@@ -1,0 +1,56 @@
+use core.net.runtime.kernel_net.[JetURLParts, JetMIME]
+use core.net.runtime.std_url_mime as url
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs:4
+// Behavioral controls: the Rust range contains no inline tests.
+#Test("url_parts_normalization_authority_query_and_core_projection") {
+    parts :: JetURLParts.parse(" HTTPS://user:pa%20ss@BüCHER.example.:443/a/../b/?x=1&x=2#hi%20there ").expect("URL")
+    assert(parts.scheme() == "https")
+    assert(parts.username() == "user")
+    assert(parts.password() == "pa ss")
+    assert(parts.host().expect("host") == "xn--bcher-kva.example")
+    assert(parts.path() == "/b/")
+    assert(parts.query_pairs() == [["x", "1"], ["x", "2"]])
+    assert(parts.fragment().expect("fragment") == "hi there")
+    assert(parts.core_port() == (443, true))
+    assert(parts.set_query("x", "3").query() == "x=3")
+    assert(parts.add_query("x", "3").query() == "x=1&x=2&x=3")
+    assert(JetURLParts.from_core_record("https", "", "", "example.com", 443, false, "/", "", "").port().is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs:410
+#Test("typed_url_holes_remain_opaque_to_path_and_authority_boundaries") {
+    assert(url.jet_validate_typed_url_literal(["ht", "://example.com/"]).is_err())
+    assert(url.jet_validate_typed_url_literal(["https://example.com:", "/"]).is_err())
+    assert(url.jet_validate_typed_url_literal(["data:text/", ",payload"]).is_err())
+    parts :: url.jet_typed_url_parts_literal(["https://example.com/a/", "/../tail"], ["x/y"])
+    assert(parts.to_string_value() == "https://example.com/a/x%2Fy/../tail")
+    assert(parts.path_segments() == ["a", "x/y", "..", "tail"])
+    dot :: url.jet_typed_url_parts_literal(["https://example.com/", ""], [".."])
+    assert(dot.to_string_value() == "https://example.com/%2E%2E")
+    data :: url.jet_typed_url_parts_literal(["data:text/plain,", ""], ["a,b/#"])
+    assert(data.to_string_value() == "data:text/plain,a%2Cb%2F%23")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs:1175
+#Test("url_codecs_preserve_strict_utf8_errors_and_query_row_policy") {
+    assert(url.jet_url_quote("a/b c+") == "a/b%20c%2B")
+    assert(url.jet_url_quote_plus("a/b c+") == "a%2Fb+c%2B")
+    assert(url.jet_url_unquote_plus("a+b%2Bc").expect("decode") == "a b+c")
+    assert(url.jet_url_unquote("%") == Err("truncated percent escape"))
+    assert(url.jet_url_unquote("%GG") == Err("invalid percent escape `%GG`"))
+    assert(url.jet_url_unquote("%FF") == Err("percent escape is not valid UTF-8"))
+    assert(url.jet_url_quote_from_bytes([U8]{255}) == "")
+    assert(url.jet_url_parse_qsl_rows("?a=%GG&&b=2") == [["a", "%GG"], ["b", "2"]])
+    assert(url.jet_url_query_rows([["a"], [], ["b", "x y", "ignored"]]) == "a=&b=x%20y")
+    assert(url.jet_url_split_fragment("a#b#c") == ("a", "b#c"))
+    assert(url.jet_url_join_text("https://example.com/a/b", "../c") == "https://example.com/c")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs:600
+#Test("mime_carrier_delegates_to_shared_kernel") {
+    mime :: JetMIME.parse("Text/Plain; Charset=utf-8").expect("MIME")
+    assert(mime.media_type() == "text")
+    assert(mime.subtype() == "plain")
+    assert(mime.essence() == "text/plain")
+    assert(mime.param("CHARSET").expect("param") == "utf-8")
+    assert(mime.to_string_value() == "text/plain; charset=utf-8")
+    assert(JetURLParts.data(mime, "a b").to_string_value() == "data:text/plain; charset=utf-8,a%20b")
+}

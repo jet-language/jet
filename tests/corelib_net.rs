@@ -42,8 +42,7 @@ fn run() -[IO, Net, Time.Wait]> {
         "name: \"net_socket_address_tiers\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc, Net, Time.Wait] } }\n",
     )
     .unwrap();
-    jet_jit::reset_jit_trace_for_test();
-    let default_stdout = match jet::Interpreter::dev_iteration(
+    let default_stdout = match crate::common::dev_run(
         file.to_str().unwrap(),
         false,
         false,
@@ -54,7 +53,7 @@ fn run() -[IO, Net, Time.Wait]> {
         }
         other => panic!("Core.net socket address failed in default dev: {other:?}"),
     };
-    let interpreter_stdout = match jet::Interpreter::dev_iteration(
+    let interpreter_stdout = match crate::common::dev_run(
         file.to_str().unwrap(),
         false,
         true,

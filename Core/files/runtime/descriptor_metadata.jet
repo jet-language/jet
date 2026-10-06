@@ -1,0 +1,140 @@
+// Source/CmdCodemod/Transaction.rs:127–135,185–194 and pinned Rust std
+// 1.90.0 sys/fs/{unix,windows}.rs FileType: native scalar projections only.
+// These bodies neither stat a pathname nor claim descriptor acquisition. The
+// caller must obtain every input from the SAME successful held-fd/HANDLE query.
+// Native fstat/error/loan/target dispatch remains #4494/#4392/#4483; no fake
+// identity, path hash, hardlink/security predicate or successful provider here.
+
+use core.time.runtime.kernel_wide_time as metadata_wide_time
+
+// One exact private object key. Unix (st_dev,st_ino); Windows (volume,index).
+// Source tuple names are preserved; consumer-specific display is not identity.
+pub struct FileID {
+    pub device: U64
+    pub inode: U64
+}
+
+// CT01 Windows path_identity:182–194 queries ONLY ByHandleFileInformation.
+// A separate narrow projection prevents an added, fallible reparse-tag query
+// from changing its original native call sequence/error precedence.
+pub struct IdentityLinks {
+    pub file_id: FileID
+    pub nlink: U64
+}
+
+// Main-ratified unix_fd.stat result, never the C-layout struct passed to libc.
+// Full64 nlink/dev/ino are retained; mode_t is U32 on the selected LP64 layout.
+pub struct RuntimeStat {
+    pub mode: U32
+    pub nlink: U64
+    pub dev: U64
+    pub ino: U64
+}
+
+// Keep target facts typed: Windows has no fabricated Unix permission mode,
+// Unix has no fabricated Windows attributes or reparse tag.
+pub enum NativeFileFacts {
+    Unix(mode: U32, uid: U32)
+    Windows(attributes: U32, reparse_tag: U32)
+}
+
+// Authority.rs:263–270 retains the full native timestamp before epoch testing.
+// Negative/pre-epoch and wider-than-U64 nanoseconds must not become zero, a
+// narrowed I64 timestamp, or a fake successful modified() observation. The
+// canonical private wide-time kernel supplies the Option<u128> equivalent.
+pub enum NativeModifiedTime {
+    Unix(seconds: I64, nanoseconds: I64)
+    Windows(filetime: U64)
+}
+
+// Authority.rs modified().ok().and_then(duration_since(...).ok()).map(as_nanos).
+// Marshal only same-query facts into the ONE epoch owner. Native-query errors
+// are still handled by the producer/caller; directory identity policy is not
+// applied here and successful raw timestamps are never substituted.
+pub fn modified_nanoseconds(time: &NativeModifiedTime) -> metadata_wide_time.UInt128Parts? Never! {
+    if time == {
+        .Unix(seconds, nanoseconds) -> metadata_wide_time.unix_epoch_nanoseconds(seconds, nanoseconds)
+        .Windows(filetime) -> metadata_wide_time.windows_epoch_nanoseconds(filetime)
+    }
+}
+
+pub struct DescriptorStat {
+    pub file_id: FileID
+    pub nlink: U64
+    pub size: U64
+    pub modified: NativeModifiedTime
+    pub is_file: Bool
+    pub is_dir: Bool
+    pub is_symlink: Bool
+    pub native: NativeFileFacts
+}
+
+// Source path_identity:127–135/191–194, exact two-word identity comparison.
+pub fn file_id_equal(left: FileID, right: FileID) -> Bool Never! {
+    left.device == right.device && left.inode == right.inode
+}
+
+// Source path_identity:191–194. Widen BEFORE shifting; no signed/high-bit loss.
+pub fn windows_file_id(volume_serial: U32, index_high: U32, index_low: U32) -> FileID Never! {
+    FileID{
+        device: U64.from_u32(volume_serial),
+        inode: (U64.from_u32(index_high) << 32) | U64.from_u32(index_low)
+    }
+}
+
+// Unix metadata identity facts from the same fstat slot, with no predicate.
+pub fn unix_identity_links(stat: RuntimeStat) -> IdentityLinks Never! {
+    IdentityLinks{file_id: FileID{device: stat.dev, inode: stat.ino}, nlink: stat.nlink}
+}
+
+// Windows one-query identity/link facts; no regular or reparse inspection.
+pub fn windows_identity_links(nlink: U32, volume_serial: U32, index_high: U32, index_low: U32) -> IdentityLinks Never! {
+    IdentityLinks{file_id: windows_file_id(volume_serial, index_high, index_low), nlink: U64.from_u32(nlink)}
+}
+
+// Pinned std sys/fs/unix.rs FileType tests S_IFMT. These constants are selected
+// Linux x86_64 glibc facts, not an unregistered all-Unix ABI/layout table.
+// CT01 read_beneath:522 consumes is_file ONLY; path_identity and History apply
+// their own nlink==1 test. Generic projection accepts multiple hard links.
+// CmdGc.rs:173–204 also consumes SAME-fd length and uid. `size` is the actual
+// std Metadata::len unsigned projection of native st_size, not checked signed
+// narrowing or an Int scratch; the raw bit-preserving boundary remains native.
+pub fn linux_x86_64_descriptor_stat(stat: RuntimeStat, size: U64, uid: U32, modified_seconds: I64, modified_nanoseconds: I64) -> DescriptorStat Never! {
+    kind :: stat.mode & U32{0xF000}
+    identity :: unix_identity_links(stat)
+    DescriptorStat{
+        file_id: identity.file_id,
+        nlink: identity.nlink,
+        size: size,
+        modified: NativeModifiedTime.Unix(modified_seconds, modified_nanoseconds),
+        is_file: kind == (U32{0x8000}),
+        is_dir: kind == (U32{0x4000}),
+        is_symlink: kind == (U32{0xA000}),
+        native: NativeFileFacts.Unix(stat.mode, uid)
+    }
+}
+
+// Pinned std 1.90.0 sys/fs/windows.rs FileType::new/is_{file,dir,symlink}:
+// name-surrogate bit, NOT every reparse point and NOT only the SYMLINK tag.
+// attributes/link/volume/index come from one held HANDLE information query;
+// reparse_tag comes from that SAME handle's actual FileAttributeTagInfo query.
+// A followed/nonreparse file has actual tag0. Query failures are not projected.
+// Windows CT01 path_identity:185 consumes links only; no regular/reparse
+// rejection is added here. Wider Unix nlink must never pass this U32 adapter.
+pub fn windows_descriptor_stat(attributes: U32, nlink: U32, volume_serial: U32, index_high: U32, index_low: U32, size_high: U32, size_low: U32, write_high: U32, write_low: U32, reparse_tag: U32) -> DescriptorStat Never! {
+    directory :: (attributes & U32{0x10}) != (U32{0})
+    reparse :: (attributes & U32{0x400}) != (U32{0})
+    surrogate :: (reparse_tag & U32{0x20000000}) != (U32{0})
+    symlink :: reparse && surrogate
+    identity :: windows_identity_links(nlink, volume_serial, index_high, index_low)
+    DescriptorStat{
+        file_id: identity.file_id,
+        nlink: identity.nlink,
+        size: (U64.from_u32(size_high) << 32) | U64.from_u32(size_low),
+        modified: NativeModifiedTime.Windows((U64.from_u32(write_high) << 32) | U64.from_u32(write_low)),
+        is_file: !symlink && !directory,
+        is_dir: !symlink && directory,
+        is_symlink: symlink,
+        native: NativeFileFacts.Windows(attributes, reparse_tag)
+    }
+}

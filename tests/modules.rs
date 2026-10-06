@@ -38,7 +38,7 @@ fn run_forced_interpreter(
     let scratch = common::Scratch::new(name);
     write_files(&scratch.path, files);
     let path = scratch.join(entry);
-    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,

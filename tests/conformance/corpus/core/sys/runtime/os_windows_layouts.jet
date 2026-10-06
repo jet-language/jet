@@ -1,0 +1,416 @@
+// Windows-only native-layout and real file primitive corpus. Main selects
+// this unit on actual Windows x86/x86_64; no kernel32/ntdll activation Linux.
+// Retain real runtime rows for the appropriate host. Every #4494 ABI/storage
+// gate remains explicit; these rows have NOT been executed by this writer.
+use core.mem as os_layout_mem
+use core.sys.host.windows_file as os_layout_win
+use core.sys.host.windows_nt_imports as os_layout_nt
+use c.kernel32 as os_layout_kernel32
+
+OVERLAPPED32_SIZE :: prep { os_layout_win.WindowsOverlapped32.$layout.size }
+OVERLAPPED32_ALIGN :: prep { os_layout_win.WindowsOverlapped32.$layout.alignment }
+OVERLAPPED32_HIGH :: prep { os_layout_win.WindowsOverlapped32.$layout[.internal_high].offset }
+OVERLAPPED32_OFFSET :: prep { os_layout_win.WindowsOverlapped32.$layout[.offset].offset }
+OVERLAPPED32_OFFSET_HIGH :: prep { os_layout_win.WindowsOverlapped32.$layout[.offset_high].offset }
+OVERLAPPED32_EVENT :: prep { os_layout_win.WindowsOverlapped32.$layout[.event].offset }
+OVERLAPPED64_SIZE :: prep { os_layout_win.WindowsOverlapped64.$layout.size }
+OVERLAPPED64_ALIGN :: prep { os_layout_win.WindowsOverlapped64.$layout.alignment }
+OVERLAPPED64_HIGH :: prep { os_layout_win.WindowsOverlapped64.$layout[.internal_high].offset }
+OVERLAPPED64_OFFSET :: prep { os_layout_win.WindowsOverlapped64.$layout[.offset].offset }
+OVERLAPPED64_OFFSET_HIGH :: prep { os_layout_win.WindowsOverlapped64.$layout[.offset_high].offset }
+OVERLAPPED64_EVENT :: prep { os_layout_win.WindowsOverlapped64.$layout[.event].offset }
+RENAME_SIZE :: prep { os_layout_win.FileRenameInfo.$layout.size }
+RENAME_ALIGN :: prep { os_layout_win.FileRenameInfo.$layout.alignment }
+RENAME_ROOT :: prep { os_layout_win.FileRenameInfo.$layout[.root_directory].offset }
+RENAME_LENGTH :: prep { os_layout_win.FileRenameInfo.$layout[.file_name_length].offset }
+RENAME_INLINE :: prep { os_layout_win.FileRenameInfo.$layout[.file_name].offset }
+DISPOSITION_SIZE :: prep { os_layout_win.FileDispositionInfo.$layout.size }
+DISPOSITION_ALIGN :: prep { os_layout_win.FileDispositionInfo.$layout.alignment }
+HANDLE_INFO_SIZE :: prep { os_layout_win.ByHandleFileInformation.$layout.size }
+HANDLE_INFO_ALIGN :: prep { os_layout_win.ByHandleFileInformation.$layout.alignment }
+HANDLE_INFO_NLINK :: prep { os_layout_win.ByHandleFileInformation.$layout[.nlink].offset }
+SYSTEM32_SIZE :: prep { os_layout_win.WindowsSystemInfo32.$layout.size }
+SYSTEM32_ALIGN :: prep { os_layout_win.WindowsSystemInfo32.$layout.alignment }
+SYSTEM32_COUNT :: prep { os_layout_win.WindowsSystemInfo32.$layout[.number_of_processors].offset }
+SYSTEM64_SIZE :: prep { os_layout_win.WindowsSystemInfo64.$layout.size }
+SYSTEM64_ALIGN :: prep { os_layout_win.WindowsSystemInfo64.$layout.alignment }
+SYSTEM64_COUNT :: prep { os_layout_win.WindowsSystemInfo64.$layout[.number_of_processors].offset }
+UNICODE_SIZE :: prep { os_layout_nt.NtUnicodeString.$layout.size }
+UNICODE_ALIGN :: prep { os_layout_nt.NtUnicodeString.$layout.alignment }
+UNICODE_BUFFER :: prep { os_layout_nt.NtUnicodeString.$layout[.buffer].offset }
+OBJECT_SIZE :: prep { os_layout_nt.NtObjectAttributes.$layout.size }
+OBJECT_ALIGN :: prep { os_layout_nt.NtObjectAttributes.$layout.alignment }
+OBJECT_ROOT :: prep { os_layout_nt.NtObjectAttributes.$layout[.root_directory].offset }
+OBJECT_NAME :: prep { os_layout_nt.NtObjectAttributes.$layout[.object_name].offset }
+OBJECT_FLAGS :: prep { os_layout_nt.NtObjectAttributes.$layout[.attributes].offset }
+OBJECT_SECURITY :: prep { os_layout_nt.NtObjectAttributes.$layout[.security_descriptor].offset }
+OBJECT_QUALITY :: prep { os_layout_nt.NtObjectAttributes.$layout[.security_quality_of_service].offset }
+TAG_SIZE :: prep { os_layout_win.FileAttributeTagInfo.$layout.size }
+TAG_ALIGN :: prep { os_layout_win.FileAttributeTagInfo.$layout.alignment }
+DIRINFO_SIZE :: prep { os_layout_win.FileIdBothDirInfo.$layout.size }
+DIRINFO_ALIGN :: prep { os_layout_win.FileIdBothDirInfo.$layout.alignment }
+DIRINFO_NAME_LENGTH :: prep { os_layout_win.FileIdBothDirInfo.$layout[.file_name_length].offset }
+DIRINFO_SHORT_LENGTH :: prep { os_layout_win.FileIdBothDirInfo.$layout[.short_name_length].offset }
+DIRINFO_SHORT_NAME :: prep { os_layout_win.FileIdBothDirInfo.$layout[.short_name].offset }
+DIRINFO_ID :: prep { os_layout_win.FileIdBothDirInfo.$layout[.file_id].offset }
+DIRINFO_NAME :: prep { os_layout_win.FileIdBothDirInfo.$layout[.file_name].offset }
+
+#Test("Windows native pointer32 or pointer64 OVERLAPPED and inline rename layout") {
+    // RootDirectory is a real native pointer field. Only the matching target
+    // width's OVERLAPPED is lawful; the other width's integer fields are NOT
+    // permission to reinterpret a HANDLE into a narrowed scalar on this host.
+    if RENAME_ROOT == Val(8) {
+        assert_eq(OVERLAPPED64_SIZE, Val(32))
+        assert_eq(OVERLAPPED64_ALIGN, Val(8))
+        assert_eq(OVERLAPPED64_HIGH, Val(8))
+        assert_eq(OVERLAPPED64_OFFSET, Val(16))
+        assert_eq(OVERLAPPED64_OFFSET_HIGH, Val(20))
+        assert_eq(OVERLAPPED64_EVENT, Val(24))
+        assert_eq(RENAME_SIZE, Val(24))
+        assert_eq(RENAME_ALIGN, Val(8))
+        assert_eq(RENAME_LENGTH, Val(16))
+        assert_eq(RENAME_INLINE, Val(20))
+    } else {
+        assert_eq(RENAME_ROOT, Val(4))
+        assert_eq(OVERLAPPED32_SIZE, Val(20))
+        assert_eq(OVERLAPPED32_ALIGN, Val(4))
+        assert_eq(OVERLAPPED32_HIGH, Val(4))
+        assert_eq(OVERLAPPED32_OFFSET, Val(8))
+        assert_eq(OVERLAPPED32_OFFSET_HIGH, Val(12))
+        assert_eq(OVERLAPPED32_EVENT, Val(16))
+        assert_eq(RENAME_SIZE, Val(16))
+        assert_eq(RENAME_ALIGN, Val(4))
+        assert_eq(RENAME_LENGTH, Val(8))
+        assert_eq(RENAME_INLINE, Val(12))
+    }
+    assert_eq(DISPOSITION_SIZE, Val(1))
+    assert_eq(DISPOSITION_ALIGN, Val(1))
+    assert_eq(HANDLE_INFO_SIZE, Val(52))
+    assert_eq(HANDLE_INFO_ALIGN, Val(4))
+    assert_eq(HANDLE_INFO_NLINK, Val(40))
+}
+
+#Test("Windows UTF16 nonASCII surrogate and NUL units use retained inline storage") {
+    // A real initialized fixed unit buffer: ASCII, U+00E9, U+1F600 pair,
+    // unpaired high surrogate (OS paths permit it), then terminating NUL.
+    units :: [U16#6]{65, 233, 55357, 56832, 55296, 0}
+    assert_eq(units[0], U16{65})
+    assert_eq(units[1], U16{233})
+    assert_eq(units[2], U16{55357})
+    assert_eq(units[3], U16{56832})
+    assert_eq(units[4], U16{55296})
+    assert_eq(units[5], U16{0})
+    // Inline FILE_RENAME_INFO tail storage for five non-NUL name units,
+    // including the final trailing struct padding of the original Rust.
+    // This is test-only owned storage, not a production file/OS adapter.
+    #Unsafe("compare actual addresses of retained initialized WCHAR payload; no escaped temporary pointer") {
+        first :: os_layout_mem.address_of(units[0])
+        second :: os_layout_mem.address_of(units[1])
+        assert_eq(second - first, 2)
+        storage := [U64#4]{0, 0, 0, 0}
+        base :: os_layout_mem.address_of(storage[0])
+        header_ptr :: os_layout_mem.Ptr<os_layout_win.FileRenameInfo>.from_addr(base)
+        null_handle :: os_layout_mem.Ptr<U8>.from_addr(0)
+        header :: os_layout_win.FileRenameInfo{
+            replace_if_exists: I32{1}, root_directory: null_handle,
+            file_name_length: U32{10}, file_name: [U16#1]{65}
+        }
+        // A typed write into the SAME aligned 32-byte backing storage.
+        os_layout_mem.volatile_write(header_ptr, header)
+        inline_offset :: RENAME_INLINE ?? panic("native inline filename offset absent")
+        loop index in 0..5 {
+            unit_ptr :: os_layout_mem.Ptr<U16>.from_addr(base + inline_offset + 2 * index)
+            os_layout_mem.volatile_write(unit_ptr, units[index])
+        }
+        readback :: os_layout_mem.volatile_read(header_ptr)
+        assert_eq(readback.replace_if_exists, I32{1})
+        assert_eq(readback.root_directory, null_handle)
+        assert_eq(readback.file_name_length, U32{10})
+        assert_eq(readback.file_name[0], U16{65})
+        loop index in 0..5 {
+            unit_ptr :: os_layout_mem.Ptr<U16>.from_addr(base + inline_offset + 2 * index)
+            assert_eq(os_layout_mem.volatile_read(unit_ptr), units[index])
+        }
+        struct_size :: RENAME_SIZE ?? panic("native rename size absent")
+        required_bytes :: struct_size + 8
+        if RENAME_ROOT == Val(8) {
+            assert_eq(required_bytes, 32)
+        } else {
+            assert_eq(required_bytes, 24)
+        }
+        assert(base % (RENAME_ALIGN ?? panic("native rename alignment absent")) == 0)
+    }
+}
+#Test("Windows INVALID_HANDLE_VALUE preserves the full native pointer width") {
+    #Unsafe("construct inert sentinel/null pointers only; never dereference sentinel or fabricate an owned HANDLE") {
+        invalid :: os_layout_mem.Ptr<U8>.from_addr(-1)
+        null_handle :: os_layout_mem.Ptr<U8>.from_addr(0)
+        low_word :: os_layout_mem.Ptr<U8>.from_addr(4294967295)
+        assert(invalid != null_handle)
+        if RENAME_ROOT == Val(8) {
+            assert(invalid != low_word)
+        } else {
+            assert_eq(invalid, low_word)
+        }
+    }
+}
+// Windows runtime rows are retained for Main's appropriate-host native test
+// unit only. Never count them as executed on a Linux source/layout run.
+struct OsWinTestHandle {
+    handle: *U8
+    delete_on_close: Bool
+}
+impl OsWinTestHandle.Close {
+    fn close(^self) {
+        #Unsafe("consume only this real owned HANDLE; cleanup refers to held identity, not a ambient filename") {
+            if self.delete_on_close {
+                disposition :: os_layout_win.FileDispositionInfo{delete_file: U8{1}}
+                _ :: os_layout_kernel32.set_file_information_by_handle(self.handle, I32{4}, os_layout_mem.Ptr<U8>.from_addr(os_layout_mem.address_of(disposition)), U32{1})
+            }
+            _ :: os_layout_kernel32.close_handle(self.handle)
+        }
+    }
+}
+struct OsWinTestDirectory {
+    owner: OsWinTestHandle
+}
+impl OsWinTestDirectory.Close {
+    fn close(^self) {
+        #Unsafe("early-failure cleanup only inside the successfully created test-owned scratch directory; every reopened HANDLE is real") {
+            a_path :: [U16#17]{106, 101, 116, 45, 111, 115, 45, 119, 105, 110, 45, 233, 55357, 56832, 92, 97, 0}
+            b_path :: [U16#17]{106, 101, 116, 45, 111, 115, 45, 119, 105, 110, 45, 233, 55357, 56832, 92, 98, 0}
+            null_handle :: os_layout_mem.Ptr<U8>.from_addr(0)
+            invalid :: os_layout_mem.Ptr<U8>.from_addr(-1)
+            loop which in 0..2 {
+                name_ptr :: if which == 0 -> os_layout_mem.Ptr<U16>.from_addr(os_layout_mem.address_of(a_path[0])) else -> os_layout_mem.Ptr<U16>.from_addr(os_layout_mem.address_of(b_path[0]))
+                raw :: os_layout_kernel32.create_file_w(name_ptr, U32{65536}, U32{7}, null_handle, U32{3}, U32{2097152}, null_handle)
+                if raw != invalid {
+                    owner := OsWinTestHandle{handle: raw, delete_on_close: true}
+                    close(^owner)
+                }
+            }
+        }
+        close(^self.owner)
+        #Unsafe("remove only the scratch directory whose successful creation this test owns") {
+            name :: [U16#15]{106, 101, 116, 45, 111, 115, 45, 119, 105, 110, 45, 233, 55357, 56832, 0}
+            _ :: os_layout_kernel32.remove_directory_w(os_layout_mem.Ptr<U16>.from_addr(os_layout_mem.address_of(name[0])))
+        }
+    }
+}
+
+fn os_win_test_write(handle: *U8, payload: *U8, count: U32, written: *U32) -> I32 Never! {
+    #Unsafe("synchronous WriteFile with borrowed named payload/status slots and null OVERLAPPED") {
+        if RENAME_ROOT == Val(8) {
+            return os_layout_kernel32.write_file64(handle, payload, count, written, os_layout_mem.Ptr<os_layout_win.WindowsOverlapped64>.from_addr(0))
+        }
+        return os_layout_kernel32.write_file32(handle, payload, count, written, os_layout_mem.Ptr<os_layout_win.WindowsOverlapped32>.from_addr(0))
+    }
+}
+fn os_win_test_read(handle: *U8, payload: *U8, count: U32, read_count: *U32) -> I32 Never! {
+    #Unsafe("synchronous ReadFile with borrowed named payload/status slots and null OVERLAPPED") {
+        if RENAME_ROOT == Val(8) {
+            return os_layout_kernel32.read_file64(handle, payload, count, read_count, os_layout_mem.Ptr<os_layout_win.WindowsOverlapped64>.from_addr(0))
+        }
+        return os_layout_kernel32.read_file32(handle, payload, count, read_count, os_layout_mem.Ptr<os_layout_win.WindowsOverlapped32>.from_addr(0))
+    }
+}
+
+#Test("Windows real UTF16 retained directory file IO lock rename disposition and clock") {
+    // Scratch cwd only. Directory creation must succeed anew: EEXIST does not
+    // confer authority to remove a prior directory. UTF16 filename includes
+    // nonASCII + a surrogate pair without any String/CString roundtrip.
+    #Unsafe("Windows host only; all HANDLEs real; all UTF16 payloads named initialized fixed storage") {
+        root :: [U16#15]{106, 101, 116, 45, 111, 115, 45, 119, 105, 110, 45, 233, 55357, 56832, 0}
+        root_ptr :: os_layout_mem.Ptr<U16>.from_addr(os_layout_mem.address_of(root[0]))
+        null_handle :: os_layout_mem.Ptr<U8>.from_addr(0)
+        invalid :: os_layout_mem.Ptr<U8>.from_addr(-1)
+        assert(os_layout_kernel32.create_directory_w(root_ptr, null_handle) != (I32{0}))
+        dir_handle :: os_layout_kernel32.create_file_w(root_ptr, U32{3221225472}, U32{7}, null_handle, U32{3}, U32{35651584}, null_handle)
+        if dir_handle == invalid {
+            saved_error :: os_layout_kernel32.get_last_error()
+            _ :: os_layout_kernel32.remove_directory_w(root_ptr)
+            panic("CreateFileW owned scratch directory failed with {saved_error}")
+        }
+        dir := OsWinTestDirectory{owner: OsWinTestHandle{handle: dir_handle, delete_on_close: false}}
+        attributes :: os_layout_kernel32.get_file_attributes_w(root_ptr)
+        assert(attributes != (U32{4294967295}))
+        assert_eq(attributes & U32{1024}, U32{0})
+        assert((attributes & U32{16}) != (U32{0}))
+        // Required native UTF16 count includes NUL; no narrowed HANDLE.
+        needed :: os_layout_kernel32.get_final_path_name_by_handle_w(dir.owner.handle, os_layout_mem.Ptr<U16>.from_addr(0), U32{0}, U32{0})
+        assert(needed > (U32{0}))
+        // Controlled scratch path must fit this initialized test buffer.
+        // This is not a provider path limit: caller chooses the live extent.
+        final_path := [U16#256]{
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+        }
+        assert(needed <= (U32{256}))
+        final_ptr :: os_layout_mem.Ptr<U16>.from_addr(os_layout_mem.address_of(final_path[0]))
+        final_written :: os_layout_kernel32.get_final_path_name_by_handle_w(dir.owner.handle, final_ptr, U32{256}, U32{0})
+        assert(final_written > (U32{0}) && final_written < (U32{256}))
+        assert_eq(final_written + U32{1}, needed)
+
+        a_path :: [U16#17]{106, 101, 116, 45, 111, 115, 45, 119, 105, 110, 45, 233, 55357, 56832, 92, 97, 0}
+        b_path :: [U16#17]{106, 101, 116, 45, 111, 115, 45, 119, 105, 110, 45, 233, 55357, 56832, 92, 98, 0}
+        a_ptr :: os_layout_mem.Ptr<U16>.from_addr(os_layout_mem.address_of(a_path[0]))
+        b_ptr :: os_layout_mem.Ptr<U16>.from_addr(os_layout_mem.address_of(b_path[0]))
+        raw_writer :: os_layout_kernel32.create_file_w(a_ptr, U32{3221291008}, U32{7}, null_handle, U32{1}, U32{2097152}, null_handle)
+        assert(raw_writer != invalid)
+        writer := OsWinTestHandle{handle: raw_writer, delete_on_close: true}
+        payload :: [U8#4]{0, 195, 169, 255}
+        payload_ptr :: os_layout_mem.Ptr<U8>.from_addr(os_layout_mem.address_of(payload[0]))
+        written := U32{0}
+        written_ptr :: os_layout_mem.Ptr<U32>.from_addr(os_layout_mem.address_of(written))
+        assert(os_win_test_write(writer.handle, payload_ptr, U32{4}, written_ptr) != (I32{0}))
+        written = ~written_ptr.*
+        assert_eq(written, U32{4})
+        assert(os_layout_kernel32.flush_file_buffers(writer.handle) != (I32{0}))
+
+        metadata := os_layout_win.ByHandleFileInformation{
+            attributes: U32{0},
+            creation: os_layout_win.WindowsFileTime{low: U32{0}, high: U32{0}},
+            access: os_layout_win.WindowsFileTime{low: U32{0}, high: U32{0}},
+            write: os_layout_win.WindowsFileTime{low: U32{0}, high: U32{0}},
+            volume_serial: U32{0}, size_high: U32{0}, size_low: U32{0},
+            nlink: U32{0}, index_high: U32{0}, index_low: U32{0}
+        }
+        metadata_ptr :: os_layout_mem.Ptr<os_layout_win.ByHandleFileInformation>.from_addr(os_layout_mem.address_of(metadata))
+        assert(os_layout_kernel32.get_file_information_by_handle(writer.handle, metadata_ptr) != (I32{0}))
+        metadata = ~metadata_ptr.*
+        assert_eq(metadata.nlink, U32{1})
+        assert_eq(metadata.size_high, U32{0})
+        assert_eq(metadata.size_low, U32{4})
+
+        if RENAME_ROOT == Val(8) {
+            overlapped := os_layout_win.WindowsOverlapped64{internal: U64{0}, internal_high: U64{0}, offset: U32{0}, offset_high: U32{0}, event: null_handle}
+            overlap_ptr :: os_layout_mem.Ptr<os_layout_win.WindowsOverlapped64>.from_addr(os_layout_mem.address_of(overlapped))
+            assert(os_layout_kernel32.lock_file_ex64(writer.handle, U32{3}, U32{0}, U32{1}, U32{0}, overlap_ptr) != (I32{0}))
+            assert(os_layout_kernel32.unlock_file_ex64(writer.handle, U32{0}, U32{1}, U32{0}, overlap_ptr) != (I32{0}))
+        } else {
+            overlapped := os_layout_win.WindowsOverlapped32{internal: U32{0}, internal_high: U32{0}, offset: U32{0}, offset_high: U32{0}, event: null_handle}
+            overlap_ptr :: os_layout_mem.Ptr<os_layout_win.WindowsOverlapped32>.from_addr(os_layout_mem.address_of(overlapped))
+            assert(os_layout_kernel32.lock_file_ex32(writer.handle, U32{3}, U32{0}, U32{1}, U32{0}, overlap_ptr) != (I32{0}))
+            assert(os_layout_kernel32.unlock_file_ex32(writer.handle, U32{0}, U32{1}, U32{0}, overlap_ptr) != (I32{0}))
+        }
+
+        // Existing destination forces actual replacement, not absent rename.
+        destination_handle :: os_layout_kernel32.create_file_w(b_ptr, U32{1073741824}, U32{7}, null_handle, U32{1}, U32{2097152}, null_handle)
+        assert(destination_handle != invalid)
+        destination := OsWinTestHandle{handle: destination_handle, delete_on_close: false}
+        assert(os_win_test_write(destination.handle, payload_ptr, U32{1}, written_ptr) != (I32{0}))
+        close(^destination)
+        rename_storage := [U64#3]{0, 0, 0}
+        rename_address :: os_layout_mem.address_of(rename_storage[0])
+        rename_ptr :: os_layout_mem.Ptr<os_layout_win.FileRenameInfo>.from_addr(rename_address)
+        rename_header :: os_layout_win.FileRenameInfo{
+            replace_if_exists: I32{1}, root_directory: dir.owner.handle,
+            file_name_length: U32{2}, file_name: [U16#1]{98}
+        }
+        os_layout_mem.volatile_write(rename_ptr, rename_header)
+        rename_size :: if RENAME_ROOT == Val(8) -> U32{24} else -> U32{16}
+        assert(os_layout_kernel32.set_file_information_by_handle(writer.handle, I32{3}, os_layout_mem.Ptr<U8>.from_addr(rename_address), rename_size) != (I32{0}))
+        assert(os_layout_kernel32.flush_file_buffers(dir.owner.handle) != (I32{0}))
+
+        raw_reader :: os_layout_kernel32.create_file_w(b_ptr, U32{2147483648}, U32{7}, null_handle, U32{3}, U32{2097152}, null_handle)
+        assert(raw_reader != invalid)
+        reader := OsWinTestHandle{handle: raw_reader, delete_on_close: false}
+        read_buffer := [U8#4]{0, 0, 0, 0}
+        read_ptr :: os_layout_mem.Ptr<U8>.from_addr(os_layout_mem.address_of(read_buffer[0]))
+        assert(os_win_test_read(reader.handle, read_ptr, U32{4}, written_ptr) != (I32{0}))
+        written = ~written_ptr.*
+        assert_eq(written, U32{4})
+        assert_eq(read_buffer[0], U8{0})
+        assert_eq(read_buffer[1], U8{195})
+        assert_eq(read_buffer[2], U8{169})
+        assert_eq(read_buffer[3], U8{255})
+        close(^reader)
+
+        frequency := I64{0}
+        before := I64{0}
+        after := I64{0}
+        frequency_ptr :: os_layout_mem.Ptr<I64>.from_addr(os_layout_mem.address_of(frequency))
+        before_ptr :: os_layout_mem.Ptr<I64>.from_addr(os_layout_mem.address_of(before))
+        after_ptr :: os_layout_mem.Ptr<I64>.from_addr(os_layout_mem.address_of(after))
+        assert(os_layout_kernel32.query_performance_frequency(frequency_ptr) != (I32{0}))
+        frequency = ~frequency_ptr.*
+        assert(frequency > (I64{0}))
+        assert(os_layout_kernel32.query_performance_counter(before_ptr) != (I32{0}))
+        before = ~before_ptr.*
+        os_layout_kernel32.sleep(U32{1})
+        assert(os_layout_kernel32.query_performance_counter(after_ptr) != (I32{0}))
+        after = ~after_ptr.*
+        assert(after > before)
+
+        disposition :: os_layout_win.FileDispositionInfo{delete_file: U8{1}}
+        assert(os_layout_kernel32.set_file_information_by_handle(writer.handle, I32{4}, os_layout_mem.Ptr<U8>.from_addr(os_layout_mem.address_of(disposition)), U32{1}) != (I32{0}))
+        writer.delete_on_close = false
+        close(^writer)
+        missing :: os_layout_kernel32.get_file_attributes_w(b_ptr)
+        missing_error :: os_layout_kernel32.get_last_error()
+        assert_eq(missing, U32{4294967295})
+        assert_eq(missing_error, U32{2})
+        close(^dir)
+    }
+}
+
+#Test("Windows actual SYSTEM_INFO native pointer width layout") {
+    if RENAME_ROOT == Val(8) {
+        assert_eq(SYSTEM64_SIZE, Val(48))
+        assert_eq(SYSTEM64_ALIGN, Val(8))
+        assert_eq(SYSTEM64_COUNT, Val(32))
+    } else {
+        assert_eq(SYSTEM32_SIZE, Val(36))
+        assert_eq(SYSTEM32_ALIGN, Val(4))
+        assert_eq(SYSTEM32_COUNT, Val(20))
+    }
+}
+
+#Test("Windows NT UnicodeString ObjectAttributes and held enumeration exact layouts") {
+    if RENAME_ROOT == Val(8) {
+        assert_eq(UNICODE_SIZE, Val(16))
+        assert_eq(UNICODE_ALIGN, Val(8))
+        assert_eq(UNICODE_BUFFER, Val(8))
+        assert_eq(OBJECT_SIZE, Val(48))
+        assert_eq(OBJECT_ALIGN, Val(8))
+        assert_eq(OBJECT_ROOT, Val(8))
+        assert_eq(OBJECT_NAME, Val(16))
+        assert_eq(OBJECT_FLAGS, Val(24))
+        assert_eq(OBJECT_SECURITY, Val(32))
+        assert_eq(OBJECT_QUALITY, Val(40))
+    } else {
+        assert_eq(UNICODE_SIZE, Val(8))
+        assert_eq(UNICODE_ALIGN, Val(4))
+        assert_eq(UNICODE_BUFFER, Val(4))
+        assert_eq(OBJECT_SIZE, Val(24))
+        assert_eq(OBJECT_ALIGN, Val(4))
+        assert_eq(OBJECT_ROOT, Val(4))
+        assert_eq(OBJECT_NAME, Val(8))
+        assert_eq(OBJECT_FLAGS, Val(12))
+        assert_eq(OBJECT_SECURITY, Val(16))
+        assert_eq(OBJECT_QUALITY, Val(20))
+    }
+    assert_eq(TAG_SIZE, Val(8))
+    assert_eq(TAG_ALIGN, Val(4))
+    assert_eq(DIRINFO_SIZE, Val(112))
+    assert_eq(DIRINFO_ALIGN, Val(8))
+    assert_eq(DIRINFO_NAME_LENGTH, Val(60))
+    assert_eq(DIRINFO_SHORT_LENGTH, Val(68))
+    assert_eq(DIRINFO_SHORT_NAME, Val(70))
+    assert_eq(DIRINFO_ID, Val(96))
+    assert_eq(DIRINFO_NAME, Val(104))
+}

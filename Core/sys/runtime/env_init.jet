@@ -1,0 +1,64 @@
+// EnvInit.rs:1–66. D-ENV-MUTATE1=A: every generated executable snapshots the
+// host environment once, before user code; accessors then read and mutate this
+// logical table, never the OS environment.
+//
+// Native gate (Main stage-2 extraction), kept native and unchanged:
+// - jet_env_table (:6–22): the process-global OnceLock<RwLock<_>> storage and
+//   its one-time std::env::vars_os read. The leaf hands the host pairs to
+//   jet_env_snapshot below, in vars_os order, and stores the result.
+// - jet_std_env_init (:24–28): FFI reporter install, forcing the table, then
+//   runtime-start observation, in that order, for every entrypoint.
+// - jet_env_read / jet_env_write (:30–36): RwLock guards that recover a
+//   poisoned lock instead of failing.
+// - The target's key comparator: Unix compares bytes (:38–42, ported below as
+//   jet_env_key_cmp_bytes). Windows uses vetted CompareStringOrdinal(ignore_case)
+//   over UTF-16 (:44–57); other targets use native OsStr order (:59–62). Both
+//   remain provider facts, not approximated Unicode casing in portable policy.
+// Names and values are the OsString's platform-encoded bytes (raw bytes on
+// Unix); they are not required to be UTF-8.
+// - Top/PlatformFamily.rs:3–5 jet_std_os_family() -> String: the target's exact
+//   std::env::consts::FAMILY ("unix", "windows", "wasm", etc.), not the OS name.
+//   Stage-2 must route core.sys.family() and Core/sys/sys.jet::family through
+//   this one native fact; inferring it from sys.name() changes WASI's meaning.
+
+// Rust `(OsString, OsString)` item of JetEnvEntries (:4).
+pub struct JetEnvEntry {
+    pub name: [U8]
+    pub value: [U8]
+}
+
+// Rust jet_env_table snapshot fold (:10–19). A later host pair whose key equals
+// an earlier one under the target comparator removes it and is appended, so
+// each key appears once, at the position of its last occurrence.
+pub fn jet_env_snapshot(vars: ^[JetEnvEntry], same_key: fn([U8], [U8]) -> Bool Never!) -> [JetEnvEntry] Never! {
+    entries := [JetEnvEntry]{}
+    loop item in ^vars {
+        at := 0
+        loop at < entries.len() {
+            if same_key(entries[at].name, item.name) {
+                // #4460: original exact-Int list slot; rebuilt native owner owed.
+                _ :: &entries.remove(at, .Slot)
+                break
+            }
+            at = at + 1
+        }
+        &entries.push(item)
+    }
+    entries
+}
+
+// Rust jet_env_key_cmp, cfg(unix) (:38–42): lexicographic bytes, a proper prefix
+// ordering first. Other targets supply their original native comparator.
+pub fn jet_env_key_cmp_bytes(left: [U8], right: [U8]) -> Ordering Never! {
+    common :: if left.len() < right.len() -> left.len() else -> right.len()
+    loop i in 0..<common {
+        order :: left[i] <=> right[i]
+        if order != Ordering.Equal -> return order
+    }
+    left.len() <=> right.len()
+}
+
+// Rust jet_env_key_eq (:64–66) over the byte comparator.
+pub fn jet_env_key_eq_bytes(left: [U8], right: [U8]) -> Bool Never! {
+    jet_env_key_cmp_bytes(left, right) == Ordering.Equal
+}

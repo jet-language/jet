@@ -95,12 +95,11 @@ language, each with golden-tested output.
   what happened, why Jet enforces the rule, and how to fix it.
   `jet explain <CODE>` expands any code into a short lesson, and `jet fix`
   applies registered safe repairs.
-- **One meaning on every execution tier.** By default, `jet run` and
-  `jet dev` execute through a Cranelift JIT with an interpreter for
-  deoptimization and compile-time evaluation; `jet build` (and `jet run`
-  when you ask for a release profile, an artifact, or a target) compiles a
-  native executable, and web targets compile to WebAssembly. A program
-  means the same thing on each.
+- **One meaning on every execution tier.** `jet run` and `jet dev` compile a
+  native executable through the normal build path and run it (`jet dev`
+  rebuilds and restarts on every save); `--interpret` runs a program in the
+  in-process evaluator that also serves compile-time code, and web targets
+  compile to WebAssembly. A program means the same thing on each.
 - **A batteries-included core library.** Files, HTTP, JSON and other
   encodings, time, text, collections, concurrency, terminal and UI, data,
   and more ship as `core.*` modules, most of them written in Jet. See the
@@ -147,8 +146,8 @@ jet test         # runs the project's #Test blocks
 The compiler front end — lexer, parser, and semantic checker — owns every
 language rule. Code generation only lowers facts the checker has already
 established, so a backend failure is always a compiler bug, never a user
-error. Native builds emit Rust and compile it with rustc and LLVM; by
-default `jet run` and `jet dev` use a Cranelift JIT. Shared runtime meaning
+error. Native builds emit Rust and compile it with rustc and LLVM; `jet run`
+and `jet dev` use that same build path. Shared runtime meaning
 lives in the Prelude and the Jet-authored core library, which every tier
 calls rather than re-implementing.
 
@@ -156,8 +155,8 @@ calls rather than re-implementing.
 (`Source/` and `crates/`) and remains the reference implementation. New
 compiler work happens in a staged port of the compiler to Jet itself, under
 `Compiler/`: one pass at a time, each Jet-authored pass proven against the
-Rust reference before it is trusted. The Rust-emission, rustc/LLVM, and
-Cranelift backends stay. Jet counts as self-hosted only once the Jet
+Rust reference before it is trusted. The Rust-emission and rustc/LLVM
+backends stay. Jet counts as self-hosted only once the Jet
 compiler reproducibly builds itself and becomes the default compiler.
 
 ## Work on Jet
@@ -187,7 +186,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and
 | Path | Contents |
 |---|---|
 | [`Source/`](Source/) | The `jet` command-line tool (Rust reference implementation) |
-| [`crates/`](crates/) | Rust crates: front end, code generation, JIT, runtime, Jetpack, and a vendored Cranelift patch |
+| [`crates/`](crates/) | Rust crates: front end, code generation, evaluator host, runtime, and Jetpack |
 | [`Compiler/`](Compiler/) | The staged Jet-authored compiler port |
 | [`Core/`](Core/) | The core library's Jet sources |
 | [`Jetpack/`](Jetpack/) | The staged Jet-authored port of the Jetpack package manager |

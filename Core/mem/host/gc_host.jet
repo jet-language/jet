@@ -1,0 +1,103 @@
+use core.mem.runtime.gc_core as gc_facts
+
+// ONE private typed seam, specialized using existing generic modules before
+// declaring monomorphic traits. Main supplies native implementations as a tandem
+// batch. No native implementation, fake or engine-value arena ships here.
+// P/F/S retain checked path/file/ordered-storage owners and specialization code.
+// Every ordinary parameter borrows; & grants exclusive mutation; ^ consumes.
+// Native locks/once serialize the complete state through return/stop/unwind.
+#Error
+pub struct GCTraceIOError { pub detail: String }
+pub enum GCTraceKind { Missing Directory Regular Other }
+pub struct GCTraceMetadata { pub kind: GCTraceKind pub uid: U64 }
+pub struct GCTraceIdentity { pub id: gc_facts.GCObjectID pub retained: Bool }
+
+pub trait GCTraceReadVisitor {
+    fn site(&self, site: gc_facts.GCPromotionSite, identities: View<GCTraceIdentity>) Never!
+}
+pub trait GCTraceMutVisitor {
+    fn identities(self, identities: &ViewMut<GCTraceIdentity>, reclaimed: View<gc_facts.GCObjectID>) Never!
+}
+pub trait GCFailureExit {
+    fn stderr_exit(self, text: String, code: Int) -> Never Never!
+}
+
+pub module gc_trace_seam<P, F, S, R: GCTraceReadVisitor, V: GCTraceMutVisitor> {
+// __gc_host.rs:125–153,179–253,401–419. Container primitives only:
+// full eight-field TraceKey lexical order; identities keep insertion order.
+// visit lends original owner+extent, never copies site/identity arrays.
+// visit_mut creates the sorted unique reclaimed extent once (Rust BTreeSet),
+// then lends it to the policy visitor. append clones static site once, as Rust;
+// remove_last drops an empty site. Native allocation/stop rails stay native.
+// Span arguments lend inferred View<T>/ViewMut<T> windows with the original
+// owner/extent; no typed constructor or list materialization crosses the seam.
+pub trait GCTraceStorage {
+    fn contains(self, store: S, site: gc_facts.GCPromotionSite) -> Bool Never!
+    fn count(self, store: S) -> Int Never!
+    fn append(self, store: &S, site: gc_facts.GCPromotionSite, id: gc_facts.GCObjectID) Never!
+    fn remove_last(self, store: &S, site: gc_facts.GCPromotionSite) Never!
+    fn visit(self, store: S, visitor: &R) Never!
+    fn visit_mut(self, store: &S, visitor: V, reclaimed: View<gc_facts.GCObjectID>) Never!
+}
+
+// Native leaf inventory (signatures below, original __gc_host.rs ranges):
+// hosted :1–15 vs __gc_portable.rs:1–12 (selected target provider fact);
+// unix :293,355,377,437 (compile-target fact, never runtime policy).
+// env_trace/path_empty :157, env_project :158, cwd :159–162,
+// unix_ms :447–452 (full u128 value as exact Int; pre-epoch/error = zero),
+// pid :168,323 (U32), next_temp :319 (wrapping atomic U64),
+// parent/name/join/path_from_utf8 :270–274,313–325 (raw path facts only),
+// metadata :276–289,301–312 (no-follow, Missing is NotFound only),
+// mkdir :290–292, chmod_path :294–299, open_new :327–349,
+// file_metadata :358–367, chmod_file :379–383, write_sync :385–388,
+// close_file :361,369,380,388, rename :390, unlink :362,370,381,393,
+// sync_parent :438–445 (Unix retained directory sync; other targets no-op),
+// ledger :80–98; GCFailureExit.stderr_exit :59–77.
+// env_trace owns raw OsString, including non-UTF8; empty is a separate fact.
+// env_project rejects non-Unicode; cwd is lossy/None on OS failure. Names lossy.
+// #4389: P retains actual directory/file authority/identity. All operations are
+// descriptor-relative/no-follow, not unchecked pathname re-resolution after
+// validation. A replaced symlink/owner fails closed. Main's extraction owns the
+// security fix; deterministic policy tests cannot claim real OS race coverage.
+// open_new: create_new+write, Unix 0600, Linux/Android O_NOFOLLOW. None means
+// AlreadyExists only. F retains one descriptor; close consumes exactly once.
+// OS leaves return raw error text; Jet owns prefixes, retry/order/cleanup.
+// No C callback unwinds: panic/stop transport remains the native provider's
+// checked rail. Layout/null/alignment are validated before lending any handle.
+// ledger borrows static provenance and repairs through call; best effort only.
+pub trait GCTraceProvider: GCFailureExit {
+    fn hosted(self) -> Bool Never!
+    fn unix(self) -> Bool Never!
+    fn env_trace(self) -> P? Never!
+    fn path_empty(self, path: P) -> Bool Never!
+    fn env_project(self) -> String? Never!
+    fn cwd(self) -> String? Never!
+    fn unix_ms(self) -> Int Never!
+    fn pid(self) -> U32 Never!
+    fn next_temp(self) -> U64 Never!
+    fn parent(self, path: P) -> P? Never!
+    fn path_from_utf8(self, text: String) -> P Never!
+    fn name(self, path: P) -> String? Never!
+    fn join(self, parent: P, name: String) -> P Never!
+    fn metadata(self, path: P) -> GCTraceMetadata GCTraceIOError!
+    fn mkdir(self, path: P) GCTraceIOError!
+    fn chmod_path(self, path: P, mode: Int) GCTraceIOError!
+    fn open_new(self, path: P) -> F? GCTraceIOError!
+    fn file_metadata(self, file: F) -> GCTraceMetadata GCTraceIOError!
+    fn chmod_file(self, file: F, mode: Int) GCTraceIOError!
+    fn write_sync(self, file: F, text: String) GCTraceIOError!
+    fn close_file(self, file: ^F) Never!
+    fn rename(self, temp: P, destination: P) GCTraceIOError!
+    fn unlink(self, path: P) Never!
+    fn sync_parent(self, parent: P) GCTraceIOError!
+    // Marshal these three borrowed strings into Rust's stack [&str;3] (:81–98).
+    // Do not allocate a Jet list merely to transport this fixed native extent.
+    fn ledger(self, kind: String, code: String, site: gc_facts.GCPromotionSite, byte_spans: Bool, expected: String?, repair_owned: String, repair_id: String, repair_pool: String) Never!
+}
+}
+
+// Shared graph leaves are declared ONCE by gc_core's graph dictionary:
+// __gc_host.rs:32–36 next_object_id ()->U64 GCFault!: relaxed checked atomic
+// increment from 1; :38–43 catch_unwind (^callback)->R GCPanic!,
+// :45–47 resume_unwind (^GCPanic)->Never consumes panic owner.
+// Mutex/Once/TryLock :11–15 retain hosted std poison/unwind semantics.

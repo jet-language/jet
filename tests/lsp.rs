@@ -1525,17 +1525,12 @@ fn lsp_diagnostic_and_code_action_match_all_tier_reports() {
     std::fs::write(&path, source).expect("write tier-parity diagnostic fixture");
     let aot = jet::compile_with_path(source, &path_string)
         .expect_err("AOT front end must reject a missing method");
-    let run = match jet::Interpreter::run_jit_once(&path_string) {
-        jet_foundation::JitBackend::RunOutcome::Problems(diags) => diags,
-        other => panic!("default resident JIT must reject E0311: {other:?}"),
-    };
-    let interpreter = match jet::Interpreter::dev_iteration(&path_string, false, true) {
-        jet_foundation::JitBackend::RunOutcome::Problems(diags) => diags,
+    let interpreter = match crate::common::dev_run(&path_string, false, true) {
+        jet::Interpreter::RunOutcome::Problems(diags) => diags,
         other => panic!("interpreter must reject E0311: {other:?}"),
     };
     let tiers = [
         ("AOT", aot.as_slice()),
-        ("default resident JIT", run.as_slice()),
         ("interpreter", interpreter.as_slice()),
     ];
     for (tier, diags) in tiers.iter().copied() {

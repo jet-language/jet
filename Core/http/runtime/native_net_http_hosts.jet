@@ -1,0 +1,1800 @@
+// PORT-PENDING 0243 crates-jet-jit-src-net-http-hosts-slice-1: crates/jet-jit/src/net_http_hosts.rs:1-1796
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // Host shims for TCP/UDP/Unix + HTTP mux/server + WS — same module as net_http_rt includes.
+//RS 
+//RS use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS use cranelift_jit::{JITBuilder, JITModule};
+//RS use cranelift_module::{FuncId, Linkage, Module};
+//RS use std::sync::MutexGuard;
+//RS 
+//RS use crate::runtime_host::JitCallableSlot;
+//RS use crate::Concurrency;
+//RS use crate::JitResultValue;
+//RS use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
+//RS 
+//RS enum NetHttpHandle {
+//RS     TcpListener(Arc<JetTCPListener>),
+//RS     TcpStream(Arc<Mutex<JetTCPStream>>),
+//RS     TLSClientConfig(JetTLSClientConfig),
+//RS     TLSRootCertificates(JetTLSRootCertificates),
+//RS     TLSClientIdentity(JetTLSClientIdentity),
+//RS     TLSStream(Arc<Mutex<JetTLSStream>>),
+//RS     SocketAddr(JetSocketAddr),
+//RS     IPAddr(JetIpAddr),
+//RS     DNSSrv(JetDNSSrv),
+//RS     UdpSocket(Arc<JetUDPSocket>),
+//RS     NetReady(Arc<JetNetReady>),
+//RS     UDPPacket(JetUDPPacket),
+//RS     #[cfg(unix)]
+//RS     UnixListener(Arc<JetUnixListener>),
+//RS     #[cfg(unix)]
+//RS     UnixStream(Arc<Mutex<JetUnixStream>>),
+//RS     HTTPMux(Arc<JetHTTPMux>),
+//RS     HTTPRouter(Arc<Mutex<JetHTTPRouter>>),
+//RS     HTTPRequest(JetHTTPRequest),
+//RS     HTTPResponse(JetHTTPResponse),
+//RS     HTTPBody(JetHTTPBody),
+//RS     HTTPBodyChunks(JetHTTPBodyChunks),
+//RS     HTTPHeaders(JetHTTPHeaders),
+//RS     HTTPMethod(JetHTTPMethod),
+//RS     HTTPStatus(JetHTTPStatus),
+//RS     HTTPVersion(JetHTTPVersion),
+//RS     HTTPHeaderName(JetHTTPHeaderName),
+//RS     HTTPHeaderValue(JetHTTPHeaderValue),
+//RS     HTTPHandler(JetHTTPHandler),
+//RS     HTTPServer(Arc<JetHTTPServer>),
+//RS     HTTPShutdownReport(JetHTTPShutdownReport),
+//RS     HTTPCorsPolicy(JetHTTPCorsPolicy),
+//RS     WsConn(Arc<Mutex<JetWsConn>>),
+//RS     WsMessage(JetWsMessage),
+//RS }
+//RS 
+//RS // Process-wide: spawn workers share handles (thread_local was empty on workers).
+//RS // Never hold this lock across blocking accept/read/write — clone Arc first.
+//RS static HANDLES: Mutex<Vec<Option<NetHttpHandle>>> = Mutex::new(Vec::new());
+//RS 
+//RS fn lock_handles() -> MutexGuard<'static, Vec<Option<NetHttpHandle>>> {
+//RS     HANDLES
+//RS         .lock()
+//RS         .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS }
+//RS 
+//RS pub(crate) fn clear_net_http_handles() {
+//RS     let servers = {
+//RS         let handles = lock_handles();
+//RS         handles
+//RS             .iter()
+//RS             .filter_map(|handle| match handle.as_ref() {
+//RS                 Some(NetHttpHandle::HTTPServer(server)) => Some(Arc::clone(server)),
+//RS                 _ => None,
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS     };
+//RS     let grace = jet_std::Duration { ns: 0 };
+//RS     for server in servers {
+//RS         Concurrency::notify_http_test_shutdown_started();
+//RS         let _ = jet_http_server_shutdown(&server, &grace);
+//RS     }
+//RS     Concurrency::with_http_runtime_quiesced(|| {
+//RS         lock_handles().clear();
+//RS         Concurrency::clear_http_shared_runtime();
+//RS     });
+//RS }
+//RS 
+//RS fn push_handle(value: NetHttpHandle) -> i64 {
+//RS     let mut v = lock_handles();
+//RS     v.push(Some(value));
+//RS     v.len() as i64
+//RS }
+//RS 
+//RS fn with_handle<R>(handle: i64, f: impl FnOnce(&NetHttpHandle) -> Option<R>) -> Option<R> {
+//RS     let v = lock_handles();
+//RS     let idx = handle.saturating_sub(1) as usize;
+//RS     v.get(idx).and_then(|s| s.as_ref()).and_then(f)
+//RS }
+//RS fn with_handle_mut<R>(handle: i64, f: impl FnOnce(&mut NetHttpHandle) -> Option<R>) -> Option<R> {
+//RS     let mut v = lock_handles();
+//RS     let idx = handle.saturating_sub(1) as usize;
+//RS     v.get_mut(idx).and_then(|s| s.as_mut()).and_then(f)
+//RS }
+//RS 
+//RS fn take_handle(handle: i64) -> Option<NetHttpHandle> {
+//RS     let mut v = lock_handles();
+//RS     let idx = handle.saturating_sub(1) as usize;
+//RS     v.get_mut(idx).and_then(|s| s.take())
+//RS }
+//RS 
+//RS fn tcp_listener(handle: i64) -> Option<Arc<JetTCPListener>> {
+//RS     with_handle(handle, |h| match h {
+//RS         NetHttpHandle::TcpListener(l) => Some(Arc::clone(l)),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS fn tcp_stream(handle: i64) -> Option<Arc<Mutex<JetTCPStream>>> {
+//RS     with_handle(handle, |h| match h {
+//RS         NetHttpHandle::TcpStream(s) => Some(Arc::clone(s)),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS fn tls_client_config(handle: i64) -> Option<JetTLSClientConfig> {
+//RS     with_handle(handle, |h| match h {
+//RS         NetHttpHandle::TLSClientConfig(config) => Some(config.clone()),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS fn tls_root_certificates(handle: i64) -> Option<JetTLSRootCertificates> {
+//RS     with_handle(handle, |h| match h {
+//RS         NetHttpHandle::TLSRootCertificates(roots) => Some(roots.clone()),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS fn tls_client_identity(handle: i64) -> Option<JetTLSClientIdentity> {
+//RS     with_handle(handle, |h| match h {
+//RS         NetHttpHandle::TLSClientIdentity(identity) => Some(identity.clone()),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS fn tls_stream(handle: i64) -> Option<Arc<Mutex<JetTLSStream>>> {
+//RS     with_handle(handle, |h| match h {
+//RS         NetHttpHandle::TLSStream(stream) => Some(Arc::clone(stream)),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS fn udp_socket(handle: i64) -> Option<Arc<JetUDPSocket>> {
+//RS     with_handle(handle, |h| match h {
+//RS         NetHttpHandle::UdpSocket(s) => Some(Arc::clone(s)),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS fn net_ready(handle: i64) -> Option<Arc<JetNetReady>> {
+//RS     with_handle(handle, |h| match h {
+//RS         NetHttpHandle::NetReady(ready) => Some(Arc::clone(ready)),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS fn net_ready_interest(value: i64) -> Option<JetNetReadyInterest> {
+//RS     match value {
+//RS         0 => Some(JetNetReadyInterest::Read),
+//RS         1 => Some(JetNetReadyInterest::Write),
+//RS         2 => Some(JetNetReadyInterest::ReadWrite),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn unix_listener(handle: i64) -> Option<Arc<JetUnixListener>> {
+//RS     with_handle(handle, |h| match h {
+//RS         NetHttpHandle::UnixListener(l) => Some(Arc::clone(l)),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn unix_stream(handle: i64) -> Option<Arc<Mutex<JetUnixStream>>> {
+//RS     with_handle(handle, |h| match h {
+//RS         NetHttpHandle::UnixStream(s) => Some(Arc::clone(s)),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS fn http_mux(handle: i64) -> Option<Arc<JetHTTPMux>> {
+//RS     with_handle(handle, |h| match h {
+//RS         NetHttpHandle::HTTPMux(m) => Some(Arc::clone(m)),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS fn jet_jit_http_router_new() -> i64 {
+//RS     push_handle(NetHttpHandle::HTTPRouter(Arc::new(Mutex::new(
+//RS         jet_http_router_new(),
+//RS     ))))
+//RS }
+//RS 
+//RS fn jet_jit_http_router_register(
+//RS     router: i64,
+//RS     method: i64,
+//RS     pattern: i64,
+//RS     callable: i64,
+//RS     file: i64,
+//RS     line: i64,
+//RS     contract: i64,
+//RS ) -> i64 {
+//RS     let method = clone_string(method);
+//RS     let pattern = clone_string(pattern);
+//RS     let file = clone_string(file);
+//RS     let contract = clone_string(contract);
+//RS     let handler = with_handle(callable, |handle| match handle {
+//RS         NetHttpHandle::HTTPHandler(handler) => Some(Arc::clone(handler)),
+//RS         _ => None,
+//RS     })
+//RS     .or_else(|| wrap_bound_http_handler(callable));
+//RS     let Some(handler) = handler else {
+//RS         Concurrency::with_runtime_mut(|runtime| runtime.set_trap("invalid resident HTTP handler"));
+//RS         return 0;
+//RS     };
+//RS     let Some(router) = http_router(router) else {
+//RS         Concurrency::with_runtime_mut(|runtime| runtime.set_trap("invalid HTTPRouter"));
+//RS         return 0;
+//RS     };
+//RS     let mut router = router.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS     jet_http_router_register(
+//RS         &mut router,
+//RS         method,
+//RS         pattern,
+//RS         handler,
+//RS         &file,
+//RS         line as u32,
+//RS         contract,
+//RS     );
+//RS     0
+//RS }
+//RS 
+//RS fn http_router(handle: i64) -> Option<Arc<Mutex<JetHTTPRouter>>> {
+//RS     with_handle(handle, |h| match h {
+//RS         NetHttpHandle::HTTPRouter(router) => Some(Arc::clone(router)),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS fn jet_jit_http_openapi(router: i64) -> i64 {
+//RS     let Some(router) = http_router(router) else {
+//RS         Concurrency::with_runtime_mut(|runtime| runtime.set_trap("invalid HTTPRouter"));
+//RS         return 0;
+//RS     };
+//RS     let router = router.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+//RS     alloc_string(crate::Web::web_rt::jet_web_openapi(&router))
+//RS }
+//RS fn jet_jit_http_reason_phrase(code: i64) -> i64 {
+//RS     alloc_string(jet_http_reason_phrase(code))
+//RS }
+//RS 
+//RS fn jet_jit_http_basic_auth(user: i64, password: i64) -> i64 {
+//RS     let user = clone_string(user);
+//RS     let password = clone_string(password);
+//RS     alloc_string(jet_http_basic_auth(&user, &password))
+//RS }
+//RS 
+//RS fn jet_jit_http_bearer_auth(token: i64) -> i64 {
+//RS     let token = clone_string(token);
+//RS     alloc_string(jet_http_bearer_auth(&token))
+//RS }
+//RS 
+//RS 
+//RS fn http_server(handle: i64) -> Option<Arc<JetHTTPServer>> {
+//RS     with_handle(handle, |h| match h {
+//RS         NetHttpHandle::HTTPServer(s) => Some(Arc::clone(s)),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS fn ws_conn(handle: i64) -> Option<Arc<Mutex<JetWsConn>>> {
+//RS     with_handle(handle, |h| match h {
+//RS         NetHttpHandle::WsConn(c) => Some(Arc::clone(c)),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS fn clone_string_list(handle: i64) -> Vec<String> {
+//RS     if handle <= 0 {
+//RS         return Vec::new();
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(handle).unwrap_or(0);
+//RS         let mut out = Vec::with_capacity(len as usize);
+//RS         for i in 0..len {
+//RS             let sid = rt.heap.list_get_int(handle, i).unwrap_or(0);
+//RS             out.push(rt.heap.clone_string(sid).unwrap_or_default());
+//RS         }
+//RS         out
+//RS     })
+//RS }
+//RS 
+//RS fn clone_bytes(handle: i64) -> Vec<u8> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(handle).unwrap_or(0);
+//RS         let mut out = Vec::with_capacity(len as usize);
+//RS         for i in 0..len {
+//RS             out.push(rt.heap.list_get_int(handle, i).unwrap_or(0) as u8);
+//RS         }
+//RS         out
+//RS     })
+//RS }
+//RS 
+//RS fn clone_string_map(handle: i64) -> Option<BTreeMap<String, String>> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.map_len(handle)?;
+//RS         let mut out = BTreeMap::new();
+//RS         for index in 0..len {
+//RS             let key = rt.heap.map_key_at(handle, index)?;
+//RS             let value = rt.heap.map_value_at(handle, index)?;
+//RS             out.insert(rt.heap.clone_string(key)?, rt.heap.clone_string(value)?);
+//RS         }
+//RS         Some(out)
+//RS     })
+//RS }
+//RS 
+//RS fn alloc_bytes(bytes: &[u8]) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for b in bytes {
+//RS             let _ = rt.heap.list_push_int(list, i64::from(*b));
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS fn result_err(msg: String) -> i64 {
+//RS     result_err_msg(&msg)
+//RS }
+//RS 
+//RS fn result_err_bits(bits: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.results.push(JitResultValue {
+//RS             ok: false,
+//RS             bits: bits as u64,
+//RS         });
+//RS         rt.results.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn result_ok_unit() -> i64 {
+//RS     result_ok(0)
+//RS }
+//RS 
+//RS fn result_ok_handle(h: i64) -> i64 {
+//RS     result_ok(h as u64)
+//RS }
+//RS 
+//RS fn net_invalid_error(operation: &str, resource: &str) -> JetNetError {
+//RS     jet_net_invalid_input(operation, resource)
+//RS }
+//RS 
+//RS fn net_invalid(operation: &str, resource: &str) -> i64 {
+//RS     net_err(net_invalid_error(operation, resource))
+//RS }
+//RS 
+//RS fn net_err(e: JetNetError) -> i64 {
+//RS     result_err_bits(marshal_net_error(e))
+//RS }
+//RS 
+//RS fn io_err(e: jet_std::IOError) -> i64 {
+//RS     result_err_bits(marshal_io_error(e))
+//RS }
+//RS 
+//RS fn http_err(e: JetHTTPError) -> i64 {
+//RS     result_err_bits(marshal_http_error_packed(e))
+//RS }
+//RS 
+//RS fn option_string(s: Option<String>) -> i64 {
+//RS     match s {
+//RS         None => 0,
+//RS         Some(v) => alloc_string(v).wrapping_add(1),
+//RS     }
+//RS }
+//RS fn option_string_result(s: Option<String>) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| match s {
+//RS         Some(value) => {
+//RS             let handle = rt.heap.alloc_string(value);
+//RS             crate::runtime_host::alloc_jit_result(rt, true, handle as u64)
+//RS         }
+//RS         None => crate::runtime_host::alloc_jit_result(rt, false, 0),
+//RS     })
+//RS }
+//RS 
+//RS fn map_net_ok<T>(r: Result<T, JetNetError>, f: impl FnOnce(T) -> i64) -> i64 {
+//RS     match r {
+//RS         Ok(v) => result_ok_handle(f(v)),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn map_net_unit(r: Result<(), JetNetError>) -> i64 {
+//RS     match r {
+//RS         Ok(()) => result_ok_unit(),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn map_io_ok<T>(r: Result<T, jet_std::IOError>, f: impl FnOnce(T) -> i64) -> i64 {
+//RS     match r {
+//RS         Ok(v) => result_ok_handle(f(v)),
+//RS         Err(e) => io_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn map_io_unit(r: Result<(), jet_std::IOError>) -> i64 {
+//RS     match r {
+//RS         Ok(()) => result_ok_unit(),
+//RS         Err(e) => io_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn map_http_ok<T>(r: Result<T, JetHTTPError>, f: impl FnOnce(T) -> i64) -> i64 {
+//RS     match r {
+//RS         Ok(v) => result_ok_handle(f(v)),
+//RS         Err(e) => http_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn net_error_detail_handle(detail: JetNetErrorDetail) -> i64 {
+//RS     let operation = alloc_string(detail.operation);
+//RS     let address = option_string(detail.address);
+//RS     let name = option_string(detail.name);
+//RS     let message = alloc_string(detail.message);
+//RS     let os_code = detail
+//RS         .os_code
+//RS         .map(|value| value.wrapping_add(1))
+//RS         .unwrap_or(0);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(5);
+//RS         let _ = rt.heap.record_set_string(record, 0, operation);
+//RS         let _ = rt.heap.record_set_int(record, 1, address);
+//RS         let _ = rt.heap.record_set_int(record, 2, name);
+//RS         let _ = rt.heap.record_set_string(record, 3, message);
+//RS         let _ = rt.heap.record_set_int(record, 4, os_code);
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS fn marshal_net_error(error: JetNetError) -> i64 {
+//RS     let parts = jet_net_error_surface_parts(error);
+//RS     let payload_bits = match parts.payload {
+//RS         JetNetErrorSurfacePayload::Detail(detail) => net_error_detail_handle(detail),
+//RS         JetNetErrorSurfacePayload::DNS {
+//RS             ordinal,
+//RS             value,
+//RS             ..
+//RS         } => alloc_string(value).wrapping_shl(8) | ordinal,
+//RS     };
+//RS     payload_bits.wrapping_shl(8) | parts.ordinal
+//RS }
+//RS fn marshal_http_error_packed(error: JetHTTPError) -> i64 {
+//RS     let parts = jet_http_error_surface_parts(error);
+//RS     let payload = match parts.payload {
+//RS         JetHTTPErrorSurfacePayload::Unit => 0,
+//RS         JetHTTPErrorSurfacePayload::Int { value, .. } => value,
+//RS         JetHTTPErrorSurfacePayload::Text { value, .. } => alloc_string(value),
+//RS         JetHTTPErrorSurfacePayload::Operation { ordinal, .. } => ordinal,
+//RS     };
+//RS     payload.wrapping_shl(8) | parts.ordinal
+//RS }
+//RS 
+//RS 
+//RS 
+//RS fn net_io_operation_ordinal(operation: jet_std::IOOperation) -> i64 {
+//RS     match operation {
+//RS         jet_std::IOOperation::Read => 0,
+//RS         jet_std::IOOperation::Write => 1,
+//RS         jet_std::IOOperation::Flush => 2,
+//RS         jet_std::IOOperation::Connect => 3,
+//RS         jet_std::IOOperation::Accept => 4,
+//RS         jet_std::IOOperation::Close => 5,
+//RS         jet_std::IOOperation::Resolve => 6,
+//RS         jet_std::IOOperation::Codec => 7,
+//RS     }
+//RS }
+//RS 
+//RS fn net_io_context_handle(context: &jet_std::IOContext) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         crate::runtime_host::alloc_io_context(
+//RS             rt,
+//RS             net_io_operation_ordinal(context.operation),
+//RS             context.resource.as_deref(),
+//RS             context.os_code,
+//RS             context.cause.as_deref(),
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn marshal_io_error(error: jet_std::IOError) -> i64 {
+//RS     let (_variant, ordinal, context) = match error {
+//RS         jet_std::IOError::InvalidInput(context) => ("InvalidInput", 0, context),
+//RS         jet_std::IOError::NotFound(context) => ("NotFound", 1, context),
+//RS         jet_std::IOError::PermissionDenied(context) => ("PermissionDenied", 2, context),
+//RS         jet_std::IOError::TimedOut(context) => ("TimedOut", 3, context),
+//RS         jet_std::IOError::Cancelled(context) => ("Cancelled", 4, context),
+//RS         jet_std::IOError::Closed(context) => ("Closed", 5, context),
+//RS         jet_std::IOError::Protocol(context) => ("Protocol", 6, context),
+//RS         jet_std::IOError::Other(context) => ("Other", 7, context),
+//RS     };
+//RS     let context_bits = net_io_context_handle(&context);
+//RS     context_bits.wrapping_shl(8) | ordinal
+//RS }
+//RS 
+//RS fn decode_result(handle: i64) -> Option<(bool, u64)> {
+//RS     if handle <= 0 {
+//RS         return None;
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let idx = handle.saturating_sub(1) as usize;
+//RS         rt.results.get(idx).map(|r| (r.ok, r.bits))
+//RS     })
+//RS }
+//RS 
+//RS type HTTPHandlerFn = unsafe extern "C" fn(i64) -> i64;
+//RS type HTTPHandlerWithEnvFn = unsafe extern "C" fn(i64, i64) -> i64;
+//RS type HTTPZeroHandlerFn = unsafe extern "C" fn() -> i64;
+//RS type HTTPZeroHandlerWithEnvFn = unsafe extern "C" fn(i64) -> i64;
+//RS 
+//RS fn decode_http_handler_result(res_h: i64) -> Result<JetHTTPResponse, JetHTTPError> {
+//RS     match decode_result(res_h) {
+//RS         Some((true, bits)) => {
+//RS             let resp_h = bits as i64;
+//RS             match take_handle(resp_h) {
+//RS                 Some(NetHttpHandle::HTTPResponse(resp)) => Ok(resp),
+//RS                 other => {
+//RS                     if let Some(v) = other {
+//RS                         let _ = push_handle(v);
+//RS                     }
+//RS                     Err(JetHTTPError::IO {
+//RS                         operation: "handler response".into(),
+//RS                     })
+//RS                 }
+//RS             }
+//RS         }
+//RS         Some((false, bits)) => {
+//RS             let packed = bits as i64;
+//RS             let ordinal = packed & 0xff;
+//RS             let payload = packed >> 8;
+//RS             let text = (9..=19).contains(&ordinal).then(|| {
+//RS                 Concurrency::with_runtime_mut(|rt| {
+//RS                     rt.heap
+//RS                         .clone_string(payload)
+//RS                         .unwrap_or_else(|| "handler error".into())
+//RS                 })
+//RS             });
+//RS             Err(
+//RS                 jet_http_error_from_surface_parts(ordinal, payload, text).unwrap_or_else(|| {
+//RS                     JetHTTPError::IO {
+//RS                         operation: "handler error".into(),
+//RS                     }
+//RS                 }),
+//RS             )
+//RS         }
+//RS         None => Err(JetHTTPError::IO {
+//RS             operation: "handler result".into(),
+//RS         }),
+//RS     }
+//RS }
+//RS 
+//RS fn resident_http_callable(handle: i64) -> Option<(usize, JitCallableSlot)> {
+//RS     Concurrency::http_callable_snapshot(handle)
+//RS }
+//RS 
+//RS fn invalid_http_handler() -> JetHTTPHandler {
+//RS     Arc::new(|_| {
+//RS         Err(JetHTTPError::IO {
+//RS             operation: "invalid resident HTTP handler".into(),
+//RS         })
+//RS     })
+//RS }
+//RS pub(crate) struct TestHttpHandler(JetHTTPHandler);
+//RS 
+//RS pub(crate) fn test_capture_http_handler(callable: i64) -> TestHttpHandler {
+//RS     TestHttpHandler(wrap_http_handler(callable))
+//RS }
+//RS 
+//RS fn wrap_http_handler(callable: i64) -> JetHTTPHandler {
+//RS     let Some((epoch, slot)) = resident_http_callable(callable) else {
+//RS         return invalid_http_handler();
+//RS     };
+//RS     Arc::new(
+//RS         move |req: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
+//RS             Concurrency::try_with_http_jet_runtime_at(epoch, || {
+//RS                 let req_h = push_handle(NetHttpHandle::HTTPRequest(req));
+//RS                 Concurrency::notify_http_test_handler_entry();
+//RS                 let res_h = unsafe {
+//RS                     if slot.has_env {
+//RS                         let f: HTTPHandlerWithEnvFn = std::mem::transmute(slot.fn_ptr as usize);
+//RS                         f(slot.env, req_h)
+//RS                     } else {
+//RS                         let f: HTTPHandlerFn = std::mem::transmute(slot.fn_ptr as usize);
+//RS                         f(req_h)
+//RS                     }
+//RS                 };
+//RS                 decode_http_handler_result(res_h)
+//RS             })
+//RS             .unwrap_or_else(|| {
+//RS                 Err(JetHTTPError::IO {
+//RS                     operation: "HTTP handler runtime unavailable".into(),
+//RS                 })
+//RS             })
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn wrap_bound_http_handler(callable: i64) -> Option<JetHTTPHandler> {
+//RS     resident_http_callable(callable).map(|_| wrap_http_handler(callable))
+//RS }
+//RS 
+//RS fn wrap_http_zero_handler(callable: i64) -> JetHTTPHandler {
+//RS     let Some((epoch, slot)) = resident_http_callable(callable) else {
+//RS         return invalid_http_handler();
+//RS     };
+//RS     Arc::new(
+//RS         move |_req: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
+//RS             Concurrency::try_with_http_jet_runtime_at(epoch, || {
+//RS                 let res_h = unsafe {
+//RS                     if slot.has_env {
+//RS                         let f: HTTPZeroHandlerWithEnvFn = std::mem::transmute(slot.fn_ptr as usize);
+//RS                         f(slot.env)
+//RS                     } else {
+//RS                         let f: HTTPZeroHandlerFn = std::mem::transmute(slot.fn_ptr as usize);
+//RS                         f()
+//RS                     }
+//RS                 };
+//RS                 decode_http_handler_result(res_h)
+//RS             })
+//RS             .unwrap_or_else(|| {
+//RS                 Err(JetHTTPError::IO {
+//RS                     operation: "HTTP handler runtime unavailable".into(),
+//RS                 })
+//RS             })
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS // ── core.net ───────────────────────────────────────────────────────────────
+//RS 
+//RS fn jet_jit_net_socket_addr(host: i64, port: i64) -> i64 {
+//RS     let host = clone_string(host);
+//RS     map_net_ok(jet_net_socket_addr(&host, port), |a| {
+//RS         push_handle(NetHttpHandle::SocketAddr(a))
+//RS     })
+//RS }
+//RS fn jet_jit_net_tcp_connect_addr(addr: i64) -> i64 {
+//RS     let Some(addr) = with_handle(addr, |h| match h {
+//RS         NetHttpHandle::SocketAddr(addr) => Some(addr.clone()),
+//RS         _ => None,
+//RS     }) else {
+//RS         return net_invalid("tcp connect", "SocketAddr");
+//RS     };
+//RS     map_net_ok(jet_net_tcp_connect_addr(&addr), |stream| {
+//RS         push_handle(NetHttpHandle::TcpStream(Arc::new(Mutex::new(stream))))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_net_socket_to_string(addr: i64) -> i64 {
+//RS     match with_handle(addr, |h| match h {
+//RS         NetHttpHandle::SocketAddr(a) => Some(jet_net_socket_to_string(a)),
+//RS         _ => None,
+//RS     }) {
+//RS         Some(s) => alloc_string(s),
+//RS         None => alloc_string(String::new()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_socket_host(addr: i64) -> i64 {
+//RS     match with_handle(addr, |h| match h {
+//RS         NetHttpHandle::SocketAddr(a) => Some(jet_net_socket_host(a)),
+//RS         _ => None,
+//RS     }) {
+//RS         Some(s) => alloc_string(s),
+//RS         None => alloc_string(String::new()),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_socket_port_typed(addr: i64) -> i64 {
+//RS     with_handle(addr, |h| match h {
+//RS         NetHttpHandle::SocketAddr(a) => Some(jet_net_socket_port(a)),
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or(0)
+//RS }
+//RS 
+//RS fn jet_jit_net_tcp_listen_str(addr: i64) -> i64 {
+//RS     let addr = clone_string(addr);
+//RS     map_net_ok(jet_net_tcp_listen(&addr), |l| {
+//RS         push_handle(NetHttpHandle::TcpListener(Arc::new(l)))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_net_tcp_listen_addr(addr: i64) -> i64 {
+//RS     let Some(addr) = with_handle(addr, |h| match h {
+//RS         NetHttpHandle::SocketAddr(a) => Some(a.clone()),
+//RS         _ => None,
+//RS     }) else {
+//RS         return net_invalid("tcp listen", "SocketAddr");
+//RS     };
+//RS     map_net_ok(jet_net_tcp_listen_addr(&addr), |l| {
+//RS         push_handle(NetHttpHandle::TcpListener(Arc::new(l)))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_net_tcp_connect(addr: i64) -> i64 {
+//RS     let addr = clone_string(addr);
+//RS     map_net_ok(jet_net_tcp_connect(&addr), |s| {
+//RS         push_handle(NetHttpHandle::TcpStream(Arc::new(Mutex::new(s))))
+//RS     })
+//RS }
+//RS fn jet_jit_net_tcp_connect_timeout(addr: i64, timeout_ms: i64) -> i64 {
+//RS     let Some(addr) = with_handle(addr, |h| match h {
+//RS         NetHttpHandle::SocketAddr(a) => Some(a.clone()),
+//RS         _ => None,
+//RS     }) else {
+//RS         return net_invalid("tcp connect timeout", "SocketAddr");
+//RS     };
+//RS     match jet_net_tcp_connect_timeout(&addr, timeout_ms) {
+//RS         Ok(stream) => result_ok_handle(push_handle(NetHttpHandle::TcpStream(Arc::new(
+//RS             Mutex::new(stream),
+//RS         )))),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS fn jet_jit_net_tcp_read(stream: i64) -> i64 {
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("tcp read", "TcpStream");
+//RS     };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     match jet_net_tcp_read(&mut guard) {
+//RS         Ok(value) => result_ok_handle(alloc_string(value)),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_tcp_write(stream: i64, data: i64) -> i64 {
+//RS     let data = clone_string(data);
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("tcp write", "TcpStream");
+//RS     };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     map_net_unit(jet_net_tcp_write(&mut guard, &data))
+//RS }
+//RS 
+//RS fn jet_jit_net_tcp_read_bytes(stream: i64, limit: i64) -> i64 {
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("tcp read", "TcpStream");
+//RS     };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     match jet_net_tcp_read_bytes(&mut guard, limit) {
+//RS         Ok(bytes) => result_ok_handle(alloc_bytes(&bytes)),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_tcp_read_bytes_deadline(stream: i64, limit: i64, deadline: i64) -> i64 {
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("tcp read", "TcpStream");
+//RS     };
+//RS     let deadline = jet_std::Duration { ns: deadline };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     match jet_net_tcp_read_bytes_deadline(&mut guard, limit, &deadline) {
+//RS         Ok(bytes) => result_ok_handle(alloc_bytes(&bytes)),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_tcp_write_bytes(stream: i64, data: i64) -> i64 {
+//RS     let data = clone_bytes(data);
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("tcp write", "TcpStream");
+//RS     };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     match jet_net_tcp_write_bytes(&mut guard, &data) {
+//RS         Ok(count) => result_ok(count as u64),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_tcp_write_bytes_deadline(stream: i64, data: i64, deadline: i64) -> i64 {
+//RS     let data = clone_bytes(data);
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("tcp write", "TcpStream");
+//RS     };
+//RS     let deadline = jet_std::Duration { ns: deadline };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     match jet_net_tcp_write_bytes_deadline(&mut guard, &data, &deadline) {
+//RS         Ok(count) => result_ok(count as u64),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_tcp_write_text(stream: i64, text: i64) -> i64 {
+//RS     let text = clone_string(text);
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("tcp write", "TcpStream");
+//RS     };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     map_net_unit(jet_net_tcp_write_text(&mut guard, &text))
+//RS }
+//RS 
+//RS fn jet_jit_net_tcp_write_text_deadline(stream: i64, text: i64, deadline: i64) -> i64 {
+//RS     let text = clone_string(text);
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("tcp write", "TcpStream");
+//RS     };
+//RS     let deadline = jet_std::Duration { ns: deadline };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     map_net_unit(jet_net_tcp_write_text_deadline(&mut guard, &text, &deadline))
+//RS }
+//RS 
+//RS fn jet_jit_net_listener_local_socket_addr(listener: i64) -> i64 {
+//RS     let Some(listener) = tcp_listener(listener) else {
+//RS         return net_invalid("listener local address", "TcpListener");
+//RS     };
+//RS     match jet_net_listener_local_socket_addr(&listener) {
+//RS         Ok(a) => result_ok_handle(push_handle(NetHttpHandle::SocketAddr(a))),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS fn jet_jit_net_tcp_stream_local_addr(stream: i64) -> i64 {
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("tcp local address", "TcpStream");
+//RS     };
+//RS     let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     match jet_net_tcp_local_addr(&guard) {
+//RS         Ok(address) => result_ok_handle(alloc_string(address)),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_tcp_stream_peer_addr(stream: i64) -> i64 {
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("tcp peer address", "TcpStream");
+//RS     };
+//RS     let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     match jet_net_tcp_peer_addr(&guard) {
+//RS         Ok(address) => result_ok_handle(alloc_string(address)),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_tcp_stream_local_socket_addr(stream: i64) -> i64 {
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("tcp local address", "TcpStream");
+//RS     };
+//RS     let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     match jet_net_tcp_local_socket_addr(&guard) {
+//RS         Ok(address) => result_ok_handle(push_handle(NetHttpHandle::SocketAddr(address))),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_tcp_stream_peer_socket_addr(stream: i64) -> i64 {
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("tcp peer address", "TcpStream");
+//RS     };
+//RS     let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     match jet_net_tcp_peer_socket_addr(&guard) {
+//RS         Ok(address) => result_ok_handle(push_handle(NetHttpHandle::SocketAddr(address))),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_set_read_timeout(stream: i64, ms: i64) -> i64 {
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("set_read_timeout", "TcpStream");
+//RS     };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     map_net_unit(jet_net_set_read_timeout(&mut guard, ms))
+//RS }
+//RS 
+//RS fn jet_jit_net_set_write_timeout(stream: i64, ms: i64) -> i64 {
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("set_write_timeout", "TcpStream");
+//RS     };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     map_net_unit(jet_net_set_write_timeout(&mut guard, ms))
+//RS }
+//RS 
+//RS fn jet_jit_net_dns_a(name: i64, ms: i64) -> i64 {
+//RS     let name = clone_string(name);
+//RS     match jet_net_dns_result(jet_net_dns_a(&name, ms), &name) {
+//RS         Ok(rows) => result_ok_handle(list_of_handles(
+//RS             rows.into_iter().map(NetHttpHandle::IPAddr).collect(),
+//RS         )),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_dns_a_at(server: i64, name: i64, ms: i64) -> i64 {
+//RS     let server = clone_string(server);
+//RS     let name = clone_string(name);
+//RS     match jet_net_dns_result(jet_net_dns_a_at(&server, &name, ms), &name) {
+//RS         Ok(rows) => result_ok_handle(list_of_handles(
+//RS             rows.into_iter().map(NetHttpHandle::IPAddr).collect(),
+//RS         )),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_dns_aaaa(name: i64, ms: i64) -> i64 {
+//RS     let name = clone_string(name);
+//RS     match jet_net_dns_result(jet_net_dns_aaaa(&name, ms), &name) {
+//RS         Ok(rows) => result_ok_handle(list_of_handles(
+//RS             rows.into_iter().map(NetHttpHandle::IPAddr).collect(),
+//RS         )),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_dns_aaaa_at(server: i64, name: i64, ms: i64) -> i64 {
+//RS     let server = clone_string(server);
+//RS     let name = clone_string(name);
+//RS     match jet_net_dns_result(jet_net_dns_aaaa_at(&server, &name, ms), &name) {
+//RS         Ok(rows) => result_ok_handle(list_of_handles(
+//RS             rows.into_iter().map(NetHttpHandle::IPAddr).collect(),
+//RS         )),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_dns_srv(name: i64, ms: i64) -> i64 {
+//RS     let name = clone_string(name);
+//RS     match jet_net_dns_result(jet_net_dns_srv(&name, ms), &name) {
+//RS         Ok(rows) => result_ok_handle(list_of_handles(
+//RS             rows.into_iter().map(NetHttpHandle::DNSSrv).collect(),
+//RS         )),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_dns_srv_at(server: i64, name: i64, ms: i64) -> i64 {
+//RS     let server = clone_string(server);
+//RS     let name = clone_string(name);
+//RS     match jet_net_dns_result(jet_net_dns_srv_at(&server, &name, ms), &name) {
+//RS         Ok(rows) => result_ok_handle(list_of_handles(
+//RS             rows.into_iter().map(NetHttpHandle::DNSSrv).collect(),
+//RS         )),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_dns_srv_target(srv: i64) -> i64 {
+//RS     with_handle(srv, |handle| match handle {
+//RS         NetHttpHandle::DNSSrv(srv) => Some(jet_net_dns_srv_target(srv)),
+//RS         _ => None,
+//RS     })
+//RS     .map(alloc_string)
+//RS     .unwrap_or_else(|| alloc_string(String::new()))
+//RS }
+//RS 
+//RS fn jet_jit_net_dns_srv_port(srv: i64) -> i64 {
+//RS     with_handle(srv, |handle| match handle {
+//RS         NetHttpHandle::DNSSrv(srv) => Some(jet_net_dns_srv_port(srv)),
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or(0)
+//RS }
+//RS 
+//RS fn jet_jit_net_dns_srv_priority(srv: i64) -> i64 {
+//RS     with_handle(srv, |handle| match handle {
+//RS         NetHttpHandle::DNSSrv(srv) => Some(jet_net_dns_srv_priority(srv)),
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or(0)
+//RS }
+//RS 
+//RS fn jet_jit_net_dns_srv_weight(srv: i64) -> i64 {
+//RS     with_handle(srv, |handle| match handle {
+//RS         NetHttpHandle::DNSSrv(srv) => Some(jet_net_dns_srv_weight(srv)),
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or(0)
+//RS }
+//RS 
+//RS fn jet_jit_net_set_timeout(stream: i64, ms: i64) -> i64 {
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("set_timeout", "TcpStream");
+//RS     };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     map_net_unit(jet_net_set_timeout(&mut guard, ms))
+//RS }
+//RS 
+//RS fn jet_jit_net_nodelay(stream: i64) -> i64 {
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("nodelay", "TcpStream");
+//RS     };
+//RS     let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     match jet_net_nodelay(&guard) {
+//RS         Ok(v) => result_ok(if v { 1 } else { 0 }),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_set_nodelay(stream: i64, enabled: i64) -> i64 {
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("set_nodelay", "TcpStream");
+//RS     };
+//RS     let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     map_net_unit(jet_net_set_nodelay(&guard, enabled != 0))
+//RS }
+//RS 
+//RS fn jet_jit_net_ttl(stream: i64) -> i64 {
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("ttl", "TcpStream");
+//RS     };
+//RS     let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     match jet_net_ttl(&guard) {
+//RS         Ok(v) => result_ok(v as u64),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_set_ttl(stream: i64, ttl: i64) -> i64 {
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("set_ttl", "TcpStream");
+//RS     };
+//RS     let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     map_net_unit(jet_net_set_ttl(&guard, ttl))
+//RS }
+//RS 
+//RS fn jet_jit_net_socket_type(stream: i64) -> i64 {
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return alloc_string(String::new());
+//RS     };
+//RS     let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     alloc_string(jet_net_socket_type(&guard))
+//RS }
+//RS 
+//RS fn jet_jit_net_sendfile(stream: i64, path: i64) -> i64 {
+//RS     let path = clone_string(path);
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("sendfile", "TcpStream");
+//RS     };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     match jet_net_sendfile(&mut guard, &path) {
+//RS         Ok(n) => result_ok(n as u64),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_dns_ptr(name: i64, ms: i64) -> i64 {
+//RS     let name = clone_string(name);
+//RS     match jet_net_dns_result(jet_net_dns_ptr(&name, ms), &name) {
+//RS         Ok(rows) => result_ok_handle(list_of_strings(rows)),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS fn jet_jit_net_dns_txt(name: i64, ms: i64) -> i64 {
+//RS     let name = clone_string(name);
+//RS     match jet_net_dns_result(jet_net_dns_txt(&name, ms), &name) {
+//RS         Ok(rows) => result_ok_handle(list_of_strings(rows)),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_dns_txt_at(server: i64, name: i64, ms: i64) -> i64 {
+//RS     let server = clone_string(server);
+//RS     let name = clone_string(name);
+//RS     match jet_net_dns_result(jet_net_dns_txt_at(&server, &name, ms), &name) {
+//RS         Ok(rows) => result_ok_handle(list_of_strings(rows)),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_getservbyname(name: i64) -> i64 {
+//RS     let name = clone_string(name);
+//RS     match jet_net_getservbyname(&name) {
+//RS         Ok(port) => result_ok(port as u64),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_getservbyport(port: i64) -> i64 {
+//RS     match jet_net_getservbyport(port) {
+//RS         Ok(name) => result_ok_handle(alloc_string(name)),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_tcp_reply(stream: i64, status: i64, body: i64) -> i64 {
+//RS     let status = clone_string(status);
+//RS     let body = clone_string(body);
+//RS     let Some(NetHttpHandle::TcpStream(s)) = take_handle(stream) else {
+//RS         return net_invalid("tcp reply", "TcpStream");
+//RS     };
+//RS     let Ok(stream) = Arc::try_unwrap(s).map(|m| m.into_inner().unwrap_or_else(|p| p.into_inner()))
+//RS     else {
+//RS         return result_err("TcpStream still shared".into());
+//RS     };
+//RS     map_net_unit(jet_net_tcp_reply(stream, &status, &body))
+//RS }
+//RS 
+//RS fn jet_jit_net_udp_bind(addr: i64) -> i64 {
+//RS     let addr = clone_string(addr);
+//RS     map_net_ok(jet_net_udp_bind(&addr), |s| {
+//RS         push_handle(NetHttpHandle::UdpSocket(Arc::new(s)))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_net_udp_local_addr(socket: i64) -> i64 {
+//RS     let Some(socket) = udp_socket(socket) else {
+//RS         return net_invalid("udp_local_addr", "UdpSocket");
+//RS     };
+//RS     match jet_net_udp_local_addr(&socket) {
+//RS         Ok(a) => result_ok_handle(push_handle(NetHttpHandle::SocketAddr(a))),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_udp_set_timeout(socket: i64, ms: i64) -> i64 {
+//RS     let Some(socket) = udp_socket(socket) else {
+//RS         return net_invalid("udp_set_timeout", "UdpSocket");
+//RS     };
+//RS     map_net_unit(jet_net_udp_set_timeout(&socket, ms))
+//RS }
+//RS 
+//RS fn jet_jit_net_udp_send_bytes_to(socket: i64, data: i64, addr: i64) -> i64 {
+//RS     let bytes = clone_bytes(data);
+//RS     let Some(addr) = with_handle(addr, |h| match h {
+//RS         NetHttpHandle::SocketAddr(a) => Some(a.clone()),
+//RS         _ => None,
+//RS     }) else {
+//RS         return net_invalid("udp_send", "SocketAddr");
+//RS     };
+//RS     let Some(socket) = udp_socket(socket) else {
+//RS         return net_invalid("udp_send", "UdpSocket");
+//RS     };
+//RS     match jet_net_udp_send_bytes_to(&socket, &bytes, &addr) {
+//RS         Ok(n) => result_ok(n as u64),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS fn jet_jit_net_udp_send_to(socket: i64, data: i64, addr: i64) -> i64 {
+//RS     let data = clone_string(data);
+//RS     let Some(addr) = with_handle(addr, |h| match h {
+//RS         NetHttpHandle::SocketAddr(a) => Some(a.clone()),
+//RS         _ => None,
+//RS     }) else {
+//RS         return net_invalid("udp_send", "SocketAddr");
+//RS     };
+//RS     let Some(socket) = udp_socket(socket) else {
+//RS         return net_invalid("udp_send", "UdpSocket");
+//RS     };
+//RS     match jet_net_udp_send_to(&socket, &data, &addr) {
+//RS         Ok(n) => result_ok(n as u64),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_udp_receive(socket: i64, limit: i64) -> i64 {
+//RS     let Some(socket) = udp_socket(socket) else {
+//RS         return net_invalid("udp_receive", "UdpSocket");
+//RS     };
+//RS     match jet_net_udp_receive(&socket, limit) {
+//RS         Ok(p) => result_ok_handle(push_handle(NetHttpHandle::UDPPacket(p))),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_udp_send_bytes_to_deadline(socket: i64, data: i64, addr: i64, deadline: i64) -> i64 {
+//RS     let bytes = clone_bytes(data);
+//RS     let Some(addr) = with_handle(addr, |h| match h {
+//RS         NetHttpHandle::SocketAddr(a) => Some(a.clone()),
+//RS         _ => None,
+//RS     }) else {
+//RS         return net_invalid("udp send", "SocketAddr");
+//RS     };
+//RS     let Some(socket) = udp_socket(socket) else {
+//RS         return net_invalid("udp send", "UdpSocket");
+//RS     };
+//RS     let deadline = jet_std::Duration { ns: deadline };
+//RS     match jet_net_udp_send_bytes_to_deadline(&socket, &bytes, &addr, &deadline) {
+//RS         Ok(n) => result_ok(n as u64),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_udp_receive_deadline(socket: i64, limit: i64, deadline: i64) -> i64 {
+//RS     let Some(socket) = udp_socket(socket) else {
+//RS         return net_invalid("udp receive", "UdpSocket");
+//RS     };
+//RS     let deadline = jet_std::Duration { ns: deadline };
+//RS     match jet_net_udp_receive_deadline(&socket, limit, &deadline) {
+//RS         Ok(packet) => result_ok_handle(push_handle(NetHttpHandle::UDPPacket(packet))),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS fn jet_jit_net_udp_packet_data(packet: i64) -> i64 {
+//RS     let data = with_handle(packet, |h| match h {
+//RS         NetHttpHandle::UDPPacket(p) => Some(jet_net_udp_packet_data(p)),
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or_default();
+//RS     alloc_string(data)
+//RS }
+//RS 
+//RS fn jet_jit_net_udp_packet_bytes(packet: i64) -> i64 {
+//RS     match with_handle(packet, |h| match h {
+//RS         NetHttpHandle::UDPPacket(p) => Some(jet_net_udp_packet_bytes(p)),
+//RS         _ => None,
+//RS     }) {
+//RS         Some(b) => alloc_bytes(&b),
+//RS         None => alloc_bytes(&[]),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_net_udp_packet_original_len(packet: i64) -> i64 {
+//RS     with_handle(packet, |h| match h {
+//RS         NetHttpHandle::UDPPacket(p) => Some(jet_net_udp_packet_original_len(p)),
+//RS         _ => None,
+//RS     })
+//RS     .unwrap_or(0)
+//RS }
+//RS 
+//RS fn jet_jit_net_udp_packet_truncated(packet: i64) -> i64 {
+//RS     i64::from(
+//RS         with_handle(packet, |h| match h {
+//RS             NetHttpHandle::UDPPacket(p) => Some(jet_net_udp_packet_truncated(p)),
+//RS             _ => None,
+//RS         })
+//RS         .unwrap_or(false),
+//RS     )
+//RS }
+//RS fn jet_jit_net_udp_packet_addr(packet: i64) -> i64 {
+//RS     // Copy the address while holding the handle-table lock, then publish the
+//RS     // new address handle after releasing it. Calling `push_handle` inside the
+//RS     // `with_handle` callback would re-lock the same table and deadlock.
+//RS     let address = with_handle(packet, |handle| match handle {
+//RS         NetHttpHandle::UDPPacket(packet) => Some(jet_net_udp_packet_addr(packet)),
+//RS         _ => None,
+//RS     });
+//RS     address
+//RS         .map(|address| push_handle(NetHttpHandle::SocketAddr(address)))
+//RS         .unwrap_or(0)
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_jit_net_unix_listen(path: i64) -> i64 {
+//RS     let path = clone_string(path);
+//RS     map_net_ok(jet_net_unix_listen(&path), |l| {
+//RS         push_handle(NetHttpHandle::UnixListener(Arc::new(l)))
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_jit_net_unix_accept(listener: i64) -> i64 {
+//RS     let Some(listener) = unix_listener(listener) else {
+//RS         return net_invalid("unix accept", "UnixListener");
+//RS     };
+//RS     match jet_net_unix_accept(&listener) {
+//RS         Ok(s) => result_ok_handle(push_handle(NetHttpHandle::UnixStream(Arc::new(
+//RS             Mutex::new(s),
+//RS         )))),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_jit_net_unix_connect(path: i64) -> i64 {
+//RS     let path = clone_string(path);
+//RS     map_net_ok(jet_net_unix_connect(&path), |s| {
+//RS         push_handle(NetHttpHandle::UnixStream(Arc::new(Mutex::new(s))))
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_jit_net_unix_read(stream: i64) -> i64 {
+//RS     let Some(stream) = unix_stream(stream) else {
+//RS         return net_invalid("unix read", "UnixStream");
+//RS     };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     match jet_net_unix_read(&mut guard) {
+//RS         Ok(s) => result_ok_handle(alloc_string(s)),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_jit_net_unix_write(stream: i64, data: i64) -> i64 {
+//RS     let data = clone_string(data);
+//RS     let Some(stream) = unix_stream(stream) else {
+//RS         return net_invalid("unix_write", "UnixStream");
+//RS     };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     map_net_unit(jet_net_unix_write(&mut guard, &data))
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_jit_net_unix_write_all_bytes(stream: i64, data: i64) -> i64 {
+//RS     let bytes = clone_bytes(data);
+//RS     let Some(stream) = unix_stream(stream) else {
+//RS         return net_invalid("unix_write_all_bytes", "UnixStream");
+//RS     };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     map_net_unit(jet_net_unix_write_all_bytes(&mut guard, &bytes))
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_jit_net_unix_close(stream: i64) -> i64 {
+//RS     let Some(stream) = unix_stream(stream) else {
+//RS         return net_invalid("unix_close", "UnixStream");
+//RS     };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     map_net_unit(jet_net_unix_close(&mut guard))
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_jit_net_unix_listen(path: i64) -> i64 {
+//RS     let path = clone_string(path);
+//RS     map_net_ok(jet_net_unix_listen(&path), |_| 0)
+//RS }
+//RS #[cfg(not(unix))]
+//RS fn jet_jit_net_unix_accept(_listener: i64) -> i64 {
+//RS     let listener = JetUnixListener;
+//RS     map_net_ok(jet_net_unix_accept(&listener), |_| 0)
+//RS }
+//RS #[cfg(not(unix))]
+//RS fn jet_jit_net_unix_connect(path: i64) -> i64 {
+//RS     let path = clone_string(path);
+//RS     map_net_ok(jet_net_unix_connect(&path), |_| 0)
+//RS }
+//RS #[cfg(not(unix))]
+//RS fn jet_jit_net_unix_read(_stream: i64) -> i64 {
+//RS     let mut stream = JetUnixStream;
+//RS     match jet_net_unix_read(&mut stream) {
+//RS         Ok(value) => result_ok_handle(alloc_string(value)),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS #[cfg(not(unix))]
+//RS fn jet_jit_net_unix_write(_stream: i64, data: i64) -> i64 {
+//RS     let mut stream = JetUnixStream;
+//RS     let data = clone_string(data);
+//RS     map_net_unit(jet_net_unix_write(&mut stream, &data))
+//RS }
+//RS #[cfg(not(unix))]
+//RS fn jet_jit_net_unix_write_all_bytes(_stream: i64, data: i64) -> i64 {
+//RS     let mut stream = JetUnixStream;
+//RS     let data = clone_bytes(data);
+//RS     map_net_unit(jet_net_unix_write_all_bytes(&mut stream, &data))
+//RS }
+//RS #[cfg(not(unix))]
+//RS fn jet_jit_net_unix_close(_stream: i64) -> i64 {
+//RS     let mut stream = JetUnixStream;
+//RS     map_net_unit(jet_net_unix_close(&mut stream))
+//RS }
+//RS #[cfg(unix)]
+//RS fn jet_jit_net_unix_accept_deadline(listener: i64, deadline: i64) -> i64 {
+//RS     let Some(listener) = unix_listener(listener) else {
+//RS         return net_invalid("unix accept", "UnixListener");
+//RS     };
+//RS     let deadline = jet_std::Duration { ns: deadline };
+//RS     match jet_net_unix_accept_deadline(&listener, &deadline) {
+//RS         Ok(stream) => result_ok_handle(push_handle(NetHttpHandle::UnixStream(Arc::new(
+//RS             Mutex::new(stream),
+//RS         )))),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_jit_net_unix_accept_deadline(_listener: i64, deadline: i64) -> i64 {
+//RS     let listener = JetUnixListener;
+//RS     let deadline = jet_std::Duration { ns: deadline };
+//RS     net_err(jet_net_unix_accept_deadline(&listener, &deadline).unwrap_err())
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_jit_net_unix_read_bytes_deadline(stream: i64, limit: i64, deadline: i64) -> i64 {
+//RS     let Some(stream) = unix_stream(stream) else {
+//RS         return net_invalid("unix read", "UnixStream");
+//RS     };
+//RS     let deadline = jet_std::Duration { ns: deadline };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     match jet_net_unix_read_bytes_deadline(&mut guard, limit, &deadline) {
+//RS         Ok(bytes) => result_ok_handle(alloc_bytes(&bytes)),
+//RS         Err(error) => net_err(error),
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_jit_net_unix_read_bytes_deadline(_stream: i64, _limit: i64, deadline: i64) -> i64 {
+//RS     let mut stream = JetUnixStream;
+//RS     let deadline = jet_std::Duration { ns: deadline };
+//RS     net_err(
+//RS         jet_net_unix_read_bytes_deadline(&mut stream, 0, &deadline)
+//RS             .unwrap_err(),
+//RS     )
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_jit_net_unix_write_all_bytes_deadline(stream: i64, data: i64, deadline: i64) -> i64 {
+//RS     let bytes = clone_bytes(data);
+//RS     let Some(stream) = unix_stream(stream) else {
+//RS         return net_invalid("unix write", "UnixStream");
+//RS     };
+//RS     let deadline = jet_std::Duration { ns: deadline };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     map_net_unit(jet_net_unix_write_all_bytes_deadline(
+//RS         &mut guard,
+//RS         &bytes,
+//RS         &deadline,
+//RS     ))
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_jit_net_unix_write_all_bytes_deadline(
+//RS     _stream: i64,
+//RS     data: i64,
+//RS     deadline: i64,
+//RS ) -> i64 {
+//RS     let mut stream = JetUnixStream;
+//RS     let bytes = clone_bytes(data);
+//RS     let deadline = jet_std::Duration { ns: deadline };
+//RS     net_err(
+//RS         jet_net_unix_write_all_bytes_deadline(&mut stream, &bytes, &deadline)
+//RS             .unwrap_err(),
+//RS     )
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_jit_net_unix_ready(stream: i64, interest: i64, deadline: i64) -> i64 {
+//RS     let Some(interest) = net_ready_interest(interest) else {
+//RS         return net_invalid("unix ready", "NetReadyInterest");
+//RS     };
+//RS     let Some(stream) = unix_stream(stream) else {
+//RS         return net_invalid("unix ready", "UnixStream");
+//RS     };
+//RS     let deadline = jet_std::Duration { ns: deadline };
+//RS     let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     map_net_ok(jet_net_unix_ready(&guard, interest, &deadline), |ready| {
+//RS         push_handle(NetHttpHandle::NetReady(Arc::new(ready)))
+//RS     })
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_jit_net_unix_ready(_stream: i64, interest: i64, deadline: i64) -> i64 {
+//RS     let Some(interest) = net_ready_interest(interest) else {
+//RS         return net_invalid("unix ready", "NetReadyInterest");
+//RS     };
+//RS     let stream = JetUnixStream;
+//RS     let deadline = jet_std::Duration { ns: deadline };
+//RS     net_err(jet_net_unix_ready(&stream, interest, &deadline).unwrap_err())
+//RS }
+//RS 
+//RS #[cfg(unix)]
+//RS fn jet_jit_net_unix_set_timeout(stream: i64, timeout: i64) -> i64 {
+//RS     let Some(stream) = unix_stream(stream) else {
+//RS         return net_invalid("unix timeout", "UnixStream");
+//RS     };
+//RS     let timeout = jet_std::Duration { ns: timeout };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     map_net_unit(jet_net_unix_set_timeout(&mut guard, &timeout))
+//RS }
+//RS 
+//RS #[cfg(not(unix))]
+//RS fn jet_jit_net_unix_set_timeout(_stream: i64, timeout: i64) -> i64 {
+//RS     let mut stream = JetUnixStream;
+//RS     let timeout = jet_std::Duration { ns: timeout };
+//RS     net_err(jet_net_unix_set_timeout(&mut stream, &timeout).unwrap_err())
+//RS }
+//RS 
+//RS // ── TcpListener / TcpStream handle methods ─────────────────────────────────
+//RS 
+//RS fn jet_jit_tcp_listener_accept(listener: i64) -> i64 {
+//RS     let Some(listener) = tcp_listener(listener) else {
+//RS         return net_invalid("tcp accept", "TcpListener");
+//RS     };
+//RS     match jet_net_tcp_accept(&listener) {
+//RS         Ok(s) => result_ok_handle(push_handle(NetHttpHandle::TcpStream(Arc::new(Mutex::new(
+//RS             s,
+//RS         ))))),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_tcp_listener_accept_deadline(listener: i64, deadline: i64) -> i64 {
+//RS     let Some(listener) = tcp_listener(listener) else {
+//RS         return net_invalid("tcp accept", "TcpListener");
+//RS     };
+//RS     let deadline = jet_std::Duration { ns: deadline };
+//RS     match jet_net_tcp_accept_deadline(&listener, &deadline) {
+//RS         Ok(s) => result_ok_handle(push_handle(NetHttpHandle::TcpStream(Arc::new(Mutex::new(
+//RS             s,
+//RS         ))))),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_tcp_listener_local_addr(listener: i64) -> i64 {
+//RS     let Some(listener) = tcp_listener(listener) else {
+//RS         return net_invalid("tcp local address", "TcpListener");
+//RS     };
+//RS     match jet_net_listener_local_socket_addr(&listener) {
+//RS         Ok(a) => result_ok_handle(alloc_string(jet_net_socket_to_string(&a))),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_tcp_stream_read_text(stream: i64, limit: i64) -> i64 {
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("tcp read", "TcpStream");
+//RS     };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     match jet_net_tcp_read_text(&mut guard, limit) {
+//RS         Ok(s) => result_ok_handle(alloc_string(s)),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_tcp_stream_read_text_deadline(stream: i64, limit: i64, deadline: i64) -> i64 {
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("tcp read", "TcpStream");
+//RS     };
+//RS     let deadline = jet_std::Duration { ns: deadline };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     match jet_net_tcp_read_text_deadline(&mut guard, limit, &deadline) {
+//RS         Ok(s) => result_ok_handle(alloc_string(s)),
+//RS         Err(e) => net_err(e),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_tcp_stream_write_all_bytes(stream: i64, data: i64) -> i64 {
+//RS     let bytes = clone_bytes(data);
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("write_all", "TcpStream");
+//RS     };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     map_net_unit(jet_net_tcp_write_all_bytes(&mut guard, &bytes))
+//RS }
+//RS 
+//RS fn jet_jit_tcp_stream_write_all_bytes_deadline(stream: i64, data: i64, deadline: i64) -> i64 {
+//RS     let bytes = clone_bytes(data);
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("write_all", "TcpStream");
+//RS     };
+//RS     let deadline = jet_std::Duration { ns: deadline };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     map_net_unit(jet_net_tcp_write_all_bytes_deadline(
+//RS         &mut guard,
+//RS         &bytes,
+//RS         &deadline,
+//RS     ))
+//RS }
+//RS fn jet_jit_tcp_stream_shutdown(stream: i64, how: i64) -> i64 {
+//RS     let Some(how) = (match how {
+//RS         0 => Some(JetNetShutdown::Read),
+//RS         1 => Some(JetNetShutdown::Write),
+//RS         2 => Some(JetNetShutdown::Both),
+//RS         _ => None,
+//RS     }) else {
+//RS         return net_invalid("tcp shutdown", "NetShutdown");
+//RS     };
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("tcp shutdown", "TcpStream");
+//RS     };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     map_net_unit(jet_net_tcp_shutdown(&mut guard, how))
+//RS }
+//RS 
+//RS fn jet_jit_tcp_stream_close(stream: i64) -> i64 {
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("tcp close", "TcpStream");
+//RS     };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     map_net_unit(jet_net_tcp_close(&mut guard))
+//RS }
+//RS 
+//RS fn jet_jit_tcp_stream_ready(stream: i64, interest: i64, deadline: i64) -> i64 {
+//RS     let Some(interest) = net_ready_interest(interest) else {
+//RS         return net_invalid("tcp ready", "NetReadyInterest");
+//RS     };
+//RS     let Some(stream) = tcp_stream(stream) else {
+//RS         return net_invalid("tcp ready", "TcpStream");
+//RS     };
+//RS     let deadline = jet_std::Duration { ns: deadline };
+//RS     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+//RS     map_net_ok(
+//RS         jet_net_tcp_ready_deadline(&mut guard, interest, &deadline),
+//RS         |ready| push_handle(NetHttpHandle::NetReady(Arc::new(ready))),
+//RS     )
+//RS }
+//RS 
+//RS fn tls_version_bits(version: JetTLSVersion) -> i64 {
+//RS     match version {
+//RS         JetTLSVersion::TLS12 => 0,
+//RS         JetTLSVersion::TLS13 => 1,
+//RS     }
+//RS }
+//RS 
+//RS fn tls_trust_bits(value: i64) -> Option<JetTLSTrust> {
+//RS     let variant = value & 0xff;
+//RS     let payload = value >> 8;
+//RS     match variant {
+//RS         0 => Some(JetTLSTrust::System),
+//RS         1 => tls_root_certificates(payload).map(JetTLSTrust::SystemPlus),
+//RS         2 => tls_root_certificates(payload).map(JetTLSTrust::CustomOnly),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn tls_version_from_bits(value: i64) -> Option<JetTLSVersion> {
+//RS     match value & 0xff {
+//RS         0 => Some(JetTLSVersion::TLS12),
+//RS         1 => Some(JetTLSVersion::TLS13),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn tls_certificate_handle(certificate: JetTLSCertificate) -> i64 {
+//RS     let der = alloc_bytes(&certificate.der);
+//RS     let sha256 = alloc_bytes(&certificate.sha256);
+//RS     let spki_sha256 = alloc_bytes(&certificate.spki_sha256);
+//RS     let dns_names = list_of_strings(certificate.dns_names);
+//RS     let subject = alloc_string(certificate.subject);
+//RS     let issuer = alloc_string(certificate.issuer);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let record = rt.heap.alloc_record(8);
+//RS         let _ = rt.heap.record_set_int(record, 0, der);
+//RS         let _ = rt.heap.record_set_int(record, 1, sha256);
+//RS         let _ = rt.heap.record_set_int(record, 2, spki_sha256);
+//RS         let _ = rt.heap.record_set_int(record, 3, dns_names);
+//RS         let _ = rt
+//RS             .heap
+//RS             .record_set_int(record, 4, certificate.valid_from_unix_ms);
+//RS         let _ = rt
+//RS             .heap
+//RS             .record_set_int(record, 5, certificate.valid_until_unix_ms);
+//RS         let _ = rt.heap.record_set_string(record, 6, subject);
+//RS         let _ = rt.heap.record_set_string(record, 7, issuer);
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS fn tls_peer_identity_handle(identity: JetTLSPeerIdentity) -> i64 {
+//RS     let leaf = tls_certificate_handle(identity.leaf);
+//RS     let chain = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_list());
+//RS     for certificate in identity.certificate_chain {
+//RS         let certificate = tls_certificate_handle(certificate);
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             let _ = rt.heap.list_push_int(chain, certificate);
+//RS         });
+//RS     }
+//RS     let server_name = alloc_string(identity.verified_server_name);
+//RS     let cipher_suite = alloc_string(identity.cipher_suite);
+//RS     let tls_version = tls_version_bits(identity.tls_version);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let version = rt.heap.alloc_record(1);
+//RS         let _ = rt.heap.record_set_int(version, 0, tls_version);
+//RS         let record = rt.heap.alloc_record(5);
+//RS         let _ = rt.heap.record_set_string(record, 0, server_name);
+//RS         let _ = rt.heap.record_set_int(record, 1, leaf);
+//RS         let _ = rt.heap.record_set_int(record, 2, chain);
+//RS         let _ = rt.heap.record_set_string(record, 3, cipher_suite);
+//RS         let _ = rt.heap.record_set_int(record, 4, version);
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS fn tls_take_tcp_stream(stream: i64) -> Result<JetTCPStream, JetNetError> {
+//RS     let Some(NetHttpHandle::TcpStream(stream)) = take_handle(stream) else {
+//RS         return Err(net_invalid_error("tls client", "TcpStream"));
+//RS     };
+//RS     Arc::try_unwrap(stream)
+//RS         .map(|mutex| {
+//RS             mutex
+//RS                 .into_inner()
+//RS                 .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS         })
+//RS         .map_err(|_| net_invalid_error("tls client", "shared TcpStream"))
+//RS }
+//RS 
+//RS fn tls_client_default(
+//RS     stream: JetTCPStream,
+//RS     server_name: &String,
+//RS     deadline: Option<&jet_std::Duration>,
+//RS ) -> Result<JetTLSStream, JetNetError> {
+//RS     let callbacks = (
+//RS         crate::Net::runtime::tls::jet_net_tls_begin_impl,
+//RS         crate::Net::runtime::tls::jet_net_tls_handshake_step_impl,
+//RS         crate::Net::runtime::tls::jet_net_tls_abort_impl,
+//RS         crate::Net::runtime::tls::jet_net_tls_wants_impl,
+//RS         crate::Net::runtime::tls::jet_net_tls_read_ready_impl,
+//RS         crate::Net::runtime::tls::jet_net_tls_read_step_impl,
+//RS         crate::Net::runtime::tls::jet_net_tls_write_step_impl,
+//RS         crate::Net::runtime::tls::jet_net_tls_close_step_impl,
+//RS         crate::Net::runtime::tls::jet_net_tls_close_write_step_impl,
+//RS         crate::Net::runtime::tls::jet_net_tls_peer_identity_impl,
+//RS     );
+//RS     match deadline {
+//RS         Some(deadline) => jet_net_tls_client_scheduler_deadline(
+//RS             stream,
+//RS             server_name,
+//RS             deadline,
+//RS             callbacks.0,
+//RS             callbacks.1,
+//RS             callbacks.2,
+//RS             callbacks.3,
+//RS             callbacks.4,
+//RS             callbacks.5,
+//RS             callbacks.6,
+//RS             callbacks.7,
+//RS             callbacks.8,
+//RS             callbacks.9,
+//RS         ),
+//RS         None => jet_net_tls_client_scheduler(
+//RS             stream,
+//RS             server_name,
+//RS             callbacks.0,
+//RS             callbacks.1,
+//RS             callbacks.2,
+//RS             callbacks.3,
+//RS             callbacks.4,
+//RS             callbacks.5,
+//RS             callbacks.6,
+//RS             callbacks.7,
+//RS             callbacks.8,
+//RS             callbacks.9,
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn tls_client_configured(
+//RS     stream: JetTCPStream,
+//RS     server_name: &String,
+//RS     config: &JetTLSClientConfig,
+//RS     deadline: &jet_std::Duration,
+//RS ) -> Result<JetTLSStream, JetNetError> {
+//RS     jet_net_tls_client_scheduler_config_deadline(
+//RS         stream,
+//RS         server_name,
+//RS         config,
+//RS         deadline,
+//RS         crate::Net::runtime::tls::jet_net_tls_begin_config_impl,
+//RS         crate::Net::runtime::tls::jet_net_tls_handshake_step_impl,
+//RS         crate::Net::runtime::tls::jet_net_tls_abort_impl,
+//RS         crate::Net::runtime::tls::jet_net_tls_wants_impl,
+//RS         crate::Net::runtime::tls::jet_net_tls_read_ready_impl,
+//RS         crate::Net::runtime::tls::jet_net_tls_read_step_impl,
+//RS         crate::Net::runtime::tls::jet_net_tls_write_step_impl,
+//RS         crate::Net::runtime::tls::jet_net_tls_close_step_impl,
+//RS         crate::Net::runtime::tls::jet_net_tls_close_write_step_impl,
+//RS         crate::Net::runtime::tls::jet_net_tls_peer_identity_impl,
+//RS     )
+//RS }
+//RS 
+//RS fn jet_jit_tls_client_config_default() -> i64 {
+//RS     push_handle(NetHttpHandle::TLSClientConfig(
+//RS         jet_tls_client_config_default(),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_tls_root_certificates_from_pem(pem: i64) -> i64 {
+//RS     let pem = clone_bytes(pem);
+//RS     match jet_tls_root_certificates_from_pem(
+//RS         &pem,
+//RS         crate::Net::runtime::tls::jet_net_tls_validate_roots_impl,
+//RS     ) {
+//RS         Ok(roots) => result_ok_handle(push_handle(NetHttpHandle::TLSRootCertificates(roots))),
+//RS         Err(error) => io_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_tls_client_identity_from_pem(cert_chain: i64, private_key: i64) -> i64 {
+//RS     let cert_chain = clone_bytes(cert_chain);
+//RS     let private_key = clone_bytes(private_key);
+//RS     match jet_tls_client_identity_from_pem(
+//RS         &cert_chain,
+//RS         &private_key,
+//RS         crate::Net::runtime::tls::jet_net_tls_validate_identity_impl,
+//RS     ) {
+//RS         Ok(identity) => result_ok_handle(push_handle(NetHttpHandle::TLSClientIdentity(identity))),
+//RS         Err(error) => io_err(error),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_tls_client_config_with_alpn(config: i64, protocols: i64) -> i64 {
+//RS     let Some(config) = tls_client_config(config) else {
+//RS         return io_err(jet_tls_config_error(
+//RS             "ClientConfig.with_alpn",
+//RS             "invalid TLSClientConfig handle".to_string(),
+//RS         ));
+//RS     };
+//RS     let protocols = clone_string_list(protocols);
+//RS     match jet_tls_client_config_with_alpn(config, &protocols) {
+//RS         Ok(config) => result_ok_handle(push_handle(NetHttpHandle::TLSClientConfig(config))),
+//RS         Err(error) => io_err(error),
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 0243 crates/jet-jit/src/net_http_hosts.rs:1-1796
+

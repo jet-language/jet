@@ -1,0 +1,46 @@
+// Execute these ownership-boundary controls on the Wasm target.
+use core.mem.host.kernel_web_abi as abi
+
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:24
+#Test("wasm error clear leaves an absent report") {
+    abi.jet_wasm_error_clear()
+    assert_eq(abi.jet_wasm_error_status(), I32{0})
+    assert_eq(abi.jet_wasm_error_len(), U32{0})
+    assert_eq(abi.jet_wasm_error_ptr(), U32{0})
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:106
+#Test("wasm zero-size allocations use the null carrier") {
+    assert_eq(abi.jet_abi_string_alloc(U32{0}), U32{0})
+    assert_eq(abi.jet_abi_list_i64_alloc(U32{0}), U32{0})
+    assert_eq(abi.jet_abi_list_int_alloc(U32{0}), U32{0})
+    assert_eq(abi.jet_abi_list_string_alloc(U32{0}), U32{0})
+    assert_eq(abi.jet_abi_map_string_int_alloc(U32{0}), U32{0})
+    abi.jet_abi_string_free(U32{0}, U32{0})
+    abi.jet_abi_list_i64_free(U32{0}, U32{0})
+    abi.jet_abi_list_int_free(U32{0}, U32{0})
+    abi.jet_abi_list_string_free(U32{0}, U32{0})
+    abi.jet_abi_map_string_int_free(U32{0}, U32{0})
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:106
+// Rust: crates/jet-codegen/src/Prelude/Core/WebAbi.rs:115
+#Test("wasm ownership registry retains simultaneously live spans") {
+    first :: abi.jet_abi_string_alloc(U32{19})
+    second :: abi.jet_abi_string_alloc(U32{19})
+    assert(first != U32{0})
+    assert(second != U32{0})
+    assert(first != second)
+    abi.jet_abi_string_free(second, U32{19})
+    abi.jet_abi_string_free(first, U32{19})
+    words :: abi.jet_abi_list_i64_alloc(U32{7})
+    assert(words != U32{0})
+    assert_eq(words % U32{8}, U32{0})
+    abi.jet_abi_list_i64_free(words, U32{7})
+    ints :: abi.jet_abi_list_int_alloc(U32{23})
+    strings :: abi.jet_abi_list_string_alloc(U32{23})
+    map :: abi.jet_abi_map_string_int_alloc(U32{23})
+    assert(ints != U32{0} && strings != U32{0} && map != U32{0})
+    assert(ints != strings && strings != map && ints != map)
+    abi.jet_abi_map_string_int_free(map, U32{23})
+    abi.jet_abi_list_string_free(strings, U32{23})
+    abi.jet_abi_list_int_free(ints, U32{23})
+}

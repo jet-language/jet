@@ -721,7 +721,7 @@ fn run() {
         .args(["build", "--profile=release", "main.jet"])
         .current_dir(&scratch.path)
         .env("JET_STORE_DIR", scratch.join("store"))
-        .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+        .env("JET_STORE_DIR", scratch.join("run-cache"))
         .env("NO_COLOR", "1")
         .output()
         .expect("run typed empty-list release build");
@@ -748,7 +748,7 @@ fn run() {
         .args(["run", "main.jet"])
         .current_dir(&scratch.path)
         .env("JET_STORE_DIR", scratch.join("store"))
-        .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+        .env("JET_STORE_DIR", scratch.join("run-cache"))
         .env("NO_COLOR", "1")
         .output()
         .expect("run typed empty-list default run");
@@ -776,7 +776,7 @@ fn two_builds_from_two_paths_are_byte_identical() {
             .args(["build", "main.jet"])
             .current_dir(&scratch.path)
             .env("JET_STORE_DIR", scratch.join("store"))
-            .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+            .env("JET_STORE_DIR", scratch.join("run-cache"))
             .env("NO_COLOR", "1")
             .output()
             .expect("run determinism build")
@@ -823,7 +823,7 @@ fn dev_build_restores_a_deleted_executable_from_its_cached_image() {
             .args(["build", "main.jet"])
             .current_dir(&scratch.path)
             .env("JET_STORE_DIR", scratch.join("store"))
-            .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+            .env("JET_STORE_DIR", scratch.join("run-cache"))
             .env("NO_COLOR", "1")
             .output()
             .expect("run jet build");
@@ -867,7 +867,7 @@ fn dev_build_from_stored_functions_is_byte_identical() {
             .args(["build", "main.jet"])
             .current_dir(&scratch.path)
             .env("JET_STORE_DIR", &store)
-            .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+            .env("JET_STORE_DIR", scratch.join("run-cache"))
             .env("NO_COLOR", "1")
             .output()
             .expect("run jet build");
@@ -912,7 +912,7 @@ fn no_change_build_replays_diagnostics_and_skips_every_check() {
             .args(["build", "main.jet"])
             .current_dir(&scratch.path)
             .env("JET_STORE_DIR", scratch.join(store))
-            .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+            .env("JET_STORE_DIR", scratch.join("run-cache"))
             .env("NO_COLOR", "1");
         if json {
             command.arg("--json");
@@ -1267,27 +1267,25 @@ fn body_edit_rechecks_only_the_edited_item() {
             .collect::<Vec<_>>();
         (String::from_utf8_lossy(&output.stderr).into_owned(), rows)
     };
-    // One row per checked module: `...; items: N reused, M checked [names], ...`.
-    let items = |rows: &[(String, String)], module: &str| {
+    // One row per checked package aggregates all of its member-file items.
+    let items = |rows: &[(String, String)]| {
         rows.iter()
-            .find(|(subject, _)| subject.ends_with(module))
+            .find(|(subject, _)| subject == "pkg:.")
             .and_then(|(_, why)| why.split_once("items: ").map(|(_, items)| items.to_string()))
-            .unwrap_or_else(|| panic!("no item row for {module}: {rows:?}"))
+            .unwrap_or_else(|| panic!("no item row for the root package: {rows:?}"))
     };
     let store = root.join("store");
 
     write(&shapes, &source(""));
     let (_, first) = check(&store);
-    assert!(items(&first, "shapes.jet").starts_with("0 reused, 4 checked"), "{first:?}");
-    assert!(items(&first, "lib.jet").starts_with("0 reused, 2 checked"), "{first:?}");
+    assert!(items(&first).starts_with("0 reused, 6 checked"), "{first:?}");
 
     write(&shapes, &source(" * 3"));
     let (warm, second) = check(&store);
     assert!(
-        items(&second, "shapes.jet").starts_with("3 reused, 1 checked [fn:area]"),
+        items(&second).starts_with("5 reused, 1 checked [fn:area]"),
         "{second:?}"
     );
-    assert!(items(&second, "lib.jet").starts_with("2 reused, 0 checked"), "{second:?}");
     let (fresh, _) = check(&root.join("fresh-store"));
     assert!(warm.contains("L0104"), "{warm}");
     assert_eq!(warm, fresh, "reused items must not change the diagnostics");
@@ -2130,7 +2128,7 @@ fn run() {
             .current_dir(&scratch.path)
             .env("JET_STORE_DIR", &store)
             .env("JET_STORE_RESERVE_BYTES", "0")
-            .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+            .env("JET_STORE_DIR", scratch.join("run-cache"))
             .env("NO_COLOR", "1")
             .spawn()
             .expect("spawn concurrent build")
@@ -3998,10 +3996,8 @@ fn build_entry_is_absent_from_the_runtime_program() {
     let _ = fs::remove_dir_all(&root);
 }
 
-/// I9: one program, one answer, on AOT, the resident Cranelift JIT, and the
-/// interpreter. The JIT arm also asserts the function actually compiled, so a
-/// silent deopt cannot pass this test by printing the right line from the wrong
-/// tier.
+/// I9: one program, one answer, on AOT, the default `jet run`, and the
+/// interpreter.
 #[test]
 fn build_entry_program_runs_the_same_on_every_tier() {
 
@@ -4038,31 +4034,19 @@ fn build_entry_program_runs_the_same_on_every_tier() {
     };
     assert_eq!(interpreted, expected, "interpreter disagreed");
 
-    jet_jit::reset_jit_trace_for_test();
-    let mut backend = jet_jit::CraneliftBackend::new();
-    let jit = jet_jit::with_program_args(&[shown.clone()], || {
-        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
-            jet::Interpreter::RunOutcome::Ran {
-                stdout,
-                stderr,
-                exit_code,
-            } => (stdout, stderr, exit_code),
-            jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-                panic!("resident JIT rejected the build-entry program: {diagnostics:?}")
-            }
+    let default_run = match common::dev_run(&shown, false, false) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+            panic!("default `jet run` rejected the build-entry program: {diagnostics:?}")
         }
-    });
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "the build-entry program must execute in the resident JIT, not from a quieter tier"
-    );
-    assert!(
-        !jet_jit::fallback_invoked_for_test(),
-        "the build-entry program must not reach a forbidden fallback"
-    );
+    };
     assert_eq!(
-        jit, interpreted,
-        "resident JIT drifted from the interpreter"
+        default_run, interpreted,
+        "default `jet run` drifted from the interpreter"
     );
 
     if common::have_rustc() {

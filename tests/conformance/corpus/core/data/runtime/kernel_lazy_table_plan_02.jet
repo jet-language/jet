@@ -1,0 +1,65 @@
+use core.data.runtime.kernel_lazy_table_plan_02.[JetTableBatch, JetTableBatchState, JetTableBatchError, JetTableBatchOffer, JetTableBatchStatus]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2404
+#Test("table_batch_rejects_zero_bounds") {
+    assert(JetTableBatchState.new(0) == Err(JetTableBatchError.ZeroCapacity))
+    assert(JetTableBatchState.with_limits(1, Val(0), None) == Err(JetTableBatchError.ZeroBatchRows))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2500
+#Test("table_batch_backpressure_consumes_no_rows_or_sequences") {
+    state := JetTableBatchState.new(1).unwrap()
+    assert(state.offer_rows(3) == JetTableBatchOffer.Accepted(JetTableBatch.new(0, 3)))
+    assert(state.status() == JetTableBatchStatus.Backpressure)
+    assert(state.offer_rows(7) == JetTableBatchOffer.Backpressure)
+    snapshot :: state.snapshot()
+    assert(snapshot.accepted_rows == 3 && snapshot.next_sequence == 1 && snapshot.backpressure_events == 1)
+    assert(state.pop() == Val(JetTableBatch.new(0, 3)))
+    assert(state.offer_rows(2) == JetTableBatchOffer.Accepted(JetTableBatch.new(1, 2)))
+    state.finish()
+    assert(state.status() == JetTableBatchStatus.Closed)
+    assert(state.pop() == Val(JetTableBatch.new(1, 2)))
+    assert(state.status() == JetTableBatchStatus.Drained)
+    assert(state.emitted_rows() == 5)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2500
+#Test("table_batch_bounds_close_after_exact_truncation") {
+    state := JetTableBatchState.with_limits(4, Val(5), Val(7)).unwrap()
+    assert(state.offer_rows(4) == JetTableBatchOffer.Accepted(JetTableBatch.new(0, 4)))
+    expected :: JetTableBatch{sequence: 1, rows: 3, truncated: true}
+    assert(state.offer_rows(9) == JetTableBatchOffer.Truncated(batch: Val(expected), dropped_rows: 6))
+    assert(state.accepted_rows() == 7 && state.dropped_rows() == 6 && state.is_closed())
+    assert(state.status() == JetTableBatchStatus.Truncated)
+    assert(state.offer_rows(1) == JetTableBatchOffer.Closed)
+    _ :: state.pop()
+    assert(state.pop() == Val(expected))
+    assert(state.status() == JetTableBatchStatus.Drained)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2539
+#Test("table_batch_zero_offer_and_zero_total_bound") {
+    state := JetTableBatchState.new(2).unwrap()
+    assert(state.offer_rows(0) == JetTableBatchOffer.Truncated(batch: None, dropped_rows: 0))
+    assert(!state.is_closed() && state.accepted_rows() == 0 && state.snapshot().next_sequence == 0)
+    bounded := JetTableBatchState.with_limits(2, None, Val(0)).unwrap()
+    assert(bounded.offer_rows(8) == JetTableBatchOffer.Truncated(batch: None, dropped_rows: 8))
+    assert(bounded.is_closed() && bounded.status() == JetTableBatchStatus.Drained)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2550
+#Test("table_batch_checked_overflow_is_transactional") {
+    state := JetTableBatchState.new(3).unwrap()
+    assert(state.offer_rows(U128.MAX) == JetTableBatchOffer.Accepted(JetTableBatch.new(0, U128.MAX)))
+    before :: state.snapshot()
+    assert(state.offer_rows(1) == JetTableBatchOffer.ArithmeticOverflow)
+    assert(state.snapshot() == before)
+    assert(state.pop() == Val(JetTableBatch.new(0, U128.MAX)))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/LazyTablePlan.rs:2609
+#Test("table_batch_cancellation_terminal_and_clears_queue") {
+    state := JetTableBatchState.new(2).unwrap()
+    _ :: state.offer_rows(4)
+    state.cancel("   ")
+    state.cancel("second reason")
+    state.close()
+    assert(state.status() == JetTableBatchStatus.Cancelled && state.queued_batches() == 0)
+    assert(state.pop() == None && state.offer_rows(1) == JetTableBatchOffer.Cancelled)
+    assert(state.accepted_rows() == 4 && state.emitted_rows() == 0)
+}

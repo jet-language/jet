@@ -1,0 +1,20 @@
+use core.prelude.runtime.kernel_option.[JetOptionPacked, jet_option_lift2, jet_option_pack_i64]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Option.rs:65
+#Test("option lift factory is lazy when either argument absent") {
+    calls := 0
+    a :: JetOptionPacked{present: false, value: 2}
+    b :: JetOptionPacked{present: true, value: 3}
+    result :: jet_option_lift2(a, b, fn() { -1 }, value -> value, fn() { calls += 1; (left, right) -> left + right })
+    assert(result == -1)
+    assert(calls == 0)
+    result :: jet_option_lift2(JetOptionPacked{present: true, value: 2}, JetOptionPacked{present: true, value: 3}, fn() { -1 }, value -> value, fn() { calls += 1; (left, right) -> left + right })
+    assert(result == 5)
+    assert(calls == 1)
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Option.rs:57
+#Test("option packed integer uses wrapping offset and ignores absent bits") {
+    assert(jet_option_pack_i64(false, I64{9}) == I64{0})
+    assert(jet_option_pack_i64(true, I64{9}) == I64{10})
+    assert(jet_option_pack_i64(true, I64{9223372036854775807}) == I64{-9223372036854775807} - I64{1})
+}

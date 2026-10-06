@@ -79,17 +79,21 @@ pub enum JetDriverCompileTarget {
 }
 
 // One Core library source module the host embeds, mirroring a Rust
-// `CoreModuleExports::CORE_SOURCE_MODULES` row or a compiler-private part from
-// `CoreSourceParts` (both generated from Prelude/Core.jet). `path` is the
-// repository path (`Core/perf/perf.jet`); `owner` names the public module that
-// schedules a private part and is "" for a public row; `owned_members` lists
-// the public functions that have crossed the Core cutover.
+// `CoreModuleExports::CORE_SOURCE_MODULES` row, a compiler-private part from
+// `CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS`, or a runtime unit from
+// `CoreSourceParts::CORE_RUNTIME_PARTS` (`runtime`). `path` is the repository
+// path (`Core/perf/perf.jet`); `owner` names the public module that
+// schedules a private part and is "" otherwise; `owned_members` lists the
+// public functions that have crossed the Core cutover. A runtime unit
+// (`core.<area>.runtime.<unit>`) is importable only by Core sources, joins
+// the load closure only when one names it, and keeps every item.
 pub struct JetDriverCoreSource {
     pub module_name: String
     pub alias: String
     pub path: String
     pub owner: String
     pub owned_members: [String]
+    pub runtime: Bool
     pub source: String
 }
 
@@ -120,11 +124,13 @@ pub struct JetDriverCompileRequest {
 // kinds by the lowercase hex SHA-256 of their bytes. The host verifies the
 // bytes and schema on both calls; a missing or unreadable record is `None`.
 // `stamp` reports a file's (size, mtime, ctime, inode) stamp so an unchanged
-// file can skip rehashing; a stamp never decides freshness.
+// file can skip rehashing; a stamp never decides freshness. The host reads and
+// writes the store's files, so each call declares that row (an undeclared
+// dynamic dispatch is the maximal row, D-EFF2).
 pub trait JetDriverRecordStore {
-    fn record(self, schema: String, key: String) -> [U8]?
-    fn put_record(self, schema: String, key: String, bytes: [U8]) -> Bool
-    fn stamp(self, path: String) -> String?
+    fn record(self, schema: String, key: String) -[FS]> [U8]?
+    fn put_record(self, schema: String, key: String, bytes: [U8]) -[FS]> Bool
+    fn stamp(self, path: String) -[FS]> String?
 }
 
 struct JetDriverSourceUnit {

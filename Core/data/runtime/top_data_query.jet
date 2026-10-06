@@ -1,0 +1,217 @@
+use core.db.runtime.kernel_sql_query.[JetSQLQuery, JetSQLSelectItem, JetSQLAggregate, JetSQLValue,
+    parse_sql_query, validate_sql_query_schema, execute_sql_rows, select_sql_indices]
+use core.data.runtime.kernel_lazy_table_plan.[JetTableTypeId, JetTableColumn, JetTableColumnId,
+    JetTableSchema, JetTableSource, JetTablePlan, JetTableCallable, JetTableOperation]
+use core.data.[DataSchema, DataFormat]
+use core.encoding.runtime.std_data_tree.[FieldError, DataTree, render_datatree_json, datatree_get]
+use core.encoding.runtime.std_data_tree.jet_datatree_encode_i64
+use std.fs.File
+use std.io.Read
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:1-14
+// D-SQL-SURFACE1=C: CSV and in-memory doors use the sole canonical SQL kernel.
+// Rust's JetAnalyticsQuery alias maps directly to canonical JetSQLQuery, not a second carrier.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:16
+fn jet_analytics_query_error(message: String) -> [FieldError] { FieldError.one(message) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:22
+JET_DATA_QUERY_MAX_BYTES :: prep { U64{512 * 1024 * 1024} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:24
+fn jet_data_query_read(path: &String) -> Result<String, [FieldError]> {
+    // GATE #4565: kernel primitive
+    #Unsafe("read a file through a bounded native reader and close its owned handle on every error or return") {
+        file :: File.open(OSPath.from(path)).map_err(fn(error) { jet_analytics_query_error("could not read `{path}`: {error}") })?
+        size :: file.metadata().map_err(fn(error) { jet_analytics_query_error("could not read `{path}`: {error}") })?.len()
+        if size > JET_DATA_QUERY_MAX_BYTES { return Err(jet_analytics_query_error("could not read `{path}`: input exceeds the {JET_DATA_QUERY_MAX_BYTES}-byte query bound")) }
+        bytes := [U8]{}
+        file.take(JET_DATA_QUERY_MAX_BYTES.saturating_add(1)).read_to_end(&bytes)
+            .map_err(fn(error) { jet_analytics_query_error("could not read `{path}`: {error}") })?
+        if (bytes.len() as U64) > JET_DATA_QUERY_MAX_BYTES { return Err(jet_analytics_query_error("could not read `{path}`: input grew beyond the {JET_DATA_QUERY_MAX_BYTES}-byte query bound")) }
+        String.from_utf8(^bytes).map_err(fn(error) { jet_analytics_query_error("could not read `{path}`: {error}") })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:54
+fn jet_data_query_validate_fields(fields: &[String], sql: &String) -> Result<(), [FieldError]> {
+    query :: jet_analytics_query_spec(sql).map_err(jet_analytics_query_error)?
+    validate_sql_query_schema(query, fn(field) { fields.iter().any(fn(known) { known == field }) }, "analytics query").map_err(jet_analytics_query_error)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:68
+fn jet_analytics_query_spec(sql: String) -> JetSQLQuery Err! { parse_sql_query(sql) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:71
+fn jet_analytics_type_id(type_name: String) -> JetTableTypeId {
+    match type_name {
+        "bool" -> JetTableTypeId.boolean()
+        "int" -> JetTableTypeId.integer()
+        "float" -> JetTableTypeId.float()
+        "text" -> JetTableTypeId.string()
+        "Any" -> JetTableTypeId.any()
+        other -> JetTableTypeId.new(other)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:83
+fn jet_analytics_schema(rows: &[DataTree]) -> JetTableSchema {
+    tree :: DataTree.Array(rows.to_vec())
+    inferred :: DataSchema.infer(tree, DataFormat.JSON)
+    columns :: inferred.columns.into_iter().map(fn(column) { JetTableColumn.new(column.name, jet_analytics_type_id(column.type_name)) }).collect()
+    JetTableSchema.new(JetTableTypeId.new("DataTree"), ^columns)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:94
+fn jet_analytics_literal_type(value: String) -> JetTableTypeId {
+    value := value.trim_matches('\'').trim_matches('"') // #4303
+    if value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("false") { JetTableTypeId.boolean() }
+    else if value.parse<I64>().is_ok() { JetTableTypeId.integer() }
+    else if value.parse<F64>().is_ok() { JetTableTypeId.float() }
+    else { JetTableTypeId.string() }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:106
+fn jet_analytics_result_schema(input: &JetTableSchema, spec: &JetSQLQuery) -> JetTableSchema {
+    row_type :: JetTableTypeId.new("{input.row_type.as_str()}::sql")
+    columns :: spec.projection.iter().flat_map(fn(item) {
+        match item {
+            JetSQLSelectItem.Wildcard -> input.columns.clone()
+            .Field(field, alias) -> {
+                name :: alias.clone().unwrap_or_else(fn() { field.clone() })
+                ty :: input.column_named(field).map(fn(column) { column.ty.clone() }).unwrap_or_else(JetTableTypeId.any)
+                [JetTableColumn.new(^name, ^ty)]
+            }
+            .Aggregate(function, field, alias) -> {
+                name :: alias.clone().unwrap_or_else(fn() {
+                    match field {
+                        Val(field) -> "{function.as_str()}_{field}"
+                        None -> function.as_str()
+                    }
+                })
+                ty :: match function {
+                    JetSQLAggregate.Count -> JetTableTypeId.integer()
+                    JetSQLAggregate.Avg -> JetTableTypeId.float()
+                    JetSQLAggregate.Sum -> field.as_ref().and_then(fn(field) { input.column_named(field) }).map(fn(column) { column.ty.clone() }).unwrap_or_else(JetTableTypeId.float)
+                    JetSQLAggregate.Min | JetSQLAggregate.Max -> field.as_ref().and_then(fn(field) { input.column_named(field) }).map(fn(column) { column.ty.clone() }).unwrap_or_else(JetTableTypeId.any)
+                }
+                [JetTableColumn.new(^name, ^ty)]
+            }
+        }
+    }).collect()
+    JetTableSchema.new(^row_type, ^columns)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:155
+fn jet_analytics_select_columns(input: &JetTableSchema, spec: &JetSQLQuery) -> [JetTableColumnId]? {
+    if spec.has_aggregate() || !spec.group_by.is_empty() { return None }
+    spec.projection.iter().map(fn(item) {
+        match item {
+            .Field(field, None) -> input.column_named(field).map(fn(column) { column.id.clone() })
+            JetSQLSelectItem.Wildcard | .Field(_, Val(_)) | .Aggregate(_, _, _) -> None
+        }
+    }).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:178
+fn jet_analytics_plan(rows: &[DataTree], spec: &JetSQLQuery) -> JetTablePlan Err! {
+    schema :: jet_analytics_schema(rows)
+    validate_sql_query_schema(spec, fn(field) { schema.column_named(field).is_some() }, "analytics query")?
+    source :: JetTableSource.new(spec.source.clone(), schema.clone()).with_rows(rows.len() as U128)
+    plan := JetTablePlan.from_source("data.query", ^source)
+    current_schema := schema.clone()
+    if spec.filter == Val((field, operator, value)) {
+        literal_type :: jet_analytics_literal_type(value)
+        callable :: JetTableCallable.new("query.where:{field}:{operator}", current_schema.row_type.clone(), JetTableTypeId.boolean())
+        node :: plan.append_filter(current_schema.clone(), ^callable).map_err(fn(error) { "analytics query plan rejected WHERE: {error}" })?
+        plan.nodes[node.index()].note = "field={field};operator={operator};value_type={literal_type.as_str()}"
+    }
+    if spec.has_aggregate() || !spec.group_by.is_empty() {
+        result_schema :: jet_analytics_result_schema(&current_schema, spec)
+        input :: plan.output
+        callable :: JetTableCallable.new("query.group:{spec.group_by.len()}", current_schema.row_type.clone(), result_schema.row_type.clone())
+        node :: plan.append(JetTableOperation.Group, [input], result_schema.clone(), Val(^callable)).map_err(fn(error) { "analytics query plan rejected GROUP BY: {error}" })?
+        projection :: spec.projection.iter().map(JetSQLSelectItem.output_name).collect().join(",")
+        plan.nodes[node.index()].note = "keys={spec.group_by.len()};projection={projection}"
+        current_schema = ^result_schema
+    } else if !spec.is_identity_projection() {
+        result_schema :: jet_analytics_result_schema(&current_schema, spec)
+        if jet_analytics_select_columns(&current_schema, spec) == Val(columns) {
+            node :: plan.append_select(result_schema.clone(), ^columns).map_err(fn(error) { "analytics query plan rejected SELECT: {error}" })?
+            plan.nodes[node.index()].note = "explicit source-column projection"
+        } else {
+            projection :: spec.projection.iter().map(JetSQLSelectItem.output_name).collect().join(",")
+            callable :: JetTableCallable.new("query.project:{projection}", current_schema.row_type.clone(), result_schema.row_type.clone())
+            node :: plan.append_map(result_schema.clone(), ^callable).map_err(fn(error) { "analytics query plan rejected SELECT: {error}" })?
+            plan.nodes[node.index()].note = "aliased source-column projection"
+        }
+        current_schema = ^result_schema
+    }
+    if spec.order == Val((field, descending)) {
+        direction :: if descending { "desc" } else { "asc" }
+        callable :: JetTableCallable.new("query.order:{field}:{direction}", current_schema.row_type.clone(), JetTableTypeId.string())
+        node :: plan.append_sort(current_schema.clone(), ^callable).map_err(fn(error) { "analytics query plan rejected ORDER BY: {error}" })?
+        plan.nodes[node.index()].note = "field={field};direction={direction}"
+    }
+    if spec.limit == Val(limit) {
+        node :: plan.append_limit(^current_schema, limit as U128).map_err(fn(error) { "analytics query plan rejected LIMIT: {error}" })?
+        plan.nodes[node.index()].note = "rows={limit}"
+    }
+    plan.validate().map_err(fn(error) { "analytics query plan rejected: {error}" })?
+    Ok(^plan)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:283
+fn jet_analytics_cell_text(cell: &DataTree) -> String {
+    match cell {
+        .Text(value) -> value.clone()
+        .Int(value) -> value.to_string()
+        .Float(value) -> value.to_string()
+        .Bool(value) -> value.to_string()
+        DataTree.Null -> ""
+        other -> render_datatree_json(other, false, 0)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:293
+fn jet_analytics_sql_value(value: &DataTree) -> JetSQLValue {
+    match value {
+        DataTree.Null -> JetSQLValue.Null
+        .Bool(value) -> JetSQLValue.Bool(*value)
+        .Int(value) -> JetSQLValue.Int(I64{*value})
+        .Float(value) -> JetSQLValue.Float(*value)
+        .Number(value) -> JetSQLValue.literal(value)
+        .TypedText(value) | .Text(value) -> JetSQLValue.Text(value.clone())
+        other -> JetSQLValue.Text(render_datatree_json(other, false, 0))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:307
+fn jet_analytics_sql_tree(value: JetSQLValue) -> DataTree {
+    match value {
+        JetSQLValue.Null -> DataTree.Null
+        .Bool(value) -> DataTree.Bool(value)
+        .Int(value) -> jet_datatree_encode_i64(value)
+        .Float(value) -> DataTree.Float(value)
+        .Text(value) -> DataTree.Text(^value)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:317
+fn jet_data_query_execute_trees(rows: &[DataTree], spec: &JetSQLQuery) -> [DataTree] Err! {
+    fields :: jet_analytics_schema(rows).columns.into_iter().map(fn(column) { column.name }).collect()
+    result :: execute_sql_rows(^fields, rows.len() as U64, spec, fn(index, field) {
+        datatree_get(rows[Int.from_u64(index)], field).map(jet_analytics_sql_value)
+    })?
+    Ok(result.into_iter().map(fn(row) {
+        DataTree.Object(row.fields.into_iter().map(fn((name, value)) { (^name, jet_analytics_sql_tree(^value)) }).collect())
+    }).collect())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:350
+fn jet_data_query_indices(rows: &[DataTree], sql: &String) -> Result<[USize], [FieldError]> {
+    spec :: jet_analytics_query_spec(sql).map_err(jet_analytics_query_error)?
+    plan :: jet_analytics_plan(rows, &spec).map_err(jet_analytics_query_error)?
+    _ :: plan.inspect().map_err(fn(error) { jet_analytics_query_error("analytics query plan inspection rejected: {error}") })?
+    if spec.needs_projection_execution() { return Err(jet_analytics_query_error("SQL projection/grouping changes the row shape; use the DataTree query result")) }
+    selected :: select_sql_indices(rows.len() as U64, spec, fn(index, field) {
+        datatree_get(rows[Int.from_u64(index)], field).map(jet_analytics_cell_text)
+    })
+    // These positions originate in the selected-width input length and remain representable.
+    Ok(selected.into_iter().map(fn(index) { index as USize }).collect())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:375
+fn jet_data_query_trees(rows: &[DataTree], sql: &String) -> Result<[DataTree], [FieldError]> {
+    spec :: jet_analytics_query_spec(sql).map_err(jet_analytics_query_error)?
+    if spec.needs_projection_execution() {
+        plan :: jet_analytics_plan(rows, &spec).map_err(jet_analytics_query_error)?
+        _ :: plan.inspect().map_err(fn(error) { jet_analytics_query_error("analytics query plan inspection rejected: {error}") })?
+        return jet_data_query_execute_trees(rows, &spec).map_err(jet_analytics_query_error)
+    }
+    selected :: jet_data_query_indices(rows, sql)?
+    Ok(selected.into_iter().map(fn(index) { rows[index].clone() }).collect())
+}

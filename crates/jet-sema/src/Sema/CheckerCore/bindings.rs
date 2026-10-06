@@ -22,15 +22,17 @@ fn canonical_fragment_name(
     owner: usize,
     name: &str,
     modules: &[crate::Sema::ModuleState],
-    source_paths: &HashMap<(usize, String), String>,
+    source_paths: &jet_foundation::Names::NameLedger,
     struct_identities: &HashMap<(usize, String), String>,
     known_identities: &HashSet<String>,
 ) -> Option<String> {
     if known_identities.contains(name) {
         return Some(name.to_string());
     }
-    if let Some(identity) = source_paths.get(&(owner, name.to_string())) {
-        return Some(identity.clone());
+    if let Some(identity) = source_paths.canonical_source_path(owner, name) {
+        if known_identities.contains(&identity) {
+            return Some(identity);
+        }
     }
     if let Some((namespace, leaf)) = name.rsplit_once('.') {
         let state = modules.get(owner)?;
@@ -65,7 +67,7 @@ fn canonical_fragment_type(
     ty: &Type,
     owner: usize,
     modules: &[crate::Sema::ModuleState],
-    source_paths: &HashMap<(usize, String), String>,
+    source_paths: &jet_foundation::Names::NameLedger,
     struct_identities: &HashMap<(usize, String), String>,
     known_identities: &HashSet<String>,
 ) -> Type {
@@ -286,7 +288,7 @@ fn fragment_signature(
     function: &crate::AST::Func,
     owner: usize,
     modules: &[crate::Sema::ModuleState],
-    source_paths: &HashMap<(usize, String), String>,
+    source_paths: &jet_foundation::Names::NameLedger,
     struct_identities: &HashMap<(usize, String), String>,
     known_identities: &HashSet<String>,
 ) -> crate::Comptime::MirBridge::MirFragmentCoreSourceSignature {
@@ -327,14 +329,15 @@ fn fragment_signature(
 type FragmentImportSignatures =
     HashMap<(String, String), crate::Comptime::MirBridge::MirFragmentCoreSourceSignature>;
 
-/// The user-module call surface of module `owner` for a comptime fragment:
-/// its `use` aliases and member-imported functions keyed to the loaded source
-/// rows (a user module's row key is its loader alias), and the declared
-/// signatures of those callees. Core modules keep their own Core route.
+/// The module-import call surface of module `owner` for a comptime fragment:
+/// its `use` aliases and member-imported functions keyed to the loaded
+/// non-Core-row targets (user modules and Core runtime units, keyed by loader
+/// alias), and the declared signatures of those callees. Public Core modules
+/// keep their own Core route.
 fn fragment_module_imports(
     owner: usize,
     modules: &[crate::Sema::ModuleState],
-    source_paths: &HashMap<(usize, String), String>,
+    source_paths: &jet_foundation::Names::NameLedger,
     struct_identities: &HashMap<(usize, String), String>,
     known_identities: &HashSet<String>,
 ) -> (
@@ -405,7 +408,7 @@ fn fragment_module_imports(
 fn fragment_module_nominals(
     owner: usize,
     modules: &[crate::Sema::ModuleState],
-    source_paths: &HashMap<(usize, String), String>,
+    source_paths: &jet_foundation::Names::NameLedger,
     struct_identities: &HashMap<(usize, String), String>,
     known_identities: &HashSet<String>,
 ) -> HashMap<String, String> {
@@ -413,9 +416,9 @@ fn fragment_module_nominals(
         .iter()
         .map(|identity| (identity.clone(), identity.clone()))
         .collect::<HashMap<_, _>>();
-    for ((module, source), path) in source_paths {
-        if *module == owner {
-            identities.insert(source.clone(), path.clone());
+    for (source, path) in source_paths.canonical_paths(owner) {
+        if known_identities.contains(&path) {
+            identities.insert(source, path);
         }
     }
     for ((module, leaf), identity) in struct_identities {
@@ -632,14 +635,9 @@ pub(crate) fn checked_comptime_nominals_for_context(
         }
     }
 
-    let mut source_paths = HashMap::new();
-    for owner in 0..modules.len() {
-        for (source, path) in name_ledger.canonical_paths(owner) {
-            if known_identities.contains(&path) {
-                source_paths.insert((owner, source), path);
-            }
-        }
-    }
+    // Resolve source keys on demand, rather than enumerate every module's
+    // package aliases anew for each isolated comptime context.
+    let source_paths = name_ledger;
 
     let mut queue = VecDeque::new();
     let mut queued = HashSet::new();
@@ -669,7 +667,7 @@ pub(crate) fn checked_comptime_nominals_for_context(
     // nominals are visible here by bare name. Registration evaluates
     // compile-time items before imports resolve, so read the loader's
     // namespace instead of this module's import table.
-    let siblings = name_ledger.namespace_siblings(module_idx);
+    let siblings: Vec<_> = name_ledger.namespace_siblings(module_idx).collect();
     for &sibling in &siblings {
         if queued.insert(sibling) {
             queue.push_back(sibling);
@@ -778,22 +776,24 @@ pub(crate) fn checked_comptime_nominals_for_context(
                 ),
             );
         }
+        // A Core module and a user file module both reach other loaded
+        // modules through ordinary imports (a Core source names its runtime
+        // units that way), so every row carries its module-import surface.
+        let (module_imports, imported_functions, import_signatures) = fragment_module_imports(
+            target,
+            modules,
+            &source_paths,
+            &struct_identities,
+            &known_identities,
+        );
+        body_module.module_imports = module_imports;
+        body_module.imported_functions = imported_functions;
+        body_module.import_signatures = import_signatures;
         // A Core row is keyed by its Core module path; a user file module's
         // row by its loader alias, the name its import aliases resolve to.
         let row_key = match source_module {
             Some(source) => source.module.to_string(),
             None => {
-                let (module_imports, imported_functions, import_signatures) =
-                    fragment_module_imports(
-                        target,
-                        modules,
-                        &source_paths,
-                        &struct_identities,
-                        &known_identities,
-                    );
-                body_module.module_imports = module_imports;
-                body_module.imported_functions = imported_functions;
-                body_module.import_signatures = import_signatures;
                 body_module.nominal_identities = fragment_module_nominals(
                     target,
                     modules,
@@ -1797,10 +1797,14 @@ impl<'a> Checker<'a> {
         };
         self.borrow_ctx = saved_borrow_ctx;
         let arena_alloc_source = arena_alloc_source.or_else(|| self.arena_alloc_source(&b.init));
+        // D-MEM-COPYSEM1=A (`infer_checked`'s field-read rule): a borrowed
+        // window is not a value to duplicate. `rec.view_field` bound here IS
+        // the view; an `Expr::Copy` would materialize an owned value under a
+        // binding typed as the view and erase its owner relation (#4392).
         if implicit_field_read
-            && it
-                .as_ref()
-                .is_some_and(|ty| self.is_cloneable_type(ty))
+            && it.as_ref().is_some_and(|ty| {
+                self.is_cloneable_type(ty) && !crate::Sema::CheckerCore::is_core_view_generic(ty)
+            })
         {
             let span = b.init.span();
             let inner = std::mem::replace(&mut b.init, Expr::Absent(span));

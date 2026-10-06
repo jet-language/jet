@@ -347,7 +347,7 @@ function executeMode(caseRoot, entry, stage, mode, operations, scratch) {
   const canonicalPath = join(modeScratch, "canonical-pass.jsonl");
   const environment = {
     ...process.env,
-    JET_RUN_CACHE_DIR: join(modeScratch, "run-cache"),
+    JET_STORE_DIR: join(modeScratch, "run-cache"),
     JET_DEV_ORACLE_CACHE_DIR: join(modeScratch, "oracle-cache"),
     JET_TEST_SCRATCH_DIR: scratch,
     JET_ADAPTER_MODE: mode,

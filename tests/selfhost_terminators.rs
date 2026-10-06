@@ -7,11 +7,21 @@ use jet::Lexer::{self, RawTokenFact, StrTokPart, TerminatorDriver, TerminatorEve
 use jet_foundation::MIR::{MirArtifactBuildMode, MirArtifactKind, MirArtifactRequest, MirArtifactTarget, MirFunctionId, MirProgram};
 use std::fs;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-const PASS_SOURCE: &str = Lexer::TERMINATOR_PASS_SOURCE;
+/// The terminator pass unit: foundation diagnostics, the diagnostic registry
+/// the lexer reports through, and the lexer itself.
+fn pass_source() -> &'static str {
+    static SOURCE: OnceLock<String> = OnceLock::new();
+    SOURCE.get_or_init(|| common::compiler_parity_source("selfhost terminator pass source", |path| {
+        path == "Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet"
+            || path == "Compiler/JetFoundation/Source/Registry/Diagnostics.jet"
+            || path == "Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet"
+            || path.starts_with("Compiler/JetLexer/Source/")
+    }))
+}
+
 const BOOT_ENTRY: &str = "\nfn bootstrap_probe(source: [U8], facts: [Int]) {\n    print(terminator_events(source, facts).len())\n}\nfn run() { bootstrap_probe([U8]{}, [Int]{}) }\n";
 
 struct Pass {
@@ -24,7 +34,7 @@ fn lower_bundle(bundle: &mut jet::AST::ProgramBundle, context: &str) -> MirProgr
     let errors = diagnostics.iter().filter(|row| row.severity == Severity::Error).collect::<Vec<_>>();
     assert!(errors.is_empty(), "{context}: checked terminator fixture: {errors:#?}");
     let request = MirArtifactRequest::new(
-        MirArtifactTarget::Cranelift, MirArtifactKind::NativeExecutable, MirArtifactBuildMode::Dev,
+        MirArtifactTarget::Interpreter, MirArtifactKind::NativeExecutable, MirArtifactBuildMode::Dev,
     );
     jet::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
         .unwrap_or_else(|error| panic!("{context}: canonical optimized terminator MIR: {error}"))
@@ -49,7 +59,7 @@ fn bootstrap(context: &str, source: &str) -> Arc<Pass> {
 
 fn pass() -> Arc<Pass> {
     static PASS: OnceLock<Arc<Pass>> = OnceLock::new();
-    PASS.get_or_init(|| bootstrap("canonical terminator pass", PASS_SOURCE)).clone()
+    PASS.get_or_init(|| bootstrap("canonical terminator pass", pass_source())).clone()
 }
 
 fn input_values(source: &[u8], facts: &[RawTokenFact]) -> Result<[MirValue; 2], String> {
@@ -204,7 +214,7 @@ fn jet_policy_matches_bounded_reference_and_downstream_parser() {
             }
         }
         for (name, source, lex) in [
-            ("own-source", PASS_SOURCE, Lexer::lex as fn(&str) -> (Vec<Token>, Vec<Diagnostic>)),
+            ("own-source", pass_source(), Lexer::lex as fn(&str) -> (Vec<Token>, Vec<Diagnostic>)),
             ("config-url", "url: https://example.test/a\nname: \"probe\"\n", Lexer::lex_config),
             ("generated-name", "fn __generated() {\n    return 1\n}\n", Lexer::lex_generated),
         ] {
@@ -311,8 +321,8 @@ fn six_policy_mutations_are_killed_through_candidate_event_application() {
         ("shift-synthetic-span", "events.push(end)", "events.push(end + 1)", "x\ny"),
     ];
     for (name, before, after, source) in mutations {
-        assert_eq!(PASS_SOURCE.matches(before).count(), 1, "mutation {name} must target one decision");
-        let mutant = bootstrap(name, &PASS_SOURCE.replacen(before, after, 1));
+        assert_eq!(pass_source().matches(before).count(), 1, "mutation {name} must target one decision");
+        let mutant = bootstrap(name, &pass_source().replacen(before, after, 1));
         jet::run_compiler_work(|| {
             let reference = Lexer::lex(source);
             let changed = Lexer::with_terminator_driver(Some(mutant.driver()), || Lexer::lex(source));
@@ -334,7 +344,8 @@ fn golden_program() -> (String, String) {
     ];
     // The printing wrapper's parameters have no compile-time values. Keep the
     // pure pass call inside it rather than folding literal facts in `run`.
-    let mut source = format!("{PASS_SOURCE}\nfn emit_events(source: [U8], facts: [Int]) {{\n    events :: terminator_events_scanned(source, false)\n    loop value in events {{ print(value) }}\n}}\nfn run() {{\n");
+    let pass_source = pass_source();
+    let mut source = format!("{pass_source}\nfn emit_events(source: [U8], facts: [Int]) {{\n    events :: terminator_events_scanned(source, false)\n    loop value in events {{ print(value) }}\n}}\nfn run() {{\n");
     let mut expected = String::new();
     for (input, events) in cases {
         let (tokens, diagnostics) = Lexer::lex_raw(input);
@@ -358,17 +369,9 @@ fn same_jet_pass_golden_executes_aot_default_interpreter_and_awaited_web() {
     let (source, expected) = golden_program();
     tir_support::assert_tiers_agree("selfhost_terminators_golden", &source, &expected);
     let (native_code, native_stdout, trace) =
-        tir_support::jit_run_traced("selfhost_terminators_golden", &source);
+        tir_support::default_run("selfhost_terminators_golden", &source);
     assert_eq!(native_code, 0, "traced default run failed:\n{trace}");
     assert_eq!(native_stdout, expected, "traced native pass changed the golden:\n{trace}");
-    assert!(trace.lines().any(|line| {
-        let mut columns = line.split_whitespace();
-        columns.next().is_some_and(|name| {
-            name == "terminator_events" || name.ends_with("::terminator_events")
-        }) && columns.next() == Some("tier1") && columns.next() == Some("native")
-    }), "the executed golden must include the Jet pass in tier1 native:\n{trace}");
-    assert!(!trace.contains("tier0 interp") && !trace.contains("deopt:"),
-        "the default-native witness must not use interpreter/deopt execution:\n{trace}");
     tir_support::assert_awaited_web_tier("selfhost_terminators_web", &source, &expected);
 }
 
@@ -391,8 +394,9 @@ fn lexer_payload_golden_program() -> (String, String) {
     assert!(matches!(&nested.kind, TokKind::Float(..)));
 
     let bytes = input.bytes().map(|byte| byte.to_string()).collect::<Vec<_>>().join(", ");
+    let pass_source = pass_source();
     let source = format!(
-        "{PASS_SOURCE}\nfn run() {{\n    result :: lex_payload([U8]{{{bytes}}}, false)\n    index := 0\n    loop index < result.tokens.len() {{\n        print(result.tokens[index].span.start)\n        print(result.tokens[index].span.end)\n        print(result.tokens[index].kind)\n        print(result.tokens[index].payload.text)\n        print(result.tokens[index].payload.integer ?? -1)\n        print(result.tokens[index].payload.decimal ?? Float{{0}})\n        print(result.tokens[index].payload.suffix)\n        index += 1\n    }}\n    print(result.diagnostics.len())\n    nested :: result.tokens[4].payload.string_parts[1].tokens[0]\n    print(nested.span.start)\n    print(nested.span.end)\n    print(nested.kind)\n    print(nested.payload.text)\n    print(nested.payload.decimal ?? Float{{0}})\n}}\n"
+        "{pass_source}\nfn run() {{\n    result :: lex_payload([U8]{{{bytes}}}, false)\n    index := 0\n    loop index < result.tokens.len() {{\n        print(result.tokens[index].span.start)\n        print(result.tokens[index].span.end)\n        print(result.tokens[index].kind)\n        print(result.tokens[index].payload.text)\n        print(result.tokens[index].payload.integer ?? -1)\n        print(result.tokens[index].payload.decimal ?? Float{{0}})\n        print(result.tokens[index].payload.suffix)\n        index += 1\n    }}\n    print(result.diagnostics.len())\n    nested :: result.tokens[4].payload.string_parts[1].tokens[0]\n    print(nested.span.start)\n    print(nested.span.end)\n    print(nested.kind)\n    print(nested.payload.text)\n    print(nested.payload.decimal ?? Float{{0}})\n}}\n"
     );
     let mut expected = String::new();
     for token in &tokens {
@@ -446,7 +450,8 @@ fn jet_and_rust_triple_delimiter_lines_have_identical_text_and_diagnostics() {
         "#FFI(cpp) fn f() { \"\"\"text {value} \\raw\"\"\" }",
         "#FFI(asm) fn f() { \"\"\"text {value} \\raw\"\"\" }",
     ];
-    let mut source = format!("{PASS_SOURCE}\nfn run() {{\n");
+    let pass_source = pass_source();
+    let mut source = format!("{pass_source}\nfn run() {{\n");
     let mut expected = String::new();
     for (index, input) in cases.iter().enumerate() {
         let bytes = input.bytes().map(|byte| byte.to_string()).collect::<Vec<_>>().join(", ");
@@ -484,10 +489,11 @@ fn jet_and_rust_triple_delimiter_lines_have_identical_text_and_diagnostics() {
 
 #[test]
 fn jet_lexer_exports_parser_ready_tokens_spans_payloads_and_diagnostics() {
+    let pass_source = pass_source();
     let source = format!(
-        "{PASS_SOURCE}\nfn run() {{\n    result :: lex_payload(\"Name 500ms 1.25 true \\\"ok\\\" 'x'\", false)\n    print(result.tokens[0].kind)\n    print(result.tokens[0].payload.text)\n    print(result.tokens[1].kind)\n    print(result.tokens[1].payload.integer ?? -1)\n    print(result.tokens[1].payload.suffix)\n    print(result.tokens[2].kind)\n    print(result.tokens[2].payload.decimal ?? Float{{0}})\n    print(result.tokens[3].kind)\n    print(result.tokens[4].kind)\n    print(result.tokens[4].payload.decoded)\n    print(result.tokens[5].kind)\n    print(result.tokens[5].payload.decoded)\n    print(result.tokens[6].kind)\n    print(result.diagnostics.len())\n    interpolated :: lex_payload(\"\\\"a{{value + 1}}b\\\"\".bytes(), false)\n    print(interpolated.tokens[0].payload.string_parts.len())\n    print(interpolated.tokens[0].payload.string_parts[0].kind)\n    print(interpolated.tokens[0].payload.string_parts[1].kind)\n    print(interpolated.tokens[0].payload.string_parts[1].tokens.len())\n    print(interpolated.tokens[0].payload.string_parts[1].tokens[0].span.start)\n    print(interpolated.tokens[0].payload.string_parts[1].tokens[3].kind)\n    print(interpolated.tokens[0].payload.string_parts[1].tokens[3].span.start)\n    terminated :: lex(\"fn f() {{\\n    value\\n}}\".bytes())\n    print(terminated.tokens[6].kind)\n    print(terminated.tokens[6].span.start)\n    print(terminated.tokens[6].span.end)\n    bad :: lex_payload(\"§§\".bytes(), false)\n    print(bad.diagnostics.len())\n    print(bad.diagnostics[0].span.start)\n    print(bad.diagnostics[1].span.start)\n    prefix :: lex_payload(\"r\\\"bad\\\"\".bytes(), false)\n    print(prefix.diagnostics[0].code)\n    print(prefix.diagnostics[0].span.end)\n}}\n",
+        "{pass_source}\nfn run() {{\n    result :: lex_payload(\"Name 500ms 1.25 true \\\"ok\\\" 'x'\", false)\n    print(result.tokens[0].kind)\n    print(result.tokens[0].payload.text)\n    print(result.tokens[1].kind)\n    print(result.tokens[1].payload.integer ?? -1)\n    print(result.tokens[1].payload.suffix)\n    print(result.tokens[2].kind)\n    print(result.tokens[2].payload.decimal ?? Float{{0}})\n    print(result.tokens[3].kind)\n    print(result.tokens[4].kind)\n    print(result.tokens[4].payload.decoded)\n    print(result.tokens[5].kind)\n    print(result.tokens[5].payload.decoded)\n    print(result.tokens[6].kind)\n    print(result.diagnostics.len())\n    interpolated :: lex_payload(\"\\\"a{{value + 1}}b\\\"\".bytes(), false)\n    print(interpolated.tokens[0].payload.string_parts.len())\n    print(interpolated.tokens[0].payload.string_parts[0].kind)\n    print(interpolated.tokens[0].payload.string_parts[1].kind)\n    print(interpolated.tokens[0].payload.string_parts[1].tokens.len())\n    print(interpolated.tokens[0].payload.string_parts[1].tokens[0].span.start)\n    print(interpolated.tokens[0].payload.string_parts[1].tokens[3].kind)\n    print(interpolated.tokens[0].payload.string_parts[1].tokens[3].span.start)\n    terminated :: lex(\"fn f() {{\\n    value\\n}}\".bytes())\n    print(terminated.tokens[6].kind)\n    print(terminated.tokens[6].span.start)\n    print(terminated.tokens[6].span.end)\n    bad :: lex_payload(\"§§\".bytes(), false)\n    print(bad.diagnostics.len())\n    print(bad.diagnostics[0].span.start)\n    print(bad.diagnostics[1].span.start)\n    prefix :: lex_payload(\"r\\\"bad\\\"\".bytes(), false)\n    print(prefix.diagnostics[0].code)\n    print(prefix.diagnostics[0].span.end)\n}}\n",
     );
-    let (code, stdout, stderr) = tir_support::jit_run("selfhost_parser_ready_lexer", &source);
+    let (code, stdout, stderr) = tir_support::default_run("selfhost_parser_ready_lexer", &source);
     assert_eq!(code, 0, "lexer interface run failed:\n{stderr}");
     assert_eq!(
         stdout,
@@ -497,8 +503,9 @@ fn jet_lexer_exports_parser_ready_tokens_spans_payloads_and_diagnostics() {
 
 #[test]
 fn jet_lexer_scans_inline_foreign_bodies_and_interpolations() {
+    let pass_source = pass_source();
     let source = format!(
-        r####"{PASS_SOURCE}
+        r####"{pass_source}
 fn run() {{
     foreign :: lex_payload(`#FFI(C) fn f() {{ """int f() {{ return "x"; }}""" }}`.bytes(), false)
     print(foreign.tokens[10].payload.decoded)
@@ -515,15 +522,16 @@ fn run() {{
 }}
 "####,
     );
-    let (code, stdout, stderr) = tir_support::jit_run("selfhost_inline_foreign_lexer", &source);
+    let (code, stdout, stderr) = tir_support::default_run("selfhost_inline_foreign_lexer", &source);
     assert_eq!(code, 0, "inline foreign lexer run failed:\n{stderr}");
     assert_eq!(stdout, "int f() { return \"x\"; }\n1\n0\n1\nE0002\n19\nvalue\n12\n");
 }
 
 #[test]
 fn jet_lexer_keeps_unicode_alphanumeric_unit_suffixes() {
+    let pass_source = pass_source();
     let source = format!(
-        r####"{PASS_SOURCE}
+        r####"{pass_source}
 fn run() {{
     result :: lex_payload(`12msμ 3usd٢`.bytes(), false)
     print(result.tokens[0].kind)
@@ -536,15 +544,16 @@ fn run() {{
 }}
 "####,
     );
-    let (code, stdout, stderr) = tir_support::jit_run("selfhost_unicode_unit_suffixes", &source);
+    let (code, stdout, stderr) = tir_support::default_run("selfhost_unicode_unit_suffixes", &source);
     assert_eq!(code, 0, "unicode unit suffix lexer run failed:\n{stderr}");
     assert_eq!(stdout, "6\nmsμ\n6\n6\nusd٢\n13\n49\n");
 }
 
 #[test]
 fn jet_lexer_uses_zero_for_integer_payload_overflow() {
+    let pass_source = pass_source();
     let source = format!(
-        r####"{PASS_SOURCE}
+        r####"{pass_source}
 fn run() {{
     values :: lex_payload(`9223372036854775807 9223372036854775808 0x7fffffffffffffff 0x8000000000000000`.bytes(), false)
     print(values.tokens[0].payload.integer ?? -1)
@@ -556,7 +565,7 @@ fn run() {{
 }}
 "####,
     );
-    let (code, stdout, stderr) = tir_support::jit_run("selfhost_integer_payload_overflow", &source);
+    let (code, stdout, stderr) = tir_support::default_run("selfhost_integer_payload_overflow", &source);
     assert_eq!(code, 0, "integer overflow lexer run failed:\n{stderr}");
     assert_eq!(stdout, "9223372036854775807\n0\n9223372036854775807\n0\n0\n49\n");
 }

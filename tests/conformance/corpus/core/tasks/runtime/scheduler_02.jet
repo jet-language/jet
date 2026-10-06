@@ -1,0 +1,78 @@
+use core.tasks.runtime.scheduler_02.[JetSchedulerChannel, JetSchedulerSendReserveError,
+    JetSchedulerSendPrepareError, JetChannelKind, JetSchedulerRawIoHandle]
+use std.cell.[Cell]
+use std.rc.[Rc]
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2960-3094
+#Test("scheduler_channel_clone_preserves_shared_queue_without_payload_clone") {
+    channel :: JetSchedulerChannel<String>.bounded(1)
+    alias :: channel.clone()
+    sender :: channel.sender()
+    assert(sender.send("owned payload"))
+    assert_eq(alias.try_receive(), Val("owned payload"))
+    assert_eq(channel.try_receive(), None)
+    sender.close()
+    assert_eq(channel.receive(), None)
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3212-3360
+#Test("scheduler_send_reservation_drop_releases_capacity_and_closed_returns_exact_value") {
+    channel :: JetSchedulerChannel<I64>.bounded(1)
+    sender :: channel.sender()
+    reservation :: sender.reserve_send().expect("first reservation")
+    drop(^reservation)
+    reservation :: sender.reserve_send().expect("released capacity may be reserved again")
+    assert_eq(reservation.commit(7), Ok(()))
+    assert_eq(channel.receive(), Val(I64{7}))
+    reservation :: sender.reserve_send().expect("empty queue has room")
+    channel.close()
+    assert_eq(reservation.commit(9), Err(I64{9}))
+    assert_eq(sender.reserve_send().err(), Val(JetSchedulerSendReserveError.Closed))
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3316-3360
+#Test("scheduler_prepared_send_does_not_extract_after_close_and_recovers_prepare_failure") {
+    channel :: JetSchedulerChannel<I64>.bounded(1)
+    sender :: channel.sender()
+    reservation :: sender.reserve_send().expect("positive capacity")
+    called :: Rc.new(Cell.new(false))
+    witness :: called.clone()
+    channel.close()
+    result :: reservation.commit_prepared<I64, String>(fn() { witness.set(true); Ok((I64{3}, I64{4})) })
+    assert_eq(result.err(), Val(JetSchedulerSendPrepareError<String>.Closed))
+    assert(not called.get())
+    channel :: JetSchedulerChannel<I64>.bounded(1)
+    sender :: channel.sender()
+    reservation :: sender.reserve_send().expect("reserve before failed preparation")
+    result :: reservation.commit_prepared<I64, String>(fn() { Err("prepare rejected") })
+    assert_eq(result.err(), Val(JetSchedulerSendPrepareError.Preparation("prepare rejected")))
+    assert(sender.send(5))
+    assert_eq(channel.try_receive(), Val(I64{5}))
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:3368-3417
+#Test("scheduler_select_view_is_not_a_receiver_and_alias_prevents_drain") {
+    channel :: JetSchedulerChannel<I64>.new()
+    sender :: channel.sender()
+    view :: channel.select_view()
+    alias :: channel.clone()
+    assert(sender.send(1))
+    assert_eq(channel.close_receiver_and_drain(), [])
+    drop(^alias)
+    assert_eq(channel.close_receiver_and_drain(), [I64{1}])
+    assert(not sender.send(2))
+    drop(^view)
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:2996-3127
+#Test("scheduler_channel_metadata_clamps_timer_and_interval_delays") {
+    timer :: JetSchedulerChannel<I64>.timer(-2)
+    assert(timer.is_timer())
+    assert_eq(timer.delay_ms(), I64{0})
+    interval :: JetSchedulerChannel<I64>.interval(0)
+    assert(interval.is_interval())
+    assert_eq(interval.delay_ms(), I64{1})
+    interval.cancel()
+    assert(interval.is_cancelled())
+    assert(interval.is_ready())
+}

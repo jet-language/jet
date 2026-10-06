@@ -1,0 +1,2277 @@
+// PORT-PENDING 0233 crates-jet-jit-src-sourcesharedinterop: crates/jet-jit/src/SourceSharedInterop.rs:1-2273
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Private physical transport for compiler-implementation `Shared<T>` values.
+//RS //!
+//RS //! This is deliberately separate from the Source evaluator's logical
+//RS //! `Shared(index)` carrier.  A value crossing the compiler entry/callback seam
+//RS //! retains one physical root and performs typed payload conversion while the
+//RS //! root's canonical read or edit permit is held.  The JIT and the generated
+//RS //! NativeAdapter use this seam; no raw pointer, heap record sentinel, or
+//RS //! evaluator session ID is a language value.
+//RS 
+//RS use std::any::Any;
+//RS use std::cell::RefCell;
+//RS use std::rc::Rc;
+//RS use std::sync::atomic::{AtomicU64, Ordering};
+//RS use std::sync::{Arc, Mutex};
+//RS use jet_foundation::MIR::{MirNativeOwned, MirRuntimeValue};
+//RS 
+//RS pub type SourceSharedInteropPayloadFinalizer =
+//RS     crate::Memory::shared_protocol::JetSharedPhysicalFinalizerBinding<MirRuntimeValue>;
+//RS pub type SourceSharedInteropCompletionDelivery =
+//RS     crate::Memory::shared_protocol::JetSharedPhysicalCompletionDelivery;
+//RS /// The physical-operation outcome every interop owner callback returns. Host
+//RS /// glue linked against a separately compiled Source runtime builds it from the
+//RS /// runtime's own outcome (the same result and completion carriers).
+//RS pub type SourceSharedInteropOperationOutcome<T> =
+//RS     crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<T>;
+//RS type SourceSharedInteropPayloadFinalizerInstaller = Arc<
+//RS     dyn Fn(&mut Option<SourceSharedInteropPayloadFinalizer>) -> Result<(), String>
+//RS         + Send
+//RS         + Sync
+//RS         + 'static,
+//RS >;
+//RS 
+//RS /// Clone the exact typed view for a currently live native Source Shared guard
+//RS /// token in this invocation. The token is only a lookup key in its origin
+//RS /// runtime, never portable permit authority.
+//RS pub fn native_shared_guard_entry_view(
+//RS     token: i64,
+//RS ) -> Option<Result<SourceSharedInteropGuardState, String>> {
+//RS     crate::runtime_host::native_shared_guard_entry_view(token)
+//RS }
+//RS fn finish_physical_operation<T>(
+//RS     completion_delivery: &Arc<Mutex<Option<SourceSharedInteropCompletionDelivery>>>,
+//RS     mut outcome: crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<T>,
+//RS ) -> Result<T, String> {
+//RS     if let Some(completion) = outcome.completion.take() {
+//RS         let delivery = completion_delivery
+//RS             .lock()
+//RS             .unwrap_or_else(|error| error.into_inner())
+//RS             .as_ref()
+//RS             .cloned()
+//RS             .expect("physical Shared completion requires its installed delivery binding");
+//RS         delivery(completion);
+//RS     }
+//RS     outcome.result
+//RS }
+//RS /// Compute the exact JIT descriptor identity for a checked MIR type. Nominal
+//RS /// types use their checked identity; structural types (including
+//RS /// `Shared<scalar>`) use the same synthetic canonical-key identity as the
+//RS /// resident runtime descriptor table.
+//RS pub fn checked_type_id(ty: &jet_foundation::MIR::MirType) -> u64 {
+//RS     ty.identity
+//RS         .map(|identity| identity.0)
+//RS         .unwrap_or_else(|| {
+//RS             jet_foundation::MIR::stable_id("jit-runtime-type", &ty.kind.canonical_key())
+//RS                 | (1_u64 << 63)
+//RS         })
+//RS }
+//RS /// Compute the descriptor identity in a checked program, including restored
+//RS /// type-instance and nominal-definition identities.
+//RS pub fn checked_type_id_for_program(
+//RS     program: &jet_foundation::MIR::MirProgram,
+//RS     ty: &jet_foundation::MIR::MirType,
+//RS ) -> u64 {
+//RS     if let Some(identity) = ty.identity {
+//RS         return identity.0;
+//RS     }
+//RS     if let Some(instance) = program
+//RS         .type_instances
+//RS         .iter()
+//RS         .find(|instance| instance.canonical_key() == ty.canonical_key())
+//RS     {
+//RS         return checked_type_id(instance);
+//RS     }
+//RS     if let jet_foundation::MIR::MirTypeKind::Apply { name, args } = &ty.kind {
+//RS         if args.is_empty() {
+//RS             if let Some(definition) = crate::functions_compile::nominal_ref_definition(program, name) {
+//RS                 return definition.id.0;
+//RS             }
+//RS         }
+//RS     }
+//RS     checked_type_id(ty)
+//RS }
+//RS 
+//RS 
+//RS /// The physical operations supplied by the owner of one typed Shared root.
+//RS ///
+//RS /// Each operation must invoke its callback exactly once while the canonical
+//RS /// read/edit permit is held. An edit callback error is a transport or codec
+//RS /// failure and aborts the physical edit; a successful edit callback commits
+//RS /// the value supplied by the callback under that same permit. A semantic
+//RS /// Source callback error is an ordinary value in the callback's successful
+//RS /// result and therefore still commits. `acquire_guard` holds the same
+//RS /// physical permit until the returned guard is dropped.
+//RS pub trait SourceSharedInteropBackend: Send + Sync + 'static {
+//RS     fn with_read(
+//RS         &self,
+//RS         callback: &mut dyn FnMut(&MirRuntimeValue) -> Result<(), String>,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()>;
+//RS     fn with_read_revision(
+//RS         &self,
+//RS         callback: &mut dyn FnMut(&MirRuntimeValue, u64) -> Result<(), String>,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()>;
+//RS 
+//RS     fn with_edit(
+//RS         &self,
+//RS         callback: &mut dyn FnMut(&mut MirRuntimeValue) -> Result<(), String>,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()>;
+//RS     fn replace_if_revision(
+//RS         &self,
+//RS         expected_revision: u64,
+//RS         replacement: MirRuntimeValue,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<(bool, u64)>;
+//RS 
+//RS     fn acquire_guard(
+//RS         &self,
+//RS         editable: bool,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<
+//RS         Box<dyn SourceSharedInteropGuard>,
+//RS     >;
+//RS }
+//RS 
+//RS 
+//RS /// Physical owner weak handles preserve source Shared lifetime semantics
+//RS /// without retaining a wrapper or a copied payload.
+//RS pub trait SourceSharedInteropWeakOwner: Send + Sync + 'static {
+//RS     /// Atomically require a live logical owner and reserve one strong alias.
+//RS     /// The returned lease must represent that exact reservation.
+//RS     fn upgrade(
+//RS         &self,
+//RS     ) -> Result<
+//RS         Option<(
+//RS             SourceSharedInterop,
+//RS             Box<dyn SourceSharedInteropOwnerAliasLease>,
+//RS         )>,
+//RS         String,
+//RS     >;
+//RS }
+//RS 
+//RS struct OwnerLifecycle {
+//RS     downgrade: Arc<dyn Fn() -> Box<dyn SourceSharedInteropWeakOwner> + Send + Sync>,
+//RS }
+//RS 
+//RS /// Owner-provided logical alias reservation. Explicit release returns any
+//RS /// completion produced by retiring this exact physical owner.
+//RS pub trait SourceSharedInteropOwnerAliasLease: Send + Sync + 'static {
+//RS     fn token_id(&self) -> i64;
+//RS     fn release(
+//RS         self: Box<Self>,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()>;
+//RS }
+//RS 
+//RS struct OwnerAliasLifecycle {
+//RS     strong_count: Arc<dyn Fn() -> Result<usize, String> + Send + Sync>,
+//RS     retain: Arc<
+//RS         dyn Fn() -> Result<Box<dyn SourceSharedInteropOwnerAliasLease>, String> + Send + Sync,
+//RS     >,
+//RS }
+//RS 
+//RS #[must_use = "dropping the token releases one logical Source Shared owner alias"]
+//RS pub struct SourceSharedInteropOwnerAlias {
+//RS     owner_identity: usize,
+//RS     token_id: i64,
+//RS     lease: Mutex<Option<Box<dyn SourceSharedInteropOwnerAliasLease>>>,
+//RS }
+//RS 
+//RS impl SourceSharedInteropOwnerAlias {
+//RS     pub(crate) fn new(
+//RS         owner_identity: usize,
+//RS         lease: Box<dyn SourceSharedInteropOwnerAliasLease>,
+//RS     ) -> Self {
+//RS         let token_id = lease.token_id();
+//RS         Self {
+//RS             owner_identity,
+//RS             token_id,
+//RS             lease: Mutex::new(Some(lease)),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn token_id(&self) -> i64 {
+//RS         self.token_id
+//RS     }
+//RS 
+//RS     pub fn release(
+//RS         &self,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+//RS         let lease = self
+//RS             .lease
+//RS             .lock()
+//RS             .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS             .take();
+//RS         match lease {
+//RS             Some(lease) => lease.release(),
+//RS             None => crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+//RS                 Err("Source Shared owner alias was already released".to_string()),
+//RS                 None,
+//RS             ),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Linearizable weak-upgrade result: the root and its newly reserved logical
+//RS /// strong alias travel together so callers cannot separate upgrade from retain.
+//RS pub struct SourceSharedInteropOwnerAliasUpgrade {
+//RS     interop: SourceSharedInterop,
+//RS     owner_alias: SourceSharedInteropOwnerAlias,
+//RS }
+//RS 
+//RS impl SourceSharedInteropOwnerAliasUpgrade {
+//RS     pub fn interop(&self) -> &SourceSharedInterop {
+//RS         &self.interop
+//RS     }
+//RS 
+//RS     pub fn owner_alias(&self) -> &SourceSharedInteropOwnerAlias {
+//RS         &self.owner_alias
+//RS     }
+//RS 
+//RS     pub fn into_parts(
+//RS         self,
+//RS     ) -> (SourceSharedInterop, SourceSharedInteropOwnerAlias) {
+//RS         (self.interop, self.owner_alias)
+//RS     }
+//RS 
+//RS     /// Adopt the reserved alias into the carrier so every carrier clone
+//RS     /// shares exactly one logical owner lease.
+//RS     pub fn into_carrier(self) -> Result<SourceSharedInterop, String> {
+//RS         self.interop.with_owner_alias_lease(self.owner_alias)
+//RS     }
+//RS }
+//RS 
+//RS /// A non-Send physical Shared guard. The JIT keeps this object in its
+//RS /// invocation-local runtime, never in the Send+Sync root carrier.
+//RS pub trait SourceSharedInteropGuard: 'static {
+//RS     /// Invoke a read projection while this guard's canonical permit is held.
+//RS     fn with_read(
+//RS         &mut self,
+//RS         callback: &mut dyn FnMut(&MirRuntimeValue) -> Result<(), String>,
+//RS     ) -> Result<(), String> {
+//RS         let value = self.read_value()?;
+//RS         callback(&value)
+//RS     }
+//RS 
+//RS     /// Invoke an edit projection while this guard's canonical permit is held.
+//RS     /// Semantic callback outcomes belong in a successful callback result so
+//RS     /// the staged value still publishes.
+//RS     fn with_edit(
+//RS         &mut self,
+//RS         callback: &mut dyn FnMut(&mut MirRuntimeValue) -> Result<(), String>,
+//RS     ) -> Result<(), String> {
+//RS         let mut value = self.read_value()?;
+//RS         callback(&mut value)?;
+//RS         self.stage_value(value)
+//RS     }
+//RS 
+//RS     /// Clone the current typed payload while this guard's canonical permit is
+//RS     /// held. The clone is only the JIT projection; the owner remains the root.
+//RS     fn read_value(&mut self) -> Result<MirRuntimeValue, String>;
+//RS 
+//RS     /// Stage a typed payload replacement while this guard's permit is held.
+//RS     /// The physical root publishes it when the final aliasing guard is dropped.
+//RS     fn stage_value(&mut self, value: MirRuntimeValue) -> Result<(), String>;
+//RS     /// Read this physical owner's revision under the already-held guard.
+//RS     fn revision(&self) -> Result<u64, String>;
+//RS     /// Whether the physical permit is currently held by this logical guard.
+//RS     fn held(&self) -> bool {
+//RS         true
+//RS     }
+//RS 
+//RS     /// Close this physical guard and return any typed owner completion.
+//RS     fn release(
+//RS         &mut self,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()>;
+//RS     /// Drop fallback for closing this physical guard. Implementations route
+//RS     /// any finalizer completion through their paired owner binding.
+//RS     fn release_during_drop(&mut self);
+//RS 
+//RS     /// Optional typed access-time projection owned by this guard (for example,
+//RS     /// a checked codec's stable Box<T> shadow). Never cast a dynamic MIR
+//RS     /// payload to T; dynamic owners should leave this unsupported.
+//RS     fn root_ptr(&mut self) -> Result<*mut (), String> {
+//RS         Err("Source Shared owner has no typed physical projection".to_string())
+//RS     }
+//RS 
+//RS     /// Mark the optional typed access-time projection dirty before yielding
+//RS     /// mutable access; the guard stages it back before releasing its permit.
+//RS     fn mark_dirty(&mut self) -> Result<(), String> {
+//RS         Err("Source Shared owner has no typed physical projection".to_string())
+//RS     }
+//RS     /// Publish the current JIT projection and release the physical permit
+//RS     /// while a condition wait parks. Implementations must retain the same
+//RS     /// logical guard lease so aliases and publication epochs remain intact.
+//RS     fn wait_suspend(
+//RS         &mut self,
+//RS         _value: MirRuntimeValue,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+//RS         crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+//RS             Err("Source Shared owner does not support canonical guard wait handoff".to_string()),
+//RS             None,
+//RS         )
+//RS     }
+//RS 
+//RS     /// Reacquire the same physical permit after a wait and refresh the JIT
+//RS     /// projection. `Ok(None)` means cancellation released the logical lease
+//RS     /// without reacquiring it.
+//RS     fn wait_resume(
+//RS         &mut self,
+//RS         _cancelled: &mut dyn FnMut() -> bool,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<
+//RS         Option<MirRuntimeValue>,
+//RS     > {
+//RS         crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+//RS             Err("Source Shared owner does not support canonical guard wait handoff".to_string()),
+//RS             None,
+//RS         )
+//RS     }
+//RS 
+//RS     /// Abort a wait whose source permit was reacquired but whose local JIT
+//RS     /// permit could not be reacquired. The logical guard is then closed
+//RS     /// without publishing a second epoch.
+//RS     fn wait_abort(&mut self) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+//RS         crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+//RS             Err("Source Shared owner cannot abort a canonical guard wait".to_string()),
+//RS             None,
+//RS         )
+//RS     }
+//RS 
+//RS     /// Finish the guard after its final JIT alias closes. A cancelled wait can
+//RS     /// leave the physical lease released; that state must discard rather than
+//RS     /// stage a second publication.
+//RS     fn finish_value(&mut self, value: MirRuntimeValue) -> Result<(), String> {
+//RS         self.stage_value(value)
+//RS     }
+//RS     /// Discard unpublished staging while retaining this physical permit.
+//RS     /// Used to roll back every participant when a canonical multi-owner stage
+//RS     /// fails before the transaction publishes any owner.
+//RS     fn discard_staged(&mut self) -> Result<(), String> {
+//RS         Err("Source Shared owner cannot discard staged values".to_string())
+//RS     }
+//RS }
+//RS pub(crate) struct SourceSharedInteropPhysicalLease {
+//RS     guard: RefCell<Box<dyn SourceSharedInteropGuard>>,
+//RS     completion_delivery: Arc<Mutex<Option<SourceSharedInteropCompletionDelivery>>>,
+//RS }
+//RS 
+//RS impl SourceSharedInteropPhysicalLease {
+//RS     pub(crate) fn with_read(
+//RS         &self,
+//RS         callback: &mut dyn FnMut(&MirRuntimeValue) -> Result<(), String>,
+//RS     ) -> Result<(), String> {
+//RS         self.guard.borrow_mut().with_read(callback)
+//RS     }
+//RS 
+//RS     pub(crate) fn with_edit(
+//RS         &self,
+//RS         callback: &mut dyn FnMut(&mut MirRuntimeValue) -> Result<(), String>,
+//RS     ) -> Result<(), String> {
+//RS         self.guard.borrow_mut().with_edit(callback)
+//RS     }
+//RS 
+//RS     pub(crate) fn read_value(&self) -> Result<MirRuntimeValue, String> {
+//RS         self.guard.borrow_mut().read_value()
+//RS     }
+//RS 
+//RS     pub(crate) fn stage_value(&self, value: MirRuntimeValue) -> Result<(), String> {
+//RS         self.guard.borrow_mut().stage_value(value)
+//RS     }
+//RS 
+//RS     pub(crate) fn revision(&self) -> Result<u64, String> {
+//RS         self.guard.borrow().revision()
+//RS     }
+//RS 
+//RS     pub(crate) fn held(&self) -> bool {
+//RS         self.guard.borrow().held()
+//RS     }
+//RS 
+//RS     pub(crate) fn wait_suspend(&self, value: MirRuntimeValue) -> Result<(), String> {
+//RS         let outcome = self.guard.borrow_mut().wait_suspend(value);
+//RS         finish_physical_operation(&self.completion_delivery, outcome)
+//RS     }
+//RS 
+//RS     pub(crate) fn wait_resume(
+//RS         &self,
+//RS         cancelled: &mut dyn FnMut() -> bool,
+//RS     ) -> Result<Option<MirRuntimeValue>, String> {
+//RS         let outcome = self.guard.borrow_mut().wait_resume(cancelled);
+//RS         finish_physical_operation(&self.completion_delivery, outcome)
+//RS     }
+//RS 
+//RS     pub(crate) fn wait_abort(&self) -> Result<(), String> {
+//RS         let outcome = self.guard.borrow_mut().wait_abort();
+//RS         finish_physical_operation(&self.completion_delivery, outcome)
+//RS     }
+//RS 
+//RS     pub(crate) fn finish_value(&self, value: MirRuntimeValue) -> Result<(), String> {
+//RS         self.guard.borrow_mut().finish_value(value)
+//RS     }
+//RS 
+//RS     pub(crate) fn discard_staged(&self) -> Result<(), String> {
+//RS         self.guard.borrow_mut().discard_staged()
+//RS     }
+//RS     pub(crate) fn release(
+//RS         &self,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+//RS         self.guard.borrow_mut().release()
+//RS     }
+//RS 
+//RS     pub(crate) fn release_during_drop(&self) {
+//RS         self.guard.borrow_mut().release_during_drop();
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for SourceSharedInteropPhysicalLease {
+//RS     fn drop(&mut self) {
+//RS         self.guard.get_mut().release_during_drop();
+//RS     }
+//RS }
+//RS 
+//RS struct SourceSharedInteropCanonicalPermit {
+//RS     lease: Rc<SourceSharedInteropPhysicalLease>,
+//RS     owner_alias: Option<SourceSharedInteropOwnerAlias>,
+//RS     editable: bool,
+//RS }
+//RS 
+//RS impl crate::Memory::shared_protocol::JetSharedCanonicalPermit
+//RS     for SourceSharedInteropCanonicalPermit
+//RS {
+//RS     fn editable(&self) -> bool {
+//RS         self.editable
+//RS     }
+//RS 
+//RS     fn held(&self) -> bool {
+//RS         self.lease.held()
+//RS     }
+//RS 
+//RS     fn release(&self) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+//RS         crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(Ok(()), None)
+//RS     }
+//RS 
+//RS     fn release_during_drop(&self) {
+//RS         // The paired non-Send physical guard lease controls release.
+//RS     }
+//RS 
+//RS     fn reacquire(&self, _cancelled: &mut dyn FnMut() -> bool) -> bool {
+//RS         self.held()
+//RS     }
+//RS 
+//RS     fn stage_value(&self, value: Box<dyn Any>) -> Result<(), String> {
+//RS         let value = value.downcast::<MirRuntimeValue>().map_err(|_| {
+//RS             "Source Shared physical guard requires a checked MIR payload".to_string()
+//RS         })?;
+//RS         self.lease.stage_value(*value)
+//RS     }
+//RS 
+//RS     fn discard_staged(&self) -> Result<(), String> {
+//RS         self.lease.discard_staged()
+//RS     }
+//RS 
+//RS     fn into_any(self: Arc<Self>) -> Arc<dyn Any> {
+//RS         self
+//RS     }
+//RS }
+//RS pub struct SourceSharedInteropGuardState {
+//RS     pub(crate) state: Arc<crate::Memory::shared_protocol::JetSharedGuardState>,
+//RS     pub(crate) lease: Rc<SourceSharedInteropPhysicalLease>,
+//RS     pub(crate) physical_identity: usize,
+//RS     pub(crate) protocol_order_key: usize,
+//RS }
+//RS 
+//RS impl SourceSharedInteropGuardState {
+//RS     /// Clone this exact invocation-local logical view without acquiring a
+//RS     /// permit or changing its path or edit capability.
+//RS     pub fn entry_view(&self) -> Result<Self, String> {
+//RS         let state = crate::Memory::shared_protocol::jet_shared_guard_clone(
+//RS             &self.state,
+//RS             self.editable(),
+//RS         )
+//RS         .map_err(str::to_owned)?;
+//RS         Ok(Self {
+//RS             state,
+//RS             lease: self.lease.clone(),
+//RS             physical_identity: self.physical_identity,
+//RS             protocol_order_key: self.protocol_order_key,
+//RS         })
+//RS     }
+//RS     pub(crate) fn release(
+//RS         self,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+//RS         let Self {
+//RS             state,
+//RS             lease,
+//RS             physical_identity: _,
+//RS             protocol_order_key: _,
+//RS         } = self;
+//RS         drop(state);
+//RS         if Rc::strong_count(&lease) == 1 {
+//RS             lease.release()
+//RS         } else {
+//RS             crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(Ok(()), None)
+//RS         }
+//RS     }
+//RS     pub(crate) fn release_and_deliver(self) -> Result<(), String> {
+//RS         let completion_delivery = Arc::clone(&self.lease.completion_delivery);
+//RS         finish_physical_operation(&completion_delivery, self.release())
+//RS     }
+//RS 
+//RS     fn acquire(
+//RS         interop: &SourceSharedInterop,
+//RS         editable: bool,
+//RS         owner_alias: Option<SourceSharedInteropOwnerAlias>,
+//RS     ) -> Result<Self, String> {
+//RS         let physical_identity = interop
+//RS             .physical_identity()
+//RS             .ok_or_else(|| "Source Shared root has no physical owner identity".to_string())?;
+//RS         let protocol_order_key = interop
+//RS             .protocol_order_key()
+//RS             .ok_or_else(|| "Source Shared root has no physical protocol-order key".to_string())?;
+//RS         if owner_alias
+//RS             .as_ref()
+//RS             .is_some_and(|alias| alias.owner_identity != interop.identity())
+//RS         {
+//RS             return Err("Source Shared guard alias belongs to a different physical owner".to_string());
+//RS         }
+//RS         let lease = interop.acquire_physical_lease(editable)?;
+//RS         let permit: Arc<dyn crate::Memory::shared_protocol::JetSharedCanonicalPermit> =
+//RS             Arc::new(SourceSharedInteropCanonicalPermit {
+//RS                 lease: lease.clone(),
+//RS                 owner_alias,
+//RS                 editable,
+//RS             });
+//RS         let state = crate::Memory::shared_protocol::jet_shared_guard_state_from_permit(
+//RS             permit, editable,
+//RS         )
+//RS         .map_err(str::to_owned)?;
+//RS         Ok(Self {
+//RS             state,
+//RS             lease,
+//RS             physical_identity,
+//RS             protocol_order_key,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn path(&self) -> &[i64] {
+//RS         self.state.path()
+//RS     }
+//RS 
+//RS     pub fn editable(&self) -> bool {
+//RS         self.state.editable()
+//RS     }
+//RS 
+//RS     pub fn held(&self) -> bool {
+//RS         self.state.held()
+//RS     }
+//RS     pub fn physical_identity(&self) -> usize {
+//RS         self.physical_identity
+//RS     }
+//RS 
+//RS     pub fn protocol_order_key(&self) -> usize {
+//RS         self.protocol_order_key
+//RS     }
+//RS 
+//RS     pub fn clone_guard(&self, editable: bool) -> Result<Self, String> {
+//RS         let state = crate::Memory::shared_protocol::jet_shared_guard_clone(
+//RS             &self.state,
+//RS             editable,
+//RS         )
+//RS         .map_err(str::to_owned)?;
+//RS         Ok(Self {
+//RS             state,
+//RS             lease: self.lease.clone(),
+//RS             physical_identity: self.physical_identity,
+//RS             protocol_order_key: self.protocol_order_key,
+//RS         })
+//RS     }
+//RS 
+//RS     pub(crate) fn canonical_state(
+//RS         &self,
+//RS     ) -> &Arc<crate::Memory::shared_protocol::JetSharedGuardState> {
+//RS         &self.state
+//RS     }
+//RS 
+//RS     pub(crate) fn wait_handoff(&self) -> SourceSharedInteropWaitHandoff {
+//RS         SourceSharedInteropWaitHandoff {
+//RS             lease: self.lease.clone(),
+//RS             error: None,
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn map_path(
+//RS         self,
+//RS         fields: &[i64],
+//RS         editable: bool,
+//RS     ) -> Result<Self, String> {
+//RS         let state = crate::Memory::shared_protocol::jet_shared_guard_map_path(
+//RS             &self.state,
+//RS             fields,
+//RS             editable,
+//RS         )
+//RS         .map_err(str::to_owned)?;
+//RS         Ok(Self {
+//RS             state,
+//RS             lease: self.lease,
+//RS             physical_identity: self.physical_identity,
+//RS             protocol_order_key: self.protocol_order_key,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn split_path(
+//RS         self,
+//RS         first_fields: &[i64],
+//RS         second_fields: &[i64],
+//RS         editable: bool,
+//RS     ) -> Result<(Self, Self), String> {
+//RS         let (first, second) =
+//RS             crate::Memory::shared_protocol::jet_shared_guard_split_path(
+//RS                 &self.state,
+//RS                 first_fields,
+//RS                 second_fields,
+//RS                 editable,
+//RS             )
+//RS             .map_err(str::to_owned)?;
+//RS         Ok((
+//RS             Self {
+//RS                 state: first,
+//RS                 lease: self.lease.clone(),
+//RS                 physical_identity: self.physical_identity,
+//RS                 protocol_order_key: self.protocol_order_key,
+//RS             },
+//RS             Self {
+//RS                 state: second,
+//RS                 lease: self.lease,
+//RS                 physical_identity: self.physical_identity,
+//RS                 protocol_order_key: self.protocol_order_key,
+//RS             },
+//RS         ))
+//RS     }
+//RS 
+//RS     pub fn with_read<R>(
+//RS         &self,
+//RS         callback: impl FnOnce(&[i64], &MirRuntimeValue) -> Result<R, String>,
+//RS     ) -> Result<R, String> {
+//RS         if !self.held() {
+//RS             return Err(crate::Memory::shared_protocol::JET_SHARED_GUARD_INVALID.to_string());
+//RS         }
+//RS         let path = self.path();
+//RS         let mut callback = Some(callback);
+//RS         let mut result = None;
+//RS         self.lease.with_read(&mut |value| {
+//RS             let callback = callback
+//RS                 .take()
+//RS                 .ok_or_else(|| "Source Shared read callback was invoked more than once".to_string())?;
+//RS             result = Some(callback(path, value)?);
+//RS             Ok(())
+//RS         })?;
+//RS         result.ok_or_else(|| "Source Shared read callback did not run".to_string())
+//RS     }
+//RS 
+//RS     pub fn with_edit<R>(
+//RS         &self,
+//RS         callback: impl FnOnce(&[i64], &mut MirRuntimeValue) -> Result<R, String>,
+//RS     ) -> Result<R, String> {
+//RS         crate::Memory::shared_protocol::jet_shared_guard_require_edit(&self.state)
+//RS             .map_err(str::to_owned)?;
+//RS         let path = self.path();
+//RS         let mut callback = Some(callback);
+//RS         let mut result = None;
+//RS         self.lease.with_edit(&mut |value| {
+//RS             let callback = callback
+//RS                 .take()
+//RS                 .ok_or_else(|| "Source Shared edit callback was invoked more than once".to_string())?;
+//RS             result = Some(callback(path, value)?);
+//RS             Ok(())
+//RS         })?;
+//RS         result.ok_or_else(|| "Source Shared edit callback did not run".to_string())
+//RS     }
+//RS 
+//RS     pub fn read_value(&self) -> Result<MirRuntimeValue, String> {
+//RS         self.with_read(|_, value| Ok(value.clone()))
+//RS     }
+//RS 
+//RS     pub fn stage_value(&self, value: MirRuntimeValue) -> Result<(), String> {
+//RS         crate::Memory::shared_protocol::jet_shared_guard_require_edit(&self.state)
+//RS             .map_err(str::to_owned)?;
+//RS         self.lease.stage_value(value)
+//RS     }
+//RS 
+//RS     pub fn revision(&self) -> Result<u64, String> {
+//RS         if !self.held() {
+//RS             return Err(crate::Memory::shared_protocol::JET_SHARED_GUARD_INVALID.to_string());
+//RS         }
+//RS         self.lease.revision()
+//RS     }
+//RS 
+//RS     pub fn wait_suspend(&self, value: MirRuntimeValue) -> Result<(), String> {
+//RS         crate::Memory::shared_protocol::jet_shared_guard_require_edit(&self.state)
+//RS             .map_err(str::to_owned)?;
+//RS         self.lease.wait_suspend(value)
+//RS     }
+//RS 
+//RS     pub fn wait_resume(
+//RS         &self,
+//RS         cancelled: &mut dyn FnMut() -> bool,
+//RS     ) -> Result<Option<MirRuntimeValue>, String> {
+//RS         self.lease.wait_resume(cancelled)
+//RS     }
+//RS 
+//RS     pub fn wait_abort(&self) -> Result<(), String> {
+//RS         self.lease.wait_abort()
+//RS     }
+//RS 
+//RS     pub fn finish_value(&self, value: MirRuntimeValue) -> Result<(), String> {
+//RS         self.lease.finish_value(value)
+//RS     }
+//RS 
+//RS     pub fn discard_staged(&self) -> Result<(), String> {
+//RS         crate::Memory::shared_protocol::jet_shared_guard_require_edit(&self.state)
+//RS             .map_err(str::to_owned)?;
+//RS         self.lease.discard_staged()
+//RS     }
+//RS }
+//RS pub(crate) struct SourceSharedInteropWaitHandoff {
+//RS     lease: Rc<SourceSharedInteropPhysicalLease>,
+//RS     error: Option<String>,
+//RS }
+//RS 
+//RS impl SourceSharedInteropWaitHandoff {
+//RS     pub(crate) fn take_error(&mut self) -> Option<String> {
+//RS         self.error.take()
+//RS     }
+//RS 
+//RS     fn record_error(&mut self, error: String) {
+//RS         if self.error.is_none() {
+//RS             self.error = Some(error);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl crate::Memory::shared_protocol::JetSharedWaitHandoff
+//RS     for SourceSharedInteropWaitHandoff
+//RS {
+//RS     fn suspend(&mut self) -> Result<(), ()> {
+//RS         let value = match self.lease.read_value() {
+//RS             Ok(value) => value,
+//RS             Err(error) => {
+//RS                 self.record_error(error);
+//RS                 return Err(());
+//RS             }
+//RS         };
+//RS         match self.lease.wait_suspend(value) {
+//RS             Ok(()) => Ok(()),
+//RS             Err(error) => {
+//RS                 self.record_error(error);
+//RS                 Err(())
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn resume(&mut self, cancelled: bool) -> Result<bool, ()> {
+//RS         let mut should_cancel = || cancelled;
+//RS         match self.lease.wait_resume(&mut should_cancel) {
+//RS             Ok(Some(_)) => Ok(true),
+//RS             Ok(None) => Ok(false),
+//RS             Err(error) => {
+//RS                 self.record_error(error);
+//RS                 Err(())
+//RS             }
+//RS         }
+//RS     }
+//RS 
+//RS     fn abort(&mut self) -> Result<(), ()> {
+//RS         match self.lease.wait_abort() {
+//RS             Ok(()) => Ok(()),
+//RS             Err(error) => {
+//RS                 self.record_error(error);
+//RS                 Err(())
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS impl SourceSharedInterop {
+//RS     pub(crate) fn acquire_physical_lease(
+//RS         &self,
+//RS         editable: bool,
+//RS     ) -> Result<Rc<SourceSharedInteropPhysicalLease>, String> {
+//RS         let guard = self.acquire_guard(editable)?;
+//RS         Ok(Rc::new(SourceSharedInteropPhysicalLease {
+//RS             guard: RefCell::new(guard),
+//RS             completion_delivery: Arc::clone(&self.completion_delivery),
+//RS         }))
+//RS     }
+//RS     /// Acquire the physical Source owner guard once and attach canonical
+//RS     /// SharedProtocol path state for access-time map/split aliases.
+//RS     pub fn acquire_guard_state(
+//RS         &self,
+//RS         editable: bool,
+//RS     ) -> Result<SourceSharedInteropGuardState, String> {
+//RS         SourceSharedInteropGuardState::acquire(self, editable, None)
+//RS     }
+//RS 
+//RS     /// Transfer a guard-prepared logical owner alias into the single canonical
+//RS     /// permit; map/split/clone guards retain this same token until final close.
+//RS     pub fn acquire_guard_state_with_owner_alias(
+//RS         &self,
+//RS         editable: bool,
+//RS         owner_alias: SourceSharedInteropOwnerAlias,
+//RS     ) -> Result<SourceSharedInteropGuardState, String> {
+//RS         SourceSharedInteropGuardState::acquire(self, editable, Some(owner_alias))
+//RS     }
+//RS }
+//RS 
+//RS struct InMemoryState {
+//RS     value: Mutex<MirRuntimeValue>,
+//RS     revision: AtomicU64,
+//RS     protocol: Arc<crate::Memory::shared_protocol::JetSharedProtocol>,
+//RS }
+//RS 
+//RS impl InMemoryState {
+//RS     fn acquire(
+//RS         &self,
+//RS         editable: bool,
+//RS     ) -> Result<Arc<crate::Memory::shared_protocol::JetSharedPermit>, String> {
+//RS         crate::Memory::shared_protocol::jet_shared_acquire(
+//RS             &self.protocol,
+//RS             editable,
+//RS             || false,
+//RS         )
+//RS         .ok_or_else(|| "Source Shared interop permit acquisition was cancelled".to_string())
+//RS     }
+//RS 
+//RS     fn publish(&self, value: MirRuntimeValue) -> Result<(), String> {
+//RS         let mut current = self
+//RS             .value
+//RS             .lock()
+//RS             .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?;
+//RS         let next = self
+//RS             .revision
+//RS             .load(Ordering::Acquire)
+//RS             .checked_add(1)
+//RS             .ok_or_else(|| "Source Shared interop revision exhausted".to_string())?;
+//RS         *current = value;
+//RS         self.revision.store(next, Ordering::Release);
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS struct InMemoryGuard {
+//RS     state: Arc<InMemoryState>,
+//RS     value: MirRuntimeValue,
+//RS     permit: Arc<crate::Memory::shared_protocol::JetSharedPermit>,
+//RS     editable: bool,
+//RS     suspended: bool,
+//RS     dirty: bool,
+//RS }
+//RS 
+//RS impl SourceSharedInteropGuard for InMemoryGuard {
+//RS     fn read_value(&mut self) -> Result<MirRuntimeValue, String> {
+//RS         if self.suspended || !self.permit.held() {
+//RS             return Err("Source Shared guard permit is not held".to_string());
+//RS         }
+//RS         Ok(self.value.clone())
+//RS     }
+//RS     fn revision(&self) -> Result<u64, String> {
+//RS         if self.suspended || !self.permit.held() {
+//RS             return Err("Source Shared guard permit is not held".to_string());
+//RS         }
+//RS         Ok(self.state.revision.load(Ordering::Acquire))
+//RS     }
+//RS     fn held(&self) -> bool {
+//RS         !self.suspended && self.permit.held()
+//RS     }
+//RS     fn release(
+//RS         &mut self,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+//RS         let commit_result = if self.permit.held() && self.dirty {
+//RS             self.state.publish(self.value.clone())
+//RS         } else {
+//RS             Ok(())
+//RS         };
+//RS         self.dirty = false;
+//RS         self.suspended = false;
+//RS         let released =
+//RS             crate::Memory::shared_protocol::JetSharedCanonicalPermit::release(self.permit.as_ref());
+//RS         let crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome {
+//RS             result: release_result,
+//RS             completion,
+//RS         } = released;
+//RS         crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+//RS             commit_result.and(release_result),
+//RS             completion,
+//RS         )
+//RS     }
+//RS 
+//RS     fn release_during_drop(&mut self) {
+//RS         if self.permit.held() && self.dirty {
+//RS             let _ = self.state.publish(self.value.clone());
+//RS         }
+//RS         self.dirty = false;
+//RS         self.suspended = false;
+//RS         crate::Memory::shared_protocol::JetSharedCanonicalPermit::release_during_drop(
+//RS             self.permit.as_ref(),
+//RS         );
+//RS     }
+//RS 
+//RS     fn stage_value(&mut self, value: MirRuntimeValue) -> Result<(), String> {
+//RS         if !self.editable {
+//RS             return Err("read-only Shared guard cannot stage a value".to_string());
+//RS         }
+//RS         if self.suspended || !self.permit.held() {
+//RS             return Err("Source Shared guard permit is not held".to_string());
+//RS         }
+//RS         self.value = value;
+//RS         self.dirty = true;
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     fn wait_suspend(
+//RS         &mut self,
+//RS         value: MirRuntimeValue,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+//RS         if !self.editable {
+//RS             return crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+//RS                 Err("read-only Shared guard cannot wait".to_string()),
+//RS                 None,
+//RS             );
+//RS         }
+//RS         if self.suspended || !self.permit.held() {
+//RS             return crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+//RS                 Err("Source Shared guard permit is not active".to_string()),
+//RS                 None,
+//RS             );
+//RS         }
+//RS         self.value = value;
+//RS         if self.dirty {
+//RS             if let Err(error) = self.state.publish(self.value.clone()) {
+//RS                 return crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+//RS                     Err(error),
+//RS                     None,
+//RS                 );
+//RS             }
+//RS             self.dirty = false;
+//RS         }
+//RS         let released =
+//RS             crate::Memory::shared_protocol::JetSharedCanonicalPermit::release(self.permit.as_ref());
+//RS         self.suspended = true;
+//RS         released
+//RS     }
+//RS 
+//RS     fn wait_resume(
+//RS         &mut self,
+//RS         cancelled: &mut dyn FnMut() -> bool,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<
+//RS         Option<MirRuntimeValue>,
+//RS     > {
+//RS         if !self.suspended || self.permit.held() {
+//RS             return crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+//RS                 Err("Source Shared guard wait lease is not suspended".to_string()),
+//RS                 None,
+//RS             );
+//RS         }
+//RS         if !self.permit.reacquire(cancelled) {
+//RS             return crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+//RS                 Ok(None),
+//RS                 None,
+//RS             );
+//RS         }
+//RS         self.suspended = false;
+//RS         let result = self
+//RS             .state
+//RS             .value
+//RS             .lock()
+//RS             .map_err(|_| "Source Shared interop value lock is poisoned".to_string())
+//RS             .map(|value| {
+//RS                 self.value = value.clone();
+//RS                 Some(self.value.clone())
+//RS             });
+//RS         crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(result, None)
+//RS     }
+//RS 
+//RS     fn wait_abort(
+//RS         &mut self,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+//RS         self.suspended = false;
+//RS         self.dirty = false;
+//RS         crate::Memory::shared_protocol::JetSharedCanonicalPermit::release(self.permit.as_ref())
+//RS     }
+//RS 
+//RS     fn finish_value(&mut self, value: MirRuntimeValue) -> Result<(), String> {
+//RS         if !self.permit.held() {
+//RS             self.suspended = false;
+//RS             self.dirty = false;
+//RS             return Ok(());
+//RS         }
+//RS         self.stage_value(value)
+//RS     }
+//RS 
+//RS     fn discard_staged(&mut self) -> Result<(), String> {
+//RS         if self.suspended || !self.permit.held() {
+//RS             return Err("Source Shared guard permit is not held".to_string());
+//RS         }
+//RS         self.value = self
+//RS             .state
+//RS             .value
+//RS             .lock()
+//RS             .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?
+//RS             .clone();
+//RS         self.dirty = false;
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for InMemoryGuard {
+//RS     fn drop(&mut self) {
+//RS         self.release_during_drop();
+//RS     }
+//RS }
+//RS 
+//RS struct InMemoryBackend {
+//RS     state: Arc<InMemoryState>,
+//RS }
+//RS 
+//RS impl InMemoryBackend {
+//RS     fn new(value: MirRuntimeValue) -> Self {
+//RS         Self {
+//RS             state: Arc::new(InMemoryState {
+//RS                 value: Mutex::new(value),
+//RS                 revision: AtomicU64::new(0),
+//RS                 protocol: crate::Memory::shared_protocol::JetSharedProtocol::new(),
+//RS             }),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS impl SourceSharedInteropBackend for InMemoryBackend {
+//RS     fn with_read(
+//RS         &self,
+//RS         callback: &mut dyn FnMut(&MirRuntimeValue) -> Result<(), String>,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+//RS         let result = (|| {
+//RS             let _permit = self.state.acquire(false)?;
+//RS             let value = self
+//RS                 .state
+//RS                 .value
+//RS                 .lock()
+//RS                 .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?;
+//RS             callback(&value)
+//RS         })();
+//RS         crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(result, None)
+//RS     }
+//RS 
+//RS     fn with_read_revision(
+//RS         &self,
+//RS         callback: &mut dyn FnMut(&MirRuntimeValue, u64) -> Result<(), String>,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+//RS         let result = (|| {
+//RS             let _permit = self.state.acquire(false)?;
+//RS             let value = self
+//RS                 .state
+//RS                 .value
+//RS                 .lock()
+//RS                 .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?;
+//RS             callback(&value, self.state.revision.load(Ordering::Acquire))
+//RS         })();
+//RS         crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(result, None)
+//RS     }
+//RS 
+//RS     fn with_edit(
+//RS         &self,
+//RS         callback: &mut dyn FnMut(&mut MirRuntimeValue) -> Result<(), String>,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+//RS         let result = (|| {
+//RS             let _permit = self.state.acquire(true)?;
+//RS             let mut value = self
+//RS                 .state
+//RS                 .value
+//RS                 .lock()
+//RS                 .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?;
+//RS             let mut edited = value.clone();
+//RS             callback(&mut edited)?;
+//RS             drop(value);
+//RS             self.state.publish(edited)
+//RS         })();
+//RS         crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(result, None)
+//RS     }
+//RS 
+//RS     fn replace_if_revision(
+//RS         &self,
+//RS         expected_revision: u64,
+//RS         replacement: MirRuntimeValue,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<(bool, u64)> {
+//RS         let result = (|| {
+//RS             let _permit = self.state.acquire(true)?;
+//RS             let mut value = self
+//RS                 .state
+//RS                 .value
+//RS                 .lock()
+//RS                 .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?;
+//RS             let current = self.state.revision.load(Ordering::Acquire);
+//RS             if current != expected_revision {
+//RS                 return Ok((false, current));
+//RS             }
+//RS             let next = current
+//RS                 .checked_add(1)
+//RS                 .ok_or_else(|| "Source Shared interop revision exhausted".to_string())?;
+//RS             *value = replacement;
+//RS             self.state.revision.store(next, Ordering::Release);
+//RS             Ok((true, next))
+//RS         })();
+//RS         crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(result, None)
+//RS     }
+//RS 
+//RS     fn acquire_guard(
+//RS         &self,
+//RS         editable: bool,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<
+//RS         Box<dyn SourceSharedInteropGuard>,
+//RS     > {
+//RS         let result = (|| {
+//RS             let permit = self.state.acquire(editable)?;
+//RS             let value = self
+//RS                 .state
+//RS                 .value
+//RS                 .lock()
+//RS                 .map_err(|_| "Source Shared interop value lock is poisoned".to_string())?
+//RS                 .clone();
+//RS             Ok(Box::new(InMemoryGuard {
+//RS                 state: self.state.clone(),
+//RS                 value,
+//RS                 permit,
+//RS                 editable,
+//RS                 suspended: false,
+//RS                 dirty: editable,
+//RS             }) as Box<dyn SourceSharedInteropGuard>)
+//RS         })();
+//RS         crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(result, None)
+//RS     }
+//RS }
+//RS 
+//RS type GuardFactory = dyn Fn(
+//RS         bool,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<
+//RS         Box<dyn SourceSharedInteropGuard>,
+//RS     > + Send
+//RS     + Sync
+//RS     + 'static;
+//RS 
+//RS struct CallbackBackend<Read, Edit, Capture, Replace> {
+//RS     read: Read,
+//RS     edit: Edit,
+//RS     capture: Capture,
+//RS     replace: Replace,
+//RS     guard: Option<Arc<GuardFactory>>,
+//RS }
+//RS 
+//RS impl<Read, Edit, Capture, Replace> SourceSharedInteropBackend
+//RS     for CallbackBackend<Read, Edit, Capture, Replace>
+//RS where
+//RS     Read: Fn(
+//RS             &mut dyn FnMut(&MirRuntimeValue) -> Result<(), String>,
+//RS         ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()>
+//RS         + Send
+//RS         + Sync
+//RS         + 'static,
+//RS     Edit: Fn(
+//RS             &mut dyn FnMut(&mut MirRuntimeValue) -> Result<(), String>,
+//RS         ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()>
+//RS         + Send
+//RS         + Sync
+//RS         + 'static,
+//RS     Capture: Fn(
+//RS             &mut dyn FnMut(&MirRuntimeValue, u64) -> Result<(), String>,
+//RS         ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()>
+//RS         + Send
+//RS         + Sync
+//RS         + 'static,
+//RS     Replace: Fn(
+//RS             u64,
+//RS             MirRuntimeValue,
+//RS         ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<(bool, u64)>
+//RS         + Send
+//RS         + Sync
+//RS         + 'static,
+//RS {
+//RS     fn with_read(
+//RS         &self,
+//RS         callback: &mut dyn FnMut(&MirRuntimeValue) -> Result<(), String>,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+//RS         (self.read)(callback)
+//RS     }
+//RS 
+//RS     fn with_read_revision(
+//RS         &self,
+//RS         callback: &mut dyn FnMut(&MirRuntimeValue, u64) -> Result<(), String>,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+//RS         (self.capture)(callback)
+//RS     }
+//RS 
+//RS     fn with_edit(
+//RS         &self,
+//RS         callback: &mut dyn FnMut(&mut MirRuntimeValue) -> Result<(), String>,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+//RS         (self.edit)(callback)
+//RS     }
+//RS 
+//RS     fn replace_if_revision(
+//RS         &self,
+//RS         expected_revision: u64,
+//RS         replacement: MirRuntimeValue,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<(bool, u64)> {
+//RS         (self.replace)(expected_revision, replacement)
+//RS     }
+//RS 
+//RS     fn acquire_guard(
+//RS         &self,
+//RS         editable: bool,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<
+//RS         Box<dyn SourceSharedInteropGuard>,
+//RS     > {
+//RS         match self.guard.as_ref() {
+//RS             Some(factory) => factory(editable),
+//RS             None => crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+//RS                 Err("Source Shared owner has no guard factory".to_string()),
+//RS                 None,
+//RS             ),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// One checked, identity-preserving physical Shared root.
+//RS ///
+//RS /// Cloning this value aliases the same backend and therefore the same physical
+//RS /// root.  `identity` is only an in-process equality key for sidecar lookup; it
+//RS /// is never emitted into MIR or used as a language-level handle.
+//RS #[derive(Clone)]
+//RS pub struct SourceSharedInterop {
+//RS     type_id: u64,
+//RS     backend: Arc<dyn SourceSharedInteropBackend>,
+//RS     owner_identity: Option<usize>,
+//RS     protocol_order_key: Option<usize>,
+//RS     owner_lifecycle: Option<Arc<OwnerLifecycle>>,
+//RS     owner_alias_lifecycle: Option<Arc<OwnerAliasLifecycle>>,
+//RS     owner_alias_lease: Option<Arc<SourceSharedInteropOwnerAlias>>,
+//RS     typed_owner: Option<Arc<dyn Any + Send + Sync>>,
+//RS     resource_lease_owner: Option<Arc<dyn Any + Send + Sync>>,
+//RS     resident_root: bool,
+//RS     completion_delivery: Arc<Mutex<Option<SourceSharedInteropCompletionDelivery>>>,
+//RS     payload_finalizer_installer: Option<SourceSharedInteropPayloadFinalizerInstaller>,
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub struct SourceSharedInteropWeak {
+//RS     type_id: u64,
+//RS     identity: usize,
+//RS     physical_identity: Option<usize>,
+//RS     protocol_order_key: Option<usize>,
+//RS     owner_alias_count: Arc<dyn Fn() -> Result<usize, String> + Send + Sync>,
+//RS     owner: Arc<dyn SourceSharedInteropWeakOwner>,
+//RS     typed_owner: Option<Arc<dyn Any + Send + Sync>>,
+//RS     resource_lease_owner: Option<Arc<dyn Any + Send + Sync>>,
+//RS }
+//RS 
+//RS 
+//RS impl SourceSharedInterop {
+//RS     /// Build a root from owner-supplied permit callbacks. `capture` must
+//RS     /// report the value and physical revision from the same read permit;
+//RS     /// `replace` must compare and publish under one exclusive permit.
+//RS     pub fn from_callbacks<Read, Edit, Capture, Replace>(
+//RS         type_id: u64,
+//RS         read: Read,
+//RS         edit: Edit,
+//RS         capture: Capture,
+//RS         replace: Replace,
+//RS     ) -> Self
+//RS     where
+//RS         Read: Fn(
+//RS                 &mut dyn FnMut(&MirRuntimeValue) -> Result<(), String>,
+//RS             ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()>
+//RS             + Send
+//RS             + Sync
+//RS             + 'static,
+//RS         Edit: Fn(
+//RS                 &mut dyn FnMut(&mut MirRuntimeValue) -> Result<(), String>,
+//RS             ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()>
+//RS             + Send
+//RS             + Sync
+//RS             + 'static,
+//RS         Capture: Fn(
+//RS                 &mut dyn FnMut(&MirRuntimeValue, u64) -> Result<(), String>,
+//RS             ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()>
+//RS             + Send
+//RS             + Sync
+//RS             + 'static,
+//RS         Replace: Fn(u64, MirRuntimeValue) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<(bool, u64)>
+//RS             + Send
+//RS             + Sync
+//RS             + 'static,
+//RS     {
+//RS         Self {
+//RS             type_id,
+//RS             backend: Arc::new(CallbackBackend {
+//RS                 read,
+//RS                 edit,
+//RS                 capture,
+//RS                 replace,
+//RS                 guard: None,
+//RS             }),
+//RS             owner_identity: None,
+//RS             protocol_order_key: None,
+//RS             owner_lifecycle: None,
+//RS             owner_alias_lifecycle: None,
+//RS             owner_alias_lease: None,
+//RS             typed_owner: None,
+//RS             resource_lease_owner: None,
+//RS             resident_root: false,
+//RS             completion_delivery: Arc::new(Mutex::new(None)),
+//RS             payload_finalizer_installer: None,
+//RS         }
+//RS     }
+//RS     /// Build a root with the owner's physical non-Send guard and its atomic
+//RS     /// revisioned capture/conditional-replacement operations.
+//RS     pub fn from_callbacks_with_guard<Read, Edit, Guard, Capture, Replace>(
+//RS         type_id: u64,
+//RS         read: Read,
+//RS         edit: Edit,
+//RS         guard: Guard,
+//RS         capture: Capture,
+//RS         replace: Replace,
+//RS     ) -> Self
+//RS     where
+//RS         Read: Fn(
+//RS                 &mut dyn FnMut(&MirRuntimeValue) -> Result<(), String>,
+//RS             ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()>
+//RS             + Send
+//RS             + Sync
+//RS             + 'static,
+//RS         Edit: Fn(
+//RS                 &mut dyn FnMut(&mut MirRuntimeValue) -> Result<(), String>,
+//RS             ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()>
+//RS             + Send
+//RS             + Sync
+//RS             + 'static,
+//RS         Guard: Fn(bool) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<Box<dyn SourceSharedInteropGuard>>
+//RS             + Send
+//RS             + Sync
+//RS             + 'static,
+//RS         Capture: Fn(
+//RS                 &mut dyn FnMut(&MirRuntimeValue, u64) -> Result<(), String>,
+//RS             ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()>
+//RS             + Send
+//RS             + Sync
+//RS             + 'static,
+//RS         Replace: Fn(u64, MirRuntimeValue) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<(bool, u64)>
+//RS             + Send
+//RS             + Sync
+//RS             + 'static,
+//RS     {
+//RS         Self {
+//RS             type_id,
+//RS             backend: Arc::new(CallbackBackend {
+//RS                 read,
+//RS                 edit,
+//RS                 capture,
+//RS                 replace,
+//RS                 guard: Some(Arc::new(guard)),
+//RS             }),
+//RS             owner_identity: None,
+//RS             protocol_order_key: None,
+//RS             owner_lifecycle: None,
+//RS             owner_alias_lifecycle: None,
+//RS             owner_alias_lease: None,
+//RS             typed_owner: None,
+//RS             resource_lease_owner: None,
+//RS             resident_root: false,
+//RS             completion_delivery: Arc::new(Mutex::new(None)),
+//RS             payload_finalizer_installer: None,
+//RS         }
+//RS     }
+//RS 
+//RS     #[cfg(test)]
+//RS     pub(crate) fn from_value(type_id: u64, value: MirRuntimeValue) -> Self {
+//RS         Self {
+//RS             type_id,
+//RS             backend: Arc::new(InMemoryBackend::new(value)),
+//RS             owner_identity: None,
+//RS             protocol_order_key: None,
+//RS             owner_lifecycle: None,
+//RS             owner_alias_lifecycle: None,
+//RS             owner_alias_lease: None,
+//RS             typed_owner: None,
+//RS             resource_lease_owner: None,
+//RS             resident_root: false,
+//RS             completion_delivery: Arc::new(Mutex::new(None)),
+//RS             payload_finalizer_installer: None,
+//RS         }
+//RS     }
+//RS     /// Bind this callback carrier to the physical owner's stable identity.
+//RS     /// Aliases represented by separate callback sets must supply the same key.
+//RS     pub fn with_owner_identity(mut self, identity: usize) -> Self {
+//RS         self.owner_identity = Some(identity);
+//RS         self
+//RS     }
+//RS 
+//RS     /// Bind the canonical ordering identity of the physical Shared permit.
+//RS     pub fn with_protocol_order_key(mut self, key: usize) -> Self {
+//RS         self.protocol_order_key = Some(key);
+//RS         self
+//RS     }
+//RS 
+//RS     /// Bind the owner's weak-upgrade operation. Logical alias counting and
+//RS     /// retention are attached separately by `with_owner_alias_lifecycle`.
+//RS     pub fn with_owner_lifecycle<Downgrade>(mut self, downgrade: Downgrade) -> Self
+//RS     where
+//RS         Downgrade: Fn() -> Box<dyn SourceSharedInteropWeakOwner> + Send + Sync + 'static,
+//RS     {
+//RS         self.owner_lifecycle = Some(Arc::new(OwnerLifecycle {
+//RS             downgrade: Arc::new(downgrade),
+//RS         }));
+//RS         self
+//RS     }
+//RS 
+//RS     /// Bind logical owner-alias counting and explicit per-alias retention.
+//RS     /// Counts exclude interop metadata, typed-root pins, and guard leases.
+//RS     pub fn with_owner_alias_lifecycle<Count, Retain>(
+//RS         mut self,
+//RS         strong_count: Count,
+//RS         retain: Retain,
+//RS     ) -> Self
+//RS     where
+//RS         Count: Fn() -> Result<usize, String> + Send + Sync + 'static,
+//RS         Retain: Fn() -> Result<Box<dyn SourceSharedInteropOwnerAliasLease>, String>
+//RS             + Send
+//RS             + Sync
+//RS             + 'static,
+//RS     {
+//RS         self.owner_alias_lifecycle = Some(Arc::new(OwnerAliasLifecycle {
+//RS             strong_count: Arc::new(strong_count),
+//RS             retain: Arc::new(retain),
+//RS         }));
+//RS         self
+//RS     }
+//RS 
+//RS     /// Bind the one-shot physical-cell finalizer installer. Its implementation
+//RS     /// must take the candidate only when the same cell has accepted it.
+//RS     pub fn with_payload_finalizer_installer<Install>(mut self, installer: Install) -> Self
+//RS     where
+//RS         Install: Fn(&mut Option<SourceSharedInteropPayloadFinalizer>) -> Result<(), String>
+//RS             + Send
+//RS             + Sync
+//RS             + 'static,
+//RS     {
+//RS         self.payload_finalizer_installer = Some(Arc::new(installer));
+//RS         self
+//RS     }
+//RS 
+//RS     /// Install a Source-aware logical drop on this exact physical root.
+//RS     ///
+//RS     /// On error, `finalizer` remains the caller's exact pending candidate.
+//RS     /// The owner invokes it only after its last logical alias and active borrow
+//RS     /// are gone, outside its state, protocol, and permit locks.
+//RS     pub fn install_payload_finalizer(
+//RS         &self,
+//RS         finalizer: &mut Option<SourceSharedInteropPayloadFinalizer>,
+//RS     ) -> Result<(), String> {
+//RS         let Some(finalizer_installer) = &self.payload_finalizer_installer else {
+//RS             return Err("Source Shared owner has no physical payload finalizer installer".to_string());
+//RS         };
+//RS         let Some(binding) = finalizer.as_ref() else {
+//RS             return Err("Source Shared payload finalizer candidate is empty".to_string());
+//RS         };
+//RS         let delivery = binding.completion_delivery();
+//RS         let mut installed_delivery = self
+//RS             .completion_delivery
+//RS             .lock()
+//RS             .unwrap_or_else(|error| error.into_inner());
+//RS         let previous_delivery = installed_delivery.replace(delivery);
+//RS         if let Err(error) = finalizer_installer(finalizer) {
+//RS             *installed_delivery = previous_delivery;
+//RS             return Err(error);
+//RS         }
+//RS         Ok(())
+//RS     }
+//RS 
+//RS     /// Retain one semantic strong alias without cloning the physical root.
+//RS     pub fn retain_owner_alias(&self) -> Result<SourceSharedInteropOwnerAlias, String> {
+//RS         let lifecycle = self
+//RS             .owner_alias_lifecycle
+//RS             .as_ref()
+//RS             .ok_or_else(|| "Source Shared owner has no logical alias lifecycle".to_string())?;
+//RS         Ok(SourceSharedInteropOwnerAlias::new(
+//RS             self.identity(),
+//RS             (lifecycle.retain)()?,
+//RS         ))
+//RS     }
+//RS 
+//RS     /// Number of semantic strong aliases, excluding carrier/guard pins.
+//RS     pub fn owner_strong_count(&self) -> Result<Option<usize>, String> {
+//RS         self.owner_alias_lifecycle
+//RS             .as_ref()
+//RS             .map(|owner| (owner.strong_count)())
+//RS             .transpose()
+//RS     }
+//RS 
+//RS     pub fn downgrade_owner(&self) -> Option<SourceSharedInteropWeak> {
+//RS         let owner = self.owner_lifecycle.as_ref()?;
+//RS         let aliases = self.owner_alias_lifecycle.as_ref()?;
+//RS         Some(SourceSharedInteropWeak {
+//RS             type_id: self.type_id,
+//RS             identity: self.identity(),
+//RS             physical_identity: self.physical_identity(),
+//RS             protocol_order_key: self.protocol_order_key,
+//RS             owner_alias_count: aliases.strong_count.clone(),
+//RS             owner: Arc::from((owner.downgrade)()),
+//RS             typed_owner: None,
+//RS             resource_lease_owner: None,
+//RS         })
+//RS     }
+//RS 
+//RS     pub fn protocol_order_key(&self) -> Option<usize> {
+//RS         self.protocol_order_key
+//RS     }
+//RS 
+//RS     pub fn physical_identity(&self) -> Option<usize> {
+//RS         self.owner_identity
+//RS     }
+//RS     /// Consume this carrier's exact logical owner alias and preserve any
+//RS     /// completion produced when it retires the physical payload.
+//RS     pub fn release_owner_alias(
+//RS         &self,
+//RS     ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+//RS         match &self.owner_alias_lease {
+//RS             Some(owner_alias) => owner_alias.release(),
+//RS             None => crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+//RS                 Err("Source Shared carrier has no logical owner alias lease".to_string()),
+//RS                 None,
+//RS             ),
+//RS         }
+//RS     }
+//RS 
+//RS     pub fn has_owner_lifecycle(&self) -> bool {
+//RS         self.owner_lifecycle.is_some() && self.owner_alias_lifecycle.is_some()
+//RS     }
+//RS 
+//RS     /// Retain an owner-native typed handle without serializing or projecting
+//RS     /// its payload. Clones of this carrier share the same attachment.
+//RS     pub fn with_typed_owner<T: Any + Send + Sync>(mut self, owner: T) -> Self {
+//RS         self.typed_owner = Some(Arc::new(owner));
+//RS         self
+//RS     }
+//RS     /// Keep one owner-issued logical alias alive across clones of this
+//RS     /// physical carrier. This is separate from typed/resource metadata pins.
+//RS     pub fn with_owner_alias_lease(
+//RS         mut self,
+//RS         owner_alias: SourceSharedInteropOwnerAlias,
+//RS     ) -> Result<Self, String> {
+//RS         if owner_alias.owner_identity != self.identity() {
+//RS             return Err("Source Shared alias lease belongs to a different physical owner".to_string());
+//RS         }
+//RS         self.owner_alias_lease = Some(Arc::new(owner_alias));
+//RS         Ok(self)
+//RS     }
+//RS     pub(crate) fn without_owner_alias_lease(&self) -> Self {
+//RS         let mut interop = self.clone();
+//RS         interop.owner_alias_lease = None;
+//RS         interop
+//RS     }
+//RS 
+//RS 
+//RS     pub fn owner_alias_token_id(&self) -> Option<i64> {
+//RS         self.owner_alias_lease
+//RS             .as_ref()
+//RS             .map(|owner_alias| owner_alias.token_id())
+//RS     }
+//RS 
+//RS 
+//RS     /// Recover the owner-native handle when this carrier originated from the
+//RS     /// same typed Shared implementation.
+//RS     pub fn downcast_typed_owner<T: Any + Send + Sync + Clone>(&self) -> Option<T> {
+//RS         self.typed_owner.as_ref()?.downcast_ref::<T>().cloned()
+//RS     }
+//RS 
+//RS     /// Attach a non-counting Source resource lease without replacing the
+//RS     /// owner-native typed handle stored in `typed_owner`.
+//RS     pub fn with_resource_lease_owner<T: Any + Send + Sync>(mut self, lease: T) -> Self {
+//RS         self.resource_lease_owner = Some(Arc::new(lease));
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn downcast_resource_lease_owner<T: Any + Send + Sync + Clone>(&self) -> Option<T> {
+//RS         self.resource_lease_owner
+//RS             .as_ref()?
+//RS             .downcast_ref::<T>()
+//RS             .cloned()
+//RS     }
+//RS 
+//RS     pub(crate) fn mark_resident_root(&mut self) {
+//RS         self.resident_root = true;
+//RS     }
+//RS 
+//RS     pub(crate) fn is_resident_root(&self) -> bool {
+//RS         self.resident_root
+//RS     }
+//RS 
+//RS     /// Checked outer `Shared<T>` type identity retained by the physical root.
+//RS     pub fn type_id(&self) -> u64 {
+//RS         self.type_id
+//RS     }
+//RS 
+//RS     /// Stable identity for aliases of this physical root during one process
+//RS     /// lifetime.
+//RS     pub fn identity(&self) -> usize {
+//RS         self.owner_identity
+//RS             .unwrap_or_else(|| Arc::as_ptr(&self.backend) as *const () as usize)
+//RS     }
+//RS 
+//RS     /// Project this exact root into the private MIR carrier.
+//RS     pub fn as_native_owned(&self) -> MirRuntimeValue {
+//RS         MirRuntimeValue::NativeOwned(MirNativeOwned::new(self.clone()))
+//RS     }
+//RS 
+//RS     /// Recover a physical Shared root from a private MIR carrier.
+//RS     pub fn from_native_owned(value: &MirRuntimeValue) -> Result<Self, String> {
+//RS         let MirRuntimeValue::NativeOwned(root) = value else {
+//RS             return Err("expected a native-owned Shared root".to_string());
+//RS         };
+//RS         root.downcast_ref::<Self>()
+//RS             .cloned()
+//RS             .ok_or_else(|| "native-owned value is not a SourceSharedInterop root".to_string())
+//RS     }
+//RS 
+//RS     pub(crate) fn finish_physical_operation<T>(
+//RS         &self,
+//RS         outcome: crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<T>,
+//RS     ) -> Result<T, String> {
+//RS         finish_physical_operation(&self.completion_delivery, outcome)
+//RS     }
+//RS 
+//RS     /// Hold the canonical read permit while invoking `callback`.
+//RS     pub fn with_read<R>(
+//RS         &self,
+//RS         callback: impl FnOnce(&MirRuntimeValue) -> Result<R, String>,
+//RS     ) -> Result<R, String> {
+//RS         let mut callback = Some(callback);
+//RS         let mut result = None;
+//RS         let outcome = self.backend.with_read(&mut |value| {
+//RS             let callback = callback
+//RS                 .take()
+//RS                 .ok_or_else(|| "Shared read callback was invoked more than once".to_string())?;
+//RS             result = Some(callback(value)?);
+//RS             Ok(())
+//RS         });
+//RS         self.finish_physical_operation(outcome)?;
+//RS         result.ok_or_else(|| "Shared read backend did not invoke its callback".to_string())
+//RS     }
+//RS     /// Capture the typed payload and owner revision under one canonical read
+//RS     /// permit. The returned revision belongs to this exact physical root.
+//RS     pub fn capture_with_revision(&self) -> Result<(MirRuntimeValue, u64), String> {
+//RS         let mut captured = None;
+//RS         let outcome = self.backend.with_read_revision(&mut |value, revision| {
+//RS             if captured.is_some() {
+//RS                 return Err("Shared capture callback was invoked more than once".to_string());
+//RS             }
+//RS             captured = Some((value.clone(), revision));
+//RS             Ok(())
+//RS         });
+//RS         self.finish_physical_operation(outcome)?;
+//RS         captured.ok_or_else(|| "Shared capture backend did not invoke its callback".to_string())
+//RS     }
+//RS     /// Atomically replace the root only when its physical revision still
+//RS     /// matches the revision captured from this same root.
+//RS     pub fn replace_if_revision(
+//RS         &self,
+//RS         expected_revision: u64,
+//RS         replacement: MirRuntimeValue,
+//RS     ) -> Result<(bool, u64), String> {
+//RS         self.finish_physical_operation(
+//RS             self.backend
+//RS                 .replace_if_revision(expected_revision, replacement),
+//RS         )
+//RS     }
+//RS 
+//RS 
+//RS     /// Hold the canonical edit permit while invoking `callback`; commit is
+//RS     /// owner-defined and occurs only when the callback returns `Ok`.
+//RS     pub fn with_edit<R>(
+//RS         &self,
+//RS         callback: impl FnOnce(&mut MirRuntimeValue) -> Result<R, String>,
+//RS     ) -> Result<R, String> {
+//RS         let mut callback = Some(callback);
+//RS         let mut result = None;
+//RS         let outcome = self.backend.with_edit(&mut |value| {
+//RS             let callback = callback
+//RS                 .take()
+//RS                 .ok_or_else(|| "Shared edit callback was invoked more than once".to_string())?;
+//RS             result = Some(callback(value)?);
+//RS             Ok(())
+//RS         });
+//RS         self.finish_physical_operation(outcome)?;
+//RS         result.ok_or_else(|| "Shared edit backend did not invoke its callback".to_string())
+//RS     }
+//RS     /// Acquire the owner's canonical guard permit and keep it alive until the
+//RS     /// returned non-Send object is dropped.
+//RS     pub fn acquire_guard(
+//RS         &self,
+//RS         editable: bool,
+//RS     ) -> Result<Box<dyn SourceSharedInteropGuard>, String> {
+//RS         self.finish_physical_operation(self.backend.acquire_guard(editable))
+//RS     }
+//RS }
+//RS impl SourceSharedInteropWeak {
+//RS     /// Checked outer `Shared<T>` identity without reserving a strong alias.
+//RS     pub fn type_id(&self) -> u64 {
+//RS         self.type_id
+//RS     }
+//RS 
+//RS     /// Stable carrier identity shared by physical aliases and their upgrades.
+//RS     pub fn identity(&self) -> usize {
+//RS         self.identity
+//RS     }
+//RS 
+//RS     /// Explicit identity of the physical Shared owner, when bound by its
+//RS     /// implementation rather than inferred from the callback backend.
+//RS     pub fn physical_identity(&self) -> Option<usize> {
+//RS         self.physical_identity
+//RS     }
+//RS 
+//RS     /// Attach a non-counting typed metadata pin, such as the lease which keeps
+//RS     /// this weak capability's Source resource arena live.
+//RS     pub fn with_typed_owner<T: Any + Send + Sync>(mut self, owner: T) -> Self {
+//RS         self.typed_owner = Some(Arc::new(owner));
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn downcast_typed_owner<T: Any + Send + Sync + Clone>(&self) -> Option<T> {
+//RS         self.typed_owner.as_ref()?.downcast_ref::<T>().cloned()
+//RS     }
+//RS 
+//RS     /// Attach a non-counting Source resource lease without replacing the
+//RS     /// owner-native typed handle stored in `typed_owner`.
+//RS     pub fn with_resource_lease_owner<T: Any + Send + Sync>(mut self, lease: T) -> Self {
+//RS         self.resource_lease_owner = Some(Arc::new(lease));
+//RS         self
+//RS     }
+//RS 
+//RS     pub fn downcast_resource_lease_owner<T: Any + Send + Sync + Clone>(&self) -> Option<T> {
+//RS         self.resource_lease_owner
+//RS             .as_ref()?
+//RS             .downcast_ref::<T>()
+//RS             .cloned()
+//RS     }
+//RS 
+//RS     /// Atomically upgrade the physical owner and reserve the returned strong
+//RS     /// alias as one operation. Callers must adopt this token; do not retain a
+//RS     /// second time after extracting the root.
+//RS     pub fn upgrade(
+//RS         &self,
+//RS     ) -> Result<Option<SourceSharedInteropOwnerAliasUpgrade>, String> {
+//RS         let Some((owner, lease)) = self.owner.upgrade()? else {
+//RS             return Ok(None);
+//RS         };
+//RS         if owner.type_id() != self.type_id
+//RS             || owner.identity() != self.identity
+//RS             || owner.physical_identity() != self.physical_identity
+//RS             || owner.protocol_order_key() != self.protocol_order_key
+//RS         {
+//RS             return Err("Source Shared weak upgrade resolved a different physical owner".to_string());
+//RS         }
+//RS         let alias_count = owner
+//RS             .owner_strong_count()?
+//RS             .ok_or_else(|| "Source Shared weak upgrade lost its alias lifecycle".to_string())?;
+//RS         if alias_count == 0 {
+//RS             return Err("Source Shared weak upgrade did not reserve a live alias".to_string());
+//RS         }
+//RS         Ok(Some(SourceSharedInteropOwnerAliasUpgrade {
+//RS             interop: owner,
+//RS             owner_alias: SourceSharedInteropOwnerAlias::new(self.identity, lease),
+//RS         }))
+//RS     }
+//RS }
+//RS 
+//RS 
+//RS impl std::fmt::Debug for SourceSharedInterop {
+//RS     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//RS         formatter
+//RS             .debug_struct("SourceSharedInterop")
+//RS             .field("type_id", &self.type_id)
+//RS             .field("identity", &self.identity())
+//RS             .finish_non_exhaustive()
+//RS     }
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod tests {
+//RS     use super::*;
+//RS 
+//RS     fn state(value: i64) -> MirRuntimeValue {
+//RS         MirRuntimeValue::Struct {
+//RS             type_name: "State".to_string(),
+//RS             fields: vec![("value".to_string(), MirRuntimeValue::Int(value))],
+//RS         }
+//RS     }
+//RS 
+//RS     fn state_value(value: &MirRuntimeValue) -> Result<i64, String> {
+//RS         let MirRuntimeValue::Struct { type_name, fields } = value else {
+//RS             return Err("expected State record".to_string());
+//RS         };
+//RS         if type_name != "State" || fields.len() != 1 || fields[0].0 != "value" {
+//RS             return Err("State record shape changed".to_string());
+//RS         }
+//RS         let MirRuntimeValue::Int(value) = &fields[0].1 else {
+//RS             return Err("State.value is not an Int".to_string());
+//RS         };
+//RS         Ok(*value)
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn missing_payload_finalizer_installer_preserves_the_candidate() {
+//RS         let root = SourceSharedInterop::from_value(0x701, MirRuntimeValue::Int(1));
+//RS         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+//RS         let finalizer_calls = Arc::clone(&calls);
+//RS         let completion_delivery: SourceSharedInteropCompletionDelivery = Arc::new(|_| {});
+//RS         let mut finalizer: Option<SourceSharedInteropPayloadFinalizer> =
+//RS             Some(crate::Memory::shared_protocol::JetSharedPhysicalFinalizerBinding::new(
+//RS                 Box::new(move |value| {
+//RS                     assert_eq!(value, MirRuntimeValue::String("retained".to_string()));
+//RS                     finalizer_calls.fetch_add(1, Ordering::SeqCst);
+//RS                     Box::new(())
+//RS                 }),
+//RS                 completion_delivery,
+//RS             ));
+//RS 
+//RS         let error = root
+//RS             .install_payload_finalizer(&mut finalizer)
+//RS             .expect_err("an owner without an installer must reject finalization");
+//RS         assert!(error.contains("no physical payload finalizer installer"));
+//RS         assert!(finalizer.is_some(), "installation failure must retain the exact candidate");
+//RS         finalizer
+//RS             .take()
+//RS             .expect("the original finalizer should remain available")
+//RS             .finish_and_deliver(MirRuntimeValue::String("retained".to_string()));
+//RS         assert_eq!(calls.load(Ordering::SeqCst), 1);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_shared_weak_upgrade_reserves_one_logical_alias() {
+//RS         struct TestAliasLease {
+//RS             token_id: i64,
+//RS             count: Arc<std::sync::atomic::AtomicUsize>,
+//RS         }
+//RS 
+//RS         impl SourceSharedInteropOwnerAliasLease for TestAliasLease {
+//RS             fn token_id(&self) -> i64 {
+//RS                 self.token_id
+//RS             }
+//RS 
+//RS             fn release(
+//RS                 self: Box<Self>,
+//RS             ) -> crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<()> {
+//RS                 let token_id = self.token_id;
+//RS                 drop(self);
+//RS                 crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome::new(
+//RS                     Ok(()),
+//RS                     Some(Box::new(token_id)),
+//RS                 )
+//RS             }
+//RS         }
+//RS 
+//RS         impl Drop for TestAliasLease {
+//RS             fn drop(&mut self) {
+//RS                 self.count.fetch_sub(1, Ordering::AcqRel);
+//RS             }
+//RS         }
+//RS 
+//RS         fn reserve_alias(
+//RS             count: Arc<std::sync::atomic::AtomicUsize>,
+//RS             token_id: i64,
+//RS         ) -> Result<Box<dyn SourceSharedInteropOwnerAliasLease>, String> {
+//RS             let mut current = count.load(Ordering::Acquire);
+//RS             loop {
+//RS                 if current == 0 {
+//RS                     return Err("no logical Shared owner remains".to_string());
+//RS                 }
+//RS                 let next = current
+//RS                     .checked_add(1)
+//RS                     .ok_or_else(|| "logical Shared alias count exhausted".to_string())?;
+//RS                 match count.compare_exchange_weak(
+//RS                     current,
+//RS                     next,
+//RS                     Ordering::AcqRel,
+//RS                     Ordering::Acquire,
+//RS                 ) {
+//RS                     Ok(_) => break,
+//RS                     Err(actual) => current = actual,
+//RS                 }
+//RS             }
+//RS             Ok(Box::new(TestAliasLease { token_id, count }))
+//RS         }
+//RS 
+//RS         struct FixedSharedWeak {
+//RS             root: SourceSharedInterop,
+//RS             count: Arc<std::sync::atomic::AtomicUsize>,
+//RS             next_token: Arc<std::sync::atomic::AtomicU64>,
+//RS         }
+//RS 
+//RS         impl SourceSharedInteropWeakOwner for FixedSharedWeak {
+//RS             fn upgrade(
+//RS                 &self,
+//RS             ) -> Result<
+//RS                 Option<(
+//RS                     SourceSharedInterop,
+//RS                     Box<dyn SourceSharedInteropOwnerAliasLease>,
+//RS                 )>,
+//RS                 String,
+//RS             > {
+//RS                 let mut current = self.count.load(Ordering::Acquire);
+//RS                 loop {
+//RS                     if current == 0 {
+//RS                         return Ok(None);
+//RS                     }
+//RS                     let next = current
+//RS                         .checked_add(1)
+//RS                         .ok_or_else(|| "logical Shared alias count exhausted".to_string())?;
+//RS                     match self.count.compare_exchange_weak(
+//RS                         current,
+//RS                         next,
+//RS                         Ordering::AcqRel,
+//RS                         Ordering::Acquire,
+//RS                     ) {
+//RS                         Ok(_) => break,
+//RS                         Err(actual) => current = actual,
+//RS                     }
+//RS                 }
+//RS                 let token_id = i64::try_from(self.next_token.fetch_add(1, Ordering::AcqRel))
+//RS                     .map_err(|_| "logical Shared alias token IDs exhausted".to_string())?;
+//RS                 Ok(Some((
+//RS                     self.root.clone(),
+//RS                     Box::new(TestAliasLease {
+//RS                         token_id,
+//RS                         count: self.count.clone(),
+//RS                     }),
+//RS                 )))
+//RS             }
+//RS         }
+//RS 
+//RS         let alias_count = Arc::new(std::sync::atomic::AtomicUsize::new(1));
+//RS         let next_token = Arc::new(std::sync::atomic::AtomicU64::new(1));
+//RS         let count_for_count = alias_count.clone();
+//RS         let count_for_retain = alias_count.clone();
+//RS         let ids_for_retain = next_token.clone();
+//RS         let root = SourceSharedInterop::from_value(38, state(1))
+//RS             .with_owner_identity(0x381)
+//RS             .with_protocol_order_key(0x382)
+//RS             .with_owner_alias_lifecycle(
+//RS                 move || Ok(count_for_count.load(Ordering::Acquire)),
+//RS                 move || {
+//RS                     let token_id = i64::try_from(ids_for_retain.fetch_add(1, Ordering::AcqRel))
+//RS                         .map_err(|_| "logical Shared alias token IDs exhausted".to_string())?;
+//RS                     reserve_alias(count_for_retain.clone(), token_id)
+//RS                 },
+//RS             );
+//RS         let weak_root = root.clone();
+//RS         let weak_count = alias_count.clone();
+//RS         let weak_ids = next_token.clone();
+//RS         let owner = root.with_owner_lifecycle(move || {
+//RS             Box::new(FixedSharedWeak {
+//RS                 root: weak_root.clone(),
+//RS                 count: weak_count.clone(),
+//RS                 next_token: weak_ids.clone(),
+//RS             })
+//RS         });
+//RS         let weak = owner
+//RS             .downgrade_owner()
+//RS             .expect("owner lifecycle should expose a weak carrier");
+//RS         assert_eq!(weak.identity(), owner.identity());
+//RS         assert_eq!(weak.physical_identity(), Some(0x381));
+//RS         assert_eq!(owner.owner_strong_count().expect("logical count"), Some(1));
+//RS 
+//RS         let metadata_clone = owner.clone();
+//RS         let first_alias = owner
+//RS             .retain_owner_alias()
+//RS             .expect("first semantic alias should retain");
+//RS         let second_alias = owner
+//RS             .retain_owner_alias()
+//RS             .expect("second semantic alias should retain");
+//RS         assert_ne!(first_alias.token_id(), second_alias.token_id());
+//RS         assert_eq!(owner.owner_strong_count().expect("logical count"), Some(3));
+//RS         drop(metadata_clone);
+//RS         assert_eq!(owner.owner_strong_count().expect("logical count"), Some(3));
+//RS         drop(first_alias);
+//RS         drop(second_alias);
+//RS         assert_eq!(owner.owner_strong_count().expect("logical count"), Some(1));
+//RS 
+//RS         let upgraded = weak
+//RS             .upgrade()
+//RS             .expect("weak upgrade should reserve atomically")
+//RS             .expect("the original logical owner is still live");
+//RS         let token_id = upgraded.owner_alias().token_id();
+//RS         let upgraded_carrier = upgraded
+//RS             .into_carrier()
+//RS             .expect("the carrier should adopt its reserved alias");
+//RS         let carrier_clone = upgraded_carrier.clone();
+//RS         assert_eq!(upgraded_carrier.owner_alias_token_id(), Some(token_id));
+//RS         assert_eq!(carrier_clone.owner_alias_token_id(), Some(token_id));
+//RS         assert_eq!(upgraded_carrier.identity(), owner.identity());
+//RS         assert_eq!(upgraded_carrier.physical_identity(), Some(0x381));
+//RS         assert_eq!(upgraded_carrier.protocol_order_key(), Some(0x382));
+//RS         assert_eq!(owner.owner_strong_count().expect("logical count"), Some(2));
+//RS         let outcome = upgraded_carrier.release_owner_alias();
+//RS         assert!(outcome.result.is_ok());
+//RS         assert_eq!(
+//RS             *outcome
+//RS                 .completion
+//RS                 .expect("explicit release returns its exact completion")
+//RS                 .downcast::<i64>()
+//RS                 .expect("completion preserves the alias token"),
+//RS             token_id,
+//RS         );
+//RS         assert_eq!(owner.owner_strong_count().expect("released count"), Some(1));
+//RS         drop(upgraded_carrier);
+//RS         drop(carrier_clone);
+//RS         assert_eq!(owner.owner_strong_count().expect("released carrier is inert"), Some(1));
+//RS         alias_count.store(0, Ordering::Release);
+//RS         assert!(
+//RS             weak.upgrade()
+//RS                 .expect("zero logical owners should be a non-error expiration")
+//RS                 .is_none(),
+//RS             "metadata pins must not resurrect a logical owner"
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_shared_interop_path_aliases_share_one_owner_permit_and_publication() {
+//RS         let owner_marker = Arc::new(0_u8);
+//RS         let owner_identity = Arc::as_ptr(&owner_marker) as usize;
+//RS         let root = SourceSharedInterop::from_value(40, state(1))
+//RS             .with_owner_identity(owner_identity)
+//RS             .with_protocol_order_key(owner_identity);
+//RS         let root_guard = root
+//RS             .acquire_guard_state(true)
+//RS             .expect("canonical physical guard should acquire");
+//RS         let mapped = root_guard
+//RS             .map_path(&[4, 7], true)
+//RS             .expect("full path should map through canonical Shared policy");
+//RS         let (first, second) = mapped
+//RS             .split_path(&[10, 11], &[20, 21], true)
+//RS             .expect("disjoint full paths should split through canonical Shared policy");
+//RS         assert_eq!(first.path(), &[4, 7, 10, 11]);
+//RS         assert_eq!(second.path(), &[4, 7, 20, 21]);
+//RS         assert!(first.held());
+//RS         assert!(second.held());
+//RS         let read_alias = first
+//RS             .clone_guard(false)
+//RS             .expect("read alias should retain the same physical permit");
+//RS 
+//RS         first
+//RS             .with_edit(|path, value| {
+//RS                 assert_eq!(path, &[4, 7, 10, 11]);
+//RS                 *value = state(9);
+//RS                 Ok(())
+//RS             })
+//RS             .expect("editable mapped guard should stage through its shared permit");
+//RS         assert_eq!(
+//RS             second
+//RS                 .with_read(|path, value| {
+//RS                     assert_eq!(path, &[4, 7, 20, 21]);
+//RS                     state_value(value)
+//RS                 })
+//RS                 .expect("split alias should read while the same permit is held"),
+//RS             9
+//RS         );
+//RS         drop(first);
+//RS         assert!(second.held());
+//RS         assert_eq!(
+//RS             read_alias
+//RS                 .with_read(|_, value| state_value(value))
+//RS                 .expect("clone alias should retain the original owner lease"),
+//RS             9
+//RS         );
+//RS         drop(second);
+//RS         assert!(read_alias.held());
+//RS         drop(read_alias);
+//RS 
+//RS         let (committed, revision) = root
+//RS             .capture_with_revision()
+//RS             .expect("last alias close should publish through the physical owner");
+//RS         assert_eq!(state_value(&committed).expect("State should decode"), 9);
+//RS         assert_eq!(revision, 1);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_shared_interop_discard_staged_aborts_without_revision() {
+//RS         let root = SourceSharedInterop::from_value(39, state(1));
+//RS         let mut guard = root
+//RS             .acquire_guard(true)
+//RS             .expect("editable physical guard should acquire");
+//RS         guard
+//RS             .stage_value(state(99))
+//RS             .expect("editable physical guard should stage");
+//RS         guard
+//RS             .discard_staged()
+//RS             .expect("physical guard should discard unpublished staging");
+//RS         drop(guard);
+//RS 
+//RS         let (value, revision) = root
+//RS             .capture_with_revision()
+//RS             .expect("discarded owner should remain readable");
+//RS         assert_eq!(state_value(&value).expect("State should decode"), 1);
+//RS         assert_eq!(revision, 0);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_shared_interop_aliases_preserve_identity_and_guard_commit() {
+//RS         let root = SourceSharedInterop::from_value(41, state(1));
+//RS         let alias = root.clone();
+//RS         assert_eq!(root.identity(), alias.identity());
+//RS 
+//RS         let native = root.as_native_owned();
+//RS         let restored = SourceSharedInterop::from_native_owned(&native)
+//RS             .expect("native-owned Source Shared root must downcast");
+//RS         assert_eq!(restored.identity(), root.identity());
+//RS 
+//RS         root.with_edit(|value| {
+//RS             *value = state(2);
+//RS             Ok(())
+//RS         })
+//RS         .expect("physical Shared edit should commit");
+//RS         assert_eq!(
+//RS             alias
+//RS                 .with_read(state_value)
+//RS                 .expect("alias should read the committed payload"),
+//RS             2
+//RS         );
+//RS 
+//RS         let mut guard = alias
+//RS             .acquire_guard(true)
+//RS             .expect("editable physical guard should acquire");
+//RS         guard
+//RS             .stage_value(state(3))
+//RS             .expect("editable guard should stage its payload");
+//RS         drop(guard);
+//RS         assert_eq!(
+//RS             root.with_read(state_value)
+//RS                 .expect("guard drop should publish its staged payload"),
+//RS             3
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_shared_interop_capture_and_conditional_replace_keep_owner_revision() {
+//RS         let root = SourceSharedInterop::from_value(44, state(1));
+//RS         let (initial, initial_revision) = root
+//RS             .capture_with_revision()
+//RS             .expect("capture should return a payload and its owner revision");
+//RS         assert_eq!(state_value(&initial).expect("initial State should decode"), 1);
+//RS         assert_eq!(initial_revision, 0);
+//RS 
+//RS         let (committed, committed_revision) = root
+//RS             .replace_if_revision(initial_revision, state(2))
+//RS             .expect("matching revision should be conditionally replaceable");
+//RS         assert!(committed);
+//RS         assert_eq!(committed_revision, initial_revision + 1);
+//RS 
+//RS         let (stale_commit, current_revision) = root
+//RS             .replace_if_revision(initial_revision, state(3))
+//RS             .expect("stale revision should be a normal non-commit");
+//RS         assert!(!stale_commit);
+//RS         assert_eq!(current_revision, committed_revision);
+//RS         let (current, current_revision) = root
+//RS             .capture_with_revision()
+//RS             .expect("capture should expose the committed value and revision");
+//RS         assert_eq!(state_value(&current).expect("State should decode"), 2);
+//RS         assert_eq!(current_revision, committed_revision);
+//RS 
+//RS         let semantic_result = root.with_edit(|value| {
+//RS             *value = state(4);
+//RS             Ok(Err::<(), _>("Source callback returned an error".to_string()))
+//RS         });
+//RS         assert_eq!(
+//RS             semantic_result,
+//RS             Ok(Err("Source callback returned an error".to_string()))
+//RS         );
+//RS         let (current, current_revision) = root
+//RS             .capture_with_revision()
+//RS             .expect("semantic callback errors remain published data");
+//RS         assert_eq!(state_value(&current).expect("State should decode"), 4);
+//RS         assert_eq!(current_revision, committed_revision + 1);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_shared_interop_edit_error_does_not_publish_partial_value() {
+//RS         let root = SourceSharedInterop::from_value(42, state(7));
+//RS         let result = root.with_edit(|value| {
+//RS             *value = state(99);
+//RS             Err::<(), _>("codec rejected the replacement".to_string())
+//RS         });
+//RS         assert_eq!(result, Err("codec rejected the replacement".to_string()));
+//RS         assert_eq!(
+//RS             root.with_read(state_value)
+//RS                 .expect("failed edit should leave the root readable"),
+//RS             7
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn source_shared_interop_wait_reacquires_refreshes_and_cancellation_discards() {
+//RS         let root = SourceSharedInterop::from_value(43, state(1));
+//RS         let mut guard = root
+//RS             .acquire_guard(true)
+//RS             .expect("editable physical guard should acquire");
+//RS         guard
+//RS             .wait_suspend(state(2))
+//RS             .result
+//RS             .expect("wait handoff should publish and release");
+//RS         root.with_edit(|value| {
+//RS             *value = state(3);
+//RS             Ok(())
+//RS         })
+//RS         .expect("another owner should edit while the guard is suspended");
+//RS         assert_eq!(
+//RS             guard
+//RS                 .wait_resume(&mut || false)
+//RS                 .result
+//RS                 .expect("wait handoff should reacquire"),
+//RS             Some(state(3))
+//RS         );
+//RS         guard
+//RS             .finish_value(state(4))
+//RS             .expect("resumed guard should finish its staged value");
+//RS         drop(guard);
+//RS         assert_eq!(
+//RS             root.with_read(state_value)
+//RS                 .expect("resumed guard should publish on close"),
+//RS             4
+//RS         );
+//RS 
+//RS         let mut cancelled = root
+//RS             .acquire_guard(true)
+//RS             .expect("second editable physical guard should acquire");
+//RS         cancelled
+//RS             .wait_suspend(state(5))
+//RS             .result
+//RS             .expect("second wait handoff should publish and release");
+//RS         root.with_edit(|value| {
+//RS             *value = state(6);
+//RS             Ok(())
+//RS         })
+//RS         .expect("owner edit should be visible before cancellation");
+//RS         assert_eq!(
+//RS             cancelled
+//RS                 .wait_resume(&mut || true)
+//RS                 .result
+//RS                 .expect("cancelled wait should return cleanly"),
+//RS             None
+//RS         );
+//RS         cancelled
+//RS             .finish_value(state(8))
+//RS             .expect("cancelled close should discard its stale projection");
+//RS         drop(cancelled);
+//RS         assert_eq!(
+//RS             root.with_read(state_value)
+//RS                 .expect("cancelled guard should leave the latest owner value"),
+//RS             6
+//RS         );
+//RS     }
+//RS }
+// END-PORT-PENDING 0233 crates/jet-jit/src/SourceSharedInterop.rs:1-2273
+

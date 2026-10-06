@@ -1,0 +1,938 @@
+use core.service.runtime.top_service_authority.*
+use core.service.runtime.top_service_authority_03.*
+use core.crypto.runtime.kernel_sha256.sha256_bytes
+use core.sys.target
+use std.fs.OpenOptions
+use std.io.[Read, Write, Seek, SeekFrom, ErrorKind]
+use core.jobs.runtime.job_queue_types.[JetJobPayload, JetJobResult, JetJobError]
+use core.crypto.[hmac_sha256_raw, constant_time_equal_bytes]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1792
+// GATE #4565: kernel primitive
+#Unsafe("operation and registry mutexes guard reservation removal before the durable delivering marker")
+pub fn jet_services_authority_mark_delivered(store: &String, id: &String) -> () JetServiceError! {
+    service_authority_validate_text(id, "service id", SERVICE_AUTH_MAX_KEY, false)?
+    runtime :: JetServiceRuntime{store:store.clone(), retention_ms:0}
+    service_authority_validate_runtime(&runtime)?
+    _operation_lock :: service_authority_operation_lock(&runtime, id)?
+    _guard :: service_authority_lock().lock().map_err(fn(_) { service_authority_error("service authority lock is poisoned") })?
+    entries :: service_authority_entries(&runtime, &service_authority_read(&runtime)?)?
+    entry := entries.iter().find(fn(entry) { entry.id == id })
+        .ok_or_else(fn() { JetServiceError.Unknown("service id `{id}` is unknown") })?
+    if entry.dead {
+        service_authority_remove_pending_entry(&runtime, entry)?
+        return Err(JetServiceError.Unavailable("cannot deliver a dead-lettered service receipt"))
+    }
+    if entry.state == JetDeliveryState.Cancelled {
+        service_authority_remove_pending_entry(&runtime, entry)?
+        return Err(JetServiceError.Unavailable("cannot deliver a cancelled delivery"))
+    }
+    if !entry.delivered_to_worker {
+        // Recovery source remains the log if the marker fails after reservation
+        // removal, so the caller can restore the whole suffix without loss.
+        service_authority_remove_pending_entry(&runtime, entry)?
+        service_authority_append_event(&runtime, entry, JetDeliveryState.Delivering, entry.attempts, service_authority_now())?
+    } else { service_authority_remove_pending_entry(&runtime, entry)? }
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1838
+// GATE #4565: kernel primitive
+#Unsafe("read endpoint registry under lock, then inspect durable receipts without retaining its guard")
+pub fn jet_services_authority_has_uncommitted(endpoint: &JetServiceEndpoint) -> Bool JetServiceError! {
+    service_authority_validate_endpoint(endpoint)?
+    key :: service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation)
+    store :: {
+        registry :: service_endpoint_registry().lock().map_err(fn(_) { service_authority_error("service endpoint registry lock is poisoned") })?
+        state := registry.get(&key).ok_or_else(fn() { JetServiceError.Partitioned("service endpoint authority is not registered") })?
+        if state.tree != endpoint.tree || state.worker != endpoint.worker {
+            return Err(JetServiceError.Revoked("service endpoint authority does not match its tree"))
+        }
+        state.store.as_ref().and_then(fn((store, generation)) { (*generation == endpoint.generation).then(fn() { store.clone() }) })
+    }
+    store :: store ?? return Ok(false)
+    runtime :: JetServiceRuntime{store:^store, retention_ms:0}
+    entries :: service_authority_entries(&runtime, &service_authority_read(&runtime)?)?
+    now :: service_authority_now()
+    Ok(entries.iter().any(fn(entry) {
+        entry.tree == endpoint.tree && entry.worker == endpoint.worker && entry.state != JetDeliveryState.Cancelled
+            && service_authority_entry_routes_to_endpoint(&runtime, entry, endpoint)
+            // Pin shard for every live durable receipt, including pending queue.
+            // Explicit retry alone performs redelivery; this only retains route.
+            && !entry.delivered && !entry.dead && entry.retained_until.is_none() && !service_authority_entry_expired(entry, now)
+    }))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1886
+fn service_authority_enqueue_entry(runtime: &JetServiceRuntime, entry: &ServiceAuthorityEntry) -> () JetServiceError! {
+    endpoint :: service_authority_current_endpoint(runtime, entry)?
+    if endpoint.tree != entry.tree || endpoint.worker != entry.worker {
+        return Err(JetServiceError.Revoked("service receipt endpoint no longer names its worker"))
+    }
+    jet_services_authority_enqueue(runtime, &endpoint, &entry.id, &entry.message)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1899
+fn service_authority_entry_routes_to_endpoint(runtime: &JetServiceRuntime, entry: &ServiceAuthorityEntry, endpoint: &JetServiceEndpoint) -> Bool {
+    if entry.tree != endpoint.tree || entry.worker != endpoint.worker { return false }
+    if entry.authority == endpoint.authority && entry.generation == endpoint.generation { return true }
+    // Restart changes provider authority but not durable logical identity.
+    // Authenticate the resolved route; never rewrite receipt or retry sideways.
+    service_authority_current_endpoint(runtime, entry).is_ok_and(fn(current) {
+        current.tree == endpoint.tree && current.worker == endpoint.worker && current.generation == endpoint.generation
+    })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1922
+fn service_authority_hex(bytes: &[U8]) -> String {
+    output := String.with_capacity(bytes.len() * 2)
+    loop byte in bytes { output.push_str("{byte:02x}") }
+    ^output
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1930
+fn service_authority_unhex(value: &String) -> [U8]? {
+    if value.len() % 2 != 0 { return None }
+    bytes := [U8].with_capacity(value.len() / 2)
+    for pair in value.as_bytes().chunks_exact(2) {
+        high :: (pair[0] as Char).to_digit(16)? as U8
+        low :: (pair[1] as Char).to_digit(16)? as U8
+        bytes.push((high << 4) | low)
+    }
+    Val(^bytes)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1944
+fn service_authority_field(value: &String) -> String {
+    encoded :: service_authority_hex(value.as_bytes())
+    "{value.len()}:{encoded}"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1952
+fn service_authority_record(op: Char, fields: &[String]) -> String {
+    record := op.to_string()
+    loop field in fields {
+        record.push('|')
+        record.push_str(&service_authority_field(field))
+    }
+    record.push('\n')
+    ^record
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1962
+fn service_authority_parse_record(line: &String) -> (Char, [String]) JetServiceError! {
+    parts := line.split('|')
+    op :: parts.next().and_then(fn(value) { value.chars().next() })
+        .ok_or_else(fn() { service_authority_error("service authority record has no operation") })?
+    fields := [String]{}
+    loop part in parts {
+        (length, encoded) := part.split_once(':').ok_or_else(fn() { service_authority_error("service authority field is malformed") })?
+        length :: length.parse::<USize>().map_err(fn(_) { service_authority_error("service authority field length is malformed") })?
+        bytes :: service_authority_unhex(encoded).ok_or_else(fn() { service_authority_error("service authority field is not hex") })?
+        if bytes.len() != length { return Err(service_authority_error("service authority field length does not match")) }
+        value :: String.from_utf8(^bytes).map_err(fn(_) { service_authority_error("service authority field is not UTF-8") })?
+        fields.push(^value)
+    }
+    Ok((op, ^fields))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:1990
+// GATE #4565: kernel primitive
+#Unsafe("read real locked append-only store with byte/record bounds and reject syntactically complete non-newline tail")
+fn service_authority_read(runtime: &JetServiceRuntime) -> [(Char, [String])] JetServiceError! {
+    service_authority_validate_store_path(&runtime.store)?
+    _file_lock :: service_authority_file_lock(&runtime.store, "store")?
+    file := match OpenOptions.new().read(true).open(OSPath.new(&runtime.store)) {
+        Ok(file) -> ^file
+        Err(error) if error.kind() == ErrorKind.NotFound -> return Ok([])
+        Err(error) -> return Err(service_authority_error("could not open service store: {error}"))
+    }
+    size :: file.metadata().map_err(fn(error) { service_authority_error("could not inspect service store: {error}") })?.len()
+    if size > SERVICE_AUTH_MAX_BYTES { return Err(JetServiceError.Policy("service authority log exceeds its byte limit")) }
+    contents := String.new()
+    file.read_to_string(&contents).map_err(fn(error) { service_authority_error("could not read service store: {error}") })?
+    if contents.lines().count() > SERVICE_AUTH_MAX_RECORDS { return Err(JetServiceError.Policy("service authority log is full")) }
+    // Ignore only syntactically incomplete crash tail; complete no-newline
+    // record is truncated and must fail closed instead of becoming history.
+    (complete, tail) := contents.rfind('\n').map(fn(end) { (&contents[0..<end], &contents[end + 1..]) }).unwrap_or(("", &contents))
+    if !tail.is_empty() && service_authority_parse_record(tail).is_ok() {
+        return Err(service_authority_error("service authority log ends with a truncated record"))
+    }
+    complete.lines().map(service_authority_parse_record).collect()
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2043
+// GATE #4565: kernel primitive
+#Unsafe("locked store repairs only incomplete crash tail and fsyncs repair and appended durable record")
+fn service_authority_append(runtime: &JetServiceRuntime, op: Char, fields: &[String]) -> () JetServiceError! {
+    service_authority_validate_store_path(&runtime.store)?
+    _file_lock :: service_authority_file_lock(&runtime.store, "store")?
+    record :: service_authority_record(op, fields)
+    options := OpenOptions.new()
+    options.create(true).append(true).read(true).write(true)
+    if target.selected_family() == "unix" { options.mode(0o600) }
+    file := options.open(OSPath.new(&runtime.store)).map_err(fn(error) { service_authority_error("could not open service store: {error}") })?
+    current_size :: file.metadata().map_err(fn(error) { service_authority_error("could not inspect service store: {error}") })?.len()
+    record_size :: U64.try_from(record.len()).map_err(fn(_) { JetServiceError.Policy("service receipt record is too large") })?
+    if current_size.checked_add(record_size).is_none_or(fn(size) { size > SERVICE_AUTH_MAX_BYTES }) {
+        return Err(JetServiceError.Policy("service authority log exceeds its byte limit"))
+    }
+    file.seek(SeekFrom.Start(0)).map_err(fn(error) { service_authority_error("could not seek service store: {error}") })?
+    contents := String.new()
+    file.read_to_string(&contents).map_err(fn(error) { service_authority_error("could not read service store before append: {error}") })?
+    complete_end :: contents.rfind('\n').map(fn(end) { end + 1 }).unwrap_or(0)
+    tail := &contents[complete_end..]
+    if !tail.is_empty() {
+        if service_authority_parse_record(tail).is_ok() {
+            return Err(service_authority_error("service authority log ends with a truncated record"))
+        }
+        file.set_len(complete_end as U64).map_err(fn(error) { service_authority_error("could not repair service authority log tail: {error}") })?
+        file.sync_all().map_err(fn(error) { service_authority_error("could not commit service authority log repair: {error}") })?
+    }
+    file.seek(SeekFrom.End(0)).map_err(fn(error) { service_authority_error("could not seek service store for append: {error}") })?
+    file.write_all(record.as_bytes()).map_err(fn(error) { service_authority_error("could not append service receipt: {error}") })?
+    file.sync_all().map_err(fn(error) { service_authority_error("could not commit service receipt: {error}") })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2116
+// Receipt identity is logical and length-framed; route authority/generation
+// changes on restart/handoff and must not enter persisted logical identity.
+fn service_authority_id(runtime: &JetServiceRuntime, endpoint: &JetServiceEndpoint, message: &String, key: &String) -> String {
+    input := [U8]{}
+    store :: service_authority_store_identity(&runtime.store)
+    loop field in [store.as_bytes(), endpoint.tree.as_bytes(), endpoint.worker.as_bytes(), message.as_bytes(), key.as_bytes()] {
+        input.extend_from_slice(&(field.len() as U64).to_be_bytes())
+        input.extend_from_slice(field)
+    }
+    digest :: sha256_bytes(input)
+    encoded :: service_authority_hex(&digest)
+    "svc-{encoded}"
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2150
+fn service_delivery_state_name(state: JetDeliveryState) -> String {
+    match state {
+        JetDeliveryState.Pending -> "Pending"
+        JetDeliveryState.Accepted -> "Accepted"
+        JetDeliveryState.Delivering -> "Delivering"
+        JetDeliveryState.Delivered -> "Delivered"
+        JetDeliveryState.DeadLettered -> "DeadLettered"
+        JetDeliveryState.Cancelled -> "Cancelled"
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2161
+fn service_delivery_state_parse(value: &String) -> JetDeliveryState JetServiceError! {
+    match value {
+        "Pending" -> Ok(JetDeliveryState.Pending)
+        "Accepted" -> Ok(JetDeliveryState.Accepted)
+        "Delivering" -> Ok(JetDeliveryState.Delivering)
+        "Delivered" -> Ok(JetDeliveryState.Delivered)
+        "DeadLettered" -> Ok(JetDeliveryState.DeadLettered)
+        "Cancelled" -> Ok(JetDeliveryState.Cancelled)
+        _ -> Err(service_authority_error("service delivery lifecycle state is malformed"))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2175
+fn service_delivery_transition_allowed(entry: &ServiceAuthorityEntry, state: JetDeliveryState, attempts: I64) -> () JetServiceError! {
+    if attempts < entry.attempts { return Err(service_authority_error("delivery event attempts move backwards")) }
+    allowed :: match (entry.state, state) {
+        (JetDeliveryState.Pending, JetDeliveryState.Accepted)
+        | (JetDeliveryState.Accepted, JetDeliveryState.Accepted)
+        | (JetDeliveryState.Accepted, JetDeliveryState.Delivering)
+        | (JetDeliveryState.Accepted, JetDeliveryState.DeadLettered)
+        | (JetDeliveryState.Accepted, JetDeliveryState.Cancelled)
+        | (JetDeliveryState.Delivering, JetDeliveryState.Accepted)
+        | (JetDeliveryState.Delivering, JetDeliveryState.Delivered)
+        | (JetDeliveryState.Delivering, JetDeliveryState.DeadLettered)
+        | (JetDeliveryState.Delivering, JetDeliveryState.Cancelled)
+        | (JetDeliveryState.Delivered, JetDeliveryState.DeadLettered) -> true
+        (JetDeliveryState.Delivered, JetDeliveryState.Accepted) -> entry.retained_until.is_some()
+        _ -> false
+    }
+    if allowed { Ok(()) } else { Err(service_authority_error("delivery event contains an invalid lifecycle transition")) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2210
+fn service_delivery_generation_key(authority: String, generation: I64) -> [U8] JetServiceError! {
+    authority_key :: service_authority_signing_key(authority)?
+    generation :: generation.to_string()
+    payload := [U8]{}
+    loop field in ["jet-service-delivery-generation-v1".as_bytes(), generation.as_bytes()] {
+        &payload.extend_from_slice(&(field.len() as U64).to_be_bytes())
+        &payload.extend_from_slice(field)
+    }
+    Ok(hmac_sha256_raw(&authority_key, &payload))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2227
+fn service_delivery_event_signature(authority: String, generation: I64, id: String, sequence: I64, state: JetDeliveryState, attempts: I64, timestamp: I64) -> String JetServiceError! {
+    key :: service_delivery_generation_key(authority, generation)?
+    sequence :: sequence.to_string()
+    attempts :: attempts.to_string()
+    timestamp :: timestamp.to_string()
+    state :: service_delivery_state_name(state)
+    payload := [U8]{}
+    loop field in ["jet-service-delivery-event-v1".as_bytes(), id.as_bytes(), sequence.as_bytes(), state.as_bytes(), attempts.as_bytes(), timestamp.as_bytes()] {
+        &payload.extend_from_slice(&(field.len() as U64).to_be_bytes())
+        &payload.extend_from_slice(field)
+    }
+    Ok(service_authority_hex(&hmac_sha256_raw(&key, &payload)))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2256
+fn service_delivery_acceptance_signature(authority: String, generation: I64, id: String, key: String, tree: String, worker: String, message: String, created: I64, expires: I64) -> String JetServiceError! {
+    signing_key :: service_delivery_generation_key(authority, generation)?
+    generation :: generation.to_string()
+    created :: created.to_string()
+    expires :: expires.to_string()
+    payload := [U8]{}
+    loop field in ["jet-service-delivery-acceptance-v2".as_bytes(), id.as_bytes(), key.as_bytes(), authority.as_bytes(), tree.as_bytes(), worker.as_bytes(), generation.as_bytes(), message.as_bytes(), created.as_bytes(), expires.as_bytes()] {
+        &payload.extend_from_slice(&(field.len() as U64).to_be_bytes())
+        &payload.extend_from_slice(field)
+    }
+    Ok(service_authority_hex(&hmac_sha256_raw(&signing_key, &payload)))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2290
+fn service_delivery_retention_signature(entry: &ServiceAuthorityEntry, retained_until: I64) -> String JetServiceError! {
+    signing_key :: service_delivery_generation_key(&entry.authority, entry.generation)?
+    retained_until :: retained_until.to_string()
+    payload := [U8]{}
+    loop field in ["jet-service-delivery-retention-v1".as_bytes(), entry.id.as_bytes(), retained_until.as_bytes()] {
+        &payload.extend_from_slice(&(field.len() as U64).to_be_bytes())
+        &payload.extend_from_slice(field)
+    }
+    Ok(service_authority_hex(&hmac_sha256_raw(&signing_key, &payload)))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2308
+fn service_delivery_receipt_signature(entry: &ServiceAuthorityEntry, duplicate: Bool) -> String JetServiceError! {
+    key :: service_delivery_generation_key(&entry.authority, entry.generation)?
+    state :: service_delivery_state_name(entry.state)
+    attempts :: entry.attempts.to_string()
+    expires :: entry.expires.to_string()
+    retained_until :: entry.retained_until.unwrap_or(-1).to_string()
+    generation :: entry.generation.to_string()
+    duplicate :: duplicate.to_string()
+    payload := [U8]{}
+    loop field in ["jet-service-delivery-receipt-v1".as_bytes(), entry.id.as_bytes(), entry.key.as_bytes(), duplicate.as_bytes(), entry.tree.as_bytes(), entry.worker.as_bytes(), entry.message.as_bytes(), state.as_bytes(), attempts.as_bytes(), expires.as_bytes(), retained_until.as_bytes(), generation.as_bytes()] {
+        &payload.extend_from_slice(&(field.len() as U64).to_be_bytes())
+        &payload.extend_from_slice(field)
+    }
+    Ok(service_authority_hex(&hmac_sha256_raw(&key, &payload)))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2340
+fn service_authority_delivery_for_entry(runtime: &JetServiceRuntime, entry: &ServiceAuthorityEntry, duplicate: Bool) -> JetDelivery {
+    JetDelivery{id: entry.id.clone(), store: service_authority_store_identity(&runtime.store), duplicate: duplicate, authority: entry.authority.clone(), generation: entry.generation}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2354
+fn service_authority_delivery_for_endpoint(runtime: &JetServiceRuntime, id: String, endpoint: &JetServiceEndpoint, duplicate: Bool) -> JetDelivery {
+    JetDelivery{id: id.to_string(), store: service_authority_store_identity(&runtime.store), duplicate: duplicate, authority: endpoint.authority.clone(), generation: endpoint.generation}
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2369
+fn service_authority_entry_state(entry: &ServiceAuthorityEntry) -> JetDeliveryState { entry.state }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2373
+fn service_authority_append_event(runtime: &JetServiceRuntime, entry: &ServiceAuthorityEntry, state: JetDeliveryState, attempts: I64, timestamp: I64) -> Unit JetServiceError! {
+    service_delivery_transition_allowed(entry, state, attempts)?
+    sequence :: entry.event_sequence.saturating_add(1)
+    signature :: service_delivery_event_signature(&entry.authority, entry.generation, &entry.id, sequence, state, attempts, timestamp)?
+    service_authority_append(runtime, 'E', &[entry.id.clone(), sequence.to_string(), service_delivery_state_name(state).to_string(), attempts.to_string(), timestamp.to_string(), ^signature])
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2405
+// GATE #4565: kernel primitive
+#Unsafe("hold per-delivery and registry native locks while loading, cleaning expired work, and authenticating handle identity")
+fn service_authority_delivery_entry(delivery: &JetDelivery) -> (JetServiceRuntime, ServiceAuthorityEntry, [(Char, [String])]) JetServiceError! {
+    service_authority_validate_text(&delivery.id, "delivery id", SERVICE_AUTH_MAX_KEY, false)?
+    runtime :: JetServiceRuntime{store: delivery.store.clone(), retention_ms: 0}
+    service_authority_validate_runtime(&runtime)?
+    _operation_lock :: service_authority_operation_lock(&runtime, &delivery.id)?
+    _guard :: service_authority_lock().lock().map_err(fn(_) { service_authority_error("service authority lock is poisoned") })?
+    records := service_authority_read(&runtime)?
+    entries := service_authority_entries(&runtime, &records)?
+    if service_authority_cleanup_expired(&runtime, &entries, service_authority_now())? {
+        records = service_authority_read(&runtime)?
+        entries = service_authority_entries(&runtime, &records)?
+    }
+    entry :: entries.into_iter().find(fn(entry) { entry.id == delivery.id }).ok_or_else(fn() { JetServiceError.Unknown("delivery `{delivery.id}` is unknown") })?
+    if delivery.authority != entry.authority -> return Err(JetServiceError.Revoked("delivery handle authority does not match its receipt"))
+    if delivery.generation != entry.generation -> return Err(JetServiceError.Stale("delivery handle generation does not match its receipt"))
+    Ok((^runtime, ^entry, ^records))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2450
+fn service_authority_validate_delivery_runtime(runtime: &JetServiceRuntime, delivery: &JetDelivery) -> Unit JetServiceError! {
+    if service_authority_store_identity(&runtime.store) != delivery.store -> return Err(JetServiceError.Revoked("delivery handle belongs to another authority store"))
+    service_authority_delivery_entry(delivery).map(fn(_) { () })
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2462
+fn jet_services_delivery_status(delivery: &JetDelivery) -> JetDeliveryState JetServiceError! {
+    (_, entry, _) :: service_authority_delivery_entry(delivery)?
+    Ok(service_authority_entry_state(&entry))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2469
+fn jet_services_delivery_wait(delivery: &JetDelivery) -> JetDeliveryState JetServiceError! { jet_services_delivery_status(delivery) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2475
+fn jet_services_delivery_receipt(delivery: &JetDelivery) -> JetDeliveryReceipt JetServiceError! {
+    (_, entry, _) :: service_authority_delivery_entry(delivery)?
+    Ok(JetDeliveryReceipt{id: entry.id.clone(), state: service_authority_entry_state(&entry), attempts: entry.attempts, retention_until: entry.retained_until.unwrap_or(-1), deadline: entry.expires, idempotency_key: entry.key.clone(), duplicate: delivery.duplicate, authority: entry.authority.clone(), generation: entry.generation, signature: service_delivery_receipt_signature(&entry, delivery.duplicate)?})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2493
+fn jet_services_delivery_events(delivery: &JetDelivery) -> [JetDeliveryEvent] JetServiceError! {
+    (_, entry, records) :: service_authority_delivery_entry(delivery)?
+    events := [JetDeliveryEvent]{}
+    loop (op, fields) in records {
+        match (op, fields.as_slice()) {
+            ('S', [id, key, authority, tree, worker, generation, message, created, expires, signature]) if id == &delivery.id -> {
+                generation :: generation.parse<I64>().map_err(fn(_) { service_authority_error("delivery event generation is malformed") })?
+                timestamp :: created.parse<I64>().map_err(fn(_) { service_authority_error("delivery event timestamp is malformed") })?
+                if !events.is_empty() -> return Err(service_authority_error("delivery event sequence is not monotonic"))
+                &events.push(JetDeliveryEvent{sequence: 1, state: JetDeliveryState.Accepted, attempts: 0, timestamp: timestamp, signature: signature.clone()})
+                expected :: service_delivery_acceptance_signature(authority, generation, id, key, tree, worker, message, timestamp, expires.parse<I64>().map_err(fn(_) { service_authority_error("delivery acceptance expiry is malformed") })?)?
+                expected :: service_authority_unhex(&expected).ok_or_else(fn() { service_authority_error("delivery acceptance signature is malformed") })?
+                supplied :: service_authority_unhex(signature).ok_or_else(fn() { service_authority_error("delivery acceptance signature is malformed") })?
+                if !constant_time_equal_bytes(&expected, &supplied) -> return Err(service_authority_error("delivery acceptance history signature does not validate"))
+            }
+            ('E', [id, sequence, state, attempts, timestamp, signature]) if id == &delivery.id -> {
+                sequence :: sequence.parse<I64>().map_err(fn(_) { service_authority_error("delivery event sequence is malformed") })?
+                state :: service_delivery_state_parse(state)?
+                attempts :: attempts.parse<I64>().map_err(fn(_) { service_authority_error("delivery event attempts are malformed") })?
+                timestamp :: timestamp.parse<I64>().map_err(fn(_) { service_authority_error("delivery event timestamp is malformed") })?
+                expected_sequence :: events.last().map(fn(event) { event.sequence.saturating_add(1) }).unwrap_or(1)
+                if sequence != expected_sequence -> return Err(service_authority_error("delivery event sequence is not monotonic"))
+                expected :: service_delivery_event_signature(&entry.authority, entry.generation, id, sequence, state, attempts, timestamp)?
+                expected :: service_authority_unhex(&expected).ok_or_else(fn() { service_authority_error("delivery event signature is malformed") })?
+                supplied :: service_authority_unhex(signature).ok_or_else(fn() { service_authority_error("delivery event signature is malformed") })?
+                if !constant_time_equal_bytes(&expected, &supplied) -> return Err(service_authority_error("delivery event signature does not validate"))
+                &events.push(JetDeliveryEvent{sequence: sequence, state: state, attempts: attempts, timestamp: timestamp, signature: signature.clone()})
+            }
+            _ -> {}
+        }
+    }
+    if events.len() as I64 != entry.event_sequence || events.first().map(fn(event) { event.sequence }) != 1 -> return Err(service_authority_error("delivery event history is incomplete"))
+    Ok(^events)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2608
+fn jet_services_delivery_retry(delivery: &JetDelivery) -> JetDelivery JetServiceError! {
+    service_authority_delivery_entry(delivery)?
+    runtime :: JetServiceRuntime{store: delivery.store.clone(), retention_ms: 0}
+    jet_services_runtime_retry(&runtime, delivery)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2617
+// GATE #4565: kernel primitive
+#Unsafe("hold per-delivery and registry native locks while durably recording cancellation before pending removal")
+fn jet_services_delivery_cancel(delivery: &JetDelivery) -> JetDelivery JetServiceError! {
+    service_authority_delivery_entry(delivery)?
+    runtime :: JetServiceRuntime{store: delivery.store.clone(), retention_ms: 0}
+    service_authority_validate_runtime(&runtime)?
+    _operation_lock :: service_authority_operation_lock(&runtime, &delivery.id)?
+    _guard :: service_authority_lock().lock().map_err(fn(_) { service_authority_error("service authority lock is poisoned") })?
+    entries :: service_authority_entries(&runtime, &service_authority_read(&runtime)?)?
+    entry :: entries.iter().find(fn(entry) { entry.id == delivery.id }).ok_or_else(fn() { JetServiceError.Unknown("delivery `{delivery.id}` is unknown") })?
+    if entry.state == JetDeliveryState.DeadLettered -> return Err(JetServiceError.Unavailable("dead-lettered delivery cannot be cancelled"))
+    if entry.state == JetDeliveryState.Delivered -> return Err(JetServiceError.Policy("delivered work cannot be cancelled"))
+    if entry.state != JetDeliveryState.Cancelled {
+        service_authority_append_event(&runtime, entry, JetDeliveryState.Cancelled, entry.attempts, service_authority_now())?
+        service_authority_remove_pending_entry(&runtime, entry)?
+    }
+    Ok(delivery.clone())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2660
+fn service_authority_entries(runtime: &JetServiceRuntime, records: &[(Char, [String])]) -> [ServiceAuthorityEntry] JetServiceError! {
+    entries := [ServiceAuthorityEntry]{}
+    loop (op, fields) in records {
+        match (*op, fields.as_slice()) {
+            ('S', [id, key, authority, tree, worker, generation, message, created, expires, signature]) -> {
+                generation :: generation.parse<I64>().map_err(fn(_) { service_authority_error("service send generation is malformed") })?
+                created :: created.parse<I64>().map_err(fn(_) { service_authority_error("service send timestamp is malformed") })?
+                expires :: expires.parse<I64>().map_err(fn(_) { service_authority_error("service send expiry is malformed") })?
+                endpoint :: service_authority_endpoint_unchecked(tree.clone(), worker.clone(), generation, authority.clone())?
+                service_authority_validate_text(key, "service idempotency key", SERVICE_AUTH_MAX_KEY, false)?
+                service_authority_validate_text(message, "service message", SERVICE_AUTH_MAX_MESSAGE, true)?
+                expected_id :: service_authority_id(runtime, &endpoint, message, key)
+                if id != &expected_id -> return Err(service_authority_error("service receipt identity does not match its authority fields"))
+                expected_signature :: service_delivery_acceptance_signature(authority, generation, id, key, tree, worker, message, created, expires)?
+                supplied_signature :: service_authority_unhex(signature).ok_or_else(fn() { service_authority_error("service acceptance signature is malformed") })?
+                expected_bytes :: service_authority_unhex(&expected_signature).ok_or_else(fn() { service_authority_error("service acceptance signature is malformed") })?
+                if !constant_time_equal_bytes(&expected_bytes, &supplied_signature) -> return Err(service_authority_error("service acceptance signature does not validate"))
+                entry :: ServiceAuthorityEntry{id: id.clone(), key: key.clone(), tree: tree.clone(), worker: worker.clone(), authority: authority.clone(), generation: generation, message: message.clone(), created: created, expires: expires, retained_until: None, attempts: 0, state: JetDeliveryState.Accepted, event_sequence: 1, delivered_to_worker: false, delivered: false, dead: false}
+                if entries.iter().any(fn(previous) { previous.id.as_str() == id.as_str() }) -> return Err(service_authority_error("service authority log contains duplicate acceptance"))
+                if entries.iter().any(fn(previous) { previous.key.as_str() == key.as_str() }) -> return Err(service_authority_error("service authority log contains duplicate idempotency work"))
+                &entries.push(^entry)
+            }
+            ('K', [id, until, signature]) -> {
+                until :: until.parse<I64>().map_err(fn(_) { service_authority_error("service retention deadline is malformed") })?
+                entry := &entries.iter_mut().find(fn(entry) { entry.id.as_str() == id.as_str() }).ok_or_else(fn() { service_authority_error("service retention references an unknown id") })?
+                expected :: service_delivery_retention_signature(entry, until)?
+                expected :: service_authority_unhex(&expected).ok_or_else(fn() { service_authority_error("service retention signature is malformed") })?
+                supplied :: service_authority_unhex(signature).ok_or_else(fn() { service_authority_error("service retention signature is malformed") })?
+                if !constant_time_equal_bytes(&expected, &supplied) -> return Err(service_authority_error("service retention signature does not validate"))
+                entry.retained_until = Val(until)
+            }
+            ('E', [id, sequence, state, attempts, timestamp, signature]) -> {
+                sequence :: sequence.parse<I64>().map_err(fn(_) { service_authority_error("delivery event sequence is malformed") })?
+                attempts :: attempts.parse<I64>().map_err(fn(_) { service_authority_error("delivery event attempts are malformed") })?
+                timestamp :: timestamp.parse<I64>().map_err(fn(_) { service_authority_error("delivery event timestamp is malformed") })?
+                state :: service_delivery_state_parse(state)?
+                entry := &entries.iter_mut().find(fn(entry) { entry.id.as_str() == id.as_str() }).ok_or_else(fn() { service_authority_error("delivery event references an unknown id") })?
+                if sequence != entry.event_sequence.saturating_add(1) -> return Err(service_authority_error("delivery event sequence is not monotonic"))
+                service_delivery_transition_allowed(entry, state, attempts)?
+                expected :: service_delivery_event_signature(&entry.authority, entry.generation, id, sequence, state, attempts, timestamp)?
+                expected :: service_authority_unhex(&expected).ok_or_else(fn() { service_authority_error("delivery event signature is malformed") })?
+                supplied :: service_authority_unhex(signature).ok_or_else(fn() { service_authority_error("delivery event signature is malformed") })?
+                if !constant_time_equal_bytes(&expected, &supplied) -> return Err(service_authority_error("delivery event signature does not validate"))
+                entry.event_sequence = sequence
+                entry.attempts = attempts
+                entry.state = state
+                entry.delivered_to_worker = state == JetDeliveryState.Delivering || state == JetDeliveryState.Delivered
+                entry.delivered = state == JetDeliveryState.Delivered
+                entry.dead = state == JetDeliveryState.DeadLettered
+            }
+            _ -> return Err(service_authority_error("service authority record has an unknown shape"))
+        }
+    }
+    Ok(^entries)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2843
+fn jet_services_runtime(store: String, retention_ms: I64) -> JetServiceRuntime { JetServiceRuntime{store: ^store, retention_ms: retention_ms} }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2850
+// GATE #4565: kernel primitive
+#Unsafe("serialize idempotent send with operation and registry locks; append authenticated receipt before actual enqueue")
+fn jet_services_runtime_send(runtime: &JetServiceRuntime, endpoint: &JetServiceEndpoint, message: &String, key: &String) -> JetDelivery JetServiceError! {
+    service_authority_validate_runtime(runtime)?
+    service_authority_validate_endpoint(endpoint)?
+    jet_services_authority_validate(endpoint)?
+    service_authority_bind_store(runtime, endpoint)?
+    service_authority_validate_text(key, "idempotency key", SERVICE_AUTH_MAX_KEY, false)?
+    service_authority_validate_text(message, "service message", SERVICE_AUTH_MAX_MESSAGE, true)?
+    _operation_lock :: service_authority_operation_lock(runtime, key)?
+    _guard :: service_authority_lock().lock().map_err(fn(_) { service_authority_error("service authority lock is poisoned") })?
+    records :: service_authority_read(runtime)?
+    entries := service_authority_entries(runtime, &records)?
+    now :: service_authority_now()
+    if service_authority_cleanup_expired(runtime, &entries, now)? -> entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?
+    if entries.iter().find(fn(entry) { entry.key.as_str() == key.as_str() && !entry.authority.is_empty() }) == .Val(entry) {
+        // Generation-scoped provider tokens may change; logical route/message identity may not.
+        if entry.tree != endpoint.tree || entry.worker != endpoint.worker || entry.message.as_str() != message.as_str() -> return Err(JetServiceError.Policy("idempotency key was already used by another service authority or delivery"))
+        duplicate_delivery :: fn() { service_authority_delivery_for_entry(runtime, entry, true) }
+        if entry.dead -> return Ok(duplicate_delivery())
+        if entry.expires > now {
+            if !entry.delivered && entry.state != JetDeliveryState.Cancelled -> service_authority_enqueue_entry(runtime, entry)?
+            return Ok(duplicate_delivery())
+        }
+        return Ok(duplicate_delivery())
+    }
+    id :: service_authority_id(runtime, endpoint, message, key)
+    expires :: service_authority_retention_deadline(now, runtime.retention_ms)
+    signature :: service_delivery_acceptance_signature(&endpoint.authority, endpoint.generation, &id, key, &endpoint.tree, &endpoint.worker, message, now, expires)?
+    service_authority_append(runtime, 'S', &[id.clone(), key.clone(), endpoint.authority.clone(), endpoint.tree.clone(), endpoint.worker.clone(), endpoint.generation.to_string(), message.clone(), now.to_string(), expires.to_string(), ^signature])?
+    jet_services_authority_enqueue(runtime, endpoint, &id, message)?
+    Ok(service_authority_delivery_for_endpoint(runtime, &id, endpoint, false))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2937
+// GATE #4565: kernel primitive
+#Unsafe("serialize retry, authenticate durable receipt, append accepted attempt before enqueue")
+fn jet_services_runtime_retry(runtime: &JetServiceRuntime, delivery: &JetDelivery) -> JetDelivery JetServiceError! {
+    service_authority_validate_runtime(runtime)?
+    service_authority_validate_delivery_runtime(runtime, delivery)?
+    id :: &delivery.id
+    service_authority_validate_text(id, "service id", SERVICE_AUTH_MAX_KEY, false)?
+    _operation_lock :: service_authority_operation_lock(runtime, id)?
+    _guard :: service_authority_lock().lock().map_err(fn(_) { service_authority_error("service authority lock is poisoned") })?
+    records :: service_authority_read(runtime)?
+    entries := service_authority_entries(runtime, &records)?
+    now :: service_authority_now()
+    if service_authority_cleanup_expired(runtime, &entries, now)? -> entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?
+    entry :: entries.iter().find(fn(entry) { entry.id.as_str() == id.as_str() }).ok_or_else(fn() { JetServiceError.Unknown("service id `{id}` is unknown") })?
+    if entry.authority.is_empty() -> return Err(JetServiceError.Unavailable("service receipt has no endpoint authority"))
+    if entry.dead -> return Err(JetServiceError.Unavailable("cannot retry a dead-lettered delivery"))
+    if entry.state == JetDeliveryState.Cancelled -> return Err(JetServiceError.Policy("cancelled delivery cannot be retried"))
+    if entry.delivered && entry.retained_until.is_none() -> return Ok(service_authority_delivery_for_entry(runtime, entry, false))
+    // Only explicit retry resets worker handoff: durable accepted marker precedes copy enqueue.
+    attempts :: entry.attempts.saturating_add(1)
+    service_authority_append_event(runtime, entry, JetDeliveryState.Accepted, attempts, now)?
+    service_authority_enqueue_entry(runtime, entry)?
+    Ok(service_authority_delivery_for_entry(runtime, entry, false))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:2988
+// GATE #4565: kernel primitive
+#Unsafe("serialize durable dead-letter transition before removal from actual pending registry")
+fn jet_services_runtime_dead_letter(runtime: &JetServiceRuntime, delivery: &JetDelivery) -> JetDelivery JetServiceError! {
+    service_authority_validate_runtime(runtime)?
+    service_authority_validate_delivery_runtime(runtime, delivery)?
+    id :: &delivery.id
+    service_authority_validate_text(id, "service id", SERVICE_AUTH_MAX_KEY, false)?
+    _operation_lock :: service_authority_operation_lock(runtime, id)?
+    _guard :: service_authority_lock().lock().map_err(fn(_) { service_authority_error("service authority lock is poisoned") })?
+    entries := service_authority_entries(runtime, &service_authority_read(runtime)?)?
+    if service_authority_cleanup_expired(runtime, &entries, service_authority_now())? -> entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?
+    entry :: entries.iter().find(fn(entry) { entry.id.as_str() == id.as_str() }).ok_or_else(fn() { JetServiceError.Unknown("service id `{id}` is unknown") })?
+    if entry.dead -> return Ok(service_authority_delivery_for_entry(runtime, entry, false))
+    service_authority_append_event(runtime, entry, JetDeliveryState.DeadLettered, entry.attempts, service_authority_now())?
+    service_authority_remove_pending_entry(runtime, entry)?
+    Ok(service_authority_delivery_for_entry(runtime, entry, false))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3026
+// GATE #4565: kernel primitive
+#Unsafe("serialize retention deadline and append its authenticated durable marker")
+fn jet_services_runtime_retain(runtime: &JetServiceRuntime, delivery: &JetDelivery) -> JetDelivery JetServiceError! {
+    service_authority_validate_runtime(runtime)?
+    service_authority_validate_delivery_runtime(runtime, delivery)?
+    id :: &delivery.id
+    service_authority_validate_text(id, "service id", SERVICE_AUTH_MAX_KEY, false)?
+    _operation_lock :: service_authority_operation_lock(runtime, id)?
+    _guard :: service_authority_lock().lock().map_err(fn(_) { service_authority_error("service authority lock is poisoned") })?
+    entries := service_authority_entries(runtime, &service_authority_read(runtime)?)?
+    if service_authority_cleanup_expired(runtime, &entries, service_authority_now())? -> entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?
+    entry :: entries.iter().find(fn(entry) { entry.id.as_str() == id.as_str() }).ok_or_else(fn() { JetServiceError.Unknown("service id `{id}` is unknown") })?
+    if entry.dead -> return Ok(service_authority_delivery_for_entry(runtime, entry, false))
+    if entry.state == JetDeliveryState.Cancelled -> return Err(JetServiceError.Policy("cancelled delivery cannot be retained"))
+    until :: service_authority_retention_deadline(service_authority_now(), runtime.retention_ms)
+    signature :: service_delivery_retention_signature(entry, until)?
+    service_authority_append(runtime, 'K', &[id.clone(), until.to_string(), ^signature])?
+    Ok(service_authority_delivery_for_entry(runtime, entry, false))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3072
+// Durable completion is separate from enqueue so send-to-worker crashes remain recoverable by retry.
+// GATE #4565: kernel primitive
+#Unsafe("serialize commit; cleanup expired work and durably acknowledge delivery before pending removal")
+fn jet_services_runtime_commit(runtime: &JetServiceRuntime, delivery: &JetDelivery) -> Unit JetServiceError! {
+    service_authority_validate_runtime(runtime)?
+    service_authority_validate_delivery_runtime(runtime, delivery)?
+    id :: &delivery.id
+    service_authority_validate_text(id, "service id", SERVICE_AUTH_MAX_KEY, false)?
+    _operation_lock :: service_authority_operation_lock(runtime, id)?
+    _guard :: service_authority_lock().lock().map_err(fn(_) { service_authority_error("service authority lock is poisoned") })?
+    entries := service_authority_entries(runtime, &service_authority_read(runtime)?)?
+    now :: service_authority_now()
+    target_expired :: entries.iter().find(fn(entry) { entry.id.as_str() == id.as_str() }).is_some_and(fn(entry) { service_authority_entry_expired(entry, now) })
+    if service_authority_cleanup_expired(runtime, &entries, now)? -> entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?
+    entry :: entries.iter().find(fn(entry) { entry.id.as_str() == id.as_str() }).ok_or_else(fn() { JetServiceError.Unknown("service id `{id}` is unknown") })?
+    if entry.dead {
+        service_authority_remove_pending_entry(runtime, entry)?
+        if target_expired -> return Err(JetServiceError.Expired("service receipt retention expired"))
+        return Err(JetServiceError.Unavailable("cannot commit a dead-lettered service receipt"))
+    }
+    if !entry.delivered_to_worker -> return Err(JetServiceError.Unavailable("service receipt has not reached its worker"))
+    if !entry.delivered -> service_authority_append_event(runtime, entry, JetDeliveryState.Delivered, entry.attempts, service_authority_now())?
+    service_authority_remove_pending_entry(runtime, entry)?
+    Ok(())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3125
+// D-DX-QUEUE1=A: durable queue state/policy live here; providers marshal only typed SQL values/rows.
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3129
+JET_JOB_QUEUE_MAX_NAME :: USize{256}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3130
+JET_JOB_QUEUE_MAX_TYPE :: USize{256}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3131
+JET_JOB_QUEUE_MAX_KEY :: USize{1024}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3132
+JET_JOB_QUEUE_MAX_REQUEST :: USize{1024}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3133
+JET_JOB_QUEUE_MAX_PAYLOAD :: USize{4 * 1024 * 1024}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3134
+JET_JOB_QUEUE_MAX_REASON :: USize{1024}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3135
+JET_JOB_QUEUE_MAX_DETAIL :: USize{16 * 1024}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3136
+JET_JOB_QUEUE_MAX_BULK :: USize{1024}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3137
+JET_JOB_QUEUE_MAX_INSPECT :: USize{1024}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3138
+JET_JOB_QUEUE_MAX_ATTEMPTS :: U32{64}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3139
+JET_JOB_QUEUE_MAX_LEASE_MS :: I64{24 * 60 * 60 * 1000}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3140
+JET_JOB_QUEUE_MAX_DELAY_MS :: I64{365 * 24 * 60 * 60 * 1000}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3145
+#Clone
+#Debug
+#Comparable
+enum JetJobQueueValue { Null, Int(I64), Text(String), Blob([U8]) }
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3155
+#Clone
+#Debug
+#Comparable
+struct JetJobQueueRow {
+    values: [(String, JetJobQueueValue)]
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3160
+    fn new(values: [(String, JetJobQueueValue)]) -> Self { Self{values: ^values} }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3164
+    fn get(self: &Self, name: String) -> &JetJobQueueValue? {
+        self.values.iter().find(fn(entry) { entry.0 == name }).map(fn(entry) { &entry.1 })
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3175
+trait JetJobQueueStore: Send {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3176
+    fn begin(self: &Self) -> Unit JetServiceError!
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3177
+    fn commit(self: &Self) -> Unit JetServiceError!
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3178
+    fn rollback(self: &Self) -> Unit
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3179
+    fn execute(self: &Self, sql: String, params: &[JetJobQueueValue]) -> I64 JetServiceError!
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3184
+    fn query(self: &Self, sql: String, params: &[JetJobQueueValue]) -> [JetJobQueueRow] JetServiceError!
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3193
+#Clone
+#Debug
+#Comparable
+enum JetJobQueueDeliveryPolicy {
+    AtLeastOnce
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3198
+    fn as_str(self: Self) -> String { match self { .AtLeastOnce -> "at_least_once" } }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3206
+#Clone
+#Debug
+#Comparable
+enum JetJobQueueState {
+    Queued, Running, Retrying, Completed, Failed, DeadLettered, Cancelled
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3217
+    fn as_str(self: Self) -> String {
+        match self { .Queued -> "queued", .Running -> "running", .Retrying -> "retrying", .Completed -> "completed", .Failed -> "failed", .DeadLettered -> "dead_lettered", .Cancelled -> "cancelled" }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3229
+    fn parse(value: String) -> Self JetServiceError! {
+        match value {
+            "queued" -> Ok(Self.Queued)
+            "running" -> Ok(Self.Running)
+            "retrying" -> Ok(Self.Retrying)
+            "completed" -> Ok(Self.Completed)
+            "failed" -> Ok(Self.Failed)
+            "dead_lettered" -> Ok(Self.DeadLettered)
+            "cancelled" -> Ok(Self.Cancelled)
+            _ -> Err(service_authority_error("queue state `{value}` is unknown"))
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3246
+impl JetJobPayload {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3247
+    fn new(type_id: String, bytes: [U8], publish: Bool) -> Self JetServiceError! {
+        payload :: Self{type_id: ^type_id, bytes: ^bytes, publish: publish}
+        jet_job_queue_validate_payload(&payload)?
+        Ok(^payload)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3263
+impl JetJobResult {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3264
+    fn new(type_id: String, bytes: [U8], publish: Bool) -> Self JetServiceError! {
+        result :: Self{type_id: ^type_id, bytes: ^bytes, publish: publish}
+        jet_job_queue_validate_result(&result)?
+        Ok(^result)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3280
+impl JetJobError {
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3281
+    fn new(type_id: String, reason: String, detail: String?) -> Self JetServiceError! {
+        error :: Self{type_id: ^type_id, reason: ^reason, detail: ^detail}
+        jet_job_queue_validate_error(&error)?
+        Ok(^error)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3297
+#Clone
+#Debug
+#Comparable
+struct JetJobEnqueue {
+    job_type: String
+    payload: JetJobPayload
+    idempotency_key: String?
+    request_id: String?
+    delay_ms: I64
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3307
+    fn new(job_type: String, payload: JetJobPayload) -> Self {
+        Self{job_type: ^job_type, payload: ^payload, idempotency_key: None, request_id: None, delay_ms: 0}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3317
+    fn with_key(self: Self, key: String) -> Self {
+        self := ^self
+        self.idempotency_key = Val(^key)
+        ^self
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3322
+    fn delayed(self: Self, delay_ms: I64) -> Self {
+        self := ^self
+        self.delay_ms = delay_ms
+        ^self
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3329
+#Clone
+#Debug
+#Comparable
+struct JetJobQueuePolicy {
+    delivery: JetJobQueueDeliveryPolicy
+    max_attempts: U32
+    lease_ms: I64
+    retry_delay_ms: I64
+    max_retry_delay_ms: I64
+    capacity: USize
+    retention_ms: I64
+    publish_payload: Bool
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3341
+    fn default() -> Self {
+        Self{delivery: JetJobQueueDeliveryPolicy.AtLeastOnce, max_attempts: 3, lease_ms: 30000, retry_delay_ms: 1000, max_retry_delay_ms: 60000, capacity: 1024, retention_ms: 7 * 24 * 60 * 60 * 1000, publish_payload: false}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3356
+    fn validate(self: &Self) -> Unit JetServiceError! {
+        if self.delivery != JetJobQueueDeliveryPolicy.AtLeastOnce -> return Err(JetServiceError.Policy("queue delivery policy must be explicit at-least-once"))
+        if self.max_attempts == 0 || self.max_attempts > JET_JOB_QUEUE_MAX_ATTEMPTS -> return Err(JetServiceError.Policy("queue max attempts must be between 1 and {JET_JOB_QUEUE_MAX_ATTEMPTS}"))
+        if self.lease_ms <= 0 || self.lease_ms > JET_JOB_QUEUE_MAX_LEASE_MS -> return Err(JetServiceError.Policy("queue lease must be positive and bounded"))
+        if self.retry_delay_ms < 0 || self.max_retry_delay_ms < self.retry_delay_ms || self.max_retry_delay_ms > JET_JOB_QUEUE_MAX_DELAY_MS -> return Err(JetServiceError.Policy("queue retry delays are outside the supported range"))
+        if self.capacity == 0 || self.capacity > JET_JOB_QUEUE_MAX_INSPECT -> return Err(JetServiceError.Policy("queue capacity must be positive and bounded"))
+        if self.retention_ms < 0 || self.retention_ms > JET_JOB_QUEUE_MAX_DELAY_MS -> return Err(JetServiceError.Policy("queue retention is outside the supported range"))
+        Ok(())
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3395
+#Clone
+#Debug
+#Comparable
+struct JetJobQueueReceipt {
+    id: String
+    authority: String
+    queue: String
+    job_type: String
+    state: JetJobQueueState
+    sequence: I64
+    attempts: U32
+    due_at_ms: I64
+    accepted_at_ms: I64
+    request_id: String?
+    idempotency_key: String?
+    lease_until_ms: I64?
+    duration_ms: I64?
+    error_reason: String?
+    delivery: JetJobQueueDeliveryPolicy
+    duplicate: Bool
+    signature: String
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3416
+#Clone
+#Debug
+#Comparable
+struct JetJobQueueClaim {
+    receipt: JetJobQueueReceipt
+    payload: JetJobPayload
+    worker: String
+    lease_token: String
+    lease_until_ms: I64
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3425
+#Clone
+#Debug
+#Comparable
+struct JetJobQueueEvent {
+    sequence: I64
+    state: JetJobQueueState
+    attempts: U32
+    timestamp_ms: I64
+    reason: String?
+    duration_ms: I64?
+    worker: String?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3436
+#Clone
+#Debug
+#Comparable
+struct JetJobQueueRecord {
+    receipt: JetJobQueueReceipt
+    payload: JetJobPayload?
+    result: JetJobResult?
+    error: JetJobError?
+    started_at_ms: I64?
+    finished_at_ms: I64?
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3446
+#Clone
+#Debug
+#Comparable
+struct JetJobQueueStatus {
+    queue: String
+    authority: String
+    queued: U64
+    running: U64
+    retrying: U64
+    completed: U64
+    failed: U64
+    dead_lettered: U64
+    cancelled: U64
+    depth: U64
+    wait_ms: U64
+    throughput: U64
+    capacity: USize
+    paused: Bool
+    freshness_ms: U64
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3466
+#Clone
+#Debug
+#Comparable
+struct JetJobQueueWorker {
+    id: String
+    concurrency: USize
+    heartbeat_ms: I64
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3472
+    fn new(id: String, concurrency: USize, heartbeat_ms: I64) -> Self JetServiceError! {
+        worker :: Self{id: ^id, concurrency: concurrency, heartbeat_ms: heartbeat_ms}
+        service_authority_validate_text(&worker.id, "queue worker", JET_JOB_QUEUE_MAX_NAME, false)?
+        if worker.concurrency == 0 || worker.concurrency > JET_JOB_QUEUE_MAX_INSPECT -> return Err(JetServiceError.Policy("queue worker concurrency must be positive and bounded"))
+        if worker.heartbeat_ms <= 0 || worker.heartbeat_ms > JET_JOB_QUEUE_MAX_LEASE_MS -> return Err(JetServiceError.Policy("queue worker heartbeat must be positive and bounded"))
+        Ok(^worker)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3492
+    fn poll(self: &Self, queue: &JetJobQueue) -> [JetJobQueueClaim] JetServiceError! { queue.claim(&self.id, self.concurrency) }
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3501
+#Clone
+#Debug
+struct JetJobQueueStoredRecord {
+    id: String
+    authority: String
+    queue: String
+    job_type: String
+    payload_type: String
+    payload: [U8]
+    payload_public: Bool
+    idempotency_key: String?
+    request_id: String?
+    sequence: I64
+    state: JetJobQueueState
+    due_at_ms: I64
+    accepted_at_ms: I64
+    started_at_ms: I64?
+    finished_at_ms: I64?
+    attempts: U32
+    lease_owner: String?
+    lease_token: String?
+    lease_until_ms: I64?
+    result_type: String?
+    result: [U8]?
+    result_public: Bool
+    error_type: String?
+    error_reason: String?
+    error_detail: String?
+    retry_at_ms: I64?
+    updated_at_ms: I64
+    signature: String
+    event_sequence: I64
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3532
+JET_JOB_QUEUE_DEVTOOLS_SOURCE :: "job-runtime"
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3535
+#Clone
+#Debug
+struct JetJobQueueDevtoolsTransition {
+    event: String
+    authority: String
+    queue: String
+    job_type: String
+    job_id: String
+    sequence: I64
+    state: JetJobQueueState
+    attempts: U32
+    timestamp_ms: I64
+    reason: String?
+    duration_ms: I64?
+    worker: String?
+    request_id: String?
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3552
+    fn from_record(record: &JetJobQueueStoredRecord, state: JetJobQueueState, attempts: U32, timestamp_ms: I64, reason: String?, duration_ms: I64?, worker: String?) -> Self {
+        event :: match state { .Queued -> "enqueue", .Running -> "start", .Retrying -> "retry", .Completed -> "complete", .Failed | .DeadLettered | .Cancelled -> "fail" }
+        Self{event: event, authority: record.authority.clone(), queue: record.queue.clone(), job_type: record.job_type.clone(), job_id: record.id.clone(), sequence: record.event_sequence.saturating_add(1), state: state, attempts: attempts, timestamp_ms: timestamp_ms, reason: reason.map(fn(reason) { reason.to_string() }), duration_ms: duration_ms, worker: worker.map(fn(worker) { worker.to_string() }), request_id: record.request_id.clone()}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3587
+    fn with_event(self: Self, event: String) -> Self {
+        self := ^self
+        self.event = event
+        ^self
+    }
+}
+

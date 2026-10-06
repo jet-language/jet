@@ -21,16 +21,23 @@
 // stop renders and exits the process exactly as the AOT entry boundary does.
 #[cfg(not(target_arch = "wasm32"))]
 mod jet_c_abi {
+    #![allow(non_snake_case)]
     use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 
-    type JetCString = *mut String;
+    pub(crate) type JetCString = *mut String;
 
-    /// Run one export body; a caught unwind ends the process through the AOT
-    /// entry boundary's report carriers instead of entering generated frames.
+    /// No Rust unwind may leave an export. Compiler workers publish a typed
+    /// internal failure; ordinary calls keep the shared AOT stop boundary.
     #[inline(always)]
-    fn guard<T>(run: impl FnOnce() -> T) -> T {
+    pub(crate) fn guard<T>(run: impl FnOnce() -> T) -> T {
         match catch_unwind(AssertUnwindSafe(run)) {
             Ok(value) => value,
+            Err(payload) if super::jet_native_comptime_active() => {
+                let message = payload.downcast_ref::<String>().map(String::as_str)
+                    .or_else(|| payload.downcast_ref::<&str>().copied())
+                    .unwrap_or("native compiler runtime carried an unknown panic payload");
+                super::jet_native_comptime_fail(4, message)
+            }
             Err(payload) => stop(payload),
         }
     }
@@ -59,11 +66,11 @@ mod jet_c_abi {
         String::from_utf8_lossy(bytes(ptr, len))
     }
 
-    fn handle(value: String) -> JetCString {
+    pub(crate) fn handle(value: String) -> JetCString {
         Box::into_raw(Box::new(value))
     }
 
-    fn view<'a>(value: JetCString) -> &'a str {
+    pub(crate) fn view<'a>(value: JetCString) -> &'a str {
         // SAFETY: `value` is a live handle from `handle` that the caller owns
         // for the duration of this call.
         unsafe { (*value).as_str() }
@@ -85,7 +92,7 @@ mod jet_c_abi {
     }
 
     /// `native_int_input`: an exact Int a native kernel receives as `i64`.
-    fn native(value: i64) -> i64 {
+    pub(crate) fn native(value: i64) -> i64 {
         crate::jet_std::jet_int_to_i64(value).unwrap_or_else(|| {
             super::jet_arithmetic_stop("<core.prelude>", 0, "native Int argument exceeds host range")
         })
@@ -100,6 +107,237 @@ mod jet_c_abi {
             super::jet_runtime_boundary(|| entry());
             0
         })
+    }
+
+    // Installed by the isolated worker, never ordinary program entry.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_comptime_begin(fuel: u64, max_depth: u64) -> bool {
+        guard(|| super::jet_native_comptime_begin(fuel, max_depth))
+    }
+    #[no_mangle]
+    pub extern "C" fn jet_rt_comptime_step(owner: u64, start: u64, end: u64) { super::jet_native_comptime_step(owner, start, end); }
+    #[no_mangle]
+    pub extern "C" fn jet_rt_comptime_work(units: u64) { super::jet_native_comptime_work(units); }
+    #[no_mangle]
+    pub extern "C" fn jet_rt_comptime_enter(owner: u64, start: u64, end: u64) { super::jet_native_comptime_enter(owner, start, end); }
+    #[no_mangle]
+    pub extern "C" fn jet_rt_comptime_leave() { super::jet_native_comptime_leave(); }
+    #[no_mangle]
+    pub extern "C" fn jet_rt_comptime_end() { super::jet_native_comptime_end(); }
+
+    // Entry error edge (MIRRust.rs entry_error_exit): a failing entry ends
+    // the process with its report and exit status 1.
+
+    /// Ends the process with the report of `error` (taken, from
+    /// jet_rt_record_new_JetErr).
+    #[no_mangle]
+    pub extern "C" fn jet_rt_entry_error_exit_err(error: *mut super::JetErr) {
+        let error = take_record(error);
+        guard(move || -> () { super::jet_entry_error_exit_jet(error) })
+    }
+
+    /// Ends the process with the entry report of an error's Printable text.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_entry_error_exit(text: JetCString) {
+        let text = view(text).to_owned();
+        guard(move || -> () { super::jet_entry_error_exit(text) })
+    }
+
+    // Core records (Compiler/JetBackend/Source/Lower/Records.jet): a
+    // MIR-defined Core type crosses a route as a handle to the runtime's own
+    // value. `jet_rt_record_tag_<R>` returns a payload enum's variant index;
+    // a getter borrows the handle and returns an owned carrier (an Option
+    // getter returns its tag and writes the payload through `some`); a
+    // constructor borrows String handles and Option boxes of a String or Int
+    // (null is None; the payload is the box's first word) and takes nested
+    // record handles. A fieldless Core enum member crosses as its index.
+
+    fn record<T>(value: T) -> *mut T {
+        Box::into_raw(Box::new(value))
+    }
+
+    fn take_record<T>(value: *mut T) -> T {
+        // SAFETY: the caller transfers its owned handle from `record`.
+        *unsafe { Box::from_raw(value) }
+    }
+
+    fn option_text(boxed: *const JetCString) -> super::JetOutcome<String, super::JetAbsent> {
+        // SAFETY: a non-null Option box holds a live String handle first.
+        if boxed.is_null() { Err(super::JetAbsent) } else { Ok(view(unsafe { *boxed }).to_owned()) }
+    }
+
+    fn option_int(boxed: *const i64) -> super::JetOutcome<i64, super::JetAbsent> {
+        // SAFETY: a non-null Option box holds an exact-Int word first.
+        if boxed.is_null() { Err(super::JetAbsent) } else { Ok(native(unsafe { *boxed })) }
+    }
+
+    fn some_text(some: *mut JetCString, value: &super::JetOutcome<String, super::JetAbsent>) -> i64 {
+        match value {
+            // SAFETY: `some` is the caller's zeroed out slot.
+            Ok(text) => { unsafe { some.write(handle(text.clone())) }; 1 }
+            Err(_) => 0,
+        }
+    }
+
+    fn record_index_stop() -> ! {
+        super::jet_panic("<core.prelude>", 0, "record variant index out of range")
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_record_new_JetErr(message: JetCString, code: *const JetCString, cause: *mut super::JetErr) -> *mut super::JetErr {
+        guard(|| {
+            let cause = if cause.is_null() { Err(super::JetAbsent) } else { Ok(take_record(cause)) };
+            record(super::jet_err(view(message).to_owned(), option_text(code), cause))
+        })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_record_get_JetErr_message(error: *mut super::JetErr) -> JetCString {
+        // SAFETY: `error` is a live handle the caller lends for this call.
+        guard(|| handle(super::jet_err_message(unsafe { &*error })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_record_get_JetErr_code(error: *mut super::JetErr, some: *mut JetCString) -> i64 {
+        // SAFETY: `error` is a live handle the caller lends for this call.
+        guard(|| some_text(some, &super::jet_err_code(unsafe { &*error })))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_record_get_JetErr_cause(error: *mut super::JetErr, some: *mut *mut super::JetErr) -> i64 {
+        // SAFETY: `error` is a live handle the caller lends; `some` is its zeroed out slot.
+        guard(|| match super::jet_err_cause(unsafe { &*error }) {
+            Ok(cause) => { unsafe { some.write(record(cause)) }; 1 }
+            Err(_) => 0,
+        })
+    }
+
+    fn io_operation(index: i64) -> crate::jet_std::IOOperation {
+        use crate::jet_std::IOOperation::*;
+        match index {
+            0 => Read,
+            1 => Write,
+            2 => Flush,
+            3 => Connect,
+            4 => Accept,
+            5 => Close,
+            6 => Resolve,
+            7 => Codec,
+            _ => record_index_stop(),
+        }
+    }
+
+    fn resource_limit(index: i64) -> crate::jet_std::ProcessResourceLimit {
+        use crate::jet_std::ProcessResourceLimit::*;
+        match index {
+            0 => WallTime,
+            1 => CpuTime,
+            2 => Memory,
+            3 => OpenFiles,
+            4 => Output,
+            _ => record_index_stop(),
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_record_new_IOContext(operation: i64, resource: *const JetCString, os_code: *const i64, cause: *const JetCString) -> *mut crate::jet_std::IOContext {
+        guard(|| {
+            record(crate::jet_std::IOContext {
+                operation: io_operation(operation),
+                resource: option_text(resource),
+                os_code: option_int(os_code),
+                cause: option_text(cause),
+            })
+        })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_record_get_IOContext_operation(context: *mut crate::jet_std::IOContext) -> i64 {
+        // SAFETY: `context` is a live handle the caller lends for this call.
+        guard(|| unsafe { &*context }.operation as i64)
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_record_get_IOContext_resource(context: *mut crate::jet_std::IOContext, some: *mut JetCString) -> i64 {
+        // SAFETY: `context` is a live handle the caller lends for this call.
+        guard(|| some_text(some, &unsafe { &*context }.resource))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_record_get_IOContext_os_code(context: *mut crate::jet_std::IOContext, some: *mut i64) -> i64 {
+        // SAFETY: `context` is a live handle the caller lends; `some` is its zeroed out slot.
+        guard(|| match unsafe { &*context }.os_code {
+            Ok(code) => { unsafe { some.write(crate::jet_std::jet_int_from_i64(code)) }; 1 }
+            Err(_) => 0,
+        })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_record_get_IOContext_cause(context: *mut crate::jet_std::IOContext, some: *mut JetCString) -> i64 {
+        // SAFETY: `context` is a live handle the caller lends for this call.
+        guard(|| some_text(some, &unsafe { &*context }.cause))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_record_tag_IOError(error: *mut crate::jet_std::IOError) -> i64 {
+        use crate::jet_std::IOError::*;
+        // SAFETY: `error` is a live handle the caller lends for this call.
+        guard(|| match unsafe { &*error } {
+            InvalidInput(_) => 0,
+            NotFound(_) => 1,
+            PermissionDenied(_) => 2,
+            TimedOut(_) => 3,
+            Cancelled(_) => 4,
+            Closed(_) => 5,
+            Protocol(_) => 6,
+            Other(_) => 7,
+            ResourceLimit(_) => 8,
+        })
+    }
+
+    // The IOContext payload of each context variant: its getter (a clone)
+    // and its constructor (taking the context handle).
+    macro_rules! io_error_context_variants {
+        ($($variant:ident: $get:ident, $new:ident;)*) => {$(
+            #[no_mangle]
+            pub extern "C" fn $get(error: *mut crate::jet_std::IOError) -> *mut crate::jet_std::IOContext {
+                // SAFETY: `error` is a live handle the caller lends for this call.
+                guard(|| match unsafe { &*error } {
+                    crate::jet_std::IOError::$variant(context) => record(context.clone()),
+                    _ => record_index_stop(),
+                })
+            }
+
+            #[no_mangle]
+            pub extern "C" fn $new(context: *mut crate::jet_std::IOContext) -> *mut crate::jet_std::IOError {
+                guard(|| record(crate::jet_std::IOError::$variant(take_record(context))))
+            }
+        )*};
+    }
+
+    io_error_context_variants! {
+        InvalidInput: jet_rt_record_get_IOError_InvalidInput, jet_rt_record_new_IOError_InvalidInput;
+        NotFound: jet_rt_record_get_IOError_NotFound, jet_rt_record_new_IOError_NotFound;
+        PermissionDenied: jet_rt_record_get_IOError_PermissionDenied, jet_rt_record_new_IOError_PermissionDenied;
+        TimedOut: jet_rt_record_get_IOError_TimedOut, jet_rt_record_new_IOError_TimedOut;
+        Cancelled: jet_rt_record_get_IOError_Cancelled, jet_rt_record_new_IOError_Cancelled;
+        Closed: jet_rt_record_get_IOError_Closed, jet_rt_record_new_IOError_Closed;
+        Protocol: jet_rt_record_get_IOError_Protocol, jet_rt_record_new_IOError_Protocol;
+        Other: jet_rt_record_get_IOError_Other, jet_rt_record_new_IOError_Other;
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_record_get_IOError_ResourceLimit(error: *mut crate::jet_std::IOError) -> i64 {
+        // SAFETY: `error` is a live handle the caller lends for this call.
+        guard(|| match unsafe { &*error } {
+            crate::jet_std::IOError::ResourceLimit(limit) => *limit as i64,
+            _ => record_index_stop(),
+        })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_rt_record_new_IOError_ResourceLimit(limit: i64) -> *mut crate::jet_std::IOError {
+        guard(|| record(crate::jet_std::IOError::ResourceLimit(resource_limit(limit))))
     }
 
     // Memory for boxes owned by generated code.
@@ -136,6 +374,19 @@ mod jet_c_abi {
     #[no_mangle]
     pub extern "C" fn jet_rt_string_from_static(ptr: *const u8, len: usize) -> JetCString {
         guard(|| handle(text(ptr, len).into_owned()))
+    }
+
+    /// Borrow UTF-8 bytes for compiler/host marshaling. The pointer remains
+    /// valid until the caller mutates or drops the owning String handle.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_string_data(value: JetCString) -> *const u8 {
+        guard(|| view(value).as_ptr())
+    }
+
+    /// Byte count paired with jet_rt_string_data, not Jet's character count.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_string_byte_len(value: JetCString) -> usize {
+        guard(|| view(value).len())
     }
 
     #[no_mangle]
@@ -212,6 +463,26 @@ mod jet_c_abi {
         target
     }
 
+    /// A String slice by a range (Core.rs `JetSliceRange for String`): the
+    /// receiver is borrowed, bounds are native, and out-of-range bounds stop at
+    /// the Jet source location.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_string_slice_range(
+        value: JetCString,
+        start: i64,
+        end: i64,
+        exclusive: u8,
+        file_ptr: *const u8,
+        file_len: usize,
+        line: i64,
+    ) -> JetCString {
+        guard(|| {
+            let sliced = super::jet_string_slice_value(view(value), start, end, exclusive != 0)
+                .unwrap_or_else(|message| super::jet_panic(&text(file_ptr, file_len), line_of(line), &message));
+            handle(sliced)
+        })
+    }
+
     // Display text, as generated Rust renders `print` and interpolation.
 
     #[no_mangle]
@@ -248,6 +519,12 @@ mod jet_c_abi {
         guard(|| handle(super::jet_fmt_display(&value)))
     }
 
+    /// A Float's Debug text (`JetDebug for f64`, which differs from Display).
+    #[no_mangle]
+    pub extern "C" fn jet_rt_float_debug(value: f64) -> JetCString {
+        guard(|| handle(super::JetDebug::jet_debug(&value)))
+    }
+
     // Stops raised by generated code itself.
 
     #[no_mangle]
@@ -269,6 +546,24 @@ mod jet_c_abi {
     #[no_mangle]
     pub extern "C" fn jet_rt_panic_list_bounds(len: i64, index: i64) {
         guard(|| super::jet_arithmetic_stop("<core.prelude>", 0, &super::jet_list_bounds_message(len, native(index))))
+    }
+
+    /// The exclusive end of a List slice window (Core.rs
+    /// jet_checked_range_bounds, action "slice"), stopping at the source
+    /// location when the native bounds fall outside `len`.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_slice_end(start: i64, end: i64, exclusive: u8, len: i64, file_ptr: *const u8, file_len: usize, line: i64) -> i64 {
+        guard(|| {
+            let range = super::JetRange { start, end, exclusive: exclusive != 0 };
+            super::jet_checked_range_bounds(len, &range, "slice", &text(file_ptr, file_len), line_of(line)).end as i64
+        })
+    }
+
+    /// The exclusive end of a View window (Core.rs jet_checked_view_window),
+    /// stopping at the source location when the native bounds fall outside `len`.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_view_end(start: i64, end: i64, exclusive: u8, len: i64, file_ptr: *const u8, file_len: usize, line: i64) -> i64 {
+        guard(|| super::jet_checked_view_window(start, end, exclusive != 0, len, &text(file_ptr, file_len), line_of(line)).1)
     }
 
     #[no_mangle]
@@ -356,9 +651,32 @@ mod jet_c_abi {
     exact_int_binary!(jet_int_add, jet_int_sub, jet_int_mul, jet_int_bit_and, jet_int_bit_or, jet_int_bit_xor, jet_int_compare);
     exact_int_located!(jet_int_div, jet_int_rem, jet_int_floor_div, jet_int_mod, jet_int_pow, jet_int_shl, jet_int_shr, jet_int_div_euclid, jet_int_rem_euclid);
 
+    /// An exact Int converted to a fixed-width integer (`int_checked_fixed`,
+    /// stopping at the source location when out of range). Every fixed width
+    /// the native backend lowers is at most 64 bits, so the checked value is
+    /// its word (two's complement for a U64 above I64.MAX).
+    #[no_mangle]
+    pub extern "C" fn jet_int_checked_fixed(value: i64, kind: i64, file_ptr: *const u8, file_len: usize, line: i64) -> i64 {
+        guard(|| crate::jet_std::jet_int_checked_fixed(value, kind, &text(file_ptr, file_len), line_of(line)) as i64)
+    }
+
     #[no_mangle]
     pub extern "C" fn jet_int_owned_from_i64(value: i64) -> i64 {
         guard(|| crate::jet_std::jet_int_owned_from_i64(value).into_raw())
+    }
+
+    /// A copy of an exact Int carrier word (a big-integer owner gains a reference).
+    #[no_mangle]
+    pub extern "C" fn jet_rt_int_clone(value: i64) -> i64 {
+        // SAFETY: `value` is a live exact-Int carrier word the caller owns.
+        guard(|| unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(value) }.into_raw())
+    }
+
+    /// An exact Int constant beyond the inline word range, from its decimal
+    /// text (MIR `BigInt` constants; the JetBackend builds them at use).
+    #[no_mangle]
+    pub extern "C" fn jet_rt_int_from_static(ptr: *const u8, len: usize) -> i64 {
+        guard(|| crate::jet_std::jet_int_from_str(&text(ptr, len)).unwrap_or_else(|message| panic!("{message}")))
     }
 
     #[no_mangle]

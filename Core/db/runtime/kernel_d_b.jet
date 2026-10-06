@@ -1,0 +1,1784 @@
+// PORT-PENDING 0210 crates-jet-jit-src-db-slice-1: crates/jet-jit/src/DB.rs:1-1780
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! `core.db` hosts (#729). `include!` canonical SQLite runtime + wire codec —
+//RS //! no third algorithm.
+//RS 
+//RS // This module includes shared Prelude source that several hosts compile,
+//RS // each using a different subset, so dead-code reports here are about the
+//RS // other hosts' usage, not about this one. Scoped to the module, never the crate.
+//RS #![allow(dead_code)]
+//RS 
+//RS use super::Concurrency;
+//RS use crate::Marshal::{clone_string, result_err_msg, result_ok};
+//RS use jet_foundation::AST::{CtValue, Type};
+//RS use jet_foundation::Diagnostics::{Diagnostic, Span};
+//RS use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS use cranelift_module::Module;
+//RS use std::collections::{BTreeSet, HashMap};
+//RS use std::sync::atomic::{AtomicU64, Ordering};
+//RS use std::sync::{Arc, Mutex};
+//RS 
+//RS trait JetShow {
+//RS     fn jet_show(&self) -> String;
+//RS }
+//RS 
+//RS trait JetDebug {
+//RS     fn jet_debug(&self) -> String;
+//RS }
+//RS 
+//RS /// D-FAIL-CONV2=A: included error fragments render failure text through this seam.
+//RS trait JetDisplay {
+//RS     fn jet_display(&self) -> String;
+//RS }
+//RS 
+//RS // The shared DB wire fragment receives the host's row carrier through this
+//RS // name. AOT supplies its JetMap; JIT keeps rows in the native map until heap
+//RS // marshalling.
+//RS type JetMap<K, V> = std::collections::BTreeMap<K, V>;
+//RS 
+//RS /// Canonical `core.db` FFI runtime (rusqlite).
+//RS mod runtime {
+//RS     include!("../../jet-pkg-model/src/Prelude/DB.rs");
+//RS }
+//RS 
+//RS /// Canonical wire encode/decode (`jet_std` DBPluginWire fragment) plus the one
+//RS /// closed row-policy language (`RowPolicy.rs`) it compiles through — the same
+//RS /// two fragments AOT splices into `mod jet_std` (I9).
+//RS mod wire {
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/RowPolicy.rs");
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs");
+//RS }
+//RS 
+//RS fn jet_std_time_now() -> i64 {
+//RS     jet_codegen::scheduler::jet_std_time_now()
+//RS }
+//RS 
+//RS pub const MIGRATION_SCHEMA_IDENTITY: &str = "jet.db.migration/v2";
+//RS 
+//RS /// Typed migration operation shared by the CLI, resident console, and JIT
+//RS /// adapter.  The database ledger, not a generated child program, records it.
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub enum MigrationOperation {
+//RS     Apply,
+//RS     Rollback,
+//RS     Direct,
+//RS }
+//RS 
+//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//RS pub enum MigrationLock {
+//RS     Shared,
+//RS     Exclusive,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct MigrationSql {
+//RS     pub ordinal: u64,
+//RS     pub sql: String,
+//RS     pub inverse_sql: Option<String>,
+//RS     pub risk: String,
+//RS     pub lock: MigrationLock,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct MigrationRequest {
+//RS     pub operation: MigrationOperation,
+//RS     pub migration_key: String,
+//RS     pub target: String,
+//RS     pub target_identity: String,
+//RS     pub database_identity: String,
+//RS     pub source_identity: String,
+//RS     pub schema_identity: String,
+//RS     pub tool_identity: String,
+//RS     pub from_version: u64,
+//RS     pub to_version: u64,
+//RS     pub lock: MigrationLock,
+//RS     pub risk: String,
+//RS     pub steps: Vec<MigrationSql>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct MigrationOutcome {
+//RS     pub receipt_id: String,
+//RS     pub operation: String,
+//RS     pub status: String,
+//RS     pub target: String,
+//RS     pub target_identity: String,
+//RS     pub source_identity: String,
+//RS     pub schema_identity: String,
+//RS     pub database_identity: String,
+//RS     pub tool_identity: String,
+//RS     pub from_version: u64,
+//RS     pub to_version: u64,
+//RS     pub step_count: usize,
+//RS     pub step_ids: Vec<String>,
+//RS     pub checksum: String,
+//RS     pub lock: MigrationLock,
+//RS     pub risk: String,
+//RS     pub started_unix_ms: u128,
+//RS     pub finished_unix_ms: u128,
+//RS     pub error: Option<String>,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq, Eq)]
+//RS pub struct MigrationStateRequest {
+//RS     pub target: String,
+//RS     pub target_identity: String,
+//RS     pub database_identity: String,
+//RS     pub source_identity: String,
+//RS     pub schema_identity: String,
+//RS }
+//RS 
+//RS #[derive(Clone, Debug, PartialEq)]
+//RS pub struct MigrationState {
+//RS     pub target: String,
+//RS     pub target_identity: String,
+//RS     pub database_identity: String,
+//RS     pub source_identity: String,
+//RS     pub schema_identity: String,
+//RS     pub current_version: u64,
+//RS     pub checksum: String,
+//RS     pub receipts: Vec<MigrationOutcome>,
+//RS     pub drift: Vec<String>,
+//RS }
+//RS 
+//RS impl MigrationState {
+//RS     pub fn is_drifted(&self) -> bool {
+//RS         !self.drift.is_empty()
+//RS     }
+//RS }
+//RS 
+//RS fn wire_migration_lock(lock: MigrationLock) -> wire::JetMigrationLock {
+//RS     match lock {
+//RS         MigrationLock::Shared => wire::JetMigrationLock::Shared,
+//RS         MigrationLock::Exclusive => wire::JetMigrationLock::Exclusive,
+//RS     }
+//RS }
+//RS 
+//RS fn wire_migration_operation(operation: MigrationOperation) -> wire::JetMigrationOperation {
+//RS     match operation {
+//RS         MigrationOperation::Apply => wire::JetMigrationOperation::Apply,
+//RS         MigrationOperation::Rollback => wire::JetMigrationOperation::Rollback,
+//RS         MigrationOperation::Direct => wire::JetMigrationOperation::Direct,
+//RS     }
+//RS }
+//RS 
+//RS fn wire_migration_request(request: &MigrationRequest) -> wire::JetMigrationRequest {
+//RS     wire::JetMigrationRequest {
+//RS         operation: wire_migration_operation(request.operation),
+//RS         migration_key: request.migration_key.clone(),
+//RS         target: request.target.clone(),
+//RS         target_identity: request.target_identity.clone(),
+//RS         database_identity: request.database_identity.clone(),
+//RS         source_identity: request.source_identity.clone(),
+//RS         schema_identity: request.schema_identity.clone(),
+//RS         tool_identity: request.tool_identity.clone(),
+//RS         from_version: request.from_version,
+//RS         to_version: request.to_version,
+//RS         lock: wire_migration_lock(request.lock),
+//RS         risk: request.risk.clone(),
+//RS         steps: request
+//RS             .steps
+//RS             .iter()
+//RS             .map(|step| wire::JetMigrationSql {
+//RS                 ordinal: step.ordinal,
+//RS                 sql: (step.sql.clone(), Vec::new()),
+//RS                 inverse_sql: step
+//RS                     .inverse_sql
+//RS                     .as_ref()
+//RS                     .map(|sql| (sql.clone(), Vec::new())),
+//RS                 risk: step.risk.clone(),
+//RS                 lock: wire_migration_lock(step.lock),
+//RS             })
+//RS             .collect(),
+//RS     }
+//RS }
+//RS 
+//RS fn migration_lock_from_wire(lock: wire::JetMigrationLock) -> MigrationLock {
+//RS     match lock {
+//RS         wire::JetMigrationLock::Shared => MigrationLock::Shared,
+//RS         wire::JetMigrationLock::Exclusive => MigrationLock::Exclusive,
+//RS     }
+//RS }
+//RS 
+//RS fn migration_outcome_from_wire(outcome: wire::JetMigrationOutcome) -> MigrationOutcome {
+//RS     MigrationOutcome {
+//RS         receipt_id: outcome.receipt_id,
+//RS         operation: outcome.operation,
+//RS         status: outcome.status,
+//RS         target: outcome.target,
+//RS         target_identity: outcome.target_identity,
+//RS         source_identity: outcome.source_identity,
+//RS         schema_identity: outcome.schema_identity,
+//RS         database_identity: outcome.database_identity,
+//RS         tool_identity: outcome.tool_identity,
+//RS         from_version: outcome.from_version,
+//RS         to_version: outcome.to_version,
+//RS         step_count: outcome.step_count,
+//RS         step_ids: outcome.step_ids,
+//RS         checksum: outcome.checksum,
+//RS         lock: migration_lock_from_wire(outcome.lock),
+//RS         risk: outcome.risk,
+//RS         started_unix_ms: outcome.started_unix_ms,
+//RS         finished_unix_ms: outcome.finished_unix_ms,
+//RS         error: outcome.error,
+//RS     }
+//RS }
+//RS 
+//RS fn migration_state_from_wire(state: wire::JetMigrationState) -> MigrationState {
+//RS     MigrationState {
+//RS         target: state.target,
+//RS         target_identity: state.target_identity,
+//RS         database_identity: state.database_identity,
+//RS         source_identity: state.source_identity,
+//RS         schema_identity: state.schema_identity,
+//RS         current_version: state.current_version,
+//RS         checksum: state.checksum,
+//RS         receipts: state
+//RS             .receipts
+//RS             .into_iter()
+//RS             .map(migration_outcome_from_wire)
+//RS             .collect(),
+//RS         drift: state.drift,
+//RS     }
+//RS }
+//RS 
+//RS struct JitMigrationBackend {
+//RS     handle: u64,
+//RS }
+//RS 
+//RS impl wire::JetDBBackend for JitMigrationBackend {
+//RS     fn begin(&mut self) -> bool {
+//RS         runtime::jet_db_begin(self.handle)
+//RS     }
+//RS 
+//RS     fn begin_with_lock(&mut self, lock: wire::JetMigrationLock) -> bool {
+//RS         runtime::jet_db_begin_mode(
+//RS             self.handle,
+//RS             if matches!(lock, wire::JetMigrationLock::Exclusive) {
+//RS                 1
+//RS             } else {
+//RS                 0
+//RS             },
+//RS         )
+//RS     }
+//RS 
+//RS     fn commit(&mut self) -> bool {
+//RS         runtime::jet_db_commit(self.handle)
+//RS     }
+//RS 
+//RS     fn rollback(&mut self) {
+//RS         let _ = runtime::jet_db_rollback(self.handle);
+//RS     }
+//RS 
+//RS     fn execute(
+//RS         &mut self,
+//RS         sql: &wire::SQL,
+//RS         _allow_schema: bool,
+//RS     ) -> Result<i64, wire::DBError> {
+//RS         wire::jet_db_decode_execute_result(&runtime::jet_db_execute(
+//RS             self.handle,
+//RS             &sql.0,
+//RS             &wire::jet_db_encode_params(&sql.1),
+//RS         ))
+//RS     }
+//RS 
+//RS     fn query(
+//RS         &mut self,
+//RS         sql: &wire::SQL,
+//RS         _allow_schema: bool,
+//RS     ) -> Result<Vec<wire::JetDBRow>, wire::DBError> {
+//RS         wire::jet_db_decode_query_result(&runtime::jet_db_query(
+//RS             self.handle,
+//RS             &sql.0,
+//RS             &wire::jet_db_encode_params(&sql.1),
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS fn run_wire_migration(
+//RS     handle: u64,
+//RS     request: &MigrationRequest,
+//RS ) -> Result<MigrationOutcome, String> {
+//RS     let wire_request = wire_migration_request(request);
+//RS     let mut backend = JitMigrationBackend { handle };
+//RS     wire::jet_db_migration_request(&mut backend, &wire_request)
+//RS         .map(migration_outcome_from_wire)
+//RS         .map_err(|error| error.message)
+//RS }
+//RS 
+//RS fn inspect_wire_migrations(
+//RS     handle: u64,
+//RS     query: &MigrationStateRequest,
+//RS ) -> Result<MigrationState, String> {
+//RS     let wire_query = wire::JetMigrationStateRequest {
+//RS         target: query.target.clone(),
+//RS         target_identity: query.target_identity.clone(),
+//RS         database_identity: query.database_identity.clone(),
+//RS         source_identity: query.source_identity.clone(),
+//RS         schema_identity: query.schema_identity.clone(),
+//RS     };
+//RS     let mut backend = JitMigrationBackend { handle };
+//RS     wire::jet_db_migration_state(&mut backend, &wire_query)
+//RS         .map(migration_state_from_wire)
+//RS         .map_err(|error| error.message)
+//RS }
+//RS 
+//RS pub fn migration_request_checksum(request: &MigrationRequest) -> String {
+//RS     wire::jet_db_migration_request_checksum(&wire_migration_request(request))
+//RS }
+//RS 
+//RS pub fn run_migration(
+//RS     path: impl AsRef<std::path::Path>,
+//RS     request: MigrationRequest,
+//RS ) -> Result<MigrationOutcome, String> {
+//RS     let connection = ConsoleDbConnection::open(path)?;
+//RS     connection.run_migration(request)
+//RS }
+//RS 
+//RS pub fn inspect_migrations(
+//RS     path: impl AsRef<std::path::Path>,
+//RS     query: MigrationStateRequest,
+//RS ) -> Result<MigrationState, String> {
+//RS     let connection = ConsoleDbConnection::open(path)?;
+//RS     connection.inspect_migrations(query)
+//RS }
+//RS 
+//RS use jet_codegen::Comptime::ServicesLite::{
+//RS     jet_job_queue_install_store_provider_if_absent, jet_services_active_execution_endpoint,
+//RS     JetJobEnqueue, JetJobError, JetJobPayload, JetJobQueue, JetJobQueueClaim,
+//RS     JetJobQueueDeliveryPolicy, JetJobQueueEvent, JetJobQueuePolicy, JetJobQueueReceipt,
+//RS     JetJobQueueRecord, JetJobQueueRow, JetJobQueueState, JetJobQueueStatus, JetJobQueueStore,
+//RS     JetJobQueueStoreProvider, JetJobQueueValue, JetJobResult, JetServiceError,
+//RS };
+//RS 
+//RS struct JitJobQueueStore {
+//RS     handle: u64,
+//RS }
+//RS 
+//RS impl Drop for JitJobQueueStore {
+//RS     fn drop(&mut self) {
+//RS         let _ = runtime::jet_db_close(self.handle);
+//RS     }
+//RS }
+//RS 
+//RS fn jit_job_queue_error(operation: &str, error: wire::DBError) -> JetServiceError {
+//RS     JetServiceError::Unavailable(format!("queue SQLite {operation} failed: {}", error.message))
+//RS }
+//RS 
+//RS fn jit_job_queue_values(values: &[JetJobQueueValue]) -> Vec<wire::DBValue> {
+//RS     values
+//RS         .iter()
+//RS         .map(|value| match value {
+//RS             JetJobQueueValue::Null => wire::DBValue::Null,
+//RS             JetJobQueueValue::Int(value) => wire::DBValue::Int(*value),
+//RS             JetJobQueueValue::Text(value) => wire::DBValue::Text(value.clone()),
+//RS             JetJobQueueValue::Blob(value) => wire::DBValue::Blob(value.clone()),
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS impl JetJobQueueStore for JitJobQueueStore {
+//RS     fn begin(&mut self) -> Result<(), JetServiceError> {
+//RS         if runtime::jet_db_begin(self.handle) {
+//RS             Ok(())
+//RS         } else {
+//RS             Err(JetServiceError::Unavailable(
+//RS                 "queue SQLite begin failed".to_string(),
+//RS             ))
+//RS         }
+//RS     }
+//RS 
+//RS     fn commit(&mut self) -> Result<(), JetServiceError> {
+//RS         if runtime::jet_db_commit(self.handle) {
+//RS             Ok(())
+//RS         } else {
+//RS             Err(JetServiceError::Unavailable(
+//RS                 "queue SQLite commit failed".to_string(),
+//RS             ))
+//RS         }
+//RS     }
+//RS 
+//RS     fn rollback(&mut self) {
+//RS         let _ = runtime::jet_db_rollback(self.handle);
+//RS     }
+//RS 
+//RS     fn execute(
+//RS         &mut self,
+//RS         sql: &str,
+//RS         params: &[JetJobQueueValue],
+//RS     ) -> Result<i64, JetServiceError> {
+//RS         let params = wire::jet_db_encode_params(&jit_job_queue_values(params));
+//RS         wire::jet_db_decode_execute_result(&runtime::jet_db_execute(
+//RS             self.handle,
+//RS             sql,
+//RS             &params,
+//RS         ))
+//RS         .map_err(|error| jit_job_queue_error("execute", error))
+//RS     }
+//RS 
+//RS     fn query(
+//RS         &mut self,
+//RS         sql: &str,
+//RS         params: &[JetJobQueueValue],
+//RS     ) -> Result<Vec<JetJobQueueRow>, JetServiceError> {
+//RS         let params = wire::jet_db_encode_params(&jit_job_queue_values(params));
+//RS         let rows = wire::jet_db_decode_query_result(&runtime::jet_db_query(
+//RS             self.handle,
+//RS             sql,
+//RS             &params,
+//RS         ))
+//RS         .map_err(|error| jit_job_queue_error("query", error))?;
+//RS         Ok(rows
+//RS             .into_iter()
+//RS             .map(|row| {
+//RS                 JetJobQueueRow::new(
+//RS                     row.into_iter()
+//RS                         .map(|(name, value)| {
+//RS                             let value = match value {
+//RS                                 wire::DBValue::Null => JetJobQueueValue::Null,
+//RS                                 wire::DBValue::Int(value) => JetJobQueueValue::Int(value),
+//RS                                 wire::DBValue::Float(value) => {
+//RS                                     JetJobQueueValue::Text(value.to_string())
+//RS                                 }
+//RS                                 wire::DBValue::Text(value) => JetJobQueueValue::Text(value),
+//RS                                 wire::DBValue::Bool(value) => {
+//RS                                     JetJobQueueValue::Int(i64::from(value))
+//RS                                 }
+//RS                                 wire::DBValue::Blob(value) => JetJobQueueValue::Blob(value),
+//RS                             };
+//RS                             (name, value)
+//RS                         })
+//RS                         .collect(),
+//RS                 )
+//RS             })
+//RS             .collect())
+//RS     }
+//RS }
+//RS 
+//RS struct JitJobQueueProvider;
+//RS 
+//RS impl JetJobQueueStoreProvider for JitJobQueueProvider {
+//RS     fn open(
+//RS         &self,
+//RS         path: &str,
+//RS         _authority: &str,
+//RS     ) -> Result<Box<dyn JetJobQueueStore>, JetServiceError> {
+//RS         if let Ok(metadata) = std::fs::symlink_metadata(path) {
+//RS             if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+//RS                 return Err(JetServiceError::Policy(
+//RS                     "queue SQLite path must be a regular file, not a symlink".to_string(),
+//RS                 ));
+//RS             }
+//RS         }
+//RS         if let Some(parent) = std::path::Path::new(path).parent() {
+//RS             std::fs::create_dir_all(parent).map_err(|error| {
+//RS                 JetServiceError::Unavailable(format!("queue SQLite directory failed: {error}"))
+//RS             })?;
+//RS         }
+//RS         let handle = runtime::jet_db_open(path);
+//RS         if handle == 0 {
+//RS             return Err(JetServiceError::Unavailable(
+//RS                 "queue SQLite open failed".to_string(),
+//RS             ));
+//RS         }
+//RS         Ok(Box::new(JitJobQueueStore { handle }))
+//RS     }
+//RS }
+//RS 
+//RS static JIT_JOB_QUEUE_PROVIDER: std::sync::Once = std::sync::Once::new();
+//RS 
+//RS pub(crate) fn jit_job_queue_install_provider() {
+//RS     JIT_JOB_QUEUE_PROVIDER.call_once(|| {
+//RS         let _ = jet_job_queue_install_store_provider_if_absent(Box::new(JitJobQueueProvider));
+//RS     });
+//RS }
+//RS /// Runtime-owned opaque JobQueue slot. The queue keeps the provider's native
+//RS /// SQLite connection alive until this slot is dropped.
+//RS pub(crate) struct JitJobQueueSlot {
+//RS     pub(crate) queue: JetJobQueue<'static>,
+//RS }
+//RS 
+//RS fn queue_policy_error(message: impl Into<String>) -> JetServiceError {
+//RS     JetServiceError::Policy(message.into())
+//RS }
+//RS 
+//RS fn queue_unavailable_error(message: impl Into<String>) -> JetServiceError {
+//RS     JetServiceError::Unavailable(message.into())
+//RS }
+//RS 
+//RS fn queue_invalid_handle() -> JetServiceError {
+//RS     queue_unavailable_error("invalid JobQueue handle")
+//RS }
+//RS 
+//RS fn queue_result_err(rt: &mut crate::runtime_host::JitRuntime, error: JetServiceError) -> i64 {
+//RS     let (message, discriminant) = match error {
+//RS         JetServiceError::Full(message) => (message, 0u64),
+//RS         JetServiceError::Ambiguous(message) => (message, 1u64),
+//RS         JetServiceError::Unknown(message) => (message, 2u64),
+//RS         JetServiceError::NotStarted(message) => (message, 3u64),
+//RS         JetServiceError::Policy(message) => (message, 4u64),
+//RS         JetServiceError::Unavailable(message) => (message, 5u64),
+//RS         JetServiceError::Partitioned(message) => (message, 6u64),
+//RS         JetServiceError::Revoked(message) => (message, 7u64),
+//RS         JetServiceError::Stale(message) => (message, 8u64),
+//RS         JetServiceError::Expired(message) => (message, 9u64),
+//RS     };
+//RS     let message = rt.heap.alloc_string(message);
+//RS     crate::runtime_host::alloc_jit_result(
+//RS         rt,
+//RS         false,
+//RS         ((message as u64) << 8) | discriminant,
+//RS     )
+//RS }
+//RS 
+//RS fn queue_result<T>(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     result: Result<T, JetServiceError>,
+//RS     encode: impl FnOnce(&mut crate::runtime_host::JitRuntime, T) -> u64,
+//RS ) -> i64 {
+//RS     match result {
+//RS         Ok(value) => {
+//RS             let bits = encode(rt, value);
+//RS             crate::runtime_host::alloc_jit_result(rt, true, bits)
+//RS         }
+//RS         Err(error) => queue_result_err(rt, error),
+//RS     }
+//RS }
+//RS 
+//RS fn queue_slot_index(handle: i64) -> Option<usize> {
+//RS     usize::try_from(handle.checked_sub(1)?).ok()
+//RS }
+//RS 
+//RS fn with_jit_job_queue<T>(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS     operation: impl FnOnce(&mut JetJobQueue<'static>) -> Result<T, JetServiceError>,
+//RS ) -> Result<T, JetServiceError> {
+//RS     let index = queue_slot_index(handle).ok_or_else(queue_invalid_handle)?;
+//RS     let slot = rt
+//RS         .job_queues
+//RS         .get_mut(index)
+//RS         .and_then(Option::as_mut)
+//RS         .ok_or_else(queue_invalid_handle)?;
+//RS     operation(&mut slot.queue)
+//RS }
+//RS 
+//RS fn queue_string(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS     label: &str,
+//RS ) -> Result<String, JetServiceError> {
+//RS     rt.heap.clone_string(handle).ok_or_else(|| {
+//RS         queue_policy_error(format!("JobQueue {label} must be a string descriptor"))
+//RS     })
+//RS }
+//RS 
+//RS fn queue_record_int(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     record: i64,
+//RS     index: i64,
+//RS     label: &str,
+//RS ) -> Result<i64, JetServiceError> {
+//RS     rt.heap.record_get_int(record, index).ok_or_else(|| {
+//RS         queue_policy_error(format!("JobQueue {label} must be an integer field"))
+//RS     })
+//RS }
+//RS 
+//RS fn queue_record_bool(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     record: i64,
+//RS     index: i64,
+//RS     label: &str,
+//RS ) -> Result<bool, JetServiceError> {
+//RS     rt.heap.record_get_bool(record, index).ok_or_else(|| {
+//RS         queue_policy_error(format!("JobQueue {label} must be a boolean field"))
+//RS     })
+//RS }
+//RS 
+//RS fn queue_record_string(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     record: i64,
+//RS     index: i64,
+//RS     label: &str,
+//RS ) -> Result<String, JetServiceError> {
+//RS     rt.heap.record_clone_string(record, index).ok_or_else(|| {
+//RS         queue_policy_error(format!("JobQueue {label} must be a string field"))
+//RS     })
+//RS }
+//RS 
+//RS fn queue_record_record(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     record: i64,
+//RS     index: i64,
+//RS     label: &str,
+//RS ) -> Result<i64, JetServiceError> {
+//RS     rt.heap.record_get_record(record, index).ok_or_else(|| {
+//RS         queue_policy_error(format!("JobQueue {label} must be a record field"))
+//RS     })
+//RS }
+//RS 
+//RS fn queue_bool_word(raw: i64, label: &str) -> Result<bool, JetServiceError> {
+//RS     match raw {
+//RS         0 => Ok(false),
+//RS         1 => Ok(true),
+//RS         _ => Err(queue_policy_error(format!(
+//RS             "JobQueue {label} must be a boolean word"
+//RS         ))),
+//RS     }
+//RS }
+//RS 
+//RS fn queue_limit(raw: i64, label: &str) -> Result<usize, JetServiceError> {
+//RS     usize::try_from(raw).map_err(|_| {
+//RS         queue_policy_error(format!("JobQueue {label} must be a non-negative limit"))
+//RS     })
+//RS }
+//RS 
+//RS fn queue_optional_string(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     raw: i64,
+//RS     label: &str,
+//RS ) -> Result<Option<String>, JetServiceError> {
+//RS     if raw == 0 {
+//RS         return Ok(None);
+//RS     }
+//RS     let handle = raw.checked_sub(1).ok_or_else(|| {
+//RS         queue_policy_error(format!("JobQueue {label} has an invalid optional string"))
+//RS     })?;
+//RS     rt.heap.clone_string(handle).map(Some).ok_or_else(|| {
+//RS         queue_policy_error(format!("JobQueue {label} has an invalid optional string"))
+//RS     })
+//RS }
+//RS 
+//RS fn queue_optional_int(raw: i64, label: &str) -> Result<Option<i64>, JetServiceError> {
+//RS     if raw == 0 {
+//RS         Ok(None)
+//RS     } else {
+//RS         raw.checked_sub(1).map(Some).ok_or_else(|| {
+//RS             queue_policy_error(format!("JobQueue {label} has an invalid optional integer"))
+//RS         })
+//RS     }
+//RS }
+//RS 
+//RS fn queue_record_optional_string(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     record: i64,
+//RS     index: i64,
+//RS     label: &str,
+//RS ) -> Result<Option<String>, JetServiceError> {
+//RS     if let Some(value) = rt.heap.record_clone_string(record, index) {
+//RS         return Ok(Some(value));
+//RS     }
+//RS     queue_optional_string(rt, queue_record_int(rt, record, index, label)?, label)
+//RS }
+//RS 
+//RS fn queue_record_optional_int(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     record: i64,
+//RS     index: i64,
+//RS     label: &str,
+//RS ) -> Result<Option<i64>, JetServiceError> {
+//RS     queue_optional_int(queue_record_int(rt, record, index, label)?, label)
+//RS }
+//RS 
+//RS fn queue_bytes(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     list: i64,
+//RS     label: &str,
+//RS ) -> Result<Vec<u8>, JetServiceError> {
+//RS     let length = rt.heap.list_len(list).ok_or_else(|| {
+//RS         queue_policy_error(format!("JobQueue {label} must be a byte list"))
+//RS     })?;
+//RS     let length = usize::try_from(length).map_err(|_| {
+//RS         queue_policy_error(format!("JobQueue {label} has an invalid byte-list length"))
+//RS     })?;
+//RS     let mut bytes = Vec::with_capacity(length);
+//RS     for index in 0..length {
+//RS         let value = rt.heap.list_get_int(list, index as i64).ok_or_else(|| {
+//RS             queue_policy_error(format!("JobQueue {label} contains an invalid byte"))
+//RS         })?;
+//RS         bytes.push(u8::try_from(value).map_err(|_| {
+//RS             queue_policy_error(format!("JobQueue {label} contains a non-byte integer"))
+//RS         })?);
+//RS     }
+//RS     Ok(bytes)
+//RS }
+//RS 
+//RS fn queue_payload(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     record: i64,
+//RS ) -> Result<JetJobPayload, JetServiceError> {
+//RS     let type_id = queue_record_string(rt, record, 0, "payload type")?;
+//RS     let bytes_handle = queue_record_int(rt, record, 1, "payload bytes")?;
+//RS     let bytes = queue_bytes(rt, bytes_handle, "payload bytes")?;
+//RS     let publish = queue_record_bool(rt, record, 2, "payload publish")?;
+//RS     JetJobPayload::new(type_id, bytes, publish)
+//RS }
+//RS 
+//RS fn queue_result_value(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     record: i64,
+//RS ) -> Result<JetJobResult, JetServiceError> {
+//RS     let type_id = queue_record_string(rt, record, 0, "result type")?;
+//RS     let bytes_handle = queue_record_int(rt, record, 1, "result bytes")?;
+//RS     let bytes = queue_bytes(rt, bytes_handle, "result bytes")?;
+//RS     let publish = queue_record_bool(rt, record, 2, "result publish")?;
+//RS     JetJobResult::new(type_id, bytes, publish)
+//RS }
+//RS 
+//RS fn queue_error_value(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     record: i64,
+//RS ) -> Result<JetJobError, JetServiceError> {
+//RS     let type_id = queue_record_string(rt, record, 0, "error type")?;
+//RS     let reason = queue_record_string(rt, record, 1, "error reason")?;
+//RS     let detail = queue_record_optional_string(rt, record, 2, "error detail")?;
+//RS     JetJobError::new(type_id, reason, detail)
+//RS }
+//RS 
+//RS fn queue_state(raw: i64) -> Result<JetJobQueueState, JetServiceError> {
+//RS     match raw {
+//RS         0 => Ok(JetJobQueueState::Queued),
+//RS         1 => Ok(JetJobQueueState::Running),
+//RS         2 => Ok(JetJobQueueState::Retrying),
+//RS         3 => Ok(JetJobQueueState::Completed),
+//RS         4 => Ok(JetJobQueueState::Failed),
+//RS         5 => Ok(JetJobQueueState::DeadLettered),
+//RS         6 => Ok(JetJobQueueState::Cancelled),
+//RS         _ => Err(queue_policy_error("JobQueue receipt has an invalid state")),
+//RS     }
+//RS }
+//RS 
+//RS fn queue_delivery(raw: i64) -> Result<JetJobQueueDeliveryPolicy, JetServiceError> {
+//RS     if raw == 0 {
+//RS         Ok(JetJobQueueDeliveryPolicy::AtLeastOnce)
+//RS     } else {
+//RS         Err(queue_policy_error(
+//RS             "JobQueue receipt has an invalid delivery policy",
+//RS         ))
+//RS     }
+//RS }
+//RS 
+//RS fn queue_receipt(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     record: i64,
+//RS ) -> Result<JetJobQueueReceipt, JetServiceError> {
+//RS     Ok(JetJobQueueReceipt {
+//RS         id: queue_record_string(rt, record, 0, "receipt id")?,
+//RS         authority: queue_record_string(rt, record, 1, "receipt authority")?,
+//RS         queue: queue_record_string(rt, record, 2, "receipt queue")?,
+//RS         job_type: queue_record_string(rt, record, 3, "receipt job type")?,
+//RS         state: queue_state(queue_record_int(rt, record, 4, "receipt state")?)?,
+//RS         sequence: queue_record_int(rt, record, 5, "receipt sequence")?,
+//RS         attempts: u32::try_from(queue_record_int(rt, record, 6, "receipt attempts")?)
+//RS             .map_err(|_| queue_policy_error("JobQueue receipt attempts are invalid"))?,
+//RS         due_at_ms: queue_record_int(rt, record, 7, "receipt due time")?,
+//RS         accepted_at_ms: queue_record_int(rt, record, 8, "receipt accepted time")?,
+//RS         request_id: queue_record_optional_string(rt, record, 9, "receipt request id")?,
+//RS         idempotency_key: queue_record_optional_string(rt, record, 10, "receipt idempotency key")?,
+//RS         lease_until_ms: queue_record_optional_int(rt, record, 11, "receipt lease")?,
+//RS         duration_ms: queue_record_optional_int(rt, record, 12, "receipt duration")?,
+//RS         error_reason: queue_record_optional_string(rt, record, 13, "receipt error")?,
+//RS         delivery: queue_delivery(queue_record_int(rt, record, 14, "receipt delivery")?)?,
+//RS         duplicate: queue_record_bool(rt, record, 15, "receipt duplicate")?,
+//RS         signature: queue_record_string(rt, record, 16, "receipt signature")?,
+//RS     })
+//RS }
+//RS 
+//RS fn queue_claim(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     record: i64,
+//RS ) -> Result<JetJobQueueClaim, JetServiceError> {
+//RS     Ok(JetJobQueueClaim {
+//RS         receipt: queue_receipt(rt, queue_record_record(rt, record, 0, "claim receipt")?)?,
+//RS         payload: queue_payload(rt, queue_record_record(rt, record, 1, "claim payload")?)?,
+//RS         worker: queue_record_string(rt, record, 2, "claim worker")?,
+//RS         lease_token: queue_record_string(rt, record, 3, "claim lease token")?,
+//RS         lease_until_ms: queue_record_int(rt, record, 4, "claim lease")?,
+//RS     })
+//RS }
+//RS 
+//RS fn queue_duration_ms(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     duration: i64,
+//RS     label: &str,
+//RS ) -> Result<i64, JetServiceError> {
+//RS     let nanos = queue_record_int(rt, duration, 0, label)?;
+//RS     if nanos < 0 {
+//RS         return Err(queue_policy_error(format!(
+//RS             "JobQueue {label} must be non-negative"
+//RS         )));
+//RS     }
+//RS     Ok(nanos / 1_000_000)
+//RS }
+//RS 
+//RS fn queue_i64(value: u64) -> i64 {
+//RS     i64::try_from(value).unwrap_or(i64::MAX)
+//RS }
+//RS 
+//RS fn queue_set_string(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     record: i64,
+//RS     index: i64,
+//RS     value: String,
+//RS ) {
+//RS     let value = rt.heap.alloc_string(value);
+//RS     let _ = rt.heap.record_set_string(record, index, value);
+//RS }
+//RS 
+//RS fn queue_set_optional_string(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     record: i64,
+//RS     index: i64,
+//RS     value: Option<String>,
+//RS ) {
+//RS     let value = value
+//RS         .map(|value| rt.heap.alloc_string(value).wrapping_add(1))
+//RS         .unwrap_or(0);
+//RS     let _ = rt.heap.record_set_int(record, index, value);
+//RS }
+//RS 
+//RS fn queue_set_optional_int(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     record: i64,
+//RS     index: i64,
+//RS     value: Option<i64>,
+//RS ) {
+//RS     let value = value.map(|value| value.wrapping_add(1)).unwrap_or(0);
+//RS     let _ = rt.heap.record_set_int(record, index, value);
+//RS }
+//RS 
+//RS fn queue_set_optional_record(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     record: i64,
+//RS     index: i64,
+//RS     value: Option<i64>,
+//RS ) {
+//RS     let value = value.map(|value| value.wrapping_add(1)).unwrap_or(0);
+//RS     let _ = rt.heap.record_set_int(record, index, value);
+//RS }
+//RS 
+//RS fn queue_alloc_bytes(rt: &mut crate::runtime_host::JitRuntime, bytes: Vec<u8>) -> i64 {
+//RS     rt.heap
+//RS         .alloc_int_list(bytes.into_iter().map(i64::from).collect())
+//RS }
+//RS 
+//RS fn queue_alloc_payload(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     payload: JetJobPayload,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(3);
+//RS     let bytes = queue_alloc_bytes(rt, payload.bytes);
+//RS     queue_set_string(rt, record, 0, payload.type_id);
+//RS     let _ = rt.heap.record_set_int(record, 1, bytes);
+//RS     let _ = rt.heap.record_set_bool(record, 2, payload.publish);
+//RS     record
+//RS }
+//RS 
+//RS fn queue_alloc_result_value(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     result: JetJobResult,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(3);
+//RS     let bytes = queue_alloc_bytes(rt, result.bytes);
+//RS     queue_set_string(rt, record, 0, result.type_id);
+//RS     let _ = rt.heap.record_set_int(record, 1, bytes);
+//RS     let _ = rt.heap.record_set_bool(record, 2, result.publish);
+//RS     record
+//RS }
+//RS 
+//RS fn queue_alloc_error_value(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     error: JetJobError,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(3);
+//RS     queue_set_string(rt, record, 0, error.type_id);
+//RS     queue_set_string(rt, record, 1, error.reason);
+//RS     queue_set_optional_string(rt, record, 2, error.detail);
+//RS     record
+//RS }
+//RS 
+//RS fn queue_alloc_receipt(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     receipt: JetJobQueueReceipt,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(17);
+//RS     queue_set_string(rt, record, 0, receipt.id);
+//RS     queue_set_string(rt, record, 1, receipt.authority);
+//RS     queue_set_string(rt, record, 2, receipt.queue);
+//RS     queue_set_string(rt, record, 3, receipt.job_type);
+//RS     let _ = rt
+//RS         .heap
+//RS         .record_set_int(record, 4, queue_state_wire(receipt.state));
+//RS     let _ = rt.heap.record_set_int(record, 5, receipt.sequence);
+//RS     let _ = rt
+//RS         .heap
+//RS         .record_set_int(record, 6, i64::from(receipt.attempts));
+//RS     let _ = rt.heap.record_set_int(record, 7, receipt.due_at_ms);
+//RS     let _ = rt.heap.record_set_int(record, 8, receipt.accepted_at_ms);
+//RS     queue_set_optional_string(rt, record, 9, receipt.request_id);
+//RS     queue_set_optional_string(rt, record, 10, receipt.idempotency_key);
+//RS     queue_set_optional_int(rt, record, 11, receipt.lease_until_ms);
+//RS     queue_set_optional_int(rt, record, 12, receipt.duration_ms);
+//RS     queue_set_optional_string(rt, record, 13, receipt.error_reason);
+//RS     let _ = rt
+//RS         .heap
+//RS         .record_set_int(record, 14, queue_delivery_wire(receipt.delivery));
+//RS     let _ = rt.heap.record_set_bool(record, 15, receipt.duplicate);
+//RS     queue_set_string(rt, record, 16, receipt.signature);
+//RS     record
+//RS }
+//RS 
+//RS fn queue_alloc_claim(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     claim: JetJobQueueClaim,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(5);
+//RS     let receipt = queue_alloc_receipt(rt, claim.receipt);
+//RS     let payload = queue_alloc_payload(rt, claim.payload);
+//RS     let _ = rt.heap.record_set_record(record, 0, receipt);
+//RS     let _ = rt.heap.record_set_record(record, 1, payload);
+//RS     queue_set_string(rt, record, 2, claim.worker);
+//RS     queue_set_string(rt, record, 3, claim.lease_token);
+//RS     let _ = rt.heap.record_set_int(record, 4, claim.lease_until_ms);
+//RS     record
+//RS }
+//RS 
+//RS fn queue_alloc_event(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     event: JetJobQueueEvent,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(7);
+//RS     let _ = rt.heap.record_set_int(record, 0, event.sequence);
+//RS     let _ = rt.heap.record_set_int(record, 1, queue_state_wire(event.state));
+//RS     let _ = rt
+//RS         .heap
+//RS         .record_set_int(record, 2, i64::from(event.attempts));
+//RS     let _ = rt.heap.record_set_int(record, 3, event.timestamp_ms);
+//RS     queue_set_optional_string(rt, record, 4, event.reason);
+//RS     queue_set_optional_int(rt, record, 5, event.duration_ms);
+//RS     queue_set_optional_string(rt, record, 6, event.worker);
+//RS     record
+//RS }
+//RS 
+//RS fn queue_alloc_record(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     value: JetJobQueueRecord,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(6);
+//RS     let receipt = queue_alloc_receipt(rt, value.receipt);
+//RS     let _ = rt.heap.record_set_record(record, 0, receipt);
+//RS     let payload = value.payload.map(|value| queue_alloc_payload(rt, value));
+//RS     let result = value
+//RS         .result
+//RS         .map(|value| queue_alloc_result_value(rt, value));
+//RS     let error = value.error.map(|value| queue_alloc_error_value(rt, value));
+//RS     queue_set_optional_record(rt, record, 1, payload);
+//RS     queue_set_optional_record(rt, record, 2, result);
+//RS     queue_set_optional_record(rt, record, 3, error);
+//RS     queue_set_optional_int(rt, record, 4, value.started_at_ms);
+//RS     queue_set_optional_int(rt, record, 5, value.finished_at_ms);
+//RS     record
+//RS }
+//RS 
+//RS fn queue_alloc_status(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     status: JetJobQueueStatus,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(15);
+//RS     queue_set_string(rt, record, 0, status.queue);
+//RS     queue_set_string(rt, record, 1, status.authority);
+//RS     let _ = rt.heap.record_set_int(record, 2, queue_i64(status.queued));
+//RS     let _ = rt.heap.record_set_int(record, 3, queue_i64(status.running));
+//RS     let _ = rt.heap.record_set_int(record, 4, queue_i64(status.retrying));
+//RS     let _ = rt.heap.record_set_int(record, 5, queue_i64(status.completed));
+//RS     let _ = rt.heap.record_set_int(record, 6, queue_i64(status.failed));
+//RS     let _ = rt
+//RS         .heap
+//RS         .record_set_int(record, 7, queue_i64(status.dead_lettered));
+//RS     let _ = rt
+//RS         .heap
+//RS         .record_set_int(record, 8, queue_i64(status.cancelled));
+//RS     let _ = rt.heap.record_set_int(record, 9, queue_i64(status.depth));
+//RS     let _ = rt.heap.record_set_int(record, 10, queue_i64(status.wait_ms));
+//RS     let _ = rt
+//RS         .heap
+//RS         .record_set_int(record, 11, queue_i64(status.throughput));
+//RS     let _ = rt
+//RS         .heap
+//RS         .record_set_int(record, 12, queue_i64(status.capacity as u64));
+//RS     let _ = rt.heap.record_set_bool(record, 13, status.paused);
+//RS     let _ = rt
+//RS         .heap
+//RS         .record_set_int(record, 14, queue_i64(status.freshness_ms));
+//RS     record
+//RS }
+//RS 
+//RS fn queue_state_wire(state: JetJobQueueState) -> i64 {
+//RS     match state {
+//RS         JetJobQueueState::Queued => 0,
+//RS         JetJobQueueState::Running => 1,
+//RS         JetJobQueueState::Retrying => 2,
+//RS         JetJobQueueState::Completed => 3,
+//RS         JetJobQueueState::Failed => 4,
+//RS         JetJobQueueState::DeadLettered => 5,
+//RS         JetJobQueueState::Cancelled => 6,
+//RS     }
+//RS }
+//RS 
+//RS fn queue_delivery_wire(delivery: JetJobQueueDeliveryPolicy) -> i64 {
+//RS     match delivery {
+//RS         JetJobQueueDeliveryPolicy::AtLeastOnce => 0,
+//RS     }
+//RS }
+//RS 
+//RS fn queue_alloc_list(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     values: impl IntoIterator<Item = i64>,
+//RS ) -> i64 {
+//RS     rt.heap.alloc_int_list(values.into_iter().collect())
+//RS }
+//RS fn jet_jit_job_queue_default() -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         jit_job_queue_install_provider();
+//RS         let result = (|| -> Result<i64, JetServiceError> {
+//RS             let endpoint = jet_services_active_execution_endpoint()?;
+//RS             let handle = i64::try_from(
+//RS                 rt.job_queues
+//RS                     .len()
+//RS                     .checked_add(1)
+//RS                     .ok_or_else(|| queue_unavailable_error("JobQueue handle space exhausted"))?,
+//RS             )
+//RS             .map_err(|_| queue_unavailable_error("JobQueue handle space exhausted"))?;
+//RS             let queue = JetJobQueue::open_default(
+//RS                 &endpoint,
+//RS                 "default".to_string(),
+//RS                 JetJobQueuePolicy::default(),
+//RS             )?;
+//RS             rt.job_queues.push(Some(JitJobQueueSlot { queue }));
+//RS             Ok(handle)
+//RS         })();
+//RS         queue_result(rt, result, |_, handle| handle as u64)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_job_queue_enqueue(queue: i64, job: i64, payload: i64, key: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = (|| -> Result<JetJobQueueReceipt, JetServiceError> {
+//RS             let job_type = queue_string(rt, job, "job type")?;
+//RS             let payload = queue_payload(rt, payload)?;
+//RS             let idempotency_key = queue_optional_string(rt, key, "idempotency key")?;
+//RS             let request = JetJobEnqueue {
+//RS                 job_type,
+//RS                 payload,
+//RS                 idempotency_key,
+//RS                 request_id: None,
+//RS                 delay_ms: 0,
+//RS             };
+//RS             with_jit_job_queue(rt, queue, |queue| queue.enqueue(request))
+//RS         })();
+//RS         queue_result(rt, result, |rt, receipt| {
+//RS             queue_alloc_receipt(rt, receipt) as u64
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_job_queue_delay(queue: i64, job: i64, payload: i64, duration: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = (|| -> Result<JetJobQueueReceipt, JetServiceError> {
+//RS             let job_type = queue_string(rt, job, "job type")?;
+//RS             let payload = queue_payload(rt, payload)?;
+//RS             let duration_ms = queue_duration_ms(rt, duration, "delay duration")?;
+//RS             with_jit_job_queue(rt, queue, |queue| {
+//RS                 queue.enqueue_delayed(job_type, payload, duration_ms, None, None)
+//RS             })
+//RS         })();
+//RS         queue_result(rt, result, |rt, receipt| {
+//RS             queue_alloc_receipt(rt, receipt) as u64
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_job_queue_receipt(queue: i64, id: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = (|| -> Result<JetJobQueueReceipt, JetServiceError> {
+//RS             let id = queue_string(rt, id, "receipt id")?;
+//RS             with_jit_job_queue(rt, queue, |queue| queue.receipt(&id))
+//RS         })();
+//RS         queue_result(rt, result, |rt, receipt| {
+//RS             queue_alloc_receipt(rt, receipt) as u64
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_job_queue_inspect(queue: i64, limit: i64, include_payload: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = (|| -> Result<Vec<JetJobQueueRecord>, JetServiceError> {
+//RS             let limit = queue_limit(limit, "inspect limit")?;
+//RS             let include_payload = queue_bool_word(include_payload, "inspect payload flag")?;
+//RS             with_jit_job_queue(rt, queue, |queue| queue.inspect(limit, include_payload))
+//RS         })();
+//RS         queue_result(rt, result, |rt, values| {
+//RS             let values = values
+//RS                 .into_iter()
+//RS                 .map(|value| queue_alloc_record(rt, value))
+//RS                 .collect::<Vec<_>>();
+//RS             queue_alloc_list(rt, values) as u64
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_job_queue_events(queue: i64, id: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = (|| -> Result<Vec<JetJobQueueEvent>, JetServiceError> {
+//RS             let id = queue_string(rt, id, "event job id")?;
+//RS             with_jit_job_queue(rt, queue, |queue| queue.events(&id))
+//RS         })();
+//RS         queue_result(rt, result, |rt, values| {
+//RS             let values = values
+//RS                 .into_iter()
+//RS                 .map(|value| queue_alloc_event(rt, value))
+//RS                 .collect::<Vec<_>>();
+//RS             queue_alloc_list(rt, values) as u64
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_job_queue_claim(queue: i64, worker: i64, limit: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = (|| -> Result<Vec<JetJobQueueClaim>, JetServiceError> {
+//RS             let worker = queue_string(rt, worker, "claim worker")?;
+//RS             let limit = queue_limit(limit, "claim limit")?;
+//RS             with_jit_job_queue(rt, queue, |queue| queue.claim(&worker, limit))
+//RS         })();
+//RS         queue_result(rt, result, |rt, values| {
+//RS             let values = values
+//RS                 .into_iter()
+//RS                 .map(|value| queue_alloc_claim(rt, value))
+//RS                 .collect::<Vec<_>>();
+//RS             queue_alloc_list(rt, values) as u64
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_job_queue_heartbeat(queue: i64, claim: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = (|| -> Result<JetJobQueueReceipt, JetServiceError> {
+//RS             let claim = queue_claim(rt, claim)?;
+//RS             with_jit_job_queue(rt, queue, |queue| queue.heartbeat(&claim))
+//RS         })();
+//RS         queue_result(rt, result, |rt, receipt| {
+//RS             queue_alloc_receipt(rt, receipt) as u64
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_job_queue_acknowledge(queue: i64, claim: i64, result_value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = (|| -> Result<JetJobQueueReceipt, JetServiceError> {
+//RS             let claim = queue_claim(rt, claim)?;
+//RS             let result_value = queue_result_value(rt, result_value)?;
+//RS             with_jit_job_queue(rt, queue, |queue| queue.acknowledge(&claim, result_value))
+//RS         })();
+//RS         queue_result(rt, result, |rt, receipt| {
+//RS             queue_alloc_receipt(rt, receipt) as u64
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_job_queue_fail(queue: i64, claim: i64, error_value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = (|| -> Result<JetJobQueueReceipt, JetServiceError> {
+//RS             let claim = queue_claim(rt, claim)?;
+//RS             let error_value = queue_error_value(rt, error_value)?;
+//RS             with_jit_job_queue(rt, queue, |queue| queue.fail(&claim, error_value))
+//RS         })();
+//RS         queue_result(rt, result, |rt, receipt| {
+//RS             queue_alloc_receipt(rt, receipt) as u64
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_job_queue_transition(
+//RS     queue: i64,
+//RS     id: i64,
+//RS     reason: i64,
+//RS     lease: i64,
+//RS     dead_letter: bool,
+//RS ) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = (|| -> Result<JetJobQueueReceipt, JetServiceError> {
+//RS             let id = queue_string(rt, id, "transition job id")?;
+//RS             let reason = queue_string(rt, reason, "transition reason")?;
+//RS             let lease = queue_optional_string(rt, lease, "transition lease")?;
+//RS             with_jit_job_queue(rt, queue, move |queue| {
+//RS                 if dead_letter {
+//RS                     queue.dead_letter(&id, reason, lease.as_deref())
+//RS                 } else {
+//RS                     queue.cancel(&id, reason, lease.as_deref())
+//RS                 }
+//RS             })
+//RS         })();
+//RS         queue_result(rt, result, |rt, receipt| {
+//RS             queue_alloc_receipt(rt, receipt) as u64
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_job_queue_cancel(queue: i64, id: i64, reason: i64, lease: i64) -> i64 {
+//RS     jet_jit_job_queue_transition(queue, id, reason, lease, false)
+//RS }
+//RS 
+//RS fn jet_jit_job_queue_dead_letter(queue: i64, id: i64, reason: i64, lease: i64) -> i64 {
+//RS     jet_jit_job_queue_transition(queue, id, reason, lease, true)
+//RS }
+//RS 
+//RS fn jet_jit_job_queue_recover_expired(queue: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = with_jit_job_queue(rt, queue, |queue| queue.recover_expired());
+//RS         queue_result(rt, result, |_, ()| 0)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_job_queue_status(queue: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = with_jit_job_queue(rt, queue, |queue| queue.status());
+//RS         queue_result(rt, result, |rt, status| {
+//RS             queue_alloc_status(rt, status) as u64
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_job_queue_pause(queue: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = with_jit_job_queue(rt, queue, |queue| queue.pause());
+//RS         queue_result(rt, result, |rt, status| {
+//RS             queue_alloc_status(rt, status) as u64
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_job_queue_resume(queue: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = with_jit_job_queue(rt, queue, |queue| queue.resume());
+//RS         queue_result(rt, result, |rt, status| {
+//RS             queue_alloc_status(rt, status) as u64
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_job_queue_wait(queue: i64, duration: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = (|| -> Result<JetJobQueueStatus, JetServiceError> {
+//RS             let duration_ms = queue_duration_ms(rt, duration, "wait duration")?;
+//RS             with_jit_job_queue(rt, queue, |queue| queue.wait(duration_ms))
+//RS         })();
+//RS         queue_result(rt, result, |rt, status| {
+//RS             queue_alloc_status(rt, status) as u64
+//RS         })
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_job_queue_prune(queue: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let result = with_jit_job_queue(rt, queue, |queue| queue.prune());
+//RS         queue_result(rt, result, |_, count| queue_i64(count) as u64)
+//RS     })
+//RS }
+//RS 
+//RS /// Shared typed database facts. The JIT only constructs these facts after the
+//RS /// host callback has matched an observed statement and explicit authority.
+//RS mod devtools {
+//RS     pub use jet_foundation::Devtools::*;
+//RS     include!("../../jet-codegen/src/Prelude/Core/DevtoolsDatabasePanel.rs");
+//RS }
+//RS 
+//RS /// Shared bounded pool state machine. The adapter keeps only native driver
+//RS /// handles here; admission, deadlines, health, reset, and draining live in the
+//RS /// included Prelude kernel.
+//RS pub(crate) mod pool {
+//RS     use super::{JetDebug, JetDisplay, JetShow};
+//RS 
+//RS     pub(crate) mod jet_std {
+//RS         pub(crate) use super::super::wire::DBError;
+//RS     }
+//RS 
+//RS     fn jet_ctx_deadline_ms() -> Option<i64> {
+//RS         jet_codegen::scheduler::jet_ctx_deadline_ms()
+//RS     }
+//RS 
+//RS     fn jet_std_time_now() -> i64 {
+//RS         jet_codegen::scheduler::jet_std_time_now()
+//RS     }
+//RS 
+//RS     include!("../../jet-codegen/src/Prelude/CoreLib/Top/DbPool.rs");
+//RS }
+//RS 
+//RS // DBValue heap record ABI (same 2-slot shape as DataTree): [disc:i64, payload].
+//RS const DV_NULL: i64 = 0;
+//RS const DV_INT: i64 = 1;
+//RS const DV_FLOAT: i64 = 2;
+//RS const DV_TEXT: i64 = 3;
+//RS const DV_BOOL: i64 = 4;
+//RS const DV_BLOB: i64 = 5;
+//RS 
+//RS thread_local! {
+//RS     /// JIT-local policy capabilities. The token is passed through Cranelift
+//RS     /// as the DBScope value; the policy and user never become mutable heap
+//RS     /// fields visible to Jet code.
+//RS     static DB_SCOPES: std::cell::RefCell<
+//RS         HashMap<u64, (u64, String, wire::JetRowPolicyExpr, String, Option<String>)>,
+//RS     > = std::cell::RefCell::new(HashMap::new());
+//RS }
+//RS thread_local! {
+//RS     static DB_POOLS: std::cell::RefCell<HashMap<u64, pool::JetDbPool<u64>>> =
+//RS         std::cell::RefCell::new(HashMap::new());
+//RS     static DB_LEASES: std::cell::RefCell<HashMap<u64, Arc<Mutex<pool::JetDbLease<u64>>>>> =
+//RS         std::cell::RefCell::new(HashMap::new());
+//RS     /// Direct `core.db` handles are tracked separately from pool drivers. A
+//RS     /// console captures these handles without reopening their path.
+//RS     static DB_CONNECTIONS: std::cell::RefCell<BTreeSet<u64>> =
+//RS         std::cell::RefCell::new(BTreeSet::new());
+//RS }
+//RS 
+//RS static NEXT_DB_POOL: AtomicU64 = AtomicU64::new(2_000_000_000);
+//RS static NEXT_DB_LEASE: AtomicU64 = AtomicU64::new(3_000_000_000);
+//RS 
+//RS static NEXT_DB_SCOPE: AtomicU64 = AtomicU64::new(1_000_000_000);
+//RS 
+//RS fn scope_parts(
+//RS     handle: u64,
+//RS ) -> Option<(u64, String, wire::JetRowPolicyExpr, String, Option<String>)> {
+//RS     DB_SCOPES.with(|scopes| scopes.borrow().get(&handle).cloned())
+//RS }
+//RS 
+//RS fn base_handle(handle: u64) -> u64 {
+//RS     scope_parts(handle)
+//RS         .map(|(base, _, _, _, _)| base)
+//RS         .unwrap_or(handle)
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS struct JitObservedQuery {
+//RS     session_id: String,
+//RS     statement_identity: String,
+//RS     handle: u64,
+//RS     sql: wire::SQL,
+//RS     source: String,
+//RS }
+//RS 
+//RS static JIT_OBSERVED_QUERIES: std::sync::LazyLock<
+//RS     std::sync::Mutex<HashMap<(String, String), JitObservedQuery>>,
+//RS > = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
+//RS static JIT_DB_EXPLAIN_CALLBACK_ONCE: std::sync::Once = std::sync::Once::new();
+//RS static JIT_DB_EXPLAIN_CALLBACK_GUARD: std::sync::OnceLock<
+//RS     jet_foundation::Devtools::JetDevtoolsDatabaseExplainCallbackGuard,
+//RS > = std::sync::OnceLock::new();
+//RS 
+//RS fn jit_db_devtools_now_ms() -> u64 {
+//RS     u64::try_from(jet_codegen::scheduler::jet_std_time_now()).unwrap_or(0)
+//RS }
+//RS 
+//RS fn jit_db_devtools_authorized() -> bool {
+//RS     std::env::var("JET_DEVTOOLS_DB_CREDENTIALS")
+//RS         .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+//RS         .unwrap_or(false)
+//RS }
+//RS 
+//RS fn jit_db_devtools_session_id() -> Option<String> {
+//RS     std::env::var("JET_DEVTOOLS_RELAY_SESSION_ID")
+//RS         .ok()
+//RS         .filter(|value| !value.is_empty())
+//RS         .or_else(jet_codegen::scheduler::jet_devtools_native_session_id)
+//RS }
+//RS 
+//RS fn jit_db_json_string(value: &str) -> String {
+//RS     let mut escaped = String::with_capacity(value.len().saturating_add(2));
+//RS     escaped.push('"');
+//RS     for character in value.chars() {
+//RS         match character {
+//RS             '"' => escaped.push_str("\\\""),
+//RS             '\\' => escaped.push_str("\\\\"),
+//RS             '\n' => escaped.push_str("\\n"),
+//RS             '\r' => escaped.push_str("\\r"),
+//RS             '\t' => escaped.push_str("\\t"),
+//RS             character if character.is_control() => {
+//RS                 escaped.push_str(&format!("\\u{:04x}", character as u32));
+//RS             }
+//RS             character => escaped.push(character),
+//RS         }
+//RS     }
+//RS     escaped.push('"');
+//RS     escaped
+//RS }
+//RS 
+//RS fn jit_db_publish_explain_error(
+//RS     session_id: &str,
+//RS     request_id: &str,
+//RS     statement_identity: &str,
+//RS     source: &str,
+//RS     code: &str,
+//RS ) {
+//RS     let mut payload = String::from("{\"query_id\":");
+//RS     payload.push_str(&jit_db_json_string(statement_identity));
+//RS     payload.push_str(",\"statement_identity\":");
+//RS     payload.push_str(&jit_db_json_string(statement_identity));
+//RS     payload.push_str(",\"source\":");
+//RS     payload.push_str(&jit_db_json_string(source));
+//RS     payload.push_str(",\"request_id\":");
+//RS     payload.push_str(&jit_db_json_string(request_id));
+//RS     payload.push_str(",\"capability\":\"DB.Explain\",\"authority_granted\":false,\"status\":\"error\",\"error_code\":");
+//RS     payload.push_str(&jit_db_json_string(code));
+//RS     payload.push_str(",\"error_message\":\"database EXPLAIN was not completed\",\"duration_ms\":0,\"deadline_ms\":0,\"finished_at_ms\":");
+//RS     payload.push_str(&jit_db_devtools_now_ms().to_string());
+//RS     payload.push_str(",\"freshness_ms\":0,\"timed_out\":false,\"truncated\":false,\"row_count\":0,\"plan_rows\":[]}");
+//RS     if let Ok(event) = jet_foundation::Devtools::JetDevtoolsEvent::from_parts(
+//RS         jit_db_devtools_now_ms(),
+//RS         "core.db",
+//RS         "DatabaseExplainResult",
+//RS         statement_identity.to_string(),
+//RS         payload,
+//RS     ) {
+//RS         jet_codegen::scheduler::jet_devtools_publish_event_for_session(session_id, event);
+//RS     }
+//RS }
+//RS 
+//RS fn jit_db_remember_observed_query(
+//RS     handle: u64,
+//RS     sql: &wire::SQL,
+//RS     metadata: &wire::JetDbQueryMetadata,
+//RS ) {
+//RS     if !jit_db_devtools_authorized() {
+//RS         return;
+//RS     }
+//RS     let Some(session_id) = jit_db_devtools_session_id() else {
+//RS         return;
+//RS     };
+//RS     let Ok(mut observed) = JIT_OBSERVED_QUERIES.lock() else {
+//RS         return;
+//RS     };
+//RS     observed.insert(
+//RS         (session_id.clone(), metadata.statement_identity.clone()),
+//RS         JitObservedQuery {
+//RS             session_id,
+//RS             statement_identity: metadata.statement_identity.clone(),
+//RS             handle: base_handle(handle),
+//RS             sql: sql.clone(),
+//RS             source: metadata.source_file.clone(),
+//RS         },
+//RS     );
+//RS     while observed.len() > 256 {
+//RS         if let Some(key) = observed.keys().next().cloned() {
+//RS             observed.remove(&key);
+//RS         } else {
+//RS             break;
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jit_db_dispatch_devtools_explain(
+//RS     session_id: &str,
+//RS     request_id: &str,
+//RS     statement_identity: &str,
+//RS     timeout_ms: u64,
+//RS     max_rows: u64,
+//RS ) {
+//RS     if !jit_db_devtools_authorized() {
+//RS         jit_db_publish_explain_error(
+//RS             session_id,
+//RS             request_id,
+//RS             statement_identity,
+//RS             "<redacted>",
+//RS             "authority_denied",
+//RS         );
+//RS         return;
+//RS     }
+//RS     let Some(observed) = JIT_OBSERVED_QUERIES
+//RS         .lock()
+//RS         .ok()
+//RS         .and_then(|queries| {
+//RS             queries
+//RS                 .get(&(session_id.to_string(), statement_identity.to_string()))
+//RS                 .cloned()
+//RS         })
+//RS     else {
+//RS         jit_db_publish_explain_error(
+//RS             session_id,
+//RS             request_id,
+//RS             statement_identity,
+//RS             "<unknown>",
+//RS             "statement_not_observed",
+//RS         );
+//RS         return;
+//RS     };
+//RS     let started_at_ms = jit_db_devtools_now_ms();
+//RS     let request = match devtools::JetDevtoolsDatabaseExplainFactRequest::new(
+//RS         observed.statement_identity.clone(),
+//RS         observed.statement_identity.clone(),
+//RS         devtools::JetDevtoolsDatabaseStatementClass::ReadOnly,
+//RS         observed.source.clone(),
+//RS         Some(request_id.to_string()),
+//RS         Vec::new(),
+//RS         timeout_ms,
+//RS         max_rows,
+//RS     ) {
+//RS         Ok(request) => request,
+//RS         Err(_) => {
+//RS             jit_db_publish_explain_error(
+//RS                 session_id,
+//RS                 request_id,
+//RS                 statement_identity,
+//RS                 &observed.source,
+//RS                 "invalid_request",
+//RS             );
+//RS             return;
+//RS         }
+//RS     };
+//RS     let grant = match devtools::JetDevtoolsDatabaseCapabilityFact::for_explain(
+//RS         observed.statement_identity.clone(),
+//RS         true,
+//RS     ) {
+//RS         Ok(grant) => grant,
+//RS         Err(_) => {
+//RS             jit_db_publish_explain_error(
+//RS                 session_id,
+//RS                 request_id,
+//RS                 statement_identity,
+//RS                 &observed.source,
+//RS                 "authority_invalid",
+//RS             );
+//RS             return;
+//RS         }
+//RS     };
+//RS     let authorized = match request.authorize(&grant, started_at_ms) {
+//RS         Ok(authorized) => authorized,
+//RS         Err(_) => {
+//RS             jit_db_publish_explain_error(
+//RS                 session_id,
+//RS                 request_id,
+//RS                 statement_identity,
+//RS                 &observed.source,
+//RS                 "authority_denied",
+//RS             );
+//RS             return;
+//RS         }
+//RS     };
+//RS     let params = wire::jet_db_encode_params(&observed.sql.1);
+//RS     let explain_wire = runtime::jet_db_explain(
+//RS         observed.handle,
+//RS         &observed.sql.0,
+//RS         &params,
+//RS         max_rows,
+//RS         timeout_ms,
+//RS     );
+//RS     let facts = match wire::jet_db_decode_explain_result(&explain_wire) {
+//RS         Ok(facts) => facts,
+//RS         Err(_) => {
+//RS             jit_db_publish_explain_error(
+//RS                 session_id,
+//RS                 request_id,
+//RS                 statement_identity,
+//RS                 &observed.source,
+//RS                 "driver_error",
+//RS             );
+//RS             return;
+//RS         }
+//RS     };
+//RS     let elapsed_ms = facts.elapsed_ms;
+//RS     let timed_out = facts.timed_out;
+//RS     let driver_truncated = facts.truncated;
+//RS     let mut rows = Vec::with_capacity(facts.plan.len());
+//RS     for plan in facts.plan {
+//RS         let parent = (plan.parent != 0).then(|| plan.parent.to_string());
+//RS         let Ok(row) = devtools::JetDevtoolsDatabasePlanRow::new(
+//RS             plan.ordinal,
+//RS             plan.ordinal.to_string(),
+//RS             parent,
+//RS             0,
+//RS             plan.operation,
+//RS             plan.relation,
+//RS             plan.index,
+//RS             None,
+//RS             None,
+//RS         ) else {
+//RS             jit_db_publish_explain_error(
+//RS                 session_id,
+//RS                 request_id,
+//RS                 statement_identity,
+//RS                 &observed.source,
+//RS                 "invalid_plan",
+//RS             );
+//RS             return;
+//RS         };
+//RS         rows.push(row);
+//RS     }
+//RS     let finished_at_ms = started_at_ms.saturating_add(elapsed_ms);
+//RS     if let Ok(result) =
+//RS         authorized.finish_with_status(finished_at_ms, rows, timed_out, driver_truncated)
+//RS     {
+//RS         if let Ok(event) = result.to_protocol_event("core.db") {
+//RS             jet_codegen::scheduler::jet_devtools_publish_event_for_session(session_id, event);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jit_db_install_devtools_explain_callback() {
+//RS     JIT_DB_EXPLAIN_CALLBACK_ONCE.call_once(|| {
+//RS         if let Ok(guard) = jet_codegen::scheduler::jet_devtools_install_database_explain_callback(
+//RS             jit_db_dispatch_devtools_explain,
+//RS         ) {
+//RS             let _ = JIT_DB_EXPLAIN_CALLBACK_GUARD.set(guard);
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn alloc_policy_record(table: &str, compiled: wire::JetRowPolicyExpr) -> i64 {
+//RS     let table_id = table.to_string();
+//RS     let expression_id = compiled.canonical().to_string();
+//RS     let compiled_id = match compiled {
+//RS         wire::JetRowPolicyExpr::AllowAll => 0,
+//RS         wire::JetRowPolicyExpr::OwnerEqualsUser => 1,
+//RS     };
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let table_id = rt.heap.alloc_string(table_id);
+//RS         let expression_id = rt.heap.alloc_string(expression_id);
+//RS         let record = rt.heap.alloc_record(3);
+//RS         let _ = rt.heap.record_set_int(record, 0, table_id);
+//RS         let _ = rt.heap.record_set_int(record, 1, expression_id);
+//RS         let _ = rt.heap.record_set_int(record, 2, compiled_id);
+//RS         record
+//RS     })
+//RS }
+//RS 
+//RS fn policy_record_parts(policy: i64) -> Option<(String, wire::JetRowPolicyExpr)> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let table = rt
+//RS             .heap
+//RS             .record_get_int(policy, 0)
+//RS             .and_then(|id| rt.heap.clone_string(id))?;
+//RS         let compiled = match rt.heap.record_get_int(policy, 2)? {
+//RS             0 => wire::JetRowPolicyExpr::AllowAll,
+//RS             1 => wire::JetRowPolicyExpr::OwnerEqualsUser,
+//RS             _ => return None,
+//RS         };
+//RS         Some((table, compiled))
+//RS     })
+//RS }
+//RS 
+//RS fn new_scope(
+//RS     connection: u64,
+//RS     table: String,
+//RS     compiled: wire::JetRowPolicyExpr,
+//RS     user: String,
+//RS ) -> i64 {
+//RS     jit_job_queue_install_provider();
+//RS     if connection == 0 {
+//RS         return 0;
+//RS     }
+//RS     let id = NEXT_DB_SCOPE.fetch_add(1, Ordering::Relaxed);
+//RS     let base = base_handle(connection);
+//RS     let request_id = crate::net_http_rt::jet_db_current_request_id();
+//RS     DB_SCOPES.with(|scopes| {
+//RS         scopes
+//RS             .borrow_mut()
+//RS             .insert(id, (base, table, compiled, user, request_id));
+//RS     });
+//RS     id as i64
+//RS }
+//RS 
+//RS fn alloc_dbvalue_record(disc: i64, payload: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let h = rt.heap.alloc_record(2);
+//RS         let _ = rt.heap.record_set_int(h, 0, disc);
+//RS         let _ = rt.heap.record_set_int(h, 1, payload);
+//RS         h
+//RS     })
+//RS }
+//RS 
+//RS fn alloc_dbvalue_float(f: f64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let h = rt.heap.alloc_record(2);
+//RS         let _ = rt.heap.record_set_int(h, 0, DV_FLOAT);
+//RS         let _ = rt.heap.record_set_float(h, 1, f);
+//RS         h
+//RS     })
+//RS }
+//RS 
+//RS fn alloc_byte_list(bytes: &[u8]) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for byte in bytes {
+//RS             let _ = rt.heap.list_push_int(list, i64::from(*byte));
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS fn alloc_dbvalue_value(value: wire::DBValue) -> i64 {
+//RS     match value {
+//RS         wire::DBValue::Null => alloc_dbvalue_record(DV_NULL, 0),
+//RS         wire::DBValue::Int(value) => alloc_dbvalue_record(DV_INT, value),
+//RS         wire::DBValue::Float(value) => alloc_dbvalue_float(value),
+//RS         wire::DBValue::Text(value) => {
+//RS             let text = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value));
+//RS             alloc_dbvalue_record(DV_TEXT, text)
+//RS         }
+//RS         wire::DBValue::Bool(value) => alloc_dbvalue_record(DV_BOOL, i64::from(value)),
+//RS         wire::DBValue::Blob(value) => {
+//RS             let bytes = alloc_byte_list(&value);
+//RS             alloc_dbvalue_record(DV_BLOB, bytes)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn read_dbvalue(handle: i64) -> Option<wire::DBValue> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let disc = rt.heap.record_get_int(handle, 0)?;
+//RS         match disc {
+//RS             DV_NULL => Some(wire::DBValue::Null),
+//RS             DV_INT => Some(wire::DBValue::Int(
+//RS                 rt.heap.record_get_int(handle, 1).unwrap_or(0),
+//RS             )),
+//RS             DV_FLOAT => Some(wire::DBValue::Float(
+//RS                 rt.heap.record_get_float(handle, 1).unwrap_or(0.0),
+//RS             )),
+//RS             DV_TEXT => {
+//RS                 let sid = rt.heap.record_get_int(handle, 1).unwrap_or(0);
+//RS                 Some(wire::DBValue::Text(
+//RS                     rt.heap.clone_string(sid).unwrap_or_default(),
+//RS                 ))
+//RS             }
+//RS             DV_BOOL => Some(wire::DBValue::Bool(
+//RS                 rt.heap.record_get_int(handle, 1).unwrap_or(0) != 0,
+//RS             )),
+//RS             DV_BLOB => {
+//RS                 let list = rt.heap.record_get_int(handle, 1)?;
+//RS                 let len = rt.heap.list_len(list)?;
+//RS                 let mut bytes = Vec::with_capacity(len as usize);
+//RS                 for i in 0..len {
+//RS                     bytes.push(u8::try_from(rt.heap.list_get_int(list, i)?).ok()?);
+//RS                 }
+//RS                 Some(wire::DBValue::Blob(bytes))
+//RS             }
+//RS             _ => None,
+//RS         }
+//RS     })
+//RS }
+//RS fn dbvalue_to_datatree(value: wire::DBValue) -> crate::Encoding::json_rt::DataTree {
+//RS     match value {
+//RS         wire::DBValue::Null => crate::Encoding::json_rt::DataTree::Null,
+//RS         wire::DBValue::Int(value) => crate::Encoding::json_rt::DataTree::Int(
+//RS             crate::Encoding::json_rt::jet_int_from_i64(value),
+//RS         ),
+//RS         wire::DBValue::Float(value) => crate::Encoding::json_rt::DataTree::Float(value),
+//RS         wire::DBValue::Text(value) => crate::Encoding::json_rt::DataTree::Text(value),
+//RS         wire::DBValue::Bool(value) => crate::Encoding::json_rt::DataTree::Bool(value),
+//RS         wire::DBValue::Blob(value) => crate::Encoding::json_rt::DataTree::Bytes(value),
+//RS     }
+//RS }
+//RS 
+//RS /// Convert the checked DB row carrier (a string-keyed map of DBValue handles)
+//RS /// through the canonical DB-column projection and DataTree carrier.
+// END-PORT-PENDING 0210 crates/jet-jit/src/DB.rs:1-1780
+

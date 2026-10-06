@@ -1,0 +1,11 @@
+use core.compute.runtime.top_compute_05.[jet_compute_binary_element]
+use core.compute.runtime.top_compute_03.[JetComputeError]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:7312-7353
+#Test("compute_binary_element_preserves_profile_rounding_and_zero_error") {
+    assert(jet_compute_binary_element("add", 16777216.0, 1.0, false) == Ok(16777217.0))
+    assert(jet_compute_binary_element("add", 16777216.0, 1.0, true) == Ok(16777216.0))
+    assert(jet_compute_binary_element("div", 1.0, -0.0, false) == Err(JetComputeError.Arithmetic("division by zero in compute operation")))
+    assert(jet_compute_binary_element("mul", F64.MAX, 2.0, false) == Err(JetComputeError.Arithmetic("compute operation produced a non-finite value")))
+    assert(jet_compute_binary_element("minimum", -2.0, 3.0, false) == Ok(-2.0))
+}

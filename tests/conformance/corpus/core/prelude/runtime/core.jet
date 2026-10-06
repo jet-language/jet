@@ -1,0 +1,65 @@
+use core.prelude.runtime.core.[JetPersistCell, JetSharedSlot, JetArith, JetShiftCount, jet_perf_default_fidelity, jet_perf_override_fidelity, jet_perf_fidelity, jet_perf_reset_fidelity, jet_test_expect_fail_abort, jet_test_expect_fail_enter_scope, jet_test_record_stop, jet_test_expect_fail_matching_scope, jet_test_expect_fail_catch_scope, jet_test_expect_fail_leave_scope, jet_test_skip_abort, jet_test_skip_scope, jet_test_take_whole_skip]
+use core.rc.[Rc]
+
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:19
+#Test("persistent slot get take set") {
+    slot :: JetPersistCell.new("first")
+    assert(slot.get() == "first")
+    assert(slot.take() == "first")
+    slot.set("second")
+    assert(slot.get() == "second")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:60
+#Test("shared folded slot take and release") {
+    shared :: Rc.new([1, 2, 3])
+    slot := JetSharedSlot.new(shared.clone())
+    assert(slot.as_ref().unwrap() == [1, 2, 3])
+    assert(slot.take().unwrap() == [1, 2, 3])
+    assert(slot.as_ref().is_none())
+    second := JetSharedSlot.new(shared)
+    second.release()
+    assert(second.take().is_none())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:637
+#Test("fidelity rejects out of range and retains previous value") {
+    jet_perf_reset_fidelity()
+    assert(jet_perf_default_fidelity() == F64{1.0})
+    jet_perf_override_fidelity(F64{0.25})?
+    assert(jet_perf_fidelity() == F64{0.25})
+    assert(jet_perf_override_fidelity(F64{1.5}).is_err())
+    assert(jet_perf_fidelity() == F64{0.25})
+    assert(jet_perf_override_fidelity(F64{-0.1}).is_err())
+    jet_perf_reset_fidelity()
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:773
+#Test("expect failure catch restores parent and retains completion") {
+    jet_test_expect_fail_abort()
+    jet_test_expect_fail_enter_scope(U64{1}, None)
+    jet_test_expect_fail_enter_scope(U64{2}, Val("E3001"))
+    jet_test_record_stop("E3001")
+    assert(jet_test_expect_fail_matching_scope() == Val(U64{2}))
+    assert(jet_test_expect_fail_catch_scope() == Val(U64{2}))
+    assert(jet_test_expect_fail_matching_scope().is_none())
+    assert(jet_test_expect_fail_leave_scope(U64{2}) == Val("E3001"))
+    assert(jet_test_expect_fail_leave_scope(U64{1}).is_none())
+    jet_test_expect_fail_abort()
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:840
+#Test("whole test skip is taken once") {
+    jet_test_skip_abort()
+    jet_test_skip_scope(false)
+    assert(not jet_test_take_whole_skip())
+    jet_test_skip_scope(true)
+    assert(jet_test_take_whole_skip())
+    assert(not jet_test_take_whole_skip())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:1582
+#Test("fixed typed arithmetic preserves signedness and modes") {
+    assert(I8{127}.jet_wrapping_add(I8{1}) == I8{-128})
+    assert(U8{255}.jet_saturating_add(U8{1}) == U8{255})
+    assert(I16{-9}.jet_div(I16{2}, "", U32{0}) == I16{-4})
+    assert(I32{-9}.jet_rem(I32{2}, "", U32{0}) == I32{-1})
+    assert(U32{0x80000000}.jet_shr(U8{31}.jet_shift_count(), "", U32{0}) == U32{1})
+    assert(U64{18446744073709551615}.jet_div(U64{3}, "", U32{0}) == U64{6148914691236517205})
+    assert(U64{1}.jet_rotate_right(U8{1}.jet_shift_count(), "", U32{0}) == U64{9223372036854775808})
+}

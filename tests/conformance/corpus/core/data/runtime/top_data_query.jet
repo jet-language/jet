@@ -1,0 +1,49 @@
+use core.data.runtime.top_data_query.[jet_data_query_validate_fields, jet_data_query_indices,
+    jet_data_query_trees, jet_analytics_schema, jet_analytics_query_spec, jet_analytics_result_schema,
+    jet_analytics_sql_value, jet_analytics_sql_tree]
+use core.encoding.runtime.std_data_tree.[DataTree, datatree_get]
+use core.db.runtime.kernel_sql_query.JetSQLValue
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:54-66,350-391
+// Behavioral controls: the Rust module contains no inline tests.
+#Test("query_filter_order_limit_selects_original_positions") {
+    rows :: [DataTree]{
+        DataTree.Object([("name", DataTree.Text("a")), ("score", DataTree.Int(2))]),
+        DataTree.Object([("name", DataTree.Text("b")), ("score", DataTree.Int(3))]),
+        DataTree.Object([("name", DataTree.Text("c")), ("score", DataTree.Int(1))])
+    }
+    sql :: "SELECT * FROM rows WHERE score >= 2 ORDER BY score DESC LIMIT 1"
+    assert(jet_data_query_indices(rows, sql).unwrap() == [USize]{1})
+    assert(jet_data_query_trees(rows, sql).unwrap() == [DataTree]{rows[1].clone()})
+    assert(jet_data_query_validate_fields([String]{"name", "score"}, sql).is_ok())
+    assert(jet_data_query_validate_fields([String]{"name"}, sql).is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:106-153,317-391
+#Test("query_projection_materializes_alias_and_indices_reject_shape_change") {
+    rows :: [DataTree]{DataTree.Object([("name", DataTree.Text("a")), ("score", DataTree.Int(2))])}
+    sql :: "SELECT name AS label FROM rows"
+    assert(jet_data_query_indices(rows, sql).is_err())
+    projected :: jet_data_query_trees(rows, sql).unwrap()
+    assert(projected == [DataTree]{DataTree.Object([("label", DataTree.Text("a"))])})
+    schema :: jet_analytics_schema(rows)
+    query :: jet_analytics_query_spec(sql).unwrap()
+    assert(jet_analytics_result_schema(&schema, &query).columns[0].name == "label")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:178-281,317-341
+#Test("query_grouped_sum_uses_shared_sql_kernel") {
+    rows :: [DataTree]{
+        DataTree.Object([("kind", DataTree.Text("x")), ("score", DataTree.Int(2))]),
+        DataTree.Object([("kind", DataTree.Text("x")), ("score", DataTree.Int(3))])
+    }
+    result :: jet_data_query_trees(rows, "SELECT kind, SUM(score) AS total FROM rows GROUP BY kind").unwrap()
+    assert(result.len() == 1)
+    assert(datatree_get(result[0], "total") == Val(DataTree.Int(5)))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/DataQuery.rs:293-315
+#Test("query_literal_number_and_sql_tree_preserve_wide_integer") {
+    value :: jet_analytics_sql_value(&DataTree.Number("9223372036854775807"))
+    assert(value == JetSQLValue.Int(I64.MAX))
+    assert(jet_analytics_sql_tree(value) == DataTree.Number("9223372036854775807"))
+    assert(jet_analytics_sql_value(&DataTree.TypedText("true")) == JetSQLValue.Text("true"))
+    assert(jet_analytics_sql_tree(JetSQLValue.Null) == DataTree.Null)
+}

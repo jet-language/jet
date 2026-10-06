@@ -1,0 +1,142 @@
+use std.sync.[LazyLock, Mutex]
+use std.fs as fs
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:4
+// GATE #4565: kernel primitive — process-wide mapped-read owner registry.
+const JET_MAPPED_PATHS: LazyLock<Mutex<[String:USize]>> = LazyLock.new(fn() { Mutex.new([String:USize]{}) })
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:8
+pub fn jet_mapped_path_key(path: String) -> String Never! {
+    #Unsafe("canonicalize native path or retain lexical fallback without following a Rust runtime bridge") {
+        value :: fs.canonicalize(OSPath.from(path)) ?? OSPath.from(path)
+        value.to_string_lossy().to_string()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:15
+pub fn jet_mapped_register(key: String) Never! {
+    #Unsafe("hold mapped registry mutex; recover poisoned state like the reference") {
+        paths := JET_MAPPED_PATHS.lock() ?? err.into_inner()
+        count :: paths.get(key) ?? USize{0}
+        paths[key.to_string()] = count + USize{1}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:22
+pub fn jet_mapped_unregister(key: String) Never! {
+    #Unsafe("hold mapped registry mutex while releasing one registered owner") {
+        paths := JET_MAPPED_PATHS.lock() ?? err.into_inner()
+        count :: paths.get(key) ?? return
+        if count > USize{1} -> paths[key] = count - USize{1}
+        else -> _ :: &paths.remove(key)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:35
+pub fn jet_mapped_path_is_live(path: String) -> Bool Never! {
+    key :: jet_mapped_path_key(path)
+    #Unsafe("read mapped owner count under the same shared registry mutex") {
+        paths :: JET_MAPPED_PATHS.lock() ?? err.into_inner()
+        (paths.get(key) ?? USize{0}) != USize{0}
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:45
+pub struct JetMappedWriterRefusal { pub path: String, pub reason: String }
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:50
+pub fn jet_mapped_writer_refusal(path: String) -> JetMappedWriterRefusal? Never! {
+    if not jet_mapped_path_is_live(path) -> return None
+    Val(JetMappedWriterRefusal{path: path.to_string(), reason: "file is mapped read-only"})
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:61
+#Equatable
+pub struct JetAuthority {
+    rights: [String:Bool]
+    // Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:69
+    pub fn from_rights(rights: [String]) -> JetAuthority Never! {
+        JetAuthority{rights: jet_authority_rights_from_strings(^rights)}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:78
+    pub fn __jet_from_rights(rights: [String]) -> JetAuthority Never! { JetAuthority.from_rights(^rights) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:85
+    pub fn workspace() -> JetAuthority Never! { JetAuthority{rights: jet_authority_workspace_rights()} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:92
+pub fn jet_authority_from_rights(rights: [String]) -> JetAuthority Never! { JetAuthority.from_rights(^rights) }
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:99
+#Equatable
+pub struct JetFileScope {
+    roots: [JetFileScopeRoot]
+    // Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:110
+    pub fn from_authority(authority: JetAuthority) -> JetFileScope Never! {
+        keys := authority.rights.keys().collect()
+        &keys.sort()
+        roots := [JetFileScopeRoot]{}
+        loop right in keys {
+            root := right.strip_prefix("FS.Read:") ?? next // #4303
+            if root.is_empty() -> next
+            // GATE #4565: kernel primitive — target-native lexical OSPath components.
+            path :: #Unsafe("decode resource root using selected-target path component semantics") {
+                if root == "repo" -> OSPath.from(".") else -> OSPath.from(root)
+            }
+            if root != "repo" {
+                parent := false
+                loop component in path.components() -> if component == .ParentDir -> parent = true
+                if parent -> next
+            }
+            &roots.push(JetFileScopeRoot{path: path, allow_absolute: root != "repo" && path.is_absolute()})
+        }
+        JetFileScope{roots: roots}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:140
+    pub fn roots(self) -> View<JetFileScopeRoot> Never! { self.roots.view() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:104
+#Equatable
+pub struct JetFileScopeRoot {
+    path: OSPath
+    allow_absolute: Bool
+    // Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:146
+    pub fn path(self) -> OSPath Never! { self.path }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:150
+    pub fn allow_absolute(self) -> Bool Never! { self.allow_absolute }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:155
+pub fn jet_authority_rights_from_strings(rights: [String]) -> [String:Bool] Never! {
+    out := [String:Bool]{}
+    loop right in ^rights -> out[^right] = true
+    out
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:164
+pub fn jet_authority_to_wire(authority: JetAuthority) -> String Never! {
+    keys := authority.rights.keys().collect()
+    &keys.sort()
+    keys.join("\n")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:168
+fn jet_authority_covers(held: String, requested: String) -> Bool Never! {
+    if held == requested -> return true
+    tail := requested.strip_prefix(held) ?? return false // #4303
+    tail.starts_with('.') || tail.starts_with(':') || tail.starts_with('/')
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:178
+pub fn jet_authority_workspace_rights() -> [String:Bool] Never! {
+    jet_authority_rights_from_strings(["FS.Read:repo", "FS.Write:.jet/build"])
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:188
+pub fn jet_authority_with_right(held: [String:Bool], requested: String) -> [String:Bool] Err! {
+    loop bound in held.keys() {
+        if jet_authority_covers(bound, requested) -> return Ok(jet_authority_rights_from_strings([requested.to_string()]))
+    }
+    Err("E0712: authority cannot narrow to `{requested}` outside its held rights")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:202
+pub fn jet_authority_without_right(held: [String:Bool], requested: String) -> [String:Bool] Never! {
+    out := [String:Bool]{}
+    loop right in held.keys() -> if not jet_authority_covers(requested, right) -> out[right.to_string()] = true
+    out
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:213
+pub fn jet_authority_with(authority: JetAuthority, requested: String) -> JetAuthority Never! {
+    rights :: jet_authority_with_right(authority.rights, requested) ?? panic(err)
+    JetAuthority{rights: rights}
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Authority.rs:224
+pub fn jet_authority_without(authority: JetAuthority, requested: String) -> JetAuthority Never! {
+    JetAuthority{rights: jet_authority_without_right(authority.rights, requested)}
+}

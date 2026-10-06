@@ -1,0 +1,396 @@
+use tests.conformance.corpus.core.port.http_i9.*
+use tests.conformance.corpus.core.port.http.[on_large_stack]
+use tests.common as common
+use tests.tir_support as tir_support
+use std.net.[TcpListener, TcpStream]
+use std.thread
+use std.time.[Duration, Instant]
+use std.io.[ErrorKind]
+use std.sync.[Arc]
+use std.sync.atomic.[AtomicBool, Ordering]
+// GATE #4494: actual TCP fixtures, scoped threads and acquire/release atomics.
+// GATE #4409: exact WouldBlock / ConnectionReset error-kind contracts.
+// Retired Cranelift trace assertions are replaced with shared-tier behavior.
+
+// Rust: tests/http_i9.rs:861
+#Test("http_text_projections_preserve_default_limits_and_body_lifecycle_on_all_supported_tiers") {
+    has_rustc :: common.have_rustc()
+    tier_count :: 2 + USize{has_rustc}
+    listener :: TcpListener.bind("127.0.0.1:0").expect("bind")
+    address :: listener.local_addr().expect("address")
+    server :: thread.spawn(() -> {
+        loop _ in 0..(tier_count * 7) {
+            (stream, _) := listener.accept().expect("client connection")
+            request :: read_http_request(&stream)
+            if request.windows(5).any(window -> window == "/over".bytes()) {
+                stream.write_all("HTTP/1.1 200 OK\r\nContent-Length: 1048577\r\nConnection: close\r\n\r\n".bytes()).unwrap()
+            } else if request.windows(7).any(window -> window == "/binary".bytes()) {
+                stream.write_all("HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\n".bytes()).unwrap()
+                stream.write_all([U8]{0, 0xff, 1}).unwrap()
+            } else if request.windows(7).any(window -> window == "/stream".bytes()) {
+                stream.write_all("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nhello".bytes()).unwrap()
+            } else if request.windows(10).any(window -> window == "/truncated".bytes()) {
+                stream.write_all("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nno".bytes()).unwrap()
+            } else {
+                stream.write_all("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello".bytes()).unwrap()
+            }
+            stream.flush().unwrap()
+        }
+    })
+    source :: HTTP_TEXT_ERROR_BODIES.replace("__URL__", "http://{address}")
+    expected :: "default=ok:5\nexplicit=ok:hello\nconsumed=err:BodyConsumed\nstream=ok:hello\nover=err:BodyTooLarge:1048576\nbinary=err:UnsupportedEncoding\ntruncated=err:IO:transport\n"
+    on_large_stack(() -> {
+        loop (use_interpreter, name) in [(false, "http_i9_text_contract_default"), (true, "http_i9_text_contract_interpreter")] {
+            output :: run_with_mode(source, name, use_interpreter)
+            assert_eq(output.stdout, expected)
+            assert_eq(output.stderr, "")
+            assert_eq(output.exit_code, 0)
+        }
+        if has_rustc {
+            (exit_code, stdout, stderr) :: common.build_and_run("http_i9_text_contract", "aot", source)
+            assert_eq(stdout, expected)
+            assert_eq(stderr, "")
+            assert_eq(exit_code, 0)
+        }
+    })
+    server.join().expect("server")
+}
+
+// Rust: tests/http_i9.rs:947
+#Test("http_web_defaults_forced_deopt_uses_prelude_ambient") {
+    on_large_stack(() -> {
+        loop use_interpreter in [false, true] {
+            output :: if use_interpreter -> run_with_mode(FORCED_DEOPT, "http_i9_forced_deopt", true) else -> run(FORCED_DEOPT, "http_i9_forced_deopt")
+            assert_eq(output.stderr, "")
+            assert_eq(output.exit_code, 0)
+            assert(output.stdout.starts_with("strasse\nReno|31|application/json|hello\nInvalidFraming\nPolicy {{ reason: "))
+            assert(output.stdout.contains("CORS credentials need named origins."))
+        }
+        // The removed deopt/fallback representation probes become O1/O2 witnesses.
+        if common.have_rustc() {
+            loop tier in [tir_support.build_and_run_multi, tir_support.build_release_and_run_multi] {
+                (exit_code, stdout, stderr) :: tier("http_i9_forced_deopt", "main.jet", [("main.jet", FORCED_DEOPT)])
+                assert_eq(stderr, "")
+                assert_eq(exit_code, 0)
+                assert(stdout.starts_with("strasse\nReno|31|application/json|hello\nInvalidFraming\nPolicy {{ reason: "))
+                assert(stdout.contains("CORS credentials need named origins."))
+            }
+        }
+    })
+}
+
+// Rust: tests/http_i9.rs:964
+#Test("http_route_handlers_preserve_arity_context_and_errors_on_both_dev_tiers") {
+    on_large_stack(() -> {
+        loop (use_interpreter, name) in [(false, "http_i9_routes_default"), (true, "http_i9_routes_interpreter")] {
+            output :: run_with_mode(ROUTE_HANDLERS, name, use_interpreter)
+            assert_eq(output.stdout, "zero\n/items/42|42|captured-header|captured\n400\n")
+            assert_eq(output.stderr, "")
+            assert_eq(output.exit_code, 0)
+        }
+    })
+}
+
+// Rust: tests/http_i9.rs:982
+#Test("http_service_get_put_get_404_matches_across_aot_run_and_interpreter") {
+    modes := [(false, false, "http_i9_service_default"), (true, false, "http_i9_service_interpreter")]
+    if common.have_rustc() { modes.push((false, true, "http_i9_service_aot")) }
+    expected :: `200|{"status":"ok"}
+200|{"stored":"alpha"}
+200|{"key":"alpha","value":"one"}
+404|{"error":"not found"}
+200|{"bye":true}
+`
+    on_large_stack(() -> {
+        loop (use_interpreter, use_aot, name) in modes {
+            output :: if use_aot -> {
+                (exit_code, stdout, stderr) :: common.build_and_run("http_i9_service_get_put_get", "aot", HTTP_SERVICE_GET_PUT_GET)
+                Output{stdout: ^stdout, stderr: ^stderr, exit_code}
+            } else -> run_with_mode(HTTP_SERVICE_GET_PUT_GET, name, use_interpreter)
+            assert_eq(output.stdout, expected)
+            assert_eq(output.stderr, "")
+            assert_eq(output.exit_code, 0)
+        }
+    })
+}
+
+// Rust: tests/http_i9.rs:1018
+#Test("hostile_http_and_websocket_urls_are_rejected_on_both_dev_tiers") {
+    on_large_stack(() -> {
+        loop (use_interpreter, name) in [(false, "http_i9_hostile_default"), (true, "http_i9_hostile_interpreter")] {
+            listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+            listener.set_nonblocking(true).unwrap()
+            address :: listener.local_addr().unwrap()
+            observer :: thread.spawn(() -> {
+                deadline :: Instant.now() + Duration.from_secs(1)
+                loop {
+                    match listener.accept() {
+                        .Ok(_) -> return true
+                        .Err(error) if error.kind() == ErrorKind.WouldBlock -> {
+                            if Instant.now() >= deadline { return false }
+                            thread.yield_now()
+                        }
+                        .Err(_) -> return false
+                    }
+                }
+            })
+            source :: HOSTILE_URLS.replace("__HTTP_URL__", "http://{address}").replace("__WS_URL__", "ws://{address}")
+            output :: run_with_mode(source, name, use_interpreter)
+            assert_eq(output.stdout, "http url rejected\nmethod rejected\nheader name rejected\nheader value rejected\ncontent length rejected\ntransfer encoding rejected\nduplicate host rejected\nconnection host rejected\nconnection length rejected\nconnection transfer rejected\nproxy connection rejected\nkeep-alive rejected\nte rejected\ntrailer rejected\nupgrade rejected\nproxy authenticate rejected\nproxy authorization rejected\nws rejected\n")
+            assert_eq(output.stderr, "")
+            assert_eq(output.exit_code, 0)
+            assert(!observer.join().unwrap(), "{name} reached the socket for a hostile request")
+        }
+    })
+}
+
+// Rust: tests/http_i9.rs:1141
+#Test("source_http_message_framing_is_status_aware_on_all_supported_tiers") {
+    expected :: "malformed-request=rejected:InvalidFraming\nvalid-request=dispatched:/safe\nmalformed-response=rejected:InvalidFraming\ninvalid-204=rejected:InvalidFraming\nvalid-304=accepted:304\nvalid-response=accepted:200\ninvalid-header=rejected:InvalidHeader\ninvalid-header-value=rejected:InvalidHeader\n"
+    on_large_stack(() -> {
+        loop (use_interpreter, name) in [(false, "http_i9_message_framing_default"), (true, "http_i9_message_framing_interpreter")] {
+            output :: run_with_mode(HTTP_SOURCE_FRAMING, name, use_interpreter)
+            assert_eq(output.stdout, expected, "{name}: exit_code={output.exit_code} stderr={output.stderr:?}")
+            assert_eq(output.stderr, "")
+            assert_eq(output.exit_code, 0)
+        }
+        if common.have_rustc() {
+            loop tier in [tir_support.build_and_run_multi, tir_support.build_release_and_run_multi] {
+                (exit_code, stdout, stderr) :: tier("http_i9_message_framing", "main.jet", [("main.jet", HTTP_SOURCE_FRAMING)])
+                assert_eq(stdout, expected, "exit_code={exit_code} stderr={stderr:?}")
+                assert_eq(stderr, "")
+                assert_eq(exit_code, 0)
+            }
+        }
+    })
+}
+
+// Rust: tests/http_i9.rs:1220
+#Test("source_boolean_short_circuit_guards_are_lazy_on_all_supported_tiers") {
+    expected :: "short-or-empty=true\nshort-or-slash=true\nshort-or-other=false\nshort-and-empty=false\nshort-and-slash=true\nshort-and-other=false\n"
+    on_large_stack(() -> {
+        loop (use_interpreter, name) in [(false, "http_i9_short_circuit_default"), (true, "http_i9_short_circuit_interpreter")] {
+            output :: run_with_mode(HTTP_SOURCE_SHORT_CIRCUIT, name, use_interpreter)
+            assert_eq(output.stdout, expected, "{name}: exit_code={output.exit_code} stderr={output.stderr:?}")
+            assert_eq(output.stderr, "")
+            assert_eq(output.exit_code, 0)
+        }
+        if common.have_rustc() {
+            loop tier in [tir_support.build_and_run_multi, tir_support.build_release_and_run_multi] {
+                (exit_code, stdout, stderr) :: tier("http_i9_short_circuit", "main.jet", [("main.jet", HTTP_SOURCE_SHORT_CIRCUIT)])
+                assert_eq(stdout, expected, "exit_code={exit_code} stderr={stderr:?}")
+                assert_eq(stderr, "")
+                assert_eq(exit_code, 0)
+            }
+        }
+    })
+}
+
+// Rust: tests/http_i9.rs:1275
+#Test("hostile_http_response_lengths_are_rejected_on_both_dev_tiers") {
+    listener :: TcpListener.bind("127.0.0.1:0").expect("bind")
+    address :: listener.local_addr().expect("address")
+    server :: thread.spawn(() -> {
+        RESPONSE_BYTES :: 64 * 1024 * 1024 + 1
+        response :: "HTTP/1.1 200 OK\r\nContent-Length: {RESPONSE_BYTES}\r\nConnection: close\r\n\r\n"
+        loop _ in 0..4 {
+            (stream, _) := listener.accept().expect("client connection")
+            _ :: stream.write_all(response.bytes())
+            _ :: stream.flush()
+        }
+    })
+    url :: "http://{address}/oversized"
+    source :: `
+use core.http.client as http
+fn run() -> {
+    if http.get("__URL__") == {
+        .Ok(_) -> print("simple accepted")
+        .Err(_) -> print("simple rejected")
+        else -> print("simple unexpected")
+    }
+    request :: http.request("GET", "__URL__")
+    if request.send() == {
+        .Ok(_) -> print("request accepted")
+        .Err(_) -> print("request rejected")
+        else -> print("request unexpected")
+    }
+}
+`.replace("__URL__", url)
+    on_large_stack(() -> {
+        loop (use_interpreter, name) in [(false, "http_i9_oversized_response_default"), (true, "http_i9_oversized_response_interpreter")] {
+            output :: run_with_mode(source, name, use_interpreter)
+            assert_eq(output.stdout, "simple rejected\nrequest rejected\n")
+            assert_eq(output.stderr, "")
+            assert_eq(output.exit_code, 0)
+        }
+    })
+    server.join().expect("server")
+}
+
+// Rust: tests/http_i9.rs:1327
+// Cleartext HTTP/1.1: http.get and HTTPRequest.send default h2c=false.
+// The protocol-configured H2C path is covered in tests/http_client_law.rs.
+// Rust: tests/http_i9.rs:1332
+#Test("hostile_http_response_sinks_reject_streamed_overruns_on_both_dev_tiers") {
+    modes :: [(false, "http_i9_response_sinks_default"), (true, "http_i9_response_sinks_interpreter")]
+    listener :: TcpListener.bind("127.0.0.1:0").expect("bind")
+    address :: listener.local_addr().expect("address")
+    gzip_body :: gzip_fixed_repeat_bomb(GZIP_RESPONSE_BODY_LIMIT + 1, 120)
+    assert(gzip_body.len() < 1024 * 1024, "gzip expansion witness must stay compact")
+    connection_count :: modes.len() * 6
+    server :: thread.spawn(() -> {
+        loop _ in 0..connection_count {
+            (stream, _) := listener.accept().expect("client connection")
+            stream.set_write_timeout(Duration.from_secs(10)).expect("write timeout")
+            request :: read_http_request(&stream)
+            serve_hostile_http_response(&stream, request, gzip_body)
+        }
+    })
+    source :: HTTP_RESPONSE_SINKS.replace("__URL__", "http://{address}")
+    expected :: "close-get=rejected:InvalidFraming\nclose-request=rejected:InvalidFraming\nchunked-get=rejected:InvalidFraming\nchunked-request=rejected:InvalidFraming\ngzip-get=rejected:InvalidFraming\ngzip-request=rejected:InvalidFraming\n"
+    on_large_stack(() -> {
+        loop (use_interpreter, name) in modes {
+            started :: Instant.now()
+            output :: run_with_mode(source, name, use_interpreter)
+            assert(started.elapsed() < Duration.from_secs(45), "{name} response sink did not terminate promptly")
+            assert_eq(output.stdout, expected)
+            assert_eq(output.stderr, "")
+            assert_eq(output.exit_code, 0)
+        }
+    })
+    server.join().expect("server")
+}
+
+// Rust: tests/http_i9.rs:1388
+#Test("hostile_chunked_body_deadline_ends_request_on_both_dev_tiers") {
+    on_large_stack(() -> {
+        loop (use_interpreter, name) in [(false, "http_i9_chunked_deadline_default"), (true, "http_i9_chunked_deadline_interpreter")] {
+            listener :: TcpListener.bind("127.0.0.1:0").expect("bind port")
+            port :: listener.local_addr().expect("port address").port()
+            drop(^listener)
+            source :: `
+use core.http.server as server
+use core.net as net
+fn run() -> (HTTPError | NetError | TaskFailure)! {
+    listener :: net.tcp_listen("127.0.0.1:__PORT__") ?? panic("listen")
+    mux :: server.mux()
+    mux.post("/", (req: HTTPRequest) HTTPResponse HTTPError! -> {
+        body :: req.body().text(1024) ?? "rejected"
+        return Ok(server.response(200, body))
+    })
+    server_task :: task {
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+    }
+    server_task.join() ?? panic("serve")
+}
+`.replace("__PORT__", port.to_string())
+            tier_name :: name.to_string()
+            runner :: thread.spawn(() -> run_with_mode(source, tier_name, use_interpreter))
+            started :: Instant.now()
+            client := loop {
+                match TcpStream.connect(("127.0.0.1", port)) {
+                    .Ok(stream) -> break stream
+                    .Err(error) if started.elapsed() < Duration.from_secs(30) -> {
+                        _ :: error
+                        thread.sleep(Duration.from_millis(100))
+                    }
+                    .Err(error) -> {
+                        _ :: runner.join()
+                        panic("chunked server did not start: {error}")
+                    }
+                }
+            }
+            client.write_all("POST / HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nTrailer: X-Test\r\nConnection: close\r\n\r\n1\r\nx\r\n0\r\n".bytes()).expect("write chunked prefix")
+            client.flush().expect("flush chunked prefix")
+            client.set_read_timeout(Duration.from_secs(35)).expect("set response timeout")
+            stop :: Arc.new(AtomicBool.new(false))
+            writer_stop :: stop.clone()
+            trickle := client.try_clone().expect("clone client")
+            writer :: thread.spawn(() -> {
+                trailer :: "X-Test: value\r\n".bytes()
+                loop (index, byte) in trailer.iter().copied().enumerate() {
+                    if writer_stop.load(Ordering.Acquire) || trickle.write_all([U8]{byte}).is_err() { return }
+                    _ :: trickle.flush()
+                    if index + 1 < trailer.len() {
+                        loop _ in 0..80 {
+                            if writer_stop.load(Ordering.Acquire) { return }
+                            thread.sleep(Duration.from_millis(100))
+                        }
+                    }
+                }
+            })
+            response := [U8]{}
+            read_result :: client.read_to_end(&response)
+            stop.store(true, Ordering.Release)
+            drop(^client)
+            writer.join().expect("trickle writer")
+            output :: runner.join().expect("chunked server")
+            assert(read_result.is_ok() && response.starts_with("HTTP/1.1 ".bytes()), "chunked request was not ended by the body deadline after {started.elapsed():?}: read={read_result:?}, response={response:?}, stderr={output.stderr}")
+            assert(started.elapsed() < Duration.from_secs(35))
+            assert_eq(output.stderr, "")
+            assert_eq(output.exit_code, 0)
+        }
+    })
+}
+
+// Rust: tests/http_i9.rs:1486
+#Test("http_request_text_projections_preserve_body_contract_on_all_supported_tiers") {
+    modes := [(false, false, "http_i9_request_text_default"), (true, false, "http_i9_request_text_interpreter")]
+    if common.have_rustc() { modes.push((false, true, "http_i9_request_text_aot")) }
+    cases: [(String, [U8], String)] :: [
+        ("/default", "hello".bytes(), "default=hello"),
+        ("/explicit", "hello".bytes(), "explicit=hello"),
+        ("/over", "hello".bytes(), "over=BodyTooLarge:4"),
+        ("/consumed", "hello".bytes(), "consumed=BodyConsumed"),
+        ("/binary", [U8]{0, 0xff, 1}, "binary=UnsupportedEncoding")
+    ]
+    on_large_stack(() -> {
+        loop (use_interpreter, use_aot, name) in modes {
+            reservation :: TcpListener.bind("127.0.0.1:0").expect("bind")
+            port :: reservation.local_addr().expect("port address").port()
+            drop(^reservation)
+            source :: HTTP_REQUEST_TEXT.replace("__PORT__", port.to_string())
+            tier_name :: name.to_string()
+            runner :: thread.spawn(() -> {
+                if use_aot {
+                    (exit_code, stdout, stderr) :: common.build_and_run("http_i9_request_text", "aot", source)
+                    Output{stdout: ^stdout, stderr: ^stderr, exit_code}
+                } else { run_with_mode(source, tier_name, use_interpreter) }
+            })
+            started :: Instant.now()
+            loop (path, body, expected) in cases {
+                client := loop {
+                    match TcpStream.connect(("127.0.0.1", port)) {
+                        .Ok(stream) -> break stream
+                        .Err(error) if started.elapsed() < Duration.from_secs(30) -> {
+                            _ :: error
+                            thread.sleep(Duration.from_millis(100))
+                        }
+                        .Err(error) -> {
+                            _ :: runner.join()
+                            panic("request-text server did not start: {error}")
+                        }
+                    }
+                }
+                client.set_read_timeout(Duration.from_secs(10)).expect("set response timeout")
+                header :: "POST {path} HTTP/1.1\r\nHost: local\r\nContent-Length: {body.len()}\r\nConnection: close\r\n\r\n"
+                client.write_all(header.bytes()).expect("write request header")
+                client.write_all(body).expect("write request body")
+                client.flush().expect("flush request")
+                response := [U8]{}
+                read_result :: client.read_to_end(&response)
+                if read_result == .Err(error) {
+                    assert_eq(error.kind(), ErrorKind.ConnectionReset, "request-text response read failed for {path}: {error}, response={response:?}")
+                }
+                response_text :: String.from_utf8(^response).expect("UTF-8 HTTP response")
+                assert(response_text.starts_with("HTTP/1.1 200"), "request-text handler returned unexpected response: {response_text:?}")
+                (_, response_body) :: response_text.split_once("\r\n\r\n").expect("request-text response headers")
+                assert_eq(response_body, expected, "request-text case {path}")
+            }
+            output :: runner.join().expect("request-text server")
+            assert_eq(output.stdout, "")
+            assert_eq(output.stderr, "")
+            assert_eq(output.exit_code, 0)
+        }
+    })
+}

@@ -9,11 +9,16 @@ or when a phase is slower than its lines/s floor.
 node Tools/perf/scaling/generate.mjs --list                 # every shape
 node Tools/perf/scaling/generate.mjs web 125000 NEW_DIR     # one corpus
 node --test Tools/perf/scaling/scaling.test.mjs
-Tools/agent/jet-env node Tools/perf/scaling/run-gate.mjs --compiler rust=jet:/mnt/jetscratch/targets/ScalingGate2/release/jet \
-  --compiler p15=bootstrap:$HOME/.cache/jet-dev/candP15/jetc0 --mode counters --jobs 2 \
+Tools/agent/jet-env node Tools/perf/scaling/run-gate.mjs --compiler "rust=jet:$RUST_JET" \
+  --compiler "jet=bootstrap:$JETC0" --mode counters --jobs 2 \
   --memory-max 8G --timeout 25 --work-dir $HOME/.cache/jet-dev/scratch/ScalingGate2/landing
 node Tools/perf/scaling/report.mjs --runs-dir RUNS_DIR --output report.md
 ```
+
+Set `RUST_JET` and `JETC0` to the current dev head's shared pair recorded in
+`~/.cache/jet-dev/dev-artifacts.json`, after that head includes these counters.
+Changing compiler binaries requires fresh receipt roots. Older candidates may
+be additional explicitly labelled historical comparisons, not the current gate.
 
 Every corpus is measured in two layouts: `files` (as generated, many files)
 and `single` (one main.jet). A compiler that fails the multi-file layout fails
@@ -50,6 +55,19 @@ those jobs' completion events and merges their receipts. `--findings FILE`
 appends retained probe evidence. Missing/unfinished receipts and absent timing
 coverage are explicitly uncovered, never inferred from counter-mode time.
 
+The Rust ledger indexes declarations, aliases and checked reference sites by
+source module; package sibling iteration borrows the loader's sorted membership
+list. Structural auto-derive publication retains one shared canonical table of
+actual nominal declarations, while derive/codegen selections remain module-local.
+Empty marker-rule and non-App entry paths do not construct unused bundle contexts.
+Declaration/alias lookup uses borrowed keys in module-owned maps, and canonical
+module/declaration identities are cached. Structure observations retain source
+order with collision-checked hash buckets; import-edge presence uses a source/span
+index. Body snapshots borrow loader alias roots rather than cloning that set.
+Package item-reuse log rows aggregate all member files of the checked package.
+Focused reuse checks count unchanged bodies across that package and require
+warm-store diagnostics to match a fresh-store check byte for byte.
+
 Shapes (`corpora.mjs`, `domains.mjs`, helpers in `package.mjs`): stress shapes
 grow one dimension with N (files, small functions, statements per function,
 nesting depth, enum width and arm tables, impls/traits, generic
@@ -71,6 +89,9 @@ emitted, allocations), drained at every phase end by `jet_driver::Trace`.
 The Jet half counts module item scans, ordinary and return-view-summary body
 checks, method jobs and impl-row scans in sema; function rows in lowering;
 global-instruction scans, impls, top-level functions and item-output lines in emit.
+Ordinary checks count prepared parallel bodies and actual serial fallback checks,
+not reuse of a prepared result. Summary checks are counted where the summaries run,
+whether the module prepares parallel bodies or checks serially.
 Counters are deltas per loop invocation, so repeated module passes sum rather
 than overwrite one another. They add no traversal or per-item sink calls.
 Series are baseline-subtracted (an N=1 rung), judged between the first and

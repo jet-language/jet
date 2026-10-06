@@ -1,0 +1,78 @@
+use core.prelude.runtime.kernel_fixed_list.[JetFixedListIndexError, jet_fixed_list_index]
+// D-SOA-TIER1=A: one column per stored field, no per-read column-set temporary.
+// Rust: crates/jet-codegen/src/Prelude/Core/Columns.rs:23
+pub type JetRowCells<C> = [C]
+// Rust: crates/jet-codegen/src/Prelude/Core/Columns.rs:29
+#Inline(Always)
+pub fn jet_columns_rows<C>(columns: View<View<C>>) -> USize {
+    if columns.first() == .Val(column) -> column.len() else -> 0
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Columns.rs:43
+#Inline(Always)
+pub fn jet_columns_gather<C: Clone>(columns: View<View<C>>, index: I64) -> JetRowCells<C> JetFixedListIndexError! {
+    row :: jet_fixed_list_index(jet_columns_rows(columns), index, (row) -> row) ?? return Err(^err)
+    Ok(columns.iter().map((column) -> column[row].clone()).collect())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Columns.rs:56
+#Inline(Always)
+pub fn jet_columns_gather_cell<C: Clone>(columns: View<View<C>>, field: USize, index: I64) -> C JetFixedListIndexError! {
+    row :: jet_fixed_list_index(jet_columns_rows(columns), index, (row) -> row) ?? return Err(^err)
+    Ok(columns[field][row].clone())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/Columns.rs:69
+#Derive(Clone, Debug, PartialEq)
+pub struct JetColumns<C> { cols: [[C]] }
+impl<C> JetColumns<C> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Columns.rs:78
+    pub fn new(width: USize) -> JetColumns<C> {
+        JetColumns<C>{cols: (0..<width).map((_) -> []).collect()}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Columns.rs:85
+    pub fn width(self: JetColumns<C>) -> USize { self.cols.len() }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Columns.rs:90
+    #Inline(Always)
+    pub fn len(self: JetColumns<C>) -> USize { self.cols.first().map_or(0, (column) -> column.len()) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Columns.rs:95
+    #Inline(Always)
+    pub fn is_empty(self: JetColumns<C>) -> Bool { self.len() == 0 }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Columns.rs:106
+    #Inline
+    pub fn project<T>(self: JetColumns<C>, field: USize, project: fn(C) -> T) -> [T] {
+        if self.cols.get(field) == .Val(column) -> column.iter().map(project).collect()
+        else -> []
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Columns.rs:118
+    #Inline(Always)
+    pub fn column(self: JetColumns<C>, field: USize) -> View<C> {
+        if self.cols.get(field) == Some(column) -> column.as_slice() else -> []
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Columns.rs:132
+    pub fn push_row<I: IntoIterator<C>>(self: &JetColumns<C>, row: I) -> () {
+        loop (column, cell) in self.cols.iter_mut().zip(^row) { column.push(^cell) }
+    }
+}
+impl<C: Clone> JetColumns<C> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/Columns.rs:142
+    #Inline(Always)
+    pub fn gather(self: JetColumns<C>, index: I64) -> JetRowCells<C> JetFixedListIndexError! {
+        row :: jet_fixed_list_index(self.len(), index, (row) -> row) ?? return Err(^err)
+        Ok(self.cols.iter().map((column) -> column[row].clone()).collect())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Columns.rs:153
+    #Inline(Always)
+    pub fn gather_cell(self: JetColumns<C>, field: USize, index: I64) -> C JetFixedListIndexError! {
+        row :: jet_fixed_list_index(self.len(), index, (row) -> row) ?? return Err(^err)
+        Ok(self.cols[field][row].clone())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Columns.rs:166
+    pub fn rows(self: JetColumns<C>) -> Iterator<JetRowCells<C>> {
+        (0..<self.len()).map((row) -> self.cols.iter().map((column) -> column[row].clone()).collect())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/Columns.rs:176
+    pub fn from_rows<I: IntoIterator<JetRowCells<C>>>(width: USize, rows: I) -> JetColumns<C> {
+        columns := JetColumns<C>.new(width)
+        loop row in rows { columns.push_row(^row) }
+        ^columns
+    }
+}
+

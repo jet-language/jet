@@ -1,0 +1,212 @@
+// SimdLanes.rs has no original inline, included, or macro-generated tests.
+// Faithful behavioral controls for reachable portable policies only. Native
+// dispatch/carrier/barrier/symbolic initialization proof remains gated in owner.
+use core.math.runtime.kernel_simd_lanes as lanes
+use core.math as math
+module lane8 :: lanes.fixed_lane(8)
+fn index_sub(left: I64, right: I64) -> I64 Never! { left - right }
+fn index_i64(value: I64) -> I64? Never! { Val(value) }
+fn index_absent(value: I64) -> I64? Never! { None }
+
+#Test("fixed lane binary preserves order and per-width wrapping") {
+    left :: [I8#4]{120, -120, 7, -7}
+    right :: [I8#4]{10, 10, 2, 2}
+    assert_eq(lanes.jet_simd_add_array(left, right), [I8#4]{-126, -110, 9, -5})
+    assert_eq(lanes.jet_simd_sub_array(left, right), [I8#4]{110, 126, 5, -9})
+    assert_eq(lanes.jet_simd_mul_array(left, right), [I8#4]{-80, 80, 14, -14})
+    assert_eq(lanes.jet_simd_div_array(left, right), [I8#4]{12, -12, 3, -3})
+    a :: [U8#2]{255, 0}
+    b :: [U8#2]{1, 1}
+    assert_eq(lanes.jet_simd_add_array(a, b), [U8#2]{0, 1})
+    assert_eq(lanes.jet_simd_sub_array(a, b), [U8#2]{254, 255})
+}
+#Test("F32 arithmetic rounds at F32 operation width") {
+    left :: [F32#2]{16777216.0, 6.0}
+    right :: [F32#2]{1.0, 4.0}
+    assert_eq(lanes.jet_simd_add_array(left, right), [F32#2]{16777216.0, 10.0})
+    assert_eq(lanes.jet_simd_div_array(left, right)[1], F32{1.5})
+}
+#Test("select and masked add retain untouched NaN and infinite lanes") {
+    a :: [Float#4]{1.0, Float.INFINITY, 3.0, 4.0}
+    b :: [Float#4]{2.0, -Float.INFINITY, 5.0, 6.0}
+    mask :: [Bool#4]{true, false, true, false}
+    assert_eq(lanes.jet_simd_select_array(mask, a, b), [Float#4]{1.0, -Float.INFINITY, 3.0, 6.0})
+    added :: lanes.jet_simd_masked_add_array(a, b, mask)
+    assert_eq(added, [Float#4]{3.0, Float.INFINITY, 8.0, 4.0})
+    assert(!math.is_nan(added[1]))
+    // Unconditional arithmetic is the deliberate semantic failing control.
+    unconditional :: lanes.jet_simd_add_array(a, b)
+    assert(math.is_nan(unconditional[1]))
+}
+#Test("slice mask shape rejection happens before any write") {
+    accumulator := [I32]{1, 2, 3}
+    addend :: [I32]{10, 20, 30}
+    short :: [Bool]{true, true}
+    mask :: [Bool]{true, false, true}
+    assert(!lanes.jet_simd_masked_add_slice(&accumulator[0..<3], addend[0..<3], short[0..<2]))
+    assert_eq(accumulator, [I32]{1, 2, 3})
+    assert(!lanes.jet_simd_masked_add_slice(&accumulator[0..<3], addend[0..<2], mask[0..<3]))
+    assert_eq(accumulator, [I32]{1, 2, 3})
+    assert(lanes.jet_simd_masked_add_slice(&accumulator[0..<3], addend[0..<3], mask[0..<3]))
+    assert_eq(accumulator, [I32]{11, 2, 33})
+}
+#Test("D-FRED1 fixed adjacent tree is not a sequential fold") {
+    values :: [Float#8]{1e16, 1.0, -1e16, 1.0, 0.0, 0.0, 0.0, 0.0}
+    assert_eq(lanes.jet_simd_reduce_fixed_array(values, Float{0.0}), Float{0.0})
+    scalar := Float{0.0}
+    loop i in 0..<8 -> scalar += values[i]
+    assert_eq(scalar, Float{1.0})
+    accumulators :: [Float#8]{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0}
+    assert_eq(lanes.jet_simd_finish_fixed(accumulators), Float{36.0})
+}
+#Test("fixed reduction places seed once and retains empty signed zero") {
+    values :: [Float]{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0}
+    assert_eq(lanes.jet_simd_reduce_fixed(values[0..<10], Float{100.0}), Float{155.0})
+    empty :: [Float]{}
+    result :: lanes.jet_simd_reduce_fixed(empty[0..<0], -Float{0.0})
+    assert(math.sign_bit(result))
+    seeded :: lanes.jet_simd_seed_fixed(Float{13.0})
+    assert_eq(seeded, [Float#8]{13.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0})
+}
+#Test("masked reduction uses source index rather than selected index") {
+    values :: [Float#8]{1e16, 1.0, -1e16, 1.0, 9.0, 9.0, 9.0, 9.0}
+    mask :: [Bool#8]{true, true, true, true, false, false, false, false}
+    assert_eq(lanes.jet_simd_masked_reduce_array(values, mask, Float{0.0}), Float{0.0})
+    none :: [Bool#8]{false, false, false, false, false, false, false, false}
+    assert(math.sign_bit(lanes.jet_simd_masked_reduce_array(values, none, -Float{0.0})))
+    assert(lanes.jet_simd_masked_reduce_slice(values[0..<8], mask[0..<7], Float{0.0}) == .None)
+    assert_eq(lanes.jet_simd_masked_reduce_slice(values[0..<8], mask[0..<8], Float{0.0}) ?? panic("shape"), Float{0.0})
+}
+#Test("masked accumulator rejects malformed mask without mutation") {
+    accumulators := lanes.jet_simd_seed_fixed(I64{10})
+    values :: [I64]{1, 2, 3, 4}
+    short :: [Bool]{true, true, true}
+    mask :: [Bool]{true, false, true, true}
+    assert(!lanes.jet_simd_accumulate_masked_fixed(&accumulators, values[0..<4], short[0..<3], 7))
+    assert_eq(accumulators, [I64#8]{10, 0, 0, 0, 0, 0, 0, 0})
+    assert(lanes.jet_simd_accumulate_masked_fixed(&accumulators, values[0..<4], mask[0..<4], 7))
+    assert_eq(accumulators, [I64#8]{10, 3, 4, 0, 0, 0, 0, 1})
+    lanes.jet_simd_accumulate_fixed(&accumulators, values[0..<4], 0)
+    assert_eq(lanes.jet_simd_finish_fixed(accumulators), I64{28})
+}
+#Test("stream reduction mismatch pulls both inputs and preserves remaining stream") {
+    values := [I64]{1, 2, 3}.lazy()
+    mask := [Bool]{true}.lazy()
+    assert(lanes.jet_simd_masked_reduce_fixed_iter(&values, &mask, I64{10}) == .None)
+    assert_eq((&values.next()) ?? panic("remaining item"), I64{3})
+    assert((&mask.next()) == .None)
+    exact := [I64]{1, 2, 3}.lazy()
+    select := [Bool]{true, false, true}.lazy()
+    assert_eq(lanes.jet_simd_masked_reduce_fixed_iter(&exact, &select, I64{10}) ?? panic("shape"), I64{14})
+    unmasked := [I64]{1, 2, 3}.lazy()
+    assert_eq(lanes.jet_simd_reduce_fixed_iter(&unmasked, I64{10}), I64{16})
+    empty := [Float]{}.lazy()
+    assert(math.sign_bit(lanes.jet_simd_reduce_fixed_iter(&empty, -Float{0.0})))
+}
+#Test("scalar-default first match returns lowest source index for all comparisons") {
+    values :: [I32]{4, 2, 2, 7}
+    assert_eq(lanes.jet_simd_first_match_slice(values[0..<4], I32{2}, lanes.JetSimdCompareOp.Eq) ?? -1, 1)
+    assert_eq(lanes.jet_simd_first_match_slice(values[0..<4], I32{4}, lanes.JetSimdCompareOp.Ne) ?? -1, 1)
+    assert_eq(lanes.jet_simd_first_match_slice(values[0..<4], I32{3}, lanes.JetSimdCompareOp.Lt) ?? -1, 1)
+    assert_eq(lanes.jet_simd_first_match_slice(values[0..<4], I32{4}, lanes.JetSimdCompareOp.Gt) ?? -1, 3)
+    assert_eq(lanes.jet_simd_first_match_slice(values[0..<4], I32{2}, lanes.JetSimdCompareOp.Le) ?? -1, 1)
+    assert_eq(lanes.jet_simd_first_match_slice(values[0..<4], I32{4}, lanes.JetSimdCompareOp.Ge) ?? -1, 0)
+    assert(lanes.jet_simd_first_match_slice(values[0..<4], I32{99}, lanes.JetSimdCompareOp.Eq) == .None)
+    truth :: [Bool]{false, true, true}
+    assert_eq(lanes.jet_simd_first_match_slice(truth[0..<3], true, lanes.JetSimdCompareOp.Eq) ?? -1, 1)
+    chars :: [Char]{'a', 'b', 'b'}
+    assert_eq(lanes.jet_simd_first_match_slice(chars[0..<3], 'b', lanes.JetSimdCompareOp.Eq) ?? -1, 1)
+}
+#Test("canonical index difference uses Euclidean remainder and absent conversion fallback") {
+    assert_eq(lane8.jet_simd_fixed_lane_from_int(I64{9}, I64{2}, index_sub, index_i64), 7)
+    assert_eq(lane8.jet_simd_fixed_lane_from_int(I64{1}, I64{2}, index_sub, index_i64), 7)
+    assert_eq(lane8.jet_simd_fixed_lane_from_int(I64{1}, I64{2}, index_sub, index_absent), 0)
+}
+#Test("splats and resident binary shape policy") {
+    assert_eq(lanes.jet_simd_f64x4_splat_array(Float{3.0}), [Float#4]{3.0, 3.0, 3.0, 3.0})
+    assert_eq(lanes.jet_simd_f64x2_splat_array(Float{3.0}), [Float#2]{3.0, 3.0})
+    assert_eq(lanes.jet_simd_f32x4_splat_array(F32{3.0}), [F32#4]{3.0, 3.0, 3.0, 3.0})
+    assert_eq(lanes.jet_simd_f32x8_splat_array(F32{3.0}), [F32#8]{3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0})
+    assert_eq(lanes.jet_simd_splat_slice(U16{9}, 3), [U16]{9, 9, 9})
+    a :: [Float]{3.0, 4.0}
+    b :: [Float]{1.0, 2.0}
+    assert_eq(lanes.jet_simd_binary_slice(a[0..<2], b[0..<2], lanes.JetSimdBinaryOp.Sub) ?? panic("shape"), [Float]{2.0, 2.0})
+    assert(lanes.jet_simd_binary_slice(a[0..<2], b[0..<1], lanes.JetSimdBinaryOp.Add) == .None)
+}
+#Test("dot length and empty shape laws") {
+    a :: [Float]{3.0, 4.0}
+    b :: [Float]{2.0, 5.0}
+    assert_eq(lanes.jet_simd_dot_f64_slice(a[0..<2], b[0..<2]) ?? panic("dot"), Float{26.0})
+    assert_eq(lanes.jet_simd_length_f64_slice(a[0..<2]) ?? panic("length"), Float{5.0})
+    assert(lanes.jet_simd_dot_f64_slice(a[0..<2], b[0..<1]) == .None)
+    assert_eq(lanes.jet_simd_dot_f64_slice(a[0..<0], b[0..<0]) ?? panic("empty dot"), Float{0.0})
+    assert(lanes.jet_simd_reduce_slice(a[0..<0], lanes.JetSimdReduceOp.Add) == .None)
+}
+#Test("float reductions ignore one NaN and preserve source integer identities") {
+    a :: [Float#4]{2.0, 3.0, 4.0, 5.0}
+    assert_eq(lanes.jet_simd_sum_array(a), Float{14.0})
+    assert_eq(lanes.jet_simd_product_array(a), Float{120.0})
+    assert_eq(lanes.jet_simd_min_array(a), Float{2.0})
+    assert_eq(lanes.jet_simd_max_array(a), Float{5.0})
+    assert_eq(lanes.jet_simd_avg_array(a), Float{3.5})
+    nan :: [Float#2]{Float.NAN, Float.NAN}
+    assert_eq(lanes.jet_simd_min_array(nan), Float.INFINITY)
+    assert_eq(lanes.jet_simd_max_array(nan), -Float.INFINITY)
+    ints :: [I8#4]{64, 64, 64, 64}
+    assert_eq(lanes.jet_simd_sum_array(ints), I8{0})
+    assert_eq(lanes.jet_simd_avg_array(ints), I8{0})
+    assert_eq(lanes.jet_simd_min_array(ints), I8.MIN)
+    assert_eq(lanes.jet_simd_max_array(ints), I8.MAX)
+}
+#Test("integer binary narrows after operation and handles signed MIN divided by minus one") {
+    a :: [I64]{120, -120, 7, -7}
+    b :: [I64]{10, 10, 2, 2}
+    assert_eq(lanes.jet_simd_integer_binary(a[0..<4], b[0..<4], lanes.JetSimdBinaryOp.Add, true, 8) ?? panic("add"), [I64]{-126, -110, 9, -5})
+    assert_eq(lanes.jet_simd_integer_binary(a[0..<4], b[0..<4], lanes.JetSimdBinaryOp.Div, true, 8) ?? panic("divide"), [I64]{12, -12, 3, -3})
+    minimum :: [I64]{I64.MIN}
+    minus_one :: [I64]{-1}
+    assert_eq(lanes.jet_simd_integer_binary(minimum[0..<1], minus_one[0..<1], lanes.JetSimdBinaryOp.Div, true, 64) ?? panic("wide divide"), minimum)
+    assert_eq(lanes.jet_simd_integer_binary(minimum[0..<1], minus_one[0..<1], lanes.JetSimdBinaryOp.Div, false, 64) ?? panic("unsigned divide"), [I64]{0})
+    // Input is not narrowed before division: 256 / 2 narrowed to signed8=-128.
+    full :: [I64]{256}
+    two :: [I64]{2}
+    assert_eq(lanes.jet_simd_integer_binary(full[0..<1], two[0..<1], lanes.JetSimdBinaryOp.Div, true, 8) ?? panic("narrow order"), [I64]{-128})
+    zero :: [I64]{0}
+    assert(lanes.jet_simd_integer_binary(full[0..<1], zero[0..<1], lanes.JetSimdBinaryOp.Div, true, 8) == .None)
+    assert(lanes.jet_simd_integer_binary(a[0..<4], b[0..<3], lanes.JetSimdBinaryOp.Add, true, 8) == .None)
+    assert(lanes.jet_simd_integer_binary(a[0..<4], b[0..<4], lanes.JetSimdBinaryOp.Add, true, 0) == .None)
+    assert(lanes.jet_simd_integer_binary(a[0..<4], b[0..<4], lanes.JetSimdBinaryOp.Add, true, 65) == .None)
+}
+#Test("integer reductions pre-narrow inputs; average widens sum before division") {
+    a :: [I64]{64, 64, 64, 64}
+    assert_eq(lanes.jet_simd_integer_reduce(a[0..<4], lanes.JetSimdReduceOp.Add, true, 8) ?? panic("sum"), I64{0})
+    assert_eq(lanes.jet_simd_integer_reduce(a[0..<4], lanes.JetSimdReduceOp.Avg, true, 8) ?? panic("average"), I64{64})
+    extremes :: [I64]{I64.MAX, I64.MAX}
+    assert_eq(lanes.jet_simd_integer_reduce(extremes[0..<2], lanes.JetSimdReduceOp.Avg, true, 64) ?? panic("wide average"), I64.MAX)
+    negatives :: [I64]{I64.MIN, I64.MIN}
+    assert_eq(lanes.jet_simd_integer_reduce(negatives[0..<2], lanes.JetSimdReduceOp.Avg, true, 64) ?? panic("negative average"), I64.MIN)
+    unsigned :: [I64]{-1, -1, -1}
+    assert_eq(lanes.jet_simd_integer_reduce(unsigned[0..<3], lanes.JetSimdReduceOp.Avg, false, 64) ?? panic("unsigned average"), I64{-1})
+    mixed :: [I64]{-7, 2}
+    assert_eq(lanes.jet_simd_integer_reduce(mixed[0..<2], lanes.JetSimdReduceOp.Avg, true, 64) ?? panic("truncate"), I64{-2})
+    assert_eq(lanes.jet_simd_integer_reduce(mixed[0..<2], lanes.JetSimdReduceOp.Min, true, 8) ?? panic("min"), I64{-7})
+    assert_eq(lanes.jet_simd_integer_reduce(mixed[0..<2], lanes.JetSimdReduceOp.Max, false, 8) ?? panic("max"), I64{249})
+    assert_eq(lanes.jet_simd_integer_reduce(mixed[0..<2], lanes.JetSimdReduceOp.Mul, true, 8) ?? panic("product"), I64{-14})
+    assert(lanes.jet_simd_integer_reduce(mixed[0..<0], lanes.JetSimdReduceOp.Avg, true, 8) == .None)
+}
+#Test("lane index exact refusal text and inclusive lower exclusive upper bounds") {
+    assert_eq(lanes.jet_simd_lane_index(I64{0}, "F64x4", 4) ?? panic("lane zero"), 0)
+    assert_eq(lanes.jet_simd_lane_index(I64{3}, "F64x4", 4) ?? panic("lane three"), 3)
+    if lanes.jet_simd_lane_index(I64{-1}, "F64x4", 4) == {
+        .Err(error) -> assert_eq(error.message, "lane index -1 out of range for F64x4 (4 lanes)")
+        .Ok(_) -> panic("negative lane accepted")
+    }
+    if lanes.jet_simd_lane_index(I64{4}, "F64x4", 4) == {
+        .Err(error) -> assert_eq(error.message, "lane index 4 out of range for F64x4 (4 lanes)")
+        .Ok(_) -> panic("upper lane accepted")
+    }
+    if lanes.jet_simd_lane_index(I64{0}, "Empty", 0) == {
+        .Err(error) -> assert_eq(error.message, "lane index 0 out of range for Empty (0 lanes)")
+        .Ok(_) -> panic("empty lane accepted")
+    }
+}

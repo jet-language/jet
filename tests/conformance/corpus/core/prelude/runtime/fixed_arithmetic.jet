@@ -1,0 +1,228 @@
+// FixedArithmetic.rs entry matrix, and affected behavioral expectations from
+// power_and_exclusive_or.rs / int_division.rs. Exact Fraction/Int spill tests,
+// widening diagnostics and E3010 stop-context projection belong to their
+// canonical owners; these assertions exercise this kernel's actual outcomes.
+use core.prelude.runtime.kernel_fixed_arithmetic as fixed
+
+// #4391: preserve MIN expectations through in-range construction. The exact
+// failing I64{-9223372036854775808} constructor regression remains in the
+// RUNTIME-FIXED-1 scratch repro-i64-min/unit.jet, not a skipped success case.
+fn fixed_test_min() -> I64 Never! { I64{-9223372036854775807} - I64{1} }
+
+fn fixed_test_wide(value: I64) -> fixed.JetFixedWide Never! {
+    fixed.JetFixedWide{high: if (value < I64{0}) -> I64{-1} else -> I64{0}, low: fixed_word_bits_for_test(value)}
+}
+fn fixed_word_bits_for_test(value: I64) -> U64 Never! {
+    if (value >= I64{0}) -> return U64.from_i64(value) ?? panic("positive test word")
+    magnitude :: (U64.from_i64(-(value + I64{1})) ?? panic("negative test word")).wrapping_add(U64{1})
+    U64{0}.wrapping_sub(magnitude)
+}
+fn fixed_test(left: I64, right: I64, op: Int, mode: Int, signed: Bool, bits: Int) -> fixed.JetFixedArithmeticResult Never! {
+    fixed.jet_fixed_arithmetic(left, fixed_test_wide(right), op, mode, signed, bits, true)
+}
+fn fixed_expect_value(actual: fixed.JetFixedArithmeticResult, wanted: I64) Never! {
+    if actual == {
+        .Value(value) -> assert_eq(value, wanted)
+        .Absent -> panic("expected Value, received Absent")
+        .Trap(error) -> panic("expected Value, received {fixed.jet_fixed_arithmetic_error_message(error)}")
+    }
+}
+fn fixed_expect_absent(actual: fixed.JetFixedArithmeticResult) Never! {
+    if actual == {
+        .Absent -> {}
+        .Value(value) -> panic("expected Absent, received {value}")
+        .Trap(error) -> panic("expected Absent, received {fixed.jet_fixed_arithmetic_error_message(error)}")
+    }
+}
+fn fixed_expect_trap(actual: fixed.JetFixedArithmeticResult, wanted: String) Never! {
+    if actual == {
+        .Trap(error) -> assert_eq(fixed.jet_fixed_arithmetic_error_message(error), wanted)
+        .Value(value) -> panic("expected Trap, received {value}")
+        .Absent -> panic("expected Trap, received Absent")
+    }
+}
+
+#Test("fixed all sixteen operation codes in trap mode") {
+    expected :: [I64]{I64{9}, I64{3}, I64{18}, I64{2}, I64{0}, I64{2}, I64{7}, I64{5}, I64{48}, I64{0}, I64{216}, I64{2}, I64{0}, I64{48}, I64{-64}, I64{-6}}
+    loop op in 0..<16 {
+        width :: if op == 10 -> 16 else -> 8
+        fixed_expect_value(fixed_test(I64{6}, I64{3}, op, 0, true, width), expected[op])
+    }
+}
+
+#Test("fixed all widths and modes maintain signed and unsigned bit carriers") {
+    loop bits in 1..<65 {
+        half :: U64{1} << (bits - 1)
+        signed_max :: I64.from_u64(half - U64{1}) ?? panic("signed maximum")
+        signed_min :: if bits == 64 -> fixed_test_min() else -> -(I64.from_u64(half) ?? panic("signed minimum"))
+        unsigned_max :: if bits == 64 -> I64{-1} else -> I64.from_u64((U64{1} << bits) - U64{1}) ?? panic("unsigned maximum")
+        fixed_expect_value(fixed_test(signed_max, I64{0}, 0, 0, true, bits), signed_max)
+        fixed_expect_absent(fixed_test(signed_max, I64{1}, 0, 3, true, bits))
+        fixed_expect_value(fixed_test(signed_max, I64{1}, 0, 1, true, bits), signed_min)
+        fixed_expect_value(fixed_test(signed_max, I64{1}, 0, 2, true, bits), signed_max)
+        fixed_expect_value(fixed_test(unsigned_max, I64{1}, 0, 1, false, bits), I64{0})
+        fixed_expect_value(fixed_test(unsigned_max, I64{1}, 0, 2, false, bits), unsigned_max)
+        fixed_expect_absent(fixed_test(unsigned_max, I64{1}, 0, 3, false, bits))
+        fixed_expect_value(fixed_test(signed_min, I64{0}, 15, 1, true, bits), signed_min)
+        fixed_expect_value(fixed_test(signed_min, I64{0}, 15, 2, true, bits), signed_max)
+        fixed_expect_absent(fixed_test(signed_min, I64{0}, 15, 3, true, bits))
+    }
+}
+
+#Test("fixed overflow exact wording and saturating direction") {
+    fixed_expect_trap(fixed_test(I64{127}, I64{1}, 0, 0, true, 8), "This addition overflows the value's type (the result is outside its range)")
+    fixed_expect_trap(fixed_test(I64{-128}, I64{1}, 1, 0, true, 8), "This subtraction overflows the value's type (the result is outside its range)")
+    fixed_expect_trap(fixed_test(I64{64}, I64{2}, 2, 0, true, 8), "This multiplication overflows the value's type (the result is outside its range)")
+    fixed_expect_value(fixed_test(I64{64}, I64{-3}, 2, 2, true, 8), I64{-128})
+    fixed_expect_value(fixed_test(I64{-128}, I64{-3}, 2, 2, true, 8), I64{127})
+    fixed_expect_value(fixed_test(I64{0}, I64{1}, 1, 1, false, 64), I64{-1})
+    fixed_expect_value(fixed_test(I64{0}, I64{1}, 1, 2, false, 64), I64{0})
+    fixed_expect_value(fixed_test(I64{-1}, I64{2}, 2, 1, false, 64), I64{-2})
+    fixed_expect_value(fixed_test(I64{-1}, I64{2}, 2, 2, false, 64), I64{-1})
+    fixed_expect_absent(fixed_test(I64{-1}, I64{2}, 2, 3, false, 64))
+    assert_eq(fixed.jet_fixed_arithmetic_error_message(fixed.JetFixedArithmeticError.RemainderOverflow), "Attempt to calculate the remainder with overflow")
+}
+
+#Test("fixed floor division deliberate-control case and modulo signs") {
+    fixed_expect_value(fixed_test(I64{-7}, I64{3}, 11, 0, true, 64), I64{-3})
+    lefts :: [I64]{I64{7}, I64{-7}, I64{7}, I64{-7}}
+    rights :: [I64]{I64{2}, I64{2}, I64{-2}, I64{-2}}
+    floors :: [I64]{I64{3}, I64{-4}, I64{-4}, I64{3}}
+    mods :: [I64]{I64{1}, I64{1}, I64{-1}, I64{-1}}
+    rems :: [I64]{I64{1}, I64{-1}, I64{1}, I64{-1}}
+    quotients :: [I64]{I64{3}, I64{-3}, I64{-3}, I64{3}}
+    loop i in 0..<4 {
+        fixed_expect_value(fixed_test(lefts[i], rights[i], 11, 0, true, 64), floors[i])
+        fixed_expect_value(fixed_test(lefts[i], rights[i], 12, 0, true, 64), mods[i])
+        fixed_expect_value(fixed_test(lefts[i], rights[i], 4, 0, true, 64), rems[i])
+        fixed_expect_value(fixed_test(lefts[i], rights[i], 3, 0, true, 64), quotients[i])
+    }
+    fixed_expect_value(fixed_test(I64{-6}, I64{3}, 12, 0, true, 64), I64{0})
+    fixed_expect_value(fixed_test(I64{-6}, I64{4}, 11, 0, true, 64), I64{-2})
+    fixed_expect_value(fixed_test(I64{17}, I64{2}, 11, 0, true, 64), I64{8})
+    fixed_expect_value(fixed_test(I64{9}, I64{2}, 11, 0, true, 64), I64{4})
+}
+
+#Test("fixed zero and MIN over negative one preserve outcomes and precedence") {
+    division_ops :: [Int]{3, 4, 11, 12}
+    loop op in division_ops {
+        loop mode in 0..<3 -> fixed_expect_trap(fixed_test(I64{10}, I64{0}, op, mode, true, 8), "divided by zero")
+        fixed_expect_absent(fixed_test(I64{10}, I64{0}, op, 3, true, 8))
+        fixed_expect_trap(fixed_test(I64{10}, I64{0}, op, 99, true, 8), "divided by zero")
+    }
+    fixed_expect_trap(fixed_test(fixed_test_min(), I64{-1}, 3, 0, true, 64), "This division overflows the value's type (the result is outside its range)")
+    fixed_expect_absent(fixed_test(fixed_test_min(), I64{-1}, 3, 3, true, 64))
+    fixed_expect_value(fixed_test(fixed_test_min(), I64{-1}, 3, 1, true, 64), fixed_test_min())
+    fixed_expect_value(fixed_test(fixed_test_min(), I64{-1}, 3, 2, true, 64), I64{9223372036854775807})
+    fixed_expect_value(fixed_test(fixed_test_min(), I64{-1}, 4, 0, true, 64), I64{0})
+    fixed_expect_value(fixed_test(fixed_test_min(), I64{-1}, 4, 3, true, 64), I64{0})
+    fixed_expect_value(fixed_test(fixed_test_min(), I64{-1}, 12, 0, true, 64), I64{0})
+}
+
+#Test("fixed powers and XOR retain exact results above two to fifty three") {
+    fixed_expect_value(fixed_test(I64{2}, I64{60}, 10, 0, true, 64), I64{1152921504606846976})
+    fixed_expect_value(fixed_test(I64{3}, I64{39}, 10, 0, true, 64), I64{4052555153018976267})
+    fixed_expect_value(fixed_test(I64{12}, I64{2}, 10, 0, true, 64), I64{144})
+    fixed_expect_value(fixed_test(I64{2}, I64{10}, 10, 0, true, 64), I64{1024})
+    fixed_expect_value(fixed_test(I64{12}, I64{10}, 7, 0, true, 64), I64{6})
+    bytes :: [I64]{I64{17}, I64{42}, I64{99}, I64{8}}
+    acc := I64{0}
+    loop byte in bytes {
+        result :: fixed_test(acc, byte, 7, 0, true, 64)
+        if result == {
+            .Value(value) -> acc = value
+            else -> panic("XOR must return Value")
+        }
+    }
+    assert_eq(acc, I64{80})
+    loop mode in 0..<3 -> fixed_expect_trap(fixed_test(I64{2}, I64{-1}, 10, mode, true, 8), "A negative exponent has no whole-number result (make the base a Float to raise it to a negative power)")
+    fixed_expect_absent(fixed_test(I64{2}, I64{-1}, 10, 3, true, 8))
+    fixed_expect_trap(fixed_test(I64{2}, I64{7}, 10, 0, true, 8), "This power overflows the value's type (the result is outside its range)")
+    fixed_expect_value(fixed_test(I64{2}, I64{7}, 10, 1, true, 8), I64{-128})
+    fixed_expect_value(fixed_test(I64{2}, I64{7}, 10, 2, true, 8), I64{127})
+    fixed_expect_absent(fixed_test(I64{2}, I64{7}, 10, 3, true, 8))
+    fixed_expect_value(fixed_test(I64{-3}, I64{5}, 10, 2, true, 8), I64{-128})
+    fixed_expect_value(fixed_test(I64{-3}, I64{6}, 10, 2, true, 8), I64{127})
+    fixed_expect_value(fixed_test(I64{0}, I64{0}, 10, 0, true, 8), I64{1})
+    fixed_expect_trap(fixed_test(I64{1}, I64{4294967296}, 10, 1, true, 64), "This power overflows the value's type (the result is outside its range)")
+    fixed_expect_absent(fixed_test(I64{1}, I64{4294967296}, 10, 3, true, 64))
+    fixed_expect_value(fixed_test(I64{-1}, I64{4294967295}, 10, 0, true, 64), I64{-1})
+    fixed_expect_value(fixed_test(I64{1}, I64{0}, 10, 2, true, 1), I64{0})
+}
+
+#Test("fixed wide operands do not truncate exponents division or modulo") {
+    huge :: fixed.JetFixedWide{high: I64{1}, low: U64{3}}
+    tiny_negative :: fixed.JetFixedWide{high: fixed_test_min(), low: U64{0}}
+    fixed_expect_trap(fixed.jet_fixed_arithmetic(I64{1}, huge, 10, 0, true, 64, true), "This power overflows the value's type (the result is outside its range)")
+    fixed_expect_absent(fixed.jet_fixed_arithmetic(I64{1}, tiny_negative, 10, 3, true, 64, true))
+    fixed_expect_value(fixed.jet_fixed_arithmetic(I64{7}, huge, 3, 0, true, 64, true), I64{0})
+    fixed_expect_value(fixed.jet_fixed_arithmetic(I64{-7}, huge, 11, 0, true, 64, true), I64{-1})
+    fixed_expect_value(fixed.jet_fixed_arithmetic(I64{-7}, huge, 4, 0, true, 64, true), I64{-7})
+    fixed_expect_absent(fixed.jet_fixed_arithmetic(I64{-7}, huge, 12, 3, true, 64, true))
+    fixed_expect_value(fixed.jet_fixed_arithmetic(I64{7}, tiny_negative, 11, 0, true, 64, true), I64{-1})
+    fixed_expect_absent(fixed.jet_fixed_arithmetic(I64{7}, tiny_negative, 12, 3, true, 64, true))
+    fixed_expect_value(fixed.jet_fixed_arithmetic(I64{0}, huge, 0, 1, false, 64, true), I64{3})
+    fixed_expect_value(fixed.jet_fixed_arithmetic(I64{0}, huge, 0, 0, false, 64, false), I64{3})
+    fixed_expect_value(fixed.jet_fixed_arithmetic(I64{0}, tiny_negative, 2, 0, true, 64, true), I64{0})
+    fixed_expect_value(fixed.jet_fixed_arithmetic(I64{1}, tiny_negative, 2, 2, true, 64, true), fixed_test_min())
+    fixed_expect_value(fixed.jet_fixed_arithmetic(I64{-1}, tiny_negative, 1, 1, true, 64, true), I64{-1})
+}
+
+#Test("fixed shifts rotations and exact wide-count errors") {
+    fixed_expect_value(fixed_test(I64{-7}, I64{1}, 9, 3, true, 64), I64{-4})
+    fixed_expect_value(fixed_test(I64{-1}, I64{1}, 9, 0, false, 64), I64{9223372036854775807})
+    fixed_expect_value(fixed_test(I64{1}, I64{63}, 8, 3, true, 64), fixed_test_min())
+    fixed_expect_trap(fixed_test(I64{1}, I64{-1}, 8, 3, true, 8), "Shifting left by -1 bits is out of range (this type is 8 bits wide)")
+    fixed_expect_trap(fixed_test(I64{1}, I64{64}, 9, 1, false, 64), "Shifting right by 64 bits is out of range (this type is 64 bits wide)")
+    huge :: fixed.JetFixedWide{high: I64{1}, low: U64{1}}
+    fixed_expect_trap(fixed.jet_fixed_arithmetic(I64{1}, huge, 8, 0, true, 64, true), "Shifting left by 18446744073709551617 bits is out of range (this type is 64 bits wide)")
+    loop bits in 1..<65 {
+        fixed_expect_value(fixed_test(I64{1}, I64{0}, 13, 99, false, bits), I64{1})
+        fixed_expect_value(fixed_test(I64{1}, I64{bits}, 14, 99, false, bits), I64{1})
+    }
+    fixed_expect_value(fixed_test(I64{129}, I64{1}, 13, 0, false, 8), I64{3})
+    fixed_expect_value(fixed_test(I64{129}, I64{1}, 14, 0, false, 8), I64{192})
+    fixed_expect_value(fixed.jet_fixed_arithmetic(I64{1}, huge, 13, 0, false, 64, true), I64{2})
+    fixed_expect_value(fixed.jet_fixed_arithmetic(I64{1}, huge, 13, 0, false, 7, true), I64{8})
+    fixed_expect_trap(fixed_test(I64{1}, I64{-1}, 13, 3, false, 64), "A rotation count cannot be negative")
+}
+
+#Test("fixed unsupported widths ops modes and ignored-mode precedence") {
+    unsupported :: "This fixed-width arithmetic operation is unsupported"
+    fixed_expect_trap(fixed_test(I64{0}, I64{0}, 0, 3, true, 0), unsupported)
+    fixed_expect_trap(fixed_test(I64{0}, I64{0}, 0, 3, true, 65), unsupported)
+    fixed_expect_trap(fixed_test(I64{1}, I64{1}, 16, 0, true, 8), unsupported)
+    fixed_expect_trap(fixed_test(I64{1}, I64{1}, 15, 0, false, 8), unsupported)
+    loop op in 0..<16 {
+        if op == 5 || op == 6 || op == 7 || op == 8 || op == 9 || op == 13 || op == 14 {
+            // These operations deliberately ignore mode, even an unknown mode.
+            result :: fixed_test(I64{1}, I64{1}, op, 99, true, 8)
+            if result == {
+                .Value(_) -> {}
+                else -> panic("bit operation must ignore mode")
+            }
+        } else {
+            fixed_expect_trap(fixed_test(I64{1}, I64{1}, op, 99, true, 8), unsupported)
+        }
+    }
+    restricted :: [Int]{4, 11, 12}
+    loop op in restricted {
+        fixed_expect_trap(fixed_test(I64{7}, I64{3}, op, 1, true, 8), unsupported)
+        fixed_expect_trap(fixed_test(I64{7}, I64{3}, op, 2, true, 8), unsupported)
+    }
+}
+
+#Test("fixed widen narrow and signed unsigned mixed operands") {
+    raw :: fixed.JetFixedWide{high: I64{-1}, low: U64{18446744073709551615}}
+    widened :: fixed.jet_fixed_integer_widen(raw, false)
+    assert_eq(widened.high, I64{0})
+    assert_eq(widened.low, U64{18446744073709551615})
+    assert_eq(fixed.jet_fixed_integer_narrow(raw, false, 64), I64{-1})
+    assert_eq(fixed.jet_fixed_integer_narrow(raw, true, 8), I64{-1})
+    assert_eq(fixed.jet_fixed_integer_narrow(raw, false, 8), I64{255})
+    fixed_expect_absent(fixed.jet_fixed_arithmetic(I64{-1}, raw, 0, 3, true, 64, false))
+    fixed_expect_value(fixed.jet_fixed_arithmetic(I64{-1}, raw, 0, 2, true, 64, false), I64{9223372036854775807})
+    fixed_expect_value(fixed_test(I64{1}, I64{2}, 0, 0, true, 16), I64{3})
+    fixed_expect_value(fixed_test(I64{2}, I64{1}, 0, 0, true, 16), I64{3})
+    fixed_expect_value(fixed_test(I64{7}, I64{1}, 0, 0, true, 32), I64{8})
+}

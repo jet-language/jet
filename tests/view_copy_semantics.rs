@@ -46,7 +46,7 @@ fn lower_checked(source: &str) -> MirProgram {
     jet::Codegen::TIR::lower_checked_mir_program_for(
         &bundle,
         MirArtifactRequest::new(
-            MirArtifactTarget::Cranelift,
+            MirArtifactTarget::Interpreter,
             MirArtifactKind::NativeExecutable,
             MirArtifactBuildMode::Dev,
         ),

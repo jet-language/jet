@@ -1,0 +1,98 @@
+// WebPending.rs:2147-2266. All four original pure-kernel tests and fixtures.
+// Main owns module publication and positive/control/restored execution.
+// #4500: canonical Queue read loans, borrowed String byte ingress; no mocks.
+use core.web.runtime.kernel_web_pending as w
+
+// Rust:2151-2157.
+fn identity() -> w.JetWebIslandIdentity Never! {
+    w.JetWebIslandIdentity.new("orders", "orders.jet", "build-a", "rev-7") ?? panic("identity")
+}
+fn boundary() -> w.JetWebStreamingBoundary Never! {
+    w.JetWebStreamingBoundary.new("orders-boundary", identity()) ?? panic("boundary")
+}
+#Test("lifecycle_commits_and_projects_exact_identity_and_time (WebPending.rs:2160)") {
+    state := boundary()
+    assert(state.receipt().is_pending())
+    _ :: &state.begin_at(U64{10}) ?? panic("begin")
+    _ :: &state.push_chunk_at(w.JetWebPendingChunk.new(U64{0}, "shell", false, identity()) ?? panic("chunk"), U64{20}) ?? panic("push")
+    _ :: &state.push_chunk_at(w.JetWebPendingChunk.new(U64{1}, "-body", true, identity()) ?? panic("chunk"), U64{30}) ?? panic("push")
+    ready :: &state.commit(U64{40}) ?? panic("commit")
+    assert(ready.state == w.JetWebPendingState.Ready)
+    assert(ready.content == "shell-body")
+    assert(ready.identity.revision == "rev-7")
+    hydration :: &state.hydration_start(identity(), U64{100}) ?? panic("hydration start")
+    assert((hydration.hydration ?? panic("missing timing")).started_at_ns == U64{100})
+    hydrated :: &state.hydration_complete(identity(), U64{145}) ?? panic("hydration complete")
+    assert((hydrated.hydration ?? panic("missing timing")).duration_ns() == Val(U64{45}))
+    server :: state.server_projection()
+    client :: state.client_projection()
+    assert(server.content() == client.content())
+    assert(server.content() == "shell-body")
+}
+#Test("invalid_sequence_and_identity_fail_closed_to_last_commit (WebPending.rs:2183)") {
+    state := boundary()
+    _ :: &state.begin_at(U64{1}) ?? panic("begin")
+    _ :: &state.push_chunk_at(w.JetWebPendingChunk.new(U64{0}, "old", true, identity()) ?? panic("chunk"), U64{2}) ?? panic("push")
+    _ :: &state.commit(U64{3}) ?? panic("commit")
+    _ :: &state.begin_at(U64{4}) ?? panic("begin")
+    _ :: &state.push_chunk_at(w.JetWebPendingChunk.new(U64{0}, "new", false, identity()) ?? panic("chunk"), U64{5}) ?? panic("push")
+    rejected := false
+    _ :: &state.push_chunk_at(w.JetWebPendingChunk.new(U64{2}, "gap", true, identity()) ?? panic("chunk"), U64{6}) ?? {
+        rejected = true
+        assert(err == w.JetWebPendingError.InvalidChunkSequence(U64{1}, U64{2}))
+        state.receipt()
+    }
+    assert(rejected)
+    assert(state.is_failed())
+    assert(state.content() == "old")
+    assert(state.stream_content() == "old")
+    _ :: &state.begin_at(U64{7}) ?? panic("begin")
+    wrong := identity()
+    wrong.revision = "rev-other"
+    mismatch := false
+    _ :: &state.hydration_start(^wrong, U64{8}) ?? {
+        mismatch = true
+        assert(if err == { .HydrationIdentityMismatch(_, _) -> true; else -> false })
+        state.receipt()
+    }
+    assert(mismatch)
+    assert(state.is_failed())
+    assert(state.content() == "old")
+}
+#Test("backpressure_and_history_truncation_are_observable (WebPending.rs:2222)") {
+    id :: identity()
+    state := w.JetWebStreamingBoundary.with_capacities("b", ~id, 1, 4, 2) ?? panic("capacities")
+    _ :: &state.begin_at(U64{1}) ?? panic("begin")
+    _ :: &state.push_chunk_at(w.JetWebPendingChunk.new(U64{0}, "1234", false, ~id) ?? panic("chunk"), U64{1}) ?? panic("push")
+    rejected := false
+    _ :: &state.push_chunk_at(w.JetWebPendingChunk.new(U64{1}, "x", true, ^id) ?? panic("chunk"), U64{1}) ?? {
+        rejected = true
+        assert(if err == {
+            .Backpressure(dimension, limit, _, _) -> dimension == w.JetWebPendingBackpressureDimension.Chunks && limit == 1
+            else -> false
+        })
+        state.receipt()
+    }
+    assert(rejected)
+    assert(state.receipt().backpressure)
+    assert(state.is_failed())
+    assert(state.content() == "")
+    assert(state.fact_count() == 2)
+    assert(state.history_truncated())
+    assert(state.receipt().truncated)
+}
+#Test("cancellation_restores_ready_content_and_marks_receipt (WebPending.rs:2247)") {
+    id :: identity()
+    state := boundary()
+    _ :: &state.begin_at(U64{1}) ?? panic("begin")
+    _ :: &state.push_chunk_at(w.JetWebPendingChunk.new(U64{0}, "committed", true, ~id) ?? panic("chunk"), U64{2}) ?? panic("push")
+    _ :: &state.commit(U64{3}) ?? panic("commit")
+    _ :: &state.begin_at(U64{4}) ?? panic("begin")
+    _ :: &state.push_chunk_at(w.JetWebPendingChunk.new(U64{0}, "replacement", true, ^id) ?? panic("chunk"), U64{5}) ?? panic("push")
+    cancelled :: &state.cancel(U64{6})
+    assert(cancelled.is_cancelled())
+    assert(cancelled.was_rolled_back())
+    assert(cancelled.state == w.JetWebPendingState.Ready)
+    assert(cancelled.content == "committed")
+    assert(state.content() == "committed")
+}

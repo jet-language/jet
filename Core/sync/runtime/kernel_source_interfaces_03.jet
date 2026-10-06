@@ -1,0 +1,1450 @@
+// PORT-PENDING 2052 crates-jet-jit-src-sourceinterfaces-slice-3601: crates/jet-jit/src/SourceInterfaces.rs:3601-5046
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS                     execution: execution(),
+//RS                     artifact: ARTIFACT,
+//RS                     trait_ref,
+//RS                     method_id: MirTraitMethodId(1),
+//RS                     method_name: "receive".to_string(),
+//RS                     receiver_type,
+//RS                 },
+//RS                 NativeInterfaceSignature {
+//RS                     receiver_access: MirAccess::Read,
+//RS                     parameters: Vec::new(),
+//RS                     return_type: unit(),
+//RS                     failure: MirFailureCarrier::Infallible,
+//RS                 },
+//RS                 Arc::new(|_object, _call| Ok(MirRuntimeValue::Unit)),
+//RS             )
+//RS             .expect("interface binding");
+//RS         let (identity, _signature) = callable("not-an-interface", &[MirAccess::Read]);
+//RS 
+//RS         assert!(matches!(
+//RS             bindings.create_native_callable_rc_wrapper(
+//RS                 identity,
+//RS                 interface_object.clone_root(),
+//RS                 |_registration| Rc::new(Cell::new(0)),
+//RS             ),
+//RS             Err(NativeInterfaceError::MissingBinding)
+//RS         ));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn native_callable_rc_decode_builds_fresh_thread_local_wrapper_for_same_root() {
+//RS         let (bindings, object, identity, _signature, carrier) =
+//RS             register_callable_root(String::from("rc-worker-root"), "rc.worker");
+//RS         let main_wrapper = make_test_native_callable_wrapper(
+//RS             &bindings,
+//RS             identity.clone(),
+//RS             carrier.clone(),
+//RS             Rc::new(Cell::new(0)),
+//RS         )
+//RS         .expect("main-thread callable wrapper");
+//RS         assert_eq!(
+//RS             native_callable_rc_association(&main_wrapper)
+//RS                 .expect("main wrapper association")
+//RS                 .0,
+//RS             identity
+//RS         );
+//RS 
+//RS         let worker_bindings = bindings.clone();
+//RS         let worker_identity = identity.clone();
+//RS         let worker_carrier = carrier.clone();
+//RS         let (decoded_identity, decoded_carrier) = std::thread::spawn(move || {
+//RS             let wrapper = make_test_native_callable_wrapper(
+//RS                 &worker_bindings,
+//RS                 worker_identity.clone(),
+//RS                 worker_carrier,
+//RS                 Rc::new(Cell::new(0)),
+//RS             )
+//RS             .expect("worker creates its own Rc wrapper");
+//RS             let association =
+//RS                 native_callable_rc_association(&wrapper).expect("worker-local association");
+//RS             assert_eq!(association.0, worker_identity);
+//RS             drop(wrapper);
+//RS             association
+//RS         })
+//RS         .join()
+//RS         .expect("worker completes");
+//RS 
+//RS         assert_eq!(decoded_identity, identity);
+//RS         assert_eq!(decoded_carrier, carrier);
+//RS         drop(decoded_carrier);
+//RS         drop(main_wrapper);
+//RS         drop(carrier);
+//RS         drop(object);
+//RS         drop(bindings);
+//RS     }
+//RS 
+//RS     /// An interface call whose only purpose is to exercise the transfer ledger
+//RS     /// directly; its receiver and signature are internally consistent so the
+//RS     /// completion path (`finish`) can be driven without a MIR program.
+//RS     fn interface_call(bindings: &NativeInterfaceBindings, arguments: Vec<NativeInterfaceArgument>) -> NativeInterfaceCall {
+//RS         let (trait_ref, receiver_type) = interface_type();
+//RS         let object = bindings.create_object(String::from("sink-root")).expect("object identity");
+//RS         let receiver = object.as_runtime_value();
+//RS         let parameters = arguments
+//RS             .iter()
+//RS             .map(|argument| MirParam {
+//RS                 index: argument.index,
+//RS                 name: format!("p{}", argument.index),
+//RS                 span: Span::new(0, 0),
+//RS                 ty: argument.ty.clone(),
+//RS                 access: argument.access,
+//RS                 ownership: MirOwnership::copy(),
+//RS                 public_label: String::new(),
+//RS                 variadic: false,
+//RS                 default_present: false,
+//RS             })
+//RS             .collect();
+//RS         NativeInterfaceCall::new(
+//RS             NativeInterfaceIdentity {
+//RS                 execution: execution(),
+//RS                 artifact: ARTIFACT,
+//RS                 trait_ref,
+//RS                 method_id: MirTraitMethodId(1),
+//RS                 method_name: "put".to_string(),
+//RS                 receiver_type,
+//RS             },
+//RS             NativeInterfaceSignature {
+//RS                 receiver_access: MirAccess::Read,
+//RS                 parameters,
+//RS                 return_type: unit(),
+//RS                 failure: MirFailureCarrier::Infallible,
+//RS             },
+//RS             Some(object),
+//RS             MirAccess::Read,
+//RS             receiver,
+//RS             arguments,
+//RS             Span::new(0, 0),
+//RS         )
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn callback_instances_share_checked_templates_without_sharing_session_roots() {
+//RS         let bindings = Arc::new(NativeInterfaceBindings::new());
+//RS         let template = bindings
+//RS             .create_object(String::from("template"))
+//RS             .expect("template object");
+//RS         let (trait_ref, receiver_type) = interface_type();
+//RS         let identity = NativeInterfaceIdentity {
+//RS             execution: execution(),
+//RS             artifact: ARTIFACT,
+//RS             trait_ref,
+//RS             method_id: MirTraitMethodId(1),
+//RS             method_name: "session".to_string(),
+//RS             receiver_type: receiver_type.clone(),
+//RS         };
+//RS         let signature = NativeInterfaceSignature {
+//RS             receiver_access: MirAccess::Read,
+//RS             parameters: Vec::new(),
+//RS             return_type: unit(),
+//RS             failure: MirFailureCarrier::Infallible,
+//RS         };
+//RS         let seen = Arc::new(Mutex::new(Vec::new()));
+//RS         let seen_by_handler = seen.clone();
+//RS         let bindings_by_handler = Arc::downgrade(&bindings);
+//RS         bindings
+//RS             .bind(
+//RS                 template.clone(),
+//RS                 identity.clone(),
+//RS                 signature.clone(),
+//RS                 Arc::new(move |object, _call| {
+//RS                     let session = object
+//RS                         .root::<String>()
+//RS                         .cloned()
+//RS                         .ok_or_else(|| "callback context root has the wrong type".to_string())?;
+//RS                     let descriptors = bindings_by_handler
+//RS                         .upgrade()
+//RS                         .ok_or_else(|| "binding set was released during dispatch".to_string())?
+//RS                         .method_descriptors()
+//RS                         .len();
+//RS                     seen_by_handler
+//RS                         .lock()
+//RS                         .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS                         .push((session, descriptors));
+//RS                     Ok(MirRuntimeValue::Unit)
+//RS                 }),
+//RS             )
+//RS             .expect("template method binds");
+//RS 
+//RS         let template_carrier = template.clone_root();
+//RS         let first = bindings
+//RS             .instantiate_interface_for_carrier(
+//RS                 &template_carrier,
+//RS                 &receiver_type,
+//RS                 String::from("session-one"),
+//RS             )
+//RS             .expect("first callback instance");
+//RS         let second = bindings
+//RS             .instantiate_interface_for_carrier(
+//RS                 &template_carrier,
+//RS                 &receiver_type,
+//RS                 String::from("session-two"),
+//RS             )
+//RS             .expect("second callback instance");
+//RS         assert_ne!(first.id(), second.id());
+//RS         assert_eq!(bindings.method_descriptors().len(), 3);
+//RS         let _scope = push_scope(bindings.clone(), execution(), ARTIFACT);
+//RS 
+//RS         for instance in [&first, &second] {
+//RS             let receiver = instance.as_runtime_value();
+//RS             let completion = dispatch_active_for_carrier(
+//RS                 identity.clone(),
+//RS                 signature.clone(),
+//RS                 MirAccess::Read,
+//RS                 receiver,
+//RS                 instance.clone_root(),
+//RS                 Vec::new(),
+//RS                 Span::new(0, 0),
+//RS             );
+//RS             assert_eq!(completion.outcome(), Ok(&MirRuntimeValue::Unit));
+//RS             drop(completion);
+//RS         }
+//RS         assert_eq!(
+//RS             *seen.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+//RS             vec![
+//RS                 (String::from("session-one"), 3),
+//RS                 (String::from("session-two"), 3),
+//RS             ]
+//RS         );
+//RS         drop(first);
+//RS         drop(second);
+//RS         assert_eq!(bindings.method_descriptors().len(), 1);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn callable_preflight_failure_never_reaches_the_handler() {
+//RS         let bindings = Arc::new(NativeInterfaceBindings::new());
+//RS         let object = bindings.create_object(String::from("service")).expect("object identity");
+//RS         let (identity, signature) = callable("bump", &[MirAccess::Write, MirAccess::Read]);
+//RS         let invoked = Arc::new(AtomicBool::new(false));
+//RS         let seen = invoked.clone();
+//RS         bindings
+//RS             .bind_callable(
+//RS                 object.clone(),
+//RS                 identity.clone(),
+//RS                 signature.clone(),
+//RS                 callable_handler(move |_call| {
+//RS                     seen.store(true, Ordering::SeqCst);
+//RS                     Ok(MirRuntimeValue::Int(0))
+//RS                 }),
+//RS             )
+//RS             .expect("callable binds");
+//RS         let _scope = push_scope(bindings.clone(), execution(), ARTIFACT);
+//RS 
+//RS         // Read access (and no writeback channel) where the checked Fn says Write.
+//RS         let completion = dispatch_active_callable(
+//RS             identity.clone(),
+//RS             signature.clone(),
+//RS             carrier_of(&object),
+//RS             vec![
+//RS                 argument(0, MirAccess::Read, MirRuntimeValue::Int(3)),
+//RS                 argument(1, MirAccess::Read, MirRuntimeValue::Int(4)),
+//RS             ],
+//RS             Span::new(0, 0),
+//RS         );
+//RS         assert!(matches!(completion.outcome(), Err(NativeInterfaceError::InvalidCall(_))));
+//RS         assert!(!invoked.load(Ordering::SeqCst));
+//RS         assert_eq!(completion.call().argument(0).expect("argument").value, MirRuntimeValue::Int(3));
+//RS 
+//RS         // A checked Read row cannot obtain a writeback channel by flag alone.
+//RS         let mut smuggled = argument(1, MirAccess::Read, MirRuntimeValue::Int(4));
+//RS         smuggled.writeback = true;
+//RS         let completion = dispatch_active_callable(
+//RS             identity.clone(),
+//RS             signature.clone(),
+//RS             carrier_of(&object),
+//RS             vec![argument(0, MirAccess::Write, MirRuntimeValue::Int(3)), smuggled],
+//RS             Span::new(0, 0),
+//RS         );
+//RS         assert!(matches!(completion.outcome(), Err(NativeInterfaceError::InvalidCall(_))));
+//RS         assert!(!invoked.load(Ordering::SeqCst));
+//RS 
+//RS         // Wrong checked value type.
+//RS         let completion = dispatch_active_callable(
+//RS             identity.clone(),
+//RS             signature.clone(),
+//RS             carrier_of(&object),
+//RS             vec![
+//RS                 argument(0, MirAccess::Write, MirRuntimeValue::String("3".to_string())),
+//RS                 argument(1, MirAccess::Read, MirRuntimeValue::Int(4)),
+//RS             ],
+//RS             Span::new(0, 0),
+//RS         );
+//RS         assert!(matches!(completion.outcome(), Err(NativeInterfaceError::InvalidCall(_))));
+//RS         assert!(!invoked.load(Ordering::SeqCst));
+//RS 
+//RS         // The well-formed call still runs.
+//RS         let completion = dispatch_active_callable(
+//RS             identity,
+//RS             signature,
+//RS             carrier_of(&object),
+//RS             vec![
+//RS                 argument(0, MirAccess::Write, MirRuntimeValue::Int(3)),
+//RS                 argument(1, MirAccess::Read, MirRuntimeValue::Int(4)),
+//RS             ],
+//RS             Span::new(0, 0),
+//RS         );
+//RS         assert_eq!(completion.outcome(), Ok(&MirRuntimeValue::Int(0)));
+//RS         assert!(invoked.load(Ordering::SeqCst));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn callable_writeback_reborrow_persists_through_result_errors_and_panics() {
+//RS         let bindings = Arc::new(NativeInterfaceBindings::new());
+//RS         let object = bindings.create_object(String::from("writeback-service")).expect("object identity");
+//RS         let (identity, signature) = callable("writeback", &[MirAccess::Write]);
+//RS         let behavior = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+//RS         let handler_behavior = behavior.clone();
+//RS         bindings
+//RS             .bind_callable(
+//RS                 object.clone(),
+//RS                 identity.clone(),
+//RS                 signature.clone(),
+//RS                 callable_handler(move |call| {
+//RS                     let behavior = handler_behavior.load(Ordering::SeqCst);
+//RS                     let borrow_result = call
+//RS                         .with_writeback_argument(0, |value| -> Result<(), &'static str> {
+//RS                             let MirRuntimeValue::Int(value) = value else {
+//RS                                 panic!("checked writeback argument is not an integer");
+//RS                             };
+//RS                             *value += 1;
+//RS                             match behavior {
+//RS                                 1 => Err("writeback callback failed"),
+//RS                                 2 => panic!("writeback callback panicked"),
+//RS                                 _ => Ok(()),
+//RS                             }
+//RS                         })
+//RS                         .map_err(|error| error.to_string())?;
+//RS                     if let Err(error) = borrow_result {
+//RS                         return Err(error.to_string());
+//RS                     }
+//RS                     Ok(MirRuntimeValue::Int(0))
+//RS                 }),
+//RS             )
+//RS             .expect("callable binds");
+//RS         let _scope = push_scope(bindings.clone(), execution(), ARTIFACT);
+//RS 
+//RS         let dispatch = || {
+//RS             dispatch_active_callable(
+//RS                 identity.clone(),
+//RS                 signature.clone(),
+//RS                 carrier_of(&object),
+//RS                 vec![argument(0, MirAccess::Write, MirRuntimeValue::Int(10))],
+//RS                 Span::new(0, 0),
+//RS             )
+//RS         };
+//RS 
+//RS         let success = dispatch();
+//RS         assert_eq!(success.outcome(), Ok(&MirRuntimeValue::Int(0)));
+//RS         assert_eq!(
+//RS             success.call().argument(0).expect("writeback argument").value,
+//RS             MirRuntimeValue::Int(11)
+//RS         );
+//RS 
+//RS         behavior.store(1, Ordering::SeqCst);
+//RS         let failed = dispatch();
+//RS         assert!(matches!(
+//RS             failed.outcome(),
+//RS             Err(NativeInterfaceError::Handler(_))
+//RS         ));
+//RS         assert_eq!(
+//RS             failed.call().argument(0).expect("writeback argument").value,
+//RS             MirRuntimeValue::Int(11)
+//RS         );
+//RS 
+//RS         behavior.store(2, Ordering::SeqCst);
+//RS         let panicked = dispatch();
+//RS         assert!(matches!(
+//RS             panicked.outcome(),
+//RS             Err(NativeInterfaceError::HandlerPanicked(_))
+//RS         ));
+//RS         assert_eq!(
+//RS             panicked.call().argument(0).expect("writeback argument").value,
+//RS             MirRuntimeValue::Int(11)
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn interface_writeback_reborrow_is_scoped_and_rejects_read_and_move() {
+//RS         let bindings = NativeInterfaceBindings::new();
+//RS         let mut write_call = interface_call(
+//RS             &bindings,
+//RS             vec![argument(0, MirAccess::Write, MirRuntimeValue::Int(5))],
+//RS         );
+//RS         write_call
+//RS             .with_writeback_argument(0, |value| {
+//RS                 let MirRuntimeValue::Int(value) = value else {
+//RS                     panic!("checked writeback argument is not an integer");
+//RS                 };
+//RS                 *value = 9;
+//RS             })
+//RS             .expect("checked Write argument is reborrowed");
+//RS         assert_eq!(
+//RS             write_call.argument(0).expect("writeback argument").value,
+//RS             MirRuntimeValue::Int(9)
+//RS         );
+//RS         assert_eq!(
+//RS             write_call.finish(Ok(MirRuntimeValue::Unit)),
+//RS             Ok(MirRuntimeValue::Unit)
+//RS         );
+//RS 
+//RS         let mut read_call = interface_call(
+//RS             &bindings,
+//RS             vec![argument(0, MirAccess::Read, MirRuntimeValue::Int(5))],
+//RS         );
+//RS         let read_closure_ran = Cell::new(false);
+//RS         assert!(matches!(
+//RS             read_call.with_writeback_argument(0, |_value| read_closure_ran.set(true)),
+//RS             Err(NativeInterfaceError::InvalidCall(_))
+//RS         ));
+//RS         assert!(!read_closure_ran.get());
+//RS 
+//RS         let move_carrier = MirNativeOwned::new(String::from("move-value"));
+//RS         let original_move = MirRuntimeValue::NativeOwned(move_carrier.clone());
+//RS         let mut move_call = interface_call(
+//RS             &bindings,
+//RS             vec![owned_argument(0, move_carrier)],
+//RS         );
+//RS         let move_closure_ran = Cell::new(false);
+//RS         assert!(matches!(
+//RS             move_call.with_writeback_argument(0, |_value| move_closure_ran.set(true)),
+//RS             Err(NativeInterfaceError::InvalidCall(_))
+//RS         ));
+//RS         assert!(!move_closure_ran.get());
+//RS         assert_eq!(move_call.argument(0).expect("Move argument").value, original_move);
+//RS         assert_eq!(
+//RS             move_call.finish(Ok(MirRuntimeValue::Unit)),
+//RS             Err(NativeInterfaceError::UnresolvedTransfers(vec![0]))
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn callable_writeback_reborrow_rejects_read_and_move_without_detaching_values() {
+//RS         let bindings = NativeInterfaceBindings::new();
+//RS         let object = bindings.create_object(String::from("callable-writeback")).expect("object identity");
+//RS 
+//RS         let (read_identity, read_signature) = callable("readonly", &[MirAccess::Read]);
+//RS         let mut read_call = NativeCallableCall::new(
+//RS             Some(read_identity),
+//RS             read_signature,
+//RS             Some(object.clone()),
+//RS             Some(carrier_of(&object)),
+//RS             vec![argument(0, MirAccess::Read, MirRuntimeValue::Int(3))],
+//RS             Span::new(0, 0),
+//RS         );
+//RS         let read_closure_ran = Cell::new(false);
+//RS         assert!(matches!(
+//RS             read_call.with_writeback_argument(0, |_value| read_closure_ran.set(true)),
+//RS             Err(NativeInterfaceError::InvalidCall(_))
+//RS         ));
+//RS         assert!(!read_closure_ran.get());
+//RS 
+//RS         let (move_identity, move_signature) = callable("move", &[MirAccess::Move]);
+//RS         let mut move_call = NativeCallableCall::new(
+//RS             Some(move_identity),
+//RS             move_signature,
+//RS             Some(object.clone()),
+//RS             Some(carrier_of(&object)),
+//RS             vec![argument(0, MirAccess::Move, MirRuntimeValue::Int(7))],
+//RS             Span::new(0, 0),
+//RS         );
+//RS         let original = move_call.argument(0).expect("Move argument").value.clone();
+//RS         let move_closure_ran = Cell::new(false);
+//RS         assert!(matches!(
+//RS             move_call.with_writeback_argument(0, |_value| move_closure_ran.set(true)),
+//RS             Err(NativeInterfaceError::InvalidCall(_))
+//RS         ));
+//RS         assert!(!move_closure_ran.get());
+//RS         assert_eq!(move_call.argument(0).expect("Move argument").value, original);
+//RS         assert_eq!(
+//RS             move_call.finish(Ok(MirRuntimeValue::Int(0))),
+//RS             Err(NativeInterfaceError::UnresolvedTransfers(vec![0]))
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn callable_writeback_reborrow_preserves_unresolved_move_obligation() {
+//RS         let bindings = NativeInterfaceBindings::new();
+//RS         let object = bindings.create_object(String::from("writeback-with-move")).expect("object identity");
+//RS         let (identity, signature) = callable_with_parameter_types(
+//RS             "writeback-with-move",
+//RS             &[int(), shared()],
+//RS             &[MirAccess::Write, MirAccess::Move],
+//RS         );
+//RS         let move_carrier = MirNativeOwned::new(String::from("unresolved-move"));
+//RS         let original_move = MirRuntimeValue::NativeOwned(move_carrier.clone());
+//RS         let mut call = NativeCallableCall::new(
+//RS             Some(identity),
+//RS             signature,
+//RS             Some(object.clone()),
+//RS             Some(carrier_of(&object)),
+//RS             vec![
+//RS                 argument(0, MirAccess::Write, MirRuntimeValue::Int(4)),
+//RS                 owned_argument(1, move_carrier),
+//RS             ],
+//RS             Span::new(0, 0),
+//RS         );
+//RS 
+//RS         call.with_writeback_argument(0, |value| {
+//RS             let MirRuntimeValue::Int(value) = value else {
+//RS                 panic!("checked writeback argument is not an integer");
+//RS             };
+//RS             *value = 8;
+//RS         })
+//RS         .expect("checked Write argument is reborrowed");
+//RS         assert_eq!(
+//RS             call.finish(Ok(MirRuntimeValue::Int(0))),
+//RS             Err(NativeInterfaceError::UnresolvedTransfers(vec![1]))
+//RS         );
+//RS         assert_eq!(call.argument(0).expect("writeback argument").value, MirRuntimeValue::Int(8));
+//RS         assert_eq!(call.argument(1).expect("Move argument").value, original_move);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn callable_root_and_signature_identify_exactly_one_function_value() {
+//RS         let bindings = Arc::new(NativeInterfaceBindings::new());
+//RS         let shared = bindings.create_object(String::from("service")).expect("object identity");
+//RS         let (alpha, signature) = callable("alpha", &[MirAccess::Read]);
+//RS         let (beta, _) = callable("beta", &[MirAccess::Read]);
+//RS         bindings
+//RS             .bind_callable(
+//RS                 shared.clone(),
+//RS                 alpha.clone(),
+//RS                 signature.clone(),
+//RS                 callable_handler(|_call| Ok(MirRuntimeValue::Int(1))),
+//RS             )
+//RS             .expect("first function binds");
+//RS 
+//RS         // Same key again is a duplicate regardless of root.
+//RS         let other_root = bindings.create_object(String::from("service")).expect("object identity");
+//RS         assert_eq!(
+//RS             bindings
+//RS                 .bind_callable(
+//RS                     other_root.clone(),
+//RS                     alpha.clone(),
+//RS                     signature.clone(),
+//RS                     callable_handler(|_call| Ok(MirRuntimeValue::Int(1))),
+//RS                 )
+//RS                 .err(),
+//RS             Some(NativeInterfaceError::DuplicateBinding)
+//RS         );
+//RS 
+//RS         // A second same-shaped function on the same root would be unreachable by
+//RS         // carrier; it is refused before any value is exposed.
+//RS         assert_eq!(
+//RS             bindings
+//RS                 .bind_callable(
+//RS                     shared.clone(),
+//RS                     beta.clone(),
+//RS                     signature.clone(),
+//RS                     callable_handler(|_call| Ok(MirRuntimeValue::Int(2))),
+//RS                 )
+//RS                 .err(),
+//RS             Some(NativeInterfaceError::CallableRootCollision {
+//RS                 key: "beta".to_string(),
+//RS                 object: shared.id(),
+//RS             })
+//RS         );
+//RS         assert_eq!(bindings.callable_descriptors().len(), 1);
+//RS 
+//RS         // The same function on its own root is fine, and each carrier reaches
+//RS         // exactly its own handler.
+//RS         bindings
+//RS             .bind_callable(
+//RS                 other_root.clone(),
+//RS                 beta,
+//RS                 signature.clone(),
+//RS                 callable_handler(|_call| Ok(MirRuntimeValue::Int(2))),
+//RS             )
+//RS             .expect("distinct root binds");
+//RS         let _scope = push_scope(bindings.clone(), execution(), ARTIFACT);
+//RS         let arguments = || vec![argument(0, MirAccess::Read, MirRuntimeValue::Int(0))];
+//RS         let first = dispatch_active_callable_for_carrier(signature.clone(), carrier_of(&shared), arguments(), Span::new(0, 0));
+//RS         assert_eq!(first.outcome(), Ok(&MirRuntimeValue::Int(1)));
+//RS         assert_eq!(first.call().identity().map(|identity| identity.key.as_str()), Some("alpha"));
+//RS         let second = dispatch_active_callable_for_carrier(signature.clone(), carrier_of(&other_root), arguments(), Span::new(0, 0));
+//RS         assert_eq!(second.outcome(), Ok(&MirRuntimeValue::Int(2)));
+//RS         assert_eq!(second.call().identity().map(|identity| identity.key.as_str()), Some("beta"));
+//RS 
+//RS         // An unbound root reports the missing binding itself, not the shape
+//RS         // error that follows from having no object.
+//RS         let unbound = bindings.create_object(String::from("service")).expect("object identity");
+//RS         let missing = dispatch_active_callable_for_carrier(signature, carrier_of(&unbound), arguments(), Span::new(0, 0));
+//RS         assert_eq!(missing.outcome(), Err(&NativeInterfaceError::MissingBinding));
+//RS         assert_eq!(missing.call().argument(0).expect("argument").value, MirRuntimeValue::Int(0));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn static_binding_metadata_does_not_keep_a_physical_carrier_alive() {
+//RS         let bindings = Arc::new(NativeInterfaceBindings::new());
+//RS         let object = bindings
+//RS             .create_object(String::from("service"))
+//RS             .expect("object identity");
+//RS         let (identity, signature) = callable("temporary", &[MirAccess::Read]);
+//RS         bindings
+//RS             .bind_callable(
+//RS                 object.clone(),
+//RS                 identity.clone(),
+//RS                 signature.clone(),
+//RS                 callable_handler(|_call| Ok(MirRuntimeValue::Int(1))),
+//RS             )
+//RS             .expect("callable binds");
+//RS         drop(object);
+//RS 
+//RS         assert!(bindings.callable_descriptors().is_empty());
+//RS         let _scope = push_scope(bindings.clone(), execution(), ARTIFACT);
+//RS         let completion = bindings.dispatch_callable_for_scope(
+//RS             identity,
+//RS             signature,
+//RS             vec![argument(0, MirAccess::Read, MirRuntimeValue::Int(0))],
+//RS             Span::new(0, 0),
+//RS         );
+//RS         assert_eq!(
+//RS             completion.outcome(),
+//RS             Err(&NativeInterfaceError::MissingBinding)
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn interface_template_metadata_does_not_retain_its_physical_carrier() {
+//RS         let bindings = NativeInterfaceBindings::new();
+//RS         let object = bindings
+//RS             .create_object(String::from("template"))
+//RS             .expect("template object");
+//RS         let (trait_ref, receiver_type) = interface_type();
+//RS         let identity = NativeInterfaceIdentity {
+//RS             execution: execution(),
+//RS             artifact: ARTIFACT,
+//RS             trait_ref,
+//RS             method_id: MirTraitMethodId(1),
+//RS             method_name: "session".to_string(),
+//RS             receiver_type,
+//RS         };
+//RS         let signature = NativeInterfaceSignature {
+//RS             receiver_access: MirAccess::Read,
+//RS             parameters: Vec::new(),
+//RS             return_type: unit(),
+//RS             failure: MirFailureCarrier::Infallible,
+//RS         };
+//RS         bindings
+//RS             .bind(
+//RS                 object.clone(),
+//RS                 identity,
+//RS                 signature,
+//RS                 Arc::new(|_object, _call| Ok(MirRuntimeValue::Unit)),
+//RS             )
+//RS             .expect("interface template binds");
+//RS         drop(object);
+//RS 
+//RS         assert!(bindings.method_descriptors().is_empty());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn rejected_offer_survives_error_conversion_while_native_owned_source_is_reclaimed() {
+//RS         let bindings = NativeInterfaceBindings::new();
+//RS         let original_carrier = MirNativeOwned::new(String::from("source"));
+//RS         let original_value = MirRuntimeValue::NativeOwned(original_carrier.clone());
+//RS         let mut call = interface_call(&bindings, vec![owned_argument(0, original_carrier)]);
+//RS         let transfer = call.take_owned_argument(0).expect("move argument detaches");
+//RS         let value = transfer.take_value().expect("native-owned source is guarded");
+//RS         let error = call
+//RS             .return_owned_argument(transfer, value, MirRuntimeValue::Bool(true))
+//RS             .map_err(NativeInterfaceTransferRejection::into_error)
+//RS             .expect_err("a value of the wrong checked type is rejected");
+//RS         assert!(matches!(error, NativeInterfaceError::InvalidCall(_)));
+//RS         assert_eq!(call.rejected_transfers().len(), 1);
+//RS         let offer = call.rejected_transfers()[0].clone();
+//RS         let alias = offer.clone();
+//RS         assert_eq!(offer.with_value(|_| alias.take_value()), Some(None));
+//RS         assert_eq!(
+//RS             offer.with_value(|value| value.clone()),
+//RS             Some(MirRuntimeValue::Bool(true))
+//RS         );
+//RS         assert_eq!(
+//RS             call.rejected_transfers()[0].with_value(|value| value.clone()),
+//RS             Some(MirRuntimeValue::Bool(true))
+//RS         );
+//RS         assert!(call.transfers().is_empty());
+//RS         assert_eq!(call.pending_transfers().collect::<Vec<_>>(), vec![0]);
+//RS 
+//RS         let outcome = call.finish(Ok(MirRuntimeValue::Unit));
+//RS         assert_eq!(
+//RS             outcome,
+//RS             Err(NativeInterfaceError::UnresolvedTransfers(vec![0]))
+//RS         );
+//RS         assert_eq!(call.arguments()[0].value, original_value);
+//RS         assert_eq!(
+//RS             call.rejected_transfers()[0].take_value(),
+//RS             Some(MirRuntimeValue::Bool(true))
+//RS         );
+//RS         assert_eq!(call.rejected_transfers()[0].take_value(), None);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn returning_a_native_owned_move_commits_to_its_argument_slot() {
+//RS         let bindings = NativeInterfaceBindings::new();
+//RS         let original_carrier = MirNativeOwned::new(String::from("source"));
+//RS         let returned_carrier = MirNativeOwned::new(String::from("returned"));
+//RS         let returned_value = MirRuntimeValue::NativeOwned(returned_carrier.clone());
+//RS         let mut call = interface_call(&bindings, vec![owned_argument(0, original_carrier)]);
+//RS         let transfer = call.take_owned_argument(0).expect("move argument detaches");
+//RS         let value = transfer.take_value().expect("native-owned source is guarded");
+//RS         call.return_owned_argument(transfer, value, returned_value.clone())
+//RS             .expect("checked returned value commits");
+//RS 
+//RS         assert_eq!(call.arguments()[0].value, returned_value);
+//RS         assert_eq!(
+//RS             call.transfers(),
+//RS             &[NativeInterfaceTransferReceipt {
+//RS                 argument: 0,
+//RS                 disposition: NativeInterfaceTransferDisposition::Returned,
+//RS             }]
+//RS         );
+//RS         assert!(call.pending_transfers().next().is_none());
+//RS         assert_eq!(call.finish(Ok(MirRuntimeValue::Unit)), Ok(MirRuntimeValue::Unit));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn dropping_an_uncommitted_guard_restores_exact_native_owned_value() {
+//RS         let bindings = NativeInterfaceBindings::new();
+//RS         let first_carrier = MirNativeOwned::new(String::from("first"));
+//RS         let first_value = MirRuntimeValue::NativeOwned(first_carrier.clone());
+//RS         let second_carrier = MirNativeOwned::new(String::from("second"));
+//RS         let second_value = MirRuntimeValue::NativeOwned(second_carrier.clone());
+//RS         let mut call = interface_call(
+//RS             &bindings,
+//RS             vec![
+//RS                 owned_argument(0, first_carrier),
+//RS                 owned_argument(1, second_carrier),
+//RS             ],
+//RS         );
+//RS         drop(call.take_owned_argument(0).expect("first detaches"));
+//RS         let transfer = call.take_owned_argument(1).expect("second detaches");
+//RS         let value = transfer.take_value().expect("second is leased");
+//RS         assert_eq!(
+//RS             value.with_value(|value| value.clone()),
+//RS             Ok(second_value.clone())
+//RS         );
+//RS         drop(value);
+//RS 
+//RS         let outcome = call.finish(Ok(MirRuntimeValue::Unit));
+//RS         assert_eq!(
+//RS             outcome,
+//RS             Err(NativeInterfaceError::UnresolvedTransfers(vec![0, 1]))
+//RS         );
+//RS         assert_eq!(call.arguments()[0].value, first_value);
+//RS         assert_eq!(call.arguments()[1].value, second_value);
+//RS         assert_eq!(call.pending_transfers().collect::<Vec<_>>(), vec![0, 1]);
+//RS         assert!(call.transfers().is_empty());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn taken_native_owned_move_is_recovered_when_consumer_errors_before_commit() {
+//RS         let bindings = NativeInterfaceBindings::new();
+//RS         let original_carrier = MirNativeOwned::new(String::from("source"));
+//RS         let original_value = MirRuntimeValue::NativeOwned(original_carrier.clone());
+//RS         let mut call = interface_call(&bindings, vec![owned_argument(0, original_carrier)]);
+//RS         let transfer = call.take_owned_argument(0).expect("move argument detaches");
+//RS         let value = transfer.take_value().expect("native-owned source is guarded");
+//RS         let attempt = call.consume_owned_argument(transfer, value, |guard, _commit| {
+//RS             assert_eq!(
+//RS                 guard.with_value(|value| value.clone()),
+//RS                 Ok(original_value.clone())
+//RS             );
+//RS             Err(NativeInterfaceError::Handler("leaf rejected".to_string()))
+//RS         });
+//RS         assert!(matches!(attempt, Err(NativeInterfaceError::Handler(_))));
+//RS 
+//RS         assert_eq!(
+//RS             call.finish(Ok(MirRuntimeValue::Unit)),
+//RS             Err(NativeInterfaceError::UnresolvedTransfers(vec![0]))
+//RS         );
+//RS         assert_eq!(call.arguments()[0].value, original_value);
+//RS         assert!(call.transfers().is_empty());
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn premature_cross_thread_extraction_aborts_before_consumption_commit() {
+//RS         use std::thread;
+//RS 
+//RS         let bindings = NativeInterfaceBindings::new();
+//RS         let original_carrier = MirNativeOwned::new(String::from("source"));
+//RS         let original_value = MirRuntimeValue::NativeOwned(original_carrier.clone());
+//RS         let mut call = interface_call(&bindings, vec![owned_argument(0, original_carrier)]);
+//RS         let transfer = call.take_owned_argument(0).expect("move argument detaches");
+//RS         let value = transfer.take_value().expect("native-owned source is guarded");
+//RS         let attempt = call.consume_owned_argument(transfer, value, move |guard, commit| {
+//RS             let extracted = thread::spawn(move || guard.into_committed_value().map_err(|_| ()))
+//RS                 .join()
+//RS                 .expect("consumer thread completes");
+//RS             assert!(extracted.is_err());
+//RS             commit(MirRuntimeValue::Int(7))
+//RS         });
+//RS 
+//RS         assert!(matches!(attempt, Err(NativeInterfaceError::InvalidCall(_))));
+//RS         assert_eq!(
+//RS             call.finish(Ok(MirRuntimeValue::Unit)),
+//RS             Err(NativeInterfaceError::UnresolvedTransfers(vec![0]))
+//RS         );
+//RS         assert_eq!(call.arguments()[0].value, original_value);
+//RS         assert_eq!(call.pending_transfers().collect::<Vec<_>>(), vec![0]);
+//RS         assert!(call.transfers().is_empty());
+//RS         assert_eq!(
+//RS             call.rejected_transfers()[0].with_value(|value| value.clone()),
+//RS             Some(MirRuntimeValue::Int(7))
+//RS         );
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn handler_panic_before_commit_restores_native_owned_move_and_preserves_writeback() {
+//RS         let bindings = Arc::new(NativeInterfaceBindings::new());
+//RS         let object = bindings.create_object(String::from("service")).expect("object identity");
+//RS         let (identity, signature) = callable_with_parameter_types(
+//RS             "sink",
+//RS             &[int(), shared()],
+//RS             &[MirAccess::Write, MirAccess::Move],
+//RS         );
+//RS         let original_carrier = MirNativeOwned::new(String::from("source"));
+//RS         let original_value = MirRuntimeValue::NativeOwned(original_carrier.clone());
+//RS         bindings
+//RS             .bind_callable(
+//RS                 object.clone(),
+//RS                 identity.clone(),
+//RS                 signature.clone(),
+//RS                 callable_handler(|call| {
+//RS                     call.writeback_argument(0, MirRuntimeValue::Int(41))
+//RS                         .map_err(|error| error.to_string())?;
+//RS                     let transfer = call
+//RS                         .take_owned_argument(1)
+//RS                         .map_err(|error| error.to_string())?;
+//RS                     let value = transfer
+//RS                         .take_value()
+//RS                         .map_err(|error| error.to_string())?;
+//RS                     call.consume_owned_argument(transfer, value, |guard, _commit| {
+//RS                         assert!(guard.with_value(|value| {
+//RS                             matches!(value, MirRuntimeValue::NativeOwned(_))
+//RS                         })?);
+//RS                         panic!("leaf failed before acceptance");
+//RS                     })
+//RS                     .map_err(|error| error.to_string())?;
+//RS                     Ok(MirRuntimeValue::Int(0))
+//RS                 }),
+//RS             )
+//RS             .expect("callable binds");
+//RS         let _scope = push_scope(bindings.clone(), execution(), ARTIFACT);
+//RS 
+//RS         let completion = dispatch_active_callable(
+//RS             identity,
+//RS             signature,
+//RS             carrier_of(&object),
+//RS             vec![
+//RS                 argument(0, MirAccess::Write, MirRuntimeValue::Int(1)),
+//RS                 owned_argument(1, original_carrier),
+//RS             ],
+//RS             Span::new(0, 0),
+//RS         );
+//RS         let (outcome, call) = completion.into_parts();
+//RS         assert_eq!(
+//RS             outcome,
+//RS             Err(NativeInterfaceError::UnresolvedTransfers(vec![1]))
+//RS         );
+//RS         assert_eq!(call.argument(0).expect("argument").value, MirRuntimeValue::Int(41));
+//RS         assert_eq!(call.argument(1).expect("argument").value, original_value);
+//RS         assert!(call.transfers().is_empty());
+//RS         assert_eq!(call.pending_transfers().collect::<Vec<_>>(), vec![1]);
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn committed_native_owned_receipt_and_writeback_survive_later_panic() {
+//RS         let bindings = Arc::new(NativeInterfaceBindings::new());
+//RS         let object = bindings.create_object(String::from("service")).expect("object identity");
+//RS         let (identity, signature) = callable_with_parameter_types(
+//RS             "sink",
+//RS             &[int(), shared()],
+//RS             &[MirAccess::Write, MirAccess::Move],
+//RS         );
+//RS         let original_carrier = MirNativeOwned::new(String::from("source"));
+//RS         let original_value = MirRuntimeValue::NativeOwned(original_carrier.clone());
+//RS         let expected_for_handler = original_value.clone();
+//RS         bindings
+//RS             .bind_callable(
+//RS                 object.clone(),
+//RS                 identity.clone(),
+//RS                 signature.clone(),
+//RS                 callable_handler(move |call| {
+//RS                     call.writeback_argument(0, MirRuntimeValue::Int(41))
+//RS                         .map_err(|error| error.to_string())?;
+//RS                     let transfer = call
+//RS                         .take_owned_argument(1)
+//RS                         .map_err(|error| error.to_string())?;
+//RS                     let value = transfer
+//RS                         .take_value()
+//RS                         .map_err(|error| error.to_string())?;
+//RS                     call.consume_owned_argument(transfer, value, |guard, commit| {
+//RS                         let (value, receipt) = guard
+//RS                             .commit_and_extract(MirRuntimeValue::Int(7), commit)?;
+//RS                         assert_eq!(value, expected_for_handler);
+//RS                         assert_eq!(receipt, MirRuntimeValue::Int(7));
+//RS                         Ok(())
+//RS                     })
+//RS                     .map_err(|error| error.to_string())?;
+//RS                     panic!("handler failed after acceptance");
+//RS                 }),
+//RS             )
+//RS             .expect("callable binds");
+//RS         let _scope = push_scope(bindings.clone(), execution(), ARTIFACT);
+//RS 
+//RS         let completion = dispatch_active_callable(
+//RS             identity,
+//RS             signature,
+//RS             carrier_of(&object),
+//RS             vec![
+//RS                 argument(0, MirAccess::Write, MirRuntimeValue::Int(1)),
+//RS                 owned_argument(1, original_carrier),
+//RS             ],
+//RS             Span::new(0, 0),
+//RS         );
+//RS         let (outcome, call) = completion.into_parts();
+//RS         assert!(matches!(
+//RS             outcome,
+//RS             Err(NativeInterfaceError::HandlerPanicked(_))
+//RS         ));
+//RS         assert_eq!(call.argument(0).expect("argument").value, MirRuntimeValue::Int(41));
+//RS         assert_eq!(call.argument(1).expect("argument").value, MirRuntimeValue::Moved);
+//RS         assert_eq!(
+//RS             call.transfers(),
+//RS             &[NativeInterfaceTransferReceipt {
+//RS                 argument: 1,
+//RS                 disposition: NativeInterfaceTransferDisposition::Consumed(
+//RS                     MirRuntimeValue::Int(7)
+//RS                 ),
+//RS             }]
+//RS         );
+//RS         assert!(call.pending_transfers().next().is_none());
+//RS     }
+//RS 
+//RS 
+//RS     #[test]
+//RS     fn fixed_list_literal_length_is_part_of_the_checked_type() {
+//RS         let fixed = MirType::from_kind(MirTypeKind::FixedList {
+//RS             elem: Box::new(int()),
+//RS             len: MirMeasure::Literal {
+//RS                 kind: "len".to_string(),
+//RS                 value: 3,
+//RS             },
+//RS         });
+//RS         let ints = |count: i64| MirRuntimeValue::List((0..count).map(MirRuntimeValue::Int).collect());
+//RS         assert!(runtime_value_matches_type(&ints(3), &fixed));
+//RS         assert!(!runtime_value_matches_type(&ints(0), &fixed));
+//RS         assert!(!runtime_value_matches_type(&ints(4), &fixed));
+//RS         assert!(!runtime_value_matches_type(
+//RS             &MirRuntimeValue::List(vec![MirRuntimeValue::Int(1), MirRuntimeValue::Int(2), MirRuntimeValue::Bool(true)]),
+//RS             &fixed
+//RS         ));
+//RS 
+//RS         let symbolic = MirType::from_kind(MirTypeKind::FixedList {
+//RS             elem: Box::new(int()),
+//RS             len: MirMeasure::Symbol {
+//RS                 kind: "len".to_string(),
+//RS                 name: "N".to_string(),
+//RS             },
+//RS         });
+//RS         assert!(runtime_value_matches_type(&ints(0), &symbolic));
+//RS         assert!(runtime_value_matches_type(&ints(5), &symbolic));
+//RS     }
+//RS     #[test]
+//RS     fn fixed_width_integer_bounds_cover_int_and_bigint_carriers() {
+//RS         let signed = MirType::from_kind(MirTypeKind::IntN {
+//RS             signed: true,
+//RS             bits: 8,
+//RS         });
+//RS         for value in [
+//RS             MirRuntimeValue::Int(-128),
+//RS             MirRuntimeValue::Int(127),
+//RS             MirRuntimeValue::BigInt("-128".to_string()),
+//RS             MirRuntimeValue::BigInt("127".to_string()),
+//RS         ] {
+//RS             assert!(runtime_value_matches_type(&value, &signed));
+//RS         }
+//RS         for value in [
+//RS             MirRuntimeValue::Int(-129),
+//RS             MirRuntimeValue::Int(128),
+//RS             MirRuntimeValue::BigInt("-129".to_string()),
+//RS             MirRuntimeValue::BigInt("128".to_string()),
+//RS             MirRuntimeValue::BigInt("not-an-integer".to_string()),
+//RS         ] {
+//RS             assert!(!runtime_value_matches_type(&value, &signed));
+//RS         }
+//RS 
+//RS         let unsigned = MirType::from_kind(MirTypeKind::IntN {
+//RS             signed: false,
+//RS             bits: 64,
+//RS         });
+//RS         assert!(runtime_value_matches_type(
+//RS             &MirRuntimeValue::Int(0),
+//RS             &unsigned
+//RS         ));
+//RS         assert!(runtime_value_matches_type(
+//RS             &MirRuntimeValue::BigInt("18446744073709551615".to_string()),
+//RS             &unsigned
+//RS         ));
+//RS         assert!(!runtime_value_matches_type(
+//RS             &MirRuntimeValue::Int(-1),
+//RS             &unsigned
+//RS         ));
+//RS         assert!(!runtime_value_matches_type(
+//RS             &MirRuntimeValue::BigInt("18446744073709551616".to_string()),
+//RS             &unsigned
+//RS         ));
+//RS 
+//RS         for bits in [0, 65] {
+//RS             let invalid_width =
+//RS                 MirType::from_kind(MirTypeKind::IntN { signed: true, bits });
+//RS             assert!(!runtime_value_matches_type(
+//RS                 &MirRuntimeValue::Int(0),
+//RS                 &invalid_width
+//RS             ));
+//RS         }
+//RS     }
+//RS 
+//RS     fn physical_borrow_root(
+//RS         type_identity: u64,
+//RS         owner_identity: usize,
+//RS     ) -> crate::SourceSharedInterop::SourceSharedInterop {
+//RS         crate::SourceSharedInterop::SourceSharedInterop::from_value(
+//RS             type_identity,
+//RS             MirRuntimeValue::Int(11),
+//RS         )
+//RS         .with_owner_identity(owner_identity)
+//RS         .with_protocol_order_key(owner_identity)
+//RS     }
+//RS 
+//RS     fn physical_borrow_entry(
+//RS         capability: &crate::SourceResources::SourceResourceHandle,
+//RS         selector: i64,
+//RS         view: crate::SourceSharedInterop::SourceSharedInteropGuardState,
+//RS     ) -> NativeInterfacePhysicalBorrowEntry {
+//RS         let metadata = NativeInterfacePhysicalBorrowMetadata {
+//RS             selector,
+//RS             owner_row: MirPreludeCallId(selector as u64),
+//RS             capability: capability.clone(),
+//RS             physical_identity: view.physical_identity(),
+//RS             editable: view.editable(),
+//RS             path: view
+//RS                 .path()
+//RS                 .iter()
+//RS                 .map(|field| MirFieldId(*field as u64))
+//RS                 .collect(),
+//RS         };
+//RS         NativeInterfacePhysicalBorrowEntry { metadata, view }
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn physical_borrow_context_restores_nested_scopes_and_separates_selectors() {
+//RS         let bindings = Arc::new(NativeInterfaceBindings::new());
+//RS         let _base = push_scope(bindings, execution(), ARTIFACT);
+//RS         let arena = crate::SourceResources::SourceResourceArena::new();
+//RS         let root = physical_borrow_root(91, 0x9101);
+//RS         let capability = arena
+//RS             .register_shared_interop_root(91, &root)
+//RS             .expect("physical root capability");
+//RS         let first_view = root
+//RS             .acquire_guard_state(true)
+//RS             .expect("physical guard view");
+//RS         let second_view = first_view
+//RS             .clone_guard(false)
+//RS             .expect("read-only argument view shares the acquired guard");
+//RS         let mut entries = vec![
+//RS             physical_borrow_entry(&capability, 17, first_view),
+//RS             physical_borrow_entry(&capability, 18, second_view),
+//RS         ];
+//RS         let first_context = NativeInterfacePhysicalBorrowContext::new(&mut entries)
+//RS             .expect("one context owns both argument guard views");
+//RS         assert!(entries.is_empty());
+//RS         assert_eq!(
+//RS             first_context
+//RS                 .entries
+//RS                 .iter()
+//RS                 .map(|entry| entry.metadata.selector)
+//RS                 .collect::<Vec<_>>(),
+//RS             vec![17, 18]
+//RS         );
+//RS         let checked_scope = NativeInterfaceScope::current_checked_scope()
+//RS             .expect("base scope supplies checked C activation metadata");
+//RS         let first_activation = NativeInterfaceScope::activate_checked_scope(
+//RS             &checked_scope,
+//RS             Some(first_context.clone()),
+//RS         );
+//RS         assert!(NativeInterfaceScope::current_physical_borrow_context()
+//RS             .is_some_and(|active| Rc::ptr_eq(&active, &first_context)));
+//RS         assert_eq!(
+//RS             NativeInterfaceScope::with_active_physical_borrow(
+//RS                 &first_context.entries[1].metadata,
+//RS                 |view| view.physical_identity(),
+//RS             )
+//RS             .expect("active C scope reborrows the selected B view"),
+//RS             first_context.entries[1].metadata.physical_identity
+//RS         );
+//RS         let (_, call_signature) = callable("physical-borrow-arguments", &[]);
+//RS         let call = NativeCallableCall::new(
+//RS             None,
+//RS             call_signature,
+//RS             None,
+//RS             None,
+//RS             Vec::new(),
+//RS             Span::new(0, 0),
+//RS         );
+//RS 
+//RS         let nested_view = first_context.entries[0]
+//RS             .view
+//RS             .entry_view()
+//RS             .expect("nested context shares the existing physical guard");
+//RS         let mut nested_entries = vec![physical_borrow_entry(
+//RS             &capability,
+//RS             29,
+//RS             nested_view,
+//RS         )];
+//RS         let nested_context = NativeInterfacePhysicalBorrowContext::new(&mut nested_entries)
+//RS             .expect("nested context owns a physical view");
+//RS         let nested_activation = NativeInterfaceScope::activate_checked_scope(
+//RS             &checked_scope,
+//RS             Some(nested_context.clone()),
+//RS         );
+//RS         assert!(NativeInterfaceScope::current_physical_borrow_context()
+//RS             .is_some_and(|active| Rc::ptr_eq(&active, &nested_context)));
+//RS 
+//RS         drop(nested_activation);
+//RS         assert!(NativeInterfaceScope::current_physical_borrow_context()
+//RS             .is_some_and(|active| Rc::ptr_eq(&active, &first_context)));
+//RS         drop(first_activation);
+//RS         assert!(NativeInterfaceScope::current_physical_borrow_context().is_none());
+//RS 
+//RS         assert!(call
+//RS             .with_physical_borrow(&first_context.entries[0].metadata, |view| {
+//RS                 assert!(view.held());
+//RS                 view.editable()
+//RS             })
+//RS             .expect("first call selector resolves its writable guard view"));
+//RS         assert!(!call
+//RS             .with_physical_borrow(&first_context.entries[1].metadata, |view| {
+//RS                 assert!(view.held());
+//RS                 view.editable()
+//RS             })
+//RS             .expect("second call selector resolves its read-only guard view"));
+//RS     }
+//RS 
+//RS 
+//RS     #[test]
+//RS     fn physical_borrow_context_is_independent_of_checked_scope() {
+//RS         let arena = crate::SourceResources::SourceResourceArena::new();
+//RS         let root = physical_borrow_root(90, 0x9001);
+//RS         let capability = arena
+//RS             .register_shared_interop_root(90, &root)
+//RS             .expect("physical root capability");
+//RS         let view = root
+//RS             .acquire_guard_state(true)
+//RS             .expect("physical guard view");
+//RS         let mut entries = vec![physical_borrow_entry(&capability, 9, view)];
+//RS 
+//RS         let context = NativeInterfacePhysicalBorrowContext::new(&mut entries)
+//RS             .expect("guest views are independent of checked C metadata");
+//RS         assert!(entries.is_empty());
+//RS         assert!(NativeInterfaceScope::current_checked_scope().is_none());
+//RS         assert!(NativeInterfaceScope::current_physical_borrow_context().is_none());
+//RS         assert!(context
+//RS             .with_physical_borrow(&context.entries[0].metadata, |view| view.held())
+//RS             .expect("same-thread context remains directly owned"));
+//RS     }
+//RS     #[test]
+//RS     fn physical_borrow_rejects_metadata_mismatches_and_preserves_invalid_entries() {
+//RS         let bindings = Arc::new(NativeInterfaceBindings::new());
+//RS         let _base = push_scope(bindings, execution(), ARTIFACT);
+//RS         let arena = crate::SourceResources::SourceResourceArena::new();
+//RS         let root = physical_borrow_root(92, 0x9201);
+//RS         let capability = arena
+//RS             .register_shared_interop_root(92, &root)
+//RS             .expect("physical root capability");
+//RS         let view = root
+//RS             .acquire_guard_state(true)
+//RS             .expect("physical guard view");
+//RS         let entry = physical_borrow_entry(&capability, 41, view);
+//RS         let expected = entry.metadata.clone();
+//RS         let mut entries = vec![entry];
+//RS         let context = NativeInterfacePhysicalBorrowContext::new(&mut entries)
+//RS             .expect("validated view and capability");
+//RS 
+//RS         let mut wrong_owner = expected.clone();
+//RS         wrong_owner.owner_row = MirPreludeCallId(999);
+//RS         let mut wrong_generation = expected.clone();
+//RS         wrong_generation.capability.generation =
+//RS             wrong_generation.capability.generation.wrapping_add(1);
+//RS         let mut wrong_raw_capability = expected.clone();
+//RS         wrong_raw_capability.capability.raw =
+//RS             wrong_raw_capability.capability.raw.wrapping_add(1);
+//RS         let mut wrong_type = expected.clone();
+//RS         wrong_type.capability.kind =
+//RS             crate::SourceResources::SourceResourceKind::SharedInteropRoot {
+//RS                 type_identity: 999,
+//RS             };
+//RS         let mut wrong_path = expected.clone();
+//RS         wrong_path.path.push(MirFieldId(3));
+//RS         let mut wrong_editability = expected.clone();
+//RS         wrong_editability.editable = !wrong_editability.editable;
+//RS         let mut wrong_physical_owner = expected.clone();
+//RS         wrong_physical_owner.physical_identity =
+//RS             wrong_physical_owner.physical_identity.wrapping_add(1);
+//RS         for mismatch in [
+//RS             wrong_owner,
+//RS             wrong_generation,
+//RS             wrong_raw_capability,
+//RS             wrong_type,
+//RS             wrong_path,
+//RS             wrong_editability,
+//RS             wrong_physical_owner,
+//RS         ] {
+//RS             assert!(context
+//RS                 .with_physical_borrow(&mismatch, |_| ())
+//RS                 .is_err());
+//RS         }
+//RS         let mut wrong_selector = expected.clone();
+//RS         wrong_selector.selector += 1;
+//RS         assert_eq!(
+//RS             context.with_physical_borrow(&wrong_selector, |_| ()),
+//RS             Err(NativeInterfaceError::MissingBinding)
+//RS         );
+//RS 
+//RS         let invalid_path_view = context.entries[0]
+//RS             .view
+//RS             .entry_view()
+//RS             .expect("retain view for rejected construction");
+//RS         let mut invalid_path_entries = vec![physical_borrow_entry(
+//RS             &capability,
+//RS             42,
+//RS             invalid_path_view,
+//RS         )];
+//RS         invalid_path_entries[0].metadata.path.push(MirFieldId(8));
+//RS         assert!(NativeInterfacePhysicalBorrowContext::new(&mut invalid_path_entries).is_err());
+//RS         assert_eq!(invalid_path_entries.len(), 1);
+//RS         assert!(invalid_path_entries[0].view.held());
+//RS 
+//RS         let invalid_edit_view = context.entries[0]
+//RS             .view
+//RS             .entry_view()
+//RS             .expect("retain view for rejected edit capability");
+//RS         let mut invalid_edit_entries = vec![physical_borrow_entry(
+//RS             &capability,
+//RS             43,
+//RS             invalid_edit_view,
+//RS         )];
+//RS         invalid_edit_entries[0].metadata.editable = false;
+//RS         assert!(NativeInterfacePhysicalBorrowContext::new(&mut invalid_edit_entries).is_err());
+//RS         assert_eq!(invalid_edit_entries.len(), 1);
+//RS         assert!(invalid_edit_entries[0].view.held());
+//RS 
+//RS         let mut wrong_thread_context =
+//RS             NativeInterfacePhysicalBorrowContext::new(&mut vec![physical_borrow_entry(
+//RS                 &capability,
+//RS                 44,
+//RS                 context.entries[0]
+//RS                     .view
+//RS                     .entry_view()
+//RS                     .expect("thread check retains a typed view"),
+//RS             )])
+//RS             .expect("construct same-thread context");
+//RS         let other_thread = std::thread::spawn(|| std::thread::current().id())
+//RS             .join()
+//RS             .expect("worker thread id");
+//RS         Rc::get_mut(&mut wrong_thread_context)
+//RS             .expect("context has one strong owner")
+//RS             .thread = other_thread;
+//RS         assert_eq!(
+//RS             wrong_thread_context.with_physical_borrow(&expected, |_| ()),
+//RS             Err(NativeInterfaceError::ExecutionMismatch)
+//RS         );
+//RS     }
+//RS 
+//RS     type TestPhysicalOutcome<T> =
+//RS         crate::Memory::shared_protocol::JetSharedPhysicalOperationOutcome<T>;
+//RS 
+//RS     struct ScopeObservingGuard {
+//RS         observed_restored_scope: Arc<AtomicBool>,
+//RS     }
+//RS 
+//RS     impl crate::SourceSharedInterop::SourceSharedInteropGuard for ScopeObservingGuard {
+//RS         fn read_value(&mut self) -> Result<MirRuntimeValue, String> {
+//RS             Ok(MirRuntimeValue::Int(11))
+//RS         }
+//RS 
+//RS         fn stage_value(&mut self, _value: MirRuntimeValue) -> Result<(), String> {
+//RS             Ok(())
+//RS         }
+//RS 
+//RS         fn revision(&self) -> Result<u64, String> {
+//RS             Ok(0)
+//RS         }
+//RS 
+//RS         fn release(&mut self) -> TestPhysicalOutcome<()> {
+//RS             TestPhysicalOutcome::new(Ok(()), None)
+//RS         }
+//RS 
+//RS         fn release_during_drop(&mut self) {
+//RS             let restored = NativeInterfaceScope::current_physical_borrow_context().is_none()
+//RS                 && active_callable_descriptors()
+//RS                     .is_ok_and(|descriptors| descriptors.len() == 1);
+//RS             self.observed_restored_scope
+//RS                 .store(restored, Ordering::SeqCst);
+//RS         }
+//RS     }
+//RS 
+//RS     fn observing_physical_borrow_root(
+//RS         type_identity: u64,
+//RS         owner_identity: usize,
+//RS         observed_restored_scope: Arc<AtomicBool>,
+//RS     ) -> crate::SourceSharedInterop::SourceSharedInterop {
+//RS         crate::SourceSharedInterop::SourceSharedInterop::from_callbacks_with_guard(
+//RS             type_identity,
+//RS             |callback| {
+//RS                 let value = MirRuntimeValue::Int(11);
+//RS                 TestPhysicalOutcome::new(callback(&value), None)
+//RS             },
+//RS             |callback| {
+//RS                 let mut value = MirRuntimeValue::Int(11);
+//RS                 TestPhysicalOutcome::new(callback(&mut value), None)
+//RS             },
+//RS             {
+//RS                 let observed_restored_scope = observed_restored_scope.clone();
+//RS                 move |_editable| {
+//RS                     let guard: Box<dyn crate::SourceSharedInterop::SourceSharedInteropGuard> =
+//RS                         Box::new(ScopeObservingGuard {
+//RS                             observed_restored_scope: observed_restored_scope.clone(),
+//RS                         });
+//RS                     TestPhysicalOutcome::new(Ok(guard), None)
+//RS                 }
+//RS             },
+//RS             |callback| {
+//RS                 let value = MirRuntimeValue::Int(11);
+//RS                 TestPhysicalOutcome::new(callback(&value, 0), None)
+//RS             },
+//RS             |_revision, _value| TestPhysicalOutcome::new(Ok((true, 1)), None),
+//RS         )
+//RS         .with_owner_identity(owner_identity)
+//RS         .with_protocol_order_key(owner_identity)
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn physical_borrow_completion_retains_views_and_last_drop_sees_restored_scope() {
+//RS         let bindings = Arc::new(NativeInterfaceBindings::new());
+//RS         let object = bindings
+//RS             .create_object(String::from("physical-borrow-scope"))
+//RS             .expect("callable object");
+//RS         let (identity, signature) = callable("physical-borrow-scope", &[]);
+//RS         bindings
+//RS             .bind_callable(
+//RS                 object.clone(),
+//RS                 identity.clone(),
+//RS                 signature.clone(),
+//RS                 callable_handler(|_call| Ok(MirRuntimeValue::Int(1))),
+//RS             )
+//RS             .expect("checked scope marker binding");
+//RS         let carrier = object.clone_root();
+//RS         let _base = push_scope(bindings, execution(), ARTIFACT);
+//RS 
+//RS         let observed = Arc::new(AtomicBool::new(false));
+//RS         let root = observing_physical_borrow_root(93, 0x9301, observed.clone());
+//RS         let arena = crate::SourceResources::SourceResourceArena::new();
+//RS         let capability = arena
+//RS             .register_shared_interop_root(93, &root)
+//RS             .expect("physical root capability");
+//RS         let view = root
+//RS             .acquire_guard_state(true)
+//RS             .expect("physical guard view");
+//RS         let mut entries = vec![physical_borrow_entry(&capability, 51, view)];
+//RS         let context = NativeInterfacePhysicalBorrowContext::new(&mut entries)
+//RS             .expect("context retains guest physical view");
+//RS         let metadata = context.entries[0].metadata.clone();
+//RS         let checked_scope = NativeInterfaceScope::current_checked_scope()
+//RS             .expect("base scope supplies checked C activation metadata");
+//RS         let activation = NativeInterfaceScope::activate_checked_scope(
+//RS             &checked_scope,
+//RS             Some(context.clone()),
+//RS         );
+//RS         let call = NativeCallableCall::new(
+//RS             Some(identity),
+//RS             signature,
+//RS             Some(object),
+//RS             Some(carrier),
+//RS             Vec::new(),
+//RS             Span::new(0, 0),
+//RS         );
+//RS         let completion = NativeCallableCompletion {
+//RS             outcome: Ok(MirRuntimeValue::Int(1)),
+//RS             call,
+//RS         };
+//RS         let (trait_ref, receiver_type) = interface_type();
+//RS         let interface_call = NativeInterfaceCall::new(
+//RS             NativeInterfaceIdentity {
+//RS                 execution: execution(),
+//RS                 artifact: ARTIFACT,
+//RS                 trait_ref,
+//RS                 method_id: MirTraitMethodId(1),
+//RS                 method_name: "physical_borrow".to_string(),
+//RS                 receiver_type,
+//RS             },
+//RS             NativeInterfaceSignature {
+//RS                 receiver_access: MirAccess::Read,
+//RS                 parameters: Vec::new(),
+//RS                 return_type: unit(),
+//RS                 failure: MirFailureCarrier::Infallible,
+//RS             },
+//RS             None,
+//RS             MirAccess::Read,
+//RS             MirRuntimeValue::Unit,
+//RS             Vec::new(),
+//RS             Span::new(0, 0),
+//RS         );
+//RS         let interface_completion = NativeInterfaceCompletion {
+//RS             outcome: Ok(MirRuntimeValue::Unit),
+//RS             call: interface_call,
+//RS         };
+//RS         drop(activation);
+//RS         let alternate_view = context.entries[0]
+//RS             .view
+//RS             .entry_view()
+//RS             .expect("alternate C scope reuses the same physical permit view");
+//RS         let mut alternate_entries = vec![physical_borrow_entry(
+//RS             &capability,
+//RS             52,
+//RS             alternate_view,
+//RS         )];
+//RS         let alternate_context =
+//RS             NativeInterfacePhysicalBorrowContext::new(&mut alternate_entries)
+//RS                 .expect("alternate context retains its own selector");
+//RS         let alternate_activation = NativeInterfaceScope::activate_checked_scope(
+//RS             &checked_scope,
+//RS             Some(alternate_context.clone()),
+//RS         );
+//RS         drop(context);
+//RS         assert!(NativeInterfaceScope::current_physical_borrow_context()
+//RS             .is_some_and(|active| Rc::ptr_eq(&active, &alternate_context)));
+//RS         assert!(completion
+//RS             .call()
+//RS             .with_physical_borrow(&metadata, |view| view.held())
+//RS             .expect("completion uses its own view under another active context"));
+//RS         assert!(interface_completion
+//RS             .call()
+//RS             .with_physical_borrow(&metadata, |view| view.held())
+//RS             .expect("interface completion uses its own view under another active context"));
+//RS         drop(alternate_activation);
+//RS         drop(alternate_context);
+//RS         assert!(NativeInterfaceScope::current_physical_borrow_context().is_none());
+//RS 
+//RS         drop(completion);
+//RS         drop(interface_completion);
+//RS         assert!(observed.load(Ordering::SeqCst));
+//RS         drop(_base);
+//RS     }
+//RS }
+//RS 
+// END-PORT-PENDING 2052 crates/jet-jit/src/SourceInterfaces.rs:3601-5046
+

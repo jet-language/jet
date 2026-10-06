@@ -1,0 +1,1120 @@
+// Canonical core.crypto.vault private continuation; Main shares 0641 declarations.
+use core.sys as sys
+use std.fs as fs
+use std.fs.File
+use std.time.[Instant, Duration, SystemTime, UNIX_EPOCH]
+use std.sync.[Arc, Mutex, Barrier]
+use std.io.[Error, BufReader, SeekFrom]
+use std.ffi.CString
+use std.process as process
+use std.env as env
+use core.crypto.[Secret, JetSigningKey, JetX25519SecretKey, JetX25519PublicKey, XChaCha20Poly1305, XNonce, Payload, x25519_checked, hkdf32, hkdf24, zeroize, jet_crypto_argon2id_run, JetPwhashRunError]
+use core.crypto.x25519 as x25519
+use jet_crypto_entropy.jet_crypto_entropy_fill
+use argon2 as argon2
+// GATE #4494: native descriptors/clock/entropy/crypto/TLS cells/secure zeroization.
+// GATE #4483: every target dispatch uses selected compilation target facts.
+
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:1776
+fn vault_prepare<T: JetVaultKey>(root: OSPath, name: String, action: JetVaultAction, target: JetVaultKeyRef<T>?, imported: ^[U8]?, reason: ^String) -> JetVaultMutationPlan<T> JetVaultError! {
+    jet_vault_validate_name(name) ?? return Err(err)
+    if action == .Retire || action == .Revoke || action == .Rotate -> vault_validate_reason(reason) ?? return Err(err)
+    (store, start_hash, provider_hash, start_kind) := vault_read_at(root) ?? return Err(err)
+    if start_kind != .V2 {
+        provisional :: vault_random<16>() ?? return Err(err)
+        if provisional == [U8; 16].filled(0) -> return Err(JetVaultError.Internal{incident_id: "vault-zero-uuid"})
+        store.repo_uuid = provisional
+    }
+    if store.keys.iter().any((r) -> r.name == name && r.key_type != T.TAG) -> return Err(JetVaultError.WrongType)
+    if action == .Generate && store.keys.iter().any((r) -> r.name == name) -> return Err(JetVaultError.Conflict)
+    if (action == .Store || action == .RawImport) && store.keys.iter().any((r) -> r.name == name && r.status == .Active) -> return Err(JetVaultError.Conflict)
+    if action == .Rotate && !store.keys.iter().any((r) -> r.name == name && r.key_type == T.TAG && r.status == .Active) -> return Err(JetVaultError.NotFound)
+    if action == .Retire || action == .Revoke {
+        reference :: target.as_ref() ?? return Err(JetVaultError.NotFound)
+        record :: vault_find(store, reference) ?? return Err(err)
+        if action == .Retire && record.status != .Active -> return Err(if record.status == .Revoked { JetVaultError.Revoked } else { JetVaultError.Conflict })
+        if action == .Revoke && record.status == .Revoked -> return Err(JetVaultError.Revoked)
+    }
+    public_key_hash :: if imported == .Val(bytes) { vault_public_hash(T.TAG, bytes) ?? return Err(err) } else { [U8; 32].filled(0) }
+    key_digest :: if imported == .Val(bytes) { vault_key_digest(T.TAG, bytes) } else { [U8; 32].filled(0) }
+    (reference_present, reference_repo, reference_generation, reference_opaque, reference_hash) :: if target == .Val(reference) {
+        (U8{1}, reference.repo_uuid, reference.generation, reference.opaque_id, reference.record_hash)
+    } else { (U8{0}, [U8; 16].filled(0), U64{0}, [U8; 16].filled(0), [U8; 32].filled(0)) }
+    current :: store.keys.iter().find((r) -> r.name == name && r.key_type == T.TAG && r.status == .Active).map((r) -> r.generation) ?? 0
+    next_generation :: (store.keys.iter().filter((r) -> r.name == name && r.key_type == T.TAG).map((r) -> r.generation).max() ?? U64{0}).checked_add(1) ?? return Err(JetVaultError.Internal{incident_id: "vault-generation"})
+    (transition_from, transition_to) :: if action == .Rotate { (current, next_generation) } else if action == .Retire || action == .Revoke { (reference_generation, U64{0}) } else { (U64{0}, next_generation) }
+    operation := "JVLT2 operation".into_bytes()
+    &operation.extend_from_slice(store.repo_uuid)
+    &operation.extend_from_slice(store.revision.to_le_bytes())
+    &operation.extend_from_slice(start_hash)
+    &operation.extend_from_slice(provider_hash)
+    &operation.push(action.byte())
+    &operation.push(T.TAG)
+    push_u16(&operation, name.len()) ?? return Err(err)
+    &operation.extend_from_slice(name.as_bytes())
+    &operation.push(reference_present)
+    &operation.extend_from_slice(reference_repo)
+    &operation.extend_from_slice(reference_generation.to_le_bytes())
+    &operation.extend_from_slice(reference_opaque)
+    &operation.extend_from_slice(reference_hash)
+    push_u16(&operation, reason.len()) ?? return Err(err)
+    &operation.extend_from_slice(reason.as_bytes())
+    &operation.extend_from_slice(public_key_hash)
+    &operation.extend_from_slice(key_digest)
+    &operation.extend_from_slice([U8; 32].filled(0))
+    operation_hash :: vault_hash([operation])
+    issued :: Instant.now()
+    deadline :: issued.checked_add(Duration.from_secs(300)) ?? return Err(JetVaultError.UnsupportedProvider)
+    now_ms :: (SystemTime.now().duration_since(UNIX_EPOCH) ?? return Err(JetVaultError.UnsupportedProvider)).as_millis()
+    expires_unix_ms :: (U64.try_from(now_ms) ?? return Err(JetVaultError.UnsupportedProvider)).checked_add(300_000) ?? return Err(JetVaultError.UnsupportedProvider)
+    JetVaultMutationPlan{action: action, name: ~name, target: ^target, imported: imported.map((bytes) -> Zeroizing(^bytes)), reason: ^reason, repo_uuid: store.repo_uuid, start_revision: store.revision, start_hash: start_hash, provider_hash: provider_hash, public_key_hash: public_key_hash, key_digest: key_digest, transition_from: transition_from, transition_to: transition_to, start_kind: start_kind, operation_hash: operation_hash, issued: issued, deadline: deadline, expires_unix_ms: expires_unix_ms}
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:1938
+pub fn jet_vault_prepare_generate_at<T: JetVaultKey>(root: OSPath, name: String) -> JetVaultMutationPlan<T> JetVaultError! { vault_prepare<T>(root, name, .Generate, None, None, "") }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:1951
+pub fn jet_vault_prepare_store_at<T: JetVaultKey>(root: OSPath, name: String, key: ^T) -> JetVaultMutationPlan<T> JetVaultError! { vault_prepare<T>(root, name, .Store, None, Val(key.into_bytes()), "") }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:1965
+fn jet_vault_prepare_raw_import_at<T: JetVaultKey>(root: OSPath, name: String, key: ^T) -> JetVaultMutationPlan<T> JetVaultError! { vault_prepare<T>(root, name, .RawImport, None, Val(key.into_bytes()), "") }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:1979
+pub fn jet_vault_prepare_rotate_at<T: JetVaultKey>(root: OSPath, name: String) -> JetVaultMutationPlan<T> JetVaultError! { vault_prepare<T>(root, name, .Rotate, None, None, "rotated") }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:1992
+pub fn jet_vault_prepare_retire_at<T: JetVaultKey>(root: OSPath, key_ref: JetVaultKeyRef<T>, reason: String) -> JetVaultMutationPlan<T> JetVaultError! { vault_prepare<T>(root, key_ref.name, .Retire, Val(~key_ref), None, ~reason) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2006
+pub fn jet_vault_prepare_revoke_at<T: JetVaultKey>(root: OSPath, key_ref: JetVaultKeyRef<T>, reason: String) -> JetVaultMutationPlan<T> JetVaultError! { vault_prepare<T>(root, key_ref.name, .Revoke, Val(~key_ref), None, ~reason) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2032
+fn vault_authority_identity() -> (U32, I32) JetVaultError! {
+    if sys.target.selected_os() != "linux" -> return Err(JetVaultError.UnsupportedProvider)
+    // Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2034
+    #FFI(c) fn geteuid() -> U32
+    // Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2035
+    #FFI(c) fn getsid(pid: I32) -> I32
+    #Unsafe("read native effective user and session identity for vault authority") {
+        user :: geteuid()
+        session :: getsid(0)
+        if session < 0 -> return Err(JetVaultError.UnsupportedProvider)
+        (user, session)
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2046 non-Linux arm above.
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2049
+fn vault_uuid_hex(bytes: [U8; 16]) -> String { bytes.iter().map((byte) -> format("{:02x}", byte)).collect() }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2058
+fn vault_headless_granted(repo_uuid: [U8; 16]) -> Bool {
+    #If(test) {
+        test_path :: VAULT_TEST_TRUST_PATH.with((slot) -> slot.borrow().clone())
+        if test_path == .Val(path) {
+            text :: fs.read_to_string(path) ?? return false
+            subject :: vault_uuid_hex(repo_uuid)
+            return text.lines().any((raw) -> {
+                line := raw.trim()
+                line == "grant:user:vault.write:{subject}" || line == "grant:repo:vault.write:{subject}"
+            })
+        }
+    }
+    home :: env.var_os("HOME") ?? return false
+    text :: fs.read_to_string(OSPath.from(home).join(".jet/trust")) ?? return false
+    subject :: vault_uuid_hex(repo_uuid)
+    text.lines().any((raw) -> {
+        line := raw.trim()
+        line == "grant:user:vault.write:{subject}" || line == "grant:repo:vault.write:{subject}"
+    })
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2085
+fn vault_native_authorize(preview: String, repo_uuid: [U8; 16]) -> Bool {
+    #If(test) {
+        answer :: VAULT_AUTHORIZER.with((slot) -> slot.borrow_mut().as_mut().map((callback) -> callback(preview)))
+        if answer == .Val(value) -> return value
+    }
+    if sys.target.selected_os() != "linux" -> return false
+    tty :: fs.OpenOptions.new().read(true).write(true).open(OSPath.from("/dev/tty")) ?? return vault_headless_granted(repo_uuid)
+    if tty.write_fmt("Vault write request: {preview}\nType `authorize` to continue:\n").is_err() -> return false
+    reader_file :: tty.try_clone() ?? return false
+    answer := String.new()
+    success :: BufReader.new(^reader_file).read_line(&answer).is_ok()
+    trimmed := answer.trim() // #4303
+    success && trimmed == "authorize"
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2127
+pub fn jet_vault_authorize_write_impl<T: JetVaultKey>(plan: JetVaultMutationPlan<T>, reason: String) -> JetVaultWrite<T> JetVaultError! {
+    vault_validate_reason(reason) ?? return Err(err)
+    now :: Instant.now()
+    if now > plan.deadline || now.duration_since(plan.issued) > Duration.from_secs(300) -> return Err(JetVaultError.Conflict)
+    bytes := "JVLT2 authority preview".into_bytes()
+    &bytes.extend_from_slice(plan.operation_hash)
+    &bytes.push(plan.action.byte())
+    &bytes.push(T.TAG)
+    &bytes.extend_from_slice(plan.repo_uuid)
+    &bytes.extend_from_slice(plan.start_revision.to_le_bytes())
+    push_u16(&bytes, plan.name.len()) ?? return Err(err)
+    &bytes.extend_from_slice(plan.name.as_bytes())
+    &bytes.extend_from_slice(plan.transition_from.to_le_bytes())
+    &bytes.extend_from_slice(plan.transition_to.to_le_bytes())
+    push_u16(&bytes, plan.reason.len()) ?? return Err(err)
+    &bytes.extend_from_slice(plan.reason.as_bytes())
+    push_u16(&bytes, reason.len()) ?? return Err(err)
+    &bytes.extend_from_slice(reason.as_bytes())
+    &bytes.extend_from_slice(plan.expires_unix_ms.to_le_bytes())
+    preview_hash :: vault_hash([bytes])
+    plan_reason :: if plan.reason.is_empty() { "<none>" } else { plan.reason }
+    preview :: "{plan.action.text()} {T.NAME} {plan.name} {plan.transition_from} -> {plan.transition_to} in repository {vault_uuid_hex(plan.repo_uuid)} at revision {plan.start_revision}; reason: {plan_reason}; authority reason: {reason}; expires_unix_ms: {plan.expires_unix_ms}"
+    if !vault_native_authorize(preview, plan.repo_uuid) -> return Err(JetVaultError.AuthorityDenied)
+    (user, session) :: vault_authority_identity() ?? return Err(err)
+    JetVaultWrite{operation_hash: plan.operation_hash, preview_hash: preview_hash, user: user, session: session, deadline: plan.deadline, marker: PhantomData<T>{}}
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2170
+struct VaultLockGuard { dir: File, file: File, nonce: String }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2178
+fn vault_linux_rename(dirfd: I32, old: String, new: String, flags: U32) -> () JetVaultError! {
+    old_c :: CString.new(old) ?? return Err(JetVaultError.Internal{incident_id: "vault-temp-name"})
+    new_c :: CString.new(new) ?? return Err(JetVaultError.Internal{incident_id: "vault-temp-name"})
+    result :: #Unsafe("descriptor-relative renameat2 of validated vault entries") { syscall(VAULT_SYS_RENAMEAT2, dirfd, old_c.as_ptr(), dirfd, new_c.as_ptr(), flags) }
+    if result < 0 {
+        error :: Error.last_os_error()
+        if error.raw_os_error() == 38 || error.raw_os_error() == 22 -> return Err(JetVaultError.UnsupportedProvider)
+        return Err(JetVaultError.IO{operation: "install", redacted_path: "<vault-store>"})
+    }
+    Ok()
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2210
+fn vault_linux_unlink(dirfd: I32, name: String) -> () JetVaultError! {
+    name_c :: CString.new(name) ?? return Err(JetVaultError.Internal{incident_id: "vault-entry-name"})
+    result :: #Unsafe("descriptor-relative unlink of validated vault entry") { unlinkat(dirfd, name_c.as_ptr(), 0) }
+    if result != 0 -> return Err(JetVaultError.IO{operation: "unlink", redacted_path: "<vault-entry>"})
+    Ok()
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2224
+fn vault_linux_link_file(file: File, dirfd: I32, name: String) -> () JetVaultError! {
+    source :: CString.new("/proc/self/fd/{file.as_raw_fd()}") ?? return Err(JetVaultError.Internal{incident_id: "vault-fd-path"})
+    name_c :: CString.new(name) ?? return Err(JetVaultError.Internal{incident_id: "vault-entry-name"})
+    result :: #Unsafe("link retained descriptor via proc fd into held vault directory") { linkat(VAULT_AT_FDCWD, source.as_ptr(), dirfd, name_c.as_ptr(), VAULT_AT_SYMLINK_FOLLOW) }
+    if result != 0 {
+        error :: Error.last_os_error()
+        if error.raw_os_error() == 38 || error.raw_os_error() == 22 -> return Err(JetVaultError.UnsupportedProvider)
+        return Err(JetVaultError.Conflict)
+    }
+    Ok()
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2260
+fn vault_same_inode(left: File, right: File) -> Bool {
+    l :: left.metadata() ?? return false
+    r :: right.metadata() ?? return false
+    l.dev() == r.dev() && l.ino() == r.ino()
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2268
+fn vault_read_file(file: File) -> [U8] JetVaultError! {
+    cloned :: file.try_clone() ?? return Err(JetVaultError.Locked)
+    cloned.seek(SeekFrom.Start(0)) ?? return Err(JetVaultError.Locked)
+    bytes := [U8]{}
+    cloned.read_to_end(&bytes) ?? return Err(JetVaultError.Locked)
+    bytes
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2279
+fn vault_quarantine_exact(dir: File, name: String, held: File, quarantine: String) -> Bool JetVaultError! {
+    dirfd :: dir.as_raw_fd()
+    visible :: vault_linux_openat(dirfd, name, 0, 0) ?? {
+        if err.raw_os_error() == 2 -> return false
+        return Err(JetVaultError.Conflict)
+    }
+    if !vault_same_inode(visible, held) -> return false
+    #If(test) {
+        if name == ".secrets.age.lock" && vault_test_fault("substitute-lock-after-check") {
+            vault_linux_rename(dirfd, name, ".secrets.age.lock.acquired", VAULT_RENAME_NOREPLACE) ?? return Err(err)
+            replacement :: vault_linux_openat(dirfd, name, 1 | VAULT_O_CREAT | VAULT_O_EXCL, 0o600) ?? return Err(JetVaultError.Conflict)
+            replacement.write_all("replacement".as_bytes()) ?? return Err(JetVaultError.Conflict)
+            replacement.sync_all() ?? return Err(JetVaultError.Conflict)
+        }
+    }
+    vault_linux_rename(dirfd, name, quarantine, VAULT_RENAME_NOREPLACE) ?? return Err(err)
+    moved :: vault_linux_openat(dirfd, quarantine, 0, 0) ?? return Err(JetVaultError.Conflict)
+    if vault_same_inode(moved, held) -> return true
+    _ :: vault_linux_rename(dirfd, quarantine, name, VAULT_RENAME_NOREPLACE)
+    false
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2324
+fn vault_remove_exact(dir: File, name: String, held: File, quarantine: String) -> Bool JetVaultError! {
+    if !(vault_quarantine_exact(dir, name, held, quarantine) ?? return Err(err)) -> return false
+    vault_linux_unlink(dir.as_raw_fd(), quarantine) ?? return Err(err)
+    true
+}
+impl VaultLockGuard {
+    // Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2339
+    fn drop(self: &Self) -> {
+        if sys.target.selected_os() == "linux" -> _ :: vault_remove_exact(self.dir, ".secrets.age.lock", self.file, ".secrets.age.lock.done.{self.nonce}")
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2345
+fn vault_process_start(pid: U32) -> U64? {
+    text :: fs.read_to_string(OSPath.from("/proc/{pid}/stat")) ?? return None
+    rest :: (text.rsplit_once(')') ?? return None).1
+    U64.parse(rest.split_whitespace().nth(19) ?? return None).ok()
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2351
+fn vault_valid_hex(text: String, count: USize) -> Bool { text.len() == count && text.bytes().all((byte) -> byte.is_ascii_hexdigit()) && text.bytes().any((byte) -> byte != 48) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2357
+fn vault_recover_stale_lock(root: OSPath, dir: File, expected_hash: [U8; 32], expected_revision: U64, expected_repo: [U8; 16]) -> () JetVaultError! {
+    dirfd :: dir.as_raw_fd()
+    file :: vault_linux_openat(dirfd, ".secrets.age.lock", 0, 0) ?? return Err(JetVaultError.Conflict)
+    metadata :: file.metadata() ?? return Err(JetVaultError.Conflict)
+    (user, _) :: vault_authority_identity() ?? return Err(err)
+    age :: metadata.modified().ok().and_then((time) -> time.elapsed().ok()) ?? return Err(JetVaultError.Conflict)
+    if !metadata.file_type().is_file() || metadata.uid() != user || age <= Duration.from_secs(600) -> return Err(JetVaultError.Conflict)
+    text :: String.from_utf8(vault_read_file(file) ?? return Err(err)) ?? return Err(JetVaultError.Conflict)
+    repo := String?{None}
+    revision := U64?{None}
+    pid := U32?{None}
+    start := U64?{None}
+    nonce := String?{None}
+    hash := String?{None}
+    loop field in text.split_whitespace() {
+        if field.split_once('=') == .Val(pair) {
+            if pair.0 == {
+                "repo" -> repo = Val(pair.1)
+                "revision" -> revision = U64.parse(pair.1).ok()
+                "pid" -> pid = U32.parse(pair.1).ok()
+                "process-start" -> start = U64.parse(pair.1).ok()
+                "nonce" -> nonce = Val(pair.1)
+                "hash" -> hash = Val(pair.1)
+                else -> {}
+            }
+        }
+    }
+    pid_value :: pid ?? return Err(JetVaultError.Conflict)
+    start_value :: start ?? return Err(JetVaultError.Conflict)
+    nonce_value :: nonce ?? return Err(JetVaultError.Conflict)
+    hash_value :: hash ?? return Err(JetVaultError.Conflict)
+    if repo != vault_uuid_hex(expected_repo) || revision != expected_revision || !vault_valid_hex(nonce_value, 32) || hash_value != hex_bytes(expected_hash) -> return Err(JetVaultError.Conflict)
+    current_start :: vault_process_start(pid_value)
+    pidfd :: #Unsafe("pidfd_open identifies stale vault lock process without PID reuse confusion") { syscall(VAULT_SYS_PIDFD_OPEN, pid_value as I32, U32{0}) }
+    dead :: if pidfd >= 0 {
+        #Unsafe("own and close the newly returned pidfd") { drop(File.from_raw_fd(pidfd as I32)) }
+        current_start != Val(start_value)
+    } else {
+        code :: Error.last_os_error().raw_os_error()
+        if code == 38 || code == 22 -> return Err(JetVaultError.UnsupportedProvider)
+        code == 3
+    }
+    if !dead -> return Err(JetVaultError.Conflict)
+    current_matches :: vault_read_contents_unrecovered_at(root).is_ok_and((tuple) -> tuple.0.revision == expected_revision && tuple.1 == expected_hash)
+    backup_matches :: (vault_linux_read(root, ".secrets.age.backup") ?? return Err(err)).and_then((bytes) -> vault_decode_ciphertext_at(root, bytes).ok()).is_some_and((tuple) -> tuple.0.revision == expected_revision && tuple.1 == expected_hash)
+    if !current_matches && !backup_matches -> return Err(JetVaultError.Conflict)
+    if !(vault_remove_exact(dir, ".secrets.age.lock", file, ".secrets.age.lock.stale.{nonce_value}") ?? return Err(err)) -> return Err(JetVaultError.Conflict)
+    Ok()
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2449
+fn vault_acquire_lock_mode(root: OSPath, repo_uuid: [U8; 16], revision: U64, start_hash: [U8; 32], recover_stale: Bool) -> VaultLockGuard JetVaultError! {
+    dir :: vault_linux_dir(root) ?? return Err(err)
+    dirfd :: dir.as_raw_fd()
+    file :: vault_linux_openat(dirfd, ".secrets.age.lock", 1 | VAULT_O_CREAT | VAULT_O_EXCL, 0o600) ?? {
+        code :: err.raw_os_error()
+        if code == 17 && recover_stale {
+            vault_recover_stale_lock(root, dir, start_hash, revision, repo_uuid) ?? return Err(err)
+            vault_recover_backup_at(root) ?? return Err(err)
+            vault_linux_openat(dirfd, ".secrets.age.lock", 1 | VAULT_O_CREAT | VAULT_O_EXCL, 0o600) ?? return Err(JetVaultError.Conflict)
+        } else {
+            if code == 38 || code == 22 -> return Err(JetVaultError.UnsupportedProvider)
+            return Err(JetVaultError.Conflict)
+        }
+    }
+    nonce_bytes :: vault_random<16>() ?? return Err(err)
+    if nonce_bytes == [U8; 16].filled(0) -> return Err(JetVaultError.Internal{incident_id: "vault-zero-lock-nonce"})
+    nonce :: hex_bytes(nonce_bytes)
+    process_start :: vault_process_start(process.id()) ?? return Err(JetVaultError.UnsupportedProvider)
+    file.write_fmt("repo={vault_uuid_hex(repo_uuid)} revision={revision} pid={process.id()} process-start={process_start} nonce={nonce} hash={hex_bytes(start_hash)}\n") ?? return Err(JetVaultError.IO{operation: "lock", redacted_path: "<vault-lock>"})
+    file.sync_all() ?? return Err(JetVaultError.IO{operation: "lock", redacted_path: "<vault-lock>"})
+    VaultLockGuard{dir: ^dir, file: ^file, nonce: ^nonce}
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2513
+fn vault_acquire_lock(root: OSPath, repo_uuid: [U8; 16], revision: U64, start_hash: [U8; 32]) -> VaultLockGuard JetVaultError! {
+    // Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2522
+    if sys.target.selected_os() != "linux" -> return Err(JetVaultError.UnsupportedProvider)
+    vault_acquire_lock_mode(root, repo_uuid, revision, start_hash, true)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2531
+fn vault_lifecycle_unix_ms(store: JetVaultStore) -> U64 JetVaultError! {
+    wall :: if vault_test_fault("clock-rollback") { U64{1} } else { U64.try_from((SystemTime.now().duration_since(UNIX_EPOCH) ?? return Err(JetVaultError.UnsupportedProvider)).as_millis()) ?? return Err(JetVaultError.UnsupportedProvider) }
+    store.keys.iter().fold(wall, (latest, record) -> latest.max(record.created_unix_ms).max(record.status_unix_ms))
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2550
+fn vault_commit_at<T: JetVaultKey>(root: OSPath, plan: ^JetVaultMutationPlan<T>, write: ^JetVaultWrite<T>, expected: JetVaultAction) -> (JetVaultKeyRef<T>?, JetVaultKeyRef<T>?) JetVaultError! {
+    now :: Instant.now()
+    (user, session) :: vault_authority_identity() ?? return Err(err)
+    if plan.action != expected || now > plan.deadline || now.duration_since(plan.issued) > Duration.from_secs(300) || now > write.deadline || write.operation_hash != plan.operation_hash || write.preview_hash == [U8; 32].filled(0) || write.user != user || write.session != session -> return Err(JetVaultError.Conflict)
+    lock :: vault_acquire_lock(root, plan.repo_uuid, plan.start_revision, plan.start_hash) ?? return Err(err)
+    (store, current_hash, provider_hash, start_kind) := vault_read_at(root) ?? return Err(err)
+    if start_kind != plan.start_kind || current_hash != plan.start_hash || provider_hash != plan.provider_hash -> return Err(JetVaultError.Conflict)
+    if start_kind == .V2 {
+        if store.repo_uuid != plan.repo_uuid || store.revision != plan.start_revision -> return Err(JetVaultError.Conflict)
+    } else {
+        if store.repo_uuid != [U8; 16].filled(0) || store.revision != 0 || plan.start_revision != 0 -> return Err(JetVaultError.Conflict)
+        store.repo_uuid = plan.repo_uuid
+    }
+    previous :: store.keys.iter().find((r) -> r.name == plan.name && r.key_type == T.TAG && r.status == .Active).map((r) -> vault_ref(store, r))
+    current := JetVaultKeyRef<T>?{None}
+    if plan.action == {
+        .Generate | .Store | .Rotate | .RawImport -> {
+            unix_ms :: vault_lifecycle_unix_ms(store) ?? return Err(err)
+            if plan.action == .Rotate {
+                loop record in &store.keys {
+                    if record.name == plan.name && record.key_type == T.TAG && record.status == .Active {
+                        record.status = .Retired
+                        record.status_unix_ms = unix_ms
+                        record.reason_hash = vault_reason_hash(.Retired, "rotated") ?? return Err(err)
+                    }
+                }
+            }
+            key :: if &plan.imported.take() == .Val(bytes) { T.from_bytes(&bytes.0.take()) ?? return Err(err) } else { T.generate() ?? return Err(err) }
+            public_key_hash :: vault_hash(["JVLT2 public key".as_bytes(), [U8]{T.TAG}, key.public_bytes()])
+            key_bytes :: key.into_bytes()
+            key_digest :: vault_key_digest(T.TAG, key_bytes)
+            if plan.action != .Generate && plan.action != .Rotate && (public_key_hash != plan.public_key_hash || key_digest != plan.key_digest) -> return Err(JetVaultError.Conflict)
+            generation :: (store.keys.iter().filter((r) -> r.name == plan.name && r.key_type == T.TAG).map((r) -> r.generation).max() ?? U64{0}).checked_add(1) ?? return Err(JetVaultError.Internal{incident_id: "vault-generation"})
+            if generation != plan.transition_to -> return Err(JetVaultError.Conflict)
+            opaque_id :: vault_random<16>() ?? return Err(err)
+            if opaque_id == [U8; 16].filled(0) -> return Err(JetVaultError.Internal{incident_id: "vault-zero-id"})
+            provenance :: if plan.action == .Generate || plan.action == .Rotate { JetVaultProvenance.Generated } else { JetVaultProvenance.Imported }
+            record := JetVaultRecord{name: ~plan.name, key_type: T.TAG, generation: generation, status: .Active, provenance: provenance, opaque_id: opaque_id, created_unix_ms: unix_ms, status_unix_ms: unix_ms, record_hash: [U8; 32].filled(0), public_key_hash: public_key_hash, reason_hash: [U8; 32].filled(0), origin: None, key: ^key_bytes}
+            record.record_hash = vault_record_hash(record)
+            current = Val(vault_ref(store, record))
+            &store.keys.push(^record)
+        }
+        .Retire | .Revoke -> {
+            unix_ms :: vault_lifecycle_unix_ms(store) ?? return Err(err)
+            target :: plan.target.as_ref() ?? return Err(JetVaultError.NotFound)
+            record :: store.keys.iter_mut().find((r) -> r.name == target.name && r.generation == target.generation && r.opaque_id == target.opaque_id && r.record_hash == target.record_hash) ?? return Err(JetVaultError.NotFound)
+            if record.key_type != T.TAG -> return Err(JetVaultError.WrongType)
+            if record.status == .Revoked -> return Err(JetVaultError.Revoked)
+            record.status = if plan.action == .Retire { JetVaultKeyStatus.Retired } else { JetVaultKeyStatus.Revoked }
+            record.status_unix_ms = unix_ms
+            record.reason_hash = vault_reason_hash(record.status, plan.reason) ?? return Err(err)
+        }
+    }
+    store.revision = store.revision.checked_add(1) ?? return Err(JetVaultError.Internal{incident_id: "vault-revision"})
+    vault_write_at(root, store, plan.start_hash, plan.provider_hash, plan.start_kind, plan.start_revision, ^lock) ?? return Err(err)
+    (^previous, ^current)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2722
+fn vault_write_at(root: OSPath, store: JetVaultStore, start_hash: [U8; 32], provider_hash: [U8; 32], start_kind: VaultStartKind, start_revision: U64, lock: ^VaultLockGuard) -> () JetVaultError! {
+    // Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2922 non-Linux arm.
+    if sys.target.selected_os() != "linux" -> return Err(JetVaultError.UnsupportedProvider)
+    dir_file :: vault_linux_dir(root) ?? return Err(err)
+    dirfd :: dir_file.as_raw_fd()
+    (current, current_hash, current_provider, current_kind) :: vault_read_at(root) ?? return Err(err)
+    if current_hash != start_hash || current_provider != provider_hash || current_kind != start_kind || current.revision != start_revision || (start_kind == .V2 && current.repo_uuid != store.repo_uuid) -> return Err(JetVaultError.Conflict)
+    (recipients, _) :: vault_recipients_at(root) ?? return Err(err)
+    plaintext :: Zeroizing(jet_vault_encode_v2(store) ?? return Err(err))
+    ciphertext :: jet_vault_encrypt_impl(recipients, plaintext.0) ?? return Err(JetVaultError.Locked)
+    temp :: vault_linux_openat(dirfd, ".", VAULT_O_RDWR | VAULT_O_TMPFILE, 0o600) ?? {
+        code :: err.raw_os_error()
+        if code == 38 || code == 22 || code == 95 -> return Err(JetVaultError.UnsupportedProvider)
+        return Err(JetVaultError.IO{operation: "create", redacted_path: "<vault-temp>"})
+    }
+    temp.write_all(ciphertext) ?? return Err(JetVaultError.IO{operation: "write", redacted_path: "<vault-store>"})
+    temp.sync_all() ?? return Err(JetVaultError.IO{operation: "fsync", redacted_path: "<vault-store>"})
+    staged_ciphertext :: vault_read_file(temp) ?? return Err(err)
+    (staged, _, staged_kind) :: vault_decode_ciphertext_at(root, staged_ciphertext) ?? return Err(err)
+    if staged_kind != .V2 || staged.repo_uuid != store.repo_uuid || staged.revision != store.revision || (jet_vault_encode_v2(staged) ?? return Err(err)) != plaintext.0 -> return Err(JetVaultError.InvalidEncoding)
+    if vault_test_fault("cancel-before-install") -> return Err(JetVaultError.Conflict)
+    (recheck, recheck_hash, recheck_provider, recheck_kind) :: vault_read_at(root) ?? return Err(err)
+    if recheck_hash != start_hash || recheck_provider != provider_hash || recheck_kind != start_kind || recheck.revision != start_revision -> return Err(JetVaultError.Conflict)
+    current_file :: if start_kind == .Absent { None } else {
+        file :: vault_linux_openat(dirfd, "secrets.age", 0, 0) ?? return Err(JetVaultError.Conflict)
+        (state, hash, kind) :: vault_decode_ciphertext_at(root, vault_read_file(file) ?? return Err(err)) ?? return Err(err)
+        if hash != start_hash || kind != start_kind || state.revision != start_revision -> return Err(JetVaultError.Conflict)
+        Val(^file)
+    }
+    if current_file == .Val(file) {
+        vault_linux_link_file(file, dirfd, ".secrets.age.backup") ?? return Err(err)
+        vault_test_pause_after_backup(root)
+    }
+    nonce :: vault_random<16>() ?? return Err(err)
+    if nonce == [U8; 16].filled(0) -> return Err(JetVaultError.Internal{incident_id: "vault-zero-temp-nonce"})
+    next_name :: ".secrets.age.next.{hex_bytes(nonce)}"
+    vault_linux_link_file(temp, dirfd, next_name) ?? return Err(err)
+    #If(test) {
+        if vault_test_fault("substitute-temp-before-install") {
+            (_, _, dir_path) :: vault_paths(root)
+            stolen :: dir_path.join("{next_name}.held")
+            fs.rename(dir_path.join(next_name), stolen) ?? return Err(JetVaultError.Conflict)
+            fs.write(dir_path.join(next_name), "substituted".as_bytes()) ?? return Err(JetVaultError.Conflict)
+        }
+    }
+    visible :: vault_linux_openat(dirfd, next_name, 0, 0) ?? return Err(JetVaultError.Conflict)
+    if !vault_same_inode(visible, temp) -> return Err(JetVaultError.Conflict)
+    vault_linux_rename(dirfd, next_name, "secrets.age", if start_kind == .Absent { VAULT_RENAME_NOREPLACE } else { VAULT_RENAME_EXCHANGE }) ?? return Err(err)
+    installed :: vault_linux_openat(dirfd, "secrets.age", 0, 0) ?? return Err(JetVaultError.DurabilityUnknown)
+    if !vault_same_inode(installed, temp) {
+        if start_kind != .Absent -> _ :: vault_linux_rename(dirfd, next_name, "secrets.age", VAULT_RENAME_EXCHANGE)
+        return Err(JetVaultError.DurabilityUnknown)
+    }
+    installed_bytes :: vault_read_file(installed) ?? return Err(err)
+    (installed_store, _, installed_kind) :: vault_decode_ciphertext_at(root, installed_bytes) ?? return Err(JetVaultError.DurabilityUnknown)
+    if installed_kind != .V2 || installed_store.repo_uuid != store.repo_uuid || installed_store.revision != store.revision || (jet_vault_encode_v2(installed_store) ?? return Err(JetVaultError.DurabilityUnknown)) != plaintext.0 -> return Err(JetVaultError.DurabilityUnknown)
+    if current_file == .Val(file) {
+        if !(vault_remove_exact(dir_file, next_name, file, "{next_name}.old") ?? return Err(err)) -> return Err(JetVaultError.DurabilityUnknown)
+    }
+    if vault_test_fault("durability-after-install") -> return Err(JetVaultError.DurabilityUnknown)
+    dir_file.sync_all() ?? return Err(JetVaultError.DurabilityUnknown)
+    if current_file == .Val(file) {
+        if !(vault_remove_exact(dir_file, ".secrets.age.backup", file, ".secrets.age.backup.done.{hex_bytes(nonce)}") ?? return Err(err)) -> return Err(JetVaultError.DurabilityUnknown)
+        dir_file.sync_all() ?? return Err(JetVaultError.DurabilityUnknown)
+    }
+    _ :: vault_test_fault("cancel-after-install")
+    // lock remains owned through directory durability and backup cleanup.
+    Ok()
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2877
+fn vault_test_fault(name: String) -> Bool {
+    #If(test) { return VAULT_TEST_FAULT.with((slot) -> slot.borrow().as_ref().is_some_and((fault) -> fault == name)) }
+    false
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2907
+fn vault_test_pause_after_backup(root: OSPath) -> {
+    #If(test) {
+        saved :: (VAULT_TEST_BACKUP_BARRIER.lock() ?? panic("unwrap failed")).clone()
+        if saved == .Val(tuple) && tuple.0 == root {
+            tuple.1.wait()
+            tuple.2.wait()
+        }
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2918
+fn hex_bytes(bytes: [U8]) -> String { bytes.iter().map((byte) -> format("{:02x}", byte)).collect() }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2934
+pub fn jet_vault_strings_from_plaintext(plaintext: [U8]) -> [(String, String)] JetVaultError! {
+    if plaintext.starts_with(JVLT_MAGIC) {
+        store := jet_vault_decode_v2(plaintext) ?? return Err(err)
+        return &store.strings.take()
+    }
+    pairs :: jet_vault_decode_pairs(plaintext) ?? return Err(JetVaultError.InvalidEncoding)
+    (vault_canonical_pairs(^pairs) ?? return Err(err)).0
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2945
+pub fn jet_vault_replace_strings_at(root: OSPath, pairs: ^[(String, String)]) -> () JetVaultError! {
+    (canonical, _) :: vault_canonical_pairs(^pairs) ?? return Err(err)
+    (store, start_hash, provider_hash, start_kind) := vault_read_at(root) ?? return Err(err)
+    if start_kind != .V2 -> return Err(JetVaultError.InvalidEncoding)
+    lock :: vault_acquire_lock(root, store.repo_uuid, store.revision, start_hash) ?? return Err(err)
+    (current, current_hash, current_provider, current_kind) :: vault_read_at(root) ?? return Err(err)
+    if current_hash != start_hash || current_provider != provider_hash || current_kind != .V2 || current.repo_uuid != store.repo_uuid || current.revision != store.revision -> return Err(JetVaultError.Conflict)
+    loop (_, value) in &store.strings -> #Unsafe("securely erase replaced vault strings before releasing storage") { zeroize(value.as_mut_vec()) }
+    store.strings = ^canonical
+    start_revision :: store.revision
+    store.revision = store.revision.checked_add(1) ?? return Err(JetVaultError.Internal{incident_id: "vault-revision"})
+    vault_write_at(root, store, start_hash, provider_hash, start_kind, start_revision, ^lock)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2985
+pub fn jet_vault_replace_strings_impl(pairs: ^[(String, String)]) -> () JetVaultError! { jet_vault_replace_strings_at(OSPath.from("."), ^pairs) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:2989
+pub fn jet_vault_commit_generate_at<T: JetVaultKey>(root: OSPath, plan: ^JetVaultMutationPlan<T>, write: ^JetVaultWrite<T>) -> JetVaultKeyRef<T> JetVaultError! { (vault_commit_at(root, ^plan, ^write, .Generate) ?? return Err(err)).1 ?? return Err(JetVaultError.Internal{incident_id: "vault-generate"}) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3000
+pub fn jet_vault_commit_store_at<T: JetVaultKey>(root: OSPath, plan: ^JetVaultMutationPlan<T>, write: ^JetVaultWrite<T>) -> JetVaultKeyRef<T> JetVaultError! { (vault_commit_at(root, ^plan, ^write, .Store) ?? return Err(err)).1 ?? return Err(JetVaultError.Internal{incident_id: "vault-store"}) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3011
+fn jet_vault_commit_raw_import_at<T: JetVaultKey>(root: OSPath, plan: ^JetVaultMutationPlan<T>, write: ^JetVaultWrite<T>) -> JetVaultKeyRef<T> JetVaultError! { (vault_commit_at(root, ^plan, ^write, .RawImport) ?? return Err(err)).1 ?? return Err(JetVaultError.Internal{incident_id: "vault-raw-import"}) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3022
+pub fn jet_vault_commit_rotate_at<T: JetVaultKey>(root: OSPath, plan: ^JetVaultMutationPlan<T>, write: ^JetVaultWrite<T>) -> JetVaultRotation<T> JetVaultError! {
+    (previous, current) :: vault_commit_at(root, ^plan, ^write, .Rotate) ?? return Err(err)
+    JetVaultRotation{previous: previous ?? return Err(JetVaultError.NotFound), current: current ?? return Err(JetVaultError.Internal{incident_id: "vault-rotate"})}
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3035
+pub fn jet_vault_commit_retire_at<T: JetVaultKey>(root: OSPath, plan: ^JetVaultMutationPlan<T>, write: ^JetVaultWrite<T>) -> () JetVaultError! {
+    _ :: vault_commit_at(root, ^plan, ^write, .Retire) ?? return Err(err)
+    Ok()
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3042
+pub fn jet_vault_commit_revoke_at<T: JetVaultKey>(root: OSPath, plan: ^JetVaultMutationPlan<T>, write: ^JetVaultWrite<T>) -> () JetVaultError! {
+    _ :: vault_commit_at(root, ^plan, ^write, .Revoke) ?? return Err(err)
+    Ok()
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3050
+fn vault_cwd() -> OSPath { OSPath.from(".") }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3053
+pub fn jet_vault_current_impl<T: JetVaultKey>(name: String) -> JetVaultKeyRef<T>? JetVaultError! { jet_vault_current_at<T>(vault_cwd(), name) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3058
+pub fn jet_vault_versions_impl<T: JetVaultKey>(name: String) -> [JetVaultKeyRef<T>] JetVaultError! { jet_vault_versions_at<T>(vault_cwd(), name) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3063
+pub fn jet_vault_load_impl<T: JetVaultKey>(key_ref: JetVaultKeyRef<T>) -> T JetVaultError! { jet_vault_load_at<T>(vault_cwd(), key_ref) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3068
+pub fn jet_vault_status_impl<T: JetVaultKey>(key_ref: JetVaultKeyRef<T>) -> JetVaultKeyStatus JetVaultError! { jet_vault_status_at<T>(vault_cwd(), key_ref) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3073
+pub fn jet_vault_prepare_generate_impl<T: JetVaultKey>(name: String) -> JetVaultMutationPlan<T> JetVaultError! { jet_vault_prepare_generate_at<T>(vault_cwd(), name) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3078
+pub fn jet_vault_prepare_store_impl<T: JetVaultKey>(name: String, key: ^T) -> JetVaultMutationPlan<T> JetVaultError! { jet_vault_prepare_store_at<T>(vault_cwd(), name, ^key) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3084
+pub fn jet_vault_prepare_rotate_impl<T: JetVaultKey>(name: String) -> JetVaultMutationPlan<T> JetVaultError! { jet_vault_prepare_rotate_at<T>(vault_cwd(), name) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3089
+pub fn jet_vault_prepare_retire_impl<T: JetVaultKey>(key_ref: JetVaultKeyRef<T>, reason: String) -> JetVaultMutationPlan<T> JetVaultError! { jet_vault_prepare_retire_at<T>(vault_cwd(), key_ref, reason) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3095
+pub fn jet_vault_prepare_revoke_impl<T: JetVaultKey>(key_ref: JetVaultKeyRef<T>, reason: String) -> JetVaultMutationPlan<T> JetVaultError! { jet_vault_prepare_revoke_at<T>(vault_cwd(), key_ref, reason) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3101
+pub fn jet_vault_commit_generate_impl<T: JetVaultKey>(write: ^JetVaultWrite<T>, plan: ^JetVaultMutationPlan<T>) -> JetVaultKeyRef<T> JetVaultError! { jet_vault_commit_generate_at(vault_cwd(), ^plan, ^write) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3107
+pub fn jet_vault_commit_store_impl<T: JetVaultKey>(write: ^JetVaultWrite<T>, plan: ^JetVaultMutationPlan<T>) -> JetVaultKeyRef<T> JetVaultError! { jet_vault_commit_store_at(vault_cwd(), ^plan, ^write) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3113
+pub fn jet_vault_commit_rotate_impl<T: JetVaultKey>(write: ^JetVaultWrite<T>, plan: ^JetVaultMutationPlan<T>) -> JetVaultRotation<T> JetVaultError! { jet_vault_commit_rotate_at(vault_cwd(), ^plan, ^write) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3119
+pub fn jet_vault_commit_retire_impl<T: JetVaultKey>(write: ^JetVaultWrite<T>, plan: ^JetVaultMutationPlan<T>) -> () JetVaultError! { jet_vault_commit_retire_at(vault_cwd(), ^plan, ^write) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3125
+pub fn jet_vault_commit_revoke_impl<T: JetVaultKey>(write: ^JetVaultWrite<T>, plan: ^JetVaultMutationPlan<T>) -> () JetVaultError! { jet_vault_commit_revoke_at(vault_cwd(), ^plan, ^write) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3131
+pub fn jet_vault_expert_prepare_import_signing_impl(name: String, bytes: ^[U8]) -> JetVaultMutationPlan<JetSigningKey> JetVaultError! {
+    guarded := Zeroizing(^bytes)
+    if guarded.0.len() != 32 -> return Err(JetVaultError.InvalidEncoding)
+    key :: JetSigningKey.from_bytes(&guarded.0.take()) ?? return Err(err)
+    jet_vault_prepare_raw_import_at(vault_cwd(), name, ^key)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3142
+pub fn jet_vault_expert_prepare_import_x25519_impl(name: String, bytes: ^[U8]) -> JetVaultMutationPlan<JetX25519SecretKey> JetVaultError! {
+    guarded := Zeroizing(^bytes)
+    if guarded.0.len() != 32 -> return Err(JetVaultError.InvalidEncoding)
+    key :: JetX25519SecretKey.from_bytes(&guarded.0.take()) ?? return Err(err)
+    jet_vault_prepare_raw_import_at(vault_cwd(), name, ^key)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3153
+pub fn jet_vault_expert_commit_import_signing_impl(write: ^JetVaultWrite<JetSigningKey>, plan: ^JetVaultMutationPlan<JetSigningKey>) -> JetVaultKeyRef<JetSigningKey> JetVaultError! { jet_vault_commit_raw_import_at(vault_cwd(), ^plan, ^write) }
+// Rust: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:3159
+pub fn jet_vault_expert_commit_import_x25519_impl(write: ^JetVaultWrite<JetX25519SecretKey>, plan: ^JetVaultMutationPlan<JetX25519SecretKey>) -> JetVaultKeyRef<JetX25519SecretKey> JetVaultError! { jet_vault_commit_raw_import_at(vault_cwd(), ^plan, ^write) }
+
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:1
+// D-CRYPTO-KEYWRAP1=A: canonical JVKW/v1 portable backup for typed vault keys.
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:5
+JVKW_MAGIC :: "JVKW".as_bytes()
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:6
+JVKW_VERSION :: U8{1}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:7
+JVKW_MAX :: 8_192
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:8
+JVKW_PAYLOAD_LEN :: 64
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:9
+JVKW_TAG_LEN :: 16
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:10
+JVKW_RECIPIENT_STANZA_LEN :: 80
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:14
+#Clone
+#Copy
+#Equatable
+pub enum JetVaultKeyWrapMode { Recipient = 1, Passphrase = 2 }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:17
+#Error
+#Clone
+#Equatable
+pub enum JetVaultKeyWrapError {
+    InvalidEncoding, UnsupportedVersion, UnsupportedMode, UnsupportedKeyType, InvalidLength, WeakPassphrase, OpenFailed, EntropyUnavailable, ResourceUnavailable,
+    Vault(JetVaultError), Internal(incident_id: String)
+}
+impl JetVaultKeyWrapError {
+    // Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:32
+    fn to_string(self) -> String {
+        if self == {
+            .InvalidEncoding -> "invalid wrapped vault key encoding"
+            .UnsupportedVersion -> "unsupported wrapped vault key version"
+            .UnsupportedMode -> "unsupported wrapped vault key mode"
+            .UnsupportedKeyType -> "unsupported wrapped vault key type"
+            .InvalidLength -> "invalid wrapped vault key length"
+            .WeakPassphrase -> "recovery passphrase must contain 16..=1048576 bytes"
+            .OpenFailed -> "open failed"
+            .EntropyUnavailable -> "the operating system could not provide cryptographic randomness"
+            .ResourceUnavailable -> "cryptographic resource unavailable"
+            .Vault(error) -> error.to_string()
+            .Internal(incident_id) -> "internal key-wrap failure; incident {incident_id}"
+        }
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:50
+    fn from(error: JetVaultError) -> Self { .Vault(^error) }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:54
+#Clone
+#Equatable
+pub struct JetWrappedVaultKey { bytes: [U8], mode: JetVaultKeyWrapMode, key_type: U8, origin_name: String, origin_generation: U64, header_len: USize }
+impl JetWrappedVaultKey {
+    // Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:64
+    pub fn from_bytes(bytes: ^[U8]) -> Self JetVaultKeyWrapError! {
+        parsed :: jvkw_parse(bytes) ?? return Err(err)
+        Self{bytes: ^bytes, mode: parsed.mode, key_type: parsed.key_type, origin_name: ^parsed.origin.name, origin_generation: parsed.origin.generation, header_len: parsed.header_end - 16}
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:75
+    pub fn bytes(self) -> [U8] { ~self.bytes }
+    // Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:76
+    pub fn mode(self) -> JetVaultKeyWrapMode { self.mode }
+    // Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:77
+    pub fn key_type(self) -> U8 { self.key_type }
+    // Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:78
+    pub fn header_len(self) -> USize { self.header_len }
+    // Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:82
+    pub fn to_string(self) -> String {
+        mode :: if self.mode == .Recipient { "recipient" } else { "passphrase" }
+        key_type :: if self.key_type == 1 { "signing" } else if self.key_type == 2 { "x25519" } else { "unsupported" }
+        "WrappedVaultKey(mode:{mode},type:{key_type},origin:{self.origin_name}@v{self.origin_generation})"
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:89
+    fn debug(self) -> String { self.to_string() }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:94
+#Clone
+#Copy
+pub enum JetVaultKeyUnlock { Recipient(@JetX25519SecretKey), Passphrase(@Secret) }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:100
+#Clone
+#Copy
+ enum JvkwModeHeader { Recipient(count: USize, ephemeral: [U8; 32], salt: [U8; 16], stanzas_at: USize), Passphrase(salt: [U8; 16]) }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:105
+struct JvkwParsed { mode: JetVaultKeyWrapMode, key_type: U8, origin: JetVaultOrigin, export_id: [U8; 16], payload_nonce: [U8; 24], header_end: USize, mode_header: JvkwModeHeader }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:114
+fn jvkw_take(bytes: [U8], at: &USize, count: USize) -> View<U8> JetVaultKeyWrapError! {
+    end :: at.checked_add(count) ?? return Err(JetVaultKeyWrapError.InvalidLength)
+    if end > bytes.len() -> return Err(JetVaultKeyWrapError.InvalidLength)
+    value :: bytes[at..<end]
+    at = end
+    value
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:120
+fn jvkw_u16(bytes: [U8], at: &USize) -> USize JetVaultKeyWrapError! { U16.from_le_bytes((jvkw_take(bytes, at, 2) ?? return Err(err)).try_into() ?? panic("unwrap failed")) as USize }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:121
+fn jvkw_u32(bytes: [U8], at: &USize) -> USize JetVaultKeyWrapError! { U32.from_le_bytes((jvkw_take(bytes, at, 4) ?? return Err(err)).try_into() ?? panic("unwrap failed")) as USize }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:122
+fn jvkw_u64(bytes: [U8], at: &USize) -> U64 JetVaultKeyWrapError! { U64.from_le_bytes((jvkw_take(bytes, at, 8) ?? return Err(err)).try_into() ?? panic("unwrap failed")) }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:123
+fn jvkw_array<const N: USize>(bytes: [U8], at: &USize) -> [U8; N] JetVaultKeyWrapError! { (jvkw_take(bytes, at, N) ?? return Err(err)).try_into() ?? return Err(JetVaultKeyWrapError.InvalidLength) }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:125
+fn jvkw_parse(bytes: [U8]) -> JvkwParsed JetVaultKeyWrapError! {
+    if bytes.len() > JVKW_MAX || bytes.len() < 16 -> return Err(JetVaultKeyWrapError.InvalidLength)
+    if bytes[0..<4] != JVKW_MAGIC -> return Err(JetVaultKeyWrapError.InvalidEncoding)
+    if bytes[4] != JVKW_VERSION -> return Err(JetVaultKeyWrapError.UnsupportedVersion)
+    mode :: if bytes[5] == 1 { JetVaultKeyWrapMode.Recipient } else if bytes[5] == 2 { JetVaultKeyWrapMode.Passphrase } else { return Err(JetVaultKeyWrapError.UnsupportedMode) }
+    key_type :: bytes[6]
+    if key_type != 1 && key_type != 2 -> return Err(JetVaultKeyWrapError.UnsupportedKeyType)
+    if bytes[7] != 0 -> return Err(JetVaultKeyWrapError.InvalidEncoding)
+    fixed_at := USize{8}
+    header_len :: jvkw_u32(bytes, &fixed_at) ?? return Err(err)
+    ciphertext_len :: jvkw_u32(bytes, &fixed_at) ?? return Err(err)
+    if ciphertext_len != JVKW_PAYLOAD_LEN -> return Err(JetVaultKeyWrapError.InvalidLength)
+    header_end :: USize{16}.checked_add(header_len) ?? return Err(JetVaultKeyWrapError.InvalidLength)
+    expected :: header_end.checked_add(JVKW_PAYLOAD_LEN + JVKW_TAG_LEN) ?? return Err(JetVaultKeyWrapError.InvalidLength)
+    if expected != bytes.len() || expected > JVKW_MAX -> return Err(JetVaultKeyWrapError.InvalidLength)
+    at := USize{16}
+    repo_uuid :: jvkw_array<16>(bytes, &at) ?? return Err(err)
+    name_len :: jvkw_u16(bytes, &at) ?? return Err(err)
+    if name_len < 1 || name_len > 128 -> return Err(JetVaultKeyWrapError.InvalidLength)
+    name :: String.from_utf8((jvkw_take(bytes, &at, name_len) ?? return Err(err)).to_vec()) ?? return Err(JetVaultKeyWrapError.InvalidEncoding)
+    jet_vault_validate_name(name) ?? return Err(JetVaultKeyWrapError.InvalidEncoding)
+    generation :: jvkw_u64(bytes, &at) ?? return Err(err)
+    opaque_id :: jvkw_array<16>(bytes, &at) ?? return Err(err)
+    record_hash :: jvkw_array<32>(bytes, &at) ?? return Err(err)
+    _created_unix_ms :: jvkw_u64(bytes, &at) ?? return Err(err)
+    export_id :: jvkw_array<16>(bytes, &at) ?? return Err(err)
+    payload_nonce :: jvkw_array<24>(bytes, &at) ?? return Err(err)
+    if repo_uuid == [U8; 16].filled(0) || generation == 0 || opaque_id == [U8; 16].filled(0) || record_hash == [U8; 32].filled(0) || export_id == [U8; 16].filled(0) -> return Err(JetVaultKeyWrapError.InvalidEncoding)
+    mode_header :: if mode == .Recipient {
+        count :: jvkw_u16(bytes, &at) ?? return Err(err)
+        if count < 1 || count > 16 -> return Err(JetVaultKeyWrapError.InvalidLength)
+        ephemeral :: jvkw_array<32>(bytes, &at) ?? return Err(err)
+        salt :: jvkw_array<16>(bytes, &at) ?? return Err(err)
+        stanzas_at :: at
+        previous := ([U8; 32])?{None}
+        loop _ in 0..<count {
+            recipient :: jvkw_array<32>(bytes, &at) ?? return Err(err)
+            _ :: jvkw_take(bytes, &at, 48) ?? return Err(err)
+            if previous == .Val(prior) && prior >= recipient -> return Err(JetVaultKeyWrapError.InvalidEncoding)
+            previous = Val(recipient)
+        }
+        JvkwModeHeader.Recipient(count, ephemeral, salt, stanzas_at)
+    } else {
+        salt :: jvkw_array<16>(bytes, &at) ?? return Err(err)
+        if (jvkw_u32(bytes, &at) ?? return Err(err)) != 65_536 || (jvkw_u32(bytes, &at) ?? return Err(err)) != 3 || (jvkw_take(bytes, &at, 1) ?? return Err(err))[0] != 1 || (jvkw_take(bytes, &at, 3) ?? return Err(err)) != [U8]{0, 0, 0} -> return Err(JetVaultKeyWrapError.InvalidEncoding)
+        JvkwModeHeader.Passphrase(salt)
+    }
+    if at != header_end -> return Err(JetVaultKeyWrapError.InvalidLength)
+    JvkwParsed{mode: mode, key_type: key_type, origin: JetVaultOrigin{repo_uuid: repo_uuid, name: ^name, generation: generation, opaque_id: opaque_id, record_hash: record_hash}, export_id: export_id, payload_nonce: payload_nonce, header_end: header_end, mode_header: mode_header}
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:182
+pub fn jet_vault_wrapped_from_bytes_impl(bytes: ^[U8]) -> JetWrappedVaultKey JetVaultKeyWrapError! { JetWrappedVaultKey.from_bytes(^bytes) }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:183
+pub fn jet_vault_wrapped_bytes_impl(wrapped: JetWrappedVaultKey) -> [U8] { wrapped.bytes() }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:184
+pub fn jet_vault_unlock_recipient_impl(identity: @JetX25519SecretKey) -> JetVaultKeyUnlock { .Recipient(identity) }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:185
+pub fn jet_vault_unlock_passphrase_impl(passphrase: @Secret) -> JetVaultKeyUnlock { .Passphrase(passphrase) }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:187
+fn jvkw_push_u16(out: &[U8], value: USize) -> () JetVaultKeyWrapError! {
+    &out.extend_from_slice((U16.try_from(value) ?? return Err(JetVaultKeyWrapError.InvalidLength)).to_le_bytes())
+    Ok()
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:191
+fn jvkw_push_u32(out: &[U8], value: USize) -> () JetVaultKeyWrapError! {
+    &out.extend_from_slice((U32.try_from(value) ?? return Err(JetVaultKeyWrapError.InvalidLength)).to_le_bytes())
+    Ok()
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:195
+fn jvkw_random<const N: USize>() -> Zeroizing<[U8; N]> JetVaultKeyWrapError! {
+    bytes := Zeroizing([U8; N].filled(0))
+    jet_crypto_entropy_fill(&bytes.0) ?? return Err(JetVaultKeyWrapError.EntropyUnavailable)
+    bytes
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:217
+fn jvkw_now_ms() -> U64 JetVaultKeyWrapError! {
+    #If(test) { if JVKW_TEST_TIME.with((slot) -> slot.get()) == .Val(value) -> return value }
+    U64.try_from((SystemTime.now().duration_since(UNIX_EPOCH) ?? return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-clock"})).as_millis()) ?? return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-clock"})
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:223
+fn jvkw_fixed(mode: JetVaultKeyWrapMode, key_type: U8, header_len: USize) -> [U8] JetVaultKeyWrapError! {
+    out := [U8].with_capacity(16 + header_len + JVKW_PAYLOAD_LEN + JVKW_TAG_LEN)
+    &out.extend_from_slice(JVKW_MAGIC)
+    &out.extend_from_slice([U8]{JVKW_VERSION, mode as U8, key_type, 0})
+    jvkw_push_u32(&out, header_len) ?? return Err(err)
+    jvkw_push_u32(&out, JVKW_PAYLOAD_LEN) ?? return Err(err)
+    out
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:232
+fn jvkw_common(out: &[U8], reference_repo: [U8; 16], name: String, generation: U64, opaque_id: [U8; 16], record_hash: [U8; 32], created_unix_ms: U64, export_id: [U8; 16], payload_nonce: [U8; 24]) -> () JetVaultKeyWrapError! {
+    &out.extend_from_slice(reference_repo)
+    jvkw_push_u16(out, name.len()) ?? return Err(err)
+    &out.extend_from_slice(name.as_bytes())
+    &out.extend_from_slice(generation.to_le_bytes())
+    &out.extend_from_slice(opaque_id)
+    &out.extend_from_slice(record_hash)
+    &out.extend_from_slice(created_unix_ms.to_le_bytes())
+    &out.extend_from_slice(export_id)
+    &out.extend_from_slice(payload_nonce)
+    Ok()
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:255
+fn jvkw_source<T: JetVaultKey>(root: OSPath, reference: JetVaultKeyRef<T>) -> (JetVaultOrigin, Zeroizing<[U8]>, [U8; 32]) JetVaultKeyWrapError! {
+    (store, _, _) :: vault_read_contents_at(root) ?? return Err(JetVaultKeyWrapError.Vault(err))
+    record :: vault_find(store, reference) ?? return Err(JetVaultKeyWrapError.Vault(err))
+    if record.status == .Revoked -> return Err(JetVaultKeyWrapError.Vault(JetVaultError.Revoked))
+    origin :: JetVaultOrigin{repo_uuid: reference.repo_uuid, name: ~reference.name, generation: reference.generation, opaque_id: reference.opaque_id, record_hash: reference.record_hash}
+    key :: Zeroizing(~record.key)
+    typed :: T.from_bytes(~key.0) ?? return Err(JetVaultKeyWrapError.Vault(err))
+    public :: typed.public_bytes().try_into() ?? return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-public"})
+    (^origin, ^key, public)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:266
+fn jvkw_seal_payload(header: ^[U8], backup_key: [U8; 32], nonce: [U8; 24], key: [U8], public: [U8; 32]) -> JetWrappedVaultKey JetVaultKeyWrapError! {
+    payload := Zeroizing([U8].with_capacity(64))
+    &payload.0.extend_from_slice(key)
+    &payload.0.extend_from_slice(public)
+    if payload.0.len() != JVKW_PAYLOAD_LEN -> return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-payload"})
+    aad := "JVKW1 payload".into_bytes()
+    &aad.extend_from_slice(header)
+    cipher :: XChaCha20Poly1305.new_from_slice(backup_key) ?? return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-payload-key"})
+    ciphertext :: cipher.encrypt(XNonce.from_slice(nonce), Payload{msg: payload.0, aad: aad}) ?? return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-payload-seal"})
+    &header.extend_from_slice(ciphertext)
+    JetWrappedVaultKey.from_bytes(^header)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:280
+pub fn jet_vault_export_to_recipients_at<T: JetVaultKey>(root: OSPath, reference: JetVaultKeyRef<T>, recipients: [JetX25519PublicKey]) -> JetWrappedVaultKey JetVaultKeyWrapError! {
+    jvkw_provider_preflight(root) ?? return Err(err)
+    if recipients.len() < 1 || recipients.len() > 16 -> return Err(JetVaultKeyWrapError.InvalidLength)
+    (origin, key, public) :: jvkw_source(root, reference) ?? return Err(err)
+    wrapped :: jvkw_export_to_recipients<T>(~origin, ^key, public, jvkw_now_ms() ?? return Err(err), recipients) ?? return Err(err)
+    vault_audit_append_at(root, "export", "recipient", "BearerCopy", T.TAG, origin, None) ?? return Err(JetVaultKeyWrapError.Vault(err))
+    wrapped
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:292
+fn jvkw_export_to_recipients<T: JetVaultKey>(origin: ^JetVaultOrigin, key: ^Zeroizing<[U8]>, public: [U8; 32], created_unix_ms: U64, recipients: [JetX25519PublicKey]) -> JetWrappedVaultKey JetVaultKeyWrapError! {
+    sorted := recipients.iter().map((recipient) -> recipient.0).collect()
+    &sorted.sort()
+    if sorted.windows(2).any((pair) -> pair[0] == pair[1]) -> return Err(JetVaultKeyWrapError.InvalidEncoding)
+    backup_key :: jvkw_random<32>() ?? return Err(err)
+    payload_nonce :: jvkw_random<24>() ?? return Err(err)
+    export_id :: jvkw_random<16>() ?? return Err(err)
+    ephemeral_secret :: jvkw_random<32>() ?? return Err(err)
+    salt :: jvkw_random<16>() ?? return Err(err)
+    if backup_key.0 == [U8; 32].filled(0) || export_id.0 == [U8; 16].filled(0) -> return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-zero-random"})
+    ephemeral_public :: x25519.x25519(ephemeral_secret.0, x25519.X25519_BASEPOINT_BYTES)
+    common_len :: USize{122}.checked_add(origin.name.len()) ?? return Err(JetVaultKeyWrapError.InvalidLength)
+    header_len :: common_len.checked_add(50 + sorted.len() * JVKW_RECIPIENT_STANZA_LEN) ?? return Err(JetVaultKeyWrapError.InvalidLength)
+    header := jvkw_fixed(.Recipient, T.TAG, header_len) ?? return Err(err)
+    jvkw_common(&header, origin.repo_uuid, origin.name, origin.generation, origin.opaque_id, origin.record_hash, created_unix_ms, export_id.0, payload_nonce.0) ?? return Err(err)
+    jvkw_push_u16(&header, sorted.len()) ?? return Err(err)
+    &header.extend_from_slice(ephemeral_public)
+    &header.extend_from_slice(salt.0)
+    stanza_prefix :: ~header
+    loop recipient in sorted {
+        shared :: Zeroizing(x25519_checked(ephemeral_secret.0, recipient) ?? return Err(JetVaultKeyWrapError.OpenFailed))
+        key_info := "JVKW1 recipient key".into_bytes()
+        &key_info.extend_from_slice(export_id.0)
+        &key_info.extend_from_slice(ephemeral_public)
+        &key_info.extend_from_slice(recipient)
+        nonce_info := "JVKW1 recipient nonce".into_bytes()
+        &nonce_info.extend_from_slice(export_id.0)
+        &nonce_info.extend_from_slice(ephemeral_public)
+        &nonce_info.extend_from_slice(recipient)
+        kek :: Zeroizing(hkdf32(shared.0, salt.0, key_info) ?? return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-recipient-kdf"}))
+        nonce :: Zeroizing(hkdf24(shared.0, salt.0, nonce_info) ?? return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-recipient-kdf"}))
+        aad := "JVKW1 recipient aad".into_bytes()
+        &aad.extend_from_slice(stanza_prefix)
+        &aad.extend_from_slice(recipient)
+        cipher :: XChaCha20Poly1305.new_from_slice(kek.0) ?? return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-recipient-key"})
+        wrapped :: cipher.encrypt(XNonce.from_slice(nonce.0), Payload{msg: backup_key.0, aad: aad}) ?? return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-recipient-seal"})
+        &header.extend_from_slice(recipient)
+        &header.extend_from_slice(wrapped)
+    }
+    jvkw_seal_payload(^header, backup_key.0, payload_nonce.0, key.0, public)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:334
+fn jvkw_argon(password: Secret, salt: [U8; 16], cancelled: fn() -> Bool, cancel_outcome: fn() -> (), wait_enter: fn() -> (), wait_leave: fn() -> ()) -> Zeroizing<[U8; 32]> JetVaultKeyWrapError! {
+    if password.0.len() < 16 || password.0.len() > 1_048_576 -> return Err(JetVaultKeyWrapError.WeakPassphrase)
+    params :: argon2.Params.new(65_536, 3, 1, Val(32)) ?? return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-argon-params"})
+    output :: jet_crypto_argon2id_run(password.0, salt, params, cancelled, wait_enter, wait_leave) ?? {
+        if err == {
+            .Cancelled -> {
+                cancel_outcome()
+                return Err(JetVaultKeyWrapError.Internal{incident_id: "cancel-returned"})
+            }
+            .ResourceUnavailable -> return Err(JetVaultKeyWrapError.ResourceUnavailable)
+            .Backend -> return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-argon-backend"})
+        }
+    }
+    key := Zeroizing([U8; 32].filled(0))
+    &key.0.copy_from_slice(output.0)
+    key
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:346
+pub fn jet_vault_export_to_passphrase_at<T: JetVaultKey>(root: OSPath, reference: JetVaultKeyRef<T>, passphrase: Secret) -> JetWrappedVaultKey JetVaultKeyWrapError! { jet_vault_export_to_passphrase_at_with_cancel(root, reference, passphrase, jet_crypto_never_cancelled, jet_crypto_ignore_cancel, jet_pwhash_wait_noop, jet_pwhash_wait_noop) }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:354
+fn jet_vault_export_to_passphrase_at_with_cancel<T: JetVaultKey>(root: OSPath, reference: JetVaultKeyRef<T>, passphrase: Secret, cancelled: fn() -> Bool, cancel_outcome: fn() -> (), wait_enter: fn() -> (), wait_leave: fn() -> ()) -> JetWrappedVaultKey JetVaultKeyWrapError! {
+    jvkw_provider_preflight(root) ?? return Err(err)
+    if passphrase.0.len() < 16 || passphrase.0.len() > 1_048_576 -> return Err(JetVaultKeyWrapError.WeakPassphrase)
+    (origin, key, public) :: jvkw_source(root, reference) ?? return Err(err)
+    wrapped :: jvkw_export_to_passphrase<T>(~origin, ^key, public, jvkw_now_ms() ?? return Err(err), passphrase, cancelled, cancel_outcome, wait_enter, wait_leave) ?? return Err(err)
+    vault_audit_append_at(root, "export", "passphrase", "BearerCopy", T.TAG, origin, None) ?? return Err(JetVaultKeyWrapError.Vault(err))
+    wrapped
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:370
+fn jvkw_export_to_passphrase<T: JetVaultKey>(origin: ^JetVaultOrigin, key: ^Zeroizing<[U8]>, public: [U8; 32], created_unix_ms: U64, passphrase: Secret, cancelled: fn() -> Bool, cancel_outcome: fn() -> (), wait_enter: fn() -> (), wait_leave: fn() -> ()) -> JetWrappedVaultKey JetVaultKeyWrapError! {
+    salt :: jvkw_random<16>() ?? return Err(err)
+    payload_nonce :: jvkw_random<24>() ?? return Err(err)
+    export_id :: jvkw_random<16>() ?? return Err(err)
+    if export_id.0 == [U8; 16].filled(0) -> return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-zero-random"})
+    backup_key :: jvkw_argon(passphrase, salt.0, cancelled, cancel_outcome, wait_enter, wait_leave) ?? return Err(err)
+    header_len :: USize{122}.checked_add(origin.name.len()).and_then((value) -> value.checked_add(28)) ?? return Err(JetVaultKeyWrapError.InvalidLength)
+    header := jvkw_fixed(.Passphrase, T.TAG, header_len) ?? return Err(err)
+    jvkw_common(&header, origin.repo_uuid, origin.name, origin.generation, origin.opaque_id, origin.record_hash, created_unix_ms, export_id.0, payload_nonce.0) ?? return Err(err)
+    &header.extend_from_slice(salt.0)
+    &header.extend_from_slice(U32{65_536}.to_le_bytes())
+    &header.extend_from_slice(U32{3}.to_le_bytes())
+    &header.extend_from_slice([U8]{1, 0, 0, 0})
+    jvkw_seal_payload(^header, backup_key.0, payload_nonce.0, key.0, public)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:393
+fn jvkw_open_recipient(parsed: JvkwParsed, bytes: [U8], identity: JetX25519SecretKey) -> Zeroizing<[U8; 32]> JetVaultKeyWrapError! {
+    #If(test) { JVKW_RECIPIENT_OPEN_COUNT.with((slot) -> slot.set(0)) }
+    (count, ephemeral, salt, stanzas_at) :: if parsed.mode_header == .Recipient(c, e, s, a) { (c, e, s, a) } else { return Err(JetVaultKeyWrapError.OpenFailed) }
+    private := Zeroizing([U8; 32].filled(0))
+    &private.0.copy_from_slice(identity.0)
+    own_public :: x25519.x25519(private.0, x25519.X25519_BASEPOINT_BYTES)
+    match_index :: (0..<count).find((index) -> {
+        start :: stanzas_at + index * JVKW_RECIPIENT_STANZA_LEN
+        Bool.from(bytes[start..<start + 32].ct_eq(own_public))
+    })
+    index :: match_index ?? 0
+    stanza_at :: stanzas_at + index * JVKW_RECIPIENT_STANZA_LEN
+    recipient_public :: bytes[stanza_at..<stanza_at + 32].try_into() ?? panic("unwrap failed")
+    #If(test) {
+        JVKW_RECIPIENT_OPEN_COUNT.with((slot) -> slot.set(slot.get() + 1))
+        JVKW_X25519_COUNT.with((slot) -> slot.set(slot.get() + 1))
+    }
+    shared :: Zeroizing(x25519_checked(private.0, ephemeral) ?? return Err(JetVaultKeyWrapError.OpenFailed))
+    key_info := "JVKW1 recipient key".into_bytes()
+    &key_info.extend_from_slice(parsed.export_id)
+    &key_info.extend_from_slice(ephemeral)
+    &key_info.extend_from_slice(recipient_public)
+    nonce_info := "JVKW1 recipient nonce".into_bytes()
+    &nonce_info.extend_from_slice(parsed.export_id)
+    &nonce_info.extend_from_slice(ephemeral)
+    &nonce_info.extend_from_slice(recipient_public)
+    #If(test) { JVKW_HKDF_COUNT.with((slot) -> slot.set(slot.get() + 1)) }
+    kek :: Zeroizing(hkdf32(shared.0, salt, key_info) ?? return Err(JetVaultKeyWrapError.OpenFailed))
+    #If(test) { JVKW_HKDF_COUNT.with((slot) -> slot.set(slot.get() + 1)) }
+    nonce :: Zeroizing(hkdf24(shared.0, salt, nonce_info) ?? return Err(JetVaultKeyWrapError.OpenFailed))
+    aad := "JVKW1 recipient aad".into_bytes()
+    &aad.extend_from_slice(bytes[0..<stanzas_at])
+    &aad.extend_from_slice(recipient_public)
+    #If(test) { JVKW_AEAD_COUNT.with((slot) -> slot.set(slot.get() + 1)) }
+    cipher :: XChaCha20Poly1305.new_from_slice(kek.0) ?? return Err(JetVaultKeyWrapError.OpenFailed)
+    opened := Zeroizing(cipher.decrypt(XNonce.from_slice(nonce.0), Payload{msg: bytes[stanza_at + 32..<stanza_at + 80], aad: aad}) ?? return Err(JetVaultKeyWrapError.OpenFailed))
+    if match_index == None -> return Err(JetVaultKeyWrapError.OpenFailed)
+    backup :: opened.0.as_slice().try_into() ?? return Err(JetVaultKeyWrapError.OpenFailed)
+    zeroize(&opened.0)
+    Zeroizing(backup)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:425
+fn jvkw_open<T: JetVaultKey>(wrapped: JetWrappedVaultKey, unlock: JetVaultKeyUnlock, cancelled: fn() -> Bool, cancel_outcome: fn() -> (), wait_enter: fn() -> (), wait_leave: fn() -> ()) -> (JvkwParsed, Zeroizing<[U8]>, [U8; 32]) JetVaultKeyWrapError! {
+    parsed :: jvkw_parse(wrapped.bytes) ?? return Err(err)
+    backup_key :: if (parsed.mode, unlock) == {
+        (.Recipient, .Recipient(identity)) -> jvkw_open_recipient(parsed, wrapped.bytes, identity) ?? return Err(err)
+        (.Passphrase, .Passphrase(passphrase)) -> {
+            salt :: if parsed.mode_header == .Passphrase(value) { value } else { return Err(JetVaultKeyWrapError.OpenFailed) }
+            #If(test) { JVKW_PASSPHRASE_OPEN_COUNT.with((slot) -> slot.set(slot.get() + 1)) }
+            jvkw_argon(passphrase, salt, cancelled, cancel_outcome, wait_enter, wait_leave) ?? {
+                if err == .WeakPassphrase || err == .ResourceUnavailable -> return Err(err)
+                return Err(JetVaultKeyWrapError.OpenFailed)
+            }
+        }
+        else -> { return Err(JetVaultKeyWrapError.OpenFailed) }
+    }
+    aad := "JVKW1 payload".into_bytes()
+    &aad.extend_from_slice(wrapped.bytes[0..<parsed.header_end])
+    cipher :: XChaCha20Poly1305.new_from_slice(backup_key.0) ?? return Err(JetVaultKeyWrapError.OpenFailed)
+    plaintext :: Zeroizing(cipher.decrypt(XNonce.from_slice(parsed.payload_nonce), Payload{msg: wrapped.bytes[parsed.header_end..], aad: aad}) ?? return Err(JetVaultKeyWrapError.OpenFailed))
+    if plaintext.0.len() != 64 || parsed.key_type != T.TAG -> return Err(JetVaultKeyWrapError.OpenFailed)
+    public :: plaintext.0[32..].try_into() ?? return Err(JetVaultKeyWrapError.OpenFailed)
+    key :: Zeroizing(~plaintext.0[0..<32])
+    typed :: T.from_bytes(~key.0) ?? return Err(JetVaultKeyWrapError.OpenFailed)
+    derived :: typed.public_bytes()
+    if derived.len() != 32 || !Bool.from(derived.ct_eq(public)) -> return Err(JetVaultKeyWrapError.OpenFailed)
+    (^parsed, ^key, public)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:450
+pub struct JetVaultWrappedImportPlan<T> {
+    name: String, key: Zeroizing<[U8]>, origin: JetVaultOrigin, mode: JetVaultKeyWrapMode, public_key_hash: [U8; 32], key_digest: [U8; 32], repo_uuid: [U8; 16], start_revision: U64, start_hash: [U8; 32], provider_hash: [U8; 32], start_kind: VaultStartKind, operation_hash: [U8; 32], existing: JetVaultKeyRef<T>?, destination_opaque_id: [U8; 16], transition_from: U64, transition_to: U64, issued: Instant, deadline: Instant, expires_unix_ms: U64
+}
+impl<T> JetVaultWrappedImportPlan<T> {
+    // Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:472
+    fn debug(self) -> String { "WrappedImportPlan(<redacted>)" }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:475
+pub fn jet_vault_prepare_import_wrapped_at<T: JetVaultKey>(root: OSPath, name: String, wrapped: ^JetWrappedVaultKey, unlock: JetVaultKeyUnlock) -> JetVaultWrappedImportPlan<T> JetVaultKeyWrapError! { jet_vault_prepare_import_wrapped_at_with_cancel<T>(root, name, ^wrapped, unlock, jet_crypto_never_cancelled, jet_crypto_ignore_cancel, jet_pwhash_wait_noop, jet_pwhash_wait_noop) }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:485
+fn jvkw_provider_preflight(root: OSPath) -> () JetVaultKeyWrapError! {
+    if sys.target.selected_os() == "linux" && sys.target.selected_env() == "gnu" && sys.target.selected_pointer_width() == 64 && (sys.target.selected_arch() == "x86_64" || sys.target.selected_arch() == "aarch64") {
+        drop(vault_linux_dir(root) ?? return Err(JetVaultKeyWrapError.Vault(err)))
+        return Ok()
+    }
+    Err(JetVaultKeyWrapError.Vault(JetVaultError.UnsupportedProvider))
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:490
+fn jet_vault_prepare_import_wrapped_at_with_cancel<T: JetVaultKey>(root: OSPath, name: String, wrapped: ^JetWrappedVaultKey, unlock: JetVaultKeyUnlock, cancelled: fn() -> Bool, cancel_outcome: fn() -> (), wait_enter: fn() -> (), wait_leave: fn() -> ()) -> JetVaultWrappedImportPlan<T> JetVaultKeyWrapError! {
+    jvkw_provider_preflight(root) ?? return Err(err)
+    jet_vault_validate_name(name) ?? return Err(JetVaultKeyWrapError.Vault(err))
+    wrapped_hash :: vault_hash(["JVKW1 wrapped bytes".as_bytes(), wrapped.bytes])
+    (parsed, key, public) :: jvkw_open<T>(wrapped, unlock, cancelled, cancel_outcome, wait_enter, wait_leave) ?? return Err(err)
+    public_key_hash :: vault_hash(["JVLT2 public key".as_bytes(), [U8]{T.TAG}, public])
+    key_digest :: vault_key_digest(T.TAG, key.0)
+    (store, start_hash, provider_hash, start_kind) := vault_read_at(root) ?? return Err(JetVaultKeyWrapError.Vault(err))
+    if start_kind != .V2 {
+        provisional :: jvkw_random<16>() ?? return Err(err)
+        if provisional.0 == [U8; 16].filled(0) -> return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-zero-uuid"})
+        store.repo_uuid = provisional.0
+    }
+    if store.keys.iter().any((record) -> record.name == name && record.key_type != T.TAG) -> return Err(JetVaultKeyWrapError.Vault(JetVaultError.WrongType))
+    same_origin :: if store.repo_uuid == parsed.origin.repo_uuid {
+        store.keys.iter().find((record) -> record.name == parsed.origin.name && record.generation == parsed.origin.generation && record.opaque_id == parsed.origin.opaque_id && record.record_hash == parsed.origin.record_hash)
+    } else { None }
+    existing :: if same_origin == .Val(record) {
+        if record.key_type != T.TAG || record.public_key_hash != public_key_hash || vault_key_digest(T.TAG, record.key) != key_digest -> return Err(JetVaultKeyWrapError.OpenFailed)
+        if record.status == .Revoked -> return Err(JetVaultKeyWrapError.Vault(JetVaultError.Revoked))
+        Val(vault_ref(store, record))
+    } else { None }
+    transition_from :: store.keys.iter().find((record) -> record.name == name && record.key_type == T.TAG && record.status == .Active).map((record) -> record.generation) ?? 0
+    transition_to :: if existing != None { transition_from } else { (store.keys.iter().filter((record) -> record.name == name && record.key_type == T.TAG).map((record) -> record.generation).max() ?? U64{0}).checked_add(1) ?? return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-generation"}) }
+    destination_opaque_id :: if existing != None { [U8; 16].filled(0) } else {
+        value :: jvkw_random<16>() ?? return Err(err)
+        if value.0 == [U8; 16].filled(0) -> return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-zero-id"})
+        value.0
+    }
+    operation := "JVKW1 import operation".into_bytes()
+    &operation.extend_from_slice(store.repo_uuid)
+    &operation.extend_from_slice(store.revision.to_le_bytes())
+    &operation.extend_from_slice(start_hash)
+    &operation.extend_from_slice(provider_hash)
+    &operation.push(T.TAG)
+    jvkw_push_u16(&operation, name.len()) ?? return Err(err)
+    &operation.extend_from_slice(name.as_bytes())
+    &operation.extend_from_slice(parsed.origin.repo_uuid)
+    jvkw_push_u16(&operation, parsed.origin.name.len()) ?? return Err(err)
+    &operation.extend_from_slice(parsed.origin.name.as_bytes())
+    &operation.extend_from_slice(parsed.origin.generation.to_le_bytes())
+    &operation.extend_from_slice(parsed.origin.opaque_id)
+    &operation.extend_from_slice(parsed.origin.record_hash)
+    &operation.extend_from_slice(public_key_hash)
+    &operation.extend_from_slice(key_digest)
+    &operation.extend_from_slice(wrapped_hash)
+    &operation.extend_from_slice(destination_opaque_id)
+    &operation.extend_from_slice(transition_from.to_le_bytes())
+    &operation.extend_from_slice(transition_to.to_le_bytes())
+    operation_hash :: vault_hash([operation])
+    issued :: Instant.now()
+    deadline :: issued.checked_add(Duration.from_secs(300)) ?? return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-deadline"})
+    expires_unix_ms :: (jvkw_now_ms() ?? return Err(err)).checked_add(300_000) ?? return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-deadline"})
+    JetVaultWrappedImportPlan{name: ~name, key: ^key, origin: ^parsed.origin, mode: parsed.mode, public_key_hash: public_key_hash, key_digest: key_digest, repo_uuid: store.repo_uuid, start_revision: store.revision, start_hash: start_hash, provider_hash: provider_hash, start_kind: start_kind, operation_hash: operation_hash, existing: ^existing, destination_opaque_id: destination_opaque_id, transition_from: transition_from, transition_to: transition_to, issued: issued, deadline: deadline, expires_unix_ms: expires_unix_ms}
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:534
+pub fn jet_vault_authorize_wrapped_import_impl<T: JetVaultKey>(plan: JetVaultWrappedImportPlan<T>, reason: String) -> JetVaultWrite<T> JetVaultKeyWrapError! {
+    vault_validate_reason(reason) ?? return Err(JetVaultKeyWrapError.Vault(err))
+    now :: Instant.now()
+    if now > plan.deadline || now.duration_since(plan.issued) > Duration.from_secs(300) -> return Err(JetVaultKeyWrapError.Vault(JetVaultError.Conflict))
+    bytes := "JVKW1 authority preview".into_bytes()
+    &bytes.extend_from_slice(plan.operation_hash)
+    &bytes.push(T.TAG)
+    &bytes.extend_from_slice(plan.repo_uuid)
+    &bytes.extend_from_slice(plan.start_revision.to_le_bytes())
+    jvkw_push_u16(&bytes, plan.name.len()) ?? return Err(err)
+    &bytes.extend_from_slice(plan.name.as_bytes())
+    &bytes.extend_from_slice(plan.origin.repo_uuid)
+    jvkw_push_u16(&bytes, plan.origin.name.len()) ?? return Err(err)
+    &bytes.extend_from_slice(plan.origin.name.as_bytes())
+    &bytes.extend_from_slice(plan.origin.generation.to_le_bytes())
+    &bytes.extend_from_slice(plan.transition_from.to_le_bytes())
+    &bytes.extend_from_slice(plan.transition_to.to_le_bytes())
+    jvkw_push_u16(&bytes, reason.len()) ?? return Err(err)
+    &bytes.extend_from_slice(reason.as_bytes())
+    &bytes.extend_from_slice(plan.expires_unix_ms.to_le_bytes())
+    preview_hash :: vault_hash([bytes])
+    preview :: "import wrapped {T.NAME} {plan.origin.name} as {plan.name} from repository {vault_uuid_hex(plan.origin.repo_uuid)} generation {plan.origin.generation} into repository {vault_uuid_hex(plan.repo_uuid)} at revision {plan.start_revision}; bearer backup cannot be recalled by later source revocation; reason: {reason}; expires_unix_ms: {plan.expires_unix_ms}"
+    if !vault_native_authorize(preview, plan.repo_uuid) -> return Err(JetVaultKeyWrapError.Vault(JetVaultError.AuthorityDenied))
+    (user, session) :: vault_authority_identity() ?? return Err(JetVaultKeyWrapError.Vault(err))
+    JetVaultWrite{operation_hash: plan.operation_hash, preview_hash: preview_hash, user: user, session: session, deadline: plan.deadline, marker: PhantomData<T>{}}
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:546
+pub fn jet_vault_commit_import_wrapped_at<T: JetVaultKey>(root: OSPath, write: ^JetVaultWrite<T>, plan: ^JetVaultWrappedImportPlan<T>) -> JetVaultKeyRef<T> JetVaultKeyWrapError! {
+    now :: Instant.now()
+    (user, session) :: vault_authority_identity() ?? return Err(JetVaultKeyWrapError.Vault(err))
+    if now > plan.deadline || now.duration_since(plan.issued) > Duration.from_secs(300) || now > write.deadline || write.operation_hash != plan.operation_hash || write.preview_hash == [U8; 32].filled(0) || write.user != user || write.session != session -> return Err(JetVaultKeyWrapError.Vault(JetVaultError.Conflict))
+    lock :: vault_acquire_lock(root, plan.repo_uuid, plan.start_revision, plan.start_hash) ?? return Err(JetVaultKeyWrapError.Vault(err))
+    (store, current_hash, provider_hash, start_kind) := vault_read_at(root) ?? return Err(JetVaultKeyWrapError.Vault(err))
+    if current_hash != plan.start_hash || provider_hash != plan.provider_hash || start_kind != plan.start_kind || (start_kind == .V2 && (store.repo_uuid != plan.repo_uuid || store.revision != plan.start_revision)) -> return Err(JetVaultKeyWrapError.Vault(JetVaultError.Conflict))
+    if start_kind != .V2 -> store.repo_uuid = plan.repo_uuid
+    if &plan.existing.take() == .Val(existing) {
+        record :: vault_find(store, existing) ?? return Err(JetVaultKeyWrapError.Vault(err))
+        if record.status == .Revoked -> return Err(JetVaultKeyWrapError.Vault(JetVaultError.Revoked))
+        if record.public_key_hash != plan.public_key_hash || vault_key_digest(T.TAG, record.key) != plan.key_digest -> return Err(JetVaultKeyWrapError.OpenFailed)
+        mode :: if plan.mode == .Recipient { "recipient" } else { "passphrase" }
+        vault_audit_append_at(root, "import", mode, "AlreadyPresent", T.TAG, plan.origin, Val(plan.name)) ?? return Err(JetVaultKeyWrapError.Vault(err))
+        drop(lock)
+        return existing
+    }
+    if store.keys.iter().any((record) -> record.name == plan.name && record.key_type != T.TAG) -> return Err(JetVaultKeyWrapError.Vault(JetVaultError.WrongType))
+    generation :: (store.keys.iter().filter((record) -> record.name == plan.name && record.key_type == T.TAG).map((record) -> record.generation).max() ?? U64{0}).checked_add(1) ?? return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-generation"})
+    if generation != plan.transition_to -> return Err(JetVaultKeyWrapError.Vault(JetVaultError.Conflict))
+    unix_ms :: vault_lifecycle_unix_ms(store) ?? return Err(JetVaultKeyWrapError.Vault(err))
+    loop record in &store.keys {
+        if record.name == plan.name && record.key_type == T.TAG && record.status == .Active {
+            record.status = .Retired
+            record.status_unix_ms = unix_ms
+            record.reason_hash = vault_reason_hash(.Retired, "wrapped import") ?? return Err(JetVaultKeyWrapError.Vault(err))
+        }
+    }
+    key :: T.from_bytes(&plan.key.0.take()) ?? return Err(JetVaultKeyWrapError.OpenFailed)
+    key_bytes :: key.into_bytes()
+    if vault_key_digest(T.TAG, key_bytes) != plan.key_digest -> return Err(JetVaultKeyWrapError.OpenFailed)
+    record := JetVaultRecord{name: ~plan.name, key_type: T.TAG, generation: generation, status: .Active, provenance: .Imported, opaque_id: plan.destination_opaque_id, created_unix_ms: unix_ms, status_unix_ms: unix_ms, record_hash: [U8; 32].filled(0), public_key_hash: plan.public_key_hash, reason_hash: [U8; 32].filled(0), origin: Val(~plan.origin), key: ^key_bytes}
+    record.record_hash = vault_record_hash(record)
+    reference :: vault_ref(store, record)
+    &store.keys.push(^record)
+    store.revision = store.revision.checked_add(1) ?? return Err(JetVaultKeyWrapError.Internal{incident_id: "jvkw-revision"})
+    vault_write_at(root, store, plan.start_hash, plan.provider_hash, plan.start_kind, plan.start_revision, ^lock) ?? return Err(JetVaultKeyWrapError.Vault(err))
+    reference
+}
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:592
+pub fn jet_vault_export_to_recipients_impl<T: JetVaultKey>(reference: JetVaultKeyRef<T>, recipients: [JetX25519PublicKey]) -> JetWrappedVaultKey JetVaultKeyWrapError! { jet_vault_export_to_recipients_at(vault_cwd(), reference, recipients) }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:593
+pub fn jet_vault_export_to_passphrase_impl<T: JetVaultKey>(reference: JetVaultKeyRef<T>, passphrase: Secret) -> JetWrappedVaultKey JetVaultKeyWrapError! { jet_vault_export_to_passphrase_at(vault_cwd(), reference, passphrase) }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:594
+pub fn jet_vault_export_to_passphrase_cancel_impl<T: JetVaultKey>(reference: JetVaultKeyRef<T>, passphrase: Secret, cancelled: fn() -> Bool, cancel_outcome: fn() -> (), wait_enter: fn() -> (), wait_leave: fn() -> ()) -> JetWrappedVaultKey JetVaultKeyWrapError! { jet_vault_export_to_passphrase_at_with_cancel(vault_cwd(), reference, passphrase, cancelled, cancel_outcome, wait_enter, wait_leave) }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:595
+pub fn jet_vault_prepare_import_wrapped_impl<T: JetVaultKey>(name: String, wrapped: ^JetWrappedVaultKey, unlock: JetVaultKeyUnlock) -> JetVaultWrappedImportPlan<T> JetVaultKeyWrapError! { jet_vault_prepare_import_wrapped_at<T>(vault_cwd(), name, ^wrapped, unlock) }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:596
+pub fn jet_vault_prepare_import_wrapped_cancel_impl<T: JetVaultKey>(name: String, wrapped: ^JetWrappedVaultKey, unlock: JetVaultKeyUnlock, cancelled: fn() -> Bool, cancel_outcome: fn() -> (), wait_enter: fn() -> (), wait_leave: fn() -> ()) -> JetVaultWrappedImportPlan<T> JetVaultKeyWrapError! { jet_vault_prepare_import_wrapped_at_with_cancel<T>(vault_cwd(), name, ^wrapped, unlock, cancelled, cancel_outcome, wait_enter, wait_leave) }
+// Rust: crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs:597
+pub fn jet_vault_commit_import_wrapped_impl<T: JetVaultKey>(write: ^JetVaultWrite<T>, plan: ^JetVaultWrappedImportPlan<T>) -> JetVaultKeyRef<T> JetVaultKeyWrapError! { jet_vault_commit_import_wrapped_at(vault_cwd(), ^write, ^plan) }

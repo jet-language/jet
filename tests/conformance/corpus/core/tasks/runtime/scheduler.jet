@@ -1,0 +1,131 @@
+use core.tasks.runtime.scheduler.*
+use std.sync.Arc
+use std.sync.atomic.[AtomicUsize, Ordering]
+use std.cell.RefCell
+use std.rc.Rc
+use std.panic as panic
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1679-1693
+#Test("scheduler_delay_defaults_keep_exact_nanos_and_progress_intervals") {
+    assert_eq(jet_task_delay_ms_defaulted(-1), U64{0})
+    assert_eq(jet_task_delay_ms_defaulted(2), U64{2})
+    assert_eq(jet_task_delay_duration_ns_defaulted(123).as_nanos(), U128{123})
+    assert_eq(jet_task_delay_duration_ns_defaulted(-5).as_nanos(), U128{0})
+    assert_eq(jet_task_interval_ms_defaulted(0), U64{1})
+    assert_eq(jet_task_interval_ms_defaulted(-3), U64{1})
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:789-1195
+#Test("deterministic_world_clock_rng_and_scope_are_isolated") {
+    assert_eq(jet_scheduler_current_world().is_none(), true)
+    first :: jet_testing_world((world) -> {
+        assert_eq(jet_world_now(&world), I64{0})
+        assert_eq(jet_world_advance(&world, 1_500_000), I64{1})
+        assert_eq(jet_scheduler_world_monotonic_now_ns(), Some(I64{1_500_000}))
+        assert(jet_scheduler_world_rng_seed(42))
+        value :: jet_scheduler_world_rng_next().expect("world RNG is controlled")
+        assert(jet_world_history(&world).starts_with("advance:1500000\nrng:seed:42\nrng:"))
+        value
+    })
+    assert_eq(jet_scheduler_current_world().is_none(), true)
+    second :: jet_testing_world((world) -> {
+        assert_eq(world.now(), I64{0})
+        assert(jet_scheduler_world_rng_seed(42))
+        jet_scheduler_world_rng_next().expect("new world has independent RNG")
+    })
+    assert_eq(first, second)
+    assert_eq(jet_scheduler_world_rng_seed(42), false)
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:614-692
+#Test("scheduler_cancel_callbacks_remove_and_invoke_without_registry_lock") {
+    // GATE #4565: kernel primitive
+    #Unsafe("real atomic callbacks observe exact cancellation; reentrant registration proves unlocked invocation") {
+        control :: JetTaskControl.new()
+        count :: Arc.new(AtomicUsize.new(0))
+        removed_count :: count.clone()
+        removed :: control.register_cancel_callback(Arc.new(() -> { _ :: removed_count.fetch_add(100, Ordering.Relaxed) }))
+        drop(^removed)
+        nested_control :: control.clone()
+        callback_count :: count.clone()
+        retained :: control.register_cancel_callback(Arc.new(() -> {
+            _ :: callback_count.fetch_add(1, Ordering.Relaxed)
+            nested_count :: callback_count.clone()
+            nested :: nested_control.register_cancel_callback(Arc.new(() -> { _ :: nested_count.fetch_add(10, Ordering.Relaxed) }))
+            drop(^nested)
+        }))
+        control.cancel()
+        assert_eq(count.load(Ordering.Relaxed), USize{11})
+        control.cancel()
+        assert_eq(count.load(Ordering.Relaxed), USize{11})
+        late_count :: count.clone()
+        late :: control.register_cancel_callback(Arc.new(() -> { _ :: late_count.fetch_add(1, Ordering.Relaxed) }))
+        assert_eq(count.load(Ordering.Relaxed), USize{12})
+        drop(^late)
+        drop(^retained)
+    }
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1256-1332
+#Test("scheduler_completion_frames_drain_only_their_reverse_order_callbacks") {
+    // GATE #4565: kernel primitive
+    #Unsafe("owner-thread mutable trace is retained through real nested completion scopes") {
+        trace :: Rc.new(RefCell.new([] as [I64]))
+        outer :: jet_scheduler_task_completion_begin()
+        one :: trace.clone()
+        jet_scheduler_task_completion_register(() -> one.borrow_mut().push(1))
+        inner :: jet_scheduler_task_completion_begin()
+        two :: trace.clone()
+        jet_scheduler_task_completion_register(() -> two.borrow_mut().push(2))
+        drop(^inner)
+        assert_eq(*trace.borrow(), [I64{2}])
+        three :: trace.clone()
+        jet_scheduler_task_completion_register(() -> three.borrow_mut().push(3))
+        outer.drain()
+        assert_eq(*trace.borrow(), [I64{2}, I64{3}, I64{1}])
+        drop(^outer)
+        assert_eq(*trace.borrow(), [I64{2}, I64{3}, I64{1}])
+    }
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:1592-1628
+#Test("owner_deadlines_pop_by_deadline_then_task_id_and_cancel_exactly") {
+    later :: jet_scheduler_owner_deadline_register(200)
+    first :: jet_scheduler_owner_deadline_register(100)
+    second :: jet_scheduler_owner_deadline_register(100)
+    cancelled :: jet_scheduler_owner_deadline_register(50)
+    jet_scheduler_owner_deadline_cancel(cancelled)
+    assert_eq(jet_scheduler_owner_deadline_pop_due(99), None)
+    assert_eq(jet_scheduler_owner_deadline_pop_due(100), Some(first))
+    assert_eq(jet_scheduler_owner_deadline_pop_due(100), Some(second))
+    assert_eq(jet_scheduler_owner_deadline_pop_due(199), None)
+    assert_eq(jet_scheduler_owner_deadline_pop_due(200), Some(later))
+    assert_eq(jet_scheduler_owner_deadline_pop_due(200), None)
+}
+
+// Behavioral control for Rust: crates/jet-codegen/src/Prelude/Scheduler.rs:312-365
+#Test("foreign_scheduler_boundary_preserves_reports_but_marks_host_faults") {
+    // GATE #4565: kernel primitive
+    #Unsafe("real native unwind is caught inside the foreign boundary before status classification") {
+        report :: jet_scheduler_catch_foreign_boundary<I64>(() -> panic.panic_any("Stop [E3001]: exact report".to_string()))
+        if report == {
+            Ok(_) -> assert(false, "report must unwind")
+            Err(payload) -> {
+                if jet_scheduler_classify_unwind<I64>(^payload) == {
+                    .Panicked(message) -> assert_eq(message, "Stop [E3001]: exact report")
+                    _ -> assert(false, "report must remain a transported panic status")
+                }
+            }
+        }
+        fault :: jet_scheduler_catch_foreign_boundary<I64>(() -> panic.panic_any("plain host failure".to_string()))
+        if fault == {
+            Ok(_) -> assert(false, "fault must unwind")
+            Err(payload) -> {
+                if jet_scheduler_classify_unwind<I64>(^payload) == {
+                    .Panicked(message) -> assert_eq(jet_scheduler_host_fault_reason(&message), Some("plain host failure"))
+                    _ -> assert(false, "host failure must not become cancellation/deadline")
+                }
+            }
+        }
+    }
+}

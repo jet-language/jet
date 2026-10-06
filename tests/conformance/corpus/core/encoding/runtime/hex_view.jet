@@ -1,0 +1,190 @@
+// RUNTIME-HEX-VIEW-1: original EncodingBase.rs:8–31 decode/nibble law.
+// Reuses binary_crc.jet's canonical 0aFF/empty/abc/zz/0g/aé/é/00 0/g
+// assertions and hex/decode.jet's dead vector; existing public cases stay intact.
+// Private source-bound corpus: Main must activate the actual private closure.
+// Values/owner independence are assertions, not native borrow/allocation proof.
+// History.rs:230–238 final decoded UTF-8 validation remains Tools-owned.
+use core.encoding as hex_view_encoding
+use core.encoding.hex as hex_view_facade
+use core.encoding.runtime.kernel_hex_decode as hex_view_kernel
+
+fn hex_view_error(raw: View<U8>, expected: String) Never! {
+    _ :: hex_view_kernel.decode(raw) ?? {
+        assert_eq(err.reason, expected)
+        return
+    }
+    panic("expected borrowed hex decode error")
+}
+
+fn hex_view_root_error(text: String, expected: String) Never! {
+    _ :: hex_view_encoding.hex_to_bytes(text) ?? {
+        assert_eq(err.reason, expected)
+        return
+    }
+    panic("expected root hex decode error")
+}
+
+fn hex_view_facade_error(text: String, expected: String) Never! {
+    _ :: hex_view_facade.decode(text) ?? {
+        assert_eq(err.reason, expected)
+        return
+    }
+    panic("expected facade hex decode error")
+}
+
+// Each text assertion reaches the private law and both established carriers.
+fn hex_view_text_error(text: String, expected: String) Never! {
+    raw :: text.bytes()
+    view :: raw[0..<raw.len()]
+    hex_view_error(view, expected)
+    hex_view_root_error(text, expected)
+    hex_view_facade_error(text, expected)
+}
+
+#Test("hex borrowed full window mixed case") {
+    raw :: [U8]{48, 97, 70, 70}
+    view :: raw[0..<raw.len()]
+    assert_eq(hex_view_kernel.decode(view) ?? panic("decode"), [U8]{10, 255})
+    assert_eq(raw, [U8]{48, 97, 70, 70})
+    assert_eq(hex_view_encoding.hex_to_bytes("0aFF") ?? panic("root"), [U8]{10, 255})
+    assert_eq(hex_view_facade.decode("0aFF") ?? panic("facade"), [U8]{10, 255})
+}
+
+#Test("hex borrowed subview excludes invalid owner bytes") {
+    raw :: [U8]{255, 48, 97, 70, 70, 0, 255}
+    window :: raw[0..<6]
+    subview :: window[1..<5]
+    assert_eq(hex_view_kernel.decode(subview) ?? panic("subview"), [U8]{10, 255})
+    assert_eq(raw, [U8]{255, 48, 97, 70, 70, 0, 255})
+}
+
+#Test("hex borrowed empty full and interior windows") {
+    raw :: [U8]{}
+    full :: raw[0..<raw.len()]
+    assert_eq(hex_view_kernel.decode(full) ?? panic("empty"), [U8]{})
+    owner :: [U8]{255, 0}
+    empty :: owner[1..<1]
+    assert_eq(hex_view_kernel.decode(empty) ?? panic("empty subview"), [U8]{})
+    assert_eq(owner, [U8]{255, 0})
+    assert_eq(hex_view_encoding.hex_to_bytes("") ?? panic("root empty"), [U8]{})
+    assert_eq(hex_view_facade.decode("") ?? panic("facade empty"), [U8]{})
+}
+
+#Test("hex every ASCII nibble in both positions and cases") {
+    lower :: "00112233445566778899aabbccddeeff".bytes()
+    upper :: "00112233445566778899AABBCCDDEEFF".bytes()
+    mixed :: "00112233445566778899aAbBcCdDeEfF".bytes()
+    reverse :: "00112233445566778899AaBbCcDdEeFf".bytes()
+    expected :: [U8]{0, 17, 34, 51, 68, 85, 102, 119, 136, 153, 170, 187, 204, 221, 238, 255}
+    lower_view :: lower[0..<lower.len()]
+    upper_view :: upper[0..<upper.len()]
+    mixed_view :: mixed[0..<mixed.len()]
+    reverse_view :: reverse[0..<reverse.len()]
+    assert_eq(hex_view_kernel.decode(lower_view) ?? panic("lower"), expected)
+    assert_eq(hex_view_kernel.decode(upper_view) ?? panic("upper"), expected)
+    assert_eq(hex_view_kernel.decode(mixed_view) ?? panic("mixed"), expected)
+    assert_eq(hex_view_kernel.decode(reverse_view) ?? panic("reverse"), expected)
+}
+
+#Test("hex decoded output owns storage independent of caller bytes") {
+    raw :: [U8]{100, 101, 97, 100}
+    view :: raw[0..<raw.len()]
+    decoded := hex_view_kernel.decode(view) ?? panic("owned decode")
+    assert_eq(decoded, [U8]{222, 173})
+    decoded[0] = U8{0}
+    &decoded.push(U8{255})
+    assert_eq(decoded, [U8]{0, 173, 255})
+    assert_eq(raw, [U8]{100, 101, 97, 100})
+    assert_eq(hex_view_kernel.decode(view) ?? panic("decode again"), [U8]{222, 173})
+    assert_eq(hex_view_encoding.hex_to_bytes("dead") ?? panic("root dead"), [U8]{222, 173})
+    assert_eq(hex_view_facade.decode("dead") ?? panic("facade dead"), [U8]{222, 173})
+}
+
+#Test("hex odd byte length precedes malformed digit") {
+    reason :: "odd-length hex string; hex text encodes whole bytes, so the length must be even"
+    hex_view_text_error("abc", reason)
+    hex_view_text_error("g", reason)
+    hex_view_text_error("zz0", reason)
+    hex_view_text_error("aé", reason)
+    raw :: [U8]{255}
+    view :: raw[0..<raw.len()]
+    hex_view_error(view, reason)
+    assert_eq(raw, [U8]{255})
+}
+
+#Test("hex odd subview length is checked independently of owner") {
+    raw :: [U8]{48, 48, 122, 122}
+    view :: raw[1..<4]
+    hex_view_error(view, "odd-length hex string; hex text encodes whole bytes, so the length must be even")
+    assert_eq(raw, [U8]{48, 48, 122, 122})
+}
+
+#Test("hex invalid even digits in high low and later pairs") {
+    reason :: "invalid hex digit; expected 0-9, a-f, or A-F"
+    hex_view_text_error("zz", reason)
+    hex_view_text_error("0g", reason)
+    hex_view_text_error("g0", reason)
+    hex_view_text_error("00g0", reason)
+    raw :: [U8]{48, 48, 48, 103}
+    view :: raw[0..<raw.len()]
+    hex_view_error(view, reason)
+    assert_eq(raw, [U8]{48, 48, 48, 103})
+}
+
+#Test("hex raw high bytes reject without String conversion") {
+    reason :: "invalid hex digit; expected 0-9, a-f, or A-F"
+    high :: [U8]{128, 48}
+    low :: [U8]{48, 255}
+    high_view :: high[0..<high.len()]
+    low_view :: low[0..<low.len()]
+    hex_view_error(high_view, reason)
+    hex_view_error(low_view, reason)
+    assert_eq(high, [U8]{128, 48})
+    assert_eq(low, [U8]{48, 255})
+}
+
+#Test("hex UTF8 encoded bytes are not scalar digits") {
+    reason :: "invalid hex digit; expected 0-9, a-f, or A-F"
+    raw :: [U8]{195, 169}
+    view :: raw[0..<raw.len()]
+    hex_view_error(view, reason)
+    hex_view_text_error("é", reason)
+    hex_view_text_error("💥", reason)
+    hex_view_text_error("１２", reason)
+}
+
+#Test("hex NUL is a rejected byte not a terminator") {
+    reason :: "invalid hex digit; expected 0-9, a-f, or A-F"
+    raw :: [U8]{48, 48, 0, 48}
+    view :: raw[0..<raw.len()]
+    hex_view_error(view, reason)
+    nul_text :: String.from_bytes([U8]{0, 0}) ?? panic("NUL is valid UTF-8")
+    prefix_text :: String.from_bytes(raw) ?? panic("embedded NUL is valid UTF-8")
+    hex_view_text_error(nul_text, reason)
+    hex_view_text_error(prefix_text, reason)
+    assert_eq(raw, [U8]{48, 48, 0, 48})
+}
+
+#Test("hex whitespace separators and 0x prefix remain rejected") {
+    invalid :: "invalid hex digit; expected 0-9, a-f, or A-F"
+    odd :: "odd-length hex string; hex text encodes whole bytes, so the length must be even"
+    hex_view_text_error("00 0", invalid)
+    hex_view_text_error(" 0", invalid)
+    hex_view_text_error("0\t", invalid)
+    hex_view_text_error("0\n", invalid)
+    crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF is valid UTF-8")
+    hex_view_text_error(crlf, invalid)
+    hex_view_text_error("0x", invalid)
+    hex_view_text_error("0x00", invalid)
+    hex_view_text_error("0X00", invalid)
+    hex_view_text_error("0x0", odd)
+}
+
+#Test("hex public String view facade uses the same root decoder") {
+    text :: "xdeadx"
+    // #4303: mutable binding for a String slice view flowing into String calls.
+    window := text.slice(1, 5)
+    assert_eq(hex_view_encoding.hex_to_bytes(window) ?? panic("root view"), [U8]{222, 173})
+    assert_eq(hex_view_facade.decode(window) ?? panic("facade view"), [U8]{222, 173})
+    assert_eq(text, "xdeadx")
+}

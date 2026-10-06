@@ -173,7 +173,7 @@ fn run() {
             .collect();
         assert!(errors.is_empty(), "checked file owner fixture: {errors:#?}");
         let request = MirArtifactRequest::new(
-            MirArtifactTarget::Cranelift,
+            MirArtifactTarget::Interpreter,
             MirArtifactKind::NativeExecutable,
             MirArtifactBuildMode::Dev,
         );
@@ -585,7 +585,7 @@ fn run() {
             .collect();
         assert!(errors.is_empty(), "checked borrowed temporary fixture: {errors:#?}");
         let request = MirArtifactRequest::new(
-            MirArtifactTarget::Cranelift,
+            MirArtifactTarget::Interpreter,
             MirArtifactKind::NativeExecutable,
             MirArtifactBuildMode::Dev,
         );

@@ -1,0 +1,73 @@
+// compiled-workload-peer-launcher.rs:924–1103: common POSIX raw process and
+// signal primitives (Unix targets only). Linux seccomp imports live solely in
+// linux_seccomp_imports.jet. No spawn/namespace/atomic policy belongs here.
+use core.mem as process_mem
+use c.c as process_os
+
+#Import module c.c {
+    fn getpid() -> I32 = "getpid"
+    fn getppid() -> I32 = "getppid"
+    fn getpgrp() -> I32 = "getpgrp"
+    fn getpgid(pid: I32) -> I32 = "getpgid"
+    fn setpgid(pid: I32, pgid: I32) -> I32 = "setpgid"
+    fn setsid() -> I32 = "setsid"
+    fn kill(pid: I32, signal_number: I32) -> I32 = "kill"
+    fn raise(signal_number: I32) -> I32 = "raise"
+    fn fork() -> I32 = "fork"
+    fn waitpid(pid: I32, status: *I32, options: I32) -> I32 = "waitpid"
+    // Child-control pipe payload is two initialized I32 slots after zero
+    // status; the pointer borrows that live extent, never a Jet list header.
+    fn pipe(out: *I32) -> I32 = "pipe"
+    // argv/envp borrow NULL-terminated pointer arrays, each pointing into
+    // retained NUL byte storage. Nested pointer admission is a #4494 gate.
+    fn execve(path: *I8, argv: **I8, envp: **I8) -> I32 = "execve"
+    fn _exit(status: I32) = "_exit"
+    // Exact nullable extern-C handler/return contract. Current C signature
+    // admission rejects Option; #4494 must model native fn-pointer null and
+    // SIG_ERR=-1, not a Jet Option tag or a boxed closure.
+    fn signal(signal_number: I32, handler: (fn(I32) -[]> Unit)?) -> (fn(I32) -[]> Unit)? = "signal"
+}
+
+// No ordinary Jet callback can be passed to signal yet: MIRRust.rs10102
+// emits the callback_boundary route, Core.rs1133 enters scheduler-world TLS
+// and catch_unwind. This is NOT evidence of an allocation/lock/GC-free signal
+// handler. #4494 must admit a no-capture, no-unwind, no-runtime-entry extern-C
+// handler restricted to signal-safe native scalars + the canonical static
+// AtomicI32 Release store. The main loop takes AcqRel exchange. RtW28 owns
+// that primitive; do not emulate it with ordinary mutable globals/callbacks.
+// Reset uses actual null SIG_DFL, not a callback that does nothing.
+//
+// fork is raw, NOT permission to run allocating Jet/scheduler code after fork
+// in a multi-threaded process. Group0-before-exec/inherited-stdio spawn needs
+// prepared argv/envp and signal-safe child path (or actual posix_spawn target
+// structs/actions); report that closure unavailable instead of Rust Command.
+// waitpid's status is initialized only when result > 0; zero WNOHANG does not
+// permit a status read, and -1 requires immediate canonical errno capture.
+
+// Selected Linux/glibc <bits/waitstatus.h> projections. These are raw status
+// decoding, not process cleanup policy. Preserve exit vs signal distinction.
+pub fn linux_wait_exited(status: I32) -> Bool Never! {
+    (status & I32{127}) == (I32{0})
+}
+pub fn linux_wait_exit_code(status: I32) -> I32 Never! {
+    (status & I32{65280}) >> I32{8}
+}
+pub fn linux_wait_signaled(status: I32) -> Bool Never! {
+    signal_word :: status & I32{127}
+    signal_word != (I32{0}) && signal_word != (I32{127})
+}
+pub fn linux_wait_term_signal(status: I32) -> I32 Never! {
+    status & I32{127}
+}
+pub fn linux_wait_stopped(status: I32) -> Bool Never! {
+    (status & I32{255}) == (I32{127})
+}
+pub fn linux_wait_stop_signal(status: I32) -> I32 Never! {
+    (status & I32{65280}) >> I32{8}
+}
+pub fn linux_wait_continued(status: I32) -> Bool Never! {
+    status == (I32{65535})
+}
+pub fn linux_wait_core_dumped(status: I32) -> Bool Never! {
+    (status & I32{128}) != (I32{0})
+}

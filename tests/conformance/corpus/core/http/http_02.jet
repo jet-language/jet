@@ -1,0 +1,15 @@
+use core.http.[http_tls_pem_base64, validate_request_header, connection_retry_allowed, redirect_may_replay_body, JetHTTPBridgeError, RetryPolicy]
+// Behavioral controls for HTTP.rs1899,2552,3537,3549 (no inline originals).
+#Test("http_client_pem_base64_and_invalid_padding") {
+    assert(http_tls_pem_base64("T W\nFu") == .Ok([U8]{77, 97, 110}))
+    assert(http_tls_pem_base64("=AAA") == .Err(JetHTTPBridgeError.TLS))
+}
+#Test("http_client_request_header_and_replay_policy") {
+    assert(validate_request_header("connection", "close, CLOSE") == .Ok(()))
+    assert(validate_request_header("content-length", "0") == .Err(JetHTTPBridgeError.InvalidFraming))
+    assert(validate_request_header("bad name", "ok") == .Err(JetHTTPBridgeError.InvalidHeader))
+    assert(!connection_retry_allowed(RetryPolicy.Safe, "POST"))
+    assert(connection_retry_allowed(RetryPolicy.Idempotent, "PUT"))
+    assert(redirect_may_replay_body("POST"))
+    assert(!redirect_may_replay_body("GET"))
+}

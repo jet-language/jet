@@ -1,0 +1,31 @@
+use core.testing.runtime.top_testing_shared.[jet_testing_diff_lines, jet_testing_diff_push, jet_testing_unified_diff, JET_TESTING_DIFF_MAX_BYTES, JET_TESTING_DIFF_MAX_LINES, JET_TESTING_DIFF_MAX_OUTPUT]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs:14-33
+#Test("testing_diff_input_limits_preserve_utf8_boundaries_and_line_endings") {
+    input :: "é".repeat(JET_TESTING_DIFF_MAX_BYTES / 2 + 1)
+    bounded :: jet_testing_diff_lines(input)
+    assert(bounded.truncated)
+    assert_eq(bounded.lines.len(), USize{1})
+    assert_eq(bounded.lines[0].len(), JET_TESTING_DIFF_MAX_BYTES)
+    lines :: jet_testing_diff_lines("a\n".repeat(JET_TESTING_DIFF_MAX_LINES + 1))
+    assert(lines.truncated)
+    assert_eq(lines.lines.len(), JET_TESTING_DIFF_MAX_LINES)
+    assert_eq(lines.lines[0], "a\n")
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs:35-60
+#Test("testing_diff_output_limit_marks_once_without_splitting_utf8") {
+    output := String.new()
+    truncated := false
+    jet_testing_diff_push(&output, &truncated, "é".repeat(JET_TESTING_DIFF_MAX_OUTPUT))
+    assert(truncated)
+    assert(output.len() <= JET_TESTING_DIFF_MAX_OUTPUT)
+    assert(output.ends_with("\n... diff output truncated ...\n"))
+    before :: output.clone()
+    jet_testing_diff_push(&output, &truncated, "ignored")
+    assert_eq(output, before)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs:72-134
+#Test("testing_diff_lcs_ties_delete_before_insert_and_normalize_missing_newline") {
+    assert_eq(jet_testing_unified_diff("x", "a\nb", "a\nc"), "--- expected x\n+++ actual x\n@@ -1,2 +1,2 @@\n a\n-b\n+c\n")
+    assert_eq(jet_testing_unified_diff("empty", "", ""), "--- expected empty\n+++ actual empty\n@@ -1,0 +1,0 @@\n")
+}

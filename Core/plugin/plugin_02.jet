@@ -1,0 +1,849 @@
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:1
+// Sandboxed Component Model runtime. One canonical authority is lent at load;
+// all imports are preflighted before instantiation and checked at every call.
+// GATE #4494: native Component Model engine, owner-thread TLS, atomics, process,
+// network and deadline-thread primitives. No ambient authority or Rust fallback.
+use std.cell.[Cell, RefCell]
+use std.thread.[ThreadLocal, Builder, sleep]
+use std.sync.[Arc]
+use std.sync.atomic.[AtomicU64, AtomicBool, Ordering]
+use std.time.[Instant, Duration]
+use std.process.[Command, Stdio]
+use std.net.[ToSocketAddrs, TcpStream]
+use std.io.[Error as IoError, ErrorKind]
+use wasmtime.component.[Component, Linker, LinkerInstance, Type, Val as ComponentVal, Instance]
+use wasmtime.component.types.[ComponentFunc, ComponentInstance, ComponentItem]
+use wasmtime.[Config, Engine, ResourceLimiter, Store, StoreContextMut, Trap, Error as WasmError]
+use jet_foundation.PluginWire.[plugin_decode_params, plugin_encode_value, PluginParamDecodeError, PluginValue]
+use jet_foundation.Authority.[Authority as CanonicalAuthority, HostImportDecision, HostImportFact, Verdict, parse_right, covers]
+use jet_foundation.MIR.[plugin_authority_import_fact]
+use jet_foundation.SHA256.[read_file_nofollow_at_root, write_file_nofollow_at_root, MAX_TREE_FILE_BYTES]
+use jet_foundation.Text.[TEXT_NUL]
+use core.sys.path.[PathComponent]
+
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:52
+PLUGIN_MAX_FUEL :: U64{10000000}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:53
+PLUGIN_MAX_MEMORY_BYTES :: USize{16 * 1024 * 1024}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:54
+PLUGIN_MAX_TABLE_ELEMENTS :: U32{10000}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:55
+PLUGIN_MAX_WIRE_BYTES :: USize{16 * 1024 * 1024}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:56
+PLUGIN_MAX_VALUE_DEPTH :: USize{64}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:57
+PLUGIN_TIMEOUT_MS :: U64{2000}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:59
+#Derive(Clone, Copy, Debug, PartialEq, Eq)
+enum PluginBudgetKind { Fuel, Memory, Table }
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:66
+#Derive(Clone, Copy, Debug, PartialEq, Eq)
+enum PluginFailureKind { UserError, DeniedAuthority, BudgetExhausted, InternalDefect }
+impl PluginFailureKind {
+    // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:74
+    fn label(self) -> String {
+        match self { .UserError -> "user-error", .DeniedAuthority -> "denied-authority", .BudgetExhausted -> "budget-exhausted", .InternalDefect -> "internal-defect" }
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:85
+#Error
+#Derive(Debug)
+struct PluginBoundaryError { kind: PluginFailureKind, message: String }
+impl PluginBoundaryError {
+    // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:91
+    fn new(kind: PluginFailureKind, message: String) -> PluginBoundaryError { PluginBoundaryError{kind: kind, message: ^message} }
+    // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:100
+    fn fmt(self, formatter: &std.fmt.Formatter) -> () std.fmt.Error! { formatter.write_str(self.message) }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:107
+struct PluginLimits {
+    memory_size: USize
+    table_elements: U32
+    instances: USize
+    memories: USize
+    tables: USize
+    failure: Cell<PluginBudgetKind?>
+}
+impl PluginLimits {
+    // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:117
+    fn new() -> PluginLimits {
+        PluginLimits{memory_size: PLUGIN_MAX_MEMORY_BYTES, table_elements: PLUGIN_MAX_TABLE_ELEMENTS,
+            instances: USize{1}, memories: USize{1}, tables: USize{1}, failure: Cell.new(None)}
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:128
+    fn reset_failure(self) -> { self.failure.set(None) }
+    // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:132
+    fn failure(self) -> PluginBudgetKind? { self.failure.get() }
+}
+impl ResourceLimiter for PluginLimits {
+    // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:138
+    fn memory_growing(self: &PluginLimits, _current: USize, desired: USize, maximum: USize?) -> Bool WasmError! {
+        if desired > self.memory_size {
+            self.failure.set(Val(.Memory))
+            return Err(WasmError.msg("plugin memory budget exhausted"))
+        }
+        maximum.map_or(true, |max| -> desired <= max)
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:151
+    fn table_growing(self: &PluginLimits, _current: U32, desired: U32, maximum: U32?) -> Bool WasmError! {
+        if desired > self.table_elements {
+            self.failure.set(Val(.Table))
+            return Err(WasmError.msg("plugin table budget exhausted"))
+        }
+        maximum.map_or(true, |max| -> desired <= max)
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:164
+    fn instances(self) -> USize { self.instances }
+    // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:168
+    fn memories(self) -> USize { self.memories }
+    // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:172
+    fn tables(self) -> USize { self.tables }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:177
+struct PluginHostState {
+    limits: PluginLimits
+    authority: CanonicalAuthority
+    authority_decision: HostImportDecision
+    imports: [String:HostImportFact]
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:188
+struct PluginInstance {
+    engine: Engine
+    store: Store<PluginHostState>
+    instance: Instance
+    authority: CanonicalAuthority
+    authority_decision: HostImportDecision
+    imports: [String:HostImportFact]
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:197
+PLUGINS :: ThreadLocal<RefCell<[U64:PluginInstance]>>.new(|| -> RefCell.new([U64:PluginInstance]{}))
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:202
+PLUGIN_CALL_DEPTH :: ThreadLocal<Cell<USize>>.new(|| -> Cell.new(USize{0}))
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:205
+struct PluginCallGuard {}
+impl PluginCallGuard {
+    // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:208
+    fn enter() -> PluginCallGuard Err! {
+        PLUGIN_CALL_DEPTH.with(|depth| -> {
+            if depth.get() != USize{0} -> return Err("plugin re-entry is not supported during an active call")
+            depth.set(USize{1})
+            PluginCallGuard{}
+        })
+    }
+    // Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:220
+    fn drop(self: &PluginCallGuard) -> { PLUGIN_CALL_DEPTH.with(|depth| -> depth.set(depth.get().saturating_sub(USize{1}))) }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:225
+NEXT_HANDLE :: AtomicU64.new(U64{1})
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:227
+fn plugin_error(kind: PluginFailureKind, message: String) -> String { "E:{kind.label()}:{message}" }
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:231
+fn plugin_call_error(name: String, kind: PluginFailureKind, message: String) -> String { plugin_error(kind, "plugin call `{name}`: {message}") }
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:239
+fn plugin_engine() -> Engine Err! {
+    config := Config.new()
+    &config.consume_fuel(true)
+    &config.epoch_interruption(true)
+    Engine.new(config).map_err(|error| -> "plugin engine: {error}")?
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:246
+fn plugin_limits() -> PluginLimits { PluginLimits.new() }
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:250
+fn plugin_relative_candidate(path: OSPath, root_text: String) -> OSPath? Err! {
+    explicit_root :: root_text != "repo"
+    if path.is_absolute() {
+        if not explicit_root -> return None
+        root :: OSPath.new(root_text)
+        if not root.is_absolute() -> return Err("an absolute plugin path requires an absolute explicit FS.Read root")
+        relative :: match path.strip_prefix(root).ok() { Val(relative) -> relative, None -> return None }
+        if relative.as_os_str().is_empty() -> return Err("plugin path names the FS.Read root, not a file")
+        if relative.components().any(|c| -> c == .ParentDir or c == .RootDir or c == .Prefix(_)) -> return Err("plugin path escapes its explicit FS.Read root")
+        return Val(relative.to_path_buf())
+    }
+    if path.components().any(|c| -> c == .ParentDir or c == .RootDir or c == .Prefix(_)) -> return Err("plugin path must be relative and must not contain `..`")
+    Val(path.to_path_buf())
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:292
+fn plugin_authority_from_wire(wire: String) -> CanonicalAuthority Err! {
+    rights := [String]{}
+    loop raw in wire.split('\n') {
+        right := raw.trim() // #4303
+        if right.is_empty() -> next
+        if parse_right(right).is_none() -> return Err("plugin authority contains an unknown right `{right}`")
+        &rights.push(right.to_string())
+    }
+    CanonicalAuthority.from_rights(^rights)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:308
+fn plugin_declared_authority_needs() -> [String] Err! { crate.jet_plugin_declared_authority_needs() }
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:312
+fn plugin_load_import_fact() -> HostImportFact { plugin_authority_import_fact() }
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:316
+fn plugin_import_right(path: String) -> String? {
+    leaf :: path.split(|c| -> c == ':' or c == '/' or c == '.' or c == '@' or c == '-').rev().find(|part| -> not part.is_empty()).unwrap_or(path).to_ascii_lowercase()
+    match leaf {
+        "read" | "read_bytes" | "readbytes" -> Val("FS.Read")
+        "write" | "write_bytes" | "writebytes" -> Val("FS.Write")
+        "connect" | "request" -> Val("Net.Connect")
+        "run" | "exec" -> Val("Exec")
+        _ -> None
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:332
+fn plugin_import_fact(path: String, function: ComponentFunc) -> HostImportFact Err! {
+    required_right :: match plugin_import_right(path) { Val(right) -> right, None -> return Err("plugin import `{path}` has no declared authority fact") }
+    parameters :: function.params().map(|ty| -> plugin_type_name(ty)).collect()
+    results :: function.results().collect()
+    if results.len() > 1 -> return Err("plugin import `{path}` has {results.len()} results; host imports require one result or none")
+    HostImportFact.new(path.to_string(), path.to_string(), required_right, ^parameters, results.first().map(plugin_type_name))
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:358
+fn plugin_scoped_candidates(path: String, authority: CanonicalAuthority, required_right: String) -> [(OSPath, OSPath)] Err! {
+    path_ref :: OSPath.new(path)
+    prefix :: "{required_right}:"
+    saw_root := false
+    candidates := [(OSPath, OSPath)]{}
+    loop right in authority.rights() {
+        root_text :: match right.strip_prefix(prefix) { Val(root) -> root, None -> next }
+        saw_root = true
+        if root_text.is_empty() -> return Err("plugin {required_right} authority names an empty root")
+        root :: OSPath.new(if root_text == "repo" { "." } else { root_text.to_string() })
+        relative :: match plugin_relative_candidate(path_ref, root_text.to_string())? { Val(relative) -> relative, None -> next }
+        &candidates.push((^root, ^relative))
+    }
+    if not saw_root -> return Err("plugin operation requires an explicit resource-scoped {required_right} authority")
+    if candidates.is_empty() -> return Err("path `{path}` is outside the granted {required_right} roots")
+    candidates
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:400
+fn plugin_bytes(value: ComponentVal) -> [U8]? {
+    match value {
+        .String(text) -> Val(text.as_bytes().to_vec())
+        .List(values) -> {
+            out := [U8]{}.with_capacity(values.len())
+            loop value in values { match value { .U8(byte) -> &out.push(byte), _ -> return None } }
+            Val(^out)
+        }
+        _ -> None
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:414
+fn plugin_set_bytes_result(import: HostImportFact, results: &[ComponentVal], bytes: [U8]) -> () Err! {
+    if results.len() != 1 -> return Err("plugin host import `{import.operation}` must return Text or list<u8>")
+    match import.result_type_id {
+        Val("Text") -> {
+            text :: String.from_utf8(^bytes).map_err(|error| -> "plugin host import `{import.operation}` returned non-UTF-8 data for Text: {error}")?
+            results[0] = .String(^text)
+        }
+        Val("list") -> { results[0] = .List(bytes.into_iter().map(|b| -> ComponentVal.U8(b)).collect()) }
+        Val(result_type) -> return Err("plugin host import `{import.operation}` has unsupported byte result `{result_type}`")
+        None -> return Err("plugin host import `{import.operation}` must return Text or list<u8>")
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:450
+fn plugin_io_error_value(operation: String, resource: String?, error: IoError) -> ComponentVal {
+    variant :: match error.kind() {
+        .InvalidInput | .InvalidData -> "invalid-input"
+        .NotFound -> "not-found"
+        .PermissionDenied -> "permission-denied"
+        .TimedOut -> "timed-out"
+        .NotConnected | .BrokenPipe -> "closed"
+        _ -> "other"
+    }
+    context :: ComponentVal.Record([
+        ("operation", ComponentVal.Enum(operation.to_string())),
+        ("resource", ComponentVal.Option(resource.map(|v| -> Box.new(ComponentVal.String(v.to_string()))))),
+        ("os-code", ComponentVal.Option(error.raw_os_error().map(|v| -> Box.new(ComponentVal.S64(I64{v}))))),
+        ("cause", ComponentVal.Option(Val(Box.new(ComponentVal.String(error.to_string())))))])
+    .Variant(variant, Val(Box.new(^context)))
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:488
+fn plugin_require_io_result(import: HostImportFact, results: [ComponentVal]) -> () Err! {
+    if results.len() != 1 or import.result_type_id != "result" -> return Err("plugin host import `{import.operation}` must return the declared typed result")
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:501
+fn plugin_set_io_result_error(import: HostImportFact, results: &[ComponentVal], operation: String, resource: String?, error: IoError) -> () Err! {
+    plugin_require_io_result(import, results)?
+    results[0] = .Result(Err(Val(Box.new(plugin_io_error_value(operation, resource, error)))))
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:515
+fn plugin_set_io_text_result(import: HostImportFact, results: &[ComponentVal], bytes: [U8], resource: String?) -> () Err! {
+    plugin_require_io_result(import, results)?
+    match String.from_utf8(^bytes) {
+        Ok(text) -> { results[0] = .Result(Ok(Val(Box.new(ComponentVal.String(^text))))) }
+        Err(error) -> {
+            error :: IoError.new(ErrorKind.InvalidData, ^error)
+            results[0] = .Result(Err(Val(Box.new(plugin_io_error_value("read", resource, error)))))
+        }
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:536
+fn plugin_set_io_unit_result(import: HostImportFact, results: &[ComponentVal]) -> () Err! {
+    plugin_require_io_result(import, results)?
+    results[0] = .Result(Ok(None))
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:545
+fn plugin_host_read(import: HostImportFact, params: [ComponentVal], results: &[ComponentVal], authority: CanonicalAuthority) -> () PluginBoundaryError! {
+    user_error :: |message| -> PluginBoundaryError.new(.UserError, message)
+    if params.len() != 1 -> return Err(user_error("plugin host import `{import.operation}` expects one path parameter"))
+    path :: match params.first() { Val(.String(path)) -> path, _ -> return Err(user_error("plugin host import `{import.operation}` requires a Text path")) }
+    candidates :: plugin_scoped_candidates(path, authority, "FS.Read").map_err(|error| -> PluginBoundaryError.new(.DeniedAuthority, "plugin host import `{import.operation}` rejected path `{path}`: {error}"))?
+    last_error := None as IoError?
+    loop (root, relative) in candidates {
+        match read_file_nofollow_at_root(root, relative, MAX_TREE_FILE_BYTES) {
+            Ok(bytes) -> return plugin_set_io_text_result(import, &results, ^bytes, Val(path)).map_err(user_error)
+            Err(error) -> { last_error = Val(^error) }
+        }
+    }
+    error :: match last_error {
+        Val(error) -> error
+        None -> return Err(PluginBoundaryError.new(.DeniedAuthority, "plugin host import `{import.operation}` rejected path `{path}`: no granted FS.Read root matched"))
+    }
+    plugin_set_io_result_error(import, &results, "read", Val(path), error).map_err(user_error)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:603
+fn plugin_host_write(import: HostImportFact, params: [ComponentVal], results: &[ComponentVal], authority: CanonicalAuthority) -> () PluginBoundaryError! {
+    user_error :: |message| -> PluginBoundaryError.new(.UserError, message)
+    if params.len() != 2 -> return Err(user_error("plugin host import `{import.operation}` expects a Text path and Text/list<u8> contents"))
+    path :: match params.first() { Val(.String(path)) -> path, _ -> return Err(user_error("plugin host import `{import.operation}` requires a Text path")) }
+    contents :: match params.get(1).and_then(plugin_bytes) { Val(contents) -> contents, None -> return Err(user_error("plugin host import `{import.operation}` requires Text or list<u8> contents")) }
+    plugin_require_io_result(import, results).map_err(user_error)?
+    candidates :: plugin_scoped_candidates(path, authority, "FS.Write").map_err(|error| -> PluginBoundaryError.new(.DeniedAuthority, "plugin host import `{import.operation}` rejected path `{path}`: {error}"))?
+    last_error := None as IoError?
+    loop (root, relative) in candidates {
+        match write_file_nofollow_at_root(root, relative, contents) {
+            Ok(_) -> return plugin_set_io_unit_result(import, &results).map_err(user_error)
+            Err(error) -> { last_error = Val(^error) }
+        }
+    }
+    error :: match last_error {
+        Val(error) -> error
+        None -> return Err(PluginBoundaryError.new(.DeniedAuthority, "plugin host import `{import.operation}` rejected path `{path}`: no granted FS.Write root matched"))
+    }
+    plugin_set_io_result_error(import, &results, "write", Val(path), error).map_err(user_error)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:663
+fn plugin_network_target(endpoint: String) -> (String, String) Err! {
+    endpoint := endpoint.trim() // #4303
+    if endpoint.is_empty() -> return Err("network endpoint is empty")
+    (scheme, authority) :: endpoint.split_once("://").map(|p| -> (p.0.to_ascii_lowercase(), p.1)).unwrap_or_else(|| -> ("", endpoint))
+    authority :: authority.split('/').next().unwrap_or_default().rsplit_once('@').map(|p| -> p.1).unwrap_or(authority)
+    default_port :: if scheme == "https" or scheme == "wss" { U16{443} } else { U16{80} }
+    if authority.starts_with('[') {
+        end :: authority.find(']').ok_or_else(|| -> "network endpoint has an unterminated IPv6 address")?
+        host :: authority[1..<end]
+        suffix :: authority.get(end + 1..).unwrap_or_default()
+        port :: match suffix {
+            "" -> default_port
+            suffix if suffix.starts_with(':') -> suffix[1..].parse<U16>().map_err(|_| -> "network endpoint has an invalid port")?
+            _ -> return Err("network endpoint has an invalid IPv6 authority")
+        }
+        return (host.to_string(), "[{host}]:{port}")
+    }
+    (host, port) :: match authority.rsplit_once(':') {
+        Val((host, port)) if not host.is_empty() and not port.is_empty() -> (host, port.parse<U16>().map_err(|_| -> "network endpoint has an invalid port")?)
+        _ -> (authority, default_port)
+    }
+    if host.is_empty() -> return Err("network endpoint has no host")
+    (host.to_string(), "{host}:{port}")
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:711
+fn plugin_host_connect(import: HostImportFact, params: [ComponentVal], results: &[ComponentVal], authority: CanonicalAuthority) -> () PluginBoundaryError! {
+    user_error :: |message| -> PluginBoundaryError.new(.UserError, message)
+    if params.len() != 1 -> return Err(user_error("plugin host import `{import.operation}` expects one Text endpoint"))
+    endpoint :: match params.first() { Val(.String(endpoint)) -> endpoint, _ -> return Err(user_error("plugin host import `{import.operation}` requires a Text endpoint")) }
+    (host, target) :: plugin_network_target(endpoint).map_err(user_error)?
+    requested :: "Net.Connect:{host}"
+    if not authority.allows(requested) -> return Err(PluginBoundaryError.new(.DeniedAuthority, "plugin host import `{import.operation}` denied endpoint `{endpoint}`: missing `{requested}`"))
+    addresses :: ToSocketAddrs.to_socket_addrs(target).map_err(|error| -> user_error("couldn't resolve `{endpoint}`: {error}"))?
+    last_error := None as String?
+    timed_out := false
+    loop address in addresses {
+        match TcpStream.connect_timeout(address, Duration.from_millis(PLUGIN_TIMEOUT_MS)) {
+            Ok(stream) -> {
+                drop(^stream)
+                if results.len() != 1 -> return Err(user_error("plugin host import `{import.operation}` must return one Bool or Text result"))
+                match import.result_type_id {
+                    Val("Bool") -> { results[0] = .Bool(true) }
+                    Val("Text") -> { results[0] = .String("connected") }
+                    Val(result_type) -> return Err(user_error("plugin host import `{import.operation}` has unsupported Net.Connect result `{result_type}`"))
+                    None -> return Err(user_error("plugin host import `{import.operation}` must return one Bool or Text result"))
+                }
+                return
+            }
+            Err(error) -> {
+                timed_out = timed_out or error.kind() == .TimedOut
+                last_error = Val(error.to_string())
+            }
+        }
+    }
+    message :: "plugin host import `{import.operation}` couldn't connect to `{endpoint}`: {last_error.unwrap_or_else(|| -> "no address resolved")}"
+    Err(PluginBoundaryError.new(if timed_out { .BudgetExhausted } else { .UserError }, ^message))
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:799
+fn plugin_host_exec(import: HostImportFact, params: [ComponentVal], results: &[ComponentVal]) -> () PluginBoundaryError! {
+    user_error :: |message| -> PluginBoundaryError.new(.UserError, message)
+    if params.len() != 2 -> return Err(user_error("plugin host import `{import.operation}` expects a Text program and list<Text> arguments"))
+    if results.len() != 1 or import.result_type_id != "Text" -> return Err(user_error("plugin host import `{import.operation}` must return one Text result"))
+    program :: match params.first() { Val(.String(program)) -> program, _ -> return Err(user_error("plugin host import `{import.operation}` requires a Text program")) }
+    command := Command.new(program)
+    arguments :: match params.get(1) { Val(.List(arguments)) -> arguments, _ -> return Err(user_error("plugin host import `{import.operation}` requires list<Text> arguments")) }
+    owned := [String]{}.with_capacity(arguments.len())
+    loop argument in arguments {
+        match argument { .String(text) -> &owned.push(text.clone()), _ -> return Err(user_error("plugin host import `{import.operation}` requires list<Text> arguments")) }
+    }
+    &command.args(owned)
+    child := &command.stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().map_err(|error| -> user_error("couldn't execute `{program}`: {error}"))?
+    deadline :: Instant.now() + Duration.from_millis(PLUGIN_TIMEOUT_MS)
+    loop {
+        match &child.try_wait() {
+            Ok(Val(_)) -> break
+            Ok(None) if Instant.now() >= deadline -> {
+                _ :: &child.kill()
+                _ :: &child.wait()
+                return Err(PluginBoundaryError.new(.BudgetExhausted, "execution of `{program}` exceeded the plugin time limit"))
+            }
+            Ok(None) -> sleep(Duration.from_millis(1))
+            Err(error) -> return Err(user_error("couldn't wait for `{program}`: {error}"))
+        }
+    }
+    output :: child.wait_with_output().map_err(|error| -> user_error("couldn't collect `{program}` output: {error}"))?
+    if not output.status.success() {
+        stderr :: String.from_utf8_lossy(output.stderr)
+        return Err(user_error("plugin host import `{import.operation}` command `{program}` failed: {stderr.trim()}"))
+    }
+    plugin_set_bytes_result(import, &results, ^output.stdout).map_err(user_error)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:879
+fn plugin_host_import_call(store: &StoreContextMut<PluginHostState>, import_id: String, params: [ComponentVal], results: &[ComponentVal]) -> () WasmError! {
+    import :: match store.data().imports.get(import_id).cloned() {
+        Val(import) -> import
+        None -> return Err(WasmError.new(PluginBoundaryError.new(.InternalDefect, "unregistered plugin host import `{import_id}`")))
+    }
+    authority :: store.data().authority.clone()
+    decision :: import.decision(authority)
+    if not decision.is_allowed() -> return Err(WasmError.new(PluginBoundaryError.new(.DeniedAuthority, "plugin host import `{import.operation}` denied: missing `{import.required_grant()}`")))
+    match import.required_grant() {
+        "FS.Read" -> plugin_host_read(import, params, &results, authority).map_err(WasmError.new)
+        "FS.Write" -> plugin_host_write(import, params, &results, authority).map_err(WasmError.new)
+        "Net.Connect" -> plugin_host_connect(import, params, &results, authority).map_err(WasmError.new)
+        "Exec" -> plugin_host_exec(import, params, &results).map_err(WasmError.new)
+        required -> Err(WasmError.new(PluginBoundaryError.new(.InternalDefect, "plugin host import `{import.operation}` has no runtime adapter for `{required}`")))
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:925
+fn plugin_register_function(scope: &LinkerInstance<PluginHostState>, name: String, path: String, function: ComponentFunc,
+    authority: CanonicalAuthority, declared_needs: [String], imports: &[String:HostImportFact]) -> () PluginBoundaryError! {
+    fact :: plugin_import_fact(path, function).map_err(|error| -> PluginBoundaryError.new(.UserError, error))?
+    if not declared_needs.iter().any(|need| -> covers(need, fact.required_grant())) -> return Err(PluginBoundaryError.new(.DeniedAuthority, "plugin host import `{path}` requires `{fact.required_grant()}` in authority.needs"))
+    decision :: fact.decision(authority)
+    if not decision.is_allowed() -> return Err(PluginBoundaryError.new(.DeniedAuthority, "plugin host import `{path}` denied: missing `{fact.required_grant()}`"))
+    import_id :: fact.id.clone()
+    &scope.func_new(name, move |store, params, results| -> plugin_host_import_call(&store, import_id, params, &results))
+        .map_err(|error| -> PluginBoundaryError.new(.InternalDefect, "register plugin host import `{path}`: {error}"))?
+    _ :: &imports.insert(fact.id.clone(), ^fact)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:973
+fn plugin_register_instance_imports(scope: &LinkerInstance<PluginHostState>, instance: ComponentInstance, engine: Engine,
+    authority: CanonicalAuthority, declared_needs: [String], imports: &[String:HostImportFact], prefix: String) -> () PluginBoundaryError! {
+    loop (name, item) in instance.exports(engine) {
+        path :: "{prefix}::{name}"
+        match item {
+            .ComponentFunc(function) -> plugin_register_function(&scope, name, path, function, authority, declared_needs, &imports)?
+            .ComponentInstance(nested) -> {
+                nested_scope := &scope.instance(name).map_err(|error| -> PluginBoundaryError.new(.InternalDefect, "register plugin host instance `{path}`: {error}"))?
+                plugin_register_instance_imports(&nested_scope, nested, engine, authority, declared_needs, &imports, path)?
+            }
+            _ -> return Err(PluginBoundaryError.new(.UserError, "plugin host import `{path}` is not a component function or instance"))
+        }
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:1024
+fn plugin_register_imports(linker: &Linker<PluginHostState>, component: Component, engine: Engine,
+    authority: CanonicalAuthority, declared_needs: [String], imports: &[String:HostImportFact]) -> () PluginBoundaryError! {
+    component_type :: component.component_type()
+    root := &linker.root()
+    loop (name, item) in component_type.imports(engine) {
+        match item {
+            .ComponentFunc(function) -> plugin_register_function(&root, name, name, function, authority, declared_needs, &imports)?
+            .ComponentInstance(instance) -> {
+                scope := &root.instance(name).map_err(|error| -> PluginBoundaryError.new(.InternalDefect, "register plugin host instance `{name}`: {error}"))?
+                plugin_register_instance_imports(&scope, instance, engine, authority, declared_needs, &imports, name)?
+            }
+            _ -> return Err(PluginBoundaryError.new(.UserError, "plugin host import `{name}` is not a component function or instance"))
+        }
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:1075
+fn plugin_read_module(path: String, authority: CanonicalAuthority) -> [U8] Err! {
+    import :: plugin_load_import_fact()
+    if authority.decide_import(import) != Verdict.Allowed -> return Err("plugin load requires an FS.Read authority")
+    candidates :: plugin_scoped_candidates(path, authority, "FS.Read")?
+    last_error := None as String?
+    loop (root, relative) in candidates {
+        match read_file_nofollow_at_root(root, relative, MAX_TREE_FILE_BYTES) {
+            Ok(bytes) -> return ^bytes
+            Err(error) -> { last_error = Val("couldn't read plugin `{path}` below the granted FS.Read root: {error}") }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| -> "couldn't read plugin `{path}` from the granted FS.Read roots"))
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:1110
+pub fn jet_plugin_load_declared(path: String, authority_wire: String, declared_needs: [String]) -> String {
+    if PLUGIN_CALL_DEPTH.with(|depth| -> depth.get()) != USize{0} -> return plugin_error(.InternalDefect, "plugin load re-entry is not supported during an active call")
+    authority :: match plugin_authority_from_wire(authority_wire) { Ok(a) -> a, Err(error) -> return plugin_error(.UserError, error) }
+    authority_decision :: plugin_load_import_fact().decision(authority)
+    if authority_decision.verdict != Verdict.Allowed -> return plugin_error(.DeniedAuthority, "plugin load requires an FS.Read authority")
+    component_bytes :: match plugin_read_module(path, authority) { Ok(bytes) -> bytes, Err(error) -> return plugin_error(.UserError, error) }
+    engine :: match plugin_engine() { Ok(engine) -> engine, Err(error) -> return plugin_error(.InternalDefect, error) }
+    component :: match Component.new(engine, component_bytes) {
+        Ok(component) -> component
+        Err(error) -> return plugin_error(.UserError, "couldn't load plugin `{path}`: {error}")
+    }
+    linker := Linker<PluginHostState>.new(engine)
+    imports := [String:HostImportFact]{}
+    if plugin_register_imports(&linker, component, engine, authority, declared_needs, &imports) == .Err(error) {
+        return plugin_error(error.kind, "plugin `{path}` host-import preflight failed: {error.message}")
+    }
+    pre_instance :: match linker.instantiate_pre(component) {
+        Ok(instance) -> instance
+        Err(error) -> return plugin_error(.InternalDefect, "plugin `{path}` host-import preflight failed during component linking: {error}")
+    }
+    store := Store.new(engine, PluginHostState{limits: plugin_limits(), authority: authority.clone(), authority_decision: authority_decision.clone(), imports: imports.clone()})
+    &store.limiter(|state| -> &state.limits)
+    &store.set_epoch_deadline(U64{1000000000})
+    &store.epoch_deadline_trap()
+    if &store.set_fuel(PLUGIN_MAX_FUEL) == .Err(error) -> return plugin_error(.InternalDefect, "plugin fuel setup failed: {error}")
+    instance :: match pre_instance.instantiate(&store) {
+        Ok(instance) -> instance
+        Err(error) -> {
+            kind :: if store.data().limits.failure().is_some() { .BudgetExhausted } else { .UserError }
+            return plugin_error(kind, "plugin `{path}` couldn't be instantiated under its authority scope: {error}")
+        }
+    }
+    handle :: NEXT_HANDLE.fetch_add(U64{1}, Ordering.Relaxed)
+    PLUGINS.with(|m| -> {
+        _ :: m.borrow_mut().insert(handle, PluginInstance{engine: ^engine, store: ^store, instance: ^instance, authority: ^authority, authority_decision: ^authority_decision, imports: ^imports})
+    })
+    "O:{handle}"
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:1232
+pub fn jet_plugin_load(path: String, authority_wire: String) -> String {
+    declared_needs :: match plugin_declared_authority_needs() { Ok(needs) -> needs, Err(error) -> return plugin_error(.InternalDefect, error) }
+    jet_plugin_load_declared(path, authority_wire, declared_needs)
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:1242
+pub fn jet_plugin_close(handle: U64) -> Bool {
+    if PLUGIN_CALL_DEPTH.with(|depth| -> depth.get()) != USize{0} -> return false
+    PLUGINS.with(|m| -> m.borrow_mut().remove(handle).is_some())
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:1258
+pub fn jet_plugin_call(handle: U64, name: String, params_wire: String) -> String {
+    call_guard :: match PluginCallGuard.enter() { Ok(guard) -> guard, Err(error) -> return plugin_error(.InternalDefect, error) }
+    PLUGINS.with(|m| -> {
+        map := m.borrow_mut()
+        plugin :: match &map.get_mut(handle) { Val(plugin) -> plugin, None -> return plugin_error(.UserError, "no plugin loaded for this handle") }
+        call_decision :: plugin.authority_decision.import.decision(plugin.authority)
+        if not call_decision.is_allowed() -> return plugin_call_error(name, .DeniedAuthority, "outside the authority granted at load time")
+        if params_wire.len() > PLUGIN_MAX_WIRE_BYTES -> return plugin_call_error(name, .BudgetExhausted, "argument wire exceeds the 16 MiB resource budget")
+        func :: match plugin.instance.get_func(&plugin.store, name) { Val(func) -> func, None -> return plugin_call_error(name, .UserError, "no exported function has this name") }
+        want_params :: func.params(plugin.store)
+        args :: match plugin_decode_params(params_wire) {
+            Ok(args) -> args
+            Err(.TooMany{..}) -> return plugin_call_error(name, .UserError, "expects {want_params.len()} argument(s), got 0")
+            Err(error) -> return plugin_call_error(name, .UserError, "arguments rejected: {error}")
+        }
+        if args.len() != want_params.len() -> return plugin_call_error(name, .UserError, "expects {want_params.len()} argument(s), got {args.len()}")
+        call_args := [ComponentVal]{}.with_capacity(args.len())
+        loop (i, (arg, ty)) in args.iter().zip(want_params.iter()).enumerate() {
+            match plugin_to_val(arg, ty) {
+                Val(value) -> &call_args.push(^value)
+                None -> return plugin_call_error(name, .UserError, "argument {i + 1} does not match the declared type ({plugin_type_name(ty)})")
+            }
+        }
+        want_results :: func.results(plugin.store)
+        if want_results.len() != 1 -> return plugin_call_error(name, .UserError, "returns {want_results.len()} values — v1 plugin calls support exactly one return value")
+        zero :: match plugin_zero_val(want_results[0]) { Val(zero) -> zero, None -> return plugin_call_error(name, .UserError, "returns an unsupported Component Model type ({plugin_type_name(want_results[0])})") }
+        if &plugin.store.set_fuel(PLUGIN_MAX_FUEL) == .Err(error) -> return plugin_call_error(name, .InternalDefect, "fuel setup failed: {error}")
+        plugin.store.data_mut().limits.reset_failure()
+        &plugin.store.set_epoch_deadline(U64{1})
+        &plugin.store.epoch_deadline_trap()
+        cancelled :: Arc.new(AtomicBool.new(false))
+        cancelled_timer :: Arc.clone(cancelled)
+        timer_engine :: plugin.engine.clone()
+        timer :: match Builder.new().name("jet-plugin-deadline").spawn(move || -> {
+            deadline :: Instant.now() + Duration.from_millis(PLUGIN_TIMEOUT_MS)
+            loop Instant.now() < deadline {
+                if cancelled_timer.load(Ordering.Relaxed) -> return
+                sleep(Duration.from_millis(1))
+            }
+            if not cancelled_timer.load(Ordering.Relaxed) { timer_engine.increment_epoch() }
+        }) {
+            Ok(timer) -> timer
+            Err(error) -> {
+                &plugin.store.set_epoch_deadline(U64{1000000000})
+                return plugin_call_error(name, .InternalDefect, "couldn't start call deadline: {error}")
+            }
+        }
+        results := [^zero]
+        call_result :: func.call(&plugin.store, call_args, &results)
+        cancelled.store(true, Ordering.Relaxed)
+        timer_joined :: timer.join().is_ok()
+        &plugin.store.set_epoch_deadline(U64{1000000000})
+        if not timer_joined -> return plugin_call_error(name, .InternalDefect, "call deadline worker failed")
+        if call_result == .Err(error) { return plugin_call_trap_error(name, ^error, plugin.store.data().limits.failure()) }
+        // Copy owned aggregates before post_return releases guest allocations.
+        wire_size :: plugin_val_wire_size(results[0], USize{0})
+        copied :: wire_size.filter(|size| -> size <= PLUGIN_MAX_WIRE_BYTES).and_then(|_| -> plugin_from_val(results[0]))
+        if func.post_return(&plugin.store) == .Err(error) -> return plugin_call_error(name, .InternalDefect, "post-return failed: {error}")
+        match (wire_size, copied) {
+            (Val(size), Val(value)) if size <= PLUGIN_MAX_WIRE_BYTES -> {
+                wire :: plugin_encode_value(value)
+                if wire.len() <= PLUGIN_MAX_WIRE_BYTES { "O:{wire}" }
+                else { plugin_call_error(name, .InternalDefect, "wire-size accounting disagreed with the encoder") }
+            }
+            (Val(_), _) -> plugin_call_error(name, .BudgetExhausted, "result wire exceeds the 16 MiB resource budget")
+            (None, _) -> plugin_call_error(name, .UserError, "returned an unsupported Component Model value ({plugin_type_name(want_results[0])})")
+        }
+    })
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:1466
+fn plugin_call_trap_error(name: String, error: WasmError, budget_failure: PluginBudgetKind?) -> String {
+    if error.downcast_ref<PluginBoundaryError>() is Val(failure) -> return plugin_call_error(name, failure.kind, failure.message)
+    trap :: error.downcast_ref<Trap>()
+    trap_is_budget :: trap.is_some_and(|trap| -> trap == .OutOfFuel or trap == .Interrupt)
+    if budget_failure.is_some() or trap_is_budget {
+        budget :: match budget_failure {
+            Val(.Memory) -> "memory"
+            Val(.Table) -> "table"
+            Val(.Fuel) -> "fuel"
+            None -> match trap { Val(.Interrupt) -> "call", Val(.OutOfFuel) -> "fuel", _ -> "call" }
+        }
+        return plugin_call_error(name, .BudgetExhausted, "{budget} budget exhausted")
+    }
+    if trap == .Val(trap) -> return plugin_call_error(name, .UserError, "guest trapped: {trap}")
+    plugin_call_error(name, .InternalDefect, "host/runtime failed while executing the guest")
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:1509
+fn plugin_type_name(ty: Type) -> String {
+    match ty {
+        .S8 -> "s8", .U8 -> "u8", .S16 -> "s16", .U16 -> "u16", .S32 -> "s32", .U32 -> "u32",
+        .S64 -> "Int", .U64 -> "u64", .Float32 -> "f32", .Float64 -> "Float", .Bool -> "Bool", .Char -> "char", .String -> "Text",
+        .List(_) -> "list", .Record(_) -> "record", .Tuple(_) -> "tuple", .Variant(_) -> "variant", .Enum(_) -> "enum",
+        .Option(_) -> "option", .Result(_) -> "result", .Flags(_) -> "flags", .Own(_) -> "own resource", .Borrow(_) -> "borrowed resource"
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:1538
+fn plugin_integer(value: I64, ty: Type) -> ComponentVal? {
+    match ty {
+        .S8 -> Val(.S8(I8.try_from(value).ok()?))
+        .U8 -> Val(.U8(U8.try_from(value).ok()?))
+        .S16 -> Val(.S16(I16.try_from(value).ok()?))
+        .U16 -> Val(.U16(U16.try_from(value).ok()?))
+        .S32 -> Val(.S32(I32.try_from(value).ok()?))
+        .U32 -> Val(.U32(U32.try_from(value).ok()?))
+        .S64 -> Val(.S64(value))
+        .U64 if value >= I64{0} -> Val(.U64(U64{value}))
+        _ -> None
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:1552
+fn plugin_to_val(value: PluginValue, ty: Type) -> ComponentVal? {
+    match (value, ty) {
+        (.Int(value), ty) -> plugin_integer(value, ty)
+        (.Float(value), .Float32) -> {
+            value :: F32{value}
+            if value.is_finite() { Val(.Float32(value)) } else { None }
+        }
+        (.Float(value), .Float64) -> Val(.Float64(value))
+        (.Bool(value), .Bool) -> Val(.Bool(value))
+        (.Text(value), .String) -> Val(.String(value.clone()))
+        (.Text(value), .Char) -> {
+            chars := value.chars()
+            ch :: &chars.next()?
+            if &chars.next().is_none() { Val(.Char(ch)) } else { None }
+        }
+        (.List(values), .List(list)) -> {
+            out := [ComponentVal]{}.with_capacity(values.len())
+            loop value in values { &out.push(plugin_to_val(value, list.ty())?) }
+            Val(.List(^out))
+        }
+        (.Record(values), .Record(record)) -> {
+            fields :: record.fields().collect()
+            if values.len() != fields.len() -> return None
+            out := [(String, ComponentVal)]{}.with_capacity(values.len())
+            loop ((name, value), field) in values.iter().zip(fields) {
+                if name != field.name -> return None
+                &out.push((name.clone(), plugin_to_val(value, field.ty)?))
+            }
+            Val(.Record(^out))
+        }
+        (.Tuple(values), .Tuple(tuple)) -> {
+            types :: tuple.types().collect()
+            if values.len() != types.len() -> return None
+            out := [ComponentVal]{}.with_capacity(values.len())
+            loop (value, ty) in values.iter().zip(types.iter()) { &out.push(plugin_to_val(value, ty)?) }
+            Val(.Tuple(^out))
+        }
+        (.Option(value), .Option(option)) -> Val(.Option(match value { Val(v) -> Val(Box.new(plugin_to_val(v, option.ty())?)), None -> None }))
+        (.ResultOk(value), .Result(result)) -> {
+            payload :: match (value, result.ok()) {
+                (None, None) -> None
+                (Val(v), Val(ty)) -> Val(Box.new(plugin_to_val(v, ty)?))
+                _ -> return None
+            }
+            Val(.Result(Ok(^payload)))
+        }
+        (.ResultErr(value), .Result(result)) -> {
+            payload :: match (value, result.err()) {
+                (None, None) -> None
+                (Val(v), Val(ty)) -> Val(Box.new(plugin_to_val(v, ty)?))
+                _ -> return None
+            }
+            Val(.Result(Err(^payload)))
+        }
+        (.Variant(name, value), .Variant(variant)) -> {
+            case :: variant.cases().find(|case| -> case.name == name)?
+            payload :: match (value, case.ty) {
+                (None, None) -> None
+                (Val(v), Val(ty)) -> Val(Box.new(plugin_to_val(v, ty)?))
+                _ -> return None
+            }
+            Val(.Variant(name.clone(), ^payload))
+        }
+        (.Enum(name), .Enum(enum_type)) if enum_type.names().any(|candidate| -> candidate == name) -> Val(.Enum(name.clone()))
+        (.Flags(names), .Flags(flags)) -> {
+            // Index once rather than re-scanning declared names for each flag.
+            allowed := [String:Bool]{}
+            loop name in flags.names() { allowed[name] = true }
+            if not names.iter().all(|name| -> allowed.contains_key(name)) -> return None
+            Val(.Flags(names.clone()))
+        }
+        _ -> None
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:1639
+fn plugin_zero_val(ty: Type) -> ComponentVal? {
+    match ty {
+        .S8 -> Val(.S8(I8{0})), .U8 -> Val(.U8(U8{0})), .S16 -> Val(.S16(I16{0})), .U16 -> Val(.U16(U16{0})),
+        .S32 -> Val(.S32(I32{0})), .U32 -> Val(.U32(U32{0})), .S64 -> Val(.S64(I64{0})), .U64 -> Val(.U64(U64{0})),
+        .Float32 -> Val(.Float32(F32{0.0})), .Float64 -> Val(.Float64(F64{0.0})), .Bool -> Val(.Bool(false)),
+        .Char -> Val(.Char(TEXT_NUL.chars().next()?)), .String -> Val(.String("")), .List(_) -> Val(.List([])),
+        .Record(record) -> {
+            out := [(String, ComponentVal)]{}
+            loop field in record.fields() { &out.push((field.name.to_string(), plugin_zero_val(field.ty)?)) }
+            Val(.Record(^out))
+        }
+        .Tuple(tuple) -> {
+            out := [ComponentVal]{}
+            loop ty in tuple.types() { &out.push(plugin_zero_val(ty)?) }
+            Val(.Tuple(^out))
+        }
+        .Variant(variant) -> {
+            case :: variant.cases().next()?
+            payload :: match case.ty { Val(ty) -> Val(Box.new(plugin_zero_val(ty)?)), None -> None }
+            Val(.Variant(case.name.to_string(), ^payload))
+        }
+        .Enum(enum_type) -> enum_type.names().next().map(|name| -> ComponentVal.Enum(name.to_string()))
+        .Option(_) -> Val(.Option(None))
+        .Result(result) -> Val(.Result(Ok(match result.ok() { Val(ty) -> Val(Box.new(plugin_zero_val(ty)?)), None -> None })))
+        .Flags(_) -> Val(.Flags([]))
+        .Own(_) | .Borrow(_) -> None
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:1685
+fn plugin_decimal_digits(value: USize) -> USize {
+    value := value
+    digits := USize{1}
+    loop value >= USize{10} {
+        value /= USize{10}
+        digits += USize{1}
+    }
+    digits
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:1694
+fn plugin_wire_add(left: USize, right: USize) -> USize? { left.checked_add(right) }
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:1698
+fn plugin_wire_tagged(payload_len: USize) -> USize? { plugin_wire_add(USize{2} + plugin_decimal_digits(payload_len), payload_len) }
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:1702
+fn plugin_val_wire_size(value: ComponentVal, depth: USize) -> USize? {
+    if depth > PLUGIN_MAX_VALUE_DEPTH -> return None
+    match value {
+        .S8(v) -> plugin_wire_tagged(USize{v.to_string().len()})
+        .U8(v) -> plugin_wire_tagged(USize{v.to_string().len()})
+        .S16(v) -> plugin_wire_tagged(USize{v.to_string().len()})
+        .U16(v) -> plugin_wire_tagged(USize{v.to_string().len()})
+        .S32(v) -> plugin_wire_tagged(USize{v.to_string().len()})
+        .U32(v) -> plugin_wire_tagged(USize{v.to_string().len()})
+        .S64(v) -> plugin_wire_tagged(USize{v.to_string().len()})
+        .U64(v) -> plugin_wire_tagged(USize{v.to_string().len()})
+        .Float32(v) -> plugin_wire_tagged(USize{F64{v}.to_string().len()})
+        .Float64(v) -> plugin_wire_tagged(USize{v.to_string().len()})
+        .Bool(v) -> plugin_wire_tagged(if v { USize{4} } else { USize{5} })
+        .Char(v) -> plugin_wire_tagged(USize{v.len_utf8()})
+        .String(v) -> plugin_wire_tagged(USize{v.len()})
+        .List(values) | .Tuple(values) -> {
+            size := USize{2} + plugin_decimal_digits(USize{values.len()})
+            loop value in values { size = plugin_wire_add(size, plugin_val_wire_size(value, depth + 1)?)? }
+            Val(size)
+        }
+        .Record(values) -> {
+            size := USize{2} + plugin_decimal_digits(USize{values.len()})
+            loop (name, value) in values {
+                size = plugin_wire_add(size, plugin_wire_tagged(USize{name.len()})?)?
+                size = plugin_wire_add(size, plugin_val_wire_size(value, depth + 1)?)?
+            }
+            Val(size)
+        }
+        .Variant(name, value) -> {
+            size := plugin_wire_tagged(USize{name.len()})?
+            size = plugin_wire_add(size, USize{1})?
+            if value == .Val(value) { size = plugin_wire_add(size, plugin_val_wire_size(value, depth + 1)?)? }
+            Val(size)
+        }
+        .Enum(name) -> plugin_wire_tagged(USize{name.len()})
+        .Option(value) -> match value { Val(value) -> plugin_wire_add(USize{1}, plugin_val_wire_size(value, depth + 1)?), None -> Val(USize{1}) }
+        .Result(Ok(value)) | .Result(Err(value)) -> {
+            size := USize{2}
+            if value == .Val(value) { size = plugin_wire_add(size, plugin_val_wire_size(value, depth + 1)?)? }
+            Val(size)
+        }
+        .Flags(names) -> {
+            size := USize{2} + plugin_decimal_digits(USize{names.len()})
+            loop name in names { size = plugin_wire_add(size, plugin_wire_tagged(USize{name.len()})?)? }
+            Val(size)
+        }
+        .Resource(_) -> None
+    }
+}
+// Rust: crates/jet-pkg-model/src/Prelude/Plugin.rs:1766
+fn plugin_from_val(value: ComponentVal) -> PluginValue? {
+    match value {
+        .S8(v) -> Val(.Int(I64{v})), .U8(v) -> Val(.Int(I64{v})), .S16(v) -> Val(.Int(I64{v})), .U16(v) -> Val(.Int(I64{v})),
+        .S32(v) -> Val(.Int(I64{v})), .U32(v) -> Val(.Int(I64{v})), .S64(v) -> Val(.Int(v)), .U64(v) -> Val(.Int(I64.try_from(v).ok()?)),
+        .Float32(v) -> Val(.Float(F64{v})), .Float64(v) -> Val(.Float(v)), .Bool(v) -> Val(.Bool(v)), .Char(v) -> Val(.Text(v.to_string())),
+        .String(v) -> Val(.Text(v.clone()))
+        .List(values) -> {
+            out := [PluginValue]{}.with_capacity(values.len())
+            loop value in values { &out.push(plugin_from_val(value)?) }
+            Val(.List(^out))
+        }
+        .Record(values) -> {
+            out := [(String, PluginValue)]{}.with_capacity(values.len())
+            loop (name, value) in values { &out.push((name.clone(), plugin_from_val(value)?)) }
+            Val(.Record(^out))
+        }
+        .Tuple(values) -> {
+            out := [PluginValue]{}.with_capacity(values.len())
+            loop value in values { &out.push(plugin_from_val(value)?) }
+            Val(.Tuple(^out))
+        }
+        .Variant(name, value) -> Val(.Variant(name.clone(), match value { Val(v) -> Val(Box.new(plugin_from_val(v)?)), None -> None }))
+        .Enum(name) -> Val(.Enum(name.clone()))
+        .Option(value) -> Val(.Option(match value { Val(v) -> Val(Box.new(plugin_from_val(v)?)), None -> None }))
+        .Result(Ok(value)) -> Val(.ResultOk(match value { Val(v) -> Val(Box.new(plugin_from_val(v)?)), None -> None }))
+        .Result(Err(value)) -> Val(.ResultErr(match value { Val(v) -> Val(Box.new(plugin_from_val(v)?)), None -> None }))
+        .Flags(names) -> Val(.Flags(names.clone()))
+        .Resource(_) -> None
+    }
+}

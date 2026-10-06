@@ -1,0 +1,29 @@
+use core.net.runtime.std_mime as mime
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Mime.rs:9
+// Behavioral controls; the source range has no inline Rust tests.
+#Test("mime_parts_normalize_and_keep_parameter_order") {
+    parts :: mime.jet_mime_parse_parts(" TEXT/HTML ; Charset=\"\"utf-8\" ; ; X= a=b ").expect("valid MIME")
+    assert(parts.top == "text")
+    assert(parts.sub == "html")
+    assert(parts.params == [("charset", "utf-8"), ("x", "a=b")])
+    assert(mime.jet_mime_essence(parts.top, parts.sub) == "text/html")
+    assert(mime.jet_mime_to_string(parts.top, parts.sub, parts.params.iter().map((key, value) -> (@key, @value))) == "text/html; charset=utf-8; x=a=b")
+    assert(mime.jet_mime_param(parts.params.iter().map((key, value) -> (@key, @value)), "CHARSET") == Val(@parts.params[0].1))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Mime.rs:9
+#Test("mime_parts_keep_exact_error_branches") {
+    assert(mime.jet_mime_parse_parts("text") == Err("MIME type needs `type/subtype`"))
+    assert(mime.jet_mime_parse_parts("text/ht ml") == Err("invalid MIME type `text/ht ml`"))
+    assert(mime.jet_mime_parse_parts("text/plain; broken") == Err("invalid MIME parameter `broken`"))
+    assert(mime.jet_mime_parse_parts("text/plain; ?=value") == Err("invalid MIME parameter `?`"))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Mime.rs:79
+#Test("mime_extension_tables_keep_aliases_and_absence") {
+    assert(mime.jet_mime_from_extension("..JPEG") == Val("image/jpeg"))
+    assert(mime.jet_mime_from_extension("unknown") == None)
+    assert(mime.jet_extension_from_mime(" APPLICATION/JSON ; charset=utf-8") == Val("json"))
+    assert(mime.jet_extension_from_mime("application/javascript") == Val("js"))
+    assert(mime.jet_extension_from_mime("text/xml") == Val("xml"))
+    assert(mime.jet_extension_from_mime("application/unknown") == None)
+}

@@ -554,6 +554,12 @@ fn lower_lambda_expecting_with_host_borrow(
     capture_facts.cloned.extend(extra_cloned.iter().cloned());
     capture_facts.cloned.extend(handle_shares.iter().cloned());
     capture_facts.moved.retain(|name| !extra_cloned.contains(name));
+    // A taken (`^name`) resource stays with its cleanup guard, and a slot
+    // this producer clones or shares is not the binding itself: neither
+    // moves as a taken capture.
+    capture_facts.taken.retain(|name| {
+        !env.is_resource(name) && !extra_cloned.contains(name) && !handle_shares.contains(name)
+    });
     TLambda {
         executable,
         source_span: lam.span,

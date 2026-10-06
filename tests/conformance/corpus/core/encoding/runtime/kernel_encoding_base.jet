@@ -1,0 +1,51 @@
+use core.encoding.runtime.kernel_encoding_base as encoding
+use core.encoding.runtime.kernel_binary as binary
+
+// Rust: crates/jet-codegen/src/Prelude/Core/EncodingBase.rs:8 (behavioral controls; no inline Rust tests)
+#Test("hex validates whole bytes before digits") {
+    assert(encoding.jet_std_hex_decode("x") == Err("odd-length hex string; hex text encodes whole bytes, so the length must be even"))
+    assert(encoding.jet_std_hex_decode("x0") == Err("invalid hex digit; expected 0-9, a-f, or A-F"))
+    assert(encoding.jet_std_hex_decode("aF00") == Ok([U8{175}, U8{0}]))
+    assert(encoding.jet_std_hex_decode("") == Ok([U8]{}))
+    assert(not encoding.jet_std_hex_is_hex(""))
+    assert(encoding.jet_std_hex_is_hex("aF00"))
+    assert(encoding.jet_std_hex_encode([U8{175}, U8{0}]) == "af00")
+    assert(encoding.jet_std_hex_encode_upper([U8{175}, U8{0}]) == "AF00")
+    assert(encoding.jet_std_hex_encode_sep([U8{175}, U8{0}], ":") == "af:00")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EncodingBase.rs:87
+#Test("CRC known check values") {
+    input :: "123456789".bytes()
+    assert(encoding.jet_std_crc_hqx(input, I64{0}) == I64{12739})
+    assert(encoding.jet_std_crc32(input) == I64{3421780262})
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EncodingBase.rs:117,141,152,183,194,201,231,235
+#Test("base encoding padding and wrapping") {
+    assert(encoding.jet_std_b64_encode([U8]{}) == "")
+    assert(encoding.jet_std_b64_encode([U8{102}]) == "Zg==")
+    assert(encoding.jet_std_b64_encode([U8{102}, U8{111}]) == "Zm8=")
+    assert(encoding.jet_std_b64_encode([U8{102}, U8{111}, U8{111}]) == "Zm9v")
+    assert(encoding.jet_std_b64_encodebytes([U8{102}]) == "Zg==\n")
+    assert(encoding.jet_std_b64_encodebytes([U8]{}) == "")
+    assert(encoding.jet_std_b64_encode_ints([I64{102}]) == "Zg==")
+    assert(encoding.jet_std_b64url_encode([U8{251}, U8{255}]) == "-_8")
+    assert(encoding.jet_std_b64url_encode_padded([U8{251}, U8{255}]) == "-_8=")
+    assert(encoding.jet_std_b64_pad("Zg") == "Zg==")
+    assert(encoding.jet_std_b64_unpad("Zg===") == "Zg")
+    assert(encoding.jet_std_base32_encode([U8{102}]) == "MY======")
+    assert(encoding.jet_std_base32hex_encode([U8{102}]) == "CO======")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EncodingBase.rs:239-520 (canonical owner controls)
+#Test("binary carriers preserve bits and format validation") {
+    assert(binary.jet_std_binary_pack_u16be(I64{-1}) == [U8{255}, U8{255}])
+    assert(binary.jet_std_binary_unpack_u64be([U8{255}, U8{255}, U8{255}, U8{255}, U8{255}, U8{255}, U8{255}, U8{255}], I64{0}) == Val(I64{-1}))
+    assert(binary.jet_std_binary_unpack_u16le([U8{1}], I64{0}) == None)
+    assert(binary.jet_std_binary_unpack_u8([U8{1}], I64{-1}) == None)
+    assert(binary.jet_std_binary_sign_extend(I64{255}, I64{8}) == I64{-1})
+    assert(binary.jet_std_binary_calcsize("0H") == Ok(I64{2}))
+    assert(binary.jet_std_binary_calcsize("2") == Err("binary format repeat count is missing a type"))
+    assert(binary.jet_std_binary_pack("2B", [I64{1}]) == Err("binary pack expected 2 values, got 1"))
+    assert(binary.jet_std_binary_unpack("b", [U8{255}, U8{0}]) == Ok([I64{255}]))
+    assert(binary.jet_std_binary_iter_unpack("", [U8]{}) == Err("binary iter_unpack needs a positive format size"))
+    assert(binary.jet_std_binary_iter_unpack("H", [U8{1}]) == Err("binary iter_unpack buffer length is not a multiple of the format size"))
+}

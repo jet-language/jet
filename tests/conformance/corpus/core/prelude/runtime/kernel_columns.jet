@@ -1,0 +1,16 @@
+use core.prelude.runtime.kernel_columns.JetColumns
+
+// Rust: crates/jet-codegen/src/Prelude/Core/Columns.rs:190
+#Test("gather_and_cell_keep_row_order_and_shared_bounds") {
+    columns :: JetColumns<String>.from_rows(2, [["x0", "y0"], ["x1", "y1"]])
+    assert_eq(columns.column(0), ["x0", "x1"].as_slice())
+    assert_eq(columns.column(1), ["y0", "y1"].as_slice())
+    assert_eq(columns.gather(1).expect("row 1 is present"), ["x1", "y1"])
+    assert_eq(columns.gather_cell(1, 0).expect("row 0 is present"), "y0")
+    loop index in [I64{-1}, I64{2}] {
+        whole :: columns.gather(index).expect_err("row must be rejected")
+        cell :: columns.gather_cell(1, index).expect_err("cell row must use the same bounds")
+        assert_eq((whole.index, whole.len), (index, 2))
+        assert_eq((cell.index, cell.len), (index, 2))
+    }
+}

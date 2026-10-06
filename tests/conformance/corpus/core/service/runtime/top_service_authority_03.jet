@@ -1,0 +1,79 @@
+use core.service.runtime.top_service_authority_03.[jet_job_queue_panel_state, jet_job_queue_panel_failure, jet_job_queue_json_text, jet_job_queue_json_optional_text, jet_job_queue_event_time, jet_job_queue_framed, jet_job_queue_id, jet_job_queue_value_text, jet_job_queue_value_i64, jet_job_queue_value_blob, jet_job_queue_row_optional_text, jet_job_queue_row_bool, jet_job_queue_u32]
+use core.service.runtime.top_service_authority_02.[JetJobQueueState, JetJobQueueValue, JetJobQueueRow]
+use core.service.runtime.top_service_authority_03.JetJobQueueNoopStore
+use core.service.runtime.top_service_authority_02.JetJobQueueStore
+use core.service.runtime.top_service_authority_03.[jet_job_queue_u64, jet_job_service_queue_tick_dispatch]
+use core.service.runtime.top_service_authority.JetServiceEndpoint
+use core.jobs.runtime.job_queue_types.JetJobError
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3593-3655
+#Test("queue_panel_state_failure_and_control_escape_preserve_original_spelling") {
+    assert_eq(jet_job_queue_panel_state(.Queued), "enqueued")
+    assert_eq(jet_job_queue_panel_state(.Running), "started")
+    assert_eq(jet_job_queue_panel_state(.DeadLettered), "failed")
+    assert_eq(jet_job_queue_panel_failure(.Cancelled, Val("lease_expired")), Val("cancelled"))
+    assert_eq(jet_job_queue_panel_failure(.Failed, Val("lease_expired: worker")), Val("worker_lost"))
+    assert_eq(jet_job_queue_panel_failure(.DeadLettered, None), Val("error"))
+    assert_eq(jet_job_queue_panel_failure(.Retrying, Val("lease_expired")), None)
+    assert_eq(jet_job_queue_json_text("\"\\\n\r\t\u{08}\u{0c}\u{01}\u{85}é"), "\"\\\"\\\\\\n\\r\\t\\b\\f\\u0001\\u0085é\"")
+    assert_eq(jet_job_queue_json_optional_text(None), "null")
+    assert_eq(jet_job_queue_json_optional_text(Val("")), "\"\"")
+    assert_eq(jet_job_queue_event_time(-1), U64{0})
+    assert_eq(jet_job_queue_event_time(7), U64{7})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:3886-3992
+#Test("queue_row_projection_rejects_type_coercion_and_non_boolean_integers") {
+    assert_eq(jet_job_queue_value_text(&JetJobQueueValue.Text("x"), "text")!, "x")
+    assert_eq(jet_job_queue_value_i64(&JetJobQueueValue.Int(3), "number")!, I64{3})
+    assert_eq(jet_job_queue_value_blob(&JetJobQueueValue.Blob([U8{1}]), "bytes")!, [U8{1}])
+    assert(jet_job_queue_value_i64(&JetJobQueueValue.Text("3"), "number").is_err())
+    row := JetJobQueueRow{values: [("empty", JetJobQueueValue.Null), ("flag", JetJobQueueValue.Int(1))]}
+    assert_eq(jet_job_queue_row_optional_text(&row, "empty")!, None)
+    assert(jet_job_queue_row_optional_text(&row, "missing").is_err())
+    assert(jet_job_queue_row_bool(&row, "flag")!)
+    row.values[1] = ("flag", JetJobQueueValue.Int(2))
+    assert(jet_job_queue_row_bool(&row, "flag").is_err())
+    assert(jet_job_queue_u32(-1, "attempts").is_err())
+    assert(jet_job_queue_u32(I64{4294967296}, "attempts").is_err())
+    assert_eq(jet_job_queue_u32(I64{4294967295}, "attempts")!, U32.MAX)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4036-4080
+#Test("queue_id_frames_fields_with_big_endian_lengths_and_domain_separation") {
+    framed := [U8]{}
+    jet_job_queue_framed(&framed, &[U8{65}, U8{66}])
+    assert_eq(framed, [U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{2}, U8{65}, U8{66}])
+    payload :: [U8]{1, 2, 3}
+    first :: jet_job_queue_id("a", "bc", 1, "type", &payload)
+    assert_eq(first, jet_job_queue_id("a", "bc", 1, "type", &payload))
+    assert(first.starts_with("jq-"))
+    assert_ne(first, jet_job_queue_id("ab", "c", 1, "type", &payload))
+    assert_ne(first, jet_job_queue_id("a", "bc", 2, "type", &payload))
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:4831-4859
+#Test("queue_transaction_move_sentinel_never_reports_success_for_database_operations") {
+    sentinel := JetJobQueueNoopStore{}
+    assert(sentinel.begin().is_err())
+    assert(sentinel.commit().is_err())
+    assert(sentinel.execute("SELECT 1", &[]).is_err())
+    assert(sentinel.query("SELECT 1", &[]).is_err())
+    // No transaction was begun by this carrier; rollback has no state to alter.
+    sentinel.rollback()
+    assert(sentinel.begin().is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5122-5126
+#Test("queue_aggregate_unsigned_projection_rejects_negative_counts") {
+    assert(jet_job_queue_u64(-1, "throughput").is_err())
+    assert_eq(jet_job_queue_u64(0, "throughput")!, U64{0})
+    assert_eq(jet_job_queue_u64(I64.MAX, "throughput")!, I64.MAX as U64)
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:5838-5848
+#Test("zero_limit_queue_tick_never_opens_store_or_invokes_dispatcher") {
+    endpoint :: JetServiceEndpoint{tree: "", worker: "", generation: -1, authority: "", channel: None}
+    calls := 0
+    settled :: jet_job_service_queue_tick_dispatch(&endpoint, 0, fn(_, _) {
+        calls += 1
+        Err(JetJobError{type_id: "unused", reason: "must not dispatch", detail: None})
+    })!
+    assert_eq(settled, USize{0})
+    assert_eq(calls, 0)
+}

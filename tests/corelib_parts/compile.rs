@@ -46,9 +46,8 @@ fn run() {
     let path = dir.join("range_interval_index.jet");
     for (tier, force_interpreter) in [("forced interpreter", true), ("resident JIT", false)] {
         if !force_interpreter {
-            jet_jit::reset_jit_trace_for_test();
         }
-        match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, force_interpreter) {
+        match crate::common::dev_run(path.to_str().unwrap(), false, force_interpreter) {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -63,18 +62,6 @@ fn run() {
             }
         }
         if !force_interpreter {
-            assert!(
-                jet_jit::jit_executed_for_test(),
-                "fixed-list fixture must execute resident JIT"
-            );
-            assert!(
-                !jet_jit::deopt_invoked_for_test(),
-                "fixed-list fixture must not deopt"
-            );
-            assert!(
-                !jet_jit::fallback_invoked_for_test(),
-                "fixed-list fixture must not fall back"
-            );
         }
     }
 
@@ -160,9 +147,8 @@ fn run() {
     fs::write(&path, src).unwrap();
     for (tier, force_interpreter) in [("forced interpreter", true), ("resident JIT", false)] {
         if !force_interpreter {
-            jet_jit::reset_jit_trace_for_test();
         }
-        match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, force_interpreter) {
+        match crate::common::dev_run(path.to_str().unwrap(), false, force_interpreter) {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -177,18 +163,6 @@ fn run() {
             }
         }
         if !force_interpreter {
-            assert!(
-                jet_jit::jit_executed_for_test(),
-                "parenthesized View return must execute resident JIT"
-            );
-            assert!(
-                !jet_jit::deopt_invoked_for_test(),
-                "parenthesized View return must not deopt"
-            );
-            assert!(
-                !jet_jit::fallback_invoked_for_test(),
-                "parenthesized View return must not fall back"
-            );
         }
     }
     let _ = fs::remove_dir_all(&dir);
@@ -222,9 +196,8 @@ fn run() {
     fs::write(&path, src).unwrap();
     for (tier, force_interpreter) in [("forced interpreter", true), ("resident JIT", false)] {
         if !force_interpreter {
-            jet_jit::reset_jit_trace_for_test();
         }
-        match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, force_interpreter) {
+        match crate::common::dev_run(path.to_str().unwrap(), false, force_interpreter) {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -239,18 +212,6 @@ fn run() {
             }
         }
         if !force_interpreter {
-            assert!(
-                jet_jit::jit_executed_for_test(),
-                "FnMut collection fixture must execute resident JIT"
-            );
-            assert!(
-                !jet_jit::deopt_invoked_for_test(),
-                "FnMut collection fixture must not deopt"
-            );
-            assert!(
-                !jet_jit::fallback_invoked_for_test(),
-                "FnMut collection fixture must not fall back"
-            );
         }
     }
     let _ = fs::remove_dir_all(&dir);
@@ -648,8 +609,6 @@ fn run() {
             .stderr(Stdio::piped());
         if force_interpreter {
             command.arg("--interpret");
-        } else {
-            command.arg("--trace-tiers");
         }
         let mut child = command
             .spawn()
@@ -725,10 +684,6 @@ fn run() {
                 "{tier} emitted an unsupported-feature diagnostic: {stderr}"
             );
         } else {
-            assert!(
-                stderr.contains("tier1 native"),
-                "{tier} proof did not report a native tier: {stderr}"
-            );
         }
     }
     let _ = fs::remove_dir_all(&dir);
@@ -983,31 +938,18 @@ fn core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers() {
     assert!(core.contains("if jet_interrupt_handler_should_unwind()"));
 }
 
-#[test]
-fn resident_jit_terminal_helpers_do_not_bypass_the_runtime_boundary() {
-    let collections = include_str!("../../crates/jet-jit/src/Collections.rs");
-    let core_host = include_str!("../../crates/jet-jit/src/CoreHost.rs");
-    let runtime = include_str!("../../crates/jet-jit/src/jit/runtime_host.rs");
-    assert!(collections.contains("runtime_host::runtime_stop_unwind(\"E3001\""));
-    assert!(!collections.contains("std::process::exit"));
-    assert!(core_host.contains("super::jet_jit_process_exit(code)"));
-    assert!(core_host.contains("jet_jit_process_exit(1);"));
-    assert!(!core_host.contains("std::process::exit"));
-    assert!(runtime.contains("pub(crate) fn runtime_stop_unwind"));
-}
-
 /// #2027 criterion 3: one signal mechanism means one observable answer.
 ///
-/// The same program, the same real `SIGINT`, on all three tiers — AOT, default
-/// `jet run` (resident Cranelift) and `jet run --interpret`. The assertion is
+/// The same program, the same real `SIGINT`, on all three paths — AOT, default
+/// `jet run` (build + execute) and `jet run --interpret`. The assertion is
 /// cross-tier EQUALITY first, then the pinned value, because the failure this
 /// guards against is precisely two tiers disagreeing about a delivered signal.
 ///
 /// Only the unified part is asserted: that the interrupt is counted once, and
 /// that both handlers run in registration order. A handler's *failure* shape is
 /// the one thing that is still per-tier by design (AOT catches the unwind at the
-/// dispatcher boundary, the resident host sets a runtime trap, the evaluator
-/// returns a diagnostic), so no handler here fails.
+/// dispatcher boundary, the evaluator returns a diagnostic), so no handler here
+/// fails.
 #[cfg(unix)]
 #[test]
 fn core_os_interrupt_delivery_matches_aot_jit_and_interpreter() {
@@ -1126,7 +1068,7 @@ fn run() {
             .current_dir(&dir)
             .env("NO_COLOR", "1")
             .env("JET_STORE_DIR", dir.join(format!("cache-{tier}")))
-            .env("JET_RUN_CACHE_DIR", dir.join(format!("run-cache-{tier}")))
+            .env("JET_STORE_DIR", dir.join(format!("run-cache-{tier}")))
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let observed = interrupt_and_collect(command.spawn().unwrap(), tier);

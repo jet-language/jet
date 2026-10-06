@@ -1,0 +1,65 @@
+use core.web.runtime.browser_test.*
+
+// Rust: crates/jet-codegen/src/Prelude/BrowserTest.rs:213
+#Test("browser_test_engines_validate_and_order") {
+    assert(jet_browser_test_engines("webkit, chromium firefox chromium") == .Ok(["chromium", "firefox", "webkit"]))
+    assert(jet_browser_test_engines("").is_err())
+    assert(jet_browser_test_engines("chromium,unknown").is_err())
+}
+// Rust: crates/jet-codegen/src/Prelude/BrowserTest.rs:239
+#Test("browser_test_command_quotes") {
+    assert(jet_browser_test_split_command("server --title 'two words' \"more words\"") == ["server", "--title", "two words", "more words"])
+    assert(jet_browser_test_split_command("  a\t b  ") == ["a", "b"])
+    assert(jet_browser_test_split_command("a '' b") == ["a", "b"])
+}
+// Rust: crates/jet-codegen/src/Prelude/BrowserTest.rs:273
+#Test("browser_test_glob_backtracking") {
+    assert(jet_browser_test_glob_match("a*?c", "abbbc"))
+    assert(jet_browser_test_glob_match("*", ""))
+    assert(!jet_browser_test_glob_match("?", ""))
+    assert(!jet_browser_test_glob_match("a*c", "abbd"))
+}
+// Rust: crates/jet-codegen/src/Prelude/BrowserTest.rs:302
+#Test("browser_test_source_saturates") {
+    source :: jet_browser_test_source("test.jet", -1, I64.MAX)
+    assert(source.path == "test.jet")
+    assert(source.line == 0)
+    assert(source.column == U32.MAX)
+}
+// Rust: crates/jet-codegen/src/Prelude/BrowserTest.rs:562
+#Test("browser_test_artifact_component") {
+    assert(jet_browser_test_safe_component("../unsafe name", "test") == ".._unsafe_name")
+    assert(jet_browser_test_safe_component("..", "test") == "test")
+    assert(jet_browser_test_safe_component("", "test") == "test")
+}
+// Rust: crates/jet-codegen/src/Prelude/BrowserTest.rs:840
+#Test("browser_test_report_uses_last_attempt") {
+    report :: JetBrowserTestReport { source_root: ".", reporter: "text", ui: false, watch: false,
+        cases: [JetBrowserTestCase { name: "missing", selected: true, attempts: [] }] }
+    assert(jet_browser_test_report_exit_code(&report) == 1)
+    assert(jet_browser_test_report_summary(&report) == "0 passed, 1 failed, 0 skipped")
+    skipped :: JetBrowserTestReport { source_root: ".", reporter: "text", ui: false, watch: false,
+        cases: [JetBrowserTestCase { name: "skip", selected: false, attempts: [] }] }
+    assert(jet_browser_test_report_exit_code(&skipped) == 0)
+    assert(jet_browser_test_report_text(&skipped) == "Browser tests: 0 passed, 0 failed, 1 skipped\nSKIP skip\n")
+}
+// Rust: crates/jet-codegen/src/Prelude/BrowserTest.rs:1095
+#Test("browser_test_html_json_escapes_script_content") {
+    assert(jet_browser_test_html_json("<&>\u{2028}\u{2029}") == "\\u003c\\u0026\\u003e\\u2028\\u2029")
+}
+// Rust: crates/jet-codegen/src/Prelude/BrowserTest.rs:1350
+#Test("browser_test_host_port_preserves_reference_defaults") {
+    assert(jet_browser_test_host_port("https://example.test/path") == .Val(("example.test", 80)))
+    assert(jet_browser_test_host_port("http://example.test:8080/") == .Val(("example.test", 8080)))
+    assert(jet_browser_test_host_port("http://user@example.test/") == .None)
+    assert(jet_browser_test_host_port("http://:80/") == .None)
+    assert(jet_browser_test_host_port("ws://example.test/") == .None)
+}
+// Rust: crates/jet-codegen/src/Prelude/BrowserTest.rs:1367
+#Test("browser_test_base64_decode") {
+    assert(jet_browser_test_base64_decode("T W\nFu") == .Ok([77, 97, 110]))
+    assert(jet_browser_test_base64_decode("TQ==") == .Ok([77]))
+    assert(jet_browser_test_base64_decode("TWE=") == .Ok([77, 97]))
+    assert(jet_browser_test_base64_decode("TQ=").is_err())
+    assert(jet_browser_test_base64_decode("!AAA").is_err())
+}

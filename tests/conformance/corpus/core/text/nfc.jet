@@ -5,3 +5,89 @@ fn run() {
     result :: text.nfc("é")
     print(result)
 }
+
+// UAX #15 NormalizationTest-17.0.0: the five-column invariants, not only c1.
+fn normalization_case(c1: String, c2: String, c3: String, c4: String, c5: String) Never! {
+    canonical :: [String]{c1, c2, c3}
+    loop value in canonical {
+        assert_eq(text.nfc(value), c2)
+        assert_eq(text.nfd(value), c3)
+    }
+    compatible :: [String]{c4, c5}
+    loop value in compatible {
+        assert_eq(text.nfc(value), c4)
+        assert_eq(text.nfd(value), c5)
+    }
+    all :: [String]{c1, c2, c3, c4, c5}
+    loop value in all {
+        assert_eq(text.nfkc(value), c4)
+        assert_eq(text.nfkd(value), c5)
+    }
+}
+
+#Test("normalization recursive decomposition and singleton exclusions") {
+    // U+212B -> U+00C5 -> U+0041 U+030A (recursive singleton).
+    _ :: normalization_case("Å", "Å", "Å", "Å", "Å")
+    _ :: normalization_case("Ω", "Ω", "Ω", "Ω", "Ω")
+    _ :: normalization_case("K", "K", "K", "K", "K")
+    _ :: normalization_case("̀", "̀", "̀", "̀", "̀")
+    // Primary composition exclusion: U+0958 never recomposes from KA + NUKTA.
+    _ :: normalization_case("क़", "क़", "क़", "क़", "क़")
+    // Supplementary scalar lookup and UTF-8 encoding.
+    _ :: normalization_case("丽", "丽", "丽", "丽", "丽")
+}
+
+#Test("normalization long s dot above dot below distinguishes all four forms") {
+    // NormalizationTest's U+1E9B U+0323 canonical vs compatibility expansion.
+    _ :: normalization_case("ẛ̣", "ẛ̣", "ẛ̣", "ṩ", "ṩ")
+    _ :: normalization_case("Ḍ̇", "Ḍ̇", "Ḍ̇", "Ḍ̇", "Ḍ̇")
+    _ :: normalization_case("Ḕ", "Ḕ", "Ḕ", "Ḕ", "Ḕ")
+}
+
+#Test("normalization Hangul LV LVT bounds and blocking") {
+    _ :: normalization_case("가", "가", "가", "가", "가")
+    _ :: normalization_case("각", "각", "각", "각", "각")
+    _ :: normalization_case("힣", "힣", "힣", "힣", "힣")
+    // NormalizationTest:1100 AC00 11A8 11A8.
+    _ :: normalization_case("ᄀ각ᆨ", "ᄀ각ᆨ", "ᄀ각ᆨ", "ᄀ각ᆨ", "ᄀ각ᆨ")
+    _ :: normalization_case("ᄀ́ᅡ", "ᄀ́ᅡ", "ᄀ́ᅡ", "ᄀ́ᅡ", "ᄀ́ᅡ")
+    _ :: normalization_case("가ᆧ", "가ᆧ", "가ᆧ", "가ᆧ", "가ᆧ")
+}
+
+#Test("normalization CCC order stable leading marks and starter barriers") {
+    // CCC 230,220 reorder; equal CCC preserves the original order.
+    _ :: normalization_case("Ḍ̇", "Ḍ̇", "Ḍ̇", "Ḍ̇", "Ḍ̇")
+    _ :: normalization_case("̣̀́", "̣̀́", "̣̀́", "̣̀́", "̣̀́")
+    _ :: normalization_case("A̅́", "A̅́", "A̅́", "A̅́", "A̅́")
+    _ :: normalization_case("A͏̊", "A͏̊", "A͏̊", "A͏̊", "A͏̊")
+    _ :: normalization_case("Å̖", "Å̖", "Å̖", "Å̖", "Å̖")
+    // NormalizationTest:05B8 05B9 05B1 0591 05C3 05B0 05AC 059F.
+    _ :: normalization_case("ֱָֹ֑׃ְ֬֟", "ֱָֹ֑׃ְ֬֟", "ֱָֹ֑׃ְ֬֟", "ֱָֹ֑׃ְ֬֟", "ֱָֹ֑׃ְ֬֟")
+}
+
+#Test("normalization composes CCC zero pairs and retains last blocking class") {
+    _ :: normalization_case("ো", "ো", "ো", "ো", "ো")
+    // NormalizationTest:0DDD 0334; CCC zero pair followed by CCC 9.
+    _ :: normalization_case("ෝ̴", "ෝ̴", "ෝ̴", "ෝ̴", "ෝ̴")
+    // A leading nonstarter is not an eligible starter (nonstarter exclusion).
+    _ :: normalization_case("̈́", "̈́", "̈́", "̈́", "̈́")
+}
+
+#Test("normalization compatibility tags recurse but unlisted ligatures stay identity") {
+    _ :: normalization_case("ﬃ", "ﬃ", "ﬃ", "ffi", "ffi")
+    _ :: normalization_case("① Ａ", "① Ａ", "① Ａ", "1 A", "1 A")
+    _ :: normalization_case("Ǆ̣", "Ǆ̣", "Ǆ̣", "DẒ̌", "DẒ̌")
+    _ :: normalization_case("Œœ", "Œœ", "Œœ", "Œœ", "Œœ")
+    _ :: normalization_case("𝟘", "𝟘", "𝟘", "0", "0")
+    _ :: normalization_case("", "", "", "", "")
+}
+
+#Test("normalization long descending CCC runs use stable linear ordering") {
+    source :: "̣́".repeat(4096)
+    wanted :: "{ "̣".repeat(4096)}{ "́".repeat(4096)}"
+    assert_eq(text.nfd(source), wanted)
+    assert_eq(text.nfc(source), wanted)
+    assert_eq(text.nfkd(source), wanted)
+    assert_eq(text.nfkc(source), wanted)
+    assert_eq(text.nfd("A{source}B{source}"), "A{wanted}B{wanted}")
+}

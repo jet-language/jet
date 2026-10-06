@@ -1,0 +1,311 @@
+// PORT-PENDING 0220 crates-jet-jit-src-layout-module-group: crates/jet-jit/src/Layout.rs:1-307
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-LAYOUT1 / D-LAYOUT-CTOR1: resident-JIT host for `name :: Layout.{ … }` /
+//RS //! `Layout` — `include!`
+//RS //! canonical `jet_layout` (Prelude/Layout.rs). No third algorithm.
+//RS 
+//RS // This module includes shared Prelude source that several hosts compile,
+//RS // each using a different subset, so dead-code reports here are about the
+//RS // other hosts' usage, not about this one. Scoped to the module, never the crate.
+//RS #![allow(dead_code)]
+//RS 
+//RS use super::Concurrency;
+//RS use crate::runtime_host::{alloc_jit_result, JitRuntime};
+//RS use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS use cranelift_module::Module;
+//RS 
+//RS /// Canonical Cassowary-style layout solver (extracted from Prelude/Layout.rs).
+//RS #[allow(dead_code, unused_imports)]
+//RS pub(crate) mod jet_layout {
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!(concat!(env!("OUT_DIR"), "/layout_rt.rs"));
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub(crate) enum LayoutSlot {
+//RS     Handle(jet_layout::Handle),
+//RS     Expr(jet_layout::LinExpr),
+//RS     Constraint(jet_layout::Constraint),
+//RS }
+//RS 
+//RS fn with_rt<F, R>(f: F) -> R
+//RS where
+//RS     F: FnOnce(&mut JitRuntime) -> R,
+//RS     R: Default,
+//RS {
+//RS     Concurrency::with_runtime_mut(f)
+//RS }
+//RS 
+//RS fn push_slot(slot: LayoutSlot) -> i64 {
+//RS     with_rt(|rt| {
+//RS         rt.layout_slots.push(slot);
+//RS         rt.layout_slots.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn slot(handle: i64) -> LayoutSlot {
+//RS     with_rt(|rt| {
+//RS         Some(
+//RS             rt.layout_slots
+//RS                 .get(handle.saturating_sub(1) as usize)
+//RS                 .expect("jit layout: bad handle")
+//RS                 .clone(),
+//RS         )
+//RS     })
+//RS     .expect("jit layout: no active runtime")
+//RS }
+//RS 
+//RS fn jet_jit_layout_new(label: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let label = rt
+//RS             .heap
+//RS             .clone_string(label)
+//RS             .unwrap_or_else(|| "layout".into());
+//RS         let h = jet_layout::Handle::new(&label);
+//RS         rt.layout_slots.push(LayoutSlot::Handle(h));
+//RS         rt.layout_slots.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_layout_from_const(v: f64) -> i64 {
+//RS     push_slot(LayoutSlot::Expr(jet_layout::LinExpr::from_const(v)))
+//RS }
+//RS 
+//RS fn jet_jit_layout_ge(lhs: i64, rhs: i64) -> i64 {
+//RS     match (slot(lhs), slot(rhs)) {
+//RS         (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => {
+//RS             push_slot(LayoutSlot::Constraint(jet_layout::ge(a, b)))
+//RS         }
+//RS         _ => jet_foundation::ice!(None, "jit layout ge: bad operands"),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_layout_le(lhs: i64, rhs: i64) -> i64 {
+//RS     match (slot(lhs), slot(rhs)) {
+//RS         (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => {
+//RS             push_slot(LayoutSlot::Constraint(jet_layout::le(a, b)))
+//RS         }
+//RS         _ => jet_foundation::ice!(None, "jit layout le: bad operands"),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_layout_eq(lhs: i64, rhs: i64) -> i64 {
+//RS     match (slot(lhs), slot(rhs)) {
+//RS         (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => {
+//RS             push_slot(LayoutSlot::Constraint(jet_layout::eq_(a, b)))
+//RS         }
+//RS         _ => jet_foundation::ice!(None, "jit layout eq: bad operands"),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_layout_add(lhs: i64, rhs: i64) -> i64 {
+//RS     match (slot(lhs), slot(rhs)) {
+//RS         (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => push_slot(LayoutSlot::Expr(a + b)),
+//RS         _ => jet_foundation::ice!(None, "jit layout add: bad operands"),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_layout_sub(lhs: i64, rhs: i64) -> i64 {
+//RS     match (slot(lhs), slot(rhs)) {
+//RS         (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => push_slot(LayoutSlot::Expr(a - b)),
+//RS         _ => jet_foundation::ice!(None, "jit layout sub: bad operands"),
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_layout_h(handle: i64, box_name: i64, anchor: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let box_name = rt.heap.clone_string(box_name).unwrap_or_default();
+//RS         let anchor = rt.heap.clone_string(anchor).unwrap_or_default();
+//RS         let LayoutSlot::Handle(h) = rt
+//RS             .layout_slots
+//RS             .get(handle.saturating_sub(1) as usize)
+//RS             .expect("jit layout h: bad handle")
+//RS             .clone()
+//RS         else {
+//RS             jet_foundation::ice!(None, "jit layout h: not a handle");
+//RS         };
+//RS         let expr = h.h(&box_name, &anchor);
+//RS         rt.layout_slots.push(LayoutSlot::Expr(expr));
+//RS         rt.layout_slots.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_layout_v(handle: i64, box_name: i64, anchor: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let box_name = rt.heap.clone_string(box_name).unwrap_or_default();
+//RS         let anchor = rt.heap.clone_string(anchor).unwrap_or_default();
+//RS         let LayoutSlot::Handle(h) = rt
+//RS             .layout_slots
+//RS             .get(handle.saturating_sub(1) as usize)
+//RS             .expect("jit layout v: bad handle")
+//RS             .clone()
+//RS         else {
+//RS             jet_foundation::ice!(None, "jit layout v: not a handle");
+//RS         };
+//RS         let expr = h.v(&box_name, &anchor);
+//RS         rt.layout_slots.push(LayoutSlot::Expr(expr));
+//RS         rt.layout_slots.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_layout_value(handle: i64, expr: i64) -> f64 {
+//RS     with_rt(|rt| {
+//RS         let LayoutSlot::Handle(h) = rt
+//RS             .layout_slots
+//RS             .get(handle.saturating_sub(1) as usize)
+//RS             .expect("jit layout value: bad handle")
+//RS             .clone()
+//RS         else {
+//RS             jet_foundation::ice!(None, "jit layout value: not a handle");
+//RS         };
+//RS         let LayoutSlot::Expr(e) = rt
+//RS             .layout_slots
+//RS             .get(expr.saturating_sub(1) as usize)
+//RS             .expect("jit layout value: bad expr")
+//RS             .clone()
+//RS         else {
+//RS             jet_foundation::ice!(None, "jit layout value: not an expr");
+//RS         };
+//RS         h.value(e)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_layout_suggest(handle: i64, expr: i64, value: f64) {
+//RS     with_rt(|rt| {
+//RS         let LayoutSlot::Handle(h) = rt
+//RS             .layout_slots
+//RS             .get(handle.saturating_sub(1) as usize)
+//RS             .expect("jit layout suggest: bad handle")
+//RS             .clone()
+//RS         else {
+//RS             jet_foundation::ice!(None, "jit layout suggest: not a handle");
+//RS         };
+//RS         let LayoutSlot::Expr(e) = rt
+//RS             .layout_slots
+//RS             .get(expr.saturating_sub(1) as usize)
+//RS             .expect("jit layout suggest: bad expr")
+//RS             .clone()
+//RS         else {
+//RS             jet_foundation::ice!(None, "jit layout suggest: not an expr");
+//RS         };
+//RS         h.suggest(e, value);
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_layout_is_feasible(handle: i64) -> i8 {
+//RS     with_rt(|rt| {
+//RS         let LayoutSlot::Handle(h) = rt
+//RS             .layout_slots
+//RS             .get(handle.saturating_sub(1) as usize)
+//RS             .expect("jit layout is_feasible: bad handle")
+//RS             .clone()
+//RS         else {
+//RS             jet_foundation::ice!(None, "jit layout is_feasible: not a handle");
+//RS         };
+//RS         if h.is_feasible() {
+//RS             1
+//RS         } else {
+//RS             0
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_layout_add_constraint(handle: i64, constraint: i64) {
+//RS     let _ = (handle, constraint);
+//RS     // Constraints auto-register via jet_layout::ge/le/eq_ (make_constraint).
+//RS }
+//RS 
+//RS fn jet_jit_layout_strength(constraint: i64, kind: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let LayoutSlot::Constraint(c) = rt
+//RS             .layout_slots
+//RS             .get(constraint.saturating_sub(1) as usize)
+//RS             .expect("jit layout strength: bad constraint")
+//RS             .clone()
+//RS         else {
+//RS             jet_foundation::ice!(None, "jit layout strength: not a constraint");
+//RS         };
+//RS         let c = match kind {
+//RS             0 => c.required(),
+//RS             1 => c.strong(),
+//RS             2 => c.medium(),
+//RS             _ => c.weak(),
+//RS         };
+//RS         rt.layout_slots.push(LayoutSlot::Constraint(c));
+//RS         rt.layout_slots.len() as i64
+//RS     })
+//RS }
+//RS 
+//RS host_fns! {
+//RS     struct LayoutHostFns;
+//RS     register: register_layout_symbols;
+//RS     declare: declare_layout_host_fns(module) {
+//RS         let cc = module.target_config().default_call_conv;
+//RS         let mut unary = Signature::new(cc);
+//RS         unary.params.push(AbiParam::new(types::I64));
+//RS         unary.returns.push(AbiParam::new(types::I64));
+//RS         let mut binary = Signature::new(cc);
+//RS         binary.params.push(AbiParam::new(types::I64));
+//RS         binary.params.push(AbiParam::new(types::I64));
+//RS         binary.returns.push(AbiParam::new(types::I64));
+//RS         let mut from_const = Signature::new(cc);
+//RS         from_const.params.push(AbiParam::new(types::F64));
+//RS         from_const.returns.push(AbiParam::new(types::I64));
+//RS         let mut ternary = Signature::new(cc);
+//RS         ternary.params.push(AbiParam::new(types::I64));
+//RS         ternary.params.push(AbiParam::new(types::I64));
+//RS         ternary.params.push(AbiParam::new(types::I64));
+//RS         ternary.returns.push(AbiParam::new(types::I64));
+//RS         let mut value = Signature::new(cc);
+//RS         value.params.push(AbiParam::new(types::I64));
+//RS         value.params.push(AbiParam::new(types::I64));
+//RS         value.returns.push(AbiParam::new(types::F64));
+//RS         let mut suggest = Signature::new(cc);
+//RS         suggest.params.push(AbiParam::new(types::I64));
+//RS         suggest.params.push(AbiParam::new(types::I64));
+//RS         suggest.params.push(AbiParam::new(types::F64));
+//RS         let mut is_feasible = Signature::new(cc);
+//RS         is_feasible.params.push(AbiParam::new(types::I64));
+//RS         is_feasible.returns.push(AbiParam::new(types::I8));
+//RS         let mut add_c = Signature::new(cc);
+//RS         add_c.params.push(AbiParam::new(types::I64));
+//RS         add_c.params.push(AbiParam::new(types::I64));
+//RS 
+//RS 
+//RS     }
+//RS     new: "jet_jit_layout_new" => jet_jit_layout_new: unary;
+//RS     new_canonical: "jet_layout::Handle::new" => jet_jit_layout_new: unary;
+//RS     from_const: "jet_jit_layout_from_const" => jet_jit_layout_from_const: from_const;
+//RS     from_const_canonical: "jet_layout::LinExpr::from_const" => jet_jit_layout_from_const: from_const;
+//RS     ge: "jet_jit_layout_ge" => jet_jit_layout_ge: binary;
+//RS     ge_canonical: "jet_layout::ge" => jet_jit_layout_ge: binary;
+//RS     le: "jet_jit_layout_le" => jet_jit_layout_le: binary;
+//RS     le_canonical: "jet_layout::le" => jet_jit_layout_le: binary;
+//RS     eq: "jet_jit_layout_eq" => jet_jit_layout_eq: binary;
+//RS     eq_canonical: "jet_layout::eq_" => jet_jit_layout_eq: binary;
+//RS     add: "jet_jit_layout_add" => jet_jit_layout_add: binary;
+//RS     add_canonical: "jet_layout::add" => jet_jit_layout_add: binary;
+//RS     sub: "jet_jit_layout_sub" => jet_jit_layout_sub: binary;
+//RS     sub_canonical: "jet_layout::sub" => jet_jit_layout_sub: binary;
+//RS     h: "jet_jit_layout_h" => jet_jit_layout_h: ternary;
+//RS     h_canonical: "jet_layout::Handle::h" => jet_jit_layout_h: ternary;
+//RS     v: "jet_jit_layout_v" => jet_jit_layout_v: ternary;
+//RS     v_canonical: "jet_layout::Handle::v" => jet_jit_layout_v: ternary;
+//RS     value: "jet_jit_layout_value" => jet_jit_layout_value: value;
+//RS     value_canonical: "jet_layout::Handle::value" => jet_jit_layout_value: value;
+//RS     suggest: "jet_jit_layout_suggest" => jet_jit_layout_suggest: suggest;
+//RS     suggest_canonical: "jet_layout::Handle::suggest" => jet_jit_layout_suggest: suggest;
+//RS     is_feasible: "jet_jit_layout_is_feasible" => jet_jit_layout_is_feasible: is_feasible;
+//RS     is_feasible_canonical: "jet_layout::Handle::is_feasible" => jet_jit_layout_is_feasible: is_feasible;
+//RS     add_constraint: "jet_jit_layout_add_constraint" => jet_jit_layout_add_constraint: add_c;
+//RS     strength: "jet_jit_layout_strength" => jet_jit_layout_strength: binary;
+//RS }
+//RS 
+//RS // silence unused import warning until lower_ctx wires Result packing
+//RS #[allow(dead_code)]
+//RS fn _alloc(ok: bool, bits: u64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, ok, bits))
+//RS }
+// END-PORT-PENDING 0220 crates/jet-jit/src/Layout.rs:1-307
+

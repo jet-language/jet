@@ -214,7 +214,7 @@ pub fn x64_lea_rip(code: &[U8], dst: Int) -> Int Never! {
     at
 }
 
-// One-operand group 3 (REX.W F7 /n): neg 3, div 6, idiv 7.
+// One-operand group 3 (REX.W F7 /n): neg 3, mul 4, div 6, idiv 7.
 fn x64_group3(code: &[U8], extension: Int, reg: Int) Never! {
     x64_rex(&code, true, 0, reg)
     x64_byte(&code, 0xf7)
@@ -222,6 +222,9 @@ fn x64_group3(code: &[U8], extension: Int, reg: Int) Never! {
 }
 
 pub fn x64_neg(code: &[U8], reg: Int) Never! { x64_group3(&code, 3, reg) }
+
+// mul src: unsigned rax * src -> rdx:rax; CF/OF mean the high half is nonzero.
+pub fn x64_mul(code: &[U8], src: Int) Never! { x64_group3(&code, 4, src) }
 
 // div src: unsigned rdx:rax / src -> rax quotient, rdx remainder.
 pub fn x64_div(code: &[U8], src: Int) Never! { x64_group3(&code, 6, src) }
@@ -326,6 +329,13 @@ pub fn x64_call_rel32(code: &[U8]) -> Int Never! {
     at :: code.len()
     x64_u32(&code, 0)
     at
+}
+
+// call r64 (FF /2).
+pub fn x64_call_reg(code: &[U8], reg: Int) Never! {
+    if reg >= 8 -> x64_byte(&code, 0x41)
+    x64_byte(&code, 0xff)
+    x64_byte(&code, 0xd0 | (reg & 7))
 }
 
 // jmp rel32 (E9 cd); returns the offset of the rel32 field.

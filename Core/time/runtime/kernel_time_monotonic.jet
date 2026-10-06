@@ -1,0 +1,48 @@
+// One monotonic scalar and controlled provider shared by execution tiers.
+// Policy is plain Jet; GATE #4565 primitives are the per-thread hook cell
+// (declare, read, swap) and the host monotonic clock.
+use core.cell.[Cell, ThreadLocal]
+use std.sync.[OnceLock]
+use std.time.[Instant]
+use core.tasks.runtime.scheduler.[jet_scheduler_world_monotonic_now_ns]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/TimeMonotonic.rs:8
+pub alias JetMonotonicProvider :: fn() -> I64?
+// Rust: crates/jet-codegen/src/Prelude/Core/TimeMonotonic.rs:10
+// GATE #4565: kernel primitive
+JET_MONOTONIC_PROVIDER :: #Unsafe("thread-local function provider is installed only for the executing thread") {
+    ThreadLocal.new(() -> Cell.new(None as JetMonotonicProvider?))
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/TimeMonotonic.rs:15
+pub fn jet_time_monotonic_provider_set(provider: JetMonotonicProvider?) -> JetMonotonicProvider? {
+    // GATE #4565: kernel primitive
+    #Unsafe("replace executing thread clock hook while returning its previous provider") {
+        JET_MONOTONIC_PROVIDER.with(current -> current.replace(provider))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/TimeMonotonic.rs:21
+fn jet_time_monotonic_controlled_now_ns() -> I64? {
+    provider :: installed_provider() ?? return None
+    provider.call()
+}
+// GATE #4565: kernel primitive — read this thread's installed clock hook.
+fn installed_provider() -> JetMonotonicProvider? {
+    #Unsafe("read the executing thread's controlled clock hook") { JET_MONOTONIC_PROVIDER.with(cell -> cell.get()) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/TimeMonotonic.rs:25
+// A thread's controlled provider precedes the controlled world, then the host.
+pub fn jet_time_monotonic_now_ns() -> I64 {
+    if {
+        jet_time_monotonic_controlled_now_ns() == .Val(now) -> now
+        jet_scheduler_world_monotonic_now_ns() == .Val(now) -> now
+        else -> host_monotonic_ns()
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/TimeMonotonic.rs:32
+// GATE #4565: kernel primitive — process monotonic epoch, elapsed ns saturated to I64.
+fn host_monotonic_ns() -> I64 {
+    static EPOCH: OnceLock<Instant> = OnceLock.new()
+    #Unsafe("initialize process monotonic epoch once and sample real elapsed time, saturating to I64") {
+        EPOCH.get_or_init(() -> Instant.now()).elapsed().as_nanos().min(I64.MAX as U128) as I64
+    }
+}

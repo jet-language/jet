@@ -1,0 +1,1381 @@
+// PORT-PENDING 0222 crates-jet-jit-src-math-slice-1889: crates/jet-jit/src/Math.rs:1889-3265
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn jet_jit_math_typed_to_array(value: i64) -> i64 {
+//RS     let Some(value) = take_val(value) else {
+//RS         trap("to_array: bad recv");
+//RS         return 0;
+//RS     };
+//RS     if matches!(value, MathVal::Int(_)) {
+//RS         pack_handle(alloc_i64_list(&int_lanes_of(value).unwrap()))
+//RS     } else {
+//RS         pack_handle(alloc_f64_list(&lanes_of(value)))
+//RS     }
+//RS }
+//RS 
+//RS fn typed_reduce_f32(value: i64, op: i64) -> f32 {
+//RS     unpack_float(jet_jit_math_reduce(value, op)) as f32
+//RS }
+//RS 
+//RS fn typed_reduce_f64(value: i64, op: i64) -> f64 {
+//RS     unpack_float(jet_jit_math_reduce(value, op))
+//RS }
+//RS 
+//RS fn typed_reduce_int(value: i64, op: i64) -> i64 {
+//RS     unpack_int(jet_jit_math_reduce(value, op))
+//RS }
+//RS 
+//RS macro_rules! typed_math_reduce_family {
+//RS     (
+//RS         $sum:ident,
+//RS         $product:ident,
+//RS         $min:ident,
+//RS         $max:ident,
+//RS         $reduce_add:ident,
+//RS         $reduce_mul:ident,
+//RS         $reduce_min:ident,
+//RS         $reduce_max:ident,
+//RS         $reduce_avg:ident,
+//RS         $call:ident,
+//RS         $return:ty
+//RS     ) => {
+//RS         fn $sum(value: i64) -> $return {
+//RS             $call(value, 0)
+//RS         }
+//RS         fn $product(value: i64) -> $return {
+//RS             $call(value, 1)
+//RS         }
+//RS         fn $min(value: i64) -> $return {
+//RS             $call(value, 2)
+//RS         }
+//RS         fn $max(value: i64) -> $return {
+//RS             $call(value, 3)
+//RS         }
+//RS         fn $reduce_add(value: i64) -> $return {
+//RS             $call(value, 0)
+//RS         }
+//RS         fn $reduce_mul(value: i64) -> $return {
+//RS             $call(value, 1)
+//RS         }
+//RS         fn $reduce_min(value: i64) -> $return {
+//RS             $call(value, 2)
+//RS         }
+//RS         fn $reduce_max(value: i64) -> $return {
+//RS             $call(value, 3)
+//RS         }
+//RS         fn $reduce_avg(value: i64) -> $return {
+//RS             $call(value, 4)
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS typed_math_reduce_family!(
+//RS     jet_jit_math_f32_sum,
+//RS     jet_jit_math_f32_product,
+//RS     jet_jit_math_f32_min,
+//RS     jet_jit_math_f32_max,
+//RS     jet_jit_math_f32_reduce_add,
+//RS     jet_jit_math_f32_reduce_mul,
+//RS     jet_jit_math_f32_reduce_min,
+//RS     jet_jit_math_f32_reduce_max,
+//RS     jet_jit_math_f32_reduce_avg,
+//RS     typed_reduce_f32,
+//RS     f32
+//RS );
+//RS typed_math_reduce_family!(
+//RS     jet_jit_math_f64_sum,
+//RS     jet_jit_math_f64_product,
+//RS     jet_jit_math_f64_min,
+//RS     jet_jit_math_f64_max,
+//RS     jet_jit_math_f64_reduce_add,
+//RS     jet_jit_math_f64_reduce_mul,
+//RS     jet_jit_math_f64_reduce_min,
+//RS     jet_jit_math_f64_reduce_max,
+//RS     jet_jit_math_f64_reduce_avg,
+//RS     typed_reduce_f64,
+//RS     f64
+//RS );
+//RS typed_math_reduce_family!(
+//RS     jet_jit_math_int_sum,
+//RS     jet_jit_math_int_product,
+//RS     jet_jit_math_int_min,
+//RS     jet_jit_math_int_max,
+//RS     jet_jit_math_int_reduce_add,
+//RS     jet_jit_math_int_reduce_mul,
+//RS     jet_jit_math_int_reduce_min,
+//RS     jet_jit_math_int_reduce_max,
+//RS     jet_jit_math_int_reduce_avg,
+//RS     typed_reduce_int,
+//RS     i64
+//RS );
+//RS 
+//RS fn jet_jit_math_typed_add(left: i64, right: i64) -> i64 {
+//RS     jet_jit_math_binary(left, right, 0)
+//RS }
+//RS 
+//RS fn jet_jit_math_typed_sub(left: i64, right: i64) -> i64 {
+//RS     jet_jit_math_binary(left, right, 1)
+//RS }
+//RS 
+//RS fn jet_jit_math_typed_mul(left: i64, right: i64) -> i64 {
+//RS     jet_jit_math_binary(left, right, 2)
+//RS }
+//RS 
+//RS fn jet_jit_math_typed_div(left: i64, right: i64) -> i64 {
+//RS     jet_jit_math_binary(left, right, 3)
+//RS }
+//RS 
+//RS macro_rules! typed_math_float_method {
+//RS     ($name:ident, $type_name:literal, $func:literal) => {
+//RS         fn $name(left: i64, right: i64) -> f64 {
+//RS             typed_math_float($type_name, $func, &[left, right])
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS macro_rules! typed_math_unary_float_method {
+//RS     ($name:ident, $type_name:literal, $func:literal) => {
+//RS         fn $name(value: i64) -> f64 {
+//RS             typed_math_float($type_name, $func, &[value])
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS macro_rules! typed_math_handle_method {
+//RS     ($name:ident, $type_name:literal, $func:literal) => {
+//RS         fn $name(value: i64) -> i64 {
+//RS             typed_math_call($type_name, $func, &[value])
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS macro_rules! typed_math_binary_handle_method {
+//RS     ($name:ident, $type_name:literal, $func:literal) => {
+//RS         fn $name(left: i64, right: i64) -> i64 {
+//RS             typed_math_call($type_name, $func, &[left, right])
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS typed_math_float_method!(jet_jit_math_vec2_dot, "Vec2", "dot");
+//RS typed_math_float_method!(jet_jit_math_vec3_dot, "Vec3", "dot");
+//RS typed_math_float_method!(jet_jit_math_vec4_dot, "Vec4", "dot");
+//RS typed_math_unary_float_method!(jet_jit_math_vec2_length, "Vec2", "length");
+//RS typed_math_unary_float_method!(jet_jit_math_vec3_length, "Vec3", "length");
+//RS typed_math_unary_float_method!(jet_jit_math_vec4_length, "Vec4", "length");
+//RS typed_math_handle_method!(jet_jit_math_vec2_normalize, "Vec2", "normalize");
+//RS typed_math_handle_method!(jet_jit_math_vec3_normalize, "Vec3", "normalize");
+//RS typed_math_handle_method!(jet_jit_math_vec4_normalize, "Vec4", "normalize");
+//RS typed_math_binary_handle_method!(jet_jit_math_vec3_cross, "Vec3", "cross");
+//RS typed_math_binary_handle_method!(jet_jit_math_mat3_matmul, "Mat3", "matmul");
+//RS typed_math_binary_handle_method!(jet_jit_math_mat4_matmul, "Mat4", "matmul");
+//RS typed_math_binary_handle_method!(jet_jit_math_mat3_transform, "Mat3", "transform");
+//RS typed_math_binary_handle_method!(jet_jit_math_mat4_transform, "Mat4", "transform");
+//RS typed_math_handle_method!(jet_jit_math_mat3_transpose, "Mat3", "transpose");
+//RS typed_math_handle_method!(jet_jit_math_mat4_transpose, "Mat4", "transpose");
+//RS 
+//RS fn jet_jit_math_vec3_scalar_op(
+//RS     value: i64,
+//RS     scalar: f64,
+//RS     op: simd_lanes::JetSimdBinaryOp,
+//RS ) -> i64 {
+//RS     let Some(value) = take_val(value) else {
+//RS         trap("math scalar binary: bad receiver");
+//RS         return 0;
+//RS     };
+//RS     let Some(value) = vec3_scalar_op(value, scalar, op) else {
+//RS         trap("math scalar binary: expected Vec3");
+//RS         return 0;
+//RS     };
+//RS     pack_handle(push_val(value))
+//RS }
+//RS 
+//RS fn jet_jit_math_vec3_mul_scalar(value: i64, scalar: f64) -> i64 {
+//RS     jet_jit_math_vec3_scalar_op(value, scalar, simd_lanes::JetSimdBinaryOp::Mul)
+//RS }
+//RS 
+//RS fn jet_jit_math_vec3_div_scalar(value: i64, scalar: f64) -> i64 {
+//RS     jet_jit_math_vec3_scalar_op(value, scalar, simd_lanes::JetSimdBinaryOp::Div)
+//RS }
+//RS 
+//RS fn jet_jit_math_float_div_vec3(scalar: f64, value: i64) -> i64 {
+//RS     let Some(value) = take_val(value) else {
+//RS         trap("math scalar binary: bad receiver");
+//RS         return 0;
+//RS     };
+//RS     let Some(value) = scalar_vec3_div(scalar, value) else {
+//RS         trap("math scalar binary: expected Vec3");
+//RS         return 0;
+//RS     };
+//RS     pack_handle(push_val(value))
+//RS }
+//RS 
+//RS fn jet_jit_math_float_mul_vec3(scalar: f64, value: i64) -> i64 {
+//RS     jet_jit_math_vec3_scalar_op(value, scalar, simd_lanes::JetSimdBinaryOp::Mul)
+//RS }
+//RS 
+//RS fn jet_jit_math_result_is_float(packed: i64) -> i8 {
+//RS     i8::from(is_float_pack(packed))
+//RS }
+//RS 
+//RS fn jet_jit_math_result_float(packed: i64) -> f64 {
+//RS     unpack_float(packed)
+//RS }
+//RS 
+//RS fn jet_jit_math_result_int(packed: i64) -> i64 {
+//RS     unpack_int(packed)
+//RS }
+//RS 
+//RS fn jet_jit_math_result_handle(packed: i64) -> i64 {
+//RS     unpack_handle(packed)
+//RS }
+//RS 
+//RS fn clone_string_list(list: i64) -> Option<Vec<String>> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(list)?;
+//RS         (0..len)
+//RS             .map(|index| rt.heap.list_get_string(list, index))
+//RS             .collect()
+//RS     })
+//RS }
+//RS 
+//RS fn require_string_list(list: i64) -> Option<Vec<String>> {
+//RS     let values = clone_string_list(list);
+//RS     if values.is_none() {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_trap("typed-text list contains a non-string value")
+//RS         });
+//RS     }
+//RS     values
+//RS }
+//RS 
+//RS fn require_bool_list(list: i64) -> Option<Vec<bool>> {
+//RS     let values: Option<Vec<bool>> = Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(list)?;
+//RS         (0..len)
+//RS             .map(|index| rt.heap.list_get_int(list, index).map(|value| value != 0))
+//RS             .collect()
+//RS     });
+//RS     if values.is_none() {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_trap("typed HTML trust list contains a non-boolean value")
+//RS         });
+//RS     }
+//RS     values
+//RS }
+//RS 
+//RS /// D-BOUND-HEAD1=A: these are marshalling adapters only. Encoding and hole
+//RS /// policy live in the same Prelude functions emitted by AOT and used by the
+//RS /// interpreter.
+//RS fn typed_path_interpolate(literals: i64, holes: i64) -> Option<String> {
+//RS     let literals = require_string_list(literals)?;
+//RS     let holes = require_string_list(holes)?;
+//RS     let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+//RS     Some(typed_text_semantics::jet_typed_path_interpolate(
+//RS         &literal_refs,
+//RS         &holes,
+//RS     ))
+//RS }
+//RS 
+//RS fn typed_datetime_interpolate(literals: i64, holes: i64) -> Option<String> {
+//RS     let literals = require_string_list(literals)?;
+//RS     let holes = require_string_list(holes)?;
+//RS     let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+//RS     Some(typed_text_semantics::jet_typed_datetime_interpolate(
+//RS         &literal_refs,
+//RS         &holes,
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_typed_path_interpolate(literals: i64, holes: i64) -> i64 {
+//RS     typed_path_interpolate(literals, holes)
+//RS         .map(alloc_string)
+//RS         .unwrap_or(0)
+//RS }
+//RS 
+//RS fn jet_jit_typed_datetime_interpolate(literals: i64, holes: i64) -> i64 {
+//RS     typed_datetime_interpolate(literals, holes)
+//RS         .map(alloc_string)
+//RS         .unwrap_or(0)
+//RS }
+//RS 
+//RS /// The canonical DateTime typed-head route carries a parsed civil-time handle,
+//RS /// not the interpolated source text. AOT and the interpreter both preserve the
+//RS /// DateTime value; the JIT adapter must do the same before civil dispatch.
+//RS fn jet_jit_typed_datetime_literal(literals: i64, holes: i64) -> i64 {
+//RS     let Some(text) = typed_datetime_interpolate(literals, holes) else {
+//RS         return 0;
+//RS     };
+//RS     match crate::Time::time_rt::jet_time_parse_rfc3339(&text) {
+//RS         Ok(value) => crate::Time::push(crate::Time::TimeValue::DateTime(value)),
+//RS         Err(error) => Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_host_fault(&format!(
+//RS                 "invalid DateTime typed-head value reached the JIT: {error}"
+//RS             ));
+//RS             0
+//RS         }),
+//RS     }
+//RS }
+//RS 
+//RS fn alloc_string_list(values: Vec<String>) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let list = rt.heap.alloc_empty_list();
+//RS         for value in values {
+//RS             let string = rt.heap.alloc_string(value);
+//RS             let _ = rt.heap.list_push_int(list, string);
+//RS         }
+//RS         list
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_typed_sql_raw(s: i64) -> i64 {
+//RS     super::DB::alloc_sql_value(typed_text_semantics::jet_typed_sql_raw(clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_typed_sql_interpolate(literals: i64, holes: i64) -> i64 {
+//RS     let Some(literals) = require_string_list(literals) else {
+//RS         return 0;
+//RS     };
+//RS     let Some(holes) = super::DB::values_from_list_checked(holes) else {
+//RS         trap("typed-text SQL bindings are malformed");
+//RS         return 0;
+//RS     };
+//RS     let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+//RS     super::DB::alloc_sql_value(typed_text_semantics::jet_typed_sql_interpolate(
+//RS         &literal_refs,
+//RS         holes,
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_typed_sql_template(value: i64) -> i64 {
+//RS     let Some(value) = super::DB::clone_sql_value(value) else {
+//RS         trap("typed-text SQL value is malformed");
+//RS         return 0;
+//RS     };
+//RS     alloc_string(typed_text_semantics::jet_typed_sql_template(&value))
+//RS }
+//RS 
+//RS fn jet_jit_typed_sql_params(value: i64) -> i64 {
+//RS     let Some(value) = super::DB::clone_sql_value(value) else {
+//RS         trap("typed-text SQL value is malformed");
+//RS         return 0;
+//RS     };
+//RS     super::DB::alloc_dbvalue_list(typed_text_semantics::jet_typed_sql_params(&value))
+//RS }
+//RS 
+//RS fn jet_jit_typed_sh_raw(s: i64) -> i64 {
+//RS     alloc_string_list(typed_text_semantics::jet_typed_sh_raw(clone_string(s)))
+//RS }
+//RS 
+//RS fn jet_jit_typed_sh_interpolate(literals: i64, holes: i64) -> i64 {
+//RS     let Some(literals) = require_string_list(literals) else {
+//RS         return 0;
+//RS     };
+//RS     let Some(holes) = require_string_list(holes) else {
+//RS         return 0;
+//RS     };
+//RS     let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+//RS     alloc_string_list(typed_text_semantics::jet_typed_sh_interpolate(
+//RS         &literal_refs,
+//RS         holes,
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_typed_html_interpolate(literals: i64, holes: i64, trusted_html: i64) -> i64 {
+//RS     let Some(literals) = require_string_list(literals) else {
+//RS         return 0;
+//RS     };
+//RS     let Some(holes) = require_string_list(holes) else {
+//RS         return 0;
+//RS     };
+//RS     let Some(trusted_html) = require_bool_list(trusted_html) else {
+//RS         return 0;
+//RS     };
+//RS     let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+//RS     alloc_string(typed_text_semantics::jet_typed_html_interpolate(
+//RS         &literal_refs,
+//RS         holes,
+//RS         &trusted_html,
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_typed_html_raw(value: i64) -> i64 {
+//RS     alloc_string(typed_text_semantics::jet_typed_html_raw(clone_string(
+//RS         value,
+//RS     )))
+//RS }
+//RS 
+//RS fn jet_jit_typed_html_text(value: i64) -> i64 {
+//RS     alloc_string(typed_text_semantics::jet_typed_html_text(clone_string(
+//RS         value,
+//RS     )))
+//RS }
+//RS 
+//RS fn jet_jit_html_escape(s: i64) -> i64 {
+//RS     alloc_string(typed_text_semantics::jet_typed_html_escape(&clone_string(
+//RS         s,
+//RS     )))
+//RS }
+//RS 
+//RS fn jet_jit_str_concat(a: i64, b: i64) -> i64 {
+//RS     let left = clone_string(a);
+//RS     let right = clone_string(b);
+//RS     alloc_string(string_concat_semantics::jet_string_concat(&left, &right))
+//RS }
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS struct JitGeometryTransform {
+//RS     matrix: [f64; 6],
+//RS     from_frame: i64,
+//RS     to_frame: i64,
+//RS }
+//RS 
+//RS fn geometry_coord(rt: &crate::runtime_host::JitRuntime, handle: i64) -> Option<(f64, f64, i64)> {
+//RS     Some((
+//RS         rt.heap.record_get_float(handle, 0)?,
+//RS         rt.heap.record_get_float(handle, 1)?,
+//RS         rt.heap.record_get_int(handle, 2)?,
+//RS     ))
+//RS }
+//RS 
+//RS fn geometry_transform(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<JitGeometryTransform> {
+//RS     Some(JitGeometryTransform {
+//RS         matrix: [
+//RS             rt.heap.record_get_float(handle, 0)?,
+//RS             rt.heap.record_get_float(handle, 1)?,
+//RS             rt.heap.record_get_float(handle, 2)?,
+//RS             rt.heap.record_get_float(handle, 3)?,
+//RS             rt.heap.record_get_float(handle, 4)?,
+//RS             rt.heap.record_get_float(handle, 5)?,
+//RS         ],
+//RS         from_frame: rt.heap.record_get_int(handle, 6)?,
+//RS         to_frame: rt.heap.record_get_int(handle, 7)?,
+//RS     })
+//RS }
+//RS 
+//RS fn geometry_coord_record(rt: &mut crate::runtime_host::JitRuntime, x: f64, y: f64, frame: i64) -> i64 {
+//RS     let record = rt.heap.alloc_record(3);
+//RS     let _ = rt.heap.record_set_float(record, 0, x);
+//RS     let _ = rt.heap.record_set_float(record, 1, y);
+//RS     let _ = rt.heap.record_set_int(record, 2, frame);
+//RS     record
+//RS }
+//RS 
+//RS fn geometry_transform_record(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     matrix: [f64; 6],
+//RS     from_frame: i64,
+//RS     to_frame: i64,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(8);
+//RS     for (index, value) in matrix.into_iter().enumerate() {
+//RS         let _ = rt.heap.record_set_float(record, index as i64, value);
+//RS     }
+//RS     let _ = rt.heap.record_set_int(record, 6, from_frame);
+//RS     let _ = rt.heap.record_set_int(record, 7, to_frame);
+//RS     record
+//RS }
+//RS 
+//RS fn geometry_ray_record(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     origin: i64,
+//RS     direction: i64,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(2);
+//RS     let _ = rt.heap.record_set_record(record, 0, origin);
+//RS     let _ = rt.heap.record_set_record(record, 1, direction);
+//RS     record
+//RS }
+//RS 
+//RS fn geometry_error_result(rt: &mut crate::runtime_host::JitRuntime, message: &'static str) -> i64 {
+//RS     let error = crate::runtime_host::alloc_jit_default_err(
+//RS         rt,
+//RS         jet_foundation::Outcome::jet_err_from_message(message.to_string()),
+//RS     );
+//RS     crate::runtime_host::alloc_jit_result(rt, false, error as u64)
+//RS }
+//RS 
+//RS fn geometry_ok_result(rt: &mut crate::runtime_host::JitRuntime, value: i64) -> i64 {
+//RS     crate::runtime_host::alloc_jit_result(rt, true, value as u64)
+//RS }
+//RS 
+//RS fn jet_jit_geometry_coord_new(x: f64, y: f64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| geometry_coord_record(rt, x, y, 0))
+//RS }
+//RS fn jet_jit_geometry_coord_new_frame(x: f64, y: f64, frame: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| geometry_coord_record(rt, x, y, frame))
+//RS }
+//RS 
+//RS fn jet_jit_geometry_coord_checked_op(a: i64, b: i64, subtract: bool) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some((ax, ay, a_frame)) = geometry_coord(rt, a) else {
+//RS             rt.set_host_fault("coordinate add received an invalid left carrier");
+//RS             return 0;
+//RS         };
+//RS         let Some((bx, by, b_frame)) = geometry_coord(rt, b) else {
+//RS             rt.set_host_fault("coordinate add received an invalid right carrier");
+//RS             return 0;
+//RS         };
+//RS         if a_frame != 0 && b_frame != 0 && a_frame != b_frame {
+//RS             return geometry_error_result(rt, "coordinate values belong to different frames");
+//RS         }
+//RS         let frame = if a_frame != 0 { a_frame } else { b_frame };
+//RS         let record = geometry_coord_record(
+//RS             rt,
+//RS             if subtract { ax - bx } else { ax + bx },
+//RS             if subtract { ay - by } else { ay + by },
+//RS             frame,
+//RS         );
+//RS         geometry_ok_result(rt, record)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_geometry_coord_plain_op(a: i64, b: i64, subtract: bool) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some((ax, ay, frame)) = geometry_coord(rt, a) else {
+//RS             rt.set_host_fault("coordinate add received an invalid left carrier");
+//RS             return 0;
+//RS         };
+//RS         let Some((bx, by, _)) = geometry_coord(rt, b) else {
+//RS             rt.set_host_fault("coordinate add received an invalid right carrier");
+//RS             return 0;
+//RS         };
+//RS         geometry_coord_record(
+//RS             rt,
+//RS             if subtract { ax - bx } else { ax + bx },
+//RS             if subtract { ay - by } else { ay + by },
+//RS             frame,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_geometry_coord_add(a: i64, b: i64) -> i64 {
+//RS     jet_jit_geometry_coord_checked_op(a, b, false)
+//RS }
+//RS 
+//RS fn jet_jit_geometry_coord_sub(a: i64, b: i64) -> i64 {
+//RS     jet_jit_geometry_coord_checked_op(a, b, true)
+//RS }
+//RS 
+//RS fn jet_jit_geometry_coord_plain_add(a: i64, b: i64) -> i64 {
+//RS     jet_jit_geometry_coord_plain_op(a, b, false)
+//RS }
+//RS 
+//RS fn jet_jit_geometry_coord_plain_sub(a: i64, b: i64) -> i64 {
+//RS     jet_jit_geometry_coord_plain_op(a, b, true)
+//RS }
+//RS 
+//RS fn jet_jit_geometry_transform_new(
+//RS     m00: f64,
+//RS     m01: f64,
+//RS     m10: f64,
+//RS     m11: f64,
+//RS     tx: f64,
+//RS     ty: f64,
+//RS     from_frame: i64,
+//RS     to_frame: i64,
+//RS ) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         geometry_transform_record(rt, [m00, m01, m10, m11, tx, ty], from_frame, to_frame)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_geometry_transform_then(first: i64, next: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(first) = geometry_transform(rt, first) else {
+//RS             rt.set_host_fault("transform composition received an invalid left carrier");
+//RS             return 0;
+//RS         };
+//RS         let Some(next) = geometry_transform(rt, next) else {
+//RS             rt.set_host_fault("transform composition received an invalid right carrier");
+//RS             return 0;
+//RS         };
+//RS         if first.to_frame != 0
+//RS             && next.from_frame != 0
+//RS             && first.to_frame != next.from_frame
+//RS         {
+//RS             return geometry_error_result(rt, "transform composition has mismatched frame identity");
+//RS         }
+//RS         let a = first.matrix;
+//RS         let b = next.matrix;
+//RS         let matrix = [
+//RS             b[0] * a[0] + b[1] * a[2],
+//RS             b[0] * a[1] + b[1] * a[3],
+//RS             b[2] * a[0] + b[3] * a[2],
+//RS             b[2] * a[1] + b[3] * a[3],
+//RS             b[0] * a[4] + b[1] * a[5] + b[4],
+//RS             b[2] * a[4] + b[3] * a[5] + b[5],
+//RS         ];
+//RS         let record = geometry_transform_record(rt, matrix, first.from_frame, next.to_frame);
+//RS         geometry_ok_result(rt, record)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_geometry_transform_inverse(transform: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(transform) = geometry_transform(rt, transform) else {
+//RS             rt.set_host_fault("transform inverse received an invalid carrier");
+//RS             return 0;
+//RS         };
+//RS         let m = transform.matrix;
+//RS         let det = m[0] * m[3] - m[1] * m[2];
+//RS         if !det.is_finite() || det.abs() <= f64::EPSILON {
+//RS             return geometry_error_result(rt, "transform is singular and has no inverse");
+//RS         }
+//RS         let inv_det = 1.0 / det;
+//RS         let matrix = [
+//RS             m[3] * inv_det,
+//RS             -m[1] * inv_det,
+//RS             -m[2] * inv_det,
+//RS             m[0] * inv_det,
+//RS             (m[1] * m[5] - m[3] * m[4]) * inv_det,
+//RS             (m[2] * m[4] - m[0] * m[5]) * inv_det,
+//RS         ];
+//RS         let record = geometry_transform_record(
+//RS             rt,
+//RS             matrix,
+//RS             transform.to_frame,
+//RS             transform.from_frame,
+//RS         );
+//RS         geometry_ok_result(rt, record)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_geometry_transform_point(transform: i64, point: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(transform) = geometry_transform(rt, transform) else {
+//RS             rt.set_host_fault("transform point received an invalid transform carrier");
+//RS             return 0;
+//RS         };
+//RS         let Some((x, y, frame)) = geometry_coord(rt, point) else {
+//RS             rt.set_host_fault("transform point received an invalid point carrier");
+//RS             return 0;
+//RS         };
+//RS         if frame != 0 && frame != transform.from_frame {
+//RS             return geometry_error_result(rt, "coordinate point belongs to a stale frame");
+//RS         }
+//RS         let m = transform.matrix;
+//RS         let record = geometry_coord_record(
+//RS             rt,
+//RS             m[0] * x + m[1] * y + m[4],
+//RS             m[2] * x + m[3] * y + m[5],
+//RS             transform.to_frame,
+//RS         );
+//RS         geometry_ok_result(rt, record)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_geometry_transform_point_at_depth(transform: i64, point: i64, depth: f64) -> i64 {
+//RS     if !depth.is_finite() {
+//RS         return Concurrency::with_runtime_mut(|rt| {
+//RS             geometry_error_result(rt, "perspective depth must be finite")
+//RS         });
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(transform) = geometry_transform(rt, transform) else {
+//RS             rt.set_host_fault("transform point received an invalid transform carrier");
+//RS             return 0;
+//RS         };
+//RS         let Some((x, y, frame)) = geometry_coord(rt, point) else {
+//RS             rt.set_host_fault("transform point received an invalid point carrier");
+//RS             return 0;
+//RS         };
+//RS         if frame != 0 && frame != transform.from_frame {
+//RS             return geometry_error_result(rt, "coordinate point belongs to a stale frame");
+//RS         }
+//RS         let m = transform.matrix;
+//RS         let origin_x = m[0] * x + m[1] * y + m[4];
+//RS         let origin_y = m[2] * x + m[3] * y + m[5];
+//RS         let record = geometry_coord_record(
+//RS             rt,
+//RS             origin_x + m[0] * depth,
+//RS             origin_y + m[2] * depth,
+//RS             transform.to_frame,
+//RS         );
+//RS         geometry_ok_result(rt, record)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_geometry_transform_ray(transform: i64, point: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(transform) = geometry_transform(rt, transform) else {
+//RS             rt.set_host_fault("transform ray received an invalid transform carrier");
+//RS             return 0;
+//RS         };
+//RS         let Some((x, y, frame)) = geometry_coord(rt, point) else {
+//RS             rt.set_host_fault("transform ray received an invalid point carrier");
+//RS             return 0;
+//RS         };
+//RS         if frame != 0 && frame != transform.from_frame {
+//RS             return geometry_error_result(rt, "coordinate point belongs to a stale frame");
+//RS         }
+//RS         let m = transform.matrix;
+//RS         let origin = geometry_coord_record(
+//RS             rt,
+//RS             m[0] * x + m[1] * y + m[4],
+//RS             m[2] * x + m[3] * y + m[5],
+//RS             transform.to_frame,
+//RS         );
+//RS         let direction = geometry_coord_record(rt, m[0], m[2], transform.to_frame);
+//RS         let ray = geometry_ray_record(rt, origin, direction);
+//RS         geometry_ok_result(rt, ray)
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn clear_math_values() {
+//RS     MATH_VALUES.with(|slot| slot.borrow_mut().clear());
+//RS }
+//RS 
+//RS host_fns! {
+//RS     struct MathHostFns;
+//RS     register: register_math_host_symbols;
+//RS     declare: declare_math_host_fns(module) {
+//RS         let cc = module.target_config().default_call_conv;
+//RS 
+//RS         let mut sig_call = Signature::new(cc);
+//RS         sig_call.params.push(AbiParam::new(types::I64));
+//RS         sig_call.params.push(AbiParam::new(types::I64));
+//RS         sig_call.params.push(AbiParam::new(types::I64));
+//RS         sig_call.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_lane_f32 = Signature::new(cc);
+//RS         for _ in 0..4 {
+//RS             sig_lane_f32.params.push(AbiParam::new(types::I64));
+//RS         }
+//RS         sig_lane_f32.returns.push(AbiParam::new(types::F32));
+//RS         let mut sig_lane_f64 = sig_lane_f32.clone();
+//RS         sig_lane_f64.returns[0] = AbiParam::new(types::F64);
+//RS         let mut sig_lane_i64 = sig_lane_f32.clone();
+//RS         sig_lane_i64.returns[0] = AbiParam::new(types::I64);
+//RS         let mut sig_lane_set_f32 = Signature::new(cc);
+//RS         sig_lane_set_f32.params.push(AbiParam::new(types::I64));
+//RS         sig_lane_set_f32.params.push(AbiParam::new(types::I64));
+//RS         sig_lane_set_f32.params.push(AbiParam::new(types::F32));
+//RS         sig_lane_set_f32.params.push(AbiParam::new(types::I64));
+//RS         sig_lane_set_f32.params.push(AbiParam::new(types::I64));
+//RS         sig_lane_set_f32.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_lane_set_f64 = sig_lane_set_f32.clone();
+//RS         sig_lane_set_f64.params[2] = AbiParam::new(types::F64);
+//RS         let mut sig_lane_set_i64 = sig_lane_set_f32.clone();
+//RS         sig_lane_set_i64.params[2] = AbiParam::new(types::I64);
+//RS 
+//RS         let mut sig_i64_i8 = Signature::new(cc);
+//RS         sig_i64_i8.params.push(AbiParam::new(types::I64));
+//RS         sig_i64_i8.returns.push(AbiParam::new(types::I8));
+//RS         let mut sig_i64_f64 = Signature::new(cc);
+//RS         sig_i64_f64.params.push(AbiParam::new(types::I64));
+//RS         sig_i64_f64.returns.push(AbiParam::new(types::F64));
+//RS         let mut sig_float_binary = Signature::new(cc);
+//RS         sig_float_binary.params.push(AbiParam::new(types::F64));
+//RS         sig_float_binary.params.push(AbiParam::new(types::F64));
+//RS         sig_float_binary.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_float_float_int = Signature::new(cc);
+//RS         sig_float_float_int.params.push(AbiParam::new(types::F64));
+//RS         sig_float_float_int.params.push(AbiParam::new(types::F64));
+//RS         sig_float_float_int.params.push(AbiParam::new(types::I64));
+//RS         sig_float_float_int.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_transform_new = Signature::new(cc);
+//RS         for _ in 0..6 {
+//RS             sig_transform_new.params.push(AbiParam::new(types::F64));
+//RS         }
+//RS         sig_transform_new.params.push(AbiParam::new(types::I64));
+//RS         sig_transform_new.params.push(AbiParam::new(types::I64));
+//RS         sig_transform_new.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_handle_handle_float = Signature::new(cc);
+//RS         sig_handle_handle_float.params.push(AbiParam::new(types::I64));
+//RS         sig_handle_handle_float.params.push(AbiParam::new(types::I64));
+//RS         sig_handle_handle_float.params.push(AbiParam::new(types::F64));
+//RS         sig_handle_handle_float.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_unary = Signature::new(cc);
+//RS         sig_unary.params.push(AbiParam::new(types::I64));
+//RS         sig_unary.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_binary = Signature::new(cc);
+//RS         sig_binary.params.push(AbiParam::new(types::I64));
+//RS         sig_binary.params.push(AbiParam::new(types::I64));
+//RS         sig_binary.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_unary_f64 = Signature::new(cc);
+//RS         sig_unary_f64.params.push(AbiParam::new(types::I64));
+//RS         sig_unary_f64.returns.push(AbiParam::new(types::F64));
+//RS         let mut sig_binary_f64 = Signature::new(cc);
+//RS         sig_binary_f64.params.push(AbiParam::new(types::I64));
+//RS         sig_binary_f64.params.push(AbiParam::new(types::I64));
+//RS         sig_binary_f64.returns.push(AbiParam::new(types::F64));
+//RS         let mut sig_ternary = sig_binary.clone();
+//RS         sig_ternary.params.push(AbiParam::new(types::I64));
+//RS         let mut sig_i64_f32 = Signature::new(cc);
+//RS         sig_i64_f32.params.push(AbiParam::new(types::I64));
+//RS         sig_i64_f32.returns.push(AbiParam::new(types::F32));
+//RS         let mut sig_f32_i64 = Signature::new(cc);
+//RS         sig_f32_i64.params.push(AbiParam::new(types::F32));
+//RS         sig_f32_i64.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_f64_i64 = Signature::new(cc);
+//RS         sig_f64_i64.params.push(AbiParam::new(types::F64));
+//RS         sig_f64_i64.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_handle_float = Signature::new(cc);
+//RS         sig_handle_float.params.push(AbiParam::new(types::I64));
+//RS         sig_handle_float.params.push(AbiParam::new(types::F64));
+//RS         sig_handle_float.returns.push(AbiParam::new(types::I64));
+//RS         let mut sig_float_handle = Signature::new(cc);
+//RS         sig_float_handle.params.push(AbiParam::new(types::F64));
+//RS         sig_float_handle.params.push(AbiParam::new(types::I64));
+//RS         sig_float_handle.returns.push(AbiParam::new(types::I64));
+//RS         macro_rules! repeated_sig {
+//RS             ($name:ident, $param:expr, $count:expr, $ret:expr) => {
+//RS                 let mut $name = Signature::new(cc);
+//RS                 for _ in 0..$count {
+//RS                     $name.params.push(AbiParam::new($param));
+//RS                 }
+//RS                 $name.returns.push(AbiParam::new($ret));
+//RS             };
+//RS         }
+//RS         repeated_sig!(sig_f32x4, types::F32, 4, types::I64);
+//RS         repeated_sig!(sig_f32x8, types::F32, 8, types::I64);
+//RS         repeated_sig!(sig_f64x2, types::F64, 2, types::I64);
+//RS         repeated_sig!(sig_f64x3, types::F64, 3, types::I64);
+//RS         repeated_sig!(sig_f64x4, types::F64, 4, types::I64);
+//RS         repeated_sig!(sig_f64x9, types::F64, 9, types::I64);
+//RS         repeated_sig!(sig_f64x16, types::F64, 16, types::I64);
+//RS         repeated_sig!(sig_i64x2, types::I64, 2, types::I64);
+//RS         repeated_sig!(sig_i64x4, types::I64, 4, types::I64);
+//RS         repeated_sig!(sig_i64x8, types::I64, 8, types::I64);
+//RS         repeated_sig!(sig_i64x16, types::I64, 16, types::I64);
+//RS         repeated_sig!(sig_i64x32, types::I64, 32, types::I64);
+//RS     }
+//RS     call: "jet_jit_math_call" => jet_jit_math_call: sig_call;
+//RS     binary: "jet_jit_math_binary" => jet_jit_math_binary: sig_call;
+//RS     splat: "jet_jit_math_splat" => jet_jit_math_splat: sig_call;
+//RS     simd_f32x4_new: "jet_math_F32x4_new" => jet_jit_math_f32x4_new: sig_f32x4;
+//RS     simd_f32x4_splat: "jet_math_F32x4_splat" => jet_jit_math_f32x4_splat: sig_f32_i64;
+//RS     simd_f32x4_from_array: "jet_math_F32x4_from_array" => jet_jit_math_f32x4_from_array: sig_unary;
+//RS     simd_f32x4_to_array: "jet_math_F32x4_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     simd_f32x4_sum: "jet_math_F32x4_sum" => jet_jit_math_f32_sum: sig_i64_f32;
+//RS     simd_f32x4_product: "jet_math_F32x4_product" => jet_jit_math_f32_product: sig_i64_f32;
+//RS     simd_f32x4_min: "jet_math_F32x4_min" => jet_jit_math_f32_min: sig_i64_f32;
+//RS     simd_f32x4_max: "jet_math_F32x4_max" => jet_jit_math_f32_max: sig_i64_f32;
+//RS     simd_f32x4_reduce_add: "jet_math_F32x4_reduce_add" => jet_jit_math_f32_reduce_add: sig_i64_f32;
+//RS     simd_f32x4_reduce_mul: "jet_math_F32x4_reduce_mul" => jet_jit_math_f32_reduce_mul: sig_i64_f32;
+//RS     simd_f32x4_reduce_min: "jet_math_F32x4_reduce_min" => jet_jit_math_f32_reduce_min: sig_i64_f32;
+//RS     simd_f32x4_reduce_max: "jet_math_F32x4_reduce_max" => jet_jit_math_f32_reduce_max: sig_i64_f32;
+//RS     simd_f32x4_reduce_avg: "jet_math_F32x4_reduce_avg" => jet_jit_math_f32_reduce_avg: sig_i64_f32;
+//RS     simd_f32x4_add: "jet_math_F32x4_add" => jet_jit_math_typed_add: sig_binary;
+//RS     simd_f32x4_sub: "jet_math_F32x4_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     simd_f32x4_mul: "jet_math_F32x4_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     simd_f32x4_div: "jet_math_F32x4_div" => jet_jit_math_typed_div: sig_binary;
+//RS     simd_f64x2_new: "jet_math_F64x2_new" => jet_jit_math_f64x2_new: sig_f64x2;
+//RS     simd_f64x2_splat: "jet_math_F64x2_splat" => jet_jit_math_f64x2_splat: sig_f64_i64;
+//RS     simd_f64x2_from_array: "jet_math_F64x2_from_array" => jet_jit_math_f64x2_from_array: sig_unary;
+//RS     simd_f64x2_to_array: "jet_math_F64x2_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     simd_f64x2_sum: "jet_math_F64x2_sum" => jet_jit_math_f64_sum: sig_i64_f64;
+//RS     simd_f64x2_product: "jet_math_F64x2_product" => jet_jit_math_f64_product: sig_i64_f64;
+//RS     simd_f64x2_min: "jet_math_F64x2_min" => jet_jit_math_f64_min: sig_i64_f64;
+//RS     simd_f64x2_max: "jet_math_F64x2_max" => jet_jit_math_f64_max: sig_i64_f64;
+//RS     simd_f64x2_reduce_add: "jet_math_F64x2_reduce_add" => jet_jit_math_f64_reduce_add: sig_i64_f64;
+//RS     simd_f64x2_reduce_mul: "jet_math_F64x2_reduce_mul" => jet_jit_math_f64_reduce_mul: sig_i64_f64;
+//RS     simd_f64x2_reduce_min: "jet_math_F64x2_reduce_min" => jet_jit_math_f64_reduce_min: sig_i64_f64;
+//RS     simd_f64x2_reduce_max: "jet_math_F64x2_reduce_max" => jet_jit_math_f64_reduce_max: sig_i64_f64;
+//RS     simd_f64x2_reduce_avg: "jet_math_F64x2_reduce_avg" => jet_jit_math_f64_reduce_avg: sig_i64_f64;
+//RS     simd_f64x2_add: "jet_math_F64x2_add" => jet_jit_math_typed_add: sig_binary;
+//RS     simd_f64x2_sub: "jet_math_F64x2_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     simd_f64x2_mul: "jet_math_F64x2_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     simd_f64x2_div: "jet_math_F64x2_div" => jet_jit_math_typed_div: sig_binary;
+//RS     simd_f32x8_new: "jet_math_F32x8_new" => jet_jit_math_f32x8_new: sig_f32x8;
+//RS     simd_f32x8_splat: "jet_math_F32x8_splat" => jet_jit_math_f32x8_splat: sig_f32_i64;
+//RS     simd_f32x8_from_array: "jet_math_F32x8_from_array" => jet_jit_math_f32x8_from_array: sig_unary;
+//RS     simd_f32x8_to_array: "jet_math_F32x8_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     simd_f32x8_sum: "jet_math_F32x8_sum" => jet_jit_math_f32_sum: sig_i64_f32;
+//RS     simd_f32x8_product: "jet_math_F32x8_product" => jet_jit_math_f32_product: sig_i64_f32;
+//RS     simd_f32x8_min: "jet_math_F32x8_min" => jet_jit_math_f32_min: sig_i64_f32;
+//RS     simd_f32x8_max: "jet_math_F32x8_max" => jet_jit_math_f32_max: sig_i64_f32;
+//RS     simd_f32x8_reduce_add: "jet_math_F32x8_reduce_add" => jet_jit_math_f32_reduce_add: sig_i64_f32;
+//RS     simd_f32x8_reduce_mul: "jet_math_F32x8_reduce_mul" => jet_jit_math_f32_reduce_mul: sig_i64_f32;
+//RS     simd_f32x8_reduce_min: "jet_math_F32x8_reduce_min" => jet_jit_math_f32_reduce_min: sig_i64_f32;
+//RS     simd_f32x8_reduce_max: "jet_math_F32x8_reduce_max" => jet_jit_math_f32_reduce_max: sig_i64_f32;
+//RS     simd_f32x8_reduce_avg: "jet_math_F32x8_reduce_avg" => jet_jit_math_f32_reduce_avg: sig_i64_f32;
+//RS     simd_f32x8_add: "jet_math_F32x8_add" => jet_jit_math_typed_add: sig_binary;
+//RS     simd_f32x8_sub: "jet_math_F32x8_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     simd_f32x8_mul: "jet_math_F32x8_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     simd_f32x8_div: "jet_math_F32x8_div" => jet_jit_math_typed_div: sig_binary;
+//RS     simd_f64x4_new: "jet_math_F64x4_new" => jet_jit_math_f64x4_new: sig_f64x4;
+//RS     simd_f64x4_splat: "jet_math_F64x4_splat" => jet_jit_math_f64x4_splat: sig_f64_i64;
+//RS     simd_f64x4_from_array: "jet_math_F64x4_from_array" => jet_jit_math_f64x4_from_array: sig_unary;
+//RS     simd_f64x4_to_array: "jet_math_F64x4_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     simd_f64x4_sum: "jet_math_F64x4_sum" => jet_jit_math_f64_sum: sig_i64_f64;
+//RS     simd_f64x4_product: "jet_math_F64x4_product" => jet_jit_math_f64_product: sig_i64_f64;
+//RS     simd_f64x4_min: "jet_math_F64x4_min" => jet_jit_math_f64_min: sig_i64_f64;
+//RS     simd_f64x4_max: "jet_math_F64x4_max" => jet_jit_math_f64_max: sig_i64_f64;
+//RS     simd_f64x4_reduce_add: "jet_math_F64x4_reduce_add" => jet_jit_math_f64_reduce_add: sig_i64_f64;
+//RS     simd_f64x4_reduce_mul: "jet_math_F64x4_reduce_mul" => jet_jit_math_f64_reduce_mul: sig_i64_f64;
+//RS     simd_f64x4_reduce_min: "jet_math_F64x4_reduce_min" => jet_jit_math_f64_reduce_min: sig_i64_f64;
+//RS     simd_f64x4_reduce_max: "jet_math_F64x4_reduce_max" => jet_jit_math_f64_reduce_max: sig_i64_f64;
+//RS     simd_f64x4_reduce_avg: "jet_math_F64x4_reduce_avg" => jet_jit_math_f64_reduce_avg: sig_i64_f64;
+//RS     simd_f64x4_add: "jet_math_F64x4_add" => jet_jit_math_typed_add: sig_binary;
+//RS     simd_f64x4_sub: "jet_math_F64x4_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     simd_f64x4_mul: "jet_math_F64x4_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     simd_f64x4_div: "jet_math_F64x4_div" => jet_jit_math_typed_div: sig_binary;
+//RS     simd_i8x16_new: "jet_math_I8x16_new" => jet_jit_math_i8x16_new: sig_i64x16;
+//RS     simd_i8x16_splat: "jet_math_I8x16_splat" => jet_jit_math_i8x16_splat: sig_unary;
+//RS     simd_i8x16_from_array: "jet_math_I8x16_from_array" => jet_jit_math_i8x16_from_array: sig_unary;
+//RS     simd_i8x16_to_array: "jet_math_I8x16_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     simd_i8x16_sum: "jet_math_I8x16_sum" => jet_jit_math_int_sum: sig_unary;
+//RS     simd_i8x16_product: "jet_math_I8x16_product" => jet_jit_math_int_product: sig_unary;
+//RS     simd_i8x16_min: "jet_math_I8x16_min" => jet_jit_math_int_min: sig_unary;
+//RS     simd_i8x16_max: "jet_math_I8x16_max" => jet_jit_math_int_max: sig_unary;
+//RS     simd_i8x16_reduce_add: "jet_math_I8x16_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+//RS     simd_i8x16_reduce_mul: "jet_math_I8x16_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+//RS     simd_i8x16_reduce_min: "jet_math_I8x16_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+//RS     simd_i8x16_reduce_max: "jet_math_I8x16_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+//RS     simd_i8x16_reduce_avg: "jet_math_I8x16_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+//RS     simd_i8x16_add: "jet_math_I8x16_add" => jet_jit_math_typed_add: sig_binary;
+//RS     simd_i8x16_sub: "jet_math_I8x16_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     simd_i8x16_mul: "jet_math_I8x16_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     simd_i8x16_div: "jet_math_I8x16_div" => jet_jit_math_typed_div: sig_binary;
+//RS     simd_i16x8_new: "jet_math_I16x8_new" => jet_jit_math_i16x8_new: sig_i64x8;
+//RS     simd_i16x8_splat: "jet_math_I16x8_splat" => jet_jit_math_i16x8_splat: sig_unary;
+//RS     simd_i16x8_from_array: "jet_math_I16x8_from_array" => jet_jit_math_i16x8_from_array: sig_unary;
+//RS     simd_i16x8_to_array: "jet_math_I16x8_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     simd_i16x8_sum: "jet_math_I16x8_sum" => jet_jit_math_int_sum: sig_unary;
+//RS     simd_i16x8_product: "jet_math_I16x8_product" => jet_jit_math_int_product: sig_unary;
+//RS     simd_i16x8_min: "jet_math_I16x8_min" => jet_jit_math_int_min: sig_unary;
+//RS     simd_i16x8_max: "jet_math_I16x8_max" => jet_jit_math_int_max: sig_unary;
+//RS     simd_i16x8_reduce_add: "jet_math_I16x8_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+//RS     simd_i16x8_reduce_mul: "jet_math_I16x8_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+//RS     simd_i16x8_reduce_min: "jet_math_I16x8_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+//RS     simd_i16x8_reduce_max: "jet_math_I16x8_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+//RS     simd_i16x8_reduce_avg: "jet_math_I16x8_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+//RS     simd_i16x8_add: "jet_math_I16x8_add" => jet_jit_math_typed_add: sig_binary;
+//RS     simd_i16x8_sub: "jet_math_I16x8_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     simd_i16x8_mul: "jet_math_I16x8_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     simd_i16x8_div: "jet_math_I16x8_div" => jet_jit_math_typed_div: sig_binary;
+//RS     simd_i32x4_new: "jet_math_I32x4_new" => jet_jit_math_i32x4_new: sig_i64x4;
+//RS     simd_i32x4_splat: "jet_math_I32x4_splat" => jet_jit_math_i32x4_splat: sig_unary;
+//RS     simd_i32x4_from_array: "jet_math_I32x4_from_array" => jet_jit_math_i32x4_from_array: sig_unary;
+//RS     simd_i32x4_to_array: "jet_math_I32x4_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     simd_i32x4_sum: "jet_math_I32x4_sum" => jet_jit_math_int_sum: sig_unary;
+//RS     simd_i32x4_product: "jet_math_I32x4_product" => jet_jit_math_int_product: sig_unary;
+//RS     simd_i32x4_min: "jet_math_I32x4_min" => jet_jit_math_int_min: sig_unary;
+//RS     simd_i32x4_max: "jet_math_I32x4_max" => jet_jit_math_int_max: sig_unary;
+//RS     simd_i32x4_reduce_add: "jet_math_I32x4_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+//RS     simd_i32x4_reduce_mul: "jet_math_I32x4_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+//RS     simd_i32x4_reduce_min: "jet_math_I32x4_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+//RS     simd_i32x4_reduce_max: "jet_math_I32x4_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+//RS     simd_i32x4_reduce_avg: "jet_math_I32x4_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+//RS     simd_i32x4_add: "jet_math_I32x4_add" => jet_jit_math_typed_add: sig_binary;
+//RS     simd_i32x4_sub: "jet_math_I32x4_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     simd_i32x4_mul: "jet_math_I32x4_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     simd_i32x4_div: "jet_math_I32x4_div" => jet_jit_math_typed_div: sig_binary;
+//RS     simd_i64x2_new: "jet_math_I64x2_new" => jet_jit_math_i64x2_new: sig_i64x2;
+//RS     simd_i64x2_splat: "jet_math_I64x2_splat" => jet_jit_math_i64x2_splat: sig_unary;
+//RS     simd_i64x2_from_array: "jet_math_I64x2_from_array" => jet_jit_math_i64x2_from_array: sig_unary;
+//RS     simd_i64x2_to_array: "jet_math_I64x2_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     simd_i64x2_sum: "jet_math_I64x2_sum" => jet_jit_math_int_sum: sig_unary;
+//RS     simd_i64x2_product: "jet_math_I64x2_product" => jet_jit_math_int_product: sig_unary;
+//RS     simd_i64x2_min: "jet_math_I64x2_min" => jet_jit_math_int_min: sig_unary;
+//RS     simd_i64x2_max: "jet_math_I64x2_max" => jet_jit_math_int_max: sig_unary;
+//RS     simd_i64x2_reduce_add: "jet_math_I64x2_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+//RS     simd_i64x2_reduce_mul: "jet_math_I64x2_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+//RS     simd_i64x2_reduce_min: "jet_math_I64x2_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+//RS     simd_i64x2_reduce_max: "jet_math_I64x2_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+//RS     simd_i64x2_reduce_avg: "jet_math_I64x2_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+//RS     simd_i64x2_add: "jet_math_I64x2_add" => jet_jit_math_typed_add: sig_binary;
+//RS     simd_i64x2_sub: "jet_math_I64x2_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     simd_i64x2_mul: "jet_math_I64x2_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     simd_i64x2_div: "jet_math_I64x2_div" => jet_jit_math_typed_div: sig_binary;
+//RS     simd_u8x16_new: "jet_math_U8x16_new" => jet_jit_math_u8x16_new: sig_i64x16;
+//RS     simd_u8x16_splat: "jet_math_U8x16_splat" => jet_jit_math_u8x16_splat: sig_unary;
+//RS     simd_u8x16_from_array: "jet_math_U8x16_from_array" => jet_jit_math_u8x16_from_array: sig_unary;
+//RS     simd_u8x16_to_array: "jet_math_U8x16_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     simd_u8x16_sum: "jet_math_U8x16_sum" => jet_jit_math_int_sum: sig_unary;
+//RS     simd_u8x16_product: "jet_math_U8x16_product" => jet_jit_math_int_product: sig_unary;
+//RS     simd_u8x16_min: "jet_math_U8x16_min" => jet_jit_math_int_min: sig_unary;
+//RS     simd_u8x16_max: "jet_math_U8x16_max" => jet_jit_math_int_max: sig_unary;
+//RS     simd_u8x16_reduce_add: "jet_math_U8x16_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+//RS     simd_u8x16_reduce_mul: "jet_math_U8x16_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+//RS     simd_u8x16_reduce_min: "jet_math_U8x16_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+//RS     simd_u8x16_reduce_max: "jet_math_U8x16_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+//RS     simd_u8x16_reduce_avg: "jet_math_U8x16_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+//RS     simd_u8x16_add: "jet_math_U8x16_add" => jet_jit_math_typed_add: sig_binary;
+//RS     simd_u8x16_sub: "jet_math_U8x16_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     simd_u8x16_mul: "jet_math_U8x16_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     simd_u8x16_div: "jet_math_U8x16_div" => jet_jit_math_typed_div: sig_binary;
+//RS     simd_u16x8_new: "jet_math_U16x8_new" => jet_jit_math_u16x8_new: sig_i64x8;
+//RS     simd_u16x8_splat: "jet_math_U16x8_splat" => jet_jit_math_u16x8_splat: sig_unary;
+//RS     simd_u16x8_from_array: "jet_math_U16x8_from_array" => jet_jit_math_u16x8_from_array: sig_unary;
+//RS     simd_u16x8_to_array: "jet_math_U16x8_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     simd_u16x8_sum: "jet_math_U16x8_sum" => jet_jit_math_int_sum: sig_unary;
+//RS     simd_u16x8_product: "jet_math_U16x8_product" => jet_jit_math_int_product: sig_unary;
+//RS     simd_u16x8_min: "jet_math_U16x8_min" => jet_jit_math_int_min: sig_unary;
+//RS     simd_u16x8_max: "jet_math_U16x8_max" => jet_jit_math_int_max: sig_unary;
+//RS     simd_u16x8_reduce_add: "jet_math_U16x8_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+//RS     simd_u16x8_reduce_mul: "jet_math_U16x8_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+//RS     simd_u16x8_reduce_min: "jet_math_U16x8_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+//RS     simd_u16x8_reduce_max: "jet_math_U16x8_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+//RS     simd_u16x8_reduce_avg: "jet_math_U16x8_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+//RS     simd_u16x8_add: "jet_math_U16x8_add" => jet_jit_math_typed_add: sig_binary;
+//RS     simd_u16x8_sub: "jet_math_U16x8_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     simd_u16x8_mul: "jet_math_U16x8_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     simd_u16x8_div: "jet_math_U16x8_div" => jet_jit_math_typed_div: sig_binary;
+//RS     simd_u32x4_new: "jet_math_U32x4_new" => jet_jit_math_u32x4_new: sig_i64x4;
+//RS     simd_u32x4_splat: "jet_math_U32x4_splat" => jet_jit_math_u32x4_splat: sig_unary;
+//RS     simd_u32x4_from_array: "jet_math_U32x4_from_array" => jet_jit_math_u32x4_from_array: sig_unary;
+//RS     simd_u32x4_to_array: "jet_math_U32x4_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     simd_u32x4_sum: "jet_math_U32x4_sum" => jet_jit_math_int_sum: sig_unary;
+//RS     simd_u32x4_product: "jet_math_U32x4_product" => jet_jit_math_int_product: sig_unary;
+//RS     simd_u32x4_min: "jet_math_U32x4_min" => jet_jit_math_int_min: sig_unary;
+//RS     simd_u32x4_max: "jet_math_U32x4_max" => jet_jit_math_int_max: sig_unary;
+//RS     simd_u32x4_reduce_add: "jet_math_U32x4_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+//RS     simd_u32x4_reduce_mul: "jet_math_U32x4_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+//RS     simd_u32x4_reduce_min: "jet_math_U32x4_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+//RS     simd_u32x4_reduce_max: "jet_math_U32x4_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+//RS     simd_u32x4_reduce_avg: "jet_math_U32x4_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+//RS     simd_u32x4_add: "jet_math_U32x4_add" => jet_jit_math_typed_add: sig_binary;
+//RS     simd_u32x4_sub: "jet_math_U32x4_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     simd_u32x4_mul: "jet_math_U32x4_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     simd_u32x4_div: "jet_math_U32x4_div" => jet_jit_math_typed_div: sig_binary;
+//RS     simd_u64x2_new: "jet_math_U64x2_new" => jet_jit_math_u64x2_new: sig_i64x2;
+//RS     simd_u64x2_splat: "jet_math_U64x2_splat" => jet_jit_math_u64x2_splat: sig_unary;
+//RS     simd_u64x2_from_array: "jet_math_U64x2_from_array" => jet_jit_math_u64x2_from_array: sig_unary;
+//RS     simd_u64x2_to_array: "jet_math_U64x2_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     simd_u64x2_sum: "jet_math_U64x2_sum" => jet_jit_math_int_sum: sig_unary;
+//RS     simd_u64x2_product: "jet_math_U64x2_product" => jet_jit_math_int_product: sig_unary;
+//RS     simd_u64x2_min: "jet_math_U64x2_min" => jet_jit_math_int_min: sig_unary;
+//RS     simd_u64x2_max: "jet_math_U64x2_max" => jet_jit_math_int_max: sig_unary;
+//RS     simd_u64x2_reduce_add: "jet_math_U64x2_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+//RS     simd_u64x2_reduce_mul: "jet_math_U64x2_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+//RS     simd_u64x2_reduce_min: "jet_math_U64x2_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+//RS     simd_u64x2_reduce_max: "jet_math_U64x2_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+//RS     simd_u64x2_reduce_avg: "jet_math_U64x2_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+//RS     simd_u64x2_add: "jet_math_U64x2_add" => jet_jit_math_typed_add: sig_binary;
+//RS     simd_u64x2_sub: "jet_math_U64x2_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     simd_u64x2_mul: "jet_math_U64x2_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     simd_u64x2_div: "jet_math_U64x2_div" => jet_jit_math_typed_div: sig_binary;
+//RS     simd_i8x32_new: "jet_math_I8x32_new" => jet_jit_math_i8x32_new: sig_i64x32;
+//RS     simd_i8x32_splat: "jet_math_I8x32_splat" => jet_jit_math_i8x32_splat: sig_unary;
+//RS     simd_i8x32_from_array: "jet_math_I8x32_from_array" => jet_jit_math_i8x32_from_array: sig_unary;
+//RS     simd_i8x32_to_array: "jet_math_I8x32_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     simd_i8x32_sum: "jet_math_I8x32_sum" => jet_jit_math_int_sum: sig_unary;
+//RS     simd_i8x32_product: "jet_math_I8x32_product" => jet_jit_math_int_product: sig_unary;
+//RS     simd_i8x32_min: "jet_math_I8x32_min" => jet_jit_math_int_min: sig_unary;
+//RS     simd_i8x32_max: "jet_math_I8x32_max" => jet_jit_math_int_max: sig_unary;
+//RS     simd_i8x32_reduce_add: "jet_math_I8x32_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+//RS     simd_i8x32_reduce_mul: "jet_math_I8x32_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+//RS     simd_i8x32_reduce_min: "jet_math_I8x32_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+//RS     simd_i8x32_reduce_max: "jet_math_I8x32_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+//RS     simd_i8x32_reduce_avg: "jet_math_I8x32_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+//RS     simd_i8x32_add: "jet_math_I8x32_add" => jet_jit_math_typed_add: sig_binary;
+//RS     simd_i8x32_sub: "jet_math_I8x32_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     simd_i8x32_mul: "jet_math_I8x32_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     simd_i8x32_div: "jet_math_I8x32_div" => jet_jit_math_typed_div: sig_binary;
+//RS     simd_i16x16_new: "jet_math_I16x16_new" => jet_jit_math_i16x16_new: sig_i64x16;
+//RS     simd_i16x16_splat: "jet_math_I16x16_splat" => jet_jit_math_i16x16_splat: sig_unary;
+//RS     simd_i16x16_from_array: "jet_math_I16x16_from_array" => jet_jit_math_i16x16_from_array: sig_unary;
+//RS     simd_i16x16_to_array: "jet_math_I16x16_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     simd_i16x16_sum: "jet_math_I16x16_sum" => jet_jit_math_int_sum: sig_unary;
+//RS     simd_i16x16_product: "jet_math_I16x16_product" => jet_jit_math_int_product: sig_unary;
+//RS     simd_i16x16_min: "jet_math_I16x16_min" => jet_jit_math_int_min: sig_unary;
+//RS     simd_i16x16_max: "jet_math_I16x16_max" => jet_jit_math_int_max: sig_unary;
+//RS     simd_i16x16_reduce_add: "jet_math_I16x16_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+//RS     simd_i16x16_reduce_mul: "jet_math_I16x16_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+//RS     simd_i16x16_reduce_min: "jet_math_I16x16_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+//RS     simd_i16x16_reduce_max: "jet_math_I16x16_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+//RS     simd_i16x16_reduce_avg: "jet_math_I16x16_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+//RS     simd_i16x16_add: "jet_math_I16x16_add" => jet_jit_math_typed_add: sig_binary;
+//RS     simd_i16x16_sub: "jet_math_I16x16_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     simd_i16x16_mul: "jet_math_I16x16_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     simd_i16x16_div: "jet_math_I16x16_div" => jet_jit_math_typed_div: sig_binary;
+//RS     simd_i32x8_new: "jet_math_I32x8_new" => jet_jit_math_i32x8_new: sig_i64x8;
+//RS     simd_i32x8_splat: "jet_math_I32x8_splat" => jet_jit_math_i32x8_splat: sig_unary;
+//RS     simd_i32x8_from_array: "jet_math_I32x8_from_array" => jet_jit_math_i32x8_from_array: sig_unary;
+//RS     simd_i32x8_to_array: "jet_math_I32x8_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     simd_i32x8_sum: "jet_math_I32x8_sum" => jet_jit_math_int_sum: sig_unary;
+//RS     simd_i32x8_product: "jet_math_I32x8_product" => jet_jit_math_int_product: sig_unary;
+//RS     simd_i32x8_min: "jet_math_I32x8_min" => jet_jit_math_int_min: sig_unary;
+//RS     simd_i32x8_max: "jet_math_I32x8_max" => jet_jit_math_int_max: sig_unary;
+//RS     simd_i32x8_reduce_add: "jet_math_I32x8_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+//RS     simd_i32x8_reduce_mul: "jet_math_I32x8_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+//RS     simd_i32x8_reduce_min: "jet_math_I32x8_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+//RS     simd_i32x8_reduce_max: "jet_math_I32x8_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+//RS     simd_i32x8_reduce_avg: "jet_math_I32x8_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+//RS     simd_i32x8_add: "jet_math_I32x8_add" => jet_jit_math_typed_add: sig_binary;
+//RS     simd_i32x8_sub: "jet_math_I32x8_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     simd_i32x8_mul: "jet_math_I32x8_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     simd_i32x8_div: "jet_math_I32x8_div" => jet_jit_math_typed_div: sig_binary;
+//RS     simd_i64x4_new: "jet_math_I64x4_new" => jet_jit_math_i64x4_new: sig_i64x4;
+//RS     simd_i64x4_splat: "jet_math_I64x4_splat" => jet_jit_math_i64x4_splat: sig_unary;
+//RS     simd_i64x4_from_array: "jet_math_I64x4_from_array" => jet_jit_math_i64x4_from_array: sig_unary;
+//RS     simd_i64x4_to_array: "jet_math_I64x4_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     simd_i64x4_sum: "jet_math_I64x4_sum" => jet_jit_math_int_sum: sig_unary;
+//RS     simd_i64x4_product: "jet_math_I64x4_product" => jet_jit_math_int_product: sig_unary;
+//RS     simd_i64x4_min: "jet_math_I64x4_min" => jet_jit_math_int_min: sig_unary;
+//RS     simd_i64x4_max: "jet_math_I64x4_max" => jet_jit_math_int_max: sig_unary;
+//RS     simd_i64x4_reduce_add: "jet_math_I64x4_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+//RS     simd_i64x4_reduce_mul: "jet_math_I64x4_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+//RS     simd_i64x4_reduce_min: "jet_math_I64x4_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+//RS     simd_i64x4_reduce_max: "jet_math_I64x4_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+//RS     simd_i64x4_reduce_avg: "jet_math_I64x4_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+//RS     simd_i64x4_add: "jet_math_I64x4_add" => jet_jit_math_typed_add: sig_binary;
+//RS     simd_i64x4_sub: "jet_math_I64x4_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     simd_i64x4_mul: "jet_math_I64x4_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     simd_i64x4_div: "jet_math_I64x4_div" => jet_jit_math_typed_div: sig_binary;
+//RS     simd_u8x32_new: "jet_math_U8x32_new" => jet_jit_math_u8x32_new: sig_i64x32;
+//RS     simd_u8x32_splat: "jet_math_U8x32_splat" => jet_jit_math_u8x32_splat: sig_unary;
+//RS     simd_u8x32_from_array: "jet_math_U8x32_from_array" => jet_jit_math_u8x32_from_array: sig_unary;
+//RS     simd_u8x32_to_array: "jet_math_U8x32_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     simd_u8x32_sum: "jet_math_U8x32_sum" => jet_jit_math_int_sum: sig_unary;
+//RS     simd_u8x32_product: "jet_math_U8x32_product" => jet_jit_math_int_product: sig_unary;
+//RS     simd_u8x32_min: "jet_math_U8x32_min" => jet_jit_math_int_min: sig_unary;
+//RS     simd_u8x32_max: "jet_math_U8x32_max" => jet_jit_math_int_max: sig_unary;
+//RS     simd_u8x32_reduce_add: "jet_math_U8x32_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+//RS     simd_u8x32_reduce_mul: "jet_math_U8x32_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+//RS     simd_u8x32_reduce_min: "jet_math_U8x32_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+//RS     simd_u8x32_reduce_max: "jet_math_U8x32_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+//RS     simd_u8x32_reduce_avg: "jet_math_U8x32_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+//RS     simd_u8x32_add: "jet_math_U8x32_add" => jet_jit_math_typed_add: sig_binary;
+//RS     simd_u8x32_sub: "jet_math_U8x32_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     simd_u8x32_mul: "jet_math_U8x32_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     simd_u8x32_div: "jet_math_U8x32_div" => jet_jit_math_typed_div: sig_binary;
+//RS     simd_u16x16_new: "jet_math_U16x16_new" => jet_jit_math_u16x16_new: sig_i64x16;
+//RS     simd_u16x16_splat: "jet_math_U16x16_splat" => jet_jit_math_u16x16_splat: sig_unary;
+//RS     simd_u16x16_from_array: "jet_math_U16x16_from_array" => jet_jit_math_u16x16_from_array: sig_unary;
+//RS     simd_u16x16_to_array: "jet_math_U16x16_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     simd_u16x16_sum: "jet_math_U16x16_sum" => jet_jit_math_int_sum: sig_unary;
+//RS     simd_u16x16_product: "jet_math_U16x16_product" => jet_jit_math_int_product: sig_unary;
+//RS     simd_u16x16_min: "jet_math_U16x16_min" => jet_jit_math_int_min: sig_unary;
+//RS     simd_u16x16_max: "jet_math_U16x16_max" => jet_jit_math_int_max: sig_unary;
+//RS     simd_u16x16_reduce_add: "jet_math_U16x16_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+//RS     simd_u16x16_reduce_mul: "jet_math_U16x16_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+//RS     simd_u16x16_reduce_min: "jet_math_U16x16_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+//RS     simd_u16x16_reduce_max: "jet_math_U16x16_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+//RS     simd_u16x16_reduce_avg: "jet_math_U16x16_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+//RS     simd_u16x16_add: "jet_math_U16x16_add" => jet_jit_math_typed_add: sig_binary;
+//RS     simd_u16x16_sub: "jet_math_U16x16_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     simd_u16x16_mul: "jet_math_U16x16_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     simd_u16x16_div: "jet_math_U16x16_div" => jet_jit_math_typed_div: sig_binary;
+//RS     simd_u32x8_new: "jet_math_U32x8_new" => jet_jit_math_u32x8_new: sig_i64x8;
+//RS     simd_u32x8_splat: "jet_math_U32x8_splat" => jet_jit_math_u32x8_splat: sig_unary;
+//RS     simd_u32x8_from_array: "jet_math_U32x8_from_array" => jet_jit_math_u32x8_from_array: sig_unary;
+//RS     simd_u32x8_to_array: "jet_math_U32x8_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     simd_u32x8_sum: "jet_math_U32x8_sum" => jet_jit_math_int_sum: sig_unary;
+//RS     simd_u32x8_product: "jet_math_U32x8_product" => jet_jit_math_int_product: sig_unary;
+//RS     simd_u32x8_min: "jet_math_U32x8_min" => jet_jit_math_int_min: sig_unary;
+//RS     simd_u32x8_max: "jet_math_U32x8_max" => jet_jit_math_int_max: sig_unary;
+//RS     simd_u32x8_reduce_add: "jet_math_U32x8_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+//RS     simd_u32x8_reduce_mul: "jet_math_U32x8_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+//RS     simd_u32x8_reduce_min: "jet_math_U32x8_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+//RS     simd_u32x8_reduce_max: "jet_math_U32x8_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+//RS     simd_u32x8_reduce_avg: "jet_math_U32x8_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+//RS     simd_u32x8_add: "jet_math_U32x8_add" => jet_jit_math_typed_add: sig_binary;
+//RS     simd_u32x8_sub: "jet_math_U32x8_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     simd_u32x8_mul: "jet_math_U32x8_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     simd_u32x8_div: "jet_math_U32x8_div" => jet_jit_math_typed_div: sig_binary;
+//RS     simd_u64x4_new: "jet_math_U64x4_new" => jet_jit_math_u64x4_new: sig_i64x4;
+//RS     simd_u64x4_splat: "jet_math_U64x4_splat" => jet_jit_math_u64x4_splat: sig_unary;
+//RS     simd_u64x4_from_array: "jet_math_U64x4_from_array" => jet_jit_math_u64x4_from_array: sig_unary;
+//RS     simd_u64x4_to_array: "jet_math_U64x4_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     simd_u64x4_sum: "jet_math_U64x4_sum" => jet_jit_math_int_sum: sig_unary;
+//RS     simd_u64x4_product: "jet_math_U64x4_product" => jet_jit_math_int_product: sig_unary;
+//RS     simd_u64x4_min: "jet_math_U64x4_min" => jet_jit_math_int_min: sig_unary;
+//RS     simd_u64x4_max: "jet_math_U64x4_max" => jet_jit_math_int_max: sig_unary;
+//RS     simd_u64x4_reduce_add: "jet_math_U64x4_reduce_add" => jet_jit_math_int_reduce_add: sig_unary;
+//RS     simd_u64x4_reduce_mul: "jet_math_U64x4_reduce_mul" => jet_jit_math_int_reduce_mul: sig_unary;
+//RS     simd_u64x4_reduce_min: "jet_math_U64x4_reduce_min" => jet_jit_math_int_reduce_min: sig_unary;
+//RS     simd_u64x4_reduce_max: "jet_math_U64x4_reduce_max" => jet_jit_math_int_reduce_max: sig_unary;
+//RS     simd_u64x4_reduce_avg: "jet_math_U64x4_reduce_avg" => jet_jit_math_int_reduce_avg: sig_unary;
+//RS     simd_u64x4_add: "jet_math_U64x4_add" => jet_jit_math_typed_add: sig_binary;
+//RS     simd_u64x4_sub: "jet_math_U64x4_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     simd_u64x4_mul: "jet_math_U64x4_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     simd_u64x4_div: "jet_math_U64x4_div" => jet_jit_math_typed_div: sig_binary;
+//RS     vec2_new: "jet_math_Vec2_new" => jet_jit_math_vec2_new: sig_f64x2;
+//RS     vec2_splat: "jet_math_Vec2_splat" => jet_jit_math_vec2_splat: sig_f64_i64;
+//RS     vec2_from_array: "jet_math_Vec2_from_array" => jet_jit_math_vec2_from_array: sig_unary;
+//RS     vec2_to_array: "jet_math_Vec2_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     vec2_dot: "jet_math_Vec2_dot" => jet_jit_math_vec2_dot: sig_binary_f64;
+//RS     vec2_length: "jet_math_Vec2_length" => jet_jit_math_vec2_length: sig_unary_f64;
+//RS     vec2_normalize: "jet_math_Vec2_normalize" => jet_jit_math_vec2_normalize: sig_unary;
+//RS     vec2_add: "jet_math_Vec2_add" => jet_jit_math_typed_add: sig_binary;
+//RS     vec2_sub: "jet_math_Vec2_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     vec2_mul: "jet_math_Vec2_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     vec2_div: "jet_math_Vec2_div" => jet_jit_math_typed_div: sig_binary;
+//RS     vec3_new: "jet_math_Vec3_new" => jet_jit_math_vec3_new: sig_f64x3;
+//RS     vec3_splat: "jet_math_Vec3_splat" => jet_jit_math_vec3_splat: sig_f64_i64;
+//RS     vec3_from_array: "jet_math_Vec3_from_array" => jet_jit_math_vec3_from_array: sig_unary;
+//RS     vec3_to_array: "jet_math_Vec3_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     vec3_dot: "jet_math_Vec3_dot" => jet_jit_math_vec3_dot: sig_binary_f64;
+//RS     vec3_length: "jet_math_Vec3_length" => jet_jit_math_vec3_length: sig_unary_f64;
+//RS     vec3_normalize: "jet_math_Vec3_normalize" => jet_jit_math_vec3_normalize: sig_unary;
+//RS     vec3_cross: "jet_math_Vec3_cross" => jet_jit_math_vec3_cross: sig_binary;
+//RS     vec3_add: "jet_math_Vec3_add" => jet_jit_math_typed_add: sig_binary;
+//RS     vec3_sub: "jet_math_Vec3_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     vec3_hadamard_mul: "jet_math_Vec3_hadamard_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     vec3_mul_scalar: "jet_math_Vec3_mul" => jet_jit_math_vec3_mul_scalar: sig_handle_float;
+//RS     vec3_div_scalar: "jet_math_Vec3_div" => jet_jit_math_vec3_div_scalar: sig_handle_float;
+//RS     float_div_vec3: "jet_math_Float_div_Vec3" => jet_jit_math_float_div_vec3: sig_float_handle;
+//RS     float_mul_vec3: "jet_math_Float_mul_Vec3" => jet_jit_math_float_mul_vec3: sig_float_handle;
+//RS     vec4_new: "jet_math_Vec4_new" => jet_jit_math_vec4_new: sig_f64x4;
+//RS     vec4_splat: "jet_math_Vec4_splat" => jet_jit_math_vec4_splat: sig_f64_i64;
+//RS     vec4_from_array: "jet_math_Vec4_from_array" => jet_jit_math_vec4_from_array: sig_unary;
+//RS     vec4_to_array: "jet_math_Vec4_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     vec4_dot: "jet_math_Vec4_dot" => jet_jit_math_vec4_dot: sig_binary_f64;
+//RS     vec4_length: "jet_math_Vec4_length" => jet_jit_math_vec4_length: sig_unary_f64;
+//RS     vec4_normalize: "jet_math_Vec4_normalize" => jet_jit_math_vec4_normalize: sig_unary;
+//RS     vec4_add: "jet_math_Vec4_add" => jet_jit_math_typed_add: sig_binary;
+//RS     vec4_sub: "jet_math_Vec4_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     vec4_mul: "jet_math_Vec4_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     vec4_div: "jet_math_Vec4_div" => jet_jit_math_typed_div: sig_binary;
+//RS     mat3_new: "jet_math_Mat3_new" => jet_jit_math_mat3_new: sig_f64x9;
+//RS     mat3_splat: "jet_math_Mat3_splat" => jet_jit_math_mat3_splat: sig_f64_i64;
+//RS     mat3_from_array: "jet_math_Mat3_from_array" => jet_jit_math_mat3_from_array: sig_unary;
+//RS     mat3_to_array: "jet_math_Mat3_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     mat3_matmul: "jet_math_Mat3_matmul" => jet_jit_math_mat3_matmul: sig_binary;
+//RS     mat3_transform: "jet_math_Mat3_transform" => jet_jit_math_mat3_transform: sig_binary;
+//RS     mat3_transpose: "jet_math_Mat3_transpose" => jet_jit_math_mat3_transpose: sig_unary;
+//RS     mat3_add: "jet_math_Mat3_add" => jet_jit_math_typed_add: sig_binary;
+//RS     mat3_sub: "jet_math_Mat3_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     mat3_mul: "jet_math_Mat3_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     mat4_new: "jet_math_Mat4_new" => jet_jit_math_mat4_new: sig_f64x16;
+//RS     mat4_splat: "jet_math_Mat4_splat" => jet_jit_math_mat4_splat: sig_f64_i64;
+//RS     mat4_from_array: "jet_math_Mat4_from_array" => jet_jit_math_mat4_from_array: sig_unary;
+//RS     mat4_to_array: "jet_math_Mat4_to_array" => jet_jit_math_typed_to_array: sig_unary;
+//RS     mat4_matmul: "jet_math_Mat4_matmul" => jet_jit_math_mat4_matmul: sig_binary;
+//RS     mat4_transform: "jet_math_Mat4_transform" => jet_jit_math_mat4_transform: sig_binary;
+//RS     mat4_transpose: "jet_math_Mat4_transpose" => jet_jit_math_mat4_transpose: sig_unary;
+//RS     mat4_add: "jet_math_Mat4_add" => jet_jit_math_typed_add: sig_binary;
+//RS     mat4_sub: "jet_math_Mat4_sub" => jet_jit_math_typed_sub: sig_binary;
+//RS     mat4_mul: "jet_math_Mat4_mul" => jet_jit_math_typed_mul: sig_binary;
+//RS     lane_f32x4: "jet_math_F32x4_lane" => jet_jit_math_lane_f32: sig_lane_f32;
+//RS     lane_f64x2: "jet_math_F64x2_lane" => jet_jit_math_lane_f64: sig_lane_f64;
+//RS     lane_f32x8: "jet_math_F32x8_lane" => jet_jit_math_lane_f32: sig_lane_f32;
+//RS     lane_f64x4: "jet_math_F64x4_lane" => jet_jit_math_lane_f64: sig_lane_f64;
+//RS     lane_vec2: "jet_math_Vec2_lane" => jet_jit_math_lane_f64: sig_lane_f64;
+//RS     lane_vec3: "jet_math_Vec3_lane" => jet_jit_math_lane_f64: sig_lane_f64;
+//RS     lane_vec4: "jet_math_Vec4_lane" => jet_jit_math_lane_f64: sig_lane_f64;
+//RS     lane_i8x16: "jet_math_I8x16_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+//RS     lane_i16x8: "jet_math_I16x8_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+//RS     lane_i32x4: "jet_math_I32x4_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+//RS     lane_i64x2: "jet_math_I64x2_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+//RS     lane_u8x16: "jet_math_U8x16_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+//RS     lane_u16x8: "jet_math_U16x8_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+//RS     lane_u32x4: "jet_math_U32x4_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+//RS     lane_u64x2: "jet_math_U64x2_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+//RS     lane_i8x32: "jet_math_I8x32_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+//RS     lane_i16x16: "jet_math_I16x16_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+//RS     lane_i32x8: "jet_math_I32x8_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+//RS     lane_i64x4: "jet_math_I64x4_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+//RS     lane_u8x32: "jet_math_U8x32_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+//RS     lane_u16x16: "jet_math_U16x16_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+//RS     lane_u32x8: "jet_math_U32x8_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+//RS     lane_u64x4: "jet_math_U64x4_lane" => jet_jit_math_lane_i64: sig_lane_i64;
+//RS     lane_set_f32: "jet_math_F32x4_lane_set" => jet_jit_math_lane_set_f32: sig_lane_set_f32;
+//RS     lane_set_f64: "jet_math_F64x2_lane_set" => jet_jit_math_lane_set_f64: sig_lane_set_f64;
+//RS     lane_set_i64: "jet_math_I64x2_lane_set" => jet_jit_math_lane_set_i64: sig_lane_set_i64;
+//RS     reduce: "jet_jit_math_reduce" => jet_jit_math_reduce: sig_binary;
+//RS     dot: "jet_jit_math_dot" => jet_jit_math_dot: sig_binary;
+//RS     length: "jet_jit_math_length" => jet_jit_math_length: sig_unary;
+//RS     result_is_float: "jet_jit_math_result_is_float" => jet_jit_math_result_is_float: sig_i64_i8;
+//RS     result_float: "jet_jit_math_result_float" => jet_jit_math_result_float: sig_i64_f64;
+//RS     geometry_screen_point_new: "jet_math_ScreenPoint_new" => jet_jit_geometry_coord_new: sig_float_binary;
+//RS     geometry_world_point_new: "jet_math_WorldPoint_new" => jet_jit_geometry_coord_new: sig_float_binary;
+//RS     geometry_view_point_new: "jet_math_ViewPoint_new" => jet_jit_geometry_coord_new: sig_float_binary;
+//RS     geometry_camera_point_new: "jet_math_CameraPoint_new" => jet_jit_geometry_coord_new: sig_float_binary;
+//RS     geometry_device_point_new: "jet_math_DevicePoint_new" => jet_jit_geometry_coord_new: sig_float_binary;
+//RS     geometry_screen_delta_new: "jet_math_ScreenDelta_new" => jet_jit_geometry_coord_new: sig_float_binary;
+//RS     geometry_world_delta_new: "jet_math_WorldDelta_new" => jet_jit_geometry_coord_new: sig_float_binary;
+//RS     geometry_view_delta_new: "jet_math_ViewDelta_new" => jet_jit_geometry_coord_new: sig_float_binary;
+//RS     geometry_camera_delta_new: "jet_math_CameraDelta_new" => jet_jit_geometry_coord_new: sig_float_binary;
+//RS     geometry_device_delta_new: "jet_math_DeviceDelta_new" => jet_jit_geometry_coord_new: sig_float_binary;
+//RS     geometry_point2_new: "jet_math_Point2_new" => jet_jit_geometry_coord_new_frame: sig_float_float_int;
+//RS     geometry_delta2_new: "jet_math_Delta2_new" => jet_jit_geometry_coord_new_frame: sig_float_float_int;
+//RS     geometry_screen_point_add: "jet_math_ScreenPoint_add" => jet_jit_geometry_coord_plain_add: sig_binary;
+//RS     geometry_screen_point_sub: "jet_math_ScreenPoint_sub" => jet_jit_geometry_coord_plain_sub: sig_binary;
+//RS     geometry_world_point_add: "jet_math_WorldPoint_add" => jet_jit_geometry_coord_plain_add: sig_binary;
+//RS     geometry_world_point_sub: "jet_math_WorldPoint_sub" => jet_jit_geometry_coord_plain_sub: sig_binary;
+//RS     geometry_view_point_add: "jet_math_ViewPoint_add" => jet_jit_geometry_coord_plain_add: sig_binary;
+//RS     geometry_view_point_sub: "jet_math_ViewPoint_sub" => jet_jit_geometry_coord_plain_sub: sig_binary;
+//RS     geometry_camera_point_add: "jet_math_CameraPoint_add" => jet_jit_geometry_coord_plain_add: sig_binary;
+//RS     geometry_camera_point_sub: "jet_math_CameraPoint_sub" => jet_jit_geometry_coord_plain_sub: sig_binary;
+//RS     geometry_device_point_add: "jet_math_DevicePoint_add" => jet_jit_geometry_coord_plain_add: sig_binary;
+//RS     geometry_device_point_sub: "jet_math_DevicePoint_sub" => jet_jit_geometry_coord_plain_sub: sig_binary;
+//RS     geometry_screen_delta_add: "jet_math_ScreenDelta_add" => jet_jit_geometry_coord_plain_add: sig_binary;
+//RS     geometry_screen_delta_sub: "jet_math_ScreenDelta_sub" => jet_jit_geometry_coord_plain_sub: sig_binary;
+//RS     geometry_world_delta_add: "jet_math_WorldDelta_add" => jet_jit_geometry_coord_plain_add: sig_binary;
+//RS     geometry_world_delta_sub: "jet_math_WorldDelta_sub" => jet_jit_geometry_coord_plain_sub: sig_binary;
+//RS     geometry_view_delta_add: "jet_math_ViewDelta_add" => jet_jit_geometry_coord_plain_add: sig_binary;
+//RS     geometry_view_delta_sub: "jet_math_ViewDelta_sub" => jet_jit_geometry_coord_plain_sub: sig_binary;
+//RS     geometry_camera_delta_add: "jet_math_CameraDelta_add" => jet_jit_geometry_coord_plain_add: sig_binary;
+//RS     geometry_camera_delta_sub: "jet_math_CameraDelta_sub" => jet_jit_geometry_coord_plain_sub: sig_binary;
+//RS     geometry_device_delta_add: "jet_math_DeviceDelta_add" => jet_jit_geometry_coord_plain_add: sig_binary;
+//RS     geometry_device_delta_sub: "jet_math_DeviceDelta_sub" => jet_jit_geometry_coord_plain_sub: sig_binary;
+//RS     geometry_point2_add: "jet_math_Point2_add" => jet_jit_geometry_coord_add: sig_binary;
+//RS     geometry_point2_sub: "jet_math_Point2_sub" => jet_jit_geometry_coord_sub: sig_binary;
+//RS     geometry_delta2_add: "jet_math_Delta2_add" => jet_jit_geometry_coord_add: sig_binary;
+//RS     geometry_delta2_sub: "jet_math_Delta2_sub" => jet_jit_geometry_coord_sub: sig_binary;
+//RS     geometry_transform_affine: "jet_math_Transform_affine" => jet_jit_geometry_transform_new: sig_transform_new;
+//RS     geometry_transform2_affine: "jet_math_Transform2_affine" => jet_jit_geometry_transform_new: sig_transform_new;
+//RS     geometry_transform_then: "jet_math_Transform_then" => jet_jit_geometry_transform_then: sig_binary;
+//RS     geometry_transform2_then: "jet_math_Transform2_then" => jet_jit_geometry_transform_then: sig_binary;
+//RS     geometry_transform_inverse: "jet_math_Transform_inverse" => jet_jit_geometry_transform_inverse: sig_unary;
+//RS     geometry_transform2_inverse: "jet_math_Transform2_inverse" => jet_jit_geometry_transform_inverse: sig_unary;
+//RS     geometry_transform_point: "jet_math_Transform_point" => jet_jit_geometry_transform_point: sig_binary;
+//RS     geometry_transform2_point: "jet_math_Transform2_point" => jet_jit_geometry_transform_point: sig_binary;
+//RS     geometry_transform_point_at_depth: "jet_math_Transform_point_at_depth" => jet_jit_geometry_transform_point_at_depth: sig_handle_handle_float;
+//RS     geometry_transform2_point_at_depth: "jet_math_Transform2_point_at_depth" => jet_jit_geometry_transform_point_at_depth: sig_handle_handle_float;
+//RS     geometry_transform_ray: "jet_math_Transform_ray" => jet_jit_geometry_transform_ray: sig_binary;
+//RS     geometry_transform2_ray: "jet_math_Transform2_ray" => jet_jit_geometry_transform_ray: sig_binary;
+//RS     result_int: "jet_jit_math_result_int" => jet_jit_math_result_int: sig_unary;
+//RS     result_handle: "jet_jit_math_result_handle" => jet_jit_math_result_handle: sig_unary;
+//RS     html_escape: "jet_jit_html_escape" => jet_jit_html_escape: sig_unary;
+//RS     str_concat: "jet_jit_str_concat" => jet_jit_str_concat: sig_binary;
+//RS     typed_sql_raw: "jet_jit_typed_sql_raw" => jet_jit_typed_sql_raw: sig_unary;
+//RS     typed_sql_interp: "jet_jit_typed_sql_interpolate" => jet_jit_typed_sql_interpolate: sig_binary;
+//RS     typed_sql_interp_canonical: "jet_typed_sql_interpolate" => jet_jit_typed_sql_interpolate: sig_binary;
+//RS     typed_sql_template: "jet_jit_typed_sql_template" => jet_jit_typed_sql_template: sig_unary;
+//RS     typed_sql_params: "jet_jit_typed_sql_params" => jet_jit_typed_sql_params: sig_unary;
+//RS     typed_sh_raw: "jet_jit_typed_sh_raw" => jet_jit_typed_sh_raw: sig_unary;
+//RS     typed_sh_interp: "jet_jit_typed_sh_interpolate" => jet_jit_typed_sh_interpolate: sig_binary;
+//RS     typed_sh_interp_canonical: "jet_typed_sh_interpolate" => jet_jit_typed_sh_interpolate: sig_binary;
+//RS     typed_html_raw: "jet_jit_typed_html_raw" => jet_jit_typed_html_raw: sig_unary;
+//RS     typed_html_text: "jet_jit_typed_html_text" => jet_jit_typed_html_text: sig_unary;
+//RS     typed_html_interp: "jet_jit_typed_html_interpolate" => jet_jit_typed_html_interpolate: sig_ternary;
+//RS     typed_html_interp_canonical: "jet_typed_html_interpolate" => jet_jit_typed_html_interpolate: sig_ternary;
+//RS     typed_path_interp: "jet_jit_typed_path_interpolate" => jet_jit_typed_path_interpolate: sig_binary;
+//RS     typed_path_interp_canonical: "jet_typed_path_literal" => jet_jit_typed_path_interpolate: sig_binary;
+//RS     typed_datetime_interp: "jet_jit_typed_datetime_interpolate" => jet_jit_typed_datetime_interpolate: sig_binary;
+//RS     typed_datetime_interp_canonical: "jet_typed_datetime_literal" => jet_jit_typed_datetime_literal: sig_binary;
+//RS }
+//RS 
+//RS #[cfg(test)]
+//RS mod shared_simd_tests {
+//RS     use super::simd_lanes;
+//RS 
+//RS     #[test]
+//RS     fn f64_binary_slice_handles_vec2_lanes() {
+//RS         let result = simd_lanes::jet_simd_f64_binary_slice(
+//RS             &[1.0, 2.0],
+//RS             &[3.0, 4.0],
+//RS             simd_lanes::JetSimdBinaryOp::Add,
+//RS         );
+//RS         assert_eq!(result, Some(vec![4.0, 6.0]));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn f64_binary_slice_handles_vec3_lanes() {
+//RS         let result = simd_lanes::jet_simd_f64_binary_slice(
+//RS             &[1.0, 2.0, 3.0],
+//RS             &[4.0, 5.0, 6.0],
+//RS             simd_lanes::JetSimdBinaryOp::Add,
+//RS         );
+//RS         assert_eq!(result, Some(vec![5.0, 7.0, 9.0]));
+//RS     }
+//RS 
+//RS     #[test]
+//RS     fn f32_binary_slice_handles_vec3_lanes() {
+//RS         let result = simd_lanes::jet_simd_f32_binary_slice(
+//RS             &[1.0, 2.0, 3.0],
+//RS             &[4.0, 5.0, 6.0],
+//RS             simd_lanes::JetSimdBinaryOp::Add,
+//RS         );
+//RS         assert_eq!(result, Some(vec![5.0, 7.0, 9.0]));
+//RS     }
+//RS }
+// END-PORT-PENDING 0222 crates/jet-jit/src/Math.rs:1889-3265
+

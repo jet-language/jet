@@ -1,0 +1,397 @@
+use core.ui.runtime.ui_02.[JetTuiBackend, JetTuiBackendState, JetNullBackend, JetBackend, JetTuiRenderTarget, JetPoint, JetSize, JetRect, JetSizeConstraint, JetUiNode, JetUiNodeKind, JetUiAriaRole, JetInputEvent, JetTuiEvent, JetEventResult, DEFAULT_MOUNT_COLS, DEFAULT_MOUNT_ROWS, jet_ui_measure_tree, jet_ui_visit_tree, jet_ui_collect_focus, jet_ui_advance_focus, tui_grid_dims, tui_blank_grid, tui_write_label]
+use jet_ui_host.[JetUiNodeId, JetUiHostError, JetUiShortcut, JetUiAccessibility, JetUiDropItem]
+use core.tui.[JetTuiStyle, jet_tui_display_width]
+use core.mem.runtime.portable_core.[JetOutcome, JetAbsent]
+use core.sync.[Arc, Mutex, LazyLock]
+use core.sync.atomic.[AtomicI64, Ordering]
+use jet_std.[jet_reactive_effect_rooted]
+use core.fmt.[JetShow]
+
+impl JetTuiBackend {
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1802
+    pub fn paint_node(self: &JetTuiBackend, node: JetUiNode) -> {
+        state := self.state.lock() ?? panic("unwrap failed")
+        JetBackend.paint(&state, &node)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1808
+    pub fn mount_node(self: &JetTuiBackend, node: JetUiNode, constraint: JetSizeConstraint) -> {
+        size :: self.measure_node(node.clone(), constraint)
+        self.layout_node(node.clone(), jet_ui_rect(0.0, 0.0, size.width, size.height))
+        self.paint_node(node)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1817
+    pub fn mount_node_default(self: &JetTuiBackend, node: JetUiNode) -> {
+        self.mount_node(node, jet_ui_constraint(0.0, 0.0, DEFAULT_MOUNT_COLS, DEFAULT_MOUNT_ROWS))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1824
+    pub fn dispatch_event(self: &JetTuiBackend, event: JetInputEvent) -> JetEventResult {
+        state := self.state.lock() ?? panic("unwrap failed")
+        JetBackend.on_event(&state, event)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1829
+    pub fn frame_lines(self: &JetTuiBackend) -> [String] {
+        state :: self.state.lock() ?? panic("unwrap failed")
+        state.grid.map(fn(row) {
+            text :: row.collect_string()
+            trimmed := text.trim_end() // #4303
+            trimmed.to_string()
+        })
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1839
+    pub fn render_count(self: &JetTuiBackend) -> I64 { self.state.lock().unwrap().render_count as I64 }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1844
+impl Default for JetTuiBackend {
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1845
+    fn default() -> JetTuiBackend { JetTuiBackend.new() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1850
+impl JetBackend for JetTuiBackendState {
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1851
+    fn measure(self: &JetTuiBackendState, node: &JetUiNode, constraint: JetSizeConstraint) -> JetSize {
+        size :: jet_ui_measure_tree(node, constraint)
+        self.measured = Val(size)
+        size
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1857
+    fn layout(self: &JetTuiBackendState, node: &JetUiNode, frame: JetRect) -> {
+        _ :: node
+        self.layout_frame = Val(frame)
+        (cols, rows) :: tui_grid_dims(&frame)
+        self.grid_cols = cols
+        self.grid_rows = rows
+        self.grid = tui_blank_grid(cols, rows)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1866
+    fn paint(self: &JetTuiBackendState, node: &JetUiNode) -> {
+        self.render_count += 1
+        self.last_node = Val(node.clone())
+        frame :: self.layout_frame ?? JetRect{x: 0.0, y: 0.0, width: node.width, height: node.height}
+        if self.grid.is_empty() {
+            (cols, rows) :: tui_grid_dims(&frame)
+            self.grid_cols = cols
+            self.grid_rows = rows
+            self.grid = tui_blank_grid(cols, rows)
+        }
+        loop r in 0..<self.grid.len() { loop c in 0..<self.grid[r].len() { self.grid[r][c] = ' ' } }
+        capabilities :: self.capabilities.clone()
+        jet_ui_visit_tree(node, frame, fn(leaf, leaf_frame) {
+            tui_write_label(&self.grid, &leaf_frame, &leaf.label, leaf.style.as_ref(), &capabilities)
+        })
+        jet_ui_bind_tree_clicks(node, "tui#0")
+        focus := [] as [JetUiNode]
+        jet_ui_collect_focus(node, &focus)
+        if not focus.is_empty() {
+            self.focused_index = Val(0)
+            self.focus_nodes = focus
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1905
+    fn on_event(self: &JetTuiBackendState, event: JetInputEvent) -> JetEventResult {
+        if event == .Key(code) {
+            if jet_ui_advance_focus(&self.focus_nodes, &self.focused_index, code, 0) == .Val(result) {
+                self.last_event = Val(result)
+                return result
+            }
+        }
+        result :: match event {
+            .Key(code) if code.is_empty() -> JetEventResult.Ignored
+            .Resize(size) if size.width <= 0.0 || size.height <= 0.0 -> JetEventResult.Ignored
+            .Resize(size) -> {
+                frame :: JetRect{x: 0.0, y: 0.0, width: size.width, height: size.height}
+                (cols, rows) :: tui_grid_dims(&frame)
+                self.layout_frame = Val(frame)
+                self.grid_cols = cols
+                self.grid_rows = rows
+                self.grid = tui_blank_grid(cols, rows)
+                JetEventResult.Handled
+            }
+            _ -> JetEventResult.Handled
+        }
+        self.last_event = Val(result)
+        result
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1938
+    fn on_tui_event(self: &JetTuiBackendState, event: JetTuiEvent) -> JetEventResult {
+        match event {
+            .Key(code, modifiers) -> {
+                if jet_ui_advance_focus(&self.focus_nodes, &self.focused_index, &code, modifiers) == .Val(result) {
+                    self.last_event = Val(result)
+                    return result
+                }
+                result :: if code.is_empty() { JetEventResult.Ignored } else { JetEventResult.Handled }
+                self.last_event = Val(result)
+                result
+            }
+            .Resize(size) -> {
+                result :: self.on_event(JetInputEvent.Resize(size))
+                if result == .Handled {
+                    if self.last_node.clone() == .Val(node) {
+                        frame :: self.layout_frame ?? JetRect{x: 0.0, y: 0.0, width: size.width, height: size.height}
+                        self.layout(&node, frame)
+                        self.paint(&node)
+                    }
+                }
+                result
+            }
+            event -> {
+                result :: JetBackend.on_tui_event(self, event)
+                self.last_event = Val(result)
+                result
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:1982
+impl JetTuiRenderTarget for JetNullBackend {
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1983
+    fn mount_tui(self: &JetNullBackend, node: JetUiNode, constraint: JetSizeConstraint) -> { self.mount_node(node, constraint) }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1987
+    fn dispatch_tui(self: &JetNullBackend, event: JetInputEvent) -> JetEventResult { self.dispatch_event(event) }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1990
+    fn dispatch_tui_event(self: &JetNullBackend, event: JetTuiEvent) -> JetEventResult {
+        state := self.state.lock() ?? panic("unwrap failed")
+        JetBackend.on_tui_event(&state, event)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:1995
+    fn frame_lines_tui(self: &JetNullBackend) -> [String] { self.paint_commands() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2000
+impl JetTuiRenderTarget for JetTuiBackend {
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:2001
+    fn mount_tui(self: &JetTuiBackend, node: JetUiNode, constraint: JetSizeConstraint) -> { self.mount_node(node, constraint) }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:2005
+    fn dispatch_tui(self: &JetTuiBackend, event: JetInputEvent) -> JetEventResult { self.dispatch_event(event) }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:2008
+    fn dispatch_tui_event(self: &JetTuiBackend, event: JetTuiEvent) -> JetEventResult {
+        state := self.state.lock() ?? panic("unwrap failed")
+        JetBackend.on_tui_event(&state, event)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:2013
+    fn frame_lines_tui(self: &JetTuiBackend) -> [String] { self.frame_lines() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2019
+pub fn jet_ui_reactive_render(body: fn()) -> { jet_reactive_effect_rooted(body) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2023
+pub fn jet_ui_null() -> JetNullBackend { JetNullBackend.new() }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2027
+pub fn jet_ui_tui() -> JetTuiBackend { JetTuiBackend.new() }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2031
+pub fn jet_ui_point(x: Float, y: Float) -> JetPoint { JetPoint{x: x, y: y} }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2035
+pub fn jet_ui_size(width: Float, height: Float) -> JetSize { JetSize{width: width, height: height} }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2039
+pub fn jet_ui_rect(x: Float, y: Float, width: Float, height: Float) -> JetRect { JetRect{x: x, y: y, width: width, height: height} }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2048
+pub fn jet_ui_constraint(min_width: Float, min_height: Float, max_width: Float, max_height: Float) -> JetSizeConstraint {
+    JetSizeConstraint{min_width: min_width, min_height: min_height, max_width: max_width, max_height: max_height}
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2062
+pub fn jet_ui_node(label: String, width: Float, height: Float) -> JetUiNode {
+    JetUiNode{label: label, width: width, height: height, role: None, accessibility: None, ime: None,
+        color: None, style: None, kind: .Custom, children: [], key: None, on_click: None, on_drop: None, shortcut: None}
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2084
+pub fn jet_ui_node_role(label: String, width: Float, height: Float, role: JetUiAriaRole) -> JetUiNode {
+    JetUiNode{label: label, width: width, height: height, role: Val(role), accessibility: None, ime: None,
+        color: None, style: None,
+        kind: if role == .Button { JetUiNodeKind.Button } else if role == .TextInput { JetUiNodeKind.TextInput } else { JetUiNodeKind.Custom },
+        children: [], key: None, on_click: None, on_drop: None, shortcut: None}
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2112
+pub fn jet_ui_node_color(label: String, width: Float, height: Float, color: String) -> JetUiNode {
+    JetUiNode{label: label, width: width, height: height, role: Val(.Label), accessibility: None, ime: None,
+        color: Val(color), style: None, kind: .Custom, children: [], key: None, on_click: None, on_drop: None, shortcut: None}
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2133
+pub fn jet_ui_node_style(node: JetUiNode, style: JetTuiStyle) -> JetUiNode {
+    node := node
+    node.style = Val(style)
+    node
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2140
+pub fn jet_ui_text(text: String) -> JetUiNode {
+    JetUiNode{label: text.clone(), width: jet_tui_display_width(text) as Float, height: 1.0,
+        role: Val(.Label), accessibility: None, ime: None, color: None, style: None, kind: .Text,
+        children: [], key: None, on_click: None, on_drop: None, shortcut: None}
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2159
+pub fn jet_ui_button(label: String) -> JetUiNode {
+    JetUiNode{label: label.clone(), width: jet_tui_display_width(label) as Float + 4.0, height: 1.0,
+        role: Val(.Button), accessibility: None, ime: None, color: None, style: None, kind: .Button,
+        children: [], key: None, on_click: None, on_drop: None, shortcut: None}
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2181
+pub fn jet_ui_button_with_metadata(label: String, shortcut: JetOutcome<JetUiShortcut, JetAbsent>, accessible_label: JetOutcome<String, JetAbsent>) -> JetUiNode {
+    node := jet_ui_button(label)
+    node.shortcut = shortcut.ok()
+    if accessible_label == .Ok(name) {
+        node.accessibility = Val(JetUiAccessibility{name: Val(name), description: None, states: []})
+    }
+    node
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2201
+pub fn jet_ui_button_on_click(label: String, shortcut: JetOutcome<JetUiShortcut, JetAbsent>, accessible_label: JetOutcome<String, JetAbsent>, handler: fn()) -> JetUiNode {
+    node := jet_ui_button_with_metadata(label, shortcut, accessible_label)
+    node.on_click = Val(jet_ui_register_click(handler))
+    node
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2213
+pub fn jet_ui_box(children: [JetUiNode]) -> JetUiNode {
+    width := 0.0
+    height := 0.0
+    loop child in children {
+        width = width.max(child.width)
+        height += child.height
+    }
+    JetUiNode{label: "", width: width, height: height, role: Val(.Container), accessibility: None, ime: None,
+        color: None, style: None, kind: .Box, children: children, key: None, on_click: None, on_drop: None, shortcut: None}
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2240
+pub fn jet_ui_node_id(node: &JetUiNode, path: String) -> JetUiNodeId JetUiHostError! {
+    identity :: match node.key { Val(key) if not key.is_empty() -> "key:{key}", _ -> path }
+    JetUiNodeId.new(identity)
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2253
+type JetUiClickHandler = Arc<fn()>
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2255
+fn jet_ui_click_slots() -> &Mutex<[I64:JetUiClickHandler]> {
+    // GATE #4565: kernel primitive — synchronized process-static initialization.
+    #Unsafe("one lazy initialized click-slot map lives for the process") {
+        static SLOTS: LazyLock<Mutex<[I64:JetUiClickHandler]>> = LazyLock.new(fn() { Mutex.new([:]) })
+        &SLOTS
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2263
+fn jet_ui_click_bindings() -> &Mutex<[JetUiNodeId:I64]> {
+    // GATE #4565: kernel primitive
+    #Unsafe("one lazy initialized click-binding map lives for the process") {
+        static BINDINGS: LazyLock<Mutex<[JetUiNodeId:I64]>> = LazyLock.new(fn() { Mutex.new([:]) })
+        &BINDINGS
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2271
+fn jet_ui_next_click_id() -> I64 {
+    // GATE #4565: kernel primitive — relaxed atomic allocation of unique IDs.
+    #Unsafe("atomic fetch-add serializes process-wide click ID allocation") {
+        static NEXT: AtomicI64 = AtomicI64.new(1)
+        NEXT.fetch_add(1, .Relaxed)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2276
+pub fn jet_ui_register_click(handler: fn()) -> I64 {
+    id :: jet_ui_next_click_id()
+    jet_ui_click_slots().lock().unwrap_or_else(fn(e) { e.into_inner() }).insert(id, Arc.new(handler))
+    id
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2286
+pub fn jet_ui_bind_click(identity: JetUiNodeId, slot: I64) -> {
+    jet_ui_click_bindings().lock().unwrap_or_else(fn(e) { e.into_inner() }).insert(identity, slot)
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2294
+pub fn jet_ui_unbind_click(identity: &JetUiNodeId) -> {
+    _ :: jet_ui_click_bindings().lock().unwrap_or_else(fn(e) { e.into_inner() }).remove(identity)
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2302
+pub fn jet_ui_dispatch(identity: &JetUiNodeId) -> {
+    slot :: jet_ui_click_bindings().lock().unwrap_or_else(fn(e) { e.into_inner() }).get(identity).copied()
+    slot :: slot ?? return
+    // Clone the callback while locked; invoke only after both map guards drop.
+    handler :: jet_ui_click_slots().lock().unwrap_or_else(fn(e) { e.into_inner() }).get(&slot).cloned()
+    if handler == .Val(callback) { callback() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2322
+type JetUiDropHandler = Arc<fn([JetUiDropItem])>
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2324
+fn jet_ui_drop_slots() -> &Mutex<[I64:JetUiDropHandler]> {
+    // GATE #4565: kernel primitive
+    #Unsafe("one lazy initialized drop-slot map lives for the process") {
+        static SLOTS: LazyLock<Mutex<[I64:JetUiDropHandler]>> = LazyLock.new(fn() { Mutex.new([:]) })
+        &SLOTS
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2332
+fn jet_ui_drop_bindings() -> &Mutex<[JetUiNodeId:I64]> {
+    // GATE #4565: kernel primitive
+    #Unsafe("one lazy initialized drop-binding map lives for the process") {
+        static BINDINGS: LazyLock<Mutex<[JetUiNodeId:I64]>> = LazyLock.new(fn() { Mutex.new([:]) })
+        &BINDINGS
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2340
+fn jet_ui_next_drop_id() -> I64 {
+    // GATE #4565: kernel primitive
+    #Unsafe("atomic fetch-add serializes process-wide drop ID allocation") {
+        static NEXT: AtomicI64 = AtomicI64.new(1)
+        NEXT.fetch_add(1, .Relaxed)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2345
+pub fn jet_ui_register_drop(handler: fn([JetUiDropItem])) -> I64 {
+    id :: jet_ui_next_drop_id()
+    jet_ui_drop_slots().lock().unwrap_or_else(fn(e) { e.into_inner() }).insert(id, Arc.new(handler))
+    id
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2356
+pub fn jet_ui_bind_drop(identity: JetUiNodeId, slot: I64) -> {
+    jet_ui_drop_bindings().lock().unwrap_or_else(fn(e) { e.into_inner() }).insert(identity, slot)
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2363
+pub fn jet_ui_unbind_drop(identity: &JetUiNodeId) -> {
+    _ :: jet_ui_drop_bindings().lock().unwrap_or_else(fn(e) { e.into_inner() }).remove(identity)
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2370
+pub fn jet_ui_dispatch_drop(identity: &JetUiNodeId, items: [JetUiDropItem]) -> {
+    slot :: jet_ui_drop_bindings().lock().unwrap_or_else(fn(e) { e.into_inner() }).get(identity).copied()
+    slot :: slot ?? return
+    handler :: jet_ui_drop_slots().lock().unwrap_or_else(fn(e) { e.into_inner() }).get(&slot).cloned()
+    if handler == .Val(callback) { callback(items) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2391
+pub fn jet_ui_bind_tree_clicks(node: &JetUiNode, path: String) -> {
+    identity :: match jet_ui_node_id(node, path) { Ok(id) -> id, Err(_) -> return }
+    if node.on_click == .Val(slot) { jet_ui_bind_click(identity.clone(), slot) }
+    if node.on_drop == .Val(slot) { jet_ui_bind_drop(identity, slot) }
+    if node.kind == .Box {
+        for (index, child) in node.children.enumerate() { jet_ui_bind_tree_clicks(child, "{path}/{index}") }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2408
+pub fn jet_ui_aria_role_button() -> JetUiAriaRole { .Button }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2412
+pub fn jet_ui_aria_role_text_input() -> JetUiAriaRole { .TextInput }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2416
+pub fn jet_ui_aria_role_label() -> JetUiAriaRole { .Label }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2420
+pub fn jet_ui_aria_role_container() -> JetUiAriaRole { .Container }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2424
+pub fn jet_ui_key_event(code: String) -> JetInputEvent { .Key(code) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2430
+pub fn jet_ui_resize_event(width: Float, height: Float) -> JetInputEvent { .Resize(JetSize{width: width, height: height}) }
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2436
+impl JetShow for JetPoint {
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:2437
+    fn jet_show(self: &JetPoint) -> String { "{{x:{self.x},y:{self.y}}}" }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2442
+impl JetShow for JetSize {
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:2443
+    fn jet_show(self: &JetSize) -> String { "{{w:{self.width},h:{self.height}}}" }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2448
+impl JetShow for JetRect {
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:2449
+    fn jet_show(self: &JetRect) -> String { "{{x:{self.x},y:{self.y},w:{self.width},h:{self.height}}}" }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2457
+impl JetShow for JetEventResult {
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:2458
+    fn jet_show(self: &JetEventResult) -> String { match self { .Handled -> "Handled", .Ignored -> "Ignored" } }
+}
+// Rust: crates/jet-codegen/src/Prelude/Ui.rs:2466
+impl JetShow for JetUiAriaRole {
+    // Rust: crates/jet-codegen/src/Prelude/Ui.rs:2467
+    fn jet_show(self: &JetUiAriaRole) -> String {
+        match self { .Button -> "Button", .TextInput -> "TextInput", .Label -> "Label", .Container -> "Container" }
+    }
+}

@@ -1206,7 +1206,7 @@ fn allow_time_wait_runs_on_every_engine_from_a_repository_subdirectory() {
     )
     .unwrap();
     for (engine, flags) in [
-        ("jit", &["--trace-tiers"][..]),
+        ("default", &[][..]),
         ("interpreter", &["--interpret"][..]),
         ("aot", &["--release"][..]),
     ] {
@@ -1221,10 +1221,6 @@ fn allow_time_wait_runs_on_every_engine_from_a_repository_subdirectory() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(output.status.success(), "{engine}: --allow=Time.Wait must run:\n{stderr}");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "waited\n", "{engine}: {stderr}");
-        // Only the resident engines trace tiers; a forced AOT fallback is silent.
-        if engine == "jit" {
-            assert!(stderr.contains("tier1 native"), "--allow must keep the JIT:\n{stderr}");
-        }
     }
 }
 

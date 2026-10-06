@@ -2322,7 +2322,7 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
     ),
     (
         "wasmtime",
-        "{ version = \"26\", features = [\"component-model\"] }",
+        "{ version = \"25\", features = [\"component-model\"] }",
     ),
     (
         "x25519-dalek",
@@ -2453,7 +2453,9 @@ pub const WASMTIME_CRATE_SPEC: (&str, &str) = ("wasmtime", "25");
 /// descriptor-relative, no-follow plugin reads. Keep the path in the cache
 /// identity through the dependency map rather than duplicating its limits.
 const JET_FOUNDATION_CRATE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-foundation");
-const JET_FOUNDATION_SOURCE_SCHEMA: &str = "jet-ffi-foundation-source-v2";
+/// Foundation's own path dependency; Cargo reads it at its host path too.
+const JET_UNICODE_CRATE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-unicode");
+const JET_FOUNDATION_SOURCE_SCHEMA: &str = "jet-ffi-foundation-source-v3";
 const JET_FOUNDATION_CODEGEN_PRELUDE_PATH: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-codegen/src/Prelude");
 const JET_FOUNDATION_ARCHIVE_SOURCE_PATH: &str =
@@ -2470,6 +2472,8 @@ const JET_FOUNDATION_CODEGEN_INPUTS: &[&str] = &[
     "Core/TimeMonotonic.rs",
     "Core/MapKey.rs",
     "Markers.jet",
+    // jet-unicode (Foundation's path dependency) includes the generated tables.
+    "CoreLib/Top/UnicodeTables.rs",
 ];
 const JET_FOUNDATION_ARCHIVE_INPUTS: &[&str] = &["archive.jet", "gzip.jet", "zstd.jet"];
 const JET_FOUNDATION_TEXT_INPUTS: &[&str] = &["string.jet"];
@@ -2478,6 +2482,7 @@ const JET_FOUNDATION_TEST_INPUTS: &[&str] = &["diagnostics_coverage_baseline.txt
 #[derive(Debug)]
 struct JetFoundationSources {
     foundation: PathBuf,
+    unicode: PathBuf,
     codegen_prelude: PathBuf,
     archive_source: PathBuf,
     text_source: PathBuf,
@@ -2529,6 +2534,7 @@ fn foundation_input_digest(
 
 fn jet_foundation_sources() -> Result<JetFoundationSources, String> {
     let foundation = verified_source_directory(Path::new(JET_FOUNDATION_CRATE_PATH), "crate")?;
+    let unicode = verified_source_directory(Path::new(JET_UNICODE_CRATE_PATH), "unicode crate")?;
     let codegen_prelude =
         verified_source_directory(Path::new(JET_FOUNDATION_CODEGEN_PRELUDE_PATH), "codegen")?;
     let archive_source =
@@ -2542,6 +2548,9 @@ fn jet_foundation_sources() -> Result<JetFoundationSources, String> {
     let mut identity =
         crate::ForeignBridge::IdentityBuilder::new(JET_FOUNDATION_SOURCE_SCHEMA);
     identity.field("foundation-tree", foundation_tree.as_bytes());
+    let unicode_tree = crate::SHA256::try_tree_hash(&unicode)
+        .map_err(|error| format!("could not fingerprint jet-unicode source: {error}"))?;
+    identity.field("unicode-tree", unicode_tree.as_bytes());
     for relative in JET_FOUNDATION_CODEGEN_INPUTS {
         let digest = foundation_input_digest(&codegen_prelude, relative, "codegen")?;
         identity.field(
@@ -2567,6 +2576,7 @@ fn jet_foundation_sources() -> Result<JetFoundationSources, String> {
 
     Ok(JetFoundationSources {
         foundation,
+        unicode,
         codegen_prelude,
         archive_source,
         text_source,
@@ -2618,6 +2628,7 @@ fn jet_foundation_mounts(
             sources.foundation.clone(),
             sources.foundation.clone(),
         ),
+        jet_sema::Comptime::Build::ReadOnlyMount::new(sources.unicode.clone(), sources.unicode.clone()),
     ];
     #[cfg(target_os = "linux")]
     {

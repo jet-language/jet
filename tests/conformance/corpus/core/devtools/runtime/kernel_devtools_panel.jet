@@ -1,0 +1,15 @@
+use core.devtools.runtime.kernel_devtools_panel.[JetDevtoolsPublishValue, jet_devtools_panel_json_escape]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/DevtoolsPanel.rs:125
+#Test("devtools_panel_json_escape_controls") {
+    assert(jet_devtools_panel_json_escape("a\"\\\n\r\t\u{1}") == "a\\\"\\\\\\n\\r\\t\\u0001")
+    assert(jet_devtools_panel_json_escape("λ") == "λ")
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/DevtoolsPanel.rs:40
+#Test("devtools_panel_closed_publish_values") {
+    assert(true.into_jet_devtools_value() == .Bool(true))
+    assert(I32{-7}.into_jet_devtools_value() == .Int(I64{-7}))
+    assert(I64{17}.into_jet_devtools_value() == .Int(I64{17}))
+    assert(F64{2.5}.into_jet_devtools_value() == .Float(F64{2.5}))
+    assert("state".into_jet_devtools_value() == .Text("state"))
+}

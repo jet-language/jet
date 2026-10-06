@@ -1,0 +1,156 @@
+use core.mem.runtime.kernel_atomic as atomic_kernel
+
+// Tests exercise the actual changed scalar policy, NOT a sequential stand-in
+// for an atomic location. The kernel has no cell, provider, concurrency or
+// exact-node implementation. Native acceptance needs the single shared ordered
+// word primitive and canonical Foundation owner before these value policies
+// can be used by Atomic.rs:310–487; passing here cannot establish that gate.
+
+#Test("atomic Bool publication wire is canonical and decode is nonzero") {
+    assert_eq(atomic_kernel.atomic_bool_into_bits(false), U64{0})
+    assert_eq(atomic_kernel.atomic_bool_into_bits(true), U64{1})
+    assert(!atomic_kernel.atomic_bool_clone_from_bits(U64{0}))
+    assert(atomic_kernel.atomic_bool_clone_from_bits(U64{1}))
+    assert(atomic_kernel.atomic_bool_clone_from_bits(U64{2}))
+    assert(atomic_kernel.atomic_bool_clone_from_bits(U64{9223372036854775808}))
+    assert(atomic_kernel.atomic_bool_clone_from_bits(U64{18446744073709551615}))
+    assert_eq(atomic_kernel.atomic_bool_clone_value(false), false)
+    assert_eq(atomic_kernel.atomic_bool_clone_value(true), true)
+}
+
+#Test("atomic U32 publication zero extends and observation truncates") {
+    assert_eq(atomic_kernel.atomic_u32_into_bits(U32{0}), U64{0})
+    assert_eq(atomic_kernel.atomic_u32_into_bits(U32{2147483648}), U64{2147483648})
+    assert_eq(atomic_kernel.atomic_u32_into_bits(U32{4294967295}), U64{4294967295})
+    assert_eq(atomic_kernel.atomic_u32_clone_from_bits(U64{0}), U32{0})
+    assert_eq(atomic_kernel.atomic_u32_clone_from_bits(U64{4294967295}), U32{4294967295})
+    assert_eq(atomic_kernel.atomic_u32_clone_from_bits(U64{4294967296}), U32{0})
+    assert_eq(atomic_kernel.atomic_u32_clone_from_bits(U64{9223372036854775808}), U32{0})
+    assert_eq(atomic_kernel.atomic_u32_clone_from_bits(U64{18446744073709551615}), U32{4294967295})
+    assert_eq(atomic_kernel.atomic_u32_clone_value(U32{4294967295}), U32{4294967295})
+}
+
+#Test("atomic U64 publication preserves every bit including exact tag patterns") {
+    values :: [U64]{U64{0}, U64{1}, U64{4611686018427387904}, U64{9223372036854775807}, U64{9223372036854775808}, U64{13835058055282163712}, U64{18446744073709551615}}
+    loop word in values {
+        assert_eq(atomic_kernel.atomic_u64_clone_value(word), word)
+        assert_eq(atomic_kernel.atomic_u64_into_bits(word), word)
+        assert_eq(atomic_kernel.atomic_u64_clone_from_bits(word), word)
+        assert(atomic_kernel.atomic_u64_equal(word, word))
+        assert(atomic_kernel.atomic_u64_equal_bits(word, word))
+        held :: atomic_kernel.atomic_u64_equal_and_hold_bits(word, word)
+        assert(held.equal)
+    }
+    assert(!atomic_kernel.atomic_u64_equal(U64{9223372036854775808}, U64{0}))
+    assert(!atomic_kernel.atomic_u64_equal_bits(U64{18446744073709551615}, U64{9223372036854775807}))
+    held :: atomic_kernel.atomic_u64_equal_and_hold_bits(U64{18446744073709551615}, U64{0})
+    assert(!held.equal)
+}
+
+#Test("atomic copy equality compares decoded values not canonical word shape") {
+    assert(atomic_kernel.atomic_bool_equal(false, false))
+    assert(!atomic_kernel.atomic_bool_equal(false, true))
+    assert(atomic_kernel.atomic_bool_equal_bits(U64{2}, true))
+    assert(!atomic_kernel.atomic_bool_equal_bits(U64{0}, true))
+    bool_match :: atomic_kernel.atomic_bool_equal_and_hold_bits(U64{18446744073709551615}, true)
+    bool_mismatch :: atomic_kernel.atomic_bool_equal_and_hold_bits(U64{0}, true)
+    assert(bool_match.equal)
+    assert(!bool_mismatch.equal)
+    assert(atomic_kernel.atomic_u32_equal(U32{4294967295}, U32{4294967295}))
+    assert(!atomic_kernel.atomic_u32_equal(U32{2147483648}, U32{0}))
+    assert(atomic_kernel.atomic_u32_equal_bits(U64{18446744073709551615}, U32{4294967295}))
+    assert(!atomic_kernel.atomic_u32_equal_bits(U64{4294967296}, U32{1}))
+    u32_match :: atomic_kernel.atomic_u32_equal_and_hold_bits(U64{4294967296}, U32{0})
+    u32_mismatch :: atomic_kernel.atomic_u32_equal_and_hold_bits(U64{4294967296}, U32{1})
+    assert(u32_match.equal)
+    assert(!u32_mismatch.equal)
+}
+
+#Test("atomic I32 value policy copies compares and wraps in exactly 32 bits") {
+    minimum :: -I32{2147483647} - I32{1}
+    maximum :: I32{2147483647}
+    assert_eq(atomic_kernel.atomic_i32_clone_value(minimum), minimum)
+    assert(atomic_kernel.atomic_i32_equal(minimum, minimum))
+    assert(!atomic_kernel.atomic_i32_equal(minimum, maximum))
+    assert_eq(atomic_kernel.atomic_i32_add_value(maximum, I32{1}), minimum)
+    assert_eq(atomic_kernel.atomic_i32_add_value(minimum, -I32{1}), maximum)
+    assert_eq(atomic_kernel.atomic_i32_add_value(minimum, minimum), I32{0})
+    assert_eq(atomic_kernel.atomic_i32_add_value(-I32{1}, I32{1}), I32{0})
+    assert_eq(atomic_kernel.atomic_i32_try_new_value(minimum) ?? panic("fixed new allocated"), minimum)
+    assert_eq(atomic_kernel.atomic_i32_try_add_value(maximum, I32{1}) ?? panic("fixed add allocated"), minimum)
+    assert_eq(atomic_kernel.atomic_i32_try_add_value(minimum, -I32{1}) ?? panic("fixed add allocated"), maximum)
+}
+
+#Test("atomic U32 value policy wraps without allocation refusal") {
+    assert_eq(atomic_kernel.atomic_u32_add_value(U32{4294967295}, U32{1}), U32{0})
+    assert_eq(atomic_kernel.atomic_u32_add_value(U32{2147483648}, U32{2147483648}), U32{0})
+    assert_eq(atomic_kernel.atomic_u32_add_value(U32{4294967295}, U32{4294967295}), U32{4294967294})
+    assert_eq(atomic_kernel.atomic_u32_try_new_value(U32{4294967295}) ?? panic("fixed new allocated"), U32{4294967295})
+    assert_eq(atomic_kernel.atomic_u32_try_add_value(U32{4294967295}, U32{1}) ?? panic("fixed add allocated"), U32{0})
+}
+
+#Test("atomic I64 value policy is fixed not the exact inline Int range") {
+    minimum :: -I64{9223372036854775807} - I64{1}
+    maximum :: I64{9223372036854775807}
+    assert_eq(atomic_kernel.atomic_i64_clone_value(minimum), minimum)
+    assert(atomic_kernel.atomic_i64_equal(minimum, minimum))
+    assert(!atomic_kernel.atomic_i64_equal(minimum, maximum))
+    assert_eq(atomic_kernel.atomic_i64_add_value(maximum, I64{1}), minimum)
+    assert_eq(atomic_kernel.atomic_i64_add_value(minimum, -I64{1}), maximum)
+    assert_eq(atomic_kernel.atomic_i64_add_value(minimum, minimum), I64{0})
+    assert_eq(atomic_kernel.atomic_i64_add_value(I64{4611686018427387903}, I64{1}), I64{4611686018427387904})
+    assert_eq(atomic_kernel.atomic_i64_try_new_value(minimum) ?? panic("fixed new allocated"), minimum)
+    assert_eq(atomic_kernel.atomic_i64_try_add_value(maximum, I64{1}) ?? panic("fixed add allocated"), minimum)
+    assert_eq(atomic_kernel.atomic_i64_try_add_value(minimum, -I64{1}) ?? panic("fixed add allocated"), maximum)
+}
+
+#Test("atomic U64 value policy wraps across the full unsigned domain") {
+    assert_eq(atomic_kernel.atomic_u64_add_value(U64{18446744073709551615}, U64{1}), U64{0})
+    assert_eq(atomic_kernel.atomic_u64_add_value(U64{9223372036854775808}, U64{9223372036854775808}), U64{0})
+    assert_eq(atomic_kernel.atomic_u64_add_value(U64{18446744073709551615}, U64{18446744073709551615}), U64{18446744073709551614})
+    assert_eq(atomic_kernel.atomic_u64_try_new_value(U64{18446744073709551615}) ?? panic("fixed new allocated"), U64{18446744073709551615})
+    assert_eq(atomic_kernel.atomic_u64_try_add_value(U64{18446744073709551615}, U64{1}) ?? panic("fixed add allocated"), U64{0})
+}
+
+#Test("atomic fixed drop rails never interpret tag-looking words as Int owners") {
+    words :: [U64]{U64{0}, U64{4611686018427387904}, U64{9223372036854775808}, U64{13835058055282163712}, U64{18446744073709551615}}
+    loop word in words {
+        _ :: atomic_kernel.atomic_bool_drop_bits(word)
+        _ :: atomic_kernel.atomic_i32_drop_bits(word)
+        _ :: atomic_kernel.atomic_u32_drop_bits(word)
+        _ :: atomic_kernel.atomic_i64_drop_bits(word)
+        _ :: atomic_kernel.atomic_u64_drop_bits(word)
+    }
+    _ :: atomic_kernel.atomic_bool_drop_value(true)
+    _ :: atomic_kernel.atomic_i32_drop_value(-I32{2147483647} - I32{1})
+    _ :: atomic_kernel.atomic_u32_drop_value(U32{4294967295})
+    _ :: atomic_kernel.atomic_i64_drop_value(-I64{9223372036854775807} - I64{1})
+    _ :: atomic_kernel.atomic_u64_drop_value(U64{18446744073709551615})
+}
+
+// Original oracle inventory: Atomic.rs has no #[test] bodies. Named suites
+// core_memory_foundations.rs, memory_semantics.rs and resource_close.rs contain
+// no Atomic tests. allocator_families.rs uses std::sync::AtomicU64 only for
+// scratch sequence numbers, not the Jet Atomic carrier. Foundation's
+// Layout.rs:1336–1350 tests the closed scalar set, not a native cell. Existing
+// executable example bounded_spsc_atomic.jet:1074–1090 keeps the
+// layout/publication/observe output oracle; its preceding channel smoke is
+// not concurrent access to the ring.
+//
+// Native acceptance, intentionally not replaced with a sequential fake:
+// - All six actual cell lanes: new/load/observe/store/publish, successful and
+//   mismatched CAS (replacement must not publish on mismatch), add returns OLD.
+// - Fixed full64/signed boundary updates retain exactly these value laws.
+// - Exact Int equality across separately allocated equal nodes, inline/spill
+//   transitions, allocation-refused try_add leaves publication untouched.
+// - Contended weak-CAS add retries release candidate/current owners; successful
+//   publication drops previous/next/delta once and returns retained old owner.
+// - Strong-CAS exact equality holds the observed owner THROUGH the CAS; reuse
+//   cannot produce an ABA match; mismatch drops expected/replacement/guard.
+//   The retain/reload primitive must return its VALIDATED raw word with the
+//   retained owner: Numeric.rs:3182–3210 can reload a different word, so the
+//   initial bits must not be reused as the expected CAS word after that change.
+// - Real producer/consumer publication and concurrent old-value uniqueness;
+//   compiler layout proves one inline U64 location, no cell clone/heap/lock.
+// These need the actual ordered word, ownership callbacks, static/shared
+// addressability and Foundation hazard domain; none is a value-policy receipt.

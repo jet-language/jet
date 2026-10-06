@@ -54,6 +54,9 @@ const CORE_EXPORTS_PATH = "crates/jet-foundation/src/CoreModuleExports.rs";
 const CORE_SOURCE_TEXTS_PATH = "crates/jet-sema/src/CoreSourceTexts.rs";
 const CORE_ROWS_GENERATOR_PATH = "Compiler/Bootstrap/generate-core-sources.mjs";
 const RING_LAYER_PATH = "crates/jet-foundation/src/RingLayer.rs";
+const CORE_PARTS_PATH = "crates/jet-foundation/src/CoreSourceParts.rs";
+const CORE_RUNTIME_PARTS_BEGIN = "// BEGIN GENERATED CORE RUNTIME PARTS";
+const CORE_RUNTIME_PARTS_END = "// END GENERATED CORE RUNTIME PARTS";
 const CORE_CALLS_BEGIN = "// BEGIN GENERATED CORE CALLS";
 const CORE_CALLS_END = "// END GENERATED CORE CALLS";
 const ENCODING_FORMAT_BEGIN = "// BEGIN GENERATED CORE ENCODING FORMATS";
@@ -1669,8 +1672,7 @@ function translateCoreCallConstructor(name, args, context) {
 }
 
 function translateCoreCallMethod(record, name, args, context) {
-  if (name === "without_direct_aot" || name === "without_direct_jit" ||
-      name === "with_native_int_result") {
+  if (name === "without_direct_aot" || name === "with_native_int_result") {
     expectRustArgumentCount(name, args, 0, context);
     return "core_call_" + name + "(" + record + ")";
   }
@@ -1679,10 +1681,6 @@ function translateCoreCallMethod(record, name, args, context) {
   if (name === "with_max_arity") {
     return "core_call_with_max_arity(" + record + ", " +
       translateRustInteger(argument, context) + ")";
-  }
-  if (name === "with_jit_symbol") {
-    return "core_call_with_jit_symbol(" + record + ", " +
-      rustStringExpression(argument, context) + ")";
   }
   if (name === "with_pure_route") {
     return "core_call_with_pure_route(" + record + ", " +
@@ -1843,6 +1841,44 @@ function validateDispatcherIdentity(module, member, expression, sourceLine) {
       sourceLine + ": DSL " + expected + " vs " + actual.constructor + " " + emitted);
   }
   return actual;
+}
+
+// The runtime unit an owned wrapper calls, when its body reaches a
+// `core.<area>.runtime.<unit>` import and no longer calls its own
+// `core.<module>.<member>` provider; otherwise null.
+function ownedWrapperRuntimeUnit(source, module, member) {
+  const lines = source.split(/\r?\n/);
+  const start = lines.findIndex(function (line) {
+    return new RegExp("^pub\\s+fn\\s+" + member + "\\b").test(line);
+  });
+  if (start < 0) return null;
+  let end = start + 1;
+  while (end < lines.length &&
+      !/^(?:pub\s+)?(?:fn|struct|enum|type|impl|mod|const|trait)\b|^#/.test(lines[end])) {
+    end += 1;
+  }
+  const body = lines.slice(start, end).join("\n");
+  if (body.includes(module + "." + member + "(")) return null;
+  const locals = new Map();
+  for (const match of source.matchAll(
+    /^use\s+(core\.[a-z0-9_]+\.runtime\.[a-z0-9_]+)(?:\.\[([^\]]*)\]|\.([A-Za-z_][A-Za-z0-9_]*))?(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?/gm,
+  )) {
+    const unit = match[1];
+    if (match[2] !== undefined) {
+      for (const item of match[2].split(",").map(function (value) { return value.trim(); }).filter(Boolean)) {
+        const parts = item.split(/\s+as\s+/);
+        locals.set((parts[1] || parts[0]).trim() + "(", unit);
+      }
+    } else if (match[3] !== undefined) {
+      locals.set((match[4] || match[3]) + "(", unit);
+    } else {
+      locals.set((match[4] || unit.split(".").pop()) + ".", unit);
+    }
+  }
+  for (const [local, unit] of locals) {
+    if (new RegExp("(?:^|[^A-Za-z0-9_.])" + local.replace(/[.(]/g, "\\$&")).test(body)) return unit;
+  }
+  return null;
 }
 
 function parseCoreSource(source) {
@@ -2148,6 +2184,23 @@ function parseCoreSource(source) {
     if (row.kind === "plain" && !memberSets.get(row.module).has(row.member)) {
       throw new Error("dispatcher row is not declared by Core.jet exports: " +
         row.module + "." + row.member);
+    }
+  }
+  // Cutover end state: once an owned wrapper calls a runtime unit instead of
+  // its `core.<module>.<member>` provider, the dispatcher row (and the Rust
+  // symbol it names) is dead and must go in the same change.
+  for (const row of dispatcherRows) {
+    if (row.kind === "receiver") continue;
+    const owner = sourceModules.find(function (entry) {
+      return entry.module === row.module && entry.ownedMembers.includes(row.member);
+    });
+    if (!owner) continue;
+    const unit = ownedWrapperRuntimeUnit(read(owner.path), owner.module, row.member);
+    if (unit) {
+      throw new Error("dispatcher row `" + row.module + "." + row.member + "` (Core.jet line " +
+        row.sourceLine + ") is dead: its owned wrapper `pub fn " + row.member + "` in " + owner.path +
+        " (owns at Core.jet line " + owner.sourceLine + ") calls runtime unit `" + unit +
+        "` instead of the provider; delete the row and the Rust symbol it names");
     }
   }
   const nonReceiverDispatcherCounts = new Map();
@@ -2512,11 +2565,83 @@ function generatedCoreSourceTexts(declarations) {
     lines.push("    (\"" + entry.module + "\", include_str!(\"../../../" + entry.path + "\")),");
   }
   lines.push("];", "");
+  lines.push(
+    "// Body text of every runtime unit in",
+    "// `jet_foundation::CoreSourceParts::CORE_RUNTIME_PARTS`, keyed by its module.",
+    "const CORE_RUNTIME_SOURCE_TEXTS: &[(&str, &str)] = &[",
+  );
+  for (const part of coreRuntimeParts()) {
+    lines.push("    (\"" + part.module + "\", include_str!(\"../../../" + part.path + "\")),");
+  }
+  lines.push("];", "");
   return lines.join("\n");
 }
 
 function writeCoreSourceTexts(declarations) {
   writeFileSync(join(ROOT, CORE_SOURCE_TEXTS_PATH), generatedCoreSourceTexts(declarations));
+}
+
+// Compiler-private runtime units come straight from the directory: every
+// `Core/<area>/runtime/**/<unit>.jet` except a `// PORT-PENDING` packet, whose
+// body is still the Rust it replaces. A nested directory is one more path
+// segment (`Core/text/runtime/assets/x.jet` is `core.text.runtime.assets.x`).
+// One list, no hand-kept table.
+function coreRuntimeParts() {
+  const parts = [];
+  const aliases = new Set();
+  const coreRoot = join(ROOT, "Core");
+  const walk = function (directory, segments) {
+    for (const entry of readdirSync(directory).sort()) {
+      const full = join(directory, entry);
+      if (statSync(full).isDirectory()) {
+        walk(full, segments.concat([entry]));
+        continue;
+      }
+      if (!entry.endsWith(".jet") || !statSync(full).isFile()) continue;
+      const path = "Core/" + segments.join("/") + "/" + entry;
+      if (/^\/\/ PORT-PENDING\b/m.test(read(path))) continue;
+      const unitSegments = segments.concat([entry.slice(0, -".jet".length)]);
+      for (const segment of unitSegments) {
+        if (!/^[a-z][a-z0-9_]*$/.test(segment)) {
+          throw new Error("runtime unit path segment `" + segment + "` is not a lowercase identifier: " + path);
+        }
+      }
+      const alias = "__core_" + unitSegments.join("_");
+      if (aliases.has(alias)) {
+        throw new Error("runtime unit alias `" + alias + "` is claimed twice; rename " + path);
+      }
+      aliases.add(alias);
+      parts.push({ module: "core." + unitSegments.join("."), alias: alias, path: path });
+    }
+  };
+  for (const area of readdirSync(coreRoot).sort()) {
+    const directory = join(coreRoot, area, "runtime");
+    if (existsSync(directory) && statSync(directory).isDirectory()) walk(directory, [area, "runtime"]);
+  }
+  return parts;
+}
+
+function generatedCoreRuntimeParts() {
+  const lines = [
+    CORE_RUNTIME_PARTS_BEGIN,
+    "// Generated by Tools/agent/check-core-surface-ledger.mjs --write from Core/*/runtime/**/*.jet; do not edit.",
+    "pub const CORE_RUNTIME_PARTS: &[CoreSourceModule] = &[",
+  ];
+  for (const part of coreRuntimeParts()) {
+    lines.push("    CoreSourceModule { module: \"" + part.module + "\", alias: \"" + part.alias +
+      "\", path: \"" + part.path + "\", owned_members: &[] },");
+  }
+  lines.push("];", CORE_RUNTIME_PARTS_END);
+  return lines.join("\n");
+}
+
+function writeCoreRuntimeParts() {
+  writeFileSync(join(ROOT, CORE_PARTS_PATH), replaceGeneratedSection(
+    read(CORE_PARTS_PATH),
+    CORE_RUNTIME_PARTS_BEGIN,
+    CORE_RUNTIME_PARTS_END,
+    generatedCoreRuntimeParts(),
+  ));
 }
 function generatedEncodingFormats(source, declarations) {
   if (!declarations.formatRows.length) {
@@ -3016,6 +3141,13 @@ function validateGeneratedViews(source, declarations) {
       read(CORE_SOURCE_TEXTS_PATH) !== generatedCoreSourceTexts(declarations)) {
     throw new Error("CoreSourceTexts.rs is stale; run --write to regenerate from Core.jet");
   }
+  const partsSource = read(CORE_PARTS_PATH);
+  const partsStart = partsSource.indexOf(CORE_RUNTIME_PARTS_BEGIN);
+  const partsEnd = partsSource.indexOf(CORE_RUNTIME_PARTS_END, partsStart);
+  if (partsStart < 0 || partsEnd < partsStart ||
+      partsSource.slice(partsStart, partsEnd + CORE_RUNTIME_PARTS_END.length) !== generatedCoreRuntimeParts()) {
+    throw new Error("CoreSourceParts.rs runtime parts are stale; run --write to regenerate from Core/*/runtime");
+  }
   // The Jet-hosted CLI's Core row table is generated from the export table.
   execFileSync(process.execPath, [join(ROOT, CORE_ROWS_GENERATOR_PATH), "--check"], { cwd: ROOT, stdio: "inherit" });
   if (!existsSync(join(ROOT, CORE_ENUM_ROWS_PATH)) ||
@@ -3033,6 +3165,7 @@ function writeCoreViews() {
   const source = read(CORE_SOURCE_PATH);
   const declarations = coreSourceFacts();
   writeCoreExportTable(source, declarations);
+  writeCoreRuntimeParts();
   execFileSync(process.execPath, [join(ROOT, CORE_ROWS_GENERATOR_PATH)], { cwd: ROOT, stdio: "inherit" });
   writeCoreSourceTexts(declarations);
   writeRingDependencyTable(source, declarations);
@@ -6210,6 +6343,7 @@ function hostileFixtures() {
 export {
   buildLedger,
   coreSourceFacts,
+  ownedWrapperRuntimeUnit,
   publicDispatcherRows,
   validatePublicDispatcher,
   generatedCoreExports,

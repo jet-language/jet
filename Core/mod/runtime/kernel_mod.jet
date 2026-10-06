@@ -1,0 +1,66 @@
+// PORT-PENDING 0227 crates-jet-jit-src-mod: crates/jet-jit/src/Mod.rs:1-62
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS // This module includes shared Prelude source that several hosts compile,
+//RS // each using a different subset, so dead-code reports here are about the
+//RS // other hosts' usage, not about this one. Scoped to the module, never the crate.
+//RS #![allow(dead_code)]
+//RS 
+//RS // D-LIB-CALLGRANT1=A: JIT uses the exact load/check/map Prelude source. This
+//RS // module only translates heap-level handles into a resident table slot.
+//RS const __JET_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
+//RS include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
+//RS include!("../../jet-codegen/src/Prelude/CoreLib/Top/Mod.rs");
+//RS 
+//RS use std::cell::RefCell;
+//RS 
+//RS thread_local! {
+//RS     static LOADED: RefCell<Vec<JetMod>> = const { RefCell::new(Vec::new()) };
+//RS }
+//RS 
+//RS pub(crate) fn load(path: String, read: Vec<String>) -> Result<i64, String> {
+//RS     let module = jet_mod_load(&path, &JetModGrant { read })?;
+//RS     Ok(LOADED.with(|loaded| {
+//RS         let mut loaded = loaded.borrow_mut();
+//RS         loaded.push(module);
+//RS         loaded.len() as i64
+//RS     }))
+//RS }
+//RS 
+//RS pub(crate) fn on_tick(id: i64, dt: i64) -> Result<i64, String> {
+//RS     call_int(id, "on_tick", &[dt])
+//RS }
+//RS 
+//RS pub(crate) fn call_int(id: i64, name: &str, args: &[i64]) -> Result<i64, String> {
+//RS     if id <= 0 {
+//RS         return Err("invalid Mod handle".to_string());
+//RS     }
+//RS     LOADED.with(|loaded| {
+//RS         let loaded = loaded.borrow();
+//RS         let module = loaded
+//RS             .get((id - 1) as usize)
+//RS             .ok_or_else(|| "invalid Mod handle".to_string())?;
+//RS         jet_mod_call_int(module, name, args)
+//RS     })
+//RS }
+//RS 
+//RS /// Release every load owned by the current JIT/interpreter invocation. The
+//RS /// integer handle is an engine carrier only; the shared Prelude `JetMod` owns
+//RS /// the native handle and staged payload and performs the actual unload in
+//RS /// `Drop`.
+//RS pub(crate) fn clear() {
+//RS     LOADED.with(|loaded| loaded.borrow_mut().clear());
+//RS }
+//RS 
+//RS /// Scope native module handles to one non-resident execution. Resident
+//RS /// hot-swap sessions intentionally keep their table; one-shot runs and
+//RS /// interpreter/deopt invocations install this guard so every return path
+//RS /// closes handles and removes staged payloads.
+//RS pub(crate) struct LoadScope;
+//RS 
+//RS impl Drop for LoadScope {
+//RS     fn drop(&mut self) {
+//RS         clear();
+//RS     }
+//RS }
+// END-PORT-PENDING 0227 crates/jet-jit/src/Mod.rs:1-62
+

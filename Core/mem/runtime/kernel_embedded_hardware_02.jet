@@ -1,0 +1,477 @@
+use core.mem.runtime.kernel_embedded_hardware.[jet_hardware_with_current_host, jet_hardware_with_current_erased_host]
+use core.mem.runtime.kernel_embedded_hardware.[JetRegisterWidth, JetRegisterSpec, JetRegisterAccessMode, JetRegisterBackend, JetRegisterValue, JetRegisterReadable, JetRegisterWritable, JetRegister, JetReadOnly, JetWriteOnly, JetReadWrite]
+use core.mem.runtime.kernel_embedded_hardware.[JetHardwareFacts, JetDmaChannelSpec, JetDmaOwnership, JET_HARDWARE_UNAVAILABLE]
+use core.prelude.runtime.kernel_panic.[jet_panic]
+use std.cell.[Cell]
+use jet_foundation.ResourceSchedule.[JetFrameCompletionHandle, current_frame_completion_handle, current_frame_completion_state]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1790
+pub fn jet_hardware_dma_wait_typed<T: JetDmaPayload>(profile_id: String, channel: String, transfer: ^JetDmaTransfer<T>) -> T Never! {
+    owned := ^transfer
+    if owned.channel() != channel -> jet_panic("<core.hardware>", 0, "DMA wait channel does not match checked transfer")
+    token :: owned.host_token()
+    if token <= I64{0} -> jet_panic("<core.hardware>", 0, "DMA wait transfer has no host token")
+    // GATE #4565: kernel primitive
+    status :: #Unsafe("provider waits for completion of this transfer's matching positive host token") {
+        jet_hardware_with_current_host(host -> host.dma_wait(profile_id, channel, token))
+    }
+    if status != I64{0} -> jet_panic("<core.hardware>", 0, "DMA wait adapter reported unavailable status")
+    &owned.mark_complete()
+    owned.wait().unwrap_or_else(_ -> jet_panic("<core.hardware>", 0, "DMA wait completed without an owned buffer")).into_inner()
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1833
+pub fn jet_hardware_setup(profile_id: I64, setup_kind: I64, item: I64, width_or_vector: I64, ownership_or_handler: I64) -> I64 Never! {
+    // GATE #4565: kernel primitive
+    #Unsafe("dispatch checked erased setup facts to the installed hardware provider") {
+        jet_hardware_with_current_erased_host(host -> host.setup(profile_id, setup_kind, item, width_or_vector, ownership_or_handler))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1851
+pub fn jet_hardware_register_read(profile_id: I64, block: I64, register: I64, width: I64) -> I64 Never! {
+    // GATE #4565: kernel primitive
+    #Unsafe("installed hardware provider owns checked register access") {
+        jet_hardware_with_current_erased_host(host -> host.register_read(profile_id, block, register, width))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1855
+pub fn jet_hardware_register_write(profile_id: I64, block: I64, register: I64, width: I64, value: I64) -> I64 Never! {
+    // GATE #4565: kernel primitive
+    #Unsafe("installed hardware provider owns checked register access") {
+        jet_hardware_with_current_erased_host(host -> host.register_write(profile_id, block, register, width, value))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1867
+pub fn jet_hardware_dma_start(profile_id: I64, channel: I64, address: I64, bytes: I64) -> I64 Never! {
+    // GATE #4565: kernel primitive
+    #Unsafe("installed provider submits the checked DMA address and byte span") {
+        jet_hardware_with_current_erased_host(host -> host.dma_start(profile_id, channel, address, bytes))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1878
+pub fn jet_hardware_dma_wait(profile_id: I64, channel: I64, transfer: I64) -> I64 Never! {
+    // GATE #4565: kernel primitive
+    #Unsafe("installed provider waits for its checked erased DMA transfer token") {
+        jet_hardware_with_current_erased_host(host -> host.dma_wait(profile_id, channel, transfer))
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1886
+pub struct JetRegisterReplay<const N: USize> { cells: [JetReplayCell; N] }
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1890
+struct JetReplayCell { defined: Bool, address: U64, width: JetRegisterWidth, value: Cell<U64> }
+impl JetReplayCell {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1898
+    fn empty() -> JetReplayCell Never! { JetReplayCell{defined: false, address: U64{0}, width: .U8, value: Cell.new(U64{0})} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1909
+#Derive(Clone, Copy, Debug, Eq, PartialEq)
+#Error
+pub enum JetRegisterReplayError { Full, Duplicate }
+impl<const N: USize> JetRegisterReplay<N> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1915
+    pub fn new() -> JetRegisterReplay<N> Never! { JetRegisterReplay{cells: [JetReplayCell; N].from_fn(_ -> JetReplayCell.empty())} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1921
+    pub fn define(self: &JetRegisterReplay<N>, address: U64, width: JetRegisterWidth, initial: U64) -> JetRegisterReplayError! {
+        if self.cells.iter().any(cell -> cell.defined && cell.address == address) -> return Err(.Duplicate)
+        cell :: &self.cells.iter_mut().find(cell -> not cell.defined).ok_or(JetRegisterReplayError.Full)?
+        cell.defined = true
+        cell.address = address
+        cell.width = width
+        cell.value.set(initial)
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1944
+    pub fn define_spec(self: &JetRegisterReplay<N>, base: U64, spec: JetRegisterSpec, initial: U64) -> JetRegisterReplayError! {
+        address :: base.saturating_add(spec.offset)
+        self.define(address, spec.width, initial)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1954
+    pub fn value(self, address: U64, width: JetRegisterWidth) -> U64? Never! {
+        self.cells.iter().find(cell -> cell.defined && cell.address == address && cell.width == width).map(cell -> cell.value.get())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1963
+    pub fn default() -> JetRegisterReplay<N> Never! { JetRegisterReplay.new<N>() }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1968
+impl<const N: USize> JetRegisterBackend for JetRegisterReplay<N> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1969
+    fn read(self, address: U64, width: JetRegisterWidth, _volatile_access: Bool) -> U64 Never! { self.value(address, width).unwrap_or(U64{0}) }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1973
+    fn write(self, address: U64, width: JetRegisterWidth, value: U64, _volatile_access: Bool) -> Never! {
+        if self.cells.iter().find(cell -> cell.defined && cell.address == address && cell.width == width) == .Val(cell) -> cell.value.set(value)
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:1986
+fn jet_replay_register_read_typed<W: JetRegisterValue, A: JetRegisterReadable, const VOLATILE: Bool>(
+    backend: JetRegisterReplay<128>, base: U64, spec: JetRegisterSpec) -> U64? Never! {
+    JetRegister<W, A, JetRegisterReplay<128>, VOLATILE>.from_spec(backend, base, spec).ok()
+        .map(register -> register.read().into_bits())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2000
+fn jet_replay_register_read(backend: JetRegisterReplay<128>, base: U64, spec: JetRegisterSpec) -> U64? Never! {
+    match (spec.width, spec.access) {
+        (.U8, .ReadOnly) -> if spec.volatile {
+            jet_replay_register_read_typed<U8, JetReadOnly, true>(backend, base, spec)
+        } else { jet_replay_register_read_typed<U8, JetReadOnly, false>(backend, base, spec) }
+        (.U8, .ReadWrite) -> if spec.volatile {
+            jet_replay_register_read_typed<U8, JetReadWrite, true>(backend, base, spec)
+        } else { jet_replay_register_read_typed<U8, JetReadWrite, false>(backend, base, spec) }
+        (.U16, .ReadOnly) -> if spec.volatile {
+            jet_replay_register_read_typed<U16, JetReadOnly, true>(backend, base, spec)
+        } else { jet_replay_register_read_typed<U16, JetReadOnly, false>(backend, base, spec) }
+        (.U16, .ReadWrite) -> if spec.volatile {
+            jet_replay_register_read_typed<U16, JetReadWrite, true>(backend, base, spec)
+        } else { jet_replay_register_read_typed<U16, JetReadWrite, false>(backend, base, spec) }
+        (.U32, .ReadOnly) -> if spec.volatile {
+            jet_replay_register_read_typed<U32, JetReadOnly, true>(backend, base, spec)
+        } else { jet_replay_register_read_typed<U32, JetReadOnly, false>(backend, base, spec) }
+        (.U32, .ReadWrite) -> if spec.volatile {
+            jet_replay_register_read_typed<U32, JetReadWrite, true>(backend, base, spec)
+        } else { jet_replay_register_read_typed<U32, JetReadWrite, false>(backend, base, spec) }
+        (.U64, .ReadOnly) -> if spec.volatile {
+            jet_replay_register_read_typed<U64, JetReadOnly, true>(backend, base, spec)
+        } else { jet_replay_register_read_typed<U64, JetReadOnly, false>(backend, base, spec) }
+        (.U64, .ReadWrite) -> if spec.volatile {
+            jet_replay_register_read_typed<U64, JetReadWrite, true>(backend, base, spec)
+        } else { jet_replay_register_read_typed<U64, JetReadWrite, false>(backend, base, spec) }
+        _ -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2066
+fn jet_replay_register_write_typed<W: JetRegisterValue, A: JetRegisterWritable, const VOLATILE: Bool>(
+    backend: JetRegisterReplay<128>, base: U64, spec: JetRegisterSpec, value: U64) -> ()? Never! {
+    register :: JetRegister<W, A, JetRegisterReplay<128>, VOLATILE>.from_spec(backend, base, spec).ok()?
+    register.write(W.from_bits(value))
+    Val(())
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2083
+fn jet_replay_register_write(backend: JetRegisterReplay<128>, base: U64, spec: JetRegisterSpec, value: U64) -> ()? Never! {
+    match (spec.width, spec.access) {
+        (.U8, .WriteOnly) -> if spec.volatile {
+            jet_replay_register_write_typed<U8, JetWriteOnly, true>(backend, base, spec, value)
+        } else { jet_replay_register_write_typed<U8, JetWriteOnly, false>(backend, base, spec, value) }
+        (.U8, .ReadWrite) -> if spec.volatile {
+            jet_replay_register_write_typed<U8, JetReadWrite, true>(backend, base, spec, value)
+        } else { jet_replay_register_write_typed<U8, JetReadWrite, false>(backend, base, spec, value) }
+        (.U16, .WriteOnly) -> if spec.volatile {
+            jet_replay_register_write_typed<U16, JetWriteOnly, true>(backend, base, spec, value)
+        } else { jet_replay_register_write_typed<U16, JetWriteOnly, false>(backend, base, spec, value) }
+        (.U16, .ReadWrite) -> if spec.volatile {
+            jet_replay_register_write_typed<U16, JetReadWrite, true>(backend, base, spec, value)
+        } else { jet_replay_register_write_typed<U16, JetReadWrite, false>(backend, base, spec, value) }
+        (.U32, .WriteOnly) -> if spec.volatile {
+            jet_replay_register_write_typed<U32, JetWriteOnly, true>(backend, base, spec, value)
+        } else { jet_replay_register_write_typed<U32, JetWriteOnly, false>(backend, base, spec, value) }
+        (.U32, .ReadWrite) -> if spec.volatile {
+            jet_replay_register_write_typed<U32, JetReadWrite, true>(backend, base, spec, value)
+        } else { jet_replay_register_write_typed<U32, JetReadWrite, false>(backend, base, spec, value) }
+        (.U64, .WriteOnly) -> if spec.volatile {
+            jet_replay_register_write_typed<U64, JetWriteOnly, true>(backend, base, spec, value)
+        } else { jet_replay_register_write_typed<U64, JetWriteOnly, false>(backend, base, spec, value) }
+        (.U64, .ReadWrite) -> if spec.volatile {
+            jet_replay_register_write_typed<U64, JetReadWrite, true>(backend, base, spec, value)
+        } else { jet_replay_register_write_typed<U64, JetReadWrite, false>(backend, base, spec, value) }
+        _ -> None
+    }
+}
+
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2186
+// Fixed function pointers only: handlers cannot allocate a boxed closure.
+#Copy
+pub enum JetInterruptHandler<C> { Context(fn(&C) Never!), Bare(fn() Never!) }
+impl<C> JetInterruptHandler<C> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2193
+    fn clone(self) -> JetInterruptHandler<C> Never! { self }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2198
+#Copy
+struct JetInterruptBinding<C> { vector: U16, handler: JetInterruptHandler<C> }
+impl<C> JetInterruptBinding<C> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2205
+    fn clone(self) -> JetInterruptBinding<C> Never! { self }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2211
+#Derive(Clone, Copy, Debug, Eq, PartialEq)
+#Error
+pub enum JetInterruptError { UnknownVector, UnboundedVector, DuplicateBinding, BindingTableFull, UnboundVector, QueueFull }
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2221
+#Derive(Clone, Copy, Debug, Eq, PartialEq)
+pub enum JetInterruptDispatch { Empty, Dispatched(U16) }
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2228
+// Fixed-capacity FIFO and binding table; no allocation or blocking during dispatch.
+pub struct JetInterruptController<C, const BINDINGS: USize, const PENDING: USize> {
+    facts: @JetHardwareFacts
+    bindings: [JetInterruptBinding<C>?; BINDINGS]
+    pending: [U16; PENDING]
+    head: USize
+    tail: USize
+    pending_len: USize
+    dropped: USize
+}
+impl<C, const BINDINGS: USize, const PENDING: USize> JetInterruptController<C, BINDINGS, PENDING> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2241
+    pub fn new(facts: @JetHardwareFacts) -> JetInterruptController<C, BINDINGS, PENDING> Never! {
+        JetInterruptController{facts, bindings: [JetInterruptBinding<C>?; BINDINGS].filled(None),
+            pending: [U16; PENDING].filled(U16{0}), head: USize{0}, tail: USize{0}, pending_len: USize{0}, dropped: USize{0}}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2253
+    pub fn bind(self: &JetInterruptController<C, BINDINGS, PENDING>, vector: U16, handler: JetInterruptHandler<C>) -> JetInterruptError! {
+        spec :: self.facts.interrupt_vector(vector).ok_or(JetInterruptError.UnknownVector)?
+        if not spec.bounded -> return Err(.UnboundedVector)
+        if self.binding_index(vector).is_some() -> return Err(.DuplicateBinding)
+        slot :: &self.bindings.iter_mut().find(slot -> slot.is_none()).ok_or(JetInterruptError.BindingTableFull)?
+        slot = Val(JetInterruptBinding{vector, handler})
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2274
+    pub fn raise(self: &JetInterruptController<C, BINDINGS, PENDING>, vector: U16) -> JetInterruptError! {
+        if self.facts.interrupt_vector(vector).is_none() -> return Err(.UnknownVector)
+        if self.binding_index(vector).is_none() -> return Err(.UnboundVector)
+        if self.pending_len == PENDING {
+            self.dropped = self.dropped.saturating_add(USize{1})
+            return Err(.QueueFull)
+        }
+        self.pending[self.tail] = vector
+        self.tail = ring_next(self.tail, PENDING)
+        self.pending_len += USize{1}
+        Ok(())
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2291
+    pub fn dispatch_next(self: &JetInterruptController<C, BINDINGS, PENDING>, context: &C) -> JetInterruptDispatch Never! {
+        if self.pending_len == USize{0} -> return .Empty
+        vector :: self.pending[self.head]
+        self.head = ring_next(self.head, PENDING)
+        self.pending_len -= USize{1}
+        if self.binding(vector) == .Val(binding) {
+            match binding.handler { .Context(handler) -> handler(context), .Bare(handler) -> handler() }
+        }
+        .Dispatched(vector)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2307
+    pub fn dispatch_all(self: &JetInterruptController<C, BINDINGS, PENDING>, context: &C) -> USize Never! {
+        dispatched := USize{0}
+        loop self.pending_len != USize{0} {
+            _ :: self.dispatch_next(context)
+            dispatched += USize{1}
+        }
+        dispatched
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2316
+    pub fn clear_pending(self: &JetInterruptController<C, BINDINGS, PENDING>) -> Never! {
+        self.head = USize{0}
+        self.tail = USize{0}
+        self.pending_len = USize{0}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2322
+    pub fn pending_len(self) -> USize Never! { self.pending_len }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2326
+    pub fn dropped(self) -> USize Never! { self.dropped }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2330
+    pub fn binding_count(self) -> USize Never! { USize{self.bindings.iter().filter(slot -> slot.is_some()).count()} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2334
+    fn binding_index(self, vector: U16) -> USize? Never! {
+        self.bindings.iter().position(slot -> slot.is_some_and(binding -> binding.vector == vector)).map(index -> USize{index})
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2341
+    fn binding(self, vector: U16) -> JetInterruptBinding<C>? Never! {
+        self.binding_index(vector).and_then(index -> self.bindings[index])
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2347
+fn ring_next(index: USize, capacity: USize) -> USize Never! {
+    if capacity == USize{0} || index + USize{1} == capacity { USize{0} } else { index + USize{1} }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2355
+module jet_dma_payload_sealed {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2356
+    pub trait Element { const WIDTH: U64 }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2368
+    impl Element for U8 { const WIDTH: U64 = U64{1} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2369
+    impl Element for U16 { const WIDTH: U64 = U64{2} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2370
+    impl Element for U32 { const WIDTH: U64 = U64{4} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2371
+    impl Element for U64 { const WIDTH: U64 = U64{8} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2372
+    impl Element for I8 { const WIDTH: U64 = U64{1} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2373
+    impl Element for I16 { const WIDTH: U64 = U64{2} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2374
+    impl Element for I32 { const WIDTH: U64 = U64{4} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2375
+    impl Element for I64 { const WIDTH: U64 = U64{8} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2376
+    impl Element for F32 { const WIDTH: U64 = U64{4} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2377
+    impl Element for F64 { const WIDTH: U64 = U64{8} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2380
+    pub trait Container {}
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2382
+    impl<T: Element> Container for [T] {}
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2383
+    impl<T: Element> Container for Box<[T]> {}
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2384
+    impl<T: Element, const N: USize> Container for [T; N] {}
+}
+
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2391
+// Sealed contiguous payload: only fixed-width integer and floating elements.
+pub trait JetDmaPayload: jet_dma_payload_sealed.Container {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2392
+    fn dma_address(self) -> U64 Never!
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2393
+    fn dma_bytes(self) -> U64 Never!
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2396
+impl<T: jet_dma_payload_sealed.Element> JetDmaPayload for [T] {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2397
+    fn dma_address(self) -> U64 Never! {
+        // GATE #4565: kernel primitive
+        #Unsafe("observe contiguous owned payload address without dereferencing it") { U64{self.as_ptr().addr()} }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2401
+    fn dma_bytes(self) -> U64 Never! { U64{self.len()}.saturating_mul(T.WIDTH) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2406
+impl<T: jet_dma_payload_sealed.Element> JetDmaPayload for Box<[T]> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2407
+    fn dma_address(self) -> U64 Never! {
+        // GATE #4565: kernel primitive
+        #Unsafe("observe boxed contiguous payload address without dereferencing it") { U64{self.as_ptr().addr()} }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2411
+    fn dma_bytes(self) -> U64 Never! { U64{self.len()}.saturating_mul(T.WIDTH) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2416
+impl<T: jet_dma_payload_sealed.Element, const N: USize> JetDmaPayload for [T; N] {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2417
+    fn dma_address(self) -> U64 Never! {
+        // GATE #4565: kernel primitive
+        #Unsafe("observe fixed contiguous payload address without dereferencing it") { U64{self.as_ptr().addr()} }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2421
+    fn dma_bytes(self) -> U64 Never! { U64{N}.saturating_mul(T.WIDTH) }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2428
+#Derive(Clone, Copy, Debug, Eq, PartialEq)
+#Error
+pub enum JetDmaError { UnknownChannel, BorrowedChannel, ZeroLength, AddressMisaligned, TransferTooLarge }
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2437
+#Derive(Clone, Copy, Debug, Eq, PartialEq)
+pub enum JetDmaTransferState { InFlight, Complete }
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2446
+// Not Clone: start consumes the CPU owner and transfer exposes no payload accessor.
+pub struct JetDmaBuffer<T> { value: T, address: U64, bytes: U64 }
+impl<T> JetDmaBuffer<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2453
+    pub fn new(value: ^T, address: U64, bytes: U64) -> JetDmaBuffer<T> Never! { JetDmaBuffer{value: ^value, address, bytes} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2461
+    pub fn address(self) -> U64 Never! { self.address }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2465
+    pub fn bytes(self) -> U64 Never! { self.bytes }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2469
+    pub fn as_ref(self) -> @T Never! from self { @self.value }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2473
+    pub fn as_mut(self: &JetDmaBuffer<T>) -> &T Never! from self { &self.value }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2477
+    pub fn into_inner(^self) -> T Never! { ^self.value }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2482
+pub struct JetDmaTransfer<T> {
+    channel: JetDmaChannelSpec
+    sequence: U64
+    host_token: I64
+    state: JetDmaTransferState
+    buffer: JetDmaBuffer<T>?
+    completion_handle: JetFrameCompletionHandle?
+}
+impl<T> JetDmaTransfer<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2494
+    fn new(channel: JetDmaChannelSpec, sequence: U64, buffer: ^JetDmaBuffer<T>) -> JetDmaTransfer<T> Never! {
+        completion_handle :: current_frame_completion_handle("jet_dma_transfer")
+            .unwrap_or_else(error -> jet_panic("<core.hardware>", 0, error))
+        JetDmaTransfer{channel, sequence, host_token: JET_HARDWARE_UNAVAILABLE, state: .InFlight,
+            buffer: Val(^buffer), completion_handle}
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2516
+    fn host_token(self) -> I64 Never! { self.host_token }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2520
+    pub fn set_host_token(self: &JetDmaTransfer<T>, token: I64) -> Never! { self.host_token = token }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2528
+    // Only the real provider completion or deterministic replay can release the retained frame resource.
+    pub fn mark_complete(self: &JetDmaTransfer<T>) -> Never! {
+        self.state = .Complete
+        if self.completion_handle == .Val(handle) {
+            if handle.signal() == .Err(error) -> jet_panic("<core.hardware>", 0, error)
+        } else if current_frame_completion_state().is_some() {
+            jet_panic("<core.hardware>", 0, "checked DMA completion is missing its submission binding")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2543
+    pub fn channel(self) -> @String Never! from self { @self.channel.name }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2547
+    pub fn channel_number(self) -> U16 Never! { self.channel.channel }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2551
+    pub fn sequence(self) -> U64 Never! { self.sequence }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2555
+    pub fn state(self) -> JetDmaTransferState Never! { self.state }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2559
+    pub fn is_complete(self) -> Bool Never! { self.state == .Complete }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2566
+    // An incomplete wait returns the same owning transfer for a later retry.
+    pub fn wait(^self) -> JetDmaBuffer<T> JetDmaWaitError<T>! {
+        owned := ^self
+        if not owned.is_complete() -> return Err(.Incomplete(^owned))
+        match &owned.buffer.take() {
+            Val(buffer) -> Ok(^buffer)
+            None -> Err(.Incomplete(^owned))
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2577
+#Error
+pub enum JetDmaWaitError<T> { Incomplete(JetDmaTransfer<T>) }
+impl<T> JetDmaWaitError<T> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2582
+    pub fn into_transfer(^self) -> JetDmaTransfer<T> Never! {
+        match ^self { .Incomplete(transfer) -> ^transfer }
+    }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2592
+pub struct JetDmaRuntime { facts: @JetHardwareFacts, next_sequence: U64 }
+impl JetDmaRuntime {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2598
+    pub fn new(facts: @JetHardwareFacts) -> JetDmaRuntime Never! { JetDmaRuntime{facts, next_sequence: U64{0}} }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2605
+    pub fn start<T>(self: &JetDmaRuntime, channel: String, buffer: ^JetDmaBuffer<T>) -> JetDmaTransfer<T> JetDmaError! {
+        spec :: self.facts.dma_channel(channel).ok_or(JetDmaError.UnknownChannel)?
+        if spec.ownership != .Transfer -> return Err(.BorrowedChannel)
+        width :: spec.transfer_width.bytes()
+        if buffer.bytes == U64{0} -> return Err(.ZeroLength)
+        if buffer.address % width != U64{0} || buffer.bytes % width != U64{0} -> return Err(.AddressMisaligned)
+        if spec.max_transfer_bytes.is_some_and(limit -> buffer.bytes > limit) -> return Err(.TransferTooLarge)
+        sequence :: self.next_sequence
+        self.next_sequence = self.next_sequence.saturating_add(U64{1})
+        Ok(JetDmaTransfer.new(spec, sequence, ^buffer))
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2638
+    pub fn start_replay<T>(self: &JetDmaRuntime, channel: String, buffer: ^JetDmaBuffer<T>) -> JetDmaTransfer<T> JetDmaError! {
+        transfer := self.start(channel, ^buffer)?
+        &transfer.mark_complete()
+        Ok(^transfer)
+    }
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2648
+    pub fn next_sequence(self) -> U64 Never! { self.next_sequence }
+}
+// Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2656
+pub struct JetHardwareReplay<C, const BINDINGS: USize, const PENDING: USize> {
+    pub interrupts: JetInterruptController<C, BINDINGS, PENDING>
+    pub dma: JetDmaRuntime
+}
+impl<C, const BINDINGS: USize, const PENDING: USize> JetHardwareReplay<C, BINDINGS, PENDING> {
+    // Rust: crates/jet-codegen/src/Prelude/Core/EmbeddedHardware.rs:2664
+    pub fn new(facts: @JetHardwareFacts) -> JetHardwareReplay<C, BINDINGS, PENDING> Never! {
+        JetHardwareReplay{interrupts: JetInterruptController.new<C, BINDINGS, PENDING>(facts), dma: JetDmaRuntime.new(facts)}
+    }
+}
+

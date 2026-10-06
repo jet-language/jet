@@ -207,7 +207,14 @@ fn jet_rust_emit_borrowed_value_reference(ctx: &JetRustEmitContext, function: MI
         }
         else -> {}
     }
-    jet_rust_emit_value_reference(ctx, value, mutable)
+    reference :: jet_rust_emit_value_reference(ctx, value, mutable)
+    // A view slot already holds a reference: reborrow its referent, not
+    // the carrier (&&[T] would make generic collection calls infer &[T]).
+    if jet_rust_emit_is_view_type(jet_rust_emit_value_type(ctx, function, value)) {
+        borrow :: if mutable -> "&mut " else -> "&"
+        return "{borrow}**({reference})"
+    }
+    reference
 }
 
 // ---- Print / AmbientInput / LayoutCompare -----------------------------------
@@ -219,15 +226,27 @@ fn jet_rust_emit_is_test_artifact(ctx: &JetRustEmitContext) -> Bool Never! {
 
 fn jet_rust_emit_print(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, value: MIRValueID) -> String Never! {
     test_print :: jet_rust_emit_is_test_artifact(&ctx)
-    // Printing only reads its value: it borrows it. A test print takes a
-    // String, so it consumes the value at its single use.
+    // Printing only reads its value: it borrows it, in the place a stable
+    // read names (jet_rust_emit_inspected_value_reference), so a read of a
+    // local or parameter is never copied first. A test print takes a String,
+    // so it consumes the value at its single use.
     rendered :: if {
-        jet_rust_emit_value_type(ctx, function, value).kind != MIRTypeKind.String -> "({jet_rust_emit_value_borrow(ctx, value)}).jet_show()"
+        jet_rust_emit_value_type(ctx, function, value).kind != MIRTypeKind.String -> "({jet_rust_emit_inspected_value_reference(&ctx, function, value)}).jet_show()"
         test_print -> jet_rust_emit_value_consume(ctx, function, value)
-        else -> "*{jet_rust_emit_value_borrow(ctx, value)}"
+        else -> "*{jet_rust_emit_inspected_value_reference(&ctx, function, value)}"
     }
     if test_print -> return "jet_test_print({rendered})"
     "{{ let _ = {jet_rust_emit_prelude_args(&ctx, function, call, [String]{"&({rendered})", "true"})}; }}"
+}
+
+// MIRRust print_borrows_value: `print(value)` only reads `value`, except a
+// test print of a String, which consumes it.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::print_borrows_value
+fn jet_rust_emit_print_reads(ctx: &JetRustEmitContext, function: MIRFunction, semantic: MIRSemanticOp, value: MIRValueID) -> Bool Never! {
+    if semantic == {
+        .Print(_, printed) -> return printed == value && (!jet_rust_emit_is_test_artifact(&ctx) || jet_rust_emit_value_type(ctx, function, value).kind != MIRTypeKind.String)
+        else -> return false
+    }
 }
 
 fn jet_rust_emit_ambient_input(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, prompt: MIRValueID?) -> String Never! {

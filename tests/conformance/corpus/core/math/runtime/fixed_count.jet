@@ -1,0 +1,129 @@
+// MathLibPure.rs:862–892,914–967 fixed-I64 policy; includes conformance
+// isqrt(17), factorial(5), binomial(5,2), perm(1,1), rising(1,1) and
+// multinomial([1,2,3]) rows. These test the true private owner, not the frozen
+// high-level Rust helpers or the separate exact-Int public API.
+use core.math.runtime.kernel_fixed_count as fixed_count_kernel
+
+fn fixed_count_test_min() -> I64 Never! { I64{-9223372036854775807} - I64{1} }
+fn fixed_count_test_max() -> I64 Never! { I64{9223372036854775807} }
+
+#Test("fixed isqrt negatives zero one and small square neighbors") {
+    assert(fixed_count_kernel.jet_std_math_isqrt(I64{-1}) == None)
+    assert(fixed_count_kernel.jet_std_math_isqrt(fixed_count_test_min()) == None)
+    cases :: [(value: I64, root: I64)]{
+        (value: I64{0}, root: I64{0}), (value: I64{1}, root: I64{1}),
+        (value: I64{2}, root: I64{1}), (value: I64{3}, root: I64{1}),
+        (value: I64{4}, root: I64{2}), (value: I64{5}, root: I64{2}),
+        (value: I64{15}, root: I64{3}), (value: I64{16}, root: I64{4}),
+        (value: I64{17}, root: I64{4}), (value: I64{24}, root: I64{4}),
+        (value: I64{25}, root: I64{5}), (value: I64{26}, root: I64{5}),
+    }
+    loop item in cases {
+        assert_eq(fixed_count_kernel.jet_std_math_isqrt(item.value) ?? I64{-1}, item.root)
+    }
+}
+
+#Test("fixed isqrt corrects rounded Float seeds without saturated squares") {
+    assert_eq(fixed_count_kernel.jet_std_math_isqrt(I64{9999999999999999}) ?? I64{-1}, I64{99999999})
+    assert_eq(fixed_count_kernel.jet_std_math_isqrt(I64{10000000000000000}) ?? I64{-1}, I64{100000000})
+    assert_eq(fixed_count_kernel.jet_std_math_isqrt(I64{10000000000000001}) ?? I64{-1}, I64{100000000})
+    assert_eq(fixed_count_kernel.jet_std_math_isqrt(I64{9223372030926249000}) ?? I64{-1}, I64{3037000498})
+    assert_eq(fixed_count_kernel.jet_std_math_isqrt(I64{9223372030926249001}) ?? I64{-1}, I64{3037000499})
+    assert_eq(fixed_count_kernel.jet_std_math_isqrt(I64{9223372030926249002}) ?? I64{-1}, I64{3037000499})
+    assert_eq(fixed_count_kernel.jet_std_math_isqrt(fixed_count_test_max()) ?? I64{-1}, I64{3037000499})
+}
+
+#Test("fixed factorial 20 fits 21 and negative inputs are absent") {
+    assert_eq(fixed_count_kernel.jet_std_math_factorial(I64{0}) ?? I64{-1}, I64{1})
+    assert_eq(fixed_count_kernel.jet_std_math_factorial(I64{1}) ?? I64{-1}, I64{1})
+    assert_eq(fixed_count_kernel.jet_std_math_factorial(I64{5}) ?? I64{-1}, I64{120})
+    assert_eq(fixed_count_kernel.jet_std_math_factorial(I64{20}) ?? I64{-1}, I64{2432902008176640000})
+    assert(fixed_count_kernel.jet_std_math_factorial(I64{21}) == None)
+    assert(fixed_count_kernel.jet_std_math_factorial(fixed_count_test_max()) == None)
+    assert(fixed_count_kernel.jet_std_math_factorial(I64{-1}) == None)
+    assert(fixed_count_kernel.jet_std_math_factorial(fixed_count_test_min()) == None)
+}
+
+#Test("fixed binomial symmetry invalid inputs and multiply-before-divide overflow") {
+    assert_eq(fixed_count_kernel.jet_std_math_binomial(I64{0}, I64{0}) ?? I64{-1}, I64{1})
+    assert_eq(fixed_count_kernel.jet_std_math_binomial(I64{5}, I64{2}) ?? I64{-1}, I64{10})
+    assert_eq(fixed_count_kernel.jet_std_math_binomial(I64{5}, I64{3}) ?? I64{-1}, I64{10})
+    assert_eq(fixed_count_kernel.jet_std_math_binomial(I64{60}, I64{30}) ?? I64{-1}, I64{118264581564861424})
+    assert_eq(fixed_count_kernel.jet_std_math_binomial(fixed_count_test_max(), I64{0}) ?? I64{-1}, I64{1})
+    assert_eq(fixed_count_kernel.jet_std_math_binomial(fixed_count_test_max(), fixed_count_test_max()) ?? I64{-1}, I64{1})
+    assert_eq(fixed_count_kernel.jet_std_math_binomial(fixed_count_test_max(), I64{1}) ?? I64{-1}, fixed_count_test_max())
+    assert(fixed_count_kernel.jet_std_math_binomial(I64{-1}, I64{0}) == None)
+    assert(fixed_count_kernel.jet_std_math_binomial(I64{1}, I64{-1}) == None)
+    assert(fixed_count_kernel.jet_std_math_binomial(I64{1}, I64{2}) == None)
+    // C(62,31)=465428353255261088 fits, but the source intermediate does not.
+    assert(fixed_count_kernel.jet_std_math_binomial(I64{62}, I64{31}) == None)
+    assert(fixed_count_kernel.jet_std_math_binomial(I64{67}, I64{33}) == None)
+    assert(fixed_count_kernel.jet_std_math_binomial(fixed_count_test_max(), I64{2}) == None)
+}
+
+#Test("fixed perm zero invalid inputs and product overflow") {
+    assert_eq(fixed_count_kernel.jet_std_math_perm(I64{0}, I64{0}) ?? I64{-1}, I64{1})
+    assert_eq(fixed_count_kernel.jet_std_math_perm(I64{1}, I64{1}) ?? I64{-1}, I64{1})
+    assert_eq(fixed_count_kernel.jet_std_math_perm(I64{5}, I64{3}) ?? I64{-1}, I64{60})
+    assert_eq(fixed_count_kernel.jet_std_math_perm(I64{20}, I64{20}) ?? I64{-1}, I64{2432902008176640000})
+    assert_eq(fixed_count_kernel.jet_std_math_perm(fixed_count_test_max(), I64{0}) ?? I64{-1}, I64{1})
+    assert_eq(fixed_count_kernel.jet_std_math_perm(fixed_count_test_max(), I64{1}) ?? I64{-1}, fixed_count_test_max())
+    assert(fixed_count_kernel.jet_std_math_perm(I64{-1}, I64{0}) == None)
+    assert(fixed_count_kernel.jet_std_math_perm(I64{1}, I64{-1}) == None)
+    assert(fixed_count_kernel.jet_std_math_perm(I64{1}, I64{2}) == None)
+    assert(fixed_count_kernel.jet_std_math_perm(I64{21}, I64{21}) == None)
+    assert(fixed_count_kernel.jet_std_math_perm(fixed_count_test_max(), I64{2}) == None)
+}
+
+#Test("fixed rising permits negative n and checks addition before multiplication") {
+    assert_eq(fixed_count_kernel.jet_std_math_rising_factorial(I64{1}, I64{1}) ?? I64{-1}, I64{1})
+    assert_eq(fixed_count_kernel.jet_std_math_rising_factorial(I64{3}, I64{4}) ?? I64{-1}, I64{360})
+    assert_eq(fixed_count_kernel.jet_std_math_rising_factorial(I64{0}, I64{0}) ?? I64{-1}, I64{1})
+    assert_eq(fixed_count_kernel.jet_std_math_rising_factorial(I64{0}, I64{2}) ?? I64{-1}, I64{0})
+    assert_eq(fixed_count_kernel.jet_std_math_rising_factorial(I64{-3}, I64{2}) ?? I64{0}, I64{6})
+    assert_eq(fixed_count_kernel.jet_std_math_rising_factorial(I64{-3}, I64{3}) ?? I64{0}, I64{-6})
+    assert_eq(fixed_count_kernel.jet_std_math_rising_factorial(I64{-3}, I64{5}) ?? I64{-1}, I64{0})
+    assert_eq(fixed_count_kernel.jet_std_math_rising_factorial(fixed_count_test_min(), I64{0}) ?? I64{-1}, I64{1})
+    assert_eq(fixed_count_kernel.jet_std_math_rising_factorial(fixed_count_test_min(), I64{1}) ?? I64{0}, fixed_count_test_min())
+    assert(fixed_count_kernel.jet_std_math_rising_factorial(I64{1}, I64{-1}) == None)
+    assert(fixed_count_kernel.jet_std_math_rising_factorial(fixed_count_test_max(), I64{2}) == None)
+    assert(fixed_count_kernel.jet_std_math_rising_factorial(I64{3037000500}, I64{2}) == None)
+    assert(fixed_count_kernel.jet_std_math_rising_factorial(fixed_count_test_min(), I64{2}) == None)
+    assert(fixed_count_kernel.jet_std_math_rising_factorial(I64{1}, I64{21}) == None)
+}
+
+#Test("fixed multinomial empty zeros real borrowed extent and source vectors") {
+    empty :: [I64]{}
+    zeros :: [I64]{0, 0, 0}
+    parts :: [I64]{-1, 1, 2, 3, -1}
+    singleton :: [I64]{fixed_count_test_max()}
+    // #4465: bind actual list views; direct slice arguments are mis-inferred.
+    empty_view :: empty[0..<empty.len()]
+    zeros_view :: zeros[0..<zeros.len()]
+    parts_view :: parts[1..<4]
+    singleton_view :: singleton[0..<singleton.len()]
+    assert_eq(fixed_count_kernel.jet_std_math_multinomial(empty_view) ?? I64{-1}, I64{1})
+    assert_eq(fixed_count_kernel.jet_std_math_multinomial(zeros_view) ?? I64{-1}, I64{1})
+    assert_eq(fixed_count_kernel.jet_std_math_multinomial(parts_view) ?? I64{-1}, I64{60})
+    assert_eq(fixed_count_kernel.jet_std_math_multinomial(singleton_view) ?? I64{-1}, I64{1})
+    assert_eq(parts[0], I64{-1})
+    assert_eq(parts[4], I64{-1})
+}
+
+#Test("fixed multinomial negative total intermediate and final product overflow") {
+    negative :: [I64]{1, -1, 2}
+    total_overflow :: [I64]{fixed_count_test_max(), 1}
+    binomial_overflow :: [I64]{31, 31}
+    product_overflow :: [I64]{20, 20, 20}
+    ordered :: [I64]{61, 1}
+    negative_view :: negative[0..<negative.len()]
+    total_overflow_view :: total_overflow[0..<total_overflow.len()]
+    binomial_overflow_view :: binomial_overflow[0..<binomial_overflow.len()]
+    product_overflow_view :: product_overflow[0..<product_overflow.len()]
+    ordered_view :: ordered[0..<ordered.len()]
+    assert(fixed_count_kernel.jet_std_math_multinomial(negative_view) == None)
+    assert(fixed_count_kernel.jet_std_math_multinomial(total_overflow_view) == None)
+    assert(fixed_count_kernel.jet_std_math_multinomial(binomial_overflow_view) == None)
+    assert(fixed_count_kernel.jet_std_math_multinomial(product_overflow_view) == None)
+    assert_eq(fixed_count_kernel.jet_std_math_multinomial(ordered_view) ?? I64{-1}, I64{62})
+}

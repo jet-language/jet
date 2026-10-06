@@ -1,0 +1,48 @@
+use tests.common as common
+use std.io.[Read, Write, ErrorKind]
+use std.net.[TcpListener, TcpStream]
+use std.sync.atomic.[AtomicUsize, Ordering]
+use std.sync.Arc
+use std.time.[Duration, Instant]
+use std.thread
+use std.fs as fs
+use std.process.Command
+// GATE #4494: actual sockets, threads, atomics and byte I/O.
+
+// Rust: tests/http_client_law.rs:10
+fn request_head(stream: &TcpStream) -> [U8] {
+    stream.set_read_timeout(Some(Duration.from_secs(5))).unwrap()
+    out := [U8]{}
+    chunk := [U8].repeat(0, 512)
+    loop !out.windows(4).any(window -> window == [U8]{13, 10, 13, 10}) {
+        read :: stream.read(&chunk).unwrap()
+        assert_ne(read, 0, "client closed before request head")
+        out.extend_from_slice(chunk[..read])
+        assert(out.len() <= 64 * 1024, "request head exceeded bound")
+    }
+    ^out
+}
+// Rust: tests/http_client_law.rs:25
+fn read_h2_frame(stream: &TcpStream) -> (U8, U8, U32, [U8]) {
+    head := [U8].repeat(0, 9)
+    stream.read_exact(&head).unwrap()
+    length :: USize.from(head[0]) << 16 | USize.from(head[1]) << 8 | USize.from(head[2])
+    id :: U32.from_be_bytes(head[5..9].try_into().unwrap()) & 0x7fffffff
+    payload := [U8].repeat(0, length)
+    stream.read_exact(&payload).unwrap()
+    (head[3], head[4], id, ^payload)
+}
+// Rust: tests/http_client_law.rs:35
+fn write_h2_frame(stream: &TcpStream, kind: U8, flags: U8, id: U32, payload: [U8]) -> {
+    length :: U32{payload.len()}
+    bytes :: length.to_be_bytes()
+    head := [U8].repeat(0, 9)
+    head[..3].copy_from_slice(bytes[1..])
+    head[3] = kind
+    head[4] = flags
+    head[5..].copy_from_slice(id.to_be_bytes())
+    stream.write_all(head).unwrap()
+    stream.write_all(payload).unwrap()
+}
+
+

@@ -1,0 +1,1794 @@
+// PORT-PENDING 0199 crates-jet-jit-src-collections-slice-5504: crates/jet-jit/src/Collections.rs:5504-7293
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn jet_jit_list_remove_value_f64(list: i64, value: f64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(values) = rt.heap.list_values_mut(list) else {
+//RS             jet_foundation::ice!(None, "jit float list remove value: bad handle");
+//RS         };
+//RS         match collection_semantics::list_remove_value(values, jet_rt::JetVal::Float(value)) {
+//RS             Some(jet_rt::JetVal::Float(removed)) => option_packed(Some(removed.to_bits() as i64)),
+//RS             Some(jet_rt::JetVal::Int(removed)) => option_packed(Some(removed)),
+//RS             Some(_) | None => 0,
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_list_remove_value_str(list: i64, value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let needle = rt
+//RS             .heap
+//RS             .clone_string(value)
+//RS             .expect("jit string list remove value: bad value");
+//RS         let Some(logical) = rt.heap.clone_list_values(list) else {
+//RS             jet_foundation::ice!(None, "jit string list remove value: bad handle");
+//RS         };
+//RS         let Some(index) = logical.iter().position(|candidate| match candidate {
+//RS             jet_rt::JetVal::Int(id) => rt.heap.clone_string(*id).is_some_and(|text| text == needle),
+//RS             jet_rt::JetVal::String(text) => text == &needle,
+//RS             _ => false,
+//RS         }) else {
+//RS             return 0;
+//RS         };
+//RS         let removed = {
+//RS             let Some(values) = rt.heap.list_values_mut(list) else {
+//RS                 jet_foundation::ice!(None, "jit string list remove value: bad handle");
+//RS             };
+//RS             collection_semantics::list_remove_slot(values, index as i64)
+//RS         };
+//RS         match removed {
+//RS             Ok(jet_rt::JetVal::Int(removed)) => option_packed(Some(removed)),
+//RS             Ok(jet_rt::JetVal::String(removed)) => {
+//RS                 let id = rt.heap.alloc_string(removed);
+//RS                 option_packed(Some(id))
+//RS             }
+//RS             Ok(_) => 0,
+//RS             Err(message) => {
+//RS                 rt.set_runtime_stop("E3010", 0, &message);
+//RS                 0
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS /// index vector, and the arena copies whatever elements those indexes name.
+//RS fn jet_jit_list_slice(list: i64, start: i64, end: i64, _line: u32) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(len) = rt.heap.list_len(list) else {
+//RS             rt.set_host_fault("jit list slice: bad list handle");
+//RS             return 0;
+//RS         };
+//RS         let indexes = (0..len).collect::<Vec<_>>();
+//RS         let kept = collection_semantics::list_slice(&indexes, start, end);
+//RS         let (Some(&first), Some(&last)) = (kept.first(), kept.last()) else {
+//RS             return rt.heap.alloc_empty_list();
+//RS         };
+//RS         if let Some(window) = rt.heap.list_slice(list, first, last + 1) {
+//RS             return window;
+//RS         }
+//RS         // The arena's raw window covers a `JetVal::List` carrier only. A
+//RS         // fixed-size `UninitList` keeps its elements behind the integer view
+//RS         // it is built from, so materialize that one through the same view.
+//RS         let Some(values) = rt.heap.clone_int_list(list) else {
+//RS             rt.set_host_fault("jit list slice: uninitialized fixed-list carrier");
+//RS             return 0;
+//RS         };
+//RS         let out = rt.heap.alloc_empty_list();
+//RS         for &value in &values[first as usize..=last as usize] {
+//RS             let _ = rt.heap.list_push_int(out, value);
+//RS         }
+//RS         out
+//RS     })
+//RS }
+//RS fn list_slice_values(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     list: i64,
+//RS     start: i64,
+//RS     end_exclusive: i64,
+//RS ) -> Option<i64> {
+//RS     if let Some(window) = rt.heap.list_slice(list, start, end_exclusive) {
+//RS         return Some(window);
+//RS     }
+//RS     let values = rt.heap.clone_list_values(list)?;
+//RS     let start = usize::try_from(start).ok()?;
+//RS     let end = usize::try_from(end_exclusive).ok()?;
+//RS     Some(rt.heap.alloc_list_values(values.get(start..end)?.to_vec()))
+//RS }
+//RS 
+//RS fn report_list_slice_error(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     file: i64,
+//RS     line: i32,
+//RS     message: &str,
+//RS ) {
+//RS     let Some(file) = rt.heap.clone_string(file) else {
+//RS         rt.set_host_fault("jit list slice: bad source file handle");
+//RS         return;
+//RS     };
+//RS     rt.set_runtime_stop_at("E3001", &file, line.max(0) as u32, message);
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_slice_vec(
+//RS     list: i64,
+//RS     start: i64,
+//RS     end: i64,
+//RS     file: i64,
+//RS     line: i32,
+//RS ) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(len) = rt.heap.list_len(list) else {
+//RS             rt.set_host_fault("jit list slice: bad list handle");
+//RS             return 0;
+//RS         };
+//RS         if start < 0 || end < 0 || start > end || end >= len {
+//RS             let message = format!("can't slice {len} items from {start} to {end} (inclusive)");
+//RS             report_list_slice_error(rt, file, line, &message);
+//RS             return 0;
+//RS         }
+//RS         let Some(end_exclusive) = end.checked_add(1) else {
+//RS             let message = format!("can't slice {len} items from {start} to {end} (inclusive)");
+//RS             report_list_slice_error(rt, file, line, &message);
+//RS             return 0;
+//RS         };
+//RS         let Some(result) = list_slice_values(rt, list, start, end_exclusive) else {
+//RS             rt.set_host_fault("jit list slice: list carrier cannot be materialized");
+//RS             return 0;
+//RS         };
+//RS         result
+//RS     })
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_slice_vec_range(list: i64, range: i64, file: i64, line: i32) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(start) = rt.heap.record_get_int(range, 0) else {
+//RS             rt.set_host_fault("jit list range slice: bad range handle");
+//RS             return 0;
+//RS         };
+//RS         let Some(end) = rt.heap.record_get_int(range, 1) else {
+//RS             rt.set_host_fault("jit list range slice: bad range end");
+//RS             return 0;
+//RS         };
+//RS         let Some(exclusive) = rt
+//RS             .heap
+//RS             .record_get_bool(range, 2)
+//RS             .or_else(|| rt.heap.record_get_int(range, 2).map(|value| value != 0))
+//RS         else {
+//RS             rt.set_host_fault("jit list range slice: bad range mode");
+//RS             return 0;
+//RS         };
+//RS         let Some(len) = rt.heap.list_len(list) else {
+//RS             rt.set_host_fault("jit list range slice: bad list handle");
+//RS             return 0;
+//RS         };
+//RS         let Some((start, end_exclusive)) =
+//RS             range_semantics::jet_range_bounds(start, end, exclusive, len)
+//RS         else {
+//RS             let message = format!(
+//RS                 "can't slice {len} items from {start} to {end} ({})",
+//RS                 if exclusive { "exclusive" } else { "inclusive" }
+//RS             );
+//RS             report_list_slice_error(rt, file, line, &message);
+//RS             return 0;
+//RS         };
+//RS         let Some(result) = list_slice_values(rt, list, start, end_exclusive) else {
+//RS             rt.set_host_fault("jit list range slice: list carrier cannot be materialized");
+//RS             return 0;
+//RS         };
+//RS         result
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_list_slice_direct(list: i64, start: i64, end: i64) -> i64 {
+//RS     jet_jit_list_slice(list, start, end, 0)
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_list_range_end(list: i64, start: i64, end: i64, exclusive: i64, line: u32) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(len) = rt.heap.list_len(list) else {
+//RS             jet_foundation::ice!(None, "jit Range window: bad list handle");
+//RS         };
+//RS         match range_semantics::jet_checked_view_bounds(start, end, exclusive != 0, len) {
+//RS             Ok((_, end_exclusive)) => end_exclusive,
+//RS             Err(message) => {
+//RS                 rt.set_runtime_stop("E3001", line, &message);
+//RS                 0
+//RS             }
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn alloc_view_mut(
+//RS     rt: &mut crate::JitRuntime,
+//RS     list: i64,
+//RS     start: usize,
+//RS     end_exclusive: usize,
+//RS ) -> i64 {
+//RS     let view = rt.heap.alloc_record(3);
+//RS     let _ = rt.heap.record_set_int(view, 0, list);
+//RS     let _ = rt.heap.record_set_int(view, 1, start as i64);
+//RS     let _ = rt.heap.record_set_int(view, 2, end_exclusive as i64 - 1);
+//RS     view
+//RS }
+//RS 
+//RS fn alloc_disjoint_result(rt: &mut crate::JitRuntime, result: Result<i64, String>) -> i64 {
+//RS     match result {
+//RS         Ok(value) => crate::runtime_host::alloc_jit_result(rt, true, value as u64),
+//RS         Err(error) => {
+//RS             let error = rt.heap.alloc_string(error);
+//RS             crate::runtime_host::alloc_jit_result(rt, false, error as u64)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_split_write(list: i64, mid: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(len) = rt.heap.list_len(list) else {
+//RS             jet_foundation::ice!(None, "jit split_write: bad list handle");
+//RS         };
+//RS         let result = disjoint_semantics::split(len as usize, mid).map(
+//RS             |((left_start, left_end), (right_start, right_end))| {
+//RS                 let pair = rt.heap.alloc_record(2);
+//RS                 let left = alloc_view_mut(rt, list, left_start, left_end);
+//RS                 let right = alloc_view_mut(rt, list, right_start, right_end);
+//RS                 let _ = rt.heap.record_set_int(pair, 0, left);
+//RS                 let _ = rt.heap.record_set_int(pair, 1, right);
+//RS                 pair
+//RS             },
+//RS         );
+//RS         alloc_disjoint_result(rt, result)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_get_disjoint_write(list: i64, targets: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let Some(len) = rt.heap.list_len(list) else {
+//RS             jet_foundation::ice!(None, "jit get_disjoint_write: bad list handle");
+//RS         };
+//RS         let Some(target_len) = rt.heap.list_len(targets) else {
+//RS             jet_foundation::ice!(None, "jit get_disjoint_write: bad targets handle");
+//RS         };
+//RS         let indices = (0..target_len)
+//RS             .map(|index| rt.heap.list_get_int(targets, index).unwrap_or_default())
+//RS             .collect::<Vec<_>>();
+//RS         let result = disjoint_semantics::indexes(len as usize, &indices).map(|ordered| {
+//RS             let mut views = vec![0; indices.len()];
+//RS             for (start, end, position) in ordered {
+//RS                 views[position] = alloc_view_mut(rt, list, start, end);
+//RS             }
+//RS             let output = rt.heap.alloc_empty_list();
+//RS             for view in views {
+//RS                 rt.heap
+//RS                     .list_push_int(output, view)
+//RS                     .expect("jit get_disjoint_write output");
+//RS             }
+//RS             output
+//RS         });
+//RS         alloc_disjoint_result(rt, result)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_range_contains(start: i64, end: i64, exclusive: i64, value: i64) -> i8 {
+//RS     range_semantics::jet_range_contains(start, end, exclusive != 0, value) as i8
+//RS }
+//RS 
+//RS fn jet_jit_range_contains_value(range: i64, value: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let start = rt.heap.record_get_int(range, 0).unwrap_or(0);
+//RS         let end = rt.heap.record_get_int(range, 1).unwrap_or(0);
+//RS         let exclusive = rt.heap.record_get_int(range, 2).unwrap_or(0);
+//RS         range_semantics::jet_range_contains(start, end, exclusive != 0, value) as i8
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_range_show(start: i64, end: i64, exclusive: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.heap
+//RS             .alloc_string(range_semantics::jet_range_structural_text(
+//RS                 start,
+//RS                 end,
+//RS                 exclusive != 0,
+//RS             ))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_range_equal(
+//RS     left_start: i64,
+//RS     left_end: i64,
+//RS     left_exclusive: i64,
+//RS     right_start: i64,
+//RS     right_end: i64,
+//RS     right_exclusive: i64,
+//RS ) -> i8 {
+//RS     range_semantics::jet_range_equal(
+//RS         left_start,
+//RS         left_end,
+//RS         left_exclusive != 0,
+//RS         right_start,
+//RS         right_end,
+//RS         right_exclusive != 0,
+//RS     ) as i8
+//RS }
+//RS 
+//RS fn jet_jit_map_new() -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_map())
+//RS }
+//RS 
+//RS fn jet_jit_map_clone(map: i64) -> i64 {
+//RS     alloc_map_pairs(&collection_semantics::map_copy_i64(clone_map_pairs(map)))
+//RS }
+//RS 
+//RS fn jet_jit_map_equal(left: i64, right: i64) -> i8 {
+//RS     i8::from(collection_semantics::map_equal_i64(
+//RS         clone_map_pairs(left),
+//RS         clone_map_pairs(right),
+//RS     ))
+//RS }
+//RS 
+//RS fn jet_jit_map_first(map: i64) -> i64 {
+//RS     let value = collection_semantics::map_first_key_i64(clone_map_pairs(map));
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let value = value.map(|key| rt.heap.alloc_string(key));
+//RS         option_i64(rt, value)
+//RS     })
+//RS }
+//RS 
+//RS fn alloc_map_rows(entries: Vec<(String, i64)>) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let out = rt.heap.alloc_empty_list();
+//RS         for (key, value) in entries {
+//RS             let row = rt.heap.alloc_record(2);
+//RS             let key_id = rt.heap.alloc_string(key);
+//RS             let _ = rt.heap.record_set_string(row, 0, key_id);
+//RS             let _ = rt.heap.record_set_int(row, 1, value);
+//RS             let _ = rt.heap.list_push_int(out, row);
+//RS         }
+//RS         out
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_to_list(map: i64) -> i64 {
+//RS     alloc_map_rows(collection_semantics::map_entries_i64(clone_map_pairs(map)))
+//RS }
+//RS 
+//RS fn jet_jit_map_top_n(map: i64, n: i64) -> i64 {
+//RS     alloc_map_rows(collection_semantics::map_top_n_i64(clone_map_pairs(map), n))
+//RS }
+//RS 
+//RS fn jet_jit_map_top_n_int(map: i64, n: i64) -> i64 {
+//RS     alloc_map_rows(collection_semantics::map_top_n_int(clone_map_pairs(map), n))
+//RS }
+//RS 
+//RS fn jet_jit_map_min(map: i64) -> i64 {
+//RS     let value = collection_semantics::map_min_i64(clone_map_pairs(map));
+//RS     Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+//RS }
+//RS 
+//RS fn jet_jit_map_min_int(map: i64) -> i64 {
+//RS     let value = collection_semantics::map_min_int(clone_map_pairs(map));
+//RS     Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+//RS }
+//RS 
+//RS fn jet_jit_map_max(map: i64) -> i64 {
+//RS     let value = collection_semantics::map_max_i64(clone_map_pairs(map));
+//RS     Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+//RS }
+//RS 
+//RS fn jet_jit_map_max_int(map: i64) -> i64 {
+//RS     let value = collection_semantics::map_max_int(clone_map_pairs(map));
+//RS     Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+//RS }
+//RS 
+//RS fn jet_jit_map_intersection(left: i64, right: i64) -> i64 {
+//RS     let pairs =
+//RS         collection_semantics::map_intersection_i64(clone_map_pairs(left), clone_map_pairs(right));
+//RS     alloc_map_pairs(&pairs)
+//RS }
+//RS 
+//RS fn jet_jit_map_slice(map: i64, keys: i64) -> i64 {
+//RS     let key_ids = clone_list_ints(keys);
+//RS     let keys = Concurrency::with_runtime_mut(|rt| {
+//RS         key_ids
+//RS             .into_iter()
+//RS             .map(|key| {
+//RS                 rt.heap
+//RS                     .clone_string(key)
+//RS                     .expect("jit map slice: string key")
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS     });
+//RS     let pairs = collection_semantics::map_slice_i64(clone_map_pairs(map), keys);
+//RS     alloc_map_pairs(&pairs)
+//RS }
+//RS 
+//RS fn jet_jit_map_from_keys(keys: i64, default: i64) -> i64 {
+//RS     let key_ids = clone_list_ints(keys);
+//RS     let keys = Concurrency::with_runtime_mut(|rt| {
+//RS         key_ids
+//RS             .into_iter()
+//RS             .map(|key| {
+//RS                 rt.heap
+//RS                     .clone_string(key)
+//RS                     .expect("jit map from_keys: string key")
+//RS             })
+//RS             .collect::<Vec<_>>()
+//RS     });
+//RS     let pairs = collection_semantics::map_from_keys_i64(keys, default);
+//RS     alloc_map_pairs(&pairs)
+//RS }
+//RS fn jet_jit_map_from_keys_int(keys: i64, default: i64) -> i64 {
+//RS     let keys = clone_list_ints(keys);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let map = rt.heap.alloc_empty_map();
+//RS         for key in keys {
+//RS             rt.heap
+//RS                 .map_insert_int(map, key, default)
+//RS                 .expect("jit Int map from_keys: insert");
+//RS         }
+//RS         map
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_from_keys_composite(keys: i64, default: i64) -> i64 {
+//RS     let keys = clone_list_ints(keys);
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let map = rt.heap.alloc_empty_map();
+//RS         for key in keys {
+//RS             rt.heap
+//RS                 .map_insert_composite(map, key, default)
+//RS                 .expect("jit composite map from_keys: insert");
+//RS         }
+//RS         map
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_map_contains_value(map: i64, needle: i64) -> i8 {
+//RS     i8::from(collection_semantics::map_contains_i64(
+//RS         clone_map_pairs(map),
+//RS         needle,
+//RS     ))
+//RS }
+//RS fn jet_jit_map_has_key(map: i64, key: i64) -> i8 {
+//RS     let Some(key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(key)) else {
+//RS         return 0;
+//RS     };
+//RS     i8::from(
+//RS         clone_map_pairs(map)
+//RS             .iter()
+//RS             .any(|(stored, _)| stored == &key),
+//RS     )
+//RS }
+//RS /// `[Int:V].has_key`: the arena compares exact Int keys by value.
+//RS fn jet_jit_map_has_key_int(map: i64, key: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| i8::from(rt.heap.map_get_int(map, key).is_some()))
+//RS }
+//RS fn jet_jit_map_has_key_composite(map: i64, key: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| i8::from(rt.heap.map_get_composite(map, key).is_some()))
+//RS }
+//RS fn map_callback_key(key: &str) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(key.to_owned()))
+//RS }
+//RS 
+//RS fn jet_jit_map_any(map: i64, callback: i64) -> i8 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     for (key, value) in clone_map_pairs(map) {
+//RS         if closure_trapped() {
+//RS             return 1;
+//RS         }
+//RS         if invoke_closure_bool_pair(slot, map_callback_key(&key), value) {
+//RS             return 1;
+//RS         }
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS     }
+//RS     0
+//RS }
+//RS 
+//RS fn jet_jit_map_all(map: i64, callback: i64) -> i8 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     for (key, value) in clone_map_pairs(map) {
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS         if !invoke_closure_bool_pair(slot, map_callback_key(&key), value) {
+//RS             return 0;
+//RS         }
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS     }
+//RS     1
+//RS }
+//RS 
+//RS fn jet_jit_map_filter(map: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let mut filtered = Vec::new();
+//RS     for (key, value) in clone_map_pairs(map) {
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS         if invoke_closure_bool_pair(slot, map_callback_key(&key), value) {
+//RS             filtered.push((key, value));
+//RS         }
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS     }
+//RS     alloc_map_pairs(&filtered)
+//RS }
+//RS 
+//RS fn jet_jit_map_map_values(map: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let mut mapped = Vec::new();
+//RS     for (key, value) in clone_map_pairs(map) {
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS         let value = invoke_closure_i64_pair(slot, map_callback_key(&key), value);
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS         mapped.push((key, value));
+//RS     }
+//RS     alloc_map_pairs(&mapped)
+//RS }
+//RS 
+//RS fn jet_jit_map_fold(map: i64, init: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let mut folded = init;
+//RS     for (key, value) in clone_map_pairs(map) {
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS         let key = map_callback_key(&key);
+//RS         folded = invoke_closure_i64_many(slot, &[folded, key, value]);
+//RS         if closure_trapped() {
+//RS             return 0;
+//RS         }
+//RS     }
+//RS     folded
+//RS }
+//RS fn jet_jit_map_merge_with(left: i64, right: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = closure_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let mut merged = std::collections::BTreeMap::new();
+//RS     for (key, value) in clone_map_pairs(left) {
+//RS         merged.insert(key, value);
+//RS     }
+//RS     for (key, right_value) in clone_map_pairs(right) {
+//RS         if let Some(left_value) = merged.remove(&key) {
+//RS             if closure_trapped() {
+//RS                 return 0;
+//RS             }
+//RS             let key_handle = map_callback_key(&key);
+//RS             let resolved =
+//RS                 invoke_closure_i64_many(slot, &[key_handle, left_value, right_value]);
+//RS             if closure_trapped() {
+//RS                 return 0;
+//RS             }
+//RS             merged.insert(key, resolved);
+//RS         } else {
+//RS             merged.insert(key, right_value);
+//RS         }
+//RS     }
+//RS     let pairs = merged.into_iter().collect::<Vec<_>>();
+//RS     alloc_map_pairs(&pairs)
+//RS }
+//RS 
+//RS fn jet_jit_map_pop_first(map: i64) -> i64 {
+//RS     let (key, value, _) = collection_semantics::map_pop_first_i64(clone_map_pairs(map));
+//RS     if let Some(key) = key {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             let key_id = rt.heap.alloc_string(key);
+//RS             let _ = rt.heap.map_remove(map, key_id);
+//RS         });
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+//RS }
+//RS 
+//RS /// D-MAP-MERGE1=E: clone `left`, then overwrite/insert every entry from `right`
+//RS /// (right wins on shared keys).
+//RS fn jet_jit_map_merge(left: i64, right: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let out = {
+//RS             let len = rt
+//RS                 .heap
+//RS                 .map_len(left)
+//RS                 .expect("jit map merge: bad left handle");
+//RS             let out = rt.heap.alloc_empty_map();
+//RS             for i in 0..len {
+//RS                 let key = rt
+//RS                     .heap
+//RS                     .map_key_at(left, i)
+//RS                     .expect("jit map merge: left key");
+//RS                 let value = rt
+//RS                     .heap
+//RS                     .map_value_at(left, i)
+//RS                     .expect("jit map merge: left value");
+//RS                 rt.heap
+//RS                     .map_insert(out, key, value)
+//RS                     .expect("jit map merge: left insert");
+//RS             }
+//RS             out
+//RS         };
+//RS         let len = rt
+//RS             .heap
+//RS             .map_len(right)
+//RS             .expect("jit map merge: bad right handle");
+//RS         for i in 0..len {
+//RS             let key = rt
+//RS                 .heap
+//RS                 .map_key_at(right, i)
+//RS                 .expect("jit map merge: right key");
+//RS             let value = rt
+//RS                 .heap
+//RS                 .map_value_at(right, i)
+//RS                 .expect("jit map merge: right value");
+//RS             rt.heap
+//RS                 .map_insert(out, key, value)
+//RS                 .expect("jit map merge: right insert");
+//RS         }
+//RS         out
+//RS     })
+//RS }
+//RS 
+//RS /// Integer-key map merge route; map values keep the raw integer key carrier.
+//RS fn jet_jit_map_merge_int(left: i64, right: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let out = {
+//RS             let len = rt
+//RS                 .heap
+//RS                 .map_len(left)
+//RS                 .expect("jit Int map merge: bad left handle");
+//RS             let out = rt.heap.alloc_empty_map();
+//RS             for i in 0..len {
+//RS                 let key = rt
+//RS                     .heap
+//RS                     .map_key_at(left, i)
+//RS                     .expect("jit Int map merge: left key");
+//RS                 let value = rt
+//RS                     .heap
+//RS                     .map_value_at(left, i)
+//RS                     .expect("jit Int map merge: left value");
+//RS                 rt.heap
+//RS                     .map_insert_int(out, key, value)
+//RS                     .expect("jit Int map merge: left insert");
+//RS             }
+//RS             out
+//RS         };
+//RS         let len = rt
+//RS             .heap
+//RS             .map_len(right)
+//RS             .expect("jit Int map merge: bad right handle");
+//RS         for i in 0..len {
+//RS             let key = rt
+//RS                 .heap
+//RS                 .map_key_at(right, i)
+//RS                 .expect("jit Int map merge: right key");
+//RS             let value = rt
+//RS                 .heap
+//RS                 .map_value_at(right, i)
+//RS                 .expect("jit Int map merge: right value");
+//RS             rt.heap
+//RS                 .map_insert_int(out, key, value)
+//RS                 .expect("jit Int map merge: right insert");
+//RS         }
+//RS         out
+//RS     })
+//RS }
+//RS fn jet_jit_map_update(left: i64, right: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt
+//RS             .heap
+//RS             .map_len(right)
+//RS             .expect("jit map update: bad right handle");
+//RS         for index in 0..len {
+//RS             let key = rt
+//RS                 .heap
+//RS                 .map_key_at(right, index)
+//RS                 .expect("jit map update: right key");
+//RS             let value = rt
+//RS                 .heap
+//RS                 .map_value_at(right, index)
+//RS                 .expect("jit map update: right value");
+//RS             rt.heap
+//RS                 .map_insert(left, key, value)
+//RS                 .expect("jit map update: bad left handle");
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_map_update_int(left: i64, right: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt
+//RS             .heap
+//RS             .map_len(right)
+//RS             .expect("jit Int map update: bad right handle");
+//RS         for index in 0..len {
+//RS             let key = rt
+//RS                 .heap
+//RS                 .map_key_at(right, index)
+//RS                 .expect("jit Int map update: right key");
+//RS             let value = rt
+//RS                 .heap
+//RS                 .map_value_at(right, index)
+//RS                 .expect("jit Int map update: right value");
+//RS             rt.heap
+//RS                 .map_insert_int(left, key, value)
+//RS                 .expect("jit Int map update: bad left handle");
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_map_update_composite(left: i64, right: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt
+//RS             .heap
+//RS             .map_len(right)
+//RS             .expect("jit composite map update: bad right handle");
+//RS         for index in 0..len {
+//RS             let key = rt
+//RS                 .heap
+//RS                 .map_key_at(right, index)
+//RS                 .expect("jit composite map update: right key");
+//RS             let value = rt
+//RS                 .heap
+//RS                 .map_value_at(right, index)
+//RS                 .expect("jit composite map update: right value");
+//RS             rt.heap
+//RS                 .map_insert_composite(left, key, value)
+//RS                 .expect("jit composite map update: bad left handle");
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_ordering_then(first: i64, second: i64) -> i64 {
+//RS     let equal = crate::types_meta::prelude_enum_variant_index(
+//RS         jet_foundation::Syntax::TYPE_ORDERING,
+//RS         "Equal",
+//RS     )
+//RS     .expect("Prelude Ordering variants must be registered");
+//RS     if first == equal {
+//RS         second
+//RS     } else {
+//RS         first
+//RS     }
+//RS }
+//RS 
+//RS /// Exact checked MIR map-index setter route.  Map assignment has the same
+//RS /// replace-or-insert semantics as the existing map insertion host.
+//RS fn jet_jit_index_map_set(map: i64, key: i64, value: i64) {
+//RS     jet_jit_map_insert(map, key, value);
+//RS }
+//RS 
+//RS fn jet_jit_map_insert(map: i64, key: i64, value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let previous = rt.heap.map_get(map, key);
+//RS         rt.heap
+//RS             .map_insert(map, key, value)
+//RS             .expect("jit map insert: bad handle");
+//RS         option_i64(rt, previous)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_insert_composite(map: i64, key: i64, value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let previous = rt.heap.map_get_composite(map, key);
+//RS         rt.heap
+//RS             .map_insert_composite(map, key, value)
+//RS             .expect("jit composite map insert: bad handle or key");
+//RS         option_i64(rt, previous)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_insert_int(map: i64, key: i64, value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let previous = rt.heap.map_get_int(map, key);
+//RS         rt.heap
+//RS             .map_insert_int(map, key, value)
+//RS             .expect("jit Int map insert: bad handle");
+//RS         option_i64(rt, previous)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_setdefault(map: i64, key: i64, value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if let Some(existing) = rt.heap.map_get(map, key) {
+//RS             return existing;
+//RS         }
+//RS         rt.heap
+//RS             .map_insert(map, key, value)
+//RS             .expect("jit map setdefault: bad handle");
+//RS         value
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_setdefault_composite(map: i64, key: i64, value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if let Some(existing) = rt.heap.map_get_composite(map, key) {
+//RS             return existing;
+//RS         }
+//RS         rt.heap
+//RS             .map_insert_composite(map, key, value)
+//RS             .expect("jit composite map setdefault: bad handle or key");
+//RS         value
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_setdefault_int(map: i64, key: i64, value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if let Some(existing) = rt.heap.map_get_int(map, key) {
+//RS             return existing;
+//RS         }
+//RS         rt.heap
+//RS             .map_insert_int(map, key, value)
+//RS             .expect("jit Int map setdefault: bad handle");
+//RS         value
+//RS     })
+//RS }
+//RS fn jet_jit_map_add_new(map: i64, key: i64, value: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if rt.heap.map_len(map).is_none() {
+//RS             jet_foundation::ice!(None, "jit map add_new: bad handle");
+//RS         }
+//RS         if rt.heap.map_get(map, key).is_some() {
+//RS             return 0;
+//RS         }
+//RS         rt.heap
+//RS             .map_insert(map, key, value)
+//RS             .expect("jit map add_new: bad handle or key");
+//RS         1
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_add_new_int(map: i64, key: i64, value: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if rt.heap.map_len(map).is_none() {
+//RS             jet_foundation::ice!(None, "jit Int map add_new: bad handle");
+//RS         }
+//RS         if rt.heap.map_get_int(map, key).is_some() {
+//RS             return 0;
+//RS         }
+//RS         rt.heap
+//RS             .map_insert_int(map, key, value)
+//RS             .expect("jit Int map add_new: bad handle");
+//RS         1
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_add_new_composite(map: i64, key: i64, value: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if rt.heap.map_len(map).is_none() {
+//RS             jet_foundation::ice!(None, "jit composite map add_new: bad handle");
+//RS         }
+//RS         if rt.heap.map_get_composite(map, key).is_some() {
+//RS             return 0;
+//RS         }
+//RS         rt.heap
+//RS             .map_insert_composite(map, key, value)
+//RS             .expect("jit composite map add_new: bad handle or key");
+//RS         1
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_try_insert(map: i64, key: i64, value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let key_text = rt.heap.clone_string(key).unwrap_or_default();
+//RS         let pairs = clone_map_pairs_in_runtime(&mut rt.heap, map);
+//RS         let (_, result) = collection_semantics::try_map_insert_i64(pairs, key_text, value);
+//RS         match result {
+//RS             Ok(previous) => {
+//RS                 let _ = rt.heap.map_insert(map, key, value);
+//RS                 let option = option_i64(rt, previous);
+//RS                 crate::runtime_host::alloc_jit_result(rt, true, option as u64)
+//RS             }
+//RS             Err(error) => alloc_error_result(rt, error),
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_try_insert_int(map: i64, key: i64, value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if rt.heap.map_len(map).is_none() {
+//RS             jet_foundation::ice!(None, "jit Int map try_insert: bad handle");
+//RS         }
+//RS         let previous = rt.heap.map_get_int(map, key);
+//RS         rt.heap
+//RS             .map_insert_int(map, key, value)
+//RS             .expect("jit Int map try_insert: bad handle");
+//RS         let option = option_i64(rt, previous);
+//RS         crate::runtime_host::alloc_jit_result(rt, true, option as u64)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_increment(map: i64, key: i64) {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let current = rt.heap.map_get(map, key).unwrap_or(0);
+//RS         let one = rt.heap.int_from_i64(1);
+//RS         let next = rt.heap.int_add(current, one);
+//RS         let _ = rt.heap.map_insert(map, key, next);
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_map_get(map: i64, key: i64, line: u32) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| match rt.heap.map_get(map, key) {
+//RS         Some(value) => value,
+//RS         None => {
+//RS             if rt.heap.map_len(map).is_none() {
+//RS                 jet_foundation::ice!(None, "jit map get: bad handle");
+//RS             }
+//RS             let key_text = match rt.heap.clone_string(key) {
+//RS                 Some(key) => jet_foundation::Outcome::jet_missing_map_key_value(key),
+//RS                 None => jet_foundation::Outcome::jet_missing_map_key_message(None),
+//RS             };
+//RS             rt.set_runtime_stop("E3001", line, &key_text);
+//RS             0
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_get_composite(map: i64, key: i64, line: u32) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| match rt.heap.map_get_composite(map, key) {
+//RS         Some(value) => value,
+//RS         None => {
+//RS             if rt.heap.map_len(map).is_none() {
+//RS                 jet_foundation::ice!(None, "jit composite map get: bad handle");
+//RS             }
+//RS             let key_text = jet_foundation::Outcome::jet_missing_map_key_message(None);
+//RS             rt.set_runtime_stop("E3001", line, &key_text);
+//RS             0
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_get_int(map: i64, key: i64, line: u32) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| match rt.heap.map_get_int(map, key) {
+//RS         Some(value) => value,
+//RS         None => {
+//RS             if rt.heap.map_len(map).is_none() {
+//RS                 jet_foundation::ice!(None, "jit Int map get: bad handle");
+//RS             }
+//RS             let key_text =
+//RS                 jet_foundation::Outcome::jet_missing_map_key_value(rt.heap.int_to_string(key));
+//RS             rt.set_runtime_stop("E3001", line, &key_text);
+//RS             0
+//RS         }
+//RS     })
+//RS }
+//RS 
+//RS /// Result-arena Option handle (`result_is_ok` / `result_get_i64`), *not* the
+//RS /// packed `0 / value + 1` carrier its sibling `jet_jit_list_get_opt` returns.
+//RS ///
+//RS /// The arena carrier is required, not incidental: a map value is an arbitrary
+//RS /// i64, so packing it as `value + 1` would alias a `-1` payload onto `None`.
+//RS /// Function values make that concrete — `bind_jit_callable` hands out
+//RS /// `-(index + 1)`, so the very first callable stored in a map has the handle
+//RS /// `-1`. Keeping presence in a separate `ok` bit is what makes any payload,
+//RS /// including `i64::MAX` and every negative handle, representable.
+//RS fn jet_jit_map_get_opt(map: i64, key: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if rt.heap.map_len(map).is_none() {
+//RS             jet_foundation::ice!(None, "jit map get_opt: bad handle");
+//RS         }
+//RS         let value = rt.heap.map_get(map, key);
+//RS         option_i64(rt, value)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_get_opt_composite(map: i64, key: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if rt.heap.map_len(map).is_none() {
+//RS             jet_foundation::ice!(None, "jit composite map get_opt: bad handle");
+//RS         }
+//RS         let value = rt.heap.map_get_composite(map, key);
+//RS         option_i64(rt, value)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_get_opt_int(map: i64, key: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if rt.heap.map_len(map).is_none() {
+//RS             jet_foundation::ice!(None, "jit Int map get_opt: bad handle");
+//RS         }
+//RS         let value = rt.heap.map_get_int(map, key);
+//RS         option_i64(rt, value)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_remove(map: i64, key: i64) -> i64 {
+//RS     let key_text = Concurrency::with_runtime_mut(|rt| {
+//RS         rt.heap
+//RS             .clone_string(key)
+//RS             .expect("jit map remove: string key")
+//RS     });
+//RS     let value = collection_semantics::map_remove_i64(clone_map_pairs(map), key_text);
+//RS     if value.is_some() {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             let _ = rt.heap.map_remove(map, key);
+//RS         });
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+//RS }
+//RS 
+//RS fn jet_jit_map_remove_composite(map: i64, key: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if rt.heap.map_len(map).is_none() {
+//RS             jet_foundation::ice!(None, "jit composite map remove: bad handle");
+//RS         }
+//RS         // Compute before the call: `option_i64` also takes `rt` mutably, so
+//RS         // passing the removal inline borrows the runtime twice.
+//RS         let removed = rt.heap.map_remove_composite(map, key);
+//RS         option_i64(rt, removed)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_remove_int(map: i64, key: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         if rt.heap.map_len(map).is_none() {
+//RS             jet_foundation::ice!(None, "jit Int map remove: bad handle");
+//RS         }
+//RS         let value = rt.heap.map_remove_int(map, key);
+//RS         option_i64(rt, value)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_len(map: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.map_len(map).expect("jit map len: bad handle"))
+//RS }
+//RS fn jet_jit_map_is_empty(map: i64) -> i8 {
+//RS     i8::from(jet_jit_map_len(map) == 0)
+//RS }
+//RS 
+//RS fn jet_jit_map_key_at(map: i64, idx: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.heap
+//RS             .map_key_at(map, idx)
+//RS             .expect("jit map key_at: bad handle")
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_value_at(map: i64, idx: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         rt.heap
+//RS             .map_value_at(map, idx)
+//RS             .expect("jit map value_at: bad handle")
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_keys(map: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.map_len(map).expect("jit map keys: bad handle");
+//RS         let out = rt.heap.alloc_empty_list();
+//RS         for i in 0..len {
+//RS             let key = rt.heap.map_key_at(map, i).expect("jit map keys: key");
+//RS             rt.heap.list_push_int(out, key).expect("jit map keys: push");
+//RS         }
+//RS         out
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_map_values(map: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.map_len(map).expect("jit map values: bad handle");
+//RS         let out = rt.heap.alloc_empty_list();
+//RS         for i in 0..len {
+//RS             let value = rt.heap.map_value_at(map, i).expect("jit map values: value");
+//RS             rt.heap
+//RS                 .list_push_int(out, value)
+//RS                 .expect("jit map values: push");
+//RS         }
+//RS         out
+//RS     })
+//RS }
+//RS 
+//RS /// Materialize a sequence only when an eager operation or terminal requires it.
+//RS fn clone_list_ints_with_runtime(rt: &mut crate::runtime_host::JitRuntime, list: i64) -> Vec<i64> {
+//RS     if let Some(values) = crate::runtime_host::lazy_iter_collect(rt, list) {
+//RS         return values;
+//RS     }
+//RS     let len = crate::runtime_host::sequence_len(rt, list)
+//RS         .expect("jit sequence adapter: bad sequence handle");
+//RS     (0..len)
+//RS         .map(|index| {
+//RS             crate::runtime_host::sequence_get_raw(rt, list, index)
+//RS                 .expect("jit sequence adapter: sequence element has no universal ABI")
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn clone_list_ints(list: i64) -> Vec<i64> {
+//RS     Concurrency::with_runtime_mut(|rt| clone_list_ints_with_runtime(rt, list))
+//RS }
+//RS 
+//RS fn clone_list_dates_with_runtime(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     list: i64,
+//RS ) -> Option<Vec<crate::Time::time_rt::JetDate>> {
+//RS     clone_list_ints_with_runtime(rt, list)
+//RS         .into_iter()
+//RS         .map(|handle| {
+//RS             let index = usize::try_from(handle.checked_sub(1)?).ok()?;
+//RS             match rt.time_values.get(index)?.as_ref()? {
+//RS                 crate::Time::TimeValue::Date(value) => Some(value.clone()),
+//RS                 _ => None,
+//RS             }
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn clone_nested_int_lists(list: i64) -> Vec<Vec<i64>> {
+//RS     clone_list_ints(list)
+//RS         .into_iter()
+//RS         .map(|child| clone_list_ints(child))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn clone_list_strings(list: i64) -> Vec<String> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let values = crate::runtime_host::lazy_iter_collect(rt, list).unwrap_or_else(|| {
+//RS             let len = crate::runtime_host::sequence_len(rt, list)
+//RS                 .expect("jit string-list adapter: bad sequence handle");
+//RS             (0..len)
+//RS                 .map(|index| {
+//RS                     crate::runtime_host::sequence_get_raw(rt, list, index)
+//RS                         .expect("jit string-list adapter: bad string value")
+//RS                 })
+//RS                 .collect()
+//RS         });
+//RS         values
+//RS             .into_iter()
+//RS             .map(|id| {
+//RS                 rt.heap
+//RS                     .clone_string(id)
+//RS                     .or_else(|| crate::runtime_host::view_string(rt, id))
+//RS                     .expect("jit string-list adapter: bad string handle")
+//RS             })
+//RS             .collect()
+//RS     })
+//RS }
+//RS 
+//RS fn clone_list_floats(list: i64) -> Vec<f64> {
+//RS     clone_list_ints(list)
+//RS         .into_iter()
+//RS         .map(|value| f64::from_bits(value as u64))
+//RS         .collect()
+//RS }
+//RS fn is_lazy_sequence(list: i64) -> bool {
+//RS     Concurrency::with_runtime_mut(|rt| crate::runtime_host::lazy_iter_index(rt, list).is_some())
+//RS }
+//RS 
+//RS fn next_lazy_sequence(list: i64) -> Option<i64> {
+//RS     Concurrency::with_runtime_mut(|rt| crate::runtime_host::lazy_iter_next(rt, list))
+//RS }
+//RS fn jet_jit_list_lazy(list: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| crate::runtime_host::lazy_iter_source(rt, list))
+//RS }
+//RS 
+//RS fn jet_jit_iter_string_split(text: i64, separator: i64) -> i64 {
+//RS     let (text, separator) = Concurrency::with_runtime_mut(|rt| {
+//RS         (
+//RS             rt.heap
+//RS                 .clone_string(text)
+//RS                 .expect("jit string split: bad text handle"),
+//RS             rt.heap
+//RS                 .clone_string(separator)
+//RS                 .expect("jit string split: bad separator handle"),
+//RS         )
+//RS     });
+//RS     let parts = collection_semantics::iter_string_split(&text, &separator);
+//RS     jet_jit_list_lazy(alloc_from_strings(&parts))
+//RS }
+//RS 
+//RS /// Materialize checked iterator payloads as owned list elements. Scalar raw
+//RS /// values pass through; aggregate handles use the descriptor-aware copy kernel.
+//RS fn typed_list_from_raw_values(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     mut values: Vec<i64>,
+//RS     element: &crate::runtime_host::RuntimeTypeDescriptor,
+//RS ) -> Result<i64, String> {
+//RS     for value in &mut values {
+//RS         *value = crate::runtime_host::runtime_clone_with_descriptor(rt, *value, element)?;
+//RS     }
+//RS     Ok(alloc_view_payloads(rt, values, element))
+//RS }
+//RS 
+//RS fn jet_jit_iter_to_list(list: i64, element_type_id: i64) -> i64 {
+//RS     let Some(element) = Concurrency::with_runtime_mut(|rt| {
+//RS         rt.runtime_type_descriptor(element_type_id as u64).cloned()
+//RS     }) else {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_host_fault("jit Iter materialization has no element descriptor")
+//RS         });
+//RS         return 0;
+//RS     };
+//RS     let values = clone_list_ints(list);
+//RS     if closure_trapped() {
+//RS         return 0;
+//RS     }
+//RS     Concurrency::with_runtime_mut(
+//RS         |rt| match typed_list_from_raw_values(rt, values, &element) {
+//RS             Ok(list) => list,
+//RS             Err(message) => {
+//RS                 rt.set_host_fault(&message);
+//RS                 0
+//RS             }
+//RS         },
+//RS     )
+//RS }
+//RS 
+//RS fn clone_map_pairs_in_runtime(heap: &mut jet_rt::JetArena, map: i64) -> Vec<(String, i64)> {
+//RS     let len = heap.map_len(map).expect("jit map adapter: bad handle");
+//RS     (0..len)
+//RS         .map(|index| {
+//RS             let key_id = heap.map_key_at(map, index).expect("jit map adapter: key");
+//RS             let key = heap
+//RS                 .clone_string(key_id)
+//RS                 .expect("jit map adapter: string key");
+//RS             let value = heap
+//RS                 .map_value_at(map, index)
+//RS                 .expect("jit map adapter: value");
+//RS             (key, value)
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn clone_map_pairs(map: i64) -> Vec<(String, i64)> {
+//RS     Concurrency::with_runtime_mut(|rt| clone_map_pairs_in_runtime(&mut rt.heap, map))
+//RS }
+//RS 
+//RS fn alloc_from_ints(xs: &[i64]) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let out = rt.heap.alloc_empty_list();
+//RS         for &v in xs {
+//RS             rt.heap
+//RS                 .list_push_int(out, v)
+//RS                 .expect("jit iter adapter: push");
+//RS         }
+//RS         out
+//RS     })
+//RS }
+//RS 
+//RS fn alloc_from_strings(xs: &[String]) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let out = rt.heap.alloc_empty_list();
+//RS         for value in xs {
+//RS             let id = rt.heap.alloc_string(value.clone());
+//RS             rt.heap
+//RS                 .list_push_int(out, id)
+//RS                 .expect("jit string-list adapter: push");
+//RS         }
+//RS         out
+//RS     })
+//RS }
+//RS 
+//RS fn alloc_from_floats(xs: &[f64]) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let out = rt.heap.alloc_empty_list();
+//RS         for &value in xs {
+//RS             rt.heap
+//RS                 .list_push_float(out, value)
+//RS                 .expect("jit float-list adapter: push");
+//RS         }
+//RS         out
+//RS     })
+//RS }
+//RS 
+//RS fn alloc_map_pairs(pairs: &[(String, i64)]) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let map = rt.heap.alloc_empty_map();
+//RS         for (key, value) in pairs {
+//RS             let key_id = rt.heap.alloc_string(key.clone());
+//RS             rt.heap
+//RS                 .map_insert(map, key_id, *value)
+//RS                 .expect("jit map adapter: insert");
+//RS         }
+//RS         map
+//RS     })
+//RS }
+//RS 
+//RS fn alloc_nested_from_ints(xs: &[Vec<i64>]) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let out = rt.heap.alloc_empty_list();
+//RS         for inner in xs {
+//RS             let child = rt.heap.alloc_empty_list();
+//RS             for &value in inner {
+//RS                 rt.heap
+//RS                     .list_push_int(child, value)
+//RS                     .expect("jit nested-list adapter: push");
+//RS             }
+//RS             rt.heap
+//RS                 .list_push_int(out, child)
+//RS                 .expect("jit nested-list adapter: outer push");
+//RS         }
+//RS         out
+//RS     })
+//RS }
+//RS 
+//RS fn transfer_progress_step(source: i64, target: i64, n: i64) -> i64 {
+//RS     crate::IO::progress_transfer_step_state(source, target, n);
+//RS     target
+//RS }
+//RS 
+//RS fn jet_jit_iter_take(list: i64, n: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let source = lazy_source_for(rt, list);
+//RS         if source == 0 {
+//RS             return 0;
+//RS         }
+//RS         crate::runtime_host::lazy_iter_take(rt, source, n)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_iter_skip(list: i64, n: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let source = lazy_source_for(rt, list);
+//RS         if source == 0 {
+//RS             return 0;
+//RS         }
+//RS         crate::runtime_host::lazy_iter_skip(rt, source, n)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_iter_first(list: i64) -> i64 {
+//RS     match collection_semantics::iter_first(clone_list_ints(list)) {
+//RS         Some(value) => value.wrapping_add(1),
+//RS         None => 0,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_iter_first_string(list: i64) -> i64 {
+//RS     match collection_semantics::iter_first(clone_list_strings(list)) {
+//RS         Some(value) => {
+//RS             Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value).wrapping_add(1))
+//RS         }
+//RS         None => 0,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_iter_first_float(list: i64) -> i64 {
+//RS     match collection_semantics::iter_first(clone_list_floats(list)) {
+//RS         Some(value) => value.to_bits().wrapping_add(1) as i64,
+//RS         None => 0,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_iter_step_by(list: i64, n: i64) -> i64 {
+//RS     let xs = clone_list_ints(list);
+//RS     let out = collection_semantics::iter_step_by(xs, n);
+//RS     transfer_progress_step(list, alloc_from_ints(&out), n)
+//RS }
+//RS 
+//RS fn jet_jit_iter_dedup(list: i64, element_type_id: i64) -> i64 {
+//RS     let Some(element_kind) = Concurrency::with_runtime_mut(|rt| {
+//RS         rt.runtime_type_descriptor(element_type_id as u64)
+//RS             .map(|descriptor| descriptor.kind)
+//RS     }) else {
+//RS         Concurrency::with_runtime_mut(|rt| {
+//RS             rt.set_host_fault("jit iterator dedup: missing element type descriptor")
+//RS         });
+//RS         return 0;
+//RS     };
+//RS     let string_elems = matches!(element_kind, crate::runtime_host::RuntimeValueKind::String);
+//RS     let out = match element_kind {
+//RS         crate::runtime_host::RuntimeValueKind::String => {
+//RS             let xs = clone_list_strings(list);
+//RS             alloc_from_strings(&collection_semantics::iter_dedup(xs))
+//RS         }
+//RS         crate::runtime_host::RuntimeValueKind::Float => {
+//RS             let xs = clone_list_floats(list);
+//RS             alloc_from_floats(&collection_semantics::iter_dedup(xs))
+//RS         }
+//RS         _ => {
+//RS             let xs = clone_list_ints(list);
+//RS             alloc_from_ints(&collection_semantics::iter_dedup(xs))
+//RS         }
+//RS     };
+//RS     crate::IO::progress_transfer_dedup_state(list, out, string_elems);
+//RS     out
+//RS }
+//RS fn jet_jit_iter_try_collect(list: i64) -> i64 {
+//RS     let is_lazy = Concurrency::with_runtime_mut(|rt| {
+//RS         crate::runtime_host::lazy_iter_index(rt, list).is_some()
+//RS     });
+//RS     if is_lazy {
+//RS         return Concurrency::with_runtime_mut(|rt| {
+//RS             let mut output = Vec::new();
+//RS             while let Some(value) = crate::runtime_host::lazy_iter_next(rt, list) {
+//RS                 let Some((ok, bits)) = crate::runtime_host::jit_result_parts(rt, value) else {
+//RS                     rt.set_host_fault("jit iterator try_collect: invalid Result element");
+//RS                     return 0;
+//RS                 };
+//RS                 if !ok {
+//RS                     return crate::runtime_host::alloc_jit_result(rt, false, bits);
+//RS                 }
+//RS                 output.push(bits as i64);
+//RS             }
+//RS             if crate::runtime_host::runtime_stop_pending(rt) {
+//RS                 return 0;
+//RS             }
+//RS             let collected = rt.heap.alloc_int_list(output);
+//RS             crate::runtime_host::alloc_jit_result(rt, true, collected as u64)
+//RS         });
+//RS     }
+//RS     let values = clone_list_ints(list);
+//RS     if closure_trapped() {
+//RS         return 0;
+//RS     }
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let mut output = Vec::with_capacity(values.len());
+//RS         for value in values {
+//RS             let Some((ok, bits)) = crate::runtime_host::jit_result_parts(rt, value) else {
+//RS                 rt.set_host_fault("jit iterator try_collect: invalid Result element");
+//RS                 return 0;
+//RS             };
+//RS             if !ok {
+//RS                 return crate::runtime_host::alloc_jit_result(rt, false, bits);
+//RS             }
+//RS             output.push(bits as i64);
+//RS         }
+//RS         let collected = rt.heap.alloc_int_list(output);
+//RS         crate::runtime_host::alloc_jit_result(rt, true, collected as u64)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_iter_chunks(list: i64, n: i64) -> i64 {
+//RS     let xs = clone_list_ints(list);
+//RS     let out = alloc_nested_from_ints(&collection_semantics::iter_chunks(xs, n));
+//RS     crate::IO::progress_transfer_chunks_state(list, out, n);
+//RS     out
+//RS }
+//RS 
+//RS fn jet_jit_iter_windows(list: i64, n: i64) -> i64 {
+//RS     let xs = clone_list_ints(list);
+//RS     let out = alloc_nested_from_ints(&collection_semantics::iter_windows(xs, n));
+//RS     crate::IO::progress_transfer_windows_state(list, out, n);
+//RS     out
+//RS }
+//RS 
+//RS fn jet_jit_list_sum_i64(list: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         clone_list_ints_with_runtime(rt, list)
+//RS             .into_iter()
+//RS             .fold(rt.heap.int_from_i64(0), |acc, value| rt.heap.int_add(acc, value))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_list_product_i64(list: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         clone_list_ints_with_runtime(rt, list)
+//RS             .into_iter()
+//RS             .fold(rt.heap.int_from_i64(1), |acc, value| rt.heap.int_mul(acc, value))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_list_min_i64(list: i64) -> i64 {
+//RS     let value = collection_semantics::list_min_i64(clone_list_ints(list)).ok();
+//RS     Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+//RS }
+//RS 
+//RS fn jet_jit_list_max_i64(list: i64) -> i64 {
+//RS     let value = collection_semantics::list_max_i64(clone_list_ints(list)).ok();
+//RS     Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+//RS }
+//RS 
+//RS fn jet_jit_list_min_float(list: i64) -> i64 {
+//RS     let value = collection_semantics::list_min_float(clone_list_floats(list)).ok();
+//RS     Concurrency::with_runtime_mut(|rt| option_i64(rt, value.map(|v| v.to_bits() as i64)))
+//RS }
+//RS 
+//RS fn jet_jit_list_max_float(list: i64) -> i64 {
+//RS     let value = collection_semantics::list_max_float(clone_list_floats(list)).ok();
+//RS     Concurrency::with_runtime_mut(|rt| option_i64(rt, value.map(|v| v.to_bits() as i64)))
+//RS }
+//RS 
+//RS fn jet_jit_list_flatten(list: i64) -> i64 {
+//RS     let outer = clone_list_ints(list);
+//RS     let nested = Concurrency::with_runtime_mut(|rt| {
+//RS         outer
+//RS             .iter()
+//RS             .map(|inner| rt.heap.clone_int_list(*inner).unwrap_or_default())
+//RS             .collect::<Vec<_>>()
+//RS     });
+//RS     let out = alloc_from_ints(&collection_semantics::list_flatten_i64(nested));
+//RS     crate::IO::progress_transfer_flatten_state(list, out);
+//RS     out
+//RS }
+//RS 
+//RS fn jet_jit_list_intersperse(list: i64, separator: i64) -> i64 {
+//RS     let out = alloc_from_ints(&collection_semantics::list_intersperse_i64(
+//RS         clone_list_ints(list),
+//RS         separator,
+//RS     ));
+//RS     crate::IO::progress_transfer_intersperse_state(list, out);
+//RS     out
+//RS }
+//RS 
+//RS #[derive(Clone, Copy)]
+//RS enum JitZipValue {
+//RS     Bits(i64),
+//RS     Float(f64),
+//RS     Absent,
+//RS }
+//RS 
+//RS fn jit_zip_read_value(
+//RS     heap: &jet_rt::JetArena,
+//RS     list: i64,
+//RS     kind: crate::runtime_host::JitZipValueKind,
+//RS     index: usize,
+//RS ) -> Option<JitZipValue> {
+//RS     let index = i64::try_from(index).ok()?;
+//RS     match kind {
+//RS         crate::runtime_host::JitZipValueKind::Float => {
+//RS             heap.list_get_float(list, index).map(JitZipValue::Float)
+//RS         }
+//RS         crate::runtime_host::JitZipValueKind::Int
+//RS         | crate::runtime_host::JitZipValueKind::Bool
+//RS         | crate::runtime_host::JitZipValueKind::Char
+//RS         | crate::runtime_host::JitZipValueKind::String
+//RS         | crate::runtime_host::JitZipValueKind::Opaque => {
+//RS             heap.list_get_int(list, index).map(JitZipValue::Bits)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Read record field `index` back in the kind `jit_zip_set_value` wrote it in.
+//RS ///
+//RS /// Two callers need this exact per-kind accessor ladder: the per-column fill
+//RS /// record `zip(fill:)` passes, and `jet_jit_list_unzip` taking a row apart
+//RS /// again. It is the read half of `jit_zip_set_value` and must stay total over
+//RS /// the same `JitZipValueKind` set — the unzip host used to read every field
+//RS /// with `record_get_int`, so a `record_set_string` column returned `None`, the
+//RS /// row was dropped, and `["a","bb","c"].zip([1,2,3]).unzip()` answered two
+//RS /// EMPTY lists.
+//RS fn jit_zip_record_field(
+//RS     heap: &mut jet_rt::JetArena,
+//RS     kind: crate::runtime_host::JitZipValueKind,
+//RS     column_fills_handle: i64,
+//RS     index: usize,
+//RS ) -> JitZipValue {
+//RS     let Some(index) = i64::try_from(index).ok() else {
+//RS         return JitZipValue::Absent;
+//RS     };
+//RS     match kind {
+//RS         crate::runtime_host::JitZipValueKind::Float => heap
+//RS             .record_get_float(column_fills_handle, index)
+//RS             .map_or(JitZipValue::Absent, JitZipValue::Float),
+//RS         crate::runtime_host::JitZipValueKind::Bool => heap
+//RS             .record_get_bool(column_fills_handle, index)
+//RS             .map_or(JitZipValue::Absent, |value| {
+//RS                 JitZipValue::Bits(i64::from(value))
+//RS             }),
+//RS         crate::runtime_host::JitZipValueKind::Char => heap
+//RS             .record_get_char(column_fills_handle, index)
+//RS             .map_or(JitZipValue::Absent, |value| {
+//RS                 JitZipValue::Bits(i64::from(u32::from(value)))
+//RS             }),
+//RS         crate::runtime_host::JitZipValueKind::Int => heap
+//RS             .record_get_int(column_fills_handle, index)
+//RS             .map_or(JitZipValue::Absent, JitZipValue::Bits),
+//RS         crate::runtime_host::JitZipValueKind::String => heap
+//RS             .record_get_string(column_fills_handle, index)
+//RS             .map_or(JitZipValue::Absent, JitZipValue::Bits),
+//RS         // `Opaque` is the ONE kind that names no payload representation, so it
+//RS         // must not assert one. It is also the only kind
+//RS         // `LowerCtx::unzip_column_kinds` can reach WITHOUT `JitMeta`: the
+//RS         // static `clif_ty` is distinct-blind, so a `distinct Name = String`
+//RS         // column looks like a plain I64 handle to it, while the row writer used
+//RS         // the distinct-AWARE erasure and stored a `String` cell. Asserting
+//RS         // `record_get_int` there read `None` — the same shape that answered two
+//RS         // empty lists, one ICE further on. So read the cell in ITS shape: the
+//RS         // column list this word is republished into is typed by the same field
+//RS         // type, so the cell's own shape is the representation that list slot
+//RS         // wants (`[Float]` slots are floats, `[String]`/`[Bool]`/`[Char]` slots
+//RS         // are the erased int word). `Int` stays first: it is the hot cell and
+//RS         // pays exactly one match, as before.
+//RS         crate::runtime_host::JitZipValueKind::Opaque => {
+//RS             if let Some(value) = heap.record_get_int(column_fills_handle, index) {
+//RS                 return JitZipValue::Bits(value);
+//RS             }
+//RS             if let Some(value) = heap.record_get_float(column_fills_handle, index) {
+//RS                 return JitZipValue::Float(value);
+//RS             }
+//RS             if let Some(value) = heap.record_get_bool(column_fills_handle, index) {
+//RS                 return JitZipValue::Bits(i64::from(value));
+//RS             }
+//RS             if let Some(value) = heap.record_get_char(column_fills_handle, index) {
+//RS                 return JitZipValue::Bits(i64::from(u32::from(value)));
+//RS             }
+//RS             heap.record_get_string(column_fills_handle, index)
+//RS                 .map_or(JitZipValue::Absent, JitZipValue::Bits)
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn jit_zip_common_fill_value(
+//RS     kind: crate::runtime_host::JitZipValueKind,
+//RS     common_fill: i64,
+//RS ) -> JitZipValue {
+//RS     match kind {
+//RS         crate::runtime_host::JitZipValueKind::Float => {
+//RS             JitZipValue::Float(f64::from_bits(common_fill as u64))
+//RS         }
+//RS         _ => JitZipValue::Bits(common_fill),
+//RS     }
+//RS }
+//RS 
+//RS fn jit_zip_pack_value(value: JitZipValue) -> i64 {
+//RS     match value {
+//RS         JitZipValue::Bits(value) => value.wrapping_add(1),
+//RS         JitZipValue::Float(value) => (value.to_bits() as i64).wrapping_add(1),
+//RS         JitZipValue::Absent => 0,
+//RS     }
+//RS }
+//RS 
+//RS fn jit_zip_set_value(
+//RS     heap: &mut jet_rt::JetArena,
+//RS     record: i64,
+//RS     index: usize,
+//RS     column: crate::runtime_host::JitZipColumn,
+//RS     value: JitZipValue,
+//RS ) -> Option<()> {
+//RS     let index = i64::try_from(index).ok()?;
+//RS     if column.optional {
+//RS         return heap.record_set_int(record, index, jit_zip_pack_value(value));
+//RS     }
+//RS     match (column.field, value) {
+//RS         (crate::runtime_host::JitZipValueKind::Float, JitZipValue::Float(value)) => {
+//RS             heap.record_set_float(record, index, value)
+//RS         }
+//RS         (crate::runtime_host::JitZipValueKind::Int, JitZipValue::Bits(value))
+//RS         | (crate::runtime_host::JitZipValueKind::Opaque, JitZipValue::Bits(value)) => {
+//RS             heap.record_set_int(record, index, value)
+//RS         }
+//RS         (crate::runtime_host::JitZipValueKind::Bool, JitZipValue::Bits(value)) => {
+//RS             heap.record_set_bool(record, index, value != 0)
+//RS         }
+//RS         (crate::runtime_host::JitZipValueKind::Char, JitZipValue::Bits(value)) => {
+//RS             heap.record_set_char(record, index, char::from_u32(value as u32).unwrap_or('\0'))
+//RS         }
+//RS         (crate::runtime_host::JitZipValueKind::String, JitZipValue::Bits(value)) => {
+//RS             heap.record_set_string(record, index, value)
+//RS         }
+//RS         (crate::runtime_host::JitZipValueKind::Float, JitZipValue::Bits(value)) => {
+//RS             heap.record_set_float(record, index, f64::from_bits(value as u64))
+//RS         }
+//RS         (_, JitZipValue::Absent) => None,
+//RS         (_, _) => None,
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_iter_zip_family(
+//RS     plan_id: i64,
+//RS     column_handles: i64,
+//RS     common_fill: i64,
+//RS     column_fills: i64,
+//RS ) -> i64 {
+//RS     let out = zip_family_rows(plan_id, column_handles, common_fill, column_fills);
+//RS     // The sidecar reads list lengths itself, so it runs outside the runtime
+//RS     // borrow the row builder holds.
+//RS     let columns = Concurrency::with_runtime_mut(|rt| {
+//RS         rt.heap.clone_int_list(column_handles).unwrap_or_default()
+//RS     });
+//RS     crate::IO::progress_transfer_zip_state(&columns, out);
+//RS     out
+//RS }
+//RS 
+//RS fn zip_family_rows(plan_id: i64, column_handles: i64, common_fill: i64, column_fills: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let out = rt.heap.alloc_empty_list();
+//RS         let Some(plan_id) = usize::try_from(plan_id).ok() else {
+//RS             jet_foundation::ice!(None, "zip plan missing");
+//RS         };
+//RS         let Some(plan) = rt.zip_plans.get(plan_id).cloned() else {
+//RS             jet_foundation::ice!(None, "zip plan missing");
+//RS         };
+//RS         let Some(handles) = rt.heap.clone_int_list(column_handles) else {
+//RS             jet_foundation::ice!(None, "zip columns handle invalid");
+//RS         };
+//RS         if handles.len() != plan.columns.len() {
+//RS             jet_foundation::ice!(None, "zip columns arity mismatch");
+//RS         }
+//RS         let Some(lengths) = handles
+//RS             .iter()
+//RS             .map(|handle| rt.heap.list_len(*handle))
+//RS             .collect::<Option<Vec<_>>>()
+//RS             .map(|lengths| {
+//RS                 lengths
+//RS                     .into_iter()
+//RS                     .map(|length| usize::try_from(length).unwrap_or(0))
+//RS                     .collect::<Vec<_>>()
+//RS             })
+//RS         else {
+//RS             jet_foundation::ice!(None, "zip column handle invalid");
+//RS         };
+//RS         let common_fills = if plan.fill_mode == 1 {
+//RS             plan.columns
+//RS                 .iter()
+//RS                 .map(|column| jit_zip_common_fill_value(column.field, common_fill))
+//RS                 .collect::<Vec<_>>()
+//RS         } else {
+//RS             Vec::new()
+//RS         };
+//RS         let column_fills = if plan.fill_mode == 2 {
+//RS             plan.columns
+//RS                 .iter()
+//RS                 .enumerate()
+//RS                 .map(|(index, column)| {
+//RS                     jit_zip_record_field(&mut rt.heap, column.field, column_fills, index)
+//RS                 })
+//RS                 .collect::<Vec<_>>()
+//RS         } else {
+//RS             Vec::new()
+//RS         };
+//RS         let Some(rows) = collection_semantics::zip_rows(
+//RS             &lengths,
+//RS             plan.mode,
+//RS             |column, index| {
+//RS                 jit_zip_read_value(&rt.heap, handles[column], plan.columns[column].input, index)
+//RS             },
+//RS             |column| {
+//RS                 collection_semantics::zip_fill_at(
+//RS                     plan.fill_mode,
+//RS                     &common_fills,
+//RS                     &column_fills,
+//RS                     JitZipValue::Absent,
+//RS                     column,
+//RS                 )
+//RS             },
+//RS         ) else {
+//RS             rt.set_runtime_stop_at("E0128", "<core.collections>", 0, "strict");
+//RS             return out;
+//RS         };
+//RS         for values in rows {
+//RS             let record = rt.heap.alloc_record(plan.columns.len());
+//RS             for (column_index, (column, value)) in plan.columns.iter().zip(values).enumerate() {
+//RS                 if jit_zip_set_value(&mut rt.heap, record, column_index, *column, value).is_none() {
+//RS                     jet_foundation::ice!(None, "zip value representation mismatch");
+//RS                 }
+//RS             }
+//RS             let _ = rt.heap.list_push_int(out, record);
+//RS         }
+//RS         out
+//RS     })
+//RS }
+//RS 
+//RS /// Push one already-read column word back into a list in its own kind.
+//RS ///
+//RS /// The write half of `jit_zip_read_value`: every kind except `Float` lives as
+//RS /// one `i64` word in a list slot (a `String` slot holds the string handle), and
+//RS /// `Float` needs `list_push_float` because a list slot is a `JetVal::Float`,
+//RS /// not the bit pattern.
+//RS fn jit_zip_push_column_value(
+//RS     heap: &mut jet_rt::JetArena,
+//RS     list: i64,
+//RS     value: JitZipValue,
+//RS ) -> Option<()> {
+//RS     match value {
+//RS         JitZipValue::Float(value) => heap.list_push_float(list, value),
+//RS         JitZipValue::Bits(value) => heap.list_push_int(list, value),
+//RS         JitZipValue::Absent => None,
+//RS     }
+//RS }
+//RS 
+//RS /// `[(A, B)].unzip()` — two columns, each read and republished in its OWN kind.
+//RS ///
+//RS /// The kinds arrive as immediates (`JitZipValueKind::code`) because lowering
+//RS /// already knows the row's field types and an unzip has no fill mode to plan.
+//RS /// This used to be an i64-pair host: it read both fields with `record_get_int`,
+//RS /// so a `String` column read `None`, the whole row fell out of a `filter_map`,
+//RS /// and the answer was two EMPTY lists rather than a stop. The split semantics
+//RS /// still belong to the Prelude kernel (I9); only the representation is here.
+// END-PORT-PENDING 0199 crates/jet-jit/src/Collections.rs:5504-7293
+

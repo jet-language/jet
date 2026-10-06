@@ -1,0 +1,1588 @@
+// PORT-PENDING 0223 crates-jet-jit-src-mathextra-module-group: crates/jet-jit/src/MathExtra.rs:1-1584
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! Extra `core.math` hosts (#1464 / I9). Algorithms from Prelude `MathLibPure`
+//RS //! via build.rs extract — marshalling only.
+//RS 
+//RS // This module includes shared Prelude source that several hosts compile,
+//RS // each using a different subset, so dead-code reports here are about the
+//RS // other hosts' usage, not about this one. Scoped to the module, never the crate.
+//RS #![allow(dead_code)]
+//RS 
+//RS use super::Concurrency;
+//RS use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS use cranelift_module::Module;
+//RS 
+//RS pub(crate) mod math_rt {
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     include!(concat!(env!("OUT_DIR"), "/math_rt.rs"));
+//RS }
+//RS 
+//RS pub(crate) mod collection_rt {
+//RS     pub(crate) type JetOutcome<T, E> = Result<T, E>;
+//RS 
+//RS     #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+//RS     pub(crate) struct JetAbsent;
+//RS 
+//RS     pub(crate) trait JetShow {
+//RS         fn jet_show(&self) -> String;
+//RS     }
+//RS     pub(crate) trait JetDisplay {
+//RS         fn jet_display(&self) -> String;
+//RS     }
+//RS     pub(crate) trait JetDebug {
+//RS         fn jet_debug(&self) -> String;
+//RS     }
+//RS 
+//RS     impl<T: std::fmt::Display> JetShow for Vec<T> {
+//RS         fn jet_show(&self) -> String {
+//RS             format!(
+//RS                 "[{}]",
+//RS                 self.iter()
+//RS                     .map(ToString::to_string)
+//RS                     .collect::<Vec<_>>()
+//RS                     .join(", ")
+//RS             )
+//RS         }
+//RS     }
+//RS 
+//RS     include!(concat!(env!("OUT_DIR"), "/collection_rt.rs"));
+//RS }
+//RS 
+//RS fn jet_jit_math_pi() -> f64 {
+//RS     math_rt::jet_std_math_pi()
+//RS }
+//RS fn jet_jit_math_abs_i64(value: i64) -> i64 {
+//RS     math_rt::jet_std_math_abs_i64(value)
+//RS }
+//RS fn jet_jit_math_abs_f64(value: f64) -> f64 {
+//RS     math_rt::jet_std_math_abs_f64(value)
+//RS }
+//RS fn jet_jit_math_abs_f32(value: f64) -> f64 {
+//RS     math_rt::jet_std_math_abs_f32(value as f32) as f64
+//RS }
+//RS fn jet_jit_math_to_bits(value: f64) -> i64 {
+//RS     math_rt::jet_std_math_to_bits(value)
+//RS }
+//RS fn jet_jit_math_from_bits(value: i64) -> f64 {
+//RS     math_rt::jet_std_math_from_bits(value)
+//RS }
+//RS fn jet_jit_math_round(value: f64) -> i64 {
+//RS     math_rt::jet_std_math_round(value)
+//RS }
+//RS fn jet_jit_math_is_nan(x: f64) -> i8 {
+//RS     i8::from(math_rt::jet_std_math_is_nan(x))
+//RS }
+//RS fn jet_jit_math_is_infinite(x: f64) -> i8 {
+//RS     i8::from(math_rt::jet_std_math_is_infinite(x))
+//RS }
+//RS fn jet_jit_math_is_finite(x: f64) -> i8 {
+//RS     i8::from(math_rt::jet_std_math_is_finite(x))
+//RS }
+//RS 
+//RS // Core-call lowering narrows every declared `Int` argument to its raw machine
+//RS // word and widens scalar `Int` results of raw-word rows; compound results
+//RS // (lists, records, packed options) are built here, so their `Int` cells must
+//RS // already hold exact carriers. List inputs narrow each carrier the way AOT
+//RS // narrows a declared `[Int]` argument.
+//RS fn int_cell(rt: &mut crate::runtime_host::JitRuntime, value: i64) -> i64 {
+//RS     rt.heap.int_from_i64(value)
+//RS }
+//RS fn int_word(rt: &mut crate::runtime_host::JitRuntime, carrier: i64) -> i64 {
+//RS     match rt.heap.int_to_i64(carrier) {
+//RS         Some(value) => value,
+//RS         None => {
+//RS             rt.set_arithmetic_stop(0, "native Int argument exceeds host range");
+//RS             0
+//RS         }
+//RS     }
+//RS }
+//RS fn opt_i64(v: Option<i64>) -> i64 {
+//RS     match v {
+//RS         Some(n) => Concurrency::with_runtime_mut(|rt| int_cell(rt, n)).wrapping_add(1),
+//RS         None => 0,
+//RS     }
+//RS }
+//RS fn list_f64s(list: i64) -> Vec<f64> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(list).unwrap_or(0);
+//RS         (0..len)
+//RS             .map(|index| rt.heap.list_get_float(list, index).unwrap_or(0.0))
+//RS             .collect()
+//RS     })
+//RS }
+//RS fn list_i64s(list: i64) -> Vec<i64> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let len = rt.heap.list_len(list).unwrap_or(0);
+//RS         (0..len)
+//RS             .map(|index| {
+//RS                 let carrier = rt.heap.list_get_int(list, index).unwrap_or(0);
+//RS                 int_word(rt, carrier)
+//RS             })
+//RS             .collect()
+//RS     })
+//RS }
+//RS fn list_bools(list: i64) -> Vec<bool> {
+//RS     list_i64s(list).into_iter().map(|value| value != 0).collect()
+//RS }
+//RS fn alloc_i64_list(values: &[i64]) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let handle = rt.heap.alloc_empty_list();
+//RS         for &value in values {
+//RS             let value = int_cell(rt, value);
+//RS             let _ = rt.heap.list_push_int(handle, value);
+//RS         }
+//RS         handle
+//RS     })
+//RS }
+//RS 
+//RS fn coll_string(rt: &crate::runtime_host::JitRuntime, handle: i64) -> String {
+//RS     rt.heap
+//RS         .clone_string(handle)
+//RS         .or_else(|| crate::runtime_host::view_string(rt, handle))
+//RS         .unwrap_or_default()
+//RS }
+//RS 
+//RS fn coll_read_string_list(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     list: i64,
+//RS ) -> Option<Vec<String>> {
+//RS     let len = rt.heap.list_len(list)?;
+//RS     (0..len)
+//RS         .map(|index| rt.heap.list_get_string(list, index))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn coll_read_i64_list(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     list: i64,
+//RS ) -> Option<Vec<i64>> {
+//RS     let len = rt.heap.list_len(list)?;
+//RS     (0..len)
+//RS         .map(|index| rt.heap.list_get_int(list, index))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn coll_alloc_string_list(rt: &mut crate::runtime_host::JitRuntime, values: &[String]) -> i64 {
+//RS     let list = rt.heap.alloc_empty_list();
+//RS     for value in values {
+//RS         let handle = rt.heap.alloc_string(value.clone());
+//RS         let _ = rt.heap.list_push_int(list, handle);
+//RS     }
+//RS     list
+//RS }
+//RS 
+//RS fn coll_read_counter(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<collection_rt::JetCounter> {
+//RS     let keys = rt.heap.record_get_int(handle, 0)?;
+//RS     let counts = rt.heap.record_get_int(handle, 1)?;
+//RS     Some(collection_rt::JetCounter {
+//RS         keys: coll_read_string_list(rt, keys)?,
+//RS         counts: coll_read_i64_list(rt, counts)?,
+//RS     })
+//RS }
+//RS 
+//RS fn coll_alloc_counter(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     counter: &collection_rt::JetCounter,
+//RS ) -> i64 {
+//RS     let keys = coll_alloc_string_list(rt, &counter.keys);
+//RS     let counts = rt.heap.alloc_int_list(counter.counts.clone());
+//RS     let record = rt.heap.alloc_record(2);
+//RS     let _ = rt.heap.record_set_int(record, 0, keys);
+//RS     let _ = rt.heap.record_set_int(record, 1, counts);
+//RS     record
+//RS }
+//RS 
+//RS fn coll_read_ordered_map(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<collection_rt::JetOrderedMap> {
+//RS     let keys = rt.heap.record_get_int(handle, 0)?;
+//RS     let values = rt.heap.record_get_int(handle, 1)?;
+//RS     Some(collection_rt::JetOrderedMap {
+//RS         keys: coll_read_string_list(rt, keys)?,
+//RS         values: coll_read_string_list(rt, values)?,
+//RS     })
+//RS }
+//RS 
+//RS fn coll_alloc_ordered_map(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     map: &collection_rt::JetOrderedMap,
+//RS ) -> i64 {
+//RS     let keys = coll_alloc_string_list(rt, &map.keys);
+//RS     let values = coll_alloc_string_list(rt, &map.values);
+//RS     let record = rt.heap.alloc_record(2);
+//RS     let _ = rt.heap.record_set_int(record, 0, keys);
+//RS     let _ = rt.heap.record_set_int(record, 1, values);
+//RS     record
+//RS }
+//RS 
+//RS fn coll_read_layer(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<collection_rt::JetLayer> {
+//RS     let keys = rt.heap.record_get_int(handle, 0)?;
+//RS     let values = rt.heap.record_get_int(handle, 1)?;
+//RS     Some(collection_rt::JetLayer {
+//RS         keys: coll_read_string_list(rt, keys)?,
+//RS         values: coll_read_string_list(rt, values)?,
+//RS     })
+//RS }
+//RS 
+//RS fn coll_read_layer_list(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     list: i64,
+//RS ) -> Option<Vec<collection_rt::JetLayer>> {
+//RS     let len = rt.heap.list_len(list)?;
+//RS     (0..len)
+//RS         .map(|index| {
+//RS             let handle = rt
+//RS                 .heap
+//RS                 .list_get_int(list, index)
+//RS                 .or_else(|| rt.heap.list_get_raw(list, index))?;
+//RS             coll_read_layer(rt, handle)
+//RS         })
+//RS         .collect()
+//RS }
+//RS 
+//RS fn coll_alloc_layer(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     layer: &collection_rt::JetLayer,
+//RS ) -> i64 {
+//RS     let keys = coll_alloc_string_list(rt, &layer.keys);
+//RS     let values = coll_alloc_string_list(rt, &layer.values);
+//RS     let record = rt.heap.alloc_record(2);
+//RS     let _ = rt.heap.record_set_int(record, 0, keys);
+//RS     let _ = rt.heap.record_set_int(record, 1, values);
+//RS     record
+//RS }
+//RS 
+//RS fn coll_read_chain(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<collection_rt::JetChain> {
+//RS     let layers = rt.heap.record_get_int(handle, 0)?;
+//RS     Some(collection_rt::JetChain {
+//RS         layers: coll_read_layer_list(rt, layers)?,
+//RS     })
+//RS }
+//RS 
+//RS fn coll_alloc_chain(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     chain: &collection_rt::JetChain,
+//RS ) -> i64 {
+//RS     let layers = rt.heap.alloc_empty_list();
+//RS     for layer in &chain.layers {
+//RS         let handle = coll_alloc_layer(rt, layer);
+//RS         let _ = rt.heap.list_push_int(layers, handle);
+//RS     }
+//RS     let record = rt.heap.alloc_record(1);
+//RS     let _ = rt.heap.record_set_int(record, 0, layers);
+//RS     record
+//RS }
+//RS 
+//RS 
+//RS fn coll_option_string(rt: &mut crate::runtime_host::JitRuntime, value: Option<String>) -> i64 {
+//RS     value
+//RS         .map(|value| rt.heap.alloc_string(value).wrapping_add(1))
+//RS         .unwrap_or(0)
+//RS }
+//RS 
+//RS fn jet_jit_comb_chain(left: i64, right: i64) -> i64 {
+//RS     alloc_i64_list(&math_rt::jet_comb_chain(list_i64s(left), list_i64s(right)))
+//RS }
+//RS fn jet_jit_comb_compress(items: i64, mask: i64) -> i64 {
+//RS     alloc_i64_list(&math_rt::jet_comb_compress(list_i64s(items), list_bools(mask)))
+//RS }
+//RS fn jet_jit_comb_drop(items: i64, count: i64) -> i64 {
+//RS     alloc_i64_list(&math_rt::jet_comb_drop(list_i64s(items), count))
+//RS }
+//RS fn jet_jit_comb_takewhile(items: i64, pred_nonneg: i8) -> i64 {
+//RS     alloc_i64_list(&math_rt::jet_comb_takewhile(list_i64s(items), pred_nonneg != 0))
+//RS }
+//RS fn jet_jit_comb_dropwhile(items: i64, pred_nonneg: i8) -> i64 {
+//RS     alloc_i64_list(&math_rt::jet_comb_dropwhile(list_i64s(items), pred_nonneg != 0))
+//RS }
+//RS fn jet_jit_comb_filterfalse(items: i64, pred_nonneg: i8) -> i64 {
+//RS     alloc_i64_list(&math_rt::jet_comb_filterfalse(list_i64s(items), pred_nonneg != 0))
+//RS }
+//RS fn jet_jit_comb_islice(items: i64, start: i64, stop: i64, step: i64) -> i64 {
+//RS     alloc_i64_list(&math_rt::jet_comb_islice(list_i64s(items), start, stop, step))
+//RS }
+//RS fn jet_jit_comb_unique(items: i64) -> i64 {
+//RS     alloc_i64_list(&math_rt::jet_comb_unique(list_i64s(items)))
+//RS }
+//RS fn jet_jit_comb_repeat(value: i64, times: i64) -> i64 {
+//RS     alloc_i64_list(&math_rt::jet_comb_repeat(value, times))
+//RS }
+//RS fn jet_jit_comb_count_from(start: i64, step: i64, count: i64) -> i64 {
+//RS     alloc_i64_list(&math_rt::jet_comb_count_from(start, step, count))
+//RS }
+//RS fn jet_jit_comb_cycle(items: i64, times: i64) -> i64 {
+//RS     alloc_i64_list(&math_rt::jet_comb_cycle(list_i64s(items), times))
+//RS }
+//RS fn jet_jit_comb_accumulate(items: i64) -> i64 {
+//RS     alloc_i64_list(&math_rt::jet_comb_accumulate(list_i64s(items)))
+//RS }
+//RS fn jet_jit_comb_reverse(items: i64) -> i64 {
+//RS     alloc_i64_list(&math_rt::jet_comb_reverse(list_i64s(items)))
+//RS }
+//RS fn list_i64_matrix(list: i64) -> Vec<Vec<i64>> {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let outer_len = rt.heap.list_len(list).unwrap_or(0);
+//RS         (0..outer_len)
+//RS             .map(|outer_index| {
+//RS                 let inner = rt.heap.list_get_int(list, outer_index).unwrap_or(0);
+//RS                 let inner_len = rt.heap.list_len(inner).unwrap_or(0);
+//RS                 (0..inner_len)
+//RS                     .map(|inner_index| {
+//RS                         let carrier = rt.heap.list_get_int(inner, inner_index).unwrap_or(0);
+//RS                         int_word(rt, carrier)
+//RS                     })
+//RS                     .collect()
+//RS             })
+//RS             .collect()
+//RS     })
+//RS }
+//RS fn alloc_i64_matrix(values: &[Vec<i64>]) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let outer = rt.heap.alloc_empty_list();
+//RS         for row in values {
+//RS             let inner = rt.heap.alloc_empty_list();
+//RS             for &value in row {
+//RS                 let value = int_cell(rt, value);
+//RS                 let _ = rt.heap.list_push_int(inner, value);
+//RS             }
+//RS             let _ = rt.heap.list_push_int(outer, inner);
+//RS         }
+//RS         outer
+//RS     })
+//RS }
+//RS fn jet_jit_comb_permutations(items: i64, k: i64) -> i64 {
+//RS     alloc_i64_matrix(&math_rt::jet_comb_permutations(list_i64s(items), k))
+//RS }
+//RS fn jet_jit_comb_combinations(items: i64, k: i64) -> i64 {
+//RS     alloc_i64_matrix(&math_rt::jet_comb_combinations(list_i64s(items), k))
+//RS }
+//RS fn jet_jit_comb_combinations_with_replacement(items: i64, k: i64) -> i64 {
+//RS     alloc_i64_matrix(&math_rt::jet_comb_combinations_with_replacement(
+//RS         list_i64s(items),
+//RS         k,
+//RS     ))
+//RS }
+//RS fn jet_jit_comb_product(items: i64, repeat: i64) -> i64 {
+//RS     alloc_i64_matrix(&math_rt::jet_comb_product(list_i64s(items), repeat))
+//RS }
+//RS fn jet_jit_comb_cartesian(left: i64, right: i64) -> i64 {
+//RS     alloc_i64_matrix(&math_rt::jet_comb_cartesian(list_i64s(left), list_i64s(right)))
+//RS }
+//RS fn jet_jit_comb_pairwise(items: i64) -> i64 {
+//RS     alloc_i64_matrix(&math_rt::jet_comb_pairwise(list_i64s(items)))
+//RS }
+//RS fn jet_jit_comb_batched(items: i64, size: i64) -> i64 {
+//RS     alloc_i64_matrix(&math_rt::jet_comb_batched(list_i64s(items), size))
+//RS }
+//RS fn jet_jit_comb_groupby(items: i64) -> i64 {
+//RS     alloc_i64_matrix(&math_rt::jet_comb_groupby(list_i64s(items)))
+//RS }
+//RS fn jet_jit_comb_tee(items: i64, copies: i64) -> i64 {
+//RS     alloc_i64_matrix(&math_rt::jet_comb_tee(list_i64s(items), copies))
+//RS }
+//RS fn jet_jit_comb_zip_longest(left: i64, right: i64, fill: i64) -> i64 {
+//RS     alloc_i64_matrix(&math_rt::jet_comb_zip_longest(
+//RS         list_i64s(left),
+//RS         list_i64s(right),
+//RS         fill,
+//RS     ))
+//RS }
+//RS fn jet_jit_comb_powerset(items: i64) -> i64 {
+//RS     alloc_i64_matrix(&math_rt::jet_comb_powerset(list_i64s(items)))
+//RS }
+//RS fn jet_jit_comb_windows(items: i64, size: i64) -> i64 {
+//RS     alloc_i64_matrix(&math_rt::jet_comb_windows(list_i64s(items), size))
+//RS }
+//RS fn jet_jit_comb_flatten(groups: i64) -> i64 {
+//RS     alloc_i64_list(&math_rt::jet_comb_flatten(list_i64_matrix(groups)))
+//RS }
+//RS fn jet_jit_comb_starmap(rows: i64) -> i64 {
+//RS     alloc_i64_list(&math_rt::jet_comb_starmap(list_i64_matrix(rows)))
+//RS }
+//RS fn jet_jit_coll_heapify(items: i64) -> i64 {
+//RS     let items = list_i64s(items);
+//RS     alloc_i64_list(&math_rt::jet_coll_heapify(&items))
+//RS }
+//RS fn jet_jit_coll_heappush(items: i64, value: i64) -> i64 {
+//RS     let items = list_i64s(items);
+//RS     alloc_i64_list(&math_rt::jet_coll_heappush(&items, value))
+//RS }
+//RS fn jet_jit_coll_bisect_left(items: i64, value: i64) -> i64 {
+//RS     let items = list_i64s(items);
+//RS     math_rt::jet_coll_bisect_left(&items, value)
+//RS }
+//RS fn jet_jit_coll_bisect_right(items: i64, value: i64) -> i64 {
+//RS     let items = list_i64s(items);
+//RS     math_rt::jet_coll_bisect_right(&items, value)
+//RS }
+//RS fn jet_jit_coll_insort_left(items: i64, value: i64) -> i64 {
+//RS     let items = list_i64s(items);
+//RS     alloc_i64_list(&math_rt::jet_coll_insort_left(&items, value))
+//RS }
+//RS fn jet_jit_coll_insort_right(items: i64, value: i64) -> i64 {
+//RS     let items = list_i64s(items);
+//RS     alloc_i64_list(&math_rt::jet_coll_insort_right(&items, value))
+//RS }
+//RS fn jet_jit_coll_merge_sorted(left: i64, right: i64) -> i64 {
+//RS     let left = list_i64s(left);
+//RS     let right = list_i64s(right);
+//RS     alloc_i64_list(&math_rt::jet_coll_merge_sorted(&left, &right))
+//RS }
+//RS fn jet_jit_coll_nsmallest(n: i64, items: i64) -> i64 {
+//RS     let items = list_i64s(items);
+//RS     alloc_i64_list(&math_rt::jet_coll_nsmallest(n, &items))
+//RS }
+//RS fn jet_jit_coll_nlargest(n: i64, items: i64) -> i64 {
+//RS     let items = list_i64s(items);
+//RS     alloc_i64_list(&math_rt::jet_coll_nlargest(n, &items))
+//RS }
+//RS fn jet_jit_coll_heappop(items: i64) -> i64 {
+//RS     let items = list_i64s(items);
+//RS     let (heap, value) = math_rt::jet_coll_heappop_pure(&items);
+//RS     pair_list_opt(&heap, value)
+//RS }
+//RS fn jet_jit_coll_heappushpop(items: i64, value: i64) -> i64 {
+//RS     let items = list_i64s(items);
+//RS     let (heap, popped) = math_rt::jet_coll_heappushpop_pure(&items, value);
+//RS     pair_list_i64(&heap, popped)
+//RS }
+//RS fn jet_jit_coll_heapreplace(items: i64, value: i64) -> i64 {
+//RS     let items = list_i64s(items);
+//RS     let (heap, popped) = math_rt::jet_coll_heapreplace_pure(&items, value);
+//RS     pair_list_opt(&heap, popped)
+//RS }
+//RS 
+//RS fn pair_list_opt(values: &[i64], value: Option<i64>) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let cells = values.iter().map(|value| int_cell(rt, *value)).collect();
+//RS         let list = rt.heap.alloc_int_list(cells);
+//RS         let payload = value.map(|value| int_cell(rt, value));
+//RS         let option = crate::runtime_host::alloc_jit_result(
+//RS             rt,
+//RS             payload.is_some(),
+//RS             payload.unwrap_or_default() as u64,
+//RS         );
+//RS         let h = rt.heap.alloc_record(2);
+//RS         let _ = rt.heap.record_set_int(h, 0, list);
+//RS         let _ = rt.heap.record_set_int(h, 1, option);
+//RS         h
+//RS     })
+//RS }
+//RS 
+//RS fn pair_list_i64(values: &[i64], value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let cells = values.iter().map(|value| int_cell(rt, *value)).collect();
+//RS         let list = rt.heap.alloc_int_list(cells);
+//RS         let value = int_cell(rt, value);
+//RS         let h = rt.heap.alloc_record(2);
+//RS         let _ = rt.heap.record_set_int(h, 0, list);
+//RS         let _ = rt.heap.record_set_int(h, 1, value);
+//RS         h
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS fn jet_jit_coll_counter() -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         coll_alloc_counter(rt, &collection_rt::jet_coll_counter())
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_counter_from(keys: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let keys = coll_read_string_list(rt, keys).unwrap_or_default();
+//RS         coll_alloc_counter(rt, &collection_rt::jet_coll_counter_from(&keys))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_counter_add(counter: i64, key: i64, amount: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let counter =
+//RS             coll_read_counter(rt, counter).unwrap_or_else(collection_rt::jet_coll_counter);
+//RS         let key = coll_string(rt, key);
+//RS         let next = collection_rt::jet_coll_counter_add(&counter, &key, amount);
+//RS         coll_alloc_counter(rt, &next)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_counter_inc(counter: i64, key: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let counter =
+//RS             coll_read_counter(rt, counter).unwrap_or_else(collection_rt::jet_coll_counter);
+//RS         let key = coll_string(rt, key);
+//RS         let next = collection_rt::jet_coll_counter_inc(&counter, &key);
+//RS         coll_alloc_counter(rt, &next)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_counter_dec(counter: i64, key: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let counter =
+//RS             coll_read_counter(rt, counter).unwrap_or_else(collection_rt::jet_coll_counter);
+//RS         let key = coll_string(rt, key);
+//RS         let next = collection_rt::jet_coll_counter_dec(&counter, &key);
+//RS         coll_alloc_counter(rt, &next)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_counter_get(counter: i64, key: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let counter =
+//RS             coll_read_counter(rt, counter).unwrap_or_else(collection_rt::jet_coll_counter);
+//RS         let key = coll_string(rt, key);
+//RS         collection_rt::jet_coll_counter_get(&counter, &key)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_counter_set_count(counter: i64, key: i64, count: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let counter =
+//RS             coll_read_counter(rt, counter).unwrap_or_else(collection_rt::jet_coll_counter);
+//RS         let key = coll_string(rt, key);
+//RS         let next = collection_rt::jet_coll_counter_set_count(&counter, &key, count);
+//RS         coll_alloc_counter(rt, &next)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_counter_total(counter: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let counter =
+//RS             coll_read_counter(rt, counter).unwrap_or_else(collection_rt::jet_coll_counter);
+//RS         collection_rt::jet_coll_counter_total(&counter)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_counter_names(counter: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let counter =
+//RS             coll_read_counter(rt, counter).unwrap_or_else(collection_rt::jet_coll_counter);
+//RS         coll_alloc_string_list(rt, &collection_rt::jet_coll_counter_names(&counter))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_counter_elements(counter: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let counter =
+//RS             coll_read_counter(rt, counter).unwrap_or_else(collection_rt::jet_coll_counter);
+//RS         coll_alloc_string_list(rt, &collection_rt::jet_coll_counter_elements(&counter))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_counter_most_common(counter: i64, k: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let counter =
+//RS             coll_read_counter(rt, counter).unwrap_or_else(collection_rt::jet_coll_counter);
+//RS         let next = collection_rt::jet_coll_counter_most_common(&counter, k);
+//RS         coll_alloc_counter(rt, &next)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_counter_subtract(left: i64, right: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let left = coll_read_counter(rt, left).unwrap_or_else(collection_rt::jet_coll_counter);
+//RS         let right =
+//RS             coll_read_counter(rt, right).unwrap_or_else(collection_rt::jet_coll_counter);
+//RS         let next = collection_rt::jet_coll_counter_subtract(&left, &right);
+//RS         coll_alloc_counter(rt, &next)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_counter_merge_add(left: i64, right: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let left = coll_read_counter(rt, left).unwrap_or_else(collection_rt::jet_coll_counter);
+//RS         let right =
+//RS             coll_read_counter(rt, right).unwrap_or_else(collection_rt::jet_coll_counter);
+//RS         let next = collection_rt::jet_coll_counter_merge_add(&left, &right);
+//RS         coll_alloc_counter(rt, &next)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_counter_clear(counter: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let counter =
+//RS             coll_read_counter(rt, counter).unwrap_or_else(collection_rt::jet_coll_counter);
+//RS         coll_alloc_counter(rt, &collection_rt::jet_coll_counter_clear(&counter))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_ordered_map() -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         coll_alloc_ordered_map(rt, &collection_rt::jet_coll_ordered_map())
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_map_get(map: i64, key: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let map =
+//RS             coll_read_ordered_map(rt, map).unwrap_or_else(collection_rt::jet_coll_ordered_map);
+//RS         let key = coll_string(rt, key);
+//RS         coll_option_string(rt, collection_rt::jet_coll_map_get(&map, &key))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_map_set(map: i64, key: i64, value: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let map =
+//RS             coll_read_ordered_map(rt, map).unwrap_or_else(collection_rt::jet_coll_ordered_map);
+//RS         let key = coll_string(rt, key);
+//RS         let value = coll_string(rt, value);
+//RS         let next = collection_rt::jet_coll_map_set(&map, &key, &value);
+//RS         coll_alloc_ordered_map(rt, &next)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_map_remove(map: i64, key: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let map =
+//RS             coll_read_ordered_map(rt, map).unwrap_or_else(collection_rt::jet_coll_ordered_map);
+//RS         let key = coll_string(rt, key);
+//RS         let next = collection_rt::jet_coll_map_remove(&map, &key);
+//RS         coll_alloc_ordered_map(rt, &next)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_map_keys(map: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let map =
+//RS             coll_read_ordered_map(rt, map).unwrap_or_else(collection_rt::jet_coll_ordered_map);
+//RS         coll_alloc_string_list(rt, &collection_rt::jet_coll_map_keys(&map))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_map_values(map: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let map =
+//RS             coll_read_ordered_map(rt, map).unwrap_or_else(collection_rt::jet_coll_ordered_map);
+//RS         coll_alloc_string_list(rt, &collection_rt::jet_coll_map_values(&map))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_map_contains(map: i64, key: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let map =
+//RS             coll_read_ordered_map(rt, map).unwrap_or_else(collection_rt::jet_coll_ordered_map);
+//RS         let key = coll_string(rt, key);
+//RS         i8::from(collection_rt::jet_coll_map_contains(&map, &key))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_map_len(map: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let map =
+//RS             coll_read_ordered_map(rt, map).unwrap_or_else(collection_rt::jet_coll_ordered_map);
+//RS         collection_rt::jet_coll_map_len(&map)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_chain() -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| coll_alloc_chain(rt, &collection_rt::jet_coll_chain()))
+//RS }
+//RS 
+//RS fn jet_jit_coll_chain_push(chain: i64, keys: i64, values: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let chain = coll_read_chain(rt, chain).unwrap_or_else(collection_rt::jet_coll_chain);
+//RS         let keys = coll_read_string_list(rt, keys).unwrap_or_default();
+//RS         let values = coll_read_string_list(rt, values).unwrap_or_default();
+//RS         let next = collection_rt::jet_coll_chain_push(&chain, &keys, &values);
+//RS         coll_alloc_chain(rt, &next)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_chain_get(chain: i64, key: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let chain = coll_read_chain(rt, chain).unwrap_or_else(collection_rt::jet_coll_chain);
+//RS         let key = coll_string(rt, key);
+//RS         coll_option_string(rt, collection_rt::jet_coll_chain_get(&chain, &key))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_coll_chain_contains(chain: i64, key: i64) -> i8 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let chain = coll_read_chain(rt, chain).unwrap_or_else(collection_rt::jet_coll_chain);
+//RS         let key = coll_string(rt, key);
+//RS         i8::from(collection_rt::jet_coll_chain_contains(&chain, &key))
+//RS     })
+//RS }
+//RS 
+//RS 
+//RS fn alloc_f64_list(values: &[f64]) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let handle = rt.heap.alloc_empty_list();
+//RS         for &value in values {
+//RS             let _ = rt.heap.list_push_float(handle, value);
+//RS         }
+//RS         handle
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_stats_sum(list: i64) -> f64 {
+//RS     math_rt::jet_stats_sum(list_f64s(list))
+//RS }
+//RS 
+//RS fn jet_jit_stats_prod(list: i64) -> f64 {
+//RS     math_rt::jet_stats_prod(list_f64s(list))
+//RS }
+//RS 
+//RS fn jet_jit_stats_count(list: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| rt.heap.list_len(list).unwrap_or(0))
+//RS }
+//RS 
+//RS fn jet_jit_stats_cumsum(list: i64) -> i64 {
+//RS     alloc_f64_list(&math_rt::jet_stats_cumsum(list_f64s(list)))
+//RS }
+//RS 
+//RS fn jet_jit_stats_cumprod(list: i64) -> i64 {
+//RS     alloc_f64_list(&math_rt::jet_stats_cumprod(list_f64s(list)))
+//RS }
+//RS 
+//RS fn jet_jit_stats_diff(list: i64) -> i64 {
+//RS     alloc_f64_list(&math_rt::jet_stats_diff(list_f64s(list)))
+//RS }
+//RS 
+//RS fn jet_jit_stats_moving_average(list: i64, window: i64) -> i64 {
+//RS     alloc_f64_list(&math_rt::jet_stats_moving_average(list_f64s(list), window))
+//RS }
+//RS 
+//RS fn jet_jit_stats_ewma(list: i64, alpha: f64) -> i64 {
+//RS     alloc_f64_list(&math_rt::jet_stats_ewma(list_f64s(list), alpha))
+//RS }
+//RS 
+//RS fn jet_jit_stats_rank(list: i64) -> i64 {
+//RS     alloc_f64_list(&math_rt::jet_stats_rank(list_f64s(list)))
+//RS }
+//RS 
+//RS fn jet_jit_stats_zscore(list: i64) -> i64 {
+//RS     alloc_f64_list(&math_rt::jet_stats_zscore(list_f64s(list)))
+//RS }
+//RS 
+//RS fn jet_jit_stats_clip(list: i64, low: f64, high: f64) -> i64 {
+//RS     alloc_f64_list(&math_rt::jet_stats_clip(list_f64s(list), low, high))
+//RS }
+//RS fn opt_f64(value: Option<f64>) -> i64 {
+//RS     match value {
+//RS         Some(value) => (value.to_bits() as i64).wrapping_add(1),
+//RS         None => 0,
+//RS     }
+//RS }
+//RS 
+//RS macro_rules! stats_opt_unary {
+//RS     ($name:ident, $function:ident) => {
+//RS         fn $name(list: i64) -> i64 {
+//RS             opt_f64(math_rt::$function(list_f64s(list)))
+//RS         }
+//RS     };
+//RS }
+//RS macro_rules! stats_opt_binary {
+//RS     ($name:ident, $function:ident) => {
+//RS         fn $name(left: i64, right: i64) -> i64 {
+//RS             opt_f64(math_rt::$function(list_f64s(left), list_f64s(right)))
+//RS         }
+//RS     };
+//RS }
+//RS macro_rules! stats_opt_float {
+//RS     ($name:ident, $function:ident) => {
+//RS         fn $name(list: i64, value: f64) -> i64 {
+//RS             opt_f64(math_rt::$function(list_f64s(list), value))
+//RS         }
+//RS     };
+//RS }
+//RS macro_rules! stats_list_unary {
+//RS     ($name:ident, $function:ident) => {
+//RS         fn $name(list: i64) -> i64 {
+//RS             alloc_f64_list(&math_rt::$function(list_f64s(list)))
+//RS         }
+//RS     };
+//RS }
+//RS macro_rules! stats_list_float {
+//RS     ($name:ident, $function:ident) => {
+//RS         fn $name(list: i64, value: f64) -> i64 {
+//RS             alloc_f64_list(&math_rt::$function(list_f64s(list), value))
+//RS         }
+//RS     };
+//RS }
+//RS macro_rules! stats_list_float_int {
+//RS     ($name:ident, $function:ident) => {
+//RS         fn $name(list: i64, value: f64, count: i64) -> i64 {
+//RS             alloc_f64_list(&math_rt::$function(list_f64s(list), value, count))
+//RS         }
+//RS     };
+//RS }
+//RS macro_rules! stats_list_int {
+//RS     ($name:ident, $function:ident) => {
+//RS         fn $name(list: i64, count: i64) -> i64 {
+//RS             alloc_f64_list(&math_rt::$function(list_f64s(list), count))
+//RS         }
+//RS     };
+//RS }
+//RS macro_rules! stats_list_binary {
+//RS     ($name:ident, $function:ident) => {
+//RS         fn $name(left: i64, right: i64) -> i64 {
+//RS             alloc_f64_list(&math_rt::$function(list_f64s(left), list_f64s(right)))
+//RS         }
+//RS     };
+//RS }
+//RS macro_rules! stats_list_histogram {
+//RS     ($name:ident, $function:ident) => {
+//RS         fn $name(list: i64, bins: i64) -> i64 {
+//RS             alloc_i64_list(&math_rt::$function(list_f64s(list), bins))
+//RS         }
+//RS     };
+//RS }
+//RS 
+//RS stats_opt_unary!(jet_jit_stats_mean, jet_stats_mean);
+//RS stats_opt_unary!(jet_jit_stats_geometric_mean, jet_stats_geometric_mean);
+//RS stats_opt_unary!(jet_jit_stats_harmonic_mean, jet_stats_harmonic_mean);
+//RS stats_opt_unary!(jet_jit_stats_median, jet_stats_median);
+//RS stats_opt_unary!(jet_jit_stats_median_low, jet_stats_median_low);
+//RS stats_opt_unary!(jet_jit_stats_median_high, jet_stats_median_high);
+//RS stats_opt_unary!(jet_jit_stats_mode, jet_stats_mode);
+//RS stats_opt_unary!(jet_jit_stats_pvariance, jet_stats_pvariance);
+//RS stats_opt_unary!(jet_jit_stats_pstdev, jet_stats_pstdev);
+//RS stats_opt_unary!(jet_jit_stats_variance, jet_stats_variance);
+//RS stats_opt_unary!(jet_jit_stats_stdev, jet_stats_stdev);
+//RS stats_opt_unary!(jet_jit_stats_iqr, jet_stats_iqr);
+//RS stats_opt_unary!(jet_jit_stats_mad, jet_stats_mad);
+//RS stats_opt_unary!(jet_jit_stats_mean_abs_deviation, jet_stats_mean_abs_deviation);
+//RS stats_opt_unary!(jet_jit_stats_skew, jet_stats_skew);
+//RS stats_opt_unary!(jet_jit_stats_kurtosis, jet_stats_kurtosis);
+//RS stats_opt_unary!(jet_jit_stats_min, jet_stats_min);
+//RS stats_opt_unary!(jet_jit_stats_max, jet_stats_max);
+//RS stats_opt_unary!(jet_jit_stats_range, jet_stats_range);
+//RS stats_opt_binary!(jet_jit_stats_covariance, jet_stats_covariance);
+//RS stats_opt_binary!(jet_jit_stats_correlation, jet_stats_correlation);
+//RS stats_opt_binary!(jet_jit_stats_sumprod, jet_stats_sumprod);
+//RS stats_opt_binary!(jet_jit_stats_weighted_mean, jet_stats_weighted_mean);
+//RS stats_opt_binary!(jet_jit_stats_spearman, jet_stats_spearman);
+//RS stats_opt_binary!(jet_jit_stats_pearson, jet_stats_correlation);
+//RS stats_opt_binary!(jet_jit_stats_covariance_population, jet_stats_covariance_population);
+//RS stats_opt_float!(jet_jit_stats_median_grouped, jet_stats_median_grouped);
+//RS stats_opt_float!(jet_jit_stats_quantile, jet_stats_quantile);
+//RS stats_opt_float!(jet_jit_stats_percentile, jet_stats_percentile);
+//RS stats_list_unary!(jet_jit_stats_multimode, jet_stats_multimode);
+//RS stats_list_float!(jet_jit_stats_kde, jet_stats_kde);
+//RS stats_list_float_int!(jet_jit_stats_kde_random, jet_stats_kde_random);
+//RS stats_list_int!(jet_jit_stats_quantiles, jet_stats_quantiles);
+//RS stats_list_binary!(jet_jit_stats_residuals, jet_stats_residuals);
+//RS stats_list_histogram!(jet_jit_stats_histogram, jet_stats_histogram);
+//RS stats_list_float!(jet_jit_stats_winsorize, jet_stats_winsorize);
+//RS 
+//RS fn jet_jit_math_min_i64(left: i64, right: i64) -> i64 {
+//RS     math_rt::jet_std_math_min_i64(left, right)
+//RS }
+//RS fn jet_jit_math_max_i64(left: i64, right: i64) -> i64 {
+//RS     math_rt::jet_std_math_max_i64(left, right)
+//RS }
+//RS fn jet_jit_math_clamp_i64(value: i64, low: i64, high: i64) -> i64 {
+//RS     math_rt::jet_std_math_clamp_i64(value, low, high)
+//RS }
+//RS fn jet_jit_math_min_f64(left: f64, right: f64) -> f64 {
+//RS     math_rt::jet_std_math_min_f64(left, right)
+//RS }
+//RS fn jet_jit_math_max_f64(left: f64, right: f64) -> f64 {
+//RS     math_rt::jet_std_math_max_f64(left, right)
+//RS }
+//RS fn jet_jit_math_clamp_f64(value: f64, low: f64, high: f64) -> f64 {
+//RS     math_rt::jet_std_math_clamp_f64(value, low, high)
+//RS }
+//RS fn jet_jit_math_checked_sub(left: i64, right: i64) -> i64 {
+//RS     opt_i64(math_rt::jet_std_math_checked_sub(left, right))
+//RS }
+//RS fn jet_jit_math_checked_mul(left: i64, right: i64) -> i64 {
+//RS     opt_i64(math_rt::jet_std_math_checked_mul(left, right))
+//RS }
+//RS fn jet_jit_math_saturating_sub(left: i64, right: i64) -> i64 {
+//RS     math_rt::jet_std_math_saturating_sub(left, right)
+//RS }
+//RS fn jet_jit_math_saturating_mul(left: i64, right: i64) -> i64 {
+//RS     math_rt::jet_std_math_saturating_mul(left, right)
+//RS }
+//RS fn jet_jit_math_tau() -> f64 {
+//RS     math_rt::jet_std_math_tau()
+//RS }
+//RS fn jet_jit_math_hypot3(a: f64, b: f64, c: f64) -> f64 {
+//RS     math_rt::jet_std_math_hypot3(a, b, c)
+//RS }
+//RS fn jet_jit_math_midpoint(a: f64, b: f64) -> f64 {
+//RS     math_rt::jet_std_math_midpoint(a, b)
+//RS }
+//RS fn jet_jit_math_gcd_many(values: i64) -> i64 {
+//RS     let values = list_i64s(values);
+//RS     math_rt::jet_std_math_gcd_many(&values)
+//RS }
+//RS fn jet_jit_math_lcm_many(values: i64) -> i64 {
+//RS     let values = list_i64s(values);
+//RS     math_rt::jet_std_math_lcm_many(&values)
+//RS }
+//RS fn jet_jit_math_powmod(base: i64, exp: i64, modulus: i64) -> i64 {
+//RS     opt_i64(math_rt::jet_std_math_powmod(base, exp, modulus))
+//RS }
+//RS fn jet_jit_math_abs_diff(left: i64, right: i64) -> i64 {
+//RS     math_rt::jet_std_math_abs_diff(left, right)
+//RS }
+//RS fn jet_jit_math_in_range(value: i64, low: i64, high: i64) -> i8 {
+//RS     i8::from(math_rt::jet_std_math_in_range(value, low, high))
+//RS }
+//RS fn jet_jit_math_xor(left: i64, right: i64) -> i64 {
+//RS     math_rt::jet_std_math_xor(left, right)
+//RS }
+//RS fn jet_jit_math_min_f32(left: f64, right: f64) -> f64 {
+//RS     math_rt::jet_std_math_min_f32(left as f32, right as f32) as f64
+//RS }
+//RS fn jet_jit_math_max_f32(left: f64, right: f64) -> f64 {
+//RS     math_rt::jet_std_math_max_f32(left as f32, right as f32) as f64
+//RS }
+//RS fn jet_jit_math_clamp_f32(value: f64, low: f64, high: f64) -> f64 {
+//RS     math_rt::jet_std_math_clamp_f32(value as f32, low as f32, high as f32) as f64
+//RS }
+//RS 
+//RS fn pair_ff(a: f64, b: f64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let h = rt.heap.alloc_record(2);
+//RS         let _ = rt.heap.record_set_float(h, 0, a);
+//RS         let _ = rt.heap.record_set_float(h, 1, b);
+//RS         h
+//RS     })
+//RS }
+//RS 
+//RS fn pair_fi(a: f64, b: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let b = int_cell(rt, b);
+//RS         let h = rt.heap.alloc_record(2);
+//RS         let _ = rt.heap.record_set_float(h, 0, a);
+//RS         let _ = rt.heap.record_set_int(h, 1, b);
+//RS         h
+//RS     })
+//RS }
+//RS 
+//RS fn pair_ii(a: i64, b: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let a = int_cell(rt, a);
+//RS         let b = int_cell(rt, b);
+//RS         let h = rt.heap.alloc_record(2);
+//RS         let _ = rt.heap.record_set_int(h, 0, a);
+//RS         let _ = rt.heap.record_set_int(h, 1, b);
+//RS         h
+//RS     })
+//RS }
+//RS 
+//RS // ── Prelude-backed (#1464) ───────────────────────────────────────────────────
+//RS 
+//RS fn jet_jit_math_erf(x: f64) -> f64 {
+//RS     math_rt::jet_std_math_erf(x)
+//RS }
+//RS fn jet_jit_math_erfc(x: f64) -> f64 {
+//RS     math_rt::jet_std_math_erfc(x)
+//RS }
+//RS fn jet_jit_math_gamma(x: f64) -> f64 {
+//RS     math_rt::jet_std_math_gamma(x)
+//RS }
+//RS fn jet_jit_math_lgamma(x: f64) -> f64 {
+//RS     math_rt::jet_std_math_lgamma(x)
+//RS }
+//RS fn jet_jit_math_ulp(x: f64) -> f64 {
+//RS     math_rt::jet_std_math_ulp(x)
+//RS }
+//RS fn jet_jit_math_significand(x: f64) -> f64 {
+//RS     math_rt::jet_std_math_significand(x)
+//RS }
+//RS fn jet_jit_math_logb(x: f64) -> f64 {
+//RS     math_rt::jet_std_math_logb(x)
+//RS }
+//RS fn jet_jit_math_ldexp(x: f64, exp: i64) -> f64 {
+//RS     math_rt::jet_std_math_ldexp(x, exp)
+//RS }
+//RS fn jet_jit_math_next_after(x: f64, toward: f64) -> f64 {
+//RS     math_rt::jet_std_math_next_after(x, toward)
+//RS }
+//RS fn jet_jit_math_cmp(a: f64, b: f64) -> i64 {
+//RS     math_rt::jet_std_math_cmp(a, b)
+//RS }
+//RS fn jet_jit_math_ilogb(x: f64) -> i64 {
+//RS     opt_i64(math_rt::jet_std_math_ilogb(x))
+//RS }
+//RS fn jet_jit_math_isqrt(v: i64) -> i64 {
+//RS     opt_i64(math_rt::jet_std_math_isqrt(v))
+//RS }
+//RS fn jet_jit_math_factorial(v: i64) -> i64 {
+//RS     Concurrency::with_runtime_mut(|rt| {
+//RS         let v = int_cell(rt, v);
+//RS         match rt.heap.int_factorial(v) {
+//RS             Some(value) => value.wrapping_add(1),
+//RS             None => 0,
+//RS         }
+//RS     })
+//RS }
+//RS // Raw-word `math.sum_int` / `prod_int` / `prod`: the shared kernels AOT calls.
+//RS fn jet_jit_math_sum_int(values: i64) -> i64 {
+//RS     math_rt::jet_std_math_sum_int(&list_i64s(values))
+//RS }
+//RS fn jet_jit_math_prod_int(values: i64) -> i64 {
+//RS     math_rt::jet_std_math_prod_int_ref(&list_i64s(values))
+//RS }
+//RS fn jet_jit_math_binomial(n: i64, k: i64) -> i64 {
+//RS     opt_i64(math_rt::jet_std_math_binomial(n, k))
+//RS }
+//RS fn jet_jit_math_perm(n: i64, k: i64) -> i64 {
+//RS     opt_i64(math_rt::jet_std_math_perm(n, k))
+//RS }
+//RS fn jet_jit_math_rising_factorial(n: i64, k: i64) -> i64 {
+//RS     opt_i64(math_rt::jet_std_math_rising_factorial(n, k))
+//RS }
+//RS fn jet_jit_math_multinomial(parts: i64) -> i64 {
+//RS     opt_i64(math_rt::jet_std_math_multinomial(list_i64s(parts)))
+//RS }
+//RS fn jet_jit_math_fmod(a: f64, b: f64) -> f64 {
+//RS     math_rt::jet_std_math_fmod(a, b)
+//RS }
+//RS fn jet_jit_math_remainder(a: f64, b: f64) -> f64 {
+//RS     math_rt::jet_std_math_remainder(a, b)
+//RS }
+//RS fn jet_jit_math_isclose(a: f64, b: f64, rel: f64, abs_tol: f64) -> i8 {
+//RS     i8::from(math_rt::jet_std_math_isclose(a, b, rel, abs_tol))
+//RS }
+//RS fn jet_jit_math_dist(left: i64, right: i64) -> f64 {
+//RS     math_rt::jet_std_math_dist(list_f64s(left), list_f64s(right))
+//RS }
+//RS fn jet_jit_math_digits(v: i64) -> i64 {
+//RS     math_rt::jet_std_math_digits(v)
+//RS }
+//RS fn jet_jit_math_leading_ones(v: i64) -> i64 {
+//RS     math_rt::jet_std_math_leading_ones(v)
+//RS }
+//RS fn jet_jit_math_trailing_ones(v: i64) -> i64 {
+//RS     math_rt::jet_std_math_trailing_ones(v)
+//RS }
+//RS 
+//RS // ── AOT-inlined f64/i64 methods (same semantics, marshall only) ──────────────
+//RS 
+//RS fn jet_jit_math_asinh(x: f64) -> f64 {
+//RS     x.asinh()
+//RS }
+//RS fn jet_jit_math_acosh(x: f64) -> f64 {
+//RS     x.acosh()
+//RS }
+//RS fn jet_jit_math_atanh(x: f64) -> f64 {
+//RS     x.atanh()
+//RS }
+//RS fn jet_jit_math_atan(x: f64) -> f64 {
+//RS     x.atan()
+//RS }
+//RS fn jet_jit_math_asin(x: f64) -> f64 {
+//RS     x.asin()
+//RS }
+//RS fn jet_jit_math_acos(x: f64) -> f64 {
+//RS     x.acos()
+//RS }
+//RS fn jet_jit_math_tan(x: f64) -> f64 {
+//RS     x.tan()
+//RS }
+//RS fn jet_jit_math_sinh(x: f64) -> f64 {
+//RS     x.sinh()
+//RS }
+//RS fn jet_jit_math_cosh(x: f64) -> f64 {
+//RS     x.cosh()
+//RS }
+//RS fn jet_jit_math_tanh(x: f64) -> f64 {
+//RS     x.tanh()
+//RS }
+//RS fn jet_jit_math_ln(x: f64) -> f64 {
+//RS     x.ln()
+//RS }
+//RS fn jet_jit_math_trunc(x: f64) -> f64 {
+//RS     x.trunc()
+//RS }
+//RS fn jet_jit_math_fract(x: f64) -> f64 {
+//RS     x.fract()
+//RS }
+//RS fn jet_jit_math_cbrt(x: f64) -> f64 {
+//RS     x.cbrt()
+//RS }
+//RS fn jet_jit_math_exp2(x: f64) -> f64 {
+//RS     x.exp2()
+//RS }
+//RS fn jet_jit_math_exp_m1(x: f64) -> f64 {
+//RS     x.exp_m1()
+//RS }
+//RS fn jet_jit_math_ln_1p(x: f64) -> f64 {
+//RS     x.ln_1p()
+//RS }
+//RS fn jet_jit_math_log(x: f64, base: f64) -> f64 {
+//RS     x.log(base)
+//RS }
+//RS fn jet_jit_math_log10(x: f64) -> f64 {
+//RS     x.log10()
+//RS }
+//RS fn jet_jit_math_log2(x: f64) -> f64 {
+//RS     x.log2()
+//RS }
+//RS fn jet_jit_math_copysign(x: f64, y: f64) -> f64 {
+//RS     x.copysign(y)
+//RS }
+//RS fn jet_jit_math_signum(x: f64) -> f64 {
+//RS     x.signum()
+//RS }
+//RS fn jet_jit_math_fma(a: f64, b: f64, c: f64) -> f64 {
+//RS     a.mul_add(b, c)
+//RS }
+//RS fn jet_jit_math_identity_f64(x: f64) -> f64 {
+//RS     x
+//RS }
+//RS fn jet_jit_math_zero_f64(_: f64) -> f64 {
+//RS     0.0
+//RS }
+//RS fn jet_jit_math_is_even(n: i64) -> i8 {
+//RS     i8::from(n % 2 == 0)
+//RS }
+//RS fn jet_jit_math_is_odd(n: i64) -> i8 {
+//RS     i8::from(n % 2 != 0)
+//RS }
+//RS fn jet_jit_math_checked_abs(n: i64) -> i64 {
+//RS     opt_i64(n.checked_abs())
+//RS }
+//RS fn jet_jit_math_checked_neg(n: i64) -> i64 {
+//RS     opt_i64(n.checked_neg())
+//RS }
+//RS fn jet_jit_math_checked_div(a: i64, b: i64) -> i64 {
+//RS     opt_i64(a.checked_div(b))
+//RS }
+//RS fn jet_jit_math_checked_rem(a: i64, b: i64) -> i64 {
+//RS     opt_i64(a.checked_rem(b))
+//RS }
+//RS fn jet_jit_math_is_normal(x: f64) -> i8 {
+//RS     i8::from(x.is_normal())
+//RS }
+//RS fn jet_jit_math_is_subnormal(x: f64) -> i8 {
+//RS     i8::from(x.is_subnormal())
+//RS }
+//RS fn jet_jit_math_is_canonical(x: f64) -> i8 {
+//RS     i8::from(x.is_finite() || x.is_nan())
+//RS }
+//RS fn jet_jit_math_is_signed(x: f64) -> i8 {
+//RS     i8::from(x.is_sign_negative())
+//RS }
+//RS fn jet_jit_math_is_zero_f(x: f64) -> i8 {
+//RS     i8::from(x == 0.0)
+//RS }
+//RS fn jet_jit_math_is_integer(x: f64) -> i8 {
+//RS     i8::from(x.is_finite() && x.fract() == 0.0)
+//RS }
+//RS fn jet_jit_math_next_up(x: f64) -> f64 {
+//RS     x.next_up()
+//RS }
+//RS fn jet_jit_math_next_down(x: f64) -> f64 {
+//RS     x.next_down()
+//RS }
+//RS fn jet_jit_math_radix(_x: f64) -> i64 {
+//RS     2
+//RS }
+//RS fn jet_jit_math_zero() -> f64 {
+//RS     0.0
+//RS }
+//RS fn jet_jit_math_copy(x: f64) -> f64 {
+//RS     x
+//RS }
+//RS fn jet_jit_math_cot(x: f64) -> f64 {
+//RS     1.0 / x.tan()
+//RS }
+//RS fn jet_jit_math_inv(x: f64) -> f64 {
+//RS     1.0 / x
+//RS }
+//RS fn jet_jit_math_sin_cos(x: f64) -> i64 {
+//RS     let (s, c) = x.sin_cos();
+//RS     pair_ff(s, c)
+//RS }
+//RS fn jet_jit_math_modf(x: f64) -> i64 {
+//RS     pair_ff(x.fract(), x.trunc())
+//RS }
+//RS fn jet_jit_math_frexp(x: f64) -> i64 {
+//RS     let exp = math_rt::jet_std_math_ilogb(x).unwrap_or(0);
+//RS     let frac = if x == 0.0 || !x.is_finite() {
+//RS         x
+//RS     } else {
+//RS         math_rt::jet_std_math_ldexp(x, -exp)
+//RS     };
+//RS     pair_fi(frac, exp)
+//RS }
+//RS fn jet_jit_math_div_mod(a: i64, b: i64) -> i64 {
+//RS     if b == 0 {
+//RS         return pair_ii(0, 0);
+//RS     }
+//RS     pair_ii(a.div_euclid(b), a.rem_euclid(b))
+//RS }
+//RS fn jet_jit_math_div_rem(a: i64, b: i64) -> i64 {
+//RS     if b == 0 {
+//RS         return pair_ii(0, 0);
+//RS     }
+//RS     pair_ii(a / b, a % b)
+//RS }
+//RS 
+//RS host_fns! {
+//RS     struct MathExtraHostFns;
+//RS     register: register_math_extra_symbols;
+//RS     declare: declare_math_extra_host_fns(module) {
+//RS         let cc = module.target_config().default_call_conv;
+//RS         let mut zero_f64 = Signature::new(cc);
+//RS         zero_f64.returns.push(AbiParam::new(types::F64));
+//RS         let mut zero_i64 = Signature::new(cc);
+//RS         zero_i64.returns.push(AbiParam::new(types::I64));
+//RS         let mut f64_f64 = Signature::new(cc);
+//RS         f64_f64.params.push(AbiParam::new(types::F64));
+//RS         f64_f64.returns.push(AbiParam::new(types::F64));
+//RS         let mut f64_f64_f64 = Signature::new(cc);
+//RS         f64_f64_f64.params.push(AbiParam::new(types::F64));
+//RS         f64_f64_f64.params.push(AbiParam::new(types::F64));
+//RS         f64_f64_f64.returns.push(AbiParam::new(types::F64));
+//RS         let mut f64_f64_f64_f64 = Signature::new(cc);
+//RS         f64_f64_f64_f64.params.push(AbiParam::new(types::F64));
+//RS         f64_f64_f64_f64.params.push(AbiParam::new(types::F64));
+//RS         f64_f64_f64_f64.params.push(AbiParam::new(types::F64));
+//RS         f64_f64_f64_f64.returns.push(AbiParam::new(types::F64));
+//RS         let mut f64_f64_f64_f64_i8 = Signature::new(cc);
+//RS         f64_f64_f64_f64_i8.params.push(AbiParam::new(types::F64));
+//RS         f64_f64_f64_f64_i8.params.push(AbiParam::new(types::F64));
+//RS         f64_f64_f64_f64_i8.params.push(AbiParam::new(types::F64));
+//RS         f64_f64_f64_f64_i8.params.push(AbiParam::new(types::F64));
+//RS         f64_f64_f64_f64_i8.returns.push(AbiParam::new(types::I8));
+//RS         let mut i64_i64_f64 = Signature::new(cc);
+//RS         i64_i64_f64.params.push(AbiParam::new(types::I64));
+//RS         i64_i64_f64.params.push(AbiParam::new(types::I64));
+//RS         i64_i64_f64.returns.push(AbiParam::new(types::F64));
+//RS         let mut f64_i64_f64 = Signature::new(cc);
+//RS         f64_i64_f64.params.push(AbiParam::new(types::F64));
+//RS         f64_i64_f64.params.push(AbiParam::new(types::I64));
+//RS         f64_i64_f64.returns.push(AbiParam::new(types::F64));
+//RS         let mut f64_i64 = Signature::new(cc);
+//RS         f64_i64.params.push(AbiParam::new(types::F64));
+//RS         f64_i64.returns.push(AbiParam::new(types::I64));
+//RS         let mut i64_f64 = Signature::new(cc);
+//RS         i64_f64.params.push(AbiParam::new(types::I64));
+//RS         i64_f64.returns.push(AbiParam::new(types::F64));
+//RS         let mut f64_i8 = Signature::new(cc);
+//RS         f64_i8.params.push(AbiParam::new(types::F64));
+//RS         f64_i8.returns.push(AbiParam::new(types::I8));
+//RS         let mut f64_f64_i64 = Signature::new(cc);
+//RS         f64_f64_i64.params.push(AbiParam::new(types::F64));
+//RS         f64_f64_i64.params.push(AbiParam::new(types::F64));
+//RS         f64_f64_i64.returns.push(AbiParam::new(types::I64));
+//RS         let mut fma = Signature::new(cc);
+//RS         fma.params.push(AbiParam::new(types::F64));
+//RS         fma.params.push(AbiParam::new(types::F64));
+//RS         fma.params.push(AbiParam::new(types::F64));
+//RS         fma.returns.push(AbiParam::new(types::F64));
+//RS         let mut i64_i64 = Signature::new(cc);
+//RS         i64_i64.params.push(AbiParam::new(types::I64));
+//RS         i64_i64.returns.push(AbiParam::new(types::I64));
+//RS         let mut i64_i8 = Signature::new(cc);
+//RS         i64_i8.params.push(AbiParam::new(types::I64));
+//RS         i64_i8.returns.push(AbiParam::new(types::I8));
+//RS         let mut i64_i64_i8 = Signature::new(cc);
+//RS         i64_i64_i8.params.push(AbiParam::new(types::I64));
+//RS         i64_i64_i8.params.push(AbiParam::new(types::I64));
+//RS         i64_i64_i8.returns.push(AbiParam::new(types::I8));
+//RS         let mut i64_i64_i64 = Signature::new(cc);
+//RS         i64_i64_i64.params.push(AbiParam::new(types::I64));
+//RS         i64_i64_i64.params.push(AbiParam::new(types::I64));
+//RS         i64_i64_i64.returns.push(AbiParam::new(types::I64));
+//RS         let mut i64_i64_i64_i8 = Signature::new(cc);
+//RS         i64_i64_i64_i8.params.push(AbiParam::new(types::I64));
+//RS         i64_i64_i64_i8.params.push(AbiParam::new(types::I64));
+//RS         i64_i64_i64_i8.params.push(AbiParam::new(types::I64));
+//RS         i64_i64_i64_i8.returns.push(AbiParam::new(types::I8));
+//RS         let mut i64_i64_i64_i64 = Signature::new(cc);
+//RS         i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+//RS         i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+//RS         i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+//RS         i64_i64_i64_i64.returns.push(AbiParam::new(types::I64));
+//RS         let mut f64_handle = Signature::new(cc);
+//RS         f64_handle.params.push(AbiParam::new(types::F64));
+//RS         f64_handle.returns.push(AbiParam::new(types::I64));
+//RS         let mut list_f64 = Signature::new(cc);
+//RS         list_f64.params.push(AbiParam::new(types::I64));
+//RS         list_f64.returns.push(AbiParam::new(types::F64));
+//RS         let mut list_i64 = Signature::new(cc);
+//RS         list_i64.params.push(AbiParam::new(types::I64));
+//RS         list_i64.returns.push(AbiParam::new(types::I64));
+//RS         let mut list_handle = Signature::new(cc);
+//RS         list_handle.params.push(AbiParam::new(types::I64));
+//RS         list_handle.returns.push(AbiParam::new(types::I64));
+//RS         let mut list_i64_handle = Signature::new(cc);
+//RS         list_i64_handle.params.push(AbiParam::new(types::I64));
+//RS         list_i64_handle.params.push(AbiParam::new(types::I64));
+//RS         list_i64_handle.returns.push(AbiParam::new(types::I64));
+//RS         let mut list_f64_handle = Signature::new(cc);
+//RS         list_f64_handle.params.push(AbiParam::new(types::I64));
+//RS         list_f64_handle.params.push(AbiParam::new(types::F64));
+//RS         list_f64_handle.returns.push(AbiParam::new(types::I64));
+//RS         let mut list_f64_f64_handle = Signature::new(cc);
+//RS         list_f64_f64_handle.params.push(AbiParam::new(types::I64));
+//RS         list_f64_f64_handle.params.push(AbiParam::new(types::F64));
+//RS         list_f64_f64_handle.params.push(AbiParam::new(types::F64));
+//RS         list_f64_f64_handle.returns.push(AbiParam::new(types::I64));
+//RS         let mut list_i64_i8_handle = Signature::new(cc);
+//RS         list_i64_i8_handle.params.push(AbiParam::new(types::I64));
+//RS         list_i64_i8_handle.params.push(AbiParam::new(types::I8));
+//RS         list_i64_i8_handle.returns.push(AbiParam::new(types::I64));
+//RS         let mut list_list_handle = Signature::new(cc);
+//RS         list_list_handle.params.push(AbiParam::new(types::I64));
+//RS         list_list_handle.params.push(AbiParam::new(types::I64));
+//RS         list_list_handle.returns.push(AbiParam::new(types::I64));
+//RS         let mut i64_i64_handle = Signature::new(cc);
+//RS         i64_i64_handle.params.push(AbiParam::new(types::I64));
+//RS         i64_i64_handle.params.push(AbiParam::new(types::I64));
+//RS         i64_i64_handle.returns.push(AbiParam::new(types::I64));
+//RS         let mut i64_i64_i64_handle = Signature::new(cc);
+//RS         i64_i64_i64_handle.params.push(AbiParam::new(types::I64));
+//RS         i64_i64_i64_handle.params.push(AbiParam::new(types::I64));
+//RS         i64_i64_i64_handle.params.push(AbiParam::new(types::I64));
+//RS         i64_i64_i64_handle.returns.push(AbiParam::new(types::I64));
+//RS         let mut list_i64_i64_i64_i64_handle = Signature::new(cc);
+//RS         list_i64_i64_i64_i64_handle.params.push(AbiParam::new(types::I64));
+//RS         list_i64_i64_i64_i64_handle.params.push(AbiParam::new(types::I64));
+//RS         list_i64_i64_i64_i64_handle.params.push(AbiParam::new(types::I64));
+//RS         list_i64_i64_i64_i64_handle.params.push(AbiParam::new(types::I64));
+//RS         list_i64_i64_i64_i64_handle.returns.push(AbiParam::new(types::I64));
+//RS         let mut list_list_i64_handle = Signature::new(cc);
+//RS         list_list_i64_handle.params.push(AbiParam::new(types::I64));
+//RS         list_list_i64_handle.params.push(AbiParam::new(types::I64));
+//RS         list_list_i64_handle.params.push(AbiParam::new(types::I64));
+//RS         list_list_i64_handle.returns.push(AbiParam::new(types::I64));
+//RS         let mut list_f64_f64_i64_handle = Signature::new(cc);
+//RS         list_f64_f64_i64_handle.params.push(AbiParam::new(types::I64));
+//RS         list_f64_f64_i64_handle.params.push(AbiParam::new(types::F64));
+//RS         list_f64_f64_i64_handle.params.push(AbiParam::new(types::I64));
+//RS         list_f64_f64_i64_handle.returns.push(AbiParam::new(types::I64));
+//RS     }
+//RS     abs_i64: "jet_jit_math_abs_i64" => jet_jit_math_abs_i64: i64_i64;
+//RS     checked_sub: "jet_jit_math_checked_sub" => jet_jit_math_checked_sub: i64_i64_i64;
+//RS     checked_mul: "jet_jit_math_checked_mul" => jet_jit_math_checked_mul: i64_i64_i64;
+//RS     saturating_sub: "jet_jit_math_saturating_sub" => jet_jit_math_saturating_sub: i64_i64_i64;
+//RS     saturating_mul: "jet_jit_math_saturating_mul" => jet_jit_math_saturating_mul: i64_i64_i64;
+//RS     abs_diff: "jet_jit_math_abs_diff" => jet_jit_math_abs_diff: i64_i64_i64;
+//RS     in_range: "jet_jit_math_in_range" => jet_jit_math_in_range: i64_i64_i64_i8;
+//RS     xor: "jet_jit_math_xor" => jet_jit_math_xor: i64_i64_i64;
+//RS     gcd_many: "jet_jit_math_gcd_many" => jet_jit_math_gcd_many: list_i64;
+//RS     lcm_many: "jet_jit_math_lcm_many" => jet_jit_math_lcm_many: list_i64;
+//RS     powmod: "jet_jit_math_powmod" => jet_jit_math_powmod: i64_i64_i64_i64;
+//RS     tau: "jet_jit_math_tau" => jet_jit_math_tau: zero_f64;
+//RS     hypot3: "jet_jit_math_hypot3" => jet_jit_math_hypot3: f64_f64_f64_f64;
+//RS     midpoint: "jet_jit_math_midpoint" => jet_jit_math_midpoint: f64_f64_f64;
+//RS     pi: "jet_jit_math_pi" => jet_jit_math_pi: zero_f64;
+//RS     abs_f64: "jet_jit_math_abs_f64" => jet_jit_math_abs_f64: f64_f64;
+//RS     abs_f32: "jet_jit_math_abs_f32" => jet_jit_math_abs_f32: f64_f64;
+//RS     abs_f64_core: "jet_std_math_abs_f64" => jet_jit_math_abs_f64: f64_f64;
+//RS     abs_f32_core: "jet_std_math_abs_f32" => jet_jit_math_abs_f32: f64_f64;
+//RS     to_bits: "jet_jit_math_to_bits" => jet_jit_math_to_bits: f64_i64;
+//RS     from_bits: "jet_jit_math_from_bits" => jet_jit_math_from_bits: i64_f64;
+//RS     round: "jet_jit_math_round" => jet_jit_math_round: f64_i64;
+//RS     erf: "jet_jit_math_erf" => jet_jit_math_erf: f64_f64;
+//RS     erfc: "jet_jit_math_erfc" => jet_jit_math_erfc: f64_f64;
+//RS     gamma: "jet_jit_math_gamma" => jet_jit_math_gamma: f64_f64;
+//RS     lgamma: "jet_jit_math_lgamma" => jet_jit_math_lgamma: f64_f64;
+//RS     ulp: "jet_jit_math_ulp" => jet_jit_math_ulp: f64_f64;
+//RS     significand: "jet_jit_math_significand" => jet_jit_math_significand: f64_f64;
+//RS     logb: "jet_jit_math_logb" => jet_jit_math_logb: f64_f64;
+//RS     ldexp: "jet_jit_math_ldexp" => jet_jit_math_ldexp: f64_i64_f64;
+//RS     next_after: "jet_jit_math_next_after" => jet_jit_math_next_after: f64_f64_f64;
+//RS     cmp: "jet_jit_math_cmp" => jet_jit_math_cmp: f64_f64_i64;
+//RS     min_i64: "jet_jit_math_min_i64" => jet_jit_math_min_i64: i64_i64_i64;
+//RS     max_i64: "jet_jit_math_max_i64" => jet_jit_math_max_i64: i64_i64_i64;
+//RS     clamp_i64: "jet_jit_math_clamp_i64" => jet_jit_math_clamp_i64: i64_i64_i64_i64;
+//RS     min_f64: "jet_jit_math_min_f64" => jet_jit_math_min_f64: f64_f64_f64;
+//RS     max_f64: "jet_jit_math_max_f64" => jet_jit_math_max_f64: f64_f64_f64;
+//RS     clamp_f64: "jet_jit_math_clamp_f64" => jet_jit_math_clamp_f64: f64_f64_f64_f64;
+//RS     min_f32: "jet_jit_math_min_f32" => jet_jit_math_min_f32: f64_f64_f64;
+//RS     max_f32: "jet_jit_math_max_f32" => jet_jit_math_max_f32: f64_f64_f64;
+//RS     clamp_f32: "jet_jit_math_clamp_f32" => jet_jit_math_clamp_f32: f64_f64_f64_f64;
+//RS     ilogb: "jet_jit_math_ilogb" => jet_jit_math_ilogb: f64_i64;
+//RS     isqrt: "jet_jit_math_isqrt" => jet_jit_math_isqrt: i64_i64;
+//RS     factorial: "jet_jit_math_factorial" => jet_jit_math_factorial: i64_i64;
+//RS     sum_int: "jet_jit_math_sum_int" => jet_jit_math_sum_int: i64_i64;
+//RS     prod_int: "jet_jit_math_prod_int" => jet_jit_math_prod_int: i64_i64;
+//RS     binomial: "jet_jit_math_binomial" => jet_jit_math_binomial: i64_i64_i64;
+//RS     perm: "jet_jit_math_perm" => jet_jit_math_perm: i64_i64_i64;
+//RS     rising_factorial: "jet_jit_math_rising_factorial" => jet_jit_math_rising_factorial: i64_i64_i64;
+//RS     multinomial: "jet_jit_math_multinomial" => jet_jit_math_multinomial: list_i64;
+//RS     fmod: "jet_jit_math_fmod" => jet_jit_math_fmod: f64_f64_f64;
+//RS     remainder: "jet_jit_math_remainder" => jet_jit_math_remainder: f64_f64_f64;
+//RS     isclose: "jet_jit_math_isclose" => jet_jit_math_isclose: f64_f64_f64_f64_i8;
+//RS     dist: "jet_jit_math_dist" => jet_jit_math_dist: i64_i64_f64;
+//RS     digits: "jet_jit_math_digits" => jet_jit_math_digits: i64_i64;
+//RS     leading_ones: "jet_jit_math_leading_ones" => jet_jit_math_leading_ones: i64_i64;
+//RS     trailing_ones: "jet_jit_math_trailing_ones" => jet_jit_math_trailing_ones: i64_i64;
+//RS     asinh: "jet_jit_math_asinh" => jet_jit_math_asinh: f64_f64;
+//RS     ln: "jet_jit_math_ln" => jet_jit_math_ln: f64_f64;
+//RS     trunc: "jet_jit_math_trunc" => jet_jit_math_trunc: f64_f64;
+//RS     fract: "jet_jit_math_fract" => jet_jit_math_fract: f64_f64;
+//RS     acosh: "jet_jit_math_acosh" => jet_jit_math_acosh: f64_f64;
+//RS     atanh: "jet_jit_math_atanh" => jet_jit_math_atanh: f64_f64;
+//RS     atan: "jet_jit_math_atan" => jet_jit_math_atan: f64_f64;
+//RS     asin: "jet_jit_math_asin" => jet_jit_math_asin: f64_f64;
+//RS     acos: "jet_jit_math_acos" => jet_jit_math_acos: f64_f64;
+//RS     tan: "jet_jit_math_tan" => jet_jit_math_tan: f64_f64;
+//RS     sinh: "jet_jit_math_sinh" => jet_jit_math_sinh: f64_f64;
+//RS     cosh: "jet_jit_math_cosh" => jet_jit_math_cosh: f64_f64;
+//RS     tanh: "jet_jit_math_tanh" => jet_jit_math_tanh: f64_f64;
+//RS     cbrt: "jet_jit_math_cbrt" => jet_jit_math_cbrt: f64_f64;
+//RS     exp2: "jet_jit_math_exp2" => jet_jit_math_exp2: f64_f64;
+//RS     exp_m1: "jet_jit_math_exp_m1" => jet_jit_math_exp_m1: f64_f64;
+//RS     ln_1p: "jet_jit_math_ln_1p" => jet_jit_math_ln_1p: f64_f64;
+//RS     log: "jet_jit_math_log" => jet_jit_math_log: f64_f64_f64;
+//RS     log10: "jet_jit_math_log10" => jet_jit_math_log10: f64_f64;
+//RS     log2: "jet_jit_math_log2" => jet_jit_math_log2: f64_f64;
+//RS     copysign: "jet_jit_math_copysign" => jet_jit_math_copysign: f64_f64_f64;
+//RS     signum: "jet_jit_math_signum" => jet_jit_math_signum: f64_f64;
+//RS     fma: "jet_jit_math_fma" => jet_jit_math_fma: fma;
+//RS     identity_f64: "jet_jit_math_identity_f64" => jet_jit_math_identity_f64: f64_f64;
+//RS     coll_heapify: "jet_jit_coll_heapify" => jet_jit_coll_heapify: list_handle;
+//RS     coll_heappush: "jet_jit_coll_heappush" => jet_jit_coll_heappush: list_i64_handle;
+//RS     coll_heappop: "jet_jit_coll_heappop" => jet_jit_coll_heappop: list_handle;
+//RS     coll_heappushpop: "jet_jit_coll_heappushpop" => jet_jit_coll_heappushpop: list_i64_handle;
+//RS     coll_heapreplace: "jet_jit_coll_heapreplace" => jet_jit_coll_heapreplace: list_i64_handle;
+//RS     coll_bisect_left: "jet_jit_coll_bisect_left" => jet_jit_coll_bisect_left: i64_i64_i64;
+//RS     coll_bisect_right: "jet_jit_coll_bisect_right" => jet_jit_coll_bisect_right: i64_i64_i64;
+//RS     coll_insort_left: "jet_jit_coll_insort_left" => jet_jit_coll_insort_left: list_i64_handle;
+//RS     coll_insort_right: "jet_jit_coll_insort_right" => jet_jit_coll_insort_right: list_i64_handle;
+//RS     coll_merge_sorted: "jet_jit_coll_merge_sorted" => jet_jit_coll_merge_sorted: list_i64_handle;
+//RS     coll_nsmallest: "jet_jit_coll_nsmallest" => jet_jit_coll_nsmallest: i64_i64_handle;
+//RS     coll_nlargest: "jet_jit_coll_nlargest" => jet_jit_coll_nlargest: i64_i64_handle;
+//RS     coll_counter: "jet_jit_coll_counter" => jet_jit_coll_counter: zero_i64;
+//RS     coll_counter_from: "jet_jit_coll_counter_from" => jet_jit_coll_counter_from: list_handle;
+//RS     coll_counter_add: "jet_jit_coll_counter_add" => jet_jit_coll_counter_add: i64_i64_i64_i64;
+//RS     coll_counter_inc: "jet_jit_coll_counter_inc" => jet_jit_coll_counter_inc: i64_i64_handle;
+//RS     coll_counter_dec: "jet_jit_coll_counter_dec" => jet_jit_coll_counter_dec: i64_i64_handle;
+//RS     coll_counter_get: "jet_jit_coll_counter_get" => jet_jit_coll_counter_get: i64_i64_i64;
+//RS     coll_counter_set_count: "jet_jit_coll_counter_set_count" => jet_jit_coll_counter_set_count: i64_i64_i64_i64;
+//RS     coll_counter_total: "jet_jit_coll_counter_total" => jet_jit_coll_counter_total: i64_i64;
+//RS     coll_counter_names: "jet_jit_coll_counter_names" => jet_jit_coll_counter_names: i64_i64;
+//RS     coll_counter_elements: "jet_jit_coll_counter_elements" => jet_jit_coll_counter_elements: i64_i64;
+//RS     coll_counter_most_common: "jet_jit_coll_counter_most_common" => jet_jit_coll_counter_most_common: i64_i64_handle;
+//RS     coll_counter_subtract: "jet_jit_coll_counter_subtract" => jet_jit_coll_counter_subtract: i64_i64_handle;
+//RS     coll_counter_merge_add: "jet_jit_coll_counter_merge_add" => jet_jit_coll_counter_merge_add: i64_i64_handle;
+//RS     coll_counter_clear: "jet_jit_coll_counter_clear" => jet_jit_coll_counter_clear: i64_i64;
+//RS     coll_ordered_map: "jet_jit_coll_ordered_map" => jet_jit_coll_ordered_map: zero_i64;
+//RS     coll_map_get: "jet_jit_coll_map_get" => jet_jit_coll_map_get: i64_i64_handle;
+//RS     coll_map_set: "jet_jit_coll_map_set" => jet_jit_coll_map_set: i64_i64_i64_handle;
+//RS     coll_map_remove: "jet_jit_coll_map_remove" => jet_jit_coll_map_remove: i64_i64_handle;
+//RS     coll_map_keys: "jet_jit_coll_map_keys" => jet_jit_coll_map_keys: i64_i64;
+//RS     coll_map_values: "jet_jit_coll_map_values" => jet_jit_coll_map_values: i64_i64;
+//RS     coll_map_contains: "jet_jit_coll_map_contains" => jet_jit_coll_map_contains: i64_i64_i8;
+//RS     coll_map_len: "jet_jit_coll_map_len" => jet_jit_coll_map_len: i64_i64;
+//RS     coll_chain: "jet_jit_coll_chain" => jet_jit_coll_chain: zero_i64;
+//RS     coll_chain_push: "jet_jit_coll_chain_push" => jet_jit_coll_chain_push: i64_i64_i64_handle;
+//RS     coll_chain_get: "jet_jit_coll_chain_get" => jet_jit_coll_chain_get: i64_i64_handle;
+//RS     coll_chain_contains: "jet_jit_coll_chain_contains" => jet_jit_coll_chain_contains: i64_i64_i8;
+//RS     is_even: "jet_jit_math_is_even" => jet_jit_math_is_even: i64_i8;
+//RS     is_odd: "jet_jit_math_is_odd" => jet_jit_math_is_odd: i64_i8;
+//RS     checked_abs: "jet_jit_math_checked_abs" => jet_jit_math_checked_abs: i64_i64;
+//RS     checked_neg: "jet_jit_math_checked_neg" => jet_jit_math_checked_neg: i64_i64;
+//RS     checked_div: "jet_jit_math_checked_div" => jet_jit_math_checked_div: i64_i64_i64;
+//RS     checked_rem: "jet_jit_math_checked_rem" => jet_jit_math_checked_rem: i64_i64_i64;
+//RS     is_nan: "jet_std_math_is_nan" => jet_jit_math_is_nan: f64_i8;
+//RS     is_infinite: "jet_std_math_is_infinite" => jet_jit_math_is_infinite: f64_i8;
+//RS     radix: "jet_jit_math_radix" => jet_jit_math_radix: f64_i64;
+//RS     zero: "jet_jit_math_zero" => jet_jit_math_zero: zero_f64;
+//RS     copy: "jet_jit_math_copy" => jet_jit_math_copy: f64_f64;
+//RS     is_finite: "jet_std_math_is_finite" => jet_jit_math_is_finite: f64_i8;
+//RS     is_normal: "jet_jit_math_is_normal" => jet_jit_math_is_normal: f64_i8;
+//RS     is_subnormal: "jet_jit_math_is_subnormal" => jet_jit_math_is_subnormal: f64_i8;
+//RS     is_canonical: "jet_jit_math_is_canonical" => jet_jit_math_is_canonical: f64_i8;
+//RS     is_signed: "jet_jit_math_is_signed" => jet_jit_math_is_signed: f64_i8;
+//RS     is_zero_f: "jet_jit_math_is_zero_f" => jet_jit_math_is_zero_f: f64_i8;
+//RS     is_integer: "jet_jit_math_is_integer" => jet_jit_math_is_integer: f64_i8;
+//RS     next_up: "jet_jit_math_next_up" => jet_jit_math_next_up: f64_f64;
+//RS     next_down: "jet_jit_math_next_down" => jet_jit_math_next_down: f64_f64;
+//RS     cot: "jet_jit_math_cot" => jet_jit_math_cot: f64_f64;
+//RS     inv: "jet_jit_math_inv" => jet_jit_math_inv: f64_f64;
+//RS     sin_cos: "jet_jit_math_sin_cos" => jet_jit_math_sin_cos: f64_handle;
+//RS     modf: "jet_jit_math_modf" => jet_jit_math_modf: f64_handle;
+//RS     frexp: "jet_jit_math_frexp" => jet_jit_math_frexp: f64_handle;
+//RS     div_mod: "jet_jit_math_div_mod" => jet_jit_math_div_mod: i64_i64_i64;
+//RS     div_rem: "jet_jit_math_div_rem" => jet_jit_math_div_rem: i64_i64_i64;
+//RS     stats_sum: "jet_jit_stats_sum" => jet_jit_stats_sum: list_f64;
+//RS     stats_prod: "jet_jit_stats_prod" => jet_jit_stats_prod: list_f64;
+//RS     stats_count: "jet_jit_stats_count" => jet_jit_stats_count: list_i64;
+//RS     stats_cumsum: "jet_jit_stats_cumsum" => jet_jit_stats_cumsum: list_handle;
+//RS     stats_cumprod: "jet_jit_stats_cumprod" => jet_jit_stats_cumprod: list_handle;
+//RS     stats_diff: "jet_jit_stats_diff" => jet_jit_stats_diff: list_handle;
+//RS     stats_mean: "jet_jit_stats_mean" => jet_jit_stats_mean: list_handle;
+//RS     stats_geometric_mean: "jet_jit_stats_geometric_mean" => jet_jit_stats_geometric_mean: list_handle;
+//RS     stats_harmonic_mean: "jet_jit_stats_harmonic_mean" => jet_jit_stats_harmonic_mean: list_handle;
+//RS     stats_median: "jet_jit_stats_median" => jet_jit_stats_median: list_handle;
+//RS     stats_median_grouped: "jet_jit_stats_median_grouped" => jet_jit_stats_median_grouped: list_f64_handle;
+//RS     stats_median_low: "jet_jit_stats_median_low" => jet_jit_stats_median_low: list_handle;
+//RS     stats_median_high: "jet_jit_stats_median_high" => jet_jit_stats_median_high: list_handle;
+//RS     stats_quantile: "jet_jit_stats_quantile" => jet_jit_stats_quantile: list_f64_handle;
+//RS     stats_percentile: "jet_jit_stats_percentile" => jet_jit_stats_percentile: list_f64_handle;
+//RS     stats_mode: "jet_jit_stats_mode" => jet_jit_stats_mode: list_handle;
+//RS     stats_multimode: "jet_jit_stats_multimode" => jet_jit_stats_multimode: list_handle;
+//RS     stats_pvariance: "jet_jit_stats_pvariance" => jet_jit_stats_pvariance: list_handle;
+//RS     stats_pstdev: "jet_jit_stats_pstdev" => jet_jit_stats_pstdev: list_handle;
+//RS     stats_variance: "jet_jit_stats_variance" => jet_jit_stats_variance: list_handle;
+//RS     stats_stdev: "jet_jit_stats_stdev" => jet_jit_stats_stdev: list_handle;
+//RS     stats_covariance: "jet_jit_stats_covariance" => jet_jit_stats_covariance: list_list_handle;
+//RS     stats_correlation: "jet_jit_stats_correlation" => jet_jit_stats_correlation: list_list_handle;
+//RS     stats_kde: "jet_jit_stats_kde" => jet_jit_stats_kde: list_f64_handle;
+//RS     stats_kde_random: "jet_jit_stats_kde_random" => jet_jit_stats_kde_random: list_f64_f64_i64_handle;
+//RS     stats_min: "jet_jit_stats_min" => jet_jit_stats_min: list_handle;
+//RS     stats_max: "jet_jit_stats_max" => jet_jit_stats_max: list_handle;
+//RS     stats_range: "jet_jit_stats_range" => jet_jit_stats_range: list_handle;
+//RS     stats_sumprod: "jet_jit_stats_sumprod" => jet_jit_stats_sumprod: list_list_handle;
+//RS     stats_weighted_mean: "jet_jit_stats_weighted_mean" => jet_jit_stats_weighted_mean: list_list_handle;
+//RS     stats_quantiles: "jet_jit_stats_quantiles" => jet_jit_stats_quantiles: list_i64_handle;
+//RS     stats_iqr: "jet_jit_stats_iqr" => jet_jit_stats_iqr: list_handle;
+//RS     stats_mad: "jet_jit_stats_mad" => jet_jit_stats_mad: list_handle;
+//RS     stats_mean_abs_deviation: "jet_jit_stats_mean_abs_deviation" => jet_jit_stats_mean_abs_deviation: list_handle;
+//RS     stats_skew: "jet_jit_stats_skew" => jet_jit_stats_skew: list_handle;
+//RS     stats_kurtosis: "jet_jit_stats_kurtosis" => jet_jit_stats_kurtosis: list_handle;
+//RS     stats_spearman: "jet_jit_stats_spearman" => jet_jit_stats_spearman: list_list_handle;
+//RS     stats_residuals: "jet_jit_stats_residuals" => jet_jit_stats_residuals: list_list_handle;
+//RS     stats_histogram: "jet_jit_stats_histogram" => jet_jit_stats_histogram: list_i64_handle;
+//RS     stats_winsorize: "jet_jit_stats_winsorize" => jet_jit_stats_winsorize: list_f64_handle;
+//RS     stats_pearson: "jet_jit_stats_pearson" => jet_jit_stats_pearson: list_list_handle;
+//RS     stats_covariance_population: "jet_jit_stats_covariance_population" => jet_jit_stats_covariance_population: list_list_handle;
+//RS     stats_moving_average: "jet_jit_stats_moving_average" => jet_jit_stats_moving_average: list_i64_handle;
+//RS     stats_ewma: "jet_jit_stats_ewma" => jet_jit_stats_ewma: list_f64_handle;
+//RS     stats_rank: "jet_jit_stats_rank" => jet_jit_stats_rank: list_handle;
+//RS     stats_zscore: "jet_jit_stats_zscore" => jet_jit_stats_zscore: list_handle;
+//RS     stats_clip: "jet_jit_stats_clip" => jet_jit_stats_clip: list_f64_f64_handle;
+//RS     comb_chain: "jet_jit_comb_chain" => jet_jit_comb_chain: list_list_handle;
+//RS     comb_compress: "jet_jit_comb_compress" => jet_jit_comb_compress: list_list_handle;
+//RS     comb_drop: "jet_jit_comb_drop" => jet_jit_comb_drop: list_i64_handle;
+//RS     comb_takewhile: "jet_jit_comb_takewhile" => jet_jit_comb_takewhile: list_i64_i8_handle;
+//RS     comb_dropwhile: "jet_jit_comb_dropwhile" => jet_jit_comb_dropwhile: list_i64_i8_handle;
+//RS     comb_filterfalse: "jet_jit_comb_filterfalse" => jet_jit_comb_filterfalse: list_i64_i8_handle;
+//RS     comb_islice: "jet_jit_comb_islice" => jet_jit_comb_islice: list_i64_i64_i64_i64_handle;
+//RS     comb_unique: "jet_jit_comb_unique" => jet_jit_comb_unique: list_handle;
+//RS     comb_repeat: "jet_jit_comb_repeat" => jet_jit_comb_repeat: i64_i64_handle;
+//RS     comb_count_from: "jet_jit_comb_count_from" => jet_jit_comb_count_from: i64_i64_i64_handle;
+//RS     comb_cycle: "jet_jit_comb_cycle" => jet_jit_comb_cycle: list_i64_handle;
+//RS     comb_accumulate: "jet_jit_comb_accumulate" => jet_jit_comb_accumulate: list_handle;
+//RS     comb_reverse: "jet_jit_comb_reverse" => jet_jit_comb_reverse: list_handle;
+//RS     comb_permutations: "jet_jit_comb_permutations" => jet_jit_comb_permutations: list_i64_handle;
+//RS     comb_combinations: "jet_jit_comb_combinations" => jet_jit_comb_combinations: list_i64_handle;
+//RS     comb_combinations_with_replacement: "jet_jit_comb_combinations_with_replacement" => jet_jit_comb_combinations_with_replacement: list_i64_handle;
+//RS     comb_product: "jet_jit_comb_product" => jet_jit_comb_product: list_i64_handle;
+//RS     comb_cartesian: "jet_jit_comb_cartesian" => jet_jit_comb_cartesian: list_list_handle;
+//RS     comb_pairwise: "jet_jit_comb_pairwise" => jet_jit_comb_pairwise: list_handle;
+//RS     comb_batched: "jet_jit_comb_batched" => jet_jit_comb_batched: list_i64_handle;
+//RS     comb_groupby: "jet_jit_comb_groupby" => jet_jit_comb_groupby: list_handle;
+//RS     comb_tee: "jet_jit_comb_tee" => jet_jit_comb_tee: list_i64_handle;
+//RS     comb_zip_longest: "jet_jit_comb_zip_longest" => jet_jit_comb_zip_longest: list_list_i64_handle;
+//RS     comb_powerset: "jet_jit_comb_powerset" => jet_jit_comb_powerset: list_handle;
+//RS     comb_windows: "jet_jit_comb_windows" => jet_jit_comb_windows: list_i64_handle;
+//RS     comb_flatten: "jet_jit_comb_flatten" => jet_jit_comb_flatten: list_handle;
+//RS     comb_starmap: "jet_jit_comb_starmap" => jet_jit_comb_starmap: list_handle;
+//RS }
+// END-PORT-PENDING 0223 crates/jet-jit/src/MathExtra.rs:1-1584
+

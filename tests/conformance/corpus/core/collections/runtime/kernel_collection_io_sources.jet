@@ -1,0 +1,18 @@
+use core.collections.runtime.kernel_collections.[JetLoopSource, JetLoopSourceKind]
+use core.collections.runtime.kernel_collection_io_sources
+use std.rc.[Rc]
+use std.cell.[RefCell]
+use std.io.[BufReader, Cursor]
+
+// Rust: crates/jet-codegen/src/Prelude/Core/CollectionIoSources.rs:139
+#Test("process_stream_collection_preserves_line_pulls_and_provider_exhaustion") {
+    // GATE #4565: kernel primitive
+    handle :: #Unsafe("retain real buffered reader storage in the process stream carrier") {
+        Rc.new(RefCell.new(Val(BufReader.new(Cursor.new(b"one\r\ntwo\nlast".to_vec())))))
+    }
+    iterator := handle.jet_loop_source(JetLoopSourceKind.LinesProcessStream, true)
+    assert(iterator.next().unwrap().downcast<String>().unwrap() == "one")
+    assert(iterator.next().unwrap().downcast<String>().unwrap() == "two")
+    assert(iterator.next().unwrap().downcast<String>().unwrap() == "last")
+    assert(iterator.next().is_none())
+}

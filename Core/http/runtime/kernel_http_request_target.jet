@@ -1,0 +1,42 @@
+// Frozen Core/HttpRequestTarget.rs:1-40. Portable policy, no transport carrier.
+use core.text.runtime.kernel_unicode_string as target_text
+use core.text.runtime.unicode_assets as target_asset
+use core.text.runtime.assets.unicode_white_space as target_whitespace
+use core.text.runtime.assets.unicode_general_category as target_category
+
+// Rust jet_http_request_target_path:3-9: only the FIRST byte matters.
+// This is projection, not URL parsing: query/fragment and following slashes stay.
+pub fn jet_http_request_target_path(url: String) -> String Never! {
+    raw :: target_text.utf8_bytes(url)
+    if raw.len() > 0 && raw[0] == (U8{47}) -> return ~url
+    ""
+}
+
+// Rust jet_http_header_name_valid:11-33: ASCII alnum and exactly 15 tchars.
+pub fn jet_http_header_name_valid(name: String) -> Bool Never! {
+    raw :: target_text.utf8_bytes(name)
+    if raw.len() == 0 -> return false
+    loop byte in raw {
+        n :: Int.from_u8(byte)
+        if (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) -> next
+        if n == 33 || n == 35 || n == 36 || n == 37 || n == 38 || n == 39 || n == 42 || n == 43 || n == 45 || n == 46 || n == 94 || n == 95 || n == 96 || n == 124 || n == 126 -> next
+        return false
+    }
+    true
+}
+
+// Rust jet_http_header_value_valid:35-40: scalar Cc and White_Space guard.
+// TAB is the sole allowed control; SPACE and TAB are the only allowed spaces.
+pub fn jet_http_header_value_valid(value: String) -> Bool Never! {
+    raw :: target_text.utf8_bytes(value)
+    whitespace :: target_whitespace.UNICODE_WHITE_SPACE
+    category :: target_category.UNICODE_GENERAL_CATEGORY
+    at := 0
+    loop at < raw.len() {
+        cp :: target_text.scalar_at(raw, at)
+        if target_asset.asset_tag(category, cp, 8) == 0 && cp != 9 -> return false
+        if target_asset.asset_contains(whitespace, cp) && cp != 32 && cp != 9 -> return false
+        at += target_text.utf8_width_at(raw, at)
+    }
+    true
+}

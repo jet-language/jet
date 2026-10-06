@@ -1,0 +1,32 @@
+use core.mem.runtime.top_shared_routes.*
+use core.math.runtime.std_math_task_mem.[JetShared]
+
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SharedRoutes.rs:3/8/13/18
+#Test("shared_routes_delegate_get_set_replace_and_read_to_one_owner") {
+    shared :: JetShared.new(I64{4})
+    assert_eq(jet_shared_get(&shared), I64{4})
+    jet_shared_set(&shared, I64{6})
+    assert_eq(jet_shared_replace(&shared, I64{9}), I64{6})
+    assert_eq(jet_shared_read(&shared, fn(value) { *value * 2 }), I64{18})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SharedRoutes.rs:58/96/105
+#Test("shared_snapshot_projection_is_owned_and_replacement_detects_stale_revision") {
+    shared :: JetShared.new(I64{4})
+    snapshot :: jet_shared_capture(&shared)
+    assert_eq(jet_shared_snapshot_value(&snapshot), I64{4})
+    assert(jet_shared_try_replace(&shared, ^snapshot, I64{7}).unwrap())
+    stale :: jet_shared_capture(&shared)
+    jet_shared_set(&shared, I64{8})
+    assert(not jet_shared_try_replace(&shared, ^stale, I64{9}).unwrap())
+    assert_eq(jet_shared_get(&shared), I64{8})
+}
+// Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/SharedRoutes.rs:126/133/138/146
+#Test("shared_weak_upgrade_and_alias_identity_use_the_canonical_owner") {
+    shared :: JetShared.new(I64{4})
+    weak :: jet_shared_downgrade(&shared)
+    alias :: jet_shared_weak_upgrade(&weak).unwrap()
+    assert(jet_shared_same(&shared, &alias))
+    assert_eq(jet_shared_strong_count(&shared), I64{2})
+    other :: JetShared.new(I64{4})
+    assert(not jet_shared_same(&shared, &other))
+}

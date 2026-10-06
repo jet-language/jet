@@ -1,0 +1,1809 @@
+// PORT-PENDING 0216 crates-jet-jit-src-ffi-slice-1814: crates/jet-jit/src/Ffi.rs:1814-3618
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS fn extend_source_helper_ffi_state(
+//RS     state: &mut FfiState,
+//RS     entries: &[FfiEntrySpec],
+//RS ) -> Result<(), String> {
+//RS     let _ = (state, entries);
+//RS     Err("jit ffi: cdylib extension unsupported on this host".into())
+//RS }
+//RS 
+//RS pub(crate) fn bind_mir_ffi_for_source_helper(
+//RS     program: &MirProgram,
+//RS     artifact_id: MirArtifactId,
+//RS     foreign_ids: &std::collections::BTreeSet<MirForeignId>,
+//RS     link_ids: &std::collections::BTreeSet<MirLinkUnitId>,
+//RS     needs_data_provider: bool,
+//RS ) -> Result<SourceHelperFfiBinding, String> {
+//RS     if foreign_ids.is_empty() && !needs_data_provider {
+//RS         return Ok(SourceHelperFfiBinding {
+//RS             owns_binding: false,
+//RS         });
+//RS     }
+//RS     let artifact = program
+//RS         .artifacts
+//RS         .iter()
+//RS         .find(|artifact| artifact.id == artifact_id)
+//RS         .ok_or_else(|| format!("jit ffi: artifact {artifact_id:?} is missing"))?;
+//RS     if !matches!(
+//RS         artifact.target,
+//RS         MirArtifactTarget::RustAot | MirArtifactTarget::Cranelift
+//RS     ) {
+//RS         return Err(format!(
+//RS             "jit ffi: artifact `{}` is not executable by the Source helper native tier",
+//RS             artifact.name
+//RS         ));
+//RS     }
+//RS     for foreign_id in foreign_ids {
+//RS         let mut matches = program
+//RS             .foreign
+//RS             .iter()
+//RS             .filter(|foreign| foreign.id == *foreign_id);
+//RS         let foreign = matches
+//RS             .next()
+//RS             .ok_or_else(|| format!("jit ffi: helper foreign {foreign_id:?} is missing"))?;
+//RS         if matches.next().is_some() {
+//RS             return Err(format!(
+//RS                 "jit ffi: helper foreign {foreign_id:?} resolves to multiple rows"
+//RS             ));
+//RS         }
+//RS         if !foreign.target_applicability.cranelift {
+//RS             return Err(format!(
+//RS                 "jit ffi: helper foreign `{}` is not applicable to Cranelift",
+//RS                 foreign.name
+//RS             ));
+//RS         }
+//RS         if let Some(link_id) = foreign.link {
+//RS             if !link_ids.contains(&link_id) {
+//RS                 return Err(format!(
+//RS                     "jit ffi: helper foreign `{}` has no checked Cranelift link authority",
+//RS                     foreign.name
+//RS                 ));
+//RS             }
+//RS         } else if !artifact.modules.contains(&foreign.module_id) {
+//RS             return Err(format!(
+//RS                 "jit ffi: helper foreign `{}` is outside artifact `{}`",
+//RS                 foreign.name, artifact.name
+//RS             ));
+//RS         }
+//RS     }
+//RS 
+//RS     let entries = mir_bridge_specs_for_helpers(program, artifact, foreign_ids)
+//RS         .map_err(|error| match error {
+//RS             BindError::Message(message) => message,
+//RS         })?;
+//RS     let path = source_helper_bridge_path(program, artifact, link_ids, needs_data_provider);
+//RS     {
+//RS         let mut state = FFI_STATE.lock().unwrap_or_else(|error| error.into_inner());
+//RS         if let Some(state) = state.as_mut() {
+//RS             if state.artifact_identity != artifact.artifact_identity {
+//RS                 return Err(
+//RS                     "jit ffi: the active bridge does not match the Source helper artifact"
+//RS                         .to_string(),
+//RS                 );
+//RS             }
+//RS             extend_source_helper_ffi_state(state, &entries)?;
+//RS             ensure_source_helper_data_provider(
+//RS                 state,
+//RS                 path.as_deref(),
+//RS                 needs_data_provider,
+//RS             )?;
+//RS             return Ok(SourceHelperFfiBinding {
+//RS                 owns_binding: false,
+//RS             });
+//RS         }
+//RS     }
+//RS 
+//RS     let Some(path) = path else {
+//RS         let requirement = if needs_data_provider && foreign_ids.is_empty() {
+//RS             "an Arrow Data provider"
+//RS         } else if needs_data_provider {
+//RS             "a bridge for foreign calls and an Arrow Data provider"
+//RS         } else {
+//RS             "a bridge for foreign calls"
+//RS         };
+//RS         return Err(format!(
+//RS             "jit ffi: Source helper artifact `{}` needs {requirement}, but has no Cranelift-applicable dynamic link",
+//RS             artifact.name
+//RS         ));
+//RS     };
+//RS     let records = record_descriptors(program).map_err(|error| match error {
+//RS         BindError::Message(message) => message,
+//RS     })?;
+//RS     load_cdylib(
+//RS         &path,
+//RS         &entries,
+//RS         records,
+//RS         needs_data_provider,
+//RS         artifact.artifact_identity.clone(),
+//RS     )?;
+//RS     Ok(SourceHelperFfiBinding { owns_binding: true })
+//RS }
+//RS 
+//RS 
+//RS 
+//RS pub(crate) fn clear_ffi() {
+//RS     if !shutdown_jit_callbacks() {
+//RS         // A failed native acknowledgement quarantines the loaded module. Keep
+//RS         // the wrapper/library and callback state live; teardown must not retry
+//RS         // or unload a native side that may still retain its trampoline.
+//RS         return;
+//RS     }
+//RS     let mut slot = FFI_STATE.lock().unwrap_or_else(|e| e.into_inner());
+//RS     if let Some(mut state) = slot.take() {
+//RS         let token_ids = FFI_HANDLES
+//RS             .lock()
+//RS             .unwrap_or_else(|e| e.into_inner())
+//RS             .by_id
+//RS             .keys()
+//RS             .copied()
+//RS             .collect::<Vec<_>>();
+//RS         for token_id in token_ids {
+//RS             let _ = close_ffi_token(&state, token_id, Span::new(0, 0));
+//RS         }
+//RS         FFI_HANDLES
+//RS             .lock()
+//RS             .unwrap_or_else(|e| e.into_inner())
+//RS             .clear();
+//RS         let provider_lease = state.arrow_provider_lease.take();
+//RS         // Release Foundation's callback registration before dropping the
+//RS         // wrapper reference. Escaped Arrow batches retain the erased provider
+//RS         // owner independently, so their release callbacks remain valid.
+//RS         drop(provider_lease);
+//RS         if !state.handle.is_null() {
+//RS             unsafe {
+//RS                 (state.clear_panic_hook_fn)();
+//RS                 dlclose(state.handle);
+//RS             }
+//RS         }
+//RS     } else {
+//RS         FFI_HANDLES
+//RS             .lock()
+//RS             .unwrap_or_else(|e| e.into_inner())
+//RS             .clear();
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn has_bound_ffi() -> bool {
+//RS     FFI_STATE
+//RS         .lock()
+//RS         .unwrap_or_else(|e| e.into_inner())
+//RS 
+//RS         .is_some()
+//RS }
+//RS #[cfg(unix)]
+//RS fn load_arrow_provider(
+//RS     path: &Path,
+//RS ) -> Result<jet_foundation::ArrowFileReader::ProviderLease, String> {
+//RS     let c_path = CString::new(path.to_string_lossy().as_bytes())
+//RS         .map_err(|_| "jit ffi: bad provider bridge path".to_string())?;
+//RS     let provider_handle = unsafe { dlopen(c_path.as_ptr(), RTLD_NOW) };
+//RS     if provider_handle.is_null() {
+//RS         let error = unsafe { dlerror() };
+//RS         let detail = if error.is_null() {
+//RS             "unknown loader error".to_string()
+//RS         } else {
+//RS             unsafe { CStr::from_ptr(error) }
+//RS                 .to_string_lossy()
+//RS                 .into_owned()
+//RS         };
+//RS         return Err(format!(
+//RS             "jit ffi: dlopen provider {}: {detail}",
+//RS             path.display()
+//RS         ));
+//RS     }
+//RS     let provider_name = CString::new("jet_data_read").expect("static symbol has no NUL");
+//RS     let provider_ptr = unsafe { dlsym(provider_handle, provider_name.as_ptr()) };
+//RS     if provider_ptr.is_null() {
+//RS         unsafe {
+//RS             dlclose(provider_handle);
+//RS         }
+//RS         return Err(format!(
+//RS             "jit ffi: missing symbol `jet_data_read` in {}",
+//RS             path.display()
+//RS         ));
+//RS     }
+//RS     // SAFETY: Parquet.rs exports exactly Foundation's Provider ABI.
+//RS     let provider: jet_foundation::ArrowFileReader::Provider =
+//RS         unsafe { std::mem::transmute(provider_ptr) };
+//RS     let owner = Arc::new(FfiProviderLibrary {
+//RS         handle: provider_handle,
+//RS     });
+//RS     let owner_erased: Arc<dyn std::any::Any + Send + Sync> = owner.clone();
+//RS     match jet_foundation::ArrowFileReader::register_owned(provider, owner_erased) {
+//RS         Ok(lease) => Ok(lease),
+//RS         Err(error) => {
+//RS             drop(owner);
+//RS             Err(format!(
+//RS                 "jit ffi: data provider registration failed for {}: {error}",
+//RS                 path.display()
+//RS             ))
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn load_cdylib(
+//RS     path: &Path,
+//RS     entries: &[FfiEntrySpec],
+//RS     records: HashMap<MirTypeId, FfiRecordDesc>,
+//RS     needs_data_provider: bool,
+//RS     artifact_identity: String,
+//RS ) -> Result<(), String> {
+//RS     #[cfg(not(unix))]
+//RS     {
+//RS         let _ = (path, entries, records, needs_data_provider, artifact_identity);
+//RS         return Err("jit ffi: cdylib load unsupported on this host".into());
+//RS     }
+//RS     #[cfg(unix)]
+//RS     {
+//RS         let arrow_provider_lease = if needs_data_provider {
+//RS             Some(load_arrow_provider(path)?)
+//RS         } else {
+//RS             None
+//RS         };
+//RS         let c_path = CString::new(path.to_string_lossy().as_bytes())
+//RS             .map_err(|_| "jit ffi: bad cdylib path".to_string())?;
+//RS         let handle = unsafe { dlopen(c_path.as_ptr(), RTLD_NOW) };
+//RS         if handle.is_null() {
+//RS             let err = unsafe { CStr::from_ptr(dlerror()) }
+//RS                 .to_string_lossy()
+//RS                 .into_owned();
+//RS             return Err(format!("jit ffi: dlopen {}: {err}", path.display()));
+//RS         }
+//RS         let setter_name = CString::new("jet_ffi_set_reporter").unwrap();
+//RS         let setter_ptr = unsafe { dlsym(handle, setter_name.as_ptr()) };
+//RS         if setter_ptr.is_null() {
+//RS             unsafe {
+//RS                 dlclose(handle);
+//RS             }
+//RS             return Err(format!(
+//RS                 "jit ffi: missing symbol `jet_ffi_set_reporter` in {}",
+//RS                 path.display()
+//RS             ));
+//RS         }
+//RS         // The reporter the bridge stores is the generated no-unwind shim, whose
+//RS         // C signature is `ffi_reporter`'s own (D-JITUNWIND1). The setter is
+//RS         // typed to take that address rather than a `fn` item so the shim is the
+//RS         // only thing this crate can pass: a raw `ffi_reporter as *const u8` here
+//RS         // would be the unguarded boundary
+//RS         // `tests/jit_no_unwind_boundary.rs` scans for.
+//RS         let set_reporter = unsafe {
+//RS             std::mem::transmute::<*mut c_void, unsafe extern "C" fn(*const u8)>(setter_ptr)
+//RS         };
+//RS         unsafe { set_reporter(crate::host_seam::guarded(ffi_reporter)) };
+//RS         let clear_hook_name = CString::new("jet_ffi_clear_panic_hook").unwrap();
+//RS         let clear_hook_ptr = unsafe { dlsym(handle, clear_hook_name.as_ptr()) };
+//RS         if clear_hook_ptr.is_null() {
+//RS             unsafe {
+//RS                 dlclose(handle);
+//RS             }
+//RS             return Err(format!(
+//RS                 "jit ffi: missing symbol `jet_ffi_clear_panic_hook` in {}",
+//RS                 path.display()
+//RS             ));
+//RS         }
+//RS         let clear_panic_hook_fn =
+//RS             unsafe { std::mem::transmute::<*mut c_void, unsafe extern "C" fn()>(clear_hook_ptr) };
+//RS         let failure_name = CString::new("jet_ffi_take_failure").unwrap();
+//RS         let failure_ptr = unsafe { dlsym(handle, failure_name.as_ptr()) };
+//RS         if failure_ptr.is_null() {
+//RS             unsafe {
+//RS                 dlclose(handle);
+//RS             }
+//RS             return Err(format!(
+//RS                 "jit ffi: missing symbol `jet_ffi_take_failure` in {}",
+//RS                 path.display()
+//RS             ));
+//RS         }
+//RS         let take_failure_fn = unsafe {
+//RS             std::mem::transmute::<*mut c_void, unsafe extern "C" fn() -> i8>(failure_ptr)
+//RS         };
+//RS         let free_name = CString::new("jet_ffi_cabi_free").unwrap();
+//RS         let free_ptr = unsafe { dlsym(handle, free_name.as_ptr()) };
+//RS         let free_fn = if free_ptr.is_null() {
+//RS             None
+//RS         } else {
+//RS             Some(unsafe {
+//RS                 std::mem::transmute::<*mut c_void, unsafe extern "C" fn(*mut u8, usize)>(free_ptr)
+//RS             })
+//RS         };
+//RS         if free_fn.is_none() && entries.iter().any(|entry| entry.ret == RetAbi::String) {
+//RS             unsafe {
+//RS                 dlclose(handle);
+//RS             }
+//RS             return Err(format!(
+//RS                 "jit ffi: missing symbol `jet_ffi_cabi_free` in {}",
+//RS                 path.display()
+//RS             ));
+//RS         }
+//RS         let mut by_wrapper = HashMap::new();
+//RS         for entry in entries {
+//RS             let is_callback_start = entry.params.contains(&ParamAbi::Callback);
+//RS             let symbol = if is_callback_start {
+//RS                 format!("{}_callback_start", entry.wrapper_name)
+//RS             } else {
+//RS                 format!("{}_cabi", entry.wrapper_name)
+//RS             };
+//RS             let c_name =
+//RS                 CString::new(symbol.as_str()).map_err(|_| "jit ffi: bad symbol".to_string())?;
+//RS             let raw_ptr = unsafe { dlsym(handle, c_name.as_ptr()) };
+//RS             if raw_ptr.is_null() {
+//RS                 unsafe {
+//RS                     dlclose(handle);
+//RS                 }
+//RS                 return Err(format!(
+//RS                     "jit ffi: missing symbol `{symbol}` in {}",
+//RS                     path.display()
+//RS                 ));
+//RS             }
+//RS             let callback_start = is_callback_start.then(|| unsafe {
+//RS                 std::mem::transmute::<*mut c_void, JitCallbackStart>(raw_ptr)
+//RS             });
+//RS             by_wrapper.insert(
+//RS                 entry.wrapper_name.clone(),
+//RS                 FfiEntry {
+//RS                     params: entry.params.clone(),
+//RS                     param_handles: entry.param_handles.clone(),
+//RS                     param_types: entry.param_types.clone(),
+//RS                     param_access: entry.param_access.clone(),
+//RS                     ret: entry.ret,
+//RS                     ret_type: entry.ret_type.clone(),
+//RS                     handle: entry.handle,
+//RS                     close_handle: entry.close_handle,
+//RS                     ptr: raw_ptr as *const (),
+//RS                     callback_start,
+//RS                 },
+//RS             );
+//RS         }
+//RS         let close_by_handle = entries
+//RS             .iter()
+//RS             .filter_map(|entry| {
+//RS                 entry
+//RS                     .close_handle
+//RS                     .map(|handle| (handle, entry.wrapper_name.clone()))
+//RS             })
+//RS             .collect::<HashMap<_, _>>();
+//RS         *FFI_STATE.lock().unwrap_or_else(|e| e.into_inner()) = Some(FfiState {
+//RS             handle,
+//RS             clear_panic_hook_fn,
+//RS             free_fn,
+//RS             take_failure_fn,
+//RS             artifact_identity,
+//RS             by_wrapper,
+//RS             close_by_handle,
+//RS             records,
+//RS             arrow_provider_lease,
+//RS         });
+//RS         Ok(())
+//RS     }
+//RS }
+//RS 
+//RS fn ffi_diag(wrapper: &str, detail: impl Into<String>, span: Span) -> Diagnostic {
+//RS     Diagnostic::error(
+//RS         "E0956",
+//RS         format!("extern call `{wrapper}` {}", detail.into()),
+//RS         "the runtime FFI adapter could not marshal this call through the prepared bridge"
+//RS             .to_string(),
+//RS         "report this as a compiler bug".to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS const FFI_RUNTIME_PANIC: &str = "panic: a foreign function panicked";
+//RS 
+//RS fn ffi_runtime_diag(span: Span) -> Diagnostic {
+//RS     Diagnostic::from_row("E3014", &[("msg", FFI_RUNTIME_PANIC)], Some(span))
+//RS }
+//RS 
+//RS fn ffi_bridge_host_fault(wrapper: &str) -> Diagnostic {
+//RS     Diagnostic::runtime_host_fault(
+//RS         String::new(),
+//RS         format!("foreign FFI bridge `{wrapper}` panicked"),
+//RS     )
+//RS }
+//RS 
+//RS fn call_cabi<R>(
+//RS     state: &FfiState,
+//RS     wrapper: &str,
+//RS     span: Span,
+//RS     call: impl FnOnce() -> R,
+//RS ) -> Result<R, Diagnostic> {
+//RS     jet_codegen::scheduler::jet_scheduler_world_reject_uncontrolled("foreign");
+//RS     let _ = unsafe { (state.take_failure_fn)() };
+//RS     let result = jet_codegen::scheduler::jet_scheduler_catch_foreign_boundary(call);
+//RS     let failure = unsafe { (state.take_failure_fn)() };
+//RS     match (failure, result) {
+//RS         (1, _) => Err(ffi_runtime_diag(span)),
+//RS         (0, Ok(value)) => Ok(value),
+//RS         _ => Err(ffi_bridge_host_fault(wrapper)),
+//RS     }
+//RS }
+//RS fn call_uniform(
+//RS     state: &FfiState,
+//RS     wrapper: &str,
+//RS     entry: &FfiEntry,
+//RS     slots: &[FfiSlot],
+//RS     out: &mut FfiSlot,
+//RS     span: Span,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let function: UniformFfi = unsafe { std::mem::transmute(entry.ptr) };
+//RS     let rc = call_cabi(state, wrapper, span, || unsafe {
+//RS         function(slots.as_ptr(), slots.len(), out as *mut FfiSlot)
+//RS     })?;
+//RS     if rc == 0 {
+//RS         Ok(())
+//RS     } else {
+//RS         Err(ffi_diag(wrapper, format!("returned {rc}"), span))
+//RS     }
+//RS }
+//RS 
+//RS fn close_ffi_token(
+//RS     state: &FfiState,
+//RS     token_id: i64,
+//RS     span: Span,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let Some((handle, raw)) = take_ffi_handle(token_id) else {
+//RS         return Ok(());
+//RS     };
+//RS     let Some(wrapper) = state.close_by_handle.get(&handle) else {
+//RS         return Err(ffi_diag(
+//RS             &format!("{handle:?}"),
+//RS             "has no registered close function",
+//RS             span,
+//RS         ));
+//RS     };
+//RS     let Some(entry) = state.by_wrapper.get(wrapper) else {
+//RS         return Err(ffi_diag(
+//RS             wrapper,
+//RS             "has no loaded close function",
+//RS             span,
+//RS         ));
+//RS     };
+//RS     if entry.params.as_slice() != [ParamAbi::Handle] {
+//RS         return Err(ffi_diag(
+//RS             wrapper,
+//RS             "has an unsupported close signature",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     if !matches!(entry.ret, RetAbi::Unit | RetAbi::Int) {
+//RS         return Err(ffi_diag(
+//RS             wrapper,
+//RS             "has a close function with a non-status return",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     let slots = [FfiSlot {
+//RS         value: raw as u64,
+//RS         ptr: std::ptr::null_mut(),
+//RS         len: 0,
+//RS     }];
+//RS     let mut out = FfiSlot {
+//RS         value: 0,
+//RS         ptr: std::ptr::null_mut(),
+//RS         len: 0,
+//RS     };
+//RS     call_uniform(state, wrapper, entry, &slots, &mut out, span)
+//RS }
+//RS 
+//RS fn ffi_int_range_diag(span: Span) -> Diagnostic {
+//RS     let code = crate::runtime_host::contract_kernel::JET_C_INT_RANGE_CODE;
+//RS     let row = jet_foundation::Registry::diagnostic(code)
+//RS         .expect("C Int range diagnostic must be registered");
+//RS     Diagnostic::error(
+//RS         code,
+//RS         crate::runtime_host::contract_kernel::jet_c_int_range_message().to_string(),
+//RS         row.why.to_string(),
+//RS         row.fix.to_string(),
+//RS         Some(span),
+//RS     )
+//RS }
+//RS 
+//RS fn runtime_int_result(value: i64) -> MirRuntimeValue {
+//RS     const SMALL_MIN: i64 = -(1i64 << 62);
+//RS     const SMALL_MAX: i64 = (1i64 << 62) - 1;
+//RS     if (SMALL_MIN..=SMALL_MAX).contains(&value) {
+//RS         MirRuntimeValue::Int(value)
+//RS     } else {
+//RS         MirRuntimeValue::BigInt(value.to_string())
+//RS     }
+//RS }
+//RS 
+//RS fn release_cabi_buffer(
+//RS     free_fn: Option<unsafe extern "C" fn(*mut u8, usize)>,
+//RS     ptr: *mut u8,
+//RS     len: usize,
+//RS ) {
+//RS     if !ptr.is_null() {
+//RS         if let Some(free) = free_fn {
+//RS             unsafe { free(ptr, len) };
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn runtime_string_arg(
+//RS     args: &[MirRuntimeValue],
+//RS     index: usize,
+//RS     wrapper: &str,
+//RS     span: Span,
+//RS ) -> Result<String, Diagnostic> {
+//RS     match args.get(index) {
+//RS         Some(MirRuntimeValue::Moved) => Err(ffi_diag(
+//RS             wrapper,
+//RS             format!("argument {index} was moved"),
+//RS             span,
+//RS         )),
+//RS         Some(MirRuntimeValue::String(value)) => Ok(value.clone()),
+//RS         Some(MirRuntimeValue::NativeOwned(_)) => Err(ffi_diag(
+//RS             wrapper,
+//RS             format!("argument {index} contains a native-owned payload"),
+//RS             span,
+//RS         )),
+//RS         _ => Err(ffi_diag(
+//RS             wrapper,
+//RS             format!("argument {index} is not a String"),
+//RS             span,
+//RS         )),
+//RS 
+//RS     }
+//RS }
+//RS 
+//RS fn runtime_handle_arg(
+//RS     args: &[MirRuntimeValue],
+//RS     index: usize,
+//RS     wrapper: &str,
+//RS     span: Span,
+//RS     target: MirForeignTarget,
+//RS     expected_handle: Option<MirHandleId>,
+//RS ) -> Result<i64, Diagnostic> {
+//RS     let value = match args.get(index) {
+//RS         Some(MirRuntimeValue::Moved) => {
+//RS             return Err(ffi_diag(
+//RS                 wrapper,
+//RS                 format!("argument {index} was moved"),
+//RS                 span,
+//RS             ));
+//RS         }
+//RS         Some(MirRuntimeValue::Int(value)) => *value,
+//RS         Some(MirRuntimeValue::BigInt(value)) => {
+//RS             value.parse::<i64>().map_err(|_| ffi_int_range_diag(span))?
+//RS         }
+//RS         Some(MirRuntimeValue::NativeOwned(_)) => {
+//RS             return Err(ffi_diag(
+//RS                 wrapper,
+//RS                 format!("argument {index} contains a native-owned payload"),
+//RS                 span,
+//RS             ));
+//RS         }
+//RS         _ => {
+//RS             return Err(ffi_diag(
+//RS                 wrapper,
+//RS                 format!("argument {index} is not an opaque handle"),
+//RS                 span,
+//RS             ));
+//RS         }
+//RS     };
+//RS     if matches!(target, MirForeignTarget::Interpreter) {
+//RS         return Ok(value);
+//RS     }
+//RS     let actual_handle = ffi_handle_id(value).ok_or_else(|| {
+//RS         ffi_diag(
+//RS             wrapper,
+//RS             format!("argument {index} is not a live opaque handle token"),
+//RS             span,
+//RS         )
+//RS     })?;
+//RS     if let Some(expected_handle) = expected_handle {
+//RS         if actual_handle != expected_handle {
+//RS             return Err(ffi_diag(
+//RS                 wrapper,
+//RS                 format!("argument {index} has the wrong checked handle type"),
+//RS                 span,
+//RS             ));
+//RS         }
+//RS     }
+//RS     ffi_handle_raw(value).ok_or_else(|| {
+//RS         ffi_diag(
+//RS             wrapper,
+//RS             format!("argument {index} is not a live opaque handle token"),
+//RS             span,
+//RS         )
+//RS     })
+//RS }
+//RS 
+//RS fn runtime_handle_result(
+//RS     handle: Option<MirHandleId>,
+//RS     raw: i64,
+//RS     target: MirForeignTarget,
+//RS     wrapper: &str,
+//RS     span: Span,
+//RS ) -> Result<MirRuntimeValue, Diagnostic> {
+//RS     let Some(handle) = handle else {
+//RS         return Err(ffi_diag(
+//RS             wrapper,
+//RS             "returned a handle without a checked handle identity",
+//RS             span,
+//RS         ));
+//RS     };
+//RS     let value = if matches!(target, MirForeignTarget::Cranelift) {
+//RS         register_ffi_handle(handle, raw)
+//RS     } else {
+//RS         raw
+//RS     };
+//RS     Ok(MirRuntimeValue::Int(value))
+//RS }
+//RS 
+//RS fn retire_handle_args(
+//RS     args: &[MirRuntimeValue],
+//RS     params: &[ParamAbi],
+//RS     close_handle: Option<MirHandleId>,
+//RS     target: MirForeignTarget,
+//RS ) {
+//RS     if close_handle.is_none() || !matches!(target, MirForeignTarget::Cranelift) {
+//RS         return;
+//RS     }
+//RS     for (arg, abi) in args.iter().zip(params) {
+//RS         if *abi == ParamAbi::Handle {
+//RS             if let MirRuntimeValue::Int(token_id) = arg {
+//RS                 let _ = take_ffi_handle(*token_id);
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn runtime_float_result(value: f64, ret_f32: bool) -> MirRuntimeValue {
+//RS     MirRuntimeValue::Float {
+//RS         value: if ret_f32 { value as f32 as f64 } else { value },
+//RS         f32: ret_f32,
+//RS     }
+//RS }
+//RS 
+//RS fn type_size_align(
+//RS     ty: &MirType,
+//RS     records: &HashMap<MirTypeId, FfiRecordDesc>,
+//RS ) -> Option<(usize, usize)> {
+//RS     match ty.kind() {
+//RS         MirTypeKind::Apply { name: nominal, .. } => {
+//RS             let id = ty.identity.or(Some(nominal.id))?;
+//RS             records.get(&id).map(|record| (record.size, record.align))
+//RS         }
+//RS         MirTypeKind::Int => Some((8, 8)),
+//RS         MirTypeKind::InlineRange { base, .. }
+//RS         | MirTypeKind::Tagged { inner: base, .. }
+//RS         | MirTypeKind::Quantity { base, .. } => type_size_align(base, records),
+//RS         _ => {
+//RS             let size = match ty.layout.size {
+//RS                 jet_foundation::MIR::MirSize::Static(size) => usize::try_from(size).ok()?,
+//RS                 jet_foundation::MIR::MirSize::Dynamic => return None,
+//RS             };
+//RS             let align = match ty.layout.align {
+//RS                 jet_foundation::MIR::MirSize::Static(align) => usize::try_from(align).ok()?,
+//RS                 jet_foundation::MIR::MirSize::Dynamic => return None,
+//RS             };
+//RS             Some((size, align.max(1)))
+//RS         }
+//RS     }
+//RS }
+//RS fn enum_tag_is_signed(tag: MirCEnumTag) -> bool {
+//RS     matches!(
+//RS         tag,
+//RS         MirCEnumTag::CInt
+//RS             | MirCEnumTag::I8
+//RS             | MirCEnumTag::I16
+//RS             | MirCEnumTag::I32
+//RS             | MirCEnumTag::I64
+//RS     )
+//RS }
+//RS 
+//RS fn enum_tag_value_valid(tag: MirCEnumTag, tag_size: usize, value: i64) -> bool {
+//RS     let Some(bits) = tag_size.checked_mul(8) else {
+//RS         return false;
+//RS     };
+//RS     if bits == 0 || bits > 64 {
+//RS         return false;
+//RS     }
+//RS     if enum_tag_is_signed(tag) {
+//RS         if bits == 64 {
+//RS             true
+//RS         } else {
+//RS             let minimum = -(1i64 << (bits - 1));
+//RS             let maximum = (1i64 << (bits - 1)) - 1;
+//RS             (minimum..=maximum).contains(&value)
+//RS         }
+//RS     } else {
+//RS         value >= 0 && (bits == 64 || (value as u64) <= ((1u64 << bits) - 1))
+//RS     }
+//RS }
+//RS 
+//RS fn write_enum_tag(
+//RS     bytes: &mut [u8],
+//RS     enum_info: &FfiEnumDesc,
+//RS     value: i64,
+//RS     wrapper: &str,
+//RS     span: Span,
+//RS ) -> Result<(), Diagnostic> {
+//RS     if bytes.len() < enum_info.tag_size {
+//RS         return Err(ffi_diag(wrapper, "enum storage is shorter than its checked tag", span));
+//RS     }
+//RS     if !enum_tag_value_valid(enum_info.tag, enum_info.tag_size, value) {
+//RS         return Err(ffi_diag(
+//RS             wrapper,
+//RS             "enum discriminant does not fit its checked C tag",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     let raw = value as u64;
+//RS     bytes[..enum_info.tag_size].copy_from_slice(&raw.to_ne_bytes()[..enum_info.tag_size]);
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn read_enum_tag(
+//RS     bytes: &[u8],
+//RS     enum_info: &FfiEnumDesc,
+//RS     wrapper: &str,
+//RS     span: Span,
+//RS ) -> Result<i64, Diagnostic> {
+//RS     if bytes.len() < enum_info.tag_size {
+//RS         return Err(ffi_diag(wrapper, "native enum storage is shorter than its checked tag", span));
+//RS     }
+//RS     let mut raw_bytes = [0u8; 8];
+//RS     raw_bytes[..enum_info.tag_size].copy_from_slice(&bytes[..enum_info.tag_size]);
+//RS     let raw = u64::from_ne_bytes(raw_bytes);
+//RS     let bits = enum_info.tag_size * 8;
+//RS     let value = if enum_tag_is_signed(enum_info.tag) {
+//RS         if bits == 64 {
+//RS             raw as i64
+//RS         } else if raw & (1u64 << (bits - 1)) != 0 {
+//RS             (raw | (!0u64 << bits)) as i64
+//RS         } else {
+//RS             raw as i64
+//RS         }
+//RS     } else {
+//RS         i64::try_from(raw).map_err(|_| {
+//RS             ffi_diag(
+//RS                 wrapper,
+//RS                 "native enum tag is outside the checked discriminant range",
+//RS                 span,
+//RS             )
+//RS         })?
+//RS     };
+//RS     Ok(value)
+//RS }
+//RS 
+//RS fn enum_variant_by_name<'a>(
+//RS     enum_info: &'a FfiEnumDesc,
+//RS     name: &str,
+//RS     wrapper: &str,
+//RS     span: Span,
+//RS ) -> Result<&'a FfiEnumVariantDesc, Diagnostic> {
+//RS     enum_info
+//RS         .variants
+//RS         .iter()
+//RS         .find(|variant| variant.name == name)
+//RS         .ok_or_else(|| ffi_diag(wrapper, format!("unknown C enum variant `{name}`"), span))
+//RS }
+//RS 
+//RS fn enum_variant_by_discriminant<'a>(
+//RS     enum_info: &'a FfiEnumDesc,
+//RS     discriminant: i64,
+//RS     wrapper: &str,
+//RS     span: Span,
+//RS ) -> Result<&'a FfiEnumVariantDesc, Diagnostic> {
+//RS     enum_info
+//RS         .variants
+//RS         .iter()
+//RS         .find(|variant| variant.discriminant == discriminant)
+//RS         .ok_or_else(|| {
+//RS             ffi_diag(
+//RS                 wrapper,
+//RS                 "native C enum discriminant is invalid",
+//RS                 span,
+//RS             )
+//RS         })
+//RS }
+//RS 
+//RS fn encode_enum_bytes_at(
+//RS     value: &MirRuntimeValue,
+//RS     enum_info: &FfiEnumDesc,
+//RS     records: &HashMap<MirTypeId, FfiRecordDesc>,
+//RS     bytes: &mut [u8],
+//RS     wrapper: &str,
+//RS     span: Span,
+//RS ) -> Result<(), Diagnostic> {
+//RS     let (variant_name, args, scalar_discriminant) = match value {
+//RS         MirRuntimeValue::Enum {
+//RS             variant, args, ..
+//RS         } => (variant.as_str(), args.as_slice(), None),
+//RS         MirRuntimeValue::Int(discriminant) if !enum_info.has_payload => {
+//RS             ("", &[][..], Some(*discriminant))
+//RS         }
+//RS         MirRuntimeValue::NativeOwned(_) => {
+//RS             return Err(ffi_diag(
+//RS                 wrapper,
+//RS                 "native-owned payload cannot cross the C bridge",
+//RS                 span,
+//RS             ));
+//RS         }
+//RS         _ => {
+//RS             return Err(ffi_diag(
+//RS                 wrapper,
+//RS                 "received a non-enum value for a checked C enum",
+//RS                 span,
+//RS             ))
+//RS         }
+//RS     };
+//RS     let variant = if let Some(discriminant) = scalar_discriminant {
+//RS         enum_variant_by_discriminant(enum_info, discriminant, wrapper, span)?
+//RS     } else {
+//RS         enum_variant_by_name(enum_info, variant_name, wrapper, span)?
+//RS     };
+//RS     let discriminant = scalar_discriminant.unwrap_or(variant.discriminant);
+//RS     write_enum_tag(bytes, enum_info, discriminant, wrapper, span)?;
+//RS     let payload_end = variant.offset.checked_add(variant.size).ok_or_else(|| {
+//RS         ffi_diag(wrapper, "enum payload offset overflowed its checked C layout", span)
+//RS     })?;
+//RS     let payload = bytes.get_mut(variant.offset..payload_end).ok_or_else(|| {
+//RS         ffi_diag(wrapper, "enum payload exceeds its checked C layout", span)
+//RS     })?;
+//RS     if !matches!(&variant.payload, MirVariantPayload::Unit) {
+//RS         payload.fill(0);
+//RS     }
+//RS     match &variant.payload {
+//RS         MirVariantPayload::Unit => {
+//RS             if !args.is_empty() {
+//RS                 return Err(ffi_diag(
+//RS                     wrapper,
+//RS                     "unit C enum variant received a payload",
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS         }
+//RS         MirVariantPayload::Single(payload_ty) => {
+//RS             if args.len() != 1 || args[0].0.is_some() {
+//RS                 return Err(ffi_diag(
+//RS                     wrapper,
+//RS                     "single-payload C enum variant has the wrong argument shape",
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS             let field_bytes = encode_bytes(&args[0].1, payload_ty, records, wrapper, span)?;
+//RS             let field_offset = *variant.field_offsets.first().ok_or_else(|| {
+//RS                 ffi_diag(wrapper, "C enum payload has no checked field offset", span)
+//RS             })?;
+//RS             let end = field_offset.checked_add(field_bytes.len()).ok_or_else(|| {
+//RS                 ffi_diag(wrapper, "C enum payload field offset overflowed", span)
+//RS             })?;
+//RS             payload
+//RS                 .get_mut(field_offset..end)
+//RS                 .ok_or_else(|| ffi_diag(wrapper, "C enum payload field exceeds its layout", span))?
+//RS                 .copy_from_slice(&field_bytes);
+//RS         }
+//RS         MirVariantPayload::Named(payload_fields) => {
+//RS             if args.len() != payload_fields.len() {
+//RS                 return Err(ffi_diag(
+//RS                     wrapper,
+//RS                     "named C enum variant has the wrong argument count",
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS             for ((field, argument), field_offset) in payload_fields
+//RS                 .iter()
+//RS                 .zip(args)
+//RS                 .zip(&variant.field_offsets)
+//RS             {
+//RS                 if argument.0.as_deref() != Some(field.name.as_str()) {
+//RS                     return Err(ffi_diag(
+//RS                         wrapper,
+//RS                         format!("C enum payload is missing field `{}`", field.name),
+//RS                         span,
+//RS                     ));
+//RS                 }
+//RS                 let field_bytes = encode_bytes(&argument.1, &field.ty, records, wrapper, span)?;
+//RS                 let end = field_offset.checked_add(field_bytes.len()).ok_or_else(|| {
+//RS                     ffi_diag(wrapper, "C enum payload field offset overflowed", span)
+//RS                 })?;
+//RS                 payload
+//RS                     .get_mut(*field_offset..end)
+//RS                     .ok_or_else(|| {
+//RS                         ffi_diag(wrapper, "C enum payload field exceeds its layout", span)
+//RS                     })?
+//RS                     .copy_from_slice(&field_bytes);
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn decode_enum_bytes(
+//RS     bytes: &[u8],
+//RS     enum_info: &FfiEnumDesc,
+//RS     records: &HashMap<MirTypeId, FfiRecordDesc>,
+//RS     enum_name: &str,
+//RS     wrapper: &str,
+//RS     span: Span,
+//RS ) -> Result<MirRuntimeValue, Diagnostic> {
+//RS     let discriminant = read_enum_tag(bytes, enum_info, wrapper, span)?;
+//RS     let variant = enum_variant_by_discriminant(enum_info, discriminant, wrapper, span)?;
+//RS     let payload_end = variant.offset.checked_add(variant.size).ok_or_else(|| {
+//RS         ffi_diag(wrapper, "enum payload offset overflowed its checked C layout", span)
+//RS     })?;
+//RS     let payload = bytes.get(variant.offset..payload_end).ok_or_else(|| {
+//RS         ffi_diag(wrapper, "enum payload exceeds its checked C layout", span)
+//RS     })?;
+//RS     let mut args = Vec::new();
+//RS     match &variant.payload {
+//RS         MirVariantPayload::Unit => {}
+//RS         MirVariantPayload::Single(payload_ty) => {
+//RS             let field_offset = *variant.field_offsets.first().ok_or_else(|| {
+//RS                 ffi_diag(wrapper, "C enum payload has no checked field offset", span)
+//RS             })?;
+//RS             let (field_size, _) = type_size_align(payload_ty, records).ok_or_else(|| {
+//RS                 ffi_diag(wrapper, "C enum payload field has no static layout", span)
+//RS             })?;
+//RS             let end = field_offset.checked_add(field_size).ok_or_else(|| {
+//RS                 ffi_diag(wrapper, "C enum payload field offset overflowed", span)
+//RS             })?;
+//RS             let field_bytes = payload.get(field_offset..end).ok_or_else(|| {
+//RS                 ffi_diag(wrapper, "C enum payload field exceeds its layout", span)
+//RS             })?;
+//RS             args.push((
+//RS                 None,
+//RS                 decode_bytes(field_bytes, payload_ty, records, wrapper, span)?,
+//RS             ));
+//RS         }
+//RS         MirVariantPayload::Named(payload_fields) => {
+//RS             for (field, field_offset) in payload_fields.iter().zip(&variant.field_offsets) {
+//RS                 let (field_size, _) = type_size_align(&field.ty, records).ok_or_else(|| {
+//RS                     ffi_diag(wrapper, "C enum payload field has no static layout", span)
+//RS                 })?;
+//RS                 let end = field_offset.checked_add(field_size).ok_or_else(|| {
+//RS                     ffi_diag(wrapper, "C enum payload field offset overflowed", span)
+//RS                 })?;
+//RS                 let field_bytes = payload.get(*field_offset..end).ok_or_else(|| {
+//RS                     ffi_diag(wrapper, "C enum payload field exceeds its layout", span)
+//RS                 })?;
+//RS                 args.push((
+//RS                     Some(field.name.clone()),
+//RS                     decode_bytes(field_bytes, &field.ty, records, wrapper, span)?,
+//RS                 ));
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(MirRuntimeValue::Enum {
+//RS         type_name: enum_name.to_string(),
+//RS         variant: variant.name.clone(),
+//RS         args,
+//RS     })
+//RS }
+//RS 
+//RS fn value_int(
+//RS     value: &MirRuntimeValue,
+//RS     wrapper: &str,
+//RS     span: Span,
+//RS ) -> Result<i64, Diagnostic> {
+//RS     match value {
+//RS         MirRuntimeValue::Int(value) => Ok(*value),
+//RS         MirRuntimeValue::BigInt(value) => value
+//RS             .parse::<i64>()
+//RS             .map_err(|_| ffi_int_range_diag(span)),
+//RS         MirRuntimeValue::Moved => Err(ffi_diag(wrapper, "received a moved value", span)),
+//RS         MirRuntimeValue::NativeOwned(_) => Err(ffi_diag(
+//RS             wrapper,
+//RS             "native-owned payload cannot cross the C bridge",
+//RS             span,
+//RS         )),
+//RS         _ => Err(ffi_diag(wrapper, "received a non-integer value", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn encode_bytes(
+//RS     value: &MirRuntimeValue,
+//RS     ty: &MirType,
+//RS     records: &HashMap<MirTypeId, FfiRecordDesc>,
+//RS     wrapper: &str,
+//RS     span: Span,
+//RS ) -> Result<Vec<u8>, Diagnostic> {
+//RS     let (size, _) = type_size_align(ty, records).ok_or_else(|| {
+//RS         ffi_diag(
+//RS             wrapper,
+//RS             format!("type `{}` has no static C layout", ty.canonical_key()),
+//RS             span,
+//RS         )
+//RS     })?;
+//RS     let mut bytes = vec![0; size];
+//RS     encode_bytes_at(value, ty, records, &mut bytes, wrapper, span)?;
+//RS     Ok(bytes)
+//RS }
+//RS 
+//RS fn encode_bytes_at(
+//RS     value: &MirRuntimeValue,
+//RS     ty: &MirType,
+//RS     records: &HashMap<MirTypeId, FfiRecordDesc>,
+//RS     bytes: &mut [u8],
+//RS     wrapper: &str,
+//RS     span: Span,
+//RS ) -> Result<(), Diagnostic> {
+//RS     if matches!(value, MirRuntimeValue::NativeOwned(_)) {
+//RS         return Err(ffi_diag(
+//RS             wrapper,
+//RS             "native-owned payload cannot cross the C bridge",
+//RS             span,
+//RS         ));
+//RS     }
+//RS     let write_uint = |bytes: &mut [u8], value: u64| {
+//RS         let raw = value.to_ne_bytes();
+//RS         bytes.copy_from_slice(&raw[..bytes.len()]);
+//RS     };
+//RS     match ty.kind() {
+//RS         MirTypeKind::Int => write_uint(bytes, value_int(value, wrapper, span)? as u64),
+//RS         MirTypeKind::IntN { .. } => write_uint(bytes, value_int(value, wrapper, span)? as u64),
+//RS         MirTypeKind::Float => {
+//RS             let MirRuntimeValue::Float { value, .. } = value else {
+//RS                 return Err(ffi_diag(wrapper, "received a non-Float value", span));
+//RS             };
+//RS             bytes.copy_from_slice(&value.to_ne_bytes()[..bytes.len()]);
+//RS         }
+//RS         MirTypeKind::Float32 => {
+//RS             let MirRuntimeValue::Float { value, .. } = value else {
+//RS                 return Err(ffi_diag(wrapper, "received a non-Float value", span));
+//RS             };
+//RS             bytes.copy_from_slice(&(*value as f32).to_ne_bytes()[..bytes.len()]);
+//RS         }
+//RS         MirTypeKind::Bool => {
+//RS             let MirRuntimeValue::Bool(value) = value else {
+//RS                 return Err(ffi_diag(wrapper, "received a non-Bool value", span));
+//RS             };
+//RS             bytes[0] = u8::from(*value);
+//RS         }
+//RS         MirTypeKind::Char => {
+//RS             let MirRuntimeValue::Char(value) = value else {
+//RS                 return Err(ffi_diag(wrapper, "received a non-Char value", span));
+//RS             };
+//RS             write_uint(bytes, *value as u32 as u64);
+//RS         }
+//RS         MirTypeKind::InlineRange { base, .. }
+//RS         | MirTypeKind::Tagged { inner: base, .. }
+//RS         | MirTypeKind::Quantity { base, .. } => {
+//RS             encode_bytes_at(value, base, records, bytes, wrapper, span)?
+//RS         }
+//RS         MirTypeKind::FixedList { elem, .. } => {
+//RS             let MirRuntimeValue::List(values) = value else {
+//RS                 return Err(ffi_diag(wrapper, "received a non-list fixed array", span));
+//RS             };
+//RS             let (element_size, _) = type_size_align(elem, records).ok_or_else(|| {
+//RS                 ffi_diag(wrapper, "fixed-array element has no static C layout", span)
+//RS             })?;
+//RS             if element_size == 0 || bytes.len() % element_size != 0 {
+//RS                 return Err(ffi_diag(
+//RS                     wrapper,
+//RS                     "fixed-array C layout is not element-aligned",
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS             let expected_len = bytes.len() / element_size;
+//RS             if values.len() != expected_len {
+//RS                 return Err(ffi_diag(
+//RS                     wrapper,
+//RS                     "fixed-array value count does not match its checked C layout",
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS             for (index, field_value) in values.iter().enumerate() {
+//RS                 let start = index * element_size;
+//RS                 encode_bytes_at(
+//RS                     field_value,
+//RS                     elem,
+//RS                     records,
+//RS                     &mut bytes[start..start + element_size],
+//RS                     wrapper,
+//RS                     span,
+//RS                 )?;
+//RS             }
+//RS         }
+//RS         MirTypeKind::Apply { name: nominal, .. } => {
+//RS             let id = ty.identity.or(Some(nominal.id)).ok_or_else(|| {
+//RS                 ffi_diag(wrapper, "record has no checked type identity", span)
+//RS             })?;
+//RS             let descriptor = records.get(&id).ok_or_else(|| {
+//RS                 ffi_diag(
+//RS                     wrapper,
+//RS                     format!("record `{}` has no checked C layout", nominal.name),
+//RS                     span,
+//RS                 )
+//RS             })?;
+//RS             if let Some(enum_info) = descriptor.enum_info.as_ref() {
+//RS                 return encode_enum_bytes_at(value, enum_info, records, bytes, wrapper, span);
+//RS             }
+//RS             let MirRuntimeValue::Struct { fields, .. } = value else {
+//RS                 return Err(ffi_diag(wrapper, "received a non-record value", span));
+//RS             };
+//RS             for (index, field) in descriptor.fields.iter().enumerate() {
+//RS                 let field_value = fields
+//RS                     .iter()
+//RS                     .find(|(name, _)| name == &field.name)
+//RS                     .or_else(|| fields.get(index))
+//RS                     .map(|(_, value)| value)
+//RS                     .ok_or_else(|| {
+//RS                         ffi_diag(
+//RS                             wrapper,
+//RS                             format!("record is missing field `{}`", field.name),
+//RS                             span,
+//RS                         )
+//RS                     })?;
+//RS                 let field_bytes =
+//RS                     encode_bytes(field_value, &field.ty, records, wrapper, span)?;
+//RS                 let end = field.offset.checked_add(field_bytes.len()).ok_or_else(|| {
+//RS                     ffi_diag(wrapper, "record field offset overflowed", span)
+//RS                 })?;
+//RS                 let destination = bytes.get_mut(field.offset..end).ok_or_else(|| {
+//RS                     ffi_diag(wrapper, "record field exceeds its checked C layout", span)
+//RS                 })?;
+//RS                 destination.copy_from_slice(&field_bytes);
+//RS             }
+//RS         }
+//RS         _ => {
+//RS             return Err(ffi_diag(
+//RS                 wrapper,
+//RS                 format!("type `{}` cannot cross the C bridge", ty.canonical_key()),
+//RS                 span,
+//RS             ))
+//RS         }
+//RS     }
+//RS     Ok(())
+//RS }
+//RS 
+//RS fn decode_bytes(
+//RS     bytes: &[u8],
+//RS     ty: &MirType,
+//RS     records: &HashMap<MirTypeId, FfiRecordDesc>,
+//RS     wrapper: &str,
+//RS     span: Span,
+//RS ) -> Result<MirRuntimeValue, Diagnostic> {
+//RS     let (size, _) = type_size_align(ty, records).ok_or_else(|| {
+//RS         ffi_diag(
+//RS             wrapper,
+//RS             format!("type `{}` has no static C layout", ty.canonical_key()),
+//RS             span,
+//RS         )
+//RS     })?;
+//RS     if bytes.len() < size {
+//RS         return Err(ffi_diag(wrapper, "native data is shorter than its C layout", span));
+//RS     }
+//RS     let bytes = &bytes[..size];
+//RS     let read_uint = |bytes: &[u8]| {
+//RS         let mut raw = [0; 8];
+//RS         raw[..bytes.len()].copy_from_slice(bytes);
+//RS         u64::from_ne_bytes(raw)
+//RS     };
+//RS     match ty.kind() {
+//RS         MirTypeKind::Int => Ok(runtime_int_result(read_uint(bytes) as i64)),
+//RS         MirTypeKind::IntN { signed, bits } => {
+//RS             let value = read_uint(bytes);
+//RS             let value = match (*signed, *bits) {
+//RS                 (true, 8) => (value as i8) as i64,
+//RS                 (true, 16) => (value as i16) as i64,
+//RS                 (true, 32) => (value as i32) as i64,
+//RS                 (true, 64) => value as i64,
+//RS                 (false, 8) => (value as u8) as i64,
+//RS                 (false, 16) => (value as u16) as i64,
+//RS                 (false, 32) => (value as u32) as i64,
+//RS                 (false, 64) => value as i64,
+//RS                 _ => {
+//RS                     return Err(ffi_diag(
+//RS                         wrapper,
+//RS                         "integer width has no checked C representation",
+//RS                         span,
+//RS                     ))
+//RS                 }
+//RS             };
+//RS             Ok(runtime_int_result(value))
+//RS         }
+//RS         MirTypeKind::Float => {
+//RS             let mut raw = [0; 8];
+//RS             raw.copy_from_slice(&bytes[..8]);
+//RS             Ok(MirRuntimeValue::Float {
+//RS                 value: f64::from_ne_bytes(raw),
+//RS                 f32: false,
+//RS             })
+//RS         }
+//RS         MirTypeKind::Float32 => {
+//RS             let mut raw = [0; 4];
+//RS             raw.copy_from_slice(&bytes[..4]);
+//RS             Ok(MirRuntimeValue::Float {
+//RS                 value: f32::from_ne_bytes(raw) as f64,
+//RS                 f32: true,
+//RS             })
+//RS         }
+//RS         MirTypeKind::Bool => Ok(MirRuntimeValue::Bool(bytes[0] != 0)),
+//RS         MirTypeKind::Char => {
+//RS             let value = read_uint(bytes) as u32;
+//RS             char::from_u32(value)
+//RS                 .map(MirRuntimeValue::Char)
+//RS                 .ok_or_else(|| ffi_diag(wrapper, "native data is not a valid Char", span))
+//RS         }
+//RS         MirTypeKind::InlineRange { base, .. }
+//RS         | MirTypeKind::Tagged { inner: base, .. }
+//RS         | MirTypeKind::Quantity { base, .. } => {
+//RS             decode_bytes(bytes, base, records, wrapper, span)
+//RS         }
+//RS         MirTypeKind::FixedList { elem, .. } => {
+//RS             let (element_size, _) = type_size_align(elem, records).ok_or_else(|| {
+//RS                 ffi_diag(wrapper, "fixed-array element has no static C layout", span)
+//RS             })?;
+//RS             if element_size == 0 || bytes.len() % element_size != 0 {
+//RS                 return Err(ffi_diag(
+//RS                     wrapper,
+//RS                     "fixed-array C layout is not element-aligned",
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS             bytes
+//RS                 .chunks_exact(element_size)
+//RS                 .map(|chunk| decode_bytes(chunk, elem, records, wrapper, span))
+//RS                 .collect::<Result<Vec<_>, _>>()
+//RS                 .map(MirRuntimeValue::List)
+//RS         }
+//RS         MirTypeKind::Apply { name: nominal, .. } => {
+//RS             let id = ty.identity.or(Some(nominal.id)).ok_or_else(|| {
+//RS                 ffi_diag(wrapper, "record has no checked type identity", span)
+//RS             })?;
+//RS             let descriptor = records.get(&id).ok_or_else(|| {
+//RS                 ffi_diag(
+//RS                     wrapper,
+//RS                     format!("record `{}` has no checked C layout", nominal.name),
+//RS                     span,
+//RS                 )
+//RS             })?;
+//RS             if let Some(enum_info) = descriptor.enum_info.as_ref() {
+//RS                 return decode_enum_bytes(bytes, enum_info, records, &descriptor.name, wrapper, span);
+//RS             }
+//RS             let mut fields = Vec::with_capacity(descriptor.fields.len());
+//RS             for field in &descriptor.fields {
+//RS                 let (_, field_size) = type_size_align(&field.ty, records)
+//RS                     .map(|(size, _)| (field.offset, size))
+//RS                     .ok_or_else(|| {
+//RS                         ffi_diag(wrapper, "record field has no static C layout", span)
+//RS                     })?;
+//RS                 let end = field.offset.checked_add(field_size).ok_or_else(|| {
+//RS                     ffi_diag(wrapper, "record field offset overflowed", span)
+//RS                 })?;
+//RS                 let field_bytes = bytes.get(field.offset..end).ok_or_else(|| {
+//RS                     ffi_diag(wrapper, "record field exceeds its checked C layout", span)
+//RS                 })?;
+//RS                 fields.push((
+//RS                     field.name.clone(),
+//RS                     decode_bytes(field_bytes, &field.ty, records, wrapper, span)?,
+//RS                 ));
+//RS             }
+//RS             Ok(MirRuntimeValue::Struct {
+//RS                 type_name: descriptor.name.clone(),
+//RS                 fields,
+//RS             })
+//RS         }
+//RS         _ => Err(ffi_diag(
+//RS             wrapper,
+//RS             format!("type `{}` cannot cross the C bridge", ty.canonical_key()),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn prepare_runtime_call(
+//RS     args: &[MirRuntimeValue],
+//RS     entry: &FfiEntry,
+//RS     records: &HashMap<MirTypeId, FfiRecordDesc>,
+//RS     wrapper: &str,
+//RS     span: Span,
+//RS     target: MirForeignTarget,
+//RS ) -> Result<(Vec<FfiSlot>, Vec<FfiStorage>), Diagnostic> {
+//RS     let mut slots = Vec::with_capacity(args.len());
+//RS     let mut storage = Vec::new();
+//RS     for (index, ((abi, ty), access)) in entry
+//RS         .params
+//RS         .iter()
+//RS         .zip(&entry.param_types)
+//RS         .zip(&entry.param_access)
+//RS         .enumerate()
+//RS     {
+//RS         let value = args.get(index).ok_or_else(|| {
+//RS             ffi_diag(wrapper, format!("argument {index} is missing"), span)
+//RS         })?;
+//RS         match abi {
+//RS             ParamAbi::Callback => {
+//RS                 return Err(ffi_diag(
+//RS                     wrapper,
+//RS                     "managed callback start requires the callback registration adapter",
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS             ParamAbi::Record => {
+//RS                 let (size, align) = type_size_align(ty, records).ok_or_else(|| {
+//RS                     ffi_diag(wrapper, "record parameter has no static C layout", span)
+//RS                 })?;
+//RS                 let bytes = encode_bytes(value, ty, records, wrapper, span)?;
+//RS                 if bytes.len() != size {
+//RS                     return Err(ffi_diag(
+//RS                         wrapper,
+//RS                         "record parameter encoding does not match its checked C layout",
+//RS                         span,
+//RS                     ));
+//RS                 }
+//RS                 let data = FfiStorage::from_bytes(&bytes, align);
+//RS                 let ptr = data.as_ptr();
+//RS                 storage.push(data);
+//RS                 slots.push(FfiSlot {
+//RS                     value: 0,
+//RS                     ptr,
+//RS                     len: size,
+//RS                 });
+//RS             }
+//RS             ParamAbi::List => {
+//RS                 let MirTypeKind::List(inner) = ty.kind() else {
+//RS                     return Err(ffi_diag(wrapper, "list carrier has a non-list type", span));
+//RS                 };
+//RS                 let MirRuntimeValue::List(values) = value else {
+//RS                     return Err(ffi_diag(wrapper, format!("argument {index} is not a List"), span));
+//RS                 };
+//RS                 let mut bytes = Vec::new();
+//RS                 for value in values {
+//RS                     bytes.extend(encode_bytes(value, inner, records, wrapper, span)?);
+//RS                 }
+//RS                 let (_, element_align) = type_size_align(inner, records).ok_or_else(|| {
+//RS                     ffi_diag(wrapper, "list element has no static C layout", span)
+//RS                 })?;
+//RS                 let data = FfiStorage::from_bytes(&bytes, element_align);
+//RS                 let ptr = if bytes.is_empty() {
+//RS                     std::ptr::null_mut()
+//RS                 } else {
+//RS                     data.as_ptr()
+//RS                 };
+//RS                 let len = values.len();
+//RS                 storage.push(data);
+//RS                 slots.push(FfiSlot {
+//RS                     value: 0,
+//RS                     ptr,
+//RS                     len,
+//RS                 });
+//RS             }
+//RS             ParamAbi::String => {
+//RS                 let value = runtime_string_arg(args, index, wrapper, span)?;
+//RS                 let mut bytes = value.into_bytes();
+//RS                 let len = bytes.len();
+//RS                 if *access == MirAccess::Write {
+//RS                     bytes.push(0);
+//RS                 }
+//RS                 let data = FfiStorage::from_bytes(&bytes, 1);
+//RS                 let ptr = data.as_ptr();
+//RS                 storage.push(data);
+//RS                 slots.push(FfiSlot {
+//RS                     value: 0,
+//RS                     ptr,
+//RS                     len,
+//RS                 });
+//RS             }
+//RS             ParamAbi::Handle => {
+//RS                 let raw = runtime_handle_arg(
+//RS                     args,
+//RS                     index,
+//RS                     wrapper,
+//RS                     span,
+//RS                     target,
+//RS                     entry.param_handles.get(index).copied().flatten(),
+//RS                 )?;
+//RS                 slots.push(FfiSlot {
+//RS                     value: raw as u64,
+//RS                     ptr: std::ptr::null_mut(),
+//RS                     len: 0,
+//RS                 });
+//RS             }
+//RS             ParamAbi::Int | ParamAbi::Float | ParamAbi::Bool => {
+//RS                 if *access == MirAccess::Write {
+//RS                     let (size, align) = type_size_align(ty, records).ok_or_else(|| {
+//RS                         ffi_diag(wrapper, "write parameter has no static C layout", span)
+//RS                     })?;
+//RS                     let mut data = FfiStorage::zeroed(size, align);
+//RS                     encode_bytes_at(value, ty, records, data.as_bytes_mut(), wrapper, span)?;
+//RS                     let ptr = data.as_ptr();
+//RS                     storage.push(data);
+//RS                     slots.push(FfiSlot {
+//RS                         value: 0,
+//RS                         ptr,
+//RS                         len: 0,
+//RS                     });
+//RS                 } else {
+//RS                     let bits = if let Some(enum_info) = mir_enum_desc(ty, records) {
+//RS                         if enum_info.has_payload {
+//RS                             return Err(ffi_diag(
+//RS                                 wrapper,
+//RS                                 "payload C enum has no scalar representation",
+//RS                                 span,
+//RS                             ));
+//RS                         }
+//RS                         let discriminant = match value {
+//RS                             MirRuntimeValue::Enum { variant, args, .. } => {
+//RS                                 if !args.is_empty() {
+//RS                                     return Err(ffi_diag(
+//RS                                         wrapper,
+//RS                                         "unit C enum variant received a payload",
+//RS                                         span,
+//RS                                     ));
+//RS                                 }
+//RS                                 enum_variant_by_name(enum_info, variant, wrapper, span)?
+//RS                                     .discriminant
+//RS                             }
+//RS                             MirRuntimeValue::Int(value) => {
+//RS                                 enum_variant_by_discriminant(enum_info, *value, wrapper, span)?;
+//RS                                 *value
+//RS                             }
+//RS                             MirRuntimeValue::NativeOwned(_) => {
+//RS                                 return Err(ffi_diag(
+//RS                                     wrapper,
+//RS                                     "native-owned payload cannot cross the C bridge",
+//RS                                     span,
+//RS                                 ));
+//RS                             }
+//RS                             _ => {
+//RS                                 return Err(ffi_diag(
+//RS                                     wrapper,
+//RS                                     "argument is not a checked C enum value",
+//RS                                     span,
+//RS                                 ))
+//RS                             }
+//RS                         };
+//RS                         discriminant as u64
+//RS                     } else {
+//RS                         match ty.kind() {
+//RS                             MirTypeKind::Float => {
+//RS                                 let MirRuntimeValue::Float { value, .. } = value else {
+//RS                                     return Err(ffi_diag(wrapper, "argument is not a Float", span));
+//RS                                 };
+//RS                                 value.to_bits()
+//RS                             }
+//RS                             MirTypeKind::Float32 => {
+//RS                                 let MirRuntimeValue::Float { value, .. } = value else {
+//RS                                     return Err(ffi_diag(wrapper, "argument is not a Float", span));
+//RS                                 };
+//RS                                 (*value as f32).to_bits() as u64
+//RS                             }
+//RS                             MirTypeKind::Bool => {
+//RS                                 let MirRuntimeValue::Bool(value) = value else {
+//RS                                     return Err(ffi_diag(wrapper, "argument is not a Bool", span));
+//RS                                 };
+//RS                                 u64::from(*value)
+//RS                             }
+//RS                             MirTypeKind::Int
+//RS                             | MirTypeKind::IntN { .. }
+//RS                             | MirTypeKind::InlineRange { .. }
+//RS                             | MirTypeKind::Tagged { .. }
+//RS                             | MirTypeKind::Quantity { .. } => {
+//RS                                 value_int(value, wrapper, span)? as u64
+//RS                             }
+//RS                             _ => {
+//RS                                 return Err(ffi_diag(
+//RS                                     wrapper,
+//RS                                     "parameter has no scalar C representation",
+//RS                                     span,
+//RS                                 ))
+//RS                             }
+//RS                         }
+//RS                     };
+//RS                     slots.push(FfiSlot {
+//RS                         value: bits,
+//RS                         ptr: std::ptr::null_mut(),
+//RS                         len: 0,
+//RS                     });
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok((slots, storage))
+//RS }
+//RS 
+//RS fn decode_runtime_result(
+//RS     state: &FfiState,
+//RS     entry: &FfiEntry,
+//RS     out: &FfiSlot,
+//RS     wrapper: &str,
+//RS     span: Span,
+//RS     target: MirForeignTarget,
+//RS     ret_f32: bool,
+//RS ) -> Result<MirRuntimeValue, Diagnostic> {
+//RS     match entry.ret {
+//RS         RetAbi::Unit => Ok(MirRuntimeValue::Unit),
+//RS         RetAbi::Int => {
+//RS             let Some(ty) = entry.ret_type.as_ref() else {
+//RS                 return Ok(runtime_int_result(out.value as i64));
+//RS             };
+//RS             let Some(id) = mir_type_identity(ty) else {
+//RS                 return Ok(runtime_int_result(out.value as i64));
+//RS             };
+//RS             let Some(descriptor) = state.records.get(&id) else {
+//RS                 return Ok(runtime_int_result(out.value as i64));
+//RS             };
+//RS             let Some(enum_info) = descriptor.enum_info.as_ref() else {
+//RS                 return Ok(runtime_int_result(out.value as i64));
+//RS             };
+//RS             if enum_info.has_payload {
+//RS                 return Err(ffi_diag(
+//RS                     wrapper,
+//RS                     "payload C enum has no scalar return carrier",
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS             let discriminant =
+//RS                 read_enum_tag(&out.value.to_ne_bytes(), enum_info, wrapper, span)?;
+//RS             let variant = enum_variant_by_discriminant(enum_info, discriminant, wrapper, span)?;
+//RS             Ok(MirRuntimeValue::Enum {
+//RS                 type_name: descriptor.name.clone(),
+//RS                 variant: variant.name.clone(),
+//RS                 args: Vec::new(),
+//RS             })
+//RS         }
+//RS         RetAbi::Float => {
+//RS             let value = if entry
+//RS                 .ret_type
+//RS                 .as_ref()
+//RS                 .is_some_and(|ty| matches!(ty.kind(), MirTypeKind::Float32))
+//RS             {
+//RS                 f32::from_bits(out.value as u32) as f64
+//RS             } else {
+//RS                 f64::from_bits(out.value)
+//RS             };
+//RS             Ok(runtime_float_result(value, ret_f32))
+//RS         }
+//RS         RetAbi::Bool => Ok(MirRuntimeValue::Bool(out.value != 0)),
+//RS         RetAbi::Handle => runtime_handle_result(
+//RS             entry.handle,
+//RS             out.value as i64,
+//RS             target,
+//RS             wrapper,
+//RS             span,
+//RS         ),
+//RS         RetAbi::String => {
+//RS             if out.ptr.is_null() && out.len != 0 {
+//RS                 return Err(ffi_diag(
+//RS                     wrapper,
+//RS                     "returned a null buffer with a non-zero length",
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS             let bytes = if out.ptr.is_null() {
+//RS                 Vec::new()
+//RS             } else {
+//RS                 // SAFETY: the generated trampoline owns this result buffer
+//RS                 // until the host copies it and invokes its matching free hook.
+//RS                 unsafe { std::slice::from_raw_parts(out.ptr, out.len) }.to_vec()
+//RS             };
+//RS             release_cabi_buffer(state.free_fn, out.ptr, out.len);
+//RS             String::from_utf8(bytes)
+//RS                 .map(MirRuntimeValue::String)
+//RS                 .map_err(|_| ffi_diag(wrapper, "returned invalid UTF-8", span))
+//RS         }
+//RS         RetAbi::Record => {
+//RS             let ty = entry
+//RS                 .ret_type
+//RS                 .as_ref()
+//RS                 .ok_or_else(|| ffi_diag(wrapper, "record result has no type", span))?;
+//RS             let (size, _) = type_size_align(ty, &state.records).ok_or_else(|| {
+//RS                 ffi_diag(wrapper, "record result has no static C layout", span)
+//RS             })?;
+//RS             if out.ptr.is_null() || out.len != size {
+//RS                 release_cabi_buffer(state.free_fn, out.ptr, out.len);
+//RS                 return Err(ffi_diag(
+//RS                     wrapper,
+//RS                     "returned record buffer does not match its checked C layout",
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS             let bytes = unsafe { std::slice::from_raw_parts(out.ptr, out.len) }.to_vec();
+//RS             release_cabi_buffer(state.free_fn, out.ptr, out.len);
+//RS             decode_bytes(&bytes, ty, &state.records, wrapper, span)
+//RS         }
+//RS         RetAbi::List => {
+//RS             let MirTypeKind::List(inner) = entry
+//RS                 .ret_type
+//RS                 .as_ref()
+//RS                 .ok_or_else(|| ffi_diag(wrapper, "list result has no type", span))?
+//RS                 .kind()
+//RS             else {
+//RS                 return Err(ffi_diag(wrapper, "list result has a non-list type", span));
+//RS             };
+//RS             let (element_size, _) = type_size_align(inner, &state.records).ok_or_else(|| {
+//RS                 ffi_diag(wrapper, "list element has no static C layout", span)
+//RS             })?;
+//RS             let total = element_size.checked_mul(out.len).ok_or_else(|| {
+//RS                 ffi_diag(wrapper, "returned list length overflowed its C layout", span)
+//RS             })?;
+//RS             if out.ptr.is_null() && total != 0 {
+//RS                 return Err(ffi_diag(
+//RS                     wrapper,
+//RS                     "returned a null list buffer with a non-zero length",
+//RS                     span,
+//RS                 ));
+//RS             }
+//RS             let bytes = if total == 0 {
+//RS                 Vec::new()
+//RS             } else {
+//RS                 // SAFETY: the C trampoline reports the native pointer and
+//RS                 // element count; copy before any owner can be invalidated.
+//RS                 unsafe { std::slice::from_raw_parts(out.ptr, total) }.to_vec()
+//RS             };
+//RS             let values = (0..out.len)
+//RS                 .map(|index| {
+//RS                     let start = index * element_size;
+//RS                     decode_bytes(
+//RS                         &bytes[start..start + element_size],
+//RS                         inner,
+//RS                         &state.records,
+//RS                         wrapper,
+//RS                         span,
+//RS                     )
+//RS                 })
+//RS                 .collect::<Result<Vec<_>, _>>()?;
+//RS             Ok(MirRuntimeValue::List(values))
+//RS         }
+//RS     }
+//RS }
+//RS fn decode_runtime_writebacks(
+//RS     state: &FfiState,
+//RS     entry: &FfiEntry,
+//RS     args: &[MirRuntimeValue],
+//RS     slots: &[FfiSlot],
+//RS     storage: &[FfiStorage],
+//RS     wrapper: &str,
+//RS     span: Span,
+//RS ) -> Result<Vec<AmbientMirExternWriteback>, Diagnostic> {
+//RS     let mut storage_index = 0usize;
+//RS     let mut writebacks = Vec::new();
+//RS     for (index, ((abi, ty), access)) in entry
+//RS         .params
+//RS         .iter()
+//RS         .zip(&entry.param_types)
+//RS         .zip(&entry.param_access)
+//RS         .enumerate()
+//RS     {
+//RS         match abi {
+//RS             ParamAbi::Record => {
+//RS                 let current_storage = storage_index;
+//RS                 storage_index += 1;
+//RS                 if *access != MirAccess::Write {
+//RS                     continue;
+//RS                 }
+//RS                 let bytes = storage
+//RS                     .get(current_storage)
+//RS                     .map(FfiStorage::as_bytes)
+//RS                     .ok_or_else(|| ffi_diag(wrapper, "mutable record storage is missing", span))?;
+//RS                 let value = decode_bytes(bytes, ty, &state.records, wrapper, span)?;
+//RS                 writebacks.push(AmbientMirExternWriteback {
+//RS                     parameter: index,
+//RS                     value,
+//RS                 });
+//RS             }
+//RS             ParamAbi::List => {
+//RS                 let current_storage = storage_index;
+//RS                 storage_index += 1;
+//RS                 if *access != MirAccess::Write {
+//RS                     continue;
+//RS                 }
+//RS                 let MirTypeKind::List(inner) = ty.kind() else {
+//RS                     return Err(ffi_diag(wrapper, "list carrier has a non-list type", span));
+//RS                 };
+//RS                 let (element_size, _) =
+//RS                     type_size_align(inner, &state.records).ok_or_else(|| {
+//RS                         ffi_diag(
+//RS                             wrapper,
+//RS                             "mutable list element has no static C layout",
+//RS                             span,
+//RS                         )
+//RS                     })?;
+//RS                 let slot = slots.get(index).copied().ok_or_else(|| {
+//RS                     ffi_diag(wrapper, "mutable list slot is missing", span)
+//RS                 })?;
+//RS                 let bytes = storage
+//RS                     .get(current_storage)
+//RS                     .map(FfiStorage::as_bytes)
+//RS                     .ok_or_else(|| ffi_diag(wrapper, "mutable list storage is missing", span))?;
+//RS                 let mut values = Vec::with_capacity(slot.len);
+//RS                 for element_index in 0..slot.len {
+//RS                     let start = element_index.checked_mul(element_size).ok_or_else(|| {
+//RS                         ffi_diag(
+//RS                             wrapper,
+//RS                             "mutable list length overflowed its C layout",
+//RS                             span,
+//RS                         )
+//RS                     })?;
+//RS                     let end = start.checked_add(element_size).ok_or_else(|| {
+//RS                         ffi_diag(wrapper, "mutable list element range overflowed", span)
+//RS                     })?;
+//RS                     let element = bytes.get(start..end).ok_or_else(|| {
+//RS                         ffi_diag(
+//RS                             wrapper,
+//RS                             "mutable list storage is shorter than its count",
+//RS                             span,
+//RS                         )
+//RS                     })?;
+//RS                     values.push(decode_bytes(
+//RS                         element,
+//RS                         inner,
+//RS                         &state.records,
+//RS                         wrapper,
+//RS                         span,
+//RS                     )?);
+//RS                 }
+//RS                 writebacks.push(AmbientMirExternWriteback {
+//RS                     parameter: index,
+//RS                     value: MirRuntimeValue::List(values),
+//RS                 });
+//RS             }
+//RS             ParamAbi::String => {
+//RS                 let current_storage = storage_index;
+//RS                 storage_index += 1;
+//RS                 if *access != MirAccess::Write {
+//RS                     continue;
+//RS                 }
+//RS                 let bytes = storage
+//RS                     .get(current_storage)
+//RS                     .map(FfiStorage::as_bytes)
+//RS                     .ok_or_else(|| ffi_diag(wrapper, "mutable String storage is missing", span))?;
+//RS                 let end = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
+//RS                 let value = String::from_utf8(bytes[..end].to_vec())
+//RS                     .map_err(|_| ffi_diag(wrapper, "native mutable String is not UTF-8", span))?;
+//RS                 writebacks.push(AmbientMirExternWriteback {
+//RS                     parameter: index,
+//RS                     value: MirRuntimeValue::String(value),
+//RS                 });
+//RS             }
+//RS             ParamAbi::Int | ParamAbi::Float | ParamAbi::Bool
+//RS                 if *access == MirAccess::Write =>
+//RS             {
+//RS                 let current_storage = storage_index;
+//RS                 storage_index += 1;
+//RS                 let bytes = storage
+//RS                     .get(current_storage)
+//RS                     .map(FfiStorage::as_bytes)
+//RS                     .ok_or_else(|| ffi_diag(wrapper, "mutable scalar storage is missing", span))?;
+//RS                 writebacks.push(AmbientMirExternWriteback {
+//RS                     parameter: index,
+//RS                     value: decode_bytes(bytes, ty, &state.records, wrapper, span)?,
+//RS                 });
+//RS             }
+//RS             ParamAbi::Int | ParamAbi::Float | ParamAbi::Bool => {}
+//RS             ParamAbi::Handle => {
+//RS                 if *access == MirAccess::Write {
+//RS                     let value = args.get(index).cloned().ok_or_else(|| {
+//RS                         ffi_diag(wrapper, "mutable handle argument is missing", span)
+//RS                     })?;
+//RS                     if !matches!(value, MirRuntimeValue::Int(_)) {
+//RS                         return Err(ffi_diag(
+//RS                             wrapper,
+//RS                             "mutable handle argument is not an integer token carrier",
+//RS                             span,
+//RS                         ));
+//RS                     }
+//RS                     // A writable opaque handle lends its native pointee. The
+//RS                     // native call cannot replace the managed token; return
+//RS                     // the original carrier so ownership and identity remain
+//RS                     // unchanged while the pointee mutation stays in place.
+//RS                     writebacks.push(AmbientMirExternWriteback {
+//RS                         parameter: index,
+//RS                         value,
+//RS                     });
+//RS                 }
+//RS             }
+//RS             ParamAbi::Callback => {
+//RS                 if *access == MirAccess::Write {
+//RS                     return Err(ffi_diag(
+//RS                         wrapper,
+//RS                         "managed callback write parameter has no checked carrier",
+//RS                         span,
+//RS                     ));
+//RS                 }
+//RS             }
+//RS         }
+//RS     }
+//RS     Ok(writebacks)
+//RS }
+//RS 
+//RS 
+// END-PORT-PENDING 0216 crates/jet-jit/src/Ffi.rs:1814-3618
+

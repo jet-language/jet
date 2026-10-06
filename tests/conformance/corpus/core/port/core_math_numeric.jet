@@ -1,0 +1,101 @@
+// Source-owned Core boundary differential fixtures. Tests live in core_math_numericTests.
+use tests.tir_support as tir_support
+use jet.Syntax as Syntax
+use std.env as env
+use std.fs as fs
+use std.process.[Command]
+
+// Rust: tests/core_net_tls.rs:4
+INVALID_DNS_LABEL_SOURCE :: """
+use core.net.tls as tls
+fn run() -[Net, Time.Wait]> IOError! {
+    _ :: tls.client("bad..example", 443)
+}
+"""
+
+// Rust: tests/core_surface_ledger.rs:20
+// GATE #4494: repository root supplied by the native test runner.
+fn root() -> OSPath { OSPath.from(env.manifest_dir()) }
+
+// Rust: tests/core_surface_ledger.rs:24
+// GATE #4494: real checker subprocess; retain exit status and both streams.
+fn run(flag: String) -> (Bool, String, String) {
+    output :: Command.new("node").arg("Tools/agent/check-core-surface-ledger.mjs").arg(flag)
+        .current_dir(root()).output().expect("node must run the core-surface-ledger checker")
+    (output.status.success(), String.from_utf8_lossy(output.stdout).to_string(), String.from_utf8_lossy(output.stderr).to_string())
+}
+
+// Rust: tests/core_surface_ledger.rs:38
+fn source(path: String) -> String {
+    fs.read_to_string(root().join(path)).unwrap_or_else(|error| -> panic("{path} must be readable: {error}"))
+}
+
+// Rust: tests/core_surface_ledger.rs:43
+fn assert_layering_contract_is_taught() -> {
+    checker_surface :: source("crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs")
+    loop marker in [
+        "D-ONCE-LAYER1=B: the typed rung is core.crypto; the raw-byte rung is core.crypto.expert.",
+        "D-ONCE-LAYER1=B: the raw-byte rung is core.crypto.expert; the typed rung is core.crypto.",
+        "D-ONCE-LAYER1=B: the one-shot rung is core.http; the configurable rung is core.http.client.",
+        "D-ONCE-LAYER1=B: the configurable rung is core.http.client; the one-shot rung is core.http."
+    ] { assert(checker_surface.contains(marker), "Core module surface lost layering marker: {marker}") }
+    mem_surface :: source("crates/jet-foundation/src/Syntax/core_surface.rs")
+    assert(mem_surface.contains("The import gate (`use core.mem`) unlocks every name; the audit gate (`#Unsafe(\"reason\")`) is required only for items marked `Audit`."), "core.mem must state both gates at its module gate")
+    laws :: source("Docs/spec/stdlib-api-laws.md")
+    assert(laws.contains("D-ONCE-LAYER1=B") && laws.contains("core.crypto.expert") && laws.contains("core.http.client"), "the ratified layering split must be in the API laws")
+    crypto_example :: source("Examples/features/crypto/random_api_split.jet")
+    assert(crypto_example.contains("D-ONCE-LAYER1=B") && crypto_example.contains("use core.crypto as crypto") && crypto_example.contains("use core.crypto.expert as expert") && crypto_example.contains("crypto rungs agree: {{rungs_agree}}"), "the crypto example must teach both ratified rungs")
+    http_example :: source("Examples/features/net/http_client.jet")
+    assert(http_example.contains("D-ONCE-LAYER1=B") && http_example.contains("use core.http as http") && http_example.contains("use core.http.client as http_client") && http_example.contains("http.get(") && http_example.contains("http_client.request("), "the HTTP example must teach both ratified rungs")
+    retired_now :: "jet" + ".time" + ".now"
+    retired_format :: "jet" + ".time" + ".format"
+    assert_eq(Syntax.rename_target(retired_now), "core.time.now", "the retired clock door must use Syntax::RETIREMENTS")
+    assert_eq(Syntax.rename_target(retired_format), "DateTime.format_rfc3339()", "the retired time format door must use Syntax::RETIREMENTS")
+}
+
+// Rust: tests/core_testing_history.rs:6
+INVALID_SEED_SOURCE :: """
+use core.testing as api
+fn reference_size(commands: [DataTree]) -> DataTree { DataTree.Int(commands.len()) }
+fn candidate_size(commands: [DataTree]) -> DataTree { DataTree.Int(commands.len()) }
+fn observe(value: DataTree) -> DataTree { ~value }
+fn run() -> Err! {
+    comparison :: api.histories<DataTree>(
+        seed: -1, cases: 1, strategy: None,
+        model: reference_size, actual: candidate_size, observe: observe,
+    )
+    print(comparison.status)
+}
+"""
+
+// Rust: tests/core_testing_history.rs:31
+INTEGER_COMMAND_SOURCE :: """
+use core.testing as api
+enum HistoryStep { Step(Int) }
+fn reference_size(commands: [HistoryStep]) -> DataTree { DataTree.Int(commands.len()) }
+fn candidate_size(commands: [HistoryStep]) -> DataTree { DataTree.Int(commands.len()) }
+fn observe(value: DataTree) -> DataTree { ~value }
+fn run() -> Err! {
+    comparison :: api.histories<HistoryStep>(
+        seed: 1, cases: 1, strategy: None,
+        model: reference_size, actual: candidate_size, observe: observe,
+    )
+    print(comparison.status)
+}
+"""
+
+// Rust: tests/core_testing_history.rs:61
+CALLBACK_FAILURE_SOURCE :: """
+use core.testing as api
+fn failing_model(commands: [DataTree]) -> DataTree Err! { return Err("history callback marker") }
+fn candidate_size(commands: [DataTree]) -> DataTree { DataTree.Int(commands.len()) }
+fn observe(value: DataTree) -> DataTree { ~value }
+fn run() -> Err! {
+    comparison :: api.histories<DataTree>(
+        seed: 1, cases: 1, strategy: None,
+        model: failing_model, actual: candidate_size, observe: observe,
+    )
+    print(comparison.status)
+    print(comparison.reason)
+}
+"""

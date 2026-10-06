@@ -21,7 +21,7 @@ const RUNNER_SOURCES: &[&str] = &[
     "crates/jet-foundation",
     "crates/jet-net",
     "crates/jet-codegen",
-    "crates/jet-jit",
+    "crates/jet-evalhost",
     "crates/jet-rt",
 ];
 

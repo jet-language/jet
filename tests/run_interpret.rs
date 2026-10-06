@@ -24,9 +24,9 @@ fn run_interpret_forces_tier_zero_without_watch() {
     fs::write(&file, format!("fn run() {{\n    print(\"{marker}\")\n}}\n")).unwrap();
 
     let default = Command::new(jet())
-        .args(["run", "--trace-tiers", "main.jet"])
+        .args(["run", "main.jet"])
         .current_dir(&dir)
-        .env("JET_RUN_CACHE_DIR", dir.join("run-cache"))
+        .env("JET_STORE_DIR", dir.join("run-cache"))
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
@@ -42,12 +42,11 @@ fn run_interpret_forces_tier_zero_without_watch() {
         String::from_utf8_lossy(&default.stderr)
     );
     assert_eq!(default.stdout, format!("{marker}\n").into_bytes());
-    assert!(String::from_utf8_lossy(&default.stderr).contains("tier1 native"));
 
     let forced = Command::new(jet())
-        .args(["run", "--trace-tiers", "--interpret", "main.jet"])
+        .args(["run", "--interpret", "main.jet"])
         .current_dir(&dir)
-        .env("JET_RUN_CACHE_DIR", dir.join("run-cache"))
+        .env("JET_STORE_DIR", dir.join("run-cache"))
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
@@ -58,7 +57,6 @@ fn run_interpret_forces_tier_zero_without_watch() {
         String::from_utf8_lossy(&forced.stderr)
     );
     assert!(!forced.stdout.is_empty());
-    assert!(!String::from_utf8_lossy(&forced.stderr).contains("tier1 native"));
     assert_eq!(forced.stdout, default.stdout);
 
     let _ = fs::remove_dir_all(&dir);
@@ -123,7 +121,7 @@ fn argv_agrees_on_every_native_tier() {
         let output = Command::new(jet())
             .args(args)
             .current_dir(&dir)
-            .env("JET_RUN_CACHE_DIR", cache.join(label).join("run"))
+            .env("JET_STORE_DIR", cache.join(label).join("run"))
             .env("JET_STORE_DIR", cache.join(label).join("build"))
             .env("NO_COLOR", "1")
             .output()
@@ -260,7 +258,7 @@ fn undrained_db_pool_exits_cleanly_on_in_process_tiers() {
             .args(extra)
             .arg("main.jet")
             .current_dir(&dir)
-            .env("JET_RUN_CACHE_DIR", dir.join("cache").join(label))
+            .env("JET_STORE_DIR", dir.join("cache").join(label))
             .env("NO_COLOR", "1")
             .output()
             .unwrap();
@@ -298,11 +296,11 @@ fn run_interpret_keeps_unused_c_member_lists_runnable() {
         });
         let mut command = Command::new(jet());
         command
-            .args(["run", "--trace-tiers"])
+            .args(["run"])
             .args(interpret.then_some("--interpret"))
             .arg("main.jet")
             .current_dir(&dir)
-            .env("JET_RUN_CACHE_DIR", cache.join("run"))
+            .env("JET_STORE_DIR", cache.join("run"))
             .env("JET_STORE_DIR", cache.join("build"))
             .env("NO_COLOR", "1");
         command.output().unwrap()
@@ -349,7 +347,7 @@ fn c_extern_calls_match_aot_and_interpreter() {
         command
             .arg("run.jet")
             .current_dir(&project)
-            .env("JET_RUN_CACHE_DIR", cache.join(mode).join("run"))
+            .env("JET_STORE_DIR", cache.join(mode).join("run"))
             .env("JET_STORE_DIR", cache.join(mode).join("build"))
             .env("NO_COLOR", "1")
             .env("JETPACK_ENV", "1")
@@ -413,7 +411,7 @@ fn sieve_scales_linearly() {
         let mut child = Command::new(jet())
             .args(["run", "--interpret", "run.jet", "--", &n_arg])
             .current_dir(&scratch.path)
-            .env("JET_RUN_CACHE_DIR", scratch.path.join("run-cache"))
+            .env("JET_STORE_DIR", scratch.path.join("run-cache"))
             .env("JET_STORE_DIR", scratch.path.join("store"))
             .env("NO_COLOR", "1")
             .stdout(Stdio::piped())
@@ -495,12 +493,9 @@ fn assert_example_tier_parity(tag: &str, example: &str, golden: &str) {
     let cache = std::env::temp_dir().join(format!("jet_tier_parity_{tag}_{}", std::process::id()));
     let _ = fs::remove_dir_all(&cache);
 
-    let run = |mode: &str, trace: bool| {
+    let run = |mode: &str| {
         let mut command = Command::new(jet());
         command.arg("run");
-        if trace {
-            command.arg("--trace-tiers");
-        }
         match mode {
             "release" => {
                 command.arg("--release");
@@ -513,17 +508,16 @@ fn assert_example_tier_parity(tag: &str, example: &str, golden: &str) {
         command
             .arg(example)
             .current_dir(&root)
-            .env("JET_RUN_CACHE_DIR", cache.join(mode).join("run"))
             .env("JET_STORE_DIR", cache.join(mode).join("build"))
             .env("NO_COLOR", "1")
             .output()
             .expect("jet run")
     };
 
-    // Byte-exact differential. No `--trace-tiers`, so stderr carries only what
-    // the program itself wrote and the three tiers must agree on all of it.
+    // Byte-exact differential: stderr carries only what the program itself
+    // wrote and the three tiers must agree on all of it.
     for mode in ["release", "default", "interpret"] {
-        let output = run(mode, false);
+        let output = run(mode);
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
         assert_eq!(
@@ -537,34 +531,6 @@ fn assert_example_tier_parity(tag: &str, example: &str, golden: &str) {
             "{tag}: `{mode}` stdout diverged from the golden"
         );
     }
-
-    // Tier proof. The forced run must be answered by tier 0 and nothing else,
-    // otherwise the differential above measured the wrong engine. Default
-    // `jet run` is only required to name `run` in the trace: which of the two
-    // tiers claims these stems is Cranelift-coverage work tracked separately,
-    // and pinning it here would assert another lane's fix.
-    let forced = run("interpret", true);
-    let forced_trace = String::from_utf8_lossy(&forced.stderr).into_owned();
-    assert!(
-        forced_trace
-            .lines()
-            .any(|line| line.starts_with("run") && line.contains("tier0 interp")),
-        "{tag}: forced `--interpret` did not run `run` on tier 0:\n{forced_trace}"
-    );
-    assert!(
-        !forced_trace.contains("tier1 native"),
-        "{tag}: forced `--interpret` reached the resident JIT:\n{forced_trace}"
-    );
-
-    let default = run("default", true);
-    let default_trace = String::from_utf8_lossy(&default.stderr).into_owned();
-    assert!(
-        default_trace.lines().any(|line| {
-            line.starts_with("run")
-                && (line.contains("tier1 native") || line.contains("tier0 interp"))
-        }),
-        "{tag}: default `jet run` reported no tier for `run`:\n{default_trace}"
-    );
 
     let _ = fs::remove_dir_all(&cache);
 }
@@ -641,9 +607,9 @@ fn run() {
     .unwrap();
 
     let mut child = Command::new(jet())
-        .args(["run", "--trace-tiers", "--interpret", "main.jet"])
+        .args(["run", "--interpret", "main.jet"])
         .current_dir(&dir)
-        .env("JET_RUN_CACHE_DIR", dir.join("run-cache"))
+        .env("JET_STORE_DIR", dir.join("run-cache"))
         .env("JET_STORE_DIR", dir.join("store"))
         .env("NO_COLOR", "1")
         .stdout(std::process::Stdio::piped())
@@ -669,12 +635,6 @@ fn run() {
         "stdout:\n{stdout}\nstderr:\n{stderr}"
     );
     assert_eq!(stdout, "responder answered\ntrue\n", "stderr:\n{stderr}");
-    assert!(
-        stderr
-            .lines()
-            .any(|line| line.starts_with("run") && line.contains("tier0 interp")),
-        "forced `--interpret` did not run `run` on tier 0:\n{stderr}"
-    );
 
     let _ = fs::remove_dir_all(&dir);
 }

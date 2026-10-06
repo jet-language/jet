@@ -1,0 +1,1804 @@
+// PORT-PENDING 0205 crates-jet-jit-src-concurrency-slice-1: crates/jet-jit/src/Concurrency.rs:1-1800
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! M4: scheduler-backed task/channel host shims for the Cranelift JIT.
+//RS 
+//RS use jet_codegen::scheduler::{
+//RS     jet_ctx_deadline_ms, jet_ctx_push_deadline, jet_keyed_stream_window_i64, jet_scheduler_all,
+//RS     jet_scheduler_any, jet_scheduler_classify_unwind, jet_scheduler_current_task_trace,
+//RS     jet_scheduler_deliver_shield_exit, jet_scheduler_panic_should_unwind,
+//RS     jet_scheduler_propagate_deadline, jet_scheduler_race, jet_scheduler_select_int_channels_tagged,
+//RS     jet_scheduler_select_int_channels_timed, jet_scheduler_shield_enter,
+//RS     jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms,
+//RS     jet_scheduler_spawn_blocking_with_control_at, jet_scheduler_task_completion_register,
+//RS     jet_scheduler_task_group_wait, jet_scheduler_try_select_int_channels_tagged,
+//RS     jet_scheduler_wait_without_unwind, jet_scheduler_yield_now, jet_std_time_duration_to_millis,
+//RS     jet_stream_key_by, jet_stream_with_event_time_i64, jet_stream_with_event_time_ns,
+//RS     jet_task_delay_ms_defaulted, jet_task_interval_ms_defaulted, jet_task_join_deadline_check,
+//RS     JetDeadlineGuard, JetDeterministicWorld, JetLateEventDisposition, JetSchedulerChannel,
+//RS     JetSchedulerJoin, JetSchedulerWait, JetShieldExit, JetStream, JetTaskControl, ParkSlot,
+//RS };
+//RS use jet_codegen::task_group::{JetTaskGroupPermit, JetTaskGroupRuntime};
+//RS use std::cell::{Cell, RefCell};
+//RS use std::collections::HashMap;
+//RS use std::sync::atomic::{AtomicUsize, Ordering};
+//RS use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock, Weak};
+//RS 
+//RS // Every native host call that reaches the resident runtime crosses this lock.
+//RS // Spawned Cranelift frames share the same arena as their parent, so the raw
+//RS // runtime pointer must never be dereferenced concurrently.
+//RS static RUNTIME_ACCESS: Mutex<()> = Mutex::new(());
+//RS /// Published for HTTP `std::thread` workers that are not jet-scheduler tasks.
+//RS static HTTP_SHARED_RUNTIME: AtomicUsize = AtomicUsize::new(0);
+//RS /// Changes whenever the published HTTP runtime is cleared or replaced. HTTP
+//RS /// callbacks retain raw JIT code pointers, so a live replacement is not enough
+//RS /// to make a callback from the previous resident image safe to invoke.
+//RS static HTTP_RUNTIME_EPOCH: AtomicUsize = AtomicUsize::new(1);
+//RS /// Test-only coordination hooks used by resident HTTP lifetime proofs. The
+//RS /// production path keeps the hooks empty; tests install them briefly to form
+//RS /// blocking barriers around a real callback and the shutdown boundary.
+//RS type HttpTestHook = Arc<dyn Fn() + Send + Sync + 'static>;
+//RS static HTTP_TEST_HANDLER_HOOK: LazyLock<Mutex<Option<HttpTestHook>>> =
+//RS     LazyLock::new(|| Mutex::new(None));
+//RS static HTTP_TEST_SHUTDOWN_HOOK: LazyLock<Mutex<Option<HttpTestHook>>> =
+//RS     LazyLock::new(|| Mutex::new(None));
+//RS 
+//RS fn http_test_handler_hook() -> &'static Mutex<Option<HttpTestHook>> {
+//RS     &HTTP_TEST_HANDLER_HOOK
+//RS }
+//RS 
+//RS fn http_test_shutdown_hook() -> &'static Mutex<Option<HttpTestHook>> {
+//RS     &HTTP_TEST_SHUTDOWN_HOOK
+//RS }
+//RS 
+//RS pub(crate) fn set_http_test_handler_hook(hook: Option<HttpTestHook>) {
+//RS     *http_test_handler_hook().lock().unwrap() = hook;
+//RS }
+//RS 
+//RS pub(crate) fn set_http_test_shutdown_hook(hook: Option<HttpTestHook>) {
+//RS     *http_test_shutdown_hook().lock().unwrap() = hook;
+//RS }
+//RS 
+//RS pub(crate) fn notify_http_test_handler_entry() {
+//RS     let hook = http_test_handler_hook().lock().unwrap().clone();
+//RS     if let Some(hook) = hook {
+//RS         hook();
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn notify_http_test_shutdown_started() {
+//RS     let hook = http_test_shutdown_hook().lock().unwrap().clone();
+//RS     if let Some(hook) = hook {
+//RS         hook();
+//RS     }
+//RS }
+//RS 
+//RS /// Task cancellation must stay live while a deopt host owns `RUNTIME_ACCESS`
+//RS /// across an interpreter wait. The registry carries only weak control handles;
+//RS /// heap and task-table ownership remain in `JitRuntime`.
+//RS static TASK_CONTROLS: OnceLock<Mutex<HashMap<(usize, usize), Weak<JetTaskControl>>>> =
+//RS     OnceLock::new();
+//RS 
+//RS thread_local! {
+//RS     static ACTIVE_RUNTIME: RefCell<Option<*mut super::JitRuntime>> = const { RefCell::new(None) };
+//RS     static RUNTIME_ACCESS_DEPTH: Cell<usize> = const { Cell::new(0) };
+//RS     static IN_JIT_TASK: Cell<bool> = const { Cell::new(false) };
+//RS     static LOCAL_RICH_PANIC: Cell<bool> = const { Cell::new(false) };
+//RS     static PENDING_SHIELD_EXIT: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+//RS     static PENDING_CHILD_DEADLINE: RefCell<Option<String>> = const { RefCell::new(None) };
+//RS     static PENDING_TASK_GROUP_PERMIT: RefCell<Option<JetTaskGroupPermit>> = const { RefCell::new(None) };
+//RS     static RICH_PANIC_REASON: RefCell<Option<String>> = const { RefCell::new(None) };
+//RS     static RICH_PANIC_REPORT: RefCell<Option<String>> = const { RefCell::new(None) };
+//RS     static WAIT_VALUE: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+//RS     /// A native task owns its trap until the parent observes its join result.
+//RS     /// Keeping this in task-local storage prevents a failing child from
+//RS     /// making an unrelated sibling leave at its next loop header.
+//RS     static TASK_TRAP: RefCell<Option<String>> = const { RefCell::new(None) };
+//RS }
+//RS 
+//RS pub(crate) struct JitTaskScope {
+//RS     previous_task: bool,
+//RS     previous_rich_panic: bool,
+//RS }
+//RS 
+//RS impl Drop for JitTaskScope {
+//RS     fn drop(&mut self) {
+//RS         IN_JIT_TASK.with(|task| task.set(self.previous_task));
+//RS         LOCAL_RICH_PANIC.with(|panic| panic.set(self.previous_rich_panic));
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn enter_jit_task() -> JitTaskScope {
+//RS     let previous_task = IN_JIT_TASK.with(|task| {
+//RS         let previous = task.get();
+//RS         task.set(true);
+//RS         previous
+//RS     });
+//RS     let previous_rich_panic = LOCAL_RICH_PANIC.with(|panic| {
+//RS         let previous = panic.get();
+//RS         panic.set(false);
+//RS         previous
+//RS     });
+//RS     JitTaskScope {
+//RS         previous_task,
+//RS         previous_rich_panic,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn in_jit_task() -> bool {
+//RS     IN_JIT_TASK.with(Cell::get)
+//RS }
+//RS 
+//RS pub(crate) fn set_local_rich_panic() {
+//RS     LOCAL_RICH_PANIC.with(|panic| panic.set(true));
+//RS }
+//RS 
+//RS pub(crate) fn local_rich_panic_pending() -> bool {
+//RS     LOCAL_RICH_PANIC.with(Cell::get)
+//RS }
+//RS 
+//RS pub(crate) struct JitTaskGroup {
+//RS     pub(crate) children: Arc<JetTaskGroupRuntime<i64>>,
+//RS }
+//RS 
+//RS impl JitTaskGroup {
+//RS     fn new(limit: i64, bounded: bool) -> Self {
+//RS         Self {
+//RS             children: Arc::new(JetTaskGroupRuntime::new_defaulted(if bounded {
+//RS                 Some(limit)
+//RS             } else {
+//RS                 None
+//RS             })),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS struct RuntimeAccessGuard {
+//RS     _lock: Option<MutexGuard<'static, ()>>,
+//RS }
+//RS 
+//RS impl RuntimeAccessGuard {
+//RS     fn enter() -> Self {
+//RS         let lock = RUNTIME_ACCESS_DEPTH.with(|depth| {
+//RS             let current = depth.get();
+//RS             depth.set(current + 1);
+//RS             (current == 0).then(|| {
+//RS                 RUNTIME_ACCESS
+//RS                     .lock()
+//RS                     .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS             })
+//RS         });
+//RS         Self { _lock: lock }
+//RS     }
+//RS 
+//RS     fn try_enter() -> Option<Self> {
+//RS         let lock = RUNTIME_ACCESS_DEPTH.with(|depth| {
+//RS             let current = depth.get();
+//RS             if current > 0 {
+//RS                 depth.set(current + 1);
+//RS                 return Some(None);
+//RS             }
+//RS             match RUNTIME_ACCESS.try_lock() {
+//RS                 Ok(lock) => {
+//RS                     depth.set(1);
+//RS                     Some(Some(lock))
+//RS                 }
+//RS                 Err(std::sync::TryLockError::Poisoned(poisoned)) => {
+//RS                     depth.set(1);
+//RS                     Some(Some(poisoned.into_inner()))
+//RS                 }
+//RS                 Err(std::sync::TryLockError::WouldBlock) => None,
+//RS             }
+//RS         })?;
+//RS         Some(Self { _lock: lock })
+//RS     }
+//RS }
+//RS 
+//RS impl Drop for RuntimeAccessGuard {
+//RS     fn drop(&mut self) {
+//RS         RUNTIME_ACCESS_DEPTH.with(|depth| depth.set(depth.get() - 1));
+//RS     }
+//RS }
+//RS 
+//RS #[repr(i64)]
+//RS enum JitWaitStatus {
+//RS     Ready = 0,
+//RS     Interrupted = 1,
+//RS     Panicked = 2,
+//RS }
+//RS 
+//RS fn wait_status<F>(f: F) -> i64
+//RS where
+//RS     F: FnOnce() -> i64,
+//RS {
+//RS     match jet_scheduler_wait_without_unwind(f) {
+//RS         JetSchedulerWait::Ready(value) => {
+//RS             WAIT_VALUE.with(|slot| slot.set(value));
+//RS             JitWaitStatus::Ready as i64
+//RS         }
+//RS         JetSchedulerWait::Cancelled => {
+//RS             set_pending_shield_exit(JetShieldExit::Cancelled);
+//RS             JitWaitStatus::Interrupted as i64
+//RS         }
+//RS         JetSchedulerWait::Deadline(rendered) => {
+//RS             record_deadline_interrupt(rendered);
+//RS             JitWaitStatus::Interrupted as i64
+//RS         }
+//RS         JetSchedulerWait::Panicked(message) => {
+//RS             trap_scheduler_report_or_panic(&message);
+//RS             JitWaitStatus::Panicked as i64
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn alloc_task_failure(rt: &mut super::JitRuntime, failure: jet_codegen::task_group::JetTaskFailure) -> u64 {
+//RS     let (discriminant, reason) = jet_codegen::task_group::jet_task_failure_abi(failure);
+//RS     let mut fields = Vec::with_capacity(1 + usize::from(reason.is_some()));
+//RS     fields.push(jet_rt::JetVal::Int(discriminant));
+//RS     if let Some(reason) = reason {
+//RS         fields.push(jet_rt::JetVal::String(reason));
+//RS     }
+//RS     rt.heap.alloc_record_values(fields) as u64
+//RS }
+//RS 
+//RS /// Marshal the shared Prelude `Result<T, TaskFailure>` rail through the
+//RS /// resident JIT's one-i64 result carrier. The scheduler only interrupts for a
+//RS /// parent wait failure; a child `TaskFailure` remains an ordinary `Err` value.
+//RS fn wait_task_result_status<T, F, Encode>(f: F, encode: Encode) -> i64
+//RS where
+//RS     F: FnOnce() -> Result<T, jet_codegen::task_group::JetTaskFailure>,
+//RS     Encode: FnOnce(&mut super::JitRuntime, T) -> u64,
+//RS {
+//RS     match jet_scheduler_wait_without_unwind(f) {
+//RS         JetSchedulerWait::Ready(Ok(value)) => {
+//RS             let result = with_runtime_mut(|rt| {
+//RS                 let payload = encode(rt, value);
+//RS                 crate::runtime_host::alloc_jit_result(rt, true, payload)
+//RS             });
+//RS             WAIT_VALUE.with(|slot| slot.set(result));
+//RS             JitWaitStatus::Ready as i64
+//RS         }
+//RS         JetSchedulerWait::Ready(Err(failure)) => {
+//RS             let result = with_runtime_mut(|rt| {
+//RS                 let payload = alloc_task_failure(rt, failure);
+//RS                 crate::runtime_host::alloc_jit_result(rt, false, payload)
+//RS             });
+//RS             WAIT_VALUE.with(|slot| slot.set(result));
+//RS             JitWaitStatus::Ready as i64
+//RS         }
+//RS         JetSchedulerWait::Cancelled => {
+//RS             set_pending_shield_exit(JetShieldExit::Cancelled);
+//RS             JitWaitStatus::Interrupted as i64
+//RS         }
+//RS         JetSchedulerWait::Deadline(rendered) => {
+//RS             record_deadline_interrupt(rendered);
+//RS             JitWaitStatus::Interrupted as i64
+//RS         }
+//RS         JetSchedulerWait::Panicked(message) => {
+//RS             trap_scheduler_report_or_panic(&message);
+//RS             JitWaitStatus::Panicked as i64
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn wait_task_result<T, F, Encode>(f: F, encode: Encode) -> i64
+//RS where
+//RS     F: FnOnce() -> Result<T, jet_codegen::task_group::JetTaskFailure>,
+//RS     Encode: FnOnce(&mut super::JitRuntime, T) -> u64,
+//RS {
+//RS     // Canonical Prelude calls return the packed Result, not the wait-status
+//RS     // discriminant used by the lower-level join/status ABI.
+//RS     let status = wait_task_result_status(f, encode);
+//RS     if status == JitWaitStatus::Ready as i64 {
+//RS         jet_jit_wait_value()
+//RS     } else {
+//RS         0
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn in_scheduler_task() -> bool {
+//RS     jet_codegen::scheduler::jet_scheduler_in_task()
+//RS }
+//RS 
+//RS pub(crate) fn set_task_trap(msg: &str) {
+//RS     TASK_TRAP.with(|slot| {
+//RS         if slot.borrow().is_none() {
+//RS             *slot.borrow_mut() = Some(msg.to_string());
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS pub(crate) fn task_trap_pending() -> bool {
+//RS     TASK_TRAP.with(|slot| slot.borrow().is_some())
+//RS }
+//RS 
+//RS fn take_task_trap() -> Option<String> {
+//RS     TASK_TRAP.with(|slot| slot.borrow_mut().take())
+//RS }
+//RS 
+//RS fn clear_task_trap() {
+//RS     TASK_TRAP.with(|slot| slot.borrow_mut().take());
+//RS }
+//RS 
+//RS fn task_controls() -> &'static Mutex<HashMap<(usize, usize), Weak<JetTaskControl>>> {
+//RS     TASK_CONTROLS.get_or_init(|| Mutex::new(HashMap::new()))
+//RS }
+//RS 
+//RS fn publish_task_control(runtime: usize, task: usize, control: &Arc<JetTaskControl>) {
+//RS     task_controls()
+//RS         .lock()
+//RS         .unwrap_or_else(|poisoned| poisoned.into_inner())
+//RS         .insert((runtime, task), Arc::downgrade(control));
+//RS }
+//RS 
+//RS fn published_task_control(runtime: usize, task: usize) -> Option<Arc<JetTaskControl>> {
+//RS     let mut controls = task_controls()
+//RS         .lock()
+//RS         .unwrap_or_else(|poisoned| poisoned.into_inner());
+//RS     let control = controls.get(&(runtime, task)).and_then(Weak::upgrade);
+//RS     if control.is_none() {
+//RS         controls.remove(&(runtime, task));
+//RS     }
+//RS     control
+//RS }
+//RS 
+//RS fn jet_jit_wait_value() -> i64 {
+//RS     WAIT_VALUE.with(|slot| slot.get())
+//RS }
+//RS 
+//RS fn set_pending_shield_exit(exit: JetShieldExit) {
+//RS     let code = match exit {
+//RS         JetShieldExit::None => 0,
+//RS         JetShieldExit::Deadline => 2,
+//RS         JetShieldExit::Cancelled => 1,
+//RS     };
+//RS     PENDING_SHIELD_EXIT.with(|pending| pending.set(pending.get().max(code)));
+//RS }
+//RS 
+//RS fn take_pending_shield_exit() -> JetShieldExit {
+//RS     PENDING_SHIELD_EXIT.with(|pending| match pending.replace(0) {
+//RS         2 => JetShieldExit::Deadline,
+//RS         1 => JetShieldExit::Cancelled,
+//RS         _ => JetShieldExit::None,
+//RS     })
+//RS }
+//RS 
+//RS fn take_pending_child_deadline() -> Option<String> {
+//RS     PENDING_CHILD_DEADLINE.with(|pending| pending.borrow_mut().take())
+//RS }
+//RS 
+//RS fn take_pending_task_group_permit() -> Option<JetTaskGroupPermit> {
+//RS     PENDING_TASK_GROUP_PERMIT.with(|pending| pending.borrow_mut().take())
+//RS }
+//RS 
+//RS pub(crate) fn set_rich_panic_reason(reason: String) {
+//RS     RICH_PANIC_REASON.with(|slot| *slot.borrow_mut() = Some(reason));
+//RS }
+//RS 
+//RS pub(crate) fn set_rich_panic_report(report: String) {
+//RS     RICH_PANIC_REPORT.with(|slot| *slot.borrow_mut() = Some(report));
+//RS }
+//RS 
+//RS pub(crate) fn take_rich_panic_report() -> Option<String> {
+//RS     RICH_PANIC_REPORT.with(|slot| slot.borrow_mut().take())
+//RS }
+//RS 
+//RS fn take_rich_panic_reason() -> Option<String> {
+//RS     RICH_PANIC_REASON.with(|slot| slot.borrow_mut().take())
+//RS }
+//RS 
+//RS pub(crate) fn jet_jit_pending_exit_status() -> i64 {
+//RS     let pending = PENDING_SHIELD_EXIT.with(|slot| slot.get() != 0);
+//RS     let deadline = jet_codegen::task_group::jet_task_deadline_pending();
+//RS     i64::from(pending || deadline)
+//RS }
+//RS 
+//RS /// Complete a control transfer after the top-level Cranelift frame returned.
+//RS /// Spawned frames use their Rust task wrapper; resident `run` uses this hook.
+//RS pub(crate) fn settle_pending_after_native() {
+//RS     match take_pending_shield_exit() {
+//RS         JetShieldExit::None => {}
+//RS         JetShieldExit::Cancelled => {
+//RS             with_runtime_mut(|rt| rt.set_trap("a task was cancelled"));
+//RS         }
+//RS         JetShieldExit::Deadline => {
+//RS             // Deadline text was recorded by the status/shield host before the
+//RS             // native early return. Resident reporting owns E3003.
+//RS         }
+//RS     }
+//RS }
+//RS pub(crate) fn http_runtime_epoch() -> usize {
+//RS     HTTP_RUNTIME_EPOCH.load(Ordering::Acquire)
+//RS }
+//RS pub(crate) fn runtime_access_available_for_test() -> bool {
+//RS     match RUNTIME_ACCESS.try_lock() {
+//RS         Ok(guard) => {
+//RS             drop(guard);
+//RS             true
+//RS         }
+//RS         Err(std::sync::TryLockError::WouldBlock | std::sync::TryLockError::Poisoned(_)) => false,
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) fn with_runtime_mut<F, R>(f: F) -> R
+//RS where
+//RS     F: FnOnce(&mut super::JitRuntime) -> R,
+//RS     R: Default,
+//RS {
+//RS     with_runtime_or(R::default, f)
+//RS }
+//RS 
+//RS /// Run `f` against the active resident runtime, or report the missing
+//RS /// runtime as `Err(missing)`. This is the seam for hosts whose outcome is a
+//RS /// `Result`: a missing runtime is a real failure at that seam, not a default
+//RS /// value, so no `Default` is fabricated for the error type.
+//RS pub(crate) fn with_runtime_result<F, T, E>(missing: E, f: F) -> Result<T, E>
+//RS where
+//RS     F: FnOnce(&mut super::JitRuntime) -> Result<T, E>,
+//RS {
+//RS     with_runtime_or(move || Err(missing), f)
+//RS }
+//RS 
+//RS /// `with_runtime_result` for hosts that report through a message string.
+//RS pub(crate) fn with_runtime_string<F, T>(f: F) -> Result<T, String>
+//RS where
+//RS     F: FnOnce(&mut super::JitRuntime) -> Result<T, String>,
+//RS {
+//RS     with_runtime_result("no active resident runtime".to_string(), f)
+//RS }
+//RS fn with_runtime_or<F, R>(absent: impl FnOnce() -> R, f: F) -> R
+//RS where
+//RS     F: FnOnce(&mut super::JitRuntime) -> R,
+//RS {
+//RS     let mut f = Some(f);
+//RS     let out = ACTIVE_RUNTIME.with(|slot| {
+//RS         let ptr = (*slot.borrow())?;
+//RS         let _guard = RuntimeAccessGuard::enter();
+//RS         // SAFETY: set only for the duration of resident_invoke on this thread.
+//RS         let rt = unsafe { ptr.as_mut() }?;
+//RS         Some((f.take().expect("runtime closure runs once"))(rt))
+//RS     });
+//RS     out.unwrap_or_else(absent)
+//RS }
+//RS 
+//RS fn clear_active_runtime_sentry_state() {
+//RS     // JIT sentry guards and frames are thread-local, so the resident runtime
+//RS     // boundary must release their Foundation state before the TLS slot is
+//RS     // cleared or the worker thread can tear down.
+//RS     crate::Memory::reset_jit_sentry_state();
+//RS }
+//RS 
+//RS pub(crate) fn set_active_runtime(ptr: Option<*mut super::JitRuntime>) {
+//RS     if ptr.is_none() {
+//RS         clear_active_runtime_sentry_state();
+//RS     }
+//RS     ACTIVE_RUNTIME.with(|slot| *slot.borrow_mut() = ptr);
+//RS     // Publish on install only. Clearing TLS (spawn worker epilogue / post-drain)
+//RS     // must not drop the shared pointer while HTTP OS threads still serve.
+//RS     if let Some(p) = ptr {
+//RS         let _guard = RuntimeAccessGuard::enter();
+//RS         let previous = HTTP_SHARED_RUNTIME.swap(p as usize, Ordering::AcqRel);
+//RS         if previous != p as usize {
+//RS             HTTP_RUNTIME_EPOCH.fetch_add(1, Ordering::AcqRel);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS pub(crate) struct ActiveRuntimeScope {
+//RS     previous: Option<*mut super::JitRuntime>,
+//RS }
+//RS 
+//RS pub(crate) fn activate_local_runtime(ptr: *mut super::JitRuntime) -> ActiveRuntimeScope {
+//RS     let previous = ACTIVE_RUNTIME.with(|slot| slot.replace(Some(ptr)));
+//RS     ActiveRuntimeScope { previous }
+//RS }
+//RS 
+//RS impl Drop for ActiveRuntimeScope {
+//RS     fn drop(&mut self) {
+//RS         ACTIVE_RUNTIME.with(|slot| *slot.borrow_mut() = self.previous.take());
+//RS     }
+//RS }
+//RS 
+//RS fn set_active_runtime_local(ptr: Option<*mut super::JitRuntime>) {
+//RS     if ptr.is_none() {
+//RS         clear_active_runtime_sentry_state();
+//RS     }
+//RS     ACTIVE_RUNTIME.with(|slot| *slot.borrow_mut() = ptr);
+//RS }
+//RS 
+//RS 
+//RS pub(crate) fn clear_http_shared_runtime() {
+//RS     let _guard = RuntimeAccessGuard::enter();
+//RS     HTTP_SHARED_RUNTIME.store(0, Ordering::Release);
+//RS     HTTP_RUNTIME_EPOCH.fetch_add(1, Ordering::AcqRel);
+//RS }
+//RS 
+//RS /// Read a retained HTTP callable and the epoch that protects it as one
+//RS /// snapshot. The runtime guard must cover both operations: otherwise a hot
+//RS /// swap can replace the published runtime between the callable lookup and
+//RS /// the epoch read, making an old code pointer appear current.
+//RS pub(crate) fn http_callable_snapshot(
+//RS     handle: i64,
+//RS ) -> Option<(usize, super::runtime_host::JitCallableSlot)> {
+//RS     let _guard = RuntimeAccessGuard::enter();
+//RS     let had = active_runtime_ptr().is_some();
+//RS     if !had {
+//RS         let addr = HTTP_SHARED_RUNTIME.load(Ordering::Acquire);
+//RS         if addr != 0 {
+//RS             ACTIVE_RUNTIME.with(|slot| {
+//RS                 *slot.borrow_mut() = Some(addr as *mut super::JitRuntime);
+//RS             });
+//RS         }
+//RS     }
+//RS     let _restore = HttpRuntimeTlsRestore { clear: !had };
+//RS     let current = active_runtime_ptr().map(|ptr| ptr as usize);
+//RS     let published = HTTP_SHARED_RUNTIME.load(Ordering::Acquire);
+//RS     if published == 0 || current != Some(published) {
+//RS         return None;
+//RS     }
+//RS     let epoch = HTTP_RUNTIME_EPOCH.load(Ordering::Acquire);
+//RS     let ptr = active_runtime_ptr()?;
+//RS     let callable = unsafe { ptr.as_ref() }
+//RS         .and_then(|rt| super::runtime_host::jit_callable_parts(rt, handle))?;
+//RS     Some((epoch, callable))
+//RS }
+//RS 
+//RS /// Run the HTTP teardown boundary while no worker can still be inside a JIT
+//RS /// callback. The caller clears the shared pointer and drops the handles while
+//RS /// this guard is held, before the resident module/runtime are released.
+//RS pub(crate) fn with_http_runtime_quiesced<F, R>(f: F) -> R
+//RS where
+//RS     F: FnOnce() -> R,
+//RS {
+//RS     let _guard = RuntimeAccessGuard::enter();
+//RS     f()
+//RS }
+//RS 
+//RS /// Pin the resident JIT heap onto the current thread for the duration of `f`.
+//RS /// HTTP `Server.serve` workers are raw OS threads; without this, host calls that
+//RS /// touch `with_runtime_mut` silently return `Default` (often `0`).
+//RS pub(crate) fn with_http_jet_runtime<F, R>(f: F) -> R
+//RS where
+//RS     F: FnOnce() -> R,
+//RS {
+//RS     // Teardown takes this same guard before clearing the published pointer and
+//RS     // dropping the resident module. Load the pointer only after acquiring it,
+//RS     // so a worker cannot retain a raw runtime address across teardown.
+//RS     let _guard = RuntimeAccessGuard::enter();
+//RS     let had = active_runtime_ptr().is_some();
+//RS     if !had {
+//RS         let addr = HTTP_SHARED_RUNTIME.load(Ordering::Acquire);
+//RS         if addr != 0 {
+//RS             ACTIVE_RUNTIME.with(|slot| {
+//RS                 *slot.borrow_mut() = Some(addr as *mut super::JitRuntime);
+//RS             });
+//RS         }
+//RS     }
+//RS     let _restore = HttpRuntimeTlsRestore { clear: !had };
+//RS     f()
+//RS }
+//RS 
+//RS /// Run a JIT callback without waiting for the runtime access lock. Callback
+//RS /// threads must skip their work when teardown or another runtime owner holds it.
+//RS pub(crate) fn try_with_http_jet_runtime<F, R>(f: F) -> Option<R>
+//RS where
+//RS     F: FnOnce() -> R,
+//RS {
+//RS     let _guard = RuntimeAccessGuard::try_enter()?;
+//RS     let had = active_runtime_ptr().is_some();
+//RS     if !had {
+//RS         let addr = HTTP_SHARED_RUNTIME.load(Ordering::Acquire);
+//RS         if addr != 0 {
+//RS             ACTIVE_RUNTIME.with(|slot| {
+//RS                 *slot.borrow_mut() = Some(addr as *mut super::JitRuntime);
+//RS             });
+//RS         }
+//RS     }
+//RS     let _restore = HttpRuntimeTlsRestore { clear: !had };
+//RS     active_runtime_ptr()?;
+//RS     Some(f())
+//RS }
+//RS 
+//RS struct HttpRuntimeTlsRestore {
+//RS     clear: bool,
+//RS }
+//RS 
+//RS impl Drop for HttpRuntimeTlsRestore {
+//RS     fn drop(&mut self) {
+//RS         if self.clear {
+//RS             clear_active_runtime_sentry_state();
+//RS             ACTIVE_RUNTIME.with(|slot| *slot.borrow_mut() = None);
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Invoke a retained HTTP callback only while its resident image is still the
+//RS /// published one. A queued HTTP/2 task can outlive server shutdown and reach
+//RS /// this boundary after a hot swap, so checking only for any live runtime would
+//RS /// still call the old raw JIT function pointer.
+//RS pub(crate) fn try_with_http_jet_runtime_at<F, R>(epoch: usize, f: F) -> Option<R>
+//RS where
+//RS     F: FnOnce() -> R,
+//RS {
+//RS     let _guard = RuntimeAccessGuard::enter();
+//RS     let had = active_runtime_ptr().is_some();
+//RS     if !had {
+//RS         let addr = HTTP_SHARED_RUNTIME.load(Ordering::Acquire);
+//RS         if addr != 0 {
+//RS             ACTIVE_RUNTIME.with(|slot| {
+//RS                 *slot.borrow_mut() = Some(addr as *mut super::JitRuntime);
+//RS             });
+//RS         }
+//RS     }
+//RS     let _restore = HttpRuntimeTlsRestore { clear: !had };
+//RS     let current = active_runtime_ptr().map(|ptr| ptr as usize);
+//RS     let published = HTTP_SHARED_RUNTIME.load(Ordering::Acquire);
+//RS     let live = epoch == HTTP_RUNTIME_EPOCH.load(Ordering::Acquire)
+//RS         && published != 0
+//RS         && current == Some(published);
+//RS     live.then(f)
+//RS }
+//RS 
+//RS /// Record a panic trap. Returns normally (caller yields a dummy value); JIT
+//RS /// code branches to its epilogue at the next `emit_trap_check` (I1 — no Rust
+//RS /// panic ever unwinds through a JIT frame).
+//RS fn trap_panic(msg: &str) -> i64 {
+//RS     with_runtime_mut(|rt| rt.set_trap(msg));
+//RS     0
+//RS }
+//RS 
+//RS fn trap_scheduler_report_or_panic(message: &str) {
+//RS     if message.starts_with("Stop [E") {
+//RS         with_runtime_mut(|rt| {
+//RS             rt.set_rendered_runtime_stop(
+//RS                 message.to_string(),
+//RS                 jet_foundation::ExitCodes::RUNTIME_PANIC,
+//RS             )
+//RS         });
+//RS     } else {
+//RS         trap_panic(message);
+//RS     }
+//RS }
+//RS 
+//RS /// Record a deadline interrupt without unwinding. A child task hands the
+//RS /// rendered E3003 report to its parent at the join boundary; the resident tier
+//RS /// records it directly.
+//RS fn record_deadline_interrupt(rendered: String) {
+//RS     if jet_scheduler_panic_should_unwind() {
+//RS         PENDING_CHILD_DEADLINE.with(|pending| {
+//RS             *pending.borrow_mut() = Some(rendered);
+//RS         });
+//RS     } else {
+//RS         with_runtime_mut(|rt| rt.set_deadline(rendered));
+//RS     }
+//RS }
+//RS 
+//RS /// Record an engine defect raised at a Cranelift host seam. Returns normally:
+//RS /// generated code reads the runtime's trap flag at its next `emit_trap_check`
+//RS /// and leaves through Cranelift control flow, never through a Rust unwind (I1).
+//RS /// `set_host_fault` puts the defect on the branded ICE rail — exit 101 with no
+//RS /// Rust payload in the program report (I2).
+//RS fn host_fault(message: &str) {
+//RS     let recorded = with_runtime_mut(|rt| {
+//RS         rt.set_host_fault(message);
+//RS         true
+//RS     });
+//RS     if !recorded {
+//RS         // No resident runtime owns this call, so there is no status channel to
+//RS         // put the fault on. Never return a silent success: say it on stderr.
+//RS         let _ = crate::runtime_host::write_jit_stderr(
+//RS             &format!("internal compiler error: {message}\n"),
+//RS             true,
+//RS         );
+//RS     }
+//RS }
+//RS 
+//RS /// Contain an unwind raised by shared-Prelude cleanup inside a host seam.
+//RS ///
+//RS /// The crate-wide no-unwind boundary is generated (`host_seam.rs`, #1997) and
+//RS /// already stands between every seam and its Cranelift caller. This is the
+//RS /// narrower, *inner* form for the handful of seam bodies that run a scheduler
+//RS /// wait point directly: `jet_scheduler_wait_without_unwind` marks the frame as
+//RS /// a live task catch frame, which is what makes a cancelled wait point choose
+//RS /// to unwind here at all instead of returning a cooperative sentinel. The outer
+//RS /// boundary would convert the same transfer, but only after abandoning the rest
+//RS /// of the seam body's cleanup.
+//RS ///
+//RS /// The seams that need this are the ones running shared-Prelude cleanup with no
+//RS /// `wait_status` around them. Dropping a `JetStreamSender` sends its completion
+//RS /// and dropping a `JetStream` cancels and drains its producer, and both are
+//RS /// scheduler wait points that unwind when the running task is cancelled
+//RS /// (`Prelude/Scheduler.rs::jet_task_deliver_cancel`). A generator abandoned by
+//RS /// `break` hits exactly that: the consumer cancels the producer, and then the
+//RS /// producer's own Cranelift epilogue calls `jet_jit_sender_close`.
+//RS ///
+//RS /// Conversion goes through the same shared decoder every wait point in this
+//RS /// file already uses, so a cancel or a deadline lands on the tier's pending
+//RS /// interrupt channel and the scheduler's own hook keeps the converted unwind
+//RS /// off stderr. Anything else is an engine defect and takes the ICE rail.
+//RS pub(crate) fn contain_seam_unwind<F>(f: F)
+//RS where
+//RS     F: FnOnce(),
+//RS {
+//RS     deliver_wait_status(jet_scheduler_wait_without_unwind(f));
+//RS }
+//RS 
+//RS /// Put one converted control transfer on the tier's existing status channel.
+//RS ///
+//RS /// I8: this is the single delivery point. The wait-point form
+//RS /// ([`contain_seam_unwind`]) and the plain-seam form
+//RS /// ([`deliver_caught_unwind`]) differ only in how they catch — never in what a
+//RS /// cancel, a blown deadline, or a defect then means.
+//RS fn deliver_wait_status(status: JetSchedulerWait<()>) {
+//RS     match status {
+//RS         JetSchedulerWait::Ready(()) => {}
+//RS         JetSchedulerWait::Cancelled => set_pending_shield_exit(JetShieldExit::Cancelled),
+//RS         JetSchedulerWait::Deadline(rendered) => record_deadline_interrupt(rendered),
+//RS         JetSchedulerWait::Panicked(message) => {
+//RS             if message.starts_with("Stop [E") {
+//RS                 with_runtime_mut(|rt| {
+//RS                     rt.set_rendered_runtime_stop(message, jet_foundation::ExitCodes::RUNTIME_PANIC)
+//RS                 });
+//RS             } else {
+//RS                 host_fault(&message);
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS /// Deliver an unwind caught at the generated `extern "C"` boundary — the
+//RS /// `host_seam` shim `host_fns!` registers for every JIT host symbol, including
+//RS /// `jet_deopt_call`. Always returns normally: generated code reads
+//RS /// the runtime's status at its next `emit_trap_check` and leaves through
+//RS /// Cranelift control flow, never through a Rust unwind (I1).
+//RS pub(crate) fn deliver_caught_unwind(payload: Box<dyn std::any::Any + Send>) {
+//RS     // A shared-Prelude stop recorded its complete report in
+//RS     // `runtime_stop_unwind` before it unwound; a second engine-local message
+//RS     // here would be an invention.
+//RS     if payload.is::<crate::runtime_host::JitRuntimeStop>() {
+//RS         return;
+//RS     }
+//RS     deliver_wait_status(jet_scheduler_classify_unwind(payload));
+//RS }
+//RS 
+//RS fn channel_pair(capacity: Option<i64>) -> i64 {
+//RS     with_runtime_mut(|rt| {
+//RS         let channel = match capacity {
+//RS             Some(capacity) => JetSchedulerChannel::bounded(capacity),
+//RS             None => JetSchedulerChannel::new(),
+//RS         };
+//RS         let sender = channel.sender();
+//RS         let receiver_id = rt.channels.len() as i64;
+//RS         rt.channels.push(channel);
+//RS         let sender_id = rt.senders.len() as i64;
+//RS         rt.senders.push(Some(sender));
+//RS         let pair = rt.heap.alloc_record(2);
+//RS         rt.heap
+//RS             .record_set_int(pair, 0, sender_id)
+//RS             .expect("fresh channel tuple has a sender slot");
+//RS         rt.heap
+//RS             .record_set_int(pair, 1, receiver_id)
+//RS             .expect("fresh channel tuple has a receiver slot");
+//RS         pair
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_channel_new() -> i64 {
+//RS     channel_pair(None)
+//RS }
+//RS 
+//RS /// `channel<T>(capacity)` — bounded buffer (D-TASKRUNTIME1).
+//RS fn jet_jit_channel_bounded(capacity: i64) -> i64 {
+//RS     channel_pair(Some(capacity))
+//RS }
+//RS 
+//RS fn jet_jit_generator_channel_new() -> i64 {
+//RS     with_runtime_mut(|rt| {
+//RS         let (producer, consumer) = jet_codegen::scheduler::jet_stream::<i64>();
+//RS         let channel = rt.next_stream_channel;
+//RS         rt.next_stream_channel -= 1;
+//RS         rt.stream_consumers.insert(channel, consumer);
+//RS         rt.stream_producers.insert(channel, Arc::new(producer));
+//RS         channel
+//RS     })
+//RS }
+//RS 
+//RS /// Attach the generic scheduler child created by the generator wrapper to its
+//RS /// shared Stream consumer. The handle tables only marshal Cranelift words;
+//RS /// `JetStream` owns cancellation and join/drain semantics.
+//RS fn jet_jit_generator_stream_attach(ch: i64, task: i64) {
+//RS     let attached: Option<(JetStream<i64>, JetSchedulerJoin<i64>, Arc<JetTaskControl>)> =
+//RS         with_runtime_mut(|rt| {
+//RS             let index = task as usize;
+//RS             let Some(consumer) = rt.stream_consumers.remove(&ch) else {
+//RS                 rt.set_host_fault("jit generator attach without consumer");
+//RS                 return None;
+//RS             };
+//RS             let Some(join) = rt.tasks.get_mut(index).and_then(Option::take) else {
+//RS                 // Put the consumer back: dropping a `JetStream` here would
+//RS                 // drain its producer while this thread still holds the runtime
+//RS                 // access guard.
+//RS                 rt.stream_consumers.insert(ch, consumer);
+//RS                 rt.set_host_fault("jit generator attach without task join");
+//RS                 return None;
+//RS             };
+//RS             let Some(control) = rt.task_controls.get(index).cloned() else {
+//RS                 rt.stream_consumers.insert(ch, consumer);
+//RS                 rt.set_host_fault("jit generator attach without task control");
+//RS                 return None;
+//RS             };
+//RS             Some((consumer, join, control))
+//RS         });
+//RS     let Some((mut consumer, join, control)) = attached else {
+//RS         // `with_runtime_mut` also yields `None` when no runtime owns this call,
+//RS         // in which case there is no status channel and the fault goes to stderr.
+//RS         host_fault("jit generator attach without active runtime");
+//RS         return;
+//RS     };
+//RS     consumer.attach_task(control, join);
+//RS     with_runtime_mut(|rt| {
+//RS         rt.stream_consumers.insert(ch, consumer);
+//RS     });
+//RS }
+//RS fn stream_callback_slot(callback: i64) -> Option<crate::runtime_host::JitCallableSlot> {
+//RS     let slot = with_runtime_mut(|rt| crate::runtime_host::jit_callable_parts(rt, callback));
+//RS     if slot.is_none() {
+//RS         host_fault("jit stream operator: invalid callback handle");
+//RS     }
+//RS     slot
+//RS }
+//RS 
+//RS unsafe fn invoke_stream_callback(slot: crate::runtime_host::JitCallableSlot, value: i64) -> i64 {
+//RS     if slot.has_env {
+//RS         let callback: unsafe extern "C" fn(i64, i64) -> i64 =
+//RS             std::mem::transmute(slot.fn_ptr as usize);
+//RS         callback(slot.env, value)
+//RS     } else {
+//RS         let callback: unsafe extern "C" fn(i64) -> i64 = std::mem::transmute(slot.fn_ptr as usize);
+//RS         callback(value)
+//RS     }
+//RS }
+//RS 
+//RS fn stream_callback_datetime_ns(value: i64) -> Option<i64> {
+//RS     super::Time::with_time(value, |time| match time {
+//RS         super::Time::TimeValue::DateTime(datetime) => datetime.to_unix_nanoseconds().ok(),
+//RS         _ => None,
+//RS     })
+//RS }
+//RS 
+//RS fn stream_operator_channel() -> i64 {
+//RS     with_runtime_mut(|rt| {
+//RS         let channel = rt.next_stream_channel;
+//RS         rt.next_stream_channel -= 1;
+//RS         channel
+//RS     })
+//RS }
+//RS 
+//RS /// `Stream.with_event_time(fn(T) -> Int)` — the callback's Unix-second result
+//RS /// is normalized by the shared event-time kernel.
+//RS fn jet_jit_stream_with_event_time(stream: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = stream_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let source = with_runtime_mut(|rt| rt.stream_consumers.remove(&stream));
+//RS     let Some(source) = source else {
+//RS         host_fault("jit stream.with_event_time: invalid stream handle");
+//RS         return 0;
+//RS     };
+//RS     let events = jet_stream_with_event_time_i64(source, move |value| unsafe {
+//RS         invoke_stream_callback(slot, *value)
+//RS     });
+//RS     let channel = stream_operator_channel();
+//RS     with_runtime_mut(|rt| {
+//RS         rt.stream_event_consumers.insert(channel, events);
+//RS     });
+//RS     channel
+//RS }
+//RS 
+//RS /// `Stream.with_event_time(fn(T) -> DateTime)` — the resident DateTime handle
+//RS /// is converted to Unix nanoseconds before the shared kernel sees it.
+//RS fn jet_jit_stream_with_event_time_ns(stream: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = stream_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let source = with_runtime_mut(|rt| rt.stream_consumers.remove(&stream));
+//RS     let Some(source) = source else {
+//RS         host_fault("jit stream.with_event_time: invalid stream handle");
+//RS         return 0;
+//RS     };
+//RS     let events = jet_stream_with_event_time_ns(source, move |value| {
+//RS         let datetime = unsafe { invoke_stream_callback(slot, *value) };
+//RS         stream_callback_datetime_ns(datetime).unwrap_or_else(|| {
+//RS             with_runtime_mut(|rt| {
+//RS                 rt.set_host_fault("jit stream.with_event_time returned an invalid DateTime");
+//RS             });
+//RS             0
+//RS         })
+//RS     });
+//RS     let channel = stream_operator_channel();
+//RS     with_runtime_mut(|rt| {
+//RS         rt.stream_event_consumers.insert(channel, events);
+//RS     });
+//RS     channel
+//RS }
+//RS 
+//RS fn jet_jit_stream_key_by(events: i64, callback: i64) -> i64 {
+//RS     let Some(slot) = stream_callback_slot(callback) else {
+//RS         return 0;
+//RS     };
+//RS     let events = with_runtime_mut(|rt| rt.stream_event_consumers.remove(&events));
+//RS     let Some(events) = events else {
+//RS         host_fault("jit stream.key_by: invalid event-time stream handle");
+//RS         return 0;
+//RS     };
+//RS     let keyed = jet_stream_key_by(events, move |value| unsafe {
+//RS         invoke_stream_callback(slot, *value)
+//RS     });
+//RS     let channel = stream_operator_channel();
+//RS     with_runtime_mut(|rt| {
+//RS         rt.stream_keyed_consumers.insert(channel, keyed);
+//RS     });
+//RS     channel
+//RS }
+//RS 
+//RS /// Bridge typed windows back to the existing scalar stream ABI. Each received
+//RS /// window gets an opaque handle; its typed value remains in `stream_windows`
+//RS /// until resident reset, while cancellation still drops the shared producer.
+//RS fn jet_jit_stream_window(keyed: i64, window: i64, watermark: i64, late: i64) -> i64 {
+//RS     let keyed = with_runtime_mut(|rt| rt.stream_keyed_consumers.remove(&keyed));
+//RS     let Some(keyed) = keyed else {
+//RS         host_fault("jit stream.window: invalid keyed stream handle");
+//RS         return 0;
+//RS     };
+//RS     let disposition = if late == 0 {
+//RS         JetLateEventDisposition::Drop
+//RS     } else {
+//RS         JetLateEventDisposition::SideOutput
+//RS     };
+//RS     let windows = jet_keyed_stream_window_i64(keyed, window, watermark, disposition);
+//RS     let channel = stream_operator_channel();
+//RS     let bridged = jet_codegen::scheduler::jet_stream_task(move |sender| {
+//RS         let mut windows = windows;
+//RS         while let Some(window) = windows.pull_checked() {
+//RS             let handle = with_runtime_mut(|rt| {
+//RS                 let handle = rt.next_stream_channel;
+//RS                 rt.next_stream_channel -= 1;
+//RS                 rt.stream_windows.insert(handle, window);
+//RS                 handle
+//RS             });
+//RS             if !sender.send_stream(handle) {
+//RS                 break;
+//RS             }
+//RS         }
+//RS     });
+//RS     with_runtime_mut(|rt| {
+//RS         rt.stream_consumers.insert(channel, bridged);
+//RS     });
+//RS     channel
+//RS }
+//RS 
+//RS /// `core.time.now()` — wall millis (honours `LEX_TEST_EPOCH`).
+//RS fn jet_jit_time_now() -> i64 {
+//RS     jet_codegen::scheduler::jet_std_time_now()
+//RS }
+//RS 
+//RS /// `#Context(deadline: …)` enter.
+//RS fn jet_jit_deadline_push(deadline_ms: i64) {
+//RS     DEADLINE_STACK.with(|stack| {
+//RS         stack.borrow_mut().push(jet_ctx_push_deadline(deadline_ms));
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_deadline_pop() {
+//RS     DEADLINE_STACK.with(|stack| {
+//RS         let _ = stack.borrow_mut().pop();
+//RS     });
+//RS }
+//RS 
+//RS thread_local! {
+//RS     static DEADLINE_STACK: RefCell<Vec<JetDeadlineGuard>> = const { RefCell::new(Vec::new()) };
+//RS }
+//RS 
+//RS fn jet_jit_channel_close(ch: i64) {
+//RS     if ch < 0 {
+//RS         let (consumer, pending_producer, event_consumer, keyed_consumer, window) =
+//RS             with_runtime_mut(|rt| {
+//RS                 (
+//RS                     rt.stream_consumers.remove(&ch),
+//RS                     rt.stream_producers.remove(&ch),
+//RS                     rt.stream_event_consumers.remove(&ch),
+//RS                     rt.stream_keyed_consumers.remove(&ch),
+//RS                     rt.stream_windows.remove(&ch),
+//RS                 )
+//RS             });
+//RS         // Drop the producer first when the wrapper has not claimed it yet, so
+//RS         // the canonical consumer Drop can receive completion immediately. Both
+//RS         // drops are shared-Prelude wait points — the producer's completion send
+//RS         // and the consumer's cancel-and-drain — so neither may unwind into the
+//RS         // Cranelift frame that called this seam (#1997).
+//RS         contain_seam_unwind(move || {
+//RS             drop(pending_producer);
+//RS             drop(consumer);
+//RS             drop(event_consumer);
+//RS             drop(keyed_consumer);
+//RS             drop(window);
+//RS         });
+//RS         return;
+//RS     }
+//RS     with_runtime_mut(|rt| {
+//RS         if let Some(channel) = rt.channels.get(ch as usize) {
+//RS             channel.cancel();
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn jet_jit_channel_sender(ch: i64) -> i64 {
+//RS     with_runtime_mut(|rt| {
+//RS         if let Some(producer) = rt.stream_producers.remove(&ch) {
+//RS             let id = rt.next_stream_sender;
+//RS             rt.next_stream_sender -= 1;
+//RS             rt.stream_senders.insert(id, producer);
+//RS             return id;
+//RS         }
+//RS         let Some(tx) = rt.channels.get(ch as usize).map(|channel| channel.sender()) else {
+//RS             rt.set_host_fault("jit channel sender: bad handle");
+//RS             return 0;
+//RS         };
+//RS         let id = rt.senders.len() as i64;
+//RS         rt.senders.push(Some(tx));
+//RS         id
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_sender_clone(s: i64) -> i64 {
+//RS     with_runtime_mut(|rt| {
+//RS         if let Some(sender) = rt.stream_senders.get(&s).cloned() {
+//RS             let id = rt.next_stream_sender;
+//RS             rt.next_stream_sender -= 1;
+//RS             rt.stream_senders.insert(id, sender);
+//RS             return id;
+//RS         }
+//RS         let Some(tx) = rt.senders.get(s as usize).and_then(Option::as_ref).cloned() else {
+//RS             rt.set_host_fault("jit sender clone: bad handle");
+//RS             return 0;
+//RS         };
+//RS         let id = rt.senders.len() as i64;
+//RS         rt.senders.push(Some(tx));
+//RS         id
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_sender_send(s: i64, v: i64) -> i64 {
+//RS     if s < 0 {
+//RS         let sender = with_runtime_mut(|rt| rt.stream_senders.get(&s).cloned());
+//RS         let Some(sender) = sender else {
+//RS             host_fault("jit stream sender send: missing stream sender");
+//RS             return JitWaitStatus::Panicked as i64;
+//RS         };
+//RS         // Do not put cancel on the pending-exit channel: Yield lowering
+//RS         // branches on this status and must reach return-path defers. A trap
+//RS         // check after the host call would jump stop_block and skip them.
+//RS         match jet_scheduler_wait_without_unwind(|| sender.send_stream(v)) {
+//RS             JetSchedulerWait::Ready(true) => {
+//RS                 WAIT_VALUE.with(|slot| slot.set(1));
+//RS                 return JitWaitStatus::Ready as i64;
+//RS             }
+//RS             JetSchedulerWait::Ready(false) | JetSchedulerWait::Cancelled => {
+//RS                 WAIT_VALUE.with(|slot| slot.set(0));
+//RS                 return JitWaitStatus::Interrupted as i64;
+//RS             }
+//RS             JetSchedulerWait::Deadline(rendered) => {
+//RS                 record_deadline_interrupt(rendered);
+//RS                 return JitWaitStatus::Interrupted as i64;
+//RS             }
+//RS             JetSchedulerWait::Panicked(message) => {
+//RS                 trap_scheduler_report_or_panic(&message);
+//RS                 return JitWaitStatus::Panicked as i64;
+//RS             }
+//RS         }
+//RS     }
+//RS     // `with_runtime_mut` yields `Default` when no runtime is installed; that
+//RS     // is an invalid handle, never a closed or live one.
+//RS     #[derive(Default)]
+//RS     enum SendTarget {
+//RS         Live(jet_codegen::scheduler::JetSchedulerSender<i64>),
+//RS         Closed,
+//RS         #[default]
+//RS         Invalid,
+//RS     }
+//RS     let target = with_runtime_mut(|rt| {
+//RS         let Some(index) = usize::try_from(s).ok() else {
+//RS             return SendTarget::Invalid;
+//RS         };
+//RS         if let Some(slot) = rt.senders.get(index) {
+//RS             // `jet_jit_sender_close` is the only writer of a `None` slot: the
+//RS             // handle was explicitly closed, so this send meets a closed
+//RS             // channel exactly like the shared Prelude `JetSchedulerSender::send`
+//RS             // (value dropped, no signal to the sender).
+//RS             return slot.clone().map_or(SendTarget::Closed, SendTarget::Live);
+//RS         }
+//RS         // A consuming task capture can retain a stack slot.  If the parent
+//RS         // returns before the child first reads it, the slot may yield a stale
+//RS         // out-of-range word instead of the sender index.  Recover only when
+//RS         // the runtime has one unambiguous live sender; never guess between
+//RS         // multiple channels.
+//RS         let mut live = rt.senders.iter().filter_map(Option::as_ref);
+//RS         let Some(sender) = live.next().cloned() else {
+//RS             return SendTarget::Invalid;
+//RS         };
+//RS         if live.next().is_some() {
+//RS             return SendTarget::Invalid;
+//RS         }
+//RS         SendTarget::Live(sender)
+//RS     });
+//RS     match target {
+//RS         SendTarget::Live(tx) => wait_status(|| i64::from(tx.send(v))),
+//RS         SendTarget::Closed => wait_status(|| 0),
+//RS         SendTarget::Invalid => {
+//RS             host_fault("jit sender send: bad handle");
+//RS             JitWaitStatus::Panicked as i64
+//RS         }
+//RS     }
+//RS }
+//RS fn jet_jit_sender_send_unit(s: i64, v: i64) {
+//RS     let _ = jet_jit_sender_send(s, v);
+//RS }
+//RS 
+//RS fn jet_jit_sender_close_unit(s: i64) {
+//RS     jet_jit_sender_close(s, 0);
+//RS }
+//RS 
+//RS fn jet_jit_sender_close(s: i64, failed: i64) {
+//RS     if s < 0 {
+//RS         let sender = with_runtime_mut(|rt| rt.stream_senders.remove(&s));
+//RS         if failed != 0 {
+//RS             if let Some(sender) = sender.as_ref() {
+//RS                 if let Some(report) = take_rich_panic_report() {
+//RS                     sender.fail_with(report);
+//RS                 } else {
+//RS                     sender.fail();
+//RS                 }
+//RS             }
+//RS         }
+//RS         // The last producer handle sends stream completion as it drops, and a
+//RS         // cancelled generator unwinds at that send. This frame's caller is
+//RS         // Cranelift-emitted, so the unwind is converted here (#1997).
+//RS         contain_seam_unwind(move || drop(sender));
+//RS         return;
+//RS     }
+//RS     with_runtime_mut(|rt| {
+//RS         if let Some(sender) = rt.senders.get(s as usize).and_then(Option::as_ref) {
+//RS             // Match the shared Prelude `JetSchedulerSender::close` used by
+//RS             // AOT and the interpreter. Explicit close is a channel close, not
+//RS             // only dropping this JIT handle; task-owned sender clones may
+//RS             // still exist after their joins, and the receiver must drain the
+//RS             // queued values before observing closed.
+//RS             sender.close();
+//RS         }
+//RS         if let Some(sender) = rt.senders.get_mut(s as usize) {
+//RS             *sender = None;
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS 
+//RS /// `0` = closed; otherwise `received + 1`. A Stream pull acknowledges the
+//RS /// preceding value before waiting for the next one. That acknowledgement is
+//RS /// the exact suspension boundary after `yield`.
+//RS fn jet_jit_generator_channel_receive_status(ch: i64) -> i64 {
+//RS     let consumer = with_runtime_mut(|rt| rt.stream_consumers.remove(&ch));
+//RS     let Some(mut consumer) = consumer else {
+//RS         host_fault("jit generator receive without a stream consumer");
+//RS         return JitWaitStatus::Panicked as i64;
+//RS     };
+//RS     let mut producer_failed = false;
+//RS     let status = wait_status(|| match consumer.pull() {
+//RS         Some(value) => value + 1,
+//RS         None => {
+//RS             producer_failed = consumer.failed();
+//RS             0
+//RS         }
+//RS     });
+//RS     if status == JitWaitStatus::Ready as i64 && producer_failed {
+//RS         // Match AOT `JetStreamIter::next`: a producer that completed with a
+//RS         // failure must not become ordinary EOF in the resident adapter. The
+//RS         // status must also cross the wait boundary so the lowering cannot
+//RS         // dispatch the EOF branch before observing the trap.
+//RS         if let Some(report) = consumer.failure_report() {
+//RS             with_runtime_mut(|rt| {
+//RS                 rt.set_rendered_runtime_stop(report, jet_foundation::ExitCodes::RUNTIME_PANIC)
+//RS             });
+//RS         } else {
+//RS             trap_panic("stream producer failed");
+//RS         }
+//RS         contain_seam_unwind(move || drop(consumer));
+//RS         return JitWaitStatus::Panicked as i64;
+//RS     }
+//RS     if status == JitWaitStatus::Ready as i64 {
+//RS         if WAIT_VALUE.with(|slot| slot.get()) == 0 {
+//RS             // Consumer Drop cancels and drains the producer: a wait point that
+//RS             // must not unwind into the Cranelift frame below (#1997).
+//RS             contain_seam_unwind(move || drop(consumer));
+//RS         } else {
+//RS             with_runtime_mut(|rt| {
+//RS                 rt.stream_consumers.insert(ch, consumer);
+//RS             });
+//RS         }
+//RS     } else {
+//RS         with_runtime_mut(|rt| {
+//RS             rt.stream_consumers.insert(ch, consumer);
+//RS         });
+//RS     }
+//RS     status
+//RS }
+//RS 
+//RS /// Marshal `JetReceiver::receive` as a real `Result<T, Closed>` carrier.
+//RS /// Payload bits stay unchanged; `Closed` is the sole unit error variant.
+//RS fn jet_jit_channel_receive_result(ch: i64) -> i64 {
+//RS     let chan = with_runtime_mut(|rt| rt.channels.get(ch as usize).cloned());
+//RS     let Some(chan) = chan else {
+//RS         host_fault("jit channel receive: bad handle");
+//RS         return 0;
+//RS     };
+//RS     let status = wait_status(|| match chan.receive() {
+//RS         Some(value) => {
+//RS             with_runtime_mut(|rt| crate::runtime_host::alloc_jit_result(rt, true, value as u64))
+//RS         }
+//RS         None => with_runtime_mut(|rt| crate::runtime_host::alloc_jit_result(rt, false, 0)),
+//RS     });
+//RS     if status == JitWaitStatus::Ready as i64 {
+//RS         WAIT_VALUE.with(|slot| slot.get())
+//RS     } else {
+//RS         0
+//RS     }
+//RS }
+//RS 
+//RS fn jet_jit_channel_try_receive(ch: i64) -> i64 {
+//RS     let chan = with_runtime_mut(|rt| rt.channels.get(ch as usize).cloned());
+//RS     let Some(chan) = chan else {
+//RS         host_fault("jit channel try_receive: bad handle");
+//RS         return 0;
+//RS     };
+//RS     let value = chan.try_receive();
+//RS     with_runtime_mut(|rt| {
+//RS         crate::runtime_host::alloc_jit_result(rt, value.is_some(), value.unwrap_or_default() as u64)
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_channel_is_timer(ch: i64) -> i64 {
+//RS     let Some(chan) = with_runtime_mut(|rt| rt.channels.get(ch as usize).cloned()) else {
+//RS         host_fault("jit channel is_timer: bad handle");
+//RS         return 0;
+//RS     };
+//RS     i64::from(chan.is_timer())
+//RS }
+//RS 
+//RS fn jet_jit_channel_is_interval(ch: i64) -> i64 {
+//RS     let Some(chan) = with_runtime_mut(|rt| rt.channels.get(ch as usize).cloned()) else {
+//RS         host_fault("jit channel is_interval: bad handle");
+//RS         return 0;
+//RS     };
+//RS     i64::from(chan.is_interval())
+//RS }
+//RS 
+//RS fn jet_jit_channel_is_cancelled(ch: i64) -> i64 {
+//RS     let Some(chan) = with_runtime_mut(|rt| rt.channels.get(ch as usize).cloned()) else {
+//RS         host_fault("jit channel is_cancelled: bad handle");
+//RS         return 0;
+//RS     };
+//RS     i64::from(chan.is_cancelled())
+//RS }
+//RS 
+//RS fn jet_jit_channel_is_ready(ch: i64) -> i64 {
+//RS     let Some(chan) = with_runtime_mut(|rt| rt.channels.get(ch as usize).cloned()) else {
+//RS         host_fault("jit channel is_ready: bad handle");
+//RS         return 0;
+//RS     };
+//RS     i64::from(chan.is_ready())
+//RS }
+//RS 
+//RS fn jet_jit_channel_delay_ms(ch: i64) -> i64 {
+//RS     let Some(chan) = with_runtime_mut(|rt| rt.channels.get(ch as usize).cloned()) else {
+//RS         host_fault("jit channel delay_ms: bad handle");
+//RS         return 0;
+//RS     };
+//RS     chan.delay_ms()
+//RS 
+//RS }
+//RS fn jet_jit_panic_channel_closed(_line: u32) -> i64 {
+//RS     trap_panic("channel closed")
+//RS }
+//RS 
+//RS type SpawnFn0 = extern "C" fn() -> i64;
+//RS type SpawnFn1 = extern "C" fn(i64) -> i64;
+//RS type SpawnFn2 = extern "C" fn(i64, i64) -> i64;
+//RS type SpawnFn3 = extern "C" fn(i64, i64, i64) -> i64;
+//RS type SpawnFn4 = extern "C" fn(i64, i64, i64, i64) -> i64;
+//RS 
+//RS fn store_task(
+//RS     join: JetSchedulerJoin<i64>,
+//RS     control: Arc<JetTaskControl>,
+//RS     skip_join_deadline: bool,
+//RS ) -> i64 {
+//RS     let runtime = active_runtime_ptr().map(|ptr| ptr as usize);
+//RS     let published = control.clone();
+//RS     let task = with_runtime_mut(|rt| {
+//RS         let id = rt.tasks.len() as i64;
+//RS         rt.tasks.push(Some(join));
+//RS         rt.task_controls.push(control);
+//RS         rt.task_skip_join_deadline.push(skip_join_deadline);
+//RS         id
+//RS     });
+//RS     if let Some(runtime) = runtime {
+//RS         publish_task_control(runtime, task as usize, &published);
+//RS     }
+//RS     task
+//RS }
+//RS 
+//RS fn task_ids_from_list(rt: &mut super::JitRuntime, list: i64) -> Vec<i64> {
+//RS     task_ids_from_carrier(rt, list).0
+//RS }
+//RS 
+//RS /// D-CONC-ALLNAMED1=A: named `task.all` carries a tuple/record of task
+//RS /// handles. The combinator host still joins a list of ids, then the payload
+//RS /// must be the same record shape so field reads (`results.first`) land.
+//RS fn task_ids_from_carrier(rt: &mut super::JitRuntime, list: i64) -> (Vec<i64>, bool) {
+//RS     if let Some(ids) = rt.heap.clone_int_list(list) {
+//RS         return (ids, false);
+//RS     }
+//RS     if let Some(fields) = rt.heap.clone_record_values(list) {
+//RS         let Some(ids) = fields
+//RS             .into_iter()
+//RS             .map(|field| match field {
+//RS                 jet_rt::JetVal::Int(id) | jet_rt::JetVal::RecordRef(id) => Some(id),
+//RS                 _ => None,
+//RS             })
+//RS             .collect::<Option<Vec<_>>>()
+//RS         else {
+//RS             rt.set_host_fault("jit task combinator: bad task handle");
+//RS             return (Vec::new(), true);
+//RS         };
+//RS         return (ids, true);
+//RS     }
+//RS     let Some(length) = crate::runtime_host::sequence_len(rt, list) else {
+//RS         rt.set_host_fault("jit task combinator: bad list handle");
+//RS         return (Vec::new(), false);
+//RS     };
+//RS     let Some(ids) = (0..length)
+//RS         .map(|index| crate::runtime_host::sequence_get_int(rt, list, index))
+//RS         .collect::<Option<Vec<_>>>()
+//RS     else {
+//RS         rt.set_host_fault("jit task combinator: bad list element");
+//RS         return (Vec::new(), false);
+//RS     };
+//RS     (ids, false)
+//RS }
+//RS 
+//RS fn store_i64_list(rt: &mut super::JitRuntime, values: Vec<i64>) -> i64 {
+//RS     rt.heap.alloc_int_list(values)
+//RS }
+//RS 
+//RS fn store_i64_record(rt: &mut super::JitRuntime, values: Vec<i64>) -> i64 {
+//RS     rt.heap.alloc_record_values(
+//RS         values
+//RS             .into_iter()
+//RS             .map(jet_rt::JetVal::Int)
+//RS             .collect(),
+//RS     )
+//RS }
+//RS 
+//RS fn store_task_all_payload(rt: &mut super::JitRuntime, values: Vec<i64>, named: bool) -> u64 {
+//RS     if named {
+//RS         store_i64_record(rt, values) as u64
+//RS     } else {
+//RS         store_i64_list(rt, values) as u64
+//RS     }
+//RS }
+//RS 
+//RS fn take_task_entries(
+//RS     rt: &mut super::JitRuntime,
+//RS     ids: &[i64],
+//RS ) -> Vec<(JetSchedulerJoin<i64>, Arc<JetTaskControl>)> {
+//RS     let mut entries = Vec::with_capacity(ids.len());
+//RS     for &id in ids {
+//RS         let idx = id as usize;
+//RS         let Some(join) = rt.tasks.get_mut(idx).and_then(Option::take) else {
+//RS             rt.set_host_fault("jit task combinator: task already joined");
+//RS             return Vec::new();
+//RS         };
+//RS         let Some(control) = rt.task_controls.get(idx).cloned() else {
+//RS             rt.set_host_fault("jit task combinator: missing task control");
+//RS             return Vec::new();
+//RS         };
+//RS         entries.push((join, control));
+//RS     }
+//RS     entries
+//RS }
+//RS 
+//RS pub(crate) fn active_runtime_ptr() -> Option<*mut super::JitRuntime> {
+//RS     ACTIVE_RUNTIME.with(|slot| *slot.borrow())
+//RS }
+//RS 
+//RS /// Re-raise an already-reported child stop out of a JIT task body, using the
+//RS /// carrier its catcher reads and *without* running Rust's panic hook.
+//RS ///
+//RS /// `jet_scheduler_catch_task_unwind` publishes the child value out of a
+//RS /// `String` payload (`jet_scheduler_panic_message`), so the payload type here
+//RS /// must match `Prelude/Core.rs`'s `jet_runtime_stop_unwind`, which raises
+//RS /// `Box::new(message.to_string())` for the same frame on the AOT tier (I9:
+//RS /// engines marshal, they do not re-decide).
+//RS ///
+//RS /// `resume_unwind` rather than `panic!` is the whole point. The scheduler's
+//RS /// process-global hook stays quiet only for `jet_scheduler_converted_unwind`
+//RS /// payloads — a cancel/deadline marker, the `__jet_ffi_runtime__: ` marker, or
+//RS /// a transported `Stop [` / `Error [` report. A child's own panic message is
+//RS /// none of those, so `panic!` here printed a raw `thread '<unnamed>' panicked
+//RS /// at Concurrency.rs` banner beside a failure the parent already reports in Jet
+//RS /// terms (I2/I4). Widening the quiet set instead would silence genuinely
+//RS /// unconvertible host panics, and rendering the report into the payload instead
+//RS /// would corrupt the value: `jet_scheduler_panic_message` splits a transported
+//RS /// report on `]: `, and an E3001 report carries its source frame, context box
+//RS /// and Why/Fix under that header, so `.Panicked(reason)` would carry the whole
+//RS /// report instead of the program's own message. `resume_unwind` is also what
+//RS /// `jit/runtime_host.rs`'s `runtime_stop_unwind` already uses.
+//RS ///
+//RS /// #1997: cranelift-jit registers no unwind info, so this must never run with a
+//RS /// JIT frame on the stack. It cannot — the callers below raise only after
+//RS /// `f()` has returned, from plain Rust frames.
+//RS fn resume_child_stop(message: String) -> ! {
+//RS     std::panic::resume_unwind(Box::new(message))
+//RS }
+//RS 
+//RS /// Run a JIT spawn body on a pool worker with the spawner's runtime heap
+//RS /// wired up, then allow callback transport to discard the join handle once
+//RS /// native shutdown owns completion.
+//RS pub(crate) fn spawn_ffi_task<F>(f: F) -> i64
+//RS where
+//RS     F: FnOnce() -> i64 + Send + 'static,
+//RS {
+//RS     spawn_with_runtime(f)
+//RS }
+//RS 
+//RS /// Spawn a typed async adapter task. Its public join result is the canonical
+//RS /// dispatch report, so parent deadline checks must not overwrite that report.
+//RS pub(crate) fn spawn_ffi_task_typed<F>(f: F) -> i64
+//RS where
+//RS     F: FnOnce() -> i64 + Send + 'static,
+//RS {
+//RS     spawn_with_runtime_at_label_policy(0, None, true, f)
+//RS }
+//RS 
+//RS pub(crate) fn detach_ffi_task(task: i64) {
+//RS     jet_jit_task_detach(task);
+//RS }
+//RS 
+//RS fn spawn_with_runtime<F>(f: F) -> i64
+//RS where
+//RS     F: FnOnce() -> i64 + Send + 'static,
+//RS {
+//RS     spawn_with_runtime_at(0, f)
+//RS }
+//RS 
+//RS fn spawn_with_runtime_at<F>(spawn_site: usize, f: F) -> i64
+//RS where
+//RS     F: FnOnce() -> i64 + Send + 'static,
+//RS {
+//RS     spawn_with_runtime_at_label(spawn_site, None, f)
+//RS }
+//RS 
+//RS fn spawn_with_runtime_at_label<F>(
+//RS     spawn_site: usize,
+//RS     explicit_label: Option<String>,
+//RS     f: F,
+//RS ) -> i64
+//RS where
+//RS     F: FnOnce() -> i64 + Send + 'static,
+//RS {
+//RS     spawn_with_runtime_at_label_policy(spawn_site, explicit_label, false, f)
+//RS }
+//RS 
+//RS fn spawn_with_runtime_at_label_policy<F>(
+//RS     spawn_site: usize,
+//RS     explicit_label: Option<String>,
+//RS     skip_join_deadline: bool,
+//RS     f: F,
+//RS ) -> i64
+//RS where
+//RS     F: FnOnce() -> i64 + Send + 'static,
+//RS {
+//RS     let Some(rt_ptr) = active_runtime_ptr() else {
+//RS         host_fault("jit spawn without active runtime");
+//RS         return 0;
+//RS     };
+//RS     let rt_addr = rt_ptr as usize;
+//RS     let label = explicit_label.unwrap_or_else(|| {
+//RS         with_runtime_mut(|rt| {
+//RS             rt.task_labels
+//RS                 .get(spawn_site)
+//RS                 .and_then(Option::as_deref)
+//RS                 .unwrap_or("")
+//RS                 .to_string()
+//RS         })
+//RS     });
+//RS     let inherited_deadline = jet_ctx_deadline_ms();
+//RS     let deopt_state = super::deopt::capture_deopt_state();
+//RS     let runtime_argv = jet_codegen::Comptime::runtime_argv();
+//RS     let control = JetTaskControl::new();
+//RS     // Register the handle before the child can enter deopt. Otherwise the
+//RS     // child can own RUNTIME_ACCESS while `store_task` is assigning its slot;
+//RS     // the parent then cannot reach the cancel call that should interrupt that
+//RS     // deopt wait point (#1997).
+//RS     let start_gate = ParkSlot::new();
+//RS     let worker_start = start_gate.clone();
+//RS     let permit = take_pending_task_group_permit();
+//RS     let join = jet_scheduler_spawn_blocking_with_control_at(
+//RS         spawn_site,
+//RS         &label,
+//RS         move || {
+//RS             worker_start.park(None);
+//RS             let _task_scope = enter_jit_task();
+//RS             let _deopt_state = super::deopt::install_deopt_state(deopt_state);
+//RS             let _permit = permit;
+//RS             // SAFETY: `rt_ptr` is the resident heap for this JIT invocation; workers
+//RS             // only touch mutex-backed channel state and indexed sender slots.
+//RS             let rt_ptr = rt_addr as *mut super::JitRuntime;
+//RS             set_active_runtime_local(Some(rt_ptr));
+//RS             // Keep the runtime and native module table wired through the shared
+//RS             // Prelude completion drain. Group callbacks are registered after
+//RS             // this one, so reverse draining closes groups before dropping
+//RS             // worker-owned modules and clearing the runtime pointer.
+//RS             jet_scheduler_task_completion_register(|| {
+//RS                 crate::Mod::clear();
+//RS                 set_active_runtime(None);
+//RS             });
+//RS             clear_task_trap();
+//RS             let _deadline = inherited_deadline.map(jet_ctx_push_deadline);
+//RS             let _ = take_pending_shield_exit();
+//RS             // Task bodies may call `process.argv()` directly or deopt into the
+//RS             // interpreter. Carry the one invocation carrier across this worker
+//RS             // hop; the task runtime must not grow a second argv store.
+//RS             let out = match runtime_argv.as_deref() {
+//RS                 Some(args) => jet_codegen::Comptime::with_runtime_argv(args, f),
+//RS                 None => f(),
+//RS             };
+//RS             let child_deadline = take_pending_child_deadline();
+//RS             // A native task owns its trap until the shared join/combinator
+//RS             // result is observed; a sibling must not inherit it at its next
+//RS             // loop header.
+//RS             let task_trap = take_task_trap();
+//RS             // A rich panic is a typed child failure under D-CONC-FAIL1. Remove
+//RS             // its top-level diagnostic state before re-raising, or the shared
+//RS             // resident runtime would report the child as a parent panic too.
+//RS             let panic_reason = take_rich_panic_reason();
+//RS             let _panic_report = take_rich_panic_report();
+//RS             jet_scheduler_deliver_shield_exit(take_pending_shield_exit());
+//RS             if let Some(rendered) = child_deadline {
+//RS                 jet_scheduler_propagate_deadline(rendered);
+//RS             }
+//RS             if let Some(reason) = panic_reason {
+//RS                 resume_child_stop(reason);
+//RS             }
+//RS             if let Some(reason) = task_trap {
+//RS                 resume_child_stop(reason);
+//RS             }
+//RS             out
+//RS         },
+//RS         control.clone(),
+//RS     );
+//RS     let task = store_task(join, control, skip_join_deadline);
+//RS     start_gate.wake();
+//RS     task
+//RS }
+//RS 
+//RS fn jet_jit_shield_enter() {
+//RS     jet_scheduler_shield_enter();
+//RS }
+//RS 
+//RS fn jet_jit_shield_leave() -> i64 {
+//RS     let exit = jet_scheduler_shield_leave_status();
+//RS     if matches!(exit, JetShieldExit::Deadline) {
+//RS         jet_codegen::task_group::jet_task_deadline_mark_pending();
+//RS         with_runtime_mut(|rt| {
+//RS             rt.set_deadline(jet_codegen::task_group::jet_task_deadline("shield exit").render())
+//RS         });
+//RS     }
+//RS     set_pending_shield_exit(exit);
+//RS     i64::from(!matches!(exit, JetShieldExit::None))
+//RS }
+//RS 
+//RS fn jet_jit_spawn0(spawn_site: i64, f: SpawnFn0) -> i64 {
+//RS     spawn_with_runtime_at(spawn_site as usize, move || f())
+//RS }
+//RS 
+//RS fn jet_jit_spawn1(spawn_site: i64, f: SpawnFn1, c0: i64) -> i64 {
+//RS     spawn_with_runtime_at(spawn_site as usize, move || f(c0))
+//RS }
+//RS 
+//RS fn core_callable(callable: i64) -> Option<super::runtime_host::JitCallableSlot> {
+//RS     let slot = with_runtime_mut(|rt| super::runtime_host::jit_callable_parts(rt, callable));
+//RS     if slot.is_none() {
+//RS         host_fault("MIR core closure has an invalid callable handle");
+//RS     }
+//RS     slot
+//RS }
+//RS 
+//RS fn invoke_core_callable(slot: super::runtime_host::JitCallableSlot) -> i64 {
+//RS     unsafe {
+//RS         if slot.has_env {
+//RS             let callback: unsafe extern "C" fn(i64) -> i64 =
+//RS                 std::mem::transmute(slot.fn_ptr as usize);
+//RS             callback(slot.env)
+//RS         } else {
+//RS             let callback: unsafe extern "C" fn() -> i64 = std::mem::transmute(slot.fn_ptr as usize);
+//RS             callback()
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS fn core_spawn_label(label: i64) -> Option<String> {
+//RS     let text = with_runtime_mut(|rt| rt.heap.clone_string(label));
+//RS     if text.is_none() {
+//RS         host_fault("MIR core spawn label is not a string handle");
+//RS     }
+//RS     text
+//RS }
+//RS 
+//RS fn jet_jit_core_spawn(site: i64, label: i64, callable: i64) -> i64 {
+//RS     let Some(site) = usize::try_from(site).ok() else {
+//RS         host_fault("MIR core spawn site is outside the JIT ABI");
+//RS         return 0;
+//RS     };
+//RS     let Some(label) = core_spawn_label(label) else {
+//RS         return 0;
+//RS     };
+//RS     let Some(slot) = core_callable(callable) else {
+//RS         return 0;
+//RS     };
+//RS     spawn_with_runtime_at_label(site, Some(label), move || invoke_core_callable(slot))
+//RS }
+//RS 
+//RS fn jet_jit_core_spawn_grouped(group: i64, site: i64, label: i64, callable: i64) -> i64 {
+//RS     let Some(site) = usize::try_from(site).ok() else {
+//RS         host_fault("MIR grouped spawn site is outside the JIT ABI");
+//RS         return 0;
+//RS     };
+//RS     let Some(label) = core_spawn_label(label) else {
+//RS         return 0;
+//RS     };
+//RS     let Some(slot) = core_callable(callable) else {
+//RS         return 0;
+//RS     };
+//RS     if jet_jit_task_group_acquire(group) != JitWaitStatus::Ready as i64 {
+//RS         return 0;
+//RS     }
+//RS     let task = spawn_with_runtime_at_label(site, Some(label), move || invoke_core_callable(slot));
+//RS     jet_jit_task_group_register(group, task);
+//RS     task
+//RS }
+//RS 
+//RS fn jet_jit_spawn2(spawn_site: i64, f: SpawnFn2, c0: i64, c1: i64) -> i64 {
+//RS     spawn_with_runtime_at(spawn_site as usize, move || f(c0, c1))
+//RS }
+//RS 
+//RS fn jet_jit_spawn3(spawn_site: i64, f: SpawnFn3, c0: i64, c1: i64, c2: i64) -> i64 {
+//RS     spawn_with_runtime_at(spawn_site as usize, move || f(c0, c1, c2))
+//RS }
+//RS 
+//RS fn jet_jit_spawn4(spawn_site: i64, f: SpawnFn4, c0: i64, c1: i64, c2: i64, c3: i64) -> i64 {
+//RS     spawn_with_runtime_at(spawn_site as usize, move || f(c0, c1, c2, c3))
+//RS }
+//RS 
+//RS fn jet_jit_task_group_new(limit: i64, bounded: i64) -> i64 {
+//RS     let id = with_runtime_mut(|rt| {
+//RS         let id = rt.task_groups.len() as i64;
+//RS         rt.task_groups
+//RS             .push(Some(JitTaskGroup::new(limit, bounded != 0)));
+//RS         id
+//RS     });
+//RS     // Prelude owns when this callback runs. This host function only marshals
+//RS     // the opaque JIT group handle into its representation-specific close.
+//RS     jet_scheduler_task_completion_register(move || {
+//RS         let _ = close_task_group(id);
+//RS     });
+//RS     id
+//RS }
+//RS 
+//RS fn jet_jit_task_group_unbounded() -> i64 {
+//RS     jet_jit_task_group_new(0, 0)
+//RS }
+//RS 
+//RS fn jet_jit_task_group_with_limit(limit: i64) -> i64 {
+//RS     jet_jit_task_group_new(limit, 1)
+//RS }
+//RS 
+//RS fn jet_jit_task_group_acquire(group: i64) -> i64 {
+//RS     PENDING_TASK_GROUP_PERMIT.with(|pending| *pending.borrow_mut() = None);
+//RS     let children = with_runtime_mut(|rt| {
+//RS         rt.task_groups
+//RS             .get(group as usize)
+//RS             .and_then(Option::as_ref)
+//RS             .map(|group| group.children.clone())
+//RS     });
+//RS     let Some(children) = children else {
+//RS         return JitWaitStatus::Ready as i64;
+//RS     };
+//RS     let waiter = ParkSlot::new();
+//RS     wait_status(|| {
+//RS         let permit = match children.acquire_with(waiter, |waiter| {
+//RS             jet_scheduler_task_group_wait(waiter);
+//RS             Ok::<(), ()>(())
+//RS         }) {
+//RS             Ok(permit) => permit,
+//RS             // The admission waiter is infallible. A failure would be an engine
+//RS             // defect, and a defect under a Cranelift frame is a diagnostic.
+//RS             Err(()) => {
+//RS                 host_fault("jit task group admission failed");
+//RS                 None
+//RS             }
+//RS         };
+//RS         PENDING_TASK_GROUP_PERMIT.with(|pending| *pending.borrow_mut() = permit);
+//RS         0
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_task_group_register(group: i64, task: i64) {
+//RS     with_runtime_mut(|rt| {
+//RS         let children = rt
+//RS             .task_groups
+//RS             .get(group as usize)
+//RS             .and_then(Option::as_ref)
+//RS             .map(|group| group.children.clone());
+//RS         match children {
+//RS             Some(children) => children.register(task),
+//RS             None => rt.set_host_fault("jit task group already closed"),
+//RS         }
+//RS     });
+//RS }
+//RS 
+//RS fn close_task_group(group: i64) -> i64 {
+//RS     let children = with_runtime_mut(|rt| {
+//RS         rt.task_groups
+//RS             .get(group as usize)
+//RS             .and_then(Option::as_ref)
+//RS             .map(|group| group.children.clone())
+//RS     });
+//RS     let Some(children) = children else {
+//RS         return JitWaitStatus::Ready as i64;
+//RS     };
+//RS     // Keep group slot live through shared drain: joined children may register.
+//RS     let join = |task: i64| {
+//RS         let join = with_runtime_mut(|rt| rt.tasks[task as usize].take());
+//RS         if let Some(join) = join {
+//RS             // A lexical group's close has no result surface. It still waits
+//RS             // every child, while D-CONC-FAIL1 keeps child failure from
+//RS             // becoming a process-level panic. Drain is the engine adapter;
+//RS             // normal close does not request cancellation from the child.
+//RS             join.drain();
+//RS         }
+//RS     };
+//RS     if jet_codegen::task_group::jet_task_deadline_pending() {
+//RS         children.close_with_cancel(
+//RS             |task| {
+//RS                 with_runtime_mut(|rt| {
+//RS                     let idx = *task as usize;
+//RS                     if rt.tasks.get(idx).is_some_and(Option::is_some) {
+//RS                         if let Some(control) = rt.task_controls.get(idx) {
+//RS                             control.cancel();
+//RS                         }
+//RS                     }
+//RS                 });
+//RS             },
+//RS             join,
+//RS         );
+//RS     } else {
+//RS         children.close_with(join);
+//RS     }
+//RS     with_runtime_mut(|rt| {
+//RS         if let Some(slot) = rt.task_groups.get_mut(group as usize) {
+//RS             let _ = slot.take();
+//RS         }
+//RS     });
+//RS     JitWaitStatus::Ready as i64
+//RS }
+//RS 
+// END-PORT-PENDING 0205 crates/jet-jit/src/Concurrency.rs:1-1800
+

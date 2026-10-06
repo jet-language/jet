@@ -51,19 +51,6 @@ pub fn with_terminator_driver<R>(driver: Option<TerminatorDriver>, work: impl Fn
     work()
 }
 
-#[doc(hidden)]
-pub const TERMINATOR_PASS_SOURCE: &str = concat!(
-    include_str!("../../../../Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet"),
-    "\n",
-    include_str!("../../../../Compiler/JetLexer/Source/Lexer/Scan.jet"),
-    "\n",
-    include_str!("../../../../Compiler/JetLexer/Source/Lexer/Terminators.jet"),
-    "\n",
-    include_str!("../../../../Compiler/JetLexer/Source/Lexer/Tokens.jet"),
-    "\n",
-    include_str!("../../../../Compiler/JetLexer/Source/Lexer/Payload.jet"),
-);
-
 /// Every raw kind has a distinct tag. No statement/continuation decision is
 /// encoded here, and adding a token kind must update this exhaustive match.
 #[doc(hidden)]

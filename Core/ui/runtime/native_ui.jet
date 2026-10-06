@@ -1,0 +1,1798 @@
+// PORT-PENDING 0235 crates-jet-jit-src-ui-slice-1: crates/jet-jit/src/Ui.rs:1-1794
+// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
+//RS //! D-RENDERTGT*: resident-JIT UI host — `include!` canonical Prelude/Ui.rs
+//RS //! and the dynamic native GTK adapter. Opaque handles only.
+//RS 
+//RS // This module includes shared Prelude source that several hosts compile,
+//RS // each using a different subset, so dead-code reports here are about the
+//RS // other hosts' usage, not about this one. Scoped to the module, never the crate.
+//RS #![allow(dead_code)]
+//RS 
+//RS use super::Concurrency;
+//RS use cranelift_codegen::ir::{types, AbiParam, Signature};
+//RS use cranelift_module::Module;
+//RS use jet_codegen::Comptime::DevSink;
+//RS use jet_foundation::AST::{CtFloat, CtValue, Type};
+//RS use jet_foundation::Diagnostics::{Diagnostic, Span};
+//RS use jet_foundation::Prelude::jet_e0956_unsupported as unsupported;
+//RS use ui_rt::{JetTuiStatefulWidget, JetTuiWidget};
+//RS use jet_foundation::MIR::{
+//RS     MirCoreClosureKind, MirNominalRef, MirPreludeCallId, MirRuntimeValue, MirSiteId, MirType,
+//RS     MirTypeKind,
+//RS };
+//RS 
+//RS #[allow(dead_code, unused_imports)]
+//RS pub(crate) mod ui_rt {
+//RS     pub trait JetShow {
+//RS         fn jet_show(&self) -> String;
+//RS     }
+//RS     mod jet_std {
+//RS         pub use crate::Reactive::reactive_rt::jet_reactive_effect_rooted;
+//RS     }
+//RS 
+//RS 
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Outcome::*;
+//RS     #[allow(unused_imports)]
+//RS     pub use jet_foundation::Devtools::*;
+//RS     use jet_codegen::Codegen::{
+//RS         JET_CANONICAL_ARABIC_FONT_BYTES, JET_CANONICAL_FONT_BYTES,
+//RS         JET_CANONICAL_SYMBOLS_FONT_BYTES,
+//RS     };
+//RS     pub mod jet_tui_kernel {
+//RS         include!("../../jet-foundation/src/Prelude/TuiKernel.rs");
+//RS     }
+//RS     include!("../../jet-codegen/src/Prelude/Core/HostServices.rs");
+//RS     include!("../../jet-codegen/src/Prelude/Ui.rs");
+//RS     include!("../../jet-codegen/src/Prelude/Core/Preview.rs");
+//RS     include!("../../jet-codegen/src/Prelude/UiGtk.rs");
+//RS }
+//RS 
+//RS 
+//RS #[derive(Clone)]
+//RS pub(crate) enum UiValue {
+//RS     FontStyle(ui_rt::JetFontStyle),
+//RS     FontFace(ui_rt::JetFontFace),
+//RS     GlyphShaper(ui_rt::JetGlyphShaper),
+//RS     Glyph(ui_rt::JetGlyph),
+//RS     GlyphRun(ui_rt::JetGlyphRun),
+//RS     CapabilityFacts(ui_rt::JetUiCapabilityFacts),
+//RS     FileFilter(ui_rt::JetUiFileFilter),
+//RS     FsRights(ui_rt::JetUiFsRights),
+//RS     FsGrant(ui_rt::JetUiFsGrant),
+//RS     GrantedPath(ui_rt::JetUiGrantedPath),
+//RS     FileDialogRequest(ui_rt::JetUiFileDialogRequest),
+//RS     FileDialogSelection(ui_rt::JetUiFileDialogSelection),
+//RS     ClipboardText(ui_rt::JetUiClipboardText),
+//RS     ClipboardWrite(ui_rt::JetUiClipboardWrite),
+//RS     TextRange(ui_rt::JetUiTextRange),
+//RS     ImeEvent(Option<ui_rt::JetUiImeEvent>),
+//RS     DragEvent(Option<ui_rt::JetUiDragEvent>),
+//RS     ShortcutModifiers(ui_rt::JetUiShortcutModifiers),
+//RS     Shortcut(ui_rt::JetUiShortcut),
+//RS     ShortcutBinding(ui_rt::JetUiShortcutBinding),
+//RS     ShortcutDispatch(ui_rt::JetUiShortcutDispatch),
+//RS     Accessibility(ui_rt::JetUiAccessibility),
+//RS     AccessibilityProjection(Option<ui_rt::JetUiAccessibilityProjection>),
+//RS     TuiEvent(ui_rt::JetTuiEvent),
+//RS     TuiCapabilities(ui_rt::JetTuiCapabilities),
+//RS     TuiColor(ui_rt::JetTuiColor),
+//RS     TuiStyle(ui_rt::JetTuiStyle),
+//RS     TuiConstraint(ui_rt::JetTuiConstraint),
+//RS     TuiDirection(ui_rt::JetTuiDirection),
+//RS     TuiListState(ui_rt::JetTuiListState),
+//RS }
+//RS 
+//RS pub(crate) struct UiState {
+//RS     pub(crate) backends: Vec<UiBackendSlot>,
+//RS     pub(crate) nodes: Vec<ui_rt::JetUiNode>,
+//RS     pub(crate) constraints: Vec<ui_rt::JetSizeConstraint>,
+//RS     pub(crate) rects: Vec<ui_rt::JetRect>,
+//RS     pub(crate) events: Vec<ui_rt::JetInputEvent>,
+//RS     pub(crate) roles: Vec<ui_rt::JetUiAriaRole>,
+//RS     pub(crate) sizes: Vec<ui_rt::JetSize>,
+//RS     pub(crate) gtk_widgets: Vec<i64>,
+//RS     /// Host selection is explicit: headless mode keeps its deterministic host,
+//RS     /// while the normal path owns the real GTK adapter. The adapter is cloned
+//RS     /// before calls that may enter a native event loop or invoke user code.
+//RS     pub(crate) host: UiHostSlot,
+//RS     /// Typed values retain their shared Prelude ownership; i64 handles only
+//RS     /// index this table and never become a second semantic implementation.
+//RS     pub(crate) values: std::collections::HashMap<i64, UiValue>,
+//RS }
+//RS 
+//RS impl Default for UiState {
+//RS     fn default() -> Self {
+//RS         let host = if std::env::var_os("JET_UI_HEADLESS").is_some() {
+//RS             UiHostSlot::Headless(std::sync::Arc::new(std::sync::Mutex::new(
+//RS                 ui_rt::JetUiHeadlessHost::new(),
+//RS             )))
+//RS         } else {
+//RS             UiHostSlot::Gtk(ui_rt::jet_ui_gtk())
+//RS         };
+//RS         Self {
+//RS             backends: Vec::new(),
+//RS             nodes: Vec::new(),
+//RS             constraints: Vec::new(),
+//RS             rects: Vec::new(),
+//RS             events: Vec::new(),
+//RS             roles: Vec::new(),
+//RS             sizes: Vec::new(),
+//RS             gtk_widgets: Vec::new(),
+//RS             host,
+//RS             values: std::collections::HashMap::new(),
+//RS         }
+//RS     }
+//RS }
+//RS 
+//RS #[derive(Clone)]
+//RS pub(crate) enum UiHostSlot {
+//RS     Gtk(ui_rt::JetGtkBackend),
+//RS     Headless(std::sync::Arc<std::sync::Mutex<ui_rt::JetUiHeadlessHost>>),
+//RS }
+//RS 
+//RS impl UiHostSlot {
+//RS     fn with_host<R>(self, body: impl FnOnce(&mut dyn ui_rt::JetUiHost) -> R) -> R {
+//RS         match self {
+//RS             Self::Gtk(mut host) => body(&mut host),
+//RS             Self::Headless(host) => {
+//RS                 let mut host = host.lock().unwrap_or_else(|error| error.into_inner());
+//RS                 body(&mut *host)
+//RS             }
+//RS         }
+//RS     }
+//RS }
+//RS fn with_rt<F, R>(f: F) -> R
+//RS where
+//RS     F: FnOnce(&mut crate::runtime_host::JitRuntime) -> R,
+//RS     R: Default,
+//RS {
+//RS     Concurrency::with_runtime_mut(f)
+//RS }
+//RS 
+//RS 
+//RS #[derive(Clone)]
+//RS pub(crate) enum UiBackendSlot {
+//RS     Null(ui_rt::JetNullBackend),
+//RS     Tui(ui_rt::JetTuiBackend),
+//RS     Gtk(ui_rt::JetGtkBackend),
+//RS }
+//RS 
+//RS fn with_ui_host<F, R>(body: F) -> R
+//RS where
+//RS     F: FnOnce() -> R,
+//RS {
+//RS     let host = with_rt(|rt| Some(rt.ui.host.clone()));
+//RS     match host {
+//RS         Some(host) => host.with_host(|host| ui_rt::jet_ui_with_host(host, body)),
+//RS         // Ambient calls can run before a resident runtime is installed. In
+//RS         // that case the canonical helper deliberately uses its default host.
+//RS         None => body(),
+//RS     }
+//RS }
+//RS fn push_struct_f64(fields: &[f64]) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let h = rt.heap.alloc_record(fields.len());
+//RS         for (i, v) in fields.iter().enumerate() {
+//RS             let _ = rt.heap.record_set_float(h, i as i64, *v);
+//RS         }
+//RS         h
+//RS     })
+//RS }
+//RS fn ui_store_value(rt: &mut crate::runtime_host::JitRuntime, handle: i64, value: UiValue) -> i64 {
+//RS     rt.ui.values.insert(handle, value);
+//RS     handle
+//RS }
+//RS 
+//RS fn ui_value(rt: &crate::runtime_host::JitRuntime, handle: i64) -> Option<UiValue> {
+//RS     rt.ui.values.get(&handle).cloned()
+//RS }
+//RS fn ui_push_tui_color(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     color: ui_rt::JetTuiColor,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(match color {
+//RS         ui_rt::JetTuiColor::RGB(..) => 4,
+//RS         _ => 2,
+//RS     });
+//RS     match color {
+//RS         ui_rt::JetTuiColor::ANSI16(index) => {
+//RS             let _ = rt.heap.record_set_int(record, 0, 0);
+//RS             let _ = rt.heap.record_set_int(record, 1, i64::from(index));
+//RS         }
+//RS         ui_rt::JetTuiColor::ANSI256(index) => {
+//RS             let _ = rt.heap.record_set_int(record, 0, 1);
+//RS             let _ = rt.heap.record_set_int(record, 1, i64::from(index));
+//RS         }
+//RS         ui_rt::JetTuiColor::RGB(red, green, blue) => {
+//RS             let _ = rt.heap.record_set_int(record, 0, 2);
+//RS             let _ = rt.heap.record_set_int(record, 1, i64::from(red));
+//RS             let _ = rt.heap.record_set_int(record, 2, i64::from(green));
+//RS             let _ = rt.heap.record_set_int(record, 3, i64::from(blue));
+//RS         }
+//RS     }
+//RS     ui_store_value(rt, record, UiValue::TuiColor(color))
+//RS }
+//RS 
+//RS fn ui_decode_tui_color(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<ui_rt::JetTuiColor> {
+//RS     if let Some(UiValue::TuiColor(color)) = ui_value(rt, handle) {
+//RS         return Some(color);
+//RS     }
+//RS     match rt.heap.record_get_int(handle, 0)? {
+//RS         0 => Some(ui_rt::JetTuiColor::ANSI16(
+//RS             rt.heap.record_get_int(handle, 1)?.clamp(0, 15) as u8,
+//RS         )),
+//RS         1 => Some(ui_rt::JetTuiColor::ANSI256(
+//RS             rt.heap.record_get_int(handle, 1)?.clamp(0, 255) as u8,
+//RS         )),
+//RS         2 => Some(ui_rt::JetTuiColor::RGB(
+//RS             rt.heap.record_get_int(handle, 1)?.clamp(0, 255) as u8,
+//RS             rt.heap.record_get_int(handle, 2)?.clamp(0, 255) as u8,
+//RS             rt.heap.record_get_int(handle, 3)?.clamp(0, 255) as u8,
+//RS         )),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn ui_push_tui_capabilities(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     capabilities: ui_rt::JetTuiCapabilities,
+//RS ) -> i64 {
+//RS     let profile = rt.heap.alloc_record(1);
+//RS     let profile_discriminant = match capabilities.profile {
+//RS         ui_rt::JetTuiColorProfile::ANSI16 => 0,
+//RS         ui_rt::JetTuiColorProfile::ANSI256 => 1,
+//RS         ui_rt::JetTuiColorProfile::TrueColor => 2,
+//RS         ui_rt::JetTuiColorProfile::ASCII => 3,
+//RS     };
+//RS     let _ = rt.heap.record_set_int(profile, 0, profile_discriminant);
+//RS     let record = rt.heap.alloc_record(8);
+//RS     let _ = rt.heap.record_set_record(record, 0, profile);
+//RS     let _ = rt.heap.record_set_bool(record, 1, capabilities.color);
+//RS     let _ = rt.heap.record_set_bool(record, 2, capabilities.unicode);
+//RS     let _ = rt.heap.record_set_bool(record, 3, capabilities.mouse);
+//RS     let _ = rt.heap.record_set_bool(record, 4, capabilities.resize);
+//RS     let _ = rt.heap.record_set_bool(record, 5, capabilities.clipboard);
+//RS     let _ = rt.heap.record_set_int(record, 6, capabilities.width as i64);
+//RS     let _ = rt.heap.record_set_int(record, 7, capabilities.height as i64);
+//RS     ui_store_value(rt, record, UiValue::TuiCapabilities(capabilities))
+//RS }
+//RS 
+//RS fn ui_decode_tui_capabilities(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<ui_rt::JetTuiCapabilities> {
+//RS     if let Some(UiValue::TuiCapabilities(capabilities)) = ui_value(rt, handle) {
+//RS         return Some(capabilities);
+//RS     }
+//RS     let profile = match rt.heap.record_get_int(rt.heap.record_get_record(handle, 0)?, 0)? {
+//RS         0 => ui_rt::JetTuiColorProfile::ANSI16,
+//RS         1 => ui_rt::JetTuiColorProfile::ANSI256,
+//RS         2 => ui_rt::JetTuiColorProfile::TrueColor,
+//RS         3 => ui_rt::JetTuiColorProfile::ASCII,
+//RS         _ => return None,
+//RS     };
+//RS     Some(ui_rt::JetTuiCapabilities {
+//RS         profile,
+//RS         color: rt.heap.record_get_bool(handle, 1)?,
+//RS         unicode: rt.heap.record_get_bool(handle, 2)?,
+//RS         mouse: rt.heap.record_get_bool(handle, 3)?,
+//RS         resize: rt.heap.record_get_bool(handle, 4)?,
+//RS         clipboard: rt.heap.record_get_bool(handle, 5)?,
+//RS         width: rt.heap.record_get_int(handle, 6)?.max(1) as usize,
+//RS         height: rt.heap.record_get_int(handle, 7)?.max(1) as usize,
+//RS     })
+//RS }
+//RS 
+//RS fn ui_push_tui_event(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     event: ui_rt::JetTuiEvent,
+//RS ) -> i64 {
+//RS     let record = match &event {
+//RS         ui_rt::JetTuiEvent::Key { .. } | ui_rt::JetTuiEvent::Timer { .. } | ui_rt::JetTuiEvent::IO { .. } => {
+//RS             rt.heap.alloc_record(3)
+//RS         }
+//RS         ui_rt::JetTuiEvent::Resize { .. } | ui_rt::JetTuiEvent::Focus { .. } => {
+//RS             rt.heap.alloc_record(2)
+//RS         }
+//RS         ui_rt::JetTuiEvent::Interrupt | ui_rt::JetTuiEvent::Close => rt.heap.alloc_record(1),
+//RS     };
+//RS     match &event {
+//RS         ui_rt::JetTuiEvent::Key { code, modifiers } => {
+//RS             let _ = rt.heap.record_set_int(record, 0, 0);
+//RS             let code = rt.heap.alloc_string(code.clone());
+//RS             let _ = rt.heap.record_set_string(record, 1, code);
+//RS             let _ = rt.heap.record_set_int(record, 2, i64::from(*modifiers));
+//RS         }
+//RS         ui_rt::JetTuiEvent::Resize { size } => {
+//RS             let size_record = rt.heap.alloc_record(2);
+//RS             let _ = rt.heap.record_set_float(size_record, 0, size.width);
+//RS             let _ = rt.heap.record_set_float(size_record, 1, size.height);
+//RS             let _ = rt.heap.record_set_int(record, 0, 1);
+//RS             let _ = rt.heap.record_set_record(record, 1, size_record);
+//RS         }
+//RS         ui_rt::JetTuiEvent::Timer { id, elapsed_ms } => {
+//RS             let _ = rt.heap.record_set_int(record, 0, 2);
+//RS             let id = rt.heap.alloc_string(id.clone());
+//RS             let _ = rt.heap.record_set_string(record, 1, id);
+//RS             let _ = rt.heap.record_set_int(record, 2, *elapsed_ms);
+//RS         }
+//RS         ui_rt::JetTuiEvent::IO { channel, payload } => {
+//RS             let bytes = rt.heap.alloc_empty_list();
+//RS             for byte in payload {
+//RS                 let _ = rt.heap.list_push_int(bytes, i64::from(*byte));
+//RS             }
+//RS             let _ = rt.heap.record_set_int(record, 0, 3);
+//RS             let channel = rt.heap.alloc_string(channel.clone());
+//RS             let _ = rt.heap.record_set_string(record, 1, channel);
+//RS             let _ = rt.heap.record_set_int(record, 2, bytes);
+//RS         }
+//RS         ui_rt::JetTuiEvent::Focus { focused } => {
+//RS             let _ = rt.heap.record_set_int(record, 0, 4);
+//RS             let _ = rt.heap.record_set_bool(record, 1, *focused);
+//RS         }
+//RS         ui_rt::JetTuiEvent::Interrupt => {
+//RS             let _ = rt.heap.record_set_int(record, 0, 5);
+//RS         }
+//RS         ui_rt::JetTuiEvent::Close => {
+//RS             let _ = rt.heap.record_set_int(record, 0, 6);
+//RS         }
+//RS     }
+//RS     ui_store_value(rt, record, UiValue::TuiEvent(event))
+//RS }
+//RS 
+//RS fn ui_push_tui_style(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     style: ui_rt::JetTuiStyle,
+//RS ) -> i64 {
+//RS     let mut optional_color = |color: Option<ui_rt::JetTuiColor>| match color {
+//RS         Some(color) => {
+//RS             let value = ui_push_tui_color(rt, color);
+//RS             crate::runtime_host::alloc_jit_result(rt, true, value as u64)
+//RS         }
+//RS         None => crate::runtime_host::alloc_jit_result(rt, false, 0),
+//RS     };
+//RS     let foreground = optional_color(style.foreground);
+//RS     let background = optional_color(style.background);
+//RS     let record = rt.heap.alloc_record(5);
+//RS     let _ = rt.heap.record_set_int(record, 0, foreground);
+//RS     let _ = rt.heap.record_set_int(record, 1, background);
+//RS     let _ = rt.heap.record_set_bool(record, 2, style.bold);
+//RS     let _ = rt.heap.record_set_bool(record, 3, style.dim);
+//RS     let _ = rt.heap.record_set_bool(record, 4, style.underline);
+//RS     ui_store_value(rt, record, UiValue::TuiStyle(style))
+//RS }
+//RS 
+//RS fn ui_decode_tui_optional_color(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<Option<ui_rt::JetTuiColor>> {
+//RS     let (present, value) = crate::runtime_host::jit_result_parts(rt, handle)?;
+//RS     if present {
+//RS         Some(Some(ui_decode_tui_color(rt, value as i64)?))
+//RS     } else {
+//RS         Some(None)
+//RS     }
+//RS }
+//RS 
+//RS fn ui_decode_tui_style(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<ui_rt::JetTuiStyle> {
+//RS     if let Some(UiValue::TuiStyle(style)) = ui_value(rt, handle) {
+//RS         return Some(style);
+//RS     }
+//RS     Some(ui_rt::JetTuiStyle {
+//RS         foreground: ui_decode_tui_optional_color(rt, rt.heap.record_get_int(handle, 0)?)?,
+//RS         background: ui_decode_tui_optional_color(rt, rt.heap.record_get_int(handle, 1)?)?,
+//RS         bold: rt.heap.record_get_bool(handle, 2)?,
+//RS         dim: rt.heap.record_get_bool(handle, 3)?,
+//RS         underline: rt.heap.record_get_bool(handle, 4)?,
+//RS     })
+//RS }
+//RS 
+//RS fn ui_push_tui_constraint(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     constraint: ui_rt::JetTuiConstraint,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(2);
+//RS     let (discriminant, value) = match constraint {
+//RS         ui_rt::JetTuiConstraint::Length(value) => (0, value),
+//RS         ui_rt::JetTuiConstraint::Min(value) => (1, value),
+//RS         ui_rt::JetTuiConstraint::Max(value) => (2, value),
+//RS         ui_rt::JetTuiConstraint::Percent(value) => (3, value),
+//RS         ui_rt::JetTuiConstraint::Fill(value) => (4, f64::from(value)),
+//RS     };
+//RS     let _ = rt.heap.record_set_int(record, 0, discriminant);
+//RS     let _ = rt.heap.record_set_float(record, 1, value);
+//RS     ui_store_value(rt, record, UiValue::TuiConstraint(constraint))
+//RS }
+//RS 
+//RS fn ui_decode_tui_constraint(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<ui_rt::JetTuiConstraint> {
+//RS     if let Some(UiValue::TuiConstraint(constraint)) = ui_value(rt, handle) {
+//RS         return Some(constraint);
+//RS     }
+//RS     let value = rt.heap.record_get_float(handle, 1)?;
+//RS     match rt.heap.record_get_int(handle, 0)? {
+//RS         0 => Some(ui_rt::JetTuiConstraint::Length(value)),
+//RS         1 => Some(ui_rt::JetTuiConstraint::Min(value)),
+//RS         2 => Some(ui_rt::JetTuiConstraint::Max(value)),
+//RS         3 => Some(ui_rt::JetTuiConstraint::Percent(value)),
+//RS         4 => Some(ui_rt::JetTuiConstraint::Fill(value.max(0.0).round().min(u16::MAX as f64) as u16)),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn ui_push_tui_direction(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     direction: ui_rt::JetTuiDirection,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(1);
+//RS     let _ = rt.heap.record_set_int(
+//RS         record,
+//RS         0,
+//RS         match direction {
+//RS             ui_rt::JetTuiDirection::Horizontal => 0,
+//RS             ui_rt::JetTuiDirection::Vertical => 1,
+//RS         },
+//RS     );
+//RS     ui_store_value(rt, record, UiValue::TuiDirection(direction))
+//RS }
+//RS 
+//RS fn ui_decode_tui_direction(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<ui_rt::JetTuiDirection> {
+//RS     if let Some(UiValue::TuiDirection(direction)) = ui_value(rt, handle) {
+//RS         return Some(direction);
+//RS     }
+//RS     match rt.heap.record_get_int(handle, 0)? {
+//RS         0 => Some(ui_rt::JetTuiDirection::Horizontal),
+//RS         1 => Some(ui_rt::JetTuiDirection::Vertical),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn ui_push_tui_list_state(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     state: ui_rt::JetTuiListState,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(2);
+//RS     let _ = rt.heap.record_set_int(record, 0, state.selected() as i64);
+//RS     let _ = rt.heap.record_set_int(record, 1, state.offset() as i64);
+//RS     ui_store_value(rt, record, UiValue::TuiListState(state))
+//RS }
+//RS 
+//RS fn ui_decode_tui_list_state(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<ui_rt::JetTuiListState> {
+//RS     if let Some(UiValue::TuiListState(state)) = ui_value(rt, handle) {
+//RS         return Some(state);
+//RS     }
+//RS     let mut state = ui_rt::JetTuiListState::default();
+//RS     state.select(rt.heap.record_get_int(handle, 0)?.max(0) as usize);
+//RS     state.scroll_to(rt.heap.record_get_int(handle, 1)?.max(0) as usize);
+//RS     Some(state)
+//RS }
+//RS 
+//RS fn ui_push_font_style(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     style: ui_rt::JetFontStyle,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(1);
+//RS     let discriminant = match style {
+//RS         ui_rt::JetFontStyle::Body => 0,
+//RS         ui_rt::JetFontStyle::Title => 1,
+//RS         ui_rt::JetFontStyle::Monospace => 2,
+//RS     };
+//RS     let _ = rt.heap.record_set_int(record, 0, discriminant);
+//RS     ui_store_value(rt, record, UiValue::FontStyle(style))
+//RS }
+//RS 
+//RS fn ui_decode_font_style(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<ui_rt::JetFontStyle> {
+//RS     if let Some(UiValue::FontStyle(style)) = ui_value(rt, handle) {
+//RS         return Some(style);
+//RS     }
+//RS     match rt.heap.record_get_int(handle, 0)? {
+//RS         0 => Some(ui_rt::JetFontStyle::Body),
+//RS         1 => Some(ui_rt::JetFontStyle::Title),
+//RS         2 => Some(ui_rt::JetFontStyle::Monospace),
+//RS         _ => None,
+//RS     }
+//RS }
+//RS 
+//RS fn ui_push_glyph_shaper(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     shaper: ui_rt::JetGlyphShaper,
+//RS ) -> i64 {
+//RS     let record = rt.heap.alloc_record(1);
+//RS     let discriminant = match shaper {
+//RS         ui_rt::JetGlyphShaper::HarfBuzz => 0,
+//RS         ui_rt::JetGlyphShaper::HeadlessFallback => 1,
+//RS     };
+//RS     let _ = rt.heap.record_set_int(record, 0, discriminant);
+//RS     ui_store_value(rt, record, UiValue::GlyphShaper(shaper))
+//RS }
+//RS 
+//RS fn ui_push_font_face(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     face: ui_rt::JetFontFace,
+//RS ) -> i64 {
+//RS     let family = rt.heap.alloc_string(face.family.clone());
+//RS     let style = ui_push_font_style(rt, face.style);
+//RS     let record = rt.heap.alloc_record(3);
+//RS     let _ = rt.heap.record_set_string(record, 0, family);
+//RS     let _ = rt.heap.record_set_float(record, 1, face.size);
+//RS     let _ = rt.heap.record_set_record(record, 2, style);
+//RS     ui_store_value(rt, record, UiValue::FontFace(face))
+//RS }
+//RS 
+//RS fn ui_decode_font_face(
+//RS     rt: &crate::runtime_host::JitRuntime,
+//RS     handle: i64,
+//RS ) -> Option<ui_rt::JetFontFace> {
+//RS     if let Some(UiValue::FontFace(face)) = ui_value(rt, handle) {
+//RS         return Some(face);
+//RS     }
+//RS     let family = rt.heap.record_clone_string(handle, 0)?;
+//RS     let size = rt.heap.record_get_float(handle, 1)?;
+//RS     let style = ui_decode_font_style(rt, rt.heap.record_get_record(handle, 2)?)?;
+//RS     Some(ui_rt::JetFontFace { family, size, style })
+//RS }
+//RS 
+//RS fn ui_push_glyph_run(
+//RS     rt: &mut crate::runtime_host::JitRuntime,
+//RS     run: ui_rt::JetGlyphRun,
+//RS ) -> i64 {
+//RS     let glyphs = rt.heap.alloc_empty_list();
+//RS     for glyph in &run.glyphs {
+//RS         let record = rt.heap.alloc_record(6);
+//RS         let _ = rt.heap.record_set_int(record, 0, glyph.id);
+//RS         let _ = rt.heap.record_set_int(record, 1, glyph.cluster);
+//RS         let _ = rt.heap.record_set_float(record, 2, glyph.x);
+//RS         let _ = rt.heap.record_set_float(record, 3, glyph.y);
+//RS         let _ = rt.heap.record_set_float(record, 4, glyph.advance_x);
+//RS         let _ = rt.heap.record_set_float(record, 5, glyph.advance_y);
+//RS         let _ = rt.heap.list_push_int(glyphs, record);
+//RS     }
+//RS     let shaper = ui_push_glyph_shaper(rt, run.shaper);
+//RS     let record = rt.heap.alloc_record(6);
+//RS     let _ = rt.heap.record_set_int(record, 0, glyphs);
+//RS     let _ = rt.heap.record_set_float(record, 1, run.advance_x);
+//RS     let _ = rt.heap.record_set_float(record, 2, run.advance_y);
+//RS     let _ = rt.heap.record_set_record(record, 3, shaper);
+//RS     let _ = rt.heap.record_set_bool(record, 4, run.deterministic);
+//RS     let _ = rt.heap.record_set_bool(record, 5, run.approximate);
+//RS     ui_store_value(rt, record, UiValue::GlyphRun(run))
+//RS }
+//RS 
+//RS fn jet_jit_font_system(style: i64) -> i64 {
+//RS     with_rt(|rt| {
+//RS         let Some(style) = ui_decode_font_style(rt, style) else {
+//RS             rt.set_host_fault("JIT font.system received an invalid FontStyle handle");
+//RS             return 0;
+//RS         };
+//RS         ui_push_font_face(rt, ui_rt::jet_font_system(style))
+//RS     })
+//RS }
+//RS 
+//RS fn jet_jit_font_shape(text: i64, face: i64) -> i64 {
+//RS     let Some((text, face)) = with_rt(|rt| {
+//RS         let Some(text) = rt.heap.clone_string(text) else {
+//RS             rt.set_host_fault("JIT font.shape received a non-string text handle");
+//RS             return None;
+//RS         };
+//RS         let Some(face) = ui_decode_font_face(rt, face) else {
+//RS             rt.set_host_fault("JIT font.shape received an invalid FontFace handle");
+//RS             return None;
+//RS         };
+//RS         Some((text, face))
+//RS     }) else {
+//RS         return 0;
+//RS     };
+//RS     let run = with_ui_host(|| {
+//RS         ui_rt::jet_ui_with_current_host(|host| host.shape_text(&text, &face))
+//RS     });
+//RS     let run = match run {
+//RS         Ok(run) => run,
+//RS         Err(error) => {
+//RS             with_rt(|rt| {
+//RS                 rt.set_host_fault(&format!("font shaping host contract failure: {error:?}"));
+//RS             });
+//RS             return 0;
+//RS         }
+//RS     };
+//RS     with_rt(|rt| ui_push_glyph_run(rt, run))
+//RS }
+//RS fn ambient_field<'a>(
+//RS     value: &'a CtValue,
+//RS     type_name: &str,
+//RS     field: &str,
+//RS     span: Span,
+//RS ) -> Result<&'a CtValue, Diagnostic> {
+//RS     let CtValue::Struct {
+//RS         type_name: actual,
+//RS         fields,
+//RS     } = value
+//RS     else {
+//RS         return Err(unsupported(
+//RS             &format!("{type_name} value expected for `{field}`"),
+//RS             span,
+//RS         ));
+//RS     };
+//RS     if actual != type_name {
+//RS         return Err(unsupported(
+//RS             &format!("expected {type_name}, got {actual}"),
+//RS             span,
+//RS         ));
+//RS     }
+//RS     fields
+//RS         .iter()
+//RS         .find_map(|(name, value)| (name == field).then_some(value))
+//RS         .ok_or_else(|| unsupported(&format!("malformed {type_name} value"), span))
+//RS }
+//RS 
+//RS fn ambient_font_style(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<ui_rt::JetFontStyle, Diagnostic> {
+//RS     let CtValue::Enum {
+//RS         type_name,
+//RS         variant,
+//RS         args,
+//RS     } = value
+//RS     else {
+//RS         return Err(unsupported("FontStyle value expected", span));
+//RS     };
+//RS     if type_name != "FontStyle" || !args.is_empty() {
+//RS         return Err(unsupported("FontStyle value expected", span));
+//RS     }
+//RS     match variant.as_str() {
+//RS         "Body" => Ok(ui_rt::JetFontStyle::Body),
+//RS         "Title" => Ok(ui_rt::JetFontStyle::Title),
+//RS         "Monospace" => Ok(ui_rt::JetFontStyle::Monospace),
+//RS         _ => Err(unsupported("unknown FontStyle variant", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_font_face(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<ui_rt::JetFontFace, Diagnostic> {
+//RS     let family = match ambient_field(value, "FontFace", "family", span)? {
+//RS         CtValue::Str(value) => value.clone(),
+//RS         _ => return Err(unsupported("FontFace.family must be String", span)),
+//RS     };
+//RS     let size = match ambient_field(value, "FontFace", "size", span)? {
+//RS         CtValue::Float(value) => value.as_f64(),
+//RS         _ => return Err(unsupported("FontFace.size must be Float", span)),
+//RS     };
+//RS     let style = ambient_font_style(ambient_field(value, "FontFace", "style", span)?, span)?;
+//RS     Ok(ui_rt::JetFontFace {
+//RS         family,
+//RS         size,
+//RS         style,
+//RS     })
+//RS }
+//RS 
+//RS fn ambient_font_style_value(style: ui_rt::JetFontStyle) -> CtValue {
+//RS     let variant = match style {
+//RS         ui_rt::JetFontStyle::Body => "Body",
+//RS         ui_rt::JetFontStyle::Title => "Title",
+//RS         ui_rt::JetFontStyle::Monospace => "Monospace",
+//RS     };
+//RS     CtValue::Enum {
+//RS         type_name: "FontStyle".to_string(),
+//RS         variant: variant.to_string(),
+//RS         args: Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_font_face_value(face: ui_rt::JetFontFace) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "FontFace".to_string(),
+//RS         fields: vec![
+//RS             ("family".to_string(), CtValue::Str(face.family)),
+//RS             ("size".to_string(), CtValue::Float(CtFloat::f64(face.size))),
+//RS             ("style".to_string(), ambient_font_style_value(face.style)),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_glyph_value(glyph: ui_rt::JetGlyph) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "Glyph".to_string(),
+//RS         fields: vec![
+//RS             ("id".to_string(), CtValue::Int(glyph.id)),
+//RS             ("cluster".to_string(), CtValue::Int(glyph.cluster)),
+//RS             ("x".to_string(), CtValue::Float(CtFloat::f64(glyph.x))),
+//RS             ("y".to_string(), CtValue::Float(CtFloat::f64(glyph.y))),
+//RS             (
+//RS                 "advance_x".to_string(),
+//RS                 CtValue::Float(CtFloat::f64(glyph.advance_x)),
+//RS             ),
+//RS             (
+//RS                 "advance_y".to_string(),
+//RS                 CtValue::Float(CtFloat::f64(glyph.advance_y)),
+//RS             ),
+//RS         ],
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_glyph_shaper_value(shaper: ui_rt::JetGlyphShaper) -> CtValue {
+//RS     let variant = match shaper {
+//RS         ui_rt::JetGlyphShaper::HarfBuzz => "HarfBuzz",
+//RS         ui_rt::JetGlyphShaper::HeadlessFallback => "HeadlessFallback",
+//RS     };
+//RS     CtValue::Enum {
+//RS         type_name: "GlyphShaper".to_string(),
+//RS         variant: variant.to_string(),
+//RS         args: Vec::new(),
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_glyph_run_value(run: ui_rt::JetGlyphRun) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: "GlyphRun".to_string(),
+//RS         fields: vec![
+//RS             (
+//RS                 "glyphs".to_string(),
+//RS                 CtValue::List(run.glyphs.into_iter().map(ambient_glyph_value).collect()),
+//RS             ),
+//RS             (
+//RS                 "advance_x".to_string(),
+//RS                 CtValue::Float(CtFloat::f64(run.advance_x)),
+//RS             ),
+//RS             (
+//RS                 "advance_y".to_string(),
+//RS                 CtValue::Float(CtFloat::f64(run.advance_y)),
+//RS             ),
+//RS             (
+//RS                 "shaper".to_string(),
+//RS                 ambient_glyph_shaper_value(run.shaper),
+//RS             ),
+//RS             ("deterministic".to_string(), CtValue::Bool(run.deterministic)),
+//RS             ("approximate".to_string(), CtValue::Bool(run.approximate)),
+//RS         ],
+//RS     }
+//RS }
+//RS fn ambient_absent(type_name: &str) -> CtValue {
+//RS     CtValue::absent(Box::new(Type::Named(type_name.to_string())))
+//RS }
+//RS 
+//RS fn ambient_optional<'a>(
+//RS     value: &'a CtValue,
+//RS     type_name: &str,
+//RS     span: Span,
+//RS ) -> Result<Option<&'a CtValue>, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Present(value) => Ok(Some(value)),
+//RS         value if value.is_clean_stop() => Ok(None),
+//RS         _ => Err(unsupported(
+//RS             &format!("expected optional {type_name} value"),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_string(value: &CtValue, type_name: &str, span: Span) -> Result<String, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Str(value) => Ok(value.clone()),
+//RS         _ => Err(unsupported(
+//RS             &format!("{type_name} value must be String"),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_int(value: &CtValue, type_name: &str, span: Span) -> Result<i64, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Int(value) => Ok(*value),
+//RS         _ => Err(unsupported(
+//RS             &format!("{type_name} value must be Int"),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_float(value: &CtValue, type_name: &str, span: Span) -> Result<f64, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Float(value) => Ok(value.as_f64()),
+//RS         _ => Err(unsupported(
+//RS             &format!("{type_name} value must be Float"),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_bool(value: &CtValue, type_name: &str, span: Span) -> Result<bool, Diagnostic> {
+//RS     match value {
+//RS         CtValue::Bool(value) => Ok(*value),
+//RS         _ => Err(unsupported(
+//RS             &format!("{type_name} value must be Bool"),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_list<'a>(
+//RS     value: &'a CtValue,
+//RS     type_name: &str,
+//RS     span: Span,
+//RS ) -> Result<&'a [CtValue], Diagnostic> {
+//RS     match value {
+//RS         CtValue::List(values) => Ok(values),
+//RS         _ => Err(unsupported(
+//RS             &format!("{type_name} value must be List"),
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_strings(
+//RS     value: &CtValue,
+//RS     type_name: &str,
+//RS     span: Span,
+//RS ) -> Result<Vec<String>, Diagnostic> {
+//RS     ambient_list(value, type_name, span)?
+//RS         .iter()
+//RS         .map(|value| ambient_string(value, type_name, span))
+//RS         .collect()
+//RS }
+//RS 
+//RS fn ambient_enum(
+//RS     value: &CtValue,
+//RS     type_name: &str,
+//RS     span: Span,
+//RS ) -> Result<String, Diagnostic> {
+//RS     let CtValue::Enum {
+//RS         type_name: actual,
+//RS         variant,
+//RS         args,
+//RS     } = value
+//RS     else {
+//RS         return Err(unsupported(&format!("{type_name} value expected"), span));
+//RS     };
+//RS     if actual != type_name || !args.is_empty() {
+//RS         return Err(unsupported(&format!("{type_name} value expected"), span));
+//RS     }
+//RS     Ok(variant.clone())
+//RS }
+//RS 
+//RS fn ambient_struct(
+//RS     type_name: &str,
+//RS     fields: Vec<(String, CtValue)>,
+//RS ) -> CtValue {
+//RS     CtValue::Struct {
+//RS         type_name: type_name.to_string(),
+//RS         fields,
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_enum_value(type_name: &str, variant: &str, args: Vec<(Option<String>, CtValue)>) -> CtValue {
+//RS     CtValue::Enum {
+//RS         type_name: type_name.to_string(),
+//RS         variant: variant.to_string(),
+//RS         args,
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_option_value(type_name: &str, value: Option<CtValue>) -> CtValue {
+//RS     value.map_or_else(
+//RS         || ambient_absent(type_name),
+//RS         |value| CtValue::Present(Box::new(value)),
+//RS     )
+//RS }
+//RS fn ambient_fs_access(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<ui_rt::JetUiFsAccess, Diagnostic> {
+//RS     match ambient_enum(value, "UIFSAccess", span)?.as_str() {
+//RS         "Read" => Ok(ui_rt::JetUiFsAccess::Read),
+//RS         "Write" => Ok(ui_rt::JetUiFsAccess::Write),
+//RS         _ => Err(unsupported("unknown UIFSAccess variant", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_fs_rights(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<ui_rt::JetUiFsRights, Diagnostic> {
+//RS     let bits = ambient_int(ambient_field(value, "UIFSRights", "bits", span)?, "UIFSRights.bits", span)?;
+//RS     let bits = u8::try_from(bits).map_err(|_| unsupported("UIFSRights.bits is out of range", span))?;
+//RS     Ok(ui_rt::JetUiFsRights::from_bits(bits))
+//RS }
+//RS 
+//RS fn ambient_node_id(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<ui_rt::JetUiNodeId, Diagnostic> {
+//RS     let value = ambient_string(
+//RS         ambient_field(value, "UINodeID", "value", span)?,
+//RS         "UINodeID.value",
+//RS         span,
+//RS     )?;
+//RS     ui_rt::JetUiNodeId::new(&value)
+//RS         .map_err(|_| unsupported("UINodeID value is invalid", span))
+//RS }
+//RS 
+//RS fn ambient_file_filter(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<ui_rt::JetUiFileFilter, Diagnostic> {
+//RS     let label = ambient_string(
+//RS         ambient_field(value, "UIFileFilter", "label", span)?,
+//RS         "UIFileFilter.label",
+//RS         span,
+//RS     )?;
+//RS     let extensions = ambient_strings(
+//RS         ambient_field(value, "UIFileFilter", "extensions", span)?,
+//RS         "UIFileFilter.extensions",
+//RS         span,
+//RS     )?;
+//RS     let mime_types = ambient_strings(
+//RS         ambient_field(value, "UIFileFilter", "mime_types", span)?,
+//RS         "UIFileFilter.mime_types",
+//RS         span,
+//RS     )?;
+//RS     ui_rt::JetUiFileFilter::new(&label, extensions, mime_types)
+//RS         .map_err(|error| unsupported(&format!("invalid UIFileFilter: {error:?}"), span))
+//RS }
+//RS 
+//RS fn ambient_granted_path(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<ui_rt::JetUiGrantedPath, Diagnostic> {
+//RS     let path = ambient_string(
+//RS         ambient_field(value, "UIGrantedPath", "path", span)?,
+//RS         "UIGrantedPath.path",
+//RS         span,
+//RS     )?;
+//RS     let grant_root = ambient_string(
+//RS         ambient_field(value, "UIGrantedPath", "grant_root", span)?,
+//RS         "UIGrantedPath.grant_root",
+//RS         span,
+//RS     )?;
+//RS     let access = ambient_fs_access(
+//RS         ambient_field(value, "UIGrantedPath", "access", span)?,
+//RS         span,
+//RS     )?;
+//RS     let grant = ui_rt::JetUiFsGrant::new(&grant_root, match access {
+//RS         ui_rt::JetUiFsAccess::Read => ui_rt::JetUiFsRights::read(),
+//RS         ui_rt::JetUiFsAccess::Write => ui_rt::JetUiFsRights::write(),
+//RS     })
+//RS     .map_err(|error| unsupported(&format!("invalid UIGrantedPath grant: {error:?}"), span))?;
+//RS     grant.scope(&path, access)
+//RS         .map_err(|error| unsupported(&format!("invalid UIGrantedPath: {error:?}"), span))
+//RS }
+//RS 
+//RS fn ambient_fs_grant(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<ui_rt::JetUiFsGrant, Diagnostic> {
+//RS     let root = ambient_string(
+//RS         ambient_field(value, "UIFSGrant", "root", span)?,
+//RS         "UIFSGrant.root",
+//RS         span,
+//RS     )?;
+//RS     let rights = ambient_fs_rights(
+//RS         ambient_field(value, "UIFSGrant", "rights", span)?,
+//RS         span,
+//RS     )?;
+//RS     ui_rt::JetUiFsGrant::new(&root, rights)
+//RS         .map_err(|error| unsupported(&format!("invalid UIFSGrant: {error:?}"), span))
+//RS }
+//RS 
+//RS fn ambient_file_request(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<ui_rt::JetUiFileDialogRequest, Diagnostic> {
+//RS     let kind = match ambient_enum(
+//RS         ambient_field(value, "UIFileDialogRequest", "kind", span)?,
+//RS         "UIFileDialogKind",
+//RS         span,
+//RS     )?
+//RS     .as_str()
+//RS     {
+//RS         "Open" => ui_rt::JetUiFileDialogKind::Open,
+//RS         "Save" => ui_rt::JetUiFileDialogKind::Save,
+//RS         _ => return Err(unsupported("unknown UIFileDialogKind variant", span)),
+//RS     };
+//RS     let title = ambient_string(
+//RS         ambient_field(value, "UIFileDialogRequest", "title", span)?,
+//RS         "UIFileDialogRequest.title",
+//RS         span,
+//RS     )?;
+//RS     let grant = ambient_fs_grant(
+//RS         ambient_field(value, "UIFileDialogRequest", "grant", span)?,
+//RS         span,
+//RS     )?;
+//RS     let initial_directory = ambient_optional(
+//RS         ambient_field(value, "UIFileDialogRequest", "initial_directory", span)?,
+//RS         "UIGrantedPath",
+//RS         span,
+//RS     )?
+//RS     .map(|value| ambient_granted_path(value, span))
+//RS     .transpose()?;
+//RS     let filters = ambient_list(
+//RS         ambient_field(value, "UIFileDialogRequest", "filters", span)?,
+//RS         "UIFileDialogRequest.filters",
+//RS         span,
+//RS     )?
+//RS     .iter()
+//RS     .map(|value| ambient_file_filter(value, span))
+//RS     .collect::<Result<Vec<_>, _>>()?;
+//RS     let allow_multiple = ambient_bool(
+//RS         ambient_field(value, "UIFileDialogRequest", "allow_multiple", span)?,
+//RS         "UIFileDialogRequest.allow_multiple",
+//RS         span,
+//RS     )?;
+//RS     let request = match kind {
+//RS         ui_rt::JetUiFileDialogKind::Open => ui_rt::JetUiFileDialogRequest::open(grant),
+//RS         ui_rt::JetUiFileDialogKind::Save => ui_rt::JetUiFileDialogRequest::save(grant),
+//RS     };
+//RS     Ok(ui_rt::JetUiFileDialogRequest {
+//RS         kind,
+//RS         title,
+//RS         grant: request.grant,
+//RS         initial_directory,
+//RS         filters,
+//RS         allow_multiple,
+//RS     })
+//RS }
+//RS 
+//RS fn ambient_shortcut_modifiers(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<ui_rt::JetUiShortcutModifiers, Diagnostic> {
+//RS     let bits = ambient_int(
+//RS         ambient_field(value, "UIShortcutModifiers", "bits", span)?,
+//RS         "UIShortcutModifiers.bits",
+//RS         span,
+//RS     )?;
+//RS     let bits = u8::try_from(bits)
+//RS         .map_err(|_| unsupported("UIShortcutModifiers.bits is out of range", span))?;
+//RS     Ok(ui_rt::JetUiShortcutModifiers::from_bits(bits))
+//RS }
+//RS 
+//RS fn ambient_shortcut(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<ui_rt::JetUiShortcut, Diagnostic> {
+//RS     let key = ambient_string(
+//RS         ambient_field(value, "UIShortcut", "key", span)?,
+//RS         "UIShortcut.key",
+//RS         span,
+//RS     )?;
+//RS     let modifiers = ambient_shortcut_modifiers(
+//RS         ambient_field(value, "UIShortcut", "modifiers", span)?,
+//RS         span,
+//RS     )?;
+//RS     ui_rt::JetUiShortcut::new(&key, modifiers)
+//RS         .map_err(|error| unsupported(&format!("invalid UIShortcut: {error:?}"), span))
+//RS }
+//RS 
+//RS fn ambient_shortcut_binding(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<ui_rt::JetUiShortcutBinding, Diagnostic> {
+//RS     let shortcut = ambient_shortcut(
+//RS         ambient_field(value, "UIShortcutBinding", "shortcut", span)?,
+//RS         span,
+//RS     )?;
+//RS     let action = ambient_string(
+//RS         ambient_field(value, "UIShortcutBinding", "action", span)?,
+//RS         "UIShortcutBinding.action",
+//RS         span,
+//RS     )?;
+//RS     let node = ambient_optional(
+//RS         ambient_field(value, "UIShortcutBinding", "node", span)?,
+//RS         "UINodeID",
+//RS         span,
+//RS     )?
+//RS     .map(|value| ambient_node_id(value, span))
+//RS     .transpose()?;
+//RS     ui_rt::JetUiShortcutBinding::new(shortcut, &action, node)
+//RS         .map_err(|error| unsupported(&format!("invalid UIShortcutBinding: {error:?}"), span))
+//RS }
+//RS 
+//RS fn ambient_accessibility_state(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<ui_rt::JetUiAccessibilityState, Diagnostic> {
+//RS     let CtValue::Enum {
+//RS         type_name,
+//RS         variant,
+//RS         args,
+//RS     } = value
+//RS     else {
+//RS         return Err(unsupported("UIAccessibilityState value expected", span));
+//RS     };
+//RS     if type_name != "UIAccessibilityState" {
+//RS         return Err(unsupported("UIAccessibilityState value expected", span));
+//RS     }
+//RS     match variant.as_str() {
+//RS         "Disabled" if args.is_empty() => Ok(ui_rt::JetUiAccessibilityState::Disabled),
+//RS         "Busy" if args.is_empty() => Ok(ui_rt::JetUiAccessibilityState::Busy),
+//RS         "Required" if args.is_empty() => Ok(ui_rt::JetUiAccessibilityState::Required),
+//RS         "Expanded" if args.len() == 1 => Ok(ui_rt::JetUiAccessibilityState::Expanded(
+//RS             ambient_bool(&args[0].1, "UIAccessibilityState.Expanded", span)?,
+//RS         )),
+//RS         "Checked" if args.len() == 1 => Ok(ui_rt::JetUiAccessibilityState::Checked(
+//RS             ambient_bool(&args[0].1, "UIAccessibilityState.Checked", span)?,
+//RS         )),
+//RS         "Selected" if args.len() == 1 => Ok(ui_rt::JetUiAccessibilityState::Selected(
+//RS             ambient_bool(&args[0].1, "UIAccessibilityState.Selected", span)?,
+//RS         )),
+//RS         "Value" if args.len() == 1 => Ok(ui_rt::JetUiAccessibilityState::Value(
+//RS             ambient_string(&args[0].1, "UIAccessibilityState.Value", span)?,
+//RS         )),
+//RS         _ => Err(unsupported(
+//RS             "unknown or malformed UIAccessibilityState variant",
+//RS             span,
+//RS         )),
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_accessibility(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<ui_rt::JetUiAccessibility, Diagnostic> {
+//RS     let name = ambient_optional(
+//RS         ambient_field(value, "UIAccessibility", "name", span)?,
+//RS         "String",
+//RS         span,
+//RS     )?
+//RS     .map(|value| ambient_string(value, "UIAccessibility.name", span))
+//RS     .transpose()?;
+//RS     let description = ambient_optional(
+//RS         ambient_field(value, "UIAccessibility", "description", span)?,
+//RS         "String",
+//RS         span,
+//RS     )?
+//RS     .map(|value| ambient_string(value, "UIAccessibility.description", span))
+//RS     .transpose()?;
+//RS     let states = ambient_list(
+//RS         ambient_field(value, "UIAccessibility", "states", span)?,
+//RS         "UIAccessibility.states",
+//RS         span,
+//RS     )?
+//RS     .iter()
+//RS     .map(|value| ambient_accessibility_state(value, span))
+//RS     .collect::<Result<Vec<_>, _>>()?;
+//RS     Ok(ui_rt::JetUiAccessibility {
+//RS         name,
+//RS         description,
+//RS         states,
+//RS     })
+//RS }
+//RS fn ambient_fs_access_value(access: ui_rt::JetUiFsAccess) -> CtValue {
+//RS     ambient_enum_value(
+//RS         "UIFSAccess",
+//RS         match access {
+//RS             ui_rt::JetUiFsAccess::Read => "Read",
+//RS             ui_rt::JetUiFsAccess::Write => "Write",
+//RS         },
+//RS         Vec::new(),
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_fs_rights_value(rights: ui_rt::JetUiFsRights) -> CtValue {
+//RS     ambient_struct(
+//RS         "UIFSRights",
+//RS         vec![("bits".to_string(), CtValue::Int(i64::from(rights.bits())))],
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_node_id_value(node_id: ui_rt::JetUiNodeId) -> CtValue {
+//RS     ambient_struct(
+//RS         "UINodeID",
+//RS         vec![("value".to_string(), CtValue::Str(node_id.as_str().to_string()))],
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_file_filter_value(filter: ui_rt::JetUiFileFilter) -> CtValue {
+//RS     ambient_struct(
+//RS         "UIFileFilter",
+//RS         vec![
+//RS             ("label".to_string(), CtValue::Str(filter.label)),
+//RS             (
+//RS                 "extensions".to_string(),
+//RS                 CtValue::List(filter.extensions.into_iter().map(CtValue::Str).collect()),
+//RS             ),
+//RS             (
+//RS                 "mime_types".to_string(),
+//RS                 CtValue::List(filter.mime_types.into_iter().map(CtValue::Str).collect()),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_granted_path_value(path: ui_rt::JetUiGrantedPath) -> CtValue {
+//RS     ambient_struct(
+//RS         "UIGrantedPath",
+//RS         vec![
+//RS             ("path".to_string(), CtValue::Str(path.path().to_string())),
+//RS             (
+//RS                 "grant_root".to_string(),
+//RS                 CtValue::Str(path.grant_root().to_string()),
+//RS             ),
+//RS             ("access".to_string(), ambient_fs_access_value(path.access())),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_fs_grant_value(grant: ui_rt::JetUiFsGrant) -> CtValue {
+//RS     ambient_struct(
+//RS         "UIFSGrant",
+//RS         vec![
+//RS             ("root".to_string(), CtValue::Str(grant.root().to_string())),
+//RS             ("rights".to_string(), ambient_fs_rights_value(grant.rights())),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_file_request_value(request: ui_rt::JetUiFileDialogRequest) -> CtValue {
+//RS     let kind = ambient_enum_value(
+//RS         "UIFileDialogKind",
+//RS         match request.kind {
+//RS             ui_rt::JetUiFileDialogKind::Open => "Open",
+//RS             ui_rt::JetUiFileDialogKind::Save => "Save",
+//RS         },
+//RS         Vec::new(),
+//RS     );
+//RS     let initial_directory = request
+//RS         .initial_directory
+//RS         .map(ambient_granted_path_value);
+//RS     ambient_struct(
+//RS         "UIFileDialogRequest",
+//RS         vec![
+//RS             ("kind".to_string(), kind),
+//RS             ("title".to_string(), CtValue::Str(request.title)),
+//RS             ("grant".to_string(), ambient_fs_grant_value(request.grant)),
+//RS             (
+//RS                 "initial_directory".to_string(),
+//RS                 ambient_option_value("UIGrantedPath", initial_directory),
+//RS             ),
+//RS             (
+//RS                 "filters".to_string(),
+//RS                 CtValue::List(
+//RS                     request
+//RS                         .filters
+//RS                         .into_iter()
+//RS                         .map(ambient_file_filter_value)
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS             ("allow_multiple".to_string(), CtValue::Bool(request.allow_multiple)),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_file_selection_value(selection: ui_rt::JetUiFileDialogSelection) -> CtValue {
+//RS     ambient_struct(
+//RS         "UIFileDialogSelection",
+//RS         vec![(
+//RS             "files".to_string(),
+//RS             CtValue::List(
+//RS                 selection
+//RS                     .files
+//RS                     .into_iter()
+//RS                     .map(ambient_granted_path_value)
+//RS                     .collect(),
+//RS             ),
+//RS         )],
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_text_range_value(range: ui_rt::JetUiTextRange) -> CtValue {
+//RS     ambient_struct(
+//RS         "UITextRange",
+//RS         vec![
+//RS             ("start".to_string(), CtValue::Int(i64::try_from(range.start).unwrap_or(i64::MAX))),
+//RS             ("end".to_string(), CtValue::Int(i64::try_from(range.end).unwrap_or(i64::MAX))),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_clipboard_text_value(value: ui_rt::JetUiClipboardText) -> CtValue {
+//RS     ambient_struct(
+//RS         "UIClipboardText",
+//RS         vec![
+//RS             ("text".to_string(), CtValue::Str(value.text)),
+//RS             (
+//RS                 "selection".to_string(),
+//RS                 ambient_option_value("UITextRange", value.selection.map(ambient_text_range_value)),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_clipboard_write_value(value: ui_rt::JetUiClipboardWrite) -> CtValue {
+//RS     ambient_struct(
+//RS         "UIClipboardWrite",
+//RS         vec![(
+//RS             "characters".to_string(),
+//RS             CtValue::Int(i64::try_from(value.characters).unwrap_or(i64::MAX)),
+//RS         )],
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_shortcut_modifiers_value(
+//RS     modifiers: ui_rt::JetUiShortcutModifiers,
+//RS ) -> CtValue {
+//RS     ambient_struct(
+//RS         "UIShortcutModifiers",
+//RS         vec![("bits".to_string(), CtValue::Int(i64::from(modifiers.bits())))],
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_shortcut_value(shortcut: ui_rt::JetUiShortcut) -> CtValue {
+//RS     ambient_struct(
+//RS         "UIShortcut",
+//RS         vec![
+//RS             ("key".to_string(), CtValue::Str(shortcut.key)),
+//RS             (
+//RS                 "modifiers".to_string(),
+//RS                 ambient_shortcut_modifiers_value(shortcut.modifiers),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_shortcut_binding_value(binding: ui_rt::JetUiShortcutBinding) -> CtValue {
+//RS     ambient_struct(
+//RS         "UIShortcutBinding",
+//RS         vec![
+//RS             (
+//RS                 "shortcut".to_string(),
+//RS                 ambient_shortcut_value(binding.shortcut),
+//RS             ),
+//RS             ("action".to_string(), CtValue::Str(binding.action)),
+//RS             (
+//RS                 "node".to_string(),
+//RS                 ambient_option_value("UINodeID", binding.node.map(ambient_node_id_value)),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_shortcut_dispatch_value(dispatch: ui_rt::JetUiShortcutDispatch) -> CtValue {
+//RS     match dispatch {
+//RS         ui_rt::JetUiShortcutDispatch::Dispatched(binding) => ambient_enum_value(
+//RS             "UIShortcutDispatch",
+//RS             "Dispatched",
+//RS             vec![(None, ambient_shortcut_binding_value(binding))],
+//RS         ),
+//RS         ui_rt::JetUiShortcutDispatch::Unhandled => {
+//RS             ambient_enum_value("UIShortcutDispatch", "Unhandled", Vec::new())
+//RS         }
+//RS     }
+//RS }
+//RS fn ambient_ime_mode(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<ui_rt::JetUiImeMode, Diagnostic> {
+//RS     match ambient_enum(value, "UIIMEMode", span)?.as_str() {
+//RS         "Native" => Ok(ui_rt::JetUiImeMode::Native),
+//RS         "Disabled" => Ok(ui_rt::JetUiImeMode::Disabled),
+//RS         _ => Err(unsupported("unknown UIIMEMode variant", span)),
+//RS     }
+//RS }
+//RS fn ambient_ime_mode_value(mode: ui_rt::JetUiImeMode) -> CtValue {
+//RS     ambient_enum_value(
+//RS         "UIIMEMode",
+//RS         match mode {
+//RS             ui_rt::JetUiImeMode::Native => "Native",
+//RS             ui_rt::JetUiImeMode::Disabled => "Disabled",
+//RS         },
+//RS         Vec::new(),
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_aria_role(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<ui_rt::JetUiAriaRole, Diagnostic> {
+//RS     match ambient_enum(value, "UIAriaRole", span)?.as_str() {
+//RS         "Button" => Ok(ui_rt::JetUiAriaRole::Button),
+//RS         "TextInput" => Ok(ui_rt::JetUiAriaRole::TextInput),
+//RS         "Label" => Ok(ui_rt::JetUiAriaRole::Label),
+//RS         "Container" => Ok(ui_rt::JetUiAriaRole::Container),
+//RS         _ => Err(unsupported("unknown UIAriaRole variant", span)),
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_node(
+//RS     value: &CtValue,
+//RS     span: Span,
+//RS ) -> Result<ui_rt::JetUiNode, Diagnostic> {
+//RS     let label = ambient_string(
+//RS         ambient_field(value, "UINode", "label", span)?,
+//RS         "UINode.label",
+//RS         span,
+//RS     )?;
+//RS     let width = ambient_float(
+//RS         ambient_field(value, "UINode", "width", span)?,
+//RS         "UINode.width",
+//RS         span,
+//RS     )?;
+//RS     let height = ambient_float(
+//RS         ambient_field(value, "UINode", "height", span)?,
+//RS         "UINode.height",
+//RS         span,
+//RS     )?;
+//RS     let role = ambient_optional(
+//RS         ambient_field(value, "UINode", "role", span)?,
+//RS         "UIAriaRole",
+//RS         span,
+//RS     )?
+//RS     .map(|value| ambient_aria_role(value, span))
+//RS     .transpose()?;
+//RS     let accessibility = ambient_optional(
+//RS         ambient_field(value, "UINode", "accessibility", span)?,
+//RS         "UIAccessibility",
+//RS         span,
+//RS     )?
+//RS     .map(|value| ambient_accessibility(value, span))
+//RS     .transpose()?;
+//RS     let ime = ambient_optional(
+//RS         ambient_field(value, "UINode", "ime", span)?,
+//RS         "UIIMEMode",
+//RS         span,
+//RS     )?
+//RS     .map(|value| ambient_ime_mode(value, span))
+//RS     .transpose()?;
+//RS     let color = ambient_optional(
+//RS         ambient_field(value, "UINode", "color", span)?,
+//RS         "String",
+//RS         span,
+//RS     )?
+//RS     .map(|value| ambient_string(value, "UINode.color", span))
+//RS     .transpose()?;
+//RS     let kind = match ambient_enum(
+//RS         ambient_field(value, "UINode", "kind", span)?,
+//RS         "UINodeKind",
+//RS         span,
+//RS     )?
+//RS     .as_str()
+//RS     {
+//RS         "Custom" => ui_rt::JetUiNodeKind::Custom,
+//RS         "Text" => ui_rt::JetUiNodeKind::Text,
+//RS         "Box" => ui_rt::JetUiNodeKind::Box,
+//RS         "Button" => ui_rt::JetUiNodeKind::Button,
+//RS         "TextInput" => ui_rt::JetUiNodeKind::TextInput,
+//RS         _ => return Err(unsupported("unknown UINodeKind variant", span)),
+//RS     };
+//RS     let children = ambient_list(
+//RS         ambient_field(value, "UINode", "children", span)?,
+//RS         "UINode.children",
+//RS         span,
+//RS     )?
+//RS     .iter()
+//RS     .map(|value| ambient_node(value, span))
+//RS     .collect::<Result<Vec<_>, _>>()?;
+//RS     let shortcut = ambient_optional(
+//RS         ambient_field(value, "UINode", "shortcut", span)?,
+//RS         "UIShortcut",
+//RS         span,
+//RS     )?
+//RS     .map(|value| ambient_shortcut(value, span))
+//RS     .transpose()?;
+//RS     Ok(ui_rt::JetUiNode {
+//RS         label,
+//RS         width,
+//RS         height,
+//RS         role,
+//RS         accessibility,
+//RS         ime,
+//RS         color,
+//RS         style: None,
+//RS         kind,
+//RS         children,
+//RS         key: None,
+//RS         on_click: None,
+//RS         on_drop: None,
+//RS         shortcut,
+//RS     })
+//RS }
+//RS fn ambient_accessibility_state_value(
+//RS     state: ui_rt::JetUiAccessibilityState,
+//RS ) -> CtValue {
+//RS     let (variant, args) = match state {
+//RS         ui_rt::JetUiAccessibilityState::Disabled => ("Disabled", Vec::new()),
+//RS         ui_rt::JetUiAccessibilityState::Busy => ("Busy", Vec::new()),
+//RS         ui_rt::JetUiAccessibilityState::Required => ("Required", Vec::new()),
+//RS         ui_rt::JetUiAccessibilityState::Expanded(value) => {
+//RS             ("Expanded", vec![(None, CtValue::Bool(value))])
+//RS         }
+//RS         ui_rt::JetUiAccessibilityState::Checked(value) => {
+//RS             ("Checked", vec![(None, CtValue::Bool(value))])
+//RS         }
+//RS         ui_rt::JetUiAccessibilityState::Selected(value) => {
+//RS             ("Selected", vec![(None, CtValue::Bool(value))])
+//RS         }
+//RS         ui_rt::JetUiAccessibilityState::Value(value) => {
+//RS             ("Value", vec![(None, CtValue::Str(value))])
+//RS         }
+//RS     };
+//RS     ambient_enum_value("UIAccessibilityState", variant, args)
+//RS }
+//RS 
+//RS fn ambient_accessibility_value(value: ui_rt::JetUiAccessibility) -> CtValue {
+//RS     ambient_struct(
+//RS         "UIAccessibility",
+//RS         vec![
+//RS             (
+//RS                 "name".to_string(),
+//RS                 ambient_option_value("String", value.name.map(CtValue::Str)),
+//RS             ),
+//RS             (
+//RS                 "description".to_string(),
+//RS                 ambient_option_value("String", value.description.map(CtValue::Str)),
+//RS             ),
+//RS             (
+//RS                 "states".to_string(),
+//RS                 CtValue::List(
+//RS                     value
+//RS                         .states
+//RS                         .into_iter()
+//RS                         .map(ambient_accessibility_state_value)
+//RS                         .collect(),
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_capability_value(capability: ui_rt::JetUiCapability) -> CtValue {
+//RS     ambient_enum_value(
+//RS         "UICapability",
+//RS         match capability {
+//RS             ui_rt::JetUiCapability::FileDialog => "FileDialog",
+//RS             ui_rt::JetUiCapability::Clipboard => "Clipboard",
+//RS             ui_rt::JetUiCapability::IME => "IME",
+//RS             ui_rt::JetUiCapability::DragDrop => "DragDrop",
+//RS             ui_rt::JetUiCapability::Shortcuts => "Shortcuts",
+//RS             ui_rt::JetUiCapability::Accessibility => "Accessibility",
+//RS             ui_rt::JetUiCapability::FontShaping => "FontShaping",
+//RS         },
+//RS         Vec::new(),
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_capability_facts_value(facts: ui_rt::JetUiCapabilityFacts) -> CtValue {
+//RS     let facts = facts
+//RS         .to_facts()
+//RS         .into_iter()
+//RS         .map(|fact| {
+//RS             ambient_struct(
+//RS                 "UICapabilityFact",
+//RS                 vec![
+//RS                     ("capability".to_string(), ambient_capability_value(fact.capability)),
+//RS                     ("granted".to_string(), CtValue::Bool(fact.granted)),
+//RS                 ],
+//RS             )
+//RS         })
+//RS         .collect();
+//RS     ambient_struct("UICapabilityFacts", vec![("facts".to_string(), CtValue::List(facts))])
+//RS }
+//RS 
+//RS fn ambient_node_value(node: ui_rt::JetUiNode) -> CtValue {
+//RS     let children = node
+//RS         .children
+//RS         .into_iter()
+//RS         .map(ambient_node_value)
+//RS         .collect();
+//RS     let role = node.role.map(|role| {
+//RS         ambient_enum_value(
+//RS             "UIAriaRole",
+//RS             match role {
+//RS                 ui_rt::JetUiAriaRole::Button => "Button",
+//RS                 ui_rt::JetUiAriaRole::TextInput => "TextInput",
+//RS                 ui_rt::JetUiAriaRole::Label => "Label",
+//RS                 ui_rt::JetUiAriaRole::Container => "Container",
+//RS             },
+//RS             Vec::new(),
+//RS         )
+//RS     });
+//RS     let kind = ambient_enum_value(
+//RS         "UINodeKind",
+//RS         match node.kind {
+//RS             ui_rt::JetUiNodeKind::Custom => "Custom",
+//RS             ui_rt::JetUiNodeKind::Text => "Text",
+//RS             ui_rt::JetUiNodeKind::Box => "Box",
+//RS             ui_rt::JetUiNodeKind::Button => "Button",
+//RS             ui_rt::JetUiNodeKind::TextInput => "TextInput",
+//RS         },
+//RS         Vec::new(),
+//RS     );
+//RS     ambient_struct(
+//RS         "UINode",
+//RS         vec![
+//RS             ("label".to_string(), CtValue::Str(node.label)),
+//RS             ("width".to_string(), CtValue::Float(CtFloat::f64(node.width))),
+//RS             ("height".to_string(), CtValue::Float(CtFloat::f64(node.height))),
+//RS             (
+//RS                 "role".to_string(),
+//RS                 ambient_option_value("UIAriaRole", role),
+//RS             ),
+//RS             (
+//RS                 "accessibility".to_string(),
+//RS                 ambient_option_value(
+//RS                     "UIAccessibility",
+//RS                     node.accessibility.map(ambient_accessibility_value),
+//RS                 ),
+//RS             ),
+//RS             (
+//RS                 "ime".to_string(),
+//RS                 ambient_option_value("UIIMEMode", node.ime.map(ambient_ime_mode_value)),
+//RS             ),
+//RS             (
+//RS                 "color".to_string(),
+//RS                 ambient_option_value("String", node.color.map(CtValue::Str)),
+//RS             ),
+//RS             ("kind".to_string(), kind),
+//RS             ("children".to_string(), CtValue::List(children)),
+//RS             (
+//RS                 "shortcut".to_string(),
+//RS                 ambient_option_value("UIShortcut", node.shortcut.map(ambient_shortcut_value)),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_ime_phase_value(phase: ui_rt::JetUiImePhase) -> CtValue {
+//RS     ambient_enum_value(
+//RS         "UIIMEPhase",
+//RS         match phase {
+//RS             ui_rt::JetUiImePhase::Start => "Start",
+//RS             ui_rt::JetUiImePhase::Update => "Update",
+//RS             ui_rt::JetUiImePhase::Commit => "Commit",
+//RS             ui_rt::JetUiImePhase::Cancel => "Cancel",
+//RS         },
+//RS         Vec::new(),
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_ime_composition_value(
+//RS     value: ui_rt::JetUiImeComposition,
+//RS ) -> CtValue {
+//RS     ambient_struct(
+//RS         "UIIMEComposition",
+//RS         vec![
+//RS             ("text".to_string(), CtValue::Str(value.text)),
+//RS             (
+//RS                 "selection".to_string(),
+//RS                 ambient_text_range_value(value.selection),
+//RS             ),
+//RS             (
+//RS                 "marked".to_string(),
+//RS                 ambient_option_value("UITextRange", value.marked.map(ambient_text_range_value)),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_ime_event_value(value: ui_rt::JetUiImeEvent) -> CtValue {
+//RS     ambient_struct(
+//RS         "UIIMEEvent",
+//RS         vec![
+//RS             ("target".to_string(), ambient_node_id_value(value.target)),
+//RS             ("phase".to_string(), ambient_ime_phase_value(value.phase)),
+//RS             (
+//RS                 "composition".to_string(),
+//RS                 ambient_option_value(
+//RS                     "UIIMEComposition",
+//RS                     value.composition.map(ambient_ime_composition_value),
+//RS                 ),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_drag_phase_value(phase: ui_rt::JetUiDragPhase) -> CtValue {
+//RS     ambient_enum_value(
+//RS         "UIDragPhase",
+//RS         match phase {
+//RS             ui_rt::JetUiDragPhase::Enter => "Enter",
+//RS             ui_rt::JetUiDragPhase::Over => "Over",
+//RS             ui_rt::JetUiDragPhase::Drop => "Drop",
+//RS             ui_rt::JetUiDragPhase::Leave => "Leave",
+//RS             ui_rt::JetUiDragPhase::Cancel => "Cancel",
+//RS         },
+//RS         Vec::new(),
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_drag_operation_value(operation: ui_rt::JetUiDragOperation) -> CtValue {
+//RS     ambient_enum_value(
+//RS         "UIDragOperation",
+//RS         match operation {
+//RS             ui_rt::JetUiDragOperation::Copy => "Copy",
+//RS             ui_rt::JetUiDragOperation::Move => "Move",
+//RS             ui_rt::JetUiDragOperation::Link => "Link",
+//RS         },
+//RS         Vec::new(),
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_drop_item_value(item: ui_rt::JetUiDropItem) -> CtValue {
+//RS     match item {
+//RS         ui_rt::JetUiDropItem::Text(value) => ambient_enum_value(
+//RS             "UIDropItem",
+//RS             "Text",
+//RS             vec![(None, CtValue::Str(value))],
+//RS         ),
+//RS         ui_rt::JetUiDropItem::URI(value) => ambient_enum_value(
+//RS             "UIDropItem",
+//RS             "URI",
+//RS             vec![(None, CtValue::Str(value))],
+//RS         ),
+//RS         ui_rt::JetUiDropItem::File(value) => ambient_enum_value(
+//RS             "UIDropItem",
+//RS             "File",
+//RS             vec![(None, ambient_granted_path_value(value))],
+//RS         ),
+//RS     }
+//RS }
+//RS 
+//RS fn ambient_drag_event_value(value: ui_rt::JetUiDragEvent) -> CtValue {
+//RS     ambient_struct(
+//RS         "UIDragEvent",
+//RS         vec![
+//RS             ("target".to_string(), ambient_node_id_value(value.target)),
+//RS             ("phase".to_string(), ambient_drag_phase_value(value.phase)),
+//RS             (
+//RS                 "operation".to_string(),
+//RS                 ambient_drag_operation_value(value.operation),
+//RS             ),
+//RS             (
+//RS                 "items".to_string(),
+//RS                 CtValue::List(value.items.into_iter().map(ambient_drop_item_value).collect()),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_projection_value(
+//RS     projection: ui_rt::JetUiAccessibilityProjection,
+//RS ) -> CtValue {
+//RS     ambient_struct(
+//RS         "UIAccessibilityProjection",
+//RS         vec![
+//RS             ("node".to_string(), ambient_node_id_value(projection.node().clone())),
+//RS             (
+//RS                 "metadata".to_string(),
+//RS                 ambient_accessibility_value(projection.metadata().clone()),
+//RS             ),
+//RS         ],
+//RS     )
+//RS }
+//RS 
+//RS fn ambient_ui_cancellation_value(reason: ui_rt::JetUiCancellation) -> CtValue {
+//RS     ambient_enum_value(
+//RS         "UICancellation",
+//RS         match reason {
+//RS             ui_rt::JetUiCancellation::User => "User",
+//RS             ui_rt::JetUiCancellation::Closed => "Closed",
+//RS             ui_rt::JetUiCancellation::Headless => "Headless",
+//RS             ui_rt::JetUiCancellation::Superseded => "Superseded",
+//RS             ui_rt::JetUiCancellation::Programmatic => "Programmatic",
+//RS         },
+//RS         Vec::new(),
+//RS     )
+//RS }
+//RS 
+// END-PORT-PENDING 0235 crates/jet-jit/src/Ui.rs:1-1794
+

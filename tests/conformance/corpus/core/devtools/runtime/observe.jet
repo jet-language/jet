@@ -1,0 +1,225 @@
+// RT222 typed REAL-source policy corpus. Native registry/producer tests remain
+// tests/event_observations.rs unchanged until real ABI/producer cutover.
+use core.devtools.runtime.observe as observe_policy
+use jet_foundation.Devtools.LiveValue as observe_decision
+use core.text.runtime.kernel_unicode_string as observe_test_text
+
+fn observe_test_task(state: String, wait: String, cancelled: Bool) -> observe_policy.JetObserveTask Never! {
+    observe_policy.JetObserveTask{parent: U64{1}, label: "child", spawn_site: U64{7}, state: state, wait: wait, deadline_ms: None, cancelled: cancelled}
+}
+fn observe_test_event(sequence: U64) -> observe_policy.JetObserveEvent Never! {
+    observe_policy.JetObserveEvent{sequence: sequence, source: "AsyncEvent", event_id: U64{2}, owner_id: U64{3}, subscription_id: U64{4}, dispatch_id: U64{5}, lifecycle: "HandlerFailed", queued: I64{-1}, blocked: I64{1}, running: I64{2}, capacity: I64{3}, overflow: "DropOldest", priority: I64{-9}, failure: "Panic", terminal: "HandlerFailed"}
+}
+fn observe_test_value(id: String, rendered: String?) -> observe_decision.JetLiveValueDecision Never! {
+    observe_decision.JetLiveValueDecision{value_id: id, type_identity: "String", disposition: "kept", reason: "explicit", rendered_value: rendered}
+}
+fn observe_test_scalars(cp: Int, count: Int) -> String Never! {
+    out := [U8]{}
+    loop i in 0..<count -> observe_test_text.append_cp(&out, cp)
+    String.from_bytes(out) ?? panic("test scalars")
+}
+
+#Test("Observe escape is exactly 160 input scalars, not bytes or output length") {
+    carriage :: observe_test_scalars(13, 1)
+    mixed :: "\"\\\n{carriage}\t"
+    assert(observe_policy.jet_observe_escape(mixed) == "\\\"\\\\   ")
+    prefix :: observe_test_scalars(128512, 159)
+    input :: "{prefix}\"LEAK"
+    expected :: "{prefix}\\\""
+    assert(observe_policy.jet_observe_escape(input) == expected)
+    quotes :: observe_test_scalars(34, 161)
+    escaped :: observe_policy.jet_observe_escape(quotes)
+    assert(escaped.len() == 320)
+    controls :: [Int]{0, 9, 10, 13, 31, 127, 128, 159}
+    loop cp in controls -> assert(observe_policy.jet_observe_escape(observe_test_scalars(cp, 1)) == " ")
+    non_controls :: [Int]{32, 160, 173, 8203, 8232, 8233, 769, 128512, 1114111}
+    loop cp in non_controls {
+        text :: observe_test_scalars(cp, 1)
+        assert(observe_policy.jet_observe_escape(text) == text)
+    }
+    assert(observe_policy.jet_observe_escape("") == "")
+}
+#Test("Observe requires all explicit identity components and exact enable spelling") {
+    assert(observe_policy.jet_observe_identity_valid("s", "o", "b", "r", "w"))
+    assert(!observe_policy.jet_observe_identity_valid("", "o", "b", "r", "w"))
+    assert(!observe_policy.jet_observe_identity_valid("s", "o", "b", "r\n", "w"))
+    assert(observe_policy.jet_observe_identity_valid(" ", "o", "b", "r", "w"))
+    assert(!observe_policy.jet_observe_env_identity_valid(Val("s"), Val("o"), Val("b"), Val("r"), None))
+    assert(observe_policy.jet_observe_env_identity_valid(Val("s"), Val("o"), Val("b"), Val("r"), Val("w")))
+    assert(observe_policy.jet_observe_live_enabled(Val("1")))
+    assert(!observe_policy.jet_observe_live_enabled(Val("true")))
+    assert(!observe_policy.jet_observe_live_enabled(Val(" 1")))
+    assert(!observe_policy.jet_observe_live_enabled(None))
+    boundary :: observe_test_scalars(128512, 4096)
+    assert(observe_policy.jet_observe_relay_value_valid(boundary))
+    assert(!observe_policy.jet_observe_relay_value_valid("{boundary}a"))
+    assert(!observe_policy.jet_observe_relay_value_valid(""))
+}
+#Test("Observe emits exact 15 payload-free event fields in original order") {
+    event :: observe_test_event(U64{18446744073709551615})
+    expected :: "{{\"sequence\":18446744073709551615,\"source\":\"AsyncEvent\",\"event_id\":2,\"owner_id\":3,\"subscription_id\":4,\"dispatch_id\":5,\"lifecycle\":\"HandlerFailed\",\"queued\":-1,\"blocked\":1,\"running\":2,\"capacity\":3,\"overflow\":\"DropOldest\",\"priority\":-9,\"failure\":\"Panic\",\"terminal\":\"HandlerFailed\"}}"
+    assert(observe_policy.jet_observe_event_json(event) == expected)
+    rows := [observe_policy.JetObserveEvent]{}
+    loop i in 0..<300 -> &rows.push(observe_test_event(U64{i + 1}))
+    projected :: observe_policy.jet_observe_events_json(rows)
+    expected_first :: observe_policy.jet_observe_event_json(observe_test_event(U64{45}))
+    expected_last :: observe_policy.jet_observe_event_json(observe_test_event(U64{300}))
+    assert(projected.starts_with("{expected_first},"))
+    assert(projected.ends_with(",{expected_last}"))
+    reversed :: [observe_policy.JetObserveEvent]{observe_test_event(U64{9}), observe_test_event(U64{2})}
+    first_reversed :: observe_policy.jet_observe_event_json(reversed[0])
+    last_reversed :: observe_policy.jet_observe_event_json(reversed[1])
+    expected_order :: "{first_reversed},{last_reversed}"
+    assert(observe_policy.jet_observe_events_json(reversed) == expected_order)
+    assert(observe_policy.jet_observe_events_json([observe_policy.JetObserveEvent]{}) == "")
+}
+#Test("Observe sorts and caps task/channel facts; overlapping categories after cap") {
+    tasks := [U64: observe_policy.JetObserveTask]{}
+    tasks[U64{8}] = observe_test_task("running", "", false)
+    tasks[U64{4}] = observe_test_task("blocked", "channel tcp #2", true)
+    tasks[U64{3}] = observe_test_task("blocked", "time 10ms", false)
+    tasks[U64{2}] = observe_test_task("blocked", "io disk", false)
+    tasks[U64{1}] = observe_test_task("queued", "network", false)
+    result :: observe_policy.jet_observe_tasks_json(tasks)
+    assert(result.compute == 2 && result.waiting == 3 && result.channel == 1 && result.time == 1 && result.io == 2 && result.running == 1 && result.cancelled == 1)
+    assert(result.json.starts_with(observe_policy.jet_observe_task_json(U64{1}, tasks[U64{1}])))
+    assert(result.json.ends_with(observe_policy.jet_observe_task_json(U64{8}, tasks[U64{8}])))
+    bounded := [U64: observe_policy.JetObserveTask]{}
+    loop i in 0..<4097 -> bounded[U64{4097 - i}] = observe_test_task("running", "", false)
+    bounded[U64{4097}] = observe_test_task("blocked", "time ignored", true)
+    capped :: observe_policy.jet_observe_tasks_json(bounded)
+    assert(capped.compute == 4096 && capped.waiting == 0 && capped.running == 4096 && capped.cancelled == 0)
+    channels := [U64: observe_policy.JetObserveChannel]{}
+    row :: observe_policy.JetObserveChannel{depth: U64{2}, capacity: None, send_waiters: U64{3}, recv_waiters: U64{4}, closed: true}
+    loop i in 0..<4097 -> channels[U64{4097 - i}] = row
+    projected :: observe_policy.jet_observe_channels_json(channels)
+    first :: observe_policy.jet_observe_channel_json(U64{1}, row)
+    last :: observe_policy.jet_observe_channel_json(U64{4096}, row)
+    assert(projected.starts_with("{first},") && projected.ends_with(",{last}"))
+    assert(!projected.contains("\"id\":4097,"))
+    expected_channel :: "{{\"id\":1,\"depth\":2,\"capacity\":null,\"send_waiters\":3,\"recv_waiters\":4,\"closed\":true}}"
+    assert(first == expected_channel)
+}
+#Test("Observe whole Foundation value decisions replace at capacity, sorted and escaped") {
+    values := [String: observe_decision.JetLiveValueDecision]{}
+    loop i in 0..<4096 {
+        key :: "v{i}"
+        observe_policy.jet_observe_store_value(&values, observe_test_value(key, None))
+    }
+    observe_policy.jet_observe_store_value(&values, observe_test_value("extra", Val("NO")))
+    assert(!values.has_key("extra") && values.len() == 4096)
+    observe_policy.jet_observe_store_value(&values, observe_test_value("v0", Val("yes\n\"")))
+    expected :: "{{\"value_id\":\"v0\",\"type_identity\":\"String\",\"disposition\":\"kept\",\"reason\":\"explicit\",\"rendered_value\":\"yes \\\"\"}}"
+    assert(observe_policy.jet_observe_value_json(values["v0"]) == expected)
+    small := [String: observe_decision.JetLiveValueDecision]{}
+    small["z"] = observe_test_value("z", None)
+    small["a"] = observe_test_value("a", None)
+    first_value :: observe_policy.jet_observe_value_json(small["a"])
+    last_value :: observe_policy.jet_observe_value_json(small["z"])
+    order :: "{first_value},{last_value}"
+    assert(observe_policy.jet_observe_values_json(small) == order)
+}
+#Test("Observe ledger is exact bounded brace/control policy, not a second decoder") {
+    ledger := Val("{{old}}")
+    observe_policy.jet_observe_store_decision_ledger(&ledger, "{{not-json}}")
+    expected_ledger :: Val("{{not-json}}")
+    assert(ledger == expected_ledger)
+    observe_policy.jet_observe_store_decision_ledger(&ledger, "{{\n}}")
+    assert(ledger == expected_ledger)
+    assert(!observe_policy.jet_observe_decision_ledger_valid(" {{}}"))
+    content :: observe_test_scalars(97, 524286)
+    exact :: "{{{content}}}"
+    assert(observe_policy.jet_observe_decision_ledger_valid(exact))
+    too_long :: observe_test_scalars(97, 524287)
+    assert(!observe_policy.jet_observe_decision_ledger_valid("{{{too_long}}}"))
+}
+#Test("Observe complete snapshot source framing, exact widths and optional nulls") {
+    tasks :: [U64: observe_policy.JetObserveTask]{}
+    channels :: [U64: observe_policy.JetObserveChannel]{}
+    events :: [observe_policy.JetObserveEvent]{}
+    values :: [String: observe_decision.JetLiveValueDecision]{}
+    facts :: observe_policy.JetObserveNativeFacts{pid: U64{42}, start_id: "start", captured_ms: 18446744073709551616, workers: U64{2}, queued: U64{3}, arenas: U64{4}, arena_allocations: U64{5}, arena_bytes: U64{6}, elapsed_ns: U64{18446744073709551615}, started_cpu_ns: None, now_cpu_ns: None, exit: true}
+    text :: observe_policy.jet_observe_snapshot(Val("s"), Val("o"), Val("b"), Val("r"), Val("w"), tasks, channels, events, values, None, facts) ?? panic("snapshot")
+    expected :: "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"s\",\"source_id\":\"o\",\"build_id\":\"b\",\"revision\":\"r\",\"world_id\":\"w\",\"decisions\":null,\"values\":[],\"schema_version\":1,\"pid\":42,\"start_id\":\"start\",\"captured_ms\":18446744073709551616,\"tasks\":[],\"channels\":[],\"event_observations\":[],\"effects\":{{\"compute\":0,\"waiting\":0,\"channel\":0,\"time\":0,\"io\":0}},\"resources\":{{\"workers\":2,\"running\":0,\"queued\":3,\"cancelled\":0,\"arenas\":4,\"arena_allocations\":5,\"arena_bytes\":6}},\"runtime\":{{\"elapsed_ns\":18446744073709551615,\"cpu_ns\":null,\"exit\":true}}}}"
+    assert(text == expected)
+    assert(observe_policy.jet_observe_snapshot(None, Val("o"), Val("b"), Val("r"), Val("w"), tasks, channels, events, values, None, facts) == None)
+    zero :: Val(U64{0})
+    two :: Val(U64{2})
+    assert(observe_policy.jet_observe_cpu_delta(Val(U64{9}), Val(U64{7})) == zero)
+    assert(observe_policy.jet_observe_cpu_delta(Val(U64{7}), Val(U64{9})) == two)
+    assert(observe_policy.jet_observe_cpu_delta(None, Val(U64{9})) == None)
+    assert(observe_policy.jet_observe_cpu_delta(Val(U64{9}), None) == None)
+    exact :: observe_test_scalars(128512, 262144)
+    assert(observe_policy.jet_observe_snapshot_fits(exact))
+    assert(!observe_policy.jet_observe_snapshot_fits("{exact}a"))
+    frame_limit :: Val((b0: U8{0}, b1: U8{64}, b2: U8{0}, b3: U8{0}))
+    assert(observe_policy.jet_observe_relay_frame_header(U64{4194304}) == frame_limit)
+    assert(observe_policy.jet_observe_relay_frame_header(U64{4194305}) == None)
+    frame_258 :: Val((b0: U8{0}, b1: U8{0}, b2: U8{1}, b3: U8{2}))
+    assert(observe_policy.jet_observe_relay_frame_header(U64{258}) == frame_258)
+}
+#Test("Observe bounded task metadata and parked report use scalar and byte policies") {
+    row := observe_test_task("queued", "", false)
+    observe_policy.jet_observe_task_set_label(&row, U64{0}, "ignored")
+    assert(row.label == "child")
+    observe_policy.jet_observe_task_set_label(&row, U64{1}, " \t ")
+    assert(row.label == "child")
+    long :: observe_test_scalars(128512, 161)
+    observe_policy.jet_observe_task_set_label(&row, U64{1}, long)
+    assert(row.label.len() == 160)
+    deadline :: Val(I64{-7})
+    observe_policy.jet_observe_task_update(&row, "blocked", long, deadline)
+    assert(row.wait.len() == 160 && row.deadline_ms == deadline)
+    identity :: observe_policy.jet_observe_task_identity(U64{2}, Val(row))
+    label :: observe_test_scalars(128512, 160)
+    expected_identity :: "{label} (spawn site 7)"
+    assert(identity == expected_identity)
+    assert(observe_policy.jet_observe_task_identity(U64{99}, None) == "task #99")
+    assert(observe_policy.jet_observe_task_failure_message_for_identity("task #99", "reason") == "task #99: reason")
+    tasks := [U64: observe_policy.JetObserveTask]{}
+    tasks[U64{2}] = observe_test_task("blocked", "", false)
+    report :: observe_policy.jet_observe_parked_details(tasks)
+    assert(report == "\n  child (spawn site 7)\n    state: blocked\n    wait target: unknown")
+    loop i in 0..<200 -> tasks[U64{i + 3}] = row
+    bounded :: observe_policy.jet_observe_parked_details(tasks)
+    assert(observe_test_text.utf8_bytes(bounded).len() <= 65536)
+    assert(bounded.contains("more parked task(s) omitted by the report limit"))
+}
+
+#Test("Observe complete sampled environment mismatch and bounded startup input") {
+    assert(observe_policy.jet_observe_identity_matches_env("s", "o", "b", "r", "w", Val("other"), Val("o"), Val("b"), Val("r"), None))
+    assert(!observe_policy.jet_observe_identity_matches_env("s", "o", "b", "r", "w", Val("other"), Val("o"), Val("b"), Val("r"), Val("w")))
+    assert(observe_policy.jet_observe_identity_matches_env("s", "o", "b", "r", "w", Val("s"), Val("o"), Val("b"), Val("r"), Val("w")))
+    initial := [observe_decision.JetLiveValueDecision]{}
+    loop i in 0..<4096 -> &initial.push(observe_test_value("same", None))
+    &initial.push(observe_test_value("late", Val("not admitted")))
+    values := [String: observe_decision.JetLiveValueDecision]{}
+    observe_policy.jet_observe_initial_values(&values, initial)
+    assert(values.len() == 1 && values.has_key("same") && !values.has_key("late"))
+}
+
+#Test("Observe independent CPU and frame scalar boundaries") {
+    max :: U64{18446744073709551615}
+    expected_delta :: Val(max)
+    assert(observe_policy.jet_observe_cpu_delta(Val(U64{0}), Val(max)) == expected_delta)
+    expected_zero :: Val(U64{0})
+    assert(observe_policy.jet_observe_cpu_delta(Val(max), Val(U64{0})) == expected_zero)
+    assert(observe_policy.jet_observe_cpu_delta(None, Val(max)) == None)
+    assert(observe_policy.jet_observe_cpu_delta(Val(max), None) == None)
+    empty_header :: Val((b0: U8{0}, b1: U8{0}, b2: U8{0}, b3: U8{0}))
+    assert(observe_policy.jet_observe_relay_frame_header(U64{0}) == empty_header)
+    limit_header :: Val((b0: U8{0}, b1: U8{64}, b2: U8{0}, b3: U8{0}))
+    assert(observe_policy.jet_observe_relay_frame_header(U64{4194304}) == limit_header)
+    assert(observe_policy.jet_observe_relay_frame_header(max) == None)
+    exact :: observe_test_scalars(128512, 262144)
+    assert(observe_policy.jet_observe_snapshot_fits(exact))
+    assert(!observe_policy.jet_observe_snapshot_fits("{exact}a"))
+}
+
+#Test("Observe relay header is exact inline four-byte ABI") {
+    frame :: observe_policy.jet_observe_relay_frame_header(U64{258}) ?? panic("header")
+    assert(frame.b0 == (U8{0}) && frame.b1 == (U8{0}) && frame.b2 == (U8{1}) && frame.b3 == (U8{2}))
+    limit :: observe_policy.jet_observe_relay_frame_header(U64{4194304}) ?? panic("limit header")
+    assert(limit.b0 == (U8{0}) && limit.b1 == (U8{64}) && limit.b2 == (U8{0}) && limit.b3 == (U8{0}))
+    assert(observe_policy.jet_observe_relay_frame_header(U64{4194305}) == None)
+}

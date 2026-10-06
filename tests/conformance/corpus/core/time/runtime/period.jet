@@ -1,0 +1,129 @@
+// Prelude/Core/Time.rs:484–625 portable Period policy. Original public show
+// cases in ../period{,_days,_months,_years}.jet and time/observable-methods in
+// tests/comptime_core_pure_parity.rs remain unchanged, held on canonical append
+// (#4262). total_in_datetime (:575–618) remains held on the unified private
+// wide/date native owner; no date-only or allocating Int test substitutes.
+use core.time.runtime.kernel_period as period_kernel
+use core.time.runtime.kernel_civil as period_test_civil
+
+fn period_test_min() -> I64 Never! { I64{-9223372036854775807} - I64{1} }
+fn period_test_max() -> I64 Never! { I64{9223372036854775807} }
+fn period_test_new(y: I64, m: I64, d: I64) -> period_kernel.CivilPeriod Never! { period_kernel.CivilPeriod.new(y, m, d) }
+fn period_test_date(y: I64, m: I64, d: I64) -> period_test_civil.CivilDate Never! { period_test_civil.CivilDate.new(y, m, d) }
+
+// tests/comptime_core_pure_parity.rs:501–504,521–524: same component values.
+#Test("period constructors and components preserve each original I64 field") {
+    p :: period_test_new(I64{1}, I64{2}, I64{3})
+    assert_eq(p.years_value(), I64{1})
+    assert_eq(p.months_value(), I64{2})
+    assert_eq(p.days_value(), I64{3})
+    components :: p.components()
+    assert_eq(components.years, I64{1})
+    assert_eq(components.months, I64{2})
+    assert_eq(components.days, I64{3})
+    assert(period_kernel.CivilPeriod.from_days(I64{4}) == period_test_new(I64{0}, I64{0}, I64{4}))
+    assert(period_kernel.CivilPeriod.from_months(I64{5}) == period_test_new(I64{0}, I64{5}, I64{0}))
+    assert(period_kernel.CivilPeriod.from_years(I64{6}) == period_test_new(I64{6}, I64{0}, I64{0}))
+    limits :: period_test_new(period_test_min(), period_test_max(), period_test_min()).components()
+    assert_eq(limits.years, period_test_min())
+    assert_eq(limits.months, period_test_max())
+    assert_eq(limits.days, period_test_min())
+}
+
+#Test("period sign uses years then months then days without cancellation") {
+    assert_eq(period_test_new(I64{1}, period_test_min(), period_test_min()).sign(), I64{1})
+    assert_eq(period_test_new(I64{-1}, period_test_max(), period_test_max()).sign(), I64{-1})
+    assert_eq(period_test_new(I64{0}, I64{1}, period_test_min()).sign(), I64{1})
+    assert_eq(period_test_new(I64{0}, I64{-1}, period_test_max()).sign(), I64{-1})
+    assert_eq(period_kernel.CivilPeriod.from_days(period_test_min()).sign(), I64{-1})
+    assert_eq(period_kernel.CivilPeriod.from_days(period_test_max()).sign(), I64{1})
+    assert_eq(period_test_new(I64{0}, I64{0}, I64{0}).sign(), I64{0})
+    assert(period_test_new(I64{0}, I64{0}, I64{0}).is_zero())
+    assert(!period_test_new(I64{1}, I64{-12}, I64{0}).is_zero())
+    assert(!period_test_new(I64{0}, I64{1}, I64{-30}).is_zero())
+    assert(!period_kernel.CivilPeriod.from_days(I64{-1}).is_zero())
+}
+
+#Test("period negation and absolute value saturate MIN independently per field") {
+    minimum :: period_test_new(period_test_min(), period_test_min(), period_test_min())
+    maximum :: period_test_new(period_test_max(), period_test_max(), period_test_max())
+    assert(minimum.negated() == maximum)
+    assert(minimum.abs() == maximum)
+    assert(maximum.abs() == maximum)
+    assert(maximum.negated() == period_test_new(I64{-9223372036854775807}, I64{-9223372036854775807}, I64{-9223372036854775807}))
+    mixed :: period_test_new(I64{1}, I64{-2}, I64{3})
+    assert(mixed.negated() == period_test_new(I64{-1}, I64{2}, I64{-3}))
+    assert(mixed.abs() == period_test_new(I64{1}, I64{2}, I64{3}))
+    assert(period_test_new(I64{-1}, I64{2}, I64{-3}).abs() == mixed.abs())
+    assert(period_kernel.CivilPeriod.from_days(I64{0}).negated().is_zero())
+    assert(period_kernel.CivilPeriod.from_days(I64{0}).abs().is_zero())
+}
+
+#Test("period addition saturates each component without normalization") {
+    assert(period_test_new(period_test_max(), period_test_min(), I64{3}).add(period_test_new(I64{1}, I64{-1}, I64{4})) == period_test_new(period_test_max(), period_test_min(), I64{7}))
+    assert(period_test_new(period_test_min(), period_test_max(), period_test_min()).add(period_test_new(period_test_max(), period_test_min(), period_test_max())) == period_test_new(I64{-1}, I64{-1}, I64{-1}))
+    assert(period_test_new(I64{1}, I64{11}, I64{30}).add(period_test_new(I64{2}, I64{2}, I64{1})) == period_test_new(I64{3}, I64{13}, I64{31}))
+    p :: period_test_new(I64{1}, I64{-2}, I64{3})
+    assert(p.add(period_test_new(I64{0}, I64{0}, I64{0})) == p)
+}
+
+#Test("period subtraction negates saturating before adding rather than saturating_sub") {
+    minimum :: period_test_new(period_test_min(), period_test_min(), period_test_min())
+    assert(minimum.sub(minimum) == period_test_new(I64{-1}, I64{-1}, I64{-1}))
+    assert(period_test_new(I64{-1}, I64{-1}, I64{-1}).sub(minimum) == period_test_new(I64{9223372036854775806}, I64{9223372036854775806}, I64{9223372036854775806}))
+    assert(period_test_new(I64{0}, I64{0}, I64{0}).sub(minimum) == minimum.negated())
+    assert(period_test_new(period_test_max(), period_test_min(), I64{5}).sub(period_test_new(I64{-1}, I64{1}, I64{2})) == period_test_new(period_test_max(), period_test_min(), I64{3}))
+    assert(period_test_new(I64{3}, I64{13}, I64{31}).sub(period_test_new(I64{2}, I64{2}, I64{1})) == period_test_new(I64{1}, I64{11}, I64{30}))
+}
+
+#Test("period date total clamps the month before residual days and recognizes all units") {
+    anchor :: period_test_date(I64{2024}, I64{1}, I64{31})
+    p :: period_test_new(I64{0}, I64{1}, I64{2})
+    assert(anchor.add_period(p.years_value(), p.months_value(), p.days_value()) == period_test_date(I64{2024}, I64{3}, I64{2}))
+    day_units :: [String]{"day", "days", "d"}
+    loop unit in day_units -> assert_eq(p.total_in_date(unit, anchor), 31.0)
+    week_units :: [String]{"week", "weeks", "w"}
+    loop unit in week_units -> assert_eq(p.total_in_date(unit, anchor), Float{31.0} / Float{7.0})
+    month_units :: [String]{"month", "months"}
+    loop unit in month_units -> assert_eq(p.total_in_date(unit, anchor), Float{1.0} + Float{2.0} / Float{29.0})
+    year_units :: [String]{"year", "years", "y"}
+    loop unit in year_units -> assert_eq(p.total_in_date(unit, anchor), Float{1.0} / Float{12.0} + Float{2.0} / Float{366.0})
+    assert_eq(period_kernel.CivilPeriod.from_months(I64{1}).total_in_date("days", period_test_date(I64{2023}, I64{1}, I64{31})), 28.0)
+    assert_eq(period_kernel.CivilPeriod.from_years(I64{1}).total_in_date("days", period_test_date(I64{2024}, I64{2}, I64{29})), 365.0)
+    assert_eq(period_kernel.CivilPeriod.from_years(I64{1}).total_in_date("months", period_test_date(I64{2024}, I64{2}, I64{29})), 12.0)
+}
+
+#Test("period date totals use calendar anchor leap year and signed residuals") {
+    backward :: period_test_new(I64{0}, I64{-1}, I64{-2})
+    march :: period_test_date(I64{2024}, I64{3}, I64{31})
+    assert_eq(backward.total_in_date("day", march), -33.0)
+    assert_eq(backward.total_in_date("month", march), Float{-1.0} + Float{-2.0} / Float{29.0})
+    assert_eq(backward.total_in_date("year", march), Float{-1.0} / Float{12.0} + Float{-2.0} / Float{366.0})
+    crossed :: period_test_new(I64{0}, I64{1}, I64{1})
+    assert_eq(crossed.total_in_date("years", period_test_date(I64{2023}, I64{12}, I64{31})), Float{1.0} / Float{12.0} + Float{1.0} / Float{366.0})
+    assert_eq(crossed.total_in_date("years", period_test_date(I64{2024}, I64{12}, I64{31})), Float{1.0} / Float{12.0} + Float{1.0} / Float{365.0})
+    assert_eq(period_test_new(I64{1}, I64{-12}, I64{1}).total_in_date("years", march), Float{1.0} / Float{366.0})
+    assert_eq(period_kernel.CivilPeriod.from_days(I64{-7}).total_in_date("weeks", march), -1.0)
+    assert_eq(period_kernel.CivilPeriod.from_days(I64{0}).total_in_date("months", march), 0.0)
+}
+
+#Test("period date total saturates year multiplication before adding months") {
+    anchor :: period_test_date(I64{2024}, I64{3}, I64{31})
+    // Cancellation after saturation keeps dates representable and distinguishes
+    // saturating_mul then saturating_add from one fused/widened computation.
+    upper :: period_test_new(period_test_max(), period_test_min(), I64{0})
+    lower :: period_test_new(period_test_min(), period_test_max(), I64{0})
+    assert_eq(upper.total_in_date("months", anchor), -1.0)
+    assert_eq(lower.total_in_date("months", anchor), -1.0)
+    assert_eq(upper.total_in_date("days", anchor), -31.0)
+    assert_eq(lower.total_in_date("days", anchor), -31.0)
+    exact_product :: period_test_new(I64{768614336404564650}, period_test_min(), I64{0})
+    assert_eq(exact_product.total_in_date("months", anchor), -8.0)
+}
+
+#Test("period date total returns zero for unknown and time-only units") {
+    p :: period_test_new(I64{1}, I64{2}, I64{3})
+    anchor :: period_test_date(I64{2024}, I64{2}, I64{29})
+    unknown_units :: [String]{"", "unknown", "Month", "m", "hours", "ns", "µs"}
+    loop unit in unknown_units -> assert_eq(p.total_in_date(unit, anchor), 0.0)
+}

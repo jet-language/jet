@@ -1,0 +1,295 @@
+// Preview.rs has no inline/include-generated tests in the assigned 1–933 window.
+// Behavioral controls below exercise the actual metadata bodies, not providers.
+// Native callback panic capture, shared owner cleanup, ordered registry/context
+// journeys remain gates documented in kernel_preview; no fake callbacks used.
+use core.ui.runtime.kernel_preview as preview
+use core.ui.[UIPreviewKind, UIPreviewDevice, UIPreviewViewport]
+use jet_foundation.Devtools.EventBody as source
+
+fn expect_text_error(value: String, field: String, limit: Int, expected: preview.JetUiPreviewError) Never! {
+    if preview.jet_ui_preview_text(value, field, limit) == {
+        .Err(error) -> assert(error == expected)
+        .Ok(_) -> panic("invalid preview text accepted")
+    }
+}
+fn source_identity() -> preview.JetUiPreviewSource Never! {
+    span :: source.jet_devtools_source_span_new("src", "screen.jet", U32{1}, U32{2}, U32{3}, U32{4})
+    preview.JetUiPreviewSource.new("src", "build", "rev", ^span)
+}
+
+#Test("preview error display preserves every original variant") {
+    errors :: [preview.JetUiPreviewError]{
+        .EmptyName, .TextTooLong("field"), .InvalidSource("reason"), .InvalidViewport("reason"), .InvalidInput("reason"),
+        .TooManyPreviews, .TooManySelected, .TooManyContexts, .TooManyInputs,
+        .DuplicatePreview("a"), .UnknownPreview("a"), .DuplicateInput("a"), .MissingSource("a"), .MissingContext("a"), .CallbackFailed("a"), .CapabilityDenied("a")
+    }
+    expected :: [String]{
+        "UI preview name must not be empty", "UI preview field exceeds its text bound", "UI preview source is invalid: reason", "UI preview viewport is invalid: reason", "UI preview input is invalid: reason",
+        "UI preview registry is full", "UI preview selection is full", "UI preview context registry is full", "UI preview inputs exceed the bounded limit",
+        "UI preview `a` is duplicated", "unknown UI preview `a`", "UI preview input `a` is duplicated", "UI preview `a` has no source identity", "UI preview context `a` is not registered", "UI preview callback `a` failed", "UI preview capability `a` is denied"
+    }
+    assert(errors.len() == expected.len())
+    loop i in 0..<errors.len() -> assert(errors[i].message() == expected[i])
+}
+#Test("preview text exact byte bounds Unicode whitespace control and precedence") {
+    expect_text_error("", "preview name", 0, .EmptyName)
+    expect_text_error("\t\n", "preview name", 0, .EmptyName)
+    expect_text_error("\u{a0}\u{2003}", "locale", 0, .InvalidSource("text must not be empty"))
+    // Non-ASCII UTF8 is checked in bytes, not scalar count.
+    preview.jet_ui_preview_text("é", "preview name", 2) ?? panic("inclusive UTF8 text bound")
+    expect_text_error("é", "preview name", 1, .TextTooLong("preview name"))
+    // Length beats Cc for nonblank text. U+0085 is both White_Space and Cc.
+    expect_text_error("a\n", "preview name", 1, .TextTooLong("preview name"))
+    expect_text_error("a\n", "preview name", 2, .InvalidSource("text contains a control character"))
+    expect_text_error("\u{85}", "preview name", 0, .EmptyName)
+    expect_text_error("a\u{7f}", "preview name", 32, .InvalidSource("text contains a control character"))
+    expect_text_error("a\u{9f}", "preview name", 32, .InvalidSource("text contains a control character"))
+    preview.jet_ui_preview_text("a\u{200d}", "preview name", 32) ?? panic("format character is not Cc")
+    preview.jet_ui_preview_text(" a ", "preview name", 3) ?? panic("surrounding spaces must not normalize name")
+}
+#Test("preview canonical devices kinds and viewport defaults") {
+    assert(preview.kind_as_str(UIPreviewKind.Preview) == "preview")
+    assert(preview.kind_as_str(UIPreviewKind.Playground) == "playground")
+    assert(preview.device_as_str(UIPreviewDevice.Phone) == "phone")
+    assert(preview.device_as_str(UIPreviewDevice.Tablet) == "tablet")
+    assert(preview.device_as_str(UIPreviewDevice.Desktop) == "desktop")
+    custom :: UIPreviewDevice.Custom("watch")
+    assert(preview.device_as_str(custom) == "watch")
+    assert(preview.device_compare(.Phone, .Tablet) == Ordering.Less)
+    assert(preview.device_compare(.Desktop, .Custom("a")) == Ordering.Less)
+    assert(preview.device_compare(.Custom("z"), .Custom("a")) == Ordering.Greater)
+    phone :: UIPreviewViewport.phone()
+    tablet :: UIPreviewViewport.tablet()
+    desktop :: UIPreviewViewport.desktop()
+    assert(phone.device == .Phone && phone.width == U32{390} && phone.height == U32{844} && phone.scale == U16{2})
+    assert(tablet.device == .Tablet && tablet.width == U32{834} && tablet.height == U32{1119} && tablet.scale == U16{2})
+    assert(desktop.device == .Desktop && desktop.width == U32{1280} && desktop.height == U32{800} && desktop.scale == U16{1})
+    phone.validate() ?? panic("phone default")
+    tablet.validate() ?? panic("tablet default")
+    desktop.validate() ?? panic("desktop default")
+}
+#Test("preview viewport dimensional scale and custom validation order") {
+    invalid :: [UIPreviewViewport]{
+        UIPreviewViewport{device: .Custom(""), width: U32{0}, height: U32{20000}, scale: U16{0}},
+        UIPreviewViewport{device: .Custom(""), width: U32{20000}, height: U32{1}, scale: U16{0}},
+        UIPreviewViewport{device: .Custom(""), width: U32{1}, height: U32{1}, scale: U16{0}},
+        UIPreviewViewport{device: .Custom(""), width: U32{1}, height: U32{1}, scale: U16{9}}
+    }
+    reasons :: [String]{"viewport dimensions must be positive", "viewport dimension exceeds the preview bound", "viewport scale exceeds the preview bound", "viewport scale exceeds the preview bound"}
+    loop i in 0..<invalid.len() {
+        if invalid[i].validate() == {
+            .Err(error) -> assert(error == preview.JetUiPreviewError.InvalidViewport(~reasons[i]))
+            .Ok(_) -> panic("invalid viewport accepted")
+        }
+    }
+    if UIPreviewViewport.new(.Custom(""), U32{1}, U32{1}, U16{1}) == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.InvalidSource("text must not be empty"))
+        .Ok(_) -> panic("empty custom device accepted")
+    }
+    _ :: UIPreviewViewport.new(.Custom("watch"), U32{16384}, U32{16384}, U16{8}) ?? panic("inclusive viewport limits")
+}
+#Test("preview trait defaults custom labels validation and derived order") {
+    defaults :: preview.JetUiPreviewTraits.default()
+    assert(defaults.theme == .System && defaults.locale == "en-US" && defaults.accessibility == .Default && defaults.lifecycle == .Initial)
+    defaults.validate() ?? panic("default traits")
+    assert(preview.JetUiPreviewTheme.HighContrast.as_str() == "high-contrast")
+    assert(preview.JetUiPreviewAccessibility.ReducedMotion.as_str() == "reduced-motion")
+    assert(preview.JetUiPreviewAccessibility.LargeText.as_str() == "large-text")
+    assert(preview.JetUiPreviewAccessibility.ScreenReader.as_str() == "screen-reader")
+    assert(preview.JetUiPreviewLifecycle.Offline.as_str() == "offline")
+    assert(preview.JetUiPreviewTheme.Custom("solar").as_str() == "solar")
+    assert(preview.JetUiPreviewTheme.System.compare(.Light) == Ordering.Less)
+    assert(preview.JetUiPreviewAccessibility.ScreenReader.compare(.Custom("a")) == Ordering.Less)
+    assert(preview.JetUiPreviewLifecycle.Custom("z").compare(.Custom("a")) == Ordering.Greater)
+    traits := preview.JetUiPreviewTraits{theme: .Custom(""), locale: "", accessibility: .Custom(""), lifecycle: .Custom("")}
+    if traits.validate() == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.InvalidSource("text must not be empty"))
+        .Ok(_) -> panic("invalid locale accepted")
+    }
+    traits.locale = "en-US"
+    traits.theme = .Custom("a\n")
+    if traits.validate() == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.InvalidSource("text contains a control character"))
+        .Ok(_) -> panic("invalid theme accepted")
+    }
+}
+#Test("preview authority exact delimiter prefix loopback and duplicate grants") {
+    development :: preview.JetUiPreviewAuthority.development()
+    assert(development.loopback_only() && !development.allows("Clock.Read", true))
+    authority :: preview.JetUiPreviewAuthority.new(true).with_capability("FS") ?? panic("grant")
+    assert(authority.allows("FS", true))
+    assert(authority.allows("FS.Read", true) && authority.allows("FS:Read", true) && authority.allows("FS/Read", true))
+    assert(!authority.allows("FSTest", true) && !authority.allows("FS_Read", true) && !authority.allows("FS.Read", false))
+    other :: preview.JetUiPreviewAuthority.new(true).with_capability("FS") ?? panic("same grant")
+    duplicate :: ^other.with_capability("FS") ?? panic("duplicate is idempotent")
+    assert(authority.equals(duplicate))
+    remote :: preview.JetUiPreviewAuthority.new(false).with_capability("é") ?? panic("nonloopback Unicode grant")
+    assert(remote.allows("é.Read", false) && !remote.allows("éX", true))
+    if preview.JetUiPreviewAuthority.new(false).with_capability("") == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.InvalidSource("text must not be empty"))
+        .Ok(_) -> panic("empty grant accepted")
+    }
+}
+#Test("preview effects retain variants and declaration ordering") {
+    clock :: preview.JetUiPreviewEffect.Clock
+    clock.validate() ?? panic("clock effect")
+    assert(clock.capability() == "Clock.Read")
+    read :: preview.JetUiPreviewEffect.Read("same")
+    write :: preview.JetUiPreviewEffect.Write("same")
+    assert(read != write && read.compare(write) == Ordering.Less)
+    assert(preview.JetUiPreviewEffect.Network("z").compare(.Clock) == Ordering.Less)
+    assert(preview.JetUiPreviewEffect.Custom("a").compare(.Custom("z")) == Ordering.Less)
+    if preview.JetUiPreviewEffect.Custom("").validate() == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.InvalidSource("text must not be empty"))
+        .Ok(_) -> panic("empty effect accepted")
+    }
+}
+#Test("preview inputs preserve conversion values and name before value refusal") {
+    boolean :: preview.JetUiPreviewInputOverride.new<Bool>("flag", true) ?? panic("Bool conversion")
+    integer :: preview.JetUiPreviewInputOverride.new<I64>("count", I64{-9223372036854775807} - I64{1}) ?? panic("I64 conversion")
+    narrow :: preview.JetUiPreviewInputOverride.new<I32>("count", I32{-2147483648}) ?? panic("I32 widening")
+    text :: preview.JetUiPreviewInputOverride.new<String>("label", "text") ?? panic("String conversion")
+    assert(boolean.value == .Bool(true))
+    assert(integer.value == .Integer(I64{-9223372036854775807} - I64{1}))
+    assert(narrow.value == .Integer(I64{-2147483648}))
+    assert(text.value == .Text("text"))
+    assert(preview.input_from_text("borrowed") == .Text("borrowed"))
+    _ :: preview.JetUiPreviewInputOverride.new<Float>("finite", -Float{0.0}) ?? panic("finite signed zero")
+    loop value in [Float]{Float.NAN, Float.INFINITY, -Float.INFINITY} {
+        if preview.JetUiPreviewInputOverride.new<Float>("number", value) == {
+            .Err(error) -> assert(error == preview.JetUiPreviewError.InvalidInput("preview float input must be finite"))
+            .Ok(_) -> panic("nonfinite input accepted")
+        }
+    }
+    if preview.JetUiPreviewInputOverride.new<Float>("", Float.NAN) == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.InvalidSource("text must not be empty"))
+        .Ok(_) -> panic("invalid input name accepted")
+    }
+}
+#Test("preview source uses canonical span and exact refusal precedence") {
+    identity := source_identity()
+    identity.validate() ?? panic("valid provenance")
+    assert(identity.equals(identity))
+    identity.span.source_id = "other"
+    if identity.validate() == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.InvalidSource("source span identity does not match source"))
+        .Ok(_) -> panic("mismatched span identity accepted")
+    }
+    identity.span.start_line = U32{0}
+    if identity.validate() == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.InvalidSource("source span is invalid"))
+        .Ok(_) -> panic("invalid source span accepted")
+    }
+    identity.revision = ""
+    identity.build_id = ""
+    identity.source_id = ""
+    if identity.validate() == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.InvalidSource("source id is invalid"))
+        .Ok(_) -> panic("invalid source id accepted")
+    }
+    identity.source_id = "src"
+    if identity.validate() == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.InvalidSource("build id is invalid"))
+        .Ok(_) -> panic("invalid build id accepted")
+    }
+    identity.build_id = "build"
+    if identity.validate() == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.InvalidSource("revision is invalid"))
+        .Ok(_) -> panic("invalid revision accepted")
+    }
+}
+
+fn ascii_bytes(count: Int) -> String Never! {
+    bytes := [U8]{}
+    loop _ in 0..<count -> &bytes.push(U8{97})
+    String.from_bytes(bytes) ?? panic("ASCII fixture")
+}
+#Test("preview trait device effect capability and input text bounds are inclusive") {
+    assert(preview.JET_UI_PREVIEW_MAX_PREVIEWS == 64 && preview.JET_UI_PREVIEW_MAX_SELECTED == 16)
+    assert(preview.JET_UI_PREVIEW_MAX_CONTEXTS == 16 && preview.JET_UI_PREVIEW_MAX_INPUTS == 32)
+    assert(preview.JET_UI_PREVIEW_MAX_TEXT_BYTES == 16384)
+    traits := preview.JetUiPreviewTraits.default()
+    traits.locale = ascii_bytes(128)
+    traits.theme = .Custom(ascii_bytes(128))
+    traits.accessibility = .Custom(ascii_bytes(128))
+    traits.lifecycle = .Custom(ascii_bytes(128))
+    traits.validate() ?? panic("inclusive trait bounds")
+    traits.locale = ascii_bytes(129)
+    if traits.validate() == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.TextTooLong("locale"))
+        .Ok(_) -> panic("oversized locale accepted")
+    }
+    _ :: UIPreviewViewport.new(.Custom(ascii_bytes(128)), U32{1}, U32{1}, U16{1}) ?? panic("inclusive device bound")
+    if UIPreviewViewport.new(.Custom(ascii_bytes(129)), U32{1}, U32{1}, U16{1}) == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.TextTooLong("viewport device"))
+        .Ok(_) -> panic("oversized device accepted")
+    }
+    preview.JetUiPreviewEffect.Read(ascii_bytes(256)).validate() ?? panic("inclusive effect bound")
+    if preview.JetUiPreviewEffect.Write(ascii_bytes(257)).validate() == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.TextTooLong("preview effect"))
+        .Ok(_) -> panic("oversized effect accepted")
+    }
+    _ :: preview.JetUiPreviewAuthority.development().with_capability(ascii_bytes(256)) ?? panic("inclusive authority bound")
+    if preview.JetUiPreviewAuthority.development().with_capability(ascii_bytes(257)) == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.TextTooLong("authority capability"))
+        .Ok(_) -> panic("oversized authority capability accepted")
+    }
+    _ :: preview.JetUiPreviewInputOverride.new<String>(ascii_bytes(256), ascii_bytes(16384)) ?? panic("inclusive input bounds")
+    if preview.JetUiPreviewInputOverride.new<String>("input", ascii_bytes(16385)) == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.TextTooLong("preview input"))
+        .Ok(_) -> panic("oversized input accepted")
+    }
+    if preview.JetUiPreviewInputOverride.new<Bool>(ascii_bytes(257), false) == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.TextTooLong("preview input name"))
+        .Ok(_) -> panic("oversized input name accepted")
+    }
+}
+#Test("preview source equality compares complete original source and span") {
+    left :: source_identity()
+    right := source_identity()
+    assert(left.equals(right))
+    right.revision = "other"
+    assert(!left.equals(right))
+    right.revision = "rev"
+    right.span.end_column = U32{5}
+    assert(!left.equals(right))
+    right.span.end_column = U32{4}
+    right.span.file = "other.jet"
+    assert(!left.equals(right))
+    right.span.file = "screen.jet"
+    right.build_id = "other"
+    assert(!left.equals(right))
+}
+
+#Test("preview contexts validate identity source inputs and preserve duplicate precedence") {
+    inputs := [preview.JetUiPreviewInputOverride]{}
+    &inputs.push(preview.JetUiPreviewInputOverride.new<Bool>("enabled", true) ?? panic("context input"))
+    context :: preview.JetUiPreviewContext.new("demo", source_identity(), ^inputs) ?? panic("context constructor")
+    assert(context.id == "demo" && context.values().len() == 1 && context.values().has_key("enabled"))
+    assert(context.equals(context))
+    duplicate := [preview.JetUiPreviewInputOverride]{}
+    &duplicate.push(preview.JetUiPreviewInputOverride.new<Bool>("same", true) ?? panic("first"))
+    &duplicate.push(preview.JetUiPreviewInputOverride.new<Bool>("same", false) ?? panic("second"))
+    if preview.JetUiPreviewContext.new("demo", source_identity(), ^duplicate) == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.DuplicateInput("same"))
+        .Ok(_) -> panic("duplicate input accepted")
+    }
+    capacity := [preview.JetUiPreviewInputOverride]{}
+    loop i in 0..<32 -> &capacity.push(preview.JetUiPreviewInputOverride.new<I64>("value{i}", I64{0}) ?? panic("bounded input"))
+    &capacity.push(preview.JetUiPreviewInputOverride.new<I64>("value0", I64{1}) ?? panic("capacity duplicate"))
+    if preview.JetUiPreviewContext.new("demo", source_identity(), ^capacity) == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.TooManyInputs)
+        .Ok(_) -> panic("33rd duplicate accepted")
+    }
+    invalid := [preview.JetUiPreviewInputOverride]{}
+    loop i in 0..<32 -> &invalid.push(preview.JetUiPreviewInputOverride.new<I64>("value{i}", I64{0}) ?? panic("bounded input"))
+    &invalid.push(preview.JetUiPreviewInputOverride{name: "bad", value: .Float(Float.NAN)})
+    if preview.JetUiPreviewContext.new("demo", source_identity(), ^invalid) == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.InvalidInput("preview float input must be finite"))
+        .Ok(_) -> panic("invalid input at capacity accepted")
+    }
+    if preview.JetUiPreviewContext.new("", source_identity(), [preview.JetUiPreviewInputOverride]{}) == {
+        .Err(error) -> assert(error == preview.JetUiPreviewError.InvalidSource("text must not be empty"))
+        .Ok(_) -> panic("empty context id accepted")
+    }
+}

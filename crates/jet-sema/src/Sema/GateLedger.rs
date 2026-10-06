@@ -280,9 +280,11 @@ struct GateContext<'a> {
 }
 
 fn checked_text_type_names(bundle: &ProgramBundle) -> HashSet<String> {
-    let registries = crate::Traits::TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
     let mut names = HashSet::new();
-    for registry in registries {
+    for module in &bundle.modules {
+        // CheckedText is a declared trait, not a structural auto-derive. Its
+        // local registration does not require the bundle-wide fixed point.
+        let registry = crate::Traits::TraitRegistry::auto_derives_for_items(&module.items);
         for (name, base) in &registry.distinct_bases {
             if *base == Type::String
                 && registry.implements_trait(name, crate::Generics::CHECKED_TEXT)
