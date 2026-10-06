@@ -827,7 +827,10 @@ fn lf_channel_send(ty: MIRType) -> MIRProgram Never! {
     fx_do(&r, MIROperation.Semantic{operation: MIRSemanticOp.HandleMethod{call: fx_prelude_id("core.channels", "sender.send"), receiver: sender, args: [MIRValueID]{value}, frame_schedule: None, frame_schedule_derivation: None}})
     fx_block(&r, 0, MIRTerminator.Return{value: None})
     program := lf_single(r)
-    &program.prelude_calls.push(fx_prelude(MIRPreludeFamily.HandleMethod, "core.channels", "sender.send", "jet_channel_send", 2, MIRPreludeABI.Effect))
+    send := fx_prelude(MIRPreludeFamily.HandleMethod, "core.channels", "sender.send", "jet_channel_send", 2, MIRPreludeABI.Effect)
+    // TIR/routes.rs SenderSend: the receiver is borrowed, the value moved.
+    send.signature.borrow_mask = [Bool]{true, false}
+    &program.prelude_calls.push(send)
     program
 }
 

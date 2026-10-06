@@ -1382,8 +1382,10 @@ struct MIRLintPlaceUseRow {
     pub usage: MIRLintPlaceUse
 }
 
-// Places an operation reads, borrows, moves, or reinitializes.
-fn mir_lint_place_uses(operation: MIROperation) -> [MIRLintPlaceUseRow] Never! {
+// Places an operation reads, borrows, moves, or reinitializes. A consuming
+// argument's place is the provenance of its value: when that value is the
+// `MovePlace` of the same place, the move was already counted there.
+fn mir_lint_place_uses(ctx: MIRLintContext, defs: MIRLintDefs, operation: MIROperation) -> [MIRLintPlaceUseRow] Never! {
     rows := [MIRLintPlaceUseRow]{}
     if operation == {
         .ReadPlace(place) -> &rows.push(MIRLintPlaceUseRow{place: place, usage: MIRLintPlaceUse.Read})
@@ -1404,6 +1406,7 @@ fn mir_lint_place_uses(operation: MIROperation) -> [MIRLintPlaceUseRow] Never! {
     }
     loop arg in mir_operation_call_args(operation) {
         if arg.place == .Val(place) {
+            if mir_call_arg_consumes(arg) && mir_lint_moved_from(ctx, defs, arg.value, place) -> next
             usage :: if {
                 mir_call_arg_consumes(arg) -> MIRLintPlaceUse.Move
                 arg.access == .Write -> MIRLintPlaceUse.Borrow
@@ -1508,7 +1511,7 @@ fn mir_lint_ownership_layout(ctx: MIRLintContext, defs: ^MIRLintDefs) -> MIRLint
                     value_count += 1
                 }
             }
-            loop row in mir_lint_place_uses(instruction.operation) {
+            loop row in mir_lint_place_uses(ctx, defs, instruction.operation) {
                 place :: mir_lint_place(ctx, row.place) ?? next
                 if row.usage == .Move {
                     key :: mir_lint_path_key(place)
@@ -1863,7 +1866,7 @@ fn mir_lint_transfer(ctx: MIRLintContext, layout: MIRLintOwnership, block: MIRBa
             failure :: mir_lint_moved_failure(ctx, layout, state, uses, span)
             if failure != None -> return MIRLintStep{successors: [MIRBlockID]{}, failure: failure}
         }
-        place_rows :: mir_lint_place_uses(operation)
+        place_rows :: mir_lint_place_uses(ctx, layout.defs, operation)
         if check {
             loop row in place_rows {
                 position :: ctx.places.get(mir_lint_key(row.place.value)) ?? next
@@ -2027,6 +2030,16 @@ fn mir_lint_handle_from(ctx: MIRLintContext, defs: MIRLintDefs, value: MIRValueI
     if ctx.function.blocks[defs.blocks[row]].instructions[defs.positions[row]].operation == {
         .ReadPlace(place) | .MovePlace(place) -> Val(place)
         else -> None
+    }
+}
+
+// Whether `value` is the `MovePlace` of `place` (its definition moved it out).
+fn mir_lint_moved_from(ctx: MIRLintContext, defs: MIRLintDefs, value: MIRValueID, place: MIRPlaceID) -> Bool Never! {
+    row :: mir_lint_def_at(defs, value)
+    if row < 0 -> return false
+    if ctx.function.blocks[defs.blocks[row]].instructions[defs.positions[row]].operation == {
+        .MovePlace(moved) -> moved == place
+        else -> false
     }
 }
 
