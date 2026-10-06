@@ -2975,10 +2975,10 @@ fn run() {
 }
 
 #[test]
-fn fmt_copy_sigil_d_shape_copy1_stability() {
-    // D-SHAPE-COPY1=A (supersedes D-CAP2/D-MEM1/S4): `x.copy()` is a prefix-verb
-    // expression — must survive fmt unchanged in binding position, call-arg
-    // position, and on a field.
+fn fmt_copy_call_d_copy_word1_stability() {
+    // D-COPY-WORD1=A (amends D-SHAPE-COPY1=A): `x.copy()` is an ordinary
+    // method-call expression — must survive fmt unchanged in binding
+    // position, call-arg position, and on a field.
     let src = "\
 struct Ticket {
     id: Int
@@ -3000,7 +3000,7 @@ fn run() {
     assert_fmt_keeps(
         src,
         &["saved :: name.copy()", "print(archive(t.copy()))", "print(t.label.copy())"],
-        "D-SHAPE-COPY1 copy sigil",
+        "D-COPY-WORD1 copy call",
     );
 }
 

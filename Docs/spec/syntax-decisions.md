@@ -2475,8 +2475,10 @@ gate) remains.
 
 **D-COPY-WORD1=A — the one copy is the method `x.copy()`** *(ratified
 2026-10-06)*: amends D-SHAPE-COPY1=A's spelling only. A deliberate copy is the
-compiler-owned method `x.copy()`, resolved before ordinary method lookup (a
-PascalCase type receiver such as `Recipe.copy()` stays an associated call); it
+compiler-owned method `x.copy()`. The parser reads it as an ordinary method
+call; sema decides by name resolution: on a value receiver it is the copy,
+resolved before ordinary method lookup so no type can redefine it, and on a
+receiver that names a type (`Recipe.copy()`) it stays an associated call. It
 chains without parentheses (`input.copy().rotate()`). The prefix `~x` is a
 retired mark: E0941 teaches it and its Safe fix writes `x.copy()`. The
 entries below keep their historical `~x` text.

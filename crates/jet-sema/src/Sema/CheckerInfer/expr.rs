@@ -5218,6 +5218,22 @@ impl<'a> Checker<'a> {
                 operator_rhs: _,
                 checked_widen: _,
             } => {
+                // D-COPY-WORD1=A: `value.copy()` with no arguments is the
+                // compiler-owned copy, resolved here before ordinary method
+                // lookup so no type can redefine it. A type receiver keeps
+                // associated-function lookup. Rewriting to `Expr::Copy` gives
+                // every later pass and tier the one copy node.
+                if method == Syntax::METHOD_COPY
+                    && args.is_empty()
+                    && type_args.is_empty()
+                    && !self.copy_receiver_names_type(receiver, owner_type_args)
+                {
+                    let copy_span =
+                        Span::new(crate::Sema::source_expr_start(receiver), method_span.end);
+                    let value = std::mem::replace(&mut **receiver, Expr::Absent(copy_span));
+                    *e = Expr::Copy(Box::new(value), copy_span);
+                    return self.infer_inner(e);
+                }
                 // D-SHAPE3a=A: the parser's empty identifier is the unspellable
                 // receiver sentinel for `.new(...)`. Resolve it only from the same
                 // expected type already propagated for literals/calls; never search a

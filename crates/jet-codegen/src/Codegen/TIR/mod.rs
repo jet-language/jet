@@ -13351,7 +13351,6 @@ pub enum TBuiltinOp {
     },
     // #1477 List/Map non-closure surface
     ListSlice,
-    ListCopy,
     ListEqual,
     ListBinarySearch,
     ListUnion,
@@ -13361,7 +13360,6 @@ pub enum TBuiltinOp {
     ListMinMax {
         tuple_struct: String,
     },
-    MapCopy,
     MapEqual,
     MapFirst,
     MapToList {
@@ -13486,7 +13484,6 @@ pub enum TBuiltinOp {
     BitSetRemove,
     BitSetCount,
     BitSetToList,
-    BitSetCopy,
     BitSetNew,
     ByteBufferNew,
     ByteBufferFrom,

@@ -1029,6 +1029,34 @@ impl<'a> Checker<'a> {
     }
 
 
+    /// D-COPY-WORD1=A: `receiver.copy()` parses as an ordinary method call;
+    /// sema decides what it means by name resolution. A receiver that names
+    /// a declared type (`Recipe.copy()`, `List<Int>.copy()`,
+    /// `alias.Type.copy()`) keeps associated-function lookup; every other
+    /// receiver is a value and gets the built-in copy. The Jet half mirrors
+    /// this in `sema_expr_copy_receiver_names_type`.
+    pub(crate) fn copy_receiver_names_type(&self, receiver: &Expr, owner_type_args: &[Type]) -> bool {
+        if !owner_type_args.is_empty() {
+            return true;
+        }
+        let names_value = |name: &str| {
+            self.binder_ref_types.contains_key(name)
+                || self.lookup(name).is_some()
+                || self.consts.contains_key(name)
+                || self.funcs.contains_key(name)
+        };
+        match receiver {
+            Expr::Ident(name, _) => !names_value(name) && self.registry.contains(name),
+            Expr::Field(base, _, _) => matches!(
+                base.as_ref(),
+                Expr::Ident(alias, _)
+                    if !names_value(alias)
+                        && (self.imports.contains_key(alias) || self.core_imports.contains_key(alias))
+            ),
+            _ => false,
+        }
+    }
+
     pub(crate) fn infer_method_call(
         &mut self,
         receiver: &mut Box<Expr>,

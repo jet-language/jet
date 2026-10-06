@@ -429,18 +429,6 @@ fn parser_is_postfix_operand(text: String) -> Bool Never! {
     depth == 0 && !in_string
 }
 
-// D-COPY-WORD1=A: a bare PascalCase name is a type (D-SHAPE-CASE1), so
-// `Type.copy()` stays an associated call (Rust `is_type_receiver`).
-fn parser_is_type_receiver(receiver: Expr) -> Bool Never! {
-    name := ""
-    if receiver == {
-        .Ident(ident, _) -> name = ident
-        else -> return false
-    }
-    bytes :: name.bytes()
-    bytes.len() > 0 && bytes[0] >= 65 && bytes[0] <= 90
-}
-
 // Rebuild the source spelling of `span` from its tokens. Whitespace between
 // tokens becomes the same number of spaces, so byte offsets stay aligned.
 fn parser_source_text(state: JetParserState, span: Span) -> String Never! {
@@ -1622,19 +1610,12 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
                     expression = ParsedExpr{expr: Expr.Call{call: call}, span: span}
                 }
                 .Field(receiver, method, method_span) -> {
-                    // D-COPY-WORD1=A: `value.copy()` is the compiler-owned
-                    // copy, resolved before ordinary method lookup so no type
-                    // can redefine it; `Type.copy()` stays an associated call.
-                    if method == "copy" && args.len() == 0 && call_type_args.len() == 0 && !parser_is_type_receiver(receiver) {
-                        expression = ParsedExpr{expr: Expr.Copy{value: receiver, span: span}, span: span}
-                    } else {
-                        // D-CONC-SHARE1=A: `Shared.new(x)` is retired; teach at
-                        // `new` (Rust `member_span`) and keep the method call.
-                        if method == "new" && parser_literal_head_path(receiver) == "Shared" -> parser_add_error_code(&state, "E1115", Span{start: method_span.end - method.len(), end: method_span.end}, "`Shared.new(…)` is the retired shared-cell constructor.", "D-CONC-SHARE1=A gives shared state one construction word, so every shared cell reads the same on the page.", "Write `shared <value>` instead of `Shared.new(<value>)`.")
-                        expression = ParsedExpr{
-                            expr: Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: call_type_args, args: args, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false},
-                            span: span,
-                        }
+                    // D-CONC-SHARE1=A: `Shared.new(x)` is retired; teach at
+                    // `new` (Rust `member_span`) and keep the method call.
+                    if method == "new" && parser_literal_head_path(receiver) == "Shared" -> parser_add_error_code(&state, "E1115", Span{start: method_span.end - method.len(), end: method_span.end}, "`Shared.new(…)` is the retired shared-cell constructor.", "D-CONC-SHARE1=A gives shared state one construction word, so every shared cell reads the same on the page.", "Write `shared <value>` instead of `Shared.new(<value>)`.")
+                    expression = ParsedExpr{
+                        expr: Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: call_type_args, args: args, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false},
+                        span: span,
                     }
                 }
                 .OptField(receiver, method, method_span, _, _) -> {

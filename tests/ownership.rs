@@ -5504,7 +5504,7 @@ fn run() { print(0) }
         Some(jet::Diagnostics::FixSafety::BehaviorPreserving)
     );
     let safe_edit = safe.edit.as_ref().expect("safe E0120 must carry an edit");
-    assert_eq!(safe_edit.new_text, "~");
+    assert_eq!(safe_edit.new_text, ".copy()");
     assert_eq!(&safe_src[safe_edit.span.start..safe_edit.span.end], "");
     let safe_fixed = jet::LSP::apply_edit(safe_src, safe_edit);
     assert!(
@@ -5580,7 +5580,7 @@ fn run() { print(0) }
     assert_eq!(edits.len(), 2);
     edits.sort_by_key(|edit| std::cmp::Reverse(edit.span.start));
     for edit in &edits {
-        assert_eq!(edit.new_text, "~");
+        assert_eq!(edit.new_text, ".copy()");
         fixed = jet::LSP::apply_edit(&fixed, edit);
     }
     assert!(fixed.contains("picked :: outer.inner.name.copy() ?? return"), "{fixed}");
@@ -5611,10 +5611,10 @@ fn core_string_view_copy_edit_names_consuming_expression() {
         .edit
         .as_ref()
         .expect("the named Core expression must carry a structured copy edit");
-    assert_eq!(edit.new_text, "~");
+    assert_eq!(edit.new_text, ".copy()");
     assert_eq!(&src[edit.span.start..edit.span.end], "");
     let diagnostic_span = diagnostic.span.expect("the Core expression must be highlighted");
-    assert_eq!(edit.span.start, diagnostic_span.start);
+    assert_eq!(edit.span.start, diagnostic_span.end);
     assert_eq!(&src[diagnostic_span.start..diagnostic_span.end], "view");
     let fixed = jet::LSP::apply_edit(src, edit);
     assert!(

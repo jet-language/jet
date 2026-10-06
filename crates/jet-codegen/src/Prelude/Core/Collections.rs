@@ -151,10 +151,6 @@ impl JetBitSet {
     }
 }
 
-fn jet_bits_copy(bits: &JetBitSet) -> JetBitSet {
-    bits.clone()
-}
-
 /// One `Bits` membership definition for every execution tier: AOT reaches it
 /// through `JetBitSet::contains`, and the Cranelift host reaches it directly on
 /// the resident bit set, so neither tier re-encodes the test (I9).
@@ -687,11 +683,6 @@ fn jet_deque_contains<T: PartialEq>(
 #[inline(always)]
 fn jet_string_starts_with(text: &str, prefix: &str) -> bool {
     text.starts_with(prefix)
-}
-
-#[inline(always)]
-fn jet_string_copy(text: &String) -> String {
-    text.clone()
 }
 
 #[inline(always)]

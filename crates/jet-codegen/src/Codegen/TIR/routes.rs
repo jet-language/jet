@@ -6254,7 +6254,6 @@ impl TBuiltinOp {
                 None,
                 carrier,
             ),
-            BitSetCopy => b("bitset_copy", "jet_bits_copy", 1, 1, &[true], None, carrier),
             ViewNew { .. } => b(
                 "view_new",
                 "jet_view_new",
@@ -6667,14 +6666,12 @@ impl TBuiltinOp {
             | IterLastIndexOf
             | IterAverage { .. }
             | IterCompare
-            | ListCopy
             | ListUnion
             | ListIntersection
             | ListDifference
             | ListRandom
             | SetCopy
             | SetCapacity
-            | MapCopy
             | MapNew
             | Zip { .. }
             | OptionZip { .. }
@@ -6869,7 +6866,7 @@ fn byte_buffer_method_route(
     let arity = match method {
         "len" | "is_empty" | "clear" | "position" | "eof" | "rewind" | "flush" | "close"
         | "shutdown" | "get_buffer" | "buffer" | "to_string" | "string" | "trim" | "trim_start"
-        | "trim_end" | "to_lower" | "to_upper" | "to_title" | "title" | "clone" | "copy"
+        | "trim_end" | "to_lower" | "to_upper" | "to_title" | "title" | "clone"
         | "lines" | "first" | "next" | "read_byte" | "read" | "is_ascii" => 1,
         "get" | "seek" | "read_bytes" | "read_string" | "contains" | "starts_with"
         | "ends_with" | "index_of" | "last_index_of" | "split" | "partition" | "join" | "equal"
@@ -6946,7 +6943,6 @@ pub(super) fn string_method_route(
         "strip" => ("strip", "jet_text_parse_strip", 1),
         "lstrip" => ("lstrip", "jet_text_parse_lstrip", 1),
         "rstrip" => ("rstrip", "jet_text_parse_rstrip", 1),
-        "copy" => ("copy", "jet_string_copy", 1),
         "replace" => ("replace", "jet_string_replace", 3),
         "count_bytes" => ("count_bytes", "jet_string_count_bytes", 1),
         "last_index_of" => ("last_index_of", "jet_unicode_last_index_of", 2),

@@ -8093,12 +8093,6 @@ mod jet_c_abi_routes {
         guard(|| list_out(crate::jet_bit_set_to_list(unsafe { &*a0 }).into_iter().map(|e| e as u64).collect(), data))
     }
 
-    /// core.builtin.bitset_copy
-    #[no_mangle]
-    pub extern "C" fn jet_bits_copy(a0: *mut crate::JetBitSet) -> *mut crate::JetBitSet {
-        guard(|| Box::into_raw(Box::new(crate::jet_bits_copy(unsafe { &*a0 }))))
-    }
-
     /// core.web.browser.connect
     #[no_mangle]
     pub extern "C" fn jet_browser_connect(a0: JetCString, ok: *mut *mut crate::JetBrowser, err: *mut *mut crate::JetBrowserError) -> i64 {

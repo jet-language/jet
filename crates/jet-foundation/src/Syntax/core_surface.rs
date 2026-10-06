@@ -396,11 +396,13 @@ pub const PARAM_ZONE_LABEL_ONLY: &str = "*";
 
 /// D-COPY-WORD1=A (amends D-SHAPE-COPY1=A's spelling): the one copy spelling
 /// is the compiler-owned method `x.copy()`, producing an owned, independent
-/// value. The parser resolves `receiver.copy()` (no arguments) to the copy
-/// node before ordinary method lookup, so no type can redefine it; a type
-/// receiver (`Recipe.copy()`) stays an ordinary associated call. A temporary
-/// (no named binding survives to be used-after), so it never needs `^` and
-/// never trips E0209. `.clone()` is not user-typable Jet syntax (I8).
+/// value. The parser reads `receiver.copy()` as an ordinary method call; sema
+/// decides by name resolution: on a value receiver (no arguments) it is the
+/// built-in copy, resolved before ordinary method lookup so no type can
+/// redefine it, and on a type receiver (`Recipe.copy()`) it stays an
+/// associated call. A temporary (no named binding survives to be used-after),
+/// so it never needs `^` and never trips E0209. `.clone()` is not
+/// user-typable Jet syntax (I8).
 pub const METHOD_COPY: &str = "copy";
 
 /// The copy call spelled on `operand`, for diagnostics and fix-its.

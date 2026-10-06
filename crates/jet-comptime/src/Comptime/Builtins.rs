@@ -2385,7 +2385,6 @@ pub fn apply_method(
             };
             Ok(CtValue::Bool(xs.ends_with(&suffix)))
         }
-        (CtValue::List(xs), "copy") => Ok(CtValue::List(xs.clone())),
         (CtValue::List(xs), "equal") => {
             let Some(CtValue::List(other)) = args.into_iter().next() else {
                 return Err(unsupported("equal needs a list", span));
@@ -2519,7 +2518,6 @@ pub fn apply_method(
             }
             Ok(CtValue::Map(out))
         }
-        (CtValue::Map(m), "copy") => Ok(CtValue::Map(m.clone())),
         (CtValue::Map(m), "equal") => {
             let Some(CtValue::Map(other)) = args.into_iter().next() else {
                 return Err(unsupported("equal needs a map", span));
@@ -2687,7 +2685,6 @@ pub fn apply_method(
         (CtValue::Str(s), "is_upper") => Ok(CtValue::Bool(super::TextLite::is_upper(s))),
         (CtValue::Str(s), "capitalize") => Ok(CtValue::Str(super::TextLite::capitalize(s))),
         (CtValue::Str(s), "swapcase") => Ok(CtValue::Str(super::TextLite::swapcase(s))),
-        (CtValue::Str(s), "copy") => Ok(CtValue::Str(s.clone())),
         (CtValue::Str(s), "reverse") => Ok(CtValue::Str(super::TextLite::reverse(s))),
         (CtValue::Str(s), "normalize") => Ok(CtValue::Str(super::TextLite::nfc(s))),
         (CtValue::Str(s), "remove_prefix") => match args.into_iter().next() {

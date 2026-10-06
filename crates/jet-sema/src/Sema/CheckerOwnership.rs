@@ -45,17 +45,26 @@ pub(crate) fn copy_edit_anchor(expr: &Expr) -> Span {
     Span::new(root.span().start.min(expr.span().start), expr.span().end)
 }
 
-/// D-COPY-WORD1=A: the edit that rewrites the authored expression at `span`
-/// into its copy call (see [`Syntax::copy_call_source`]). `None` when `span`
-/// does not hold authored source.
+/// D-COPY-WORD1=A: the edit that turns the authored expression at `span`
+/// into its copy call (see [`Syntax::copy_call_source`]). A postfix operand
+/// keeps its text and the edit appends `.copy()` at its end (the Jet half's
+/// edit shape); any other operand is replaced by `(operand).copy()`. `None`
+/// when `span` does not hold authored source.
 pub(crate) fn copy_edit(source: &str, span: Span) -> Option<TextEdit> {
     let text = source.get(span.start..span.end)?;
     if text.is_empty() || text.trim() != text {
         return None;
     }
-    Some(TextEdit {
-        span,
-        new_text: Syntax::copy_call_source(text),
+    let call = Syntax::copy_call_source(text);
+    Some(match call.strip_prefix(text) {
+        Some(suffix) => TextEdit {
+            span: Span::new(span.end, span.end),
+            new_text: suffix.to_string(),
+        },
+        None => TextEdit {
+            span,
+            new_text: call,
+        },
     })
 }
 

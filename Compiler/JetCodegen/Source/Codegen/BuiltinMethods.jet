@@ -428,7 +428,6 @@ fn jet_codegen_builtin_container_route(operation: TBuiltinOp) -> JetCodegenBuilt
         .BitSetRemove -> return jet_codegen_builtin_route("bitset_remove", "jet_bitset_remove", 2, [Bool]{true, false}, Val(Effect.Mem))
         .BitSetCount -> return jet_codegen_builtin_route("bit_set_count", "jet_bit_set_count", 1, [Bool]{true}, None)
         .BitSetToList -> return jet_codegen_builtin_route("bit_set_to_list", "jet_bit_set_to_list", 1, [Bool]{true}, None)
-        .BitSetCopy -> return jet_codegen_builtin_route("bitset_copy", "jet_bits_copy", 1, [Bool]{true}, None)
         .BagAdd -> return jet_codegen_builtin_route("bag_add", "jet_bag_add", 2, [Bool]{true, false}, Val(Effect.Mem))
         .BagRemove -> return jet_codegen_builtin_route("bag_remove", "jet_bag_remove", 2, [Bool]{true, false}, Val(Effect.Mem))
         .BagHas -> return jet_codegen_builtin_route("bag_has", "jet_bag_has", 2, [Bool]{true, true}, None)
@@ -603,7 +602,7 @@ fn jet_codegen_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result:
         .ListBinarySearch -> return jet_codegen_builtin_route("list_binary_search", "jet_list_binary_search", 2, [Bool]{true, true}, None)
         .ListEqual -> return jet_codegen_builtin_route("list_equal", "jet_list_equal", 2, [Bool]{true, true}, None)
         .ListReplace -> return jet_codegen_builtin_route("list_replace", "jet_list_replace", 3, [Bool]{true, false, false}, None)
-        .MapCopy | .ListCopy | .MapNew | .SetCopy | .BitSetNew | .ByteBufferNew | .BagLen -> panic("checked primitive or receiver-only builtin has no generic route")
+        .MapNew | .SetCopy | .BitSetNew | .ByteBufferNew | .BagLen -> panic("checked primitive or receiver-only builtin has no generic route")
         else -> {}
     }
     jet_codegen_builtin_route_for_receiver(operation, receiver, carrier)
@@ -660,7 +659,6 @@ fn jet_codegen_builtin_string_method_route(method: String, result: Type, carrier
     if method == "strip" -> return jet_codegen_builtin_route("strip", "jet_text_parse_strip", 1, [Bool]{true}, None)
     if method == "lstrip" -> return jet_codegen_builtin_route("lstrip", "jet_text_parse_lstrip", 1, [Bool]{true}, None)
     if method == "rstrip" -> return jet_codegen_builtin_route("rstrip", "jet_text_parse_rstrip", 1, [Bool]{true}, None)
-    if method == "copy" -> return jet_codegen_builtin_route("copy", "jet_string_copy", 1, [Bool]{true}, None)
     if method == "replace" -> return jet_codegen_builtin_route("replace", "jet_string_replace", 3, [Bool]{true, true, true}, None)
     if method == "count_bytes" -> return jet_codegen_builtin_route("count_bytes", "jet_string_count_bytes", 1, [Bool]{true}, None)
     if method == "last_index_of" -> return jet_codegen_builtin_route("last_index_of", "jet_unicode_last_index_of", 2, [Bool]{true, true}, None)
@@ -702,7 +700,7 @@ fn jet_codegen_builtin_string_method_route(method: String, result: Type, carrier
 fn jet_codegen_builtin_byte_buffer_method_route(method: String) -> JetCodegenBuiltinRoute Never! {
     if method == "capacity" -> return jet_codegen_builtin_route("byte_buffer_capacity", "JetByteBuffer::capacity", 1, [Bool]{true}, None)
     arity := 0
-    if method == "len" || method == "is_empty" || method == "clear" || method == "position" || method == "eof" || method == "rewind" || method == "flush" || method == "close" || method == "shutdown" || method == "get_buffer" || method == "buffer" || method == "to_string" || method == "string" || method == "trim" || method == "trim_start" || method == "trim_end" || method == "to_lower" || method == "to_upper" || method == "to_title" || method == "title" || method == "clone" || method == "copy" || method == "lines" || method == "first" || method == "next" || method == "read_byte" || method == "read" || method == "is_ascii" -> arity = 1
+    if method == "len" || method == "is_empty" || method == "clear" || method == "position" || method == "eof" || method == "rewind" || method == "flush" || method == "close" || method == "shutdown" || method == "get_buffer" || method == "buffer" || method == "to_string" || method == "string" || method == "trim" || method == "trim_start" || method == "trim_end" || method == "to_lower" || method == "to_upper" || method == "to_title" || method == "title" || method == "clone" || method == "lines" || method == "first" || method == "next" || method == "read_byte" || method == "read" || method == "is_ascii" -> arity = 1
     if method == "get" || method == "seek" || method == "read_bytes" || method == "read_string" || method == "contains" || method == "starts_with" || method == "ends_with" || method == "index_of" || method == "last_index_of" || method == "split" || method == "partition" || method == "join" || method == "equal" || method == "compare" || method == "copy_to" || method == "write_to" -> arity = 2
     if method == "replace" -> arity = 3
     if arity == 0 -> panic("checked ByteBufferMethod has no canonical route")
