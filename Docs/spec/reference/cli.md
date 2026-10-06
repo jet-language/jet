@@ -262,6 +262,15 @@ one read or parse failure reports every failure with exit 2 (exit 1 under
 sorted) and exits 1; `--diff` adds unified diffs; `--dry-run` is both; `-`
 formats stdin to stdout under the `--stdin-path=` label; `--simplify` enables
 the ratified rewrites. The retired-spelling status lines go to stderr unless
-`--quiet`. `package.jet` and other Package/Config record sources (the typed
-Package formatter), `--lang`, `--changed`, and `--explicit-copies` are refused
-with E2104 until they are ported.
+`--quiet`. `package.jet` and `Config` record sources go through the typed
+Package formatter (the Jetpack Package model, referenced into the Compiler
+unit from `Jetpack/PackageModel`): an unreadable manifest stops the run with
+its E1206-family diagnostic, and a layout the model declines (authored
+comments) is left as written. `--changed` formats the `.jet` files git reports
+changed against `HEAD` or staged (exit 2 outside a git worktree).
+`--explicit-copies` checks each file, then writes `~` at every implicit copy
+site: the Safe `~` edits sema gives the same source under
+`#Policy(copies: .Explicit)`; marks that would not parse report E0122.
+`--lang <language>` checks its options, the language name, the `env.jet`
+root, and the `env.jet` read, then is refused with E2104 because the
+environment evaluator has no Jet path into the compiler yet.
