@@ -14595,8 +14595,6 @@ pub enum THandleOp {
         /// calls carry one extra lowered argument: the checked input binding.
         args_len: usize,
     },
-    /// D-WEBVIRTUAL1: project a virtual window through its canonical facts API.
-    WebVirtualWindowFacts,
     /// D-DBPOLICY-BIND1: bind a validated RowPolicy + user to a DBConnection.
     DBWithPolicy,
     /// D-DBPOOL1: bounded acquisition, readiness, draining, and receipt share

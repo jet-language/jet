@@ -77,20 +77,6 @@ impl JetWebVirtualWindow {
         self.visible_count() <= max_visible_items.max(0)
     }
 
-    pub fn facts_json(&self) -> String {
-        format!(
-            "{{\"total_count\":{},\"scroll_offset\":{},\"viewport_size\":{},\"estimated_item_size\":{},\"overscan\":{},\"start\":{},\"end\":{},\"total_size\":{},\"measured_count\":{}}}",
-            self.total_count,
-            self.scroll_offset,
-            self.viewport_size,
-            self.estimated_item_size,
-            self.overscan,
-            self.start,
-            self.end,
-            self.total_size,
-            self.measured_count,
-        )
-    }
 }
 
 /// Build one bounded virtual range.  `overscan` is measured in rows; size and
@@ -207,9 +193,6 @@ impl JetWebVirtualViewport {
         self.set_window(current.with_measurement(index, size));
     }
 
-    pub fn facts_json(&self) -> String {
-        self.window().facts_json()
-    }
 }
 
 /// Build a window with a dynamic estimate from positive measured row sizes.

@@ -1017,7 +1017,6 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "WebTablePage" => Some("JetWebTablePage"),
         "WebTable" => Some("JetWebTable"),
         "WebVirtualViewport" => Some("JetWebVirtualViewport"),
-        "WebVirtualWindow" => Some("JetWebVirtualWindow"),
         "WebVirtualPlan" => Some("JetWebVirtualPlan"),
         "WebVirtualPlanViewport" => Some("JetWebVirtualPlanViewport"),
         "Atomic" => Some("JetAtomic"),

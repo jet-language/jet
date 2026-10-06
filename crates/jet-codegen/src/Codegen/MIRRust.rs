@@ -3031,11 +3031,13 @@ fn is_source_owned_core_raylib_shape(name: &str) -> bool {
 }
 
 fn is_source_owned_core_web_query_shape(name: &str) -> bool {
-    name.starts_with("<corelib>/Core/web::Core/web/query.jet::")
+    (name.starts_with("<corelib>/Core/web::Core/web/query.jet::")
         && matches!(
             crate::Codegen::core_source_type_leaf(name),
             "WebQuery" | "WebQueryState" | "WebMutationState"
-        )
+        ))
+        || (name.starts_with("<corelib>/Core/web::Core/web/virtual.jet::")
+            && crate::Codegen::core_source_type_leaf(name) == "WebVirtualWindow")
 }
 fn is_source_owned_core_web_query_enum(name: &str) -> bool {
     name.starts_with("<corelib>/Core/web::Core/web/query.jet::")
