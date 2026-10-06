@@ -210,6 +210,12 @@ pub fn sema_function_header_supported(function: Func, context: &SemaCheckContext
             sema_check_unsupported(&context, "the declared `from` view sources on parameter `{parameter.name}` are not supported by the self-hosted checker yet")
             supported = false
         }
+        // D-METHOD-FOOTPRINT1=A: the Rust checker owns the E0231 body check
+        // and API publication of a stated receiver footprint.
+        if parameter.declared_footprint != None {
+            sema_check_unsupported(&context, "the stated receiver footprint on `{function.name}` is not supported by the self-hosted checker yet")
+            supported = false
+        }
     }
     supported
 }

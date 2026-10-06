@@ -1141,6 +1141,16 @@ whose items are kept is declared `[@T]`; a stored link into an item of `[T]`
 is rejected with a fix that rewrites the element type. This rule takes effect
 with the D-MEMREF1 link build.
 
+A method's field footprint (D-METHOD-FOOTPRINT1=A) is the set of receiver
+fields its body reads or changes through `self`, including the footprints of
+sibling methods it calls on `self`; any other use of the whole `self` makes it
+the whole record. A receiver may state it, `&self.log` or `&self.[log, hits]`;
+the stated set must name stored fields and cover the body (E0231). Public
+methods publish the footprint (stated, else inferred) in the API snapshot as
+`; footprint = self.[a, b]`. Calls still count as touching the whole receiver
+until the native emitter keeps disjoint field borrows of one local across
+statements.
+
 ### Zero-copy string views
 
 Binding `String.trim()`, `.after(sep)`, or `.before(sep)` to a local creates a

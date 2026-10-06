@@ -50,6 +50,7 @@ pub const LEXICAL_LEDGER: &[LexicalEntry] = &[
     LexicalEntry { spelling: "?", meaning: "optional type mark after its type (`T?`)", decision: "D-TYPE-SUFFIX1=A" },
     LexicalEntry { spelling: "??", meaning: "fallback", decision: "D-RESULT-DECON2" },
     LexicalEntry { spelling: "&place.method(…) / ^place.method(…)", meaning: "receiver place mark: `&`/`^` on the maximal named place a method call writes or takes; fresh receivers stay unmarked; a line starting `&name`/`^name` begins a statement", decision: "D-CAP-RECEIVER1=D" },
+    LexicalEntry { spelling: "&self.field / &self.[a, b]", meaning: "stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[`", decision: "D-METHOD-FOOTPRINT1=A; D-SPREAD1=A" },
     LexicalEntry { spelling: "T{expr}", meaning: "field default", decision: "D-DEFAULT-SHAPE1" },
     LexicalEntry { spelling: "Name{\"…\"}", meaning: "checked text head", decision: "S8; D-CHECKED-TEXT1" },
     LexicalEntry { spelling: ".{ … }", meaning: "typed anonymous value", decision: "D-POLICY-WORD1" },
@@ -230,6 +231,8 @@ pub const MARKER_ALIGN_LEGACY: &str = "Align";
 // D-SPREAD1=A reuses `.[` (OP_MEMBER_SPREAD) for member spread
 // `prefix.[a, b, c]` → `[prefix.a, prefix.b, prefix.c]`. Call fan-out stays
 // removed (D-VERDICT-1324-1).
+// D-METHOD-FOOTPRINT1=A reuses `.` and the member spread `.[` on a method
+// receiver: `&self.log` / `&self.[log, hits]` states the receiver footprint.
 // D-SHAPE-RESOURCE2=A adds contextual `defer` only at statement head in the
 // exact form `defer close(^resource)`; KW_DEFER/RESOURCE_CLOSE are canonical.
 // D-SHAPE3a=A adds no token: expected-type `.new(...)` reuses MEM_ALLOC_NEW

@@ -532,6 +532,7 @@ pub(super) fn named_param(name: &str, ty: Type, span: Span) -> Param {
         variadic: false,
         variadic_bound_list: None,
         declared_view_from_names: None,
+        footprint: Default::default(),
     }
 }
 

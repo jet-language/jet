@@ -50,6 +50,7 @@ Do not hand-edit these rows. Add or change a spelling in Syntax.rs, recording it
 | `?` | optional type mark after its type (`T?`) | `D-TYPE-SUFFIX1=A` |
 | `??` | fallback | `D-RESULT-DECON2` |
 | `&place.method(…) / ^place.method(…)` | receiver place mark: `&`/`^` on the maximal named place a method call writes or takes; fresh receivers stay unmarked; a line starting `&name`/`^name` begins a statement | `D-CAP-RECEIVER1=D` |
+| `&self.field / &self.[a, b]` | stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[` | `D-METHOD-FOOTPRINT1=A; D-SPREAD1=A` |
 | `T{expr}` | field default | `D-DEFAULT-SHAPE1` |
 | `Name{"…"}` | checked text head | `S8; D-CHECKED-TEXT1` |
 | `.{ … }` | typed anonymous value | `D-POLICY-WORD1` |
@@ -2590,6 +2591,20 @@ and aggregate per-slot `from (text: primary | fallback)` ship in the same ruling
 `self.field = v`, compound ops, and whole-`self` reassignment all lower
 through the deref'd receiver; the same write in a read method is E0205 with a
 "write the receiver as `&self`" fix at the assignment.
+
+**D-METHOD-FOOTPRINT1=A — method field footprints** *(ratified 2026-10-06,
+card #3645)*: sema infers each method's receiver footprint, the record
+fields its body reads or changes through `self` (calls to sibling methods
+on `self` add their footprints; any other use of a whole `self` is the
+whole record). An expert may state the footprint on the receiver with the
+ratified member spread, `&self.log` or `&self.[log, hits]`; the stated set
+must name stored fields and cover the body (E0231), and callers see the
+stated set. Public methods publish the footprint in the API snapshot as
+`; footprint = self.[a, b]`, so a change is a reported API change. Letting
+a call `&s.m()` run beside a live view of a field outside `m`'s footprint
+waits on the native emitter keeping disjoint field borrows of one local
+across statements; until then calls still count as touching the whole
+receiver.
 
 **D-LINK-ITEM1=A — kept links point at objects** *(ratified 2026-10-06,
 card #3645)*: a link (`@`, D-MEMREF1) used only within a brief, checker-bounded
@@ -8410,6 +8425,7 @@ user-typeable syntax; a row here with no prose above it is still binding.
 | `D-META-STAGE1` | B | `c0jq7pog` |
 | `D-META-USER1` | A | `c0jq7pog` |
 | `D-METADEPTH1` | A | `c0ath783` |
+| `D-METHOD-FOOTPRINT1` | A | `c00rqc09` |
 | `D-MIGRATE-SRC1` | A | `c0xede68` |
 | `D-MODCOMPUTE1` | A | `c0cqh9xs` |
 | `D-MODSEM1` | A | `c0c74q4f` |

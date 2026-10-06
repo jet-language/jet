@@ -940,6 +940,7 @@ impl<'a> Fmt<'a> {
                             variadic: false,
                             variadic_bound_list: None,
                             declared_view_from_names: None,
+                            footprint: Default::default(),
                             public_label: None,
                             zone: crate::AST::ParamZone::Either,
                         })

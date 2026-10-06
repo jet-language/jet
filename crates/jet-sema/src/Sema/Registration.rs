@@ -1944,6 +1944,7 @@ pub(crate) fn synthesize_delegation_method(
         variadic: false,
         variadic_bound_list: None,
         declared_view_from_names: None,
+        footprint: Default::default(),
         public_label: None,
         zone: crate::AST::ParamZone::Either,
     };
@@ -2032,6 +2033,7 @@ pub(crate) fn synthesize_default_method(
         variadic: false,
         variadic_bound_list: None,
         declared_view_from_names: None,
+        footprint: Default::default(),
         public_label: None,
         zone: crate::AST::ParamZone::Either,
     };

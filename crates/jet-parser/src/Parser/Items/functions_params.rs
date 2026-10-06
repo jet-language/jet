@@ -2,7 +2,7 @@ use super::super::{
     AccessConvention, Diagnostic, EnumDef, Func, MetaAttr, Param, Parser, Span, StructDef, Syntax,
     TokKind, Type,
 };
-use crate::AST::{ParamZone, PatSlot, Pattern};
+use crate::AST::{Expr, ParamZone, PatSlot, Pattern};
 
 impl<'a> Parser<'a> {
     /// S83: parse either an ordinary parameter list or one bare variant head
@@ -1090,6 +1090,26 @@ impl<'a> Parser<'a> {
         } else {
             self.expect_ident("for a parameter name")?
         };
+        // D-METHOD-FOOTPRINT1=A: an expert receiver may state its field
+        // footprint with a field or the ratified member spread: `&self.log`,
+        // `&self.[log, hits]`. A consuming `^self` takes the whole value.
+        let declared_footprint = if name == Syntax::KW_SELF
+            && convention != AccessConvention::Move
+            && matches!(self.peek().kind, TokKind::Dot)
+        {
+            self.bump();
+            if matches!(self.peek().kind, TokKind::LBracket) {
+                let receiver = Expr::Ident(name.clone(), name_span);
+                match self.parse_member_spread(receiver, name_span.start)? {
+                    Expr::MemberSpread { members, .. } => Some(members),
+                    _ => unreachable!("member spread parses to MemberSpread"),
+                }
+            } else {
+                Some(vec![self.expect_field_name()?])
+            }
+        } else {
+            None
+        };
         // D-APILABEL1=A: `timeout seconds: Int` — two adjacent identifiers
         // split the public call label from the local parameter name. The
         // first one parsed is the label; the second is what the body reads.
@@ -1206,6 +1226,10 @@ impl<'a> Parser<'a> {
             variadic,
             variadic_bound_list,
             declared_view_from_names,
+            footprint: crate::AST::ReceiverFootprint {
+                declared: declared_footprint,
+                inferred: None,
+            },
         };
         if let Some(marker_span) = root_marker_span {
             self.bind_rule_fact(

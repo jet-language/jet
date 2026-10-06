@@ -483,6 +483,13 @@ pub enum Stmt {
     },
 }
 
+/// One node of [`Stmt::for_each_node_mut`]: an expression, or an assignment
+/// target before the expressions inside it.
+pub enum WalkNode<'a> {
+    Expr(&'a mut Expr),
+    LValue(&'a mut LValue),
+}
+
 impl Stmt {
     /// Visit every expression in this statement, including expressions in
     /// nested statement bodies, without changing the checked AST.
@@ -496,17 +503,29 @@ impl Stmt {
     /// fragment needs its expression diagnostics reanchored to the user item
     /// that caused the fragment to be generated.
     pub fn for_each_expr_mut(&mut self, mut f: impl FnMut(&mut Expr)) {
-        fn visit_expr(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
-            expr.for_each_expr_mut(f);
+        self.for_each_node_mut(|node| {
+            if let WalkNode::Expr(expr) = node {
+                f(expr);
+            }
+        });
+    }
+
+    /// Visit every expression and every assignment target in this statement
+    /// and its nested statement bodies. A target is visited before the
+    /// expressions inside it, so a caller may inspect the place it names.
+    pub fn for_each_node_mut(&mut self, mut f: impl FnMut(WalkNode<'_>)) {
+        fn visit_expr(expr: &mut Expr, f: &mut impl FnMut(WalkNode<'_>)) {
+            expr.for_each_expr_mut(|expr| f(WalkNode::Expr(expr)));
         }
 
-        fn visit_body(body: &mut [Stmt], f: &mut impl FnMut(&mut Expr)) {
+        fn visit_body(body: &mut [Stmt], f: &mut impl FnMut(WalkNode<'_>)) {
             for stmt in body {
                 visit_stmt(stmt, f);
             }
         }
 
-        fn visit_lvalue(lvalue: &mut LValue, f: &mut impl FnMut(&mut Expr)) {
+        fn visit_lvalue(lvalue: &mut LValue, f: &mut impl FnMut(WalkNode<'_>)) {
+            f(WalkNode::LValue(lvalue));
             match lvalue {
                 LValue::Local { .. } => {}
                 LValue::Index { base, index, .. } => {
@@ -517,7 +536,7 @@ impl Stmt {
             }
         }
 
-        fn visit_for_kind(kind: &mut ForKind, f: &mut impl FnMut(&mut Expr)) {
+        fn visit_for_kind(kind: &mut ForKind, f: &mut impl FnMut(WalkNode<'_>)) {
             match kind {
                 ForKind::Range {
                     start, end, step, ..
@@ -537,7 +556,7 @@ impl Stmt {
             }
         }
 
-        fn visit_stmt(stmt: &mut Stmt, f: &mut impl FnMut(&mut Expr)) {
+        fn visit_stmt(stmt: &mut Stmt, f: &mut impl FnMut(WalkNode<'_>)) {
             match stmt {
                 Stmt::Expr(expr) => visit_expr(expr, f),
                 Stmt::DeferClose { close, .. } => visit_expr(close, f),
