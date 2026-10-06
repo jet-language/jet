@@ -608,10 +608,7 @@ fn jet_cli_doc_undocumented_report(graph: JetCLIDocGraph, modules: [JetDriverDoc
     jet_cli_doc_sort_strings(&paths)
     rendered := ""
     loop path in paths {
-        found_module :: loop candidate in modules {
-            if jet_cli_doc_stable_path(candidate.path) == path -> break candidate
-        }
-        doc_module :: found_module ?? next
+        doc_module :: jet_cli_doc_module_at(modules, path) ?? next
         diagnostics := [Diagnostic]{}
         loop item in jet_cli_doc_undocumented_public(graph) {
             if item.source.path != path -> next
@@ -1162,6 +1159,7 @@ pub fn jet_cli_main(args: [String]) -> Int {
         }
         .Test(file, source, color, verbose, threads, options) -> output = jet_cli_compile_test(file, source, color, verbose, threads, options)
         .New(name, template, annotated, quiet, color) -> output = jet_cli_new_project(name, template, annotated, quiet, color)
+
         .Doc(file, source, color, json, check) -> output = jet_cli_compile_doc(file, source, color, json, check)
         .Emit(file, source, color) -> output = jet_cli_compile_emit(file, source, color)
         .Lint(file, source, color, notice) -> {

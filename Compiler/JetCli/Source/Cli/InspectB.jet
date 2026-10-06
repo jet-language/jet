@@ -661,8 +661,8 @@ fn jet_cli_engine_dispatch(engine: String, verb: String, argv: [String]) -[Env, 
 
 // Rust `io::Error` Display text of a host I/O failure: the runtime records
 // it as the context's `cause` (CoreLib `IOContext`).
-fn jet_cli_io_error_text(err: IOError) -> String Never! {
-    cause :: if err == {
+fn jet_cli_io_error_text(failure: IOError) -> String Never! {
+    cause :: if failure == {
         .InvalidInput(context) -> context.cause
         .NotFound(context) -> context.cause
         .PermissionDenied(context) -> context.cause
@@ -674,7 +674,7 @@ fn jet_cli_io_error_text(err: IOError) -> String Never! {
         .ResourceLimit(_) -> String?{None}
     }
     if cause == .Val(text) -> return text
-    "{err}"
+    "{failure}"
 }
 
 // ---------------------------------------------------------------------------
@@ -767,7 +767,7 @@ fn jet_cli_inspect_env(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPla
 // `jet inspect semindex <file.jet>` (CmdSemIndex.rs `run_semindex`): the
 // semantic index of the checked entry, compiled by the host
 // (`JetCLIPlan.Semindex`).
-fn jet_cli_semindex(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
+fn jet_cli_semindex(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     path :: jet_cli_inspect_first_positional(args) ?? return jet_cli_inspect_b_fail("E2104", "`jet inspect semindex` needs an entry file", "jet inspect semindex Examples/features/basics/hello.jet", color, json, JET_DRIVER_EXIT_USER_ERROR)
     JetCLIPlan.Semindex{file: jet_cli_inspect_absolutize(path), color: color, json: json}
 }
