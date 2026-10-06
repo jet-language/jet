@@ -102,7 +102,7 @@ fn lower_inline_members(p: MIRProgram, ty: MIRType) -> [LowerMember] Never! {
 // A List or Map is an inline [len, cap, data] header (Lists.jet, Maps.jet), a
 // View<T> window the same header borrowing its buffer.
 fn lower_inline_size(p: MIRProgram, ty: MIRType) -> Int Never! {
-    if ty.kind == .List(_) | .Map(_, _) -> return 24
+    if ty.kind == .List(_) | .Map(_, _) | .FixedList(_, _) -> return 24
     if lower_view_element(ty) != None -> return 24
     lower_align_up(lower_members_end(p, lower_inline_members(p, ty), 0), 8)
 }
