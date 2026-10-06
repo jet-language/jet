@@ -5270,7 +5270,7 @@ impl<'a> Checker<'a> {
                             "E0356",
                             "`.new(...)` needs one known receiver type here".to_string(),
                             "the inferred constructor uses the surrounding expected type; Jet does not search a global constructor registry".to_string(),
-                            "add a type annotation or write the full `Type.new(...)` form".to_string(),
+                            "write the full `Type.new(...)` form, or use `.new(...)` where its type is already expected".to_string(),
                             Some(*method_span),
                         ));
                         return None;
@@ -5605,7 +5605,7 @@ impl<'a> Checker<'a> {
                                 "a leading-dot variant needs a known enum type from context"
                                     .to_string(),
                                 format!(
-                                    "add a type annotation, or write the full form `EnumName.{}`",
+                                    "write the full form `EnumName.{}`, or use it where its enum type is already expected",
                                     variant
                                 ),
                                 Some(*span),
@@ -5665,8 +5665,8 @@ impl<'a> Checker<'a> {
                                 Syntax::LIT_NULL
                             ),
                             format!(
-                                "add a type annotation, or use `{}` where the type is already known",
-                                Syntax::LIT_NULL
+                                "write the optional type on the value, for example `Int?{{{}}}`, or use `{}` where a `T?` is already expected",
+                                Syntax::LIT_NULL, Syntax::LIT_NULL
                             ),
                             Some(*span),
                         ));
@@ -5684,8 +5684,8 @@ impl<'a> Checker<'a> {
                             Syntax::LIT_NULL
                         ),
                         format!(
-                            "add a type annotation, or use `{}` where the type is already known",
-                            Syntax::LIT_NULL
+                            "write the optional type on the value, for example `Int?{{{}}}`, or use `{}` where a `T?` is already expected",
+                            Syntax::LIT_NULL, Syntax::LIT_NULL
                         ),
                         Some(*span),
                     ));

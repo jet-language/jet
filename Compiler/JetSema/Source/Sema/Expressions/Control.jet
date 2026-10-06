@@ -111,14 +111,14 @@ fn sema_expression_present(value: Expr, span: Span, expected: Type?, environment
 
 fn sema_expression_absent(span: Span, expected: Type?, diagnostics: &[Diagnostic]) -> TExpr? {
     required :: expected ?? {
-        &diagnostics.push(sema_error("E0308", span, "bare `None` needs a known optional type here", "`None` only fits where a `T?` is expected (S32)", "add a type annotation, or use `None` where the type is already known"))
+        &diagnostics.push(sema_error("E0308", span, "bare `None` needs a known optional type here", "`None` only fits where a `T?` is expected (S32)", "write the optional type on the value, for example `Int?{{None}}`, or use `None` where a `T?` is already expected"))
         return None
     }
     normalized :: sema_expr_unwrap_tag(required)
     if normalized == {
         .Option(_) -> Val(sema_tir_expr(normalized, TExprKind.Absent, span))
         else -> {
-            &diagnostics.push(sema_error("E0308", span, "bare `None` needs a known optional type here", "`None` only fits where a `T?` is expected (S32)", "add a type annotation, or use `None` where the type is already known"))
+            &diagnostics.push(sema_error("E0308", span, "bare `None` needs a known optional type here", "`None` only fits where a `T?` is expected (S32)", "write the optional type on the value, for example `Int?{{None}}`, or use `None` where a `T?` is already expected"))
             None
         }
     }

@@ -440,7 +440,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
     resolved_name := type_name
     if resolved_name == "" {
         expected_ty :: expected ?? {
-            &diagnostics.push(sema_error("E0330", span, "can't infer the enum type for `.{variant}`", "a leading-dot variant needs a known enum type from context", "add a type annotation, or write the full form `EnumName.{variant}`"))
+            &diagnostics.push(sema_error("E0330", span, "can't infer the enum type for `.{variant}`", "a leading-dot variant needs a known enum type from context", "write the full form `EnumName.{variant}`, or use it where its enum type is already expected"))
             return None
         }
         normalized :: sema_expr_unwrap_tag(expected_ty)
@@ -457,7 +457,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
             else -> ""
         }
         if resolved_name == "" {
-            &diagnostics.push(sema_error("E0330", span, "can't infer the enum type for `.{variant}`", "a leading-dot variant needs a known enum type from context", "add a type annotation, or write the full form `EnumName.{variant}`"))
+            &diagnostics.push(sema_error("E0330", span, "can't infer the enum type for `.{variant}`", "a leading-dot variant needs a known enum type from context", "write the full form `EnumName.{variant}`, or use it where its enum type is already expected"))
             return None
         }
     }
@@ -477,7 +477,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
         inferred_is_enum := false
         if inferred_owner == .Val(owner_symbol) -> inferred_is_enum = sema_scope_declaration_is(environment, owner_symbol.id, SemaScopeDeclarationKind.Enum)
         if !inferred_is_enum {
-            &diagnostics.push(sema_error("E0330", span, "can't infer the enum type for `.{variant}`", "a leading-dot variant needs a known enum type from context", "add a type annotation, or write the full form `EnumName.{variant}`"))
+            &diagnostics.push(sema_error("E0330", span, "can't infer the enum type for `.{variant}`", "a leading-dot variant needs a known enum type from context", "write the full form `EnumName.{variant}`, or use it where its enum type is already expected"))
             return None
         }
     }
