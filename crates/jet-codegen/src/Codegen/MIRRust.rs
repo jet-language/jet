@@ -244,6 +244,10 @@ enum ViewReturnLifetime {
 
 const VIEW_RETURN_LIFETIME: &str = "'__jet_view";
 
+/// The higher-ranked lifetime a callable type names when its returned view
+/// borrows from its own arguments.
+const CALLABLE_VIEW_LIFETIME: &str = "'__jet_fn";
+
 /// `<lifetimes…, generics…>` for a signature whose type generics render as
 /// `generics` (`""` or `<…>`).
 fn signature_generics(lifetimes: &[&str], generics: &str) -> String {
@@ -5642,7 +5646,12 @@ impl<'a> RustEmitter<'a> {
                     .call_metadata
                     .as_ref()
                     .map(|metadata| metadata.conventions.as_slice());
-                self.callable_type(&signature.params, conventions, signature.ret.as_deref())
+                self.callable_type(
+                    &signature.params,
+                    conventions,
+                    signature.ret.as_deref(),
+                    signature.return_view_provenance.as_ref(),
+                )
             }
             MirTypeKind::SendFn {
                 params,
@@ -6422,21 +6431,70 @@ impl<'a> RustEmitter<'a> {
         params: &[MirType],
         conventions: Option<&[MirAccess]>,
         ret: Option<&MirType>,
+        return_view_provenance: Option<&BTreeMap<Vec<String>, MirViewProvenance>>,
     ) -> String {
-        let parameter_types = params
+        let modes = params
             .iter()
             .enumerate()
             .map(|(index, param)| {
-                let access = Self::callable_parameter_access(conventions, index);
+                self.callable_parameter_mode(
+                    param,
+                    Self::callable_parameter_access(conventions, index),
+                )
+            })
+            .collect::<Vec<_>>();
+        // D-MEMPROVENANCE3=A / #4392: a callable whose returned view borrows
+        // from its arguments states that relation as a higher-ranked lifetime
+        // on the borrowed owner arguments (`for<'f> FnMut(&'f A, &B) -> &'f
+        // str`), so rustc never has to guess it from several inputs.
+        let view_owners = ret
+            .filter(|ret| !self.history_runtime_metadata_enabled() && self.type_carries_view(ret))
+            .and_then(|_| {
+                let mut owners = BTreeSet::new();
+                let mut statics = false;
+                for path in return_view_provenance
+                    .into_iter()
+                    .flat_map(BTreeMap::values)
+                    .flat_map(|view| view.sources.iter())
+                {
+                    match path.source {
+                        MirViewSource::Parameter(index) => {
+                            owners.insert(index);
+                        }
+                        MirViewSource::Static { .. } => statics = true,
+                        MirViewSource::Receiver => {}
+                    }
+                }
+                if owners.is_empty() && !statics {
+                    owners = (0..modes.len()).collect();
+                }
+                owners.retain(|index| matches!(modes.get(*index), Some('R' | 'W')));
+                if !owners.is_empty() {
+                    Some((CALLABLE_VIEW_LIFETIME, owners))
+                } else if statics {
+                    Some(("'static", owners))
+                } else {
+                    None
+                }
+            });
+        let parameter_types = params
+            .iter()
+            .zip(&modes)
+            .enumerate()
+            .map(|(index, (param, mode))| {
                 let rendered = self.rust_type(param);
-                let mode = self.callable_parameter_mode(param, access);
+                let lifetime = view_owners
+                    .as_ref()
+                    .filter(|(_, owners)| owners.contains(&index))
+                    .map(|(lifetime, _)| format!("{lifetime} "))
+                    .unwrap_or_default();
                 let callable = match mode {
-                    'W' => format!("&mut {rendered}"),
-                    'R' => format!("&{rendered}"),
+                    'W' => format!("&{lifetime}mut {rendered}"),
+                    'R' => format!("&{lifetime}{rendered}"),
                     'O' => rendered.clone(),
                     other => panic!("MIR callable has unknown mode `{other}`"),
                 };
-                (rendered, callable, mode)
+                (rendered, callable, *mode)
             })
             .collect::<Vec<_>>();
         let params = parameter_types
@@ -6445,8 +6503,17 @@ impl<'a> RustEmitter<'a> {
             .collect::<Vec<_>>()
             .join(", ");
         let ret = ret
-            .map(|ret| self.rust_type(ret))
+            .map(|ret| match &view_owners {
+                Some((lifetime, _)) => self.with_view_lifetime(lifetime, || self.rust_type(ret)),
+                None => self.rust_type(ret),
+            })
             .unwrap_or_else(|| "()".to_string());
+        let higher_ranked = match &view_owners {
+            Some((lifetime, _)) if *lifetime == CALLABLE_VIEW_LIFETIME => {
+                format!("for<{CALLABLE_VIEW_LIFETIME}> ")
+            }
+            _ => String::new(),
+        };
         if self.history_runtime_metadata_enabled() {
             let arity = parameter_types.len();
             let modes = parameter_types
@@ -6483,7 +6550,7 @@ impl<'a> RustEmitter<'a> {
             )
         } else {
             format!(
-                "std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnMut({params}) -> {ret}>>>>"
+                "std::rc::Rc<std::cell::RefCell<Option<Box<dyn {higher_ranked}FnMut({params}) -> {ret}>>>>"
             )
         }
     }

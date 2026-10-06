@@ -759,24 +759,67 @@ fn jet_rust_emit_c_abi_type_definitions(ctx: &JetRustEmitContext, lines: &[Strin
     }
 }
 
-fn jet_rust_emit_callable_type_parts(ctx: &JetRustEmitContext, params: [MIRType], conventions: [MIRAccess], ret: MIRType?) -> String Never! {
-    rendered := [String]{}
-    index := 0
-    loop param in params {
+// MIRRust callable_type (D-MEMPROVENANCE3=A / #4392): a callable whose
+// returned view borrows from its arguments names that relation as a
+// higher-ranked lifetime on the borrowed owner arguments.
+fn jet_rust_emit_callable_type_parts(ctx: &JetRustEmitContext, params: [MIRType], conventions: [MIRAccess], ret: MIRType?, provenance: [MIRViewProvenanceEntry]?) -> String Never! {
+    accesses := [MIRAccess]{}
+    loop index in 0..<params.len() {
         access := MIRAccess.Read
         if index < conventions.len() -> access = conventions[index]
-        &rendered.push(jet_rust_emit_callable_param_type(&ctx, param, access))
-        index += 1
+        &accesses.push(access)
+    }
+    owners := [Int]{}
+    statics := false
+    view_return := if ret == .Val(ret_ty) -> jet_rust_emit_type_carries_view(ctx, ret_ty) else -> false
+    if view_return {
+        loop entry in provenance ?? [MIRViewProvenanceEntry]{} {
+            loop path in entry.provenance.sources {
+                if path.source == {
+                    .Parameter(index) -> if !jet_rust_emit_int_list_has(owners, index) -> &owners.push(index)
+                    .Static(_, _) -> statics = true
+                    .Receiver -> {}
+                }
+            }
+        }
+        if owners.len() == 0 && !statics {
+            loop index in 0..<params.len() -> &owners.push(index)
+        }
+    }
+    borrowed_owners := [Int]{}
+    loop index in owners {
+        if index < params.len() && (accesses[index] == MIRAccess.Write || (accesses[index] == MIRAccess.Read && jet_rust_emit_type_is_borrowed(params[index]))) -> &borrowed_owners.push(index)
+    }
+    lifetime := ""
+    if borrowed_owners.len() > 0 {
+        lifetime = JET_RUST_EMIT_CALLABLE_VIEW_LIFETIME
+    } else if view_return && statics {
+        lifetime = "'static"
+    }
+    rendered := [String]{}
+    loop (index, param) in params {
+        text := jet_rust_emit_callable_param_type(&ctx, param, accesses[index])
+        if lifetime != "" && jet_rust_emit_int_list_has(borrowed_owners, index) {
+            if text.starts_with("&mut ") {
+                text = "&{lifetime} mut {text.slice(5, text.len())}"
+            } else if text.starts_with("&") {
+                text = "&{lifetime} {text.slice(1, text.len())}"
+            }
+        }
+        &rendered.push(text)
     }
     result := "()"
-    if ret == .Val(ret_ty) -> result = jet_rust_emit_type(&ctx, ret_ty)
-    "std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnMut({rendered.join(", ")}) -> {result}>>>>"
+    if ret == .Val(ret_ty) -> result = if lifetime != "" -> jet_rust_emit_type_with_view_lifetime(&ctx, ret_ty, lifetime) else -> jet_rust_emit_type(&ctx, ret_ty)
+    higher_ranked := if lifetime == JET_RUST_EMIT_CALLABLE_VIEW_LIFETIME -> "for<{lifetime}> " else -> ""
+    "std::rc::Rc<std::cell::RefCell<Option<Box<dyn {higher_ranked}FnMut({rendered.join(", ")}) -> {result}>>>>"
 }
+
+JET_RUST_EMIT_CALLABLE_VIEW_LIFETIME :: "'__jet_fn"
 
 fn jet_rust_emit_function_type(ctx: &JetRustEmitContext, signature: MIRFunctionSignature) -> String Never! {
     conventions := [MIRAccess]{}
     if signature.call_metadata != None -> conventions = (signature.call_metadata ?? MIRCallMetadata{names: [String]{}, defaults: [Bool]{}, variadic: [Bool]{}, conventions: [MIRAccess]{}, policies: MIRCallablePolicyChain{policies: [MIRCallablePolicy]{}}}).conventions
-    jet_rust_emit_callable_type_parts(&ctx, signature.params, conventions, signature.ret)
+    jet_rust_emit_callable_type_parts(&ctx, signature.params, conventions, signature.ret, signature.return_view_provenance)
 }
 
 fn jet_rust_emit_send_function_type(ctx: &JetRustEmitContext, params: [MIRType], ret: MIRType?, conventions: [MIRAccess]) -> String Never! {
