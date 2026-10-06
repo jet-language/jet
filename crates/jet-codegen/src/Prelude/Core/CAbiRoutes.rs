@@ -15021,11 +15021,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.tui.ascii
-    #[no_mangle]
-    pub extern "C" fn jet_tui_ascii(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_tui_ascii(view(a0))))
-    }
 
     /// core.tui.capabilities
     #[no_mangle]
@@ -15033,11 +15028,6 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_tui_capabilities())))
     }
 
-    /// core.tui.display_width
-    #[no_mangle]
-    pub extern "C" fn jet_tui_display_width_int(a0: JetCString) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_tui_display_width_int(view(a0))))
-    }
 
     /// core.tui.list
     #[no_mangle]

@@ -82,7 +82,18 @@ pub fn capabilities() -> TUICapabilities Never! {
     core.tui.capabilities()
 }
 
-pub fn ascii(value: String) -> String Never! { core.tui.ascii(value) }
+pub fn ascii(value: String) -> String Never! {
+    raw :: value.bytes()
+    out := [U8]{}
+    i := 0
+    loop i < raw.len() {
+        width :: utf8_width(raw[i])
+        n :: scalar_at(raw, i, width)
+        i += width
+        &out.push(U8{ascii_scalar(n)})
+    }
+    String.from_bytes(out) ?? ""
+}
 pub fn color_ansi16(index: Int) -> TUIColor Never! { TUIColor.ANSI16(clamp_color(index, 15)) }
 pub fn color_ansi256(index: Int) -> TUIColor Never! { TUIColor.ANSI256(clamp_color(index, 255)) }
 pub fn color_rgb(red: Int, green: Int, blue: Int) -> TUIColor Never! {
@@ -115,7 +126,22 @@ pub fn style_background(s: TUIStyle, color: TUIColor) -> TUIStyle Never! {
 pub fn style_text(value: String, s: TUIStyle, caps: TUICapabilities) -> String Never! {
     core.tui.style_text(value, s, caps)
 }
-pub fn display_width(value: String) -> Int Never! { core.tui.display_width(value) }
+pub fn display_width(value: String) -> Int Never! {
+    raw :: value.bytes()
+    result := 0
+    i := 0
+    escape := false
+    loop i < raw.len() {
+        width :: utf8_width(raw[i])
+        n :: scalar_at(raw, i, width)
+        i += width
+        if escape {
+            if n == 64 || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) -> escape = false
+        } else if n == 27 -> escape = true
+        else -> result += scalar_display_width(n)
+    }
+    result
+}
 
 pub fn length(value: Float) -> TUIConstraint Never! { TUIConstraint.Length(nonnegative(value)) }
 pub fn min(value: Float) -> TUIConstraint Never! { TUIConstraint.Min(nonnegative(value)) }
@@ -197,3 +223,61 @@ fn tui_constructor_policy() {
     assert(s.background == Val(TUIColor.ANSI16(1)))
 }
 
+
+fn utf8_width(byte: U8) -> Int Never! {
+    n :: Int.from_u8(byte)
+    if n < 128 -> 1 else if n < 224 -> 2 else if n < 240 -> 3 else 4
+}
+
+fn scalar_at(raw: [U8], offset: Int, width: Int) -> Int Never! {
+    value := Int.from_u8(raw[offset])
+    if width == 1 -> return value
+    value = value & ((1 << (7 - width)) - 1)
+    i := 1
+    loop i < width {
+        value = (value << 6) | (Int.from_u8(raw[offset + i]) & 63)
+        i += 1
+    }
+    value
+}
+
+fn ascii_scalar(n: Int) -> Int Never! {
+    if n == 0x2500 || n == 0x2501 || n == 0x2550 -> return 45
+    if n == 0x2502 || n == 0x2503 || n == 0x2551 -> return 124
+    if n == 0x250C || n == 0x250F || n == 0x2554 || n == 0x2510 || n == 0x2513 || n == 0x2557 ||
+       n == 0x2514 || n == 0x2517 || n == 0x255A || n == 0x2518 || n == 0x251B || n == 0x255D ||
+       n == 0x251C || n == 0x2524 || n == 0x252C || n == 0x2534 || n == 0x253C || n == 0x254B || n == 0x256C -> return 43
+    if n == 0x2192 || n == 0x21D2 || n == 0x279C -> return 62
+    if n == 0x2190 || n == 0x21D0 -> return 60
+    if n == 0x2191 || n == 0x21D1 -> return 94
+    if n == 0x2193 || n == 0x21D3 -> return 118
+    if n < 128 -> n else 63
+}
+
+fn scalar_display_width(n: Int) -> Int Never! {
+    if n < 32 || (n >= 0x7F && n <= 0x9F) ||
+       (n >= 0x0300 && n <= 0x036F) || (n >= 0x0483 && n <= 0x0489) ||
+       (n >= 0x0591 && n <= 0x05BD) || (n >= 0x0610 && n <= 0x061A) ||
+       (n >= 0x064B && n <= 0x065F) || (n >= 0x1AB0 && n <= 0x1AFF) ||
+       (n >= 0x1DC0 && n <= 0x1DFF) || (n >= 0x20D0 && n <= 0x20FF) ||
+       (n >= 0xFE20 && n <= 0xFE2F) -> return 0
+    if (n >= 0x1100 && n <= 0x115F) || (n >= 0x2329 && n <= 0x232A) ||
+       (n >= 0x2E80 && n <= 0x303E) || (n >= 0x3040 && n <= 0xA4CF) ||
+       (n >= 0xAC00 && n <= 0xD7A3) || (n >= 0xF900 && n <= 0xFAFF) ||
+       (n >= 0xFE10 && n <= 0xFE19) || (n >= 0xFE30 && n <= 0xFE6F) ||
+       (n >= 0xFF00 && n <= 0xFF60) || (n >= 0xFFE0 && n <= 0xFFE6) ||
+       (n >= 0x1F300 && n <= 0x1FAFF) -> return 2
+    1
+}
+
+#Test
+fn tui_text_policy() {
+    assert(ascii("─━═│┃║┌┏╔┐┓╗└┗╚┘┛╝├┤┬┴┼╋╬") == "---|||+++++++++++++++++++")
+    assert(ascii("→⇒➜←⇐↑⇑↓⇓é🙂") == ">>><<^^vv??")
+    assert(display_width("é") == 1)
+    assert(display_width("界🙂") == 4)
+    assert(display_width("\n\t") == 0)
+    escape :: String.from_bytes([U8]{27}) ?? ""
+    assert(display_width("{escape}[31mred{escape}[0m") == 3)
+    assert(display_width("{escape}[31") == 0)
+}
