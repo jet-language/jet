@@ -2974,6 +2974,8 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
         return None
     }
     sema_ownership_declare_binding(&state, symbol, false)
+    // D-CALLSITE-MARK1=A: a bound lambda that takes a capture runs once.
+    if binding.init == .Lambda(bound_lambda) -> sema_ownership_bind_once_lambda(&state, bound_lambda.span, symbol.id.key)
     sema_single_use_note_binding(&state, symbol, environment)
     if binding.name == "_" -> sema_single_use_check_discard(init.ty, binding.name_span, environment, &diagnostics)
     sema_stmt_track_origin(binding, environment, &scopes)

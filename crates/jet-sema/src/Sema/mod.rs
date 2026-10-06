@@ -2119,6 +2119,14 @@ pub(crate) struct Checker<'a> {
     /// A later use that reaches one reports E0209 there (pass a copy with
     /// `~`) instead of turning it into a share.
     implicit_take_sites: HashMap<Span, ImplicitTakeSite>,
+    /// D-CALLSITE-MARK1=A: lambdas whose body takes a captured name with
+    /// `^`, keyed by the lambda span, with that capture's name. The take
+    /// moves the capture into the lambda, so the lambda runs at most once.
+    once_lambda_sites: HashMap<Span, String>,
+    /// D-CALLSITE-MARK1=A: bindings that hold such a lambda, keyed by the
+    /// binding's definition span. A call moves the binding, so a second
+    /// call on any path reports E0121 naming the taken capture.
+    once_lambdas: HashMap<Span, String>,
     /// D-LOOP-SUBJECT1=A: active bindingless collecting-loop subjects.
     implicit_loop_subject_depth: usize,
     /// D-SUBJECT-COHERE1=A: active subject-shorthand lambda scopes.

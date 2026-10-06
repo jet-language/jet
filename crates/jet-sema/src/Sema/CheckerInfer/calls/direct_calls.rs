@@ -2817,6 +2817,14 @@ impl<'a> Checker<'a> {
                 }
             }
 
+            // D-CALLSITE-MARK1=A: a written `&` always means the call edits.
+            if !sig.is_extern
+                && *param_conv == AccessConvention::Read
+                && crate::Sema::Diagnostics::expr_root_ident(&arg.expr).is_some()
+                && self.reject_unbacked_write_mark(&call.name, arg, param_ty)
+            {
+                continue;
+            }
             match (param_conv, arg.convention) {
                 (AccessConvention::Move, AccessConvention::Read) => {
                     // D-COPY-DEFAULT1=A: an unmarked last use moves like `^name`.

@@ -303,7 +303,14 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
     source_indices := [Int]{}
     pin_arguments := false
     binder_site := 0
+    // D-CALLSITE-MARK1=A: per argument, its first name reference in
+    // `context.name_references`, and the noted implicit take arguments
+    // (argument index and binding key), for the one-name-two-slots rule.
+    reference_starts := [Int]{}
+    take_indices := [Int]{}
+    take_keys := [String]{}
     loop index in 0..<args.len() {
+        &reference_starts.push(context.name_references.len())
         slot :: sema_call_bound_slot(binding, binding.sources[index], args[index])
         if slot < 0 || slot >= params.len() -> return None
         parameter :: params[slot]
@@ -345,13 +352,34 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         }
         // D-COPY-DEFAULT1=A: the ownership check that follows moves an
         // eligible unmarked take argument at its last use.
-        if !report_conventions && decision == SemaCallConventionDecision.NeedsImplicitClone && binder_refs.len() == 0 -> sema_ownership_note_implicit_take(&state, args[index].expr, value.ty, required, environment, context.generic_params, scopes)
+        if !report_conventions && decision == SemaCallConventionDecision.NeedsImplicitClone && binder_refs.len() == 0 {
+            if sema_ownership_note_implicit_take(&state, args[index].expr, value.ty, required, environment, context.generic_params, scopes) == .Val(key) {
+                &take_indices.push(index)
+                &take_keys.push(key)
+            }
+        }
         &values.push(value)
         &slots.push(slot)
         &required_types.push(required)
         &source_indices.push(args[index].flags.source_index ?? -1)
     }
+    &reference_starts.push(context.name_references.len())
+    loop position in 0..<take_indices.len() {
+        if sema_call_key_named_elsewhere(take_keys[position], take_indices[position], reference_starts, context) -> sema_ownership_note_implicit_take_twice(&state, expr_span(args[take_indices[position]].expr))
+    }
     Val(SemaCallTypedArguments{values: values, slots: slots, required_types: required_types, source_indices: source_indices, pin_arguments: pin_arguments, binder_site: binder_site})
+}
+
+// Whether an argument other than `own` references the binding `key`;
+// `starts` holds each argument's first name reference and the end.
+fn sema_call_key_named_elsewhere(key: String, own: Int, starts: [Int], context: SemaCheckContext) -> Bool Never! {
+    loop other in 0..<starts.len() - 1 {
+        if other == own -> next
+        loop index in starts[other]..<starts[other + 1] {
+            if index < context.name_references.len() && context.name_references[index].symbol.id.key == key -> return true
+        }
+    }
+    false
 }
 
 fn sema_call_binder_ref_symbol(environment: SemaScopeEnvironment, owner: String, site: Int, slot: Int, name: String, ty: Type, span: Span) -> Symbol Never! {
