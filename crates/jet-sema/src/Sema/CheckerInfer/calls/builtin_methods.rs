@@ -1024,11 +1024,14 @@ impl<'a> Checker<'a> {
                         et,
                         crate::AST::AccessConvention::Read,
                     );
-                    if i == 0
-                        && !self.in_lambda_body
-                        && callback_value_takes_default_route(recv_ty, method, &arg.expr, &gt)
-                    {
-                        self.failure_direct_source = true;
+                    // Inside a callback the failure propagates through that
+                    // callback's carrier, exactly as a direct `f(item)` does.
+                    if i == 0 && callback_value_takes_default_route(recv_ty, method, &arg.expr, &gt) {
+                        if self.in_lambda_body {
+                            self.task_body_propagates = true;
+                        } else {
+                            self.failure_direct_source = true;
+                        }
                     }
                     if Collections::is_closure_method(method) && i == 0 && method == "map" {
                         if let Type::Fn {

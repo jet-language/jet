@@ -261,7 +261,12 @@ pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, 
         }
         if callback {
             callback_return = Val(sema_call_collections_callback_return(value))
-            if index == 0 && sema_call_collections_callback_takes_default_route(receiver_value.ty, method, value) -> context.failure_direct_source = true
+            // Like a direct `f(item)`: the unresolved edge also reaches the
+            // owner from inside a callback (Rust sets `task_body_propagates`).
+            if index == 0 && sema_call_collections_callback_takes_default_route(receiver_value.ty, method, value) {
+                context.failure_direct_source = true
+                &context.failure_edges.push("")
+            }
             callback_mutable = if value.kind == {
                 .Lambda(lambda) -> lambda.capture_facts.needs_fn_mut
                 else -> callback_mutable
