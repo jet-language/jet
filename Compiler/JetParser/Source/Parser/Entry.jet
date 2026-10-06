@@ -69,12 +69,16 @@ pub fn parse_generated_source(source: [U8]) -> ParseResult {
 }
 
 pub fn parse_lexed(lexed: Lexed) -> ParseResult {
-    parser_parse_lexed_lines(lexed, [U8]{}, [Int]{})
+    parser_parse_lexed_lines(~lexed, [U8]{}, [Int]{})
 }
 
-fn parser_parse_lexed_lines(lexed: Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
+// The lexed tokens move into the parser state (field moves reset the field,
+// so no token list is copied on the way).
+fn parser_parse_lexed_lines(lexed: ^Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
     source_end :: if lexed.tokens.len() > 0 -> lexed.tokens[lexed.tokens.len() - 1].span.start else -> 0
-    parser_parse_prepared(parser_prepare_tokens(lexed.tokens), lexed.diagnostics, source_end, line_starts, source)
+    tokens := ^lexed.tokens
+    lexed.tokens = [Token]{}
+    parser_parse_prepared(parser_prepare_tokens(^tokens), lexed.diagnostics, source_end, line_starts, source)
 }
 
 fn parser_line_starts(source: [U8]) -> [Int] Never! {
@@ -93,19 +97,21 @@ pub fn parse_tokens(tokens: [Token]) -> ParseResult {
         }
         else -> 0
     }
-    parser_parse_prepared(parser_prepare_tokens(tokens), [Diagnostic]{}, source_end, [Int]{}, [U8]{})
+    parser_parse_prepared(parser_prepare_tokens(~tokens), [Diagnostic]{}, source_end, [Int]{}, [U8]{})
 }
 
 // D-EACH1=C: fence expansion runs before parsing. A fence error stops the
 // parse like any token-level rejection: no partially expanded AST is built.
-fn parser_parse_prepared(prepared: ParserFenceExpansion, lexer_diagnostics: [Diagnostic], source_end: Int, line_starts: [Int], source: [U8]) -> ParseResult {
+fn parser_parse_prepared(prepared: ^ParserFenceExpansion, lexer_diagnostics: [Diagnostic], source_end: Int, line_starts: [Int], source: [U8]) -> ParseResult {
     if prepared.diagnostics.len() > 0 {
         diagnostics := [Diagnostic]{}
         loop diagnostic in lexer_diagnostics -> &diagnostics.push(diagnostic)
         loop diagnostic in prepared.diagnostics -> &diagnostics.push(diagnostic)
         return ParseResult{program: ast_program(), diagnostics: diagnostics}
     }
-    state := JetParserState{tokens: prepared.tokens, position: 0, diagnostics: lexer_diagnostics, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0, statement_start: -1, line_starts: line_starts, source: source}
+    tokens := ^prepared.tokens
+    prepared.tokens = [Token]{}
+    state := JetParserState{tokens: ^tokens, position: 0, diagnostics: lexer_diagnostics, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0, statement_start: -1, line_starts: line_starts, source: source}
     program := parser_parse_program(&state)
     program.block_spans = state.block_spans
     program.else_arms = state.else_arms
