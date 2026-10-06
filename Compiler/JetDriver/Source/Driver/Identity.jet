@@ -6,6 +6,7 @@ use jet_foundation.[
     ImportDecl,
     Item,
     JetReleaseDevtoolsPolicy,
+    JetTargetLayout,
     MIRAllocatorPolicy,
     MIRArtifactBuildMode,
     MIRArtifactID,
@@ -13,6 +14,7 @@ use jet_foundation.[
     MIRProgram,
     MIRRuntimeLayer,
     MIRSourceFile,
+    NameLedger,
     PackageKeyDependency,
     PackageKeySourceFile,
     PackageKeyTargetFact,
@@ -35,6 +37,8 @@ use jet_foundation.[
 use jet_sema.[
     SemaCallSiteFact,
     SemaNameReferenceFact,
+    SemaCheckedMemoryFacts,
+    SemaLayoutProjectionRow,
     SemaComptimeItemValue,
     SemaRegistrationImportEdge,
     SemaSourceOrigin,
@@ -124,6 +128,14 @@ pub struct JetDriverDocModule {
     pub functions: [TFunc]{[TFunc]{}}
     pub name_references: [SemaNameReferenceFact]{[SemaNameReferenceFact]{}}
     pub call_facts: [SemaCallSiteFact]{[SemaCallSiteFact]{}}
+    // Shared once per checked bundle; module positions retain Sema's ordering.
+    pub name_ledger: Shared<NameLedger>?{None}
+    pub memory_facts: Shared<SemaCheckedMemoryFacts>?{None}
+    pub module_identity: String{""}
+    pub target_triple: String{""}
+    pub target_layout: JetTargetLayout?{None}
+    pub layout_facts: [SemaLayoutProjectionRow]{[SemaLayoutProjectionRow]{}}
+    pub name_module_index: Int{-1}
 }
 
 // One Core library source module the host embeds, mirroring a Rust

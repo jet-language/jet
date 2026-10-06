@@ -3051,7 +3051,7 @@ pub struct MIRHarnessPlan {
 
 pub enum MIRNameVisibility { Private Package Public }
 
-pub struct MIRNameModule { pub alias: String, pub path: String, pub package: String }
+pub struct MIRNameModule { pub alias: String, pub path: String, pub package: String, pub namespace: String?{None} }
 
 pub struct MIRNameDeclaration {
     pub module_index: Int
@@ -3090,12 +3090,20 @@ pub struct MIRStructureFact {
     pub gate: String?
 }
 
+pub struct MIRNameDisplayPath {
+    pub module_index: Int
+    pub internal_path: String
+    pub display_path: String
+}
+
 pub struct MIRNameFacts {
     pub modules: [MIRNameModule]
     pub declarations: [MIRNameDeclaration]
     pub aliases: [MIRNameAlias]
     pub references: [MIRNameReference]
     pub structure_facts: [MIRStructureFact]
+    // Source-facing paths are semantic-check metadata, not emitted identities.
+    pub display_paths: [MIRNameDisplayPath]{[MIRNameDisplayPath]{}}
 }
 
 pub struct MIRSchemaMigrationPlan {

@@ -166,6 +166,17 @@ The generated help groups subcommands as follows:
 Use `jet help registry`, `jet help inspect`, or `jet help <subcommand>` when a
 script needs the complete generated synopsis rather than this index.
 
+`find` and symbol help read source-facing names from Sema's checked name
+ledger. Unambiguous visible names stay short; ambiguous names retain their
+canonical path. Generated inline and generic-module names project to their
+authored member path without changing package-qualified semantic identity.
+
+Doc-mode compiler results retain the selected target triple and layout
+capabilities, typed layout reflection values, and transitive memory-denial
+projections from the checker that diagnoses E0921. Prepared `@origin` reads
+retain their checked optional `OriginInfo` values on the owning function;
+untracked or moved locals have no readable origin.
+
 ## Shared option spellings
 
 The options below are intentionally named exactly as in `target/debug/jet help`:

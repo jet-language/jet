@@ -22,6 +22,7 @@ use jet_foundation.[
     SymbolKind,
     TComptimeValue,
     TExpr,
+    TOriginProjection,
     TFailureCarrier,
     TGenericParam,
     TIntegerBounds,
@@ -500,6 +501,7 @@ pub struct SemaCheckContext {
     // does not handle yet or a lost compiler invariant. These reach the
     // driver's internal-problem report (I2), never the user's diagnostics.
     pub incomplete_reasons: [String]{[String]{}}
+    pub origin_facts: [TOriginProjection]{[TOriginProjection]{}}
 }
 
  
@@ -832,6 +834,7 @@ pub struct SemaCheckContextMark {
     pub failure_union_cases: Int
     pub failure_union_edges: Int
     pub incomplete_reasons: Int
+    pub origin_facts: Int
     pub saved: SemaCheckContext
 }
 
@@ -862,6 +865,7 @@ pub fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMar
         failure_union_cases: context.failure_union_cases.len(),
         failure_union_edges: context.failure_union_edges.len(),
         incomplete_reasons: context.incomplete_reasons.len(),
+        origin_facts: context.origin_facts.len(),
         saved: SemaCheckContext{
             exact_int_reachable: context.exact_int_reachable,
             unsafe_depth: context.unsafe_depth,
@@ -945,6 +949,7 @@ pub fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckCo
     loop context.compute_calls.len() > mark.compute_calls -> _ := &context.compute_calls.pop()
     loop context.autodiff_obligations.len() > mark.autodiff_obligations -> _ := &context.autodiff_obligations.pop()
     loop context.copy_events.len() > mark.copy_events -> _ := &context.copy_events.pop()
+    loop context.origin_facts.len() > mark.origin_facts -> _ := &context.origin_facts.pop()
     loop context.noelse_chain_starts.len() > mark.noelse_chain_starts -> _ := &context.noelse_chain_starts.pop()
     loop context.failure_edges.len() > mark.failure_edges -> _ := &context.failure_edges.pop()
     loop context.failure_union_members.len() > mark.failure_union_members -> _ := &context.failure_union_members.pop()

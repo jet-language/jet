@@ -269,6 +269,8 @@ pub struct SemaGraphResult {
     // `SemaRegistrationGraph.retain_programs`: each module's program as sema
     // settled it, indexed like `modules`; empty otherwise.
     pub programs: [Program]{[Program]{}}
+    pub memory_declarations: [SemaMemoryFactDeclaration]{[SemaMemoryFactDeclaration]{}}
+    pub memory_projections: [SemaMemoryProjectionRow]{[SemaMemoryProjectionRow]{}}
 }
 
 struct SemaFunctionResult {
@@ -1146,6 +1148,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         memo_field: None,
         uses_stack_sentry: false,
         kind: function_kind,
+        origin_facts: ~context.origin_facts,
     }
     SemaFunctionResult{
         value: Val(tir),
@@ -2376,7 +2379,10 @@ fn sema_name_add_alias(facts: &MIRNameFacts, module_index: Int, name: String, ta
 
 pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> MIRNameFacts Never! {
     facts := MIRNameFacts{modules: [MIRNameModule]{}, declarations: [MIRNameDeclaration]{}, aliases: [MIRNameAlias]{}, references: [MIRNameReference]{}, structure_facts: [MIRStructureFact]{}}
-    loop graph_module in graph.modules -> &facts.modules.push(MIRNameModule{alias: graph_module.module_name, path: graph_module.module_path, package: graph_module.package_identity})
+    loop graph_module in graph.modules {
+        namespace :: if sema_registration_package_is_namespace(graph_module.package_identity) -> Val(graph_module.package_identity) else -> None
+        &facts.modules.push(MIRNameModule{alias: graph_module.module_name, path: graph_module.module_path, package: graph_module.package_identity, namespace: namespace})
+    }
     owner_names :: sema_name_owner_index(graph)
     symbol_index :: sema_name_symbol_index(graph)
     module_index := 0
@@ -2385,6 +2391,7 @@ pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphMo
         checked :: modules[module_index]
         sema_name_add_tir_declarations(&facts, module_index, source.module_path, checked.declarations)
         loop item in source.program.items -> sema_name_add_item(&facts, module_index, source.module_path, "", item)
+        sema_name_add_display_paths(&facts, module_index, source.module_path, source.program.items)
         loop import in source.imports {
             target_index := sema_registration_module_index(graph, import.target_module_identity)
             target_name := import.target_module_identity
@@ -2432,6 +2439,7 @@ pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphMo
         aliases: sema_name_first_aliases(facts.aliases),
         references: sema_name_first_references(facts.references),
         structure_facts: facts.structure_facts,
+        display_paths: facts.display_paths,
     }
 }
 
@@ -3502,7 +3510,9 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
         })
     }
     if trace_sink == .Val(sink) -> sink.begin("sema.effects", "", -1, -1)
-    effects := sema_effects_check_modules(^effect_inputs)
+    root_policy :: sema_comptime_policy_for_package(stage.package_policies, resolved_graph.package_identity)
+    package_memory_denials :: root_policy.and_then((policy) -> policy.authority_deny) ?? [String]{}
+    effects := sema_effects_check_modules(^effect_inputs, package_memory_denials)
     if trace_sink == .Val(sink) -> sink.end("sema.effects", effects.modules.len())
     loop diagnostic in effects.diagnostics -> &diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
@@ -3657,5 +3667,7 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
         complete: complete,
         inferred_infallible: inferred_infallible,
         programs: programs,
+        memory_declarations: ^effects.memory_declarations,
+        memory_projections: ^effects.memory_projections,
     }
 }
