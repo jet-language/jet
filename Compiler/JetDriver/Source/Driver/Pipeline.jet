@@ -1230,6 +1230,10 @@ fn jet_driver_package_facts(
             artifact_target = MIRArtifactTarget.Web
             artifact_tier = "web"
         }
+        request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.Interpreter -> {
+            artifact_target = MIRArtifactTarget.Interpreter
+            artifact_tier = "interpreter"
+        }
         request.eval_config.runtime_execution -> {
             artifact_target = MIRArtifactTarget.Cranelift
             artifact_tier = "cranelift"
@@ -2477,6 +2481,7 @@ fn jet_driver_artifact_plan(
     if artifact_target == {
         .RustAOT -> artifact_target_name = "RustAot"
         .Cranelift -> artifact_target_name = "Cranelift"
+        .Interpreter -> artifact_target_name = "Interpreter"
         .Web -> {
             artifact_target_name = "Web"
             artifact_kind = MIRArtifactKind.WebApplication
@@ -3251,7 +3256,17 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     // Rust `lower_tir_artifact_facts_for_request`: a TestExecutable has no
     // entry; its harness owns `main`.
     entry_function := MIRFunctionID?{None}
-    if request.mode != JetDriverCompileMode.Test -> entry_function = jet_driver_resolve_entry_function(load, checked_graph, lowered.functions, &stage_diagnostics)
+    if {
+        request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.Interpreter -> {
+            selected_name :: request.evaluation_entry ?? "run"
+            key :: symbol_id(SymbolKind.Function, load.entry_module_identity, "", selected_name).key
+            entry_function = jet_driver_find_lowered_function_id(lowered.functions, key)
+            if entry_function == .None {
+                &stage_diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the evaluation entry `{selected_name}` has no checked MIR function", "evaluation executes the selected checked function through canonical JetEval", "declare the selected entry in the evaluation module"))
+            }
+        }
+        request.mode != JetDriverCompileMode.Test -> entry_function = jet_driver_resolve_entry_function(load, checked_graph, lowered.functions, &stage_diagnostics)
+    }
     load.diagnostics = stage_diagnostics
     web_target := if request.target == {
         .Web(_, _, _) -> true
@@ -3376,6 +3391,9 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
             &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the MIR optimizer result lost the explicit package entry function", "the typed entry binding must survive every optimizer stage unchanged", "preserve the selected MirFunctionId through optimization"))
             if !kg.enabled -> return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Pass), false, trace)
         }
+    }
+    if request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.Interpreter {
+        return jet_driver_compile_result(load, load.diagnostics, entry_function, Val(^optimized_program), None, None, failed_stage, failed_stage == .None && !jet_driver_has_errors(load.diagnostics), trace)
     }
     if web_target {
         web_config_option := if request.target == {
