@@ -293,9 +293,10 @@ fn jet_rust_emit_call_arg_with_borrow(ctx: &JetRustEmitContext, function: MIRFun
                 .Val(place) -> jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Read)
                 else -> {
                     // MIRRust call_arg_for_function: a borrowed value with no
-                    // argument place borrows the place its definition reads.
+                    // argument place borrows the place its definition reads;
+                    // a String literal lends its static String.
                     partial :: if jet_rust_emit_partial_projection_only(&ctx, function, arg.value) -> jet_rust_emit_partial_value_reference(&ctx, function, arg.value) else -> String?{None}
-                    if partial == .Val(reference) -> reference else -> jet_rust_emit_borrowed_value_reference(&ctx, function, arg.value, MIRAccess.Read)
+                    if partial == .Val(reference) -> reference else -> jet_rust_emit_static_string_literal_reference(&ctx, function, arg.value) ?? jet_rust_emit_borrowed_value_reference(&ctx, function, arg.value, MIRAccess.Read)
                 }
             }
         }
@@ -1602,7 +1603,9 @@ fn jet_rust_emit_foreign_argument(ctx: &JetRustEmitContext, function: MIRFunctio
         value :: jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, false)
         return jet_rust_emit_native_int_argument(&ctx, value, None)
     }
-    borrowed :: arg.access == MIRAccess.Read && !mir_type_is_scalar(parameter.ty)
+    // D-FFI-CAP1: the Rust bridge's `jet_ffi_<name>` wrapper takes a read
+    // parameter as an owned Rust value, so only other languages borrow it.
+    borrowed :: arg.access == MIRAccess.Read && !mir_type_is_scalar(parameter.ty) && foreign.foreign_language != MIRForeignLanguage.Rust
     jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, borrowed)
 }
 
@@ -2787,7 +2790,7 @@ fn jet_rust_emit_enum_value(ctx: &JetRustEmitContext, function: MIRFunction, own
     // its declared Rust slot; DataTree's exact Int and Map-backed Object cross
     // through their Prelude helpers.
     http_body :: jet_rust_emit_is_core_http_type(ctx.program.types[row_index], "Body")
-    native :: jet_rust_emit_has_native_type_projection(ctx.program.types[row_index].key)
+    native :: jet_rust_emit_has_native_type_projection(ctx, ctx.program.types[row_index].key)
     data_tree :: jet_rust_emit_core_rust_type_name(ctx.program.types[row_index].key) == (Val("DataTree"))
     if shape == {
         .Unit -> {
@@ -3076,7 +3079,7 @@ fn jet_rust_emit_move_facts(ctx: &JetRustEmitContext, function: MIRFunction) -> 
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::plan_move_facts
 fn jet_rust_emit_payload_take_shape(ctx: JetRustEmitContext, owner: MIRTypeID, variant: String, members: [JetRustEmitPayloadMember]) -> Bool Never! {
     if jet_rust_emit_type_index(ctx, owner) == .Val(definition_index) {
-        if ctx.program.types[definition_index].key.starts_with("<corelib>/") || jet_rust_emit_has_native_type_projection(ctx.program.types[definition_index].key) -> return false
+        if ctx.program.types[definition_index].key.starts_with("<corelib>/") || jet_rust_emit_has_native_type_projection(ctx, ctx.program.types[definition_index].key) -> return false
         if ctx.program.types[definition_index].kind == {
             .Enum(variants, _) -> {
                 loop row in variants {
@@ -3183,7 +3186,7 @@ fn jet_rust_emit_enum_payload(ctx: &JetRustEmitContext, function: MIRFunction, r
                     else -> return "unreachable!(\"Core HTTP Body variant has no native payload projection\")"
                 }
             }
-            native :: jet_rust_emit_has_native_type_projection(ctx.program.types[definition_index].key)
+            native :: jet_rust_emit_has_native_type_projection(ctx, ctx.program.types[definition_index].key)
             data_tree :: jet_rust_emit_core_rust_type_name(ctx.program.types[definition_index].key) == (Val("DataTree"))
             head :: jet_rust_emit_enum_variant_name(&ctx, owner, variant)
             if ctx.program.types[definition_index].kind == {
@@ -3241,7 +3244,7 @@ fn jet_rust_emit_plain_payload_pattern(ctx: &JetRustEmitContext, owner: MIRTypeI
     definition_index :: jet_rust_emit_type_index(ctx, owner) ?? return None
     definition :: ctx.program.types[definition_index]
     if definition.id != owner -> return None
-    if definition.key.starts_with("<corelib>/") || jet_rust_emit_has_native_type_projection(definition.key) || jet_rust_emit_core_rust_type_name(definition.key) != None -> return None
+    if definition.key.starts_with("<corelib>/") || jet_rust_emit_has_native_type_projection(ctx, definition.key) || jet_rust_emit_core_rust_type_name(definition.key) != None -> return None
     if definition.kind == .Enum(variants, _) {
         loop row in variants {
             if row.name != variant -> next
@@ -3308,7 +3311,7 @@ fn jet_rust_emit_struct_literal(ctx: &JetRustEmitContext, type_id: MIRTypeID, fi
     rust_type_name :: jet_rust_emit_type_name(&ctx, type_id)
     key := ""
     if jet_rust_emit_type_index(ctx, type_id) == .Val(row_index) -> key = ctx.program.types[row_index].key
-    native :: jet_rust_emit_has_native_type_projection(key)
+    native :: jet_rust_emit_has_native_type_projection(ctx, key)
     range_type :: rust_type_name.ends_with("JetRange")
     data_error :: rust_type_name.ends_with("jet_std::DataError")
     async_policy :: key == "AsyncPolicy"
@@ -3369,7 +3372,7 @@ fn jet_rust_emit_field_read(ctx: &JetRustEmitContext, function: MIRFunction, bas
     key := ""
     if owner == .Val(definition_index) {
         key = ctx.program.types[definition_index].key
-        native = jet_rust_emit_has_native_type_projection(ctx.program.types[definition_index].key)
+        native = jet_rust_emit_has_native_type_projection(ctx, ctx.program.types[definition_index].key)
         if field_row == .Val(declared) {
             loop edge in ctx.program.types[definition_index].boxed_edges { if edge == declared.name -> boxed = true }
         }
@@ -4676,6 +4679,9 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
         radix_text :: jet_rust_emit_borrowed_value_reference(&ctx, function, args[0], MIRAccess.Read)
         return "{root}jet_std::jet_int_owned_to_radix({receiver_text}, {radix_text}).unwrap_or_else(|error| {root}jet_arithmetic_stop(\"<mir>\", 0u32, &error))"
     }
+    // MIRRust prelude_values_with_receiver: a String literal operand of a
+    // literal builtin route is passed as its static text.
+    literal_route :: jet_rust_emit_literal_builtin_symbol(mir_symbol_name(row.symbol))
     rendered := [String]{}
     if receiver_place == .Val(place) {
         if !row.signature.borrow_mask[0] {
@@ -4684,7 +4690,8 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
         }
         &rendered.push(jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Write))
     } else if row.signature.borrow_mask[0] {
-        &rendered.push(jet_rust_emit_borrowed_value_reference(&ctx, function, receiver, MIRAccess.Read))
+        literal :: if literal_route -> jet_rust_emit_literal_string_value(ctx, function, receiver) else -> String?{None}
+        &rendered.push(if literal == .Val(text) -> jet_rust_emit_quote(text) else -> jet_rust_emit_borrowed_value_reference(&ctx, function, receiver, MIRAccess.Read))
     } else {
         &rendered.push(jet_rust_emit_value_consume(ctx, function, receiver))
     }
@@ -4716,8 +4723,10 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
                 consumed :: jet_rust_emit_value_consume(ctx, function, value)
                 &rendered.push(jet_rust_emit_native_int_argument(&ctx, consumed, None))
             } else {
+                literal :: if literal_route && borrowed -> jet_rust_emit_literal_string_value(ctx, function, value) else -> String?{None}
                 if {
                     jet_rust_emit_host_borrow_callback_value(&ctx, function, value, false, false) == .Val(callback) -> &rendered.push(callback)
+                    literal == .Val(text) -> &rendered.push(jet_rust_emit_quote(text))
                     borrowed -> &rendered.push(jet_rust_emit_borrowed_value_reference(&ctx, function, value, MIRAccess.Read))
                     else -> &rendered.push(jet_rust_emit_value_consume(ctx, function, value))
                 }

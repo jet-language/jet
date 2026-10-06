@@ -218,6 +218,10 @@ struct BundleFunctionFacts {
     value_type: Type,
     source_type: Type,
     contracts: (Vec<ContractClause>, Vec<ContractClause>),
+    /// #4609: the declaring module and type-parameter order of a generic
+    /// function, so a package-bound call names the same canonical instance an
+    /// imported one does.
+    generic: Option<super::Imports::ImportedGenericFunction>,
 }
 
 struct BundleConstantFacts {
@@ -370,6 +374,7 @@ impl BundleCodegenFacts {
                             params, ret, binding: (rust_module.clone(), function.name.clone()),
                             value_type, source_type,
                             contracts: (function.pre.clone(), function.post.clone()),
+                            generic: super::Imports::imported_generic_function(bundle, owner, function),
                         });
                         if crate::Sema::guest_import_function_signature(function).is_some() {
                             metadata.foreign_call_keys.insert(format!("{rust_module}::{}", function.name),
@@ -636,6 +641,9 @@ pub(crate) struct Cx {
     pub(crate) reexport_calls: HashMap<(String, String), (String, String)>,
     /// `(import alias, function)` -> parameter conventions for cross-module calls.
     pub(crate) import_sigs: HashMap<(String, String), Vec<(AccessConvention, Type)>>,
+    /// #4609: the generic targets among `import_sigs`, under the same keys.
+    pub(crate) import_generics:
+        HashMap<(String, String), crate::Codegen::Imports::ImportedGenericFunction>,
     /// c109 Phase 14: `(import alias, function)` -> the function's return type, so the
     /// TIR can carry a total result type for a cross-module call (mirrors `import_sigs`).
     pub(crate) import_rets: HashMap<(String, String), Option<Type>>,
@@ -762,6 +770,12 @@ pub(crate) struct Cx {
     /// Concrete instantiations of imported source-owned Core generic calls,
     /// keyed by their checked canonical module and function identity.
     pub(crate) jit_core_source_generic_calls: std::cell::RefCell<
+        std::collections::BTreeMap<(String, String), Vec<Vec<Type>>>,
+    >,
+    /// #4609: concrete instantiations of another source module's generic
+    /// functions, keyed by the declaring module identity and function; the
+    /// type arguments are canonical (module-qualified) nominal spellings.
+    pub(crate) jit_module_generic_calls: std::cell::RefCell<
         std::collections::BTreeMap<(String, String), Vec<Vec<Type>>>,
     >,
     /// Functions whose typed decode depends on the canonical TIR migration
@@ -1914,6 +1928,16 @@ impl Cx {
 
     pub(crate) fn fact_import_sigs(&self, key: &(String, String)) -> Option<&Vec<(AccessConvention, Type)>> {
         self.import_sigs.get(key).or_else(|| self.bound_function(key).map(|fact| &fact.params))
+    }
+
+    /// The generic target behind `fact_import_sigs(key)`, read from the same
+    /// source as that signature: the module's imports when they declare the
+    /// key, else the package-bound function.
+    pub(crate) fn fact_import_generic(&self, key: &(String, String)) -> Option<&super::Imports::ImportedGenericFunction> {
+        if self.import_sigs.contains_key(key) {
+            return self.import_generics.get(key);
+        }
+        self.bound_function(key)?.generic.as_ref()
     }
 
     pub(crate) fn fact_import_rets(&self, key: &(String, String)) -> Option<&Option<Type>> {
@@ -4997,7 +5021,7 @@ pub(crate) fn populate_cx_from_bundle(
     register_foreign_enum_variants(cx, bundle, module_idx);
     cx.reexport_calls = reexport_call_map(bundle, module_idx);
     let nested_calls = nested_file_calls(bundle, module_idx);
-    cx.import_sigs = import_sig_map(bundle, module_idx, &nested_calls);
+    (cx.import_sigs, cx.import_generics) = import_sig_map(bundle, module_idx, &nested_calls);
     cx.import_rets = import_ret_map(bundle, module_idx, &nested_calls);
     cx.core_imports = core_import_map(bundle, module_idx);
     register_bundle_reflect_paths(cx, bundle, module_idx);
@@ -5831,6 +5855,7 @@ pub(crate) fn build_cx_items(
         foreign_types: HashMap::new(),
         reexport_calls: HashMap::new(),
         import_sigs: HashMap::new(),
+        import_generics: HashMap::new(),
         import_rets: HashMap::new(),
         core_imports: HashMap::new(),
         used_core: Arc::new(HashSet::new()),
@@ -5884,6 +5909,7 @@ pub(crate) fn build_cx_items(
         jit_method_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         jit_generic_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         jit_core_source_generic_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
+        jit_module_generic_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         jit_canonical_deopt: std::cell::RefCell::new(HashSet::new()),
         jit_canonical_calls: std::cell::RefCell::new(HashSet::new()),
         jit_local_call_prefix: None,

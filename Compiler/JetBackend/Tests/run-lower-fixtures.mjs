@@ -4,7 +4,8 @@
 // loader unit (Tests/LoadImages.jet) beside it.
 //
 // usage: node Compiler/JetBackend/Tests/run-lower-fixtures.mjs <outdir>
-// Append --abi to assemble just the ABI/alignment witnesses.
+// Append --abi to assemble just the ABI/alignment witnesses, or --sanitize
+// for just the sanitize-mode witnesses (Tests/SanitizeFixtures.jet).
 // then:  cd <outdir> && jet run unit.jet        (writes <fixture>.elf files)
 // then:  node Compiler/JetBackend/Tests/check-native-fixtures.mjs <outdir>
 //        (with JET_RUNTIME_C_LIB, it also runs every image through load.jet)
@@ -77,9 +78,12 @@ function body(path) {
 // fixture file under Tests/Fixtures, in name order.
 const sorted = (dir) => existsSync(`${repo}/${dir}`) ? readdirSync(`${repo}/${dir}`).filter((name) => name.endsWith(".jet") && !excluded.has(name)).sort().map((name) => `${dir}/${name}`) : [];
 const abiOnly = process.argv.includes("--abi");
+const sanitizeOnly = process.argv.includes("--sanitize");
+const small = abiOnly || sanitizeOnly;
 const parts = [
-  ...(abiOnly ? [
+  ...(small ? [
     item("Compiler/JetFoundation/Source/MIR/MIR.jet", "pub struct MIRTypeID "),
+    ...(sanitizeOnly ? [body("Compiler/JetFoundation/Source/Text/RustDebug.jet")] : []),
   ] : [
     "// [unit source: Foundation items named by MIR.jet]",
     item("Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet", "pub struct Span {"),
@@ -91,7 +95,8 @@ const parts = [
   ]),
   body("Compiler/JetBackend/Source/LIR/LIR.jet"),
   body("Compiler/JetBackend/Source/LIR/Lint.jet"),
-  ...(!abiOnly ? [
+  ...(sanitizeOnly ? [body("Compiler/JetBackend/Source/LIR/Sanitize.jet")] : []),
+  ...(!small ? [
     body("Compiler/JetBackend/Source/LIR/Print.jet"),
     ...sorted("Compiler/JetBackend/Source/Lower").map(body),
   ] : []),
@@ -103,9 +108,9 @@ const parts = [
   body("Compiler/JetBackend/Source/Image/RuntimeStrings.jet"),
   body("Compiler/JetBackend/Source/Image/ELF.jet"),
   body("Compiler/JetBackend/Source/Image/Object.jet"),
-  ...(!abiOnly ? [body("Compiler/JetBackend/Source/Image/Memory.jet")] : []),
-  body("Compiler/JetBackend/Tests/AbiFixtures.jet"),
-  ...(abiOnly ? ["fn run() { abi_fixtures() }"] : [body("Compiler/JetBackend/Tests/LowerFixtures.jet"), ...sorted("Compiler/JetBackend/Tests/Fixtures").map(body)]),
+  ...(!small ? [body("Compiler/JetBackend/Source/Image/Memory.jet")] : []),
+  ...(sanitizeOnly ? [body("Compiler/JetBackend/Tests/SanitizeFixtures.jet"), "fn run() { sanitize_fixtures() }"] : [body("Compiler/JetBackend/Tests/AbiFixtures.jet")]),
+  ...(abiOnly ? ["fn run() { abi_fixtures() }"] : sanitizeOnly ? [] : [body("Compiler/JetBackend/Tests/LowerFixtures.jet"), ...sorted("Compiler/JetBackend/Tests/Fixtures").map(body)]),
 ];
 mkdirSync(outDir, { recursive: true });
 writeFileSync(`${outDir}/unit.jet`, [...coreUses, "", ...parts].join("\n"));

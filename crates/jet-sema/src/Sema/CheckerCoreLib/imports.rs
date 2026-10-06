@@ -459,7 +459,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(soft_public_use(name, span));
             }
             let mut sig = target.funcs.get(&semantic_name).unwrap().clone();
-            self.qualify_builtin_shadowing_sig(mod_idx, &mut sig);
+            self.qualify_imported_function_sig(mod_idx, &semantic_name, &mut sig);
             if let Some(dep) = sig.deprecation.as_ref() {
                 self.check_deprecation(name, dep, span);
             }

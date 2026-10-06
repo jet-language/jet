@@ -4487,7 +4487,7 @@ impl<'a> Checker<'a> {
                     if owner == self.module_idx {
                         self.inline_addr_taken.insert(name.clone());
                     }
-                    self.qualify_builtin_shadowing_sig(owner, &mut sig);
+                    self.qualify_imported_function_sig(owner, name, &mut sig);
                     if let Some((idx, (convention, _))) = sig
                         .params
                         .iter()
@@ -5531,6 +5531,12 @@ impl<'a> Checker<'a> {
                             return None;
                         }
                     }
+                }
+                // A source spelling and its canonical imported identity must
+                // produce one nominal instance, including method demands.
+                for arg in type_args.iter_mut() {
+                    let ty = std::mem::replace(arg, Type::Int);
+                    *arg = self.resolve_type(ty);
                 }
                 // Inline-module members are local nominals with a mangled
                 // semantic identity, not foreign imports. Resolve that identity

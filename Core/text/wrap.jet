@@ -461,7 +461,7 @@ fn word_prefix(text: String, width: Int) -> String Never! {
             current = candidate
         } else {
             if current.bytes().len() == 0 -> return take_width(words[i], width)
-            return ~current
+            return current
         }
         i = i + 1
     }
@@ -477,7 +477,7 @@ fn take_width(text: String, width: Int) -> String Never! {
     loop i < clusters.len() {
         cluster :: clusters[i]
         cluster_width :: unicode.display_width(cluster)
-        if current_width + cluster_width > width -> return ~out
+        if current_width + cluster_width > width -> return out
         out = "{out}{cluster}"
         current_width = current_width + cluster_width
         i = i + 1

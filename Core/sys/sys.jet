@@ -155,10 +155,8 @@ pub fn getegid() -[Env]> Int Never! { core.sys.getegid() }
 
 pub fn getpgrp() -[Env]> Int Never! { core.sys.getpgrp() }
 
-pub fn umask(mask: Int) -[FS, Env]> Int Never! {
-    #Unsafe("posix umask: change the process file-creation mask") {
-        return core.sys.umask(mask)
-    }
+#Unsafe("posix umask: the caller owns the process file-creation mask and restores it when other code relies on it") pub fn umask(mask: Int) -[FS, Env]> Int Never! {
+    core.sys.umask(mask)
 }
 pub fn exitcode(code: Int) -> Int Never! { code }
 
@@ -184,111 +182,77 @@ pub fn getsid(pid: Int) -[Env]> Int IOError! {
     }
 }
 
-pub fn getpriority(which: Int) -[Env]> Int IOError! {
-    #Unsafe("posix getpriority: read process scheduling priority") {
-        return core.sys.getpriority(which)
-    }
+#Unsafe("posix getpriority: the caller vouches that `which` names this process or one it controls") pub fn getpriority(which: Int) -[Env]> Int IOError! {
+    core.sys.getpriority(which)
 }
 
-pub fn setpriority(which: Int, priority: Int) IOError! -[Env]> {
-    #Unsafe("posix setpriority: change process scheduling priority") {
-        return core.sys.setpriority(which, priority)
-    }
+#Unsafe("posix setpriority: the caller owns the scheduling priority of the process it changes") pub fn setpriority(which: Int, priority: Int) IOError! -[Env]> {
+    core.sys.setpriority(which, priority)
 }
 
-pub fn utime(path: String, atime: Int, mtime: Int) IOError! -[FS, Env]> {
-    #Unsafe("posix utime: change file timestamps") {
-        return core.sys.utime(path, atime, mtime)
-    }
+#Unsafe("posix utime: the caller owns the file whose timestamps it rewrites") pub fn utime(path: String, atime: Int, mtime: Int) IOError! -[FS, Env]> {
+    core.sys.utime(path, atime, mtime)
 }
 
 pub fn sync() Never! -[FS, Env]> { core.sys.sync() }
 
-pub fn stop(code: Int) Never! -[Env]> {
-    #Unsafe("posix stop: terminate the process with an exit code") {
-        core.sys.stop(code)
-    }
+#Unsafe("posix stop: the caller accepts that the process ends here after the shared cleanup boundary") pub fn stop(code: Int) Never! -[Env]> {
+    core.sys.stop(code)
 }
 
 pub fn set_current_dir(path: String) IOError! -[FS, Env]> {
     return core.sys.set_current_dir(path)
 }
-pub fn pipe() -[FS, Env]> [Int] IOError! {
-    #Unsafe("posix pipe: create process file descriptors") {
-        return core.sys.pipe()
-    }
+#Unsafe("posix pipe: the caller owns both returned descriptors and closes each exactly once") pub fn pipe() -[FS, Env]> [Int] IOError! {
+    core.sys.pipe()
 }
 
-pub fn close_fd(fd: Int) Never! -[FS, Env]> {
-    #Unsafe("posix close_fd: close a process file descriptor") {
-        core.sys.close_fd(fd)
-    }
+#Unsafe("posix close_fd: the caller owns `fd` and nothing uses it after this call") pub fn close_fd(fd: Int) Never! -[FS, Env]> {
+    core.sys.close_fd(fd)
 }
 
-pub fn mkfifo(path: String, mode: Int) IOError! -[FS, Env]> {
-    #Unsafe("posix mkfifo: create a named pipe") {
-        return core.sys.mkfifo(path, mode)
-    }
+#Unsafe("posix mkfifo: the caller owns `path` and removes the named pipe it creates") pub fn mkfifo(path: String, mode: Int) IOError! -[FS, Env]> {
+    core.sys.mkfifo(path, mode)
 }
 
-pub fn fork() -[Env]> Int IOError! {
-    #Unsafe("posix fork: create a child process") {
-        return core.sys.fork()
-    }
+#Unsafe("posix fork: the caller handles both the parent and the child return and reaps the child") pub fn fork() -[Env]> Int IOError! {
+    core.sys.fork()
 }
 
-pub fn setsid() -[Env]> Int IOError! {
-    #Unsafe("posix setsid: create a process session") {
-        return core.sys.setsid()
-    }
+#Unsafe("posix setsid: the caller owns the process session topology it changes") pub fn setsid() -[Env]> Int IOError! {
+    core.sys.setsid()
 }
 
-pub fn wait() -[Env, Time.Wait]> Int IOError! {
-    #Unsafe("posix wait: reap a child process") {
-        return core.sys.wait()
-    }
+#Unsafe("posix wait: the caller owns the child processes it reaps") pub fn wait() -[Env, Time.Wait]> Int IOError! {
+    core.sys.wait()
 }
 
-pub fn waitpid(pid: Int, options: Int) -[Env, Time.Wait]> Int IOError! {
-    #Unsafe("posix waitpid: reap a selected child process") {
-        return core.sys.waitpid(pid, options)
-    }
+#Unsafe("posix waitpid: the caller owns the child process it reaps") pub fn waitpid(pid: Int, options: Int) -[Env, Time.Wait]> Int IOError! {
+    core.sys.waitpid(pid, options)
 }
 
-pub fn setuid(uid: Int) IOError! -[Env]> {
-    #Unsafe("posix setuid: change process credentials") {
-        return core.sys.setuid(uid)
-    }
+#Unsafe("posix setuid: the caller drops or changes process credentials deliberately") pub fn setuid(uid: Int) IOError! -[Env]> {
+    core.sys.setuid(uid)
 }
 
-pub fn setgid(gid: Int) IOError! -[Env]> {
-    #Unsafe("posix setgid: change process credentials") {
-        return core.sys.setgid(gid)
-    }
+#Unsafe("posix setgid: the caller drops or changes process credentials deliberately") pub fn setgid(gid: Int) IOError! -[Env]> {
+    core.sys.setgid(gid)
 }
 
-pub fn setpgrp() IOError! -[Env]> {
-    #Unsafe("posix setpgrp: change process group topology") {
-        return core.sys.setpgrp()
-    }
+#Unsafe("posix setpgrp: the caller owns the process group topology it changes") pub fn setpgrp() IOError! -[Env]> {
+    core.sys.setpgrp()
 }
 
-pub fn setpgid(pid: Int, pgid: Int) IOError! -[Env]> {
-    #Unsafe("posix setpgid: change process group topology") {
-        return core.sys.setpgid(pid, pgid)
-    }
+#Unsafe("posix setpgid: the caller owns the process group topology it changes") pub fn setpgid(pid: Int, pgid: Int) IOError! -[Env]> {
+    core.sys.setpgid(pid, pgid)
 }
 
-pub fn kill(pid: Int, signal: Int) IOError! -[Env]> {
-    #Unsafe("posix kill: send a signal to a process") {
-        return core.sys.kill(pid, signal)
-    }
+#Unsafe("posix kill: the caller owns or is entitled to signal the target process") pub fn kill(pid: Int, signal: Int) IOError! -[Env]> {
+    core.sys.kill(pid, signal)
 }
 
-pub fn initgroups(user: String, group: Int) IOError! -[Env]> {
-    #Unsafe("posix initgroups: change supplementary groups") {
-        return core.sys.initgroups(user, group)
-    }
+#Unsafe("posix initgroups: the caller changes supplementary groups deliberately") pub fn initgroups(user: String, group: Int) IOError! -[Env]> {
+    core.sys.initgroups(user, group)
 }
 
 

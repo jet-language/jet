@@ -1,6 +1,6 @@
 mod common;
 
-fn checked(source: &str, mode: jet::Sema::CompileMode) -> (jet::AST::ProgramBundle, Vec<String>) {
+fn write_source(source: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "jet_marker_rule_signatures_{}_{}",
         std::process::id(),
@@ -9,16 +9,36 @@ fn checked(source: &str, mode: jet::Sema::CompileMode) -> (jet::AST::ProgramBund
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");
     std::fs::write(&path, source).unwrap();
-    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-    let codes = jet::Sema::check_bundle(&mut bundle, mode)
+    path
+}
+
+/// The checked diagnostics the driver gates on: parser teaching plus sema.
+fn checked_codes(bundle: &mut jet::AST::ProgramBundle, mode: jet::Sema::CompileMode) -> Vec<String> {
+    let sema = jet::Sema::check_bundle(bundle, mode);
+    std::mem::take(&mut bundle.parse_teaching)
         .into_iter()
+        .chain(sema)
         .map(|diagnostic| diagnostic.code.to_string())
-        .collect();
+        .collect()
+}
+
+fn checked(source: &str, mode: jet::Sema::CompileMode) -> (jet::AST::ProgramBundle, Vec<String>) {
+    let path = write_source(source);
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+    let codes = checked_codes(&mut bundle, mode);
     (bundle, codes)
 }
 
+/// Codes for a source, including the ones that stop it at load.
 fn codes(source: &str) -> Vec<String> {
-    checked(source, jet::Sema::CompileMode::Check).1
+    let path = write_source(source);
+    match jet::Loader::load_entry(path.to_str().unwrap()) {
+        Ok(mut bundle) => checked_codes(&mut bundle, jet::Sema::CompileMode::Check),
+        Err(diagnostics) => diagnostics
+            .into_iter()
+            .map(|diagnostic| diagnostic.code.to_string())
+            .collect(),
+    }
 }
 
 fn diagnostics(source: &str) -> Vec<jet::Diagnostics::Diagnostic> {
@@ -111,7 +131,7 @@ fn _helper() {}
 
 fn run() {
     #FX(lang.Effect.Net) {}
-    #FX(grant: lang.Effect.Net) {}
+    #FX(_grant: lang.Effect.Net) {}
 }
 "#,
     );

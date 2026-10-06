@@ -1592,6 +1592,7 @@ fn lower_demanded_generic_methods(
     let mut pending = std::mem::take(&mut *cx.jit_method_calls.borrow_mut());
     collect_serde_codec_demands(funcs, &mut pending);
     let mut processed = std::collections::BTreeSet::new();
+    let mut foreign = std::collections::BTreeMap::new();
     while let Some((key, (owner_ty, method_name, method_type_args))) = pending.pop_first() {
         if !processed.insert(key.clone()) {
             continue;
@@ -1609,12 +1610,19 @@ fn lower_demanded_generic_methods(
             Type::Named(name) => (name.as_str(), &[]),
             _ => continue,
         };
+        let name = match name.rsplit_once("::") {
+            Some((owner, leaf)) if owner == cx.module_identity => leaf,
+            _ => name,
+        };
         let Some(params) = items.iter().find_map(|item| match item {
             Item::Struct(def) if def.name == name => Some(def.type_params.as_slice()),
             Item::Enum(def) if def.name == name => Some(def.type_params.as_slice()),
             Item::Distinct(def) if def.name == name => Some(&[]),
             _ => None,
         }) else {
+            if name.contains("::") {
+                foreign.insert(key, (owner_ty, method_name, method_type_args));
+            }
             continue;
         };
         let owner_subst: std::collections::HashMap<String, Type> = params
@@ -1726,7 +1734,7 @@ fn lower_demanded_generic_methods(
                     lower_method_for_owner(
                         &specialized,
                         name,
-                        owner_ty.clone(),
+                        local_module_type(&cx.module_identity, &owner_ty),
                         cx,
                         generated_serde && specialized.compiler_generated,
                     )
@@ -1741,7 +1749,9 @@ fn lower_demanded_generic_methods(
                     )
                 }
             } else {
-                lower_method_for_owner(&specialized, name, owner_ty.clone(), cx, false)
+                lower_method_for_owner(
+                    &specialized, name, local_module_type(&cx.module_identity, &owner_ty), cx, false,
+                )
             };
             cx.current_type_params.replace(previous_type_params);
             lowered.key = function_semantic_key(&lowered.module, &key);
@@ -1756,6 +1766,7 @@ fn lower_demanded_generic_methods(
             }
         }
     }
+    cx.jit_method_calls.borrow_mut().extend(foreign);
     Ok(())
 }
 
@@ -2010,6 +2021,99 @@ pub(crate) fn demand_core_source_generic_function(
     Some(generic_free_function_instance_key(method, &type_args))
 }
 
+/// Instantiate a module boundary signature from sema's recorded type arguments.
+/// In particular, a lambda must lower against `fn(Item)`, not the template's
+/// `fn(T)`: its coercion and demand shape both carry the concrete callable ABI.
+pub(crate) fn module_call_signature(
+    cx: &Cx,
+    key: &(String, String),
+    type_args: &[Type],
+) -> Option<Vec<(crate::AST::AccessConvention, Type)>> {
+    let sig = cx.fact_import_sigs(key)?;
+    let Some(generic) = cx.fact_import_generic(key) else {
+        return Some(sig.iter().map(|(conv, ty)| {
+            (*conv, cx.expand_type_aliases(ty).with_effective_fn_returns())
+        }).collect());
+    };
+    if generic.type_params.len() != type_args.len() {
+        return None;
+    }
+    let subst = generic
+        .type_params
+        .iter()
+        .cloned()
+        .zip(type_args.iter().map(|ty| canonical_module_type(cx, ty)))
+        .collect();
+    Some(sig.iter().map(|(conv, ty)| {
+        let instantiated = crate::Generics::substitute_type(ty, &subst);
+        (*conv, cx.expand_type_aliases(&instantiated).with_effective_fn_returns())
+    }).collect())
+}
+
+/// #4609: a call into another source module's generic function names the
+/// concrete instance its declaring module lowers
+/// (`specialize_module_generic_calls`) and returns that module's identity and
+/// the instance name; Ok(None) only when the target is not generic. Missing
+/// checked type arguments are an invariant failure, never an unspecialized call.
+/// Type arguments are recorded canonically for one instance key.
+pub(crate) fn demand_module_generic_function(
+    cx: &Cx,
+    sig_key: &(String, String),
+    function: &str,
+    explicit_type_args: &[Type],
+) -> Result<Option<(String, String)>, String> {
+    let Some(generic) = cx.fact_import_generic(sig_key) else {
+        return Ok(None);
+    };
+    if explicit_type_args.len() != generic.type_params.len() {
+        return Err(format!(
+            "checked generic target `{}::{function}` has no complete instance ({} type arguments, expected {})",
+            generic.module_identity, explicit_type_args.len(), generic.type_params.len()
+        ));
+    }
+    // Sema has already inferred and validated these arguments. Rebinding from
+    // lowered values would conflate a callable's carrier with its source type.
+    let type_args = explicit_type_args
+        .iter()
+        .map(|ty| canonical_module_type(cx, ty))
+        .collect::<Vec<_>>();
+    cx.jit_module_generic_calls
+        .borrow_mut()
+        .entry((generic.module_identity.clone(), function.to_string()))
+        .or_default()
+        .push(type_args.clone());
+    Ok(Some((
+        generic.module_identity.clone(),
+        generic_free_function_instance_key(function, &type_args),
+    )))
+}
+
+/// A type in the lowering module's spelling with each nominal that module
+/// declares qualified by its identity, the spelling every other module uses.
+fn canonical_module_type(cx: &Cx, ty: &Type) -> Type {
+    let qualify = |name: &str| {
+        (!name.contains("::") && cx.local_type_names.contains(name))
+            .then(|| format!("{}::{name}", cx.module_identity))
+    };
+    rewrite_apply_heads(&ty.map_named_types(&qualify), &|name| {
+        qualify(name).unwrap_or_else(|| name.to_string())
+    })
+}
+
+/// The reverse of `canonical_module_type` for the module `owner`: its own
+/// nominals return to the bare spelling its context declares them under.
+fn local_module_type(owner: &str, ty: &Type) -> Type {
+    let prefix = format!("{owner}::");
+    let localize = |name: &str| {
+        name.strip_prefix(&prefix)
+            .filter(|leaf| !leaf.contains("::"))
+            .map(str::to_string)
+    };
+    rewrite_apply_heads(&ty.map_named_types(&localize), &|name| {
+        localize(name).unwrap_or_else(|| name.to_string())
+    })
+}
+
 fn generic_free_function_template(items: &[Item], called_name: &str) -> Option<Func> {
     for item in items {
         match item {
@@ -2188,6 +2292,26 @@ fn checked_imported_core_source_signature<'a>(
         .filter(|signature| signature.module_identity == owner)
 }
 
+/// Keep the boundary of instances lowered in an imported module's context
+/// under that module's canonical nominal identities, as its ordinary
+/// functions are (#4609).
+fn qualify_imported_instances(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    owner: &str,
+    instances: &mut [TFunc],
+) {
+    for instance in instances {
+        for (_, ty, _) in &mut instance.params {
+            *ty = qualify_imported_type(bundle, module_idx, owner, &[], ty);
+        }
+        instance.ret = instance
+            .ret
+            .as_ref()
+            .map(|ty| qualify_imported_type(bundle, module_idx, owner, &[], ty));
+    }
+}
+
 fn lower_checked_core_source_generic_instance(
     bundle: &ProgramBundle,
     module_idx: usize,
@@ -2344,6 +2468,150 @@ fn specialize_checked_core_source_generics(
                 ));
             }
             merge_core_source_generic_calls(cx, &imported_cx);
+        }
+    }
+}
+
+fn merge_module_generic_calls(target: &Cx, source: &Cx) {
+    let calls = std::mem::take(&mut *source.jit_module_generic_calls.borrow_mut());
+    let mut target_calls = target.jit_module_generic_calls.borrow_mut();
+    for (key, type_args) in calls {
+        target_calls.entry(key).or_default().extend(type_args);
+    }
+    target.jit_method_calls.borrow_mut().extend(
+        std::mem::take(&mut *source.jit_method_calls.borrow_mut()),
+    );
+}
+
+/// #4609: lower every instance of a source module's generic function that a
+/// call from another module demanded (`demand_module_generic_function`), in
+/// the declaring module's own context, until no lowered instance demands
+/// more. An entry-owned instance keeps the entry's bare spelling, like the
+/// entry's own specializations; an imported one takes the module's emitted
+/// prefix and canonical boundary types, like its ordinary functions.
+fn specialize_module_generic_calls(
+    bundle: &ProgramBundle,
+    extern_funcs: &std::sync::Arc<std::collections::HashMap<String, crate::Codegen::ExternFn>>,
+    debug_linemap: bool,
+    cx: &Cx,
+    funcs: &mut Vec<TFunc>,
+    spawn_lambdas: &mut Vec<TJitSpawnLambda>,
+) -> Result<(), LowerError> {
+    let facts = cx.bundle_facts.as_ref().expect("checked bundle context must share program facts");
+    let module_rows = (0..bundle.modules.len())
+        .filter_map(|index| {
+            bundle
+                .name_ledger
+                .module_identity(index)
+                .map(|identity| (identity, index))
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut processed = std::collections::HashSet::new();
+    loop {
+        let calls = std::mem::take(&mut *cx.jit_module_generic_calls.borrow_mut());
+        let methods = std::mem::take(&mut *cx.jit_method_calls.borrow_mut());
+        if calls.is_empty() && methods.is_empty() {
+            return Ok(());
+        }
+        for ((owner, function), mut instantiations) in calls {
+            instantiations.sort_by_key(|types| format!("{types:?}"));
+            instantiations.dedup();
+            let missing_target = || {
+                LowerError::new(
+                    crate::Diagnostics::Span::new(0, 0),
+                    format!("checked generic target `{owner}::{function}` has no loaded template"),
+                )
+            };
+            let module_idx = *module_rows.get(&owner).ok_or_else(missing_target)?;
+            let module = &bundle.modules[module_idx];
+            let template =
+                generic_free_function_template(&module.items, &function).ok_or_else(missing_target)?;
+            let entry = module_idx == bundle.entry;
+            let mut imported_cx = (!entry).then(|| {
+                build_imported_generic_core_cx(
+                    bundle,
+                    module_idx,
+                    extern_funcs,
+                    debug_linemap,
+                    spawn_lambdas.len(),
+                    facts,
+                )
+            });
+            for type_args in instantiations {
+                let instance = generic_free_function_instance_key(&function, &type_args);
+                let key = function_semantic_key(&owner, &instance);
+                if !processed.insert(key.clone()) || funcs.iter().any(|f| f.key == key) {
+                    continue;
+                }
+                if let Some(imported_cx) = imported_cx.as_mut() {
+                    imported_cx.jit_spawn_site_base = spawn_lambdas.len();
+                }
+                let module_cx = imported_cx.as_ref().unwrap_or(cx);
+                let local_args = if entry {
+                    type_args
+                        .iter()
+                        .map(|ty| local_module_type(&owner, ty))
+                        .collect::<Vec<_>>()
+                } else {
+                    type_args
+                };
+                let first_instance = funcs.len();
+                let (_, mut lowered) = lower_core_source_generic_template(
+                    template.clone(),
+                    &local_args,
+                    &instance,
+                    module_cx,
+                );
+                lowered.key = key;
+                lowered.name = if entry {
+                    instance
+                } else {
+                    format!("{}::{}", mangle(&module.alias), mangle(&instance))
+                };
+                funcs.push(lowered);
+                lower_demanded_generic_methods(&module.items, module_cx, funcs)?;
+                specialize_generic_free_functions(&module.items, module_cx, funcs);
+                if !entry {
+                    qualify_imported_instances(bundle, module_idx, &owner, &mut funcs[first_instance..]);
+                }
+                spawn_lambdas.extend(std::mem::take(
+                    &mut *module_cx.jit_spawn_lambdas.borrow_mut(),
+                ));
+            }
+            if let Some(imported_cx) = &imported_cx {
+                merge_core_source_generic_calls(cx, imported_cx);
+                merge_module_generic_calls(cx, imported_cx);
+            }
+        }
+        for (instance, (owner_ty, method, method_args)) in methods {
+            let name = match &owner_ty {
+                Type::Named(name) | Type::Apply { name, .. } => name,
+                _ => continue,
+            };
+            let Some(module_idx) = bundle.name_ledger.nominal_module(name) else {
+                continue;
+            };
+            let owner = crate::Codegen::Context::module_identity(bundle, module_idx);
+            let key = function_semantic_key(&owner, &instance);
+            if !processed.insert(key.clone()) || funcs.iter().any(|function| function.key == key) {
+                continue;
+            }
+            let module = &bundle.modules[module_idx];
+            let imported_cx = build_imported_generic_core_cx(
+                bundle, module_idx, extern_funcs, debug_linemap, spawn_lambdas.len(), facts,
+            );
+            imported_cx.jit_method_calls.borrow_mut().insert(
+                instance, (owner_ty, method, method_args),
+            );
+            let first_instance = funcs.len();
+            lower_demanded_generic_methods(&module.items, &imported_cx, funcs)?;
+            specialize_generic_free_functions(&module.items, &imported_cx, funcs);
+            qualify_imported_instances(bundle, module_idx, &owner, &mut funcs[first_instance..]);
+            spawn_lambdas.extend(std::mem::take(
+                &mut *imported_cx.jit_spawn_lambdas.borrow_mut(),
+            ));
+            merge_core_source_generic_calls(cx, &imported_cx);
+            merge_module_generic_calls(cx, &imported_cx);
         }
     }
 }
@@ -5935,11 +6203,27 @@ fn lower_checked_tir_program_on_stack(
                     _ => {}
                 }
             }
+            // #4609: the generic functions and methods an imported module
+            // instantiates in its own bodies specialize in its own context,
+            // as the entry's do, under the module's canonical boundary types.
+            let first_instance = funcs.len();
+            lower_demanded_generic_methods(&imported.items, &imported_cx, &mut funcs)?;
+            specialize_generic_free_functions(&imported.items, &imported_cx, &mut funcs);
+            qualify_imported_instances(bundle, module_idx, &imported_owner, &mut funcs[first_instance..]);
             spawn_lambdas.extend(std::mem::take(
                 &mut *imported_cx.jit_spawn_lambdas.borrow_mut(),
             ));
             merge_core_source_generic_calls(&cx, &imported_cx);
+            merge_module_generic_calls(&cx, &imported_cx);
         }
+        specialize_module_generic_calls(
+            bundle,
+            &extern_funcs,
+            debug_linemap,
+            &cx,
+            &mut funcs,
+            &mut spawn_lambdas,
+        )?;
         specialize_checked_core_source_generics(
             bundle,
             &extern_funcs,
@@ -12640,7 +12924,8 @@ pub enum TClosureOp {
     FloatAddParaFold {
         f32: bool,
     },
-    /// `fold(init, f)` — `jet_list_fold((recv).clone(), init, f)`.
+    /// `iter.fold(init, f)` — `jet_list_fold(recv, init, f)`; a list or view
+    /// folds through the borrowed `ViewFold`.
     Fold,
     GroupBy,
     /// `count_by(f)` — `jet_list_count_by((recv).clone(), f)`.

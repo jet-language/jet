@@ -175,7 +175,7 @@ fn qualify_imported_nominal_name(
         .unwrap_or_else(|| name.to_string())
 }
 
-fn rewrite_apply_heads(ty: &Type, qualify: &impl Fn(&str) -> String) -> Type {
+pub(crate) fn rewrite_apply_heads(ty: &Type, qualify: &impl Fn(&str) -> String) -> Type {
     match ty {
         Type::Apply { name, args } => Type::Apply {
             name: qualify(name),
