@@ -1223,21 +1223,6 @@ pub(crate) fn collect_fixed_length_write_params(
     }
 }
 
-/// Length-preserving list methods: a `&param.method()` call with one of these
-/// names edits elements in place and never changes the list's length.
-const LENGTH_PRESERVING_LIST_METHODS: &[&str] = &[
-    "sort",
-    "sort_desc",
-    "sort_by",
-    "sort_by_key",
-    "reverse",
-    "swap",
-    "fill",
-    "shuffle",
-    "rotate_left",
-    "rotate_right",
-];
-
 /// The onward `(callee, parameter index)` uses of list write parameter `param`
 /// in `body`, or `None` when the body may resize it: a write-marked method
 /// that is not length-preserving, a reassignment of the whole list, a write
@@ -1269,7 +1254,9 @@ fn write_list_param_onward_uses(body: &[Stmt], param: &str) -> Option<Vec<(Strin
                 if let Expr::Place(inner, crate::AST::PlaceAccess::Write, _) = receiver.as_ref() {
                     if is_param(inner, param) {
                         accounted += 1;
-                        if !LENGTH_PRESERVING_LIST_METHODS.contains(&method.as_str()) {
+                        if !jet_foundation::Collections::LENGTH_PRESERVING_LIST_METHODS
+                            .contains(&method.as_str())
+                        {
                             resizes = true;
                         }
                     }

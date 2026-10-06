@@ -2267,7 +2267,9 @@ pub(super) fn lower_expr(
             condition,
             predicate,
         } => {
-            let guard = lower_consuming_value(ctx, guard)?;
+            // `wait` borrows its guard: the kernel reacquires the same lock and
+            // the guard stays live (and droppable) after the call.
+            let guard = ctx.lower_child(guard)?;
             let condition = ctx.lower_child(condition)?;
             let predicate = ctx.lower_lambda(predicate)?;
             let call =
@@ -3274,6 +3276,16 @@ pub(super) fn lower_expr(
                 };
                 lowered_args[0] = lower_builtin_native_int(ctx, lowered_args[0], &arg.ty)?;
             }
+            // ByteBuffer index/count operands (`get`, `seek`, `read_bytes`,
+            // `read_string`) cross the kernel as the native i64 word.
+            if let TBuiltinOp::ByteBufferMethod { method } = op {
+                if super::byte_buffer_native_int_operand(method) {
+                    let Some(arg) = args.first() else {
+                        return Err(ctx.error(ctx.span(), "checked builtin requires an index operand"));
+                    };
+                    lowered_args[0] = lower_builtin_native_int(ctx, lowered_args[0], &arg.ty)?;
+                }
+            }
             let route_receiver_ty = super::builtin_dispatch_ty(recv.ty.clone());
             let route = op
                 .prelude_route(&route_receiver_ty, &expr.ty, &carrier)
@@ -3564,15 +3576,17 @@ pub(super) fn lower_expr(
                 .map(|(index, arg)| {
                     let widen = widen_to_vec.get(index).copied().unwrap_or(false);
                     let mut lowered = ctx.lower_core_call_arg(arg, index, record, widen)?;
-                    // A volatile store writes T through Ptr<T>. Keep that
-                    // checked carrier intact instead of narrowing exact Int
-                    // as though this were a bounded native Core argument.
-                    let typed_pointer_value = record.module == "core.mem"
+                    // A volatile store writes T through Ptr<T>, and `keep<T>`
+                    // returns its argument at the checked type. Keep those
+                    // carriers intact instead of narrowing exact Int as though
+                    // they were bounded native Core arguments.
+                    let typed_carrier_value = (record.module == "core.mem"
                         && record.member == "volatile_write"
-                        && index == 1;
+                        && index == 1)
+                        || (record.module == "core.prelude" && record.member == "keep");
                     if record.signature.borrow_mask.get(index).copied() == Some(false)
                         && matches!(arg.ty.without_user_tags(), Type::Int)
-                        && !typed_pointer_value
+                        && !typed_carrier_value
                     {
                         lowered.value = lower_builtin_native_int(ctx, lowered.value, &arg.ty)?;
                     }
@@ -4464,7 +4478,7 @@ pub(super) fn lower_expr(
                 super::THandleOp::GameSceneOnFrame { derivation, .. } => derivation.clone(),
                 _ => None,
             };
-            let (receiver, _) = lower_builtin_receiver(
+            let (mut receiver, _) = lower_builtin_receiver(
                 ctx,
                 recv,
                 matches!(
@@ -4506,8 +4520,14 @@ pub(super) fn lower_expr(
                         | THandleOp::TLSStreamWriteAllDeadline
                         | THandleOp::TLSStreamClose
                         | THandleOp::TLSStreamCloseWrite
+                        | THandleOp::SolverRequire
                 ),
             )?;
+            // `Solver.new(seed)`'s seed is its receiver slot: the kernel
+            // takes the native i64 word, so the exact Int narrows here.
+            if matches!(op, THandleOp::SolverNew) {
+                receiver = lower_builtin_native_int(ctx, receiver, &recv.ty)?;
+            }
             let source_args = args;
             let mut args = lower_handle_method_args(ctx, source_args)?;
             if matches!(

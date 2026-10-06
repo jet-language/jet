@@ -6879,15 +6879,25 @@ fn byte_buffer_method_route(
     };
     let member = format!("byte_buffer_{method}");
     let symbol = format!("JetByteBuffer::{method}");
+    let mut borrow_mask = vec![true; arity];
+    if byte_buffer_native_int_operand(method) {
+        borrow_mask[1] = false;
+    }
     Ok(b(
         &member,
         &symbol,
         arity,
         arity,
-        &vec![true; arity],
+        &borrow_mask,
         Some(Effect::Mem),
         carrier,
     ))
+}
+
+/// ByteBuffer methods whose operand is an index or count the kernel takes as
+/// the native `i64` word (by value, narrowed from the exact Int).
+pub(super) fn byte_buffer_native_int_operand(method: &str) -> bool {
+    matches!(method, "get" | "seek" | "read_bytes" | "read_string")
 }
 
 fn byte_buffer_write_route(
@@ -6901,7 +6911,9 @@ fn byte_buffer_write_route(
         &symbol,
         2,
         2,
-        &[true, method == "write_bytes"],
+        // `write`/`write_bytes` borrow their `&Vec<u8>`; the scalar
+        // `write_<kind>` forms take their value.
+        &[true, matches!(method, "write" | "write_bytes")],
         Some(Effect::Mem),
         carrier,
     ))

@@ -46,6 +46,8 @@ enum NativeIntSource {
 pub fn exact_prelude_adapter(bare: &str) -> Option<(&'static str, &'static [usize])> {
         Some(match bare {
             "jet_fraction_from_parts" => ("jet_fraction_from_owned_parts", &[0, 1]),
+            "jet_fraction_numerator" => ("jet_fraction_owned_numerator", &[]),
+            "jet_fraction_denominator" => ("jet_fraction_owned_denominator", &[]),
             "JetDate::new" => ("jet_local_date_owned", &[0, 1, 2]),
             "JetLocalTime::new" => ("jet_local_time_owned", &[0, 1, 2]),
             "JetPeriod::new" => ("jet_period_owned", &[0, 1, 2]),
@@ -25018,6 +25020,17 @@ impl<'a> RustEmitter<'a> {
                 self.config.root_prefix
             );
         }
+        // `core.service.runtime(store, retention: Duration)`: the kernel keeps
+        // retention as whole milliseconds, the same `ns / 1_000_000` the
+        // interpreter route takes from the checked Duration.
+        if row.module == "core.service" && row.member == "runtime" && args.len() == 2 {
+            let store = self.call_arg_for_function(function, &args[0], false);
+            let retention = self.call_arg_for_function(function, &args[1], false);
+            return format!(
+                "{}({store}, ({retention}).ns / 1_000_000)",
+                self.prelude_symbol(route)
+            );
+        }
         let emitted = self.core_call_symbol_for_function(
             function,
             row,
@@ -26467,6 +26480,14 @@ impl<'a> RustEmitter<'a> {
                     if index > 0 && route.symbol.name() == "jet_http_shutdown_report_field" {
                         let value = self.value_move(value_id);
                         return self.native_int_argument(value, location);
+                    }
+                    // `world.advance(duration)`: the kernel takes the
+                    // Duration's nanosecond word, read through the borrow.
+                    if index == 1 && route.symbol.name() == "jet_world_advance" {
+                        return format!(
+                            "({}).ns",
+                            self.borrowed_value_reference(function, value_id, MirAccess::Read)
+                        );
                     }
                     if (route.module == "core.time"
                         || (route.module == "core.handle"
@@ -28211,7 +28232,9 @@ impl<'a> RustEmitter<'a> {
             let arguments = if cell_route {
                 format!("{method}({project})")
             } else {
-                format!("{method}({}i64, {project})", field.0)
+                // The field id is a u64 identity; the kernel's provenance key is
+                // its i64 bit pattern (a bare u64 literal overflows `i64`).
+                format!("{method}({}u64 as i64, {project})", field.0)
             };
             expression = format!("({expression}).{arguments}");
         }
@@ -28276,8 +28299,9 @@ impl<'a> RustEmitter<'a> {
             format!("({prefix}).{method}({project})")
         } else {
             format!(
-                "({prefix}).{method}({}i64, {}i64, {project})",
-                first[common].0, second[common].0
+                "({prefix}).{method}({}u64 as i64, {}u64 as i64, {project})",
+                first[common].0,
+                second[common].0
             )
         };
         let first_mapped = self.map_guard_path(
@@ -29408,7 +29432,20 @@ impl<'a> RustEmitter<'a> {
                 args,
                 owner_type_args,
                 type_args,
-            } => self.static_prelude_call(function, *call, args, owner_type_args, type_args),
+            } => {
+                let emitted =
+                    self.static_prelude_call(function, *call, args, owner_type_args, type_args);
+                // The HTTP shutdown report kernel reports each count as a
+                // machine word for the checked exact-Int field.
+                if self.prelude_row(*call).symbol.name() == "jet_http_shutdown_report_field" {
+                    return result
+                        .and_then(|value| {
+                            self.native_int_result(&emitted, self.value_type(function, value))
+                        })
+                        .unwrap_or(emitted);
+                }
+                emitted
+            }
             MirSemanticOp::DecodeUnder {
                 call,
                 segment,

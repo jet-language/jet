@@ -440,10 +440,10 @@ fn fallible_set_runtime_hook_is_typed_for_next_edition() {
     );
     let probe = r#"    jet_std_env_init();
     let invalid_name: Result<(), jet_std::EnvError> =
-        jet_std_env_set(&"".to_string(), &"value".to_string());
+        jet_std_env_try_set(&"".to_string(), &"value".to_string());
     assert!(matches!(invalid_name, Err(jet_std::EnvError::InvalidName)));
     let invalid_value: Result<(), jet_std::EnvError> =
-        jet_std_env_set(&"name".to_string(), &"bad\0value".to_string());
+        jet_std_env_try_set(&"name".to_string(), &"bad\0value".to_string());
     assert!(matches!(invalid_value, Err(jet_std::EnvError::InvalidValue)));
     jet_runtime_boundary(|| __jet_run());"#;
     let rust = out.rust.replacen(
