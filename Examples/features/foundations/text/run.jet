@@ -28,18 +28,16 @@ fn merge_sequence(sequence: [String], key: String) -> [String] {
     index := 0
     loop index < sequence.len() {
         current :: sequence.get(index) ?? ""
-        if index + 1 < sequence.len() {
-            next :: sequence.get(index + 1) ?? ""
-            if pair_key(current, next) == key {
+        next :: sequence.get(index + 1) ?? ""
+        if {
+            index + 1 < sequence.len() && pair_key(current, next) == key -> {
                 &result.push(merged)
                 index += 2
-            } else {
+            }
+            else -> {
                 &result.push(current)
                 index += 1
             }
-        } else {
-            &result.push(current)
-            index += 1
         }
     }
     return result

@@ -22,23 +22,9 @@ fn parse_formula(source: String) -> Formula? {
         token :: words[0].trim()
         if token == "" -> return None
         if Int.parse(token) == .Val(value) {
-            return Val(
-            Formula{
-                kind: 0,
-                value: value,
-                left: "",
-                right: "",
-            },
-            )
+            return Val(Formula{kind: 0, value: value, left: "", right: ""})
         }
-        return Val(
-        Formula{
-            kind: 3,
-            value: 0,
-            left: token,
-            right: "",
-        },
-        )
+        return Val(Formula{kind: 3, value: 0, left: token, right: ""})
     }
     if words.len() != 3 -> return None
 
@@ -46,16 +32,14 @@ fn parse_formula(source: String) -> Formula? {
     operator :: words[1].trim()
     right :: words[2].trim()
     if left == "" || right == "" -> return None
-    kind :: if operator == "+" -> 1 else if operator == "-" -> 2 else if operator == "*" -> 4 else -> 9
+    kind :: if operator == {
+        "+" -> 1
+        "-" -> 2
+        "*" -> 4
+        else -> 9
+    }
     if kind == 9 -> return None
-    return Val(
-    Formula{
-        kind: kind,
-        value: 0,
-        left: left,
-        right: right,
-    },
-    )
+    Val(Formula{kind: kind, value: 0, left: left, right: right})
 }
 
 pub fn parse(source: String) -> Book? {
@@ -74,12 +58,7 @@ pub fn parse(source: String) -> Book? {
         }
     }
     if order.len() == 0 -> return None
-    return Val(
-    Book{
-        cells: cells,
-        order: order,
-    },
-    )
+    Val(Book{cells: cells, order: order})
 }
 
 fn valid_operand(operand: String, book: Book, visiting: &[String]) -> Bool {
@@ -166,25 +145,23 @@ visiting: &[String],
     if visiting.contains(~name) -> return None
     formula :: book.cells.get(~name) ?? return None
     &visiting.push(name)
-    value :: if formula.kind == 0 -> {
-        Val(formula.value)
-    } else if formula.kind == 3 -> {
-        resolve_operand(formula.left, ~book, values, visiting)
-    } else -> {
-        left :: resolve_operand(formula.left, ~book, values, visiting) ?? {
-            _ :: &visiting.pop()
-            return None
-        }
-        right :: resolve_operand(formula.right, ~book, values, visiting) ?? {
-            _ :: &visiting.pop()
-            return None
-        }
-        if formula.kind == 1 -> {
-            Val(left + right)
-        } else if formula.kind == 2 -> {
-            Val(left - right)
-        } else -> {
-            Val(left * right)
+    value :: if formula.kind == {
+        0 -> Val(formula.value)
+        3 -> resolve_operand(formula.left, ~book, values, visiting)
+        else -> {
+            left :: resolve_operand(formula.left, ~book, values, visiting) ?? {
+                _ :: &visiting.pop()
+                return None
+            }
+            right :: resolve_operand(formula.right, ~book, values, visiting) ?? {
+                _ :: &visiting.pop()
+                return None
+            }
+            if formula.kind == {
+                1 -> Val(left + right)
+                2 -> Val(left - right)
+                else -> Val(left * right)
+            }
         }
     }
     _ :: &visiting.pop()
@@ -229,10 +206,5 @@ new_value: Int,
             &touched.push(name)
         }
     }
-    return Val(
-    Recalc{
-        values: values,
-        touched: touched,
-    },
-    )
+    Val(Recalc{values: values, touched: touched})
 }
