@@ -87,7 +87,7 @@ pub fn sema_call_http_mount(receiver: Expr, receiver_value: TExpr, args: [CallAr
                         loop registered in nominal.methods {
                             if registered.declaration.name == method.name -> meta.http_route_source = Val(registered.symbol.id.key)
                         }
-                        handler :: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, result_type: None, error_type: None, effects: None, body: LambdaBody.Expr{value: invocation}, span: marker.span, meta: meta}}
+                        handler :: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: invocation}, span: marker.span, meta: meta}}
                         registration :: sema_call_try_http_router(receiver, sema_tir_expr(receiver_value.ty, TExprKind.Local{local: mux_local}, span), verb, [CallArg]{sema_http_mount_arg(path, marker.span), sema_http_mount_arg(handler, marker.span)}, marker.span, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
                         if registration.value == .Val(value) -> &body.push(TStmt.ExprStmt{value: value, span: marker.span})
                     }
