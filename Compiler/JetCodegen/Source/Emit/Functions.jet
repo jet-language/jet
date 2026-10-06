@@ -1774,6 +1774,25 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRIm
         }
         &lines.push("}}")
     }
+    // D-ITER-HOOK: a user `Iterable` is a native loop source. The runtime
+    // bridge takes `Iterable.iter` once and steps `Iterator.next` through the
+    // shared loop cursor (MIRRust emit_impl, `jet_iterable_loop_source`). A
+    // generic owner states the bridge's `'static` item bounds.
+    if implementation.trait_ref == .Val(iterable_ref) && iterable_ref.name == "Iterable" {
+        owner :: jet_rust_emit_type(&ctx, implementation.self_type)
+        &lines.push("")
+        &lines.push("impl{impl_generics} JetLoopSource for {owner}")
+        if impl_generics != "" {
+            &lines.push("where")
+            &lines.push("    <{owner} as __jet_Iterable>::__jet_Iter: __jet_Iterator + 'static,")
+            &lines.push("    <<{owner} as __jet_Iterable>::__jet_Iter as __jet_Iterator>::__jet_Item: 'static,")
+        }
+        &lines.push("{{")
+        &lines.push("    fn jet_loop_source(self, source_kind: JetLoopSourceKind, by_value: bool) -> Box<dyn Iterator<Item = JetLoopAny>> {{")
+        &lines.push("        jet_iterable_loop_source(self, source_kind, by_value)")
+        &lines.push("    }}")
+        &lines.push("}}")
+    }
     ctx.current_generic_params = previous_generic_params
 }
 

@@ -1102,11 +1102,12 @@ fn lower_trait_method_inner(
     operator_rhs: Option<&Type>,
 ) -> TFunc {
     // D-FAILURE-FOUNDATION1: protocol bodies keep their declared ABI. Encode,
-    // Decode, Display, Debug, Equatable, Comparable, Close, and same-type
-    // arithmetic are Rust trait methods (`String`, `bool`, `Ordering`, the
-    // owner type, and unit — never `Result`), so projecting an omitted contract
-    // onto a hand-written body would emit `Result<raw, Err>` and violate the
-    // trait ABI just as it would for a compiler-generated body.
+    // Decode, Display, Debug, Equatable, Comparable, Close, Iterable, and
+    // same-type arithmetic are Rust trait methods (`String`, `bool`,
+    // `Ordering`, the owner type, the iterator cursor, and unit — never
+    // `Result`), so projecting an omitted contract onto a hand-written body
+    // would emit `Result<raw, Err>` and violate the trait ABI just as it would
+    // for a compiler-generated body.
     // Other user trait methods still use the implicit Error carrier.
     let raw_protocol_return = raw_protocol_return
         || matches!(
@@ -1119,6 +1120,7 @@ fn lower_trait_method_inner(
                 | crate::Generics::COMPARABLE
                 | crate::Generics::CLOSE
                 | crate::Syntax::TRAIT_ROLLBACK
+                | crate::Syntax::TRAIT_ITERABLE
                 | crate::Generics::ADD
                 | crate::Generics::SUB
                 | crate::Generics::MUL

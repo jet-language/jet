@@ -7950,6 +7950,27 @@ impl<'a> RustEmitter<'a> {
             let signatures = carrier_trait_signatures(&out[methods_start..methods_end]);
             let _ = writeln!(out, "trait {carrier_trait} {{\n{signatures}}}\n");
         }
+        // D-ITER-HOOK: a user `Iterable` is a native loop source. The runtime
+        // bridge takes `Iterable.iter` once and steps `Iterator.next` through
+        // the shared loop cursor, as the JIT's registered iterable hook does.
+        // A generic owner states the bridge's `'static` item bounds.
+        if implementation
+            .trait_ref
+            .as_ref()
+            .is_some_and(|trait_ref| trait_ref.name == jet_foundation::Syntax::TRAIT_ITERABLE)
+        {
+            let bounds = if generics.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "\nwhere\n    <{owner} as __jet_Iterable>::__jet_Iter: __jet_Iterator + 'static,\n    <<{owner} as __jet_Iterable>::__jet_Iter as __jet_Iterator>::__jet_Item: 'static,"
+                )
+            };
+            let _ = writeln!(
+                out,
+                "impl{generics} JetLoopSource for {owner}{bounds}\n{{\n    fn jet_loop_source(self, source_kind: JetLoopSourceKind, by_value: bool) -> Box<dyn Iterator<Item = JetLoopAny>> {{\n        jet_iterable_loop_source(self, source_kind, by_value)\n    }}\n}}\n"
+            );
+        }
         self.pop_generic_scope();
         for function in functions {
             if self.owner_independent_static(function) {
