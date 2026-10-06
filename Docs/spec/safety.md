@@ -97,10 +97,10 @@ required.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 68,
+  "total": 69,
   "counts": {
     "docs": 2,
-    "examples": 23,
+    "examples": 24,
     "tests": 43
   },
   "regions": [
@@ -215,6 +215,13 @@ required.
       "line": 9,
       "column": 5,
       "reason": "stand-in MMIO cell stays on this stack frame"
+    },
+    {
+      "package": "examples",
+      "file": "Examples/features/lowlevel/opaque_handles/run.jet",
+      "line": 34,
+      "column": 5,
+      "reason": "fixed headers define handle close ownership, exclusive buffers, and bounded output lengths"
     },
     {
       "package": "examples",
@@ -613,6 +620,7 @@ required.
 | examples | Examples/features/lowlevel/inline_c.jet | 6:5 | "call the audited inline C contract" |
 | examples | Examples/features/lowlevel/lowlevel.jet | 10:5 | "`cell` is live on this stack frame and the pointer never escapes" |
 | examples | Examples/features/lowlevel/mmio_board_write.jet | 9:5 | "stand-in MMIO cell stays on this stack frame" |
+| examples | Examples/features/lowlevel/opaque_handles/run.jet | 34:5 | "fixed headers define handle close ownership, exclusive buffers, and bounded output lengths" |
 | examples | Examples/features/lowlevel/pointer_cast_deref.jet | 11:5 | "flag is live on this stack frame and the pointer never escapes" |
 | examples | Examples/features/lowlevel/unsafe_obligations.jet | 5:5 | "cell stays live and the pointer remains local" |
 | examples | Examples/features/memory/pin.jet | 43:5 | "node storage is fixed for the returned pin; self_addr names this place" |
