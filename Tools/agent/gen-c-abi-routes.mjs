@@ -151,6 +151,7 @@ const text = readFileSync(runtimePath, "utf8");
 const fns = new Map(); // "path::name" -> [{ pub, sig, wasmOnly, gated, path }]
 const types = new Map(); // "path::Name" -> [{ visible, generic, gated, derives }] (module-level struct / enum)
 const globs = new Map(); // module path -> [module paths it glob-imports (`use <module>::*;`)]
+const renames = new Map(); // "path::Alias" -> "path::Name" (`use path::{Name as Alias}`)
 // The attribute lines (`#[...]`) on the item whose line starts at `lineStart`
 // (the attribute and doc-comment lines directly above it).
 const attributesBefore = (lineStart) => {
@@ -295,17 +296,31 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
           types.set(key, list);
         }
       } else if (word === "use" && stack.every((frame) => frame.mod)) {
-        const m = /^\s+((?:[a-z_][a-z0-9_]*::)*)\*\s*;/.exec(text.slice(j, j + 120));
-        if (m) {
-          const here = stack.map((frame) => frame.mod);
-          const target = m[1].split("::").filter(Boolean);
+        const here = stack.map((frame) => frame.mod);
+        // A `use` path (relative to this module unless `crate::`), as a
+        // module path from the crate root.
+        const resolve = (prefix) => {
+          const target = prefix.split("::").filter(Boolean);
           const base = target[0] === "crate" ? [] : [...here];
           for (const segment of target[0] === "crate" ? target.slice(1) : target) {
             if (segment === "super") base.pop();
             else if (segment !== "self") base.push(segment);
           }
+          return base;
+        };
+        const m = /^\s+((?:[a-z_][a-z0-9_]*::)*)\*\s*;/.exec(text.slice(j, j + 120));
+        if (m) {
           const key = here.join("::");
-          globs.set(key, [...(globs.get(key) ?? []), base.join("::")]);
+          globs.set(key, [...(globs.get(key) ?? []), resolve(m[1]).join("::")]);
+        }
+        // Renamed imports (`use super::{JetTempDirOwner as TempDir, ...};`).
+        const renamed = /^\s+((?:[a-z_][a-z0-9_]*::)*)(?:\{([^{}]*)\}|([A-Z][A-Za-z0-9_]*\s+as\s+[A-Z][A-Za-z0-9_]*))\s*;/.exec(text.slice(j, j + 2000));
+        if (renamed) {
+          const base = resolve(renamed[1]);
+          for (const entry of (renamed[2] ?? renamed[3]).split(",")) {
+            const rename = /^\s*([A-Z][A-Za-z0-9_]*)\s+as\s+([A-Z][A-Za-z0-9_]*)\s*$/.exec(entry);
+            if (rename) renames.set([...here, rename[2]].join("::"), [...base, rename[1]].join("::"));
+          }
         }
       }
       i = j;
@@ -316,10 +331,11 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
 }
 
 // The declaration a runtime type path names: `{ key, decls }` for the item at
-// that module path, or one a module's glob import (`use super::*;`,
-// `pub(crate) use jet_sync::*;`) brings in; null if none.
+// that module path, one a renamed import names, or one a module's glob import
+// (`use super::*;`, `pub(crate) use jet_sync::*;`) brings in; null if none.
 const declarationOf = (rustPath, seen = new Set()) => {
   if (types.has(rustPath)) return { key: rustPath, decls: types.get(rustPath) };
+  if (renames.has(rustPath)) return declarationOf(renames.get(rustPath), seen);
   const segments = rustPath.split("::");
   const name = segments.pop();
   const module = segments.join("::");
@@ -541,6 +557,8 @@ function valueCarrier(ty, path, nativeInt) {
   if (ty === "bool") return { jet: "Flag", cty: "bool", wrap: (v) => v };
   if (ty === "f64") return { jet: "Float", cty: "f64", wrap: (v) => v };
   if (ty === "char") return { jet: "Word", cty: "i64", wrap: (v) => `(${v}) as i64` };
+  // The prelude Ordering: the Jet enum's variant index (Less, Equal, Greater).
+  if (ty === "__jet_Ordering") return { jet: `Tag{name: "Ordering", variants: "Less,Equal,Greater"}`, cty: "i64", wrap: (v) => `match ${v} { crate::__jet_Ordering::__jet_Less => 0, crate::__jet_Ordering::__jet_Equal => 1, crate::__jet_Ordering::__jet_Greater => 2 }` };
   // An owned exact Int: its carrier word, ownership passing to the caller.
   if (/^(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty)) return { jet: "Word", cty: "i64", wrap: (v) => `(${v}).into_raw()` };
   if (opaqueName.test(ty)) {
@@ -826,7 +844,8 @@ const handleOf = (rustPath) => {
   if (!found || found.decls.length !== 1) return null;
   const [decl] = found.decls;
   if (!decl.visible || decl.generic || decl.gated) return null;
-  return { name, full: `crate::${found.key}` };
+  // A renamed import names the declaration's own type.
+  return { name: found.key.split("::").pop(), full: `crate::${found.key}` };
 };
 // Every Jet name of a native handle type: the table names, plus the canonical
 // name of each Core source type that resolves to a native type.

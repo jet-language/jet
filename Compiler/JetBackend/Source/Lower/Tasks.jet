@@ -196,6 +196,34 @@ fn lower_task_group_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     true
 }
 
+// `core.sys.atexit(callback)`: the callback's owned closure box joins the
+// runtime's exit handlers (CAbiTask.rs jet_rt_native_atexit), which run at
+// the process exit boundary (jet_runtime_boundary / jet_runtime_process_exit).
+fn lower_atexit_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
+    row :: lower_prelude_row(p, call) ?? return false
+    if mir_symbol_name(row.symbol) != "jet_std_os_atexit" -> return false
+    if args.len() != 1 {
+        lower_fail(&m, &f, "core.sys.atexit with {args.len()} arguments is not lowered at O0 yet")
+        return true
+    }
+    closure_ty :: lower_value_type(c, args[0].value) ?? {
+        lower_fail(&m, &f, "core.sys.atexit callback has no checked type")
+        return true
+    }
+    result :: lower_task_body_result(closure_ty) ?? {
+        lower_fail(&m, &f, "core.sys.atexit over {mir_type_display_name(closure_ty)} is not lowered at O0 yet")
+        return true
+    }
+    if lower_repr(p, result) != .Absent {
+        lower_fail(&m, &f, "core.sys.atexit over {mir_type_display_name(closure_ty)} is not lowered at O0 yet")
+        return true
+    }
+    env :: lower_task_owned_closure(p, c, &m, &f, args[0].value, closure_ty) ?? return true
+    lower_call_runtime(&m, &f, "jet_rt_native_atexit", [LIRValueID]{env}, None)
+    lower_alias_absent(&f, instruction)
+    true
+}
+
 // Task handle methods by Prelude member; false when `receiver` is no Task.
 fn lower_task_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, receiver: MIRValueID, args: [MIRValueID]) -> Bool Never! {
     receiver_ty :: lower_value_type(c, receiver) ?? return false

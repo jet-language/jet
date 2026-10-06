@@ -12071,6 +12071,12 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_decimal_ceil(unsafe { &*a0 }))))
     }
 
+    /// core.precise.decimal_compare
+    #[no_mangle]
+    pub extern "C" fn jet_decimal_compare(a0: *mut crate::jet_std::JetDecimal, a1: *mut crate::jet_std::JetDecimal) -> i64 {
+        guard(|| match crate::jet_decimal_compare(unsafe { &*a0 }, unsafe { &*a1 }) { crate::__jet_Ordering::__jet_Less => 0, crate::__jet_Ordering::__jet_Equal => 1, crate::__jet_Ordering::__jet_Greater => 2 })
+    }
+
     /// core.precise.decimal_div
     #[no_mangle]
     pub extern "C" fn jet_decimal_div(a0: *mut crate::jet_std::JetDecimal, a1: *mut crate::jet_std::JetDecimal) -> *mut crate::jet_std::JetFraction {
@@ -20884,6 +20890,12 @@ mod jet_c_abi_routes {
 
     /// TIR/routes.rs
     #[no_mangle]
+    pub extern "C" fn JetDate_compare_value(a0: *mut crate::JetDate, a1: *mut crate::JetDate) -> i64 {
+        guard(|| match crate::JetDate::compare_value(unsafe { &*a0 }, unsafe { &*a1 }.clone()) { crate::__jet_Ordering::__jet_Less => 0, crate::__jet_Ordering::__jet_Equal => 1, crate::__jet_Ordering::__jet_Greater => 2 })
+    }
+
+    /// TIR/routes.rs
+    #[no_mangle]
     pub extern "C" fn JetDate_day(a0: *mut crate::JetDate) -> i64 {
         guard(|| crate::jet_std::jet_int_from_i64(crate::JetDate::day(unsafe { &*a0 })))
     }
@@ -21060,6 +21072,12 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn JetDateTime_ceil_with(a0: *mut crate::JetDateTime, a1: JetCString, a2: i64) -> *mut crate::JetDateTime {
         guard(|| Box::into_raw(Box::new(crate::JetDateTime::ceil_with(unsafe { &*a0 }, view(a1), a2))))
+    }
+
+    /// TIR/routes.rs
+    #[no_mangle]
+    pub extern "C" fn JetDateTime_compare_value(a0: *mut crate::JetDateTime, a1: *mut crate::JetDateTime) -> i64 {
+        guard(|| match crate::JetDateTime::compare_value(unsafe { &*a0 }, unsafe { &*a1 }.clone()) { crate::__jet_Ordering::__jet_Less => 0, crate::__jet_Ordering::__jet_Equal => 1, crate::__jet_Ordering::__jet_Greater => 2 })
     }
 
     /// TIR/routes.rs
@@ -21268,6 +21286,12 @@ mod jet_c_abi_routes {
 
     /// TIR/routes.rs
     #[no_mangle]
+    pub extern "C" fn JetInstant_compare_value(a0: *mut crate::JetInstant, a1: *mut crate::JetInstant) -> i64 {
+        guard(|| match crate::JetInstant::compare_value(unsafe { &*a0 }, unsafe { &*a1 }.clone()) { crate::__jet_Ordering::__jet_Less => 0, crate::__jet_Ordering::__jet_Equal => 1, crate::__jet_Ordering::__jet_Greater => 2 })
+    }
+
+    /// TIR/routes.rs
+    #[no_mangle]
     pub extern "C" fn JetInstant_elapsed_duration(a0: *mut crate::JetInstant) -> *mut crate::jet_std::Duration {
         guard(|| Box::into_raw(Box::new(crate::JetInstant::elapsed_duration(unsafe { &*a0 }))))
     }
@@ -21294,6 +21318,12 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn JetLocalTime_ceil_with(a0: *mut crate::JetLocalTime, a1: JetCString, a2: i64) -> *mut crate::JetLocalTime {
         guard(|| Box::into_raw(Box::new(crate::JetLocalTime::ceil_with(unsafe { &*a0 }, view(a1), a2))))
+    }
+
+    /// TIR/routes.rs
+    #[no_mangle]
+    pub extern "C" fn JetLocalTime_compare_value(a0: *mut crate::JetLocalTime, a1: *mut crate::JetLocalTime) -> i64 {
+        guard(|| match crate::JetLocalTime::compare_value(unsafe { &*a0 }, unsafe { &*a1 }.clone()) { crate::__jet_Ordering::__jet_Less => 0, crate::__jet_Ordering::__jet_Equal => 1, crate::__jet_Ordering::__jet_Greater => 2 })
     }
 
     /// TIR/routes.rs
@@ -21510,6 +21540,12 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn JetZonedDateTime_add_period_value(a0: *mut crate::JetZonedDateTime, a1: *mut crate::JetPeriod) -> *mut crate::JetZonedDateTime {
         guard(|| Box::into_raw(Box::new(crate::JetZonedDateTime::add_period_value(unsafe { &*a0 }, unsafe { &*a1 }.clone()))))
+    }
+
+    /// TIR/routes.rs
+    #[no_mangle]
+    pub extern "C" fn JetZonedDateTime_compare_value(a0: *mut crate::JetZonedDateTime, a1: *mut crate::JetZonedDateTime) -> i64 {
+        guard(|| match crate::JetZonedDateTime::compare_value(unsafe { &*a0 }, unsafe { &*a1 }.clone()) { crate::__jet_Ordering::__jet_Less => 0, crate::__jet_Ordering::__jet_Equal => 1, crate::__jet_Ordering::__jet_Greater => 2 })
     }
 
     /// TIR/routes.rs
@@ -21834,7 +21870,6 @@ mod jet_c_abi_routes {
 //   jet_db_scope_migrate (core.db.migrate): no runtime function
 //   jet_db_scope_transaction (core.db.transaction): no runtime function
 //   jet_db_with_policy (core.handle.db.with_policy): no runtime function
-//   jet_decimal_compare (core.precise.decimal_compare): result type __jet_Ordering
 //   jet_deque_capacity (core.builtin.deque_capacity): generic
 //   jet_deque_contains (core.builtin.deque_contains): generic
 //   jet_deque_delete (core.builtin.deque_delete): generic
@@ -22457,14 +22492,9 @@ mod jet_c_abi_routes {
 //   jet_web_storage_session_remove (core.web.storage.session.remove): no runtime function
 //   jet_web_storage_session_set (core.web.storage.session.set): no runtime function
 //   jet_web_virtual_window_facts (core.web.virtual.facts_json): no runtime function
-//   JetDate::compare_value (TIR/routes.rs): result type __jet_Ordering
-//   JetDateTime::compare_value (TIR/routes.rs): result type __jet_Ordering
-//   JetInstant::compare_value (TIR/routes.rs): result type __jet_Ordering
-//   JetLocalTime::compare_value (TIR/routes.rs): result type __jet_Ordering
 //   JetPeriod::total_in_value (TIR/routes.rs): generic
 //   JetZone::next_transition_value (TIR/routes.rs): result type JetOutcome<i64, JetAbsent>
 //   JetZone::previous_transition_value (TIR/routes.rs): result type JetOutcome<i64, JetAbsent>
-//   JetZonedDateTime::compare_value (TIR/routes.rs): result type __jet_Ordering
 //   JetZonedDateTime::next_transition_value (TIR/routes.rs): result type JetOutcome<i64, JetAbsent>
 //   JetZonedDateTime::previous_transition_value (TIR/routes.rs): result type JetOutcome<i64, JetAbsent>
 // END GENERATED C-ABI ROUTES

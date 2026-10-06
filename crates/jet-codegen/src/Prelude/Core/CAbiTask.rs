@@ -88,6 +88,36 @@ mod jet_c_abi_task {
         guard(|| Box::into_raw(Box::new(jet_std::JetTaskGroup::with_limit(native(limit)))))
     }
 
+    /// One owned native `fn()` closure box (Closures.jet layout: 0 reference
+    /// count, 8 code, 16 release helper) held as a process exit handler.
+    struct ExitCallback(*mut u8);
+    impl ExitCallback {
+        fn run(&self) {
+            let code: unsafe extern "C" fn(*mut u8) = unsafe { std::mem::transmute(*(self.0.add(8) as *const usize)) };
+            unsafe { code(self.0) };
+        }
+    }
+    impl Drop for ExitCallback {
+        fn drop(&mut self) {
+            unsafe {
+                let count = self.0 as *mut i64;
+                *count -= 1;
+                if *count == 0 {
+                    let release: unsafe extern "C" fn(*mut u8) = std::mem::transmute(*(self.0.add(16) as *const usize));
+                    release(self.0);
+                }
+            }
+        }
+    }
+
+    /// `core.sys.atexit(callback)`: the callback runs once at the process
+    /// exit boundary, as generated Rust's `jet_std_os_atexit` registers it.
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_native_atexit(boxed: *mut u8) {
+        let callback = ExitCallback(boxed);
+        guard(move || super::jet_std_os_atexit(std::rc::Rc::new(move || callback.run())))
+    }
+
     #[no_mangle]
     pub unsafe extern "C" fn jet_rt_native_task_drop(task: *mut NativeTask) {
         guard(|| { if !task.is_null() { drop(Box::from_raw(task)); } })
