@@ -35,7 +35,6 @@ fn jet_codegen_lower_field_destructure(builder: &JetCodegenBuilder, temp: TLocal
         _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: move_place, value: subject})
         temporary = Val(move_place)
     }
-    moved := [String]{}
     loop binding in binds {
         field_type := jet_codegen_checked_host_field_type(builder, init.ty, binding.field)
         field_id := jet_codegen_host_field_id(builder, init.ty, binding.field)
@@ -51,7 +50,6 @@ fn jet_codegen_lower_field_destructure(builder: &JetCodegenBuilder, temp: TLocal
         }
         destination := jet_codegen_bind_local(&builder, binding.local, field_type, binding.local.mutable, None, None, false)
         _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: destination, value: value})
-        &moved.push(binding.field)
     }
     // A move destructure that took every field out of its temp leaves nothing
     // to release: clear the temp's drop flag exactly as a whole move does, so
@@ -61,8 +59,8 @@ fn jet_codegen_lower_field_destructure(builder: &JetCodegenBuilder, temp: TLocal
         if fields.len() == 0 -> return
         loop field in fields {
             taken := false
-            loop name in moved {
-                if name == field {
+            loop binding in binds {
+                if binding.field == field {
                     taken = true
                     break
                 }

@@ -71,6 +71,8 @@ Shared-guard `map`, `split`, and `wait` consume their source guard. Lowering a
 named guard therefore emits the same owned-place move as task consumption;
 the guard's cleanup flag clears before its scope exits. A plain `ReadPlace`
 is not a substitute for this ownership fact.
+A fully moved destructure temp also clears its cleanup flag; completeness is
+checked against the original binding list, without a copied moved-field ledger.
 
 ## Type kinds (23)
 

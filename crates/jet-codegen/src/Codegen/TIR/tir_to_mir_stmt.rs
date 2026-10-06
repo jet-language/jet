@@ -1047,7 +1047,6 @@ fn lower_tuple_destructure(
             value: subject,
         },
     )?;
-    let mut moved = Vec::with_capacity(binds.len());
     for (index, (local_name, _)) in binds.iter().enumerate() {
         let field_name = ctx.field_name_for_type(&init.ty, index)?;
         let field_ty = ctx.checked_field_type(&init.ty, &field_name)?;
@@ -1069,9 +1068,8 @@ fn lower_tuple_destructure(
             None,
             MirOperation::WritePlace { place, value },
         )?;
-        moved.push(field_name);
     }
-    release_emptied_destructure_temp(ctx, &init.ty, temp_place, &moved)
+    release_emptied_destructure_temp(ctx, &init.ty, temp_place, |_, index| index < binds.len())
 }
 
 /// A move destructure takes the bound fields out of its temp one by one. Once
@@ -1083,11 +1081,11 @@ fn release_emptied_destructure_temp(
     ctx: &mut LowerCtx,
     ty: &Type,
     temp_place: MirPlaceId,
-    moved: &[String],
+    taken: impl Fn(&str, usize) -> bool,
 ) -> Result<(), LowerError> {
     let mut index = 0;
     while let Ok(field) = ctx.field_name_for_type(ty, index) {
-        if !moved.contains(&field) {
+        if !taken(&field, index) {
             return Ok(());
         }
         index += 1;
@@ -1174,7 +1172,6 @@ fn lower_struct_destructure(
             value: subject,
         },
     )?;
-    let mut moved = Vec::with_capacity(binds.len());
     for (local_name, field_name) in binds {
         let field_ty = ctx.checked_field_type(&init.ty, field_name)?;
         let field_place =
@@ -1195,9 +1192,10 @@ fn lower_struct_destructure(
             None,
             MirOperation::WritePlace { place, value },
         )?;
-        moved.push(field_name.clone());
     }
-    release_emptied_destructure_temp(ctx, &init.ty, temp_place, &moved)
+    release_emptied_destructure_temp(ctx, &init.ty, temp_place, |field, _| {
+        binds.iter().any(|(_, name)| name == field)
+    })
 }
 
 fn lower_list_destructure(
