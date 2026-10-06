@@ -2241,7 +2241,7 @@ fn jet_http_server_run_listener_inner(
                     let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(10)));
                     let mut discard = [0u8; 8192];
                     let _ = stream.read(&mut discard);
-                    let _ = stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                    let _ = stream.write_all(jet_http_srv_empty_wire(503, "Service Unavailable").as_bytes());
                     let _ = stream.flush();
                     let _ = stream.shutdown(std::net::Shutdown::Write);
                     continue;
@@ -2262,7 +2262,7 @@ fn jet_http_server_run_listener_inner(
                         let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(10)));
                         let mut discard = [0u8; 8192];
                         let _ = stream.read(&mut discard);
-                        let _ = stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                        let _ = stream.write_all(jet_http_srv_empty_wire(503, "Service Unavailable").as_bytes());
                         let _ = stream.flush();
                         let _ = stream.shutdown(std::net::Shutdown::Write);
                     }
@@ -2894,6 +2894,11 @@ fn jet_http2_encode_response_headers(response: &JetHTTPResponse, length: Option<
     if let Some(length) = length {
         jet_http2_encode_integer(&mut output, 28, 4, 0);
         jet_http2_encode_string(&mut output, &length.to_string());
+    }
+    // D-HTTP-DATE1=A: `date` is HPACK static-table name 33.
+    if !(&response.headers).into_iter().any(|(name, _)| name.eq_ignore_ascii_case("date")) {
+        jet_http2_encode_integer(&mut output, 33, 4, 0);
+        jet_http_srv_with_date(|date| jet_http2_encode_string(&mut output, date));
     }
     let connection_headers = response.headers.all("connection").into_iter()
         .flat_map(|value| value.split(','))
@@ -5024,10 +5029,22 @@ fn jet_http_srv_read_error_response(error: &JetHTTPReadError) -> String {
         505 => "HTTP Version Not Supported",
         _ => "Bad Request",
     };
-    format!(
-        "HTTP/1.1 {} {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-        error.status, reason
-    )
+    jet_http_srv_empty_wire(error.status, reason)
+}
+
+/// A bodiless `Connection: close` response the server writes before any
+/// handler runs (read errors, overload shedding). D-HTTP-DATE1=A: it carries
+/// `Date` like every serialized response.
+pub fn jet_http_srv_empty_wire(status: i64, reason: &str) -> String {
+    let mut out = String::with_capacity(112);
+    out.push_str("HTTP/1.1 ");
+    out.push_str(&status.to_string());
+    out.push(' ');
+    out.push_str(reason);
+    out.push_str("\r\n");
+    jet_http_srv_push_date(&mut out);
+    out.push_str("Content-Length: 0\r\nConnection: close\r\n\r\n");
+    out
 }
 
 fn jet_http_mux_serve_tls<V, S>(
@@ -5811,6 +5828,9 @@ fn jet_http_srv_write_response(
         && known_length.is_none();
     let mut out = String::with_capacity(128);
     write!(&mut out, "{} {} {}\r\n", version, resp.status, reason).expect("response formatting cannot fail");
+    if !(&resp.headers).into_iter().any(|(name, _)| name.eq_ignore_ascii_case("date")) {
+        jet_http_srv_push_date(&mut out);
+    }
     if !body_forbidden {
         if reset_content {
             out.push_str("Content-Length: 0\r\n");
@@ -6085,6 +6105,34 @@ fn jet_http_date(seconds: i64) -> String {
     format!("{}, {:02} {} {:04} {:02}:{:02}:{:02} GMT",
         WEEKDAYS[(days + 4).rem_euclid(7) as usize], day, MONTHS[(month - 1) as usize], year,
         within / 3600, within / 60 % 60, within % 60)
+}
+
+thread_local! {
+    /// D-HTTP-DATE1=A: the IMF-fixdate text for the last second this thread
+    /// formatted, so the serializer reformats at most once per second.
+    static JET_HTTP_DATE_CACHE: std::cell::RefCell<(i64, String)> =
+        const { std::cell::RefCell::new((i64::MIN, String::new())) };
+}
+
+/// D-HTTP-DATE1=A: append `Date: <IMF-fixdate>\r\n` read from the program's
+/// clock (`jet_std_time_now`), so a deterministic test world yields a fixed
+/// value and production yields the real time.
+pub fn jet_http_srv_push_date(out: &mut String) {
+    out.push_str("Date: ");
+    jet_http_srv_with_date(|date| out.push_str(date));
+    out.push_str("\r\n");
+}
+
+fn jet_http_srv_with_date<R>(use_date: impl FnOnce(&str) -> R) -> R {
+    let seconds = jet_std_time_now().div_euclid(1_000);
+    JET_HTTP_DATE_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.0 != seconds {
+            cache.1 = jet_http_date(seconds);
+            cache.0 = seconds;
+        }
+        use_date(&cache.1)
+    })
 }
 
 fn jet_http_date_parse(value: &str) -> Option<i64> {
