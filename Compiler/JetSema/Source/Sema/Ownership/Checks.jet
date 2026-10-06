@@ -2913,6 +2913,14 @@ pub fn sema_ownership_fork(state: &SemaOwnershipState) -> SemaOwnershipFork Neve
     fork
 }
 
+// A fork the code after it keeps running on in place (a loop body): its
+// receiver frames stay. It ends in a join or a rollback and its close.
+pub fn sema_ownership_mark(state: &SemaOwnershipState) -> SemaOwnershipFork Never! {
+    fork :: sema_ownership_state_fork(state)
+    state.forks += 1
+    fork
+}
+
 // The fork marks of a state, without opening a fork.
 fn sema_ownership_state_fork(state: SemaOwnershipState) -> SemaOwnershipFork Never! {
     SemaOwnershipFork{
@@ -3220,25 +3228,46 @@ fn sema_ownership_loop_path_to_depth(path: SemaOwnershipState, target_depth: Int
     normalized
 }
 
-pub fn sema_ownership_join_loop_value_paths(state: &SemaOwnershipState, context: SemaCheckContext, frame_index: Int, before: SemaOwnershipState, after_body: SemaOwnershipState, body_falls_through: Bool, may_skip: Bool) -> Bool Never! {
-    paths := [SemaOwnershipState]{}
-    if may_skip -> &paths.push(sema_ownership_state_snapshot(before))
-    if may_skip && body_falls_through -> &paths.push(sema_ownership_loop_path_to_depth(after_body, before.scope_depth))
-    loop exit in sema_loop_value_break_flows(context, frame_index) -> &paths.push(sema_ownership_loop_path_to_depth(exit, before.scope_depth))
+// The join after a loop (Rust `FlowFacts::after_loop_value`). `fork` is the
+// mark the loop opened before its body (sema_ownership_mark); the body ran in
+// place, so `state` is the state after it. The join base is the fork state,
+// or with `outer` that state after leaving one more scope (a counted loop's
+// own scope). Paths: the base when the body may be skipped, the state after
+// the body when it falls through, and every recorded break, each left down
+// to the base depth.
+pub fn sema_ownership_join_loop_value_paths(state: &SemaOwnershipState, context: SemaCheckContext, frame_index: Int, fork: SemaOwnershipFork, outer: Bool, body_falls_through: Bool, may_skip: Bool) -> Bool Never! {
+    target_depth :: if outer -> fork.scope_depth - 1 else -> fork.scope_depth
+    found :: state.share_found
+    after_body := SemaOwnershipPath?{None}
+    if may_skip && body_falls_through {
+        normalize :: sema_ownership_mark(&state)
+        loop state.scope_depth > target_depth -> sema_ownership_leave_scope(&state)
+        after_body = Val(sema_ownership_fork_path(state, fork))
+        sema_ownership_fork_rollback(&state, normalize)
+        sema_ownership_fork_close(&state, normalize)
+    }
+    sema_ownership_fork_rollback(&state, fork)
+    if outer -> sema_ownership_leave_scope(&state)
+    base :: sema_ownership_state_fork(state)
+    paths := [SemaOwnershipPath]{}
+    if may_skip -> &paths.push(sema_ownership_fork_base(base))
+    if after_body == .Val(path) -> &paths.push(path)
+    loop exit in sema_loop_value_break_flows(context, frame_index) -> &paths.push(sema_ownership_fork_path(sema_ownership_loop_path_to_depth(exit, target_depth), fork))
+    joined := sema_ownership_fork_base(base)
     if paths.len() == 0 {
-        sema_ownership_join_paths(&state, before, before, before, false)
-        return false
+        joined = sema_ownership_path_join(state, base, joined, joined, false, found)
+    } else {
+        joined = paths[0]
+        index := 1
+        loop index < paths.len() {
+            joined = sema_ownership_path_join(state, base, joined, paths[index], true, joined.share_found)
+            index += 1
+        }
+        joined = sema_ownership_path_join(state, base, joined, joined, true, found)
     }
-    joined := paths[0]
-    index := 1
-    loop index < paths.len() {
-        next := sema_ownership_state_snapshot(joined)
-        sema_ownership_join_paths(&next, before, joined, paths[index], true)
-        joined = next
-        index += 1
-    }
-    sema_ownership_join_paths(&state, before, joined, joined, true)
-    may_skip || sema_loop_value_break_flows(context, frame_index).len() > 0
+    sema_ownership_fork_apply(&state, joined)
+    sema_ownership_fork_close(&state, fork)
+    paths.len() > 0
 }
 
 // ────────────────────────────────────────────────────────────────────────────

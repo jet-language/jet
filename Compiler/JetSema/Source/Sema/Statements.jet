@@ -280,7 +280,7 @@ fn sema_stmt_generator_return_rejected(value: Expr?, return_type: Type?, environ
     true
 }
 
-fn sema_stmt_close_loop_value_frame(context: &SemaCheckContext, frame_index: Int, body: &[TStmt], state: &SemaOwnershipState, before: SemaOwnershipState, after_body: SemaOwnershipState, may_skip: Bool, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_stmt_close_loop_value_frame(context: &SemaCheckContext, frame_index: Int, body: &[TStmt], state: &SemaOwnershipState, fork: SemaOwnershipFork, outer: Bool, may_skip: Bool, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
     valid := true
     frame := SemaLoopValueFrame?{None}
     if frame_index >= 0 && frame_index < context.loop_value_frames.len() -> frame = Val(context.loop_value_frames[frame_index])
@@ -289,7 +289,7 @@ fn sema_stmt_close_loop_value_frame(context: &SemaCheckContext, frame_index: Int
         if !sema_loop_value_widen_result_breaks(&body, value.label, result_type, environment, &diagnostics) -> valid = false
     }
     body_falls_through := sema_stmt_tir_block_can_fall_through(body)
-    _ := sema_ownership_join_loop_value_paths(&state, context, frame_index, before, after_body, body_falls_through, may_skip)
+    _ := sema_ownership_join_loop_value_paths(&state, context, frame_index, fork, outer, body_falls_through, may_skip)
     sema_loop_value_pop_frame(&context)
     valid
 }
@@ -4688,7 +4688,8 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                             .None -> {}
                         }
 
-                        before := sema_ownership_state_snapshot(state)
+                        // The body runs in place from this mark (sema_ownership_mark).
+                        loop_fork :: sema_ownership_mark(&state)
                         sema_scope_enter(&scopes, &state, "for@{span.start}")
                         label_name := String?{None}
                         if label != None {
@@ -4731,8 +4732,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                         }
                         if label != None -> sema_scope_pop_loop_label(&scopes)
                         sema_single_use_leave_scope(&scopes, &state, &diagnostics)
-                        body_state := sema_ownership_state_snapshot(state)
-                        if !sema_stmt_close_loop_value_frame(&context, loop_frame_index, &nested.value, &state, before, body_state, true, environment, &diagnostics) -> valid = false
+                        if !sema_stmt_close_loop_value_frame(&context, loop_frame_index, &nested.value, &state, loop_fork, false, true, environment, &diagnostics) -> valid = false
                         if {
                             !valid -> complete = false
                             else -> {
@@ -4799,7 +4799,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                             &diagnostics.push(sema_error("E0120", expr_span(collection_expr), "this loop can't take a stream or iterator out of a field or index", "each step pulls from the source itself, so the loop must take a whole value this scope owns", "bind it into a local this scope owns first, then loop over that local"))
                             valid = false
                         }
-                        before := sema_ownership_state_snapshot(state)
+                        loop_fork :: sema_ownership_mark(&state)
                         // #4318 §4: the source's root, resolved before the loop
                         // names can shadow it.
                         stable_root_key := sema_stmt_for_in_stable_root_key(collection_expr, scopes, state)
@@ -4857,8 +4857,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                         if !nested.complete -> valid = false
                         if label != None -> sema_scope_pop_loop_label(&scopes)
                         sema_single_use_leave_scope(&scopes, &state, &diagnostics)
-                        body_state := sema_ownership_state_snapshot(state)
-                        if !sema_stmt_close_loop_value_frame(&context, loop_frame_index, &nested.value, &state, before, body_state, true, environment, &diagnostics) -> valid = false
+                        if !sema_stmt_close_loop_value_frame(&context, loop_frame_index, &nested.value, &state, loop_fork, false, true, environment, &diagnostics) -> valid = false
                         if consumes_collection && owns_collection {
                             if collection_expr == {
                                 .Ident(_, _) -> {
@@ -4909,7 +4908,9 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                     &diagnostics.push(sema_error("E0110", span, "the counted loop condition must be Bool, but this is {type_name(cond_ty)}", "the program needs a clear yes or no here", "compare the value to produce Bool"))
                     cond_valid = false
                 }
-                before_iteration := sema_ownership_state_snapshot(state)
+                // Each iteration starts from this mark; the join base is the
+                // counted loop's own scope left (`outer`).
+                loop_fork :: sema_ownership_mark(&state)
                 loop_frame_index := context.loop_value_frames.len()
                 sema_loop_value_push_frame(&context, label_name)
                 previous_arrow_loop_body := context.arrow_loop_body
@@ -4925,10 +4926,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                 }
                 if label != None -> sema_scope_pop_loop_label(&scopes)
                 sema_single_use_leave_scope(&scopes, &state, &diagnostics)
-                body_state := sema_ownership_state_snapshot(state)
-                before_outer := sema_ownership_state_snapshot(before_iteration)
-                sema_ownership_leave_scope(&before_outer)
-                if !sema_stmt_close_loop_value_frame(&context, loop_frame_index, &nested.value, &state, before_outer, body_state, true, environment, &diagnostics) -> loop_scope_valid = false
+                if !sema_stmt_close_loop_value_frame(&context, loop_frame_index, &nested.value, &state, loop_fork, true, true, environment, &diagnostics) -> loop_scope_valid = false
                 if {
                     init_tir == None || !cond_valid || !nested.complete || !step_valid || !loop_scope_valid -> complete = false
                     else -> {
@@ -4958,7 +4956,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                         complete = false
                     }
                     else -> {
-                        before := sema_ownership_state_snapshot(state)
+                        loop_fork :: sema_ownership_mark(&state)
                         loop_scope_valid := true
                         sema_scope_enter(&scopes, &state, "while@{span.start}")
                         label_name := String?{None}
@@ -4975,10 +4973,9 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                         context.arrow_loop_body = previous_arrow_loop_body
                         if label != None -> sema_scope_pop_loop_label(&scopes)
                         sema_single_use_leave_scope(&scopes, &state, &diagnostics)
-                        body_state := sema_ownership_state_snapshot(state)
                         // Rust `check_stmt` (statements.rs:233-266): a literal
                         // `true` condition never skips the body, as `loop`.
-                        if !sema_stmt_close_loop_value_frame(&context, loop_frame_index, &nested.value, &state, before, body_state, !sema_stmt_refutable_expr_is_true(condition), environment, &diagnostics) -> loop_scope_valid = false
+                        if !sema_stmt_close_loop_value_frame(&context, loop_frame_index, &nested.value, &state, loop_fork, false, !sema_stmt_refutable_expr_is_true(condition), environment, &diagnostics) -> loop_scope_valid = false
                         if {
                             !nested.complete || !loop_scope_valid -> complete = false
                             else -> &output.push(TStmt.While{label: label_name, condition: cond, body: nested.value, span: span})
@@ -4987,7 +4984,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                 }
             }
             .Loop(body, span, arrow_body, label) -> {
-                before := sema_ownership_state_snapshot(state)
+                loop_fork :: sema_ownership_mark(&state)
                 sema_scope_enter(&scopes, &state, "loop@{span.start}")
                 label_name := String?{None}
                 label_valid := true
@@ -5004,8 +5001,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                 context.arrow_loop_body = previous_arrow_loop_body
                 if label != None -> sema_scope_pop_loop_label(&scopes)
                 sema_single_use_leave_scope(&scopes, &state, &diagnostics)
-                body_state := sema_ownership_state_snapshot(state)
-                if !sema_stmt_close_loop_value_frame(&context, loop_frame_index, &nested.value, &state, before, body_state, false, environment, &diagnostics) -> label_valid = false
+                if !sema_stmt_close_loop_value_frame(&context, loop_frame_index, &nested.value, &state, loop_fork, false, false, environment, &diagnostics) -> label_valid = false
                 if {
                     !nested.complete || !label_valid -> complete = false
                     else -> &output.push(TStmt.Loop{label: label_name, body: nested.value, span: span})
