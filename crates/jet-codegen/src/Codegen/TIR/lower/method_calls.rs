@@ -157,54 +157,6 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     )
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
-        "core.auth",
-        "register_user",
-        "jet_auth_register_user",
-        true,
-        &[false, false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "password_login",
-        "jet_auth_password_login",
-        true,
-        &[false, false, false, false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "magic_link_issue",
-        "jet_auth_magic_link_issue",
-        true,
-        &[false, false, false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "magic_link_consume",
-        "jet_auth_magic_link_consume",
-        true,
-        &[false, false, false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "oauth_begin",
-        "jet_auth_oauth_begin",
-        true,
-        &[false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "oauth_finish",
-        "jet_auth_oauth_finish",
-        true,
-        &[false, false, false, false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
         "core.sync",
         "counter_new",
         "jet_sync_counter_new",

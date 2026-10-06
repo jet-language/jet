@@ -268,6 +268,8 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
                 "magic_link_consume",
                 "oauth_begin",
                 "oauth_finish",
+                "__store_load",
+                "__store_replace",
             ],
         )
     {
@@ -1407,7 +1409,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 17a13d46fa71031feba92f9b91c2063b5d9d21decafad41ecd6f3f316775f92a
+// Source SHA-256: d3832c7029f0df85baf0d906206943cfc3cf1713ce7c8d9fa329daf3462e6d23
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1601,17 +1603,12 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.log", "warn_fields"),
     ("core.log", "error_fields"),
     ("core.log", "debug_fields"),
-    ("core.auth", "session_validate"),
+    ("core.auth", "__store_load"),
+    ("core.auth", "__store_replace"),
     ("core.auth", "session_show"),
     ("core.auth", "session_user"),
     ("core.auth", "session_cookie"),
     ("core.auth", "session_id"),
-    ("core.auth", "register_user"),
-    ("core.auth", "password_login"),
-    ("core.auth", "magic_link_issue"),
-    ("core.auth", "magic_link_consume"),
-    ("core.auth", "oauth_begin"),
-    ("core.auth", "oauth_finish"),
     ("core.net", "socket_addr"),
     ("core.net", "tcp_listen"),
     ("core.net", "tcp_listen_addr"),
@@ -2604,17 +2601,12 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.log", "__sink_store", "jet_log_sink_store", true, &[true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.log", "__sample_store", "jet_log_sample_store", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.log", "__sample_count_store", "jet_log_sample_count_store", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.auth", "session_validate", "jet_auth_session_validate", true, &[true, false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.auth", "__store_load", "jet_auth_store_load", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.auth", "__store_replace", "jet_auth_store_replace", true, &[true, false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.auth", "session_show", "jet_auth_session_show", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.auth", "session_user", "jet_auth_session_user", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.auth", "session_cookie", "jet_auth_session_cookie", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.auth", "session_id", "jet_auth_session_id", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.auth", "register_user", "jet_auth_register_user", true, &[false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot(),
-    CoreCallRecord::new( "core.auth", "password_login", "jet_auth_password_login", true, &[false, false, false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot(),
-    CoreCallRecord::new( "core.auth", "magic_link_issue", "jet_auth_magic_link_issue", true, &[false, false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot(),
-    CoreCallRecord::new( "core.auth", "magic_link_consume", "jet_auth_magic_link_consume", true, &[false, false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot(),
-    CoreCallRecord::new( "core.auth", "oauth_begin", "jet_auth_oauth_begin", true, &[false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot(),
-    CoreCallRecord::new( "core.auth", "oauth_finish", "jet_auth_oauth_finish", true, &[false, false, false, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot(),
     CoreCallRecord::new( "core.sync", "text_merge", "jet_sync_text_merge", true, &[true, true], ),
     CoreCallRecord::new( "core.sync", "text_show", "jet_sync_text_show", true, &[true], ),
     CoreCallRecord::new( "core.sync", "text_metadata", "jet_sync_text_metadata", true, &[true], ),
@@ -2698,7 +2690,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.net.tls", "read", "jet_net_tls_read_bytes", true, &[true, false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.net.tls", "write", "jet_net_tls_write_bytes", true, &[true, true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_native_int_result(),
     CoreCallRecord::new("core.net.tls", "write_all", "jet_net_tls_write_all_bytes", true, &[true, true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.net.tls", "write_text", "jet_net_tls_write_text", true, &[true, true]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.net", "dns_srv_target", "jet_net_dns_srv_target", true, &[true], ) .with_pure_route(CoreCallPureRoute::Net),
     CoreCallRecord::new( "core.net", "dns_srv_port", "jet_net_dns_srv_port", true, &[true], ) .with_pure_route(CoreCallPureRoute::Net) .with_native_int_result(),
     CoreCallRecord::new( "core.net", "dns_srv_priority", "jet_net_dns_srv_priority", true, &[true], ) .with_pure_route(CoreCallPureRoute::Net) .with_native_int_result(),

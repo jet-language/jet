@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 17a13d46fa71031feba92f9b91c2063b5d9d21decafad41ecd6f3f316775f92a
+// Source SHA-256: d3832c7029f0df85baf0d906206943cfc3cf1713ce7c8d9fa329daf3462e6d23
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -208,7 +208,7 @@ const CORE_MODULE_6_MEMBERS: &[&str] = &["decode", "decode_argv", "flag", "get_b
 const CORE_MODULE_6_TYPES: &[(&str, CoreLeafKind)] = &[("ArgDef", CoreLeafKind::Plain), ("ArgsSpec", CoreLeafKind::Plain)];
 const CORE_MODULE_6_DEPENDENCIES: &[&str] = &["core.process"];
 
-const CORE_MODULE_7_MEMBERS: &[&str] = &["Auth", "AuthError", "Claims", "Session", "magic_link_consume", "magic_link_issue", "oauth_begin", "oauth_finish", "password_login", "register_user", "session_cookie", "session_id", "session_show", "session_user", "session_validate", "verify_jwt", "verify_paseto"];
+const CORE_MODULE_7_MEMBERS: &[&str] = &["Auth", "AuthError", "Claims", "Session", "magic_link_consume", "magic_link_issue", "oauth_begin", "oauth_finish", "password_login", "register_user", "session_cookie", "session_id", "session_show", "session_user", "session_validate", "verify_jwt", "verify_paseto", "__store_load", "__store_replace"];
 const CORE_MODULE_7_TYPES: &[(&str, CoreLeafKind)] = &[("Auth", CoreLeafKind::Plain), ("AuthError", CoreLeafKind::Enum(&["Rejected", "Expired", "Malformed", "Unavailable"])), ("Claims", CoreLeafKind::Plain), ("Session", CoreLeafKind::Plain)];
 const CORE_MODULE_7_DEPENDENCIES: &[&str] = &["core.crypto", "core.net", "core.time"];
 
