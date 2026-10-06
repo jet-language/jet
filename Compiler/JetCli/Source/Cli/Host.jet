@@ -1024,7 +1024,7 @@ fn jet_cli_fmt_run(request: JetCLIFmtRequest) -> JetDriverVerbOutput {
         loop index in 0..<dirty.len() -> &order.push(index)
         position := 1
         loop position < order.len() {
-            current :: order[position]
+            current :: ~order[position]
             slot := position
             loop slot > 0 && relative[current] < relative[order[slot - 1]] {
                 order[slot] = order[slot - 1]
@@ -1056,7 +1056,7 @@ fn jet_cli_fmt_relative(path: String, root: String) -> String Never! {
     if path == root -> return ""
     prefix :: if root.ends_with("/") -> root else -> "{root}/"
     if path.starts_with(prefix) -> return path.slice(prefix.len()..<path.len())
-    path
+    ~path
 }
 
 // ---- `jet fmt --lang` (CmdCompile.rs `run_external_fmt`) ----

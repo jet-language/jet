@@ -959,10 +959,9 @@ fn jet_driver_doc_modules(request: JetDriverCompileRequest, load: JetDriverLoadR
     modules := [JetDriverDocModule]{}
     loop (index, graph_module) in graph.modules {
         if graph_module.module_identity == effect_identity || index >= graph.programs.len() -> next
-        found_unit :: loop loaded in load.modules {
+        unit_index :: loop loaded in load.modules {
             if loaded.module_identity == graph_module.module_identity -> break loaded.source_unit_index
-        }
-        unit_index :: found_unit ?? next
+        } ?? -1
         if unit_index < 0 || unit_index >= load.source_units.len() -> next
         unit :: load.source_units[unit_index]
         if unit.root_index < 0 || unit.file_index < 0 || unit.source_origin != SemaSourceOrigin.Snapshot || unit.root_index >= request.authorized_sources.roots.len() -> next

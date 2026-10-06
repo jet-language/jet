@@ -1435,7 +1435,7 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
                 job.action == "types" -> output = jet_cli_inspect_types(jet_cli_inspect_programs(snapshot), job.json)
                 job.action == "shapes" -> output = jet_cli_inspect_shapes(jet_cli_inspect_programs(snapshot), job.json, job.color)
                 job.action == "rights" -> output = jet_cli_inspect_rights(result, job.project, job.file, job.json)
-                job.action == "impact" -> output = jet_cli_inspect_impact_report(job, result, diagnostics.len(), (cli_time.unix_ns() - started) / 1000000)
+                job.action == "impact" -> output = jet_cli_inspect_impact_report(job, result, diagnostics.len(), (cli_time.unix_ns() - started) /% 1000000)
                 else -> output = jet_cli_inspect_build_plan(job, snapshot)
             }
         }
@@ -1595,8 +1595,8 @@ fn jet_cli_impact_walk(calls: [JetCLISemCall], symbol: String, depth_limit: Int,
     depths := [Int]{0}
     cursor := 0
     loop cursor < frontier.len() {
-        current :: frontier[cursor]
-        depth :: depths[cursor]
+        current :: ~frontier[cursor]
+        depth :: ~depths[cursor]
         cursor += 1
         if depth >= depth_limit -> next
         loop call in calls {
