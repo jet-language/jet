@@ -1281,7 +1281,7 @@ pub fn check_program(program: Program, module_name: String, source_file: String,
     }
     // #3708: one program has no bundle failure solve, so every recorded
     // failure-domain obligation is emitted as reported.
-    if sema_failure_settle_obligations(&diagnostics, [String]{}) -> complete = false
+    if sema_failure_settle_obligations(&diagnostics, [String:Bool]{}) -> complete = false
     sema_attach_diagnostic_source_locations(&diagnostics, 0, source_segments)
     SemaResult{module_name: module_name, functions: functions, call_facts: call_facts, hardware_use: hardware_use, comptime_requests: comptime_requests, comptime_body_sources: comptime_body_sources, compute_facts: compute_facts, name_references: name_references, exact_int_reachable: exact_int_reachable, copy_events: copy_events, diagnostics: diagnostics, complete: complete}
 }
@@ -3697,19 +3697,41 @@ fn sema_failure_solve(graph: SemaRegistrationGraph, modules: [SemaGraphModuleRes
             inferred[facts.function_key] = true
         }
     }
-    loop {
-        changed := false
-        loop facts in candidates {
-            if !(inferred.get(facts.function_key) ?? false) -> next
-            loop edge in facts.edges {
-                if !(inferred.get(edge) ?? false) {
+    // The greatest fixpoint by propagation: a candidate with an edge to a
+    // key that is not (or no longer) inferred falls, and its fall reaches
+    // every candidate with an edge to it through `dependents`, so each edge
+    // is visited a bounded number of times instead of once per round.
+    dependent_slots := [String:Int]{}
+    dependents := [[Int]]{}
+    fallen := [String]{}
+    loop (row, facts) in candidates {
+        loop edge in facts.edges {
+            if !(inferred.get(edge) ?? false) {
+                if inferred.get(facts.function_key) ?? false {
                     inferred[facts.function_key] = false
-                    changed = true
-                    break
+                    &fallen.push(facts.function_key)
                 }
+                next
+            }
+            slot := dependent_slots.get(edge) ?? -1
+            if slot < 0 {
+                slot = dependents.len()
+                dependent_slots[edge] = slot
+                &dependents.push([Int]{})
+            }
+            &dependents[slot].push(row)
+        }
+    }
+    loop fallen.len() > 0 {
+        key :: &fallen.pop() ?? break
+        slot :: dependent_slots.get(key) ?? next
+        loop row in dependents[slot] {
+            caller :: candidates[row].function_key
+            if inferred.get(caller) ?? false {
+                inferred[caller] = false
+                &fallen.push(caller)
             }
         }
-        if !changed -> break
     }
     solved := [String]{}
     loop facts in candidates {
@@ -3719,10 +3741,15 @@ fn sema_failure_solve(graph: SemaRegistrationGraph, modules: [SemaGraphModuleRes
 }
 
 // #3708: discharge each failure-domain obligation whose callee the solve
-// proved infallible, and emit the rest with the obligation mark removed.
-// Returns whether any obligation survived as an error.
-fn sema_failure_settle_obligations(diagnostics: &[Diagnostic], solved: [String]) -> Bool Never! {
+// proved infallible (`solved` holds the infallible keys), and emit the rest
+// with the obligation mark removed. Returns whether any obligation survived
+// as an error.
+fn sema_failure_settle_obligations(diagnostics: &[Diagnostic], solved: [String:Bool]) -> Bool Never! {
     mark :: sema_failure_obligation_mark()
+    pending :: loop diagnostic in diagnostics {
+        if (diagnostic.detail ?? "").starts_with(mark) -> break true
+    } ?? false
+    if !pending -> return false
     kept := [Diagnostic]{}
     survived := false
     loop diagnostic in diagnostics {
@@ -3733,14 +3760,7 @@ fn sema_failure_settle_obligations(diagnostics: &[Diagnostic], solved: [String])
         }
         lines :: detail.split("\n").to_list()
         callee :: lines[0].replace(mark, "")
-        discharged := false
-        loop key in solved {
-            if key == callee {
-                discharged = true
-                break
-            }
-        }
-        if discharged -> next
+        if solved.get(callee) != None -> next
         remainder := [String]{}
         loop line_index in 1..<lines.len() -> &remainder.push(lines[line_index])
         emitted := diagnostic
@@ -3999,11 +4019,11 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
     }
     // The failure-domain obligations recorded against unannotated callees
     // are discharged or emitted.
-    if sema_failure_settle_obligations(&diagnostics, inferred_infallible) -> complete = false
+    infallible_keys := [String:Bool]{}
+    loop key in inferred_infallible -> infallible_keys[key] = true
+    if sema_failure_settle_obligations(&diagnostics, infallible_keys) -> complete = false
     loop settle_index in 0..<modules.len() {
-        module_diagnostics := modules[settle_index].diagnostics
-        if sema_failure_settle_obligations(&module_diagnostics, inferred_infallible) -> modules[settle_index].complete = false
-        modules[settle_index].diagnostics = module_diagnostics
+        if sema_failure_settle_obligations(&modules[settle_index].diagnostics, infallible_keys) -> modules[settle_index].complete = false
     }
     // D-METHODMACRO1=A: the `#Inline(Always)` promise (E0917-E0919) needs
     // every body's function-value references first.
@@ -4017,29 +4037,34 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
         source_index :: sema_registration_module_index(resolved_graph, modules[module_index].module_identity) ?? next
         source :: resolved_graph.modules[source_index]
         &effect_inputs.push(SemaEffectModuleInput{
-            module_identity: modules[module_index].module_identity,
-            functions: ^modules[module_index].functions,
+            module_index: module_index,
             sources: sema_comptime_effect_sources(source),
-            call_facts: modules[module_index].call_facts,
             source_segments: source.source_segments,
             trait_bounds: sema_effect_trait_bounds(source.program.items),
         })
     }
     if trace_sink == .Val(sink) -> sink.begin("sema.effects", "", -1, -1)
-    effects := sema_effects_check_modules(^effect_inputs)
-    if trace_sink == .Val(sink) -> sink.end("sema.effects", effects.modules.len())
+    // The effect graph reads every checked body in place and stamps each
+    // solved row onto `modules`.
+    effects := sema_effects_check_modules(&modules, effect_inputs)
+    if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
     loop diagnostic in effects.diagnostics -> &diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
-    loop effect_module_index in 0..<effects.modules.len() {
-        effect_index :: sema_registration_module_index(resolved_graph, effects.modules[effect_module_index].module_identity) ?? next
-        modules[effect_index].functions = ^effects.modules[effect_module_index].functions
-    }
+    // The autodiff purity proof reads the effect-solved functions only when
+    // some body records an autodiff obligation.
     resolved_compute_facts := [SemaComputeFunctionFacts]{}
+    has_autodiff_obligation := false
+    loop module_result in modules {
+        loop function_facts in module_result.compute_facts {
+            if function_facts.autodiff_obligations.len() > 0 -> has_autodiff_obligation = true
+            &resolved_compute_facts.push(function_facts)
+        }
+    }
     effect_solved_functions := [TFunc]{}
-    loop module_index in 0..<modules.len() {
-        module_result :: modules[module_index]
-        loop function_facts in module_result.compute_facts -> &resolved_compute_facts.push(function_facts)
-        loop function in module_result.functions -> &effect_solved_functions.push(function)
+    if has_autodiff_obligation {
+        loop module_result in modules {
+            loop function in module_result.functions -> &effect_solved_functions.push(function)
+        }
     }
     compute_diagnostics := sema_compute_validate_autodiff_purity(resolved_compute_facts, effect_solved_functions)
     loop diagnostic in compute_diagnostics {
@@ -4107,13 +4132,8 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
     }
 
     core_modules := [SemaCoreModuleUsageResult]{}
-    core_module_index := 0
-    loop core_module_index < resolved_graph.modules.len() {
-        graph_module :: resolved_graph.modules[core_module_index]
-        checked_module :: modules[core_module_index]
-        generated_roots := sema_core_generated_roots(resolved_graph, graph_module)
-        &core_modules.push(sema_core_module_usage_from_registration(graph_module, checked_module.exact_int_reachable, generated_roots))
-        core_module_index += 1
+    loop core_module_index in 0..<resolved_graph.modules.len() {
+        &core_modules.push(sema_core_module_usage_from_registration(resolved_graph, resolved_graph.modules[core_module_index], modules[core_module_index].exact_int_reachable))
     }
     core_usage := sema_core_combine_module_usage(core_modules)
     loop module_usage in core_usage.modules {
