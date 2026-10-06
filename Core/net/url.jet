@@ -29,6 +29,26 @@ pub struct URL {
 }
 
 impl URL {
+    pub fn scheme(self) -> String Never! { ~self.scheme }
+    pub fn path(self) -> String Never! { ~self.path }
+    pub fn query(self) -> String Never! { ~self.query }
+
+    pub fn host(self) -> String? Never! {
+        if self.host.bytes().len() == 0 -> return None
+        Val(~self.host)
+    }
+
+    /// Only an authority port written explicitly is present.
+    pub fn port(self) -> Int? Never! {
+        if !self.port_explicit || self.port < 0 -> return None
+        Val(self.port)
+    }
+
+    pub fn fragment(self) -> String? Never! {
+        if self.fragment.bytes().len() == 0 -> return None
+        Val(~self.fragment)
+    }
+
     /// Render the URL; an explicit authority port is kept.
     pub fn to_string(self) -> String Never! { unparse(self) }
 
@@ -97,6 +117,38 @@ impl URL {
 
     /// Resolve a relative reference against this URL.
     pub fn join(self, relative: String) -> URL URLError! { join_url(self, relative) }
+
+    /// Replace every occurrence of a decoded query key, appending its value.
+    pub fn set_query(self, key: String, value: String) -> URL Never! {
+        rows := [[String]]{}
+        loop row in self.query_pairs() {
+            if row[0] != key -> &rows.push(row)
+        }
+        &rows.push([String]{key, value})
+        with_query(self, rows)
+    }
+
+    /// Append a pair without changing previous occurrences or their order.
+    pub fn add_query(self, key: String, value: String) -> URL Never! {
+        rows := self.query_pairs()
+        &rows.push([String]{key, value})
+        with_query(self, rows)
+    }
+}
+
+fn with_query(url: URL, rows: [[String]]) -> URL Never! {
+    URL{
+        scheme: url.scheme,
+        user_text: url.user_text,
+        password_text: url.password_text,
+        host: url.host,
+        port: url.port,
+        port_explicit: url.port_explicit,
+        path: url.path,
+        query: encode_query(rows),
+        fragment: url.fragment,
+        raw: "",
+    }
 }
 
 fn userinfo_text(url: URL) -> String Never! {
@@ -830,4 +882,30 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     if start < 0 || start >= limit -> return out
     loop i in start..<limit -> &out.push(raw[i])
     out
+}
+
+#Test
+fn receiver_components_and_query_updates() URLError! {
+    original :: parse("https://example.com:443/a?x=1&keep=2&x=3#part")
+    assert(original.scheme() == "https")
+    assert(original.path() == "/a")
+    assert(original.query() == "x=1&keep=2&x=3")
+    assert(original.host() == Val("example.com"))
+    assert(original.port() == Val(443))
+    assert(original.fragment() == Val("part"))
+    changed :: original.set_query("x", "a b")
+    assert(changed.query() == "keep=2&x=a%20b")
+    assert(changed.add_query("x", "4").query() == "keep=2&x=a%20b&x=4")
+    assert(original.query() == "x=1&keep=2&x=3")
+}
+
+#Test
+fn absent_url_components() URLError! {
+    local :: file("/tmp/a")
+    assert(local.host() == None)
+    assert(local.port() == None)
+    assert(local.fragment() == None)
+    web :: parse("https://example.com/")
+    assert(web.port() == None)
+    assert(web.default_port() == Val(443))
 }

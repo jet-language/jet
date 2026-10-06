@@ -2627,55 +2627,6 @@ fn jet_net_sendfile(stream: &mut JetTCPStream, path: &String) -> Result<i64, Jet
     Ok(written.min(i64::MAX as u64) as i64)
 }
 
-const JET_NET_SERVICES: &[(&str, i64)] = &[
-    ("ftp", 21),
-    ("ssh", 22),
-    ("telnet", 23),
-    ("smtp", 25),
-    ("dns", 53),
-    ("domain", 53),
-    ("http", 80),
-    ("pop3", 110),
-    ("imap", 143),
-    ("https", 443),
-    ("smtps", 465),
-    ("submission", 587),
-    ("imaps", 993),
-    ("pop3s", 995),
-];
-
-pub(crate) fn jet_net_getservbyname(name: &String) -> Result<i64, JetNetError> {
-    let key = name.to_ascii_lowercase();
-    JET_NET_SERVICES
-        .iter()
-        .find(|(n, _)| *n == key)
-        .map(|(_, port)| *port)
-        .ok_or_else(|| {
-            JetNetError::InvalidInput(jet_net_detail(
-                "getservbyname",
-                None,
-                None,
-                format!("unknown service `{name}`"),
-                None,
-            ))
-        })
-}
-
-pub(crate) fn jet_net_getservbyport(port: i64) -> Result<String, JetNetError> {
-    JET_NET_SERVICES
-        .iter()
-        .find(|(_, p)| *p == port)
-        .map(|(n, _)| (*n).to_string())
-        .ok_or_else(|| {
-            JetNetError::InvalidInput(jet_net_detail(
-                "getservbyport",
-                None,
-                None,
-                format!("unknown port `{port}`"),
-                None,
-            ))
-        })
-}
 
 fn jet_net_udp_bind(addr: &String) -> Result<JetUDPSocket, JetNetError> {
     jet_scheduler_world_reject_uncontrolled("network");

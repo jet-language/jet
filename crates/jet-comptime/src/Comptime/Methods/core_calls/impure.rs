@@ -396,41 +396,37 @@ pub fn apply_impure_core_call_with_type_args(
             }
             Ok(CtValue::Unit)
         }
-        ("core.log", "enabled") => {
-            let level = log_string_arg(one(0)?, span)?;
-            Ok(CtValue::Bool(super::log_kernel::enabled(level)))
+        ("core.log", "__level_load") => Ok(CtValue::Int(super::log_kernel::jet_log_level_load())),
+        ("core.log", "__disabled_load") => Ok(CtValue::Bool(super::log_kernel::jet_log_disabled_load())),
+        ("core.log", "__level_store") => {
+            super::log_kernel::jet_log_level_store(as_int(one(0)?, span)?);
+            Ok(CtValue::Unit)
         }
-        ("core.log", "disable") => {
-            super::log_kernel::disable();
+        ("core.log", "__disabled_store") => {
+            super::log_kernel::jet_log_disabled_store(log_bool_arg(one(0)?, span)?);
             Ok(CtValue::Unit)
         }
         ("core.log", "flush") => {
             super::log_kernel::flush();
             Ok(CtValue::Unit)
         }
-        ("core.log", "set_sink") => {
-            let kind = log_string_arg(one(0)?, span)?;
-            let path = log_string_arg(one(1)?, span)?;
-            super::log_kernel::set_sink(kind, path);
+        ("core.log", "__format_store") => {
+            super::log_kernel::jet_log_format_store(as_int(one(0)?, span)?);
             Ok(CtValue::Unit)
         }
-        ("core.log", "sample_every") => {
-            super::log_kernel::sample_every(as_int(one(0)?, span)?);
+        ("core.log", "__sink_store") => {
+            super::log_kernel::jet_log_sink_store(log_string_arg(one(0)?, span)?);
             Ok(CtValue::Unit)
         }
-        ("core.log", "otlp_file") => {
-            super::log_kernel::otlp_file(log_string_arg(one(0)?, span)?);
+        ("core.log", "__sample_store") => {
+            super::log_kernel::jet_log_sample_store(as_int(one(0)?, span)?);
             Ok(CtValue::Unit)
         }
-        ("core.log", "set_level") => {
-            super::log_kernel::set_level(log_string_arg(one(0)?, span)?);
+        ("core.log", "__sample_count_store") => {
+            super::log_kernel::jet_log_sample_count_store(as_int(one(0)?, span)?);
             Ok(CtValue::Unit)
         }
-        ("core.log", "setup") => {
-            super::log_kernel::setup(log_string_arg(one(0)?, span)?);
-            Ok(CtValue::Unit)
-        }
-        ("core.log", "set_trace_id") => {
+        ("core.log", "__trace_store") => {
             super::log_kernel::set_trace_id(as_string(one(0)?, span)?);
             Ok(CtValue::Unit)
         }

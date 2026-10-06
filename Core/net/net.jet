@@ -72,7 +72,12 @@ pub struct SRVRecord {
     pub weight: Int
 }
 
-pub fn gethostname() -> String Never! { core.net.gethostname() }
+pub fn gethostname() -[Env, FS]> String Never! {
+    environment :: core.sys.get("HOSTNAME") ?? ""
+    if environment.len() > 0 -> return environment
+    contents :: core.files.read("/etc/hostname") ?? return "localhost"
+    core.text.trim(contents)
+}
 
 pub fn ip_addr(text: String) -[Net, Time.Wait]> IPAddr NetError! {
     if !valid_text(text) -> return Err(net_err("ip_addr", text, "IP address is empty or contains control bytes"))
@@ -431,12 +436,53 @@ pub fn dns_srv_weight(record: DNSSRV) -> Int Never! { core.net.dns_srv_weight(re
 
 pub fn getservbyname(name: String) -[Net, Time.Wait]> Int NetError! {
     if !valid_text(name) -> return Err(net_err("getservbyname", name, "service name is empty or contains control bytes"))
-    core.net.getservbyname(name)
+    key :: ascii_lower(name)
+    if key == {
+        "ftp" -> Ok(21)
+        "ssh" -> Ok(22)
+        "telnet" -> Ok(23)
+        "smtp" -> Ok(25)
+        "dns" | "domain" -> Ok(53)
+        "http" -> Ok(80)
+        "pop3" -> Ok(110)
+        "imap" -> Ok(143)
+        "https" -> Ok(443)
+        "smtps" -> Ok(465)
+        "submission" -> Ok(587)
+        "imaps" -> Ok(993)
+        "pop3s" -> Ok(995)
+        else -> Err(service_error("getservbyname", "unknown service `{name}`"))
+    }
 }
 
 pub fn getservbyport(port: Int) -[Net, Time.Wait]> String NetError! {
     if !valid_port(port) -> return Err(net_err("getservbyport", "{port}", "port must be in 0..=65535"))
-    core.net.getservbyport(port)
+    if port == {
+        21 -> Ok("ftp")
+        22 -> Ok("ssh")
+        23 -> Ok("telnet")
+        25 -> Ok("smtp")
+        53 -> Ok("dns")
+        80 -> Ok("http")
+        110 -> Ok("pop3")
+        143 -> Ok("imap")
+        443 -> Ok("https")
+        465 -> Ok("smtps")
+        587 -> Ok("submission")
+        993 -> Ok("imaps")
+        995 -> Ok("pop3s")
+        else -> Err(service_error("getservbyport", "unknown port `{port}`"))
+    }
+}
+
+fn service_error(operation: String, message: String) -> NetError Never! {
+    NetError.InvalidInput(NetErrorDetail{
+        operation: operation,
+        address: None,
+        name: None,
+        message: message,
+        os_code: None,
+    })
 }
 
 pub fn error_operation(err: NetError) -> String Never! { return core.net.error_operation(err) }
@@ -580,4 +626,19 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     if start < 0 || start >= limit -> return out
     loop i in start..<limit -> &out.push(raw[i])
     out
+}
+
+#Test
+fn service_names_and_aliases() -[Net, Time.Wait]> NetError! {
+    http :: getservbyname("HTTP")
+    domain :: getservbyname("domain")
+    dns :: getservbyport(53)
+    assert(http == 80)
+    assert(domain == 53)
+    assert(dns == "dns")
+    loop name in [String]{"ftp", "ssh", "telnet", "smtp", "dns", "http", "pop3", "imap", "https", "smtps", "submission", "imaps", "pop3s"} {
+        port :: getservbyname(name)
+        reverse :: getservbyport(port)
+        assert(reverse == name)
+    }
 }

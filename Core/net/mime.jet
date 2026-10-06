@@ -36,6 +36,15 @@ impl MIME {
 
     /// Validated `[name, value]` parameter rows in source order.
     pub fn params(self) -> [[String]] Never! { ~self.parameters }
+
+    /// Canonical essence followed by parameters in their original order.
+    pub fn to_string(self) -> String Never! {
+        out := self.essence()
+        loop row in self.parameters {
+            if row.len() == 2 -> out = "{out}; {row[0]}={row[1]}"
+        }
+        out
+    }
 }
 
 pub fn parse(text: String) -> MIME MIMEError! {
@@ -217,4 +226,12 @@ fn slice(raw: [U8], start: Int, end: Int) -> String Never! {
         &out.push(raw[i])
         i = i + 1
     }
+}
+
+#Test
+fn mime_render_preserves_parameter_order() MIMEError! {
+    value :: parse("Text/Plain; Charset=\"UTF-8\"; boundary=abc")
+    assert(value.to_string() == "text/plain; charset=UTF-8; boundary=abc")
+    assert(value.param("CHARSET") == Val("UTF-8"))
+    assert(value.param("missing") == None)
 }

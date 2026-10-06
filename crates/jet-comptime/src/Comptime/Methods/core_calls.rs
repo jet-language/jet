@@ -280,17 +280,11 @@ mod log_kernel {
         jet_ring_log_fatal(message);
     }
 
-    pub(super) fn disable() {
-        jet_ring_log_disable();
-    }
 
     pub(super) fn flush() {
         jet_ring_log_flush();
     }
 
-    pub(super) fn enabled(level: &String) -> bool {
-        jet_ring_log_enabled(level)
-    }
 
     pub(super) fn field(key: &String, value: &String) -> jet_std::LogField {
         jet_ring_log_field(key, value)
@@ -344,25 +338,6 @@ mod log_kernel {
         jet_ring_log_close(span);
     }
 
-    pub(super) fn set_sink(kind: &String, path: &String) {
-        jet_ring_log_set_sink(kind, path);
-    }
-
-    pub(super) fn sample_every(value: i64) {
-        jet_ring_log_sample_every(value);
-    }
-
-    pub(super) fn otlp_file(path: &String) {
-        jet_ring_log_otlp_file(path);
-    }
-
-    pub(super) fn set_level(level: &String) {
-        jet_ring_log_set_level(level);
-    }
-
-    pub(super) fn setup(format: &String) {
-        jet_ring_log_setup(format);
-    }
 }
 /// Set the shared Prelude log trace context for the MIR evaluator.
 ///
