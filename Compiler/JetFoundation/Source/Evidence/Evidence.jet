@@ -143,3 +143,13 @@ pub fn evidence_expectation_error_text(error: EvidenceExpectationError) -> Strin
 pub fn evidence_record_validate(record: EvidenceRecord) EvidenceExpectationError! {
     evidence_expectation_validate(record.expectation, record.outcome)
 }
+
+// Rust `EvidenceRecord::is_expected_failure`.
+pub fn evidence_record_is_expected_failure(record: EvidenceRecord) -> Bool Never! {
+    record.outcome == EvidenceOutcome.Failed && record.expectation == EvidenceExpectation.ExpectedFailure
+}
+
+// Rust `EvidenceRecord::is_unexpected_pass`.
+pub fn evidence_record_is_unexpected_pass(record: EvidenceRecord) -> Bool Never! {
+    record.outcome == EvidenceOutcome.Passed && record.expectation == EvidenceExpectation.ExpectedFailure
+}

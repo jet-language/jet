@@ -163,7 +163,7 @@ pub fn comparison_record_artifact_id(record: ComparisonRecord) -> String Compari
 // Rust `ComparisonRecord::assert_equal`: tests the verdict, not structure.
 pub fn comparison_record_assert_equal(record: ComparisonRecord) ComparisonAssertionError! {
     if record.status == ComparisonStatus.Matched && record.samples.len() != 0 && record.discarded_cases == 0 -> return
-    Err(ComparisonAssertionError{status: record.status, reason: record.reason ?? "comparison did not establish equality"})
+    return Err(ComparisonAssertionError{status: record.status, reason: record.reason ?? "comparison did not establish equality"})
 }
 
 // Rust `Display for ComparisonAssertionError`.

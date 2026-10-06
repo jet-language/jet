@@ -278,7 +278,7 @@ fn jet_cli_inspect_plain_error(text: String, exit_code: Int) -> JetCLIPlan Never
 
 // Source/main.rs `absolutize`: `path` joined onto the working directory.
 fn jet_cli_inspect_absolute(path: String) -[FS, Env]> String Never! {
-    if path.starts_with("/") -> return path
+    if path.starts_with("/") -> return ~path
     cwd :: cli_files.cwd() ?? "."
     "{cwd}/{path}"
 }
@@ -385,7 +385,8 @@ fn jet_cli_coverage_facts() -> JetCLICoverageFacts Never! {
             }
         }
     }
-    planes :: loop fact in facts -> fact.plane
+    planes := [String]{}
+    loop fact in facts -> &planes.push(fact.plane)
     &planes.sort()
     ordered :: loop plane in planes -> facts[slots.get(plane) ?? 0]
     JetCLICoverageFacts.Facts{facts: ordered}
@@ -428,7 +429,8 @@ fn jet_cli_coverage_baseline(text: String) -> JetCLICoverageBaseline Never! {
         }
         &rows.push(JetCLICoverageBaselineRow{plane: fields[0], edit_covered: edit_covered, reason_covered: reason_covered, total: total})
     }
-    planes :: loop row in rows -> row.plane
+    planes := [String]{}
+    loop row in rows -> &planes.push(row.plane)
     &planes.sort()
     ordered := [JetCLICoverageBaselineRow]{}
     loop plane in planes {
