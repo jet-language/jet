@@ -723,8 +723,11 @@ pub fn wrap(key: Secret, recipient: X25519PublicKey) -[Rand]> WrappedKey CryptoE
     loop b in recipient.bytes -> &header.push(b)
     loop b in eph_pk.bytes -> &header.push(b)
     loop b in salt -> &header.push(b)
-    wrap_aad := [U8]{}
     _ :: append_be32(&header, key.bytes.len()) ?? return Err(CryptoError.Length)
+    // JETW1 AAD is the domain label followed by the 92-byte header; `unwrap`
+    // authenticates the same bytes.
+    wrap_aad := [U8]{}
+    loop b in "JETW1 wrap".bytes() -> &wrap_aad.push(b)
     loop b in header -> &wrap_aad.push(b)
     body :: xchacha_seal(kek.bytes, nonce.bytes, wrap_aad, key.bytes)
     out := [U8]{}
