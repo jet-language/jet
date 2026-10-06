@@ -138,6 +138,12 @@ impl<'a> Checker<'a> {
         if name.contains("::") {
             return name.to_string();
         }
+        if let Some((item, module)) = self.core_item_imports.get(name).zip(self.core_imports.get(name)) {
+            if jet_foundation::CoreModuleExports::core_leaf_kind(module, item).is_some() {
+                return self.core_nominal_shadowing_builtin(module, item)
+                    .unwrap_or_else(|| item.clone());
+            }
+        }
         let (import_ns, leaf) = Self::split_type_name(name);
         if let Some(module) = import_ns.and_then(|alias| self.core_imports.get(alias)) {
             if jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf).is_some() {
@@ -188,6 +194,9 @@ impl<'a> Checker<'a> {
     pub(crate) fn resolve_type(&mut self, ty: Type) -> Type {
         self.record_type_import_use(&ty);
         match ty {
+            Type::Named(name) if self.type_param_scope.iter().any(|param| param.name == name) => {
+                Type::Named(name)
+            }
             // D-NUMOPS1: typed numeric heads such as `Float{…}` are
             // source spellings for primitive carriers, not nominal types.
             // Resolve them before ordinary nominal lookup so call seams
@@ -233,13 +242,15 @@ impl<'a> Checker<'a> {
                     // Source-owned Core crypto types use the owner's canonical
                     // identity, the one its signatures and methods carry.
                     self.core_crypto_struct_type(&n).unwrap_or_else(|| {
-                        crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(n))
+                        crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(
+                            self.core_item_imports.get(&n).cloned().unwrap_or(n),
+                        ))
                     })
                 } else {
                     let item = self.core_item_imports.get(&n).map_or(n.as_str(), String::as_str);
                     match self.core_nominal_shadowing_builtin(module, item) {
                         Some(canonical) => Type::Named(canonical),
-                        None => Type::Named(n),
+                        None => Type::Named(item.to_string()),
                     }
                 }
             }
@@ -426,12 +437,18 @@ impl<'a> Checker<'a> {
         (source, effective)
     }
 
-    /// Publish the canonical declared return on the checked AST function so
-    /// body checking, signatures, and TIR all project the same carrier.
-    pub(crate) fn canonicalize_function_return_type(
+    /// Publish the canonical declared types on the checked AST function so
+    /// body checking, signatures, and TIR all project the same carriers.
+    pub(crate) fn canonicalize_function_signature(
         &mut self,
         function: &mut crate::AST::Func,
     ) {
+        for param in &mut function.params {
+            if param.name != crate::Syntax::KW_SELF {
+                let ty = std::mem::replace(&mut param.ty, Type::Int);
+                param.ty = self.resolve_type(ty);
+            }
+        }
         function.return_type = function.return_type.take().map(|ty| self.resolve_type(ty));
     }
 

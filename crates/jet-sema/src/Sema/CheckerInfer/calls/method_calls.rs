@@ -2115,6 +2115,8 @@ impl<'a> Checker<'a> {
             ) {
                 if is_json_type_name(&item) {
                     if let Some(ret) = self.check_core_json_lit(method, args, span) {
+                        self.record_import_alias_reference(alias, *alias_span);
+                        **receiver = Expr::Ident(item, span);
                         *resolved_ret_out = Some(ret.clone());
                         return Some(ret);
                     }

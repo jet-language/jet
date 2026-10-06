@@ -1979,24 +1979,28 @@ impl<'a> Checker<'a> {
             .then(|| self.canonical_nominal_name(owner, leaf))
     }
 
-    /// A function signature read across a module boundary names the owner's
-    /// records that only share a built-in type's leaf (`Path`) by canonical
-    /// path, so the caller never reads that leaf as the built-in.
-    pub(crate) fn qualify_builtin_shadowing_sig(&self, owner: usize, sig: &mut crate::AST::FuncSig) {
+    /// Read a free function's declared signature in its owning module, just
+    /// like method signatures. Apply heads and callable slots cross the same
+    /// boundary; the function's generic parameters keep their lexical names.
+    pub(crate) fn qualify_imported_function_sig(
+        &self,
+        owner: usize,
+        name: &str,
+        sig: &mut crate::AST::FuncSig,
+    ) {
         if owner == self.module_idx {
             return;
         }
-        let qualify = |ty: &Type| {
-            ty.map_named_types(&|name| {
-                self.record_distinct_from_builtin(owner, name)
-                    .then(|| self.canonical_nominal_name(owner, name))
-            })
-        };
+        let generic_names = self.modules
+            .and_then(|modules| modules.get(owner))
+            .and_then(|module| module.trait_reg.fn_params.get(name))
+            .map(|params| params.iter().map(|param| param.name.clone()).collect())
+            .unwrap_or_default();
         for (_, ty) in &mut sig.params {
-            *ty = qualify(ty);
+            *ty = self.qualify_method_type(owner, ty, &generic_names);
         }
         if let Some(ret) = &mut sig.return_type {
-            *ret = qualify(ret);
+            *ret = self.qualify_method_type(owner, ret, &generic_names);
         }
     }
 
@@ -2164,13 +2168,18 @@ impl<'a> Checker<'a> {
         let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
             return self.trait_reg.implements_trait(type_name, trait_name);
         };
-        if owner == self.module_idx {
-            self.trait_reg.implements_trait(leaf, trait_name)
+        let state = self.modules.and_then(|modules| modules.get(owner));
+        let registry = if owner == self.module_idx {
+            self.trait_reg
+        } else if let Some(state) = state {
+            &state.trait_reg
         } else {
-            self.modules
-                .and_then(|modules| modules.get(owner))
-                .is_some_and(|module| module.trait_reg.implements_trait(leaf, trait_name))
-        }
+            return false;
+        };
+        registry.implements_trait(leaf, trait_name)
+            || (trait_name == crate::Syntax::TRAIT_CLOSE
+                && state.is_some_and(|state| state.module_path.starts_with("<corelib>/"))
+                && registry.synthetic_close_types.contains(leaf))
     }
 
     pub(crate) fn capability_type_context(

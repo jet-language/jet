@@ -188,6 +188,12 @@ by `node Compiler/Bootstrap/generate-core-sources.mjs`, which
 `node Tools/agent/check-core-surface-ledger.mjs --write` runs and `--check`
 holds current.
 
+The native bootstrap host also authorizes loose source roots without creating
+a manifest. A missing `package.jet` preserves the compiler's source-root
+namespace semantics; retired manifests, symlinks, and other authority errors
+are not treated as missing. Existing manifests and source files retain their
+checked handles and are revalidated before invoking the compiler.
+
 `jet build` writes `.jet/build/<stem>` in that source root. The default and
 `--profile debug` builds use the Jet-native backend: `lir_lower_entry` lowers
 the functions `fn run` reaches to a relocatable object, and the in-process
