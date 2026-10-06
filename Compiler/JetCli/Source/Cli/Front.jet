@@ -1,7 +1,7 @@
 // The `jet` front door (Source/main.rs `main` up to verb dispatch): output
 // flags, retired, moved, and grouped routes, help and the greeting, unknown
 // commands (E2101) and flags (E2102), then the verbs the Jet driver owns
-// (`explain <CODE>`, `check`, `build`, `run <file>`, `test <file>`, and `new <name>`). Every report is the
+// (`explain <CODE>`, `check`, `build`, `run <file>`, `test <file>`, `new <name>`, and `doc <file>`). Every report is the
 // Rust host's exact bytes and exit status for the same argv. A command whose
 // Jet port has not landed yet is refused with E2104 instead of guessing its
 // behavior.
@@ -45,6 +45,9 @@ pub enum JetCLIPlan {
     // `jet new <name>`: write the project folder (Source/CmdCompile.rs
     // `run_new`); `template` is "" for the print-only starter.
     New(name: String, template: String, annotated: Bool, quiet: Bool, color: Bool)
+    // `jet doc <file>` (Source/CmdDoc.rs `run_doc`): `json` prints the
+    // `inspect.doc` status, `check` reports undocumented public items.
+    Doc(file: String, source: String, color: Bool, json: Bool, check: Bool)
 }
 
 // The `jet test` options the Jet host carries out (Source/CmdCompile.rs
@@ -372,6 +375,16 @@ fn jet_cli_check(args: [String], command: String, color: Bool, quiet: Bool, thre
         return jet_cli_fail("E2105", "can't securely read the file `{file}`", jet_cli_why("E2105"), fix, color, JET_DRIVER_EXIT_USER_ERROR)
     }
     JetCLIPlan.Check{file: file, source: source, color: color, quiet: quiet, threads: threads}
+}
+
+// `jet doc [<file>]`: the entry resolves as `jet check` resolves it.
+fn jet_cli_doc(args: [String], color: Bool, quiet: Bool, json: Bool, check: Bool) -[FS, Env]> JetCLIPlan Never! {
+    entry :: jet_cli_check(args, "doc", color, quiet, None)
+    if entry == {
+        .Check(file, source, _, _, _) -> return JetCLIPlan.Doc{file: file, source: source, color: color, json: json, check: check}
+        else -> {}
+    }
+    entry
 }
 
 // Build flags whose Jet port has not landed: refused, never ignored.
@@ -780,7 +793,7 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
     }
     if raw.len() == 0 -> return jet_cli_not_ported("repl", color)
     if raw[0] == "?" -> return jet_cli_not_ported("?", color)
-    if json -> return jet_cli_not_ported("{raw[0]} --json", color)
+    if json && raw[0] != "doc" -> return jet_cli_not_ported("{raw[0]} --json", color)
 
     // Retired, moved, and grouped spellings (Source/main.rs `normalize_frequency_ring_argv`).
     if jet_cli_retired_report(raw, color) == .Val(report) -> return jet_cli_done("", report, JET_DRIVER_EXIT_USAGE)
@@ -935,6 +948,7 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
         "run" -> return jet_cli_run(jet_argv, args, passthrough, false, color, quiet, verbose, threads)
         "test" -> return jet_cli_test(jet_argv, color, quiet, verbose, threads)
         "new" -> return jet_cli_new(jet_argv, args, color, quiet)
+        "doc" -> return jet_cli_doc(args, color, quiet, json, jet_argv.contains("--check"))
         else -> {}
     }
     jet_cli_not_ported(command, color)
