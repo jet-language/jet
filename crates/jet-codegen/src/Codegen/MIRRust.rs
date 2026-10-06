@@ -2657,6 +2657,116 @@ mod unwrap_value_slot_tests {
     }
 }
 
+/// Slot name prefixes whose names are numbered from a MIR id.
+const NUMBERED_SLOT_PREFIXES: [&str; 3] = ["__jet_v_", "__jet_l_", "__jet_pm_"];
+
+/// The byte length of the numbered slot name (`__jet_v_N`, `__jet_l_N`,
+/// `__jet_pm_N`) starting at `at` when its digits end the identifier, else 0.
+fn numbered_slot_len(text: &[u8], at: usize) -> usize {
+    for prefix in NUMBERED_SLOT_PREFIXES {
+        if !text[at..].starts_with(prefix.as_bytes()) {
+            continue;
+        }
+        let digits_start = at + prefix.len();
+        let digits = text[digits_start..].iter().take_while(|byte| byte.is_ascii_digit()).count();
+        let end = digits_start + digits;
+        if digits > 0 && !text.get(end).copied().is_some_and(is_identifier_byte) {
+            return end - at;
+        }
+    }
+    0
+}
+
+/// Deletes the slot declarations nothing reads. `out[start..]` holds the
+/// function's slot declarations and body. A line `let mut slot: Option<T> =
+/// None;` (any indent, not under an attribute) whose numbered slot name is
+/// mentioned nowhere else in that text declares storage no statement uses:
+/// it only holds `None`, so its drop is a no-op and removing it changes
+/// nothing but the frame size. Mentions are counted over the raw text,
+/// string and comment text included, so a doubtful slot is kept.
+fn drop_unmentioned_slots(out: &mut String, start: usize) {
+    let body = &out[start..];
+    let bytes = body.as_bytes();
+    let mut mentions: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        let joined = index > 0 && is_identifier_byte(bytes[index - 1]);
+        let len = if bytes[index] == b'_' && !joined { numbered_slot_len(bytes, index) } else { 0 };
+        if len == 0 {
+            index += 1;
+            continue;
+        }
+        *mentions.entry(&body[index..index + len]).or_default() += 1;
+        index += len;
+    }
+    let unused = |line: &str| -> bool {
+        let content = line.trim_end_matches('\n').trim_start_matches(' ');
+        let Some(rest) = content.strip_prefix("let mut ") else {
+            return false;
+        };
+        let len = numbered_slot_len(rest.as_bytes(), 0);
+        len > 0
+            && rest[len..].starts_with(": Option<")
+            && rest.ends_with("> = None;")
+            && mentions.get(&rest[..len]) == Some(&1)
+    };
+    let mut kept = String::with_capacity(body.len());
+    let mut previous: Option<&str> = None;
+    let mut removed = false;
+    for line in body.split_inclusive('\n') {
+        let attributed = previous.is_some_and(|line| line.trim_start_matches(' ').starts_with("#["));
+        if !attributed && unused(line) {
+            removed = true;
+        } else {
+            kept.push_str(line);
+        }
+        previous = Some(line);
+    }
+    if removed {
+        out.truncate(start);
+        out.push_str(&kept);
+    }
+}
+
+#[cfg(test)]
+mod drop_unmentioned_slot_tests {
+    use super::drop_unmentioned_slots;
+
+    #[test]
+    fn unread_none_slots_lose_their_declarations() {
+        let mut out = [
+            "fn f() {\n",
+            "    let mut __jet_l_1: Option<Span> = None;\n",
+            "    let mut __jet_l_2: Option<Span> = None;\n",
+            "    let mut __jet_v_3: Option<Vec<Expr>> = None;\n",
+            "    let mut __jet_v_30: Option<bool> = None;\n",
+            "    let mut __jet_pm_4: Option<Expr> = None;\n",
+            "    let mut __jet_v_5: Option<String> = Some(g());\n",
+            "    #[cfg(not(jet_release))]\n",
+            "    let mut __jet_v_6: Option<bool> = None;\n",
+            "    let mut __jet_v_7: JetSharedSlot<Expr> = JetSharedSlot::empty();\n",
+            "    __jet_l_2 = Some(span());\n",
+            "    h(__jet_v_30.take(), x__jet_v_3, __jet_v_3_tail, \"__jet_pm_4\");\n",
+        ]
+        .concat();
+        drop_unmentioned_slots(&mut out, "fn f() {\n".len());
+        let expected = [
+            "fn f() {\n",
+            "    let mut __jet_l_2: Option<Span> = None;\n",
+            "    let mut __jet_v_30: Option<bool> = None;\n",
+            "    let mut __jet_pm_4: Option<Expr> = None;\n",
+            "    let mut __jet_v_5: Option<String> = Some(g());\n",
+            "    #[cfg(not(jet_release))]\n",
+            "    let mut __jet_v_6: Option<bool> = None;\n",
+            "    let mut __jet_v_7: JetSharedSlot<Expr> = JetSharedSlot::empty();\n",
+            "    __jet_l_2 = Some(span());\n",
+            "    h(__jet_v_30.take(), x__jet_v_3, __jet_v_3_tail, \"__jet_pm_4\");\n",
+        ]
+        .concat();
+        assert_eq!(out, expected);
+    }
+}
+
 /// Final text pass over one emitted function body (`out[start..]`): every
 /// slot and label named from a 64-bit MIR id is renamed in first-mention
 /// order to a short sequential name (`__jet_v_N` -> `_vK`, `__jet_l_N` ->
@@ -14293,6 +14403,7 @@ impl<'a> RustEmitter<'a> {
             fold_value_slots(out, slots_start, declarations_end);
             unwrap_value_slots(out, slots_start);
         }
+        drop_unmentioned_slots(out, slots_start);
         compact_function_text(out, slots_start);
         if generator {
             let _ = writeln!(out, "    }})");

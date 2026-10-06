@@ -257,6 +257,100 @@ fn jet_rust_emit_declared_value_id(line: String) -> String? Never! {
     Val(String.from_bytes(~(bytes[start..<end])) ?? "")
 }
 
+// The numbered slot name prefixes, as bytes: `__jet_v_`, `__jet_l_`, `__jet_pm_`.
+fn jet_rust_emit_numbered_slot_prefixes() -> [[U8]] Never! {
+    [[U8]]{"__jet_v_".bytes(), "__jet_l_".bytes(), "__jet_pm_".bytes()}
+}
+
+// The byte length of the numbered slot name (`__jet_v_N`, `__jet_l_N`,
+// `__jet_pm_N`; `prefixes` from `jet_rust_emit_numbered_slot_prefixes`)
+// starting at `at` when its digits end the identifier, else 0.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::numbered_slot_len
+fn jet_rust_emit_numbered_slot_len(prefixes: [[U8]], text: [U8], at: Int) -> Int Never! {
+    loop prefix in prefixes {
+        digits :: jet_rust_emit_compact_numbered(text, at, prefix)
+        if digits > 0 -> return prefix.len() + digits
+    }
+    0
+}
+
+// Whether `line` is `let mut slot: Option<T> = None;` (any indent) for a
+// numbered slot that `mentions` counts exactly once: its own declaration.
+fn jet_rust_emit_unmentioned_slot_declaration(prefixes: [[U8]], line: String, mentions: [String:Int]) -> Bool Never! {
+    bytes :: line.bytes()
+    indent := 0
+    loop indent < bytes.len() && Int.from_u8(bytes[indent]) == 32 -> indent += 1
+    content :: String.from_bytes(~(bytes[indent..<bytes.len()])) ?? ""
+    if !content.starts_with("let mut ") || !content.ends_with("> = None;") -> return false
+    content_bytes :: content.bytes()
+    len :: jet_rust_emit_numbered_slot_len(prefixes, content_bytes, 8)
+    if len == 0 -> return false
+    name :: String.from_bytes(~(content_bytes[8..<8 + len])) ?? ""
+    rest :: String.from_bytes(~(content_bytes[8 + len..<content_bytes.len()])) ?? ""
+    rest.starts_with(": Option<") && (mentions.get(name) ?? 0) == 1
+}
+
+// MIRRust drop_unmentioned_slots: `lines[start..]` are the slot declarations
+// and the body. A line `let mut slot: Option<T> = None;` (any indent, not
+// under an attribute) whose numbered slot name is mentioned nowhere else in
+// that text declares storage no statement uses: it only holds `None`, so its
+// drop is a no-op and removing it changes nothing but the frame size.
+// Mentions are counted over the raw text, string and comment text included,
+// so a doubtful slot is kept.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::drop_unmentioned_slots
+fn jet_rust_emit_drop_unmentioned_slots(lines: [String], start: Int) -> [String] Never! {
+    body := [String]{}
+    loop (index, entry) in lines {
+        if index >= start {
+            loop line in entry.split("\n").to_list() -> &body.push(line)
+        }
+    }
+    prefixes :: jet_rust_emit_numbered_slot_prefixes()
+    mentions := [String:Int]{}
+    loop line in body {
+        bytes :: line.bytes()
+        index := 0
+        loop index < bytes.len() {
+            joined :: index > 0 && jet_rust_emit_identifier_byte(bytes[index - 1])
+            len :: if Int.from_u8(bytes[index]) == 95 && !joined -> jet_rust_emit_numbered_slot_len(prefixes, bytes, index) else -> 0
+            if len == 0 {
+                index += 1
+                next
+            }
+            name :: String.from_bytes(~(bytes[index..<index + len])) ?? ""
+            &mentions.add(name, (mentions.get(name) ?? 0) + 1).drop("the count replaces the prior count")
+            index += len
+        }
+    }
+    kept := [String]{}
+    removed := false
+    attributed := false
+    loop line in body {
+        if !attributed && jet_rust_emit_unmentioned_slot_declaration(prefixes, line, mentions) {
+            removed = true
+        } else {
+            &kept.push(line)
+        }
+        attributed = jet_rust_emit_attribute_line(line)
+    }
+    if !removed -> return ~lines
+    rebuilt := [String]{}
+    loop (index, entry) in lines {
+        if index >= start -> break
+        &rebuilt.push(entry)
+    }
+    loop line in kept -> &rebuilt.push(line)
+    rebuilt
+}
+
+// Whether `line` (after its leading spaces) starts an attribute `#[`.
+fn jet_rust_emit_attribute_line(line: String) -> Bool Never! {
+    bytes :: line.bytes()
+    indent := 0
+    loop indent < bytes.len() && Int.from_u8(bytes[indent]) == 32 -> indent += 1
+    indent + 1 < bytes.len() && Int.from_u8(bytes[indent]) == 35 && Int.from_u8(bytes[indent + 1]) == 91
+}
+
 // MIRRust strip_enclosing_parens: `text` without parentheses enclosing all of it.
 fn jet_rust_emit_fold_strip_parens(text: String) -> String Never! {
     current := text
@@ -2521,6 +2615,7 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     localized :: jet_rust_emit_localize_value_slots(&ctx, function, lines, values_start, values_end)
     lines = jet_rust_emit_fold_value_slots(localized.lines, values_start, localized.body_start)
     lines = jet_rust_emit_unwrap_value_slots(lines, values_start)
+    lines = jet_rust_emit_drop_unmentioned_slots(lines, 1)
     lines = jet_rust_emit_compact_function_text(lines, 1)
     if generator -> &lines.push("    }})")
     &lines.push("}}")
