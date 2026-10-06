@@ -147,3 +147,20 @@ fn fx_display_custom() -> MIRProgram Never! {
     program.impls = [MIRImplDef]{fx_display_impl("custom Printable", "Printable", ty, mir_function_id("custom_show"), 1), fx_display_impl("custom Display", "Display", ty, mir_function_id("custom_display"), 2)}
     program
 }
+
+// fn run() { names :: ["Ada", "say \"hi\""]; print(names); print("{names}"); print("{names:Debug}") }
+// A List renders each element in its own mode (TextValues.rs / Values.rs):
+// Show and Display leave Strings bare, Debug quotes and escapes them.
+// expect-stdout display-list: "[Ada, say \"hi\"]\n[Ada, say \"hi\"]\n[\"Ada\", \"say \\\"hi\\\"\"]\n"
+fn fx_display_list() -> MIRProgram Never! {
+    b := fx_builder()
+    ada :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "Ada"}})
+    said :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "say \"hi\""}})
+    names :: fx_owned(&b, mir_type_from_kind(MIRTypeKind.List{inner: fx_string()}), MIROperation.BuildList{values: [MIRValueID]{ada, said}, trait_coercion: None})
+    fx_print(&b, names)
+    fx_render_interpolation(&b, names, MIRStringFormat.Display)
+    fx_render_interpolation(&b, names, MIRStringFormat.Debug)
+    fx_do(&b, MIROperation.Drop{value: names, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+}

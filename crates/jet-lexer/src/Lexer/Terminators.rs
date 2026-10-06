@@ -275,6 +275,7 @@ fn insert_terminators(src: &str, toks: &mut Vec<Token>, diags: &mut Vec<Diagnost
 pub fn lex(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
     let (mut toks, mut diags) = lex_raw(src);
     insert_terminators(src, &mut toks, &mut diags);
+    jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::Tokens, toks.len());
     (toks, diags)
 }
 

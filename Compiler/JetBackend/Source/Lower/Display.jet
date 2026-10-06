@@ -306,8 +306,9 @@ fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
         lower_render_push(p, &m, &f, builder, ok_ty, ok_value, mode)
         if !clean || mode == .Debug -> lower_render_static(&m, &f, builder, ")")
     } else if glue.ty.kind == .List(elem) {
-        // `[a, b]`, each element rendered as a member (runtime_host.rs
-        // display_handle_text_mode List: display_slot_text per element).
+        // `[a, b]`, each element rendered in the list's own mode, as the
+        // runtime's List JetDisplay / JetShow / JetDebug do (TextValues.rs,
+        // Values.rs): a String element is unquoted except under Debug.
         lower_render_static(&m, &f, builder, "[")
         length :: lower_list_word(&f, operand, 0)
         data :: lower_list_data(&f, operand)
@@ -334,7 +335,7 @@ fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
         lower_start(&f, item, [LIRValueID]{})
         address :: lower_list_address(&f, data, at, stride)
         value :: lower_render_load(p, &f, address, 0, elem, false)
-        lower_render_member_push(p, &m, &f, builder, elem, value, mode)
+        lower_render_push(p, &m, &f, builder, elem, value, mode)
         next_at :: lower_word(&f)
         one :: lower_const(&f, 1)
         lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: one})

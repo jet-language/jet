@@ -17999,7 +17999,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             )
                 | ("core.collections", "each_ref")
                 | ("core.iter", _)
-                | ("core.view", "map" | "try_map" | "try_filter")
+                | ("core.view", "map" | "fold" | "try_map" | "try_filter")
                 | ("core.option", "map")
                 | ("core.bag", "any")
         )
@@ -18594,7 +18594,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     "core.iter",
                     "take_while" | "skip_while" | "flat_map" | "scan"
                 )
-                | ("core.view", "map" | "try_map" | "try_filter")
+                | ("core.view", "map" | "fold" | "try_map" | "try_filter")
         ) {
             let scan_seed = if member == "scan" {
                 Some(

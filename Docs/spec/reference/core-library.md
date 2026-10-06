@@ -1519,11 +1519,7 @@ fn run() {
 | `loadavg()` / `times()` | `[Float] -[Env]>` | Return load averages or process CPU times. |
 | `exitcode(status)` / `success(status)` | `Int` / `Bool` | Interpret a wait status without an effect. |
 | `sync()` | `Unit -[FS, Env]>` | Flush filesystem buffers. |
-| `umask(mask)` | `Int -[FS, Env]>` | Set and return the previous creation mask. |
-| `getpgid(pid)` / `getsid(pid)` / `getpriority(who)` | `Int !IOError -[Env]>` | Inspect POSIX process-group, session, or scheduling state. |
-| `setpriority(who, priority)` | `!IOError -[Env]>` | Change scheduling priority. |
-| `utime(path, atime, mtime)` | `!IOError -[FS, Env]>` | Change file timestamps. |
-| `stop(code)` | never returns `-[Env]>` | Request process termination through the process boundary. |
+| `getpgid(pid)` / `getsid(pid)` | `Int !IOError -[Env]>` | Inspect POSIX process-group or session state. |
 
 The source-compatible `set` form reports an invalid environment call as E3001;
 its future typed error form is a language-edition change, not a second Core
@@ -1531,11 +1527,17 @@ namespace. Names must be non-empty and contain neither NUL nor `=`; values
 cannot contain NUL. `vars` does not silently skip an unrepresentable entry:
 `EnvError.NonUnicode` reports it.
 
-POSIX process/session controls require an OS gate and an audited `#Unsafe`
-region:
+POSIX process/session controls are `#Unsafe` functions: every call needs an OS
+gate and an enclosing audited `#Unsafe("reason")` region (E3103 otherwise),
+whether the call goes through the module alias or a direct import:
 
 | API | Result | Description |
 | --- | --- | --- |
+| `umask(mask)` | `Int -[FS, Env]>` | Set and return the previous creation mask. |
+| `getpriority(who)` | `Int !IOError -[Env]>` | Inspect scheduling priority. |
+| `setpriority(who, priority)` | `!IOError -[Env]>` | Change scheduling priority. |
+| `utime(path, atime, mtime)` | `!IOError -[FS, Env]>` | Change file timestamps. |
+| `stop(code)` | never returns `-[Env]>` | Request process termination through the process boundary. |
 | `fork()` / `setsid()` | `Int !IOError -[Env]>` | Fork or create a process session. |
 | `wait()` / `waitpid(pid, options)` | `Int !IOError -[Env, Time.Wait]>` | Reap a child or selected child. |
 | `kill(pid, signal)` | `!IOError -[Env]>` | Send a signal. |
@@ -2992,9 +2994,9 @@ fn run() {
 | `allocator.reset()` | — | Drop values while retaining reusable storage. |
 | `close(^allocator)` | — | Release the allocator resource permanently. |
 | `address_of<T>(value: T) -> Int` | address | Return an inert address value. |
-| `from_addr<T>(address: Int) -> *T` | pointer | Reconstitute a pointer; requires an audited unsafe context. |
-| `volatile_read<T>(pointer: *T) -> T` | value | Perform a volatile read; requires unsafe context. |
-| `volatile_write<T>(pointer: *T, value: T)` | — | Perform a volatile write; requires unsafe context. |
+| `from_addr<T>(address: Int) -> *T` | pointer | `#Unsafe` function: reconstitute a pointer; every call sits in an audited `#Unsafe` region. |
+| `volatile_read<T>(pointer: *T) -> T` | value | `#Unsafe` function: perform a volatile read; every call sits in an audited `#Unsafe` region. |
+| `volatile_write<T>(pointer: *T, value: T)` | — | `#Unsafe` function: perform a volatile write; every call sits in an audited `#Unsafe` region. |
 
 `Fixed` never grows or falls back to the heap. It reserves allocation and
 reverse-drop space from opposite ends of its buffer and fails before moving a

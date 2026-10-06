@@ -97,7 +97,9 @@ fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     symbol :: lower_runtime_symbol(row)
     receiver_ty :: lower_value_type(c, receiver) ?? return lower_fail(&m, &f, unsupported)
     result_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, unsupported)
-    folds :: symbol == "jet_list_fold"
+    // A list or view folds through the borrowed `jet_view_fold` route; a view
+    // shares the List header layout, so both walk the same buffer.
+    folds :: symbol == "jet_list_fold" || symbol == "jet_view_fold"
     if args.len() != (if folds -> 2 else -> 1) -> return lower_fail(&m, &f, unsupported)
     closure_arg :: args[args.len() - 1]
     closure_ty :: lower_value_type(c, closure_arg.value) ?? return lower_fail(&m, &f, unsupported)
