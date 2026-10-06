@@ -4,7 +4,7 @@
 // D-ENCBASE-STRICT1: edition 2027+ decoders are strict RFC 4648 (no
 // whitespace, canonical padding, zero unused bits) and report
 // `invalid <codec> at byte <N>: <reason>`; edition 2026 keeps the compatibility
-// parser. The codec kernels are the host rows; these members forward to them.
+// parser. Encoding and alphabet transformations are implemented here in Jet.
 use core as core
 use core.encoding.hex as hex
 use core.encoding.base32 as base32
@@ -22,9 +22,13 @@ fn rewrap(reason: String) -> Base64Error Never! { Base64Error{reason: reason} }
 
 fn u8_int(b: U8) -> Int Never! { Int.from_u8(b) }
 
-pub fn encode(data: [U8]) -> String Never! { core.encoding.base64.encode(data) }
+pub fn encode(data: [U8]) -> String Never! {
+    encode_alphabet(data, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", true)
+}
 
-pub fn encode_url(data: [U8]) -> String Never! { core.encoding.base64.encode_url(data) }
+pub fn encode_url(data: [U8]) -> String Never! {
+    encode_alphabet(data, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", false)
+}
 
 pub fn decode(text: String) -> [U8] Base64Error! {
     if core.encoding.base64.decode(text) == {
@@ -67,7 +71,15 @@ pub fn b85decode(text: String) -> [U8] Base64Error! { base85_decode(text, C_B85_
 pub fn z85encode(data: [U8]) -> String Base64Error! { base85_encode(data, C_Z85_ALPHABET, true) }
 pub fn z85decode(text: String) -> [U8] Base64Error! { base85_decode(text, C_Z85_ALPHABET, true) }
 
-pub fn encodebytes(data: [U8]) -> String Never! { core.encoding.base64.encodebytes(data) }
+pub fn encodebytes(data: [U8]) -> String Never! {
+    encoded :: encode(data).bytes()
+    out := [U8]{}
+    loop i in 0..<encoded.len() {
+        &out.push(encoded[i])
+        if (i + 1) %% 76 == 0 || i + 1 == encoded.len() -> &out.push(U8{10})
+    }
+    String.from_bytes(out) ?? ""
+}
 
 pub fn decodebytes(text: String) -> [U8] Base64Error! {
     if core.encoding.base64.decodebytes(text) == {
@@ -99,13 +111,26 @@ fn decode_base32hex(text: String) -> [U8] Base64Error! {
     }
 }
 
-pub fn encode_url_padded(data: [U8]) -> String Never! { core.encoding.base64.encode_url_padded(data) }
+pub fn encode_url_padded(data: [U8]) -> String Never! {
+    encode_alphabet(data, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", true)
+}
 
 pub fn decode_padded(text: String) -> [U8] Base64Error! { decode(text) }
 
-pub fn pad(text: String) -> String Never! { core.encoding.base64.pad(text) }
+pub fn pad(text: String) -> String Never! {
+    remainder :: text.bytes().len() %% 4
+    if remainder == 0 -> return text
+    out := text
+    loop _ in 0..<(4 - remainder) -> out = "{out}="
+    out
+}
 
-pub fn unpad(text: String) -> String Never! { core.encoding.base64.unpad(text) }
+pub fn unpad(text: String) -> String Never! {
+    raw :: text.bytes()
+    end := raw.len()
+    loop end > 0 && raw[end - 1] == U8{61} -> end -= 1
+    String.from_bytes(raw[0..<end]) ?? ""
+}
 
 pub fn is_base64(text: String) -> Bool Never! {
     decode(text) == .Ok(_)
@@ -252,4 +277,40 @@ fn base85_decode(text: String, alphabet: String, require_full: Bool) -> [U8] Bas
 fn to_u8(n: Int) -> U8 Never! {
     v :: n & 255
     (U8{v})
+}
+
+fn encode_alphabet(data: [U8], alphabet: String, padded: Bool) -> String Never! {
+    chars :: alphabet.bytes()
+    out := [U8]{}
+    i := 0
+    loop i < data.len() {
+        remain :: data.len() - i
+        a :: u8_int(data[i])
+        b :: if remain > 1 -> u8_int(data[i + 1]) else -> 0
+        c :: if remain > 2 -> u8_int(data[i + 2]) else -> 0
+        &out.push(chars[a >> 2])
+        &out.push(chars[((a & 3) << 4) | (b >> 4)])
+        if remain > 1 -> &out.push(chars[((b & 15) << 2) | (c >> 6)]) else {
+            if padded -> &out.push(U8{61})
+        }
+        if remain > 2 -> &out.push(chars[c & 63]) else {
+            if padded -> &out.push(U8{61})
+        }
+        i += 3
+    }
+    String.from_bytes(out) ?? ""
+}
+
+#Test
+fn base64_encoder_vectors() {
+    assert(encode([U8]{}) == "")
+    assert(encode("f".bytes()) == "Zg==")
+    assert(encode("fo".bytes()) == "Zm8=")
+    assert(encode("foo".bytes()) == "Zm9v")
+    assert(encode_url([U8]{251, 255}) == "-_8")
+    assert(encode_url_padded([U8]{251, 255}) == "-_8=")
+    assert(encodebytes([U8]{}) == "")
+    assert(encodebytes("foo".bytes()) == "Zm9v\n")
+    assert(pad("Zg") == "Zg==")
+    assert(unpad("Zg===") == "Zg")
 }

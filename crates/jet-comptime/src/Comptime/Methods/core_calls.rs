@@ -889,21 +889,7 @@ fn core_math_float_clamp(
     }
 }
 
-fn hex_encode(bytes: Vec<u8>) -> String {
-    encoding_base_kernel::jet_std_hex_encode(&bytes)
-}
 
-fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
-    encoding_base_kernel::jet_std_hex_decode(&s.to_string())
-}
-
-fn base64_encode(bytes: Vec<u8>) -> String {
-    encoding_base_kernel::jet_std_b64_encode(&bytes)
-}
-
-fn base32_encode(bytes: &[u8]) -> String {
-    encoding_base_kernel::jet_std_base32_encode(&bytes.to_vec())
-}
 
 /// Core modules the REPL interpreter cannot run (native FFI / threads / HTTP stack).
 fn repl_native_only_module(module: &str) -> Option<&'static str> {
