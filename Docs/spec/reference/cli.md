@@ -108,7 +108,7 @@ jet fill <file.jet[:line]>           Propose checked code for typed goals
 jet generate <GeneratorJob> [--apply|--dry-run] [--entry <file.jet>] [--json] Run an explicit source generator with authority and a receipt
 jet shared-store <command>           Manage the optional shared package broker
 jet try <plan.json>                  Speculatively apply a plan and re-check its claims
-jet Fold [args]                      Reverse a recorded Package source transition
+jet fold [args]                      Reverse a recorded Package source transition
 ```
 
 The `bind` shorthand accepts the explicit binding-plan form shown by help:

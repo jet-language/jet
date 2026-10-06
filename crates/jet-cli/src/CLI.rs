@@ -1055,8 +1055,7 @@ impl HelpOrder {
     }
 }
 
-/// Every `COMMANDS` row in `order`. Names compare case-insensitively, so the
-/// capitalized `Fold` sits between `flash` and `fuzz`.
+/// Every `COMMANDS` row in `order`. Names compare ASCII-case-insensitively.
 pub fn commands_in(order: HelpOrder) -> Vec<&'static CommandSpec> {
     let by_name = |left: &CommandSpec, right: &CommandSpec| {
         left.name
