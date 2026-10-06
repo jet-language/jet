@@ -4,7 +4,7 @@ mod common;
 
 use common::{build_and_run, ffi_bridge_cache_root, have_rustc};
 use jet::Diagnostics::Severity;
-use jet::Interpreter::{dev_iteration, RunOutcome};
+use jet::Interpreter::RunOutcome;
 
 fn assert_single_type_error(source: &str, expected: &[&str]) {
     let diagnostics = jet::compile(source).expect_err("wrong crypto role must fail in sema");
@@ -71,9 +71,6 @@ fn typed_crypto_matches_aot_in_default_dev_with_honest_jit_boundary() {
         errors.is_empty(),
         "typed crypto must type-check: {errors:?}"
     );
-    let policy = common::development_policy();
-    common::compile_cranelift_bundle(&bundle, &policy)
-        .expect("typed crypto must compile natively in the resident JIT");
 
     let (aot_code, aot_stdout, aot_stderr) =
         build_and_run("jet_crypto_c12", "typed_crypto", &source);
@@ -104,7 +101,7 @@ fn typed_crypto_matches_aot_in_default_dev_with_honest_jit_boundary() {
         "generated crypto dependencies must be exact and feature-minimal",
     );
 
-    let dev = match dev_iteration(path, false, false) {
+    let dev = match crate::common::dev_run(path, false, false) {
         RunOutcome::Ran {
             stdout,
             stderr,

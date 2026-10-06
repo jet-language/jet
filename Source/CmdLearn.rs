@@ -1201,7 +1201,6 @@ fn evaluate(path: &Path, expected_output: &str) -> Evaluation {
     let run = jet::Interpreter::dev_iteration_with_gates_profile_and_settings_with_lints(
         &file,
         false,
-        false,
         jet::Policy::GateSet::default(),
         "dev",
         &std::collections::BTreeMap::new(),
@@ -1759,7 +1758,7 @@ fn watch_until_changed(path: &Path, mode: OutputMode) -> Result<(), i32> {
         println!("Press Ctrl+C to exit. Run 'jet learn' to resume.");
     }
     loop {
-        jet_jit::scheduler_sleep_ms(120);
+        jet_evalhost::scheduler_sleep_ms(120);
         let Some(receipt) = watch.poll() else {
             continue;
         };

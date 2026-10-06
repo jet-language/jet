@@ -1416,7 +1416,6 @@ fn mir_image_static_str(value: String) -> Result<&'static str, String> {
         if record.symbol.name() == value { return Ok(record.symbol.name()); }
         if let Some(item) = record.receiver_types.iter().copied().find(|item| *item == value) { return Ok(item); }
         if let Some(item) = record.effect_leaf.filter(|item| *item == value) { return Ok(item); }
-        if let Some(item) = record.jit_symbol.filter(|item| *item == value) { return Ok(item); }
         if let Some(marker) = record.marker {
             if marker.member == value { return Ok(marker.member); }
             if marker.since == value { return Ok(marker.since); }

@@ -407,7 +407,7 @@ fn run_restart_process(bin: &Path, store: &Path, phase: &str, id: Option<&str>) 
 fn run_restart_default_process(dir: &Path, store: &Path, phase: &str, id: Option<&str>) -> String {
     let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
     command
-        .args(["run", "restart.jet", "--trace-tiers"])
+        .args(["run", "restart.jet"])
         .current_dir(dir)
         .env("NO_COLOR", "1")
         .env("JET_SERVICE_AUTH_STORE", store)

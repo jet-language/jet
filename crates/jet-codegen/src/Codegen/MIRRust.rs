@@ -1409,16 +1409,10 @@ fn select_artifact(
     let target_ok = match (target, plan.target) {
         (MirRustTarget::Native, MirArtifactTarget::RustAot) => true,
         (MirRustTarget::WebWasm, MirArtifactTarget::Web) => true,
-        (
-            MirRustTarget::Native,
-            MirArtifactTarget::Cranelift | MirArtifactTarget::Interpreter | MirArtifactTarget::Web,
-        )
-        | (
-            MirRustTarget::WebWasm,
-            MirArtifactTarget::RustAot
-            | MirArtifactTarget::Cranelift
-            | MirArtifactTarget::Interpreter,
-        ) => false,
+        (MirRustTarget::Native, MirArtifactTarget::Interpreter | MirArtifactTarget::Web)
+        | (MirRustTarget::WebWasm, MirArtifactTarget::RustAot | MirArtifactTarget::Interpreter) => {
+            false
+        }
     };
     let kind_ok = match (target, plan.kind) {
         (
@@ -13611,7 +13605,6 @@ impl<'a> RustEmitter<'a> {
         }
         let _ = writeln!(out, "fn __jet_harness_run() -> bool {{");
         let _ = writeln!(out, "    jet_test_install_panic_hook();");
-        let _ = writeln!(out, "    jet_test_trace_tier();");
         if self.coverage_enabled() {
             for (id, function) in self.coverage_branch_rows() {
                 let _ = writeln!(
@@ -13783,7 +13776,6 @@ impl<'a> RustEmitter<'a> {
             );
             let _ = writeln!(out, "fn __jet_fuzz_run() {{");
             let _ = writeln!(out, "    jet_test_install_panic_hook();");
-            let _ = writeln!(out, "    jet_test_trace_tier();");
             let _ = writeln!(
                 out,
                 "    let __jet_name = {name_literal};\n\

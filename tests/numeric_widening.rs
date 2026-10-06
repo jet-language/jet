@@ -2,7 +2,7 @@ mod common;
 
 mod tir_support;
 
-use jet::Interpreter::{dev_iteration, RunOutcome};
+use jet::Interpreter::RunOutcome;
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -46,7 +46,7 @@ fn write_program(name: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
 
 fn run_in_process(name: &str, files: &[(&str, &str)], force_interpreter: bool) -> RunOutcome {
     let path = write_program(name, files);
-    dev_iteration(path.to_str().unwrap(), false, force_interpreter)
+    crate::common::dev_run(path.to_str().unwrap(), false, force_interpreter)
 }
 
 fn run_interpreter(name: &str, source: &str) -> (i32, String, String) {
@@ -64,20 +64,7 @@ fn run_interpreter(name: &str, source: &str) -> (i32, String, String) {
 
 fn run_resident(name: &str, files: &[(&str, &str)]) -> RunOutcome {
     let _trace_guard = JIT_TRACE_LOCK.lock().unwrap();
-    jet_jit::reset_jit_trace_for_test();
     let outcome = run_in_process(name, files, false);
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "{name} did not execute resident JIT code"
-    );
-    assert!(
-        !jet_jit::fallback_invoked_for_test(),
-        "{name} invoked the fallback tier"
-    );
-    assert!(
-        !jet_jit::deopt_invoked_for_test(),
-        "{name} deoptimized into the interpreter"
-    );
     outcome
 }
 
@@ -188,7 +175,7 @@ fn assert_trap_all_tiers(name: &str, source: &str) {
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");
     fs::write(&path, source).unwrap();
-    match dev_iteration(path.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, true) {
         RunOutcome::Ran {
             stdout,
             stderr,

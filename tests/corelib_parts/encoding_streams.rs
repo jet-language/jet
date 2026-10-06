@@ -345,7 +345,7 @@ fn run() {{
     assert_eq!(stderr, "");
     let dev_path = dir.join("json_stream_atomic.jet");
     fs::write(&dev_path, &source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
         }
@@ -965,7 +965,7 @@ fn run() {{
     assert_eq!(stderr, "");
     let dev_path = dir.join("json_stream_drop_heap.jet");
     fs::write(&dev_path, &source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
         }
@@ -1198,7 +1198,7 @@ fn run() {{
     assert_eq!(stderr, "");
     let dev_path = dir.join("jsonl_stream_drop_heap.jet");
     fs::write(&dev_path, &source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
         }
@@ -1293,7 +1293,7 @@ fn run() {{
     assert_eq!(stderr, "");
     let dev_path = dir.join("csv_stream_drop_heap.jet");
     fs::write(&dev_path, &source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
         }
@@ -1432,7 +1432,7 @@ fn run() {{
     assert_eq!(stderr, "");
     let dev_path = dir.join("xml_stream_drop_heap.jet");
     fs::write(&dev_path, &source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
         }
@@ -1531,7 +1531,7 @@ fn run() {{
     assert_eq!(stderr, "");
     let dev_path = dir.join("cbor_stream_drop_heap.jet");
     fs::write(&dev_path, &source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
         }
@@ -1773,7 +1773,7 @@ fn run() {{
     assert_eq!(stderr, "");
     let dev_path = dir.join("csv_stream.jet");
     fs::write(&dev_path, &source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
         }
@@ -1931,7 +1931,7 @@ fn run() {{
     assert_eq!(stderr, "");
     let dev_path = dir.join("cbor_stream.jet");
     fs::write(&dev_path, &source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
         }
@@ -2302,7 +2302,7 @@ fn run() {{
     assert_eq!((code, stdout.as_str(), stderr.as_str()), (0, "true\ntrue\n", ""));
     let path = dir.join("cbor_io.jet");
     fs::write(&path, &source).unwrap();
-    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, "true\ntrue\n", ""));
         }
@@ -2389,10 +2389,7 @@ fn run() {
             .all(|diag| !matches!(diag.severity, jet::Diagnostics::Severity::Error)),
         "CBOR fixture must type-check: {diagnostics:?}"
     );
-    common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .expect("CBOR fixture must compile for resident JIT");
-    jet_jit::reset_jit_trace_for_test();
-    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout: dev_stdout,
             stderr: dev_stderr,
@@ -2402,22 +2399,10 @@ fn run() {
                 (exit_code, dev_stdout, dev_stderr),
                 (0, stdout.clone(), String::new())
             );
-            assert!(
-                jet_jit::jit_executed_for_test(),
-                "CBOR whole-value fixture must execute resident JIT"
-            );
-            assert!(
-                !jet_jit::deopt_invoked_for_test(),
-                "CBOR whole-value fixture must not silently deopt"
-            );
-            assert!(
-                !jet_jit::fallback_invoked_for_test(),
-                "CBOR whole-value fixture must not fall back"
-            );
         }
         other => panic!("CBOR whole-value default-dev failed: {other:?}"),
     }
-    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran {
             stdout: interpreter_stdout,
             stderr: interpreter_stderr,
@@ -2663,7 +2648,7 @@ fn run() {
 
     let path = dir.join("cbor_whole_corpus.jet");
     fs::write(&path, source).unwrap();
-    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout: dev_stdout,
             stderr: dev_stderr,

@@ -111,7 +111,6 @@ fn is_native_rust_derive(derive: MirTraitId) -> bool {
 fn target_supports_impl(applicability: MirTargetApplicability, target: MirArtifactTarget) -> bool {
     match target {
         MirArtifactTarget::RustAot => applicability.rust_aot,
-        MirArtifactTarget::Cranelift => applicability.cranelift,
         MirArtifactTarget::Interpreter => applicability.interpreter,
         MirArtifactTarget::Web => applicability.web,
     }
@@ -2408,7 +2407,6 @@ fn lower_impl_rows(
                 target_os: row.target_os.clone(),
                 target_applicability: MirTargetApplicability {
                     rust_aot: true,
-                    cranelift: true,
                     interpreter: true,
                     web: true,
                 },
@@ -2551,7 +2549,6 @@ fn attach_orphan_methods(impls: &mut Vec<MirImplDef>, functions: &[MirFunction])
             target_os: None,
             target_applicability: MirTargetApplicability {
                 rust_aot: true,
-                cranelift: true,
                 interpreter: true,
                 web: true,
             },
@@ -4372,7 +4369,6 @@ fn lower_function(
         visibility: lower_visibility(f.visibility),
         target_applicability: MirTargetApplicability {
             rust_aot: f.target_applicability.rust_aot,
-            cranelift: f.target_applicability.cranelift,
             interpreter: f.target_applicability.interpreter,
             web: f.target_applicability.web,
         },
@@ -10332,7 +10328,6 @@ impl<'a> LowerCtx<'a> {
             effects: lambda.effects.clone(),
             target_applicability: TTargetApplicability {
                 rust_aot: true,
-                cranelift: true,
                 interpreter: true,
                 web: true,
             },

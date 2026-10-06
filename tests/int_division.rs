@@ -7,7 +7,7 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{assert_tiers_agree, build_and_run, build_and_run_full, have_rustc, jit_run};
+use tir_support::{assert_tiers_agree, build_and_run, build_and_run_full, have_rustc, default_run};
 
 const SEED: &str = "fn score(n: Int) -> Int {\n    return n\n}\n";
 
@@ -200,7 +200,7 @@ fn run() {
             "{name}: raw Rust panic leaked (I2): {err}"
         );
 
-        let (jit_code, jit_out, jit_err) = jit_run(&format!("{name}_jit"), src);
+        let (jit_code, jit_out, jit_err) = default_run(&format!("{name}_jit"), src);
         assert_eq!(
             jit_code, 70,
             "{name}: jet run must exit 70 (I9), got {jit_code}: {jit_out}{jit_err}"

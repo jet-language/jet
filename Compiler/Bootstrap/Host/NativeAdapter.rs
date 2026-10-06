@@ -64,8 +64,8 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
     }
 
     let source_binding_type = symbols.type_symbol("JetEvalNativeBindingIdentity")?;
-    let source_binding_identity = "::jet_jit::SourceResources::SourceNativeBindingIdentity";
-    let resource_handle = "::jet_jit::SourceResources::SourceResourceHandle";
+    let source_binding_identity = "::jet_evalhost::SourceResources::SourceNativeBindingIdentity";
+    let resource_handle = "::jet_evalhost::SourceResources::SourceResourceHandle";
     let expected_receiver_key = format!("{:?}", receiver_type.canonical_key());
     emit_native_callback_jobs(out)?;
     writeln!(
@@ -81,17 +81,17 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
          type __JetBootstrapNativePacket = (::jet_foundation::MIR::MirType, ::jet_foundation::MIR::MirRuntimeValue);\n\
          #[doc(hidden)]\n\
          struct __JetBootstrapNativeAdapterRoot {{
-             bindings: ::std::sync::Arc<::jet_jit::SourceInterfaces::NativeInterfaceBindings>,
+             bindings: ::std::sync::Arc<::jet_evalhost::SourceInterfaces::NativeInterfaceBindings>,
              program: ::std::sync::Arc<::jet_foundation::MIR::MirProgram>,
              machine_abi_shape: crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape,\n\
              shared_payload_shapes: ::std::collections::BTreeMap<String, crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape>,\n\
-             completion_scope: ::jet_jit::SourceExecutionCompletionScopeWeak,\n\
-             callback_jobs: ::std::sync::Weak<dyn ::jet_jit::SourceCallbacks::SourceCallbackJobOwner>,\n\
-             resources_weak: ::jet_jit::SourceResources::SourceResourceLeaseWeak,\n\
+             completion_scope: ::jet_evalhost::SourceExecutionCompletionScopeWeak,\n\
+             callback_jobs: ::std::sync::Weak<dyn ::jet_evalhost::SourceCallbacks::SourceCallbackJobOwner>,\n\
+             resources_weak: ::jet_evalhost::SourceResources::SourceResourceLeaseWeak,\n\
              artifact: ::jet_foundation::MIR::MirArtifactId,
              receiver_type: ::jet_foundation::MIR::MirType,
              execution: ::jet_foundation::MIR::MirExecutionIdentity,
-             template: ::jet_jit::SourceInterfaces::NativeInterfaceObject,
+             template: ::jet_evalhost::SourceInterfaces::NativeInterfaceObject,
              native_bindings: ::std::sync::Mutex<Vec<__JetBootstrapNativeBindingRegistration>>,
          }}
          #[doc(hidden)]\n\
@@ -104,10 +104,10 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
          struct __JetBootstrapNativeAdapterOwner {{\n\
              root: ::std::sync::Arc<__JetBootstrapNativeAdapterRoot>,\n\
              callbacks: __JetBootstrapNativeCallbackSession,\n\
-             resources: ::jet_jit::SourceResources::SourceResourceLease,\n\
-             cleanup: Option<::jet_jit::SourceResources::SourceResourceCleanupLease>,\n\
-             instance: ::std::sync::OnceLock<::jet_jit::SourceInterfaces::NativeInterfaceObject>,\n\
-             capability: ::std::sync::OnceLock<::jet_jit::SourceResources::SourceResourceHandle>,\n\
+             resources: ::jet_evalhost::SourceResources::SourceResourceLease,\n\
+             cleanup: Option<::jet_evalhost::SourceResources::SourceResourceCleanupLease>,\n\
+             instance: ::std::sync::OnceLock<::jet_evalhost::SourceInterfaces::NativeInterfaceObject>,\n\
+             capability: ::std::sync::OnceLock<::jet_evalhost::SourceResources::SourceResourceHandle>,\n\
              callback_failed: ::std::sync::Arc<::std::sync::atomic::AtomicBool>,\n\
              context: ::std::sync::Arc<__JetBootstrapNativeCallbackContext>,\n\
              borrowed_session: bool,\n\
@@ -116,7 +116,7 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
              fn drop(&mut self) {{
                  if let Some(capability) = self.capability.take() {{
                      if let Err(error) = self.resources.arena().release_capability(&capability) {{
-                         self.context.record_failure(::jet_jit::SourceDeoptError::InvalidRequest(error));
+                         self.context.record_failure(::jet_evalhost::SourceEntryError::InvalidRequest(error));
                      }}
                  }}
                  let _ = self.instance.take();
@@ -126,20 +126,20 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
          #[derive(Clone)]\n\
          struct __JetBootstrapNativeAdapter {{\n\
              root: ::std::sync::Arc<__JetBootstrapNativeAdapterRoot>,\n\
-             resources: ::jet_jit::SourceResources::SourceResourceLease,\n\
-             cleanup: Option<::jet_jit::SourceResources::SourceResourceCleanupLease>,\n\
+             resources: ::jet_evalhost::SourceResources::SourceResourceLease,\n\
+             cleanup: Option<::jet_evalhost::SourceResources::SourceResourceCleanupLease>,\n\
              callbacks: __JetBootstrapNativeCallbackSession,\n\
-             instance: ::jet_jit::SourceInterfaces::NativeInterfaceObject,\n\
-             capability: ::jet_jit::SourceResources::SourceResourceHandle,\n\
+             instance: ::jet_evalhost::SourceInterfaces::NativeInterfaceObject,\n\
+             capability: ::jet_evalhost::SourceResources::SourceResourceHandle,\n\
              owner: ::std::sync::Arc<__JetBootstrapNativeAdapterOwner>,\n\
              borrowed_session: bool,\n\
          }}\n\
          fn __jet_bootstrap_native_adapter_template(\n\
-             bindings: &::std::sync::Arc<::jet_jit::SourceInterfaces::NativeInterfaceBindings>,\n\
+             bindings: &::std::sync::Arc<::jet_evalhost::SourceInterfaces::NativeInterfaceBindings>,\n\
              program: &::jet_foundation::MIR::MirProgram,\n\
              artifact: ::jet_foundation::MIR::MirArtifactId,\n\
              receiver_type: ::jet_foundation::MIR::MirType,\n\
-         ) -> Result<::jet_jit::SourceInterfaces::NativeInterfaceObject, String> {{\n\
+         ) -> Result<::jet_evalhost::SourceInterfaces::NativeInterfaceObject, String> {{\n\
              if receiver_type.canonical_key() != {expected_receiver_key} {{\n\
                  return Err(\"native adapter receiver type differs from the exact checked JetEvalConfig.host_adapter leaf\".to_string());\n\
              }}\n\
@@ -167,7 +167,7 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
         writeln!(
             out,
             "    {{\n\
-             let descriptor = ::jet_jit::SourceInterfaces::NativeInterfaceMethod::checked_for_execution(\n\
+             let descriptor = ::jet_evalhost::SourceInterfaces::NativeInterfaceMethod::checked_for_execution(\n\
                  program,\n\
                  execution.clone(),\n\
                  artifact,\n\
@@ -191,7 +191,7 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
              {{\n\
                  return Err(format!(\"JetEvalHostAdapter.{method_name} Rust metadata disagrees with its checked MIR interface signature\"));\n\
              }}\n\
-             let handler: ::jet_jit::SourceInterfaces::NativeInterfaceHandler = ::std::sync::Arc::new(|object, call| {{\n\
+             let handler: ::jet_evalhost::SourceInterfaces::NativeInterfaceHandler = ::std::sync::Arc::new(|object, call| {{\n\
                  let instance = object.root::<__JetBootstrapNativeAdapterInstance>()\n\
                      .ok_or_else(|| \"native adapter carrier has no callback-scope context\".to_string())?;\n\
                  __jet_bootstrap_native_interface_{method_name}(instance, call)\n\
@@ -209,16 +209,16 @@ pub(crate) fn emit_bootstrap_native_adapter_impl(
          }}\n\
          impl __JetBootstrapNativeAdapter {{\n\
              fn new_with_bindings(\n\
-                 resources: ::jet_jit::SourceResources::SourceResourceLease,\n\
-                 bindings: ::std::sync::Arc<::jet_jit::SourceInterfaces::NativeInterfaceBindings>,\n\
+                 resources: ::jet_evalhost::SourceResources::SourceResourceLease,\n\
+                 bindings: ::std::sync::Arc<::jet_evalhost::SourceInterfaces::NativeInterfaceBindings>,\n\
                  program: ::std::sync::Arc<::jet_foundation::MIR::MirProgram>,\n\
                  machine_abi_shape: crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape,\n\
                  shared_payload_shapes: ::std::collections::BTreeMap<String, crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape>,\n\
-                 completion_scope: ::jet_jit::SourceExecutionCompletionScope,\n\
-                 callback_jobs: ::std::sync::Arc<dyn ::jet_jit::SourceCallbacks::SourceCallbackJobOwner>,\n\
+                 completion_scope: ::jet_evalhost::SourceExecutionCompletionScope,\n\
+                 callback_jobs: ::std::sync::Arc<dyn ::jet_evalhost::SourceCallbacks::SourceCallbackJobOwner>,\n\
                  artifact: ::jet_foundation::MIR::MirArtifactId,\n\
                  receiver_type: ::jet_foundation::MIR::MirType,\n\
-                 template: ::jet_jit::SourceInterfaces::NativeInterfaceObject,\n\
+                 template: ::jet_evalhost::SourceInterfaces::NativeInterfaceObject,\n\
                  native_bindings: Vec<__JetBootstrapNativeBindingRegistration>,\n\
              ) -> Result<Self, String> {{\n\
                  if receiver_type.canonical_key() != {expected_receiver_key} {{\n\
@@ -386,8 +386,8 @@ fn emit_native_callback_jobs(out: &mut String) -> Result<(), BootstrapHostCodecE
 struct __JetBootstrapNativeCallbackJobState {
     admission_closed: bool,
     open_sessions: usize,
-    active: Vec<::jet_jit::JetSchedulerJoin<Result<(), ::jet_jit::JetTaskFailure>>>,
-    failures: Vec<::jet_jit::JetTaskFailure>,
+    active: Vec<::jet_evalhost::JetSchedulerJoin<Result<(), ::jet_evalhost::JetTaskFailure>>>,
+    failures: Vec<::jet_evalhost::JetTaskFailure>,
     draining: bool,
     transitions: usize,
 }
@@ -419,8 +419,8 @@ impl __JetBootstrapNativeCallbackJobs {
 
     fn schedule(
         &self,
-        job: ::jet_jit::SourceCallbacks::SourceCallbackJob,
-    ) -> Result<(), ::jet_jit::SourceCallbacks::SourceCallbackJob> {
+        job: ::jet_evalhost::SourceCallbacks::SourceCallbackJob,
+    ) -> Result<(), ::jet_evalhost::SourceCallbacks::SourceCallbackJob> {
         let job_slot = ::std::sync::Arc::new(::std::sync::Mutex::new(Some(job)));
         {
             let mut state = self.lock_state();
@@ -450,7 +450,7 @@ impl __JetBootstrapNativeCallbackJobs {
 
         let task_slot = ::std::sync::Arc::clone(&job_slot);
         let spawned = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(move || {
-            ::jet_jit::jet_scheduler_spawn(move || {
+            ::jet_evalhost::jet_scheduler_spawn(move || {
                 let job = task_slot
                     .lock()
                     .unwrap_or_else(::std::sync::PoisonError::into_inner)
@@ -483,7 +483,7 @@ impl __JetBootstrapNativeCallbackJobs {
         }
     }
 
-    fn drain_jobs(&self) -> ::jet_jit::SourceCallbacks::SourceCallbackJobDrainOutcome {
+    fn drain_jobs(&self) -> ::jet_evalhost::SourceCallbacks::SourceCallbackJobDrainOutcome {
         loop {
             let handle = {
                 let mut state = self.lock_state();
@@ -492,11 +492,11 @@ impl __JetBootstrapNativeCallbackJobs {
                         && state.open_sessions == 0
                         && state.transitions == 0
                     {
-                        return ::jet_jit::SourceCallbacks::SourceCallbackJobDrainOutcome::Complete {
+                        return ::jet_evalhost::SourceCallbacks::SourceCallbackJobDrainOutcome::Complete {
                             failures: state.failures.clone(),
                         };
                     }
-                    return ::jet_jit::SourceCallbacks::SourceCallbackJobDrainOutcome::Pending {
+                    return ::jet_evalhost::SourceCallbacks::SourceCallbackJobDrainOutcome::Pending {
                         open_callback_sessions: state.open_sessions,
                         pending_jobs: state.active.len() + state.transitions,
                     };
@@ -532,7 +532,7 @@ impl __JetBootstrapNativeCallbackJobs {
     }
 }
 
-impl ::jet_jit::SourceCallbacks::SourceCallbackJobOwner for __JetBootstrapNativeCallbackJobs {
+impl ::jet_evalhost::SourceCallbacks::SourceCallbackJobOwner for __JetBootstrapNativeCallbackJobs {
     fn session_started(&self) -> Result<(), String> {
         let mut state = self.lock_state();
         if state.admission_closed {
@@ -559,16 +559,16 @@ impl ::jet_jit::SourceCallbacks::SourceCallbackJobOwner for __JetBootstrapNative
 
     fn submit(
         &self,
-        job: ::jet_jit::SourceCallbacks::SourceCallbackJob,
-    ) -> Result<(), ::jet_jit::SourceCallbacks::SourceCallbackJob> {
+        job: ::jet_evalhost::SourceCallbacks::SourceCallbackJob,
+    ) -> Result<(), ::jet_evalhost::SourceCallbacks::SourceCallbackJob> {
         self.schedule(job)
     }
 
-    fn drain(&self) -> ::jet_jit::SourceCallbacks::SourceCallbackJobDrainOutcome {
+    fn drain(&self) -> ::jet_evalhost::SourceCallbacks::SourceCallbackJobDrainOutcome {
         {
             let mut state = self.lock_state();
             if state.draining {
-                return ::jet_jit::SourceCallbacks::SourceCallbackJobDrainOutcome::Pending {
+                return ::jet_evalhost::SourceCallbacks::SourceCallbackJobDrainOutcome::Pending {
                     open_callback_sessions: state.open_sessions,
                     pending_jobs: state.active.len() + state.transitions,
                 };
@@ -598,7 +598,7 @@ fn emit_native_interface_helpers(
     out.push_str(
         r#"fn __jet_bootstrap_native_adapter_for_interface_call(
             instance: &__JetBootstrapNativeAdapterInstance,
-            call: &::jet_jit::SourceInterfaces::NativeInterfaceCall,
+            call: &::jet_evalhost::SourceInterfaces::NativeInterfaceCall,
             trait_id: ::jet_foundation::MIR::MirTraitId,
             method_id: ::jet_foundation::MIR::MirTraitMethodId,
             method_name: &str,
@@ -608,7 +608,7 @@ fn emit_native_interface_helpers(
             if !::std::sync::Arc::ptr_eq(&instance.root, &owner.root) {
                 return Err("native adapter instance and owner have different immutable roots".to_string());
             }
-            let checked = ::jet_jit::SourceInterfaces::NativeInterfaceMethod::checked_for_execution(
+            let checked = ::jet_evalhost::SourceInterfaces::NativeInterfaceMethod::checked_for_execution(
                 owner.root.program.as_ref(),
                 owner.root.execution.clone(),
                 owner.root.artifact,
@@ -710,7 +710,7 @@ fn emit_native_interface_helpers(
         let generated = format!(
             r#"fn __jet_bootstrap_native_interface_{name}(
                 instance: &__JetBootstrapNativeAdapterInstance,
-                call: &mut ::jet_jit::SourceInterfaces::NativeInterfaceCall,
+                call: &mut ::jet_evalhost::SourceInterfaces::NativeInterfaceCall,
             ) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {{
                 let adapter = __jet_bootstrap_native_adapter_for_interface_call(
                     instance,
@@ -733,9 +733,9 @@ fn emit_native_callback_scope_helpers(out: &mut String) -> Result<(), BootstrapH
     out.push_str(r#"
 struct __JetBootstrapNativeCallbackContext {
     root: ::std::sync::Arc<__JetBootstrapNativeAdapterRoot>,
-    cleanup: Option<::jet_jit::SourceResources::SourceResourceCleanupLease>,
+    cleanup: Option<::jet_evalhost::SourceResources::SourceResourceCleanupLease>,
     // Keeps this callback session admitted by the invocation's job owner.
-    _registration: ::jet_jit::SourceCallbacks::SourceCallbackJobSessionRegistration,
+    _registration: ::jet_evalhost::SourceCallbacks::SourceCallbackJobSessionRegistration,
     failures: __JetBootstrapNativeCallbackFailures,
 }
 
@@ -745,19 +745,19 @@ struct __JetBootstrapNativeCallbackContext {
 #[derive(Clone)]
 struct __JetBootstrapNativeCallbackFailures {
     execution: ::jet_foundation::MIR::MirExecutionIdentity,
-    resources: ::jet_jit::SourceResources::SourceResourceLeaseWeak,
-    completion_scope: ::jet_jit::SourceExecutionCompletionScope,
+    resources: ::jet_evalhost::SourceResources::SourceResourceLeaseWeak,
+    completion_scope: ::jet_evalhost::SourceExecutionCompletionScope,
     failed: ::std::sync::Arc<::std::sync::atomic::AtomicBool>,
 }
 
 impl __JetBootstrapNativeCallbackFailures {
-    fn record(&self, cause: ::jet_jit::SourceDeoptError) {
+    fn record(&self, cause: ::jet_evalhost::SourceEntryError) {
         self.failed.store(true, ::std::sync::atomic::Ordering::Release);
-        self.completion_scope.record(::jet_jit::SourceExecutionCompletion {
+        self.completion_scope.record(::jet_evalhost::SourceExecutionCompletion {
             execution: Some(self.execution.clone()),
             function: None,
             lease: self.resources.upgrade(),
-            disposition: ::jet_jit::SourceExecutionCompletionDisposition::NotInvoked {
+            disposition: ::jet_evalhost::SourceExecutionCompletionDisposition::NotInvoked {
                 cause,
                 entry_values: Vec::new(),
                 write_borrow_indices: Vec::new(),
@@ -768,7 +768,7 @@ impl __JetBootstrapNativeCallbackFailures {
 }
 
 impl __JetBootstrapNativeCallbackContext {
-    fn record_failure(&self, cause: ::jet_jit::SourceDeoptError) {
+    fn record_failure(&self, cause: ::jet_evalhost::SourceEntryError) {
         self.failures.record(cause);
     }
 }
@@ -781,7 +781,7 @@ fn __jet_bootstrap_native_callback_transport(
             // Payloads are machine callback leases; without the machine they
             // can only be reported, never released.
             if !abandonment.is_empty() {
-                failures.record(::jet_jit::SourceDeoptError::Callback(
+                failures.record(::jet_evalhost::SourceEntryError::Callback(
                     "Source callback session was abandoned with unreleased callbacks or undelivered events".to_string(),
                 ));
             }
@@ -794,7 +794,7 @@ fn __jet_bootstrap_native_callback_transport(
 fn __jet_bootstrap_native_adapter_owner_from_context(
     context: ::std::sync::Arc<__JetBootstrapNativeCallbackContext>,
     callbacks: __JetBootstrapNativeCallbackSession,
-    resources: ::jet_jit::SourceResources::SourceResourceLease,
+    resources: ::jet_evalhost::SourceResources::SourceResourceLease,
     borrowed_session: bool,
 ) -> ::std::sync::Arc<__JetBootstrapNativeAdapterOwner> {
     ::std::sync::Arc::new(__JetBootstrapNativeAdapterOwner {
@@ -812,14 +812,14 @@ fn __jet_bootstrap_native_adapter_owner_from_context(
 
 fn __jet_bootstrap_native_adapter_owner_new(
     root: ::std::sync::Arc<__JetBootstrapNativeAdapterRoot>,
-    resources: ::jet_jit::SourceResources::SourceResourceLease,
-    cleanup: Option<::jet_jit::SourceResources::SourceResourceCleanupLease>,
+    resources: ::jet_evalhost::SourceResources::SourceResourceLease,
+    cleanup: Option<::jet_evalhost::SourceResources::SourceResourceCleanupLease>,
 ) -> Result<::std::sync::Arc<__JetBootstrapNativeAdapterOwner>, String> {
     let completion_scope = root.completion_scope.upgrade()
         .ok_or_else(|| "Source callback origin has no live completion receiver".to_string())?;
     let jobs = root.callback_jobs.upgrade()
         .ok_or_else(|| "Source callback origin has no live job owner".to_string())?;
-    let registration = ::jet_jit::SourceCallbacks::SourceCallbackJobSessionRegistration::start(jobs)?;
+    let registration = ::jet_evalhost::SourceCallbacks::SourceCallbackJobSessionRegistration::start(jobs)?;
     let failures = __JetBootstrapNativeCallbackFailures {
         execution: root.execution.clone(),
         resources: resources.downgrade(),
@@ -851,10 +851,10 @@ fn emit_native_callback_helpers(
     let eval_machine = symbols.type_symbol("JetEvalMachine")?;
     let callback_result = symbols.type_symbol("JetEvalCallbackResult")?;
     let span = symbols.type_symbol("Span")?;
-    let callback_session = "::jet_jit::SourceCallbacks::SourceCallbackSession";
-    let callback_event = "::jet_jit::SourceCallbacks::SourceCallbackEvent";
-    let callback_error = "::jet_jit::SourceCallbacks::SourceCallbackError";
-    let callback_reply_error = "::jet_jit::SourceCallbacks::SourceCallbackReplyError";
+    let callback_session = "::jet_evalhost::SourceCallbacks::SourceCallbackSession";
+    let callback_event = "::jet_evalhost::SourceCallbacks::SourceCallbackEvent";
+    let callback_error = "::jet_evalhost::SourceCallbacks::SourceCallbackError";
+    let callback_reply_error = "::jet_evalhost::SourceCallbacks::SourceCallbackReplyError";
     let invoke = symbols.call(
         "jet_eval_callback_invoke",
         &[("*machine", ""), ("lease", "lease"), ("args", "args"), ("span", "span.clone()")],
@@ -1026,7 +1026,7 @@ fn emit_native_binding_helpers(
             "numeric_unit_conversion_exact differs from the checked Float/String×4 -> ?Float ABI".to_string(),
         ));
     }
-    let source_resources = "::jet_jit::SourceResources";
+    let source_resources = "::jet_evalhost::SourceResources";
     let resource_identity = format!("{source_resources}::SourceNativeBindingIdentity");
     let source_native_binding = format!("{source_resources}::SourceNativeBinding");
 
@@ -1041,12 +1041,12 @@ fn emit_native_binding_helpers(
 
 
         fn __jet_bootstrap_native_numeric_callable_template(
-            bindings: &::std::sync::Arc<::jet_jit::SourceInterfaces::NativeInterfaceBindings>,
+            bindings: &::std::sync::Arc<::jet_evalhost::SourceInterfaces::NativeInterfaceBindings>,
             program: &::jet_foundation::MIR::MirProgram,
             artifact: ::jet_foundation::MIR::MirArtifactId,
         ) -> Result<(
-            ::jet_jit::SourceInterfaces::NativeInterfaceObject,
-            ::jet_jit::SourceInterfaces::NativeCallableIdentity,
+            ::jet_evalhost::SourceInterfaces::NativeInterfaceObject,
+            ::jet_evalhost::SourceInterfaces::NativeCallableIdentity,
         ), String> {
             let checked = crate::__jet_bootstrap_entry_field_type(
                 program,
@@ -1058,16 +1058,16 @@ fn emit_native_binding_helpers(
                 .clone();
             let execution = program.sealed_execution_identity(Some(artifact))
                 .map_err(|error| error.to_string())?;
-            let identity = ::jet_jit::SourceInterfaces::NativeCallableIdentity::checked_for_execution(
+            let identity = ::jet_evalhost::SourceInterfaces::NativeCallableIdentity::checked_for_execution(
                 execution,
                 artifact,
                 crate::__JET_BOOTSTRAP_NUMERIC_UNIT_CONVERSION_KEY,
                 callable_type.clone(),
             ).map_err(|error| error.to_string())?;
-            let signature = ::jet_jit::SourceInterfaces::NativeCallableSignature::checked(&callable_type)
+            let signature = ::jet_evalhost::SourceInterfaces::NativeCallableSignature::checked(&callable_type)
                 .map_err(|error| error.to_string())?;
             let object = bindings.create_object(()).map_err(|error| error.to_string())?;
-            let handler: ::jet_jit::SourceInterfaces::NativeCallableHandler =
+            let handler: ::jet_evalhost::SourceInterfaces::NativeCallableHandler =
                 ::std::sync::Arc::new(|_, call| crate::__jet_bootstrap_native_numeric_unit_conversion(call));
             bindings.bind_callable(object.clone(), identity.clone(), signature, handler)
                 .map_err(|error| error.to_string())?;
@@ -1076,10 +1076,10 @@ fn emit_native_binding_helpers(
 
 
         fn __jet_bootstrap_native_numeric_wrapper(
-            bindings: &::std::sync::Arc<::jet_jit::SourceInterfaces::NativeInterfaceBindings>,
+            bindings: &::std::sync::Arc<::jet_evalhost::SourceInterfaces::NativeInterfaceBindings>,
             program: &::std::sync::Arc<::jet_foundation::MIR::MirProgram>,
             artifact: ::jet_foundation::MIR::MirArtifactId,
-            identity: ::jet_jit::SourceInterfaces::NativeCallableIdentity,
+            identity: ::jet_evalhost::SourceInterfaces::NativeCallableIdentity,
             carrier: ::jet_foundation::MIR::MirNativeOwned,
         ) -> Result<__JetBootstrapNativeNumericWrapper, String> {
             let checked = crate::__jet_bootstrap_entry_field_type(
@@ -1091,7 +1091,7 @@ fn emit_native_binding_helpers(
                 .ok_or_else(|| "checked numeric callback field lost its Option leaf".to_string())?;
             let execution = program.sealed_execution_identity(Some(artifact))
                 .map_err(|error| error.to_string())?;
-            let expected = ::jet_jit::SourceInterfaces::NativeCallableIdentity::checked_for_execution(
+            let expected = ::jet_evalhost::SourceInterfaces::NativeCallableIdentity::checked_for_execution(
                 execution.clone(),
                 artifact,
                 crate::__JET_BOOTSTRAP_NUMERIC_UNIT_CONVERSION_KEY,
@@ -1100,7 +1100,7 @@ fn emit_native_binding_helpers(
             if identity != expected {
                 return Err("numeric callback identity is not the exact checked config callable".to_string());
             }
-            let signature = ::jet_jit::SourceInterfaces::NativeCallableSignature::checked(callable_type)
+            let signature = ::jet_evalhost::SourceInterfaces::NativeCallableSignature::checked(callable_type)
                 .map_err(|error| error.to_string())?;
             let active_bindings = bindings.clone();
             let active_program = program.clone();
@@ -1123,7 +1123,7 @@ fn emit_native_binding_helpers(
                                 ::jet_foundation::MIR::MirRuntimeValue::String(scale_den.clone()),
                             ];
                             let arguments = signature.parameters.iter().zip(values).enumerate()
-                                .map(|(index, (parameter, value))| ::jet_jit::SourceInterfaces::NativeInterfaceArgument {
+                                .map(|(index, (parameter, value))| ::jet_evalhost::SourceInterfaces::NativeInterfaceArgument {
                                     index,
                                     ty: parameter.ty.clone(),
                                     access: parameter.access,
@@ -1167,17 +1167,17 @@ fn emit_native_binding_helpers(
         fn __jet_bootstrap_native_numeric_association(
             wrapper: &__JetBootstrapNativeNumericWrapper,
         ) -> Result<(
-            ::jet_jit::SourceInterfaces::NativeCallableIdentity,
+            ::jet_evalhost::SourceInterfaces::NativeCallableIdentity,
             ::jet_foundation::MIR::MirNativeOwned,
         ), String> {
-            ::jet_jit::SourceInterfaces::native_callable_rc_association(wrapper)
+            ::jet_evalhost::SourceInterfaces::native_callable_rc_association(wrapper)
                 .map_err(|error| error.to_string())
         }
 
         fn __jet_bootstrap_native_numeric_registration(
             adapter: &__JetBootstrapNativeAdapter,
         ) -> Result<(
-            ::jet_jit::SourceInterfaces::NativeCallableIdentity,
+            ::jet_evalhost::SourceInterfaces::NativeCallableIdentity,
             ::jet_foundation::MIR::MirNativeOwned,
         ), String> {
             let rows = adapter.root.native_bindings.lock().unwrap_or_else(|error| error.into_inner());
@@ -1232,15 +1232,15 @@ fn emit_native_binding_helpers(
         // `artifact`, computed once by the owner of `program` (the image never
         // changes), so a per-session registration never re-digests the program.
         fn __jet_bootstrap_native_binding_registration(
-            resources: &::jet_jit::SourceResources::SourceResourceLease,
-            cleanup: Option<&::jet_jit::SourceResources::SourceResourceCleanupLease>,
+            resources: &::jet_evalhost::SourceResources::SourceResourceLease,
+            cleanup: Option<&::jet_evalhost::SourceResources::SourceResourceCleanupLease>,
             program: &::jet_foundation::MIR::MirProgram,
             artifact: ::jet_foundation::MIR::MirArtifactId,
             expected_execution: &::jet_foundation::MIR::MirExecutionIdentity,
             field_path: Vec<String>,
             binding: __JET_SOURCE_BINDING_IDENTITY__,
             identity: __JET_SOURCE_RESOURCE_IDENTITY__,
-            object: ::jet_jit::SourceInterfaces::NativeInterfaceObject,
+            object: ::jet_evalhost::SourceInterfaces::NativeInterfaceObject,
             dynamic: bool,
         ) -> Result<__JetBootstrapNativeBindingRegistration, String> {
             let host_field = __jet_bootstrap_native_binding_field_is(&field_path, "host_adapter");
@@ -1307,8 +1307,8 @@ fn emit_native_binding_helpers(
                 Some(cleanup) => cleanup.register_native_binding_root(physical)?,
                 None => resources.arena().register_native_binding_root(physical)?,
             };
-            if capability.handle != ::jet_jit::SourceResources::native_binding_handle_id()
-                || capability.kind != ::jet_jit::SourceResources::SourceResourceKind::NativeBinding
+            if capability.handle != ::jet_evalhost::SourceResources::native_binding_handle_id()
+                || capability.kind != ::jet_evalhost::SourceResources::SourceResourceKind::NativeBinding
             {
                 let _ = resources.arena().release_capability(&capability);
                 return Err("Source arena returned a mismatched NativeBinding capability".to_string());
@@ -1324,8 +1324,8 @@ fn emit_native_binding_helpers(
 
         fn __jet_bootstrap_native_adapter_new_scope(
             root: ::std::sync::Arc<__JetBootstrapNativeAdapterRoot>,
-            resources: ::jet_jit::SourceResources::SourceResourceLease,
-            cleanup: Option<::jet_jit::SourceResources::SourceResourceCleanupLease>,
+            resources: ::jet_evalhost::SourceResources::SourceResourceLease,
+            cleanup: Option<::jet_evalhost::SourceResources::SourceResourceCleanupLease>,
         ) -> Result<__JetBootstrapNativeAdapter, String> {
             let owner = __jet_bootstrap_native_adapter_owner_new(root, resources, cleanup)?;
             __jet_bootstrap_native_adapter_bind_owner(owner)
@@ -1480,8 +1480,8 @@ fn emit_native_binding_helpers(
                 if !value_type.same_checked_type(checked_type) {
                     continue;
                 }
-                if row.capability.handle != ::jet_jit::SourceResources::native_binding_handle_id()
-                    || row.capability.kind != ::jet_jit::SourceResources::SourceResourceKind::NativeBinding
+                if row.capability.handle != ::jet_evalhost::SourceResources::native_binding_handle_id()
+                    || row.capability.kind != ::jet_evalhost::SourceResources::SourceResourceKind::NativeBinding
                 {
                     return Err("native Source field carries a non-NativeBinding capability".to_string());
                 }
@@ -1913,7 +1913,7 @@ fn emit_native_binding_helpers(
                         .downcast_ref::<__JetBootstrapNativeNumericWrapper>()
                         .ok_or_else(|| "checked numeric callback field is not its exact typed wrapper".to_string())?;
                     let (identity, carrier) = __jet_bootstrap_native_numeric_association(wrapper)?;
-                    let expected = ::jet_jit::SourceInterfaces::NativeCallableIdentity::checked_for_execution(
+                    let expected = ::jet_evalhost::SourceInterfaces::NativeCallableIdentity::checked_for_execution(
                         self.adapter.root.execution.clone(),
                         self.adapter.root.artifact,
                         crate::__JET_BOOTSTRAP_NUMERIC_UNIT_CONVERSION_KEY,
@@ -1968,13 +1968,13 @@ fn emit_native_binding_helpers(
                  checked_type: &::jet_foundation::MIR::MirType,
                  program: &::jet_foundation::MIR::MirProgram,
                  physical_identity: usize,
-                 root: ::jet_jit::SourceSharedInterop::SourceSharedInterop,
+                 root: ::jet_evalhost::SourceSharedInterop::SourceSharedInterop,
                  payload_shape: &crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape,
              ) -> Result<Option<::jet_foundation::MIR::MirRuntimeValue>, String> {
                  let ::jet_foundation::MIR::MirTypeKind::Shared(payload_type) = checked_type.kind() else {
                      return Err("physical Shared encoder received a non-Shared checked type".to_string());
                  };
-                 let expected_type_id = ::jet_jit::SourceSharedInterop::checked_type_id_for_program(
+                 let expected_type_id = ::jet_evalhost::SourceSharedInterop::checked_type_id_for_program(
                      program,
                      checked_type,
                  );

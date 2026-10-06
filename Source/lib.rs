@@ -117,7 +117,6 @@ pub use RecordIndex::{
     RecordLink,
 };
 pub mod ReceiptStore;
-pub mod RunCache;
 pub use ReceiptStore::{Receipt, ReceiptClaim, ReceiptInput};
 pub mod BudgetProviders;
 pub mod BudgetStore;

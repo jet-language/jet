@@ -1527,24 +1527,6 @@ where
 {
     jet_test_run(expected_failure, run).map(|()| JetPropertyCaseResult::Accepted)
 }
-/// D-E3-1905: the test child is an AOT binary. The release profile is encoded
-/// at compile time so `jet test --release --trace-tiers` proves which binary
-/// was built, without claiming that the test harness used a JIT or interpreter.
-fn jet_test_trace_tier() {
-    if std::env::var_os("JET_TEST_TRACE_TIERS").is_none() {
-        return;
-    }
-    let line = if cfg!(jet_release) {
-        "tier aot profile=release"
-    } else {
-        "tier aot profile=default"
-    };
-    if std::env::var_os("JET_TEST_JSON").is_some() {
-        eprintln!("{line}");
-    } else {
-        println!("{line}");
-    }
-}
 /// Deterministic splitmix64 step, used by `jet test --shuffle` to reorder tests.
 /// Independent of `JetRng`/`PROP_PRELUDE` (that runtime is only emitted when the
 /// file has a property test) so shuffling never depends on the file's contents.

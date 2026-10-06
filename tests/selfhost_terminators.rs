@@ -7,7 +7,6 @@ use jet::Lexer::{self, RawTokenFact, StrTokPart, TerminatorDriver, TerminatorEve
 use jet_foundation::MIR::{MirArtifactBuildMode, MirArtifactKind, MirArtifactRequest, MirArtifactTarget, MirFunctionId, MirProgram};
 use std::fs;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -35,7 +34,7 @@ fn lower_bundle(bundle: &mut jet::AST::ProgramBundle, context: &str) -> MirProgr
     let errors = diagnostics.iter().filter(|row| row.severity == Severity::Error).collect::<Vec<_>>();
     assert!(errors.is_empty(), "{context}: checked terminator fixture: {errors:#?}");
     let request = MirArtifactRequest::new(
-        MirArtifactTarget::Cranelift, MirArtifactKind::NativeExecutable, MirArtifactBuildMode::Dev,
+        MirArtifactTarget::Interpreter, MirArtifactKind::NativeExecutable, MirArtifactBuildMode::Dev,
     );
     jet::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
         .unwrap_or_else(|error| panic!("{context}: canonical optimized terminator MIR: {error}"))
@@ -370,17 +369,9 @@ fn same_jet_pass_golden_executes_aot_default_interpreter_and_awaited_web() {
     let (source, expected) = golden_program();
     tir_support::assert_tiers_agree("selfhost_terminators_golden", &source, &expected);
     let (native_code, native_stdout, trace) =
-        tir_support::jit_run_traced("selfhost_terminators_golden", &source);
+        tir_support::default_run("selfhost_terminators_golden", &source);
     assert_eq!(native_code, 0, "traced default run failed:\n{trace}");
     assert_eq!(native_stdout, expected, "traced native pass changed the golden:\n{trace}");
-    assert!(trace.lines().any(|line| {
-        let mut columns = line.split_whitespace();
-        columns.next().is_some_and(|name| {
-            name == "terminator_events" || name.ends_with("::terminator_events")
-        }) && columns.next() == Some("tier1") && columns.next() == Some("native")
-    }), "the executed golden must include the Jet pass in tier1 native:\n{trace}");
-    assert!(!trace.contains("tier0 interp") && !trace.contains("deopt:"),
-        "the default-native witness must not use interpreter/deopt execution:\n{trace}");
     tir_support::assert_awaited_web_tier("selfhost_terminators_web", &source, &expected);
 }
 
@@ -502,7 +493,7 @@ fn jet_lexer_exports_parser_ready_tokens_spans_payloads_and_diagnostics() {
     let source = format!(
         "{pass_source}\nfn run() {{\n    result :: lex_payload(\"Name 500ms 1.25 true \\\"ok\\\" 'x'\", false)\n    print(result.tokens[0].kind)\n    print(result.tokens[0].payload.text)\n    print(result.tokens[1].kind)\n    print(result.tokens[1].payload.integer ?? -1)\n    print(result.tokens[1].payload.suffix)\n    print(result.tokens[2].kind)\n    print(result.tokens[2].payload.decimal ?? Float{{0}})\n    print(result.tokens[3].kind)\n    print(result.tokens[4].kind)\n    print(result.tokens[4].payload.decoded)\n    print(result.tokens[5].kind)\n    print(result.tokens[5].payload.decoded)\n    print(result.tokens[6].kind)\n    print(result.diagnostics.len())\n    interpolated :: lex_payload(\"\\\"a{{value + 1}}b\\\"\".bytes(), false)\n    print(interpolated.tokens[0].payload.string_parts.len())\n    print(interpolated.tokens[0].payload.string_parts[0].kind)\n    print(interpolated.tokens[0].payload.string_parts[1].kind)\n    print(interpolated.tokens[0].payload.string_parts[1].tokens.len())\n    print(interpolated.tokens[0].payload.string_parts[1].tokens[0].span.start)\n    print(interpolated.tokens[0].payload.string_parts[1].tokens[3].kind)\n    print(interpolated.tokens[0].payload.string_parts[1].tokens[3].span.start)\n    terminated :: lex(\"fn f() {{\\n    value\\n}}\".bytes())\n    print(terminated.tokens[6].kind)\n    print(terminated.tokens[6].span.start)\n    print(terminated.tokens[6].span.end)\n    bad :: lex_payload(\"§§\".bytes(), false)\n    print(bad.diagnostics.len())\n    print(bad.diagnostics[0].span.start)\n    print(bad.diagnostics[1].span.start)\n    prefix :: lex_payload(\"r\\\"bad\\\"\".bytes(), false)\n    print(prefix.diagnostics[0].code)\n    print(prefix.diagnostics[0].span.end)\n}}\n",
     );
-    let (code, stdout, stderr) = tir_support::jit_run("selfhost_parser_ready_lexer", &source);
+    let (code, stdout, stderr) = tir_support::default_run("selfhost_parser_ready_lexer", &source);
     assert_eq!(code, 0, "lexer interface run failed:\n{stderr}");
     assert_eq!(
         stdout,
@@ -531,7 +522,7 @@ fn run() {{
 }}
 "####,
     );
-    let (code, stdout, stderr) = tir_support::jit_run("selfhost_inline_foreign_lexer", &source);
+    let (code, stdout, stderr) = tir_support::default_run("selfhost_inline_foreign_lexer", &source);
     assert_eq!(code, 0, "inline foreign lexer run failed:\n{stderr}");
     assert_eq!(stdout, "int f() { return \"x\"; }\n1\n0\n1\nE0002\n19\nvalue\n12\n");
 }
@@ -553,7 +544,7 @@ fn run() {{
 }}
 "####,
     );
-    let (code, stdout, stderr) = tir_support::jit_run("selfhost_unicode_unit_suffixes", &source);
+    let (code, stdout, stderr) = tir_support::default_run("selfhost_unicode_unit_suffixes", &source);
     assert_eq!(code, 0, "unicode unit suffix lexer run failed:\n{stderr}");
     assert_eq!(stdout, "6\nmsμ\n6\n6\nusd٢\n13\n49\n");
 }
@@ -574,7 +565,7 @@ fn run() {{
 }}
 "####,
     );
-    let (code, stdout, stderr) = tir_support::jit_run("selfhost_integer_payload_overflow", &source);
+    let (code, stdout, stderr) = tir_support::default_run("selfhost_integer_payload_overflow", &source);
     assert_eq!(code, 0, "integer overflow lexer run failed:\n{stderr}");
     assert_eq!(stdout, "9223372036854775807\n0\n9223372036854775807\n0\n0\n49\n");
 }

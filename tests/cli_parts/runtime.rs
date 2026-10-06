@@ -367,7 +367,7 @@ build: {
             .args(["run", "--profile=debug", path.to_str().unwrap()])
             .current_dir(&dir)
             .env("JET_STORE_DIR", dir.join("store"))
-            .env("JET_RUN_CACHE_DIR", dir.join("run-cache"))
+            .env("JET_STORE_DIR", dir.join("run-cache"))
             .env("NO_COLOR", "1")
             .output()
             .unwrap()

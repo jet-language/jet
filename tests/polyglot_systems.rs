@@ -198,15 +198,6 @@ fn run() {
         "15\n17\n20\n42\n-1\n42\n-1\n"
     );
 
-    let mut bundle =
-        jet::Loader::load_entry_with_overlay(main.to_str().unwrap(), None, false).unwrap();
-    assert!(jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run).is_empty());
-    let boundary = common::cranelift_resident_safe_detail(&bundle);
-    assert!(
-        !boundary.is_empty() && boundary.to_ascii_lowercase().contains("foreign"),
-        "resident JIT must name its C++ boundary instead of silently falling back: {boundary}"
-    );
-
     let _ = fs::remove_dir_all(root);
 }
 
