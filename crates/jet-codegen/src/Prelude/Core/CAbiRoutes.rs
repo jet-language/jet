@@ -12090,29 +12090,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.encoding.hex.b2a_base64, core.encoding.base64.encode
-    #[no_mangle]
-    pub extern "C" fn jet_std_b64_encode(a0_0: *const u64, a0_1: i64) -> JetCString {
-        guard(|| handle(crate::jet_std_b64_encode(&list_in(a0_0, a0_1, |w| w as u8))))
-    }
-
-    /// core.encoding.base64.encodebytes
-    #[no_mangle]
-    pub extern "C" fn jet_std_b64_encodebytes(a0_0: *const u64, a0_1: i64) -> JetCString {
-        guard(|| handle(crate::jet_std_b64_encodebytes(&list_in(a0_0, a0_1, |w| w as u8))))
-    }
-
-    /// core.encoding.base64.pad
-    #[no_mangle]
-    pub extern "C" fn jet_std_b64_pad(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_std_b64_pad(unsafe { &*a0 })))
-    }
-
-    /// core.encoding.base64.unpad
-    #[no_mangle]
-    pub extern "C" fn jet_std_b64_unpad(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_std_b64_unpad(unsafe { &*a0 })))
-    }
 
     /// core.encoding.base64.decode_url
     #[no_mangle]
@@ -12123,17 +12100,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.encoding.base64.encode_url
-    #[no_mangle]
-    pub extern "C" fn jet_std_b64url_encode(a0_0: *const u64, a0_1: i64) -> JetCString {
-        guard(|| handle(crate::jet_std_b64url_encode(&list_in(a0_0, a0_1, |w| w as u8))))
-    }
-
-    /// core.encoding.base64.encode_url_padded
-    #[no_mangle]
-    pub extern "C" fn jet_std_b64url_encode_padded(a0_0: *const u64, a0_1: i64) -> JetCString {
-        guard(|| handle(crate::jet_std_b64url_encode_padded(&list_in(a0_0, a0_1, |w| w as u8))))
-    }
 
     /// core.encoding.base32.b32decode
     #[no_mangle]
@@ -12144,11 +12110,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.encoding.base32.b32encode
-    #[no_mangle]
-    pub extern "C" fn jet_std_base32_encode(a0_0: *const u64, a0_1: i64) -> JetCString {
-        guard(|| handle(crate::jet_std_base32_encode(&list_in(a0_0, a0_1, |w| w as u8))))
-    }
 
     /// core.encoding.base32.b32hexdecode
     #[no_mangle]
@@ -12159,11 +12120,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.encoding.base32.b32hexencode
-    #[no_mangle]
-    pub extern "C" fn jet_std_base32hex_encode(a0_0: *const u64, a0_1: i64) -> JetCString {
-        guard(|| handle(crate::jet_std_base32hex_encode(&list_in(a0_0, a0_1, |w| w as u8))))
-    }
 
     /// core.encoding.binary.calcsize
     #[no_mangle]
@@ -12345,17 +12301,6 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_std_clock_new(a0))))
     }
 
-    /// core.encoding.hex.crc_hqx
-    #[no_mangle]
-    pub extern "C" fn jet_std_crc_hqx(a0_0: *const u64, a0_1: i64, a1: i64) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_crc_hqx(&list_in(a0_0, a0_1, |w| w as u8), a1)))
-    }
-
-    /// core.encoding.hex.crc32
-    #[no_mangle]
-    pub extern "C" fn jet_std_crc32(a0_0: *const u64, a0_1: i64) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_crc32(&list_in(a0_0, a0_1, |w| w as u8))))
-    }
 
     /// core.crypto.random.bytes
     #[no_mangle]
@@ -12810,44 +12755,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.encoding.hex.decode
-    #[no_mangle]
-    pub extern "C" fn jet_std_hex_decode(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_std_hex_decode(unsafe { &*a0 }) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
-        })
-    }
-
-    /// core.encoding.hex.dump
-    #[no_mangle]
-    pub extern "C" fn jet_std_hex_dump(a0_0: *const u64, a0_1: i64) -> JetCString {
-        guard(|| handle(crate::jet_std_hex_dump(&list_in(a0_0, a0_1, |w| w as u8))))
-    }
-
-    /// core.encoding.hex.encode
-    #[no_mangle]
-    pub extern "C" fn jet_std_hex_encode(a0_0: *const u64, a0_1: i64) -> JetCString {
-        guard(|| handle(crate::jet_std_hex_encode(&list_in(a0_0, a0_1, |w| w as u8))))
-    }
-
-    /// core.encoding.hex.encode_sep
-    #[no_mangle]
-    pub extern "C" fn jet_std_hex_encode_sep(a0_0: *const u64, a0_1: i64, a1: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_std_hex_encode_sep(&list_in(a0_0, a0_1, |w| w as u8), unsafe { &*a1 })))
-    }
-
-    /// core.encoding.hex.encode_upper
-    #[no_mangle]
-    pub extern "C" fn jet_std_hex_encode_upper(a0_0: *const u64, a0_1: i64) -> JetCString {
-        guard(|| handle(crate::jet_std_hex_encode_upper(&list_in(a0_0, a0_1, |w| w as u8))))
-    }
-
-    /// core.encoding.hex.is_hex
-    #[no_mangle]
-    pub extern "C" fn jet_std_hex_is_hex(a0: JetCString) -> bool {
-        guard(|| crate::jet_std_hex_is_hex(unsafe { &*a0 }))
-    }
 
     /// core.process.argv
     #[no_mangle]

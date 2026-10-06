@@ -1548,53 +1548,6 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         // host kernels the Core wrappers forward to; the evaluator binds the
         // same Rust kernels AOT and the JIT call (EncodingBase.rs,
         // BaseEncodingDispatch.rs). ---
-        ("core.encoding.hex", "encode") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Str(hex_encode(bytes)))
-        }
-        ("core.encoding.hex", "encode_upper") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Str(encoding_base_kernel::jet_std_hex_encode_upper(&bytes)))
-        }
-        ("core.encoding.hex", "decode") => {
-            let s = as_string(one(0)?, span)?;
-            Ok(match hex_decode(s) {
-                Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
-            })
-        }
-        ("core.encoding.hex", "is_hex") => {
-            let s = as_string(one(0)?, span)?.to_string();
-            Ok(CtValue::Bool(encoding_base_kernel::jet_std_hex_is_hex(&s)))
-        }
-        ("core.encoding.hex", "crc_hqx") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            let value = as_int(one(1)?, span)?;
-            Ok(CtValue::Int(encoding_base_kernel::jet_std_crc_hqx(&bytes, value)))
-        }
-        ("core.encoding.hex", "crc32") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Int(encoding_base_kernel::jet_std_crc32(&bytes)))
-        }
-        ("core.encoding.hex", "encode_sep") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            let separator = as_string(one(1)?, span)?.to_string();
-            Ok(CtValue::Str(encoding_base_kernel::jet_std_hex_encode_sep(
-                &bytes, &separator,
-            )))
-        }
-        ("core.encoding.hex", "dump") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Str(encoding_base_kernel::jet_std_hex_dump(&bytes)))
-        }
-        ("core.encoding.hex", "b2a_base64") | ("core.encoding.base64", "encode") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Str(base64_encode(bytes)))
-        }
-        ("core.encoding.base64", "encodebytes") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Str(encoding_base_kernel::jet_std_b64_encodebytes(&bytes)))
-        }
         ("core.encoding.base64", "decode") | ("core.encoding.base64", "decodebytes")
         | ("core.encoding.hex", "a2b_base64") => {
             let s = as_string(one(0)?, span)?;
@@ -1614,26 +1567,6 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 },
             )
         }
-        ("core.encoding.base64", "encode_url") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Str(encoding_base_kernel::jet_std_b64url_encode(
-                &bytes,
-            )))
-        }
-        ("core.encoding.base64", "encode_url_padded") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Str(encoding_base_kernel::jet_std_b64url_encode_padded(
-                &bytes,
-            )))
-        }
-        ("core.encoding.base64", "pad") => {
-            let s = as_string(one(0)?, span)?.to_string();
-            Ok(CtValue::Str(encoding_base_kernel::jet_std_b64_pad(&s)))
-        }
-        ("core.encoding.base64", "unpad") => {
-            let s = as_string(one(0)?, span)?.to_string();
-            Ok(CtValue::Str(encoding_base_kernel::jet_std_b64_unpad(&s)))
-        }
         ("core.encoding.base64", "decode_url") => {
             let s = as_string(one(0)?, span)?;
             let allow_whitespace = args_bool(1, false)?;
@@ -1650,14 +1583,6 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                     Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
                 },
             )
-        }
-        ("core.encoding.base32", "encode" | "b32encode") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Str(base32_encode(&bytes)))
-        }
-        ("core.encoding.base32", "b32hexencode") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Str(encoding_base_kernel::jet_std_base32hex_encode(&bytes)))
         }
         ("core.encoding.base32", "decode" | "b32decode") => {
             let s = as_string(one(0)?, span)?;
