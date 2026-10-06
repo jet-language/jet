@@ -1482,7 +1482,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 59c9b89cd2cd32e430d4ce65139c69568d23064ad4147820d93bf86541105a6f
+// Source SHA-256: 1bc63f43a8c852325aaa2bd0a66445bca1cf82f23079b3c28dc8daa195c61813
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2127,7 +2127,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.math", "isclose", "jet_std_math_isclose", true, &[false, false, false, false], ) .with_jit_symbol("jet_jit_math_isclose") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new( "core.math", "dist", "jet_std_math_dist", true, &[false, false], ) .with_jit_symbol("jet_jit_math_dist") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new( "core.math", "checked_pow", "jet_std_math_checked_pow", true, &[false, false], ) .with_native_int_result(),
-    CoreCallRecord::new( "core.math", "int_pow", "jet_std_math_int_pow", true, &[false, false], ) .with_native_int_result(),
     CoreCallRecord::new("core.math", "asinh", "jet_std_math_asinh", true, &[false]) .with_jit_symbol("jet_jit_math_asinh") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "acosh", "jet_std_math_acosh", true, &[false]) .with_jit_symbol("jet_jit_math_acosh") .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "atanh", "jet_std_math_atanh", true, &[false]) .with_jit_symbol("jet_jit_math_atanh") .with_pure_route(CoreCallPureRoute::Math),
