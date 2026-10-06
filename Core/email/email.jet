@@ -159,6 +159,17 @@ pub fn limits() -> Limits Never! {
     }
 }
 
+#Test
+fn email_limits_contract() {
+    value :: limits()
+    assert(value.max_reply_line_bytes == 512)
+    assert(value.max_reply_lines == 100)
+    assert(value.max_capabilities == 100)
+    assert(value.max_recipients == 100)
+    assert(value.max_message_bytes == 33554432)
+    assert(value.max_auth_challenge_bytes == 4096)
+}
+
 pub fn smtp_auth(user: String, password: Secret) -> SMTPAuth Never! {
     SMTPAuth.Password{username: user, password: password}
 }
