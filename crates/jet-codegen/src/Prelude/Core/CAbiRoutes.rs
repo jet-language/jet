@@ -12395,11 +12395,8 @@ mod jet_c_abi_routes {
 
     /// core.sys.set
     #[no_mangle]
-    pub extern "C" fn jet_std_env_set(a0: JetCString, a1: JetCString, err: *mut *mut crate::jet_std::EnvError) -> i64 {
-        guard(|| match crate::jet_std_env_set(unsafe { &*a0 }, unsafe { &*a1 }) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
+    pub extern "C" fn jet_std_env_set(a0: JetCString, a1: JetCString) {
+        guard(|| crate::jet_std_env_set(unsafe { &*a0 }, unsafe { &*a1 }))
     }
 
     /// core.sys.unset
