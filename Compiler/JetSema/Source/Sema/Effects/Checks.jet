@@ -69,11 +69,11 @@ pub struct SemaEffectFxRegion {
     pub span: Span
 }
 
+// One checked module's effect inputs. The module's functions and call facts
+// are read in place from `modules[module_index]` (sema_effects_check_modules).
 pub struct SemaEffectModuleInput {
-    pub module_identity: String
-    pub functions: [TFunc]
+    pub module_index: Int
     pub sources: [SemaEffectFunctionSource]
-    pub call_facts: [SemaCallSiteFact]
     pub source_segments: [SemaSourceSegment]
     // D-EFF3 trait-method effect ceilings this module declares (E0742).
     pub trait_bounds: [SemaEffectTraitBound]{[SemaEffectTraitBound]{}}
@@ -87,15 +87,7 @@ pub struct SemaEffectTraitBound {
     pub bound: [String]
 }
 
-pub struct SemaEffectModuleResult {
-    pub module_identity: String
-    pub functions: [TFunc]
-    pub diagnostics: [Diagnostic]
-    pub complete: Bool
-}
-
 pub struct SemaEffectGraphResult {
-    pub modules: [SemaEffectModuleResult]
     pub diagnostics: [Diagnostic]
     pub complete: Bool
 }
@@ -676,12 +668,8 @@ fn sema_effect_node_index(node_by_key: [String:Int], key: String) -> Int? Never!
     node_by_key.get(key)
 }
 
-fn sema_effect_publish_diagnostics(all: &[Diagnostic], modules: &[SemaEffectModuleResult], module_index: Int, source_segments: [SemaSourceSegment], batch: [Diagnostic]) Never! {
-    loop diagnostic in batch {
-        located :: sema_diagnostic_with_source_location(^diagnostic, source_segments)
-        &all.push(located)
-        &modules[module_index].diagnostics.push(located)
-    }
+fn sema_effect_publish_diagnostics(all: &[Diagnostic], source_segments: [SemaSourceSegment], batch: [Diagnostic]) Never! {
+    loop diagnostic in batch -> &all.push(sema_diagnostic_with_source_location(^diagnostic, source_segments))
 }
 
 fn sema_effect_node_from_source(function: TFunc, source: SemaEffectFunctionSource?, module_index: Int, diagnostics: &[Diagnostic]) -> SemaEffectNode {
@@ -858,43 +846,59 @@ fn sema_effect_record_memory_open(nodes: &[SemaEffectNode], node_index: Int, spa
 
 // Indices store positions, not copied semantic facts. Caller buckets retain
 // source order, including equal-width interval ties; exact duplicates use the
-// first row just as the original search did.
+// first row just as the original search did. One index serves every module:
+// `module` selects the module whose call facts the walks read, so the
+// function-node map is shared rather than copied per module.
 struct SemaEffectCallIndex {
-    facts: [SemaCallSiteFact]
-    exact: [String:Int]
-    caller_slots: [String:Int]
-    callers: [[Int]]
+    module: Int
+    modules: [SemaEffectModuleCalls]
     node_by_key: [String:Int]
 }
 
-fn sema_effect_fact_key(caller_key: String, span: Span) -> String Never! {
-    "{caller_key.len()}:{caller_key}:{span.start}:{span.end}"
+struct SemaEffectModuleCalls {
+    facts: [SemaCallSiteFact]
+    caller_slots: [String:Int]
+    callers: [SemaEffectCallerFacts]
 }
 
-fn sema_effect_call_index(facts: [SemaCallSiteFact], node_by_key: [String:Int]) -> SemaEffectCallIndex Never! {
-    index := SemaEffectCallIndex{facts: facts, exact: [String:Int]{}, caller_slots: [String:Int]{}, callers: [[Int]]{}, node_by_key: node_by_key}
+// One caller's facts: every position in source order, and the positions of
+// each span start (`starts` maps a start to its row in `exact`).
+struct SemaEffectCallerFacts {
+    positions: [Int]
+    starts: [Int:Int]
+    exact: [[Int]]
+}
+
+fn sema_effect_module_calls(facts: [SemaCallSiteFact]) -> SemaEffectModuleCalls Never! {
+    calls := SemaEffectModuleCalls{facts: facts, caller_slots: [String:Int]{}, callers: [SemaEffectCallerFacts]{}}
     loop (position, fact) in facts {
-        key :: sema_effect_fact_key(fact.caller_key, fact.span)
-        if index.exact.get(key) == None -> index.exact[key] = position
-        slot := index.caller_slots.get(fact.caller_key) ?? -1
+        slot := calls.caller_slots.get(fact.caller_key) ?? -1
         if slot < 0 {
-            slot = index.callers.len()
-            index.caller_slots[fact.caller_key] = slot
-            &index.callers.push([Int]{})
+            slot = calls.callers.len()
+            calls.caller_slots[fact.caller_key] = slot
+            &calls.callers.push(SemaEffectCallerFacts{positions: [Int]{}, starts: [Int:Int]{}, exact: [[Int]]{}})
         }
-        &index.callers[slot].push(position)
+        &calls.callers[slot].positions.push(position)
+        row := calls.callers[slot].starts.get(fact.span.start) ?? -1
+        if row < 0 {
+            row = calls.callers[slot].exact.len()
+            calls.callers[slot].starts[fact.span.start] = row
+            &calls.callers[slot].exact.push([Int]{})
+        }
+        &calls.callers[slot].exact[row].push(position)
     }
-    index
+    calls
 }
 
 fn sema_effect_find_fact(index: SemaEffectCallIndex, caller_key: String, span: Span) -> SemaCallSiteFact? {
-    exact :: sema_effect_find_exact_fact(index, caller_key, span)
-    if exact != None -> return exact
-    slot :: index.caller_slots.get(caller_key) ?? return None
+    calls :: index.modules[index.module]
+    slot :: calls.caller_slots.get(caller_key) ?? return None
+    exact :: sema_effect_exact_position(calls.callers[slot], calls.facts, span)
+    if exact == .Val(position) -> return Val(calls.facts[position])
     best := SemaCallSiteFact?{None}
     best_width := 2147483647
-    loop position in index.callers[slot] {
-        fact :: index.facts[position]
+    loop position in calls.callers[slot].positions {
+        fact :: calls.facts[position]
         if sema_effect_span_contains(fact.span, span) || sema_effect_span_contains(span, fact.span) {
             width :: fact.span.end - fact.span.start
             if width < best_width {
@@ -907,8 +911,19 @@ fn sema_effect_find_fact(index: SemaEffectCallIndex, caller_key: String, span: S
 }
 
 fn sema_effect_find_exact_fact(index: SemaEffectCallIndex, caller_key: String, span: Span) -> SemaCallSiteFact? {
-    position :: index.exact.get(sema_effect_fact_key(caller_key, span)) ?? return None
-    Val(index.facts[position])
+    calls :: index.modules[index.module]
+    slot :: calls.caller_slots.get(caller_key) ?? return None
+    position :: sema_effect_exact_position(calls.callers[slot], calls.facts, span) ?? return None
+    Val(calls.facts[position])
+}
+
+// The first of the caller's facts whose span is exactly `span`.
+fn sema_effect_exact_position(caller: SemaEffectCallerFacts, facts: [SemaCallSiteFact], span: Span) -> Int? Never! {
+    row :: caller.starts.get(span.start) ?? return None
+    loop position in caller.exact[row] {
+        if facts[position].span.end == span.end -> return Val(position)
+    }
+    None
 }
 
 
@@ -1504,9 +1519,9 @@ fn sema_effect_trait_bound_diagnostic(bound: SemaEffectTraitBound, over: [String
 }
 
 // D-EFF3: every impl of a bounded trait method stays within the trait's row.
-fn sema_effect_check_trait_bounds(module_row: SemaEffectModuleInput, source_index: SemaEffectSourceIndex, nodes: [SemaEffectNode], node_by_key: [String:Int], solved: [[String]], diagnostics: &[Diagnostic]) {
+fn sema_effect_check_trait_bounds(module_row: SemaEffectModuleInput, functions: [TFunc], source_index: SemaEffectSourceIndex, nodes: [SemaEffectNode], node_by_key: [String:Int], solved: [[String]], diagnostics: &[Diagnostic]) {
     if module_row.trait_bounds.len() == 0 -> return
-    loop function in module_row.functions {
+    loop function in functions {
         if function.kind == {
             .TraitMethod(_, _, owner_type, trait_symbol, _) -> {
                 node_index :: sema_effect_node_index(node_by_key, function.key) ?? next
@@ -1836,36 +1851,44 @@ fn sema_effect_region_inferred(nodes: [SemaEffectNode], solved: [[String]], owne
     inferred
 }
 
-pub fn sema_effects_check_modules(inputs: ^[SemaEffectModuleInput]) -> SemaEffectGraphResult {
+// `modules` are the checked modules; each input names its module, whose
+// functions and call facts are read in place. The solved effect row of every
+// input module's function is stamped onto `modules` at the end.
+pub fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput]) -> SemaEffectGraphResult {
     diagnostics := [Diagnostic]{}
     nodes := [SemaEffectNode]{}
-    results := [SemaEffectModuleResult]{}
     source_indices :: loop module_index in 0..<inputs.len() -> sema_effect_source_index(inputs[module_index].sources)
     node_by_key := [String:Int]{}
-    loop module_index in 0..<inputs.len() -> &results.push(SemaEffectModuleResult{module_identity: inputs[module_index].module_identity, functions: [TFunc]{}, diagnostics: [Diagnostic]{}, complete: true})
     loop module_index in 0..<inputs.len() {
         module_row :: inputs[module_index]
-        loop function_index in 0..<module_row.functions.len() {
-            function :: module_row.functions[function_index]
+        loop function in modules[module_row.module_index].functions {
             source := sema_effect_source_for(function, module_row.sources, source_indices[module_index])
             function_diagnostics := [Diagnostic]{}
             if node_by_key.get(function.key) == None -> node_by_key[function.key] = nodes.len()
             &nodes.push(sema_effect_node_from_source(function, source, module_index, &function_diagnostics))
-            sema_effect_publish_diagnostics(&diagnostics, &results, module_index, module_row.source_segments, function_diagnostics)
+            sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, function_diagnostics)
         }
     }
-    fact_indices :: loop module_index in 0..<inputs.len() -> sema_effect_call_index(inputs[module_index].call_facts, node_by_key)
+    calls := SemaEffectCallIndex{module: 0, modules: [SemaEffectModuleCalls]{}, node_by_key: node_by_key}
+    loop module_row in inputs -> &calls.modules.push(sema_effect_module_calls(modules[module_row.module_index].call_facts))
+    any_unsafe :: loop node in nodes {
+        if node.is_unsafe -> break true
+    } ?? false
 
     loop module_index in 0..<inputs.len() {
         module_row :: inputs[module_index]
-        loop function_index in 0..<module_row.functions.len() {
-            function :: module_row.functions[function_index]
+        calls.module = module_index
+        loop function in modules[module_row.module_index].functions {
             node_index :: sema_effect_node_index(node_by_key, function.key) ?? next
             function_diagnostics := [Diagnostic]{}
-            sema_effect_collect_function(&nodes, node_index, function, fact_indices[module_index], &function_diagnostics)
-            audited := function.is_unsafe && (function.unsafe_gate.map((gate) -> gate.enabled) ?? false)
-            sema_effect_check_unsafe_statements_tir(&nodes, fact_indices[module_index], function.key, function.body, audited, &function_diagnostics)
-            sema_effect_publish_diagnostics(&diagnostics, &results, module_index, module_row.source_segments, function_diagnostics)
+            sema_effect_collect_function(&nodes, node_index, function, calls, &function_diagnostics)
+            // A call needs an audited region only when its callee is an
+            // `#Unsafe` function; with none in the graph the walk finds nothing.
+            if any_unsafe {
+                audited := function.is_unsafe && (function.unsafe_gate.map((gate) -> gate.enabled) ?? false)
+                sema_effect_check_unsafe_statements_tir(&nodes, calls, function.key, function.body, audited, &function_diagnostics)
+            }
+            sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, function_diagnostics)
         }
     }
 
@@ -1885,63 +1908,55 @@ pub fn sema_effects_check_modules(inputs: ^[SemaEffectModuleInput]) -> SemaEffec
             // Keep all diagnostics; the caller receives one complete graph
             // result instead of a partially updated function list.
         }
-        sema_effect_publish_diagnostics(&diagnostics, &results, nodes[node_index].module_index, inputs[nodes[node_index].module_index].source_segments, function_diagnostics)
+        sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[node_index].module_index].source_segments, function_diagnostics)
     }
     loop module_index in 0..<inputs.len() {
         module_row :: inputs[module_index]
         bound_diagnostics := [Diagnostic]{}
-        sema_effect_check_trait_bounds(module_row, source_indices[module_index], nodes, node_by_key, solved, &bound_diagnostics)
-        sema_effect_publish_diagnostics(&diagnostics, &results, module_index, module_row.source_segments, bound_diagnostics)
+        sema_effect_check_trait_bounds(module_row, modules[module_row.module_index].functions, source_indices[module_index], nodes, node_by_key, solved, &bound_diagnostics)
+        sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, bound_diagnostics)
     }
     loop node_index in 0..<nodes.len() {
         memory_diagnostics := [Diagnostic]{}
         sema_effect_check_memory_denials(nodes, node_by_key, node_index, &memory_diagnostics)
-        sema_effect_publish_diagnostics(&diagnostics, &results, nodes[node_index].module_index, inputs[nodes[node_index].module_index].source_segments, memory_diagnostics)
+        sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[node_index].module_index].source_segments, memory_diagnostics)
     }
     loop module_index in 0..<inputs.len() {
         module_row :: inputs[module_index]
+        calls.module = module_index
         region_diagnostics := [Diagnostic]{}
-        loop function_index in 0..<module_row.functions.len() {
-            function :: module_row.functions[function_index]
+        loop function in modules[module_row.module_index].functions {
             source :: sema_effect_source_for(function, module_row.sources, source_indices[module_index]) ?? next
             if source.fx_regions.len() == 0 -> next
             node_index :: sema_effect_node_index(node_by_key, function.key) ?? next
             loop region in source.fx_regions {
-                inferred :: sema_effect_region_inferred(nodes, solved, node_index, function, region, fact_indices[module_index])
+                inferred :: sema_effect_region_inferred(nodes, solved, node_index, function, region, calls)
                 over :: sema_effect_uncovered(inferred, region.caps)
                 if over.len() > 0 -> &region_diagnostics.push(sema_effect_scope_diagnostic("FX", over, region.caps, region.caps_span))
             }
         }
-        sema_effect_publish_diagnostics(&diagnostics, &results, module_index, module_row.source_segments, region_diagnostics)
+        sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, region_diagnostics)
     }
-    loop module_index in 0..<inputs.len() {
-        module_row :: inputs[module_index]
+    loop module_row in inputs {
         discarded := [Diagnostic]{}
-        loop fact in module_row.call_facts {
+        loop fact in modules[module_row.module_index].call_facts {
             if !fact.discarded -> next
             callee :: fact.callee ?? next
             node_index :: sema_effect_node_index(node_by_key, callee.key) ?? next
             if !sema_effect_row_has_no_outcome(nodes[node_index], solved[node_index]) -> next
             &discarded.push(sema_effect_discarded_result_diagnostic(nodes[node_index], fact.span))
         }
-        sema_effect_publish_diagnostics(&diagnostics, &results, module_index, module_row.source_segments, discarded)
+        sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, discarded)
     }
-    // All source reads are finished. Transfer each owned list into its result
-    // before stamping solved effects; neither side needs a second list.
-    loop module_index in 0..<results.len() {
-        results[module_index].functions = ^inputs[module_index].functions
-        loop function_index in 0..<results[module_index].functions.len() {
-            node_index :: sema_effect_node_index(node_by_key, results[module_index].functions[function_index].key) ?? next
-            results[module_index].functions[function_index].effects = sema_effect_tfacts(nodes[node_index], solved[node_index])
+    // All source reads are finished: stamp the solved rows in place.
+    loop module_row in inputs {
+        target :: module_row.module_index
+        loop function_index in 0..<modules[target].functions.len() {
+            node_index :: sema_effect_node_index(node_by_key, modules[target].functions[function_index].key) ?? next
+            modules[target].functions[function_index].effects = sema_effect_tfacts(nodes[node_index], solved[node_index])
         }
-        results[module_index].complete = !sema_has_error_since(diagnostics, 0)
     }
-    complete :: !sema_has_error_since(diagnostics, 0)
-    SemaEffectGraphResult{modules: results, diagnostics: diagnostics, complete: complete}
-}
-
-pub fn sema_effects_check_module(input: SemaEffectModuleInput) -> SemaEffectGraphResult {
-    sema_effects_check_modules([SemaEffectModuleInput]{input})
+    SemaEffectGraphResult{diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0)}
 }
 
 pub fn sema_effect_check_unsafe_statements(statements: [Stmt], diagnostics: &[Diagnostic]) -> Bool {
