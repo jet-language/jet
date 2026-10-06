@@ -686,9 +686,7 @@ fn jet_rust_prefix_prelude_parts(state: &JetRustPrefixState, out: &[String], dev
     &out.push(jet_rust_prefix_cut(&state, jet_rust_prefix_prelude(&state, "Devtools.rs"), "// JET_HOST_DEVTOOLS_NATIVE_BEGIN", "// JET_HOST_DEVTOOLS_NATIVE_END"))
     &out.push(jet_rust_prefix_foundation(&state, "DevtoolsNative.rs"))
     &out.push(jet_rust_prefix_raw_const(&state, "DEVTOOLS_NATIVE_WRAPPERS_PRELUDE"))
-    loop file in [String]{"FaultInjection.rs", "Core/Keep.rs", "JobQueueTypes.rs", "Job.rs", "Core/Option.rs", "Core/FixedList.rs", "Core/Columns.rs", "Core/ColumnList.rs", "Core/UnicodeString.rs", "Core/Ascii.rs", "Core/ProcessArgs.rs", "Core/StringConcat.rs", "Core/ViewCopy.rs", "Core/Loadable.rs", "Core/Values.rs", "Core/TextValues.rs", "Core/RangeBounds.rs", "Core/InlineRange.rs", "Core/Disjoint.rs", "Core/ExpiringSecret.rs", "Core/SetAlgebra.rs", "Core/Duration.rs", "Core/Measurement.rs", "Core/TimeMonotonic.rs", "Core/Time.rs", "Core/Sketch.rs", "Core/Contracts.rs", "Core/MapKey.rs", "Core/RuntimeStack.rs", "Core/Authority.rs", "Core/FixedArithmetic.rs", "Core/FloatOrdering.rs", "Core/ParallelKernel.rs"} {
-        &out.push(jet_rust_prefix_prelude(&state, file))
-    }
+    jet_rust_prefix_push_files(&state, &out, [String]{"FaultInjection.rs", "Core/Keep.rs", "JobQueueTypes.rs", "Job.rs", "Core/Option.rs", "Core/FixedList.rs", "Core/Columns.rs", "Core/ColumnList.rs", "Core/UnicodeString.rs", "Core/Ascii.rs", "Core/ProcessArgs.rs", "Core/StringConcat.rs", "Core/ViewCopy.rs", "Core/Loadable.rs", "Core/Values.rs", "Core/TextValues.rs", "Core/RangeBounds.rs", "Core/InlineRange.rs", "Core/Disjoint.rs", "Core/ExpiringSecret.rs", "Core/SetAlgebra.rs", "Core/Duration.rs", "Core/Measurement.rs", "Core/TimeMonotonic.rs", "Core/Time.rs", "Core/Sketch.rs", "Core/Contracts.rs", "Core/MapKey.rs", "Core/RuntimeStack.rs", "Core/Authority.rs", "Core/FixedArithmetic.rs", "Core/FloatOrdering.rs", "Core/ParallelKernel.rs"})
     // RESOURCE_FACTS_PRELUDE
     &out.push("\n#[allow(non_snake_case, unused_imports)]\nmod ResourceSchedule {{\n")
     &out.push(jet_rust_prefix_foundation(&state, "ResourceSchedule.rs"))
@@ -696,9 +694,7 @@ fn jet_rust_prefix_prelude_parts(state: &JetRustPrefixState, out: &[String], dev
     &out.push(jet_rust_prefix_foundation(&state, "FactsDerivation.rs"))
     &out.push("\n}}\n")
     &out.push(jet_rust_prefix_foundation(&state, "Evidence.rs"))
-    loop file in [String]{"Core/TestEvidence.rs", "Core.rs", "Core/ViewAccess.rs", "Core/Power.rs", "Core/Division.rs", "TypedText.rs", "Core/Progress.rs", "Core/Bytes.rs", "Core/FSIgnore.rs", "Core/FSWalk.rs", "CoreLib/JetStd/Iter.rs", "Core/CollectionFailure.rs", "Core/SortKernel.rs"} {
-        &out.push(jet_rust_prefix_prelude(&state, file))
-    }
+    jet_rust_prefix_push_files(&state, &out, [String]{"Core/TestEvidence.rs", "Core.rs", "Core/ViewAccess.rs", "Core/Power.rs", "Core/Division.rs", "TypedText.rs", "Core/Progress.rs", "Core/Bytes.rs", "Core/FSIgnore.rs", "Core/FSWalk.rs", "CoreLib/JetStd/Iter.rs", "Core/CollectionFailure.rs", "Core/SortKernel.rs"})
     &out.push(jet_rust_prefix_collections(&state))
     &out.push(jet_rust_prefix_prelude(&state, "Memo.rs"))
     &out.push(jet_rust_prefix_prelude(&state, "SharedProtocol.rs"))
@@ -731,9 +727,11 @@ fn jet_rust_prefix_template_holes(templates: [String]) -> [String] Never! {
             close :: jet_rust_prefix_find(bytes, "}}".bytes(), open + 1)
             if close < 0 -> break
             plain := close > open + 1
-            loop index in open + 1..<close {
+            index := open + 1
+            loop index < close {
                 code :: Int.from_u8(bytes[index])
                 if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95) -> plain = false
+                index += 1
             }
             hole :: jet_rust_prefix_slice(bytes, open + 1, close)
             if plain {
@@ -844,14 +842,17 @@ fn jet_rust_prefix_ffi_reporter(out: &[String], ffi_crate: String?) Never! {
 // mod.rs `push_cached_runtime_traits`.
 fn jet_rust_prefix_runtime_traits(out: &[String]) Never! {
     &out.push("pub trait __jet_Display {{\n    fn display(&self) -> String;\n}}\n\npub trait __jet_Equatable: Sized {{ fn equal(&self, rhs: &Self) -> bool; }}\n")
-    loop ty in [String]{"i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "char", "String"} {
+    equatable :: [String]{"i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "char", "String"}
+    loop ty in equatable {
         &out.push("impl __jet_Equatable for {ty} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n")
     }
     &out.push("\n#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]\npub enum __jet_Ordering {{ __jet_Less, __jet_Equal, __jet_Greater }}\n\n#[derive(Clone, Copy, Debug, PartialEq, Eq)]\npub enum __jet_RemoveBy {{ __jet_Val, __jet_Slot }}\n\npub trait __jet_Comparable: Sized {{ fn compare(&self, rhs: &Self) -> __jet_Ordering; }}\n")
-    loop ty in [String]{"i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "bool", "char", "String"} {
+    comparable :: [String]{"i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "bool", "char", "String"}
+    loop ty in comparable {
         &out.push("impl __jet_Comparable for {ty} {{ fn compare(&self, rhs: &Self) -> __jet_Ordering {{ if self < rhs {{ __jet_Ordering::__jet_Less }} else if self > rhs {{ __jet_Ordering::__jet_Greater }} else {{ __jet_Ordering::__jet_Equal }} }} }}\n")
     }
-    loop pair in [String]{"Add add", "Sub sub", "Mul mul", "Div div"} {
+    arithmetic :: [String]{"Add add", "Sub sub", "Mul mul", "Div div"}
+    loop pair in arithmetic {
         words :: pair.split(" ").to_list()
         &out.push("pub trait __jet_{words[0]}<Rhs = Self>: Sized {{ type Output; fn {words[1]}(&self, rhs: &Rhs) -> Self::Output; }}\n")
     }
@@ -920,9 +921,7 @@ fn jet_rust_prefix_vetted(open: String, audit: String, source: String, close: St
 // mod.rs `CORELIB_KERNEL_PARTS`, with the mapped-file and shared-route gates.
 fn jet_rust_prefix_kernel_parts(state: &JetRustPrefixState, out: &[String], mapped_file: Bool, shared: Bool) Never! {
     parts := [String]{}
-    loop file in [String]{"CoreLib/JetStd/Open.rs", "CoreLib/JetStd/Regex.rs", "TaskGroup.rs", "CoreLib/JetStd/Mime.rs", "CoreLib/JetStd/UrlMime.rs", "CoreLib/JetStd/JSONCodec.rs", "CoreLib/JetStd/EncodingTypes.rs"} {
-        &parts.push(jet_rust_prefix_prelude(&state, file))
-    }
+    jet_rust_prefix_push_files(&state, &parts, [String]{"CoreLib/JetStd/Open.rs", "CoreLib/JetStd/Regex.rs", "TaskGroup.rs", "CoreLib/JetStd/Mime.rs", "CoreLib/JetStd/UrlMime.rs", "CoreLib/JetStd/JSONCodec.rs", "CoreLib/JetStd/EncodingTypes.rs"})
     &parts.push(jet_rust_prefix_vetted("jet_std_common_types", "// AUDIT: D-INTBIG1 keeps the exact-Int raw ownership adapters and the\n// platform terminal handle seam inside this compiler-owned source.\n", jet_rust_prefix_prelude(&state, "CoreLib/JetStd/CommonTypes.rs"), "jet_std_common_types"))
     if mapped_file -> &parts.push(jet_rust_prefix_prelude(&state, "CoreLib/JetStd/MappedFile.rs"))
     &parts.push(jet_rust_prefix_vetted("jet_std_xml_options", "// AUDIT: D-ENC-XML-SURFACE1 keeps XML stream limits and policies shared\n// between the AOT Prelude and the resident JIT stream host.\n", jet_rust_prefix_prelude(&state, "CoreLib/JetStd/XmlOptions.rs"), "jet_std_xml_options"))
@@ -931,9 +930,7 @@ fn jet_rust_prefix_kernel_parts(state: &JetRustPrefixState, out: &[String], mapp
     &parts.push("\npub mod plugin_wire {{\n")
     &parts.push(jet_rust_prefix_foundation(&state, "PluginWire.rs"))
     &parts.push("\n}}\n")
-    loop file in [String]{"CoreLib/JetStd/DBPluginWire.rs", "CoreLib/JetStd/WireOrder.rs", "CoreLib/JetStd/DataTreeKind.rs", "Core/FieldError.rs"} {
-        &parts.push(jet_rust_prefix_prelude(&state, file))
-    }
+    jet_rust_prefix_push_files(&state, &parts, [String]{"CoreLib/JetStd/DBPluginWire.rs", "CoreLib/JetStd/WireOrder.rs", "CoreLib/JetStd/DataTreeKind.rs", "Core/FieldError.rs"})
     &parts.push("\npub use crate::DataTree::DataTree;\n")
     &parts.push(jet_rust_prefix_prelude(&state, "CoreLib/JetStd/DataTree.rs"))
     &parts.push(jet_rust_prefix_prelude(&state, "CoreLib/JetStd/TestingComparison.rs"))
@@ -946,9 +943,7 @@ fn jet_rust_prefix_kernel_parts(state: &JetRustPrefixState, out: &[String], mapp
     &parts.push(jet_rust_prefix_vetted("jet_std_reactive_event_watch", "// AUDIT: D-REACT1/D-DATARACE1 keep re-entrant staged values and synchronized\n// signal storage behind this compiler-owned, opt-in reactive source.\n", jet_rust_prefix_prelude(&state, "CoreLib/JetStd/ReactiveEventWatch.rs"), "jet_std_reactive_event_watch"))
     &parts.push(jet_rust_prefix_vetted("jet_std_ffi_callbacks", "// AUDIT: D-FFI-CALLBACK2 keeps callback registration, in-flight accounting,\n// native shutdown acknowledgement, and release in one managed source.\n", jet_rust_prefix_prelude(&state, "CoreLib/JetStd/FfiCallbacks.rs"), "jet_std_ffi_callbacks"))
     &parts.push("\nuse crate::jet_encoding_json::quote_json;\n")
-    loop file in [String]{"CoreLib/JetStd/JSONDataTree.rs", "CoreLib/JetStd/TOML.rs", "CoreLib/JetStd/YAML.rs"} {
-        &parts.push(jet_rust_prefix_prelude(&state, file))
-    }
+    jet_rust_prefix_push_files(&state, &parts, [String]{"CoreLib/JetStd/JSONDataTree.rs", "CoreLib/JetStd/TOML.rs", "CoreLib/JetStd/YAML.rs"})
     if shared -> &parts.push(jet_rust_prefix_prelude(&state, "CoreLib/Top/SharedRoutes.rs"))
     // Host crates include UrlMime.rs directly; AOT already embeds the MIME kernel.
     mime :: "    include!(\"Mime.rs\");\n\n"
@@ -989,25 +984,17 @@ fn jet_rust_prefix_corelib_body(state: &JetRustPrefixState, out: &[String], mapp
     &out.push("\nmod terminal_default {{\n{jet_rust_prefix_prelude(&state, "TerminalDefault.rs")}\n}}\n")
     if arrow -> jet_rust_prefix_closure(&state, &out, [String]{"arrow_file_reader"})
     &out.push("// jet:raylib-begin\n")
-    loop file in [String]{"Core/Raylib.rs", "CoreLib/Top/HandlesRaylib.rs", "CoreLib/Top/DbPool.rs", "CoreLib/Top/UnicodeTables.rs", "Core/Path.rs", "CoreLib/Top/Text.rs", "Core/Codec.rs"} {
-        &out.push(jet_rust_prefix_prelude(&state, file))
-    }
+    jet_rust_prefix_push_files(&state, &out, [String]{"Core/Raylib.rs", "CoreLib/Top/HandlesRaylib.rs", "CoreLib/Top/DbPool.rs", "CoreLib/Top/UnicodeTables.rs", "Core/Path.rs", "CoreLib/Top/Text.rs", "Core/Codec.rs"})
     &out.push(jet_rust_prefix_flat_body(jet_rust_prefix_prelude(&state, "CoreLib/Top/EncodingTraits.rs")))
-    loop file in [String]{"Core/ColumnListCodec.rs", "CoreLib/Top/EncodingHostileIo.rs", "CoreLib/Top/EncodingStream.rs", "Core/EncodingError.rs", "Core/EncodingBase.rs", "CoreLib/Top/EncodingCodecs.rs", "CoreLib/Top/SHA256Raw.rs", "CoreLib/Top/SHAFamily.rs"} {
-        &out.push(jet_rust_prefix_prelude(&state, file))
-    }
+    jet_rust_prefix_push_files(&state, &out, [String]{"Core/ColumnListCodec.rs", "CoreLib/Top/EncodingHostileIo.rs", "CoreLib/Top/EncodingStream.rs", "Core/EncodingError.rs", "Core/EncodingBase.rs", "CoreLib/Top/EncodingCodecs.rs", "CoreLib/Top/SHA256Raw.rs", "CoreLib/Top/SHAFamily.rs"})
     &out.push("fn jet_log_write_line(line: &str) {{ eprintln!(\"{{}}\", line); }}\n")
     &out.push("fn jet_log_process_exit(code: i64) {{ std::process::exit(code as i32); }}\n")
-    loop file in [String]{"Core/LogState.rs", "CoreLib/Top/Log.rs", "CoreLib/Top/RingCsvLogTimeCrypto.rs"} {
-        &out.push(jet_rust_prefix_prelude(&state, file))
-    }
+    jet_rust_prefix_push_files(&state, &out, [String]{"Core/LogState.rs", "CoreLib/Top/Log.rs", "CoreLib/Top/RingCsvLogTimeCrypto.rs"})
     &out.push("// JET_VETTED_UNSAFE_BEGIN: jet_crypto_entropy\n")
     &out.push(jet_rust_prefix_prelude(&state, "CoreLib/Top/CryptoEntropy.rs"))
     &out.push("// JET_VETTED_UNSAFE_END: jet_crypto_entropy\n")
     &out.push("use jet_crypto_entropy::{{jet_crypto_entropy_fill, JetCryptoEntropyError}};\n")
-    loop file in [String]{"CoreLib/Top/DNSResolverPolicy.rs", "Deadline.rs", "WorkflowWait.rs", "CoreLib/Top/TimeSleep.rs", "CoreLib/Top/WorkflowSleep.rs", "Core/NetPure.rs", "Core/NetError.rs", "CoreLib/Top/NetHTTP.rs", "CoreLib/Top/Solver.rs", "Core/SeededRandom.rs", "Core/StringBytes.rs", "Core/TimeInstant.rs", "CoreLib/Top/MathRandomTime.rs", "CoreLib/Top/FakeData.rs"} {
-        &out.push(jet_rust_prefix_prelude(&state, file))
-    }
+    jet_rust_prefix_push_files(&state, &out, [String]{"CoreLib/Top/DNSResolverPolicy.rs", "Deadline.rs", "WorkflowWait.rs", "CoreLib/Top/TimeSleep.rs", "CoreLib/Top/WorkflowSleep.rs", "Core/NetPure.rs", "Core/NetError.rs", "CoreLib/Top/NetHTTP.rs", "CoreLib/Top/Solver.rs", "Core/SeededRandom.rs", "Core/StringBytes.rs", "Core/TimeInstant.rs", "CoreLib/Top/MathRandomTime.rs", "CoreLib/Top/FakeData.rs"})
     // MIR closure emission always uses the typed testing-history carriers.
     &out.push("\nmod jet_testing_comparison_foundation {{\n{jet_rust_prefix_foundation(&state, "TestingComparison.rs")}\n}}\n")
     &out.push("\n#[allow(non_snake_case)]\nmod TestingComparison {{ pub use crate::jet_testing_comparison_foundation::*; }}\n#[allow(non_snake_case)]\nmod JSON {{\n")
