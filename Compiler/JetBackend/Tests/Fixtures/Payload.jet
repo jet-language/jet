@@ -225,21 +225,33 @@ fn fx_opaque_enum_rejected(name: String, operation: Int) -> MIRProgram Never! {
     fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{definition})
 }
 
+// A mismatch prints what the lowering produced instead.
 fn fx_opaque_enum_rejection_check(name: String, operation: Int) -> Bool Never! {
     program :: fx_opaque_enum_rejected(name, operation)
-    if lower_native_enum_layout(program, fx_named(name)) -> return false
+    if lower_native_enum_layout(program, fx_named(name)) {
+        print("opaque-enum {name}/{operation}: has a native enum layout")
+        return false
+    }
     lowered :: lir_lower_entry(program, mir_function_id("run"))
+    expected :: "opaque runtime enum {mir_type_display_name(fx_named(name))} has no native enum layout"
     found := false
     loop issue in lowered.issues {
-        if issue.message == "opaque runtime enum {name} has no native enum layout" -> found = true
+        if issue.message == expected -> found = true
     }
-    if !found -> return false
+    if !found {
+        loop issue in lowered.issues -> print("opaque-enum {name}/{operation} issue: {issue.message}")
+        print("opaque-enum {name}/{operation}: expected issue: {expected}")
+        return false
+    }
     loop function in lowered.lir.functions {
         if function.name != "run" -> next
         loop block in function.blocks {
             loop instruction in block.insts {
                 if instruction == .Load(_, _, offset) {
-                    if offset == 0 -> return false
+                    if offset == 0 {
+                        print("opaque-enum {name}/{operation}: reads the opaque value at offset 0")
+                        return false
+                    }
                 }
             }
         }
@@ -251,10 +263,75 @@ fn fx_opaque_enum_rejection_checks() -> Bool Never! {
     // A source-owned enum with the same spelling still has its native layout.
     local := fx_opaque_enum_rejected("Closed", 0)
     local.types[0].key = "Closed"
-    if !lower_native_enum_layout(local, fx_named("Closed")) -> return false
+    if !lower_native_enum_layout(local, fx_named("Closed")) {
+        print("opaque-enum: a source-owned Closed has no native enum layout")
+        return false
+    }
     if !fx_opaque_enum_rejection_check("Closed", 0) -> return false
     if !fx_opaque_enum_rejection_check("Closed", 1) -> return false
-    if !fx_opaque_enum_rejection_check("TaskFailure", 2) -> return false
-    print("opaque-enum: rejection checks passed (Closed ZST, construction, TaskFailure payload)")
+    if !fx_record_enum_projection_check() -> return false
+    if !fx_raw_pointer_lowering_check() -> return false
+    print("opaque-enum: rejection checks passed (Closed ZST, construction); TaskFailure record payload projects natively; raw pointer lowering lints clean")
     true
+}
+
+// TaskFailure has a Core record schema (Records.jet): the runtime value is
+// rebuilt in its native layout at the route boundary, so a payload projection
+// reads the native box and is not rejected as an opaque runtime enum. A
+// mismatch prints the reason.
+fn fx_record_enum_projection_check() -> Bool Never! {
+    program :: fx_opaque_enum_rejected("TaskFailure", 2)
+    ty :: fx_named("TaskFailure")
+    if lower_record_schema(program, ty) == None {
+        print("record projection: TaskFailure has no record schema")
+        return false
+    }
+    if !lower_native_enum_layout(program, ty) {
+        print("record projection: TaskFailure has no native enum layout")
+        return false
+    }
+    lowered :: lir_lower_entry(program, mir_function_id("run"))
+    loop issue in lowered.issues {
+        if issue.message.contains("opaque runtime enum") {
+            print("record projection issue: {issue.message}")
+            return false
+        }
+    }
+    true
+}
+
+// `cell :: I64{1337}; p :: *cell; print(p.*)`: the raw-addressed local is a
+// cell, the Ptr word becomes a typed pointer only through jet_rt_sentry_read,
+// and the whole module lowers and lints with no issue. The pointee is a
+// physically trivial I64: a bitwise Ptr read of an owning value (exact Int,
+// String) is rejected, as the sentry read is a plain ptr::read.
+fn fx_raw_pointer_lowering_check() -> Bool Never! {
+    ptr_ty :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Ptr"), args: [MIRType]{fx_i64()}})
+    b := fx_builder()
+    cell :: fx_local(&b, "cell", fx_i64(), mir_copy_ownership())
+    value :: fx_i64_const(&b, 1337)
+    fx_do(&b, MIROperation.WritePlace{place: cell, value: value})
+    pointer :: fx_copy(&b, ptr_ty, MIROperation.RawAddressOf{place: cell})
+    read :: fx_copy(&b, fx_i64(), MIROperation.Deref{value: pointer})
+    fx_print(&b, read)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    program :: fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    lowered :: lir_lower_entry(program, mir_function_id("run"))
+    if lowered.issues.len() > 0 {
+        loop issue in lowered.issues -> print("raw pointer issue: {issue.message}")
+        return false
+    }
+    loop function in lowered.lir.functions {
+        loop block in function.blocks {
+            loop instruction in block.insts {
+                if instruction == .Call(_, _, callee, _) {
+                    if callee == .Runtime(symbol) {
+                        if symbol == "jet_rt_sentry_read" -> return true
+                    }
+                }
+            }
+        }
+    }
+    print("raw pointer: no jet_rt_sentry_read call in the lowered module")
+    false
 }

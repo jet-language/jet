@@ -181,9 +181,35 @@ fn jet_cli_host_triple(arch: String, os: String) -> String Never! {
     "{arch}-unknown-{os}"
 }
 
-// The memory free for new work, from Linux `/proc/meminfo` `MemAvailable`
-// (kB), in bytes; `None` where the host cannot tell.
+// The memory free for new work, in bytes: Linux `/proc/meminfo`
+// `MemAvailable` (kB), lowered to the tightest cgroup v2 headroom
+// (`memory.max - memory.current`) of this process's cgroup and its
+// ancestors, so a capped run never admits threads its cap cannot hold;
+// `None` where the host cannot tell.
 fn jet_cli_memory_available() -[FS]> Int? Never! {
+    available := jet_cli_meminfo_available() ?? return None
+    membership :: cli_files.read("/proc/self/cgroup") ?? return Val(available)
+    path := ""
+    loop line in membership.lines() {
+        if line.starts_with("0::") -> path = line.slice(3..<line.len())
+    }
+    loop {
+        directory :: "/sys/fs/cgroup{path}"
+        limit :: jet_cli_cgroup_bytes("{directory}/memory.max")
+        used :: jet_cli_cgroup_bytes("{directory}/memory.current")
+        if limit == .Val(max) && used == .Val(current) {
+            headroom :: if max > current -> max - current else -> 0
+            if headroom < available -> available = headroom
+        }
+        if path == "" || path == "/" -> break
+        cut := path.len() - 1
+        loop cut > 0 && path.slice(cut..<(cut + 1)) != "/" -> cut -= 1
+        path = path.slice(0..<cut)
+    }
+    Val(available)
+}
+
+fn jet_cli_meminfo_available() -[FS]> Int? Never! {
     text :: cli_files.read("/proc/meminfo") ?? return None
     loop line in text.lines() {
         if !line.starts_with("MemAvailable:") -> next
@@ -194,6 +220,14 @@ fn jet_cli_memory_available() -[FS]> Int? Never! {
         }
     }
     None
+}
+
+// One cgroup v2 byte count (`memory.max`, `memory.current`); `None` when the
+// file is missing or holds `max` (no limit).
+fn jet_cli_cgroup_bytes(file: String) -[FS]> Int? Never! {
+    text :: cli_files.read(file) ?? return None
+    bytes :: Int.parse(text.trim()) ?? return None
+    Val(bytes)
 }
 
 // Build the request for `file` (the entry as the user named it) and run the

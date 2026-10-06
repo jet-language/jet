@@ -334,9 +334,7 @@ pub(super) fn lower_bin_match_pattern_bindings(
 
 pub(super) fn struct_pattern_field_type(cx: &Cx, subject_ty: &Type, field: &str) -> Option<Type> {
     match subject_ty {
-        Type::Apply { name, .. } => cx
-            .struct_fields
-            .get(name)?
+        Type::Apply { name, .. } => cx.fact_struct_fields(name)?
             .iter()
             .find(|(f, _)| f == field)
             .map(|(_, t)| t.clone()),
@@ -777,8 +775,7 @@ pub(crate) fn tir_add_pattern_bindings(
                 return Err("enum pattern payload slot count");
             }
             let payload = owner.as_deref().and_then(|owner| {
-                cx.enum_variants
-                    .get(owner)?
+                cx.fact_enum_variants(owner)?
                     .iter()
                     .find(|(name, _)| name == variant)
                     .map(|(_, payload)| payload)
@@ -802,7 +799,7 @@ pub(crate) fn tir_add_pattern_bindings(
                                 .as_ref()
                                 .zip(edge.as_ref())
                                 .is_some_and(|(owner, edge)| {
-                                    cx.boxed_edges.contains(&(owner.clone(), edge.clone()))
+                                    cx.fact_box_edge(&owner, &edge)
                                 });
                         let local = if boxed {
                             TLocal::user(name).through_ref()
@@ -1032,9 +1029,7 @@ pub(crate) fn enum_variant_payload_type<'a>(
     edge: &str,
 ) -> Result<Option<&'a Type>, &'static str> {
     let type_name = crate::Codegen::TIR::canonical_enum_owner(cx, type_name);
-    let variants = cx
-        .enum_variants
-        .get(&type_name)
+    let variants = cx.fact_enum_variants(&type_name)
         .ok_or("enum payload owner layout")?;
     // A positional payload's edge is the complete variant path. Check that form
     // before splitting on `.`: a grouped leaf such as `Net.Ping` is a variant in
@@ -1146,9 +1141,7 @@ fn enum_edge_declared_type<'a>(cx: &'a Cx, type_name: &str, edge: &str) -> Optio
     }
     let (variant, label) = edge.rsplit_once('.')?;
     let owner = crate::Codegen::TIR::canonical_enum_owner(cx, type_name);
-    let (_, payload) = cx
-        .enum_variants
-        .get(&owner)?
+    let (_, payload) = cx.fact_enum_variants(&owner)?
         .iter()
         .find(|(candidate, _)| candidate == variant)?;
     match payload {

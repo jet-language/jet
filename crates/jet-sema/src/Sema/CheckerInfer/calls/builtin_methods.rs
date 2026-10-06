@@ -462,7 +462,7 @@ impl<'a> Checker<'a> {
             let captured = self
                 .lookup(&name)
                 .map(|info| info.ty.clone())
-                .or_else(|| self.consts.get(&name).cloned());
+                .or_else(|| self.const_type(&name).cloned());
             let Some(ty) = captured else { continue };
             if super::super::is_reactive_handle_ty(&ty)
                 && !self.lookup(&name).is_some_and(|info| info.reactive_local)

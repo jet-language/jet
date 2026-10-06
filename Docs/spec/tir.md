@@ -47,6 +47,25 @@ type parameters and canonical trait bounds into inference, including explicit
 type arguments. Lowering consumes the checked substitutions and bound evidence;
 it must not reconstruct a forwarded parameter's bounds from its spelling.
 
+Cross-file generic calls lower in the declaring file's context, with canonical
+nominal identities at their boundary. Callable parameter coercions use the
+checked concrete signature and effective callable-return carrier, never an
+unspecialized `fn(T)` template or a raw source return type. A generic target
+without a complete checked instance is a lowering invariant failure;
+it cannot fall back to the template's ordinary function name. The executable
+example is [`package_members`](../../Examples/features/modules/package_members/run.jet).
+
+Core runtime-carrier type imports follow the authoritative Core export ledger
+even when no source nominal declaration exists. Import aliases preserve the
+carrier's builtin identity, and checked constructors publish that identity
+as their lowering receiver. A user module cannot acquire Core ownership merely
+by using a Core-like name.
+
+Checked function parameters and explicit nominal construction type arguments
+publish their resolved identities on the AST consumed by lowering. Body locals,
+patterns, and specialization keys must not reinterpret the same declaration
+through different source spellings.
+
 Both executable lenses consume the channel read-only. A missing field means
 “not proven”; it never authorizes codegen to re-derive sema policy. An optimized
 lens may derive a private SSA form internally, but that form is not a third

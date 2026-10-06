@@ -53,7 +53,7 @@ pub(crate) struct AuthorizedSourceSnapshot {
 struct AuthorizedSourceRootLease {
     resolver: AuthorityResolver,
     root: crate::Authority::CheckedDirectory,
-    manifest: CheckedFile,
+    manifest: Option<CheckedFile>,
     files: Vec<CheckedFile>,
     foreign_cache_files: Vec<CheckedFile>,
 }
@@ -76,7 +76,9 @@ impl AuthorizedSourceLease {
     pub(crate) fn revalidate(&self) -> Result<(), AuthorityError> {
         for root in &self.roots {
             root.resolver.revalidate_directory(&root.root)?;
-            root.resolver.revalidate_file(&root.manifest)?;
+            if let Some(manifest) = &root.manifest {
+                root.resolver.revalidate_file(manifest)?;
+            }
             for file in &root.files {
                 root.resolver.revalidate_file(file)?;
             }
@@ -127,9 +129,13 @@ pub(crate) fn open_authorized_source_candidates(
     for (root_index, root_path) in roots.iter().enumerate() {
         let resolver = AuthorityResolver::open(root_path)?;
         let root_directory = resolver.checked_directory(Path::new("."))?;
-        // This checks both the canonical package.jet and the retired jet.toml
-        // marker before either can enter the source snapshot.
-        let manifest = resolver.checked_manifest(Path::new("."))?.file;
+        // Match the Rust driver's loose-root authorization: absence is valid,
+        // but retired manifests and every other authority failure remain fatal.
+        let manifest = match resolver.checked_manifest(Path::new(".")) {
+            Ok(manifest) => Some(manifest.file),
+            Err(error) if error.is_missing() => None,
+            Err(error) => return Err(error),
+        };
         let mut files = resolver.discover_source_files()?;
         let checked_entry = if root_index == entry_root_index {
             Some(resolver.checked_file(entry)?)
@@ -153,12 +159,11 @@ pub(crate) fn open_authorized_source_candidates(
             None
         };
 
-        if !files
-            .iter()
-            .any(|file| file.relative == manifest.relative)
-        {
-            files.push(manifest.clone());
-            files.sort_by(|left, right| left.relative.cmp(&right.relative));
+        if let Some(manifest) = &manifest {
+            if !files.iter().any(|file| file.relative == manifest.relative) {
+                files.push(manifest.clone());
+                files.sort_by(|left, right| left.relative.cmp(&right.relative));
+            }
         }
         let foreign_cache_files =
             collect_authorized_foreign_cache_files(&resolver, &files)?;
@@ -173,7 +178,9 @@ pub(crate) fn open_authorized_source_candidates(
             resolver.revalidate_file(file)?;
             authorized_foreign_cache_files.push(authorized_source_file(file)?);
         }
-        resolver.revalidate_file(&manifest)?;
+        if let Some(manifest) = &manifest {
+            resolver.revalidate_file(manifest)?;
+        }
         resolver.revalidate_root()?;
 
         let root_identity = identity_key(&root_directory.identity);
@@ -2500,11 +2507,13 @@ fn emit_bootstrap_host_factory(
             "        {request_mir_lint_every_pass}: ::std::env::var_os(\"JET_BOOTSTRAP_MIR_LINT_EVERY_PASS\").is_some_and(|value| value == \"1\"),\n",
             "        // D-JOBS1=A: the bootstrap host takes no `--threads` cap, so the\n",
             "        // compiler admits threads automatically up to the reported cores\n",
-            "        // and within the memory Linux reports available.\n",
+            "        // and within the memory Linux reports available, lowered to the\n",
+            "        // tightest cgroup v2 headroom (memory.max - memory.current) of this\n",
+            "        // process's cgroup and its ancestors.\n",
             "        {request_compiler_threads}: {threads_type} {{\n",
             "            {threads_cap}: Err(Default::default()),\n",
             "            {threads_cores}: jet_foundation::Numeric::JetInt::from_i64(::std::thread::available_parallelism().map(|cores| cores.get() as i64).unwrap_or(1)),\n",
-            "            {threads_memory}: ::std::fs::read_to_string(\"/proc/meminfo\").ok().and_then(|text| text.lines().find_map(|line| line.strip_prefix(\"MemAvailable:\").and_then(|rest| rest.trim().trim_end_matches(\"kB\").trim().parse::<i64>().ok()))).map(|kilobytes| jet_foundation::Numeric::JetInt::from_i64(kilobytes.saturating_mul(1024))).ok_or_else(Default::default),\n",
+            "            {threads_memory}: ::std::fs::read_to_string(\"/proc/meminfo\").ok().and_then(|text| text.lines().find_map(|line| line.strip_prefix(\"MemAvailable:\").and_then(|rest| rest.trim().trim_end_matches(\"kB\").trim().parse::<i64>().ok()))).map(|kilobytes| {{ let mut free = kilobytes.saturating_mul(1024); if let Some(path) = ::std::fs::read_to_string(\"/proc/self/cgroup\").ok().and_then(|text| text.lines().find_map(|line| line.strip_prefix(\"0::\").map(str::to_string))) {{ let mut dir = ::std::path::PathBuf::from(format!(\"/sys/fs/cgroup{{}}\", path.trim_end_matches('/'))); loop {{ let read = |name: &str| ::std::fs::read_to_string(dir.join(name)).ok().and_then(|value| value.trim().parse::<i64>().ok()); if let (Some(max), Some(current)) = (read(\"memory.max\"), read(\"memory.current\")) {{ free = free.min((max - current).max(0)); }} if dir == ::std::path::Path::new(\"/sys/fs/cgroup\") || !dir.pop() {{ break; }} }} }} jet_foundation::Numeric::JetInt::from_i64(free) }}).ok_or_else(Default::default),\n",
             "        }},\n",
             "    }};\n",
             "    Ok(__jet_request)\n",
