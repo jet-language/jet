@@ -109,6 +109,8 @@ defaults there. Its native leaves return optional raw TLS pause and cancellation
 flags, without formatting or choosing an idle value. Terminal `eprint` owns its
 newline/error-discard policy in Jet; `buffered`, `binread`, and `binwrite` compose
 the canonical stdin and filesystem operations instead of native forwarding APIs.
+Confirmation likewise owns its prompt, whitespace/case handling and safe false
+answer on empty/closed input or an IO failure in Jet.
 
 ## One meaning across execution tiers
 
