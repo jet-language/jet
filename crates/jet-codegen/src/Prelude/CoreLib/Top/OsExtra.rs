@@ -23,11 +23,8 @@ pub(crate) fn jet_std_os_executable() -> String {
 pub(crate) fn jet_std_os_pid() -> i64 {
     std::process::id() as i64
 }
-pub(crate) fn jet_std_os_username() -> String {
-    std::env::var("USER")
-        .ok()
-        .or_else(|| std::env::var("USERNAME").ok())
-        .unwrap_or_default()
+pub(crate) fn jet_sys_host_env_raw(name: &String) -> Option<Vec<u8>> {
+    std::env::var_os(name).map(std::ffi::OsString::into_encoded_bytes)
 }
 
 fn jet_os_unsupported(op: &str) -> jet_std::IOError {
