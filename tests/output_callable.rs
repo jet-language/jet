@@ -1,6 +1,5 @@
 use jet::Interpreter::RunOutcome;
 use jet::AST::{Expr, Item, OutputKind, Type};
-use jet_jit::CraneliftBackend;
 
 mod common;
 
@@ -185,43 +184,39 @@ fn aot_dev_and_jit_consume_the_resolved_entry() {
 }
 
 #[test]
-fn resident_jit_runs_hot_swaps_and_reports_fallible_selected_entry_without_fallback() {
-    // `run` then `hot_swap` is one resident session, and a session is scoped
-    // to its thread (D-HOTSWAP1 / D-PERSIST1). Install the sized compiler
-    // stack once around the whole session; `CraneliftBackend::run`'s own
-    // boundary is re-entrant and runs inline inside it.
-    jet_jit::on_compiler_stack(resident_jit_hot_swap_session);
+fn interpreter_runs_hot_swaps_and_reports_fallible_selected_entry() {
+    // `run` then `hot_swap` is one dev session, and a session is scoped to its
+    // thread (D-HOTSWAP1 / D-PERSIST1). Install the sized compiler stack once
+    // around the whole session.
+    jet_evalhost::on_compiler_stack(interpreter_hot_swap_session);
 }
 
-fn resident_jit_hot_swap_session() {
-    if !jet_jit::cranelift_host_supported() {
-        return;
-    }
+fn interpreter_hot_swap_session() {
     let v1 = checked_bundle(
         "APP :: Output.Executable{ name: \"demo\", entry: start }\nfn start() { print(\"v1\") }\n",
-        "jet_output_resident_v1",
+        "jet_output_session_v1",
         jet::Sema::CompileMode::Run,
     );
     let v2 = checked_bundle(
         "APP :: Output.Executable{ name: \"demo\", entry: start }\nfn start() { return Err(\"selected boom\") }\n",
-        "jet_output_resident_v2",
+        "jet_output_session_v2",
         jet::Sema::CompileMode::Run,
     );
-    assert!(common::cranelift_resident_safe(&v1));
-    assert!(common::cranelift_resident_safe(&v2));
 
     let policy = common::development_policy();
-    let mut backend = CraneliftBackend::new();
-    let first = common::run_cranelift_bundle(&mut backend, &v1, false, &policy);
+    let mut backend = jet::JitBackend::InterpreterBackend::new(
+        jet::Interpreter::InterpreterInvocation::DevInterpret,
+    );
+    let first = common::run_interpreter_bundle(&mut backend, &v1, false, &policy);
     assert!(matches!(first, RunOutcome::Ran { ref stdout, exit_code: 0, .. } if stdout == "v1\n"));
-    let swapped = common::hot_swap_cranelift_bundle(
+    let swapped = common::hot_swap_interpreter_bundle(
         &mut backend,
         "start",
         &v2,
         false,
         &policy,
     )
-    .expect("resident hot swap");
+    .expect("interpreter hot swap");
     assert!(
         matches!(&swapped, RunOutcome::Ran { stderr, exit_code: 1, .. } if stderr == "Error: selected boom\n"),
         "{swapped:?}"

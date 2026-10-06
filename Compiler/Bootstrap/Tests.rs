@@ -31,8 +31,8 @@ const BACKEND_DEV_HOST_PROFILE: &str = "\n[profile.dev.package.jet-foundation]\n
 /// Parallel rustc jobs (and codegen tokens) of a backend build. The
 /// stage-zero backend build runs inside the bootstrap test's memory cap, so
 /// at most this many unit or repository crates compile at once. Measured
-/// peaks: sharded unit crates <= 2.1 GB each, jet_jit 5.7 GB, so six jobs
-/// stay well inside a 22 GB cap.
+/// peaks: sharded unit crates <= 2.1 GB each, jet_evalhost <= 5.7 GB, so six
+/// jobs stay well inside a 22 GB cap.
 const BACKEND_BUILD_JOBS: &str = "6";
 /// Stack for the backend build's rustc threads (`RUST_MIN_STACK`): the
 /// emitted units' deeply nested blocks overflow rustc's default 8 MiB in
@@ -62,8 +62,8 @@ const BACKEND_COLD_TRAITS: [&str; 3] = ["__jet_Decode", "__jet_Encode", "__jet_C
 const BACKEND_COLD_PROFILE: &str = "opt-level = 0\ndebug = false\n";
 /// `BACKEND_BUILD_JOBS` of a release-profile backend build. Measured peaks:
 /// 12 MB hot shards about 3 GB (opt-level 2), the runtime 2 GB, the largest
-/// cold shard 4.6 GB (opt-level 0); with jet_jit (5.7 GB in dev) five jobs
-/// stay under a 22 GB cap.
+/// cold shard 4.6 GB (opt-level 0); with jet_evalhost (<= 5.7 GB in dev) five
+/// jobs stay under a 22 GB cap.
 const BACKEND_RELEASE_BUILD_JOBS: &str = "5";
 /// `JET_STAGE_ZERO_PROFILE=release` builds this test run's backend artifacts
 /// (jetc0 above all) with this Cargo profile instead of dev: stage one is
@@ -251,12 +251,12 @@ impl Drop for BootstrapTaskRootsCursorState {
 }
 // bootstrap:task-roots-end
 fn assert_source_completion_retired(
-    completion: ::jet_jit::SourceExecutionCompletion,
+    completion: ::jet_evalhost::SourceExecutionCompletion,
 ) {
     match completion.disposition {
-        ::jet_jit::SourceExecutionCompletionDisposition::Invoked {
+        ::jet_evalhost::SourceExecutionCompletionDisposition::Invoked {
             retirement: Some(
-                ::jet_jit::SourceExecutionCompletionRetirement::Completed(retirement),
+                ::jet_evalhost::SourceExecutionCompletionRetirement::Completed(retirement),
             ),
             ..
         } => {
@@ -548,7 +548,7 @@ fn __jet_bootstrap_harness_entry(
         let execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(
             compiler_image.artifact,
         );
-        let completion_scope = ::jet_jit::SourceExecutionCompletionScope::new();
+        let completion_scope = ::jet_evalhost::SourceExecutionCompletionScope::new();
         let mut completion_owner =
             crate::compiler_bootstrap_runner::BootstrapRunCompletionOwner::new(
                 completion_scope.clone(),
@@ -602,7 +602,7 @@ fn __jet_bootstrap_harness_entry(
         let execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(
             compiler_image.header.artifact,
         );
-        let completion_scope = ::jet_jit::SourceExecutionCompletionScope::new();
+        let completion_scope = ::jet_evalhost::SourceExecutionCompletionScope::new();
         let mut completion_owner =
             crate::compiler_bootstrap_runner::BootstrapRunCompletionOwner::new(
                 completion_scope.clone(),
@@ -688,7 +688,7 @@ fn __jet_bootstrap_harness_entry(
         );
 
         let close_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let cursor_handle = ::jet_jit::SourceResources::loop_cursor_handle_id();
+        let cursor_handle = ::jet_evalhost::SourceResources::loop_cursor_handle_id();
         let cursor_state = BootstrapTaskRootsCursorState {
             close_count: close_count.clone(),
         };
@@ -725,16 +725,16 @@ fn __jet_bootstrap_harness_entry(
         let shared_finalizer = finalizer.id;
         let shared_finalizer_return_type = finalizer.return_type.clone();
         fn assert_shared_finalizer_completed(
-            completion: ::jet_jit::SourceExecutionCompletion,
+            completion: ::jet_evalhost::SourceExecutionCompletion,
             helper: ::jet_foundation::MIR::MirFunctionId,
             mir: &::jet_foundation::MIR::MirProgram,
             return_type: &::jet_foundation::MIR::MirType,
         ) {
             assert_eq!(completion.function, Some(helper));
             match completion.disposition {
-                ::jet_jit::SourceExecutionCompletionDisposition::Invoked {
+                ::jet_evalhost::SourceExecutionCompletionDisposition::Invoked {
                     retirement: Some(
-                        ::jet_jit::SourceExecutionCompletionRetirement::Completed(retirement),
+                        ::jet_evalhost::SourceExecutionCompletionRetirement::Completed(retirement),
                     ),
                     writebacks,
                     ..
@@ -831,7 +831,7 @@ fn __jet_bootstrap_harness_entry(
                 .unwrap_or_else(|error| panic!("task-root Source resource retirement failed: {error:?}"))
             {
                 if let Err(completion) =
-                    ::jet_jit::SourceExecutionCompletionScope::record_current(completion)
+                    ::jet_evalhost::SourceExecutionCompletionScope::record_current(completion)
                 {
                     panic!("task-root parent produced an unrouted completion: {completion:?}");
                 }
@@ -971,7 +971,7 @@ fn __jet_bootstrap_harness_entry(
             let execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(
                 compiler_image.artifact,
             );
-            let completion_scope = ::jet_jit::SourceExecutionCompletionScope::new();
+            let completion_scope = ::jet_evalhost::SourceExecutionCompletionScope::new();
             let mut completion_owner =
                 crate::compiler_bootstrap_runner::BootstrapRunCompletionOwner::new(
                     completion_scope.clone(),
@@ -1029,12 +1029,12 @@ fn __jet_bootstrap_harness_entry(
                 execution,
             };
             fn assert_source_completion_retired(
-                completion: ::jet_jit::SourceExecutionCompletion,
+                completion: ::jet_evalhost::SourceExecutionCompletion,
             ) {
                 match completion.disposition {
-                    ::jet_jit::SourceExecutionCompletionDisposition::Invoked {
+                    ::jet_evalhost::SourceExecutionCompletionDisposition::Invoked {
                         retirement: Some(
-                            ::jet_jit::SourceExecutionCompletionRetirement::Completed(retirement),
+                            ::jet_evalhost::SourceExecutionCompletionRetirement::Completed(retirement),
                         ),
                         ..
                     } => {
@@ -2814,7 +2814,7 @@ fn backend_identity_build_script(
     });
     // The identity code is inlined (the root build.rs `#[path]`-includes the
     // same two files) rather than taken from a `jet` build-dependency: that
-    // dependency compiled the `jet` and `jet-jit` crates a second time for the
+    // dependency compiled the `jet` and `jet-evalhost` crates a second time for the
     // host, doubling the largest repository crates' share of the build.
     let inline_module = |relative: &str| {
         let path = repo.join(relative);
@@ -4017,25 +4017,23 @@ fn write_backend_project(
             Err(error) => panic!("cannot remove stale backend compiler image `{}`: {error}", image_path.display()),
         },
     }
-    // The backend project is its own workspace root, so it repeats the
-    // repository's `[patch.crates-io]` (the vendored cranelift-jit that
-    // jet-jit needs) and starts from the repository lockfile, keeping every
-    // dependency at the version the repository builds with.
+    // The backend project is its own workspace root, so it starts from the
+    // repository lockfile, keeping every dependency at the version the
+    // repository builds with.
     let manifest = format!(
-        "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2021\"\nbuild = \"build.rs\"\n\n[dependencies]\njet = {{ path = {:?} }}\njet-codegen = {{ path = {:?} }}\njet-driver = {{ path = {:?} }}\njet-foundation = {{ path = {:?} }}\njet-jit = {{ path = {:?} }}\njet-net = {{ path = {:?} }}\njet-pkg-model = {{ path = {:?} }}\njet-rt = {{ path = {:?} }}\njet-store = {{ path = {:?} }}\n{ffi_dependency}{unit_dependencies}\n[patch.crates-io]\ncranelift-jit = {{ path = {:?} }}\n{unit_profiles}{build_profile}",
+        "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2021\"\nbuild = \"build.rs\"\n\n[dependencies]\njet = {{ path = {:?} }}\njet-codegen = {{ path = {:?} }}\njet-driver = {{ path = {:?} }}\njet-evalhost = {{ path = {:?} }}\njet-foundation = {{ path = {:?} }}\njet-net = {{ path = {:?} }}\njet-pkg-model = {{ path = {:?} }}\njet-rt = {{ path = {:?} }}\njet-store = {{ path = {:?} }}\n{ffi_dependency}{unit_dependencies}\n{unit_profiles}{build_profile}",
         package_name,
         repo.display().to_string(),
         // The linked Host modules name these crates directly (codegen's native
         // loop cursor key, the package model's devtools policy, the record store).
         repo.join("crates/jet-codegen").display().to_string(),
         repo.join("crates/jet-driver").display().to_string(),
+        repo.join("crates/jet-evalhost").display().to_string(),
         repo.join("crates/jet-foundation").display().to_string(),
-        repo.join("crates/jet-jit").display().to_string(),
         repo.join("crates/jet-net").display().to_string(),
         repo.join("crates/jet-pkg-model").display().to_string(),
         repo.join("crates/jet-rt").display().to_string(),
         repo.join("crates/jet-store").display().to_string(),
-        repo.join("crates/vendor/cranelift-jit-0.112.3").display().to_string(),
         ffi_dependency = ffi_dependency,
         unit_dependencies = unit_dependencies,
         unit_profiles = unit_profiles,
@@ -4308,4 +4306,83 @@ fn assert_command_success(label: &str, output: &Output) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
     );
+}
+
+/// I9 parity of the Jet host's runtime prefix (Compiler/JetCodegen
+/// Emit/RuntimePrefix.jet) with MIRRust `emit_mir_runtime_text`. Driven by
+/// the Jet-hosted build proof: `JET_RUNTIME_PREFIX_CASES` holds
+/// `;`-separated `<release|test>=<source.jet>=<hosted .rs>` cases, where the
+/// hosted `.rs` is what the Jet-hosted `jet build --release` / `jet test`
+/// wrote. The Rust compiler emits the same program through the profile that
+/// command uses; its text must begin with the hosted file's prefix (every
+/// byte before the Jet emitter's header), and that prefix must end where the
+/// runtime block does.
+#[test]
+#[ignore = "driven by the Jet-hosted runtime-prefix parity proof"]
+fn jet_hosted_runtime_prefix_matches_rust() {
+    const JET_ITEMS_HEADER: &str =
+        "// Generated by Jet MIR Rust source emission; checked MIR is authoritative.";
+    let cases = std::env::var("JET_RUNTIME_PREFIX_CASES")
+        .expect("JET_RUNTIME_PREFIX_CASES names the parity cases");
+    let mut checked = 0usize;
+    for case in cases.split(';').filter(|case| !case.is_empty()) {
+        let fields = case.split('=').collect::<Vec<_>>();
+        let [kind, source_path, hosted_path] = fields.as_slice() else {
+            panic!("parity case `{case}` is not `<kind>=<source>=<hosted .rs>`");
+        };
+        let source = std::fs::read_to_string(source_path)
+            .unwrap_or_else(|error| panic!("cannot read {source_path}: {error}"));
+        let rust = match *kind {
+            "release" => crate::compile_with_target_and_gates_and_profile(
+                &source,
+                source_path,
+                crate::Policy::GateSet::default(),
+                None,
+                "release",
+            )
+            .unwrap_or_else(|diagnostics| panic!("{source_path}: {diagnostics:?}"))
+            .rust,
+            "test" => crate::compile_tests_with_path(&source, source_path)
+                .unwrap_or_else(|diagnostics| panic!("{source_path}: {diagnostics:?}"))
+                .0,
+            other => panic!("parity case kind `{other}` is neither `release` nor `test`"),
+        };
+        let hosted = std::fs::read_to_string(hosted_path)
+            .unwrap_or_else(|error| panic!("cannot read {hosted_path}: {error}"));
+        let prefix_len = hosted
+            .find(JET_ITEMS_HEADER)
+            .unwrap_or_else(|| panic!("{hosted_path} has no Jet emitter header"));
+        let prefix = &hosted[..prefix_len];
+        assert!(
+            prefix.ends_with("// jet:cached-core-end\n\n"),
+            "{hosted_path}: the hosted prefix does not end at the runtime block"
+        );
+        if !rust.starts_with(prefix) {
+            let at = rust
+                .bytes()
+                .zip(prefix.bytes())
+                .position(|(left, right)| left != right)
+                .unwrap_or(rust.len().min(prefix.len()));
+            let window = |text: &str| {
+                let mut start = at.saturating_sub(120).min(text.len());
+                let mut end = (at + 120).min(text.len());
+                while !text.is_char_boundary(start) {
+                    start -= 1;
+                }
+                while !text.is_char_boundary(end) {
+                    end += 1;
+                }
+                text[start..end].to_string()
+            };
+            panic!(
+                "{kind} {source_path}: the hosted prefix ({} bytes) and the Rust program ({} bytes) differ at byte {at}\nrust:   {:?}\nhosted: {:?}",
+                prefix.len(),
+                rust.len(),
+                window(&rust),
+                window(prefix),
+            );
+        }
+        checked += 1;
+    }
+    assert!(checked > 0, "JET_RUNTIME_PREFIX_CASES selected no case");
 }

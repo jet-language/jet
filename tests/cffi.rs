@@ -1546,9 +1546,9 @@ fn run() {
     )
     .unwrap();
     let jit_run = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "jit.jet", "--trace-tiers"])
+        .args(["run", "jit.jet"])
         .current_dir(&root)
-        .env("JET_RUN_CACHE_DIR", root.join("run-cache"))
+        .env("JET_STORE_DIR", root.join("run-cache"))
         .env("NO_COLOR", "1")
         .output()
         .expect("run every admitted hidden C-bridge signature");
@@ -1558,13 +1558,6 @@ fn run() {
         String::from_utf8_lossy(&jit_run.stdout),
         "7\n9\n42\n42\n2.5\n21.0\nhi\n"
     );
-    assert!(
-        jit_stderr
-            .lines()
-            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
-        "{jit_stderr}"
-    );
-    assert!(!jit_stderr.contains("tier0 interp"), "{jit_stderr}");
     assert!(!jit_stderr.contains("unbound wrapper"), "{jit_stderr}");
     assert!(
         !jit_stderr.contains("unsupported signature"),

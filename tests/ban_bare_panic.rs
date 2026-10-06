@@ -226,24 +226,9 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "#[cfg(test)] deliberately panicking hostile provider fixture plus workload-object assertion",
     ),
     (
-        "crates/jet-jit/build.rs",
+        "crates/jet-evalhost/build.rs",
         3,
         "build.rs inventory of Prelude enums — no ice! (build script is not the compiler front end)",
-    ),
-    (
-        "crates/jet-jit/src/jit/runtime_host.rs",
-        1,
-        "#[test] Core-row presence assertion for host_fns audit",
-    ),
-    (
-        "crates/jet-jit/src/jit/resident.rs",
-        1,
-        "#[test] host-helper fault outcome assertion fixture",
-    ),
-    (
-        "crates/jet-jit/src/Compute.rs",
-        1,
-        "include-style compute semantics jet_panic adapter — user-program RUNTIME_PANIC path, not compiler ICE",
     ),
     (
         "crates/jet-cli/src/CLI.rs",
@@ -286,7 +271,7 @@ const SCAN_ROOTS: &[&str] = &[
     "crates/jet-codegen",
     "crates/jet-driver",
     "crates/jet-semindex",
-    "crates/jet-jit",
+    "crates/jet-evalhost",
     "crates/jet-net",
     "crates/jet-queries",
     "crates/jet-rt",

@@ -157,10 +157,6 @@ fn run() {
 #[test]
 fn core_db_query_one_first_row_matches_all_execution_tiers() {
     assert!(common::have_rustc(), "DB query_one parity proof requires rustc");
-    assert!(
-        jet_jit::cranelift_host_supported(),
-        "DB query_one parity proof requires a resident Cranelift host"
-    );
     let dir = common::unique_tmp("jet_corelib_db_query_one_parity");
     fs::create_dir_all(&dir).unwrap();
     fs::write(
@@ -205,7 +201,7 @@ fn run() {
     let file = dir.join("db_query_one_parity.jet");
     fs::write(&file, src).unwrap();
     let path = file.to_string_lossy().into_owned();
-    let interpreted = match jet::Interpreter::dev_iteration(&path, false, true) {
+    let interpreted = match crate::common::dev_run(&path, false, true) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!(stderr, "");
             assert_eq!(exit_code, 0);
@@ -217,8 +213,7 @@ fn run() {
     };
     assert_eq!(interpreted, expected);
 
-    jet_jit::reset_jit_trace_for_test();
-    let resident = match jet::Interpreter::dev_iteration(&path, false, false) {
+    let resident = match crate::common::dev_run(&path, false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!(stderr, "");
             assert_eq!(exit_code, 0);
@@ -229,9 +224,6 @@ fn run() {
         }
     };
     assert_eq!(resident, expected);
-    assert!(jet_jit::jit_executed_for_test(), "DB query_one must execute in resident JIT");
-    assert!(!jet_jit::deopt_invoked_for_test(), "DB query_one must not deopt");
-    assert!(!jet_jit::fallback_invoked_for_test(), "DB query_one must not fall back");
     assert_eq!(resident, interpreted, "DB query_one tiers diverged");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -989,7 +981,7 @@ fn compiler_sources_reject_retired_jet_ring_keys() {
         "crates/jet-sema/src",
         "crates/jet-codegen/src",
         "crates/jet-comptime/src",
-        "crates/jet-jit/src",
+        "crates/jet-evalhost/src",
         "crates/jet-repl/src",
     ];
     let retired = [

@@ -1752,7 +1752,7 @@ fn loader_records_import_edge_facts_and_erases_boundary_policy_before_codegen() 
             .args(args)
             .env("NO_COLOR", "1")
             .env(
-                "JET_RUN_CACHE_DIR",
+                "JET_STORE_DIR",
                 root.join(".cache").join(label).join("run"),
             )
             .env(

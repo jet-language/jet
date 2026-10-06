@@ -394,19 +394,15 @@ fn run() -[Rand, Time]> {
 
     let path = dir.join("nondeterministic_matrix.jet");
     fs::write(&path, source).unwrap();
-    jet_jit::reset_jit_trace_for_test();
-    let resident_stdout = match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+    let resident_stdout = match crate::common::dev_run(path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!((exit_code, stderr.as_str()), (0, "$xml_event"), "resident JIT stderr");
             stdout
         }
         other => panic!("nondeterministic matrix resident JIT failed: {other:?}"),
     };
-    assert!(jet_jit::jit_executed_for_test(), "random/time matrix must execute in resident JIT");
-    assert!(!jet_jit::deopt_invoked_for_test(), "random/time matrix must not deopt");
-    assert!(!jet_jit::fallback_invoked_for_test(), "random/time matrix must not fall back");
 
-    let forced_stdout = match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
+    let forced_stdout = match crate::common::dev_run(path.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!((exit_code, stderr.as_str()), (0, "$xml_event"), "forced interpreter stderr");
             stdout
@@ -726,7 +722,7 @@ fn run() {
 
     let dev_path = dir.join("xml_whole_bytes.jet");
     fs::write(&dev_path, source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!((exit_code, stdout, stderr), (0, expected.to_string(), String::new()));
         }
@@ -783,7 +779,7 @@ fn run() {
 
     let dev_path = dir.join("xml_chars.jet");
     fs::write(&dev_path, &source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!((exit_code, stdout, stderr), (0, expected.to_string(), String::new()));
         }
@@ -843,7 +839,7 @@ fn run() {
 
     let dev_path = dir.join("xml_attribute_normalization.jet");
     fs::write(&dev_path, source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!(
                 (exit_code, stdout, stderr),
@@ -984,7 +980,7 @@ fn run() {
     assert_eq!(stdout, expected);
     let dev_path = dir.join("base_decoder_parity.jet");
     fs::write(&dev_path, source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,

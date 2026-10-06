@@ -315,7 +315,7 @@ fn sema_prelude_conversion_demands_expr(expression: TExpr, module_identity: Stri
 // declares its own conversion for a pair keeps it. Every conversion that cannot
 // be injected names its cause in `reasons`; with `keep_going` (JET_KEEP_GOING)
 // a conversion whose body fails to check is kept as its typed trap.
-pub fn sema_inject_prelude_error_conversions(module_identity: String, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable, functions: &[TFunc], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], reasons: &[String], keep_going: Bool) -> Bool {
+pub fn sema_inject_prelude_error_conversions(module_identity: String, environment: &SemaScopeEnvironment, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, functions: &[TFunc], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], reasons: &[String], keep_going: Bool) -> Bool {
     demands := [SemaPreludeConversionDemand]{}
     loop function in functions {
         loop statement in function.body {
@@ -346,7 +346,7 @@ pub fn sema_inject_prelude_error_conversions(module_identity: String, environmen
             next
         }
         before :: diagnostics.len()
-        checked :: sema_function_check(conversion, symbol.id, TFuncKind.TopLevel, false, &environment, &scopes, &diagnostics, &call_facts, &comptime_requests, &name_references)
+        checked :: sema_function_check(conversion, symbol.id, TFuncKind.TopLevel, false, &environment, &scopes, host_hooks, &diagnostics, &call_facts, &comptime_requests, &name_references)
         if !checked.complete {
             complete = false
             loop reason in checked.incomplete_reasons -> &reasons.push("{label}: {reason}")
@@ -357,7 +357,7 @@ pub fn sema_inject_prelude_error_conversions(module_identity: String, environmen
                 loop index in before..<diagnostics.len() -> &reported.push("{diagnostics[index].code} {diagnostics[index].what}")
                 if reported.len() == 0 -> &reasons.push("{label}: body checking is incomplete") else -> &reasons.push("{label}: body checking stopped on {reported.join("; ")}")
             }
-            if keep_going -> _ := sema_keep_going_push_stub(sema_keep_going_stub(conversion, symbol.id, TFuncKind.TopLevel, false, &environment, &scopes), label, &functions, &reasons)
+            if keep_going -> _ := sema_keep_going_push_stub(sema_keep_going_stub(conversion, symbol.id, TFuncKind.TopLevel, false, &environment, &scopes, host_hooks), label, &functions, &reasons)
             next
         }
         if !sema_append_function(&functions, checked) {

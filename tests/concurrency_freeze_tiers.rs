@@ -146,7 +146,7 @@ fn crossing_plane_aot_matches_expected() {
 #[test]
 fn crossing_plane_jit_matches_expected() {
     let (code, stdout, stderr) =
-        tir_support::jit_run("concurrency_crossing_plane_jit", CROSSING_SOURCE);
+        tir_support::default_run("concurrency_crossing_plane_jit", CROSSING_SOURCE);
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(
         stdout, CROSSING_EXPECTED,

@@ -918,7 +918,7 @@ fn run() {
 
     let file = dir.join("user_derive_generic.jet");
     fs::write(&file, src).unwrap();
-    match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(file.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -929,7 +929,7 @@ fn run() {
         }
         other => panic!("generic user derive did not run in default dev: {other:?}"),
     }
-    match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(file.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,

@@ -646,7 +646,7 @@ fn release_test_uses_aot_tier_marker() {
     let example = root.join("Examples/features/tooling/property_tests.jet");
     let cwd = isolated_test_package("jet_release_property");
     let out = Command::new(&jet)
-        .args(["test", "--release", "--trace-tiers", "--show-default", "--capture=all"])
+        .args(["test", "--release", "--show-default", "--capture=all"])
         .arg(&example)
         .current_dir(&cwd.path)
         .output()

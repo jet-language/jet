@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 1bc63f43a8c852325aaa2bd0a66445bca1cf82f23079b3c28dc8daa195c61813
+// Source SHA-256: 3255b28e2215056ce01d61db0052a3e6d42ef7875a622ec48fa9ac89cd9bba66
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,

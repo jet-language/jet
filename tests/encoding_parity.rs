@@ -1,5 +1,5 @@
 //! Card #713/#715: whole/stream encoding parity across AOT, comptime (where
-//! pure), and default-dev with #778 tiered backend attribution.
+//! pure), the default `jet run`, and the forced interpreter.
 //!
 //! One matrix harness records tier outcomes instead of isolated per-format tests.
 //! Edition 2026 keeps the D-ENCBASE-STRICT1 compatibility union and single-arg
@@ -10,11 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use jet::Interpreter::{dev_iteration, RunOutcome};
-use jet_jit::{
-    deopt_invoked_for_test, fallback_invoked_for_test, jit_executed_for_test,
-    reset_jit_trace_for_test, set_trace_tiers, take_last_trace, Tier,
-};
+use jet::Interpreter::RunOutcome;
 
 mod common;
 #[path = "tir_support/mod.rs"]
@@ -76,12 +72,6 @@ impl ProgramOutput {
             stderr,
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum DevBackend {
-    ResidentJit,
-    DeoptInterp,
 }
 
 fn on_encoding_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
@@ -159,68 +149,22 @@ fn checked_bundle(path: &str) -> jet::AST::ProgramBundle {
     bundle
 }
 
-fn run_default_dev(path: &str) -> (DevBackend, ProgramOutput) {
-    reset_jit_trace_for_test();
-    let bundle = checked_bundle(path);
-    let jit_safe = common::cranelift_resident_safe(&bundle);
-    match dev_iteration(path, false, false) {
+/// The default `jet run`: build, then execute the artifact.
+fn run_default_dev(path: &str) -> ProgramOutput {
+    match crate::common::dev_run(path, false, false) {
         RunOutcome::Ran {
             stdout,
             stderr,
             exit_code,
-        } => {
-            let jit = jit_executed_for_test();
-            let deopt = deopt_invoked_for_test();
-            let fallback = fallback_invoked_for_test();
-            assert!(
-                !fallback,
-                "default-dev must not silently fall back to interpreter/AOT for encoding probes"
-            );
-            if deopt {
-                (
-                    DevBackend::DeoptInterp,
-                    ProgramOutput::ran(stdout, stderr, exit_code),
-                )
-            } else {
-                assert!(
-                    jit,
-                    "successful default-dev encoding probe must execute resident JIT"
-                );
-                assert!(
-                    jit_safe,
-                    "resident JIT run requires cranelift_resident_safe; detail: {}",
-                    common::cranelift_resident_safe_detail(&bundle)
-                );
-                (
-                    DevBackend::ResidentJit,
-                    ProgramOutput::ran(stdout, stderr, exit_code),
-                )
-            }
-        }
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
         RunOutcome::Problems(diags) => {
-            assert!(
-                !fallback_invoked_for_test(),
-                "default-dev must not silently fall back when deopt hits an interpreter gap"
-            );
-            assert!(
-                !diags.iter().any(|d| d.code == "E2211"),
-                "E2211 retired by #778; encoding probes must silent-deopt or name E0956: {diags:?}"
-            );
-            let detail = diags
-                .iter()
-                .map(|d| format!("{}:{}", d.code, d.what))
-                .collect::<Vec<_>>()
-                .join("; ");
-            (
-                DevBackend::DeoptInterp,
-                ProgramOutput::ran(String::new(), format!("interpreter gap: {detail}"), 101),
-            )
+            panic!("default `jet run` rejected encoding probe: {diags:?}")
         }
     }
 }
 
 fn run_forced_interpreter(path: &str) -> ProgramOutput {
-    match dev_iteration(path, false, true) {
+    match crate::common::dev_run(path, false, true) {
         RunOutcome::Ran {
             stdout,
             stderr,
@@ -259,8 +203,8 @@ fn assert_aot_comptime_binding_parity(label: &str, source: &str, jet_path: &Path
     let _ = source;
 }
 
-/// Named interpreter/JIT gaps that cannot claim encoding parity (C5).
-/// File-backed stream handles still stop on the #778 deopt interpreter:
+/// Named interpreter gaps that cannot claim encoding parity (C5).
+/// File-backed stream handles still stop on the interpreter:
 /// ResourceNew / THandleOp (E0956) or panic-stop from missing file handles (E0953).
 fn named_encoding_dev_gap(stderr: &str) -> bool {
     let e0956 = stderr.contains("E0956")
@@ -293,48 +237,24 @@ fn assert_default_dev_matches_aot_or_honest_gap(
     aot: &ProgramOutput,
     interpreter_fallback: bool,
 ) {
-    let (backend, dev) = run_default_dev(jet_path.to_str().unwrap());
-    eprintln!(
-        "{label} default-dev backend={backend:?} exit={} deopt_gap={}",
-        dev.exit,
-        named_encoding_dev_gap(&dev.stderr)
-    );
-    match backend {
-        DevBackend::ResidentJit => {
-            assert_eq!(
-                dev.stdout, aot.stdout,
-                "{label} default-dev/JIT stdout drift"
+    let dev = run_default_dev(jet_path.to_str().unwrap());
+    assert_eq!(dev.stdout, aot.stdout, "{label} default `jet run` stdout drift");
+    assert_eq!(dev.stderr, aot.stderr, "{label} default `jet run` stderr drift");
+    assert_eq!(dev.exit, aot.exit, "{label} default `jet run` exit drift");
+    if interpreter_fallback {
+        let interp = run_forced_interpreter(jet_path.to_str().unwrap());
+        if named_encoding_dev_gap(&interp.stderr) {
+            // Explicit unsupported path — does not satisfy interpreter parity.
+            eprintln!(
+                "note: {label} interpreter named gap (no parity claim): {}",
+                interp.stderr
             );
+        } else {
             assert_eq!(
-                dev.stderr, aot.stderr,
-                "{label} default-dev/JIT stderr drift"
+                interp.stdout, aot.stdout,
+                "{label} forced interpreter must preserve AOT encoding semantics"
             );
-            assert_eq!(dev.exit, aot.exit, "{label} default-dev/JIT exit drift");
-        }
-        DevBackend::DeoptInterp => {
-            if dev.exit == 0 {
-                assert_eq!(dev.stdout, aot.stdout, "{label} deopt-interp stdout drift");
-                assert_eq!(dev.stderr, aot.stderr, "{label} deopt-interp stderr drift");
-                assert_eq!(dev.exit, aot.exit, "{label} deopt-interp exit drift");
-            } else if named_encoding_dev_gap(&dev.stderr) {
-                // Explicit unsupported path — does not satisfy stream/default-dev parity.
-                eprintln!(
-                    "note: {label} default-dev named gap (no parity claim): {}",
-                    dev.stderr
-                );
-            } else if interpreter_fallback {
-                let interp = run_forced_interpreter(jet_path.to_str().unwrap());
-                assert_eq!(
-                    interp.stdout, aot.stdout,
-                    "{label} forced-interpreter must preserve AOT encoding semantics when default-dev deopts"
-                );
-                assert_eq!(interp.exit, aot.exit, "{label} interpreter exit drift");
-            } else {
-                panic!(
-                    "{label} default-dev deopt failed without named encoding gap or parity: exit={} stderr={}",
-                    dev.exit, dev.stderr
-                );
-            }
+            assert_eq!(interp.exit, aot.exit, "{label} interpreter exit drift");
         }
     }
 }
@@ -465,19 +385,19 @@ fn configured_csv_options_match_aot_default_dev_and_interpreter_inner() {
     let expected = "1\n3\nada\nline1|line2\n1\ntrue\n";
     assert_eq!(aot.stdout, expected, "configured CSV AOT output drift");
     let dev = run_default_dev(path.to_str().unwrap());
-    assert_eq!(dev.1.exit, 0, "configured CSV default-dev failed: {}", dev.1.stderr);
-    assert_eq!(dev.1.stdout, aot.stdout, "configured CSV default-dev drift");
+    assert_eq!(dev.exit, 0, "configured CSV default-dev failed: {}", dev.stderr);
+    assert_eq!(dev.stdout, aot.stdout, "configured CSV default-dev drift");
     let interpreter = run_forced_interpreter(path.to_str().unwrap());
     assert_eq!(interpreter.exit, 0, "configured CSV interpreter failed: {}", interpreter.stderr);
     assert_eq!(interpreter.stdout, aot.stdout, "configured CSV interpreter drift");
 }
 
 #[test]
-fn serde_examples_match_aot_default_resident_jit_and_interpreter() {
-    on_encoding_stack(serde_examples_match_aot_default_resident_jit_and_interpreter_inner);
+fn serde_examples_match_aot_default_run_and_interpreter() {
+    on_encoding_stack(serde_examples_match_aot_default_run_and_interpreter_inner);
 }
 
-fn serde_examples_match_aot_default_resident_jit_and_interpreter_inner() {
+fn serde_examples_match_aot_default_run_and_interpreter_inner() {
     if !common::have_rustc() {
         eprintln!("note: skipping serde example parity (need rustc)");
         return;
@@ -524,13 +444,7 @@ fn serde_examples_match_aot_default_resident_jit_and_interpreter_inner() {
         let expected_output = ProgramOutput::ran(expected.to_string(), String::new(), 0);
         assert_eq!(aot, expected_output, "{stem} AOT output drifted");
 
-        let (backend, default_run) = run_default_dev(jet_path.to_str().unwrap());
-        assert_eq!(
-            backend,
-            DevBackend::ResidentJit,
-            "{stem} default run must stay resident JIT; detail: {}",
-            common::cranelift_resident_safe_detail(&checked_bundle(jet_path.to_str().unwrap()))
-        );
+        let default_run = run_default_dev(jet_path.to_str().unwrap());
         assert_eq!(default_run, aot, "{stem} default run diverged from AOT");
 
         let interpreter = run_forced_interpreter(jet_path.to_str().unwrap());
@@ -584,11 +498,11 @@ fn whole_value_codecs_match_aot_comptime_and_default_dev_inner() {
 }
 
 #[test]
-fn hostile_json_and_toml_depth_match_aot_resident_jit_and_interpreter() {
-    on_encoding_stack(hostile_json_and_toml_depth_match_aot_resident_jit_and_interpreter_inner);
+fn hostile_json_and_toml_depth_match_aot_default_run_and_interpreter() {
+    on_encoding_stack(hostile_json_and_toml_depth_match_aot_default_run_and_interpreter_inner);
 }
 
-fn hostile_json_and_toml_depth_match_aot_resident_jit_and_interpreter_inner() {
+fn hostile_json_and_toml_depth_match_aot_default_run_and_interpreter_inner() {
     if !common::have_rustc() {
         eprintln!("note: skipping hostile JSON/TOML depth parity (need rustc)");
         return;
@@ -607,12 +521,7 @@ fn hostile_json_and_toml_depth_match_aot_resident_jit_and_interpreter_inner() {
     assert_eq!(aot.stdout, expected);
     assert_eq!(aot.stderr, "");
 
-    let (backend, dev) = run_default_dev(path.to_str().unwrap());
-    assert_eq!(
-        backend,
-        DevBackend::ResidentJit,
-        "hostile JSON/TOML default run must stay resident JIT"
-    );
+    let dev = run_default_dev(path.to_str().unwrap());
     assert_eq!(dev, aot, "hostile JSON/TOML default run diverged from AOT");
 
     let interpreter = run_forced_interpreter(path.to_str().unwrap());
@@ -680,8 +589,8 @@ fn run() {
         aot.stderr
     );
     assert_eq!(aot.stdout, expected);
-    let (backend, dev) = run_default_dev(path.to_str().unwrap());
-    assert_eq!(dev, aot, "default-dev backend: {backend:?}");
+    let dev = run_default_dev(path.to_str().unwrap());
+    assert_eq!(dev, aot, "default `jet run` diverged");
     let interpreter = run_forced_interpreter(path.to_str().unwrap());
     assert_eq!(interpreter, aot, "forced interpreter diverged");
 }
@@ -718,8 +627,8 @@ true|/a|duplicate object key `a`
     let aot = run_aot(&path, scratch.path());
     assert_eq!(aot.exit, 0, "JSON quoted Unicode AOT failed: {}", aot.stderr);
     assert_eq!(aot.stdout, expected);
-    let (backend, dev) = run_default_dev(path.to_str().unwrap());
-    assert_eq!(dev, aot, "default-dev backend: {backend:?}");
+    let dev = run_default_dev(path.to_str().unwrap());
+    assert_eq!(dev, aot, "default `jet run` diverged");
     let interpreter = run_forced_interpreter(path.to_str().unwrap());
     assert_eq!(interpreter, aot, "forced interpreter diverged");
 }
@@ -763,29 +672,17 @@ fn run() {
 "#;
     let scratch = Scratch::new("cbor_typed_schema");
     let path = scratch.write_project("2026", source);
-    let bundle = checked_bundle(path.to_str().unwrap());
-    let plan = common::cranelift_tier_plan(&bundle);
-    assert!(
-        !plan.whole_interp,
-        "regression needs mixed named-function deopt: {plan:?}"
-    );
-    assert!(
-        plan.deopt.iter().any(|(name, _)| name == "gap"),
-        "regression needs `gap` on the named deopt tier: {plan:?}"
-    );
+    checked_bundle(path.to_str().unwrap());
     let expected =
         "42dead|a262696407677061796c6f616442dead\n42dead|a262696407677061796c6f616442dead\n";
     let aot = run_aot(&path, scratch.path());
     assert_eq!(aot.exit, 0, "typed CBOR AOT failed: {}", aot.stderr);
     assert_eq!(aot.stdout, expected);
-    let (backend, dev) = run_default_dev(path.to_str().unwrap());
-    assert_eq!(dev.exit, 0, "typed CBOR default-dev failed: {}", dev.stderr);
-    assert_eq!(dev.stdout, expected, "default-dev backend: {backend:?}");
-    assert_eq!(backend, DevBackend::DeoptInterp);
-    assert!(
-        deopt_invoked_for_test(),
-        "typed CBOR regression must execute named-function deopt"
-    );
+    let dev = run_default_dev(path.to_str().unwrap());
+    assert_eq!(dev.exit, 0, "typed CBOR default run failed: {}", dev.stderr);
+    assert_eq!(dev.stdout, expected, "typed CBOR default run drifted");
+    let interpreter = run_forced_interpreter(path.to_str().unwrap());
+    assert_eq!(interpreter.stdout, expected, "typed CBOR interpreter drifted");
 }
 
 #[test]
@@ -899,25 +796,7 @@ fn run() {
         "name: \"enc\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
     )
     .unwrap();
-    let bundle = checked_bundle(path.to_str().unwrap());
-    let plan = common::cranelift_tier_plan(&bundle);
-    assert!(
-        !plan.whole_interp,
-        "regression needs mixed tiers: gap={:?}; plan={plan:?}",
-        plan.gap
-    );
-    assert!(
-        plan.native.contains("run"),
-        "zero-arg run must remain the native entry in mixed tiers: {plan:?}"
-    );
-    assert!(
-        plan.deopt.iter().any(|(name, _)| name == "forced_deopt"),
-        "regression must force the codec body through named deopt: {plan:?}"
-    );
-    assert!(
-        !plan.deopt.iter().any(|(name, _)| name == "resident"),
-        "resident control must stay on the resident tier: {plan:?}"
-    );
+    checked_bundle(path.to_str().unwrap());
     let aot = run_aot(&path, scratch.path());
     assert_eq!(aot.exit, 0, "Codable corpus AOT failed: {}", aot.stderr);
     let mut lines = aot.stdout.lines();
@@ -933,18 +812,10 @@ fn run() {
         "unexpected AOT output: {}",
         aot.stdout
     );
-    let (backend, dev) = run_default_dev(path.to_str().unwrap());
-    assert_eq!(backend, DevBackend::DeoptInterp);
+    let dev = run_default_dev(path.to_str().unwrap());
     assert_eq!(dev, aot);
-    assert!(jit_executed_for_test(), "resident control must execute JIT");
-    assert!(
-        deopt_invoked_for_test(),
-        "forced-deopt control must execute TIR evaluator"
-    );
-    assert!(
-        !fallback_invoked_for_test(),
-        "codec corpus must not fall back"
-    );
+    let interpreter = run_forced_interpreter(path.to_str().unwrap());
+    assert_eq!(interpreter, aot, "Codable corpus interpreter drifted");
 }
 
 #[test]
@@ -1040,31 +911,17 @@ fn run() {
         "name: \"enc\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
     )
     .unwrap();
-    let bundle = checked_bundle(path.to_str().unwrap());
-    let plan = common::cranelift_tier_plan(&bundle);
-    assert!(!plan.whole_interp, "regression needs mixed tiers: {plan:?}");
-    assert!(
-        plan.deopt.iter().any(|(name, _)| name == "forced_deopt"),
-        "regression must force migration through named deopt: {plan:?}"
-    );
+    checked_bundle(path.to_str().unwrap());
     let aot = run_aot(&path, scratch.path());
     assert_eq!(aot.exit, 0, "migration corpus AOT failed: {}", aot.stderr);
     assert_eq!(
         aot.stdout,
         "Ada|95|localhost\nscore:expected Int, found text \"bad\"\n"
     );
-    let (backend, dev) = run_default_dev(path.to_str().unwrap());
-    assert_eq!(backend, DevBackend::DeoptInterp);
+    let dev = run_default_dev(path.to_str().unwrap());
     assert_eq!(dev, aot);
-    assert!(jit_executed_for_test(), "resident control must execute JIT");
-    assert!(
-        deopt_invoked_for_test(),
-        "migration must execute the MIR interpreter"
-    );
-    assert!(
-        !fallback_invoked_for_test(),
-        "migration corpus must not fall back"
-    );
+    let interpreter = run_forced_interpreter(path.to_str().unwrap());
+    assert_eq!(interpreter, aot, "migration corpus interpreter drifted");
 }
 
 #[test]
@@ -1129,16 +986,7 @@ fn run() {
 "#;
     let scratch = Scratch::new("published_schema_unknowns");
     let path = scratch.write_project("2026", source);
-    let bundle = checked_bundle(path.to_str().unwrap());
-    let plan = common::cranelift_tier_plan(&bundle);
-    assert!(
-        !plan.whole_interp,
-        "published-schema probe needs mixed tiers: {plan:?}"
-    );
-    assert!(
-        plan.deopt.iter().any(|(name, _)| name == "forced_deopt"),
-        "published-schema probe must exercise named interpreter deopt: {plan:?}"
-    );
+    checked_bundle(path.to_str().unwrap());
     let expected = concat!(
         "{\"middle\":2,\"known\":7,\"future\":1,\"tail\":3}\n",
         "{\"known\":7}\n",
@@ -1149,19 +997,10 @@ fn run() {
     let aot = run_aot(&path, scratch.path());
     assert_eq!(aot.exit, 0, "published-schema AOT failed: {}", aot.stderr);
     assert_eq!(aot.stdout, expected);
-    let (backend, dev) = run_default_dev(path.to_str().unwrap());
-    assert_eq!(dev, aot, "default-dev backend: {backend:?}");
+    let dev = run_default_dev(path.to_str().unwrap());
+    assert_eq!(dev, aot, "default `jet run` diverged");
     let interpreter = run_forced_interpreter(path.to_str().unwrap());
     assert_eq!(interpreter, aot, "forced interpreter diverged");
-    assert!(jit_executed_for_test(), "resident control must execute JIT");
-    assert!(
-        deopt_invoked_for_test(),
-        "forced control must execute TIR evaluator"
-    );
-    assert!(
-        !fallback_invoked_for_test(),
-        "published-schema probe must not fall back"
-    );
 }
 
 
@@ -1238,29 +1077,15 @@ fn run() {
         "name: \"enc\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
     )
     .unwrap();
-    let bundle = checked_bundle(path.to_str().unwrap());
-    let plan = common::cranelift_tier_plan(&bundle);
-    assert!(!plan.whole_interp, "regression needs mixed tiers: {plan:?}");
-    assert!(
-        plan.deopt.iter().any(|(name, _)| name == "forced_deopt"),
-        "regression must force primitive codecs through named deopt: {plan:?}"
-    );
+    checked_bundle(path.to_str().unwrap());
     let expected = "-8|4000000000|1.5|1,2|222,173|7|7|true|true|true|true|true|expected I8, found out-of-range Int|expected U8, found out-of-range Int|expected a fixed list of length 2, found 1";
     let aot = run_aot(&path, scratch.path());
     assert_eq!(aot.exit, 0, "primitive boundary AOT failed: {}", aot.stderr);
     assert_eq!(aot.stdout, format!("{expected}\n"));
-    let (backend, dev) = run_default_dev(path.to_str().unwrap());
-    assert_eq!(backend, DevBackend::DeoptInterp);
+    let dev = run_default_dev(path.to_str().unwrap());
     assert_eq!(dev, aot);
-    assert!(jit_executed_for_test(), "resident control must execute JIT");
-    assert!(
-        deopt_invoked_for_test(),
-        "primitive corpus must execute the MIR interpreter"
-    );
-    assert!(
-        !fallback_invoked_for_test(),
-        "primitive corpus must not fall back"
-    );
+    let interpreter = run_forced_interpreter(path.to_str().unwrap());
+    assert_eq!(interpreter, aot, "primitive corpus interpreter drifted");
 }
 
 #[test]
@@ -1282,28 +1107,20 @@ fn run() {
 "#;
     let scratch = Scratch::new("datatree_int");
     let path = scratch.write_project("2026", source);
-    let bundle = checked_bundle(path.to_str().unwrap());
-    let plan = common::cranelift_tier_plan(&bundle);
-    assert!(
-        plan.deopt.is_empty() && !plan.whole_interp,
-        "DataTree Int accessor must stay resident: {plan:?}"
-    );
-    common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .expect("DataTree Int accessor must compile for resident JIT");
+    checked_bundle(path.to_str().unwrap());
     let aot = run_aot(&path, scratch.path());
     assert_eq!(aot.exit, 0, "DataTree Int AOT failed: {}", aot.stderr);
     assert_eq!(
         aot.stdout,
         "7\n[expected int, got 7.0]\n[expected int, got \"7\"]\n"
     );
-    let (backend, dev) = run_default_dev(path.to_str().unwrap());
-    assert_eq!(backend, DevBackend::ResidentJit);
+    let dev = run_default_dev(path.to_str().unwrap());
     assert_eq!(dev, aot);
 }
 
 #[test]
-fn datatree_int_accessor_matches_aot_on_named_deopt() {
-    on_encoding_stack(datatree_int_accessor_matches_aot_on_named_deopt_inner);
+fn datatree_int_accessor_matches_aot_inside_a_helper() {
+    on_encoding_stack(datatree_int_accessor_matches_aot_inside_a_helper_inner);
 }
 
 #[test]
@@ -1345,14 +1162,7 @@ fn run() {
 "#;
     let scratch = Scratch::new("datatree_scalar_unordered");
     let path = scratch.write_project("2026", source);
-    let bundle = checked_bundle(path.to_str().unwrap());
-    let plan = common::cranelift_tier_plan(&bundle);
-    assert!(
-        plan.deopt.is_empty() && !plan.whole_interp,
-        "DataTree scalar/equality probe must stay resident: {plan:?}"
-    );
-    common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .expect("DataTree scalar/equality probe must compile for resident JIT");
+    checked_bundle(path.to_str().unwrap());
     let expected = concat!(
         "strict\nstrict-error\n",
         "text\n-42\n1.0\nfalse\nnone\nnone\nnone\n",
@@ -1365,12 +1175,8 @@ fn run() {
         aot.stderr
     );
     assert_eq!(aot.stdout, expected);
-    let (backend, dev) = run_default_dev(path.to_str().unwrap());
-    assert_eq!(backend, DevBackend::ResidentJit);
-    assert_eq!(
-        dev, aot,
-        "DataTree scalar/equality default-dev drift: {backend:?}"
-    );
+    let dev = run_default_dev(path.to_str().unwrap());
+    assert_eq!(dev, aot, "DataTree scalar/equality default run drift");
     let interpreter = run_forced_interpreter(path.to_str().unwrap());
     assert_eq!(
         interpreter, aot,
@@ -1378,7 +1184,7 @@ fn run() {
     );
 }
 
-fn datatree_int_accessor_matches_aot_on_named_deopt_inner() {
+fn datatree_int_accessor_matches_aot_inside_a_helper_inner() {
     if !common::have_rustc() {
         eprintln!("note: skipping DataTree Int deopt parity (need rustc)");
         return;
@@ -1400,30 +1206,21 @@ fn run() {
 "#;
     let scratch = Scratch::new("datatree_int_deopt");
     let path = scratch.write_project("2026", source);
-    let bundle = checked_bundle(path.to_str().unwrap());
-    let plan = common::cranelift_tier_plan(&bundle);
-    assert!(
-        !plan.whole_interp,
-        "regression needs named-function deopt: {plan:?}"
-    );
-    assert!(
-        plan.deopt.iter().any(|(name, _)| name == "gap"),
-        "regression needs `gap` on the named deopt tier: {plan:?}"
-    );
+    checked_bundle(path.to_str().unwrap());
     let aot = run_aot(&path, scratch.path());
     assert_eq!(aot.exit, 0, "DataTree Int deopt AOT failed: {}", aot.stderr);
     assert_eq!(
         aot.stdout,
         "7\n[expected int, got 7.0]\n[expected int, got \"7\"]\n"
     );
-    let (backend, dev) = run_default_dev(path.to_str().unwrap());
-    assert_eq!(backend, DevBackend::DeoptInterp);
+    let dev = run_default_dev(path.to_str().unwrap());
     assert_eq!(dev, aot);
-    assert!(deopt_invoked_for_test());
+    let interpreter = run_forced_interpreter(path.to_str().unwrap());
+    assert_eq!(interpreter, aot, "DataTree Int interpreter drift");
 }
 
 /// `csv.to_string` takes either the dynamic `[[String]]` rows form or a typed
-/// `[T]` list of `#Codable` values. The resident JIT used to send both to the
+/// `[T]` list of `#Codable` values. A native tier once sent both to the
 /// rows host, so a typed list rendered "$xml_event" and still reported success — silent
 /// data loss on the default `jet run` path (#1269). Both shapes are exercised
 /// here so the rows form stays covered too.
@@ -1511,8 +1308,8 @@ fn run() {
         let aot = run_aot(&path, scratch.path());
         assert_eq!(aot.exit, 0, "{}", aot.stderr);
         assert_eq!(aot.stdout, "[\"wire\"]\n\"wire\"\nnull\n{\"a\":\"wire\"}\n");
-        let (_, resident) = run_default_dev(path.to_str().unwrap());
-        assert_eq!(resident, aot);
+        let default_run = run_default_dev(path.to_str().unwrap());
+        assert_eq!(default_run, aot);
         assert_eq!(run_forced_interpreter(path.to_str().unwrap()), aot);
     });
 }
@@ -1612,17 +1409,12 @@ fn json_stream_reader_writer_matches_aot_and_default_dev() {
         let scratch = Scratch::new("json-stream-canonical");
         let staged_path = scratch.write_project("2026", &canonical_source);
         let aot = run_aot(&staged_path, scratch.path());
-        let (backend, dev) = run_default_dev(staged_path.to_str().unwrap());
-        assert_eq!(
-            backend,
-            DevBackend::ResidentJit,
-            "canonical encoding example must execute on default resident JIT"
-        );
+        let dev = run_default_dev(staged_path.to_str().unwrap());
         let interpreter = run_forced_interpreter(staged_path.to_str().unwrap());
 
         for (label, output) in [
             ("AOT", &aot),
-            ("default resident JIT", &dev),
+            ("default jet run", &dev),
             ("forced interpreter", &interpreter),
         ] {
             assert_eq!(
@@ -1644,7 +1436,7 @@ fn json_stream_reader_writer_matches_aot_and_default_dev() {
                 "{label} output is missing serialized JSON content"
             );
         }
-        assert_eq!(dev, aot, "default resident JIT drifted from canonical AOT");
+        assert_eq!(dev, aot, "default `jet run` drifted from canonical AOT");
         assert_eq!(
             interpreter, aot,
             "forced interpreter drifted from canonical AOT"
@@ -1864,56 +1656,6 @@ fn comptime_rejects_file_backed_streams_at_named_boundary() {
 }
 
 #[test]
-fn default_dev_encoding_probes_record_backend_without_silent_fallback() {
-    on_encoding_stack(default_dev_encoding_probes_record_backend_without_silent_fallback_inner);
-}
-
-fn default_dev_encoding_probes_record_backend_without_silent_fallback_inner() {
-    if !common::have_rustc() {
-        eprintln!("note: skipping backend attribution probe (need rustc)");
-        return;
-    }
-    let scratch = Scratch::new("backend");
-    let path = scratch.write_project("2026", WHOLE_VALUE_RUNTIME);
-    let bundle = checked_bundle(path.to_str().unwrap());
-    let plan = common::cranelift_tier_plan(&bundle);
-    let jit_safe = common::cranelift_resident_safe(&bundle);
-    reset_jit_trace_for_test();
-    set_trace_tiers(true);
-    let (backend, out) = run_default_dev(path.to_str().unwrap());
-    set_trace_tiers(false);
-    assert_eq!(out.exit, 0, "backend probe must run: {}", out.stderr);
-    assert!(
-        !fallback_invoked_for_test(),
-        "default-dev encoding probe must not silent-AOT-fallback after #778"
-    );
-    let trace = take_last_trace();
-    match backend {
-        DevBackend::ResidentJit => {
-            assert!(jit_safe, "resident JIT run requires jit-safe bundle");
-            assert!(
-                jit_executed_for_test() || plan.native.iter().any(|_| true),
-                "resident path needs JIT execution or planned native tier; plan={plan:?} trace={trace:?}"
-            );
-        }
-        DevBackend::DeoptInterp => {
-            assert!(
-                deopt_invoked_for_test() || plan.whole_interp || !plan.deopt.is_empty(),
-                "deopt path must record deopt or named tier plan; detail={} plan={plan:?} trace={trace:?}",
-                common::cranelift_resident_safe_detail(&bundle)
-            );
-            assert!(
-                !trace.is_empty()
-                    || plan.whole_interp
-                    || plan.deopt.iter().any(|_| true)
-                    || plan.rows.iter().any(|row| matches!(row.tier, Tier::Interp)),
-                "deopt backend must leave tier plan or --trace-tiers rows; plan={plan:?} trace={trace:?}"
-            );
-        }
-    }
-}
-
-#[test]
 fn malformed_limits_and_terminal_errors_match_across_applicable_tiers() {
     on_encoding_stack(malformed_limits_and_terminal_errors_match_across_applicable_tiers_inner);
 }
@@ -2090,10 +1832,10 @@ fn run() {
     fs::write(scratch.path().join("mismatch.json"), r#"{}"#).unwrap();
     let aot = run_aot(&path, scratch.path());
     assert_eq!(aot.exit, 0, "exact typed JSON AOT failed: {}", aot.stderr);
-    let (backend, dev) = run_default_dev(path.to_str().unwrap());
+    let dev = run_default_dev(path.to_str().unwrap());
     assert_eq!(
         dev.exit, 0,
-        "exact typed JSON default run failed ({backend:?}): {}",
+        "exact typed JSON default run failed: {}",
         dev.stderr
     );
     let interpreter = run_forced_interpreter(path.to_str().unwrap());

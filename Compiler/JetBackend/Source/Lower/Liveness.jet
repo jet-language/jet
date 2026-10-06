@@ -1,0 +1,158 @@
+// Which carried slots each MIR block needs on entry: backward liveness over
+// the slots' places, so a block's parameters and every edge into it carry only
+// those slots instead of every slot. Lowering then grows with the live values,
+// not with blocks × slots (a many-variant enum's derived decode has over a
+// thousand blocks and as many temporaries).
+//
+// A block uses a slot when an instruction names one of its places (reads,
+// moves, projected writes, replacements, addresses, receiver and call-argument
+// places, require diagnostics' and DataEntriesToMap's locals) before the block
+// defines it; a whole-root WritePlace, or the value a temporary or parameter
+// place stands for, defines it. A slot no later block uses is not carried, so
+// an edge never passes it; the entry still starts every slot as its
+// placeholder (Lower.jet lower_clear_slot).
+use jet_foundation.[
+    MIRCallArg, MIRFunction, MIROperation, MIRPlaceID, MIRSemanticOp, mir_operation_place_uses,
+]
+
+LOWER_LIVE_BITS :: prep { 48 }
+
+fn lower_live_empty(words: Int) -> [Int] Never! {
+    row := [Int]{}
+    loop _ in 0..<words -> &row.push(0)
+    row
+}
+
+fn lower_live_has(bits: [Int], slot: Int) -> Bool Never! {
+    ((bits[slot /% LOWER_LIVE_BITS] >> (slot % LOWER_LIVE_BITS)) & 1) == 1
+}
+
+fn lower_live_set(bits: &[Int], slot: Int) Never! {
+    word :: slot /% LOWER_LIVE_BITS
+    bits[word] = bits[word] | (1 << (slot % LOWER_LIVE_BITS))
+}
+
+fn lower_call_arg_places(args: [MIRCallArg]) -> [MIRPlaceID] Never! {
+    places := [MIRPlaceID]{}
+    loop arg in args {
+        if arg.place == .Val(place) -> &places.push(place)
+    }
+    places
+}
+
+fn lower_semantic_places(semantic: MIRSemanticOp) -> [MIRPlaceID] Never! {
+    if semantic == {
+        .StaticPreludeCall(_, args, _, _) | .HardwareCall(_, _, _, args) | .ClosureMethod(_, args, _) | .AllocNew(_, _, _, args) | .HostCall(_, args) -> lower_call_arg_places(args)
+        .CursorTakePattern(_, place, _) | .ReaderTakePattern(_, place, _) -> [MIRPlaceID]{place}
+        else -> [MIRPlaceID]{}
+    }
+}
+
+// Every place `operation` names: mir_operation_place_uses plus call-argument
+// places (a Write argument lends its place) and pattern receivers.
+fn lower_instruction_places(operation: MIROperation) -> [MIRPlaceID] Never! {
+    places := mir_operation_place_uses(operation)
+    extra := [MIRPlaceID]{}
+    if operation == {
+        .Call(_, args, _) | .IndirectCall(_, args, _) -> extra = lower_call_arg_places(args)
+        .CoreCall(_, _, args, _, _, _) -> extra = lower_call_arg_places(args)
+        .Semantic(semantic) -> extra = lower_semantic_places(semantic)
+        else -> {}
+    }
+    loop place in extra -> &places.push(place)
+    places
+}
+
+// Per MIR block position: the carried slots live on entry, ascending. Blocks
+// outside `order` (unreachable) need none.
+fn lower_live_slots(function: MIRFunction, slots: [LowerSlot], place_slots: [U64:Int], local_slots: [U64:Int], defined_slots: [U64:Int], successors: [[Int]], order: [Int]) -> [[Int]] Never! {
+    words :: (slots.len() + LOWER_LIVE_BITS - 1) /% LOWER_LIVE_BITS
+    roots := [U64:Bool]{}
+    loop place in function.places {
+        if place.projections.len() == 0 -> _ := &roots.add(place.id.value, true)
+    }
+    uses := [[Int]]{}
+    defs := [[Int]]{}
+    loop block in function.blocks {
+        used := lower_live_empty(words)
+        defined := lower_live_empty(words)
+        loop instruction in block.instructions {
+            if instruction.operation == .Phi(_) {
+                // A phi's value is the block's own parameter: it defines the
+                // temporary place standing for it before any use, so the slot
+                // is never also carried in (which would override the phi).
+                if instruction.result == .Val(result) {
+                    if defined_slots.get(result.value) == .Val(slot) {
+                        if slots[slot].carried -> lower_live_set(&defined, slot)
+                    }
+                }
+                next
+            }
+            killed := -1
+            if instruction.operation == .WritePlace(place, _) {
+                if roots.get(place.value) != None -> killed = place_slots.get(place.value) ?? -1
+            }
+            touched := [Int]{}
+            loop place in lower_instruction_places(instruction.operation) {
+                slot :: place_slots.get(place.value) ?? next
+                if slot != killed -> &touched.push(slot)
+            }
+            if instruction.operation == .Semantic(semantic) {
+                if semantic == .RequireStop(_, _, _, _, context, _, _) {
+                    loop local in context.locals {
+                        slot :: local_slots.get(local.local.value) ?? next
+                        &touched.push(slot)
+                    }
+                }
+                if semantic == .DataEntriesToMap(_, local) {
+                    if local_slots.get(local.value) == .Val(slot) -> &touched.push(slot)
+                }
+            }
+            loop slot in touched {
+                if slots[slot].carried && !lower_live_has(defined, slot) -> lower_live_set(&used, slot)
+            }
+            if killed >= 0 && slots[killed].carried -> lower_live_set(&defined, killed)
+            if instruction.result == .Val(result) {
+                if defined_slots.get(result.value) == .Val(slot) {
+                    if slots[slot].carried -> lower_live_set(&defined, slot)
+                }
+            }
+        }
+        &uses.push(used)
+        &defs.push(defined)
+    }
+    // live_in = use ∪ (live_out − def), to a fixed point, sinks first.
+    live := [[Int]]{}
+    loop _ in function.blocks -> &live.push(lower_live_empty(words))
+    changed := true
+    loop changed {
+        changed = false
+        index := order.len() - 1
+        loop index >= 0 {
+            position :: order[index]
+            out := lower_live_empty(words)
+            loop target in successors[position] {
+                loop word in 0..<words -> out[word] = out[word] | live[target][word]
+            }
+            row := [Int]{}
+            loop word in 0..<words {
+                kept :: out[word] - (out[word] & defs[position][word])
+                &row.push(uses[position][word] | kept)
+            }
+            if row != live[position] {
+                live[position] = row
+                changed = true
+            }
+            index -= 1
+        }
+    }
+    rows := [[Int]]{}
+    loop bits in live {
+        row := [Int]{}
+        loop slot in 0..<slots.len() {
+            if lower_live_has(bits, slot) -> &row.push(slot)
+        }
+        &rows.push(row)
+    }
+    rows
+}

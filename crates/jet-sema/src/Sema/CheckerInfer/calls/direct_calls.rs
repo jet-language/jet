@@ -2257,9 +2257,12 @@ impl<'a> Checker<'a> {
             } else {
                 for (param, actual) in fn_type_params.iter().zip(&call.type_args) {
                     let actual = self.resolve_type(actual.clone());
-                    // D-CALLBACK-ERR1=A: `Never` fills a failure-domain
-                    // parameter (`apply<Never>(plain)`).
-                    if !actual.is_never() {
+                    // D-CALLBACK-ERR1=A: `Never` fills only a failure-domain
+                    // parameter (`apply<Never>(plain)`); elsewhere it is a
+                    // value position (D-NEVER2=B, E2422).
+                    if !actual.is_never()
+                        || !crate::Sema::CheckerCore::sig_names_failure_domain(&sig, &param.name)
+                    {
                         self.check_declared_type(&actual, call.name_span);
                     }
                     for bound in &param.bounds {
