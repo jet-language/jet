@@ -858,7 +858,9 @@ pub fn sema_collection_method_operation(contract: SemaCollectionMethodContract, 
         }}
         .SeqFilter -> SemaCollectionOperation.Closure{operation: if fallible -> TClosureOp.TryFilter else -> TClosureOp.Filter}
         .SeqEach -> SemaCollectionOperation.Closure{operation: if callback_mutable -> TClosureOp.EachMut else -> TClosureOp.Each}
-        .SeqFold -> SemaCollectionOperation.Closure{operation: if is_view -> TClosureOp.ViewFold else -> TClosureOp.Fold}
+        // A list folds through the borrowed view route (the step reads each
+        // element), so the receiver is never copied to be consumed.
+        .SeqFold -> SemaCollectionOperation.Closure{operation: if is_view || sema_collection_family(contract.kind) == CollectionReceivers.List -> TClosureOp.ViewFold else -> TClosureOp.Fold}
         .SetMap -> SemaCollectionOperation.SetClosure{operation: if {
             fallible -> TClosureOp.TryMap
             callback_mutable -> TClosureOp.MapMut

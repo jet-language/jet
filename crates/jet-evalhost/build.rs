@@ -2,6 +2,9 @@ use std::path::PathBuf;
 
 fn main() {
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+    // Prelude/Mem.rs (included by src/Memory.rs) leaves out the generated
+    // runtime's C-ABI exports under this cfg.
+    println!("cargo::rustc-cfg=jet_evalhost");
     write_yaml_std(&manifest);
     write_layout_rt(&manifest);
     write_reactive_rt(&manifest);

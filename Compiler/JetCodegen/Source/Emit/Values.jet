@@ -2045,6 +2045,7 @@ fn jet_rust_emit_inspected_only(ctx: &JetRustEmitContext, function: MIRFunction,
             address = true
         }
         .Move(_) | .Copy(_, _) -> return jet_rust_emit_inspected_transfer(&ctx, function, value)
+        .BuildString(_) | .Constant(_) -> return jet_rust_emit_literal_borrow_only(&ctx, function, value)
         else -> return false
     }
     // A place projecting from the value's own slot reads that slot, so an
@@ -2082,6 +2083,93 @@ fn jet_rust_emit_inspected_only(ctx: &JetRustEmitContext, function: MIRFunction,
         if !inspects -> return false
     }
     used && (place_receivers_only || (!address && jet_rust_emit_immutable_read_place(&ctx, function, value) != None))
+}
+
+// MIRRust literal_string_value: the text of a String that is a literal: a
+// constant, or built only from literal parts.
+fn jet_rust_emit_literal_string_value(ctx: JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String? Never! {
+    instruction :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return None
+    if instruction.operation == {
+        .Constant(constant) -> {
+            if constant == {
+                .String(text) -> return Val(text)
+                else -> return None
+            }
+        }
+        .BuildString(parts) -> {
+            pieces := [String]{}
+            loop part in parts {
+                if part.kind == {
+                    .Literal(text) -> &pieces.push(text)
+                    else -> return None
+                }
+            }
+            return Val(pieces.join(""))
+        }
+        else -> return None
+    }
+}
+
+// MIRRust static_string_literal_reference: a borrowed read of a String
+// literal lends a process-lifetime String built once on first use
+// (`&'static String`, the type a `&String` parameter takes). A no-OS build has
+// no `LazyLock`: it keeps the per-use String.
+fn jet_rust_emit_static_string_literal_reference(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String? Never! {
+    if jet_rust_emit_is_no_os(&ctx) -> return None
+    if jet_rust_emit_value_type(ctx, function, value).kind != MIRTypeKind.String -> return None
+    text :: jet_rust_emit_literal_string_value(ctx, function, value) ?? return None
+    Val("{{ static __JET_LITERAL: ::std::sync::LazyLock<String> = ::std::sync::LazyLock::new(|| String::from({jet_rust_emit_quote(text)})); &*__JET_LITERAL }}")
+}
+
+// MIRRust literal_borrow_only: every use of a String literal is a borrowed
+// Read argument of a user call, which lends the static String
+// (jet_rust_emit_static_string_literal_reference), or a borrowed operand of a
+// literal builtin route, which passes its static text
+// (jet_rust_emit_builtin_method_values), so the literal is never built.
+fn jet_rust_emit_literal_borrow_only(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> Bool Never! {
+    if jet_rust_emit_literal_string_value(ctx, function, value) == None -> return false
+    used := false
+    loop user in jet_rust_emit_value_users(ctx, function, value) {
+        if user.instruction < 0 -> return false
+        operation :: function.blocks[user.block].instructions[user.instruction].operation
+        if operation == {
+            .Call(callee, args, _) -> {
+                if jet_rust_emit_static_string_literal_reference(&ctx, function, value) == None -> return false
+                if callee == {
+                    .User(_) -> {}
+                    else -> return false
+                }
+                if !jet_rust_emit_direct_borrow_call(&ctx, function, callee, args, value) -> return false
+                loop arg in args {
+                    if arg.value == value && (arg.access != MIRAccess.Read || arg.place != None) -> return false
+                }
+            }
+            .Semantic(semantic) -> {
+                if semantic == {
+                    .BuiltinMethod(call, receiver, receiver_place, args, _) -> {
+                        row :: jet_rust_emit_prelude_route(ctx, call, false) ?? return false
+                        mask :: row.signature.borrow_mask
+                        if !jet_rust_emit_literal_builtin_symbol(mir_symbol_name(row.symbol)) || mask.len() != args.len() + 1 -> return false
+                        if receiver == value && (receiver_place != None || !mask[0]) -> return false
+                        loop (index, arg) in args {
+                            if arg == value && !mask[index + 1] -> return false
+                        }
+                    }
+                    else -> return false
+                }
+            }
+            else -> return false
+        }
+        used = true
+    }
+    used
+}
+
+// MIRRust literal_builtin_symbol: builtin receiver routes whose borrowed
+// operands take `&str` (the string kernels) or any borrowed form of the key
+// (`jet_map_get_opt`, `K: Borrow<Q>`).
+fn jet_rust_emit_literal_builtin_symbol(symbol: String) -> Bool Never! {
+    symbol == "jet_iter_string_split" || symbol == "jet_iter_string_rsplit" || symbol == "jet_string_contains" || symbol == "jet_string_starts_with" || symbol == "jet_string_ends_with" || symbol == "jet_map_get_opt"
 }
 
 // True when some instruction names a place projecting from `value`'s own
