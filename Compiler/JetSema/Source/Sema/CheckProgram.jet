@@ -1437,7 +1437,7 @@ pub fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &
             memory_complete = false
         }
     }
-    sema_comptime_probe_prepare(&probe, environment, program)
+    sema_comptime_probe_prepare(&probe, environment, program, available.counted_values)
     if !probe.applied {
         loop diagnostic in probe.diagnostics -> &diagnostics.push(diagnostic)
         sema_attach_diagnostic_source_locations(&diagnostics, 0, environment.source_segments)
@@ -2929,6 +2929,110 @@ pub fn sema_comptime_graph_apply_values(graph: &SemaRegistrationGraph, values: [
     }
 }
 
+// The rows of a graph that a staged value can type, keyed as
+// sema_comptime_constant_values keys values ("{module identity}|{key}"):
+// waiting constant symbols, constant rows not fully typed, waiting import
+// bindings (keyed by their target module) and untyped `Const` items. A run
+// builds them once (sema_comptime_value_sites) and applies each landing
+// through them (sema_comptime_graph_apply_sites), so a landing reads only
+// its own values' rows instead of every row of every module. Staged values
+// only fill in types, so no row outside these ever takes one. `constants`
+// lists the positions of every constant row by "{module index}|{key}"
+// (sema_comptime_staged_constant_rows).
+pub struct SemaComptimeValueSites {
+    sites: [String:[SemaComptimeValueSite]]
+    constants: [String:[Int]]
+}
+
+pub enum SemaComptimeValueSite {
+    Symbol(module_index: Int, position: Int)
+    Constant(module_index: Int, position: Int)
+    ModuleImport(module_index: Int, import_index: Int, binding: Int)
+    Item(module_index: Int, position: Int)
+    GraphImport(import_index: Int, binding: Int)
+}
+
+fn sema_comptime_value_site_add(sites: &[String:[SemaComptimeValueSite]], slot: String, site: SemaComptimeValueSite) Never! {
+    rows := sites.get(slot) ?? [SemaComptimeValueSite]{}
+    &rows.push(site)
+    sites[slot] = rows
+}
+
+pub fn sema_comptime_value_sites(graph: SemaRegistrationGraph) -> SemaComptimeValueSites Never! {
+    sites := [String:[SemaComptimeValueSite]]{}
+    constants := [String:[Int]]{}
+    loop module_index in 0..<graph.modules.len() {
+        module_identity :: graph.modules[module_index].module_identity
+        loop position in 0..<graph.modules[module_index].symbols.len() {
+            if sema_comptime_symbol_waits(graph.modules[module_index].symbols[position]) -> sema_comptime_value_site_add(&sites, "{module_identity}|{graph.modules[module_index].symbols[position].id.key}", SemaComptimeValueSite.Symbol{module_index: module_index, position: position})
+        }
+        loop position in 0..<graph.modules[module_index].constants.len() {
+            constant :: graph.modules[module_index].constants[position]
+            row_slot :: "{module_index}|{constant.symbol.id.key}"
+            positions := constants.get(row_slot) ?? [Int]{}
+            &positions.push(position)
+            constants[row_slot] = positions
+            if constant.ty != None && constant.symbol.ty != None && constant.declaration.ty != None -> next
+            sema_comptime_value_site_add(&sites, "{module_identity}|{constant.symbol.id.key}", SemaComptimeValueSite.Constant{module_index: module_index, position: position})
+        }
+        loop import_index in 0..<graph.modules[module_index].imports.len() {
+            loop binding in 0..<graph.modules[module_index].imports[import_index].bindings.len() {
+                row :: graph.modules[module_index].imports[import_index].bindings[binding]
+                if sema_comptime_symbol_waits(row.symbol) -> sema_comptime_value_site_add(&sites, "{row.target_module_identity}|{row.symbol.id.key}", SemaComptimeValueSite.ModuleImport{module_index: module_index, import_index: import_index, binding: binding})
+            }
+        }
+        loop position in 0..<graph.modules[module_index].program.items.len() {
+            key :: sema_comptime_constant_item_key(module_identity, graph.modules[module_index].program.items[position]) ?? next
+            sema_comptime_value_site_add(&sites, "{module_identity}|{key}", SemaComptimeValueSite.Item{module_index: module_index, position: position})
+        }
+    }
+    loop import_index in 0..<graph.imports.len() {
+        loop binding in 0..<graph.imports[import_index].bindings.len() {
+            row :: graph.imports[import_index].bindings[binding]
+            if sema_comptime_symbol_waits(row.symbol) -> sema_comptime_value_site_add(&sites, "{row.target_module_identity}|{row.symbol.id.key}", SemaComptimeValueSite.GraphImport{import_index: import_index, binding: binding})
+        }
+    }
+    SemaComptimeValueSites{sites: sites, constants: constants}
+}
+
+// sema_comptime_graph_apply_values on a graph whose sites are `sites`: each
+// site of a value takes it under the same test that rewrite applies, so the
+// graph ends exactly as there.
+pub fn sema_comptime_graph_apply_sites(graph: &SemaRegistrationGraph, sites: SemaComptimeValueSites, values: [SemaComptimeItemValue]) Never! {
+    if values.len() == 0 -> return
+    constants :: sema_comptime_constant_values(values)
+    loop (slot, value) in constants {
+        rows :: sites.sites.get(slot) ?? next
+        loop site in rows {
+            if site == {
+                .Symbol(module_index, position) -> {
+                    if sema_comptime_symbol_waits(graph.modules[module_index].symbols[position]) -> graph.modules[module_index].symbols[position].ty = Val(value.ty)
+                }
+                .Constant(module_index, position) -> {
+                    if graph.modules[module_index].constants[position].ty == None -> graph.modules[module_index].constants[position].ty = Val(value.ty)
+                    if graph.modules[module_index].constants[position].symbol.ty == None -> graph.modules[module_index].constants[position].symbol.ty = Val(value.ty)
+                    if graph.modules[module_index].constants[position].declaration.ty == None -> graph.modules[module_index].constants[position].declaration.ty = Val(value.ty)
+                }
+                .ModuleImport(module_index, import_index, binding) -> {
+                    if sema_comptime_symbol_waits(graph.modules[module_index].imports[import_index].bindings[binding].symbol) -> graph.modules[module_index].imports[import_index].bindings[binding].symbol.ty = Val(value.ty)
+                }
+                .Item(module_index, position) -> {
+                    if graph.modules[module_index].program.items[position] == .Const(definition) {
+                        if definition.ty == None {
+                            updated_definition := definition
+                            updated_definition.ty = Val(value.ty)
+                            graph.modules[module_index].program.items[position] = Item.Const{value: updated_definition}
+                        }
+                    }
+                }
+                .GraphImport(import_index, binding) -> {
+                    if sema_comptime_symbol_waits(graph.imports[import_index].bindings[binding].symbol) -> graph.imports[import_index].bindings[binding].symbol.ty = Val(value.ty)
+                }
+            }
+        }
+    }
+}
+
 fn sema_comptime_symbol_takes_value(symbol: Symbol, module_identity: String, constants: [String:SemaComptimeItemValue]) -> Bool Never! {
     sema_comptime_symbol_waits(symbol) && sema_comptime_value_for_symbol(constants, module_identity, symbol.id.key) != None
 }
@@ -3010,15 +3114,19 @@ fn sema_comptime_constant_has_ast_value(graph: SemaRegistrationGraph, module_ide
 // An empty probe scope: the first sema_comptime_probe_prepare builds it. The
 // caller that runs a series of probes owns one and lends it to each.
 pub fn sema_comptime_probe_init(host_hooks: SemaHostHookAccess?) -> SemaScopeProbe Never! {
-    SemaScopeProbe{module_identity: "", table: sema_scope_init(""), applied: false, diagnostics: [Diagnostic]{}, constants: [SemaScopeProbeConstant]{}, host_hooks: host_hooks}
+    SemaScopeProbe{module_identity: "", table: sema_scope_init(""), applied: false, diagnostics: [Diagnostic]{}, constants: [SemaScopeProbeConstant]{}, host_hooks: host_hooks, version: -1}
 }
 
 // Readies `probe` as the declaration scope of the environment's current
 // module (set by sema_scope_environment_enter_probe_module): a scope built for
 // that module is reused, with any constant a staged value typed since copied
-// in, and anything else is rebuilt. The caller checks inside a mark on
-// `probe.table` and rolls back, so the next probe finds the same scope.
-fn sema_comptime_probe_prepare(probe: &SemaScopeProbe, environment: SemaScopeEnvironment, program: SemaProgramTables) {
+// in, and anything else is rebuilt. `version` is the number of staged values
+// applied to the run's graph (SemaComptimeAvailableConstants
+// counted_values): only those type waiting constants, so a scope compared at
+// the same version has nothing to copy in, and is reused as it is. The caller
+// checks inside a mark on `probe.table` and rolls back, so the next probe
+// finds the same scope.
+fn sema_comptime_probe_prepare(probe: &SemaScopeProbe, environment: SemaScopeEnvironment, program: SemaProgramTables, version: Int) {
     module_identity :: environment.module_identity
     graph_option :: program.registration_graph
     graph :: graph_option ?? {
@@ -3027,11 +3135,14 @@ fn sema_comptime_probe_prepare(probe: &SemaScopeProbe, environment: SemaScopeEnv
         probe.applied = false
         probe.diagnostics = [Diagnostic]{}
         probe.constants = [SemaScopeProbeConstant]{}
+        probe.version = -1
         return
     }
     if probe.applied && probe.module_identity == module_identity {
+        if probe.version == version && version >= 0 -> return
         if sema_registration_module_index(graph, module_identity) == .Val(module_index) {
             sema_comptime_probe_refresh(&probe, graph, module_index)
+            probe.version = version
             return
         }
     }
@@ -3046,6 +3157,7 @@ fn sema_comptime_probe_prepare(probe: &SemaScopeProbe, environment: SemaScopeEnv
     probe.applied = applied
     probe.diagnostics = diagnostics
     probe.constants = constants
+    probe.version = version
 }
 
 // Copies each waiting constant that a staged value has typed since the last
@@ -3199,7 +3311,7 @@ fn sema_comptime_probe_module(shared_state: Shared<SemaProbeShared>, graph: Sema
     module_sources := sema_comptime_collect_module_sources(graph, graph.modules[module_index])
     if module_sources.len() > 0 && sema_scope_environment_enter_probe_module(&environment, program, graph.modules[module_index].module_identity, [SemaComptimeBodyValue]{}) {
         probe := sema_comptime_probe_init(host_hooks)
-        sema_comptime_probe_prepare(&probe, environment, program)
+        sema_comptime_probe_prepare(&probe, environment, program, -1)
         if probe.applied {
             weights := [Int]{}
             workers :: sema_comptime_probe_workers(module_sources, graph.modules[module_index].program.items.len(), threads, &weights)
@@ -3637,30 +3749,40 @@ pub fn sema_comptime_modules_with_values(program: SemaProgramTables, values: [Se
 // reads values only for constant rows, and applying a value only types
 // constant rows of the graph, which no other declaration reads), so a run
 // joins these rows to its staged modules instead of rechecking every module.
-// As there, the first value of a constant key wins.
-pub fn sema_comptime_staged_constant_rows(resolved_graph: SemaRegistrationGraph, values: [SemaComptimeItemValue], from: Int) -> [TConstantDef] {
+// As there, the first value of a constant key wins: `staged` holds the
+// `module\nkey` of every constant value before `from` (sema_comptime_staged_keys)
+// and gains those from `from` on, so no value is compared with every earlier
+// one; `sites` (sema_comptime_value_sites of `resolved_graph`) finds the
+// value's constant rows without scanning its module's constants.
+pub fn sema_comptime_staged_constant_rows(resolved_graph: SemaRegistrationGraph, sites: SemaComptimeValueSites, values: [SemaComptimeItemValue], from: Int, staged: &[String:Bool]) -> [TConstantDef] {
     rows := [TConstantDef]{}
     // Staging diagnostics are never reported (as for the module rechecks).
     diagnostics := [Diagnostic]{}
     loop index in from..<values.len() {
         value :: values[index]
         if value.kind != SemaComptimeItemKind.Constant -> next
-        earlier := false
-        loop previous in 0..<index {
-            if values[previous].kind == SemaComptimeItemKind.Constant && values[previous].module_identity == value.module_identity && values[previous].key == value.key -> earlier = true
-        }
-        if earlier -> next
+        staged_key :: "{value.module_identity}\n{value.key}"
+        if staged.get(staged_key) != None -> next
+        staged[staged_key] = true
         module_index :: sema_registration_module_index(resolved_graph, value.module_identity) ?? next
+        positions :: sites.constants.get("{module_index}|{value.key}") ?? next
         module_row :: resolved_graph.modules[module_index]
         staged_values := [String:SemaComptimeItemValue]{}
         staged_values[value.key] = value
-        loop constant in module_row.constants {
-            if constant.symbol.id.key != value.key -> next
-            row :: sema_checked_constant_with_values(resolved_graph, module_row, constant, staged_values, &diagnostics) ?? next
+        loop position in positions {
+            row :: sema_checked_constant_with_values(resolved_graph, module_row, module_row.constants[position], staged_values, &diagnostics) ?? next
             &rows.push(row)
         }
     }
     rows
+}
+
+// Adds the `module\nkey` of every constant value of `values` to `staged`
+// (sema_comptime_staged_constant_rows).
+pub fn sema_comptime_staged_keys(values: [SemaComptimeItemValue], staged: &[String:Bool]) Never! {
+    loop value in values {
+        if value.kind == SemaComptimeItemKind.Constant -> staged["{value.module_identity}\n{value.key}"] = true
+    }
 }
 
 // The scope half of a staging run's one environment: every comptime item and
@@ -3713,7 +3835,7 @@ pub fn sema_check_comptime_item(environment: &SemaScopeEnvironment, program: Sem
 fn sema_check_comptime_item_in(environment: SemaScopeEnvironment, program: SemaProgramTables, probe: &SemaScopeProbe, available: SemaComptimeAvailableConstants, source: SemaComptimeItemSource, values: [SemaComptimeItemValue]) -> SemaComptimeItemCheck {
     graph_option :: program.registration_graph
     resolved_graph :: graph_option ?? return SemaComptimeItemCheck{request: None, dependencies: source.dependencies, waiting_dependencies: source.dependencies, diagnostics: [Diagnostic]{}, complete: false}
-    sema_comptime_probe_prepare(&probe, environment, program)
+    sema_comptime_probe_prepare(&probe, environment, program, available.counted_values)
     diagnostics := ~probe.diagnostics
     if !probe.applied -> return SemaComptimeItemCheck{request: None, dependencies: source.dependencies, waiting_dependencies: source.dependencies, diagnostics: diagnostics, complete: false}
     mark :: sema_scope_mark(&probe.table)
