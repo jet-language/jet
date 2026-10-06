@@ -485,8 +485,8 @@ fn sema_effect_declarations_irreversible_fact(declarations: [Item], effect_name:
 // declarations loaded from the pinned Prelude module. It deliberately does
 // not maintain a second root allowlist: adding or removing an irreversible
 // effect in Prelude/Effects.jet changes this fact at the source boundary.
-fn sema_effect_canonical_irreversible_fact(environment: SemaScopeEnvironment, effect_name: String) -> Bool? {
-    graph_option :: environment.registration_graph
+fn sema_effect_canonical_irreversible_fact(environment: SemaScopeEnvironment, program: SemaProgramTables, effect_name: String) -> Bool? {
+    graph_option :: program.registration_graph
     graph :: graph_option ?? return None
     canonical_identity :: graph.canonical_effect_module_identity
     if canonical_identity == "" -> return None
@@ -495,8 +495,8 @@ fn sema_effect_canonical_irreversible_fact(environment: SemaScopeEnvironment, ef
     sema_effect_declarations_irreversible_fact(graph.modules[module_index].program.items, effect_name)
 }
 
-pub fn sema_effect_root_is_irreversible(environment: SemaScopeEnvironment, effect_name: String) -> Bool? {
-    sema_effect_canonical_irreversible_fact(environment, effect_name)
+pub fn sema_effect_root_is_irreversible(environment: SemaScopeEnvironment, program: SemaProgramTables, effect_name: String) -> Bool? {
+    sema_effect_canonical_irreversible_fact(environment, program, effect_name)
 }
 
 pub fn sema_effect_transaction_wall_diagnostic(api: String, effect_name: String, span: Span) -> Diagnostic {
@@ -508,13 +508,13 @@ pub fn sema_effect_transaction_wall_diagnostic(api: String, effect_name: String,
 // Check a call's declared effect row at the authored-transaction wall. The
 // caller supplies the canonical API spelling because TIR call nodes may no
 // longer retain the registration module/member pair.
-pub fn sema_effect_check_transaction_wall(environment: SemaScopeEnvironment, scopes: SemaScopeTable, effect_row: [EffectRowEntry]?, api: String, span: Span, diagnostics: &[Diagnostic]) -> Bool? {
+pub fn sema_effect_check_transaction_wall(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, effect_row: [EffectRowEntry]?, api: String, span: Span, diagnostics: &[Diagnostic]) -> Bool? {
     if scopes.transaction_wall_depth <= 0 -> return Val(true)
     row :: effect_row ?? return Val(true)
     loop entry in row {
         if entry.name.starts_with("!") || entry.name.starts_with("..") -> next
         parsed :: sema_effect_parse_name(entry.name) ?? next
-        irreversible :: sema_effect_root_is_irreversible(environment, parsed) ?? return None
+        irreversible :: sema_effect_root_is_irreversible(environment, program, parsed) ?? return None
         if irreversible {
             &diagnostics.push(sema_effect_transaction_wall_diagnostic(api, parsed, span))
             return Val(false)
@@ -782,8 +782,8 @@ fn sema_effect_node_from_source(function: TFunc, source: SemaEffectFunctionSourc
 // Intrinsic producers use the same fact carrier as checked calls. The effect
 // row is authoritative producer input: an empty present row means known-pure,
 // while an absent row remains unknown and is conservatively maximal downstream.
-pub fn sema_effect_record_intrinsic_fact(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, facts: SemaCallFacts, diagnostics: &[Diagnostic]) -> Bool Never! {
-    wall := sema_effect_check_transaction_wall(environment, scopes, facts.effect_bound, api, span, &diagnostics)
+pub fn sema_effect_record_intrinsic_fact(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, facts: SemaCallFacts, diagnostics: &[Diagnostic]) -> Bool Never! {
+    wall := sema_effect_check_transaction_wall(environment, program, scopes, facts.effect_bound, api, span, &diagnostics)
     allowed :: wall ?? return false
     if !allowed -> return false
     caller_key := sema_scope_function_owner_key(scopes)
@@ -801,9 +801,9 @@ pub fn sema_effect_record_intrinsic_fact(environment: SemaScopeEnvironment, scop
 
 // Convenience entry point for intrinsic operations whose only call metadata
 // is their canonical effect row. Use an empty row to record a known-pure site.
-pub fn sema_effect_record_intrinsic_effects(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, effect_row: [EffectRowEntry], diagnostics: &[Diagnostic]) -> Bool Never! {
+pub fn sema_effect_record_intrinsic_effects(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, effect_row: [EffectRowEntry], diagnostics: &[Diagnostic]) -> Bool Never! {
     sema_effect_record_intrinsic_fact(
-        environment,
+        environment, program,
         &scopes,
         &context,
         api,
