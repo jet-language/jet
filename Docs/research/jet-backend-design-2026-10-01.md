@@ -1092,6 +1092,17 @@ the comparison over fresh working directories. The harness refuses new MIR
 emissions, driver builds and shard processes while `~/.cache/jet-dev/proofq/PAUSE` exists; queue the
 continuation through proofq after the compile gate, not as a direct heavy run.
 
+Native-vs-Rust differential (#4619): `Tests/run-differential.mjs <outdir>`
+reads a run-goldens output directory after its run stage and compares each
+native run (`run/<case>.stdout`, exit status) with the Rust path's `jet run`
+reference (`mir/<case>.ref`), not only with the golden. A native result that
+differs from the Rust path is `native-diverges`, separate from a golden both
+paths miss (`agree-off-golden`). The gate fails on any divergence; with
+`--require-native` also on any golden the Rust path passes that native does
+not agree on, and with `--baseline <differential.tsv>` on any case that
+agreed before and no longer does. It writes `differential.tsv` and
+`differential-summary.txt`.
+
 ### Comparing the two front-end feeds
 
 `JetDriver.jet_driver_compile_mir` runs the same checked pipeline and optimizer
