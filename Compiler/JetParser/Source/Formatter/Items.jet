@@ -1202,7 +1202,14 @@ fn jfmt_fmt_trait(f: &JetFmt, t: TraitDef) {
     jfmt_write(&f, "trait ")
     jfmt_write(&f, t.name)
     // D-TRAIT-OVERLOAD1=A: one supertrait stays bare, several use the list.
-    // The Jet AST's TraitDef carries no supertraits yet, so none print.
+    if t.supertraits.len() == 1 {
+        jfmt_write(&f, ": ")
+        jfmt_write(&f, t.supertraits[0])
+    } else if t.supertraits.len() > 1 {
+        jfmt_write(&f, ": [")
+        jfmt_write(&f, t.supertraits.join(", "))
+        jfmt_write(&f, "]")
+    }
     jfmt_write(&f, " ")
     jfmt_write(&f, "{{")
     jfmt_newline(&f)
