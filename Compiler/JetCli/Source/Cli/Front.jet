@@ -102,6 +102,8 @@ pub struct JetCLIFmtRequest {
     pub simplify: Bool
     pub color: Bool
     pub quiet: Bool
+    // `--json`: the Rust status envelopes (`--check` clean/dirty/diff, preflight errors).
+    pub json: Bool{false}
 }
 
 // The `jet test` options the Jet host carries out (Source/CmdCompile.rs
@@ -934,6 +936,7 @@ fn jet_cli_fmt(argv: [String], jet_argv: [String], args: [String], color: Bool, 
         simplify: jet_argv.contains("--simplify"),
         color: color,
         quiet: quiet,
+        json: jet_argv.contains("--json"),
     }}
 }
 

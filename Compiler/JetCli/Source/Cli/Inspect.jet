@@ -1401,7 +1401,7 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     }
     source :: cli_files.read(job.file) ?? ""
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    semantic :: job.action == "rights" || job.action == "impact"
+    semantic :: job.action == "rights" || job.action == "impact" || job.action == "shapes"
     mode :: if semantic -> JetDriverCompileMode.Doc else -> JetDriverCompileMode.Program
     watch :: cli_time.start()
     compiled :: jet_cli_compile_file(job.file, job.color, job.threads, mode)
@@ -1414,7 +1414,7 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
                 errors.len() > 0 -> output = jet_cli_inspect_check_failed(job, source, errors)
                 result.internal_problem != None -> output = jet_cli_ice(result.internal_problem ?? "")
                 job.action == "types" -> output = jet_cli_inspect_types(jet_cli_inspect_programs(snapshot), job.json)
-                job.action == "shapes" -> output = jet_cli_inspect_shapes(jet_cli_inspect_programs(snapshot), job.file, job.json, job.color)
+                job.action == "shapes" -> output = jet_cli_inspect_shapes(result.doc_modules, job.json, job.color)
                 job.action == "rights" -> output = jet_cli_inspect_rights(result, job.project, job.file, job.json)
                 job.action == "impact" -> output = jet_cli_inspect_impact_report(job, result, diagnostics.len(), watch.elapsed_millis())
                 else -> output = jet_cli_inspect_build_plan(job, snapshot)
