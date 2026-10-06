@@ -2891,6 +2891,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     target_machine :: target_machine_option ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Check), false, trace)
 
     registration_inputs := [SemaRegistrationModuleInput]{}
+    source_positions :: jet_driver_source_file_positions(load.source_files)
     loop loaded_index in 0..<load.modules.len() {
         loaded_module :: load.modules[loaded_index]
         if loaded_module.source_unit_index < 0 || loaded_module.source_unit_index >= load.source_units.len() {
@@ -2913,6 +2914,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
             source_origin: unit.source_origin,
             program: loaded_module.program,
             foreign_handles: registration_foreign_handles,
+            source: jet_driver_source_text_at(load.source_files, source_positions, unit.path),
         })
     }
     canonical_effect_module_identity := canonical_effect_module.module_identity

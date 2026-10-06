@@ -18,10 +18,12 @@ use jet_foundation.[
     Func,
     ImplDef,
     Item,
+    LValue,
     MarkerDecl,
     NamedCtValue,
     NamedType,
     Span,
+    Stmt,
     StructDef,
     TAppliedRule,
     TAppliedRuleArgumentMenu,
@@ -29,6 +31,7 @@ use jet_foundation.[
     TComptimeKey,
     TComptimeValue,
     diagnostic_with_detail,
+    expr_span,
 ]
 
 pub struct SemaUserDeriveProvider {
@@ -432,6 +435,148 @@ fn sema_user_rule_collect_module(graph: SemaRegistrationGraph, module_index: Int
             }
         }
     }
+    // D-META-DSL1=A: a `.Block` rule receives the text inside Jet's closed
+    // braces as its `target` value. The rule body can check that text and
+    // emit ordinary Jet items through the same typed path as a type or
+    // function rule (Rust `CheckInner.rs` declared text blocks).
+    source :: graph.modules[module_index].source
+    block_spans :: graph.modules[module_index].program.block_spans
+    blocks := [SemaUserTextBlock]{}
+    loop item in items -> sema_user_text_blocks_in_item(item, source, block_spans, &blocks)
+    loop block in blocks {
+        body :: sema_user_rule_body(declarations, block.name) ?? next
+        expanded :: sema_derive_expand_provider_body(body, "target", CtValue.Str{value: block.text}, &diagnostics) ?? next
+        loop expanded_item in expanded -> &generated.push(expanded_item)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Declared text blocks (Rust `Bundle/Pipeline.rs` `block_source`,
+// `collect_declared_text_blocks`, `collect_item_declared_text_blocks`).
+
+pub struct SemaUserTextBlock {
+    pub name: String
+    pub text: String
+    pub span: Span
+}
+
+// Rust `LValue::span`.
+fn sema_user_text_lvalue_span(target: LValue) -> Span Never! {
+    if target == {
+        .Local(_, span) | .Index(_, _, span, _) | .Field(_, _, span) -> span
+    }
+}
+
+// Rust `Stmt::span`.
+fn sema_user_text_stmt_span(statement: Stmt) -> Span Never! {
+    if statement == {
+        .Expr(value) -> expr_span(value)
+        .Val(binding) -> binding.name_span
+        .Assign(target, _, _, _) -> sema_user_text_lvalue_span(target)
+        else -> sema_compiler_index_stmt_span(statement)
+    }
+}
+
+// The text inside the block's braces: the widest recorded block inside the
+// statement that covers every body statement (the last of equal widths), or
+// for an empty body the first recorded block inside it.
+fn sema_user_text_block_source(source: String, body: [Stmt], block_spans: [Span], outer: Span) -> String Never! {
+    chosen := Span?{None}
+    if body.len() > 0 {
+        first :: sema_user_text_stmt_span(body[0]).start
+        last :: sema_user_text_stmt_span(body[body.len() - 1]).end
+        width := -1
+        loop span in block_spans {
+            if span.start > outer.start && span.end < outer.end && span.start <= first && span.end >= last {
+                candidate :: if span.end > span.start -> span.end - span.start else -> 0
+                if candidate >= width {
+                    width = candidate
+                    chosen = Val(span)
+                }
+            }
+        }
+    } else {
+        loop span in block_spans {
+            if span.start > outer.start && span.end < outer.end {
+                if chosen == .Val(best) {
+                    if span.start < best.start -> chosen = Val(span)
+                } else {
+                    chosen = Val(span)
+                }
+            }
+        }
+    }
+    span :: chosen ?? return ""
+    bytes :: source.bytes()
+    if span.start < 0 || span.end < span.start || span.end > bytes.len() -> return ""
+    String.from_bytes(bytes[span.start..<span.end]) ?? ""
+}
+
+// Rust `ScopeMembers::statement_bodies`.
+fn sema_user_text_statement_bodies(statement: Stmt) -> [[Stmt]] Never! {
+    if statement == {
+        .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
+            bodies := [[Stmt]]{}
+            loop arm in arms -> &bodies.push(arm.body)
+            if else_body == .Val(body) -> &bodies.push(body)
+            bodies
+        }
+        .ComptimeIf(_, _, then_body, else_body, _, _) -> {
+            bodies := [[Stmt]]{then_body}
+            if else_body == .Val(body) -> &bodies.push(body)
+            bodies
+        }
+        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> [[Stmt]]{body}
+        else -> [[Stmt]]{}
+    }
+}
+
+fn sema_user_text_blocks_in(statements: [Stmt], source: String, block_spans: [Span], blocks: &[SemaUserTextBlock]) {
+    loop statement in statements {
+        if statement == .ScopeMember(name, _, _, _, body, dsl, _, span) {
+            if dsl -> &blocks.push(SemaUserTextBlock{name: name, text: sema_user_text_block_source(source, body, block_spans, span), span: span})
+        }
+        loop child in sema_user_text_statement_bodies(statement) -> sema_user_text_blocks_in(child, source, block_spans, &blocks)
+    }
+}
+
+fn sema_user_text_blocks_in_methods(methods: [Func], source: String, block_spans: [Span], blocks: &[SemaUserTextBlock]) {
+    loop method in methods -> sema_user_text_blocks_in(method.body, source, block_spans, &blocks)
+}
+
+fn sema_user_text_blocks_in_item(item: Item, source: String, block_spans: [Span], blocks: &[SemaUserTextBlock]) {
+    if item == {
+        .Func(function) -> sema_user_text_blocks_in(function.body, source, block_spans, &blocks)
+        .Test(test) -> sema_user_text_blocks_in(test.body, source, block_spans, &blocks)
+        .Impl(implementation) -> sema_user_text_blocks_in_methods(implementation.methods, source, block_spans, &blocks)
+        .Struct(definition) -> {
+            sema_user_text_blocks_in_methods(definition.methods, source, block_spans, &blocks)
+            loop implementation in definition.trait_impls -> sema_user_text_blocks_in_methods(implementation.methods, source, block_spans, &blocks)
+        }
+        .Enum(definition) -> {
+            sema_user_text_blocks_in_methods(definition.methods, source, block_spans, &blocks)
+            loop implementation in definition.trait_impls -> sema_user_text_blocks_in_methods(implementation.methods, source, block_spans, &blocks)
+        }
+        .CodeModule(code_module) -> {
+            if code_module.body == .Val(body) {
+                loop nested in body -> sema_user_text_blocks_in_item(nested, source, block_spans, &blocks)
+            }
+        }
+        else -> {}
+    }
+}
+
+// D-META-DSL1=A: a text block is checked by its rule only when the rule's
+// first declaration has a body (Rust `marker_vocabulary.declaration`).
+pub fn sema_registration_declared_text_rule(graph: SemaRegistrationGraph, name: String) -> Bool Never! {
+    loop module_row in graph.modules {
+        loop item in module_row.program.items {
+            if item == .MarkerDecl(declaration) {
+                if declaration.name == name -> return declaration.body != None
+            }
+        }
+    }
+    false
 }
 
 fn sema_user_rule_expand_module(graph: &SemaRegistrationGraph, module_index: Int, declarations: [MarkerDecl]) {
