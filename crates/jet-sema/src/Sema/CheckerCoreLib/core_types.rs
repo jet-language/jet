@@ -4490,7 +4490,7 @@ pub(crate) fn core_encoding_variants(
         "XMLReason" => &["Syntax", "Truncated", "ForbiddenDTD", "UnknownEntity"],
         "XMLEntityPolicy" => &["PredefinedOnly", "Reject"],
         "XMLEncoding" => &["UTF8", "UTF16"],
-        "XMLCanonicalMode" => &["Inclusive", "Exclusive"],
+        "XMLCanonicalMode" => &["Inclusive11", "Exclusive10"],
         _ => return None,
     };
     for name in units {
