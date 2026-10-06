@@ -94,7 +94,11 @@ fn jet_cli_sem_json_callable_signature(callable: JetCLISemCallable, view_provena
         effective :: failure_contract_effective_type(contract)
         error_names := [String]{}
         if effective == .Result(_, err) {
-            if !(err == .Named(name) && name == "Never") -> &error_names.push(type_name(err))
+            never := false
+            if err == .Named(name) {
+                if name == "Never" -> never = true
+            }
+            if !never -> &error_names.push(type_name(err))
         }
         errors = jet_cli_sem_json_strings(error_names)
         failure_contract = jet_cli_json_string(type_name(effective))

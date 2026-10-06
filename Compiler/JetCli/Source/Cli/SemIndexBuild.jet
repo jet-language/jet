@@ -11,44 +11,31 @@ use jet_driver.[
     JetDriverDocModule,
 ]
 use jet_foundation.[
-    AccessConvention,
-    CallablePolicy,
+    ArithmeticPolicyFact,
+    BindName,
+    BindPattern,
+    Binding,
     CallArg,
-    DerivationRecord,
+    CallablePolicy,
     DeriveBodyItem,
     EffectRowEntry,
-    EnumLitArg,
     Expr,
-    FailureContract,
-    ForKind,
     Func,
-    ImportKind,
     Item,
     LValue,
-    LambdaBody,
     MIRDerivationMethod,
     Marker,
-    MarkerCallArg,
     NamedSpan,
-    OrFallback,
+    OutputKind,
     Param,
     ParamZone,
     Span,
     Stmt,
-    StrPart,
-    TFunc,
+    SwitchArm,
     TraitImplBlock,
     TraitMethodSig,
-    ArithmeticPolicyFact,
-    BindName,
-    Binding,
-    BindPattern,
-    OutputKind,
-    SwitchArm,
     Type,
-    TypedLitBody,
     ViewProvenanceMap,
-    VariantPayload,
     access_sigil,
     derivation_identity,
     derivation_record,
@@ -60,7 +47,6 @@ use jet_foundation.[
     type_name,
 ]
 use jet_sema.[
-    SemaCallSiteFact,
     SemaNameReferenceFact,
     sema_compiler_index_view_map,
     sema_compiler_index_view_provenance,
@@ -576,12 +562,20 @@ fn jet_cli_sem_item_head(item: Item) -> NamedSpan Never! {
     }
 }
 
+fn jet_cli_sem_lvalue_start(target: LValue) -> Int Never! {
+    if target == {
+        .Local(_, name_span) -> name_span.start
+        .Index(base, _, _, _) -> expr_span(base).start
+        .Field(base, _, _) -> expr_span(base).start
+    }
+}
+
 // `Stmt::span` and the statement shape.
 fn jet_cli_sem_stmt_head(stmt: Stmt) -> NamedSpan {
     if stmt == {
         .Expr(expr) -> NamedSpan{name: "Expr", span: expr_span(expr)}
         .Val(binding) -> NamedSpan{name: "Val", span: Span{start: binding.name_span.start, end: expr_span(binding.init).end}}
-        .Assign(target, _, op_span, value) -> NamedSpan{name: "Assign", span: Span{start: op_span.start, end: expr_span(value).end}}
+        .Assign(target, _, _, value) -> NamedSpan{name: "Assign", span: Span{start: jet_cli_sem_lvalue_start(target), end: expr_span(value).end}}
         .Return(_, span) -> NamedSpan{name: "Return", span: span}
         .While(_, _, span, _, _) -> NamedSpan{name: "While", span: span}
         .For(_, _, _, _, _, span, _, _, _) -> NamedSpan{name: "For", span: span}
