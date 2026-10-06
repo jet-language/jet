@@ -256,7 +256,8 @@ fn fx_opaque_enum_rejection_checks() -> Bool Never! {
     if !fx_opaque_enum_rejection_check("Closed", 0) -> return false
     if !fx_opaque_enum_rejection_check("Closed", 1) -> return false
     if !fx_record_enum_projection_check() -> return false
-    print("opaque-enum: rejection checks passed (Closed ZST, construction); TaskFailure record payload projects natively")
+    if !fx_raw_pointer_lowering_check() -> return false
+    print("opaque-enum: rejection checks passed (Closed ZST, construction); TaskFailure record payload projects natively; raw pointer lowering lints clean")
     true
 }
 
@@ -273,4 +274,39 @@ fn fx_record_enum_projection_check() -> Bool Never! {
         if issue.message.contains("opaque runtime enum") -> return false
     }
     true
+}
+
+// `cell :: I64{1337}; p :: *cell; print(p.*)`: the raw-addressed local is a
+// cell, the Ptr word becomes a typed pointer only through jet_rt_sentry_read,
+// and the whole module lowers and lints with no issue. The pointee is a
+// physically trivial I64: a bitwise Ptr read of an owning value (exact Int,
+// String) is rejected, as the sentry read is a plain ptr::read.
+fn fx_raw_pointer_lowering_check() -> Bool Never! {
+    ptr_ty :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Ptr"), args: [MIRType]{fx_i64()}})
+    b := fx_builder()
+    cell :: fx_local(&b, "cell", fx_i64(), mir_copy_ownership())
+    value :: fx_i64_const(&b, 1337)
+    fx_do(&b, MIROperation.WritePlace{place: cell, value: value})
+    pointer :: fx_copy(&b, ptr_ty, MIROperation.RawAddressOf{place: cell})
+    read :: fx_copy(&b, fx_i64(), MIROperation.Deref{value: pointer})
+    fx_print(&b, read)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    program :: fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    lowered :: lir_lower_entry(program, mir_function_id("run"))
+    if lowered.issues.len() > 0 {
+        loop issue in lowered.issues -> print("raw pointer issue: {issue.message}")
+        return false
+    }
+    loop function in lowered.lir.functions {
+        loop block in function.blocks {
+            loop instruction in block.insts {
+                if instruction == .Call(_, _, callee, _) {
+                    if callee == .Runtime(symbol) {
+                        if symbol == "jet_rt_sentry_read" -> return true
+                    }
+                }
+            }
+        }
+    }
+    false
 }
