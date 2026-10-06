@@ -3807,6 +3807,18 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(unit_ty(), io.clone())),
         )),
+        ("core.files", "__reader_stat") => Some((
+            vec![(read, Type::Named("FileReader".to_string()))],
+            Some(result_ty(Type::List(Box::new(Type::Int)), io.clone())),
+        )),
+        ("core.files", "__writer_stat") => Some((
+            vec![(read, Type::Named("FileWriter".to_string()))],
+            Some(result_ty(Type::List(Box::new(Type::Int)), io.clone())),
+        )),
+        ("core.files", "__writer_set_mode") => Some((
+            vec![(read, Type::Named("FileWriter".to_string())), (read, Type::Int)],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
         // D-URL1=A: typed URLs, query strings, component escaping, and MIME values.
         ("core.net.url", "parse") => Some((
             vec![(read, Type::String)],

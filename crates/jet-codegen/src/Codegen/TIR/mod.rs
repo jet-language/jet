@@ -14087,6 +14087,8 @@ pub enum THandleOp {
     },
     /// FileReader: `read_line()` → `{root}jet_std_file_reader_read_line(&mut (recv))`.
     FileReaderReadLine,
+    /// #3593 FileReader: `read(max)` → `{root}jet_std_file_reader_read(&mut (recv), a0)`.
+    FileReaderRead,
     /// Read-only projection of the path retained by a live provider handle.
     FileReaderPath,
     /// D-FOUND-VIEW1=A: mapped-file byte window (`Result<View<[U8]>, IOError>`).
@@ -14103,6 +14105,10 @@ pub enum THandleOp {
     FileWriterWriteLine,
     /// FileWriter: `flush()` → `{root}jet_std_file_writer_flush(&mut (recv))`.
     FileWriterFlush,
+    /// #3593 FileWriter: `write_all(bytes)` → `{root}jet_std_file_writer_write_all(&mut (recv), &(a0))`.
+    FileWriterWriteAll,
+    /// #3593 FileWriter: `fsync()` → `{root}jet_std_file_writer_fsync(&mut (recv))`.
+    FileWriterFsync,
     /// Read-only projection of the path retained by a live provider handle.
     FileWriterPath,
     /// D-ENCSTREAM-SURFACE1=A: JSON pull reader/writer lifecycle.

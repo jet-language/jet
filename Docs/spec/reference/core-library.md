@@ -791,9 +791,12 @@ fn count_lines(path: String) -> Int IOError! {
 | `create(path)` | `FileWriter !IOError` | Create or replace a buffered writer. |
 | `append(path)` | `FileWriter !IOError` | Open a buffered appending writer. |
 | `reader.read_line()` | `?String !IOError` | Read one line without its newline; return `None` at EOF. |
+| `reader.read(max)` | `[U8] !IOError` | Read up to `max` bytes from the shared position; an empty list is EOF. |
+| `reader.stat()` / `writer.stat()` | `Stat !IOError` | Describe the open file itself (fstat); a writer's buffered bytes count only after a flush. |
 | `reader.lines()` in a loop source | stream of `String` | Pull lines without loading the complete file. |
-| `writer.write_line(text)` | `!IOError` | Write text and a newline. |
-| `writer.flush()` | `!IOError` | Flush pending writer bytes. |
+| `writer.write_line(text)` / `writer.write_all(bytes)` | `!IOError` | Write text and a newline, or every byte of `bytes` (buffered). |
+| `writer.flush()` / `writer.fsync()` | `!IOError` | Flush pending writer bytes; `fsync` also makes the file's data durable. |
+| `writer.set_mode(mode)` | `!IOError` | Set the open file's permission bits; Windows keeps only read-only. |
 
 Readers, writers, temporary resources, and locks own their provider resource
 until lexical scope exit or an explicit `close(^handle)` consumes the handle.
