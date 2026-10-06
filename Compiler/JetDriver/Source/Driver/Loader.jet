@@ -919,7 +919,7 @@ fn jet_driver_root_inline_carrier(snapshot: JetDriverAuthorizedSourceSnapshot, r
         block :: jet_driver_inline_package(file.source)
         carrier_path :: jet_driver_display_path(entry_root, file.path)
         if block.error == .Val(failure) {
-            &diagnostics.push(diagnostic_with_source_path(failure, carrier_path, 0))
+            &diagnostics.push(diagnostic_with_source_path(~failure, carrier_path, 0))
             return None
         }
         if !block.found -> next
@@ -928,7 +928,7 @@ fn jet_driver_root_inline_carrier(snapshot: JetDriverAuthorizedSourceSnapshot, r
             // stock carrier by its registry row (Rust `package_facts_for_entry`).
             span :: Span{start: block.start, end: block.end}
             conflict :: if file_index == entry_index -> jet_driver_diagnostic("E1363", span, "an inline Package conflicts with package.jet", "one project cannot carry both an inline Package block and a package.jet manifest", "remove package.jet or remove the inline Package block") else -> jet_driver_row_diagnostic("E1363", Val(span))
-            &diagnostics.push(diagnostic_with_source_path(conflict, carrier_path, 0))
+            &diagnostics.push(diagnostic_with_source_path(^conflict, carrier_path, 0))
             return None
         }
         return Val(JetDriverInlineCarrier{file_index: file_index, block: block})

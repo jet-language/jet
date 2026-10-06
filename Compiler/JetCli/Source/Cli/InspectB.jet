@@ -757,12 +757,11 @@ fn jet_cli_inspect_env(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPla
 }
 
 // `jet inspect semindex <file.jet>` (CmdSemIndex.rs `run_semindex`): the
-// semantic index (jet-semindex) is not ported.
-fn jet_cli_semindex(args: [String], color: Bool, json: Bool) -> JetCLIPlan Never! {
-    if jet_cli_inspect_first_positional(args) == None {
-        return jet_cli_inspect_b_fail("E2104", "`jet inspect semindex` needs an entry file", "jet inspect semindex Examples/features/basics/hello.jet", color, json, JET_DRIVER_EXIT_USER_ERROR)
-    }
-    jet_cli_not_ported("inspect semindex", color)
+// semantic index of the checked entry, compiled by the host
+// (`JetCLIPlan.Semindex`).
+fn jet_cli_semindex(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
+    path :: jet_cli_inspect_first_positional(args) ?? return jet_cli_inspect_b_fail("E2104", "`jet inspect semindex` needs an entry file", "jet inspect semindex Examples/features/basics/hello.jet", color, json, JET_DRIVER_EXIT_USER_ERROR)
+    JetCLIPlan.Semindex{file: jet_cli_inspect_absolutize(path), color: color, json: json}
 }
 
 // `jet inspect output <file.jet> [<address>]` (CmdInspect.rs `run_output`):
@@ -849,14 +848,26 @@ fn jet_cli_expand(args: [String], color: Bool, json: Bool) -> JetCLIPlan Never! 
 // `jet inspect schema status | squash --before <version>` (CmdSchema.rs
 // `run_schema`): the published-schema snapshots (Publish.rs) and the E0910
 // migration diff are not ported.
-fn jet_cli_schema(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
+fn jet_cli_schema(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     fix :: "use `jet inspect schema status` to inspect published schemas, or `jet inspect schema squash --before <version>` to re-baseline them"
     verb :: if args.len() > 0 -> args[0] else -> ""
     hint :: "error: no package.jet found — run `jet inspect schema` inside a project"
     if verb == {
         "status" -> {
-            if jet_cli_inspect_project_root("inspect schema status", hint, color) == .Refused(plan) -> return plan
-            return jet_cli_not_ported("inspect schema status", color)
+            root := ""
+            if jet_cli_inspect_project_root("inspect schema status", hint, color) == {
+                .Root(path) -> root = path
+                .Refused(plan) -> return plan
+            }
+            // Schema.rs `load_all_snapshots`: `<root>/.jet/cache/schema` (or
+            // `JET_SCHEMA_CACHE_DIR`). With no snapshot the report is fixed;
+            // reading snapshots and the E0910 pending diff are not ported.
+            cache :: cli_sys.get("JET_SCHEMA_CACHE_DIR") ?? jet_cli_authority_path(root, ".jet/cache/schema")
+            names :: cli_files.listdir(cache) ?? [String]{}
+            loop name in names {
+                if name.ends_with(".snapshot") -> return jet_cli_not_ported("inspect schema status", color)
+            }
+            return jet_cli_done("no published schemas yet.\nnote: a `#PublishedSchema` struct is snapshotted into .jet/cache/schema/ on `jet registry publish`.\n", "", JET_DRIVER_EXIT_OK)
         }
         "squash" -> {
             if jet_cli_option_value(args, "--before") == None {

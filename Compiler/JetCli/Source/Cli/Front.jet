@@ -2,11 +2,12 @@
 // flags, retired, moved, and grouped routes, help and the greeting, unknown
 // commands (E2101) and flags (E2102), then the verbs the Jet driver owns
 // (`explain <CODE>`, `check [<file>|<dir>]`, `build <file>`,
-// `run [<file>|<dir>]`, `test <file>`, `new <name>`, and `emit --rust <file>`; a bare or
-// directory target resolves the project entry, Entry.jet), and the inspect
-// group (Inspect.jet). Every report is the Rust host's exact bytes and exit
-// status for the same argv. A command whose Jet port has not landed yet is
-// refused with E2104 instead of guessing its behavior.
+// `run [<file>|<dir>]`, `test <file>`, `new <name>`, `emit --rust <file>`,
+// and `doc <file>`; a bare or directory target resolves the project entry,
+// Entry.jet), and the inspect group (Inspect.jet). Every report is the Rust
+// host's exact bytes and exit status for the same argv. A command whose Jet
+// port has not landed yet is refused with E2104 instead of guessing its
+// behavior.
 use core.files as cli_files
 use jet_driver.[
     JetDriverVerbOutput,
@@ -60,6 +61,12 @@ pub enum JetCLIPlan {
     // `jet lint --a11y <file>`: report the accessibility lints of the entry
     // (CmdDevTools.rs `run_lint_a11y`); `notice` is resolution's stderr.
     Lint(file: String, source: String, color: Bool, notice: String)
+    // `jet doc <file>` (Source/CmdDoc.rs `run_doc`): `json` prints the
+    // `inspect.doc` status, `check` reports undocumented public items.
+    Doc(file: String, source: String, color: Bool, json: Bool, check: Bool)
+    // `jet inspect semindex <file>` (Source/CmdSemIndex.rs `run_semindex`):
+    // the host checks the absolute `file` and prints its semantic index.
+    Semindex(file: String, color: Bool, json: Bool)
 }
 
 // The `jet test` options the Jet host carries out (Source/CmdCompile.rs
@@ -418,6 +425,16 @@ fn jet_cli_read_entry(file: String, command: String, color: Bool, quiet: Bool, t
         return jet_cli_done("", "{notice}{jet_cli_report("E2105", "can't securely read the file `{file}`", jet_cli_why("E2105"), fix, color)}", JET_DRIVER_EXIT_USER_ERROR)
     }
     JetCLIPlan.Check{file: file, source: source, color: color, quiet: quiet, threads: threads, project: project, notice: notice}
+}
+
+// `jet doc [<file>]`: the entry resolves as `jet check` resolves it.
+fn jet_cli_doc(args: [String], color: Bool, quiet: Bool, json: Bool, check: Bool) -[FS, Env]> JetCLIPlan Never! {
+    entry :: jet_cli_check(args, "doc", color, quiet, None)
+    if entry == {
+        .Check(file, source, _, _, _) -> return JetCLIPlan.Doc{file: file, source: source, color: color, json: json, check: check}
+        else -> {}
+    }
+    entry
 }
 
 // Build flags whose Jet port has not landed: refused, never ignored.
@@ -878,7 +895,7 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
     if raw.len() == 0 -> return jet_cli_not_ported("repl", color)
     if raw[0] == "?" -> return jet_cli_not_ported("?", color)
     // The inspect group renders its own `--json` envelopes (Inspect.jet).
-    if json && raw[0] != "inspect" -> return jet_cli_not_ported("{raw[0]} --json", color)
+    if json && raw[0] != "inspect" && raw[0] != "doc" -> return jet_cli_not_ported("{raw[0]} --json", color)
 
     // Retired, moved, and grouped spellings (Source/main.rs `normalize_frequency_ring_argv`).
     if jet_cli_retired_report(raw, color) == .Val(report) -> return jet_cli_done("", report, JET_DRIVER_EXIT_USAGE)
@@ -1035,6 +1052,7 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
         "new" -> return jet_cli_new(jet_argv, args, color, quiet)
         "emit" -> return jet_cli_emit(jet_argv, args, color, quiet)
         "lint" -> return jet_cli_lint(jet_argv, args, color, quiet)
+        "doc" -> return jet_cli_doc(args, color, quiet, json, jet_argv.contains("--check"))
         else -> {}
     }
     if jet_cli_inspect_word(command) -> return jet_cli_inspect(argv, jet_argv, args, color, quiet, json, threads)

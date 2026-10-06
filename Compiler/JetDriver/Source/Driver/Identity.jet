@@ -3,6 +3,8 @@ use jet_foundation.[
     CompilerThreads,
     CompilerTraceSink,
     Diagnostic,
+    ImportDecl,
+    Item,
     JetReleaseDevtoolsPolicy,
     MIRAllocatorPolicy,
     MIRArtifactBuildMode,
@@ -18,6 +20,7 @@ use jet_foundation.[
     Record,
     RecordSection,
     Span,
+    TFunc,
     diagnostic_from_registry,
     diagnostic_registry_row,
     diagnostic_with_source_path,
@@ -30,6 +33,8 @@ use jet_foundation.[
     record_encode,
 ]
 use jet_sema.[
+    SemaCallSiteFact,
+    SemaNameReferenceFact,
     SemaRegistrationImportEdge,
     SemaSourceOrigin,
     SemaSourceSegment,
@@ -83,9 +88,34 @@ pub enum JetDriverCompileTarget {
 // (its artifact starts at the package entry); `Test` compiles the `jet test`
 // harness: named `#Test` bodies are checked and lowered, E0601 reports a file
 // with none, and the artifact is a TestExecutable whose harness runs them.
+// `Doc` compiles as `Program` does and also keeps each user module's checked
+// declarations (`JetDriverDocModule`) for `jet doc`.
 pub enum JetDriverCompileMode {
     Program
     Test
+    Doc
+}
+
+// One user module of the checked bundle as `jet doc` and the semantic index
+// read it (Rust `ProgramModule`: `alias`, `source`, `pub_file`, the post-sema
+// `items`, and `block_spans`, so derived impls and inferred failure contracts
+// are the ones the checker settled). `path` is the module's display path:
+// relative to the entry root when beneath it, which is the stable path
+// `jet doc` prints. `module_name`, `functions`, `name_references`, and
+// `call_facts` are the module's checked rows (Rust `SemIndexEffectFacts`
+// summaries and the name ledger's references).
+pub struct JetDriverDocModule {
+    pub path: String
+    pub alias: String
+    pub source: String
+    pub pub_file: Bool
+    pub items: [Item]
+    pub block_spans: [Span]{[Span]{}}
+    pub imports: [ImportDecl]{[ImportDecl]{}}
+    pub module_name: String{""}
+    pub functions: [TFunc]{[TFunc]{}}
+    pub name_references: [SemaNameReferenceFact]{[SemaNameReferenceFact]{}}
+    pub call_facts: [SemaCallSiteFact]{[SemaCallSiteFact]{}}
 }
 
 // One Core library source module the host embeds, mirroring a Rust
@@ -260,6 +290,8 @@ struct JetDriverLoadResult {
     diagnostics: [Diagnostic]
     failed_stage: JetDriverStage?
     complete: Bool
+    // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
+    doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}}
 }
 
 // The entry package's written authority policy, for the host's application
@@ -295,6 +327,8 @@ pub struct JetDriverCompileResult {
     // compile recorded, one TSV row each: phase, item, code, message, span.
     pub keep_going_rows: [String]{[String]{}}
     pub authority_policy: JetDriverAuthorityPolicy?{None}
+    // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
+    pub doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}}
 }
 
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read

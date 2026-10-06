@@ -211,7 +211,7 @@ fn jet_rust_prefix_replace(text: String, from: String, to: String) -> String Nev
     bytes :: text.bytes()
     pattern :: from.bytes()
     at := jet_rust_prefix_find(bytes, pattern, 0)
-    if at < 0 -> return text
+    if at < 0 -> return ~text
     parts := [String]{}
     kept := 0
     loop at >= 0 {
@@ -537,14 +537,9 @@ fn jet_rust_prefix_merge_imports(state: &JetRustPrefixState, sources: [String]) 
                 next
             }
             // Keep `kept` in binding order (the BTreeMap key).
-            &kept.push(import)
-            slot := kept.len() - 1
-            loop slot > 0 && jet_rust_prefix_less(kept[slot].binding, kept[slot - 1].binding) {
-                held :: kept[slot - 1]
-                kept[slot - 1] = kept[slot]
-                kept[slot] = held
-                slot -= 1
-            }
+            position = 0
+            loop position < kept.len() && jet_rust_prefix_less(kept[position].binding, import.binding) -> position += 1
+            kept = jet_rust_prefix_insert_import(kept, position, import)
         }
     }
     paths := [String]{}
@@ -554,14 +549,9 @@ fn jet_rust_prefix_merge_imports(state: &JetRustPrefixState, sources: [String]) 
             if path == import.path -> known = true
         }
         if known -> next
-        &paths.push(import.path)
-        slot := paths.len() - 1
-        loop slot > 0 && jet_rust_prefix_less(paths[slot], paths[slot - 1]) {
-            held :: paths[slot - 1]
-            paths[slot - 1] = paths[slot]
-            paths[slot] = held
-            slot -= 1
-        }
+        position := 0
+        loop position < paths.len() && jet_rust_prefix_less(paths[position], import.path) -> position += 1
+        paths = jet_rust_prefix_insert_text(paths, position, import.path)
     }
     rendered := [String]{}
     loop path in paths {
@@ -612,7 +602,8 @@ JET_RUST_PREFIX_DATA_PLOT_IMPORTS :: "use std::collections::{{BTreeMap, BTreeSet
 // mod.rs `scheduler_prelude_for_emit(true)`: the flat import set, then the
 // native-I/O Scheduler body and the Stream body.
 fn jet_rust_prefix_scheduler(state: &JetRustPrefixState) -> String Never! {
-    imports :: jet_rust_prefix_merge_imports(&state, jet_rust_prefix_flat_sources(&state))
+    sources :: jet_rust_prefix_flat_sources(&state)
+    imports :: jet_rust_prefix_merge_imports(&state, sources)
     scheduler :: jet_rust_prefix_replace(jet_rust_prefix_flat_body(jet_rust_prefix_prelude(&state, "Scheduler.rs")), "feature = \"jet_native_io\"", "all()")
     "{imports}{scheduler}{jet_rust_prefix_flat_body(jet_rust_prefix_prelude(&state, "Stream.rs"))}"
 }
@@ -626,9 +617,29 @@ fn jet_rust_prefix_cut(state: &JetRustPrefixState, text: String, begin: String, 
     stop :: jet_rust_prefix_find(bytes, end.bytes(), 0)
     if start < 0 || stop < 0 || start >= stop + end.bytes().len() {
         jet_rust_prefix_fail(&state, "the runtime source markers `{begin}`/`{end}` are missing or out of order")
-        return text
+        return ~text
     }
     "{jet_rust_prefix_slice(bytes, 0, start)}{jet_rust_prefix_slice(bytes, stop + end.bytes().len(), bytes.len())}"
+}
+
+fn jet_rust_prefix_insert_import(rows: [JetRustPrefixImport], position: Int, row: JetRustPrefixImport) -> [JetRustPrefixImport] Never! {
+    out := [JetRustPrefixImport]{}
+    loop index in 0..<rows.len() {
+        if index == position -> &out.push(row)
+        &out.push(rows[index])
+    }
+    if position >= rows.len() -> &out.push(row)
+    out
+}
+
+fn jet_rust_prefix_insert_text(rows: [String], position: Int, row: String) -> [String] Never! {
+    out := [String]{}
+    loop index in 0..<rows.len() {
+        if index == position -> &out.push(row)
+        &out.push(rows[index])
+    }
+    if position >= rows.len() -> &out.push(row)
+    out
 }
 
 fn jet_rust_prefix_collections(state: &JetRustPrefixState) -> String Never! {
@@ -683,7 +694,8 @@ fn jet_rust_prefix_prelude_parts(state: &JetRustPrefixState, out: &[String], dev
     &out.push(jet_rust_prefix_foundation(&state, "Shape.rs"))
     &out.push(jet_rust_prefix_prelude(&state, "DevelopmentReceipt.rs"))
     &out.push(jet_rust_prefix_prelude(&state, "Core/Receipt.rs"))
-    &out.push(jet_rust_prefix_cut(&state, jet_rust_prefix_prelude(&state, "Devtools.rs"), "// JET_HOST_DEVTOOLS_NATIVE_BEGIN", "// JET_HOST_DEVTOOLS_NATIVE_END"))
+    devtools :: jet_rust_prefix_prelude(&state, "Devtools.rs")
+    &out.push(jet_rust_prefix_cut(&state, devtools, "// JET_HOST_DEVTOOLS_NATIVE_BEGIN", "// JET_HOST_DEVTOOLS_NATIVE_END"))
     &out.push(jet_rust_prefix_foundation(&state, "DevtoolsNative.rs"))
     &out.push(jet_rust_prefix_raw_const(&state, "DEVTOOLS_NATIVE_WRAPPERS_PRELUDE"))
     jet_rust_prefix_push_files(&state, &out, [String]{"FaultInjection.rs", "Core/Keep.rs", "JobQueueTypes.rs", "Job.rs", "Core/Option.rs", "Core/FixedList.rs", "Core/Columns.rs", "Core/ColumnList.rs", "Core/UnicodeString.rs", "Core/Ascii.rs", "Core/ProcessArgs.rs", "Core/StringConcat.rs", "Core/ViewCopy.rs", "Core/Loadable.rs", "Core/Values.rs", "Core/TextValues.rs", "Core/RangeBounds.rs", "Core/InlineRange.rs", "Core/Disjoint.rs", "Core/ExpiringSecret.rs", "Core/SetAlgebra.rs", "Core/Duration.rs", "Core/Measurement.rs", "Core/TimeMonotonic.rs", "Core/Time.rs", "Core/Sketch.rs", "Core/Contracts.rs", "Core/MapKey.rs", "Core/RuntimeStack.rs", "Core/Authority.rs", "Core/FixedArithmetic.rs", "Core/FloatOrdering.rs", "Core/ParallelKernel.rs"})
@@ -752,7 +764,9 @@ fn jet_rust_prefix_diagnostic_projection() -> String Never! {
     out := [String]{"\nfn jet_runtime_diagnostic_row(code: &str) -> Option<JetRuntimeDiagnosticRow> {{\n\n    match code {{\n"}
     loop row in diagnostic_registry_rows() {
         if row.stage != "runtime" || row.status != DiagnosticRegistryStatus.Active -> next
-        holes :: loop hole in jet_rust_prefix_template_holes([String]{row.what, row.why, row.fix}) -> jet_rust_emit_quote(hole)
+        templates :: [String]{row.what, row.why, row.fix}
+        holes := [String]{}
+        loop hole in jet_rust_prefix_template_holes(templates) -> &holes.push(jet_rust_emit_quote(hole))
         code :: jet_rust_emit_quote(row.code)
         &out.push("        {code} => Some(JetRuntimeDiagnosticRow {{ code: {code}, what: {jet_rust_emit_quote(row.what)}, why: {jet_rust_emit_quote(row.why)}, fix: {jet_rust_emit_quote(row.fix)}, template_holes: &[{holes.join(", ")}] }}),\n")
     }
@@ -908,9 +922,9 @@ fn jet_rust_prefix_strip_interop(kernel: String) -> String Never! {
     begin :: "    // jet:source-shared-interop-jit-begin\n"
     end :: "    // jet:source-shared-interop-jit-end\n"
     start :: jet_rust_prefix_find(bytes, begin.bytes(), 0)
-    if start < 0 -> return kernel
+    if start < 0 -> return ~kernel
     stop :: jet_rust_prefix_find(bytes, end.bytes(), start)
-    if stop < 0 -> return kernel
+    if stop < 0 -> return ~kernel
     "{jet_rust_prefix_slice(bytes, 0, start)}{jet_rust_prefix_slice(bytes, stop + end.bytes().len(), bytes.len())}"
 }
 
@@ -1184,7 +1198,8 @@ fn jet_rust_prefix_full_corelib(state: &JetRustPrefixState, out: &[String], linu
         jet_rust_prefix_push_files(&state, &out, [String]{"Core/DevtoolsPanel.rs", "Core/DevtoolsPanelCatalog.rs", "Core/DevtoolsDatabasePanel.rs", "Core/DevtoolsJobsPanel.rs", "Core/DevtoolsRequestPanel.rs", "Core/DevtoolsTelemetryPanel.rs", "Core/DevtoolsTopologyPanel.rs"})
     }
     if jet_rust_prefix_has(parts, MIRRuntimePartID.Gtk) && linux -> &out.push(jet_rust_prefix_prelude(&state, "UiGtk.rs"))
-    jet_rust_prefix_optional_parts(&state, &out, parts, test_harness, policy, jet_rust_prefix_compiler_version(&state))
+    version :: jet_rust_prefix_compiler_version(&state)
+    jet_rust_prefix_optional_parts(&state, &out, parts, test_harness, policy, version)
     jet_rust_prefix_app_parts(&state, &out, parts)
 }
 
@@ -1481,8 +1496,8 @@ fn jet_rust_prefix_leading_start(source: [U8], code: [U8], line_start: Int, floo
     }
     above := start
     loop above > floor && jet_rust_prefix_is_space(code[above - 1]) -> above -= 1
-    if above == floor || Int.from_u8(code[above - 1]) != 93 -> return start
-    -1
+    found :: above == floor || Int.from_u8(code[above - 1]) != 93
+    if found -> start else -> -1
 }
 
 // `strip_test_items`: drop every `#[cfg(test)]`/`#[test]` item with its docs.
@@ -1511,7 +1526,7 @@ fn jet_rust_prefix_strip_test_items(text: String) -> String Never! {
         }
         line_start = line_end
     }
-    if kept == 0 -> return text
+    if kept == 0 -> return ~text
     &out.push(jet_rust_prefix_slice(source, kept, source.len()))
     out.join("")
 }

@@ -77,16 +77,56 @@ pub enum FailureContract {
     Explicit(success: Type, error: Type)
     Converted(success: Type, source: Type, target: Type)
     ProvenUnreachable(success: Type)
+    // #3708: no contract was written and sema proved the failure set empty;
+    // the `ProvenUnreachable` carrier with inferred provenance.
+    InferredNever(success: Type)
+    // D-FAIL-INFER-UNION1=A: no contract was written and sema inferred the
+    // typed failures (one member or their union) that reach the function.
+    Inferred(success: Type, error: Type)
+}
+
+// Rust `FailureContract::from_return_type`: the contract a written return
+// type declares.
+pub fn failure_contract_from_return_type(return_type: Type?) -> FailureContract Never! {
+    declared :: return_type ?? return FailureContract.Default{success: Type.Named{name: "Unit"}, error: Type.Named{name: "Err"}}
+    if declared == {
+        .Named(name) -> if name == "Never" -> return FailureContract.DeclaredNever
+        .Result(ok, err) -> {
+            if err == .Named(name) && name == "Never" -> return FailureContract.ProvenUnreachable{success: ok}
+            return FailureContract.Explicit{success: ok, error: err}
+        }
+        .Option(success) -> return FailureContract.Optional{success: success}
+        else -> {}
+    }
+    FailureContract.Default{success: declared, error: Type.Named{name: "Err"}}
+}
+
+// Rust `Func::failure_contract`: sema projects a solved contract onto the
+// declaration with no written span, so a span-less `T Never!` is the
+// inferred-empty set and a span-less typed error is an inferred union. The
+// defaulted `run` keeps its span-less `Err!` as an explicit contract.
+pub fn failure_contract_of_function(return_type: Type?, return_type_span: Span?) -> FailureContract Never! {
+    contract :: failure_contract_from_return_type(return_type)
+    if return_type_span != None -> return contract
+    if contract == {
+        .ProvenUnreachable(success) -> return FailureContract.InferredNever{success: success}
+        .Explicit(success, error) -> {
+            if error == .Named(name) && name == "Err" -> return contract
+            return FailureContract.Inferred{success: success, error: error}
+        }
+        else -> {}
+    }
+    contract
 }
 
 // The failure route a callable exposes to its callers.
 pub fn failure_contract_effective_type(contract: FailureContract) -> Type Never! {
     if contract == {
         .DeclaredNever -> Type.Named{name: "Never"}
-        .Default(success, error) | .Explicit(success, error) -> Type.Result{ok: success, err: error}
+        .Default(success, error) | .Explicit(success, error) | .Inferred(success, error) -> Type.Result{ok: success, err: error}
         .Optional(success) -> Type.Option{inner: success}
         .Converted(success, _, target) -> Type.Result{ok: success, err: target}
-        .ProvenUnreachable(success) -> Type.Result{ok: success, err: Type.Named{name: "Never"}}
+        .ProvenUnreachable(success) | .InferredNever(success) -> Type.Result{ok: success, err: Type.Named{name: "Never"}}
     }
 }
 
@@ -100,6 +140,8 @@ pub fn failure_contract_source(contract: FailureContract) -> String Never! {
         .Converted(_, source, target) -> "converted {type_name(source)} -> {type_name(target)}"
         .DeclaredNever -> "declared Never return"
         .ProvenUnreachable(_) -> "explicit !Never (proven unreachable)"
+        .InferredNever(_) -> "inferred: none"
+        .Inferred(_, error) -> "inferred: {type_name(error)}"
     }
 }
 
