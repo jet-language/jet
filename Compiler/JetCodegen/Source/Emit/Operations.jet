@@ -4677,6 +4677,9 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
         radix_text :: jet_rust_emit_borrowed_value_reference(&ctx, function, args[0], MIRAccess.Read)
         return "{root}jet_std::jet_int_owned_to_radix({receiver_text}, {radix_text}).unwrap_or_else(|error| {root}jet_arithmetic_stop(\"<mir>\", 0u32, &error))"
     }
+    // MIRRust prelude_values_with_receiver: a String literal operand of a
+    // literal builtin route is passed as its static text.
+    literal_route :: jet_rust_emit_literal_builtin_symbol(mir_symbol_name(row.symbol))
     rendered := [String]{}
     if receiver_place == .Val(place) {
         if !row.signature.borrow_mask[0] {
@@ -4685,7 +4688,8 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
         }
         &rendered.push(jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Write))
     } else if row.signature.borrow_mask[0] {
-        &rendered.push(jet_rust_emit_borrowed_value_reference(&ctx, function, receiver, MIRAccess.Read))
+        literal :: if literal_route -> jet_rust_emit_literal_string_value(ctx, function, receiver) else -> String?{None}
+        &rendered.push(if literal == .Val(text) -> jet_rust_emit_quote(text) else -> jet_rust_emit_borrowed_value_reference(&ctx, function, receiver, MIRAccess.Read))
     } else {
         &rendered.push(jet_rust_emit_value_consume(ctx, function, receiver))
     }
@@ -4717,8 +4721,10 @@ fn jet_rust_emit_builtin_method_values(ctx: &JetRustEmitContext, function: MIRFu
                 consumed :: jet_rust_emit_value_consume(ctx, function, value)
                 &rendered.push(jet_rust_emit_native_int_argument(&ctx, consumed, None))
             } else {
+                literal :: if literal_route && borrowed -> jet_rust_emit_literal_string_value(ctx, function, value) else -> String?{None}
                 if {
                     jet_rust_emit_host_borrow_callback_value(&ctx, function, value, false, false) == .Val(callback) -> &rendered.push(callback)
+                    literal == .Val(text) -> &rendered.push(jet_rust_emit_quote(text))
                     borrowed -> &rendered.push(jet_rust_emit_borrowed_value_reference(&ctx, function, value, MIRAccess.Read))
                     else -> &rendered.push(jet_rust_emit_value_consume(ctx, function, value))
                 }

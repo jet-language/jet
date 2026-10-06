@@ -322,8 +322,8 @@ fn run() {
         "skip should lower to lazy helper"
     );
     assert!(
-        out.rust.contains("jet_list_fold"),
-        "fold should lower to helper"
+        out.rust.contains("jet_view_fold"),
+        "List.fold should lower to the borrowed view helper"
     );
     assert!(
         out.rust.contains("jet_iter_take_while"),
