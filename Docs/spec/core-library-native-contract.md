@@ -93,6 +93,13 @@ values and fail-closed policy in Jet; the OS CSPRNG is a host cell. The raw
 algorithm controls in `core.crypto.expert` remain an explicit audited door, not
 a hidden provider policy.
 
+`core.math` keeps IEEE classification, adjacent-value and exponent composition,
+rounding/conversion policy, remainder validation, distance accumulation, and
+special-function approximations in Jet. Its numeric host boundary is limited
+to primitive bit casts and libm operations that Jet cannot yet express through
+an intrinsic or an external call. A classification or composite operation is
+not a native leaf merely because Rust exposes it as a scalar method.
+
 A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.
