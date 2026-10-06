@@ -45,16 +45,35 @@ pub enum JetCLIPlan {
     // `jet new <name>`: write the project folder (Source/CmdCompile.rs
     // `run_new`); `template` is "" for the print-only starter.
     New(name: String, template: String, annotated: Bool, quiet: Bool, color: Bool)
-    // `jet fmt [paths…] [-]` (Source/CmdCompile.rs `run_fmt`): `paths` are
-    // the explicit file/directory targets (empty = the project root),
-    // `stdin_mode` formats stdin to stdout under the `stdin_path` label;
-    // `check` reports instead of writing, `diff` adds unified diffs.
-    Fmt(paths: [String], stdin_mode: Bool, stdin_path: String?, check: Bool, diff: Bool, simplify: Bool, color: Bool, quiet: Bool)
+    // `jet fmt [paths…] [-]` (Source/CmdCompile.rs `run_fmt`).
+    Fmt(request: JetCLIFmtRequest)
+    // `jet fmt --lang <language>` (CmdCompile.rs `run_external_fmt`): the
+    // environment formatter over staged files; `argv` starts at `fmt`.
+    FmtLang(argv: [String], color: Bool)
     // An inspect projection over a checked entry (Inspect.jet): the host
     // compiles `job.file`, then projects the checked program.
     Inspect(job: JetCLIInspectJob)
     // An inspect command the host runs (InspectB.jet).
     InspectB(plan: JetCLIInspectBPlan)
+}
+
+// One native `jet fmt` invocation (Source/main.rs `"fmt"` -> `run_fmt`).
+pub struct JetCLIFmtRequest {
+    // Explicit file/directory targets; empty formats the project root.
+    pub paths: [String]
+    // `-`: format stdin to stdout under the `stdin_path` label.
+    pub stdin_mode: Bool
+    pub stdin_path: String?
+    // `--check`/`--dry-run` report instead of writing; `diff` adds unified diffs.
+    pub check: Bool
+    pub diff: Bool
+    // `--changed`: only the VCS-changed `.jet` files (git).
+    pub changed: Bool
+    // `--explicit-copies`: write `~` at each implicit copy site sema reports.
+    pub explicit_copies: Bool
+    pub simplify: Bool
+    pub color: Bool
+    pub quiet: Bool
 }
 
 // The `jet test` options the Jet host carries out (Source/CmdCompile.rs
@@ -761,14 +780,12 @@ fn jet_cli_new(jet_argv: [String], args: [String], color: Bool, quiet: Bool) -[F
     JetCLIPlan.New{name: name, template: template, annotated: jet_argv.contains("--annotated"), quiet: quiet, color: color}
 }
 
-// `jet fmt` (Source/main.rs `"fmt"`): native `.jet` formatting. The external
-// `--lang` formatter, `--changed` (git), and `--explicit-copies` (sema copy
-// sites) are not ported yet and are refused.
-fn jet_cli_fmt(jet_argv: [String], args: [String], color: Bool, quiet: Bool) -> JetCLIPlan Never! {
+// `jet fmt` (Source/main.rs `"fmt"`): `--lang` selects the environment
+// formatter (`argv` is the whole command line from `fmt`, `--` included);
+// otherwise native `.jet` formatting.
+fn jet_cli_fmt(argv: [String], jet_argv: [String], args: [String], color: Bool, quiet: Bool) -> JetCLIPlan Never! {
     loop argument in jet_argv {
-        if argument == "--lang" || argument.starts_with("--lang=") -> return jet_cli_not_ported("fmt --lang", color)
-        if argument == "--changed" -> return jet_cli_not_ported("fmt --changed", color)
-        if argument == "--explicit-copies" -> return jet_cli_not_ported("fmt --explicit-copies", color)
+        if argument == "--lang" || argument.starts_with("--lang=") -> return JetCLIPlan.FmtLang{argv: argv, color: color}
     }
     dry_run :: jet_argv.contains("--dry-run")
     stdin_path := String?{None}
@@ -787,7 +804,18 @@ fn jet_cli_fmt(jet_argv: [String], args: [String], color: Bool, quiet: Bool) -> 
             &paths.push(args[index])
         }
     }
-    JetCLIPlan.Fmt{paths: paths, stdin_mode: stdin_mode, stdin_path: stdin_path, check: jet_argv.contains("--check") || dry_run, diff: jet_argv.contains("--diff") || dry_run, simplify: jet_argv.contains("--simplify"), color: color, quiet: quiet}
+    JetCLIPlan.Fmt{request: JetCLIFmtRequest{
+        paths: paths,
+        stdin_mode: stdin_mode,
+        stdin_path: stdin_path,
+        check: jet_argv.contains("--check") || dry_run,
+        diff: jet_argv.contains("--diff") || dry_run,
+        changed: jet_argv.contains("--changed"),
+        explicit_copies: jet_argv.contains("--explicit-copies"),
+        simplify: jet_argv.contains("--simplify"),
+        color: color,
+        quiet: quiet,
+    }}
 }
 
 // Plan one `jet` invocation; `raw` is argv without the program name.
@@ -977,7 +1005,7 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
         "run" -> return jet_cli_run(jet_argv, args, passthrough, false, color, quiet, verbose, threads)
         "test" -> return jet_cli_test(jet_argv, color, quiet, verbose, threads)
         "new" -> return jet_cli_new(jet_argv, args, color, quiet)
-        "fmt" -> return jet_cli_fmt(jet_argv, args, color, quiet)
+        "fmt" -> return jet_cli_fmt(argv, jet_argv, args, color, quiet)
         else -> {}
     }
     if jet_cli_inspect_word(command) -> return jet_cli_inspect(argv, jet_argv, args, color, quiet, json, threads)
