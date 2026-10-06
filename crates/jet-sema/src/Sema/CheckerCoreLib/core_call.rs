@@ -3991,13 +3991,15 @@ impl<'a> Checker<'a> {
                 if args.len() != 1 {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
-                let row = args.get_mut(0).and_then(|arg| {
+                let owner_and_row = args.get_mut(0).and_then(|arg| {
                     let actual = self.infer(&mut arg.expr)?;
                     let convention = core_call_argument_convention(module, name, 0);
                     self.finish_core_call_ownership(name, 0, arg, convention, &actual);
                     match actual {
-                        Type::Apply { name: carrier, args } if carrier == "DataArrowBatch" && args.len() == 1 => {
-                            args.into_iter().next()
+                        Type::Apply { name: carrier, args }
+                            if super::data_nominal_leaf(&carrier) == Some("DataArrowBatch") && args.len() == 1 =>
+                        {
+                            args.into_iter().next().map(|row| (carrier, row))
                         }
                         other => {
                             self.diags.push(Diagnostic::error(
@@ -4015,15 +4017,23 @@ impl<'a> Checker<'a> {
                 for arg in args.iter_mut().skip(1) {
                     self.infer(&mut arg.expr);
                 }
-                let Some(row) = row else {
+                let Some((carrier, row)) = owner_and_row else {
                     return None;
                 };
                 if name == "import" {
-                    return Some(data_carrier_type("DataArrowBatch", row));
+                    return Some(data_carrier_type(&carrier, row));
                 }
+                let query_name = self
+                    .core_source_owner_module("core.data", "Query")
+                    .map(|owner| self.canonical_nominal_name(owner, "Query"))
+                    .unwrap_or_else(|| "Query".to_string());
+                let error_name = self
+                    .core_source_owner_module("core.data", "DataError")
+                    .map(|owner| self.canonical_nominal_name(owner, "DataError"))
+                    .unwrap_or_else(|| "DataError".to_string());
                 return Some(result_ty(
-                    data_carrier_type("Query", row),
-                    Type::Named("DataError".to_string()),
+                    data_carrier_type(&query_name, row),
+                    Type::Named(error_name),
                 ));
             }
             // D-DX-LOADERS1=A: loader lifecycle operations infer their row

@@ -1988,16 +1988,46 @@ impl<'a> Checker<'a> {
             .then(|| self.canonical_nominal_name(owner, leaf))
     }
 
-    /// A function signature read across a module boundary names the owner's
-    /// records that only share a built-in type's leaf (`Path`) by canonical
-    /// path, so the caller never reads that leaf as the built-in.
-    pub(crate) fn qualify_builtin_shadowing_sig(&self, owner: usize, sig: &mut crate::AST::FuncSig) {
+    /// An imported function signature retains the declaration's nominal
+    /// owners, including generated foreign records and imported Core types.
+    /// Its lexical function parameters are not nominal names to qualify.
+    pub(crate) fn qualify_imported_function_sig(
+        &self,
+        owner: usize,
+        function: &str,
+        sig: &mut crate::AST::FuncSig,
+    ) {
         if owner == self.module_idx {
             return;
         }
+        let Some(module) = self.modules.and_then(|modules| modules.get(owner)) else {
+            return;
+        };
+        let parameters = module.trait_reg.fn_params.get(function);
         let qualify = |ty: &Type| {
             ty.map_named_types(&|name| {
-                self.record_distinct_from_builtin(owner, name)
+                if name.contains("::")
+                    || parameters.is_some_and(|params| params.iter().any(|param| param.name == name))
+                {
+                    return None;
+                }
+                if let Some(imported_leaf) = module.core_item_imports.get(name) {
+                    let imported_module = module.core_imports.get(name)?;
+                    let imported_owner =
+                        self.core_source_owner_module(imported_module, imported_leaf)?;
+                    return Some(self.canonical_nominal_name(imported_owner, imported_leaf));
+                }
+                if let Some((imported_leaf, imported_owner)) = module.unqualified_file.get(name) {
+                    return Some(self.canonical_nominal_name(*imported_owner, imported_leaf));
+                }
+                // These registry rows are injected into every module, rather
+                // than declared by the imported function's lexical owner.
+                if matches!(name, crate::Syntax::TYPE_ORDERING | crate::Syntax::TYPE_REMOVE_BY) {
+                    return None;
+                }
+                module
+                    .registry
+                    .contains(name)
                     .then(|| self.canonical_nominal_name(owner, name))
             })
         };

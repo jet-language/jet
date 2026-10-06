@@ -90,6 +90,15 @@ Checked-text interpolation carries each hole's checked generic encoder arguments
 through compile-time validation and runtime lowering. Its dynamic `from`
 boundary invokes the declared checker once and preserves the original error;
 only a successful outcome wraps the original text in the nominal type.
+Imported function signatures retain each declared record's lexical owner through
+nested list and generic types, while function-generic parameters keep their
+lexical bindings. Generated C handle and glyph records use that same nominal
+identity; equally shaped caller records are not interchangeable.
+Arrow import preserves the checked batch owner and row type, and query consumes
+that owner. Canonical Core-data query heads select the existing native Query
+operation rows: collection remains the checked `[T] !DataError` materialization
+boundary, not a source-record method shim.
+
 
 Shared collection kernels narrow owned exact `Int` arguments through
 Foundation's borrowed `JetInt::to_native_i64` ABI check on every host. The seam

@@ -1,6 +1,15 @@
 use super::core_types::{decode_error_ty, u8_ty};
 use crate::AST::Type;
 
+/// A fixed data row accepts its canonical Core owner, never a same-leaf
+/// user-qualified nominal. Bare names remain the bootstrap row spelling.
+pub(crate) fn data_nominal_leaf(name: &str) -> Option<&str> {
+    if name.starts_with("<corelib>/Core/data::") {
+        return name.rsplit("::").next();
+    }
+    (!name.contains("::") && !name.contains('.')).then_some(name)
+}
+
 /// D-SERDE-ACCESS=B + D-SERDE14=A: accessor methods on `DataTree`. Every read
 /// yields `T ![FieldError]` so automatic propagation composes with no mapping ceremony
 /// inside a hand `decode`; `.field` and `.at` fill `FieldError.path` from the
@@ -100,4 +109,22 @@ pub fn is_reflect_type_name(name: &str) -> bool {
         name,
         "Value" | "Field" | "TypeInfo" | "FieldInfo" | "MethodInfo"
     )
+}
+
+#[cfg(test)]
+mod data_nominal_tests {
+    use super::data_nominal_leaf;
+
+    #[test]
+    fn accepts_core_data_owners_without_erasing_user_nominals() {
+        assert_eq!(data_nominal_leaf("Query"), Some("Query"));
+        assert_eq!(
+            data_nominal_leaf("<corelib>/Core/data::Core/data/arrow.jet::DataArrowBatch"),
+            Some("DataArrowBatch")
+        );
+        assert_eq!(data_nominal_leaf("<corelib>/Core/data::Query"), Some("Query"));
+        assert_eq!(data_nominal_leaf("user::Query"), None);
+        assert_eq!(data_nominal_leaf("user.Query"), None);
+        assert_eq!(data_nominal_leaf("<corelib>/Core/database::Query"), None);
+    }
 }

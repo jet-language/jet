@@ -16,6 +16,8 @@ use jet_foundation.[
     THostCall,
     TTypedTextForm,
     Type,
+    ast_empty_call_arg_flags,
+    core_receiver_method,
     type_name,
 ]
 
@@ -23,6 +25,24 @@ fn sema_data_tree_type() -> Type Never! { Type.Named{name: "DataTree"} }
 fn sema_data_value_type() -> Type Never! { Type.Named{name: "DBValue"} }
 fn sema_data_decode_error() -> Type Never! { Type.List{element: Type.Named{name: "FieldError"}} }
 fn sema_data_result(ok: Type, err: Type) -> Type Never! { Type.Result{ok: ok, err: err} }
+
+fn sema_data_nominal_is(name: String, leaf: String) -> Bool Never! {
+    name == leaf || (name.starts_with("<corelib>/Core/data::") && name.ends_with("::{leaf}"))
+}
+
+fn sema_data_source_type_name(environment: SemaScopeEnvironment, leaf: String) -> String Never! {
+    graph :: environment.registration_graph ?? return leaf
+    loop module_row in graph.modules {
+        if module_row.module_name != "core.data" -> next
+        loop nominal in module_row.nominals {
+            if nominal.symbol.name == leaf {
+                if nominal.compiler_owned -> return leaf
+                return "{nominal.symbol.module_name}::{leaf}"
+            }
+        }
+    }
+    leaf
+}
 
 fn sema_data_is_json_name(name: String) -> Bool Never! {
     name == "DataTree" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV"
@@ -171,6 +191,21 @@ fn sema_data_try_dbvalue_accessor(receiver: Expr, receiver_value: TExpr, method:
 
 pub fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     resolved_ty := sema_call_resolved_type(receiver_value.ty, environment)
+    if resolved_ty == .Apply(name, parameters) {
+        if sema_data_nominal_is(name, "Query") && parameters.len() == 1 && method == "collect" {
+            if type_args.len() != 0 || args.len() != 0 {
+                sema_data_check_explicit_type_args("Query.collect", type_args, 0, span, &diagnostics)
+                sema_data_arity_diagnostic("Query.collect", 0, args.len(), span, &diagnostics)
+                sema_data_check_discarded_arguments(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
+            record :: core_receiver_method("Query", "collect") ?? return SemaMethodSpecialCheck{handled: false, value: None}
+            source_arg :: CallArg{convention: AccessConvention.Read, expr: receiver, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+            result_type :: sema_data_result(Type.List{element: parameters[0]}, Type.Named{name: sema_data_source_type_name(environment, "DataError")})
+            value :: sema_data_core_emit(record, "Query.collect", [CallArg]{source_arg}, [Type]{receiver_value.ty}, [TExpr]{receiver_value}, [Type]{parameters[0]}, result_type, span, expected, environment, &scopes, &state, &context, &diagnostics)
+            return SemaMethodSpecialCheck{handled: true, value: value}
+        }
+    }
     if method == "encode" -> return sema_data_check_encode(receiver, receiver_value, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if resolved_ty == {
         .Named(name) -> {
@@ -941,7 +976,7 @@ pub fn sema_call_try_data_core_call(module_name: String, member: String, args: [
             else -> {
                 if first.ty == {
                     .Apply(name, parameters) -> {
-                        if name == "DataArrowBatch" && parameters.len() == 1 {
+                        if sema_data_nominal_is(name, "DataArrowBatch") && parameters.len() == 1 {
                             row = Val(parameters[0])
                         }
                     }
@@ -970,8 +1005,8 @@ pub fn sema_call_try_data_core_call(module_name: String, member: String, args: [
         row_type :: row ?? Type.Named{name: "Unit"}
         result_type := if {
             module_name == "core.data" -> Type.Apply{name: "Query", args: [Type]{row_type}}
-            member == "import" -> Type.Apply{name: "DataArrowBatch", args: [Type]{row_type}}
-            else -> Type.Result{ok: Type.Apply{name: "Query", args: [Type]{row_type}}, err: Type.Named{name: "DataError"}}
+            member == "import" -> first.ty
+            else -> Type.Result{ok: Type.Apply{name: sema_data_source_type_name(environment, "Query"), args: [Type]{row_type}}, err: Type.Named{name: sema_data_source_type_name(environment, "DataError")}}
         }
         record :: sema_call_core_record(module_name, member, args.len(), span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         result :: sema_data_core_emit(record, "{module_name}.{member}", args, argument_types, typed, [Type]{row_type}, result_type, span, expected, environment, &scopes, &state, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
