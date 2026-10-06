@@ -993,9 +993,6 @@ fn jet_cli_plan(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
     json :: jet_cli_wants_json(owned)
     if raw.len() == 0 -> return jet_cli_not_ported("repl", color)
     if raw[0] == "?" -> return jet_cli_not_ported("?", color)
-    // `check`, `doc`, and the inspect group render their own `--json`
-    // envelopes (Report.jet, Inspect.jet).
-    if json && raw[0] != "doc" && raw[0] != "check" && raw[0] != "inspect" -> return jet_cli_not_ported("{raw[0]} --json", color)
 
     // Retired, moved, and grouped spellings (Source/main.rs `normalize_frequency_ring_argv`).
     if jet_cli_retired_report(raw, color) == .Val(report) -> return jet_cli_done("", report, JET_DRIVER_EXIT_USAGE)
