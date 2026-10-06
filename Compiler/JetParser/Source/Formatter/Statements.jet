@@ -440,7 +440,8 @@ fn jfmt_fmt_fenced_names(f: &JetFmt, fence: FencedNames) {
             }
         }
         if same && jfmt_src_range_valid(f, first_span.start, first_span.end) {
-            jfmt_write(&f, "<: {jfmt_src_text(f, first_span.start, first_span.end)} :>")
+            range_text :: jfmt_src_text(f, first_span.start, first_span.end)
+            jfmt_write(&f, "<: {range_text} :>")
             return
         }
     }
@@ -483,7 +484,10 @@ fn jfmt_fmt_fenced_names(f: &JetFmt, fence: FencedNames) {
 
 fn jfmt_write_fence_fragment(f: &JetFmt, start: Int, end: Int, preserve_layout: Bool) {
     if preserve_layout {
-        if jfmt_src_range_valid(f, start, end) -> jfmt_write(&f, jfmt_src_text(f, start, end))
+        if jfmt_src_range_valid(f, start, end) {
+            text :: jfmt_src_text(f, start, end)
+            jfmt_write(&f, text)
+        }
         return
     }
     literal_spans := [Span]{}
@@ -492,11 +496,20 @@ fn jfmt_write_fence_fragment(f: &JetFmt, start: Int, end: Int, preserve_layout: 
     }
     cursor := start
     loop span in literal_spans {
-        if jfmt_src_range_valid(f, cursor, span.start) -> jfmt_write_normalized_source_fragment(&f, jfmt_src_text(f, cursor, span.start))
-        if jfmt_src_range_valid(f, span.start, span.end) -> jfmt_write(&f, jfmt_src_text(f, span.start, span.end))
+        if jfmt_src_range_valid(f, cursor, span.start) {
+            fragment :: jfmt_src_text(f, cursor, span.start)
+            jfmt_write_normalized_source_fragment(&f, fragment)
+        }
+        if jfmt_src_range_valid(f, span.start, span.end) {
+            literal :: jfmt_src_text(f, span.start, span.end)
+            jfmt_write(&f, literal)
+        }
         cursor = span.end
     }
-    if jfmt_src_range_valid(f, cursor, end) -> jfmt_write_normalized_source_fragment(&f, jfmt_src_text(f, cursor, end))
+    if jfmt_src_range_valid(f, cursor, end) {
+        fragment :: jfmt_src_text(f, cursor, end)
+        jfmt_write_normalized_source_fragment(&f, fragment)
+    }
 }
 
 fn jfmt_write_normalized_source_fragment(f: &JetFmt, fragment: String) {
@@ -532,7 +545,7 @@ fn jfmt_write_normalized_source_fragment(f: &JetFmt, fragment: String) {
 pub fn jfmt_emit_leading_statement_gap(f: &JetFmt, start: Int, end: Int) {
     cursor := start
     loop f.comment_i < f.comments.len() {
-        text :: f.comments[f.comment_i].text
+        text :: ~f.comments[f.comment_i].text
         span :: f.comments[f.comment_i].span
         if span.start >= end -> break
         if span.start < start {
@@ -1161,17 +1174,34 @@ fn jfmt_consecutive_expr_int_range(f: JetFmt, fence: FencedNames) -> NameRange? 
         if !jfmt_src_range_valid(f, entry.span.start, entry.span.end) -> return None
         text :: jfmt_src_text(f, entry.span.start, entry.span.end)
         if text.contains(".") -> return None
-        parsed :: text.replace("_", "").parse()
-        if parsed == {
-            .Ok(value) -> &values.push(value)
-            .Err(_) -> return None
-        }
+        value :: jfmt_parse_decimal_i64(text.replace("_", "")) ?? return None
+        &values.push(value)
         &texts.push(text)
     }
     loop index in 1..<values.len() {
         if values[index] != values[index - 1] + 1 -> return None
     }
     Val(NameRange{start: texts[0], end: texts[texts.len() - 1]})
+}
+
+// Rust `str::parse::<i64>`: an optional sign, then one or more ASCII digits.
+fn jfmt_parse_decimal_i64(text: String) -> Int? Never! {
+    bytes :: text.bytes()
+    index := 0
+    negative := false
+    if bytes.len() > 0 && (Int.from_u8(bytes[0]) == 43 || Int.from_u8(bytes[0]) == 45) {
+        negative = Int.from_u8(bytes[0]) == 45
+        index = 1
+    }
+    if index >= bytes.len() -> return None
+    value := 0
+    loop index < bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        if code < 48 || code > 57 -> return None
+        value = value * 10 + (code - 48)
+        index += 1
+    }
+    Val(if negative -> -value else -> value)
 }
 
 fn jfmt_fmt_classic_switch(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?) {
@@ -1191,7 +1221,8 @@ fn jfmt_fmt_classic_switch(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?) {
     if else_body == .Val(body) {
         then_used_braces :: jfmt_out_trimmed_ends_with_close(f)
         jfmt_write(&f, " else")
-        jfmt_fmt_control_body_after_header(&f, body, then_used_braces || jfmt_authored_braced_loop_exit(f, body))
+        braced_exit :: jfmt_authored_braced_loop_exit(f, body)
+        jfmt_fmt_control_body_after_header(&f, body, then_used_braces || braced_exit)
     }
 }
 
@@ -1201,7 +1232,7 @@ fn jfmt_authored_braced_loop_exit(f: JetFmt, body: [Stmt]) -> Bool {
 
 fn jfmt_emit_classic_if_condition_trivia(f: &JetFmt, condition_start: Int) {
     loop f.comment_i < f.comments.len() && f.comments[f.comment_i].span.start < condition_start {
-        text :: f.comments[f.comment_i].text
+        text :: ~f.comments[f.comment_i].text
         jfmt_write(&f, text)
         f.comment_i += 1
         if text.starts_with("//") {
@@ -1638,7 +1669,7 @@ fn jfmt_resugar_layout_stmt(layout_name: String, stmt: Stmt) -> Stmt Never! {
             b2.init = jfmt_resugar_layout_expr(layout_name, b.init)
             Stmt.Val{binding: b2}
         }
-        else -> stmt
+        else -> ~stmt
     }
 }
 
@@ -1679,6 +1710,6 @@ fn jfmt_resugar_layout_expr(layout_name: String, e: Expr) -> Expr Never! {
             call2.args = jfmt_resugar_layout_args(layout_name, call.args)
             Expr.Call{call: call2}
         }
-        else -> e
+        else -> ~e
     }
 }

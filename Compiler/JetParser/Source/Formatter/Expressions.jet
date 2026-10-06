@@ -314,9 +314,9 @@ fn jfmt_result_handler_source_end(f: JetFmt, expr: Expr) -> Int Never! {
 
 fn jfmt_emit_result_handler_comments(f: &JetFmt, start: Int, end: Int) Never! {
     loop f.comment_i < f.comments.len() {
-        comment :: f.comments[f.comment_i]
+        comment :: ~f.comments[f.comment_i]
         if comment.span.start < start || comment.span.start >= end -> break
-        jfmt_emit_comment_line(&f, comment.text)
+        jfmt_emit_comment_line(&f, ~comment.text)
         f.comment_i += 1
     }
 }
@@ -480,15 +480,15 @@ fn jfmt_dispatch_value_head(f: JetFmt, expr: Expr) -> JetFmtDispatchHead? Never!
                 first_binary :: jfmt_binary_parts(first) ?? return None
                 if jfmt_same_op(first_binary.op, table_op) && jfmt_is_all_value_alts(f, first_binary.left, table_op, cond) -> return Val(JetFmtDispatchHead{subject: first_binary.left, op: table_op})
             }
-            None
+            JetFmtDispatchHead?{None}
         }
         // Card #1440: a pattern-headed value table's first arm is a
         // PatternTest; the table subject is the test's subject (`==` only).
         .PatternTest(subject, _, _) -> {
             if jfmt_bin_op_spell(table_op) == "==" -> return Val(JetFmtDispatchHead{subject: subject, op: table_op})
-            None
+            JetFmtDispatchHead?{None}
         }
-        else -> None
+        else -> JetFmtDispatchHead?{None}
     }
 }
 
@@ -869,7 +869,8 @@ pub fn jfmt_fmt_type_at(f: &JetFmt, ty: Type, source: Span?) {
             }
             jfmt_write(&f, name)
             jfmt_write(&f, "<")
-            jfmt_fmt_type_list(&f, args, jfmt_source_list_at(f, source, JFMT_DELIM_ANGLE), fallback_span)
+            type_source :: jfmt_source_list_at(f, source, JFMT_DELIM_ANGLE)
+            jfmt_fmt_type_list(&f, args, type_source, fallback_span)
             jfmt_write(&f, ">")
         }
         // D-QUANTITY-TYPE1=A: sema-synthesized; kept for exhaustiveness.
@@ -972,7 +973,8 @@ fn jfmt_fmt_named_struct_head(f: &JetFmt, type_name: String, type_args: [Type], 
     jfmt_write(&f, type_name)
     if type_args.len() > 0 {
         jfmt_write(&f, "<")
-        jfmt_fmt_type_list(&f, type_args, jfmt_source_list_at(f, source_span, JFMT_DELIM_ANGLE), source_span ?? Span{start: 0, end: 0})
+        type_source :: jfmt_source_list_at(f, source_span, JFMT_DELIM_ANGLE)
+        jfmt_fmt_type_list(&f, type_args, type_source, source_span ?? Span{start: 0, end: 0})
         jfmt_write(&f, ">")
     }
 }
@@ -1284,11 +1286,17 @@ pub fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
             }
         }
         // D-SHIFT1 (c7shift): a pattern-literal argument.
-        .StrMatchLit(parts, span) -> jfmt_fmt_str_match_parts(&f, parts, jfmt_is_typed_head_body(f, span))
+        .StrMatchLit(parts, span) -> {
+            typed_head :: jfmt_is_typed_head_body(f, span)
+            jfmt_fmt_str_match_parts(&f, parts, typed_head)
+        }
         // D-BINPAT1: the byte-mode sibling.
         .BinMatchLit(parts, _) -> jfmt_fmt_bin_match_parts(&f, parts)
         // S34/S67: keep the author's radix, separators and hex case.
-        .Int(value, span, _, raw) -> jfmt_write(&f, jfmt_int_literal_spelling(f, span, value, raw))
+        .Int(value, span, _, raw) -> {
+            spelling :: jfmt_int_literal_spelling(f, span, value, raw)
+            jfmt_write(&f, spelling)
+        }
         .Float(value, _, _, raw) -> jfmt_write(&f, jfmt_float_literal_spelling(value, raw))
         // D-UNITLIT1: `500ms` — no space between number and suffix.
         .UnitLit(raw, _, _, suffix, _, _) -> {
@@ -1733,18 +1741,18 @@ fn jfmt_is_subjectless_guard(subject: Expr, span: Span) -> Bool Never! {
 // A loop body that is one subjectless single-arm guard prints as `if cond`;
 // returns the statements that remain for the braces.
 fn jfmt_guarded_loop_body(f: &JetFmt, body: [Stmt], loop_span: Span?) -> [Stmt] {
-    if body.len() != 1 -> return body
+    if body.len() != 1 -> return ~body
     if body[0] == .Switch(subject, arms, else_body, span) {
-        if else_body != None -> return body
+        if else_body != None -> return ~body
         if loop_span == .Val(required) {
-            if !jfmt_same_span(span, required) -> return body
+            if !jfmt_same_span(span, required) -> return ~body
         }
-        if !jfmt_is_subjectless_guard(subject, span) || arms.len() != 1 -> return body
+        if !jfmt_is_subjectless_guard(subject, span) || arms.len() != 1 -> return ~body
         jfmt_write(&f, " if ")
         jfmt_fmt_expr(&f, arms[0].cond, JFMT_PREC_OR_FALLBACK)
-        return arms[0].body
+        return ~arms[0].body
     }
-    body
+    ~body
 }
 
 fn jfmt_fmt_value_loop_body(f: &JetFmt, body: [Stmt], loop_span: Span) {
@@ -1852,7 +1860,8 @@ pub fn jfmt_fmt_lambda(f: &JetFmt, lambda: Lambda) {
     if !bare_param -> jfmt_write(&f, ")")
     if lambda.effects == .Val(effects) {
         jfmt_write(&f, " -[")
-        jfmt_fmt_effect_row(&f, effects, jfmt_source_effect_row_span_after(f, lambda.span.start))
+        row_source :: jfmt_source_effect_row_span_after(f, lambda.span.start)
+        jfmt_fmt_effect_row(&f, effects, row_source)
         jfmt_write(&f, "]> ")
     } else {
         jfmt_write(&f, " -> ")
@@ -1985,7 +1994,10 @@ pub fn jfmt_fmt_pattern(f: &JetFmt, pattern: Pattern) {
             jfmt_write(&f, "}}")
         }
         // D-PARSESTR1: an interpolation literal used as a pattern.
-        .StrMatch(parts, span) -> jfmt_fmt_str_match_parts(&f, parts, jfmt_is_typed_head_body(f, span))
+        .StrMatch(parts, span) -> {
+            typed_head :: jfmt_is_typed_head_body(f, span)
+            jfmt_fmt_str_match_parts(&f, parts, typed_head)
+        }
         // D-BINPAT1 / D-UNIFYLIT1=A: `[U8]{"…"}` binary pattern.
         .BinMatch(parts, _) -> jfmt_fmt_bin_match_parts(&f, parts)
     }
@@ -2131,7 +2143,8 @@ fn jfmt_fmt_call(f: &JetFmt, call: Call) {
 fn jfmt_fmt_call_type_args(f: &JetFmt, type_args: [Type], start: Int) {
     if type_args.len() == 0 -> return
     jfmt_write(&f, "<")
-    jfmt_fmt_type_list(&f, type_args, jfmt_source_list_span_after(f, start, JFMT_DELIM_ANGLE), Span{start: 0, end: 0})
+    type_source :: jfmt_source_list_span_after(f, start, JFMT_DELIM_ANGLE)
+    jfmt_fmt_type_list(&f, type_args, type_source, Span{start: 0, end: 0})
     jfmt_write(&f, ">")
 }
 

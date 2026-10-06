@@ -129,7 +129,7 @@ fn jfmt_sort_members(members: [JetFmtMember]) -> [JetFmtMember] Never! {
     sorted := members
     index := 1
     loop index < sorted.len() {
-        current :: sorted[index]
+        current :: ~sorted[index]
         position := index
         loop position > 0 && current.start < sorted[position - 1].start {
             sorted[position] = sorted[position - 1]
@@ -144,7 +144,7 @@ fn jfmt_sort_members(members: [JetFmtMember]) -> [JetFmtMember] Never! {
 // Rust `Option<Span>` lookup into `source_list_item_spans`.
 fn jfmt_span_at(spans: [Span], index: Int, fallback: Span) -> Span Never! {
     if index < spans.len() -> return spans[index]
-    fallback
+    ~fallback
 }
 
 fn jfmt_item_spans_for(f: JetFmt, source: JetFmtSourceList?) -> [Span] {
@@ -189,7 +189,7 @@ fn jfmt_items_rfind(haystack: [U8], needle: [U8], before: Int) -> Int? Never! {
 // The segment after the last `separator` (Rust `rsplit(sep).next()`).
 fn jfmt_last_segment(text: String, separator: String) -> String Never! {
     bytes :: text.bytes()
-    position :: jfmt_items_rfind(bytes, separator.bytes(), bytes.len()) ?? return text
+    position :: jfmt_items_rfind(bytes, separator.bytes(), bytes.len()) ?? return ~text
     jfmt_bytes_text(bytes, position + separator.bytes().len(), bytes.len())
 }
 
@@ -219,7 +219,7 @@ fn jfmt_substitute_type(ty: Type, params: [TypeParam], args: [Type]) -> Type Nev
             loop index in 0..<params.len() {
                 if index < args.len() && params[index].name == name -> return args[index]
             }
-            ty
+            ~ty
         }
         .Apply(name, nested) -> {
             out := [Type]{}
@@ -270,7 +270,7 @@ fn jfmt_unit_type_name(member: String) -> String Never! {
         if bytes.len() == 0 -> next
         out = "{out}{jfmt_bytes_text(bytes, 0, 1).to_upper()}{jfmt_bytes_text(bytes, 1, bytes.len())}"
     }
-    if out.len() == 0 -> return member
+    if out.len() == 0 -> return ~member
     out
 }
 
@@ -299,7 +299,7 @@ fn jfmt_unit_family_decodes(family: UnitFamilyDef, name: String) -> Bool? Never!
 
 // Rust `Names::member_name(module_name, "")`.
 fn jfmt_member_name_prefix(module_name: String) -> String Never! {
-    stripped :: if module_name.starts_with("__jet_") -> jfmt_bytes_text(module_name.bytes(), 6, module_name.bytes().len()) else -> module_name
+    stripped :: if module_name.starts_with("__jet_") -> jfmt_bytes_text(module_name.bytes(), 6, module_name.bytes().len()) else -> ~module_name
     decoded :: jfmt_decode_generated_suffix(stripped) ?? stripped
     jfmt_generated_path("{decoded}.")
 }
@@ -593,7 +593,7 @@ fn jfmt_canonical_migration_source(f: JetFmt, span: Span) -> String {
     sorted := edits
     position_index := 1
     loop position_index < sorted.len() {
-        current :: sorted[position_index]
+        current :: ~sorted[position_index]
         position := position_index
         loop position > 0 && current.start < sorted[position - 1].start {
             sorted[position] = sorted[position - 1]
@@ -673,7 +673,8 @@ fn jfmt_fmt_meta_rule(f: &JetFmt, meta: MetaAttr) {
 
 // Copy an item's source slice verbatim and skip the comments inside it.
 fn jfmt_write_verbatim(f: &JetFmt, start: Int, end: Int, newline: Bool) {
-    jfmt_write(&f, jfmt_src_text(f, start, end))
+    text :: jfmt_src_text(f, start, end)
+    jfmt_write(&f, text)
     if newline -> jfmt_newline(&f)
     jfmt_skip_verbatim_comments(&f, end)
 }
@@ -690,7 +691,7 @@ pub fn jfmt_fmt_item(f: &JetFmt, item: Item) {
             // before `fn`, so preserve that source form verbatim. Written
             // `impl Type { … }` blocks still use canonical fmt.
             line_start :: (jfmt_items_rfind(f.src_bytes, "\n".bytes(), i.span.start) ?? -1) + 1
-            text_bytes :: f.src_bytes[line_start..<i.span.end]
+            text_bytes :: ~f.src_bytes[line_start..<i.span.end]
             if jfmt_items_find(text_bytes, "fn {i.type_name}.".bytes(), 0) != None {
                 // The AST does not retain the marker ordering for this sugar,
                 // but the formatter still owns the canonical arrow. Restrict
@@ -767,7 +768,8 @@ pub fn jfmt_fmt_item(f: &JetFmt, item: Item) {
         // D-MIGRATE1: preserve migration layout while emitting the canonical
         // arrow and literal spellings inside the block.
         .Migration(m) -> {
-            jfmt_write(&f, jfmt_canonical_migration_source(f, m.span))
+            migration_text :: jfmt_canonical_migration_source(f, m.span)
+            jfmt_write(&f, migration_text)
             jfmt_newline(&f)
             jfmt_skip_verbatim_comments(&f, m.span.end)
         }
@@ -924,7 +926,8 @@ pub fn jfmt_fmt_derive_body_items(f: &JetFmt, body: [DeriveBodyItem]) {
     loop index in 0..<body.len() {
         body_item :: body[index]
         if index > 0 && !f.at_line_start -> jfmt_newline(&f)
-        jfmt_emit_leading(&f, jfmt_derive_body_item_start(f, body_item))
+        item_start :: jfmt_derive_body_item_start(f, body_item)
+        jfmt_emit_leading(&f, item_start)
         if body_item == {
             .Item(item) -> jfmt_fmt_item(&f, item)
             .Stmt(stmt) -> jfmt_fmt_stmt(&f, stmt)
@@ -941,7 +944,8 @@ pub fn jfmt_fmt_derive_body_items(f: &JetFmt, body: [DeriveBodyItem]) {
                 jfmt_end_template_block(&f)
             }
         }
-        jfmt_emit_trailing(&f, jfmt_derive_body_item_end(f, body_item))
+        item_end :: jfmt_derive_body_item_end(f, body_item)
+        jfmt_emit_trailing(&f, item_end)
         if !f.at_line_start -> jfmt_newline(&f)
     }
 }
@@ -1147,7 +1151,8 @@ fn jfmt_fmt_perf_module(f: &JetFmt, declaration: ModuleDecl) -> Bool {
             budget :: perf.budgets[index]
             if index > 0 -> jfmt_write(&f, ", ")
             jfmt_write(&f, "{{")
-            jfmt_fmt_perf_budget_fields(&f, budget.fields, jfmt_source_list_span_after(f, budget.span.start, JFMT_DELIM_BRACE))
+            budget_source :: jfmt_source_list_span_after(f, budget.span.start, JFMT_DELIM_BRACE)
+            jfmt_fmt_perf_budget_fields(&f, budget.fields, budget_source)
             jfmt_write(&f, "}}")
         }
         jfmt_write(&f, "}}")
@@ -1157,7 +1162,8 @@ fn jfmt_fmt_perf_module(f: &JetFmt, declaration: ModuleDecl) -> Bool {
             budget :: perf.budgets[index]
             if index > 0 -> jfmt_write(&f, ", ")
             jfmt_write(&f, "Budget{{")
-            jfmt_fmt_perf_budget_fields(&f, budget.fields, jfmt_source_list_span_after(f, budget.span.start, JFMT_DELIM_BRACE))
+            budget_source :: jfmt_source_list_span_after(f, budget.span.start, JFMT_DELIM_BRACE)
+            jfmt_fmt_perf_budget_fields(&f, budget.fields, budget_source)
             jfmt_write(&f, "}}")
         }
         jfmt_write(&f, "]")
@@ -1218,7 +1224,8 @@ fn jfmt_fmt_trait(f: &JetFmt, t: TraitDef) {
         jfmt_write(&f, "fn ")
         jfmt_write(&f, m.name)
         jfmt_write(&f, "(")
-        jfmt_fmt_param_list(&f, m.params, jfmt_source_list_span_after(f, m.name_span.end, JFMT_DELIM_PAREN))
+        param_source :: jfmt_source_list_span_after(f, m.name_span.end, JFMT_DELIM_PAREN)
+        jfmt_fmt_param_list(&f, m.params, param_source)
         jfmt_write(&f, ")")
         if m.declared_effects == .Val(effects) {
             source :: jfmt_source_effect_row_span_after(f, m.name_span.end)
@@ -1281,7 +1288,8 @@ fn jfmt_fmt_extern_fn(f: &JetFmt, ef: ExternFn) {
     jfmt_write(&f, "fn ")
     jfmt_write(&f, ef.name)
     jfmt_write(&f, "(")
-    jfmt_fmt_param_list(&f, ef.params, jfmt_source_list_span_after(f, ef.name_span.end, JFMT_DELIM_PAREN))
+    param_source :: jfmt_source_list_span_after(f, ef.name_span.end, JFMT_DELIM_PAREN)
+    jfmt_fmt_param_list(&f, ef.params, param_source)
     jfmt_write(&f, ")")
     if ef.return_type == .Val(ret) {
         if jfmt_is_unit_fallible_type(ret) {
@@ -1345,7 +1353,8 @@ fn jfmt_fmt_test(f: &JetFmt, t: TestDef) {
         jfmt_write(&f, " fn ")
         jfmt_write(&f, t.name ?? panic("property tests have a parsed name"))
         jfmt_write(&f, "(")
-        jfmt_fmt_param_list(&f, t.params, jfmt_source_list_span_after(f, t.name_span.end, JFMT_DELIM_PAREN))
+        param_source :: jfmt_source_list_span_after(f, t.name_span.end, JFMT_DELIM_PAREN)
+        jfmt_fmt_param_list(&f, t.params, param_source)
         jfmt_write(&f, ")")
     }
     jfmt_write(&f, " ")
@@ -1382,7 +1391,8 @@ fn jfmt_fmt_type_alias(f: &JetFmt, a: TypeAliasDef) {
     jfmt_fmt_pub_qualifier(&f, a.is_pub, a.is_package_pub)
     jfmt_write(&f, "alias ")
     jfmt_write(&f, a.name)
-    jfmt_fmt_type_params(&f, a.type_params, jfmt_source_list_span_after(f, a.name_span.end, JFMT_DELIM_ANGLE))
+    type_source :: jfmt_source_list_span_after(f, a.name_span.end, JFMT_DELIM_ANGLE)
+    jfmt_fmt_type_params(&f, a.type_params, type_source)
     jfmt_write(&f, " :: ")
     jfmt_fmt_type_at(&f, a.target, Val(a.target_span))
     jfmt_write(&f, ";")
@@ -1462,7 +1472,8 @@ fn jfmt_fmt_marker_call_arg(f: &JetFmt, argument: MarkerCallArg) {
         .Expr(value) -> jfmt_fmt_expr(&f, value, JFMT_PREC_OR_FALLBACK)
         .EffectRow(effects, span) -> {
             jfmt_write(&f, "-[")
-            jfmt_fmt_effect_row(&f, effects, jfmt_source_list_span_after(f, span.start, JFMT_DELIM_BRACKET))
+            row_source :: jfmt_source_list_span_after(f, span.start, JFMT_DELIM_BRACKET)
+            jfmt_fmt_effect_row(&f, effects, row_source)
             jfmt_write(&f, "]>")
         }
     }
@@ -1503,7 +1514,8 @@ pub fn jfmt_fmt_marker_group(f: &JetFmt, markers: [Marker], sigil: String, lone_
     }
     jfmt_write(&f, sigil)
     jfmt_write(&f, "[")
-    jfmt_fmt_marker_list(&f, markers, jfmt_source_marker_group_span(f, markers[0].name_span.start))
+    group_source :: jfmt_source_marker_group_span(f, markers[0].name_span.start)
+    jfmt_fmt_marker_list(&f, markers, group_source)
     jfmt_write(&f, "]")
     jfmt_newline(&f)
 }
@@ -1567,7 +1579,7 @@ fn jfmt_empty_body_inline(f: JetFmt, span: Span) -> Bool Never! {
     if open < span.start -> return false
     close :: jfmt_items_rfind(bytes, "}}".bytes(), span.end) ?? return false
     if close <= open -> return false
-    body :: bytes[open + 1..<close]
+    body :: ~bytes[open + 1..<close]
     loop byte in body {
         if Int.from_u8(byte) == 10 -> return false
     }
@@ -1597,7 +1609,8 @@ fn jfmt_fmt_func(f: &JetFmt, func: Func, top_level: Bool) {
     if func.is_comptime -> jfmt_write(&f, "prep ")
     jfmt_write(&f, "fn ")
     jfmt_write(&f, func.name)
-    jfmt_fmt_type_params(&f, func.type_params, jfmt_source_list_span_after(f, func.name_span.end, JFMT_DELIM_ANGLE))
+    type_source :: jfmt_source_list_span_after(f, func.name_span.end, JFMT_DELIM_ANGLE)
+    jfmt_fmt_type_params(&f, func.type_params, type_source)
     jfmt_write(&f, "(")
     head_written := false
     if func.head_pattern == .Val(head) {
@@ -1619,7 +1632,10 @@ fn jfmt_fmt_func(f: &JetFmt, func: Func, top_level: Bool) {
             }
         }
     }
-    if !head_written -> jfmt_fmt_param_list(&f, func.params, jfmt_source_list_span_after(f, func.name_span.end, JFMT_DELIM_PAREN))
+    if !head_written {
+        param_source :: jfmt_source_list_span_after(f, func.name_span.end, JFMT_DELIM_PAREN)
+        jfmt_fmt_param_list(&f, func.params, param_source)
+    }
     jfmt_write(&f, ")")
     unit_fallible :: if func.return_type == .Val(ret) -> jfmt_is_unit_fallible_type(ret) else -> false
     // D-SIG-AFTER1=A: the one arrow, then optional return facts.
@@ -1628,7 +1644,8 @@ fn jfmt_fmt_func(f: &JetFmt, func: Func, top_level: Bool) {
         if func.declared_effects == .Val(effects) {
             jfmt_write(&f, " ")
             jfmt_write(&f, "-[")
-            jfmt_fmt_effect_row(&f, effects, jfmt_source_effect_row_span_after(f, func.name_span.end))
+            row_source :: jfmt_source_effect_row_span_after(f, func.name_span.end)
+            jfmt_fmt_effect_row(&f, effects, row_source)
             jfmt_write(&f, "]>")
         } else if func.is_pure {
             jfmt_write(&f, " ")
@@ -1660,7 +1677,7 @@ fn jfmt_fmt_func(f: &JetFmt, func: Func, top_level: Bool) {
         }
     }
     if func.declared_return_view_provenance == .Val(map) -> jfmt_fmt_declared_return_view_from(&f, map, func.params)
-    saved_return_type :: f.expected_return_type
+    saved_return_type :: ~f.expected_return_type
     f.expected_return_type = func.return_type
     // D-FFI-INLINE1=A (card #501): an inline foreign fn's body is a single
     // foreign-source string. Reconstruct the triple-quoted shape exactly,
@@ -1945,7 +1962,8 @@ fn jfmt_fmt_struct(f: &JetFmt, s: StructDef, top_level: Bool) {
     if top_level -> jfmt_fmt_pub_qualifier(&f, s.is_pub, s.is_package_pub)
     jfmt_write(&f, "struct ")
     jfmt_write(&f, s.name)
-    jfmt_fmt_type_params(&f, s.type_params, jfmt_source_list_span_after(f, s.name_span.end, JFMT_DELIM_ANGLE))
+    type_source :: jfmt_source_list_span_after(f, s.name_span.end, JFMT_DELIM_ANGLE)
+    jfmt_fmt_type_params(&f, s.type_params, type_source)
     jfmt_write(&f, " {{")
     jfmt_newline(&f)
     derives_decode :: jfmt_has_name(s.derives, "Decode")
@@ -1973,7 +1991,8 @@ fn jfmt_fmt_enum(f: &JetFmt, e: EnumDef, top_level: Bool) {
     if top_level -> jfmt_fmt_pub_qualifier(&f, e.is_pub, e.is_package_pub)
     jfmt_write(&f, "enum ")
     jfmt_write(&f, e.name)
-    jfmt_fmt_type_params(&f, e.type_params, jfmt_source_list_span_after(f, e.name_span.end, JFMT_DELIM_ANGLE))
+    type_source :: jfmt_source_list_span_after(f, e.name_span.end, JFMT_DELIM_ANGLE)
+    jfmt_fmt_type_params(&f, e.type_params, type_source)
     jfmt_write(&f, " {{")
     jfmt_newline(&f)
     derives_decode :: jfmt_has_name(e.derives, "Decode")
@@ -2050,7 +2069,8 @@ fn jfmt_fmt_variant_name_and_payload(f: &JetFmt, v: Variant, name: String, deriv
         jfmt_write(&f, " ")
     } else if v.serde_markers.len() > 1 {
         jfmt_write(&f, "#[")
-        jfmt_fmt_marker_list(&f, v.serde_markers, jfmt_source_marker_group_span(f, v.name_span.start))
+        group_source :: jfmt_source_marker_group_span(f, v.name_span.start)
+        jfmt_fmt_marker_list(&f, v.serde_markers, group_source)
         jfmt_write(&f, "] ")
     }
     jfmt_write(&f, name)
@@ -2107,7 +2127,7 @@ fn jfmt_enum_entries_at_prefix(e: EnumDef, prefix: String) -> [JetFmtEnumEntry] 
     sorted := items
     position_index := 1
     loop position_index < sorted.len() {
-        current :: sorted[position_index]
+        current :: ~sorted[position_index]
         position := position_index
         loop position > 0 && current.order < sorted[position - 1].order {
             sorted[position] = sorted[position - 1]
@@ -2344,7 +2364,8 @@ fn jfmt_fmt_cli_binding(f: &JetFmt, binding: CLICommandBinding) {
             jfmt_fmt_marker(&f, binding.markers[0])
         } else {
             jfmt_write(&f, "[")
-            jfmt_fmt_marker_list(&f, binding.markers, jfmt_source_marker_group_span(f, binding.name_span.start))
+            group_source :: jfmt_source_marker_group_span(f, binding.name_span.start)
+            jfmt_fmt_marker_list(&f, binding.markers, group_source)
             jfmt_write(&f, "]")
         }
         jfmt_write(&f, " ")

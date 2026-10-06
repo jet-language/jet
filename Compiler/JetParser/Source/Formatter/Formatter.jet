@@ -320,7 +320,7 @@ pub fn jfmt_line_of(f: JetFmt, pos: Int) -> Int Never! {
     low := 0
     high := f.newlines.len()
     loop low < high {
-        middle :: (low + high) / 2
+        middle :: (low + high) /% 2
         if f.newlines[middle] < pos {
             low = middle + 1
         } else {
@@ -335,7 +335,7 @@ pub fn jfmt_first_token_at(f: JetFmt, start: Int) -> Int Never! {
     low := 0
     high := f.source_toks.len()
     loop low < high {
-        middle :: (low + high) / 2
+        middle :: (low + high) /% 2
         if f.source_toks[middle].span.start < start {
             low = middle + 1
         } else {
@@ -624,10 +624,10 @@ fn jfmt_parse_radix(digits: [U8], start: Int, radix: Int, allow_sign: Bool) -> I
         digit :: jfmt_digit_value(digits[index])
         if digit >= radix -> return None
         if negative {
-            if value < (-9223372036854775807 - 1 + digit) / radix -> return None
+            if value < (-9223372036854775807 - 1 + digit) /% radix -> return None
             value = value * radix - digit
         } else {
-            if value > (9223372036854775807 - digit) / radix -> return None
+            if value > (9223372036854775807 - digit) /% radix -> return None
             value = value * radix + digit
         }
         index += 1
@@ -820,7 +820,7 @@ pub fn jfmt_loop_source_separator(f: &JetFmt, next_start: Int, wrap: Bool) Never
 pub fn jfmt_loop_separator_tail(f: &JetFmt, next_start: Int, wrap: Bool) Never! {
     broke := false
     loop f.comment_i < f.comments.len() && f.comments[f.comment_i].span.start < next_start {
-        text :: f.comments[f.comment_i].text
+        text :: ~f.comments[f.comment_i].text
         jfmt_write(&f, "  ")
         jfmt_write(&f, text)
         f.comment_i += 1
@@ -864,14 +864,15 @@ pub fn jfmt_blank_separator_before_item(f: &JetFmt) Never! {
 
 pub fn jfmt_emit_remaining_comments(f: &JetFmt) Never! {
     loop f.comment_i < f.comments.len() {
-        jfmt_emit_comment_line(&f, f.comments[f.comment_i].text)
+        text :: ~f.comments[f.comment_i].text
+        jfmt_emit_comment_line(&f, text)
         f.comment_i += 1
     }
 }
 
 pub fn jfmt_emit_leading(f: &JetFmt, pos: Int) Never! {
     loop f.comment_i < f.comments.len() {
-        comment :: f.comments[f.comment_i]
+        comment :: ~f.comments[f.comment_i]
         if comment.span.start >= pos -> break
         if jfmt_is_trailing_comment_at(f, comment.span) -> break
         jfmt_emit_comment_line(&f, comment.text)
@@ -882,7 +883,7 @@ pub fn jfmt_emit_leading(f: &JetFmt, pos: Int) Never! {
 
 pub fn jfmt_emit_trailing(f: &JetFmt, end: Int) Never! {
     loop f.comment_i < f.comments.len() {
-        comment :: f.comments[f.comment_i]
+        comment :: ~f.comments[f.comment_i]
         if comment.span.start >= f.trailing_comment_limit -> break
         if comment.span.start >= end && jfmt_line_of(f, comment.span.start) == jfmt_line_of(f, end) {
             jfmt_write(&f, "  ")
@@ -1167,7 +1168,7 @@ pub fn jfmt_item_span_or(spans: [Span]?, index: Int, fallback: Span) -> Span Nev
     if spans == .Val(list) {
         if index < list.len() -> return list[index]
     }
-    fallback
+    ~fallback
 }
 
 pub fn jfmt_list_item_spans(f: JetFmt, source: JetFmtSourceList?) -> [Span]? Never! {
@@ -1286,19 +1287,19 @@ fn jfmt_self_typed(expr: Expr) -> Bool Never! {
 
 fn jfmt_unwrap_redundant_optional_value(value: Expr) -> Expr Never! {
     if value == .EnumLit(type_name, variant, _, args, _, _) {
-        if type_name.len() > 0 || variant != "Val" || args.len() != 1 -> return value
+        if type_name.len() > 0 || variant != "Val" || args.len() != 1 -> return ~value
         if args[0] == .Positional(inner) {
             if jfmt_self_typed(inner) -> return inner
         }
     }
-    value
+    ~value
 }
 
 fn jfmt_strip_optional_returns_in_if(expr: Expr) -> Expr Never! {
     if expr == .If(cond, then_body, then_value, else_body, else_value, span) {
         return Expr.If{cond: cond, then_body: jfmt_strip_optional_returns_in_body(then_body), then_value: then_value, else_body: jfmt_strip_optional_returns_in_body(else_body), else_value: jfmt_strip_optional_returns_in_if(else_value), span: span}
     }
-    expr
+    ~expr
 }
 
 fn jfmt_strip_optional_returns_in_body(body: [Stmt]) -> [Stmt] Never! {
@@ -1342,7 +1343,7 @@ fn jfmt_strip_optional_func(function: Func) -> Func Never! {
             return updated
         }
     }
-    function
+    ~function
 }
 
 fn jfmt_strip_optional_funcs(functions: [Func]) -> [Func] Never! {
@@ -1419,7 +1420,7 @@ fn jfmt_apply_source_edits(src: String, edits: [TextEdit]) -> String? Never! {
     // Rust sorts by descending start; apply from the end of the source.
     index := 1
     loop index < ordered.len() {
-        current :: ordered[index]
+        current :: ~ordered[index]
         position := index
         loop position > 0 && current.span.start > ordered[position - 1].span.start {
             ordered[position] = ordered[position - 1]
@@ -1457,7 +1458,7 @@ fn jfmt_sort_edits_by_start(edits: [TextEdit]) -> [TextEdit] Never! {
     sorted := edits
     index := 1
     loop index < sorted.len() {
-        current :: sorted[index]
+        current :: ~sorted[index]
         position := index
         loop position > 0 && current.span.start < sorted[position - 1].span.start {
             sorted[position] = sorted[position - 1]
@@ -1724,7 +1725,7 @@ fn jfmt_print_family_edits(src: String, aliases: [String], calls: [JetFmtRetired
 
 fn jfmt_rewrite_print_family_fragment(src: String, aliases: [String]) -> String {
     lexed :: lex(src.bytes())
-    if lexed.diagnostics.len() > 0 -> return src
+    if lexed.diagnostics.len() > 0 -> return ~src
     calls := [JetFmtRetiredPrintCall]{}
     jfmt_collect_retired_print_calls(lexed.tokens, aliases, &calls)
     jfmt_apply_source_edits(src, jfmt_print_family_edits(src, aliases, calls)) ?? src
@@ -1956,13 +1957,15 @@ pub fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: 
             stmt :: prog.script_body[stmt_i]
             jfmt_emit_leading(&f, jfmt_stmt_span(stmt).start)
             jfmt_fmt_stmt(&f, stmt)
-            jfmt_emit_trailing(&f, jfmt_statement_source_end(f, stmt))
+            stmt_end :: jfmt_statement_source_end(f, stmt)
+            jfmt_emit_trailing(&f, stmt_end)
             if !f.at_line_start -> jfmt_newline(&f)
             stmt_i += 1
             previous_was_script = true
         } else {
             item :: prog.items[item_i]
-            jfmt_emit_leading(&f, jfmt_item_span_start(f, item))
+            item_start :: jfmt_item_span_start(f, item)
+            jfmt_emit_leading(&f, item_start)
             jfmt_fmt_item(&f, item)
             jfmt_emit_trailing(&f, jfmt_item_span_end(item))
             item_i += 1
