@@ -286,6 +286,9 @@ fn sema_core_generated_context_markers(graph: SemaRegistrationGraph, registratio
     loop type_name in ([String]{"Pool", "Cell", "ID"}) -> sema_core_generated_register_core_qualified(&markers, "core.mem", type_name)
     loop type_name in ([String]{"Vec", "Matrix"}) -> sema_core_generated_register_core_qualified(&markers, "core.compute", type_name)
     loop row in registration_module.imports -> sema_core_generated_register_import(&markers, row)
+    // D-MOD-CYCLE1=A: a package name bound in the module shadows a Core name
+    // like a non-Core import does.
+    loop owner in registration_module.namespace_bindings -> sema_core_generated_marker_add(&markers, sema_core_generated_shadow_marker(graph.modules[owner.module_index].symbols[owner.row].name))
 }
 
 

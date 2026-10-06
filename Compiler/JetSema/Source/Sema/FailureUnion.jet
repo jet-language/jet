@@ -231,7 +231,7 @@ fn sema_failure_union_mint(graph: &SemaRegistrationGraph, row: SemaFailureUnionR
     name :: row.name
     owned :: sema_failure_union_type_name(name)
     segments := graph.modules[row.module_index].source_segments
-    clash := sema_registration_module_has_name(graph.modules[row.module_index], owned) || sema_registration_module_has_import_name(graph.modules[row.module_index], owned)
+    clash := sema_registration_module_has_name(graph.modules[row.module_index], owned) || sema_registration_module_has_import_name(graph.modules[row.module_index], owned) || sema_registration_namespace_owner(graph, row.module_index, owned) != None
     start :: diagnostics.len()
     if clash {
         &diagnostics.push(sema_error("E0105", row.cases[0].span, "`{name}` creates error cases, but the type `{owned}` already exists", "cases written as `Err(.Case(…))` in `{name}` form its own error type, named `{owned}` after the function", "write the failure contract of `{name}` (for example `-> T {owned}!`), or rename the declared `{owned}`"))

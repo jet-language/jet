@@ -3329,6 +3329,13 @@ fn sema_comptime_probe_refresh(probe: &SemaScopeProbe, graph: SemaRegistrationGr
                     probe.table.bindings[constant.binding].symbol = graph.modules[module_index].imports[import_index].bindings[binding].symbol
                 }
             }
+            .Namespace(owner, position) -> {
+                if sema_comptime_symbol_waits(graph.modules[owner].symbols[position]) {
+                    &waiting.push(constant)
+                } else {
+                    probe.table.bindings[constant.binding].symbol = graph.modules[owner].symbols[position]
+                }
+            }
         }
     }
     probe.constants = waiting
