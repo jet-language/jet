@@ -51,14 +51,26 @@ fn jet_cli_errors(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
 }
 
 // `jet check <file>`: compile through the Jet compiler, place each diagnostic
-// on the file that owns it, and report the outcome the Rust host prints.
-fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?) -> JetDriverVerbOutput {
+// on the file that owns it, and report the outcome the Rust host prints. An
+// explicit file outside every project that imports `project.<module>` is
+// E2393 before the compile (CmdCompile.rs `run_native_execution`). A
+// `project` check (bare or directory) of a program, not a library, runs in
+// Run mode, so an entry with no `fn run` is E0101 (CmdInspect.rs
+// `check_projection_with_options_and_preflight`, Completion.rs).
+fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool) -> JetDriverVerbOutput {
+    if !project {
+        if jet_cli_missing_project_context(file, source) == .Val(missing) {
+            return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, [Diagnostic]{missing}, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        }
+    }
+    requires_run :: project && !jet_cli_package_is_library_only(file) && jet_cli_entry_lacks_run(source)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, threads, JetDriverCompileMode.Program)
     if compiled == {
         .Refused(refusal) -> output = ~refusal
         .Compiled(result, snapshot) -> {
-            diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+            diagnostics := jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+            if requires_run -> &diagnostics.push(jet_cli_no_run_diagnostic())
             output = jet_driver_check_outcome(file, source, diagnostics, color, quiet)
             if jet_cli_errors(diagnostics).len() == 0 {
                 if result.internal_problem == .Val(problem) -> output = jet_cli_ice(problem)
@@ -66,6 +78,14 @@ fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool,
         }
     }
     output
+}
+
+// Resolution's stderr notices (a migrated retired entry, `--show-default`)
+// go out before the compile, ahead of anything the built program writes.
+fn jet_cli_write_notice(notice: String) {
+    if notice.len() == 0 -> return
+    stderr_handle :: cli_term.stderr()
+    &stderr_handle.write(notice).drop("jet stderr")
 }
 
 // Syntax/predicates.rs `sanitize_crate_name`: ASCII letters, digits, and `_`
@@ -478,9 +498,18 @@ pub fn jet_cli_main(args: [String]) -> Int {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}
     if plan == {
         .Done(done) -> output = ~done
-        .Check(file, source, color, quiet, threads) -> output = jet_cli_compile_check(file, source, color, quiet, threads)
-        .Build(file, source, color, release, threads, invocation) -> output = jet_cli_compile_build(file, source, color, release, threads, invocation)
-        .Run(file, source, color, release, verbose, threads, program_args, invocation) -> output = jet_cli_compile_run(file, source, color, release, verbose, threads, program_args, invocation)
+        .Check(file, source, color, quiet, threads, project, notice) -> {
+            jet_cli_write_notice(notice)
+            output = jet_cli_compile_check(file, source, color, quiet, threads, project)
+        }
+        .Build(file, source, color, release, threads, invocation, notice) -> {
+            jet_cli_write_notice(notice)
+            output = jet_cli_compile_build(file, source, color, release, threads, invocation)
+        }
+        .Run(file, source, color, release, verbose, threads, program_args, invocation, notice) -> {
+            jet_cli_write_notice(notice)
+            output = jet_cli_compile_run(file, source, color, release, verbose, threads, program_args, invocation)
+        }
         .Test(file, source, color, verbose, threads, options) -> output = jet_cli_compile_test(file, source, color, verbose, threads, options)
         .New(name, template, annotated, quiet, color) -> output = jet_cli_new_project(name, template, annotated, quiet, color)
     }

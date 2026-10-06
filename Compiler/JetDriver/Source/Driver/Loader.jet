@@ -2114,13 +2114,13 @@ fn jet_driver_check_reserved_import(declaration: ImportDecl, diagnostics: &[Diag
 // D-ECO-INLINEPACKAGE1: the one leading `package { … }` carrier of a source
 // (Rust `Package::extract_inline_package`). Offsets index the original text;
 // `error` is the E1360/E1361/E1362 structure failure.
-struct JetDriverInlinePackage {
-    found: Bool
-    start: Int
-    end: Int
-    body_start: Int
-    body_end: Int
-    error: Diagnostic?
+pub struct JetDriverInlinePackage {
+    pub found: Bool
+    pub start: Int
+    pub end: Int
+    pub body_start: Int
+    pub body_end: Int
+    pub error: Diagnostic?
 }
 
 fn jet_driver_inline_byte(bytes: [U8], at: Int) -> Int Never! {
@@ -2318,7 +2318,7 @@ fn jet_driver_inline_package_failure(code: String, start: Int, end: Int) -> JetD
     JetDriverInlinePackage{found: false, start: start, end: end, body_start: start, body_end: start, error: Val(jet_driver_row_diagnostic(code, Val(Span{start: start, end: end})))}
 }
 
-fn jet_driver_inline_package(source: String) -> JetDriverInlinePackage {
+pub fn jet_driver_inline_package(source: String) -> JetDriverInlinePackage {
     none :: JetDriverInlinePackage{found: false, start: 0, end: 0, body_start: 0, body_end: 0, error: None}
     if !source.contains("package") -> return none
     bytes :: source.bytes()
@@ -2352,14 +2352,14 @@ fn jet_driver_blank_source_range(source: String, start: Int, end: Int) -> String
 
 // The source an ordinary parse reads: the inline carrier masked away (Rust
 // `Package::mask_inline_package_source`).
-fn jet_driver_mask_inline_package(source: String, carrier: JetDriverInlinePackage) -> String {
+pub fn jet_driver_mask_inline_package(source: String, carrier: JetDriverInlinePackage) -> String {
     if !carrier.found -> return ~source
     jet_driver_blank_source_range(source, carrier.start, carrier.end)
 }
 
 // Only the carrier's body, at its original offsets, for the manifest field
 // parser (Rust `InlinePackageBlock::body`).
-fn jet_driver_inline_package_body(source: String, carrier: JetDriverInlinePackage) -> String {
+pub fn jet_driver_inline_package_body(source: String, carrier: JetDriverInlinePackage) -> String {
     head :: jet_driver_blank_source_range(source, 0, carrier.body_start)
     jet_driver_blank_source_range(head, carrier.body_end, head.len())
 }
