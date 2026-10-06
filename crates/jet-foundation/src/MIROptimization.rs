@@ -1573,13 +1573,15 @@ fn verify_panic_context(
     if context.function.is_empty() {
         return invalid("panic context has no function".to_string());
     }
-    let mut seen_locals = HashSet::new();
+    // A read alias (`count :: rows`) reports under its own name while sharing
+    // the owner's local, so the report key is the name, not the local.
+    let mut seen_names = HashSet::new();
     for (name, local) in &context.locals {
         if name.is_empty() {
             return invalid("panic context has an unnamed local".to_string());
         }
-        if !seen_locals.insert(*local) {
-            return invalid(format!("duplicate panic context local {local:?}"));
+        if !seen_names.insert(name.as_str()) {
+            return invalid(format!("duplicate panic context local `{name}`"));
         }
         if !function.locals.iter().any(|candidate| candidate.id == *local) {
             return invalid(format!("panic context local {local:?}"));
@@ -3247,13 +3249,15 @@ fn verify_semantic_operation(
             if context.function.is_empty() {
                 return invalid("require-stop context has no function".to_string());
             }
-            let mut seen_locals = HashSet::new();
+            // A read alias reports under its own name while sharing the
+            // owner's local; the report key is the name, not the local.
+            let mut seen_names = HashSet::new();
             for (name, local) in &context.locals {
                 if name.is_empty() {
                     return invalid("require-stop context has an unnamed local".to_string());
                 }
-                if !seen_locals.insert(*local) {
-                    return invalid(format!("duplicate require-stop local {local:?}"));
+                if !seen_names.insert(name.as_str()) {
+                    return invalid(format!("duplicate require-stop local `{name}`"));
                 }
                 if !function.locals.iter().any(|candidate| candidate.id == *local) {
                     return invalid(format!("require-stop local {local:?}"));
