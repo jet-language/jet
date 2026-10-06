@@ -2042,8 +2042,10 @@ fn mir_lint_shared_read(ctx: MIRLintContext, defs: MIRLintDefs, value: MIRValueI
 fn mir_lint_parameter_index(ctx: MIRLintContext, defs: MIRLintDefs, value: MIRValueID) -> Int Never! {
     row :: mir_lint_def_at(defs, value)
     if row < 0 -> return -1
-    if ctx.function.blocks[defs.blocks[row]].instructions[defs.positions[row]].operation == .Parameter(index, _) -> return index
-    -1
+    if ctx.function.blocks[defs.blocks[row]].instructions[defs.positions[row]].operation == {
+        .Parameter(index, _) -> index
+        else -> -1
+    }
 }
 
 // The key of the local at the root of `place` ("" for any other root). With
@@ -2504,12 +2506,12 @@ fn mir_lint_propagate_borrow_origins(ctx: MIRLintContext, origins: &[String:[Int
     }
     head := 0
     loop head < work.len() {
-        row :: work[head]
+        row :: ~work[head]
         head += 1
         queued[row] = false
         loop cursors[row] < carried[row].len() {
-            origin :: carried[row][cursors[row]]
-            cursors[row] += 1
+            origin :: ~carried[row][cursors[row]]
+            cursors[row] = cursors[row] + 1
             loop target in edges[row] {
                 key :: target * primary.len() + origin
                 if members.get(key) != None -> next
@@ -2627,7 +2629,7 @@ fn mir_lint_safety_layout(ctx: MIRLintContext, defs: MIRLintDefs) -> MIRLintSafe
         }
     }
     mir_lint_propagate_borrow_origins(ctx, &origins, origin_values)
-    root_values :: origin_values
+    root_values :: ^origin_values
     origin_values = [String]{}
     origin_roots := [Int]{}
     associations := [String:[Int]]{}
@@ -2650,7 +2652,7 @@ fn mir_lint_safety_layout(ctx: MIRLintContext, defs: MIRLintDefs) -> MIRLintSafe
         loop place in places {
             position :: ctx.places.get(mir_lint_key(place.value)) ?? next
             root :: mir_lint_place_root(function.places[position])
-            if seen_owner.get(root) == Val(root_row) -> next
+            if (seen_owner.get(root) ?? -1) == root_row -> next
             _ := &seen_owner.add(root, root_row)
             &keys.push(root)
         }
@@ -2845,8 +2847,9 @@ fn mir_lint_safety_step(ctx: MIRLintContext, layout: MIRLintOwnership, instructi
                 loop holder in (safety.holders.get(local) ?? [Int]{}) {
                     origin :: safety.holder_origins[holder]
                     active :: current.contains(origin) && mir_lint_state_has(state, mir_lint_origin_active_bit(layout, origin))
+                    stale :: active && mir_lint_state_has(state, layout.safety_base + origin)
                     mir_lint_state_set(&state, mir_lint_holder_bit(layout, holder), active)
-                    mir_lint_state_set(&state, mir_lint_holder_stale_bit(layout, holder), active && mir_lint_state_has(state, layout.safety_base + origin))
+                    mir_lint_state_set(&state, mir_lint_holder_stale_bit(layout, holder), stale)
                 }
             }
         }

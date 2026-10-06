@@ -735,7 +735,7 @@ fn lf_owned_read_snapshot(changed_before_use: Bool, branched: Bool) -> MIRProgra
 fn lf_owned_read_ssa_parent(changed_before_use: Bool, branched: Bool) -> MIRProgram Never! {
     r := fx_builder()
     parent :: fx_value(&r, fx_int(), mir_copy_value_ownership(), MIROperation.Constant{value: MIRConstant.BigInt{decimal: "4611686018427387904"}})
-    place :: MIRPlaceID{value: 500 + r.places.len()}
+    place :: MIRPlaceID{value: fx_word(U64{500}, r.places.len())}
     &r.places.push(MIRPlace{id: place, span: fx_span(), ty: fx_int(), base: MIRPlaceBase.Temporary{value: parent}, projections: [MIRProjection]{}, access: MIRAccess.Read, persist_key: None})
     snapshot :: fx_value(&r, fx_int(), mir_copy_value_ownership(), MIROperation.ReadPlace{place: place})
     if branched {

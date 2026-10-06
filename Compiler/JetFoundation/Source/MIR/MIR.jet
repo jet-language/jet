@@ -1992,7 +1992,7 @@ pub fn mir_operation_value_consumption(operation: MIROperation, value: MIRValueI
                     }
                     MIRValueConsumption.No
                 }
-                .CoreClosureCall(_, .Spawn, _, closure, _, _) -> if closure == Val(value) -> MIRValueConsumption.Yes{requires_owner: true} else -> MIRValueConsumption.No
+                .CoreClosureCall(_, .Spawn, _, closure, _, _) -> if closure != Val(value) -> MIRValueConsumption.No else -> MIRValueConsumption.Yes{requires_owner: true}
                 .HandleMethod(_, receiver, args, _, _) -> {
                     if receiver == value && borrow_mask.len() > 0 && !borrow_mask[0] -> return MIRValueConsumption.Yes{requires_owner: true}
                     loop (index, arg) in args {
@@ -2016,9 +2016,9 @@ pub fn mir_operation_value_consumption(operation: MIROperation, value: MIRValueI
 
 pub fn mir_terminator_value_consumption(terminator: MIRTerminator, value: MIRValueID) -> MIRValueConsumption Never! {
     if terminator == {
-        .Return(returned) -> if returned == .Val(value) -> MIRValueConsumption.Yes{requires_owner: false} else -> MIRValueConsumption.No
+        .Return(returned) -> if returned != .Val(value) -> MIRValueConsumption.No else -> MIRValueConsumption.Yes{requires_owner: false}
         // Break's value is transferred by its destination phi, not twice.
-        .Break(_, returned) -> if returned == .Val(value) -> MIRValueConsumption.Through{transfers: false} else -> MIRValueConsumption.No
+        .Break(_, returned) -> if returned != .Val(value) -> MIRValueConsumption.No else -> MIRValueConsumption.Through{transfers: false}
         .Yield(yielded, _) -> if yielded == value -> MIRValueConsumption.Yes{requires_owner: false} else -> MIRValueConsumption.No
         else -> MIRValueConsumption.No
     }
@@ -2202,12 +2202,12 @@ fn mir_read_snapshot_unstable(function: MIRFunction, candidates: [U64:Bool], rou
     loop row in work -> _ := &members.add(row * function.values.len() + row, true)
     head := 0
     loop head < work.len() {
-        row :: work[head]
+        row :: ~work[head]
         head += 1
         queued[row] = false
         loop cursors[row] < origins[row].len() {
-            origin :: origins[row][cursors[row]]
-            cursors[row] += 1
+            origin :: ~origins[row][cursors[row]]
+            cursors[row] = cursors[row] + 1
             loop target in edges[row] {
                 key :: target * function.values.len() + origin
                 if members.get(key) != None -> next
