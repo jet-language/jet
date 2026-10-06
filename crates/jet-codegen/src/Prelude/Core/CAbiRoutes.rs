@@ -13759,11 +13759,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std_os_uptime())
     }
 
-    /// core.sys.username
-    #[no_mangle]
-    pub extern "C" fn jet_std_os_username() -> JetCString {
-        guard(|| handle(crate::jet_std_os_username()))
-    }
 
     /// core.sys.utime
     #[no_mangle]

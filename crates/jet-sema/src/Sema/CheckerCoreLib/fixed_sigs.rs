@@ -1511,6 +1511,10 @@ fn core_fixed_sig_impl(
             vec![(read, Type::String)],
             Some(Type::Option(Box::new(Type::String))),
         )),
+        ("core.sys", "__host_env") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Option(Box::new(Type::List(Box::new(u8_ty()))))),
+        )),
         ("core.sys", "set") => Some((vec![(read, Type::String), (read, Type::String)], None)),
         ("core.sys", "unset") => Some((
             vec![(read, Type::String)],

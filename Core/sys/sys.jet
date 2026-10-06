@@ -52,7 +52,9 @@ pub fn username() -[Env]> String Never! {
     if user != None -> return user
     username :: get("USERNAME")
     if username != None -> return username
-    core.sys.username()
+    host_user :: host_env("USER")
+    if host_user != None -> return host_user
+    host_env("USERNAME") ?? ""
 }
 
 pub fn release() -[Env]> String Never! { core.sys.release() }
@@ -302,4 +304,21 @@ fn expansion_literal_policy() -[Env]> {
     assert(expand("$$$") == "")
     assert(expand("%VALUE%") == "%VALUE%")
     assert(expand("é") == "Ã©")
+}
+
+fn host_env(name: String) -[Env]> String? Never! {
+    decode_host_env(core.sys.__host_env(name))
+}
+
+fn decode_host_env(raw: [U8]?) -> String? Never! {
+    bytes :: raw ?? return None
+    String.from_bytes(bytes)
+}
+
+#Test
+fn host_environment_text_policy() {
+    assert(decode_host_env(None) == None)
+    assert(decode_host_env(Val([U8]{})) == Val(""))
+    assert(decode_host_env(Val([U8]{195, 169})) == Val("é"))
+    assert(decode_host_env(Val([U8]{255})) == None)
 }
