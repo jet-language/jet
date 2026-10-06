@@ -1515,14 +1515,27 @@ fn compute_function_type_names(ty: &Type) -> Option<Vec<String>> {
     })
 }
 
-fn compute_transform_parameter_names(expr: &Expr, cx: &Cx) -> Option<Vec<String>> {
+/// The declaration-local parameter names of a compute-transform function
+/// operand, mirroring sema's `compute_function_names`: a named function, a
+/// function-typed local, a lambda, or a nested transform.
+fn compute_transform_parameter_names(
+    expr: &Expr,
+    cx: &Cx,
+    env: &LowerEnv,
+) -> Option<Vec<String>> {
     match expr {
-        Expr::Paren(inner, _) => compute_transform_parameter_names(inner, cx),
+        Expr::Paren(inner, _) => compute_transform_parameter_names(inner, cx, env),
         Expr::Ident(name, _) => cx
             .fn_param_names
             .get(name)
             .cloned()
-            .or_else(|| cx.fn_types.get(name).and_then(compute_function_type_names)),
+            .or_else(|| cx.fn_types.get(name).and_then(compute_function_type_names))
+            .or_else(|| {
+                env.locals
+                    .get(name)
+                    .and_then(|(_, ty)| ty.as_ref())
+                    .and_then(compute_function_type_names)
+            }),
         Expr::Lambda(lambda) => Some(
             lambda
                 .params
@@ -1537,7 +1550,7 @@ fn compute_transform_parameter_names(expr: &Expr, cx: &Cx) -> Option<Vec<String>
             ) =>
         {
             args.first()
-                .and_then(|arg| compute_transform_parameter_names(&arg.expr, cx))
+                .and_then(|arg| compute_transform_parameter_names(&arg.expr, cx, env))
         }
         Expr::Call(call)
             if matches!(
@@ -1547,7 +1560,7 @@ fn compute_transform_parameter_names(expr: &Expr, cx: &Cx) -> Option<Vec<String>
         {
             call.args
                 .first()
-                .and_then(|arg| compute_transform_parameter_names(&arg.expr, cx))
+                .and_then(|arg| compute_transform_parameter_names(&arg.expr, cx, env))
         }
         _ => None,
     }
@@ -1568,6 +1581,9 @@ fn lower_compute_transform_call(
         return None;
     }
     let function = args.first()?;
+    // Only a function-valued first operand is the transform; the Tensor-valued
+    // `gradient(pred, target)` stays on the source-owned Core route.
+    let parameter_names = compute_transform_parameter_names(&function.expr, cx, env)?;
     let lowered_function = lower_expr(&function.expr, cx, env);
     let function_ty = lowered_function.ty.clone();
     let mut lowered_args = vec![lowered_function];
@@ -1581,11 +1597,6 @@ fn lower_compute_transform_call(
             lowered_args.push(lower_expr(&arg.expr, cx, env));
         }
     }
-    let Some(parameter_names) = compute_transform_parameter_names(&function.expr, cx)
-        .or_else(|| compute_function_type_names(&function_ty))
-    else {
-        return None;
-    };
     let primal_count = if method == "jvp" {
         value_args.len() / 2
     } else {
@@ -6106,8 +6117,14 @@ fn lower_method_call_impl(
     // would otherwise fall through to `StaticCall { User(alias) }` and E0956.
     if let Expr::Ident(alias, _) = receiver {
         if !env.locals.contains_key(alias) {
+            // `use core.crypto.[Secret]` binds a Core *type* item: its
+            // `Secret.from_text(...)` is a static method on that type, not a
+            // `core.crypto.from_text` module member.
             let core_target = cx
                 .core_import_module_for_function(&env.fn_name, alias)
+                .filter(|module| {
+                    jet_foundation::CoreModuleExports::core_leaf_kind(module, alias).is_none()
+                })
                 .map(|module| (module.to_owned(), method.to_owned()))
                 .or_else(|| {
                     cx.inline_reexport_core
@@ -6119,6 +6136,20 @@ fn lower_method_call_impl(
                     let method = core_method.as_str();
                     if module == "core.devtools" && method == "publish" {
                         return lower_devtools_publish(method_span, args, resolved_ret, cx, env);
+                    }
+                    // D-COMPUTE-GRAD1=E: the function-valued transform is
+                    // claimed before the source-owned Tensor `gradient(pred,
+                    // target)` wrapper, exactly as sema routes it.
+                    if let Some(transform) = lower_compute_transform_call(
+                        &module,
+                        method,
+                        method_span,
+                        args,
+                        resolved_ret,
+                        cx,
+                        env,
+                    ) {
+                        return transform;
                     }
                     if let Some(source_call) = lower_core_source_call(
                         method_span,
@@ -6194,17 +6225,6 @@ fn lower_method_call_impl(
                                 args: call_args,
                             },
                         };
-                    }
-                    if let Some(transform) = lower_compute_transform_call(
-                        &module,
-                        method,
-                        method_span,
-                        args,
-                        resolved_ret,
-                        cx,
-                        env,
-                    ) {
-                        return transform;
                     }
                     if module == "core.math" && matches!(method, "is_nan" | "is_inf" | "is_finite")
                     {
@@ -6378,6 +6398,20 @@ fn lower_method_call_impl(
                     if submodule == "core.devtools" && method == "publish" {
                         return lower_devtools_publish(method_span, args, resolved_ret, cx, env);
                     }
+                    // D-COMPUTE-GRAD1=E: the function-valued transform is
+                    // claimed before the source-owned Tensor `gradient(pred,
+                    // target)` wrapper, exactly as sema routes it.
+                    if let Some(transform) = lower_compute_transform_call(
+                        &submodule,
+                        method,
+                        method_span,
+                        args,
+                        resolved_ret,
+                        cx,
+                        env,
+                    ) {
+                        return transform;
+                    }
                     if let Some(source_call) = lower_core_source_call(
                         method_span,
                         &submodule,
@@ -6423,17 +6457,6 @@ fn lower_method_call_impl(
                     }
                     if submodule == "core.math" && method == "abs" {
                         return lower_core_math_abs(args, resolved_ret, method_span, cx, env);
-                    }
-                    if let Some(transform) = lower_compute_transform_call(
-                        &submodule,
-                        method,
-                        method_span,
-                        args,
-                        resolved_ret,
-                        cx,
-                        env,
-                    ) {
-                        return transform;
                     }
                     let mut targs: Vec<TExpr> = args
                         .iter()
