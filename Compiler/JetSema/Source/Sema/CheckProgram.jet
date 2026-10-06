@@ -2082,7 +2082,11 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
     // Each module publishes a delta; the scaling harness sums the events.
     items_scanned := 0
     functions_checked := 0
-    if trace_sink != None -> functions_checked = ready.bodies.len()
+    count_work := false
+    if trace_sink != None {
+        count_work = true
+        functions_checked = ready.bodies.len()
+    }
     method_jobs := 0
     impl_rows_scanned := 0
     loop item_index < program.items.len() {
@@ -2200,7 +2204,7 @@ fn sema_check_registration_module(graph: SemaRegistrationGraph, environment: &Se
                             if trace_functions {
                                 if trace_sink == .Val(sink) -> sink.begin("sema.function", func.name, item_index, program.items.len())
                             }
-                            checked :: sema_check_module_function(&ready.bodies, item_index, scopes_changed, memory_func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), &environment, &scopes, host_hooks, &diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references, trace_sink != None, &functions_checked)
+                            checked :: sema_check_module_function(&ready.bodies, item_index, scopes_changed, memory_func, symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name), &environment, &scopes, host_hooks, &diagnostics, &function_call_facts, &function_comptime_requests, &function_name_references, count_work, &functions_checked)
                             if trace_functions {
                                 if trace_sink == .Val(sink) -> sink.end("sema.function", 1)
                             }
