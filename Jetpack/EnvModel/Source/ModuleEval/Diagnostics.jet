@@ -17,6 +17,12 @@ pub fn envmodel_error(code: String, what: String, why: String, fix: String, span
     EnvModelEvalError{diagnostic: diagnostic_from_registry(code, span, what, why, fix)}
 }
 
+// E1242: a fleet or vmtest host references a system that no contribution
+// defines (U15). `known` is the rendered hint naming the captured systems.
+pub fn envmodel_fleet_unknown_system(fleet: String, host: String, system: String, known: String) -> EnvModelEvalError Never! {
+    envmodel_error("E1242", "the fleet `{fleet}` host `{host}` names an unknown system `{system}`", "fleets are frozen jetos research capture; captured hosts must still point at a captured system so the plan is coherent", "define captured `system.{system}: {{ … }}`, or point the host at an existing captured system ({known})", None)
+}
+
 fn envmodel_bad_source_ref(ref_text: String, span: Span?) -> EnvModelEvalError Never! {
     envmodel_error("E0968", "`{ref_text}` isn't a `target@provider` source ref or bare path", "D-JPK-REF1 puts the upstream target before `@` and its provider after it; local `./`, `../`, and `/` paths stay bare", "Write `NixOS/nixpkgs/nixos-24.05@github`, `nixos-unstable@nixpkgs`, or a bare path such as `../local`", span)
 }

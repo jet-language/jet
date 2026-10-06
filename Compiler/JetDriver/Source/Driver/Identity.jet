@@ -30,6 +30,7 @@ use jet_foundation.[
     record_encode,
 ]
 use jet_sema.[
+    SemaComptimeItemValue,
     SemaRegistrationImportEdge,
     SemaSourceOrigin,
     SemaSourceSegment,
@@ -83,9 +84,14 @@ pub enum JetDriverCompileTarget {
 // (its artifact starts at the package entry); `Test` compiles the `jet test`
 // harness: named `#Test` bodies are checked and lowered, E0601 reports a file
 // with none, and the artifact is a TestExecutable whose harness runs them.
+// `Comptime` checks the program and runs its build-time values through the
+// canonical comptime stage (checked, lowered to MIR, evaluated by JetEval),
+// then stops: nothing is lowered or emitted for run time. Config surfaces
+// (Jetpack EnvModel) evaluate their typed values this way.
 pub enum JetDriverCompileMode {
     Program
     Test
+    Comptime
 }
 
 // One Core library source module the host embeds, mirroring a Rust
@@ -295,6 +301,9 @@ pub struct JetDriverCompileResult {
     // compile recorded, one TSV row each: phase, item, code, message, span.
     pub keep_going_rows: [String]{[String]{}}
     pub authority_policy: JetDriverAuthorityPolicy?{None}
+    // `JetDriverCompileMode.Comptime`: every build-time value the comptime
+    // stage produced, constants included. Empty in the other modes.
+    pub comptime_values: [SemaComptimeItemValue]{[SemaComptimeItemValue]{}}
 }
 
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read

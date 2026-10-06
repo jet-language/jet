@@ -51,8 +51,9 @@ pub fn jet_cli_inspect_b(argv: [String], command: String, jet_argv: [String], ar
     None
 }
 
-// The inspect commands the host carries out because they run another process
-// or read the project's package, lock and advisory state.
+// The inspect commands the host carries out because they run another process,
+// read the project's package, lock and advisory state, or evaluate a config
+// surface through the compiler's comptime stage.
 pub enum JetCLIInspectBPlan {
     // EngineDispatch.rs `dispatch`: run `engine` with `argv` on inherited stdio.
     Engine(engine: String, verb: String, argv: [String])
@@ -60,13 +61,20 @@ pub enum JetCLIInspectBPlan {
     Audit(root: String, advisory_db: String?, color: Bool, json: Bool)
     // CmdSupply.rs `run_sbom` for the project at `root`.
     Sbom(root: String, cyclonedx: Bool, color: Bool, json: Bool)
+    // CmdInspect.rs `run_env` for the config surface `file` (its bytes are
+    // `source`; `base_dir` is the directory its values resolve against).
+    Env(file: String, source: String, base_dir: String, color: Bool, json: Bool)
 }
 
-pub fn jet_cli_inspect_b_host(plan: JetCLIInspectBPlan) -[Env, FS, Exec, IO, Time, Time.Wait]> JetDriverVerbOutput Never! {
+// Config-surface evaluation reaches the compiler driver, whose host adapter
+// makes dynamic calls with no effect bound, so this stays unannotated like
+// the other compiling host verbs.
+pub fn jet_cli_inspect_b_host(plan: JetCLIInspectBPlan) -> JetDriverVerbOutput {
     if plan == {
         .Engine(engine, verb, argv) -> jet_cli_engine_dispatch(engine, verb, argv)
         .Audit(root, advisory_db, color, json) -> jet_cli_run_audit(root, advisory_db, color, json)
         .Sbom(root, cyclonedx, color, json) -> jet_cli_run_sbom(root, cyclonedx, color, json)
+        .Env(file, source, base_dir, color, json) -> jet_cli_inspect_env_host(file, source, base_dir, color, json)
     }
 }
 
@@ -765,14 +773,24 @@ fn jet_cli_inspect_env(args: [String], color: Bool, json: Bool) -[FS, Env]> JetC
     source :: cli_files.read(file) ?? return jet_cli_inspect_b_fail("E2105", "can't read config surface `{file}`: {jet_cli_io_error_text(err)}", "pass a readable `env.jet` or `config.jet` file", color, json, JET_DRIVER_EXIT_USER_ERROR)
     parent :: cli_files.dirname(file)
     base_dir :: if parent == "" -> "." else -> parent
+    JetCLIPlan.InspectB{plan: JetCLIInspectBPlan.Env{file: file, source: source, base_dir: base_dir, color: color, json: json}}
+}
+
+fn jet_cli_inspect_env_output(stdout: String, stderr: String, exit_code: Int) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: exit_code}
+}
+
+// The host half of `jet inspect env`: evaluate the surface and project its
+// reads (text, or the `inspect.env` status object under `--json`).
+fn jet_cli_inspect_env_host(file: String, source: String, base_dir: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
     plan :: if envmodel_evaluate_env(source, base_dir) == {
         .Ok(evaluated) -> evaluated
         .Err(error) -> {
             if json {
                 report :: jet_cli_source_report_json(error.diagnostic, jet_cli_report_path(file), source)
-                return jet_cli_done("{jet_cli_status_render_with_reports("inspect.env", false, [String]{report}, [JetCLIStatusField]{})}\n", "", JET_DRIVER_EXIT_USER_ERROR)
+                return jet_cli_inspect_env_output("{jet_cli_status_render_with_reports("inspect.env", false, [String]{report}, [JetCLIStatusField]{})}\n", "", JET_DRIVER_EXIT_USER_ERROR)
             }
-            return jet_cli_done("", diagnostic_render_all(file, source, [Diagnostic]{error.diagnostic}, color), JET_DRIVER_EXIT_USER_ERROR)
+            return jet_cli_inspect_env_output("", diagnostic_render_all(file, source, [Diagnostic]{error.diagnostic}, color), JET_DRIVER_EXIT_USER_ERROR)
         }
     }
     if json {
@@ -784,7 +802,7 @@ fn jet_cli_inspect_env(args: [String], color: Bool, json: Bool) -[FS, Env]> JetC
             jet_cli_status_field("file", jet_cli_status_text(file)),
             jet_cli_status_field("reads", jet_cli_status_array(reads)),
         })
-        return jet_cli_done("{jet_cli_status_render("inspect.env", true, [JetCLIStatusField]{jet_cli_status_field("env", payload)})}\n", "", JET_DRIVER_EXIT_OK)
+        return jet_cli_inspect_env_output("{jet_cli_status_render("inspect.env", true, [JetCLIStatusField]{jet_cli_status_field("env", payload)})}\n", "", JET_DRIVER_EXIT_OK)
     }
     out := "environment\nfile: {file}\n"
     if plan.environment_reads.len() == 0 {
@@ -793,7 +811,7 @@ fn jet_cli_inspect_env(args: [String], color: Bool, json: Bool) -[FS, Env]> JetC
         out = "{out}reads:\n"
         loop read in plan.environment_reads -> out = "{out}  {read.name}: {read.ty}\n"
     }
-    jet_cli_done(out, "", JET_DRIVER_EXIT_OK)
+    jet_cli_inspect_env_output(out, "", JET_DRIVER_EXIT_OK)
 }
 
 // `jet inspect semindex <file.jet>` (CmdSemIndex.rs `run_semindex`): the

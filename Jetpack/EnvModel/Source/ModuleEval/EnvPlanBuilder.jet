@@ -28,22 +28,23 @@ pub fn envmodel_is_module_surface(src: String) -> Bool Never! {
 
 // Evaluate a typed `env.jet` into an `EnvPlan`. Sources merge across modules
 // by key (U5); package sugar resolves to `package@source` refs; the `prompt`
-// fact becomes the label.
-pub fn envmodel_evaluate_env(src: String, base_dir: String) -[FS, Env]> EnvPlan EnvModelEvalError! {
+// fact becomes the label. Module values run through the Compiler's comptime
+// driver (dynamic host calls), so this chain declares no effect row.
+pub fn envmodel_evaluate_env(src: String, base_dir: String) -> EnvPlan EnvModelEvalError! {
     Ok(envmodel_evaluate_env_with_selections(src, base_dir, None, None))
 }
 
 // Evaluate a typed environment with one authoritative preset selection. An
 // explicit CLI choice is resolved before ambient hostname/user matching, so
 // an unrelated ambient preset cannot reject or augment the requested plan.
-pub fn envmodel_evaluate_env_with_preset(src: String, base_dir: String, requested_preset: String?) -[FS, Env]> EnvPlan EnvModelEvalError! {
+pub fn envmodel_evaluate_env_with_preset(src: String, base_dir: String, requested_preset: String?) -> EnvPlan EnvModelEvalError! {
     Ok(envmodel_evaluate_env_with_selections(src, base_dir, requested_preset, None))
 }
 
 // Evaluate an environment while explicitly selecting one `env.<name>` module.
 // The ordinary CLI uses the deterministic default (`dev`, then `default`,
 // then lexical order) when it has no selector.
-pub fn envmodel_evaluate_env_with_environment(src: String, base_dir: String, requested_environment: String?) -[FS, Env]> EnvPlan EnvModelEvalError! {
+pub fn envmodel_evaluate_env_with_environment(src: String, base_dir: String, requested_environment: String?) -> EnvPlan EnvModelEvalError! {
     Ok(envmodel_evaluate_env_with_selections(src, base_dir, None, requested_environment))
 }
 
@@ -51,7 +52,7 @@ fn envmodel_unresolved_root(base_dir: String, cause: IOError) -> EnvModelEvalErr
     envmodel_error("E1331", "environment root `{base_dir}` cannot be resolved: {cause}", "one environment graph must resolve from a real project directory before it follows imports or path-backed facts", "run the command from an existing project directory", None)
 }
 
-pub fn envmodel_evaluate_env_with_selections(src: String, base_dir: String, requested_preset: String?, requested_environment: String?) -[FS, Env]> EnvPlan EnvModelEvalError! {
+pub fn envmodel_evaluate_env_with_selections(src: String, base_dir: String, requested_preset: String?, requested_environment: String?) -> EnvPlan EnvModelEvalError! {
     environment_root :: files.canonicalize(base_dir) ?? return Err(envmodel_unresolved_root(base_dir, err))
     loader := FileSystemSourceLoader{root: environment_root}
     Ok(envmodel_evaluate_env_with_source_loader(src, environment_root, &loader, requested_preset, requested_environment))
@@ -61,7 +62,7 @@ pub fn envmodel_evaluate_env_with_selections(src: String, base_dir: String, requ
 // the store. This is the production path for `jet profile plan`: provider
 // identity, source provenance, and collision selections come from the same
 // graph used by environment evaluation.
-pub fn envmodel_evaluate_package_profile(src: String, base_dir: String, name: String) -[FS, Env]> PackageProfilePlan EnvModelEvalError! {
+pub fn envmodel_evaluate_package_profile(src: String, base_dir: String, name: String) -> PackageProfilePlan EnvModelEvalError! {
     env :: envmodel_evaluate_env(src, base_dir)
     profiles := PackageProfileSet{}
     loop profile in env.package_profiles {
@@ -204,7 +205,7 @@ fn envmodel_classify_profile_ref(raw: String, table: SourceTable) -> RefSpec Ref
 // This is the same graph evaluator as `envmodel_evaluate_env_with_selections`;
 // only the file and directory boundary changes. Package tooling uses it to
 // keep every imported profile source inside the already-pinned package root.
-pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, base_dir: String, loader: &L, requested_preset: String?, requested_environment: String?) -[FS, Env]> EnvPlan EnvModelEvalError! {
+pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, base_dir: String, loader: &L, requested_preset: String?, requested_environment: String?) -> EnvPlan EnvModelEvalError! {
     program :: envmodel_parse_program(src)
     environment_root :: files.canonicalize(base_dir) ?? return Err(envmodel_unresolved_root(base_dir, err))
     // The root `env.jet` plus every file reachable through `imports: find(…)`
@@ -333,17 +334,29 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
         }
     }
     integration_facts.validate() ?? return Err(envmodel_error("E1335", "environment integration lowering was lossy", err.message, "use named secret references and supported typed integration arguments", None))
+    system_names := [String]{}
+    loop evaluated in modules {
+        loop name in evaluated.system_names -> &system_names.push(name)
+    }
+    known_systems :: if system_names.len() == 0 -> "no `system.<name>:` contribution is defined" else -> "known systems: {system_names.join(", ")}"
     // D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` cross-checks
     // against this project's own package manifest (E1267) — a different
     // manifest than the environment this pass evaluates, so it is loaded here
-    // rather than threaded through as a plan field.
+    // rather than threaded through as a plan field. An `.Iso` image names a
+    // captured system (E0978).
     needs_package_facts := false
     loop image in images {
-        if !image.from_environment -> needs_package_facts = true
+        if image.kind == ImageKind.OCI && !image.from_environment -> needs_package_facts = true
     }
     manifest := PackageFacts?{None}
     if needs_package_facts -> manifest = &loader.package_facts()
     loop image in images {
+        if image.kind == ImageKind.Iso {
+            if !system_names.contains(image.from) {
+                return Err(envmodel_error("E0978", "The image `{image.name}` is built from an unknown system `{image.from}`", "`from: system.<name>` is frozen jetos disk-image research; Jetpack's active image path uses `from: packages.<name>`", "Use `from: packages.<name>` for an `.Oci` image, or keep the system image as research capture ({known_systems})", None))
+            }
+            next
+        }
         if image.from_environment {
             if !environment_names.contains(image.from) {
                 return Err(envmodel_error("E1327", "the image `{image.name}` names unknown environment `{image.from}`", "D-ENV-IMAGE1: an environment image projects one declared `env.<name>` fact graph into a runnable OCI image", "declare `module env.{image.from} {{ … }}`, or point `from:` at an existing environment", None))
@@ -367,6 +380,21 @@ pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, ba
             .None -> {}
         }
         if !is_executable -> return Err(envmodel_oci_from_non_executable(image.name, image.from, is_library))
+    }
+    // U15: every fleet and vmtest host must reference a known system (E1242).
+    loop evaluated in modules {
+        loop group in evaluated.fleets {
+            loop host in group.hosts {
+                if !system_names.contains(host.system) -> return Err(envmodel_fleet_unknown_system(group.name, host.name, host.system, known_systems))
+            }
+        }
+    }
+    loop evaluated in modules {
+        loop group in evaluated.vmtests {
+            loop host in group.hosts {
+                if !system_names.contains(host.system) -> return Err(envmodel_fleet_unknown_system(group.name, host.name, host.system, known_systems))
+            }
+        }
     }
     envmodel_validate_secret_graph(secrets, Span{start: 0, end: 0})
     if requested_environment != None {

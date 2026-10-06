@@ -5,8 +5,10 @@
 
 // Parse `src` and evaluate every enabled module it declares. `base_dir`
 // resolves `embed_file` inside contribution expressions, same as ordinary
-// comptime evaluation.
-pub fn envmodel_evaluate_source(src: String, base_dir: String) -[Env]> [EvaluatedModule] EnvModelEvalError! {
+// comptime evaluation. Module values run through the Compiler's comptime
+// path, whose driver makes dynamic host calls, so the evaluation chain
+// declares no effect row.
+pub fn envmodel_evaluate_source(src: String, base_dir: String) -> [EvaluatedModule] EnvModelEvalError! {
     program :: envmodel_parse_program(src)
     Ok(envmodel_evaluate_modules(program.items, src, base_dir))
 }
@@ -90,8 +92,8 @@ fn envmodel_environment_globals(reads: [EnvironmentRead]) -[Env]> [String: CtVal
 }
 
 // Evaluate every enabled `Item.Module` in `items` (already parsed).
-pub fn envmodel_evaluate_modules(items: [Item], src: String, base_dir: String) -[Env]> [EvaluatedModule] EnvModelEvalError! {
-    scope :: ModuleEvalScope{base_dir: base_dir, funcs: envmodel_collect_funcs(items)}
+pub fn envmodel_evaluate_modules(items: [Item], src: String, base_dir: String) -> [EvaluatedModule] EnvModelEvalError! {
+    scope :: ModuleEvalScope{base_dir: base_dir, source: src, funcs: envmodel_collect_funcs(items)}
     reads :: envmodel_environment_reads(src)
     globals :: envmodel_collect_comptime_globals(items, scope, envmodel_environment_globals(reads))
     out := [EvaluatedModule]{}
@@ -143,6 +145,9 @@ fn envmodel_evaluate_module(decl: ModuleDecl, src: String, scope: ModuleEvalScop
     images := [ImagePlan]{}
     environment_contributions := [EnvironmentContribution]{}
     package_profiles := [PackageProfileSpec]{}
+    system_names := [String]{}
+    fleets := [FleetPlan]{}
+    vmtests := [FleetPlan]{}
     integrations :: envmodel_evaluate_integration_imports(decl.imports, scope, globals)
     source_bytes :: src.bytes()
     loop contribution in decl.contributions {
@@ -170,15 +175,43 @@ fn envmodel_evaluate_module(decl: ModuleDecl, src: String, scope: ModuleEvalScop
             }
             .Image(lit) -> { &images.push(envmodel_evaluate_image(contribution.path, lit, scope, globals)) }
             .Profile(lit) -> { &package_profiles.push(envmodel_evaluate_package_profile_fields(contribution.path, lit.fields, src, scope, globals, decl.name)) }
-            // The system/fleet/vmtest tiers belong to the JetOS evaluator and
-            // performance budgets to the performance gate; none of them
-            // carries an environment fact.
-            .System(_) | .Fleet(_) | .VMTest(_) | .Perf(_) -> {}
+            // System field checks belong to the JetOS evaluator; the name is
+            // what images and hosts reference. Fleets and vmtests capture
+            // their hosts (E1244/E1245 here, E1242 at plan assembly).
+            .System(_) -> &system_names.push(contribution.path)
+            .Fleet(lit) -> {
+                hosts := [HostPlan]?{None}
+                loop field in lit.fields {
+                    if field.value == {
+                        .Hosts(host_entries) -> hosts = Val(loop host in host_entries -> HostPlan{name: host.name, system: host.system})
+                        .Other(_) -> return Err(envmodel_error("E1244", "`{field.name}` isn't a field of `Fleet`", "fleet deployment remains frozen jetos research; only `hosts` is captured for planning", "remove `{field.name}`; captured fleets use `hosts: {{ … }}`", Val(field.name_span)))
+                    }
+                }
+                captured :: hosts ?? return Err(envmodel_error("E1245", "this `Fleet` has no `hosts`", "fleet deployment is frozen jetos research, but captured fleets still name hosts for later planning", "add `hosts: {{ web1: system.<name> }}` if this is research capture", Val(lit.span)))
+                &fleets.push(FleetPlan{name: contribution.path, hosts: captured})
+            }
+            .VMTest(lit) -> {
+                hosts := [HostPlan]?{None}
+                loop field in lit.fields {
+                    if field.value == {
+                        .Hosts(host_entries) -> hosts = Val(loop host in host_entries -> HostPlan{name: host.name, system: host.system})
+                        .Run(_) -> {}
+                        .Other(_) -> return Err(envmodel_error("E1244", "`{field.name}` isn't a field of `Fleet`", "fleet deployment remains frozen jetos research; only `hosts` is captured for planning", "remove `{field.name}`; captured fleets use `hosts: {{ … }}`", Val(field.name_span)))
+                    }
+                }
+                captured :: hosts ?? return Err(envmodel_error("E1245", "this `Fleet` has no `hosts`", "fleet deployment is frozen jetos research, but captured fleets still name hosts for later planning", "add `hosts: {{ web1: system.<name> }}` if this is research capture", Val(lit.span)))
+                &vmtests.push(FleetPlan{name: contribution.path, hosts: captured})
+            }
+            // Performance budgets belong to the performance gate.
+            .Perf(_) -> {}
         }
     }
     Ok(EvaluatedModule{
         name: decl.name,
         entries: entries,
+        system_names: system_names,
+        fleets: fleets,
+        vmtests: vmtests,
         images: images,
         environment_contributions: environment_contributions,
         integrations: integrations,

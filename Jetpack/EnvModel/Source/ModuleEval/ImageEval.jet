@@ -45,7 +45,7 @@ pub fn envmodel_evaluate_image(path: String, lit: ImageLit, scope: ModuleEvalSco
     from_system := false
     from_environment := false
     from_span := lit.span
-    format_written := false
+    format := String?{None}
     target := String?{None}
     kind_word := String?{None}
     kind_span := lit.span
@@ -78,7 +78,7 @@ pub fn envmodel_evaluate_image(path: String, lit: ImageLit, scope: ModuleEvalSco
                     }
                 }
             }
-            .Format(_, _) -> format_written = true
+            .Format(word, _) -> format = Val(word)
             .Platform(os, arch, span) -> target = Val(envmodel_check_platform(os, arch, span))
             .Other(expr) -> {
                 known :: EnvModelImageField.parse(field.name) ?? return Err(envmodel_image_restated_field(field.name, field.name_span))
@@ -100,22 +100,35 @@ pub fn envmodel_evaluate_image(path: String, lit: ImageLit, scope: ModuleEvalSco
         }
     }
     from :: from_name ?? return Err(envmodel_image_missing_from(lit.span))
-    if from_system -> return Err(envmodel_image_kind_from_mismatch(IMAGE_KIND_OCI, from_span))
+    // `from: system.<name>` infers the `.Iso` disk-image tier; a package or
+    // an environment infers `.Oci`. A written `kind:` must agree.
+    kind := if from_system -> ImageKind.Iso else -> ImageKind.OCI
     if kind_word == {
         .Val(written) -> {
-            if written == IMAGE_KIND_ISO -> return Err(envmodel_image_kind_from_mismatch(IMAGE_KIND_ISO, kind_span))
-            if written != IMAGE_KIND_OCI -> return Err(envmodel_image_unknown_kind(written, kind_span))
+            if written == IMAGE_KIND_ISO {
+                if !from_system -> return Err(envmodel_image_kind_from_mismatch(IMAGE_KIND_ISO, kind_span))
+            } else if written == IMAGE_KIND_OCI {
+                if from_system -> return Err(envmodel_image_kind_from_mismatch(IMAGE_KIND_OCI, kind_span))
+            } else {
+                return Err(envmodel_image_unknown_kind(written, kind_span))
+            }
         }
         .None -> {}
     }
-    // `.Oci` never reads `format:`, and a package image has no system to
-    // cross-compile for.
-    if format_written -> return Err(envmodel_image_restated_field(IMAGE_FIELD_FORMAT, from_span))
-    if target != None && !from_environment -> return Err(envmodel_image_restated_field(SYSTEM_FIELD_TARGET, from_span))
+    if kind == ImageKind.OCI {
+        // `.Oci` never reads `format:`, and a package image has no system to
+        // cross-compile for.
+        if format != None -> return Err(envmodel_image_restated_field(IMAGE_FIELD_FORMAT, from_span))
+        if target != None && !from_environment -> return Err(envmodel_image_restated_field(SYSTEM_FIELD_TARGET, from_span))
+    } else if expose.len() > 0 || env_vars.len() > 0 || image_files.len() > 0 || base != None {
+        // `.Iso` never reads the `.Oci`-only fields.
+        return Err(envmodel_image_restated_field(IMAGE_FIELD_EXPOSE, from_span))
+    }
     Ok(ImagePlan{
         name: path,
-        kind: ImageKind.OCI,
+        kind: kind,
         from: from,
+        format: format ?? "iso",
         from_environment: from_environment,
         target: target,
         expose: expose,
