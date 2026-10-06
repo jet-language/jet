@@ -831,7 +831,7 @@ pub fn pivot_sum<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> St
         }
         found := -1
         loop cell_index in 0..<cells.len() {
-            if text_compare(~cells[cell_index].row_key, ~row_name) == 0 && text_compare(~cells[cell_index].column_key, ~column_name) == 0 {
+            if text_compare(cells[cell_index].row_key, row_name) == 0 && text_compare(cells[cell_index].column_key, column_name) == 0 {
                 found = cell_index
                 break
             }
@@ -975,27 +975,27 @@ pub fn require_bridge(provider: String) DataError! {
 }
 
 fn make_loader<T>(kind: DataLoaderKind, locator: String, member: String, parameters: [String], format_name: String, authority_name: String, limits: DataLimits) -> DataLoader<T> DataError! {
-    if !valid_encoding_limits(~limits.encoding) {
+    if !valid_encoding_limits(limits.encoding) {
         return Err(data_error(DataErrorKind.Limit, "encoding limits are outside their safe ranges", "data.loader"))
     }
     if limits.max_groups <= 0 || limits.max_sort_rows <= 0 || limits.max_join_rows <= 0 || limits.max_output_rows <= 0 {
         return Err(data_error(DataErrorKind.InvalidArgument, "data limits must be positive", "data.loader"))
     }
-    if !valid_public_text(~locator, false) {
+    if !valid_public_text(locator, false) {
         return Err(data_error(DataErrorKind.InvalidArgument, "source locator is invalid", "data.loader"))
     }
-    if member.len() > 0 && !valid_public_text(~member, false) {
+    if member.len() > 0 && !valid_public_text(member, false) {
         return Err(data_error(DataErrorKind.InvalidArgument, "archive member is invalid", "data.loader"))
     }
     if kind != DataLoaderKind.File && member.len() > 0 {
         return Err(data_error(DataErrorKind.InvalidArgument, "only file loaders may carry an archive member", "data.loader"))
     }
     loop parameter in parameters {
-        if !valid_public_text(~parameter, true) {
+        if !valid_public_text(parameter, true) {
             return Err(data_error(DataErrorKind.InvalidArgument, "loader parameter is invalid", "data.loader"))
         }
     }
-    if !valid_public_text(~authority_name, false) || !valid_authority(~authority_name) {
+    if !valid_public_text(authority_name, false) || !valid_authority(authority_name) {
         return Err(data_error(DataErrorKind.InvalidArgument, "loader authority is invalid", "data.loader"))
     }
     format :: parse_format(format_name) ?? return Err(data_error(DataErrorKind.InvalidArgument, "unknown data format", "data.loader"))
@@ -1026,7 +1026,7 @@ fn make_loader<T>(kind: DataLoaderKind, locator: String, member: String, paramet
 
 fn public_parameters(values: [String]) -> [String] Never! {
     out := [String]{}
-    loop value in values -> &out.push(public_parameter(~value))
+    loop value in values -> &out.push(public_parameter(value))
     out
 }
 
@@ -1038,8 +1038,8 @@ fn public_parameter(value: String) -> String Never! {
     key :: trim(parts[0])
     if key.len() == 0 -> return "value-{sha256(normalized.bytes()).hex()}"
     parameter_value :: parts[1]
-    upper_key :: upper(~key)
-    upper_value :: upper(~parameter_value)
+    upper_key :: upper(key)
+    upper_value :: upper(parameter_value)
     sensitive_key := upper_key.contains("PASSWORD") || upper_key.contains("PASSWD") || upper_key.contains("PWD") || upper_key.contains("SECRET") || upper_key.contains("TOKEN") || upper_key.contains("CREDENTIAL") || upper_key.contains("AUTH") || upper_key.contains("API_KEY") || upper_key.contains("APIKEY") || upper_key.contains("ACCESS_KEY") || upper_key.contains("ACCESS-TOKEN") || upper_key.contains("SIGNATURE") || upper_key.contains("COOKIE") || upper_key.contains("SESSION") || upper_key.contains("PRIVATE_KEY") || upper_key.contains("PRIVATE-KEY") || upper_key.contains("BEARER")
     sensitive_value := upper_value.starts_with("BEARER ") || upper_value.starts_with("BASIC ") || upper_value.starts_with("-----BEGIN") || upper_value.starts_with("PASSWORD=") || upper_value.starts_with("SECRET=") || upper_value.starts_with("TOKEN=") || upper_value.starts_with("CREDENTIAL=") || upper_value.starts_with("AUTHORIZATION=")
     if sensitive_key || sensitive_value -> return "{key}=<redacted>"
@@ -1063,7 +1063,7 @@ fn public_locator(kind: DataLoaderKind, locator: String) -> String Never! {
     }
     if query_parts.len() == 1 -> return base
     public_query := [String]{}
-    loop parameter in query_parts[1].split("&") -> &public_query.push(public_parameter(~parameter))
+    loop parameter in query_parts[1].split("&") -> &public_query.push(public_parameter(parameter))
     "{base}?{public_query.join("&")}"
 }
 
@@ -1093,7 +1093,7 @@ fn valid_public_text(text: String, allow_empty: Bool) -> Bool Never! {
 }
 
 fn valid_authority(text: String) -> Bool Never! {
-    normalized := upper(~text)
+    normalized := upper(text)
     if normalized.starts_with("BEARER ") || normalized.starts_with("BASIC ") -> return false
     if normalized.starts_with("PASSWORD=") || normalized.starts_with("SECRET=") || normalized.starts_with("TOKEN=") || normalized.starts_with("CREDENTIAL=") || normalized.starts_with("AUTHORIZATION=") -> return false
     loop byte in text.bytes() {

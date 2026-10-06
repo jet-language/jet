@@ -262,18 +262,22 @@ fn full_and_filtered_views_keep_one_provenance_ledger() {
     assert!(scope.contains("impure:"), "{scope}");
     assert!(!scope.contains("unsafe:"), "{scope}");
 
-    let authority = stdout(&run(
+    // D-CLI-ONE1=A: authority inspection is the `inspect rights` plane and
+    // unsafe inspection is the `inspect gates --kind unsafe` view.
+    let rights = stdout(&run(
         &scratch.path,
-        &["inspect", "authority", "--json", "gates.jet"],
+        &["inspect", "rights", "--json", "gates.jet"],
     ));
-    assert!(authority.contains("\"kind\":\"unsafe\""), "{authority}");
-    assert!(!authority.contains("precision_demotion"), "{authority}");
+    assert!(rights.contains("\"action\":\"inspect.rights\""), "{rights}");
+    assert!(rights.contains("\"required\":[\"IO\"]"), "{rights}");
+    assert!(!rights.contains("precision_demotion"), "{rights}");
 
     let unsafe_view = stdout(&run(
         &scratch.path,
-        &["inspect", "unsafe", "--json", "gates.jet"],
+        &["inspect", "gates", "--kind", "unsafe", "--json", "gates.jet"],
     ));
-    assert!(unsafe_view.contains("\"gates\":["), "{unsafe_view}");
+    assert!(unsafe_view.contains("\"kind\":\"unsafe\""), "{unsafe_view}");
+    assert!(unsafe_view.contains("\"counts\":{\"unsafe\":1}"), "{unsafe_view}");
     assert!(!unsafe_view.contains("test impure reason"), "{unsafe_view}");
 }
 
