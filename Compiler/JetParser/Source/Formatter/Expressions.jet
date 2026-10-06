@@ -716,16 +716,6 @@ fn jfmt_fmt_type_list(f: &JetFmt, types: [Type], list_source: JetFmtSourceList?,
     jfmt_comma_end(&f, multiline, list_source)
 }
 
-fn jfmt_fmt_effect_row(f: &JetFmt, effects: [EffectRowEntry], source: JetFmtSourceList?) {
-    multiline :: jfmt_comma_begin(&f, effects.len(), source)
-    loop (index, entry) in effects {
-        jfmt_comma_before(&f, index, multiline, entry.span.start)
-        jfmt_write(&f, entry.name)
-        jfmt_comma_after(&f, multiline, entry.span.end)
-    }
-    jfmt_comma_end(&f, multiline, source)
-}
-
 fn jfmt_source_list_at(f: JetFmt, source: Span?, delimiter: Int) -> JetFmtSourceList? Never! {
     if source == .Val(span) -> return jfmt_source_list_span_after(f, span.start, delimiter)
     None
