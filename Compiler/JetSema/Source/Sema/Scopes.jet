@@ -241,7 +241,7 @@ pub fn sema_loop_value_set_collecting_type(context: &SemaCheckContext, ty: Type)
     context.collect_item_types[context.collect_item_types.len() - 1] = Val(ty)
 }
 
-pub fn sema_loop_value_append_collecting_item_type(context: &SemaCheckContext, ty: Type, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+pub fn sema_loop_value_append_collecting_item_type(context: &SemaCheckContext, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
     if ty == (Type.Named{name: "Unit"}) {
         &diagnostics.push(sema_error("E0073", span, "this collecting loop path produces no item", "every accepted iteration must contribute one non-unit value unless `next` omits it", "return a value on this path, or remove `->`"))
         return false
@@ -623,20 +623,20 @@ fn sema_scope_environment_boxed_edges(graph: SemaRegistrationGraph?) -> [String:
 }
 
 // The first checked declaration of `name` owned by `module_identity`.
-pub fn sema_scope_checked_type_row(environment: SemaScopeEnvironment, module_identity: String, name: String) -> Int? {
-    environment.checked_type_rows.get("{module_identity}::{name}")
+pub fn sema_scope_checked_type_row(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, name: String) -> Int? {
+    program.checked_type_rows.get("{module_identity}::{name}")
 }
 
 // Every checked declaration row named `name`, in declaration order.
-pub fn sema_scope_checked_type_name_rows(environment: SemaScopeEnvironment, name: String) -> [Int] {
-    slot :: environment.checked_type_name_slots.get(name) ?? return [Int]{}
-    environment.checked_type_name_rows[slot]
+pub fn sema_scope_checked_type_name_rows(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> [Int] {
+    slot :: program.checked_type_name_slots.get(name) ?? return [Int]{}
+    program.checked_type_name_rows[slot]
 }
 
 // One environment serves every module of a graph pass: the registration
 // graph, checked types and write-parameter facts stay, and the module's own
 // source facts replace the previous module's.
-pub fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, module_row: SemaRegistrationModule, comptime_body_values: [SemaComptimeBodyValue]) Never! {
+pub fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, program: SemaProgramTables, module_row: SemaRegistrationModule, comptime_body_values: [SemaComptimeBodyValue]) Never! {
     environment.module_identity = module_row.module_identity
     environment.package_identity = module_row.package_identity
     environment.module_name = module_row.module_name
@@ -657,8 +657,8 @@ pub fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, m
 // and source facts replace the previous target's; every other per-module or
 // per-function fact starts empty, as in a newly built probe environment.
 // False when the graph has no such module.
-pub fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironment, module_identity: String, comptime_body_values: [SemaComptimeBodyValue]) -> Bool Never! {
-    if environment.registration_graph == .Val(graph) {
+pub fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, comptime_body_values: [SemaComptimeBodyValue]) -> Bool Never! {
+    if program.registration_graph == .Val(graph) {
         module_index :: sema_registration_module_index(graph, module_identity) ?? return false
         environment.module_identity = graph.modules[module_index].module_identity
         environment.package_identity = graph.modules[module_index].package_identity
@@ -677,15 +677,15 @@ pub fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironm
     false
 }
 
-pub fn sema_scope_environment_boxed_edge(environment: SemaScopeEnvironment, owner: SymbolID, edge: String) -> Bool Never! {
-    if environment.registration_graph == .Val(graph) {
+pub fn sema_scope_environment_boxed_edge(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: SymbolID, edge: String) -> Bool Never! {
+    if program.registration_graph == .Val(graph) {
         row :: sema_type_graph_nominal_row(graph, owner.key) ?? return false
         module_identity :: graph.modules[row.module_index].module_identity
-        if sema_scope_checked_type_row(environment, module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name) == .Val(checked_row) -> return sema_checked_type_has_boxed_edge(environment.checked_types[checked_row], edge)
+        if sema_scope_checked_type_row(environment, program, module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name) == .Val(checked_row) -> return sema_checked_type_has_boxed_edge(program.checked_types[checked_row], edge)
         // Matched in place: a pattern on the indexed path copies the whole item.
         nominal :: graph.modules[row.module_index].nominals[row.row]
         if nominal.source == .SourceAST(definition) {
-            return sema_checked_boxed_edges(graph, environment.boxed_edges, module_identity, definition).contains(edge)
+            return sema_checked_boxed_edges(graph, program.boxed_edges, module_identity, definition).contains(edge)
         }
     }
     false
@@ -1551,8 +1551,8 @@ pub enum SemaScopeDeclarationSite {
     Local(index: Int)
 }
 
-pub fn sema_scope_declaration_site(environment: SemaScopeEnvironment, id: SymbolID) -> SemaScopeDeclarationSite? {
-    if environment.registration_graph == .Val(graph) {
+pub fn sema_scope_declaration_site(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeDeclarationSite? {
+    if program.registration_graph == .Val(graph) {
         // The first function and nominal rows by key replace the module scan
         // (earlier modules first, functions before nominals in one module).
         function_module := -1
@@ -1574,17 +1574,17 @@ pub fn sema_scope_declaration_site(environment: SemaScopeEnvironment, id: Symbol
     None
 }
 
-pub fn sema_scope_resolve_declaration(environment: SemaScopeEnvironment, id: SymbolID) -> Item? {
-    site :: sema_scope_declaration_site(environment, id) ?? return None
+pub fn sema_scope_resolve_declaration(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Item? {
+    site :: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return Val(environment.declarations[index].item)
-    graph_option :: environment.registration_graph
+    graph_option :: program.registration_graph
     graph :: graph_option ?? return None
     if site == .Function(module_index, row) -> return Val(Item.Func{value: graph.modules[module_index].functions[row].declaration})
     if site == .Nominal(module_index, row) -> return sema_registration_nominal_source_item(graph.modules[module_index].nominals[row].source)
     None
 }
 
-// The item variant of sema_scope_resolve_declaration(environment, id).
+// The item variant of sema_scope_resolve_declaration(environment, program, id).
 pub enum SemaScopeDeclarationKind {
     Func
     Struct
@@ -1603,12 +1603,12 @@ fn sema_scope_item_kind(item: Item) -> SemaScopeDeclarationKind Never! {
     }
 }
 
-pub fn sema_scope_declaration_kind(environment: SemaScopeEnvironment, id: SymbolID) -> SemaScopeDeclarationKind? {
-    site :: sema_scope_declaration_site(environment, id) ?? return None
+pub fn sema_scope_declaration_kind(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeDeclarationKind? {
+    site :: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return Val(sema_scope_item_kind(environment.declarations[index].item))
     if site == .Function(_, _) -> return Val(SemaScopeDeclarationKind.Func)
     if site == .Nominal(module_index, row) {
-        graph_option :: environment.registration_graph
+        graph_option :: program.registration_graph
         graph :: graph_option ?? return None
         nominal :: graph.modules[module_index].nominals[row]
         if nominal.source == .SourceAST(item) -> return Val(sema_scope_item_kind(item))
@@ -1616,8 +1616,8 @@ pub fn sema_scope_declaration_kind(environment: SemaScopeEnvironment, id: Symbol
     None
 }
 
-pub fn sema_scope_declaration_is(environment: SemaScopeEnvironment, id: SymbolID, kind: SemaScopeDeclarationKind) -> Bool {
-    found :: sema_scope_declaration_kind(environment, id) ?? return false
+pub fn sema_scope_declaration_is(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID, kind: SemaScopeDeclarationKind) -> Bool {
+    found :: sema_scope_declaration_kind(environment, program, id) ?? return false
     found == kind
 }
 
@@ -1633,11 +1633,11 @@ fn sema_scope_item_struct(item: Item) -> SemaScopeStructShape? {
 }
 
 // The struct shape when sema_scope_resolve_declaration(environment, id) is a struct.
-pub fn sema_scope_declaration_struct(environment: SemaScopeEnvironment, id: SymbolID) -> SemaScopeStructShape? {
-    site :: sema_scope_declaration_site(environment, id) ?? return None
+pub fn sema_scope_declaration_struct(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeStructShape? {
+    site :: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return sema_scope_item_struct(environment.declarations[index].item)
     if site == .Nominal(module_index, row) {
-        graph_option :: environment.registration_graph
+        graph_option :: program.registration_graph
         graph :: graph_option ?? return None
         nominal :: graph.modules[module_index].nominals[row]
         if nominal.source == .SourceAST(item) -> return sema_scope_item_struct(item)
@@ -1659,11 +1659,11 @@ fn sema_scope_item_enum(item: Item) -> SemaScopeEnumShape? {
 }
 
 // The enum shape when sema_scope_resolve_declaration(environment, id) is an enum.
-pub fn sema_scope_declaration_enum(environment: SemaScopeEnvironment, id: SymbolID) -> SemaScopeEnumShape? {
-    site :: sema_scope_declaration_site(environment, id) ?? return None
+pub fn sema_scope_declaration_enum(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeEnumShape? {
+    site :: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return sema_scope_item_enum(environment.declarations[index].item)
     if site == .Nominal(module_index, row) {
-        graph_option :: environment.registration_graph
+        graph_option :: program.registration_graph
         graph :: graph_option ?? return None
         nominal :: graph.modules[module_index].nominals[row]
         if nominal.source == .SourceAST(item) -> return sema_scope_item_enum(item)
@@ -1681,11 +1681,11 @@ fn sema_scope_item_enum_declares(item: Item, variant: String) -> Bool Never! {
 }
 
 // sema_scope_resolve_declaration(environment, id) is an enum declaring `variant`.
-pub fn sema_scope_declaration_enum_declares(environment: SemaScopeEnvironment, id: SymbolID, variant: String) -> Bool {
-    site :: sema_scope_declaration_site(environment, id) ?? return false
+pub fn sema_scope_declaration_enum_declares(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID, variant: String) -> Bool {
+    site :: sema_scope_declaration_site(environment, program, id) ?? return false
     if site == .Local(index) -> return sema_scope_item_enum_declares(environment.declarations[index].item, variant)
     if site == .Nominal(module_index, row) {
-        graph_option :: environment.registration_graph
+        graph_option :: program.registration_graph
         graph :: graph_option ?? return false
         nominal :: graph.modules[module_index].nominals[row]
         if nominal.source == .SourceAST(item) -> return sema_scope_item_enum_declares(item, variant)
@@ -1700,11 +1700,11 @@ fn sema_scope_item_distinct(item: Item) -> DistinctDef? {
 
 // The declaration when sema_scope_resolve_declaration(environment, id) is a
 // distinct type; a distinct declaration has no methods to leave behind.
-pub fn sema_scope_declaration_distinct(environment: SemaScopeEnvironment, id: SymbolID) -> DistinctDef? {
-    site :: sema_scope_declaration_site(environment, id) ?? return None
+pub fn sema_scope_declaration_distinct(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> DistinctDef? {
+    site :: sema_scope_declaration_site(environment, program, id) ?? return None
     if site == .Local(index) -> return sema_scope_item_distinct(environment.declarations[index].item)
     if site == .Nominal(module_index, row) {
-        graph_option :: environment.registration_graph
+        graph_option :: program.registration_graph
         graph :: graph_option ?? return None
         nominal :: graph.modules[module_index].nominals[row]
         if nominal.source == .SourceAST(item) -> return sema_scope_item_distinct(item)
@@ -1719,10 +1719,10 @@ fn sema_scope_item_function_type_params(item: Item) -> [TypeParam] Never! {
 
 // The type parameters when sema_scope_resolve_declaration(environment, id) is
 // a function, else none; the function's body is never copied.
-pub fn sema_scope_declaration_function_type_params(environment: SemaScopeEnvironment, id: SymbolID) -> [TypeParam] {
-    site :: sema_scope_declaration_site(environment, id) ?? return [TypeParam]{}
+pub fn sema_scope_declaration_function_type_params(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> [TypeParam] {
+    site :: sema_scope_declaration_site(environment, program, id) ?? return [TypeParam]{}
     if site == .Local(index) -> return sema_scope_item_function_type_params(environment.declarations[index].item)
-    graph_option :: environment.registration_graph
+    graph_option :: program.registration_graph
     graph :: graph_option ?? return [TypeParam]{}
     if site == .Function(module_index, row) -> return graph.modules[module_index].functions[row].declaration.type_params
     if site == .Nominal(module_index, row) {
