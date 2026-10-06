@@ -132,6 +132,8 @@ pub(crate) mod os_rt {
             Closed(IOContext),
             Protocol(IOContext),
             Other(IOContext),
+            AlreadyExists(IOContext),
+            Unsupported(IOContext),
         }
 
         impl IOError {
@@ -160,7 +162,17 @@ pub(crate) mod os_rt {
                 os_code: error.raw_os_error().map(i64::from),
                 cause: Some(error.to_string()),
             };
+            let not_supported = matches!(
+                error.raw_os_error(),
+                Some(code) if (cfg!(target_os = "linux") && code == 95)
+                    || (cfg!(target_os = "macos") && (code == 45 || code == 102))
+            );
+            if not_supported {
+                return IOError::Unsupported(context);
+            }
             match error.kind() {
+                std::io::ErrorKind::AlreadyExists => IOError::AlreadyExists(context),
+                std::io::ErrorKind::Unsupported => IOError::Unsupported(context),
                 std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
                     IOError::InvalidInput(context)
                 }
@@ -246,6 +258,8 @@ pub(crate) mod os_rt {
             jet_std::IOError::Closed(context) => ("Closed", context),
             jet_std::IOError::Protocol(context) => ("Protocol", context),
             jet_std::IOError::Other(context) => ("Other", context),
+            jet_std::IOError::AlreadyExists(context) => ("AlreadyExists", context),
+            jet_std::IOError::Unsupported(context) => ("Unsupported", context),
         };
         super::Concurrency::with_runtime_mut(|rt| {
             let record = crate::runtime_host::alloc_io_context(
@@ -1357,25 +1371,6 @@ fn jet_jit_fs_remove_all(path: i64) -> i64 {
     }
 }
 
-fn jet_jit_fs_stat(path: i64) -> i64 {
-    let path = clone_path_arg(path);
-    os_rt::marshal_result(fs_prelude::jet_fs_stat(&path), |stat| {
-        Concurrency::with_runtime_mut(|rt| {
-            let record = rt.heap.alloc_record(9);
-            let kind = rt.heap.alloc_string(stat.kind);
-            let _ = rt.heap.record_set_int(record, 0, stat.size);
-            let _ = rt.heap.record_set_int(record, 1, stat.modified_ms);
-            let _ = rt.heap.record_set_int(record, 2, stat.created_ms);
-            let _ = rt.heap.record_set_bool(record, 3, stat.readonly);
-            let _ = rt.heap.record_set_bool(record, 4, stat.is_file);
-            let _ = rt.heap.record_set_bool(record, 5, stat.is_dir);
-            let _ = rt.heap.record_set_bool(record, 6, stat.is_symlink);
-            let _ = rt.heap.record_set_string(record, 7, kind);
-            let _ = rt.heap.record_set_int(record, 8, stat.mode);
-            record as u64
-        })
-    })
-}
 fn jet_jit_fs_is_fifo(path: i64) -> i64 {
     let path = clone_path_arg(path);
     os_rt::marshal_result(fs_prelude::jet_std_fs_is_fifo(&path), u64::from)
@@ -2181,8 +2176,6 @@ host_fns! {
     fs_append_all: "jet_jit_fs_append_all" => jet_jit_fs_append_all: sig_i64_i64_i64;
     fs_write_bytes: "jet_jit_fs_write_bytes" => jet_jit_fs_write_bytes: sig_i64_i64_i64;
     io_binwrite: "jet_jit_io_binwrite" => jet_jit_io_binwrite: sig_i64_i64_i64;
-    fs_stat: "jet_jit_fs_stat" => jet_jit_fs_stat: sig_unary_i64;
-    fs_lstat: "jet_jit_fs_stat" => jet_jit_fs_stat: sig_unary_i64;
     fs_is_fifo: "jet_jit_fs_is_fifo" => jet_jit_fs_is_fifo: sig_unary_i64;
     fs_is_socket: "jet_jit_fs_is_socket" => jet_jit_fs_is_socket: sig_unary_i64;
     fs_chown: "jet_jit_fs_chown" => jet_jit_fs_chown: sig_i64_i64_i64_i64;

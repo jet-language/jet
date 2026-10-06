@@ -706,15 +706,19 @@ Whole-file and metadata functions:
 | `read_at(path, offset, count)` | `[U8] !IOError` | Read a bounded byte range. |
 | `write_at(path, offset, bytes)` | `!IOError` | Write bytes at an offset. |
 | `write_atomic(path, bytes)` | `!IOError` | Publish bytes through a temporary file and rename. |
-| `fsync(path)` | `!IOError` | Flush a file to stable storage. |
+| `fsync(path)` | `!IOError` | Flush a file, or a folder so earlier renames inside it are durable. |
+| `open(path, links:)` / `create(path, if_exists:, mode:, links:)` / `append(path, mode:, links:)` | `FileReader` / `FileWriter !IOError` | Open a close-on-exec stream handle. `if_exists: .Refuse` creates exclusively, `mode` sets a new file's bits before the umask, and `links: .Refuse` refuses a final symbolic link. |
+| `open_directory(path)` | `Directory !IOError` | Hold a directory whose last part is a real directory, not a link. |
+| `samefile(a, b)` | `Bool !IOError` | Compare the two entries' `FileID`s. |
+| `extended_attribute_names(path)` / `extended_attribute(path, name)` / `set_extended_attribute(path, name, value)` | `[String]` / `[U8]?` / `!IOError` | Act on the path itself, never a final link's target. Names are sorted. |
 | `exists(path)` / `is_dir(path)` / `is_file(path)` | `Bool` | Return false when the path cannot be observed; these helpers do not raise a missing-path error. |
-| `stat(path)` | `Stat !IOError` | Read size, timestamps, mode, permissions, and file-kind facts. |
+| `stat(path)` / `lstat(path)` | `Stat !IOError` | Describe the entry itself, never a final link's target. |
 | `set_mode(path, mode)` | `!IOError` | Set Unix mode bits; non-Unix providers use their documented readonly mapping. |
 | `list_dir(path)` | `[DirEntry] !IOError` | List entries in name order. |
 | `create_dir(path)` / `create_dir_all(path)` | `!IOError` | Create one directory or its missing parents. |
 | `remove(path)` / `remove_dir(path)` / `remove_all(path)` | `!IOError` | Remove a file, empty directory, or tree. |
 | `copy(from, to)` / `copy_dir(from, to)` | `!IOError` | Copy one regular file or a directory tree. Directory copy does not dereference symlinks or special entries. |
-| `rename(from, to)` | `!IOError` | Rename or move a path. |
+| `rename(from, to, if_exists:)` | `!IOError` | Rename or move a path; `.Replace` (default), `.Refuse`, or `.Swap`. |
 | `symlink(original, link)` / `hard_link(original, link)` | `!IOError` | Create symbolic or hard links. |
 | `read_link(path)` | `String !IOError` | Read a symbolic-link target. |
 | `canonicalize(path)` / `absolute(path)` | `String !IOError` | Resolve an existing path with symlinks, or make an absolute lexical path without requiring existence. |
@@ -726,9 +730,36 @@ Whole-file and metadata functions:
 
 `walk`, `walk_parallel`, and `walk_files` accept the optional `ignore` value;
 `fs.walk(root)` is the convenience form. `DirEntry` has `name`, `path`, and
-`is_dir`. `Stat` has `size`, `modified_ms`, `created_ms`, `readonly`, `is_file`,
-`is_dir`, `is_symlink`, `kind`, and `mode`. `WalkEntry` exposes `path`,
+`is_dir`. `Stat` has `size`, `kind`, `mode`, `readonly`, `is_file`, `is_dir`,
+`is_symlink`, `id: FileID{device, inode}`, `links`, `owner: Int?` (None on
+Windows), `size_on_disk`, `modified` and `changed` (`DateTime`, nanosecond
+precision), and `created: DateTime?` (None where the file system keeps no
+birth time). `WalkEntry` exposes `path`,
 `relative`, `is_dir`, and `depth` through the checked type projection.
+
+Store-grade contracts (D-CORE-FILEERROR1, D-CORE-FILEOPEN1, D-CORE-FILESTAT1,
+D-CORE-FILEDIR1, D-CORE-HANDLEFD1, D-CORE-FILERENAME1, D-CORE-FILEXATTR1):
+
+- `IOError.AlreadyExists` reports an existing target a call was asked not to
+  replace (`EEXIST`, `ERROR_FILE_EXISTS`, `ERROR_ALREADY_EXISTS`).
+  `IOError.Unsupported` reports a request this system or file system cannot
+  perform (`ENOTSUP`, `EOPNOTSUPP`, `ENOSYS`, `ERROR_NOT_SUPPORTED`). Both
+  carry the shared `IOContext`; match the kind, never `os_code`.
+- A `Directory` keeps working after its path is renamed or removed. Its
+  methods (`open`, `create`, `open_directory`, `create_directory`, `list`,
+  `stat`, `entry_stat`, `read_link`, `rename(from, to, into:, if_exists:)`,
+  `remove`, `remove_directory`, `fsync`) take a relative name of plain parts
+  separated by `/`. Each part is opened without following a link; `..`, `.`,
+  empty parts, and absolute names are `IOError.InvalidInput`. `create_directory`
+  on an existing name is `AlreadyExists`. The handle is close-on-exec and
+  closes at scope exit.
+- `rename(..., if_exists: .Refuse)` is `AlreadyExists` when the target exists;
+  a file system without no-replace renames falls back to link-then-unlink for
+  files and reports `Unsupported` for folders. `.Swap` exchanges two existing
+  names in one step; a missing name is `NotFound` and a system without
+  exchange is `Unsupported`.
+- Extended attributes on Windows, or on a file system without them, report
+  no names and no values; writes are `Unsupported`.
 
 The retired raw-String `read_dir` helper is not a reserved method name:
 user struct and trait methods named `read_dir` participate in normal resolution.

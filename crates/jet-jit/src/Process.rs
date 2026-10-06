@@ -185,6 +185,12 @@ pub(crate) fn process_io_error_result(error: process_prelude::IOError) -> i64 {
         process_prelude::IOError::Other(context) => {
             (process_io_error_variant("Other"), context)
         }
+        process_prelude::IOError::AlreadyExists(context) => {
+            (process_io_error_variant("AlreadyExists"), context)
+        }
+        process_prelude::IOError::Unsupported(context) => {
+            (process_io_error_variant("Unsupported"), context)
+        }
         process_prelude::IOError::ResourceLimit(limit) => {
             return Concurrency::with_runtime_mut(|rt| {
                 // ResourceLimit uses the same one-slot enum record that generic
@@ -711,6 +717,12 @@ pub(crate) fn mir_io_error(error: process_prelude::IOError) -> MirRuntimeValue {
         }
         process_prelude::IOError::Other(context) => {
             ("Other", vec![(None, mir_io_context(context))])
+        }
+        process_prelude::IOError::AlreadyExists(context) => {
+            ("AlreadyExists", vec![(None, mir_io_context(context))])
+        }
+        process_prelude::IOError::Unsupported(context) => {
+            ("Unsupported", vec![(None, mir_io_context(context))])
         }
         process_prelude::IOError::ResourceLimit(limit) => {
             ("ResourceLimit", vec![(None, mir_process_resource_limit(limit))])

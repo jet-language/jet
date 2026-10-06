@@ -2713,20 +2713,6 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("TempFile", &["path"]),
     ("FileLock", &["path"]),
     ("WatchEvent", &["path", "domain", "kind"]),
-    (
-        "Stat",
-        &[
-            "size",
-            "modified_ms",
-            "created_ms",
-            "readonly",
-            "is_file",
-            "is_dir",
-            "is_symlink",
-            "kind",
-            "mode",
-        ],
-    ),
     ("DataColumn", &["id", "name", "type_name", "nullable"]),
     (
         "DataStatus",

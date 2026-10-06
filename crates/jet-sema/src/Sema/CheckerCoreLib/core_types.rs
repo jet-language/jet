@@ -302,7 +302,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Mod" | "ModGrant"
         | "FileReader" | "FileWriter" | "FileLines" | "FileScope" | "MappedFile"
         // D-LSDIR1/D-FSOPS1/D-WATCH-SCOPE1: filesystem and watcher values.
-        | "DirEntry" | "Stat" | "WalkEntry" | "TempDir" | "TempFile" | "FileLock"
+        | "DirEntry" | "WalkEntry" | "TempDir" | "TempFile" | "FileLock"
         // stdlib-api-laws D4: `WatchEvent.domain`/`.kind` are closed enums.
         | "WatchEvent" | "WatchDomain" | "WatchKind" | "WatchHandle" | "WatchSet"
         // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: data summary/status values.
@@ -1901,10 +1901,6 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         // D-LSDIR1=A: DirEntry has name (bare filename), path (full path), is_dir.
         ("DirEntry", "name" | "path") => Some(Type::String),
         ("DirEntry", "is_dir") => Some(Type::Bool),
-        // D-FSOPS1=A: typed filesystem metadata and recursive walk entries.
-        ("Stat", "size" | "modified_ms" | "created_ms" | "mode") => Some(Type::Int),
-        ("Stat", "readonly" | "is_file" | "is_dir" | "is_symlink") => Some(Type::Bool),
-        ("Stat", "kind") => Some(Type::String),
         ("WalkEntry", "path" | "relative") => Some(Type::String),
         ("WalkEntry", "is_dir") => Some(Type::Bool),
         ("WalkEntry", "depth") => Some(Type::Int),
