@@ -21,6 +21,7 @@ JET_DRIVER_EXIT_USER_ERROR,
 jet_driver_inline_package,
 jet_driver_inline_package_body,
 jet_driver_mask_inline_package,
+jet_driver_parse_user_source,
 ]
 use jet_foundation.[
 Diagnostic,
@@ -53,7 +54,6 @@ Token,
 lex,
 lex_config,
 ]
-use jet_parser.parse_source
 
 // Syntax.rs `DEFAULT_ENTRY_FILE`, `LEGACY_ENTRY_FILE`, `PACKAGE_FILE`,
 // `PAYLOAD_FILE`, `WORKSPACE_FILE`, `ENV_FILE`, `CONFIG_FILE`,
@@ -462,7 +462,7 @@ fn jet_cli_top_level_function_lines(source: String, wanted: String) -> [Int] Nev
 // A source that lexes and parses with no error, read as Rust
 // `Parser::parse_with_source(..).ok()` reads it.
 fn jet_cli_parsed_program(source: String) -> Program? Never! {
-    parsed :: parse_source(source.bytes())
+    parsed :: jet_driver_parse_user_source(source)
     loop diagnostic in parsed.diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> return None
     }
@@ -495,7 +495,7 @@ fn jet_cli_package_sources(root: String, files: &[JetDriverAuthorizedSourceFile]
     loop file in discovered {
         name :: jet_cli_file_name(file.relative_path)
         if JET_CLI_RESERVED_SOURCE_NAMES.contains(name) -> next
-        if file.relative_path == JET_CLI_LEGACY_ENTRY_FILE || file.relative_path == "src/{JET_CLI_LEGACY_ENTRY_FILE}" {
+        if file.relative_path == JET_CLI_LEGACY_ENTRY_FILE || file.relative_path == ("src/{JET_CLI_LEGACY_ENTRY_FILE}") {
             next
         }
         &files.push(file)
@@ -518,7 +518,7 @@ enum JetCLIMigration {
 
 // Package/mod.rs `format_entry_error`.
 fn jet_cli_format_entry_error(origin: String, error: String) -> String Never! {
-    if origin == "" -> return error
+    if origin == "" -> return ~error
     "{origin}: {error}"
 }
 
@@ -1240,11 +1240,11 @@ pub fn jet_cli_resolve_source_path(command: String, raw: String, color: Bool, no
 
 // The notices resolution wrote, ahead of the report that stopped it.
 fn jet_cli_with_notices(notices: [String], plan: JetCLIPlan) -> JetCLIPlan Never! {
-    if notices.len() == 0 -> return plan
+    if notices.len() == 0 -> return ~plan
     if plan == .Done(output) {
         return jet_cli_done(output.stdout, "{notices.join("")}{output.stderr}", output.exit_code)
     }
-    plan
+    ~plan
 }
 
 // CmdInspect.rs `package_is_library_only`: a project check of a library

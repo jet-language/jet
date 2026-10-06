@@ -2366,7 +2366,7 @@ pub fn jet_driver_inline_package_body(source: String, carrier: JetDriverInlinePa
 
 // A user source parse: the inline carrier is masked; a structure failure
 // replaces the parse (Rust Loader `prepare_frontend_module`).
-fn jet_driver_parse_user_source(text: String) -> ParseResult {
+pub fn jet_driver_parse_user_source(text: String) -> ParseResult {
     carrier :: jet_driver_inline_package(text)
     if carrier.error == .Val(diagnostic) -> return ParseResult{program: ast_program(), diagnostics: [Diagnostic]{diagnostic}}
     if !carrier.found -> return parse_source(text.bytes())
