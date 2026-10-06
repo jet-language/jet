@@ -2491,12 +2491,13 @@ fn merge_module_generic_calls(target: &Cx, source: &Cx) {
 /// prefix and canonical boundary types, like its ordinary functions.
 fn specialize_module_generic_calls(
     bundle: &ProgramBundle,
-    extern_funcs: &std::collections::HashMap<String, crate::Codegen::ExternFn>,
+    extern_funcs: &std::sync::Arc<std::collections::HashMap<String, crate::Codegen::ExternFn>>,
     debug_linemap: bool,
     cx: &Cx,
     funcs: &mut Vec<TFunc>,
     spawn_lambdas: &mut Vec<TJitSpawnLambda>,
 ) -> Result<(), LowerError> {
+    let facts = cx.bundle_facts.as_ref().expect("checked bundle context must share program facts");
     let module_rows = (0..bundle.modules.len())
         .filter_map(|index| {
             bundle
@@ -2533,6 +2534,7 @@ fn specialize_module_generic_calls(
                     extern_funcs,
                     debug_linemap,
                     spawn_lambdas.len(),
+                    facts,
                 )
             });
             for type_args in instantiations {
@@ -2596,7 +2598,7 @@ fn specialize_module_generic_calls(
             }
             let module = &bundle.modules[module_idx];
             let imported_cx = build_imported_generic_core_cx(
-                bundle, module_idx, extern_funcs, debug_linemap, spawn_lambdas.len(),
+                bundle, module_idx, extern_funcs, debug_linemap, spawn_lambdas.len(), facts,
             );
             imported_cx.jit_method_calls.borrow_mut().insert(
                 instance, (owner_ty, method, method_args),
