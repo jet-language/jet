@@ -654,16 +654,12 @@ fn parser_fact_root(name: String) -> Bool Never! {
     name == "$build" || name == "$package" || name == "$phase" || name == "$program"
 }
 
-// Rust `unknown_fact_root`: a `$` word in ordinary expression position that
-// is no fact root. An ALL_CAPS `$NAME` is the config-only environment read
-// (D-ONCE-DOLLAR1=B); any other word is no compiler fact. Fatal, as Rust
-// returns it as the expression's `Err`.
-fn parser_report_unknown_fact_root(state: &JetParserState, name: String, span: Span) {
-    if parser_constant_name(name.removeprefix("$")) {
-        parser_add_error(&state, span, "`$NAME` is an environment read for config surfaces only", "D-ONCE-DOLLAR1=B reserves `$NAME` for typed environment access in `env.jet` and deploy/config files; ordinary program code does not read the environment with `$`", "move the read to `env.jet` or a deploy/config file, or use an explicit program API for runtime environment access")
-        return
-    }
-    parser_add_error(&state, span, "`{name}` is not a compiler fact", "`$` marks facts the compiler supplies: the roots `$build`, `$package`, `$phase` and `$program`, and `$` members of a type, function or value such as `T.$layout` (D-META-ROOT3=A)", "read a fact root such as `$build.os`, or read the fact on its subject, such as `T.$fields`")
+// A `$` word in ordinary expression position that is no fact root is an
+// environment read outside a config surface (D-ONCE-DOLLAR1=B), reported on
+// the `$` mark (tests/ui/comptime_prefix_dollar_retired.stderr). Fatal, as
+// Rust returns it as the expression's `Err`.
+fn parser_report_unknown_fact_root(state: &JetParserState, span: Span) {
+    parser_add_error(&state, Span{start: span.start, end: span.start + 1}, "`$NAME` is an environment read for config surfaces only", "D-ONCE-DOLLAR1=B reserves `$NAME` for typed environment access in `env.jet` and deploy/config files; ordinary program code does not read the environment with `$`", "move the read to `env.jet` or a deploy/config file, or use an explicit program API for runtime environment access")
 }
 
 // D-CONSTMARK1: after `#Static` / `#Inline`, a constant binding `NAME :: …`

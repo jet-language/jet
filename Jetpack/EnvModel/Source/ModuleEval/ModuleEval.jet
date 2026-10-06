@@ -2,6 +2,7 @@
 // every enabled `Item.Module`, run each `env.*` field through comptime (or
 // the text-level Pkg-sugar parser for `packages:`), and merge the resulting
 // contributions through the §6 engine.
+use core.sys as envmodel_module_sys
 
 // Parse `src` and evaluate every enabled module it declares. `base_dir`
 // resolves `embed_file` inside contribution expressions, same as ordinary
@@ -86,7 +87,7 @@ fn envmodel_environment_globals(reads: [EnvironmentRead]) -[Env]> [String: CtVal
     globals := [String: CtValue]{}
     loop read in reads {
         name :: read.name.removeprefix("$")
-        globals[read.name] = CtValue.Str{value: sys.get(name) ?? ""}
+        globals[read.name] = CtValue.Str{value: envmodel_module_sys.get(name) ?? ""}
     }
     globals
 }
@@ -145,7 +146,7 @@ fn envmodel_evaluate_module(decl: ModuleDecl, src: String, scope: ModuleEvalScop
     images := [ImagePlan]{}
     environment_contributions := [EnvironmentContribution]{}
     package_profiles := [PackageProfileSpec]{}
-    system_names := [String]{}
+    systems := [SystemPlan]{}
     fleets := [FleetPlan]{}
     vmtests := [FleetPlan]{}
     integrations :: envmodel_evaluate_integration_imports(decl.imports, scope, globals)
@@ -168,17 +169,16 @@ fn envmodel_evaluate_module(decl: ModuleDecl, src: String, scope: ModuleEvalScop
             .Env(lit) -> {
                 capture :: envmodel_evaluate_env_fields(lit.fields, src, scope, globals, source)
                 services := [DevServicePlan]{}
-                loop service in lit.services -> { &services.push(envmodel_evaluate_dev_service(service, scope, globals)) }
+                loop service in lit.services -> &services.push(envmodel_evaluate_dev_service(service, scope, globals))
                 reads :: envmodel_environment_reads(pkg_bytes_text(source_bytes, contribution.span.start, contribution.span.end))
                 &environment_contributions.push(capture.contribution(contribution.path, reads, services))
                 &entries.push(ModuleEntry{key: ModuleEntryKey{namespace: Namespace.Env, path: contribution.path}, entry: capture.entry})
             }
             .Image(lit) -> { &images.push(envmodel_evaluate_image(contribution.path, lit, scope, globals)) }
             .Profile(lit) -> { &package_profiles.push(envmodel_evaluate_package_profile_fields(contribution.path, lit.fields, src, scope, globals, decl.name)) }
-            // System field checks belong to the JetOS evaluator; the name is
-            // what images and hosts reference. Fleets and vmtests capture
-            // their hosts (E1244/E1245 here, E1242 at plan assembly).
-            .System(_) -> &system_names.push(contribution.path)
+            // Fleets and vmtests capture their hosts (E1244/E1245 here, E1242
+            // at plan assembly).
+            .System(lit) -> &systems.push(envmodel_evaluate_system(contribution.path, lit, src, scope, globals))
             .Fleet(lit) -> {
                 hosts := [HostPlan]?{None}
                 loop field in lit.fields {
@@ -209,7 +209,7 @@ fn envmodel_evaluate_module(decl: ModuleDecl, src: String, scope: ModuleEvalScop
     Ok(EvaluatedModule{
         name: decl.name,
         entries: entries,
-        system_names: system_names,
+        systems: systems,
         fleets: fleets,
         vmtests: vmtests,
         images: images,
@@ -244,7 +244,7 @@ pub fn envmodel_merge_all(modules: [EvaluatedModule]) -> [MergedModuleEntry] Mer
         }
     }
     out := [MergedModuleEntry]{}
-    loop position in 0..<keys.len() -> { &out.push(MergedModuleEntry{key: keys[position], entry: pkg_merge_entry(grouped[position])}) }
+    loop position in 0..<keys.len() -> &out.push(MergedModuleEntry{key: keys[position], entry: pkg_merge_entry(grouped[position])})
     Ok(out)
 }
 

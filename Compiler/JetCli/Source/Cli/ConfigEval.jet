@@ -39,6 +39,7 @@ use jet_sema.[
 
 // A config value that could not be evaluated: the diagnostic, placed on the
 // config source.
+#Error
 pub struct ComptimeEvalError {
     pub diagnostic: Diagnostic
 }
@@ -56,7 +57,7 @@ pub fn comptime_evaluate(expr: Expr, source: String, funcs: [String: Func], base
         .Loaded(sources) -> sources
         .Missing(what, fix) -> { return Err(ComptimeEvalError{diagnostic: diagnostic_from_registry("E2105", Val(expr_span(expr)), what, jet_cli_why("E2105"), fix)}) }
     }
-    result :: jet_config_compile(program, core_sources, base_dir)
+    result :: jet_config_compile(program, core_sources, base_dir) ?? return Err(jet_config_eval_error(expr, "this config value could not be evaluated: {err}"))
     loop diagnostic in result.diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> return Err(ComptimeEvalError{diagnostic: diagnostic_from_registry(diagnostic.code, Val(expr_span(expr)), diagnostic.what, diagnostic.why, diagnostic.fix)})
     }
@@ -228,4 +229,20 @@ fn jet_config_compile(program: String, core_sources: [JetDriverCoreSource], base
     }
     request := jet_cli_driver_request(snapshot, core_sources, None, JetDriverCompileMode.Comptime)
     jet_driver_compile(^request)
+}
+
+// Rust `PackageFacts::load(root)` for the Jet-hosted CLI's environment
+// loader. Jetpack's (EnvModel/ModuleEval/PackageFactsLoad.jet) reads the
+// package root through the authority resolver, which needs Core's directory
+// handles (D-CORE-FILEDIR1). Until D-FSDIR1 (#4697) brings it into this unit,
+// a root with no manifest is `Absent` exactly as the resolver reports it, and
+// a root that has one is refused rather than read some other way.
+fn envmodel_load_package_root(root: String) -[FS]> EnvModelPackageRoot EnvModelEvalError! {
+    loop name in [String]{PACKAGE_FILE, PAYLOAD_FILE} {
+        path :: "{root}/{name}"
+        if config_files.exists(path) || config_files.is_symlink(path) {
+            return Err(envmodel_error("E2104", "reading the package at `{root}` is not part of the Jet-hosted CLI yet", jet_cli_why("E2104"), "run this command with the Rust-hosted `jet` until the Jet CLI reads package roots (D-FSDIR1, #4697)", None))
+        }
+    }
+    Ok(EnvModelPackageRoot.Absent)
 }
