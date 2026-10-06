@@ -4373,20 +4373,23 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
     // The autodiff purity proof reads the effect-solved functions only when
     // some body records an autodiff obligation.
     resolved_compute_facts := [SemaComputeFunctionFacts]{}
-    has_autodiff_obligation := false
-    loop module_result in modules {
-        loop function_facts in module_result.compute_facts {
-            if function_facts.autodiff_obligations.len() > 0 -> has_autodiff_obligation = true
+    autodiff_obligations := 0
+    loop module_index in 0..<modules.len() {
+        loop function_facts in modules[module_index].compute_facts {
+            autodiff_obligations += function_facts.autodiff_obligations.len()
             &resolved_compute_facts.push(function_facts)
         }
     }
-    effect_solved_functions := [TFunc]{}
-    if has_autodiff_obligation {
-        loop module_result in modules {
-            loop function in module_result.functions -> &effect_solved_functions.push(function)
+    // The autodiff purity check reads the effect-solved functions only for an
+    // obligation, so a program without one never copies its checked bodies.
+    compute_diagnostics := [Diagnostic]{}
+    if autodiff_obligations > 0 {
+        effect_solved_functions := [TFunc]{}
+        loop module_index in 0..<modules.len() {
+            loop function in modules[module_index].functions -> &effect_solved_functions.push(function)
         }
+        compute_diagnostics = sema_compute_validate_autodiff_purity(resolved_compute_facts, effect_solved_functions)
     }
-    compute_diagnostics := sema_compute_validate_autodiff_purity(resolved_compute_facts, effect_solved_functions)
     loop diagnostic in compute_diagnostics {
         if diagnostic.span == {
             .Val(span) -> {
