@@ -963,6 +963,7 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
             return Val(jet_codegen_handle_core("core.time", "duration_new", symbol, [Bool]{false, false}, None))
         }
         .FileReaderReadLine -> return Val(jet_codegen_handle_h("file_reader.read_line", "jet_std_file_reader_read_line", [Bool]{true}, Val(Effect.FS)))
+        .FileReaderRead -> return Val(jet_codegen_handle_h("file_reader.read", "jet_std_file_reader_read", [Bool]{true, false}, Val(Effect.FS)))
         .FileReaderPath -> return Val(jet_codegen_handle_h("file_reader.path", "jet_std_file_reader_path", [Bool]{true}, None))
         .MappedFileWindow -> return Val(jet_codegen_handle_h("mapped_file.window", "jet_std_fs_map_window_view", [Bool]{true, false, false}, Val(Effect.FS)))
         .MappedFileWindowLen -> return Val(jet_codegen_handle_h("mapped_file.window_len", "jet_std_fs_map_window_len_view", [Bool]{true, false, false}, Val(Effect.FS)))
@@ -971,6 +972,8 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .MappedFileIsEmpty -> return Val(jet_codegen_handle_h("mapped_file.is_empty", "jet_std_fs_map_is_empty", [Bool]{true}, None))
         .FileWriterWriteLine -> return Val(jet_codegen_handle_h("file_writer.write_line", "jet_std_file_writer_write_line", [Bool]{true, true}, Val(Effect.FS)))
         .FileWriterFlush -> return Val(jet_codegen_handle_h("file_writer.flush", "jet_std_file_writer_flush", [Bool]{true}, Val(Effect.FS)))
+        .FileWriterWriteAll -> return Val(jet_codegen_handle_h("file_writer.write_all", "jet_std_file_writer_write_all", [Bool]{true, true}, Val(Effect.FS)))
+        .FileWriterFsync -> return Val(jet_codegen_handle_h("file_writer.fsync", "jet_std_file_writer_fsync", [Bool]{true}, Val(Effect.FS)))
         .FileWriterPath -> return Val(jet_codegen_handle_h("file_writer.path", "jet_std_file_writer_path", [Bool]{true}, None))
         .JSONReaderNext -> return Val(jet_codegen_handle_h("json_reader.next", "jet_enc_json_reader_next", [Bool]{true}, Val(Effect.IO)))
         .JSONWriterWrite -> return Val(jet_codegen_handle_h("json_writer.write", "jet_enc_json_writer_write", [Bool]{true, false}, Val(Effect.IO)))
@@ -1348,7 +1351,7 @@ fn jet_codegen_handle_receiver_is_mutating(operation: THandleOp) -> Bool Never! 
         else -> {}
     }
     if operation == {
-        .FileReaderReadLine | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .CSVWriterWrite | .CSVWriterFlush | .CSVWriterFinish | .ClockTick | .ClockAdvance | .ClockWait | .FakeName | .FakeEmail | .FakeHost | .FakeAddress | .TCPStreamRead | .TCPStreamWrite | .TCPStreamClose | .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite -> true
+        .FileReaderReadLine | .FileReaderRead | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .CSVWriterWrite | .CSVWriterFlush | .CSVWriterFinish | .ClockTick | .ClockAdvance | .ClockWait | .FakeName | .FakeEmail | .FakeHost | .FakeAddress | .TCPStreamRead | .TCPStreamWrite | .TCPStreamClose | .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite -> true
         else -> false
     }
 }

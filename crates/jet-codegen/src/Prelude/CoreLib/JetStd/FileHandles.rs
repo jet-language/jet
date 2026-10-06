@@ -594,12 +594,11 @@ fn jet_fs_stat_row(meta: &std::fs::Metadata) -> Vec<i64> {
     }
 }
 
-/// Windows identity comes from the open handle: volume serial, 64-bit file
-/// index, link count, and allocation size.
+/// Windows identity comes from an open handle: volume serial, 64-bit file
+/// index, and link count.
 // AUDIT: GetFileInformationByHandle writes one caller-owned record.
 #[cfg(windows)]
-fn jet_fs_windows_identity(path: &str, follow: bool, row: &mut [i64]) -> std::io::Result<()> {
-    use std::os::windows::fs::OpenOptionsExt;
+fn jet_fs_windows_identity_of(file: &std::fs::File, row: &mut [i64]) -> std::io::Result<()> {
     use std::os::windows::io::AsRawHandle;
     #[repr(C)]
     struct ByHandleFileInformation {
@@ -617,13 +616,6 @@ fn jet_fs_windows_identity(path: &str, follow: bool, row: &mut [i64]) -> std::io
     unsafe extern "system" {
         fn GetFileInformationByHandle(handle: *mut std::ffi::c_void, info: *mut ByHandleFileInformation) -> i32;
     }
-    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
-    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-    let mut flags = FILE_FLAG_BACKUP_SEMANTICS;
-    if !follow {
-        flags |= FILE_FLAG_OPEN_REPARSE_POINT;
-    }
-    let file = std::fs::OpenOptions::new().access_mode(0).custom_flags(flags).open(path)?;
     let mut info = std::mem::MaybeUninit::<ByHandleFileInformation>::zeroed();
     if unsafe { GetFileInformationByHandle(file.as_raw_handle() as *mut std::ffi::c_void, info.as_mut_ptr()) } == 0 {
         return Err(std::io::Error::last_os_error());
@@ -633,6 +625,33 @@ fn jet_fs_windows_identity(path: &str, follow: bool, row: &mut [i64]) -> std::io
     row[5] = (((info.index_high as u64) << 32) | info.index_low as u64) as i64;
     row[6] = info.links as i64;
     Ok(())
+}
+
+/// The identity of `path`, opened without read access; `follow: false` opens
+/// a final link itself.
+#[cfg(windows)]
+fn jet_fs_windows_identity(path: &str, follow: bool, row: &mut [i64]) -> std::io::Result<()> {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    let mut flags = FILE_FLAG_BACKUP_SEMANTICS;
+    if !follow {
+        flags |= FILE_FLAG_OPEN_REPARSE_POINT;
+    }
+    let file = std::fs::OpenOptions::new().access_mode(0).custom_flags(flags).open(path)?;
+    jet_fs_windows_identity_of(&file, row)
+}
+
+/// D-CORE-FILESTAT1: the metadata row of an open file (fstat), in the same
+/// order as `jet_fs_stat_at`. `shown` names the file in an error.
+pub(crate) fn jet_fs_stat_file(file: &std::fs::File, shown: &str) -> Result<Vec<i64>, IOError> {
+    let meta = file.metadata().map_err(|error| io_error_at(IOOperation::Read, shown, error))?;
+    #[allow(unused_mut)]
+    let mut row = jet_fs_stat_row(&meta);
+    #[cfg(windows)]
+    jet_fs_windows_identity_of(file, &mut row)
+        .map_err(|error| io_error_at(IOOperation::Read, shown, error))?;
+    Ok(row)
 }
 
 /// Metadata for `name` relative to `handle` (negative: a path). An empty
