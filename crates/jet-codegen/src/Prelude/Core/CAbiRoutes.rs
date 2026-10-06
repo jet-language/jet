@@ -10145,10 +10145,10 @@ mod jet_c_abi_routes {
 
     /// core.net.dns_ptr
     #[no_mangle]
-    pub extern "C" fn jet_net_dns_ptr(a0: JetCString, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn jet_net_dns_ptr(a0: JetCString, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
         guard(|| match crate::jet_net_dns_ptr(unsafe { &*a0 }, a1) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| handle(e) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
 
@@ -10178,19 +10178,19 @@ mod jet_c_abi_routes {
 
     /// core.net.dns_txt
     #[no_mangle]
-    pub extern "C" fn jet_net_dns_txt(a0: JetCString, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn jet_net_dns_txt(a0: JetCString, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
         guard(|| match crate::jet_net_dns_txt(unsafe { &*a0 }, a1) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| handle(e) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
 
     /// core.net.dns_txt_at
     #[no_mangle]
-    pub extern "C" fn jet_net_dns_txt_at(a0: JetCString, a1: JetCString, a2: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
+    pub extern "C" fn jet_net_dns_txt_at(a0: JetCString, a1: JetCString, a2: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
         guard(|| match crate::jet_net_dns_txt_at(unsafe { &*a0 }, unsafe { &*a1 }, a2) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| handle(e) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
+            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
     }
 
