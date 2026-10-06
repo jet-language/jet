@@ -1890,11 +1890,17 @@ impl Cx {
         })
     }
 
+    /// The package-bound function a module call key names: `(module alias or
+    /// Rust module, function)`, or `(name, name)` for an unqualified call to a
+    /// package sibling (the key `fact_unqualified_file` lowers under).
     fn bound_function(&self, key: &(String, String)) -> Option<&BundleFunctionFacts> {
         let facts = self.bundle_facts.as_ref()?;
         let target = facts.rust_modules.get(&key.0).copied()
             .or_else(|| facts.names.alias(self.bundle_module, &key.0)
-                .and_then(|alias| alias.target_module))?;
+                .and_then(|alias| alias.target_module));
+        let Some(target) = target else {
+            return if key.0 == key.1 { self.namespace_function(&key.1) } else { None };
+        };
         let owner = facts.names.namespace_owner(target, &key.1).unwrap_or(target);
         facts.functions.get(owner)?.get(&key.1)
     }
