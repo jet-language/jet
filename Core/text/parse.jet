@@ -343,28 +343,15 @@ pub fn rstrip(text: String) -> String Never! { parse_unicode_string.trim_end(tex
 
 pub fn strip(text: String) -> String Never! { parse_unicode_string.trim(text) }
 
-pub fn ljust(text: String, width: Int, fill: String) -> String Never! {
-    pad :: fill_to(fill)
-    n := width - text.bytes().len()
-    if n <= 0 -> return ~text
-    "{text}{repeat_char(pad, n)}"
-}
+// I8: one padding mechanism. ljust/rjust/center are core.text pad_end/pad_start/
+// center (Unicode scalars, never UTF-8 bytes).
+pub fn ljust(text: String, width: Int, fill: String) -> String Never! { unicode.pad_end(text, width, fill) }
 
-pub fn rjust(text: String, width: Int, fill: String) -> String Never! {
-    pad :: fill_to(fill)
-    n := width - text.bytes().len()
-    if n <= 0 -> return ~text
-    "{repeat_char(pad, n)}{text}"
-}
+pub fn rjust(text: String, width: Int, fill: String) -> String Never! { unicode.pad_start(text, width, fill) }
 
-pub fn center(text: String, width: Int, fill: String) -> String Never! {
-    pad :: fill_to(fill)
-    n := width - text.bytes().len()
-    if n <= 0 -> return ~text
-    left :: n /% 2
-    "{repeat_char(pad, left)}{text}{repeat_char(pad, n - left)}"
-}
+pub fn center(text: String, width: Int, fill: String) -> String Never! { unicode.center(text, width, fill) }
 
+// Rust jet_text_zfill: `width` counts Unicode scalars; a leading sign stays first.
 pub fn zfill(text: String, width: Int) -> String Never! {
     raw :: text.bytes()
     sign := ""
@@ -373,7 +360,7 @@ pub fn zfill(text: String, width: Int) -> String Never! {
         sign = slice_b(raw, 0, 1)
         rest = slice_b(raw, 1, raw.len())
     }
-    n := width - text.bytes().len()
+    n := width - unicode.scalar_count(text)
     if n <= 0 -> return ~text
     "{sign}{repeat_char("0", n)}{rest}"
 }
@@ -616,11 +603,6 @@ pub fn escape_c(text: String) -> String Never! {
         }
     }
     out
-}
-
-fn fill_to(fill: String) -> String {
-    if fill.bytes().len() == 0 -> return " "
-    slice_b(fill.bytes(), 0, 1)
 }
 
 fn repeat_char(ch: String, n: Int) -> String {
