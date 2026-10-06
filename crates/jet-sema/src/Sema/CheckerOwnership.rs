@@ -2423,6 +2423,22 @@ impl<'a> Checker<'a> {
                             Syntax::KW_SELF
                         ),
                     )
+                } else if info.param_conv.is_some() {
+                    // A parameter is never re-declared: its write access
+                    // comes from the `&` mark on the parameter and the call.
+                    (
+                        format!(
+                            "cannot write to `{}` — it does not have the write-access marker `&`; required before calling `.{}()`",
+                            root, method
+                        ),
+                        format!(
+                            "change the parameter to `{}: {}{}` and pass the argument with `{}` at the call site",
+                            root,
+                            Syntax::SIGIL_WRITE,
+                            info.ty.name(),
+                            Syntax::SIGIL_WRITE
+                        ),
+                    )
                 } else {
                     (
                         format!(
