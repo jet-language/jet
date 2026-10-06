@@ -3141,7 +3141,7 @@ fn run() {
     clicked :: event.new<Int>()
     clicked.on(scope, n -> print("clicked {n}"))
     clicked.once(scope, n -> print("once {n}"))
-    print(&clicked.emit(1).summary())
+    print(clicked.emit(1).summary())
     scope.cancel()
 }
 ```

@@ -7505,6 +7505,9 @@ fn lower_method_call_impl(
                         }))
                     }
                     (Some("DispatchReport"), "trace") => Type::Named("EventTrace".to_string()),
+                    // Event/Hook `trace()` and EventTrace `summary()` are text;
+                    // a Unit result here printed `<invalid>` on the JIT.
+                    (_, "trace" | "summary") => Type::String,
                     (
                         _,
                         "listener_count" | "queued_count" | "active_count" | "delivered" | "queued"
