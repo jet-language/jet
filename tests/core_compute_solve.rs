@@ -12,14 +12,14 @@ use core.compute.[Tensor, ComputeError]
 use core.compute.solve as solve
 
 fn run() {
-    scaled :: Tensor{shape: [Int]{1, 1}, data: [Float]{1e-20}, device: "CPU", numeric_profile: ""}
-    rhs :: Tensor{shape: [Int]{1}, data: [Float]{2e-20}, device: "CPU", numeric_profile: ""}
+    scaled :: Tensor{shape: [Int]{1, 1}, data: [Float]{1e-20}, device: "CPU", numeric_profile: "", requested: ""}
+    rhs :: Tensor{shape: [Int]{1}, data: [Float]{2e-20}, device: "CPU", numeric_profile: "", requested: ""}
     solution :: solve.dense(scaled, rhs) ?? panic("scaled dense solve")
     print("dense:{solution.data}")
     factors :: solve.lu(scaled) ?? panic("scaled LU")
     print("lu:{factors.pivots}")
 
-    singular :: Tensor{shape: [Int]{2, 2}, data: [Float]{1.0, 2.0, 2.0, 4.0}, device: "CPU", numeric_profile: ""}
+    singular :: Tensor{shape: [Int]{2, 2}, data: [Float]{1.0, 2.0, 2.0, 4.0}, device: "CPU", numeric_profile: "", requested: ""}
     if solve.lu(singular) == {
         .Ok(_) -> print("singular:accepted")
         .Err(error) -> {
@@ -31,7 +31,7 @@ fn run() {
         }
     }
 
-    wrong_rhs :: Tensor{shape: [Int]{2}, data: [Float]{1.0, 2.0}, device: "CPU", numeric_profile: ""}
+    wrong_rhs :: Tensor{shape: [Int]{2}, data: [Float]{1.0, 2.0}, device: "CPU", numeric_profile: "", requested: ""}
     if solve.dense(scaled, wrong_rhs) == {
         .Ok(_) -> print("shape:accepted")
         .Err(error) -> {
@@ -43,7 +43,7 @@ fn run() {
         }
     }
 
-    cuda :: Tensor{shape: [Int]{1, 1}, data: [Float]{1.0}, device: "CUDA", numeric_profile: ""}
+    cuda :: Tensor{shape: [Int]{1, 1}, data: [Float]{1.0}, device: "CUDA", numeric_profile: "", requested: ""}
     if solve.lu(cuda) == {
         .Ok(_) -> print("device:accepted")
         .Err(error) -> {

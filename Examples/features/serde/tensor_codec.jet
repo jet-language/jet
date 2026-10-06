@@ -49,7 +49,7 @@ fn from_tree(tree: DataTree) -> compute.Tensor {
     data := [Float]{}
     loop item in elements(tree, "data") -> &data.push(number(item))
     profile :: (&tree.field("profile") ?? panic("profile")).text() ?? panic("profile text")
-    compute.Tensor{shape: shape, data: data, device: "CPU", numeric_profile: profile}
+    compute.Tensor{shape: shape, data: data, device: "CPU", numeric_profile: profile, requested: "CPU"}
 }
 
 fn run() {
@@ -62,7 +62,7 @@ fn run() {
     text :: compute.serialize(matrix) ?? panic("serialize")
     print("serialize: {text}")
     describe("deserialize", compute.deserialize(text) ?? panic("deserialize"))
-    single :: compute.Tensor{shape: [2, 3], data: [1.5, 2.0, 3.0, 4.0, 5.0, 6.25], device: "CPU", numeric_profile: "F32Strict+Reproducible"}
+    single :: compute.Tensor{shape: [2, 3], data: [1.5, 2.0, 3.0, 4.0, 5.0, 6.25], device: "CPU", numeric_profile: "F32Strict+Reproducible", requested: "CPU"}
     describe("f32 deserialize", compute.deserialize(compute.serialize(single) ?? panic("serialize f32")) ?? panic("deserialize f32"))
 
     // JSON through an explicit tree.

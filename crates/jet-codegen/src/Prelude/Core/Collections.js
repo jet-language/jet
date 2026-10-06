@@ -195,13 +195,13 @@ function jet_list_remove_value(xs, value) {
     : jet_option_some(xs.splice(position, 1)[0]);
 }
 
-function jet_list_remove_slot(xs, index) {
+function jet_list_remove_slot(xs, index, file, line) {
   const position = Number(index);
   if (!Number.isSafeInteger(position) || position < 0 || position >= xs.length) {
     jet_runtime_stop(
       "E3010",
-      "<core.collections>",
-      0,
+      file,
+      line,
       `the list has ${xs.length} items, so position ${index} doesn't exist`,
     );
   }

@@ -412,7 +412,7 @@ fn expand_builtin_serde_items_with_auto_here(
                         );
                     }
                     if !fully_generated(&derived.name, &derived.derives) {
-                        generated_items.extend(struct_codec_items(&derived));
+                        generated_items.extend(struct_codec_items(&derived, source));
                     }
                 }
             }
@@ -549,7 +549,7 @@ fn codec_params(
     params
 }
 
-fn struct_codec_items(s: &crate::AST::StructDef) -> Vec<Item> {
+fn struct_codec_items(s: &crate::AST::StructDef, items: &[Item]) -> Vec<Item> {
     let encode = has_derive(&s.derives, crate::Generics::ENCODE);
     let decode = has_derive(&s.derives, crate::Generics::DECODE);
     let span = s
@@ -608,7 +608,7 @@ fn struct_codec_items(s: &crate::AST::StructDef) -> Vec<Item> {
                 params,
                 vec![named_param("tree", data_tree_type(), span)],
                 Some(result_type(target_type(&s.name, &s.type_params), span)),
-                struct_decode_body(s, span),
+                struct_decode_body(s, items, span),
                 span,
             ),
             span,
@@ -1052,7 +1052,33 @@ fn serde_decode_error_body(
     body
 }
 
-fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
+/// The wire keys a `#DenyUnknownFields` struct accepts: its own non-skipped
+/// keys plus, for each `#Flatten` field, the keys of the flattened struct
+/// (recursively). `None` when a flattened type isn't a struct in `items`,
+/// so its keys can't be enumerated here.
+fn deny_unknown_allowed_keys(s: &crate::AST::StructDef, items: &[Item]) -> Option<Vec<String>> {
+    let mut keys = Vec::new();
+    for field in s
+        .reflection_fields()
+        .filter(|field| !has_marker(&field.serde_markers, crate::Syntax::MARKER_SKIP))
+    {
+        if has_marker(&field.serde_markers, crate::Syntax::MARKER_FLATTEN) {
+            let Type::Named(name) = &field.ty else {
+                return None;
+            };
+            let inner = items.iter().find_map(|item| match item {
+                Item::Struct(inner) if &inner.name == name => Some(inner),
+                _ => None,
+            })?;
+            keys.extend(deny_unknown_allowed_keys(inner, items)?);
+        } else {
+            keys.push(serde_field_key(s, field));
+        }
+    }
+    Some(keys)
+}
+
+fn struct_decode_body(s: &crate::AST::StructDef, items: &[Item], span: Span) -> Vec<Stmt> {
     let mut body = vec![binding(
         "jet_serde_errors",
         Some(field_error_list_type(span)),
@@ -1092,14 +1118,13 @@ fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
     ));
 
     let deny_unknown = has_marker(&s.serde_markers, crate::Syntax::MARKER_DENY_UNKNOWN_FIELDS);
-    let has_flatten = s
-        .reflection_fields()
-        .any(|field| has_marker(&field.serde_markers, crate::Syntax::MARKER_FLATTEN));
-    if deny_unknown && !has_flatten {
-        let keys = s
-            .reflection_fields()
-            .filter(|field| !has_marker(&field.serde_markers, crate::Syntax::MARKER_SKIP))
-            .map(|field| string_expr(&serde_field_key(s, field), span))
+    if let Some(keys) = deny_unknown
+        .then(|| deny_unknown_allowed_keys(s, items))
+        .flatten()
+    {
+        let keys = keys
+            .iter()
+            .map(|key| string_expr(key, span))
             .collect::<Vec<_>>();
         let allowed = list_literal(keys, span);
         body.push(pattern_switch(
@@ -1141,7 +1166,56 @@ fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
 
     let mut field_values = Vec::new();
     let mut decoded = Vec::new();
-    let mut required = Vec::new();
+    // Key presence is settled before any field decodes, so an absent required
+    // key reports E2410 instead of the null it decodes from.
+    let required = s
+        .reflection_fields()
+        .filter(|field| {
+            !has_marker(&field.serde_markers, crate::Syntax::MARKER_SKIP)
+                && !has_marker(&field.serde_markers, crate::Syntax::MARKER_FLATTEN)
+                && !matches!(field.ty, Type::Option(_))
+                && serde_default_expr(field).is_none()
+        })
+        .map(|field| {
+            (
+                format!("jet_serde_missing_required_{}", field.name),
+                serde_field_key(s, field),
+            )
+        })
+        .collect::<Vec<_>>();
+    for (name, _) in &required {
+        body.push(binding(name, Some(Type::Bool), Expr::Bool(true, span), true, span));
+    }
+    if !required.is_empty() {
+        body.push(pattern_switch(
+            copy(ident("tree", span), span),
+            "Object",
+            vec!["jet_serde_presence_entries".to_string()],
+            vec![for_each_map(
+                "jet_serde_presence_key",
+                "jet_serde_presence_value",
+                ident("jet_serde_presence_entries", span),
+                required
+                    .iter()
+                    .map(|(missing, key)| {
+                        if_stmt(
+                            binary(
+                                BinOp::Eq,
+                                ident("jet_serde_presence_key", span),
+                                string_expr(key, span),
+                                span,
+                            ),
+                            vec![assign_local(missing, Expr::Bool(false, span), span)],
+                            span,
+                        )
+                    })
+                    .collect(),
+                span,
+            )],
+            Some(Vec::new()),
+            span,
+        ));
+    }
     for field in s.reflection_fields() {
         let value = if has_marker(&field.serde_markers, crate::Syntax::MARKER_SKIP) {
             serde_default_expr(field).unwrap_or_else(|| serde_zero_expr(&field.ty, span))
@@ -1184,20 +1258,8 @@ fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
             let key = serde_field_key(s, field);
             let is_required =
                 !matches!(field.ty, Type::Option(_)) && serde_default_expr(field).is_none();
-            let missing = if is_required {
-                let name = format!("jet_serde_missing_required_{}", decoded.len());
-                body.push(binding(
-                    &name,
-                    Some(Type::Bool),
-                    Expr::Bool(false, span),
-                    true,
-                    span,
-                ));
-                required.push((name.clone(), key.clone()));
-                Some(name)
-            } else {
-                None
-            };
+            let missing =
+                is_required.then(|| format!("jet_serde_missing_required_{}", field.name));
             let subtree = if matches!(field.ty, Type::Option(_)) {
                 or_fallback(
                     method(
@@ -1286,43 +1348,6 @@ fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
             }
         };
         field_values.push((field.name.clone(), value));
-    }
-
-    if !required.is_empty() {
-        let assignments = required
-            .iter()
-            .map(|(name, _)| assign_local(name, Expr::Bool(true, span), span))
-            .collect::<Vec<_>>();
-        let mut presence_body = assignments;
-        presence_body.push(for_each_map(
-            "jet_serde_presence_key",
-            "jet_serde_presence_value",
-            ident("jet_serde_presence_entries", span),
-            required
-                .iter()
-                .map(|(missing, key)| {
-                    if_stmt(
-                        binary(
-                            BinOp::Eq,
-                            ident("jet_serde_presence_key", span),
-                            string_expr(key, span),
-                            span,
-                        ),
-                        vec![assign_local(missing, Expr::Bool(false, span), span)],
-                        span,
-                    )
-                })
-                .collect(),
-            span,
-        ));
-        body.push(pattern_switch(
-            copy(ident("tree", span), span),
-            "Object",
-            vec!["jet_serde_presence_entries".to_string()],
-            presence_body,
-            Some(Vec::new()),
-            span,
-        ));
     }
 
     let mut success = Vec::new();
