@@ -125,12 +125,36 @@ pub struct FileLock {
     path: String
 }
 
+/// An open file for reading. `read_line`, `lines`, and `read(max)` advance
+/// one shared position; `read` returns up to `max` bytes and an empty list
+/// at end of file.
 pub struct FileReader {
     path: String
+
+    /// D-CORE-FILESTAT1=A: what the open file is now (fstat). Comparing
+    /// `id` with a later `files.stat(path).id` shows whether the path was
+    /// replaced after the open.
+    pub fn stat(self) -[FS.Read]> Stat IOError! {
+        stat_from_row(core.files.__reader_stat(self))
+    }
 }
 
+/// An open file for writing. `write_line` and `write_all` are buffered;
+/// `flush` hands the bytes to the system and `fsync` also makes them durable.
 pub struct FileWriter {
     path: String
+
+    /// D-CORE-FILESTAT1=A: what the open file is now (fstat). Bytes still
+    /// buffered are not counted until `flush` or `fsync`.
+    pub fn stat(self) -[FS.Read]> Stat IOError! {
+        stat_from_row(core.files.__writer_stat(self))
+    }
+
+    /// Set the open file's permission bits (0o0..0o7777) without naming its
+    /// path again. Windows keeps only the read-only flag.
+    pub fn set_mode(self, mode: Int) IOError! -[FS.Write]> {
+        core.files.__writer_set_mode(self, mode)
+    }
 }
 
 
