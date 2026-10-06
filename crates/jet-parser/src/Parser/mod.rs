@@ -1378,7 +1378,7 @@ mod s61_tests {
         let (tokens, errors) = lex("fn run() { value :: 1 }\n");
         assert!(errors.is_empty(), "lex errors: {errors:?}");
         let expected = crate::Lexer::without_comments(&tokens);
-        let (prepared, fences) = prepare_tokens(&tokens).expect("clean source");
+        let (prepared, fences) = prepare_tokens(&tokens, true).expect("clean source");
         assert!(fences.is_empty());
         assert_eq!(prepared.as_ref(), expected.as_slice());
         assert!(
