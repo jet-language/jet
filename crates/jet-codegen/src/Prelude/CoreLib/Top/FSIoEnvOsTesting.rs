@@ -703,9 +703,6 @@ fn jet_std_env_current_dir() -> Result<String, jet_std::IOError> {
         .map(|p| p.to_string_lossy().to_string())
         .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Resolve, None, e))
 }
-fn jet_std_env_home_dir() -> Option<String> {
-    jet_std_env_get(&"HOME".to_string()).or_else(|| jet_std_env_get(&"USERPROFILE".to_string()))
-}
 
 fn jet_std_os_set_current_dir(path: &String) -> Result<(), jet_std::IOError> {
     std::env::set_current_dir(path)
