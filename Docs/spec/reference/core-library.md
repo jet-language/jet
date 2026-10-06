@@ -1321,9 +1321,9 @@ registration method.
 | `remove(set, target)` / `contains(set, target)` | `!IOError` / `Bool !IOError` | Return the explicit unsupported-operation error for non-empty set operations; an empty `contains` target returns false. |
 | `debounce(handle, ms)` | `WatchHandle !IOError` | Reject a negative duration and otherwise return the provider's unsupported-operation error. |
 
-`WatchDomain` is `File`, `Process`, or `Port`. `WatchEventKind` is `Created`,
+`WatchDomain` is `File`, `Process`, or `Port`. `WatchKind` is `Created`,
 `Modified`, `Removed`, `Error`, `Exited`, or `Ready`. `WatchEvent` carries
-`domain`, `kind`, `path`, `detail`, `pid`, and `port`. Match all variants when
+`domain`, `kind`, and `path`. Match all variants when
 handling a closed event enum. See
 [`watcher.jet`](../../../Examples/features/io/watcher.jet).
 

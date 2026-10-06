@@ -12,8 +12,10 @@ package {
 use core as core
 use core.files as files
 
-pub struct WatchHandle { pub kind: String, pub target: String }
-pub struct WatchSet { pub handles: [WatchHandle] }
+// `WatchHandle`, `WatchSet`, `WatchEvent`, and the closed `WatchDomain` /
+// `WatchKind` enums are the compiler-owned carriers of the one host watcher
+// shared by every tier (receiver methods `on`, `poll`, `events`, `cancel`,
+// `is_active`, `summary`, `add`); this module declares no second copy.
 
 pub fn files(path: String) -[FS]> WatchHandle IOError! {
     if path.bytes().len() == 0 {
@@ -82,30 +84,6 @@ pub fn target(handle: WatchHandle) -> String Never! {
     summary_target(handle.summary())
 }
 
-
-pub enum WatchDomain {
-    File
-    Process
-    Port
-}
-
-pub enum WatchEventKind {
-    Created
-    Modified
-    Removed
-    Error
-    Exited
-    Ready
-}
-
-pub struct WatchEvent {
-    pub domain: WatchDomain
-    pub kind: WatchEventKind
-    pub path: String
-    pub detail: String
-    pub pid: Int
-    pub port: Int
-}
 
 pub fn recursive(path: String) -[FS]> WatchHandle IOError! {
     // The host file watcher already snapshots directories recursively.

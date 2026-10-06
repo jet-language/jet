@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 5a4aff2e2eb284903b97b012cf928234b95737464050baa9322a8331bdb16e72
+// Source SHA-256: f8104d2dcb1205e8182bc4715495b70f4cf1857bbd14a470997f2d24c31bcfce
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -196,7 +196,7 @@ const CORE_MODULE_5_MEMBERS: &[&str] = &["compress", "decompress", "is_zstd", "m
 const CORE_MODULE_5_TYPES: &[(&str, CoreLeafKind)] = &[("ZstdFileError", CoreLeafKind::Enum(&["Read", "Write", "Malformed", "Unsupported", "Checksum"]))];
 const CORE_MODULE_5_DEPENDENCIES: &[&str] = &["core.archive"];
 
-const CORE_MODULE_6_MEMBERS: &[&str] = &["decode", "decode_argv", "flag", "get_bool", "get_int", "get_text", "has", "help_text", "merge", "positionals", "program", "spec", "ArgDef", "ArgsSpec", "apply_defaults", "argument", "count_flag", "default_value", "define", "dest", "get_choice", "get_or", "help_from", "missing_required", "remainder", "required", "usage", "wants_help"];
+const CORE_MODULE_6_MEMBERS: &[&str] = &["decode", "decode_argv", "get_bool", "get_int", "get_text", "has", "help_text", "merge", "positionals", "program", "spec", "ArgDef", "ArgsSpec", "apply_defaults", "count_flag", "default_value", "define", "dest", "get_choice", "get_or", "help_from", "missing_required", "remainder", "required", "usage", "wants_help"];
 const CORE_MODULE_6_TYPES: &[(&str, CoreLeafKind)] = &[("ArgDef", CoreLeafKind::Plain), ("ArgsSpec", CoreLeafKind::Plain)];
 const CORE_MODULE_6_DEPENDENCIES: &[&str] = &["core.process"];
 
@@ -576,8 +576,8 @@ const CORE_MODULE_100_MEMBERS: &[&str] = &["Measurement", "abs", "add", "centi",
 const CORE_MODULE_100_TYPES: &[(&str, CoreLeafKind)] = &[("Measurement", CoreLeafKind::Generic(1))];
 const CORE_MODULE_100_DEPENDENCIES: &[&str] = &["core.math"];
 
-const CORE_MODULE_101_MEMBERS: &[&str] = &["add", "contains", "files", "kind", "len", "port", "process_pid", "remove", "set", "target", "WatchHandle", "WatchSet", "recursive", "debounce", "poll", "events", "cancel", "is_active", "summary", "drain", "WatchDomain", "WatchEventKind", "WatchEvent"];
-const CORE_MODULE_101_TYPES: &[(&str, CoreLeafKind)] = &[("WatchHandle", CoreLeafKind::Plain), ("WatchSet", CoreLeafKind::Plain), ("WatchDomain", CoreLeafKind::Enum(&["File", "Process", "Port"])), ("WatchEventKind", CoreLeafKind::Enum(&["Created", "Modified", "Removed", "Error", "Exited", "Ready"])), ("WatchEvent", CoreLeafKind::Plain)];
+const CORE_MODULE_101_MEMBERS: &[&str] = &["add", "contains", "files", "kind", "len", "port", "process_pid", "remove", "set", "target", "WatchHandle", "WatchSet", "recursive", "debounce", "poll", "events", "cancel", "is_active", "summary", "drain", "WatchDomain", "WatchKind", "WatchEvent"];
+const CORE_MODULE_101_TYPES: &[(&str, CoreLeafKind)] = &[("WatchHandle", CoreLeafKind::Plain), ("WatchSet", CoreLeafKind::Plain), ("WatchDomain", CoreLeafKind::Enum(&["File", "Process", "Port"])), ("WatchKind", CoreLeafKind::Enum(&["Created", "Modified", "Removed", "Error", "Exited", "Ready"])), ("WatchEvent", CoreLeafKind::Plain)];
 const CORE_MODULE_101_DEPENDENCIES: &[&str] = &["core.files"];
 
 const CORE_MODULE_102_MEMBERS: &[&str] = &["App", "Auth", "Context", "LiveQuery", "Mount", "Session", "app", "auth", "auth_oauth", "auth_routes", "auth_show", "form", "invalidate", "live", "live_get", "live_show", "live_stats", "on", "openapi", "page", "signal_push", "storage", "subscribe", "sync", "transact_invalidate", "value", "WebPage", "WebEvent"];
@@ -750,7 +750,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.archive", alias: "core_archive", path: "Core/archive/archive.jet", owned_members: &["crc32", "adler32", "deflate", "inflate", "compress", "decompress", "zip_decompress", "zip_names_json", "list", "zip_open", "zip_next", "zip_read", "zip_write", "zip_close", "zip_extract", "unzip", "tar_add", "tar_get", "tar_names_json", "create"] },
     CoreSourceModule { module: "core.archive.gzip", alias: "core_core_archive_gzip", path: "Core/archive/gzip.jet", owned_members: &["compress", "compress_file", "compress_text", "crc", "decompress", "decompress_file", "decompress_text", "is_gzip", "isize", "magic", "peek_isize"] },
     CoreSourceModule { module: "core.archive.zstd", alias: "core_core_archive_zstd", path: "Core/archive/zstd.jet", owned_members: &["compress", "compress_file", "compress_text", "decompress", "decompress_file", "decompress_text", "is_zstd", "magic"] },
-    CoreSourceModule { module: "core.args", alias: "core_core_args", path: "Core/args/args.jet", owned_members: &["decode", "decode_argv", "get_bool", "get_int", "get_text", "merge", "spec", "positionals", "program", "help_text", "flag", "has", "argument", "define", "dest", "required", "default_value", "get_or", "get_choice", "missing_required", "apply_defaults", "usage", "help_from", "remainder", "count_flag", "wants_help"] },
+    CoreSourceModule { module: "core.args", alias: "core_core_args", path: "Core/args/args.jet", owned_members: &["decode", "decode_argv", "get_bool", "get_int", "get_text", "merge", "positionals", "program", "help_text", "has", "define", "dest", "required", "default_value", "get_or", "get_choice", "missing_required", "apply_defaults", "usage", "help_from", "remainder", "count_flag", "wants_help"] },
     CoreSourceModule { module: "core.auth", alias: "core_core_auth", path: "Core/auth/auth.jet", owned_members: &["magic_link_consume", "magic_link_issue", "oauth_begin", "oauth_finish", "password_login", "register_user", "session_cookie", "session_id", "session_show", "session_user", "session_validate", "verify_jwt", "verify_paseto"] },
     CoreSourceModule { module: "core.build", alias: "core_core_build", path: "Core/build/build.jet", owned_members: &["graph", "receipt_diff"] },
     CoreSourceModule { module: "core.compiler", alias: "core_core_compiler", path: "Core/compiler/compiler.jet", owned_members: &["check", "lex", "lock", "manifest", "package", "parse", "profiles", "source_map"] },
