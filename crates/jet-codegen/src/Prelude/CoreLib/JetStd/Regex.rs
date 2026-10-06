@@ -2397,6 +2397,51 @@ mod tests {
         assert_eq!(alphabetic.find("123λ!").ok().as_deref(), Some("λ"));
     }
 
+    /// Core/regex/regex.jet gives these same answers (golden
+    /// text/regex_unicode_parity pins the Jet half): Unicode simple case
+    /// folding, classes over scalars, \p/\P, syntax errors, character
+    /// positions, and `$` replacement expansion.
+    #[test]
+    fn unicode_rules_shared_with_the_jet_engine() {
+        let ci = jet_regex_flags(true, false, false);
+        let plain = RegexFlags::default();
+        let find = |pattern: &str, flags: &RegexFlags, text: &str| {
+            jet_regex_compile_with(pattern, flags).unwrap().find(text).ok()
+        };
+        assert_eq!(find("straße", &ci, "STRASSE"), None);
+        assert_eq!(find("straße", &ci, "STRAßE").as_deref(), Some("STRAßE"));
+        assert_eq!(find("école", &ci, "ÉCOLE").as_deref(), Some("ÉCOLE"));
+        assert_eq!(find("σ", &ci, "Σ").as_deref(), Some("Σ"));
+        assert_eq!(find("[à-ö]+", &ci, "xÀÉÖy").as_deref(), Some("ÀÉÖ"));
+        assert_eq!(find("[é]+", &plain, "aééb").as_deref(), Some("éé"));
+        assert_eq!(find("[^a]", &plain, "é").as_deref(), Some("é"));
+        assert_eq!(find("[α-ω]+", &plain, "xαβγ").as_deref(), Some("αβγ"));
+        assert_eq!(find(r"\p{L}+", &plain, "123héllo!").as_deref(), Some("héllo"));
+        assert_eq!(find(r"\P{L}+", &plain, "123héllo!").as_deref(), Some("123"));
+        assert_eq!(find(r"\p{N}+", &plain, "x٣٤y").as_deref(), Some("٣٤"));
+        assert_eq!(find(r"\s", &plain, "a\u{3000}b").as_deref(), Some("\u{3000}"));
+        assert_eq!(find(r"[\p{L}\d]+", &plain, "ab1é!").as_deref(), Some("ab1é"));
+        for bad in [r"[\P{L}]", r"\p{Foo}", r"(a)\1", "[]"] {
+            assert!(jet_regex_compile(bad).is_err(), "{bad} must be a syntax error");
+        }
+        for good in ["[^]]", "a{5000}"] {
+            assert!(jet_regex_compile(good).is_ok(), "{good} must compile");
+        }
+        let found = JetRegex::parse("(é+)b").unwrap().matches("aéébxéb");
+        let spans: Vec<_> = found
+            .iter()
+            .map(|m| (m.start(), m.end(), m.group(1).ok()))
+            .collect();
+        assert_eq!(
+            spans,
+            vec![(1, 4, Some("éé".to_string())), (5, 7, Some("é".to_string()))]
+        );
+        let word = JetRegex::parse("([a-z]+)").unwrap();
+        assert_eq!(word.replace("ab cd", "<${1}>"), "<> <>");
+        let named = JetRegex::parse("(?<w>[a-z]+)").unwrap();
+        assert_eq!(named.replace("ab cd", "<${w}|$0|$$>"), "<ab|ab|$> <cd|cd|$>");
+    }
+
     /// #4574: the byte search stays inside the haystack slice. Every byte past
     /// the slice end is the needle, so a block load crossing the end would
     /// report a position outside the slice. `regex_find_byte` runs the

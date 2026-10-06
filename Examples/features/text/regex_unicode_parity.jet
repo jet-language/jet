@@ -1,0 +1,50 @@
+// core.regex has one meaning on every tier: the Jet engine (Core/regex)
+// and the Prelude engine agree on Unicode case folding, scalar classes,
+// \p{...}/\P{...}, syntax errors, and `$` replacement expansion.
+use core.regex as rx
+
+fn show(label: String, re: rx.Regex, text: String) {
+    found :: rx.find(re, text) ?? "none"
+    print("{label}: is={rx.is_match(re, text)} full={rx.full_match(re, text)} find='{found}' all={rx.find_all(re, text).len()}")
+}
+
+fn pat(p: String) -> rx.Regex {
+    rx.compile(p) ?? panic("compile {p}")
+}
+
+fn ci(p: String) -> rx.Regex {
+    rx.compile_with(p, rx.flags(true, false, false)) ?? panic("compile {p}")
+}
+
+fn verdict(p: String) {
+    if rx.compile(p) == {
+        .Ok(_) -> print("{p}: compiles")
+        .Err(_) -> print("{p}: syntax error")
+    }
+}
+
+fn run() {
+    show("ci sharp s", ci("straße"), "STRASSE")
+    show("ci sharp s exact", ci("straße"), "STRAßE")
+    show("ci accent", ci("école"), "ÉCOLE")
+    show("ci sigma", ci("σ"), "Σ")
+    show("ci range", ci("[à-ö]+"), "xÀÉÖy")
+    show("class member", pat("[é]+"), "aééb")
+    show("negated class", pat("[^a]"), "é")
+    show("scalar range", pat("[α-ω]+"), "xαβγ")
+    show("letters", pat("\\p{{L}}+"), "123héllo!")
+    show("non-letters", pat("\\P{{L}}+"), "123héllo!")
+    show("numbers", pat("\\p{{N}}+"), "x٣٤y")
+    show("unicode space", pat("\\s"), "a　b")
+    show("class with property", pat("[\\p{{L}}\\d]+"), "ab1é!")
+    verdict("[\\P{{L}}]")
+    verdict("\\p{{Foo}}")
+    verdict("(a)\\1")
+    verdict("[]")
+    verdict("[^]]")
+    verdict("a{{5000}}")
+    print(rx.matches(pat("(é+)b"), "aéébxéb").len())
+    print(rx.replace(pat("([a-z]+)_(\\d+)"), "xx jet_2026 yy", "$2-$1"))
+    print(rx.replace(pat("([a-z]+)"), "ab cd", "<${{1}}>"))
+    print(rx.replace(pat("(?<w>[a-z]+)"), "ab cd", "<${{w}}|$0|$$>"))
+}

@@ -2699,20 +2699,26 @@ Use `#Test` for test declarations and keep assertions about behavior rather
 than implementation details. The compiler and test runner own test discovery;
 the helper types only control inputs and observations.
 
-### `core.regex` — bounded regular expressions
+### `core.regex` — linear-time regular expressions
 
-`core.regex` is a UTF-8 pattern engine with an explicit finite execution
-budget. It supports concatenation, alternation, groups, `*`, `+`, `?`, bounded
-repetition, `.`, `^`, `$`, and the `\d`, `\w`, and `\s` classes. Flags include
-ASCII `ignore_case`, `multiline`, and `dot_matches_newline`. A malformed
-pattern is a typed `RegexError`; a match operation cannot run without a finite
-budget. The implementation is in
-[`Core/regex/regex.jet`](../../../Core/regex/regex.jet).
+`core.regex` is a Thompson/Pike VM over Unicode scalars, the same engine and
+rules as the Prelude engine, so every tier gives one answer. Matching is linear
+in the text, with no recursion and no step budget. It supports concatenation,
+alternation, capture groups numbered by their `(`, `(?:…)`, `(?<name>…)`, `*`,
+`+`, `?`, `{n}`, `{n,}`, `{n,m}`, `.`, `^`, `$` (end of text), classes over
+scalars (`[]`, `[^]`, ranges), `\d` and `\w` (ASCII), `\s` (Unicode
+White_Space), and `\p{L}`/`\p{Letter}`/`\p{Alphabetic}`, `\p{N}`/`\p{Number}`,
+`\p{White_Space}` with `\P{…}` outside `[]`. `ignore_case` compares Unicode
+simple lowercase mappings; `multiline` lets `^` match after a newline;
+`dot_matches_newline` lets `.` match `\n`. Backreferences and lookaround are
+syntax errors. A malformed pattern is a typed `RegexError`. The implementation
+is in [`Core/regex/regex.jet`](../../../Core/regex/regex.jet).
 
-The budget is an execution bound, not a promise of linear-time matching. The
-engine does not expose named capture groups: `Match.groups` is a positional
-list. Use the compiled `Pattern`/`Regex` values when the same expression is
-used repeatedly, and call `escape` for literal user input.
+`Match.start` and `Match.end` are character (Unicode scalar) positions.
+`Match.groups` is a positional list; a group that did not take part is `""`.
+`replace` expands `$0`…`$N`, `${name}` and `$$`. Use the compiled `Regex`
+value when the same expression is used repeatedly, and call `escape` for
+literal user input.
 
 | Signature | Result | Description |
 |---|---|---|

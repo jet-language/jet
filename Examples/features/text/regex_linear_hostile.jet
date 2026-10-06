@@ -4,10 +4,14 @@
 use core.regex as rx
 
 fn run() {
-    long := ""
-    loop _ in 0..<100000 -> long += "a"
+    long :: "a".repeat(100000)
     plus :: rx.compile("a+") ?? panic("a+ compiles")
     print("100k a+ full match: {rx.full_match(plus, long)}")
+    // The scan reuses one set of thread rows: repeated long scans keep a flat
+    // footprint.
+    rounds := 0
+    loop _ in 0..<8 -> rounds = rounds + rx.find_all(plus, long).len()
+    print("8 x 100k a+ find_all: {rounds}")
     print("100k a+ find_all: {rx.find_all(plus, long).len()}")
     group :: rx.compile("(a|aa)*b") ?? panic("(a|aa)*b compiles")
     print("100k (a|aa)*b: {rx.is_match(group, long)}")
