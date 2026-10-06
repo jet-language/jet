@@ -9,6 +9,7 @@ thread_local! {
         const { std::cell::Cell::new(0) };
 }
 
+#[inline(always)]
 pub fn jet_runtime_stack_enter() -> bool {
     JET_RUNTIME_STACK_DEPTH.with(|depth| {
         let next = depth.get().saturating_add(1);
@@ -17,6 +18,7 @@ pub fn jet_runtime_stack_enter() -> bool {
     })
 }
 
+#[inline(always)]
 pub fn jet_runtime_stack_leave() {
     JET_RUNTIME_STACK_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
 }
