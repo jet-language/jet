@@ -1,0 +1,42 @@
+// D-TEST-STOPMSG1=A: the same panic code is not enough to identify its reason.
+#Test("message substring matches") {
+    .expect_fail(message: "fingerprint collision") {
+        panic("internal compiler error: E0859 generic module instance fingerprint collision")
+    }
+    assert(true, "execution continues after the matched region")
+}
+#Test("code and message match") {
+    .expect_fail(E3001, message: "fingerprint collision") {
+        panic("internal compiler error: E0859 generic module instance fingerprint collision")
+    }
+}
+#Test("wrong message fails") {
+    .expect_fail(message: "fingerprint collision") {
+        panic("assertion failed: modules.len() > 0")
+    }
+}
+#Test("wrong code fails") {
+    .expect_fail(E3010, message: "fingerprint collision") {
+        panic("fingerprint collision")
+    }
+}
+#Test("clean finish fails") {
+    .expect_fail(message: "fingerprint collision") {
+        assert(true)
+    }
+}
+#Test("case sensitive message fails") {
+    .expect_fail(message: "Fingerprint collision") {
+        panic("fingerprint collision")
+    }
+}
+#Test("rendered prefix is not message") {
+    .expect_fail(message: "panic:") {
+        panic("fingerprint collision")
+    }
+}
+#Test("collision mutation fails") {
+    .expect_fail(E3001, message: "internal compiler error: E0859 generic module instance fingerprint collision") {
+        panic("internal compiler error: E0859 generic module instance digest conflict")
+    }
+}

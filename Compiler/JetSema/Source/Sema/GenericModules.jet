@@ -843,15 +843,24 @@ fn sema_genmod_definition_items(items: [Item]) -> [Item] {
     kept
 }
 
-pub fn sema_generic_modules_expand(program: Program, module_identity: String, imported: [SemaGenericModuleSource]) -> Program {
+// Expands `program`'s module aliases in place; a program without one is left
+// untouched (not copied).
+pub fn sema_generic_modules_expand(program: &Program, module_identity: String, imported: [SemaGenericModuleSource]) {
+    rewritten :: sema_generic_modules_rewritten_items(program, module_identity, imported) ?? return
+    program.items = rewritten
+}
+
+// The expanded item list of `program`, or None when it has no module alias to
+// expand (or its aliases form a cycle).
+fn sema_generic_modules_rewritten_items(program: Program, module_identity: String, imported: [SemaGenericModuleSource]) -> [Item]? {
     items :: program.items
     aliases := [ModuleAliasDef]{}
     loop item in items {
         if item == .ModuleAlias(alias) -> &aliases.push(alias)
     }
-    if aliases.len() == 0 -> return ~program
+    if aliases.len() == 0 -> return None
     silent := SemaGenericModuleCheck{module_identity: module_identity, diagnostics: [Diagnostic]{}, seen: [String:Bool]{}}
-    if sema_genmod_report_cycles(items, &silent) -> return ~program
+    if sema_genmod_report_cycles(items, &silent) -> return None
     enums :: sema_genmod_enums(items, [GenericModuleDef]{})
     values :: sema_genmod_folded_consts(items, [String:Expr]{}, enums)
     sources := [SemaGenericModuleSource]{}
@@ -942,7 +951,7 @@ pub fn sema_generic_modules_expand(program: Program, module_identity: String, im
         &rewritten.push(item)
     }
     loop declaration in declarations -> &rewritten.push(declaration)
-    sema_program_with_items(program, ^rewritten)
+    Val(rewritten)
 }
 
 // The last template bound to a name wins, like Rust's template map where an

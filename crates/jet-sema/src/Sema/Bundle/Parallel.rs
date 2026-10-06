@@ -3,32 +3,19 @@
 //!
 //! Callers hand in independent jobs and get the results back in job order,
 //! then merge them serially in source order. That keeps every diagnostic,
-//! fact and checked body identical to a serial run; `JET_CHECK_THREADS=1`
-//! runs the same jobs inline, in order, for debugging and for comparing the
-//! two.
+//! fact and checked body identical to a serial run; `--threads 1` runs the
+//! same jobs inline, in order, for debugging and for comparing the two.
 
-/// Default upper bound on sema workers. Each worker holds a full checker and
-/// may lower whole-module comptime fragments, so the peak grows with the
-/// worker count; `JET_CHECK_THREADS` sets a different count explicitly.
+/// Automatic upper bound on sema workers. Each worker holds a full checker
+/// and may lower whole-module comptime fragments, so the peak grows with the
+/// worker count; `--threads N` sets a different cap explicitly.
 const MAX_CHECK_WORKERS: usize = 8;
 
-/// Workers for `jobs` independent jobs: `JET_CHECK_THREADS` when set to a
-/// positive number, otherwise the machine's available parallelism, capped by
-/// the job count and `MAX_CHECK_WORKERS`. The setting only changes how the
-/// work is scheduled, never its result, so it is read directly rather than
-/// through `CheckReads` (it is not an input of the checked program).
+/// Workers for `jobs` independent jobs, admitted under the compiler's one
+/// thread cap (`jet_foundation::CompilerThreads`). The count only changes
+/// how the work is scheduled, never its result.
 pub(crate) fn check_worker_count(jobs: usize) -> usize {
-    let requested = std::env::var("JET_CHECK_THREADS")
-        .ok()
-        .and_then(|value| value.trim().parse::<usize>().ok())
-        .filter(|threads| *threads > 0);
-    let threads = requested.unwrap_or_else(|| {
-        std::thread::available_parallelism()
-            .map(std::num::NonZeroUsize::get)
-            .unwrap_or(1)
-            .min(MAX_CHECK_WORKERS)
-    });
-    threads.min(jobs).max(1)
+    jet_foundation::CompilerThreads::admit(jobs, MAX_CHECK_WORKERS)
 }
 
 /// Run `work` on every job with `check_worker_count` workers and return the

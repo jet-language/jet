@@ -13,7 +13,7 @@ pub(crate) fn is_display_migration_candidate(checker: &Checker<'_>, ty: &Type) -
         Type::Named(name)
             if checker.registry.is_user_struct(name)
                 && !is_core_shown_type(name)
-                && checker.trait_reg.auto_printable.contains(name)
+                && checker.trait_reg.has_auto_derive(Generics::PRINTABLE, name)
                 && checker.trait_reg.implements_trait(name, Generics::DEBUG)
                 && !checker.trait_reg.implements_trait(name, Generics::DISPLAY)
     )

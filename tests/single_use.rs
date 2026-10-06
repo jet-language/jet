@@ -431,7 +431,7 @@ fn run() {
         (
             "unbound spawn",
             r#"
-fn work() -> Int -> 7
+fn work() -> Int { 7 }
 fn run() {
     task work()
     print("spawned")

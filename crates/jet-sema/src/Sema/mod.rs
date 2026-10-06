@@ -394,7 +394,7 @@ pub(crate) fn solve_inferred_failure(
         })
         .collect();
     let members: Vec<Vec<usize>> = (0..module_count)
-        .map(|module_idx| name_ledger.namespace_siblings(module_idx))
+        .map(|module_idx| name_ledger.namespace_siblings(module_idx).collect())
         .collect();
     let owner_of = |module: usize, leaf: &str| {
         if declared[module].contains(leaf) {
@@ -3305,17 +3305,12 @@ impl<'a> Checker<'a> {
             })
             .cloned()
             .collect::<Vec<_>>();
+        let site = format!("{}:{}..{}", self.module_path, span.start, span.end);
+        if let Some(diagnostic) = crate::Policy::gate_refusal(key, &site, Some(span), &declarations) {
+            self.diags.push(diagnostic);
+            return false;
+        }
         match crate::Policy::resolve_with_gates(key, declarations, &self.gates) {
-            Ok(Some(policy)) if policy.value == crate::Policy::PolicyValue::Forbid => {
-                self.diags.push(Diagnostic::error(
-                    if key == crate::Policy::PolicyKey::Unsafe { "E3105" } else { "E3415" },
-                    format!("the `{}` gate is denied by effective policy", key.name()),
-                    "an organization or package policy can refuse an audited escape, including its invocation gate".to_string(),
-                    format!("remove the `{}` escape or change the owning policy", key.name()),
-                    Some(span),
-                ));
-                false
-            }
             Ok(_) => true,
             Err(_error) => {
                 let code = if self.gates.allows(key) {

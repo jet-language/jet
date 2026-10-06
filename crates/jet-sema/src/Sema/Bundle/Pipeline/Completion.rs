@@ -797,6 +797,11 @@ pub(super) fn complete_bundle_check(
     diags.extend(super::super::super::MemoryFacts::annotate_scoped_gc_promotions(bundle));
     apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);
     bundle.name_ledger = name_ledger.clone();
+    if super::super::super::GateLedger::GateLedger::has_new_refusal(bundle) {
+        let mut ledger = super::super::super::GateLedger::GateLedger::default();
+        ledger.append_structure_facts(&name_ledger);
+        diags.extend(ledger.policy_diagnostics(bundle));
+    }
     // D-BUILDENTRY1 / I2+I3+I9 (Tower card 2008): checking is finished, so the
     // build entry has had every diagnostic it is owed. It is not runtime code,
     // and `BuildContext`/`BuildPlan` have no runtime lowering, so leaving it in
@@ -1047,11 +1052,7 @@ fn record_import_edge_facts(
             let Some(target) = ledger.module_path(target_idx).map(str::to_string) else {
                 continue;
             };
-            if ledger.structure_facts().iter().any(|fact| {
-                fact.kind == jet_foundation::Names::StructureFactKind::ImportEdge
-                    && fact.source == source
-                    && fact.span == import.span
-            }) {
+            if ledger.has_import_fact(&source, import.span) {
                 continue;
             }
             ledger.record_structure_fact(jet_foundation::Names::StructureFact::new(

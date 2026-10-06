@@ -3,9 +3,8 @@ use super::super::{
 };
 
 impl<'a> Parser<'a> {
-    /// D-LAMBDA-IFACE1=A: probe the real suffix parser so type-start tokens
-    /// that are also expression operators (`*`, `(`, `[`, `?`) do not turn
-    /// ordinary grouped expressions into lambdas.
+    /// D-LAMBDA-IFACE2=A: only parameters and an effect row form an interface.
+    /// Probe retired types solely to select the teaching diagnostic.
     fn lambda_tail_starts_at(&mut self, index: usize) -> bool {
         let saved_pos = self.pos;
         let saved_diags = self.diags.len();
@@ -16,16 +15,17 @@ impl<'a> Parser<'a> {
         let saved_type_generic_truncated = self.type_generic_truncated;
 
         self.pos = index;
-        let parsed = self
-            .parse_lambda_return_interface()
-            .ok()
-            .and_then(|_| self.parse_opt_func_effects().ok())
-            .map(|(effects, effect_via)| {
-                effects.is_some()
-                    || effect_via.is_some()
-                    || Self::at_unified_arrow_token(&self.peek().kind)
-            })
-            .unwrap_or(false);
+        let parsed = if self.func_effect_starts_here()
+            || Self::at_unified_arrow_token(&self.peek().kind)
+        {
+            true
+        } else if self.type_starts_here() || matches!(self.peek().kind, TokKind::Star) {
+            self.type_().is_ok()
+                && (self.func_effect_starts_here()
+                    || Self::at_unified_arrow_token(&self.peek().kind))
+        } else {
+            false
+        };
 
         self.pos = saved_pos;
         self.diags.truncate(saved_diags);
@@ -182,7 +182,11 @@ impl<'a> Parser<'a> {
         }
         let close_paren = self.peek().span;
         self.expect(TokKind::RParen, "after lambda parameters")?;
-        let (result_type, error_type) = self.parse_lambda_return_interface()?;
+        if !self.func_effect_starts_here()
+            && !Self::at_unified_arrow_token(&self.peek().kind)
+        {
+            return Err(Self::lambda_interface_diagnostic(self.peek().span));
+        }
         let (effects, effect_via) = self.parse_opt_func_effects()?;
         if let Some((_, span)) = effect_via {
             return Err(Diagnostic::error(
@@ -201,8 +205,6 @@ impl<'a> Parser<'a> {
         Ok(Lambda {
             take_names,
             params,
-            result_type,
-            error_type,
             effects,
             body,
             span: Span::new(open.start, end),
@@ -219,8 +221,6 @@ impl<'a> Parser<'a> {
         Ok(Lambda {
             take_names: Vec::new(),
             params: Vec::new(),
-            result_type: None,
-            error_type: None,
             effects: None,
             body,
             span: Span::new(open.start, end),
@@ -228,21 +228,14 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_lambda_return_interface(
-        &mut self,
-    ) -> Result<(Option<super::super::Type>, Option<super::super::Type>), Diagnostic> {
-        let return_type = if !self.func_effect_starts_here()
-            && (self.type_starts_here() || matches!(self.peek().kind, TokKind::Star))
-        {
-            Some(self.type_()?.0)
-        } else {
-            self.parse_unit_fallible_return()?.map(|(ty, _)| ty)
-        };
-        Ok(match return_type {
-            Some(super::super::Type::Result { ok, err }) => (Some(*ok), Some(*err)),
-            Some(ty) => (Some(ty), None),
-            None => (None, None),
-        })
+    fn lambda_interface_diagnostic(span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E0399",
+            "a lambda cannot write a return or error type".to_string(),
+            "a lambda's arrow introduces its body; return and error types come from the expected callable type".to_string(),
+            "remove the type; pass the lambda to a typed parameter or slot, or use a named `fn` for a full interface".to_string(),
+            Some(span),
+        )
     }
 
     /// D-LAMBDA-INFER1 (ratified 2026-07-04): a bare single-param lambda with
@@ -252,7 +245,19 @@ impl<'a> Parser<'a> {
     /// D-ARROW-CONTROL1: captures are always inferred.
     pub(super) fn parse_bare_lambda(&mut self) -> Result<Lambda, Diagnostic> {
         let (name, name_span) = self.expect_ident("as a lambda parameter")?;
-        self.expect_unified_arrow("after a bare lambda parameter")?;
+        let (effects, effect_via) = self.parse_opt_func_effects()?;
+        if let Some((_, span)) = effect_via {
+            return Err(Diagnostic::error(
+                "E0119",
+                "a lambda effect row cannot publish `via`".to_string(),
+                "a lambda stores a concrete effect row as part of its callable interface".to_string(),
+                "write the effects directly, for example `-[Net]>`".to_string(),
+                Some(span),
+            ));
+        }
+        if effects.is_none() {
+            self.expect_unified_arrow("after a bare lambda parameter")?;
+        }
         let (body, end) = self.lambda_arrow_body(name_span.end)?;
         Ok(Lambda {
             take_names: vec![],
@@ -262,9 +267,7 @@ impl<'a> Parser<'a> {
                 ty: None,
                 ty_span: None,
             }],
-            result_type: None,
-            error_type: None,
-            effects: None,
+            effects,
             body,
             span: Span::new(name_span.start, end),
             meta: LambdaMeta::default(),
@@ -282,6 +285,17 @@ impl<'a> Parser<'a> {
         &mut self,
         fallback_end: usize,
     ) -> Result<(LambdaBody, usize), Diagnostic> {
+        let typed_body = matches!(&self.peek().kind, TokKind::Ident(name)
+            if name.chars().next().is_some_and(char::is_uppercase));
+        let body_start = self.peek().span;
+        let body_start_pos = self.pos;
+        let body_start_diags = self.diags.len();
+        let struct_body = typed_body && matches!(self.peek2().kind, TokKind::LBrace);
+        let error_suffix = matches!(self.peek2().kind, TokKind::Ident(_))
+            && matches!(self.toks.get(self.pos + 2).map(|t| &t.kind), Some(TokKind::Bang));
+        if typed_body && (matches!(self.peek2().kind, TokKind::Bang) || error_suffix) {
+            return Err(Self::lambda_interface_diagnostic(body_start));
+        }
         if matches!(self.peek().kind, TokKind::LBrace) {
             self.expect(TokKind::LBrace, "to open the lambda body")?;
             // D-TAIL-RETURN1=A: a block lambda keeps one unadorned final
@@ -304,7 +318,18 @@ impl<'a> Parser<'a> {
             let end = self.toks[self.pos - 1].span.end;
             Ok((LambdaBody::Block(statements), end))
         } else {
-            let expression = self.expr()?;
+            let expression = match self.expr() {
+                Ok(expression) => expression,
+                // `Type { statements }` is a retired return type before a
+                // block body. Resume statement recovery at the type so it
+                // skips the whole braced body, not just its first line.
+                Err(_) if struct_body => {
+                    self.pos = body_start_pos;
+                    self.diags.truncate(body_start_diags);
+                    return Err(Self::lambda_interface_diagnostic(body_start));
+                }
+                Err(diagnostic) => return Err(diagnostic),
+            };
             if matches!(self.peek().kind, TokKind::Eq) || self.peek().kind.compound_op().is_some() {
                 let op_tok = self.bump();
                 let op = op_tok.kind.compound_op();

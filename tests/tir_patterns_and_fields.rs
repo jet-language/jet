@@ -210,14 +210,14 @@ pub struct ListReport {
 }
 
 impl ListReport {
-    pub fn label(self) -> String -> self.status
+    pub fn label(self) -> String { self.status }
 }
 
 pub fn list_json(status: String) -> String {
     return json.to_string(ListReport{schema: \"jet.report/v1\", status: status})
 }
 
-pub fn mk() -> ListReport -> ListReport{schema: \"jet.report/v1\", status: \"ok\"}
+pub fn mk() -> ListReport { ListReport{schema: \"jet.report/v1\", status: \"ok\"} }
 
 pub fn round_trip(wire: String) -> String {
     report :: json.decode<ListReport>(wire) ?? panic(\"declaring module decode\")
@@ -327,7 +327,7 @@ fn run() {
 /// or forced-interpreter output.
 #[test]
 fn imported_zero_arg_string_result_matches_every_tier() {
-    let plan_src = "pub fn greeting() -> String -> \"hello\"\n";
+    let plan_src = "pub fn greeting() -> String { \"hello\" }\n";
     let main_src = "\
 use plan
 
@@ -402,7 +402,7 @@ fn mapped_string_lists_flatten_on_each_hosted_tier() {
 fn flatten_words(contents: String) -> [String] {
     return contents.lines().map((line: String) -> line.split(" ").to_list()).flatten()
 }
-fn flatten_string_rows() -> [String] -> [[String]]{{"red"}, {"blue", "green"}}.flatten()
+fn flatten_string_rows() -> [String] { [[String]]{{"red"}, {"blue", "green"}}.flatten() }
 fn run() {
     words :: flatten_words("one two\nthree four")
     neighbors :: flatten_words("five six")
@@ -441,7 +441,7 @@ fn run() {
         assert_eq!(stdout, expected, "{stderr}");
     }
     let unsupported_src = r#"
-fn flatten_float_rows(rows: [[Float]]) -> [Float] -> rows.flatten()
+fn flatten_float_rows(rows: [[Float]]) -> [Float] { rows.flatten() }
 fn run() {
     values :: flatten_float_rows([[Float]{1.5}, [Float]{2.5}])
     print(values.len())
@@ -464,15 +464,15 @@ fn run() {
 #[test]
 fn float_list_arguments_stay_native_on_the_default_tier() {
     let src = r#"
-fn first(values: [Float]) -> Float -> values.first() ?? 0.0
-fn last(values: [Float]) -> Float -> values.last() ?? 0.0
+fn first(values: [Float]) -> Float { values.first() ?? 0.0 }
+fn last(values: [Float]) -> Float { values.last() ?? 0.0 }
 fn sorted_first(values: [Float]) -> Float {
     sorted_values := values.copy()
     &sorted_values.sort()
     return sorted_values.first() ?? 0.0
 }
-fn ordered(left: Float, right: Float) -> Bool -> left < right
-fn list_ordered(left: [Float], right: [Float]) -> Bool -> left < right
+fn ordered(left: Float, right: Float) -> Bool { left < right }
+fn list_ordered(left: [Float], right: [Float]) -> Bool { left < right }
 fn run() {
     values :: [Float]{1.0, 2.0}
     print(first(values))
@@ -1182,7 +1182,7 @@ fn run() {
 fn lexical_parameter_shadows_same_named_comptime_constant_on_all_tiers() {
     let src = r#"
 TOWER :: prep { 99 }
-fn choose(tower: Int) -> Int -> tower
+fn choose(tower: Int) -> Int { tower }
 fn run() {
     print(choose(7))
 }
@@ -1689,7 +1689,7 @@ struct Circle {
     radius: Float
 
     impl Shape {
-        fn area(self) -> Float -> self.radius * self.radius
+        fn area(self) -> Float { self.radius * self.radius }
     }
 }
 
@@ -1698,7 +1698,7 @@ struct Square {
 }
 
 impl Square.Shape {
-    fn area(self) -> Float -> self.side * self.side
+    fn area(self) -> Float { self.side * self.side }
 }
 
 fn run() {
@@ -1723,10 +1723,10 @@ struct Parcel {
 }
 
 impl Parcel.Measure {
-    fn measure(self) -> Int -> self.n
+    fn measure(self) -> Int { self.n }
 }
 
-fn via<T: Measure>(value: T) -> Int -> value.measure()
+fn via<T: Measure>(value: T) -> Int { value.measure() }
 
 fn run() {
     print(via(Parcel{n: 5}))
@@ -1752,7 +1752,7 @@ impl Parcel.Measure {
     }
 }
 
-fn via<T: Measure>(value: T) -> Int -> value.measure()
+fn via<T: Measure>(value: T) -> Int { value.measure() }
 
 fn run() {
     print(via(Parcel{n: 5}))
@@ -1767,5 +1767,14 @@ authority: { holds: { allow: [Exec, IO, Mem.Alloc] } }
         effectful,
         limited_authority,
         "E1803",
+    );
+}
+
+#[test]
+fn pattern_hole_new_names_and_explicit_comparisons_agree_across_tiers() {
+    assert_tiers_agree(
+        "pattern_hole_name1",
+        include_str!("../Examples/features/basics/pattern_matching.jet"),
+        include_str!("../Examples/features/expected/basics/pattern_matching.out"),
     );
 }

@@ -289,7 +289,7 @@ fn connect(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) -> Str
 fn identity<T>(value: T, *, note: String{\"unused\"}) -> T {
     return value
 }
-fn force(*, force: Bool) -> Int -> 1
+fn force(*, force: Bool) -> Int { 1 }
 fn apply(action: fn(*, force: Bool) -> Int) -> Int {
     return action(force: true)
 }
@@ -354,7 +354,7 @@ fn function_value_arguments_preserve_public_callable_contracts() {
     let src = "\
 fn factory(action: fn(*, force: Bool) -> Int) -> Int { return action(force: true) }
 fn invoke(callback: fn(fn(*, force: Bool) -> Int) -> Int) -> Int { return callback(plain) }
-fn plain(value: Bool) -> Int -> 1
+fn plain(value: Bool) -> Int { 1 }
 fn run() { _ :: invoke(factory) }
 ";
     let diagnostics = jet::compile(src)

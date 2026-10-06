@@ -1821,6 +1821,17 @@ fn apply_native_effect_policy(
                     error,
                 ),
             };
+            if manifest.authority.grants.iter().any(|(_, effects)| !effects.is_empty())
+                || manifest.authority.holds.allow.as_ref().is_some_and(|effects| !effects.is_empty())
+            {
+                if let Err(diagnostics) = jet::Loader::check_project_gate(
+                    root, jet::Policy::PolicyKey::DependencyGrant,
+                    &format!("{} dependency grants", lock_path.display()),
+                ) {
+                    report_problems(mode, file, src, &diagnostics);
+                    exit(ExitCodes::USER_ERROR);
+                }
+            }
             jet::EffectBudget::update_lock_provenance(&mut lock, entries, manifest);
             let replacement = jet::Lock::write(&lock);
             if let Err(error) = transaction.replace_file(&lock_snapshot, replacement.as_bytes()) {
@@ -3343,6 +3354,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     let mut progress = BuildProgress::new(cmd, emit_rust, verbose, mode, output_profile);
     progress.major("Reading", file);
     progress.minor("profile", profile.budget_name());
+    progress.minor("threads", &jet_foundation::CompilerThreads::report());
     let (src, source_snapshot) = match source_overlay {
         Some((_, source)) => (source.to_owned(), None),
         None => {
@@ -7261,7 +7273,10 @@ impl TestRunOpts {
                 "--profile" => {
                     opts.profile = Some(test_run_option_value(argv, &mut index, name, inline));
                 }
-                "--set" => {
+                // `--threads` is the process-wide compiler cap the host
+                // installed before dispatch (D-JOBS1=A); only its value word
+                // is skipped here.
+                "--set" | "--threads" => {
                     if inline.is_none() {
                         let _ = test_run_option_value(argv, &mut index, name, inline);
                     }
@@ -8498,6 +8513,9 @@ fn run_test_watch_child(
     }
     if crate::OutputAdapter::advisory_lints_visible() {
         command.arg("--verbose");
+    }
+    if let Some(threads) = jet_foundation::CompilerThreads::cap() {
+        command.arg(format!("--threads={threads}"));
     }
     append_test_watch_flags(&mut command, opts, filter);
     // The parent applies the selected capture policy after collecting the

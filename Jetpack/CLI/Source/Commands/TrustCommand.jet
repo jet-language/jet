@@ -110,8 +110,8 @@ fn cli_print_trust_record(theme: Theme, record: TrustRecord) Never! -[IO, Time.W
 
 fn cli_trust_record_matches(record: TrustRecord, selector: String) -> Bool Never! {
     if record == {
-        .Hash(hash) -> selector == hash || selector == "hash:{hash}"
-        .Pattern(pattern) -> selector == pattern || selector == "pattern:{pattern}"
+        .Hash(hash) -> selector == hash || selector == ("hash:{hash}")
+        .Pattern(pattern) -> selector == pattern || selector == ("pattern:{pattern}")
         .Grant(grant) -> selector == grant.subject || selector == grant.key() || selector == "{grant.scope}:{grant.key()}"
         .Raw(line) -> selector == line
     }

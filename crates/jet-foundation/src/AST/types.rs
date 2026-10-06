@@ -85,6 +85,7 @@ impl Dimension {
     }
 
     /// Stable identity used by API/type serialization.
+    /// Axis names retain UTF-8; percent escapes protect only `%`, `;`, and `:`.
     pub fn identity(&self) -> String {
         self.axes()
             .map(|(axis, exponent)| format!("{}:{exponent}", escape_axis(axis)))
@@ -150,8 +151,11 @@ fn unescape_axis(axis: &str) -> Option<String> {
     let mut index = 0;
     while index < bytes.len() {
         if bytes[index] != b'%' {
-            out.push(bytes[index] as char);
-            index += 1;
+            let start = index;
+            while index < bytes.len() && bytes[index] != b'%' {
+                index += 1;
+            }
+            out.push_str(&axis[start..index]);
             continue;
         }
         let code = axis.get(index + 1..index + 3)?;
@@ -2654,6 +2658,20 @@ mod tests {
             marker: TagMarker::Internal(InternalTag::CoreCryptoNominal),
             inner: Box::new(Type::Named("Secret".to_string())),
         }
+    }
+
+    #[test]
+    fn dimension_identity_roundtrips_utf8_and_escaped_axes() {
+        for identity in ["物:1", "時間:-1;长度:2", "物%3A量%3B%25🙂:1"] {
+            let dimension = super::Dimension::from_identity(identity).expect("valid identity");
+            assert_eq!(dimension.identity(), identity);
+            assert_eq!(
+                super::Dimension::from_identity(&dimension.identity()),
+                Some(dimension),
+            );
+        }
+        assert!(super::Dimension::from_identity("物%:1").is_none());
+        assert!(super::Dimension::from_identity("物%FF:1").is_none());
     }
 
     #[test]

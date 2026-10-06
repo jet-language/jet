@@ -6332,7 +6332,7 @@ fn lower_checked_tir_program_on_stack(
         }
         let mut program = TirProgram {
             package_identity: bundle.build_facts.package_name.clone(),
-            entry_sibling_calls: (!bundle.name_ledger.namespace_siblings(bundle.entry).is_empty())
+            entry_sibling_calls: (bundle.name_ledger.namespace_siblings(bundle.entry).next().is_some())
                 .then(|| {
                     (
                         entry_module_identity.clone(),
@@ -6781,9 +6781,8 @@ pub enum ScopeMemberKind {
     /// `.setup { … }` — the body's statements are spliced inline (bindings leak
     /// to the rest of the test), running first.
     Setup,
-    /// `.expect_fail { … }` / `.expect_fail(E3010) { … }` — the region must
-    /// fail, optionally with the named runtime stop code.
-    ExpectFail(Option<String>),
+    /// D-TEST-STOPMSG1=A: require a stop, optionally checking code and raw message.
+    ExpectFail { code: Option<String>, message: Option<String> },
     /// `.timeout(dur) { … }` — post-hoc budget. The region runs to completion,
     /// then its elapsed time is compared against the canonical Duration value;
     /// over budget fails the test. (v1: post-hoc — does not interrupt a hang.)
@@ -12822,22 +12821,7 @@ pub(crate) fn lambda_effect_facts(lam: &crate::AST::Lambda) -> TEffectFacts {
     facts
 }
 pub(crate) fn lambda_failure_carrier(lam: &crate::AST::Lambda) -> TFailureCarrier {
-    let contract = match (
-        &lam.result_type,
-        &lam.error_type,
-        &lam.meta.fallible_carrier,
-    ) {
-        (_, Some(error), _) => crate::AST::FailureContract::Explicit {
-            success: lam
-                .result_type
-                .clone()
-                .unwrap_or_else(|| Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
-            error: error.clone(),
-        },
-        (Some(result), None, _) => crate::AST::FailureContract::from_return_type(Some(result)),
-        (None, None, Some(carrier)) => crate::AST::FailureContract::from_return_type(Some(carrier)),
-        (None, None, None) => crate::AST::FailureContract::from_return_type(None),
-    };
+    let contract = crate::AST::FailureContract::from_return_type(lam.meta.fallible_carrier.as_ref());
     TFailureCarrier::from_contract(&contract)
 }
 

@@ -478,8 +478,8 @@ pub fn parse_response(url: String, raw: [U8]) -> HTTPResponse HTTPError! {
     head_end :: header_text_end(raw, split)
     if head_end > C_MAX_HEADER_BYTES -> return Err(.InvalidHeader)
     head :: String.from_bytes(slice_b(raw, 0, head_end)) ?? return Err(.Protocol{version: "HTTP"})
+    if raw.len() - split > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
     body_raw :: slice_b(raw, split, raw.len())
-    if body_raw.len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
     lines :: split_lines(head)
     if lines.len() == 0 || lines[0].bytes().len() > C_MAX_REQUEST_LINE_BYTES -> return Err(.InvalidStatus)
     parsed :: parse_status_line(lines[0]) ?? return Err(.InvalidStatus)
@@ -513,8 +513,8 @@ pub fn parse_request(raw: [U8]) -> HTTPRequest HTTPError! {
     head_end :: header_text_end(raw, split)
     if head_end > C_MAX_HEADER_BYTES -> return Err(.InvalidHeader)
     head :: String.from_bytes(slice_b(raw, 0, head_end)) ?? return Err(.Protocol{version: "HTTP"})
+    if raw.len() - split > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
     body_raw :: slice_b(raw, split, raw.len())
-    if body_raw.len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
     lines :: split_lines(head)
     if lines.len() == 0 || lines[0].bytes().len() > C_MAX_REQUEST_LINE_BYTES -> return Err(.InvalidMethod)
     parts :: split_space_line(lines[0])
@@ -1216,12 +1216,6 @@ fn slice_str(text: String, start: Int, end: Int) -> String {
 }
 
 fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] Never! {
-    out := [U8]{}
-    i := start
-    loop {
-        if i >= end || i >= raw.len() -> return ~out
-        &out.push(raw[i])
-        i = i + 1
-    }
+    raw.slice(start, end)
 }
 

@@ -295,7 +295,7 @@ fn jet_env_info_discloses_typed_summary_without_realizing_or_starting_services()
             data_dir: "state/fixture",
             watch: ["src"],
             after: ["database"],
-            before_start: ["lint"],
+            before_start: ["lint_all"],
             sockets: ["run/fixture.sock"]
         }
     }
@@ -316,7 +316,7 @@ module env.full {
 "#,
     )
     .unwrap();
-    fs::write(project.join("run.jet"), "#Job\nfn lint() {}\n").unwrap();
+    fs::write(project.join("run.jet"), "#Job\nfn lint_all() {}\n").unwrap();
 
     let output = jet()
         .args(["env", "info", "--json", "--offline", "--no-color"])
@@ -341,9 +341,9 @@ module env.full {
         "\"run\":[\"fixture\",\"--port\",\"8080\"]",
         "\"ready\":\"fixture --ready\"",
         "\"after\":[\"database\"]",
-        "\"before_start\":[\"lint\"]",
+        "\"before_start\":[\"lint_all\"]",
         "\"sockets\":[\"run/fixture.sock\"]",
-        "\"checks\":[],\"jobs\":[\"lint\"]",
+        "\"checks\":[],\"jobs\":[\"lint_all\"]",
         "\"variables\":[{\"name\":\"HOME\",\"sources\":[\"environment\"]}]",
         "\"files\":[\"config/generated.txt\"]",
         "\"git_hooks_path\":\"scripts/githooks\"",

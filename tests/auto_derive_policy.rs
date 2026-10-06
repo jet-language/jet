@@ -845,17 +845,22 @@ fn run() {
         .unwrap();
     assert!(badge_identity.contains("::"), "{badge_identity}");
     let dep_facts = &facts[dep_idx];
-    for selected in [
-        &app_facts.auto_printable,
-        &app_facts.auto_debug,
-        &app_facts.auto_equatable,
+    assert!(std::sync::Arc::ptr_eq(
+        app_facts.canonical_auto_derives.as_ref().unwrap(),
+        dep_facts.canonical_auto_derives.as_ref().unwrap(),
+    ));
+    for (trait_name, selected) in [
+        (jet::Generics::PRINTABLE, &app_facts.auto_printable),
+        (jet::Generics::DEBUG, &app_facts.auto_debug),
+        (jet::Generics::EQUATABLE, &app_facts.auto_equatable),
     ] {
         assert!(selected.contains("Token"), "{selected:?}");
         assert!(selected.contains("LocalEnvelope"), "{selected:?}");
         assert!(selected.contains("UnionEnvelope"), "{selected:?}");
         assert!(!selected.contains("DependencyEnvelope"), "{selected:?}");
         assert!(!selected.contains("vendor.Token"), "{selected:?}");
-        assert!(selected.contains(&badge_identity), "{selected:?}");
+        assert!(app_facts.has_auto_derive(trait_name, &badge_identity), "{selected:?}");
+        assert!(!selected.contains(&badge_identity), "canonical facts must not be copied into local selections");
         assert!(selected.contains("ImportedEnvelope"), "{selected:?}");
     }
     // Anonymous unions support structural equality, but there is no total
@@ -866,7 +871,7 @@ fn run() {
     assert!(!comparable.contains("UnionEnvelope"), "{comparable:?}");
     assert!(!comparable.contains("DependencyEnvelope"), "{comparable:?}");
     assert!(!comparable.contains("vendor.Token"), "{comparable:?}");
-    assert!(comparable.contains(&badge_identity), "{comparable:?}");
+    assert!(app_facts.has_auto_derive(jet::Generics::COMPARABLE, &badge_identity), "{comparable:?}");
     assert!(comparable.contains("ImportedEnvelope"), "{comparable:?}");
     assert!(app_facts.auto_encode.contains("ImportedEnvelope"));
     assert!(app_facts.auto_decode.contains("ImportedEnvelope"));

@@ -90,6 +90,15 @@ pub fn compile_dev_aot_image(
             "the program leaves the resident Cranelift subset: {unsafe_detail}"
         ));
     }
+    // The runner invokes the entry only; `<binary> <job> <args…>` dispatch
+    // lives in the rustc artifact's generated `main`.
+    if program
+        .artifacts
+        .iter()
+        .any(|plan| plan.id == artifact && !plan.jobs.is_empty())
+    {
+        return Err("the program dispatches `#Job` functions from its arguments".to_string());
+    }
     // An interpreter-tier function deopts into the checked MIR program at run
     // time; the image carries machine code only.
     let plan = plan_mir_tiers(program, artifact);

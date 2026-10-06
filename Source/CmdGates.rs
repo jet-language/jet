@@ -5,17 +5,12 @@ use std::process::exit;
 
 use jet::Diagnostics::Span;
 use jet::Sema::GateLedger::{GateEntry, GateKind, GateLedger};
+use jet::GateWriters::{append_invocation_flags, external_entry};
 use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 
 const LARGE_KIND_THRESHOLD: usize = 16;
 
-pub(crate) fn run(
-    args: &[String],
-    json: bool,
-    color: bool,
-    gates: jet::Policy::GateSet,
-    authority_only: bool,
-) {
+pub(crate) fn run(args: &[String], json: bool, color: bool, gates: jet::Policy::GateSet) {
     let Some(file) = entry_file(args) else {
         crate::cli_error!(@fix "E2104", "`jet inspect gates` needs an entry file", "jet inspect gates run.jet");
         exit(jet::ExitCodes::USAGE);
@@ -56,13 +51,21 @@ pub(crate) fn run(
 
     let kind = option_value(args, "--kind");
     let kind = kind.as_deref().map(parse_kind).transpose().unwrap_or_else(|error| {
-        crate::cli_error!(@fix "E2104", error, "use one of unsafe, impure, dependency_grant, build_flag, session_flag, trust_grant, force_pin, taint_scrub, duty_drop, state_transition, precision_demotion, nondeterministic, or structure");
+        crate::cli_error!(@fix "E2104", error, "use one of unsafe, impure, dependency_grant, build_flag, session_flag, trust_grant, force_pin, taint_scrub, duty_drop, state_transition, precision_demotion, nondeterministic, structure, or lint_allow");
         exit(jet::ExitCodes::USAGE);
     });
     let scope = option_value(args, "--scope").map(|value| value.to_ascii_lowercase());
 
     let mut ledger = GateLedger::collect(&bundle, gates);
     append_external_writers(&mut ledger, &bundle, args);
+    let mut diagnostics = ledger.diagnostics().to_vec();
+    diagnostics.extend(ledger.policy_diagnostics(&bundle).into_iter().map(|diagnostic| {
+        jet::Sema::GateLedger::GateDiagnostic {
+            source: diagnostic.origin().map_or_else(|| file.clone(), |origin| origin.display.clone()),
+            diagnostic,
+        }
+    }));
+    ledger.set_diagnostics(diagnostics);
     if !ledger.diagnostics().is_empty() {
         render_diagnostics(&ledger, &bundle, json, color);
     }
@@ -70,14 +73,14 @@ pub(crate) fn run(
     let entries = ledger
         .entries()
         .iter()
-        .filter(|entry| kind_matches(entry, kind, authority_only))
+        .filter(|entry| kind.is_none_or(|wanted| entry.kind == wanted))
         .filter(|entry| scope_matches(entry, scope.as_deref()))
         .collect::<Vec<_>>();
 
     if json {
         render_json(&entries, &bundle);
     } else {
-        render_human(&entries, &bundle, authority_only);
+        render_human(&entries, &bundle);
     }
 }
 
@@ -122,13 +125,6 @@ fn parse_kind(value: &str) -> Result<GateKind, String> {
     GateKind::parse(value).ok_or_else(|| format!("unknown gate kind `{value}`"))
 }
 
-fn kind_matches(entry: &GateEntry, kind: Option<GateKind>, authority_only: bool) -> bool {
-    if authority_only && !entry.kind.is_rights_kind() {
-        return false;
-    }
-    kind.is_none_or(|wanted| entry.kind == wanted)
-}
-
 fn scope_matches(entry: &GateEntry, scope: Option<&str>) -> bool {
     let Some(scope) = scope else { return true };
     scope == "all"
@@ -137,240 +133,13 @@ fn scope_matches(entry: &GateEntry, scope: Option<&str>) -> bool {
         || entry.source.eq_ignore_ascii_case(scope)
 }
 
-fn append_authority_entries(
-    ledger: &mut GateLedger,
-    authority: &jet::Package::PackageAuthority,
-    source: &str,
-) {
-    let provenance = |field: &str| vec![format!("{source}:{field}")];
-    let holds_authority = format!("{source} authority.holds");
-    let grants_authority = format!("{source} authority.grants");
-    if let Some(allow) = &authority.holds.allow {
-        ledger.push(external_entry(
-            GateKind::BuildFlag,
-            "security",
-            "package",
-            source,
-            "authority.holds.allow",
-            &format!(
-                "required effects: not evaluated; granted effects: {}; denied effects: none; authority: {holds_authority}",
-                allow.join(",")
-            ),
-            provenance("authority.holds.allow"),
-        ));
-    }
-    if let Some(deny) = &authority.holds.deny {
-        ledger.push(external_entry(
-            GateKind::BuildFlag,
-            "security",
-            "package",
-            source,
-            "authority.holds.deny",
-            &format!(
-                "required effects: not evaluated; granted effects: none; denied effects: {}; authority: {holds_authority}",
-                deny.join(",")
-            ),
-            provenance("authority.holds.deny"),
-        ));
-    }
-    for (dependency, rights) in &authority.grants {
-        ledger.push(external_entry(
-            GateKind::DependencyGrant,
-            "security",
-            "package",
-            source,
-            dependency,
-            &format!(
-                "required effects: not evaluated; granted effects: {}; denied effects: none; authority: {grants_authority}",
-                rights.join(",")
-            ),
-            provenance("authority.grants"),
-        ));
-    }
-    if let Some(trust) = &authority.trust {
-        if let Some(default) = trust.default {
-            ledger.push(external_entry(
-                GateKind::TrustGrant,
-                "security",
-                "package",
-                source,
-                "authority.trust.default",
-                &format!("default: {}", trust_decision_label(default)),
-                provenance("authority.trust.default"),
-            ));
-        }
-        if let Some(ci) = trust.ci_prompt {
-            ledger.push(external_entry(
-                GateKind::TrustGrant,
-                "security",
-                "package",
-                source,
-                "authority.trust.ci",
-                &format!("prompt: {}", trust_decision_label(ci)),
-                provenance("authority.trust.ci"),
-            ));
-        }
-        for (service, decision) in &trust.services {
-            ledger.push(external_entry(
-                GateKind::TrustGrant,
-                "security",
-                "package",
-                source,
-                &format!("authority.trust.services.{service}"),
-                &format!("{}", trust_decision_label(*decision)),
-                provenance("authority.trust.services"),
-            ));
-        }
-        if let Some(require) = trust.require {
-            ledger.push(external_entry(
-                GateKind::TrustGrant,
-                "security",
-                "package",
-                source,
-                "authority.trust.require",
-                &format!("require: {}", require.label()),
-                provenance("authority.trust.require"),
-            ));
-        }
-    }
-    for provider in &authority.providers {
-        let mut detail = format!("registry: {}", provider.registry);
-        if !provider.allow.is_empty() {
-            detail.push_str(&format!(", allow: {}", provider.allow.join(",")));
-        }
-        if !provider.deny.is_empty() {
-            detail.push_str(&format!(", deny: {}", provider.deny.join(",")));
-        }
-        ledger.push(external_entry(
-            GateKind::TrustGrant,
-            "security",
-            "package",
-            source,
-            &format!("authority.providers.{}", provider.provider),
-            &detail,
-            provenance("authority.providers"),
-        ));
-    }
-}
-
-fn trust_decision_label(decision: jet::Package::TrustDecision) -> &'static str {
-    match decision {
-        jet::Package::TrustDecision::Allow => "allow",
-        jet::Package::TrustDecision::Prompt => "prompt",
-        jet::Package::TrustDecision::Deny => "deny",
-    }
-}
 
 pub(crate) fn append_external_writers(
     ledger: &mut GateLedger,
     bundle: &jet::AST::ProgramBundle,
     args: &[String],
 ) {
-    let root = &bundle.project_root;
-    if let Ok(Some(facts)) = jet::Loader::package_facts_for_bundle(bundle) {
-        let source = facts.origin.as_str();
-        append_authority_entries(ledger, &facts.authority, source);
-        for effect in &facts.build_allow {
-            let mut provenance = facts.field_provenance("build_allow").to_vec();
-            if provenance.is_empty() {
-                provenance.push(format!("{source}:build.allow"));
-            }
-            ledger.push(external_entry(
-                GateKind::BuildFlag,
-                "security",
-                "package",
-                source,
-                &format!("build:{effect}"),
-                "package build authority",
-                provenance,
-            ));
-        }
-    }
-
-    if let Some(lock) = jet::Lock::load(root) {
-        if let Some(authority) = &lock.authority {
-            append_authority_entries(ledger, authority, jet::Syntax::UNIFIED_LOCK_FILE);
-        } else {
-            for package in &lock.packages {
-                if !package.effect_grants.is_empty() || !package.granted_effects.is_empty() {
-                    ledger.push(external_entry(
-                        GateKind::DependencyGrant,
-                "security",
-                "package",
-                jet::Syntax::UNIFIED_LOCK_FILE,
-                &package.name,
-                        &format!(
-                            "required effects: {}; granted effects: {}; denied effects: {}; authority: {}",
-                            effect_names(&package.required_effects, &package.effects),
-                            effect_names(&package.granted_effects, &package.effect_grants),
-                            effect_names(&package.denied_effects, &[]),
-                            package
-                                .effect_authority
-                                .as_deref()
-                                .unwrap_or(".jet/lock effect provenance"),
-                        ),
-                        vec![format!(
-                            "{}:dependency.effect-grants",
-                            jet::Syntax::UNIFIED_LOCK_FILE
-                        )],
-                    ));
-                }
-            }
-        }
-        for (subject, effects) in &lock.workspace_overlay_policy.build_grants {
-            ledger.push(external_entry(
-                GateKind::DependencyGrant,
-                "security",
-                "package",
-                jet::Syntax::UNIFIED_LOCK_FILE,
-                &format!("build:{subject}"),
-                &format!(
-                    "required effects: not evaluated; granted effects: {}; denied effects: none; authority: .jet/lock workspace authority",
-                    effects.join(",")
-                ),
-                vec![format!(
-                    "{}:workspace.build-grants",
-                    jet::Syntax::UNIFIED_LOCK_FILE
-                )],
-            ));
-        }
-        for overlay in &lock.workspace_overlay_policy.overlays {
-            for package in &overlay.packages {
-                let forced = package.priority >= 100
-                    || package
-                        .field_priorities
-                        .values()
-                        .any(|priority| *priority >= 100);
-                if !forced {
-                    continue;
-                }
-                let fields = package
-                    .field_priorities
-                    .iter()
-                    .filter(|(_, priority)| **priority >= 100)
-                    .map(|(field, _)| field.as_str())
-                    .collect::<Vec<_>>();
-                let detail = if fields.is_empty() {
-                    "workspace override".to_string()
-                } else {
-                    format!("workspace override fields: {}", fields.join(","))
-                };
-                ledger.push(external_entry(
-                    GateKind::ForcePin,
-                    "security",
-                    "package",
-                    jet::Syntax::UNIFIED_LOCK_FILE,
-                    &package.package,
-                    &detail,
-                    vec![format!(
-                        "{}:overlay {} priority=Force",
-                        jet::Syntax::UNIFIED_LOCK_FILE,
-                        overlay.name
-                    )],
-                ));
-            }
-        }
-    }
+    jet::GateWriters::append_package_writers(ledger, bundle);
 
     let trust_path = jetpack::Trust::store_path();
     for record in jetpack::Trust::list_records(&trust_path) {
@@ -408,113 +177,6 @@ pub(crate) fn append_external_writers(
     append_invocation_flags(ledger, args);
 }
 
-fn effect_names(primary: &[String], fallback: &[String]) -> String {
-    let effects = if primary.is_empty() {
-        fallback
-    } else {
-        primary
-    };
-    if effects.is_empty() {
-        "none".to_string()
-    } else {
-        effects.join(",")
-    }
-}
-
-fn append_invocation_flags(ledger: &mut GateLedger, args: &[String]) {
-    let mut index = 0;
-    while index < args.len() {
-        let argument = &args[index];
-        if let Some(spec) = argument.strip_prefix("--gate=") {
-            ledger.push(external_entry(
-                GateKind::BuildFlag,
-                "security",
-                "build",
-                "command line",
-                &format!("--gate {spec}"),
-                "audited invocation allowance",
-                vec!["command line".to_string()],
-            ));
-        } else if argument == "--gate" {
-            if let Some(spec) = args.get(index + 1) {
-                ledger.push(external_entry(
-                    GateKind::BuildFlag,
-                    "security",
-                    "build",
-                    "command line",
-                    &format!("--gate {spec}"),
-                    "audited invocation allowance",
-                    vec!["command line".to_string()],
-                ));
-                index += 1;
-            }
-        } else if argument.starts_with("--allow-") {
-            ledger.push(external_entry(
-                GateKind::BuildFlag,
-                "security",
-                "build",
-                "command line",
-                argument,
-                "build authority allowance",
-                vec!["command line".to_string()],
-            ));
-        } else if argument.starts_with("--deny-")
-            || matches!(
-                argument.as_str(),
-                "--trust" | "--online" | "--try-anyway" | "--interpret" | "--offline" | "--locked"
-            )
-        {
-            ledger.push(external_entry(
-                GateKind::SessionFlag,
-                "security",
-                "session",
-                "command line",
-                argument,
-                "session bypass or trust choice",
-                vec!["command line".to_string()],
-            ));
-        } else if argument == "--force"
-            || argument == "--release"
-            || argument.starts_with("--target=")
-            || argument.starts_with("--profile=")
-        {
-            ledger.push(external_entry(
-                GateKind::BuildFlag,
-                "security",
-                "build",
-                "command line",
-                argument,
-                "build policy choice",
-                vec!["command line".to_string()],
-            ));
-        }
-        index += 1;
-    }
-}
-
-fn external_entry(
-    kind: GateKind,
-    domain: &str,
-    scope: &str,
-    source: &str,
-    subject: &str,
-    detail: &str,
-    provenance: Vec<String>,
-) -> GateEntry {
-    GateEntry {
-        kind,
-        domain: domain.to_string(),
-        scope: scope.to_string(),
-        source: source.to_string(),
-        span: None,
-        subject: subject.to_string(),
-        reason: None,
-        status: Some("recorded".to_string()),
-        detail: detail.to_string(),
-        provenance,
-        operations: Vec::new(),
-    }
-}
 
 fn render_diagnostics(
     ledger: &GateLedger,
@@ -559,12 +221,8 @@ fn render_diagnostics(
     exit(jet::ExitCodes::USER_ERROR);
 }
 
-fn render_human(entries: &[&GateEntry], bundle: &jet::AST::ProgramBundle, authority_only: bool) {
-    println!(
-        "{} gates: {}",
-        if authority_only { "authority" } else { "gates" },
-        entries.len()
-    );
+fn render_human(entries: &[&GateEntry], bundle: &jet::AST::ProgramBundle) {
+    println!("gates: {}", entries.len());
     let mut index = 0;
     while index < entries.len() {
         let kind = entries[index].kind;

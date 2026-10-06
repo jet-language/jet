@@ -141,6 +141,106 @@ fn is_view_type(ty: &MirType) -> bool {
     }
 }
 
+/// True when `ty` carries a `View`/`ViewMut` whose Rust spelling borrows,
+/// directly or through a nominal type `carrier` reports as holding one.
+fn type_contains_view(ty: &MirType, carrier: &dyn Fn(&str) -> bool) -> bool {
+    let nested = |inner: &MirType| type_contains_view(inner, carrier);
+    match ty.kind() {
+        MirTypeKind::Apply { name, args } => {
+            // D-PIN1=A: `Pin<T>` joins the borrowed-window family (`&mut T`).
+            (matches!(name.name.as_str(), "View" | "ViewMut" | "Pin") && args.len() == 1)
+                || carrier(&name.name)
+                || args.iter().any(nested)
+        }
+        MirTypeKind::List(inner) | MirTypeKind::Shared(inner) | MirTypeKind::Option(inner) => {
+            nested(inner)
+        }
+        MirTypeKind::Map { key, value } => nested(key) || nested(value),
+        MirTypeKind::Result { ok, err } => nested(ok) || nested(err),
+        MirTypeKind::Tuple(fields) => fields.iter().any(|(_, field)| nested(field)),
+        MirTypeKind::FixedList { elem, .. } => nested(elem),
+        MirTypeKind::Tagged { inner, .. }
+        | MirTypeKind::InlineRange { base: inner, .. }
+        | MirTypeKind::Quantity { base: inner, .. } => nested(inner),
+        MirTypeKind::Union(members) => members.iter().any(nested),
+        _ => false,
+    }
+}
+
+/// D-MEM-VIEWRET1 (#4392): the names and keys of every Jet-declared type
+/// whose stored data holds a view, so its Rust declaration takes the
+/// `'__jet_view` lifetime parameter and every use names one. A type holding
+/// such a type holds one too; the set grows to its fixed point. Rows the
+/// runtime or Prelude spell (`declared` false) keep their own Rust type.
+fn collect_view_carriers(
+    program: &MirProgram,
+    declared: &dyn Fn(&MirTypeDef) -> bool,
+) -> BTreeSet<String> {
+    let mut carriers = BTreeSet::new();
+    loop {
+        let mut grew = false;
+        for def in &program.types {
+            if carriers.contains(&def.key) || !declared(def) {
+                continue;
+            }
+            let carrier = |name: &str| carriers.contains(name);
+            let holds = |ty: &MirType| type_contains_view(ty, &carrier);
+            let carries = match &def.kind {
+                MirTypeDefKind::Struct { fields, .. } => fields
+                    .iter()
+                    .filter(|field| !field.computed)
+                    .any(|field| holds(&field.ty)),
+                MirTypeDefKind::Enum { variants, .. } => {
+                    variants.iter().any(|variant| match &variant.payload {
+                        MirVariantPayload::Unit => false,
+                        MirVariantPayload::Single(ty) => holds(ty),
+                        MirVariantPayload::Named(fields) => {
+                            fields.iter().any(|field| holds(&field.ty))
+                        }
+                    })
+                }
+                MirTypeDefKind::Distinct { base, .. } => holds(base),
+                MirTypeDefKind::Alias { target } => holds(target),
+                MirTypeDefKind::UnitFamily { .. } => false,
+            };
+            if carries {
+                carriers.insert(def.key.clone());
+                carriers.insert(def.name.clone());
+                grew = true;
+            }
+        }
+        if !grew {
+            return carriers;
+        }
+    }
+}
+
+/// D-MEM-VIEWRET1 (#4392): the lifetime a callable signature names for the
+/// views it returns.
+enum ViewReturnLifetime {
+    /// No returned view, or Rust elision already ties it to its one owner.
+    Elided,
+    /// Every owner is a static.
+    Static,
+    /// `'__jet_view`, carried by the receiver and/or these declared parameters.
+    Named { receiver: bool, params: BTreeSet<usize> },
+}
+
+const VIEW_RETURN_LIFETIME: &str = "'__jet_view";
+
+/// `<lifetimes…, generics…>` for a signature whose type generics render as
+/// `generics` (`""` or `<…>`).
+fn signature_generics(lifetimes: &[&str], generics: &str) -> String {
+    if lifetimes.is_empty() {
+        return generics.to_string();
+    }
+    let lifetimes = lifetimes.join(", ");
+    match generics.strip_prefix('<') {
+        Some(rest) => format!("<{lifetimes}, {rest}"),
+        None => format!("<{lifetimes}>"),
+    }
+}
+
 /// Formatting-only policy for the MIR Rust adapter.
 ///
 /// All semantic choices are MIR facts.  The adapter may choose the generated
@@ -3396,7 +3496,18 @@ struct RustEmitter<'a> {
     /// Lowest `visiting` index a cycle assumption reached in the current
     /// `type_derive_capability` frame (`usize::MAX` when none).
     derive_capability_cycle_floor: std::cell::Cell<usize>,
+    /// Closed rows found capable only under a cycle assumption on a frame
+    /// still open; each is cached once that frame settles capable, and
+    /// dropped when it settles incapable. Every entry belongs to the current
+    /// top-level query's trait (a depth-0 frame always settles them).
+    derive_capability_pending: std::cell::RefCell<Vec<MirTypeId>>,
     history_callback_lifetime: std::cell::Cell<&'static str>,
+    /// D-MEM-VIEWRET1 (#4392): the lifetime a `View`/`ViewMut` carrier names
+    /// while a callable signature renders its returned views and their
+    /// sources. `None` renders the elided `&[T]` used everywhere else.
+    view_lifetime: std::cell::Cell<Option<&'static str>>,
+    /// D-MEM-VIEWRET1 (#4392): `collect_view_carriers` for this program.
+    view_carriers: BTreeSet<String>,
     partial_moves: BTreeMap<MirFunctionId, Vec<PartialMoveRoot>>,
     shared_capture_locals: BTreeMap<MirFunctionId, BTreeSet<MirLocalId>>,
     move_facts: BTreeMap<MirFunctionId, MoveFacts>,
@@ -3587,7 +3698,10 @@ impl<'a> RustEmitter<'a> {
             history_runtime_metadata: std::cell::OnceCell::new(),
             derive_capability_cache: std::cell::RefCell::new(BTreeMap::new()),
             derive_capability_cycle_floor: std::cell::Cell::new(usize::MAX),
+            derive_capability_pending: std::cell::RefCell::new(Vec::new()),
             history_callback_lifetime: std::cell::Cell::new("'static"),
+            view_lifetime: std::cell::Cell::new(None),
+            view_carriers: BTreeSet::new(),
             partial_moves: BTreeMap::new(),
             shared_capture_locals: BTreeMap::new(),
             move_facts: BTreeMap::new(),
@@ -3618,6 +3732,9 @@ impl<'a> RustEmitter<'a> {
             function_indexes: std::cell::RefCell::new(HashMap::new()),
             closure_parents: std::cell::OnceCell::new(),
         };
+        let view_carriers =
+            collect_view_carriers(program, &|def: &MirTypeDef| emitter.jet_declares_type(def));
+        emitter.view_carriers = view_carriers;
         for function in &program.functions {
             let roots = emitter.plan_partial_moves(function);
             if !roots.is_empty() {
@@ -4073,13 +4190,16 @@ impl<'a> RustEmitter<'a> {
         let member = self.test_scope_member(function, scope_id);
         if enter {
             return match member {
-                Some(MirTestScopeMember::ExpectFail { expected_code }) => {
+                Some(MirTestScopeMember::ExpectFail { expected_code, expected_message }) => {
                     let expected = expected_code
                         .as_deref()
                         .map(|code| format!("Some({code:?})"))
                         .unwrap_or_else(|| "None".to_string());
+                    let message = expected_message.as_deref()
+                        .map(|message| format!("Some({message:?})"))
+                        .unwrap_or_else(|| "None".to_string());
                     format!(
-                        "{root}jet_test_expect_fail_enter_scope({}, {expected})",
+                        "{root}jet_test_expect_fail_enter_scope({}, {expected}, {message})",
                         scope_id.0
                     )
                 }
@@ -4094,13 +4214,16 @@ impl<'a> RustEmitter<'a> {
             };
         }
         match member {
-            Some(MirTestScopeMember::ExpectFail { expected_code }) => {
+            Some(MirTestScopeMember::ExpectFail { expected_code, expected_message }) => {
                 let expected = expected_code
                     .as_deref()
                     .map(|code| format!("Some({code:?})"))
                     .unwrap_or_else(|| "None".to_string());
+                let message = expected_message.as_deref()
+                    .map(|message| format!("Some({message:?})"))
+                    .unwrap_or_else(|| "None".to_string());
                 format!(
-                    "if {root}jet_test_expect_fail_leave_scope({}).is_none() {{ {root}jet_test_expect_fail_unmet({expected}); }}",
+                    "if {root}jet_test_expect_fail_leave_scope({}).is_none() {{ {root}jet_test_expect_fail_unmet({expected}, {message}); }}",
                     scope_id.0
                 )
             }
@@ -4963,6 +5086,16 @@ impl<'a> RustEmitter<'a> {
         self.type_def(id).key == jet_foundation::Syntax::TYPE_ERR
     }
 
+    /// `Err.cause`: a field named `cause` on the default `Err` row. A field of
+    /// a structural tuple (or any owner with no definition row) is never it.
+    fn is_default_err_cause_field(&self, id: MirFieldId) -> bool {
+        let row = &self.program.fields[self.field_positions[&id]];
+        row.field.name == "cause"
+            && self
+                .try_type_def(row.owner)
+                .is_some_and(|definition| definition.key == jet_foundation::Syntax::TYPE_ERR)
+    }
+
     fn named_struct_field_value(
         &self,
         type_id: MirTypeId,
@@ -5635,17 +5768,22 @@ impl<'a> RustEmitter<'a> {
         // canonical Rust slice spelling before falling through to nominal
         // declaration lookup.
         if name.name == "View" && args.len() == 1 {
+            let lifetime = self.view_lifetime_prefix();
             if matches!(
                 args[0].kind(),
                 MirTypeKind::Apply { name, args }
                     if args.is_empty() && name.name == "str"
             ) {
-                return "&str".to_string();
+                return format!("&{lifetime}str");
             }
-            return format!("&[{}]", self.rust_type(&args[0]));
+            return format!("&{lifetime}[{}]", self.rust_type(&args[0]));
         }
         if name.name == "ViewMut" && args.len() == 1 {
-            return format!("&mut [{}]", self.rust_type(&args[0]));
+            return format!(
+                "&{}mut [{}]",
+                self.view_lifetime_prefix(),
+                self.rust_type(&args[0])
+            );
         }
         if name.name == "Instant" {
             return self.rust_root_prelude_type("JetInstant", args);
@@ -5918,15 +6056,20 @@ impl<'a> RustEmitter<'a> {
             return format!("{}{}", self.config.root_prefix, allocator);
         }
         let head = self.nominal_name(&name.name);
+        // D-MEM-VIEWRET1 (#4392): a declared type holding a view takes its
+        // lifetime first.
+        let lifetime = self
+            .view_carriers
+            .contains(&name.name)
+            .then(|| self.view_carrier_lifetime().to_string());
+        let args = lifetime
+            .into_iter()
+            .chain(args.iter().map(|arg| self.rust_type(arg)))
+            .collect::<Vec<_>>();
         if args.is_empty() {
             head
         } else {
-            let args = args
-                .iter()
-                .map(|arg| self.rust_type(arg))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("{head}<{args}>")
+            format!("{head}<{}>", args.join(", "))
         }
     }
 
@@ -6382,6 +6525,170 @@ impl<'a> RustEmitter<'a> {
             MirAccess::Read | MirAccess::Move => ty,
         }
     }
+
+    /// `'lifetime ` while a signature names its view lifetime, else nothing.
+    fn view_lifetime_prefix(&self) -> String {
+        self.view_lifetime
+            .get()
+            .map(|lifetime| format!("{lifetime} "))
+            .unwrap_or_default()
+    }
+
+    /// `render` with every `View`/`ViewMut` it spells naming `lifetime`.
+    fn with_view_lifetime(&self, lifetime: &'static str, render: impl FnOnce() -> String) -> String {
+        let previous = self.view_lifetime.replace(Some(lifetime));
+        let rendered = render();
+        self.view_lifetime.set(previous);
+        rendered
+    }
+
+    /// True when `ty` holds a view, directly or through a declared type
+    /// whose Rust declaration takes the `'__jet_view` lifetime parameter.
+    fn type_carries_view(&self, ty: &MirType) -> bool {
+        type_contains_view(ty, &|name: &str| self.view_carriers.contains(name))
+    }
+
+    /// The lifetime argument a use of a view-carrying declared type names:
+    /// the signature's view lifetime, else the inferred `'_`.
+    fn view_carrier_lifetime(&self) -> &'static str {
+        self.view_lifetime.get().unwrap_or("'_")
+    }
+
+    /// `<'__jet_view, …>` for a declaration whose type generics render as
+    /// `generics`, when the declared row holds a view.
+    fn type_def_generics(&self, def: &MirTypeDef, generics: &str) -> String {
+        if self.view_carriers.contains(&def.key) {
+            signature_generics(&[VIEW_RETURN_LIFETIME], generics)
+        } else {
+            generics.to_string()
+        }
+    }
+
+    /// The `<'_, …>` arguments an impl header names for a declared row whose
+    /// type arguments render as `args` (`""` or `<…>`).
+    fn type_def_impl_args(&self, def: &MirTypeDef, args: &str) -> String {
+        if self.view_carriers.contains(&def.key) {
+            signature_generics(&["'_"], args)
+        } else {
+            args.to_string()
+        }
+    }
+
+    /// D-MEM-VIEWRET1 (#4392): how a signature names the lifetime of the views
+    /// it returns. Sema proved every returned view's owners (receiver,
+    /// parameter positions, statics); the Rust signature states the same
+    /// relation, so rustc never has to guess it (I2/I3).
+    ///
+    /// `inputs` are the rendered non-receiver parameters (captures first) and
+    /// `declared` the rendered types of the declared parameters by position.
+    fn view_return_lifetime(
+        &self,
+        return_type: &MirType,
+        provenance: Option<&BTreeMap<Vec<String>, MirViewProvenance>>,
+        receiver: Option<MirAccess>,
+        inputs: &[String],
+        declared: &[String],
+    ) -> ViewReturnLifetime {
+        if !self.type_carries_view(return_type) {
+            return ViewReturnLifetime::Elided;
+        }
+        let mut receiver_source = false;
+        let mut statics = false;
+        let mut params = BTreeSet::new();
+        for path in provenance
+            .into_iter()
+            .flat_map(BTreeMap::values)
+            .flat_map(|view| view.sources.iter())
+        {
+            match path.source {
+                MirViewSource::Receiver => receiver_source = true,
+                MirViewSource::Parameter(index) => {
+                    params.insert(index);
+                }
+                MirViewSource::Static { .. } => statics = true,
+            }
+        }
+        if !receiver_source && params.is_empty() {
+            return if statics {
+                ViewReturnLifetime::Static
+            } else {
+                ViewReturnLifetime::Elided
+            };
+        }
+        // Rust elision names a borrowed receiver for every elided output
+        // lifetime; without one, exactly one input lifetime must exist and
+        // belong to the owner. Anything else is spelled out.
+        let borrowed_receiver = matches!(receiver, Some(MirAccess::Read | MirAccess::Write));
+        if borrowed_receiver {
+            if params.is_empty() && !statics {
+                return ViewReturnLifetime::Elided;
+            }
+        } else if !receiver_source && !statics && params.len() == 1 {
+            let positions: usize = inputs
+                .iter()
+                .map(|input| input.matches(['&', '\'']).count())
+                .sum();
+            let owner = params.first().copied().unwrap_or_default();
+            if positions == 1 && declared.get(owner).is_some_and(|ty| ty.starts_with('&')) {
+                return ViewReturnLifetime::Elided;
+            }
+        }
+        ViewReturnLifetime::Named {
+            receiver: receiver_source && borrowed_receiver,
+            params,
+        }
+    }
+
+    /// A view owner's parameter type under `'__jet_view`: its own shared or
+    /// exclusive borrow names the lifetime, and so does every view it carries
+    /// (an exclusive borrow of a view carrier keeps its outer lifetime free,
+    /// since `&mut` is invariant).
+    fn view_owner_parameter_type(&self, ty: &MirType, render: impl FnOnce() -> String) -> String {
+        let carries_view = self.type_carries_view(ty);
+        let rendered = if carries_view {
+            self.with_view_lifetime(VIEW_RETURN_LIFETIME, render)
+        } else {
+            render()
+        };
+        if let Some(rest) = rendered.strip_prefix("&mut ") {
+            if carries_view {
+                rendered
+            } else {
+                format!("&{VIEW_RETURN_LIFETIME} mut {rest}")
+            }
+        } else if rendered.starts_with("&'") {
+            rendered
+        } else if let Some(rest) = rendered.strip_prefix('&') {
+            format!("&{VIEW_RETURN_LIFETIME} {rest}")
+        } else {
+            rendered
+        }
+    }
+
+    /// The returned-view provenance a callable's signature states: a trait
+    /// method implementation states its trait's contract, which every
+    /// implementation and dynamic dispatch share.
+    fn signature_view_provenance<'f>(
+        &'f self,
+        function: &'f MirFunction,
+    ) -> Option<&'f BTreeMap<Vec<String>, MirViewProvenance>> {
+        if let MirFunctionForm::TraitMethod { trait_ref, .. } = &function.form {
+            let name = self.function_leaf_name(function);
+            let declared = self
+                .program
+                .traits
+                .iter()
+                .filter(|definition| definition.id == trait_ref.id)
+                .flat_map(|definition| definition.methods.iter())
+                .find(|method| method.name == name)
+                .and_then(|method| method.return_view_provenance.as_ref())
+                .filter(|provenance| !provenance.is_empty());
+            if declared.is_some() {
+                return declared;
+            }
+        }
+        function.return_view_provenance.as_ref()
+    }
     fn capture_param_name(&self, slot: usize) -> String {
         format!("__jet_capture_{slot}")
     }
@@ -6811,21 +7118,69 @@ impl<'a> RustEmitter<'a> {
                 MirAccess::Move => "self".to_string(),
             });
         }
-        params.extend(method.params.iter().map(|param| {
-            format!(
-                "{}: {}",
-                mangle(&param.name),
-                self.synthetic_rollback_parameter_type(definition, param)
-            )
-        }));
-        let params = params.join(", ");
-        let ret = self.synthetic_rollback_type(definition, &method.return_type);
-        self.history_callback_lifetime.set(previous_lifetime);
-        let generics = if params.contains("'__jet_callback") || ret.contains("'__jet_callback") {
-            "<'__jet_callback>"
-        } else {
-            ""
+        let receiver_slots = params.len();
+        let declared_types = method
+            .params
+            .iter()
+            .map(|param| self.synthetic_rollback_parameter_type(definition, param))
+            .collect::<Vec<_>>();
+        params.extend(
+            method
+                .params
+                .iter()
+                .zip(&declared_types)
+                .map(|(param, ty)| format!("{}: {ty}", mangle(&param.name))),
+        );
+        // D-MEM-VIEWRET1 (#4392): the declaration states the same view
+        // lifetime contract as every implementation (`emit_callable_named`).
+        let view_lifetime = self.view_return_lifetime(
+            &method.return_type,
+            method
+                .return_view_provenance
+                .as_ref()
+                .filter(|provenance| !provenance.is_empty()),
+            method.self_access,
+            &params[receiver_slots..],
+            &declared_types,
+        );
+        let render_ret = || self.synthetic_rollback_type(definition, &method.return_type);
+        let ret = match &view_lifetime {
+            ViewReturnLifetime::Elided => render_ret(),
+            ViewReturnLifetime::Static => self.with_view_lifetime("'static", render_ret),
+            ViewReturnLifetime::Named {
+                receiver,
+                params: owners,
+            } => {
+                if *receiver {
+                    if let Some(slot) = params.first_mut() {
+                        *slot = slot.replacen('&', &format!("&{VIEW_RETURN_LIFETIME} "), 1);
+                    }
+                }
+                for &owner in owners {
+                    let Some(param) = method.params.get(owner) else {
+                        panic!(
+                            "MIR trait method {} returns a view of parameter {owner}, which it does not declare",
+                            method.name
+                        );
+                    };
+                    let ty = self.view_owner_parameter_type(&param.ty, || {
+                        self.synthetic_rollback_parameter_type(definition, param)
+                    });
+                    params[receiver_slots + owner] = format!("{}: {ty}", mangle(&param.name));
+                }
+                self.with_view_lifetime(VIEW_RETURN_LIFETIME, render_ret)
+            }
         };
+        let params = params.join(", ");
+        self.history_callback_lifetime.set(previous_lifetime);
+        let mut lifetimes = Vec::new();
+        if matches!(view_lifetime, ViewReturnLifetime::Named { .. }) {
+            lifetimes.push(VIEW_RETURN_LIFETIME);
+        }
+        if params.contains("'__jet_callback") || ret.contains("'__jet_callback") {
+            lifetimes.push("'__jet_callback");
+        }
+        let generics = signature_generics(&lifetimes, "");
         let method_name = self.trait_method_symbol(definition, method);
         let Some(default_id) = method.default else {
             let _ = writeln!(out, "    fn {method_name}{generics}({params}) -> {ret};",);
@@ -6905,7 +7260,8 @@ impl<'a> RustEmitter<'a> {
     fn emit_constant_def(&self, constant: &MirConstantDef, out: &mut String) {
         let name = mangle_path(&constant.key);
         let visibility = self.visibility(constant.visibility);
-        let ty = self.rust_type(&constant.ty);
+        // A constant's views can only borrow static data (D-MEM-VIEWRET1).
+        let ty = self.with_view_lifetime("'static", || self.rust_type(&constant.ty));
         // D-MEM-COPYSEM1: a folded aggregate is one per-thread value built
         // once; reads borrow it (`NAME_shared`). A large list is filled by
         // row chunks, a smaller one by the inline `vec![..]` of the same rows.
@@ -7073,17 +7429,24 @@ impl<'a> RustEmitter<'a> {
         self.push_generic_scope(impl_generic_params);
         let generics = self.generic_params_from(impl_generic_params);
         let owner = self.rust_type(&implementation.self_type);
-        let owner = if !impl_generic_params.is_empty()
-            && matches!(implementation.self_type.kind(), MirTypeKind::Apply { args, .. } if args.is_empty())
-        {
-            let arguments = impl_generic_params
-                .iter()
-                .map(|param| mangle(&param.name))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("{owner}<{arguments}>")
-        } else {
-            owner
+        let owner = match implementation.self_type.kind() {
+            MirTypeKind::Apply { name, args }
+                if !impl_generic_params.is_empty() && args.is_empty() =>
+            {
+                let arguments = impl_generic_params
+                    .iter()
+                    .map(|param| mangle(&param.name))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                // A view-carrying row already spelled its `<'_>` lifetime.
+                match owner.strip_suffix('>') {
+                    Some(head) if self.view_carriers.contains(&name.name) => {
+                        format!("{head}, {arguments}>")
+                    }
+                    _ => format!("{owner}<{arguments}>"),
+                }
+            }
+            _ => owner,
         };
         // An inherent impl on a carrier the runtime declares (Core `URL` and
         // `MIME` are the Prelude's `JetURL`/`JetMIME`) is rejected once the
@@ -7995,7 +8358,13 @@ impl<'a> RustEmitter<'a> {
                 }
                 // A closed row's answer depends on the row alone: `false` means
                 // an incapable leaf is reachable, and `true` is final once no
-                // cycle assumption above this frame was used.
+                // cycle assumption above this frame was used. A `true` that
+                // used such an assumption waits in `derive_capability_pending`
+                // until the frame it assumed settles: every frame between
+                // returned `true`, so a capable settled frame proves them all
+                // (a greatest fixed point); an incapable one drops them.
+                // Without this, every row of a recursive type family
+                // re-expanded the whole family per query.
                 let cacheable = args.is_empty()
                     && def.generic_params.is_empty()
                     && bindings.is_empty()
@@ -8011,6 +8380,7 @@ impl<'a> RustEmitter<'a> {
                     }
                 }
                 let depth = visiting.len();
+                let pending_start = self.derive_capability_pending.borrow().len();
                 let outer_floor = self.derive_capability_cycle_floor.replace(usize::MAX);
                 let mut next_bindings = bindings.clone();
                 let mut next_generic_params = generic_params.clone();
@@ -8090,6 +8460,20 @@ impl<'a> RustEmitter<'a> {
                         .or_default()
                         .insert(def.id, result);
                 }
+                let mut pending = self.derive_capability_pending.borrow_mut();
+                if !result {
+                    pending.truncate(pending_start);
+                } else if floor >= depth {
+                    if pending.len() > pending_start {
+                        let mut cache = self.derive_capability_cache.borrow_mut();
+                        let rows = cache.entry(trait_name.to_string()).or_default();
+                        for settled in pending.drain(pending_start..) {
+                            rows.insert(settled, true);
+                        }
+                    }
+                } else if cacheable {
+                    pending.push(def.id);
+                }
                 result
             }
         }
@@ -8164,7 +8548,7 @@ impl<'a> RustEmitter<'a> {
         {
             return;
         }
-        let name = self.type_name(def.id);
+        let name = format!("{}{}", self.type_name(def.id), self.type_def_impl_args(def, ""));
         let _ = writeln!(
             out,
             "impl JetDisplay for {name} {{\n    fn jet_display(&self) -> String {{\n        self.0.jet_display()\n    }}\n}}\n"
@@ -8275,6 +8659,7 @@ impl<'a> RustEmitter<'a> {
                     .join(", ")
             )
         };
+        let type_args = self.type_def_impl_args(def, &type_args);
         let impl_generics = self.structural_generics(def, trait_name);
         let source_name = quote_rust_string(
             def.name
@@ -8474,8 +8859,13 @@ impl<'a> RustEmitter<'a> {
     /// rows, canonical Core native carriers and native history types already
     /// have their Rust spelling in the runtime or Prelude.
     fn declares_type_def(&self, def: &MirTypeDef) -> bool {
-        self.module_selected(def.module)
-            && !self.runtime_declares_type(def)
+        self.module_selected(def.module) && self.jet_declares_type(def)
+    }
+
+    /// Type rows some Jet artifact declares (this one when its module is
+    /// selected), rather than the runtime or Prelude.
+    fn jet_declares_type(&self, def: &MirTypeDef) -> bool {
+        !self.runtime_declares_type(def)
             && !is_canonical_core_native_type(&def.key)
             && self.history_native_type_name(&def.key).is_none()
     }
@@ -8483,7 +8873,9 @@ impl<'a> RustEmitter<'a> {
     fn emit_type_def(&self, def: &'a MirTypeDef, out: &mut String) {
         self.push_generic_scope(&def.generic_params);
         let name = self.type_name(def.id);
-        let generics = self.generic_params_from(&def.generic_params);
+        // D-MEM-VIEWRET1 (#4392): a row holding a view declares the lifetime
+        // its stored views (and nested view-carrying rows) name.
+        let generics = self.type_def_generics(def, &self.generic_params_from(&def.generic_params));
         let visibility = self.visibility(if def.public {
             MirVisibility::Public
         } else if def.package_public {
@@ -8636,6 +9028,11 @@ impl<'a> RustEmitter<'a> {
                 }
             }
         }
+        let outer_view_lifetime = self.view_lifetime.replace(
+            self.view_carriers
+                .contains(&def.key)
+                .then_some(VIEW_RETURN_LIFETIME),
+        );
         match &def.kind {
             MirTypeDefKind::Struct { fields, .. } => {
                 let _ = writeln!(out, "{visibility}struct {name}{generics} {{");
@@ -8704,6 +9101,7 @@ impl<'a> RustEmitter<'a> {
                 let _ = writeln!(out, "}}\n");
             }
         }
+        self.view_lifetime.set(outer_view_lifetime);
         self.emit_structural_show_impl(def, out);
         if matches!(def.layout, Some(MirStructLayout::Columnar)) {
             match &def.kind {
@@ -11135,6 +11533,16 @@ impl<'a> RustEmitter<'a> {
                             input.name
                         ),
                         Some(MirCliDefault::TypeDefault) => "Default::default()".to_string(),
+                        // A job or recorded default is rendered text; a
+                        // non-text input decodes it as the same argv word.
+                        Some(MirCliDefault::Value(MirConstant::String(text)))
+                            if !matches!(input.ty.kind(), MirTypeKind::String) =>
+                        {
+                            format!(
+                                "{{ let __d = {text:?}.to_string(); {} }}",
+                                self.cli_scalar_expr(input, "__d")
+                            )
+                        }
                         Some(MirCliDefault::Value(value)) => self.constant_for_type(value, &input.ty),
                     };
                     let ty = self.rust_type(&input.ty);
@@ -12459,21 +12867,33 @@ impl<'a> RustEmitter<'a> {
                     )
                 } else {
                     match function.return_type.kind() {
+                        // A fallible job settles its failure as a job error
+                        // instead of encoding it; a Unit success carries no
+                        // bytes, exactly as an infallible Unit job does.
                         MirTypeKind::Result { ok, .. } => {
-                            let ok_type = ok.display_name();
-                            format!(
-                                "    let __job_result = {}({argument});\n\
-                                 match __job_result {{\n\
-                                     Ok(__ok) => {{\n\
+                            let ok_arm = if ok.is_unit() {
+                                format!(
+                                    "Ok(()) => Ok({root}JetJobResult {{ type_id: \"Unit\".to_string(), bytes: Vec::new(), publish: false }}),\n"
+                                )
+                            } else {
+                                format!(
+                                    "Ok(__ok) => {{\n\
                                          let __bytes = match {root}jet_enc_cbor_to_bytes_canonical(&__ok) {{\n\
                                              Ok(__bytes) => __bytes,\n\
                                              Err(__error) => return Err({root}JetJobError {{ type_id: __payload.type_id.clone(), reason: \"encode\".to_string(), detail: Some(format!(\"{{:?}}\", __error)) }}),\n\
                                          }};\n\
                                          Ok({root}JetJobResult {{ type_id: {:?}.to_string(), bytes: __bytes, publish: false }})\n\
-                                     }}\n\
+                                     }}\n",
+                                    ok.display_name()
+                                )
+                            };
+                            format!(
+                                "    let __job_result = {}({argument});\n\
+                                 match __job_result {{\n\
+                                     {ok_arm}\
+                                     Err(__error) => Err({root}JetJobError {{ type_id: __payload.type_id.clone(), reason: \"failed\".to_string(), detail: Some(format!(\"{{:?}}\", __error)) }}),\n\
                                  }}\n",
                                 self.function_name(function.id),
-                                ok_type
                             )
                         }
                         _ => {
@@ -13598,38 +14018,95 @@ impl<'a> RustEmitter<'a> {
                 declared.len()
             );
         }
-        params.extend(declared.iter().map(|param| {
-            let name = mangle(&param.name);
-            if serde_codec == Some(MirSerdeCodec::Decode) {
-                format!("{name}: &{}jet_std::DataTree", self.config.root_prefix)
-            } else if self.arithmetic_trait_method(function) && self.is_scalar(&param.ty) {
-                format!("{name}: &{}", self.rust_parameter_type(&param.ty))
-            } else {
-                format!(
-                    "{}{name}: {}",
-                    if param.access == MirAccess::Move {
-                        "mut "
-                    } else {
-                        ""
-                    },
+        let arithmetic = self.arithmetic_trait_method(function);
+        let declared_types = declared
+            .iter()
+            .map(|param| {
+                if serde_codec == Some(MirSerdeCodec::Decode) {
+                    format!("&{}jet_std::DataTree", self.config.root_prefix)
+                } else if arithmetic && self.is_scalar(&param.ty) {
+                    format!("&{}", self.rust_parameter_type(&param.ty))
+                } else {
                     self.function_parameter_type(function, param)
-                )
+                }
+            })
+            .collect::<Vec<_>>();
+        let binding = |param: &MirParam| {
+            let plain = serde_codec == Some(MirSerdeCodec::Decode)
+                || arithmetic && self.is_scalar(&param.ty)
+                || param.access != MirAccess::Move;
+            if plain { "" } else { "mut " }
+        };
+        let receiver_slots = params.len() - function.capture_params.len();
+        params.extend(
+            declared
+                .iter()
+                .zip(&declared_types)
+                .map(|(param, ty)| format!("{}{}: {ty}", binding(param), mangle(&param.name))),
+        );
+        let view_lifetime = if return_override.is_some() || serde_codec.is_some() {
+            ViewReturnLifetime::Elided
+        } else {
+            let receiver = match method_form {
+                Some(MirFunctionForm::Method { self_access, .. })
+                | Some(MirFunctionForm::TraitMethod { self_access, .. }) => *self_access,
+                _ => None,
+            };
+            self.view_return_lifetime(
+                &function.return_type,
+                self.signature_view_provenance(function),
+                receiver,
+                &params[receiver_slots..],
+                &declared_types,
+            )
+        };
+        let ret = match &view_lifetime {
+            ViewReturnLifetime::Elided => {
+                return_override.unwrap_or_else(|| self.rust_type(&function.return_type))
             }
-        }));
+            ViewReturnLifetime::Static => {
+                self.with_view_lifetime("'static", || self.rust_type(&function.return_type))
+            }
+            ViewReturnLifetime::Named {
+                receiver,
+                params: owners,
+            } => {
+                if *receiver {
+                    if let Some(slot) = params.first_mut() {
+                        *slot = slot.replacen('&', &format!("&{VIEW_RETURN_LIFETIME} "), 1);
+                    }
+                }
+                for &owner in owners {
+                    let Some(param) = declared.get(owner) else {
+                        panic!(
+                            "MIR function {:?} returns a view of parameter {owner}, which it does not declare",
+                            function.id
+                        );
+                    };
+                    let ty = self.view_owner_parameter_type(&param.ty, || {
+                        self.function_parameter_type(function, param)
+                    });
+                    params[receiver_slots + function.capture_params.len() + owner] =
+                        format!("{}{}: {ty}", binding(param), mangle(&param.name));
+                }
+                self.with_view_lifetime(VIEW_RETURN_LIFETIME, || {
+                    self.rust_type(&function.return_type)
+                })
+            }
+        };
         let params = params.join(", ");
-        let ret = return_override.unwrap_or_else(|| self.rust_type(&function.return_type));
+
         self.history_callback_lifetime.set(previous_lifetime);
         // Forwarding or returning a callable preserves its capture lifetime.
         // Owned factories can instantiate this lifetime without borrowing.
-        let generics = if params.contains("'__jet_callback") || ret.contains("'__jet_callback") {
-            if generics.is_empty() {
-                "<'__jet_callback>".to_string()
-            } else {
-                format!("<'__jet_callback, {}", &generics[1..])
-            }
-        } else {
-            generics
-        };
+        let mut lifetimes = Vec::new();
+        if matches!(view_lifetime, ViewReturnLifetime::Named { .. }) {
+            lifetimes.push(VIEW_RETURN_LIFETIME);
+        }
+        if params.contains("'__jet_callback") || ret.contains("'__jet_callback") {
+            lifetimes.push("'__jet_callback");
+        }
+        let generics = signature_generics(&lifetimes, &generics);
         let name = name_override.map(str::to_string).unwrap_or_else(|| {
             if method_form.is_some() {
                 self.rust_method_symbol(function)
@@ -13946,7 +14423,7 @@ impl<'a> RustEmitter<'a> {
                 );
                 let _ = writeln!(
                     out,
-                    "{:indent$}if let Some(__jet_scope) = {}jet_test_expect_fail_matching_scope() {{",
+                    "{:indent$}if let Some(__jet_scope) = {}jet_test_expect_fail_stopped_scope() {{",
                     "",
                     self.config.root_prefix,
                     indent = body_indent + 24
@@ -16915,7 +17392,17 @@ impl<'a> RustEmitter<'a> {
                     self.parameter_place(function, value, mutable)
                 )
             }
-            _ => self.value_slot_reference(value, mutable),
+            _ => {
+                let reference = self.value_slot_reference(value, mutable);
+                // A view slot contains a Rust reference already. Borrow its
+                // referent, not the reference carrier (e.g. &&[T] for len).
+                if is_view_type(self.value_type(function, value)) {
+                    let borrow = if mutable { "&mut " } else { "&" };
+                    format!("{borrow}**({reference})")
+                } else {
+                    reference
+                }
+            }
         }
     }
 
@@ -27716,8 +28203,8 @@ impl<'a> RustEmitter<'a> {
         let MirTypeKind::Result { ok, err } = result_ty.kind() else {
             panic!("MIR plugin export `{export_name}` result is not a checked Result")
         };
-        if !matches!(self.plugin_unwrap_type(err).kind(), MirTypeKind::String) {
-            panic!("MIR plugin export `{export_name}` result error is not checked String")
+        if !matches!(self.plugin_unwrap_type(err).kind(), MirTypeKind::Apply { name, .. } if crate::Codegen::core_rust_type_name(&name.name) == Some("PluginError")) {
+            panic!("MIR plugin export `{export_name}` result error is not checked PluginError")
         }
         let params = signature
             .params
@@ -27754,7 +28241,7 @@ impl<'a> RustEmitter<'a> {
              Ok(__jet_plugin_result_value) => \
              (|__jet_plugin_result_value: {wire}PluginValue| -> Result<{result_type}, String> {{ \
              {decoded} \
-             }})(__jet_plugin_result_value), \
+             }})(__jet_plugin_result_value).map_err(|message| {wire}PluginError::defect({export_name:?}, message)), \
              Err(__jet_plugin_error) => Err(__jet_plugin_error), \
              }} \
              }}"
@@ -27795,6 +28282,13 @@ impl<'a> RustEmitter<'a> {
             return projected;
         }
         let field_name = self.field_name(field);
+        // Runtime Err stores a boxed cause, but the checked projection is ?Err.
+        if self.is_default_err_cause_field(field) {
+            let source = self.elided_shared_guard_base(function, base)
+                .map(|place| format!("&({place})"))
+                .unwrap_or_else(|| self.value_slot_reference(base, false));
+            return format!("{}jet_err_cause({source})", self.config.root_prefix);
+        }
         let value = if let Some(reference) = self.partial_projected_value(function, base, field) {
             if self.boxed_field(field) {
                 format!("({reference}).as_ref().clone()")
@@ -29901,6 +30395,9 @@ impl<'a> RustEmitter<'a> {
         }
 
         let value = self.place_base(function, &place.base, false, &place.projections);
+        if matches!(place.projections.last(), Some(MirProjection::Field { field, .. }) if self.is_default_err_cause_field(*field)) {
+            return format!("{}jet_err_cause_projection(&({value}))", self.config.root_prefix);
+        }
         // A native host record's Int slot widens on every read, exactly as the
         // value-level field read does, including a payload projected out of
         // that slot (`limits.max_total_bytes` matched as `.Val(max)`).

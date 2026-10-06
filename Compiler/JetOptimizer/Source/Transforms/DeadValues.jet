@@ -7,7 +7,6 @@ use jet_foundation.[
     MIROwnership,
     MIRPreludeCall,
     MIRPreludeCallID,
-    MIRProgram,
     MIRType,
     MIRValueFact,
     MIRValueID,
@@ -19,17 +18,6 @@ struct MIRPassDeadDefinition {
     pub instruction: Int
     pub slot: Int
     pub next: Int
-}
-
-// Rust: crates/jet-foundation/src/MIROptimization.rs::eliminate_dead_pure_values
-fn mir_pass_eliminate_dead_pure(program: &MIRProgram) -> Int Never! {
-    purity :: mir_pass_prelude_purity(program.prelude_calls)
-    removed_total := 0
-    loop function_index in 0..<program.functions.len() {
-        function_window := &program.functions[function_index]
-        removed_total += mir_pass_dead_pure_function(&function_window, purity)
-    }
-    removed_total
 }
 
 // Rust: crates/jet-foundation/src/MIROptimization.rs::eliminate_dead_pure_values

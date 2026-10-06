@@ -19,6 +19,7 @@ use crate::AST::{
     TraitDef, TraitImplBlock, TraitMethodSig, Type, TypeParam,
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 /// D-OPMIX1 / D-FOUND-OPMIX1=A: one checked operator hook and its concrete
 /// right-hand type. `rhs` is always concrete in this table; a bare
 /// `impl Type.Op` is recorded with the owner's type as its right-hand operand.
@@ -79,6 +80,9 @@ pub struct TraitRegistry {
     pub auto_comparable: HashSet<String>,
     pub auto_encode: HashSet<String>,
     pub auto_decode: HashSet<String>,
+    /// Canonical facts are frozen once and shared by every module registry.
+    /// The six bare-name sets above remain local derive selections.
+    pub canonical_auto_derives: Option<Arc<TraitRegistry>>,
     /// D-ITER-HOOK: collection type → element type for `loop x in coll`.
     pub iterable_items: HashMap<String, Type>,
     /// D-INDEX-HOOK: type → (key, value) for expert `[]` indexing.
@@ -340,7 +344,10 @@ impl TraitRegistry {
         // local, so visibility and shadowing are unaffected.
         let mut published = TraitRegistry::default();
         for (target, registry) in registries.iter().enumerate() {
-            let identity = |leaf: &String| name_ledger.nominal_identity(target, leaf);
+            let identity = |leaf: &String| {
+                registry.local_types.contains(leaf)
+                    .then(|| name_ledger.nominal_identity(target, leaf)).flatten()
+            };
             published
                 .auto_printable
                 .extend(registry.auto_printable.iter().filter_map(identity));
@@ -360,8 +367,9 @@ impl TraitRegistry {
                 .auto_decode
                 .extend(registry.auto_decode.iter().filter_map(identity));
         }
+        let published = Arc::new(published);
         for registry in &mut registries {
-            registry.merge_auto_derives(&published);
+            registry.canonical_auto_derives = Some(Arc::clone(&published));
         }
         registries
     }
@@ -376,6 +384,13 @@ impl TraitRegistry {
             .extend(source.auto_comparable.iter().cloned());
         self.auto_encode.extend(source.auto_encode.iter().cloned());
         self.auto_decode.extend(source.auto_decode.iter().cloned());
+        self.canonical_auto_derives = source.canonical_auto_derives.clone();
+    }
+
+    pub fn has_auto_derive(&self, trait_name: &str, type_name: &str) -> bool {
+        self.auto_derive_set(trait_name).is_some_and(|facts| facts.contains(type_name))
+            || self.canonical_auto_derives.as_ref()
+                .is_some_and(|facts| facts.auto_derive_set(trait_name).is_some_and(|set| set.contains(type_name)))
     }
 
     pub fn register_items(&mut self, items: &[Item], diags: &mut Vec<Diagnostic>) {
@@ -2058,15 +2073,11 @@ impl TraitRegistry {
             return true;
         }
         match trait_name {
-            PRINTABLE if self.auto_printable.contains(type_name) => true,
-            DEBUG if self.auto_debug.contains(type_name) => true,
+            PRINTABLE | DEBUG | EQUATABLE | COMPARABLE | ENCODE | DECODE
+                if self.has_auto_derive(trait_name, type_name) => true,
             DISPLAY => self
                 .trait_impls
                 .contains(&(type_name.to_string(), DISPLAY.to_string())),
-            EQUATABLE if self.auto_equatable.contains(type_name) => true,
-            COMPARABLE if self.auto_comparable.contains(type_name) => true,
-            ENCODE if self.auto_encode.contains(type_name) => true,
-            DECODE if self.auto_decode.contains(type_name) => true,
             COMPARABLE | SERIALIZE | ENCODE | DECODE => self
                 .derives
                 .get(type_name)
@@ -2082,7 +2093,7 @@ impl TraitRegistry {
             // `JetDisplay` impl — the S55 auto-printable derive, or an explicit
             // `impl Type.Display`.
             RENDERABLE => {
-                self.auto_printable.contains(type_name)
+                self.has_auto_derive(PRINTABLE, type_name)
                     || self
                         .trait_impls
                         .contains(&(type_name.to_string(), DISPLAY.to_string()))
@@ -2665,6 +2676,7 @@ impl TraitRegistry {
             "TempDir",
             "TempFile",
             "TextError",
+            "PluginError",
             "TLSStream",
             "TLSVersion",
             "UDPPacket",
@@ -2752,6 +2764,9 @@ impl TraitRegistry {
         // projection law; Format/Kind/Cause/Error compare by value.
         self.trait_impls
             .insert(("EncodingError".to_string(), DISPLAY.to_string()));
+        self.trait_impls.insert(("PluginError".to_string(), DISPLAY.to_string()));
+        self.auto_debug.insert("PluginError".to_string());
+        self.auto_equatable.insert("PluginLimit".to_string());
         // D-DATAFLOW1=A: DataError Display is the typed analytics/stream error law.
         self.trait_impls
             .insert(("DataError".to_string(), DISPLAY.to_string()));

@@ -45,9 +45,9 @@ fn converted(value: Int) -> Int StoreFailure! {
     return value
 }
 
-fn contextual_source() -> Int -> Err("context", code: "E_CONTEXT", cause: Err("root"))
+fn contextual_source() -> Int { Err("context", code: "E_CONTEXT", cause: Err("root")) }
 
-fn contextual() -> Int -> contextual_source()?("loading")
+fn contextual() -> Int { contextual_source()?("loading") }
 
 fn optional_success(value: Int) -> Int? {
     if value == 0 {
@@ -67,7 +67,7 @@ fn unit_caller(fail: Bool) -> Int {
     return 7
 }
 
-fn impossible() -> Int Never! -> 7
+fn impossible() -> Int Never! { 7 }
 
 fn matrix() -> String {
     return "{implicit(2) ?? -1}|{implicit(0) ?? -1}|{explicit(2) ?? -2}|{explicit(0) ?? -2}|{converted(2) ?? -3}|{converted(0) ?? -3}|{contextual() ?? -4}|{optional_success(2) ?? -5}|{optional_success(0) ?? -5}|{unit_caller(false) ?? -6}|{unit_caller(true) ?? -6}|{impossible() ?? -7}"
@@ -93,7 +93,7 @@ impl StoreFailure -> Err {
     return Err("converted")
 }
 
-fn read() -> Int StoreFailure! -> Err(StoreFailure.Missing)
+fn read() -> Int StoreFailure! { Err(StoreFailure.Missing) }
 
 fn run() {
     read()
@@ -110,11 +110,11 @@ fn run() {
 "#;
 
 const RECOVERED_CONTEXT: &str = r#"
-fn contextual_source() -> Int -> Err("context", cause: Err("root"))
+fn contextual_source() -> Int { Err("context", cause: Err("root")) }
 
-fn contextual() -> Int -> contextual_source()?("loading")
+fn contextual() -> Int { contextual_source()?("loading") }
 
-fn later() -> Int -> Err("later")
+fn later() -> Int { Err("later") }
 
 fn run() {
     contextual() ?? 0

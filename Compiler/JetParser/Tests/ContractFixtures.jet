@@ -1,0 +1,100 @@
+// Production parser contracts; assembled with the canonical L2 sources by
+// run-contract-fixtures.mjs. Any failed assertion exits through panic.
+fn pc_require(ok: Bool, name: String) {
+    if !ok -> panic("parser contract failed: {name}")
+}
+
+fn pc_binding_names(parsed: ParseResult) -> [String] {
+    names := [String]{}
+    loop item in parsed.program.items {
+        if item == .Func(func) {
+            loop statement in func.body {
+                if statement == .Val(binding) -> &names.push(binding.name)
+            }
+        }
+    }
+    names
+}
+
+fn pc_binding_values(parsed: ParseResult) -> [Int] {
+    values := [Int]{}
+    loop item in parsed.program.items {
+        if item == .Func(func) {
+            loop statement in func.body {
+                if statement == .Val(binding) && binding.init == .Int(value, _, _, _) -> &values.push(value)
+            }
+        }
+    }
+    values
+}
+
+fn pc_semicolon(source: String, replacement: String) {
+    parsed :: parse_source(source.bytes())
+    pc_require(parsed.diagnostics.len() == 1, "one diagnostic for all semicolons in one file")
+    diagnostic :: parsed.diagnostics[0]
+    pc_require(diagnostic.code == "E0373", "registered semicolon diagnostic")
+    edit :: diagnostic.edit ?? panic("E0373 has no edit")
+    pc_require(edit.new_text == replacement, "behavior-preserving newline/removal edit")
+    pc_require(source.slice(edit.span.start, edit.span.end) == ";", "edit covers only the authored semicolon")
+    pc_require(pc_binding_names(parsed) == [String]{"first", "second", "third"}, "parser resumes at every next statement")
+    pc_require(pc_binding_values(parsed) == [Int]{1, 2, 3}, "recovered statements keep their original values")
+    // Apply the one-per-file repair repeatedly; no boundary may swallow a name.
+    repaired := source
+    loop _ in 0..<3 {
+        checked :: parse_source(repaired.bytes())
+        if checked.diagnostics.len() == 0 -> break
+        repair :: checked.diagnostics[0].edit ?? panic("repair lost its edit")
+        repaired = "{repaired.slice(0, repair.span.start)}{repair.new_text}{repaired.slice(repair.span.end, repaired.len())}"
+    }
+    checked :: parse_source(repaired.bytes())
+    pc_require(checked.diagnostics.len() == 0, "all suggested repairs parse canonically")
+    pc_require(pc_binding_names(checked) == pc_binding_names(parsed), "repair preserves statement order and bindings")
+    pc_require(pc_binding_values(checked) == pc_binding_values(parsed), "repair preserves values as well as boundaries")
+}
+
+fn pc_module_markers() {
+    retired :: parse_source("#Extern module c.sample {{ }}".bytes())
+    pc_require(retired.diagnostics.len() == 1 && retired.diagnostics[0].code == "E0060", "Extern teaches Import")
+    pc_require(retired.diagnostics[0].fix.contains("#Import"), "Extern replacement agrees with registry")
+    pc_require(retired.program.items.len() == 1, "Extern recovery keeps the module")
+    pc_require(if retired.program.items[0] == .CModule(value) -> value.kind == CModuleKind.Extern else -> false, "Extern recovery is an import, not Bindgen")
+    active :: parse_source("#Import module c.sample {{ }}".bytes())
+    pc_require(active.diagnostics.len() == 0, "canonical module import is active")
+    bindgen :: parse_source("#Bindgen module c.sample.__bindgen__ {{ }}".bytes())
+    // The marker is active; authored use of the generated-only namespace
+    // still receives the independent lexical reserved-name diagnostic.
+    pc_require(bindgen.diagnostics.len() == 1 && bindgen.diagnostics[0].code == "E0067", "Bindgen is active while its generated namespace stays reserved")
+    pc_require(if bindgen.program.items[0] == .CModule(value) -> value.kind == CModuleKind.Bindgen else -> false, "Bindgen remains its own module kind")
+}
+
+fn pc_marker_metadata() {
+    parsed :: parse_source(PC_MARKER_SOURCE.bytes())
+    pc_require(parsed.diagnostics.len() == 0, "complete canonical marker registry parses")
+    seen := 0
+    loop item in parsed.program.items {
+        if item == .MarkerDecl(declaration) {
+            expected :: PC_MARKER_STATUS.get(declaration.name) ?? panic("unregistered marker {declaration.name}")
+            replacement := ""
+            loop parameter in declaration.params {
+                if parameter.name == "$retired" && parameter.value == .Val(value) && value == .Str(parts, _) {
+                    if parts.len() == 1 && parts[0] == .Lit(text) -> replacement = text
+                }
+            }
+            pc_require(replacement == expected, "parser preserves active/retired status for {declaration.name}")
+            seen += 1
+        }
+    }
+    pc_require(seen == PC_MARKER_STATUS.len(), "every marker status is covered")
+    pc_require((PC_MARKER_STATUS.get("Extern") ?? "") == "#Import", "Extern registry retirement")
+}
+
+fn run() {
+    canonical :: parse_source("fn run() {{\n values :: [JSON]{{JSON.Null}}\n print(values.len())\n}}\n".bytes())
+    pc_require(canonical.diagnostics.len() == 0, "canonical newline collection consumer")
+    pc_semicolon("fn run() {{ first :: 1; second :: 2; third :: 3\n}}\n", "\n")
+    pc_semicolon("fn run() {{\n first :: 1;\n second :: 2;\n third :: 3\n}}\n", "")
+    pc_module_markers()
+    pc_marker_metadata()
+    print("V48 semicolon edits/recovery: passed")
+    print("marker registry/parser status: passed")
+}

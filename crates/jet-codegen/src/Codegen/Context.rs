@@ -957,6 +957,10 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-DBDRIVER1: the tagged SQL parameter/column value + its error type.
         "DBValue" => Some("DBValue"),
         "DBError" => Some("DBError"),
+        "PluginFrame" => Some("PluginFrame"),
+        "PluginFault" => Some("PluginFault"),
+        "PluginLimit" => Some("PluginLimit"),
+        "PluginError" => Some("PluginError"),
         // D-RAYLIB1=A: display-gated graphics bridge types.
         "RaylibWindow" => Some("RaylibWindow"),
         "RaylibColor" => Some("RaylibColor"),
@@ -1743,6 +1747,10 @@ impl Cx {
             (Some("core.email"), "RecipientReport") => Some("RecipientReport"),
             (Some("core.email"), "SendReport") => Some("SendReport"),
             (Some("core.email"), "EmailError") => Some("EmailError"),
+            (Some("core.plugin"), "PluginFrame") => Some("PluginFrame"),
+            (Some("core.plugin"), "PluginFault") => Some("PluginFault"),
+            (Some("core.plugin"), "PluginLimit") => Some("PluginLimit"),
+            (Some("core.plugin"), "PluginError") => Some("PluginError"),
             (Some("core.email"), "SMTPAuth") => Some("SMTPAuth"),
             (Some("core.email"), "TLSTrust") => Some("TLSTrust"),
             (Some("core.email"), "SMTPConfig") => Some("SMTPConfig"),
@@ -4270,8 +4278,8 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
         core_import_map, core_source_sig_map, foreign_type_map, import_mod_map, import_ret_map,
         import_sig_map, inline_core_import_maps, inline_foreign_import_maps,
         inline_foreign_import_signature_maps, inline_foreign_reexport_maps,
-        inline_foreign_reexport_signature_maps, inline_import_maps, reexport_call_map,
-        register_foreign_enum_variants, unqualified_import_maps,
+        inline_foreign_reexport_signature_maps, inline_import_maps, nested_file_calls,
+        reexport_call_map, register_foreign_enum_variants, unqualified_import_maps,
         update_cloneability_with_foreign_types,
     };
     cx.import_mods = import_mod_map(bundle, module_idx);
@@ -4293,20 +4301,17 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     let source_path = bundle.name_ledger.module_path(module_idx);
     cx.checked_const_ref_sites = bundle
         .name_ledger
-        .references()
-        .iter()
-        .filter_map(|((source, start, end), reference)| {
-            if Some(source.as_str()) != source_path || reference.kind != "const" {
+        .module_references(source_path.unwrap_or_default())
+        .filter_map(|((_, start, end), reference)| {
+            if reference.kind != "const" {
                 return None;
             }
             let target_module = (0..bundle.modules.len()).find(|target_idx| {
                 bundle.name_ledger.module_path(*target_idx)
                     == Some(reference.module_path.as_str())
             })?;
-            let declaration = bundle.name_ledger.declarations().find(|declaration| {
-                declaration.module == target_module
-                    && declaration.span == reference.def_span
-                    && declaration.kind == "const"
+            let declaration = bundle.name_ledger.module_declarations(target_module).find(|declaration| {
+                declaration.span == reference.def_span && declaration.kind == "const"
             })?;
             let ty = bundle.modules[target_module]
                 .items
@@ -4329,8 +4334,8 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
             ))
         })
         .collect();
-    for alias in bundle.name_ledger.aliases() {
-        if alias.module != module_idx || cx.const_ref_keys.contains_key(&alias.name) {
+    for alias in bundle.name_ledger.module_aliases(module_idx) {
+        if cx.const_ref_keys.contains_key(&alias.name) {
             continue;
         }
         let Some(target_module) = alias.target_module else {
@@ -4411,8 +4416,9 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     update_cloneability_with_foreign_types(cx, &bundle.modules[module_idx].items);
     register_foreign_enum_variants(cx, bundle, module_idx);
     cx.reexport_calls = reexport_call_map(bundle, module_idx);
-    cx.import_sigs = import_sig_map(bundle, module_idx);
-    cx.import_rets = import_ret_map(bundle, module_idx);
+    let nested_calls = nested_file_calls(bundle, module_idx);
+    cx.import_sigs = import_sig_map(bundle, module_idx, &nested_calls);
+    cx.import_rets = import_ret_map(bundle, module_idx, &nested_calls);
     cx.core_imports = core_import_map(bundle, module_idx);
     register_bundle_reflect_paths(cx, bundle, module_idx);
     register_core_close_types(cx, bundle);
@@ -4421,7 +4427,7 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.foreign_undos = bundle_foreign_undos(bundle, module_idx);
     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
     register_bundle_unit_metadata(cx, bundle, module_idx);
-    let (uinline, ufile) = unqualified_import_maps(bundle, module_idx);
+    let (uinline, ufile) = unqualified_import_maps(bundle, module_idx, &nested_calls);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
     let (inline, file, names, reexports) = inline_import_maps(bundle, module_idx);
@@ -4988,6 +4994,46 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
                     .map(|variant| ((*variant).to_string(), VariantPayload::Unit))
                     .collect(),
             );
+            cx.cloneable.insert(name.to_string());
+        }
+    }
+    // D-PLUGIN-FAILURE1=A: `core.plugin` declares no copy of its failure
+    // carrier; the compiler-owned rows (sema core_types, tir_to_mir_types)
+    // are its one identity, so checked patterns need the same owner facts.
+    if cx.core_imports.values().any(|module| module == "core.plugin") {
+        let zero = Span::new(0, 0);
+        let fault = Type::Named("PluginFault".to_string());
+        let limits = ["Fuel", "Memory", "Table", "Time", "Wire"]
+            .into_iter()
+            .map(|variant| (variant.to_string(), VariantPayload::Unit))
+            .collect::<Vec<_>>();
+        let errors = vec![
+            ("Guest".to_string(), VariantPayload::Single(fault.clone(), zero)),
+            ("Denied".to_string(), VariantPayload::Single(fault.clone(), zero)),
+            (
+                "Budget".to_string(),
+                VariantPayload::Named(vec![
+                    VariantField {
+                        name: "limit".to_string(),
+                        name_span: zero,
+                        ty: Type::Named("PluginLimit".to_string()),
+                        ty_span: zero,
+                    },
+                    VariantField {
+                        name: "fault".to_string(),
+                        name_span: zero,
+                        ty: fault.clone(),
+                        ty_span: zero,
+                    },
+                ]),
+            ),
+            ("Defect".to_string(), VariantPayload::Single(fault, zero)),
+        ];
+        for (name, variants) in [("PluginLimit", limits), ("PluginError", errors)] {
+            for (variant, _) in &variants {
+                cx.variant_owner.insert(variant.clone(), name.to_string());
+            }
+            cx.enum_variants.insert(name.to_string(), variants);
             cx.cloneable.insert(name.to_string());
         }
     }

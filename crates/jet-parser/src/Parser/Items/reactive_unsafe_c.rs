@@ -103,13 +103,18 @@ impl<'a> Parser<'a> {
             effect_via = via;
         }
 
-        // Value-returning signatures use the canonical callable body arrow.
-        // Unit and unit-fallible signatures keep the no-payload block form.
-        if return_type
-            .as_ref()
-            .is_some_and(Self::return_type_has_value)
-        {
-            self.expect_unified_arrow("before the `#FFI` foreign-source body")?;
+        // D-SIG-AFTER1=A (card #4512): the foreign-source body follows the
+        // one arrow and its result directly. A second `->` is E0080.
+        if matches!(self.peek().kind, TokKind::UnifiedArrow) {
+            let arrow = self.bump().span;
+            let brace = self.peek().span;
+            self.diags.push(Self::arrow_function_body(
+                arrow,
+                matches!(self.peek().kind, TokKind::LBrace).then(|| crate::Diagnostics::TextEdit {
+                    span: Span::new(arrow.start, brace.start),
+                    new_text: String::new(),
+                }),
+            ));
         }
         self.expect(TokKind::LBrace, "to open the `#FFI` foreign-source body")?;
         while matches!(self.peek().kind, TokKind::Semi) {

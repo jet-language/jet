@@ -495,13 +495,13 @@ pub fn sema_call_check_bound_arguments(state: &SemaOwnershipState, callee: Strin
 
 // This path runs Ownership after expression typing and before lowering. The
 // ownership hook may mark implicit_clone on the source arg, so lowering must
-// happen only after it accepts and completes. `pins` receives the
-// declaration-slot temporaries the caller places before its call.
-pub fn sema_call_check_bound_arguments_owned(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, pins: &[TStmt], diagnostics: &[Diagnostic]) -> [TCallArg]? {
+// happen only after it accepts and completes. Return the lowered arguments
+// together with the declaration-slot temporaries placed before the call.
+pub fn sema_call_check_bound_arguments_owned(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> (args: [TCallArg], pins: [TStmt])? {
     typed :: sema_call_typecheck_bound_arguments(callee, params, abi, apply_lambda_escape_override, binding, &args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, false) ?? return None
     ownership :: sema_ownership_check_call_arguments(&state, callee, params, &args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
     lowered := sema_call_lower_bound_arguments(typed, params, &args, environment)
-    loop pin in sema_call_pin_binder_arguments(typed, params, &lowered, environment, scopes, span) -> &pins.push(pin)
-    Val(lowered)
+    pins := sema_call_pin_binder_arguments(typed, params, &lowered, environment, scopes, span)
+    Val((args: ^lowered, pins: ^pins))
 }

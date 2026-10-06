@@ -1,5 +1,6 @@
 use core.math as math
 use jet_foundation.[
+    JET_CLI_COMMANDS,
     Diagnostic,
     EveryArg,
     EverySchedule,
@@ -247,12 +248,12 @@ pub fn sema_check_job_artifact(function: Func, checked_function: TFunc, environm
     SemaJobArtifactCheckResult{fact: fact, schedule: schedule, diagnostics: diagnostics, complete: complete}
 }
 
-/// D-JOB-NAMES1=A: the only names a `#Job fn` cannot take. `run`, `dev`,
-/// `build`, and `test` are Jet's lifecycle entries; a built program's own
-/// argument parser answers `help` and `version`. Jobs run under `jet jobs`,
-/// so every other Jet command word is an ordinary job name.
-fn sema_job_reserved_names() -> [String] Never! {
-    [String]{"run", "dev", "build", "test", "help", "version"}
+/// D-JET-VERBS1=A: sema and help read the same command registry.
+fn sema_job_is_reserved(name: String) -> Bool Never! {
+    loop command in JET_CLI_COMMANDS {
+        if command.name == name -> return true
+    }
+    false
 }
 
 fn sema_job_scope_name(scope: JobScope) -> String Never! {
@@ -264,19 +265,18 @@ fn sema_job_scope_name(scope: JobScope) -> String Never! {
 }
 
 fn sema_job_reserved_name_error(name: String, span: Span) -> Diagnostic {
-    sema_error("E0928", span, "`{name}` is reserved by Jet's command line", "`run`, `dev`, `build`, and `test` name Jet's lifecycle entries, and a built program answers `help` and `version` itself", "rename the job, e.g. `#Job fn {name}_all()`")
+    sema_error("E0928", span, "`{name}` is reserved by Jet's command line", "`{name}` is a Jet command; top-level jobs must have distinct names", "rename the job, e.g. `#Job fn {name}_all()`")
 }
 
 fn sema_job_duplicate_error(name: String, scope: JobScope, span: Span) -> Diagnostic {
     scope_name := sema_job_scope_name(scope)
-    sema_error("E0928", span, "job `{name}` is declared more than once in scope .{scope_name}", "`jet jobs {name}` must select exactly one function", "rename one of the jobs, or give the declarations different scopes")
+    sema_error("E0928", span, "job `{name}` is declared more than once in scope .{scope_name}", "`jet {name}` must select exactly one function", "rename one of the jobs, or give the declarations different scopes")
 }
 
 /// E0928: a `#Job fn` takes a reserved name, or two jobs share one name in
 /// the same scope of a module.
 pub fn sema_check_job_names(items: [Item]) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
-    reserved := sema_job_reserved_names()
     seen_names := [String]{}
     seen_scopes := [JobScope]{}
     loop item in items {
@@ -284,7 +284,7 @@ pub fn sema_check_job_names(items: [Item]) -> [Diagnostic] {
             .Func(function) -> {
                 if !function.is_job -> next
                 span := function.job_span ?? function.name_span
-                if reserved.contains(function.name) {
+                if sema_job_is_reserved(function.name) {
                     &diagnostics.push(sema_job_reserved_name_error(function.name, span))
                     next
                 }

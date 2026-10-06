@@ -5815,7 +5815,7 @@ fn jet_jit_map_new() -> i64 {
 }
 
 fn jet_jit_map_clone(map: i64) -> i64 {
-    alloc_map_pairs(&collection_semantics::map_copy_i64(clone_map_pairs(map)))
+    alloc_map_pairs_like(map, &collection_semantics::map_copy_i64(clone_map_pairs(map)))
 }
 
 fn jet_jit_map_equal(left: i64, right: i64) -> i8 {
@@ -5882,7 +5882,7 @@ fn jet_jit_map_max_int(map: i64) -> i64 {
 fn jet_jit_map_intersection(left: i64, right: i64) -> i64 {
     let pairs =
         collection_semantics::map_intersection_i64(clone_map_pairs(left), clone_map_pairs(right));
-    alloc_map_pairs(&pairs)
+    alloc_map_pairs_like(left, &pairs)
 }
 
 fn jet_jit_map_slice(map: i64, keys: i64) -> i64 {
@@ -5898,7 +5898,7 @@ fn jet_jit_map_slice(map: i64, keys: i64) -> i64 {
             .collect::<Vec<_>>()
     });
     let pairs = collection_semantics::map_slice_i64(clone_map_pairs(map), keys);
-    alloc_map_pairs(&pairs)
+    alloc_map_pairs_like(map, &pairs)
 }
 
 fn jet_jit_map_from_keys(keys: i64, default: i64) -> i64 {
@@ -5917,10 +5917,12 @@ fn jet_jit_map_from_keys(keys: i64, default: i64) -> i64 {
     alloc_map_pairs(&pairs)
 }
 fn jet_jit_map_from_keys_int(keys: i64, default: i64) -> i64 {
-    let keys = clone_list_ints(keys);
+    let raw_keys = clone_list_ints(keys);
     Concurrency::with_runtime_mut(|rt| {
         let map = rt.heap.alloc_empty_map();
-        for key in keys {
+        // A U64/I64 key list makes a word-keyed map (#4576).
+        rt.heap.copy_map_cells(keys, map);
+        for key in raw_keys {
             rt.heap
                 .map_insert_int(map, key, default)
                 .expect("jit Int map from_keys: insert");
@@ -6022,7 +6024,7 @@ fn jet_jit_map_filter(map: i64, callback: i64) -> i64 {
             return 0;
         }
     }
-    alloc_map_pairs(&filtered)
+    alloc_map_pairs_like(map, &filtered)
 }
 
 fn jet_jit_map_map_values(map: i64, callback: i64) -> i64 {
@@ -6085,7 +6087,7 @@ fn jet_jit_map_merge_with(left: i64, right: i64, callback: i64) -> i64 {
         }
     }
     let pairs = merged.into_iter().collect::<Vec<_>>();
-    alloc_map_pairs(&pairs)
+    alloc_map_pairs_like(left, &pairs)
 }
 
 fn jet_jit_map_pop_first(map: i64) -> i64 {
@@ -6109,6 +6111,7 @@ fn jet_jit_map_merge(left: i64, right: i64) -> i64 {
                 .map_len(left)
                 .expect("jit map merge: bad left handle");
             let out = rt.heap.alloc_empty_map();
+            rt.heap.copy_map_cells(left, out);
             for i in 0..len {
                 let key = rt
                     .heap
@@ -6154,6 +6157,7 @@ fn jet_jit_map_merge_int(left: i64, right: i64) -> i64 {
                 .map_len(left)
                 .expect("jit Int map merge: bad left handle");
             let out = rt.heap.alloc_empty_map();
+            rt.heap.copy_map_cells(left, out);
             for i in 0..len {
                 let key = rt
                     .heap
@@ -6231,6 +6235,19 @@ fn jet_jit_map_update_int(left: i64, right: i64) {
                 .expect("jit Int map update: bad left handle");
         }
     });
+}
+
+/// Key `map` by fixed-width 64-bit words (`unsigned` is 1 for `U64`) before
+/// an Int-family route touches its keys: raw words are never decoded or
+/// retained as exact-integer pointers (#4576).
+fn jet_jit_map_word_keys(map: i64, unsigned: i64) {
+    Concurrency::with_runtime_mut(|rt| rt.heap.set_map_word_keys(map, unsigned != 0));
+}
+
+/// Store `map`'s values as fixed-width 64-bit words, never retained as
+/// exact-integer pointers (#4576).
+fn jet_jit_map_word_values(map: i64) {
+    Concurrency::with_runtime_mut(|rt| rt.heap.set_map_word_values(map));
 }
 
 fn jet_jit_map_update_composite(left: i64, right: i64) {
@@ -6787,16 +6804,30 @@ fn alloc_from_floats(xs: &[f64]) -> i64 {
 }
 
 fn alloc_map_pairs(pairs: &[(String, i64)]) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let map = rt.heap.alloc_empty_map();
-        for (key, value) in pairs {
-            let key_id = rt.heap.alloc_string(key.clone());
-            rt.heap
-                .map_insert(map, key_id, *value)
-                .expect("jit map adapter: insert");
-        }
-        map
-    })
+    Concurrency::with_runtime_mut(|rt| alloc_map_pairs_in(&mut rt.heap, None, pairs))
+}
+
+/// `alloc_map_pairs` for a result whose values have `source`'s type, so the
+/// result keeps `source`'s raw-word value cells (#4576): a `[String:Float]`
+/// copy must not retain its floats as exact-Int pointers.
+fn alloc_map_pairs_like(source: i64, pairs: &[(String, i64)]) -> i64 {
+    Concurrency::with_runtime_mut(|rt| alloc_map_pairs_in(&mut rt.heap, Some(source), pairs))
+}
+
+fn alloc_map_pairs_in(
+    heap: &mut jet_rt::JetArena,
+    source: Option<i64>,
+    pairs: &[(String, i64)],
+) -> i64 {
+    let map = heap.alloc_empty_map();
+    if let Some(source) = source {
+        heap.copy_map_cells(source, map);
+    }
+    for (key, value) in pairs {
+        let key_id = heap.alloc_string(key.clone());
+        heap.map_insert(map, key_id, *value).expect("jit map adapter: insert");
+    }
+    map
 }
 
 fn alloc_nested_from_ints(xs: &[Vec<i64>]) -> i64 {
@@ -11617,6 +11648,8 @@ host_fns! {
     map_merge_int: "jet_jit_map_merge_int" => jet_jit_map_merge_int: sig_get_opt;
     map_update: "jet_jit_map_update" => jet_jit_map_update: sig_push;
     map_update_int: "jet_jit_map_update_int" => jet_jit_map_update_int: sig_push;
+    map_word_keys: "jet_jit_map_word_keys" => jet_jit_map_word_keys: sig_push;
+    map_word_values: "jet_jit_map_word_values" => jet_jit_map_word_values: sig_sort;
     map_update_composite: "jet_jit_map_update_composite" => jet_jit_map_update_composite: sig_push;
     map_merge_with: "jet_jit_map_merge_with" => jet_jit_map_merge_with: sig_closure_fold;
     checked_map_merge_with: "jet_map_merge_with" => jet_jit_map_merge_with: sig_closure_fold;

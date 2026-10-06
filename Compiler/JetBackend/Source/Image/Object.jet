@@ -94,8 +94,10 @@ pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Ex
     loop function in functions -> &offsets.push(x64_link_place(&text, function))
     rodata := [U8]{}
     data_offsets := [Int]{}
+    rodata_align := 1
     loop object in program.data {
         elf64_pad(&rodata, object.align)
+        if object.align > rodata_align -> rodata_align = object.align
         &data_offsets.push(rodata.len())
         loop byte in object.bytes -> &rodata.push(byte)
     }
@@ -197,7 +199,7 @@ pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Ex
     elf64_u16(&bytes, ELF64_OBJECT_SECTIONS)
     elf64_u16(&bytes, ELF64_OBJECT_SHSTRTAB)
     contents :: [[U8]]{text, rodata, rela, symtab, strtab, shstrtab}
-    aligns :: [Int]{X64_FUNCTION_ALIGN, 16, 8, 8, 1, 1}
+    aligns :: [Int]{X64_FUNCTION_ALIGN, rodata_align, 8, 8, 1, 1}
     section_offsets := [Int]{}
     loop (index, content) in contents {
         elf64_pad(&bytes, aligns[index])
@@ -211,7 +213,7 @@ pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Ex
     // .text: PROGBITS, ALLOC | EXECINSTR
     elf64_section_header(&bytes, name_offsets[1], 1, 6, section_offsets[0], text.len(), 0, 0, X64_FUNCTION_ALIGN, 0)
     // .rodata: PROGBITS, ALLOC
-    elf64_section_header(&bytes, name_offsets[2], 1, 2, section_offsets[1], rodata.len(), 0, 0, 16, 0)
+    elf64_section_header(&bytes, name_offsets[2], 1, 2, section_offsets[1], rodata.len(), 0, 0, rodata_align, 0)
     // .rela.text: RELA, INFO_LINK, against .symtab, for .text
     elf64_section_header(&bytes, name_offsets[3], 4, 0x40, section_offsets[2], rela.len(), ELF64_OBJECT_SYMTAB, ELF64_OBJECT_TEXT, 8, ELF64_RELA_SIZE)
     // .symtab: names in .strtab, locals before `first_global`

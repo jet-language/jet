@@ -432,7 +432,7 @@ mod text_kernel {
         jet_std_fs_scope_read(&scope, &path.to_string())
     }
     pub(super) fn fs_read_bytes(path: &str) -> Result<Vec<u8>, jet_std::IOError> {
-        jet_std_fs_read_bytes(&path.to_string())
+        jet_std_fs_read_bytes(path)
     }
     pub(super) fn fs_write(path: &str, text: &str) -> Result<(), jet_std::IOError> {
         jet_std_fs_write(&path.to_string(), &text.to_string())
@@ -663,8 +663,6 @@ fn opaque_file<T: std::any::Any + Send + Sync>(value: T) -> crate::AST::CtValue 
         lambda: crate::AST::Lambda {
             take_names: Vec::new(),
             params: Vec::new(),
-            result_type: None,
-            error_type: None,
             effects: None,
             body: crate::AST::LambdaBody::Block(Vec::new()),
             span: crate::Diagnostics::Span::new(0, 0),

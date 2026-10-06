@@ -9398,6 +9398,42 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         let ty = self.mir_value_type(id)?;
         self.map_key_kind_for_type(&ty)
     }
+
+    /// Marks `map`'s raw-word key and value cells (see `element_word_cells`
+    /// and `map_value_word_cells`) before a route stores or looks up through
+    /// them, so the arena never reads a raw `U64`/`I64`/`Float` word as an
+    /// exact-integer pointer (#4576). `keys` is `Some(unsigned)` for word keys.
+    fn mark_map_word_cells(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        map: Value,
+        keys: Option<bool>,
+        values: bool,
+    ) -> Result<(), String> {
+        if let Some(unsigned) = keys {
+            let unsigned = builder.ins().iconst(types::I64, i64::from(unsigned));
+            self.call_host(builder, self.host.coll.map_word_keys, &[map, unsigned])?;
+        }
+        if values {
+            self.call_host(builder, self.host.coll.map_word_values, &[map])?;
+        }
+        Ok(())
+    }
+
+    /// `mark_map_word_cells` for the map type `map_ty`.
+    fn mark_map_type_word_cells(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        map: Value,
+        map_ty: &MirType,
+    ) -> Result<(), String> {
+        let Some((key_ty, value_ty)) = comparison_map_parts(map_ty) else {
+            return Ok(());
+        };
+        let keys = element_word_cells(key_ty);
+        let values = map_value_word_cells(value_ty);
+        self.mark_map_word_cells(builder, map, keys, values)
+    }
     /// Lower a collection index to the native carrier expected by JIT hosts.
     /// Checked `Int` values may be boxed, while list/lane/pool kernels consume
     /// a native i64 position. Maps intentionally keep their raw carrier: map
@@ -9480,7 +9516,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .ok_or_else(|| "MIR list index getter returned no value".to_string())?
             }
             jet_foundation::MIR::MirIndexKind::Map => {
-                let host = match self.map_key_kind(index)? {
+                let key_ty = self.mir_value_type(index)?;
+                self.mark_map_word_cells(builder, base, element_word_cells(&key_ty), false)?;
+                let host = match self.map_key_kind_for_type(&key_ty)? {
                     MapKeyKind::String => self.host.coll.map_get,
                     MapKeyKind::Int => self.host.coll.map_get_int,
                     MapKeyKind::Composite => self.host.coll.map_get_composite,
@@ -9583,7 +9621,10 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     "MIR writable index place has no exact setter Prelude route".to_string()
                 })?;
                 let value = self.cast(builder, value, types::I64)?;
-                let host = match self.map_key_kind(index)? {
+                let key_ty = self.mir_value_type(index)?;
+                let words = map_value_word_cells(value_ty);
+                self.mark_map_word_cells(builder, base, element_word_cells(&key_ty), words)?;
+                let host = match self.map_key_kind_for_type(&key_ty)? {
                     MapKeyKind::String => self.host.coll.index_map_set,
                     MapKeyKind::Int => self.host.coll.map_insert_int,
                     MapKeyKind::Composite => self.host.coll.map_insert_composite,
@@ -11160,6 +11201,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .first()
             .copied()
             .ok_or_else(|| "MIR constant map host returned no map".to_string())?;
+        let word_keys = key_ty.and_then(element_word_cells);
+        let word_values = value_ty.is_some_and(map_value_word_cells);
+        self.mark_map_word_cells(builder, map, word_keys, word_values)?;
         for (key, value) in values {
             let (kind, key) = self.constant_key(builder, key, key_ty)?;
             let value = self.constant(builder, value, None, value_ty)?;
@@ -11182,6 +11226,10 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
     ) -> Result<(MapKeyKind, Value), String> {
         let ty = ty.map(constant_structural_type);
         match key {
+            // A fixed-width key is its raw word, never an exact carrier (#4576).
+            MirConstKey::Int(value) if ty.and_then(element_word_cells).is_some() => {
+                Ok((MapKeyKind::Int, builder.ins().iconst(types::I64, *value)))
+            }
             MirConstKey::Int(value) => Ok((
                 MapKeyKind::Int,
                 builder
@@ -11266,7 +11314,13 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     self.call_host(builder, self.host.struct_set_str, &[record, index, value])?
                 }
                 MapKeyKind::Int => {
-                    self.call_host(builder, self.host.struct_set_i64, &[record, index, value])?
+                    // A fixed-width field keys as a word, as runtime records do.
+                    let host = match ty.map(constant_structural_type).and_then(element_word_cells) {
+                        Some(true) => self.host.struct_set_uword,
+                        Some(false) => self.host.struct_set_word,
+                        None => self.host.struct_set_i64,
+                    };
+                    self.call_host(builder, host, &[record, index, value])?
                 }
                 MapKeyKind::Composite => self.call_host(
                     builder,
@@ -11618,6 +11672,25 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             if op.is_comparison() {
                 return Ok(self.compare(builder, op, left, right));
             }
+        }
+        // A String left operand of `Add` is text append: the checked
+        // compound `out += piece` lowers to `ReadPlace + piece; WritePlace`,
+        // and the evaluator and the AOT emitter concatenate the same pair.
+        // JIT Strings are shared heap handles (a String copy keeps the
+        // handle), so the append builds a fresh buffer instead of writing
+        // into the left handle another owner may still read.
+        if op == MirBinaryOp::Add && matches!(left_ty.kind(), MirTypeKind::String) {
+            let right = if matches!(right_ty.kind(), MirTypeKind::String) {
+                right
+            } else if is_text_view_type(right_ty) {
+                self.text_view_string(builder, right)?
+            } else {
+                return Err(format!(
+                    "MIR text append has no checked right operand `{}`",
+                    right_ty.display_name()
+                ));
+            };
+            return self.string_append(builder, left, right);
         }
         // D-TIME-INSTANT1=A: an Instant is a resident time handle and a
         // Duration is its raw nanosecond carrier. Point arithmetic runs through
@@ -13370,6 +13443,25 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         }
         Ok(buffer)
     }
+    /// `left + right` for two String handles: one fresh buffer holding both
+    /// texts; neither operand handle is written.
+    fn string_append(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        left: Value,
+        right: Value,
+    ) -> Result<Value, String> {
+        let buffer = self
+            .call_host(builder, self.host.str_begin, &[])?
+            .first()
+            .copied()
+            .ok_or_else(|| "MIR string host returned no buffer".to_string())?;
+        for part in [left, right] {
+            let part = self.cast(builder, part, types::I64)?;
+            let _ = self.call_host(builder, self.host.str_push_str, &[buffer, part])?;
+        }
+        Ok(buffer)
+    }
     fn project_members(
         &mut self,
         builder: &mut FunctionBuilder<'_>,
@@ -14098,6 +14190,11 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .first()
             .copied()
             .ok_or_else(|| "MIR map host returned no value".to_string())?;
+        if let Some((key, value)) = entries.first() {
+            let keys = element_word_cells(&self.mir_value_type(*key)?);
+            let values = map_value_word_cells(&self.mir_value_type(*value)?);
+            self.mark_map_word_cells(builder, map, keys, values)?;
+        }
         for (key, value) in entries {
             let key_kind = self.map_key_kind(*key)?;
             let key = self.cast(builder, self.value(*key)?, types::I64)?;
@@ -17751,6 +17848,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 MapKeyKind::Composite => self.host.coll.map_update_composite,
             };
             let receiver = self.collection_receiver_value(builder, receiver, receiver_place)?;
+            self.mark_map_type_word_cells(builder, receiver, &receiver_ty)?;
             let other = self.cast(builder, self.value(*other)?, types::I64)?;
             self.queue_capture_place_writeback_id(receiver_place)?;
             self.call_host(builder, host, &[receiver, other])?;
@@ -17765,7 +17863,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 MapKeyKind::Int => self.host.coll.map_has_key_int,
                 MapKeyKind::Composite => self.host.coll.map_has_key_composite,
             };
+            let receiver_ty = self.mir_value_type(receiver)?;
             let receiver = self.collection_receiver_value(builder, receiver, receiver_place)?;
+            self.mark_map_type_word_cells(builder, receiver, &receiver_ty)?;
             let key = self.cast(builder, self.value(*key)?, types::I64)?;
             let value = self
                 .call_host(builder, host, &[receiver, key])?
@@ -18302,6 +18402,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     return Err(format!("MIR {member} expects key and value arguments"));
                 }
                 let receiver = receiver_value!()?;
+                self.mark_map_type_word_cells(builder, receiver, &receiver_ty)?;
                 let key = integer_value!(args[0])?;
                 let value = integer_value!(args[1])?;
                 let host = match (member, self.map_key_kind(args[0])?) {
@@ -18332,6 +18433,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     return Err("MIR Map.remove expects one key argument".to_string());
                 }
                 let receiver = receiver_value!()?;
+                self.mark_map_type_word_cells(builder, receiver, &receiver_ty)?;
                 let key = integer_value!(args[0])?;
                 let host = match self.map_key_kind(args[0])? {
                     MapKeyKind::String => self.host.coll.map_remove,
@@ -18358,7 +18460,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     MapKeyKind::Int => self.host.coll.map_get_opt_int,
                     MapKeyKind::Composite => self.host.coll.map_get_opt_composite,
                 };
-                (host, vec![receiver_value!()?, integer_value!(args[0])?])
+                let receiver = receiver_value!()?;
+                self.mark_map_type_word_cells(builder, receiver, &receiver_ty)?;
+                (host, vec![receiver, integer_value!(args[0])?])
             }
             "map_merge" => {
                 if args.len() != 1 {
@@ -18379,7 +18483,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                         );
                     }
                 };
-                (host, vec![receiver_value!()?, integer_value!(args[0])?])
+                let receiver = receiver_value!()?;
+                self.mark_map_type_word_cells(builder, receiver, &receiver_ty)?;
+                (host, vec![receiver, integer_value!(args[0])?])
             }
             // `iter_join` is the checked Iter route; the host streams a lazy
             // receiver and reads a list receiver by index.
@@ -22488,6 +22594,14 @@ fn element_word_cells(element: &MirType) -> Option<bool> {
         MirTypeKind::InlineRange { base, .. } => element_word_cells(base),
         _ => None,
     }
+}
+
+/// Whether a map's value cells are raw words the arena must never retain as
+/// exact `Int` pointers: fixed-width 64-bit integers and floats. Every positive
+/// `Float` >= 2.0 has top bits `01`, the exact-Int pointer tag, so retaining
+/// one dereferences its mantissa as a `JetIntNode`.
+fn map_value_word_cells(value: &MirType) -> bool {
+    value.is_float() || element_word_cells(value).is_some()
 }
 
 /// Word-cell kind of a list type's elements (see `element_word_cells`).

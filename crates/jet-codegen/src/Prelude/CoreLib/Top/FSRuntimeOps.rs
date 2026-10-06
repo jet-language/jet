@@ -473,11 +473,11 @@ pub(crate) fn jet_std_fs_read_at(
     buf.truncate(n);
     Ok(buf)
 }
-pub(crate) fn jet_std_fs_read_bytes(path: &String) -> Result<Vec<u8>, jet_std::IOError> {
+pub(crate) fn jet_std_fs_read_bytes(path: &str) -> Result<Vec<u8>, jet_std::IOError> {
     if jet_fault_should_fail("FS.Read") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Read,
-            Some(path.clone()),
+            Some(path.to_owned()),
             "fault injected: FS.Read",
         ));
     }

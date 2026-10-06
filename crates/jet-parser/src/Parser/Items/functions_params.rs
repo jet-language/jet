@@ -124,12 +124,35 @@ impl<'a> Parser<'a> {
             mut effect_via,
             prefix_effect_span,
         ) = self.parse_callable_result_and_prefix_effects()?;
+        // A retired bare result before the arrow already teaches the whole
+        // `-> Type { … }` shape (E0068); the arrow-body codes stay quiet then.
+        let retired_result_shape = return_type_span.is_some_and(|span| {
+            self.diags
+                .iter()
+                .any(|diag| diag.code == "E0068" && diag.span == Some(span))
+        });
         let declared_return_view_provenance = self.parse_opt_declared_view_from(&params);
         let post_effect_span = (!declared_effects.is_some()
             && !effect_via.is_some()
             && self.func_effect_starts_here())
         .then(|| self.peek().span);
         if post_effect_span.is_some() {
+            // D-SIG-AFTER1=A (card #4512): `-> T -[E]>` writes two arrows;
+            // the result follows the one effect arrow instead (E0068).
+            if let Some(span) = post_effect_span.filter(|_| {
+                let after_plain_arrow = return_type_span.is_some_and(|result| {
+                    self.toks[..self.pos]
+                        .iter()
+                        .rev()
+                        .find(|token| token.span.end <= result.start)
+                        .is_some_and(|token| matches!(token.kind, TokKind::UnifiedArrow))
+                });
+                after_plain_arrow
+                    && matches!(self.peek().kind, TokKind::Minus)
+                    && matches!(self.peek2().kind, TokKind::LBracket)
+            }) {
+                self.diags.push(Self::retired_signature_shape(span));
+            }
             let (effects, via) = self.parse_opt_func_effects()?;
             declared_effects = effects;
             effect_via = via;
@@ -172,8 +195,10 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // D-SIG-SHAPE1=B: `->` (or the effect ceiling) starts a one-line
-        // body. Keep retired `::`/`=` input readable for the migration.
+        // D-SIG-AFTER1=A (card #4512): a named function has one arrow, before
+        // its result, and a braced body. A body `->` after the result, or an
+        // expression right after the arrow, is E0080 and recovers to the same
+        // body. Retired `=>`/`::`/`=` markers keep their own teaching codes.
         let effect_body_marker = effect_body_span.is_some();
         let body_marker_span = match effect_body_span {
             Some(span)
@@ -189,15 +214,33 @@ impl<'a> Parser<'a> {
             }
             _ => self.parse_optional_function_body_marker(allow_guest_import_symbol),
         };
+        let teach_arrow_body = !allow_guest_import_symbol && !retired_result_shape;
+        let body_arrow_span = body_marker_span.filter(|span| {
+            teach_arrow_body
+                && matches!(self.toks[self.pos.saturating_sub(1)].kind, TokKind::UnifiedArrow)
+                && self.toks[self.pos.saturating_sub(1)].span == *span
+        });
         if body_marker_span.is_some() {
             let value_body = !matches!(self.peek().kind, TokKind::LBrace)
                 || (!effect_body_marker
                     && self.brace_starts_record()
                     && !matches!(self.peek2().kind, TokKind::RBrace));
+            if !value_body {
+                if let Some(arrow) = body_arrow_span {
+                    let brace = self.peek().span;
+                    self.diags.push(Self::arrow_function_body(
+                        arrow,
+                        Some(crate::Diagnostics::TextEdit {
+                            span: Span::new(arrow.start, brace.start),
+                            new_text: String::new(),
+                        }),
+                    ));
+                }
+            }
             if value_body {
-                // A one-expression marker accepts a field-led brace as an
-                // inferred record literal. Statement-shaped braces are
-                // callable blocks, including `return` bodies.
+                // Recover a one-expression body, including a field-led
+                // brace read as an inferred record literal. Statement-shaped
+                // braces are callable blocks, including `return` bodies.
                 let (body, end) = if self.function_body_is_missing() {
                     self.diags
                         .push(Self::missing_function_body(self.peek().span, &name));
@@ -208,7 +251,25 @@ impl<'a> Parser<'a> {
                     (Vec::new(), end)
                 } else {
                     let expr = self.expr()?;
-                    let expr_end = expr.span().end;
+                    let expr_start = expr.span().start;
+                    let expr_end = self.toks[self.pos.saturating_sub(1)].span.end;
+                    let effect_arrow_body =
+                        teach_arrow_body && effect_body_marker && body_marker_span == effect_body_span;
+                    if body_arrow_span.is_some() || effect_arrow_body {
+                        let replace_start = body_arrow_span.map_or(expr_start, |arrow| arrow.start);
+                        let edit = self
+                            .source
+                            .as_deref()
+                            .and_then(|source| source.get(expr_start..expr_end))
+                            .map(|text| crate::Diagnostics::TextEdit {
+                                span: Span::new(replace_start, expr_end),
+                                new_text: format!("{{ {text} }}"),
+                            });
+                        self.diags.push(Self::arrow_function_body(
+                            body_arrow_span.unwrap_or(Span::new(expr_start, expr_end)),
+                            edit,
+                        ));
+                    }
                     self.finish_stmt()?;
                     let end = if self.pos > 0 {
                         self.toks[self.pos - 1].span.end
@@ -273,8 +334,7 @@ impl<'a> Parser<'a> {
                 });
             }
         }
-        // D-SIG-AFTER1=A: a value-returning named body is `{ … }`. The
-        // retired D-CALLABLE-ONE1 extra `->` before braces is gone.
+        // D-SIG-AFTER1=A: a named body is `{ … }`.
         if !matches!(self.peek().kind, TokKind::LBrace) {
             self.diags
                 .push(Self::missing_function_body(self.peek().span, &name));
@@ -585,6 +645,11 @@ impl<'a> Parser<'a> {
                     | TokKind::RParen
             ) || (matches!(self.peek().kind, TokKind::LBrace) && end < self.peek().span.start)
                 || matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::VIEW_FROM)
+                // `-> T -[E]>`: a second (effect) arrow; E0068 at the caller.
+                || (matches!(self.peek().kind, TokKind::Minus)
+                    && matches!(self.peek2().kind, TokKind::LBracket))
+                // A one-line trait slot ends at the enclosing `}`.
+                || matches!(self.peek().kind, TokKind::RBrace)
         });
         self.pos = saved_pos;
         self.diags.truncate(saved_diags);
@@ -866,6 +931,19 @@ impl<'a> Parser<'a> {
 
     fn missing_function_body(span: Span, name: &str) -> Diagnostic {
         Diagnostic::from_row("E0081", &[("name", name)], Some(span))
+    }
+
+    /// D-SIG-AFTER1=A (card #4512): E0080 for a named body after an arrow.
+    /// The edit, when the caller can build one, rewrites to the braced body.
+    pub(in crate::Parser) fn arrow_function_body(
+        span: Span,
+        edit: Option<crate::Diagnostics::TextEdit>,
+    ) -> Diagnostic {
+        let diagnostic = Diagnostic::from_row("E0080", &[], Some(span));
+        match edit {
+            Some(edit) => diagnostic.with_edit(edit),
+            None => diagnostic,
+        }
     }
 
     /// D-APILABEL1=A: parse `(` … `)` parameters including the two zone

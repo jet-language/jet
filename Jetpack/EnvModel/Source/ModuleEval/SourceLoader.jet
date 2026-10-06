@@ -46,7 +46,7 @@ impl FileSystemSourceLoader.SourceLoader {
         entries :: files.list_dir(directory) ?? return Err(envmodel_source_loader_error(directory, "{err}"))
         found := [String]{}
         loop entry in entries {
-            if !entry.name.ends_with(".{FILE_EXT}") || entry.name == ".{FILE_EXT}" -> next
+            if !entry.name.ends_with(".{FILE_EXT}") || entry.name == (".{FILE_EXT}") -> next
             canonical :: files.canonicalize(entry.path) ?? return Err(envmodel_source_loader_error(entry.path, "{err}"))
             if !envmodel_path_within(canonical, self.root) || !files.is_file(canonical) {
                 return Err(envmodel_source_loader_error(entry.path, "source import resolves outside the environment root"))

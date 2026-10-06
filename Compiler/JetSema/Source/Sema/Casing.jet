@@ -84,7 +84,53 @@ fn sema_casing_join(scalars: [String], start: Int, end: Int) -> String Never! {
     out
 }
 
+// The ASCII reading of sema_casing_has_case, straight from the name's bytes
+// (no per-scalar strings); None when the name is not all ASCII.
+fn sema_casing_ascii_has_case(name: String, case: SemaNameCase) -> Bool? Never! {
+    bytes :: name.bytes()
+    count :: bytes.len()
+    loop index in 0..<count {
+        if Int.from_u8(bytes[index]) >= 128 -> return None
+    }
+    if name == "_" -> return Val(true)
+    start := 0
+    if count > 0 && Int.from_u8(bytes[0]) == 95 -> start = 1
+    if start >= count || Int.from_u8(bytes[start]) == 95 || Int.from_u8(bytes[count - 1]) == 95 -> return Val(false)
+    rest :: start + 1
+    loop index in rest..<count {
+        if Int.from_u8(bytes[index]) == 95 && Int.from_u8(bytes[index - 1]) == 95 -> return Val(false)
+    }
+    first :: Int.from_u8(bytes[start])
+    upper :: first >= 65 && first <= 90
+    lower :: first >= 97 && first <= 122
+    if case == {
+        .Pascal -> {
+            if !upper -> return Val(false)
+            loop index in rest..<count {
+                code :: Int.from_u8(bytes[index])
+                if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) -> return Val(false)
+            }
+        }
+        .Snake -> {
+            if !lower -> return Val(false)
+            loop index in rest..<count {
+                code :: Int.from_u8(bytes[index])
+                if !(code == 95 || (code >= 48 && code <= 57) || (code >= 97 && code <= 122)) -> return Val(false)
+            }
+        }
+        .Screaming -> {
+            if !upper -> return Val(false)
+            loop index in rest..<count {
+                code :: Int.from_u8(bytes[index])
+                if !(code == 95 || (code >= 48 && code <= 57) || (code >= 65 && code <= 90)) -> return Val(false)
+            }
+        }
+    }
+    Val(true)
+}
+
 fn sema_casing_has_case(name: String, case: SemaNameCase) -> Bool {
+    if sema_casing_ascii_has_case(name, case) == .Val(ascii) -> return ascii
     if name == "_" -> return true
     body := name
     if body.starts_with("_") -> body = sema_casing_drop_first_byte(body)
@@ -303,6 +349,11 @@ fn sema_casing_pascal(name: String, span: Span, category: String, diagnostics: &
 }
 
 fn sema_casing_snake(name: String, span: Span, category: String, diagnostics: &[Diagnostic]) {
+    // Most names have no `.` or `-` to split on.
+    if !name.contains(".") && !name.contains("-") {
+        sema_casing_check(name, span, category, SemaNameCase.Snake, &diagnostics)
+        return
+    }
     loop part in name.split(".") {
         loop segment in part.split("-") -> sema_casing_check(segment, span, category, SemaNameCase.Snake, &diagnostics)
     }

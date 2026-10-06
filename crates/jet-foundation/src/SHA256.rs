@@ -275,8 +275,14 @@ mod rooted_authority {
 
     const O_RDONLY: i32 = 0;
     const O_WRONLY: i32 = 1;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     const O_CREAT: i32 = 0o100;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_CREAT: i32 = 0x0200;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     const O_EXCL: i32 = 0o200;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_EXCL: i32 = 0x0800;
     #[cfg(any(target_os = "linux", target_os = "android"))]
     const O_CLOEXEC: i32 = 0o2000000;
     #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -837,6 +843,24 @@ mod rooted_authority {
             && left.length == right.length
             && left.modified == right.modified
             && left.links == right.links
+    }
+
+    #[cfg(test)]
+    mod open_flag_tests {
+        use super::*;
+
+        /// Exclusive child creation uses each system's own `fcntl.h` bits:
+        /// Darwin's O_CREAT/O_EXCL are 0x200/0x800, not Linux's 0o100/0o200
+        /// (the Linux bits on Darwin are O_SHLOCK/O_EXLOCK, so the create was
+        /// neither created nor exclusive).
+        #[test]
+        fn exclusive_create_flags_match_the_target_headers() {
+            let flags = O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC;
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            assert_eq!(flags, 0o2400301);
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            assert_eq!(flags, 0x0100_0B01);
+        }
     }
 }
 

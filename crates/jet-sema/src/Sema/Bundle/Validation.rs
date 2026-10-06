@@ -336,16 +336,6 @@ pub(crate) fn register_func_item(
     diags: &mut Vec<Diagnostic>,
     prelude_enabled: bool,
 ) {
-    if f.name == Syntax::BUILTIN_ASSERT_EQ {
-        diags.push(Diagnostic::error(
-            "E0106",
-            format!("the name `{}` is built in and can't be redefined", f.name),
-            format!("`{}` is provided by the language itself", f.name),
-            "choose a different name for this function".to_string(),
-            Some(f.name_span),
-        ));
-        return;
-    }
     if prelude_enabled && crate::Sema::Prelude::is_prelude_name(&f.name) {
         diags.push(crate::Sema::Prelude::shadow_warning(&f.name, f.name_span));
     }
@@ -1763,8 +1753,8 @@ impl MainBodyPass<'_, '_> {
 /// Check every body of one module. Bodies are independent jobs checked on a
 /// bounded worker pool (see `Parallel`) against the module's final tables;
 /// their products are merged in source order, so the checked module,
-/// diagnostics and facts equal a serial run's. `JET_CHECK_THREADS=1` runs the
-/// same jobs one by one.
+/// diagnostics and facts equal a serial run's. `--threads 1` runs the same
+/// jobs one by one.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn check_module_bodies(
     module: &mut crate::AST::LoadedModule,
