@@ -29,6 +29,7 @@ const sourceRoots = [
   "Compiler/JetSema/Source",
   "Compiler/JetCodegen/Source/Codegen",
   "Compiler/JetCodegen/Source/Emit",
+  "Compiler/JetRepl/Source",
   "Compiler/JetEval/Source",
   "Compiler/JetDriver/Source",
   "Compiler/JetCli/Source",

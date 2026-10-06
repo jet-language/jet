@@ -1,0 +1,55 @@
+// Rust AST/comptime.rs CtValue::to_json and CtFloat::to_json. These are the
+// canonical value bytes consumed by eval, REPL, and notebook adapters.
+pub fn ast_comptime_value_json(value: CtValue) -> String Never! {
+    if value == {
+        .Int(number) -> "{number}"
+        .Float(number) -> {
+            rendered :: ast_comptime_float_text(number)
+            if rendered.contains(".") || rendered.contains("e") || rendered.contains("E") -> rendered else -> "{rendered}.0"
+        }
+        .Bool(flag) -> if flag -> "true" else -> "false"
+        .Char(character) -> "\"{character}\""
+        .Str(text) -> "\"{ast_comptime_debug_escape(text, false)}\""
+        .BigInt(decimal) -> "\"{decimal}\""
+        .Bytes(bytes) -> {
+            parts :: loop byte in bytes -> "{byte}"
+            "[{parts.join(",")}]"
+        }
+        .List(values) -> {
+            parts :: loop item in values -> ast_comptime_value_json(item)
+            "[{parts.join(",")}]"
+        }
+        .Map(entries) -> {
+            parts :: loop entry in entries -> "{ast_comptime_value_json(ast_comptime_key_to_value(entry.key))}:{ast_comptime_value_json(entry.value)}"
+            "{{{parts.join(",")}}}"
+        }
+        .Struct(_, fields) -> {
+            parts := [String]{}
+            loop field in fields {
+                if ast_comptime_memo_storage_name(field.name) -> next
+                &parts.push("\"{field.name}\":{ast_comptime_value_json(field.value)}")
+            }
+            "{{{parts.join(",")}}}"
+        }
+        .Enum(_, variant, args) -> {
+            if args.len() == 0 -> return "\"{variant}\""
+            parts := [String]{}
+            labeled := true
+            loop argument in args {
+                if argument.label == .Val(label) {
+                    &parts.push("\"{label}\":{ast_comptime_value_json(argument.value)}")
+                } else {
+                    labeled = false
+                    &parts.push(ast_comptime_value_json(argument.value))
+                }
+            }
+            if labeled -> "{{\"{variant}\":{{{parts.join(",")}}}}}" else -> "{{\"{variant}\":[{parts.join(",")}]}}"
+        }
+        .Present(inner) -> ast_comptime_value_json(inner)
+        .Failed(report) -> if report == {
+            .Clean(_) -> "null"
+            .Told(inner) -> "{{\"err\":{ast_comptime_value_json(inner)}}}"
+        }
+        .Unit | .Closure(_) -> "null"
+    }
+}
