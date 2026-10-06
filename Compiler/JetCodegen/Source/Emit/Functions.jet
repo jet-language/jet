@@ -1393,8 +1393,15 @@ fn jet_rust_emit_trait_definition(ctx: &JetRustEmitContext, definition: MIRTrait
     } else {
         &lines.push("{visibility}trait {name} {{")
     }
-    loop associated in definition.associated_types -> &lines.push("    type {jet_rust_emit_associated_type_name(associated.name)};")
+    previous_associated_types := ctx.current_associated_types
+    associated_names := [String]{}
+    loop associated in definition.associated_types {
+        &associated_names.push(associated.name)
+        &lines.push("    type {jet_rust_emit_associated_type_name(associated.name)};")
+    }
+    ctx.current_associated_types = associated_names
     loop method in definition.methods -> jet_rust_emit_trait_method_definition(&ctx, definition, method, &lines)
+    ctx.current_associated_types = previous_associated_types
     &lines.push("}}")
 }
 

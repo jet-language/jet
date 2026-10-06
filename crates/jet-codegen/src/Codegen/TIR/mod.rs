@@ -5159,7 +5159,12 @@ fn lower_checked_tir_program_on_stack(
                         &mut funcs,
                         &mut contract_rows,
                     );
-                    if f.inline_foreign.is_some() || !f.type_params.is_empty() {
+                    // D-VARARGBOUND1: a trait-bounded variadic is a template;
+                    // only its per-arity `__vaN` instances are callable.
+                    if f.inline_foreign.is_some()
+                        || !f.type_params.is_empty()
+                        || cx.variadic_bound_fns.contains_key(&f.name)
+                    {
                         continue;
                     }
                     // Resident `jet run` has no AST fallback. Lower sibling

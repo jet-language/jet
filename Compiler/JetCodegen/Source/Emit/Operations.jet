@@ -4607,6 +4607,9 @@ fn jet_rust_emit_handle_method_values(ctx: &JetRustEmitContext, function: MIRFun
     values := [MIRValueID]{receiver}
     loop arg in args -> &values.push(arg)
     row :: jet_rust_emit_prelude_route(ctx, call, false) ?? return jet_rust_emit_semantic_values(&ctx, function, call, values)
+    // MIRRust prelude_handle_method: `Path.home()` is receiver-free; its Unit
+    // placeholder receiver never reaches the nullary Prelude row.
+    if row.member == "path.home" && args.len() == 0 -> return jet_rust_emit_route_call(&ctx, call, [String]{})
     if values.len() < row.signature.arity || values.len() > row.signature.max_arity || row.signature.borrow_mask.len() != values.len() -> return jet_rust_emit_semantic_values(&ctx, function, call, values)
     reader_route :: row.module_name == "core.handle" && (row.member.starts_with("reader.read_") || row.member == "reader.seek" || row.member == "reader.skip" || row.member == "reader.take" || row.member == "cursor.skip_ws" || row.member == "cursor.take_until")
     commit_route :: row.module_name == "core.transaction" && row.member == "commit"

@@ -2371,6 +2371,7 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
         "WatchKind",
         &["Created", "Modified", "Removed", "Error", "Exited", "Ready"],
     ),
+    ("LateEventDisposition", &["Drop", "SideOutput"]),
     ("NetReadyInterest", &["Read", "Write", "ReadWrite"]),
     (
         "WsError",

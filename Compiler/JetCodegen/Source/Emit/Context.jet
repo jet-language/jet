@@ -172,6 +172,9 @@ pub struct JetRustEmitContext {
     pub failure: JetRustEmitFailure?
     pub current_function: MIRFunctionID?
     pub current_generic_params: [MIRGenericParam]
+    // Associated type names of the trait whose declaration is being emitted;
+    // inside it they spell `Self::<name>` (MIRRust trait_associated_types).
+    pub current_associated_types: [String]
     // `"function:param"` keys of list write parameters emitted as `&mut [T]`
     // because a caller fills them with a range write window.
     pub window_params: [String:Bool]
@@ -1044,6 +1047,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         failure: None,
         current_function: None,
         current_generic_params: [MIRGenericParam]{},
+        current_associated_types: [String]{},
         window_params: jet_rust_emit_collect_window_params(program),
         source_index: jet_codegen_source_index(program.source_files),
         type_index_by_id: type_index_by_id,

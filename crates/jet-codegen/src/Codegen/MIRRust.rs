@@ -3414,6 +3414,9 @@ struct RustEmitter<'a> {
     history_callable_arities: std::cell::RefCell<BTreeSet<usize>>,
     history_callable_modes: std::cell::RefCell<BTreeSet<(usize, String)>>,
     generic_scopes: std::cell::RefCell<Vec<&'a [MirGenericParam]>>,
+    /// Associated types of the trait declaration being printed; inside it a
+    /// bare `Elem` is the implementor's `Self::Elem`.
+    trait_associated_types: std::cell::Cell<&'a [MirAssociatedTypeDecl]>,
     history_current_function: std::cell::Cell<Option<MirFunctionId>>,
     /// Control-flow state of the function body being printed.
     cfg_state: std::cell::RefCell<Option<MirCfgState>>,
@@ -3617,6 +3620,7 @@ impl<'a> RustEmitter<'a> {
             history_callable_arities: std::cell::RefCell::new(BTreeSet::new()),
             history_callable_modes: std::cell::RefCell::new(BTreeSet::new()),
             generic_scopes: std::cell::RefCell::new(Vec::new()),
+            trait_associated_types: std::cell::Cell::new(&[]),
             history_current_function: std::cell::Cell::new(None),
             cfg_state: std::cell::RefCell::new(None),
             history_runtime_metadata: std::cell::OnceCell::new(),
@@ -4551,14 +4555,18 @@ impl<'a> RustEmitter<'a> {
                             let MirTypeDefKind::Enum { variants, .. } = &def.kind else {
                                 return false;
                             };
+                            // A union is a member set: sema sorts its carrier
+                            // variants by leaf name, while a checked identity
+                            // keeps source order and canonical Core keys.
                             variants.len() == members.len()
-                                && variants.iter().zip(members).all(|(variant, member)| {
-                                    variant.name == member.name()
-                                        && matches!(
+                                && members.iter().all(|member| {
+                                    variants.iter().any(|variant| {
+                                        matches!(
                                             &variant.payload,
                                             MirVariantPayload::Single(payload)
                                                 if payload.same_checked_type(member)
                                         )
+                                    })
                                 })
                         })
                     });
@@ -5661,6 +5669,15 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn rust_apply_type(&self, name: &MirNominalRef, args: &[MirType]) -> String {
+        if args.is_empty()
+            && self
+                .trait_associated_types
+                .get()
+                .iter()
+                .any(|associated| associated.name == name.name)
+        {
+            return format!("Self::{}", mangle(&name.name));
+        }
         if self.is_active_generic_param(&name.name) {
             if !args.is_empty() {
                 panic!(
@@ -6030,6 +6047,27 @@ impl<'a> RustEmitter<'a> {
         }
         if let Some(allocator) = crate::Codegen::alloc_handle_rust_type(native_name) {
             return format!("{}{}", self.config.root_prefix, allocator);
+        }
+        // Prelude carriers that Context::rust_type also spells without a
+        // declaration row; a user declaration of the same name still wins.
+        if !self.types_by_name.contains_key(&name.name) {
+            let root = &self.config.root_prefix;
+            match (name.name.as_str(), args) {
+                (jet_foundation::Syntax::TYPE_SHARED_REVISION_ERROR, []) => {
+                    return format!("{root}jet_std::JetSharedRevisionError");
+                }
+                (jet_foundation::Syntax::TYPE_SHARED_SNAPSHOT, [value, update]) => {
+                    return format!(
+                        "{root}jet_std::JetSharedSnapshot<{}, {}>",
+                        self.rust_type(value),
+                        self.rust_type(update)
+                    );
+                }
+                ("ComputeViewMut", [_] | []) => return format!("{root}JetComputeViewMut<'_>"),
+                ("TransformError", []) => return format!("{root}JetErr"),
+                ("BrowserTestServer", []) => return format!("{root}JetBrowserTestServer"),
+                _ => {}
+            }
         }
         let head = self.nominal_name(&name.name);
         if args.is_empty() {
@@ -6836,7 +6874,7 @@ impl<'a> RustEmitter<'a> {
 
     fn emit_trait_def(
         &self,
-        definition: &MirTraitDef,
+        definition: &'a MirTraitDef,
         emitted_methods: &mut BTreeSet<MirFunctionId>,
         out: &mut String,
     ) {
@@ -6860,6 +6898,7 @@ impl<'a> RustEmitter<'a> {
         for associated in &definition.associated_types {
             let _ = writeln!(out, "    type {};", mangle(&associated.name));
         }
+        let previous_associated = self.trait_associated_types.replace(&definition.associated_types);
         if self.is_synthetic_rollback_trait(definition) {
             for method in self.synthetic_rollback_methods(definition) {
                 self.emit_trait_method(definition, &method, emitted_methods, out);
@@ -6869,6 +6908,7 @@ impl<'a> RustEmitter<'a> {
                 self.emit_trait_method(definition, method, emitted_methods, out);
             }
         }
+        self.trait_associated_types.set(previous_associated);
         let _ = writeln!(out, "}}\n");
     }
 
@@ -25631,6 +25671,15 @@ impl<'a> RustEmitter<'a> {
         if route.member == "callback_event_stop" {
             if !args.is_empty() {
                 panic!("callback event stop route has no explicit arguments");
+            }
+            return self.prelude_call_args_exact(call, &[]);
+        }
+        // `Path.home()` is receiver-free: the TIR handle method carries a Unit
+        // placeholder receiver the nullary Prelude row never takes (MIREval
+        // applies the same rule).
+        if route.member == "path.home" {
+            if !args.is_empty() {
+                panic!("MIR path.home handle method received unexpected arguments");
             }
             return self.prelude_call_args_exact(call, &[]);
         }

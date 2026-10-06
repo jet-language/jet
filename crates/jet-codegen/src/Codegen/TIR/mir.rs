@@ -9076,7 +9076,7 @@ impl<'a> LowerCtx<'a> {
                         match binding {
                             MirPatternBinding::Wildcard => {}
                             MirPatternBinding::Bind { name, .. } => {
-                                let ty = ctx.variant_payload_type(owner, variant, index)?;
+                                let ty = ctx.subject_variant_payload_type(owner, subject_ty, variant, index)?;
                                 if let Some(window) = window {
                                     let place = ctx.project_payload_place(
                                         window,
@@ -9103,7 +9103,7 @@ impl<'a> LowerCtx<'a> {
                                 ctx.bind_pattern_value(name, ty, value, mutable, reuse_bindings)?;
                             }
                             MirPatternBinding::Range { lo, hi } => {
-                                let ty = ctx.variant_payload_type(owner, variant, index)?;
+                                let ty = ctx.subject_variant_payload_type(owner, subject_ty, variant, index)?;
                                 let value = ctx.emit_checked(
                                     "pattern",
                                     Some(&ty),
@@ -9117,9 +9117,7 @@ impl<'a> LowerCtx<'a> {
                                 tests.push(ctx.lower_numeric_range(value, &ty, *lo, *hi)?);
                             }
                             MirPatternBinding::Nested(inner) => {
-                                let ty = ctx
-                                    .enum_payload_type_for(subject_ty, variant, index)
-                                    .or_else(|_| ctx.variant_payload_type(owner, variant, index))?;
+                                let ty = ctx.subject_variant_payload_type(owner, subject_ty, variant, index)?;
                                 let value = ctx.emit_checked(
                                     "pattern",
                                     Some(&ty),
@@ -9337,12 +9335,12 @@ impl<'a> LowerCtx<'a> {
                     let (field_id, value_ty, binding) = match field {
                         MirPatternField::Bind { field, local, .. } => (
                             *field,
-                            self.field_type_for_id(owner, *field)?,
+                            self.subject_field_type(owner, subject_ty, *field)?,
                             Some(local.as_str()),
                         ),
                         MirPatternField::Value {
                             field, value: _, ..
-                        } => (*field, self.field_type_for_id(owner, *field)?, None),
+                        } => (*field, self.subject_field_type(owner, subject_ty, *field)?, None),
                     };
                     if let (Some(window), Some(name)) = (window, binding) {
                         let span = self.span();
@@ -9657,7 +9655,7 @@ impl<'a> LowerCtx<'a> {
                 for (index, binding) in bindings.iter().enumerate() {
                     match binding {
                         MirPatternBinding::Bind { name, .. } => {
-                            let ty = self.variant_payload_type(owner, variant, index)?;
+                            let ty = self.subject_variant_payload_type(owner, subject_ty, variant, index)?;
                             if let Some(window) = window {
                                 let kind = MirPayloadKind::Enum {
                                     owner,
@@ -9681,9 +9679,7 @@ impl<'a> LowerCtx<'a> {
                             self.bind_pattern_value(name, ty, value, mutable, false)?;
                         }
                         MirPatternBinding::Nested(inner) => {
-                            let ty = self
-                                .enum_payload_type_for(subject_ty, variant, index)
-                                .or_else(|_| self.variant_payload_type(owner, variant, index))?;
+                            let ty = self.subject_variant_payload_type(owner, subject_ty, variant, index)?;
                             let value = self.emit_checked(
                                 "pattern",
                                 Some(&ty),
@@ -9804,19 +9800,40 @@ impl<'a> LowerCtx<'a> {
         index: usize,
     ) -> Result<Type, LowerError> {
         let owner = self.field_owner_id_for_type(ty)?;
+        self.subject_variant_payload_type(owner, ty, variant, index)
+    }
+
+    /// The declared payload slot of `variant` on the checked `owner`,
+    /// instantiated with the generic arguments of the matched subject type.
+    fn subject_variant_payload_type(
+        &self,
+        owner: MirTypeId,
+        subject_ty: &Type,
+        variant: &str,
+        index: usize,
+    ) -> Result<Type, LowerError> {
         let payload = self.variant_payload_type(owner, variant, index)?;
-        if let Type::Apply { args, .. } = ty {
-            if let Some(definition) = self.type_defs.iter().find(|definition| definition.id == owner) {
-                let substitutions = definition
-                    .generic_params
-                    .iter()
-                    .zip(args)
-                    .map(|(param, arg)| (param.name.clone(), arg.clone()))
-                    .collect();
-                return Ok(crate::Generics::substitute_type(&payload, &substitutions));
-            }
-        }
-        Ok(payload)
+        Ok(self.instantiate_owner_member_type(owner, subject_ty, &payload))
+    }
+
+    /// Owner declarations keep their generic parameters (`T`, `E`); a member
+    /// read through an applied subject (`HookOutcome<Int, String>`) takes the
+    /// subject's arguments. Non-applied subjects keep the declared type.
+    fn instantiate_owner_member_type(&self, owner: MirTypeId, subject_ty: &Type, member: &Type) -> Type {
+        let normalized = self.normalize_contextual_type(subject_ty);
+        let Type::Apply { args, .. } = field_owner_type(&normalized) else {
+            return member.clone();
+        };
+        let Some(definition) = self.type_defs.iter().find(|definition| definition.id == owner) else {
+            return member.clone();
+        };
+        let substitutions = definition
+            .generic_params
+            .iter()
+            .zip(args)
+            .map(|(param, arg)| (param.name.clone(), arg.clone()))
+            .collect();
+        crate::Generics::substitute_type(member, &substitutions)
     }
 
     fn variant_payload_type(
@@ -9862,6 +9879,18 @@ impl<'a> LowerCtx<'a> {
                     )
                 }),
         }
+    }
+
+    /// The declared type of `field` on the checked `owner`, instantiated with
+    /// the generic arguments of the matched subject type.
+    fn subject_field_type(
+        &self,
+        owner: MirTypeId,
+        subject_ty: &Type,
+        field: MirFieldId,
+    ) -> Result<Type, LowerError> {
+        let declared = self.field_type_for_id(owner, field)?;
+        Ok(self.instantiate_owner_member_type(owner, subject_ty, &declared))
     }
 
     fn field_type_for_id(&self, owner: MirTypeId, field: MirFieldId) -> Result<Type, LowerError> {
@@ -9910,22 +9939,7 @@ impl<'a> LowerCtx<'a> {
         let owner = self.field_owner_id_for_type(ty)?;
         let field_id = self.field_id_for(owner, field)?;
         let field_ty = self.field_type_for_id(owner, field_id)?;
-        if let Type::Apply { args, .. } = ty {
-            if let Some(definition) = self
-                .type_defs
-                .iter()
-                .find(|definition| definition.id == owner)
-            {
-                let substitutions = definition
-                    .generic_params
-                    .iter()
-                    .zip(args)
-                    .map(|(param, arg)| (param.name.clone(), arg.clone()))
-                    .collect();
-                return Ok(crate::Generics::substitute_type(&field_ty, &substitutions));
-            }
-        }
-        Ok(field_ty)
+        Ok(self.instantiate_owner_member_type(owner, ty, &field_ty))
     }
 
     pub(super) fn checked_field_type(&self, ty: &Type, field: &str) -> Result<Type, LowerError> {

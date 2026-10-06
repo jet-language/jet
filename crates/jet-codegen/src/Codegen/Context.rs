@@ -1811,6 +1811,7 @@ impl Cx {
             (Some("core.jobs"), "JobQueueStatus") => Some("JobQueueStatus"),
             (Some("core.jobs"), "JobQueueState") => Some("JobQueueState"),
             (Some("core.jobs"), "JobQueueDeliveryPolicy") => Some("JobQueueDeliveryPolicy"),
+            (Some("core.time"), "Duration") => Some("Duration"),
             _ => None,
         }
     }

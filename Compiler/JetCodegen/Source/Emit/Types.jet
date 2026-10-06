@@ -598,6 +598,7 @@ fn jet_rust_emit_current_generic_parameter(ctx: &JetRustEmitContext, name: MIRNo
 
 fn jet_rust_emit_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef, args: [MIRType]) -> String Never! {
     if args.len() == 0 && jet_rust_emit_current_generic_parameter(&ctx, name) -> return jet_rust_emit_mangle(name.name)
+    if args.len() == 0 && ctx.current_associated_types.contains(name.name) -> return "Self::{jet_rust_emit_associated_type_name(name.name)}"
     if args.len() == 0 && name.name == "Unit" -> return "()"
     if args.len() == 0 && name.name == "Never" -> return "std::convert::Infallible"
     if args.len() == 0 && name.name == "Stm" -> return "{ctx.config.root_prefix}JetSharedTransaction"
@@ -2551,6 +2552,15 @@ fn jet_rust_emit_native_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef
         if name.name == "Expired" && args.len() == 0 -> return Val("JetExpired")
         if name.name == "Cache" && args.len() == 2 -> return Val("JetCache<{jet_rust_emit_type(&ctx, args[0])}, {jet_rust_emit_type(&ctx, args[1])}>")
         if name.name == "Shared.Weak" && args.len() == 1 -> return Val("{root}jet_std::JetSharedWeak<{jet_rust_emit_type(&ctx, args[0])}>")
+    }
+    // MIRRust rust_apply_type: Prelude carriers Context::rust_type spells
+    // without a declaration row; a user type wins.
+    if !user_declared {
+        if name.name == "SharedRevisionError" && args.len() == 0 -> return Val("{root}jet_std::JetSharedRevisionError")
+        if name.name == "SharedSnapshot" && args.len() == 2 -> return Val("{root}jet_std::JetSharedSnapshot<{jet_rust_emit_type(&ctx, args[0])}, {jet_rust_emit_type(&ctx, args[1])}>")
+        if name.name == "ComputeViewMut" && args.len() <= 1 -> return Val("{root}JetComputeViewMut<'_>")
+        if name.name == "TransformError" && args.len() == 0 -> return Val("{root}JetErr")
+        if name.name == "BrowserTestServer" && args.len() == 0 -> return Val("{root}JetBrowserTestServer")
     }
     if !user_declared {
         layout :: if name.name == {
