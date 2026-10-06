@@ -62,6 +62,11 @@ pub enum JetCLIPlan {
     // `jet emit --rust <file>`: print the Rust generated for the entry
     // (CmdDevTools.rs `run_emit_rust`).
     Emit(file: String, source: String, color: Bool, json: Bool)
+    // `jet fill <file>[:line]` (Source/main.rs `"fill"`, Fill.jet): the typed
+    // goal report; `target` keeps its optional `:line` suffix.
+    Fill(target: String, json: Bool, color: Bool)
+    // `jet diff|merge ...` (StructuralMerge.jet): `argv` starts at the command word.
+    Structural(argv: [String], command: String, json: Bool)
     // `jet lint --a11y <file>`: report the accessibility lints of the entry
     // (CmdDevTools.rs `run_lint_a11y`); `notice` is resolution's stderr.
     Lint(file: String, source: String, color: Bool, notice: String)
@@ -1173,9 +1178,8 @@ fn jet_cli_plan(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
     if jet_cli_engine_commands(command, argv) == .Val(plan) -> return plan
     if command == {
         "help" -> {
-            // `help diff|merge` is bespoke structural help (SolCLI1), not ported yet.
-            if args.len() > 1 && (args[1] == "diff" || args[1] == "merge") && jet_cli_is_help_order(jet_cli_help_order(jet_argv)) -> return jet_cli_not_ported("help {args[1]}", color)
-            return jet_cli_help(jet_argv, args, None, color, json)
+            bespoke :: if args.len() > 1 -> jet_cli_structural_help(args[1]) else -> String?{None}
+            return jet_cli_help(jet_argv, args, bespoke, color, json)
         }
         "version" -> return jet_cli_version(json)
         "man" -> return jet_cli_renderable(jet_cli_man_page(), json)
@@ -1189,6 +1193,20 @@ fn jet_cli_plan(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
         "new" -> return jet_cli_new(jet_argv, args, color, quiet)
         "doc" -> return jet_cli_doc(jet_argv, args, color, quiet, json, jet_argv.contains("--check"))
         "emit" -> return jet_cli_emit(jet_argv, args, color, quiet, json)
+        "fill" -> {
+            if args.len() < 2 -> return jet_cli_done("", if quiet -> "" else -> jet_cli_command_help("fill"), JET_DRIVER_EXIT_USAGE)
+            return JetCLIPlan.Fill{target: args[1], json: json, color: color}
+        }
+        "diff" | "merge" -> {
+            start := 0
+            loop (index, word) in argv {
+                if word == command {
+                    start = index
+                    break
+                }
+            }
+            return JetCLIPlan.Structural{argv: jet_cli_tail(argv, start), command: command, json: json}
+        }
         "lint" -> return jet_cli_lint(jet_argv, args, color, quiet)
         "fmt" -> return jet_cli_fmt(argv, jet_argv, args, color, quiet)
         "find" -> return jet_cli_find(jet_cli_tail(argv, 1), color, json)

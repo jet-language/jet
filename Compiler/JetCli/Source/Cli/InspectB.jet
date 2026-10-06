@@ -977,9 +977,22 @@ fn jet_cli_sbom(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan 
     jet_cli_not_ported("inspect sbom", color)
 }
 
-// `jet inspect bind …` (CmdDevTools.rs `run_bind`): the usage page; the
-// language binders and the C header backend are not ported.
-fn jet_cli_bind(args: [String], color: Bool) -> JetCLIPlan Never! {
+// `jet inspect bind …` / `jet bind …` (CmdDevTools.rs `run_bind`): the usage
+// page, and the data-schema binders (`json|csv|sql|xml|proto`, Bindings.jet)
+// with an explicit `-o`. Their default output needs canonical
+// `Loader::selected_project_root` (workspace > repository > package), which
+// the bootstrap host does not have yet; the language binders and the C header
+// backend are not ported.
+fn jet_cli_bind(args: [String], color: Bool) -[FS]> JetCLIPlan Never! {
+    if args.len() > 0 && (args[0] == "json" || args[0] == "csv" || args[0] == "sql" || args[0] == "xml" || args[0] == "proto") {
+        if jet_cli_data_bind_prepare(args[0], jet_cli_tail(args, 1), color) == {
+            .Done(plan) -> return plan
+            .Prepared(job) -> {
+                if job.output != None -> return jet_cli_data_bind_finish(job, "")
+                return jet_cli_not_ported("inspect bind {job.format} <default output>", color)
+            }
+        }
+    }
     if args.len() > 0 && !jet_cli_is_help_flag(args[0]) -> return jet_cli_not_ported("inspect bind", color)
     usage :: "usage: {JET_CLI_BINARY} inspect bind <header.h> [--pkg <lib>] [--overlay <path>] [--link <lib>] [-o <out.jet>]\n       {JET_CLI_BINARY} inspect bind <json|csv|sql|xml|proto> <input> [--type <Type>] [-o <output>]\n\nGenerate a C binding cache from a header (S59). The output is\na `#Bindgen module c.<lib>.__bindgen__` file, by default written\nto .jet/bindings/c/<lib>.jet. The compiler also runs this\nautomatically on a cache miss; `jet inspect bind` is the manual refresh.\n"
     jet_cli_done("", usage, if args.len() == 0 -> JET_DRIVER_EXIT_USAGE else -> JET_DRIVER_EXIT_OK)
