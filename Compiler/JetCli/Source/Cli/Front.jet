@@ -45,6 +45,9 @@ pub enum JetCLIPlan {
     // `jet new <name>`: write the project folder (Source/CmdCompile.rs
     // `run_new`); `template` is "" for the print-only starter.
     New(name: String, template: String, annotated: Bool, quiet: Bool, color: Bool)
+    // An inspect projection over a checked entry (Inspect.jet): the host
+    // compiles `job.file`, then projects the checked program.
+    Inspect(job: JetCLIInspectJob)
 }
 
 // The `jet test` options the Jet host carries out (Source/CmdCompile.rs
@@ -123,14 +126,16 @@ fn jet_cli_fail(code: String, what: String, why: String, fix: String, color: Boo
 
 // A real `jet` command whose Jet port has not landed: refused, never guessed.
 fn jet_cli_not_ported(command: String, color: Bool) -> JetCLIPlan Never! {
-    jet_cli_fail(
-        "E2104",
-        "`jet {command}` is not part of the Jet-hosted CLI yet",
-        jet_cli_why("E2104"),
-        "run `jet {command}` with the Rust-hosted `jet` until the Jet CLI owns it",
-        color,
-        JET_DRIVER_EXIT_USAGE,
-    )
+    JetCLIPlan.Done{output: jet_cli_not_ported_output(command, color)}
+}
+
+// The bytes and status of that refusal, for a host-side projection.
+fn jet_cli_not_ported_output(command: String, color: Bool) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{
+        stdout: "",
+        stderr: jet_cli_report("E2104", "`jet {command}` is not part of the Jet-hosted CLI yet", jet_cli_why("E2104"), "run `jet {command}` with the Rust-hosted `jet` until the Jet CLI owns it", color),
+        exit_code: JET_DRIVER_EXIT_USAGE,
+    }
 }
 
 fn jet_cli_prefix(items: [String], end: Int) -> [String] Never! {
