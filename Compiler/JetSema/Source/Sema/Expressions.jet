@@ -2090,6 +2090,21 @@ fn sema_expr_comptime_target(environment: SemaScopeEnvironment, program: SemaPro
     None
 }
 
+// Whether sema_expr_comptime_target's target for `symbol` is declared
+// `comptime`, read in place from the graph rows.
+fn sema_expr_comptime_target_declared(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, symbol: SymbolID) -> Bool {
+    if program.registration_graph == .Val(graph) {
+        row :: graph.callable_rows.get(symbol.key) ?? return false
+        return if row == {
+            .Function(module_index, index) -> graph.modules[module_index].functions[index].declaration.is_comptime
+            .NominalMethod(module_index, owner, index) -> graph.modules[module_index].nominals[owner].methods[index].declaration.is_comptime
+            else -> false
+        }
+    }
+    target :: sema_expr_comptime_target(environment, program, &scopes, symbol) ?? return false
+    target.declaration.is_comptime
+}
+
 fn sema_expr_comptime_value(value: TExpr) -> TComptimeValue? {
     if value.kind == {
         .IntLit(number, _) -> {
@@ -2163,9 +2178,12 @@ fn sema_expr_record_call_fact(environment: SemaScopeEnvironment, program: SemaPr
         discarded: false,
     })
     symbol :: callee ?? return true
-    target :: sema_expr_comptime_target(environment, program, &scopes, symbol) ?? return true
-    if !target.declaration.is_comptime -> return true
+    // Every early return here is the same `true`, and the target lookup is
+    // pure, so the cheap tests go first and only a `comptime` target builds
+    // its row (whose declaration copy is the callee's whole body).
     if scopes.comptime_execution_depth > 0 -> return true
+    if !sema_expr_comptime_target_declared(environment, program, &scopes, symbol) -> return true
+    target :: sema_expr_comptime_target(environment, program, &scopes, symbol) ?? return true
     args :: sema_expr_comptime_call_args(checked.value) ?? {
         &diagnostics.push(sema_error("E0956", span, "compile-time call `{target.path}` needs compile-time value arguments", "the deferred MIR evaluator receives only canonical TComptimeValue arguments", "pass supported compile-time values to this call"))
         return false

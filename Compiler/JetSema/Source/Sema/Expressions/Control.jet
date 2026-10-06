@@ -450,12 +450,31 @@ fn sema_failure_callee(expr: Expr?, environment: SemaScopeEnvironment, program: 
             index :: sema_scope_resolve_index(scopes, call.name) ?? return None
             symbol :: scopes.bindings[index].symbol
             if symbol.kind != SymbolKind.Function -> return None
-            item :: sema_scope_resolve_declaration(environment, program, symbol.id) ?? return None
-            if item == .Func(func) -> return Val(SemaFailureCallee{key: symbol.id.key, inferable: func.inline_foreign == None && sema_failure_contract_source(func.return_type) == "implicit default !Err"})
-            return None
+            inferable :: sema_failure_callee_inferable(environment, program, symbol.id) ?? return None
+            return Val(SemaFailureCallee{key: symbol.id.key, inferable: inferable})
         }
         else -> return None
     }
+}
+
+// For a declared function `id`: whether it is an ordinary body with no failure
+// contract written (sema_failure_callee); None when `id` declares no function.
+// A graph function is read at its row: resolving the declaration copied the
+// callee's whole body on every failing call.
+fn sema_failure_callee_inferable(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Bool? {
+    site :: sema_scope_declaration_site(environment, program, id) ?? return None
+    if site == .Function(module_index, row) {
+        graph_option :: program.registration_graph
+        graph :: graph_option ?? return None
+        return Val(sema_failure_function_inferable(graph.modules[module_index].functions[row].declaration))
+    }
+    item :: sema_scope_resolve_declaration(environment, program, id) ?? return None
+    if item == .Func(func) -> return Val(sema_failure_function_inferable(func))
+    None
+}
+
+fn sema_failure_function_inferable(func: Func) -> Bool {
+    func.inline_foreign == None && sema_failure_contract_source(func.return_type) == "implicit default !Err"
 }
 
 // #3708: one propagated failure of this body: the callee's key when the
