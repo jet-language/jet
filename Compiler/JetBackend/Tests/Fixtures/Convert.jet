@@ -267,11 +267,14 @@ fn fx_convert_float_integer_rejected(target: MIRType) -> MIRProgram Never! {
 fn fx_convert_float_i64_rejected() -> MIRProgram Never! { fx_convert_float_integer_rejected(fx_i64()) }
 fn fx_convert_float_int_rejected() -> MIRProgram Never! { fx_convert_float_integer_rejected(fx_int()) }
 
+// A miss prints the issues the lowering reported instead.
 fn fx_convert_has_issue(program: MIRProgram, message: String) -> Bool Never! {
     lowered :: lir_lower_entry(program, mir_function_id("run"))
     loop issue in lowered.issues {
         if issue.message == message -> return true
     }
+    loop issue in lowered.issues -> print("convert issue: {issue.message}")
+    print("convert: expected issue: {message}")
     false
 }
 
