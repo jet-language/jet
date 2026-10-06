@@ -757,12 +757,11 @@ fn jet_cli_inspect_env(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPla
 }
 
 // `jet inspect semindex <file.jet>` (CmdSemIndex.rs `run_semindex`): the
-// semantic index (jet-semindex) is not ported.
-fn jet_cli_semindex(args: [String], color: Bool, json: Bool) -> JetCLIPlan Never! {
-    if jet_cli_inspect_first_positional(args) == None {
-        return jet_cli_inspect_b_fail("E2104", "`jet inspect semindex` needs an entry file", "jet inspect semindex Examples/features/basics/hello.jet", color, json, JET_DRIVER_EXIT_USER_ERROR)
-    }
-    jet_cli_not_ported("inspect semindex", color)
+// semantic index of the checked entry, compiled by the host
+// (`JetCLIPlan.Semindex`).
+fn jet_cli_semindex(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
+    path :: jet_cli_inspect_first_positional(args) ?? return jet_cli_inspect_b_fail("E2104", "`jet inspect semindex` needs an entry file", "jet inspect semindex Examples/features/basics/hello.jet", color, json, JET_DRIVER_EXIT_USER_ERROR)
+    JetCLIPlan.Semindex{file: jet_cli_inspect_absolutize(path), color: color, json: json}
 }
 
 // `jet inspect output <file.jet> [<address>]` (CmdInspect.rs `run_output`):

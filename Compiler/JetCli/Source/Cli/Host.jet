@@ -661,6 +661,34 @@ fn jet_cli_doc_result(file: String, source: String, color: Bool, json: Bool, che
     JetDriverVerbOutput{stdout: "doc: generated {output_dir}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
+// `jet inspect semindex <file>` (CmdSemIndex.rs `run_semindex`): check the
+// entry through the Jet compiler, then print the semantic index summary or
+// its `inspect.semindex` status line. Load or check errors are reported on
+// stderr with exit 1.
+fn jet_cli_compile_semindex(file: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    compiled :: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Doc)
+    if compiled == {
+        .Refused(refusal) -> output = ~refusal
+        .Compiled(result, snapshot) -> output = jet_cli_semindex_result(file, color, json, result, snapshot)
+    }
+    output
+}
+
+fn jet_cli_semindex_result(file: String, color: Bool, json: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
+    diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+    if jet_cli_errors(diagnostics).len() > 0 {
+        if json -> return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "`jet inspect semindex --json` on a file with errors is not part of the Jet-hosted CLI yet", jet_cli_why("E2104"), "run `jet inspect semindex {file}` to read the errors, or use the Rust `jet` for their JSON reports", color), exit_code: JET_DRIVER_EXIT_USAGE}
+        source :: cli_files.read(file) ?? ""
+        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, diagnostics, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+    authority :: jet_cli_application_authority(result, None)
+    index :: jet_cli_build_semindex(result.doc_modules, JetCLISemEffectProjection{required: authority.required, granted: authority.granted, denied: authority.denied, authority: authority.authority})
+    if json -> return JetDriverVerbOutput{stdout: "{jet_cli_semindex_status_json(index)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: jet_cli_semindex_text(index), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
 // Unannotated because the compile verbs are (Request.jet `jet_cli_compile_file`).
 pub fn jet_cli_main(args: [String]) -> Int {
     plan :: jet_cli_front(args)
@@ -690,6 +718,7 @@ pub fn jet_cli_main(args: [String]) -> Int {
         }
         .Inspect(job) -> output = jet_cli_inspect_host(job)
         .InspectB(plan) -> output = jet_cli_inspect_b_host(plan)
+        .Semindex(file, color, json) -> output = jet_cli_compile_semindex(file, color, json)
     }
     if output.stdout.len() > 0 {
         out :: cli_term.stdout()
