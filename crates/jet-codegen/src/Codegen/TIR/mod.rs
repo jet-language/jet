@@ -12794,6 +12794,10 @@ pub struct TCaptureFacts {
     pub frozen: std::collections::BTreeSet<String>,
     pub materialized: std::collections::BTreeSet<String>,
     pub moved: std::collections::BTreeSet<String>,
+    /// `^name` captures (`Lambda::take_names`): the closure takes the
+    /// binding, which the scope never uses again (sema E0121), so a capture
+    /// the body only reads moves into the closure instead of copying.
+    pub taken: std::collections::BTreeSet<String>,
 }
 
 pub(crate) fn function_effect_facts(f: &crate::AST::Func) -> TEffectFacts {
@@ -12901,6 +12905,7 @@ pub(crate) fn lambda_capture_facts(lam: &crate::AST::Lambda) -> TCaptureFacts {
         frozen: lam.meta.frozen_captures.iter().cloned().collect(),
         materialized: lam.meta.materialized_captures.iter().cloned().collect(),
         moved: lam.meta.moved_captures.iter().cloned().collect(),
+        taken: lam.take_names.iter().map(|(name, _)| name.clone()).collect(),
     }
 }
 
