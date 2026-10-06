@@ -16,6 +16,13 @@ and flags in `crates/jet-cli/src/CLI.rs`; `node Compiler/Bootstrap/check-command
 Run `jet help <command>` for the complete options for one command; do not infer an
 option from an older guide.
 
+Help and version are human renderables, not machine records: `jet help --json`
+and `jet version --json` succeed with no output. Diagnostic essays instead
+use the `jet.status/v1` `explain` action under `--json`. `jet emit --rust --json`
+still writes the generated Rust verbatim; its machine mode affects diagnostic
+failures, not the emitted program. C and C++ driver aliases own their raw
+arguments (including `--help` and `--version`) before Jet parses global flags.
+
 ## Project jobs
 
 Write a named chore as `#Job fn deploy(region: String) { … }`, then run
