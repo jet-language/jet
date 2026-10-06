@@ -8706,14 +8706,17 @@ fn semantic_operation_is_pure(
     // `sender.close`, `receiver.close`, `clock.tick`, ...) mutates
     // runtime-owned shared state behind its handle, and so does a host
     // method on a runtime cell (`Shared.edit`, `Shared.set`, `Cell.edit`,
-    // `Pool.remove`, ...). None of that is part of the route's own effect
-    // row, so an unused unit or scalar result never makes the call dead.
+    // `Pool.remove`, ...) and an HTTP route registration (`mux.get`,
+    // `router.post`, ...), which adds the route to the mux or router behind
+    // its handle. None of that is part of the route's own effect row, so an
+    // unused unit or scalar result never makes the call dead.
     if matches!(
         operation,
         MirSemanticOp::ClosureMethod { .. }
             | MirSemanticOp::CoreClosureCall { .. }
             | MirSemanticOp::HandleMethod { .. }
             | MirSemanticOp::HostCall { .. }
+            | MirSemanticOp::HttpRouterRegister { .. }
     ) {
         return false;
     }
