@@ -230,7 +230,11 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
     if same_text(module, "core.time") {
         return Some(Effect::Time);
     }
-    if same_text(module, "core.math.random") || same_text(module, "core.crypto.random") {
+    // #4652: `core.math.random()` draws from the same ambient stream.
+    if same_text(module, "core.math.random")
+        || same_text(module, "core.crypto.random")
+        || (same_text(module, "core.math") && same_text(method, "random"))
+    {
         return Some(Effect::Rand);
     }
     // Key generation draws from the OS generator, like crypto.random.bytes.
@@ -3905,7 +3909,7 @@ pub fn core_call_mismatch(
 }
 #[cfg(test)]
 mod tests {
-    use super::{core_call, CoreCapabilityKind};
+    use super::{core_call, CoreCapabilityKind, CORE_CALLS};
     use crate::Effects::Effect;
 
     #[test]
@@ -3949,4 +3953,26 @@ mod tests {
         assert!(native.capability().is_well_formed());
     }
 
+    /// #4652 ratchet: a row whose native leaf reads the ambient random stream
+    /// or the wall clock must carry that effect, so a Core wrapper that calls
+    /// it without declaring the effect is refused by the effect checker.
+    #[test]
+    fn ambient_native_leaves_declare_their_effect() {
+        let ambient: &[(&str, Effect)] = &[
+            ("jet_std_random_", Effect::Rand),
+            ("jet_std_crypto_random_", Effect::Rand),
+            ("jet_std_time_now", Effect::Time),
+        ];
+        let mut undeclared = Vec::new();
+        for row in CORE_CALLS {
+            let symbol = row.symbol.name();
+            for (prefix, effect) in ambient {
+                if symbol.starts_with(prefix) && row.effect() != Some(*effect) {
+                    undeclared.push(format!("{}.{} ({symbol}) -> {:?}", row.module, row.member, row.effect()));
+                }
+            }
+        }
+        assert!(undeclared.is_empty(), "ambient native leaves without their effect: {undeclared:#?}");
+        assert_eq!(core_call("core.math", "random").and_then(|row| row.effect()), Some(Effect::Rand));
+    }
 }

@@ -158,7 +158,8 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
         module_name == "core.net" || module_name == "core.net.tls" || module_name == "core.http.client" || module_name == "core.http.server" || module_name == "core.http.middleware" || (module_name == "core.http" && core_call_one_of(member, [String]{"serve", "get"})) -> Val(Effect.Net)
         module_name == "core.game.raylib" -> Val(Effect.GPU)
         module_name == "core.time" -> Val(Effect.Time)
-        module_name == "core.math.random" || module_name == "core.crypto.random" -> Val(Effect.Rand)
+        // #4652: `core.math.random()` draws from the same ambient stream.
+        module_name == "core.math.random" || module_name == "core.crypto.random" || (module_name == "core.math" && member == "random") -> Val(Effect.Rand)
         // Key generation draws from the OS generator, like crypto.random.bytes.
         module_name == "core.crypto" && core_call_one_of(member, [String]{"__x25519_generate", "__signing_generate"}) -> Val(Effect.Rand)
         module_name == "core.sys" && member == "success" -> None
