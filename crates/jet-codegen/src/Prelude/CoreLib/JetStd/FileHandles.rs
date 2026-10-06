@@ -200,6 +200,9 @@ mod jet_fs_sys {
     pub const DT_UNKNOWN: u8 = 0;
     pub const DT_DIR: u8 = 4;
 
+    // `openat` is variadic in C; a host crate may also declare it with a fixed
+    // `mode` argument, which the clash lint would otherwise reject.
+    #[allow(clashing_extern_declarations)]
     unsafe extern "C" {
         pub fn openat(dirfd: c_int, path: *const c_char, flags: c_int, ...) -> c_int;
         pub fn mkdirat(dirfd: c_int, path: *const c_char, mode: u32) -> c_int;

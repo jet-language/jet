@@ -25,7 +25,7 @@ struct OverlayInputIdentity {
 // The pinned identity of a regular file, or the reason it may not be used.
 fn env_overlay_identity(info: Stat) -> OverlayInputIdentity String! {
     if info.links != 1 -> return Err("is hard-linked (multiple directory entries)")
-    Ok(OverlayInputIdentity{length: info.size, modified_ns: info.modified.unix_ns, id: info.id, links: info.links})
+    Ok(OverlayInputIdentity{length: info.size, modified_ns: info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds"), id: info.id, links: info.links})
 }
 
 fn env_overlay_io(cause: String) -> IOError Never! {
