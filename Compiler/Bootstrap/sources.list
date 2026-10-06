@@ -366,11 +366,49 @@ Jetpack/PackageModel/Source/Manifest/Compose.jet
 Jetpack/PackageModel/Source/Manifest/Migration.jet
 Jetpack/PackageModel/Source/Manifest/Convert.jet
 # == end Jetpack package model ==
+
+# == Jetpack environment model (PortEnvModel) ==
+# The jet-env-model `evaluate_env` graph behind `jet inspect env` and every
+# command that resolves a typed environment, referenced from Jetpack/EnvModel,
+# never copied (I8). It builds on the package-model block above and adds the
+# package-model files the evaluator needs (platform key, merge law, recipe
+# steps, provider facts). Activation-only readers that need the package
+# resolver (Environment/DotenvAuthority, Workspace/WorkspaceFile) and the
+# bounded JSON decode (Provider/ProviderFactsJson) stay in Jetpack's own
+# build until D-FSDIR1 (#4697) / D-CORE-JSONLIMIT1.
+Jetpack/PackageModel/Source/Platform/Platform.jet
+Jetpack/PackageModel/Source/Merge/FactLaw.jet
+Jetpack/PackageModel/Source/Merge/Merge.jet
+Jetpack/PackageModel/Source/Recipe/BuildRecipe.jet
+Jetpack/PackageModel/Source/Provider/ProviderSelector.jet
+Jetpack/PackageModel/Source/Provider/ProviderFacts.jet
+Jetpack/EnvModel/Source/Environment/FactReaders.jet
+Jetpack/EnvModel/Source/Environment/Integrations.jet
+Jetpack/EnvModel/Source/Environment/ManagedFiles.jet
+Jetpack/EnvModel/Source/Environment/Presets.jet
+Jetpack/EnvModel/Source/Environment/PackageProfiles.jet
+Jetpack/EnvModel/Source/Environment/LanguagePacks.jet
+Jetpack/EnvModel/Source/Environment/Lifecycle.jet
+Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet
+Jetpack/EnvModel/Source/ModuleEval/Plans.jet
+Jetpack/EnvModel/Source/ModuleEval/ComputedFields.jet
+Jetpack/EnvModel/Source/ModuleEval/DevServiceEval.jet
+Jetpack/EnvModel/Source/ModuleEval/ImageEval.jet
+Jetpack/EnvModel/Source/ModuleEval/PackageSugar.jet
+Jetpack/EnvModel/Source/ModuleEval/SecretSpecs.jet
+Jetpack/EnvModel/Source/ModuleEval/EnvFields.jet
+Jetpack/EnvModel/Source/ModuleEval/IntegrationImports.jet
+Jetpack/EnvModel/Source/ModuleEval/ProfileEval.jet
+Jetpack/EnvModel/Source/ModuleEval/ModuleEval.jet
+Jetpack/EnvModel/Source/ModuleEval/SourceLoader.jet
+Jetpack/EnvModel/Source/ModuleEval/EnvPlanBuilder.jet
+# == end Jetpack environment model ==
 Compiler/JetCli/Source/Cli/Registry.jet
 Compiler/JetCli/Source/Cli/Front.jet
 Compiler/JetCli/Source/Cli/Entry.jet
 Compiler/JetCli/Source/Cli/CoreSources.jet
 Compiler/JetCli/Source/Cli/Request.jet
+Compiler/JetCli/Source/Cli/ConfigEval.jet
 Compiler/JetCli/Source/Cli/Authority.jet
 Compiler/JetCli/Source/Cli/RuntimePrefix.jet
 Compiler/JetCli/Source/Cli/Status.jet

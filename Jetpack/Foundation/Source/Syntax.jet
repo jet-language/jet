@@ -328,6 +328,7 @@ TYPE_STRING :: prep { "String" }
 TYPE_ENV :: prep { "Env" }
 TYPE_PROFILE :: prep { "Profile" }
 TYPE_PROMPT :: prep { "Prompt" }
+TYPE_SYSTEM :: prep { "System" }
 TYPE_IMAGE :: prep { "Image" }
 TYPE_BUDGET :: prep { "Budget" }
 // D-JPK-SECRETMETA1=B / D-JPK-SECRETCOMPOSE1=D: the typed secret-map grammar.
@@ -374,6 +375,10 @@ IMAGE_FIELD_FROM :: prep { "from" }
 IMAGE_FIELD_FORMAT :: prep { "format" }
 IMAGE_KIND_OCI :: prep { "Oci" }
 IMAGE_KIND_ISO :: prep { "Iso" }
+// U14: the disk-image formats an `.Iso` image's `format:` may name.
+IMAGE_FORMAT_ISO :: prep { "iso" }
+IMAGE_FORMAT_QCOW :: prep { "qcow" }
+IMAGE_FORMAT_RAW :: prep { "raw" }
 IMAGE_FIELD_KIND :: prep { "kind" }
 IMAGE_FIELD_EXPOSE :: prep { "expose" }
 IMAGE_FIELD_ENV_VARS :: prep { "env_vars" }
@@ -433,9 +438,10 @@ RECIPE_STEP_FIELD_TOOL :: prep { "tool" }
 RECIPE_STEP_FIELD_ARGS :: prep { "args" }
 RECIPE_STEP_FIELD_SRC :: prep { "src" }
 RECIPE_STEP_FIELD_DEST :: prep { "dest" }
-// S31: string escape markers and their decoded characters (`{{`/`}}` are
-// literal braces).
-ESCAPES :: prep { [(marker: String, decoded: String)]{(marker: "n", decoded: "\n"), (marker: "t", decoded: "\t"), (marker: "\"", decoded: "\""), (marker: "\\", decoded: "\\")} }
+// S31: string escape markers and their decoded characters, index for index
+// (`{{`/`}}` are literal braces).
+ESCAPE_MARKERS :: prep { [String]{"n", "t", "\"", "\\"} }
+ESCAPE_DECODED :: prep { [String]{"\n", "\t", "\"", "\\"} }
 
 // ── CLI env/use/jobs (jet_foundation::Syntax, Syntax/effects_surface.rs) ──
 
