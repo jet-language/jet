@@ -423,20 +423,20 @@ fn jet_cli_zero_pad(value: Int, width: Int) -> String Never! {
 
 // Lock.rs `timestamp_now`: RFC 3339 UTC with nanoseconds.
 fn jet_cli_rfc3339(unix_ns: Int) -> String Never! {
-    seconds :: unix_ns / 1000000000
-    days :: seconds / 86400
+    seconds :: unix_ns /% 1000000000
+    days :: seconds /% 86400
     second :: seconds % 86400
     z :: days + 719468
-    era :: z / 146097
+    era :: z /% 146097
     doe :: z - era * 146097
-    yoe :: (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+    yoe :: (doe - doe /% 1460 + doe /% 36524 - doe /% 146096) /% 365
     year := yoe + era * 400
-    doy :: doe - (365 * yoe + yoe / 4 - yoe / 100)
-    month_part :: (5 * doy + 2) / 153
-    day :: doy - (153 * month_part + 2) / 5 + 1
+    doy :: doe - (365 * yoe + yoe /% 4 - yoe /% 100)
+    month_part :: (5 * doy + 2) /% 153
+    day :: doy - (153 * month_part + 2) /% 5 + 1
     month :: if month_part < 10 -> month_part + 3 else -> month_part - 9
     if month <= 2 -> year += 1
-    "{jet_cli_zero_pad(year, 4)}-{jet_cli_zero_pad(month, 2)}-{jet_cli_zero_pad(day, 2)}T{jet_cli_zero_pad(second / 3600, 2)}:{jet_cli_zero_pad((second % 3600) / 60, 2)}:{jet_cli_zero_pad(second % 60, 2)}.{jet_cli_zero_pad(unix_ns % 1000000000, 9)}Z"
+    "{jet_cli_zero_pad(year, 4)}-{jet_cli_zero_pad(month, 2)}-{jet_cli_zero_pad(day, 2)}T{jet_cli_zero_pad(second /% 3600, 2)}:{jet_cli_zero_pad((second % 3600) /% 60, 2)}:{jet_cli_zero_pad(second % 60, 2)}.{jet_cli_zero_pad(unix_ns % 1000000000, 9)}Z"
 }
 
 // Lock.rs `git_output`: trimmed stdout of a successful `git -C <root> …`.
