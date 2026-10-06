@@ -1230,22 +1230,6 @@ fn jet_cli_inspect_types(programs: [Program], json: Bool) -> JetDriverVerbOutput
     JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
-// CmdInspect.rs `run_shapes` for a program with no shape declarations: every
-// struct of the bundle (and of a Core module it imports) is one shape fact,
-// whose projection (Sema `shape_fact_from_struct`) is not ported yet.
-fn jet_cli_inspect_shapes(programs: [Program], json: Bool, color: Bool) -> JetDriverVerbOutput Never! {
-    loop program in programs {
-        if program.imports.len() > 0 -> return jet_cli_not_ported_output("inspect shapes <program with imports>", color)
-        loop item in program.items {
-            if item == .Struct(_) -> return jet_cli_not_ported_output("inspect shapes <struct shape facts>", color)
-        }
-    }
-    if json {
-        return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.shapes", true, [JetCLIStatusField]{jet_cli_status_field("shapes", jet_cli_status_array([JetCLIStatusValue]{}))})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    }
-    JetDriverVerbOutput{stdout: "No shape facts declared.\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-}
-
 // CmdCompile.rs `run_build_query` after the compile: a program whose entry
 // declares no root `fn build` runs the default pipeline. Evaluating a
 // declared build program's graph, query, and explanations is not ported yet.
@@ -1431,7 +1415,7 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
                 errors.len() > 0 -> output = jet_cli_inspect_check_failed(job, source, errors)
                 result.internal_problem != None -> output = jet_cli_ice(result.internal_problem ?? "")
                 job.action == "types" -> output = jet_cli_inspect_types(jet_cli_inspect_programs(snapshot), job.json)
-                job.action == "shapes" -> output = jet_cli_inspect_shapes(jet_cli_inspect_programs(snapshot), job.json, job.color)
+                job.action == "shapes" -> output = jet_cli_inspect_shapes(jet_cli_inspect_programs(snapshot), job.file, job.json, job.color)
                 job.action == "rights" -> output = jet_cli_inspect_rights(result, job.project, job.file, job.json)
                 job.action == "impact" -> output = jet_cli_inspect_impact_report(job, result, diagnostics.len(), watch.elapsed_millis())
                 else -> output = jet_cli_inspect_build_plan(job, snapshot)

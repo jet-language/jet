@@ -225,8 +225,9 @@ fn jet_cli_lock_source(raw: String) -> JetCLILockSource Never! {
     if jet_cli_lock_kv_field(inline, "root") != None -> return JetCLILockSource.Parsed{root: true, source_hash: None}
     if jet_cli_lock_kv_field(inline, "path") != None -> return JetCLILockSource.Parsed{root: false, source_hash: None}
     if jet_cli_lock_kv_field(inline, "nix") != None -> return JetCLILockSource.Missing
-    loop kind in [String]{"cran", "luarocks", "registry"} {
-        if jet_cli_lock_kv_field(inline, kind) != None {
+    registry_kinds :: [String]{"cran", "luarocks", "registry"}
+    loop registry_kind in registry_kinds {
+        if jet_cli_lock_kv_field(inline, registry_kind) != None {
             return JetCLILockSource.Parsed{root: false, source_hash: Val(jet_cli_lock_kv_field(inline, "source-hash") ?? "")}
         }
     }
