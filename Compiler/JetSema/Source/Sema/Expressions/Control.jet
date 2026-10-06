@@ -450,12 +450,31 @@ fn sema_failure_callee(expr: Expr?, environment: SemaScopeEnvironment, program: 
             index :: sema_scope_resolve_index(scopes, call.name) ?? return None
             symbol :: scopes.bindings[index].symbol
             if symbol.kind != SymbolKind.Function -> return None
-            item :: sema_scope_resolve_declaration(environment, program, symbol.id) ?? return None
-            if item == .Func(func) -> return Val(SemaFailureCallee{key: symbol.id.key, inferable: func.inline_foreign == None && sema_failure_contract_source(func.return_type) == "implicit default !Err"})
-            return None
+            inferable :: sema_failure_callee_inferable(environment, program, symbol.id) ?? return None
+            return Val(SemaFailureCallee{key: symbol.id.key, inferable: inferable})
         }
         else -> return None
     }
+}
+
+// For a declared function `id`: whether it is an ordinary body with no failure
+// contract written (sema_failure_callee); None when `id` declares no function.
+// A graph function is read at its row: resolving the declaration copied the
+// callee's whole body on every failing call.
+fn sema_failure_callee_inferable(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Bool? {
+    site :: sema_scope_declaration_site(environment, program, id) ?? return None
+    if site == .Function(module_index, row) {
+        graph_option :: program.registration_graph
+        graph :: graph_option ?? return None
+        return Val(sema_failure_function_inferable(graph.modules[module_index].functions[row].declaration))
+    }
+    item :: sema_scope_resolve_declaration(environment, program, id) ?? return None
+    if item == .Func(func) -> return Val(sema_failure_function_inferable(func))
+    None
+}
+
+fn sema_failure_function_inferable(func: Func) -> Bool {
+    func.inline_foreign == None && sema_failure_contract_source(func.return_type) == "implicit default !Err"
 }
 
 // #3708: one propagated failure of this body: the callee's key when the
@@ -688,16 +707,22 @@ fn sema_expression_propagated(inner: TExpr, conversion: TTryConvert, span: Span)
     Val(sema_tir_expr(payload, TExprKind.Try{value: inner, conversion: conversion, failure: sema_expression_failure_carrier(inner.ty)}, span))
 }
 
-// D-FAILURE-FOUNDATION1=A: automatic propagation of a call root. Only a
-// Result carrier propagates; an optional result is an ordinary value. The
-// propagation site joins the failure journey like an explicit `?(text)` hop,
-// without a note (D-ERRCTX1, #3713).
-fn sema_expression_auto_propagate(expr: Expr, value: TExpr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if sema_expr_unwrap_tag(value.ty) == {
+// D-FAILURE-FOUNDATION1=A: whether a call root of type `ty` propagates
+// automatically. Only a Result carrier propagates; an optional result is an
+// ordinary value, and so is a carrier where the expected type is the carrier
+// position itself.
+fn sema_expression_auto_propagates(ty: Type, expected: Type?) -> Bool {
+    if sema_expr_unwrap_tag(ty) == {
         .Result(_, _) -> {}
-        else -> return Val(value)
+        else -> return false
     }
-    if sema_expression_failure_carrier_position(expected, value.ty) -> return Val(value)
+    !sema_expression_failure_carrier_position(expected, ty)
+}
+
+// The automatic propagation of a call root that propagates
+// (sema_expression_auto_propagates). The propagation site joins the failure
+// journey like an explicit `?(text)` hop, without a note (D-ERRCTX1, #3713).
+fn sema_expression_auto_propagate(expr: Expr, value: TExpr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     span :: expr_span(expr)
     conversion :: sema_expression_propagation_conversion(value, Val(expr), span, true, environment, program, &scopes, &context, &diagnostics) ?? return None
     payload :: sema_expression_carrier_payload(value.ty) ?? return None

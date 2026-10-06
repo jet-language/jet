@@ -425,13 +425,27 @@ fn sema_taint_collect_items(catalog: &SemaTaintCatalog, graph: SemaRegistrationG
 fn sema_taint_import_module(graph: SemaRegistrationGraph, module_identity: String, name: String) -> String Never! {
     module_index :: sema_registration_module_index(graph, module_identity) ?? return ""
     module_row :: graph.modules[module_index]
-    loop import in module_row.imports {
+    // D-MOD-CYCLE1=A: the package names bind after the imports before
+    // `namespace_import_split`, unless the module declares the name itself.
+    namespace_from :: if module_row.namespace_import_split < 0 -> module_row.imports.len() else -> module_row.namespace_import_split
+    loop (import_index, import) in module_row.imports {
+        if import_index == namespace_from {
+            namespace :: sema_taint_namespace_module(graph, module_index, name)
+            if namespace != "" -> return namespace
+        }
         loop binding in import.bindings {
             if binding.local == name -> return binding.target_module_identity
         }
         if import.declaration.alias == name -> return import.target_module_identity
     }
+    if namespace_from >= module_row.imports.len() -> return sema_taint_namespace_module(graph, module_index, name)
     ""
+}
+
+fn sema_taint_namespace_module(graph: SemaRegistrationGraph, module_index: Int, name: String) -> String Never! {
+    if graph.modules[module_index].symbol_positions.get(name) != None -> return ""
+    owner :: sema_registration_namespace_owner(graph, module_index, name) ?? return ""
+    graph.modules[owner.module_index].module_identity
 }
 fn sema_taint_find_tag(catalog: SemaTaintCatalog, graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaTaintTagFact? {
     builtin :: sema_taint_builtin_tag(name)

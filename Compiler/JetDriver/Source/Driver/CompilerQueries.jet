@@ -11,6 +11,7 @@ use jet_sema.[
     SemaComptimeFunctionResult,
     SemaComptimeItemValue,
     SemaForeignProviderInput,
+    SemaGraphModuleResult,
     SemaGraphResult,
     SemaRegistrationGraph,
     SemaRegistrationModuleInput,
@@ -63,6 +64,9 @@ fn jet_driver_compiler_check_registration_inputs(load: JetDriverLoadResult, prov
             source_origin: unit.source_origin,
             program: loaded_module.program,
             foreign_handles: handles,
+            namespace: loaded_module.namespace,
+            namespace_names: loaded_module.namespace_names,
+            namespace_refs: loaded_module.namespace_refs,
         })
     }
     Val(inputs)
@@ -214,13 +218,16 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
     initial_values := [SemaComptimeItemValue]{ }
     stage_diagnostics = load.diagnostics
     load.diagnostics = [Diagnostic]{}
-    // The declaration pass's graph becomes the run's environment graph.
+    // The declaration pass's graph becomes the run's environment graph,
+    // and its modules move into the run, which hands them back.
     staged_graph := ^stage.graph
     stage.graph = None
     run_staged := ^staged_graph ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the declaration pass lost its registration graph"))
+    declared_modules := ^stage.modules
+    stage.modules = [SemaGraphModuleResult]{}
     run := jet_driver_run_comptime(
         ^run_staged,
-        stage.modules,
+        ^declared_modules,
         stage.sources,
         stage.names,
         initial_values,
@@ -229,6 +236,7 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
         input.request,
         &stage_diagnostics,
     )
+    jet_driver_comptime_return_declared(&stage, &run)
     load.diagnostics = stage_diagnostics
     if run.soft_stop -> return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, None)
     if !run.complete {

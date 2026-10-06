@@ -288,25 +288,48 @@ struct SemaPreludeConversionDemand {
     pub site: Span
 }
 
-fn sema_prelude_conversion_demands_expr(expression: TExpr, module_identity: String, demands: &[SemaPreludeConversionDemand]) {
+// The demand walk's state (SemaEffectWalk.PreludeDemands): the module and its
+// demands so far, in walk order.
+struct SemaPreludeDemandWalk {
+    module_identity: String
+    demands: [SemaPreludeConversionDemand]
+}
+
+// One expression of the demand walk: a propagation site whose conversion is
+// this module's prelude routine for a Core error family member reaching `Err`
+// demands it (first site per routine), then its children are walked in place
+// (sema_effect_walk_expr_children), in the order tir_expr_children gives them.
+fn sema_prelude_conversion_demands_visit(walk: SemaEffectWalk, state: Shared<SemaPreludeDemandWalk>, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller_key: String, expression: TExpr) {
     conversion :: if expression.kind == {
         .Try(_, value, _) -> Val(value)
         .TryWithContext(_, _, value, _, _, _) -> Val(value)
         else -> None
     }
     if conversion == .Val(value) {
-        if value == .Typed(key, source, target) {
-            expected :: symbol_id(SymbolKind.Function, module_identity, "", sema_failure_conversion_function_name(source, target)).key
-            if key == expected && target == (Type.Named{name: "Err"}) && sema_core_error_family_member(type_name(source)) {
-                known := false
-                loop demand in demands {
-                    if demand.key == key -> known = true
-                }
-                if !known -> &demands.push(SemaPreludeConversionDemand{key: key, source: source, site: expression.span})
-            }
-        }
+        if value == .Typed(key, source, target) -> sema_prelude_conversion_demand_add(state, key, source, target, expression.span)
     }
-    loop child in tir_expr_children(expression) -> sema_prelude_conversion_demands_expr(child, module_identity, &demands)
+    sema_effect_walk_expr_children(walk, &nodes, facts, &diagnostics, caller_key, expression)
+}
+
+fn sema_prelude_conversion_demand_add(state: Shared<SemaPreludeDemandWalk>, key: String, source: Type, target: Type, site: Span) {
+    permit :: state.guard_edit()
+    expected :: symbol_id(SymbolKind.Function, permit.value.module_identity, "", sema_failure_conversion_function_name(source, target)).key
+    if key != expected || target != (Type.Named{name: "Err"}) || !sema_core_error_family_member(type_name(source)) -> return
+    loop demand in permit.value.demands {
+        if demand.key == key -> return
+    }
+    &permit.value.demands.push(SemaPreludeConversionDemand{key: key, source: source, site: site})
+}
+
+fn sema_prelude_demand_walk_take(state: Shared<SemaPreludeDemandWalk>) -> [SemaPreludeConversionDemand] {
+    permit :: state.guard_edit()
+    demands := [SemaPreludeConversionDemand]{}
+    loop permit.value.demands.len() > 0 {
+        demand :: &permit.value.demands.pop() ?? break
+        &demands.push(demand)
+    }
+    &demands.reverse()
+    demands
 }
 
 // Demand-driven injection (the Rust reference's
@@ -316,12 +339,17 @@ fn sema_prelude_conversion_demands_expr(expression: TExpr, module_identity: Stri
 // be injected names its cause in `reasons`; with `keep_going` (JET_KEEP_GOING)
 // a conversion whose body fails to check is kept as its typed trap.
 pub fn sema_inject_prelude_error_conversions(module_identity: String, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, functions: &[TFunc], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], reasons: &[String], keep_going: Bool) -> Bool {
-    demands := [SemaPreludeConversionDemand]{}
+    // Every function's propagation sites, walked in place in function and
+    // body order (the walk copies no subtree).
+    walk_state :: shared SemaPreludeDemandWalk{module_identity: module_identity, demands: [SemaPreludeConversionDemand]{}}
+    walk :: SemaEffectWalk.PreludeDemands{state: walk_state}
+    nodes := [SemaEffectNode]{}
+    facts :: SemaEffectCallIndex{current_module: 0, modules: [SemaEffectModuleCalls]{}, node_by_key: [String:Int]{}}
+    ignored := [Diagnostic]{}
     loop function in functions {
-        loop statement in function.body {
-            loop child in tir_stmt_children(statement) -> sema_prelude_conversion_demands_expr(child, module_identity, &demands)
-        }
+        loop statement in function.body -> sema_effect_walk_stmt_children(walk, &nodes, facts, &ignored, function.key, statement)
     }
+    demands :: sema_prelude_demand_walk_take(walk_state)
     complete := true
     loop demand in demands {
         present := false

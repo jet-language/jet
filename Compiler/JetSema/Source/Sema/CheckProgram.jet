@@ -3219,6 +3219,12 @@ pub fn sema_comptime_value_sites(graph: SemaRegistrationGraph) -> SemaComptimeVa
     SemaComptimeValueSites{sites: sites, constants: constants}
 }
 
+// No value sites: the placeholder a comptime run's staging holds until the
+// run's program tables exist (sema_comptime_value_sites).
+pub fn sema_comptime_value_sites_empty() -> SemaComptimeValueSites Never! {
+    SemaComptimeValueSites{sites: [String:[SemaComptimeValueSite]]{}, constants: [String:[Int]]{}}
+}
+
 // sema_comptime_graph_apply_values on a graph whose sites are `sites`: each
 // site of a value takes it under the same test that rewrite applies, so the
 // graph ends exactly as there. Every row typed is recorded on `trail`.
@@ -3441,6 +3447,13 @@ fn sema_comptime_probe_refresh(probe: &SemaScopeProbe, graph: SemaRegistrationGr
                     &waiting.push(constant)
                 } else {
                     probe.table.bindings[constant.binding].symbol = graph.modules[module_index].imports[import_index].bindings[binding].symbol
+                }
+            }
+            .Namespace(owner, position) -> {
+                if sema_comptime_symbol_waits(graph.modules[owner].symbols[position]) {
+                    &waiting.push(constant)
+                } else {
+                    probe.table.bindings[constant.binding].symbol = graph.modules[owner].symbols[position]
                 }
             }
         }
