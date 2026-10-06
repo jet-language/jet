@@ -2822,6 +2822,9 @@ Reactive updates are explicit: use `set` or `update`, read through `get`, and
 release effects with `unsubscribe`. A derived computation does not become a
 hidden global dataflow graph.
 Reactivity is an opt-in library rather than ambient language semantics (`D-REACT1`); `computed` is the canonical alias for the derived-value constructor (`D-SIGNAL1`).
+Setting a synchronized signal updates the provider state, not the Jet carrier
+binding, so its receiver call uses `count.set(value)` without an `&` mark. UI
+button handlers use the trailing block form, `ui.button("Click") { … }`.
 
 ### `core.reactive.loadable` — asynchronous value state
 

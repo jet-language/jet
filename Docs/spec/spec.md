@@ -1444,6 +1444,10 @@ set because the checker cannot inspect its body. This keeps inference sound
 without attempting to read foreign code. Deterministic constructors such as a
 seeded `Clock` or `RNG` carry no ambient effect; reading ambient time or
 randomness still does.
+The opaque Rust bridge example `Examples/features/lowlevel/ffi.jet` therefore
+declares the complete maximal grant, including `Secret` and `Time`; its base64
+operation is unchanged, and this grant does not assert that the foreign body
+actually reads either capability.
 
 For example, interpolated `print` in
 `Examples/features/basics/first_hour_expert.jet` records both `IO` and the
