@@ -81,13 +81,6 @@ fn jet_std_math_checked_pow(base: i64, exp: i64) -> Option<i64> {
     }
     base.checked_pow(exp as u32)
 }
-// D-EXPNEG1=A: a negative exponent stops with the shared arithmetic report.
-fn jet_std_math_int_pow(base: i64, exp: i64) -> i64 {
-    if exp < 0 {
-        jet_fixed_error_stop(JetFixedArithmeticError::PowerNegative, "<core.math>", 0);
-    }
-    base.saturating_pow(exp as u32)
-}
 // D-FLOATW1 (ratified 2026-06-22): F32 variants — sqrt(F32)->F32, pow(F32,F32)->F32 etc.
 // F32 is a real precision choice, not just storage; no silent widening to f64 (I3).
 fn jet_std_math_sqrt_f32(x: f32) -> f32 {

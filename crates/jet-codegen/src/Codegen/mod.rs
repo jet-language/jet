@@ -3237,6 +3237,7 @@ fn push_typed_core_optional_parts(
         out.push_str(include_str!("../Prelude/CoreLib/Top/MathLibPure.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/MathComplexTraits.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomFns.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/MathNativeStops.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/LinalgFns.rs"));
     }
     if needs_data {
@@ -3979,6 +3980,7 @@ fn push_corelib_prelude_body(
         out.push_str(include_str!("../Prelude/CoreLib/Top/MathLibPure.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/MathComplexTraits.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomFns.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/MathNativeStops.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/LinalgFns.rs"));
     }
     if needs_encoding {
