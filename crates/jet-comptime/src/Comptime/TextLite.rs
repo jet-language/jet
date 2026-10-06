@@ -1168,20 +1168,8 @@ pub(crate) fn apply_files_leaf(
             }
             "__fsync_directory" => done(text_kernel::jet_std::jet_fs_directory_fsync(int(0)?), unit),
             "__create_directory" => done(text_kernel::jet_std::jet_fs_directory_create(int(0)?, &text(1)?, int(2)?), unit),
-            "__list_directory" => done(text_kernel::jet_std::jet_fs_directory_list(int(0)?), |entries| {
-                CtValue::List(
-                    entries
-                        .into_iter()
-                        .map(|entry| CtValue::Struct {
-                            type_name: "DirEntry".to_string(),
-                            fields: vec![
-                                ("name".to_string(), CtValue::Str(entry.name)),
-                                ("path".to_string(), CtValue::Str(entry.path)),
-                                ("is_dir".to_string(), CtValue::Bool(entry.is_dir)),
-                            ],
-                        })
-                        .collect(),
-                )
+            "__list_directory" => done(text_kernel::jet_std::jet_fs_directory_list(int(0)?), |rows| {
+                CtValue::List(rows.into_iter().map(CtValue::Bytes).collect())
             }),
             "__stat_at" => done(text_kernel::jet_std::jet_fs_stat_at(int(0)?, &text(1)?, boolean(2)?), |row| {
                 CtValue::List(row.into_iter().map(CtValue::Int).collect())

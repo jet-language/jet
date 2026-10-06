@@ -22,6 +22,8 @@ fn run() {
     written :: writer.stat()
     print("written size {written.size} mode {written.mode} file {written.is_file}")
     close(^writer)
+    held_dir :: files.open_directory(scratch.path)
+    loop entry in held_dir.list() -> print("entry {entry.name} unicode={entry.name_is_unicode} raw bytes={entry.raw_name.len()} dir={entry.is_dir}")
 
     reader :: files.open(path, links: .Refuse)
     held :: reader.stat()

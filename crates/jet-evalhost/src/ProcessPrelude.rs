@@ -133,13 +133,6 @@ pub(crate) mod process_prelude {
             }
         }
 
-        #[derive(Clone, Debug, PartialEq)]
-        pub struct DirEntry {
-            pub name: String,
-            pub path: String,
-            pub is_dir: bool,
-        }
-
         // #3593: the same held-directory and *at(2) leaves AOT embeds.
         include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/FileHandles.rs");
 
