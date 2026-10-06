@@ -3093,13 +3093,17 @@ impl<'a> Checker<'a> {
             // gate. At runtime (which is what sema is checking here), this block is
             // semantically a plain block: it has no runtime significance. The gate is
             // enforced only inside the comptime interpreter. L3102 fires when no
-            // reason was given.
+            // reason was given; a checked String argument that is not a literal
+            // (`#Impure(reason)`) is a reason.
             Stmt::Impure {
-                reason, body, span, ..
+                reason,
+                reason_expr,
+                body,
+                span,
             } => {
                 let policy_allowed =
                     self.audited_gate_allowed(crate::Policy::PolicyKey::Impure, *span);
-                if reason.is_none() {
+                if reason.is_none() && reason_expr.is_none() {
                     self.diags.push(Diagnostic::lint(
                         "L3102",
                         "this `#Impure` block has no reason".to_string(),

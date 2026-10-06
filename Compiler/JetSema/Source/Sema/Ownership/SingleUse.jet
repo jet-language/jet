@@ -32,25 +32,25 @@ fn sema_single_use_type_name(ty: Type) -> String? {
 
 // Rust `type_is_single_use` over the registry: a `#SingleUse` struct or enum,
 // or the Core `Delivery` handle (Rust `core_single_use_type`).
-pub fn sema_single_use_type(ty: Type, environment: SemaScopeEnvironment) -> Bool {
+pub fn sema_single_use_type(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     name :: sema_single_use_type_name(ty) ?? return false
     if name == "Delivery" -> return true
-    definition :: sema_serde_type_definition(environment, name) ?? return false
+    definition :: sema_serde_type_definition(environment, program, name) ?? return false
     definition.single_use
 }
 
 // D-LIN1: a binding that owns a `#SingleUse` value carries the consume duty.
 // The duty transfers on `y :: x`: the move marks `x` consumed and `y` owns it.
-pub fn sema_single_use_note_binding(state: &SemaOwnershipState, symbol: Symbol, environment: SemaScopeEnvironment) {
+pub fn sema_single_use_note_binding(state: &SemaOwnershipState, symbol: Symbol, environment: SemaScopeEnvironment, program: SemaProgramTables) {
     ty :: symbol.ty ?? return
-    if !sema_single_use_type(ty, environment) -> return
+    if !sema_single_use_type(ty, environment, program) -> return
     row :: sema_ownership_last_row(state, symbol.id.key)
     if row >= 0 -> sema_ownership_set_single_use(&state, row)
 }
 
 // E0140 (D-FACT-WORD1=A): `_ :: value` skips the job of a `#SingleUse` value.
-pub fn sema_single_use_check_discard(ty: Type, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
-    if sema_single_use_type(ty, environment) -> &diagnostics.push(sema_single_use_diag_discarded(span))
+pub fn sema_single_use_check_discard(ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+    if sema_single_use_type(ty, environment, program) -> &diagnostics.push(sema_single_use_diag_discarded(span))
 }
 
 pub fn sema_single_use_key(state: SemaOwnershipState, key: String) -> Bool Never! {
@@ -130,14 +130,14 @@ pub fn sema_single_use_check_paths(before: SemaOwnershipState, paths: [SemaOwner
 // Discarding a `#SingleUse` value this way is legal only in an audited
 // `#Unsafe("reason")` region or function (E0143). The value is consumed even
 // on the E0143 path, so no E0140 cascades at scope end.
-pub fn sema_single_use_check_consume(call: Call, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+pub fn sema_single_use_check_consume(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.args.len() != 1 {
         &diagnostics.push(sema_error("E0103", call.name_span, "`consume` discards exactly one value", "`drop` throws a single value away, running its cleanup", "e.g. consume(x)"))
-        loop argument in call.args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        loop argument in call.args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     argument :: call.args[0]
-    value :: sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    value :: sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if argument.expr == .Ident(name, span) {
         if context.unsafe_depth == 0 && sema_single_use_argument(state, argument.expr, scopes) != None {
             &diagnostics.push(sema_single_use_diag_unaudited(name, span))

@@ -33,20 +33,14 @@ pub struct Pin<T> {}
 
 pub fn address_of<T>(value: T) -> Int Never! { core.mem.address_of<T>(value) }
 
-pub fn from_addr<T>(addr: Int) -> *T Never! {
-    #Unsafe("raw address is an audited typed pointer boundary") {
-        return mem.Ptr<T>.from_addr(addr)
-    }
+#Unsafe("`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer") pub fn from_addr<T>(addr: Int) -> *T Never! {
+    mem.Ptr<T>.from_addr(addr)
 }
 
-pub fn volatile_read<T>(pointer: *T) -> T Never! {
-    #Unsafe("volatile access requires an audited typed pointer") {
-        return core.mem.volatile_read<T>(pointer)
-    }
+#Unsafe("`pointer` names a live, aligned, readable `T` for the whole access") pub fn volatile_read<T>(pointer: *T) -> T Never! {
+    core.mem.volatile_read<T>(pointer)
 }
 
-pub fn volatile_write<T>(pointer: *T, value: T) Never! {
-    #Unsafe("volatile access requires an audited typed pointer") {
-        core.mem.volatile_write<T>(pointer, value)
-    }
+#Unsafe("`pointer` names a live, aligned, writable `T` for the whole access") pub fn volatile_write<T>(pointer: *T, value: T) Never! {
+    core.mem.volatile_write<T>(pointer, value)
 }

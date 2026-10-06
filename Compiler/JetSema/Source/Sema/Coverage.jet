@@ -76,7 +76,7 @@ fn sema_coverage_collect_nested(shape: TPatternShape, key: String, inner: &[TPat
 }
 
 // The single payload type behind a head key, when nested coverage applies.
-fn sema_coverage_payload_type(subject_ty: Type, key: String, environment: SemaScopeEnvironment) -> Type? {
+fn sema_coverage_payload_type(subject_ty: Type, key: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
     if subject_ty == {
         .Option(inner) -> if key == "Val" -> return Val(inner)
         .Result(ok, err) -> {
@@ -84,7 +84,7 @@ fn sema_coverage_payload_type(subject_ty: Type, key: String, environment: SemaSc
             if key == "Err" -> return Val(err)
         }
         .Named(_) | .Apply(_, _) -> {
-            graph_option :: environment.registration_graph
+            graph_option :: program.registration_graph
             graph :: graph_option ?? return None
             nominal_row :: sema_pattern_nominal_row(graph, environment.module_identity, subject_ty) ?? return None
             nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
@@ -131,7 +131,7 @@ fn sema_coverage_group_nested(shape: TPatternShape, groups: &[String:[TPatternSh
 // S31: the covered keys of a set of arm shapes over `subject_ty`. A head key
 // with only nested payload arms is covered when those nested arms jointly
 // cover its payload type (to any depth).
-fn sema_coverage_keys(subject_ty: Type, shapes: [TPatternShape], environment: SemaScopeEnvironment, ranges: &[SemaIntegerRange]) -> [String] {
+fn sema_coverage_keys(subject_ty: Type, shapes: [TPatternShape], environment: SemaScopeEnvironment, program: SemaProgramTables, ranges: &[SemaIntegerRange]) -> [String] {
     keys := [String]{}
     partial_keys := [String]{}
     groups := [String:[TPatternShape]]{}
@@ -142,12 +142,12 @@ fn sema_coverage_keys(subject_ty: Type, shapes: [TPatternShape], environment: Se
     key_set := sema_coverage_key_set(keys)
     loop key in partial_keys {
         if sema_coverage_leaf_covered(key_set, key) -> next
-        payload_ty :: sema_pattern_unwrap_tags(sema_coverage_payload_type(subject_ty, key, environment) ?? next)
+        payload_ty :: sema_pattern_unwrap_tags(sema_coverage_payload_type(subject_ty, key, environment, program) ?? next)
         if !sema_coverage_is_closed(payload_ty) -> next
         inner :: groups.get(key) ?? [TPatternShape]{}
         inner_ranges := [SemaIntegerRange]{}
-        inner_keys :: sema_coverage_keys(payload_ty, inner, environment, &inner_ranges)
-        if sema_coverage_missing(payload_ty, inner_keys, environment).len() == 0 {
+        inner_keys :: sema_coverage_keys(payload_ty, inner, environment, program, &inner_ranges)
+        if sema_coverage_missing(payload_ty, inner_keys, environment, program).len() == 0 {
             &keys.push(key)
             key_set[key] = true
         }
@@ -247,11 +247,11 @@ fn sema_coverage_compiler_enum(ty: Type) -> [String]? {
     None
 }
 
-fn sema_coverage_missing(subject_ty: Type, keys: [String], environment: SemaScopeEnvironment) -> [String] Never! {
+fn sema_coverage_missing(subject_ty: Type, keys: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String] Never! {
     missing := [String]{}
     if subject_ty == {
         .Named(_) | .Apply(_, _) -> {
-            graph_option :: environment.registration_graph
+            graph_option :: program.registration_graph
             graph :: graph_option ?? return missing
             nominal_row :: sema_pattern_nominal_row(graph, environment.module_identity, subject_ty) ?? {
                 variants :: sema_coverage_compiler_enum(subject_ty) ?? return missing
@@ -288,14 +288,14 @@ fn sema_coverage_missing(subject_ty: Type, keys: [String], environment: SemaScop
 
 // D-OUTCOME-SHAPE1=A: a `T? E!` subject reports its missing success states
 // directly (`Val(...)`, `None`), never as `Ok(...)`.
-fn sema_coverage_three_state_missing(ok: Type, shapes: [TPatternShape], keys: [String], environment: SemaScopeEnvironment) -> [String] {
+fn sema_coverage_three_state_missing(ok: Type, shapes: [TPatternShape], keys: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String] {
     missing := [String]{}
     if !sema_coverage_has_key(keys, "Ok") {
         inner := [TPatternShape]{}
         seen := [String]{}
         loop shape in shapes -> sema_coverage_collect_nested(shape, "Ok", &inner, &seen)
         inner_ranges := [SemaIntegerRange]{}
-        inner_keys :: sema_coverage_keys(ok, inner, environment, &inner_ranges)
+        inner_keys :: sema_coverage_keys(ok, inner, environment, program, &inner_ranges)
         if !sema_coverage_has_key(inner_keys, "Val") -> &missing.push("Val(...)")
         if !sema_coverage_has_key(inner_keys, "None") -> &missing.push("None")
     }
@@ -305,7 +305,7 @@ fn sema_coverage_three_state_missing(ok: Type, shapes: [TPatternShape], keys: [S
 
 // Port of the Rust checker's `check_pattern_coverage_complete`: reports E0307
 // for an else-less table whose checked pattern conditions leave a case open.
-pub fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
+pub fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
     table :: sema_coverage_table(conditions) ?? return
     // D-PARSESTR1 / D-BINPAT1 (Rust `report_refutable_pattern_without_else`):
     // a text or byte arm can always fail to match, so the table needs `else`.
@@ -330,7 +330,7 @@ pub fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Sp
     }
     subject_ty :: sema_pattern_unwrap_tags(table.subject.ty)
     ranges := [SemaIntegerRange]{}
-    keys :: sema_coverage_keys(subject_ty, table.shapes, environment, &ranges)
+    keys :: sema_coverage_keys(subject_ty, table.shapes, environment, program, &ranges)
     interval :: sema_coverage_integer_interval(subject_ty)
     if interval == .Val(bounds) {
         if sema_coverage_ranges_cover(ranges, bounds.lo, bounds.hi) -> return
@@ -340,10 +340,10 @@ pub fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Sp
         &diagnostics.push(sema_error("E0307", span, "this `if` over `{type_name(subject_ty)}` has no `else` arm — range arms can't cover every value", domain_note, "add `else -> {{ … }}` to handle values not matched by any range"))
         return
     }
-    missing := sema_coverage_missing(subject_ty, keys, environment)
+    missing := sema_coverage_missing(subject_ty, keys, environment, program)
     if subject_ty == .Result(ok, _) {
         ok_ty :: sema_pattern_unwrap_tags(ok)
-        if sema_pattern_is_option(ok_ty) -> missing = sema_coverage_three_state_missing(ok_ty, table.shapes, keys, environment)
+        if sema_pattern_is_option(ok_ty) -> missing = sema_coverage_three_state_missing(ok_ty, table.shapes, keys, environment, program)
     }
     if missing.len() == 0 -> return
     names :: missing.join(", ")
@@ -433,7 +433,7 @@ pub fn sema_coverage_noelse_statement_conditions(source: Expr, lowered: TStmt) -
 
 // L0303 (#3716): the parser-recorded `else` arm of the dispatch table whose
 // chain levels all carry `span`.
-fn sema_coverage_else_arm(environment: SemaScopeEnvironment, span: Span) -> ElseArmSpan? {
+fn sema_coverage_else_arm(environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span) -> ElseArmSpan? {
     loop arm in environment.else_arms {
         if arm.table.start == span.start && arm.table.end == span.end -> return Val(arm)
     }
@@ -441,19 +441,19 @@ fn sema_coverage_else_arm(environment: SemaScopeEnvironment, span: Span) -> Else
 }
 
 // True when this `if` level belongs to a dispatch table with an `else` arm.
-pub fn sema_coverage_is_else_table(environment: SemaScopeEnvironment, span: Span) -> Bool {
-    sema_coverage_else_arm(environment, span) != None
+pub fn sema_coverage_is_else_table(environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span) -> Bool {
+    sema_coverage_else_arm(environment, program, span) != None
 }
 
 // A closed set: an enum, `T?`, `T E!`, or a union. Numbers, text, and
 // structs stay open, so an `else` after their arms can still run.
-fn sema_coverage_is_closed_set(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
+fn sema_coverage_is_closed_set(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if ty == {
         .Option(_) | .Result(_, _) | .Union(_) -> return true
         .Named(_) | .Apply(_, _) -> {}
         else -> return false
     }
-    graph_option :: environment.registration_graph
+    graph_option :: program.registration_graph
     graph :: graph_option ?? return false
     nominal_row :: sema_pattern_nominal_row(graph, environment.module_identity, ty) ?? return sema_coverage_compiler_enum(ty) != None
     graph.modules[nominal_row.module_index].nominals[nominal_row.row].kind == SemaRegistrationNominalKind.Enum
@@ -513,14 +513,14 @@ pub fn sema_coverage_else_statement_conditions(source: Expr, lowered: TStmt) -> 
 // L0303 (#3716): an `else` after pattern arms that already cover a closed set
 // can never run, and a case added later would fall into it silently instead
 // of raising E0307. Report the arm with the Safe edit that deletes it.
-pub fn sema_coverage_check_redundant_else(conditions: [TExpr], span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
-    arm :: sema_coverage_else_arm(environment, span) ?? return
+pub fn sema_coverage_check_redundant_else(conditions: [TExpr], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+    arm :: sema_coverage_else_arm(environment, program, span) ?? return
     table :: sema_coverage_table(conditions) ?? return
     subject_ty :: sema_pattern_unwrap_tags(table.subject.ty)
-    if !sema_coverage_is_closed_set(subject_ty, environment) -> return
+    if !sema_coverage_is_closed_set(subject_ty, environment, program) -> return
     ranges := [SemaIntegerRange]{}
-    keys :: sema_coverage_keys(subject_ty, table.shapes, environment, &ranges)
-    if sema_coverage_missing(subject_ty, keys, environment).len() != 0 -> return
+    keys :: sema_coverage_keys(subject_ty, table.shapes, environment, program, &ranges)
+    if sema_coverage_missing(subject_ty, keys, environment, program).len() != 0 -> return
     shown :: type_name(subject_ty)
     diagnostic :: sema_lint("L0303", arm.arm, "this `else` can never run; every case of `{shown}` is already handled", "if a case is added to `{shown}` later, it would go to this `else` silently instead of the compiler asking you to handle it", "delete the `else` arm")
     &diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: arm.delete, new_text: ""}))
