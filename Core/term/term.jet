@@ -82,7 +82,10 @@ pub fn binwrite(path: String, bytes: [U8]) IOError! -[IO, Time.Wait]> {
     core.files.write_bytes(path, bytes)
 }
 
-pub fn confirm(prompt: String) -[IO, Time.Wait]> Bool Never! { core.term.confirm(prompt) }
+pub fn confirm(prompt: String) -[IO, Time.Wait]> Bool Never! {
+    answer :: input("{prompt} [y/N] ") ?? ""
+    confirm_answer(answer)
+}
 
 pub fn choose(prompt: String, options: [String]) -[IO, Time.Wait]> String IOError! {
     if options.len() == 0 -> return Err(term_input_error("choose", prompt, "choose needs at least one item"))
@@ -126,6 +129,11 @@ fn term_input_error(operation: String, resource: String, cause: String) -> IOErr
         os_code: None,
         cause: Val("{operation}: {cause}"),
     })
+}
+
+fn confirm_answer(answer: String) -> Bool Never! {
+    normalized :: ascii_lower(answer.trim())
+    normalized == "y" || normalized == "yes"
 }
 fn sgr(spec: String) -> String {
     parts := [String]{}
@@ -230,3 +238,11 @@ fn parse_int(text: String) -> Int? {
     Val(n)
 }
 
+
+#Test("confirmation accepts only an ASCII case-insensitive yes") {
+    assert(confirm_answer(" y "))
+    assert(confirm_answer(" YeS\t"))
+    assert(!confirm_answer(""))
+    assert(!confirm_answer("no"))
+    assert(!confirm_answer("yés"))
+}

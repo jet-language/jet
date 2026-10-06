@@ -12865,11 +12865,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.term.confirm
-    #[no_mangle]
-    pub extern "C" fn jet_std_io_confirm(a0: JetCString) -> bool {
-        guard(|| crate::jet_std_io_confirm(unsafe { &*a0 }))
-    }
 
 
     /// core.term.input_secret

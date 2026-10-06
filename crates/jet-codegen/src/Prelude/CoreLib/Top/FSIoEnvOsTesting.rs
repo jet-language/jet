@@ -148,30 +148,6 @@ fn jet_std_io_prompt_read() -> Result<JetTermRead, jet_std::IOError> {
 
 // D-IO-PROMPT1=A: safe defaults and one terminal-owned secret-input path.
 
-fn jet_std_io_confirm(prompt: &String) -> bool {
-    jet_term_confirm_with_io(
-        prompt,
-        |text| {
-            if jet_fault_should_fail("IO.Write") {
-                return Err(jet_std::IOError::other(
-                    jet_std::IOOperation::Write,
-                    Some("stdout".to_string()),
-                    "fault injected: IO.Write",
-                ));
-            }
-            if jet_fault_should_fail("IO.Flush") {
-                return Err(jet_std::IOError::other(
-                    jet_std::IOOperation::Flush,
-                    Some("stdout".to_string()),
-                    "fault injected: IO.Flush",
-                ));
-            }
-            jet_term_write_stdout(text, true)
-                .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
-        },
-        jet_std_io_prompt_read,
-    )
-}
 
 fn jet_std_io_choose(prompt: &String, items: &Vec<String>) -> Result<String, jet_std::IOError> {
     jet_term_choose_with_io(

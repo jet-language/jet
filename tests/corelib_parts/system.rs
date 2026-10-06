@@ -33,6 +33,27 @@ fn run() {{
 }
 
 #[test]
+fn core_term_source_confirmation_preserves_prompt_and_closed_default() {
+    assert!(common::have_rustc(), "terminal confirmation proof requires rustc");
+    let dir = std::env::temp_dir().join(format!("jet_corelib_term_confirm_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.term as term
+
+fn run() {
+    print(term.confirm("Proceed?"))
+    print(term.confirm("Again?"))
+}
+"#;
+    let (code, stdout, stderr) =
+        build_and_run(&dir, "term_confirm", source, &[], Some(" YeS \r\n"));
+    assert_eq!(code, 0, "terminal source confirmation failed: {stderr}");
+    assert_eq!(stdout, "Proceed? [y/N] true\nAgain? [y/N] false\n");
+    assert_eq!(stderr, "");
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn text_unicode_audit_surface_runs() {
     let have_rustc = common::have_rustc();
     if !have_rustc {
