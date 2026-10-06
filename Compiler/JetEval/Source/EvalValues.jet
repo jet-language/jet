@@ -495,24 +495,29 @@ pub struct JetEvalTaskCallbackInvokeResult {
 }
 
 
+// The evaluator's host boundary. Compile-time evaluation holds the canonical
+// comptime rights row (D-META-EFFECT1 c3): memory-only work plus the embed
+// reads, so every call declares `FS.Read`. An undeclared dynamic dispatch
+// would be the maximal row (D-EFF2) and would make every checker path that
+// evaluates a constant reach every effect.
 trait JetEvalHostAdapter {
-    fn new_session(self) -> JetEvalHostAdapter
-    fn clone_adapter(self) -> JetEvalHostAdapter
-    fn poll_callbacks(self, machine: &JetEvalMachine) -> Bool
-    fn drain_callbacks(self, machine: &JetEvalMachine) -> Bool
-    fn host_call(self, machine: &JetEvalMachine, target: JetEvalHostCallTarget, static_operand: JetEvalHostStaticOperand?, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, arg_shapes: [JetEvalHostTypeShape], span: Span) -> JetEvalHostResult?
-    fn foreign_call(self, machine: &JetEvalMachine, row: MIRForeign, args: ^[JetEvalHostArgument], span: Span) -> JetEvalHostResult?
-    fn handle_call(self, machine: &JetEvalMachine, operation: String, handle: MIRHandleID, raw: Int, span: Span) -> JetEvalHostResult?
+    fn new_session(self) -[]> JetEvalHostAdapter
+    fn clone_adapter(self) -[]> JetEvalHostAdapter
+    fn poll_callbacks(self, machine: &JetEvalMachine) -[FS.Read]> Bool
+    fn drain_callbacks(self, machine: &JetEvalMachine) -[FS.Read]> Bool
+    fn host_call(self, machine: &JetEvalMachine, target: JetEvalHostCallTarget, static_operand: JetEvalHostStaticOperand?, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, arg_shapes: [JetEvalHostTypeShape], span: Span) -[FS.Read]> JetEvalHostResult?
+    fn foreign_call(self, machine: &JetEvalMachine, row: MIRForeign, args: ^[JetEvalHostArgument], span: Span) -[FS.Read]> JetEvalHostResult?
+    fn handle_call(self, machine: &JetEvalMachine, operation: String, handle: MIRHandleID, raw: Int, span: Span) -[FS.Read]> JetEvalHostResult?
     // Cleanup-only path for Source backing-root refs and provisional owner
     // leases. A committed allocator lease is released by the allocator's
     // normal handle drop instead.
-    fn fixed_backing_release(self, machine: &JetEvalMachine, handle: MIRHandleID, raw: Int, lease: Int?, span: Span) -> JetEvalHostResult?
-    fn fixed_backing_access(self, machine: &JetEvalMachine, root: JetEvalHostFixedBackingStorage, operation: JetEvalHostFixedBackingOperation, span: Span) -> JetEvalHostFixedBackingAccessResult?
-    fn physical_binding(self) -> JetEvalHostValue
-    fn native_call(self, machine: &JetEvalMachine, binding: JetEvalNativeCallBinding, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -> JetEvalHostResult?
-    fn channel_select(self, machine: &JetEvalMachine, row: MIRPreludeCall, kind: MIRSelectKind, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -> JetEvalHostResult?
-    fn task_group(self, machine: &JetEvalMachine, row: MIRPreludeCall, kind: MIRTaskGroupKind, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -> JetEvalHostResult?
-    fn shared_call(self, machine: &JetEvalMachine, operation: JetEvalSharedPhysicalOp, row: MIRPreludeCall, map_row: MIRPreludeCall?, shared: JetEvalRuntimeValue, guard: JetEvalRuntimeValue?, condition: JetEvalRuntimeValue?, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -> JetEvalHostResult?
+    fn fixed_backing_release(self, machine: &JetEvalMachine, handle: MIRHandleID, raw: Int, lease: Int?, span: Span) -[]> JetEvalHostResult?
+    fn fixed_backing_access(self, machine: &JetEvalMachine, root: JetEvalHostFixedBackingStorage, operation: JetEvalHostFixedBackingOperation, span: Span) -[]> JetEvalHostFixedBackingAccessResult?
+    fn physical_binding(self) -[]> JetEvalHostValue
+    fn native_call(self, machine: &JetEvalMachine, binding: JetEvalNativeCallBinding, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[FS.Read]> JetEvalHostResult?
+    fn channel_select(self, machine: &JetEvalMachine, row: MIRPreludeCall, kind: MIRSelectKind, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[]> JetEvalHostResult?
+    fn task_group(self, machine: &JetEvalMachine, row: MIRPreludeCall, kind: MIRTaskGroupKind, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[]> JetEvalHostResult?
+    fn shared_call(self, machine: &JetEvalMachine, operation: JetEvalSharedPhysicalOp, row: MIRPreludeCall, map_row: MIRPreludeCall?, shared: JetEvalRuntimeValue, guard: JetEvalRuntimeValue?, condition: JetEvalRuntimeValue?, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[]> JetEvalHostResult?
 }
 
 pub struct JetEvalConfig {

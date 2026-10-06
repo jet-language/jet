@@ -113,7 +113,7 @@ fn sema_expression_unit_literal_fact(suffix: String, graph: SemaRegistrationGrap
     None
 }
 
-fn sema_expression_unit_literal(raw: String, int_value: Int?, float_value: Float?, suffix: String, suffix_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expression_unit_literal(raw: String, int_value: Int?, float_value: Float?, suffix: String, suffix_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> TExpr? {
     graph :: environment.registration_graph
     if suffix != "" && graph == .Val(facts_graph) {
         fact :: sema_expression_unit_literal_fact(suffix, facts_graph)
@@ -141,7 +141,7 @@ fn sema_expression_unit_literal(raw: String, int_value: Int?, float_value: Float
                 constructed_ty :: Type.Result{ok: Type.Named{name: "Duration"}, err: Type.Named{name: "RangeError"}}
                 constructed :: sema_tir_expr(constructed_ty, TExprKind.HandleMethod{receiver: unit_value, operation: THandleOp.DurationNew{unit: "Nanoseconds", float: is_float}, args: [TExpr]{}}, span)
                 message :: sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "time literal is outside Duration's i64 range"}}}, span)
-                fallback :: TOrFallback.Panic{message: message, location: sema_expression_panic_location(environment, suffix_span)}
+                fallback :: TOrFallback.Panic{message: message, location: sema_expression_panic_location(environment, scopes, suffix_span)}
                 checked :: sema_tir_expr(Type.Named{name: "Duration"}, TExprKind.OrFallback{value: constructed, fallback: fallback, ambient_err: None}, span)
                 return sema_expr_expected(checked, expected, environment, &diagnostics)
             }
@@ -739,7 +739,7 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
         return None
     }
     kind :: sema_expression_index_kind(resolved_kind, base_ty)
-    value :: sema_tir_expr(result_ty ?? Type.Named{name: "Unit"}, TExprKind.Index{base: checked_base, index: checked_index, kind: kind, access: AccessConvention.Read, checked_call: None, location: sema_expression_panic_location(environment, span)}, span)
+    value :: sema_tir_expr(result_ty ?? Type.Named{name: "Unit"}, TExprKind.Index{base: checked_base, index: checked_index, kind: kind, access: AccessConvention.Read, checked_call: None, location: sema_expression_panic_location(environment, scopes, span)}, span)
     sema_expr_expected(value, expected, environment, &diagnostics)
 }
 
@@ -785,7 +785,7 @@ fn sema_expression_slice(base: Expr, start: Expr, end: Expr, range: Expr?, span:
     }
     zero_start :: sema_tir_expr(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
     zero_end :: sema_tir_expr(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
-    result :: sema_tir_expr(result_ty ?? Type.Named{name: "Unit"}, TExprKind.Slice{base: checked_base, start: checked_start ?? zero_start, end: checked_end ?? zero_end, range: range_value, location: sema_expression_panic_location(environment, span)}, span)
+    result :: sema_tir_expr(result_ty ?? Type.Named{name: "Unit"}, TExprKind.Slice{base: checked_base, start: checked_start ?? zero_start, end: checked_end ?? zero_end, range: range_value, location: sema_expression_panic_location(environment, scopes, span)}, span)
     sema_expr_expected(result, expected, environment, &diagnostics)
 }
 

@@ -298,15 +298,13 @@ fn run() {
         run_default_multi("inline_use_list", "main.jet", &[("main.jet", src)]);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, "8\n10\n");
-    assert!(stderr.contains("tier1 native"), "{stderr}");
-    assert!(!stderr.contains("tier0 interp"), "{stderr}");
 
     let dir = std::env::temp_dir().join(format!("jet_inline_use_interp_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");
     fs::write(&path, src).unwrap();
-    let outcome = jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true);
+    let outcome = crate::common::dev_run(path.to_str().unwrap(), false, true);
     match outcome {
         jet::Interpreter::RunOutcome::Ran {
             stdout, exit_code, ..
@@ -356,8 +354,6 @@ fn run() {
         run_default_multi("inline_core_use_list", "main.jet", &[("main.jet", src)]);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, "3\n4\n9\n10\n4.0\n9.0\n10.0\n7\n5\n");
-    assert!(stderr.contains("tier1 native"), "{stderr}");
-    assert!(!stderr.contains("tier0 interp"), "{stderr}");
 
     let dir =
         std::env::temp_dir().join(format!("jet_inline_core_use_interp_{}", std::process::id()));
@@ -365,7 +361,7 @@ fn run() {
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");
     fs::write(&path, src).unwrap();
-    let outcome = jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true);
+    let outcome = crate::common::dev_run(path.to_str().unwrap(), false, true);
     match outcome {
         jet::Interpreter::RunOutcome::Ran {
             stdout, exit_code, ..
@@ -419,7 +415,7 @@ pub fn label(prefix: String, n: Int) -> String {
     fs::write(dir.join("main.jet"), main_src).unwrap();
     fs::write(dir.join("math.jet"), math_src).unwrap();
     let outcome =
-        jet::Interpreter::dev_iteration(dir.join("main.jet").to_str().unwrap(), false, true);
+        crate::common::dev_run(dir.join("main.jet").to_str().unwrap(), false, true);
     match outcome {
         jet::Interpreter::RunOutcome::Ran {
             stdout, exit_code, ..

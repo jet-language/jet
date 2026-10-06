@@ -171,13 +171,14 @@ For C and C++, the driver-specific options are `--project-root`, `--build-root`,
 `--target`. The exact acceptance and forwarding behavior is documented in
 [CC driver hosts](cc-driver.md).
 
-## Jet-hosted `check` and `build`
+## Jet-hosted `check`, `build`, `run`, `test`, and `new`
 
 The Jet-hosted CLI ([`Compiler/JetCli`](../../../Compiler/JetCli)) runs
-`jet check <file>` and `jet build <file>` through the Jet compiler
-(`jet_driver_compile`). It gives the compiler one authorized source root: the
-nearest directory at or above the file that holds `package.jet`, or the file's
-own directory for a loose file, with every `.jet` file under it (dot names,
+`jet check <file>`, `jet build <file>`, `jet run <file>`, and
+`jet test <file>` through the Jet
+compiler (`jet_driver_compile`). It gives the compiler one authorized source
+root: the nearest directory at or above the file that holds `package.jet`, or
+the file's own directory for a loose file, with every `.jet` file under it (dot names,
 `target`, `build`, `node_modules`, `bin`, and nested projects stay out) and the
 generated C/C++ binding caches. The Core library bodies are read from the Jet
 toolchain source tree named by `JET_TOOLCHAIN_ROOT` (the directory that holds
@@ -188,8 +189,66 @@ by `node Compiler/Bootstrap/generate-core-sources.mjs`, which
 holds current.
 
 `jet build` writes `.jet/build/<stem>` in that source root. The default and
-`--profile debug` builds use the Jet-native backend (`lir_lower_program` and a
-static x86-64 executable); a program that backend cannot lower yet is refused
+`--profile debug` builds use the Jet-native backend: `lir_lower_entry` lowers
+the functions `fn run` reaches to a relocatable object, and the in-process
+linker binds it to the runtime pack shipped beside `jet` into a static x86-64
+executable. A program that backend cannot lower yet is refused
 with E2104. `--release` (or `--profile release`) compiles the emitted Rust with
-rustc and the release profile flags. Other build flags and profiles are
-refused with E2104 until they are ported.
+rustc and the release profile flags. The Rust file starts with the same
+runtime/Core prefix the Rust compiler emits (MIRRust `emit_mir_runtime_text`):
+[`Emit/RuntimePrefix.jet`](../../../Compiler/JetCodegen/Source/Emit/RuntimePrefix.jet)
+assembles it from the Prelude and Foundation `.rs` sources under
+`JET_TOOLCHAIN_ROOT` (which must therefore also hold `crates/`), with the
+artifact's runtime parts, the test-harness gate, and the release devtools
+policy (`local` inspection for `--release`, development for a test harness).
+Other build flags and profiles are refused with E2104 until they are ported.
+
+`jet run <file>` (and the `jet <file>` shorthand) builds the same executable
+with the same profile rules, then runs it on the caller's stdin, stdout, and
+stderr and exits with its status (1 when a signal ended it). The program's
+arguments are the words after the first standalone `--`, or else the
+positional words after the file. Advisory lints stay hidden unless `--verbose`
+or `-v` comes before `--`; a verbose run reports them before the program
+starts. Run flags other than `--release`, `--profile`, `--verbose`, `--quiet`,
+`--color`, `--threads`, `--allow`, and `--deny` are refused with E2104 until they are ported.
+
+Before `jet build` or `jet run` writes anything, the Jet host checks the
+application authority ([`Authority.jet`](../../../Compiler/JetCli/Source/Cli/Authority.jet)):
+the checked entry's solved effect row against the beginner floor (`IO`,
+`Mem.Alloc`, `Exec.Args`), the entry package's `authority.holds` (from
+`package.jet` or the entry's leading inline `package { … }` block, which the
+Jet loader reads with the same field parser and masks before parsing), and the
+`--allow=`/`--deny=` rows of the invocation. A denied or undecided right is
+E1803, exit 1; a file with no package manifest leads the Fix with the exact
+`--allow` command. The interactive confirmation (D-SCRIPT-CONFIRM1), authority
+receipts, and lint-policy enforcement are not ported yet: the Jet host always
+answers as a non-interactive run.
+
+`jet test <file> [<filter>]` compiles the file in test mode: each named
+`#Test` body is checked and lowered as a synthetic function (a property
+test's ungeneratable parameter types are E0613, a file with no named test is
+E0601), and the artifact is a TestExecutable whose harness owns `main`. The
+harness is built through rustc as `.jet/build/.test_<stem>.<pid>` (the
+Jet-native backend has no harness entry yet) and run with `JET_TEST_CAPTURE`,
+`JET_TEST_FILTER`, `JET_TEST_SHUFFLE_SEED`, `JET_TEST_SERIAL`,
+`JET_TEST_TRACE_TIERS`, `JET_UPDATE_SNAPSHOTS`, and `JET_PROJECT_ROOT`. Its
+captured output is shown under `--capture=all`, or for a failed run under the
+default `--capture=failed`; the exit is 0 when the harness passed, else 1. It
+honors `--capture`, `--filter`, `--shuffle=<seed>`, `--serial`,
+`--trace-tiers`, `-u`/`--update-snapshots`, `--fresh`, `--show-default`,
+`--release`, `--profile`, `--verbose`, `--quiet`, `--color`, and `--threads`.
+Directory and package targets, doctests, a `fn test` override, a bare
+`--shuffle`, and the other test flags are refused with E2104 until they are
+ported. The test-result cache, the evidence report, and the package claims
+floor are not ported yet: every run compiles fresh, and the outcome is the
+harness exit (the Rust host's outcome for a package without a claims floor).
+
+`jet new <name> [--template cli|ui|web|overrides] [--annotated]` writes the
+same project the Rust host writes (CmdCompile.rs `run_new`): `package.jet`
+with the template's authority holds, `.jet/lock` with the running toolchain
+pin and the build stamp (the git revision when the folder is inside a
+repository), the template's `run.jet`, the four comment-only `@*.jet` command
+homes for `overrides`, and `.gitignore`, then the status lines on stderr
+(muted by `--quiet`). A bare `jet new` prints the command help with exit 2.
+The backend scaffolds (`jet new service|route|job|migration`) are refused with
+E2104 until they are ported.

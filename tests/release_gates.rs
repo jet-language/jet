@@ -730,10 +730,10 @@ fn warning_free_policy_is_strict_and_curated() {
         "the production test path must inherit the warning wall"
     );
 
-    let jit = fs::read_to_string(root().join("crates/jet-jit/src/lib.rs"))
-        .expect("read jet-jit lint policy");
+    let evalhost = fs::read_to_string(root().join("crates/jet-evalhost/src/lib.rs"))
+        .expect("read jet-evalhost lint policy");
     assert!(
-        jit.contains("#![expect(") && jit.contains("reason = \"#804:"),
+        evalhost.contains("#![expect(") && evalhost.contains("reason = \"#804:"),
         "intentional Rust lint exceptions must use card-referenced #[expect]"
     );
 }

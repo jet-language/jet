@@ -1,0 +1,174 @@
+// Boundary marshaling only: all String/exact-Int meaning belongs to the same
+// runtime that the mapped code calls. Composite values require a native layout
+// descriptor and ownership/drop receipt; they are rejected before execution.
+use core.math as math
+use jet_foundation.[MIRType, TComptimeValue]
+
+pub struct X64ComptimeWord {
+    pub word: Int
+    pub errors: [String]
+}
+
+pub struct X64ComptimeValue {
+    pub value: TComptimeValue?
+    pub errors: [String]
+}
+
+fn x64_comptime_word_failure(message: String) -> X64ComptimeWord Never! {
+    X64ComptimeWord{word: 0, errors: [String]{message}}
+}
+
+fn x64_comptime_value_failure(message: String) -> X64ComptimeValue Never! {
+    X64ComptimeValue{value: None, errors: [String]{message}}
+}
+
+// Preflight the value ABI before mapping/calling. This is not an effects or
+// execution-budget proof: the compiler must establish those independently.
+pub fn x64_comptime_scalar_supported(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Int | .Bool | .Char | .Float | .String -> true
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> x64_comptime_scalar_supported(inner)
+        .IntN(_, bits) -> bits == 64
+        .Apply(name, args) -> args.len() == 0 && name.name == "Unit"
+        else -> false
+    }
+}
+
+fn x64_comptime_runtime_text(runtime: X64Runtime, text: String, symbol: String) -> X64ComptimeWord {
+    if runtime.errors.len() > 0 -> return X64ComptimeWord{word: 0, errors: runtime.errors}
+    function :: os_library_symbol(runtime.library, symbol)
+    if function == 0 -> return x64_comptime_word_failure("unresolved runtime symbol {symbol}")
+    bytes :: text.bytes()
+    // Include padding because os_copy_in writes complete words, including an
+    // empty String's mapped address. Runtime construction copies the bytes.
+    buffer :: os_map(bytes.len() + 8, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(buffer) -> return x64_comptime_word_failure("mmap for compiler value failed (errno {-buffer})")
+    os_copy_in(buffer, bytes)
+    word := 0
+    #Unsafe("function is the resolved (ptr,len)->word runtime constructor; buffer remains readable until it returns") {
+        word = os_call_address_two(function, buffer, bytes.len())
+    }
+    released :: os_unmap(buffer, bytes.len() + 8)
+    if os_failed(released) -> return x64_comptime_word_failure("munmap for compiler value failed (errno {-released})")
+    X64ComptimeWord{word: word, errors: [String]{}}
+}
+
+// Produce an owning runtime carrier (String/large Int) or scalar bits. The
+// invocation owns transferred parameters; borrowed carriers remain the host's.
+pub fn x64_comptime_encode_scalar(runtime: X64Runtime, ty: MIRType, value: TComptimeValue) -> X64ComptimeWord {
+    if ty.kind == .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return x64_comptime_encode_scalar(runtime, inner, value)
+    if ty.kind == {
+        .Int -> {
+            if value == .Int(number) {
+                if number >= -4611686018427387904 && number < 4611686018427387904 -> return X64ComptimeWord{word: number, errors: [String]{}}
+                return x64_comptime_runtime_text(runtime, "{number}", "jet_rt_int_from_static")
+            }
+            if value == .BigInt(decimal) -> return x64_comptime_runtime_text(runtime, decimal, "jet_rt_int_from_static")
+        }
+        .IntN(signed, bits) -> {
+            if bits == 64 {
+                number := 0
+                if value == {
+                    .Int(integer) -> number = integer
+                    .BigInt(decimal) -> number = Int.parse(decimal) ?? return x64_comptime_word_failure("native 64-bit value is not an integer")
+                    else -> return x64_comptime_word_failure("native 64-bit value is not an integer")
+                }
+                if signed {
+                    if number < -9223372036854775808 || number >= 9223372036854775808 -> return x64_comptime_word_failure("native signed value is outside 64 bits")
+                } else {
+                    if number < 0 || number >= 18446744073709551616 -> return x64_comptime_word_failure("native unsigned value is outside 64 bits")
+                    if number >= 9223372036854775808 -> number -= 18446744073709551616
+                }
+                return X64ComptimeWord{word: number, errors: [String]{}}
+            }
+        }
+        .Bool -> {
+            if value == .Bool(flag) -> return X64ComptimeWord{word: if flag -> 1 else -> 0, errors: [String]{}}
+        }
+        .Char -> {
+            if value == .Char(scalar) -> return X64ComptimeWord{word: scalar, errors: [String]{}}
+        }
+        .Float -> {
+            if value == .Float(number, bits) {
+                if bits == 64 -> return X64ComptimeWord{word: math.to_bits(number), errors: [String]{}}
+            }
+        }
+        .String -> {
+            if value == .String(text) -> return x64_comptime_runtime_text(runtime, text, "jet_rt_string_from_static")
+        }
+        .Apply(name, args) -> {
+            if args.len() == 0 && name.name == "Unit" && value == .Unit -> return X64ComptimeWord{word: 0, errors: [String]{}}
+        }
+        else -> {}
+    }
+    x64_comptime_word_failure("compiler value does not match the supported native scalar ABI")
+}
+
+// Copy out while the runtime owns a live String. Never rely on Rust's private
+// String layout, or use char length for a byte buffer (UTF-8 and NUL retained).
+fn x64_comptime_read_string(runtime: X64Runtime, word: Int) -> X64ComptimeValue {
+    if runtime.errors.len() > 0 -> return X64ComptimeValue{value: None, errors: runtime.errors}
+    data_function :: os_library_symbol(runtime.library, "jet_rt_string_data")
+    length_function :: os_library_symbol(runtime.library, "jet_rt_string_byte_len")
+    if data_function == 0 || length_function == 0 -> return x64_comptime_value_failure("runtime lacks compiler String projections")
+    if word == 0 -> return x64_comptime_value_failure("native String result is null")
+    address := 0
+    length := 0
+    #Unsafe("word is a live String handle and both functions borrow it through the canonical runtime C ABI") {
+        address = os_call_address(data_function, word)
+        length = os_call_address(length_function, word)
+    }
+    bytes := [U8]{}
+    loop index in 0..<length {
+        byte := 0
+        #Unsafe("the runtime's borrowed UTF-8 projection holds length readable bytes until the owning String is dropped") {
+            byte = os_load_byte(address + index)
+        }
+        &bytes.push(U8{byte})
+    }
+    text :: String.from_bytes(bytes) ?? return x64_comptime_value_failure("runtime String projection is not UTF-8")
+    X64ComptimeValue{value: Val(TComptimeValue.String{value: text}), errors: [String]{}}
+}
+
+// Borrow a returned carrier; decoding never consumes it or changes ownership.
+// The compiler must drop the native result after retaining this detached value.
+pub fn x64_comptime_decode_scalar(runtime: X64Runtime, ty: MIRType, word: Int) -> X64ComptimeValue {
+    if ty.kind == .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return x64_comptime_decode_scalar(runtime, inner, word)
+    if ty.kind == {
+        .Int -> {
+            if word >= -4611686018427387904 && word < 4611686018427387904 -> return X64ComptimeValue{value: Val(TComptimeValue.Int{value: word}), errors: [String]{}}
+            stringify :: os_library_symbol(runtime.library, "jet_rt_int_to_string")
+            drop :: os_library_symbol(runtime.library, "jet_rt_string_drop")
+            if stringify == 0 || drop == 0 -> return x64_comptime_value_failure("runtime lacks exact-Int compiler projections")
+            text_word := 0
+            #Unsafe("word is a live exact-Int carrier and stringify returns a fresh owning String") {
+                text_word = os_call_address(stringify, word)
+            }
+            decoded :: x64_comptime_read_string(runtime, text_word)
+            #Unsafe("the temporary String is owned here and decoding has copied its bytes") {
+                _ := os_call_address(drop, text_word)
+            }
+            if decoded.errors.len() > 0 -> return decoded
+            text :: decoded.value ?? return x64_comptime_value_failure("runtime exact-Int projection returned no String")
+            if text == .String(decimal) -> return X64ComptimeValue{value: Val(TComptimeValue.BigInt{decimal: decimal}), errors: [String]{}}
+        }
+        .IntN(signed, bits) -> {
+            if bits == 64 {
+                if !signed && word < 0 -> return X64ComptimeValue{value: Val(TComptimeValue.BigInt{decimal: (word + 18446744073709551616).to_string()}), errors: [String]{}}
+                return X64ComptimeValue{value: Val(TComptimeValue.Int{value: word}), errors: [String]{}}
+            }
+        }
+        .Bool -> {
+            if word != 0 && word != 1 -> return x64_comptime_value_failure("native Bool result is not 0 or 1")
+            return X64ComptimeValue{value: Val(TComptimeValue.Bool{value: word == 1}), errors: [String]{}}
+        }
+        .Char -> return X64ComptimeValue{value: Val(TComptimeValue.Char{value: word}), errors: [String]{}}
+        .Float -> return X64ComptimeValue{value: Val(TComptimeValue.Float{value: math.from_bits(word), bits: 64}), errors: [String]{}}
+        .String -> return x64_comptime_read_string(runtime, word)
+        .Apply(name, args) -> {
+            if args.len() == 0 && name.name == "Unit" -> return X64ComptimeValue{value: Val(TComptimeValue.Unit), errors: [String]{}}
+        }
+        else -> {}
+    }
+    x64_comptime_value_failure("native result requires a composite layout/ownership descriptor")
+}

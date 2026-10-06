@@ -3296,11 +3296,13 @@ Prelude-backed mechanism on every applicable tier. Reductions keep their
 left-to-right scalar fold order for bit-identical results; raw target
 intrinsics remain behind `#Unsafe`.
 
-**D-JIT1 / D-JIT2 / D-JITDEP1 — JIT tier**: production is AOT; the Cranelift
-JIT is the dev-loop tier-1 over the interpreter tier-0, behind the
-`JitBackend` seam, in its own `jet-jit/` crate (`Source/` stays std-only).
-**D-DEVMODE1 hard rule**: dev-runtime output must be byte-identical to the
-release build — divergence is a release blocker.
+**D-EXEC2=A — JIT retired** *(ratified, card #4134; supersedes D-JIT1 /
+D-JIT2 / D-JITDEP1)*: the Cranelift JIT and its crate are removed. `jet run`
+and `jet dev` use the normal build path and execute the result; `jet dev`
+rebuilds and restarts on every save. The comptime evaluator stays and also
+serves `--interpret`. Native in-memory O0 replaces the build-and-execute
+loop when it lands. **D-DEVMODE1 hard rule**: dev-runtime output must be
+byte-identical to the release build — divergence is a release blocker.
 
 **D-PLUGIN1 / D-DEP-WASM1**, naming amended by **D-ONCE-SANDBOX1=A**:
 `target: sandbox` compiles to a sandboxed WASM module (wasmtime + Component
@@ -5239,51 +5241,10 @@ a difference in supported features/functionality between JIT and AOT.” D-AOT-C
 (below) decided the remaining AOT mechanism; it does not create a third
 product lens or a feature/functionality split.
 
-**D-AOT-CRANELIFT1=B — Cranelift emits the fast AOT debug profile** *(ratified
-2026-07-16, card #666)*: on supported targets, `jet build --profile=debug`
-lowers the same sema-approved executable TIR through Cranelift to object code
-and links, with no generated Rust and no rustc. Unsupported targets fall back
-to rustc opt-level 0 and report that fallback in `jet explain build`; they
-never lose features or silently change optimization intent. Optimized AOT
-(`jet build`, `--release`) keeps the rustc backend. Both backends face R12
-differential tests; behavior and diagnostics are identical, only wait time
-differs.
-
-```text
-$ jet run hello.jet    # fast: opt-level 0         ~150 ms (illustrative)
-$ jet dev  hello.jet   # fast: opt-level 0         ~150 ms (illustrative)
-$ jet build hello.jet  # optimized: -O + thin-LTO  ~450 ms (illustrative)
-
-$ jet build --profile=debug hello.jet   # fast build of a build artifact
-$ jet run   --release       hello.jet   # optimized one-off run
-```
-
-*Owner ruling 2026-09-30 (card #3953):* every non-release native `jet build`
-(the default, `fast` and `debug` profiles) takes the Cranelift backend;
-`--release`, `hardened`, `ci`, `small`, no-OS and named profiles keep
-rustc/LLVM. The dev executable is a copy of the prebuilt `jet-aot-rt` runner
-with the program's Cranelift image appended (the same lowering and warm-module
-format `jet run` uses), so no rustc, C compiler or linker runs. The runner
-verifies the image's checksum and runtime build identity before running it and
-maps code writable, then read+execute, never both. A program the image cannot
-carry (native FFI, C links, CLI-decoded entries, interpreter-tier functions,
-compile-time state beyond strings, the checked type registry and closure
-targets, or code whose function numbering a reload cannot reproduce) builds
-with rustc and prints `[build] note: building with rustc because <cause>`,
-naming the one rule the program broke. The backend is part of the native
-cache key. A Cranelift build generates no Rust (`.jet/build/<stem>.rs` is
-written only when rustc runs), probes no rustc or linker for its key, and
-caches only the image: a cache hit appends the stored image to a copy of the
-runner, and an unchanged rebuild recognizes the existing executable by its
-length and image trailer (the image's SHA-256) instead of hashing it. The
-rustc executable built after a refusal is cached under the Cranelift key
-extended with the rustc and linker identity. Once lowered, functions compile
-to machine code on all host threads (`jet run` too) and are defined in
-lowering order, so the image is byte-identical to a one-thread compile. Each
-compiled function is also stored by its Cranelift incremental-cache key (the
-function's IR with callee names abstracted, the target and its flags) and the
-`jet` build identity; a later build of any program reuses it for a function
-with the same key, so an edit recompiles only the functions whose IR changed.
+**D-AOT-CRANELIFT1=B** *(ratified 2026-07-16, card #666; retired by
+D-EXEC2=A)*: the Cranelift debug-AOT backend and its card #3953 dev-image
+runner are removed with the JIT. Every native `jet build`, including the
+default, `fast`, and `debug` profiles, emits Rust and builds with rustc/LLVM.
 
 **Migrations** *(D-MIGRATE1, D-MIGRATE2A–F)*: `#PublishedSchema` types
 snapshot field layout; a breaking change without a migration is E0910.

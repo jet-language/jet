@@ -179,8 +179,8 @@ fn workspace_crates_keep_declared_dependency_direction() {
         ],
     );
     assert_deps(
-        "crates/jet-jit/Cargo.toml",
-        &["jet-codegen", "jet-foundation", "jet-rt"],
+        "crates/jet-evalhost/Cargo.toml",
+        &["jet-codegen", "jet-foundation", "jet-pkg-model", "jet-rt", "jet-unicode"],
     );
     // Card #367 / D-PRODUCT-SPLIT1=C slice 2: `jetos` is its own crate/binary
     // boundary now (was a root-package shim). It still dispatches through
@@ -198,7 +198,7 @@ fn workspace_crates_keep_declared_dependency_direction() {
             "jet-env-model",
             "jet-foundation",
             "jet-impact",
-            "jet-jit",
+            "jet-evalhost",
             "jet-queries",
             "jet-repl",
             "jet-semindex",

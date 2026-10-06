@@ -1,0 +1,169 @@
+// Entry closure regression and structural call-graph checks. No new Prelude
+// routes: the executable fixture only needs the existing print route.
+use jet_backend.[LowerPrepared, lower_prepare_entry]
+use jet_foundation.[
+    MIRAccess,
+    MIRCallArg,
+    MIRCallbackAdapter,
+    MIRCallbackID,
+    MIRCallee,
+    MIRCaptureFacts,
+    MIRCaptureParam,
+    MIRCloseAdapter,
+    MIRConstant,
+    MIRDropKind,
+    MIRDropAction,
+    MIRHandleID,
+    MIRHandleLifecycle,
+    MIRHandlePayload,
+    MIRImplDef,
+    MIRImplID,
+    MIRFunction,
+    MIRGenericParam,
+    MIROperation,
+    MIRProgram,
+    MIRSemanticOp,
+    MIRTerminator,
+    MIRTraitDef,
+    MIRTraitID,
+    MIRTraitMethod,
+    MIRTraitMethodID,
+    MIRTraitRef,
+    MIRType,
+    MIRTypeDef,
+    MIRTypeDefKind,
+    MIRTypeKind,
+    mir_copy_ownership,
+    mir_function_id,
+    mir_owned_ownership,
+    mir_type_from_kind,
+]
+
+// fn unused_generic[T]() {}
+// fn unused_capture() { /* closure body with a captured Int */ }
+// fn used() { print("used") }
+// fn run() { used() }
+// expect-stdout reach: "used\n"
+fn fx_reach() -> MIRProgram Never! {
+    u := fx_builder()
+    text :: fx_owned(&u, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "used"}})
+    fx_print(&u, text)
+    fx_do(&u, MIROperation.Drop{value: text, kind: MIRDropKind.Value})
+    fx_block(&u, 0, MIRTerminator.Return{value: None})
+
+    g := fx_builder()
+    fx_block(&g, 0, MIRTerminator.Return{value: None})
+    generic := fx_function("unused_generic", g, fx_unit())
+    generic.generic_params = [MIRGenericParam]{MIRGenericParam{name: "T", bounds: [MIRTraitRef]{}}}
+
+    c := fx_builder()
+    _ := fx_copy(&c, fx_int(), MIROperation.Capture{slot: 0})
+    fx_block(&c, 0, MIRTerminator.Return{value: None})
+    captured := fx_function("unused_capture", c, fx_unit())
+    captured.capture_params = [MIRCaptureParam]{MIRCaptureParam{slot: 0, name: "x", span: fx_span(), ty: fx_int(), access: MIRAccess.Read, ownership: mir_copy_ownership()}}
+
+    r := fx_builder()
+    _ := fx_copy(&r, fx_unit(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("used")}, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    types := [MIRTypeDef]{fx_type_def("Untouched", MIRTypeDefKind.Alias{target: fx_int()})}
+    // run is deliberately not first, before or after filtering. The CLI must
+    // compute its LIR entry index from the filtered program, not the old rows.
+    fx_program([MIRFunction]{generic, fx_function("used", u, fx_unit()), captured, fx_function("run", r, fx_unit())}, ^types)
+}
+
+// A mismatch prints the kept inventory and the preparation issues.
+fn fx_reach_same_ids(prepared: LowerPrepared, names: [String]) -> Bool Never! {
+    same := prepared.issues.len() == 0 && prepared.functions.len() == names.len()
+    if same {
+        loop (index, name) in names {
+            if prepared.functions[index].id != mir_function_id(name) || prepared.functions[index].original != mir_function_id(name) || prepared.functions[index].instance_row != -1 -> same = false
+            if (prepared.mir_rows.get(mir_function_id(name).value) ?? -1) != index -> same = false
+        }
+    }
+    if !same {
+        kept :: loop row in prepared.functions -> row.name
+        print("reach: expected [{names.join(", ")}], kept [{kept.join(", ")}]")
+        loop issue in prepared.issues -> print("reach: {issue.message}")
+    }
+    same
+}
+
+// Structural checks exercise routes not yet executable in native lowering.
+// a -> leaf -> method -> a forms a cycle; closure -> leaf shares an edge;
+// run also names a semantic callback adapter. The unreachable captured and
+// generic definitions must not become roots merely because they exist.
+fn fx_reach_graph_checks() -> Bool Never! {
+    initial :: fx_reach()
+    entry :: mir_function_id("run")
+    kept :: lower_prepare_entry(initial, entry)
+    if !fx_reach_same_ids(kept, [String]{"used", "run"}) -> return false
+    if kept.declaration_rows.len() != initial.types.len() || kept.source_rows.len() != initial.functions.len() -> return false
+    if !fx_reach_same_ids(lower_prepare_entry(initial, entry), [String]{"used", "run"}) -> return false
+    absent :: lower_prepare_entry(initial, mir_function_id("absent"))
+    if absent.functions.len() != 0 || absent.issues.len() == 0 -> return false
+
+    a := fx_builder()
+    fx_do(&a, MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("leaf")}, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+    fx_block(&a, 0, MIRTerminator.Return{value: None})
+    l := fx_builder()
+    fx_do(&l, MIROperation.Call{callee: MIRCallee.Method{function: mir_function_id("method"), owner: fx_int()}, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+    fx_block(&l, 0, MIRTerminator.Return{value: None})
+    m := fx_builder()
+    fx_do(&m, MIROperation.Call{callee: MIRCallee.Associated{function: mir_function_id("associated"), owner: fx_int()}, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+    fx_block(&m, 0, MIRTerminator.Return{value: None})
+    c := fx_builder()
+    fx_do(&c, MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("leaf")}, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+    fx_block(&c, 0, MIRTerminator.Return{value: None})
+    callback := fx_builder()
+    fx_block(&callback, 0, MIRTerminator.Return{value: None})
+    r := fx_builder()
+    fx_do(&r, MIROperation.Call{callee: MIRCallee.Associated{function: mir_function_id("associated"), owner: fx_int()}, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+    // A function reference in an otherwise unexecuted block still counts.
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    lambda :: fx_copy(&r, fx_unit(), MIROperation.Closure{function: mir_function_id("closure"), captures: [], facts: MIRCaptureFacts{escapes: false, needs_fn_mut: false, mutable: [], cloned: [], frozen: [], materialized: [], moved: []}})
+    fx_do(&r, MIROperation.Semantic{operation: MIRSemanticOp.CCallback{call: fx_prelude_id("callback", "make"), callback: MIRCallbackID{value: 9}, lambda: lambda}})
+    fx_block(&r, 1, MIRTerminator.Return{value: None})
+    functions :: [MIRFunction]{initial.functions[0], fx_function("leaf", l, fx_unit()), fx_function("associated", a, fx_unit()), initial.functions[2], fx_function("run", r, fx_unit()), fx_function("method", m, fx_unit()), fx_function("closure", c, fx_unit()), fx_function("callback", callback, fx_unit())}
+    graph := initial
+    graph.functions = functions
+    graph.callbacks = [MIRCallbackAdapter]{MIRCallbackAdapter{id: MIRCallbackID{value: 9}, symbol: "fixture_callback", function: mir_function_id("callback"), params: [], return_type: None, abi: .C, managed: false, plan_digest: None, callback_identity: None}}
+    closed :: lower_prepare_entry(graph, entry)
+    fx_reach_same_ids(closed, [String]{"leaf", "associated", "run", "method", "closure", "callback"}) && closed.callbacks.len() == graph.callbacks.len() && closed.foreign_rows.len() == graph.foreign.len() && fx_reach_metadata_checks()
+}
+
+fn fx_reach_empty(name: String) -> MIRFunction Never! {
+    b := fx_builder()
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_function(name, b, fx_unit())
+}
+
+// Dynamic TraitMethod reaches the same-named method in each matching impl
+// plus the default, not other methods of that trait. Capture/place types reach
+// lifecycle close/undo bodies without rooting every handle row in the program.
+fn fx_reach_metadata_checks() -> Bool Never! {
+    trait_ref :: MIRTraitRef{id: MIRTraitID{value: 20}, name: "FixtureTrait"}
+    method_id :: MIRTraitMethodID{value: 21}
+    receiver :: mir_type_from_kind(MIRTypeKind.TraitObject{bounds: [MIRTraitRef]{trait_ref}})
+    r := fx_builder()
+    place :: fx_local(&r, "handle", fx_string(), mir_owned_ownership())
+    fx_do(&r, MIROperation.Call{callee: MIRCallee.TraitMethod{method: method_id, trait_ref: trait_ref, receiver: receiver}, args: [], type_args: []})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    root := fx_function("run", r, fx_unit())
+    root.capture_params = [MIRCaptureParam]{MIRCaptureParam{slot: 0, name: "handle", span: fx_span(), ty: fx_string(), access: MIRAccess.Move, ownership: mir_owned_ownership()}}
+    root.drops = [MIRDropAction]{MIRDropAction{place: place, edge: .Return, span: fx_span()}}
+    implemented := fx_reach_empty("implementation")
+    implemented.name = "show"
+    unrelated := fx_reach_empty("other_method")
+    unrelated.name = "other"
+    types := [MIRTypeDef]{}
+    p := fx_program([MIRFunction]{fx_reach_empty("close"), unrelated, root, fx_reach_empty("default"), implemented, fx_reach_empty("undo"), fx_reach_empty("adapter"), fx_reach_empty("unused_close")}, ^types)
+    p.traits = [MIRTraitDef]{MIRTraitDef{id: trait_ref.id, module_id: root.module_id, key: trait_ref.name, name: trait_ref.name, span: fx_span(), visibility: .Private, associated_types: [], methods: [MIRTraitMethod]{MIRTraitMethod{id: method_id, name: "show", span: fx_span(), self_access: Val(MIRAccess.Read), params: [], declared_return: Val(fx_unit()), return_type: fx_unit(), failure: .Infallible, effects: root.effects, is_pure: false, return_view_provenance: None, declared_return_view_provenance: None, default: Val(mir_function_id("default"))}}}}
+    p.impls = [MIRImplDef]{MIRImplDef{id: MIRImplID{value: 22}, module_id: root.module_id, key: "FixtureImpl", span: fx_span(), self_type: fx_int(), trait_ref: Val(trait_ref), associated_types: [], methods: [mir_function_id("implementation"), mir_function_id("other_method")], delegation: None, compiler_generated: false, serde: None, operator_marker: None, operator_rhs: None, target_os: None, target_applicability: root.target_applicability}}
+    p.handles = [MIRHandleLifecycle]{
+        MIRHandleLifecycle{id: MIRHandleID{value: 23}, ty: fx_string(), ownership: .Owned, payload: MIRHandlePayload{library: "fixture", typedef_name: "handle", close: "close"}, close: Val(mir_function_id("close")), close_foreign: None, undo: Val(mir_function_id("undo")), send: false, sync: false, close_source: None, thread_safety: None},
+        MIRHandleLifecycle{id: MIRHandleID{value: 24}, ty: fx_int(), ownership: .Owned, payload: MIRHandlePayload{library: "fixture", typedef_name: "unused", close: "unused_close"}, close: Val(mir_function_id("unused_close")), close_foreign: None, undo: None, send: false, sync: false, close_source: None, thread_safety: None},
+    }
+    p.cffi.close_adapters = [MIRCloseAdapter]{MIRCloseAdapter{lib: "fixture", handle_type: "handle", raw_function: "raw_close", adapter_function: "adapter"}}
+    kept :: lower_prepare_entry(p, mir_function_id("run"))
+    fx_reach_same_ids(kept, [String]{"close", "run", "default", "implementation", "undo", "adapter"}) && kept.lifecycle.len() == p.handles.len() && kept.source_rows.len() == p.functions.len()
+}

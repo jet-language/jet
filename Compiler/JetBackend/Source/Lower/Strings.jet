@@ -1,0 +1,104 @@
+// String operations borrow opaque runtime handles in both hosted and static images.
+use jet_foundation.[
+    MIRFieldID,
+    MIRInstruction,
+    MIRPlaceID,
+    MIRPreludeABI,
+    MIRPreludeCall,
+    MIRPreludeFamily,
+    MIRProgram,
+    MIRType,
+    MIRValueID,
+    mir_symbol_name,
+]
+
+fn lower_string_compare(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, condition: LIRCondition, left: LIRValueID, right: LIRValueID) Never! {
+    order :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_compare", [LIRValueID]{left, right}, Val(order))
+    zero :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Compare{dst: dst, condition: condition, left: order, right: zero})
+}
+
+fn lower_string_type(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .String -> true
+        .Tagged(_, inner) -> lower_string_type(inner)
+        .InlineRange(inner, _, _) -> lower_string_type(inner)
+        .Quantity(inner, _) -> lower_string_type(inner)
+        else -> lower_string_view(ty)
+    }
+}
+
+// A `View<str>` (MIRRust.rs is_string_view_type: a borrowed `&str` window
+// into its owner's text) is an owned String handle holding the window's text.
+// Its kernels' owned twins (lower_route_symbol) return the same text, and a
+// window is only read (shown, compared, measured, materialized by `Copy`), so
+// the copy is unobservable; it costs one allocation the zero-copy window
+// avoids.
+fn lower_string_view(ty: MIRType) -> Bool Never! {
+    if ty.kind == .Apply(name, args) {
+        if name.name != "View" || args.len() != 1 -> return false
+        if args[0].kind == .Apply(inner, inner_args) -> return inner.name == "str" && inner_args.len() == 0
+    }
+    false
+}
+
+// Text that crosses as a String handle: a String or a `View<str>`.
+fn lower_text_type(ty: MIRType) -> Bool Never! {
+    ty.kind == .String || lower_string_view(ty)
+}
+
+// The runtime kernel a Prelude row's call runs: a `&str` view kernel runs
+// its owned twin, since a `View<str>` is an owned String (lower_string_view).
+fn lower_route_symbol(row: MIRPreludeCall) -> String Never! {
+    symbol :: mir_symbol_name(row.symbol)
+    if symbol == "jet_string_after_view" -> return "jet_string_after"
+    if symbol == "jet_string_before_view" -> return "jet_string_before"
+    if symbol == "jet_string_trim_view" || symbol == "jet_unicode_trim_view" -> return "jet_unicode_trim"
+    symbol
+}
+
+fn lower_string_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, receiver: MIRValueID, receiver_place: MIRPlaceID?, args: [MIRValueID], aggregate_fields: [MIRFieldID]?) -> Bool Never! {
+    receiver_ty :: lower_value_type(c, receiver) ?? return false
+    if !lower_string_type(receiver_ty) || row.family != .BuiltinMethod || row.module_name != "core.builtin" -> return false
+    symbol :: mir_symbol_name(row.symbol)
+    is_len :: (row.member == "len" || row.member == "len_string") && symbol == "jet_char_len"
+    is_empty :: row.member == "is_empty" && symbol == "jet_string_is_empty"
+    is_contains :: row.member == "contains" && symbol == "jet_string_contains"
+    is_prefix :: row.member == "string_starts_with" && symbol == "jet_string_starts_with"
+    is_suffix :: row.member == "string_ends_with" && symbol == "jet_string_ends_with"
+    if !is_len && !is_empty && !is_contains && !is_prefix && !is_suffix -> return false
+    arity :: if is_len || is_empty -> 1 else -> 2
+    if row.abi != .Value || row.signature.arity != arity || args.len() != arity - 1 || aggregate_fields != None {
+        lower_fail(&m, &f, "this String builtin method shape is not lowered at O0 yet")
+        return true
+    }
+    result_ty :: instruction.ty ?? {
+        lower_fail(&m, &f, "a String builtin method without a result is not lowered at O0 yet")
+        return true
+    }
+    if (is_len && !lower_is_exact_int(result_ty)) || (!is_len && result_ty.kind != .Bool) {
+        lower_fail(&m, &f, "this String builtin method result type is not lowered at O0 yet")
+        return true
+    }
+    lowered := [LIRValueID]{}
+    value :: lower_use(&m, &f, receiver) ?? return true
+    &lowered.push(value)
+    loop arg in args {
+        ty :: lower_value_type(c, arg) ?? {
+            lower_fail(&m, &f, "a String builtin method argument without a checked type is not lowered at O0 yet")
+            return true
+        }
+        if !lower_string_type(ty) {
+            lower_fail(&m, &f, "this String builtin method argument type is not lowered at O0 yet")
+            return true
+        }
+        arg_value :: lower_use(&m, &f, arg) ?? return true
+        &lowered.push(arg_value)
+    }
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    // Rust MIRRust.rs:26912-26916 adapts jet_char_len's native integer to Int.
+    // A scalar count cannot exceed the allocated String's inline-range byte length.
+    lower_call_runtime(&m, &f, symbol, lowered, Val(dst))
+    true
+}

@@ -6,13 +6,13 @@
 // why `--test dev` could not finish inside the suite guard.
 
 #[test]
-fn language_callables_and_types_match_interpreter_jit_and_aot() {
+fn language_callables_and_types_match_interpreter_default_run_and_aot() {
     const CHILD_STEM: &str = "JET_1215_STEM";
     if let Ok(stem) = std::env::var(CHILD_STEM) {
-        assert_cranelift_three_way(&example_path(&stem), &stem);
+        assert_tier_parity(&example_path(&stem), &stem);
         return;
     }
-    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+    if skip_without_rustc() {
         return;
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
@@ -45,7 +45,7 @@ fn language_callables_and_types_match_interpreter_jit_and_aot() {
         "types/value_tag_type",
     ];
     run_child_stem_battery(
-        "language_callables_and_types_match_interpreter_jit_and_aot",
+        "language_callables_and_types_match_interpreter_default_run_and_aot",
         CHILD_STEM,
         "language/callable/type parity",
         *DEV_DIFF_TIMEOUT,
@@ -55,13 +55,13 @@ fn language_callables_and_types_match_interpreter_jit_and_aot() {
 }
 
 #[test]
-fn comptime_effects_and_errors_match_interpreter_jit_and_aot() {
+fn comptime_effects_and_errors_match_interpreter_default_run_and_aot() {
     const CHILD_STEM: &str = "JET_1217_STEM";
     if let Ok(stem) = std::env::var(CHILD_STEM) {
-        assert_cranelift_three_way(&example_path(&stem), &stem);
+        assert_tier_parity(&example_path(&stem), &stem);
         return;
     }
-    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+    if skip_without_rustc() {
         return;
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
@@ -90,7 +90,7 @@ fn comptime_effects_and_errors_match_interpreter_jit_and_aot() {
         "errors/typed_error_families",
     ];
     run_child_stem_battery(
-        "comptime_effects_and_errors_match_interpreter_jit_and_aot",
+        "comptime_effects_and_errors_match_interpreter_default_run_and_aot",
         CHILD_STEM,
         "comptime/effect/error parity",
         *DEV_DIFF_TIMEOUT,
@@ -100,13 +100,13 @@ fn comptime_effects_and_errors_match_interpreter_jit_and_aot() {
 }
 
 #[test]
-fn collections_memory_and_streams_match_interpreter_jit_and_aot() {
+fn collections_memory_and_streams_match_interpreter_default_run_and_aot() {
     const CHILD_STEM: &str = "JET_1216_STEM";
     if let Ok(stem) = std::env::var(CHILD_STEM) {
-        assert_cranelift_three_way(&example_path(&stem), &stem);
+        assert_tier_parity(&example_path(&stem), &stem);
         return;
     }
-    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+    if skip_without_rustc() {
         return;
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
@@ -140,7 +140,7 @@ fn collections_memory_and_streams_match_interpreter_jit_and_aot() {
         "streams/generators",
     ];
     run_child_stem_battery(
-        "collections_memory_and_streams_match_interpreter_jit_and_aot",
+        "collections_memory_and_streams_match_interpreter_default_run_and_aot",
         CHILD_STEM,
         "collection/memory/stream parity",
         *DEV_DIFF_TIMEOUT,
@@ -150,8 +150,8 @@ fn collections_memory_and_streams_match_interpreter_jit_and_aot() {
 }
 
 #[test]
-fn stream_pull_hostile_matrix_matches_interpreter_jit_and_aot() {
-    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+fn stream_pull_hostile_matrix_matches_interpreter_default_run_and_aot() {
+    if skip_without_rustc() {
         return;
     }
     let stem = "streams/generators";
@@ -165,12 +165,12 @@ fn stream_pull_hostile_matrix_matches_interpreter_jit_and_aot() {
             panic!("hostile Stream matrix did not run in the interpreter: {diags:?}");
         }
     }
-    assert_cranelift_three_way(&file, stem);
+    assert_tier_parity(&file, stem);
 }
 
 #[test]
-fn stream_producer_failure_matches_interpreter_jit_and_aot() {
-    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+fn stream_producer_failure_matches_interpreter_default_run_and_aot() {
+    if skip_without_rustc() {
         return;
     }
     let source = r#"fn failing() -> Stream<Int> {
@@ -189,7 +189,7 @@ fn run() {
     let file = std::env::temp_dir().join(format!("jet_stream_failure_{}.jet", std::process::id()));
     fs::write(&file, source).expect("write Stream failure fixture");
     let file = file.to_string_lossy().into_owned();
-    let interpreted = match dev_iteration(&file, false, true) {
+    let interpreted = match crate::common::dev_run(&file, false, true) {
         RunOutcome::Ran {
             stdout,
             stderr,
@@ -200,26 +200,12 @@ fn run() {
         }
     };
 
-    let bundle = checked_bundle_from_path(&file);
-    let policy = common::development_policy();
-    jet_jit::reset_jit_trace_for_test();
-    let mut backend = CraneliftBackend::new();
-    let jit = jet_jit::with_program_args(std::slice::from_ref(&file), || {
-        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
-            RunOutcome::Ran {
-                stdout,
-                stderr,
-                exit_code,
-            } => ProgramOutput::ran(stdout, stderr, exit_code),
-            RunOutcome::Problems(diags) => {
-                panic!("Stream producer failure did not run in JIT: {diags:?}");
-            }
-        }
-    });
+    checked_bundle_from_path(&file);
+    let default_run = default_run_output(&file, "streams/generators");
     let aot_dir = std::env::temp_dir().join(format!("jet_stream_failure_aot_{}", std::process::id()));
     let aot = compiled_binary_output(&aot_dir, "stream_failure", 0, "streams/generators", &file);
 
-    assert_eq!(jit, interpreted, "Stream producer failure drifted in JIT");
+    assert_eq!(default_run, interpreted, "Stream producer failure drifted in default `jet run`");
     assert_eq!(aot, interpreted, "Stream producer failure drifted in AOT");
     assert_eq!(interpreted.exit_code, 70, "producer failure must remain a panic");
     assert_eq!(interpreted.stdout, "value: 1\n");
@@ -227,13 +213,13 @@ fn run() {
 }
 
 #[test]
-fn crypto_auth_and_vault_match_interpreter_jit_and_aot() {
+fn crypto_auth_and_vault_match_interpreter_default_run_and_aot() {
     const CHILD_STEM: &str = "JET_1222_STEM";
     if let Ok(stem) = std::env::var(CHILD_STEM) {
         assert_crypto_auth_vault_three_way(&example_path(&stem), &stem);
         return;
     }
-    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+    if skip_without_rustc() {
         return;
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
@@ -250,7 +236,7 @@ fn crypto_auth_and_vault_match_interpreter_jit_and_aot() {
         "crypto/vault_secret",
     ];
     run_child_stem_battery(
-        "crypto_auth_and_vault_match_interpreter_jit_and_aot",
+        "crypto_auth_and_vault_match_interpreter_default_run_and_aot",
         CHILD_STEM,
         "crypto/auth/vault parity",
         *DEV_DIFF_TIMEOUT,
@@ -260,13 +246,13 @@ fn crypto_auth_and_vault_match_interpreter_jit_and_aot() {
 }
 
 #[test]
-fn network_http_and_browser_match_interpreter_jit_and_aot() {
+fn network_http_and_browser_match_interpreter_default_run_and_aot() {
     const CHILD_STEM: &str = "JET_1221_STEM";
     if let Ok(stem) = std::env::var(CHILD_STEM) {
         assert_network_http_browser_three_way(&example_path(&stem), &stem);
         return;
     }
-    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+    if skip_without_rustc() {
         return;
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
@@ -289,7 +275,7 @@ fn network_http_and_browser_match_interpreter_jit_and_aot() {
         "net/ws_echo",
     ];
     run_child_stem_battery(
-        "network_http_and_browser_match_interpreter_jit_and_aot",
+        "network_http_and_browser_match_interpreter_default_run_and_aot",
         CHILD_STEM,
         "network/http/browser parity",
         *DEV_DIFF_TIMEOUT,
@@ -299,13 +285,13 @@ fn network_http_and_browser_match_interpreter_jit_and_aot() {
 }
 
 #[test]
-fn concurrency_and_game_match_interpreter_jit_and_aot() {
+fn concurrency_and_game_match_interpreter_default_run_and_aot() {
     const CHILD_STEM: &str = "JET_1218_STEM";
     if let Ok(stem) = std::env::var(CHILD_STEM) {
         assert_concurrency_and_game_three_way(&example_path(&stem), &stem);
         return;
     }
-    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+    if skip_without_rustc() {
         return;
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
@@ -320,7 +306,7 @@ fn concurrency_and_game_match_interpreter_jit_and_aot() {
         "game/raylib_window",
     ];
     run_child_stem_battery(
-        "concurrency_and_game_match_interpreter_jit_and_aot",
+        "concurrency_and_game_match_interpreter_default_run_and_aot",
         CHILD_STEM,
         "concurrency/game parity",
         *DEV_DIFF_TIMEOUT,
@@ -330,13 +316,13 @@ fn concurrency_and_game_match_interpreter_jit_and_aot() {
 }
 
 #[test]
-fn ui_and_web_match_interpreter_jit_and_aot() {
+fn ui_and_web_match_interpreter_default_run_and_aot() {
     const CHILD_STEM: &str = "JET_1225_STEM";
     if let Ok(stem) = std::env::var(CHILD_STEM) {
         assert_ui_and_web_three_way(&example_path(&stem), &stem);
         return;
     }
-    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+    if skip_without_rustc() {
         return;
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
@@ -362,7 +348,7 @@ fn ui_and_web_match_interpreter_jit_and_aot() {
         "web/web_wasm_callback",
     ];
     run_child_stem_battery(
-        "ui_and_web_match_interpreter_jit_and_aot",
+        "ui_and_web_match_interpreter_default_run_and_aot",
         CHILD_STEM,
         "ui/web parity",
         *DEV_DIFF_TIMEOUT,
@@ -372,15 +358,15 @@ fn ui_and_web_match_interpreter_jit_and_aot() {
 }
 
 #[test]
-fn reflection_value_matches_interpreter_jit_aot_and_jet_run() {
-    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+fn reflection_value_matches_interpreter_aot_and_jet_run() {
+    if skip_without_rustc() {
         return;
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let stem = "reflection/reflect-value";
     let file = example_path(stem);
     assert_data_pipelines_parsing_three_way(&file, stem);
-    let cli_run = run_cli_default_resident("run", &file, "reflection_value_cli_run");
+    let cli_run = run_cli_default("run", &file, "reflection_value_cli_run");
     assert_eq!(
         cli_run,
         golden_program_output(stem),
@@ -389,8 +375,8 @@ fn reflection_value_matches_interpreter_jit_aot_and_jet_run() {
 }
 
 #[test]
-fn typed_fact_reads_match_interpreter_jit_and_aot() {
-    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+fn typed_fact_reads_match_interpreter_default_run_and_aot() {
+    if skip_without_rustc() {
         return;
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
@@ -399,13 +385,13 @@ fn typed_fact_reads_match_interpreter_jit_and_aot() {
 }
 
 #[test]
-fn data_pipelines_and_parsing_match_interpreter_jit_and_aot() {
+fn data_pipelines_and_parsing_match_interpreter_default_run_and_aot() {
     const CHILD_STEM: &str = "JET_1223_STEM";
     if let Ok(stem) = std::env::var(CHILD_STEM) {
         assert_data_pipelines_parsing_three_way(&example_path(&stem), &stem);
         return;
     }
-    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+    if skip_without_rustc() {
         return;
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
@@ -434,7 +420,7 @@ fn data_pipelines_and_parsing_match_interpreter_jit_and_aot() {
         "tooling/todo_hole",
     ];
     run_child_stem_battery(
-        "data_pipelines_and_parsing_match_interpreter_jit_and_aot",
+        "data_pipelines_and_parsing_match_interpreter_default_run_and_aot",
         CHILD_STEM,
         "data/parse/tooling parity",
         *DEV_DIFF_TIMEOUT,
@@ -445,13 +431,13 @@ fn data_pipelines_and_parsing_match_interpreter_jit_and_aot() {
 
 #[test]
 
-fn io_cli_terminal_and_time_match_interpreter_jit_and_aot() {
+fn io_cli_terminal_and_time_match_interpreter_default_run_and_aot() {
     const CHILD_STEM: &str = "JET_1219_STEM";
     if let Ok(stem) = std::env::var(CHILD_STEM) {
         assert_io_cli_terminal_time_three_way(&example_path(&stem), &stem);
         return;
     }
-    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+    if skip_without_rustc() {
         return;
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
@@ -474,7 +460,7 @@ fn io_cli_terminal_and_time_match_interpreter_jit_and_aot() {
         "text/time_calendar",
     ];
     run_child_stem_battery(
-        "io_cli_terminal_and_time_match_interpreter_jit_and_aot",
+        "io_cli_terminal_and_time_match_interpreter_default_run_and_aot",
         CHILD_STEM,
         "io/cli/terminal/time parity",
         Duration::from_secs(120),
@@ -484,21 +470,21 @@ fn io_cli_terminal_and_time_match_interpreter_jit_and_aot() {
 }
 
 #[test]
-fn core_os_examples_match_interpreter_jit_and_aot() {
-    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+fn core_os_examples_match_interpreter_default_run_and_aot() {
+    if skip_without_rustc() {
         return;
     }
     std::thread::Builder::new()
         .stack_size(64 * 1024 * 1024)
-        .spawn(core_os_examples_match_interpreter_jit_and_aot_inner)
+        .spawn(core_os_examples_match_interpreter_default_run_and_aot_inner)
         .expect("spawn core.sys parity worker")
         .join()
         .expect("core.sys parity worker must not panic");
 }
 
 #[test]
-fn explicit_exit_cleanup_matches_interpreter_jit_and_aot() {
-    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+fn explicit_exit_cleanup_matches_interpreter_default_run_and_aot() {
+    if skip_without_rustc() {
         return;
     }
     // The cleanup graph is intentionally deep enough to exceed the small
@@ -523,13 +509,13 @@ fn explicit_exit_cleanup_matches_interpreter_jit_and_aot() {
 }
 
 #[test]
-fn lowlevel_and_safety_match_interpreter_jit_and_aot() {
+fn lowlevel_and_safety_match_interpreter_default_run_and_aot() {
     const CHILD_STEM: &str = "JET_1220_STEM";
     if let Ok(stem) = std::env::var(CHILD_STEM) {
         assert_lowlevel_and_safety_three_way(&example_path(&stem), &stem);
         return;
     }
-    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+    if skip_without_rustc() {
         return;
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
@@ -551,7 +537,7 @@ fn lowlevel_and_safety_match_interpreter_jit_and_aot() {
         "safety/checked_text_sql",
     ];
     run_child_stem_battery(
-        "lowlevel_and_safety_match_interpreter_jit_and_aot",
+        "lowlevel_and_safety_match_interpreter_default_run_and_aot",
         CHILD_STEM,
         "lowlevel/safety parity",
         Duration::from_secs(180),

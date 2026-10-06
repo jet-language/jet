@@ -2,18 +2,21 @@
 // the O0 lowering calls, hand-assembled over raw Linux system calls, for
 // images that link neither libc nor the compiled runtime. It implements the
 // symbol table of the design doc ("Calls into the compiled runtime") with the
-// same System V signatures, so a module links unchanged against either
-// runtime. Hosted images link the compiled runtime's C-ABI exports instead.
+// same System V signatures. Hosted images use compiled C-ABI exports instead;
+// frozen module String carriers currently require this freestanding runtime.
 //
 // Representations, private to this runtime:
 // - memory comes from mmap and returns to munmap (`jet_rt_free` passes the size);
-// - a String handle points at `[len: word][bytes]`;
+// - a String handle points at `[len: word][bytes]`; bit 63 marks frozen static
+//   storage, never freed. Readers mask it and clone returns an unflagged owner;
 // - a string builder points at `[buffer: String-shaped, capacity: word]`;
 // - a range cursor points at `[current, end, step, exclusive, done]` words.
 // Int words are inline integers only: a result outside the inline range stops
 // the program with a report, because big integers live in the compiled runtime.
 // A runtime stop writes `error[CODE]: message` to stderr and exits with 70,
 // the compiled runtime's stop status.
+
+use jet_foundation.[JET_RUST_DEBUG_ESCAPED_RANGES]
 
 struct X64ImageFixup { pub at: Int, pub label: Int }
 
@@ -157,26 +160,322 @@ fn x64_image_stop() -> X64CompiledFunction Never! {
     x64_image_finish(&a, "jet_image_stop")
 }
 
+// jet_rt_panic_list_bounds(len, index): the E3010 List bounds stop with
+// Outcome.rs jet_list_bounds_message's wording; the process exits, so the
+// rendered numbers are never freed.
+fn x64_image_list_bounds_stop() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    x64_mov_rr(&a.code, X64_R12, X64_RDI)
+    x64_mov_rr(&a.code, X64_R13, X64_RSI)
+    pieces :: [String]{"error[E3010]: the list has ", " items, so position "}
+    loop (ordinal, piece) in pieces {
+        x64_mov_ri(&a.code, X64_RDI, 2)
+        x64_image_text(&a, X64_RSI, X64_RDX, piece)
+        x64_image_call(&a, "jet_image_write")
+        x64_mov_rr(&a.code, X64_RDI, if ordinal == 0 -> X64_R12 else -> X64_R13)
+        x64_image_call(&a, "jet_rt_i64_to_string")
+        x64_load(&a.code, X64_RDX, X64_RAX, 0)
+        x64_lea(&a.code, X64_RSI, X64_RAX, 8)
+        x64_mov_ri(&a.code, X64_RDI, 2)
+        x64_image_call(&a, "jet_image_write")
+    }
+    x64_image_stop_with(&a, " doesn't exist\n")
+    x64_image_finish(&a, "jet_rt_panic_list_bounds")
+}
+
+// require/panic's borrowed String carrier, written without a trailing newline.
+fn x64_image_require_write_string(a: &X64ImageAsm, handle: Int) Never! {
+    x64_load(&a.code, X64_RDX, handle, 0)
+    x64_image_string_length(&a.code, X64_RDX)
+    x64_lea(&a.code, X64_RSI, handle, 8)
+    x64_mov_ri(&a.code, X64_RDI, 2)
+    x64_image_call(&a, "jet_image_write")
+}
+
+fn x64_image_require_write_text(a: &X64ImageAsm, text: String) Never! {
+    x64_image_text(&a, X64_RSI, X64_RDX, text)
+    x64_mov_ri(&a.code, X64_RDI, 2)
+    x64_image_call(&a, "jet_image_write")
+}
+
+// jet_rt_require_stop(kind, descriptor, message, left_debug, right_debug, locals).
+// Core.rs:jet_require/jet_require_eq/jet_panic_rich; RuntimeDiagnosticCore.rs:
+// jet_write_runtime_stop. The static context box is rendered by Require.jet.
+fn x64_image_require_stop() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    equal :: x64_image_label(&a)
+    context :: x64_image_label(&a)
+    tail :: x64_image_label(&a)
+    x64_alu_ri(&a.code, X64Alu.Sub, X64_RSP, 8)
+    x64_store(&a.code, X64_RSP, 0, X64_RDI)
+    x64_mov_rr(&a.code, X64_R12, X64_RSI)
+    x64_mov_rr(&a.code, X64_R13, X64_RDX)
+    x64_mov_rr(&a.code, X64_R14, X64_RCX)
+    x64_mov_rr(&a.code, X64_R15, X64_R8)
+    x64_mov_rr(&a.code, X64_RBX, X64_R9)
+    x64_image_require_write_text(&a, "Stop [E3001]: `panic: ")
+    x64_load(&a.code, X64_RAX, X64_RSP, 0)
+    x64_alu_ri(&a.code, X64Alu.Cmp, X64_RAX, 1)
+    x64_image_jcc(&a, X64Cond.E, equal)
+    x64_image_require_write_string(&a, X64_R13)
+    x64_image_jmp(&a, context)
+    x64_image_bind(&a, equal)
+    x64_image_require_write_text(&a, "expected: ")
+    x64_image_require_write_string(&a, X64_R15)
+    x64_image_require_write_text(&a, ", got: ")
+    x64_image_require_write_string(&a, X64_R14)
+    x64_image_bind(&a, context)
+    x64_image_require_write_text(&a, "`\n")
+    x64_load(&a.code, X64_RSI, X64_R12, 72)
+    x64_load(&a.code, X64_RDX, X64_R12, 80)
+    x64_mov_ri(&a.code, X64_RDI, 2)
+    x64_image_call(&a, "jet_image_write")
+    x64_test_rr(&a.code, X64_RBX, X64_RBX)
+    x64_image_jcc(&a, X64Cond.E, tail)
+    x64_load(&a.code, X64_RAX, X64_RBX, 0)
+    x64_image_string_length(&a.code, X64_RAX)
+    x64_test_rr(&a.code, X64_RAX, X64_RAX)
+    x64_image_jcc(&a, X64Cond.E, tail)
+    x64_image_require_write_text(&a, "locals: ")
+    x64_image_require_write_string(&a, X64_RBX)
+    x64_image_require_write_text(&a, "\n")
+    x64_image_bind(&a, tail)
+    x64_image_stop_with(&a, " Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).\n Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.\nMore: jet-lang.dev/e/E3001\n")
+    x64_image_finish(&a, "jet_rt_require_stop")
+}
+
+// Values.rs:JetDebug for String = format!("{self:?}"). Decode each scalar,
+// binary-search the shared Rust Debug ranges, then write directly into one
+// output mapping. Return surplus whole pages, so String drop's len+8 unmaps
+// the entire remaining mapping without a second allocation or payload copy.
+fn x64_image_require_debug_string() -> X64CompiledFunction Never! {
+    ranges :: JET_RUST_DEBUG_ESCAPED_RANGES
+    a := x64_image_asm()
+    top :: x64_image_label(&a)
+    done :: x64_image_label(&a)
+    next :: x64_image_label(&a)
+    literal :: x64_image_label(&a)
+    copy_loop :: x64_image_label(&a)
+    unicode :: x64_image_label(&a)
+    decoded :: x64_image_label(&a)
+    decode :: x64_image_label(&a)
+    width3 :: x64_image_label(&a)
+    width4 :: x64_image_label(&a)
+    short :: x64_image_label(&a)
+    search :: x64_image_label(&a)
+    search_done :: x64_image_label(&a)
+    search_lower :: x64_image_label(&a)
+    hex_start :: x64_image_label(&a)
+    hex :: x64_image_label(&a)
+    hex_digit :: x64_image_label(&a)
+    hex_store :: x64_image_label(&a)
+    returned :: x64_image_label(&a)
+    table :: x64_image_label(&a)
+    saved :: [Int]{X64_RBX, X64_R12, X64_R13, X64_R14, X64_R15}
+    loop reg in saved -> x64_push(&a.code, reg)
+    x64_alu_ri(&a.code, X64Alu.Sub, X64_RSP, 16)
+    x64_load(&a.code, X64_R13, X64_RDI, 0)
+    x64_image_string_length(&a.code, X64_R13)
+    x64_lea(&a.code, X64_R12, X64_RDI, 8)
+    x64_mov_rr(&a.code, X64_RDI, X64_R13)
+    x64_mov_ri(&a.code, X64_RAX, 10)
+    x64_imul_rr(&a.code, X64_RDI, X64_RAX)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_RDI, 10)
+    x64_store(&a.code, X64_RSP, 0, X64_RDI)
+    x64_mov_ri(&a.code, X64_RSI, 8)
+    x64_image_call(&a, "jet_rt_alloc")
+    x64_mov_rr(&a.code, X64_R14, X64_RAX)
+    x64_lea(&a.code, X64_R15, X64_R14, 8)
+    x64_mov_ri(&a.code, X64_RAX, 34)
+    x64_store_u8(&a.code, X64_R15, 0, X64_RAX)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_R15, 1)
+    x64_image_bind(&a, top)
+    x64_test_rr(&a.code, X64_R13, X64_R13)
+    x64_image_jcc(&a, X64Cond.E, done)
+    x64_load_u8(&a.code, X64_R9, X64_R12, 0)
+    x64_mov_ri(&a.code, X64_R8, 1)
+    x64_alu_ri(&a.code, X64Alu.Cmp, X64_R9, 128)
+    x64_image_jcc(&a, X64Cond.B, decoded)
+    x64_mov_ri(&a.code, X64_R8, 2)
+    x64_alu_ri(&a.code, X64Alu.Cmp, X64_R9, 224)
+    x64_image_jcc(&a, X64Cond.AE, width3)
+    x64_alu_ri(&a.code, X64Alu.And, X64_R9, 31)
+    x64_image_jmp(&a, decode)
+    x64_image_bind(&a, width3)
+    x64_mov_ri(&a.code, X64_R8, 3)
+    x64_alu_ri(&a.code, X64Alu.Cmp, X64_R9, 240)
+    x64_image_jcc(&a, X64Cond.AE, width4)
+    x64_alu_ri(&a.code, X64Alu.And, X64_R9, 15)
+    x64_image_jmp(&a, decode)
+    x64_image_bind(&a, width4)
+    x64_mov_ri(&a.code, X64_R8, 4)
+    x64_alu_ri(&a.code, X64Alu.And, X64_R9, 7)
+    x64_image_bind(&a, decode)
+    x64_mov_ri(&a.code, X64_RCX, 1)
+    x64_lea(&a.code, X64_R10, X64_R12, 1)
+    decode_loop :: x64_image_label(&a)
+    x64_image_bind(&a, decode_loop)
+    x64_shift_ri(&a.code, X64Shift.Shl, X64_R9, 6)
+    x64_load_u8(&a.code, X64_RAX, X64_R10, 0)
+    x64_alu_ri(&a.code, X64Alu.And, X64_RAX, 63)
+    x64_alu_rr(&a.code, X64Alu.Or, X64_R9, X64_RAX)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_R10, 1)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_RCX, 1)
+    x64_alu_rr(&a.code, X64Alu.Cmp, X64_RCX, X64_R8)
+    x64_image_jcc(&a, X64Cond.B, decode_loop)
+    x64_image_bind(&a, decoded)
+    specials :: [Int]{0, 9, 10, 13, 34, 92}
+    escapes :: [Int]{48, 116, 110, 114, 34, 92}
+    loop (index, scalar) in specials {
+        skip :: x64_image_label(&a)
+        x64_alu_ri(&a.code, X64Alu.Cmp, X64_R9, scalar)
+        x64_image_jcc(&a, X64Cond.NE, skip)
+        x64_mov_ri(&a.code, X64_RAX, escapes[index])
+        x64_image_jmp(&a, short)
+        x64_image_bind(&a, skip)
+    }
+    x64_alu_ri(&a.code, X64Alu.Cmp, X64_R9, 32)
+    x64_image_jcc(&a, X64Cond.B, unicode)
+    x64_alu_ri(&a.code, X64Alu.Cmp, X64_R9, 127)
+    x64_image_jcc(&a, X64Cond.E, unicode)
+    x64_image_jcc(&a, X64Cond.B, literal)
+    at :: x64_lea_rip(&a.code, X64_RSI)
+    &a.fixups.push(X64ImageFixup{at: at, label: table})
+    x64_mov_ri(&a.code, X64_RDX, 0)
+    x64_mov_ri(&a.code, X64_RDI, ranges.len() /% 2)
+    x64_image_bind(&a, search)
+    x64_alu_rr(&a.code, X64Alu.Cmp, X64_RDX, X64_RDI)
+    x64_image_jcc(&a, X64Cond.AE, search_done)
+    x64_mov_rr(&a.code, X64_RCX, X64_RDX)
+    x64_alu_rr(&a.code, X64Alu.Add, X64_RCX, X64_RDI)
+    x64_shift_ri(&a.code, X64Shift.Shr, X64_RCX, 1)
+    x64_mov_rr(&a.code, X64_R10, X64_RCX)
+    x64_shift_ri(&a.code, X64Shift.Shl, X64_R10, 4)
+    x64_alu_rr(&a.code, X64Alu.Add, X64_R10, X64_RSI)
+    x64_load(&a.code, X64_RAX, X64_R10, 8)
+    x64_alu_rr(&a.code, X64Alu.Cmp, X64_RAX, X64_R9)
+    x64_image_jcc(&a, X64Cond.B, search_lower)
+    x64_mov_rr(&a.code, X64_RDI, X64_RCX)
+    x64_image_jmp(&a, search)
+    x64_image_bind(&a, search_lower)
+    x64_lea(&a.code, X64_RDX, X64_RCX, 1)
+    x64_image_jmp(&a, search)
+    x64_image_bind(&a, search_done)
+    x64_alu_ri(&a.code, X64Alu.Cmp, X64_RDX, ranges.len() /% 2)
+    x64_image_jcc(&a, X64Cond.AE, literal)
+    x64_shift_ri(&a.code, X64Shift.Shl, X64_RDX, 4)
+    x64_alu_rr(&a.code, X64Alu.Add, X64_RDX, X64_RSI)
+    x64_load(&a.code, X64_RAX, X64_RDX, 0)
+    x64_alu_rr(&a.code, X64Alu.Cmp, X64_RAX, X64_R9)
+    x64_image_jcc(&a, X64Cond.BE, unicode)
+    x64_image_jmp(&a, literal)
+    x64_image_bind(&a, short)
+    x64_mov_ri(&a.code, X64_RDX, 92)
+    x64_store_u8(&a.code, X64_R15, 0, X64_RDX)
+    x64_store_u8(&a.code, X64_R15, 1, X64_RAX)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_R15, 2)
+    x64_image_jmp(&a, next)
+    x64_image_bind(&a, unicode)
+    loop (index, byte) in "\\u{{".bytes() {
+        x64_mov_ri(&a.code, X64_RAX, Int.from_u8(byte))
+        x64_store_u8(&a.code, X64_R15, index, X64_RAX)
+    }
+    x64_alu_ri(&a.code, X64Alu.Add, X64_R15, 3)
+    x64_mov_ri(&a.code, X64_RCX, 20)
+    x64_image_bind(&a, hex_start)
+    x64_mov_rr(&a.code, X64_RAX, X64_R9)
+    x64_shift_cl(&a.code, X64Shift.Shr, X64_RAX)
+    x64_test_rr(&a.code, X64_RAX, X64_RAX)
+    x64_image_jcc(&a, X64Cond.NE, hex)
+    x64_alu_ri(&a.code, X64Alu.Sub, X64_RCX, 4)
+    x64_image_jmp(&a, hex_start)
+    x64_image_bind(&a, hex)
+    x64_mov_rr(&a.code, X64_RAX, X64_R9)
+    x64_shift_cl(&a.code, X64Shift.Shr, X64_RAX)
+    x64_alu_ri(&a.code, X64Alu.And, X64_RAX, 15)
+    x64_alu_ri(&a.code, X64Alu.Cmp, X64_RAX, 10)
+    x64_image_jcc(&a, X64Cond.B, hex_digit)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_RAX, 87)
+    x64_image_jmp(&a, hex_store)
+    x64_image_bind(&a, hex_digit)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_RAX, 48)
+    x64_image_bind(&a, hex_store)
+    x64_store_u8(&a.code, X64_R15, 0, X64_RAX)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_R15, 1)
+    x64_alu_ri(&a.code, X64Alu.Sub, X64_RCX, 4)
+    x64_image_jcc(&a, X64Cond.NS, hex)
+    x64_mov_ri(&a.code, X64_RAX, 125)
+    x64_store_u8(&a.code, X64_R15, 0, X64_RAX)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_R15, 1)
+    x64_image_jmp(&a, next)
+    x64_image_bind(&a, literal)
+    x64_mov_rr(&a.code, X64_R10, X64_R12)
+    x64_mov_rr(&a.code, X64_RCX, X64_R8)
+    x64_image_bind(&a, copy_loop)
+    x64_load_u8(&a.code, X64_RAX, X64_R10, 0)
+    x64_store_u8(&a.code, X64_R15, 0, X64_RAX)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_R10, 1)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_R15, 1)
+    x64_alu_ri(&a.code, X64Alu.Sub, X64_RCX, 1)
+    x64_image_jcc(&a, X64Cond.NE, copy_loop)
+    x64_image_bind(&a, next)
+    x64_alu_rr(&a.code, X64Alu.Add, X64_R12, X64_R8)
+    x64_alu_rr(&a.code, X64Alu.Sub, X64_R13, X64_R8)
+    x64_image_jmp(&a, top)
+    x64_image_bind(&a, done)
+    x64_mov_ri(&a.code, X64_RAX, 34)
+    x64_store_u8(&a.code, X64_R15, 0, X64_RAX)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_R15, 1)
+    x64_alu_rr(&a.code, X64Alu.Sub, X64_R15, X64_R14)
+    x64_lea(&a.code, X64_RAX, X64_R15, -8)
+    x64_store(&a.code, X64_R14, 0, X64_RAX)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_R15, 4095)
+    x64_alu_ri(&a.code, X64Alu.And, X64_R15, -4096)
+    x64_load(&a.code, X64_RSI, X64_RSP, 0)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_RSI, 4095)
+    x64_alu_ri(&a.code, X64Alu.And, X64_RSI, -4096)
+    x64_alu_rr(&a.code, X64Alu.Sub, X64_RSI, X64_R15)
+    x64_image_jcc(&a, X64Cond.E, returned)
+    x64_mov_rr(&a.code, X64_RDI, X64_R14)
+    x64_alu_rr(&a.code, X64Alu.Add, X64_RDI, X64_R15)
+    x64_mov_ri(&a.code, X64_RDX, 8)
+    x64_image_call(&a, "jet_rt_free")
+    x64_image_bind(&a, returned)
+    x64_mov_rr(&a.code, X64_RAX, X64_R14)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_RSP, 16)
+    index := saved.len() - 1
+    loop index >= 0 {
+        x64_pop(&a.code, saved[index])
+        index -= 1
+    }
+    x64_ret(&a.code)
+    x64_image_bind(&a, table)
+    loop bound in ranges -> x64_u64(&a.code, bound)
+    x64_image_finish(&a, "jet_rt_require_debug_string")
+}
+
 fn x64_image_stop_function(name: String, message: String) -> X64CompiledFunction Never! {
     a := x64_image_asm()
     x64_image_stop_with(&a, message)
     x64_image_finish(&a, name)
 }
 
-// jet_rt_unreachable(ptr, len): report the reason and stop.
-fn x64_image_unreachable() -> X64CompiledFunction Never! {
+// `name`(ptr, len): report `prefix` and the message text, then stop.
+// jet_rt_unreachable is MIR `Never`; jet_rt_panic_message is a Prelude
+// `jet_panic("<core.prelude>", 0, message)` stop (Collections.rs:1518).
+fn x64_image_message_stop(name: String, prefix: String) -> X64CompiledFunction Never! {
     a := x64_image_asm()
     x64_mov_rr(&a.code, X64_R12, X64_RDI)
     x64_mov_rr(&a.code, X64_R13, X64_RSI)
     x64_mov_ri(&a.code, X64_RDI, 2)
-    x64_image_text(&a, X64_RSI, X64_RDX, "error[E3001]: unreachable: ")
+    x64_image_text(&a, X64_RSI, X64_RDX, prefix)
     x64_image_call(&a, "jet_image_write")
     x64_mov_ri(&a.code, X64_RDI, 2)
     x64_mov_rr(&a.code, X64_RSI, X64_R12)
     x64_mov_rr(&a.code, X64_RDX, X64_R13)
     x64_image_call(&a, "jet_image_write")
     x64_image_stop_with(&a, "\n")
-    x64_image_finish(&a, "jet_rt_unreachable")
+    x64_image_finish(&a, name)
 }
 
 // jet_rt_alloc(size, align) -> ptr: an anonymous private read+write mapping.
@@ -208,6 +507,13 @@ fn x64_image_free() -> X64CompiledFunction Never! {
 
 // ---------------------------------------------------------------------------
 // Strings.
+
+// Immutable module strings mark bit 63 of the length; every byte reader strips
+// it, while clone builds a normal unflagged heap carrier.
+fn x64_image_string_length(code: &[U8], reg: Int) Never! {
+    x64_shift_ri(&code, X64Shift.Shl, reg, 1)
+    x64_shift_ri(&code, X64Shift.Shr, reg, 1)
+}
 
 // jet_image_string_new(len) -> String with its length set and bytes unwritten.
 fn x64_image_string_new() -> X64CompiledFunction Never! {
@@ -250,6 +556,7 @@ fn x64_image_string_from_static() -> X64CompiledFunction Never! {
 fn x64_image_string_clone() -> X64CompiledFunction Never! {
     a := x64_image_asm()
     x64_load(&a.code, X64_RSI, X64_RDI, 0)
+    x64_image_string_length(&a.code, X64_RSI)
     x64_lea(&a.code, X64_RDI, X64_RDI, 8)
     x64_image_tail(&a, "jet_rt_string_from_static")
     x64_image_finish(&a, "jet_rt_string_clone")
@@ -258,9 +565,13 @@ fn x64_image_string_clone() -> X64CompiledFunction Never! {
 // jet_rt_string_drop(String)
 fn x64_image_string_drop() -> X64CompiledFunction Never! {
     a := x64_image_asm()
+    done :: x64_image_label(&a)
     x64_load(&a.code, X64_RSI, X64_RDI, 0)
+    x64_test_rr(&a.code, X64_RSI, X64_RSI)
+    x64_image_jcc(&a, X64Cond.L, done)
     x64_alu_ri(&a.code, X64Alu.Add, X64_RSI, 8)
     x64_image_syscall(&a, 11)
+    x64_image_bind(&a, done)
     x64_ret(&a.code)
     x64_image_finish(&a, "jet_rt_string_drop")
 }
@@ -271,6 +582,8 @@ fn x64_image_string_eq() -> X64CompiledFunction Never! {
     differ :: x64_image_label(&a)
     x64_load(&a.code, X64_RCX, X64_RDI, 0)
     x64_load(&a.code, X64_RDX, X64_RSI, 0)
+    x64_image_string_length(&a.code, X64_RCX)
+    x64_image_string_length(&a.code, X64_RDX)
     x64_alu_rr(&a.code, X64Alu.Cmp, X64_RCX, X64_RDX)
     x64_image_jcc(&a, X64Cond.NE, differ)
     x64_alu_ri(&a.code, X64Alu.Add, X64_RDI, 8)
@@ -293,6 +606,7 @@ fn x64_image_write_stdout_line() -> X64CompiledFunction Never! {
     x64_push(&a.code, X64_RBX)
     x64_mov_rr(&a.code, X64_RBX, X64_RDI)
     x64_load(&a.code, X64_RDX, X64_RBX, 0)
+    x64_image_string_length(&a.code, X64_RDX)
     x64_lea(&a.code, X64_RSI, X64_RBX, 8)
     x64_mov_ri(&a.code, X64_RDI, 1)
     x64_image_call(&a, "jet_image_write")
@@ -392,6 +706,7 @@ fn x64_image_builder_push_static() -> X64CompiledFunction Never! {
 fn x64_image_builder_push() -> X64CompiledFunction Never! {
     a := x64_image_asm()
     x64_load(&a.code, X64_RDX, X64_RSI, 0)
+    x64_image_string_length(&a.code, X64_RDX)
     x64_lea(&a.code, X64_RSI, X64_RSI, 8)
     x64_image_tail(&a, "jet_rt_string_builder_push_static")
     x64_image_finish(&a, "jet_rt_string_builder_push")
@@ -464,6 +779,33 @@ fn x64_image_i64_to_string() -> X64CompiledFunction Never! {
     x64_alu_ri(&a.code, X64Alu.Add, X64_RSP, 40)
     x64_ret(&a.code)
     x64_image_finish(&a, "jet_rt_i64_to_string")
+}
+
+// jet_rt_u64_to_string consumes the full unsigned bit pattern: never negate
+// the high-bit values (CAbi.rs:jet_rt_i64_to_string uses signed formatting).
+fn x64_image_u64_to_string() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    next :: x64_image_label(&a)
+    x64_alu_ri(&a.code, X64Alu.Sub, X64_RSP, 40)
+    x64_mov_rr(&a.code, X64_RAX, X64_RDI)
+    x64_lea(&a.code, X64_RSI, X64_RSP, 32)
+    x64_mov_ri(&a.code, X64_RCX, 10)
+    x64_image_bind(&a, next)
+    x64_alu_rr(&a.code, X64Alu.Xor, X64_RDX, X64_RDX)
+    x64_div(&a.code, X64_RCX)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_RDX, 48)
+    x64_alu_ri(&a.code, X64Alu.Sub, X64_RSI, 1)
+    x64_store_u8(&a.code, X64_RSI, 0, X64_RDX)
+    x64_test_rr(&a.code, X64_RAX, X64_RAX)
+    x64_image_jcc(&a, X64Cond.NE, next)
+    x64_lea(&a.code, X64_RAX, X64_RSP, 32)
+    x64_alu_rr(&a.code, X64Alu.Sub, X64_RAX, X64_RSI)
+    x64_mov_rr(&a.code, X64_RDI, X64_RSI)
+    x64_mov_rr(&a.code, X64_RSI, X64_RAX)
+    x64_image_call(&a, "jet_rt_string_from_static")
+    x64_alu_ri(&a.code, X64Alu.Add, X64_RSP, 40)
+    x64_ret(&a.code)
+    x64_image_finish(&a, "jet_rt_u64_to_string")
 }
 
 // jet_rt_int_to_string(Int) -> String: every Int in this runtime is inline.
@@ -593,6 +935,112 @@ fn x64_image_int_div() -> X64CompiledFunction Never! {
     x64_image_bind(&a, outside)
     x64_image_tail(&a, "jet_image_big_int")
     x64_image_finish(&a, "jet_int_div")
+}
+
+// E3010's registered rich report (RuntimeDiagnosticCore.rs:215-246).
+// file_ptr, file_len, line, message_ptr, message_len; no source box for E3010.
+fn x64_image_numeric_write_text(a: &X64ImageAsm, text: String) Never! {
+    x64_image_text(&a, X64_RSI, X64_RDX, text)
+    x64_mov_ri(&a.code, X64_RDI, 2)
+    x64_image_call(&a, "jet_image_write")
+}
+
+fn x64_image_numeric_stop() -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    footer :: x64_image_label(&a)
+    // Five saved registers also align the stack before every call.
+    saved :: [Int]{X64_R12, X64_R13, X64_R14, X64_R15, X64_RBX}
+    loop reg in saved -> x64_push(&a.code, reg)
+    x64_mov_rr(&a.code, X64_R12, X64_RDI)
+    x64_mov_rr(&a.code, X64_R13, X64_RSI)
+    x64_mov_rr(&a.code, X64_R14, X64_RDX)
+    x64_mov_rr(&a.code, X64_R15, X64_RCX)
+    x64_mov_rr(&a.code, X64_RBX, X64_R8)
+    x64_image_numeric_write_text(&a, "Stop [E3010]: `")
+    x64_mov_ri(&a.code, X64_RDI, 2)
+    x64_mov_rr(&a.code, X64_RSI, X64_R15)
+    x64_mov_rr(&a.code, X64_RDX, X64_RBX)
+    x64_image_call(&a, "jet_image_write")
+    x64_image_numeric_write_text(&a, "`\n")
+    x64_test_rr(&a.code, X64_R13, X64_R13)
+    x64_image_jcc(&a, X64Cond.E, footer)
+    x64_image_numeric_write_text(&a, "  --> ")
+    x64_mov_ri(&a.code, X64_RDI, 2)
+    x64_mov_rr(&a.code, X64_RSI, X64_R12)
+    x64_mov_rr(&a.code, X64_RDX, X64_R13)
+    x64_image_call(&a, "jet_image_write")
+    x64_image_numeric_write_text(&a, ":")
+    x64_mov_rr(&a.code, X64_RDI, X64_R14)
+    x64_image_call(&a, "jet_rt_i64_to_string")
+    x64_mov_rr(&a.code, X64_RSI, X64_RAX)
+    x64_load(&a.code, X64_RDX, X64_RAX, 0)
+    x64_alu_ri(&a.code, X64Alu.Add, X64_RSI, 8)
+    x64_mov_ri(&a.code, X64_RDI, 2)
+    x64_image_call(&a, "jet_image_write")
+    x64_image_numeric_write_text(&a, "\n")
+    x64_image_bind(&a, footer)
+    x64_image_text(&a, X64_RDI, X64_RSI, " Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n")
+    x64_image_tail(&a, "jet_image_stop")
+    x64_image_finish(&a, "jet_rt_numeric_stop")
+}
+
+// CommonTypes.rs:jet_int_div_rem_euclid. Static images accept only inline
+// carriers, and route an out-of-inline quotient to the existing big-Int stop.
+fn x64_image_int_euclid(name: String, remainder: Bool) -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    outside :: x64_image_label(&a)
+    nonzero :: x64_image_label(&a)
+    positive_divisor :: x64_image_label(&a)
+    adjusted :: x64_image_label(&a)
+    x64_test_rr(&a.code, X64_RSI, X64_RSI)
+    x64_image_jcc(&a, X64Cond.NE, nonzero)
+    // Forward the source-location words unchanged to the rich E3010 adapter.
+    x64_mov_rr(&a.code, X64_RDI, X64_RDX)
+    x64_mov_rr(&a.code, X64_RSI, X64_RCX)
+    x64_mov_rr(&a.code, X64_RDX, X64_R8)
+    x64_image_text(&a, X64_RCX, X64_R8, "divided by zero")
+    x64_image_tail(&a, "jet_rt_numeric_stop")
+    x64_image_bind(&a, nonzero)
+    // Never execute idiv on a tagged carrier, including native I64.MIN.
+    x64_mov_rr(&a.code, X64_RAX, X64_RDI)
+    x64_image_inline_check(&a, outside)
+    x64_mov_rr(&a.code, X64_RAX, X64_RSI)
+    x64_image_inline_check(&a, outside)
+    x64_mov_rr(&a.code, X64_RAX, X64_RDI)
+    x64_cqo(&a.code)
+    x64_idiv(&a.code, X64_RSI)
+    x64_test_rr(&a.code, X64_RDX, X64_RDX)
+    x64_image_jcc(&a, X64Cond.NS, adjusted)
+    x64_test_rr(&a.code, X64_RSI, X64_RSI)
+    x64_image_jcc(&a, X64Cond.G, positive_divisor)
+    if remainder -> x64_alu_rr(&a.code, X64Alu.Sub, X64_RDX, X64_RSI)
+    else -> x64_alu_ri(&a.code, X64Alu.Add, X64_RAX, 1)
+    x64_image_jmp(&a, adjusted)
+    x64_image_bind(&a, positive_divisor)
+    if remainder -> x64_alu_rr(&a.code, X64Alu.Add, X64_RDX, X64_RSI)
+    else -> x64_alu_ri(&a.code, X64Alu.Sub, X64_RAX, 1)
+    x64_image_bind(&a, adjusted)
+    if remainder -> x64_mov_rr(&a.code, X64_RAX, X64_RDX)
+    x64_image_inline_check(&a, outside)
+    x64_ret(&a.code)
+    x64_image_bind(&a, outside)
+    x64_image_tail(&a, "jet_image_big_int")
+    x64_image_finish(&a, name)
+}
+
+// Carrier adapters for MIRRust.rs:conversion (:23498/:23519) and
+// index_operand (:23161). Tagged operands/wide constructor inputs stop only
+// inside this freestanding runtime; the compiled adapters support big Ints.
+fn x64_image_int_conversion(name: String, to_float: Bool) -> X64CompiledFunction Never! {
+    a := x64_image_asm()
+    outside :: x64_image_label(&a)
+    x64_mov_rr(&a.code, X64_RAX, X64_RDI)
+    x64_image_inline_check(&a, outside)
+    if to_float -> x64_cvtsi2sd(&a.code, 0, X64_RAX)
+    x64_ret(&a.code)
+    x64_image_bind(&a, outside)
+    x64_image_tail(&a, "jet_image_big_int")
+    x64_image_finish(&a, name)
 }
 
 // ---------------------------------------------------------------------------
@@ -742,10 +1190,14 @@ pub fn x64_image_runtime() -> [X64CompiledFunction] Never! {
     [X64CompiledFunction]{
         x64_image_write(),
         x64_image_stop(),
+        x64_image_list_bounds_stop(),
+        x64_image_require_stop(),
+        x64_image_require_debug_string(),
         x64_image_stop_function("jet_rt_panic_overflow", "error[E3010]: arithmetic overflow\n"),
         x64_image_stop_function("jet_rt_panic_division_by_zero", "error[E3010]: division by zero\n"),
         x64_image_stop_function("jet_image_big_int", "error[E3010]: Int result outside the inline range; big integers need the compiled runtime\n"),
-        x64_image_unreachable(),
+        x64_image_message_stop("jet_rt_unreachable", "error[E3001]: unreachable: "),
+        x64_image_message_stop("jet_rt_panic_message", "error[E3001]: "),
         x64_image_alloc(),
         x64_image_free(),
         x64_image_string_new(),
@@ -753,12 +1205,19 @@ pub fn x64_image_runtime() -> [X64CompiledFunction] Never! {
         x64_image_string_clone(),
         x64_image_string_drop(),
         x64_image_string_eq(),
+        x64_image_string_compare(),
+        x64_image_char_len(),
+        x64_image_string_is_empty(),
+        x64_image_string_predicate("jet_string_contains"),
+        x64_image_string_predicate("jet_string_starts_with"),
+        x64_image_string_predicate("jet_string_ends_with"),
         x64_image_write_stdout_line(),
         x64_image_builder_new(),
         x64_image_builder_push_static(),
         x64_image_builder_push(),
         x64_image_builder_finish(),
         x64_image_i64_to_string(),
+        x64_image_u64_to_string(),
         x64_image_int_to_string(),
         x64_image_bool_to_string(),
         x64_image_char_to_string(),
@@ -767,6 +1226,12 @@ pub fn x64_image_runtime() -> [X64CompiledFunction] Never! {
         x64_image_int_arithmetic("jet_int_sub", LIRBinaryOp.Sub),
         x64_image_int_arithmetic("jet_int_mul", LIRBinaryOp.Mul),
         x64_image_int_div(),
+        x64_image_numeric_stop(),
+        x64_image_int_euclid("jet_int_div_euclid", false),
+        x64_image_int_euclid("jet_int_rem_euclid", true),
+        x64_image_int_conversion("jet_int_owned_from_i64", false),
+        x64_image_int_conversion("jet_int_owned_to_i64", false),
+        x64_image_int_conversion("jet_int_owned_to_f64", true),
         x64_image_range_init(),
         x64_image_range_has_next(),
         x64_image_range_value(),

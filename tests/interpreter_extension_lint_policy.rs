@@ -27,7 +27,7 @@ fn run(dir: &Path, interpret: bool) -> Output {
         .current_dir(dir)
         .env("JET_COMPILER_EXTENSION", compiler_extension())
         .env(
-            "JET_RUN_CACHE_DIR",
+            "JET_STORE_DIR",
             dir.join(if interpret {
                 "cache-interpreter"
             } else {

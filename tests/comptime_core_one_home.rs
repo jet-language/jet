@@ -63,10 +63,7 @@ fn mime_and_email_have_one_semantic_home() {
         codegen.contains("CoreLib/Email.rs"),
         "AOT must embed email kernel"
     );
-    let jit = read("crates/jet-jit/src/Net.rs");
     assert!(read("crates/jet-comptime/src/Comptime/EmailAdapter.rs").contains("CoreLib/Email.rs"));
-    assert!(jit.contains("CoreLib/Email.rs"));
-    assert!(jit.contains("CoreLib/JetStd/UrlMime.rs"));
 
     assert!(
         !pure.contains("fn email_"),
@@ -82,7 +79,6 @@ fn sketches_have_one_semantic_home() {
     let kernel = "Core/Sketch.rs";
     for (path, tier) in [
         ("crates/jet-codegen/src/Codegen/mod.rs", "AOT"),
-        ("crates/jet-jit/src/Sketch.rs", "JIT"),
         (
             "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
             "comptime/interpreter",
@@ -93,8 +89,6 @@ fn sketches_have_one_semantic_home() {
 
     let pure = read("crates/jet-comptime/src/Comptime/CorePureParity.rs");
     let core = read("crates/jet-codegen/src/Prelude/Core.rs");
-    let build = read("crates/jet-jit/build.rs");
-    let jit = read("crates/jet-jit/src/Sketch.rs");
     for fingerprint in [
         "wrapping_mul(1099511628211)",
         "TDIGEST_DELTA",
@@ -108,9 +102,7 @@ fn sketches_have_one_semantic_home() {
             !core.contains(fingerprint),
             "Core.rs copied `{fingerprint}`"
         );
-        assert!(!jit.contains(fingerprint), "JIT copied `{fingerprint}`");
     }
-    assert!(!build.contains("write_sketch_rt"));
 }
 
 #[test]
@@ -118,7 +110,6 @@ fn solver_has_one_semantic_home() {
     let kernel = "CoreLib/Top/Solver.rs";
     for (path, tier) in [
         ("crates/jet-codegen/src/Codegen/mod.rs", "AOT"),
-        ("crates/jet-jit/src/Solver.rs", "JIT"),
         (
             "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
             "comptime/interpreter",
@@ -129,10 +120,8 @@ fn solver_has_one_semantic_home() {
 
     let pure = read("crates/jet-comptime/src/Comptime/CorePureParity.rs");
     let math_time = read("crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs");
-    let jit = read("crates/jet-jit/src/Solver.rs");
     assert!(!pure.contains("failures + 1"));
     assert!(!math_time.contains("fn jet_solver_"));
-    assert!(!jit.contains("solver.failures += 1"));
 }
 
 #[test]
@@ -142,7 +131,6 @@ fn civil_time_and_duration_have_one_semantic_home() {
             "Core/Time.rs",
             [
                 "crates/jet-codegen/src/Codegen/mod.rs",
-                "crates/jet-jit/src/Time.rs",
                 "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
             ],
         ),
@@ -150,7 +138,6 @@ fn civil_time_and_duration_have_one_semantic_home() {
             "Core/Duration.rs",
             [
                 "crates/jet-codegen/src/Codegen/mod.rs",
-                "crates/jet-jit/src/jit/runtime_host.rs",
                 "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
             ],
         ),
@@ -171,8 +158,6 @@ fn civil_time_and_duration_have_one_semantic_home() {
 
     let pure = read("crates/jet-comptime/src/Comptime/CorePureParity.rs");
     let old_core = read("crates/jet-codegen/src/Prelude/Core.rs");
-    let jit_time = read("crates/jet-jit/src/Time.rs");
-    let jit_build = read("crates/jet-jit/build.rs");
     for fingerprint in [
         "365 * y + y / 4 - y / 100",
         "RFC3339 datetime needs Z or an offset",
@@ -186,12 +171,7 @@ fn civil_time_and_duration_have_one_semantic_home() {
             !old_core.contains(fingerprint),
             "Core.rs copied `{fingerprint}`"
         );
-        assert!(
-            !jit_time.contains(fingerprint),
-            "JIT copied `{fingerprint}`"
-        );
     }
-    assert!(!jit_build.contains("write_time_rt"));
 }
 
 #[test]
@@ -203,13 +183,12 @@ fn xml_has_one_semantic_home() {
     );
     assert!(
         read("crates/jet-foundation/src/lib.rs").contains("pub mod XmlKernel"),
-        "JIT and comptime must import the foundation XML kernel"
+        "comptime must import the foundation XML kernel"
     );
 
     let comptime = read("crates/jet-comptime/src/Comptime/EncodingLite.rs");
     let comptime_production = comptime.split("#[cfg(test)]").next().unwrap();
     let pure = read("crates/jet-comptime/src/Comptime/CorePureParity.rs");
-    let jit = read("crates/jet-jit/src/Encoding.rs");
     let aot = read("crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs");
     for (tier, source, call) in [
         ("AOT", aot.as_str(), "jet_xml_kernel::parse_document(text)"),
@@ -217,11 +196,6 @@ fn xml_has_one_semantic_home() {
             "comptime/interpreter",
             comptime_production,
             "XmlKernel::parse_document(text)",
-        ),
-        (
-            "JIT",
-            jit.as_str(),
-            "XmlKernel::parse_document(&clone_string(text))",
         ),
     ] {
         assert!(
@@ -247,10 +221,6 @@ fn xml_has_one_semantic_home() {
             !comptime_production.contains(&format!("XmlPull::{operation}")),
             "comptime bypassed XML kernel for `{operation}`"
         );
-        assert!(
-            !jit.contains(&format!("XmlPull::{operation}")),
-            "JIT bypassed XML kernel for `{operation}`"
-        );
     }
     assert!(!pure.contains("XmlPull::canonical_document("));
 }
@@ -260,7 +230,6 @@ fn measurement_has_one_semantic_home() {
     let kernel = "Core/Measurement.rs";
     for path in [
         "crates/jet-codegen/src/Codegen/mod.rs",
-        "crates/jet-jit/src/jit/runtime_host.rs",
         "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
     ] {
         assert!(read(path).contains(kernel), "{path} must include {kernel}");
@@ -268,7 +237,6 @@ fn measurement_has_one_semantic_home() {
 
     let pure = read("crates/jet-comptime/src/Comptime/CorePureParity.rs");
     let aot = read("crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs");
-    let jit = read("crates/jet-jit/src/jit/runtime_host.rs");
     for fingerprint in [
         "left_uncertainty * left_uncertainty",
         "self.uncertainty * self.uncertainty",
@@ -281,10 +249,6 @@ fn measurement_has_one_semantic_home() {
         assert!(
             !aot.contains(fingerprint),
             "AOT wrapper copied `{fingerprint}`"
-        );
-        assert!(
-            !jit.contains(fingerprint),
-            "JIT wrapper copied `{fingerprint}`"
         );
     }
 
@@ -310,7 +274,6 @@ fn round_three_value_kernels_have_one_semantic_home() {
             "Core/Fmt.rs",
             [
                 "crates/jet-codegen/src/Codegen/mod.rs",
-                "crates/jet-jit/src/Fmt.rs",
                 "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
             ],
         ),
@@ -318,7 +281,6 @@ fn round_three_value_kernels_have_one_semantic_home() {
             "Core/Path.rs",
             [
                 "crates/jet-codegen/src/Codegen/mod.rs",
-                "crates/jet-jit/src/CoreHost.rs",
                 "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
             ],
         ),
@@ -326,7 +288,6 @@ fn round_three_value_kernels_have_one_semantic_home() {
             "Core/SeededRandom.rs",
             [
                 "crates/jet-codegen/src/Codegen/mod.rs",
-                "crates/jet-jit/src/Random.rs",
                 "crates/jet-comptime/src/Comptime/Methods/dispatch.rs",
             ],
         ),
@@ -334,7 +295,6 @@ fn round_three_value_kernels_have_one_semantic_home() {
             "Core/EncodingBase.rs",
             [
                 "crates/jet-codegen/src/Codegen/mod.rs",
-                "crates/jet-jit/src/Encoding.rs",
                 "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
             ],
         ),
@@ -342,7 +302,6 @@ fn round_three_value_kernels_have_one_semantic_home() {
             "Core/NetPure.rs",
             [
                 "crates/jet-codegen/src/Codegen/mod.rs",
-                "crates/jet-jit/src/net_http_rt.rs",
                 "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
             ],
         ),
@@ -350,7 +309,6 @@ fn round_three_value_kernels_have_one_semantic_home() {
             "CoreLib/Top/MathLibPure.rs",
             [
                 "crates/jet-codegen/src/Codegen/mod.rs",
-                "crates/jet-jit/build.rs",
                 "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
             ],
         ),
@@ -358,7 +316,6 @@ fn round_three_value_kernels_have_one_semantic_home() {
             "Core/Loadable.rs",
             [
                 "crates/jet-codegen/src/Codegen/mod.rs",
-                "crates/jet-jit/src/Reactive.rs",
                 "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
             ],
         ),
@@ -366,7 +323,6 @@ fn round_three_value_kernels_have_one_semantic_home() {
             "CoreLib/Top/Text.rs",
             [
                 "crates/jet-codegen/src/Codegen/mod.rs",
-                "crates/jet-jit/src/Text.rs",
                 "crates/jet-comptime/src/Comptime/TextLite.rs",
             ],
         ),
@@ -374,7 +330,6 @@ fn round_three_value_kernels_have_one_semantic_home() {
             "CoreLib/JetStd/UrlMime.rs",
             [
                 "crates/jet-codegen/src/Codegen/mod.rs",
-                "crates/jet-jit/src/Net.rs",
                 "crates/jet-comptime/src/Comptime/UrlLite.rs",
             ],
         ),
@@ -389,14 +344,12 @@ fn round_three_value_kernels_have_one_semantic_home() {
     assert!(!codecs.contains("fn jet_std_b64_encode"));
     assert!(!codecs.contains("fn jet_std_base32_encode"));
     let core_calls = read("crates/jet-comptime/src/Comptime/Methods/core_calls.rs");
-    let jit_encoding = read("crates/jet-jit/src/Encoding.rs");
     for decoder in [
         "base_encoding_dispatch::decode_base64",
         "base_encoding_dispatch::decode_base64url",
         "base_encoding_dispatch::decode_base32",
     ] {
         assert!(core_calls.contains(decoder), "comptime must use {decoder}");
-        assert!(jit_encoding.contains(decoder), "JIT must use {decoder}");
     }
 
     let data_fmt = read("crates/jet-codegen/src/Prelude/CoreLib/Top/DataFmt.rs");

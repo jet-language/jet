@@ -15,7 +15,7 @@ choices into an executable lens or create a second meaning.
 ## One semantic core (R12 / D-ONECORE1=A)
 
 There is one structured semantic core. Every executable lens—Rust AOT emit,
-Cranelift, interpreter, and web—consumes that core exhaustively. Surface sugar
+interpreter, and web—consumes that core exhaustively. Surface sugar
 expands during lowering or an earlier sema rewrite into core nodes that those
 lenses already handle. A coverage miss is an internal compiler error, never a
 fallback.
@@ -51,7 +51,7 @@ Both executable lenses consume the channel read-only. A missing field means
 “not proven”; it never authorizes codegen to re-derive sema policy. An optimized
 lens may derive a private SSA form internally, but that form is not a third
 semantic representation or source of truth. Every TIR construct remains
-exhaustive for AOT, Cranelift, interpreter, and web.
+exhaustive for AOT, interpreter, and web.
 
 ## Lowering rules
 

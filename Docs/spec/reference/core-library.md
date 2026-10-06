@@ -3583,8 +3583,8 @@ The Rust-hosted compiler remains Jet's production and reference compiler. Jet
 source packages under [`Core/`](../../../Core/) are compiled by that normal
 frontend; they are not evidence that the compiler is self-hosted. The staged
 Jet-authored compiler in [`Compiler/`](../../../Compiler/) is a separate
-bootstrap project, while Rust emission, rustc/LLVM, and Cranelift remain part
-of the host implementation.
+bootstrap project, while Rust emission and rustc/LLVM remain part of the host
+implementation.
 
 `Core.jet` is the declaration registry, `Core/**/*.jet` is the source for the
 Jet-owned package surface, and provider code supplies operations that require
