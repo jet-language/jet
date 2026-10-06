@@ -332,6 +332,9 @@ fn jet_rust_emit_program_items(ctx: &JetRustEmitContext, trace_sink: CompilerTra
     units :: jet_rust_emit_units(ctx.program)
     pieces := [JetRustEmitUnitPiece]{}
     lines := [String]{}
+    global_instructions_scanned := 0
+    impls_emitted := 0
+    top_level_functions_emitted := 0
     jet_rust_emit_program_header(&ctx, &lines)
     jet_rust_emit_hardware_facts(&ctx, &lines)
     // MIRRust module_selected: only the selected artifact's modules emit items.
@@ -377,6 +380,7 @@ fn jet_rust_emit_program_items(ctx: &JetRustEmitContext, trace_sink: CompilerTra
         loop function in ctx.program.functions {
             loop block in function.blocks {
                 loop instruction in block.instructions {
+                    if trace_sink != None -> global_instructions_scanned += 1
                     if instruction.operation == .Global(name) -> global_reads[name] = true
                 }
             }
@@ -419,6 +423,7 @@ fn jet_rust_emit_program_items(ctx: &JetRustEmitContext, trace_sink: CompilerTra
             start :: lines.len()
             impl_lines := [String]{}
             jet_rust_emit_impl_definition(&ctx, implementation, &impl_lines)
+            if trace_sink != None -> impls_emitted += 1
             loop line in impl_lines -> &lines.push(line)
             &lines.push("")
             if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_impl_unit(&ctx, units, implementation), start, lines.len())
@@ -451,6 +456,7 @@ fn jet_rust_emit_program_items(ctx: &JetRustEmitContext, trace_sink: CompilerTra
             }
             start :: lines.len()
             function_lines :: jet_rust_emit_function(&ctx, function)
+            if trace_sink != None -> top_level_functions_emitted += 1
             loop line in function_lines -> &lines.push(line)
             &lines.push("")
             if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_file_unit(units, jet_rust_emit_id_key(function.source_file.value), function.span.start), start, lines.len())
@@ -458,6 +464,14 @@ fn jet_rust_emit_program_items(ctx: &JetRustEmitContext, trace_sink: CompilerTra
                 if trace_sink == .Val(sink) -> sink.end("emit.function", lines.len() - start)
             }
         }
+    }
+    if trace_sink == .Val(sink) {
+        sink.progress("counters.emit.global_instructions_scanned", global_instructions_scanned, -1)
+        sink.progress("counters.emit.impls_scanned", ctx.program.impls.len(), -1)
+        sink.progress("counters.emit.impls_emitted", impls_emitted, -1)
+        sink.progress("counters.emit.functions_scanned", ctx.program.functions.len(), -1)
+        sink.progress("counters.emit.top_level_functions_emitted", top_level_functions_emitted, -1)
+        sink.progress("counters.emit.item_lines_emitted", lines.len(), -1)
     }
     items_end :: lines.len()
     // The emit phase's end closes this span on every return below.
