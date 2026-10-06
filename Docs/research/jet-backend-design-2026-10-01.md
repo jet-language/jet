@@ -726,3 +726,17 @@ paths miss (`agree-off-golden`). The gate fails on any divergence; with
 not agree on, and with `--baseline <differential.tsv>` on any case that
 agreed before and no longer does. It writes `differential.tsv` and
 `differential-summary.txt`.
+
+Sanitizer mode (#4619): `Tests/run-sanitized.mjs <outdir> --runtime
+<runtime.rs>` builds the prepared runtime text (the one the corpus's runtime
+pack came from) as a staticlib with `-Zsanitizer=address -Zub-checks=yes`,
+links every `lower/<case>.o` against it with `clang -fsanitize=address`, and
+runs each golden with every ASan/LSan report written under
+`sanitize/reports/`. Native code itself is not instrumented: the mode checks
+every runtime and libc call the native code makes, turns a native crash into
+a report with a symbolized stack, and finds unreachable heap blocks at exit.
+A run without a report must also reproduce the plain native run (ASan fills
+fresh heap blocks with `0xbe`, so a native read of uninitialized heap
+diverges). The gate is zero reports and zero divergences; `--no-leaks`
+drops LeakSanitizer and the summary records it. Shadow checks emitted by the
+native code generator are the next step for this mode.
