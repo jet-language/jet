@@ -33,6 +33,10 @@ use jet_foundation.[
     diagnostic_registry_rows,
     diagnostic_render_all,
     type_name,
+    DIAGNOSTIC_ERROR,
+]
+use jet_lexer.[
+    lex,
 ]
 use jet_parser.[
     parse_source,
@@ -611,8 +615,9 @@ fn jet_cli_inspect_compiler_error(operation: String, file: String, message: Stri
 }
 
 // CmdCompile.rs `run_compiler_api`: an unknown operation and an unreadable
-// input are versioned error documents (Rust `io::Error` wording); the lex,
-// parse, source-map, and check projections are not ported yet.
+// input are versioned error documents (Rust `io::Error` wording), and lex
+// and parse project the Jet lexer and parser; source-map and check are not
+// ported yet.
 fn jet_cli_inspect_compiler(args: [String], color: Bool) -[FS]> JetCLIPlan Never! {
     operation :: if args.len() > 1 -> args[1] else -> ""
     file :: if args.len() > 2 -> args[2] else -> ""
@@ -625,7 +630,200 @@ fn jet_cli_inspect_compiler(args: [String], color: Bool) -[FS]> JetCLIPlan Never
         if cli_files.read_bytes(file) == None -> return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: Permission denied (os error 13)")
         return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: stream did not contain valid UTF-8")
     }
-    jet_cli_not_ported("inspect compiler {operation}", color)
+    source :: cli_files.read(file) ?? ""
+    // Rust masks an inline `package { }` carrier before lexing; that mask
+    // lives in the driver and is not shared yet.
+    if source.contains("package") || operation == "source-map" || operation == "source_map" -> return jet_cli_not_ported("inspect compiler {operation}", color)
+    value :: if operation == "lex" -> jet_cli_compiler_lexed(source) else -> jet_cli_compiler_syntax_tree(source)
+    payload :: jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("schema_version", jet_cli_status_int(1)),
+        jet_cli_status_field("api_version", jet_cli_status_int(1)),
+        jet_cli_status_field("operation", jet_cli_status_text(operation)),
+        jet_cli_status_field("value", value),
+    })
+    jet_cli_done("{jet_cli_status_render("inspect.compiler.{operation}", true, [JetCLIStatusField]{jet_cli_status_field("compiler", payload)})}\n", "", JET_DRIVER_EXIT_OK)
+}
+
+// Compiler.rs `token_kind_name`, indexed by the jet_lexer `TOKEN_*` tag.
+JET_CLI_TOKEN_KIND_NAMES :: [String]{
+    "", "identifier", "literal.raw_string", "literal.string", "literal.int", "literal.float",
+    "literal.unit_number", "literal.char", "literal.true", "literal.false", "keyword.self",
+    "literal.null", "keyword.break", "keyword.return", "punctuation.right_paren",
+    "punctuation.right_bracket", "punctuation.right_brace", "operator.try", "retired.plus_plus",
+    "retired.minus_minus", "operator.greater", "operator.shift_right", "operator.fence_close",
+    "punctuation.dot", "operator.optional_field", "operator.and", "operator.or", "operator.add",
+    "operator.subtract", "operator.star", "operator.divide", "operator.floor_divide",
+    "operator.modulo", "operator.remainder", "operator.equal", "operator.not_equal",
+    "operator.less", "operator.less_equal", "operator.greater_equal", "operator.compare",
+    "operator.amp", "operator.alternative", "operator.caret", "operator.tilde_pipe",
+    "operator.shift_left", "operator.fallback", "punctuation.left_brace",
+    "punctuation.left_paren", "punctuation.left_bracket", "eof", "operator.not",
+    "operator.unified_arrow", "", "operator.lambda_arrow", "operator.assign", "comment.line",
+    "comment.block", "keyword.fn", "keyword.pub", "keyword.priv", "keyword.if", "keyword.else",
+    "keyword.in", "keyword.mutate", "keyword.move", "keyword.copy", "keyword.struct",
+    "keyword.enum", "keyword.impl", "keyword.trait", "keyword.tag", "keyword.effect",
+    "keyword.derive", "keyword.it", "keyword.const", "keyword.comptime", "keyword.loop",
+    "keyword.yield", "keyword.use", "keyword.extern", "keyword.module", "operator.fence_open",
+    "punctuation.colon", "operator.bind_immutable", "operator.bind_mutable",
+    "punctuation.comma", "terminator", "operator.range", "operator.range_exclusive",
+    "operator.spread", "punctuation.at", "operator.tilde", "operator.tilde_pipe_assign",
+    "operator.trait_attach", "operator.add_assign", "operator.subtract_assign",
+    "operator.multiply_assign", "operator.divide_assign", "operator.floor_divide_assign",
+    "operator.modulo_assign", "operator.remainder_assign", "operator.amp_assign",
+    "operator.bit_or_assign", "operator.caret_assign", "operator.shift_left_assign",
+    "operator.shift_right_assign", "punctuation.hash", "punctuation.dollar",
+}
+
+fn jet_cli_compiler_span(start: Int, end: Int) -> JetCLIStatusValue Never! {
+    jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("start", jet_cli_status_int(start)), jet_cli_status_field("end", jet_cli_status_int(end))})
+}
+
+// Compiler.rs `status_diagnostic`.
+fn jet_cli_compiler_diagnostics(diagnostics: [Diagnostic]) -> JetCLIStatusValue Never! {
+    values :: loop diagnostic in diagnostics -> jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("code", jet_cli_status_text(diagnostic.code)),
+        jet_cli_status_field("severity", jet_cli_status_text(if diagnostic.severity == DIAGNOSTIC_ERROR -> "error" else -> "lint")),
+        jet_cli_status_field("message", jet_cli_status_text(diagnostic.what)),
+        jet_cli_status_field("why", jet_cli_status_text(diagnostic.why)),
+        jet_cli_status_field("fix", jet_cli_status_text(diagnostic.fix)),
+        jet_cli_status_field("span", if diagnostic.span == .Val(span) -> jet_cli_compiler_span(span.start, span.end) else -> JetCLIStatusValue.Null),
+    })
+    jet_cli_status_array(values)
+}
+
+// Compiler.rs `SourcePositionIndex::line_col` for every byte offset: lines
+// and columns count Unicode scalars from 1; an offset inside a scalar
+// counts that scalar.
+struct JetCLIPositions {
+    lines: [Int]
+    columns: [Int]
+}
+
+fn jet_cli_compiler_positions(bytes: [U8]) -> JetCLIPositions Never! {
+    lines := [Int]{}
+    columns := [Int]{}
+    line := 1
+    column := 1
+    loop byte in bytes {
+        &lines.push(line)
+        &columns.push(column)
+        code :: Int.from_u8(byte)
+        if {
+            code == 10 -> {
+                line += 1
+                column = 1
+            }
+            code >= 128 && code < 192 -> {}
+            else -> column += 1
+        }
+    }
+    &lines.push(line)
+    &columns.push(column)
+    JetCLIPositions{lines: lines, columns: columns}
+}
+
+fn jet_cli_compiler_position(positions: JetCLIPositions, offset: Int) -> JetCLIStatusValue Never! {
+    index :: if offset < positions.lines.len() -> offset else -> positions.lines.len() - 1
+    jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("line", jet_cli_status_int(positions.lines[index])), jet_cli_status_field("column", jet_cli_status_int(positions.columns[index]))})
+}
+
+// Compiler.rs `lex_source` + `status_lexed`: every token with its kind,
+// exact source text, byte span, and line/column ends, then the lexer
+// diagnostics.
+fn jet_cli_compiler_lexed(source: String) -> JetCLIStatusValue Never! {
+    bytes :: source.bytes()
+    lexed :: lex(bytes)
+    positions :: jet_cli_compiler_positions(bytes)
+    tokens :: loop token in lexed.tokens -> {
+        start :: token.span.start
+        end :: token.span.end
+        text :: if start < end && end <= bytes.len() -> String.from_bytes(bytes[start..end - 1]) ?? "" else -> ""
+        kind :: if token.kind >= 0 && token.kind < JET_CLI_TOKEN_KIND_NAMES.len() -> JET_CLI_TOKEN_KIND_NAMES[token.kind] else -> ""
+        jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("kind", jet_cli_status_text(kind)),
+            jet_cli_status_field("text", jet_cli_status_text(text)),
+            jet_cli_status_field("span", jet_cli_compiler_span(start, end)),
+            jet_cli_status_field("start", jet_cli_compiler_position(positions, start)),
+            jet_cli_status_field("end", jet_cli_compiler_position(positions, end)),
+        })
+    }
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("schema_version", jet_cli_status_int(1)),
+        jet_cli_status_field("api_version", jet_cli_status_int(1)),
+        jet_cli_status_field("source", jet_cli_status_text(source)),
+        jet_cli_status_field("tokens", jet_cli_status_array(tokens)),
+        jet_cli_status_field("diagnostics", jet_cli_compiler_diagnostics(lexed.diagnostics)),
+    })
+}
+
+// Compiler.rs `item_node`: one top-level item's kind, name, and name span.
+fn jet_cli_compiler_item(item: Item) -> JetCLIStatusValue Never! {
+    kind := ""
+    name := String?{None}
+    start := 0
+    end := 0
+    if item == {
+        .Func(value) -> { kind = "function"; name = Val(value.name); start = value.name_span.start; end = value.name_span.end }
+        .Struct(value) -> { kind = "struct"; name = Val(value.name); start = value.name_span.start; end = value.name_span.end }
+        .Enum(value) -> { kind = "enum"; name = Val(value.name); start = value.name_span.start; end = value.name_span.end }
+        .Distinct(value) -> { kind = "distinct"; name = Val(value.name); start = value.name_span.start; end = value.name_span.end }
+        .TypeAlias(value) -> { kind = "type_alias"; name = Val(value.name); start = value.name_span.start; end = value.name_span.end }
+        .UnitFamily(value) -> { kind = "unit_family"; name = Val(value.family); start = value.family_span.start; end = value.family_span.end }
+        .Trait(value) -> { kind = "trait"; name = Val(value.name); start = value.name_span.start; end = value.name_span.end }
+        .Tag(value) -> { kind = "tag"; name = Val(value.name); start = value.name_span.start; end = value.name_span.end }
+        .EffectDecl(value) -> { kind = "effect"; name = Val(value.name); start = value.name_span.start; end = value.name_span.end }
+        .Impl(value) -> { kind = "impl"; name = Val(value.type_name); start = value.type_span.start; end = value.type_span.end }
+        .Const(value) -> { kind = "const"; name = Val(value.name); start = value.name_span.start; end = value.name_span.end }
+        .Test(value) -> { kind = "test"; name = value.name; start = value.name_span.start; end = value.name_span.end }
+        .ExternRust(value) -> { kind = "extern_rust"; name = Val(value.crate_spec); start = value.span.start; end = value.span.end }
+        .Module(value) -> { kind = "module"; name = Val(value.name); start = value.name_span.start; end = value.name_span.end }
+        .CModule(value) -> { kind = "c_module"; name = Val(value.lib); start = value.path_span.start; end = value.path_span.end }
+        .CodeModule(value) -> { kind = "code_module"; name = Val(value.name); start = value.name_span.start; end = value.name_span.end }
+        .ErrorConv(value) -> { kind = "error_conversion"; name = Val("{value.from_ty} -> {value.to_ty}"); start = value.from_span.start; end = value.from_span.end }
+        .Migration(value) -> { kind = "migration"; name = Val(value.type_name); start = value.type_span.start; end = value.type_span.end }
+        .ProtocolDecl(value) -> { kind = "protocol"; name = Val(value.name); start = value.name_span.start; end = value.name_span.end }
+        .UserDerive(value) -> { kind = "derive"; name = Val(value.trait_name); start = value.trait_span.start; end = value.trait_span.end }
+        .TemplateLoop(value) -> { kind = "template_loop"; start = value.span.start; end = value.span.end }
+        .GenericModule(value) -> { kind = "generic_module"; name = Val(value.name); start = value.name_span.start; end = value.name_span.end }
+        .ModuleAlias(value) -> { kind = "module_alias"; name = Val(value.name); start = value.name_span.start; end = value.name_span.end }
+        .MarkerDecl(value) -> { kind = "marker"; name = Val(value.name); start = value.name_span.start; end = value.name_span.end }
+        .FactDecl(value) -> { kind = "fact"; name = Val(value.name); start = value.name_span.start; end = value.name_span.end }
+    }
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("kind", jet_cli_status_text(kind)),
+        jet_cli_status_field("name", jet_cli_status_optional_text(name)),
+        jet_cli_status_field("span", jet_cli_compiler_span(start, end)),
+    })
+}
+
+// Compiler.rs `parse_source` + `status_syntax_tree`: lexer diagnostics stop
+// before the parse; a parse with errors keeps only its error diagnostics and
+// no items; a clean parse lists every top-level item and its advisories.
+fn jet_cli_compiler_syntax_tree(source: String) -> JetCLIStatusValue Never! {
+    bytes :: source.bytes()
+    lexed :: lex(bytes)
+    items := [JetCLIStatusValue]{}
+    diagnostics := lexed.diagnostics
+    if diagnostics.len() == 0 {
+        parsed :: parse_source(bytes)
+        errors := [Diagnostic]{}
+        loop diagnostic in parsed.diagnostics {
+            if diagnostic.severity == DIAGNOSTIC_ERROR -> &errors.push(diagnostic)
+        }
+        if errors.len() > 0 {
+            diagnostics = errors
+        } else {
+            diagnostics = parsed.diagnostics
+            loop item in parsed.program.items -> &items.push(jet_cli_compiler_item(item))
+        }
+    }
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("schema_version", jet_cli_status_int(1)),
+        jet_cli_status_field("api_version", jet_cli_status_int(1)),
+        jet_cli_status_field("source", jet_cli_status_text(source)),
+        jet_cli_status_field("items", jet_cli_status_array(items)),
+        jet_cli_status_field("diagnostics", jet_cli_compiler_diagnostics(diagnostics)),
+    })
 }
 
 // CmdInspect.rs `run_provenance` up to the manifest root; the dependency
