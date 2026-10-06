@@ -17035,10 +17035,13 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
+    /// The text of a String that is a literal: a constant, or built only
+    /// from literal parts.
     fn literal_string_value(&self, function: &MirFunction, value: MirValueId) -> Option<String> {
-        let Some(MirOperation::BuildString { parts }) = self.value_definition(function, value)
-        else {
-            return None;
+        let parts = match self.value_definition(function, value) {
+            Some(MirOperation::Constant(MirConstant::String(text))) => return Some(text.clone()),
+            Some(MirOperation::BuildString { parts }) => parts,
+            _ => return None,
         };
         let mut literal = String::new();
         for part in parts {
@@ -17088,6 +17091,21 @@ impl<'a> RustEmitter<'a> {
 
     fn borrowed_literal_route(&self, route: MirPreludeCallId) -> bool {
         Self::borrowed_literal_symbol(&self.prelude_symbol(route))
+    }
+
+    /// Builtin receiver routes whose borrowed operands take `&str` (the
+    /// string kernels) or any borrowed form of the key (`jet_map_get_opt`,
+    /// `K: Borrow<Q>`): a String literal operand is passed as its static text.
+    fn literal_builtin_symbol(symbol: &str) -> bool {
+        matches!(
+            symbol,
+            "jet_iter_string_split"
+                | "jet_iter_string_rsplit"
+                | "jet_string_contains"
+                | "jet_string_starts_with"
+                | "jet_string_ends_with"
+                | "jet_map_get_opt"
+        )
     }
 
     fn call_arg_for_function_with_literal(
@@ -17945,6 +17963,24 @@ impl<'a> RustEmitter<'a> {
                     left,
                     right,
                 } => self.string_equality_operand(function, *op, *left, *right, value),
+                // A borrowed operand of a literal builtin route is its static
+                // text (`prelude_values_with_receiver`).
+                MirOperation::Semantic(MirSemanticOp::BuiltinMethod {
+                    call,
+                    receiver,
+                    receiver_place,
+                    args,
+                    ..
+                }) => {
+                    let row = self.prelude_row(*call);
+                    Self::literal_builtin_symbol(row.symbol.name())
+                        && (*receiver != value
+                            || receiver_place.is_none()
+                                && row.signature.borrow_mask.first() == Some(&true))
+                        && args.iter().enumerate().all(|(index, arg)| {
+                            *arg != value || row.signature.borrow_mask.get(index + 1) == Some(&true)
+                        })
+                }
                 _ => false,
             };
             if !allowed {
@@ -19573,7 +19609,11 @@ impl<'a> RustEmitter<'a> {
                     self.field_place_expression(function, value).is_some()
                         && self.direct_borrow_only(function, value)
                 })
-                || matches!(&instruction.operation, MirOperation::BuildString { .. })
+                || matches!(
+                    &instruction.operation,
+                    MirOperation::BuildString { .. }
+                        | MirOperation::Constant(MirConstant::String(_))
+                )
                     && instruction
                         .result
                         .is_some_and(|value| self.literal_borrow_only(function, value))
@@ -30050,16 +30090,10 @@ impl<'a> RustEmitter<'a> {
             return format!("({}).into_bytes()", self.value_move(receiver));
         }
         let receiver_value = receiver;
-        // Routes whose borrowed operands are all `&str`: a String literal
-        // operand passes its static text instead of building a String.
-        let literal_string_iter_route = matches!(
-            row.symbol.name(),
-            "jet_iter_string_split"
-                | "jet_iter_string_rsplit"
-                | "jet_string_contains"
-                | "jet_string_starts_with"
-                | "jet_string_ends_with"
-        );
+        // Routes whose borrowed operands are all `&str` (or a borrowed map
+        // key): a String literal operand passes its static text instead of
+        // building a String.
+        let literal_string_iter_route = Self::literal_builtin_symbol(row.symbol.name());
         let receiver = if literal_string_iter_route
             && receiver_place.is_none()
             && row.signature.borrow_mask.first().copied() == Some(true)
