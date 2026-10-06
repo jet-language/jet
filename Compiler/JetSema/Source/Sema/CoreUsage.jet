@@ -704,15 +704,15 @@ fn sema_core_collect_items(items: [Item], imports: [SemaCoreImport], registered:
             .Distinct(definition) -> sema_core_collect_type(definition.base, registered, &used, &spans, Val(definition.base_span))
             .ErrorConv(definition) -> sema_core_collect_stmts(definition.body, imports, registered, &used, &spans, &callbacks)
             .CodeModule(code_module) -> {
-                if code_module.body != None {
+                if code_module.body == .Val(body) {
                     scoped := sema_core_import_copy(imports)
                     // An inline module's own declarations and imports shadow
                     // the generated Core names inside its body only.
                     scoped_registered := registered
-                    sema_core_generated_scope_shadow_items(code_module.body ?? [Item]{}, &scoped_registered)
+                    sema_core_generated_scope_shadow_items(body, &scoped_registered)
                     sema_core_generated_scope_import_markers(code_module.imports, &scoped_registered)
                     loop declaration in code_module.imports -> sema_core_collect_ast_import(&scoped, declaration)
-                    sema_core_collect_items(code_module.body ?? [Item]{}, scoped, scoped_registered, &used, &spans, &callbacks)
+                    sema_core_collect_items(body, scoped, scoped_registered, &used, &spans, &callbacks)
                 }
             }
             else -> {}
