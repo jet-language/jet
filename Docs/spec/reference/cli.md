@@ -176,6 +176,12 @@ capabilities, typed layout reflection values, and transitive memory-denial
 projections from the checker that diagnoses E0921. Prepared `@origin` reads
 retain their checked optional `OriginInfo` values on the owning function;
 untracked or moved locals have no readable origin.
+`expand --facts memory`, `layout`, and `origin` render those retained facts
+as text or canonical JSON. A layout without a physical-byte guarantee keeps
+unknown byte fields absent and reports E0959; it does not estimate them from
+the host. The origin lens reads the checked prepared value, not a source-text
+guess about whether a value was tracked.
+
 
 ## Shared option spellings
 
