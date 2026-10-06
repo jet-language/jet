@@ -134,7 +134,12 @@ fn trust_json_parse_record(raw: String) -> [String: DataTree] TrustError! {
 
 fn trust_json_object(value: DataTree) -> [String: DataTree]? Never! {
     if value == {
-        .Object(fields) -> Val(fields)
+        // D-DATATREE-ORDER1=A: the object's ordered pairs, indexed by name.
+        .Object(fields) -> {
+            members := [String: DataTree]{}
+            loop pair in fields -> members[pair.key] = pair.value
+            Val(members)
+        }
         else -> None
     }
 }

@@ -525,7 +525,12 @@ fn image_read_blob(root: String, digest: String) -[FS]> [U8] ImageError! {
 
 fn image_object(value: DataTree, label: String) -> [String: DataTree] ImageError! {
     if value == {
-        .Object(fields) -> Ok(fields)
+        // D-DATATREE-ORDER1=A: the object's ordered pairs, indexed by name.
+        .Object(fields) -> {
+            members := [String: DataTree]{}
+            loop pair in fields -> members[pair.key] = pair.value
+            Ok(members)
+        }
         else -> Err(image_invalid("{label} is not an object"))
     }
 }

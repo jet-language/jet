@@ -48,7 +48,9 @@ pub fn parse(source: String) -> [Step]? {
 
 fn field(value: DataTree, name: String) -> DataTree? {
     if value == .Object(entries) {
-        if entries.get(~name) == .Val(found) -> return Val(found)
+        loop pair in entries {
+            if pair.key == name -> return Val(pair.value)
+        }
     }
     return None
 }

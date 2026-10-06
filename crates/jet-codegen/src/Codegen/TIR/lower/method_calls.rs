@@ -5597,9 +5597,11 @@ fn lower_method_call_impl(
                 let arg = args.first().map(|a| {
                     let mut value = lower_expr(&a.expr, cx, env);
                     if method == "Object" && matches!(&value.kind, TExprKind::MapLit(_)) {
-                        value.ty = crate::Sema::core_json_pattern_types(method)
-                            .and_then(|types| types.into_iter().next())
-                            .expect("checked DataTree.Object payload type");
+                        value.ty = Type::Map {
+                            key: Box::new(Type::String),
+                            key_span: None,
+                            value: Box::new(Type::Named(Syntax::TYPE_DATA.to_string())),
+                        };
                     }
                     let value = if method == "Array" {
                         let payload =

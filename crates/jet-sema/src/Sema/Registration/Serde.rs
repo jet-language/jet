@@ -461,7 +461,18 @@ fn expand_builtin_serde_items_with_auto_here(
             _ => {}
         }
     }
+    // Generated helper functions (published-schema migration) exist once.
+    let existing_functions = items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Func(function) => Some(function.name.as_str()),
+            _ => None,
+        })
+        .collect::<std::collections::HashSet<_>>();
     generated_items.retain(|item| {
+        if let Item::Func(function) = item {
+            return !existing_functions.contains(function.name.as_str());
+        }
         let Item::Impl(implementation) = item else {
             return true;
         };
@@ -600,6 +611,13 @@ fn struct_codec_items(s: &crate::AST::StructDef, items: &[Item]) -> Vec<Item> {
             false,
             true,
         );
+        let body = match struct_migration_decode(s, items, span) {
+            Some((helpers, body)) => {
+                out.extend(helpers);
+                body
+            }
+            None => struct_decode_body(s, items, span),
+        };
         out.push(Item::Impl(serde_impl(
             &s.name,
             crate::Generics::DECODE,
@@ -608,13 +626,328 @@ fn struct_codec_items(s: &crate::AST::StructDef, items: &[Item]) -> Vec<Item> {
                 params,
                 vec![named_param("tree", data_tree_type(), span)],
                 Some(result_type(target_type(&s.name, &s.type_params), span)),
-                struct_decode_body(s, items, span),
+                body,
                 span,
             ),
             span,
         )));
     }
     out
+}
+
+/// D-MIGRATE4: a decodable `#PublishedSchema` struct with `migration` blocks
+/// decodes silently from every historical shape, on every tier, through these
+/// ordinary Jet items. The derived `decode` runs the current-shape decode
+/// first; when it fails, `migrate` matches the object's key set against each
+/// historical shape (newest first, exact set), walks the remaining migration
+/// steps forward, and the current-shape decode runs once more on the migrated
+/// object. No match returns the current-shape failures. `None` when the type
+/// has no runtime migration chain (not published, generic, no blocks, or an
+/// op whose default/converter function was not lowered).
+fn struct_migration_decode(
+    s: &crate::AST::StructDef,
+    items: &[Item],
+    span: Span,
+) -> Option<(Vec<Item>, Vec<Stmt>)> {
+    use crate::AST::MigrationOp;
+    const ENTRIES: &str = "jet_serde_entries";
+    let published = s.is_published_schema
+        || s.derives
+            .iter()
+            .any(|(name, _)| name == crate::Syntax::MARKER_PUBLISHED_SCHEMA);
+    if !published || !s.type_params.is_empty() {
+        return None;
+    }
+    let blocks = items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Migration(block) if block.type_name == s.name => Some(block),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if blocks.is_empty() {
+        return None;
+    }
+    let style = serde_rename_all_style(&s.serde_markers);
+    let wire_key = |name: &str| {
+        s.reflection_fields()
+            .find(|field| field.name == name)
+            .map(|field| serde_field_key(s, field))
+            .unwrap_or_else(|| serde_rename_all_name(style, name))
+    };
+
+    // Shape v<i> is the key set before block i; undo blocks newest first.
+    let mut shape = s
+        .reflection_fields()
+        .filter(|field| !has_marker(&field.serde_markers, crate::Syntax::MARKER_SKIP))
+        .map(|field| serde_field_key(s, field))
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut shapes = Vec::with_capacity(blocks.len());
+    for block in blocks.iter().rev() {
+        for op in &block.ops {
+            match op {
+                MigrationOp::Add { field, .. } => {
+                    shape.remove(&wire_key(field));
+                }
+                MigrationOp::Remove { field, .. } => {
+                    shape.insert(wire_key(field));
+                }
+                MigrationOp::Rename { from, to, .. } => {
+                    shape.remove(&wire_key(to));
+                    shape.insert(wire_key(from));
+                }
+                MigrationOp::Change { .. } => {}
+            }
+        }
+        shapes.push(shape.clone());
+    }
+    shapes.reverse();
+
+    // Block i's ops rewrite the mutable `jet_serde_entries` map from v<i> to v<i+1>.
+    let mut steps = Vec::with_capacity(blocks.len());
+    for block in &blocks {
+        let mut ops = Vec::with_capacity(block.ops.len());
+        for op in &block.ops {
+            ops.push(match op {
+                MigrationOp::Rename { from, to, .. } => {
+                    migration_rekey(ENTRIES, &wire_key(from), Some(&wire_key(to)), span)
+                }
+                MigrationOp::Remove { field, .. } => {
+                    migration_rekey(ENTRIES, &wire_key(field), None, span)
+                }
+                MigrationOp::Add {
+                    field, default_fn, ..
+                } => assign_index(
+                    ENTRIES,
+                    string_expr(&wire_key(field), span),
+                    method(free_call(default_fn.as_deref()?, Vec::new(), span), "encode", Vec::new(), span),
+                    span,
+                ),
+                MigrationOp::Change {
+                    field,
+                    from_ty,
+                    conv_fn,
+                    ..
+                } => {
+                    let key = wire_key(field);
+                    let old = method_with_type_args(
+                        or_fallback(
+                            method(
+                                data_tree_object_expr(copy(ident(ENTRIES, span), span), span),
+                                "field",
+                                vec![string_expr(&key, span)],
+                                span,
+                            ),
+                            data_tree_null(span),
+                            span,
+                        ),
+                        "decode",
+                        vec![from_ty.clone()],
+                        span,
+                    );
+                    scope_stmt(
+                        vec![result_switch(
+                            old,
+                            "jet_serde_old_value",
+                            vec![assign_index(
+                                ENTRIES,
+                                string_expr(&key, span),
+                                method(
+                                    free_call(
+                                        conv_fn.as_deref()?,
+                                        vec![ident("jet_serde_old_value", span)],
+                                        span,
+                                    ),
+                                    "encode",
+                                    Vec::new(),
+                                    span,
+                                ),
+                                span,
+                            )],
+                            "jet_serde_change_errors",
+                            vec![ret(Expr::Absent(span), span)],
+                            span,
+                        )],
+                        span,
+                    )
+                }
+            });
+        }
+        steps.push(ops);
+    }
+
+    let mut walker = vec![
+        binding(
+            ENTRIES,
+            Some(map_type(data_tree_type(), span)),
+            map_literal(Vec::new(), span),
+            true,
+            span,
+        ),
+        binding("jet_serde_is_object", Some(Type::Bool), Expr::Bool(false, span), true, span),
+        pattern_switch(
+            copy(ident("tree", span), span),
+            "Object",
+            vec!["jet_serde_object".to_string()],
+            vec![
+                // D-DATATREE-ORDER1=A: the Object payload is the ordered pair
+                // list; the migration steps rekey a Map of it.
+                for_each(
+                    "jet_serde_pair",
+                    ident("jet_serde_object", span),
+                    vec![assign_index(
+                        ENTRIES,
+                        copy(field_read("jet_serde_pair", "key", span), span),
+                        copy(field_read("jet_serde_pair", "value", span), span),
+                        span,
+                    )],
+                    span,
+                ),
+                assign_local("jet_serde_is_object", Expr::Bool(true, span), span),
+            ],
+            Some(Vec::new()),
+            span,
+        ),
+        if_stmt(
+            unary_not(ident("jet_serde_is_object", span), span),
+            vec![ret(Expr::Absent(span), span)],
+            span,
+        ),
+    ];
+    for (index, keys) in shapes.iter().enumerate().rev() {
+        let size = binary(
+            BinOp::Eq,
+            method(ident(ENTRIES, span), "len", Vec::new(), span),
+            Expr::Int(keys.len() as i64, span, None, None),
+            span,
+        );
+        let matches = keys.iter().fold(size, |all, key| {
+            binary(
+                BinOp::And,
+                all,
+                method(ident(ENTRIES, span), "has_key", vec![string_expr(key, span)], span),
+                span,
+            )
+        });
+        let mut body = steps[index..].iter().flatten().cloned().collect::<Vec<_>>();
+        body.push(ret(
+            Expr::Present(Box::new(data_tree_object_expr(ident(ENTRIES, span), span)), span),
+            span,
+        ));
+        walker.push(if_stmt(matches, body, span));
+    }
+    walker.push(ret(Expr::Absent(span), span));
+
+    let current = jet_foundation::Names::mangle(&format!("serde_decode_current_{}", s.name));
+    let migrate = jet_foundation::Names::mangle(&format!("serde_migrate_{}", s.name));
+    let target = Type::Named(s.name.clone());
+    let helpers = vec![
+        Item::Func(serde_method(
+            &current,
+            Vec::new(),
+            vec![named_param("tree", data_tree_type(), span)],
+            Some(result_type(target, span)),
+            struct_decode_body(s, items, span),
+            span,
+        )),
+        Item::Func(serde_method(
+            &migrate,
+            Vec::new(),
+            vec![named_param("tree", data_tree_type(), span)],
+            Some(Type::Option(Box::new(data_tree_type()))),
+            walker,
+            span,
+        )),
+    ];
+    let body = vec![
+        binding(
+            "jet_serde_errors",
+            Some(field_error_list_type(span)),
+            list_literal(Vec::new(), span),
+            true,
+            span,
+        ),
+        result_switch(
+            free_call(&current, vec![copy(ident("tree", span), span)], span),
+            "jet_serde_value",
+            vec![ret(ok(ident("jet_serde_value", span), span), span)],
+            "jet_serde_current_errors",
+            vec![assign_local(
+                "jet_serde_errors",
+                ident("jet_serde_current_errors", span),
+                span,
+            )],
+            span,
+        ),
+        option_switch(
+            free_call(&migrate, vec![ident("tree", span)], span),
+            "jet_serde_migrated",
+            vec![ret(
+                free_call(&current, vec![ident("jet_serde_migrated", span)], span),
+                span,
+            )],
+            Vec::new(),
+            span,
+        ),
+        ret(err(ident("jet_serde_errors", span), span), span),
+    ];
+    Some((helpers, body))
+}
+
+/// One migration rename (`to` present) or remove over the `entries` map:
+/// rebuild it with the `key` entry renamed to `to` or dropped.
+fn migration_rekey(entries: &str, key: &str, to: Option<&str>, span: Span) -> Stmt {
+    let keep = assign_index(
+        "jet_serde_next",
+        ident("jet_serde_key", span),
+        ident("jet_serde_value", span),
+        span,
+    );
+    let is_key = binary(BinOp::Eq, ident("jet_serde_key", span), string_expr(key, span), span);
+    let visit = match to {
+        Some(to) => Stmt::Switch {
+            subject: Expr::Bool(true, span),
+            arms: vec![SwitchArm {
+                cond: is_key,
+                body: vec![assign_index(
+                    "jet_serde_next",
+                    string_expr(to, span),
+                    ident("jet_serde_value", span),
+                    span,
+                )],
+                span,
+            }],
+            else_body: Some(vec![keep]),
+            span,
+        },
+        None => if_stmt(unary_not(is_key, span), vec![keep], span),
+    };
+    scope_stmt(
+        vec![
+            binding(
+                "jet_serde_next",
+                Some(map_type(data_tree_type(), span)),
+                map_literal(Vec::new(), span),
+                true,
+                span,
+            ),
+            for_each_map("jet_serde_key", "jet_serde_value", ident(entries, span), vec![visit], span),
+            assign_local(entries, ident("jet_serde_next", span), span),
+        ],
+        span,
+    )
+}
+
+fn free_call(name: &str, args: Vec<Expr>, span: Span) -> Expr {
+    Expr::Call(crate::AST::Call {
+        name: name.to_string(),
+        name_span: span,
+        type_args: Vec::new(),
+        args: args.into_iter().map(|expr| call_arg(expr, span)).collect(),
+        resolved_ret: None,
+        range_checked: false,
+        widen_approx: false,
+    })
 }
 
 fn enum_codec_items(e: &crate::AST::EnumDef) -> Vec<Item> {
@@ -900,14 +1233,13 @@ fn struct_encode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
                 copy(ident(&nested, span), span),
                 "Object",
                 vec!["entries".to_string()],
-                vec![for_each_map(
-                    "key",
-                    "value",
+                vec![for_each(
+                    "jet_serde_pair",
                     ident("entries", span),
                     vec![assign_index(
                         "out",
-                        ident("key", span),
-                        ident("value", span),
+                        copy(field_read("jet_serde_pair", "key", span), span),
+                        copy(field_read("jet_serde_pair", "value", span), span),
                         span,
                     )],
                     span,
@@ -1131,23 +1463,27 @@ fn struct_decode_body(s: &crate::AST::StructDef, items: &[Item], span: Span) -> 
             copy(ident("tree", span), span),
             "Object",
             vec!["entries".to_string()],
-            vec![for_each_map(
-                "key",
-                "value",
+            vec![for_each(
+                "jet_serde_pair",
                 ident("entries", span),
                 vec![if_stmt(
                     unary_not(
-                        method(allowed.clone(), "contains", vec![ident("key", span)], span),
+                        method(
+                            allowed.clone(),
+                            "contains",
+                            vec![field_read("jet_serde_pair", "key", span)],
+                            span,
+                        ),
                         span,
                     ),
                     vec![expr_stmt(method(
                         ident("jet_serde_errors", span),
                         "push",
                         vec![field_error_expr_value(
-                            copy(ident("key", span), span),
+                            copy(field_read("jet_serde_pair", "key", span), span),
                             interpolated_string(
                                 "E2412: unknown field `",
-                                ident("key", span),
+                                field_read("jet_serde_pair", "key", span),
                                 "`",
                                 span,
                             ),
@@ -1191,9 +1527,8 @@ fn struct_decode_body(s: &crate::AST::StructDef, items: &[Item], span: Span) -> 
             copy(ident("tree", span), span),
             "Object",
             vec!["jet_serde_presence_entries".to_string()],
-            vec![for_each_map(
-                "jet_serde_presence_key",
-                "jet_serde_presence_value",
+            vec![for_each(
+                "jet_serde_presence_pair",
                 ident("jet_serde_presence_entries", span),
                 required
                     .iter()
@@ -1201,7 +1536,7 @@ fn struct_decode_body(s: &crate::AST::StructDef, items: &[Item], span: Span) -> 
                         if_stmt(
                             binary(
                                 BinOp::Eq,
-                                ident("jet_serde_presence_key", span),
+                                field_read("jet_serde_presence_pair", "key", span),
                                 string_expr(key, span),
                                 span,
                             ),
