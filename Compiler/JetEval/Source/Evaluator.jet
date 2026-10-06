@@ -1602,9 +1602,16 @@ pub fn jet_eval_task_root_release(task_root: ^JetEvalTaskRoot, adapter: JetEvalH
 }
 
 fn jet_eval_run(machine: &JetEvalMachine, target_depth: Int) -> JetEvalRuntimeValue? {
+    jet_eval_run_until(&machine, target_depth, None)
+}
+
+fn jet_eval_run_until(machine: &JetEvalMachine, target_depth: Int, boundary: JetEvalRunBoundary?) -> JetEvalRuntimeValue? {
     loop machine.frames.len() > target_depth && machine.failure == None && machine.internal_problem == None && !machine.soft_stop {
+        if boundary == .Val(stop) {
+            if machine.frames.len() == target_depth + 1 && machine.frames[target_depth].function == stop.function && machine.frames[target_depth].block == stop.block && machine.frames[target_depth].ip == 0 -> return None
+        }
         if !jet_eval_poll_callbacks(&machine, jet_eval_empty_span()) -> break
-        if !machine.config.runtime_execution && machine.steps >= machine.config.fuel {
+        if (!machine.config.runtime_execution || boundary != None) && machine.steps >= machine.config.fuel {
             jet_eval_fuel_fail(&machine, jet_eval_empty_span())
             break
         }

@@ -167,8 +167,11 @@ use jet_sema.[
     sema_name_build_facts,
     sema_registration_lookup_counts,
     sema_registration_prepare_graph,
+    sema_registration_callable_declaration,
     sema_source_location_at,
 ]
+use jet_repl.repl_session_new
+use jet_eval.jet_eval_runtime_config
 use jet_codegen.[
     JetCodegenComptimeSession,
     JetCodegenForeignArtifacts,
@@ -1231,7 +1234,7 @@ fn jet_driver_package_facts(
             artifact_target = MIRArtifactTarget.Web
             artifact_tier = "web"
         }
-        request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.Interpreter -> {
+        request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.Interpreter || request.mode == JetDriverCompileMode.Repl -> {
             artifact_target = MIRArtifactTarget.Interpreter
             artifact_tier = "interpreter"
         }
@@ -2960,7 +2963,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     jet_driver_trace_lookup_counters(request.trace_sink, "register", register_lookups, SemaLookupCounters{module_lookups: 0, name_lookups: 0})
     if kg.enabled -> registration_graph.keep_going = true
     if request.mode == JetDriverCompileMode.Test -> registration_graph.test_mode = true
-    if request.mode == JetDriverCompileMode.Doc -> registration_graph.retain_programs = true
+    if request.mode == JetDriverCompileMode.Doc || request.mode == JetDriverCompileMode.Repl -> registration_graph.retain_programs = true
     if registration_graph.internal_problem != None {
         loop diagnostic in registration_graph.diagnostics -> &load.diagnostics.push(diagnostic)
         return jet_driver_compile_internal_result(
@@ -3263,7 +3266,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     // entry; its harness owns `main`.
     entry_function := MIRFunctionID?{None}
     if {
-        request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.Interpreter -> {
+        request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.Interpreter || request.mode == JetDriverCompileMode.Repl -> {
             selected_name :: request.evaluation_entry ?? "run"
             key :: symbol_id(SymbolKind.Function, load.entry_module_identity, "", selected_name).key
             entry_function = jet_driver_find_lowered_function_id(lowered.functions, key)
@@ -3305,7 +3308,9 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     if request.mode == JetDriverCompileMode.Test -> test_artifacts = Val(jet_driver_test_artifacts(load.package_identity, &checked_graph, &lowered.functions))
     // The checked TIR functions are as large as the MIR lowered from them;
     // release them before MIR assembly and optimization.
-    loop module_index in 0..<checked_graph.modules.len() -> checked_graph.modules[module_index].functions = [TFunc]{}
+    if request.mode != JetDriverCompileMode.Repl {
+        loop module_index in 0..<checked_graph.modules.len() -> checked_graph.modules[module_index].functions = [TFunc]{}
+    }
     stage_diagnostics = load.diagnostics
     load.diagnostics = [Diagnostic]{}
     if request.trace_sink == .Val(sink) -> sink.begin("assemble", "", -1, -1)
@@ -3350,6 +3355,29 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     }
     artifact_plan :: artifact_plan_option ?? return jet_driver_compile_internal_result(load, trace, "the compiler artifact plan is unavailable")
     program_value.artifacts = [MIRArtifactPlan]{artifact_plan}
+    if request.mode == JetDriverCompileMode.Repl {
+        if failed_stage != None || jet_driver_has_errors(load.diagnostics) -> return jet_driver_compile_result(load, load.diagnostics, entry_function, None, None, None, failed_stage, false, trace)
+        selected_name :: request.evaluation_entry ?? "run"
+        owner :: symbol_id(SymbolKind.Function, load.entry_module_identity, "", selected_name)
+        root := TFunc?{None}
+        loop module_row in checked_graph.modules {
+            loop function in module_row.functions { if function.key == owner.key -> root = Val(function) }
+        }
+        checked_root :: root ?? return jet_driver_compile_internal_result(load, trace, "REPL selected root lost its checked TFunc")
+        source :: sema_registration_callable_declaration(resolved_registration, owner) ?? return jet_driver_compile_internal_result(load, trace, "REPL selected root lost its registered declaration")
+        session_result :: repl_session_new(resolved_registration, ^checked_graph.modules, source, checked_root, ^program_value, jet_eval_runtime_config(request.eval_config))
+        if session_result == {
+            .Ok(session) -> {
+                result := jet_driver_compile_result(load, load.diagnostics, entry_function, None, None, None, None, true, trace)
+                result.repl_session = Val(session)
+                return result
+            }
+            .Err(message) -> {
+                &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "REPL session initialization refused the checked root", message, "select an empty zero-parameter REPL root"))
+                return jet_driver_compile_result(load, load.diagnostics, entry_function, None, None, None, Val(JetDriverStage.Check), false, trace)
+            }
+        }
+    }
     // Compile time is explicit in the checker, so ordinary immutable bindings
     // over pure work are folded here, once, for every execution tier.
     program_value = jet_driver_fold_pure_calls(^program_value)

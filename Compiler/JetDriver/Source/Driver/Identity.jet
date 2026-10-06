@@ -46,6 +46,7 @@ JetWebArtifacts,
 JetWebAssets,
 ]
 use jet_eval.JetEvalConfig
+use jet_repl.ReplSession
 
 pub struct JetDriverAuthorizedSourceFile {
     pub path: String
@@ -103,6 +104,7 @@ pub enum JetDriverCompileMode {
     Comptime
     Eval
     Interpreter
+    Repl
 }
 
 // One user module of the checked bundle as `jet doc` and the semantic index
@@ -354,6 +356,8 @@ pub struct JetDriverCompileResult {
     // `JetDriverCompileMode.Comptime`: every build-time value the comptime
     // stage produced, constants included. Empty in the other modes.
     pub comptime_values: [SemaComptimeItemValue]{[SemaComptimeItemValue]{}}
+    // A Repl compile retains its checked scope and canonical MIR machine.
+    pub repl_session: ReplSession?{None}
 }
 
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read
