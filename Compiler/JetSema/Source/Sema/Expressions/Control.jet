@@ -723,8 +723,13 @@ fn sema_expression_try(value: Expr, span: Span, conversion: TryConvert, context_
     }
     value_tir := sema_expression_propagated(inner, try_conversion, span) ?? return None
     if context_expr == .Val(context_source) {
-        context_state := sema_ownership_state_snapshot(state)
-        note :: sema_check_expression(context_source, Val(Type.String), environment, program, &scopes, &context_state, &tail_store, &check_context, &diagnostics) ?? return None
+        // The note's ownership effects are discarded: it is checked inside a
+        // fork and rolled back.
+        context_fork :: sema_ownership_fork(&state)
+        checked_note :: sema_check_expression(context_source, Val(Type.String), environment, program, &scopes, &state, &tail_store, &check_context, &diagnostics)
+        sema_ownership_fork_rollback(&state, context_fork)
+        sema_ownership_fork_close(&state, context_fork)
+        note :: checked_note ?? return None
         location :: sema_expression_panic_location(environment, program, scopes, span)
         value_tir = sema_tir_expr(value_tir.ty, TExprKind.TryWithContext{inner: inner, note: Val(note), convert: try_conversion, file: location.file, line: location.line, function: location.function}, span)
     }
