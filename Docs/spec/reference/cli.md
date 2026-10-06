@@ -302,3 +302,9 @@ takes the selected environment's `formatter:` package, stages the matching
 temporary directory, and runs `jetpack env … -- <formatter> <staged…>`;
 `--check`/`--diff`/`--dry-run` report the files whose bytes changed (exit 1),
 otherwise those files are written back. No formatter declared is E1340.
+
+Unsafe-gate inspection reads the parser's audited regions and scoped policy
+declarations. It retains each low-level operation, its typed obligations
+(`valid_ptr`, `aligned`, `no_alias`), the immediately following assertion, and
+the policy provenance. Nested unsafe regions own their proofs independently;
+an assertion cannot discharge an operation across a region boundary.
