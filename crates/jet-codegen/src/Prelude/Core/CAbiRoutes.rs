@@ -13571,23 +13571,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.sys.getegid
-    #[no_mangle]
-    pub extern "C" fn jet_std_os_getegid() -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_os_getegid()))
-    }
-
-    /// core.sys.geteuid
-    #[no_mangle]
-    pub extern "C" fn jet_std_os_geteuid() -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_os_geteuid()))
-    }
-
-    /// core.sys.getgid
-    #[no_mangle]
-    pub extern "C" fn jet_std_os_getgid() -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_os_getgid()))
-    }
 
     /// core.sys.getgroups
     #[no_mangle]
@@ -13604,17 +13587,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.sys.getpgrp
-    #[no_mangle]
-    pub extern "C" fn jet_std_os_getpgrp() -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_os_getpgrp()))
-    }
-
-    /// core.sys.getppid
-    #[no_mangle]
-    pub extern "C" fn jet_std_os_getppid() -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_os_getppid()))
-    }
 
     /// core.sys.getpriority
     #[no_mangle]
@@ -13634,11 +13606,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.sys.getuid
-    #[no_mangle]
-    pub extern "C" fn jet_std_os_getuid() -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_os_getuid()))
-    }
 
     /// core.sys.hostname, core.net.gethostname
     #[no_mangle]

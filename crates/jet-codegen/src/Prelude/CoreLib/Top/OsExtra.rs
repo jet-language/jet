@@ -239,55 +239,35 @@ fn jet_os_last_err(op: jet_std::IOOperation, path: Option<String>) -> jet_std::I
     jet_std::IOError::other(op, path, std::io::Error::from_raw_os_error(errno))
 }
 
-pub(crate) fn jet_std_os_getppid() -> i64 {
+pub(crate) fn jet_sys_getppid_raw() -> Option<i64> {
     #[cfg(unix)]
-    {
-        return unsafe { jet_os_sys::getppid() as i64 };
-    }
+    { Some(unsafe { jet_os_sys::getppid() as i64 }) }
     #[cfg(not(unix))]
-    {
-        0
-    }
+    { None }
 }
-pub(crate) fn jet_std_os_getuid() -> i64 {
+pub(crate) fn jet_sys_getuid_raw() -> Option<i64> {
     #[cfg(unix)]
-    {
-        return unsafe { jet_os_sys::getuid() as i64 };
-    }
+    { Some(unsafe { jet_os_sys::getuid() as i64 }) }
     #[cfg(not(unix))]
-    {
-        0
-    }
+    { None }
 }
-pub(crate) fn jet_std_os_geteuid() -> i64 {
+pub(crate) fn jet_sys_geteuid_raw() -> Option<i64> {
     #[cfg(unix)]
-    {
-        return unsafe { jet_os_sys::geteuid() as i64 };
-    }
+    { Some(unsafe { jet_os_sys::geteuid() as i64 }) }
     #[cfg(not(unix))]
-    {
-        0
-    }
+    { None }
 }
-pub(crate) fn jet_std_os_getgid() -> i64 {
+pub(crate) fn jet_sys_getgid_raw() -> Option<i64> {
     #[cfg(unix)]
-    {
-        return unsafe { jet_os_sys::getgid() as i64 };
-    }
+    { Some(unsafe { jet_os_sys::getgid() as i64 }) }
     #[cfg(not(unix))]
-    {
-        0
-    }
+    { None }
 }
-pub(crate) fn jet_std_os_getegid() -> i64 {
+pub(crate) fn jet_sys_getegid_raw() -> Option<i64> {
     #[cfg(unix)]
-    {
-        return unsafe { jet_os_sys::getegid() as i64 };
-    }
+    { Some(unsafe { jet_os_sys::getegid() as i64 }) }
     #[cfg(not(unix))]
-    {
-        0
-    }
+    { None }
 }
 pub(crate) fn jet_std_os_getgroups() -> Vec<i64> {
     #[cfg(unix)]
@@ -325,15 +305,11 @@ pub(crate) fn jet_std_os_getpgid(pid: i64) -> Result<i64, jet_std::IOError> {
         Err(jet_os_unsupported("getpgid"))
     }
 }
-pub(crate) fn jet_std_os_getpgrp() -> i64 {
+pub(crate) fn jet_sys_getpgrp_raw() -> Option<i64> {
     #[cfg(unix)]
-    {
-        return unsafe { jet_os_sys::getpgrp() as i64 };
-    }
+    { Some(unsafe { jet_os_sys::getpgrp() as i64 }) }
     #[cfg(not(unix))]
-    {
-        0
-    }
+    { None }
 }
 pub(crate) fn jet_std_os_getsid(pid: i64) -> Result<i64, jet_std::IOError> {
     #[cfg(unix)]

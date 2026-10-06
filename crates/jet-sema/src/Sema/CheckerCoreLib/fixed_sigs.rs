@@ -1536,6 +1536,9 @@ fn core_fixed_sig_impl(
             "pid" | "getpid" | "cpu_count" | "getppid" | "getuid" | "geteuid" | "getgid"
             | "getegid" | "getpgrp",
         ) => Some((vec![], Some(Type::Int))),
+        ("core.sys", "__getppid" | "__getuid" | "__geteuid" | "__getgid" | "__getegid" | "__getpgrp") => {
+            Some((vec![], Some(Type::Option(Box::new(Type::Int)))))
+        }
         ("core.sys", "umask" | "exitcode") => Some((vec![(read, Type::Int)], Some(Type::Int))),
         ("core.sys", "success") => Some((vec![(read, Type::Int)], Some(Type::Bool))),
         ("core.sys", "uptime") => Some((vec![], Some(Type::Float))),
