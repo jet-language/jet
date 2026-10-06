@@ -4286,15 +4286,26 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.module_alias = bundle.modules[module_idx].alias.clone();
     cx.module_identity = module_identity(bundle, module_idx);
     // Project sema's checked serde capabilities as well as source bodies for
-    // mounted callbacks. Auto-derived records carry the same endpoint schema
-    // as explicitly derived records; marker spelling is not a capability test.
+    // mounted callbacks. Sema materializes every Encode/Decode capability —
+    // explicit, auto-derived, or hand-written — as an impl in the finished
+    // item list, so auto-derived records carry the same endpoint schema as
+    // explicitly derived records; marker spelling is not a capability test.
     fn register_http_metadata(cx: &mut Cx, bundle: &ProgramBundle, owner: usize, module_idx: usize, items: &[Item]) {
+        let is_codec = |trait_name: &str| trait_name == Generics::ENCODE || trait_name == Generics::DECODE;
+        let codec_impls: HashSet<&str> = items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Impl(implementation) if implementation.trait_name.as_deref().is_some_and(is_codec) => {
+                    Some(implementation.type_name.as_str())
+                }
+                _ => None,
+            })
+            .collect();
         for item in items {
             match item {
                 Item::Struct(definition) => {
-                    let traits = &bundle.modules[owner].trait_reg;
-                    if traits.implements_trait(&definition.name, Generics::ENCODE)
-                        || traits.implements_trait(&definition.name, Generics::DECODE)
+                    if codec_impls.contains(definition.name.as_str())
+                        || definition.trait_impls.iter().any(|block| is_codec(&block.trait_name))
                     {
                         if let Some(identity) = bundle.name_ledger.nominal_identity(owner, &definition.name) {
                             let mut fields = jet_foundation::Reflection::fields(definition);
