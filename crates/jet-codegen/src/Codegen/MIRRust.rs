@@ -29413,7 +29413,20 @@ impl<'a> RustEmitter<'a> {
                 args,
                 owner_type_args,
                 type_args,
-            } => self.static_prelude_call(function, *call, args, owner_type_args, type_args),
+            } => {
+                let emitted =
+                    self.static_prelude_call(function, *call, args, owner_type_args, type_args);
+                // The HTTP shutdown report kernel reports each count as a
+                // machine word for the checked exact-Int field.
+                if self.prelude_row(*call).symbol.name() == "jet_http_shutdown_report_field" {
+                    return result
+                        .and_then(|value| {
+                            self.native_int_result(&emitted, self.value_type(function, value))
+                        })
+                        .unwrap_or(emitted);
+                }
+                emitted
+            }
             MirSemanticOp::DecodeUnder {
                 call,
                 segment,
