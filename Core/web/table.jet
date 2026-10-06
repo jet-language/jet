@@ -441,7 +441,7 @@ fn default_state() -> WebTableState {
 fn parse_columns<T>(text: String) -> [WebTableColumn<T>] {
     out := [WebTableColumn<T>]{ }
     loop raw_name in split_commas(text) {
-        name :: trim(~raw_name)
+        name :: trim(raw_name)
         if out.len() >= C_MAX_TABLE_COLUMNS -> next
         if name.len() > 0 && name.len() <= 128 && !has_control_text(name) -> &out.push(WebTableColumn<T>{name: ~name, label: ~name, project: default_project})
     }

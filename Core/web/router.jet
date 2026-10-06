@@ -112,7 +112,7 @@ pub fn navigate(router: WebRouter, path: String) -> WebNavigation WebRouterError
 
 pub fn preload(router: &WebRouter, path: String) -> WebNavigation WebRouterError! {
     if path.len() == 0 || path.len() > C_MAX_ROUTER_PATH || !(valid_percent_encoding(path) ?? false) -> return Err(WebRouterError.Invalid)
-    nav := match_path(~router, path) ?? return Err(WebRouterError.NotFound)
+    nav := match_path(router, path) ?? return Err(WebRouterError.NotFound)
     nav.status = WebNavigationStatus.Preloading
     router.current = ~path
     router.status = WebNavigationStatus.Preloading
@@ -318,10 +318,10 @@ fn query_fields(path: String, fields: [WebRouterField], codec: WebRouterSearchCo
     seen := [String]{}
     loop piece in split_amp(query) {
         if piece.len() == 0 -> return None
-        eq :: find_byte(~piece, 61)
-        if eq < 1 || !(valid_percent_encoding(~piece) ?? false) -> return None
-        key :: percent_decode(slice_text(~piece, 0, eq), true) ?? return None
-        value :: percent_decode(slice_text(~piece, eq + 1, piece.len()), true) ?? return None
+        eq :: find_byte(piece, 61)
+        if eq < 1 || !(valid_percent_encoding(piece) ?? false) -> return None
+        key :: percent_decode(slice_text(piece, 0, eq), true) ?? return None
+        value :: percent_decode(slice_text(piece, eq + 1, piece.len()), true) ?? return None
         if !valid_router_name(key) || !field_name_allowed(fields, key) || contains_text(seen, key) || has_control_text(value) -> return None
         &seen.push(~key)
         &out.push(WebRouterField{name: key, value: value})
@@ -336,15 +336,15 @@ fn parse_json_query(text: String, fields: [WebRouterField]) -> [WebRouterField]?
     seen := [String]{}
     out := [WebRouterField]{}
     loop member in split_json_members(inner) {
-        piece := trim_json(~member)
+        piece := trim_json(member)
         if piece.len() == 0 -> return None
-        colon := find_byte(~piece, 58)
+        colon := find_byte(piece, 58)
         if colon <= 0 -> return None
-        key_text := trim_json(slice_text(~piece, 0, colon))
-        value_text := trim_json(slice_text(~piece, colon + 1, piece.len()))
+        key_text := trim_json(slice_text(piece, 0, colon))
+        value_text := trim_json(slice_text(piece, colon + 1, piece.len()))
         key :: json_unquote(key_text) ?? return None
         value :: json_unquote(value_text) ?? return None
-        if !valid_router_name(~key) || !field_name_allowed(fields, ~key) || contains_text(seen, ~key) || has_control_text(~value) -> return None
+        if !valid_router_name(key) || !field_name_allowed(fields, key) || contains_text(seen, key) || has_control_text(value) -> return None
         &seen.push(~key)
         &out.push(WebRouterField{name: ~key, value: ~value})
     }

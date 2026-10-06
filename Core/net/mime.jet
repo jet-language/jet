@@ -145,7 +145,7 @@ pub fn extension(mime: String) -> String? Never! {
 }
 
 fn trim_dot(ext: String) -> String Never! {
-    raw :: (~ext).bytes()
+    raw :: ext.bytes()
     i := 0
     loop i < raw.len() && raw[i] == (U8{46}) -> i = i + 1
     if i > 0 -> return slice(raw, i, raw.len())
@@ -153,7 +153,7 @@ fn trim_dot(ext: String) -> String Never! {
 }
 
 fn trim_params(mime: String) -> String Never! {
-    raw :: (~mime).bytes()
+    raw :: mime.bytes()
     loop i in 0..<raw.len() {
         if raw[i] == (U8{59}) -> return trim_ascii(slice(raw, 0, i))
     }

@@ -459,10 +459,12 @@ fn jet_map_is_empty<K: Ord, V>(map: &JetMap<K, V>) -> bool {
     map.is_empty()
 }
 
+/// The key is any borrowed form of `K` (`K: Borrow<Q>`), so a `String`-keyed
+/// map is read with a literal `&str` key without building a `String`.
 #[inline(always)]
-fn jet_map_get_opt<K: Ord, V: Clone>(
+fn jet_map_get_opt<K: Ord + std::borrow::Borrow<Q>, V: Clone, Q: Ord + ?Sized>(
     map: &JetMap<K, V>,
-    key: &K,
+    key: &Q,
 ) -> JetOutcome<V, JetAbsent> {
     jet_outcome_of(map.get(key).cloned())
 }
