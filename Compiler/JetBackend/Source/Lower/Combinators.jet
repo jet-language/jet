@@ -129,6 +129,10 @@ fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
         return
     }
     elem :: lower_list_element(receiver_ty) ?? return lower_fail(&m, &f, unsupported)
+    if symbol == "jet_list_sort_by" || symbol == "jet_list_sort_by_desc" || symbol == "jet_list_sort_by_compare" {
+        mode :: if symbol == "jet_list_sort_by" -> 0 else if symbol == "jet_list_sort_by_desc" -> 1 else -> 2
+        return lower_closure_sort(p, c, &m, &f, instruction, receiver, receiver_ty, elem, closure_arg, closure_ty, mode)
+    }
     if lower_repr(p, elem) == .Absent -> return lower_fail(&m, &f, unsupported)
     if symbol == "jet_list_filter" || symbol == "jet_list_map" {
         produced :: lower_list_element(result_ty) ?? return lower_fail(&m, &f, unsupported)
@@ -203,4 +207,159 @@ fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
         return
     }
     lower_fail(&m, &f, unsupported)
+}
+
+// A word slot `at` of an 8-byte-per-slot scratch buffer.
+fn lower_sort_slot(f: &LowerFunction, buffer: LIRValueID, at: LIRValueID) -> LIRValueID Never! {
+    lower_list_address(&f, buffer, at, 8)
+}
+
+fn lower_sort_load(f: &LowerFunction, buffer: LIRValueID, at: LIRValueID) -> LIRValueID Never! {
+    slot :: lower_sort_slot(&f, buffer, at)
+    value :: lower_word(&f)
+    lower_emit(&f, LIRInst.Load{dst: value, base: slot, offset: 0})
+    value
+}
+
+// Opens `head(at)` counting from `start` while `at < end`; the open block is
+// the body. lower_each_end closes it (LowerEach.address is unused).
+fn lower_sort_loop(f: &LowerFunction, start: LIRValueID, end: LIRValueID) -> LowerEach Never! {
+    head :: lower_new_block(&f)
+    body :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    at :: lower_word(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{start})})
+    lower_start(&f, head, [LIRValueID]{at})
+    more :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Lt, left: at, right: end})
+    lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, body, [LIRValueID]{})
+    LowerEach{head: head, done: done, at: at, address: at, state: [LIRValueID]{}, exit: [LIRValueID]{}}
+}
+
+// `xs.sort_by(key)` / `sort_by_desc(key)` (SortKernel.rs
+// jet_list_try_sort_by_key_kernel: every key computed once, in List order,
+// then a stable sort of the keys) and `xs.sort_by(compare)`
+// (jet_list_sort_by_compare, a stable sort under the comparator). A stable
+// insertion sort orders a permutation of positions; the elements then move
+// once into a new buffer in that order. `mode`: 0 key ascending, 1 key
+// descending, 2 comparator.
+fn lower_closure_sort(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, receiver_ty: MIRType, elem: MIRType, closure_arg: MIRCallArg, closure_ty: MIRType, mode: Int) Never! {
+    by_key :: mode != 2
+    if lower_view_element(receiver_ty) != None -> return lower_fail(&m, &f, "sorting a View in place is not lowered at O0 yet")
+    if lower_repr(p, elem) == .Absent -> return lower_fail(&m, &f, "sorting a List of {mir_type_display_name(elem)} is not lowered at O0 yet")
+    signature :: if closure_ty.kind == .Fn(row) -> row else -> {
+        lower_fail(&m, &f, "sort_by with a {mir_type_display_name(closure_ty)} closure is not lowered at O0 yet")
+        return
+    }
+    ret :: signature.ret ?? return lower_fail(&m, &f, "sort_by closure without a result type is not lowered at O0 yet")
+    if by_key && lower_map_key_kind(p, ret) == "" -> return lower_fail(&m, &f, "sort_by with a {mir_type_display_name(ret)} key is not lowered at O0 yet")
+    less_index := 0
+    if !by_key {
+        definition :: lower_type_def(p, ret) ?? return lower_fail(&m, &f, "sort_by comparator result {mir_type_display_name(ret)} has no definition")
+        less :: lower_variant(definition, "Less") ?? return lower_fail(&m, &f, "sort_by comparator result {mir_type_display_name(ret)} has no Less variant")
+        less_index = lower_discriminant(less.index)
+    }
+    list :: lower_use(&m, &f, receiver) ?? return
+    closure :: lower_use(&m, &f, closure_arg.value) ?? return
+    length :: lower_list_word(&f, list, 0)
+    cap :: lower_list_word(&f, list, 8)
+    data :: lower_list_data(&f, list)
+    stride :: lower_list_stride(p, elem)
+    zero :: lower_const(&f, 0)
+    one :: lower_const(&f, 1)
+    order :: lower_list_buffer(&m, &f, length, 8)
+    keys := order
+    if by_key -> keys = lower_list_buffer(&m, &f, length, 8)
+
+    // Positions in List order; each key computed once, in that order.
+    fill :: lower_sort_loop(&f, zero, length)
+    order_slot :: lower_sort_slot(&f, order, fill.at)
+    lower_emit(&f, LIRInst.Store{base: order_slot, offset: 0, value: fill.at})
+    if by_key {
+        item_address :: lower_list_address(&f, data, fill.at, stride)
+        item :: lower_read_at(p, &f, item_address, 0, elem) ?? return
+        key :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, ret) ?? return lower_fail(&m, &f, "sort_by key closure has no result")
+        key_slot :: lower_sort_slot(&f, keys, fill.at)
+        lower_write_at(p, &f, key_slot, 0, key, ret)
+    }
+    lower_each_end(&f, fill, [LIRValueID]{})
+
+    // Stable insertion sort: slot j moves down while it orders strictly
+    // before slot j - 1.
+    outer :: lower_sort_loop(&f, one, length)
+    inner :: lower_new_block(&f)
+    check :: lower_new_block(&f)
+    swap :: lower_new_block(&f)
+    advance :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(inner, [LIRValueID]{outer.at})})
+    j :: lower_word(&f)
+    lower_start(&f, inner, [LIRValueID]{j})
+    positive :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: positive, condition: LIRCondition.Gt, left: j, right: zero})
+    lower_seal(&f, LIRTerminator.Branch{condition: positive, then_target: lower_target(check, [LIRValueID]{}), else_target: lower_target(advance, [LIRValueID]{})})
+    lower_start(&f, check, [LIRValueID]{})
+    previous :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: previous, op: LIRBinaryOp.Sub, left: j, right: one})
+    before := LIRValueID{value: -1}
+    if by_key {
+        current_slot :: lower_sort_slot(&f, keys, j)
+        previous_slot :: lower_sort_slot(&f, keys, previous)
+        current_key :: lower_read_at(p, &f, current_slot, 0, ret) ?? return
+        previous_key :: lower_read_at(p, &f, previous_slot, 0, ret) ?? return
+        ordered :: if mode == 0 -> lower_map_key_order(p, &m, &f, ret, current_key, previous_key) else -> lower_map_key_order(p, &m, &f, ret, previous_key, current_key)
+        before = ordered.less
+    } else {
+        current_at :: lower_sort_load(&f, order, j)
+        previous_at :: lower_sort_load(&f, order, previous)
+        current_address :: lower_list_address(&f, data, current_at, stride)
+        previous_address :: lower_list_address(&f, data, previous_at, stride)
+        current :: lower_read_at(p, &f, current_address, 0, elem) ?? return
+        earlier :: lower_read_at(p, &f, previous_address, 0, elem) ?? return
+        verdict :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{current, earlier}, ret) ?? return lower_fail(&m, &f, "sort_by comparator has no result")
+        less_word :: lower_const(&f, less_index)
+        before = lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: before, condition: LIRCondition.Eq, left: verdict, right: less_word})
+    }
+    lower_seal(&f, LIRTerminator.Branch{condition: before, then_target: lower_target(swap, [LIRValueID]{}), else_target: lower_target(advance, [LIRValueID]{})})
+    lower_start(&f, swap, [LIRValueID]{})
+    buffers := [LIRValueID]{order}
+    if by_key -> &buffers.push(keys)
+    loop buffer in buffers {
+        here_slot :: lower_sort_slot(&f, buffer, j)
+        there_slot :: lower_sort_slot(&f, buffer, previous)
+        here :: lower_word(&f)
+        there :: lower_word(&f)
+        lower_emit(&f, LIRInst.Load{dst: here, base: here_slot, offset: 0})
+        lower_emit(&f, LIRInst.Load{dst: there, base: there_slot, offset: 0})
+        lower_emit(&f, LIRInst.Store{base: here_slot, offset: 0, value: there})
+        lower_emit(&f, LIRInst.Store{base: there_slot, offset: 0, value: here})
+    }
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(inner, [LIRValueID]{previous})})
+    lower_start(&f, advance, [LIRValueID]{})
+    lower_each_end(&f, outer, [LIRValueID]{})
+
+    // Move every element once into its sorted position.
+    sorted :: lower_list_buffer(&m, &f, length, stride)
+    place :: lower_sort_loop(&f, zero, length)
+    source_at :: lower_sort_load(&f, order, place.at)
+    from :: lower_list_address(&f, data, source_at, stride)
+    to :: lower_list_address(&f, sorted, place.at, stride)
+    lower_list_move(p, &f, to, from, elem)
+    lower_each_end(&f, place, [LIRValueID]{})
+    lower_list_free_buffer(&m, &f, data, cap, stride)
+    lower_emit(&f, LIRInst.Store{base: list, offset: 8, value: length})
+    lower_emit(&f, LIRInst.Store{base: list, offset: 16, value: sorted})
+
+    if by_key && lower_needs_drop(p, ret) {
+        release :: lower_sort_loop(&f, zero, length)
+        release_slot :: lower_sort_slot(&f, keys, release.at)
+        key :: lower_read_at(p, &f, release_slot, 0, ret) ?? return
+        lower_map_drop_value(p, &m, &f, key, ret)
+        lower_each_end(&f, release, [LIRValueID]{})
+    }
+    lower_list_free_buffer(&m, &f, order, length, 8)
+    if by_key -> lower_list_free_buffer(&m, &f, keys, length, 8)
+    if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
+    lower_alias_absent(&f, instruction)
 }

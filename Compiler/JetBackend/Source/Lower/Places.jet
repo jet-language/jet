@@ -117,7 +117,7 @@ fn lower_walk_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, root: LIR
                     base = lower_map_value_address(p, &m, &f, header, ty, index) ?? return None
                     ty = lower_map_value_type(ty) ?? return None
                     offset = 0
-                } else if kind == .List {
+                } else if kind == .List || kind == .FixedListProof {
                     found :: lower_index_address(p, &m, &f, header, ty, index) ?? return None
                     ty = lower_list_element(ty) ?? return None
                     base = found.base
