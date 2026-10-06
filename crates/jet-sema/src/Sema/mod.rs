@@ -1455,6 +1455,17 @@ pub(crate) struct CallAccessFrame {
     accesses: Vec<CallPlaceAccess>,
 }
 
+/// D-COPY-DEFAULT1=A: one unmarked take argument the checker moved as its
+/// name's last use. `reported` keeps one E0209 per site when several later
+/// uses reach it.
+#[derive(Debug, Clone)]
+pub(crate) struct ImplicitTakeSite {
+    name: String,
+    callee: String,
+    ty: Type,
+    reported: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ViewOwnerOrigin {
     Local,
@@ -2103,6 +2114,11 @@ pub(crate) struct Checker<'a> {
     /// shares. After the body check each site becomes `~name`; the paired
     /// E0121 is reported only if that site cannot be found in the body.
     share_sites: Vec<(Span, Diagnostic)>,
+    /// D-COPY-DEFAULT1=A: unmarked arguments to a take parameter that the
+    /// checker moved as their name's last use, keyed by the argument span.
+    /// A later use that reaches one reports E0209 there (pass a copy with
+    /// `~`) instead of turning it into a share.
+    implicit_take_sites: HashMap<Span, ImplicitTakeSite>,
     /// D-LOOP-SUBJECT1=A: active bindingless collecting-loop subjects.
     implicit_loop_subject_depth: usize,
     /// D-SUBJECT-COHERE1=A: active subject-shorthand lambda scopes.
@@ -2342,6 +2358,10 @@ pub(crate) struct Checker<'a> {
     /// True only while checking a lambda body. Distinguishes an escaping lambda
     /// from the checker's ordinary top-level default escape policy.
     in_lambda_body: bool,
+    /// Scope depth of the innermost lambda body's own scope (0 outside any
+    /// lambda). A name declared below it is a capture, which a call inside
+    /// the body never moves without `^`.
+    lambda_scope_floor: usize,
     /// Builtin mutating receivers discovered while inferring the current
     /// lambda body. The builtin table supplies the mutation fact; inline
     /// callbacks fold these roots into `LambdaMeta::mut_captures`.
@@ -2600,6 +2620,7 @@ struct ErasedScopeSnapshot {
     allow_string_view_read: bool,
     lambda_escapes: bool,
     in_lambda_body: bool,
+    lambda_scope_floor: usize,
     inferred_lambda_mut_captures: HashSet<String>,
     lambda_params_are_lending_views: bool,
     is_task_spawn: bool,
@@ -2730,6 +2751,7 @@ impl<'a> Checker<'a> {
             allow_string_view_read: self.allow_string_view_read,
             lambda_escapes: self.lambda_escapes,
             in_lambda_body: self.in_lambda_body,
+            lambda_scope_floor: self.lambda_scope_floor,
             inferred_lambda_mut_captures: self.inferred_lambda_mut_captures.clone(),
             lambda_params_are_lending_views: self.lambda_params_are_lending_views,
             is_task_spawn: self.is_task_spawn,
@@ -2859,6 +2881,7 @@ impl<'a> Checker<'a> {
         self.allow_string_view_read = snapshot.allow_string_view_read;
         self.lambda_escapes = snapshot.lambda_escapes;
         self.in_lambda_body = snapshot.in_lambda_body;
+        self.lambda_scope_floor = snapshot.lambda_scope_floor;
         self.inferred_lambda_mut_captures = snapshot.inferred_lambda_mut_captures;
         self.lambda_params_are_lending_views = snapshot.lambda_params_are_lending_views;
         self.is_task_spawn = snapshot.is_task_spawn;

@@ -488,6 +488,24 @@ pub(crate) fn aliasing_mut_after_read(name: &str, span: Span) -> Diagnostic {
     )
 }
 
+/// E0204 (#4702): one call reads a name through an earlier argument and
+/// takes it through a later one, as in `pair(t, ^t)` or `pair(t, t)`.
+pub(crate) fn aliasing_take_while_lent(name: &str, callee: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0204",
+        format!("`{name}` is already lent to this call, so `{callee}` can't take it here too"),
+        format!(
+            "an earlier argument lets `{callee}` read `{name}` for the whole call, so this argument can't hand the same value over"
+        ),
+        format!(
+            "pass a copy to one of the two parameters with the copy marker `{}` (`{}{name}`)",
+            Syntax::SIGIL_COPY,
+            Syntax::SIGIL_COPY,
+        ),
+        Some(span),
+    )
+}
+
 pub(crate) fn loop_control_outside(kw: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0115",
