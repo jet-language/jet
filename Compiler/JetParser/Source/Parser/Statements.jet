@@ -88,6 +88,7 @@ use jet_lexer.[
     TOKEN_SEMI,
     TOKEN_SELF,
     TOKEN_SHL_EQ,
+    TOKEN_SHR,
     TOKEN_SHR_EQ,
     TOKEN_SLASH_EQ,
     TOKEN_SLASH_PERCENT_EQ,
@@ -143,6 +144,39 @@ fn parser_value_tail_ahead(state: JetParserState) -> Bool Never! {
         if kind == TOKEN_SEMI && depth == 0 {
             following :: parser_lookahead_forward(state, index + 1, 0).kind
             if following != TOKEN_KW_ELSE -> return following == TOKEN_RBRACE || following == TOKEN_EOF
+        }
+        index += 1
+    }
+    true
+}
+
+// Must the callable body's line at the cursor (a `loop`) be speculated as its
+// collecting tail? Only a line that `parser_value_tail_ahead` says can end the
+// body can be at the tail, so every other line goes straight to statement
+// parsing; the speculation's rewound result would be thrown away. The one
+// exception is a line whose speculative parse leaves state behind that the
+// rewind does not restore and the statement reparse then sees: the once-per-file
+// E0373 flag (an authored `;`), block policy declarations (`#`), the retired
+// step span (`++`, `--`), and a split `>>` type close. Such a line keeps the
+// speculation, so the result is the same as speculating every line.
+fn parser_tail_speculation_needed(state: JetParserState) -> Bool Never! {
+    if parser_value_tail_ahead(state) -> return true
+    depth := 0
+    index := state.position
+    loop index < state.tokens.len() {
+        kind :: state.tokens[index].kind
+        if kind == TOKEN_SEMI && state.tokens[index].span.start < state.tokens[index].span.end -> return true
+        if kind == TOKEN_HASH || kind == TOKEN_PLUS_PLUS || kind == TOKEN_MINUS_MINUS || kind == TOKEN_SHR -> return true
+        if kind == TOKEN_EOF -> return true
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
+        if (kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET) && depth > 0 -> depth -= 1
+        if kind == TOKEN_RBRACE {
+            if depth == 0 -> return true
+            depth -= 1
+        }
+        if kind == TOKEN_SEMI && depth == 0 {
+            following :: parser_lookahead_kind_forward(state, index + 1, 0)
+            if following != TOKEN_KW_ELSE -> return false
         }
         index += 1
     }
@@ -325,6 +359,7 @@ fn parser_parse_body_lines(state: &JetParserState, value_tail: Bool) -> ParsedBl
 // the block's value. Any other loop form, or a loop with lines after it, is
 // parsed again as a statement.
 fn parser_parse_tail_loop(state: &JetParserState) -> Stmt {
+    if !parser_tail_speculation_needed(state) -> return parser_parse_statement(&state)
     saved_position :: state.position
     saved_diagnostics :: state.diagnostics.len()
     saved_blocks :: state.block_spans.len()
