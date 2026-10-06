@@ -750,7 +750,7 @@ pub fn sema_call_check_default_err(call: Call, expected: Type?, environment: Sem
             }
             // D-FAIL-INFER-UNION1=A: record what this `Err` sends down the
             // default route before the ordinary check below.
-            if err == (Type.Named{name: "Err"}) -> sema_failure_union_record_err(call, environment, program, &scopes, state, &tail_store, &context)
+            if err == (Type.Named{name: "Err"}) -> sema_failure_union_record_err(call, environment, program, &scopes, &state, &tail_store, &context)
         }
     }
     wrap :: result != None
@@ -804,7 +804,7 @@ fn sema_call_collect_inference_facts(params: [SemaCallParam], binding: SemaCallB
         if slot >= 0 && slot < params.len() {
             if sema_call_argument_parameter_type(params[slot], args[index]) == .Val(required) && !sema_call_inference_needs_context(args[index].expr) {
                 probe_diagnostics := [Diagnostic]{}
-                value :: sema_probe_expression(args[index].expr, None, environment, program, &scopes, state, &tail_store, &context, &probe_diagnostics)
+                value :: sema_probe_expression(args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics)
                 if value == .Val(checked) {
                     &parameter_types.push(required)
                     &argument_types.push(checked.ty)
@@ -835,7 +835,7 @@ fn sema_call_lambda_failure_facts(facts: &SemaCallInferenceFacts, generic_params
                                 if generic {
                                     failure := Type.Named{name: "Never"}
                                     probe_diagnostics := [Diagnostic]{}
-                                    value :: sema_probe_expression(args[index].expr, None, environment, program, &scopes, state, &tail_store, &context, &probe_diagnostics)
+                                    value :: sema_probe_expression(args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics)
                                     if value == .Val(checked) {
                                         if checked.ty == .Fn(_, lambda_ret, _, _, _, _) {
                                             if lambda_ret == .Val(lambda_value) {

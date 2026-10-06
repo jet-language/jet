@@ -1161,7 +1161,7 @@ fn sema_expression_typed_literal_whole_value(head: Type, value: Expr, environmen
     probe_diagnostics := [Diagnostic]{}
     // The probe reads the enclosing statement tails (its liveness frames in
     // `context` index this store), so it shares the store, never a fresh one.
-    checked :: sema_probe_expression(value, Val(head), environment, program, &scopes, state, &tail_store, &context, &probe_diagnostics) ?? return false
+    checked :: sema_probe_expression(value, Val(head), environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return false
     if probe_diagnostics.len() != 0 -> return false
     _ := sema_expr_expected(checked, Val(head), environment, program, &probe_diagnostics) ?? return false
     probe_diagnostics.len() == 0

@@ -4254,7 +4254,7 @@ fn sema_stmt_return_if_arms_fit_carrier(value: Expr, return_type: Type?, scopes:
 fn sema_stmt_check_return_value(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     diagnostic_start :: diagnostics.len()
     checked :: sema_stmt_check_return_value_typed(value, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    if checked == None -> sema_stmt_value_return_mismatch(value, return_type, diagnostic_start, environment, program, &scopes, state, &tail_store, &context, &diagnostics)
+    if checked == None -> sema_stmt_value_return_mismatch(value, return_type, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     checked
 }
 
@@ -4300,7 +4300,7 @@ fn sema_stmt_return_is_view_boundary(return_type: Type?) -> Bool Never! {
 // D-DISCARD1=A (owner ruling): with a written return type, a value that does
 // not fit it is E0113 about the value itself (the Rust reference's
 // `check_return_expr`), replacing the generic E0108 at the value.
-fn sema_stmt_value_return_mismatch(value: Expr, return_type: Type?, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+fn sema_stmt_value_return_mismatch(value: Expr, return_type: Type?, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
     if sema_stmt_return_success_type(return_type) == (Type.Named{name: "Unit"}) -> return
     value_span :: expr_span(value)
     found := Int?{None}
@@ -4315,7 +4315,7 @@ fn sema_stmt_value_return_mismatch(value: Expr, return_type: Type?, diagnostic_s
     mismatch_index :: found ?? return
     // The value's own type, inferred without the return type as a target.
     probe_diagnostics := [Diagnostic]{}
-    offered :: sema_probe_expression(value, None, environment, program, &scopes, state, &tail_store, &context, &probe_diagnostics) ?? return
+    offered :: sema_probe_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return
     diagnostics[mismatch_index] = sema_return_value_mismatch(context.function_name, sema_stmt_return_required_type(return_type), offered.ty, value_span)
 }
 
@@ -4325,13 +4325,13 @@ fn sema_stmt_value_return_mismatch(value: Expr, return_type: Type?, diagnostic_s
 // returns as-is. The syntactic carrier test above cannot see such a value's
 // type, so it is inferred here on its own. A `T !E` slot keeps method and
 // value calls on the payload route, where their failure propagates.
-fn sema_stmt_return_probed_carrier(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
+fn sema_stmt_return_probed_carrier(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
     if !sema_stmt_return_is_carrier(return_type) -> return false
     if sema_stmt_return_known_type(value, scopes) != None -> return false
     required :: sema_stmt_return_required_type(return_type)
     if !sema_stmt_return_probe_shape(value, sema_expr_unwrap_tag(required) == .Option(_)) -> return false
     probe_diagnostics := [Diagnostic]{}
-    probed :: sema_probe_expression(value, None, environment, program, &scopes, state, &tail_store, &context, &probe_diagnostics) ?? return false
+    probed :: sema_probe_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return false
     sema_stmt_return_types_are_carriers(probed.ty, required)
 }
 
@@ -4348,7 +4348,7 @@ fn sema_stmt_return_probe_shape(value: Expr, optional_slot: Bool) -> Bool Never!
 
 fn sema_stmt_check_return_value_typed(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     required := sema_stmt_return_required_type(return_type)
-    if sema_stmt_return_expr_is_carrier(value, return_type, scopes) || sema_stmt_return_probed_carrier(value, return_type, environment, program, &scopes, state, &tail_store, &context) {
+    if sema_stmt_return_expr_is_carrier(value, return_type, scopes) || sema_stmt_return_probed_carrier(value, return_type, environment, program, &scopes, &state, &tail_store, &context) {
         carrier :: sema_check_expression(value, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         // #3708: a fallible value returned as-is (not an `Ok`/`Err` written
         // here) is this body's own failure source.
@@ -4540,7 +4540,7 @@ fn sema_stmt_scope_form_label(statement: Stmt) -> String Never! {
 // A value that only fails against the promised type is checked on its own.
 fn sema_stmt_check_dead_value_tail(tail: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     probe_diagnostics := [Diagnostic]{}
-    probed :: sema_probe_expression(tail, return_type, environment, program, &scopes, state, &tail_store, &context, &probe_diagnostics)
+    probed :: sema_probe_expression(tail, return_type, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics)
     expected := Type?{None}
     if probed != None && !sema_has_error_since(probe_diagnostics, 0) -> expected = return_type
     sema_check_expression(tail, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) != None
@@ -4578,7 +4578,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
             // Checked on the live tables and rolled back; only its failure
             // rows are kept.
             dead_scope_mark :: sema_scope_mark(&scopes)
-            dead_state := sema_ownership_state_snapshot(state)
+            dead_fork :: sema_ownership_fork(&state)
             dead_mark :: sema_check_context_mark(&context)
             // A dead last line is checked for its own diagnostics, never as the
             // value the function hands back. Rust `check_value_tail`
@@ -4588,11 +4588,11 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
             if index + 1 == statements.len() && statement == .Expr(tail) && context.value_tail_span == (Val(expr_span(tail))) && !sema_stmt_refutable_expr_diverges(tail) {
                 dead_value_tail = true
                 context.value_tail_span = None
-                if !sema_stmt_check_dead_value_tail(tail, return_type, environment, program, &scopes, &dead_state, &tail_store, &context, &diagnostics) -> complete = false
+                if !sema_stmt_check_dead_value_tail(tail, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) -> complete = false
             }
             context.value_tail_span = None
             if !dead_value_tail {
-                dead_result :: sema_check_statements([Stmt]{statement}, return_type, environment, program, &scopes, &dead_state, &tail_store, &context, &diagnostics, loop_depth)
+                dead_result :: sema_check_statements([Stmt]{statement}, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
                 if !dead_result.complete -> complete = false
             }
             dead_edges := [String]{}
@@ -4605,6 +4605,8 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
             dead_union_edges := [String]{}
             loop union_edge_index in dead_mark.failure_union_edges..<context.failure_union_edges.len() -> &dead_union_edges.push(context.failure_union_edges[union_edge_index])
             dead_general :: context.failure_union_general
+            sema_ownership_fork_rollback(&state, dead_fork)
+            sema_ownership_fork_close(&state, dead_fork)
             sema_check_context_rollback(&context, dead_mark)
             sema_scope_rollback(&scopes, dead_scope_mark)
             // #3708: dead source still counts toward the body's failure rows.
@@ -5298,9 +5300,11 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                 if {
                     marker.name == "Off" || marker.name == "DebugOnly" -> {
                         erased_scope_mark :: sema_scope_mark(&scopes)
-                        erased_state := sema_ownership_state_snapshot(state)
+                        erased_fork :: sema_ownership_fork(&state)
                         erased_mark :: sema_check_context_mark(&context)
-                        checked :: sema_check_statements(body, return_type, environment, program, &scopes, &erased_state, &tail_store, &context, &diagnostics, loop_depth)
+                        checked :: sema_check_statements(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
+                        sema_ownership_fork_rollback(&state, erased_fork)
+                        sema_ownership_fork_close(&state, erased_fork)
                         erased_reasons := [String]{}
                         loop reason_index in erased_mark.incomplete_reasons..<context.incomplete_reasons.len() -> &erased_reasons.push(context.incomplete_reasons[reason_index])
                         sema_check_context_rollback(&context, erased_mark)

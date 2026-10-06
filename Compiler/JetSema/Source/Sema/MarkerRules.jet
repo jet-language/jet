@@ -721,11 +721,13 @@ fn sema_marker_rules_observe_argument(marker: Marker, source_index: Int, expecte
     }
     // Probed on the live tables, rolled back below.
     probe_scope_mark :: sema_scope_mark(&scopes)
-    probe_state := sema_ownership_state_snapshot(state)
+    probe_fork :: sema_ownership_fork(&state)
     probe_context_mark :: sema_check_context_mark(&context)
     reference_start := context.name_references.len()
     request_start := context.comptime_requests.len()
-    checked := sema_check_expression(argument, checked_expected, environment, program, &scopes, &probe_state, &tail_store, &context, &diagnostics)
+    checked := sema_check_expression(argument, checked_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    sema_ownership_fork_rollback(&state, probe_fork)
+    sema_ownership_fork_close(&state, probe_fork)
     checked_value := TExpr?{None}
     constant := TComptimeValue?{None}
     staged_source := SemaComptimeItemSource?{None}

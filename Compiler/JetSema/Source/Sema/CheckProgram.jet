@@ -1055,8 +1055,11 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
             default_context.unsafe_depth = context.unsafe_depth
             default_context.generic_params = generic_params
             default_context.host_hooks = context.host_hooks
-            default_state := sema_ownership_state_snapshot(state)
-            checked_default :: sema_check_expression(parameter.default ?? Expr.Unit{span: parameter.name_span}, Val(parameter_ty), updated, program, &scopes, &default_state, &tail_store, &default_context, &diagnostics)
+            // Checked on the live ownership state inside a fork and rolled back.
+            default_fork :: sema_ownership_fork(&state)
+            checked_default :: sema_check_expression(parameter.default ?? Expr.Unit{span: parameter.name_span}, Val(parameter_ty), updated, program, &scopes, &state, &tail_store, &default_context, &diagnostics)
+            sema_ownership_fork_rollback(&state, default_fork)
+            sema_ownership_fork_close(&state, default_fork)
             if {
                 checked_default == None -> {
                     complete = false

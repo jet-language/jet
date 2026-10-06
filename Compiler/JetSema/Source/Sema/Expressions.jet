@@ -2337,16 +2337,19 @@ fn sema_expr_check_unit_conversion_source(argument: Expr, method: String, rounde
     checked
 }
 
-// Checks `value` for its own type only, on the live scope table and context:
-// both are rolled back afterwards and the ownership state is a throwaway copy,
-// so the probe leaves nothing behind except what it reports to `diagnostics`.
-// This replaces whole-table snapshots, which copied every module binding and
-// every row the function had accumulated, per probe.
-pub fn sema_probe_expression(value: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+// Checks `value` for its own type only, on the live scope table, context and
+// ownership state: all three are rolled back afterwards (the ownership state
+// through a fork, which the probe runs in as on a whole-state copy), so the
+// probe leaves nothing behind except what it reports to `diagnostics`. This
+// replaces whole-table and whole-state snapshots, which copied every module
+// binding and every row the function had accumulated, per probe.
+pub fn sema_probe_expression(value: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     scope_mark :: sema_scope_mark(&scopes)
     context_mark :: sema_check_context_mark(&context)
-    probe_state := sema_ownership_state_snapshot(state)
-    checked :: sema_check_expression(value, expected, environment, program, &scopes, &probe_state, &tail_store, &context, &diagnostics)
+    fork :: sema_ownership_fork(&state)
+    checked :: sema_check_expression(value, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    sema_ownership_fork_rollback(&state, fork)
+    sema_ownership_fork_close(&state, fork)
     sema_check_context_rollback(&context, context_mark)
     sema_scope_rollback(&scopes, scope_mark)
     checked
@@ -2379,12 +2382,14 @@ fn sema_expr_try_explicit_unit_method(receiver: Expr, method: String, method_spa
     }
     probe_scope_mark :: sema_scope_mark(&scopes)
     probe_context_mark :: sema_check_context_mark(&context)
-    probe_state := sema_ownership_state_snapshot(state)
+    probe_fork :: sema_ownership_fork(&state)
     probe_diagnostics := [Diagnostic]{}
     // The probe shares the enclosing statement-tail store: the liveness
     // frames in `context` index it.
     probe_rounded_allowed := false
-    probe_source := sema_expr_check_unit_conversion_source(args[0].expr, method, rounded, environment, program, &scopes, &probe_state, &tail_store, &context, &probe_diagnostics, &probe_rounded_allowed)
+    probe_source := sema_expr_check_unit_conversion_source(args[0].expr, method, rounded, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics, &probe_rounded_allowed)
+    sema_ownership_fork_rollback(&state, probe_fork)
+    sema_ownership_fork_close(&state, probe_fork)
     sema_check_context_rollback(&context, probe_context_mark)
     sema_scope_rollback(&scopes, probe_scope_mark)
     source_probe :: probe_source ?? return SemaMethodSpecialCheck{handled: false, value: None}
@@ -2837,7 +2842,7 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
             }
             else -> {
                 probe_diagnostics := [Diagnostic]{}
-                checked_argument := sema_probe_expression(argument.expr, None, environment, program, &scopes, state, &tail_store, &context, &probe_diagnostics)
+                checked_argument := sema_probe_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics)
                 if {
                     checked_argument != None -> {
                         checked_value :: checked_argument ?? return None
@@ -3082,12 +3087,12 @@ fn sema_expr_unit_probe_shape(expr: Expr) -> Bool Never! {
 
 // Rust `infer_binary`: the left operand keeps the surrounding expectation,
 // and a literal before a measurement (or a unit under `*` or `/`) is Float.
-fn sema_expr_decimal_lhs_expected(op: BinOp, left: Expr, right: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Type? {
+fn sema_expr_decimal_lhs_expected(op: BinOp, left: Expr, right: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Type? {
     if !sema_expr_decimal_literal_operand(left, true) -> return None
     if sema_expr_expects_machine_float(expected) -> return ~expected
     if !sema_expr_unit_probe_shape(right) -> return None
     probe_diagnostics := [Diagnostic]{}
-    probed :: sema_probe_expression(right, None, environment, program, &scopes, state, &tail_store, &context, &probe_diagnostics) ?? return None
+    probed :: sema_probe_expression(right, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return None
     if sema_expr_measurement_type(probed.ty) || ((op == BinOp.Mul || op == BinOp.Div) && sema_expr_scalable_unit_type(probed.ty, environment, program)) -> return Val(Type.Float)
     None
 }
@@ -3146,7 +3151,8 @@ fn sema_expr_optional_builder(expr: Expr) -> Bool Never! {
 }
 
 fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    checked_lhs :: sema_check_expression(left, sema_expr_decimal_lhs_expected(op, left, right, expected, environment, program, &scopes, state, &tail_store, &context), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    lhs_expected :: sema_expr_decimal_lhs_expected(op, left, right, expected, environment, program, &scopes, &state, &tail_store, &context)
+    checked_lhs :: sema_check_expression(left, lhs_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     rhs_expected := Type?{None}
     if {
         sema_expr_decimal_literal_operand(right, false) -> rhs_expected = sema_expr_decimal_rhs_expected(op, checked_lhs.ty, environment, program)
