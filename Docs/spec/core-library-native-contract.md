@@ -109,6 +109,9 @@ both signed zeros without assigning policy to the native cell.
 `core.game.raylib` sound handles are Jet records retaining the supplied path.
 `play_sound` preserves the existing non-empty-path acceptance contract, not a
 claim of native audio submission; this pair requires no host operation.
+The `color` constructor also runs entirely in Jet: each channel is clamped to
+`0..255` before the existing drawing carrier is constructed. No native or
+compile-time color constructor duplicates that normalization.
 
 `core.web.virtual` windows are Jet records. Window construction, measured-size
 estimation, bounded slicing and indices, and `WebVirtualWindow.facts_json` use

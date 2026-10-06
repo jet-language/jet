@@ -1090,15 +1090,6 @@ fn apply_raylib_core_call(
             let _ = as_int(one(0)?, span)?;
             Ok(CtValue::Unit)
         }
-        "color" => Ok(CtValue::Struct {
-            type_name: "RaylibColor".to_string(),
-            fields: vec![
-                ("r".to_string(), CtValue::Int(as_int(one(0)?, span)?)),
-                ("g".to_string(), CtValue::Int(as_int(one(1)?, span)?)),
-                ("b".to_string(), CtValue::Int(as_int(one(2)?, span)?)),
-                ("a".to_string(), CtValue::Int(as_int(one(3)?, span)?)),
-            ],
-        }),
         "gamepad_down" => {
             let gamepad = as_int(one(0)?, span)?;
             let button = as_string(one(1)?, span)?;

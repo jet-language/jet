@@ -131,3 +131,15 @@ fn sound_acceptance() -[FS, GPU]> Bool {
     named :: load_sound("sound.wav")
     !play_sound(empty) && play_sound(named) && named.path == "sound.wav"
 }
+
+#Test
+fn color_channel_bounds() -> Bool {
+    c :: color(-1, 0, 255, 256)
+    c.r == 0 && c.g == 0 && c.b == 255 && c.a == 255
+}
+
+#Test
+fn color_retains_channels() -> Bool {
+    c :: color(13, 57, 101, 149)
+    c.r == 13 && c.g == 57 && c.b == 101 && c.a == 149
+}
