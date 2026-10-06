@@ -2634,12 +2634,11 @@ fn sema_ownership_view_same(left: SemaOwnershipViewFact, right: SemaOwnershipVie
 }
 
 pub fn sema_ownership_join_paths(state: &SemaOwnershipState, before: SemaOwnershipState, then_state: SemaOwnershipState, else_state: SemaOwnershipState, has_else: Bool) Never! {
-    base :: sema_ownership_state_snapshot(before)
     state.scope_depth = before.scope_depth
     state.next_seq = before.next_seq
     if then_state.next_seq > state.next_seq -> state.next_seq = then_state.next_seq
     if else_state.next_seq > state.next_seq -> state.next_seq = else_state.next_seq
-    state.declarations = base.declarations
+    state.declarations = before.declarations
     declaration_keys := [String:Bool]{}
     loop declaration in state.declarations -> declaration_keys[declaration.key] = true
     loop fact in then_state.declarations {
@@ -2669,7 +2668,7 @@ pub fn sema_ownership_join_paths(state: &SemaOwnershipState, before: SemaOwnersh
         }
     }
     if !has_else {
-        loop moved in base.moved {
+        loop moved in before.moved {
             if !sema_ownership_moved_covered(merged_moves, move_slots, move_rows, moved) {
                 sema_ownership_bucket_add(&move_slots, &move_rows, moved.place.root_key, merged_moves.len())
                 &merged_moves.push(sema_ownership_moved_snapshot(moved))
@@ -2686,7 +2685,7 @@ pub fn sema_ownership_join_paths(state: &SemaOwnershipState, before: SemaOwnersh
     // Loans and views are hazards after a branch whenever any executable
     // path carries them.  Keep pre-merge hazards and union both branch facts;
     // lexical scope cleanup has already removed facts whose owners ended.
-    merged_loans := base.loans
+    merged_loans := before.loans
     loan_slots := [String:Int]{}
     loan_rows := [[Int]]{}
     loop (row, loan) in merged_loans -> sema_ownership_bucket_add(&loan_slots, &loan_rows, loan.place.root_key, row)
@@ -2697,7 +2696,7 @@ pub fn sema_ownership_join_paths(state: &SemaOwnershipState, before: SemaOwnersh
     merged_views := [SemaOwnershipViewFact]{}
     view_slots := [String:Int]{}
     view_rows := [[Int]]{}
-    loop view in base.views {
+    loop view in before.views {
         if view.active {
             sema_ownership_bucket_add(&view_slots, &view_rows, view.carrier_key, merged_views.len())
             &merged_views.push(sema_ownership_view_snapshot(view))
@@ -2706,7 +2705,7 @@ pub fn sema_ownership_join_paths(state: &SemaOwnershipState, before: SemaOwnersh
     loop fact in then_state.views -> sema_ownership_merge_view(&merged_views, &view_slots, &view_rows, fact)
     loop fact in else_state.views -> sema_ownership_merge_view(&merged_views, &view_slots, &view_rows, fact)
     state.views = merged_views
-    merged_references := base.references
+    merged_references := before.references
     anchors := sema_ownership_reference_anchors(merged_references)
     sema_ownership_admit_references(&merged_references, &anchors, then_state.references)
     sema_ownership_admit_references(&merged_references, &anchors, else_state.references)
