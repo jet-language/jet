@@ -232,7 +232,7 @@ fn jet_driver_comptime_body_pass(
     known := [String:Bool]{}
     loop source in pending -> jet_driver_comptime_body_source_add(&body_sources, &known, source)
     run := jet_driver_run_comptime(
-        graph, None, [SemaGraphModuleResult]{}, body_sources, current_graph.names, values, functions,
+        ~graph, [SemaGraphModuleResult]{}, body_sources, current_graph.names, values, functions,
         load, request, &diagnostics,
     )
     jet_driver_comptime_trace_append(&trace, run.trace)
@@ -286,8 +286,7 @@ pub fn jet_driver_validate_checked_text(
     }
     resolved_registration := sema_comptime_graph_with_values(graph, initial_values)
     run := jet_driver_run_comptime(
-        resolved_registration,
-        None,
+        ~resolved_registration,
         [SemaGraphModuleResult]{},
         sources,
         initial_graph.names,

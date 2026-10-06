@@ -131,6 +131,7 @@ use jet_sema.[
     SemaComptimeValueSites,
     SemaForeignProviderInput,
     SemaFunctionMemoryPlan,
+    SemaGraphTrail,
     SemaGraphModuleResult,
     SemaGraphResult,
     SemaLookupCounters,
@@ -159,17 +160,20 @@ use jet_sema.[
     sema_comptime_program,
     sema_comptime_find_function_source,
     sema_comptime_graph_apply_sites,
+    sema_comptime_graph_apply_values,
     sema_comptime_graph_with_values,
     sema_comptime_modules_with_values,
     sema_comptime_probe_init,
     sema_comptime_staged_constant_rows,
     sema_comptime_staged_keys,
     sema_comptime_value_sites,
-    sema_finalize_registration_graph,
+    sema_finalize_graph,
     sema_function_memory_plan_from_graph,
     sema_hardware_use_merge,
     sema_hardware_use_snapshot,
     sema_host_hook_access,
+    sema_graph_trail_init,
+    sema_graph_trail_undo,
     sema_name_build_facts,
     sema_registration_lookup_counts,
     sema_registration_prepare_graph,
@@ -255,6 +259,13 @@ fn jet_driver_diagnostic_at_registration_site(graph: SemaRegistrationGraph, modu
     jet_driver_diagnostic_with_location(code, span, location, what, why, fix)
 }
 
+// The registration-site diagnostic on the graph `program` owns (a comptime
+// run's tables).
+fn jet_driver_diagnostic_at_program_site(program: SemaProgramTables, module_identity: String, code: String, span: Span, what: String, why: String, fix: String) -> Diagnostic {
+    graph :: program.registration_graph ?? return jet_driver_diagnostic_with_location(code, span, None, what, why, fix)
+    jet_driver_diagnostic_at_registration_site(graph, module_identity, code, span, what, why, fix)
+}
+
 fn jet_driver_diagnostic_at_loaded_site(load: JetDriverLoadResult, module_identity: String, code: String, span: Span, what: String, why: String, fix: String) -> Diagnostic {
     location := jet_driver_source_location_for_load_module(load, module_identity, span)
     jet_driver_diagnostic_with_location(code, span, location, what, why, fix)
@@ -309,6 +320,12 @@ fn jet_driver_attach_registration_source_location(diagnostic: Diagnostic, graph:
     span :: diagnostic.span ?? return diagnostic
     location :: jet_driver_source_location_for_registration_module(graph, module_identity, span) ?? return diagnostic
     diagnostic_with_source_mapping(^diagnostic, location.source_path, location.aggregate_start, location.source_start)
+}
+// jet_driver_attach_registration_source_location on the graph `program` owns
+// (a comptime run's tables).
+fn jet_driver_attach_program_source_location(diagnostic: Diagnostic, program: SemaProgramTables, module_identity: String) -> Diagnostic Never! {
+    graph :: program.registration_graph ?? return ~diagnostic
+    jet_driver_attach_registration_source_location(diagnostic, graph, module_identity)
 }
 fn jet_driver_module_display(relative_path: String) -> String Never! {
     parts := relative_path.split("/").to_list()
@@ -1407,9 +1424,9 @@ fn jet_driver_comptime_wait_add(dependencies: &[String], key: String) Never! {
 // (sema_comptime_program) and `available` its constant keys: every function
 // check re-targets the environment instead of copying the graph per function.
 // A function the run already checked completely is reused from
-// `checked_functions`.
+// `checked_functions`. Function sources and module rows are read from
+// `program`'s graph, whose staged values never change them.
 fn jet_driver_comptime_function_closure(
-    graph: SemaRegistrationGraph,
     environment: &SemaScopeEnvironment, program: SemaProgramTables,
     probe: &SemaScopeProbe,
     available: SemaComptimeAvailableConstants,
@@ -1420,6 +1437,7 @@ fn jet_driver_comptime_function_closure(
     request: SemaComptimeItemRequest,
     diagnostics: &[Diagnostic],
 ) -> JetDriverComptimeFunctionClosure {
+    graph :: program.registration_graph ?? return JetDriverComptimeFunctionClosure{functions: [TFunc]{}, waiting_dependencies: [String]{}, complete: false, incomplete_reasons: [String]{"the staged comptime environment lost its registration graph"}}
     // Each function enters the queue once, so the queue is also the set of
     // functions processed.
     queue := [JetDriverComptimeFunctionRef]{}
@@ -2070,7 +2088,10 @@ fn jet_driver_assemble_mir(
 // `graph` is the run environment's graph with every value of `values`
 // applied (equal to sema_comptime_graph_with_values of the registration graph
 // and `values`), handed on when the run completed so finalization reuses it
-// instead of copying the registration graph again; None on every other exit.
+// instead of copying the registration graph again; None on every other exit,
+// where `partial_graph` holds the run's graph with the values applied so far.
+// `trail` records every edit the run made to the graph it was given
+// (sema_graph_trail_undo gives that graph back).
 struct JetDriverComptimeRunResult {
     values: [SemaComptimeItemValue]
     functions: [SemaComptimeFunctionResult]
@@ -2079,6 +2100,8 @@ struct JetDriverComptimeRunResult {
     soft_stop: Bool
     internal_problem: String?
     graph: SemaRegistrationGraph?
+    partial_graph: SemaRegistrationGraph?
+    trail: SemaGraphTrail
 }
 
 fn jet_driver_comptime_run_result(
@@ -2088,7 +2111,7 @@ fn jet_driver_comptime_run_result(
     complete: Bool,
     soft_stop: Bool,
 ) -> JetDriverComptimeRunResult Never! {
-    JetDriverComptimeRunResult{values: values, functions: functions, trace: trace, complete: complete, soft_stop: soft_stop, internal_problem: None, graph: None}
+    JetDriverComptimeRunResult{values: values, functions: functions, trace: trace, complete: complete, soft_stop: soft_stop, internal_problem: None, graph: None, partial_graph: None, trail: sema_graph_trail_init()}
 }
 
 fn jet_driver_comptime_lost_graph(values: [SemaComptimeItemValue], functions: [SemaComptimeFunctionResult], trace: JetDriverCompileTrace) -> JetDriverComptimeRunResult Never! {
@@ -2105,27 +2128,24 @@ fn jet_driver_comptime_lost_session(values: [SemaComptimeItemValue], functions: 
 
 // Applies the values that landed from position `from` on to the run's
 // program graph in place, through the graph's value sites `sites`
-// (sema_comptime_value_sites), and counts them as available. False when the
-// tables lost their graph.
-fn jet_driver_comptime_apply_landed(program: &SemaProgramTables, available: &SemaComptimeAvailableConstants, sites: SemaComptimeValueSites, values: [SemaComptimeItemValue], from: Int) -> Bool {
+// (sema_comptime_value_sites), recording each typed row on `trail`, and
+// counts them as available. False when the tables lost their graph.
+fn jet_driver_comptime_apply_landed(program: &SemaProgramTables, available: &SemaComptimeAvailableConstants, sites: SemaComptimeValueSites, values: [SemaComptimeItemValue], from: Int, trail: &SemaGraphTrail) -> Bool {
     landed := [SemaComptimeItemValue]{}
     loop value_index in from..<values.len() -> &landed.push(values[value_index])
     if &program.registration_graph == {
         None -> return false
-        .Val(resolved_graph) -> sema_comptime_graph_apply_sites(&resolved_graph, sites, landed)
+        .Val(resolved_graph) -> sema_comptime_graph_apply_sites(&resolved_graph, sites, landed, &trail)
     }
     sema_comptime_available_constants_add(&available, values)
     true
 }
 
-// The value sites of the run's program graph, read in place (`graph`'s when
-// the tables lost their graph, which the first landing reports).
-fn jet_driver_comptime_program_sites(program: &SemaProgramTables, graph: SemaRegistrationGraph) -> SemaComptimeValueSites {
-    if &program.registration_graph == {
-        None -> {}
-        .Val(resolved_graph) -> return sema_comptime_value_sites(resolved_graph)
-    }
-    sema_comptime_value_sites(graph)
+// The value sites of the run's program graph, read in place. The run's
+// tables own their graph from the start of the run.
+fn jet_driver_comptime_program_sites(program: SemaProgramTables) -> SemaComptimeValueSites {
+    resolved_graph :: program.registration_graph ?? panic("the staged comptime environment lost its registration graph")
+    sema_comptime_value_sites(resolved_graph)
 }
 
 fn jet_driver_comptime_item_value(source: SemaComptimeItemSource, value: TComptimeValue, ty: Type) -> SemaComptimeItemValue Never! {
@@ -2721,9 +2741,10 @@ fn jet_driver_comptime_machine_eval(owned: ^JetDriverComptimeMachine, function_i
 // a (shareable) batch grows the run's live program when it can (A2c), else
 // builds the union of the live closure and its own. If no shared program can
 // be built, its reports are withdrawn and each entry is evaluated on its own
-// program.
+// program. The registration rows a flush reads (module rows, identities,
+// source segments, the target machine) are read from `program`'s graph,
+// whose staged values never change them.
 fn jet_driver_comptime_flush(
-    graph: SemaRegistrationGraph,
     declared: [SemaGraphModuleResult],
     names: MIRNameFacts,
     load: JetDriverLoadResult,
@@ -2737,6 +2758,7 @@ fn jet_driver_comptime_flush(
     counters: &JetDriverComptimeCounters,
     diagnostics: &[Diagnostic],
 ) -> JetDriverComptimeFlush {
+    graph :: program.registration_graph ?? return JetDriverComptimeFlush{stop: Val(jet_driver_comptime_lost_graph(values, checked_functions, trace)), progressed: false}
     flushed := JetDriverComptimeFlush{stop: None, progressed: false}
     start := 0
     loop start < batch.entries.len() {
@@ -2819,7 +2841,7 @@ fn jet_driver_comptime_flush(
                 _ := &diagnostics.pop()
             }
             loop index in start..<batch.entries.len() {
-                single := jet_driver_comptime_flush(graph, declared, names, load, request, jet_driver_comptime_batch_single(batch, index), &values, checked_functions, &trace, program, &staging, &counters, &diagnostics)
+                single := jet_driver_comptime_flush(declared, names, load, request, jet_driver_comptime_batch_single(batch, index), &values, checked_functions, &trace, program, &staging, &counters, &diagnostics)
                 if single.progressed -> flushed.progressed = true
                 if single.stop == .Val(stopped) {
                     flushed.stop = Val(stopped)
@@ -2966,13 +2988,14 @@ fn jet_driver_merge_checked_text_functions(graph: &SemaGraphResult, registration
     true
 }
 
-// `staged` is an owned copy of `graph` the caller already holds (the
-// declaration pass's copy, SemaComptimeDeclarationStage.graph); None copies
-// `graph` for the run's program tables.
+// `staged` is the graph the run's program tables own (moved in, never
+// copied): the declaration pass's graph (SemaComptimeDeclarationStage.graph)
+// or the caller's own copy. Every edit the run makes to it is recorded on the
+// result's `trail`, and the graph comes back on every exit (`graph` or
+// `partial_graph`).
 fn jet_driver_run_comptime(
-    graph: SemaRegistrationGraph,
-    staged: ^SemaRegistrationGraph?,
-    // The declaration pass's modules of `graph` (jet_driver_comptime_stage), or empty.
+    staged: ^SemaRegistrationGraph,
+    // The declaration pass's modules of `staged` (jet_driver_comptime_stage), or empty.
     declared: [SemaGraphModuleResult],
     sources: [SemaComptimeItemSource],
     names: MIRNameFacts,
@@ -2983,7 +3006,24 @@ fn jet_driver_run_comptime(
     diagnostics: &[Diagnostic],
 ) -> JetDriverComptimeRunResult {
     counters := JetDriverComptimeCounters{items_checked: 0, programs_built: 0, programs_grown: 0, item_functions_evaluated: 0, rows_lowered: 0, items_bare: 0}
-    result := jet_driver_comptime_run(graph, ^staged, declared, sources, names, initial_values, initial_functions, load, request, &counters, &diagnostics)
+    // Read before the tables take `staged`: staged values only type waiting
+    // constants, so the function declarations (the memory plan and the
+    // function owners), the constants' AST values, the module rows and the
+    // keep-going mode read the same with or without them.
+    // The memory plan is shared by every on-demand function check.
+    memory_plan :: sema_function_memory_plan_from_graph(staged)
+    available := sema_comptime_available_constants(staged, initial_values)
+    run_index := jet_driver_comptime_run_index(staged, initial_functions)
+    bare_ok :: jet_driver_comptime_bare_ok(staged, declared)
+    keep_going := staged.keep_going
+    // One program-tables value owns the graph carrying the staged values for
+    // every item and function check, beside one environment they re-target;
+    // the values that landed since the last item are applied to that graph in
+    // place rather than rebuilding it per item, and counted into the run's
+    // available constant keys.
+    trail := sema_graph_trail_init()
+    program := sema_comptime_program(^staged, initial_values, &trail)
+    result := jet_driver_comptime_run(&program, &trail, memory_plan, &available, &run_index, bare_ok, keep_going, declared, sources, names, initial_values, initial_functions, load, request, &counters, &diagnostics)
     if request.trace_sink == .Val(sink) {
         sink.progress("counters.comptime.items_checked", counters.items_checked, -1)
         sink.progress("counters.comptime.programs_built", counters.programs_built, -1)
@@ -2992,12 +3032,25 @@ fn jet_driver_run_comptime(
         sink.progress("counters.comptime.rows_lowered", counters.rows_lowered, -1)
         sink.progress("counters.comptime.items_bare", counters.items_bare, -1)
     }
+    // The completed run moved its graph into `graph`; any other exit hands
+    // the graph back here.
+    result.partial_graph = ^program.registration_graph
+    program.registration_graph = None
+    result.trail = ^trail
     result
 }
 
+// `program` owns the run's graph, `trail` records its edits; `available`,
+// `run_index`, `bare_ok` and `keep_going` were read from the graph before
+// the tables took it (jet_driver_run_comptime).
 fn jet_driver_comptime_run(
-    graph: SemaRegistrationGraph,
-    staged: ^SemaRegistrationGraph?,
+    program: &SemaProgramTables,
+    trail: &SemaGraphTrail,
+    memory_plan: SemaFunctionMemoryPlan,
+    available: &SemaComptimeAvailableConstants,
+    run_index: &JetDriverComptimeRunIndex,
+    bare_ok: Bool,
+    keep_going: Bool,
     declared: [SemaGraphModuleResult],
     sources: [SemaComptimeItemSource],
     names: MIRNameFacts,
@@ -3009,28 +3062,16 @@ fn jet_driver_comptime_run(
     diagnostics: &[Diagnostic],
 ) -> JetDriverComptimeRunResult {
     values := ~initial_values
-    // The memory plan reads only function declarations, which staged values
-    // never change, so every on-demand function check shares this one.
-    memory_plan :: sema_function_memory_plan_from_graph(graph)
     checked_functions := ~initial_functions
     trace := jet_driver_empty_compile_trace()
     pending := sources
     // The `module\nkey` of every source pending or staged in this run.
     known_sources := [String:Bool]{}
     loop source in sources -> known_sources["{source.module_identity}\n{source.key}"] = true
-    // One program-tables value owns the graph carrying the staged values for
-    // every item and function check, beside one environment they re-target;
-    // the values that landed since the last item are applied to that graph in
-    // place rather than rebuilding it per item, and counted into the run's
-    // available constant keys.
-    owned := ^staged
     environment := sema_comptime_environment()
-    program := sema_comptime_program(^owned ?? ~graph, values)
     // The module scope every item and function check of the run checks in.
     probe := sema_comptime_probe_init(sema_host_hook_access(request.eval_config.host_hooks))
-    available := sema_comptime_available_constants(graph, values)
     resolved_count := values.len()
-    run_index := jet_driver_comptime_run_index(graph, checked_functions)
     // Checked functions whose checked-text calls were already queued; the
     // run's checked functions only grow, so each is scanned once.
     scanned_functions := 0
@@ -3042,7 +3083,7 @@ fn jet_driver_comptime_run(
     // other item first takes the rows of the values that landed since them
     // (jet_driver_comptime_stage). Codegen owns the staged modules (moved in,
     // never copied per item) and their indexes.
-    staging := JetDriverComptimeStaging{session: None, runtime_modules: [SemaGraphModuleResult]{}, foreign: None, count: -1, live: [JetDriverComptimeLive]{}, growth_constants: [MIRConstantDef]{}, restore: false, global_keys: [String:Bool]{}, global_count: 0, sites: jet_driver_comptime_program_sites(&program, graph), staged_keys: [String:Bool]{}, bare: false, bare_ok: jet_driver_comptime_bare_ok(graph, declared)}
+    staging := JetDriverComptimeStaging{session: None, runtime_modules: [SemaGraphModuleResult]{}, foreign: None, count: -1, live: [JetDriverComptimeLive]{}, growth_constants: [MIRConstantDef]{}, restore: false, global_keys: [String:Bool]{}, global_count: 0, sites: jet_driver_comptime_program_sites(program), staged_keys: [String:Bool]{}, bare: false, bare_ok: bare_ok}
     loop (key, _) in request.eval_config.globals -> staging.global_keys[key] = true
     // Items whose check and closure read nothing a batch holds back
     // (jet_driver_comptime_reads_batch) are checked and, when
@@ -3071,7 +3112,7 @@ fn jet_driver_comptime_run(
             loop retry {
                 retry = false
                 if values.len() > resolved_count {
-                    if !jet_driver_comptime_apply_landed(&program, &available, staging.sites, values, resolved_count) -> return jet_driver_comptime_lost_graph(values, checked_functions, trace)
+                    if !jet_driver_comptime_apply_landed(&program, &available, staging.sites, values, resolved_count, &trail) -> return jet_driver_comptime_lost_graph(values, checked_functions, trace)
                     resolved_count = values.len()
                 }
                 source_key :: "{source.module_identity}\n{source.key}"
@@ -3091,14 +3132,14 @@ fn jet_driver_comptime_run(
                 checked_item := sema_check_comptime_item(&environment, program, &probe, available, source, values)
                 counters.items_checked += 1
                 if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, checked_item.waiting_dependencies, checked_item.diagnostics.len() > 0 || !checked_item.complete) {
-                    flushed := jet_driver_comptime_flush(graph, declared, names, load, request, batch, &values, checked_functions, &trace, program, &staging, &counters, &diagnostics)
+                    flushed := jet_driver_comptime_flush(declared, names, load, request, batch, &values, checked_functions, &trace, program, &staging, &counters, &diagnostics)
                     batch = jet_driver_comptime_batch_new()
                     if flushed.progressed -> made_progress = true
                     if flushed.stop == .Val(stopped) {
                         return stopped
                     }
                     if values.len() > resolved_count {
-                        if !jet_driver_comptime_apply_landed(&program, &available, staging.sites, values, resolved_count) -> return jet_driver_comptime_lost_graph(values, checked_functions, trace)
+                        if !jet_driver_comptime_apply_landed(&program, &available, staging.sites, values, resolved_count, &trail) -> return jet_driver_comptime_lost_graph(values, checked_functions, trace)
                         resolved_count = values.len()
                         checked_item = sema_check_comptime_item(&environment, program, &probe, available, source, values)
                         counters.items_checked += 1
@@ -3107,10 +3148,10 @@ fn jet_driver_comptime_run(
                 item_diagnostic_start := diagnostics.len()
                 // A comptime item's checker reports against its own module's
                 // source, so each carries that module's location.
-                loop diagnostic in checked_item.diagnostics -> &diagnostics.push(jet_driver_attach_registration_source_location(diagnostic, graph, source.module_identity))
+                loop diagnostic in checked_item.diagnostics -> &diagnostics.push(jet_driver_attach_program_source_location(diagnostic, program, source.module_identity))
                 // JET_KEEP_GOING: an item whose own check reported an error is
                 // dropped (its value never lands) and the run goes on.
-                if graph.keep_going {
+                if keep_going {
                     if jet_driver_has_errors_since(diagnostics, item_diagnostic_start) -> next
                 } else if jet_driver_has_errors(diagnostics) {
                     return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
@@ -3131,8 +3172,8 @@ fn jet_driver_comptime_run(
                     &next_pending.push(source)
                     next
                 }
-                if !checked_item.complete && graph.keep_going {
-                    &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, "E0003", source.span, "keep-going: comptime item `{source.name}` did not check to a complete typed value", "JET_KEEP_GOING drops the item and runs the rest", "see the item's other reports"))
+                if !checked_item.complete && keep_going {
+                    &diagnostics.push(jet_driver_diagnostic_at_program_site(program, source.module_identity, "E0003", source.span, "keep-going: comptime item `{source.name}` did not check to a complete typed value", "JET_KEEP_GOING drops the item and runs the rest", "see the item's other reports"))
                     next
                 }
                 if !checked_item.complete {
@@ -3143,7 +3184,7 @@ fn jet_driver_comptime_run(
                     return result
                 }
                 comptime_request :: checked_item.request ?? {
-                    &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, "E0003", source.span, "a complete comptime item check returned no typed evaluation request", "each staged value is evaluated only from its complete checked TIR expression", "retain the canonical Sema comptime request"))
+                    &diagnostics.push(jet_driver_diagnostic_at_program_site(program, source.module_identity, "E0003", source.span, "a complete comptime item check returned no typed evaluation request", "each staged value is evaluated only from its complete checked TIR expression", "retain the canonical Sema comptime request"))
                     return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                 }
                 if source.kind == SemaComptimeItemKind.Constant && comptime_request.calls.len() == 0 {
@@ -3160,13 +3201,13 @@ fn jet_driver_comptime_run(
                     }
                 }
                 checked_mark := checked_functions.len()
-                closure := jet_driver_comptime_function_closure(graph, &environment, program, &probe, available, &run_index, memory_plan, values, &checked_functions, comptime_request, &diagnostics)
+                closure := jet_driver_comptime_function_closure(&environment, program, &probe, available, &run_index, memory_plan, values, &checked_functions, comptime_request, &diagnostics)
                 if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, closure.waiting_dependencies, diagnostics.len() > item_diagnostic_start || !closure.complete) {
                     loop diagnostics.len() > item_diagnostic_start {
                         _ := &diagnostics.pop()
                     }
                     jet_driver_comptime_forget_functions(&checked_functions, &run_index, checked_mark)
-                    flushed := jet_driver_comptime_flush(graph, declared, names, load, request, batch, &values, checked_functions, &trace, program, &staging, &counters, &diagnostics)
+                    flushed := jet_driver_comptime_flush(declared, names, load, request, batch, &values, checked_functions, &trace, program, &staging, &counters, &diagnostics)
                     batch = jet_driver_comptime_batch_new()
                     if flushed.progressed -> made_progress = true
                     if flushed.stop == .Val(stopped) {
@@ -3175,13 +3216,13 @@ fn jet_driver_comptime_run(
                     retry = true
                     next
                 }
-                if graph.keep_going {
+                if keep_going {
                     if jet_driver_has_errors_since(diagnostics, item_diagnostic_start) -> next
                 } else if jet_driver_has_errors(diagnostics) {
                     return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                 }
-                if !closure.complete && closure.waiting_dependencies.len() == 0 && graph.keep_going {
-                    &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, "E0003", source.span, "keep-going: comptime item `{source.name}` has an incomplete function closure: {closure.incomplete_reasons.join("; ")}", "JET_KEEP_GOING drops the item and runs the rest", "see the closure's other reports"))
+                if !closure.complete && closure.waiting_dependencies.len() == 0 && keep_going {
+                    &diagnostics.push(jet_driver_diagnostic_at_program_site(program, source.module_identity, "E0003", source.span, "keep-going: comptime item `{source.name}` has an incomplete function closure: {closure.incomplete_reasons.join("; ")}", "JET_KEEP_GOING drops the item and runs the rest", "see the closure's other reports"))
                     next
                 }
                 if !closure.complete && closure.waiting_dependencies.len() == 0 {
@@ -3226,7 +3267,7 @@ fn jet_driver_comptime_run(
                     next
                 }
                 if batch.entries.len() > 0 {
-                    flushed := jet_driver_comptime_flush(graph, declared, names, load, request, batch, &values, checked_functions, &trace, program, &staging, &counters, &diagnostics)
+                    flushed := jet_driver_comptime_flush(declared, names, load, request, batch, &values, checked_functions, &trace, program, &staging, &counters, &diagnostics)
                     batch = jet_driver_comptime_batch_new()
                     if flushed.progressed -> made_progress = true
                     if flushed.stop == .Val(stopped) {
@@ -3236,7 +3277,7 @@ fn jet_driver_comptime_run(
                 alone := jet_driver_comptime_batch_new()
                 alone.shareable = false
                 jet_driver_comptime_batch_add(&alone, source, comptime_request, &closure.functions, None)
-                flushed := jet_driver_comptime_flush(graph, declared, names, load, request, alone, &values, checked_functions, &trace, program, &staging, &counters, &diagnostics)
+                flushed := jet_driver_comptime_flush(declared, names, load, request, alone, &values, checked_functions, &trace, program, &staging, &counters, &diagnostics)
                 if flushed.progressed -> made_progress = true
                 if flushed.stop == .Val(stopped) {
                     return stopped
@@ -3244,7 +3285,7 @@ fn jet_driver_comptime_run(
             }
         }
         if batch.entries.len() > 0 {
-            flushed := jet_driver_comptime_flush(graph, declared, names, load, request, batch, &values, checked_functions, &trace, program, &staging, &counters, &diagnostics)
+            flushed := jet_driver_comptime_flush(declared, names, load, request, batch, &values, checked_functions, &trace, program, &staging, &counters, &diagnostics)
             batch = jet_driver_comptime_batch_new()
             if flushed.progressed -> made_progress = true
             if flushed.stop == .Val(stopped) {
@@ -3257,11 +3298,11 @@ fn jet_driver_comptime_run(
                 cycle != None -> {
                     cycle_row :: cycle ?? return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                     cycle_diagnostic := sema_comptime_dependency_cycle_diagnostic(cycle_row.name, cycle_row.span)
-                    &diagnostics.push(jet_driver_attach_registration_source_location(cycle_diagnostic, graph, cycle_row.module_identity))
+                    &diagnostics.push(jet_driver_attach_program_source_location(cycle_diagnostic, program, cycle_row.module_identity))
                 }
                 wait_rows.len() > 0 -> {
                     stalled := wait_rows[0]
-                    &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, stalled.module_identity, "E0003", stalled.span, "the staged comptime dependency graph is stalled without a proven cycle", "only an actual cycle among unresolved canonical dependencies is reported as a cycle", "preserve the dependency owner or complete the missing staged value"))
+                    &diagnostics.push(jet_driver_diagnostic_at_program_site(program, stalled.module_identity, "E0003", stalled.span, "the staged comptime dependency graph is stalled without a proven cycle", "only an actual cycle among unresolved canonical dependencies is reported as a cycle", "preserve the dependency owner or complete the missing staged value"))
                 }
                 else -> {
                     &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the staged comptime dependency graph is stalled without a proven cycle", "only an actual cycle among unresolved canonical dependencies is reported as a cycle", "preserve the dependency owner or complete the missing staged value"))
@@ -3274,7 +3315,7 @@ fn jet_driver_comptime_run(
     // Values that landed in the last pass join the environment's graph, which
     // then leaves with the result.
     if values.len() > resolved_count {
-        if !jet_driver_comptime_apply_landed(&program, &available, staging.sites, values, resolved_count) -> return jet_driver_comptime_lost_graph(values, checked_functions, trace)
+        if !jet_driver_comptime_apply_landed(&program, &available, staging.sites, values, resolved_count, &trail) -> return jet_driver_comptime_lost_graph(values, checked_functions, trace)
     }
     finished := jet_driver_comptime_run_result(values, checked_functions, trace, true, false)
     finished.graph = ^program.registration_graph
@@ -4186,9 +4227,16 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         )
     }
     if request.trace_sink == .Val(sink) -> sink.begin("sema.check", "", -1, -1)
-    comptime_stage := sema_collect_comptime_declarations(registration_graph, package_policies, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink)
+    // The registration graph moves through the declaration pass, the comptime
+    // run and finalization, which record every edit they make to it on one
+    // trail; undoing the trail after finalization gives it back exactly, so no
+    // pass copies it.
+    comptime_stage := sema_collect_comptime_declarations(^registration_graph, package_policies, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink)
     if request.trace_sink == .Val(sink) -> sink.end("sema.check", comptime_stage.modules.len())
-    jet_driver_trace_lookup_counters(request.trace_sink, "sema.check", sema_registration_lookup_counts(registration_graph), register_lookups)
+    // Every copy of a graph shares one counter set (SemaLookupCounters).
+    check_lookups := register_lookups
+    if comptime_stage.graph == .Val(stage_graph) -> check_lookups = sema_registration_lookup_counts(stage_graph)
+    jet_driver_trace_lookup_counters(request.trace_sink, "sema.check", check_lookups, register_lookups)
     if kg.enabled {
         loop diagnostic in comptime_stage.diagnostics -> &load.diagnostics.push(diagnostic)
         jet_driver_keep_going_diagnostics(&kg, "sema.check", load.diagnostics)
@@ -4211,12 +4259,12 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     stage_diagnostics := load.diagnostics
     load.diagnostics = [Diagnostic]{}
     if request.trace_sink == .Val(sink) -> sink.begin("comptime", "", -1, -1)
-    // The declaration pass's graph copy becomes the run's environment graph.
+    // The declaration pass's graph becomes the run's environment graph.
     staged_graph := ^comptime_stage.graph
     comptime_stage.graph = None
+    run_staged := ^staged_graph ?? return jet_driver_compile_internal_result(load, trace, "the declaration pass lost its registration graph")
     comptime_run := jet_driver_run_comptime(
-        registration_graph,
-        ^staged_graph,
+        ^run_staged,
         comptime_stage.modules,
         comptime_stage.sources,
         comptime_stage.names,
@@ -4250,11 +4298,24 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         return result
     }
     if request.trace_sink == .Val(sink) -> sink.begin("sema.finalize", "", -1, -1)
-    // The completed run's graph already carries its values: finalization
-    // takes it instead of copying the registration graph again.
+    // A completed run's graph already carries its values: finalization takes
+    // it in place. After any other exit (JET_KEEP_GOING) the run's edits are
+    // undone and every value applied again, which is
+    // sema_comptime_graph_with_values of the registration graph.
+    trail := ^comptime_run.trail
+    comptime_run.trail = sema_graph_trail_init()
     run_graph := ^comptime_run.graph
     comptime_run.graph = None
-    checked_graph := sema_finalize_registration_graph(registration_graph, ^run_graph, comptime_stage, comptime_run.values, comptime_run.functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink)
+    if run_graph == None {
+        partial_graph := ^comptime_run.partial_graph
+        comptime_run.partial_graph = None
+        restored := ^partial_graph ?? return jet_driver_compile_internal_result(load, trace, "the staged comptime environment lost its registration graph")
+        sema_graph_trail_undo(&restored, &trail)
+        sema_comptime_graph_apply_values(&restored, comptime_run.values, &trail)
+        run_graph = Val(^restored)
+    }
+    finalize_graph := ^run_graph ?? return jet_driver_compile_internal_result(load, trace, "the staged comptime environment lost its registration graph")
+    checked_graph := sema_finalize_graph(^finalize_graph, &trail, comptime_stage, comptime_run.values, comptime_run.functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink)
     if request.trace_sink == .Val(sink) -> sink.end("sema.finalize", checked_graph.modules.len())
     if checked_graph.modules.len() != registration_module_count {
         loop diagnostic in checked_graph.diagnostics -> &load.diagnostics.push(diagnostic)
@@ -4264,6 +4325,12 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         }
         return result
     }
+    // Finalization hands the graph back; undoing every recorded edit gives
+    // back the registration graph the later passes read.
+    finalized_graph := ^checked_graph.registration_graph
+    checked_graph.registration_graph = None
+    registration_graph = ^finalized_graph ?? return jet_driver_compile_internal_result(load, trace, "semantic finalization lost the registration graph")
+    sema_graph_trail_undo(&registration_graph, &trail)
     stage_diagnostics = load.diagnostics
     load.diagnostics = [Diagnostic]{}
     if request.trace_sink == .Val(sink) -> sink.begin("comptime.bodies", "", -1, -1)
