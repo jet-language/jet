@@ -1155,6 +1155,8 @@ fn jet_rust_emit_adapter_symbol_is(symbol: String, root: String, name: String) -
 // The owned-integer adapter a runtime symbol routes to, or the symbol itself.
 fn jet_rust_emit_exact_adapter_target(root: String, symbol: String) -> String Never! {
     if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_fraction_from_parts") -> return "{root}jet_fraction_from_owned_parts"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_fraction_numerator") -> return "{root}jet_fraction_owned_numerator"
+    if jet_rust_emit_adapter_symbol_is(symbol, root, "jet_fraction_denominator") -> return "{root}jet_fraction_owned_denominator"
     if jet_rust_emit_adapter_symbol_is(symbol, root, "JetDate::new") -> return "{root}jet_local_date_owned"
     if jet_rust_emit_adapter_symbol_is(symbol, root, "JetLocalTime::new") -> return "{root}jet_local_time_owned"
     if jet_rust_emit_adapter_symbol_is(symbol, root, "JetPeriod::new") -> return "{root}jet_period_owned"
@@ -1205,7 +1207,7 @@ fn jet_rust_emit_exact_adapter_positions(target: String) -> [Int] Never! {
     if {
         target.ends_with("jet_local_date_owned") || target.ends_with("jet_local_time_owned") || target.ends_with("jet_period_owned") -> [Int]{0, 1, 2}
         target.ends_with("jet_int_owned_from_radix") -> [Int]{1}
-        target.ends_with("jet_int_owned_parse") -> [Int]{}
+        target.ends_with("jet_int_owned_parse") || target.ends_with("jet_fraction_owned_numerator") || target.ends_with("jet_fraction_owned_denominator") -> [Int]{}
         target.ends_with("jet_fraction_from_owned_parts") -> [Int]{0, 1}
         target.ends_with("jet_int_owned_add") || target.ends_with("jet_int_owned_sub") || target.ends_with("jet_int_owned_mul") || target.ends_with("jet_int_owned_bit_and") || target.ends_with("jet_int_owned_bit_or") || target.ends_with("jet_int_owned_bit_xor") || target.ends_with("jet_int_owned_div") || target.ends_with("jet_int_owned_rem") || target.ends_with("jet_int_owned_div_euclid") || target.ends_with("jet_int_owned_rem_euclid") || target.ends_with("jet_int_owned_floor_div") || target.ends_with("jet_int_owned_mod") || target.ends_with("jet_int_owned_pow") || target.ends_with("jet_int_owned_shl") || target.ends_with("jet_int_owned_shr") || target.ends_with("jet_int_owned_to_radix") || target.ends_with("jet_fmt_decimal_int_owned") || target.ends_with("jet_fmt_grouped_int_owned") || target.ends_with("jet_fmt_hex_owned") -> [Int]{0, 1}
         else -> [Int]{0}

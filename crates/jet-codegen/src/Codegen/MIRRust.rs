@@ -46,6 +46,8 @@ enum NativeIntSource {
 pub fn exact_prelude_adapter(bare: &str) -> Option<(&'static str, &'static [usize])> {
         Some(match bare {
             "jet_fraction_from_parts" => ("jet_fraction_from_owned_parts", &[0, 1]),
+            "jet_fraction_numerator" => ("jet_fraction_owned_numerator", &[]),
+            "jet_fraction_denominator" => ("jet_fraction_owned_denominator", &[]),
             "JetDate::new" => ("jet_local_date_owned", &[0, 1, 2]),
             "JetLocalTime::new" => ("jet_local_time_owned", &[0, 1, 2]),
             "JetPeriod::new" => ("jet_period_owned", &[0, 1, 2]),
