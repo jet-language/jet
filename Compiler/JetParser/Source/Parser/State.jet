@@ -177,13 +177,50 @@ fn parser_lookahead(state: &JetParserState, offset: Int) -> Token Never! {
     parser_synthetic_token(TOKEN_EOF, Span{start: state.source_end, end: state.source_end})
 }
 
+// Kind-only reads: the parser asks for the current or a lookahead token's kind
+// far more often than for the token, so these never copy a Token (payload text,
+// decoded text, string parts). Same cursor effects as `parser_current` /
+// `parser_lookahead` (trivia skipped at the cursor) and the same kinds.
+fn parser_lookahead_kind_forward(state: JetParserState, start: Int, skip: Int) -> Int Never! {
+    remaining := skip
+    loop index in start..<state.tokens.len() {
+        kind :: state.tokens[index].kind
+        if !parser_is_trivia(kind) {
+            if remaining == 0 -> return kind
+            remaining -= 1
+        }
+    }
+    TOKEN_EOF
+}
+
 fn parser_current_kind(state: &JetParserState) -> Int Never! {
-    parser_current(&state).kind
+    if state.pending_type_gt -> return TOKEN_GT
+    parser_skip_trivia(&state)
+    if state.position < 0 || state.position >= state.tokens.len() -> return TOKEN_EOF
+    state.tokens[state.position].kind
 }
 
 fn parser_kind_at(state: &JetParserState, offset: Int) -> Int Never! {
     if offset == 0 -> return parser_current_kind(&state)
-    parser_lookahead(&state, offset).kind
+    seek_offset := offset
+    if state.pending_type_gt {
+        if seek_offset > 0 -> return parser_lookahead_kind_forward(state, state.position, seek_offset - 1)
+        if seek_offset == -1 -> return TOKEN_GT
+        seek_offset += 1
+    }
+    parser_skip_trivia(&state)
+    if seek_offset >= 0 -> return parser_lookahead_kind_forward(state, state.position, seek_offset)
+    index := state.position - 1
+    remaining := -seek_offset
+    loop index >= 0 {
+        kind :: state.tokens[index].kind
+        if !parser_is_trivia(kind) {
+            remaining -= 1
+            if remaining == 0 -> return kind
+        }
+        index -= 1
+    }
+    TOKEN_EOF
 }
 
 fn parser_bump(state: &JetParserState) -> Token Never! {
@@ -225,7 +262,7 @@ fn parser_report_explicit_semicolon(state: &JetParserState, span: Span) Never! {
 
 fn parser_type_close_here(state: &JetParserState) -> Bool Never! {
     if state.pending_type_gt -> return true
-    kind :: parser_current(&state).kind
+    kind :: parser_current_kind(&state)
     kind == TOKEN_GT || kind == TOKEN_SHR
 }
 

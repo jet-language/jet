@@ -56,6 +56,7 @@ use jet_foundation.[
     UnitScaleProvenance,
     Variant,
     VariantPayload,
+    ast_program,
     core_enum_payload_variants,
     core_enum_variant_payload,
     core_module_export,
@@ -1853,25 +1854,27 @@ pub fn sema_registration_prepare_module(input: SemaRegistrationModuleInput) -> S
 
 fn sema_registration_prepare_module_with(input: SemaRegistrationModuleInput, templates: [SemaGenericModuleSource]) -> SemaRegistrationModuleResult {
     diagnostics := [Diagnostic]{}
-    module_row := sema_registration_prepare_module_row(input, templates, &diagnostics)
+    module_row := sema_registration_prepare_module_row(~input, templates, &diagnostics)
     SemaRegistrationModuleResult{module_row: module_row, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0)}
 }
 
 // The prepared row of one module; its diagnostics are appended to `reported`.
-// The row is returned whole, so the graph takes it without a copy.
+// The row is returned whole, so the graph takes it without a copy. The input
+// is consumed: its program moves into the row instead of being copied.
 // `templates` are the generic-module templates the module imports; its own
 // templates come from its program.
-fn sema_registration_prepare_module_row(input: SemaRegistrationModuleInput, templates: [SemaGenericModuleSource], reported: &[Diagnostic]) -> SemaRegistrationModule {
+fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, templates: [SemaGenericModuleSource], reported: &[Diagnostic]) -> SemaRegistrationModule {
     diagnostics := [Diagnostic]{}
+    owned := ^input
     module_row := SemaRegistrationModule{
-        package_identity: input.package_identity,
-        module_identity: input.module_identity,
-        module_name: input.module_name,
-        module_path: input.module_path,
-        source_file: input.source_file,
-        source_segments: input.source_segments,
-        source_origin: input.source_origin,
-        program: input.program,
+        package_identity: owned.package_identity,
+        module_identity: owned.module_identity,
+        module_name: owned.module_name,
+        module_path: owned.module_path,
+        source_file: owned.source_file,
+        source_segments: owned.source_segments,
+        source_origin: owned.source_origin,
+        program: ^owned.program,
         symbols: [Symbol]{},
         declarations: [Item]{},
         symbol_positions: [String:Int]{},
@@ -1885,13 +1888,15 @@ fn sema_registration_prepare_module_row(input: SemaRegistrationModuleInput, temp
         exports: [SemaRegistrationExport]{},
         declared_trait_impls: [String:Bool]{},
     }
+    // The reset makes the `^` above a move, not a copy of the program.
+    owned.program = ast_program()
     if module_row.package_identity == "" || module_row.module_identity == "" || module_row.module_name == "" || module_row.module_path == "" || module_row.source_file == "" {
         &diagnostics.push(sema_error_optional("E0003", None, "a declaration registry row is missing source identity", "package, module, display path, and source identity remain separate semantic inputs", "provide the loader's canonical package, module, display-path, and source-file identities"))
     }
     // D-SHAPE-CASE1: identifier casing is checked on the parsed source before
     // any declaration is registered or rewritten.
-    sema_casing_program(input.program, &diagnostics)
-    loop facts in input.foreign_handles {
+    sema_casing_program(module_row.program, &diagnostics)
+    loop facts in owned.foreign_handles {
         if sema_registration_module_has_name(module_row, facts.jet_name) {
             &diagnostics.push(sema_defined_twice(facts.jet_name, "module declarations share one namespace", facts.source_span))
             next
@@ -1908,7 +1913,7 @@ fn sema_registration_prepare_module_row(input: SemaRegistrationModuleInput, temp
     // sibling mangling and registration).
     // Each rewrite below updates the program in place and leaves it
     // untouched (uncopied) when it has nothing to rewrite.
-    sema_generic_modules_expand(&module_row.program, input.module_identity, templates)
+    sema_generic_modules_expand(&module_row.program, module_row.module_identity, templates)
     // D-MOD2/D-MOD3: inline modules give their members one lifted identity
     // (types beside the module, top-level member functions by member name)
     // and resolve `module.f(...)` and `use module.[f]` before registration.
@@ -1936,12 +1941,16 @@ fn sema_registration_prepare_module_row(input: SemaRegistrationModuleInput, temp
     row_source_file :: ~module_row.source_file
     row_source_origin :: ~module_row.source_origin
     row_source_segments :: ~module_row.source_segments
-    loop index in 0..<module_row.program.items.len() {
-        item :: ~module_row.program.items[index]
-        if !sema_registration_add_root(&module_row, item, row_source_file, row_source_origin, row_source_segments, &diagnostics) {
+    // Registering a root reads no program item, so the items move out for the
+    // walk and back after it: each one is read in place instead of copied.
+    items := ^module_row.program.items
+    module_row.program.items = [Item]{}
+    loop index in 0..<items.len() {
+        if !sema_registration_add_root(&module_row, items[index], row_source_file, row_source_origin, row_source_segments, &diagnostics) {
             // The first declaration remains the lookup winner after a collision.
         }
     }
+    module_row.program.items = ^items
     // Only foreign-handle rows change; every other row is read in place (a
     // copied row would carry its whole source declaration).
     loop nominal_index in 0..<module_row.nominals.len() {
@@ -1953,9 +1962,12 @@ fn sema_registration_prepare_module_row(input: SemaRegistrationModuleInput, temp
             module_row.nominals[nominal_index].source = SemaRegistrationNominalSource.ForeignHandle{value: updated_facts}
         }
     }
+    // Only impls register here; every other item is skipped without a copy.
     loop index in 0..<module_row.program.items.len() {
-        item :: ~module_row.program.items[index]
-        sema_registration_add_impl(&module_row, item, &diagnostics)
+        if module_row.program.items[index] == .Impl(_) {
+            item :: ~module_row.program.items[index]
+            sema_registration_add_impl(&module_row, item, &diagnostics)
+        }
     }
     // Root exports are retained separately so private declarations never become
     // cross-module candidates merely because their name is known.
@@ -2243,16 +2255,26 @@ pub fn sema_registration_compiler_builtin_row(graph: SemaRegistrationGraph, name
     graph.compiler_builtin_rows.get(name)
 }
 
-// `counting` sets the graph's `counting` (#4319 lookup counters).
-pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: String, canonical_effect_module_identity: String, foreign_providers: [SemaForeignProviderInput], target_machine: MIRTargetMachine, build_facts: SemaBuildFacts, counting: Bool) -> SemaRegistrationGraph {
+// `counting` sets the graph's `counting` (#4319 lookup counters). The inputs
+// are consumed: each program moves into its module row.
+pub fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: String, canonical_effect_module_identity: String, foreign_providers: [SemaForeignProviderInput], target_machine: MIRTargetMachine, build_facts: SemaBuildFacts, counting: Bool) -> SemaRegistrationGraph {
     modules := [SemaRegistrationModule]{}
     diagnostics := [Diagnostic]{}
     // Module identity -> row; duplicates are rejected below, so the first row
     // is the only row (Rust `Bundle/ItemReuse.rs` `by_identity`).
     module_rows := [String:Int]{}
     template_index :: sema_generic_modules_index(inputs, edges)
-    loop input in inputs {
-        module_row := sema_registration_prepare_module_row(input, sema_generic_modules_imported(inputs, edges, template_index, input.module_identity), &diagnostics)
+    // Every module's imported templates are read while all inputs are whole;
+    // then the inputs are taken in order (popped from the reversed list).
+    imported := [[SemaGenericModuleSource]]{}
+    loop index in 0..<inputs.len() -> &imported.push(sema_generic_modules_imported(inputs, edges, template_index, inputs[index].module_identity))
+    pending := ^inputs
+    &pending.reverse()
+    &imported.reverse()
+    loop {
+        input :: &pending.pop() ?? break
+        templates :: &imported.pop() ?? [SemaGenericModuleSource]{}
+        module_row := sema_registration_prepare_module_row(input, templates, &diagnostics)
         duplicate :: module_rows.get(module_row.module_identity) != None
         if !duplicate -> module_rows[module_row.module_identity] = modules.len()
         if {
@@ -2271,13 +2293,13 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
     canonical_effect_index :: sema_registration_module_index(graph, canonical_effect_module_identity)
     if canonical_effect_index == {
         .Val(effect_module_index) -> {
-            effect_module :: ~graph.modules[effect_module_index]
-            if effect_module.package_identity != JET_CANONICAL_EFFECT_PACKAGE_IDENTITY || effect_module.module_path != JET_CANONICAL_EFFECT_MODULE_PATH {
+            // Read in place: a copy of the row would carry its whole program.
+            if graph.modules[effect_module_index].package_identity != JET_CANONICAL_EFFECT_PACKAGE_IDENTITY || graph.modules[effect_module_index].module_path != JET_CANONICAL_EFFECT_MODULE_PATH {
                 graph.internal_problem = Val("the canonical Prelude effect module identity does not match its pinned source owner")
                 graph.complete = false
             }
             effect_declaration_count := 0
-            loop item in effect_module.program.items {
+            loop item in graph.modules[effect_module_index].program.items {
                 if item == {
                     .EffectDecl(_) -> effect_declaration_count += 1
                     else -> {}
