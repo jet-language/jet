@@ -5,8 +5,10 @@
 // word (`inspect` for `inspect env`, which keeps its group word); `None`
 // leaves the command to the caller's E2104 refusal.
 use core.files as cli_files
+use core.process as cli_process
 use core.sys as cli_sys
 use jet_driver.[
+    JetDriverVerbOutput,
     JET_DRIVER_EXIT_OK,
     JET_DRIVER_EXIT_USAGE,
     JET_DRIVER_EXIT_USER_ERROR,
@@ -23,19 +25,76 @@ use jet_foundation.[
 // `argv` is the normalized argv with its `--` tail (main.rs `raw`), `jet_argv`
 // the words before `--`, and `args` their positional words.
 pub fn jet_cli_inspect_b(argv: [String], command: String, jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan? Never! {
+    rest :: jet_cli_tail(argv, 1)
     if command == {
         "reserved" -> return Val(jet_cli_reserved(json))
-        "digest" -> return Val(jet_cli_digest(jet_cli_tail(argv, 1), color, json))
+        "digest" -> return Val(jet_cli_digest(rest, color, json))
+        "inspect" -> return Val(jet_cli_inspect_env(jet_cli_tail(argv, 2), color, json))
+        "semindex" -> return Val(jet_cli_semindex(rest, color, json))
+        "output" -> return Val(jet_cli_inspect_output(rest, color, json))
+        "expand" -> return Val(jet_cli_expand(rest, color, json))
+        "schema" -> return Val(jet_cli_schema(rest, color, json))
+        "codemod" -> return Val(jet_cli_codemod(rest, color, json))
+        "audit" -> return Val(jet_cli_audit(rest, color, json))
+        "sbom" -> return Val(jet_cli_sbom(color))
+        "bind" -> return Val(jet_cli_bind(rest, color))
+        // Jetpack owns build logs (U27), package details (U26), and channel
+        // freshness (U21); `jet` only dispatches.
+        "logs" | "info" | "outdated" -> return Val(JetCLIPlan.InspectB{plan: JetCLIInspectBPlan.Engine{engine: JET_CLI_JETPACK_BINARY, verb: command, argv: argv}})
         else -> {}
     }
     None
 }
 
-// An inspect report: plain text with `color`, or the failed `cli` status line
-// under `--json` (main.rs `cli_error!`).
+// The inspect commands the host carries out because they run another process.
+pub enum JetCLIInspectBPlan {
+    // EngineDispatch.rs `dispatch`: run `engine` with `argv` on inherited stdio.
+    Engine(engine: String, verb: String, argv: [String])
+}
+
+pub fn jet_cli_inspect_b_host(plan: JetCLIInspectBPlan) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
+    if plan == {
+        .Engine(engine, verb, argv) -> jet_cli_engine_dispatch(engine, verb, argv)
+    }
+}
+
+// The shared Why and default Fix of a spanless CLI code (Source/main.rs
+// `cli_diagnostic_copy`).
+struct JetCLIDiagnosticCopy {
+    why: String
+    fix: String
+}
+
+fn jet_cli_diagnostic_copy(code: String) -> JetCLIDiagnosticCopy Never! {
+    if code == {
+        "E1202" -> return JetCLIDiagnosticCopy{why: "the lockfile must contain the exact dependency graph before a locked or supply-chain command can run", fix: "run `jet fetch`, then run the command again"}
+        "E1235" -> return JetCLIDiagnosticCopy{why: "the registry endpoint contains credentials or URL parameters, or its git operation failed because of network, authentication, or local-clone state; rendered endpoint details are redacted", fix: "remove URL credentials and parameters, configure the host Git credential provider for the registry path, then check network access"}
+        "E2101" -> return JetCLIDiagnosticCopy{why: "Jet command groups accept only commands in their named area", fix: "run `jet help` or the command group's `help` route"}
+        "E2102" -> return JetCLIDiagnosticCopy{why: "Jet ignores no flags silently, so a typo cannot quietly change a command", fix: "correct the named flag, or run `jet help` to see the flags"}
+        "E2104" -> return JetCLIDiagnosticCopy{why: "Jet needs valid command input before it can run this command", fix: "correct the named argument or input, then run the command again"}
+        "E2105" -> return JetCLIDiagnosticCopy{why: "Jet could not complete the named file, tool, or operating-system operation", fix: "correct the named problem, then run the command again"}
+        "E2941" -> return JetCLIDiagnosticCopy{why: "jet prove accepts only its registered proof lenses", fix: "use `all`, `refinements`, `effects`, `taint`, `contracts`, `tests`, `budgets`, `replay`, or `solver`"}
+        else -> {}
+    }
+    JetCLIDiagnosticCopy{why: "Jet could not complete this command", fix: "correct the named problem, then run the command again"}
+}
+
+// main.rs `emit_cli_report`: plain text with `color`, or the failed `cli`
+// status line on stdout under `--json`.
+fn jet_cli_inspect_b_report(code: String, what: String, why: String, fix: String, color: Bool, json: Bool, exit_code: Int) -> JetCLIPlan Never! {
+    if json -> return jet_cli_done(jet_cli_fail_json(code, what, why, fix), "", exit_code)
+    jet_cli_fail(code, what, why, fix, color, exit_code)
+}
+
+// `cli_error!(@fix code, what, fix)`.
 fn jet_cli_inspect_b_fail(code: String, what: String, fix: String, color: Bool, json: Bool, exit_code: Int) -> JetCLIPlan Never! {
-    if json -> return jet_cli_done(jet_cli_fail_json(code, what, jet_cli_why(code), fix), "", exit_code)
-    jet_cli_fail(code, what, jet_cli_why(code), fix, color, exit_code)
+    jet_cli_inspect_b_report(code, what, jet_cli_diagnostic_copy(code).why, fix, color, json, exit_code)
+}
+
+// `cli_error!(code, what)`: the code's shared Why and Fix.
+fn jet_cli_inspect_b_error(code: String, what: String, color: Bool, json: Bool, exit_code: Int) -> JetCLIPlan Never! {
+    shared :: jet_cli_diagnostic_copy(code)
+    jet_cli_inspect_b_report(code, what, shared.why, shared.fix, color, json, exit_code)
 }
 
 // ---------------------------------------------------------------------------
@@ -442,7 +501,8 @@ fn jet_cli_digest_slices(digest: String) -> [JetCLIDigestSlice] Never! {
 fn jet_cli_inspect_edit_distance(left: String, right: String) -> Int Never! {
     a :: left.bytes()
     b :: right.bytes()
-    previous := loop index in 0..b.len() -> index
+    first_row :: loop index in 0..b.len() -> index
+    previous := first_row
     loop i in 0..<a.len() {
         current := [Int]{i + 1}
         loop j in 0..<b.len() {
@@ -515,4 +575,344 @@ fn jet_cli_digest(options: [String], color: Bool, json: Bool) -[FS, Env]> JetCLI
         }
     }
     jet_cli_inspect_b_fail("E2104", "unknown digest topic `{wanted}`", "use `--topic {closest}`, or list topics with `jet inspect digest --list-topics`", color, json, JET_DRIVER_EXIT_USAGE)
+}
+
+// ---------------------------------------------------------------------------
+// Engine-verb process dispatch (Source/EngineDispatch.rs, D-JPK-DISPATCH1=B):
+// `jet` never links the Jetpack engine; it runs the engine binary by name
+// after a protocol handshake. The engine's exit code is `jet`'s, its stdio is
+// this process's, and every flag is forwarded verbatim.
+
+// Syntax `JETPACK_BINARY_NAME`, `ENGINE_PROTOCOL_FLAG`, `ROOT_ENGINE_DISPATCH_PID_ENV`.
+JET_CLI_JETPACK_BINARY :: "jetpack"
+JET_CLI_ENGINE_PROTOCOL_FLAG :: "--engine-protocol"
+JET_CLI_ROOT_ENGINE_DISPATCH_PID_ENV :: "JET_INTERNAL_ROOT_DISPATCH_PID"
+
+// `find_engine_binary`: the directory of the running `jet` first, then
+// `PATH`, so a `jetpack` shadowed on `PATH` never wins over the one `jet`
+// shipped with. A candidate is an executable regular file.
+fn jet_cli_find_engine_binary(name: String) -[FS, Env]> String? Never! {
+    dirs := [String]{}
+    if jet_cli_parent(cli_sys.executable()) == .Val(directory) -> &dirs.push(directory)
+    if cli_sys.get("PATH") == .Val(path) {
+        loop directory in path.split(":") -> &dirs.push(if directory == "" -> "." else -> directory)
+    }
+    loop directory in dirs {
+        candidate :: jet_cli_authority_path(directory, name)
+        if !cli_files.is_file(candidate) -> next
+        stat :: cli_files.stat(candidate) ?? next
+        if stat.is_symlink || (stat.mode & 73) != 0 -> return Val(candidate)
+    }
+    None
+}
+
+// E1228 `engine-missing` (`missing_engine_message`).
+fn jet_cli_missing_engine_message(engine: String, verb: String) -> String Never! {
+    "Error [E1228]: `{verb}` needs the `{engine}` engine, which isn't installed\n Why: `{verb}` is a jetpack engine verb — {JET_CLI_BINARY} execs `{engine}` for it rather than building package-manager logic into the compiler\n Fix: install the matching Jet toolchain (the `{engine}` binary ships alongside `{JET_CLI_BINARY}`)\nMore: jet-lang.dev/e/E1228\n"
+}
+
+// E1227 `engine-version-skew` (`version_skew_message`); `engine_version` is
+// None when the engine gave no usable handshake reply.
+fn jet_cli_version_skew_message(engine: String, jet_version: String, engine_version: String?) -> String Never! {
+    bin :: JET_CLI_BINARY
+    if engine_version == .Val(version) {
+        return "Error [E1227]: `{bin}` {jet_version} and `{engine}` {version} disagree\n Why: `{bin}` and `{engine}` ship as one toolchain and must match exactly, or the engine may not understand what `{bin}` sends it\n Fix: Use matching `{bin}`/`{engine}` versions — reinstall the toolchain so both binaries come from the same release\n More: jet-lang.dev/e/E1227\n"
+    }
+    "Error [E1227]: `{bin}` {jet_version} and `{engine}` disagree (no protocol reply)\n Why: `{bin}` and `{engine}` ship as one toolchain and must match exactly; this `{engine}` didn't answer the version handshake, so it predates this protocol\n Fix: Use matching `{bin}`/`{engine}` versions — reinstall the toolchain so both binaries come from the same release\n More: jet-lang.dev/e/E1227\n"
+}
+
+// `query_engine_protocol`: the trimmed stdout of `<engine> --engine-protocol`,
+// or None on any failure (treated as skew, never as compatible).
+fn jet_cli_query_engine_protocol(bin: String) -[Exec, Time.Wait]> String? Never! {
+    receipt :: cli_process.cmd([String]{bin, JET_CLI_ENGINE_PROTOCOL_FLAG}).run() ?? return None
+    if !receipt.success -> return None
+    reply :: receipt.output.trim()
+    if reply.len() == 0 -> return None
+    Val(reply)
+}
+
+// `dispatch`: find the engine, check its protocol version, then run it with
+// inherited stdio and return its exit code (a signal-ended engine exits 1).
+fn jet_cli_engine_dispatch(engine: String, verb: String, argv: [String]) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
+    bin :: jet_cli_find_engine_binary(engine) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_missing_engine_message(engine, verb), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    reply :: jet_cli_query_engine_protocol(bin)
+    if reply != Val(JET_CLI_VERSION) {
+        return JetDriverVerbOutput{stdout: "", stderr: jet_cli_version_skew_message(engine, JET_CLI_VERSION, reply), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    command := [String]{bin}
+    loop argument in argv -> &command.push(argument)
+    spec :: cli_process.cmd(command).env(JET_CLI_ROOT_ENGINE_DISPATCH_PID_ENV, "{cli_process.current_pid()}").stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
+    receipt :: spec.run() ?? return JetDriverVerbOutput{
+        stdout: "",
+        stderr: jet_cli_report("E2105", "couldn't run `{bin}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", false),
+        exit_code: JET_DRIVER_EXIT_USER_ERROR,
+    }
+    exit_code := receipt.code
+    if receipt.signal != None -> exit_code = JET_DRIVER_EXIT_USER_ERROR
+    JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code}
+}
+
+// Rust `io::Error` Display text of a host I/O failure: the runtime records
+// it as the context's `cause` (CoreLib `IOContext`).
+fn jet_cli_io_error_text(err: IOError) -> String Never! {
+    cause :: if err == {
+        .InvalidInput(context) -> context.cause
+        .NotFound(context) -> context.cause
+        .PermissionDenied(context) -> context.cause
+        .TimedOut(context) -> context.cause
+        .Cancelled(context) -> context.cause
+        .Closed(context) -> context.cause
+        .Protocol(context) -> context.cause
+        .Other(context) -> context.cause
+        .ResourceLimit(_) -> String?{None}
+    }
+    cause ?? "{err}"
+}
+
+// ---------------------------------------------------------------------------
+// Command fronts whose semantic back end has no Jet port yet. Each validates
+// its input exactly as the Rust host does (same reports, streams, and exit
+// statuses), then refuses with E2104 at the first step that needs the
+// missing subsystem, never guessing its result.
+
+// The first word that is not a flag.
+fn jet_cli_inspect_first_positional(args: [String]) -> String? Never! {
+    loop argument in args {
+        if !argument.starts_with("-") -> return Val(argument)
+    }
+    None
+}
+
+fn jet_cli_inspect_positionals(args: [String]) -> [String] Never! {
+    found := [String]{}
+    loop argument in args {
+        if !argument.starts_with("-") -> &found.push(argument)
+    }
+    found
+}
+
+// `cwd.join(raw)` for a relative path.
+fn jet_cli_inspect_absolutize(raw: String) -[FS]> String Never! {
+    if raw.starts_with("/") -> return raw
+    cwd :: cli_files.cwd() ?? "."
+    jet_cli_authority_path(cwd, raw)
+}
+
+// The project root of the current directory, or the plan that stopped.
+enum JetCLIInspectRoot {
+    Root(path: String)
+    Refused(plan: JetCLIPlan)
+}
+
+// D-JPK-FILENAME2=B: retired manifest names that teach E1226 instead of the
+// generic missing-manifest line (Loader.rs `stale_manifest_name_message`).
+JET_CLI_RETIRED_MANIFESTS :: [String]{"pkg.jet", "pack.jet", "payload.jet", "jet.toml"}
+
+// main.rs `require_manifest_root`: the nearest `package.jet` root, else
+// `hint` on stderr (exit 1). Inline-package carriers and retired manifest
+// names (Loader.rs `find_inline_package_root_checked`,
+// `stale_manifest_name_message`) are not ported, so a directory that could
+// hold either is refused rather than guessed.
+fn jet_cli_inspect_project_root(command: String, hint: String, color: Bool) -[FS]> JetCLIInspectRoot Never! {
+    cwd :: cli_files.cwd() ?? "."
+    if jet_cli_manifest_root(cwd) == .Val(root) -> return JetCLIInspectRoot.Root{path: root}
+    loop name in JET_CLI_RETIRED_MANIFESTS {
+        if cli_files.exists(jet_cli_authority_path(cwd, name)) -> return JetCLIInspectRoot.Refused{plan: jet_cli_not_ported(command, color)}
+    }
+    current := cwd
+    loop {
+        if cli_files.is_file(jet_cli_authority_path(current, "main.jet")) || cli_files.is_file(jet_cli_authority_path(current, "src/main.jet")) {
+            return JetCLIInspectRoot.Refused{plan: jet_cli_not_ported(command, color)}
+        }
+        current = jet_cli_parent(current) ?? break
+        if current == "/" -> break
+    }
+    JetCLIInspectRoot.Refused{plan: jet_cli_done("", "{hint}\n", JET_DRIVER_EXIT_USER_ERROR)}
+}
+
+// `jet inspect env [<env.jet|config.jet>]` (CmdInspect.rs `run_env`): the
+// config surface evaluation (jet-env-model `ModuleEval::evaluate_env`) is not
+// ported.
+fn jet_cli_inspect_env(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
+    file := ""
+    skip_value := false
+    loop argument in args {
+        if skip_value {
+            skip_value = false
+            next
+        }
+        if argument == "--profile" || argument == "--target" || argument == "--scope" || argument == "--kind" {
+            skip_value = true
+            next
+        }
+        if argument.starts_with("-") -> next
+        file = argument
+        break
+    }
+    if file == "" -> file = if cli_files.is_file("env.jet") -> "env.jet" else -> "config.jet"
+    // The evaluator reads the surface itself; this read only reports a
+    // missing or unreadable file first, as the Rust host does.
+    _ :: cli_files.read(file) ?? return jet_cli_inspect_b_fail("E2105", "can't read config surface `{file}`: {jet_cli_io_error_text(err)}", "pass a readable `env.jet` or `config.jet` file", color, json, JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_not_ported("inspect env", color)
+}
+
+// `jet inspect semindex <file.jet>` (CmdSemIndex.rs `run_semindex`): the
+// semantic index (jet-semindex) is not ported.
+fn jet_cli_semindex(args: [String], color: Bool, json: Bool) -> JetCLIPlan Never! {
+    if jet_cli_inspect_first_positional(args) == None {
+        return jet_cli_inspect_b_fail("E2104", "`jet inspect semindex` needs an entry file", "jet inspect semindex Examples/features/basics/hello.jet", color, json, JET_DRIVER_EXIT_USER_ERROR)
+    }
+    jet_cli_not_ported("inspect semindex", color)
+}
+
+// `jet inspect output <file.jet> [<address>]` (CmdInspect.rs `run_output`):
+// Output selection (`ResolvedOutput`, which JetSema does not fill yet) is
+// not ported.
+fn jet_cli_inspect_output(args: [String], color: Bool, json: Bool) -> JetCLIPlan Never! {
+    if jet_cli_inspect_first_positional(args) == None {
+        return jet_cli_inspect_b_fail("E2104", "`jet inspect output` needs an entry file", "run `jet inspect output Examples/features/tooling/output_callable.jet`", color, json, JET_DRIVER_EXIT_USAGE)
+    }
+    jet_cli_not_ported("inspect output", color)
+}
+
+// One registered expand lens (CmdExpand.rs `LENSES`).
+struct JetCLIExpandLens {
+    name: String
+    summary: String
+}
+
+JET_CLI_EXPAND_LENSES :: [JetCLIExpandLens]{
+    JetCLIExpandLens{name: "inline", summary: "#Inline / #Inline(Always) contracts (D-METHODMACRO1)"},
+    JetCLIExpandLens{name: "memory", summary: "transitive Mem.* denial facts (D-MEM-FACTS1 / D-AUTHORITY-MEM1)"},
+    JetCLIExpandLens{name: "web", summary: "D-WEBAPP1 application graph facts (routes/actions/policy)"},
+    JetCLIExpandLens{name: "effects", summary: "resolved function effect rows (D-EFF1 / D-SEMINDEX1)"},
+    JetCLIExpandLens{name: "layout", summary: "D-LAYOUT-FACTS1 compiler-owned type layout facts"},
+    JetCLIExpandLens{name: "origin", summary: "D-TRACK-ORIGIN1 typed #Track provenance facts"},
+    JetCLIExpandLens{name: "derive", summary: "derived behavior already attached to types (D-ONCE-DERIVE1)"},
+    JetCLIExpandLens{name: "templates", summary: "checked prep loop marker in impl, test, and measurement expansions (D-STRUCT-ONCE1)"},
+    JetCLIExpandLens{name: "callable-signature", summary: "typed checked semindex projection; metadata identity and convention producers remain unavailable"},
+}
+
+// `print_available_lenses`.
+fn jet_cli_expand_lens_list() -> String Never! {
+    out := " available lenses:\n"
+    loop lens in JET_CLI_EXPAND_LENSES -> out = "{out}   {jet_cli_inspect_pad(lens.name, 8)} {lens.summary}\n"
+    out
+}
+
+// A text-mode expand error: the report, then the lens list.
+fn jet_cli_expand_lens_error(code: String, what: String, color: Bool) -> JetCLIPlan Never! {
+    shared :: jet_cli_diagnostic_copy(code)
+    jet_cli_done("", "{jet_cli_report(code, what, shared.why, shared.fix, color)}{jet_cli_expand_lens_list()}", JET_DRIVER_EXIT_USER_ERROR)
+}
+
+// `jet inspect expand [--facts <lens>] <file.jet>` (CmdExpand.rs
+// `run_expand`): the checked lens projections are not ported.
+fn jet_cli_expand(args: [String], color: Bool, json: Bool) -> JetCLIPlan Never! {
+    lens_name := String?{None}
+    positional := [String]{}
+    index := 0
+    loop index < args.len() {
+        argument :: args[index]
+        if {
+            argument.starts_with("--facts=") -> lens_name = Val(argument.slice(8..<argument.len()))
+            argument == "--facts" -> {
+                if index + 1 >= args.len() {
+                    if json -> return jet_cli_inspect_b_report("E2104", "`--facts` needs a lens name", "the expand command must know which registered lens to project", "pass `--facts inline`, `--facts memory`, `--facts web`, `--facts effects`, `--facts layout`, `--facts origin`, `--facts derive`, `--facts templates`, or `--facts callable-signature`", color, json, JET_DRIVER_EXIT_USER_ERROR)
+                    return jet_cli_expand_lens_error("E2104", "`--facts` needs a lens name", color)
+                }
+                index += 1
+                lens_name = Val(args[index])
+            }
+            !argument.starts_with("-") -> &positional.push(argument)
+            else -> {}
+        }
+        index += 1
+    }
+    if positional.len() == 0 {
+        if json -> return jet_cli_inspect_b_report("E2104", "`jet inspect expand` needs an entry file", "expand facts come from one checked Jet entry file", "run `jet inspect expand --facts inline Examples/features/basics/hello.jet`", color, json, JET_DRIVER_EXIT_USER_ERROR)
+        return jet_cli_inspect_b_error("E2104", "`jet inspect expand` needs an entry file", color, json, JET_DRIVER_EXIT_USER_ERROR)
+    }
+    if lens_name == .Val(name) {
+        known := false
+        loop lens in JET_CLI_EXPAND_LENSES {
+            if lens.name == name -> known = true
+        }
+        if !known {
+            if json -> return jet_cli_inspect_b_report("E2941", "unknown expand lens `{name}`", "only registered lenses have checked semantic facts", "use `inline`, `memory`, `web`, `effects`, `layout`, `origin`, `derive`, `templates`, or `callable-signature`", color, json, JET_DRIVER_EXIT_USER_ERROR)
+            return jet_cli_expand_lens_error("E2941", "unknown expand lens `{name}`", color)
+        }
+    }
+    jet_cli_not_ported("inspect expand", color)
+}
+
+// `jet inspect schema status | squash --before <version>` (CmdSchema.rs
+// `run_schema`): the published-schema snapshots (Publish.rs) and the E0910
+// migration diff are not ported.
+fn jet_cli_schema(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
+    fix :: "use `jet inspect schema status` to inspect published schemas, or `jet inspect schema squash --before <version>` to re-baseline them"
+    verb :: if args.len() > 0 -> args[0] else -> ""
+    hint :: "error: no package.jet found — run `jet inspect schema` inside a project"
+    if verb == {
+        "status" -> {
+            if jet_cli_inspect_project_root("inspect schema status", hint, color) == .Refused(plan) -> return plan
+            return jet_cli_not_ported("inspect schema status", color)
+        }
+        "squash" -> {
+            if jet_cli_option_value(args, "--before") == None {
+                return jet_cli_inspect_b_report("E2104", "`jet inspect schema squash` needs `--before <version>`", "squash re-baselines to the current shape and marks migrations before a version as no longer required, so it needs that cutoff version", "run `jet inspect schema squash --before 2.0.0` (the version whose migrations you want to retire)", color, json, JET_DRIVER_EXIT_USER_ERROR)
+            }
+            if jet_cli_inspect_project_root("inspect schema squash", hint, color) == .Refused(plan) -> return plan
+            return jet_cli_not_ported("inspect schema squash", color)
+        }
+        else -> {}
+    }
+    if args.len() > 0 -> return jet_cli_inspect_b_fail("E2101", "`jet inspect schema {verb}` isn't a schema command", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_inspect_b_fail("E2104", "`jet inspect schema` needs a verb", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
+}
+
+// `jet inspect codemod <plan.json> --dry-run | apply <plan.json> | undo
+// <log.json>` (CmdCodemod.rs `run_codemod`): planning and replay need the
+// semantic index (jet-semindex), which is not ported.
+fn jet_cli_codemod(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
+    positional :: jet_cli_inspect_positionals(args)
+    dry_run :: args.contains("--dry-run")
+    if positional.len() == 2 && positional[0] == "dry-run" {
+        return jet_cli_inspect_b_error("E2105", "`jet inspect codemod dry-run` is retired; use `jet inspect codemod <plan.json> --dry-run`", color, json, JET_DRIVER_EXIT_USER_ERROR)
+    }
+    object := String?{None}
+    if {
+        positional.len() == 1 && dry_run -> object = Val(positional[0])
+        positional.len() == 2 && positional[0] == "apply" && !dry_run -> object = Val(positional[1])
+        positional.len() == 2 && positional[0] == "undo" && !dry_run -> return jet_cli_not_ported("inspect codemod undo", color)
+        else -> return jet_cli_inspect_b_error("E2105", "`jet inspect codemod` needs `<plan.json> --dry-run`, `apply <plan.json>`, or `undo <log.json>`\n Fix: jet inspect codemod migration.codemod.json --dry-run", color, json, JET_DRIVER_EXIT_USER_ERROR)
+    }
+    path :: jet_cli_inspect_absolutize(object ?? "")
+    _ :: cli_files.read(path) ?? return jet_cli_inspect_b_error("E2105", "could not read codemod `{path}`: {jet_cli_io_error_text(err)}", color, json, JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_not_ported("inspect codemod", color)
+}
+
+// `jet inspect audit [copies|memory|<entry.jet>] [--advisory-db <path>]`
+// (main.rs `"audit"`, CmdSupply.rs `run_audit`): the copy ledger, the memory
+// witnesses, and the lockfile/advisory-feed audit are not ported.
+fn jet_cli_audit(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
+    if args.len() > 0 && args[0] == "memory" -> return jet_cli_not_ported("inspect audit memory", color)
+    if args.len() > 0 && (args[0] == "copies" || args[0].ends_with(".jet")) -> return jet_cli_not_ported("inspect audit copies", color)
+    if jet_cli_inspect_project_root("inspect audit", "error: no package.jet found — run `jet inspect audit` inside a project", color) == .Refused(plan) -> return plan
+    jet_cli_not_ported("inspect audit", color)
+}
+
+// `jet inspect sbom [--cyclonedx]` (CmdSupply.rs `run_sbom`): the lockfile
+// reader and the SPDX/CycloneDX emitters are not ported.
+fn jet_cli_sbom(color: Bool) -[FS]> JetCLIPlan Never! {
+    if jet_cli_inspect_project_root("inspect sbom", "error: no package.jet found — run `jet inspect sbom` inside a project", color) == .Refused(plan) -> return plan
+    jet_cli_not_ported("inspect sbom", color)
+}
+
+// `jet inspect bind …` (CmdDevTools.rs `run_bind`): the usage page; the
+// language binders and the C header backend are not ported.
+fn jet_cli_bind(args: [String], color: Bool) -> JetCLIPlan Never! {
+    if args.len() > 0 && !jet_cli_is_help_flag(args[0]) -> return jet_cli_not_ported("inspect bind", color)
+    usage :: "usage: {JET_CLI_BINARY} inspect bind <header.h> [--pkg <lib>] [--overlay <path>] [--link <lib>] [-o <out.jet>]\n       {JET_CLI_BINARY} inspect bind <json|csv|sql|xml|proto> <input> [--type <Type>] [-o <output>]\n\nGenerate a C binding cache from a header (S59). The output is\na `#Bindgen module c.<lib>.__bindgen__` file, by default written\nto .jet/bindings/c/<lib>.jet. The compiler also runs this\nautomatically on a cache miss; `jet inspect bind` is the manual refresh.\n"
+    jet_cli_done("", usage, if args.len() == 0 -> JET_DRIVER_EXIT_USAGE else -> JET_DRIVER_EXIT_OK)
 }
