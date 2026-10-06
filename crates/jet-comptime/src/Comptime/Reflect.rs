@@ -324,10 +324,12 @@ pub fn build_dimension_info(dimension: &Dimension) -> CtValue {
     )
 }
 
+/// Reflected ranges are distinct-type bounds, which are inclusive
+/// (D-RANGETYPE1), so the `Range` row's `exclusive` field is always false.
 fn build_range_value(start: CtValue, end: CtValue) -> CtValue {
     ct_struct(
         crate::Syntax::TYPE_RANGE,
-        &[("start", start), ("end", end)],
+        &[("start", start), ("end", end), ("exclusive", CtValue::Bool(false))],
     )
 }
 

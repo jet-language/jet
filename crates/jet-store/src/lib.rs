@@ -2185,10 +2185,12 @@ fn ensure_dir(path: &Path) -> Result<(), StoreError> {
         ))),
         Ok(metadata) if metadata.is_dir() => Ok(()),
         Ok(_) => Err(StoreError::Config(format!("store path is not a directory: {}", path.display()))),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            fs::create_dir(path)?;
-            sync_dir(path.parent().expect("created directory has parent"))
-        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => match fs::create_dir(path) {
+            Ok(()) => sync_dir(path.parent().expect("created directory has parent")),
+            // A concurrent opener of the same store created it first.
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => ensure_dir(path),
+            Err(error) => Err(StoreError::Io(error)),
+        },
         Err(error) => Err(StoreError::Io(error)),
     }
 }
