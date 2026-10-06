@@ -1735,7 +1735,7 @@ pub fn jet_scheduler_task_paused() -> Option<bool> {
 }
 
 /// Read the current host task's cancellation flag; absence is preserved for Jet.
-pub fn jet_scheduler_task_cancelled() -> Option<bool> {
+pub fn jet_scheduler_task_cancelled_state() -> Option<bool> {
     TASK_CONTROL.with(|task| {
         task.borrow().as_ref().map(|control| {
             control.cancelled.load(std::sync::atomic::Ordering::Relaxed)

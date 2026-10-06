@@ -13808,8 +13808,8 @@ mod jet_c_abi_routes {
 
     /// core.tasks.__task_cancelled
     #[no_mangle]
-    pub extern "C" fn jet_scheduler_task_cancelled(some: *mut bool) -> i64 {
-        guard(|| match crate::jet_scheduler_task_cancelled() {
+    pub extern "C" fn jet_scheduler_task_cancelled_state(some: *mut bool) -> i64 {
+        guard(|| match crate::jet_scheduler_task_cancelled_state() {
             Some(value) => { unsafe { some.write(value) }; 1 }
             None => 0,
         })
