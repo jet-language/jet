@@ -3181,45 +3181,52 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         value := sema_tir_expr(Type.Named{name: "Fraction"}, TExprKind.PreciseBuiltin{type_name: "Fraction", function: "from_parts", args: [TExpr]{lhs, rhs}}, span)
         return sema_expr_expected(value, expected, environment, program, &diagnostics)
     }
-    duration := sema_expr_check_duration_binary(op, lhs, rhs, span)
-    if duration != None -> return sema_expr_expected(duration ?? lhs, expected, environment, program, &diagnostics)
-    time := sema_expr_check_time_binary(op, lhs, rhs, span, line)
-    if time != None -> return sema_expr_expected(time ?? lhs, expected, environment, program, &diagnostics)
-    if (lhs.ty == Type.Named{name: "Instant"} && rhs.ty == Type.Named{name: "Instant"} && op == BinOp.Add) || (lhs.ty == Type.Named{name: "Duration"} && rhs.ty == Type.Named{name: "Instant"} && op == BinOp.Sub) {
-        &diagnostics.push(sema_error("E0127", span, "{sema_expr_binary_name(op)} is not available between `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "Time points are positions; only point + delta, point - delta, point - point, and delta + delta are defined", "subtract two Instants for a Duration, or add a Duration to an Instant"))
-        return None
-    }
-    unit_present := sema_expr_unit_fact(lhs.ty, environment, program) != None || sema_expr_unit_fact(rhs.ty, environment, program) != None || sema_expr_unit_dimension(lhs.ty, environment, program) != None || sema_expr_unit_dimension(rhs.ty, environment, program) != None
-    unit := sema_expr_check_unit_binary(op, lhs, rhs, span, line, environment, program, &scopes, context, &diagnostics)
-    if unit != None -> return sema_expr_expected(unit ?? lhs, expected, environment, program, &diagnostics)
-    if unit_present -> return None
-    distinct_lhs := sema_expr_distinct_facts(lhs.ty, environment, program, &scopes)
-    distinct_rhs := sema_expr_distinct_facts(rhs.ty, environment, program, &scopes)
-    if distinct_lhs != None || distinct_rhs != None {
-        distinct := sema_expr_check_distinct_binary(op, lhs, rhs, span, line, distinct_lhs, distinct_rhs, &scopes, &diagnostics)
-        if distinct != None -> return sema_expr_expected(distinct ?? lhs, expected, environment, program, &diagnostics)
-        return None
-    }
-    geometry_present := sema_expr_geometry_is_point(lhs.ty) || sema_expr_geometry_is_delta(lhs.ty) || sema_expr_geometry_is_point(rhs.ty) || sema_expr_geometry_is_delta(rhs.ty)
-    geometry := sema_expr_check_geometry_binary(op, lhs, rhs, span, line, &diagnostics)
-    if geometry != None -> return sema_expr_expected(geometry ?? lhs, expected, environment, program, &diagnostics)
-    if geometry_present -> return None
-    precise := sema_expr_check_precise_binary(op, lhs, rhs, span, line, &diagnostics)
-    if precise != None -> return sema_expr_expected(precise ?? lhs, expected, environment, program, &diagnostics)
-    if sema_expr_precise_name(lhs.ty) != None || sema_expr_precise_name(rhs.ty) != None {
-        return None
-    }
-    if sema_expr_has_numeric_overload(lhs.ty) || sema_expr_has_numeric_overload(rhs.ty) {
-        operator_value := sema_expr_check_operator(op, left, right, lhs, rhs, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, line)
-        if operator_value != None -> return operator_value
-    }
-    math := sema_expr_check_math_binary(op, lhs, rhs, span, line, &diagnostics)
-    if math != None -> return sema_expr_expected(math ?? lhs, expected, environment, program, &diagnostics)
-    math_left := sema_expr_type_base_name(lhs.ty)
-    math_right := sema_expr_type_base_name(rhs.ty)
-    if (math_left != None && sema_expr_is_math_type_name(math_left ?? "")) || (math_right != None && sema_expr_is_math_type_name(math_right ?? "")) {
-        &diagnostics.push(sema_error("E2511", span, "{sema_expr_binary_name(op)} isn't defined between `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "built-in lane and linalg operators keep fixed shapes and scalar rules", "match the operand shapes or call a named math method"))
-        return None
+    // Scalar leaf operands (Int, Float, Bool, String, Char, IntN, Float32) are
+    // none of the typed operand families below: no Duration/Instant, unit,
+    // distinct, geometry, precise, overloaded or math type has a scalar leaf
+    // on both sides, so each of those routes returns nothing for them and
+    // reports nothing. They go straight to the comparison and numeric rules.
+    if !sema_expr_scalar_leaf(lhs.ty) || !sema_expr_scalar_leaf(rhs.ty) {
+        duration := sema_expr_check_duration_binary(op, lhs, rhs, span)
+        if duration != None -> return sema_expr_expected(duration ?? lhs, expected, environment, program, &diagnostics)
+        time := sema_expr_check_time_binary(op, lhs, rhs, span, line)
+        if time != None -> return sema_expr_expected(time ?? lhs, expected, environment, program, &diagnostics)
+        if (lhs.ty == Type.Named{name: "Instant"} && rhs.ty == Type.Named{name: "Instant"} && op == BinOp.Add) || (lhs.ty == Type.Named{name: "Duration"} && rhs.ty == Type.Named{name: "Instant"} && op == BinOp.Sub) {
+            &diagnostics.push(sema_error("E0127", span, "{sema_expr_binary_name(op)} is not available between `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "Time points are positions; only point + delta, point - delta, point - point, and delta + delta are defined", "subtract two Instants for a Duration, or add a Duration to an Instant"))
+            return None
+        }
+        unit_present := sema_expr_unit_fact(lhs.ty, environment, program) != None || sema_expr_unit_fact(rhs.ty, environment, program) != None || sema_expr_unit_dimension(lhs.ty, environment, program) != None || sema_expr_unit_dimension(rhs.ty, environment, program) != None
+        unit := sema_expr_check_unit_binary(op, lhs, rhs, span, line, environment, program, &scopes, context, &diagnostics)
+        if unit != None -> return sema_expr_expected(unit ?? lhs, expected, environment, program, &diagnostics)
+        if unit_present -> return None
+        distinct_lhs := sema_expr_distinct_facts(lhs.ty, environment, program, &scopes)
+        distinct_rhs := sema_expr_distinct_facts(rhs.ty, environment, program, &scopes)
+        if distinct_lhs != None || distinct_rhs != None {
+            distinct := sema_expr_check_distinct_binary(op, lhs, rhs, span, line, distinct_lhs, distinct_rhs, &scopes, &diagnostics)
+            if distinct != None -> return sema_expr_expected(distinct ?? lhs, expected, environment, program, &diagnostics)
+            return None
+        }
+        geometry_present := sema_expr_geometry_is_point(lhs.ty) || sema_expr_geometry_is_delta(lhs.ty) || sema_expr_geometry_is_point(rhs.ty) || sema_expr_geometry_is_delta(rhs.ty)
+        geometry := sema_expr_check_geometry_binary(op, lhs, rhs, span, line, &diagnostics)
+        if geometry != None -> return sema_expr_expected(geometry ?? lhs, expected, environment, program, &diagnostics)
+        if geometry_present -> return None
+        precise := sema_expr_check_precise_binary(op, lhs, rhs, span, line, &diagnostics)
+        if precise != None -> return sema_expr_expected(precise ?? lhs, expected, environment, program, &diagnostics)
+        if sema_expr_precise_name(lhs.ty) != None || sema_expr_precise_name(rhs.ty) != None {
+            return None
+        }
+        if sema_expr_has_numeric_overload(lhs.ty) || sema_expr_has_numeric_overload(rhs.ty) {
+            operator_value := sema_expr_check_operator(op, left, right, lhs, rhs, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, line)
+            if operator_value != None -> return operator_value
+        }
+        math := sema_expr_check_math_binary(op, lhs, rhs, span, line, &diagnostics)
+        if math != None -> return sema_expr_expected(math ?? lhs, expected, environment, program, &diagnostics)
+        math_left := sema_expr_type_base_name(lhs.ty)
+        math_right := sema_expr_type_base_name(rhs.ty)
+        if (math_left != None && sema_expr_is_math_type_name(math_left ?? "")) || (math_right != None && sema_expr_is_math_type_name(math_right ?? "")) {
+            &diagnostics.push(sema_error("E2511", span, "{sema_expr_binary_name(op)} isn't defined between `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "built-in lane and linalg operators keep fixed shapes and scalar rules", "match the operand shapes or call a named math method"))
+            return None
+        }
     }
     comparison := sema_comparability_check_binary(op, lhs, rhs, span, line, environment, program, &diagnostics)
     if comparison.handled {
