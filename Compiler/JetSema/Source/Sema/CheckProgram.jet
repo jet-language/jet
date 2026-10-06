@@ -2049,10 +2049,10 @@ fn sema_check_bodies_parallel(shared: Shared<SemaCheckShared>, wave: ^SemaBodyWa
     // Popped last module first, as the result lists them.
     prepared := [SemaPreparedBodies]{}
     loop modules.len() > 0 {
-        module := &modules.pop() ?? break
+        wave_module := &modules.pop() ?? break
         bodies := &module_bodies.pop() ?? break
         ready := SemaPreparedBodies{scopes: [SemaScopeTable]{}, bodies: ^bodies}
-        &ready.scopes.push(^module.scopes)
+        &ready.scopes.push(^wave_module.scopes)
         &prepared.push(^ready)
     }
     prepared
@@ -2074,8 +2074,8 @@ fn sema_check_body_wave_take(wave_state: Shared<SemaBodyWave>) -> [SemaBodyWaveM
     permit :: wave_state.guard_edit()
     modules := [SemaBodyWaveModule]{}
     loop permit.value.modules.len() > 0 {
-        module :: &permit.value.modules.pop() ?? break
-        &modules.push(module)
+        wave_module :: &permit.value.modules.pop() ?? break
+        &modules.push(wave_module)
     }
     &modules.reverse()
     modules

@@ -847,10 +847,10 @@ fn sema_effect_record_memory_open(nodes: &[SemaEffectNode], node_index: Int, spa
 // Indices store positions, not copied semantic facts. Caller buckets retain
 // source order, including equal-width interval ties; exact duplicates use the
 // first row just as the original search did. One index serves every module:
-// `module` selects the module whose call facts the walks read, so the
+// `current_module` selects the module whose call facts the walks read, so the
 // function-node map is shared rather than copied per module.
 struct SemaEffectCallIndex {
-    module: Int
+    current_module: Int
     modules: [SemaEffectModuleCalls]
     node_by_key: [String:Int]
 }
@@ -891,7 +891,7 @@ fn sema_effect_module_calls(facts: [SemaCallSiteFact]) -> SemaEffectModuleCalls 
 }
 
 fn sema_effect_find_fact(index: SemaEffectCallIndex, caller_key: String, span: Span) -> SemaCallSiteFact? {
-    calls :: index.modules[index.module]
+    calls :: index.modules[index.current_module]
     slot :: calls.caller_slots.get(caller_key) ?? return None
     exact :: sema_effect_exact_position(calls.callers[slot], calls.facts, span)
     if exact == .Val(position) -> return Val(calls.facts[position])
@@ -911,7 +911,7 @@ fn sema_effect_find_fact(index: SemaEffectCallIndex, caller_key: String, span: S
 }
 
 fn sema_effect_find_exact_fact(index: SemaEffectCallIndex, caller_key: String, span: Span) -> SemaCallSiteFact? {
-    calls :: index.modules[index.module]
+    calls :: index.modules[index.current_module]
     slot :: calls.caller_slots.get(caller_key) ?? return None
     position :: sema_effect_exact_position(calls.callers[slot], calls.facts, span) ?? return None
     Val(calls.facts[position])
@@ -1869,7 +1869,7 @@ pub fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [Se
             sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, function_diagnostics)
         }
     }
-    calls := SemaEffectCallIndex{module: 0, modules: [SemaEffectModuleCalls]{}, node_by_key: node_by_key}
+    calls := SemaEffectCallIndex{current_module: 0, modules: [SemaEffectModuleCalls]{}, node_by_key: node_by_key}
     loop module_row in inputs -> &calls.modules.push(sema_effect_module_calls(modules[module_row.module_index].call_facts))
     any_unsafe :: loop node in nodes {
         if node.is_unsafe -> break true
@@ -1877,7 +1877,7 @@ pub fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [Se
 
     loop module_index in 0..<inputs.len() {
         module_row :: inputs[module_index]
-        calls.module = module_index
+        calls.current_module = module_index
         loop function in modules[module_row.module_index].functions {
             node_index :: sema_effect_node_index(node_by_key, function.key) ?? next
             function_diagnostics := [Diagnostic]{}
@@ -1923,7 +1923,7 @@ pub fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [Se
     }
     loop module_index in 0..<inputs.len() {
         module_row :: inputs[module_index]
-        calls.module = module_index
+        calls.current_module = module_index
         region_diagnostics := [Diagnostic]{}
         loop function in modules[module_row.module_index].functions {
             source :: sema_effect_source_for(function, module_row.sources, source_indices[module_index]) ?? next
