@@ -19,9 +19,11 @@
 // compound assignment, `if` statements, arm tables and `if` values, counted,
 // conditional and list loops with `break` and `next`, lists (literal, push,
 // indexed read and write, len, printing), one struct (literal, field write,
-// printing), helper functions taking Int, list and struct parameters, early
-// returns, a bounded recursive helper, and prints inside helpers (so call and
-// short-circuit order are observable). Every choice is typed by the bindings in
+// printing), Strings (literals, interpolation, `+=`, `~` copies, moves out of
+// a binding, which then stays unused, `len`, equality), helper functions
+// taking Int, String, list and struct parameters, early returns, a bounded
+// recursive helper, and prints inside helpers (so call and short-circuit
+// order are observable). Every choice is typed by the bindings in
 // scope. The model evaluates the program with i64 semantics (`/%` and `%`
 // floor, `%%` truncates, `>>` is arithmetic); a program whose evaluation
 // overflows, divides by zero, indexes out of range or runs too long is
@@ -99,7 +101,8 @@ class Gen {
     return live.at(-1)[0];
   }
   fresh(prefix) { return `${prefix}${this.n++}`; }
-  vars(pred) { return this.scopes.flat().filter(pred); }
+  // A moved String binding is gone for the rest of the program.
+  vars(pred) { return this.scopes.flat().filter((v) => !v.moved && pred(v)); }
   declare(v) { this.scopes.at(-1).push(v); return v; }
 
   // Expressions.
@@ -115,12 +118,14 @@ class Gen {
     const ints = this.vars((v) => v.type === "Int");
     const lists = this.vars((v) => v.type === "List");
     const structs = this.vars((v) => v.type === "Struct");
+    const strs = this.vars((v) => v.type === "Str");
     const kind = this.weighted([
       ["lit", 4], ["var", ints.length ? 6 : 0], ["len", lists.length ? 1 : 0],
-      ["index", lists.length && allowIndex ? 2 : 0], ["field", structs.length ? 2 : 0],
+      ["index", lists.length && allowIndex ? 2 : 0], ["field", structs.length ? 2 : 0], ["slen", strs.length ? 1 : 0],
     ]);
     if (kind === "var") return { k: "var", name: this.pick(ints).name };
     if (kind === "len") return { k: "len", list: this.pick(lists).name };
+    if (kind === "slen") return { k: "len", list: this.pick(strs).name };
     if (kind === "field") return { k: "field", base: this.pick(structs).name, f: this.pick(this.struct.fields) };
     if (kind === "index") {
       const list = this.pick(lists).name;
@@ -155,10 +160,12 @@ class Gen {
   }
   boolExpr(depth) {
     const bools = this.vars((v) => v.type === "Bool");
+    const strs = this.vars((v) => v.type === "Str");
     if (depth <= 0 || this.chance(0.2)) {
-      const kind = this.weighted([["lit", 1], ["var", bools.length ? 3 : 0], ["cmp", 4]]);
+      const kind = this.weighted([["lit", 1], ["var", bools.length ? 3 : 0], ["cmp", 4], ["scmp", strs.length ? 1 : 0]]);
       if (kind === "lit") return { k: "bool", v: this.chance(0.5) };
       if (kind === "var") return { k: "var", name: this.pick(bools).name };
+      if (kind === "scmp") return bin(this.pick(["==", "!="]), { k: "var", name: this.pick(strs).name }, this.chance(0.5) ? { k: "var", name: this.pick(strs).name } : this.text());
       return bin(this.pick(COMPARE), this.intExpr(1), this.intExpr(1));
     }
     const kind = this.weighted([["cmp", 6], ["and", 2], ["or", 2], ["not", 1]]);
@@ -170,6 +177,27 @@ class Gen {
   ifValue() {
     const arms = Array.from({ length: 1 + this.int(3) }, () => [this.boolExpr(2), this.intExpr(2)]);
     return { k: "ifx", arms, otherwise: this.intExpr(2) };
+  }
+  // String values: literals, interpolations of the bindings in scope, and
+  // explicit copies (`~s`). Moves (`t :: s`) are generated as bindings.
+  text() {
+    const letters = "abcdefghij klm-:.,";
+    return { k: "str", v: Array.from({ length: this.int(6) }, () => letters[this.int(letters.length)]).join("") };
+  }
+  strExpr() {
+    const strs = this.vars((v) => v.type === "Str");
+    const holes = [
+      ...this.vars((v) => v.type === "Int").map((v) => ({ k: "var", name: v.name })),
+      ...strs.map((v) => ({ k: "var", name: v.name })),
+      ...strs.map((v) => ({ k: "len", list: v.name })),
+    ];
+    const kind = this.weighted([["lit", 3], ["fmt", holes.length ? 3 : 0], ["copy", strs.length ? 2 : 0]]);
+    if (kind === "copy") return { k: "copy", name: this.pick(strs).name };
+    if (kind === "lit") return this.text();
+    const parts = [];
+    for (let i = 0, n = 1 + this.int(3); i < n; i++) parts.push(this.text().v, this.pick(holes));
+    if (this.chance(0.5)) parts.push(this.text().v);
+    return { k: "strfmt", parts };
   }
 
   // Statements. ctx: { loops (nesting), inLoop, inFn, prints, nest }.
@@ -186,6 +214,9 @@ class Gen {
     const lists = this.vars((v) => v.type === "List");
     const open = lists.filter((v) => v.mutable && !v.frozen);
     const structs = this.vars((v) => v.type === "Struct" && v.mutable);
+    const strs = this.vars((v) => v.type === "Str" && v.mutable);
+    // A move out of a binding made in an enclosing loop would repeat (E: use after move).
+    const movable = strs.filter((v) => v.loops === ctx.loops);
     const deeper = ctx.nest < 3;
     const kind = this.weighted([
       ["int", 5], ["bool", 1], ["assign", ints.length ? 4 : 0], ["assignBool", bools.length ? 0.5 : 0],
@@ -194,6 +225,7 @@ class Gen {
       ["list", 1.5], ["push", open.length ? 1.5 : 0], ["setidx", open.length ? 1 : 0],
       ["foreach", lists.length && ctx.loops < 2 && deeper ? 1.5 : 0],
       ["struct", this.struct ? 1 : 0], ["setfield", structs.length ? 1.5 : 0],
+      ["str", 2], ["append", strs.length ? 2 : 0], ["assignStr", strs.length ? 0.5 : 0], ["move", movable.length ? 0.7 : 0],
       ["jump", ctx.inLoop ? 1 : 0], ["return", ctx.inFn ? 0.7 : 0],
     ]);
     const inner = { ...ctx, nest: ctx.nest + 1 };
@@ -220,6 +252,27 @@ class Gen {
         const v = this.pick(bools);
         v.mutated = true;
         return [{ k: "assign", name: v.name, op: "=", e: this.boolExpr(2) }];
+      }
+      case "str": {
+        const init = this.strExpr();
+        return [{ k: "decl", v: this.declare({ name: this.fresh("s"), type: "Str", mutable: true, mutated: false, loops: ctx.loops }), init }];
+      }
+      case "append": {
+        const v = this.pick(strs);
+        v.mutated = true;
+        const all = this.vars((x) => x.type === "Str");
+        return [{ k: "assign", name: v.name, op: "+=", e: this.chance(0.3) ? { k: "var", name: this.pick(all).name } : this.strExpr() }];
+      }
+      case "assignStr": {
+        const v = this.pick(strs);
+        v.mutated = true;
+        return [{ k: "assign", name: v.name, op: "=", e: this.strExpr() }];
+      }
+      case "move": {
+        const source = this.pick(movable);
+        const init = { k: "var", name: source.name };
+        source.moved = true;
+        return [{ k: "decl", v: this.declare({ name: this.fresh("s"), type: "Str", mutable: true, mutated: false, loops: ctx.loops }), init }];
       }
       case "print": return [this.print()];
       case "if": {
@@ -288,7 +341,9 @@ class Gen {
     const bools = this.vars((v) => v.type === "Bool");
     const lists = this.vars((v) => v.type === "List");
     const structs = this.vars((v) => v.type === "Struct");
-    const kind = this.weighted([["interp", 4], ["expr", 2], ["bool", 1], ["list", lists.length ? 1 : 0], ["struct", structs.length ? 0.7 : 0]]);
+    const strs = this.vars((v) => v.type === "Str");
+    const kind = this.weighted([["interp", 4], ["expr", 2], ["bool", 1], ["list", lists.length ? 1 : 0], ["struct", structs.length ? 0.7 : 0], ["str", strs.length ? 1 : 0]]);
+    if (kind === "str") return { k: "print", e: { k: "var", name: this.pick(strs).name } };
     if (kind === "expr") return { k: "print", e: this.intExpr(2) };
     if (kind === "bool") return { k: "print", e: this.boolExpr(2) };
     if (kind === "list") return { k: "print", e: { k: "var", name: this.pick(lists).name } };
@@ -296,6 +351,7 @@ class Gen {
     const holes = [
       ...ints.map((v) => ({ k: "var", name: v.name })),
       ...bools.map((v) => ({ k: "var", name: v.name })),
+      ...strs.map((v) => ({ k: "var", name: v.name })),
       ...structs.flatMap((v) => this.struct.fields.map((f) => ({ k: "field", base: v.name, f }))),
     ];
     const parts = [this.fresh("t")];
@@ -304,7 +360,7 @@ class Gen {
   }
 
   helper(index) {
-    const types = ["Int", "Int", "Int", "Int", "List", ...(this.struct ? ["Struct"] : [])];
+    const types = ["Int", "Int", "Int", "Int", "List", "Str", ...(this.struct ? ["Struct"] : [])];
     const params = Array.from({ length: 1 + this.int(3) }, (_, i) => ({ name: `a${index}_${i}`, type: this.pick(types), mutable: false }));
     const fn = { name: `h${index}`, params, body: [] };
     this.current = fn;
@@ -342,7 +398,7 @@ class Gen {
     this.scopes = [[]];
     const ctx = { loops: 0, inLoop: false, inFn: false, prints: true, nest: 0 };
     const run = Array.from({ length: 10 + this.int(20) }, () => this.stmt(ctx)).flat();
-    for (const v of this.scopes[0]) run.push({ k: "print", e: { k: "var", name: v.name } });
+    for (const v of this.scopes[0].filter((v) => !v.moved)) run.push({ k: "print", e: { k: "var", name: v.name } });
     return { struct: this.struct, fns: this.fns, run };
   }
 }
@@ -357,6 +413,9 @@ function render(e) {
   switch (e.k) {
     case "int": return atom(e.v < 0n ? `(${e.v})` : `${e.v}`);
     case "bool": return atom(String(e.v));
+    case "str": return atom(`"${e.v}"`);
+    case "strfmt": return atom(`"${e.parts.map((part) => (typeof part === "string" ? part : `{${expr(part)}}`)).join("")}"`);
+    case "copy": return atom(`~${e.name}`);
     case "var": return atom(e.name);
     case "len": return atom(`${e.list}.len()`);
     case "index": return atom(`${e.list}[${expr(e.idx)}]`);
@@ -447,7 +506,7 @@ function lines(stmts, depth) {
   return out;
 }
 
-const TYPE_NAMES = { Int: "Int", List: "[Int]" };
+const TYPE_NAMES = { Int: "Int", List: "[Int]", Str: "String" };
 function source(program, header) {
   const out = [...header.map((line) => `// ${line}`)];
   if (program.struct) out.push("", `struct ${program.struct.name} {`, ...program.struct.fields.map((f) => `    ${f}: Int`), "}");
@@ -518,7 +577,7 @@ class Machine {
   tick() { if (++this.steps > STEP_LIMIT) throw new Reject("steps"); }
   show(v) {
     if (typeof v === "bigint") return v.toString();
-    if (typeof v === "boolean") return String(v);
+    if (typeof v === "boolean" || typeof v === "string") return String(v);
     if (v.items) return `[${v.items.join(", ")}]`;
     return `${v.sname} { ${Object.entries(v.f).map(([f, x]) => `${f}: ${x}`).join(", ")} }`;
   }
@@ -528,11 +587,16 @@ class Machine {
   }
   eval(e, env) {
     switch (e.k) {
-      case "int": case "bool": return e.v;
+      case "int": case "bool": case "str": return e.v;
+      case "copy": return env.get(e.name);
+      case "strfmt": return e.parts.map((part) => (typeof part === "string" ? part : this.show(this.eval(part, env)))).join("");
       case "var": return env.get(e.name);
       case "neg": return checked(-this.eval(e.e, env));
       case "not": return !this.eval(e.e, env);
-      case "len": return BigInt(env.get(e.list).items.length);
+      case "len": {
+        const value = env.get(e.list);
+        return BigInt(typeof value === "string" ? value.length : value.items.length);
+      }
       case "field": return env.get(e.base).f[e.f];
       case "index": {
         const list = env.get(e.list);
