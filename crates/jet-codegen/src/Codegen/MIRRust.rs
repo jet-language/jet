@@ -3133,6 +3133,17 @@ fn core_native_probe_name(name: &str) -> &str {
     }
 }
 
+/// Spell a rendered Rust path type with generic arguments in its
+/// expression/pattern form: `a::Owner<T>` becomes `a::Owner::<T>`.
+fn expression_path_generics(path: String) -> String {
+    match path.find('<') {
+        Some(open) if !path[..open].ends_with("::") => {
+            format!("{}::{}", &path[..open], &path[open..])
+        }
+        _ => path,
+    }
+}
+
 fn has_native_type_projection(name: &str) -> bool {
     if is_source_owned_core_compute_shape(name)
         || is_source_owned_core_net_shape(name)
@@ -4628,7 +4639,15 @@ impl<'a> RustEmitter<'a> {
         }
         if let Some(def) = self.program.types.iter().find(|def| def.id == id) {
             if has_native_type_projection(&def.key) {
-                return self.rust_apply_type(&MirNominalRef::from_name(&def.key), &[]);
+                // `type_name` spells the owner of struct literals, variant
+                // constructors and patterns, i.e. expression/pattern position.
+                // A native projection may carry generic arguments (the email
+                // carriers are `SMTPAuth<Secret>`), which must use the path
+                // form `Owner::<Args>` there; Rust accepts it in type position too.
+                return expression_path_generics(self.rust_apply_type(
+                    &MirNominalRef::from_name(&def.key),
+                    &[],
+                ));
             }
         }
 
@@ -25267,11 +25286,13 @@ impl<'a> RustEmitter<'a> {
         let event_factory = (row.module == "core.event"
             && matches!(
                 row.member.as_str(),
-                "new" | "async_result" | "hook" | "decision_hook"
+                "new" | "with_policy" | "async_result" | "hook" | "decision_hook"
             ))
             || symbol.rsplit_once("::").is_some_and(|(owner, method)| {
-                matches!(method, "new" | "async_result" | "hook" | "decision_hook")
-                    && owner
+                matches!(
+                    method,
+                    "new" | "with_policy" | "async_result" | "hook" | "decision_hook"
+                ) && owner
                         .rsplit_once("::")
                         .map(|(_, owner)| owner)
                         .and_then(|owner| owner.split('<').next())
@@ -25317,6 +25338,21 @@ impl<'a> RustEmitter<'a> {
             .iter()
             .enumerate()
             .map(|(index, arg)| {
+                // The service runtime stores a worker as its checked function
+                // item (`fn()`), not as the Rc callable carrier.
+                if row.module == "core.service" && row.member == "worker" && index == 2 {
+                    return self.service_worker_handler(function, arg.value);
+                }
+                if let Some(inputs) =
+                    Self::native_kernel_callback_inputs(route_row.symbol.name(), index)
+                {
+                    if !matches!(
+                        self.value_definition(function, arg.value),
+                        Some(MirOperation::Semantic(MirSemanticOp::HostBorrowCallback { .. }))
+                    ) {
+                        return self.host_callback_with_inputs(function, arg.value, inputs);
+                    }
+                }
                 // A DataStream query consumes the one-shot stream even though
                 // the list query row shares the same checked Core signature.
                 let borrowed = if stream_query && index == 0 {
@@ -28009,11 +28045,23 @@ impl<'a> RustEmitter<'a> {
         )
     }
     fn native_kernel_callback_inputs(symbol: &str, index: usize) -> Option<&'static [bool]> {
-        match (symbol.rsplit("::").next().unwrap_or(symbol), index) {
-            ("jet_map_merge_with", 2) => Some(&[true, false, false]),
-            ("jet_iter_split_at", 2) => Some(&[false, false]),
-            ("jet_iter_enumerate", 1) => Some(&[false, true]),
-            ("jet_expiring_secret_with", 1) => Some(&[true]),
+        let mut segments = symbol.rsplit("::");
+        let member = segments.next().unwrap_or(symbol);
+        let owner = segments.next().map(|owner| owner.split('<').next().unwrap_or(owner));
+        match (owner, member, index) {
+            (_, "jet_map_merge_with", 2) => Some(&[true, false, false]),
+            (_, "jet_iter_split_at", 2) => Some(&[false, false]),
+            (_, "jet_iter_enumerate", 1) => Some(&[false, true]),
+            // The deterministic world is lent to the test body by ownership
+            // (`FnOnce(JetDeterministicWorld) -> T`).
+            (_, "jet_testing_world", 0) => Some(&[false]),
+            (_, "jet_expiring_secret_with", 1) => Some(&[true]),
+            // Sync event/hook listeners are host `Fn(T)` closures that receive
+            // the dispatched value by ownership (receiver 0, scope 1).
+            (Some("JetEvent" | "JetHook" | "JetDecisionHook"), "on" | "once", 2)
+            | (Some("JetEvent" | "JetHook" | "JetDecisionHook"), "on_priority", 3) => {
+                Some(&[false])
+            }
             _ => None,
         }
     }
@@ -29822,7 +29870,17 @@ impl<'a> RustEmitter<'a> {
                 parts,
             } => {
                 let pattern = self.binary_pattern(parts);
-                let subject = format!("({}).bytes", self.value_slot_reference(*subject, false));
+                // The subject is either `Bytes` (the runtime `JetByteBuffer`,
+                // whose payload is `.bytes`) or a `[U8]` list (`Vec<u8>`).
+                let subject_ref = self.value_slot_reference(*subject, false);
+                let subject = match self.value_type(function, *subject).kind() {
+                    MirTypeKind::Apply { name, .. }
+                        if name.name == jet_foundation::Syntax::TYPE_BYTES =>
+                    {
+                        format!("({subject_ref}).bytes.as_slice()")
+                    }
+                    _ => format!("({subject_ref}).as_slice()"),
+                };
                 let scan = self.prelude_call_args(*call, &[subject, pattern]);
                 self.pattern_match_result(function, result, &scan)
             }
@@ -30225,6 +30283,29 @@ impl<'a> RustEmitter<'a> {
             }
         };
         self.prelude_call_args_exact(call, &args)
+    }
+
+    /// A service worker handler as the runtime's `fn()` item: a non-capturing
+    /// adapter around the checked worker function. A worker failure unwinds
+    /// into the service dispatcher, which settles it as a service error.
+    fn service_worker_handler(&self, function: &MirFunction, handler: MirValueId) -> String {
+        let Some(MirOperation::Closure { function: target_id, captures, .. }) =
+            self.value_definition(function, handler)
+        else {
+            panic!("MIR service worker handler {:?} is not a checked function value", handler);
+        };
+        if !captures.is_empty() {
+            panic!("MIR service worker handler {:?} captures its environment", handler);
+        }
+        let target = self.function_row(*target_id);
+        if !target.params.is_empty() {
+            panic!("MIR service worker handler {:?} takes parameters", handler);
+        }
+        let root = &self.config.root_prefix;
+        format!(
+            "|| {{ if let Err(__jet_error) = <_ as {root}jet_std::JetIntoDispatchResult<String>>::into_dispatch_result({}()) {{ panic!(\"service worker failed: {{}}\", __jet_error) }} }}",
+            self.function_name(*target_id)
+        )
     }
 
     fn native_callback_adapter(
@@ -31086,6 +31167,19 @@ impl<'a> RustEmitter<'a> {
                 "{}({receiver}, {callback}, {})",
                 self.prelude_symbol(call),
                 self.list_aggregate_builder(function, receiver_value, result),
+            );
+        }
+        // `para_partition` returns the checked `(false_, true_)` tuple; the
+        // kernel hands its two partitions, false first, to this builder.
+        if row.abi == MirPreludeAbi::Aggregate
+            && row.module == "core.list"
+            && row.member == "para_partition"
+        {
+            assert_eq!(args.len(), 1, "MIR List.para_partition route expects one callback");
+            let callback = self.closure_call_argument(function, row, 0, &args[0]);
+            return format!(
+                "{}({receiver}, {callback}, |__jet_false, __jet_true| (__jet_false, __jet_true))",
+                self.prelude_symbol(call),
             );
         }
         let mut values = vec![receiver];
