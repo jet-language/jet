@@ -167,14 +167,26 @@ fn jet_cli_find_signature_shape(signature: String) -> JetCLIFindShape? Never! {
     Val(JetCLIFindShape{inputs: inputs, output: jet_cli_find_compact(output)})
 }
 
+// Does `value` parse as an Int (Rust `str::parse::<i64>().is_ok()`)?
+fn jet_cli_find_parses_int(value: String) -> Bool Never! {
+    _ :: Int.parse(value) ?? return false
+    true
+}
+
+// Does `value` parse as a Float (Rust `str::parse::<f64>().is_ok()`)?
+fn jet_cli_find_parses_float(value: String) -> Bool Never! {
+    _ :: Float.parse(value) ?? return false
+    true
+}
+
 // CmdSemIndex.rs `literal_type`.
 fn jet_cli_find_literal_type(raw: String) -> String? Never! {
     value :: raw.trim()
     quoted :: (value.starts_with("\"") && value.ends_with("\"")) || (value.starts_with("'") && value.ends_with("'"))
     if quoted -> return Val("String")
     if value == "true" || value == "false" -> return Val("Bool")
-    if Int.parse(value) != None -> return Val("Int")
-    if Float.parse(value) != None -> return Val("Float")
+    if jet_cli_find_parses_int(value) -> return Val("Int")
+    if jet_cli_find_parses_float(value) -> return Val("Float")
     if value.starts_with("[") && value.ends_with("]") {
         inner :: jet_cli_find_text(value, 1, value.bytes().len() - 1)
         if inner.trim() == "" -> return Val("[T]")
