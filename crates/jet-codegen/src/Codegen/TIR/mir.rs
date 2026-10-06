@@ -611,11 +611,20 @@ impl FunctionRegistry {
 
     /// A bare built-in boundary spelling (`URL`) that the calling module does
     /// not declare names its Core carrier record (`row_claims_bare_name`), so
-    /// a method on it is that record's checked method.
+    /// a method on it is that record's checked method. Any other bare Core
+    /// export (`Digest256` returned by `sha256` into `core.email`) names the
+    /// record of the one Core source module that exports it.
     fn carrier_record_methods(&self, owner: &str, method: &str) -> Vec<MirFunctionId> {
-        let Some(suffix) = crate::Syntax::typed_head_kind(owner)
+        let modules = match crate::Syntax::typed_head_kind(owner)
             .and_then(|kind| kind.carrier_record_module())
-            .and_then(jet_foundation::CoreModuleExports::core_source_module)
+        {
+            Some(module) => vec![module],
+            None => jet_foundation::CoreModuleExports::core_type_modules(owner),
+        };
+        let [module] = modules.as_slice() else {
+            return Vec::new();
+        };
+        let Some(suffix) = jet_foundation::CoreModuleExports::core_source_module(module)
             .map(|source| format!("{}::{owner}", source.path))
         else {
             return Vec::new();

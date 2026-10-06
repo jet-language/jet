@@ -9461,6 +9461,27 @@ fn lower_method_call_impl(
             Type::Apply { name, .. } if name == "Set" || name == crate::Syntax::TYPE_RANK
         ) {
             let wrapped = crate::Codegen::TIR::wrap_set_receiver_as_list(recv_t, method_span);
+            // Sema types `Set.flat_map` as `Iter<U>` (core-library: lazy), so
+            // its list projection enters the iterator flat_map, not the eager
+            // list one.
+            let lazy_elem = match (&wrapped.ty, method) {
+                (Type::List(elem), "flat_map") => Some((**elem).clone()),
+                _ => None,
+            };
+            let wrapped = match lazy_elem {
+                Some(elem) => TExpr {
+                    ty: Type::Apply {
+                        name: crate::Syntax::TYPE_ITER.to_string(),
+                        args: vec![elem],
+                    },
+                    kind: TExprKind::BuiltinMethod {
+                        recv: Box::new(wrapped),
+                        op: TBuiltinOp::ListLazy,
+                        args: vec![],
+                    },
+                },
+                None => wrapped,
+            };
             let ty = wrapped.ty.clone();
             (wrapped, ty)
         } else {

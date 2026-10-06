@@ -3028,10 +3028,12 @@ pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
             ))
         || name == crate::Syntax::TYPE_MEASUREMENT
         || name == crate::Syntax::TYPE_ERR
+        // Core/compute declares its own `VJPRun` record (source-owned shape);
+        // only the autodiff transform's bare `VJPRun` is the native carrier.
+        || (name == "VJPRun" && !source_name.starts_with("<corelib>/Core/compute::"))
         || matches!(
             name,
-            "VJPRun"
-                | "Group"
+            "Group"
                 | "DataJoin"
                 | "DataSnapshot"
                 | "DataPivotCell"
