@@ -10,6 +10,7 @@ package {
 }
 use core as core
 use core.files as files
+use core.sys as sys
 
 // core.testing — deterministic tests and comparison records.
 //
@@ -87,8 +88,22 @@ fn terminal_comparison(relation: String, reason: String) -> TestComparison {
     }
 }
 
-/// Compare or create a host-managed snapshot for `name`.
-pub fn snap(name: String, value: String) -[FS]> Bool Never! { core.testing.snap(name, value) }
+/// Compare or create a snapshot. Updating observes JET_UPDATE_SNAPSHOTS,
+/// so the environment read is part of the declared effect row.
+pub fn snap(name: String, value: String) -[FS, Env]> Bool Never! {
+    path :: "__snapshots__/{snapshot_name(name)}.snap"
+    update :: (sys.get("JET_UPDATE_SNAPSHOTS") ?? "") == "1"
+    if update || !files.is_file(path) {
+        if files.mkdir("__snapshots__", true) == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
+        files.write(path, value) ?? return false
+        return true
+    }
+    expected :: files.read(path) ?? return false
+    expected == value
+}
 
 pub fn golden(name: String, value: String) -[FS]> Bool Never! {
     core.testing.golden(name, value)
@@ -133,4 +148,25 @@ pub fn status(comparison: TestComparison) -> String Never! { comparison.status }
 
 #Test("corpus reports an absent directory as an empty collection") {
     assert_eq(corpus("__jet_absent_corpus__/missing").len(), 0)
+}
+
+fn snapshot_name(name: String) -> String Never! {
+    out := [U8]{}
+    loop byte in name.bytes() {
+        c :: Int.from_u8(byte)
+        if (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 45 || c == 95 {
+            &out.push(byte)
+        } else if c < 128 || c >= 192 {
+            // String is valid UTF-8; only a leading byte starts a scalar.
+            &out.push(U8{95})
+        }
+    }
+    if out.len() == 0 -> return "case"
+    String.from_bytes(out) ?? panic("snapshot names contain only ASCII")
+}
+
+#Test("Snapshot names replace each non-ASCII scalar exactly once") {
+    assert_eq(snapshot_name(""), "case")
+    assert_eq(snapshot_name("a/B.c é界"), "a_B_c___")
+    assert_eq(snapshot_name("safe-Name_42"), "safe-Name_42")
 }
