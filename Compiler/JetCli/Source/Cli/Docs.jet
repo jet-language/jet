@@ -1,9 +1,9 @@
 // The documentation projection of the Jet-hosted `jet doc` (jet-semindex
 // Docs.rs `build_doc_graph`, `DocGraph::to_status_envelope`, `to_markdown`,
-// `to_html`; the callable failure and nominal trait-contract facts it reads
-// come from jet-semindex Build.rs `callable_kind`/`method_fact`/`fn_signature`
-// and JSON.rs `contract_metadata`/`collect_trait_contracts`). The command
-// checks a bundle, asks this module for a projection, and chooses an output
+// `to_html`). The callable failure and nominal trait-contract facts it reads
+// are the shared semantic index's (SemIndexBuild.jet `jet_cli_build_semindex`),
+// exactly as Docs.rs reads `SemIndex`. The command checks a bundle, builds the
+// index once, asks this module for a projection, and chooses an output
 // format; it does not walk the AST a second time. The items are the checked
 // modules' items as sema settled them, so derived impls and inferred failure
 // contracts are the checker's.
@@ -11,26 +11,10 @@ use jet_driver.[
     JetDriverDocModule,
 ]
 use jet_foundation.[
-    FailureContract,
     Func,
     Item,
     Marker,
-    NamedType,
-    Param,
-    ParamZone,
     Span,
-    TraitImplBlock,
-    access_sigil,
-    expr_span,
-    failure_contract_effective_type,
-    failure_contract_from_return_type,
-    failure_contract_of_function,
-    failure_contract_source,
-    type_name,
-]
-use jet_sema.[
-    sema_compiler_index_view_map,
-    sema_compiler_index_view_provenance,
 ]
 
 JET_CLI_DOC_SCHEMA_VERSION :: 1
@@ -104,30 +88,6 @@ pub struct JetCLIDocGraph {
     pub items: [JetCLIDocItem]
     pub impls: [JetCLIDocImpl]
     pub doctests: [JetCLIDocTest]
-}
-
-// One semindex definition `jet doc` enriches from: a callable with its
-// checked failure contract, or a distinct nominal (Build.rs `SymDef`).
-struct JetCLIDocDefinition {
-    module_path: String
-    name: String
-    start: Int
-    end: Int
-    contract: FailureContract?
-    nominal: Bool
-}
-
-// One trait-impl method member fact (Build.rs `method_fact` with
-// `MemberOrigin::TraitImpl`).
-struct JetCLIDocMember {
-    owner: String
-    trait_name: String
-    signature: String
-}
-
-struct JetCLIDocIndex {
-    definitions: [JetCLIDocDefinition]
-    members: [JetCLIDocMember]
 }
 
 // The text of `bytes[start..<end]`, or "" when the range is empty.
@@ -477,179 +437,41 @@ fn jet_cli_doc_collect_items(items: [Item], unit: JetCLIDocUnit, parent: String,
     }
 }
 
-// Build.rs `function_parameter_parts` with `fn_signature`'s access sigils and
-// written defaults; `self` is not a call parameter.
-fn jet_cli_doc_parameter_parts(params: [Param], source: String) -> [String] {
-    shown_params := [Param]{}
-    loop parameter in params {
-        if parameter.name != "self" -> &shown_params.push(parameter)
-    }
-    bytes :: source.bytes()
-    parts := [String]{}
-    star_done := false
-    loop (index, parameter) in shown_params {
-        label :: if parameter.public_label == .Val(written) -> written.name else -> parameter.name
-        if parameter.zone == ParamZone.LabelOnly && !star_done {
-            star_done = true
-            &parts.push("*")
-        }
-        shown :: if {
-            parameter.zone == ParamZone.PositionalOnly -> parameter.name
-            label == parameter.name -> label
-            else -> "{label} {parameter.name}"
-        }
-        rest :: if parameter.variadic -> "..." else -> ""
-        part := "{access_sigil(parameter.convention)}{shown}: {rest}{type_name(parameter.ty)}"
-        if parameter.default == .Val(default) {
-            span :: expr_span(default)
-            default_text :: jet_cli_doc_text(bytes, span.start, span.end)
-            part = "{part}{{"
-            part = "{part}{default_text}}}"
-        }
-        &parts.push(part)
-        next_positional :: index + 1 < shown_params.len() && shown_params[index + 1].zone == ParamZone.PositionalOnly
-        if parameter.zone == ParamZone.PositionalOnly && !next_positional -> &parts.push("/")
-    }
-    parts
+// Docs.rs `definition_belongs_to_doc_item`: semindex definitions keep the
+// checked module path, documentation names its stable project path.
+fn jet_cli_doc_belongs(definition: JetCLISemDef, item: JetCLIDocItem) -> Bool Never! {
+    jet_cli_doc_stable_path(definition.module_path) == item.module_path && item.source.start <= definition.def_span.start && definition.def_span.end <= item.source.end
 }
 
-// Build.rs `fn_signature` for a member fact: the call surface, the effect
-// ceiling, returned views, and the effective failure route. Callable
-// `#Policy` rows are not rendered.
-fn jet_cli_doc_member_signature(function: Func, source: String) -> String {
-    contract :: failure_contract_of_function(function.return_type, function.return_type_span)
-    shown := [String]{}
-    if function.declared_effects == .Val(rows) {
-        loop row in rows {
-            root :: row.name.split(".").to_list()[0]
-            if root != "Panic" && root != "Mem" -> &shown.push(row.name)
-        }
-    }
-    result :: type_name(failure_contract_effective_type(contract))
-    ceiling :: if {
-        function.effect_via == .Val(via) -> " -[via {via.name}]>"
-        shown.len() == 0 -> ""
-        else -> " -[{shown.join(", ")}]>"
-    }
-    suffix :: if {
-        ceiling != "" -> if result == "" -> ceiling else -> "{ceiling} {result}"
-        result != "" -> " -> {result}"
-        else -> ""
-    }
-    signature := "fn {function.name}({jet_cli_doc_parameter_parts(function.params, source).join(", ")}){suffix}"
-    if function.return_view_provenance == .Val(map) {
-        if map.entries.len() == 1 && map.entries[0].slot.len() == 0 {
-            signature = "{signature} ; view_source = {sema_compiler_index_view_provenance(map.entries[0].value)}"
-        } else {
-            signature = "{signature} ; view_sources = {sema_compiler_index_view_map(function.return_view_provenance)}"
-        }
-    }
-    "{signature}\nfailure: {type_name(failure_contract_effective_type(contract))} ({failure_contract_source(contract)})"
-}
-
-fn jet_cli_doc_define_function(index: &JetCLIDocIndex, module_path: String, function: Func) Never! {
-    &index.definitions.push(JetCLIDocDefinition{module_path: module_path, name: function.name, start: function.name_span.start, end: function.name_span.end, contract: Val(failure_contract_of_function(function.return_type, function.return_type_span)), nominal: false})
-}
-
-fn jet_cli_doc_define_trait_block(index: &JetCLIDocIndex, unit: JetCLIDocUnit, owner: String, block: TraitImplBlock) {
-    loop method in block.methods {
-        &index.members.push(JetCLIDocMember{owner: owner, trait_name: block.trait_name, signature: jet_cli_doc_member_signature(method, unit.source)})
-        jet_cli_doc_define_function(&index, unit.path, method)
-    }
-}
-
-// The definitions and trait-impl members of one module, in the semindex
-// walk order (Build.rs `collect_item`): generic module bodies are not
-// indexed, code module bodies are.
-fn jet_cli_doc_index_items(index: &JetCLIDocIndex, unit: JetCLIDocUnit, items: [Item]) {
-    loop item in items {
-        if item == {
-            .Func(function) -> jet_cli_doc_define_function(&index, unit.path, function)
-            .Struct(definition) -> {
-                loop method in definition.methods -> jet_cli_doc_define_function(&index, unit.path, method)
-                loop block in definition.trait_impls -> jet_cli_doc_define_trait_block(&index, unit, definition.name, block)
-            }
-            .Enum(definition) -> {
-                loop method in definition.methods -> jet_cli_doc_define_function(&index, unit.path, method)
-                loop block in definition.trait_impls -> jet_cli_doc_define_trait_block(&index, unit, definition.name, block)
-            }
-            .Trait(definition) -> {
-                loop method in definition.methods {
-                    &index.definitions.push(JetCLIDocDefinition{module_path: unit.path, name: method.name, start: method.name_span.start, end: method.name_span.end, contract: Val(failure_contract_from_return_type(method.return_type)), nominal: false})
-                }
-            }
-            .Impl(definition) -> {
-                loop method in definition.methods {
-                    if definition.trait_name == .Val(implemented) {
-                        &index.members.push(JetCLIDocMember{owner: definition.type_name, trait_name: implemented, signature: jet_cli_doc_member_signature(method, unit.source)})
-                    }
-                    jet_cli_doc_define_function(&index, unit.path, method)
-                }
-            }
-            .Distinct(definition) -> &index.definitions.push(JetCLIDocDefinition{module_path: unit.path, name: definition.name, start: definition.name_span.start, end: definition.name_span.end, contract: None, nominal: true})
-            .CodeModule(code_module) -> {
-                if code_module.body == .Val(body) -> jet_cli_doc_index_items(&index, unit, body)
-            }
-            else -> {}
-        }
-    }
-}
-
-// Docs.rs `definition_belongs_to_doc_item`.
-fn jet_cli_doc_belongs(definition: JetCLIDocDefinition, item: JetCLIDocItem) -> Bool Never! {
-    definition.module_path == item.module_path && item.source.start <= definition.start && definition.end <= item.source.end
-}
-
-// JSON.rs `member_signatures`: sorted, deduplicated.
-fn jet_cli_doc_member_signatures(index: JetCLIDocIndex, owner: String, trait_name: String) -> [String] Never! {
-    methods := [String]{}
-    loop member in index.members {
-        if member.owner == owner && member.trait_name == trait_name && !methods.contains(member.signature) -> &methods.push(member.signature)
-    }
-    jet_cli_doc_sort_strings(&methods)
-    methods
-}
-
-// Docs.rs `render_trait_contract` over one implementation.
-fn jet_cli_doc_trait_contract(index: JetCLIDocIndex, owner: String, trait_name: String, associated: [NamedType]) -> String Never! {
-    lines := [String]{"implements {trait_name}"}
-    loop entry in associated -> &lines.push("  type {entry.name} = {type_name(entry.ty)}")
-    loop method in jet_cli_doc_member_signatures(index, owner, trait_name) -> &lines.push("  {method}")
-    lines.join("\n")
-}
-
-// JSON.rs `collect_trait_contracts`.
-fn jet_cli_doc_collect_trait_contracts(index: JetCLIDocIndex, items: [Item], owner: String, contracts: &[String]) Never! {
-    loop item in items {
-        if item == {
-            .Impl(definition) -> {
-                parts :: definition.type_name.split(".").to_list()
-                if parts[parts.len() - 1] == owner && definition.trait_name == .Val(implemented) {
-                    &contracts.push(jet_cli_doc_trait_contract(index, owner, implemented, definition.assoc_type_impls))
-                }
-            }
-            .Struct(definition) -> if definition.name == owner {
-                loop block in definition.trait_impls -> &contracts.push(jet_cli_doc_trait_contract(index, owner, block.trait_name, block.assoc_type_impls))
-            }
-            .Enum(definition) -> if definition.name == owner {
-                loop block in definition.trait_impls -> &contracts.push(jet_cli_doc_trait_contract(index, owner, block.trait_name, block.assoc_type_impls))
-            }
-            .CodeModule(code_module) -> if code_module.body == .Val(body) -> jet_cli_doc_collect_trait_contracts(index, body, owner, &contracts)
-            .GenericModule(generic_module) -> jet_cli_doc_collect_trait_contracts(index, generic_module.body, owner, &contracts)
-            else -> {}
-        }
-    }
-}
-
-// The callable (or, with `nominal`, the distinct nominal) definition that
-// documents `item`.
-fn jet_cli_doc_definition_for(index: JetCLIDocIndex, item: JetCLIDocItem, nominal: Bool) -> JetCLIDocDefinition? Never! {
+// The first semindex function definition that documents `item`.
+fn jet_cli_doc_callable_for(index: JetCLISemIndex, item: JetCLIDocItem) -> JetCLISemCallable? Never! {
     loop definition in index.definitions {
-        if definition.name != item.name || !jet_cli_doc_belongs(definition, item) -> next
-        if nominal && definition.nominal -> return Val(~definition)
-        if !nominal && definition.contract != None -> return Val(~definition)
+        if definition.def.name != item.name || !jet_cli_doc_belongs(definition.def, item) -> next
+        if definition.def.kind == .Function(callable) -> return Val(callable)
     }
     None
+}
+
+// The first semindex distinct nominal definition that documents `item`.
+fn jet_cli_doc_nominal_for(index: JetCLISemIndex, item: JetCLIDocItem) -> JetCLISemDefinition? Never! {
+    loop definition in index.definitions {
+        if definition.def.name == item.name && definition.nominal_base != None && jet_cli_doc_belongs(definition.def, item) -> return Val(~definition)
+    }
+    None
+}
+
+// Docs.rs `render_trait_contract`.
+fn jet_cli_doc_trait_contract(contract: JetCLISemTraitContract) -> String Never! {
+    lines := [String]{"implements {contract.trait_name}"}
+    loop entry in contract.associated_types {
+        if entry.ty == .Val(ty) {
+            &lines.push("  type {entry.name} = {ty}")
+        } else {
+            &lines.push("  type {entry.name}")
+        }
+    }
+    loop method in contract.methods -> &lines.push("  {method}")
+    lines.join("\n")
 }
 
 // The checked module whose stable path is `path`.
@@ -661,24 +483,25 @@ pub fn jet_cli_doc_module_at(modules: [JetDriverDocModule], path: String) -> Jet
 }
 
 // Docs.rs `enrich_callable_contracts` and `enrich_type_contracts`.
-fn jet_cli_doc_enrich(items: &[JetCLIDocItem], index: JetCLIDocIndex, modules: [JetDriverDocModule]) Never! {
+fn jet_cli_doc_enrich(items: &[JetCLIDocItem], index: JetCLISemIndex) Never! {
     loop item_index in 0..<items.len() {
         item :: ~items[item_index]
         if item.kind == "function" {
-            found :: jet_cli_doc_definition_for(index, item, false) ?? next
-            contract :: found.contract ?? next
-            failure :: type_name(failure_contract_effective_type(contract))
-            source :: failure_contract_source(contract)
-            items[item_index].failure_contract = Val(failure)
-            items[item_index].failure_source = Val(source)
-            items[item_index].signature = "{item.signature}\nfailure: {failure} ({source})"
+            callable :: jet_cli_doc_callable_for(index, item) ?? next
+            if !callable.signature_facts_available -> next
+            failure :: jet_cli_sem_failure_contract_name(callable)
+            source :: jet_cli_sem_failure_source_name(callable)
+            items[item_index].failure_contract = failure
+            items[item_index].failure_source = source
+            signature := "{item.signature}\nfailure: unavailable"
+            if failure == .Val(failure_name) {
+                if source == .Val(source_name) -> signature = "{item.signature}\nfailure: {failure_name} ({source_name})"
+            }
+            items[item_index].signature = signature
         } else if item.kind == "distinct" {
-            found :: jet_cli_doc_definition_for(index, item, true) ?? next
-            doc_module :: jet_cli_doc_module_at(modules, found.module_path) ?? next
-            contracts := [String]{}
-            jet_cli_doc_collect_trait_contracts(index, doc_module.items, found.name, &contracts)
+            found :: jet_cli_doc_nominal_for(index, item) ?? next
             signature := item.signature
-            loop contract in contracts -> signature = "{signature}\n{contract}"
+            loop contract in found.trait_contracts -> signature = "{signature}\n{jet_cli_doc_trait_contract(contract)}"
             items[item_index].signature = signature
         }
     }
@@ -906,21 +729,21 @@ fn jet_cli_doc_sort_tests(values: &[JetCLIDocTest]) Never! {
     }
 }
 
-// Docs.rs `build_doc_graph`: the projection of the checked modules, with the
-// application authority of the same checked program.
-pub fn jet_cli_build_doc_graph(modules: [JetDriverDocModule], effect_projection: JetCLIAuthority) -> JetCLIDocGraph {
+// Docs.rs `build_doc_graph`: the projection of the checked modules, enriched
+// from the semantic index of the same checked program (whose effect
+// projection is the application authority).
+pub fn jet_cli_build_doc_graph(modules: [JetDriverDocModule], index: JetCLISemIndex) -> JetCLIDocGraph {
     protocol_names := [String]{}
     loop doc_module in modules -> jet_cli_doc_collect_protocol_names(doc_module.items, &protocol_names)
     graph := JetCLIDocGraph{
         schema_version: JET_CLI_DOC_SCHEMA_VERSION,
         root: ".",
-        effect_projection: effect_projection,
+        effect_projection: index.effect_projection,
         modules: [JetCLIDocModule]{},
         items: [JetCLIDocItem]{},
         impls: [JetCLIDocImpl]{},
         doctests: [JetCLIDocTest]{},
     }
-    index := JetCLIDocIndex{definitions: [JetCLIDocDefinition]{}, members: [JetCLIDocMember]{}}
     loop doc_module in modules {
         unit :: JetCLIDocUnit{path: jet_cli_doc_stable_path(doc_module.path), source: doc_module.source}
         &graph.modules.push(JetCLIDocModule{
@@ -932,9 +755,8 @@ pub fn jet_cli_build_doc_graph(modules: [JetDriverDocModule], effect_projection:
         })
         loop test in jet_cli_doc_discover_doctests(unit) -> &graph.doctests.push(test)
         jet_cli_doc_collect_items(doc_module.items, unit, "", doc_module.pub_file, protocol_names, &graph.items, &graph.impls)
-        jet_cli_doc_index_items(&index, unit, doc_module.items)
     }
-    jet_cli_doc_enrich(&graph.items, index, modules)
+    jet_cli_doc_enrich(&graph.items, index)
     jet_cli_doc_sort_modules(&graph.modules)
     jet_cli_doc_sort_items(&graph.items)
     jet_cli_doc_sort_impls(&graph.impls)
@@ -949,17 +771,6 @@ pub fn jet_cli_doc_undocumented_public(graph: JetCLIDocGraph) -> [JetCLIDocItem]
         if item.public && item.summary == "" -> &undocumented.push(item)
     }
     undocumented
-}
-
-// EffectBudget.rs `render_effect_names`.
-fn jet_cli_doc_effect_names(effects: [String]) -> String Never! {
-    if effects.len() == 0 -> return "none"
-    effects.join(", ")
-}
-
-// EffectBudget.rs `render_effect_projection_line`.
-fn jet_cli_doc_effect_line(projection: JetCLIAuthority) -> String Never! {
-    "required effects: {jet_cli_doc_effect_names(projection.required)}; granted effects: {jet_cli_doc_effect_names(projection.granted)}; denied effects: {jet_cli_doc_effect_names(projection.denied)}; authority: {projection.authority}"
 }
 
 fn jet_cli_doc_source_value(source: JetCLIDocSource) -> JetCLIStatusValue Never! {
@@ -1068,7 +879,7 @@ fn jet_cli_doc_summary_text(item: JetCLIDocItem) -> String Never! {
 
 // `DocGraph::to_markdown`.
 pub fn jet_cli_doc_markdown(graph: JetCLIDocGraph) -> String Never! {
-    out := "# Jet Documentation\n\nGenerated from the checked semantic graph.\n\n## Effect Roles\n\n{jet_cli_doc_effect_line(graph.effect_projection)}\n\n## Modules\n\n"
+    out := "# Jet Documentation\n\nGenerated from the checked semantic graph.\n\n## Effect Roles\n\n{jet_cli_effect_projection_line(graph.effect_projection)}\n\n## Modules\n\n"
     loop doc_module in graph.modules {
         out = "{out}- `{doc_module.name}` — `{doc_module.path}` ([source]({jet_cli_doc_link(doc_module.source.link)}))\n"
         if doc_module.summary != "" -> out = "{out}  {doc_module.summary}\n"
@@ -1106,7 +917,7 @@ pub fn jet_cli_doc_markdown(graph: JetCLIDocGraph) -> String Never! {
 
 // `DocGraph::to_html`.
 pub fn jet_cli_doc_html(graph: JetCLIDocGraph) -> String Never! {
-    out := "<!doctype html><html><head><meta charset=\"utf-8\"><title>Jet Documentation</title></head><body><h1>Jet Documentation</h1><p>Generated from the checked semantic graph.</p><h2>Effect Roles</h2><p>{jet_cli_html_escape(jet_cli_doc_effect_line(graph.effect_projection))}</p><h2>Modules</h2><ul>"
+    out := "<!doctype html><html><head><meta charset=\"utf-8\"><title>Jet Documentation</title></head><body><h1>Jet Documentation</h1><p>Generated from the checked semantic graph.</p><h2>Effect Roles</h2><p>{jet_cli_html_escape(jet_cli_effect_projection_line(graph.effect_projection))}</p><h2>Modules</h2><ul>"
     loop doc_module in graph.modules {
         out = "{out}<li><code>{jet_cli_html_escape(doc_module.name)}</code> — <code>{jet_cli_html_escape(doc_module.path)}</code> (<a href=\"{jet_cli_html_escape(jet_cli_doc_link(doc_module.source.link))}\">source</a>)"
         if doc_module.summary != "" -> out = "{out}<p>{jet_cli_html_escape(doc_module.summary)}</p>"

@@ -295,15 +295,6 @@ pub struct JetCLISemStateGraph {
     pub transitions: [JetCLISemStateTransition]
 }
 
-// EffectBudget.rs `EffectProjection` (the application authority of the same
-// checked program `jet build` authorizes).
-pub struct JetCLISemEffectProjection {
-    pub required: [String]
-    pub granted: [String]
-    pub denied: [String]
-    pub authority: String
-}
-
 // One converted definition (Types.rs `SymbolDef`): the walk's record plus
 // the per-definition facts `convert_defs` attaches.
 pub struct JetCLISemDefinition {
@@ -314,7 +305,9 @@ pub struct JetCLISemDefinition {
     pub trait_contracts: [JetCLISemTraitContract]
 }
 
-// Types.rs `SemIndex`: the versioned index over one checked program.
+// Types.rs `SemIndex`: the versioned index over one checked program. Its
+// effect projection (EffectBudget.rs `EffectProjection`) is the application
+// authority of the same checked program `jet build` authorizes.
 pub struct JetCLISemIndex {
     pub definitions: [JetCLISemDefinition]
     pub definition_facts: [JetCLISemDefinitionFact]
@@ -322,7 +315,7 @@ pub struct JetCLISemIndex {
     pub instances: [JetCLISemInstance]
     pub outputs: [JetCLISemOutput]
     pub state_graphs: [JetCLISemStateGraph]
-    pub effect_projection: JetCLISemEffectProjection
+    pub effect_projection: JetCLIAuthority
     pub references: [JetCLISemRef]
     pub calls: [JetCLISemCall]
     pub effects: [JetCLISemEffect]

@@ -643,10 +643,10 @@ fn jet_cli_doc_result(file: String, source: String, color: Bool, json: Bool, che
     diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
     if jet_cli_errors(diagnostics).len() > 0 {
         if json -> return JetDriverVerbOutput{stdout: jet_cli_render_all_json(jet_cli_report_cwd(), file, source, diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
-        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, diagnostics, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, diagnostics, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
-    graph :: jet_cli_build_doc_graph(result.doc_modules, jet_cli_application_authority(result, None))
+    graph :: jet_cli_build_doc_graph(result.doc_modules, jet_cli_checked_semindex(result))
     if check {
         if jet_cli_doc_undocumented_public(graph).len() > 0 {
             if json -> return JetDriverVerbOutput{stdout: jet_cli_doc_undocumented_report(graph, result.doc_modules, color, true, jet_cli_report_cwd()), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
@@ -683,13 +683,15 @@ fn jet_cli_compile_semindex(file: String, color: Bool, json: Bool) -> JetDriverV
 fn jet_cli_semindex_result(file: String, color: Bool, json: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
     diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
     if jet_cli_errors(diagnostics).len() > 0 {
-        if json -> return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "`jet inspect semindex --json` on a file with errors is not part of the Jet-hosted CLI yet", jet_cli_why("E2104"), "run `jet inspect semindex {file}` to read the errors, or use the Rust `jet` for their JSON reports", color), exit_code: JET_DRIVER_EXIT_USAGE}
         source :: cli_files.read(file) ?? ""
-        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, diagnostics, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        if json -> return JetDriverVerbOutput{stdout: jet_cli_render_all_json(jet_cli_report_cwd(), file, source, diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        // One report per diagnostic, each followed by a blank line.
+        stderr := ""
+        loop diagnostic in diagnostics -> stderr = "{stderr}{diagnostic_render_all(file, source, [Diagnostic]{diagnostic}, color)}\n"
+        return JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
-    authority :: jet_cli_application_authority(result, None)
-    index :: jet_cli_build_semindex(result.doc_modules, JetCLISemEffectProjection{required: authority.required, granted: authority.granted, denied: authority.denied, authority: authority.authority})
+    index :: jet_cli_checked_semindex(result)
     if json -> return JetDriverVerbOutput{stdout: "{jet_cli_semindex_status_json(index)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     JetDriverVerbOutput{stdout: jet_cli_semindex_text(index), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }

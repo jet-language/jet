@@ -8,6 +8,7 @@
 // walk never runs a second checker. LSP hover and inlay text have no Jet
 // consumer and are not produced.
 use jet_driver.[
+    JetDriverCompileResult,
     JetDriverDocModule,
 ]
 use jet_foundation.[
@@ -1995,7 +1996,7 @@ fn jet_cli_sem_convert_defs(db: JetCLISemDB, modules: [JetDriverDocModule]) -> [
 // Build.rs `build_symbol_db` + `SymbolDB::finalize_index` (Build.rs
 // `build_index`): the semantic index of the checked user modules.
 // `effect_projection` is the application authority of the same program.
-pub fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: JetCLISemEffectProjection) -> JetCLISemIndex {
+pub fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: JetCLIAuthority) -> JetCLISemIndex {
     db := jet_cli_sem_db()
     module_paths := [String: String]{}
     loop doc_module in modules -> module_paths[doc_module.module_name] = doc_module.path
@@ -2075,4 +2076,12 @@ pub fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: 
         slot_boundaries: db.slot_boundaries,
         bypasses: db.bypasses,
     }
+}
+
+// jet-semindex lib.rs `open`: the semantic index of one checked compile
+// result, its effect projection the application authority of that program.
+// Every semantic consumer (semindex, doc, impact, find, help, expand, blame,
+// review, codemod) reads this one index.
+pub fn jet_cli_checked_semindex(result: JetDriverCompileResult) -> JetCLISemIndex {
+    jet_cli_build_semindex(result.doc_modules, jet_cli_application_authority(result, None))
 }
