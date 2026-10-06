@@ -466,12 +466,13 @@ pub(crate) fn jet_fs_directory_create(handle: i64, name: &String, mode: i64) -> 
     }
 }
 
-/// List a held directory in name order. Entries are never followed: a link
-/// to a directory reports `is_dir: false`.
-pub(crate) fn jet_fs_directory_list(handle: i64) -> Result<Vec<DirEntry>, IOError> {
+/// List a held directory. Each row is one entry: its kind byte (1 directory,
+/// 0 anything else; entries are never followed, so a link to a directory is
+/// 0) followed by the entry's raw name bytes. Rows are in raw-byte order.
+/// Core's `Directory.list` decodes the rows.
+pub(crate) fn jet_fs_directory_list(handle: i64) -> Result<Vec<Vec<u8>>, IOError> {
     #[cfg(unix)]
     {
-        use std::os::unix::ffi::OsStrExt;
         use jet_fs_sys as sys;
         let base = jet_fs_held_path(handle, IOOperation::Read)?;
         // A fresh descriptor starts reading at the first entry and is owned by
@@ -496,18 +497,30 @@ pub(crate) fn jet_fs_directory_list(handle: i64) -> Result<Vec<DirEntry>, IOErro
             if bytes == b"." || bytes == b".." {
                 continue;
             }
-            let name = std::ffi::OsStr::from_bytes(bytes).to_string_lossy().to_string();
             let is_dir = if kind == sys::DT_UNKNOWN {
-                jet_fs_stat_at(handle, &name, false)
-                    .map(|row| row.first().copied() == Some(1))
-                    .unwrap_or(false)
+                // The file system gave no type: describe the entry itself,
+                // never a link target, through the stream's own descriptor.
+                #[cfg(target_os = "linux")]
+                let flags = sys::O_PATH | sys::O_NOFOLLOW | sys::O_CLOEXEC;
+                #[cfg(not(target_os = "linux"))]
+                let flags = sys::O_RDONLY | sys::O_SYMLINK | sys::O_NONBLOCK | sys::O_CLOEXEC;
+                let probe = unsafe { sys::openat(fd, raw.as_ptr(), flags, 0 as std::ffi::c_uint) };
+                if probe < 0 {
+                    false
+                } else {
+                    let file = unsafe { <std::fs::File as std::os::fd::FromRawFd>::from_raw_fd(probe) };
+                    file.metadata().map(|meta| meta.is_dir()).unwrap_or(false)
+                }
             } else {
                 kind == sys::DT_DIR
             };
-            out.push(DirEntry { path: jet_fs_shown(&base, &name), name, is_dir });
+            let mut row = Vec::with_capacity(bytes.len() + 1);
+            row.push(is_dir as u8);
+            row.extend_from_slice(bytes);
+            out.push(row);
         }
         unsafe { sys::closedir(stream) };
-        out.sort_by(|left, right| left.name.cmp(&right.name));
+        out.sort_by(|left, right| left[1..].cmp(&right[1..]));
         return Ok(out);
     }
     #[cfg(not(unix))]
