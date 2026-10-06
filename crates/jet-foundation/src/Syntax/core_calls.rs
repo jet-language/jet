@@ -1407,7 +1407,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: b442c161430134434fa6d38d2b2cbcebfe709d2993b239d07ac6880cdaa91340
+// Source SHA-256: 4b78716ab75043a5113ffd7056d4948bd058a9fe35abcf1f21e99f6aca373bb0
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1531,7 +1531,6 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.files", "read_link"),
     ("core.files", "temp_dir"),
     ("core.files", "temp_file"),
-    ("core.term", "confirm"),
     ("core.term", "choose"),
     ("core.term", "input_secret"),
     ("core.term", "read_all_input"),
@@ -1817,7 +1816,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.args", "decode", "jet_args_decode", true, &[]),
     CoreCallRecord::new("core.args", "merge", "jet_config_merge", true, &[true, true]),
     CoreCallRecord::new("core.args", "spec", "jet_args_spec", true, &[]),
-    CoreCallRecord::new("core.term", "confirm", "jet_std_io_confirm", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.term", "choose", "jet_std_io_choose", true, &[true, true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.term", "input", "jet_std_io_input", true, &[]) .with_max_arity(1),
     CoreCallRecord::new( "core.term", "input_secret", "jet_std_io_input_secret", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
