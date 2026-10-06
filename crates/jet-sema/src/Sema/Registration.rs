@@ -937,6 +937,27 @@ impl<'a> Checker<'a> {
         if let Some(expected) = value_return.as_ref() {
             self.check_value_block(&mut f.body, expected, false, f.span);
         } else {
+            // Errors as values: `Ok()` supplies the unit success of a
+            // unit-fallible body. On the body's last line it is that body's
+            // result, so it checks as the `return Ok()` it means instead of a
+            // statement whose expected carrier was cleared.
+            if matches!(body_return.as_ref(), Some(Type::Result { ok, .. }) if is_void_named(ok)) {
+                if let Some(last) = f.body.last_mut() {
+                    let unit_ok_tail = matches!(
+                        &*last,
+                        Stmt::Expr(Expr::Call(call))
+                            if call.name == Syntax::LIT_OK
+                                && call.args.is_empty()
+                                && !self.funcs.contains_key(&call.name)
+                    );
+                    if unit_ok_tail {
+                        if let Stmt::Expr(tail) = std::mem::replace(last, Stmt::Return(None, f.span)) {
+                            let span = tail.span();
+                            *last = Stmt::Return(Some(tail), span);
+                        }
+                    }
+                }
+            }
             // D-DISCARD1=A: with no written return type the function returns
             // nothing, so a value on its last line is lost (E0433).
             let previous_lost_tail = self.lost_tail_span;
