@@ -1871,6 +1871,9 @@ pub fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [Se
     }
     calls := SemaEffectCallIndex{module: 0, modules: [SemaEffectModuleCalls]{}, node_by_key: node_by_key}
     loop module_row in inputs -> &calls.modules.push(sema_effect_module_calls(modules[module_row.module_index].call_facts))
+    any_unsafe :: loop node in nodes {
+        if node.is_unsafe -> break true
+    } ?? false
 
     loop module_index in 0..<inputs.len() {
         module_row :: inputs[module_index]
@@ -1879,8 +1882,12 @@ pub fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [Se
             node_index :: sema_effect_node_index(node_by_key, function.key) ?? next
             function_diagnostics := [Diagnostic]{}
             sema_effect_collect_function(&nodes, node_index, function, calls, &function_diagnostics)
-            audited := function.is_unsafe && (function.unsafe_gate.map((gate) -> gate.enabled) ?? false)
-            sema_effect_check_unsafe_statements_tir(&nodes, calls, function.key, function.body, audited, &function_diagnostics)
+            // A call needs an audited region only when its callee is an
+            // `#Unsafe` function; with none in the graph the walk finds nothing.
+            if any_unsafe {
+                audited := function.is_unsafe && (function.unsafe_gate.map((gate) -> gate.enabled) ?? false)
+                sema_effect_check_unsafe_statements_tir(&nodes, calls, function.key, function.body, audited, &function_diagnostics)
+            }
             sema_effect_publish_diagnostics(&diagnostics, module_row.source_segments, function_diagnostics)
         }
     }
