@@ -38,6 +38,27 @@ fn split(bytes: View<U8>) -> Packet Err! from bytes {
     Ok(Packet{header: header, body: body})
 }
 
+fn fill(window: ViewMut<U8>, value: Int) {
+    loop i in 0..<window.len() -> window[i] = U8{value}
+}
+
+// A write window over part of a write window reborrows the same storage.
+fn tail_mut(window: ViewMut<U8>, start: Int) -> ViewMut<U8> from window {
+    &window[start..<window.len()]
+}
+
+// A reader over a view parameter grabs subranges of that view.
+fn read(all: View<U8>) {
+    reader := Reader{bytes: all, at: 0}
+    first :: &reader.grab(2) ?? return
+    print(total(first))
+    second :: &reader.grab(3) ?? return
+    print(total(second))
+    print(reader.at)
+    tail :: &reader.grab(4) ?? all[0..<1]
+    print(total(tail))
+}
+
 fn run() {
     asset :: [U8{1}, U8{2}, U8{3}, U8{4}, U8{5}, U8{6}]
     all :: asset[0..<6]
@@ -47,14 +68,7 @@ fn run() {
     print(inner[0..<2].len())
     deeper :: inner[1..<4]
     print(total(deeper[0..<2]))
-    reader := Reader{bytes: all, at: 0}
-    first :: &reader.grab(2) ?? return
-    print(total(first))
-    second :: &reader.grab(3) ?? return
-    print(total(second))
-    print(reader.at)
-    tail :: &reader.grab(4) ?? all[0..<1]
-    print(total(tail))
+    read(all)
     packet :: split(all) ?? return
     print(total(packet.header))
     print(total(packet.body))
@@ -68,4 +82,13 @@ fn run() {
     center :: &window[1..<2]
     center[0] = U8{5}
     loop byte in data -> print(Int.from_u8(byte))
+    // Constant-bound write windows lend their storage to a write view
+    // parameter, and a write subrange returned from one still reaches `cells`.
+    cells := [U8{0}, U8{0}, U8{0}, U8{0}, U8{0}]
+    lead :: &cells[0..<2]
+    fill(lead, 7)
+    whole :: &cells[0..<5]
+    rest :: tail_mut(whole, 3)
+    fill(rest, 9)
+    loop byte in cells -> print(Int.from_u8(byte))
 }

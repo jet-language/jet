@@ -912,7 +912,14 @@ fn jet_rust_emit_parameter_place(ctx: JetRustEmitContext, function: MIRFunction,
             parameter :: jet_rust_emit_find_parameter(function, index)
             if mutable {
                 if parameter.access == MIRAccess.Move -> return name
-                if parameter.access != MIRAccess.Write -> panic("MIR parameter place is not writable")
+                // D-MEMPROVENANCE2: a by-value `ViewMut<T>` parameter is
+                // itself a `&mut [T]`; a write subrange reborrows through it
+                // (MIRRust parameter_place `mutable_view`).
+                mutable_view := false
+                if parameter.ty.kind == .Apply(type_name, type_args) {
+                    mutable_view = type_name.name == "ViewMut" && type_args.len() == 1 && parameter.access == MIRAccess.Read && !jet_rust_emit_is_receiver(function, index) && !jet_rust_emit_type_is_borrowed(parameter.ty)
+                }
+                if parameter.access != MIRAccess.Write && !mutable_view -> panic("MIR parameter place is not writable")
                 return "*{name}"
             }
             // MIRRust parameter_place: a by-value Read parameter (scalar ABI)

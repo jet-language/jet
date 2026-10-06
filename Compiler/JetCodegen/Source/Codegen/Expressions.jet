@@ -1336,12 +1336,15 @@ fn jet_codegen_lower_expression_place(builder: &JetCodegenBuilder, program: JetC
         // The fixed-length range window `&list[a..b]` written through is a
         // range place over the owner list, so a write argument or a mutating
         // receiver edits the owner's storage instead of a copy.
+        // D-MEMPROVENANCE2: `&view[a..b]` over a declared `ViewMut<T>` is the
+        // narrower range of the same owner place (Rust: write_window_receiver).
         .Slice(base, _, _, range, location) -> {
-            list_base :: if jet_codegen_builtin_untag(base.ty) == {
+            window_base :: if jet_codegen_builtin_untag(base.ty) == {
                 .List(_) -> true
+                .Apply(name, view_args) -> name == "ViewMut" && view_args.len() == 1
                 else -> false
             }
-            if access != MIRAccess.Write || !list_base -> return None
+            if access != MIRAccess.Write || !window_base -> return None
             base_place := jet_codegen_lower_expression_place(&builder, program, base, access) ?? return None
             range_expr :: range ?? panic("checked range window has no Range value")
             range_value := jet_codegen_lower_expr(&builder, program, range_expr)
