@@ -116,6 +116,13 @@ The `bind` shorthand accepts the explicit binding-plan form shown by help:
 `bind <name> --update --accept <candidate-digest>`. Foreign-header bind-in
 commands remain under `jet inspect bind`.
 
+`fix memory` uses exercised runtime witnesses, not whole-program memory proof.
+It applies only a single repair whose original byte span still matches the
+source (or recognizes that the replacement is already present). Overlapping,
+stale, out-of-root, and ambiguous suggestions remain options. `--dry-run`
+reports prospective repairs without writing files; its JSON `changed` fields
+remain false.
+
 ## Command groups
 
 The generated help groups subcommands as follows:
