@@ -2029,8 +2029,8 @@ pub(crate) fn module_call_signature(
     key: &(String, String),
     type_args: &[Type],
 ) -> Option<Vec<(crate::AST::AccessConvention, Type)>> {
-    let sig = cx.import_sigs.get(key)?;
-    let Some(generic) = cx.import_generics.get(key) else {
+    let sig = cx.fact_import_sigs(key)?;
+    let Some(generic) = cx.fact_import_generic(key) else {
         return Some(sig.iter().map(|(conv, ty)| {
             (*conv, cx.expand_type_aliases(ty).with_effective_fn_returns())
         }).collect());
@@ -2062,7 +2062,7 @@ pub(crate) fn demand_module_generic_function(
     function: &str,
     explicit_type_args: &[Type],
 ) -> Result<Option<(String, String)>, String> {
-    let Some(generic) = cx.import_generics.get(sig_key) else {
+    let Some(generic) = cx.fact_import_generic(sig_key) else {
         return Ok(None);
     };
     if explicit_type_args.len() != generic.type_params.len() {

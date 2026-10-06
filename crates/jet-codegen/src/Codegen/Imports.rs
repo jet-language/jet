@@ -1773,7 +1773,7 @@ pub(crate) struct ImportedGenericFunction {
     pub(crate) type_params: Vec<String>,
 }
 
-fn imported_generic_function(
+pub(crate) fn imported_generic_function(
     bundle: &ProgramBundle,
     target: usize,
     function: &crate::AST::Func,

@@ -218,6 +218,10 @@ struct BundleFunctionFacts {
     value_type: Type,
     source_type: Type,
     contracts: (Vec<ContractClause>, Vec<ContractClause>),
+    /// #4609: the declaring module and type-parameter order of a generic
+    /// function, so a package-bound call names the same canonical instance an
+    /// imported one does.
+    generic: Option<super::Imports::ImportedGenericFunction>,
 }
 
 struct BundleConstantFacts {
@@ -370,6 +374,7 @@ impl BundleCodegenFacts {
                             params, ret, binding: (rust_module.clone(), function.name.clone()),
                             value_type, source_type,
                             contracts: (function.pre.clone(), function.post.clone()),
+                            generic: super::Imports::imported_generic_function(bundle, owner, function),
                         });
                         if crate::Sema::guest_import_function_signature(function).is_some() {
                             metadata.foreign_call_keys.insert(format!("{rust_module}::{}", function.name),
@@ -1914,6 +1919,16 @@ impl Cx {
 
     pub(crate) fn fact_import_sigs(&self, key: &(String, String)) -> Option<&Vec<(AccessConvention, Type)>> {
         self.import_sigs.get(key).or_else(|| self.bound_function(key).map(|fact| &fact.params))
+    }
+
+    /// The generic target behind `fact_import_sigs(key)`, read from the same
+    /// source as that signature: the module's imports when they declare the
+    /// key, else the package-bound function.
+    pub(crate) fn fact_import_generic(&self, key: &(String, String)) -> Option<&super::Imports::ImportedGenericFunction> {
+        if self.import_sigs.contains_key(key) {
+            return self.import_generics.get(key);
+        }
+        self.bound_function(key)?.generic.as_ref()
     }
 
     pub(crate) fn fact_import_rets(&self, key: &(String, String)) -> Option<&Option<Type>> {
