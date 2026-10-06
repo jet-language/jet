@@ -927,6 +927,13 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         }
         _ := &place_slots.add(place.id.value, slot)
     }
+    // A parameter's local row names its Parameter place, not a Local one;
+    // require diagnostics read it through that place's root slot.
+    loop row in function.locals {
+        if local_slots.get(row.id.value) == None {
+            if place_slots.get(row.place.value) == .Val(slot) -> _ := &local_slots.add(row.id.value, slot)
+        }
+    }
     // A place a closure captures by reference, or whose raw address is taken
     // (Pointers.jet), makes its root a cell.
     loop block in function.blocks {
@@ -2559,6 +2566,14 @@ fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         if lower_route_name(p, call) == "core.compare.eq" && args.len() == 2 -> return lower_core_equal(p, c, &m, &f, instruction, args[0].value, args[1].value)
         values :: lower_route_values(p, &m, &f, call, args, "StaticPreludeCall") ?? return
         return lower_route_call(p, c, &m, &f, instruction, call, values, "StaticPreludeCall")
+    }
+    // MIRRust.rs AllocNew: the allocator constructor is a plain route call
+    // (jet_mem::JetArena::new, ...::with_capacity); an inline-backed Fixed
+    // has no route and is reported by lower_route_values.
+    if semantic == .AllocNew(call, _, inline_size, args) {
+        if inline_size != None -> return lower_fail(&m, &f, "AllocNew {lower_route_name(p, call)} with inline backing is not lowered at O0 yet")
+        values :: lower_route_values(p, &m, &f, call, args, "AllocNew") ?? return
+        return lower_route_call(p, c, &m, &f, instruction, call, values, "AllocNew")
     }
     // MIRRust.rs semantic: both are a plain Prelude call with their values.
     if semantic == .MathBuiltin(_, call, args) -> return lower_route_call(p, c, &m, &f, instruction, call, args, "MathBuiltin")

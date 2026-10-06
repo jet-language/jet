@@ -142,7 +142,12 @@ fn lower_walk_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, root: LIR
                     base = found.base
                     offset = found.offset
                 } else {
-                    lower_fail(&m, &f, "non-List, non-Map index projection is not lowered at O0 yet")
+                    kind_name :: if kind == {
+                        .Lane -> "Lane"
+                        .Pool -> "Pool"
+                        else -> "other"
+                    }
+                    lower_fail(&m, &f, "non-List, non-Map index projection ({kind_name} on {mir_type_display_name(ty)}) is not lowered at O0 yet")
                     return None
                 }
             }
