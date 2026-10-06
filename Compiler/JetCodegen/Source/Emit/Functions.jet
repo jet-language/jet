@@ -78,13 +78,15 @@ fn jet_rust_emit_value_declaration(ctx: &JetRustEmitContext, function: MIRFuncti
     "let mut {jet_rust_emit_value_slot(value.id)}: Option<{jet_rust_emit_type(&ctx, value.ty)}> = None;"
 }
 
-// MIRRust localizable_value_slots: a value whose type has no observable drop
-// may be declared at its definition instead of the function top.
-fn jet_rust_emit_value_slot_localizable(ty: MIRType) -> Bool Never! {
-    if ty.kind == {
-        .Bool | .Int | .IntN(_, _) | .Float | .Float32 | .Char | .String -> true
-        else -> false
-    }
+// MIRRust localizable_value_slots: a value whose drop does nothing but free
+// memory may be declared at its definition instead of the function top (its
+// value is freed when that scope ends, not when the function returns):
+// every plain-drop type (jet_rust_emit_type_drop_is_plain over
+// ctx.plain_drop_types) unless the value's ownership drops a handle, a shared
+// count or a view. The caller also rejects a Rust slot type that borrows.
+fn jet_rust_emit_value_slot_localizable(ctx: JetRustEmitContext, value: MIRValueFact) -> Bool Never! {
+    if value.ownership.drop != MIRDropKind.NoDrop && value.ownership.drop != MIRDropKind.Value -> return false
+    jet_rust_emit_type_drop_is_plain(value.ty, ctx.plain_drop_types)
 }
 
 fn jet_rust_emit_blank_line(bytes: [U8]) -> Bool Never! {
@@ -135,6 +137,49 @@ struct JetRustEmitLocalizedSlots {
     pub body_start: Int
 }
 
+// MIRRust lent_value_slots: the candidate value slots (ids in `types`) some
+// `body` statement lends to a reference slot: a statement assigning
+// `slot = ..` to a slot whose `let .. = None;` declaration in `lines[1..]`
+// (the whole function after its signature) names a borrowing type (`&` or a
+// lifetime) and that mentions the candidate. Such a candidate must outlive
+// the reference slot, so it keeps its function-wide declaration.
+fn jet_rust_emit_lent_value_slots(lines: [String], body: [String], types: [String:String]) -> [String:Bool] Never! {
+    references := [String:Bool]{}
+    loop (index, entry) in lines {
+        if index < 1 -> next
+        loop line in entry.split("\n").to_list() {
+            bytes :: line.bytes()
+            start := 0
+            loop start < bytes.len() && Int.from_u8(bytes[start]) == 32 -> start += 1
+            content :: String.from_bytes(~(bytes[start..<bytes.len()])) ?? ""
+            if !content.starts_with("let ") || !content.ends_with(" = None;") -> next
+            start += 4
+            if content.starts_with("let mut ") -> start += 4
+            end := start
+            loop end < bytes.len() && jet_rust_emit_identifier_byte(bytes[end]) -> end += 1
+            tail :: String.from_bytes(~(bytes[end..<bytes.len()])) ?? ""
+            if !tail.starts_with(": ") -> next
+            if tail.contains("&") || tail.contains("'") -> references[String.from_bytes(~(bytes[start..<end])) ?? ""] = true
+        }
+    }
+    lent := [String:Bool]{}
+    if references.len() == 0 -> return lent
+    loop line in body {
+        bytes :: line.bytes()
+        indent := 0
+        loop indent < bytes.len() && Int.from_u8(bytes[indent]) == 32 -> indent += 1
+        target := indent
+        loop target < bytes.len() && jet_rust_emit_identifier_byte(bytes[target]) -> target += 1
+        name :: String.from_bytes(~(bytes[indent..<target])) ?? ""
+        tail :: String.from_bytes(~(bytes[target..<bytes.len()])) ?? ""
+        if !tail.starts_with(" = ") || references.get(name) == None -> next
+        loop mention in jet_rust_emit_value_mentions(line) {
+            if types.get(mention.id) != None -> lent[mention.id] = true
+        }
+    }
+    lent
+}
+
 // MIRRust localize_value_slots: `lines[values_start..values_end]` are the
 // value declarations and every later line is the body. The declarations need
 // not follow `function.values` one to one (a reference-binding payload has
@@ -147,7 +192,10 @@ struct JetRustEmitLocalizedSlots {
 fn jet_rust_emit_localize_value_slots(ctx: &JetRustEmitContext, function: MIRFunction, lines: [String], values_start: Int, values_end: Int) -> JetRustEmitLocalizedSlots Never! {
     types := [String:String]{}
     loop value in function.values {
-        if jet_rust_emit_value_slot_localizable(value.ty) -> &types.add("{value.id.value}", jet_rust_emit_type(&ctx, value.ty)).drop("value ids are unique")
+        if !jet_rust_emit_value_slot_localizable(ctx, value) -> next
+        rendered :: jet_rust_emit_type(&ctx, value.ty)
+        if rendered.contains("&") || rendered.contains("'") -> next
+        &types.add("{value.id.value}", rendered).drop("value ids are unique")
     }
     if types.len() == 0 -> return JetRustEmitLocalizedSlots{lines: ~lines, body_start: values_end}
     declared := [String:Int]{}
@@ -199,6 +247,7 @@ fn jet_rust_emit_localize_value_slots(ctx: &JetRustEmitContext, function: MIRFun
         }
         &open.push(index)
     }
+    pinned :: jet_rust_emit_lent_value_slots(lines, body, types)
     localized := [Int:String]{}
     dropped := [String:Bool]{}
     loop value in function.values {
@@ -212,7 +261,7 @@ fn jet_rust_emit_localize_value_slots(ctx: &JetRustEmitContext, function: MIRFun
         indent :: indents[line]
         rest :: if indent < bytes.len() -> String.from_bytes(~(bytes[indent..<bytes.len()])) ?? "" else -> ""
         defines :: (on_first_line.get(id) ?? 0) == 1 && (first_column.get(id) ?? -1) == indent && rest.starts_with("__jet_v_{id} = Some(")
-        if defines && (last_line.get(id) ?? body.len()) < scope_end[line] {
+        if defines && (last_line.get(id) ?? body.len()) < scope_end[line] && pinned.get(id) == None {
             &localized.add(line, id).drop("one definition per line")
             &dropped.add(id, true).drop("value ids are unique")
         }

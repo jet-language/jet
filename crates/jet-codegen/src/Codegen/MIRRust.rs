@@ -215,6 +215,99 @@ fn collect_view_carriers(
     }
 }
 
+/// True when dropping a value of `ty` does nothing but free memory: it is a
+/// scalar, a `String`, an owned list/map/option/result/tuple of such values,
+/// or a nominal row `plain` reports. Handles, shared counts, views, callables,
+/// trait objects and tagged carriers are never plain.
+fn type_drop_is_plain(ty: &MirType, plain: &dyn Fn(&str) -> bool) -> bool {
+    let nested = |inner: &MirType| type_drop_is_plain(inner, plain);
+    match ty.kind() {
+        MirTypeKind::Int
+        | MirTypeKind::Float
+        | MirTypeKind::Float32
+        | MirTypeKind::Bool
+        | MirTypeKind::Char
+        | MirTypeKind::String
+        | MirTypeKind::IntN { .. } => true,
+        MirTypeKind::List(inner) | MirTypeKind::Option(inner) => nested(inner),
+        MirTypeKind::FixedList { elem, .. } => nested(elem),
+        MirTypeKind::InlineRange { base, .. } | MirTypeKind::Quantity { base, .. } => nested(base),
+        MirTypeKind::Map { key, value } => nested(key) && nested(value),
+        MirTypeKind::Result { ok, err } => nested(ok) && nested(err),
+        MirTypeKind::Tuple(fields) => fields.iter().all(|(_, field)| nested(field)),
+        MirTypeKind::Apply { name, args } => args.is_empty() && plain(&name.name),
+        _ => false,
+    }
+}
+
+/// The names and keys of program-declared, non-generic, owned type rows
+/// whose values own nothing but memory (`type_drop_is_plain` for every
+/// stored field and payload). Rows the runtime spells (`runtime_declared`),
+/// compiler builtins, Core rows (`<corelib>/`, `core.`, `core::` keys), view
+/// carriers, laid-out rows and shared or move-only rows are never plain, and
+/// neither is a name or key any such row also uses. The set starts from every
+/// eligible row and shrinks to its fixed point, so recursive rows stay plain.
+fn collect_plain_drop_types(
+    program: &MirProgram,
+    runtime_declared: &dyn Fn(&MirTypeDef) -> bool,
+    view_carriers: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    let eligible = |def: &MirTypeDef| {
+        !runtime_declared(def)
+            && def.compiler_builtin.is_none()
+            && !def.key.starts_with("<corelib>/")
+            && !def.key.starts_with("core.")
+            && !def.key.starts_with("core::")
+            && def.generic_params.is_empty()
+            && def.layout.is_none()
+            && matches!(def.ownership, MirOwnershipMode::Copy | MirOwnershipMode::Owned)
+            && !view_carriers.contains(&def.key)
+    };
+    let mut plain = BTreeSet::new();
+    let mut tainted = BTreeSet::new();
+    for def in &program.types {
+        let set = if eligible(def) { &mut plain } else { &mut tainted };
+        set.insert(def.key.clone());
+        set.insert(def.name.clone());
+    }
+    for label in &tainted {
+        plain.remove(label);
+    }
+    loop {
+        let mut shrank = false;
+        for def in &program.types {
+            if !plain.contains(&def.key) && !plain.contains(&def.name) {
+                continue;
+            }
+            let holds = |ty: &MirType| type_drop_is_plain(ty, &|name: &str| plain.contains(name));
+            let stays = match &def.kind {
+                MirTypeDefKind::Struct { fields, .. } => fields
+                    .iter()
+                    .filter(|field| !field.computed)
+                    .all(|field| holds(&field.ty)),
+                MirTypeDefKind::Enum { variants, .. } => {
+                    variants.iter().all(|variant| match &variant.payload {
+                        MirVariantPayload::Unit => true,
+                        MirVariantPayload::Single(ty) => holds(ty),
+                        MirVariantPayload::Named(fields) => fields.iter().all(|field| holds(&field.ty)),
+                    })
+                }
+                MirTypeDefKind::Distinct { base, .. } => holds(base),
+                MirTypeDefKind::Alias { target } => holds(target),
+                MirTypeDefKind::UnitFamily { .. } => true,
+            };
+            if !stays {
+                plain.remove(&def.key);
+                plain.remove(&def.name);
+                shrank = true;
+            }
+        }
+        if !shrank {
+            return plain;
+        }
+    }
+}
+
 /// D-MEM-VIEWRET1 (#4392): the lifetime a callable signature names for the
 /// views it returns.
 enum ViewReturnLifetime {
@@ -1895,11 +1988,49 @@ fn for_each_value_mention(text: &str, mut visit: impl FnMut(usize, usize, u64)) 
     }
 }
 
+/// The candidate value slots some `body` statement lends to a reference
+/// slot: a statement assigning `slot = ..` to a slot whose `let .. = None;`
+/// declaration in `text` (the whole function after its signature) names a
+/// borrowing type (`&` or a lifetime) and that mentions the candidate. Such
+/// a candidate must outlive the reference slot, so it keeps its
+/// function-wide declaration.
+fn lent_value_slots(text: &str, body: &str, candidates: &BTreeMap<u64, String>) -> BTreeSet<u64> {
+    let references: BTreeSet<&str> = text
+        .lines()
+        .filter_map(|line| {
+            let content = line.trim_start_matches(' ');
+            let rest = content.strip_prefix("let ")?;
+            let rest = rest.strip_prefix("mut ").unwrap_or(rest);
+            let name = rest.bytes().take_while(|byte| is_identifier_byte(*byte)).count();
+            let ty = rest[name..].strip_prefix(": ")?.strip_suffix(" = None;")?;
+            (ty.contains('&') || ty.contains('\'')).then_some(&rest[..name])
+        })
+        .collect();
+    let mut lent = BTreeSet::new();
+    if references.is_empty() {
+        return lent;
+    }
+    for line in body.lines() {
+        let content = line.trim_start_matches(' ');
+        let target = content.bytes().take_while(|byte| is_identifier_byte(*byte)).count();
+        if !content[target..].starts_with(" = ") || !references.contains(&content[..target]) {
+            continue;
+        }
+        for_each_value_mention(line, |_, _, id| {
+            if candidates.contains_key(&id) {
+                lent.insert(id);
+            }
+        });
+    }
+    lent
+}
+
 /// Declares block-local value slots at their definition. `out[slots_start..
 /// slots_end]` holds the function's slot declarations and everything after it
 /// the body. A candidate slot (no observable drop) whose first body mention
 /// starts its `slot = Some(..);` statement, and whose later mentions all stay
 /// in that statement's lexical scope (no line between them is indented less),
+/// and that no statement lends to a reference slot (`lent_value_slots`),
 /// becomes `let mut slot: Option<T> = Some(..);` there; a candidate the body
 /// never mentions loses its declaration. Returns where the declarations end.
 fn localize_value_slots(
@@ -1965,6 +2096,7 @@ fn localize_value_slots(
         }
         open.push(index);
     }
+    let pinned = lent_value_slots(&out[slots_start..], body, candidates);
     let mut localized: BTreeMap<usize, u64> = BTreeMap::new();
     let mut dropped: BTreeSet<u64> = BTreeSet::new();
     for id in candidates.keys() {
@@ -1979,7 +2111,7 @@ fn localize_value_slots(
         let defines = mention.on_first_line == 1
             && mention.first_column == indents[line]
             && lines[line][indents[line]..].starts_with(&format!("__jet_v_{id} = Some("));
-        if defines && mention.last_line < scope_end[line] {
+        if defines && mention.last_line < scope_end[line] && !pinned.contains(id) {
             localized.insert(line, *id);
             dropped.insert(*id);
         }
@@ -3612,6 +3744,9 @@ struct RustEmitter<'a> {
     view_lifetime: std::cell::Cell<Option<&'static str>>,
     /// D-MEM-VIEWRET1 (#4392): `collect_view_carriers` for this program.
     view_carriers: BTreeSet<String>,
+    /// `collect_plain_drop_types` for this program: rows whose values own
+    /// nothing but memory, so their slots may be declared at definition.
+    plain_drop_types: BTreeSet<String>,
     partial_moves: BTreeMap<MirFunctionId, Vec<PartialMoveRoot>>,
     shared_capture_locals: BTreeMap<MirFunctionId, BTreeSet<MirLocalId>>,
     move_facts: BTreeMap<MirFunctionId, MoveFacts>,
@@ -3806,6 +3941,7 @@ impl<'a> RustEmitter<'a> {
             history_callback_lifetime: std::cell::Cell::new("'static"),
             view_lifetime: std::cell::Cell::new(None),
             view_carriers: BTreeSet::new(),
+            plain_drop_types: BTreeSet::new(),
             partial_moves: BTreeMap::new(),
             shared_capture_locals: BTreeMap::new(),
             move_facts: BTreeMap::new(),
@@ -3838,7 +3974,13 @@ impl<'a> RustEmitter<'a> {
         };
         let view_carriers =
             collect_view_carriers(program, &|def: &MirTypeDef| emitter.jet_declares_type(def));
+        let plain_drop_types = collect_plain_drop_types(
+            program,
+            &|def: &MirTypeDef| emitter.runtime_declares_type(def),
+            &view_carriers,
+        );
         emitter.view_carriers = view_carriers;
+        emitter.plain_drop_types = plain_drop_types;
         for function in &program.functions {
             let roots = emitter.plan_partial_moves(function);
             if !roots.is_empty() {
@@ -19193,26 +19335,24 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
-    /// Value slots whose type has no observable drop: declaring one at its
-    /// definition instead of the function top changes only its scope.
+    /// Value slots whose drop does nothing but free memory: declaring one at
+    /// its definition instead of the function top changes only its scope
+    /// (its value is freed when that scope ends, not when the function
+    /// returns). Every plain-drop type qualifies (`type_drop_is_plain` over
+    /// `plain_drop_types`) unless the value's ownership drops a handle, a
+    /// shared count or a view, or its Rust slot type borrows.
     fn localizable_value_slots(&self, function: &MirFunction) -> BTreeMap<u64, String> {
+        let plain = |name: &str| self.plain_drop_types.contains(name);
         function
             .values
             .iter()
-            .filter(|(value, ty, _, _)| {
+            .filter(|(value, ty, _, ownership)| {
                 self.history_binding(*value).is_none()
-                    && matches!(
-                        ty.kind(),
-                        MirTypeKind::Bool
-                            | MirTypeKind::Int
-                            | MirTypeKind::IntN { .. }
-                            | MirTypeKind::Float
-                            | MirTypeKind::Float32
-                            | MirTypeKind::Char
-                            | MirTypeKind::String
-                    )
+                    && matches!(ownership.drop, MirDropKind::None | MirDropKind::Value)
+                    && type_drop_is_plain(ty, &plain)
             })
             .map(|(value, ty, _, _)| (value.0, self.rust_local_type(ty)))
+            .filter(|(_, rust)| !rust.contains('&') && !rust.contains('\''))
             .collect()
     }
 

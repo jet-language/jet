@@ -158,6 +158,97 @@ fn jet_rust_emit_collect_view_carriers(ctx: &JetRustEmitContext) -> [String:Bool
     carriers
 }
 
+// MIRRust type_drop_is_plain: dropping a value of `ty` does nothing but free
+// memory: a scalar, a `String`, an owned list/map/option/result/tuple of such
+// values, or a nominal row in `plain`. Handles, shared counts, views,
+// callables, trait objects and tagged carriers are never plain.
+fn jet_rust_emit_type_drop_is_plain(ty: MIRType, plain: [String:Bool]) -> Bool Never! {
+    if ty.kind == {
+        .Int | .Float | .Float32 | .Bool | .Char | .String | .IntN(_, _) -> return true
+        .List(inner) | .Option(inner) -> return jet_rust_emit_type_drop_is_plain(inner, plain)
+        .FixedList(elem, _) -> return jet_rust_emit_type_drop_is_plain(elem, plain)
+        .InlineRange(base, _, _) -> return jet_rust_emit_type_drop_is_plain(base, plain)
+        .Quantity(base, _) -> return jet_rust_emit_type_drop_is_plain(base, plain)
+        .Map(key, value) -> return jet_rust_emit_type_drop_is_plain(key, plain) && jet_rust_emit_type_drop_is_plain(value, plain)
+        .Result(ok, err) -> return jet_rust_emit_type_drop_is_plain(ok, plain) && jet_rust_emit_type_drop_is_plain(err, plain)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if !jet_rust_emit_type_drop_is_plain(field.ty, plain) -> return false
+            }
+            return true
+        }
+        .Apply(name, args) -> return args.len() == 0 && (plain.get(name.name) ?? false)
+        else -> return false
+    }
+}
+
+// MIRRust collect_plain_drop_types: the names and keys of program-declared,
+// non-generic, owned type rows whose values own nothing but memory
+// (`jet_rust_emit_type_drop_is_plain` for every stored field and payload).
+// Rows the runtime spells, compiler builtins, Core rows (`<corelib>/`,
+// `core.`, `core::` keys), view carriers, laid-out rows and shared or
+// move-only rows are never plain, and neither is a name or key any such row
+// also uses. The set (the labels mapped to `true`) starts from every eligible
+// row and shrinks to its fixed point, so recursive rows stay plain.
+fn jet_rust_emit_collect_plain_drop_types(ctx: &JetRustEmitContext) -> [String:Bool] Never! {
+    eligible := [Bool]{}
+    tainted := [String:Bool]{}
+    loop definition in ctx.program.types {
+        owned :: definition.ownership == MIROwnershipMode.Copy || definition.ownership == MIROwnershipMode.Owned
+        row_eligible :: !jet_rust_emit_runtime_declares_type(&ctx, definition) && definition.compiler_builtin == None && !definition.key.starts_with("<corelib>/") && !definition.key.starts_with("core.") && !definition.key.starts_with("core::") && definition.generic_params.len() == 0 && definition.layout == None && owned && ctx.view_carriers.get(definition.key) == None
+        &eligible.push(row_eligible)
+        if !row_eligible {
+            tainted[definition.key] = true
+            tainted[definition.name] = true
+        }
+    }
+    plain := [String:Bool]{}
+    loop (index, definition) in ctx.program.types {
+        if !eligible[index] -> next
+        if tainted.get(definition.key) == None -> plain[definition.key] = true
+        if tainted.get(definition.name) == None -> plain[definition.name] = true
+    }
+    shrank := true
+    loop shrank {
+        shrank = false
+        loop definition in ctx.program.types {
+            if !(plain.get(definition.key) ?? false) && !(plain.get(definition.name) ?? false) -> next
+            stays := true
+            if definition.kind == {
+                .Struct(fields, _) -> {
+                    loop field in fields {
+                        if !field.computed && !jet_rust_emit_type_drop_is_plain(field.ty, plain) -> stays = false
+                    }
+                }
+                .Enum(variants, _) -> {
+                    loop variant in variants {
+                        if variant.payload == {
+                            .Unit -> {}
+                            .Single(value) -> {
+                                if !jet_rust_emit_type_drop_is_plain(value, plain) -> stays = false
+                            }
+                            .Named(fields) -> {
+                                loop field in fields {
+                                    if !jet_rust_emit_type_drop_is_plain(field.ty, plain) -> stays = false
+                                }
+                            }
+                        }
+                    }
+                }
+                .Distinct(base, _) -> stays = jet_rust_emit_type_drop_is_plain(base, plain)
+                .Alias(target) -> stays = jet_rust_emit_type_drop_is_plain(target, plain)
+                .UnitFamily(_) -> {}
+            }
+            if !stays {
+                plain[definition.key] = false
+                plain[definition.name] = false
+                shrank = true
+            }
+        }
+    }
+    plain
+}
+
 // MIRRust type_def_generics: `<'__jet_view, …>` for a declaration whose type
 // generics render as `generics`, when the declared row holds a view.
 fn jet_rust_emit_type_def_generics(ctx: JetRustEmitContext, definition: MIRTypeDef, generics: String) -> String Never! {
