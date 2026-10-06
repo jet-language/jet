@@ -733,10 +733,17 @@ A system call wrapper returns the kernel's result: a value, or `-errno` in
 | `os_protect(address, size, protection)`, `os_unmap(address, size)` | mprotect(2), munmap(2) over whole pages |
 | `os_exit(status)` | exit_group(2) |
 | `os_store_word(address, value)` | One 8-byte store. `#[Unsafe, FFI(asm)]` |
+| `os_load_word(address)`, `os_load_byte(address) -> Int` | Read one word/byte from caller-owned readable memory. `#[Unsafe, FFI(asm)]` |
 | `os_copy_in(address, bytes)` | Copy a `[U8]` in, one little-endian word at a time |
 | `os_call_address(address, argument) -> Int` | Call-code-address (below). `#[Unsafe, FFI(asm)]` |
+| `os_call_address_two(address, first, second) -> Int` | Call-code-address with two System V word arguments. `#[Unsafe, FFI(asm)]` |
 | `os_library_open(path)`, `os_library_symbol(library, name)` | Bind runtime exports by name through the dynamic linker (today's runtime only, below) |
 | `os_page_round(size)`, `OS_PAGE_SIZE`, `OS_PROT_*`, `OS_SYS_*` | Helpers and constants |
+
+FFI assembly functions use the ordinary braced function body immediately after
+their return type, as the `os_call_address` example below shows. Source gates use
+the dev release Jet checker so this OS layer and the rest of the assembled
+compiler share the same accepted grammar.
 
 Threads come next, on the same `os_syscall`: `clone3` with a stack from
 `os_map` and a second assembly entry that switches to the new stack and
