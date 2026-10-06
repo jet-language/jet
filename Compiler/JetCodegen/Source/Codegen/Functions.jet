@@ -940,21 +940,23 @@ fn jet_codegen_lower_byte_list_constant(ty: Type, value: TComptimeValue) -> MIRC
         else -> false
     }
     if !is_byte_list -> return None
-    elements :: if value == {
-        .List(values) -> values
-        else -> return None
-    }
-    bytes := [U8]{}
-    loop element in elements {
-        if element == {
-            .Int(literal) -> {
-                byte :: U8.from_int(literal) ?? return None
-                &bytes.push(byte)
+    if value == {
+        .List(elements) -> {
+            bytes := [U8]{}
+            loop element in elements {
+                if element == {
+                    .Int(literal) -> {
+                        byte :: U8.from_int(literal) ?? return None
+                        &bytes.push(byte)
+                    }
+                    else -> return None
+                }
             }
-            else -> return None
+            return Val(MIRConstant.Bytes{value: bytes})
         }
+        else -> {}
     }
-    Val(MIRConstant.Bytes{value: bytes})
+    None
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::inline_known_constant_reads
