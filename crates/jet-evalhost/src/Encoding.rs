@@ -14,9 +14,6 @@ use jet_foundation::Diagnostics::{Diagnostic, Span};
 // The Foundation carrier's tier-side accessors are a trait defined by the
 // included Prelude `DataTree.rs`; the host adapters below call them by name.
 
-mod encoding_base_rt {
-    include!("../../jet-codegen/src/Prelude/Core/EncodingBase.rs");
-}
 
 mod encoding_error_rt {
 }

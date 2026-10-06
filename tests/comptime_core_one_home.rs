@@ -292,13 +292,6 @@ fn round_three_value_kernels_have_one_semantic_home() {
             ],
         ),
         (
-            "Core/EncodingBase.rs",
-            [
-                "crates/jet-codegen/src/Codegen/mod.rs",
-                "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
-            ],
-        ),
-        (
             "Core/NetPure.rs",
             [
                 "crates/jet-codegen/src/Codegen/mod.rs",
@@ -343,6 +336,17 @@ fn round_three_value_kernels_have_one_semantic_home() {
     assert!(!codecs.contains("fn jet_std_hex_encode"));
     assert!(!codecs.contains("fn jet_std_b64_encode"));
     assert!(!codecs.contains("fn jet_std_base32_encode"));
+    let kernel = read("crates/jet-codegen/src/Prelude/Core/EncodingBase.rs");
+    for name in [
+        "jet_std_hex_encode", "jet_std_hex_decode", "jet_std_hex_dump",
+        "jet_std_crc_hqx", "jet_std_crc32", "jet_std_b64_encode",
+        "jet_std_base32_encode", "jet_std_base32hex_encode",
+    ] {
+        assert!(!kernel.contains(name), "{name} must live in Jet Core");
+    }
+    for path in ["Core/encoding/hex.jet", "Core/encoding/base64.jet", "Core/encoding/base32.jet"] {
+        assert!(read(path).contains("#Test"), "{path} must cover its codec kernels");
+    }
     let core_calls = read("crates/jet-comptime/src/Comptime/Methods/core_calls.rs");
     for decoder in [
         "base_encoding_dispatch::decode_base64",

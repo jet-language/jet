@@ -1,9 +1,6 @@
 use super::super::repl_process::{run_repl_process, REPL_PROCESS_OUTPUT_LIMIT_BYTES};
 use super::*;
 
-mod process_args_kernel {
-    include!("../../../../../jet-codegen/src/Prelude/Core/ProcessArgs.rs");
-}
 // #1480: use the same line/byte stdin Prelude as AOT and JIT. This adapter
 // supplies only the host-side IOError shape required by that shared source;
 // line ownership and newline policy stay in `Prelude/CoreLib/Top/IoLineStream.rs`.
@@ -664,18 +661,6 @@ pub fn apply_impure_core_call_with_type_args(
             let argv = super::super::super::Interpreter::runtime_argv()
                 .unwrap_or_else(|| vec!["jet".to_string()]);
             Ok(CtValue::List(argv.into_iter().map(CtValue::Str).collect()))
-        }
-        ("core.process", "args") => {
-            // Keep the projection in the shared Prelude. The returned list is
-            // newly allocated on every call, just like the native adapters.
-            let argv = super::super::super::Interpreter::runtime_argv()
-                .unwrap_or_else(|| vec!["jet".to_string()]);
-            Ok(CtValue::List(
-                process_args_kernel::jet_process_args_view(argv)
-                    .into_iter()
-                    .map(CtValue::Str)
-                    .collect(),
-            ))
         }
         ("core.term", "progress") => {
             let Some(source) = args.first() else {
