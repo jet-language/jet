@@ -196,13 +196,17 @@ impl CBORReader {
             if n > safe_limits().max_item_bytes {
                 return Err(self.fail(EncodingErrorKind.Limit, "CBOR map exceeds EncodingLimits.safe().max_item_bytes"))
             }
-            entries := [String:DataTree]{}
+            // D-DATATREE-ORDER1=A: members keep arrival order; the temporary
+            // key set rejects a repeated text key and is freed with the map.
+            entries := [(key: String, value: DataTree)]{}
+            seen := [String: Bool]{}
             loop _ in 0..<n {
                 key_tree :: &self.read_value(depth + 1)
                 key :: key_tree.text() ?? return Err(self.fail(EncodingErrorKind.Unsupported, "CBOR map keys must be text to land in DataTree.Object"))
-                if entries.has_key(key) -> return Err(self.fail(EncodingErrorKind.Syntax, "duplicate CBOR map key `{key}`"))
+                if seen.has_key(key) -> return Err(self.fail(EncodingErrorKind.Syntax, "duplicate CBOR map key `{key}`"))
+                _ :: &seen.add(key, true)
                 value :: &self.read_value(depth + 1)
-                _ :: &entries.add(key, value)
+                &entries.push((key: key, value: value))
             }
             return Ok(DataTree.Object(entries))
         }
@@ -276,7 +280,7 @@ fn write_cbor_array(out: &[U8], items: [DataTree], canonical: Bool) {
     loop item in items -> write_cbor(&out, item, canonical)
 }
 
-fn write_cbor_object(out: &[U8], entries: [String:DataTree], canonical: Bool) {
+fn write_cbor_object(out: &[U8], entries: [(key: String, value: DataTree)], canonical: Bool) {
     write_cbor_head(&out, 5, entries.len())
     if !canonical {
         loop pair in entries {
@@ -285,20 +289,21 @@ fn write_cbor_object(out: &[U8], entries: [String:DataTree], canonical: Bool) {
         }
         return
     }
-    keys := [String]{}
-    loop pair in entries -> &keys.push(pair.key)
-    loop i in 0..<keys.len() {
-        loop j in (i + 1)..<keys.len() {
-            if compare_cbor_text(keys[j], keys[i]) < 0 {
-                tmp :: ~keys[i]
-                keys[i] = keys[j]
-                keys[j] = tmp
+    // Canonical CBOR sorts a borrowed view of the members; the object keeps its order.
+    order := [Int]{}
+    loop i in 0..<entries.len() -> &order.push(i)
+    loop i in 0..<order.len() {
+        loop j in (i + 1)..<order.len() {
+            if compare_cbor_text(entries[order[j]].key, entries[order[i]].key) < 0 {
+                tmp :: order[i]
+                order[i] = order[j]
+                order[j] = tmp
             }
         }
     }
-    loop key in keys {
-        write_cbor(&out, DataTree.Text(key), canonical)
-        write_cbor(&out, entries.get(key) ?? DataTree.Null, canonical)
+    loop at in order {
+        write_cbor(&out, DataTree.Text(entries[at].key), canonical)
+        write_cbor(&out, entries[at].value, canonical)
     }
 }
 

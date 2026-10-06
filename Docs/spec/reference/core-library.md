@@ -2139,10 +2139,14 @@ are `MONDAY :: 0` through `SUNDAY :: 6`.
 ### `core.encoding` — bounded value codecs
 
 `core.encoding` converts complete values to and from `DataTree`. Objects retain
-insertion order, integers and floating-point numbers remain distinct, and
+arrival order: the `Object` payload is the ordered pair list
+`[(key: String, value: DataTree)]` (D-DATATREE-ORDER1), and a repeated name is a
+`Syntax` error except under `json.parse_allow_duplicates`. Integers and
+floating-point numbers remain distinct, and
 malformed input returns a typed `EncodingError`. The whole-value codecs are
 pure; readers and writers expose the same boundaries incrementally. The
-shared codec shape and value tree follow D-ENC1, D-JSONVERB1, and D-SERDE13.
+shared codec shape and value tree follow D-ENC1, D-JSONVERB1, D-SERDE13, and
+D-DATATREE-ORDER1.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |

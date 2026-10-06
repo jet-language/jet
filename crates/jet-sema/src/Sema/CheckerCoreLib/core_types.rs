@@ -2788,11 +2788,8 @@ pub fn core_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
         "Float" => Some(vec![Type::Float]),
         "Text" => Some(vec![Type::String]),
         "Array" => Some(vec![Type::List(Box::new(json.clone()))]),
-        "Object" => Some(vec![Type::Map {
-            key: Box::new(Type::String),
-            key_span: None,
-            value: Box::new(json),
-        }]),
+        // D-DATATREE-ORDER1=A: an object is its fields in arrival order.
+        "Object" => Some(vec![data_tree_object_pairs_ty()]),
         // `Number` is the compiler-only lexical carrier used by typed JSON
         // parsing. It is accepted in generated union decoder patterns, but
         // has no public `DataTree.Number(...)` constructor.

@@ -3949,7 +3949,24 @@ everywhere. `.field` and `.at` fill `path` from the segment they read; scalar
 accessors leave it empty and a containing decoder uses `FieldError.under`, so
 `?` chains inside a hand `decode` remain direct; hand-built object
 nodes take the map literal — `DataTree.Object({ "name": v, … })` —
-insertion-ordered, and the pair-list form is not accepted.
+insertion-ordered. *Amended by D-DATATREE-ORDER1 = A:* `DataTree.Object` also
+accepts the ordered pair list `[(key: String, value: DataTree)]` for
+programmatic building (list order is kept), and a `[String: DataTree]` Map
+value contributes its sorted iteration order.
+
+**D-DATATREE-ORDER1 = A** *(ratified 2026-10-05)*: a `DataTree` object keeps its
+fields in arrival order; ordinary Maps stay sorted. The `Object` payload is the
+ordered pair list `[(key: String, value: DataTree)]` on every tier, so
+`if tree == .Object(fields)` binds that list and `.field(name)` scans it.
+Parsers build the pair list and reject a repeated name (strict JSON, TOML
+including inline tables, YAML, text-key CBOR) with a temporary key set;
+`json.parse_allow_duplicates` keeps the later value at the first name's
+position. Canonical writers (`json.canonical`, canonical CBOR) sort a borrowed
+view and never change the object. `==` compares objects field by field in
+order; `equal_unordered` ignores field order. A Map filled by `add` in one
+function and then passed to `DataTree.Object` draws a warning whose
+machine-applicable fix builds the pair list instead, and `jet fix` rewrites a
+direct `==`/`!=` between `DataTree` values to `equal_unordered`.
 
 **D-SERDE16 = A** *(ratified 2026-07-11, card #131)*: decode an arbitrary
 subtree through its target's public protocol with `tree.decode<T>()`. The

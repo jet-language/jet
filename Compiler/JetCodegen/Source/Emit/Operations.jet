@@ -3312,16 +3312,7 @@ fn jet_rust_emit_enum_payload(ctx: &JetRustEmitContext, function: MIRFunction, r
                                     if index != 0 -> return "unreachable!(\"MIR enum payload index out of range\")"
                                     if data_tree && variant == "Int" -> return "{root}jet_std::jet_datatree_int_payload(&{value}).expect(\"MIR enum payload variant mismatch\")"
                                     payload := "payload.clone()"
-                                    object_map := false
-                                    if data_tree && variant == "Object" && result == .Val(result_id) {
-                                        if jet_rust_emit_value_type(ctx, function, result_id).kind == {
-                                            .Map(_, _) -> object_map = true
-                                            else -> {}
-                                        }
-                                    }
-                                    if object_map {
-                                        payload = "{root}jet_data_entries_to_map(payload.clone())"
-                                    } else if native && jet_rust_emit_native_int_result(&ctx, "payload.clone()", payload_type) != None {
+                                    if native && jet_rust_emit_native_int_result(&ctx, "payload.clone()", payload_type) != None {
                                         payload = jet_rust_emit_native_int_result(&ctx, "payload.clone()", payload_type) ?? payload
                                     } else if jet_rust_emit_equality_edge_boxed(ctx.program.types[definition_index], variant) {
                                         payload = "payload.as_ref().clone()"
@@ -5277,10 +5268,6 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
         .AttachTag(value, _) -> return jet_rust_emit_value_move(ctx, value)
         .Semantic(semantic) -> {
             if semantic == {
-                .DataEntriesToMap(call, local) -> {
-                    entries :: jet_rust_emit_place_local(&ctx, local, false)
-                    return jet_rust_emit_route_call(&ctx, call, [String]{entries})
-                }
                 .MathBuiltin(_, call, args) | .PreciseBuiltin(_, call, args) -> return jet_rust_emit_semantic_values(&ctx, function, call, args)
                 .Print(call, value) -> return jet_rust_emit_print(&ctx, function, call, value)
                 .AmbientInput(call, prompt) -> return jet_rust_emit_ambient_input(&ctx, function, call, prompt)

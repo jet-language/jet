@@ -884,11 +884,6 @@ fn mir_pass_validate_semantic_operation(
                 if !mir_pass_source_file_id_exists(tables, loc.file) -> return Val("overflow location references an unknown source file")
             }
         }
-        .DataEntriesToMap(_, local) -> {
-            found := false
-            loop candidate in function.locals { if candidate.id == local -> found = true }
-            if !found -> return Val("data-entry map operation references a missing local")
-        }
         .MathBuiltin(_, call, _) -> {
             route :: mir_pass_prelude(tables, call) ?? return Val("numeric builtin route is missing")
             if route.family != .MathBuiltin -> return Val("math builtin route family is inconsistent")
