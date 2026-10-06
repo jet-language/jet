@@ -1273,14 +1273,6 @@ fn jet_jit_regex_count(pat: i64, text: i64) -> i64 {
         .unwrap_or_default()
 }
 
-fn jet_jit_regex_replace_method(pat: i64, text: i64, repl: i64) -> i64 {
-    jet_jit_regex_replace(pat, repl, text)
-}
-
-fn jet_jit_regex_replace_first_method(pat: i64, text: i64, repl: i64) -> i64 {
-    jet_jit_regex_replace_first(pat, repl, text)
-}
-
 fn regex_replacement_callback(
     callback: i64,
 ) -> Option<crate::runtime_host::JitCallableSlot> {
@@ -1408,7 +1400,7 @@ fn jet_jit_regex_match_group_end(handle: i64, group: i64) -> i64 {
     .map(|matched| option_int_bits(matched.group_end(group).ok()))
     .unwrap_or_default()
 }
-fn jet_jit_regex_replace_impl(pat: i64, repl: i64, text: i64, first: bool) -> i64 {
+fn jet_jit_regex_replace_impl(pat: i64, text: i64, repl: i64, first: bool) -> i64 {
     let text = clone_string(text);
     let replacement = clone_string(repl);
     clone_compiled_regex(pat)
@@ -1425,12 +1417,12 @@ fn jet_jit_regex_replace_impl(pat: i64, repl: i64, text: i64, first: bool) -> i6
         .unwrap_or_default()
 }
 
-fn jet_jit_regex_replace(pat: i64, repl: i64, text: i64) -> i64 {
-    jet_jit_regex_replace_impl(pat, repl, text, false)
+fn jet_jit_regex_replace(pat: i64, text: i64, repl: i64) -> i64 {
+    jet_jit_regex_replace_impl(pat, text, repl, false)
 }
 
-fn jet_jit_regex_replace_first(pat: i64, repl: i64, text: i64) -> i64 {
-    jet_jit_regex_replace_impl(pat, repl, text, true)
+fn jet_jit_regex_replace_first(pat: i64, text: i64, repl: i64) -> i64 {
+    jet_jit_regex_replace_impl(pat, text, repl, true)
 }
 
 fn jet_jit_regex_split(pat: i64, text: i64) -> i64 {
@@ -1696,8 +1688,8 @@ host_fns! {
     checked_regex_find_all: "jet_std::JetRegex::find_all" => jet_jit_regex_find_all: binary;
     checked_regex_matches: "jet_std::JetRegex::matches" => jet_jit_regex_matches: binary;
     checked_regex_split: "jet_std::JetRegex::split" => jet_jit_regex_split: binary;
-    checked_regex_replace: "jet_std::JetRegex::replace" => jet_jit_regex_replace_method: ternary;
-    checked_regex_replace_first: "jet_std::JetRegex::replace_first" => jet_jit_regex_replace_first_method: ternary;
+    checked_regex_replace: "jet_std::JetRegex::replace" => jet_jit_regex_replace: ternary;
+    checked_regex_replace_first: "jet_std::JetRegex::replace_first" => jet_jit_regex_replace_first: ternary;
     checked_regex_replace_all_with: "jet_std::JetRegex::replace_all_with" => jet_jit_regex_replace_all_with: ternary;
     checked_regex_split_limit: "jet_std::JetRegex::split_limit" => jet_jit_regex_split_limit: ternary;
     checked_regex_match_start: "jet_std::JetRegexMatch::start" => jet_jit_regex_match_start: unary;

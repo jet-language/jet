@@ -376,40 +376,21 @@ pub(super) fn regex_split_limit(args: Vec<CtValue>, span: Span) -> Result<CtValu
             .collect(),
     ))
 }
-fn regex_replace_impl(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-    let re = regex_pattern(&args, span)?;
-    let rep = as_string(
-        args.get(1)
-            .ok_or_else(|| unsupported("regex.replace: missing replacement argument", span))?,
-        span,
-    )?;
-    let text = as_string(
-        args.get(2)
-            .ok_or_else(|| unsupported("regex.replace: missing text argument", span))?,
-        span,
-    )?;
-    let replaced = re.replace(text, rep);
-    Ok(CtValue::Str(replaced))
+// `core.regex.replace(pattern, text, replacement)` is the method form with the
+// pattern as receiver: one argument order on every tier.
+fn regex_replace_call(args: Vec<CtValue>, method: &str, span: Span) -> Result<CtValue, Diagnostic> {
+    let (pattern, rest) = args
+        .split_first()
+        .ok_or_else(|| unsupported("regex call: missing pattern argument", span))?;
+    regex_replace_method(pattern, method, rest, span)
 }
 
 pub(super) fn regex_replace(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-    regex_replace_impl(args, span)
+    regex_replace_call(args, "replace", span)
 }
 
 pub(super) fn regex_replace_first(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-    let re = regex_pattern(&args, span)?;
-    let rep = as_string(
-        args.get(1).ok_or_else(|| {
-            unsupported("regex.replace_first: missing replacement argument", span)
-        })?,
-        span,
-    )?;
-    let text = as_string(
-        args.get(2)
-            .ok_or_else(|| unsupported("regex.replace_first: missing text argument", span))?,
-        span,
-    )?;
-    Ok(CtValue::Str(re.replace_first(text, rep)))
+    regex_replace_call(args, "replace_first", span)
 }
 
 fn regex_replace_method(

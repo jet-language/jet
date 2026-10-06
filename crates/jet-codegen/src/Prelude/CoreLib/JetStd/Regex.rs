@@ -876,15 +876,11 @@ pub fn jet_regex_matches(pattern: &JetRegex, text: &str) -> Vec<JetRegexMatch> {
     pattern.matches(text)
 }
 
-pub fn jet_regex_replace(
-    pattern: &JetRegex,
-    repl: &str,
-    text: &str,
-) -> String {
+pub fn jet_regex_replace(pattern: &JetRegex, text: &str, repl: &str) -> String {
     pattern.replace(text, repl)
 }
 
-pub fn jet_regex_replace_first(pattern: &JetRegex, repl: &str, text: &str) -> String {
+pub fn jet_regex_replace_first(pattern: &JetRegex, text: &str, repl: &str) -> String {
     pattern.replace_first(text, repl)
 }
 
