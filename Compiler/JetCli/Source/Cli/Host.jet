@@ -511,9 +511,10 @@ fn jet_cli_doc_undocumented_report(graph: JetCLIDocGraph, modules: [JetDriverDoc
     jet_cli_doc_sort_strings(&paths)
     rendered := ""
     loop path in paths {
-        doc_module :: loop candidate in modules {
+        found_module :: loop candidate in modules {
             if jet_cli_doc_stable_path(candidate.path) == path -> break candidate
-        } ?? next
+        }
+        doc_module :: found_module ?? next
         diagnostics := [Diagnostic]{}
         loop item in jet_cli_doc_undocumented_public(graph) {
             if item.source.path != path -> next
