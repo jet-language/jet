@@ -1962,13 +1962,18 @@ fn phi_target_blocks(function: &MirFunction) -> BTreeSet<MirBlockId> {
 
 /// Calls `visit(line, column, id)` for every `__jet_v_<id>` slot mention in
 /// `text`, with `line` counted from the start of `text`.
-fn for_each_value_mention(text: &str, mut visit: impl FnMut(usize, usize, u64)) {
-    const PREFIX: &str = "__jet_v_";
+fn for_each_value_mention(text: &str, visit: impl FnMut(usize, usize, u64)) {
+    for_each_slot_mention(text, "__jet_v_", visit);
+}
+
+/// Calls `visit(line, column, id)` for every `<prefix><id>` numbered slot
+/// mention in `text`, with `line` counted from the start of `text`.
+fn for_each_slot_mention(text: &str, prefix: &str, mut visit: impl FnMut(usize, usize, u64)) {
     for (line_index, line) in text.split_inclusive('\n').enumerate() {
         let mut search = 0;
-        while let Some(found) = line[search..].find(PREFIX) {
+        while let Some(found) = line[search..].find(prefix) {
             let at = search + found;
-            let digits_start = at + PREFIX.len();
+            let digits_start = at + prefix.len();
             let digits = line[digits_start..]
                 .bytes()
                 .take_while(|byte| byte.is_ascii_digit())
@@ -1988,13 +1993,13 @@ fn for_each_value_mention(text: &str, mut visit: impl FnMut(usize, usize, u64)) 
     }
 }
 
-/// The candidate value slots some `body` statement lends to a reference
-/// slot: a statement assigning `slot = ..` to a slot whose `let .. = None;`
-/// declaration in `text` (the whole function after its signature) names a
-/// borrowing type (`&` or a lifetime) and that mentions the candidate. Such
-/// a candidate must outlive the reference slot, so it keeps its
-/// function-wide declaration.
-fn lent_value_slots(text: &str, body: &str, candidates: &BTreeMap<u64, String>) -> BTreeSet<u64> {
+/// The candidate `<prefix><id>` slots some `body` statement lends to a
+/// reference slot: a statement assigning `slot = ..` to a slot whose
+/// `let .. = None;` declaration in `text` (the whole function after its
+/// signature) names a borrowing type (`&` or a lifetime) and that mentions
+/// the candidate. Such a candidate must outlive the reference slot, so it
+/// keeps its function-wide declaration.
+fn lent_slots(text: &str, body: &str, prefix: &str, candidate: impl Fn(u64) -> bool) -> BTreeSet<u64> {
     let references: BTreeSet<&str> = text
         .lines()
         .filter_map(|line| {
@@ -2016,8 +2021,8 @@ fn lent_value_slots(text: &str, body: &str, candidates: &BTreeMap<u64, String>) 
         if !content[target..].starts_with(" = ") || !references.contains(&content[..target]) {
             continue;
         }
-        for_each_value_mention(line, |_, _, id| {
-            if candidates.contains_key(&id) {
+        for_each_slot_mention(line, prefix, |_, _, id| {
+            if candidate(id) {
                 lent.insert(id);
             }
         });
@@ -2025,25 +2030,28 @@ fn lent_value_slots(text: &str, body: &str, candidates: &BTreeMap<u64, String>) 
     lent
 }
 
-/// Declares block-local value slots at their definition. `out[slots_start..
-/// slots_end]` holds the function's slot declarations and everything after it
-/// the body. A candidate slot (no observable drop) whose first body mention
-/// starts its `slot = Some(..);` statement, and whose later mentions all stay
-/// in that statement's lexical scope (no line between them is indented less),
-/// and that no statement lends to a reference slot (`lent_value_slots`),
-/// becomes `let mut slot: Option<T> = Some(..);` there; a candidate the body
-/// never mentions loses its declaration. Returns where the declarations end.
-fn localize_value_slots(
+/// Declares block-local `<prefix><id>` slots (`__jet_v_` values or `__jet_l_`
+/// locals) at their definition. `out[slots_start..slots_end]` holds the
+/// function's slot declarations and everything after it the body. A
+/// candidate slot (id -> its Rust type; no observable drop) whose first body
+/// mention starts its `slot = Some(..);` statement, and whose later mentions
+/// all stay in that statement's lexical scope (no line between them is
+/// indented less), and that no statement lends to a reference slot
+/// (`lent_slots`), becomes `let mut slot: Option<T> = Some(..);` there; a
+/// candidate the body never mentions loses its declaration. Returns where the
+/// declarations end.
+fn localize_slots(
     out: &mut String,
     slots_start: usize,
     slots_end: usize,
+    prefix: &str,
     candidates: &BTreeMap<u64, String>,
 ) -> usize {
     if candidates.is_empty() {
         return slots_end;
     }
     let mut declared: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
-    for_each_value_mention(&out[slots_start..slots_end], |_, _, id| {
+    for_each_slot_mention(&out[slots_start..slots_end], prefix, |_, _, id| {
         if candidates.contains_key(&id) {
             *declared.entry(id).or_default() += 1;
         }
@@ -2056,7 +2064,7 @@ fn localize_value_slots(
     }
     let body = &out[slots_end..];
     let mut mentions: std::collections::HashMap<u64, Mentions> = std::collections::HashMap::new();
-    for_each_value_mention(body, |line, column, id| {
+    for_each_slot_mention(body, prefix, |line, column, id| {
         if !candidates.contains_key(&id) {
             return;
         }
@@ -2096,7 +2104,7 @@ fn localize_value_slots(
         }
         open.push(index);
     }
-    let pinned = lent_value_slots(&out[slots_start..], body, candidates);
+    let pinned = lent_slots(&out[slots_start..], body, prefix, |id| candidates.contains_key(&id));
     let mut localized: BTreeMap<usize, u64> = BTreeMap::new();
     let mut dropped: BTreeSet<u64> = BTreeSet::new();
     for id in candidates.keys() {
@@ -2110,7 +2118,7 @@ fn localize_value_slots(
         let line = mention.first_line;
         let defines = mention.on_first_line == 1
             && mention.first_column == indents[line]
-            && lines[line][indents[line]..].starts_with(&format!("__jet_v_{id} = Some("));
+            && lines[line][indents[line]..].starts_with(&format!("{prefix}{id} = Some("));
         if defines && mention.last_line < scope_end[line] && !pinned.contains(id) {
             localized.insert(line, *id);
             dropped.insert(*id);
@@ -2122,7 +2130,8 @@ fn localize_value_slots(
     let mut rebuilt = String::with_capacity(out.len() - slots_start);
     for line in out[slots_start..slots_end].split_inclusive('\n') {
         let declared_id = line
-            .strip_prefix("    let mut __jet_v_")
+            .strip_prefix("    let mut ")
+            .and_then(|rest| rest.strip_prefix(prefix))
             .and_then(|rest| rest.split_once(':'))
             .and_then(|(id, _)| id.parse::<u64>().ok());
         if declared_id.is_some_and(|id| dropped.contains(&id)) {
@@ -2135,9 +2144,9 @@ fn localize_value_slots(
         match localized.get(&index) {
             Some(id) => {
                 let indent = indents[index];
-                let slot = format!("__jet_v_{id} = ");
+                let slot = format!("{prefix}{id} = ");
                 rebuilt.push_str(&line[..indent]);
-                let _ = write!(rebuilt, "let mut __jet_v_{id}: Option<{}> = ", candidates[id]);
+                let _ = write!(rebuilt, "let mut {prefix}{id}: Option<{}> = ", candidates[id]);
                 rebuilt.push_str(&line[indent + slot.len()..]);
             }
             None => rebuilt.push_str(line),
@@ -2542,7 +2551,8 @@ fn attributed_statement(lines: &[String], index: usize) -> bool {
 /// by a borrowing closure carrier (`borrowing_closure_expression`) folds the
 /// same way, as a block typed like the slot. The definition and its top
 /// declaration go away. Attributed (debug-only) statements never fold.
-fn fold_value_slots(out: &mut String, slots_start: usize, slots_end: usize) {
+/// Returns where the declarations end afterwards.
+fn fold_value_slots(out: &mut String, slots_start: usize, slots_end: usize) -> usize {
     let mut mentions: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
     for_each_value_mention(&out[slots_start..], |_, _, id| *mentions.entry(id).or_default() += 1);
     let body_start = out[slots_start..slots_end].split_inclusive('\n').count();
@@ -2640,14 +2650,19 @@ fn fold_value_slots(out: &mut String, slots_start: usize, slots_end: usize) {
         folded = true;
     }
     if !folded {
-        return;
+        return slots_end;
     }
     out.truncate(slots_start);
-    for (line, removed) in lines.iter().zip(removed) {
+    let mut declarations_end = slots_start;
+    for (index, (line, removed)) in lines.iter().zip(removed).enumerate() {
         if !removed {
             out.push_str(line);
+            if index < body_start {
+                declarations_end = out.len();
+            }
         }
     }
+    declarations_end
 }
 
 /// `JET_COPY_TAGS=1`: tag every emitted value clone with its copy fact
@@ -2670,7 +2685,7 @@ fn copy_scalar_type(ty: &str) -> bool {
 /// Turns block-local value slots into plain `let` bindings. `out[slots_start
 /// ..]` holds the function's slot declarations and body. A slot declared at
 /// its single definition (`let mut slot: Option<T> = Some(E);`, see
-/// `localize_value_slots`) whose every other mention is a shared read
+/// `localize_slots`) whose every other mention is a shared read
 /// (`slot.as_ref().expect("MIR value")`) is never taken, written through or
 /// re-initialized, so it becomes `let slot: T = E;`: an owned read names a
 /// Copy scalar directly and clones any other type, and a borrow is `&slot`.
@@ -2786,6 +2801,63 @@ mod unwrap_value_slot_tests {
         ]
         .concat();
         assert_eq!(out, expected);
+    }
+}
+
+#[cfg(test)]
+mod localize_slot_tests {
+    use super::localize_slots;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn block_local_slots_are_declared_at_their_definition() {
+        let declarations = [
+            "    let mut __jet_l_1: Option<Expr> = None;\n",
+            "    let mut __jet_l_2: Option<Expr> = None;\n",
+            "    let mut __jet_l_3: Option<Expr> = None;\n",
+            "    let mut __jet_l_4: Option<&Expr> = None;\n",
+            "    let mut __jet_l_5: Option<Expr> = None;\n",
+            "    let mut __jet_l_6: Option<Expr> = None;\n",
+        ]
+        .concat();
+        let body = [
+            "    if c {\n",
+            "        __jet_l_1 = Some(f());\n",
+            "        g(__jet_l_1.as_ref().expect(\"MIR local\"));\n",
+            "        __jet_l_2 = Some(f());\n",
+            "    }\n",
+            "    g(__jet_l_2.as_ref().expect(\"MIR local\"));\n",
+            "    if c {\n",
+            "        __jet_l_3 = Some(f());\n",
+            "        __jet_l_4 = Some(__jet_l_3.as_ref().expect(\"MIR local\"));\n",
+            "        __jet_l_5 = Some(f()); h(__jet_l_5.take());\n",
+            "    }\n",
+        ]
+        .concat();
+        let mut out = format!("{declarations}{body}");
+        let candidates: BTreeMap<u64, String> =
+            [1, 2, 3, 5, 6].into_iter().map(|id| (id, "Expr".to_string())).collect();
+        let end = localize_slots(&mut out, 0, declarations.len(), "__jet_l_", &candidates);
+        let expected = [
+            "    let mut __jet_l_2: Option<Expr> = None;\n",
+            "    let mut __jet_l_3: Option<Expr> = None;\n",
+            "    let mut __jet_l_4: Option<&Expr> = None;\n",
+            "    let mut __jet_l_5: Option<Expr> = None;\n",
+            "    if c {\n",
+            "        let mut __jet_l_1: Option<Expr> = Some(f());\n",
+            "        g(__jet_l_1.as_ref().expect(\"MIR local\"));\n",
+            "        __jet_l_2 = Some(f());\n",
+            "    }\n",
+            "    g(__jet_l_2.as_ref().expect(\"MIR local\"));\n",
+            "    if c {\n",
+            "        __jet_l_3 = Some(f());\n",
+            "        __jet_l_4 = Some(__jet_l_3.as_ref().expect(\"MIR local\"));\n",
+            "        __jet_l_5 = Some(f()); h(__jet_l_5.take());\n",
+            "    }\n",
+        ]
+        .concat();
+        assert_eq!(out, expected);
+        assert_eq!(end, 4 * "    let mut __jet_l_2: Option<Expr> = None;\n".len() + 1);
     }
 }
 
@@ -14541,9 +14613,11 @@ impl<'a> RustEmitter<'a> {
         *self.cfg_state.borrow_mut() = previous_cfg;
         if !custom_arms {
             let localizable = self.localizable_value_slots(function);
-            let declarations_end = localize_value_slots(out, slots_start, slots_end, &localizable);
-            fold_value_slots(out, slots_start, declarations_end);
+            let values_end = localize_slots(out, slots_start, slots_end, "__jet_v_", &localizable);
+            let declarations_end = fold_value_slots(out, slots_start, values_end);
             unwrap_value_slots(out, slots_start);
+            let localizable = self.localizable_local_slots(function);
+            localize_slots(out, slots_start, declarations_end, "__jet_l_", &localizable);
         }
         drop_unmentioned_slots(out, slots_start);
         compact_function_text(out, slots_start);
@@ -19352,6 +19426,31 @@ impl<'a> RustEmitter<'a> {
                     && type_drop_is_plain(ty, &plain)
             })
             .map(|(value, ty, _, _)| (value.0, self.rust_local_type(ty)))
+            .filter(|(_, rust)| !rust.contains('&') && !rust.contains('\''))
+            .collect()
+    }
+
+    /// Local slots declared `Option<T>` (`emit_slots`) whose drop does nothing
+    /// but free memory, under `localizable_value_slots`'s rule: never an
+    /// uninit fixed list, a shared-capture cell, a reference binding, a
+    /// partially moved root, an arena or string view, or a GC root.
+    fn localizable_local_slots(&self, function: &MirFunction) -> BTreeMap<u64, String> {
+        let plain = |name: &str| self.plain_drop_types.contains(name);
+        function
+            .locals
+            .iter()
+            .filter(|local| {
+                !local.uninit
+                    && !local.arena_view
+                    && !local.string_view
+                    && !local.gc_root
+                    && matches!(local.ownership.drop, MirDropKind::None | MirDropKind::Value)
+                    && type_drop_is_plain(&local.ty, &plain)
+                    && !self.local_is_shared_capture(function, local.id)
+                    && !self.ref_binding_local(function, local.id)
+                    && self.partial_move_root(function, &MirPlaceBase::Local(local.id)).is_none()
+            })
+            .map(|local| (local.id.0, self.rust_local_type(&local.ty)))
             .filter(|(_, rust)| !rust.contains('&') && !rust.contains('\''))
             .collect()
     }
