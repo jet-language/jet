@@ -159,6 +159,7 @@ use jet_sema.[
     sema_comptime_program,
     sema_comptime_find_function_source,
     sema_comptime_graph_apply_sites,
+    sema_comptime_graph_apply_values,
     sema_comptime_graph_with_values,
     sema_comptime_modules_with_values,
     sema_comptime_probe_init,
@@ -3033,7 +3034,7 @@ fn jet_driver_run_comptime(
 // the staged session once the first full staging moved them in (the session
 // only joined constant rows to them, jet_codegen_comptime_session_add_constants),
 // else as they were moved in.
-fn jet_driver_comptime_take_declared(staging: &JetDriverComptimeStaging) -> [SemaGraphModuleResult] Never! {
+fn jet_driver_comptime_take_declared(staging: &JetDriverComptimeStaging) -> [SemaGraphModuleResult] {
     if !staging.declared_staged {
         declared := ^staging.declared
         staging.declared = [SemaGraphModuleResult]{}
@@ -3083,6 +3084,17 @@ fn jet_driver_comptime_run(
     // place rather than rebuilding it per item, and counted into the run's
     // available constant keys.
     owned := ^staged
+    // A run with no item checks, evaluates and lands nothing, so it hands on
+    // what the program tables below would: the staged graph (or a copy of
+    // `graph`) with the initial values applied (sema_comptime_program), with
+    // no run-wide index built over it.
+    if sources.len() == 0 {
+        resolved := ^owned ?? ~graph
+        sema_comptime_graph_apply_values(&resolved, values)
+        finished := jet_driver_comptime_run_result(values, checked_functions, trace, true, false)
+        finished.graph = Val(^resolved)
+        return finished
+    }
     environment := sema_comptime_environment()
     program := sema_comptime_program(^owned ?? ~graph, values)
     // The module scope every item and function check of the run checks in.
