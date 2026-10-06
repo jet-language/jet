@@ -739,7 +739,12 @@ impl<'a> Checker<'a> {
                     // The Ok types (`ret_ok` and `ok`) do NOT need to be equal: `?`
                     // only propagates the error; the unwrapped Ok value may have any
                     // type (it is bound by the caller, not returned unchanged).
-                    Type::Result { err: ret_err, .. } if *ret_err == err => {
+                    // A cross-module callee publishes its canonical error name
+                    // while the caller's contract may spell the same declaration
+                    // bare; both name one nominal type.
+                    Type::Result { err: ret_err, .. }
+                        if *ret_err == err || self.nominal_type_identity(ret_err, &err) =>
+                    {
                         self.task_body_propagates = true;
                         publish_try_call_carrier(inner.as_mut(), || Type::Result {
                             ok: Box::new((*ok).clone()),
