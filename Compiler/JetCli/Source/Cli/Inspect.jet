@@ -999,6 +999,13 @@ fn jet_cli_compiler_syntax_tree(source: String) -> JetCLIStatusValue Never! {
     })
 }
 
+// The `io::Error` wording for a file that exists but cannot be read as text:
+// unreadable bytes are a permission failure, readable bytes are not UTF-8.
+fn jet_cli_inspect_compiler_read_failure(operation: String, file: String) -[FS]> JetCLIPlan Never! {
+    _ :: cli_files.read_bytes(file) ?? return jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: Permission denied (os error 13)")
+    jet_cli_inspect_compiler_error(operation, file, "could not read compiler input: stream did not contain valid UTF-8")
+}
+
 // CmdInspect.rs `run_provenance` up to the manifest root; the dependency
 // provenance report is not ported yet.
 fn jet_cli_inspect_provenance(color: Bool) -[FS, Env]> JetCLIPlan Never! {
