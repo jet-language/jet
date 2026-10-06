@@ -1268,6 +1268,19 @@ fn jet_codegen_project_deref_place(builder: &JetCodegenBuilder, base: MIRPlaceID
     id
 }
 
+// D-PIN3=A: the place a pin names. A pin local bound by `mem.pin(&place)`
+// aliases the owner place itself (as does a borrowed receiver); a stored or
+// returned pin is a window whose target is one deref away.
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs::project_pin_target
+fn jet_codegen_project_pin_target(builder: &JetCodegenBuilder, base: MIRPlaceID, inner: Type, span: Span) -> MIRPlaceID Never! {
+    root :: jet_codegen_find_place(builder, base) ?? panic("checked pin place has no MIR base")
+    if root.ty.kind == {
+        .Apply(name, args) -> if name.name == "Pin" && args.len() == 1 -> return jet_codegen_project_deref_place(&builder, base, inner, span)
+        else -> {}
+    }
+    base
+}
+
 // Project the fixed-length range window `range` of a list place. The window
 // keeps the list type, so a length-preserving callee edits it in place.
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::project_range_place
@@ -1292,15 +1305,7 @@ fn jet_codegen_lower_expression_place(builder: &JetCodegenBuilder, expression: T
         .Field(receiver, reference) -> {
             base := jet_codegen_lower_expression_place(&builder, receiver, access) ?? return None
             if receiver.ty == {
-                .Apply(name, args) -> {
-                    // A borrowed Pin receiver is already its pinned place
-                    // (Rust skips the deref projection for a Borrow receiver).
-                    borrowed :: if receiver.kind == {
-                        .Borrow(_, _) -> true
-                        else -> false
-                    }
-                    if name == "Pin" && args.len() == 1 && !borrowed -> base = jet_codegen_project_deref_place(&builder, base, args[0], expression.span)
-                }
+                .Apply(name, args) -> if name == "Pin" && args.len() == 1 -> base = jet_codegen_project_pin_target(&builder, base, args[0], expression.span)
                 else -> {}
             }
             field_id :: jet_codegen_field_ref_id(builder, receiver.ty, reference)
@@ -1528,6 +1533,19 @@ fn jet_codegen_lower_field_expr(builder: &JetCodegenBuilder, expression: TExpr, 
     folded :: jet_codegen_fold_prepared_field(&builder, expression, reference)
     if folded == .Val(value) -> return value
     field_id := jet_codegen_field_ref_id(builder, receiver.ty, reference)
+    // D-PIN3=A: a field read through a pin reads the pinned place; the pin is
+    // an exclusive reference, never a value to copy out of.
+    if receiver.ty == {
+        .Apply(name, args) -> if name == "Pin" && args.len() == 1 {
+            pinned := jet_codegen_lower_expression_place(&builder, receiver, MIRAccess.Read)
+            if pinned == .Val(pin_base) {
+                target := jet_codegen_project_pin_target(&builder, pin_base, args[0], expression.span)
+                place := jet_codegen_project_field_place(&builder, target, expression.span, expression.ty, field_id)
+                return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.ReadPlace{place: place})
+            }
+        }
+        else -> {}
+    }
     // Reading one stored field only needs that field: project the field place
     // and read it, instead of copying the whole receiver first (#3735).
     if jet_codegen_is_field_read_chain(builder, receiver) && jet_codegen_is_stored_struct_field(builder, receiver.ty, reference) {

@@ -2360,7 +2360,19 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
         if members[0].result != value.id -> &lines.push("    let mut {jet_rust_emit_payload_slot(value.id)}: Option<{jet_rust_emit_type(&ctx, value.ty)}> = None;")
     }
     generator :: function.generator != None
-    if generator -> &lines.push("    {ctx.config.root_prefix}jet_std::jet_stream_task(move |__jet_yield_tx| {{")
+    // MIRRust emit_callable_named: the producer runs on its own task thread
+    // (`Send + 'static`), so a read-borrowed parameter is snapshotted into the
+    // closure; a read parameter cannot change during the call.
+    borrowed := [String]{}
+    if generator {
+        loop parameter in function.params {
+            rendered :: jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
+            if rendered.starts_with("&") && !rendered.starts_with("&mut ") -> &borrowed.push(jet_rust_emit_parameter_name(function, parameter.index))
+        }
+        loop name in borrowed -> &lines.push("    let {name} = {name}.to_owned();")
+        &lines.push("    {ctx.config.root_prefix}jet_std::jet_stream_task(move |__jet_yield_tx| {{")
+        loop name in borrowed -> &lines.push("        let {name} = &{name};")
+    }
     indent :: if generator -> "    " else -> ""
     // MIRRust emit_callable_named: every body enters a stack frame for runtime
     // reports; only fallible, unsafe or policy-scoped bodies keep it in release.

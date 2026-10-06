@@ -56,6 +56,21 @@ fn pin_inner_type(ty: &Type) -> Option<Type> {
     }
 }
 
+/// D-PIN3=A: the place a pin names. A pin local bound by `mem.pin(&place)`
+/// aliases the owner place itself; a stored or returned pin is a window whose
+/// target is one deref away.
+fn project_pin_target(
+    ctx: &mut LowerCtx,
+    base: MirPlaceId,
+    inner: Type,
+) -> Result<MirPlaceId, LowerError> {
+    if ctx.place_is_pin(base) {
+        ctx.project_deref_place(base, inner, ctx.span())
+    } else {
+        Ok(base)
+    }
+}
+
 /// Whether `expr` names a place built only from a local or parameter, list
 /// or map elements, and stored struct fields, so a field read can project it
 /// without copying. `xs[i].f` reads `f` through one index-then-field place
@@ -1002,11 +1017,7 @@ pub(super) fn lower_receiver_place(
                 return Ok(None);
             };
             let base = if let Some(inner) = pin_inner_type(&recv.ty) {
-                if matches!(&recv.kind, TExprKind::Borrow { .. }) {
-                    base
-                } else {
-                    ctx.project_deref_place(base, inner, ctx.span())?
-                }
+                project_pin_target(ctx, base, inner)?
             } else {
                 base
             };
@@ -2149,6 +2160,17 @@ pub(super) fn lower_expr(
                 if let Some(base) = lower_receiver_place(ctx, recv, MirAccess::Read)? {
                     let place = ctx.project_field_place(base, field, stored_ty.clone(), ctx.span())?;
                     return ctx.emit("field.read", Some(stored_ty), MirOperation::ReadPlace(place));
+                }
+            }
+            // D-PIN3=A: a field read through a pin reads the pinned place; the
+            // pin is an exclusive reference, never a raw pointer to copy out of.
+            if !computed_grads {
+                if let Some(inner) = pin_inner_type(&recv.ty) {
+                    if let Some(base) = lower_receiver_place(ctx, recv, MirAccess::Read)? {
+                        let base = project_pin_target(ctx, base, inner)?;
+                        let place = ctx.project_field_place(base, field, stored_ty.clone(), ctx.span())?;
+                        return ctx.emit("pin.field.read", Some(stored_ty), MirOperation::ReadPlace(place));
+                    }
                 }
             }
             let field_id = ctx.field_id_for_type(&recv.ty, field)?;

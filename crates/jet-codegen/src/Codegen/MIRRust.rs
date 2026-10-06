@@ -157,6 +157,17 @@ fn is_nonowning_reference_type(ty: &MirType) -> bool {
     }
 }
 
+/// D-PIN1=A: `Pin<T>`, the exclusive reference to a pinned place.
+fn is_pin_type(ty: &MirType) -> bool {
+    match ty.kind() {
+        MirTypeKind::Tagged { inner, .. } => is_pin_type(inner),
+        MirTypeKind::Apply { name, args } => {
+            args.len() == 1 && name.name == jet_foundation::Syntax::TYPE_PIN
+        }
+        _ => false,
+    }
+}
+
 /// True when `ty` carries a `View`/`ViewMut` whose Rust spelling borrows,
 /// directly or through a nominal type `carrier` reports as holding one.
 fn type_contains_view(ty: &MirType, carrier: &dyn Fn(&str) -> bool) -> bool {
@@ -5590,11 +5601,11 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
-    fn rust_type(&self, ty: &MirType) -> String {
-        let ty = if ty.identity.is_some() {
-            self.canonical_type(ty)
+    fn rust_type(&self, source: &MirType) -> String {
+        let ty = if source.identity.is_some() {
+            self.canonical_type(source)
         } else {
-            ty
+            source
         };
         match ty.kind() {
             MirTypeKind::Int => "jet_foundation::Numeric::JetInt".to_string(),
@@ -5647,11 +5658,19 @@ impl<'a> RustEmitter<'a> {
                     .call_metadata
                     .as_ref()
                     .map(|metadata| metadata.conventions.as_slice());
+                // Returned-view provenance is not part of callable identity, so
+                // the canonical instance row may carry another slot's relation
+                // (or none). The Rust lifetime spelling follows this slot's own
+                // declared relation.
+                let return_view_provenance = match source.kind() {
+                    MirTypeKind::Fn(own) => own.return_view_provenance.as_ref(),
+                    _ => signature.return_view_provenance.as_ref(),
+                };
                 self.callable_type(
                     &signature.params,
                     conventions,
                     signature.ret.as_deref(),
-                    signature.return_view_provenance.as_ref(),
+                    return_view_provenance,
                 )
             }
             MirTypeKind::SendFn {
@@ -8537,7 +8556,8 @@ impl<'a> RustEmitter<'a> {
                             )
                         });
                 }
-                if name.name == "ViewMut" {
+                // D-PIN1=A: `Pin<T>` is the same exclusive `&mut T` window.
+                if name.name == "ViewMut" || name.name == jet_foundation::Syntax::TYPE_PIN {
                     return trait_name != "Clone"
                         && args.first().is_some_and(|inner| {
                             self.type_derive_capability(
@@ -14469,11 +14489,26 @@ impl<'a> RustEmitter<'a> {
         let slots_end = out.len();
         let generator = function.generator.is_some();
         if generator {
+            // The producer runs on its own task thread (`Send + 'static`), so a
+            // read-borrowed parameter is snapshotted into the closure: a read
+            // parameter cannot change during the call, and the stream outlives it.
+            let borrowed = declared
+                .iter()
+                .zip(&declared_types)
+                .filter(|(_, ty)| ty.starts_with('&') && !ty.starts_with("&mut "))
+                .map(|(param, _)| mangle(&param.name))
+                .collect::<Vec<_>>();
+            for name in &borrowed {
+                let _ = writeln!(out, "    let {name} = {name}.to_owned();");
+            }
             let _ = writeln!(
                 out,
                 "    {}jet_std::jet_stream_task(move |__jet_yield_tx| {{",
                 self.config.root_prefix
             );
+            for name in &borrowed {
+                let _ = writeln!(out, "        let {name} = &{name};");
+            }
         }
         let body_indent = if generator { 8 } else { 4 };
         let (stack_file, stack_line, stack_source) = self.function_stack_context(function);
@@ -20595,6 +20630,12 @@ impl<'a> RustEmitter<'a> {
             ),
             MirOperation::AddressOf { place, access } => {
                 if *access != MirAccess::Move {
+                    // D-PIN1=A: `mem.pin(&place)` is the exclusive reference
+                    // itself (`Pin<T>` spells `&mut T`), so its result holds the
+                    // borrow of the place rather than a copy of the value.
+                    if result.is_some_and(|value| is_pin_type(self.value_type(function, value))) {
+                        return self.place_reference(function, *place, MirAccess::Write);
+                    }
                     // An owned SSA result must contain the declared place value.
                     // Borrow-only callers use `place_reference` at their call
                     // boundary; storing that reference in `Option<T>` would

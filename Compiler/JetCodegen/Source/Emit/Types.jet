@@ -338,7 +338,7 @@ fn jet_rust_emit_type(ctx: &JetRustEmitContext, source: MIRType) -> String Never
         .Shared(inner) -> "{ctx.config.root_prefix}jet_std::JetShared<{jet_rust_emit_type(&ctx, inner)}>"
         .Option(inner) -> "{ctx.config.root_prefix}JetOutcome<{jet_rust_emit_type(&ctx, inner)}, {ctx.config.root_prefix}JetAbsent>"
         .Result(ok, err) -> "{ctx.config.root_prefix}JetOutcome<{jet_rust_emit_type(&ctx, ok)}, {jet_rust_emit_type(&ctx, err)}>"
-        .Fn(signature) -> jet_rust_emit_function_type(&ctx, signature)
+        .Fn(signature) -> jet_rust_emit_function_type(&ctx, signature, jet_rust_emit_own_view_provenance(source, signature))
         .SendFn(params, ret, conventions) -> jet_rust_emit_send_function_type(&ctx, params, ret, conventions)
         .Apply(name, args) -> jet_rust_emit_apply_type(&ctx, name, args)
         .TraitObject(bounds) -> {
@@ -816,10 +816,18 @@ fn jet_rust_emit_callable_type_parts(ctx: &JetRustEmitContext, params: [MIRType]
 
 JET_RUST_EMIT_CALLABLE_VIEW_LIFETIME :: "'__jet_fn"
 
-fn jet_rust_emit_function_type(ctx: &JetRustEmitContext, signature: MIRFunctionSignature) -> String Never! {
+fn jet_rust_emit_function_type(ctx: &JetRustEmitContext, signature: MIRFunctionSignature, provenance: [MIRViewProvenanceEntry]?) -> String Never! {
     conventions := [MIRAccess]{}
     if signature.call_metadata != None -> conventions = (signature.call_metadata ?? MIRCallMetadata{names: [String]{}, defaults: [Bool]{}, variadic: [Bool]{}, conventions: [MIRAccess]{}, policies: MIRCallablePolicyChain{policies: [MIRCallablePolicy]{}}}).conventions
-    jet_rust_emit_callable_type_parts(&ctx, signature.params, conventions, signature.ret, signature.return_view_provenance)
+    jet_rust_emit_callable_type_parts(&ctx, signature.params, conventions, signature.ret, provenance)
+}
+
+// MIRRust rust_type: returned-view provenance is not part of callable
+// identity, so the canonical instance row may carry another slot's relation
+// (or none). The Rust lifetime spelling follows the emitted slot's own relation.
+fn jet_rust_emit_own_view_provenance(source: MIRType, canonical: MIRFunctionSignature) -> [MIRViewProvenanceEntry]? Never! {
+    if source.kind == .Fn(own) -> return own.return_view_provenance
+    canonical.return_view_provenance
 }
 
 fn jet_rust_emit_send_function_type(ctx: &JetRustEmitContext, params: [MIRType], ret: MIRType?, conventions: [MIRAccess]) -> String Never! {
@@ -1219,7 +1227,8 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
                 if args.len() == 0 -> return false
                 return jet_rust_emit_type_derive_capability(&ctx, args[0], trait_name, &visiting, bindings, generic_params)
             }
-            if name.name == "ViewMut" {
+            // D-PIN1=A: `Pin<T>` is the same exclusive `&mut T` window.
+            if name.name == "ViewMut" || name.name == "Pin" {
                 if trait_name == "Clone" -> return false
                 if args.len() == 0 -> return false
                 return jet_rust_emit_type_derive_capability(&ctx, args[0], trait_name, &visiting, bindings, generic_params)

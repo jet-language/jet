@@ -5481,7 +5481,18 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         let lm = crate::Sema::is_math_type(ln) && !cx.type_names.contains(ln);
                         let rm = crate::Sema::is_math_type(rn) && !cx.type_names.contains(rn);
                         if lm || rm {
+                            // A Named scalar operand (`Decimal`, `F64`) against a math
+                            // value is a scalar splat, typed like the checker's
+                            // math_scalar_binop_result fallback (`2.0 * v` is `Vec3`).
                             crate::Sema::math_binop_result(*op, ln, rn)
+                                .or_else(|| {
+                                    lm.then(|| crate::Sema::math_scalar_binop_result(*op, ln, &rhs.ty))
+                                        .flatten()
+                                })
+                                .or_else(|| {
+                                    rm.then(|| crate::Sema::math_scalar_binop_result(*op, rn, &lhs.ty))
+                                        .flatten()
+                                })
                                 .unwrap_or_else(|| lhs.ty.clone())
                         } else if ln == rn
                             && crate::Sema::precise_binop_result(*op, ln, rn).is_some()

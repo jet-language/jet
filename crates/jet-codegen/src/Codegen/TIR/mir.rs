@@ -9988,6 +9988,22 @@ impl<'a> LowerCtx<'a> {
             })
     }
 
+    /// D-PIN3=A: whether a place still holds the `Pin<T>` window itself. A pin
+    /// local bound by `mem.pin(&place)` aliases the pinned owner place, which
+    /// is already the target; a stored or returned pin is a window to deref.
+    pub(super) fn place_is_pin(&self, place: MirPlaceId) -> bool {
+        self.places
+            .iter()
+            .find(|candidate| candidate.id == place)
+            .is_some_and(|candidate| {
+                matches!(
+                    candidate.ty.kind(),
+                    MirTypeKind::Apply { name, args }
+                        if name.name == crate::Syntax::TYPE_PIN && args.len() == 1
+                )
+            })
+    }
+
     pub(super) fn place_for_local(
         &mut self,
         local: &TLocal,
