@@ -136,6 +136,20 @@ uses the corresponding fallible kernel rather than declaring the enclosing
 function infallible while emitting a fallible call. Literal lambdas keep their
 own inferred propagation; explicitly written optional or typed failure
 contracts retain their existing carrier projections.
+An eager adapter inside a lambda propagates through that lambda's carrier to
+the enclosing owner; nesting does not erase the callable value's failure route.
+
+The `Iterable.iter` protocol retains its declared raw iterator return, rather
+than adding an implicit `Err` wrapper that its protocol ABI cannot accept.
+A user Iterable enters the same runtime loop cursor as other checked sources:
+MIR consumes its source once, `iter` runs once, and `Iterator.next` absence
+ends iteration. Native emission supplies the owner's loop-source bridge.
+
+A callable returning a view names the checked relationship between its
+borrowed owner arguments and that return with a higher-ranked lifetime.
+Returned static views remain static. The callable metadata and the ordinary
+function-value type use the same provenance facts; neither guesses a lifetime
+from the order of argument types.
 
 ## Core keepers
 

@@ -148,6 +148,10 @@ fn filtered(values: [Int], callback: fn(Int) -> Bool) -> [Int] {
     values.filter(callback)
 }
 
+fn nested(values: [[Int]], callback: fn(Int) -> Int) -> [[Int]] {
+    values.map(items -> items.map(callback))
+}
+
 fn ascending(values: [Int], callback: fn(Int) -> Int) -> [Int] {
     items := values
     &items.sort_by(callback)
@@ -169,9 +173,11 @@ fn run() {
     print((ascending([2, 0, 1], key) ?? [-1])[0])
     print((descending([1, 2], key) ?? [-1])[0])
     print((descending([1, 0, 2], key) ?? [-1])[0])
+    print((nested([[1, 2], [3, 4]], key) ?? [[]]).len())
+    print((nested([[1, 0], [3, 4]], key) ?? [[]]).len())
 }
 "#,
-        "2\n1\n1\n2\n1\n-1\n2\n-1\n",
+        "2\n1\n1\n2\n1\n-1\n2\n-1\n2\n1\n",
     );
 }
 
@@ -378,6 +384,15 @@ fn impossible(values: [Int], callback: fn(Int) -> Int) -> [Int] Never! {
     items := values
     &items.sort_by_desc(callback)
     items
+}
+fn run() {}
+"#,
+        ),
+        (
+            "callable value inside lambda",
+            r#"
+fn impossible(values: [[Int]], callback: fn(Int) -> Int) -> [[Int]] Never! {
+    values.map(items -> items.map(callback))
 }
 fn run() {}
 "#,
