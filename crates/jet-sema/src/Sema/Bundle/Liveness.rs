@@ -152,7 +152,8 @@ pub(super) fn check_liveness(
 /// from an earlier evaluation, bypassing `eval_comptime_items`'s callback after
 /// `clear_sema_facts`; the original expression still owns the semantic alias
 /// reads, so feed it through the same identity recorder before liveness projects
-/// warnings.
+/// warnings. Written marker arguments are compile-time expressions too and go
+/// through the same recorder.
 fn record_materialized_comptime_alias_uses(bundle: &ProgramBundle, ledger: &mut NameLedger) {
     for (module_idx, module) in bundle.modules.iter().enumerate() {
         // Every local import name a `prep` initializer can read: Core and
@@ -193,6 +194,19 @@ fn record_materialized_comptime_alias_uses(bundle: &ProgramBundle, ledger: &mut 
                 &imports,
                 &globals,
             );
+        }
+        // A marker argument such as `#Target(lang.Target.Web)` reads its
+        // import alias as written; the checked marker keeps only the leaf.
+        for application in &module.rule_facts {
+            for argument in application.marker.expr_args() {
+                crate::Sema::record_comptime_import_alias_uses(
+                    ledger,
+                    module_idx,
+                    argument,
+                    &imports,
+                    &globals,
+                );
+            }
         }
     }
 }
