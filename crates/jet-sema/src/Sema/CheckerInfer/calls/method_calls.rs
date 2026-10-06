@@ -143,6 +143,43 @@ impl<'a> Checker<'a> {
         )
     }
 
+    /// E0104 for a built-in receiver method called with an argument count no
+    /// form of it accepts. `None` when the method has no arity-keyed form or
+    /// accepts `actual`, so the caller keeps its own report.
+    fn builtin_method_arity_diagnostic(
+        receiver_ty: &Type,
+        method: &str,
+        actual: usize,
+        span: Span,
+    ) -> Option<Diagnostic> {
+        let accepted: Vec<usize> = (0..=8)
+            .filter(|arity| Collections::builtin_method_return(receiver_ty, method, *arity, false).is_some())
+            .collect();
+        if accepted.is_empty() || accepted.contains(&actual) {
+            return None;
+        }
+        let label = Self::receiver_method_label(receiver_ty);
+        let count = |n: usize| format!("{n} argument{}", if n == 1 { "" } else { "s" });
+        let expected = match accepted.as_slice() {
+            [one] => count(*one),
+            [first, .., last] if last - first + 1 == accepted.len() => {
+                format!("{first} to {}", count(*last))
+            }
+            many => format!(
+                "{} or {}",
+                many[..many.len() - 1].iter().map(usize::to_string).collect::<Vec<_>>().join(", "),
+                count(many[many.len() - 1])
+            ),
+        };
+        Some(Diagnostic::error(
+            "E0104",
+            format!("`{label}.{method}` expects {expected}, got {actual}"),
+            format!("`{label}` has a `{method}` method, but no form of it takes {}", count(actual)),
+            format!("call `.{method}(…)` with {expected}"),
+            Some(span),
+        ))
+    }
+
     fn missing_instance_method_diagnostic(
         &self,
         method: &str,
@@ -7999,6 +8036,20 @@ impl<'a> Checker<'a> {
                     if name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER
             )
         {
+            // A built-in method that exists with another arity is a wrong
+            // argument count, not an unknown method: E0311 would then suggest
+            // a different name for a correctly spelled call.
+            if builtin_methods.iter().any(|known| known == method) {
+                if let Some(diagnostic) =
+                    Self::builtin_method_arity_diagnostic(&recv_ty, method, args.len(), span)
+                {
+                    self.diags.push(diagnostic);
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+            }
             let diagnostic = self.missing_instance_method_diagnostic(
                 method,
                 &recv_ty,
