@@ -1,33 +1,25 @@
-// `jet inspect shapes <file.jet>` after the check (CmdInspect.rs `run_shapes`):
-// every struct of the checked entry is one canonical shape fact (jet-sema
-// Schema.rs `shape_fact_from_struct`, jet-foundation Shape.rs `ShapeFact`,
-// CLISchema.rs `shape_field_names`), printed with its ten projections. A
-// program that imports modules, and a field default the compile-time
-// evaluator would have to fold (Rust reads `Field::default_ct`), are refused
-// with E2104, never guessed.
+// `jet inspect shapes`: project the checked modules, including imported
+// declarations and folded defaults. Shape construction follows the canonical
+// Schema.jet `shape_fact_from_struct` from origin/port/compiler.
 use jet_driver.[
-    JetDriverVerbOutput,
-    JET_DRIVER_EXIT_OK,
-    JET_DRIVER_EXIT_USER_ERROR,
+JetDriverVerbOutput,
+JetDriverDocModule,
+JET_DRIVER_EXIT_OK,
+JET_DRIVER_EXIT_USER_ERROR,
 ]
 use jet_foundation.[
-    Expr,
-    Field,
-    Item,
-    Marker,
-    MarkerCallArg,
-    Program,
-    StrPart,
-    StructDef,
-    StructLayout,
-    Type,
-    UnOp,
-    diagnostic_from_registry,
-    type_name,
+CtValue,
+Field,
+Item,
+Marker,
+MarkerCallArg,
+StructDef,
+StructLayout,
+Type,
+diagnostic_from_registry,
+type_name,
 ]
-use jet_sema.[
-    sema_checked_wire_case,
-]
+use jet_sema.sema_checked_wire_case
 
 // Shape.rs `ShapeProjectionKind::ALL`, in order.
 JET_CLI_SHAPE_PROJECTIONS :: [String]{"json", "cbor", "csv", "toml", "yaml", "xml", "args", "env", "db", "layout"}
@@ -86,21 +78,12 @@ struct JetCLIShapeFact {
     alignment: Int?
 }
 
-// A field default: its value, none (Rust `shape_default` yields None for a
-// list, map, struct, enum, or unit value), or a value this port cannot fold.
-enum JetCLIShapeDefault {
-    Value(value: JetCLIStatusValue)
-    Absent
-    Unfolded
-}
-
 enum JetCLIShapeBuild {
     Fact(fact: JetCLIShapeFact)
-    // Shape.rs `ShapeError` display text.
     Invalid(error: String)
-    Unported(shape: String)
 }
 
+// Shape.rs `ShapeError` display text.
 // Schema.rs `shape_type`.
 fn jet_cli_shape_type(source: String, ty: Type) -> JetCLIShapeType Never! {
     if ty == {
@@ -158,43 +141,24 @@ fn jet_cli_shape_type_label(ty: JetCLIShapeType) -> String Never! {
     }
 }
 
-// The literal default of one field, as Rust's `default_ct` would hold it.
-fn jet_cli_shape_default(value: Expr) -> JetCLIShapeDefault Never! {
+// Schema.jet `shape_default`: only scalar and byte defaults project; aggregate
+// values intentionally have no ShapeDefault.
+fn jet_cli_shape_default(value: CtValue) -> JetCLIStatusValue? Never! {
     if value == {
-        .Int(number, _, _, _) -> JetCLIShapeDefault.Value{value: jet_cli_status_int(number)}
-        .Float(number, _, _, _) -> JetCLIShapeDefault.Value{value: JetCLIStatusValue.Float{text: "{number}"}}
-        .Bool(flag, _) -> JetCLIShapeDefault.Value{value: jet_cli_status_bool(flag)}
-        .Char(text, _) -> JetCLIShapeDefault.Value{value: jet_cli_status_text(text)}
-        .Str(parts, _) -> {
-            text := ""
-            loop part in parts {
-                if part == .Lit(literal) {
-                    text = "{text}{literal}"
-                } else {
-                    return JetCLIShapeDefault.Unfolded
-                }
+        .Int(number) -> Val(jet_cli_status_int(number))
+        .Float(number) -> {
+            text :: if number == {
+                .F64(value) -> "{value}"
+                .F32(value) -> "{value}"
             }
-            JetCLIShapeDefault.Value{value: jet_cli_status_text(text)}
+            Val(JetCLIStatusValue.Float{text: text})
         }
-        .Unary(op, operand, _) -> {
-            if op != UnOp.Neg -> return JetCLIShapeDefault.Unfolded
-            if operand == {
-                .Int(number, _, _, _) -> JetCLIShapeDefault.Value{value: jet_cli_status_int(0 - number)}
-                .Float(number, _, _, _) -> JetCLIShapeDefault.Value{value: JetCLIStatusValue.Float{text: "{-number}"}}
-                else -> JetCLIShapeDefault.Unfolded
-            }
-        }
-        .Present(inner, _) | .Paren(inner, _) -> jet_cli_shape_default(inner)
-        .TypedLit(head, _, _) -> {
-            if head == .Val(ty) {
-                if ty == .Named(name) {
-                    if name == "Bytes" -> return JetCLIShapeDefault.Unfolded
-                }
-            }
-            JetCLIShapeDefault.Absent
-        }
-        .ListLit(_, _) | .MapLit(_, _) | .StructLit(_, _, _, _, _, _, _) | .EnumLit(_, _, _, _, _, _) | .TupleLit(_, _, _) | .Unit(_) | .Absent(_) -> JetCLIShapeDefault.Absent
-        else -> JetCLIShapeDefault.Unfolded
+        .Bool(flag) -> Val(jet_cli_status_bool(flag))
+        .Char(code) -> Val(jet_cli_status_text("{code}"))
+        .Str(text) -> Val(jet_cli_status_text(text))
+        .Bytes(bytes) -> Val(jet_cli_status_array(loop byte in bytes -> jet_cli_status_int(Int.from_u8(byte))))
+        .Present(inner) -> jet_cli_shape_default(inner)
+        else -> None
     }
 }
 
@@ -323,30 +287,35 @@ fn jet_cli_shape_fact(source: String, structure: StructDef) -> JetCLIShapeBuild 
     fields := [JetCLIShapeField]{}
     loop (order, field) in structure.fields {
         ty :: jet_cli_shape_type(source, field.ty)
-        default := JetCLIStatusValue?{None}
-        if field.default == .Val(expression) {
-            if jet_cli_shape_default(expression) == {
-                .Value(value) -> default = Val(value)
-                .Absent -> {}
-                .Unfolded -> return JetCLIShapeBuild.Unported{shape: "field default the compile-time evaluator folds"}
-            }
-        }
+        default :: if field.default_ct == .Val(value) -> jet_cli_shape_default(value) else -> None
         short := String?{None}
-        if jet_cli_shape_marker(field.serde_markers, "Short") == .Val(marker) -> short = jet_cli_shape_marker_string(marker, None)
+        if jet_cli_shape_marker(field.serde_markers, "Short") == .Val(marker) {
+            short = jet_cli_shape_marker_string(marker, None)
+        }
         skip :: field.computed != None || jet_cli_shape_marker(field.serde_markers, "Skip") != None
         &fields.push(JetCLIShapeField{name: field.name, ty: ty, order: order, names: jet_cli_shape_field_names(structure, field), encoding: jet_cli_shape_encoding(ty), default: default, skip: skip, short: short})
     }
     seen := [String]{}
     loop field in fields {
-        if jet_cli_shape_bad_name(field.name) -> return JetCLIShapeBuild.Invalid{error: "invalid shape field name {field.name}"}
+        if jet_cli_shape_bad_name(field.name) {
+            return JetCLIShapeBuild.Invalid{error: "invalid shape field name {field.name}"}
+        }
         if field.ty == .Unknown(name) {
-            if jet_cli_shape_bad_name(name) -> return JetCLIShapeBuild.Invalid{error: "unknown shape type {name}"}
+            if jet_cli_shape_bad_name(name) {
+                return JetCLIShapeBuild.Invalid{error: "unknown shape type {name}"}
+            }
         }
-        if jet_cli_shape_bad_slot(field.names) == .Val(slot) -> return JetCLIShapeBuild.Invalid{error: "invalid {slot} name for field {field.name}"}
+        if jet_cli_shape_bad_slot(field.names) == .Val(slot) {
+            return JetCLIShapeBuild.Invalid{error: "invalid {slot} name for field {field.name}"}
+        }
         if field.short == .Val(short) {
-            if jet_cli_shape_bad_name(short) -> return JetCLIShapeBuild.Invalid{error: "invalid metadata for field {field.name}"}
+            if jet_cli_shape_bad_name(short) {
+                return JetCLIShapeBuild.Invalid{error: "invalid metadata for field {field.name}"}
+            }
         }
-        if seen.contains(field.name) -> return JetCLIShapeBuild.Invalid{error: "duplicate shape field {field.name}"}
+        if seen.contains(field.name) {
+            return JetCLIShapeBuild.Invalid{error: "duplicate shape field {field.name}"}
+        }
         &seen.push(field.name)
     }
     loop projection in JET_CLI_SHAPE_PROJECTIONS {
@@ -354,7 +323,9 @@ fn jet_cli_shape_fact(source: String, structure: StructDef) -> JetCLIShapeBuild 
         loop field in fields {
             if field.skip -> next
             name :: jet_cli_shape_name_for(field.names, projection)
-            if names.contains(name) -> return JetCLIShapeBuild.Invalid{error: "duplicate {projection} projection name {name}"}
+            if names.contains(name) {
+                return JetCLIShapeBuild.Invalid{error: "duplicate {projection} projection name {name}"}
+            }
             &names.push(name)
         }
     }
@@ -362,9 +333,11 @@ fn jet_cli_shape_fact(source: String, structure: StructDef) -> JetCLIShapeBuild 
     alignment := Int?{None}
     if structure.layout == .Val(declared) {
         if declared == {
-            .C -> layout = "c"
+            .C -> { layout = "c" }
             .CAligned(value, _) -> {
-                if value <= 0 || value & (value - 1) != 0 -> return JetCLIShapeBuild.Invalid{error: "invalid shape layout alignment {value}"}
+                if value <= 0 || value & (value - 1) != 0 {
+                    return JetCLIShapeBuild.Invalid{error: "invalid shape layout alignment {value}"}
+                }
                 layout = "c"
                 alignment = Val(value)
             }
@@ -380,9 +353,10 @@ fn jet_cli_shape_names_value(names: JetCLIShapeNames) -> JetCLIStatusValue Never
     labels :: [String]{"json", "cbor", "csv", "toml", "yaml", "xml", "db", "layout"}
     ignored := [String]{}
     loop index in 0..<slots.len() {
-        if slots[index] == None -> &ignored.push(labels[index])
+        if slots[index] == .None -> &ignored.push(labels[index])
     }
-    jet_cli_status_object([JetCLIStatusField]{
+    jet_cli_status_object(
+    [JetCLIStatusField]{
         jet_cli_status_field("text", jet_cli_status_text(names.text)),
         jet_cli_status_field("json", jet_cli_status_optional_text(names.json)),
         jet_cli_status_field("cbor", jet_cli_status_optional_text(names.cbor)),
@@ -395,7 +369,8 @@ fn jet_cli_shape_names_value(names: JetCLIShapeNames) -> JetCLIStatusValue Never
         jet_cli_status_field("db", jet_cli_status_optional_text(names.db)),
         jet_cli_status_field("layout", jet_cli_status_optional_text(names.layout)),
         jet_cli_status_field("ignored", jet_cli_status_texts(ignored)),
-    })
+    },
+    )
 }
 
 // The projected fields (Shape.rs `ShapeFact::project`): unskipped, in order;
@@ -405,7 +380,9 @@ fn jet_cli_shape_projection_value(fact: JetCLIShapeFact, projection: String) -> 
     loop field in fact.fields {
         if field.skip -> next
         short :: if projection == "args" -> field.short else -> String?{None}
-        &rows.push(jet_cli_status_object([JetCLIStatusField]{
+        &rows.push(
+        jet_cli_status_object(
+        [JetCLIStatusField]{
             jet_cli_status_field("source_name", jet_cli_status_text(field.name)),
             jet_cli_status_field("name", jet_cli_status_text(jet_cli_shape_name_for(field.names, projection))),
             jet_cli_status_field("decode_name", jet_cli_status_text(jet_cli_shape_name_for(field.names, "json"))),
@@ -415,18 +392,23 @@ fn jet_cli_shape_projection_value(fact: JetCLIShapeFact, projection: String) -> 
             jet_cli_status_field("default", field.default ?? JetCLIStatusValue.Null),
             jet_cli_status_field("short", jet_cli_status_optional_text(short)),
             jet_cli_status_field("doc", JetCLIStatusValue.Null),
-        }))
+        },
+        ),
+        )
     }
-    jet_cli_status_object([JetCLIStatusField]{
+    jet_cli_status_object(
+    [JetCLIStatusField]{
         jet_cli_status_field("kind", jet_cli_status_text(projection)),
         jet_cli_status_field("status", jet_cli_status_text("supported")),
         jet_cli_status_field("fields", jet_cli_status_array(rows)),
-    })
+    },
+    )
 }
 
 // CmdInspect.rs `shape_fact_value`.
 fn jet_cli_shape_fact_value(fact: JetCLIShapeFact) -> JetCLIStatusValue Never! {
-    fields :: loop field in fact.fields -> jet_cli_status_object([JetCLIStatusField]{
+    fields :: loop field in fact.fields -> jet_cli_status_object(
+    [JetCLIStatusField]{
         jet_cli_status_field("source_name", jet_cli_status_text(field.name)),
         jet_cli_status_field("type", jet_cli_status_text(jet_cli_shape_type_label(field.ty))),
         jet_cli_status_field("order", jet_cli_status_int(field.order)),
@@ -436,38 +418,59 @@ fn jet_cli_shape_fact_value(fact: JetCLIShapeFact) -> JetCLIStatusValue Never! {
         jet_cli_status_field("names", jet_cli_shape_names_value(field.names)),
         jet_cli_status_field("short", jet_cli_status_optional_text(field.short)),
         jet_cli_status_field("doc", JetCLIStatusValue.Null),
-    })
+    },
+    )
     projections :: loop projection in JET_CLI_SHAPE_PROJECTIONS -> jet_cli_shape_projection_value(fact, projection)
     alignment :: if fact.alignment == .Val(value) -> jet_cli_status_int(value) else -> JetCLIStatusValue.Null
-    jet_cli_status_object([JetCLIStatusField]{
-        jet_cli_status_field("identity", jet_cli_status_object([JetCLIStatusField]{
+    jet_cli_status_object(
+    [JetCLIStatusField]{
+        jet_cli_status_field(
+        "identity",
+        jet_cli_status_object(
+        [JetCLIStatusField]{
             jet_cli_status_field("source", jet_cli_status_text(fact.source)),
             jet_cli_status_field("type", jet_cli_status_text(fact.type_name)),
             jet_cli_status_field("key", jet_cli_status_text("{fact.source}::{fact.type_name}")),
-        })),
-        jet_cli_status_field("dimensions", jet_cli_status_object([JetCLIStatusField]{
+        },
+        ),
+        ),
+        jet_cli_status_field(
+        "dimensions",
+        jet_cli_status_object(
+        [JetCLIStatusField]{
             jet_cli_status_field("status", jet_cli_status_text("known")),
             jet_cli_status_field("rank", jet_cli_status_int(1)),
             jet_cli_status_field("width", jet_cli_status_int(fact.fields.len())),
-        })),
+        },
+        ),
+        ),
         jet_cli_status_field("encoding", jet_cli_status_text("Object")),
-        jet_cli_status_field("layout", jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field(
+        "layout",
+        jet_cli_status_object(
+        [JetCLIStatusField]{
             jet_cli_status_field("kind", jet_cli_status_text(fact.layout)),
             jet_cli_status_field("alignment", alignment),
-        })),
-        jet_cli_status_field("provenance", jet_cli_status_object([JetCLIStatusField]{
+        },
+        ),
+        ),
+        jet_cli_status_field(
+        "provenance",
+        jet_cli_status_object(
+        [JetCLIStatusField]{
             jet_cli_status_field("origin", jet_cli_status_text("declared")),
             jet_cli_status_field("span", JetCLIStatusValue.Null),
             jet_cli_status_field("declaration", jet_cli_status_text(fact.type_name)),
-        })),
+        },
+        ),
+        ),
         jet_cli_status_field("fields", jet_cli_status_array(fields)),
         jet_cli_status_field("projections", jet_cli_status_array(projections)),
-    })
+    },
+    )
 }
 
-fn jet_cli_shape_name_text(value: String?) -> String Never! {
-    value ?? "ignored"
-}
+fn jet_cli_shape_name_text(value: String?) -> String Never! { value ?? "ignored" }
 
 // CmdInspect.rs `print_shape_fact`.
 fn jet_cli_shape_fact_text(fact: JetCLIShapeFact) -> String Never! {
@@ -479,32 +482,31 @@ fn jet_cli_shape_fact_text(fact: JetCLIShapeFact) -> String Never! {
         names :: field.names
         out = "{out}    names: text={names.text} json={jet_cli_shape_name_text(names.json)} cbor={jet_cli_shape_name_text(names.cbor)} csv={jet_cli_shape_name_text(names.csv)} toml={jet_cli_shape_name_text(names.toml)} yaml={jet_cli_shape_name_text(names.yaml)} xml={jet_cli_shape_name_text(names.xml)} args={names.args} env={names.env} db={jet_cli_shape_name_text(names.db)} layout={jet_cli_shape_name_text(names.layout)}\n"
     }
-    loop projection in JET_CLI_SHAPE_PROJECTIONS -> out = "{out}  projection {projection}: supported ({projected} fields)\n"
+    loop projection in JET_CLI_SHAPE_PROJECTIONS {
+        out = "{out}  projection {projection}: supported ({projected} fields)\n"
+    }
     out
 }
 
-// CmdInspect.rs `run_shapes` after `check_projection`. The checked entry
-// is one module named by its file name, as the Rust bundle displays it.
-fn jet_cli_inspect_shapes(programs: [Program], file: String, json: Bool, color: Bool) -> JetDriverVerbOutput Never! {
-    if programs.len() != 1 -> return jet_cli_not_ported_output("inspect shapes <multi-module bundle>", color)
-    program :: programs[0]
-    if program.imports.len() > 0 -> return jet_cli_not_ported_output("inspect shapes <program with imports>", color)
-    source :: jet_cli_file_name(file)
+// CmdInspect.rs `run_shapes`: module display identity, then type name.
+fn jet_cli_inspect_shapes(modules: [JetDriverDocModule], json: Bool, color: Bool) -> JetDriverVerbOutput Never! {
     facts := [JetCLIShapeFact]{}
-    loop item in program.items {
-        if item == .Struct(structure) {
-            if jet_cli_shape_fact(source, structure) == {
-                .Fact(fact) -> &facts.push(fact)
-                .Unported(shape) -> return jet_cli_not_ported_output("inspect shapes <{shape}>", color)
-                .Invalid(error) -> {
-                    what :: "could not project shape `{structure.name}` from `{source}`: {error}"
-                    why :: "the checked declaration could not form one canonical shape fact"
-                    fix :: "fix the declaration's field names, types, or format markers"
-                    if json {
-                        report :: jet_cli_report_json(diagnostic_from_registry("E2105", None, what, why, fix), None, "", "", 0)
-                        return JetDriverVerbOutput{stdout: "{jet_cli_status_render_with_reports("inspect.shapes", false, [String]{report}, [JetCLIStatusField]{})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    loop checked in modules {
+        source :: checked.path
+        loop item in checked.items {
+            if item == .Struct(structure) {
+                if jet_cli_shape_fact(source, structure) == {
+                    .Fact(fact) -> { &facts.push(fact) }
+                    .Invalid(error) -> {
+                        what :: "could not project shape `{structure.name}` from `{source}`: {error}"
+                        why :: "the checked declaration could not form one canonical shape fact"
+                        fix :: "fix the declaration's field names, types, or format markers"
+                        if json {
+                            report :: jet_cli_report_json(diagnostic_from_registry("E2105", None, what, why, fix), None, "", "", 0)
+                            return JetDriverVerbOutput{stdout: "{jet_cli_status_render_with_reports("inspect.shapes", false, [String]{report}, [JetCLIStatusField]{})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+                        }
+                        return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", what, why, fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
                     }
-                    return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", what, why, fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
                 }
             }
         }
@@ -512,7 +514,7 @@ fn jet_cli_inspect_shapes(programs: [Program], file: String, json: Bool, color: 
     loop index in 1..<facts.len() {
         value :: ~facts[index]
         position := index
-        loop position > 0 && facts[position - 1].type_name > value.type_name {
+        loop position > 0 && (facts[position - 1].source > value.source || (facts[position - 1].source == value.source && facts[position - 1].type_name > value.type_name)) {
             facts[position] = facts[position - 1]
             position -= 1
         }
