@@ -181,6 +181,9 @@ as text or canonical JSON. A layout without a physical-byte guarantee keeps
 unknown byte fields absent and reports E0959; it does not estimate them from
 the host. The origin lens reads the checked prepared value, not a source-text
 guess about whether a value was tracked.
+Convention routing reads complete retained directory listings from the
+authorized compiler request, including empty directories. It never invents
+directories from source-file names or reopens ambient filesystem paths.
 
 
 ## Shared option spellings
