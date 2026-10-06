@@ -3,7 +3,7 @@ use crate::AST::Type;
 
 /// A fixed data row accepts its canonical Core owner, never a same-leaf
 /// user-qualified nominal. Bare names remain the bootstrap row spelling.
-pub(crate) fn data_nominal_leaf(name: &str) -> Option<&str> {
+pub fn data_nominal_leaf(name: &str) -> Option<&str> {
     if name.starts_with("<corelib>/Core/data::") {
         return name.rsplit("::").next();
     }

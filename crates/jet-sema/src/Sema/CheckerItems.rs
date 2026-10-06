@@ -1991,6 +1991,10 @@ impl<'a> Checker<'a> {
     /// An imported function signature retains the declaration's nominal
     /// owners, including generated foreign records and imported Core types.
     /// Its lexical function parameters are not nominal names to qualify.
+    /// A record the importing module declares itself keeps its local leaf:
+    /// that leaf is the module's own spelling of the same nominal, so a
+    /// signature that re-imports it (crypto.jet calling expert.jet, whose
+    /// `Secret` is crypto.jet's) still unifies with local bindings.
     pub(crate) fn qualify_imported_function_sig(
         &self,
         owner: usize,
@@ -2004,8 +2008,15 @@ impl<'a> Checker<'a> {
             return;
         };
         let parameters = module.trait_reg.fn_params.get(function);
+        let canonical = |imported_owner: usize, leaf: &str| {
+            if imported_owner == self.module_idx {
+                leaf.to_string()
+            } else {
+                self.canonical_nominal_name(imported_owner, leaf)
+            }
+        };
         let qualify = |ty: &Type| {
-            ty.map_named_types(&|name| {
+            ty.map_nominal_names(&|name| {
                 if name.contains("::")
                     || parameters.is_some_and(|params| params.iter().any(|param| param.name == name))
                 {
@@ -2015,10 +2026,10 @@ impl<'a> Checker<'a> {
                     let imported_module = module.core_imports.get(name)?;
                     let imported_owner =
                         self.core_source_owner_module(imported_module, imported_leaf)?;
-                    return Some(self.canonical_nominal_name(imported_owner, imported_leaf));
+                    return Some(canonical(imported_owner, imported_leaf));
                 }
                 if let Some((imported_leaf, imported_owner)) = module.unqualified_file.get(name) {
-                    return Some(self.canonical_nominal_name(*imported_owner, imported_leaf));
+                    return Some(canonical(*imported_owner, imported_leaf));
                 }
                 // These registry rows are injected into every module, rather
                 // than declared by the imported function's lexical owner.

@@ -684,7 +684,7 @@ fn csv_query_row_type(ty: &Type) -> Option<Type> {
     let Type::Apply { name, args } = ok.without_user_tags() else {
         return None;
     };
-    (name == "Query" && args.len() == 1).then(|| args[0].clone())
+    (crate::Sema::data_nominal_leaf(name) == Some("Query") && args.len() == 1).then(|| args[0].clone())
 }
 /// Recover the single checked `T` carried by typed DataLoader/DataSnapshot/
 /// DataStream calls.  The call result retains the full fallible/optional/list
@@ -693,8 +693,10 @@ fn data_row_type(ty: &Type) -> Option<Type> {
     match ty.without_user_tags() {
         Type::Result { ok, .. } | Type::Option(ok) => data_row_type(ok),
         Type::Apply { name, args }
-            if matches!(name.as_str(), "DataLoader" | "DataSnapshot" | "DataStream")
-                && args.len() == 1 =>
+            if matches!(
+                crate::Sema::data_nominal_leaf(name),
+                Some("DataLoader" | "DataSnapshot" | "DataStream")
+            ) && args.len() == 1 =>
         {
             Some(args[0].clone())
         }
