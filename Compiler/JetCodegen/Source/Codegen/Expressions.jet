@@ -5489,6 +5489,39 @@ fn jet_codegen_pattern_variant_payload_type(builder: JetCodegenBuilder, subject_
     panic("checked pattern owner has no registered nominal declaration")
 }
 
+// The MIR enum a checked variant pattern tests and projects. A union subject
+// is its anonymous union enum, whose variants are the member tags and whose
+// one payload is the member itself (Rust `variant_payload_types` and the
+// `union_enum_name` layout); every other subject is the pattern's owner.
+struct JetCodegenVariantOwner {
+    pub owner: MIRTypeID
+    pub variant: String
+    pub union_member: Type?
+}
+
+fn jet_codegen_pattern_variant_owner(builder: JetCodegenBuilder, pattern: TPattern, subject_ty: Type, variant: String) -> JetCodegenVariantOwner Never! {
+    subject_type := jet_codegen_unwrap_pattern_tags(subject_ty)
+    if subject_type == .Union(members) {
+        identity :: jet_codegen_lower_type_for_function(subject_type, builder).identity ?? panic("checked union pattern subject has no MIR identity")
+        loop member in members {
+            tag :: jet_codegen_union_member_tag(member)
+            if tag == variant || type_name(jet_codegen_unwrap_pattern_tags(member)) == variant -> return JetCodegenVariantOwner{owner: identity, variant: tag, union_member: Val(member)}
+        }
+        panic("checked union pattern names no member of its subject")
+    }
+    owner :: pattern.enum_type ?? panic("checked variant pattern has no canonical owner")
+    JetCodegenVariantOwner{owner: jet_codegen_mir_type_id_for_symbol(builder.modules, owner), variant: variant, union_member: None}
+}
+
+fn jet_codegen_pattern_variant_slot_type(builder: JetCodegenBuilder, pattern: TPattern, subject_ty: Type, target: JetCodegenVariantOwner, variant: String, index: Int) -> Type Never! {
+    if target.union_member == .Val(member) {
+        if index != 0 -> panic("checked union pattern has more than one payload slot")
+        return member
+    }
+    owner :: pattern.enum_type ?? panic("checked variant pattern has no canonical owner")
+    jet_codegen_pattern_variant_payload_type(builder, subject_ty, owner, variant, index)
+}
+
 fn jet_codegen_pattern_field_id(builder: JetCodegenBuilder, subject_ty: Type, field: String) -> MIRFieldID Never! {
     resolved := jet_codegen_resolve_field_by_name(builder.modules, builder.function.module_identity, builder.generic_type_names, jet_codegen_unwrap_pattern_tags(subject_ty), field)
     jet_codegen_mir_field_id(resolved)
@@ -5953,20 +5986,20 @@ fn jet_codegen_lower_pattern_shape_test(builder: &JetCodegenBuilder, pattern: TP
                 }
                 else -> {}
             }
-            owner :: pattern.enum_type ?? panic("checked variant pattern has no canonical owner")
-            owner_id := jet_codegen_mir_type_id_for_symbol(builder.modules, owner)
-            is_variant := jet_codegen_emit_value(&builder, span, Type.Bool, MIROperation.EnumIs{subject: subject_value, owner: owner_id, variant: variant})
+            target :: jet_codegen_pattern_variant_owner(builder, pattern, subject.ty, variant)
+            owner_id :: target.owner
+            is_variant := jet_codegen_emit_value(&builder, span, Type.Bool, MIROperation.EnumIs{subject: subject_value, owner: owner_id, variant: target.variant})
             index := 0
             loop binding in bindings {
                 if binding == {
                     .Range(lo, hi) -> {
-                        payload_ty := jet_codegen_pattern_variant_payload_type(builder, subject.ty, owner, variant, index)
-                        operation := MIROperation.EnumPayload{subject: subject_value, owner: owner_id, variant: variant, index: index}
+                        payload_ty := jet_codegen_pattern_variant_slot_type(builder, pattern, subject.ty, target, variant, index)
+                        operation := MIROperation.EnumPayload{subject: subject_value, owner: owner_id, variant: target.variant, index: index}
                         is_variant = jet_codegen_lower_guarded_pattern_range(&builder, is_variant, payload_ty, lo, hi, span, "enum-pattern-range", operation)
                     }
                     .Nested(nested) -> {
-                        payload_ty := jet_codegen_pattern_variant_payload_type(builder, subject.ty, owner, variant, index)
-                        operation := MIROperation.EnumPayload{subject: subject_value, owner: owner_id, variant: variant, index: index}
+                        payload_ty := jet_codegen_pattern_variant_slot_type(builder, pattern, subject.ty, target, variant, index)
+                        operation := MIROperation.EnumPayload{subject: subject_value, owner: owner_id, variant: target.variant, index: index}
                         is_variant = jet_codegen_lower_guarded_nested_pattern(&builder, pattern, is_variant, payload_ty, nested, span, "enum-pattern-nested", operation, false, false, None)
                     }
                     else -> {}
@@ -6067,8 +6100,8 @@ fn jet_codegen_bind_pattern_shape(builder: &JetCodegenBuilder, pattern: TPattern
                 }
                 else -> {}
             }
-            owner :: pattern.enum_type ?? panic("checked variant binding has no canonical owner")
-            owner_id := jet_codegen_mir_type_id_for_symbol(builder.modules, owner)
+            target :: jet_codegen_pattern_variant_owner(builder, pattern, subject.ty, variant)
+            owner_id :: target.owner
             index := 0
             loop binding in bindings {
                 if binding == {
@@ -6076,18 +6109,18 @@ fn jet_codegen_bind_pattern_shape(builder: &JetCodegenBuilder, pattern: TPattern
                         if name != "" && name != "_" {
                             fact := jet_codegen_pattern_binding_fact(pattern, name)
                             if window == .Val(base) {
-                                window_place := jet_codegen_payload_window_place(&builder, base, MIRPayloadKind.Enum{owner: owner_id, variant: variant, index: index}, fact.ty, fact.span)
+                                window_place := jet_codegen_payload_window_place(&builder, base, MIRPayloadKind.Enum{owner: owner_id, variant: target.variant, index: index}, fact.ty, fact.span)
                                 jet_codegen_bind_window_binding(&builder, fact, window_place)
                             } else {
-                                payload := jet_codegen_emit_value(&builder, fact.span, fact.ty, MIROperation.EnumPayload{subject: subject_value, owner: owner_id, variant: variant, index: index})
+                                payload := jet_codegen_emit_value(&builder, fact.span, fact.ty, MIROperation.EnumPayload{subject: subject_value, owner: owner_id, variant: target.variant, index: index})
                                 jet_codegen_write_pattern_binding(&builder, fact, payload, reuse)
                             }
                         }
                     }
                     .Nested(nested) -> {
-                        payload_ty := jet_codegen_pattern_variant_payload_type(builder, subject.ty, owner, variant, index)
-                        nested_window := if window == .Val(base) -> Val(jet_codegen_payload_window_place(&builder, base, MIRPayloadKind.Enum{owner: owner_id, variant: variant, index: index}, payload_ty, span)) else -> MIRPlaceID?{None}
-                        jet_codegen_bind_nested_pattern(&builder, pattern, payload_ty, nested, span, MIROperation.EnumPayload{subject: subject_value, owner: owner_id, variant: variant, index: index}, reuse, nested_window)
+                        payload_ty := jet_codegen_pattern_variant_slot_type(builder, pattern, subject.ty, target, variant, index)
+                        nested_window := if window == .Val(base) -> Val(jet_codegen_payload_window_place(&builder, base, MIRPayloadKind.Enum{owner: owner_id, variant: target.variant, index: index}, payload_ty, span)) else -> MIRPlaceID?{None}
+                        jet_codegen_bind_nested_pattern(&builder, pattern, payload_ty, nested, span, MIROperation.EnumPayload{subject: subject_value, owner: owner_id, variant: target.variant, index: index}, reuse, nested_window)
                     }
                     else -> {}
                 }

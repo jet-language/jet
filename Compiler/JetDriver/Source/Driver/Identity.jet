@@ -120,11 +120,13 @@ pub struct JetDriverCompileRequest {
 // kinds by the lowercase hex SHA-256 of their bytes. The host verifies the
 // bytes and schema on both calls; a missing or unreadable record is `None`.
 // `stamp` reports a file's (size, mtime, ctime, inode) stamp so an unchanged
-// file can skip rehashing; a stamp never decides freshness.
+// file can skip rehashing; a stamp never decides freshness. The host reads and
+// writes the store's files, so each call declares that row (an undeclared
+// dynamic dispatch is the maximal row, D-EFF2).
 pub trait JetDriverRecordStore {
-    fn record(self, schema: String, key: String) -> [U8]?
-    fn put_record(self, schema: String, key: String, bytes: [U8]) -> Bool
-    fn stamp(self, path: String) -> String?
+    fn record(self, schema: String, key: String) -[FS]> [U8]?
+    fn put_record(self, schema: String, key: String, bytes: [U8]) -[FS]> Bool
+    fn stamp(self, path: String) -[FS]> String?
 }
 
 struct JetDriverSourceUnit {

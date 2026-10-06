@@ -477,9 +477,12 @@ pub struct SemaRegistrationModuleResult {
 // Host callbacks the checker calls into. Function values never copy, so the
 // graph holds them behind one shared handle; copies of the graph (and of every
 // scope environment that carries it) share the same callbacks.
+// Pure compiler services the host installs. Each declares its empty effect
+// row: an unbounded function value is the maximal row (D-EFF2), which would
+// make every checker path that consults a hook reach every effect.
 pub struct SemaRegistrationHostHooks {
-    pub numeric_unit_conversion_exact: (fn(Float, String, String, String, String) -> Float?)?
-    pub typed_boundary_literal_validate: (fn(MIRTypedHeadKind, [String]) -> String?)?
+    pub numeric_unit_conversion_exact: (fn(Float, String, String, String, String) -[]> Float?)?
+    pub typed_boundary_literal_validate: (fn(MIRTypedHeadKind, [String]) -[]> String?)?
 }
 
 // D-BUILD-FACT3=A / D-CONF-READ1=A: the folded build snapshot the driver

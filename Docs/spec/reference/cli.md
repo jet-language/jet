@@ -171,13 +171,13 @@ For C and C++, the driver-specific options are `--project-root`, `--build-root`,
 `--target`. The exact acceptance and forwarding behavior is documented in
 [CC driver hosts](cc-driver.md).
 
-## Jet-hosted `check` and `build`
+## Jet-hosted `check`, `build`, and `run`
 
 The Jet-hosted CLI ([`Compiler/JetCli`](../../../Compiler/JetCli)) runs
-`jet check <file>` and `jet build <file>` through the Jet compiler
-(`jet_driver_compile`). It gives the compiler one authorized source root: the
-nearest directory at or above the file that holds `package.jet`, or the file's
-own directory for a loose file, with every `.jet` file under it (dot names,
+`jet check <file>`, `jet build <file>`, and `jet run <file>` through the Jet
+compiler (`jet_driver_compile`). It gives the compiler one authorized source
+root: the nearest directory at or above the file that holds `package.jet`, or
+the file's own directory for a loose file, with every `.jet` file under it (dot names,
 `target`, `build`, `node_modules`, `bin`, and nested projects stay out) and the
 generated C/C++ binding caches. The Core library bodies are read from the Jet
 toolchain source tree named by `JET_TOOLCHAIN_ROOT` (the directory that holds
@@ -195,3 +195,13 @@ executable. A program that backend cannot lower yet is refused
 with E2104. `--release` (or `--profile release`) compiles the emitted Rust with
 rustc and the release profile flags. Other build flags and profiles are
 refused with E2104 until they are ported.
+
+`jet run <file>` (and the `jet <file>` shorthand) builds the same executable
+with the same profile rules, then runs it on the caller's stdin, stdout, and
+stderr and exits with its status (1 when a signal ended it). The program's
+arguments are the words after the first standalone `--`, or else the
+positional words after the file. Advisory lints stay hidden unless `--verbose`
+or `-v` comes before `--`; a verbose run reports them before the program
+starts. Run flags other than `--release`, `--profile`, `--verbose`, `--quiet`,
+`--color`, and `--threads` are refused with E2104 until they are ported, and so
+is `jet test`.
