@@ -1407,7 +1407,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: e000a9ef013ee3c2b6a56028e8a052f3c064b7008f2e2d5934892995c33e923f
+// Source SHA-256: 42eabeba25f7e05c3e04a64439658a9e8b13d94812a6c6278ab9a55aed9311c4
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -3106,7 +3106,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.web.devserver", "for_app", "jet_devserver_for_app", true, &[true], ),
     CoreCallRecord::new("core.web.devserver", "app", "jet_devserver_app", true, &[]),
     CoreCallRecord::new( "core.data.sketch.hll", "new", "JetHyperLogLog::new", false, &[], ) .with_pure_route(CoreCallPureRoute::SketchHll),
-    CoreCallRecord::new( "core.data.sketch.tdigest", "new", "JetTDigest::new", false, &[], ) .with_pure_route(CoreCallPureRoute::SketchTDigest),
     CoreCallRecord::new( "core.data.sketch.cms", "new", "JetCountMinSketch::new", false, &[], ) .with_pure_route(CoreCallPureRoute::SketchCms),
     CoreCallRecord::new( "core.data.sketch.reservoir", "new", "JetReservoirSampler::new", false, &[false], ) .with_pure_route(CoreCallPureRoute::SketchReservoir),
     CoreCallRecord::new( "core.web.browser", "profile", "jet_browser_profile", false, &[true], ),
@@ -3370,9 +3369,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::receiver(&["HyperLogLog"], "new", &[]),
     CoreCallRecord::receiver(&["HyperLogLog"], "add", &[true]),
     CoreCallRecord::receiver(&["HyperLogLog"], "count", &[]),
-    CoreCallRecord::receiver(&["TDigest"], "new", &[]),
-    CoreCallRecord::receiver(&["TDigest"], "add", &[false]),
-    CoreCallRecord::receiver(&["TDigest"], "quantile", &[false]),
     CoreCallRecord::receiver(&["CountMinSketch"], "new", &[]),
     CoreCallRecord::receiver(&["CountMinSketch"], "add", &[true]),
     CoreCallRecord::receiver(&["CountMinSketch"], "count", &[true]),
@@ -3383,7 +3379,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::receiver(&["Solver"], "require", &[false]),
     CoreCallRecord::receiver(&["Solver"], "failure_count", &[]),
     CoreCallRecord::receiver(&["Solver"], "status", &[]),
-    CoreCallRecord::receiver( &[ "HyperLogLog", "TDigest", "CountMinSketch", "ReservoirSampler", "Solver", "ServiceUpgradeReceipt", "DataError", VAULT_KEY_REF_TYPE, ], "__display", &[], ),
+    CoreCallRecord::receiver( &[ "HyperLogLog", "CountMinSketch", "ReservoirSampler", "Solver", "ServiceUpgradeReceipt", "DataError", VAULT_KEY_REF_TYPE, ], "__display", &[], ),
     CoreCallRecord::new( "core.http.server", "bind", "jet_http_server_bind", false, &[true, false, false, false], ) .with_max_arity(4) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot(),
     CoreCallRecord::new( "core.data", "inner_join", "jet_data_inner_join_checked_default", true, &[true, true, false, false], ) .without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.data.arrow", "import", "jet_data_arrow_import", true, &[false]),

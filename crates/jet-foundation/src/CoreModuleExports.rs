@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: e000a9ef013ee3c2b6a56028e8a052f3c064b7008f2e2d5934892995c33e923f
+// Source SHA-256: 42eabeba25f7e05c3e04a64439658a9e8b13d94812a6c6278ab9a55aed9311c4
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -288,9 +288,9 @@ const CORE_MODULE_28_MEMBERS: &[&str] = &["new", "Reservoir"];
 const CORE_MODULE_28_TYPES: &[(&str, CoreLeafKind)] = &[("Reservoir", CoreLeafKind::Plain)];
 const CORE_MODULE_28_DEPENDENCIES: &[&str] = &["core.data"];
 
-const CORE_MODULE_29_MEMBERS: &[&str] = &["new", "Centroid", "Packed", "TDigest"];
-const CORE_MODULE_29_TYPES: &[(&str, CoreLeafKind)] = &[("Centroid", CoreLeafKind::Plain), ("Packed", CoreLeafKind::Plain), ("TDigest", CoreLeafKind::Plain)];
-const CORE_MODULE_29_DEPENDENCIES: &[&str] = &["core.data", "core.math"];
+const CORE_MODULE_29_MEMBERS: &[&str] = &["new", "Centroid", "TDigest"];
+const CORE_MODULE_29_TYPES: &[(&str, CoreLeafKind)] = &[("Centroid", CoreLeafKind::Plain), ("TDigest", CoreLeafKind::Plain)];
+const CORE_MODULE_29_DEPENDENCIES: &[&str] = &["core.data"];
 
 const CORE_MODULE_30_MEMBERS: &[&str] = &["decode", "migrate", "open", "open_memory", "pool", "policy", "policy_audit", "row_bool", "row_float", "row_int", "row_text", "row_value", "transaction", "DBConnection", "DBScope", "DBPool", "DBLease", "DBPoolReceipt", "DBError", "DBValue", "SQL"];
 const CORE_MODULE_30_TYPES: &[(&str, CoreLeafKind)] = &[("DBConnection", CoreLeafKind::Plain), ("DBScope", CoreLeafKind::Plain), ("DBPool", CoreLeafKind::Plain), ("DBLease", CoreLeafKind::Plain), ("DBPoolReceipt", CoreLeafKind::Plain), ("DBError", CoreLeafKind::Plain), ("DBValue", CoreLeafKind::Enum(&["Null", "Int", "Float", "Text", "Bool", "Blob"])), ("SQL", CoreLeafKind::Plain)];
