@@ -22,8 +22,9 @@
 //
 // Verdicts: pass, wrong (ran, output or exit differs), unsupported (lowering
 // or object issue, or a runtime symbol the C library does not export),
-// no-mir, convert-error, lower-crash, no-golden (expects a compile error or
-// has no expected stdout).
+// no-mir, convert-error, lower-crash, no-golden (expects a compile error).
+// An example with neither expected file is not a golden and is skipped, as
+// Tools/agent/stage1/golden-cases.mjs "all" skips it.
 //
 // usage: [JET_RUNTIME_PACK=<jet_runtime.pack.o> | JET_RUNTIME_C_LIB=<libjet_runtime_c.a>] [JET=<jet binary>]
 //        [JET_LOWER_RUN=1 | JET_LOWER_RELEASE=1] [JET_LOWER_SHARDS=<n>] [JET_LOWER_MEM=<cap>] [JET_LOWER_BATCH=<n>]
@@ -87,7 +88,8 @@ for (const entry of entries) {
   const slug = entry.stem.replace(/[^A-Za-z0-9_-]+/gu, "_");
   const expectedOut = join(features, "expected", `${entry.stem}.out`);
   const expectedErr = join(features, "expected", `${entry.stem}.err.out`);
-  const verdict = existsSync(expectedErr) || !existsSync(expectedOut) ? "no-golden" : null;
+  if (!existsSync(expectedOut) && !existsSync(expectedErr)) continue;
+  const verdict = existsSync(expectedErr) ? "no-golden" : null;
   cases.push({ entry, slug, expectedOut, stdin: stdinTable.get(entry.stem) ?? null, verdict, detail: "" });
 }
 const open = () => cases.filter((c) => c.verdict === null);
