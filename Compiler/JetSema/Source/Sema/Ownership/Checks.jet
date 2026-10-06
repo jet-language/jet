@@ -102,6 +102,18 @@ pub struct SemaOwnershipMoveOrigin {
     // take parameter, moved as its name's last use. A later use reports
     // E0209 at the argument (pass a copy with `~`) instead of sharing it.
     pub implicit_take: String?{None}
+    // D-CALLSITE-MARK1=A: the captured name a run-once lambda takes with
+    // `^`, when this move is that lambda binding's call. A later call
+    // reports E0121 naming the capture (Rust `moved_use_diagnostic`).
+    pub once_capture: String?{None}
+}
+
+// D-CALLSITE-MARK1=A: a lambda whose body takes a captured name with `^`.
+// `site` is the lambda's span; `key` is the binding that holds it, once bound.
+pub struct SemaOwnershipOnceLambda {
+    pub site: Span
+    pub key: String
+    pub capture: String
 }
 
 // D-COPY-DEFAULT1=A: an unmarked move site that a later use reached. The
@@ -170,6 +182,13 @@ pub struct SemaOwnershipState {
     // found eligible to move at their last use (Rust
     // `take_unmarked_last_use`); the call ownership check makes the move.
     pub implicit_take_ok: [Span]{[Span]{}}
+    // D-CALLSITE-MARK1=A: eligible unmarked take arguments whose name another
+    // argument of the same call also names. Such a name has no last use in
+    // that call (Rust `take_unmarked_last_use` `named_elsewhere`): E0209.
+    pub implicit_take_twice: [Span]{[Span]{}}
+    // D-CALLSITE-MARK1=A: run-once lambdas found in this function, and the
+    // bindings holding them (Rust `once_lambda_sites` / `once_lambdas`).
+    pub once_lambdas: [SemaOwnershipOnceLambda]{[SemaOwnershipOnceLambda]{}}
     // D-SHAPE-PLACE1=A: `function#parameter` keys of list write parameters
     // proven length-preserving (sema_fixed_length_write_params).
     pub fixed_length_write_params: [String]
@@ -1496,6 +1515,12 @@ pub fn sema_ownership_move_origin(expr: Expr, places: [SemaOwnershipPlace], ty: 
 // unmarked, the use also records the move site, so the next check of the
 // function treats that site as a share and this use is valid.
 pub fn sema_ownership_report_moved(state: &SemaOwnershipState, place: SemaOwnershipPlace, moved: SemaOwnershipMovedPlace, span: Span, diagnostics: &[Diagnostic]) {
+    if moved.origin.once_capture == .Val(capture) {
+        name :: sema_ownership_place_name(moved.place)
+        label :: if sema_ownership_span_same(moved.origin.span, span) -> "`{name}` ran here on an earlier loop iteration" else -> "`{name}` ran here"
+        &diagnostics.push(diagnostic_with_label(sema_error("E0121", span, "`{name}` can run only once, and it already ran", "`{name}` takes its captured `{capture}` with the move marker `^`, so its first call gave `{capture}` away", "call `{name}` once, or let it pass a copy of `{capture}` with the copy marker `~` (`~{capture}`) instead of taking it"), moved.origin.span, label))
+        return
+    }
     if moved.origin.implicit_take == .Val(callee) {
         sema_ownership_report_implicit_take_reused(callee, sema_ownership_place_name(moved.place), moved.origin.span, span, &diagnostics)
         return
@@ -2100,6 +2125,13 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
             write_place_ok = false
             &diagnostics.push(sema_ownership_call_diag_write_place(arg.span))
         }
+        // D-CALLSITE-MARK1=A (Rust `reject_unbacked_write_mark`): a written
+        // `&` always means the call edits; a write window parameter keeps it.
+        if arg.convention == AccessConvention.Write && write_place_ok && param.convention == AccessConvention.Read && !sema_ownership_is_window_type(param.ty ?? Type.Named{name: "Unit"}) {
+            accepted = false
+            &diagnostics.push(sema_ownership_diag_unbacked_write_mark(callee, arg.expr))
+            next
+        }
         if arg.convention == AccessConvention.Write && write_place_ok {
             if arg.expr == {
                 .Slice(_, _, _, _, _) -> if !sema_window_contains(state.fixed_length_write_params, sema_window_callee_key(callee, param.name)) {
@@ -2131,7 +2163,10 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
                 }
                 if !checked -> accepted = false
             }
-            if arg.convention != AccessConvention.Move || !sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "Unit"}) {
+            // A name reported in two slots (E0209 below) is settled: it lends
+            // nothing to the call, as in Rust `take_unmarked_last_use`.
+            twice :: decision == SemaCallConventionDecision.NeedsImplicitClone && !binder_rooted && sema_ownership_expr_site_listed(state.implicit_take_twice, arg.expr)
+            if !twice && (arg.convention != AccessConvention.Move || !sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "Unit"})) {
                 loop place in places -> &accesses.push(SemaOwnershipCallAccess{place: place, access: arg.convention, span: arg.span})
             }
         }
@@ -2143,9 +2178,16 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
                 &diagnostics.push(sema_ownership_diag_take_while_lent(sema_ownership_argument_name(arg), callee, expr_span(arg.expr)))
                 next
             }
+            // D-CALLSITE-MARK1=A: a name in two argument slots of one call has
+            // no last use there (Rust `named_elsewhere`).
+            if !binder_rooted && sema_ownership_expr_site_listed(state.implicit_take_twice, arg.expr) {
+                accepted = false
+                &diagnostics.push(sema_ownership_diag_take_twice(sema_ownership_argument_name(arg), callee, expr_span(arg.expr)))
+                next
+            }
             // D-COPY-DEFAULT1=A (Rust `take_unmarked_last_use`): an eligible
             // unmarked argument moves like `^name`; a later use reports E0209.
-            if !binder_rooted && sema_ownership_implicit_take_ok(state, arg.expr) {
+            if !binder_rooted && sema_ownership_expr_site_listed(state.implicit_take_ok, arg.expr) {
                 args[index].convention = AccessConvention.Move
                 if !sema_ownership_mark_implicit_take(&state, arg.expr, scopes, callee, &diagnostics) -> accepted = false
                 next
@@ -2191,9 +2233,43 @@ fn sema_ownership_diag_take_while_lent(name: String, callee: String, span: Span)
     sema_error("E0204", span, "`{name}` is already lent to this call, so `{callee}` can't take it here too", "an earlier argument lets `{callee}` read `{name}` for the whole call, so this argument can't hand the same value over", "pass a copy to one of the two parameters with the copy marker `~` (`~{name}`)")
 }
 
-fn sema_ownership_implicit_take_ok(state: SemaOwnershipState, expr: Expr) -> Bool Never! {
+// E0225 (Rust `reject_unbacked_write_mark`): `&` before an argument whose
+// parameter only reads it. The mark sits just before the place's root name.
+fn sema_ownership_diag_unbacked_write_mark(callee: String, expr: Expr) -> Diagnostic {
+    start :: sema_ownership_place_root_start(expr) ?? expr_span(expr).start
+    mark_span :: Span{start: start - 1, end: start}
+    diagnostic_with_edit(sema_error("E0225", mark_span, "`{callee}` only reads this argument, so it takes no `&` mark", "a mark shows that a call writes (`&`) or takes (`^`) the named place; `{callee}` declares this parameter read-only, so the call leaves the place unmarked", "remove `&`"), TextEdit{span: mark_span, new_text: ""})
+}
+
+fn sema_ownership_place_root_start(expr: Expr) -> Int? Never! {
+    if expr == {
+        .Ident(_, span) -> return Val(span.start)
+        .Field(base, _, _) -> return sema_ownership_place_root_start(base)
+        .Index(base, _, _, _) -> return sema_ownership_place_root_start(base)
+        .Slice(base, _, _, _, _) -> return sema_ownership_place_root_start(base)
+        else -> return None
+    }
+}
+
+// A write window type (`ViewMut<T>`, `ComputeViewMut<T>`): its `&` place
+// construction stays written at a read parameter (Rust `is_window_type`).
+fn sema_ownership_is_window_type(ty: Type) -> Bool Never! {
+    if ty == {
+        .Apply(name, _) -> name == "ViewMut" || name == "ComputeViewMut"
+        .Tagged(_, inner) -> sema_ownership_is_window_type(inner)
+        else -> false
+    }
+}
+
+// E0209 (Rust `take_unmarked_last_use` `named_elsewhere`): one call names
+// the same binding in two argument slots, so neither slot is its last use.
+fn sema_ownership_diag_take_twice(name: String, callee: String, span: Span) -> Diagnostic {
+    sema_error("E0209", span, "`{name}` is passed to `{callee}` more than once in this call", "a name used in two arguments of one call has no last use in that call, so `{callee}` can't take `{name}` without a mark", "write the copy marker `~` (`~{name}`) to pass a copy, or the move marker `^` (`^{name}`) where the call hands `{name}` over")
+}
+
+fn sema_ownership_expr_site_listed(sites: [Span], expr: Expr) -> Bool Never! {
     if expr == .Ident(_, span) {
-        loop site in state.implicit_take_ok {
+        loop site in sites {
             if sema_ownership_span_same(site, span) -> return true
         }
     }
@@ -2211,24 +2287,76 @@ fn sema_ownership_mark_implicit_take(state: &SemaOwnershipState, expr: Expr, sco
     true
 }
 
+// D-CALLSITE-MARK1=A (Rust `once_lambda_sites`): the lambda at `site` takes
+// its captured `capture` with `^`, so it can run only once.
+pub fn sema_ownership_note_once_lambda(state: &SemaOwnershipState, site: Span, capture: String) Never! {
+    loop once in state.once_lambdas {
+        if sema_ownership_span_same(once.site, site) -> return
+    }
+    &state.once_lambdas.push(SemaOwnershipOnceLambda{site: site, key: "", capture: capture})
+}
+
+// D-CALLSITE-MARK1=A (Rust `once_lambdas`): the binding `key` holds the
+// run-once lambda at `site`.
+pub fn sema_ownership_bind_once_lambda(state: &SemaOwnershipState, site: Span, key: String) Never! {
+    loop index in 0..<state.once_lambdas.len() {
+        if sema_ownership_span_same(state.once_lambdas[index].site, site) -> state.once_lambdas[index].key = key
+    }
+}
+
+// D-CALLSITE-MARK1=A: a call of a run-once lambda binding moves the binding,
+// so a later call on any path reports E0121 naming the taken capture. The
+// callee's own use check already reported a call after the move.
+pub fn sema_ownership_call_once_lambda(state: &SemaOwnershipState, callee: Expr, scopes: SemaScopeTable) Never! {
+    if callee == .Ident(_, span) {
+        binding :: sema_ownership_binding_for_expr(&state, callee, scopes) ?? return
+        capture := String?{None}
+        loop once in state.once_lambdas {
+            if once.key != "" && once.key == binding.symbol.id.key -> capture = Val(once.capture)
+        }
+        if capture == None -> return
+        places :: sema_ownership_places_from_expr_in_state(callee, scopes, &state)
+        loop place in places {
+            if sema_ownership_place_moved(&state, place) != None -> return
+        }
+        loop place in places -> &state.moved.push(SemaOwnershipMovedPlace{place: place, origin: SemaOwnershipMoveOrigin{span: span, consumer: "its first call", share_ty: None, once_capture: capture}})
+    }
+}
+
 // D-COPY-DEFAULT1=A (Rust `take_unmarked_last_use`): the typed argument
 // check notes an unmarked argument to a take parameter that may move at its
 // name's last use. Only a plain owned local or take parameter of an ordinary
 // copyable value qualifies: a value with cleanup (a `Close` resource, a
 // consume duty, or a type holding one), a type parameter, a task, a view, a
-// string view, and a capture inside a lambda body keep `^`.
-pub fn sema_ownership_note_implicit_take(state: &SemaOwnershipState, expr: Expr, ty: Type, required: Type, environment: SemaScopeEnvironment, generic_params: [TGenericParam], scopes: SemaScopeTable) Never! {
+// string view, and a capture inside a lambda body keep `^`. Returns the
+// noted binding's symbol key, so the caller can find the same name in
+// another argument (sema_ownership_note_implicit_take_twice).
+pub fn sema_ownership_note_implicit_take(state: &SemaOwnershipState, expr: Expr, ty: Type, required: Type, environment: SemaScopeEnvironment, generic_params: [TGenericParam], scopes: SemaScopeTable) -> String? Never! {
     if expr == .Ident(_, span) {
-        binding :: sema_ownership_binding_for_expr(&state, expr, scopes) ?? return
-        if binding.symbol.kind != SymbolKind.Local && binding.symbol.kind != SymbolKind.Parameter -> return
-        if sema_ownership_binding_is_borrowed_param(binding) || binding.string_view -> return
-        if sema_single_use_key(state, binding.symbol.id.key) -> return
-        if sema_ownership_binding_captured(scopes, binding) -> return
-        if !type_identity_equal(ty, required) || sema_ownership_type_mentions_generic(ty, generic_params) -> return
+        binding :: sema_ownership_binding_for_expr(&state, expr, scopes) ?? return None
+        if binding.symbol.kind != SymbolKind.Local && binding.symbol.kind != SymbolKind.Parameter -> return None
+        if sema_ownership_binding_is_borrowed_param(binding) || binding.string_view -> return None
+        if sema_single_use_key(state, binding.symbol.id.key) -> return None
+        if sema_ownership_binding_captured(scopes, binding) -> return None
+        if !type_identity_equal(ty, required) || sema_ownership_type_mentions_generic(ty, generic_params) -> return None
         facts :: sema_copy_classify(ty, SemaCopyIntent.Clone, environment, generic_params, false)
-        if !facts.accepted || !facts.complete || facts.copyable || !facts.cloneable || facts.resource || facts.materializes_view || facts.dynamic_loan -> return
+        if !facts.accepted || !facts.complete || facts.copyable || !facts.cloneable || facts.resource || facts.materializes_view || facts.dynamic_loan -> return None
         &state.implicit_take_ok.push(span)
+        return Val(binding.symbol.id.key)
     }
+    None
+}
+
+// D-CALLSITE-MARK1=A: a noted take argument whose name another argument of
+// the same call also references has no last use in that call; the call
+// ownership check reports E0209 there instead of moving it.
+pub fn sema_ownership_note_implicit_take_twice(state: &SemaOwnershipState, span: Span) Never! {
+    kept := [Span]{}
+    loop site in state.implicit_take_ok {
+        if !sema_ownership_span_same(site, span) -> &kept.push(site)
+    }
+    state.implicit_take_ok = kept
+    &state.implicit_take_twice.push(span)
 }
 
 // A binding declared outside the innermost lambda body around this point.

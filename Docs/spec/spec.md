@@ -998,17 +998,25 @@ fn run() {
 Writing through a read receiver is E0205 and points to `&self`. Calling a
 `&self` method requires a changeable receiver binding and is checked with E0202.
 Using the same name twice while a write access is live is E0204: pass `&x` once,
-or materialize `~x` first.
+or materialize `~x` first. A written `&` always means the call edits
+(D-CALLSITE-MARK1=A): `&x` passed to a parameter that only reads is E0225,
+whose Safe fix removes the mark. A `ViewMut<T>` parameter keeps the `&` that
+builds its write window.
 
 ### Copies, moves, and owned destinations
 
 A named binding passed to a take parameter without `^` moves when the call is
-its last use (D-COPY-DEFAULT1=A); any later use on any path, or a later
-iteration of a loop the name outlives, makes that argument E0209, which teaches
-`~x`. Jet never hides a clone to make that call work. Fields, values with
-cleanup (a `Close` resource, a consume duty, or a type holding one), type
-parameters, and captures inside a lambda body still need `^`. One call that
-reads a name through one argument and takes it through another is E0204.
+its last use (D-COPY-DEFAULT1=A, D-CALLSITE-MARK1=A); any later use on any path,
+or a later iteration of a loop the name outlives, makes that argument E0209,
+which teaches `~x` or a reorder. Jet never hides a clone to make that call work.
+A name in two argument slots of one call has no last use in that call, so a
+take slot is E0209 there. Fields, values with cleanup (a `Close` resource, a
+consume duty, or a type holding one by value), type parameters, and captures
+inside a lambda body still need `^`, so the moment a value with cleanup closes
+is always written. One call that reads a name through one argument and takes
+it through another is E0204. `^x` on a captured name inside a lambda body moves
+`x` into the lambda: `x` is gone after the lambda is made, and a second call
+of the lambda binding on any path is E0121.
 A literal, `~x`, or call result is a temporary and
 may enter a take parameter without another marker. `~x` is the one copy spelling;
 it creates an independent owned value, including when `x` is a Bool or integer:
