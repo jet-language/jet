@@ -668,13 +668,14 @@ fn jet_cli_resolve_run_entry(root: String, manifest: JetCLIManifest?, notices: &
         compatible.len() == 1 -> selected = compatible[0]
         facts.default_run == .Val(chosen) -> selected = chosen
         else -> {
-            return JetCLIStockEntry.Unported{shape: "package with several runnable outputs and no run default"}
+            // ComposeError::Conflict, behind the facts origin.
+            return JetCLIStockEntry.Failed{message: "{origin}: conflicting `outputs.run` from `{origin}` ({compatible.join(", ")}) and `{origin}` (no unambiguous compatible output was selected)"}
         }
     }
     loop output in facts.outputs {
         if output.name != selected -> next
         if !jet_cli_runnable_kind(output.kind) {
-            return JetCLIStockEntry.Unported{shape: "package whose run default is not runnable"}
+            return JetCLIStockEntry.Failed{message: "{origin}: conflicting `outputs.run` from `{origin}` ({output.name}) and `{origin}` (selected output is incompatible with the Executable or Service intent)"}
         }
         entry :: jet_cli_output_entry_file(root, output) ?? return JetCLIStockEntry.Failed{message: "{origin}: typed output `{output.name}` has no unique source entry for `{output.entry ?? "<missing>"}`"}
         return JetCLIStockEntry.Found{entry: entry}
