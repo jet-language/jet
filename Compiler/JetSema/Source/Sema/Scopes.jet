@@ -334,24 +334,16 @@ pub struct SemaComptimeBodyValue {
     pub ty: Type
 }
 
+// The scope half of a check's environment: the module and function being
+// checked. The program half (SemaProgramTables) is passed beside it, so a
+// copied or per-thread environment never copies the graph.
 pub struct SemaScopeEnvironment {
-    pub registration_graph: SemaRegistrationGraph?
     pub module_identity: String
     pub package_identity: String
     pub module_name: String
     pub source_file: String
     pub source_origin: SemaSourceOrigin
     pub source_segments: [SemaSourceSegment]
-    pub checked_types: [TTypeDef]
-    // Rust `Checker::types` (keyed registry): `checked_types` rows by
-    // "{module_identity}::{name}" (first row), and every row of a bare name
-    // in order (`checked_type_name_slots` -> `checked_type_name_rows`).
-    pub checked_type_rows: [String:Int]{[String:Int]{}}
-    pub checked_type_name_slots: [String:Int]{[String:Int]{}}
-    pub checked_type_name_rows: [[Int]]{[[Int]]{}}
-    // `sema_checked_program_boxed_edges(registration_graph)`: nominal SymbolId
-    // key -> its boxed recursive-layout keys, computed once per environment.
-    pub boxed_edges: [String:[String]]{[String:[String]]{}}
     pub declarations: [SemaScopeDeclaration]
     pub generic_params: [TGenericParam]
     pub comptime_body_values: [SemaComptimeBodyValue]
@@ -579,9 +571,28 @@ pub struct SemaScopeHardwareFacts {
     pub pending: [SemaHardwareDMATransferFact]
 }
 
-// The environment owns the registration graph it is given: callers hand over
-// one copy rather than a read value the constructor would copy again.
-pub fn sema_scope_environment_init(graph: ^SemaRegistrationGraph?, module_identity: String, package_identity: String, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], checked_types: [TTypeDef], declarations: [SemaScopeDeclaration]) -> SemaScopeEnvironment Never! {
+// The program half of a check's environment (FRONTEND-300X §3.1 J): the
+// registration graph and the checked-type tables every check reads. One
+// pass driver owns it and every checker borrows it; only comptime value
+// landing writes it. The tables own the graph they are given: callers hand
+// over one graph rather than a read value the constructor would copy again.
+pub struct SemaProgramTables {
+    pub registration_graph: SemaRegistrationGraph?
+    pub checked_types: [TTypeDef]
+    // Rust `Checker::types` (keyed registry): `checked_types` rows by
+    // "{module_identity}::{name}" (first row), and every row of a bare name
+    // in order (`checked_type_name_slots` -> `checked_type_name_rows`).
+    pub checked_type_rows: [String:Int]
+    pub checked_type_name_slots: [String:Int]
+    pub checked_type_name_rows: [[Int]]
+    // `sema_checked_program_boxed_edges(registration_graph)`: nominal SymbolId
+    // key -> its boxed recursive-layout keys, computed once per tables. Staged
+    // comptime values type only waiting constants, never a nominal's fields,
+    // so landing values leaves these edges unchanged.
+    pub boxed_edges: [String:[String]]
+}
+
+pub fn sema_program_tables_init(graph: ^SemaRegistrationGraph?, checked_types: [TTypeDef]) -> SemaProgramTables Never! {
     rows := [String:Int]{}
     name_slots := [String:Int]{}
     name_rows := [[Int]]{}
@@ -596,19 +607,24 @@ pub fn sema_scope_environment_init(graph: ^SemaRegistrationGraph?, module_identi
         }
     }
     boxed_edges := sema_scope_environment_boxed_edges(graph)
-    SemaScopeEnvironment{
+    SemaProgramTables{
         registration_graph: graph,
+        checked_types: checked_types,
+        checked_type_rows: rows,
+        checked_type_name_slots: name_slots,
+        checked_type_name_rows: name_rows,
+        boxed_edges: boxed_edges,
+    }
+}
+
+pub fn sema_scope_environment_init(module_identity: String, package_identity: String, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], declarations: [SemaScopeDeclaration]) -> SemaScopeEnvironment Never! {
+    SemaScopeEnvironment{
         module_identity: module_identity,
         package_identity: package_identity,
         module_name: module_name,
         source_file: source_file,
         source_origin: source_origin,
         source_segments: source_segments,
-        checked_types: checked_types,
-        checked_type_rows: rows,
-        checked_type_name_slots: name_slots,
-        checked_type_name_rows: name_rows,
-        boxed_edges: boxed_edges,
         declarations: declarations,
         generic_params: [TGenericParam]{},
         comptime_body_values: [SemaComptimeBodyValue]{},
