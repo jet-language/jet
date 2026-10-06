@@ -4,17 +4,24 @@
 // kernel signature has a C carrier, plus the backend's matching route table.
 //
 // usage: node Tools/agent/gen-c-abi-routes.mjs <runtime.rs> [--check]
-//   <runtime.rs> is the compiled runtime's Rust text as emitted for a one-line
-//   program (`jet emit --rust seed.jet`, seed `fn run() { print("hello") }`):
-//   the exact items the `jet_runtime` crate holds, so every kernel's module
-//   path and signature come from the runtime itself, not from a second list.
+//   <runtime.rs> is the compiled runtime's Rust text as emitted for the
+//   all-parts seed (`jet emit --rust Compiler/JetBackend/Tests/allparts-seed.jet`;
+//   emission selects runtime parts by the Core modules a program uses, and the
+//   seed imports every one): the exact items the `jet_runtime` crate holds, so
+//   every kernel's module path and signature come from the runtime itself,
+//   not from a second list.
 //
 // Routes (the registry):
-//   - crates/jet-foundation/src/Syntax/core_calls.rs: every CoreCallRecord row
-//     AOT calls directly (`aot_direct`), keyed by its symbol (a Prelude or a
-//     Rust-crate symbol: both are one runtime function generated Rust calls);
+//   - crates/jet-foundation/src/Syntax/core_calls.rs: every CoreCallRecord row,
+//     keyed by its symbol (a Prelude or a Rust-crate symbol: both are one
+//     runtime function generated Rust calls), except a non-direct row that
+//     MIRRust.rs `core_call` / `source_math_call` emits in a form of its own;
+//     a symbol MIRRust.rs `exact_prelude_adapter` maps to an owned exact-Int
+//     kernel calls that kernel;
 //   - crates/jet-codegen/src/Codegen/TIR/routes.rs: every StaticPrelude route
-//     row (`prelude_route_row(MirPreludeFamily::StaticPrelude, ...)`).
+//     row (`prelude_route_row(MirPreludeFamily::StaticPrelude, ...)`), builtin
+//     and handle method rows, and every other Prelude symbol the TIR sources
+//     spell that names a runtime function (an inherent method included).
 //
 // Outputs:
 //   - crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs: the adapters, module
@@ -52,6 +59,49 @@ const jetOut = "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet";
 // ---------------------------------------------------------------------------
 // 1. The registry's routes: symbol -> { native_int_result, rows }.
 
+// The body of `fn name(` in Rust `source`, through its matching brace.
+const fnBody = (source, name) => {
+  const at = source.search(new RegExp(`\\bfn ${name}\\(`));
+  if (at < 0) throw new Error(`gen-c-abi-routes: no fn ${name}`);
+  const open = source.indexOf("{", at);
+  let depth = 0;
+  for (let k = open; k < source.length; k++) {
+    if (source[k] === '"') { k++; while (source[k] !== '"') k += source[k] === "\\" ? 2 : 1; continue; }
+    if (source[k] === "{") depth++;
+    else if (source[k] === "}" && --depth === 0) return source.slice(open + 1, k);
+  }
+  throw new Error(`gen-c-abi-routes: unterminated fn ${name}`);
+};
+const mirRustRs = readFileSync(`${repo}/crates/jet-codegen/src/Codegen/MIRRust.rs`, "utf8");
+const stringsIn = (s) => [...s.matchAll(/"([^"]*)"/g)].map((m) => m[1]);
+
+// The Core rows generated Rust (MIRRust.rs `core_call`) emits through a form
+// of their own instead of the row's Prelude symbol, whatever the call's type
+// arguments or arity: a route to that symbol would be a second meaning (I9).
+// A form chosen by the call's type arguments or arity leaves the plain call
+// on the symbol, so its row keeps a route.
+const ownForm = new Set();
+for (const m of fnBody(mirRustRs, "core_call").matchAll(/\bif (row\.module == "([^"]+)"[^{]*)\{/g)) {
+  const condition = m[1];
+  if (/type_args|args\.len\(\)/.test(condition)) continue;
+  const members = [...condition.matchAll(/row\.member == "([^"]+)"/g)].map((k) => k[1]);
+  const listed = /matches!\(\s*row\.member\.as_str\(\),([^)]*)\)/.exec(condition);
+  if (listed) members.push(...stringsIn(listed[1]));
+  for (const member of members) ownForm.add(`${m[2]}.${member}`);
+}
+// `source_math_call`: a non-direct core.math row it lists calls its Jet source
+// function, never a runtime kernel.
+const sourceMath = /row\.module != "core\.math"[\s\S]*?!matches!\(\s*row\.member\.as_str\(\),([^)]*)\)/.exec(fnBody(mirRustRs, "source_math_call"));
+if (!sourceMath || ownForm.size === 0) throw new Error("gen-c-abi-routes: MIRRust core_call / source_math_call forms not found");
+const sourceMathMembers = new Set(stringsIn(sourceMath[1]));
+
+// MIRRust.rs `exact_prelude_adapter`: a Prelude symbol generated Rust calls as
+// its owned exact-Int kernel, the listed argument positions borrowed as
+// `&JetInt`. The route keeps the symbol; its adapter calls the kernel.
+const exactAdapters = new Map();
+for (const m of fnBody(mirRustRs, "exact_prelude_adapter").matchAll(/"([^"]+)"\s*=>\s*\{?\s*\("([^"]+)",\s*&\[[^\]]*\]\)/g)) exactAdapters.set(m[1], m[2]);
+if (exactAdapters.size === 0) throw new Error("gen-c-abi-routes: no exact_prelude_adapter rows");
+
 const routes = new Map();
 const addRoute = (symbol, nativeInt, row) => {
   const entry = routes.get(symbol) ?? { nativeInt: false, rows: [] };
@@ -59,12 +109,18 @@ const addRoute = (symbol, nativeInt, row) => {
   entry.rows.push(row);
   routes.set(symbol, entry);
 };
+// Every Core call row: generated Rust calls a direct row's symbol, and a
+// non-direct row's symbol too unless `core_call` gives it its own form.
 const coreCalls = readFileSync(`${repo}/crates/jet-foundation/src/Syntax/core_calls.rs`, "utf8");
 for (const line of coreCalls.split("\n")) {
   const record = /^\s*CoreCallRecord::new\(\s*"([^"]*)",\s*"([^"]*)",\s*"([^"]*)",\s*(?:true|false)/.exec(line);
-  if (!record || line.includes(".without_direct_aot()")) continue;
+  if (!record) continue;
   const [, module, member, symbol] = record;
   if (!symbol) continue;
+  if (line.includes(".without_direct_aot()")) {
+    if (ownForm.has(`${module}.${member}`)) continue;
+    if (module === "core.math" && sourceMathMembers.has(member)) continue;
+  }
   addRoute(symbol, line.includes(".with_native_int_result()"), `${module}.${member}`);
 }
 const tirRoutes = readFileSync(`${repo}/crates/jet-codegen/src/Codegen/TIR/routes.rs`, "utf8");
@@ -111,10 +167,15 @@ const attributesBefore = (lineStart) => {
 };
 const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => line.startsWith("#[cfg("));
 {
-  const stack = []; // frames: { mod: name | null, gated }
+  // frames: { mod: name | null, impl: type name | null, gated }. An inherent
+  // `impl Name {` of a non-generic type holds methods keyed `path::Name::method`.
+  const stack = [];
   let i = 0;
   let pendingMod = null;
+  let pendingImpl = null;
   let pendingGated = false;
+  // An item scope: every frame a module, or modules then one inherent impl.
+  const itemScope = () => stack.every((frame, k) => frame.mod || (frame.impl && k === stack.length - 1));
   const n = text.length;
   const isIdent = (c) => /[A-Za-z0-9_]/.test(c);
   while (i < n) {
@@ -149,14 +210,15 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
       continue;
     }
     if (c === "{") {
-      stack.push({ mod: pendingMod, gated: pendingGated });
+      stack.push({ mod: pendingMod, impl: pendingImpl, gated: pendingGated });
       pendingMod = null;
+      pendingImpl = null;
       pendingGated = false;
       i++;
       continue;
     }
     if (c === "}") { stack.pop(); i++; continue; }
-    if (c === ";") { pendingMod = null; i++; continue; }
+    if (c === ";") { pendingMod = null; pendingImpl = null; i++; continue; }
     if (isIdent(c) && !isIdent(text[i - 1] ?? " ")) {
       let j = i;
       while (j < n && isIdent(text[j])) j++;
@@ -167,7 +229,13 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
           pendingMod = m[1];
           pendingGated = cfgsBefore(text.lastIndexOf("\n", i) + 1).some((cfg) => cfg !== '#[cfg(not(target_arch = "wasm32"))]');
         }
-      } else if (word === "fn" && stack.every((frame) => frame.mod)) {
+      } else if (word === "impl" && stack.every((frame) => frame.mod)) {
+        const m = /^\s+([A-Z][A-Za-z0-9_]*)\s*\{/.exec(text.slice(j, j + 120));
+        if (m) {
+          pendingImpl = m[1];
+          pendingGated = cfgsBefore(text.lastIndexOf("\n", i) + 1).some((cfg) => cfg !== '#[cfg(not(target_arch = "wasm32"))]');
+        }
+      } else if (word === "fn" && itemScope()) {
         const m = /^\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(text.slice(j, j + 120));
         if (m) {
           // The signature runs to the body's `{` (or `;`) outside parentheses
@@ -184,8 +252,10 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
           const lineStart = text.lastIndexOf("\n", i) + 1;
           const head = text.slice(lineStart, i);
           const cfgs = cfgsBefore(lineStart);
-          const path = stack.map((frame) => frame.mod).join("::");
-          const key = path ? `${path}::${m[1]}` : m[1];
+          const impl = stack.length > 0 ? stack[stack.length - 1].impl : null;
+          const path = stack.filter((frame) => frame.mod).map((frame) => frame.mod).join("::");
+          const owner = impl ? (path ? `${path}::${impl}` : impl) : path;
+          const key = owner ? `${owner}::${m[1]}` : m[1];
           const list = fns.get(key) ?? [];
           list.push({
             pub: /\bpub\b/.test(head),
@@ -195,6 +265,8 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
             // `not(target_arch = "wasm32")`), here or on an enclosing module.
             gated: cfgs.some((cfg) => cfg !== '#[cfg(not(target_arch = "wasm32"))]') || stack.some((frame) => frame.gated),
             path,
+            // The inherent impl's type for a method (`Self` and the receiver).
+            selfType: impl,
           });
           fns.set(key, list);
           i = k;
@@ -215,6 +287,10 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
             generic: Boolean(m[2]),
             gated: attributes.some((line) => line.startsWith("#[cfg(") && line !== '#[cfg(not(target_arch = "wasm32"))]') || stack.some((frame) => frame.gated),
             derives: attributes.filter((line) => line.startsWith("#[derive(")).flatMap((line) => line.slice(9).split(/[,)\]]/).map((s) => s.trim().split("::").pop())).filter(Boolean),
+            // The item's text from its keyword (its body follows): record exports read its fields.
+            kind: word,
+            at: i,
+            path,
           });
           types.set(key, list);
         }
@@ -263,6 +339,24 @@ const declarationOf = (rustPath, seen = new Set()) => {
 for (const key of fns.keys()) {
   if (/^jet_(?:decimal|fraction)_[a-z0-9_]+$/.test(key)) addRoute(key, false, `core.precise.${key.slice(4)}`);
   else if (/^jet_math_[A-Z][A-Za-z0-9]*_[a-z0-9_]+$/.test(key)) addRoute(key, false, `core.math.${key.slice(9)}`);
+}
+
+// Every other Prelude symbol the TIR -> MIR lowering spells as a literal
+// (handle-method, DataTree, HTTP request and Core-type associated rows written
+// as `("Type", "member") => "symbol"` arms rather than registry rows) that
+// names a runtime function. MIRRust.rs calls such a row's symbol with its
+// arguments and widens an Int result from the kernel word, as for the handle
+// rows above. A symbol a family above already lists keeps its own row.
+{
+  const tirDir = `${repo}/crates/jet-codegen/src/Codegen/TIR`;
+  const spelled = /^(?:[a-z_][a-z0-9_]*::)*(?:jet_[a-z0-9_]+|[A-Z][A-Za-z0-9_]*::[a-z_][a-z0-9_]*)$/;
+  for (const file of readdirSync(tirDir, { recursive: true }).filter((f) => f.endsWith(".rs")).sort()) {
+    for (const m of readFileSync(`${tirDir}/${file}`, "utf8").matchAll(/"([A-Za-z_][A-Za-z0-9_:]*)"/g)) {
+      const symbol = m[1];
+      if (routes.has(symbol) || !spelled.test(symbol) || !fns.has(symbol)) continue;
+      addRoute(symbol, true, `TIR/${file}`);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -385,7 +479,11 @@ function paramCarrier(ty, path) {
   const tag = tagCarrier(ty, path);
   if (tag) return one(tag.jet, "i64", tag.read);
   // An exact Int by value: the borrowed carrier word, cloned into an owner.
-  if (/^(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty)) return one("Word", "i64", (a) => `unsafe { ${qualify(ty, path)}::clone_from_raw(${a}) }`);
+  // The exact Int is spelled from the crate root wherever its kernel names it.
+  if (/^(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty)) return one("Word", "i64", (a) => `unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(${a}) }`);
+  // A borrowed exact Int (an exact_prelude_adapter kernel): an owner of the
+  // same carrier word, lent for the call.
+  if (/^&(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty)) return one("Word", "i64", (a) => `&unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(${a}) }`);
   const list = /^(&?)(?:\[(.+)\]|Vec<(.+)>)$/.exec(ty);
   if (list && (list[1] === "&" || list[3])) {
     const element = elementCarrier(list[2] ?? list[3]);
@@ -576,19 +674,28 @@ const skipped = [];
 const exported = new Set(handExports);
 const handles = new Map();
 for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]))) {
-  const name = symbol.split("::").pop();
-  const path = symbol.includes("::") ? symbol.split("::").slice(0, -1).join("::") : "";
+  // An exact-Int adapted symbol calls its owned kernel (MIRRust.rs
+  // call_symbol_for_function); the route keeps the symbol.
+  const target = exactAdapters.get(symbol) ?? symbol;
+  const segments = symbol.split("::");
+  // A method's export names its type too (`JetDateTime::date` -> `JetDateTime_date`).
+  const name = segments.length > 1 && /^[A-Z]/.test(segments[segments.length - 2]) ? segments.slice(-2).join("_") : segments[segments.length - 1];
   const label = route.rows[0];
   if (handExports.has(name)) continue;
   if (exported.has(name)) { skipped.push(`${symbol} (${label}): export name taken`); continue; }
-  const all = (fns.get(symbol) ?? []).filter((def) => !def.wasmOnly);
+  const all = (fns.get(target) ?? []).filter((def) => !def.wasmOnly);
   if (all.length === 0) { skipped.push(`${symbol} (${label}): no runtime function`); continue; }
   const defs = all.filter((def) => !def.gated);
   if (defs.length === 0) { skipped.push(`${symbol} (${label}): platform-gated`); continue; }
   if (new Set(defs.map((def) => def.sig)).size !== 1) { skipped.push(`${symbol} (${label}): cfg-dependent signature`); continue; }
   const def = defs[0];
+  const path = def.path;
   if (path && !def.pub) { skipped.push(`${symbol} (${label}): not public in ${path}`); continue; }
-  const sig = parseSignature(def.sig);
+  // A method's receiver is its first parameter; `Self` is the impl's type.
+  const selfSig = def.selfType
+    ? def.sig.replace(/\((\s*)(&\s*mut\s+|&\s*|mut\s+)?self\b/, (_, space, ref) => `(${space}self: ${(ref ?? "").replace(/^mut\s+$/, "")}Self`).replace(/\bSelf\b/g, def.selfType)
+    : def.sig;
+  const sig = parseSignature(selfSig);
   if (!sig) { skipped.push(`${symbol} (${label}): unparsed signature ${def.sig}`); continue; }
   if (sig.generics) { skipped.push(`${symbol} (${label}): generic`); continue; }
   const params = splitTop(sig.params).map((param) => {
@@ -605,7 +712,7 @@ for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]
     else handles.set(handle.name, handle.full);
   }
   if (!exported.has(name)) continue;
-  adapters.push({ symbol, name, label, params, result, rows: route.rows });
+  adapters.push({ symbol, target, name, label, params, result, rows: route.rows });
 }
 
 // Core types the runtime holds natively: the Jet name -> native Rust type
@@ -621,19 +728,6 @@ const syntaxConstants = new Map();
     for (const m of readFileSync(file, "utf8").matchAll(/pub const ([A-Z][A-Z0-9_]*): &str = "([^"]*)";/g)) syntaxConstants.set(m[1], m[2]);
   }
 }
-// The body of `fn name(` in Rust `source`, through its matching brace.
-const fnBody = (source, name) => {
-  const at = source.search(new RegExp(`\\bfn ${name}\\(`));
-  if (at < 0) throw new Error(`gen-c-abi-routes: no fn ${name}`);
-  const open = source.indexOf("{", at);
-  let depth = 0;
-  for (let k = open; k < source.length; k++) {
-    if (source[k] === '"') { k++; while (source[k] !== '"') k += source[k] === "\\" ? 2 : 1; continue; }
-    if (source[k] === "{") depth++;
-    else if (source[k] === "}" && --depth === 0) return source.slice(open + 1, k);
-  }
-  throw new Error(`gen-c-abi-routes: unterminated fn ${name}`);
-};
 // The `"A" | "B" => Some("T")` and `n if n == Syntax::A || n == "B" => Some("T")`
 // arms of one name table (`Some(name)` maps a name to itself).
 const nameTable = (source, name) => {
@@ -652,7 +746,6 @@ const nameTable = (source, name) => {
 };
 const contextRs = readFileSync(`${repo}/crates/jet-codegen/src/Codegen/Context.rs`, "utf8");
 const predicatesRs = readFileSync(`${repo}/crates/jet-foundation/src/Syntax/predicates.rs`, "utf8");
-const mirRustRs = readFileSync(`${repo}/crates/jet-codegen/src/Codegen/MIRRust.rs`, "utf8");
 // MIRRust.rs `rust_apply_type`'s own argument-free spellings
 // (`if name.name == X { return <root path> }`), checked before every table
 // against the name as written (a canonical Core name never matches them).
@@ -854,6 +947,150 @@ for (const [name, full] of handleRows) {
   rs.push("        guard(|| unsafe { &*left } == unsafe { &*right })");
   rs.push("    }");
 }
+
+// Core records (Compiler/JetBackend/Source/Lower/Records.jet): a MIR-defined
+// Core type whose generated-Rust type is one of these runtime structs or enums
+// crosses a route as that value's handle, converted member by member:
+//   jet_rt_record_new_<R>(fields...) / jet_rt_record_get_<R>_<field>(h)   struct
+//   jet_rt_record_tag_<R>(h) / jet_rt_record_new_<R>_<V>(payload?) /
+//   jet_rt_record_get_<R>_<V>(h)                                          enum
+// A member is a String, an Int (i64 or exact), a Bool, a Float, a fieldless
+// runtime enum (its index), a nested record, or an Option / JetOutcome of a
+// String, an Int or a record. Each schema row names its members' kinds, so the
+// lowering crosses a Jet type only when every member means the same carrier.
+// Records CAbi.rs writes by hand (their exports there) are not generated.
+const recordDecl = (full) => {
+  const found = declarationOf(full.replace(/^crate::/, ""));
+  if (!found || found.decls.length !== 1) return null;
+  const decl = found.decls[0];
+  if (decl.generic || decl.gated || decl.at === undefined) return null;
+  const open = text.indexOf("{", decl.at);
+  const head = text.slice(decl.at, open);
+  if (open < 0 || /[;(]/.test(head) || /\bwhere\b/.test(head)) return null;
+  let depth = 0;
+  let close = open;
+  for (; close < text.length; close++) {
+    if (text[close] === "{") depth++;
+    else if (text[close] === "}" && --depth === 0) break;
+  }
+  const body = text.slice(open + 1, close).replace(/\/\/[^\n]*/g, "");
+  if (/#\[cfg/.test(body)) return null;
+  return { kind: decl.kind, path: decl.path, items: splitTop(body.replace(/#\[[^\]]*\]/g, "")) };
+};
+const recordable = new Map(); // runtime name -> { full, kind, path, members }
+for (const [name, full] of handleRows) {
+  if (handExports.has(`jet_rt_record_tag_${name}`) || handExports.has(`jet_rt_record_new_${name}`)) continue;
+  const decl = recordDecl(full);
+  if (!decl) continue;
+  const members = [];
+  let ok = true;
+  for (const item of decl.items) {
+    if (decl.kind === "struct") {
+      const field = /^(pub(?:\([a-z]+\))?\s+)?([a-z_][a-z0-9_]*)\s*:\s*([\s\S]+)$/.exec(item);
+      // A struct in a module exposes only its `pub` fields to the adapters.
+      if (!field || (decl.path && !field[1])) { ok = false; break; }
+      members.push({ name: field[2], ty: field[3].replace(/\s+/g, "") });
+    } else {
+      const variant = /^([A-Z][A-Za-z0-9_]*)\s*(?:\(([\s\S]*)\)|=\s*[-0-9]+)?$/.exec(item);
+      if (!variant || (variant[2] !== undefined && splitTop(variant[2]).length !== 1)) { ok = false; break; }
+      members.push({ name: variant[1], ty: variant[2] === undefined ? null : variant[2].replace(/\s+/g, "") });
+    }
+  }
+  if (ok) recordable.set(name, { full, kind: decl.kind, path: decl.path, members });
+}
+// A member's carrier: { kind, ret, outCty, get(place), cty, make(param) }, or
+// null when no export carries it. `place` is a Rust place of the member.
+const recordMember = (ty, path) => {
+  const exact = /^(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty);
+  if (ty === "String") return { kind: "Text", ret: "JetCString", get: (v) => `handle(${v}.clone())`, cty: "JetCString", make: (p) => `view(${p}).to_owned()` };
+  if (ty === "i64") return { kind: "Int", ret: "i64", get: (v) => `crate::jet_std::jet_int_from_i64(${v})`, cty: "i64", make: (p) => `native(${p})` };
+  if (exact) return { kind: "Int", ret: "i64", get: (v) => `${v}.clone().into_raw()`, cty: "i64", make: (p) => `unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(${p}) }` };
+  if (ty === "bool") return { kind: "Flag", ret: "bool", get: (v) => `${v}`, cty: "u8", make: (p) => `${p} != 0` };
+  if (ty === "f64") return { kind: "Float", ret: "f64", get: (v) => `${v}`, cty: "f64", make: (p) => p };
+  const tag = tagCarrier(ty, path);
+  if (tag) return { kind: `Tag.${opaqueName.exec(ty)[1]}`, ret: "i64", get: (v) => tag.write(`&${v}`), cty: "i64", make: tag.read };
+  const option = /^(Option|JetOutcome)<(.+?)(?:,JetAbsent|,(?:crate::|super::)*JetAbsent)?>$/.exec(ty);
+  if (option) {
+    if (option[1] === "JetOutcome" && !/,(?:(?:crate|super)::)*JetAbsent>$/.test(ty)) return null;
+    const inner = recordMember(option[2], path);
+    if (!inner || !(inner.kind === "Text" || inner.kind === "Int" || inner.kind.startsWith("Rec."))) return null;
+    const [some, none] = option[1] === "Option" ? ["Some", "None"] : ["Ok", "Err(crate::JetAbsent)"];
+    const boxed = inner.kind.startsWith("Rec.") ? inner.cty : `*const ${inner.cty}`;
+    return {
+      kind: `Opt${inner.kind}`, ret: "i64", outCty: inner.ret,
+      get: (v) => `match &${v} { ${some}(item) => { unsafe { some.write(${inner.get("(*item)")}) }; 1 } _ => 0 }`,
+      cty: boxed,
+      make: (p) => `if ${p}.is_null() { ${none} } else { ${some}(${inner.kind.startsWith("Rec.") ? inner.make(p) : inner.make(`unsafe { *${p} }`)}) }`,
+    };
+  }
+  if (opaqueName.test(ty)) {
+    const name = opaqueName.exec(ty)[1];
+    const nested = handles.get(name);
+    if (!nested || nested !== qualify(ty, path) && declarationOf(nested.replace(/^crate::/, ""))?.key !== declarationOf(qualify(ty, path).replace(/^crate::/, ""))?.key) return null;
+    if (!cloneable.has(name)) return null;
+    return { kind: `Rec.${name}`, ret: `*mut ${nested}`, get: (v) => `Box::into_raw(Box::new(${v}.clone()))`, cty: `*mut ${nested}`, make: (p) => `*unsafe { Box::from_raw(${p}) }` };
+  }
+  return null;
+};
+// A record whose members all cross; a nested record must itself cross.
+const recordMembers = new Map(); // runtime name -> [{ name, carrier | null }]
+for (const [name, record] of recordable) {
+  const carried = record.members.map((member) => ({ name: member.name, carrier: member.ty === null ? null : recordMember(member.ty, record.path) }));
+  if (carried.every((member, k) => record.members[k].ty === null || member.carrier)) recordMembers.set(name, carried);
+}
+for (let changed = true; changed;) {
+  changed = false;
+  for (const [name, members] of recordMembers) {
+    const nestedKinds = members.map((member) => member.carrier?.kind.replace(/^Opt/, "") ?? "").filter((kind) => kind.startsWith("Rec."));
+    if (nestedKinds.every((kind) => recordMembers.has(kind.slice(4)))) continue;
+    recordMembers.delete(name);
+    changed = true;
+  }
+}
+const recordSchemas = [];
+for (const [name, members] of [...recordMembers].sort((a, b) => a[0].localeCompare(b[0]))) {
+  const { full, kind } = recordable.get(name);
+  const described = members.map((member) => (member.carrier ? `${member.name}=${member.carrier.kind}` : member.name)).join(",");
+  recordSchemas.push(kind === "struct" ? { name, variants: "", fields: described } : { name, variants: described, fields: "" });
+  const getter = (export_, param, carrier, place) => {
+    const out = carrier.outCty ? `, some: *mut ${carrier.outCty}` : "";
+    rs.push("");
+    rs.push("    #[no_mangle]");
+    rs.push(`    pub extern "C" fn ${export_}(value: *mut ${full}${out}) -> ${carrier.ret} {`);
+    rs.push(`        // SAFETY: \`value\` is a live handle the caller lends${carrier.outCty ? "; `some` is its zeroed out slot" : " for this call"}.`);
+    rs.push(`        guard(|| ${param} ${place})`);
+    rs.push("    }");
+  };
+  if (kind === "struct") {
+    // A fieldless struct carries nothing a schema row can check.
+    if (members.length === 0) { recordSchemas.pop(); continue; }
+    for (const member of members) getter(`jet_rt_record_get_${name}_${member.name}`, `{ let value = unsafe { &*value };`, member.carrier, `${member.carrier.get(`value.${member.name}`)} }`);
+    rs.push("");
+    rs.push("    #[no_mangle]");
+    rs.push(`    pub extern "C" fn jet_rt_record_new_${name}(${members.map((member, k) => `m${k}: ${member.carrier.cty}`).join(", ")}) -> *mut ${full} {`);
+    rs.push(`        guard(|| Box::into_raw(Box::new(${full} { ${members.map((member, k) => `${member.name}: ${member.carrier.make(`m${k}`)}`).join(", ")} })))`);
+    rs.push("    }");
+    continue;
+  }
+  // A fieldless enum crosses as its index: its schema row alone.
+  if (members.every((member) => !member.carrier)) continue;
+  rs.push("");
+  rs.push("    #[no_mangle]");
+  rs.push(`    pub extern "C" fn jet_rt_record_tag_${name}(value: *mut ${full}) -> i64 {`);
+  rs.push("        // SAFETY: `value` is a live handle the caller lends for this call.");
+  rs.push(`        guard(|| match unsafe { &*value } { ${members.map((member, k) => `${full}::${member.name}${member.carrier ? "(_)" : ""} => ${k}`).join(", ")} })`);
+  rs.push("    }");
+  for (const member of members) {
+    if (member.carrier) {
+      getter(`jet_rt_record_get_${name}_${member.name}`, `match unsafe { &*value } { ${full}::${member.name}(item) =>`, member.carrier, `${member.carrier.get("(*item)")}, _ => crate::jet_panic("<core.prelude>", 0, "record variant index out of range") }`);
+    }
+    rs.push("");
+    rs.push("    #[no_mangle]");
+    rs.push(`    pub extern "C" fn jet_rt_record_new_${name}_${member.name}(${member.carrier ? `payload: ${member.carrier.cty}` : ""}) -> *mut ${full} {`);
+    rs.push(`        guard(|| Box::into_raw(Box::new(${full}::${member.name}${member.carrier ? `(${member.carrier.make("payload")})` : ""})))`);
+    rs.push("    }");
+  }
+}
 for (const adapter of adapters) {
   const params = [];
   const names = adapter.params.map((param, index) => param.ctys.map((cty, k) => {
@@ -863,7 +1100,7 @@ for (const adapter of adapters) {
   }));
   for (const out of adapter.result.outs) params.push(`${out.name}: *mut ${out.cty}`);
   const ret = adapter.result.ret ? ` -> ${adapter.result.ret}` : "";
-  const call = `crate::${adapter.symbol}(${adapter.params.map((param, index) => param.expr(names[index])).join(", ")})`;
+  const call = `crate::${adapter.target}(${adapter.params.map((param, index) => param.expr(names[index])).join(", ")})`;
   rs.push("");
   rs.push(`    /// ${adapter.rows.join(", ")}`);
   rs.push("    #[no_mangle]");
@@ -935,6 +1172,14 @@ jet.push("        if handle.jet_name == name -> return Val(~handle)");
 jet.push("    }");
 jet.push("    None");
 jet.push("}");
+jet.push("");
+jet.push("// Core records the runtime's generated record exports carry (Records.jet),");
+jet.push("// keyed by runtime type: a struct's fields in constructor order or an enum's");
+jet.push("// variants in index order, each `name=kind` when it carries a member (Text,");
+jet.push("// Int, Flag, Float, Tag.<enum>, Rec.<record>, Opt<kind>).");
+jet.push("LOWER_GENERATED_RECORDS :: prep { [LowerRecordSchema]{");
+for (const schema of recordSchemas) jet.push(`    LowerRecordSchema{jet_name: "${schema.name}", variants: "${schema.variants}", fields: "${schema.fields}"},`);
+jet.push("} }");
 jet.push("// END GENERATED C-ABI ROUTES");
 
 const outputs = [[rsOut, rs.join("\n") + "\n"], [jetOut, jet.join("\n") + "\n"]];
