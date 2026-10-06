@@ -76,7 +76,8 @@ pub struct ArtifactDigest {
 
 // SHA-256 of `bytes` through the compiler's canonical hash.
 fn store_artifact_sha256(bytes: [U8]) -> [U8] Never! {
-    mir_sha256_bytes(bytes)
+    view :: bytes[0..<bytes.len()]
+    mir_sha256_bytes(view)
 }
 
 fn store_artifact_hex_value(byte: U8) -> Int? Never! {

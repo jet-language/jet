@@ -1,9 +1,10 @@
 // Canonical SHA-256 for compiler-owned identity bytes.
 //
-// The implementation follows Foundation's SHA256 utility: UTF-8 input is
-// padded with the standard big-endian bit length, compression runs on `U32`
-// words with wrapping addition, and the public identity helper emits
-// lowercase hexadecimal. The round constants stay `Int` tables and are
+// The implementation follows Foundation's SHA256 utility: input is borrowed,
+// full blocks are read in place, and only the final partial block is padded
+// with the standard big-endian bit length. Compression runs on `U32`
+// words with wrapping addition; identity helpers emit lowercase hexadecimal.
+// The round constants stay `Int` tables and are
 // widened to `U32` once per digest.
 
 MIR_SHA256_LENGTH_MASK :: prep { 0xffffffffffffffff }
@@ -21,12 +22,12 @@ MIR_SHA256_H0 :: prep { [Int]{
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
 } }
 
-fn mir_sha256_word(bytes: [U8], offset: Int) -> U32 Never! {
+fn mir_sha256_word(bytes: View<U8>, offset: Int) -> U32 Never! {
     (U32.from_u8(bytes[offset]) << 24) | (U32.from_u8(bytes[offset + 1]) << 16) | (U32.from_u8(bytes[offset + 2]) << 8) | U32.from_u8(bytes[offset + 3])
 }
 
-fn mir_sha256_compress(state: &[U32], words: &[U32], k: [U32], block: [U8]) Never! {
-    loop index in 0..<16 -> words[index] = mir_sha256_word(block, index * 4)
+fn mir_sha256_compress(state: &[U32], words: &[U32], k: [U32], block: View<U8>, offset: Int) Never! {
+    loop index in 0..<16 -> words[index] = mir_sha256_word(block, offset + index * 4)
     loop index in 16..<64 {
         s0 :: words[index - 15].rotate_right(7) ~| words[index - 15].rotate_right(18) ~| (words[index - 15] >> 3)
         s1 :: words[index - 2].rotate_right(17) ~| words[index - 2].rotate_right(19) ~| (words[index - 2] >> 10)
@@ -67,15 +68,20 @@ fn mir_sha256_compress(state: &[U32], words: &[U32], k: [U32], block: [U8]) Neve
     state[7] = state[7].wrapping_add(h)
 }
 
-fn mir_sha256_bytes(data: [U8]) -> [U8] Never! {
+fn mir_sha256_bytes(data: View<U8>) -> [U8] Never! {
     state := [U32]{}
     loop word in MIR_SHA256_H0 -> &state.push(U32{word})
     k := [U32]{}
     loop word in MIR_SHA256_K -> &k.push(U32{word})
     words := [U32]{}
     loop _ in 0..<64 -> &words.push(U32{0})
+    offset := 0
+    loop offset + 64 <= data.len() {
+        mir_sha256_compress(&state, &words, k, data, offset)
+        offset += 64
+    }
     msg := [U8]{}
-    loop byte in data -> &msg.push(byte)
+    loop position in offset..<data.len() -> &msg.push(data[position])
     &msg.push(U8{128})
     loop msg.len() % 64 != 56 -> &msg.push(U8{0})
     bit_length :: (data.len() * 8) & MIR_SHA256_LENGTH_MASK
@@ -85,10 +91,10 @@ fn mir_sha256_bytes(data: [U8]) -> [U8] Never! {
         &msg.push(U8{length_byte})
         index -= 1
     }
-    offset := 0
+    padded :: msg[0..<msg.len()]
+    offset = 0
     loop offset < msg.len() {
-        block :: loop position in 0..<64 -> msg[offset + position]
-        mir_sha256_compress(&state, &words, k, block)
+        mir_sha256_compress(&state, &words, k, padded, offset)
         offset += 64
     }
     output := [U8]{}
@@ -121,6 +127,8 @@ pub fn mir_sha256_hex_bytes(bytes: [U8]) -> String Never! {
 }
 
 pub fn mir_sha256_hex(value: String) -> String Never! {
-    mir_sha256_hex_bytes(mir_sha256_bytes(value.bytes()))
+    bytes :: value.bytes()
+    view :: bytes[0..<bytes.len()]
+    mir_sha256_hex_bytes(mir_sha256_bytes(view))
 }
 

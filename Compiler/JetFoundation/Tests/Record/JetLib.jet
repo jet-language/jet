@@ -308,3 +308,12 @@ fn jetlib_test_wire_effects(stamp: JetLibStamp, effects: [String]) -> [U8] Never
     assert_eq(jetlib_parse_message(utf8, false), "effect name is not UTF-8")
     assert_eq(jetlib_parse_message(utf8, true), ".jetlib header effect is not UTF-8")
 }
+
+#Test("jetlib payload identity hashes the retained window without widening") {
+    bytes :: "xabcx".bytes()
+    payload :: bytes[1..<4]
+    empty :: bytes[2..<2]
+    assert_eq(record_blob_key(payload), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    assert_eq(pkg_jetlib_payload_digest(payload), "sha256-ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    assert_eq(pkg_jetlib_payload_digest(empty), "sha256-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+}
