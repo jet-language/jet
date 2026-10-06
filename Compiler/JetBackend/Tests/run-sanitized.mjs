@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 // Sanitizer mode for the native golden corpus (#4619 criterion 3). Native
-// objects from a run-goldens.mjs output directory (<out>/lower/<case>.o) are
-// linked against the same runtime built with AddressSanitizer, LeakSanitizer
-// and Rust's UB precondition checks, and run with the golden's stdin. Native
-// code is not instrumented; the ASan runtime still checks every call it
-// makes into the runtime and libc (allocation, free, memcpy and string
+// objects from a run-goldens.mjs output directory are linked against the same
+// runtime built with AddressSanitizer, LeakSanitizer and Rust's UB
+// precondition checks, and run with the golden's stdin. When run-goldens ran
+// with JET_LOWER_SANITIZE=1, <out>/lower/<case>.asan.o carries ASan checks on
+// every native heap load and store (Compiler/JetBackend/Source/LIR/Sanitize.jet)
+// and is linked instead of <case>.o; either way the ASan runtime checks every
+// call into the runtime and libc (allocation, free, memcpy and string
 // interceptors), turns a native crash into a report with a stack, and finds
-// leaked heap blocks at exit.
+// leaked heap blocks at exit. sanitize.tsv records which object ran
+// (native-checked or runtime-only).
 //
 //   1. runtime: <runtime.rs> (the prepared runtime text the corpus's runtime
 //      pack was linked from, prepare-call-runtime.mjs output) is compiled once
@@ -123,7 +126,12 @@ for (const line of readFileSync(resultsPath, "utf8").split("\n").filter(Boolean)
   const slug = stem.replace(/[^A-Za-z0-9_-]+/gu, "_");
   const c = { stem, verdict: "", detail: "" };
   cases.push(c);
-  const object = join(dirs.lower, `${slug}.o`);
+  // run-goldens.mjs with JET_LOWER_SANITIZE=1 also writes the object with
+  // ASan checks on every native heap access (LIR/Sanitize.jet); it is
+  // preferred over the uninstrumented one.
+  const instrumented = join(dirs.lower, `${slug}.asan.o`);
+  const object = existsSync(instrumented) ? instrumented : join(dirs.lower, `${slug}.o`);
+  c.instrumented = object === instrumented;
   if (!existsSync(object) || existsSync(join(dirs.lower, `${slug}.issues`))) {
     c.verdict = "no-object";
     continue;
@@ -175,7 +183,7 @@ for (const line of readFileSync(resultsPath, "utf8").split("\n").filter(Boolean)
 
 const counts = new Map();
 for (const c of cases) counts.set(c.verdict, (counts.get(c.verdict) ?? 0) + 1);
-writeFileSync(join(outDir, "sanitize.tsv"), cases.map((c) => `${c.stem}\t${c.verdict}\t${c.detail}`).join("\n") + "\n");
+writeFileSync(join(outDir, "sanitize.tsv"), cases.map((c) => `${c.stem}\t${c.verdict}\t${c.instrumented ? "native-checked" : "runtime-only"}\t${c.detail}`).join("\n") + "\n");
 const reported = cases.filter((c) => c.verdict === "report");
 const failures = cases.filter((c) => c.verdict === "report" || c.verdict === "sanitized-diverges");
 const kinds = new Map();
@@ -185,7 +193,7 @@ for (const c of reported) {
 }
 const summary = [
   `cases: ${cases.length}`,
-  `mode: address+ub-checks runtime, leaks ${leaks ? "on" : "off"}`,
+  `mode: address+ub-checks runtime, leaks ${leaks ? "on" : "off"}; native code checked in ${cases.filter((c) => c.instrumented).length} of ${cases.length} cases`,
   ...["clean", "report", "sanitized-diverges", "link-failed", "no-object"].filter((verdict) => counts.has(verdict)).map((verdict) => `${verdict}: ${counts.get(verdict)}`),
   "",
   "reports by kind:",

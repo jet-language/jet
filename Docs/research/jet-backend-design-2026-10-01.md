@@ -1106,16 +1106,22 @@ agreed before and no longer does. It writes `differential.tsv` and
 Sanitizer mode (#4619): `Tests/run-sanitized.mjs <outdir> --runtime
 <runtime.rs>` builds the prepared runtime text (the one the corpus's runtime
 pack came from) as a staticlib with `-Zsanitizer=address -Zub-checks=yes`,
-links every `lower/<case>.o` against it with `clang -fsanitize=address`, and
+links every native object against it with `clang -fsanitize=address`, and
 runs each golden with every ASan/LSan report written under
-`sanitize/reports/`. Native code itself is not instrumented: the mode checks
-every runtime and libc call the native code makes, turns a native crash into
-a report with a symbolized stack, and finds unreachable heap blocks at exit.
-A run without a report must also reproduce the plain native run (ASan fills
-fresh heap blocks with `0xbe`, so a native read of uninitialized heap
-diverges). The gate is zero reports and zero divergences; `--no-leaks`
-drops LeakSanitizer and the summary records it. Shadow checks emitted by the
-native code generator are the next step for this mode.
+`sanitize/reports/`. The mode checks every runtime and libc call the native
+code makes, turns a native crash into a report with a symbolized stack, and
+finds unreachable heap blocks at exit. Native code itself is checked when
+run-goldens ran with `JET_LOWER_SANITIZE=1`: GoldenLower then also writes
+`lower/<case>.asan.o`, lowered through `LIR/Sanitize.jet`, which precedes
+every Load and Store whose base is not a stack slot of its own function with
+a call to ASan's outlined check (`__asan_loadN`/`__asan_storeN` on the
+effective address and the access width); run-sanitized links that object
+instead of `<case>.o` and records which one ran. Native frames carry no
+redzones, so stack slots are not checked. A run without a report must also
+reproduce the plain native run (ASan fills fresh heap blocks with `0xbe`, so
+a native read of uninitialized heap diverges). The gate is zero reports and
+zero divergences; `--no-leaks` drops LeakSanitizer and the summary records
+it.
 
 Fuzz corpus (#4619): `Tools/agent/safety-fuzz.mjs <outdir> --seed N --count K`
 writes K type-directed generated programs and their expected stdout in the
