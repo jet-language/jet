@@ -23467,7 +23467,12 @@ impl<'a> RustEmitter<'a> {
                 && !foreign.bridge_eligible
                 && param.access == MirAccess::Read
                 && !self.is_scalar(&param.ty);
+            // D-FFI-CAP1: the Rust bridge's safe `jet_ffi_<name>` wrapper
+            // takes a read parameter as an ordinary owned Rust value
+            // (`foreign_rust_param_type`), so the call hands it one.
+            let owned_rust_bridge = matches!(foreign.foreign_language, MirForeignLanguage::Rust);
             let borrowed = !direct_c_aggregate
+                && !owned_rust_bridge
                 && param.access == MirAccess::Read
                 && !self.is_scalar(&param.ty);
             return self.call_arg_for_function(caller, arg, borrowed);

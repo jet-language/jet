@@ -5218,8 +5218,9 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                     }
                 }
             }
-            .Impure(reason, _, body, span) -> {
-                if reason == None {
+            .Impure(reason, reason_expr, body, span) -> {
+                // A checked String argument that is not a literal (`#Impure(reason)`) is a reason.
+                if reason == None && reason_expr == None {
                     &diagnostics.push(sema_lint("L3102", span, "this `#Impure` block has no reason", "every comptime effect gate records why ambient I/O is needed", "add the reason: `#Impure(\"reading build config\") {{ … }}`"))
                 }
                 nested :: sema_stmt_check_block(body, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, "impure@{span.start}", loop_depth)

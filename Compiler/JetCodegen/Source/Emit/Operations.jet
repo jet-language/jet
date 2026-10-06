@@ -1603,7 +1603,9 @@ fn jet_rust_emit_foreign_argument(ctx: &JetRustEmitContext, function: MIRFunctio
         value :: jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, false)
         return jet_rust_emit_native_int_argument(&ctx, value, None)
     }
-    borrowed :: arg.access == MIRAccess.Read && !mir_type_is_scalar(parameter.ty)
+    // D-FFI-CAP1: the Rust bridge's `jet_ffi_<name>` wrapper takes a read
+    // parameter as an owned Rust value, so only other languages borrow it.
+    borrowed :: arg.access == MIRAccess.Read && !mir_type_is_scalar(parameter.ty) && foreign.foreign_language != MIRForeignLanguage.Rust
     jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, borrowed)
 }
 
