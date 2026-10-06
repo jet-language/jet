@@ -255,7 +255,7 @@ pub fn jet_cli_inspect(argv: [String], jet_argv: [String], args: [String], color
     if command == {
         "graph" | "query" | "explain-build" -> return jet_cli_inspect_build_query(command, args, color, json, threads)
         "compiler" -> return jet_cli_inspect_compiler(args, color)
-        "provenance" -> return jet_cli_inspect_provenance(color)
+        "provenance" -> return jet_cli_inspect_provenance(jet_cli_tail(args, 1), color, json, threads)
         "impact" -> return jet_cli_inspect_impact(argv, color, json, threads)
         else -> {}
     }
@@ -301,6 +301,8 @@ pub struct JetCLIInspectJob {
     pub project: Bool
     // The `jet inspect impact` transitive walk limit (`--depth=N`).
     pub depth: Int{3}
+    // `provenance`: the manifest root whose `.jet/lock` the report reads.
+    pub root: String{""}
 }
 
 // The entry an inspect scope names, and the stderr notices project entry
@@ -317,7 +319,7 @@ fn jet_cli_inspect_plain_error(text: String, exit_code: Int) -> JetCLIPlan Never
 
 // Source/main.rs `absolutize`: `path` joined onto the working directory.
 fn jet_cli_inspect_absolute(path: String) -[FS, Env]> String Never! {
-    if path.starts_with("/") -> return path
+    if path.starts_with("/") -> return ~path
     cwd :: cli_files.cwd() ?? "."
     "{cwd}/{path}"
 }
@@ -444,7 +446,7 @@ fn jet_cli_coverage_facts() -> JetCLICoverageFacts Never! {
             }
         }
     }
-    planes :: loop fact in facts -> fact.plane
+    planes := loop fact in facts -> fact.plane
     &planes.sort()
     ordered :: loop plane in planes -> facts[slots.get(plane) ?? 0]
     JetCLICoverageFacts.Facts{facts: ordered}
@@ -487,7 +489,7 @@ fn jet_cli_coverage_baseline(text: String) -> JetCLICoverageBaseline Never! {
         }
         &rows.push(JetCLICoverageBaselineRow{plane: fields[0], edit_covered: edit_covered, reason_covered: reason_covered, total: total})
     }
-    planes :: loop row in rows -> row.plane
+    planes := loop row in rows -> row.plane
     &planes.sort()
     ordered := [JetCLICoverageBaselineRow]{}
     loop plane in planes {
@@ -997,15 +999,6 @@ fn jet_cli_compiler_syntax_tree(source: String) -> JetCLIStatusValue Never! {
     })
 }
 
-// CmdInspect.rs `run_provenance` up to the manifest root; the dependency
-// provenance report is not ported yet.
-fn jet_cli_inspect_provenance(color: Bool) -[FS, Env]> JetCLIPlan Never! {
-    if jet_cli_inspect_package_root(cli_files.cwd() ?? ".") == None {
-        return jet_cli_inspect_plain_error("error: no package.jet found — run `jet inspect provenance` inside a project\n", JET_DRIVER_EXIT_USER_ERROR)
-    }
-    jet_cli_not_ported("inspect provenance", color)
-}
-
 // Traits.rs `OperatorImpl`, with its operand and result types by name.
 struct JetCLIOperatorImpl {
     left: String
@@ -1273,10 +1266,14 @@ fn jet_cli_inspect_build_plan(job: JetCLIInspectJob, snapshot: JetDriverAuthoriz
 
 // CmdInspect.rs `render_check_failure` (types, shapes) and CmdCompile.rs
 // `report_problems` (the build queries, which end in the problem count).
-// The `--json` report envelope is not ported yet.
-fn jet_cli_inspect_check_failed(job: JetCLIInspectJob, source: String, errors: [Diagnostic]) -> JetDriverVerbOutput Never! {
-    if job.json -> return jet_cli_not_ported_output("inspect {job.action} --json", job.color)
+// Under `--json` the reports are one failed status line on stdout: the
+// `inspect` action, or `diagnostics` for the build queries.
+fn jet_cli_inspect_check_failed(job: JetCLIInspectJob, source: String, errors: [Diagnostic]) -[FS, Env]> JetDriverVerbOutput Never! {
     build_query :: job.action == "graph" || job.action == "query" || job.action == "explain-build"
+    if job.json {
+        action :: if build_query -> "diagnostics" else -> "inspect"
+        return JetDriverVerbOutput{stdout: jet_cli_reports_status_json(action, false, jet_cli_report_cwd(), job.file, source, errors), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
     stderr :: if build_query -> jet_driver_report_problems(job.file, source, errors, job.color, true) else -> diagnostic_render_all(job.file, source, errors, job.color)
     JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
@@ -1412,6 +1409,7 @@ pub fn jet_cli_inspect_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
 
 fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     if job.action == "replay" -> return jet_cli_inspect_replay_host(job)
+    if job.action == "provenance" -> return jet_cli_inspect_provenance_host(job)
     if !cli_files.is_file(job.file) {
         missing :: diagnostic_from_registry("E0603", None, "can't find the file `{jet_cli_inspect_absolute(job.file)}`", "a named `.jet` source path must point at an existing file", "check the spelling, or create the missing file")
         return jet_cli_inspect_check_failed(job, "", [Diagnostic]{missing})
@@ -1420,7 +1418,7 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     semantic :: job.action == "rights" || job.action == "impact"
     mode :: if semantic -> JetDriverCompileMode.Doc else -> JetDriverCompileMode.Program
-    started :: cli_time.unix_ns()
+    watch :: cli_time.start()
     compiled :: jet_cli_compile_file(job.file, job.color, job.threads, mode)
     if compiled == {
         .Refused(refusal) -> output = ~refusal
@@ -1433,7 +1431,7 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
                 job.action == "types" -> output = jet_cli_inspect_types(jet_cli_inspect_programs(snapshot), job.json)
                 job.action == "shapes" -> output = jet_cli_inspect_shapes(jet_cli_inspect_programs(snapshot), job.json, job.color)
                 job.action == "rights" -> output = jet_cli_inspect_rights(result, job.project, job.file, job.json)
-                job.action == "impact" -> output = jet_cli_inspect_impact_report(job, result, diagnostics.len(), (cli_time.unix_ns() - started) / 1000000)
+                job.action == "impact" -> output = jet_cli_inspect_impact_report(job, result, diagnostics.len(), watch.elapsed_millis())
                 else -> output = jet_cli_inspect_build_plan(job, snapshot)
             }
         }
@@ -1593,8 +1591,8 @@ fn jet_cli_impact_walk(calls: [JetCLISemCall], symbol: String, depth_limit: Int,
     depths := [Int]{0}
     cursor := 0
     loop cursor < frontier.len() {
-        current :: frontier[cursor]
-        depth :: depths[cursor]
+        current :: ~frontier[cursor]
+        depth :: depths[cursor] + 0
         cursor += 1
         if depth >= depth_limit -> next
         loop call in calls {

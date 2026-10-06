@@ -3,13 +3,10 @@
 // `StatusEnvelope::json`, `render_status`, `report_json_string`). Producers
 // build typed values; only this file turns them into JSON bytes.
 use jet_foundation.[
-    Diagnostic,
-    DIAGNOSTIC_ERROR,
     diagnostic_from_registry,
 ]
 
 pub JET_CLI_STATUS_SCHEMA :: "jet.status/v1"
-JET_CLI_REPORT_SCHEMA :: "jet.report/v3"
 
 // A typed JSON value accepted as an action-specific status field; `Float`
 // holds a number already rendered as JSON text.
@@ -144,42 +141,8 @@ pub fn jet_cli_status_render_with_reports(action: String, ok: Bool, reports: [St
     "{out}}}"
 }
 
-fn jet_cli_report_optional(value: String?) -> String Never! {
-    text :: value ?? return "null"
-    jet_cli_json_string(text)
-}
-
-fn jet_cli_report_strings(values: [String]) -> String Never! {
-    rendered :: loop value in values -> jet_cli_json_string(value)
-    "[{rendered.join(",")}]"
-}
-
-// `ReportEnvelope::json` for a spanless CLI diagnostic (Report.rs): no file,
-// position, labels, causes, or edits; the registry's no-fix reason, when the
-// row has one, takes the place of the empty `fix_edits`.
-pub fn jet_cli_report_json(diagnostic: Diagnostic) -> String Never! {
-    moment :: if diagnostic.moment == {
-        .Compile -> "compile"
-        .Run -> "run"
-        .Test -> "test"
-        .Tool -> "tool"
-    }
-    severity :: if diagnostic.severity == DIAGNOSTIC_ERROR -> "error" else -> "lint"
-    edits := ",\"fix_edits\":[]"
-    if diagnostic.no_fix_reason == .Val(reason) {
-        kind :: if reason.kind == {
-            .Behavior -> "behavior"
-            .Design -> "design"
-            .Ambiguous -> "ambiguous"
-        }
-        edits = ",\"no_fix_reason\":{{\"kind\":{jet_cli_json_string(kind)},\"next\":{jet_cli_json_string(reason.next)}}}"
-    }
-    "{{\"schema\":{jet_cli_json_string(JET_CLI_REPORT_SCHEMA)},\"moment\":{jet_cli_json_string(moment)},\"severity\":{jet_cli_json_string(severity)},\"code\":{jet_cli_json_string(diagnostic.code)},\"what\":{jet_cli_json_string(diagnostic.what)},\"why\":{jet_cli_json_string(diagnostic.why)},\"fix\":{jet_cli_json_string(diagnostic.fix)},\"detail\":{jet_cli_report_optional(diagnostic.detail)},\"denial_kind\":{jet_cli_report_optional(diagnostic.denial_kind)},\"call_chain\":{jet_cli_report_strings(diagnostic.call_chain)},\"scope_chain\":{jet_cli_report_strings(diagnostic.scope_chain)},\"nearest_granting_scope\":{jet_cli_report_optional(diagnostic.nearest_granting_scope)},\"file\":null,\"line\":null,\"col\":null,\"span\":null{edits},\"cause\":[],\"clears\":0}}"
-}
-
 // The `--json` form of a spanless CLI error (Source/main.rs `cli_error!` in
 // machine mode): one failed `cli` status line on stdout.
 pub fn jet_cli_fail_json(code: String, what: String, why: String, fix: String) -> String Never! {
-    report :: jet_cli_report_json(diagnostic_from_registry(code, None, what, why, fix))
-    "{jet_cli_status_render_with_reports("cli", false, [String]{report}, [JetCLIStatusField]{})}\n"
+    jet_cli_report_status_json(diagnostic_from_registry(code, None, what, why, fix))
 }
