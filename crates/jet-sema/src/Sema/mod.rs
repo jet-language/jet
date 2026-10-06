@@ -393,17 +393,12 @@ pub(crate) fn solve_inferred_failure(
                 .collect()
         })
         .collect();
-    let members: Vec<Vec<usize>> = (0..module_count)
-        .map(|module_idx| name_ledger.namespace_siblings(module_idx).collect())
-        .collect();
     let owner_of = |module: usize, leaf: &str| {
         if declared[module].contains(leaf) {
             return Some(module);
         }
-        members[module]
-            .iter()
-            .copied()
-            .find(|&member| declared[member].contains(leaf))
+        name_ledger.namespace_owner(module, leaf)
+            .filter(|&member| declared[member].contains(leaf))
     };
     let resolved: Vec<Vec<(&str, Vec<Option<(usize, &str)>>)>> = candidates
         .iter()
@@ -891,11 +886,6 @@ impl TypeRegistry {
     /// D-DIST1: true when `name` is a registered distinct type.
     pub(crate) fn is_distinct(&self, name: &str) -> bool {
         matches!(self.types.get(name), Some(TypeDef::Distinct { .. }))
-    }
-
-    /// D-TYPEALIAS1: true when `name` is a registered transparent type alias.
-    pub(crate) fn is_type_alias(&self, name: &str) -> bool {
-        matches!(self.types.get(name), Some(TypeDef::Alias { .. }))
     }
 
     pub(crate) fn type_alias(&self, name: &str) -> Option<(&[crate::AST::TypeParam], &Type)> {
@@ -1925,10 +1915,10 @@ pub(crate) struct ModuleState {
     exact_int_reachable: SharedFlag,
     /// D-NEVER1=C: names whose checked bodies have no returning path. This is
     /// a compiler-only bottom fact; it never becomes a public `Never` type.
-    diverging_functions: std::collections::HashSet<String>,
+    diverging_functions: std::sync::Arc<std::collections::HashSet<String>>,
     /// D-SHAPE-PLACE1=A: `(function, parameter index)` pairs whose list write
     /// parameter is proven length-preserving, so a range window may fill it.
-    fixed_length_write_params: std::collections::HashSet<(String, usize)>,
+    fixed_length_write_params: std::sync::Arc<std::collections::HashSet<(String, usize)>>,
     funcs: HashMap<String, FuncSig>,
     registry: TypeRegistry,
     consts: HashMap<String, Type>,
@@ -1945,7 +1935,7 @@ pub(crate) struct ModuleState {
     trait_reg: TraitRegistry,
     /// D-FACTMODEL1=A: the one erased fact registry visible to body folds.
     /// State rows and checked graphs are compile-time metadata only.
-    fact_registry: jet_foundation::Facts::FactRegistry,
+    fact_registry: std::sync::Arc<jet_foundation::Facts::FactRegistry>,
     policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
     /// D-STRUCT-POLICY1=A: one bundle-local nominal setting table shared by
     /// marker and `apply` validation.
@@ -3005,6 +2995,27 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn namespace_function_owner(&self, name: &str) -> Option<usize> {
+        let owner = self.name_ledger.namespace_owner(self.module_idx, name)?;
+        self.modules?.get(owner)?.funcs.contains_key(name).then_some(owner)
+    }
+
+    pub(crate) fn has_file_function(&self, name: &str) -> bool {
+        self.unqualified_file.contains_key(name) || self.namespace_function_owner(name).is_some()
+    }
+
+    pub(crate) fn file_function_binding(&self, name: &str) -> Option<(String, usize)> {
+        self.unqualified_file.get(name).cloned()
+            .or_else(|| self.namespace_function_owner(name).map(|owner| (name.to_owned(), owner)))
+    }
+
+    pub(crate) fn const_type(&self, name: &str) -> Option<&Type> {
+        self.consts.get(name).or_else(|| {
+            let owner = self.name_ledger.namespace_owner(self.module_idx, name)?;
+            self.modules?.get(owner)?.consts.get(name)
+        })
+    }
+
     pub(crate) fn unit_fact_for_type(&self, ty: &Type) -> Option<(String, UnitFact)> {
         let Type::Named(name) = ty else { return None };
         if let Some(fact) = self.registry.unit_fact(name) {
@@ -3028,8 +3039,9 @@ impl<'a> Checker<'a> {
             return Some((canonical, fact));
         }
         let mut owner = None;
-        for (index, module) in modules.iter().enumerate() {
-            if module.registry.is_unit_type(leaf) && self.type_is_pub_in(index, leaf) {
+        for declaration in self.name_ledger.declarations_named(leaf) {
+            let index = declaration.module;
+            if modules[index].registry.is_unit_type(leaf) && self.type_is_pub_in(index, leaf) {
                 if owner.is_some_and(|previous| previous != index) {
                     return None;
                 }

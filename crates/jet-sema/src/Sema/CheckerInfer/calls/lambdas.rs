@@ -180,7 +180,7 @@ impl<'a> Checker<'a> {
             if self.is_known_enum(name) {
                 continue;
             }
-            if self.lookup(name).is_none() && !self.consts.contains_key(name) {
+            if self.lookup(name).is_none() && self.const_type(name).is_none() {
                 self.unknown_name(name, lam.span);
             }
         }
@@ -257,7 +257,7 @@ impl<'a> Checker<'a> {
                 let cap = self
                     .lookup(name)
                     .map(|i| (i.ty.clone(), i.param_conv))
-                    .or_else(|| self.consts.get(name).map(|t| (t.clone(), None)));
+                    .or_else(|| self.const_type(name).map(|t| (t.clone(), None)));
                 let Some((cap_ty, cap_conv)) = cap else {
                     continue;
                 };
@@ -269,7 +269,7 @@ impl<'a> Checker<'a> {
                             .unwrap_or_else(|| {
                                 self.funcs.contains_key(name)
                                     || self.unqualified.contains_key(name)
-                                    || self.unqualified_file.contains_key(name)
+                                    || self.has_file_function(name)
                             });
                         if callback_safe {
                             None

@@ -188,7 +188,7 @@ fn lower_template_expr(
     template_vars: &std::collections::HashSet<String>,
 ) -> TExpr {
     match expr {
-        Expr::ComptimeName { name, .. } if cx.const_values.contains_key(name) => {
+        Expr::ComptimeName { name, .. } if cx.fact_const_values(name).is_some() => {
             lower_expr(expr, cx, env)
         }
         Expr::ComptimeName { value: Some(_), .. } => lower_expr(expr, cx, env),
@@ -857,13 +857,13 @@ pub(crate) fn lower_named_collection_callback(
     let Expr::Ident(name, _) = expr else {
         return None;
     };
-    if env.locals.contains_key(name) || cx.consts.contains_key(name) {
+    if env.locals.contains_key(name) || cx.fact_consts(name).is_some() {
         return None;
     }
     let ty = if effective {
-        cx.fn_types.get(name)
+        cx.fact_fn_types(name)
     } else {
-        cx.fn_source_types.get(name)
+        cx.fact_fn_source_types(name)
     }?;
     if !matches!(ty, Type::Fn { .. }) {
         return None;
@@ -872,7 +872,7 @@ pub(crate) fn lower_named_collection_callback(
         ty: ty.clone(),
         kind: TExprKind::FnValue {
             kind: crate::Codegen::TIR::TFnValueKind::NamedFn {
-                name: Some(name.clone()),
+                name: Some(cx.function_value_name(name)),
                 lambda: None,
             },
         },
@@ -1127,17 +1127,15 @@ pub(crate) fn lower_call_arg_value(
         }
         (Expr::Ident(name, _), Some((_, ty @ Type::Fn { .. })))
             if !env.locals.contains_key(name)
-                && !cx.consts.contains_key(name)
-                && cx
-                    .fn_types
-                    .get(name)
+                && !cx.fact_consts(name).is_some()
+                && cx.fact_fn_types(name)
                     .is_some_and(|fn_ty| matches!(fn_ty, Type::Fn { .. })) =>
         {
             TExpr {
                 ty: ty.clone(),
                 kind: TExprKind::FnValue {
                     kind: crate::Codegen::TIR::TFnValueKind::NamedFn {
-                        name: Some(name.clone()),
+                        name: Some(cx.function_value_name(name)),
                         lambda: None,
                     },
                 },
@@ -1480,8 +1478,8 @@ pub(crate) fn lower_extern_call_arg(
 /// `s.starts_with("Box::new(")` check, resolved at lowering.
 pub(crate) fn ast_arg_is_named_fn_value(e: &Expr, cx: &Cx, env: &LowerEnv) -> bool {
     if let Expr::Ident(name, _) = e {
-        if !env.locals.contains_key(name) && !cx.consts.contains_key(name) {
-            return matches!(cx.fn_types.get(name), Some(Type::Fn { .. }));
+        if !env.locals.contains_key(name) && !cx.fact_consts(name).is_some() {
+            return matches!(cx.fact_fn_types(name), Some(Type::Fn { .. }));
         }
     }
     false

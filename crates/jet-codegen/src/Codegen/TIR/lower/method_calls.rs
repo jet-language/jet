@@ -569,7 +569,7 @@ fn plugin_component_type(
             if !seen.insert(name.clone()) {
                 return None;
             }
-            let result = cx.struct_fields.get(name).and_then(|fields| {
+            let result = cx.fact_struct_fields(name).and_then(|fields| {
                 fields
                     .iter()
                     .enumerate()
@@ -649,8 +649,7 @@ fn imported_extern_call_type(_c_abi: bool, declared: Type) -> Type {
 }
 
 fn canonical_foreign_key(cx: &Cx, spelling: &str, fallback: &str) -> String {
-    cx.foreign_call_keys
-        .get(spelling)
+    cx.fact_foreign_call_key(spelling)
         .cloned()
         .unwrap_or_else(|| fallback.to_string())
 }
@@ -755,9 +754,7 @@ fn lower_builtin_binary_method(
         _ => unreachable!("checked builtin binary method"),
     };
     let distinct = match recv.ty.without_user_tags() {
-        Type::Named(name) => cx
-            .distinct_types
-            .get(name)
+        Type::Named(name) => cx.fact_distinct_types(name)
             .map(|(base, _)| (name.clone(), base.clone())),
         _ => None,
     };
@@ -1518,11 +1515,9 @@ fn compute_function_type_names(ty: &Type) -> Option<Vec<String>> {
 fn compute_transform_parameter_names(expr: &Expr, cx: &Cx) -> Option<Vec<String>> {
     match expr {
         Expr::Paren(inner, _) => compute_transform_parameter_names(inner, cx),
-        Expr::Ident(name, _) => cx
-            .fn_param_names
-            .get(name)
+        Expr::Ident(name, _) => cx.fact_fn_param_names(name)
             .cloned()
-            .or_else(|| cx.fn_types.get(name).and_then(compute_function_type_names)),
+            .or_else(|| cx.fact_fn_types(name).and_then(compute_function_type_names)),
         Expr::Lambda(lambda) => Some(
             lambda
                 .params
@@ -1911,7 +1906,7 @@ fn string_bytes_receiver_is_owned(receiver: &TExpr, cx: &Cx) -> bool {
             let Some(Type::Fn {
                 return_view_provenance,
                 ..
-            }) = cx.fn_types.get(name)
+            }) = cx.fact_fn_types(name)
             else {
                 return false;
             };
@@ -2163,11 +2158,10 @@ fn lower_data_schema_call(
     };
     let row = |name: &str| {
         Some((
-            cx.struct_type_param_order
-                .get(name)
+            cx.fact_struct_type_param_order(name)
                 .cloned()
                 .unwrap_or_default(),
-            cx.struct_fields.get(name)?.clone(),
+            cx.fact_struct_fields(name)?.clone(),
         ))
     };
     let Some(columns) = crate::Comptime::DataPipeline::schema_columns_for_type(elem, true, &row)
@@ -2675,9 +2669,7 @@ fn route_handler_param_names(handler_expr: &Expr, cx: &Cx) -> Option<Vec<String>
                 .map(|param| param.name.clone())
                 .collect(),
         ),
-        Expr::Ident(name, _) => cx
-            .fn_param_names
-            .get(name)
+        Expr::Ident(name, _) => cx.fact_fn_param_names(name)
             .map(|params| params.iter().map(|param_name| param_name.clone()).collect()),
         _ => None,
     }
@@ -2695,7 +2687,7 @@ fn route_static_string(expr: &Expr, cx: &Cx) -> Option<String> {
             }
             Some(value)
         }
-        Expr::Ident(name, _) => match cx.const_values.get(name) {
+        Expr::Ident(name, _) => match cx.fact_const_values(name) {
             Some(crate::AST::CtValue::Str(value)) => Some(value.clone()),
             _ => None,
         },
@@ -2764,7 +2756,7 @@ fn route_schema_type(
             _ if !cx.codable_types.contains(name) => None,
             _ if !active.insert(name.clone()) => None,
             _ => {
-                let fields = cx.reflection_fields.get(name)?;
+                let fields = cx.fact_reflection_fields(name)?;
                 let mut properties = Vec::with_capacity(fields.len());
                 for field in fields.iter().filter(|field| field.is_pub) {
                     properties.push(jet_foundation::MIR::MirHttpPropertyFact {
@@ -2839,7 +2831,7 @@ fn route_schema_expr(
 fn route_status(expr: &Expr, cx: &Cx) -> Option<i64> {
     match route_strip_parens(expr) {
         Expr::Int(value, ..) => Some(*value),
-        Expr::Ident(name, _) => match cx.const_values.get(name) {
+        Expr::Ident(name, _) => match cx.fact_const_values(name) {
             Some(crate::AST::CtValue::Int(value)) => Some(*value),
             _ => None,
         },
@@ -3193,9 +3185,7 @@ fn route_handler_contract(
         }
         Expr::Ident(name, _) => {
             let body = LambdaBody::Block(cx.fn_bodies.get(name)?.clone());
-            let params = cx
-                .sigs
-                .get(name)?
+            let params = cx.fact_sigs(name)?
                 .iter()
                 .map(|(_, ty)| ty.clone())
                 .collect::<Vec<_>>();
@@ -3207,7 +3197,7 @@ fn route_handler_contract(
     let mut response_aliases = std::collections::HashMap::new();
     let mut handler_param_names = Vec::with_capacity(param_types.len());
     if let Expr::Ident(name, _) = handler {
-        if let Some(param_names) = cx.fn_param_names.get(name) {
+        if let Some(param_names) = cx.fact_fn_param_names(name) {
             for (param_name, ty) in param_names.iter().zip(param_types.iter()) {
                 handler_param_names.push((param_name.clone(), ty.clone()));
                 locals.insert(param_name.clone(), ty.clone());
@@ -3361,7 +3351,7 @@ fn hardware_method_op(
     cx: &Cx,
     env: &LowerEnv,
 ) -> Result<Option<THardwareCall>, String> {
-    let Some(profile_id) = cx.hardware_profile_id.clone().filter(|id| !id.is_empty()) else {
+    let Some(profile_id) = cx.hardware_profile_id.as_deref().filter(|id| !id.is_empty()).map(str::to_owned) else {
         return Ok(None);
     };
     let Some(profile) = cx.hardware_profile.as_ref() else {
@@ -3544,7 +3534,7 @@ fn lower_http_middleware_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> T
 /// rejected every non-named handler (E2810).
 fn lower_app_route_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     let params = match expr {
-        Expr::Ident(name, _) => cx.fn_types.get(name).and_then(|ty| match ty {
+        Expr::Ident(name, _) => cx.fact_fn_types(name).and_then(|ty| match ty {
             Type::Fn { params, .. } => Some(params.clone()),
             _ => None,
         }),
@@ -3595,7 +3585,7 @@ fn app_route_binding(method: &str, handler: Option<&Expr>, cx: &Cx) -> String {
         return String::new();
     };
     let (Some(names), Some(Type::Fn { params, .. })) =
-        (cx.fn_param_names.get(name), cx.fn_source_types.get(name))
+        (cx.fact_fn_param_names(name), cx.fact_fn_source_types(name))
     else {
         return String::new();
     };
@@ -3611,7 +3601,7 @@ fn app_route_binding(method: &str, handler: Option<&Expr>, cx: &Cx) -> String {
                 return "d".to_string();
             }
             if let Type::Named(record) = ty {
-                if let Some(fields) = cx.struct_fields.get(record) {
+                if let Some(fields) = cx.fact_struct_fields(record) {
                     let fields = fields
                         .iter()
                         .map(|(field, field_ty)| match field_ty {
@@ -3838,7 +3828,7 @@ fn lower_method_call_impl(
     let declared_recv_type = recv_type.as_deref().and_then(|name| {
         handle_method_op(name, method, args.len())?;
         let owner = cx.method_metadata_name(name, method);
-        if !cx.method_sigs.contains_key(&(owner, method.to_string())) {
+        if !cx.fact_method_sigs(&(owner, method.to_string())).is_some() {
             return None;
         }
         cx.local_type_identities
@@ -4142,11 +4132,10 @@ fn lower_method_call_impl(
                 });
             }
             let sig = root_alias.as_ref().and_then(|alias| {
-                cx.import_sigs
-                    .get(&(alias.clone(), root_name.clone()))
+                cx.fact_import_sigs(&(alias.clone(), root_name.clone()))
                     .cloned()
             });
-            let Some(sig) = sig.or_else(|| cx.sigs.get(&root_name).cloned()) else {
+            let Some(sig) = sig.or_else(|| cx.fact_sigs(&root_name).cloned()) else {
                 return invariant_method_expr(
                     method_span,
                     "root call without a resolved signature",
@@ -5517,7 +5506,7 @@ fn lower_method_call_impl(
                     "distinct raw without a named distinct receiver",
                 );
             };
-            let Some((_, _)) = cx.distinct_types.get(name) else {
+            let Some((_, _)) = cx.fact_distinct_types(name) else {
                 return invariant_method_expr(
                     method_span,
                     "distinct raw without its checked base type",
@@ -5542,7 +5531,7 @@ fn lower_method_call_impl(
         return in_own_frame(|| {
             let recv = lower_expr(receiver, cx, env);
             let boxed = match &recv.ty {
-                Type::Named(name) => cx.boxed_edges.contains(&(name.clone(), method.to_string())),
+                Type::Named(name) => cx.fact_box_edge(&name, &method),
                 _ => false,
             };
             let callee = TExpr {
@@ -5992,7 +5981,7 @@ fn lower_method_call_impl(
                     });
                 }
                 let enum_owner = crate::Codegen::TIR::canonical_enum_owner(cx, type_name);
-                if let Some(variants) = cx.enum_variants.get(&enum_owner) {
+                if let Some(variants) = cx.fact_enum_variants(&enum_owner) {
                     if variants.iter().any(|(v, _)| v == method) {
                         // A source spelling that is not a local row (an
                         // imported leaf, or a user module lowered for a `prep`
@@ -6580,10 +6569,8 @@ fn lower_method_call_impl(
                                             args: eargs,
                                         },
                                     };
-                                    let undo = cx
-                                        .foreign_undos
-                                        .get(&wrapper_key)
-                                        .or_else(|| cx.foreign_undos.get(method))
+                                    let undo = cx.fact_foreign_undo(&wrapper_key)
+                                        .or_else(|| cx.fact_foreign_undo(method))
                                         .map(String::as_str);
                                     return wrap_foreign_undo(
                                         lowered,
@@ -6595,7 +6582,7 @@ fn lower_method_call_impl(
                                 });
                             }
                             if let Some(foreign_key) =
-                                cx.foreign_call_keys.get(&wrapper_key).cloned()
+                                cx.fact_foreign_call_key(&wrapper_key).cloned()
                             {
                                 let eargs = args
                                     .iter()
@@ -6616,10 +6603,8 @@ fn lower_method_call_impl(
                                         args: eargs,
                                     },
                                 };
-                                let undo = cx
-                                    .foreign_undos
-                                    .get(&wrapper_key)
-                                    .or_else(|| cx.foreign_undos.get(method))
+                                let undo = cx.fact_foreign_undo(&wrapper_key)
+                                    .or_else(|| cx.fact_foreign_undo(method))
                                     .map(String::as_str);
                                 return wrap_foreign_undo(
                                     lowered,
@@ -6629,7 +6614,7 @@ fn lower_method_call_impl(
                                     env,
                                 );
                             }
-                            let undo = cx.foreign_undos.get(&wrapper_key).map(String::as_str);
+                            let undo = cx.fact_foreign_undo(&wrapper_key).map(String::as_str);
                             let targs = lower_module_args(args, sig.as_deref(), env, cx);
                             let lowered = TExpr {
                                 ty: ret,
@@ -6667,7 +6652,7 @@ fn lower_method_call_impl(
                     .cloned()
                 {
                     return in_own_frame(|| {
-                        let sig = cx.sigs.get(&mangled_key).cloned();
+                        let sig = cx.fact_sigs(&mangled_key).cloned();
                         let targs = lower_module_args(args, sig.as_deref(), env, cx);
                         let target_return =
                             call_return_type_with_args(cx, &mangled_key, type_args, &targs);
@@ -6701,13 +6686,9 @@ fn lower_method_call_impl(
                     .cloned()
                 {
                     return in_own_frame(|| {
-                        let undo = cx
-                            .foreign_undos
-                            .get(&format!("{real_mod}::{real_fn}"))
+                        let undo = cx.fact_foreign_undo(&format!("{real_mod}::{real_fn}"))
                             .map(String::as_str);
-                        let sig = cx
-                            .import_sigs
-                            .get(&(alias.clone(), method.to_string()))
+                        let sig = cx.fact_import_sigs(&(alias.clone(), method.to_string()))
                             .cloned();
                         let targs = lower_module_args(args, sig.as_deref(), env, cx);
                         let target_return = match imported_module_call_target_return(
@@ -6742,15 +6723,13 @@ fn lower_method_call_impl(
                         return wrap_foreign_undo(lowered, undo, method_span.start as u32, cx, env);
                     });
                 }
-                if let Some(mod_name) = cx.import_mods.get(alias).cloned() {
+                if let Some(mod_name) = cx.fact_import_binding(&(alias.clone(), method.to_owned()))
+                    .map(|binding| binding.0.clone()).or_else(|| cx.import_mods.get(alias).cloned())
+                {
                     return in_own_frame(|| {
-                        let undo = cx
-                            .foreign_undos
-                            .get(&format!("{mod_name}::{method}"))
+                        let undo = cx.fact_foreign_undo(&format!("{mod_name}::{method}"))
                             .map(String::as_str);
-                        let sig = cx
-                            .import_sigs
-                            .get(&(alias.clone(), method.to_string()))
+                        let sig = cx.fact_import_sigs(&(alias.clone(), method.to_string()))
                             .cloned();
                         if let Some(extern_fn) = cx
                             .extern_funcs
@@ -6773,8 +6752,7 @@ fn lower_method_call_impl(
                                     .collect();
                                 let ty = imported_extern_call_type(
                                     c_abi,
-                                    cx.import_rets
-                                        .get(&(alias.clone(), method.to_string()))
+                                    cx.fact_import_rets(&(alias.clone(), method.to_string()))
                                         .cloned()
                                         .flatten()
                                         .unwrap_or_else(unit_type),
@@ -6791,9 +6769,7 @@ fn lower_method_call_impl(
                                         args: eargs,
                                     },
                                 };
-                                let undo = cx
-                                    .foreign_undos
-                                    .get(&format!("{mod_name}::{method}"))
+                                let undo = cx.fact_foreign_undo(&format!("{mod_name}::{method}"))
                                     .map(String::as_str);
                                 return wrap_foreign_undo(
                                     lowered,
@@ -6804,9 +6780,7 @@ fn lower_method_call_impl(
                                 );
                             });
                         }
-                        if let Some(foreign_key) = cx
-                            .foreign_call_keys
-                            .get(&format!("{mod_name}::{method}"))
+                        if let Some(foreign_key) = cx.fact_foreign_call_key(&format!("{mod_name}::{method}"))
                             .cloned()
                         {
                             let eargs = args
@@ -6822,8 +6796,7 @@ fn lower_method_call_impl(
                                 .collect();
                             let ty = imported_extern_call_type(
                                 true,
-                                cx.import_rets
-                                    .get(&(alias.clone(), method.to_string()))
+                                cx.fact_import_rets(&(alias.clone(), method.to_string()))
                                     .cloned()
                                     .flatten()
                                     .unwrap_or_else(unit_type),
@@ -6836,9 +6809,7 @@ fn lower_method_call_impl(
                                     args: eargs,
                                 },
                             };
-                            let undo = cx
-                                .foreign_undos
-                                .get(&format!("{mod_name}::{method}"))
+                            let undo = cx.fact_foreign_undo(&format!("{mod_name}::{method}"))
                                 .map(String::as_str);
                             return wrap_foreign_undo(
                                 lowered,
@@ -6886,9 +6857,7 @@ fn lower_method_call_impl(
                     .map(str::to_owned)
                 {
                     return in_own_frame(|| {
-                        let undo = cx
-                            .foreign_undos
-                            .get(&format!("{mod_name}::{method}"))
+                        let undo = cx.fact_foreign_undo(&format!("{mod_name}::{method}"))
                             .map(String::as_str);
                         let sig = cx.import_signature_for_function(&env.fn_name, alias, method);
                         if let Some(extern_fn) = cx
@@ -6928,9 +6897,7 @@ fn lower_method_call_impl(
                                         args: eargs,
                                     },
                                 };
-                                let undo = cx
-                                    .foreign_undos
-                                    .get(&format!("{mod_name}::{method}"))
+                                let undo = cx.fact_foreign_undo(&format!("{mod_name}::{method}"))
                                     .map(String::as_str);
                                 return wrap_foreign_undo(
                                     lowered,
@@ -6941,9 +6908,7 @@ fn lower_method_call_impl(
                                 );
                             });
                         }
-                        if let Some(foreign_key) = cx
-                            .foreign_call_keys
-                            .get(&format!("{mod_name}::{method}"))
+                        if let Some(foreign_key) = cx.fact_foreign_call_key(&format!("{mod_name}::{method}"))
                             .cloned()
                         {
                             let eargs = args
@@ -6971,9 +6936,7 @@ fn lower_method_call_impl(
                                     args: eargs,
                                 },
                             };
-                            let undo = cx
-                                .foreign_undos
-                                .get(&format!("{mod_name}::{method}"))
+                            let undo = cx.fact_foreign_undo(&format!("{mod_name}::{method}"))
                                 .map(String::as_str);
                             return wrap_foreign_undo(
                                 lowered,
@@ -7025,11 +6988,9 @@ fn lower_method_call_impl(
                 if cx.code_modules.contains(alias.as_str()) {
                     return in_own_frame(|| {
                         let mangled_key = jet_foundation::Names::member_name(alias, method);
-                        let undo = cx
-                            .foreign_undos
-                            .get(&format!("{alias}::{method}"))
+                        let undo = cx.fact_foreign_undo(&format!("{alias}::{method}"))
                             .map(String::as_str);
-                        let sig = cx.sigs.get(&mangled_key).cloned();
+                        let sig = cx.fact_sigs(&mangled_key).cloned();
                         let targs = lower_module_args(args, sig.as_deref(), env, cx);
                         let target_return =
                             call_return_type_with_args(cx, &mangled_key, type_args, &targs);
@@ -9453,7 +9414,7 @@ fn lower_method_call_impl(
             || matches!(
                 &recv_ty,
                 Type::Named(name)
-                    if crate::Sema::is_math_type(name) && !cx.type_names.contains(name)
+                    if crate::Sema::is_math_type(name) && !cx.fact_type_name(name)
             );
         if skip_closure {
             if let Type::Named(handle) = &recv_ty {
@@ -10160,7 +10121,7 @@ fn lower_method_call_impl(
     // must not fall through to the user-method Todo path.
     if let Some(handle) = recv_type {
         if (handle == Syntax::TYPE_DECIMAL || handle == Syntax::TYPE_FRACTION)
-            && !cx.type_names.contains(handle)
+            && !cx.fact_type_name(handle)
         {
             let known = matches!(
                 (handle.as_str(), method, args.len()),
@@ -10237,7 +10198,7 @@ fn lower_method_call_impl(
     }
 
     if let Some(handle) = recv_type {
-        if crate::Sema::is_math_type(handle) && !cx.type_names.contains(handle) {
+        if crate::Sema::is_math_type(handle) && !cx.fact_type_name(handle) {
             let is_reduce = method == "reduce" && crate::Sema::is_simd_lane_type(handle);
             if is_reduce || crate::Sema::math_method_return(handle, method, args.len()).is_some() {
                 return in_own_frame(|| {
@@ -10851,7 +10812,7 @@ fn lower_method_call_impl(
         // `EncodingLimits.safe()`, because the caller that skipped the argument
         // need not have imported `core.encoding` to name an alias for it.
         if let Expr::Ident(type_name, _) = receiver {
-            if type_name == "EncodingLimits" && !cx.struct_fields.contains_key(type_name) {
+            if type_name == "EncodingLimits" && !cx.fact_struct_fields(type_name).is_some() {
                 return in_own_frame(|| {
                     return TExpr {
                         ty: Type::Named("EncodingLimits".to_string()),
@@ -10867,7 +10828,7 @@ fn lower_method_call_impl(
             }
         }
         if let Expr::Ident(type_name, _) = receiver {
-            if type_name == "DataLimits" && !cx.struct_fields.contains_key(type_name) {
+            if type_name == "DataLimits" && !cx.fact_struct_fields(type_name).is_some() {
                 return in_own_frame(|| TExpr {
                     ty: Type::Named("DataLimits".to_string()),
                     kind: TExprKind::StaticCall {
@@ -11211,7 +11172,7 @@ fn lower_method_call_impl(
                 // every engine builds the same builder spec from T's rows.
                 if method == "merge"
                     && args.len() == 2
-                    && cx.type_names.contains(&type_name)
+                    && cx.fact_type_name(&type_name)
                     && matches!(resolved_ret, Some(Type::Result { ok, .. }) if **ok == Type::Named(type_name.clone()))
                 {
                     let Some(ty) = resolved_ret.cloned() else {
@@ -11268,9 +11229,7 @@ fn lower_method_call_impl(
                         .map(|argument| lower_one_call_arg(argument, None, env, cx))
                         .collect();
                     let resolved_type_args = if method == "encode_hole" {
-                        let sig = cx
-                            .method_sigs
-                            .get(&(type_name.clone(), method.to_string()))
+                        let sig = cx.fact_method_sigs(&(type_name.clone(), method.to_string()))
                             .cloned()
                             .unwrap_or_default();
                         let inferred = resolved_method_type_args(
@@ -11315,8 +11274,7 @@ fn lower_method_call_impl(
                         ty: resolved_ret
                             .cloned()
                             .or_else(|| {
-                                cx.method_rets
-                                    .get(&(type_name.clone(), method.to_string()))
+                                cx.fact_method_rets(&(type_name.clone(), method.to_string()))
                                     .cloned()
                                     .flatten()
                             })
@@ -11406,7 +11364,7 @@ fn lower_method_call_impl(
                 if type_name == "Path"
                     && method == "home"
                     && args.is_empty()
-                    && !cx.type_names.contains("Path")
+                    && !cx.fact_type_name("Path")
                 {
                     return in_own_frame(|| {
                         return TExpr {
@@ -11603,7 +11561,7 @@ fn lower_method_call_impl(
                     }
                 }
                 if let (Some((base, _)), Some(source), Some(arg)) = (
-                    cx.distinct_types.get(&type_name),
+                    cx.fact_distinct_types(&type_name),
                     Syntax::numeric_conversion_source(method),
                     args.first(),
                 ) {
@@ -11611,7 +11569,7 @@ fn lower_method_call_impl(
                         return in_own_frame(|| {
                             let op = resolve_numeric_conversion_op(&base.name(), source)
                                 .expect("sema admitted a numeric distinct conversion");
-                            let range = cx.distinct_ranges.get(&type_name).copied();
+                            let range = cx.fact_distinct_ranges(&type_name).copied();
                             return TExpr {
                                 ty: resolved_ret
                                     .cloned()
@@ -11628,7 +11586,7 @@ fn lower_method_call_impl(
                     }
                 }
                 if let (Some((base, _)), Some(arg)) =
-                    (cx.distinct_types.get(&type_name), args.first())
+                    (cx.fact_distinct_types(&type_name), args.first())
                 {
                     if args.len() == 1
                         && !base.is_numeric()
@@ -11647,7 +11605,7 @@ fn lower_method_call_impl(
                     }
                 }
                 if let (Some(destination), Some(arg)) =
-                    (cx.unit_facts.get(&type_name), args.first())
+                    (cx.fact_unit_facts(&type_name), args.first())
                 {
                     let exact_method = method.strip_suffix("_rounded").unwrap_or(method);
                     let lowered = lower_expr(&arg.expr, cx, env);
@@ -11663,7 +11621,7 @@ fn lower_method_call_impl(
                         _ => None,
                     });
                     let source = match &lowered.ty {
-                        Type::Named(name) => cx.unit_facts.get(name),
+                        Type::Named(name) => cx.fact_unit_facts(name),
                         _ => None,
                     }
                     .or_else(|| {
@@ -11783,7 +11741,7 @@ fn lower_method_call_impl(
                 if type_name == "Reader"
                     && method == "over"
                     && args.len() == 1
-                    && !cx.type_names.contains("Reader")
+                    && !cx.fact_type_name("Reader")
                 {
                     let owned = args[0].flags.owned_last_use;
                     return in_own_frame(|| {
@@ -11802,7 +11760,7 @@ fn lower_method_call_impl(
                 if type_name == "Cursor"
                     && method == "over"
                     && args.len() == 1
-                    && !cx.type_names.contains("Cursor")
+                    && !cx.fact_type_name("Cursor")
                 {
                     return in_own_frame(|| {
                         let s_arg = lower_expr(&args[0].expr, cx, env);
@@ -11818,7 +11776,7 @@ fn lower_method_call_impl(
                 }
                 // D-FIDELITY-API1=A: `Perf.fidelity()` / `Perf.override_fidelity(v)?`
                 // lower to the same core call shape as `use core.perf as perf`.
-                if type_name == "Perf" && !cx.type_names.contains("Perf") {
+                if type_name == "Perf" && !cx.fact_type_name("Perf") {
                     return in_own_frame(|| {
                         let targs: Vec<TExpr> =
                             args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
@@ -11905,7 +11863,7 @@ fn lower_method_call_impl(
                 // the ordinary BuiltinMethod carrier; the inert Unit receiver keeps
                 // static lowering inside the existing TIR seam.
                 if type_name == Syntax::TYPE_LIST
-                    && !cx.type_names.contains(Syntax::TYPE_LIST)
+                    && !cx.fact_type_name(Syntax::TYPE_LIST)
                     && matches!(method, "try_new" | "try_with_capacity")
                     && ((method == "try_new" && args.is_empty())
                         || (method == "try_with_capacity" && args.len() == 1))
@@ -12438,7 +12396,7 @@ fn lower_method_call_impl(
                 // both are present. `a`/`b` lower plainly as values; `R` comes from sema's
                 // `resolved_ret` (the arg-dependent return type, same mechanism the
                 // polymorphic core specials use — see the AST `MethodCall.resolved_ret` doc).
-                if type_name == "Option" && method == "lift2" && !cx.type_names.contains("Option") {
+                if type_name == "Option" && method == "lift2" && !cx.fact_type_name("Option") {
                     return in_own_frame(|| {
                         let a_ty = match tir_recv_jet_ty(&args[1].expr, env) {
                             Some(Type::Option(inner)) => (*inner).clone(),
@@ -12516,7 +12474,7 @@ fn lower_method_call_impl(
 
                 // D-SIMD2 / D-LINALG1: a static method on a built-in math type → the prelude
                 // free function `{root}jet_math_<T>_<method>(args)`.
-                if crate::Sema::is_math_type(&type_name) && !cx.type_names.contains(&type_name) {
+                if crate::Sema::is_math_type(&type_name) && !cx.fact_type_name(&type_name) {
                     if let Some(ret) =
                         crate::Sema::math_static_return(&type_name, method, args.len())
                     {
@@ -12566,8 +12524,8 @@ fn lower_method_call_impl(
                 // module's canonical nominal, exactly as instance calls look it up,
                 // and that identity also names the checked function target.
                 let dotted_key = (type_name.clone(), method.to_string());
-                let lookup_type_name = if cx.method_sigs.contains_key(&dotted_key)
-                    || cx.method_rets.contains_key(&dotted_key)
+                let lookup_type_name = if cx.fact_method_sigs(&dotted_key).is_some()
+                    || cx.fact_method_rets(&dotted_key).is_some()
                 {
                     type_name.clone()
                 } else {
@@ -12577,11 +12535,9 @@ fn lower_method_call_impl(
                     let leaf_key = (leaf.to_string(), method.to_string());
                     match cx.imported_type_metadata_name(&type_name) {
                         Some(identity)
-                            if !cx.method_sigs.contains_key(&leaf_key)
-                                && !cx.method_rets.contains_key(&leaf_key)
-                                && cx
-                                    .method_sigs
-                                    .contains_key(&(identity.clone(), method.to_string())) =>
+                            if !cx.fact_method_sigs(&leaf_key).is_some()
+                                && !cx.fact_method_rets(&leaf_key).is_some()
+                                && cx.fact_method_sigs(&(identity.clone(), method.to_string())).is_some() =>
                         {
                             identity
                         }
@@ -12602,7 +12558,7 @@ fn lower_method_call_impl(
                         method,
                         rhs,
                     );
-                    cx.operator_methods.get(&key).cloned()
+                    cx.fact_operator_method(&key).cloned()
                 });
                 let sig = if operator_rhs.is_some() {
                     operator_method
@@ -12610,9 +12566,7 @@ fn lower_method_call_impl(
                         .map(|facts| facts.sig.clone())
                         .unwrap_or_default()
                 } else {
-                    let sig = cx
-                        .method_sigs
-                        .get(&(lookup_type_name.to_string(), method.to_string()))
+                    let sig = cx.fact_method_sigs(&(lookup_type_name.to_string(), method.to_string()))
                         .cloned()
                         .unwrap_or_default();
                     instantiated_sig.map(|sig| sig.to_vec()).unwrap_or_else(|| {
@@ -12690,8 +12644,7 @@ fn lower_method_call_impl(
                     .as_ref()
                     .map(|facts| facts.trait_name.clone())
                     .or_else(|| {
-                        cx.trait_method_traits
-                            .get(&(lookup_type_name.to_string(), method.to_string()))
+                        cx.fact_trait_method_traits(&(lookup_type_name.to_string(), method.to_string()))
                             .cloned()
                     });
                 let generic_method = (matches!(&owner_type, Type::Apply { .. })
@@ -12787,7 +12740,7 @@ fn lower_method_call_impl(
                                     method,
                                     candidate_rhs,
                                 );
-                                cx.operator_methods.get(&key).cloned()
+                                cx.fact_operator_method(&key).cloned()
                             })
                         })
                 });
@@ -12806,7 +12759,7 @@ fn lower_method_call_impl(
                             )]
                         })
                 } else {
-                    cx.method_sigs.get(&key).cloned().unwrap_or_default()
+                    cx.fact_method_sigs(&key).cloned().unwrap_or_default()
                 };
                 let sig = if effective_operator_rhs.is_some() {
                     sig
@@ -12831,19 +12784,16 @@ fn lower_method_call_impl(
                 } else {
                     resolved_ret
                         .cloned()
-                        .or_else(|| cx.method_rets.get(&key).cloned().flatten())
+                        .or_else(|| cx.fact_method_rets(&key).cloned().flatten())
                 }
                 .unwrap_or_else(unit_type);
                 let builtin_operator = crate::Generics::is_builtin_trait(ty)
                     && matches!(method, "add" | "sub" | "mul" | "div" | "equal" | "compare");
                 let distinct_numeric_operator = concrete_owner.as_ref().is_some_and(|owner| {
-                    cx.distinct_types
-                        .get(owner)
+                    cx.fact_distinct_types(owner)
                         .is_some_and(|(_, numeric)| *numeric)
                         && !cx.distinct_ranges.contains_key(owner)
-                        && !cx
-                            .method_sigs
-                            .contains_key(&(owner.clone(), method.to_string()))
+                        && !cx.fact_method_sigs(&(owner.clone(), method.to_string())).is_some()
                 }) && operator_method.is_none()
                     && matches!(method, "add" | "sub" | "mul" | "div");
                 if builtin_operator
@@ -12995,7 +12945,7 @@ fn lower_method_call_impl(
             let trait_name = operator_trait_for_method(method)?;
             let key =
                 crate::Traits::operator_method_identity(&lookup_ty_name, trait_name, method, rhs);
-            cx.operator_methods.get(&key).cloned()
+            cx.fact_operator_method(&key).cloned()
         });
         // A checked operator carries its complete identity from sema. Never
         // collapse that call onto the ordinary owner/method table.
@@ -13005,8 +12955,7 @@ fn lower_method_call_impl(
                 .map(|facts| facts.sig.clone())
                 .unwrap_or_default()
         } else {
-            cx.method_sigs
-                .get(&(metadata_ty_name.to_string(), method.to_string()))
+            cx.fact_method_sigs(&(metadata_ty_name.to_string(), method.to_string()))
                 .cloned()
                 .unwrap_or_default()
         };
@@ -13053,8 +13002,7 @@ fn lower_method_call_impl(
                 let ret_ty = resolved_ret
                     .cloned()
                     .or_else(|| {
-                        cx.method_rets
-                            .get(&(trait_name.clone(), method.to_string()))
+                        cx.fact_method_rets(&(trait_name.clone(), method.to_string()))
                             .cloned()
                             .flatten()
                     })
@@ -13073,14 +13021,10 @@ fn lower_method_call_impl(
             });
         }
 
-        let distinct_numeric_operator = cx
-            .distinct_types
-            .get(&lookup_ty_name)
+        let distinct_numeric_operator = cx.fact_distinct_types(&lookup_ty_name)
             .is_some_and(|(_, numeric)| *numeric)
             && !cx.distinct_ranges.contains_key(&lookup_ty_name)
-            && !cx
-                .method_sigs
-                .contains_key(&(metadata_ty_name.clone(), method.to_string()))
+            && !cx.fact_method_sigs(&(metadata_ty_name.clone(), method.to_string())).is_some()
             && operator_method.is_none()
             && matches!(method, "add" | "sub" | "mul" | "div")
             && args.len() == 1;
@@ -13131,9 +13075,7 @@ fn lower_method_call_impl(
                 .or_else(|| operator_trait_for_method(method))
                 .expect("checked operator method has a canonical trait");
             TMethodRef::operator(&lookup_ty_name, trait_name, method, rhs)
-        } else if cx
-            .trait_methods
-            .contains(&(metadata_ty_name.to_string(), method.to_string()))
+        } else if cx.fact_trait_method(&(metadata_ty_name.to_string(), method.to_string()))
         {
             TMethodRef::bare(method)
         } else if generic_method {
@@ -13256,14 +13198,12 @@ pub(crate) fn instantiate_method_sig(
     method_type_args: &[Type],
 ) -> Vec<(AccessConvention, Type)> {
     let mut subst = std::collections::HashMap::new();
-    if let Some(owner_params) = cx.struct_type_param_order.get(type_name) {
+    if let Some(owner_params) = cx.fact_struct_type_param_order(type_name) {
         for (param, actual) in owner_params.iter().zip(owner_type_args) {
             subst.insert(param.clone(), actual.clone());
         }
     }
-    if let Some(method_params) = cx
-        .method_type_params
-        .get(&(type_name.to_string(), method.to_string()))
+    if let Some(method_params) = cx.fact_method_type_params(&(type_name.to_string(), method.to_string()))
     {
         for (param, actual) in method_params.iter().zip(method_type_args) {
             subst.insert(param.name.clone(), actual.clone());
@@ -13283,15 +13223,12 @@ fn instantiate_method_ret(
     resolved_ret: Option<&Type>,
 ) -> Option<Type> {
     let template = resolved_ret.cloned().or_else(|| {
-        cx.method_rets
-            .get(&(type_name.to_string(), method.to_string()))
+        cx.fact_method_rets(&(type_name.to_string(), method.to_string()))
             .cloned()
             .flatten()
     })?;
     let mut subst = owner_type_subst(cx, type_name, owner_type_args);
-    if let Some(method_params) = cx
-        .method_type_params
-        .get(&(type_name.to_string(), method.to_string()))
+    if let Some(method_params) = cx.fact_method_type_params(&(type_name.to_string(), method.to_string()))
     {
         for (param, actual) in method_params.iter().zip(method_type_args) {
             subst.insert(param.name.clone(), actual.clone());
@@ -13313,9 +13250,7 @@ fn resolved_method_type_args(
     if !explicit_type_args.is_empty() {
         return explicit_type_args.to_vec();
     }
-    let Some(method_params) = cx
-        .method_type_params
-        .get(&(type_name.to_string(), method.to_string()))
+    let Some(method_params) = cx.fact_method_type_params(&(type_name.to_string(), method.to_string()))
     else {
         return Vec::new();
     };
@@ -13333,8 +13268,7 @@ fn resolved_method_type_args(
         }
     }
     if let (Some(template), Some(actual)) = (
-        cx.method_rets
-            .get(&(type_name.to_string(), method.to_string()))
+        cx.fact_method_rets(&(type_name.to_string(), method.to_string()))
             .and_then(Option::as_ref),
         resolved_ret,
     ) {
@@ -13367,8 +13301,7 @@ fn owner_type_subst(
     type_name: &str,
     owner_type_args: &[Type],
 ) -> std::collections::HashMap<String, Type> {
-    cx.struct_type_param_order
-        .get(type_name)
+    cx.fact_struct_type_param_order(type_name)
         .into_iter()
         .flat_map(|params| params.iter().zip(owner_type_args))
         .map(|(param, actual)| (param.clone(), actual.clone()))
@@ -13514,10 +13447,10 @@ mod checked_core_source_target_tests {
                 jet_foundation::CoreModuleExports::core_source_owns(module, method),
                 "the source module must own the checked request wrapper"
             );
-            cx.core_source_modules
+            std::sync::Arc::make_mut(&mut cx.core_source_modules)
                 .insert(module.to_string(), source_module.alias.to_string());
             let checked_module_identity = "source-package::Core/http/client.jet";
-            cx.core_source_sigs.insert(
+            std::sync::Arc::make_mut(&mut cx.core_source_sigs).insert(
                 (module.to_string(), method.to_string()),
                 crate::Codegen::CoreSourceFunctionSignature {
                     module_identity: checked_module_identity.to_string(),
