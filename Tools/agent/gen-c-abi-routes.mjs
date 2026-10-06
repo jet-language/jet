@@ -18,7 +18,8 @@
 //
 // Outputs:
 //   - crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs: the adapters, module
-//     `jet_c_abi_routes`, appended after CAbi.rs in the runtime text;
+//     `jet_c_abi_routes`, appended after CAbi.rs only in the all-parts native
+//     runtime crate (Compiler/JetBackend/Tests/prepare-call-runtime.mjs --allparts);
 //   - Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet: the carrier table
 //     the lowering checks a call against before it calls the adapter.
 //
