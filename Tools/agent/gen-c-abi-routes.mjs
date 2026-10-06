@@ -4,17 +4,24 @@
 // kernel signature has a C carrier, plus the backend's matching route table.
 //
 // usage: node Tools/agent/gen-c-abi-routes.mjs <runtime.rs> [--check]
-//   <runtime.rs> is the compiled runtime's Rust text as emitted for a one-line
-//   program (`jet emit --rust seed.jet`, seed `fn run() { print("hello") }`):
-//   the exact items the `jet_runtime` crate holds, so every kernel's module
-//   path and signature come from the runtime itself, not from a second list.
+//   <runtime.rs> is the compiled runtime's Rust text as emitted for the
+//   all-parts seed (`jet emit --rust Compiler/JetBackend/Tests/allparts-seed.jet`;
+//   emission selects runtime parts by the Core modules a program uses, and the
+//   seed imports every one): the exact items the `jet_runtime` crate holds, so
+//   every kernel's module path and signature come from the runtime itself,
+//   not from a second list.
 //
 // Routes (the registry):
-//   - crates/jet-foundation/src/Syntax/core_calls.rs: every CoreCallRecord row
-//     AOT calls directly (`aot_direct`), keyed by its symbol (a Prelude or a
-//     Rust-crate symbol: both are one runtime function generated Rust calls);
+//   - crates/jet-foundation/src/Syntax/core_calls.rs: every CoreCallRecord row,
+//     keyed by its symbol (a Prelude or a Rust-crate symbol: both are one
+//     runtime function generated Rust calls), except a non-direct row that
+//     MIRRust.rs `core_call` / `source_math_call` emits in a form of its own;
+//     a symbol MIRRust.rs `exact_prelude_adapter` maps to an owned exact-Int
+//     kernel calls that kernel;
 //   - crates/jet-codegen/src/Codegen/TIR/routes.rs: every StaticPrelude route
-//     row (`prelude_route_row(MirPreludeFamily::StaticPrelude, ...)`).
+//     row (`prelude_route_row(MirPreludeFamily::StaticPrelude, ...)`), builtin
+//     and handle method rows, and every other Prelude symbol the TIR sources
+//     spell that names a runtime function (an inherent method included).
 //
 // Outputs:
 //   - crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs: the adapters, module
@@ -52,6 +59,49 @@ const jetOut = "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet";
 // ---------------------------------------------------------------------------
 // 1. The registry's routes: symbol -> { native_int_result, rows }.
 
+// The body of `fn name(` in Rust `source`, through its matching brace.
+const fnBody = (source, name) => {
+  const at = source.search(new RegExp(`\\bfn ${name}\\(`));
+  if (at < 0) throw new Error(`gen-c-abi-routes: no fn ${name}`);
+  const open = source.indexOf("{", at);
+  let depth = 0;
+  for (let k = open; k < source.length; k++) {
+    if (source[k] === '"') { k++; while (source[k] !== '"') k += source[k] === "\\" ? 2 : 1; continue; }
+    if (source[k] === "{") depth++;
+    else if (source[k] === "}" && --depth === 0) return source.slice(open + 1, k);
+  }
+  throw new Error(`gen-c-abi-routes: unterminated fn ${name}`);
+};
+const mirRustRs = readFileSync(`${repo}/crates/jet-codegen/src/Codegen/MIRRust.rs`, "utf8");
+const stringsIn = (s) => [...s.matchAll(/"([^"]*)"/g)].map((m) => m[1]);
+
+// The Core rows generated Rust (MIRRust.rs `core_call`) emits through a form
+// of their own instead of the row's Prelude symbol, whatever the call's type
+// arguments or arity: a route to that symbol would be a second meaning (I9).
+// A form chosen by the call's type arguments or arity leaves the plain call
+// on the symbol, so its row keeps a route.
+const ownForm = new Set();
+for (const m of fnBody(mirRustRs, "core_call").matchAll(/\bif (row\.module == "([^"]+)"[^{]*)\{/g)) {
+  const condition = m[1];
+  if (/type_args|args\.len\(\)/.test(condition)) continue;
+  const members = [...condition.matchAll(/row\.member == "([^"]+)"/g)].map((k) => k[1]);
+  const listed = /matches!\(\s*row\.member\.as_str\(\),([^)]*)\)/.exec(condition);
+  if (listed) members.push(...stringsIn(listed[1]));
+  for (const member of members) ownForm.add(`${m[2]}.${member}`);
+}
+// `source_math_call`: a non-direct core.math row it lists calls its Jet source
+// function, never a runtime kernel.
+const sourceMath = /row\.module != "core\.math"[\s\S]*?!matches!\(\s*row\.member\.as_str\(\),([^)]*)\)/.exec(fnBody(mirRustRs, "source_math_call"));
+if (!sourceMath || ownForm.size === 0) throw new Error("gen-c-abi-routes: MIRRust core_call / source_math_call forms not found");
+const sourceMathMembers = new Set(stringsIn(sourceMath[1]));
+
+// MIRRust.rs `exact_prelude_adapter`: a Prelude symbol generated Rust calls as
+// its owned exact-Int kernel, the listed argument positions borrowed as
+// `&JetInt`. The route keeps the symbol; its adapter calls the kernel.
+const exactAdapters = new Map();
+for (const m of fnBody(mirRustRs, "exact_prelude_adapter").matchAll(/"([^"]+)"\s*=>\s*\{?\s*\("([^"]+)",\s*&\[[^\]]*\]\)/g)) exactAdapters.set(m[1], m[2]);
+if (exactAdapters.size === 0) throw new Error("gen-c-abi-routes: no exact_prelude_adapter rows");
+
 const routes = new Map();
 const addRoute = (symbol, nativeInt, row) => {
   const entry = routes.get(symbol) ?? { nativeInt: false, rows: [] };
@@ -59,12 +109,18 @@ const addRoute = (symbol, nativeInt, row) => {
   entry.rows.push(row);
   routes.set(symbol, entry);
 };
+// Every Core call row: generated Rust calls a direct row's symbol, and a
+// non-direct row's symbol too unless `core_call` gives it its own form.
 const coreCalls = readFileSync(`${repo}/crates/jet-foundation/src/Syntax/core_calls.rs`, "utf8");
 for (const line of coreCalls.split("\n")) {
   const record = /^\s*CoreCallRecord::new\(\s*"([^"]*)",\s*"([^"]*)",\s*"([^"]*)",\s*(?:true|false)/.exec(line);
-  if (!record || line.includes(".without_direct_aot()")) continue;
+  if (!record) continue;
   const [, module, member, symbol] = record;
   if (!symbol) continue;
+  if (line.includes(".without_direct_aot()")) {
+    if (ownForm.has(`${module}.${member}`)) continue;
+    if (module === "core.math" && sourceMathMembers.has(member)) continue;
+  }
   addRoute(symbol, line.includes(".with_native_int_result()"), `${module}.${member}`);
 }
 const tirRoutes = readFileSync(`${repo}/crates/jet-codegen/src/Codegen/TIR/routes.rs`, "utf8");
@@ -111,10 +167,15 @@ const attributesBefore = (lineStart) => {
 };
 const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => line.startsWith("#[cfg("));
 {
-  const stack = []; // frames: { mod: name | null, gated }
+  // frames: { mod: name | null, impl: type name | null, gated }. An inherent
+  // `impl Name {` of a non-generic type holds methods keyed `path::Name::method`.
+  const stack = [];
   let i = 0;
   let pendingMod = null;
+  let pendingImpl = null;
   let pendingGated = false;
+  // An item scope: every frame a module, or modules then one inherent impl.
+  const itemScope = () => stack.every((frame, k) => frame.mod || (frame.impl && k === stack.length - 1));
   const n = text.length;
   const isIdent = (c) => /[A-Za-z0-9_]/.test(c);
   while (i < n) {
@@ -149,14 +210,15 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
       continue;
     }
     if (c === "{") {
-      stack.push({ mod: pendingMod, gated: pendingGated });
+      stack.push({ mod: pendingMod, impl: pendingImpl, gated: pendingGated });
       pendingMod = null;
+      pendingImpl = null;
       pendingGated = false;
       i++;
       continue;
     }
     if (c === "}") { stack.pop(); i++; continue; }
-    if (c === ";") { pendingMod = null; i++; continue; }
+    if (c === ";") { pendingMod = null; pendingImpl = null; i++; continue; }
     if (isIdent(c) && !isIdent(text[i - 1] ?? " ")) {
       let j = i;
       while (j < n && isIdent(text[j])) j++;
@@ -167,7 +229,13 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
           pendingMod = m[1];
           pendingGated = cfgsBefore(text.lastIndexOf("\n", i) + 1).some((cfg) => cfg !== '#[cfg(not(target_arch = "wasm32"))]');
         }
-      } else if (word === "fn" && stack.every((frame) => frame.mod)) {
+      } else if (word === "impl" && stack.every((frame) => frame.mod)) {
+        const m = /^\s+([A-Z][A-Za-z0-9_]*)\s*\{/.exec(text.slice(j, j + 120));
+        if (m) {
+          pendingImpl = m[1];
+          pendingGated = cfgsBefore(text.lastIndexOf("\n", i) + 1).some((cfg) => cfg !== '#[cfg(not(target_arch = "wasm32"))]');
+        }
+      } else if (word === "fn" && itemScope()) {
         const m = /^\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(text.slice(j, j + 120));
         if (m) {
           // The signature runs to the body's `{` (or `;`) outside parentheses
@@ -184,8 +252,10 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
           const lineStart = text.lastIndexOf("\n", i) + 1;
           const head = text.slice(lineStart, i);
           const cfgs = cfgsBefore(lineStart);
-          const path = stack.map((frame) => frame.mod).join("::");
-          const key = path ? `${path}::${m[1]}` : m[1];
+          const impl = stack.length > 0 ? stack[stack.length - 1].impl : null;
+          const path = stack.filter((frame) => frame.mod).map((frame) => frame.mod).join("::");
+          const owner = impl ? (path ? `${path}::${impl}` : impl) : path;
+          const key = owner ? `${owner}::${m[1]}` : m[1];
           const list = fns.get(key) ?? [];
           list.push({
             pub: /\bpub\b/.test(head),
@@ -195,6 +265,8 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
             // `not(target_arch = "wasm32")`), here or on an enclosing module.
             gated: cfgs.some((cfg) => cfg !== '#[cfg(not(target_arch = "wasm32"))]') || stack.some((frame) => frame.gated),
             path,
+            // The inherent impl's type for a method (`Self` and the receiver).
+            selfType: impl,
           });
           fns.set(key, list);
           i = k;
@@ -263,6 +335,24 @@ const declarationOf = (rustPath, seen = new Set()) => {
 for (const key of fns.keys()) {
   if (/^jet_(?:decimal|fraction)_[a-z0-9_]+$/.test(key)) addRoute(key, false, `core.precise.${key.slice(4)}`);
   else if (/^jet_math_[A-Z][A-Za-z0-9]*_[a-z0-9_]+$/.test(key)) addRoute(key, false, `core.math.${key.slice(9)}`);
+}
+
+// Every other Prelude symbol the TIR -> MIR lowering spells as a literal
+// (handle-method, DataTree, HTTP request and Core-type associated rows written
+// as `("Type", "member") => "symbol"` arms rather than registry rows) that
+// names a runtime function. MIRRust.rs calls such a row's symbol with its
+// arguments and widens an Int result from the kernel word, as for the handle
+// rows above. A symbol a family above already lists keeps its own row.
+{
+  const tirDir = `${repo}/crates/jet-codegen/src/Codegen/TIR`;
+  const spelled = /^(?:[a-z_][a-z0-9_]*::)*(?:jet_[a-z0-9_]+|[A-Z][A-Za-z0-9_]*::[a-z_][a-z0-9_]*)$/;
+  for (const file of readdirSync(tirDir, { recursive: true }).filter((f) => f.endsWith(".rs")).sort()) {
+    for (const m of readFileSync(`${tirDir}/${file}`, "utf8").matchAll(/"([A-Za-z_][A-Za-z0-9_:]*)"/g)) {
+      const symbol = m[1];
+      if (routes.has(symbol) || !spelled.test(symbol) || !fns.has(symbol)) continue;
+      addRoute(symbol, true, `TIR/${file}`);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -385,7 +475,11 @@ function paramCarrier(ty, path) {
   const tag = tagCarrier(ty, path);
   if (tag) return one(tag.jet, "i64", tag.read);
   // An exact Int by value: the borrowed carrier word, cloned into an owner.
-  if (/^(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty)) return one("Word", "i64", (a) => `unsafe { ${qualify(ty, path)}::clone_from_raw(${a}) }`);
+  // The exact Int is spelled from the crate root wherever its kernel names it.
+  if (/^(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty)) return one("Word", "i64", (a) => `unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(${a}) }`);
+  // A borrowed exact Int (an exact_prelude_adapter kernel): an owner of the
+  // same carrier word, lent for the call.
+  if (/^&(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty)) return one("Word", "i64", (a) => `&unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(${a}) }`);
   const list = /^(&?)(?:\[(.+)\]|Vec<(.+)>)$/.exec(ty);
   if (list && (list[1] === "&" || list[3])) {
     const element = elementCarrier(list[2] ?? list[3]);
@@ -576,19 +670,28 @@ const skipped = [];
 const exported = new Set(handExports);
 const handles = new Map();
 for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]))) {
-  const name = symbol.split("::").pop();
-  const path = symbol.includes("::") ? symbol.split("::").slice(0, -1).join("::") : "";
+  // An exact-Int adapted symbol calls its owned kernel (MIRRust.rs
+  // call_symbol_for_function); the route keeps the symbol.
+  const target = exactAdapters.get(symbol) ?? symbol;
+  const segments = symbol.split("::");
+  // A method's export names its type too (`JetDateTime::date` -> `JetDateTime_date`).
+  const name = segments.length > 1 && /^[A-Z]/.test(segments[segments.length - 2]) ? segments.slice(-2).join("_") : segments[segments.length - 1];
   const label = route.rows[0];
   if (handExports.has(name)) continue;
   if (exported.has(name)) { skipped.push(`${symbol} (${label}): export name taken`); continue; }
-  const all = (fns.get(symbol) ?? []).filter((def) => !def.wasmOnly);
+  const all = (fns.get(target) ?? []).filter((def) => !def.wasmOnly);
   if (all.length === 0) { skipped.push(`${symbol} (${label}): no runtime function`); continue; }
   const defs = all.filter((def) => !def.gated);
   if (defs.length === 0) { skipped.push(`${symbol} (${label}): platform-gated`); continue; }
   if (new Set(defs.map((def) => def.sig)).size !== 1) { skipped.push(`${symbol} (${label}): cfg-dependent signature`); continue; }
   const def = defs[0];
+  const path = def.path;
   if (path && !def.pub) { skipped.push(`${symbol} (${label}): not public in ${path}`); continue; }
-  const sig = parseSignature(def.sig);
+  // A method's receiver is its first parameter; `Self` is the impl's type.
+  const selfSig = def.selfType
+    ? def.sig.replace(/\((\s*)(&\s*mut\s+|&\s*|mut\s+)?self\b/, (_, space, ref) => `(${space}self: ${(ref ?? "").replace(/^mut\s+$/, "")}Self`).replace(/\bSelf\b/g, def.selfType)
+    : def.sig;
+  const sig = parseSignature(selfSig);
   if (!sig) { skipped.push(`${symbol} (${label}): unparsed signature ${def.sig}`); continue; }
   if (sig.generics) { skipped.push(`${symbol} (${label}): generic`); continue; }
   const params = splitTop(sig.params).map((param) => {
@@ -605,7 +708,7 @@ for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]
     else handles.set(handle.name, handle.full);
   }
   if (!exported.has(name)) continue;
-  adapters.push({ symbol, name, label, params, result, rows: route.rows });
+  adapters.push({ symbol, target, name, label, params, result, rows: route.rows });
 }
 
 // Core types the runtime holds natively: the Jet name -> native Rust type
@@ -621,19 +724,6 @@ const syntaxConstants = new Map();
     for (const m of readFileSync(file, "utf8").matchAll(/pub const ([A-Z][A-Z0-9_]*): &str = "([^"]*)";/g)) syntaxConstants.set(m[1], m[2]);
   }
 }
-// The body of `fn name(` in Rust `source`, through its matching brace.
-const fnBody = (source, name) => {
-  const at = source.search(new RegExp(`\\bfn ${name}\\(`));
-  if (at < 0) throw new Error(`gen-c-abi-routes: no fn ${name}`);
-  const open = source.indexOf("{", at);
-  let depth = 0;
-  for (let k = open; k < source.length; k++) {
-    if (source[k] === '"') { k++; while (source[k] !== '"') k += source[k] === "\\" ? 2 : 1; continue; }
-    if (source[k] === "{") depth++;
-    else if (source[k] === "}" && --depth === 0) return source.slice(open + 1, k);
-  }
-  throw new Error(`gen-c-abi-routes: unterminated fn ${name}`);
-};
 // The `"A" | "B" => Some("T")` and `n if n == Syntax::A || n == "B" => Some("T")`
 // arms of one name table (`Some(name)` maps a name to itself).
 const nameTable = (source, name) => {
@@ -652,7 +742,6 @@ const nameTable = (source, name) => {
 };
 const contextRs = readFileSync(`${repo}/crates/jet-codegen/src/Codegen/Context.rs`, "utf8");
 const predicatesRs = readFileSync(`${repo}/crates/jet-foundation/src/Syntax/predicates.rs`, "utf8");
-const mirRustRs = readFileSync(`${repo}/crates/jet-codegen/src/Codegen/MIRRust.rs`, "utf8");
 // MIRRust.rs `rust_apply_type`'s own argument-free spellings
 // (`if name.name == X { return <root path> }`), checked before every table
 // against the name as written (a canonical Core name never matches them).
@@ -863,7 +952,7 @@ for (const adapter of adapters) {
   }));
   for (const out of adapter.result.outs) params.push(`${out.name}: *mut ${out.cty}`);
   const ret = adapter.result.ret ? ` -> ${adapter.result.ret}` : "";
-  const call = `crate::${adapter.symbol}(${adapter.params.map((param, index) => param.expr(names[index])).join(", ")})`;
+  const call = `crate::${adapter.target}(${adapter.params.map((param, index) => param.expr(names[index])).join(", ")})`;
   rs.push("");
   rs.push(`    /// ${adapter.rows.join(", ")}`);
   rs.push("    #[no_mangle]");
