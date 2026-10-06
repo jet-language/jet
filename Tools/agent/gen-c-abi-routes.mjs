@@ -151,6 +151,7 @@ const text = readFileSync(runtimePath, "utf8");
 const fns = new Map(); // "path::name" -> [{ pub, sig, wasmOnly, gated, path }]
 const types = new Map(); // "path::Name" -> [{ visible, generic, gated, derives }] (module-level struct / enum)
 const globs = new Map(); // module path -> [module paths it glob-imports (`use <module>::*;`)]
+const renames = new Map(); // "path::Alias" -> "path::Name" (`use path::{Name as Alias}`)
 // The attribute lines (`#[...]`) on the item whose line starts at `lineStart`
 // (the attribute and doc-comment lines directly above it).
 const attributesBefore = (lineStart) => {
@@ -295,17 +296,31 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
           types.set(key, list);
         }
       } else if (word === "use" && stack.every((frame) => frame.mod)) {
-        const m = /^\s+((?:[a-z_][a-z0-9_]*::)*)\*\s*;/.exec(text.slice(j, j + 120));
-        if (m) {
-          const here = stack.map((frame) => frame.mod);
-          const target = m[1].split("::").filter(Boolean);
+        const here = stack.map((frame) => frame.mod);
+        // A `use` path (relative to this module unless `crate::`), as a
+        // module path from the crate root.
+        const resolve = (prefix) => {
+          const target = prefix.split("::").filter(Boolean);
           const base = target[0] === "crate" ? [] : [...here];
           for (const segment of target[0] === "crate" ? target.slice(1) : target) {
             if (segment === "super") base.pop();
             else if (segment !== "self") base.push(segment);
           }
+          return base;
+        };
+        const m = /^\s+((?:[a-z_][a-z0-9_]*::)*)\*\s*;/.exec(text.slice(j, j + 120));
+        if (m) {
           const key = here.join("::");
-          globs.set(key, [...(globs.get(key) ?? []), base.join("::")]);
+          globs.set(key, [...(globs.get(key) ?? []), resolve(m[1]).join("::")]);
+        }
+        // Renamed imports (`use super::{JetTempDirOwner as TempDir, ...};`).
+        const renamed = /^\s+((?:[a-z_][a-z0-9_]*::)*)(?:\{([^{}]*)\}|([A-Z][A-Za-z0-9_]*\s+as\s+[A-Z][A-Za-z0-9_]*))\s*;/.exec(text.slice(j, j + 2000));
+        if (renamed) {
+          const base = resolve(renamed[1]);
+          for (const entry of (renamed[2] ?? renamed[3]).split(",")) {
+            const rename = /^\s*([A-Z][A-Za-z0-9_]*)\s+as\s+([A-Z][A-Za-z0-9_]*)\s*$/.exec(entry);
+            if (rename) renames.set([...here, rename[2]].join("::"), [...base, rename[1]].join("::"));
+          }
         }
       }
       i = j;
@@ -316,10 +331,11 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
 }
 
 // The declaration a runtime type path names: `{ key, decls }` for the item at
-// that module path, or one a module's glob import (`use super::*;`,
-// `pub(crate) use jet_sync::*;`) brings in; null if none.
+// that module path, one a renamed import names, or one a module's glob import
+// (`use super::*;`, `pub(crate) use jet_sync::*;`) brings in; null if none.
 const declarationOf = (rustPath, seen = new Set()) => {
   if (types.has(rustPath)) return { key: rustPath, decls: types.get(rustPath) };
+  if (renames.has(rustPath)) return declarationOf(renames.get(rustPath), seen);
   const segments = rustPath.split("::");
   const name = segments.pop();
   const module = segments.join("::");
@@ -462,6 +478,17 @@ function elementCarrier(ty) {
   return null;
 }
 
+// A List parameter element of a cloneable runtime type: each slot word is a
+// borrowed handle, cloned into the Rust Vec (the lowering lends a handle per
+// element: a record element converts through Records.jet for the call).
+function handleElement(ty, path) {
+  if (!opaqueName.test(ty) || tagCarrier(ty, path)) return null;
+  const name = opaqueName.exec(ty)[1];
+  const full = qualify(ty, path);
+  if (name === "String" || name === "Self" || !derivesClone(full)) return null;
+  return { jet: `Handle{name: "${name}"}`, read: `unsafe { &*(w as *const ${full}) }.clone()`, handle: { name, full } };
+}
+
 // Parameter carrier: { jet, ctys: [C types], expr(names) } or null. A List
 // parameter is two words: its slot data pointer and its length.
 function paramCarrier(ty, path) {
@@ -470,6 +497,10 @@ function paramCarrier(ty, path) {
   if (ty === "&str") return one("Text", "JetCString", (a) => `view(${a})`);
   if (ty === "&String") return one("Text", "JetCString", (a) => `unsafe { &*${a} }`);
   if (ty === "String") return one("Text", "JetCString", (a) => `view(${a}).to_owned()`);
+  if (ty === "&i64") return one("Word", "i64", (a) => `&${a}`);
+  // The prelude Ordering (by value or borrowed): the Jet enum's variant index.
+  const ordering = /^(&?)__jet_Ordering$/.exec(ty);
+  if (ordering) return one(`Tag{name: "Ordering", variants: "Less,Equal,Greater"}`, "i64", (a) => `${ordering[1]}match ${a} { 0 => crate::__jet_Ordering::__jet_Less, 1 => crate::__jet_Ordering::__jet_Equal, 2 => crate::__jet_Ordering::__jet_Greater, _ => range_stop() }`);
   if (ty === "i64") return one("Word", "i64", (a) => a);
   if (fixedInts.has(ty)) return one("Word", "i64", (a) => `fixed::<${ty}>(${a})`);
   if (ty === "bool") return one("Flag", "u8", (a) => `${a} != 0`);
@@ -486,10 +517,10 @@ function paramCarrier(ty, path) {
   if (/^&(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty)) return one("Word", "i64", (a) => `&unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(${a}) }`);
   const list = /^(&?)(?:\[(.+)\]|Vec<(.+)>)$/.exec(ty);
   if (list && (list[1] === "&" || list[3])) {
-    const element = elementCarrier(list[2] ?? list[3]);
+    const element = elementCarrier(list[2] ?? list[3]) ?? handleElement(list[2] ?? list[3], path);
     if (!element) return null;
     const items = (d, n) => `list_in(${d}, ${n}, |w| ${element.read})`;
-    return { jet: `List{elem: LowerRouteCarrier.${element.jet}}`, ctys: ["*const u64", "i64"], expr: ([d, n]) => (list[1] === "&" ? `&${items(d, n)}` : items(d, n)) };
+    return { jet: `List{elem: LowerRouteCarrier.${element.jet}}`, ctys: ["*const u64", "i64"], expr: ([d, n]) => (list[1] === "&" ? `&${items(d, n)}` : items(d, n)), handle: element.handle };
   }
   // A mutably borrowed handle: the adapter mutates the runtime value in the
   // caller's own box (the lowering lends the handle of its Write place).
@@ -530,6 +561,8 @@ function valueCarrier(ty, path, nativeInt) {
   if (ty === "bool") return { jet: "Flag", cty: "bool", wrap: (v) => v };
   if (ty === "f64") return { jet: "Float", cty: "f64", wrap: (v) => v };
   if (ty === "char") return { jet: "Word", cty: "i64", wrap: (v) => `(${v}) as i64` };
+  // The prelude Ordering: the Jet enum's variant index (Less, Equal, Greater).
+  if (ty === "__jet_Ordering") return { jet: `Tag{name: "Ordering", variants: "Less,Equal,Greater"}`, cty: "i64", wrap: (v) => `match ${v} { crate::__jet_Ordering::__jet_Less => 0, crate::__jet_Ordering::__jet_Equal => 1, crate::__jet_Ordering::__jet_Greater => 2 }` };
   // An owned exact Int: its carrier word, ownership passing to the caller.
   if (/^(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty)) return { jet: "Word", cty: "i64", wrap: (v) => `(${v}).into_raw()` };
   if (opaqueName.test(ty)) {
@@ -596,18 +629,33 @@ function parseSignature(sig) {
 function resultShape(ty, path, nativeInt) {
   ty = (ty ?? "()").replace(/\s+/g, "");
   if (ty === "!") ty = "()";
-  const generic = /^(Option|Result)<(.*)>$/.exec(ty);
+  // `JetOutcome<T, JetAbsent>` (= `Result<T, JetAbsent>`) is generated Rust's
+  // `T?`: it crosses as an Option.
+  const outcome = /^(?:(?:[a-z_][a-z0-9_]*::)*JetOutcome|Result)<(.*),JetAbsent>$/.exec(ty);
+  const generic = outcome ? [ty, "Option", outcome[1]] : /^(Option|Result)<(.*)>$/.exec(ty);
+  const [somePattern, nonePattern] = outcome ? ["Ok", "Err(_)"] : ["Some", "None"];
+  // A List result element: a plain slot word, or a new owned handle of a
+  // runtime value (the lowering's List keeps the handles as its elements).
+  const resultElement = (t) => {
+    const plain = elementCarrier(t);
+    if (plain) return plain;
+    if (!opaqueName.test(t) || tagCarrier(t, path)) return null;
+    const name = opaqueName.exec(t)[1];
+    if (name === "String" || name === "Self") return null;
+    const full = qualify(t, path);
+    return { jet: `Handle{name: "${name}"}`, write: "Box::into_raw(Box::new(e)) as u64", handle: { name, full } };
+  };
   const listOf = (t) => {
     const list = /^Vec<(.+)>$/.exec(t);
-    return list ? elementCarrier(list[1]) : null;
+    return list ? resultElement(list[1]) : null;
   };
   const list = /^Vec<(.+)>$/.exec(ty);
   if (list) {
     // A List result: its length, with its slot buffer written to `data`.
-    const element = elementCarrier(list[1]);
+    const element = resultElement(list[1]);
     if (!element) return null;
     return {
-      jet: `Plain{carrier: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "data", cty: "*mut u64" }], handles: [],
+      jet: `Plain{carrier: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "data", cty: "*mut u64" }], handles: element.handle ? [element.handle] : [],
       body: (call) => `list_out(${call}.into_iter().map(|e| ${element.write}).collect(), data)`,
     };
   }
@@ -636,15 +684,15 @@ function resultShape(ty, path, nativeInt) {
     const element = listOf(args[0]);
     if (element) {
       return {
-        jet: `Option{some: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "some", cty: "*mut u64" }, { name: "some_len", cty: "i64" }], handles: [],
-        body: (call) => `match ${call} {\n            ${listArm("some", element, "Some", 1)}\n            None => 0,\n        }`,
+        jet: `Option{some: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "some", cty: "*mut u64" }, { name: "some_len", cty: "i64" }], handles: element.handle ? [element.handle] : [],
+        body: (call) => `match ${call} {\n            ${listArm("some", element, somePattern, 1)}\n            ${nonePattern} => 0,\n        }`,
       };
     }
     const v = valueCarrier(args[0], path, nativeInt);
     if (!v || !v.cty) return null;
     return {
       jet: `Option{some: LowerRouteCarrier.${v.jet}}`, ret: "i64", outs: [{ name: "some", cty: v.cty }], handles: v.handle ? [v.handle] : [],
-      body: (call) => `match ${call} {\n            Some(value) => { unsafe { some.write(${v.wrap("value")}) }; 1 }\n            None => 0,\n        }`,
+      body: (call) => `match ${call} {\n            ${somePattern}(value) => { unsafe { some.write(${v.wrap("value")}) }; 1 }\n            ${nonePattern} => 0,\n        }`,
     };
   }
   if (args.length !== 2) return null;
@@ -661,7 +709,7 @@ function resultShape(ty, path, nativeInt) {
     : ok.cty ? `Ok(value) => { unsafe { ok.write(${ok.wrap("value")}) }; 1 }` : "Ok(()) => 1,";
   const okJet = okList ? `List{elem: LowerRouteCarrier.${okList.jet}}` : ok.jet;
   return {
-    jet: `Result{ok: LowerRouteCarrier.${okJet}, err: LowerRouteCarrier.${err.jet}}`, ret: "i64", outs, handles: [ok?.handle, err.handle].filter(Boolean),
+    jet: `Result{ok: LowerRouteCarrier.${okJet}, err: LowerRouteCarrier.${err.jet}}`, ret: "i64", outs, handles: [ok?.handle, okList?.handle, err.handle].filter(Boolean),
     body: (call) => `match ${call} {\n            ${okArm}\n            Err(error) => { unsafe { err.write(${err.wrap("error")}) }; 0 }\n        }`,
   };
 }
@@ -815,7 +863,8 @@ const handleOf = (rustPath) => {
   if (!found || found.decls.length !== 1) return null;
   const [decl] = found.decls;
   if (!decl.visible || decl.generic || decl.gated) return null;
-  return { name, full: `crate::${found.key}` };
+  // A renamed import names the declaration's own type.
+  return { name: found.key.split("::").pop(), full: `crate::${found.key}` };
 };
 // Every Jet name of a native handle type: the table names, plus the canonical
 // name of each Core source type that resolves to a native type.
@@ -1091,6 +1140,40 @@ for (const [name, members] of [...recordMembers].sort((a, b) => a[0].localeCompa
     rs.push("    }");
   }
 }
+// Field places of a handle struct (one the lowering keeps as a runtime handle,
+// e.g. TempDir's `path`): jet_rt_handle_field_<R>_<field>(h) is the address of
+// the field inside the runtime value, lent while `h` lives. A String or a
+// nested handle is that address as a borrowed handle; a Float or a Bool is
+// its storage. The lowering reads (never writes or moves) through it.
+const handleFields = [];
+for (const [name, full] of handleRows) {
+  if (recordMembers.has(name)) continue;
+  const decl = recordDecl(full);
+  if (!decl || decl.kind !== "struct") continue;
+  for (const item of decl.items) {
+    const field = /^(pub(?:\([a-z]+\))?\s+)?([a-z_][a-z0-9_]*)\s*:\s*([\s\S]+)$/.exec(item);
+    if (!field || (decl.path && !field[1])) continue;
+    const ty = field[3].replace(/\s+/g, "");
+    let kind = null;
+    let pointee = null;
+    if (ty === "String") { kind = "Text"; pointee = "String"; }
+    else if (ty === "f64") { kind = "Float"; pointee = "f64"; }
+    else if (ty === "bool") { kind = "Flag"; pointee = "bool"; }
+    else if (opaqueName.test(ty) && !tagCarrier(ty, decl.path)) {
+      const nested = opaqueName.exec(ty)[1];
+      const held = handles.get(nested);
+      if (held && declarationOf(held.replace(/^crate::/, ""))?.key === declarationOf(qualify(ty, decl.path).replace(/^crate::/, ""))?.key) { kind = `Handle.${nested}`; pointee = held; }
+    }
+    if (!kind) continue;
+    handleFields.push({ name, field: field[2], kind });
+    rs.push("");
+    rs.push("    #[no_mangle]");
+    rs.push(`    pub extern "C" fn jet_rt_handle_field_${name}_${field[2]}(value: *mut ${full}) -> *const ${pointee} {`);
+    rs.push("        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.");
+    rs.push(`        unsafe { std::ptr::addr_of!((*value).${field[2]}) }`);
+    rs.push("    }");
+  }
+}
 for (const adapter of adapters) {
   const params = [];
   const names = adapter.params.map((param, index) => param.ctys.map((cty, k) => {
@@ -1180,6 +1263,22 @@ jet.push("// Int, Flag, Float, Tag.<enum>, Rec.<record>, Opt<kind>).");
 jet.push("LOWER_GENERATED_RECORDS :: prep { [LowerRecordSchema]{");
 for (const schema of recordSchemas) jet.push(`    LowerRecordSchema{jet_name: "${schema.name}", variants: "${schema.variants}", fields: "${schema.fields}"},`);
 jet.push("} }");
+jet.push("");
+jet.push("// Fields of runtime handle structs readable in place (Places.jet):");
+jet.push("// `jet_rt_handle_field_<runtime>_<field>(h)` lends the field's address; kind is");
+jet.push("// Text, Float, Flag or Handle.<runtime>.");
+jet.push("pub struct LowerHandleField { pub runtime: String, pub field: String, pub kind: String }");
+jet.push("");
+jet.push("LOWER_HANDLE_FIELDS :: prep { [LowerHandleField]{");
+for (const row of handleFields) jet.push(`    LowerHandleField{runtime: "${row.name}", field: "${row.field}", kind: "${row.kind}"},`);
+jet.push("} }");
+jet.push("");
+jet.push("pub fn lower_handle_field(runtime: String, field: String) -> LowerHandleField? {");
+jet.push("    loop row in LOWER_HANDLE_FIELDS {");
+jet.push("        if row.runtime == runtime && row.field == field -> return Val(~row)");
+jet.push("    }");
+jet.push("    None");
+jet.push("}");
 jet.push("// END GENERATED C-ABI ROUTES");
 
 const outputs = [[rsOut, rs.join("\n") + "\n"], [jetOut, jet.join("\n") + "\n"]];

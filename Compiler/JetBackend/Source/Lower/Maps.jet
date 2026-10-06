@@ -206,6 +206,10 @@ fn lower_map_index_write(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
                 if position < count - 1 -> &prefix.push(projection)
             }
             walked :: lower_walk_place(p, &m, &f, root, c.slots[slot].ty, prefix) ?? return true
+            if walked.borrowed {
+                lower_fail(&m, &f, "writing through a field of runtime handle is not lowered at O0 yet")
+                return true
+            }
             header = lower_address(&f, walked.address.base, walked.address.offset)
             map_ty = walked.ty
         }

@@ -254,6 +254,99 @@ fn lower_record_store_from_slot(p: MIRProgram, m: &LowerModule, f: &LowerFunctio
     lower_emit(&f, LIRInst.Drop{value: handle})
 }
 
+// A List of records crosses a route as a buffer of borrowed runtime handles,
+// one per element ("list.record_handles"), freed with its handles after the
+// call ("list.record_handles_free"); the adapter clones each one.
+fn lower_record_list_element(p: MIRProgram, ty: MIRType, carrier: LowerRouteCarrier) -> MIRType? {
+    if carrier == .List(elem) {
+        if elem == .Handle(name) {
+            element :: lower_list_element(ty) ?? return None
+            if lower_record_handle(p, element) == .Val(runtime) {
+                if runtime == name -> return Val(element)
+            }
+        }
+    }
+    None
+}
+
+// A List of records lent to a route: its type, handle buffer and length.
+struct LowerRecordList {
+    pub ty: MIRType
+    pub buffer: LIRValueID
+    pub length: LIRValueID
+}
+
+// A counted loop over 0..<count: `lower_record_loop_start` leaves its body
+// block open; `lower_record_loop_end` closes it and continues after the loop.
+struct LowerRecordLoop {
+    pub head: LIRBlockID
+    pub done: LIRBlockID
+    pub index: LIRValueID
+}
+
+fn lower_record_loop_start(f: &LowerFunction, count: LIRValueID) -> LowerRecordLoop Never! {
+    zero :: lower_const(&f, 0)
+    head :: lower_new_block(&f)
+    body :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{zero})})
+    index :: lower_word(&f)
+    lower_start(&f, head, [LIRValueID]{index})
+    more :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Lt, left: index, right: count})
+    lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, body, [LIRValueID]{})
+    LowerRecordLoop{head: head, done: done, index: index}
+}
+
+fn lower_record_loop_end(f: &LowerFunction, counted: LowerRecordLoop) Never! {
+    next_index :: lower_word(&f)
+    one :: lower_const(&f, 1)
+    lower_emit(&f, LIRInst.Binary{dst: next_index, op: LIRBinaryOp.Add, left: counted.index, right: one})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(counted.head, [LIRValueID]{next_index})})
+    lower_start(&f, counted.done, [LIRValueID]{})
+}
+
+// "list.record_handles" (List header) -> buffer of one new handle per element.
+fn lower_helper_record_handles(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
+    list :: ~f.open_params[0]
+    elem :: lower_list_element(glue.ty) ?? panic("list.record_handles helper has no List type")
+    length :: lower_list_word(&f, list, 0)
+    buffer :: lower_list_buffer(&m, &f, length, 8)
+    data :: lower_list_data(&f, list)
+    stride :: lower_list_stride(p, elem)
+    counted :: lower_record_loop_start(&f, length)
+    address :: lower_list_address(&f, data, counted.index, stride)
+    value :: lower_read_at(p, &f, address, 0, elem) ?? panic("a record element has storage")
+    handle :: lower_pointer(&f)
+    lower_call_helper(&m, &f, "record.out", elem, [LIRValueID]{value}, Val(handle))
+    slot :: lower_list_address(&f, buffer, counted.index, 8)
+    lower_emit(&f, LIRInst.Store{base: slot, offset: 0, value: handle})
+    lower_record_loop_end(&f, counted)
+    lower_seal(&f, LIRTerminator.Return{value: Val(buffer)})
+    lir_builder_finish(f.builder)
+}
+
+// "list.record_handles_free" (buffer, length): drops each handle, then frees
+// the buffer.
+fn lower_helper_record_handles_free(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_word()}, None)
+    buffer :: ~f.open_params[0]
+    length :: ~f.open_params[1]
+    elem :: lower_list_element(glue.ty) ?? panic("list.record_handles_free helper has no List type")
+    runtime :: lower_record_handle(p, elem) ?? panic("list.record_handles_free is requested for record Lists")
+    counted :: lower_record_loop_start(&f, length)
+    slot :: lower_list_address(&f, buffer, counted.index, 8)
+    handle :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_{runtime}"}, None)
+    lower_emit(&f, LIRInst.Load{dst: handle, base: slot, offset: 0})
+    lower_emit(&f, LIRInst.Drop{value: handle})
+    lower_record_loop_end(&f, counted)
+    lower_list_free_buffer(&m, &f, buffer, length, 8)
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
 // ---------------------------------------------------------------------------
 // Generated helpers.
 
