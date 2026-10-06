@@ -98,6 +98,26 @@ pub fn jet_std_math_abs_f32(value: f32) -> f32 {
     value.abs()
 }
 
+// Float builtin-method lowering still targets these symbols. The public Jet
+// scalar implementations do not use these policy-free predicate operations.
+pub fn jet_std_math_is_nan(value: f64) -> bool { value.is_nan() }
+pub fn jet_std_math_is_infinite(value: f64) -> bool { value.is_infinite() }
+pub fn jet_std_math_is_finite(value: f64) -> bool { value.is_finite() }
+
+// core_source_owns retains cmp on the compiler route pending its paired cutover.
+pub fn jet_std_math_cmp(a: f64, b: f64) -> i64 {
+    match a.partial_cmp(&b) {
+        Some(std::cmp::Ordering::Less) => -1,
+        Some(std::cmp::Ordering::Equal) => 0,
+        Some(std::cmp::Ordering::Greater) => 1,
+        None => {
+            if a.is_nan() && b.is_nan() { 0 }
+            else if a.is_nan() { 1 }
+            else { -1 }
+        }
+    }
+}
+
 
 
 

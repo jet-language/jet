@@ -62,6 +62,20 @@ fn jet_eval_route_core_math(row: MIRCoreCall, data: [TComptimeValue], args: [Jet
             bits :: jet_eval_route_core_wrapping_bits(data[0], &machine, span) ?? return None
             Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Float{value: math.from_bits(bits), bits: 64}})
         }
+        "jet_std_math_cmp" -> {
+            left :: jet_eval_route_core_float(data, 0, &machine, span) ?? return None
+            right :: jet_eval_route_core_float(data, 1, &machine, span) ?? return None
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: math.cmp(left, right)}})
+        }
+        "jet_std_math_is_nan" | "jet_std_math_is_infinite" | "jet_std_math_is_finite" -> {
+            number :: jet_eval_route_core_float(data, 0, &machine, span) ?? return None
+            flag :: if {
+                symbol == "jet_std_math_is_nan" -> math.is_nan(number)
+                symbol == "jet_std_math_is_infinite" -> math.is_inf(number)
+                else -> math.is_finite(number)
+            }
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: flag}})
+        }
         "jet_std_math_sin" | "jet_std_math_cos" | "jet_std_math_tan" | "jet_std_math_asin" | "jet_std_math_acos" | "jet_std_math_atan" | "jet_std_math_sinh" | "jet_std_math_cosh" | "jet_std_math_tanh" -> jet_eval_route_core_float_result(jet_eval_route_core_unary(symbol, jet_eval_route_core_float(data, 0, &machine, span) ?? return None))
         "jet_std_math_exp" | "jet_std_math_ln" | "jet_std_math_log2" | "jet_std_math_log10" | "jet_std_math_acosh" | "jet_std_math_asinh" | "jet_std_math_atanh" | "jet_std_math_cbrt" | "jet_std_math_exp2" | "jet_std_math_exp_m1" | "jet_std_math_ln_1p" -> jet_eval_route_core_float_result(jet_eval_route_core_unary(symbol, jet_eval_route_core_float(data, 0, &machine, span) ?? return None))
         "jet_std_math_floor" | "jet_std_math_ceil" | "jet_std_math_trunc" | "jet_std_math_sqrt" -> jet_eval_route_core_float_result(jet_eval_route_core_unary(symbol, jet_eval_route_core_float(data, 0, &machine, span) ?? return None))

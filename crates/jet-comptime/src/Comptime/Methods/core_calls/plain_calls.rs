@@ -390,6 +390,12 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
             ),
             _ => Err(unsupported("core.math.clamp: non-numeric arguments", span)),
         },
+        ("core.math", "cmp") => Ok(CtValue::Int(math_lib_pure::jet_std_math_cmp(
+            as_float(one(0)?, span)?, as_float(one(1)?, span)?,
+        ))),
+        ("core.math", "is_finite") => Ok(CtValue::Bool(
+            math_lib_pure::jet_std_math_is_finite(as_float(one(0)?, span)?),
+        )),
         ("core.math", "log2") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.log2())),
         ("core.math", "log10") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.log10())),
         // card #392 gap fix: the rest of `core.math` — mechanical ports of

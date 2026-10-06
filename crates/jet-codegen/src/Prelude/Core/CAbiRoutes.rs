@@ -13441,6 +13441,17 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std_math_ln_1p(a0))
     }
 
+    /// Predicate adapters retained for Float builtin-method lowering.
+    #[no_mangle]
+    pub extern "C" fn jet_std_math_is_nan(a0: f64) -> bool { guard(|| crate::jet_std_math_is_nan(a0)) }
+    #[no_mangle]
+    pub extern "C" fn jet_std_math_is_infinite(a0: f64) -> bool { guard(|| crate::jet_std_math_is_infinite(a0)) }
+    #[no_mangle]
+    pub extern "C" fn jet_std_math_is_finite(a0: f64) -> bool { guard(|| crate::jet_std_math_is_finite(a0)) }
+    #[no_mangle]
+    pub extern "C" fn jet_std_math_cmp(a0: f64, a1: f64) -> i64 {
+        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_std_math_cmp(a0, a1)))
+    }
 
     /// core.math.log10
     #[no_mangle]
