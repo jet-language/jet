@@ -1205,10 +1205,10 @@ fn lower_list_min_max(
     )
 }
 
-fn lower_consuming_task_value(ctx: &mut LowerCtx, value: &TExpr) -> Result<MirValueId, LowerError> {
+fn lower_consuming_value(ctx: &mut LowerCtx, value: &TExpr) -> Result<MirValueId, LowerError> {
     if let Some(place) = lower_receiver_place(ctx, value, MirAccess::Move)? {
         return ctx.emit(
-            "task-consuming-value",
+            "consuming-value",
             Some(value.ty.clone()),
             MirOperation::MovePlace { place },
         );
@@ -2195,7 +2195,7 @@ pub(super) fn lower_expr(
             editable,
         } => {
             let path = ctx.shared_guard_field_path(&guard.ty, path)?;
-            let guard = ctx.lower_child(guard)?;
+            let guard = lower_consuming_value(ctx, guard)?;
             let call = ctx.intern_prelude_route(super::shared_guard_map_route(
                 *editable, &expr.ty, &carrier,
             )?)?;
@@ -2218,7 +2218,7 @@ pub(super) fn lower_expr(
         } => {
             let first = ctx.shared_guard_field_path(&guard.ty, first)?;
             let second = ctx.shared_guard_field_path(&guard.ty, second)?;
-            let guard = ctx.lower_child(guard)?;
+            let guard = lower_consuming_value(ctx, guard)?;
             let map_call = ctx.intern_prelude_route(super::shared_guard_map_route(
                 *editable, &expr.ty, &carrier,
             )?)?;
@@ -2243,7 +2243,7 @@ pub(super) fn lower_expr(
             condition,
             predicate,
         } => {
-            let guard = ctx.lower_child(guard)?;
+            let guard = lower_consuming_value(ctx, guard)?;
             let condition = ctx.lower_child(condition)?;
             let predicate = ctx.lower_lambda(predicate)?;
             let call =
@@ -3863,7 +3863,7 @@ pub(super) fn lower_expr(
                 &tasks.ty,
                 &carrier,
             ))?;
-            let tasks = vec![lower_consuming_task_value(ctx, tasks)?];
+            let tasks = vec![lower_consuming_value(ctx, tasks)?];
             ctx.emit(
                 "task-group-all",
                 Some(expr.ty.clone()),
@@ -3880,7 +3880,7 @@ pub(super) fn lower_expr(
                 &tasks.ty,
                 &carrier,
             ))?;
-            let tasks = vec![lower_consuming_task_value(ctx, tasks)?];
+            let tasks = vec![lower_consuming_value(ctx, tasks)?];
             ctx.emit(
                 "task-group-race",
                 Some(expr.ty.clone()),
@@ -3897,7 +3897,7 @@ pub(super) fn lower_expr(
                 &tasks.ty,
                 &carrier,
             ))?;
-            let tasks = vec![lower_consuming_task_value(ctx, tasks)?];
+            let tasks = vec![lower_consuming_value(ctx, tasks)?];
             ctx.emit(
                 "task-group-any",
                 Some(expr.ty.clone()),
@@ -4396,7 +4396,7 @@ pub(super) fn lower_expr(
                     ));
                 }
                 let call = ctx.intern_prelude_route(op.prelude_route(&recv.ty, &carrier)?)?;
-                let receiver = lower_consuming_task_value(ctx, recv)?;
+                let receiver = lower_consuming_value(ctx, recv)?;
                 return ctx.emit(
                     "task-consume",
                     Some(expr.ty.clone()),

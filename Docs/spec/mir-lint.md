@@ -67,6 +67,11 @@ Every rule belongs to one family. The family name is part of the ICE text.
 | `ownership.move` | No value or place is used after it was moved on every path to the use, a value is consumed at most once, and only owned values are consumed. A write to a moved place or its parent restores it. A Bool local that is provably false (or true) on every path removes the branch edge it guards, and the same Bool facts are followed along each path out of a move: a place use is a second move only when some feasible path reaches it from the move without a restoring write (a cleanup move guarded by the drop flag the move cleared runs only where the place was refilled). Failure and unwind drop edges are entry points. |
 | `effect.row` | Every effect in a direct callee's solved row is in the caller's solved row, itself or through a parent effect (`FS` covers `FS.Write`), unless the caller's row is maximal. |
 
+Shared-guard `map`, `split`, and `wait` consume their source guard. Lowering a
+named guard therefore emits the same owned-place move as task consumption;
+the guard's cleanup flag clears before its scope exits. A plain `ReadPlace`
+is not a substitute for this ownership fact.
+
 ## Type kinds (23)
 
 | Kind | Rule |

@@ -353,6 +353,18 @@ fn mapped_and_split_guards_write_disjoint_fields_on_all_tiers() {
     with_compiler_stack(|| {
         assert_native_and_default(MAP_AND_SPLIT, "13\n10\n", "jet_shared_guard_projection")
     });
+    let named = MAP_AND_SPLIT
+        .replace(
+            "mapped := handle.guard_edit().map",
+            "guard :: handle.guard_edit()\n    mapped := ^guard.map",
+        )
+        .replace(
+            "(left, right) := handle.guard_edit().split",
+            "guard :: handle.guard_edit()\n    (left, right) := ^guard.split",
+        );
+    with_compiler_stack(|| {
+        assert_native_and_default(&named, "13\n10\n", "jet_shared_guard_named_projection")
+    });
 }
 
 #[test]

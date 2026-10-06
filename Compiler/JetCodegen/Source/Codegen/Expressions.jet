@@ -3304,7 +3304,7 @@ fn jet_codegen_lower_core_closure_call(builder: &JetCodegenBuilder, expression: 
 }
 
 fn jet_codegen_lower_shared_guard_wait(builder: &JetCodegenBuilder, expression: TExpr, guard: TExpr, condition: TExpr, predicate: TLambda) -> MIRValueID {
-    guard_value := jet_codegen_lower_expr(&builder, guard)
+    guard_value := jet_codegen_lower_consuming_value(&builder, guard)
     condition_value := jet_codegen_lower_expr(&builder, condition)
     predicate_value := jet_codegen_lower_lambda(&builder, predicate, false, "direct").value
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
@@ -6309,10 +6309,9 @@ fn jet_codegen_task_group_result_tasks(ty: Type) -> Bool Never! {
     }
 }
 
-// Rust `lower_consuming_task_value`: a task handle in a local moves out of
-// the local's own place row (retained at Move, as `.Move(Local)` does), so its
-// drop flag clears and scope exit does not move it a second time.
-fn jet_codegen_lower_consuming_task_value(builder: &JetCodegenBuilder, value: TExpr) -> MIRValueID {
+// Rust `lower_consuming_value`: an owned handle moves from its own place row,
+// so its drop flag clears and scope exit does not move it a second time.
+fn jet_codegen_lower_consuming_value(builder: &JetCodegenBuilder, value: TExpr) -> MIRValueID {
     if value.kind == .Local(local) {
         place := jet_codegen_lower_local_place(&builder, local)
         if !jet_codegen_unmovable_place(builder, place) -> jet_codegen_retain_place_access(&builder, place, MIRAccess.Move)
@@ -6332,7 +6331,7 @@ fn jet_codegen_lower_task_group_value(builder: &JetCodegenBuilder, expression: T
     }
     if jet_codegen_task_group_result_tasks(tasks.ty) -> member = "{member}_result"
     call := jet_codegen_intern_route(&builder, MIRPreludeFamily.StaticPrelude, "core.tasks", member, "jet_std::jet_task_{member}", 1, [Bool]{false}, None, jet_codegen_failure_carrier_for_type(expression.ty), MIRPreludeABI.Value)
-    value := jet_codegen_lower_consuming_task_value(&builder, tasks)
+    value := jet_codegen_lower_consuming_value(&builder, tasks)
     jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.TaskGroup{call: call, kind: kind, tasks: [MIRValueID]{value}}})
 }
 
