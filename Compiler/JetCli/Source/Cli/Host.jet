@@ -25,11 +25,21 @@ use jet_driver.[
     jet_driver_present_diagnostics,
     jet_driver_report_problems,
 ]
+use jet_eval.[
+    jet_eval_comptime_value,
+    jet_eval_default_config,
+    jet_eval_function,
+    jet_eval_retire_result,
+]
 use jet_foundation.[
+    CtValue,
     Diagnostic,
     DIAGNOSTIC_ERROR,
     DIAGNOSTIC_LINT,
     Span,
+    TComptimeValue,
+    ast_comptime_value_json,
+    ast_comptime_value_show,
     diagnostic_from_registry,
     diagnostic_render_all,
     mir_sha256_hex,
@@ -42,6 +52,7 @@ use jet_parser.[
     jfmt_retired_print_family_edits,
     jfmt_retired_type_edits,
 ]
+use jet_sema.sema_user_template_ct_value
 
 // crates/jet-foundation/src/ExitCodes.rs `ICE`: Jet's own defect.
 JET_CLI_EXIT_ICE :: 101
@@ -192,6 +203,64 @@ fn jet_cli_emit_result(file: String, source: String, color: Bool, json: Bool, re
     }
     JetDriverVerbOutput{stdout: "{prefix}{items}", stderr: stderr, exit_code: JET_DRIVER_EXIT_OK}
 }
+
+// `jet eval <file>` (CmdDevTools.rs `run_eval`): the entry checks in Eval
+// mode (the driver runs the transitive E3401 purity walk from `run`), then
+// JetEval evaluates `run` over the canonical MIR. What the program printed is
+// program output: before the value, or on stderr under `--json` so stdout
+// stays one `eval` status document.
+fn jet_cli_compile_eval(file: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
+    source :: cli_files.read(file) ?? return JetDriverVerbOutput{
+        stdout: "",
+        stderr: jet_cli_report("E2105", "couldn't read `{file}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color),
+        exit_code: JET_DRIVER_EXIT_USER_ERROR,
+    }
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    compiled :: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Eval)
+    if compiled == {
+        .Refused(refusal) -> output = ~refusal
+        .Compiled(result, snapshot) -> output = jet_cli_eval_result(file, source, color, json, result, snapshot)
+    }
+    output
+}
+
+fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
+    errors :: jet_cli_errors(jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files))
+    if errors.len() > 0 -> return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, errors, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+    program :: result.mir ?? return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
+    entry :: result.entry_function ?? return jet_cli_ice("the Jet compiler finished `{file}` without its `run` entry")
+    config :: jet_eval_default_config()
+    span :: Span{start: 0, end: 0}
+    evaluated := jet_eval_function(^program, entry, [TComptimeValue]{}, ^config)
+    data := TComptimeValue?{None}
+    if evaluated.error == None && evaluated.internal_problem == None && evaluated.complete && !evaluated.soft_stop {
+        data = jet_eval_comptime_value(&evaluated, span)
+    }
+    jet_eval_retire_result(&evaluated, span)
+    if evaluated.error == .Val(failure) {
+        return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, [Diagnostic]{failure.diagnostic}, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    if evaluated.internal_problem == .Val(problem) -> return jet_cli_ice(problem.message)
+    checked :: data ?? return jet_cli_ice("evaluating `run` in `{file}` produced no value")
+    value :: sema_user_template_ct_value(checked) ?? return jet_cli_ice("the value of `run` in `{file}` is not compile-time data")
+    if json {
+        rendered :: jet_cli_status_value_parse(ast_comptime_value_json(value)) ?? return jet_cli_ice("the value of `run` in `{file}` has no JSON form")
+        return JetDriverVerbOutput{stdout: "{jet_cli_status_render("eval", true, [JetCLIStatusField]{jet_cli_status_field("value", rendered)})}\n", stderr: evaluated.stdout, exit_code: JET_DRIVER_EXIT_OK}
+    }
+    shown :: jet_cli_eval_shown(value)
+    line :: if shown == .Val(text) -> "{text}\n" else -> ""
+    JetDriverVerbOutput{stdout: "{evaluated.stdout}{line}", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// CmdDevTools.rs `render_eval_value`: a present value shows its inner value
+// and Unit shows nothing.
+fn jet_cli_eval_shown(value: CtValue) -> String? Never! {
+    if value == .Present(inner) -> return jet_cli_eval_shown(inner)
+    if value == .Unit -> return None
+    Val(ast_comptime_value_show(value))
+}
+
 // Syntax/predicates.rs `sanitize_crate_name`: ASCII letters, digits, and `_`
 // stay; any other character becomes one `_` (a UTF-8 continuation byte
 // belongs to the character before it).
@@ -1325,6 +1394,10 @@ pub fn jet_cli_main(args: [String]) -> Int {
         .InspectB(inspect_plan) -> output = jet_cli_inspect_b_host(inspect_plan)
         .Semindex(file, color, json) -> output = jet_cli_compile_semindex(file, color, json)
         .Find(file, query, mode, json) -> output = jet_cli_compile_find(file, query, mode, json)
+        .Eval(file, color, json, notice) -> {
+            jet_cli_write_notice(notice)
+            output = jet_cli_compile_eval(file, color, json)
+        }
     }
     if output.stdout.len() > 0 {
         out :: cli_term.stdout()
