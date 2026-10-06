@@ -1742,7 +1742,7 @@ impl<'a> Checker<'a> {
         Some((source.module, leaf))
     }
 
-    fn same_declared_name_identity(&self, want: &str, got: &str) -> bool {
+    pub(crate) fn same_declared_name_identity(&self, want: &str, got: &str) -> bool {
         if want == got {
             return true;
         }

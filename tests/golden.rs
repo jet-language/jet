@@ -771,7 +771,12 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
                 .arg(format!("dependency={}", deps_dir.display()));
         }
     }
-    let clinks = jet::resolve_c_links(entry.path.to_str().unwrap())
+    // Link resolution reads the same project state the front end compiled
+    // against: a staged fixture's `.jet` exists only in its scratch copy.
+    let project_entry = staged_fixture
+        .as_ref()
+        .map_or(entry.path.as_path(), |scratch| scratch.entry.as_path());
+    let clinks = jet::resolve_c_links(project_entry.to_str().unwrap())
         .expect("resolve_c_links should succeed for example C bindings");
     for arg in &clinks {
         rustc_cmd.arg(arg);
@@ -792,7 +797,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     // Both stay in the COMPILE universe: front end, I1, and I2 above all still
     // apply. Held back by declared facts, so a new example is classified
     // instead of discovered as a timeout.
-    if let Some(reason) = example_native_run_skip(&entry.path) {
+    if let Some(reason) = example_native_run_skip(project_entry) {
         eprintln!("note: built Examples/features/{stem}.jet; not run ({reason})");
         return;
     }
