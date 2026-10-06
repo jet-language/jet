@@ -946,7 +946,44 @@ fn jet_driver_compile_result(
         complete: complete,
         internal_problem: None,
         authority_policy: jet_driver_authority_policy(load),
+        doc_modules: load.doc_modules,
     }
+}
+
+// `JetDriverCompileMode.Doc`: the checked user modules (Rust
+// `ProgramBundle.modules`), with the items sema settled. Core sources, the
+// compiler-owned effect module, and synthetic C modules are not the user's
+// API, so they are left out, as the Rust bundle leaves them out. A module of
+// another package keeps its module name as its alias.
+fn jet_driver_doc_modules(request: JetDriverCompileRequest, load: JetDriverLoadResult, graph: SemaGraphResult, effect_identity: String) -> [JetDriverDocModule] Never! {
+    modules := [JetDriverDocModule]{}
+    loop (index, graph_module) in graph.modules {
+        if graph_module.module_identity == effect_identity || index >= graph.programs.len() -> next
+        unit_index :: loop loaded in load.modules {
+            if loaded.module_identity == graph_module.module_identity -> break loaded.source_unit_index
+        } ?? -1
+        if unit_index < 0 || unit_index >= load.source_units.len() -> next
+        unit :: load.source_units[unit_index]
+        if unit.root_index < 0 || unit.file_index < 0 || unit.source_origin != SemaSourceOrigin.Snapshot || unit.root_index >= request.authorized_sources.roots.len() -> next
+        files :: request.authorized_sources.roots[unit.root_index].files
+        if unit.file_index >= files.len() -> next
+        alias :: if unit.package_identity == load.package_identity -> "" else -> unit.module_name
+        &modules.push(JetDriverDocModule{
+            path: unit.path,
+            physical_path: files[unit.file_index].path,
+            alias: alias,
+            source: files[unit.file_index].source,
+            pub_file: graph.programs[index].pub_file,
+            items: graph.programs[index].items,
+            block_spans: graph.programs[index].block_spans,
+            imports: graph.programs[index].imports,
+            module_name: graph_module.module_name,
+            functions: graph_module.functions,
+            name_references: graph_module.name_references,
+            call_facts: graph_module.call_facts,
+        })
+    }
+    modules
 }
 
 fn jet_driver_authority_policy(load: JetDriverLoadResult) -> JetDriverAuthorityPolicy? {
@@ -2853,6 +2890,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     target_machine :: target_machine_option ?? return jet_driver_compile_result(load, load.diagnostics, None, None, None, None, Val(JetDriverStage.Check), false, trace)
 
     registration_inputs := [SemaRegistrationModuleInput]{}
+    source_positions :: jet_driver_source_file_positions(load.source_files)
     loop loaded_index in 0..<load.modules.len() {
         loaded_module :: load.modules[loaded_index]
         if loaded_module.source_unit_index < 0 || loaded_module.source_unit_index >= load.source_units.len() {
@@ -2875,6 +2913,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
             source_origin: unit.source_origin,
             program: loaded_module.program,
             foreign_handles: registration_foreign_handles,
+            source: jet_driver_source_text_at(load.source_files, source_positions, unit.path),
         })
     }
     canonical_effect_module_identity := canonical_effect_module.module_identity
@@ -2914,6 +2953,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     jet_driver_trace_lookup_counters(request.trace_sink, "register", register_lookups, SemaLookupCounters{module_lookups: 0, name_lookups: 0})
     if kg.enabled -> registration_graph.keep_going = true
     if request.mode == JetDriverCompileMode.Test -> registration_graph.test_mode = true
+    if request.mode == JetDriverCompileMode.Doc -> registration_graph.retain_programs = true
     if registration_graph.internal_problem != None {
         loop diagnostic in registration_graph.diagnostics -> &load.diagnostics.push(diagnostic)
         return jet_driver_compile_internal_result(
@@ -3080,6 +3120,7 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         if !kg.enabled -> return jet_driver_compile_internal_result(load, trace, "staged method closure lost its checked function or registered owner")
         jet_driver_keep_going_row(&kg, "comptime.validate", "-", "ICE", "staged method closure lost its checked function or registered owner", "-")
     }
+    if request.mode == JetDriverCompileMode.Doc -> load.doc_modules = jet_driver_doc_modules(request, load, checked_graph, canonical_effect_module_identity)
 
     // Every checked function moves out of its graph module into one list, so
     // the checked TIR is resident once from here on: the rows return to their

@@ -45,6 +45,7 @@ fn jet_driver_compiler_check_failure(load: JetDriverLoadResult, stage: JetDriver
 
 fn jet_driver_compiler_check_registration_inputs(load: JetDriverLoadResult, providers: [SemaForeignProviderInput], diagnostics: &[Diagnostic]) -> [SemaRegistrationModuleInput]? {
     inputs := [SemaRegistrationModuleInput]{ }
+    source_positions :: jet_driver_source_file_positions(load.source_files)
     loop module_index in 0..<load.modules.len() {
         loaded_module :: load.modules[module_index]
         if loaded_module.source_unit_index < 0 || loaded_module.source_unit_index >= load.source_units.len() {
@@ -63,6 +64,7 @@ fn jet_driver_compiler_check_registration_inputs(load: JetDriverLoadResult, prov
             source_origin: unit.source_origin,
             program: loaded_module.program,
             foreign_handles: handles,
+            source: jet_driver_source_text_at(load.source_files, source_positions, unit.path),
         })
     }
     Val(inputs)
@@ -90,6 +92,23 @@ fn jet_driver_compiler_check_source_bytes(load: JetDriverLoadResult, path: Strin
         found = Val(file.source)
     }
     found
+}
+
+// Path -> position of its first loaded source text, built once per compile so
+// each module reads its text without rescanning the file list.
+fn jet_driver_source_file_positions(files: [MIRSourceFile]) -> [String:Int] Never! {
+    positions := [String:Int]{}
+    loop (index, file) in files {
+        if positions.get(file.path) == None -> positions[file.path] = index
+    }
+    positions
+}
+
+// The loaded text of `path`; a module with no loaded text (a compiler-synthetic
+// unit) has none.
+fn jet_driver_source_text_at(files: [MIRSourceFile], positions: [String:Int], path: String) -> String Never! {
+    if positions.get(path) == .Val(index) -> return files[index].source
+    ""
 }
 
 fn jet_driver_compiler_check_module_sources(load: JetDriverLoadResult, canonical: SemaRegistrationModuleInput, canonical_source: String, parsed: JetCompilerServicesParseFacts) -> [SemaCompilerModuleSource]? {

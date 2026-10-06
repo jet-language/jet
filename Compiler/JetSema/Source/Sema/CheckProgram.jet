@@ -266,6 +266,9 @@ pub struct SemaGraphResult {
     // #3708: the unannotated top-level functions the bundle failure solve
     // proved infallible, by symbol key.
     pub inferred_infallible: [String]{[String]{}}
+    // `SemaRegistrationGraph.retain_programs`: each module's program as sema
+    // settled it, indexed like `modules`; empty otherwise.
+    pub programs: [Program]{[Program]{}}
 }
 
 struct SemaFunctionResult {
@@ -3633,6 +3636,10 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
     // every checked body's references are known.
     loop diagnostic in sema_liveness_structure(resolved_graph, modules) -> &diagnostics.push(diagnostic)
     names :: sema_name_build_facts(resolved_graph, modules)
+    programs := [Program]{}
+    if graph.retain_programs {
+        loop source_module in resolved_graph.modules -> &programs.push(source_module.program)
+    }
     SemaGraphResult{
         package_identity: graph.package_identity,
         entry_module_identity: graph.entry_module_identity,
@@ -3649,5 +3656,6 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
         diagnostics: diagnostics,
         complete: complete,
         inferred_infallible: inferred_infallible,
+        programs: programs,
     }
 }
