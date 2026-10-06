@@ -742,10 +742,10 @@ fn jet_cli_inspect_project_root(command: String, hint: String, color: Bool) -[FS
     JetCLIInspectRoot.Refused{plan: jet_cli_done("", "{hint}\n", JET_DRIVER_EXIT_USER_ERROR)}
 }
 
-// `jet inspect env [<env.jet|config.jet>]` (CmdInspect.rs `run_env`): the
-// config surface evaluation (jet-env-model `ModuleEval::evaluate_env`) is not
-// ported.
-fn jet_cli_inspect_env(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
+// `jet inspect env [<env.jet|config.jet>]` (CmdInspect.rs `run_env`):
+// evaluate a config surface (jet-env-model `ModuleEval::evaluate_env`) and
+// project its typed `$NAME` reads without exposing their values.
+fn jet_cli_inspect_env(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     file := ""
     skip_value := false
     loop argument in args {
@@ -761,11 +761,39 @@ fn jet_cli_inspect_env(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPla
         file = argument
         break
     }
-    if file == "" -> file = if cli_files.is_file("env.jet") -> "env.jet" else -> "config.jet"
-    // The evaluator reads the surface itself; this read only reports a
-    // missing or unreadable file first, as the Rust host does.
-    _ :: cli_files.read(file) ?? return jet_cli_inspect_b_fail("E2105", "can't read config surface `{file}`: {jet_cli_io_error_text(err)}", "pass a readable `env.jet` or `config.jet` file", color, json, JET_DRIVER_EXIT_USER_ERROR)
-    jet_cli_not_ported("inspect env", color)
+    if file == "" -> file = if cli_files.is_file(ENV_FILE) -> ENV_FILE else -> CONFIG_FILE
+    source :: cli_files.read(file) ?? return jet_cli_inspect_b_fail("E2105", "can't read config surface `{file}`: {jet_cli_io_error_text(err)}", "pass a readable `env.jet` or `config.jet` file", color, json, JET_DRIVER_EXIT_USER_ERROR)
+    parent :: cli_files.dirname(file)
+    base_dir :: if parent == "" -> "." else -> parent
+    plan :: if envmodel_evaluate_env(source, base_dir) == {
+        .Ok(evaluated) -> evaluated
+        .Err(error) -> {
+            if json {
+                report :: jet_cli_source_report_json(error.diagnostic, jet_cli_report_path(file), source)
+                return jet_cli_done("{jet_cli_status_render_with_reports("inspect.env", false, [String]{report}, [JetCLIStatusField]{})}\n", "", JET_DRIVER_EXIT_USER_ERROR)
+            }
+            return jet_cli_done("", diagnostic_render_all(file, source, [Diagnostic]{error.diagnostic}, color), JET_DRIVER_EXIT_USER_ERROR)
+        }
+    }
+    if json {
+        reads :: loop read in plan.environment_reads -> jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("name", jet_cli_status_text(read.name)),
+            jet_cli_status_field("type", jet_cli_status_text(read.ty)),
+        })
+        payload :: jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("file", jet_cli_status_text(file)),
+            jet_cli_status_field("reads", jet_cli_status_array(reads)),
+        })
+        return jet_cli_done("{jet_cli_status_render("inspect.env", true, [JetCLIStatusField]{jet_cli_status_field("env", payload)})}\n", "", JET_DRIVER_EXIT_OK)
+    }
+    out := "environment\nfile: {file}\n"
+    if plan.environment_reads.len() == 0 {
+        out = "{out}reads: none\n"
+    } else {
+        out = "{out}reads:\n"
+        loop read in plan.environment_reads -> out = "{out}  {read.name}: {read.ty}\n"
+    }
+    jet_cli_done(out, "", JET_DRIVER_EXIT_OK)
 }
 
 // `jet inspect semindex <file.jet>` (CmdSemIndex.rs `run_semindex`): the
