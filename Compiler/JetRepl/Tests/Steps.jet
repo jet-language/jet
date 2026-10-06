@@ -24,7 +24,23 @@ fn repl_steps_echo(session: &ReplSession, source: String) -> String {
     panic("REPL input did not execute: {source}")
 }
 
+// Rust sigil_binding_is_classified_as_statement and
+// bare_binding_is_preserved_as_an_exact_statement. Jet's canonical parser
+// uses a line boundary here instead of Rust's generated trailing semicolon.
+fn repl_steps_classifier_contract() {
+    loop text in ([String]{"t :: s", "s :: \"\""}) {
+        classified :: repl_classify(text, 1)
+        if classified == .Accepted(.Stmts(body, suppress, check_source)) {
+            repl_steps_require(!suppress && check_source == text && body.len() == 1, "binding source preserved")
+            if body[0] == .Val(_) {
+
+            } else { panic("binding classified as expression") }
+        } else { panic("binding classification refused") }
+    }
+}
+
 fn run() {
+    repl_steps_classifier_contract()
     session := repl_steps_session()
     _ :: repl_steps_echo(&session, "counter := 0")
     result :: repl_session_step(&session, "counter += 1\nprint(counter)")

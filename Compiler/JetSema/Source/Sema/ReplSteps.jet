@@ -19,6 +19,7 @@ pub struct SemaReplStep {
     pub statements: [TStmt]
     pub echo: TExpr?
     pub diagnostics: [Diagnostic]
+    pub incomplete_reasons: [String]{[String]{}}
 }
 
 pub fn sema_repl_session_new(graph: SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], source: Func, root: TFunc) -> SemaReplSession String! {
@@ -126,12 +127,16 @@ pub fn sema_repl_type_check_stmts(session: &SemaReplSession, statements: [Stmt],
     sema_attach_diagnostic_source_locations(&diagnostics, 0, source_segments)
     complete = complete && !sema_has_error_since(diagnostics, 0)
     if !complete {
+        reasons := [String]{}
+        loop index in context_mark.incomplete_reasons..<session.context.incomplete_reasons.len() {
+            &reasons.push(session.context.incomplete_reasons[index])
+        }
         sema_scope_rollback(&session.scopes, scope_mark)
         sema_check_context_rollback(&session.context, context_mark)
         session.ownership = ownership_mark
         session.environment.source_segments = previous_segments
         loop session.tails.bodies.len() > tail_mark -> _ :: &session.tails.bodies.pop()
-        return SemaReplStep{complete: false, root: session.root, statements: [TStmt]{}, echo: None, diagnostics: ^diagnostics}
+        return SemaReplStep{complete: false, root: session.root, statements: [TStmt]{}, echo: None, diagnostics: ^diagnostics, incomplete_reasons: ^reasons}
     }
     sema_scope_commit(&session.scopes, scope_mark)
     session.root = candidate

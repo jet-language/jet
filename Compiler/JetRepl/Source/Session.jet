@@ -23,6 +23,7 @@ pub struct ReplSession {
 pub enum ReplStepResult {
     Evaluated(result: JetEvalReplStepResult, diagnostics: [Diagnostic])
     Rejected(diagnostics: [Diagnostic])
+    CompilerIncomplete(reasons: [String])
     Control(input: ReplInput)
     InvalidSession(message: String)
 }
@@ -100,6 +101,9 @@ pub fn repl_session_step(session: &ReplSession, text: String) -> ReplStepResult 
             if !checked.complete {
                 loop session.source.len() > offset -> _ :: &session.source.pop()
                 loop session.line_starts.len() > lines_mark -> _ :: &session.line_starts.pop()
+                if checked.diagnostics.len() == 0 {
+                    return ReplStepResult.CompilerIncomplete{reasons: checked.incomplete_reasons}
+                }
                 return ReplStepResult.Rejected{diagnostics: checked.diagnostics}
             }
             session.segments = ^segments

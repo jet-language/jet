@@ -1,6 +1,6 @@
 // Retained checked-MIR steps. The executor is jet_eval_run_until, the same
 // instruction/terminator/callback/drop path used by every JetEval entry.
-use jet_foundation.[MIRAccess, MIRBlockID, MIRFunctionID, MIRProgram, MIRValueID, diagnostic_with_detail]
+use jet_foundation.[MIRAccess, MIRBlockID, MIRFunctionID, MIRProgram, MIRValueID, diagnostic_with_detail, mir_type_is_unit]
 
 pub struct JetEvalRunBoundary {
     pub function: MIRFunctionID
@@ -15,6 +15,7 @@ pub struct JetEvalReplSession {
 pub struct JetEvalReplStepResult {
     pub complete: Bool
     pub echo: String?
+    pub echo_type: String?{None}
     pub stdout: String
     pub stderr: String
     pub steps: Int
@@ -57,12 +58,20 @@ pub fn jet_eval_repl_run_step(session: &JetEvalReplSession, program: ^MIRProgram
         stopped = frame.function == boundary.function && frame.block == boundary.block && frame.ip == 0
     }
     shown := String?{None}
+    shown_type := String?{None}
     if stopped && session.machine.failure == .None && session.machine.internal_problem == .None && !session.machine.soft_stop {
         if echo == .Val(value) {
-            shown = jet_eval_semantic_display(&session.machine, 0, value, jet_eval_empty_span())
+            if jet_eval_value_type(&session.machine, 0, value, jet_eval_empty_span()) == .Val(ty) {
+                if !mir_type_is_unit(ty) {
+                    shown = jet_eval_semantic_display(&session.machine, 0, value, jet_eval_empty_span())
+                    shown_type = Val(jet_eval_type_display_name(session.machine, ty))
+                }
+            }
         }
         if session.machine.failure == .None && session.machine.internal_problem == .None {
-            return jet_eval_repl_step_result(session, true, shown, false)
+            result := jet_eval_repl_step_result(session, true, shown, false)
+            result.echo_type = shown_type
+            return result
         }
     }
     // No false rollback: owned host resources cannot be cloned. The failed
