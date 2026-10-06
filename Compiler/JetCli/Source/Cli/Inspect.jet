@@ -1352,7 +1352,7 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     }
     source :: cli_files.read(job.file) ?? ""
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    semantic :: job.action == "rights" || job.action == "impact" || job.action == "shapes"
+    semantic :: job.action == "rights" || job.action == "impact" || job.action == "shapes" || job.action == "expand"
     mode :: if semantic -> JetDriverCompileMode.Doc else -> JetDriverCompileMode.Program
     watch :: cli_time.start()
     compiled :: jet_cli_compile_file(job.file, job.color, job.threads, mode)
@@ -1368,6 +1368,7 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
                 job.action == "shapes" -> output = jet_cli_inspect_shapes(result.doc_modules, job.json, job.color)
                 job.action == "rights" -> output = jet_cli_inspect_rights(result, job.project, job.file, job.json)
                 job.action == "impact" -> output = jet_cli_inspect_impact_report(job, result, diagnostics.len(), watch.elapsed_millis())
+                job.action == "expand" -> output = jet_cli_inspect_expand_report(job, result, diagnostics.len(), watch.elapsed_millis())
                 else -> output = jet_cli_inspect_build_plan(job, snapshot)
             }
         }
@@ -1428,32 +1429,7 @@ fn jet_cli_inspect_impact_report(job: JetCLIInspectJob, result: JetDriverCompile
     }
     source :: job.file
     if job.json {
-        rows := [JetCLIStatusValue]{}
-        loop row in JET_CLI_EXPLICIT_FILE_PROOF_ROWS {
-            &rows.push(jet_cli_status_object([JetCLIStatusField]{
-                jet_cli_status_field("output", jet_cli_status_text("not-applicable")),
-                jet_cli_status_field("name", jet_cli_status_text(row[0])),
-                jet_cli_status_field("status", jet_cli_status_text("not applicable")),
-                jet_cli_status_field("detail", jet_cli_status_text(row[1])),
-                jet_cli_status_field("diagnostic", jet_cli_status_text(row[2])),
-            }))
-        }
-        provenance :: jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("source", jet_cli_status_text(source)),
-            jet_cli_status_field("profile", jet_cli_status_text("dev")),
-            jet_cli_status_field("front_end", jet_cli_status_text(JET_CLI_CHECK_FRONT_END)),
-            jet_cli_status_field("programmable_build", jet_cli_status_text("not-selected")),
-            jet_cli_status_field("diagnostics", jet_cli_status_int(diagnostics)),
-        })
-        check :: jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("status", jet_cli_status_text("passed")),
-            jet_cli_status_field("contract", jet_cli_status_text("jet.check/v1")),
-            jet_cli_status_field("schema_version", jet_cli_status_int(1)),
-            jet_cli_status_field("scope", jet_cli_status_text("explicit-file")),
-            jet_cli_status_field("elapsed_ms", jet_cli_status_int(elapsed_ms)),
-            jet_cli_status_field("provenance", provenance),
-            jet_cli_status_field("rows", jet_cli_status_array(rows)),
-        })
+        check :: jet_cli_inspect_check_value(source, elapsed_ms, diagnostics)
         definition_value :: if definition_module == .Val(name) -> jet_cli_status_text(name) else -> JetCLIStatusValue.Null
         impact :: jet_cli_status_object([JetCLIStatusField]{
             jet_cli_status_field("symbol", jet_cli_status_text(symbol)),
@@ -1474,10 +1450,7 @@ fn jet_cli_inspect_impact_report(job: JetCLIInspectJob, result: JetDriverCompile
         status :: if found -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.impact", found, [JetCLIStatusField]{jet_cli_status_field("impact", impact)})}\n", stderr: "", exit_code: status}
     }
-    out := "check: passed (source={source}, profile=dev, scope=explicit-file, schema_version=1, elapsed_ms={elapsed_ms}, front_end={JET_CLI_CHECK_FRONT_END}, programmable_build=not-selected, diagnostics={diagnostics})\n"
-    loop row in JET_CLI_EXPLICIT_FILE_PROOF_ROWS {
-        out = "{out}proof: output=not-applicable {row[0]} [not applicable] {row[1]} (diagnostic={row[2]})\n"
-    }
+    out := jet_cli_inspect_check_text(source, elapsed_ms, diagnostics)
     if !found {
         out = "{out}symbol `{symbol}` not found in index\n"
         if references.len() == 0 && call_sites.len() == 0 -> return JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
@@ -1494,6 +1467,73 @@ fn jet_cli_inspect_impact_report(job: JetCLIInspectJob, result: JetDriverCompile
     loop edge in downstream -> out = "{out}  downstream[d{edge.depth}] {edge.caller} -> {edge.callee} @ {edge.module_path}\n"
     status :: if found -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR
     JetDriverVerbOutput{stdout: out, stderr: "", exit_code: status}
+}
+
+// CmdInspect.rs `check_result_value` for a passed explicit-file check: the
+// `jet.check/v1` record impact and expand carry.
+fn jet_cli_inspect_check_value(source: String, elapsed_ms: Int, diagnostics: Int) -> JetCLIStatusValue Never! {
+    rows := [JetCLIStatusValue]{}
+    loop row in JET_CLI_EXPLICIT_FILE_PROOF_ROWS {
+        &rows.push(jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("output", jet_cli_status_text("not-applicable")),
+            jet_cli_status_field("name", jet_cli_status_text(row[0])),
+            jet_cli_status_field("status", jet_cli_status_text("not applicable")),
+            jet_cli_status_field("detail", jet_cli_status_text(row[1])),
+            jet_cli_status_field("diagnostic", jet_cli_status_text(row[2])),
+        }))
+    }
+    provenance :: jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("source", jet_cli_status_text(source)),
+        jet_cli_status_field("profile", jet_cli_status_text("dev")),
+        jet_cli_status_field("front_end", jet_cli_status_text(JET_CLI_CHECK_FRONT_END)),
+        jet_cli_status_field("programmable_build", jet_cli_status_text("not-selected")),
+        jet_cli_status_field("diagnostics", jet_cli_status_int(diagnostics)),
+    })
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("status", jet_cli_status_text("passed")),
+        jet_cli_status_field("contract", jet_cli_status_text("jet.check/v1")),
+        jet_cli_status_field("schema_version", jet_cli_status_int(1)),
+        jet_cli_status_field("scope", jet_cli_status_text("explicit-file")),
+        jet_cli_status_field("elapsed_ms", jet_cli_status_int(elapsed_ms)),
+        jet_cli_status_field("provenance", provenance),
+        jet_cli_status_field("rows", jet_cli_status_array(rows)),
+    })
+}
+
+// CmdInspect.rs `check_result_text` for a passed explicit-file check.
+fn jet_cli_inspect_check_text(source: String, elapsed_ms: Int, diagnostics: Int) -> String Never! {
+    out := "check: passed (source={source}, profile=dev, scope=explicit-file, schema_version=1, elapsed_ms={elapsed_ms}, front_end={JET_CLI_CHECK_FRONT_END}, programmable_build=not-selected, diagnostics={diagnostics})\n"
+    loop row in JET_CLI_EXPLICIT_FILE_PROOF_ROWS {
+        out = "{out}proof: output=not-applicable {row[0]} [not applicable] {row[1]} (diagnostic={row[2]})\n"
+    }
+    out
+}
+
+// CmdExpand.rs `run_expand` after the check: the selected lens projected from
+// the checked program (Expand.jet). The memory, web, layout and origin lenses
+// and the bare all-lens view need checked producers the Doc result does not
+// carry yet, so they are refused rather than reported empty.
+fn jet_cli_inspect_expand_report(job: JetCLIInspectJob, result: JetDriverCompileResult, diagnostics: Int, elapsed_ms: Int) -> JetDriverVerbOutput {
+    selection :: job.subject ?? return jet_cli_not_ported_output("inspect expand <all lenses>", false)
+    index :: jet_cli_checked_semindex(result)
+    facts := [JetCLIExpandFact]{}
+    if selection == {
+        "inline" -> facts = jet_cli_expand_inline(result.doc_modules, job.json)
+        "effects" -> facts = jet_cli_expand_effects(index)
+        "derive" -> facts = jet_cli_expand_derive(index, result.doc_modules)
+        "templates" -> facts = jet_cli_expand_templates(result.doc_modules)
+        "callable-signature" -> facts = jet_cli_expand_callable(index, result.doc_modules)
+        else -> return jet_cli_not_ported_output("inspect expand --facts {selection}", false)
+    }
+    lens := JET_CLI_EXPAND_LENSES[0]
+    loop spec in JET_CLI_EXPAND_LENSES {
+        if spec.name == selection -> lens = spec
+    }
+    if job.json {
+        values :: [JetCLIStatusValue]{jet_cli_expand_lens_value(lens, facts)}
+        return JetDriverVerbOutput{stdout: jet_cli_expand_json(index, selection, values, jet_cli_inspect_check_value(job.file, elapsed_ms, diagnostics)), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    JetDriverVerbOutput{stdout: jet_cli_expand_text(index, lens, facts, jet_cli_inspect_check_text(job.file, elapsed_ms, diagnostics)), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // CmdInspect.rs `explicit_file_proof_rows`: name, detail, diagnostic.

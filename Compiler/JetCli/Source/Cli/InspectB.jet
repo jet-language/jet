@@ -37,7 +37,7 @@ pub fn jet_cli_inspect_b(argv: [String], command: String, jet_argv: [String], ar
         "inspect" -> return Val(jet_cli_inspect_env(jet_cli_tail(argv, 2), color, json))
         "semindex" -> return Val(jet_cli_semindex(rest, color, json))
         "output" -> return Val(jet_cli_inspect_output(rest, color, json))
-        "expand" -> return Val(jet_cli_expand(rest, color, json))
+        "expand" -> return Val(jet_cli_expand(rest, color, json, threads))
         "schema" -> return Val(jet_cli_schema(rest, color, json))
         "codemod" -> return Val(jet_cli_codemod(rest, color, json))
         "audit" -> return Val(jet_cli_audit(rest, color, json))
@@ -827,75 +827,15 @@ fn jet_cli_inspect_output(args: [String], color: Bool, json: Bool) -> JetCLIPlan
     jet_cli_not_ported("inspect output", color)
 }
 
-// One registered expand lens (CmdExpand.rs `LENSES`).
-struct JetCLIExpandLens {
-    name: String
-    summary: String
-}
-
-JET_CLI_EXPAND_LENSES :: [JetCLIExpandLens]{
-    JetCLIExpandLens{name: "inline", summary: "#Inline / #Inline(Always) contracts (D-METHODMACRO1)"},
-    JetCLIExpandLens{name: "memory", summary: "transitive Mem.* denial facts (D-MEM-FACTS1 / D-AUTHORITY-MEM1)"},
-    JetCLIExpandLens{name: "web", summary: "D-WEBAPP1 application graph facts (routes/actions/policy)"},
-    JetCLIExpandLens{name: "effects", summary: "resolved function effect rows (D-EFF1 / D-SEMINDEX1)"},
-    JetCLIExpandLens{name: "layout", summary: "D-LAYOUT-FACTS1 compiler-owned type layout facts"},
-    JetCLIExpandLens{name: "origin", summary: "D-TRACK-ORIGIN1 typed #Track provenance facts"},
-    JetCLIExpandLens{name: "derive", summary: "derived behavior already attached to types (D-ONCE-DERIVE1)"},
-    JetCLIExpandLens{name: "templates", summary: "checked prep loop marker in impl, test, and measurement expansions (D-STRUCT-ONCE1)"},
-    JetCLIExpandLens{name: "callable-signature", summary: "typed checked semindex projection; metadata identity and convention producers remain unavailable"},
-}
-
-// `print_available_lenses`.
-fn jet_cli_expand_lens_list() -> String Never! {
-    out := " available lenses:\n"
-    loop lens in JET_CLI_EXPAND_LENSES -> out = "{out}   {jet_cli_inspect_pad(lens.name, 8)} {lens.summary}\n"
-    out
-}
-
-// A text-mode expand error: the report, then the lens list.
-fn jet_cli_expand_lens_error(code: String, what: String, color: Bool) -> JetCLIPlan Never! {
-    shared :: jet_cli_diagnostic_copy(code)
-    jet_cli_done("", "{jet_cli_report(code, what, shared.why, shared.fix, color)}{jet_cli_expand_lens_list()}", JET_DRIVER_EXIT_USER_ERROR)
-}
-
 // `jet inspect expand [--facts <lens>] <file.jet>` (CmdExpand.rs
-// `run_expand`): the checked lens projections are not ported.
-fn jet_cli_expand(args: [String], color: Bool, json: Bool) -> JetCLIPlan Never! {
-    lens_name := String?{None}
-    positional := [String]{}
-    index := 0
-    loop index < args.len() {
-        argument :: args[index]
-        if {
-            argument.starts_with("--facts=") -> lens_name = Val(argument.slice(8..<argument.len()))
-            argument == "--facts" -> {
-                if index + 1 >= args.len() {
-                    if json -> return jet_cli_inspect_b_report("E2104", "`--facts` needs a lens name", "the expand command must know which registered lens to project", "pass `--facts inline`, `--facts memory`, `--facts web`, `--facts effects`, `--facts layout`, `--facts origin`, `--facts derive`, `--facts templates`, or `--facts callable-signature`", color, json, JET_DRIVER_EXIT_USER_ERROR)
-                    return jet_cli_expand_lens_error("E2104", "`--facts` needs a lens name", color)
-                }
-                index += 1
-                lens_name = Val(args[index])
-            }
-            !argument.starts_with("-") -> &positional.push(argument)
-            else -> {}
-        }
-        index += 1
+// `run_expand`): Expand.jet parses (usage and lens errors included); the host
+// checks the absolute entry in Doc mode and projects the selected lens
+// (Inspect.jet `jet_cli_inspect_expand_report`).
+fn jet_cli_expand(args: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+    if jet_cli_expand_parse(args, json, color) == {
+        .Done(output) -> return JetCLIPlan.Done{output: output}
+        .Ready(file, selection) -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "expand", file: jet_cli_inspect_absolute(file), subject: selection, json: json, color: false, threads: threads, notice: "", project: false}}
     }
-    if positional.len() == 0 {
-        if json -> return jet_cli_inspect_b_report("E2104", "`jet inspect expand` needs an entry file", "expand facts come from one checked Jet entry file", "run `jet inspect expand --facts inline Examples/features/basics/hello.jet`", color, json, JET_DRIVER_EXIT_USER_ERROR)
-        return jet_cli_inspect_b_error("E2104", "`jet inspect expand` needs an entry file", color, json, JET_DRIVER_EXIT_USER_ERROR)
-    }
-    if lens_name == .Val(name) {
-        known := false
-        loop lens in JET_CLI_EXPAND_LENSES {
-            if lens.name == name -> known = true
-        }
-        if !known {
-            if json -> return jet_cli_inspect_b_report("E2941", "unknown expand lens `{name}`", "only registered lenses have checked semantic facts", "use `inline`, `memory`, `web`, `effects`, `layout`, `origin`, `derive`, `templates`, or `callable-signature`", color, json, JET_DRIVER_EXIT_USER_ERROR)
-            return jet_cli_expand_lens_error("E2941", "unknown expand lens `{name}`", color)
-        }
-    }
-    jet_cli_not_ported("inspect expand", color)
 }
 
 // `jet inspect schema status | squash --before <version>` (CmdSchema.rs
