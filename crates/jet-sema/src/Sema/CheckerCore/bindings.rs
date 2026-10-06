@@ -19,6 +19,10 @@ fn core_source_target(names: &jet_foundation::Names::NameLedger, module: &str) -
 struct FragmentNominalIndex<'a> {
     modules: &'a [crate::Sema::ModuleState],
     names: &'a jet_foundation::Names::NameLedger,
+    /// The module whose items a comptime fragment lowers in place. The
+    /// fragment declares that module's nominals under their source names, so
+    /// they keep that spelling; every other nominal is its canonical identity.
+    fragment_module: Option<usize>,
 }
 
 impl FragmentNominalIndex<'_> {
@@ -36,6 +40,16 @@ impl FragmentNominalIndex<'_> {
         self.get(owner, name) == Some(identity)
     }
 
+    /// How the fragment spells a canonical identity: the bare source name for
+    /// a nominal its own module declares, the identity otherwise.
+    fn spelling<'b>(&self, identity: &'b str) -> &'b str {
+        let Some(module) = self.fragment_module else { return identity };
+        match identity.rsplit_once("::") {
+            Some((_, leaf)) if self.get(module, leaf) == Some(identity) => leaf,
+            _ => identity,
+        }
+    }
+
     fn module_names(&self, owner: usize) -> impl Iterator<Item = (&str, &str)> {
         self.names.module_declarations(owner).filter_map(move |declaration|
             self.get(owner, &declaration.name).map(|identity| (declaration.name.as_str(), identity)))
@@ -43,6 +57,21 @@ impl FragmentNominalIndex<'_> {
 }
 
 fn canonical_fragment_name(
+    owner: usize,
+    name: &str,
+    modules: &[crate::Sema::ModuleState],
+    source_paths: &jet_foundation::Names::NameLedger,
+    struct_identities: &FragmentNominalIndex<'_>,
+) -> Option<String> {
+    let identity = fragment_identity(owner, name, modules, source_paths, struct_identities)?;
+    let spelling = struct_identities.spelling(&identity);
+    if spelling.len() < identity.len() {
+        return Some(spelling.to_owned());
+    }
+    Some(identity)
+}
+
+fn fragment_identity(
     owner: usize,
     name: &str,
     modules: &[crate::Sema::ModuleState],
@@ -475,7 +504,10 @@ pub(crate) fn checked_comptime_nominals_for_context(
 ) -> Option<crate::Comptime::MirBridge::MirFragmentNominalFacts> {
     let current = modules.get(module_idx)?;
     let reexports = &current.reexports;
-    let struct_identities = FragmentNominalIndex { modules, names: name_ledger };
+    let struct_identities = FragmentNominalIndex { modules, names: name_ledger, fragment_module: None };
+    // The fragment lowers this module's own functions beside its own items,
+    // so their signatures spell its nominals as those items declare them.
+    let fragment_identities = FragmentNominalIndex { fragment_module: Some(module_idx), ..struct_identities };
 
     // Resolve source keys on demand, rather than enumerate every module's
     // package aliases anew for each isolated comptime context.
@@ -526,7 +558,7 @@ pub(crate) fn checked_comptime_nominals_for_context(
     for item in &current.items {
         if let crate::AST::Item::Func(function) = item {
             facts.function_signatures.insert(function.name.clone(),
-                fragment_signature(function, module_idx, modules, source_paths, &struct_identities));
+                fragment_signature(function, module_idx, modules, source_paths, &fragment_identities));
         }
         if let crate::AST::Item::Enum(def) = item {
             let mut row = def.clone();
