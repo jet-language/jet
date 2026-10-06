@@ -7118,13 +7118,21 @@ impl<'a> Checker<'a> {
                 None
             }
             _ => {
-                self.diags.push(Diagnostic::error(
-                    "E0505",
-                    format!("only lists and maps can be indexed, not {}", base_ty.show()),
-                    "use `[ ]` on a `List` or `Map` value".to_string(),
-                    "check the value before `[`".to_string(),
-                    Some(*span),
-                ));
+                // The base of a chained index is inferred again by each
+                // enclosing expression; report this site once.
+                let reported = self
+                    .diags
+                    .iter()
+                    .any(|d| d.code == "E0505" && d.span == Some(*span));
+                if !reported {
+                    self.diags.push(Diagnostic::error(
+                        "E0505",
+                        format!("only lists and maps can be indexed, not {}", base_ty.show()),
+                        "use `[ ]` on a `List` or `Map` value".to_string(),
+                        "check the value before `[`".to_string(),
+                        Some(*span),
+                    ));
+                }
                 None
             }
         }
