@@ -978,7 +978,7 @@ pub fn apply_impure_core_call_with_type_args(
         ("core.math.random", _) | ("core.testing", "fake_rng") => {
             apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
         }
-        ("core.crypto.random", "bytes") => {
+        ("core.crypto.random", "__os_entropy") => {
             apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
         }
         // `core.text.fmt` is pure text rendering; at runtime it carries the

@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 39f1f0e3a1da22c6543aa537ef76ee2235447b1b7a538ac6777f0679dd5ee832
+// Source SHA-256: 17a13d46fa71031feba92f9b91c2063b5d9d21decafad41ecd6f3f316775f92a
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -248,7 +248,7 @@ const CORE_MODULE_16_MEMBERS: &[&str] = &["aes256gcm_open", "aes256gcm_seal", "a
 const CORE_MODULE_16_TYPES: &[(&str, CoreLeafKind)] = &[];
 const CORE_MODULE_16_DEPENDENCIES: &[&str] = &["core.crypto"];
 
-const CORE_MODULE_17_MEMBERS: &[&str] = &["bytes", "choice", "int_range", "token_hex", "token_urlsafe", "u32", "u64", "token_bytes", "randbelow", "randbits", "compare_digest", "choice_int", "shuffle_ints"];
+const CORE_MODULE_17_MEMBERS: &[&str] = &["bytes", "choice", "int_range", "token_hex", "token_urlsafe", "u32", "u64", "token_bytes", "randbelow", "randbits", "compare_digest", "choice_int", "shuffle_ints", "__os_entropy"];
 const CORE_MODULE_17_TYPES: &[(&str, CoreLeafKind)] = &[];
 const CORE_MODULE_17_DEPENDENCIES: &[&str] = &["core.crypto"];
 

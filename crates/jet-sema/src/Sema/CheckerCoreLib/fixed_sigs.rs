@@ -2445,10 +2445,10 @@ fn core_fixed_sig_impl(
         ("core.math.random", "paretovariate") => {
             Some((vec![(read, Type::Float)], Some(Type::Float)))
         }
-        // D-CRYPTO-RNG1=A: the fail-closed OS CSPRNG kernel behind the Jet
-        // `core.crypto.random.bytes` wrapper. A missing or rejected provider is
-        // `None` here; the wrapper surfaces it as `CryptoError.Unavailable`.
-        ("core.crypto.random", "bytes") => Some((
+        // D-CRYPTO-RNG1=A: the one fail-closed OS CSPRNG fill behind the Jet
+        // `core.crypto.random.bytes` policy. A missing or rejected provider is
+        // `None` here; the Jet body surfaces it as `CryptoError.Unavailable`.
+        ("core.crypto.random", "__os_entropy") => Some((
             vec![(read, Type::Int)],
             Some(Type::Option(Box::new(list_u8.clone()))),
         )),

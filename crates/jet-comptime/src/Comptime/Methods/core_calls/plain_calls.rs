@@ -1336,12 +1336,13 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 fields: vec![("state".to_string(), CtValue::Int(mixed as i64))],
             })
         }
-        // D-CRYPTO-RNG1=A: a missing or rejected provider is `None`; the Jet
-        // wrapper in `Core/crypto/random.jet` reports it as `Unavailable`.
-        ("core.crypto.random", "bytes") => {
+        // D-CRYPTO-RNG1=A: the one OS CSPRNG fill behind the Jet
+        // `core.crypto.random.bytes` policy; a missing or rejected provider is
+        // `None` and the Jet body reports it as `Unavailable`.
+        ("core.crypto.random", "__os_entropy") => {
             let count = match one(0)? {
                 CtValue::Int(value) => *value,
-                _ => return Err(unsupported("crypto.random.bytes expects an Int", span)),
+                _ => return Err(unsupported("crypto.random.__os_entropy expects an Int", span)),
             };
             Ok(match crypto_entropy_kernel::jet_crypto_entropy_bytes(count) {
                 Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
