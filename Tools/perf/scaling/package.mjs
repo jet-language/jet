@@ -102,7 +102,8 @@ export function pack(files, prefix, items, perFile = 600) {
     size = 0;
   };
   for (const lines of items) {
-    current.push(...lines, '');
+    for (const line of lines) current.push(line);
+    current.push('');
     size += lines.length;
     if (size >= perFile) flush();
   }

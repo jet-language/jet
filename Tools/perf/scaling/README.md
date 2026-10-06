@@ -94,6 +94,8 @@ not reuse of a prepared result. Summary checks are counted where the summaries r
 whether the module prepares parallel bodies or checks serially.
 Counters are deltas per loop invocation, so repeated module passes sum rather
 than overwrite one another. They add no traversal or per-item sink calls.
+Line packing and single-file assembly append iteratively, so large rungs do not
+depend on the JavaScript engine's call-argument limit.
 Series are baseline-subtracted (an N=1 rung), judged between the first and
 last measurable rung against N log N (bounds: counters 1.25, time/RSS 1.5),
 and projected to 1M lines. Floors come from

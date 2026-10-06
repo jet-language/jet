@@ -432,12 +432,11 @@ function singleFile(files) {
   const bodies = [];
   const names = Object.keys(files).filter(name => name !== 'package.jet' && name !== 'main.jet').sort();
   for (const name of [...names, 'main.jet']) {
-    const kept = [];
+    bodies.push(`// ---- ${name}`);
     for (const line of files[name].split('\n')) {
       if (/^use /.test(line)) uses.add(line);
-      else kept.push(line);
+      else bodies.push(line);
     }
-    bodies.push(`// ---- ${name}`, ...kept);
   }
   return { 'package.jet': files['package.jet'], 'main.jet': `${[...uses, '', ...bodies].join('\n')}\n` };
 }

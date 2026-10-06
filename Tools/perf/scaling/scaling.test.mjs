@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { report } from './report.mjs';
 import { queuePlan } from './enqueue.mjs';
+import { pack } from './package.mjs';
 
 test('every shape is deterministic and grows with N', () => {
   for (const [shape, entry] of Object.entries(SHAPES)) {
@@ -17,6 +18,16 @@ test('every shape is deterministic and grows with N', () => {
   }
   assert.equal(corpus('diagnostics', 5).expect.diagnostics, 5);
   assert.throws(() => corpus('unknown', 1), /Unknown shape/);
+});
+
+test('large packed items and single-file domains do not expand lines into call arguments', () => {
+  const files = {};
+  const lines = Array.from({ length: 200000 }, () => 'row');
+  pack(files, 'large', [lines]);
+  assert.equal(files['large_0.jet'], `${lines.join('\n')}\n`);
+  const large = corpus('generic-lib', 200000, 1, 'single');
+  assert.ok(large.code_lines >= 200000);
+  assert.ok(large.files['main.jet'].includes('fn run()'));
 });
 
 test('counter parsing fails closed', () => {
