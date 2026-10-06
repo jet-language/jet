@@ -12,12 +12,16 @@ package {
 // core.regex — one engine, compile-checked literals, fallible runtime.
 //
 // `r"..."` literals are a compiler feature. `compile` is for patterns that
-// arrive at run time. This file is a bounded backtracking NFA over UTF-8
-// bytes: concatenation, `|`, `()` , `*` `+` `?` `{n,m}`, `.`, `^`, `$`,
-// `[]`/`[^]` and the usual `\d\w\s` classes. Flags: `ignore_case` (ASCII),
-// `multiline`, and `dot_matches_newline`. Every execution consumes an
-// explicit finite budget, so hostile nested quantifiers terminate; a pattern
-// that does not compile fails with RegexError, never a panic.
+// arrive at run time. This file is the same Thompson/Pike VM as the Prelude
+// engine (Prelude/CoreLib/JetStd/Regex.rs): the pattern compiles to
+// Consume/Save/Split/Assert/Match instructions and one scan advances every
+// live thread a scalar at a time, so matching is linear in the text with no
+// recursion and no budget. Leftmost-first priority, captures (numbered by
+// their `(`), `(?:…)`, `(?<name>…)`, `*` `+` `?` `{n,m}`, `.`, `^`, `$`,
+// `[]`/`[^]` and `\d\w\s` follow the Prelude rules; backreferences and
+// lookaround are syntax errors there and here. Flags: `ignore_case` (ASCII),
+// `multiline` (`^` after a newline), and `dot_matches_newline`. A pattern that
+// does not compile fails with RegexError, never a panic.
 
 #Error
 pub enum RegexError {
@@ -43,8 +47,10 @@ pub struct RegexFlag {
 pub struct Regex {
     pub pattern: String
     pub flags: RegexFlags
-    pub nodes: [Node]
-    pub root: Int
+    insts: [Inst]
+    start: Int
+    anchored_start: Bool
+    groups: Int
 }
 
 pub struct Match {
@@ -54,14 +60,14 @@ pub struct Match {
     pub groups: [String]
 }
 
-pub struct Node {
-    pub kind: String
-    pub s: String
-    pub a: Int
-    pub b: Int
-    pub left: Int
-    pub right: Int
-    pub neg: Bool
+struct Node {
+    kind: String
+    s: String
+    a: Int
+    b: Int
+    left: Int
+    right: Int
+    neg: Bool
 }
 
 pub fn flags(ignore_case: Bool, multiline: Bool, dot_matches_newline: Bool) -> RegexFlags Never! {
@@ -85,22 +91,25 @@ pub fn escape(text: String) -> String Never! {
 pub fn compile(pattern: String) -> Regex RegexError! { compile_with(pattern, flags(false, false, false)) }
 
 pub fn compile_with(pattern: String, flags: RegexFlags) -> Regex RegexError! {
-    p := Parser{bytes: pattern.bytes(), i: 0, flags: flags, nodes: [Node]{}}
+    p := Parser{bytes: pattern.bytes(), i: 0, flags: flags, nodes: [Node]{}, groups: 0}
     root :: &p.parse_alt()
     if p.i != p.bytes.len() -> return Err(RegexError.Syntax)
-    Ok(Regex{pattern: pattern, flags: flags, nodes: p.nodes, root: root})
+    c := Compiler{nodes: p.nodes, insts: [Inst]{}}
+    frag :: &c.compile(root)
+    done :: &c.push(OP_MATCH, "", false, -1)
+    &c.patch(frag.outs, done)
+    anchored :: c.insts[frag.start].op == OP_ASSERT_START
+    Ok(Regex{pattern: pattern, flags: flags, insts: c.insts, start: frag.start, anchored_start: anchored, groups: p.groups})
 }
 
 pub fn is_match(pattern: Regex, text: String) -> Bool Never! {
-    m :: find(pattern, text)
-    m != None
+    scan(pattern, text.bytes(), 0, false, false, true, 1).len() > 0
 }
 
 pub fn full_match(pattern: Regex, text: String) -> Bool Never! {
     raw :: text.bytes()
-    caps := [CaptureSpan]{}
-    if run_exec(pattern, raw, 0, pattern.root, &caps) != raw.len() -> return false
-    true
+    runs :: scan(pattern, raw, 0, true, false, false, 1)
+    runs.len() == 1 && runs[0].start == 0 && runs[0].end == raw.len()
 }
 
 pub fn match(pattern: Regex, text: String) -> Match? Never! { find_match(pattern, text) }
@@ -126,22 +135,7 @@ pub fn find_all(pattern: Regex, text: String) -> [String] Never! {
 pub fn matches(pattern: Regex, text: String) -> [Match] Never! {
     raw :: text.bytes()
     out := [Match]{}
-    i := 0
-    loop i <= raw.len() {
-        caps := [CaptureSpan]{}
-        end :: run_exec(pattern, raw, i, pattern.root, &caps)
-        if end >= i && (end > i || empty_ok(pattern)) {
-            &out.push(make_match(raw, i, end, caps))
-            if end == i {
-                i = i + scalar_width(raw, i)
-            } else {
-                i = end
-            }
-        } else {
-            i = i + scalar_width(raw, i)
-        }
-        if out.len() > raw.len() + 1 -> break
-    }
+    loop run in scan(pattern, raw, 0, false, true, false, -1) -> &out.push(make_match(raw, run, pattern.groups))
     out
 }
 
@@ -149,15 +143,14 @@ pub fn split(pattern: Regex, text: String) -> [String] Never! { split_limit(patt
 
 pub fn split_limit(pattern: Regex, text: String, n: Int) -> [String] Never! {
     raw :: text.bytes()
-    ms :: matches(pattern, text)
+    if n == 1 -> return [String]{text}
+    limit := -1
+    if n > 1 -> limit = n - 1
     out := [String]{}
     cur := 0
-    used := 0
-    loop m in ms {
-        if n > 0 && used + 1 >= n -> break
-        &out.push(slice(raw, cur, m.start))
-        cur = m.end
-        used = used + 1
+    loop run in scan(pattern, raw, 0, false, false, false, limit) {
+        &out.push(slice(raw, cur, run.start))
+        cur = run.end
     }
     &out.push(slice(raw, cur, raw.len()))
     out
@@ -243,15 +236,15 @@ pub fn replace_first(pattern: Regex, text: String, replacement: String) -> Strin
 
 fn replace_n(pattern: Regex, text: String, replacement: String, first_only: Bool) -> String {
     raw :: text.bytes()
-    ms :: matches(pattern, text)
+    limit := -1
+    if first_only -> limit = 1
     out := [U8]{}
     cur := 0
-    loop m in ms {
-        loop b in slice(raw, cur, m.start).bytes() -> &out.push(b)
-        expanded :: expand(m, replacement)
+    loop run in scan(pattern, raw, 0, false, true, false, limit) {
+        loop b in slice(raw, cur, run.start).bytes() -> &out.push(b)
+        expanded :: expand(make_match(raw, run, pattern.groups), replacement)
         loop b in expanded.bytes() -> &out.push(b)
-        cur = m.end
-        if first_only -> break
+        cur = run.end
     }
     loop b in slice(raw, cur, raw.len()).bytes() -> &out.push(b)
     String.from_bytes(out) ?? ""
@@ -262,11 +255,7 @@ struct Parser {
     i: Int
     flags: RegexFlags
     nodes: [Node]
-}
-
-struct CaptureSpan {
-    start: Int
-    end: Int
+    groups: Int
 }
 
 impl Parser {
@@ -350,7 +339,18 @@ impl Parser {
         if n == 41 || n == 124 || n == 42 || n == 43 || n == 63 || n == 123 {
             return Err(RegexError.Syntax)
         }
-        Ok(&self.emit("lit", String.from_bytes([U8]{b}) ?? "", 0, 0, -1, -1, false))
+        // One literal is one scalar: a UTF-8 lead byte takes its continuation
+        // bytes, so the VM consumes the whole character in one step.
+        lit := [U8]{b}
+        if n >= 192 {
+            loop {
+                c :: self.peek() ?? break
+                if c < (U8{128}) || c > (U8{191}) -> break
+                _ :: &self.bump()
+                &lit.push(c)
+            }
+        }
+        Ok(&self.emit("lit", String.from_bytes(lit) ?? "", 0, 0, -1, -1, false))
     }
 
     fn parse_group(&self) -> Int RegexError! {
@@ -377,11 +377,14 @@ impl Parser {
             if raw_name.len() == 0 -> return Err(RegexError.Syntax)
             name = String.from_bytes(raw_name) ?? ""
         }
+        // Capture numbers follow the opening `(`, as in the Prelude engine.
+        self.groups = self.groups + 1
+        index :: self.groups
         inner :: &self.parse_alt()
         group_close :: self.peek() ?? (U8{0})
         if group_close != (U8{41}) -> return Err(RegexError.Syntax)
         _ :: &self.bump()
-        Ok(&self.emit("group", name, 0, 0, inner, -1, false))
+        Ok(&self.emit("group", name, index, 0, inner, -1, false))
     }
 
     fn parse_escape(&self) -> Int RegexError! {
@@ -397,7 +400,10 @@ impl Parser {
             110 -> return Ok(&self.emit("lit", "\n", 0, 0, -1, -1, false))
             114 -> return Ok(&self.emit("lit", String.from_bytes([U8]{13}) ?? "", 0, 0, -1, -1, false))
             116 -> return Ok(&self.emit("lit", "\t", 0, 0, -1, -1, false))
-            else -> { _ := 0 }
+            else -> {
+                // Backreferences are not linear; the Prelude engine rejects them too.
+                if n >= 48 && n <= 57 -> return Err(RegexError.Syntax)
+            }
         }
         Ok(&self.emit("lit", String.from_bytes([U8]{b}) ?? "", 0, 0, -1, -1, false))
     }
@@ -481,23 +487,6 @@ impl Parser {
     }
 }
 
-struct MatchBudget {
-    remaining: Int
-}
-
-fn budget_limit(re: Regex, text: [U8]) -> Int Never! {
-    nodes := re.nodes.len()
-    bytes := text.len()
-    n := nodes
-    if n > 4096 -> n = 4096
-    m := bytes
-    if m > 4096 -> m = 4096
-    limit := (n + 1) * (m + 1) * 32
-    if limit < 4096 -> return 4096
-    if limit > 1000000 -> return 1000000
-    limit
-}
-
 fn scalar_width(raw: [U8], i: Int) -> Int Never! {
     if i < 0 || i >= raw.len() -> return 1
     n :: raw[i]
@@ -520,186 +509,314 @@ fn scalar_width(raw: [U8], i: Int) -> Int Never! {
     need + 1
 }
 
-fn trim_caps(caps: &[CaptureSpan], keep: Int) Never! {
-    loop caps.len() > keep -> _ :: &caps.pop()
+// Program instructions, the Prelude engine's RegexInst set. A consuming
+// instruction continues at `x`; Split prefers `x` over `y` (leftmost-first).
+OP_LIT :: 0
+OP_ANY :: 1
+OP_CLASS :: 2
+OP_SAVE :: 3
+OP_SPLIT :: 4
+OP_ASSERT_START :: 5
+OP_ASSERT_END :: 6
+OP_MATCH :: 7
+
+struct Inst {
+    op: Int
+    s: String
+    neg: Bool
+    slot: Int
+    x: Int
+    y: Int
 }
 
-fn run_exec(re: Regex, text: [U8], i: Int, node: Int, caps: &[CaptureSpan]) -> Int Never! {
-    budget := MatchBudget{remaining: budget_limit(re, text)}
-    exec(re, text, i, node, &caps, &budget)
+// A fragment's dangling exits: `inst` patches `x`, `-inst - 1` patches `y`.
+struct Frag {
+    start: Int
+    outs: [Int]
 }
 
-fn flatten_seq(re: Regex, node: Int, parts: &[Int]) Never! {
-    if node < 0 || node >= re.nodes.len() -> return
-    n :: re.nodes[node]
-    if n.kind == "seq" {
-        flatten_seq(re, n.left, &parts)
-        flatten_seq(re, n.right, &parts)
-        return
+struct Compiler {
+    nodes: [Node]
+    insts: [Inst]
+}
+
+impl Compiler {
+    fn push(&self, op: Int, s: String, neg: Bool, slot: Int) -> Int Never! {
+        &self.insts.push(Inst{op: op, s: s, neg: neg, slot: slot, x: -1, y: -1})
+        self.insts.len() - 1
     }
-    &parts.push(node)
-}
 
-fn exec_sequence(re: Regex, text: [U8], i: Int, node: Int, caps: &[CaptureSpan], budget: &MatchBudget) -> Int Never! {
-    parts := [Int]{}
-    flatten_seq(re, node, &parts)
-    exec_parts(re, text, i, parts, 0, &caps, &budget)
-}
-
-fn exec_parts(re: Regex, text: [U8], pos: Int, parts: [Int], index: Int, caps: &[CaptureSpan], budget: &MatchBudget) -> Int Never! {
-    if index >= parts.len() -> return pos
-    n :: re.nodes[parts[index]]
-    if n.kind == "rep" -> return exec_rep_tail(re, text, pos, n, parts, index + 1, &caps, &budget, 0)
-    if n.kind == "alt" -> return exec_alt_tail(re, text, pos, n, parts, index + 1, &caps, &budget)
-    end :: exec(re, text, pos, parts[index], &caps, &budget)
-    if end < 0 -> return -1
-    exec_parts(re, text, end, parts, index + 1, &caps, &budget)
-}
-
-fn exec_alt_tail(re: Regex, text: [U8], pos: Int, n: Node, parts: [Int], next: Int, caps: &[CaptureSpan], budget: &MatchBudget) -> Int Never! {
-    saved := caps.len()
-    left :: exec(re, text, pos, n.left, &caps, &budget)
-    if left >= 0 {
-        end :: exec_parts(re, text, left, parts, next, &caps, &budget)
-        if end >= 0 -> return end
+    fn single(&self, op: Int, s: String, neg: Bool, slot: Int) -> Frag Never! {
+        id :: &self.push(op, s, neg, slot)
+        Frag{start: id, outs: [Int]{id}}
     }
-    trim_caps(&caps, saved)
-    right :: exec(re, text, pos, n.right, &caps, &budget)
-    if right < 0 -> return -1
-    exec_parts(re, text, right, parts, next, &caps, &budget)
-}
 
-fn exec_rep_tail(re: Regex, text: [U8], pos: Int, n: Node, parts: [Int], next: Int, caps: &[CaptureSpan], budget: &MatchBudget, count: Int) -> Int Never! {
-    if n.b >= 0 && count >= n.b -> return exec_parts(re, text, pos, parts, next, &caps, &budget)
-    if count >= n.a {
-        saved := caps.len()
-        nxt :: exec(re, text, pos, n.left, &caps, &budget)
-        if nxt >= 0 && nxt != pos {
-            deeper :: exec_rep_tail(re, text, nxt, n, parts, next, &caps, &budget, count + 1)
-            if deeper >= 0 -> return deeper
-            trim_caps(&caps, saved)
-        } else {
-            trim_caps(&caps, saved)
+    fn patch(&self, outs: [Int], target: Int) Never! {
+        loop code in outs {
+            if {
+                code >= 0 -> {
+                    old :: ~self.insts[code]
+                    self.insts[code] = Inst{op: old.op, s: old.s, neg: old.neg, slot: old.slot, x: target, y: old.y}
+                }
+                else -> {
+                    id :: -code - 1
+                    old :: ~self.insts[id]
+                    self.insts[id] = Inst{op: old.op, s: old.s, neg: old.neg, slot: old.slot, x: old.x, y: target}
+                }
+            }
         }
-        return exec_parts(re, text, pos, parts, next, &caps, &budget)
     }
-    saved := caps.len()
-    nxt :: exec(re, text, pos, n.left, &caps, &budget)
-    if nxt < 0 || nxt == pos {
-        trim_caps(&caps, saved)
-        return -1
+
+    fn star(&self, node: Int) -> Frag Never! {
+        atom :: &self.compile(node)
+        split :: &self.push(OP_SPLIT, "", false, -1)
+        &self.patch([Int]{split}, atom.start)
+        &self.patch(atom.outs, split)
+        Frag{start: split, outs: [Int]{-split - 1}}
     }
-    end :: exec_rep_tail(re, text, nxt, n, parts, next, &caps, &budget, count + 1)
-    if end < 0 -> trim_caps(&caps, saved)
-    end
+
+    fn optional(&self, node: Int) -> Frag Never! {
+        atom :: &self.compile(node)
+        split :: &self.push(OP_SPLIT, "", false, -1)
+        &self.patch([Int]{split}, atom.start)
+        outs := atom.outs
+        &outs.push(-split - 1)
+        Frag{start: split, outs: outs}
+    }
+
+    // Recursion here follows the pattern's nesting, never the text.
+    fn compile(&self, node: Int) -> Frag Never! {
+        n :: ~self.nodes[node]
+        if n.kind == "lit" -> return &self.single(OP_LIT, n.s, false, -1)
+        if n.kind == "dot" -> return &self.single(OP_ANY, "", false, -1)
+        if n.kind == "class" -> return &self.single(OP_CLASS, n.s, n.neg, -1)
+        if n.kind == "start" -> return &self.single(OP_ASSERT_START, "", false, -1)
+        if n.kind == "end" -> return &self.single(OP_ASSERT_END, "", false, -1)
+        if n.kind == "seq" {
+            left :: &self.compile(n.left)
+            right :: &self.compile(n.right)
+            &self.patch(left.outs, right.start)
+            return Frag{start: left.start, outs: right.outs}
+        }
+        if n.kind == "alt" {
+            left :: &self.compile(n.left)
+            right :: &self.compile(n.right)
+            split :: &self.push(OP_SPLIT, "", false, -1)
+            &self.patch([Int]{split}, left.start)
+            &self.patch([Int]{-split - 1}, right.start)
+            outs := left.outs
+            loop code in right.outs -> &outs.push(code)
+            return Frag{start: split, outs: outs}
+        }
+        if n.kind == "group" {
+            open :: &self.push(OP_SAVE, "", false, n.a * 2)
+            inner :: &self.compile(n.left)
+            &self.patch([Int]{open}, inner.start)
+            close :: &self.push(OP_SAVE, "", false, n.a * 2 + 1)
+            &self.patch(inner.outs, close)
+            return Frag{start: open, outs: [Int]{close}}
+        }
+        if n.kind == "rep" {
+            // `{min,max}`: min required copies, then max - min optional
+            // copies or one star, exactly the Prelude compile_range shape.
+            frag := &self.single(OP_SAVE, "", false, -1)
+            loop k in 0..<n.a {
+                piece :: &self.compile(n.left)
+                &self.patch(frag.outs, piece.start)
+                frag = Frag{start: frag.start, outs: piece.outs}
+            }
+            if n.b < 0 {
+                tail :: &self.star(n.left)
+                &self.patch(frag.outs, tail.start)
+                return Frag{start: frag.start, outs: tail.outs}
+            }
+            loop k in n.a..<n.b {
+                tail :: &self.optional(n.left)
+                &self.patch(frag.outs, tail.start)
+                frag = Frag{start: frag.start, outs: tail.outs}
+            }
+            return frag
+        }
+        // "empty": a no-op save keeps the fragment shape uniform.
+        &self.single(OP_SAVE, "", false, -1)
+    }
 }
 
-fn exec(re: Regex, text: [U8], i: Int, node: Int, caps: &[CaptureSpan], budget: &MatchBudget) -> Int Never! {
-    saved := caps.len()
-    if budget.remaining <= 0 -> return -1
-    budget.remaining = budget.remaining - 1
-    if i < 0 || node < 0 || node >= re.nodes.len() -> return -1
-    n :: re.nodes[node]
-    if n.kind == "empty" -> return i
-    if n.kind == "lit" {
-        lit :: n.s.bytes()
-        if i + lit.len() > text.len() -> return -1
-        loop k in 0..<lit.len() {
-            a :: fold(text[i + k], re.flags.ignore_case)
-            b :: fold(lit[k], re.flags.ignore_case)
-            if a != b -> return -1
-        }
-        return i + lit.len()
-    }
-    if n.kind == "dot" {
-        if i >= text.len() -> return -1
-        if text[i] == (U8{10}) && !re.flags.dot_matches_newline -> return -1
-        return i + scalar_width(text, i)
-    }
-    if n.kind == "start" {
-        if i == 0 -> return i
-        if re.flags.multiline && i > 0 && text[i - 1] == (U8{10}) -> return i
-        return -1
-    }
-    if n.kind == "end" {
-        if i == text.len() -> return i
-        if re.flags.multiline && i < text.len() && text[i] == (U8{10}) -> return i
-        return -1
-    }
-    if n.kind == "seq" {
-        end :: exec_sequence(re, text, i, node, &caps, &budget)
-        if end < 0 -> trim_caps(&caps, saved)
-        return end
-    }
-    if n.kind == "alt" {
-        left_saved := caps.len()
-        a :: exec(re, text, i, n.left, &caps, &budget)
-        if a >= 0 -> return a
-        trim_caps(&caps, left_saved)
-        return exec(re, text, i, n.right, &caps, &budget)
-    }
-    if n.kind == "group" {
-        slot := caps.len()
-        &caps.push(CaptureSpan{start: i, end: -1})
-        end :: exec(re, text, i, n.left, &caps, &budget)
-        if end >= 0 {
-            caps[slot] = CaptureSpan{start: i, end: end}
-            return end
-        }
-        trim_caps(&caps, saved)
-        return -1
-    }
-    if n.kind == "class" {
-        if i >= text.len() -> return -1
-        width :: scalar_width(text, i)
-        if text[i] > (U8{127}) && !n.neg -> return -1
-        ok :: class_hit(n.s, text[i], re.flags.ignore_case)
-        if n.neg {
-            if ok -> return -1
-            return i + width
-        }
-        if ok -> return i + width
-        return -1
-    }
-    if n.kind == "rep" {
-        end :: exec_rep(re, text, i, n, &caps, 0, &budget)
-        if end < 0 -> trim_caps(&caps, saved)
-        return end
-    }
-    -1
+struct Thread {
+    pc: Int
+    start: Int
+    caps: Int
 }
 
-fn exec_rep(re: Regex, text: [U8], i: Int, n: Node, caps: &[CaptureSpan], count: Int, budget: &MatchBudget) -> Int Never! {
-    if n.b >= 0 && count == n.b -> return i
-    if count >= n.a {
-        rest :: exec_rep_more(re, text, i, n, &caps, count, &budget)
-        if rest >= 0 -> return rest
-        return i
-    }
-    saved := caps.len()
-    nxt :: exec(re, text, i, n.left, &caps, &budget)
-    if nxt < 0 || (nxt == i && n.b != 0) {
-        trim_caps(&caps, saved)
-        return -1
-    }
-    end :: exec_rep(re, text, nxt, n, &caps, count + 1, &budget)
-    if end < 0 -> trim_caps(&caps, saved)
-    end
+// Captures are a persistent list: each Save pushes one node that points at
+// the thread's previous head, so forking a thread copies one Int.
+struct CapNode {
+    slot: Int
+    pos: Int
+    prev: Int
 }
 
-fn exec_rep_more(re: Regex, text: [U8], i: Int, n: Node, caps: &[CaptureSpan], count: Int, budget: &MatchBudget) -> Int Never! {
-    if n.b >= 0 && count >= n.b -> return -1
-    saved := caps.len()
-    nxt :: exec(re, text, i, n.left, &caps, &budget)
-    if nxt < 0 || nxt == i {
-        trim_caps(&caps, saved)
-        return -1
+struct VMState {
+    threads: [Thread]
+    seen: [Int]
+    epoch: Int
+    min_start: Int
+    matched: Thread
+}
+
+struct Run {
+    start: Int
+    end: Int
+    caps: [Int]
+}
+
+fn no_thread() -> Thread Never! { Thread{pc: -1, start: -1, caps: -1} }
+
+fn new_state(size: Int) -> VMState Never! {
+    seen := [Int]{}
+    loop k in 0..<size -> &seen.push(-1)
+    VMState{threads: [Thread]{}, seen: seen, epoch: 0, min_start: -1, matched: no_thread()}
+}
+
+/// Follow every epsilon edge from `first` with an explicit stack, in
+/// priority order, recording consuming and matching threads once per pc.
+fn add_thread(re: Regex, text: [U8], state: &VMState, arena: &[CapNode], first: Thread, pos: Int, capture: Bool) Never! {
+    stack := [Thread]{first}
+    loop stack.len() > 0 {
+        t :: &stack.pop() ?? break
+        if state.seen[t.pc] == state.epoch -> next
+        state.seen[t.pc] = state.epoch
+        inst :: re.insts[t.pc]
+        if inst.op == OP_SAVE {
+            caps := t.caps
+            if capture && inst.slot >= 0 {
+                &arena.push(CapNode{slot: inst.slot, pos: pos, prev: t.caps})
+                caps = arena.len() - 1
+            }
+            &stack.push(Thread{pc: inst.x, start: t.start, caps: caps})
+            next
+        }
+        if inst.op == OP_SPLIT {
+            &stack.push(Thread{pc: inst.y, start: t.start, caps: t.caps})
+            &stack.push(Thread{pc: inst.x, start: t.start, caps: t.caps})
+            next
+        }
+        if inst.op == OP_ASSERT_START {
+            if pos == 0 || (re.flags.multiline && text[pos - 1] == (U8{10})) {
+                &stack.push(Thread{pc: inst.x, start: t.start, caps: t.caps})
+            }
+            next
+        }
+        if inst.op == OP_ASSERT_END {
+            if pos == text.len() -> &stack.push(Thread{pc: inst.x, start: t.start, caps: t.caps})
+            next
+        }
+        if state.min_start < 0 || t.start < state.min_start -> state.min_start = t.start
+        if inst.op == OP_MATCH && (state.matched.pc < 0 || t.start < state.matched.start) {
+            state.matched = t
+        }
+        &state.threads.push(t)
     }
-    after_child := caps.len()
-    deeper :: exec_rep_more(re, text, nxt, n, &caps, count + 1, &budget)
-    if deeper >= 0 -> return deeper
-    trim_caps(&caps, after_child)
-    nxt
+}
+
+fn consumes(re: Regex, inst: Inst, text: [U8], pos: Int, width: Int) -> Bool Never! {
+    if inst.op == OP_ANY -> return re.flags.dot_matches_newline || text[pos] != (U8{10})
+    if inst.op == OP_CLASS {
+        if text[pos] > (U8{127}) -> return inst.neg
+        return class_hit(inst.s, text[pos], re.flags.ignore_case) != inst.neg
+    }
+    lit :: inst.s.bytes()
+    if lit.len() != width -> return false
+    loop k in 0..<width {
+        if fold(text[pos + k], re.flags.ignore_case) != fold(lit[k], re.flags.ignore_case) -> return false
+    }
+    true
+}
+
+fn capture_slots(arena: [CapNode], found: Thread, end: Int, groups: Int, capture: Bool) -> [Int] Never! {
+    slots := [Int]{}
+    if !capture -> return slots
+    loop k in 0..<((groups + 1) * 2) -> &slots.push(-1)
+    head := found.caps
+    loop head >= 0 {
+        node :: arena[head]
+        if node.slot < slots.len() && slots[node.slot] < 0 -> slots[node.slot] = node.pos
+        head = node.prev
+    }
+    slots[0] = found.start
+    slots[1] = end
+    slots
+}
+
+fn next_search_pos(text: [U8], start: Int, end: Int) -> Int Never! {
+    if end > start -> return end
+    if end >= text.len() -> return text.len() + 1
+    end + scalar_width(text, end)
+}
+
+/// The Prelude `regex_scan`: start threads enter one shared VM at each scalar
+/// boundary until the leftmost match begins; that start's last match wins,
+/// and the scan resumes at the non-overlap boundary. Collects at most
+/// `limit` runs (all when `limit` < 0).
+fn scan(re: Regex, text: [U8], from: Int, anchored: Bool, capture: Bool, stop_on_match: Bool, limit: Int) -> [Run] Never! {
+    out := [Run]{}
+    if from > text.len() -> return out
+    size :: re.insts.len()
+    current := new_state(size)
+    arena := [CapNode]{}
+    pos := from
+    winner := -1
+    has_last := false
+    last := Run{start: 0, end: 0, caps: [Int]{}}
+    single_start :: anchored || (re.anchored_start && !re.flags.multiline)
+    loop {
+        can_start :: !re.anchored_start || re.flags.multiline || pos == 0
+        if winner < 0 && can_start && (!anchored || pos == from) {
+            add_thread(re, text, &current, &arena, Thread{pc: re.start, start: pos, caps: -1}, pos, capture)
+        }
+        if stop_on_match && current.matched.pc >= 0 {
+            &out.push(Run{start: current.matched.start, end: pos, caps: [Int]{}})
+            return out
+        }
+        if current.threads.len() == 0 && single_start -> return out
+        found :: current.matched
+        if winner < 0 && found.pc >= 0 -> winner = found.start
+        if winner >= 0 && found.pc >= 0 && found.start == winner {
+            last = Run{start: found.start, end: pos, caps: capture_slots(arena, found, pos, re.groups, capture)}
+            has_last = true
+        }
+        boundary := pos == text.len()
+        if !boundary {
+            width :: scalar_width(text, pos)
+            next_pos :: pos + width
+            following := new_state(size)
+            loop t in current.threads {
+                inst :: re.insts[t.pc]
+                if inst.op > OP_CLASS -> next
+                if !consumes(re, inst, text, pos, width) -> next
+                add_thread(re, text, &following, &arena, Thread{pc: inst.x, start: t.start, caps: t.caps}, next_pos, capture)
+            }
+            current = following
+            if stop_on_match && current.matched.pc >= 0 {
+                &out.push(Run{start: current.matched.start, end: next_pos, caps: [Int]{}})
+                return out
+            }
+            pos = next_pos
+            boundary = winner >= 0 && current.min_start != winner
+        }
+        if boundary {
+            if !has_last -> return out
+            resume :: next_search_pos(text, last.start, last.end)
+            &out.push(last)
+            has_last = false
+            last = Run{start: 0, end: 0, caps: [Int]{}}
+            if limit >= 0 && out.len() >= limit -> return out
+            if resume > text.len() -> return out
+            current = new_state(size)
+            winner = -1
+            pos = resume
+        }
+    }
 }
 
 fn class_hit(spec: String, b: U8, fold_case: Bool) -> Bool Never! {
@@ -728,7 +845,12 @@ fn class_hit(spec: String, b: U8, fold_case: Bool) -> Bool Never! {
                 i = i + 2
                 next
             }
-            if fold(escaped, fold_case) == ch -> return true
+            // `\n`, `\r`, `\t` name their control bytes in a class too.
+            literal := escaped
+            if escaped == (U8{110}) -> literal = U8{10}
+            if escaped == (U8{114}) -> literal = U8{13}
+            if escaped == (U8{116}) -> literal = U8{9}
+            if fold(literal, fold_case) == ch -> return true
             i = i + 2
             next
         }
@@ -753,25 +875,27 @@ fn fold(b: U8, on: Bool) -> Int Never! {
 
 fn find_match(pattern: Regex, text: String) -> Match? {
     raw :: text.bytes()
-    i := 0
-    loop i <= raw.len() {
-        caps := [CaptureSpan]{}
-        end :: run_exec(pattern, raw, i, pattern.root, &caps)
-        if end >= i {
-            return Val(make_match(raw, i, end, caps))
-        }
-        i = i + scalar_width(raw, i)
-    }
-    None
+    runs :: scan(pattern, raw, 0, false, true, false, 1)
+    if runs.len() == 0 -> return None
+    Val(make_match(raw, runs[0], pattern.groups))
 }
 
-fn make_match(raw: [U8], start: Int, end: Int, caps: [CaptureSpan]) -> Match Never! {
+fn make_match(raw: [U8], run: Run, group_count: Int) -> Match Never! {
     groups := [String]{}
-    loop g in caps -> &groups.push(slice(raw, g.start, g.end))
-    Match{start: start, end: end, text: slice(raw, start, end), groups: groups}
+    loop g in 1..<(group_count + 1) {
+        start := -1
+        end := -1
+        if 2 * g + 1 < run.caps.len() {
+            start = run.caps[2 * g]
+            end = run.caps[2 * g + 1]
+        }
+        if {
+            start >= 0 && end >= start -> &groups.push(slice(raw, start, end))
+            else -> &groups.push("")
+        }
+    }
+    Match{start: run.start, end: run.end, text: slice(raw, run.start, run.end), groups: groups}
 }
-
-fn empty_ok(pattern: Regex) -> Bool { true }
 
 fn slice(raw: [U8], start: Int, end: Int) -> String Never! {
     out := [U8]{}

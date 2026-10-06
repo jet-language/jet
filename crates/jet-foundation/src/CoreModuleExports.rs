@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 14dc54ce6fbe429b4105620c98cb2c0ec17ee50a367f56e79c47abd688536f72
+// Source SHA-256: 0c97edd4dda79f8488b7fbc365f543eff98d5096e00250905a2285476312c432
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -476,8 +476,8 @@ const CORE_MODULE_75_MEMBERS: &[&str] = &["of", "ReflectValue", "inspect"];
 const CORE_MODULE_75_TYPES: &[(&str, CoreLeafKind)] = &[("ReflectValue", CoreLeafKind::Plain)];
 const CORE_MODULE_75_DEPENDENCIES: &[&str] = &["core.text"];
 
-const CORE_MODULE_76_MEMBERS: &[&str] = &["compile", "compile_with", "escape", "find", "find_all", "finditer", "flags", "full_match", "is_match", "match", "matches", "purge", "replace", "replace_first", "split", "split_limit", "Match", "Node", "Pattern", "Regex", "RegexFlag", "RegexFlags", "expand", "regex", "join", "search", "findall", "fullmatch", "sub", "subn", "RegexError"];
-const CORE_MODULE_76_TYPES: &[(&str, CoreLeafKind)] = &[("Pattern", CoreLeafKind::Plain), ("RegexFlag", CoreLeafKind::Plain), ("Match", CoreLeafKind::Plain), ("Node", CoreLeafKind::Plain), ("Regex", CoreLeafKind::Plain), ("RegexFlags", CoreLeafKind::Plain), ("RegexError", CoreLeafKind::Enum(&["Syntax", "Cache"]))];
+const CORE_MODULE_76_MEMBERS: &[&str] = &["compile", "compile_with", "escape", "find", "find_all", "finditer", "flags", "full_match", "is_match", "match", "matches", "purge", "replace", "replace_first", "split", "split_limit", "Match", "Pattern", "Regex", "RegexFlag", "RegexFlags", "expand", "regex", "join", "search", "findall", "fullmatch", "sub", "subn", "RegexError"];
+const CORE_MODULE_76_TYPES: &[(&str, CoreLeafKind)] = &[("Pattern", CoreLeafKind::Plain), ("RegexFlag", CoreLeafKind::Plain), ("Match", CoreLeafKind::Plain), ("Regex", CoreLeafKind::Plain), ("RegexFlags", CoreLeafKind::Plain), ("RegexError", CoreLeafKind::Enum(&["Syntax", "Cache"]))];
 const CORE_MODULE_76_DEPENDENCIES: &[&str] = &["core.text"];
 
 const CORE_MODULE_77_MEMBERS: &[&str] = &["callback", "RealtimeStream"];
