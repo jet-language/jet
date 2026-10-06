@@ -629,14 +629,16 @@ fn sema_stmt_check_unit_if_parts(condition: Expr, then_body: [Stmt], then_value:
         .Val(checked) -> checked.bindings
         else -> [SemaConditionBinding]{}
     }
-    before := sema_ownership_state_snapshot(state)
+    // Both arms check in place on the live ownership state, each rolled back
+    // to the fork (sema_ownership_fork), and their paths join after.
+    fork :: sema_ownership_fork(&state)
     before_hardware :: sema_scope_hardware_facts(scopes)
-    then_state := sema_ownership_state_snapshot(before)
     then_mark :: sema_scope_mark(&scopes)
-    then_result :: sema_stmt_check_unit_branch(then_body, then_value, condition_bindings, return_type, environment, &scopes, &then_state, &tail_store, &context, &diagnostics, "if.then@{span.start}", loop_depth)
+    then_result :: sema_stmt_check_unit_branch(then_body, then_value, condition_bindings, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, "if.then@{span.start}", loop_depth)
+    then_path :: sema_ownership_fork_path(state, fork)
+    sema_ownership_fork_rollback(&state, fork)
     then_hardware :: sema_scope_hardware_facts(scopes)
     sema_scope_rollback(&scopes, then_mark)
-    else_state := sema_ownership_state_snapshot(before)
     else_mark :: sema_scope_mark(&scopes)
     else_is_elseif := false
     else_result := SemaStatementResult{value: [TStmt]{}, complete: false}
@@ -644,11 +646,13 @@ fn sema_stmt_check_unit_if_parts(condition: Expr, then_body: [Stmt], then_value:
         .If(_, _, _, _, _, _) -> {
             else_is_elseif = true
             if else_body.len() == 0 {
-                else_result = sema_stmt_check_unit_if(else_value, return_type, environment, &scopes, &else_state, &tail_store, &context, &diagnostics, loop_depth)
+                else_result = sema_stmt_check_unit_if(else_value, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
             }
         }
-        else -> else_result = sema_stmt_check_unit_branch(else_body, else_value, [SemaConditionBinding]{}, return_type, environment, &scopes, &else_state, &tail_store, &context, &diagnostics, "if.else@{span.start}", loop_depth)
+        else -> else_result = sema_stmt_check_unit_branch(else_body, else_value, [SemaConditionBinding]{}, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, "if.else@{span.start}", loop_depth)
     }
+    else_path :: sema_ownership_fork_path(state, fork)
+    sema_ownership_fork_rollback(&state, fork)
     sema_leave_source_nesting(&context)
     else_hardware :: sema_scope_hardware_facts(scopes)
     sema_scope_rollback(&scopes, else_mark)
@@ -656,24 +660,26 @@ fn sema_stmt_check_unit_if_parts(condition: Expr, then_body: [Stmt], then_value:
     // code after the `if`, so its moves are not moves there (D-COPY-DEFAULT1).
     then_reaches_merge :: sema_stmt_tir_block_can_fall_through(then_result.value)
     else_reaches_merge :: sema_stmt_tir_block_can_fall_through(else_result.value)
-    if {
-        then_reaches_merge && else_reaches_merge -> sema_ownership_join_paths(&state, before, then_state, else_state, true)
-        then_reaches_merge -> sema_ownership_join_paths(&state, before, then_state, before, false)
-        else_reaches_merge -> sema_ownership_join_paths(&state, before, else_state, before, false)
-        else -> sema_ownership_join_paths(&state, before, before, before, false)
+    // The single-use check reads the state before the branch, which the
+    // rollback left live; the join reports nothing, so the order holds.
+    single_use_paths := [SemaOwnershipPath]{}
+    if then_reaches_merge -> &single_use_paths.push(then_path)
+    if else_reaches_merge -> &single_use_paths.push(else_path)
+    sema_single_use_check_paths(state, single_use_paths, &diagnostics)
+    base :: sema_ownership_fork_base(fork)
+    joined :: if {
+        then_reaches_merge && else_reaches_merge -> sema_ownership_path_join(state, fork, then_path, else_path, true, state.share_found)
+        then_reaches_merge -> sema_ownership_path_join(state, fork, then_path, base, false, state.share_found)
+        else_reaches_merge -> sema_ownership_path_join(state, fork, else_path, base, false, state.share_found)
+        else -> sema_ownership_path_join(state, fork, base, base, false, state.share_found)
     }
+    sema_ownership_fork_apply(&state, joined)
+    sema_ownership_fork_close(&state, fork)
     // D-UNINIT1: only paths that reach the merge count (Rust `merge_paths`).
-    if then_reaches_merge && !else_reaches_merge -> state.uninit = then_state.uninit
-    if else_reaches_merge && !then_reaches_merge -> state.uninit = else_state.uninit
-    loop site in then_state.share_found -> sema_ownership_note_share_found(&state, site)
-    loop site in else_state.share_found -> sema_ownership_note_share_found(&state, site)
-    // The join reads the arm states first, so they move into the single-use
-    // check instead of being copied once more (it reports nothing the join
-    // or the share notes do).
-    single_use_paths := [SemaOwnershipState]{}
-    if then_reaches_merge -> &single_use_paths.push(^then_state)
-    if else_reaches_merge -> &single_use_paths.push(^else_state)
-    sema_single_use_check_paths(before, single_use_paths, &diagnostics)
+    if then_reaches_merge && !else_reaches_merge -> state.uninit = then_path.uninit
+    if else_reaches_merge && !then_reaches_merge -> state.uninit = else_path.uninit
+    loop site in then_path.share_found -> sema_ownership_note_share_found(&state, site)
+    loop site in else_path.share_found -> sema_ownership_note_share_found(&state, site)
     sema_scope_join_hardware_paths(&scopes, before_hardware, then_hardware, else_hardware, true)
     if checked_condition == None || !then_result.complete || !else_result.complete {
         return SemaStatementResult{value: [TStmt]{}, complete: false}
@@ -744,24 +750,25 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
             }
         }
     }
-    before := sema_ownership_state_snapshot(state)
-    before_hardware :: sema_scope_hardware_facts(scopes)
-    fallthrough_state := sema_ownership_state_snapshot(before)
     // Arm conditions are checked on the fallthrough path in place; each arm
-    // body and the else body are checked in place and rolled back.
+    // body and the else body are checked in place and rolled back, on the
+    // scope table and on the ownership state (sema_ownership_fork). Paths are
+    // taken against the state before the table, `fork`.
+    fork :: sema_ownership_fork(&state)
+    before_hardware :: sema_scope_hardware_facts(scopes)
     fallthrough_mark :: sema_scope_mark(&scopes)
     conditions := [SemaCheckedCondition?]{}
     branches := [SemaStatementResult]{}
     branch_hardware := [SemaScopeHardwareFacts]{}
-    merged_state := sema_ownership_state_snapshot(before)
+    merged_path := sema_ownership_fork_base(fork)
     has_branch := false
     arm_found := [SemaOwnershipShareSite]{}
     complete := true
-    single_use_paths := [SemaOwnershipState]{}
+    single_use_paths := [SemaOwnershipPath]{}
     arm_index := 0
     loop arm_index < arms.len() {
         arm := arms[arm_index]
-        condition_result := sema_expression_check_condition(arm.cond, environment, &scopes, &fallthrough_state, &tail_store, &context, &diagnostics)
+        condition_result := sema_expression_check_condition(arm.cond, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         arm_bindings := [SemaConditionBinding]{}
         if condition_result == {
             .Val(condition) -> {
@@ -774,11 +781,11 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
             }
         }
         branch_mark :: sema_scope_mark(&scopes)
-        branch_state := sema_ownership_state_snapshot(fallthrough_state)
-        sema_scope_enter(&scopes, &branch_state, "if.arm@{arm.span.start}")
-        sema_expression_declare_condition_bindings(arm_bindings, &scopes, &branch_state, true, &diagnostics)
+        branch_fork :: sema_ownership_fork(&state)
+        sema_scope_enter(&scopes, &state, "if.arm@{arm.span.start}")
+        sema_expression_declare_condition_bindings(arm_bindings, &scopes, &state, true, &diagnostics)
         if value_tail -> context.value_tail_span = sema_stmt_value_tail_marker(arm.body)
-        branch := sema_check_statements(arm.body, return_type, environment, &scopes, &branch_state, &tail_store, &context, &diagnostics, loop_depth)
+        branch := sema_check_statements(arm.body, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
         // An arm whose body did not check leaves no complete TIR for it; the
         // table must not lower that arm as an empty fall-through.
         if !branch.complete -> complete = false
@@ -786,35 +793,34 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
             context.value_tail_span = Val(span)
             if !sema_stmt_check_value_block_end(arm.body, branch.value, return_type, arm.span, context.function_name, &diagnostics) -> complete = false
         }
-        sema_single_use_leave_scope(&scopes, &branch_state, &diagnostics)
+        sema_single_use_leave_scope(&scopes, &state, &diagnostics)
+        branch_path :: sema_ownership_fork_path(state, fork)
+        sema_ownership_fork_rollback(&state, branch_fork)
+        sema_ownership_fork_close(&state, branch_fork)
         &branch_hardware.push(sema_scope_hardware_facts(scopes))
         sema_scope_rollback(&scopes, branch_mark)
         &branches.push(branch)
         // D-COPY-DEFAULT1: an arm that leaves does not reach the merge.
-        loop site in branch_state.share_found -> &arm_found.push(site)
-        if sema_stmt_tir_block_can_fall_through(branch.value) -> &single_use_paths.push(sema_ownership_state_snapshot(branch_state))
+        loop site in branch_path.share_found -> &arm_found.push(site)
+        if sema_stmt_tir_block_can_fall_through(branch.value) -> &single_use_paths.push(branch_path)
         if {
             !sema_stmt_tir_block_can_fall_through(branch.value) -> {}
             !has_branch -> {
-                merged_state = branch_state
+                merged_path = branch_path
                 has_branch = true
             }
-            else -> {
-                joined := merged_state
-                sema_ownership_join_paths(&joined, before, merged_state, branch_state, true)
-                merged_state = joined
-            }
+            else -> merged_path = sema_ownership_path_join(state, fork, merged_path, branch_path, true, merged_path.share_found)
         }
         arm_index += 1
     }
     else_result := [TStmt]?{None}
-    else_state := sema_ownership_state_snapshot(fallthrough_state)
+    else_fork :: sema_ownership_fork(&state)
     else_mark :: sema_scope_mark(&scopes)
     if else_body != None {
         body :: else_body
         complement :: sema_stmt_else_presence_names(arms, scopes)
         if value_tail -> context.value_tail_span = sema_stmt_value_tail_marker(body)
-        checked_else :: if complement.len() == 0 -> sema_stmt_check_block(body, return_type, environment, &scopes, &else_state, &tail_store, &context, &diagnostics, "if.else@{span.start}", loop_depth) else -> sema_stmt_check_else_complement(complement, body, span, return_type, environment, &scopes, &else_state, &tail_store, &context, &diagnostics, loop_depth)
+        checked_else :: if complement.len() == 0 -> sema_stmt_check_block(body, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, "if.else@{span.start}", loop_depth) else -> sema_stmt_check_else_complement(complement, body, span, return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
         if !checked_else.complete -> complete = false
         if value_tail {
             context.value_tail_span = Val(span)
@@ -822,6 +828,9 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
         }
         else_result = Val(checked_else.value)
     }
+    else_path :: sema_ownership_fork_path(state, fork)
+    sema_ownership_fork_rollback(&state, else_fork)
+    sema_ownership_fork_close(&state, else_fork)
     else_hardware :: sema_scope_hardware_facts(scopes)
     sema_scope_rollback(&scopes, else_mark)
     sema_scope_rollback(&scopes, fallthrough_mark)
@@ -835,18 +844,23 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
         }
     }
     else_reaches_merge :: else_body == None || sema_stmt_tir_block_can_fall_through(else_result ?? [TStmt]{})
-    if {
-        has_branch && else_reaches_merge -> sema_ownership_join_paths(&state, before, merged_state, else_state, true)
-        has_branch -> sema_ownership_join_paths(&state, before, merged_state, merged_state, true)
-        else_reaches_merge -> sema_ownership_join_paths(&state, before, else_state, else_state, true)
-        else -> sema_ownership_join_paths(&state, before, before, before, false)
+    // The fallthrough path ends here: the live state is the one before the
+    // table again, which the single-use check reads; the join reports
+    // nothing, so the order holds.
+    sema_ownership_fork_rollback(&state, fork)
+    if else_reaches_merge -> &single_use_paths.push(else_path)
+    sema_single_use_check_paths(state, single_use_paths, &diagnostics)
+    base :: sema_ownership_fork_base(fork)
+    joined :: if {
+        has_branch && else_reaches_merge -> sema_ownership_path_join(state, fork, merged_path, else_path, true, state.share_found)
+        has_branch -> sema_ownership_path_join(state, fork, merged_path, merged_path, true, state.share_found)
+        else_reaches_merge -> sema_ownership_path_join(state, fork, else_path, else_path, true, state.share_found)
+        else -> sema_ownership_path_join(state, fork, base, base, false, state.share_found)
     }
+    sema_ownership_fork_apply(&state, joined)
+    sema_ownership_fork_close(&state, fork)
     loop site in arm_found -> sema_ownership_note_share_found(&state, site)
-    loop site in else_state.share_found -> sema_ownership_note_share_found(&state, site)
-    // Read by the join and share notes first (neither reports), the else
-    // state moves into the single-use check instead of a copy.
-    if else_reaches_merge -> &single_use_paths.push(^else_state)
-    sema_single_use_check_paths(before, single_use_paths, &diagnostics)
+    loop site in else_path.share_found -> sema_ownership_note_share_found(&state, site)
     sema_scope_join_hardware_paths(&scopes, before_hardware, hardware_merged, else_hardware, true)
     if !complete -> return SemaStatementResult{value: [TStmt]{}, complete: false}
     // A subjectless guard table proves no coverage: its arms test their own
@@ -2297,13 +2311,14 @@ fn sema_stmt_refutable_assign_capture_identity(pattern: &TPattern, name: BindNam
     }
 }
 
-// The miss route runs in its own frame on the live scope table, rolled back at
-// the end (instead of on a copy of the whole table).
-fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaRefutableFallbackCheck {
+// The miss route runs in its own frame on the live scope table and on the
+// live ownership state (sema_ownership_fork), both rolled back at the end
+// (instead of on copies of the whole table and state).
+fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaRefutableFallbackCheck {
     before := diagnostics.len()
     fallback_mark :: sema_scope_mark(&scopes)
-    fallback_state := sema_ownership_state_snapshot(state)
-    sema_scope_enter(&scopes, &fallback_state, "refutable.fallback@{span.start}")
+    fork :: sema_ownership_fork(&state)
+    sema_scope_enter(&scopes, &state, "refutable.fallback@{span.start}")
     carrier := sema_expr_unwrap_tag(subject_ty)
     result := SemaRefutableFallbackCheck{tir: None, statements: [TStmt]{}, complete: false, ambient_err: None}
     if carrier == {
@@ -2312,7 +2327,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
             symbol := Symbol{id: symbol_id(SymbolKind.Local, environment.module_identity, owner, "err"), kind: SymbolKind.Local, name: "err", module_name: environment.module_identity, owner: Val(owner), span: span, ty: Val(error_ty), visibility: 0}
             frame :: scopes.current
             sema_scope_push_binding(&scopes, SemaScopeBinding{frame: frame, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
-            sema_ownership_declare_binding(&fallback_state, symbol, false)
+            sema_ownership_declare_binding(&state, symbol, false)
             result.ambient_err = Val(tir_symbol_local("err", span, symbol.id))
         }
         else -> {}
@@ -2322,7 +2337,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
     context.fallback_err_denial = sema_fallback_err_denial_for(carrier)
     if fallback == {
         .Value(value) -> {
-            checked := sema_check_expression(value, None, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics)
+            checked := sema_check_expression(value, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
             if checked != None {
                 item :: checked ?? sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Unit, expr_span(value))
                 result.tir = Val(TOrFallback.Value{value: item})
@@ -2332,12 +2347,12 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
         }
         .Block(body, value, block_span) -> {
             block_mark :: sema_scope_mark(&scopes)
-            sema_scope_enter(&scopes, &fallback_state, "refutable.block@{block_span.start}")
+            sema_scope_enter(&scopes, &state, "refutable.block@{block_span.start}")
             block_return_type :: ~scopes.return_type
             block_loop_depth :: scopes.loop_depth
-            checked_block := sema_check_statements(body, block_return_type, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics, block_loop_depth)
-            if value == .Val(tail) -> _ := sema_check_expression(tail, None, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics)
-            sema_single_use_leave_scope(&scopes, &fallback_state, &diagnostics)
+            checked_block := sema_check_statements(body, block_return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, block_loop_depth)
+            if value == .Val(tail) -> _ := sema_check_expression(tail, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            sema_single_use_leave_scope(&scopes, &state, &diagnostics)
             sema_scope_rollback(&scopes, block_mark)
             diverges := value == None && (sema_stmt_refutable_block_exits(body) || sema_stmt_refutable_tir_block_has_never_expr(checked_block.value))
             valid := diverges && checked_block.complete
@@ -2364,15 +2379,15 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
                 .Val(expression) -> {
                     if {
                         scopes.return_type == None -> {
-                            _ := sema_check_expression(expression, None, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics)
+                            _ := sema_check_expression(expression, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
                             &diagnostics.push(sema_error("E0405", expr_span(expression), "`?? return value` cannot return a value here", "this function returns nothing", "drop the value from the return route"))
                         }
                         else -> {
                             fallback_return_type :: ~scopes.return_type
-                            checked :: sema_stmt_check_return_value(expression, fallback_return_type, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics)
+                            checked :: sema_stmt_check_return_value(expression, fallback_return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics)
                             if checked != None {
                                 checked_value :: checked
-                                if sema_stmt_record_return_views(expression, checked_value.ty, scopes, &fallback_state, &context, &diagnostics) && sema_stmt_move_direct(expression, &fallback_state, scopes, "`return`", &diagnostics) {
+                                if sema_stmt_record_return_views(expression, checked_value.ty, scopes, &state, &context, &diagnostics) && sema_stmt_move_direct(expression, &state, scopes, "`return`", &diagnostics) {
                                     return_tir = Val(TOrFallback.Return{value: Val(checked_value)})
                                     statement_value = Val(checked_value)
                                 }
@@ -2394,7 +2409,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
                     &diagnostics.push(sema_error("E0103", name_span, "`panic` needs exactly one message", "a panic report needs something to show the user", "write `?? panic(\"message\")`"))
                 }
                 else -> {
-                    message := sema_check_expression(args[0].expr, Val(Type.String), environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics)
+                    message := sema_check_expression(args[0].expr, Val(Type.String), environment, &scopes, &state, &tail_store, &context, &diagnostics)
                     if message != None {
                         checked :: message ?? sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: ""}}}, name_span)
                         location := sema_expression_panic_location(environment, scopes, name_span)
@@ -2456,7 +2471,9 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
         }
     }
     context.fallback_err_denial = enclosing_err_denial
-    sema_single_use_leave_scope(&scopes, &fallback_state, &diagnostics)
+    sema_single_use_leave_scope(&scopes, &state, &diagnostics)
+    sema_ownership_fork_rollback(&state, fork)
+    sema_ownership_fork_close(&state, fork)
     sema_scope_rollback(&scopes, fallback_mark)
     result.complete = result.complete && diagnostics.len() == before
     result
@@ -2477,7 +2494,7 @@ fn sema_stmt_check_refutable_binding(binding: Binding, pattern: Pattern, fallbac
     }
     move_valid := true
     if move_subject && !sema_stmt_move_direct(binding.init, &state, scopes, "the pattern binding", &diagnostics) -> move_valid = false
-    checked_fallback := sema_stmt_check_refutable_fallback(fallback, subject.ty, span, environment, &scopes, state, &tail_store, &context, &diagnostics)
+    checked_fallback := sema_stmt_check_refutable_fallback(fallback, subject.ty, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     locals := [TLocal]{}
     checked_pattern_tir := checked_pattern.checked
     loop name in names {

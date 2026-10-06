@@ -891,19 +891,26 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
         &diagnostics.push(sema_error("E0405", span, "`??` only works on a fallible value, not {type_name(subject.ty)}", "the left side must be a `Result` or optional value", "call something that can fail, then write `... ?? fallback`"))
         return None
     }
-    before := sema_ownership_state_snapshot(state)
-    fallback_state := sema_ownership_state_snapshot(before)
-    // The fallback route runs in its own frame on the live scope table and is
-    // rolled back, instead of on a copy of the whole table.
+    // The fallback route runs in its own frame on the live scope table and on
+    // the live ownership state, both rolled back (sema_ownership_fork),
+    // instead of on copies of the whole table and state.
+    fork :: sema_ownership_fork(&state)
     fallback_mark :: sema_scope_mark(&scopes)
-    route :: sema_expression_or_fallback_route(fallback, span, subject.ty, payload, environment, &scopes, &fallback_state, &tail_store, &context, &diagnostics)
+    route :: sema_expression_or_fallback_route(fallback, span, subject.ty, payload, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     sema_scope_rollback(&scopes, fallback_mark)
+    fallback_path :: sema_ownership_fork_path(state, fork)
     checked_route :: route ?? {
-        sema_ownership_keep_share_found(&state, fallback_state)
+        sema_ownership_fork_drop(&state, fork, fallback_path.share_found, [SemaOwnershipShareSite]{})
         return None
     }
     fallback_payload :: checked_route.payload
-    if checked_route.reaches_merge -> sema_ownership_join_paths(&state, before, before, fallback_state, true) else -> sema_ownership_keep_share_found(&state, fallback_state)
+    if checked_route.reaches_merge {
+        sema_ownership_fork_rollback(&state, fork)
+        sema_ownership_fork_apply(&state, sema_ownership_path_join(state, fork, sema_ownership_fork_base(fork), fallback_path, true, state.share_found))
+        sema_ownership_fork_close(&state, fork)
+    } else {
+        sema_ownership_fork_drop(&state, fork, fallback_path.share_found, [SemaOwnershipShareSite]{})
+    }
     route_value :: checked_route.value ?? TOrFallback.Value{value: sema_tir_expr(fallback_payload, TExprKind.Unit, span)}
     // D-FAILURE-FOUNDATION1=A (Rust `lower_or_fallback`): a mixed `T? E!`
     // carrier has two failure routes, so `??` removes them one at a time:
@@ -1573,19 +1580,20 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     if else_table_head -> &context.noelse_chain_starts.push(span.start)
     checked :: sema_expression_check_condition(condition, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     checked_condition :: checked.value
-    before := sema_ownership_state_snapshot(state)
-    then_state := sema_ownership_state_snapshot(before)
-    // Each arm runs in its own frame on the live scope table and is rolled
-    // back. Only a deferred bare `None` then-value, checked after the else arm,
-    // keeps a copy of the then-arm table.
+    // Each arm runs in its own frame on the live scope table and on the live
+    // ownership state, both rolled back (sema_ownership_fork). Only a deferred
+    // bare `None` then-value, checked after the else arm, keeps a copy of the
+    // then-arm table and state.
+    fork :: sema_ownership_fork(&state)
     then_mark :: sema_scope_mark(&scopes)
-    sema_scope_enter(&scopes, &then_state, "if.then@{span.start}")
-    sema_expression_declare_condition_bindings(checked.bindings, &scopes, &then_state, true, &diagnostics)
-    then_result :: sema_check_statements(then_body, then_mark.saved.return_type, environment, &scopes, &then_state, &tail_store, &context, &diagnostics, then_mark.saved.loop_depth)
+    sema_scope_enter(&scopes, &state, "if.then@{span.start}")
+    sema_expression_declare_condition_bindings(checked.bindings, &scopes, &state, true, &diagnostics)
+    then_result :: sema_check_statements(then_body, then_mark.saved.return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, then_mark.saved.loop_depth)
     if !then_result.complete {
-        sema_scope_leave(&scopes, &then_state)
+        sema_scope_leave(&scopes, &state)
         sema_scope_rollback(&scopes, then_mark)
-        sema_ownership_keep_share_found(&state, then_state)
+        then_found :: state.share_found
+        sema_ownership_fork_drop(&state, fork, then_found, [SemaOwnershipShareSite]{})
         return None
     }
     // Owner rule (bare `None`): without an optional expected type, a bare
@@ -1595,70 +1603,88 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     defer_then :: sibling_rule && sema_expression_bare_absent_arm(then_value, false)
     then_first := TExpr?{None}
     deferred_then_scopes := sema_scope_init("")
+    deferred_then_state := sema_ownership_state_init()
+    then_path := sema_ownership_fork_base(fork)
+    // The then-arm scope exit (its table is gone, so only the ownership side
+    // of sema_single_use_leave_scope remains); reported after the else arm.
+    then_end_diagnostics := [Diagnostic]{}
     if defer_then {
         deferred_then_scopes = sema_scope_snapshot(scopes)
+        deferred_then_state = sema_ownership_state_snapshot(state)
     } else {
-        first :: sema_check_expression(then_value, expected, environment, &scopes, &then_state, &tail_store, &context, &diagnostics) ?? {
-            sema_scope_leave(&scopes, &then_state)
+        first :: sema_check_expression(then_value, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+            sema_scope_leave(&scopes, &state)
             sema_scope_rollback(&scopes, then_mark)
-            sema_ownership_keep_share_found(&state, then_state)
+            then_found :: state.share_found
+            sema_ownership_fork_drop(&state, fork, then_found, [SemaOwnershipShareSite]{})
             return None
         }
         then_first = Val(first)
+        sema_single_use_check_scope_end(state, &then_end_diagnostics)
+        sema_ownership_leave_scope(&state)
+        then_path = sema_ownership_fork_path(state, fork)
     }
     sema_scope_rollback(&scopes, then_mark)
+    sema_ownership_fork_rollback(&state, fork)
+    then_found :: if defer_then -> deferred_then_state.share_found else -> then_path.share_found
 
-    else_state := sema_ownership_state_snapshot(before)
     else_mark :: sema_scope_mark(&scopes)
-    sema_scope_enter(&scopes, &else_state, "if.else@{span.start}")
-    else_result :: sema_check_statements(else_body, else_mark.saved.return_type, environment, &scopes, &else_state, &tail_store, &context, &diagnostics, else_mark.saved.loop_depth)
+    sema_scope_enter(&scopes, &state, "if.else@{span.start}")
+    else_result :: sema_check_statements(else_body, else_mark.saved.return_type, environment, &scopes, &state, &tail_store, &context, &diagnostics, else_mark.saved.loop_depth)
     if !else_result.complete {
-        sema_scope_leave(&scopes, &else_state)
+        sema_scope_leave(&scopes, &state)
         sema_scope_rollback(&scopes, else_mark)
-        sema_ownership_keep_share_found(&state, then_state)
-        sema_ownership_keep_share_found(&state, else_state)
+        else_found :: state.share_found
+        sema_ownership_fork_drop(&state, fork, then_found, else_found)
         return None
     }
     else_expected :: if sibling_rule && sema_expression_bare_absent_arm(else_value, true) -> sema_expression_absent_sibling(then_first) else -> expected
-    else_checked :: sema_check_expression(else_value, else_expected, environment, &scopes, &else_state, &tail_store, &context, &diagnostics) ?? {
-        sema_scope_leave(&scopes, &else_state)
+    else_checked :: sema_check_expression(else_value, else_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+        sema_scope_leave(&scopes, &state)
         sema_scope_rollback(&scopes, else_mark)
-        sema_ownership_keep_share_found(&state, then_state)
-        sema_ownership_keep_share_found(&state, else_state)
+        else_found :: state.share_found
+        sema_ownership_fork_drop(&state, fork, then_found, else_found)
         return None
     }
     else_reaches_merge :: !sema_stmt_block_has_no_fallthrough(else_body) && else_checked.ty != Type.Named{name: "Never"}
-    sema_single_use_leave_scope(&scopes, &else_state, &diagnostics)
+    sema_single_use_leave_scope(&scopes, &state, &diagnostics)
     sema_scope_rollback(&scopes, else_mark)
+    else_path :: sema_ownership_fork_path(state, fork)
+    sema_ownership_fork_rollback(&state, fork)
 
     then_checked :: then_first ?? {
-        sema_check_expression(then_value, sema_expression_absent_sibling(Val(else_checked)), environment, &deferred_then_scopes, &then_state, &tail_store, &context, &diagnostics) ?? {
-            sema_scope_leave(&deferred_then_scopes, &then_state)
-            sema_ownership_keep_share_found(&state, then_state)
-            sema_ownership_keep_share_found(&state, else_state)
+        sema_check_expression(then_value, sema_expression_absent_sibling(Val(else_checked)), environment, &deferred_then_scopes, &deferred_then_state, &tail_store, &context, &diagnostics) ?? {
+            sema_scope_leave(&deferred_then_scopes, &deferred_then_state)
+            sema_ownership_fork_drop(&state, fork, deferred_then_state.share_found, else_path.share_found)
             return None
         }
     }
     then_reaches_merge :: !sema_stmt_block_has_no_fallthrough(then_body) && then_checked.ty != Type.Named{name: "Never"}
-    // The then-arm scope exit: its table is gone, so only the ownership side
-    // of sema_single_use_leave_scope remains (the table side is discarded).
-    sema_single_use_check_scope_end(then_state, &diagnostics)
-    sema_ownership_leave_scope(&then_state)
-    if {
-        then_reaches_merge && else_reaches_merge -> sema_ownership_join_paths(&state, before, then_state, else_state, true)
-        then_reaches_merge -> sema_ownership_join_paths(&state, before, then_state, before, false)
-        else_reaches_merge -> sema_ownership_join_paths(&state, before, else_state, before, false)
-        else -> sema_ownership_join_paths(&state, before, before, before, false)
+    if defer_then {
+        sema_single_use_check_scope_end(deferred_then_state, &diagnostics)
+        sema_ownership_leave_scope(&deferred_then_state)
+        then_path = sema_ownership_fork_path(deferred_then_state, fork)
+    } else {
+        loop diagnostic in then_end_diagnostics -> &diagnostics.push(diagnostic)
     }
+    // The single-use check reads the state before the `if`, which the
+    // rollback left live; the join and share notes report nothing.
+    single_use_paths := [SemaOwnershipPath]{}
+    if then_reaches_merge -> &single_use_paths.push(then_path)
+    if else_reaches_merge -> &single_use_paths.push(else_path)
+    sema_single_use_check_paths(state, single_use_paths, &diagnostics)
+    base :: sema_ownership_fork_base(fork)
+    joined :: if {
+        then_reaches_merge && else_reaches_merge -> sema_ownership_path_join(state, fork, then_path, else_path, true, state.share_found)
+        then_reaches_merge -> sema_ownership_path_join(state, fork, then_path, base, false, state.share_found)
+        else_reaches_merge -> sema_ownership_path_join(state, fork, else_path, base, false, state.share_found)
+        else -> sema_ownership_path_join(state, fork, base, base, false, state.share_found)
+    }
+    sema_ownership_fork_apply(&state, joined)
+    sema_ownership_fork_close(&state, fork)
     // A share site found on an arm that leaves is still found.
-    sema_ownership_keep_share_found(&state, then_state)
-    sema_ownership_keep_share_found(&state, else_state)
-    // The join and share notes read the arm states first (and report
-    // nothing), so they move into the single-use check instead of a copy.
-    single_use_paths := [SemaOwnershipState]{}
-    if then_reaches_merge -> &single_use_paths.push(^then_state)
-    if else_reaches_merge -> &single_use_paths.push(^else_state)
-    sema_single_use_check_paths(before, single_use_paths, &diagnostics)
+    loop site in then_path.share_found -> sema_ownership_note_share_found(&state, site)
+    loop site in else_path.share_found -> sema_ownership_note_share_found(&state, site)
     joined_then := then_checked
     joined_else := else_checked
     result_ty :: if {
