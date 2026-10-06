@@ -709,7 +709,12 @@ fn provider_cc_manifest_number(object: [String: DataTree], field: String) -> Int
 
 fn provider_cc_manifest_object(value: DataTree) -> [String: DataTree]? Never! {
     if value == {
-        .Object(fields) -> Val(fields)
+        // D-DATATREE-ORDER1=A: the object's ordered pairs, indexed by name.
+        .Object(fields) -> {
+            members := [String: DataTree]{}
+            loop pair in fields -> members[pair.key] = pair.value
+            Val(members)
+        }
         else -> None
     }
 }

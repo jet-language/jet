@@ -106,7 +106,9 @@ fn provider_add_catalog_value(value: DataTree, names: &[String]) Never! {
         .Array(values) -> {
             loop item in values -> provider_add_catalog_value(item, &names)
         }
-        .Object(fields) -> {
+        .Object(pairs) -> {
+            fields := [String: DataTree]{}
+            loop pair in pairs -> fields[pair.key] = pair.value
             if fields.get("name") == {
                 .Val(found) -> {
                     if pkg_json_text(found) == {

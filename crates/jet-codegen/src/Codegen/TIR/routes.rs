@@ -8652,27 +8652,6 @@ pub(super) fn ambient_input_route(
         "ambient input",
     )
 }
-/// Convert one checked runtime entry vector into the canonical typed map.
-pub(super) fn data_entries_to_map_route(
-    result: &Type,
-    carrier: &TFailureCarrier,
-) -> Result<TPreludeRoute, LowerError> {
-    let _ = result;
-    prelude_route_row(
-        MirPreludeFamily::StaticPrelude,
-        "core.collections",
-        "entries_to_map",
-        "jet_data_entries_to_map",
-        1,
-        1,
-        &[false],
-        None,
-        carrier,
-        MirPreludeAbi::Value,
-        "map entries conversion",
-    )
-}
-
 pub(super) fn todo_route(
     result: &Type,
     _carrier: &TFailureCarrier,

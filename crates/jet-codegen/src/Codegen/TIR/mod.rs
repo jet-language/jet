@@ -8131,7 +8131,6 @@ pub enum TPatternPosition {
     OptionBinding,
     Arm,
     VariantPath,
-    DataEntries { temp: String },
 }
 
 impl TPattern {
@@ -11882,9 +11881,6 @@ pub enum TExprKind {
     /// resolves the Rust static name; other engines look the value up by the
     /// same Jet name in their own const table.
     ConstRef(String),
-    /// D-ENC-DYN1: collect the ordered `Data` object entries a
-    /// `TPatternPosition::DataEntries` test captured into the user-visible map.
-    DataEntriesToMap(TLocal),
     /// Call to a plain top-level function. Each arg carries its emit decisions.
     Call {
         name: String,
