@@ -25020,6 +25020,17 @@ impl<'a> RustEmitter<'a> {
                 self.config.root_prefix
             );
         }
+        // `core.service.runtime(store, retention: Duration)`: the kernel keeps
+        // retention as whole milliseconds, the same `ns / 1_000_000` the
+        // interpreter route takes from the checked Duration.
+        if row.module == "core.service" && row.member == "runtime" && args.len() == 2 {
+            let store = self.call_arg_for_function(function, &args[0], false);
+            let retention = self.call_arg_for_function(function, &args[1], false);
+            return format!(
+                "{}({store}, ({retention}).ns / 1_000_000)",
+                self.prelude_symbol(route)
+            );
+        }
         let emitted = self.core_call_symbol_for_function(
             function,
             row,
@@ -26469,6 +26480,14 @@ impl<'a> RustEmitter<'a> {
                     if index > 0 && route.symbol.name() == "jet_http_shutdown_report_field" {
                         let value = self.value_move(value_id);
                         return self.native_int_argument(value, location);
+                    }
+                    // `world.advance(duration)`: the kernel takes the
+                    // Duration's nanosecond word, read through the borrow.
+                    if index == 1 && route.symbol.name() == "jet_world_advance" {
+                        return format!(
+                            "({}).ns",
+                            self.borrowed_value_reference(function, value_id, MirAccess::Read)
+                        );
                     }
                     if (route.module == "core.time"
                         || (route.module == "core.handle"
