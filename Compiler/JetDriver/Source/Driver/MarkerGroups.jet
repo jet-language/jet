@@ -207,7 +207,7 @@ fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], e
         loop row in rows -> &groups.push(row.tokens)
         unit :: units[modules[module_index].source_unit_index]
         original :: jet_driver_marker_group_source(source_files, unit.path) ?? return false
-        source :: if jet_driver_unit_is_core(unit) -> jet_driver_mask_core_package(original) else -> original
+        source :: if jet_driver_unit_is_core(unit) -> jet_driver_mask_inline_package(original, jet_driver_inline_package(original)) else -> original
         lexed := if jet_driver_unit_is_core(unit) -> lex_generated(source.bytes()) else -> lex(source.bytes())
         expanded :: expand_named_marker_groups_with_uses(lexed.tokens, groups)
         if expanded.uses.len() == 0 -> next

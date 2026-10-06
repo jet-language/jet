@@ -50,7 +50,6 @@ use jet_lexer.[
     TOKEN_STRING,
     Token,
     lex_config,
-    lex_generated,
 ]
 use jet_parser.[
     parse_generated_source,
@@ -886,6 +885,57 @@ fn jet_driver_manifest_outputs(tokens: [Token], open_index: Int, close_index: In
     outputs
 }
 
+// The file of the entry root whose leading `package { … }` block is the
+// root's Package (D-ECO-INLINEPACKAGE1).
+struct JetDriverInlineCarrier {
+    file_index: Int
+    block: JetDriverInlinePackage
+}
+
+// The entry root's inline Package carrier (Rust Loader `load_file`): the
+// entry's own block, else the stock entry `main.jet` / `src/main.jet` that
+// carries one (`find_inline_package_root_checked`). A structure failure
+// (E1360/E1361/E1362) or a carrier beside `package.jet` (E1363) is reported
+// at the carrier's path and selects no carrier.
+fn jet_driver_root_inline_carrier(snapshot: JetDriverAuthorizedSourceSnapshot, root_index: Int, has_manifest: Bool, diagnostics: &[Diagnostic]) -> JetDriverInlineCarrier? {
+    root :: snapshot.roots[root_index]
+    if root.identity != snapshot.entry_root_identity -> return None
+    entry_root :: jet_driver_entry_root_path(snapshot)
+    entry_display :: jet_driver_display_path(entry_root, snapshot.entry_path)
+    entry_index := -1
+    loop (file_index, file) in root.files {
+        if jet_driver_display_path(entry_root, file.path) == entry_display -> entry_index = file_index
+    }
+    candidates := [Int]{}
+    if entry_index >= 0 -> &candidates.push(entry_index)
+    stock_entries :: [String]{"main.jet", "src/main.jet"}
+    loop stock in stock_entries {
+        loop (file_index, file) in root.files {
+            if file.relative_path == stock && file_index != entry_index -> &candidates.push(file_index)
+        }
+    }
+    loop file_index in candidates {
+        file :: root.files[file_index]
+        block :: jet_driver_inline_package(file.source)
+        carrier_path :: jet_driver_display_path(entry_root, file.path)
+        if block.error == .Val(failure) {
+            &diagnostics.push(diagnostic_with_source_path(~failure, carrier_path, 0))
+            return None
+        }
+        if !block.found -> next
+        if has_manifest {
+            // The entry's own block is worded by the entry-facts check, a
+            // stock carrier by its registry row (Rust `package_facts_for_entry`).
+            span :: Span{start: block.start, end: block.end}
+            conflict :: if file_index == entry_index -> jet_driver_diagnostic("E1363", span, "an inline Package conflicts with package.jet", "one project cannot carry both an inline Package block and a package.jet manifest", "remove package.jet or remove the inline Package block") else -> jet_driver_row_diagnostic("E1363", Val(span))
+            &diagnostics.push(diagnostic_with_source_path(^conflict, carrier_path, 0))
+            return None
+        }
+        return Val(JetDriverInlineCarrier{file_index: file_index, block: block})
+    }
+    None
+}
+
 fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, root_index: Int, diagnostics: &[Diagnostic]) -> JetDriverPackageInfo {
     root := snapshot.roots[root_index]
     entry_root :: jet_driver_entry_root_path(snapshot)
@@ -900,21 +950,28 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
             retired_manifest_path = jet_driver_display_path(entry_root, root.files[file_index].path)
         }
     }
-    if manifest_file_index == None {
-        if retired_manifest {
-            &diagnostics.push(jet_driver_diagnostic_at_source("E0003", None, retired_manifest_path, 0, "the authority root contains a retired package manifest", "package identity is read only from the canonical package.jet manifest", "replace the retired manifest with package.jet"))
-        }
+    inline_carrier :: jet_driver_root_inline_carrier(snapshot, root_index, manifest_file_index != None, &diagnostics)
+    if manifest_file_index == None && retired_manifest {
+        &diagnostics.push(jet_driver_diagnostic_at_source("E0003", None, retired_manifest_path, 0, "the authority root contains a retired package manifest", "package identity is read only from the canonical package.jet manifest", "replace the retired manifest with package.jet"))
+    }
+    if manifest_file_index == None && inline_carrier == None {
         root_display :: jet_driver_display_path(entry_root, root.canonical_path)
         identity :: "source-root:{root_display.len()}:{root_display}"
-        return JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: "", version: "", edition: JET_DRIVER_LATEST_EDITION, runtime_ceiling: None, allocator_policy: MIRAllocatorPolicy.HostedDefault, authority_allow: None, authority_deny: None, authority_needs: [String]{}, entry: None, manifest_path: None, dependencies: [JetDriverPackageDependency]{}, outputs: jet_driver_no_package_outputs()}
+        return JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: "", version: "", edition: JET_DRIVER_LATEST_EDITION, runtime_ceiling: None, allocator_policy: MIRAllocatorPolicy.HostedDefault, authority_allow: None, authority_deny: None, authority_needs: [String]{}, entry: None, manifest_path: None, inline_package: false, dependencies: [JetDriverPackageDependency]{}, outputs: jet_driver_no_package_outputs()}
     }
-    if retired_manifest {
+    if manifest_file_index != None && retired_manifest {
         &diagnostics.push(jet_driver_diagnostic_at_source("E0003", None, retired_manifest_path, 0, "the authority root contains both canonical and retired package manifests", "choosing either file would make package identity ambiguous", "remove jet.toml and keep package.jet"))
     }
-    manifest :: manifest_file_index ?? 0
+    // An inline Package feeds its body, at its original offsets, to the same
+    // field parser as `package.jet`; its carrier file is the manifest path.
+    manifest := manifest_file_index ?? 0
+    source := root.files[manifest].source
+    if inline_carrier == .Val(carrier) {
+        manifest = carrier.file_index
+        source = jet_driver_inline_package_body(root.files[manifest].source, carrier.block)
+    }
     manifest_path := jet_driver_display_path(entry_root, root.files[manifest].path)
     manifest_diagnostic_start :: diagnostics.len()
-    source := root.files[manifest].source
     lexed :: lex_config(source.bytes())
     loop diagnostic in lexed.diagnostics -> &diagnostics.push(diagnostic)
     tokens :: lexed.tokens
@@ -1069,7 +1126,28 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
         &diagnostics.push(jet_driver_diagnostic_without_span("E2001", "package manifest requests an unsupported language edition", "this compiler supports editions 2026, 2027, and 2028", "select one of the editions supported by this toolchain"))
     }
     if name.len() == 0 {
-        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "package manifest has no name", "a package dependency identity requires a declared name", "add `name: \"package_name\"` to package.jet"))
+        // An inline body words it as the canonical Package field parser does.
+        missing_name :: if inline_carrier != None -> "Package needs a `name` field" else -> "package manifest has no name"
+        &diagnostics.push(jet_driver_diagnostic_without_span("E0003", missing_name, "a package dependency identity requires a declared name", "add `name: \"package_name\"` to package.jet"))
+    }
+    // A malformed inline body is one E1362 at the body (Rust Loader: the field
+    // failure becomes the diagnostic's why).
+    if inline_carrier == .Val(carrier) {
+        if jet_driver_has_errors_since(diagnostics, manifest_diagnostic_start) {
+            field_failure := ""
+            kept := [Diagnostic]{}
+            loop diagnostic_index in manifest_diagnostic_start..<diagnostics.len() {
+                diagnostic :: diagnostics[diagnostic_index]
+                if {
+                    diagnostic.severity != DIAGNOSTIC_ERROR -> &kept.push(diagnostic)
+                    field_failure.len() == 0 -> field_failure = diagnostic.what
+                    else -> {}
+                }
+            }
+            loop diagnostics.len() > manifest_diagnostic_start -> _ := &diagnostics.pop()
+            loop diagnostic in kept -> &diagnostics.push(diagnostic)
+            &diagnostics.push(jet_driver_diagnostic("E1362", Span{start: carrier.block.body_start, end: carrier.block.body_end}, "the inline Package body is malformed", field_failure, "fix the inline Package fields, then retry"))
+        }
     }
     diagnostic_index := manifest_diagnostic_start
     loop diagnostic_index < diagnostics.len() {
@@ -1077,7 +1155,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
         diagnostic_index += 1
     }
     identity :: jet_driver_package_identity(name, version)
-    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, entry: entry, manifest_path: Val(manifest_path), dependencies: dependencies, outputs: outputs}
+    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, entry: entry, manifest_path: Val(manifest_path), inline_package: inline_carrier != None, dependencies: dependencies, outputs: outputs}
 }
 
 fn jet_driver_default_module_alias(relative_path: String) -> String Never! {
@@ -1153,6 +1231,7 @@ fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDrive
                 relative_path: file.relative_path,
                 source_segments: jet_driver_source_segments(unit_path, file.source),
                 source_origin: SemaSourceOrigin.Snapshot,
+                in_namespace: package.manifest_path != None && !package.inline_package,
             })
         }
     }
@@ -1722,7 +1801,7 @@ fn jet_driver_unit_is_loose(unit: JetDriverSourceUnit) -> Bool Never! {
 // manifest package belongs to it except the package's payload and workspace
 // modules; loose files and embedded Core modules have no namespace.
 fn jet_driver_unit_is_namespace_member(unit: JetDriverSourceUnit) -> Bool Never! {
-    if jet_driver_unit_is_loose(unit) || jet_driver_unit_is_core(unit) -> return false
+    if !unit.in_namespace -> return false
     parts := unit.relative_path.split("/").to_list()
     file_name :: &parts.pop() ?? ""
     file_name != "pkg.jet" && file_name != "workspace.jet"
@@ -2028,22 +2107,266 @@ fn jet_driver_check_reserved_import(declaration: ImportDecl, diagnostics: &[Diag
     true
 }
 
-// Mask the leading inline `package { … }` carrier of a Core source with
-// spaces, keeping line endings, so every span stays an offset into the
-// original text (Rust `Package::mask_inline_package_source`).
-fn jet_driver_mask_core_package(source: String) -> String {
-    tokens :: lex_generated(source.bytes()).tokens
-    index := 0
-    loop index < tokens.len() && (tokens[index].kind == TOKEN_SEMI || tokens[index].kind == TOKEN_LINE_COMMENT || tokens[index].kind == TOKEN_BLOCK_COMMENT) {
-        index += 1
+// D-ECO-INLINEPACKAGE1: the one leading `package { … }` carrier of a source
+// (Rust `Package::extract_inline_package`). Offsets index the original text;
+// `error` is the E1360/E1361/E1362 structure failure.
+struct JetDriverInlinePackage {
+    found: Bool
+    start: Int
+    end: Int
+    body_start: Int
+    body_end: Int
+    error: Diagnostic?
+}
+
+fn jet_driver_inline_byte(bytes: [U8], at: Int) -> Int Never! {
+    if at < 0 || at >= bytes.len() -> return -1
+    Int.from_u8(bytes[at])
+}
+
+fn jet_driver_inline_space(byte: Int) -> Bool Never! {
+    byte == 32 || byte == 9 || byte == 10 || byte == 12 || byte == 13
+}
+
+fn jet_driver_inline_ident_byte(byte: Int) -> Bool Never! {
+    (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95
+}
+
+// The end of the `//` comment (or byte-zero launch header) at `at`.
+fn jet_driver_inline_line_end(bytes: [U8], at: Int) -> Int Never! {
+    cursor := at + 2
+    loop cursor < bytes.len() && jet_driver_inline_byte(bytes, cursor) != 10 -> cursor += 1
+    if cursor > bytes.len() -> return bytes.len()
+    cursor
+}
+
+fn jet_driver_inline_block_comment_end(bytes: [U8], start: Int) -> Int Never! {
+    depth := 1
+    cursor := start + 2
+    loop cursor < bytes.len() {
+        byte :: jet_driver_inline_byte(bytes, cursor)
+        following :: jet_driver_inline_byte(bytes, cursor + 1)
+        if byte == 47 && following == 42 {
+            depth += 1
+            cursor += 2
+            next
+        }
+        if byte == 42 && following == 47 {
+            if depth > 0 -> depth -= 1
+            cursor += 2
+            if depth == 0 -> return cursor
+            next
+        }
+        cursor += 1
     }
-    if index + 1 >= tokens.len() || tokens[index].kind != TOKEN_IDENT || tokens[index].payload.decoded != "package" -> return ~source
-    close :: jet_driver_manifest_matching_brace(tokens, index + 1) ?? return ~source
+    bytes.len()
+}
+
+// The end of the quoted (or `"""` triple-quoted) string at `start`.
+fn jet_driver_inline_string_end(bytes: [U8], start: Int) -> Int Never! {
+    quote :: jet_driver_inline_byte(bytes, start)
+    triple :: quote == 34 && jet_driver_inline_byte(bytes, start + 1) == 34 && jet_driver_inline_byte(bytes, start + 2) == 34
+    cursor := if triple -> start + 3 else -> start + 1
+    escaped := false
+    loop cursor < bytes.len() {
+        byte :: jet_driver_inline_byte(bytes, cursor)
+        if escaped {
+            escaped = false
+            cursor += 1
+            next
+        }
+        if byte == 92 {
+            escaped = true
+            cursor += 1
+            next
+        }
+        if triple && byte == 34 && jet_driver_inline_byte(bytes, cursor + 1) == 34 && jet_driver_inline_byte(bytes, cursor + 2) == 34 -> return cursor + 3
+        if !triple && byte == quote -> return cursor + 1
+        cursor += 1
+    }
+    bytes.len()
+}
+
+// Skip whitespace, comments, and the byte-zero `#!/` launch header.
+fn jet_driver_inline_trivia_end(bytes: [U8], from: Int) -> Int Never! {
+    at := from
+    loop {
+        if at == 0 && jet_driver_inline_byte(bytes, 0) == 35 && jet_driver_inline_byte(bytes, 1) == 33 && jet_driver_inline_byte(bytes, 2) == 47 {
+            at = jet_driver_inline_line_end(bytes, 0)
+            next
+        }
+        loop jet_driver_inline_space(jet_driver_inline_byte(bytes, at)) -> at += 1
+        if jet_driver_inline_byte(bytes, at) == 47 && jet_driver_inline_byte(bytes, at + 1) == 47 {
+            at = jet_driver_inline_line_end(bytes, at)
+            next
+        }
+        if jet_driver_inline_byte(bytes, at) == 47 && jet_driver_inline_byte(bytes, at + 1) == 42 {
+            following :: jet_driver_inline_block_comment_end(bytes, at)
+            if following == at -> return at
+            at = following
+            next
+        }
+        return at
+    }
+}
+
+// The opening brace of a `package {` carrier starting at `at`, or -1.
+fn jet_driver_inline_package_open(bytes: [U8], at: Int) -> Int Never! {
+    keyword :: "package".bytes()
+    if at < 0 || at + keyword.len() > bytes.len() -> return -1
+    loop (offset, expected) in keyword {
+        if bytes[at + offset] != expected -> return -1
+    }
+    if jet_driver_inline_ident_byte(jet_driver_inline_byte(bytes, at - 1)) || jet_driver_inline_ident_byte(jet_driver_inline_byte(bytes, at + keyword.len())) -> return -1
+    open :: jet_driver_inline_trivia_end(bytes, at + keyword.len())
+    if jet_driver_inline_byte(bytes, open) == 123 -> open else -> -1
+}
+
+// One past the brace that closes the block opened at `open`, or -1.
+fn jet_driver_inline_block_end(bytes: [U8], open: Int) -> Int Never! {
+    if open < 0 -> return -1
+    depth := 0
+    cursor := open
+    loop cursor < bytes.len() {
+        byte :: jet_driver_inline_byte(bytes, cursor)
+        following :: jet_driver_inline_byte(bytes, cursor + 1)
+        if byte == 34 || byte == 39 {
+            cursor = jet_driver_inline_string_end(bytes, cursor)
+            next
+        }
+        if byte == 47 && following == 47 {
+            cursor = jet_driver_inline_line_end(bytes, cursor)
+            next
+        }
+        if byte == 47 && following == 42 {
+            cursor = jet_driver_inline_block_comment_end(bytes, cursor)
+            next
+        }
+        if byte == 123 -> depth += 1
+        if byte == 125 {
+            if depth == 0 -> return -1
+            depth -= 1
+            if depth == 0 -> return cursor + 1
+        }
+        cursor += 1
+    }
+    -1
+}
+
+// The start of a `package {` carrier in top-level item position at or after
+// `from`, or -1 (Rust `find_top_level_inline_package`).
+fn jet_driver_inline_top_level_package(bytes: [U8], from: Int) -> Int Never! {
+    cursor := from
+    braces := 0
+    brackets := 0
+    parens := 0
+    item_position := true
+    loop cursor < bytes.len() {
+        byte :: jet_driver_inline_byte(bytes, cursor)
+        following :: jet_driver_inline_byte(bytes, cursor + 1)
+        if byte == 34 || byte == 39 {
+            cursor = jet_driver_inline_string_end(bytes, cursor)
+            next
+        }
+        if byte == 47 && following == 47 {
+            cursor = jet_driver_inline_line_end(bytes, cursor)
+            next
+        }
+        if byte == 47 && following == 42 {
+            cursor = jet_driver_inline_block_comment_end(bytes, cursor)
+            next
+        }
+        top :: braces == 0 && brackets == 0 && parens == 0
+        if top && item_position && jet_driver_inline_package_open(bytes, cursor) >= 0 -> return cursor
+        if {
+            byte == 123 -> {
+                braces += 1
+                item_position = false
+            }
+            byte == 125 -> {
+                if braces > 0 -> braces -= 1
+                if braces == 0 && brackets == 0 && parens == 0 -> item_position = true
+            }
+            byte == 91 -> {
+                brackets += 1
+                item_position = false
+            }
+            byte == 93 -> {
+                if brackets > 0 -> brackets -= 1
+            }
+            byte == 40 -> {
+                parens += 1
+                item_position = false
+            }
+            byte == 41 -> {
+                if parens > 0 -> parens -= 1
+            }
+            byte == 59 && top -> item_position = true
+            top && !jet_driver_inline_space(byte) -> item_position = false
+            else -> {}
+        }
+        cursor += 1
+    }
+    -1
+}
+
+fn jet_driver_inline_package_failure(code: String, start: Int, end: Int) -> JetDriverInlinePackage {
+    JetDriverInlinePackage{found: false, start: start, end: end, body_start: start, body_end: start, error: Val(jet_driver_row_diagnostic(code, Val(Span{start: start, end: end})))}
+}
+
+fn jet_driver_inline_package(source: String) -> JetDriverInlinePackage {
+    none :: JetDriverInlinePackage{found: false, start: 0, end: 0, body_start: 0, body_end: 0, error: None}
+    if !source.contains("package") -> return none
+    bytes :: source.bytes()
+    first :: jet_driver_inline_trivia_end(bytes, 0)
+    open :: jet_driver_inline_package_open(bytes, first)
+    if open >= 0 {
+        end :: jet_driver_inline_block_end(bytes, open)
+        if end < 0 -> return jet_driver_inline_package_failure("E1362", first, bytes.len())
+        duplicate :: jet_driver_inline_top_level_package(bytes, end)
+        if duplicate >= 0 {
+            duplicate_end :: jet_driver_inline_block_end(bytes, jet_driver_inline_package_open(bytes, duplicate))
+            return jet_driver_inline_package_failure("E1361", duplicate, if duplicate_end < 0 -> bytes.len() else -> duplicate_end)
+        }
+        return JetDriverInlinePackage{found: true, start: first, end: end, body_start: open + 1, body_end: end - 1, error: None}
+    }
+    stray :: jet_driver_inline_top_level_package(bytes, first)
+    if stray < 0 -> return none
+    stray_end :: jet_driver_inline_block_end(bytes, jet_driver_inline_package_open(bytes, stray))
+    jet_driver_inline_package_failure("E1360", stray, if stray_end < 0 -> bytes.len() else -> stray_end)
+}
+
+// Blank `start..<end` with spaces, keeping line endings, so every span stays
+// an offset into the original text (Rust `InlinePackageBlock::mask_source`).
+fn jet_driver_blank_source_range(source: String, start: Int, end: Int) -> String {
     bytes := source.bytes()
-    loop offset in tokens[index].span.start..<tokens[close].span.end {
+    loop offset in start..<end {
         if bytes[offset] != (U8{10}) && bytes[offset] != (U8{13}) -> bytes[offset] = U8{32}
     }
     String.from_bytes(bytes) ?? ~source
+}
+
+// The source an ordinary parse reads: the inline carrier masked away (Rust
+// `Package::mask_inline_package_source`).
+fn jet_driver_mask_inline_package(source: String, carrier: JetDriverInlinePackage) -> String {
+    if !carrier.found -> return ~source
+    jet_driver_blank_source_range(source, carrier.start, carrier.end)
+}
+
+// Only the carrier's body, at its original offsets, for the manifest field
+// parser (Rust `InlinePackageBlock::body`).
+fn jet_driver_inline_package_body(source: String, carrier: JetDriverInlinePackage) -> String {
+    head :: jet_driver_blank_source_range(source, 0, carrier.body_start)
+    jet_driver_blank_source_range(head, carrier.body_end, head.len())
+}
+
+// A user source parse: the inline carrier is masked; a structure failure
+// replaces the parse (Rust Loader `prepare_frontend_module`).
+fn jet_driver_parse_user_source(text: String) -> ParseResult {
+    carrier :: jet_driver_inline_package(text)
+    if carrier.error == .Val(diagnostic) -> return ParseResult{program: ast_program(), diagnostics: [Diagnostic]{diagnostic}}
+    if !carrier.found -> return parse_source(text.bytes())
+    parse_source(jet_driver_mask_inline_package(text, carrier).bytes())
 }
 
 // One unit's parse input, resolved before any parse runs so a parse thread
@@ -2085,7 +2408,7 @@ fn jet_driver_parse_job_bytes(job: JetDriverParseJob) -> Int Never! {
 // after the parse (`jet_driver_core_runtime_member_imports`).
 fn jet_driver_parse_one(job: JetDriverParseJob) -> ParseResult {
     if job == {
-        .Source(text) -> parse_source(text.bytes())
+        .Source(text) -> jet_driver_parse_user_source(text)
         .RuntimeEntry(text) -> parse_generated_source(text.bytes())
         .Core(text, owned_members, runtime) -> jet_driver_parse_core_source(text, owned_members, runtime)
         .Missing -> ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}
@@ -2097,7 +2420,7 @@ fn jet_driver_parse_one(job: JetDriverParseJob) -> ParseResult {
 // but a public function outside `owned_members` is dropped so its calls keep
 // the compiler-owned route. Parser lints never reach user output.
 fn jet_driver_parse_core_source(text: String, owned_members: [String], runtime: Bool) -> ParseResult {
-    parsed := parse_generated_source(jet_driver_mask_core_package(text).bytes())
+    parsed := parse_generated_source(jet_driver_mask_inline_package(text, jet_driver_inline_package(text)).bytes())
     kept := [Item]{}
     loop item in parsed.program.items {
         if item == {
@@ -2285,6 +2608,7 @@ fn jet_driver_add_core_unit(source_units: &[JetDriverSourceUnit], queued: &[Bool
         relative_path: relative_path,
         source_segments: jet_driver_core_source_segments(path, source),
         source_origin: SemaSourceOrigin.CompilerGenerated,
+        in_namespace: false,
     })
     &queued.push(false)
     source_units.len() - 1

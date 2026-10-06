@@ -2,7 +2,7 @@
 // native backend. The Rust feed is decoded only for the independent comparator.
 // run-front-feed.mjs assembles this with the compiler and schema stream codec.
 use core.files as ff_files
-use jet_driver.[jet_driver_present_diagnostics]
+use jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
 use jet_cli.[jet_cli_compile_file]
 use jet_foundation.[DIAGNOSTIC_ERROR, MIRProgram, MIRFunctionID]
 
@@ -32,7 +32,7 @@ fn ff_native(name: String, program: MIRProgram, entry_id: MIRFunctionID, pack: G
 }
 
 fn ff_case(file: String, name: String, pack: GLPack) -> String {
-    compiled :: jet_cli_compile_file(file, false, false, None)
+    compiled :: jet_cli_compile_file(file, false, false, None, JetDriverCompileMode.Program)
     if compiled == {
         .Refused(refusal) -> {
             ff_files.write("{name}.front-issues", refusal.stderr) ?? panic("cannot write front-end refusal")
