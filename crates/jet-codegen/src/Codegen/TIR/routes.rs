@@ -3155,32 +3155,6 @@ impl THandleOp {
             HTTPServerMethod { .. } | EmailMethod { .. } => primitive(),
             RegexMethod { kind, method } => regex_route(kind, method, carrier)?,
             UrlMimeMethod { kind, method } => url_mime_route(kind, method, carrier)?,
-            SketchMethod { sketch, method } => {
-                let (arity, borrow_mask): (usize, &[bool]) =
-                    match (sketch.as_str(), method.as_str()) {
-                        ("HyperLogLog", "add") | ("CountMinSketch", "add" | "count") => {
-                            (2, &[true, true])
-                        }
-                        ("HyperLogLog", "count") | ("ReservoirSampler", "sample") => (1, &[true]),
-                        ("ReservoirSampler", "add") => {
-                            (2, &[true, false])
-                        }
-                        _ => {
-                            return Err(route_error(format!(
-                                "unknown checked sketch method `{sketch}.{method}`"
-                            )));
-                        }
-                    };
-                h(
-                    &format!("{sketch}.{method}"),
-                    &format!("Jet{sketch}::{method}"),
-                    arity,
-                    arity,
-                    borrow_mask,
-                    None,
-                    carrier,
-                )
-            }
             CivilTimeMethod { kind, method } => civil_time_route(kind, method, carrier)?,
             ProcessSpecMethod { method, args_len } => match (method.as_str(), *args_len) {
                 ("cwd", 1) => h(

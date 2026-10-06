@@ -968,19 +968,6 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_JetCountMinSketch(value: *mut crate::JetCountMinSketch) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_JetCountMinSketch(value: *mut crate::JetCountMinSketch) -> *mut crate::JetCountMinSketch {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_JetCursor(value: *mut crate::JetCursor) {
@@ -2264,19 +2251,6 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_JetHyperLogLog(value: *mut crate::JetHyperLogLog) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_JetHyperLogLog(value: *mut crate::JetHyperLogLog) -> *mut crate::JetHyperLogLog {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_JetInputEvent(value: *mut crate::JetInputEvent) {
@@ -2904,19 +2878,6 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
     }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_drop_JetReservoirSampler(value: *mut crate::JetReservoirSampler) {
-        if !value.is_null() {
-            // SAFETY: the caller transfers its owned handle from `Box::into_raw`.
-            drop(unsafe { Box::from_raw(value) });
-        }
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_clone_JetReservoirSampler(value: *mut crate::JetReservoirSampler) -> *mut crate::JetReservoirSampler {
-        // SAFETY: `value` is a live handle the caller owns for this call.
-        guard(|| Box::into_raw(Box::new(unsafe { &*value }.clone())))
-    }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_drop_JetRowPolicy(value: *mut crate::jet_sync::JetRowPolicy) {
@@ -5521,11 +5482,6 @@ mod jet_c_abi_routes {
         guard(|| handle(<crate::JetCounter as crate::JetDebug>::jet_debug(unsafe { &*value })))
     }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_show_JetCountMinSketch(value: *mut crate::JetCountMinSketch) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::JetCountMinSketch as crate::JetShow>::jet_show(unsafe { &*value })))
-    }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_display_JetDate(value: *mut crate::JetDate) -> JetCString {
@@ -5731,11 +5687,6 @@ mod jet_c_abi_routes {
         guard(|| handle(<crate::JetHTTPVersion as crate::JetShow>::jet_show(unsafe { &*value })))
     }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_show_JetHyperLogLog(value: *mut crate::JetHyperLogLog) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::JetHyperLogLog as crate::JetShow>::jet_show(unsafe { &*value })))
-    }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_display_JetInstant(value: *mut crate::JetInstant) -> JetCString {
@@ -5965,11 +5916,6 @@ mod jet_c_abi_routes {
         guard(|| handle(<crate::jet_std::JetRegexMatch as crate::JetShow>::jet_show(unsafe { &*value })))
     }
 
-    #[no_mangle]
-    pub extern "C" fn jet_rt_handle_show_JetReservoirSampler(value: *mut crate::JetReservoirSampler) -> JetCString {
-        // SAFETY: `value` is a live handle the caller lends for this call.
-        guard(|| handle(<crate::JetReservoirSampler as crate::JetShow>::jet_show(unsafe { &*value })))
-    }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_display_JetServiceDelivery(value: *mut crate::JetServiceDelivery) -> JetCString {
@@ -16632,9 +16578,6 @@ mod jet_c_abi_routes {
 //   JetByteBuffer::from (core.builtin.byte_buffer_from): no runtime function
 //   JetByteBuffer::to_bytes (core.builtin.byte_buffer_to_bytes): no runtime function
 //   JetByteBuffer::with_capacity (core.builtin.byte_buffer_with_capacity): no runtime function
-//   JetCountMinSketch::new (core.data.sketch.cms.new): no runtime function
 //   JetDate::parse_iso_week_date (core.time.parse_iso_week_date): no runtime function
-//   JetHyperLogLog::new (core.data.sketch.hll.new): no runtime function
 //   JetLocalTime::new (core.time.time): no runtime function
-//   JetReservoirSampler::new (core.data.sketch.reservoir.new): no runtime function
 // END GENERATED C-ABI ROUTES

@@ -18,7 +18,7 @@ use crate::Sema::CheckerCoreLib::{
     parsed_args_method_return, path_method_return, process_child_method_return,
     process_spec_method_return, process_stdin_method_return, process_stream_method_return,
     reflect_method_return, regex_method_return, require_exact_labels, require_net_method_labels,
-    simd_reduce_markers, sketch_method_return, sketch_type_name, terminal_session_method_return,
+    simd_reduce_markers, terminal_session_method_return,
     text_cursor_method_return, u8_ty, ui_backend_method_return, unit_ty, url_mime_method_return,
     web_method_return, wrong_core_arity, geometry_is_delta, geometry_is_point, geometry_method_return,
     geometry_space, geometry_static_arg_types, geometry_static_return_with_owner,
@@ -5298,14 +5298,6 @@ impl<'a> Checker<'a> {
                 }
             }
             *recv_type_out = Some("Loadable".to_string());
-            return ret;
-        }
-        // D-APPROX1=A: method calls on sketch data structures.
-        if let Some(ret) = sketch_method_return(&recv_ty, method, args) {
-            for a in args.iter_mut() {
-                self.infer(&mut a.expr);
-            }
-            *recv_type_out = Some(sketch_type_name(&recv_ty).unwrap_or("Sketch").to_string());
             return ret;
         }
         // D-NETDEP1=A / D-HTTPLIB1=A: method calls on HTTP types.

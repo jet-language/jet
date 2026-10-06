@@ -651,24 +651,6 @@ fn jet_perf_reset_fidelity() {
     );
 }
 
-impl JetShow for JetHyperLogLog {
-    fn jet_show(&self) -> String {
-        format!("HyperLogLog(count={})", self.count())
-    }
-}
-
-
-impl JetShow for JetCountMinSketch {
-    fn jet_show(&self) -> String {
-        "CountMinSketch".to_string()
-    }
-}
-
-impl JetShow for JetReservoirSampler {
-    fn jet_show(&self) -> String {
-        format!("ReservoirSampler(n={})", self.parts().2)
-    }
-}
 
 struct JetTestExpectFrame {
     scope: u64,

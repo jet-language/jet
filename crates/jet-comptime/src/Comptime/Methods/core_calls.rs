@@ -517,9 +517,6 @@ mod solver_kernel {
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/Solver.rs");
 }
 
-mod sketch_kernel {
-    include!("../../../../jet-codegen/src/Prelude/Core/Sketch.rs");
-}
 
 mod time_kernel {
     fn jet_scheduler_world_now_ms() -> Option<i64> {
@@ -760,13 +757,6 @@ pub fn apply_core_pure_method(
     core_pure_parity::evaluate_method(recv, method, args, span)
 }
 
-pub fn sketch_add(
-    recv: &CtValue,
-    args: &[CtValue],
-    span: Span,
-) -> Option<Result<(CtValue, CtValue), Diagnostic>> {
-    core_pure_parity::sketch_add(recv, args, span)
-}
 
 pub(in super::super) fn solver_require(
     recv: &CtValue,

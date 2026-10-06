@@ -7266,31 +7266,6 @@ impl<'a> Checker<'a> {
                 self.expect_core_arg("from_timestamp", 0, &Type::Int, &mut args[0]);
                 return Some(Type::Named("DateTime".to_string()));
             }
-            // D-APPROX1=A: sketch constructors.
-            ("core.data.sketch.hll", "new") => {
-                for a in args.iter_mut() {
-                    self.infer(&mut a.expr);
-                }
-                return Some(Type::Named("HyperLogLog".to_string()));
-            }
-            ("core.data.sketch.cms", "new") => {
-                for a in args.iter_mut() {
-                    self.infer(&mut a.expr);
-                }
-                return Some(Type::Named("CountMinSketch".to_string()));
-            }
-            ("core.data.sketch.reservoir", "new") => {
-                if args.len() != 1 {
-                    self.diags
-                        .push(wrong_core_arity("new", 1, args.len(), span));
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
-                    }
-                    return None;
-                }
-                self.expect_core_arg("new", 0, &Type::Int, &mut args[0]);
-                return Some(Type::Named("ReservoirSampler".to_string()));
-            }
             // D-NUMTYPE1=A: core.math.fraction(top, bottom) answers an exact
             // ratio, or nothing when the bottom is zero.
             ("core.math", "fraction") => {
