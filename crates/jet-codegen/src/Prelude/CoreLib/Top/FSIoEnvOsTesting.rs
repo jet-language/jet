@@ -123,9 +123,6 @@ fn jet_std_io_args() -> Vec<String> {
     std::env::args().collect()
 }
 
-fn jet_std_io_process_args() -> Vec<String> {
-    jet_process_args_view(jet_std_io_args())
-}
 // #1480: jet_std_io_input moved to IoLineStream.rs so the JIT host can
 // `include!` the same Prelude source (I9); still in scope here via the
 // shared crate-root closure both files get concatenated into for AOT.

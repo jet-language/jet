@@ -13,7 +13,7 @@ use core as core
 use core.files as files
 
 
-pub fn args() -[Exec.Args]> [String] Never! { core.process.args() }
+pub fn args() -[Exec.Args]> [String] Never! { args_from_argv(argv()) }
 
 pub fn argv() -[Exec.Args]> [String] Never! { core.process.argv() }
 
@@ -347,3 +347,15 @@ fn slice_u8(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out
 }
 
+
+fn args_from_argv(values: [String]) -> [String] Never! {
+    if values.len() < 2 -> return [String]{}
+    values[1..<values.len()]
+}
+
+#Test
+fn process_argument_projection() {
+    assert(args_from_argv([String]{}) == [String]{})
+    assert(args_from_argv([String]{"jet"}) == [String]{})
+    assert(args_from_argv([String]{"tool", "", "a b"}) == [String]{"", "a b"})
+}

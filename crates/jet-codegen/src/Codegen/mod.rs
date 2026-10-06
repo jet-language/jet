@@ -338,7 +338,6 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/ColumnList.rs"),
     include_str!("../Prelude/Core/UnicodeString.rs"),
     include_str!("../Prelude/Core/Ascii.rs"),
-    include_str!("../Prelude/Core/ProcessArgs.rs"),
     // D-STR-CONCAT1: the owned String `+`/`+=` result is one kernel for every
     // execution tier; the evaluator and JIT include this same source.
     include_str!("../Prelude/Core/StringConcat.rs"),

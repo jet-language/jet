@@ -382,9 +382,6 @@ mod math_lib_pure {
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs");
 }
 
-mod encoding_base_kernel {
-    include!("../../../../jet-codegen/src/Prelude/Core/EncodingBase.rs");
-}
 
 mod encoding_error_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/EncodingError.rs");

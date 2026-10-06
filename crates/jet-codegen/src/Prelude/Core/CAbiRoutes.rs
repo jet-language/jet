@@ -12783,11 +12783,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.process.args
-    #[no_mangle]
-    pub extern "C" fn jet_std_io_process_args(data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_std_io_process_args().into_iter().map(|e| handle(e) as u64).collect(), data))
-    }
 
     /// core.term.progress
     #[no_mangle]
