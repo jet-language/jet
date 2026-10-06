@@ -1308,9 +1308,10 @@ pub fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
         .MemberSpread(base, members, span) -> {
             jfmt_fmt_expr(&f, base, JFMT_PREC_POSTFIX)
             jfmt_write(&f, ".[")
-            source := jfmt_source_list_span_after(f, expr_span(base).end, JFMT_DELIM_BRACKET)
-            if source == .Val(list) {
-                if list.span.end > span.end -> source = None
+            found :: jfmt_source_list_span_after(f, expr_span(base).end, JFMT_DELIM_BRACKET)
+            source := JetFmtSourceList?{None}
+            if found == .Val(list) {
+                if list.span.end <= span.end -> source = Val(list)
             }
             multiline :: jfmt_comma_begin(&f, members.len(), source)
             loop (index, member) in members {
