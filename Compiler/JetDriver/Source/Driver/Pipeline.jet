@@ -86,6 +86,7 @@ use jet_foundation.[
     THarnessKind,
     THarnessPlanFact,
     TJobFact,
+    TLocal,
     TOutputCheckFact,
     TTestFact,
     core_module_export,
@@ -151,6 +152,7 @@ use jet_sema.[
     sema_comptime_append_checked_function_to_module,
     sema_comptime_available_constants,
     sema_comptime_available_constants_add,
+    sema_comptime_bare_module,
     sema_comptime_checked_text_source,
     sema_comptime_dependency_cycle_diagnostic,
     sema_comptime_environment,
@@ -1501,6 +1503,12 @@ fn jet_driver_comptime_function_closure(
 // `sites` are the value sites of the environment's graph, through which
 // landings apply and staged constant rows are found; `staged_keys` the
 // `module\nkey` of every constant value the session's rows cover.
+// G (closure-scoped staging): `bare` is set while `session` is the bare
+// session (jet_driver_comptime_stage_bare), which serves batches that reach
+// no declaration until the first batch that does; `bare_ok` whether the run
+// may stage bare at all (the declaration pass's modules are at hand and
+// carry no foreign rows, so a bare program lacks only rows its items never
+// read).
 struct JetDriverComptimeStaging {
     session: JetCodegenComptimeSession?
     runtime_modules: [SemaGraphModuleResult]
@@ -1513,6 +1521,8 @@ struct JetDriverComptimeStaging {
     global_count: Int
     sites: SemaComptimeValueSites
     staged_keys: [String:Bool]
+    bare: Bool
+    bare_ok: Bool
 }
 
 // A2c, one growing comptime program per run. A shareable flush (each of its
@@ -1581,6 +1591,10 @@ struct JetDriverComptimeBatch {
     // Whether every evaluated entry passed jet_driver_comptime_batchable, so
     // the batch may evaluate on, and become, the run's live program.
     shareable: Bool
+    // G: whether no evaluated entry reaches a declaration or has a closure
+    // (jet_driver_comptime_entry_bare), so the batch may lower on the bare
+    // session.
+    bare: Bool
 }
 
 // What evaluating a batch did to the run.
@@ -1602,6 +1616,8 @@ struct JetDriverComptimeCounters {
     programs_grown: Int
     item_functions_evaluated: Int
     rows_lowered: Int
+    // G: item functions evaluated on a bare program.
+    items_bare: Int
 }
 
 // The program a flush evaluates on: held until the first evaluation moves it
@@ -2175,7 +2191,7 @@ fn jet_driver_comptime_batchable(source: SemaComptimeItemSource, request: SemaCo
 }
 
 fn jet_driver_comptime_batch_new() -> JetDriverComptimeBatch Never! {
-    JetDriverComptimeBatch{entries: [JetDriverComptimeEntry]{}, functions: [TFunc]{}, function_rows: [String:Int]{}, keys: [String:Bool]{}, needs_rows: false, shareable: true}
+    JetDriverComptimeBatch{entries: [JetDriverComptimeEntry]{}, functions: [TFunc]{}, function_rows: [String:Int]{}, keys: [String:Bool]{}, needs_rows: false, shareable: true, bare: true}
 }
 
 // Appends an item to `batch`, moving the functions of its checked closure
@@ -2196,6 +2212,7 @@ fn jet_driver_comptime_batch_add(batch: &JetDriverComptimeBatch, source: SemaCom
         &batch.functions.push(^function)
     }
     if plain == None && (request.dependencies.len() > 0 || function_keys.len() > 0) -> batch.needs_rows = true
+    if plain == None && !jet_driver_comptime_entry_bare(request, function_keys) -> batch.bare = false
     batch.keys[source.key] = true
     &batch.entries.push(JetDriverComptimeEntry{source: source, request: request, function_keys: function_keys, plain: plain})
 }
@@ -2212,6 +2229,7 @@ fn jet_driver_comptime_batch_single(batch: JetDriverComptimeBatch, index: Int) -
         &single.functions.push(batch.functions[row])
     }
     if entry.plain == None && (entry.request.dependencies.len() > 0 || entry.function_keys.len() > 0) -> single.needs_rows = true
+    if entry.plain == None && !jet_driver_comptime_entry_bare(entry.request, entry.function_keys) -> single.bare = false
     single.keys[entry.source.key] = true
     &single.entries.push(entry)
     single
@@ -2281,8 +2299,18 @@ fn jet_driver_comptime_stage(
             &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, head.module_identity, "E0003", head.span, "the staged comptime declaration graph lost a registered module", "temporary interpreter MIR retains every module identity from the registered graph", "preserve the complete resolved module set while applying staged values"))
             return Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
         }
-        loop runtime_module in staged_modules {
-            if runtime_module.module_identity != graph.canonical_effect_module_identity -> &staging.runtime_modules.push(runtime_module)
+        // Assembly reads only the runtime modules' count and foreign rows,
+        // and foreign lowering reads nothing else when no module has foreign
+        // rows (jet_driver_comptime_bare_ok), so the bare modules stand in for
+        // a copy of every staged module then.
+        if staging.bare_ok {
+            loop index in 0..<graph.modules.len() {
+                if graph.modules[index].module_identity != graph.canonical_effect_module_identity -> &staging.runtime_modules.push(sema_comptime_bare_module(graph.modules[index]))
+            }
+        } else {
+            loop runtime_module in staged_modules {
+                if runtime_module.module_identity != graph.canonical_effect_module_identity -> &staging.runtime_modules.push(runtime_module)
+            }
         }
         session := jet_codegen_comptime_session(^staged_modules, load.source_files)
         // The rows of the values so far join the declared modules as later
@@ -2726,10 +2754,18 @@ fn jet_driver_comptime_flush(
     // entry's check and closure name only constants that landed before the
     // batch (naming a batch constant makes a check wait on it), and rows of
     // constants an item does not name never change its value.
-    staged :: jet_driver_comptime_stage(graph, declared, load, batch.entries[start].request, batch.needs_rows, values, checked_functions, trace, program, &staging, &diagnostics)
-    if staged == .Val(stopped) {
-        flushed.stop = Val(stopped)
-        return flushed
+    // G: a batch that reaches no declaration lowers on the bare session
+    // until the first batch that does, which replaces the bare session (and
+    // the live program built on it) with the staged session of every module.
+    if batch.bare && staging.bare_ok && (staging.session == None || staging.bare) {
+        if staging.session == None -> jet_driver_comptime_stage_bare(graph, load, &staging)
+    } else {
+        if staging.bare -> jet_driver_comptime_unstage_bare(&staging)
+        staged :: jet_driver_comptime_stage(graph, declared, load, batch.entries[start].request, batch.needs_rows, values, checked_functions, trace, program, &staging, &diagnostics)
+        if staged == .Val(stopped) {
+            flushed.stop = Val(stopped)
+            return flushed
+        }
     }
     if staging.session == None {
         flushed.stop = Val(jet_driver_comptime_lost_session(values, checked_functions, trace))
@@ -2815,6 +2851,7 @@ fn jet_driver_comptime_flush(
         function_id :: item_functions[evaluated_index]
         evaluated_index += 1
         counters.item_functions_evaluated += 1
+        if staging.bare -> counters.items_bare += 1
         source :: entry.source
         comptime_request :: entry.request
         if !jet_driver_comptime_globals_check(&staging, values, graph, comptime_request.module_identity, comptime_request.span, &diagnostics) {
@@ -2945,7 +2982,7 @@ fn jet_driver_run_comptime(
     request: JetDriverCompileRequest,
     diagnostics: &[Diagnostic],
 ) -> JetDriverComptimeRunResult {
-    counters := JetDriverComptimeCounters{items_checked: 0, programs_built: 0, programs_grown: 0, item_functions_evaluated: 0, rows_lowered: 0}
+    counters := JetDriverComptimeCounters{items_checked: 0, programs_built: 0, programs_grown: 0, item_functions_evaluated: 0, rows_lowered: 0, items_bare: 0}
     result := jet_driver_comptime_run(graph, ^staged, declared, sources, names, initial_values, initial_functions, load, request, &counters, &diagnostics)
     if request.trace_sink == .Val(sink) {
         sink.progress("counters.comptime.items_checked", counters.items_checked, -1)
@@ -2953,6 +2990,7 @@ fn jet_driver_run_comptime(
         sink.progress("counters.comptime.programs_grown", counters.programs_grown, -1)
         sink.progress("counters.comptime.item_functions_evaluated", counters.item_functions_evaluated, -1)
         sink.progress("counters.comptime.rows_lowered", counters.rows_lowered, -1)
+        sink.progress("counters.comptime.items_bare", counters.items_bare, -1)
     }
     result
 }
@@ -3004,7 +3042,7 @@ fn jet_driver_comptime_run(
     // other item first takes the rows of the values that landed since them
     // (jet_driver_comptime_stage). Codegen owns the staged modules (moved in,
     // never copied per item) and their indexes.
-    staging := JetDriverComptimeStaging{session: None, runtime_modules: [SemaGraphModuleResult]{}, foreign: None, count: -1, live: [JetDriverComptimeLive]{}, growth_constants: [MIRConstantDef]{}, restore: false, global_keys: [String:Bool]{}, global_count: 0, sites: jet_driver_comptime_program_sites(&program, graph), staged_keys: [String:Bool]{}}
+    staging := JetDriverComptimeStaging{session: None, runtime_modules: [SemaGraphModuleResult]{}, foreign: None, count: -1, live: [JetDriverComptimeLive]{}, growth_constants: [MIRConstantDef]{}, restore: false, global_keys: [String:Bool]{}, global_count: 0, sites: jet_driver_comptime_program_sites(&program, graph), staged_keys: [String:Bool]{}, bare: false, bare_ok: jet_driver_comptime_bare_ok(graph, declared)}
     loop (key, _) in request.eval_config.globals -> staging.global_keys[key] = true
     // Items whose check and closure read nothing a batch holds back
     // (jet_driver_comptime_reads_batch) are checked and, when
@@ -3242,6 +3280,144 @@ fn jet_driver_comptime_run(
     finished.graph = ^program.registration_graph
     program.registration_graph = None
     finished
+}
+
+// G (closure-scoped staging): what a checked comptime item's TIR reaches
+// beyond itself. `functions` are the keys of the functions it calls;
+// `everything` is set once it names any other declaration (a constant, a
+// nominal type, a trait, a field owner, a foreign row, ...) or holds a form
+// this walk does not follow, so an unknown form never counts as reaching
+// nothing. The forms followed read no module declaration while they lower:
+// primitive types lower without module lookups (jet_codegen_qualify_type,
+// jet_codegen_type_instance_id), and literals, plain local reads, unary and
+// binary operations (prelude or primitive dispatch; the fact-enum fold reads
+// modules only for constant and enum operands), comparison chains without
+// hooks, Display interpolation, inline blocks and plain lets lower without
+// one. So an item that reaches nothing lowers on the bare session exactly as
+// on the staged session of every module.
+struct JetDriverComptimeReach {
+    everything: Bool
+    functions: [String]
+}
+
+fn jet_driver_comptime_reach_type(reach: &JetDriverComptimeReach, ty: Type) Never! {
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) -> {}
+        else -> reach.everything = true
+    }
+}
+
+fn jet_driver_comptime_reach_local(reach: &JetDriverComptimeReach, local: TLocal) Never! {
+    if local.deref || local.address_lifetime != None || local.persist_key != None || local.string_bytes_source != None || local.uninit_scalar || local.uninit_fixed -> reach.everything = true
+}
+
+fn jet_driver_comptime_reach_expr(reach: &JetDriverComptimeReach, expression: TExpr) Never! {
+    if reach.everything -> return
+    jet_driver_comptime_reach_type(&reach, expression.ty)
+    if expression.kind == {
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) -> {}
+        .StrLit(parts) -> {
+            loop part in parts {
+                if part == {
+                    .Interpolation(value, format) -> {
+                        if format == {
+                            .Display -> {}
+                            else -> reach.everything = true
+                        }
+                        jet_driver_comptime_reach_expr(&reach, value)
+                    }
+                    else -> {}
+                }
+            }
+        }
+        .Local(local) -> jet_driver_comptime_reach_local(&reach, local)
+        .Unary(_, operand) -> jet_driver_comptime_reach_expr(&reach, operand)
+        .Binary(_, _, _, lhs, rhs) -> {
+            jet_driver_comptime_reach_expr(&reach, lhs)
+            jet_driver_comptime_reach_expr(&reach, rhs)
+        }
+        .CompareChain(operands, _, hooks) -> {
+            loop hook in hooks {
+                if hook -> reach.everything = true
+            }
+            loop operand in operands -> jet_driver_comptime_reach_expr(&reach, operand)
+        }
+        .InlineBlock(body) -> {
+            loop statement in body -> jet_driver_comptime_reach_stmt(&reach, statement)
+        }
+        else -> reach.everything = true
+    }
+}
+
+fn jet_driver_comptime_reach_stmt(reach: &JetDriverComptimeReach, statement: TStmt) Never! {
+    if reach.everything -> return
+    if statement == {
+        .Let(local, let_ty, init, gc_promotion, gc_transferred, _) -> {
+            if let_ty == {
+                .Inferred -> {}
+                else -> reach.everything = true
+            }
+            if gc_promotion != None || gc_transferred -> reach.everything = true
+            jet_driver_comptime_reach_local(&reach, local)
+            jet_driver_comptime_reach_expr(&reach, init)
+        }
+        .ExprStmt(value, _) -> jet_driver_comptime_reach_expr(&reach, value)
+        .LineMarker(_) | .SourceSpan(_) -> {}
+        else -> reach.everything = true
+    }
+}
+
+// G: whether an evaluated entry may lower on the bare session: it names no
+// staged constant, its checked closure is empty and its TIR (and expected
+// type) reaches nothing.
+fn jet_driver_comptime_entry_bare(request: SemaComptimeItemRequest, function_keys: [String]) -> Bool Never! {
+    if request.dependencies.len() > 0 || function_keys.len() > 0 -> return false
+    reach := JetDriverComptimeReach{everything: false, functions: [String]{}}
+    if request.expected_type == .Val(expected) -> jet_driver_comptime_reach_type(&reach, expected)
+    jet_driver_comptime_reach_expr(&reach, request.expression)
+    !reach.everything && reach.functions.len() == 0
+}
+
+// G: whether a run may stage bare: the declaration pass's modules of every
+// registered module are at hand and none carries foreign rows (a bare program
+// has none, and its assembly reads only the module count and foreign rows).
+fn jet_driver_comptime_bare_ok(graph: SemaRegistrationGraph, declared: [SemaGraphModuleResult]) -> Bool Never! {
+    if declared.len() == 0 || declared.len() != graph.modules.len() -> return false
+    loop index in 0..<declared.len() {
+        if declared[index].foreign_functions.len() > 0 || declared[index].foreign_providers.len() > 0 -> return false
+    }
+    true
+}
+
+// G: stages the bare session, over the bare module of every registered module
+// (sema_comptime_bare_module), and its runtime modules (every bare module but
+// the canonical effect module, as staged runtime modules are): lowering a
+// batch that reaches nothing reads no declaration, so its program carries
+// only its item functions, never a row of every module.
+fn jet_driver_comptime_stage_bare(graph: SemaRegistrationGraph, load: JetDriverLoadResult, staging: &JetDriverComptimeStaging) Never! {
+    modules := [SemaGraphModuleResult]{}
+    loop index in 0..<graph.modules.len() {
+        bare := sema_comptime_bare_module(graph.modules[index])
+        if bare.module_identity != graph.canonical_effect_module_identity -> &staging.runtime_modules.push(bare)
+        &modules.push(^bare)
+    }
+    staging.session = Val(jet_codegen_comptime_session(^modules, load.source_files))
+    staging.bare = true
+}
+
+// G: drops the bare session, its runtime modules and foreign rows, and the
+// live program built on it, so the next staging builds the staged session of
+// every module as the run's first (jet_driver_comptime_stage). A later batch
+// builds its own program: by A2c's argument its values are those the bare
+// live program would give.
+fn jet_driver_comptime_unstage_bare(staging: &JetDriverComptimeStaging) Never! {
+    staging.session = None
+    staging.runtime_modules = [SemaGraphModuleResult]{}
+    staging.foreign = None
+    staging.live = [JetDriverComptimeLive]{}
+    staging.growth_constants = [MIRConstantDef]{}
+    staging.restore = false
+    staging.bare = false
 }
 
 // Rust `plain_literal_value` (Registration/Items.rs): a constant whose checked
