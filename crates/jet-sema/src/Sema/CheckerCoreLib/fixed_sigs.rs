@@ -5881,6 +5881,8 @@ fn core_fixed_sig_impl(
             Some(Type::Named(crate::Syntax::TYPE_KEY.to_string())),
         )),
         // D-FIDELITY-API1=A: runtime-global fidelity signal.
+        ("core.perf", "__read_bits") => Some((vec![], Some(int))),
+        ("core.perf", "__write_bits") => Some((vec![(read, int)], Some(unit))),
         ("core.perf", "fidelity") => Some((vec![], Some(float))),
         ("core.perf", "default_fidelity") => Some((vec![], Some(float.clone()))),
         ("core.perf", "override_fidelity") => Some((

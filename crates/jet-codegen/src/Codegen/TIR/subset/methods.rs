@@ -1687,7 +1687,7 @@ pub(crate) fn static_method_call_in_subset(
     }
     if type_name == "Perf"
         && !cx.fact_type_name("Perf")
-        && core_call_covered("core.perf", method)
+        && jet_foundation::CoreModuleExports::core_source_owns_call("core.perf", method, args.len())
     {
         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }

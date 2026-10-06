@@ -100,6 +100,12 @@ to primitive bit casts and libm operations that Jet cannot yet express through
 an intrinsic or an external call. A classification or composite operation is
 not a native leaf merely because Rust exposes it as a scalar method.
 
+`core.perf` owns unit-interval validation, rejected-value errors, the `1.0`
+default, reset semantics, and f32 rounding in Jet. The provider only loads and
+stores one zero-initialized atomic word. Jet encodes a stored IEEE value as its
+signed f64 bit pattern plus one, reserving zero for the default; this preserves
+both signed zeros without assigning policy to the native cell.
+
 A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.

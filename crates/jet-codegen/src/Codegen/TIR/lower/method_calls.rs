@@ -11794,38 +11794,12 @@ fn lower_method_call_impl(
                 // D-FIDELITY-API1=A: `Perf.fidelity()` / `Perf.override_fidelity(v)?`
                 // lower to the same core call shape as `use core.perf as perf`.
                 if type_name == "Perf" && !cx.fact_type_name("Perf") {
-                    return in_own_frame(|| {
-                        let targs: Vec<TExpr> =
-                            args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
-                        let widen_to_vec = core_widen_to_vec("core.perf", method, &targs);
-                        let Some(ty) = resolved_ret.cloned() else {
-                            return invariant_method_expr(
-                                method_span,
-                                format!("Perf.{method} without a resolved return type",),
-                            );
-                        };
-                        let record = match checked_core_record(
-                            "core.perf",
-                            method,
-                            targs.len(),
-                            method_span,
-                        ) {
-                            Ok(record) => record,
-                            Err(expr) => return expr,
-                        };
-                        TExpr {
-                            ty: ty.clone(),
-                            kind: TExprKind::CoreCall {
-                                record,
-                                args: targs,
-                                source_span: method_span,
-                                type_args: Vec::new(),
-                                widen_to_vec,
-                                data_plan: None,
-                                fallibility: TFailureCarrier::from_checked_type(&ty),
-                            },
-                        }
-                    });
+                    if let Some(call) = lower_core_source_call(
+                        method_span, "core.perf", method, type_args, resolved_ret, args, cx, env,
+                    ) {
+                        return call;
+                    }
+                    return invariant_method_expr(method_span, "Perf source call was not loaded");
                 }
                 // D-COLLBREADTH1=A: `Set.from([...])` → collect list into HashSet.
                 // Lower the list arg as the recv of a SetFrom BuiltinMethod.

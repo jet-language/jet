@@ -787,7 +787,6 @@ pub fn display_core_pure_value(value: &CtValue) -> Option<String> {
 pub(in super::super) use regex::apply_regex_method;
 pub use regex::eval_regex_replace_all_with;
 
-const PERF_DEFAULT_FIDELITY_BITS: u32 = 1.0f32.to_bits();
 // D-FIDELITY-API1=A: this signal must behave like the AOT binary's
 // process-global static (fresh default per program run, persists across
 // reads/writes within one run). This compiler process hosts many concurrent
@@ -798,7 +797,7 @@ const PERF_DEFAULT_FIDELITY_BITS: u32 = 1.0f32.to_bits();
 // process-wide static had) while preserving the existing single-thread
 // persistence a REPL session or dev run relies on.
 thread_local! {
-    static PERF_FIDELITY: Cell<u32> = const { Cell::new(PERF_DEFAULT_FIDELITY_BITS) };
+    static PERF_FIDELITY: Cell<i64> = const { Cell::new(0) };
 }
 
 // ---------------------------------------------------------------------------

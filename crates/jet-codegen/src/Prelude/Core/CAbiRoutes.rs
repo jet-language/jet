@@ -10857,31 +10857,16 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.perf.default_fidelity
+    /// core.perf.__read_bits
     #[no_mangle]
-    pub extern "C" fn jet_perf_default_fidelity() -> f64 {
-        guard(|| crate::jet_perf_default_fidelity())
+    pub extern "C" fn jet_perf_read_bits() -> i64 {
+        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_perf_read_bits()))
     }
 
-    /// core.perf.fidelity
+    /// core.perf.__write_bits
     #[no_mangle]
-    pub extern "C" fn jet_perf_fidelity() -> f64 {
-        guard(|| crate::jet_perf_fidelity())
-    }
-
-    /// core.perf.override_fidelity
-    #[no_mangle]
-    pub extern "C" fn jet_perf_override_fidelity(a0: f64, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_perf_override_fidelity(a0) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(handle(error)) }; 0 }
-        })
-    }
-
-    /// core.perf.reset_fidelity
-    #[no_mangle]
-    pub extern "C" fn jet_perf_reset_fidelity() {
-        guard(|| crate::jet_perf_reset_fidelity())
+    pub extern "C" fn jet_perf_write_bits(a0: i64) {
+        guard(|| crate::jet_perf_write_bits(a0))
     }
 
     /// core.handle.process.child.exited
