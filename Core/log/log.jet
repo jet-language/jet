@@ -42,6 +42,8 @@ pub fn warning(message: String) Never! -[Log]> { warn(message) }
 
 pub fn critical(message: String) Never! -[Log]> { emit("critical", message, [LogField]{}) }
 
+/// Emit a `fatal` record, flush, and exit the process with status 1. The exit
+/// happens even when `disable` or the level filter suppresses the record.
 pub fn fatal(message: String) Never! -[Log]> { emit("fatal", message, [LogField]{}) }
 
 pub fn debug_fields(message: String, fields: [LogField]) Never! -[Log]> { emit("debug", message, fields) }
@@ -162,7 +164,9 @@ pub fn enabled(level: String) -[Log]> Bool Never! {
 fn emit(level: String, message: String, fields: [LogField]) -[Log]> {
     normalized :: canon_level(level)
     if normalized.len() == 0 -> return
-    if !core.log.enabled(normalized) -> return
+    // `fatal` always reaches the host: it suppresses a filtered record itself
+    // and still flushes and exits 1.
+    if normalized != "fatal" && !core.log.enabled(normalized) -> return
     normalized_fields := fields
     if normalized_fields.len() > 0 -> normalized_fields = normalize_fields(normalized_fields)
     if normalized == {
