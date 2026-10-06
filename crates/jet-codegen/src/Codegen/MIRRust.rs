@@ -3025,6 +3025,11 @@ fn is_source_owned_core_net_shape(name: &str) -> bool {
             && matches!(leaf, "TLSCertificate" | "TLSPeerIdentity"))
 }
 
+fn is_source_owned_core_raylib_shape(name: &str) -> bool {
+    name.starts_with("<corelib>/Core/game::Core/game/raylib.jet::")
+        && crate::Codegen::core_source_type_leaf(name) == "RaylibSound"
+}
+
 fn is_source_owned_core_web_query_shape(name: &str) -> bool {
     name.starts_with("<corelib>/Core/web::Core/web/query.jet::")
         && matches!(
@@ -3090,6 +3095,7 @@ fn core_native_probe_name(name: &str) -> &str {
         || is_source_owned_core_compute_shape(name)
         || is_source_owned_core_net_shape(name)
         || is_source_owned_core_web_query_shape(name)
+        || is_source_owned_core_raylib_shape(name)
     {
         name
     } else if name.starts_with("<corelib>/") {
@@ -3103,6 +3109,7 @@ fn has_native_type_projection(name: &str) -> bool {
     if is_source_owned_core_compute_shape(name)
         || is_source_owned_core_net_shape(name)
         || is_source_owned_core_web_query_shape(name)
+        || is_source_owned_core_raylib_shape(name)
     {
         return false;
     }

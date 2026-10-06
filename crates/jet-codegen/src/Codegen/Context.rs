@@ -1316,7 +1316,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-RAYLIB1=A: display-gated graphics bridge types.
         "RaylibWindow" => Some("RaylibWindow"),
         "RaylibColor" => Some("RaylibColor"),
-        "RaylibSound" => Some("RaylibSound"),
         "RaylibTextureAtlas" => Some("RaylibTextureAtlas"),
         // D-TYPEDSQL-SINK1=A: `SQL` is a checked `(String, Vec<DBValue>)`
         // carrier. It remains a known core value type for subset gating; the
@@ -1519,7 +1518,6 @@ pub(crate) fn raylib_handle_rust_type(name: &str) -> Option<&'static str> {
     match name {
         "RaylibWindow" => Some("RaylibWindow"),
         "RaylibColor" => Some("RaylibColor"),
-        "RaylibSound" => Some("RaylibSound"),
         "RaylibTextureAtlas" => Some("RaylibTextureAtlas"),
         _ => None,
     }

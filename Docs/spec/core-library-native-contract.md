@@ -106,6 +106,10 @@ stores one zero-initialized atomic word. Jet encodes a stored IEEE value as its
 signed f64 bit pattern plus one, reserving zero for the default; this preserves
 both signed zeros without assigning policy to the native cell.
 
+`core.game.raylib` sound handles are Jet records retaining the supplied path.
+`play_sound` preserves the existing non-empty-path acceptance contract, not a
+claim of native audio submission; this pair requires no host operation.
+
 A high-level native implementation must not be retained as an invisible runtime
 fallback for a Jet implementation. If an API changes identity or semantics,
 make the change at the contract boundary and migrate its users in one cutover.
