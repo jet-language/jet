@@ -1001,6 +1001,56 @@ fn jet_rust_emit_format_integer_kind(ty: MIRType) -> Int Never! {
     }
 }
 
+// MIRRust shows_labeled_tuple: a Jet tuple lowers to a plain Rust tuple,
+// which carries no labels, so a type reaching a labeled tuple through tuples
+// and lists renders its shown text at the use from the MIR type.
+fn jet_rust_emit_shows_labeled_tuple(ctx: &JetRustEmitContext, source: MIRType) -> Bool Never! {
+    ty := source
+    if ty.identity == .Val(identity) {
+        if jet_rust_emit_type_instance(ctx, identity, true) == .Val(instance) -> ty = instance
+    }
+    if ty.kind == {
+        .Tuple(fields) -> fields.len() > 0
+        .List(inner) | .FixedList(inner, _) -> jet_rust_emit_shows_labeled_tuple(&ctx, inner)
+        else -> false
+    }
+}
+
+// MIRRust structural_text: the text `method` (`jet_show`, `jet_display` or
+// `jet_debug`) gives the value `reference` (an expression of type `&ty`)
+// names. A labeled tuple renders as the canonical record of its labels
+// (`(idx,item) { idx: 0, item: 1 }`), a list of them through the list shape;
+// any other type through its own protocol impl.
+fn jet_rust_emit_structural_text(ctx: &JetRustEmitContext, source: MIRType, reference: String, method: String, depth: Int) -> String Never! {
+    ty := source
+    if ty.identity == .Val(identity) {
+        if jet_rust_emit_type_instance(ctx, identity, true) == .Val(instance) -> ty = instance
+    }
+    if ty.kind == {
+        .Tuple(fields) -> {
+            if fields.len() > 0 {
+                labels := [String]{}
+                values := [String]{}
+                loop (index, field) in fields {
+                    &labels.push("{field.name}")
+                    text :: jet_rust_emit_structural_text(&ctx, field.ty, "&({reference}).{index}", method, depth + 1)
+                    &values.push("({jet_rust_emit_quote(field.name)}.to_string(), {text})")
+                }
+                return "{ctx.config.root_prefix}jet_debug_record({jet_rust_emit_quote("({labels.join(",")})")}, [{values.join(", ")}])"
+            }
+        }
+        .List(inner) | .FixedList(inner, _) -> {
+            if jet_rust_emit_shows_labeled_tuple(&ctx, inner) {
+                item :: "__jet_item{depth}"
+                text :: jet_rust_emit_structural_text(&ctx, inner, item, method, depth + 1)
+                return "format!(\"[{{}}]\", ({reference}).iter().map(|{item}| {text}).collect::<Vec<String>>().join(\", \"))"
+            }
+        }
+        else -> {}
+    }
+    "({reference}).{method}()"
+}
+
 // MIRRust string_format_route / lower_direct_string_format: every hole renders
 // through the canonical `core.text.fmt` kernel the reference lowers it to
 // (`jet_fmt_display`, `jet_fmt_decimal`, ...). Exact Int selectors take the
@@ -1011,6 +1061,16 @@ fn jet_rust_emit_string_format(ctx: &JetRustEmitContext, function: MIRFunction, 
     root :: ~ctx.config.root_prefix
     borrowed :: jet_rust_emit_value_reference(ctx, value, false)
     shown :: "{root}jet_fmt_display({borrowed})"
+    if format == {
+        .Display | .Debug -> {
+            ty :: jet_rust_emit_value_type(ctx, function, value)
+            if jet_rust_emit_shows_labeled_tuple(&ctx, ty) {
+                method :: if format == .Debug -> "jet_debug" else -> "jet_display"
+                return jet_rust_emit_structural_text(&ctx, ty, borrowed, method, 0)
+            }
+        }
+        else -> {}
+    }
     if format == {
         .Display -> return shown
         .Debug -> return "{root}jet_fmt_debug({borrowed})"
@@ -1186,6 +1246,15 @@ fn jet_rust_emit_prelude_call(ctx: &JetRustEmitContext, function: MIRFunction, i
     symbol :: jet_rust_emit_prelude_symbol(&ctx, id)
     exact :: jet_rust_emit_exact_adapter(&ctx, function, symbol, args)
     mask := route.signature.borrow_mask
+    // MIRRust call_symbol_for_function: a labeled tuple carries its labels
+    // only in MIR, so `{value}` and `{value:Debug}` of one render its record.
+    if args.len() == 1 && (jet_rust_emit_adapter_symbol_is(symbol, ctx.config.root_prefix, "jet_fmt_display") || jet_rust_emit_adapter_symbol_is(symbol, ctx.config.root_prefix, "jet_fmt_debug")) {
+        ty :: jet_rust_emit_value_type(ctx, function, args[0].value)
+        if jet_rust_emit_shows_labeled_tuple(&ctx, ty) {
+            method :: if jet_rust_emit_adapter_symbol_is(symbol, ctx.config.root_prefix, "jet_fmt_debug") -> "jet_debug" else -> "jet_display"
+            return jet_rust_emit_structural_text(&ctx, ty, jet_rust_emit_call_arg_with_borrow(&ctx, function, args[0], true), method, 0)
+        }
+    }
     mask = jet_rust_emit_exact_adapter_mask(args, symbol, mask, exact)
     if args.len() == 2 && (jet_rust_emit_adapter_symbol_is(symbol, ctx.config.root_prefix, "jet_fmt_decimal_int") || jet_rust_emit_adapter_symbol_is(symbol, ctx.config.root_prefix, "jet_fmt_grouped_int")) && jet_rust_emit_format_integer_kind(jet_rust_emit_value_type(ctx, function, args[0].value)) == 2 {
         // Fixed-width words cross the decimal kernel as their exact text,

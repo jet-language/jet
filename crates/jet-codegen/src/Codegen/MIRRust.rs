@@ -8822,14 +8822,16 @@ impl<'a> RustEmitter<'a> {
         );
     }
 
-    /// D-FAIL-CONV2=A: `Prelude/Errors.jet` converts each Core error family
-    /// member onto `Err` with `Err("{self}")`, and every Prelude-owned member
-    /// renders that text through its `JetShow`. A member declared in Core Jet
-    /// source (`UUIDError`) is emitted from MIR instead, so it needs the same
-    /// `JetDisplay` forwarding its Prelude-owned siblings carry (I9: the
-    /// resident engine shows the same record). A unit-only enum keeps the
-    /// case-name display above; a user `Display` impl keeps its own.
-    fn emit_core_error_family_display_impl(&self, def: &MirTypeDef, out: &mut String) {
+    /// D-DISPLAYDBG1 / D-FAIL-CONV2=A: an auto-`Printable` record (struct,
+    /// unit family, or enum with a payload case) admits bare `{value}` and
+    /// renders its structural record on every tier: the resident engine shows
+    /// the same record, and Core error family members convert onto `Err` with
+    /// `Err("{self}")`. AOT's `jet_fmt_display<T: JetDisplay>` needs that render
+    /// as a `JetDisplay` impl forwarding to the structural `JetShow`. A unit-only
+    /// enum keeps its case-name display; distinct and alias rows have no
+    /// structural body; a selected user `Display` impl keeps its own rendering.
+    /// The caller passes `emit_show` (the structural `JetShow` is emitted).
+    fn emit_printable_record_display_impl(&self, def: &MirTypeDef, out: &mut String) {
         let unit_enum = matches!(
             &def.kind,
             MirTypeDefKind::Enum { variants, .. }
@@ -8837,10 +8839,7 @@ impl<'a> RustEmitter<'a> {
                     .iter()
                     .all(|variant| matches!(&variant.payload, MirVariantPayload::Unit))
         );
-        if !def.key.starts_with("<corelib>/")
-            || !crate::Sema::is_core_error_family_type(&def.key)
-            || !def.generic_params.is_empty()
-            || unit_enum
+        if unit_enum
             || matches!(
                 &def.kind,
                 MirTypeDefKind::Distinct { .. } | MirTypeDefKind::Alias { .. }
@@ -8849,10 +8848,19 @@ impl<'a> RustEmitter<'a> {
         {
             return;
         }
-        let name = self.type_name(def.id);
+        let type_args = if def.generic_params.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "<{}>",
+                def.generic_params.iter().map(|param| mangle(&param.name)).collect::<Vec<_>>().join(", ")
+            )
+        };
+        let name = format!("{}{}", self.type_name(def.id), self.type_def_impl_args(def, &type_args));
+        let impl_generics = self.structural_generics(def, crate::Generics::PRINTABLE);
         let _ = writeln!(
             out,
-            "impl JetDisplay for {name} {{\n    fn jet_display(&self) -> String {{\n        <Self as JetShow>::jet_show(self)\n    }}\n}}\n"
+            "impl{impl_generics} JetDisplay for {name} {{\n    fn jet_display(&self) -> String {{\n        <Self as JetShow>::jet_show(self)\n    }}\n}}\n"
         );
     }
 
@@ -8898,7 +8906,7 @@ impl<'a> RustEmitter<'a> {
         self.emit_plain_enum_display_impl(def, out);
         self.emit_printable_distinct_display_impl(def, out);
         if emit_show {
-            self.emit_core_error_family_display_impl(def, out);
+            self.emit_printable_record_display_impl(def, out);
         }
         if (!emit_show && !emit_debug) || matches!(&def.kind, MirTypeDefKind::Alias { .. }) {
             return;
@@ -22749,6 +22757,60 @@ impl<'a> RustEmitter<'a> {
         out
     }
 
+    /// Whether `ty` reaches a labeled tuple through tuples and lists. A Jet
+    /// tuple lowers to a plain Rust tuple, which carries no labels, so its
+    /// shown text (`(idx,item) { idx: 0, item: 1 }`, the labels in their
+    /// canonical order) is rendered at the use from the MIR type.
+    fn shows_labeled_tuple(ty: &MirType) -> bool {
+        match ty.kind() {
+            MirTypeKind::Tuple(fields) => !fields.is_empty(),
+            MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => {
+                Self::shows_labeled_tuple(inner)
+            }
+            _ => false,
+        }
+    }
+
+    /// The text `method` (`jet_show`, `jet_display` or `jet_debug`) gives the
+    /// value `reference` (an expression of type `&ty`) names: a labeled tuple
+    /// renders as the canonical record of its labels, a list of them through
+    /// the list shape; any other type through its own protocol impl.
+    fn structural_text(&self, ty: &MirType, reference: &str, method: &str, depth: usize) -> String {
+        match ty.kind() {
+            MirTypeKind::Tuple(fields) if !fields.is_empty() => {
+                let source = format!(
+                    "({})",
+                    fields.iter().map(|(label, _)| label.as_str()).collect::<Vec<_>>().join(",")
+                );
+                let values = fields
+                    .iter()
+                    .enumerate()
+                    .map(|(index, (label, field))| {
+                        let field_text = self.structural_text(
+                            field,
+                            &format!("&({reference}).{index}"),
+                            method,
+                            depth + 1,
+                        );
+                        format!("({label:?}.to_string(), {field_text})")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}jet_debug_record({source:?}, [{values}])", self.config.root_prefix)
+            }
+            MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. }
+                if Self::shows_labeled_tuple(inner) =>
+            {
+                let item = format!("__jet_item{depth}");
+                let item_text = self.structural_text(inner, &item, method, depth + 1);
+                format!(
+                    "format!(\"[{{}}]\", ({reference}).iter().map(|{item}| {item_text}).collect::<Vec<String>>().join(\", \"))"
+                )
+            }
+            _ => format!("({reference}).{method}()"),
+        }
+    }
+
     fn project_members(&self, base: MirValueId, members: &[MirFieldId]) -> String {
         let mut expression = self.value_owned(base);
         for member in members {
@@ -27420,6 +27482,20 @@ impl<'a> RustEmitter<'a> {
             .unwrap_or(symbol);
         let forced_borrows = adapter.map(|(_, positions)| positions);
         let allow_literal = Self::borrowed_literal_symbol(&symbol);
+        // A labeled tuple carries its labels only in MIR: `{value}` and
+        // `{value:Debug}` of one render its record at the use.
+        let protocol = match symbol.rsplit("::").next() {
+            Some("jet_fmt_display") => Some("jet_display"),
+            Some("jet_fmt_debug") => Some("jet_debug"),
+            _ => None,
+        };
+        if let (Some(method), [arg]) = (protocol, args) {
+            let ty = self.value_type(function, arg.value);
+            if Self::shows_labeled_tuple(ty) {
+                let reference = self.call_arg_for_function_with_literal(function, arg, true, allow_literal);
+                return self.structural_text(ty, &reference, method, 0);
+            }
+        }
         let generic = if type_args.is_empty() {
             String::new()
         } else {
@@ -29222,11 +29298,14 @@ impl<'a> RustEmitter<'a> {
                         );
                     }
                 }
-                let value_expr = if !matches!(
-                    self.value_type(function, *value).kind(),
-                    MirTypeKind::String
-                ) {
-                    format!("({}).jet_show()", self.inspected_value_reference(function, *value))
+                let value_type = self.value_type(function, *value);
+                let value_expr = if !matches!(value_type.kind(), MirTypeKind::String) {
+                    self.structural_text(
+                        value_type,
+                        &self.inspected_value_reference(function, *value),
+                        "jet_show",
+                        0,
+                    )
                 } else if test_print {
                     self.value_consume(function, *value)
                 } else {
