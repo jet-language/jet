@@ -16,10 +16,15 @@ use jet_driver.[
 use jet_foundation.[
     CORE_MODULE_EXPORTS,
     DIAGNOSTIC_ERROR,
+    Diagnostic,
     DiagnosticRegistryFix,
     TAppliedRule,
     diagnostic_registry_rows,
+    diagnostic_render_all,
     marker_source_read,
+]
+use jet_parser.[
+    parse_source,
 ]
 
 // `argv` is the normalized argv with its `--` tail (main.rs `raw`), `jet_argv`
@@ -36,7 +41,7 @@ pub fn jet_cli_inspect_b(argv: [String], command: String, jet_argv: [String], ar
         "schema" -> return Val(jet_cli_schema(rest, color, json))
         "codemod" -> return Val(jet_cli_codemod(rest, color, json))
         "audit" -> return Val(jet_cli_audit(rest, color, json))
-        "sbom" -> return Val(jet_cli_sbom(color))
+        "sbom" -> return Val(jet_cli_sbom(rest, color, json))
         "bind" -> return Val(jet_cli_bind(rest, color))
         // Jetpack owns build logs (U27), package details (U26), and channel
         // freshness (U21); `jet` only dispatches.
@@ -46,15 +51,22 @@ pub fn jet_cli_inspect_b(argv: [String], command: String, jet_argv: [String], ar
     None
 }
 
-// The inspect commands the host carries out because they run another process.
+// The inspect commands the host carries out because they run another process
+// or read the project's package, lock and advisory state.
 pub enum JetCLIInspectBPlan {
     // EngineDispatch.rs `dispatch`: run `engine` with `argv` on inherited stdio.
     Engine(engine: String, verb: String, argv: [String])
+    // CmdSupply.rs `run_audit` for the project at `root`.
+    Audit(root: String, advisory_db: String?, color: Bool, json: Bool)
+    // CmdSupply.rs `run_sbom` for the project at `root`.
+    Sbom(root: String, cyclonedx: Bool, color: Bool, json: Bool)
 }
 
-pub fn jet_cli_inspect_b_host(plan: JetCLIInspectBPlan) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
+pub fn jet_cli_inspect_b_host(plan: JetCLIInspectBPlan) -[Env, FS, Exec, IO, Time, Time.Wait]> JetDriverVerbOutput Never! {
     if plan == {
         .Engine(engine, verb, argv) -> jet_cli_engine_dispatch(engine, verb, argv)
+        .Audit(root, advisory_db, color, json) -> jet_cli_run_audit(root, advisory_db, color, json)
+        .Sbom(root, cyclonedx, color, json) -> jet_cli_run_sbom(root, cyclonedx, color, json)
     }
 }
 
@@ -905,20 +917,302 @@ fn jet_cli_codemod(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPlan Ne
 }
 
 // `jet inspect audit [copies|memory|<entry.jet>] [--advisory-db <path>]`
-// (main.rs `"audit"`, CmdSupply.rs `run_audit`): the copy ledger, the memory
-// witnesses, and the lockfile/advisory-feed audit are not ported.
+// (main.rs `"audit"`): the copy ledger and the memory witnesses are not
+// ported; the lockfile/advisory-feed audit (CmdSupply.rs `run_audit`) runs on
+// the host through `JetCLIInspectBPlan.Audit`.
 fn jet_cli_audit(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
     if args.len() > 0 && args[0] == "memory" -> return jet_cli_not_ported("inspect audit memory", color)
     if args.len() > 0 && (args[0] == "copies" || args[0].ends_with(".jet")) -> return jet_cli_not_ported("inspect audit copies", color)
-    if jet_cli_inspect_project_root("inspect audit", "error: no package.jet found — run `jet inspect audit` inside a project", color) == .Refused(plan) -> return plan
-    jet_cli_not_ported("inspect audit", color)
+    root :: if jet_cli_inspect_project_root("inspect audit", "error: no package.jet found — run `jet inspect audit` inside a project", color) == {
+        .Root(path) -> path
+        .Refused(plan) -> { return plan }
+    }
+    JetCLIPlan.InspectB{plan: JetCLIInspectBPlan.Audit{root: root, advisory_db: jet_cli_supply_flag_value(args, "--advisory-db"), color: color, json: json}}
 }
 
-// `jet inspect sbom [--cyclonedx]` (CmdSupply.rs `run_sbom`): the lockfile
-// reader and the SPDX/CycloneDX emitters are not ported.
-fn jet_cli_sbom(color: Bool) -[FS]> JetCLIPlan Never! {
-    if jet_cli_inspect_project_root("inspect sbom", "error: no package.jet found — run `jet inspect sbom` inside a project", color) == .Refused(plan) -> return plan
-    jet_cli_not_ported("inspect sbom", color)
+// `jet inspect sbom [--cyclonedx]` (CmdSupply.rs `run_sbom`), run on the host
+// through `JetCLIInspectBPlan.Sbom`.
+fn jet_cli_sbom(args: [String], color: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
+    root :: if jet_cli_inspect_project_root("inspect sbom", "error: no package.jet found — run `jet inspect sbom` inside a project", color) == {
+        .Root(path) -> path
+        .Refused(plan) -> { return plan }
+    }
+    JetCLIPlan.InspectB{plan: JetCLIInspectBPlan.Sbom{root: root, cyclonedx: args.contains("--cyclonedx"), color: color, json: json}}
+}
+
+// main.rs `flag_value`: the word after the first exact `flag`.
+fn jet_cli_supply_flag_value(args: [String], flag: String) -> String? Never! {
+    loop index in 0..<args.len() {
+        if args[index] == flag {
+            if index + 1 < args.len() -> return Val(args[index + 1])
+            return None
+        }
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
+// Supply-chain commands (Source/CmdSupply.rs `run_audit`, `audit_fail`,
+// `run_sbom`, `package_input`; main.rs `find_project_entry`). The manifest,
+// lock, advisory and SBOM models are the Jetpack package-model ports the
+// shared sources.list block references.
+
+fn jet_cli_supply_output(stdout: String, stderr: String, exit_code: Int) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: exit_code}
+}
+
+// `cli_error!(@fix code, what, fix)` as a host output.
+fn jet_cli_supply_fail(code: String, what: String, fix: String, color: Bool, json: Bool) -> JetDriverVerbOutput Never! {
+    why :: jet_cli_diagnostic_copy(code).why
+    if json -> return jet_cli_supply_output(jet_cli_fail_json(code, what, why, fix), "", JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_supply_output("", jet_cli_report(code, what, why, fix, color), JET_DRIVER_EXIT_USER_ERROR)
+}
+
+// `cli_error!(code, what)`: the code's shared Why and Fix.
+fn jet_cli_supply_error(code: String, what: String, color: Bool, json: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_supply_fail(code, what, jet_cli_diagnostic_copy(code).fix, color, json)
+}
+
+// `eprint!(render_diagnostics(file, raw, diagnostics))` then exit 1.
+fn jet_cli_supply_render(file: String, raw: String, diagnostics: [Diagnostic], color: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_supply_output("", diagnostic_render_all(file, raw, diagnostics, color), JET_DRIVER_EXIT_USER_ERROR)
+}
+
+// main.rs `emit_cli_diagnostics` without an active profile: a failed
+// `diagnostics` status line on stdout under `--json`, else rendered text.
+fn jet_cli_supply_emit(file: String, source: String, diagnostics: [Diagnostic], color: Bool, json: Bool) -> JetDriverVerbOutput Never! {
+    if json {
+        reports :: loop diagnostic in diagnostics -> jet_cli_report_json(diagnostic)
+        return jet_cli_supply_output("{jet_cli_status_render_with_reports("diagnostics", false, reports, [JetCLIStatusField]{})}\n", "", JET_DRIVER_EXIT_USER_ERROR)
+    }
+    jet_cli_supply_render(file, source, diagnostics, color)
+}
+
+// A project entry path, or the output that stopped the command.
+enum JetCLISupplyEntry {
+    Path(path: String)
+    Stopped(output: JetDriverVerbOutput)
+}
+
+// main.rs `find_project_entry_with_callable` (path only): the typed Package
+// run output, the inline Package carrier, the stock entries, the
+// `<package>.jet` file, the package's `fn run` member or first source file,
+// else the (missing) root `run.jet`.
+fn jet_cli_supply_project_entry(root: String, color: Bool, json: Bool) -[FS, Env, IO]> JetCLISupplyEntry Never! {
+    resolver :: AuthorityResolver.open(root) ?? return JetCLISupplyEntry.Stopped{output: jet_cli_supply_emit(PACKAGE_FILE, "", [Diagnostic]{err.diagnostic()}, color, json)}
+    package := CheckedPackage?{None}
+    if resolver.checked_package(".") == {
+        .Ok(found) -> package = Val(found)
+        .Err(error) -> {
+            if !error.is_missing() -> return JetCLISupplyEntry.Stopped{output: jet_cli_supply_emit(PACKAGE_FILE, "", [Diagnostic]{error.diagnostic()}, color, json)}
+        }
+    }
+    if package == .Val(checked) {
+        if checked.facts.resolve_run_entry_checked(resolver) == {
+            .Ok(found) -> {
+                if found == .Val(entry) -> return JetCLISupplyEntry.Path{path: entry.file.path}
+            }
+            .Err(error) -> return JetCLISupplyEntry.Stopped{output: jet_cli_supply_fail("E2105", error.message, "repair the typed Package output or point at a `.jet` file directly", color, json)}
+        }
+    }
+    cache := WorkspaceDeclarationCache.new()
+    if pkg_find_inline_package_root_checked(&cache, root) == {
+        .Ok(found) -> {
+            if found == .Val(inline_root) {
+                if inline_root == resolver.root {
+                    if pkg_package_facts_for_root(&cache, inline_root) == {
+                        .Ok(facts) -> {
+                            if facts == .Val(inline_facts) {
+                                if inline_facts.resolve_run_entry_checked(resolver) == {
+                                    .Ok(entry_found) -> {
+                                        if entry_found == .Val(entry) -> return JetCLISupplyEntry.Path{path: entry.file.path}
+                                    }
+                                    .Err(error) -> return JetCLISupplyEntry.Stopped{output: jet_cli_supply_fail("E2105", error.message, "repair the typed inline Package output or point at a `.jet` file directly", color, json)}
+                                }
+                            }
+                        }
+                        .Err(error) -> return JetCLISupplyEntry.Stopped{output: jet_cli_supply_emit(inline_root, "", [Diagnostic]{error.diagnostic}, color, json)}
+                    }
+                }
+            }
+        }
+        .Err(error) -> return JetCLISupplyEntry.Stopped{output: jet_cli_supply_emit(WORKSPACE_FILE, "", [Diagnostic]{error.diagnostic}, color, json)}
+    }
+    if PackageFacts.default().resolve_run_entry_checked(resolver) == {
+        .Ok(found) -> {
+            if found == .Val(entry) -> return JetCLISupplyEntry.Path{path: entry.file.path}
+        }
+        .Err(error) -> return JetCLISupplyEntry.Stopped{output: jet_cli_supply_fail("E2105", error.message, "keep one project entry, using `run.jet`, or point at a `.jet` file directly", color, json)}
+    }
+    if package == .Val(checked) {
+        if resolver.checked_file("{checked.facts.name}.{FILE_EXT}") == {
+            .Ok(file) -> {
+                if resolver.revalidate_file(file) == .Err(error) -> return JetCLISupplyEntry.Stopped{output: jet_cli_supply_emit(PACKAGE_FILE, "", [Diagnostic]{error.diagnostic()}, color, json)}
+                return JetCLISupplyEntry.Path{path: file.path}
+            }
+            .Err(error) -> {
+                if !error.is_missing() -> return JetCLISupplyEntry.Stopped{output: jet_cli_supply_emit(PACKAGE_FILE, "", [Diagnostic]{error.diagnostic()}, color, json)}
+            }
+        }
+        // D-MOD-CYCLE1=A: without `run.jet`, the member declaring the
+        // package's one `fn run` is the entry; else its first source file.
+        if !cli_files.is_file(jet_cli_authority_path(resolver.root, DEFAULT_ENTRY_FILE)) {
+            if jet_cli_supply_run_member(resolver.root) == .Val(member) -> return JetCLISupplyEntry.Path{path: member}
+            if resolver.discover_source_files() == .Ok(sources) {
+                loop file in sources {
+                    if pkg_path_file_name(file.relative) != PACKAGE_FILE -> return JetCLISupplyEntry.Path{path: file.path}
+                }
+            }
+        }
+    }
+    JetCLISupplyEntry.Path{path: jet_cli_authority_path(resolver.root, DEFAULT_ENTRY_FILE)}
+}
+
+// Loader.rs `package_run_member`: the first member (never `package.jet`)
+// that lexes and parses cleanly and declares a top-level `fn run`.
+fn jet_cli_supply_run_member(root: String) -[FS, Env]> String? Never! {
+    resolver :: AuthorityResolver.open(root) ?? return None
+    sources :: resolver.discover_source_files() ?? return None
+    loop file in sources {
+        if pkg_path_file_name(file.relative) == PACKAGE_FILE -> next
+        source :: file.text() ?? next
+        parsed :: parse_source(source.bytes())
+        if parsed.diagnostics.len() > 0 -> next
+        loop item in parsed.program.items {
+            if item == {
+                .Func(function) -> {
+                    if function.name == "run" -> return Val(file.path)
+                }
+                else -> {}
+            }
+        }
+    }
+    None
+}
+
+// The project manifest, or the output that stopped the command.
+enum JetCLISupplyManifest {
+    Loaded(manifest: Manifest)
+    Stopped(output: JetDriverVerbOutput)
+}
+
+// CmdSupply.rs `package_input`: the inline Package of an existing entry,
+// else the checked package facts beside `package.jet`.
+fn jet_cli_supply_package_input(root: String, color: Bool, json: Bool) -[FS, Env, IO]> JetCLISupplyManifest Never! {
+    entry :: if jet_cli_supply_project_entry(root, color, json) == {
+        .Path(path) -> path
+        .Stopped(output) -> { return JetCLISupplyManifest.Stopped{output: output} }
+    }
+    facts := PackageFacts?{None}
+    if cli_files.is_file(entry) {
+        entry_raw :: cli_files.read(entry) ?? return JetCLISupplyManifest.Stopped{output: jet_cli_supply_error("E2105", "couldn't read {entry}: {jet_cli_io_error_text(err)}", color, json)}
+        inline :: if pkg_extract_inline_package(entry_raw) == {
+            .Ok(found) -> found
+            .Err(error) -> { return JetCLISupplyManifest.Stopped{output: jet_cli_supply_render(entry, entry_raw, [Diagnostic]{error.diagnostic()}, color)} }
+        }
+        cache := WorkspaceDeclarationCache.new()
+        facts = if pkg_package_facts_for_entry(&cache, entry) == {
+            .Ok(found) -> found
+            .Err(error) -> { return JetCLISupplyManifest.Stopped{output: jet_cli_supply_render(entry, entry_raw, [Diagnostic]{error.diagnostic}, color)} }
+        }
+        if inline == .Val(block) {
+            if facts == .Val(entry_facts) {
+                raw :: block.body(entry_raw)
+                if pkg_to_manifest(entry_facts, raw) == {
+                    .Ok(manifest) -> return JetCLISupplyManifest.Loaded{manifest: manifest}
+                    .Err(error) -> return JetCLISupplyManifest.Stopped{output: jet_cli_supply_render(entry, raw, [Diagnostic]{error.diagnostic}, color)}
+                }
+            }
+        }
+    } else {
+        facts = if PackageFacts.load_checked(root) == {
+            .Ok(found) -> found
+            .Err(error) -> { return JetCLISupplyManifest.Stopped{output: jet_cli_supply_render(PACKAGE_FILE, "", [Diagnostic]{error.diagnostic()}, color)} }
+        }
+    }
+    resolved :: facts ?? return JetCLISupplyManifest.Stopped{output: jet_cli_supply_error("E2105", "couldn't resolve package facts for {root}", color, json)}
+    located :: if pkg_manifest_path_checked(root) == {
+        .Ok(found) -> found
+        .Err(_) -> None
+    }
+    path :: located ?? return JetCLISupplyManifest.Stopped{output: jet_cli_supply_error("E2105", "couldn't locate {PACKAGE_FILE}", color, json)}
+    raw :: cli_files.read(path) ?? return JetCLISupplyManifest.Stopped{output: jet_cli_supply_error("E2105", "couldn't read {path}: {jet_cli_io_error_text(err)}", color, json)}
+    if pkg_to_manifest(resolved, raw) == {
+        .Ok(manifest) -> JetCLISupplyManifest.Loaded{manifest: manifest}
+        .Err(error) -> JetCLISupplyManifest.Stopped{output: jet_cli_supply_render(path, raw, [Diagnostic]{error.diagnostic}, color)}
+    }
+}
+
+// CmdSupply.rs `audit_fail`: render one diagnostic against `path` and exit 1.
+fn jet_cli_audit_fail(path: String, raw: String, diagnostic: Diagnostic, color: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_supply_render(path, raw, [Diagnostic]{diagnostic}, color)
+}
+
+// CmdSupply.rs `run_audit`: verify the signed offline feed against the
+// pinned trust root, then check the lockfile against its advisories and the
+// maturity policy.
+fn jet_cli_run_audit(root: String, advisory_db: String?, color: Bool, json: Bool) -[FS, Env, IO, Time]> JetDriverVerbOutput Never! {
+    source_exceptions :: if jet_cli_supply_package_input(root, color, json) == {
+        .Loaded(manifest) -> manifest.policy.exceptions
+        .Stopped(output) -> { return output }
+    }
+    lock_path :: jet_cli_authority_path(jet_cli_authority_path(root, ".jet"), "lock")
+    lock_text :: cli_files.read(lock_path) ?? {
+        if err == {
+            .NotFound(_) -> return jet_cli_audit_fail(lock_path, "", publication_e2611("the unified lockfile", "run `jet fetch`, review the lock, then run `jet inspect audit` again"), color)
+            else -> {}
+        }
+        return jet_cli_audit_fail(lock_path, "", publication_e2611("a readable unified lockfile", "repair `{lock_path}` and run `jet inspect audit` again: {jet_cli_io_error_text(err)}"), color)
+    }
+    lock :: if pkg_lock_parse(lock_text) == {
+        .Ok(parsed) -> parsed
+        .Err(error) -> { return jet_cli_audit_fail(lock_path, lock_text, publication_e2611("a valid unified lockfile", "repair `{lock_path}`: {error.message()}"), color) }
+    }
+    configured :: if advisory_db == .Val(path) -> Val(path) else -> publication_advisory_feed_path(root)
+    feed_path :: configured ?? return jet_cli_audit_fail(root, "", publication_e2611("a signed advisory database", "pass --advisory-db <path>, set JET_ADVISORY_DB, or add .jet/advisories.db"), color)
+    feed_text :: cli_files.read(feed_path) ?? return jet_cli_audit_fail(feed_path, "", publication_e2611("a readable signed advisory database", "repair `{feed_path}` and retry: {jet_cli_io_error_text(err)}"), color)
+    feed :: if publication_parse_advisory_feed(feed_text) == {
+        .Ok(parsed) -> parsed
+        .Err(error) -> { return jet_cli_audit_fail(feed_path, feed_text, error.diagnostic, color) }
+    }
+    trust_path :: publication_advisory_trust_path(root)
+    trust_text :: cli_files.read(trust_path) ?? return jet_cli_audit_fail(trust_path, "", publication_e2610("advisory trust root", "could not read `{trust_path}`: {jet_cli_io_error_text(err)}"), color)
+    trust :: if publication_parse_advisory_trust(trust_text) == {
+        .Ok(parsed) -> parsed
+        .Err(error) -> { return jet_cli_audit_fail(trust_path, trust_text, error.diagnostic, color) }
+    }
+    report :: if publication_audit_advisory_feed_with_source_exceptions(lock, feed, trust, publication_advisory_now(), source_exceptions) == {
+        .Ok(audited) -> audited
+        .Err(error) -> { return jet_cli_audit_fail(feed_path, feed_text, error.diagnostic, color) }
+    }
+    stdout := "audit: feed sequence {report.receipt.sequence} verified (key {report.receipt.key_id}, digest {report.receipt.digest}, offline local feed).\n"
+    stdout = "{stdout}audit: policy maturity {report.receipt.maturity_seconds}s; exact exceptions use package#version; {lock.packages.len()} dependencies checked.\n"
+    loop exception in report.source_exceptions -> stdout = "{stdout}audit: source policy exception applied: {exception}\n"
+    diagnostics := report.maturity
+    critical := 0
+    loop found in report.matches {
+        &diagnostics.push(found.diagnostic)
+        if found.severity == .Critical -> critical += 1
+    }
+    if diagnostics.len() == 0 -> return jet_cli_supply_output("{stdout}audit: no advisories found.\n", "", JET_DRIVER_EXIT_OK)
+    stderr := "{diagnostic_render_all(PACKAGE_FILE, "", diagnostics, color)}\n{report.matches.len()} advisory match(es) found ({critical} critical)\n"
+    if critical > 0 || report.maturity.len() > 0 {
+        stderr = "{stderr}audit: policy checks failed. Upgrade the affected dependencies or wait for an approved exception.\n"
+        return jet_cli_supply_output(stdout, stderr, JET_DRIVER_EXIT_USER_ERROR)
+    }
+    jet_cli_supply_output(stdout, stderr, JET_DRIVER_EXIT_OK)
+}
+
+// CmdSupply.rs `run_sbom`: an SPDX (default) or CycloneDX bill of materials
+// of the lockfile under the manifest's package identity.
+fn jet_cli_run_sbom(root: String, cyclonedx: Bool, color: Bool, json: Bool) -[FS, Env, IO]> JetDriverVerbOutput Never! {
+    manifest :: if jet_cli_supply_package_input(root, color, json) == {
+        .Loaded(loaded) -> loaded
+        .Stopped(output) -> { return output }
+    }
+    lock :: pkg_lock_load(root) ?? return jet_cli_supply_error("E1202", "no lockfile found — run `jet fetch` first", color, json)
+    out :: if cyclonedx -> publication_emit_cyclonedx(lock, manifest.package.name, manifest.package.version) else -> publication_emit_spdx(lock, manifest.package.name, manifest.package.version)
+    jet_cli_supply_output(out, "", JET_DRIVER_EXIT_OK)
 }
 
 // `jet inspect bind …` (CmdDevTools.rs `run_bind`): the usage page; the
