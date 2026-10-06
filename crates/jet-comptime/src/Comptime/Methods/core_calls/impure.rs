@@ -741,22 +741,6 @@ pub fn apply_impure_core_call_with_type_args(
             }
             Ok(CtValue::Unit)
         }
-        ("core.term", "eprint") => {
-            let text = args
-                .iter()
-                .map(|v| display_core_pure_value(v).unwrap_or_else(|| v.jet_show()))
-                .collect::<Vec<_>>()
-                .join("\n");
-            if let Some(s) = sink {
-                let frame = super::term_semantics::jet_term_print_frame(&text);
-                if !repl_mode && super::term_semantics::jet_term_stderr_is_program_stream() {
-                    let _ = super::term_semantics::jet_term_write_stderr(&frame, true);
-                } else {
-                    s.stderr.push_str(&frame);
-                }
-            }
-            Ok(CtValue::Unit)
-        }
         ("core.term", "readline") => {
             if repl_mode {
                 Err(repl_native_module_diag("core.term", method, span))

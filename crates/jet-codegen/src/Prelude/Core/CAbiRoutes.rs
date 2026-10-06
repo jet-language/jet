@@ -12855,20 +12855,6 @@ mod jet_c_abi_routes {
         guard(|| list_out(crate::jet_std_io_args().into_iter().map(|e| handle(e) as u64).collect(), data))
     }
 
-    /// core.term.binread
-    #[no_mangle]
-    pub extern "C" fn jet_std_io_binread(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_io_binread(unsafe { &*a0 }) {
-            Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.term.buffered
-    #[no_mangle]
-    pub extern "C" fn jet_std_io_buffered() -> *mut crate::JetStdinReader {
-        guard(|| Box::into_raw(Box::new(crate::jet_std_io_buffered())))
-    }
 
     /// core.term.choose
     #[no_mangle]
@@ -12885,11 +12871,6 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_std_io_confirm(unsafe { &*a0 }))
     }
 
-    /// core.term.eprint
-    #[no_mangle]
-    pub extern "C" fn jet_std_io_eprint(a0: JetCString) {
-        guard(|| crate::jet_std_io_eprint(unsafe { &*a0 }))
-    }
 
     /// core.term.input_secret
     #[no_mangle]
@@ -14477,10 +14458,22 @@ mod jet_c_abi_routes {
         guard(|| list_out(crate::jet_std::jet_regex_split_limit(unsafe { &*a0 }, view(a1), a2).into_iter().map(|e| handle(e) as u64).collect(), data))
     }
 
-    /// core.tasks.current_task
+    /// core.tasks.__task_paused
     #[no_mangle]
-    pub extern "C" fn jet_task_current_trace() -> JetCString {
-        guard(|| handle(crate::jet_std::jet_task_current_trace()))
+    pub extern "C" fn jet_scheduler_task_paused(some: *mut bool) -> i64 {
+        guard(|| match crate::jet_scheduler_task_paused() {
+            Some(value) => { unsafe { some.write(value) }; 1 }
+            None => 0,
+        })
+    }
+
+    /// core.tasks.__task_cancelled
+    #[no_mangle]
+    pub extern "C" fn jet_scheduler_task_cancelled(some: *mut bool) -> i64 {
+        guard(|| match crate::jet_scheduler_task_cancelled() {
+            Some(value) => { unsafe { some.write(value) }; 1 }
+            None => 0,
+        })
     }
 
     /// core.tasks.yield_now
