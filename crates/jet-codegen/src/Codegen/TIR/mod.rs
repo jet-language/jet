@@ -14496,11 +14496,6 @@ pub enum THandleOp {
     ExpiringMethod {
         method: String,
     },
-    /// D-APPROX1=A: method call on a sketch data structure (HyperLogLog/TDigest/CMS/ReservoirSampler).
-    SketchMethod {
-        sketch: String,
-        method: String,
-    },
     /// D-TIMEDEPTH1=A: method call on a civil-time type (Date/DateTime).
     CivilTimeMethod {
         kind: String,

@@ -23,7 +23,7 @@ use super::core_calls::{
     apply_core_call_with_type, apply_data_line_call, apply_history_rng_method,
     apply_impure_core_call_with_type, as_float,
     as_string, display_core_pure_value, eval_regex_replace_all_with, io_error_value,
-    jet_term_print_frame, normalize_path_args, sketch_add, solver_new, solver_require,
+    jet_term_print_frame, normalize_path_args, solver_new, solver_require,
     IoErrorOperation,
 };
 use super::repl_process::apply_repl_authorized_core_call_with_type;

@@ -967,10 +967,6 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "Auth" => Some("JetAuthApp"),
         // D-DBPOLICY-BIND1: RowPolicy is re-exported by the root Sync carrier.
         "RowPolicy" => Some("JetRowPolicy"),
-        // D-APPROX1=A: native sketch carriers are Prelude-root values.
-        "HyperLogLog" => Some("JetHyperLogLog"),
-        "CountMinSketch" => Some("JetCountMinSketch"),
-        "ReservoirSampler" => Some("JetReservoirSampler"),
         "JetDate" | "JetInstant" | "JetLocalTime" | "JetDateTime" | "JetPeriod" | "JetZone"
         | "JetZonedDateTime" => Some(name),
         "WebMutationStatus" => Some("JetWebMutationStatus"),
@@ -3351,10 +3347,6 @@ impl Cx {
             }
             // D-PENDING1=B: Loadable<Unknown, Unknown> placeholders — Rust infers the type.
             Type::Named(name) if name == "Unknown" => "_".to_string(),
-            // D-APPROX1=A: sketch types → opaque Rust structs.
-            Type::Named(name) if name == "HyperLogLog" => "JetHyperLogLog".to_string(),
-            Type::Named(name) if name == "CountMinSketch" => "JetCountMinSketch".to_string(),
-            Type::Named(name) if name == "ReservoirSampler" => "JetReservoirSampler".to_string(),
             // D-TIMEDEPTH1=A: civil-time types → opaque Rust structs.
             Type::Named(name) if name == "Date" => "JetDate".to_string(),
             Type::Named(name) if name == "LocalDate" => "JetDate".to_string(),

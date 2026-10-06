@@ -60,13 +60,13 @@ module core.data.stream exports { cancel, collect, from_items, is_empty, len, ne
 source_module core.data.stream path Core/data/stream.jet alias core_core_data_stream owns { cancel, collect, from_items, is_empty, len, next, skip, take_n }
 module core.data.plot exports { JetDataPlotAccessibility, JetDataPlotAggregate, JetDataPlotAxis, JetDataPlotBackend, JetDataPlotCapability, JetDataPlotChannel, JetDataPlotColumn, JetDataPlotDomain, JetDataPlotEncoding, JetDataPlotError, JetDataPlotErrorKind, JetDataPlotFacet, JetDataPlotFacetKind, JetDataPlotField, JetDataPlotFilterOp, JetDataPlotInspection, JetDataPlotInteraction, JetDataPlotLayer, JetDataPlotLayout, JetDataPlotLegend, JetDataPlotLegendPosition, JetDataPlotMark, JetDataPlotPlan, JetDataPlotProjection, JetDataPlotRender, JetDataPlotRenderFormat, JetDataPlotScale, JetDataPlotScaleKind, JetDataPlotSchema, JetDataPlotSelectedRow, JetDataPlotSourceFacts, JetDataPlotSupport, JetDataPlotTransform, JetDataPlotValue, bar_svg, bar_text, inspect, inspect_json, line_svg, line_text, plot, render, show, svg, text } types { JetDataPlotAccessibility:plain, JetDataPlotAggregate:plain(Sum|Mean|Count|Min|Max), JetDataPlotAxis:plain, JetDataPlotBackend:plain(SVG|Text), JetDataPlotCapability:plain, JetDataPlotChannel:plain(X|Y|Color|Size), JetDataPlotColumn:plain, JetDataPlotDomain:plain(Auto|Explicit), JetDataPlotEncoding:plain, JetDataPlotError:plain, JetDataPlotErrorKind:plain(Schema|Encoding|Render), JetDataPlotFacet:plain, JetDataPlotFacetKind:plain(Wrap|Grid), JetDataPlotField:plain, JetDataPlotFilterOp:plain(Eq|Ne|Lt|Le|Gt|Ge), JetDataPlotInspection:plain, JetDataPlotInteraction:plain(Hover|Select|Pan), JetDataPlotLayer:plain, JetDataPlotLayout:plain, JetDataPlotLegend:plain, JetDataPlotLegendPosition:plain(Top|Bottom|Left|Right), JetDataPlotMark:plain(Bar|Line|Point), JetDataPlotPlan:plain, JetDataPlotProjection:plain, JetDataPlotRender:plain, JetDataPlotRenderFormat:plain(SVG|Text|JSON), JetDataPlotScale:plain, JetDataPlotScaleKind:plain(Linear|Log|Band), JetDataPlotSchema:plain, JetDataPlotSelectedRow:plain, JetDataPlotSourceFacts:plain, JetDataPlotSupport:plain(Full|Partial|Unsupported), JetDataPlotTransform:plain(Identity|Filter|Aggregate), JetDataPlotValue:plain(Number|Text|Bool) } depends_on [core.data]
 source_module core.data.plot path Core/data/plot.jet alias core_core_data_plot owns { bar_svg, bar_text, inspect, inspect_json, line_svg, line_text, plot, render, show, svg, text }
-module core.data.sketch exports { empty, merge } depends_on [core.data]
-source_module core.data.sketch path Core/data/sketch.jet alias core_data_sketch owns { empty, merge }
-module core.data.sketch.cms exports { new, CountMin, merge } types { CountMin:plain } depends_on [core.data]
+module core.data.sketch exports { empty, merge, __fnv1a64 } depends_on [core.data]
+source_module core.data.sketch path Core/data/sketch.jet alias core_data_sketch owns { empty, merge, __fnv1a64 }
+module core.data.sketch.cms exports { new, CountMinSketch, merge } types { CountMinSketch:plain } depends_on [core.data, core.data.sketch]
 source_module core.data.sketch.cms path Core/data/sketch/cms.jet alias core_core_data_sketch_cms owns { new, merge }
-module core.data.sketch.hll exports { new, HLL } types { HLL:plain } depends_on [core.data, core.math]
+module core.data.sketch.hll exports { new, HyperLogLog } types { HyperLogLog:plain } depends_on [core.data, core.math, core.data.sketch]
 source_module core.data.sketch.hll path Core/data/sketch/hll.jet alias core_core_data_sketch_hll owns { new }
-module core.data.sketch.reservoir exports { new, Reservoir } types { Reservoir:plain } depends_on [core.data]
+module core.data.sketch.reservoir exports { new, ReservoirSampler } types { ReservoirSampler:plain } depends_on [core.data]
 source_module core.data.sketch.reservoir path Core/data/sketch/reservoir.jet alias core_core_data_sketch_reservoir owns { new }
 module core.data.sketch.tdigest exports { new, Centroid, TDigest } types { Centroid:plain, TDigest:plain } depends_on [core.data]
 source_module core.data.sketch.tdigest path Core/data/sketch/tdigest.jet alias core_core_data_sketch_tdigest owns { new }
@@ -1611,9 +1611,6 @@ dispatcher_row plain app auth_show | CoreCallRecord::new("app", "auth_show", "je
 dispatcher_row plain core.web auth_show | CoreCallRecord::new("core.web", "auth_show", "jet_app_auth_show", true, &[true])
 dispatcher_row plain core.web.devserver for_app | CoreCallRecord::new( "core.web.devserver", "for_app", "jet_devserver_for_app", true, &[true], )
 dispatcher_row plain core.web.devserver app | CoreCallRecord::new("core.web.devserver", "app", "jet_devserver_app", true, &[])
-dispatcher_row plain core.data.sketch.hll new | CoreCallRecord::new( "core.data.sketch.hll", "new", "JetHyperLogLog::new", false, &[], ) .with_pure_route(CoreCallPureRoute::SketchHll)
-dispatcher_row plain core.data.sketch.cms new | CoreCallRecord::new( "core.data.sketch.cms", "new", "JetCountMinSketch::new", false, &[], ) .with_pure_route(CoreCallPureRoute::SketchCms)
-dispatcher_row plain core.data.sketch.reservoir new | CoreCallRecord::new( "core.data.sketch.reservoir", "new", "JetReservoirSampler::new", false, &[false], ) .with_pure_route(CoreCallPureRoute::SketchReservoir)
 dispatcher_row plain core.web.browser profile | CoreCallRecord::new( "core.web.browser", "profile", "jet_browser_profile", false, &[true], )
 dispatcher_row plain core.web.browser timeout | CoreCallRecord::new( "core.web.browser", "timeout", "jet_browser_timeout", false, &[false], )
 dispatcher_row plain core.web.browser locked | CoreCallRecord::new( "core.web.browser", "locked", "jet_browser_locked", false, &[true], )
@@ -1871,20 +1868,11 @@ dispatcher_row receiver - sub | CoreCallRecord::receiver(&["Measurement"], "sub"
 dispatcher_row receiver - mul | CoreCallRecord::receiver(&["Measurement"], "mul", &[false])
 dispatcher_row receiver - div | CoreCallRecord::receiver(&["Measurement"], "div", &[false])
 dispatcher_row receiver - sqrt | CoreCallRecord::receiver(&["Measurement"], "sqrt", &[])
-dispatcher_row receiver - new | CoreCallRecord::receiver(&["HyperLogLog"], "new", &[])
-dispatcher_row receiver - add | CoreCallRecord::receiver(&["HyperLogLog"], "add", &[true])
-dispatcher_row receiver - count | CoreCallRecord::receiver(&["HyperLogLog"], "count", &[])
-dispatcher_row receiver - new | CoreCallRecord::receiver(&["CountMinSketch"], "new", &[])
-dispatcher_row receiver - add | CoreCallRecord::receiver(&["CountMinSketch"], "add", &[true])
-dispatcher_row receiver - count | CoreCallRecord::receiver(&["CountMinSketch"], "count", &[true])
-dispatcher_row receiver - new | CoreCallRecord::receiver(&["ReservoirSampler"], "new", &[false])
-dispatcher_row receiver - add | CoreCallRecord::receiver(&["ReservoirSampler"], "add", &[true])
-dispatcher_row receiver - sample | CoreCallRecord::receiver(&["ReservoirSampler"], "sample", &[])
 dispatcher_row receiver - new | CoreCallRecord::receiver(&["Solver"], "new", &[false])
 dispatcher_row receiver - require | CoreCallRecord::receiver(&["Solver"], "require", &[false])
 dispatcher_row receiver - failure_count | CoreCallRecord::receiver(&["Solver"], "failure_count", &[])
 dispatcher_row receiver - status | CoreCallRecord::receiver(&["Solver"], "status", &[])
-dispatcher_row receiver - __display | CoreCallRecord::receiver( &[ "HyperLogLog", "CountMinSketch", "ReservoirSampler", "Solver", "ServiceUpgradeReceipt", "DataError", VAULT_KEY_REF_TYPE, ], "__display", &[], )
+dispatcher_row receiver - __display | CoreCallRecord::receiver( &[ "Solver", "ServiceUpgradeReceipt", "DataError", VAULT_KEY_REF_TYPE, ], "__display", &[], )
 dispatcher_row plain core.http.server bind | CoreCallRecord::new( "core.http.server", "bind", "jet_http_server_bind", false, &[true, false, false, false], ) .with_max_arity(4) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot()
 dispatcher_row plain core.data inner_join | CoreCallRecord::new( "core.data", "inner_join", "jet_data_inner_join_checked_default", true, &[true, true, false, false], ) .without_direct_aot()
 
