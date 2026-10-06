@@ -177,6 +177,25 @@ fn lower_task_spawn(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     lower_call_runtime(&m, &f, symbol, args, Val(dst))
 }
 
+// `task.group` builds its owning group with `JetTaskGroup.new()` or
+// `.with_limit(limit)`; the group crosses as the runtime JetTaskGroup handle
+// (RuntimeRoutes.jet `Group`), whose drop joins every child.
+fn lower_task_group_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
+    row :: lower_prelude_row(p, call) ?? return false
+    symbol :: mir_symbol_name(row.symbol)
+    limited :: symbol == "jet_std::JetTaskGroup::with_limit"
+    if symbol != "jet_std::JetTaskGroup::new" && !limited -> return false
+    if args.len() != (if limited -> 1 else -> 0) {
+        lower_fail(&m, &f, "JetTaskGroup.{row.member} with {args.len()} arguments is not lowered at O0 yet")
+        return true
+    }
+    values := [LIRValueID]{}
+    if limited -> &values.push(lower_use(&m, &f, args[0].value) ?? return true)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    lower_call_runtime(&m, &f, if limited -> "jet_rt_native_task_group_with_limit" else -> "jet_rt_native_task_group_new", values, Val(dst))
+    true
+}
+
 // Task handle methods by Prelude member; false when `receiver` is no Task.
 fn lower_task_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, receiver: MIRValueID, args: [MIRValueID]) -> Bool Never! {
     receiver_ty :: lower_value_type(c, receiver) ?? return false
