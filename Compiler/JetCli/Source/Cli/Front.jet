@@ -52,6 +52,9 @@ pub enum JetCLIPlan {
     // `jet emit --rust <file>`: print the Rust generated for the entry
     // (CmdDevTools.rs `run_emit_rust`).
     Emit(file: String, source: String, color: Bool)
+    // `jet lint --a11y <file>`: report the accessibility lints of the entry
+    // (CmdDevTools.rs `run_lint_a11y`); `notice` is resolution's stderr.
+    Lint(file: String, source: String, color: Bool, notice: String)
 }
 
 // The `jet test` options the Jet host carries out (Source/CmdCompile.rs
@@ -755,6 +758,44 @@ fn jet_cli_explain(jet_argv: [String], args: [String], color: Bool) -> JetCLIPla
     JetCLIPlan.Done{output: jet_driver_explain_code(None, color)}
 }
 
+// `jet lint --a11y|--complexity|--cost <file>` (Source/main.rs `"lint"`):
+// with no target the command's help is a usage error; exactly one category
+// is required (E2102). The target resolves as main.rs `resolve_source_path`
+// does (a directory is its project's stock entry; a file keeps its typed
+// spelling, or gains `.jet`). Only `--a11y` is ported; the complexity and
+// cost views are refused.
+fn jet_cli_lint(jet_argv: [String], args: [String], color: Bool, quiet: Bool) -[FS, Env]> JetCLIPlan Never! {
+    if args.len() < 2 -> return jet_cli_done("", if quiet -> "" else -> jet_cli_command_help("lint"), JET_DRIVER_EXIT_USAGE)
+    a11y :: jet_argv.contains("--a11y")
+    complexity :: jet_argv.contains("--complexity")
+    cost :: jet_argv.contains("--cost")
+    categories := 0
+    if a11y -> categories += 1
+    if complexity -> categories += 1
+    if cost -> categories += 1
+    if categories != 1 {
+        return jet_cli_fail("E2102", "usage: jet lint --a11y|--complexity|--cost <file.jet>", "`lint` needs exactly one category flag", "run `jet lint --a11y <file.jet>`, `jet lint --complexity <file.jet>`, or `jet lint --cost <file.jet>`", color, JET_DRIVER_EXIT_USAGE)
+    }
+    if complexity -> return jet_cli_not_ported("lint --complexity", color)
+    if cost -> return jet_cli_not_ported("lint --cost", color)
+    target :: args[1]
+    file := target
+    notice := ""
+    if cli_files.is_dir(target) {
+        if jet_cli_resolve_source_path("lint", target, color, [String]{}) == {
+            .File(path, _, written) -> {
+                file = path
+                notice = written
+            }
+            .Refused(plan) -> return plan
+        }
+    } else {
+        if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") -> file = "{target}.jet"
+    }
+    source :: cli_files.read(file) ?? return jet_cli_done("", "{notice}{jet_cli_report("E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color)}", JET_DRIVER_EXIT_USER_ERROR)
+    JetCLIPlan.Lint{file: file, source: source, color: color, notice: notice}
+}
+
 // `jet emit --rust <file>` (Source/main.rs `"emit"`, CmdDevTools.rs
 // `run_emit_rust`): with no target the command's help is a usage error; a
 // target without `--rust` is E2102; the file is read as typed.
@@ -985,6 +1026,7 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
         "test" -> return jet_cli_test(jet_argv, color, quiet, verbose, threads)
         "new" -> return jet_cli_new(jet_argv, args, color, quiet)
         "emit" -> return jet_cli_emit(jet_argv, args, color, quiet)
+        "lint" -> return jet_cli_lint(jet_argv, args, color, quiet)
         else -> {}
     }
     jet_cli_not_ported(command, color)

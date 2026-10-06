@@ -1199,8 +1199,7 @@ fn jet_cli_stale_manifest(dir: String, stale: String, color: Bool) -> JetCLIPlan
 
 // main.rs `resolve_command_target` for a directory `raw`: the shared bare
 // rule when it yields a real file, else `resolve_source_path`'s project
-// entry (a missing `run.jet` beside a package is read, and so reported, by
-// the caller; no package at all is E2105).
+// entry.
 pub fn jet_cli_resolve_directory_target(command: String, raw: String, member_flag: String?, use_override: Bool, color: Bool) -[FS, Env]> JetCLITarget Never! {
     notices := [String]{}
     if jet_cli_resolve_bare_entry(command, raw, member_flag, use_override, color, &notices) == {
@@ -1212,22 +1211,31 @@ pub fn jet_cli_resolve_directory_target(command: String, raw: String, member_fla
         .Refused(plan) -> return JetCLITarget.Refused{plan: jet_cli_with_notices(notices, plan)}
         .Absent -> {}
     }
+    jet_cli_resolve_source_path(command, raw, color, notices)
+}
+
+// main.rs `resolve_source_path` for a directory `raw` (a project root): its
+// stock entry. A missing entry beside a package is read, and so reported, by
+// the caller; no package at all is E2105. `notices` are the stderr notices
+// written so far.
+pub fn jet_cli_resolve_source_path(command: String, raw: String, color: Bool, notices: [String]) -[FS, Env]> JetCLITarget Never! {
+    written := notices
     root :: cli_files.realpath(raw) ?? raw
     entry := ""
-    if jet_cli_find_project_entry(root, command, color, &notices) == {
+    if jet_cli_find_project_entry(root, command, color, &written) == {
         .Entry(found) -> { entry = found.path }
-        .Refused(plan) -> return JetCLITarget.Refused{plan: jet_cli_with_notices(notices, plan)}
+        .Refused(plan) -> return JetCLITarget.Refused{plan: jet_cli_with_notices(written, plan)}
         .Absent -> entry = jet_cli_entry_join(root, JET_CLI_DEFAULT_ENTRY_FILE)
     }
     if !cli_files.is_file(entry) {
         if jet_cli_manifest_problem(root, color) == .Val(problem) {
-            return JetCLITarget.Refused{plan: jet_cli_with_notices(notices, problem)}
+            return JetCLITarget.Refused{plan: jet_cli_with_notices(written, problem)}
         }
         if jet_cli_checked_file(root, JET_CLI_PACKAGE_FILE) == .None {
-            return JetCLITarget.Refused{plan: jet_cli_with_notices(notices, jet_cli_fail("E2105", "no `{JET_CLI_DEFAULT_ENTRY_FILE}` entry in `{raw}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR))}
+            return JetCLITarget.Refused{plan: jet_cli_with_notices(written, jet_cli_fail("E2105", "no `{JET_CLI_DEFAULT_ENTRY_FILE}` entry in `{raw}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR))}
         }
     }
-    JetCLITarget.File{path: entry, callable: None, notice: notices.join("")}
+    JetCLITarget.File{path: entry, callable: None, notice: written.join("")}
 }
 
 // The notices resolution wrote, ahead of the report that stopped it.
