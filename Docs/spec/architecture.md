@@ -53,6 +53,31 @@ The [execution seam](../../crates/jet-foundation/src/JitBackend.rs) instead
 passes canonical MIR and an artifact identity to the resident backends.
 These are consumers of one checked meaning, not separate front ends.
 
+### Native representation boundaries
+
+The [Jet x86-64 selector](../../Compiler/JetBackend/Source/X64/Select.jet)
+normalizes incoming and returned `Bool` values from the low System V ABI byte;
+unspecified upper register or stack-slot bits must not change Jet truth.
+Image origins preserve the linker's relative alignment: relocatable read-only
+sections advertise and use their maximum datum alignment, and static ELF text
+starts after header padding to the maximum function/data alignment.
+The [ABI fixtures](../../Compiler/JetBackend/Tests/AbiFixtures.jet) exercise
+dirty upper bits and aligned data addresses, including a system-linked object.
+
+Runtime representation is not the checked field type. In particular, default
+`Err.cause` value and place reads use the shared
+[cause projection](../../crates/jet-foundation/src/Outcome.rs) to expose
+`Err?`, not the runtime's boxed recursive storage. The
+[default error example](../../Examples/features/errors/default_err_value.jet)
+covers present, absent and repeated cause reads.
+Returned `View` and `ViewMut` signatures retain the checked owner provenance:
+both Rust emitters attach an explicit lifetime to the returned reference and
+its owner parameter, not to unrelated borrowed parameters. Static-only views
+use `'static`. The [borrowed view example](../../Examples/features/memory/borrowed_view_len.jet)
+covers a multi-parameter return, chained and stored length reads, indexing,
+and iteration without converting the borrowed slice to a list.
+
+
 ### One reflection model
 
 `StructDef::reflection_fields()` is the declaration-owned stored-field-row source for
@@ -222,6 +247,16 @@ pinned stage0-to-stage1 build, #815 is byte-identical stage1-to-stage2 output,
 and #816 is the Jet-built compiler full-suite closeout. The policy-family
 homes #808–#813 and the boundary inventory #218 cannot substitute for those
 bootstrap and fixed-point proofs.
+
+The fixed-point output includes both the emitted source and its embedded
+compiler MIR image. [`BuildIdentity`](../../Compiler/Bootstrap/BuildIdentity.rs)
+separates `JET_COMPILER_SOURCE_ID` (canonical compiler source bytes, independent
+of the backend build profile) from `JET_COMPILER_BUILD_ID` (source bytes plus
+build facts and, for generated compiler binaries, generated inputs). The
+private HostFacts supplied to JetDriver use the source identity so changing
+the compiler binary's optimization profile does not change compiler-authored
+MIR. Build receipts and physical artifact/cache identities retain the build
+identity; source identity is not proof that two compiler binaries are identical.
 
 Behavioral parity between any two compiler binaries (#670) is a separate,
 reusable proof: [`Tools/agent/compiler-diff.mjs`](../../Tools/agent/compiler-diff.mjs)
@@ -758,9 +793,16 @@ The failure envelope records which budget was actually consumed; a guest
 memory/table request is not relabeled as fuel exhaustion, and an oversized
 wire is rejected before an unbounded host encoding. A call trap is classified
 as user/guest failure, denied authority, budget exhaustion, or internal host
-defect from typed boundary state, not by parsing backend error text. The
-wire keeps the original Jet operation and exported call name and remains the
-transport envelope; no public `Plugin` error type is added.
+defect from typed boundary state, not by parsing backend error text.
+D-PLUGIN-FAILURE1=A carries that cause as `core.plugin.PluginError`, with the
+export name, original display message, and up to 32 innermost-first Wasm frames.
+Budget failures name Fuel, Memory, Table, Time, or the 16 MiB Wire limit. A
+`PluginFrame` locates the function by name (empty without a name section), the
+Wasm `component` it ran in, and the offset; debug-file/line loading is
+intentionally outside this transport. Failures before guest execution carry no
+frames. A failed load leaves a handle whose first call returns the load fault
+with export `load`, without stopping unrelated host work. A propagated failure
+records the host call site in the ordinary failure journey.
 
 Handles and Wasmtime stores are owner-thread state. Cross-thread use and
 unload of an active call are rejected by the existing handle boundary, and

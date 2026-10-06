@@ -184,6 +184,8 @@ marker DebugOnly($sites: [.Statement, .Block])
 
 // D-TESTFAULT1=A: test-only effect substitution is configured by one typed
 // marker argument; the harness owns fail-nth scheduling.
+// D-TEST-STOPMSG1=A: `.expect_fail([E30xx,] message: "text")` checks a
+// region's raw stop message. Whole-test expected_fail remains the known-bug mark.
 marker Test(name: String{"function name"}, faults: [Effect]{[]}, expected_fail: Bool{false}, $sites: [.Test])
 
 marker Target(target: Target, $sites: [.File, .Module, .Function])
@@ -200,11 +202,11 @@ marker NoPrelude($sites: [.File])
 
 marker SQL(row: Type{none}, $sites: [.Block])
 
-marker Extern($sites: [.Module])
+marker Extern($sites: [.Module], $retired: "#Import")
 
 marker Bindgen($sites: [.Module])
 
-marker allow(lint: Ident, $sites: [.Declaration, .Field, .Statement], $repeatable: true)
+marker allow(lint: Ident, reason: String{none}, $sites: [.Declaration, .Field, .Statement], $repeatable: true)
 
 marker Static($sites: [.Constant])
 

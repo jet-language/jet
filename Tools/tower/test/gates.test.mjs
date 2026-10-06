@@ -629,6 +629,79 @@ test('deleteCard proceeds when decisions are only open (unratified)', () => {
   assert.equal(st.load().cards.length, 0);
 });
 
+// Owner 2026-10-04: the owner's own UI may delete a card WITH its ballots,
+// ratified ones included, only with owner-UI provenance (server-built) and an
+// explicit per-decision confirmation. Everything deleted lands in the log.
+const OWNER_UI = { kind: 'owner-ui', session: 'audit-1' };
+const ratifiedCard = () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Doomed' }, cfg));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-1', title: 'first', ...ballot() }));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-2', title: 'second', ...ballot() }));
+  st.mutate((s) => db.ratify(s, 'D-1', 'A', null, 'owner'));
+  return st;
+};
+
+test('owner UI deletes a card with its open and ratified ballots in one mutation and logs each', () => {
+  const st = ratifiedCard();
+  const rev = st.load().meta.rev;
+  const { result } = st.mutate((s) => db.deleteCard(s, '#1',
+    { by: 'someone', decisions: ['D-1', 'D-2'], deleteRatified: ['D-1'] }, OWNER_UI));
+  const s = st.load();
+  assert.equal(s.meta.rev, rev + 1, 'card and ballots go in a single store mutation');
+  assert.equal(s.cards.length, 0);
+  assert.equal(s.decisions.length, 0);
+  assert.deepEqual(result.decisions.map(d => [d.id, d.status, d.outcome]), [['D-1', 'ratified', 'A'], ['D-2', 'open', null]]);
+  const [cardEvent, ...ballotEvents] = s.events.slice(0, 3);
+  assert.equal(cardEvent.action, 'card.delete');
+  assert.equal(cardEvent.by, 'owner', 'owner-UI provenance attributes the delete to the owner');
+  assert.match(cardEvent.note, /Doomed — with ballots D-1 \(ratified\), D-2 \(open\) · owner-ui session=audit-1/);
+  assert.deepEqual(ballotEvents.map(e => [e.action, e.ref]).sort(), [['decision.delete', 'D-1'], ['decision.delete', 'D-2']]);
+  assert.match(ballotEvents.find(e => e.ref === 'D-1').note, /deleted with card #1 — ratified \(outcome A\): first/);
+});
+
+test('owner UI still needs an explicit tick for every ratified ballot', () => {
+  const st = ratifiedCard();
+  for (const deleteRatified of [undefined, [], ['D-2']]) {
+    assert.throws(
+      () => st.mutate((s) => db.deleteCard(s, '#1', { by: 'owner', decisions: ['D-1', 'D-2'], deleteRatified }, OWNER_UI)),
+      (e) => e.code === 'E_HAS_RATIFIED' && /D-1/.test(e.message));
+  }
+  assert.equal(st.load().cards.length, 1);
+  assert.equal(st.load().decisions.length, 2);
+});
+
+test('a ratified-ballot tick without owner-UI provenance is refused, by owner included', () => {
+  const st = ratifiedCard();
+  for (const ownerUi of [null, { kind: 'owner-ui' }, { kind: 'cli', session: 'x' }]) {
+    assert.throws(
+      () => st.mutate((s) => db.deleteCard(s, '#1', { by: 'owner', decisions: ['D-1', 'D-2'], deleteRatified: ['D-1'] }, ownerUi)),
+      (e) => e.code === 'E_HAS_RATIFIED');
+  }
+  assert.equal(st.load().cards.length, 1);
+});
+
+test('delete refuses when the ballots changed since the confirmation was shown', () => {
+  const st = ratifiedCard();
+  assert.throws(
+    () => st.mutate((s) => db.deleteCard(s, '#1', { by: 'owner', decisions: ['D-1'], deleteRatified: ['D-1'] }, OWNER_UI)),
+    (e) => e.code === 'E_CONFLICT' && /D-1, D-2/.test(e.message));
+  assert.equal(st.load().decisions.length, 2);
+});
+
+test('delete clears blockedBy refs to the deleted ballots and refuses to orphan a supersession link', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-1', title: 't', ...ballot() }));
+  st.mutate((s, cfg) => db.addCard(s, { title: 'B', blockedBy: ['D-1', '#1'] }, cfg));
+  st.mutate((s) => db.addDecision(s, { cardId: '#2', id: 'D-2', title: 'u', ...ballot() }));
+  st.mutate((s) => { s.decisions.find(d => d.id === 'D-2').supersededBy = 'D-1'; });
+  assert.throws(() => st.mutate((s) => db.deleteCard(s, '#1', { by: 'owner' })), (e) => e.code === 'E_REFERENCED');
+  st.mutate((s) => { delete s.decisions.find(d => d.id === 'D-2').supersededBy; });
+  st.mutate((s) => db.deleteCard(s, '#1', { by: 'owner' }));
+  assert.deepEqual(st.load().cards[0].blockedBy, []);
+});
+
 // ---- 5. ratify outcome must match an option key -----------------------------
 
 test('ratify refuses an outcome that is not one of the option keys (E_INVALID)', () => {

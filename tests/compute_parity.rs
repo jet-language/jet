@@ -182,7 +182,7 @@ fn named_gradient_composes_into_second_derivative() {
     let source = r#"
 use core.compute as compute
 
-fn loss(w: Tensor, x: Tensor) -> Tensor -> compute.mul(w, x) ?? panic("loss")
+fn loss(w: Tensor, x: Tensor) -> Tensor { compute.mul(w, x) ?? panic("loss") }
 
 fn run() {
     w :: compute.from_list([2.0]) ?? panic("w")

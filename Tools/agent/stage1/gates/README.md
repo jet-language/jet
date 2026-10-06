@@ -22,13 +22,17 @@ reported CONSTANT rather than fitted.
 
 At least two distinct rung sizes and fitted RSS evidence are required. A phase
 without two positive elapsed observations, missing requested rung, failed receipt
-status, malformed trace or unfinished span prevents a pass. Completed phases of
-failed runs are still printed for investigation; unfinished categories are excluded
-from fitting. Failed/partial runs never establish successful scaling acceptance.
+status, malformed trace or unfinished span prevents a pass. **Exponents are fitted
+only on trap-free runs** (`status=ok`): a failed keep-going compile reruns phases
+once per trap (the L5 optimize "206 s" was seven reruns, not growth), so its
+summed spans measure the rerun count. A failed run's completed phases are printed
+as `EXCLUDED <rung> <phase> seconds=…` for investigation and never fitted;
+unfinished categories are excluded too. Failed/partial runs never establish
+successful scaling acceptance.
 
 - **0:** complete available evidence, every fitted time/RSS exponent <= 1.3.
-- **1:** any superlinear fit; prints offending phase, metric, k and sample count,
-  even when there are additional availability failures.
+- **1:** any superlinear fit over trap-free runs; prints offending phase, metric,
+  k and sample count, even when there are additional availability failures.
 - **2:** unavailable/incomplete evidence or incorrect invocation, without a
   demonstrated superlinear fit. A single-rung run cannot pass.
 

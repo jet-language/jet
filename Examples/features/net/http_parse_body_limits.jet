@@ -1,0 +1,43 @@
+// #4431: both source parsers admit exactly the body cap and reject cap + 1
+// before making the owned byte projection. No transport is involved.
+use core.http as http
+
+fn request_result(raw: [U8]) -> String Never! {
+    if http.parse_request(raw) == {
+        .Ok(_) -> return "accepted"
+        .Err(error) -> {
+            if error == {
+                .BodyTooLarge(limit) -> return "BodyTooLarge:{limit}"
+                else -> return "unexpected error"
+            }
+        }
+    }
+    "unexpected result"
+}
+
+fn response_result(raw: [U8]) -> String Never! {
+    if http.parse_response("http://example.test/", raw) == {
+        .Ok(_) -> return "accepted"
+        .Err(error) -> {
+            if error == {
+                .BodyTooLarge(limit) -> return "BodyTooLarge:{limit}"
+                else -> return "unexpected error"
+            }
+        }
+    }
+    "unexpected result"
+}
+
+fn run() {
+    crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    loop size in [0, 3, 1048576, 1048577] {
+        request := "POST / HTTP/1.1{crlf}Host: example.test{crlf}Content-Length: {size}{crlf}{crlf}".bytes()
+        response := "HTTP/1.1 200 OK{crlf}Content-Length: {size}{crlf}{crlf}".bytes()
+        loop _ in 0..<size {
+            &request.push(U8{97})
+            &response.push(U8{97})
+        }
+        print("request {size}: {request_result(request)}")
+        print("response {size}: {response_result(response)}")
+    }
+}

@@ -20,8 +20,8 @@ const JET_HIGHLIGHT_KEYWORD_OTHER = ["$build", "$package", "$phase", "$program",
 const JET_HIGHLIGHT_LITERAL = ["Cancelled", "DeadlineBlown", "None", "Panicked", "Val", "false", "true"];
 const JET_HIGHLIGHT_TYPE_BUILTIN = ["()", "BTreeMap", "Bits", "Bool", "Budget", "BudgetApplies", "Bytes", "CSV", "Cache", "Char", "Complex", "Computed", "Condition", "DBValue", "DataTree", "Decimal", "Derived", "Duration", "Effect", "EncodingError", "Err", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Instant", "Int", "Iter", "JSON", "Key", "Measurement", "MemoStats", "PriorityQueue", "Ptr", "Queue", "Rank", "Receiver", "Sender", "Set", "Shared", "Shared.Weak", "SharedGuard", "SharedRevisionError", "SharedSnapshot", "Signal", "Stream", "String", "Subscription", "TOML", "Task", "TaskFailure", "U16", "U32", "U64", "U8", "UTF8Error", "ViewIter", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
 const JET_HIGHLIGHT_BUILTIN = ["assert", "assert_eq", "channel", "check", "freeze", "input", "join", "print"];
-const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Arithmetic", "Bindgen", "CLI", "Close", "Codable", "CodableAsBase", "Commutative", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "DenyUnknownFields", "Deprecated", "DevPanel", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Error", "Every", "Extern", "FFI", "FX", "Flag", "Flatten", "HTML", "Impure", "Inline", "Interrupt", "Job", "Kernel", "Layout", "Live", "Local", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Reactive", "Receipt", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Root", "SQL", "Scalar", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Target", "Test", "Todo", "Track", "Transact", "Transition", "Undo", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
-const JET_HIGHLIGHT_SIGIL = ["#", "$", "&", "...", "::", ":=", "@[", "]@", "^", "~"];
+const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Arithmetic", "Bindgen", "CLI", "Close", "Codable", "CodableAsBase", "Commutative", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "DenyUnknownFields", "Deprecated", "DevPanel", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Error", "Every", "FFI", "FX", "Flag", "Flatten", "HTML", "Impure", "Inline", "Interrupt", "Job", "Kernel", "Layout", "Live", "Local", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Reactive", "Receipt", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Root", "SQL", "Scalar", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Target", "Test", "Todo", "Track", "Transact", "Transition", "Undo", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
+const JET_HIGHLIGHT_SIGIL = ["#", "$", "&", "...", "::", ":=", ":>", "<:", "^", "~"];
 const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%%", "%%=", "%=", "&&", "&=", "*", "*=", "+", "+=", "-", "-=", "->", "..", "..<", ".[", "/", "/%", "/%=", "/=", "<", "<<", "<<=", "<=", "<=>", "==", ">", ">=", ">>", ">>=", "?", "?.", "??", "^=", "|", "|=", "||", "~|", "~|="];
 // END GENERATED JET SYNTAX HIGHLIGHTS
 
@@ -40,6 +40,8 @@ module.exports = grammar({
     [$.capability_type, $.union_type],
     [$.option_type, $.union_type],
     [$.fallible_type],
+    // A leading-dot scope statement can follow an impl item.
+    [$.impl_block],
     [$.loop_stmt, $._loop_head],
     [$._expr, $.if_expr],
     [$.named_type_field, $.lambda_param],
@@ -784,8 +786,13 @@ module.exports = grammar({
         $.region_stmt,
         $.live_stmt,
         $.marker_block_stmt,
+        $.scope_member_stmt,
         $.expr_stmt,
       ),
+
+    // D-DOTSCOPE1 / D-TEST-STOPMSG1=A: labels use the ordinary argument list.
+    scope_member_stmt: ($) =>
+      seq(".", field("name", $.identifier), optional($.arg_list), $.scoped_block),
 
     // A rule-introduced block: `#FX(IO) { … }` (D-EFF1),
     // named `#FX(grant: FS) { … }` (D-ABILITY-NAME2), `#Transact(order) { … }` (D-TXN4).

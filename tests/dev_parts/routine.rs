@@ -633,7 +633,7 @@ fn outer_result() -> Int {
     result
 }
 
-fn identity(value: Int) -> Int -> value
+fn identity(value: Int) -> Int { value }
 
 fn nested_binary_exit() -> Int {
     result :: loop {
@@ -3386,9 +3386,9 @@ derive T.Access {
     fn make(value: ^@param) -> @name<@param> {
         return @name<@param>{ value: value }
     }
-    fn marker() -> Int -> 17
-    fn get_value(self) -> @param -> ~self.value
-    fn type_name(self) -> String -> T.$name
+    fn marker() -> Int { 17 }
+    fn get_value(self) -> @param { ~self.value }
+    fn type_name(self) -> String { T.$name }
 }
 
 derive T.NumericAccess {
@@ -3398,8 +3398,8 @@ derive T.NumericAccess {
         self.value = value
         return ~self.value
     }
-    fn plus(self, rhs: @param) -> @param -> self.value + rhs
-    fn equal_to(self, rhs: @param) -> Bool -> self.value == rhs
+    fn plus(self, rhs: @param) -> @param { self.value + rhs }
+    fn equal_to(self, rhs: @param) -> Bool { self.value == rhs }
 }
 
 #Access
@@ -3512,7 +3512,7 @@ fn nested_generic_user_derive_reaches_resident_jit() {
 derive T.Access {
     info :: T.reflect()
     param :: info.type_params[0].name
-    fn get_value(self) -> @param -> ~self.value
+    fn get_value(self) -> @param { ~self.value }
 }
 
 #Access
@@ -7270,7 +7270,7 @@ fn tiered_run_selects_per_function_tiers_and_cross_calls() {
     let file = dir.join("mixed.jet");
     fs::write(
         &file,
-        r#"#Memo fn cached(n: Int) -[]> Int -> n * 2
+        r#"#Memo fn cached(n: Int) -[]> Int { n * 2 }
 
 fn add1(n: Int) -> Int {
     return n + 1

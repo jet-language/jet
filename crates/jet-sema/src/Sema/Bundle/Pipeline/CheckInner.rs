@@ -104,6 +104,10 @@ pub(super) fn check_bundle_opts_for_output_inner(
     // Rewrite inline-module sibling calls to their mangled names before any
     // registration/checking/codegen sees the bodies.
     mangle_inline_sibling_calls(bundle);
+    if super::super::GateLedger::GateLedger::has_new_refusal(bundle) {
+        let ledger = super::super::GateLedger::GateLedger::collect(bundle, gates);
+        diags.extend(ledger.policy_diagnostics(bundle));
+    }
     // D-UNSAFE-OBLIG1=A: run after compile-time branch selection and generic
     // module expansion, but before registration/TIR. Assertions are checked and
     // erased here so no generated or untaken body bypasses the policy.

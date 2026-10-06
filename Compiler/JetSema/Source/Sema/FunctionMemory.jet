@@ -27,14 +27,16 @@ pub struct SemaFunctionMemoryModuleInput {
     pub module_identity: String
     pub package_identity: String
     pub policy_declarations: [PolicyDeclaration]
-    pub items: [Item]
 }
 
 pub struct SemaFunctionMemoryFunction {
     pub module_identity: String
     // The leaf name of the type that owns a method, "" for a free function.
     pub owner: String
-    pub function: Func
+    // The declaration as the plan rewrote it. None when no scoped-GC policy
+    // reaches it and no other function shares its key: the plan then leaves
+    // it exactly as written, so the checker reads its own declaration.
+    pub function: Func?
     pub diagnostics: [Diagnostic]
     pub transfer_root: Bool
     pub complete: Bool
@@ -52,10 +54,35 @@ pub struct SemaFunctionMemoryPlan {
 struct SemaFunctionMemorySource {
     module_identity: String
     owner: String
-    function: Func
-    outer_policies: [PolicyDeclaration]
+    span: Span
+    // The declaration, copied only when a scoped-GC policy may rewrite it
+    // (sema_function_memory_scope_may_annotate); `chain` is then its policy
+    // ladder, and empty otherwise.
+    function: Func?
+    chain: [PolicyDeclaration]
     transfer_root: Bool
-    declarations: [PolicyDeclaration]
+}
+
+// One walk over a plan's items in row order. Collecting, it records each
+// function's source row; fetching (a second walk), it copies the declarations
+// of the `wanted` rows into `fetched`.
+struct SemaFunctionMemoryWalk {
+    sources: [SemaFunctionMemorySource]
+    fetching: Bool
+    next_row: Int
+    wanted: [Int:Bool]
+    fetched: [Int:Func]
+}
+
+// The declarations a plan rewrote (`functions`, at plan rows `rows`, both in
+// row order) and the transfer-root names they promote.
+struct SemaFunctionMemoryPlanned {
+    functions: [Func]
+    rows: [Int]
+    promoted: [String]
+    // The first row of each key a later row shares: a lookup by that key
+    // reads this row's declaration, so the row keeps a copy of it.
+    shared_rows: [Int:Bool]
 }
 
 struct SemaFunctionMemoryPolicy {
@@ -190,103 +217,188 @@ fn sema_function_memory_resolve_policy(declarations: [PolicyDeclaration], diagno
     Val(SemaFunctionMemoryPolicy{value: value, provenance: provenance, explanation: sema_function_memory_policy_explanation(value, provenance)})
 }
 
-fn sema_function_memory_source_push(functions: &[SemaFunctionMemorySource], module_identity: String, owner: String, function: Func, transfer_root: Bool, outer: [PolicyDeclaration], declarations: [PolicyDeclaration]) Never! {
-    &functions.push(SemaFunctionMemorySource{module_identity: module_identity, owner: sema_serde_named_leaf(owner), function: function, transfer_root: transfer_root, outer_policies: outer, declarations: declarations})
+fn sema_function_memory_walk_new() -> SemaFunctionMemoryWalk Never! {
+    SemaFunctionMemoryWalk{sources: [SemaFunctionMemorySource]{}, fetching: false, next_row: 0, wanted: [Int:Bool]{}, fetched: [Int:Func]{}}
 }
 
-fn sema_function_memory_collect_items(items: [Item], module_identity: String, top_level: Bool, outer: [PolicyDeclaration], declarations: [PolicyDeclaration], functions: &[SemaFunctionMemorySource]) Never! {
+// One function of the walk, at the walk's next row. A declaration is copied
+// only when the plan may rewrite it or (fetching) the plan asked for it.
+fn sema_function_memory_visit(walk: &SemaFunctionMemoryWalk, module_identity: String, owner: String, function: Func, transfer_root: Bool, outer: [PolicyDeclaration], declarations: [PolicyDeclaration]) Never! {
+    row :: walk.next_row
+    walk.next_row = row + 1
+    if walk.fetching {
+        if walk.wanted.get(row) != None -> walk.fetched[row] = function
+        return
+    }
+    chain :: sema_function_memory_function_policies(outer, declarations, function)
+    rewritable := Func?{None}
+    if sema_function_memory_scope_may_annotate(function.body, chain) -> rewritable = Val(function)
+    &walk.sources.push(SemaFunctionMemorySource{module_identity: module_identity, owner: sema_serde_named_leaf(owner), span: function.span, function: rewritable, chain: chain, transfer_root: transfer_root})
+}
+
+fn sema_function_memory_collect_items(items: [Item], module_identity: String, top_level: Bool, outer: [PolicyDeclaration], declarations: [PolicyDeclaration], walk: &SemaFunctionMemoryWalk) Never! {
     loop item in items {
         if item == {
-            .Func(function) -> sema_function_memory_source_push(&functions, module_identity, "", function, top_level, outer, declarations)
+            .Func(function) -> sema_function_memory_visit(&walk, module_identity, "", function, top_level, outer, declarations)
             .Struct(definition) -> {
-                loop function in definition.methods -> sema_function_memory_source_push(&functions, module_identity, definition.name, function, false, outer, declarations)
+                loop function in definition.methods -> sema_function_memory_visit(&walk, module_identity, definition.name, function, false, outer, declarations)
                 loop implementation in definition.trait_impls {
-                    loop function in implementation.methods -> sema_function_memory_source_push(&functions, module_identity, definition.name, function, false, outer, declarations)
+                    loop function in implementation.methods -> sema_function_memory_visit(&walk, module_identity, definition.name, function, false, outer, declarations)
                 }
             }
             .Enum(definition) -> {
                 loop implementation in definition.trait_impls {
-                    loop function in implementation.methods -> sema_function_memory_source_push(&functions, module_identity, definition.name, function, false, outer, declarations)
+                    loop function in implementation.methods -> sema_function_memory_visit(&walk, module_identity, definition.name, function, false, outer, declarations)
                 }
             }
             .Impl(implementation) -> {
-                loop function in implementation.methods -> sema_function_memory_source_push(&functions, module_identity, implementation.type_name, function, false, outer, declarations)
+                loop function in implementation.methods -> sema_function_memory_visit(&walk, module_identity, implementation.type_name, function, false, outer, declarations)
             }
             .CodeModule(code_module) -> {
-                if code_module.body == .Val(body) -> sema_function_memory_collect_items(body, module_identity, false, outer, declarations, &functions)
+                if code_module.body == .Val(body) -> sema_function_memory_collect_items(body, module_identity, false, outer, declarations, &walk)
             }
             else -> {}
         }
     }
 }
 
-pub fn sema_function_memory_plan(modules: [SemaFunctionMemoryModuleInput]) -> SemaFunctionMemoryPlan {
-    sources := [SemaFunctionMemorySource]{}
-    loop module_input in modules {
-        package_policies := sema_function_memory_package_policies(modules, module_input.package_identity)
-        outer := package_policies
-        loop declaration in module_input.policy_declarations {
-            if declaration.key == PolicyKey.ScopedGC && declaration.scope == PolicyScope.Module -> &outer.push(declaration)
-        }
-        sema_function_memory_collect_items(module_input.items, module_input.module_identity, true, outer, module_input.policy_declarations, &sources)
+// Visits one module's functions in row order under its package and module
+// scoped-GC policies; returns its top-level item count (the propagation bound
+// sums them).
+fn sema_function_memory_walk_module(modules: [SemaFunctionMemoryModuleInput], package_identity: String, module_identity: String, declarations: [PolicyDeclaration], items: [Item], walk: &SemaFunctionMemoryWalk) -> Int Never! {
+    outer := sema_function_memory_package_policies(modules, package_identity)
+    loop declaration in declarations {
+        if declaration.key == PolicyKey.ScopedGC && declaration.scope == PolicyScope.Module -> &outer.push(declaration)
     }
-    limit := 0
-    loop module_input in modules -> limit += module_input.items.len()
-    sema_function_memory_plan_sources(sources, limit)
+    sema_function_memory_collect_items(items, module_identity, true, outer, declarations, &walk)
+    items.len()
 }
 
-fn sema_function_memory_plan_sources(sources: [SemaFunctionMemorySource], limit: Int) -> SemaFunctionMemoryPlan {
-    diagnostics := [Diagnostic]{}
-    functions := [SemaFunctionMemoryFunction]{}
-    loop source in sources {
+fn sema_function_memory_walk_graph(graph: SemaRegistrationGraph, walk: &SemaFunctionMemoryWalk) -> Int Never! {
+    modules := [SemaFunctionMemoryModuleInput]{}
+    loop module_row in graph.modules {
+        &modules.push(SemaFunctionMemoryModuleInput{module_identity: module_row.module_identity, package_identity: module_row.package_identity, policy_declarations: module_row.program.policy_declarations})
+    }
+    limit := 0
+    loop module_row in graph.modules {
+        limit += sema_function_memory_walk_module(modules, module_row.package_identity, module_row.module_identity, module_row.program.policy_declarations, module_row.program.items, &walk)
+    }
+    limit
+}
+
+fn sema_function_memory_walk_program(program: Program, module_identity: String, package_identity: String, walk: &SemaFunctionMemoryWalk) -> Int Never! {
+    modules :: [SemaFunctionMemoryModuleInput]{SemaFunctionMemoryModuleInput{module_identity: module_identity, package_identity: package_identity, policy_declarations: program.policy_declarations}}
+    sema_function_memory_walk_module(modules, package_identity, module_identity, program.policy_declarations, program.items, &walk)
+}
+
+fn sema_function_memory_plan_new() -> SemaFunctionMemoryPlan Never! {
+    SemaFunctionMemoryPlan{functions: [SemaFunctionMemoryFunction]{}, positions: [String:Int]{}, diagnostics: [Diagnostic]{}, complete: true}
+}
+
+// The plan's rows for `sources`, in order: each policy ladder resolved, the
+// declarations a policy reaches rewritten, and transfers propagated among the
+// rewritten transfer roots (a declaration no policy reaches never gains a
+// scoped-GC fact, so it can neither promote nor take a transfer).
+fn sema_function_memory_plan_rows(plan: &SemaFunctionMemoryPlan, sources: [SemaFunctionMemorySource], limit: Int) -> SemaFunctionMemoryPlanned {
+    planned := SemaFunctionMemoryPlanned{functions: [Func]{}, rows: [Int]{}, promoted: [String]{}, shared_rows: [Int:Bool]{}}
+    loop (row, source) in sources {
         function_diagnostics := [Diagnostic]{}
-        function := source.function
         function_complete := true
-        chain := sema_function_memory_function_policies(source.outer_policies, source.declarations, function)
-        effective := sema_function_memory_resolve_policy(chain, &function_diagnostics, &function_complete)
-        function.gc_scope = false
-        if effective == .Val(policy) && policy.value == PolicyValue.Enabled -> function.gc_scope = true
-        function.gc_return = sema_function_memory_annotate_scope(&function.body, chain, &function_diagnostics, &function_complete)
+        if source.function == .Val(declared) {
+            function := declared
+            effective := sema_function_memory_resolve_policy(source.chain, &function_diagnostics, &function_complete)
+            function.gc_scope = false
+            if effective == .Val(policy) && policy.value == PolicyValue.Enabled -> function.gc_scope = true
+            function.gc_return = sema_function_memory_annotate_scope(&function.body, source.chain, &function_diagnostics, &function_complete)
+            &planned.functions.push(function)
+            &planned.rows.push(row)
+        }
         function_complete = function_complete && function_diagnostics.len() == 0
-        loop diagnostic in function_diagnostics -> &diagnostics.push(diagnostic)
-        &functions.push(SemaFunctionMemoryFunction{module_identity: source.module_identity, owner: source.owner, function: function, diagnostics: function_diagnostics, transfer_root: source.transfer_root, complete: function_complete})
+        loop diagnostic in function_diagnostics -> &plan.diagnostics.push(diagnostic)
+        &plan.functions.push(SemaFunctionMemoryFunction{module_identity: source.module_identity, owner: source.owner, function: None, diagnostics: function_diagnostics, transfer_root: source.transfer_root, complete: function_complete})
+        key :: sema_function_memory_key(source.module_identity, source.owner, source.span)
+        first :: plan.positions.get(key) ?? -1
+        if first >= 0 {
+            planned.shared_rows[first] = true
+        } else {
+            plan.positions[key] = row
+        }
     }
     iteration := 0
     loop iteration < limit {
-        promoted := [String]{}
-        loop function in functions {
-            if function.transfer_root && function.function.gc_return -> sema_function_memory_append_name_unique(&promoted, function.function.name)
-        }
+        promoted :: sema_function_memory_promoted(plan, planned)
         changed := false
-        loop index in 0..<functions.len() {
-            // Updated in place: copying each row out and back would copy
-            // every function body once per round.
-            if functions[index].transfer_root -> changed = sema_function_memory_propagate_transfers(&functions[index].function, promoted) || changed
+        loop index in 0..<planned.functions.len() {
+            // Updated in place: copying each function out and back would
+            // copy every rewritten body once per round.
+            if plan.functions[planned.rows[index]].transfer_root -> changed = sema_function_memory_propagate_transfers(&planned.functions[index], promoted) || changed
         }
         if !changed -> break
         iteration += 1
     }
+    planned.promoted = sema_function_memory_promoted(plan, planned)
+    planned
+}
+
+fn sema_function_memory_promoted(plan: SemaFunctionMemoryPlan, planned: SemaFunctionMemoryPlanned) -> [String] Never! {
     promoted := [String]{}
-    loop function in functions {
-        if function.transfer_root && function.function.gc_return -> sema_function_memory_append_name_unique(&promoted, function.function.name)
+    loop index in 0..<planned.functions.len() {
+        if plan.functions[planned.rows[index]].transfer_root && planned.functions[index].gc_return -> sema_function_memory_append_name_unique(&promoted, planned.functions[index].name)
     }
-    loop index in 0..<functions.len() {
-        if !functions[index].transfer_root || functions[index].function.gc_scope -> next
-        loop diagnostic in sema_function_memory_boundary_diagnostics(functions[index].function, promoted) {
-            &functions[index].diagnostics.push(diagnostic)
-            &diagnostics.push(diagnostic)
-            functions[index].complete = false
+    promoted
+}
+
+// The rows whose declarations the plan still reads: the first row of a shared
+// key, and, once a function is promoted, every transfer root no policy
+// rewrote (its bindings are checked against the promoted callees).
+fn sema_function_memory_wanted_rows(plan: SemaFunctionMemoryPlan, planned: SemaFunctionMemoryPlanned) -> [Int:Bool] Never! {
+    rewritten := [Int:Bool]{}
+    loop row in planned.rows -> rewritten[row] = true
+    wanted := [Int:Bool]{}
+    loop row in 0..<plan.functions.len() {
+        if rewritten.get(row) != None -> next
+        if planned.shared_rows.get(row) != None || (planned.promoted.len() > 0 && plan.functions[row].transfer_root) -> wanted[row] = true
+    }
+    wanted
+}
+
+// Completes `plan` from its rewritten declarations and the `fetched` ones
+// (sema_function_memory_wanted_rows): E2111 at each ownership-only transfer
+// root, then each row's declaration, then completeness.
+fn sema_function_memory_plan_finish(plan: &SemaFunctionMemoryPlan, planned: &SemaFunctionMemoryPlanned, fetched: [Int:Func]) {
+    if planned.promoted.len() > 0 {
+        rewritten := [Int:Int]{}
+        loop index in 0..<planned.rows.len() -> rewritten[planned.rows[index]] = index
+        loop row in 0..<plan.functions.len() {
+            if !plan.functions[row].transfer_root -> next
+            found := [Diagnostic]{}
+            if rewritten.get(row) == .Val(index) {
+                if planned.functions[index].gc_scope -> next
+                found = sema_function_memory_boundary_diagnostics(planned.functions[index], planned.promoted)
+            } else {
+                if fetched.get(row) == .Val(declared) -> found = sema_function_memory_boundary_diagnostics(declared, planned.promoted)
+            }
+            loop diagnostic in found {
+                &plan.functions[row].diagnostics.push(diagnostic)
+                &plan.diagnostics.push(diagnostic)
+                plan.functions[row].complete = false
+            }
         }
     }
-    complete := diagnostics.len() == 0
-    positions := [String:Int]{}
-    loop index in 0..<functions.len() {
-        function :: functions[index]
-        if !function.complete -> complete = false
-        key :: sema_function_memory_key(function.module_identity, function.owner, function.function.span)
-        if positions.get(key) == None -> positions[key] = index
+    loop planned.functions.len() > 0 {
+        function :: &planned.functions.pop() ?? break
+        row :: &planned.rows.pop() ?? break
+        plan.functions[row].function = Val(function)
     }
-    SemaFunctionMemoryPlan{functions: functions, positions: positions, diagnostics: diagnostics, complete: complete}
+    loop row in 0..<plan.functions.len() {
+        if plan.functions[row].function != None || planned.shared_rows.get(row) == None -> next
+        if fetched.get(row) == .Val(declared) -> plan.functions[row].function = Val(declared)
+    }
+    complete := plan.diagnostics.len() == 0
+    loop function in plan.functions {
+        if !function.complete -> complete = false
+    }
+    plan.complete = complete
 }
 
 // E2111 for each binding of an ownership-only function that keeps a
@@ -307,38 +419,37 @@ fn sema_function_memory_boundary_diagnostics(function: Func, promoted: [String])
     found
 }
 
+// A declaration no scoped-GC policy reaches is not copied into the plan (its
+// row has no function); the walk revisits the items only when a shared key or
+// an E2111 boundary check needs such a declaration after all.
 pub fn sema_function_memory_plan_from_graph(graph: SemaRegistrationGraph) -> SemaFunctionMemoryPlan {
-    modules := [SemaFunctionMemoryModuleInput]{}
-    loop module_row in graph.modules {
-        &modules.push(SemaFunctionMemoryModuleInput{
-            module_identity: module_row.module_identity,
-            package_identity: module_row.package_identity,
-            policy_declarations: module_row.program.policy_declarations,
-            items: [Item]{},
-        })
+    walk := sema_function_memory_walk_new()
+    limit :: sema_function_memory_walk_graph(graph, &walk)
+    plan := sema_function_memory_plan_new()
+    planned := sema_function_memory_plan_rows(&plan, walk.sources, limit)
+    walk.wanted = sema_function_memory_wanted_rows(plan, planned)
+    if walk.wanted.len() > 0 {
+        walk.fetching = true
+        walk.next_row = 0
+        _ := sema_function_memory_walk_graph(graph, &walk)
     }
-    sources := [SemaFunctionMemorySource]{}
-    limit := 0
-    loop module_row in graph.modules {
-        outer := sema_function_memory_package_policies(modules, module_row.package_identity)
-        loop declaration in module_row.program.policy_declarations {
-            if declaration.key == PolicyKey.ScopedGC && declaration.scope == PolicyScope.Module -> &outer.push(declaration)
-        }
-        sema_function_memory_collect_items(module_row.program.items, module_row.module_identity, true, outer, module_row.program.policy_declarations, &sources)
-        limit += module_row.program.items.len()
-    }
-    sema_function_memory_plan_sources(sources, limit)
+    sema_function_memory_plan_finish(&plan, &planned, walk.fetched)
+    plan
 }
 
 pub fn sema_function_memory_plan_for_program(program: Program, module_identity: String, package_identity: String) -> SemaFunctionMemoryPlan {
-    sema_function_memory_plan([SemaFunctionMemoryModuleInput]{
-        SemaFunctionMemoryModuleInput{
-            module_identity: module_identity,
-            package_identity: package_identity,
-            policy_declarations: program.policy_declarations,
-            items: program.items,
-        },
-    })
+    walk := sema_function_memory_walk_new()
+    limit :: sema_function_memory_walk_program(program, module_identity, package_identity, &walk)
+    plan := sema_function_memory_plan_new()
+    planned := sema_function_memory_plan_rows(&plan, walk.sources, limit)
+    walk.wanted = sema_function_memory_wanted_rows(plan, planned)
+    if walk.wanted.len() > 0 {
+        walk.fetching = true
+        walk.next_row = 0
+        _ := sema_function_memory_walk_program(program, module_identity, package_identity, &walk)
+    }
+    sema_function_memory_plan_finish(&plan, &planned, walk.fetched)
+    plan
 }
 
 pub fn sema_function_memory_has_unsupported_policies(declarations: [PolicyDeclaration]) -> Bool Never! {

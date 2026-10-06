@@ -56,6 +56,8 @@ use jet_foundation.[
     UnitScaleProvenance,
     Variant,
     VariantPayload,
+    core_enum_payload_variants,
+    core_enum_variant_payload,
     core_module_export,
     expr_span,
     sema_reserved_type_name,
@@ -502,6 +504,15 @@ pub fn sema_build_facts_reject_debug_traces(facts: SemaBuildFacts) -> Bool Never
     facts.artifact_build || facts.profile == "release" || facts.profile == "hardened"
 }
 
+// #4319 scaling counters (Tools/perf/scaling) of the graph's lookups: module
+// rows by identity and names in a module's namespace. One counter set is
+// shared by every copy of a graph; it counts only when the graph's
+// `counting` is set, so an uncounted lookup costs one flag test.
+pub struct SemaLookupCounters {
+    pub module_lookups: Int
+    pub name_lookups: Int
+}
+
 pub struct SemaRegistrationGraph {
     pub package_identity: String
     pub entry_module_identity: String
@@ -517,6 +528,8 @@ pub struct SemaRegistrationGraph {
     pub imports: [SemaRegistrationImport]
     pub unit_facts: [SemaRegistrationUnitFact]
     pub host_hooks: Shared<SemaRegistrationHostHooks>
+    pub lookup_counters: Shared<SemaLookupCounters>
+    pub counting: Bool
     pub internal_problem: String?
     pub diagnostics: [Diagnostic]
     pub complete: Bool
@@ -1328,16 +1341,40 @@ pub fn sema_registration_is_compiler_owned(nominal: SemaRegistrationNominal) -> 
 }
 
 // Rust `builtin_type_registry` (Bundle.rs) and the compiler-owned MIR enum rows
-// (`COMPILER_OWNED_ENUMS`): `Ordering` and `RemoveBy` are runtime enums every
-// module sees without a declaration. They keep the bare shared spelling as
-// their canonical type key, so every module's values name one type.
+// (`COMPILER_OWNED_ENUMS`): `Ordering`, `RemoveBy`, and the task rail's
+// `TaskFailure` are runtime enums every module sees without a declaration.
+// They keep the bare shared spelling as their canonical type key, so every
+// module's values name one type.
 pub fn sema_registration_is_compiler_owned_enum(nominal: SemaRegistrationNominal) -> Bool Never! {
     nominal.compiler_owned && nominal.generated_provenance == (Val(sema_registration_compiler_owned_enum_provenance()))
 }
 
-fn sema_registration_compiler_owned_enum(module_identity: String, name: String, variant_names: [String]) -> SemaRegistrationNominal {
+// The declared variant rows of a compiler-owned runtime enum: the unit menus
+// of `Ordering`/`RemoveBy`, and D-CONC-FAIL1=A's `TaskFailure` from the Core
+// enum payload rows (Rust TIR registers the same variants and payloads).
+fn sema_registration_compiler_owned_enum_variants(name: String) -> [Variant]? {
     span :: Span{start: 0, end: 0}
-    variants :: loop variant_name in variant_names -> Variant{name: variant_name, name_span: span, payload: VariantPayload.Unit, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}}
+    names := sema_compiler_enum_variants(name) ?? [String]{}
+    unit_menu :: names.len() > 0
+    if !unit_menu {
+        if name != "TaskFailure" -> return None
+        names = core_enum_payload_variants(name) ?? return None
+    }
+    variants := [Variant]{}
+    loop variant_name in names {
+        payload := VariantPayload.Unit
+        if !unit_menu {
+            payload_types :: core_enum_variant_payload(name, variant_name) ?? return None
+            if payload_types.len() > 1 -> return None
+            if payload_types.len() == 1 -> payload = VariantPayload.Single{ty: payload_types[0], span: span}
+        }
+        &variants.push(Variant{name: variant_name, name_span: span, payload: payload, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}})
+    }
+    Val(variants)
+}
+
+fn sema_registration_compiler_owned_enum(module_identity: String, name: String, variants: [Variant]) -> SemaRegistrationNominal {
+    span :: Span{start: 0, end: 0}
     definition :: EnumDef{
         span: span,
         is_pub: true,
@@ -1807,9 +1844,17 @@ pub fn sema_registration_prepare_module(input: SemaRegistrationModuleInput) -> S
     sema_registration_prepare_module_with(input, [SemaGenericModuleSource]{})
 }
 
+fn sema_registration_prepare_module_with(input: SemaRegistrationModuleInput, templates: [SemaGenericModuleSource]) -> SemaRegistrationModuleResult {
+    diagnostics := [Diagnostic]{}
+    module_row := sema_registration_prepare_module_row(input, templates, &diagnostics)
+    SemaRegistrationModuleResult{module_row: module_row, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0)}
+}
+
+// The prepared row of one module; its diagnostics are appended to `reported`.
+// The row is returned whole, so the graph takes it without a copy.
 // `templates` are the generic-module templates the module imports; its own
 // templates come from its program.
-fn sema_registration_prepare_module_with(input: SemaRegistrationModuleInput, templates: [SemaGenericModuleSource]) -> SemaRegistrationModuleResult {
+fn sema_registration_prepare_module_row(input: SemaRegistrationModuleInput, templates: [SemaGenericModuleSource], reported: &[Diagnostic]) -> SemaRegistrationModule {
     diagnostics := [Diagnostic]{}
     module_row := SemaRegistrationModule{
         package_identity: input.package_identity,
@@ -1854,14 +1899,16 @@ fn sema_registration_prepare_module_with(input: SemaRegistrationModuleInput, tem
     // D-CONF-GENSPELL1=A: each valid module alias becomes an expanded module
     // instance before anything else sees the items (Rust expands before
     // sibling mangling and registration).
-    module_row.program = sema_generic_modules_expand(module_row.program, module_row.module_identity, templates)
+    // Each rewrite below updates the program in place and leaves it
+    // untouched (uncopied) when it has nothing to rewrite.
+    sema_generic_modules_expand(&module_row.program, input.module_identity, templates)
     // D-MOD2/D-MOD3: inline modules give their members one lifted identity
     // (types beside the module, top-level member functions by member name)
     // and resolve `module.f(...)` and `use module.[f]` before registration.
-    module_row.program = sema_inline_modules_lower(module_row.program, &diagnostics)
+    sema_inline_modules_lower(&module_row.program, &diagnostics)
     // D-STRUCT-ONCE1=A: root `prep loop` declarations expand first, so every
     // generated impl, conversion, and test registers as a written item.
-    module_row.program.items = sema_derive_expand_template_loops(module_row.program.items, &diagnostics)
+    sema_derive_expand_template_loops(&module_row.program.items, &diagnostics)
     // Reject reserved type declarations before automatic capability expansion:
     // an invalid nominal must not produce methods that cascade from E0106.
     item_index := 0
@@ -1874,11 +1921,11 @@ fn sema_registration_prepare_module_with(input: SemaRegistrationModuleInput, tem
     }
     // D-ERR-CONV: declared conversions register once per module and become
     // their checked conversion routines before any declaration is resolved.
-    module_row.program.items = sema_error_conversion_items(module_row.program.items, &diagnostics)
+    sema_error_conversion_items(&module_row.program.items, &diagnostics)
     // D-ONCE-DERIVE1=A: selected built-in capabilities expand from the Prelude
     // derive templates into compiler-generated trait blocks before any
     // declaration, impl, or known-time value is registered.
-    module_row.program.items = sema_derive_expand_builtin_items(module_row.program.items, &diagnostics)
+    sema_derive_expand_builtin_items(&module_row.program.items, &diagnostics)
     row_source_file :: ~module_row.source_file
     row_source_origin :: ~module_row.source_origin
     row_source_segments :: ~module_row.source_segments
@@ -1914,7 +1961,8 @@ fn sema_registration_prepare_module_with(input: SemaRegistrationModuleInput, tem
     }
 
     sema_attach_diagnostic_source_locations(&diagnostics, 0, module_row.source_segments)
-    SemaRegistrationModuleResult{module_row: module_row, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0)}
+    loop diagnostic in diagnostics -> &reported.push(diagnostic)
+    module_row
 }
 
 fn sema_registration_import_is_unqualified(declaration: ImportDecl) -> Bool Never! {
@@ -1923,7 +1971,17 @@ fn sema_registration_import_is_unqualified(declaration: ImportDecl) -> Bool Neve
 
 // Rust `Bundle/ItemReuse.rs` `by_identity`: module identity -> row.
 fn sema_registration_module_index(graph: SemaRegistrationGraph, identity: String) -> Int? {
+    if graph.counting {
+        counters := graph.lookup_counters
+        permit :: counters.guard_edit()
+        permit.value.module_lookups += 1
+    }
     graph.module_rows.get(identity)
+}
+
+// The graph's lookup counts so far (SemaLookupCounters).
+pub fn sema_registration_lookup_counts(graph: SemaRegistrationGraph) -> SemaLookupCounters {
+    SemaLookupCounters{module_lookups: graph.lookup_counters.module_lookups, name_lookups: graph.lookup_counters.name_lookups}
 }
 
 // The registered module NAME (`core.term`) of a module IDENTITY such as a
@@ -2142,9 +2200,9 @@ fn sema_registration_inject_compiler_builtins(graph: &SemaRegistrationGraph) {
         sema_registration_index_nominal_rows(&graph, module_index, first_nominal)
         graph.compiler_builtin_rows["Err"] = SemaRegistrationRowRef{module_index: module_index, row: first_nominal}
     }
-    runtime_enums :: [String]{"Ordering", "RemoveBy"}
+    runtime_enums :: [String]{"Ordering", "RemoveBy", "TaskFailure"}
     loop name in runtime_enums {
-        variants :: sema_compiler_enum_variants(name) ?? panic("compiler-owned enum has no variant menu")
+        variants :: sema_registration_compiler_owned_enum_variants(name) ?? panic("compiler-owned enum has no variant menu")
         module_index :: sema_registration_compiler_builtin_module(graph, name) ?? next
         module_identity := graph.modules[module_index].module_identity
         first_nominal :: graph.modules[module_index].nominals.len()
@@ -2161,26 +2219,26 @@ pub fn sema_registration_compiler_builtin_row(graph: SemaRegistrationGraph, name
     graph.compiler_builtin_rows.get(name)
 }
 
-pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: String, canonical_effect_module_identity: String, foreign_providers: [SemaForeignProviderInput], target_machine: MIRTargetMachine, build_facts: SemaBuildFacts, host_hooks: Shared<SemaRegistrationHostHooks>) -> SemaRegistrationGraph {
+// `counting` sets the graph's `counting` (#4319 lookup counters).
+pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: String, canonical_effect_module_identity: String, foreign_providers: [SemaForeignProviderInput], target_machine: MIRTargetMachine, build_facts: SemaBuildFacts, host_hooks: Shared<SemaRegistrationHostHooks>, counting: Bool) -> SemaRegistrationGraph {
     modules := [SemaRegistrationModule]{}
     diagnostics := [Diagnostic]{}
     // Module identity -> row; duplicates are rejected below, so the first row
     // is the only row (Rust `Bundle/ItemReuse.rs` `by_identity`).
     module_rows := [String:Int]{}
     loop input in inputs {
-        prepared := sema_registration_prepare_module_with(input, sema_generic_modules_imported(inputs, edges, input.module_identity))
-        loop diagnostic in prepared.diagnostics -> &diagnostics.push(diagnostic)
-        duplicate :: module_rows.get(prepared.module_row.module_identity) != None
-        if !duplicate -> module_rows[prepared.module_row.module_identity] = modules.len()
+        module_row := sema_registration_prepare_module_row(input, sema_generic_modules_imported(inputs, edges, input.module_identity), &diagnostics)
+        duplicate :: module_rows.get(module_row.module_identity) != None
+        if !duplicate -> module_rows[module_row.module_identity] = modules.len()
         if {
-            duplicate -> &diagnostics.push(sema_defined_twice_optional(prepared.module_row.module_identity, "module identities must be unique in one declaration graph", None))
-            else -> &modules.push(prepared.module_row)
+            duplicate -> &diagnostics.push(sema_defined_twice_optional(module_row.module_identity, "module identities must be unique in one declaration graph", None))
+            else -> &modules.push(module_row)
         }
     }
     if package_identity == "" || entry_module_identity == "" {
         &diagnostics.push(sema_error_optional("E0003", None, "the declaration graph is missing its package or entry identity", "cross-module lookup must use one exact graph identity", "provide the loader's canonical package and entry module identities"))
     }
-    graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_rows: module_rows, edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, host_hooks: host_hooks, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, callable_rows: [String:SemaRegistrationCallableRow]{}, nominal_row_slots: [String:Int]{}, nominal_row_buckets: [[SemaRegistrationRowRef]]{}, impl_row_slots: [String:Int]{}, impl_row_buckets: [[SemaRegistrationRowRef]]{}, nominal_symbol_rows: [String:SemaRegistrationRowRef]{}}
+    graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_rows: module_rows, edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, host_hooks: host_hooks, lookup_counters: shared SemaLookupCounters{module_lookups: 0, name_lookups: 0}, counting: counting, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, callable_rows: [String:SemaRegistrationCallableRow]{}, nominal_row_slots: [String:Int]{}, nominal_row_buckets: [[SemaRegistrationRowRef]]{}, impl_row_slots: [String:Int]{}, impl_row_buckets: [[SemaRegistrationRowRef]]{}, nominal_symbol_rows: [String:SemaRegistrationRowRef]{}}
     loop indexed_module in 0..<graph.modules.len() -> sema_registration_index_nominal_rows(&graph, indexed_module, 0)
     if entry_module_identity != "" && sema_registration_module_index(graph, entry_module_identity) == None {
         &graph.diagnostics.push(sema_error_optional("E0003", None, "the declaration graph entry is not loaded", "the entry identity must name one prepared module", "include the entry module in the loader's module inputs"))
@@ -2271,17 +2329,17 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
     sema_generic_modules_check(&graph, inputs)
     graph.complete = !sema_has_error_since(graph.diagnostics, 0)
     // Rust erases templates and aliases once expanded: their symbols stay
-    // registered, but no later pass sees an unexpanded body.
+    // registered, but no later pass sees an unexpanded body. They are removed
+    // in place; every other item stays where it is, uncopied.
     loop erased_index in 0..<graph.modules.len() {
-        kept := [Item]{}
-        loop item_index in 0..<graph.modules[erased_index].program.items.len() {
-            item :: graph.modules[erased_index].program.items[item_index]
-            if item == {
-                .GenericModule(_) | .ModuleAlias(_) -> {}
-                else -> &kept.push(item)
+        item_index := 0
+        loop item_index < graph.modules[erased_index].program.items.len() {
+            if sema_registration_item_is_expanded_template(graph.modules[erased_index].program.items[item_index]) {
+                _ := &graph.modules[erased_index].program.items.remove(item_index, .Slot)
+            } else {
+                item_index += 1
             }
         }
-        graph.modules[erased_index].program.items = kept
     }
     // D-METADERIVE1=A / D-META-USER1=A: user derives and declared marker
     // bodies expand over the complete graph's reflection and register their
@@ -2292,7 +2350,19 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
     graph
 }
 
+fn sema_registration_item_is_expanded_template(item: Item) -> Bool Never! {
+    if item == {
+        .GenericModule(_) | .ModuleAlias(_) -> true
+        else -> false
+    }
+}
+
 pub fn sema_registration_lookup_name(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaRegistrationResolvedSymbol? {
+    if graph.counting {
+        counters := graph.lookup_counters
+        permit :: counters.guard_edit()
+        permit.value.name_lookups += 1
+    }
     module_index :: sema_registration_module_index(graph, module_identity) ?? return None
     module_row :: graph.modules[module_index]
     if module_row.symbol_positions.get(name) == .Val(symbol_position) {
@@ -2357,22 +2427,34 @@ fn sema_registration_parameter_default(parameters: [SemaRegistrationParameter], 
 }
 
 pub fn sema_registration_apply_graph_module(graph: SemaRegistrationGraph, module_identity: String, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    waiting := [SemaScopeProbeConstant]{}
+    sema_registration_apply_graph_module_rows(graph, module_identity, &scopes, &diagnostics, &waiting)
+}
+
+// sema_registration_apply_graph_module that also records in `waiting` each
+// binding it pushes for a constant still waiting for its known-time type,
+// with the graph row the binding was copied from.
+pub fn sema_registration_apply_graph_module_rows(graph: SemaRegistrationGraph, module_identity: String, scopes: &SemaScopeTable, diagnostics: &[Diagnostic], waiting: &[SemaScopeProbeConstant]) -> Bool {
     module_index :: sema_registration_module_index(graph, module_identity) ?? return false
     module_row :: graph.modules[module_index]
     complete := true
     sema_scope_seed_unit_policy(&scopes, graph, module_identity)
     if !sema_scope_add_compiler_builtin(&scopes, graph) -> complete = false
-    loop symbol in module_row.symbols {
+    loop (position, symbol) in module_row.symbols {
         if !sema_scope_add_module_symbol(&scopes, symbol) {
             &diagnostics.push(sema_diagnostic_with_source_location(sema_defined_twice(symbol.name, "module declarations share one namespace", symbol.span), module_row.source_segments))
             complete = false
+        } else if sema_comptime_symbol_waits(symbol) {
+            &waiting.push(SemaScopeProbeConstant{binding: scopes.bindings.len() - 1, source: SemaScopeProbeSource.Symbol{position: position}})
         }
     }
-    loop import in module_row.imports {
-        loop binding in import.bindings {
+    loop (import_index, import) in module_row.imports {
+        loop (binding_index, binding) in import.bindings {
             if !sema_scope_add_module_symbol(&scopes, binding.symbol) {
                 &diagnostics.push(sema_diagnostic_with_source_location(sema_defined_twice(binding.local, "imported names share the module namespace", binding.symbol.span), module_row.source_segments))
                 complete = false
+            } else if sema_comptime_symbol_waits(binding.symbol) {
+                &waiting.push(SemaScopeProbeConstant{binding: scopes.bindings.len() - 1, source: SemaScopeProbeSource.Import{import_index: import_index, binding: binding_index}})
             }
         }
     }

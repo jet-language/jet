@@ -557,7 +557,7 @@ pub(super) fn realize_ref_outcome(
             drop(spinner.take());
             clear_live_region(&mut live);
             RuntimePolicy::warn_sandbox_fallback(theme);
-            if Trust::gate_build_identity(theme, &Trust::store_path(), &identity, flags.trust)
+            if Trust::gate_build_identity(theme, &Trust::store_path(), project_dir.as_deref().unwrap_or(std::path::Path::new(".")), &identity, flags.trust)
                 .is_err()
             {
                 return RefOutcome::Failed;
@@ -819,7 +819,7 @@ pub(super) fn realize_adapter(
             &expectation.identity.platform,
             table,
         );
-        if Trust::gate_build_identity(theme, &Trust::store_path(), &identity, flags.trust).is_err()
+        if Trust::gate_build_identity(theme, &Trust::store_path(), project_dir.as_deref().unwrap_or(std::path::Path::new(".")), &identity, flags.trust).is_err()
         {
             return None;
         }

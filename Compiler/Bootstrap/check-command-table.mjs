@@ -1,10 +1,7 @@
 #!/usr/bin/env node
-// The `jet` command table has one source: Compiler/JetCli/Source/Cli/Commands.jet
-// (D-JETCLI-HOST1=A). The Rust host keeps a frozen copy in
-// crates/jet-cli/src/CLI.rs (`HandlerKey`, `InspectPlane`, the `*_ACTIONS`
-// arrays, `COMMANDS`, and `BASE_FLAGS`) until the Jet CLI replaces it. This
-// tool reads both tables as data and fails when they differ in any command,
-// nested action, dispatcher seam, flag, or order.
+// The shared `jet` command table lives in JetFoundation (D-JET-VERBS1=A).
+// Rust keeps commands in foundation and flags in jet-cli. Read both parts
+// as one table and fail if Jet and Rust differ.
 //
 // usage: node Compiler/Bootstrap/check-command-table.mjs
 //   exit 0 when the tables agree; exit 1 with the first differences otherwise.
@@ -13,8 +10,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-export const JET_TABLE = "Compiler/JetCli/Source/Cli/Commands.jet";
-export const RUST_TABLE = "crates/jet-cli/src/CLI.rs";
+export const JET_TABLE = "Compiler/JetFoundation/Source/Registry/CLICommands.jet";
+export const RUST_TABLE = "crates/jet-foundation/src/CLICommands.rs";
+export const RUST_FLAGS = "crates/jet-cli/src/CLI.rs";
 
 function fail(message) {
   throw new Error(`command-table: ${message}`);
@@ -303,7 +301,7 @@ export function tableDifferences(jet, rust) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const jet = readJetTable(readFileSync(resolve(repoRoot, JET_TABLE), "utf8"));
-  const rust = readRustTable(readFileSync(resolve(repoRoot, RUST_TABLE), "utf8"));
+  const rust = readRustTable(readFileSync(resolve(repoRoot, RUST_TABLE), "utf8") + "\n" + readFileSync(resolve(repoRoot, RUST_FLAGS), "utf8"));
   const differences = tableDifferences(jet, rust);
   if (differences.length > 0) {
     console.error(`command-table: ${JET_TABLE} and the frozen Rust copy in ${RUST_TABLE} differ:\n${differences.slice(0, 20).join("\n")}`);

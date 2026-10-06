@@ -2557,7 +2557,7 @@ mod tests {
     y: Int
 }
 
-fn make() -> Point -> {x: 1, y: 2}
+fn make() -> Point { {x: 1, y: 2} }
 
 fn accepts(values: [String]) {}
 
@@ -2572,7 +2572,7 @@ fn run() {
 }
 "#;
         let once = format_source(source).expect("inferred braces should format");
-        assert!(once.contains("-> {x: 1, y: 2}"), "{once}");
+        assert!(once.contains("fn make() -> Point { {x: 1, y: 2} }"), "{once}");
         assert!(once.contains("accepts({\"needle\"})"), "{once}");
         assert!(once.contains("fn block() {"), "{once}");
         assert_eq!(
@@ -2618,16 +2618,16 @@ fn run() {
     }
 
     #[test]
-    fn lambda_interface_round_trips_result_error_and_pure_effect_row() {
+    fn lambda_interface_round_trips_parameters_and_pure_effect_row() {
         let source = r#"enum LambdaError { Invalid }
 
 fn run() {
-    increment :: (n: Int) Int LambdaError! -[]> { return Ok(n + 1) }
+    increment :: (n: Int) -[]> { return n + 1 }
 }
 "#;
         let once = format_source(source).expect("lambda interface should format");
         assert!(
-            once.contains("(n: Int) Int LambdaError! -[]>") && !once.contains("(n: Int) ->"),
+            once.contains("(n: Int) -[]>") && !once.contains("(n: Int) Int"),
             "lambda interface was lost or respelled incorrectly:\n{once}"
         );
         assert_eq!(
@@ -2638,9 +2638,9 @@ fn run() {
 
     #[test]
     fn failure_formatter_keeps_prefix_and_contextual_roles() {
-        let source = r#"fn load() -> Int? IOError! -> read()?(
+        let source = r#"fn load() -> Int? IOError! { read()?(
     "loading"
-)
+) }
 "#;
         let once = format_source(source).expect("failure syntax should format");
         assert!(once.contains("fn load() -> Int? IOError!"), "{once}");
@@ -2650,7 +2650,7 @@ fn run() {
             format_source(&once).expect("failure fmt should be stable")
         );
 
-        let source = "fn load() -> Int IOError! -> read()\n";
+        let source = "fn load() -> Int IOError! { read() }\n";
         let (tokens, lex_diagnostics) = crate::Lexer::lex(source);
         assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
         let mut program = crate::Parser::parse_for_fmt(&tokens).expect("source should parse");
@@ -2673,7 +2673,7 @@ fn run() {
             None,
         );
         let formatted = format_program(&program, source, &[]);
-        assert!(formatted.contains("-> read()"), "{formatted}");
+        assert!(formatted.contains("{ read() }"), "{formatted}");
         assert!(!formatted.contains("read()?"), "{formatted}");
         assert_eq!(
             formatted,

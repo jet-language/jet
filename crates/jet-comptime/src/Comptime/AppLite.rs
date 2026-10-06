@@ -51,7 +51,7 @@ mod web_kernel {
         };
         use jet_foundation::Outcome::{
             jet_render_runtime_stop, jet_stream_take_failure_report, JetRuntimeDiagnostic,
-            JetTaskFailure,
+            JetTaskFailure, JetStreamFailure,
         };
 
         pub(crate) fn jet_runtime_stop_with_context(
@@ -1008,8 +1008,6 @@ fn opaque_web<T: std::any::Any + Send + Sync>(value: T) -> CtValue {
         lambda: Lambda {
             take_names: Vec::new(),
             params: Vec::new(),
-            result_type: None,
-            error_type: None,
             effects: None,
             body: LambdaBody::Block(Vec::new()),
             span: Span::new(0, 0),

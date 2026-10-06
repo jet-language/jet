@@ -476,7 +476,7 @@ fn run() {
     print(sys.expand("$HOME") == home)
     print(sys.expand("${{HOME}}") == home)
     print(sys.expand("%HOME%") == home)
-    print(sys.expand("λ<$HOME>🌍") == "λ<{home}>🌍")
+    print(sys.expand("λ<$HOME>🌍") == ("λ<{home}>🌍"))
     print(sys.expand("$$HOME") == "$HOME")
 }
 "#,

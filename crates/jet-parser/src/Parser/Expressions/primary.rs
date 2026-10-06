@@ -313,7 +313,10 @@ impl<'a> Parser<'a> {
             // so the header reported "this loop has no body". A lambda in
             // that position writes its parameter list in parentheses.
             TokKind::Ident(_)
-                if allow_struct_lit && Self::at_unified_arrow_token(&self.peek2().kind) =>
+                if allow_struct_lit
+                    && (Self::at_unified_arrow_token(&self.peek2().kind)
+                        || (matches!(self.peek2().kind, TokKind::Minus)
+                            && matches!(self.toks.get(self.pos + 2).map(|t| &t.kind), Some(TokKind::LBracket)))) =>
             {
                 Ok(Expr::Lambda(Box::new(self.parse_bare_lambda()?)))
             }
@@ -893,8 +896,6 @@ impl<'a> Parser<'a> {
                 let lambda = Lambda {
                     take_names: Vec::new(),
                     params: Vec::new(),
-                    result_type: None,
-                    error_type: None,
                     effects: None,
                     body,
                     span: body_span,
@@ -1027,8 +1028,6 @@ impl<'a> Parser<'a> {
         let lambda = Lambda {
             take_names,
             params: Vec::new(),
-            result_type: None,
-            error_type: None,
             effects: None,
             body,
             span: body_span,

@@ -82,13 +82,35 @@ fn __jet_bootstrap_source_physical_path(
         format!("{}/{display}", root.canonical_path)
     }
 }
+/// SHA-256 revision of a diagnostic origin's source text, hashed once per
+/// distinct source: diagnostics of one file all carry the same text, and
+/// hashing it again per diagnostic made revision checks the largest part of
+/// result decoding. A cached revision is reused only for byte-identical text
+/// (compared in full), so the check still binds every origin to its bytes.
+fn __jet_bootstrap_source_revision(path: &str, source: &str) -> String {
+    thread_local! {
+        static REVISIONS: ::std::cell::RefCell<::std::collections::HashMap<String, (String, String)>> =
+            ::std::cell::RefCell::new(::std::collections::HashMap::new());
+    }
+    REVISIONS.with(|revisions| {
+        let mut revisions = revisions.borrow_mut();
+        if let Some((text, revision)) = revisions.get(path) {
+            if text == source {
+                return revision.clone();
+            }
+        }
+        let revision = ::jet_foundation::SHA256::sha256_hex(source.as_bytes());
+        revisions.insert(path.to_string(), (source.to_string(), revision.clone()));
+        revision
+    })
+}
 fn __jet_bootstrap_validate_origin(
     value: &::jet_foundation::Diagnostics::DiagnosticOrigin,
     source_path: Option<&String>,
     generated_source_files: &[@t.MIRSourceFile@],
     snapshot: &crate::compiler_bootstrap_host::AuthorizedSourceSnapshot,
 ) -> Result<bool, String> {
-    let expected_revision = ::jet_foundation::SHA256::sha256_hex(value.source.as_bytes());
+    let expected_revision = __jet_bootstrap_source_revision(&value.path, &value.source);
     if value.revision != expected_revision {
         return Err(format!("diagnostic origin `{}` has a revision that does not match its exact source bytes", value.path));
     }

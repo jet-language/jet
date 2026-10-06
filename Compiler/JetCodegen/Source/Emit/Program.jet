@@ -195,7 +195,8 @@ fn jet_rust_emit_foreign(ctx: &JetRustEmitContext, foreign: MIRForeign) -> [Stri
 fn jet_rust_emit_constant_definition(ctx: &JetRustEmitContext, definition: MIRConstantDef) -> String Never! {
     visibility :: jet_rust_emit_visibility(definition.visibility)
     name :: jet_rust_emit_generated_path(definition.key)
-    ty :: jet_rust_emit_type(&ctx, definition.ty)
+    // A constant's views can only borrow static data (D-MEM-VIEWRET1).
+    ty :: jet_rust_emit_type_with_view_lifetime(&ctx, definition.ty, "'static")
     root :: ~ctx.config.root_prefix
     if jet_rust_emit_shared_constant(jet_rust_emit_is_no_os(&ctx), definition) {
         chunks := [String]{}

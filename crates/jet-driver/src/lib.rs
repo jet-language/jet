@@ -57,6 +57,7 @@ pub mod Formatter;
 pub mod Driver;
 pub mod FixEngine;
 pub mod Foreign;
+pub mod GateWriters;
 pub mod InterpreterBoundary;
 pub mod Loader;
 pub mod ProjectParts;

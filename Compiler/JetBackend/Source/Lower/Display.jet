@@ -145,6 +145,9 @@ fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIR
         lower_fail(&m, &f, "displaying {mir_type_display_name(ty)} without a value is not lowered at O0 yet")
         return None
     }
+    // A Core record renders through its runtime type's own JetDisplay /
+    // JetShow / JetDebug, as generated Rust does (Records.jet).
+    if lower_record_render(p, &m, &f, ty, operand, mode) == .Val(text) -> return Val(text)
     if repr == .Handle(_, _) {
         // A runtime handle renders through its runtime type's own JetDisplay /
         // JetShow (generated jet_rt_handle_display_<T> / jet_rt_handle_show_<T>).
@@ -397,20 +400,7 @@ fn lower_helper_display(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
         lower_render_static(&m, &f, builder, ")")
     } else if lower_type_def(p, glue.ty) == .Val(definition) {
         if definition.kind == .Struct(fields, _) {
-            // The general `Err` displays as its message on every tier
-            // (runtime_host.rs nominal_handle_text, AOT JetShow for JetErr).
-            message := -1
-            if lower_render_name(definition.name) == "Err" {
-                loop (index, field) in fields { if field.name == "message" && field.ty.kind == .String -> message = index }
-            }
-            if message >= 0 {
-                field :: fields[message]
-                info :: lower_struct_field(p, glue.ty, field.id) ?? panic("the Err message field has storage")
-                value :: lower_render_load(p, &f, operand, info.offset, field.ty, info.boxed)
-                lower_render_push(p, &m, &f, builder, field.ty, value, mode)
-            } else {
-                lower_render_record(p, &m, &f, builder, operand, definition.name, fields, definition, glue.ty, false, mode)
-            }
+            lower_render_record(p, &m, &f, builder, operand, definition.name, fields, definition, glue.ty, false, mode)
         } else if definition.kind == .Enum(variants, _) {
             discriminant := operand
             if !lower_enum_is_tag(variants) {

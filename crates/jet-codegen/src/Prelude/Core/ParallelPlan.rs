@@ -1503,14 +1503,16 @@ impl JetParallelPlan {
         while active.len() > 1 {
             let mut next = Vec::with_capacity(active.len().div_ceil(2));
             let mut cursor = 0;
-            let left = active[cursor];
-            if let Some(&right) = active.get(cursor + 1) {
-                pairs.push((left, right));
-                next.push(left);
-                cursor += 2;
-            } else {
-                next.push(left);
-                cursor += 1;
+            while cursor < active.len() {
+                let left = active[cursor];
+                if let Some(&right) = active.get(cursor + 1) {
+                    pairs.push((left, right));
+                    next.push(left);
+                    cursor += 2;
+                } else {
+                    next.push(left);
+                    cursor += 1;
+                }
             }
             active = next;
         }
@@ -1956,6 +1958,27 @@ mod parallel_plan_tests {
         )
         .unwrap();
         assert_eq!(plan.merge_tree(), vec![(0, 1)]);
+    }
+
+    #[test]
+    fn merge_tree_pairs_every_adjacent_chunk_per_level() {
+        let proof = JetParallelProof::new(
+            JetParallelIterationDomain::from_len(5 * JET_PARALLEL_DEFAULT_CHUNK_ITEMS),
+            vec![JetParallelAccessFact::read("input")],
+            vec![JetParallelEffectFact::reduction("sum")],
+            Vec::new(),
+            Some(JetParallelReductionFact::proven("sum")),
+        );
+        let plan = JetParallelPlan::select_explicit(
+            JetParallelOperation::Fold,
+            proof,
+            JetParallelResourceBounds::explicit(5, 5),
+        )
+        .unwrap();
+        assert_eq!(plan.chunk_count(), 5);
+        // Level one pairs (0,1) and (2,3) and carries 4; level two pairs
+        // (0,2); level three pairs (0,4): n - 1 merges, odd tail carried.
+        assert_eq!(plan.merge_tree(), vec![(0, 1), (2, 3), (0, 2), (0, 4)]);
     }
 
     #[test]

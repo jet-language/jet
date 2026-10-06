@@ -117,7 +117,7 @@ struct Pair {
     a: Int
     b: Int
 }
-fn align(left: D, right: D) -> Pair -> Pair{a: left.value, b: right.value}
+fn align(left: D, right: D) -> Pair { Pair{a: left.value, b: right.value} }
 impl D.Add {
     fn add(self, rhs: D) -> D {
         pair :: align(self, rhs)
@@ -513,7 +513,7 @@ fn list_bounds_stop_keeps_registered_code_across_tiers() {
         ),
     ] {
         let source = format!(
-            "fn pick(values: [Int], index: Int) -> Int -> values[index]\n{body}"
+            "fn pick(values: [Int], index: Int) -> Int {{ values[index] }}\n{body}"
         );
         let files = [("main.jet", source.as_str())];
         for run in [

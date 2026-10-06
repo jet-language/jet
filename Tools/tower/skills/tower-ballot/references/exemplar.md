@@ -1,8 +1,9 @@
 # Complete ballot exemplar
 
-This is a submit-ready shape, not a copyable decision. Replace every fact with
-current card evidence. The recommended option is `A` and appears first in both
-option lists; `whyNot` covers the losing option `B`.
+This illustrates the JSON shape, not a copyable or ready decision. Replace every
+fact, research finding, and reader identity with real evidence before submission.
+The recommended option is `A` first; `whyNot` covers `B`. Apply the
+[clarity rules](clarity.md), including research before drafting.
 
 ```json
 {
@@ -28,22 +29,22 @@ option lists; `whyNot` covers the losing option `B`.
     "options": [
       {
         "key": "A",
-        "name": "TTL per entry",
+        "name": "Price timer",
         "gist": "Expire each price after a bounded time.",
         "gains": ["Works without changing every writer."],
         "losses": ["A price can stay stale until its timer expires."],
         "proposed": {
-          "code": "price = cache.get(\"price\", ttl: 300)"
+          "code": "// Before\nprice = cache.get(\"price\")\n// After: refresh after five minutes\nprice = cache.get(\"price\", ttl: 300)"
         }
       },
       {
         "key": "B",
-        "name": "Event-driven purge",
-        "gist": "Purge a price whenever its source changes.",
+        "name": "Change notices",
+        "gist": "Clear a saved price whenever its source changes.",
         "gains": ["A changed price reaches readers quickly."],
         "losses": ["Every writer must publish a correct purge event."],
         "proposed": {
-          "code": "price = cache.get(\"price\")\nsource.on_change { cache.purge(\"price\") }"
+          "code": "// Before\nprice = cache.get(\"price\")\n// After\nprice = cache.get(\"price\")\nsource.on_change { cache.purge(\"price\") }"
         }
       }
     ],
@@ -63,10 +64,10 @@ option lists; `whyNot` covers the losing option `B`.
           "reason": "B refreshes sooner but relies on every writer publishing correctly."
         }
       ],
-      "tradeoff": "The service accepts bounded staleness to avoid a required event path."
+      "tradeoff": "Display prices may lag briefly; payment always checks the current price."
     }
   },
-  "situation": "A cache is a saved copy of a slow answer, like writing down a phone number instead of looking it up each time. Today the pricing service saves prices with no rule for when a saved price is too old. For example, a vendor raises a rate at 9am, and customers still see the old price at noon. That costs money and trust, and a beginner cannot tell why the page is wrong. You are deciding how saved prices expire. We recommend giving each saved price a short timer, because it works without changing every writer.",
+  "situation": "A saved price makes a shopping page faster because it avoids asking the seller again on each visit. Today that saved price never expires, so a seller's morning price change can still be missing at noon. Customers may see a wrong price and lose trust in the shop. The vote decides when saved prices refresh; we recommend a short timer, with payment always checking the seller's current price.",
   "gist": "How should cached prices expire?",
   "lesson": "A cache keeps a reusable copy of expensive work. This choice sets how old a price may become and how quickly a new price reaches customers.",
   "story": "Dana ships a pricing page. A vendor changes a rate at 9am, and customers must see a safe result without a hidden invalidation path.",
@@ -74,14 +75,14 @@ option lists; `whyNot` covers the losing option `B`.
   "options": [
     {
       "key": "A",
-      "name": "TTL per entry",
+      "name": "Price timer",
       "detail": "Expire each price after a bounded time. It works without changing every writer, but a price may stay stale until the timer expires.",
       "technical": "The cache stores an expiry timestamp with each entry and rejects entries past that timestamp.",
       "code": "price = cache.get(\"price\", ttl: 300)"
     },
     {
       "key": "B",
-      "name": "Event-driven purge",
+      "name": "Change notices",
       "detail": "Purge a price whenever its source changes. It reaches readers quickly, but every writer must publish a correct purge event.",
       "technical": "Each source mutation emits a named event that invalidates matching cache keys.",
       "code": "price = cache.get(\"price\")\nsource.on_change { cache.purge(\"price\") }"
@@ -110,7 +111,7 @@ option lists; `whyNot` covers the losing option `B`.
         "reason": "B refreshes sooner but relies on every writer publishing correctly."
       }
     ],
-    "tradeoff": "The service accepts bounded staleness to avoid a required event path."
+    "tradeoff": "Display prices may lag briefly; payment always checks the current price."
   },
   "reviewPasses": {
     "beginner": "Fresh agent: reader-17. Skill: rli5. The beginner pass tested the complete ballot and found one undefined term; the lesson was repaired.",

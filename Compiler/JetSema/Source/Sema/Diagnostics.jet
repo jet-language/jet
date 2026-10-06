@@ -343,6 +343,10 @@ fn sema_return_value_fix(want: Type, got: Type) -> String Never! {
 // E0113: a value handed back by `function` does not match its written
 // return type `want`.
 pub fn sema_return_value_mismatch(function: String, want: Type, got: Type, span: Span) -> Diagnostic {
-    want_name :: type_name(want)
-    sema_error("E0113", span, "this value is {sema_type_show(got)}, but `{function}` returns {want_name}", "`{function}` declares {want_name} as its result, so the value it hands back must be {want_name}", sema_return_value_fix(want, got))
+    // The failure solver wraps even a written infallible result in
+    // `T Never!`. That erased error rail is not part of the value contract,
+    // and must not hide the concrete conversion/wrapping advice for T.
+    required :: if want == .Result(success, error) && sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) -> success else -> want
+    want_name :: type_name(required)
+    sema_error("E0113", span, "this value is {sema_type_show(got)}, but `{function}` returns {want_name}", "`{function}` declares {want_name} as its result, so the value it hands back must be {want_name}", sema_return_value_fix(required, got))
 }

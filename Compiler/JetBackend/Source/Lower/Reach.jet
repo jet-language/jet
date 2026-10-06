@@ -125,6 +125,7 @@ fn lower_reach_operation(p: MIRProgram, q: &LowerPrepared, function: MIRFunction
         .Call(callee, args, type_args) -> {
             loop arg in args -> lower_reach_arg(&q, arg, parent)
             lower_reach_callee(p, &q, callee, type_args, parent, site)
+            if callee == .Prelude(call) -> lower_lazy_reach_call(p, &q, function, facts, call, args, parent)
         }
         .IndirectCall(_, args, type_args) -> {
             loop ty in type_args -> lower_mono_intern_type(&q, ty, parent)
@@ -141,9 +142,10 @@ fn lower_reach_operation(p: MIRProgram, q: &LowerPrepared, function: MIRFunction
             lower_reach_constant(&q, p.constants[row].value, parent)
         }
         .PtrFromAddr(_, element) -> lower_mono_intern_type(&q, element, parent)
-        .CoreCall(_, _, args, type_args, fallibility, plan) -> {
+        .CoreCall(_, route, args, type_args, fallibility, plan) -> {
             loop ty in type_args -> lower_mono_intern_type(&q, ty, parent)
             loop arg in args -> lower_reach_arg(&q, arg, parent)
+            lower_lazy_reach_call(p, &q, function, facts, route, args, parent)
             lower_reach_fallibility(&q, fallibility, parent)
             if plan == .Val(data) {
                 loop node in data.logical {
@@ -177,12 +179,17 @@ fn lower_reach_semantic(p: MIRProgram, q: &LowerPrepared, function: MIRFunction,
         .BuiltinMethod(call, receiver, _, _, _) -> {
             // `list.join` shows every element (Lists.jet lower_helper_list_join).
             if lower_prelude_row(p, call) == .Val(row) {
-                if row.member == "join" -> lower_reach_render_value(&q, function, facts, receiver, true, parent)
+                if lower_runtime_symbol(row) == "jet_iter_join" {
+                    lower_lazy_reach_value(&q, function, facts, receiver, parent)
+                } else if row.member == "join" {
+                    lower_reach_render_value(&q, function, facts, receiver, true, parent)
+                }
             }
         }
         .CCallback(_, callback, _) -> lower_reach_callback(p, &q, callback.value, parent, site)
-        .StaticPreludeCall(_, args, owners, types) -> {
+        .StaticPreludeCall(call, args, owners, types) -> {
             loop arg in args -> lower_reach_arg(&q, arg, parent)
+            lower_lazy_reach_call(p, &q, function, facts, call, args, parent)
             loop owner in owners {
                 if owner == .Type(ty) -> lower_mono_intern_type(&q, ty, parent)
             }

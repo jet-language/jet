@@ -11,9 +11,9 @@
 //!   marker that declares none.
 //! - E0615 — a member statement outside any member-declaring marker block.
 //! - E0616 — `.setup` is not the first statement.
-//! - E0617 — wrong argument shape (`.timeout` needs one duration value; `.setup` /
-//!   `.expect_fail` takes an optional stop code; `.skip` takes an optional reason
-//!   string).
+//! - E0617 — wrong argument shape (`.timeout` needs one duration value; `.setup` takes none;
+//!   `.expect_fail` takes an optional stop code and non-empty literal message;
+//!   `.skip` takes an optional reason string).
 //! - E0618 — a member nested inside another member or a control block (they must
 //!   stay flat, at the top level of the marker body).
 //!
@@ -741,19 +741,30 @@ fn validate_args(
             }
         }
         n if n == Syntax::SCOPE_TEST_EXPECT_FAIL => {
-            let ok = args.is_empty()
-                || (args.len() == 1
-                    && matches!(
-                        &args[0],
-                        Expr::Ident(code, _) if code.starts_with("E30")
-                            && jet_foundation::Registry::diagnostic(code).is_some()
-                    ));
+            let mut code_seen = false;
+            let mut message_seen = false;
+            let ok = args.len() <= 2 && args.iter().all(|arg| match arg {
+                Expr::Ident(code, _) if !code_seen && !message_seen
+                    && code.starts_with("E30")
+                    && jet_foundation::Registry::diagnostic(code).is_some() => {
+                        code_seen = true;
+                        true
+                    }
+                Expr::TupleLit(fields, ..) if !message_seen && fields.len() == 1
+                    && fields[0].0 == Syntax::SCOPE_TEST_EXPECT_MESSAGE => {
+                        message_seen = true;
+                        matches!(&fields[0].1, Expr::Str(parts, _)
+                            if !parts.is_empty() && parts.iter().all(|part| matches!(part, crate::AST::StrPart::Lit(_)))
+                                && parts.iter().any(|part| matches!(part, crate::AST::StrPart::Lit(text) if !text.is_empty())))
+                    }
+                _ => false,
+            });
             if !ok {
                 diags.push(Diagnostic::error(
                     "E0617",
-                    "`.expect_fail` takes one optional runtime stop code".to_string(),
-                    "the code names the E30xx stop the region must produce".to_string(),
-                    "write `.expect_fail { … }` or `.expect_fail(E3010) { … }`".to_string(),
+                    "`.expect_fail` takes an optional runtime stop code and `message: \"text\"`".to_string(),
+                    "the code names a registered E30xx stop; the message is a non-empty string literal matched as a case-sensitive substring".to_string(),
+                    "write `.expect_fail { … }`, `.expect_fail(E3010) { … }`, or `.expect_fail(E3001, message: \"reason\") { … }`".to_string(),
                     Some(at),
                 ));
             }

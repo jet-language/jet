@@ -503,6 +503,9 @@ pub(crate) fn resolve_static_rule_products(
     let mut static_strings = Vec::new();
     for application in &facts {
         let marker = &application.marker;
+        if marker.name == Syntax::MARKER_ALLOW && marker.expr_arg(1).is_none() {
+            diags.push(Diagnostic::from_row("L3103", &[], Some(marker.span)));
+        }
         if crate::Policy::applied_rule(&marker.name).is_none() {
             continue;
         }

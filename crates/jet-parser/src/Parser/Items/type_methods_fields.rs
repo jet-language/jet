@@ -16,7 +16,7 @@ impl<'a> Parser<'a> {
         self.reject_root_method_params(&params);
         let (
             mut return_type,
-            _return_type_span,
+            return_type_span,
             mut declared_effects,
             _effect_via,
             _prefix_effect_span,
@@ -36,14 +36,39 @@ impl<'a> Parser<'a> {
         }
         let declared_return_view_provenance = self.parse_opt_declared_view_from(&params);
         if declared_effects.is_none() {
+            // D-SIG-AFTER1=A (card #4512): `-> T -[E]>` writes two arrows.
+            if return_type_span.is_some_and(|span| {
+                matches!(self.peek().kind, TokKind::Minus)
+                    && matches!(self.peek2().kind, TokKind::LBracket)
+                    && self.toks[..self.pos]
+                        .iter()
+                        .rev()
+                        .find(|token| token.span.end <= span.start)
+                        .is_some_and(|token| matches!(token.kind, TokKind::UnifiedArrow))
+            }) {
+                self.diags
+                    .push(Self::retired_signature_shape(self.peek().span));
+            }
             declared_effects = self.parse_opt_effect_annotation()?;
         }
         let is_pure = is_pure
             || declared_effects
                 .as_ref()
                 .is_some_and(|effects| effects.is_empty());
-        if self.at_unified_arrow() {
-            self.bump();
+        // D-SIG-AFTER1=A (card #4512): a default body sits in braces right
+        // after the result. A body `->` is E0080 and recovers to the body.
+        let body_arrow = self.at_unified_arrow().then(|| self.bump().span);
+        if let Some(arrow) = body_arrow {
+            if matches!(self.peek().kind, TokKind::LBrace) {
+                let brace = self.peek().span;
+                self.diags.push(Self::arrow_function_body(
+                    arrow,
+                    Some(crate::Diagnostics::TextEdit {
+                        span: Span::new(arrow.start, brace.start),
+                        new_text: String::new(),
+                    }),
+                ));
+            }
         }
         let default_body = if matches!(self.peek().kind, TokKind::LBrace) {
             self.bump();
@@ -60,10 +85,23 @@ impl<'a> Parser<'a> {
             self.callable_tail_block_depth = previous_tail_depth;
             self.callable_tail_expects_value = previous_tail_value;
             Some(stmts)
-        } else {
-            let end = self.peek().span.end;
+        } else if let Some(arrow) = body_arrow {
+            let expr = self.expr()?;
+            let expr_start = expr.span().start;
+            let expr_end = self.toks[self.pos.saturating_sub(1)].span.end;
+            let edit = self
+                .source
+                .as_deref()
+                .and_then(|source| source.get(expr_start..expr_end))
+                .map(|text| crate::Diagnostics::TextEdit {
+                    span: Span::new(arrow.start, expr_end),
+                    new_text: format!("{{ {text} }}"),
+                });
+            self.diags.push(Self::arrow_function_body(arrow, edit));
             self.finish_stmt()?;
-            let _ = end;
+            Some(vec![crate::AST::Stmt::Expr(expr)])
+        } else {
+            self.finish_stmt()?;
             None
         };
         let end = self.peek().span.end;

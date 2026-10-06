@@ -287,17 +287,10 @@ fn finish_workspace_load(
     match result {
         Ok(plan) => match WorkspaceLock::write(dir, &plan) {
             Ok(()) => Some(Ok(plan)),
-            Err(error) => {
-                let lock_path = dir.join(Syntax::UNIFIED_LOCK_FILE);
-                let diagnostic =
-                    crate::Lock::e1202_workspace_write(&lock_path.display().to_string(), &error);
+            Err(diagnostics) => {
                 eprint!(
                     "{}",
-                    crate::Diagnostics::render_all(
-                        Syntax::WORKSPACE_FILE,
-                        "",
-                        std::slice::from_ref(&diagnostic),
-                    )
+                    crate::Diagnostics::render_all(Syntax::WORKSPACE_FILE, "", &diagnostics)
                 );
                 Some(Err(2))
             }

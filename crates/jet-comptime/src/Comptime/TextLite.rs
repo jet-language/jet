@@ -663,8 +663,6 @@ fn opaque_file<T: std::any::Any + Send + Sync>(value: T) -> crate::AST::CtValue 
         lambda: crate::AST::Lambda {
             take_names: Vec::new(),
             params: Vec::new(),
-            result_type: None,
-            error_type: None,
             effects: None,
             body: crate::AST::LambdaBody::Block(Vec::new()),
             span: crate::Diagnostics::Span::new(0, 0),

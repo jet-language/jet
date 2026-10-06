@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Command-frequency census for `jet help` (#3724).
 //
-// For every command row in Compiler/JetCli/Source/Cli/Commands.jet, counts the files in
+// For every command row in Compiler/JetFoundation/Source/Registry/CLICommands.jet, counts the files in
 // the repository's teaching and test text (Docs/, Examples/, tests/, Tools/;
 // tracked plus untracked files that git does not ignore) that invoke
 // `jet <command>`. A file counts once per command, so one generated evidence
@@ -11,7 +11,7 @@
 // alphabetically.
 //
 // usage: node Tools/cli-census/census.mjs [--check]
-//   (no flag)  rewrite the ranks in Commands.jet and its frozen CLI.rs copy, print the ranking
+//   (no flag) rewrite the ranks in the shared Jet and Rust command registries
 //   --check    print the ranking; exit 1 when either table holds different ranks
 //
 // Output is deterministic: files are read in sorted order and the ranking is
@@ -33,13 +33,13 @@ const EXCLUDED_PREFIXES = ["Tools/tower/.tower/", "Tools/cli-census/", "tests/cl
 // equal, so both carry the same ranks.
 const TABLES = [
   {
-    path: join(ROOT, "Compiler/JetCli/Source/Cli/Commands.jet"),
+    path: join(ROOT, "Compiler/JetFoundation/Source/Registry/CLICommands.jet"),
     open: "pub JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{\n",
     close: "\n} }\n",
     rowPattern: /^ {4}JetCLICommandSpec\{\n[\s\S]*?^ {4}\},?$/gm,
   },
   {
-    path: join(ROOT, "crates/jet-cli/src/CLI.rs"),
+    path: join(ROOT, "crates/jet-foundation/src/CLICommands.rs"),
     open: "pub const COMMANDS: &[CommandSpec] = &[\n",
     close: "\n];\n",
     rowPattern: /^ {4}CommandSpec \{\n[\s\S]*?^ {4}\},?$/gm,

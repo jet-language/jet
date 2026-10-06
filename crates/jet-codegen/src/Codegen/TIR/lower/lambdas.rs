@@ -235,22 +235,6 @@ pub(crate) fn lower_lambda_expecting_host_borrow_with_return(
     )
 }
 
-/// D-FAILURE-FOUNDATION1: mirror sema's implicit `Error` carrier for a lambda
-/// that writes a success/error annotation. The AST keeps those two source
-/// slots separate, while the lowered callable must expose one Rust carrier.
-pub(crate) fn lambda_explicit_failure_carrier(lam: &Lambda) -> Option<Type> {
-    if lam.result_type.is_none() && lam.error_type.is_none() {
-        return None;
-    }
-    Some(Type::Result {
-        ok: Box::new(lam.result_type.clone().unwrap_or_else(unit_type)),
-        err: Box::new(
-            lam.error_type
-                .clone()
-                .unwrap_or_else(|| Type::Named(crate::Syntax::TYPE_ERR.to_string())),
-        ),
-    })
-}
 
 fn is_default_error_type(ty: &Type) -> bool {
     matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_ERR)
@@ -345,9 +329,7 @@ fn lower_lambda_expecting_with_host_borrow(
     // carrier is its own body result plus the callback slot's failure type; inheriting
     // the enclosing function's success type would erase a callback tail such as `true`
     // to `Unit`.
-    let explicit_failure_carrier = lambda_explicit_failure_carrier(lam);
     let lambda_ret_ty = expected_return
-        .or(explicit_failure_carrier.as_ref())
         .or(lam.meta.fallible_carrier.as_ref())
         .map(|ret| lambda_carrier_return_type(&body_ty, ret))
         .unwrap_or_else(|| body_ty.clone());
@@ -355,7 +337,6 @@ fn lower_lambda_expecting_with_host_borrow(
     // outer error carrier while lowering `??`, but it never escapes that call.
     let direct_fallible = expected_return.is_none()
         && lam.meta.fallible_carrier.is_none()
-        && explicit_failure_carrier.is_none()
         && env
             .ret_ty
             .as_ref()
@@ -603,10 +584,7 @@ fn lower_lambda_expecting_with_host_borrow(
             // default is for standalone Jet callables and would leave a
             // host `Fn() -> Unit` with a Result carrier and no return slot.
             crate::Codegen::TIR::TFailureCarrier::from_checked_type(&lambda_ret_ty)
-        } else if lam.result_type.is_some()
-            || lam.error_type.is_some()
-            || lam.meta.fallible_carrier.is_some()
-        {
+        } else if lam.meta.fallible_carrier.is_some() {
             match crate::Codegen::TIR::lambda_failure_carrier(lam) {
                 crate::Codegen::TIR::TFailureCarrier::Infallible => {
                     crate::Codegen::TIR::TFailureCarrier::from_checked_type(&body_ty)
@@ -646,9 +624,7 @@ fn fallible_lambda_value(
     _env: &LowerEnv,
     expected_return: Option<&Type>,
 ) -> TExpr {
-    let explicit_failure_carrier = lambda_explicit_failure_carrier(lam);
     let carrier = expected_return
-        .or(explicit_failure_carrier.as_ref())
         .or(lam.meta.fallible_carrier.as_ref());
     if carrier.is_none() {
         return value;

@@ -67,6 +67,7 @@ use jet_foundation.[
     ViewSourceProjection,
     ast_binding,
     ast_empty_lambda_meta,
+    diagnostic_registry_row,
     expr_span,
     measure_literal_value,
     symbol_id,
@@ -2476,6 +2477,9 @@ fn sema_stmt_check_refutable_binding(binding: Binding, pattern: Pattern, fallbac
     checked_pattern_tir := checked_pattern.checked
     loop name in names {
         fact := sema_stmt_refutable_capture_fact(checked_pattern.bindings, name)
+        // A refused hole has no binding fact; recovery must leave its
+        // existing value visible rather than declaring it a second time.
+        if fact == None && (if pattern == {.StrMatch(_, _) | .BinMatch(_, _) -> true else -> false}) && !sema_pattern_hole_name_available(name.name, scopes) -> next
         ty := if fact == {.Val(value) -> value.ty else -> Type.Int}
         local := sema_stmt_destructure_local(name, ty, binding.mutable, environment, &scopes, &state, &diagnostics)
         if local == None -> next
@@ -3653,8 +3657,6 @@ fn sema_stmt_check_reactive(body: [Stmt], span: Span, environment: SemaScopeEnvi
     lambda := Lambda{
         take_names: [NamedSpan]{},
         params: [LambdaParam]{},
-        result_type: Val(Type.Named{name: "Unit"}),
-        error_type: None,
         effects: None,
         body: LambdaBody.Block{body: closure_body},
         span: span,
@@ -3662,7 +3664,7 @@ fn sema_stmt_check_reactive(body: [Stmt], span: Span, environment: SemaScopeEnvi
     }
     previous_escapes := context.lambda_escapes
     context.lambda_escapes = Val(true)
-    checked := sema_expression_lambda(lambda, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    checked := sema_expression_lambda(lambda, Val(Type.Fn{params: [Type]{}, ret: Val(Type.Named{name: "Unit"}), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}), environment, &scopes, &state, &tail_store, &context, &diagnostics)
     context.lambda_escapes = previous_escapes
     if forbidden -> return None
     expression :: checked ?? return None
@@ -3702,15 +3704,45 @@ fn sema_stmt_check_scope_member(name: String, args: [Expr], args_span: Span?, bo
             }
         }
         "expect_fail" -> {
-            if args.len() == {
-                0 -> kind = Val(TScopeMemberKind.ExpectFail{code: None})
-                1 -> {
-                    if args[0] == {
-                        .Ident(code, _) -> kind = Val(TScopeMemberKind.ExpectFail{code: Val(code)})
-                        else -> {}
+            code := String?{None}
+            message := String?{None}
+            valid := args.len() <= 2
+            loop argument in args {
+                if argument == {
+                    .Ident(value, _) -> {
+                        if code != None || message != None || !value.starts_with("E30") || diagnostic_registry_row(value) == None -> valid = false
+                        code = Val(value)
                     }
+                    .TupleLit(fields, _, _) -> {
+                        if message != None || fields.len() != 1 {
+                            valid = false
+                            next
+                        }
+                        if fields[0].name != "message" {
+                            valid = false
+                            next
+                        }
+                        if fields[0].value == {
+                            .Str(parts, _) -> {
+                                text := ""
+                                loop part in parts {
+                                    if part == {
+                                        .Lit(value) -> text = "{text}{value}"
+                                        else -> valid = false
+                                    }
+                                }
+                                if text.len() == 0 -> valid = false
+                                message = Val(text)
+                            }
+                            else -> valid = false
+                        }
+                    }
+                    else -> valid = false
                 }
-                else -> {}
+            }
+            if {
+                valid -> kind = Val(TScopeMemberKind.ExpectFail{code: code, message: message})
+                else -> &diagnostics.push(sema_error("E0617", args_span ?? span, "`.expect_fail` takes an optional runtime stop code and `message: \"text\"`", "the code names a registered E30xx stop; the message is a non-empty string literal matched as a case-sensitive substring", "write `.expect_fail {{ … }}`, `.expect_fail(E3010) {{ … }}`, or `.expect_fail(E3001, message: \"reason\") {{ … }}`"))
             }
         }
         "timeout" -> {
@@ -4099,13 +4131,19 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
         .Ident(_, _) -> true
         else -> false
     }
-    string_view_return := sema_stmt_string_view_type(checked.ty) && (value_is_ident || sema_string_view_call_sources(value, scopes, &state).len() > 0)
-    // Rust keeps checking the move after a refused `View<str>` source (E0120).
-    view_valid := if string_view_return -> sema_string_view_record_return(value, scopes, &state, &context, &diagnostics) else -> sema_stmt_record_return_views(value, checked.ty, scopes, &state, &context, &diagnostics)
+    // Classify the value, not the enclosing Result/Option rail. The failure
+    // solver also wraps an infallible view return in `View<str> Never!`.
+    returned_success :: sema_stmt_return_success_type(Val(checked.ty))
+    string_view_return := sema_stmt_string_view_type(returned_success) && (value_is_ident || sema_string_view_call_sources(value, scopes, &state).len() > 0)
+    materialized_string_view :: sema_string_view_owning_read(value, returned_success, scopes)
+    // An owning materialization returns new storage, not the source window's
+    // provenance. A view return must instead prove its original owner.
+    view_valid := materialized_string_view || if string_view_return -> sema_string_view_record_return(value, scopes, &state, &context, &diagnostics) else -> sema_stmt_record_return_views(value, checked.ty, scopes, &state, &context, &diagnostics)
     // A named `View<T>` boundary reads every bare place through a window
     // (Rust wraps it before the audit), so only other returns are audited.
     if return_type != None && !sema_stmt_return_is_view_boundary(return_type) -> sema_copy_site_check_borrowed_return(value, environment, scopes, context, &diagnostics)
-    moved := (!string_view_return && !view_valid) || sema_stmt_move_direct(value, &state, scopes, "`return`", &diagnostics)
+    // Neither a returned window nor its owning copy moves the window's owner.
+    moved := materialized_string_view || string_view_return || (!view_valid) || sema_stmt_move_direct(value, &state, scopes, "`return`", &diagnostics)
     if !view_valid || !moved -> return None
     Val(checked)
 }
@@ -4287,27 +4325,35 @@ fn sema_stmt_lost_tail_diagnostic(function: String, value_type: String, span: Sp
     sema_error("E0433", span, "this {value_type} value is thrown away", "`{function}` has no return type, so it returns nothing and the value of its last line is lost", "if `{function}` should return it, write `-> {value_type}` after its parameter list; to discard it on purpose, write `.drop(\"reason\")`")
 }
 
-// A statement call under an automatic or written `?` still carries a
-// failure unless its callee's contract is `T Never!` (D-DISCARD1=A): declared,
-// or projected onto a callee the #3708 failure solve proved infallible
-// (`sema_failure_project_infallible`) before the bundle's final check.
-fn sema_stmt_discarded_call(checked: TExpr) -> TExpr? Never! {
+// The call a statement drops, under an automatic or written `?` or bare, and
+// whether its checked carrier is `T Never!`. Under `?` the call still carries
+// a failure unless its callee's contract is `T Never!` (D-DISCARD1=A):
+// declared, or projected onto a callee the #3708 failure solve proves
+// infallible after this one check (`sema_failure_reconcile_infallible`).
+struct SemaStmtDiscardedCall {
+    call: TExpr
+    infallible: Bool
+}
+
+fn sema_stmt_discarded_call(checked: TExpr) -> SemaStmtDiscardedCall? Never! {
     inner := checked
     if checked.kind == {
         .Try(value, _, _) -> inner = value
         .TryWithContext(value, _, _, _, _, _) -> inner = value
-        else -> return Val(checked)
+        else -> return Val(SemaStmtDiscardedCall{call: checked, infallible: true})
     }
-    if sema_expr_unwrap_tag(inner.ty) == .Result(_, error) && sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) -> return Val(inner)
+    if sema_expr_unwrap_tag(inner.ty) == .Result(_, error) -> return Val(SemaStmtDiscardedCall{call: inner, infallible: sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"})})
     None
 }
 
 // E0433 candidate: the statement drops the non-Unit result of a direct,
 // static or method call. Mark the call's fact; the solved effect phase
 // reports it when the callee's row is empty (D-DISCARD1=A: pure means an
-// empty row and nothing passed with `&`).
+// empty row and nothing passed with `&`). A call whose carrier can still fail
+// waits for the failure solve.
 fn sema_stmt_mark_discarded_result(checked: TExpr, fact_start: Int, context: &SemaCheckContext) Never! {
-    call :: sema_stmt_discarded_call(checked) ?? return
+    discarded :: sema_stmt_discarded_call(checked) ?? return
+    call :: discarded.call
     callee_key :: if call.kind == {
         .Call(callee, _, args) -> if sema_stmt_discard_args_effectful(args) -> "" else -> callee.key
         .StaticCall(_, _, method, _, args) -> if sema_stmt_discard_args_effectful(args) -> "" else -> method.symbol.key
@@ -4324,7 +4370,11 @@ fn sema_stmt_mark_discarded_result(checked: TExpr, fact_start: Int, context: &Se
     index := context.call_facts.len() - 1
     loop index >= fact_start {
         if context.call_facts[index].callee == .Val(symbol) && symbol.key == callee_key {
-            context.call_facts[index].discarded = true
+            if discarded.infallible {
+                context.call_facts[index].discarded = true
+            } else {
+                context.call_facts[index].discarded_if_infallible = true
+            }
             return
         }
         index -= 1
@@ -5240,7 +5290,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                 if sema_stmt_refutable_block_exits(body) -> reachable = false
             }
             .ScopeMember(name, _, _, _, body, _, _, _) -> {
-                if name != "skip" && sema_stmt_refutable_block_exits(body) -> reachable = false
+                if name != "skip" && name != "expect_fail" && sema_stmt_refutable_block_exits(body) -> reachable = false
             }
             .Transact(_, _, body, _, _) | .Policy(_, body, _) -> {
                 if sema_stmt_block_has_no_fallthrough(body) -> reachable = false

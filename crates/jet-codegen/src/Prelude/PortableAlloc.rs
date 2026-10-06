@@ -584,8 +584,16 @@ pub fn jet_err_code(error: &JetErr) -> JetOutcome<String, JetAbsent> {
 
 #[inline]
 pub fn jet_err_cause(error: &JetErr) -> JetOutcome<JetErr, JetAbsent> {
-    error
-        .cause
+    jet_err_cause_projection(&error.cause)
+}
+
+// Physical cause slots may be read through a checked place projection.
+// Keep boxing hidden there, just as for a whole-Err accessor call.
+#[inline]
+pub fn jet_err_cause_projection(
+    cause: &JetOutcome<Box<JetErr>, JetAbsent>,
+) -> JetOutcome<JetErr, JetAbsent> {
+    cause
         .as_ref()
         .map(|cause| (**cause).clone())
         .map_err(|_| JetAbsent)

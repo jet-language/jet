@@ -1657,7 +1657,7 @@ fn loader_enforces_import_boundaries_and_warns_on_zero_match() {
             + "boundaries: { deny: [{ from: \"app.ui\", to: \"app.db\" }] }\n"),
     );
     write(&denied, "ui.jet", "use db\nfn run() -[IO]> { }\n");
-    write(&denied, "db.jet", "pub fn value() -> Int -> 1\n");
+    write(&denied, "db.jet", "pub fn value() -> Int { 1 }\n");
     let error = jet::Loader::load_entry(denied.join("ui.jet").to_str().unwrap())
         .expect_err("a denied import edge must fail during loading");
     assert_eq!(first_diag_code(&error), "E0619");
@@ -1696,7 +1696,7 @@ fn loader_records_import_edge_facts_and_erases_boundary_policy_before_codegen() 
         "ui.jet",
         "use db\nfn run() -[IO]> { print(db.value()) }\n",
     );
-    write(&root, "db.jet", "pub fn value() -> Int -> 1\n");
+    write(&root, "db.jet", "pub fn value() -> Int { 1 }\n");
     let entry = root.join("ui.jet");
     let shown = entry.to_str().unwrap();
     let mut bundle = jet::Loader::load_entry(shown).expect("allowed edge must load");
@@ -1809,7 +1809,7 @@ fn denied_import_boundary_fact_reaches_structure_inspection() {
             + "boundaries: { deny: [{ from: \"app.ui\", to: \"app.db\" }] }\n"),
     );
     write(&root, "ui.jet", "use db\nfn run() { }\n");
-    write(&root, "db.jet", "pub fn value() -> Int -> 1\n");
+    write(&root, "db.jet", "pub fn value() -> Int { 1 }\n");
     let entry = root.join("ui.jet");
     let shown = entry.to_str().unwrap();
 
@@ -8419,7 +8419,7 @@ fn pub_package_type_and_field_are_visible_inside_project_scope() {
     let s = Scratch::new("type");
     fs::write(
         s.join("helper.jet"),
-        "pub(package) struct Secret {\n    pub(package) value: String\n}\n\npub fn make() -> Secret -> Secret{ value: \"ok\" }\n",
+        "pub(package) struct Secret {\n    pub(package) value: String\n}\n\npub fn make() -> Secret { Secret{ value: \"ok\" } }\n",
     )
     .unwrap();
     fs::write(

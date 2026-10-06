@@ -92,11 +92,13 @@ use jet_foundation.[
     TNumericOp,
     TOrFallback,
     TPanicLoc,
+    TPreludeArg,
     TPattern,
     TPlace,
     TRangeArm,
     TRequireKind,
     TScopeMemberKind,
+    TStaticOwner,
     TStmt,
     TTraitMethod,
     TTransactionSnapshot,
@@ -110,7 +112,10 @@ use jet_foundation.[
     mir_type_identity_key,
     stable_id,
     symbol_id,
+    tir_expr_children,
     tir_generated_local,
+    tir_pattern_children,
+    tir_stmt_children,
     tir_symbol_local,
     tir_user_local,
     type_identity_key,
@@ -324,8 +329,12 @@ fn jet_codegen_lower_task_group(builder: &JetCodegenBuilder, group: TLocal, limi
     place := jet_codegen_bind_local(&builder, group, group_ty, group.mutable, None, None, false)
     _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: place, value: value})
 
+    // Rust `TStmt::TaskGroup`: the group joins its children through the
+    // Prelude's borrowed `JetTaskGroup::close`, deferred to the scope's exit.
     resource := TExpr{ty: group_ty, kind: TExprKind.Local{local: group}, span: span, integer_bounds: None, cost: None}
-    close := TExpr{ty: Type.Named{name: "Unit"}, kind: TExprKind.Close{value: resource}, span: span, integer_bounds: None, cost: None}
+    close_method := TMethodRef{symbol: symbol_id(SymbolKind.Function, "", "jet_std::JetTaskGroup", "close"), name: "close", mangled: false, trait_owner: None, operator_identity: None}
+    close_arg := TCallArg{value: resource, template_items: [SymbolID]{}, borrow: true, mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+    close := TExpr{ty: Type.Named{name: "Unit"}, kind: TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: true, path: "jet_std::JetTaskGroup", generics: [TPreludeArg]{}}, owner_type: None, method: close_method, type_args: [Type]{}, args: [TCallArg]{close_arg}}, span: span, integer_bounds: None, cost: None}
     group_symbol :: group.symbol_id ?? panic("checked task-group local has no symbol identity")
     thunk := jet_codegen_lower_defer_thunk(&builder, close, group_symbol, scope.value, span)
     jet_codegen_register_deferred_call(&builder, thunk)
@@ -334,9 +343,24 @@ fn jet_codegen_lower_task_group(builder: &JetCodegenBuilder, group: TLocal, limi
     jet_codegen_leave_scope(&builder, scope)
 }
 
-fn jet_codegen_lower_scope_member_body(builder: &JetCodegenBuilder, scope: MIRScopeID, body: [TStmt]) {
+fn jet_codegen_lower_scope_member_body(builder: &JetCodegenBuilder, scope: MIRScopeID, body: [TStmt], span: Span, expect_fail: Bool) {
     jet_codegen_lower_block(&builder, body)
+    exit := jet_codegen_new_block(&builder, span, "scope-member.exit")
+    join := jet_codegen_new_block(&builder, span, "scope-member.join")
+    // Rust lower_scope_member_body: an `.expect_fail` body that ends in an
+    // unconditional stop jumps to its exit after the stop. The stop never
+    // returns, so the jump never runs; it keeps the exit reachable, which is
+    // where a caught stop resumes and which gives the backend's catch match
+    // an arm for the scope.
+    ends_in_stop := false
+    if builder.block_positions.get(builder.current.value) == .Val(at) {
+        if builder.blocks[at].terminator == .Unreachable(reason) -> ends_in_stop = reason == "checked unconditional stop"
+    }
+    if jet_codegen_current_is_open(builder) || (expect_fail && ends_in_stop) -> jet_codegen_terminate(&builder, MIRTerminator.Jump{target: exit})
+    jet_codegen_switch_block(&builder, exit)
     jet_codegen_leave_scope(&builder, scope)
+    if jet_codegen_current_is_open(builder) -> jet_codegen_terminate(&builder, MIRTerminator.Jump{target: join})
+    jet_codegen_switch_block(&builder, join)
 }
 
 fn jet_codegen_lower_scope_member(builder: &JetCodegenBuilder, kind: TScopeMemberKind, body: [TStmt], span: Span) {
@@ -345,23 +369,23 @@ fn jet_codegen_lower_scope_member(builder: &JetCodegenBuilder, kind: TScopeMembe
             jet_codegen_lower_statements(&builder, body)
             return
         }
-        .ExpectFail(expected) -> {
+        .ExpectFail(expected, message) -> {
             scope := jet_codegen_enter_scope(&builder, MIRScopeKind.ScopeMember, span, expected)
-            jet_codegen_attach_scope_member(&builder, scope, MIRTestScopeMember.ExpectFail{expected_code: expected})
-            jet_codegen_lower_scope_member_body(&builder, scope, body)
+            jet_codegen_attach_scope_member(&builder, scope, MIRTestScopeMember.ExpectFail{expected_code: expected, expected_message: message})
+            jet_codegen_lower_scope_member_body(&builder, scope, body, span, true)
             return
         }
         .Timeout(duration) -> {
             value := jet_codegen_lower_expr(&builder, duration)
             scope := jet_codegen_enter_scope(&builder, MIRScopeKind.ScopeMember, span, Val("timeout"))
             jet_codegen_attach_scope_member(&builder, scope, MIRTestScopeMember.Timeout{duration: value})
-            jet_codegen_lower_scope_member_body(&builder, scope, body)
+            jet_codegen_lower_scope_member_body(&builder, scope, body, span, false)
             return
         }
         .Measure -> {
             scope := jet_codegen_enter_scope(&builder, MIRScopeKind.ScopeMember, span, Val("measure"))
             jet_codegen_attach_scope_member(&builder, scope, MIRTestScopeMember.Measure)
-            jet_codegen_lower_scope_member_body(&builder, scope, body)
+            jet_codegen_lower_scope_member_body(&builder, scope, body, span, false)
             return
         }
         .Skip -> {
@@ -2244,12 +2268,15 @@ fn jet_codegen_lower_statement(builder: &JetCodegenBuilder, statement: TStmt) {
                         // below it, or its payload past a diverging `??`)
                         // aliases the place. The parameter cannot change
                         // while the function runs, so the alias reads exactly
-                        // what a copy would hold.
+                        // what a copy would hold. So does one of a place
+                        // whose root its scope leaves alone
+                        // (jet_codegen_stable_element_lets).
                         read_alias := MIRPlaceID?{None}
                         if binds_init_type && !local.mutable && !local.generated && !gc_root_requested {
+                            stable_root :: builder.stable_element_lets.get(jet_codegen_element_let_key(local, span)) == (Val(true))
                             read_alias = if init.kind == {
                                 .OrFallback(subject, fallback, ambient_err) -> jet_codegen_lower_or_fallback_window(&builder, init, subject, fallback, ambient_err)
-                                else -> jet_codegen_read_binding_place(&builder, init)
+                                else -> jet_codegen_read_binding_place(&builder, init, stable_root)
                             }
                         }
                         if read_alias == .Val(read_place) {
@@ -2574,9 +2601,17 @@ fn jet_codegen_lower_fallback_failure(builder: &JetCodegenBuilder, expression: T
 // route names the payload in place, so the binding copies nothing. Returns
 // the payload place with lowering continuing on the success route; None
 // (nothing emitted) when `subject` is not such a place or the fallback can
-// produce a value.
+// produce a value. A `.Value` fallback qualifies when it always leaves
+// (jet_codegen_fallback_value_exits): the exit block of `x :: p ?? { ...;
+// return }` and of the D-FLOWTYPE1 guard `if p == None -> return`, and the
+// `<no else arm>` of an else-complement refinement.
+// Rust: tir_to_mir_expr.rs lower_or_fallback_window / inline_block_diverges.
 fn jet_codegen_lower_or_fallback_window(builder: &JetCodegenBuilder, expression: TExpr, subject: TExpr, fallback: TOrFallback, ambient_err: TLocal?) -> MIRPlaceID? {
-    if fallback == .Value(_) -> return None
+    value_fallback := false
+    if fallback == .Value(fallback_value) {
+        if !jet_codegen_fallback_value_exits(fallback_value) -> return None
+        value_fallback = true
+    }
     never :: Type.Named{name: "Never"}
     optional := false
     payload_type := never
@@ -2603,11 +2638,33 @@ fn jet_codegen_lower_or_fallback_window(builder: &JetCodegenBuilder, expression:
     failure_block := jet_codegen_new_block(&builder, expression.span, "fallback-failure")
     jet_codegen_terminate(&builder, MIRTerminator.Branch{condition: condition, then_target: success_block, else_target: failure_block})
     jet_codegen_switch_block(&builder, failure_block)
-    if jet_codegen_lower_fallback_failure(&builder, expression, value, error_type, fallback, ambient_err) != None -> panic("checked diverging fallback produced a value")
+    // An exiting `.Value` fallback never reaches its value: a Never-typed
+    // tail that leaves the block open ends in Unreachable like any other.
+    produced :: jet_codegen_lower_fallback_failure(&builder, expression, value, error_type, fallback, ambient_err)
+    if produced != None && !value_fallback -> panic("checked diverging fallback produced a value")
     if jet_codegen_current_is_open(builder) -> jet_codegen_terminate(&builder, MIRTerminator.Unreachable{reason: "diverging fallback"})
     jet_codegen_switch_block(&builder, success_block)
     kind :: if optional -> MIRPayloadKind.Option else -> MIRPayloadKind.Result{ok: true}
     Val(jet_codegen_payload_window_place(&builder, window, kind, payload_type, expression.span))
+}
+
+// A `??` `.Value` fallback that always leaves the current route: a
+// Never-typed value, or an inline block whose last statement exits (a
+// return, break, or continue, labelled or not) or is an exiting value.
+// Every route through such a block either leaves early or reaches that exit.
+fn jet_codegen_fallback_value_exits(value: TExpr) -> Bool Never! {
+    if value.ty == (Type.Named{name: "Never"}) -> return true
+    if value.kind == {
+        .InlineBlock(body) -> {
+            if body.len() == 0 -> return false
+            if body[body.len() - 1] == {
+                .Return(_, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> true
+                .ExprStmt(tail, _) -> jet_codegen_fallback_value_exits(tail)
+                else -> false
+            }
+        }
+        else -> false
+    }
 }
 
 fn jet_codegen_lower_result_handler_arm(builder: &JetCodegenBuilder, expression: TExpr, body: [TStmt], value: TExpr, join: MIRBlockID, incoming: &[MIRPhiIncoming]) {
@@ -2783,6 +2840,21 @@ fn jet_codegen_pattern_scan_route(builder: &JetCodegenBuilder, binary: Bool, res
     jet_codegen_intern_route(&builder, MIRPreludeFamily.StaticPrelude, "core.pattern", member, symbol, 2, [Bool]{true, false}, None, jet_codegen_failure_carrier_for_type(result_type), MIRPreludeABI.Value)
 }
 
+// Rust tir_to_mir_expr pattern_scan_captures: an IsSome probe reads no
+// capture, so its carrier keeps the empty tuple. An Unwrap probe reads every
+// hole, so its carrier holds each hole at its checked type, named by
+// position: the canonical capture tuple each PatternCapture indexes. AOT can
+// only read a capture the carrier's type keeps.
+fn jet_codegen_pattern_scan_result_type(expression: TExpr, probe: TMatchProbe) -> Type Never! {
+    fields := [TypeTupleField]{}
+    if probe == TMatchProbe.Unwrap {
+        if expression.ty == .Tuple(checked) {
+            loop (index, field) in checked -> &fields.push(TypeTupleField{name: "{index}", ty: field.ty})
+        }
+    }
+    Type.Option{inner: Type.Tuple{fields: fields}}
+}
+
 fn jet_codegen_lower_string_match_scan(builder: &JetCodegenBuilder, expression: TExpr, subject: TExpr, parts: [StrMatchPart], probe: TMatchProbe) -> MIRValueID {
     subject_value := jet_codegen_lower_expr(&builder, subject)
     pattern := [MIRTextPatternPart]{}
@@ -2795,7 +2867,7 @@ fn jet_codegen_lower_string_match_scan(builder: &JetCodegenBuilder, expression: 
             }
         }
     }
-    result_type := Type.Option{inner: Type.Tuple{fields: [TypeTupleField]{}}}
+    result_type := jet_codegen_pattern_scan_result_type(expression, probe)
     call := jet_codegen_pattern_scan_route(&builder, false, result_type)
     matched := jet_codegen_emit_value(&builder, expression.span, result_type, MIROperation.Semantic{operation: MIRSemanticOp.TextPatternMatch{call: call, subject: subject_value, parts: pattern}})
     jet_codegen_lower_pattern_probe(&builder, expression, matched, probe)
@@ -2816,7 +2888,7 @@ fn jet_codegen_lower_binary_match_scan(builder: &JetCodegenBuilder, expression: 
             }
         }
     }
-    result_type := Type.Option{inner: Type.Tuple{fields: [TypeTupleField]{}}}
+    result_type := jet_codegen_pattern_scan_result_type(expression, probe)
     call := jet_codegen_pattern_scan_route(&builder, true, result_type)
     matched := jet_codegen_emit_value(&builder, expression.span, result_type, MIROperation.Semantic{operation: MIRSemanticOp.BinaryPatternMatch{call: call, subject: subject_value, parts: pattern}})
     jet_codegen_lower_pattern_probe(&builder, expression, matched, probe)
@@ -3105,4 +3177,469 @@ fn jet_codegen_lower_split_view(builder: &JetCodegenBuilder, owner: TExpr?, root
     }
     place := jet_codegen_bind_local(&builder, local, ty, write, None, None, false)
     _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: place, value: value})
+}
+
+// D-MEM-COPYSEM1 (Rust `check_binding` read window, E0212): which immutable
+// place bindings of a body (`row :: rows[i]`, `item :: p.items[j]`) may alias
+// their place. Rust sema keeps such a binding a live read window and refuses
+// any change to its root while the binding lives; Jet sema does not yet
+// (#4559), so lowering proves the same condition over the checked body: no
+// statement after the binding in its scope writes, consumes, write-borrows,
+// or address-takes the root, or calls a closure value, and nothing before its
+// scope ends captures the root, address-takes it, or opens a write window on
+// it (a window or capture can change the root under another name). A plain
+// read of the root is no change: an implicit last-use move is placed by the
+// MIR pass (LastUse.jet), which sees every read of the alias as a read of
+// the root. Names stand for locals, so a shadowing name only makes the answer
+// more conservative.
+//
+// One walk: `disturbed` counts the changes seen so far and `last` holds each
+// name's latest count, so a binding recorded at count `start` is stable when
+// its root's latest change, read when its scope ends, is not past `start`.
+// The name `*` stands for every root. The body of an inline block, an
+// `Inline` statement, a setup member or an `if` prelude lowers without a
+// scope of its own, so its bindings answer at the end of the enclosing scope.
+// Keyed by jet_codegen_element_let_key.
+struct JetCodegenLetStability {
+    pub disturbed: Int
+    pub last: [String:Int]
+    pub pinned: [String:Bool]
+    pub pending: [JetCodegenLetCandidate]
+    pub stable: [String:Bool]
+}
+
+// A binding (`name :: <place rooted at root>`) recorded at change count
+// `start`.
+struct JetCodegenLetCandidate {
+    pub key: String
+    pub name: String
+    pub root: String
+    pub start: Int
+}
+
+// How an expression position uses a local it names: read in place (an index
+// or field base, a borrow, a copy, a non-mutating receiver), read as a value,
+// or possibly written or consumed. Only the last changes it.
+enum JetCodegenStabilityUse {
+    Inspect
+    Value
+    Write
+}
+
+fn jet_codegen_element_let_key(local: TLocal, span: Span) -> String Never! {
+    "{local.name}@{span.start}:{span.end}"
+}
+
+fn jet_codegen_stable_element_lets(statements: [TStmt], expression: TExpr?) -> [String:Bool] Never! {
+    state := JetCodegenLetStability{disturbed: 0, last: [String:Int]{}, pinned: [String:Bool]{}, pending: [JetCodegenLetCandidate]{}, stable: [String:Bool]{}}
+    jet_codegen_stability_list(&state, statements, false)
+    if expression == .Val(value) -> jet_codegen_stability_expr(&state, value, JetCodegenStabilityUse.Value)
+    jet_codegen_stability_settle(&state, 0)
+    state.stable
+}
+
+fn jet_codegen_stability_disturb(state: &JetCodegenLetStability, name: String) Never! {
+    state.disturbed += 1
+    state.last[name] = state.disturbed
+}
+
+// Answers the candidates recorded since `mark`: their scope ends here. A
+// captured or address-taken binding would hold its place past the reads the
+// walk sees, so it copies too.
+fn jet_codegen_stability_settle(state: &JetCodegenLetStability, mark: Int) Never! {
+    any_change :: state.last.get("*") ?? 0
+    any_pinned :: state.pinned.get("*") != None
+    loop state.pending.len() > mark {
+        candidate :: &state.pending.pop() ?? { break }
+        stable := !any_pinned && any_change <= candidate.start && (state.last.get(candidate.root) ?? 0) <= candidate.start && state.pinned.get(candidate.root) == None && state.pinned.get(candidate.name) == None
+        if state.stable.get(candidate.key) == .Val(known) -> stable = stable && known
+        state.stable[candidate.key] = stable
+    }
+}
+
+// A statement list; `transparent` when it lowers without a scope of its own.
+fn jet_codegen_stability_list(state: &JetCodegenLetStability, statements: [TStmt], transparent: Bool) Never! {
+    mark :: state.pending.len()
+    loop statement in statements {
+        jet_codegen_stability_stmt(&state, statement)
+        if statement == .Let(local, _, init, _, _, span) {
+            if !local.mutable && !local.generated {
+                element := init
+                if init.kind == .Clone(inner, _) -> element = inner
+                if jet_codegen_element_place_root(element) == .Val(root) -> &state.pending.push(JetCodegenLetCandidate{key: jet_codegen_element_let_key(local, span), name: local.name, root: root.name, start: state.disturbed})
+            }
+        }
+    }
+    if !transparent -> jet_codegen_stability_settle(&state, mark)
+}
+
+// The local a place expression is rooted at, through fields, indexes,
+// slices, copies and borrows.
+fn jet_codegen_stability_root(expression: TExpr) -> String? {
+    if expression.kind == {
+        .Local(local) -> Val(local.name)
+        .Field(base, _) | .Index(base, _, _, _, _, _) | .IndexRead(base, _, _, _, _) | .Slice(base, _, _, _, _) | .SliceOwned(base, _, _, _, _) | .Clone(base, _) | .Borrow(base, _) -> jet_codegen_stability_root(base)
+        else -> None
+    }
+}
+
+// A write window opened on `expression` (a `&place` binding, switch subject
+// or loop source) may change its root under the window's names.
+fn jet_codegen_stability_window(state: &JetCodegenLetStability, expression: TExpr) Never! {
+    if expression.kind == .Borrow(place, access) {
+        if access != AccessConvention.Read {
+            if jet_codegen_stability_root(place) == .Val(root) -> state.pinned[root] = true
+        }
+    }
+}
+
+// An owner that hands parts of itself out (a destructure, a switch subject,
+// a loop source, a refutable binding) may give up storage.
+fn jet_codegen_stability_owner(state: &JetCodegenLetStability, expression: TExpr) Never! {
+    jet_codegen_stability_window(&state, expression)
+    jet_codegen_stability_expr(&state, expression, JetCodegenStabilityUse.Write)
+}
+
+fn jet_codegen_stability_values(state: &JetCodegenLetStability, values: [TExpr]) Never! {
+    loop value in values -> jet_codegen_stability_expr(&state, value, JetCodegenStabilityUse.Value)
+}
+
+fn jet_codegen_stability_cond(state: &JetCodegenLetStability, condition: TIfCond) Never! {
+    if condition == {
+        .Plain(value) | .IsNone(value) -> jet_codegen_stability_expr(&state, value, JetCodegenStabilityUse.Value)
+        .And(left, right) -> {
+            jet_codegen_stability_cond(&state, left)
+            jet_codegen_stability_cond(&state, right)
+        }
+        .IfLet(pattern, subject) | .Matches(pattern, subject) -> {
+            jet_codegen_stability_values(&state, tir_pattern_children(pattern))
+            jet_codegen_stability_owner(&state, subject)
+        }
+        // The prelude's bindings stay visible in the branch it guards.
+        .WithPrelude(prelude, nested) -> {
+            jet_codegen_stability_list(&state, prelude, true)
+            jet_codegen_stability_cond(&state, nested)
+        }
+    }
+}
+
+fn jet_codegen_stability_arms(state: &JetCodegenLetStability, arms: [TMatchArm]) Never! {
+    loop arm in arms {
+        jet_codegen_stability_values(&state, tir_pattern_children(arm.pattern))
+        jet_codegen_stability_list(&state, arm.body, false)
+    }
+}
+
+fn jet_codegen_stability_else(state: &JetCodegenLetStability, else_body: [TStmt]?) Never! {
+    if else_body == .Val(statements) -> jet_codegen_stability_list(&state, statements, false)
+}
+
+fn jet_codegen_stability_stmt(state: &JetCodegenLetStability, statement: TStmt) Never! {
+    value :: JetCodegenStabilityUse.Value
+    write :: JetCodegenStabilityUse.Write
+    if statement == {
+        .Let(_, _, init, _, _, _) -> {
+            jet_codegen_stability_window(&state, init)
+            jet_codegen_stability_expr(&state, init, value)
+        }
+        .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _, _) -> jet_codegen_stability_owner(&state, init)
+        .RefutableBind(pattern, init, fallback, _) -> {
+            jet_codegen_stability_values(&state, tir_pattern_children(pattern))
+            jet_codegen_stability_owner(&state, init)
+            jet_codegen_stability_list(&state, fallback, false)
+        }
+        .Assign(place, _, assigned, _, _, _) -> {
+            jet_codegen_stability_expr(&state, assigned, value)
+            if place == {
+                .Local(local) -> jet_codegen_stability_disturb(&state, local.name)
+                .Expr(target) -> jet_codegen_stability_expr(&state, target, write)
+            }
+        }
+        .ContractScope(pre, body, post, _, _) -> {
+            loop contract in pre {
+                jet_codegen_stability_expr(&state, contract.condition, value)
+                jet_codegen_stability_expr(&state, contract.message, value)
+            }
+            jet_codegen_stability_list(&state, body, false)
+            loop contract in post {
+                jet_codegen_stability_expr(&state, contract.condition, value)
+                jet_codegen_stability_expr(&state, contract.message, value)
+            }
+        }
+        .CountedLoop(_, init, condition, step, _, body, _) -> {
+            jet_codegen_stability_stmt(&state, init)
+            jet_codegen_stability_expr(&state, condition, value)
+            if step == .Val(next_step) -> jet_codegen_stability_stmt(&state, next_step)
+            jet_codegen_stability_list(&state, body, false)
+        }
+        .ForRange(_, _, start, end, step, _, body, _, _) -> {
+            jet_codegen_stability_expr(&state, start, value)
+            jet_codegen_stability_expr(&state, end, value)
+            if step == .Val(step_value) -> jet_codegen_stability_expr(&state, step_value, value)
+            jet_codegen_stability_list(&state, body, false)
+        }
+        .Range(_, _, source, start, end, step, _, _, body, _) -> {
+            if source == .Val(source_value) -> jet_codegen_stability_owner(&state, source_value)
+            jet_codegen_stability_expr(&state, start, value)
+            jet_codegen_stability_expr(&state, end, value)
+            if step == .Val(step_value) -> jet_codegen_stability_expr(&state, step_value, value)
+            jet_codegen_stability_list(&state, body, false)
+        }
+        .TaskGroup(_, limit, body, _) -> {
+            if limit == .Val(limit_value) -> jet_codegen_stability_expr(&state, limit_value, value)
+            jet_codegen_stability_list(&state, body, false)
+        }
+        .If(condition, then_body, else_body, _, _) -> {
+            jet_codegen_stability_cond(&state, condition)
+            jet_codegen_stability_list(&state, then_body, false)
+            jet_codegen_stability_else(&state, else_body)
+        }
+        .Loop(_, body, _) -> jet_codegen_stability_list(&state, body, false)
+        .While(_, condition, body, _) -> {
+            jet_codegen_stability_expr(&state, condition, value)
+            jet_codegen_stability_list(&state, body, false)
+        }
+        .Match(subject, arms, _, _) -> {
+            jet_codegen_stability_owner(&state, subject)
+            jet_codegen_stability_arms(&state, arms)
+        }
+        .EnumMatch(scrutinee, _, arms, else_body, _, _) -> {
+            jet_codegen_stability_owner(&state, scrutinee)
+            jet_codegen_stability_arms(&state, arms)
+            jet_codegen_stability_else(&state, else_body)
+        }
+        .RangeSwitch(subject, arms, else_body, _) -> {
+            jet_codegen_stability_expr(&state, subject, value)
+            loop arm in arms -> jet_codegen_stability_list(&state, arm.body, false)
+            jet_codegen_stability_list(&state, else_body, false)
+        }
+        .MixedSwitch(subject, _, arms, else_body, _) -> {
+            jet_codegen_stability_owner(&state, subject)
+            loop arm in arms {
+                jet_codegen_stability_expr(&state, arm.condition, value)
+                jet_codegen_stability_list(&state, arm.body, false)
+            }
+            jet_codegen_stability_else(&state, else_body)
+        }
+        .IndexAssign(_, base, index, _, assigned, _) | .IndexHookAssign(_, base, index, assigned, _) -> {
+            jet_codegen_stability_expr(&state, index, value)
+            jet_codegen_stability_expr(&state, assigned, value)
+            jet_codegen_stability_expr(&state, base, write)
+        }
+        .IndexFieldAssign(assign, _) -> {
+            jet_codegen_stability_expr(&state, assign.index, value)
+            jet_codegen_stability_expr(&state, assign.value, value)
+            jet_codegen_stability_expr(&state, assign.base, write)
+        }
+        .MathSwizzleAssign(base, _, _, assigned, _, _) -> {
+            jet_codegen_stability_expr(&state, assigned, value)
+            jet_codegen_stability_expr(&state, base, write)
+        }
+        .ForIn(_, _, _, source, collection, step, _, _, _, _, body, _) -> {
+            jet_codegen_stability_owner(&state, source)
+            jet_codegen_stability_owner(&state, collection)
+            if step == .Val(step_value) -> jet_codegen_stability_expr(&state, step_value, value)
+            jet_codegen_stability_list(&state, body, false)
+        }
+        .Inline(body, _) -> jet_codegen_stability_list(&state, body, true)
+        .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) -> jet_codegen_stability_list(&state, body, false)
+        .ContextBlock(guards, body, _) -> {
+            loop guard in guards -> jet_codegen_stability_expr(&state, guard.value, value)
+            jet_codegen_stability_list(&state, body, false)
+        }
+        .ScopeMember(kind, body, _) -> {
+            if kind == .Timeout(duration) -> jet_codegen_stability_expr(&state, duration, value)
+            setup :: if kind == {
+                .Setup -> true
+                else -> false
+            }
+            jet_codegen_stability_list(&state, body, setup)
+        }
+        .Transact(_, snapshots, _, body, _) -> {
+            loop snapshot in snapshots -> state.pinned[snapshot.local.name] = true
+            jet_codegen_stability_list(&state, body, false)
+        }
+        .GCEdit(root, _, _, _, index_temp, edited, _) -> {
+            if index_temp == .Val(index_value) -> jet_codegen_stability_expr(&state, index_value, value)
+            jet_codegen_stability_stmt(&state, edited)
+            jet_codegen_stability_disturb(&state, root)
+        }
+        .SplitViews(owner, root, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) -> {
+            if owner == .Val(owner_value) -> jet_codegen_stability_expr(&state, owner_value, write)
+            state.pinned[root] = true
+        }
+        .Reactive(_, _) -> state.pinned["*"] = true
+        // Return, ExprStmt, BreakValue, DeferClose, Contract: values only.
+        else -> jet_codegen_stability_values(&state, tir_stmt_children(statement))
+    }
+}
+
+fn jet_codegen_stability_call_args(state: &JetCodegenLetStability, args: [TCallArg]) Never! {
+    loop argument in args {
+        use_kind :: if argument.mut_borrow -> JetCodegenStabilityUse.Write else -> JetCodegenStabilityUse.Value
+        jet_codegen_stability_expr(&state, argument.value, use_kind)
+    }
+}
+
+// How the receiver of a route that `mutates` uses its local.
+fn jet_codegen_stability_receiver(mutates: Bool) -> JetCodegenStabilityUse Never! {
+    if mutates -> return JetCodegenStabilityUse.Write
+    JetCodegenStabilityUse.Inspect
+}
+
+fn jet_codegen_stability_access(access: AccessConvention) -> JetCodegenStabilityUse Never! {
+    if access == AccessConvention.Read -> return JetCodegenStabilityUse.Inspect
+    JetCodegenStabilityUse.Write
+}
+
+// How a place projection (index, slice) checked with `access` uses its base:
+// a write, move or write borrow of `a.b[i].c[j]` writes through every base
+// down to the root, whatever access the inner index was checked with.
+fn jet_codegen_stability_base(use_kind: JetCodegenStabilityUse, access: AccessConvention) -> JetCodegenStabilityUse Never! {
+    if use_kind == JetCodegenStabilityUse.Write -> return JetCodegenStabilityUse.Write
+    jet_codegen_stability_access(access)
+}
+
+fn jet_codegen_stability_expr(state: &JetCodegenLetStability, expression: TExpr, use_kind: JetCodegenStabilityUse) Never! {
+    inspect :: JetCodegenStabilityUse.Inspect
+    value :: JetCodegenStabilityUse.Value
+    write :: JetCodegenStabilityUse.Write
+    if expression.kind == {
+        .Local(local) -> {
+            if use_kind == write -> jet_codegen_stability_disturb(&state, local.name)
+        }
+        .Field(receiver, _) -> jet_codegen_stability_expr(&state, receiver, use_kind)
+        .Index(base, index, _, access, _, _) -> {
+            jet_codegen_stability_expr(&state, index, value)
+            jet_codegen_stability_expr(&state, base, jet_codegen_stability_base(use_kind, access))
+        }
+        .IndexRead(base, index, _, _, _) -> {
+            jet_codegen_stability_expr(&state, index, value)
+            jet_codegen_stability_expr(&state, base, jet_codegen_stability_base(use_kind, AccessConvention.Read))
+        }
+        .Slice(base, start, end, range, _) | .SliceOwned(base, start, end, range, _) -> {
+            jet_codegen_stability_expr(&state, start, value)
+            jet_codegen_stability_expr(&state, end, value)
+            if range == .Val(range_value) -> jet_codegen_stability_expr(&state, range_value, value)
+            jet_codegen_stability_expr(&state, base, jet_codegen_stability_base(use_kind, AccessConvention.Read))
+        }
+        .Clone(copied, _) | .ExplicitCopy(copied) | .MaterializeView(copied) -> jet_codegen_stability_expr(&state, copied, inspect)
+        .Borrow(place, access) -> jet_codegen_stability_expr(&state, place, jet_codegen_stability_access(access))
+        .Move(moved) | .Drop(moved) | .Close(moved) -> jet_codegen_stability_expr(&state, moved, write)
+        .ResourceTake(local) -> jet_codegen_stability_disturb(&state, local.name)
+        // A mutating route writes through its receiver; an owned iterator
+        // receiver is moved (jet_codegen_lower_builtin_receiver).
+        .BuiltinMethod(receiver, operation, args) -> {
+            jet_codegen_stability_values(&state, args)
+            jet_codegen_stability_expr(&state, receiver, jet_codegen_stability_receiver(jet_codegen_builtin_mutates_receiver(operation) || jet_codegen_builtin_iter_receiver(receiver.ty)))
+        }
+        .ClosureMethod(receiver, operation, args) -> {
+            jet_codegen_stability_values(&state, args)
+            jet_codegen_stability_expr(&state, receiver, jet_codegen_stability_receiver(jet_codegen_closure_method_mutates_receiver(operation) || jet_codegen_closure_receiver_kind(receiver.ty) == (Val("iter"))))
+        }
+        .HandleMethod(receiver, operation, args) -> {
+            jet_codegen_stability_values(&state, args)
+            jet_codegen_stability_expr(&state, receiver, jet_codegen_stability_receiver(jet_codegen_handle_receiver_is_mutating(operation)))
+        }
+        .Binary(_, _, _, lhs, rhs) -> {
+            jet_codegen_stability_expr(&state, lhs, value)
+            jet_codegen_stability_expr(&state, rhs, value)
+        }
+        .Unary(_, operand) | .Present(operand) | .Ok(operand) | .Err(operand) | .Try(operand, _, _) | .Print(operand) -> jet_codegen_stability_expr(&state, operand, value)
+        .CompareChain(operands, _, _) -> jet_codegen_stability_values(&state, operands)
+        .CoreCall(_, args, _, _, _, _, _) -> jet_codegen_stability_values(&state, args)
+        .StructLit(fields, _, _) -> loop field in fields -> jet_codegen_stability_expr(&state, field.value, value)
+        .StrLit(parts) -> loop part in parts {
+            if part == .Interpolation(hole, _) -> jet_codegen_stability_expr(&state, hole, value)
+        }
+        .Call(_, _, args) | .ModuleCall(_, _, _, _, args) | .StaticCall(_, _, _, _, args) | .AllocNew(_, args) -> jet_codegen_stability_call_args(&state, args)
+        // A method receiver may be written through: its convention is the
+        // method's.
+        .MethodCall(receiver, _, _, args) -> {
+            jet_codegen_stability_call_args(&state, args)
+            jet_codegen_stability_expr(&state, receiver, write)
+        }
+        .ExternCall(_, _, args) -> loop argument in args {
+            use_kind_arg :: if argument.mut_borrow -> write else -> value
+            jet_codegen_stability_expr(&state, argument.value, use_kind_arg)
+        }
+        .PatternMatches(subject, pattern) -> {
+            jet_codegen_stability_values(&state, tir_pattern_children(pattern))
+            jet_codegen_stability_owner(&state, subject)
+        }
+        // A closure changes only what it captures; its body lowers as its
+        // own function.
+        .Lambda(lambda) | .LambdaValue(lambda) -> loop capture in lambda.captures {
+            state.pinned[capture.source] = true
+            state.pinned[capture.local.name] = true
+        }
+        .AddressOf(place, _, _) | .RawAddressOf(place) -> {
+            if place == {
+                .Local(local) -> state.pinned[local.name] = true
+                .Expr(target) -> {
+                    if jet_codegen_stability_root(target) == .Val(root) -> state.pinned[root] = true
+                    jet_codegen_stability_expr(&state, target, write)
+                }
+            }
+        }
+        // An inline block lowers into the enclosing scope.
+        .InlineBlock(body) -> jet_codegen_stability_list(&state, body, true)
+        .IfExpr(condition, then_body, then_value, else_body, else_value) -> {
+            jet_codegen_stability_cond(&state, condition)
+            jet_codegen_stability_list(&state, then_body, false)
+            jet_codegen_stability_expr(&state, then_value, value)
+            jet_codegen_stability_list(&state, else_body, false)
+            jet_codegen_stability_expr(&state, else_value, value)
+        }
+        .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> {
+            jet_codegen_stability_owner(&state, subject)
+            jet_codegen_stability_values(&state, tir_pattern_children(ok_pattern))
+            jet_codegen_stability_list(&state, ok_body, false)
+            jet_codegen_stability_expr(&state, ok_value, value)
+            jet_codegen_stability_values(&state, tir_pattern_children(err_pattern))
+            jet_codegen_stability_list(&state, err_body, false)
+            jet_codegen_stability_expr(&state, err_value, value)
+            jet_codegen_stability_expr(&state, terminal, value)
+        }
+        // A call of a closure value may change whatever that closure captured.
+        .IndirectCall(_, _, _, _) | .OptionLift2(_, _, _) | .HostBorrowCallback(_, _) -> {
+            loop child in tir_expr_children(expression) -> jet_codegen_stability_expr(&state, child, write)
+            jet_codegen_stability_disturb(&state, "*")
+        }
+        .FnValue(kind) -> {
+            if kind == {
+                // A named function captures nothing.
+                .NamedFn(_, lambda) -> {
+                    if lambda != None -> state.pinned["*"] = true
+                }
+                .Call(_, _) -> {
+                    loop child in tir_expr_children(expression) -> jet_codegen_stability_expr(&state, child, write)
+                    jet_codegen_stability_disturb(&state, "*")
+                }
+                else -> state.pinned["*"] = true
+            }
+        }
+        .HostCall(call) -> {
+            if call == {
+                .Helper(_, _, args) -> loop argument in args {
+                    if argument == {
+                        .Expr(passed) -> jet_codegen_stability_expr(&state, passed, write)
+                        .Borrow(passed) -> jet_codegen_stability_expr(&state, passed, inspect)
+                        .Lambda(_) -> state.pinned["*"] = true
+                    }
+                }
+                .CCallback(_, _, _, _, _, _) -> state.pinned["*"] = true
+                .GCEdit(root, _, edges, _, _, _) -> {
+                    loop child in tir_expr_children(expression) -> jet_codegen_stability_expr(&state, child, write)
+                    jet_codegen_stability_disturb(&state, root.name)
+                    loop edge in edges -> jet_codegen_stability_disturb(&state, edge.name)
+                }
+                else -> loop child in tir_expr_children(expression) -> jet_codegen_stability_expr(&state, child, write)
+            }
+        }
+        // Executables whose captures this walk does not read.
+        .CoreClosureCall(_) | .SharedGuardWait(_, _, _) -> state.pinned["*"] = true
+        // Any other form may write what it names.
+        else -> loop child in tir_expr_children(expression) -> jet_codegen_stability_expr(&state, child, write)
+    }
 }

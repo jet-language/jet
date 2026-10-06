@@ -8,6 +8,7 @@ use jet_foundation.[
     Diagnostic,
     Span,
     Type,
+    diagnostic_registry_row,
     dimension_identity,
     type_identity_equal,
     type_name,
@@ -210,7 +211,21 @@ fn sema_inference_validate_bounds(graph: SemaRegistrationGraph?, context: &SemaI
             }
             &evidence.push(SemaInferenceBoundEvidence{param: parameter.name, actual: concrete, bound: bound, satisfied: satisfied, source: span})
             if !satisfied {
-                &diagnostics.push(sema_error("E0905", span, "`{type_name(concrete)}` does not satisfy `{bound}`", "every declared generic bound is part of the callable contract", "provide a type with the required registered implementation"))
+                name :: type_name(concrete)
+                row :: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
+                what :: row.what.replace("{{type}}", name).replace("{{bound}}", bound)
+                why := "`{name}` would need to implement `{bound}` before it can be used here"
+                fix := "write `impl {name}.{bound} {{ … }}` with every required method"
+                if bound == "Comparable" -> fix = "write `#Comparable` before `{name}`, or use `sort_by` with a key"
+                if bound == "Comparable" && name == "Float" -> fix = "use explicit Float comparisons or sort by a total key that handles NaN"
+                if bound == "Numeric" -> fix = "write `#Numeric` on a distinct number type, or `impl {name}.Numeric {{ … }}` with `zero` and `one` on a struct that implements Add, Sub, Mul, and Comparable"
+                loop caller_parameter in context.lexical_generic_params {
+                    if caller_parameter.name == name {
+                        why = "type parameter `{name}` doesn't declare the `{bound}` bound, so a caller may choose a type without it"
+                        fix = "declare the bound where `{name}` is introduced: `<{name}: {bound}>`"
+                    }
+                }
+                &diagnostics.push(sema_error("E0905", span, what, row.why.replace("{{why}}", why), row.fix.replace("{{fix}}", fix)))
                 return None
             }
         }

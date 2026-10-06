@@ -1,0 +1,14 @@
+// Function-boundary cell map-filter-collect: an eager map/filter/map chain
+// collects one list per round (D-LOOPMAP1=B eager adapters).
+#CLI struct Args { n: Int }
+
+fn run(args: Args) {
+    xs := [Int]{}
+    loop i in 0..<100000 -> &xs.push(i)
+    acc := 0
+    loop r in 0..<args.n {
+        ys :: xs.map(x -> x * 3 + r).filter(x -> x % 2 == 0).map(x -> x + 1)
+        loop y in ys -> acc += y
+    }
+    print(acc)
+}

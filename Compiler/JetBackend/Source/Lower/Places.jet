@@ -94,6 +94,10 @@ fn lower_walk_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, root: LIR
                 ty = found.ty
             }
             .Payload(kind, _) -> {
+                if !lower_native_enum_layout(p, ty) {
+                    lower_fail(&m, &f, "opaque runtime enum {mir_type_display_name(ty)} has no native enum layout")
+                    return None
+                }
                 found :: lower_payload_info(p, ty, kind) ?? {
                     lower_fail(&m, &f, "payload projection of {mir_type_display_name(ty)} is not lowered at O0 yet")
                     return None
@@ -151,6 +155,8 @@ fn lower_projected_move_supported(m: &LowerModule, f: &LowerFunction, projection
 }
 
 fn lower_enum(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, type_id: MIRTypeID, variant: String, args: [MIREnumArg]) Never! {
+    ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "enum construction has no checked type")
+    if !lower_native_enum_layout(p, ty) -> return lower_fail(&m, &f, "opaque runtime enum {mir_type_display_name(ty)} has no native enum layout")
     definition :: lower_owned_def(p, type_id, lower_checked_type(c, instruction)) ?? return lower_fail(&m, &f, "enum type {type_id.value} is missing")
     found :: lower_variant(definition, variant) ?? return lower_fail(&m, &f, "{definition.name} has no variant {variant}")
     // Check every payload has storage before allocating or storing any part
@@ -178,6 +184,8 @@ fn lower_enum(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
 }
 
 fn lower_enum_payload(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, subject: MIRValueID, owner: MIRTypeID, variant: String, index: Int) Never! {
+    ty :: lower_value_type(c, subject) ?? return lower_fail(&m, &f, "enum subject has no checked type")
+    if !lower_native_enum_layout(p, ty) -> return lower_fail(&m, &f, "opaque runtime enum {mir_type_display_name(ty)} has no native enum layout")
     definition :: lower_owned_def(p, owner, lower_value_type(c, subject)) ?? return lower_fail(&m, &f, "enum type {owner.value} is missing")
     found :: lower_variant(definition, variant) ?? return lower_fail(&m, &f, "{definition.name} has no variant {variant}")
     info :: lower_enum_payload_info(p, definition, found.variant, index) ?? return lower_fail(&m, &f, "{definition.name}.{variant} has no stored payload {index}")

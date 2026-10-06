@@ -52,7 +52,7 @@ const payload = (...flags) => by('file', 'stdin', ...flags);
 const COMMAND_FLAGS = {
   init: { flags: ['name', 'dir'] },
   import: { flags: ['dir', 'name', 'force'] },
-  serve: { flags: ['port', 'open', 'noWatch'] },
+  serve: { flags: ['port', 'open', 'noWatch', 'worker'] },
   status: { flags: ['days', 'window', 'color'], verbs: {
     post: payload('expectRev'),
     show: [],
@@ -567,7 +567,8 @@ function cmdCard(store, { pos, flags }) {
     }
     case 'delete': {
       const { result } = store.mutate((s) => db.deleteCard(s, ref, { by }));
-      return out(flags, `deleted card #${result.num}`, result);
+      const ballots = result.decisions.length ? ` with ballot${result.decisions.length > 1 ? 's' : ''} ${result.decisions.map(d => `${d.id} (${d.status})`).join(', ')}` : '';
+      return out(flags, `deleted card #${result.num}${ballots}`, result);
     }
     case 'log': {
       if (typeof flags.text !== 'string' || !flags.text.trim())
@@ -1350,23 +1351,22 @@ export async function run(argv) {
 
     switch (cmd) {
       case 'serve': {
-        const { serve } = await import('./server.mjs');
-        const port = Number(flags.port || store.config.port);
-        let server = serve(store, port, !!flags.open);
-        // #522 — the running process loads all routes/db code once at
-        // start; without this, an edit to app/*.mjs never takes
-        // effect until someone remembers to restart `tower serve` by hand.
-        // --no-watch is the escape hatch (tests, embedding).
-        if (!flags.noWatch) {
-          const { watchForRestart } = await import('./restart.mjs');
-          watchForRestart({
+        // #522 — the server loads all routes/db code once at start. Plain
+        // `tower serve` is a supervisor that restarts its `--worker` server
+        // when app/*.mjs changes (restart.mjs); --no-watch serves in this
+        // process with no supervisor (tests, embedding).
+        if (!flags.noWatch && !flags.worker) {
+          const { superviseServe } = await import('./restart.mjs');
+          return superviseServe({
             towerRoot: join(dirname(fileURLToPath(import.meta.url)), '..'),
             argv: process.argv.slice(2),
-            getServer: () => server,
-            reopen: () => { server = serve(store, port, !!flags.open); },
           });
         }
-        return server;
+        const { serve } = await import('./server.mjs');
+        const port = Number(flags.port || store.config.port);
+        if (!flags.worker) return serve(store, port, !!flags.open);
+        const { serveWorker } = await import('./restart.mjs');
+        return serveWorker({ serveFn: (open) => serve(store, port, open), open: !!flags.open })();
       }
       case 'status':    return sub.pos.length ? cmdStatusReport(store, sub) : cmdStatus(store, sub);
       case 'briefing':  return cmdBriefing(store, sub);

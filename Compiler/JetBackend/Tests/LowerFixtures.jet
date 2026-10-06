@@ -764,6 +764,7 @@ fn fx_report_executable(name: String, image: X64ExecutableResult) -> Bool {
 }
 
 fn run() {
+    abi_fixtures()
     clean := true
     if !fx_reach_graph_checks() {
         print("issue reach: graph closure checks failed")
@@ -775,6 +776,10 @@ fn run() {
     }
     if !fx_mono_rejection_checks() {
         print("issue mono: rejection checks failed")
+        clean = false
+    }
+    if !fx_opaque_enum_rejection_checks() {
+        print("issue opaque-enum: rejection checks failed")
         clean = false
     }
     if !fx_report("hello", fx_hello()) -> clean = false

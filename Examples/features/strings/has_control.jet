@@ -1,0 +1,44 @@
+use core.text as text
+
+fn scalar(cp: Int) -> String {
+    raw := [U8]{}
+    if {
+        cp < 128 -> &raw.push(U8{cp})
+        cp < 2048 -> {
+            &raw.push(U8{Int{192} | (cp >> 6)})
+            &raw.push(U8{Int{128} | (cp & Int{63})})
+        }
+        cp < 65536 -> {
+            &raw.push(U8{Int{224} | (cp >> 12)})
+            &raw.push(U8{Int{128} | ((cp >> 6) & Int{63})})
+            &raw.push(U8{Int{128} | (cp & Int{63})})
+        }
+        else -> {
+            &raw.push(U8{Int{240} | (cp >> 18)})
+            &raw.push(U8{Int{128} | ((cp >> 12) & Int{63})})
+            &raw.push(U8{Int{128} | ((cp >> 6) & Int{63})})
+            &raw.push(U8{Int{128} | (cp & Int{63})})
+        }
+    }
+    String.from_bytes(~raw) ?? panic("invalid Unicode scalar")
+}
+
+fn run() {
+    print(text.has_control(""))
+    print(text.has_control("ann"))
+    print(text.has_control("ann\n"))
+    print(text.has_control("\t"))
+    print(text.has_control(scalar(13)))
+    loop cp in [0, 31, 127, 128, 159, 160, 8232, 8233, 8205] {
+        print(text.has_control(scalar(cp)))
+    }
+    all_match := true
+    loop cp in 0..<1114112 {
+        if cp < 55296 || cp > 57343 {
+            cc :: cp < 32 || (cp >= 127 && cp <= 159)
+            if text.has_control(scalar(cp)) != cc -> all_match = false
+        }
+    }
+    print("all valid Unicode scalars match pinned Cc ranges: {all_match}")
+    print("CRLF remains one grapheme: {text.graphemes(String.from_bytes([U8]{13, 10}) ?? panic("invalid CRLF")).len() == 1}")
+}

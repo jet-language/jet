@@ -27,7 +27,8 @@
 //
 // usage: [JET_RUNTIME_PACK=<jet_runtime.pack.o> | JET_RUNTIME_C_LIB=<libjet_runtime_c.a>] [JET=<jet binary>]
 //        [JET_LOWER_RUN=1 | JET_LOWER_RELEASE=1] [JET_LOWER_SHARDS=<n>] [JET_LOWER_MEM=<cap>] [JET_LOWER_BATCH=<n>]
-//        node Compiler/JetBackend/Tests/run-goldens.mjs <outdir> [--stage mir|convert|lower|run] [--until mir|convert|lower|run] [filter...]
+//        [JET_MIR_EMIT=1] dumps freshly checked MIR with `jet emit --rust`, without compiling/running the Rust output.
+//        node Compiler/JetBackend/Tests/run-goldens.mjs <outdir> [--stage mir|convert|lower|run] [--until mir|convert|lower|run] [--case-list FILE | filter...]
 // A later stage reuses the files of the earlier ones in <outdir>.
 // Writes <outdir>/results.tsv and <outdir>/summary.txt.
 import { createHash } from "node:crypto";
@@ -47,16 +48,21 @@ if (!outDir) {
 let first = "mir";
 let last = "run";
 const filters = [];
+let selectedStems = null;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--stage") first = args[++i];
   else if (args[i] === "--until") last = args[++i];
+  else if (args[i] === "--case-list") {
+    selectedStems = readFileSync(args[++i], "utf8").split("\n").map((stem) => stem.trim()).filter(Boolean);
+    if (!selectedStems.length || new Set(selectedStems).size !== selectedStems.length) throw new Error("case list must be nonempty and unique");
+  }
   else filters.push(args[i]);
 }
 const STAGES = ["mir", "convert", "lower", "run"];
 const from = STAGES.indexOf(first);
 const until = STAGES.indexOf(last);
 if (from < 0 || until < from) throw new Error(`bad stage range ${first}..${last}`);
-const safeJet = `${process.env.HOME}/.cache/jet-luna/safe-jet.sh`;
+const safeJet = `${process.env.HOME}/.cache/jet-dev/safe-jet.sh`;
 const runtimeLib = process.env.JET_RUNTIME_C_LIB;
 const runtimePack = process.env.JET_RUNTIME_PACK;
 
@@ -69,8 +75,15 @@ const dirs = { work: join(outDir, "work"), mir: join(outDir, "mir"), lower: join
 for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true });
 
 const cases = [];
-for (const entry of collectGoldenEntries(features)) {
-  if (filters.length && !filters.some((needle) => entry.stem.includes(needle))) continue;
+const entries = collectGoldenEntries(features);
+if (selectedStems) {
+  if (filters.length) throw new Error("case list and substring filters are mutually exclusive");
+  const available = new Set(entries.map((entry) => entry.stem));
+  for (const stem of selectedStems) if (!available.has(stem)) throw new Error(`unknown case-list stem: ${stem}`);
+}
+const selection = selectedStems ? new Set(selectedStems) : null;
+for (const entry of entries) {
+  if (selection ? !selection.has(entry.stem) : filters.length && !filters.some((needle) => entry.stem.includes(needle))) continue;
   const slug = entry.stem.replace(/[^A-Za-z0-9_-]+/gu, "_");
   const expectedOut = join(features, "expected", `${entry.stem}.out`);
   const expectedErr = join(features, "expected", `${entry.stem}.err.out`);
@@ -96,18 +109,22 @@ function stage(c) {
 
 if (from <= 0 && until >= 0) {
   for (const c of open()) {
+    requireProofUnpaused();
     const dump = join(dirs.mir, `${c.slug}.mir`);
     rmSync(dump, { force: true });
     const cwd = stage(c);
-    const run = spawnSync(safeJet, ["run", c.entry.shown], {
+    const emit = process.env.JET_MIR_EMIT === "1";
+    const command = emit ? ["emit", "--rust", c.entry.shown] : ["run", c.entry.shown];
+    const run = spawnSync(safeJet, command, {
       cwd,
       input: c.stdin ?? "",
       encoding: "utf8",
+      stdio: ["pipe", emit ? "ignore" : "pipe", "pipe"],
       env: { ...process.env, JET_DUMP_MIR: resolve(dump), SAFE_JET_TIMEOUT: process.env.SAFE_JET_TIMEOUT ?? "120" },
       maxBuffer: 1 << 28,
     });
-    writeFileSync(join(dirs.mir, `${c.slug}.ref`), JSON.stringify({ status: run.status, stdout: run.stdout, stderr: run.stderr }));
-    console.log(`mir ${c.slug}: ${existsSync(dump) ? "dumped" : "no dump"} (jet run exit ${run.status})`);
+    writeFileSync(join(dirs.mir, `${c.slug}.ref`), JSON.stringify({ mode: emit ? "emit" : "run", status: run.status, stdout: run.stdout ?? "", stderr: run.stderr ?? "" }));
+    console.log(`mir ${c.slug}: ${existsSync(dump) ? "dumped" : "no dump"} (jet ${emit ? "emit" : "run"} exit ${run.status})`);
   }
 }
 
@@ -213,7 +230,6 @@ function pruneTables(program) {
   if (instances) instances.items = instances.items.filter((ty) => typeIds(ty).every((id) => refs.get("MirTypeId").has(id)));
 }
 
-const drift = new Map();
 if (from <= 1 && until >= 1) {
   for (const c of open()) {
     const dump = join(dirs.mir, `${c.slug}.mir`);
@@ -228,7 +244,6 @@ if (from <= 1 && until >= 1) {
       prune(program, entryId);
       const converter = new Converter(schema);
       const value = converter.convert(program, programType, "program");
-      for (const [message, count] of converter.drift) drift.set(message, (drift.get(message) ?? 0) + count);
       const lines = [BigInt(entryId).toString()];
       encode(value, programType, schema, lines);
       writeFileSync(mird, `${lines.join("\n")}\n`);
@@ -236,13 +251,15 @@ if (from <= 1 && until >= 1) {
       writeFileSync(join(dirs.lower, `${c.slug}.convert-error`), `${error.stack}\n`);
     }
   }
-  writeFileSync(join(outDir, "drift.txt"), [...drift].sort((a, b) => b[1] - a[1]).map(([message, count]) => `${count}\t${message}`).join("\n") + "\n");
 }
 for (const c of open()) {
   if (!existsSync(join(dirs.mir, `${c.slug}.mir`))) {
     c.verdict = "no-mir";
     const ref = join(dirs.mir, `${c.slug}.ref`);
-    if (existsSync(ref)) c.detail = `jet run exit ${JSON.parse(readFileSync(ref, "utf8")).status}`;
+    if (existsSync(ref)) {
+      const reference = JSON.parse(readFileSync(ref, "utf8"));
+      c.detail = `jet ${reference.mode ?? "run"} exit ${reference.status}`;
+    }
   } else if (existsSync(join(dirs.lower, `${c.slug}.convert-error`))) {
     c.verdict = "convert-error";
     c.detail = readFileSync(join(dirs.lower, `${c.slug}.convert-error`), "utf8").split("\n")[0];
@@ -338,7 +355,11 @@ function driverCommand() {
   return [buildDriver()];
 }
 
+function requireProofUnpaused() {
+  if (existsSync(join(process.env.HOME, ".cache/jet-dev/proofq/PAUSE"))) throw new Error("proofq paused: retain partial outputs and resume after the pause lifts");
+}
 function buildDriver() {
+  requireProofUnpaused();
   const unit = readFileSync(join(dirs.lower, "unit.jet"), "utf8");
   const release = process.env.JET_LOWER_RELEASE === "1";
   const stamp = `${release ? "release" : "dev"}\n${createHash("sha256").update(unit).digest("hex")}\n`;
@@ -374,6 +395,7 @@ function runShard(command, index, shard) {
     let pending = shard;
     const next = () => {
       if (pending.length === 0) return done();
+      requireProofUnpaused();
       const batch = pending.slice(0, size);
       const rest = pending.slice(size);
       writeFileSync(join(dir, "cases.txt"), batch.map((c) => `../${c.slug}`).join("\n") + "\n");
@@ -409,9 +431,16 @@ function runShard(command, index, shard) {
 }
 
 if (from <= 2 && until >= 2) {
-  assembleUnit();
-  const pending = open().filter((c) => existsSync(join(dirs.lower, `${c.slug}.mird`)));
-  for (const c of pending) {
+  const resume = process.env.JET_LOWER_RESUME === "1";
+  if (resume && !existsSync(join(dirs.lower, "unit.jet"))) throw new Error("resume requires the original frozen lower/unit.jet");
+  if (!resume) assembleUnit();
+  const pending = open().filter((c) => {
+    if (!existsSync(join(dirs.lower, `${c.slug}.mird`))) return false;
+    if (!resume) return true;
+    const issues = join(dirs.lower, `${c.slug}.issues`);
+    return !existsSync(join(dirs.lower, `${c.slug}.o`)) && !(existsSync(issues) && readFileSync(issues, "utf8").trim());
+  });
+  if (!resume) for (const c of pending) {
     for (const suffix of [".o", ".exe", ".elf", ".issues", ".pack-issues", ".static-issues"]) rmSync(join(dirs.lower, `${c.slug}${suffix}`), { force: true });
   }
   const command = driverCommand();
@@ -481,6 +510,8 @@ for (const c of until >= 3 ? open() : []) {
   const run = spawnSync(program, [], { input: c.stdin ?? "", encoding: "utf8", timeout: 20000, cwd, maxBuffer: 1 << 26 });
   const expected = readFileSync(c.expectedOut, "utf8");
   writeFileSync(join(dirs.run, `${c.slug}.stdout`), run.stdout ?? "");
+  writeFileSync(join(dirs.run, `${c.slug}.stderr`), run.stderr ?? "");
+  writeFileSync(join(dirs.run, `${c.slug}.status.json`), JSON.stringify({ status: run.status, signal: run.signal, error: run.error ? { code: run.error.code, message: run.error.message } : null }) + "\n");
   if (run.stdout === expected && run.status === 0) c.verdict = "pass";
   else {
     c.verdict = "wrong";

@@ -806,7 +806,7 @@ use core.text as text
 struct Token { raw: String }
 
 impl Token.Encode {
-    fn encode(self) -> DataTree -> DataTree.Text("wire")
+    fn encode(self) -> DataTree { DataTree.Text("wire") }
 }
 
 impl Token.Decode {
@@ -1493,10 +1493,10 @@ fn custom_encode_survives_containers() {
 use core.encoding.json as json
 struct Token { raw: String }
 impl Token.Encode {
-    fn encode(self) -> DataTree -> DataTree.Text("wire")
+    fn encode(self) -> DataTree { DataTree.Text("wire") }
 }
-fn token() -> Token? -> Val(Token{raw: "raw"})
-fn empty() -> Token? -> None
+fn token() -> Token? { Val(Token{raw: "raw"}) }
+fn empty() -> Token? { None }
 fn run() {
     print(json.to_string([Token{raw: "raw"}]))
     print(json.to_string(token()))

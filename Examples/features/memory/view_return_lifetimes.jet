@@ -1,0 +1,46 @@
+// D-MEM-VIEWRET1 (#4392): a returned view borrows the owners sema proved for
+// it, and every tier keeps that relation. One owner beside scalar arguments,
+// two possible owners, and a method borrowing its receiver all return views.
+struct Table {
+    bytes: [U8]
+    stride: Int
+}
+
+impl Table {
+    fn row(self, index: Int) -> View<U8> from self.bytes {
+        self.bytes[index * self.stride..<(index + 1) * self.stride]
+    }
+}
+
+// The asset owns the window; `start` and `width` are plain inputs.
+fn window(asset: [U8], start: Int, width: Int) -> View<U8> from asset {
+    asset[start..<start + width]
+}
+
+// The result borrows whichever input wins at runtime.
+fn longer(left: [U8], right: [U8], width: Int) -> View<U8> from left | right {
+    if left.len() >= right.len() {
+        return left[0..<width]
+    }
+    right[0..<width]
+}
+
+fn total(view: View<U8>) -> Int {
+    sum := 0
+    loop byte in view -> sum += Int.from_u8(byte)
+    sum
+}
+
+fn run() {
+    asset :: [U8{1}, U8{2}, U8{3}, U8{4}, U8{5}]
+    short :: [U8{9}, U8{8}]
+    middle :: window(asset, 1, 3)
+    print(total(middle))
+    // A returned view is usable directly, without an intermediate binding.
+    print(window(asset, 1, 3).len())
+    picked :: longer(short, asset, 2)
+    print(total(picked))
+    table :: Table{bytes: [U8{10}, U8{20}, U8{30}, U8{40}], stride: 2}
+    second :: table.row(1)
+    print(total(second))
+}

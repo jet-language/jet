@@ -66,7 +66,8 @@
     "loss_owner_required_for": "any_comparable_metric_loss",
     "axis_schemas": {
       "live_reload": "gauntlet-axis-live-reload-v1",
-      "memory_safety_fuzz": "gauntlet-axis-memory-safety-fuzz-v1"
+      "memory_safety_fuzz": "gauntlet-axis-memory-safety-fuzz-v1",
+      "compile_throughput": "gauntlet-axis-compile-throughput-v1"
     },
     "axis_publication": "required_axes_complete_and_unblocked",
     "metric_applicability": {
@@ -432,6 +433,52 @@
         }
       ],
       "fairness": ["same generated input file", "same timeout and resource budget", "sanitizer or equivalent finding evidence", "deduplicate each finding before close"]
+    },
+    "compile_throughput": {
+      "status": "required",
+      "schema": "gauntlet-axis-compile-throughput-v1",
+      "basis": "Owner direction 2026-10-02 on #4308/#4310: ~300k lines in under 2 s, nonincremental, all cores by default, explicit single-threaded option; D-EXEC1=A (jet build defaults to O1)",
+      "metric": "clean_build_wall_ns",
+      "command": ["jet", "build", "{entry}"],
+      "harness": "Tools/perf/throughput/harness.mjs",
+      "artifact_discovery": "from the compiler receipt (efficiency note, section 6), never by file mtime",
+      "programs": [
+        {
+          "id": "bench300k",
+          "generator": "node Tools/perf/scaling/generate.mjs mixed --code-lines 300000 --seed 1 {dir}",
+          "source_sha256": "3b8c2aa12bfe483d0c5b16d9ed1c992a42dee07d29bb4115315c3a9de0ca8643",
+          "loc_contract": {"nonblank_noncomment_lines_min": 300000, "record": ["physical_lines", "code_lines", "bytes", "functions", "types", "comptime_items"]},
+          "shape": "shaped after L5 (25.6 lines per function, 53 bytes per line, 4.7% comptime items): 22.6 lines per function, 45 bytes per line, 4.8% comptime items; structs/enums with payloads/traits through trait values/generic functions/closures/value and variant matches/maps/strings/interpolation; one source file of 308 sections until both compilers build one multi-file package (Tools/perf/scaling/mixed.mjs)",
+          "expected_output": "mixed checksum 828630 sections 308\n",
+          "threshold": {"arm": "default", "wall_ns_lt": 2000000000, "statistic": "median_and_max"}
+        },
+        {
+          "id": "selfhost",
+          "source": "Compiler/Bootstrap/sources.list (assembled unit until #3862, then the package graph)",
+          "expected_output": "canonical-stage2-probes",
+          "threshold": {"arm": "default", "lines_per_second_min": 150000, "statistic": "median_and_min"}
+        }
+      ],
+      "arms": [
+        {"id": "default", "jobs": "default"},
+        {"id": "single", "jobs": 1}
+      ],
+      "cache_lane": "clean_full_build: no user checked/object/final-artifact reuse, empty program store, no daemon; shipped prebuilt runtime and Core interface record allowed; one unmeasured warmup for page cache",
+      "samples": 5,
+      "warmups": 1,
+      "machine": {"record": ["cpu_model", "cores", "threads", "memory_bytes", "governor", "kernel"], "reference": "AMD Ryzen 9 7950X3D 16C/32T, 61 GiB"},
+      "record": ["wall_ns", "cpu_user_ns", "cpu_sys_ns", "peak_rss_bytes", "threads_used", "per_phase_wall_ns", "per_phase_cpu_ns", "phase_counters", "artifact_sha256", "diagnostic_sha256", "compiler_sha256", "compiler_build_profile"],
+      "gates": {
+        "determinism": "default and single arms produce byte-identical artifacts and diagnostics",
+        "memory": {"selfhost_peak_rss_bytes_max": 805306368, "bench300k_peak_rss_bytes_max": 1073741824},
+        "phase_budgets": "Tools/perf/throughput/bench.json phase_budgets (SPEED-PLAN.md section 1.3); an overrun must name an owning card"
+      },
+      "output_validation": "the built artifact runs; stdout byte-exact against the golden; failure, mismatch, or a missing sample fails closed",
+      "comparator": "absolute thresholds; strict (equality fails); no averaging across programs, arms, or lanes",
+      "lanes": {
+        "full": "both programs, both arms, 5 samples: at every speed-card close and at milestones",
+        "quick": "bench30k (same generator, --code-lines 30000) frontend phases with JET_TRACE_FILE, 3 samples: every compiler-touching change, regression budget 15% per phase (Tools/perf/baseline.json budgets) against Tools/perf/throughput/quick-baseline.json"
+      }
     }
   },
   "loss_owners": {

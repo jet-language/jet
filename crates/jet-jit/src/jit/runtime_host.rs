@@ -4180,6 +4180,7 @@ impl JitRuntime {
         // report available to stream/task adapters, but leave resident output
         // and exit status untouched.
         Concurrency::set_rich_panic_reason(message.to_string());
+        Concurrency::set_stream_failure(code, message);
         Concurrency::set_rich_panic_report(report.rendered);
         Concurrency::set_local_rich_panic();
     }
@@ -4342,6 +4343,20 @@ impl JitRuntime {
 
     pub(crate) fn set_arithmetic_stop(&mut self, line: u32, message: &str) {
         self.set_runtime_stop(contract_kernel::JET_ARITHMETIC_CODE, line, message);
+    }
+
+    pub(crate) fn set_stream_runtime_stop(&mut self, report: jet_foundation::Outcome::JetStreamFailure) {
+        if Concurrency::in_scheduler_task() {
+            Concurrency::set_stream_failure(&report.code, &report.message);
+            Concurrency::set_rich_panic_reason(report.message);
+            Concurrency::set_rich_panic_report(report.rendered);
+            Concurrency::set_local_rich_panic();
+            return;
+        }
+        if self.trapped.is_some() || self.exit_code.is_some() { return; }
+        self.stderr.push_str(&report.rendered);
+        self.exit_code = Some(jet_foundation::ExitCodes::RUNTIME_PANIC);
+        self.store_trap(&report.message);
     }
 
     pub(crate) fn set_rendered_runtime_stop(&mut self, rendered: String, exit_code: i32) {
@@ -12012,6 +12027,14 @@ pub(crate) fn jit_error(rt: &JitRuntime, handle: i64) -> Option<jet_foundation::
             RuntimeValueKind::String => rt.heap.record_set_string(record, index, raw),
             RuntimeValueKind::Record | RuntimeValueKind::Enum => {
                 rt.heap.record_set_record(record, index, raw)
+            }
+            // A 64-bit fixed-width word uses every bit pattern: never an
+            // exact-integer pointer (#4576).
+            RuntimeValueKind::Int
+                if descriptor.integer_width.is_some_and(|width| width.bits == 64) =>
+            {
+                let unsigned = descriptor.integer_width.is_some_and(|width| !width.signed);
+                rt.heap.record_set_word(record, index, raw, unsigned)
             }
             _ => rt.heap.record_set_int(record, index, raw),
         };

@@ -70,7 +70,8 @@ fn parser_parse_extern_rust(state: &JetParserState) -> Item {
 
 fn parser_parse_c_module(state: &JetParserState) -> Item {
     marker :: parser_parse_marker(&state)
-    kind :: if marker.name == "Import" -> CModuleKind.Extern else -> CModuleKind.Bindgen
+    if marker.name == "Extern" -> parser_add_error_code(&state, "E0060", marker.name_span, "`#Extern module` is retired", "C library overlays use the same import spelling as foreign callables", "write `#Import module` instead")
+    kind :: if marker.name == "Import" || marker.name == "Extern" -> CModuleKind.Extern else -> CModuleKind.Bindgen
     parser_expect(&state, TOKEN_KW_MODULE, "after `#{marker.name}` in a C module declaration")
     root :: parser_expect_name(&state, "after `module` in a C module path")
     if root.payload.decoded != "c" {

@@ -167,6 +167,10 @@ IR with these choices, which the Jet lowering keeps or replaces as noted:
 | `View<str>` | an owned String handle holding the window's text: the `_view` kernels run their owned twins (`jet_string_after`, `jet_string_before`, `jet_unicode_trim`); costs one allocation the zero-copy `&str` avoids, otherwise unobservable (a window is only read) | `ptr` | `jet_rt_string_drop` |
 | `Distinct`/`Alias` types | as their base | — | — |
 
+Result boxes reserve at least one eight-byte payload word after the tag,
+including zero-sized payloads. Runtime marshaling uses the same minimum,
+alignment and size as native construction and drop glue.
+
 Sizes: a word, handle or box pointer is 8 bytes (align 8), a Bool 1 byte, Unit
 0. An inline aggregate is 8-aligned and padded to whole words, so copies move
 words; a member sits at the next multiple of its alignment, and a recursive
@@ -409,6 +413,50 @@ must not. Canonical Core identities override a source layout only when the gener
 name rules replace that exact identity; source-owned enums and records retain their
 native constructors and matches. Tuple adapters write zeroed word slots, and lowering
 copies each item into the tuple's naturally aligned native field offset.
+A MIR-defined Core record (the general `Err`, `IOError`, `IOContext`; schemas in
+`Lower/Records.jet`) keeps its native layout and crosses a route as its runtime
+type's handle: a generated `record.out` helper builds it through
+`jet_rt_record_new_<R>[_<Variant>]` (String handles and String/Int Option boxes
+borrowed, nested record handles taken), and `record.in` rebuilds the native value
+through `jet_rt_record_tag_<R>` and `jet_rt_record_get_<R>_<member>` (owned
+results; an Option getter returns its tag and writes one out slot). A fieldless
+Core enum member crosses as its variant index. A record argument's handle is
+dropped after the call; a returned handle is dropped after conversion. Records
+render through their runtime type's own Display, Show and Debug, as generated
+Rust does, and a failing entry's `Err` reaches `jet_rt_entry_error_exit_err` the
+same way.
+
+Lazy collection routes use the existing `Collections.rs` and `LoopCursor.rs`
+kernels through `CAbiIter.rs`; lowering does not recreate their iteration or
+failure policy. A copied descriptor tree carries stride, clone/drop and checked
+trait callbacks plus recursive element/error descriptors. Slots up to three words
+are stored inline; a borrowed cursor projection retains the buffered owner until
+advance, while the native cursor's taken flag prevents returning it twice.
+Callbacks follow MIR parameter access: Read lends a slot, Move transfers an owned
+input or clones a borrowed input, and the returned consume mask disarms only moved
+owners. Write uses a genuinely mutable owned local; a borrowed kernel input may
+not be made mutable by casting its shared reference. That unsupported adaptation
+is reported as a native lowering failure, not silently changed to Read.
+`Tests/prepare-call-runtime.mjs --allparts` refreshes the current C ABI, generated
+routes and iterator adapters together for full-pack proofs; its default mode
+retains an emitted seed's paired route set.
+
+Task and channel adapters share the iterator's typed slot descriptors rather
+than introducing another erased value ABI. A native SendFn body writes its
+result directly into an owned slot; Sema's sendability facts authorize moving
+the body and its captures to a scheduler thread. The existing task, task-group
+and channel kernels retain responsibility for ordering, cancellation and error
+policy. Consuming operands register as ownership sinks before lowering place
+reads: a task group cannot destructively consume a borrowed list header, and
+join/detach cannot consume a borrowed task. Loaded code and its destructors must
+remain mapped until every task body and returned value owner has finished.
+Opaque runtime-owned enums do not expose a native discriminant or payload
+layout. Their construction, variant tests and payload projections report a
+native unsupported issue unless an explicit record adapter supplies that layout.
+In particular, `TaskFailure` is a Rust-owned enum and `Closed` can be a
+zero-sized `Box` with dangling address 1; neither may be read at pointer + 0.
+The rejection fixtures cover Closed variant tests/construction and TaskFailure
+payload reads and assert that no zero-offset load was emitted for their body.
 Linking: the runtime rlib plus a staticlib wrapper crate
 (`extern crate jet_runtime;`, `--crate-type staticlib`) gives
 `libjet_runtime_c.a`; link the object with it and `-lpthread -ldl -lm`.
@@ -588,7 +636,6 @@ for kernels not yet instrumented. The runtime ABI alone is not a native-prep
 selection policy or proof of end-to-end compiler diagnostic parity.
 `Tests/comptime-runtime.c` exercises the actual exports in exec'd children,
 including successful scope reuse and fuel charged from a callback thread.
-
 ## In-process linking
 
 `Image/StaticLink.jet` (`x64_link_executable(names, bufs)`, #4549) links
@@ -752,10 +799,17 @@ A system call wrapper returns the kernel's result: a value, or `-errno` in
 | `os_protect(address, size, protection)`, `os_unmap(address, size)` | mprotect(2), munmap(2) over whole pages |
 | `os_exit(status)` | exit_group(2) |
 | `os_store_word(address, value)` | One 8-byte store. `#[Unsafe, FFI(asm)]` |
+| `os_load_word(address)`, `os_load_byte(address) -> Int` | Read one word/byte from caller-owned readable memory. `#[Unsafe, FFI(asm)]` |
 | `os_copy_in(address, bytes)` | Copy a `[U8]` in, one little-endian word at a time |
 | `os_call_address(address, argument) -> Int` | Call-code-address (below). `#[Unsafe, FFI(asm)]` |
+| `os_call_address_two(address, first, second) -> Int` | Call-code-address with two System V word arguments. `#[Unsafe, FFI(asm)]` |
 | `os_library_open(path)`, `os_library_symbol(library, name)` | Bind runtime exports by name through the dynamic linker (today's runtime only, below) |
 | `os_page_round(size)`, `OS_PAGE_SIZE`, `OS_PROT_*`, `OS_SYS_*` | Helpers and constants |
+
+FFI assembly functions use the ordinary braced function body immediately after
+their return type, as the `os_call_address` example below shows. Source gates use
+the dev release Jet checker so this OS layer and the rest of the assembled
+compiler share the same accepted grammar.
 
 Threads come next, on the same `os_syscall`: `clone3` with a stack from
 `os_map` and a second assembly entry that switches to the new stack and
@@ -793,7 +847,7 @@ is spelled with the existing inline-assembly mechanism (D-FFI-ASM1,
 D-FFI-ASMOPS1) rather than a new builtin, so it adds no syntax and no ballot:
 
     #[Unsafe("calls machine code; …"), FFI(asm)]
-    fn os_call_address(address: Int, argument: Int) -> Int -> {
+    fn os_call_address(address: Int, argument: Int) -> Int {
         """
         mov rdi, {argument}
         call {address}
@@ -1086,3 +1140,67 @@ compares stdout with the golden; each verdict names its leg (`static` or
 `hosted`). `--stage` and `--until` bound the stages that run.
 `<outdir>/summary.txt` counts pass, wrong, unsupported and harness verdicts and
 ranks the blockers by how many goldens each one stops.
+Each executed native case retains stdout, stderr and process status/signal/error
+receipts so all wrong-output, stop and crash causes can be diagnosed as one batch.
+Set `JET_MIR_EMIT=1` to regenerate checked MIR with the current reference
+compiler's `emit --rust` seam without compiling or executing its Rust output.
+The native executable still runs against the golden; the dump receipt is
+explicitly an emission receipt, not a reference-execution pass.
+For independently queued shards, `--case-list FILE` selects exact newline-separated
+golden stems, rejecting empty, duplicate or unknown rows. Give each shard its own
+output directory and decoder unit; share only the checked MIR input corpus.
+
+An interrupted lowering batch can resume with `JET_LOWER_RESUME=1`: its original
+`lower/unit.jet` is required and kept frozen; completed `.o` files and nonempty
+issue reports are retained rather than lowered again. Replay runtime linking for
+any object interrupted before its executable/link report was written, then run
+the comparison over fresh working directories. The harness refuses new MIR
+emissions, driver builds and shard processes while `~/.cache/jet-dev/proofq/PAUSE` exists; queue the
+continuation through proofq after the compile gate, not as a direct heavy run.
+
+### Comparing the two front-end feeds
+
+`JetDriver.jet_driver_compile_mir` runs the same checked pipeline and optimizer
+without invoking the Rust emitter. The Jet CLI's native `build` selects this
+path; release emission still selects `jet_driver_compile`. Host supplies the
+exact versioned compiler identity through `JET_COMPILER_IDENTITY` (canonical
+`name@version#build-id`), alongside `JET_TOOLCHAIN_ROOT` for Core sources.
+Native builds hand the live `MIRProgram` to `lir_lower_entry`, generate the
+object, and use the in-process linker with the packaged runtime pack.
+
+`Tests/run-front-feed.mjs` selects **every** `pass` row in an explicit native
+`results.tsv` baseline. It assembles the compiler source inventory,
+`Tests/FrontFeed.jet`, and schema-generated observation codecs into one probe.
+The Jet feed passes the driver's live MIR directly to the backend; only the
+independent Rust feed uses Debug conversion. Both feeds link the same runtime
+pack and run in separate, identically staged working directories with the
+golden's stdin. The gate requires matching stdout, stderr, and status between
+feeds, and successful stdout agreement with the golden for each feed.
+
+```sh
+node Compiler/JetBackend/Tests/run-front-feed.mjs OUT \
+  --baseline NATIVE/results.tsv --rust-mir CACHED/mir --assemble
+# Build OUT/probe/unit.jet with the reference compiler's release backend.
+JET_RUNTIME_PACK=RUNTIME/jet_runtime.pack.o \
+  node Compiler/JetBackend/Tests/run-front-feed.mjs OUT \
+  --baseline NATIVE/results.tsv --rust-jet REFERENCE_JET --probe PROBE_BINARY
+```
+
+`--rust-jet` regenerates checked MIR for the staged source via `emit --rust`
+and the MIR observation hook; it does not execute a different reference tier.
+The Debug converter follows the bootstrap codec's memo bound split, comptime
+field spelling, fixed-width trap-route derivation, and preformatted string
+interpolation. A missing checked Copy fact or payload is a stale-schema error,
+not an invented zero/default. Regenerate such cached dumps before differential
+execution. `node Compiler/JetBackend/Tests/test-front-feed-codec.mjs` exercises
+these mappings and strict token-stream observation without a full compiler
+build.
+
+Full MIR observations are retained per case. `gaps.json` and `gaps.tsv` rank
+all observed schema, type, layout/ABI, ownership/drop, route, and generic
+differences by the number of distinct affected goldens. IDs scoped to source
+authority are compared through symbolic names where pairing is unambiguous;
+ambiguous pairing is reported, never treated as equality. `--bootstrap JETC0`
+provides a front-end diagnostic census before the probe can be built.
+Preparation and a receipt-only census never establish differential parity;
+only `summary.json` with `differential_verified: true` does.

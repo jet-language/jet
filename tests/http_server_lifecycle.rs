@@ -167,7 +167,7 @@ mod jet_std {
     pub struct JetMIME {
         pub top: String,
         pub sub: String,
-        pub params: Vec<(String, String)>,
+        pub parameters: Vec<Vec<String>>,
     }
 
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");

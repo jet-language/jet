@@ -77,6 +77,19 @@ fn sema_window_collect_functions(items: [Item], functions: &[Func]) {
 pub fn sema_fixed_length_write_params(items: [Item]) -> [String] Never! {
     functions := [Func]{}
     sema_window_collect_functions(items, &functions)
+    sema_window_fixed_length_params(functions)
+}
+
+// The same bundle-wide fact over every module of `graph`, in module order:
+// each module's items are read in place rather than first copied into one
+// bundle list.
+pub fn sema_fixed_length_write_params_in_graph(graph: SemaRegistrationGraph) -> [String] Never! {
+    functions := [Func]{}
+    loop module_index in 0..<graph.modules.len() -> sema_window_collect_functions(graph.modules[module_index].program.items, &functions)
+    sema_window_fixed_length_params(functions)
+}
+
+fn sema_window_fixed_length_params(functions: [Func]) -> [String] Never! {
     // Name -> declaration positions in bundle order: one census answers both
     // the ambiguity count and every onward-edge lookup.
     positions := [String:[Int]]{}

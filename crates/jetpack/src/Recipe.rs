@@ -2725,8 +2725,8 @@ fn step_command(step: &BuildStep) -> String {
 
 /// Record trust for a recipe hash in the canonical trust store. Returns `true`
 /// when the hash is new and `false` when the store already contains it.
-pub fn trust_first_build(recipe_hash: &str, trust_store: &Path) -> bool {
-    crate::Trust::grant_hash(trust_store, recipe_hash)
+pub fn trust_first_build(recipe_hash: &str, trust_store: &Path, project_dir: &Path) -> Result<bool, Vec<Diagnostic>> {
+    crate::Trust::grant_hash(trust_store, project_dir, recipe_hash)
 }
 
 // ── Diagnostics ───────────────────────────────────────────────────────────────
@@ -3146,7 +3146,7 @@ mod tests {
         };
         let h = recipe.recipe_hash();
         assert!(
-            trust_first_build(&h, &trust),
+            trust_first_build(&h, &trust, &base).unwrap(),
             "first build is newly trusted"
         );
         assert!(
@@ -3159,7 +3159,7 @@ mod tests {
             "one canonical trust record is written"
         );
         assert!(
-            !trust_first_build(&h, &trust),
+            !trust_first_build(&h, &trust, &base).unwrap(),
             "second build is already trusted"
         );
         std::fs::remove_dir_all(&base).ok();

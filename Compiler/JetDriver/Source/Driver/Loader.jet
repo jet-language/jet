@@ -20,6 +20,10 @@ use jet_foundation.[
     Program,
     Span,
     ast_program,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
+    compiler_threads_part_of,
+    compiler_threads_partition,
     core_module_export,
     core_module_retirement,
     diagnostic_with_source_path,
@@ -2046,19 +2050,52 @@ fn jet_driver_mask_core_package(source: String) -> String {
     String.from_bytes(bytes) ?? ~source
 }
 
+// One unit's parse input, resolved before any parse runs so a parse thread
+// reads only its own source text, never the request.
+enum JetDriverParseJob {
+    // A user source file.
+    Source(text: String)
+    // An embedded Core module and the public members that have crossed the
+    // Core cutover.
+    Core(text: String, owned_members: [String])
+    // A Core unit whose row is out of range: an empty program.
+    Missing
+}
+
+fn jet_driver_parse_job(request: JetDriverCompileRequest, unit: JetDriverSourceUnit) -> JetDriverParseJob {
+    if !jet_driver_unit_is_core(unit) -> return JetDriverParseJob.Source{text: request.authorized_sources.roots[unit.root_index].files[unit.file_index].source}
+    if unit.file_index < 0 || unit.file_index >= request.core_sources.len() -> return JetDriverParseJob.Missing
+    row :: request.core_sources[unit.file_index]
+    JetDriverParseJob.Core{text: row.source, owned_members: row.owned_members}
+}
+
+fn jet_driver_parse_job_bytes(job: JetDriverParseJob) -> Int Never! {
+    if job == {
+        .Source(text) -> text.len()
+        .Core(text, _) -> text.len()
+        .Missing -> 0
+    }
+}
+
+fn jet_driver_parse_one(job: JetDriverParseJob) -> ParseResult {
+    if job == {
+        .Source(text) -> parse_source(text.bytes())
+        .Core(text, owned_members) -> jet_driver_parse_core_source(text, owned_members)
+        .Missing -> ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}
+    }
+}
+
 // Parse one embedded Core module. Source metadata selects the public members
 // that have crossed the Core cutover: private helpers and declarations stay,
 // but a public function outside `owned_members` is dropped so its calls keep
 // the compiler-owned route. Parser lints never reach user output.
-fn jet_driver_parse_core_source(core_sources: [JetDriverCoreSource], unit: JetDriverSourceUnit) -> ParseResult {
-    if unit.file_index < 0 || unit.file_index >= core_sources.len() -> return ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}
-    row :: core_sources[unit.file_index]
-    parsed := parse_generated_source(jet_driver_mask_core_package(row.source).bytes())
+fn jet_driver_parse_core_source(text: String, owned_members: [String]) -> ParseResult {
+    parsed := parse_generated_source(jet_driver_mask_core_package(text).bytes())
     kept := [Item]{}
     loop item in parsed.program.items {
         if item == {
             .Func(value) -> {
-                if value.is_pub && !row.owned_members.contains(value.name) -> next
+                if value.is_pub && !owned_members.contains(value.name) -> next
             }
             else -> {}
         }
@@ -2070,6 +2107,84 @@ fn jet_driver_parse_core_source(core_sources: [JetDriverCoreSource], unit: JetDr
         if diagnostic.severity != DIAGNOSTIC_LINT -> &diagnostics.push(diagnostic)
     }
     ParseResult{program: ^parsed.program, diagnostics: diagnostics}
+}
+
+// One parse thread's jobs, held last-first; parsed and returned first-first.
+fn jet_driver_parse_part(jobs: [JetDriverParseJob]) -> [ParseResult] {
+    results := [ParseResult]{}
+    index := jobs.len()
+    loop index > 0 {
+        index -= 1
+        &results.push(jet_driver_parse_one(jobs[index]))
+    }
+    results
+}
+
+// Parses the parts popped from `parts` (first part on top), one task per
+// part and the last part on this thread. Returns each part's results, last
+// part first, so popping yields them in part order.
+fn jet_driver_parse_parts(parts: ^[[JetDriverParseJob]]) -> [[ParseResult]] {
+    remaining := ^parts
+    jobs :: &remaining.pop() ?? return [[ParseResult]]{}
+    if remaining.len() == 0 -> return [[ParseResult]]{jet_driver_parse_part(jobs)}
+    parsed := [[ParseResult]]{}
+    task.group parse_threads {
+        first :: task jet_driver_parse_part(jobs)
+        parsed = jet_driver_parse_parts(^remaining)
+        &parsed.push(^^first.join() ?? panic(compiler_threads_failure_text(err)))
+    }
+    parsed
+}
+
+// A parse thread is admitted for at least this much source, so a small
+// program parses on the calling thread.
+JET_DRIVER_PARSE_MIN_BYTES_PER_THREAD :: 262144
+// Transient parser memory per source byte of the largest file a thread may
+// parse (tokens, line starts, and parser state beside the retained program).
+JET_DRIVER_PARSE_SCRATCH_PER_BYTE :: 64
+
+// Parses `pending[first..]`, the units queued since the last wave, on the
+// admitted threads; the results come back in `pending` order, last-first, so
+// the load loop pops them in queue order. Parsing reads nothing but each
+// unit's own text, so the waves give the same programs and diagnostics as
+// parsing each unit when the loop reaches it.
+fn jet_driver_parse_wave(request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], pending: [Int], first: Int) -> [ParseResult] {
+    jobs := [JetDriverParseJob]{}
+    weights := [Int]{}
+    total := 0
+    largest := 0
+    loop position in first..<pending.len() {
+        job :: jet_driver_parse_job(request, source_units[pending[position]])
+        bytes :: jet_driver_parse_job_bytes(job)
+        &weights.push(bytes)
+        total += bytes
+        if bytes > largest -> largest = bytes
+        &jobs.push(job)
+    }
+    workers :: compiler_threads_admit(request.compiler_threads, jobs.len(), total, JET_DRIVER_PARSE_MIN_BYTES_PER_THREAD, largest * JET_DRIVER_PARSE_SCRATCH_PER_BYTE, 0)
+    parts := [[JetDriverParseJob]]{}
+    if workers <= 1 {
+        &jobs.reverse()
+        &parts.push(^jobs)
+    } else {
+        bounds :: compiler_threads_partition(weights, workers)
+        loop _ in 0..<workers -> &parts.push([JetDriverParseJob]{})
+        part := workers - 1
+        loop {
+            job :: &jobs.pop() ?? break
+            part = compiler_threads_part_of(bounds, part, jobs.len())
+            &parts[part].push(job)
+        }
+        &parts.reverse()
+    }
+    parsed := jet_driver_parse_parts(^parts)
+    results := [ParseResult]{}
+    loop {
+        done :: &parsed.pop() ?? break
+        &results.extend(done)
+    }
+    &results.reverse()
+    results
 }
 
 fn jet_driver_core_source_segments(path: String, source: String) -> [SemaSourceSegment] Never! {
@@ -2318,7 +2433,20 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
     core_generated := [MIRSourceFile]{}
     names_url_carrier := false
     pending_index := 0
+    // The current parse wave's results, last-first: every unit queued when
+    // the wave starts is parsed at once, on the admitted compiler threads.
+    parsed := [ParseResult]{}
     loop pending_index < pending.len() {
+        if parsed.len() == 0 {
+            wave_size :: pending.len() - pending_index
+            if request.trace_sink == .Val(sink) -> sink.begin("parse", if wave_size == 1 -> source_units[pending[pending_index]].relative_path else -> "{wave_size} files", pending_index, pending.len())
+            parsed = jet_driver_parse_wave(request, source_units, pending, pending_index)
+            if request.trace_sink == .Val(sink) {
+                items := 0
+                loop wave_result in parsed -> items += wave_result.program.items.len()
+                sink.end("parse", items)
+            }
+        }
         source_unit_index := pending[pending_index]
         pending_index += 1
         // A copy: loading a Core import appends to `source_units`.
@@ -2336,9 +2464,7 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
                 }
             }
         }
-        if request.trace_sink == .Val(sink) -> sink.begin("parse", unit.relative_path, pending_index - 1, pending.len())
-        parse_result := if is_core -> jet_driver_parse_core_source(request.core_sources, unit) else -> parse_source(request.authorized_sources.roots[unit.root_index].files[unit.file_index].source.bytes())
-        if request.trace_sink == .Val(sink) -> sink.end("parse", parse_result.program.items.len())
+        parse_result := &parsed.pop() ?? ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}
         parse_diagnostic_start :: diagnostics.len()
         loop diagnostic in parse_result.diagnostics -> &diagnostics.push(diagnostic)
         loop parse_diagnostic_index in parse_diagnostic_start..<diagnostics.len() {

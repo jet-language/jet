@@ -607,9 +607,9 @@ enum NarrowError { Narrow }
 #Error
 enum OtherError { Other }
 
-fn narrow() -> Int NarrowError! -> Err(NarrowError.Narrow)
+fn narrow() -> Int NarrowError! { Err(NarrowError.Narrow) }
 
-fn widen() -> Int (NarrowError | OtherError)! -> narrow()
+fn widen() -> Int (NarrowError | OtherError)! { narrow() }
 
 fn run() {
     print(widen() ?? 7)
@@ -653,9 +653,9 @@ fn source(value: Int) -> Int {
     return value
 }
 
-fn add(value: Int) -> Int -> value + 1
+fn add(value: Int) -> Int { value + 1 }
 
-fn is_zero(value: Int) -> Bool -> value == 0
+fn is_zero(value: Int) -> Bool { value == 0 }
 
 fn argument(value: Int) -> Int {
     return add(source(value))
@@ -677,7 +677,7 @@ fn branch_value(value: Int) -> Int {
 }
 
 fn closure(value: Int) -> Int {
-    worker :: (n: Int) Int -> source(n) + 1
+    worker :: (n: Int) -> source(n) + 1
     return worker(value)
 }
 
@@ -722,8 +722,8 @@ fn source_flag(value: Int) -> Bool {
     return value > 1
 }
 
-fn add_one(value: Int) -> Int -> value + 1
-fn retain_flag(value: Bool) -> Bool -> value
+fn add_one(value: Int) -> Int { value + 1 }
+fn retain_flag(value: Bool) -> Bool { value }
 
 fn run() {
     values :: [1, 2]
@@ -1898,7 +1898,7 @@ fn outer_result() -> Int {
     result
 }
 
-fn identity(value: Int) -> Int -> value
+fn identity(value: Int) -> Int { value }
 
 fn nested_binary_exit() -> Int {
     result :: loop {

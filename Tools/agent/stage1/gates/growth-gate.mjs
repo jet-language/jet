@@ -16,8 +16,11 @@ try {
     const rung=Object.fromEntries(headers.map((h,i)=>[h,line.split('\t')[i]])),dir=join(root,rung.rung);
     if(!existsSync(join(dir,'result.env'))) continue;
     recorded.add(rung.rung);
-    const result=env(join(dir,'result.env'));
-    if(result.status!=='ok') invalid.push(`${rung.rung}: failed compilation (rc=${result.rc})`);
+    const result=env(join(dir,'result.env')),trapFree=result.status==='ok';
+    // Only trap-free runs are growth evidence: a failed (keep-going) compile
+    // reruns phases per trap (optimize per failing function), so its summed
+    // spans measure the rerun count, not the unit's growth.
+    if(!trapFree) invalid.push(`${rung.rung}: failed compilation (rc=${result.rc}); excluded from fits`);
     try {
       const file=join(dir,'trace.json'),balances=new Map();
       // The human reader tolerates malformed/truncated streaming input. A HARD
@@ -36,7 +39,8 @@ try {
       if(!Number.isFinite(wall) || wall<=0 || !Number.isFinite(bytes) || bytes<=0) throw new Error('invalid wall/unit size');
       const rows=phases(trace,wall);
       for(const [name,row] of rows) if(row.open) {invalid.push(`${rung.rung}: unfinished ${name} excluded from fit`);rows.delete(name);}
-      runs.push({bytes,rows});
+      if(trapFree) runs.push({bytes,rows});
+      else for(const [name,row] of rows) console.log(`EXCLUDED ${rung.rung} ${name} seconds=${row.secs.toFixed(6)}`);
     } catch(e) {invalid.push(`${rung.rung}: ${e.message}`);}
   }
   for(const name of requested) if(!recorded.has(name)) invalid.push(`${name}: requested rung has no result`);
