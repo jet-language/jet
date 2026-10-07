@@ -276,7 +276,10 @@ impl BootstrapRunCompletionOwner {
             });
         };
         let (retirement_requested, retained_roots) = self.resource_liveness()?;
-        if retained_roots != 0 || !retirement_requested {
+        // An owner allowed to retire requests retirement itself below: the
+        // AOT factory lease returns its resource session unrequested (D-EXEC1),
+        // so waiting for an outside request would leave it Pending forever.
+        if retained_roots != 0 || (!retirement_requested && !self.allow_resource_retirement) {
             return Ok(BootstrapRunCompletionFinish::Pending {
                 retirement_requested,
                 retained_roots,
@@ -1507,4 +1510,55 @@ pub(crate) fn bootstrap_artifact_build_id(
             "cannot compute private compiler artifact identity: {error}"
         ))
     })
+}
+
+#[cfg(test)]
+mod completion_owner_tests {
+    use super::{BootstrapRunCompletionFinish, BootstrapRunCompletionOwner, SourceResourceSession};
+
+    fn finish_until_settled(owner: &BootstrapRunCompletionOwner) -> BootstrapRunCompletionFinish {
+        loop {
+            match owner.finish().expect("finish a bootstrap completion owner") {
+                BootstrapRunCompletionFinish::Ready(completions) => drop(completions),
+                settled => return settled,
+            }
+        }
+    }
+
+    // The AOT factory lease hands back its Source resource session without a
+    // retirement request (factory and optimizer-evidence modes). An owner
+    // allowed to retire must retire it, not report Pending forever.
+    #[test]
+    fn allowed_owner_retires_an_unrequested_resource_session() {
+        let scope = jet_evalhost::SourceExecutionCompletionScope::new();
+        let mut owner = BootstrapRunCompletionOwner::new(scope);
+        let resources = SourceResourceSession::new();
+        owner.set_resources(resources.clone());
+        assert!(matches!(
+            finish_until_settled(&owner),
+            BootstrapRunCompletionFinish::Pending { retirement_requested: false, retained_roots: 0, .. }
+        ));
+        owner.allow_resource_retirement();
+        match finish_until_settled(&owner) {
+            BootstrapRunCompletionFinish::Complete { failures } => assert!(failures.is_empty()),
+            other => panic!("an allowed owner left its resources unretired: {other:?}"),
+        }
+        assert!(resources.arena().is_retired().expect("retirement state"));
+    }
+
+    #[test]
+    fn allowed_owner_waits_for_retained_roots() {
+        let scope = jet_evalhost::SourceExecutionCompletionScope::new();
+        let mut owner = BootstrapRunCompletionOwner::new(scope);
+        let resources = SourceResourceSession::new();
+        owner.set_resources(resources.clone());
+        owner.allow_resource_retirement();
+        let root = resources.retain_root().expect("retain a Source root");
+        assert!(matches!(
+            finish_until_settled(&owner),
+            BootstrapRunCompletionFinish::Pending { retained_roots: 1, .. }
+        ));
+        drop(root);
+        assert!(matches!(finish_until_settled(&owner), BootstrapRunCompletionFinish::Complete { .. }));
+    }
 }
