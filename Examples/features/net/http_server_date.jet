@@ -35,11 +35,11 @@ fn run() (HTTPError | NetError | TaskFailure)! {
         server.serve_once_listener(listener, mux) ?? panic("serve failed")
     }
     root :: http.get("http://{addr}/") ?? panic("GET / failed")
-    print("root date shape: {imf_fixdate_shape(&root.header("date") ?? "")}")
+    print("root date shape: {imf_fixdate_shape(root.header("date") ?? "")}")
     missing :: http.get("http://{addr}/missing") ?? panic("GET /missing failed")
-    print("404 date shape: {imf_fixdate_shape(&missing.header("date") ?? "")}")
+    print("404 date shape: {imf_fixdate_shape(missing.header("date") ?? "")}")
     dated :: http.get("http://{addr}/dated") ?? panic("GET /dated failed")
-    print("handler date: {&dated.header("date") ?? "missing"}")
+    print("handler date: {dated.header("date") ?? "missing"}")
     wire :: net.tcp_connect(addr) ?? panic("connect failed")
     request := "".bytes()
     loop line in ["GET / HTTP/1.1", "Host: local", "Connection: close", ""] {
