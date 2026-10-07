@@ -313,6 +313,9 @@ fn mir_pass_inline_plan(
                 if mapped_value == .Val(returned) -> &plan.return_incoming.push(MIRPhiIncoming{block: mir_pass_inline_block(maps, block.id), value: returned})
                 MIRTerminator.Jump{target: continuation}
             }
+            // A callee's stop edge must reach the caller's own cleanup, which a
+            // remapped Stopped cannot: a stop-point body is never inlined.
+            .Poll(_, _, _) | .Stopped -> return MIRInlinePlanResult{plan: None, error: None}
             else -> mir_pass_inline_terminator(block.terminator, maps)
         }
         &plan.blocks.push(MIRBasicBlock{id: mir_pass_inline_block(maps, block.id), span: block.span, instructions: instructions, terminator: terminator})
@@ -524,6 +527,9 @@ fn mir_pass_inline_terminator(terminator: MIRTerminator, maps: MIRInlineMaps) ->
         .Break(target, value) -> MIRTerminator.Break{target: mir_pass_inline_block(maps, target), value: mir_pass_inline_optional_value(maps, value)}
         .Continue(target) -> MIRTerminator.Continue{target: mir_pass_inline_block(maps, target)}
         .Unreachable(reason) -> MIRTerminator.Unreachable{reason: reason}
+        // Unreachable from planning (a stop-point body is never inlined).
+        .Poll(kind, resume, stop) -> MIRTerminator.Poll{kind: kind, resume: mir_pass_inline_block(maps, resume), stop: mir_pass_inline_block(maps, stop)}
+        .Stopped -> MIRTerminator.Stopped
     }
 }
 
