@@ -76,15 +76,21 @@ fn mime_and_email_have_one_semantic_home() {
 
 #[test]
 fn sketches_have_one_semantic_home() {
+    // HLL/count-min/reservoir/TDigest are ordinary Jet carriers in Core/data/sketch*.jet;
+    // no tier may regain the deleted Rust kernel.
     let kernel = "Core/Sketch.rs";
-    for (path, tier) in [
-        ("crates/jet-codegen/src/Codegen/mod.rs", "AOT"),
-        (
-            "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
-            "comptime/interpreter",
-        ),
+    for path in [
+        "crates/jet-codegen/src/Codegen/mod.rs",
+        "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
+        "Compiler/JetCodegen/Source/Emit/RuntimePrefix.jet",
     ] {
-        assert!(read(path).contains(kernel), "{tier} must include {kernel}");
+        assert!(!read(path).contains(kernel), "{path} must not include {kernel}");
+    }
+    assert!(!Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("crates/jet-codegen/src/Prelude/Core/Sketch.rs")
+        .exists());
+    for path in ["Core/data/sketch/hll.jet", "Core/data/sketch/cms.jet", "Core/data/sketch/reservoir.jet"] {
+        assert!(read(path).contains("#Test"), "{path} must cover its sketch policy");
     }
 
     let pure = read("crates/jet-comptime/src/Comptime/CorePureParity.rs");
