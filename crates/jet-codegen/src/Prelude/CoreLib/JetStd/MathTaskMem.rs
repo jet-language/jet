@@ -943,7 +943,10 @@ macro_rules! jet_lane_show {
     // D-CONC-STREAM1=A / D-CANCELMODEL1=C: the canonical pull/cancellation
     // protocol lives in the shared Prelude scheduler. This module only
     // exposes it under the `jet_std` namespace used by emitted AOT code.
-    pub use super::{jet_stream_task, JetStream, JetStreamSender};
+    pub use super::{
+        jet_stream_task, JetKeyedStream, JetLateEventDisposition, JetStream, JetStreamEvent,
+        JetStreamSender, JetStreamWindow,
+    };
 
     /// D-TASKRUNTIME1=A: one-shot timer channel; wakes through the scheduler timer wheel.
     pub fn after(ms: i64) -> JetReceiver<()> {

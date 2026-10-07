@@ -74,6 +74,11 @@ Exact Jet integers are narrowed only where the native field representation
 requires a host word; compile-time folding must not bypass that adaptation.
 Timer adapters marshal a checked `Duration` into scheduler milliseconds;
 interval payloads remain exact Jet `Int` values rather than host integers.
+The shared task runtime exposes the event-time stream carriers through the same
+native namespace as `Stream`: events, keyed streams, windows, and late-event
+dispositions must all be nameable by emitted functions and local slots. Their
+runtime definitions stay shared; the namespace projection does not create new
+storage or a second stream protocol.
 
 A Jet read parameter does not imply a borrowed host argument. The checked
 native route's borrow mask decides whether the emitter lends the place or

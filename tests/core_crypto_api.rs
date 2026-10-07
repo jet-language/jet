@@ -26,6 +26,45 @@ fn run() {
 }
 
 #[test]
+fn secret_decode_uses_the_source_owned_text_codec() {
+    let output = jet::compile(
+        r#"
+use core.crypto as crypto
+use core.encoding.json as json
+
+#[Decode]
+struct Config {
+    #Redact password: crypto.Secret
+}
+
+fn run() {
+    value :: json.decode<Config>("{{\"password\":\"credential\"}}") ?? return
+    if value.password.bytes != "credential".bytes() -> panic("secret decode bytes")
+    if crypto.Secret.decode(DataTree.Int(42)) == .Ok(_) -> panic("non-text secret accepted")
+}
+"#,
+    )
+    .expect("Secret Decode must lower through its checked source implementation");
+    assert!(
+        output.rust.contains("impl __jet_Decode for __jet__x3ccorelib_x3e_sCore_scrypto_c_cCore_scrypto_scrypto_djet_c_cSecret"),
+        "the source Secret must own the generated Decode implementation"
+    );
+}
+
+#[test]
+fn a_user_secret_name_does_not_acquire_a_builtin_decoder() {
+    let errors = jet::compile(
+        r#"
+use core.encoding.json as json
+struct Secret { bytes: [U8] }
+fn run() { value :: json.decode<Secret>("\"credential\"") ?? return }
+"#,
+    )
+    .expect_err("a user Secret needs its own Decode implementation");
+    assert!(errors.iter().any(|error| error.code == "E2411"));
+}
+
+#[test]
 fn crypto_file_helpers_accept_typed_paths_with_mixed_call_labels() {
     let _output = jet::compile(
         r#"

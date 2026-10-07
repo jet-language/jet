@@ -166,11 +166,10 @@ pub fn sema_serde_type_is_admissible(environment: SemaScopeEnvironment, ty: Type
             }
             true
         }
-        .Tagged(marker, inner) -> if marker == .Internal(_) -> direction == SemaSerdeDirection.Decode && inner == Type.Named{name: "Secret"} else -> false
+        .Tagged(_, _) -> false
         .Named(name) -> {
             if name == "Decimal" || name == "Date" || name == "LocalDate" || name == "LocalTime" || name == "DateTime" || name == "Duration" -> return true
             if sema_serde_core_data_name(environment, name, direction) -> return true
-            if direction == SemaSerdeDirection.Decode && name == "Secret" -> return true
             if sema_serde_generic_bound(environment, name, direction) -> return true
             definition :: sema_serde_type_definition(environment, name) ?? return false
             sema_serde_implementation(environment, definition, direction)

@@ -433,18 +433,8 @@ pub(crate) fn is_decodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
         Type::Map { key, value, .. } => {
             matches!(**key, Type::String) && is_decodable_ty(value, reg)
         }
-        Type::Tagged { marker, inner }
-            if matches!(
-                marker,
-                crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)
-            ) && matches!(inner.as_ref(), Type::Named(name) if name == "Secret") =>
-        {
-            true
-        }
         Type::Named(n) => {
             n == "Decimal"
-                || n == "Secret"
-                || n.rsplit_once('.').is_some_and(|(_, leaf)| leaf == "Secret")
                 || matches!(
                     n.as_str(),
                     "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Duration"

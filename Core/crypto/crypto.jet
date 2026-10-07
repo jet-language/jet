@@ -101,6 +101,15 @@ pub struct Secret {
     pub fn from_bytes(bytes: [U8]) -> Secret Never! { Secret{bytes: bytes} }
 }
 
+// D-CONFIG-ENV1: configuration codecs construct the nominal secret from text.
+// There is deliberately no Encode implementation that could reveal its bytes.
+impl Secret.Decode {
+    fn decode(tree: DataTree) -> Secret [FieldError]! {
+        if tree == .Text(text) -> return Ok(Secret.from_text(text))
+        return Err([FieldError{path: "", reason: "expected a string"}])
+    }
+}
+
 // Secret-bearing values wipe their bytes when they close (D-SHAPE-RESOURCE1=A).
 // The wipe consumes the byte buffer; the emptied field keeps the owner whole
 // for its own release.
