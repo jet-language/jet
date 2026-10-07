@@ -2,7 +2,7 @@
 // hand-MIR programs keep their generic declarations (no #Inline(Always)), so
 // the native backend itself instantiates every generic function and method.
 // Source sketches describe the checked Jet input.
-use jet_backend.[LowerPrepared, lir_lower_entry, lower_call_bindings, lower_instance_id, lower_prepare_entry]
+use jet_backend.[LowerPrepared, lir_lower_callables, lir_lower_entry, lower_call_bindings, lower_instance_id, lower_prepare_callables, lower_prepare_entry]
 use jet_foundation.[
     MIRAccess, MIRBinaryOp, MIRBlockID, MIRCallArg,
     MIRCallFallibility, MIRCallee, MIRCaptureParam, MIRConstReport, MIRConstant,
@@ -754,6 +754,15 @@ fn fx_mono_inventory(p: MIRProgram, instances: Int, originals: [String]) -> Bool
 }
 
 fn fx_mono_structural_checks() -> Bool Never! {
+    // Two roots share one inventory; duplicate roots must not emit a second
+    // body, and one absent root refuses the entire callable image.
+    roots :: [MIRFunctionID]{mir_function_id("run"), mir_function_id("monomorphic_leaf"), mir_function_id("run")}
+    shared :: lower_prepare_callables(fx_mono_three_types(), roots)
+    if shared.issues.len() != 0 || shared.roots.len() != 2 || shared.functions.len() != 5 -> return false
+    selected :: lir_lower_callables(fx_mono_three_types(), roots)
+    if selected.issues.len() != 0 || selected.callables.len() != 2 || selected.entry != selected.callables.get(roots[0].value) -> return false
+    absent :: lir_lower_callables(fx_mono_three_types(), [MIRFunctionID]{roots[0], mir_function_id("absent")})
+    if absent.issues.len() == 0 || absent.entry != None || absent.finalizer != None || absent.callables.len() != 0 -> return false
     // identity<Int>, identity<String>, identity<Record>; both Int sites share one.
     if !fx_mono_inventory(fx_mono_three_types(), 3, [String]{"monomorphic_leaf", "run"}) -> return false
     // outer and identity, each at three types.
