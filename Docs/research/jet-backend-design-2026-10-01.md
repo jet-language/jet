@@ -1431,10 +1431,10 @@ outcome and reporting bodies. The native reporter's raw environment-presence
 import belongs to the remaining host layer; presence must not disappear when
 an environment value is not UTF-8.
 
-The remaining invocation and per-task capture rails are an explicit L8a
+The remaining invocation and per-thread capture rails are an explicit L8a
 dependency. No existing task export exposes the private test output buffer
 or the test-body stop boundary; replacing `jet_rt_test_unit` and
-`jet_rt_test_print` requires L8a's task-local cell and invocation-boundary APIs.
+`jet_rt_test_print` requires L8a's thread-local cell and invocation-boundary APIs.
 Property generation remains a named gap, not an emulated or empty engine.
 The unit-only wire consumer refuses property records.
 
