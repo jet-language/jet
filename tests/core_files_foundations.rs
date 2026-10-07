@@ -128,7 +128,7 @@ fn core_files_directory_listing_preserves_invalid_utf8_basename_identity() {
     let scratch = common::Scratch::new("core_files_raw_names");
     let fixture_root = scratch.path.join("names");
     std::fs::create_dir(&fixture_root).expect("create raw-name fixture");
-    for name in [b"a\x80".as_slice(), b"a\xff".as_slice()] {
+    for name in [b"a\xff".as_slice(), b"a\x80".as_slice()] {
         std::fs::write(fixture_root.join(std::ffi::OsStr::from_bytes(name)), b"")
             .expect("create native non-Unicode basename");
     }
@@ -167,15 +167,19 @@ fn run() {
         &source,
         "distinct raw identities, equal display names: true\n",
     );
+    let claim_source = scratch.join("run.jet");
+    std::fs::write(
+        &claim_source,
+        format!("package {{ name: \"core_files_raw_names_claims\" authority: {{ holds: {{ allow: [FS.Read, IO, Mem.Alloc] }} }} }}\n{source}"),
+    ).expect("write native basename Jet claims");
+    check_jet_claims(&claim_source, 1);
 }
 
 fn check_core_files_golden(stem: &str) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Examples/features");
-    let source = std::fs::read_to_string(root.join("io").join(format!("{stem}.jet")))
-        .expect("read core.files golden source");
     let expected = std::fs::read_to_string(root.join("expected/io").join(format!("{stem}.out")))
         .expect("read core.files golden output");
-    tir_support::assert_tiers_agree(stem, &source, &expected);
+    tir_support::assert_example_cli_tiers_agree(&format!("io/{stem}"), &expected);
 }
 
 #[test]
@@ -192,3 +196,33 @@ fn core_files_golden_handle_io() { check_core_files_golden("files_handle_io"); }
 fn core_files_golden_descriptor_transactions() { check_core_files_golden("files_descriptor_transactions"); }
 #[test]
 fn core_files_golden_walk_files() { check_core_files_golden("walk_files"); }
+
+fn check_jet_claims(source: &std::path::Path, count: usize) {
+    for release in [false, true] {
+        let scratch = common::Scratch::new("core_files_jet_claims");
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_jet"));
+        command.args(["test", "--show-default", "--capture=all", "--serial", "--fresh"]);
+        if release {
+            command.arg("--release");
+        }
+        let output = command.arg(source)
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .env("JET_STORE_DIR", scratch.join("cache"))
+            .env("JETPACK_ROOT", scratch.join("jetpack"))
+            .env("JETPACK_ENV", "1")
+            .env("NO_COLOR", "1")
+            .output().expect("execute Jet file descriptor claims");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success(), "Jet claims failed (release={release}):\n{stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr));
+        assert!(stdout.contains(&format!("{count} passed, 0 failed")),
+            "Jet claims were not all exercised (release={release}):\n{stdout}");
+    }
+}
+
+#[test]
+fn core_files_descriptor_jet_claims() {
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("Examples/features/io/files_descriptor_transactions.jet");
+    check_jet_claims(&source, 4);
+}

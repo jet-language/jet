@@ -541,7 +541,6 @@ pub(crate) fn jet_fs_directory_list(handle: i64) -> Result<Vec<Vec<u8>>, IOError
             out.push(row);
         }
         unsafe { sys::closedir(stream) };
-        out.sort_by(|left, right| left[1..].cmp(&right[1..]));
         return Ok(out);
     }
     #[cfg(not(unix))]

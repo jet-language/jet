@@ -77,6 +77,16 @@ fn unicode_basename(raw: [U8]) -> String? Never! {
     Val(String.from_bytes(raw) ?? return None)
 }
 
+fn raw_name_order(left: [U8], right: [U8]) -> Ordering Never! {
+    i := 0
+    loop i < left.len() && i < right.len() {
+        if left[i] < right[i] -> return .Less
+        if left[i] > right[i] -> return .Greater
+        i += 1
+    }
+    left.len() <=> right.len()
+}
+
 /// D-CORE-FILEOPEN1=A: whether `create` may replace an existing file.
 /// `Refuse` creates exclusively and reports `IOError.AlreadyExists`.
 pub enum CreateIfExists {
@@ -309,6 +319,7 @@ pub struct Directory {
                 name_is_unicode: unicode,
             })
         }
+        &out.sort_by((left: DirectoryEntry, right: DirectoryEntry) -> raw_name_order(left.raw_name, right.raw_name))
         Ok(out)
     }
 
