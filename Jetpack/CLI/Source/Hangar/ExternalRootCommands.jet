@@ -151,12 +151,12 @@ CLI_MAX_UNIX_SECONDS :: prep { 9223372036854775807 }
 
 // The failure carrier of a duration parse; the text is the Rust error.
 #Error
-pub struct DurationParseError {
-    pub message: String
+struct DurationParseError {
+    message: String
 }
 
 // A positive `<digits><s|m|h|d|w>` duration in seconds.
-pub fn cli_parse_duration(value: String) -> Int DurationParseError! {
+fn cli_parse_duration(value: String) -> Int DurationParseError! {
     raw :: value.bytes()
     split := 0
     loop split < raw.len() && Int.from_u8(raw[split]) >= 48 && Int.from_u8(raw[split]) <= 57 -> split += 1
@@ -181,7 +181,7 @@ fn cli_duration_unit_seconds(unit: String) -> Int? Never! {
 }
 
 // The largest whole unit that divides `seconds`: `2 weeks`, `1 day`, ….
-pub fn cli_render_duration(seconds: Int) -> String Never! {
+fn cli_render_duration(seconds: Int) -> String Never! {
     unit :: if {
         seconds %% 604800 == 0 -> (amount: seconds /% 604800, name: "week")
         seconds %% 86400 == 0 -> (amount: seconds /% 86400, name: "day")

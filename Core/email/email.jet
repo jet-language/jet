@@ -39,7 +39,7 @@ C_MAX_AUTH_CHALLENGE_BYTES :: 4096
 // Jet owns deterministic address, MIME, and message policy. Only the
 // transport-facing SMTP provider calls below cross the native boundary.
 #Error
-pub enum EmailError {
+enum EmailError {
     Configuration(operation: String, server: String?, code: Int?, reason: String)
     DNS(operation: String, server: String?, code: Int?, reason: String)
     Connect(operation: String, server: String?, code: Int?, reason: String)
@@ -56,99 +56,99 @@ pub enum EmailError {
 // These records and enums describe the stable checked email surface. Address,
 // MIME, SMTP, and secret handling keep one semantic path across execution
 // tiers; only actual provider I/O remains native.
-pub struct Address {
-    pub display: String?
-    pub mailbox: String
+struct Address {
+    display: String?
+    mailbox: String
 }
 
-pub struct Attachment {
-    pub filename: String
-    pub mime: String
-    pub bytes: [U8]
+struct Attachment {
+    filename: String
+    mime: String
+    bytes: [U8]
 }
 
-pub struct Envelope {
-    pub from: Address
-    pub recipients: [Address]
+struct Envelope {
+    from: Address
+    recipients: [Address]
 }
 
-pub struct Message {
-    pub from: Address
-    pub to: [Address]
-    pub bcc: [Address]
-    pub subject: String
-    pub text: String
-    pub html: String
-    pub attachments: [Attachment]
-    pub envelope: Envelope
-    pub wire_upper: Int
+struct Message {
+    from: Address
+    to: [Address]
+    bcc: [Address]
+    subject: String
+    text: String
+    html: String
+    attachments: [Attachment]
+    envelope: Envelope
+    wire_upper: Int
 }
 
-pub enum SMTPSecurity {
+enum SMTPSecurity {
     StartTLS
     TLS
 }
 
-pub enum RecipientPolicy {
+enum RecipientPolicy {
     RequireAll
     DeliverAccepted
 }
 
-pub struct Limits {
-    pub max_reply_line_bytes: Int
-    pub max_reply_lines: Int
-    pub max_capabilities: Int
-    pub max_recipients: Int
-    pub max_message_bytes: Int
-    pub max_auth_challenge_bytes: Int
+struct Limits {
+    max_reply_line_bytes: Int
+    max_reply_lines: Int
+    max_capabilities: Int
+    max_recipients: Int
+    max_message_bytes: Int
+    max_auth_challenge_bytes: Int
 }
 
-pub enum TLSTrust {
+enum TLSTrust {
     System
     SystemPlusCa(pem: [U8])
 }
 
-pub struct DKIMConfig {
-    pub domain: String
-    pub selector: String
-    pub private_key: Secret
-    pub signed_headers: [String]
+struct DKIMConfig {
+    domain: String
+    selector: String
+    private_key: Secret
+    signed_headers: [String]
 }
 
-pub struct SMTPConfig {
-    pub host: String
-    pub port: Int
-    pub security: SMTPSecurity
-    pub auth: SMTPAuth
-    pub recipient_policy: RecipientPolicy
-    pub trust: TLSTrust
-    pub limits: Limits
-    pub dkim: DKIMConfig?
+struct SMTPConfig {
+    host: String
+    port: Int
+    security: SMTPSecurity
+    auth: SMTPAuth
+    recipient_policy: RecipientPolicy
+    trust: TLSTrust
+    limits: Limits
+    dkim: DKIMConfig?
 }
 
 // Mailer is an opaque provider handle. Its send method owns the network
 // protocol and reports accepted/rejected recipients without fake success.
-pub struct Mailer {
+struct Mailer {
 
 }
 
-pub struct RecipientReport {
-    pub address: Address
-    pub accepted: Bool
-    pub code: Int
-    pub message: String
+struct RecipientReport {
+    address: Address
+    accepted: Bool
+    code: Int
+    message: String
 }
 
-pub struct SendReport {
-    pub server: String
-    pub accepted: [RecipientReport]
-    pub rejected: [RecipientReport]
-    pub response_code: Int
-    pub response: String
-    pub accepted_at: String
+struct SendReport {
+    server: String
+    accepted: [RecipientReport]
+    rejected: [RecipientReport]
+    response_code: Int
+    response: String
+    accepted_at: String
 }
 
-pub fn limits() -> Limits Never! {
+fn limits() -> Limits Never! {
     Limits{
         max_reply_line_bytes: C_MAX_REPLY_LINE_BYTES,
         max_reply_lines: C_MAX_REPLY_LINES,
@@ -159,15 +159,15 @@ pub fn limits() -> Limits Never! {
     }
 }
 
-pub fn smtp_auth(user: String, password: Secret) -> SMTPAuth Never! {
+fn smtp_auth(user: String, password: Secret) -> SMTPAuth Never! {
     SMTPAuth.Password{username: user, password: password}
 }
 
-pub fn dkim(domain: String, selector: String, key: Secret, signed_headers: [String]) -> DKIMConfig Never! {
+fn dkim(domain: String, selector: String, key: Secret, signed_headers: [String]) -> DKIMConfig Never! {
     DKIMConfig{domain: domain, selector: selector, private_key: key, signed_headers: signed_headers}
 }
 
-pub fn send_report(server: String, accepted: [RecipientReport], rejected: [RecipientReport], response_code: Int, response: String, accepted_at: String) -> SendReport Never! {
+fn send_report(server: String, accepted: [RecipientReport], rejected: [RecipientReport], response_code: Int, response: String, accepted_at: String) -> SendReport Never! {
     SendReport{
         server: server,
         accepted: accepted,
@@ -178,7 +178,7 @@ pub fn send_report(server: String, accepted: [RecipientReport], rejected: [Recip
     }
 }
 
-pub fn address(text: String) -> Address EmailError! {
+fn address(text: String) -> Address EmailError! {
     reject_controls(text, "email address") ?? return Err(invalid_address("email address contains a forbidden control character"))
     value := text.trim()
     if value.bytes().len() == 0 || value.bytes().len() > 512 {
@@ -200,7 +200,7 @@ pub fn address(text: String) -> Address EmailError! {
     Ok(Address{display: display, mailbox: mailbox})
 }
 
-pub fn attachment(name: String, mime: String, bytes: [U8]) -> Attachment EmailError! {
+fn attachment(name: String, mime: String, bytes: [U8]) -> Attachment EmailError! {
     validate_attachment_parts(name, mime, bytes) ?? return Err(invalid_attachment("invalid attachment"))
     if bytes.len() > C_MAX_ATTACHMENT_BYTES {
         return Err(limit_error("attachment", "attachment exceeds 26214400 bytes"))
@@ -208,7 +208,7 @@ pub fn attachment(name: String, mime: String, bytes: [U8]) -> Attachment EmailEr
     Ok(Attachment{filename: name, mime: ascii_lower(mime), bytes: bytes})
 }
 
-pub fn message(from: Address, to: [Address], bcc: [Address], subject: String, text: String, html: HTML, attachments: [Attachment]) -> Message EmailError! {
+fn message(from: Address, to: [Address], bcc: [Address], subject: String, text: String, html: HTML, attachments: [Attachment]) -> Message EmailError! {
     html_text :: html.text()
     validate_message_parts(from, to, bcc, subject, text, html_text, attachments) ?? return Err(invalid_message("message contains invalid fields"))
     upper :: prospective_wire_upper(from, to, subject, text, html_text, attachments)
@@ -232,7 +232,7 @@ pub fn message(from: Address, to: [Address], bcc: [Address], subject: String, te
     )
 }
 
-pub fn envelope(from: Address, recipients: [Address]) -> Envelope EmailError! {
+fn envelope(from: Address, recipients: [Address]) -> Envelope EmailError! {
     validate_address(from) ?? return Err(invalid_address("invalid sender address"))
     if recipients.len() == 0 {
         return Err(invalid_message("email envelope needs at least one recipient"))
@@ -246,7 +246,7 @@ pub fn envelope(from: Address, recipients: [Address]) -> Envelope EmailError! {
     Ok(Envelope{from: from, recipients: recipients})
 }
 
-pub fn serialize(message: Message) -> [U8] EmailError! {
+fn serialize(message: Message) -> [U8] EmailError! {
     validate_message_value(message) ?? return Err(invalid_message("message is invalid"))
     mixed :: boundary(message, "mixed")
     alternative :: boundary(message, "alternative")
@@ -287,7 +287,7 @@ pub fn serialize(message: Message) -> [U8] EmailError! {
     Ok(out)
 }
 
-pub fn smtp(config: SMTPConfig) -[Net]> Mailer EmailError! {
+fn smtp(config: SMTPConfig) -[Net]> Mailer EmailError! {
     issue :: validate_smtp_config(config)
     if issue == {
         .None -> { _ := 0 }
@@ -300,7 +300,7 @@ fn no_smtp_auth() -> SMTPAuth Never! { .None }
 
 fn no_dkim() -> DKIMConfig? { None }
 
-pub fn smtp_from_env() -[Env, Net]> Mailer EmailError! {
+fn smtp_from_env() -[Env, Net]> Mailer EmailError! {
     host_value :: core.sys.get("SMTP_HOST")
     host := ""
     if host_value == {

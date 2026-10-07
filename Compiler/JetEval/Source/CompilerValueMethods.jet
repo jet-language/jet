@@ -115,7 +115,7 @@ fn jet_eval_compiler_value_method_projection(value: TComptimeValue, owner: Strin
     Val(JetEvalRuntimeValue.Data{value: projected})
 }
 
-pub fn jet_eval_route_compiler_value_host(row: MIRPreludeCall, args: [TComptimeValue], machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
+fn jet_eval_route_compiler_value_host(row: MIRPreludeCall, args: [TComptimeValue], machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if row.family != MIRPreludeFamily.StaticPrelude || row.module_name != "core.host" || mir_symbol_name(row.symbol) != "jet_comptime_host_method" {
         jet_eval_compiler_fail(&machine, span, "invalid compiler value Prelude route")
         return None

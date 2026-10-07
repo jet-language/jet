@@ -3,7 +3,7 @@
 // dependency-name path boundary (Package/Blocks.rs).
 
 // Where a dependency resolves from.
-pub enum DepSource {
+enum DepSource {
     // The selector from a `name#version` registry ref (or a quoted selector).
     Version(String)
     // A bare path or `target@provider` source ref.
@@ -17,7 +17,7 @@ pub enum DepSource {
 }
 
 // Render one `DepSource` back to its display/audit string form.
-pub fn pkg_dep_display(source: DepSource) -> String Never! {
+fn pkg_dep_display(source: DepSource) -> String Never! {
     if source == {
         .Version(value) -> value
         .Provider(provider, target) -> if provider == {
@@ -32,7 +32,7 @@ pub fn pkg_dep_display(source: DepSource) -> String Never! {
 
 // Render one `DepSource` for a public package view: git URL user
 // information and query/fragment text never cross the projection.
-pub fn pkg_dep_display_redacted(source: DepSource) -> String Never! {
+fn pkg_dep_display_redacted(source: DepSource) -> String Never! {
     if source == {
         .Git(url, selector) -> "{{ git: {pkg_debug_str(pkg_redact_dependency_url(url))}, {selector.field()}: {pkg_debug_str(selector.value())} }}"
         else -> pkg_dep_display(source)
@@ -96,7 +96,7 @@ fn pkg_ref_error_debug(error: RefError) -> String Never! {
     }
 }
 
-pub fn pkg_parse_deps(body: String) -> [String: DepSource] PackageParseError! {
+fn pkg_parse_deps(body: String) -> [String: DepSource] PackageParseError! {
     deps := [String: DepSource]{}
     loop entry in pkg_key_value_entries(body) {
         name :: entry.key
@@ -148,7 +148,7 @@ fn pkg_parse_dep_value(name: String, trimmed: String) -> DepSource PackageParseE
 
 // Dependency names become directory names in the store and build tree, so
 // the package model keeps them one safe path component.
-pub fn pkg_validate_dependency_name(name: String) -> Bool Never! {
+fn pkg_validate_dependency_name(name: String) -> Bool Never! {
     name != "" && name != "." && name != ".." && !name.contains("/") && !name.contains("\\") && !name.contains(":") && !pkg_text_has_control(name)
 }
 

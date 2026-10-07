@@ -25,13 +25,13 @@ fn pkg_cpp_render_jet(lib: String, surface: CppSurface) -> String Never! {
         loop method in class.methods {
             params :: if method.params.len() > 0 -> ", {pkg_cpp_jet_params(method.params)}" else -> ""
             args :: if method.params.len() > 0 -> ", {pkg_cpp_jet_args(method.params)}" else -> ""
-            out = "{out}    pub fn {method.jet_name}(self{params}) -[FFI.Cpp]> {method.result.jet()} CppError! {{\n        result_value :: abi.{name}_{method.jet_name}(self.value{args})\n        code :: abi.take_error()\n        if code != 0 {{ return Err(cpp_error(code)) }}\n        return Ok(result_value)\n    }}\n"
+            out = "{out}    fn {method.jet_name}(self{params}) -[FFI.Cpp]> {method.result.jet()} CppError! {{\n        result_value :: abi.{name}_{method.jet_name}(self.value{args})\n        code :: abi.take_error()\n        if code != 0 {{ return Err(cpp_error(code)) }}\n        return Ok(result_value)\n    }}\n"
         }
         if class.methods.len() > 0 -> out = "{out}}}\n\n"
-        out = "{out}pub fn close_{name}(value: ^{class.name}) -[FFI.Cpp]> {{\n    abi.{name}_close(value.value)\n    if abi.take_error() != 0 {{ panic(\"C++ handle close failed\") }}\n}}\n\n"
+        out = "{out}fn close_{name}(value: ^{class.name}) -[FFI.Cpp]> {{\n    abi.{name}_close(value.value)\n    if abi.take_error() != 0 {{ panic(\"C++ handle close failed\") }}\n}}\n\n"
     }
     loop function in surface.functions {
-        out = "{out}pub fn {function.jet_name}({pkg_cpp_jet_params(function.params)}) -[FFI.Cpp]> {function.result.jet()} CppError! {{\n    result_value :: abi.{function.jet_name}({pkg_cpp_jet_args(function.params)})\n    code :: abi.take_error()\n    if code != 0 {{ return Err(cpp_error(code)) }}\n    return Ok(result_value)\n}}\n\n"
+        out = "{out}fn {function.jet_name}({pkg_cpp_jet_params(function.params)}) -[FFI.Cpp]> {function.result.jet()} CppError! {{\n    result_value :: abi.{function.jet_name}({pkg_cpp_jet_args(function.params)})\n    code :: abi.take_error()\n    if code != 0 {{ return Err(cpp_error(code)) }}\n    return Ok(result_value)\n}}\n\n"
     }
     out
 }

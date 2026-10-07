@@ -6893,7 +6893,7 @@ dependencies = [
             emit_cargo_toml("nested_ffi_probe", &BTreeMap::new(), false),
         )
         .expect("write generated nested manifest");
-        std::fs::write(root.join("src/lib.rs"), "pub fn probe() -> i64 { 7 }\n")
+        std::fs::write(root.join("src/lib.rs"), "fn probe() -> i64 { 7 }\n")
             .expect("write generated nested source");
 
         let output = Command::new("cargo")
@@ -7079,7 +7079,7 @@ dependencies = [
         );
 
         assert!(source.contains("pub type JetOutcome<T, E> = Result<T, E>;"));
-        assert!(source.contains("pub struct JetAbsent;"));
+        assert!(source.contains("struct JetAbsent;"));
         assert!(source.contains("pub fn jet_present<T, E>(value: T)"));
         assert!(source.contains("pub fn jet_render_runtime_stop_from_row("));
         assert!(source.contains("mod jet_encoding_errors {"));

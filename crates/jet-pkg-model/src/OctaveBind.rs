@@ -419,12 +419,12 @@ use core.encoding.json as json
     out.push_str(&format!(
         r#"}}
 
-pub struct Session {{
+struct Session {{
     value: Int
 }}
 
 #Error
-pub enum OctaveError {{
+enum OctaveError {{
     NotRunning
     Timeout
     Cancelled
@@ -446,15 +446,15 @@ pub enum OctaveError {{
     fn close(^self) { abi.close(self.value) }
 }
 
-pub fn close(session: ^Session) -[FFI.Octave]> { abi.close(session.value) }
+fn close(session: ^Session) -[FFI.Octave]> { abi.close(session.value) }
 
-pub fn open() -[FFI.Octave]> Session OctaveError! {
+fn open() -[FFI.Octave]> Session OctaveError! {
     handle :: abi.open()
     if abi.take_error() != 0 -> return Err(OctaveError.NotRunning)
     return Ok(Session{ value: handle })
 }
 
-pub fn cancel(session: Session) -[FFI.Octave]> { abi.cancel(session.value) }
+fn cancel(session: Session) -[FFI.Octave]> { abi.cancel(session.value) }
 
 "#,
     );

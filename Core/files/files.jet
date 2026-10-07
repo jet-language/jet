@@ -39,71 +39,71 @@ use core.sys as sys
 // symlink and other special entries are never dereferenced.
 
 
-pub struct DirEntry {
-    pub name: String
-    pub path: String
-    pub is_dir: Bool
-}
-
-pub struct Stat {
-    pub size: Int
-    pub modified_ms: Int
-    pub created_ms: Int
-    pub readonly: Bool
-    pub is_file: Bool
-    pub is_dir: Bool
-    pub is_symlink: Bool
-    pub kind: String
-    pub mode: Int
-}
-
-pub struct WalkEntry {
-    pub path: String
-    pub relative: String
-    pub is_dir: Bool
-    pub depth: Int
-}
-
-pub struct FileScope {
-    pub authority: Authority
-}
-
-pub struct MappedFile {
-    pub path: String
-    pub bytes: [U8]
-}
-
-pub struct TempDir {
+struct DirEntry {
+    name: String
     path: String
+    is_dir: Bool
 }
 
-pub struct TempFile {
+struct Stat {
+    size: Int
+    modified_ms: Int
+    created_ms: Int
+    readonly: Bool
+    is_file: Bool
+    is_dir: Bool
+    is_symlink: Bool
+    kind: String
+    mode: Int
+}
+
+struct WalkEntry {
     path: String
+    relative: String
+    is_dir: Bool
+    depth: Int
 }
 
-pub struct FileLock {
+struct FileScope {
+    authority: Authority
+}
+
+struct MappedFile {
     path: String
+    bytes: [U8]
 }
 
-pub struct FileReader {
-    path: String
+struct TempDir {
+    priv path: String
 }
 
-pub struct FileWriter {
-    path: String
+struct TempFile {
+    priv path: String
+}
+
+struct FileLock {
+    priv path: String
+}
+
+struct FileReader {
+    priv path: String
+}
+
+struct FileWriter {
+    priv path: String
 }
 
 
-pub fn scope(authority: Authority) -[FS]> FileScope Never! { {authority: authority} }
+fn scope(authority: Authority) -[FS]> FileScope Never! { {authority: authority} }
 
 
-pub fn open(path: String) -[FS.Read]> FileReader IOError! { core.files.open(path) }
+fn open(path: String) -[FS.Read]> FileReader IOError! { core.files.open(path) }
 
 
-pub fn create(path: String) -[FS.Write]> FileWriter IOError! { core.files.create(path) }
+fn create(path: String) -[FS.Write]> FileWriter IOError! { core.files.create(path) }
 
 
-pub fn append(path: String) -[FS.Write]> FileWriter IOError! { core.files.append(path) }
+fn append(path: String) -[FS.Write]> FileWriter IOError! { core.files.append(path) }
 
 
 
@@ -133,58 +133,58 @@ fn io_err(operation: String, path: String, message: String) -> IOError Never! {
 }
 
 
-pub fn read_bytes(path: String) -[FS.Read]> [U8] IOError! { core.files.read_bytes(path) }
+fn read_bytes(path: String) -[FS.Read]> [U8] IOError! { core.files.read_bytes(path) }
 
 
-pub fn read(path: String) -[FS.Read]> String IOError! {
+fn read(path: String) -[FS.Read]> String IOError! {
     bytes :: read_bytes(path)
     Ok(String.from_bytes(bytes) ?? return Err(io_err("read", path, "file is not valid UTF-8")))
 }
 
 
-pub fn map(path: String) -[FS.Read]> MappedFile IOError! { core.files.map(path) }
+fn map(path: String) -[FS.Read]> MappedFile IOError! { core.files.map(path) }
 
 
-pub fn write(path: String, text: String) IOError! -[FS.Write]> { core.files.write(path, text) }
+fn write(path: String, text: String) IOError! -[FS.Write]> { core.files.write(path, text) }
 
 
-pub fn write_bytes(path: String, bytes: [U8]) IOError! -[FS.Write]> { core.files.write_bytes(path, bytes) }
+fn write_bytes(path: String, bytes: [U8]) IOError! -[FS.Write]> { core.files.write_bytes(path, bytes) }
 
 
-pub fn append_all(path: String, text: String) IOError! -[FS.Write]> { core.files.append_all(path, text) }
+fn append_all(path: String, text: String) IOError! -[FS.Write]> { core.files.append_all(path, text) }
 
 
-pub fn write_atomic(path: String, bytes: [U8]) IOError! -[FS.Write]> {
+fn write_atomic(path: String, bytes: [U8]) IOError! -[FS.Write]> {
     core.files.write_atomic(path, bytes)
 }
 
 
-pub fn read_at(path: String, offset: Int, count: Int) -[FS.Read]> [U8] IOError! {
+fn read_at(path: String, offset: Int, count: Int) -[FS.Read]> [U8] IOError! {
     core.files.read_at(path, offset, count)
 }
 
 
-pub fn write_at(path: String, offset: Int, bytes: [U8]) IOError! -[FS.Write]> {
+fn write_at(path: String, offset: Int, bytes: [U8]) IOError! -[FS.Write]> {
     core.files.write_at(path, offset, bytes)
 }
 
 
-pub fn fsync(path: String) IOError! -[FS.Write]> { core.files.fsync(path) }
+fn fsync(path: String) IOError! -[FS.Write]> { core.files.fsync(path) }
 
 
 fn exists_impl(path: String) -> Bool Never! { core.files.exists(path) }
 
 
-pub fn exists(path: String) -[FS]> Bool Never! { exists_impl(path) }
+fn exists(path: String) -[FS]> Bool Never! { exists_impl(path) }
 
 
-pub fn is_dir(path: String) -[FS.Read]> Bool Never! { core.files.is_dir(path) }
+fn is_dir(path: String) -[FS.Read]> Bool Never! { core.files.is_dir(path) }
 
 
-pub fn stat(path: String) -[FS.Read]> Stat IOError! { core.files.stat(path) }
+fn stat(path: String) -[FS.Read]> Stat IOError! { core.files.stat(path) }
 
 
-pub fn set_mode(path: String, mode: Int) IOError! -[FS.Write]> { core.files.set_mode(path, mode) }
+fn set_mode(path: String, mode: Int) IOError! -[FS.Write]> { core.files.set_mode(path, mode) }
 
 
 fn anchor_for_parts(drive: String, absolute: Bool) -> String Never! {
@@ -236,7 +236,7 @@ fn is_abs_impl(path: String) -> Bool Never! {
     raw.len() >= 2 && is_letter(raw[0]) && raw[1] == (U8{58})
 }
 
-pub fn is_abs(path: String) -> Bool Never! { is_abs_impl(path) }
+fn is_abs(path: String) -> Bool Never! { is_abs_impl(path) }
 
 
 fn is_separator(b: U8) -> Bool Never! { b == (U8{47}) || b == (U8{92}) }
@@ -270,7 +270,7 @@ fn split_slash_impl(path: String) -> [String] Never! {
     out
 }
 
-pub fn split_slash(path: String) -> [String] Never! { split_slash_impl(path) }
+fn split_slash(path: String) -> [String] Never! { split_slash_impl(path) }
 
 
 fn collapse_impl(path: String) -> String Never! {
@@ -307,7 +307,7 @@ fn collapse_impl(path: String) -> String Never! {
     compose(anchor_for_parts(drive, absolute), out)
 }
 
-pub fn collapse(path: String) -> String Never! { collapse_impl(path) }
+fn collapse(path: String) -> String Never! { collapse_impl(path) }
 
 
 fn strip_leading_separators(path: String) -> String Never! {
@@ -329,25 +329,25 @@ fn join_impl(a: String, b: String) -> String Never! {
     "{a}/{clean_b}"
 }
 
-pub fn join(a: String, b: String) -> String Never! { join_impl(a, b) }
+fn join(a: String, b: String) -> String Never! { join_impl(a, b) }
 
 
-pub fn absolute(path: String) -[FS, Env]> String IOError! {
+fn absolute(path: String) -[FS, Env]> String IOError! {
     if is_abs_impl(path) -> return Ok(collapse_impl(path))
     cwd :: sys.current_dir()
     Ok(collapse_impl(join_impl(cwd, path)))
 }
 
 
-pub fn canonicalize(path: String) -[FS, Env]> String IOError! {
+fn canonicalize(path: String) -[FS, Env]> String IOError! {
     core.files.canonicalize(path)
 }
 
 
-pub fn list_dir(path: String) -[FS.Read]> [DirEntry] IOError! { core.files.list_dir(path) }
+fn list_dir(path: String) -[FS.Read]> [DirEntry] IOError! { core.files.list_dir(path) }
 
 
-pub fn create_dir(path: String) IOError! -[FS.Write]> { core.files.create_dir(path) }
+fn create_dir(path: String) IOError! -[FS.Write]> { core.files.create_dir(path) }
 
 
 fn dirname_impl(path: String) -> String Never! {
@@ -374,10 +374,10 @@ fn dirname_impl(path: String) -> String Never! {
     ""
 }
 
-pub fn dirname(path: String) -> String Never! { dirname_impl(path) }
+fn dirname(path: String) -> String Never! { dirname_impl(path) }
 
 
-pub fn create_dir_all(path: String) IOError! -[FS]> {
+fn create_dir_all(path: String) IOError! -[FS]> {
     if path.bytes().len() == 0 -> return Ok()
     if exists(path) ?? panic("exists failed") {
         info :: stat(path)
@@ -391,13 +391,13 @@ pub fn create_dir_all(path: String) IOError! -[FS]> {
 }
 
 
-pub fn remove(path: String) IOError! -[FS.Write]> { core.files.remove(path) }
+fn remove(path: String) IOError! -[FS.Write]> { core.files.remove(path) }
 
 
-pub fn remove_dir(path: String) IOError! -[FS.Write]> { core.files.remove_dir(path) }
+fn remove_dir(path: String) IOError! -[FS.Write]> { core.files.remove_dir(path) }
 
 
-pub fn remove_all(path: String) IOError! -[FS]> {
+fn remove_all(path: String) IOError! -[FS]> {
     if is_dir(path) ?? panic("is_dir failed") {
         entries :: list_dir(path)
         loop e in entries -> remove_all(e.path)
@@ -415,7 +415,7 @@ fn copy_file_impl(from: String, to: String) IOError! -[FS]> {
 }
 
 
-pub fn copy_dir(from: String, to: String) IOError! -[FS]> {
+fn copy_dir(from: String, to: String) IOError! -[FS]> {
     create_dir_all(to)
     entries :: list_dir(from)
     loop e in entries {
@@ -431,20 +431,20 @@ pub fn copy_dir(from: String, to: String) IOError! -[FS]> {
 }
 
 
-pub fn rename(from: String, to: String) IOError! -[FS.Write]> { core.files.rename(from, to) }
+fn rename(from: String, to: String) IOError! -[FS.Write]> { core.files.rename(from, to) }
 
 
 /// Create `link` as a symbolic link naming `original`. The link text is stored
 /// as given and is not resolved; later path operations follow it, so lexical
 /// `Path.is_within` cannot see an escape through a link — compare
 /// `canonicalize` results instead.
-pub fn symlink(original: String, link: String) IOError! -[FS.Write]> { core.files.symlink(original, link) }
+fn symlink(original: String, link: String) IOError! -[FS.Write]> { core.files.symlink(original, link) }
 
 
-pub fn hard_link(original: String, link: String) IOError! -[FS.Write]> { core.files.hard_link(original, link) }
+fn hard_link(original: String, link: String) IOError! -[FS.Write]> { core.files.hard_link(original, link) }
 
 
-pub fn read_link(path: String) -[FS.Read]> String IOError! { core.files.read_link(path) }
+fn read_link(path: String) -[FS.Read]> String IOError! { core.files.read_link(path) }
 
 
 fn split_lines(text: String) -> [String] Never! {
@@ -570,7 +570,7 @@ fn glob_match_impl(pattern: String, path: String) -> Bool Never! {
     glob_parts(pp, 0, tt, 0)
 }
 
-pub fn glob_match(pattern: String, path: String) -> Bool Never! { glob_match_impl(pattern, path) }
+fn glob_match(pattern: String, path: String) -> Bool Never! { glob_match_impl(pattern, path) }
 
 
 fn has_separator(path: String) -> Bool Never! {
@@ -633,7 +633,7 @@ fn relative_impl(path: String, start: String) -> String Never! {
     s
 }
 
-pub fn relative(path: String, start: String) -> String Never! { relative_impl(path, start) }
+fn relative(path: String, start: String) -> String Never! { relative_impl(path, start) }
 
 
 fn ignored(name: String, path: String, root: String, skip: [String]) -> Bool Never! {
@@ -687,18 +687,18 @@ fn walk_impl(root: String, ignore: String?, files_only: Bool) -[FS]> [WalkEntry]
 }
 
 
-pub fn walk(root: String, ignore: String?) -[FS]> [WalkEntry] IOError! {
+fn walk(root: String, ignore: String?) -[FS]> [WalkEntry] IOError! {
     walk_impl(root, ignore, false)
 }
 
 
-pub fn walk_parallel(root: String, ignore: String?) -[FS]> [WalkEntry] IOError! {
+fn walk_parallel(root: String, ignore: String?) -[FS]> [WalkEntry] IOError! {
     // Cooperative Jet has no thread pool yet; the walk is the same walk.
     walk_impl(root, ignore, false)
 }
 
 
-pub fn walk_files(root: String, ignore: String?) -[FS]> [WalkEntry] IOError! {
+fn walk_files(root: String, ignore: String?) -[FS]> [WalkEntry] IOError! {
     walk_impl(root, ignore, true)
 }
 
@@ -740,7 +740,7 @@ fn glob_root(pattern: String) -> String Never! {
 }
 
 
-pub fn glob(pattern: String) -[FS]> [String] IOError! {
+fn glob(pattern: String) -[FS]> [String] IOError! {
     if !has_meta(pattern) {
         if exists_impl(pattern) -> return Ok([String]{~pattern})
         return Ok([String]{})
@@ -763,19 +763,19 @@ pub fn glob(pattern: String) -[FS]> [String] IOError! {
 }
 
 
-pub fn temp_dir(prefix: String) -[FS]> TempDir IOError! { core.files.temp_dir(prefix) }
+fn temp_dir(prefix: String) -[FS]> TempDir IOError! { core.files.temp_dir(prefix) }
 
 
-pub fn temp_file(prefix: String) -[FS]> TempFile IOError! { core.files.temp_file(prefix) }
+fn temp_file(prefix: String) -[FS]> TempFile IOError! { core.files.temp_file(prefix) }
 
 
 /// Take an exclusive lock by creating `path` (create-new). A second `lock` on
 /// a held path fails with an `IOError`; the lock file is removed when the
 /// returned `FileLock` leaves scope, which makes the path available again.
-pub fn lock(path: String) -[FS]> FileLock IOError! { core.files.lock(path) }
+fn lock(path: String) -[FS]> FileLock IOError! { core.files.lock(path) }
 
 
-pub fn basename(path: String) -> String Never! {
+fn basename(path: String) -> String Never! {
     raw :: path.bytes()
     i := raw.len() - 1
     loop i >= 0 {
@@ -786,7 +786,7 @@ pub fn basename(path: String) -> String Never! {
 }
 
 
-pub fn suffix(path: String) -> String Never! {
+fn suffix(path: String) -> String Never! {
     name :: basename(path)
     raw :: name.bytes()
     i := raw.len() - 1
@@ -798,7 +798,7 @@ pub fn suffix(path: String) -> String Never! {
 }
 
 
-pub fn stem(path: String) -> String Never! {
+fn stem(path: String) -> String Never! {
     name :: basename(path)
     raw :: name.bytes()
     i := raw.len() - 1
@@ -810,7 +810,7 @@ pub fn stem(path: String) -> String Never! {
 }
 
 
-pub fn with_suffix(path: String, next: String) -> String Never! {
+fn with_suffix(path: String, next: String) -> String Never! {
     dir :: dirname(path)
     base :: stem(path)
     joined :: "{base}{next}"
@@ -819,14 +819,14 @@ pub fn with_suffix(path: String, next: String) -> String Never! {
 }
 
 
-pub fn with_name(path: String, name: String) -> String Never! {
+fn with_name(path: String, name: String) -> String Never! {
     dir :: dirname(path)
     if dir.bytes().len() == 0 -> return ~name
     join(dir, name)
 }
 
 
-pub fn is_absolute(path: String) -> Bool Never! { is_abs(path) }
+fn is_absolute(path: String) -> Bool Never! { is_abs(path) }
 
 
 fn is_file_impl(path: String) -> Bool Never! {
@@ -834,24 +834,24 @@ fn is_file_impl(path: String) -> Bool Never! {
     info.is_file
 }
 
-pub fn is_file(path: String) -[FS]> Bool Never! { is_file_impl(path) }
+fn is_file(path: String) -[FS]> Bool Never! { is_file_impl(path) }
 
 
-pub fn is_symlink(path: String) -[FS]> Bool Never! {
+fn is_symlink(path: String) -[FS]> Bool Never! {
     info :: core.files.stat(path) ?? return false
     info.is_symlink
 }
 
 
-pub fn cwd() -[FS, Env]> String IOError! { sys.current_dir() }
+fn cwd() -[FS, Env]> String IOError! { sys.current_dir() }
 
 
-pub fn home() -[FS, Env]> String IOError! {
+fn home() -[FS, Env]> String IOError! {
     core.sys.home_dir() ?? return Err(io_err("home", "", "home directory unavailable"))
 }
 
 
-pub fn expanduser(path: String) -[FS, Env]> String IOError! {
+fn expanduser(path: String) -[FS, Env]> String IOError! {
     raw :: path.bytes()
     if raw.len() == 0 || raw[0] != (U8{126}) -> return Ok(~path)
     h :: home()
@@ -861,7 +861,7 @@ pub fn expanduser(path: String) -[FS, Env]> String IOError! {
 }
 
 
-pub fn touch(path: String) IOError! -[FS]> {
+fn touch(path: String) IOError! -[FS]> {
     if exists_impl(path) {
         core.files.fsync(path)
         return Ok()
@@ -872,77 +872,77 @@ pub fn touch(path: String) IOError! -[FS]> {
 }
 
 
-pub fn relocate(from: String, to: String) IOError! -[FS]> { core.files.rename(from, to) }
+fn relocate(from: String, to: String) IOError! -[FS]> { core.files.rename(from, to) }
 
 
 /// Python-compatible spelling for an atomic replacement rename.
-pub fn replace(from: String, to: String) IOError! -[FS]> { relocate(from, to) }
+fn replace(from: String, to: String) IOError! -[FS]> { relocate(from, to) }
 
 
 /// Return `path` relative to `start`, using the same normalized path rules.
-pub fn relativeto(path: String, start: String) -> String Never! { relative(path, start) }
+fn relativeto(path: String, start: String) -> String Never! { relative(path, start) }
 
 
 /// Python-compatible spelling for `set_mode`.
-pub fn chmod(path: String, mode: Int) IOError! -[FS]> { core.files.set_mode(path, mode) }
+fn chmod(path: String, mode: Int) IOError! -[FS]> { core.files.set_mode(path, mode) }
 
 
 /// Copy the bytes of `from` to `to`, creating missing parent directories.
 /// Unlike Python's `shutil.copy2`, permission bits and timestamps are not
 /// copied: the new file takes the default mode.
-pub fn copy2(from: String, to: String) IOError! -[FS]> { copy_file_impl(from, to) }
+fn copy2(from: String, to: String) IOError! -[FS]> { copy_file_impl(from, to) }
 
 
 /// Python-compatible spelling for a single-file copy.
-pub fn copyfile(from: String, to: String) IOError! -[FS]> { copy2(from, to) }
+fn copyfile(from: String, to: String) IOError! -[FS]> { copy2(from, to) }
 
 
 /// Create one directory, or all missing parents when `parents` is true.
-pub fn mkdir(path: String, parents: Bool) IOError! -[FS]> {
+fn mkdir(path: String, parents: Bool) IOError! -[FS]> {
     if parents -> return core.files.create_dir_all(path)
     core.files.create_dir(path)
 }
 
 
-pub fn rmdir(path: String) IOError! -[FS]> { core.files.remove_dir(path) }
+fn rmdir(path: String) IOError! -[FS]> { core.files.remove_dir(path) }
 
 
-pub fn unlink(path: String) IOError! -[FS]> { core.files.remove(path) }
+fn unlink(path: String) IOError! -[FS]> { core.files.remove(path) }
 
 
-pub fn joinpath(a: String, b: String) -> String Never! { join(a, b) }
+fn joinpath(a: String, b: String) -> String Never! { join(a, b) }
 
 
 /// Python `os` spellings backed by the same checked filesystem surface.
-pub fn getcwd() -[FS, Env]> String IOError! { cwd() }
+fn getcwd() -[FS, Env]> String IOError! { cwd() }
 
 
-pub fn chdir(path: String) IOError! -[FS, Env]> { sys.set_current_dir(path) }
+fn chdir(path: String) IOError! -[FS, Env]> { sys.set_current_dir(path) }
 
 
-pub fn scandir(path: String) -[FS]> [DirEntry] IOError! { core.files.list_dir(path) }
+fn scandir(path: String) -[FS]> [DirEntry] IOError! { core.files.list_dir(path) }
 
 
-pub fn gettempdir() -[Env]> String Never! { sys.temp_dir() }
+fn gettempdir() -[Env]> String Never! { sys.temp_dir() }
 
 
-pub fn getenv(name: String) -[Env]> String? Never! { sys.get(name) }
+fn getenv(name: String) -[Env]> String? Never! { sys.get(name) }
 
 
-pub fn read_lines(path: String) -[FS]> [String] IOError! {
+fn read_lines(path: String) -[FS]> [String] IOError! {
     text :: core.files.read(path)
     Ok(split_lines(text))
 }
 
 
-pub fn write_lines(path: String, lines: [String]) IOError! -[FS]> {
+fn write_lines(path: String, lines: [String]) IOError! -[FS]> {
     s := ""
     loop line in lines -> s = "{s}{line}\n"
     core.files.write(path, s)
 }
 
 
-pub fn commonpath(paths: [String]) -> String Never! {
+fn commonpath(paths: [String]) -> String Never! {
     if paths.len() == 0 -> return ""
     first :: collapse_impl(paths[0])
     anchor := anchor_of(first)
@@ -970,7 +970,7 @@ pub fn commonpath(paths: [String]) -> String Never! {
 }
 
 
-pub fn fnmatch(name: String, pattern: String) -> Bool Never! { glob_match(pattern, name) }
+fn fnmatch(name: String, pattern: String) -> Bool Never! { glob_match(pattern, name) }
 
 
 fn split_path_env(text: String) -> [String] Never! {
@@ -998,7 +998,7 @@ fn split_path_env(text: String) -> [String] Never! {
 }
 
 
-pub fn which(name: String) -[FS, Env]> String? Never! {
+fn which(name: String) -[FS, Env]> String? Never! {
     if is_abs_impl(name) {
         if is_file_impl(name) -> return Val(~name)
         return None
@@ -1026,7 +1026,7 @@ fn slice_path(text: String, start: Int, end: Int) -> String Never! {
 }
 
 
-pub fn splitext(path: String) -> (ext: String, root: String) Never! {
+fn splitext(path: String) -> (ext: String, root: String) Never! {
     ext :: suffix(path)
     if ext.bytes().len() == 0 -> return (root: ~path, ext: "")
     root :: slice_path(path, 0, path.bytes().len() - ext.bytes().len())
@@ -1034,30 +1034,30 @@ pub fn splitext(path: String) -> (ext: String, root: String) Never! {
 }
 
 
-pub fn split(path: String) -> (dir: String, name: String) Never! {
+fn split(path: String) -> (dir: String, name: String) Never! {
     (dir: dirname(path), name: basename(path))
 }
 
 
-pub fn normpath(path: String) -> String Never! { collapse(path) }
+fn normpath(path: String) -> String Never! { collapse(path) }
 
 
-pub fn getsize(path: String) -[FS]> Int IOError! {
+fn getsize(path: String) -[FS]> Int IOError! {
     s :: core.files.stat(path)
     Ok(s.size)
 }
 
 
-pub fn getmtime(path: String) -[FS]> Int IOError! {
+fn getmtime(path: String) -[FS]> Int IOError! {
     s :: core.files.stat(path)
     Ok(s.modified_ms)
 }
 
 
-pub fn lexists(path: String) -[FS]> Bool Never! { exists_impl(path) || is_symlink(path) }
+fn lexists(path: String) -[FS]> Bool Never! { exists_impl(path) || is_symlink(path) }
 
 
-pub fn samefile(a: String, b: String) -[FS]> Bool IOError! {
+fn samefile(a: String, b: String) -[FS]> Bool IOError! {
     sa :: core.files.stat(a)
     sb :: core.files.stat(b)
     _ :: sa
@@ -1066,7 +1066,7 @@ pub fn samefile(a: String, b: String) -[FS]> Bool IOError! {
 }
 
 
-pub fn commonprefix(paths: [String]) -> String Never! {
+fn commonprefix(paths: [String]) -> String Never! {
     if paths.len() == 0 -> return ""
     pref := ~paths[0]
     loop p in paths {
@@ -1083,7 +1083,7 @@ pub fn commonprefix(paths: [String]) -> String Never! {
 }
 
 
-pub fn expandvars(path: String) -[Env]> String IOError! {
+fn expandvars(path: String) -[Env]> String IOError! {
     raw :: path.bytes()
     out := ""
     i := 0
@@ -1116,16 +1116,16 @@ pub fn expandvars(path: String) -[Env]> String IOError! {
 }
 
 
-pub fn move(from: String, to: String) IOError! -[FS]> { core.files.rename(from, to) }
+fn move(from: String, to: String) IOError! -[FS]> { core.files.rename(from, to) }
 
 
-pub fn rmtree(path: String) IOError! -[FS]> { core.files.remove_all(path) }
+fn rmtree(path: String) IOError! -[FS]> { core.files.remove_all(path) }
 
 
-pub fn makedirs(path: String) IOError! -[FS]> { core.files.create_dir_all(path) }
+fn makedirs(path: String) IOError! -[FS]> { core.files.create_dir_all(path) }
 
 
-pub fn listdir(path: String) -[FS]> [String] IOError! {
+fn listdir(path: String) -[FS]> [String] IOError! {
     entries :: core.files.list_dir(path)
     out := [String]{}
     loop e in entries -> &out.push(e.name)
@@ -1133,10 +1133,10 @@ pub fn listdir(path: String) -[FS]> [String] IOError! {
 }
 
 
-pub fn glob_recursive(pattern: String) -[FS]> [String] IOError! { core.files.glob(pattern) }
+fn glob_recursive(pattern: String) -[FS]> [String] IOError! { core.files.glob(pattern) }
 
 
-pub fn fnmatch_filter(names: [String], pattern: String) -> [String] Never! {
+fn fnmatch_filter(names: [String], pattern: String) -> [String] Never! {
     out := [String]{}
     loop n in names {
         if fnmatch(n, pattern) -> &out.push(n)
@@ -1145,7 +1145,7 @@ pub fn fnmatch_filter(names: [String], pattern: String) -> [String] Never! {
 }
 
 
-pub fn is_mount(path: String) -[FS]> Bool Never! {
+fn is_mount(path: String) -[FS]> Bool Never! {
     if !core.files.is_dir(~path) -> return false
     parent :: dirname(path)
     if parent == path -> return true
@@ -1153,7 +1153,7 @@ pub fn is_mount(path: String) -[FS]> Bool Never! {
 }
 
 
-pub fn ensure_parent(path: String) IOError! -[FS]> { core.files.create_dir_all(dirname_impl(path)) }
+fn ensure_parent(path: String) IOError! -[FS]> { core.files.create_dir_all(dirname_impl(path)) }
 
 
 fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
@@ -1167,13 +1167,13 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
 }
 
 
-pub fn readdir(path: String) -[FS]> [DirEntry] IOError! { core.files.list_dir(path) }
+fn readdir(path: String) -[FS]> [DirEntry] IOError! { core.files.list_dir(path) }
 
 
-pub fn walkdir(root: String, ignore: String?) -[FS]> [WalkEntry] IOError! { walk_impl(root, ignore, false) }
+fn walkdir(root: String, ignore: String?) -[FS]> [WalkEntry] IOError! { walk_impl(root, ignore, false) }
 
 
-pub fn truncate(path: String, size: Int) IOError! -[FS]> {
+fn truncate(path: String, size: Int) IOError! -[FS]> {
     if size < 0 -> return Err(io_err("truncate", path, "negative size"))
     bytes :: core.files.read_bytes(~path)
     if size < bytes.len() {
@@ -1186,39 +1186,39 @@ pub fn truncate(path: String, size: Int) IOError! -[FS]> {
 }
 
 
-pub fn createdirectory(path: String) IOError! -[FS]> { core.files.create_dir(path) }
+fn createdirectory(path: String) IOError! -[FS]> { core.files.create_dir(path) }
 
 
-pub fn filesize(path: String) -[FS]> Int IOError! {
+fn filesize(path: String) -[FS]> Int IOError! {
     info :: core.files.stat(path)
     Ok(info.size)
 }
 
 
-pub fn delete(path: String) IOError! -[FS]> { core.files.remove(path) }
+fn delete(path: String) IOError! -[FS]> { core.files.remove(path) }
 
 
-pub fn cp(from: String, to: String) IOError! -[FS]> { copy2(from, to) }
+fn cp(from: String, to: String) IOError! -[FS]> { copy2(from, to) }
 
 
-pub fn rm(path: String) IOError! -[FS]> { core.files.remove(path) }
+fn rm(path: String) IOError! -[FS]> { core.files.remove(path) }
 
 
-pub fn realpath(path: String) -[FS, Env]> String IOError! { core.files.canonicalize(path) }
+fn realpath(path: String) -[FS, Env]> String IOError! { core.files.canonicalize(path) }
 
 
-pub fn pwd() -[FS, Env]> String IOError! { cwd() }
+fn pwd() -[FS, Env]> String IOError! { cwd() }
 
 
-pub fn tmpdir(prefix: String) -[FS]> String IOError! {
+fn tmpdir(prefix: String) -[FS]> String IOError! {
     temp :: core.files.temp_dir(prefix)
     Ok(temp.path)
 }
 
 
-pub fn topath(path: String) -[FS, Env]> String IOError! { core.files.canonicalize(path) }
+fn topath(path: String) -[FS, Env]> String IOError! { core.files.canonicalize(path) }
 
 
-pub fn cd(path: String) IOError! -[FS, Env]> { sys.set_current_dir(path) }
+fn cd(path: String) IOError! -[FS, Env]> { sys.set_current_dir(path) }
 
 

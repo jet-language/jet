@@ -1,18 +1,18 @@
-pub enum Condition {
+enum Condition {
     AtLeast(Int)
     Equals(Int)
 }
 
-pub enum Action {
+enum Action {
     Add(Int)
     Set(Int)
 }
 
-pub struct Rule {
-    name: String
-    fact: String
-    condition: Condition
-    action: Action
+struct Rule {
+    priv name: String
+    priv fact: String
+    priv condition: Condition
+    priv action: Action
 }
 
 fn parse_rule(source: String) -> Rule? {
@@ -48,7 +48,7 @@ fn parse_rule(source: String) -> Rule? {
     Val(Rule{name: name, fact: fact, condition: condition, action: action})
 }
 
-pub fn parse(source: String) -> [Rule]? {
+fn parse(source: String) -> [Rule]? {
     rules := [Rule]{}
     loop item in source.split(";") {
         line :: item.trim()
@@ -87,7 +87,7 @@ fn apply(facts: &[String:Int], fact: String, action: Action) -> String {
     return ""
 }
 
-pub fn fire(facts: &[String:Int], rules: [Rule]) -> [String] {
+fn fire(facts: &[String:Int], rules: [Rule]) -> [String] {
     events := [String]{}
     loop rule in rules {
         value :: facts.get(~rule.fact) ?? 0

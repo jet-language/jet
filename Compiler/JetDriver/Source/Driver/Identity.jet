@@ -43,34 +43,34 @@ use jet_eval.[
     JetEvalConfig,
 ]
 
-pub struct JetDriverAuthorizedSourceFile {
-    pub path: String
-    pub relative_path: String
-    pub identity: String
-    pub source: String
+struct JetDriverAuthorizedSourceFile {
+    path: String
+    relative_path: String
+    identity: String
+    source: String
 }
 
-pub struct JetDriverAuthorizedSourceRoot {
-    pub canonical_path: String
-    pub identity: String
-    pub allow_hardlinks: Bool
-    pub files: [JetDriverAuthorizedSourceFile]
-    pub foreign_cache_files: [JetDriverAuthorizedSourceFile]
+struct JetDriverAuthorizedSourceRoot {
+    canonical_path: String
+    identity: String
+    allow_hardlinks: Bool
+    files: [JetDriverAuthorizedSourceFile]
+    foreign_cache_files: [JetDriverAuthorizedSourceFile]
 }
 
-pub struct JetDriverAuthorizedSourceSnapshot {
-    pub roots: [JetDriverAuthorizedSourceRoot]
-    pub entry_root_identity: String
-    pub entry_path: String
+struct JetDriverAuthorizedSourceSnapshot {
+    roots: [JetDriverAuthorizedSourceRoot]
+    entry_root_identity: String
+    entry_path: String
 }
 
-pub struct JetDriverHostFacts {
-    pub target_triple: String?
-    pub active_os: String?
-    pub compiler_identity: String?
+struct JetDriverHostFacts {
+    target_triple: String?
+    active_os: String?
+    compiler_identity: String?
 }
 
-pub enum JetDriverCompileTarget {
+enum JetDriverCompileTarget {
     Native
     Web(
         assets: JetWebAssets,
@@ -83,7 +83,7 @@ pub enum JetDriverCompileTarget {
 // (its artifact starts at the package entry); `Test` compiles the `jet test`
 // harness: named `#Test` bodies are checked and lowered, E0601 reports a file
 // with none, and the artifact is a TestExecutable whose harness runs them.
-pub enum JetDriverCompileMode {
+enum JetDriverCompileMode {
     Program
     Test
 }
@@ -94,35 +94,35 @@ pub enum JetDriverCompileMode {
 // repository path (`Core/perf/perf.jet`); `owner` names the public module that
 // schedules a private part and is "" for a public row; `owned_members` lists
 // the public functions that have crossed the Core cutover.
-pub struct JetDriverCoreSource {
-    pub module_name: String
-    pub alias: String
-    pub path: String
-    pub owner: String
-    pub owned_members: [String]
-    pub source: String
+struct JetDriverCoreSource {
+    module_name: String
+    alias: String
+    path: String
+    owner: String
+    owned_members: [String]
+    source: String
 }
 
-pub struct JetDriverCompileRequest {
-    pub authorized_sources: JetDriverAuthorizedSourceSnapshot
-    pub canonical_effect_source: String
-    pub core_sources: [JetDriverCoreSource]
-    pub host_facts: JetDriverHostFacts
-    pub eval_config: JetEvalConfig
-    pub target: JetDriverCompileTarget
-    pub record_store: JetDriverRecordStore?
+struct JetDriverCompileRequest {
+    authorized_sources: JetDriverAuthorizedSourceSnapshot
+    canonical_effect_source: String
+    core_sources: [JetDriverCoreSource]
+    host_facts: JetDriverHostFacts
+    eval_config: JetEvalConfig
+    target: JetDriverCompileTarget
+    record_store: JetDriverRecordStore?
     // The host's streaming trace (`JET_TRACE_FILE`); `None` traces nothing.
-    pub trace_sink: CompilerTraceSink?
+    trace_sink: CompilerTraceSink?
     // Full verification: the optimizer re-verifies legality and runs MIR
     // Lint on the lowered program and the result of every pass, not only
     // legality on entry and Lint on the final program. Tests and `--verify`
     // turn it on; ordinary compiles leave it off.
-    pub mir_lint_every_pass: Bool
+    mir_lint_every_pass: Bool
     // The compiler threads this compile may use (D-JOBS1=A `--threads N`;
     // automatic, memory-aware admission without it). Every thread count gives
     // the same diagnostics and output bytes.
-    pub compiler_threads: CompilerThreads
-    pub mode: JetDriverCompileMode{JetDriverCompileMode.Program}
+    compiler_threads: CompilerThreads
+    mode: JetDriverCompileMode{JetDriverCompileMode.Program}
 }
 
 // The compiler's record store, reached only through the host, which owns
@@ -134,7 +134,7 @@ pub struct JetDriverCompileRequest {
 // file can skip rehashing; a stamp never decides freshness. The host reads and
 // writes the store's files, so each call declares that row (an undeclared
 // dynamic dispatch is the maximal row, D-EFF2).
-pub trait JetDriverRecordStore {
+trait JetDriverRecordStore {
     fn record(self, schema: String, key: String) -[FS]> [U8]?
     fn put_record(self, schema: String, key: String, bytes: [U8]) -[FS]> Bool
     fn stamp(self, path: String) -[FS]> String?
@@ -266,46 +266,46 @@ struct JetDriverLoadResult {
 // authority check (Source/CmdCompile.rs `resolve_application_authority`).
 // `manifest_path` is None for a file with no `package.jet`; `allow`/`deny`
 // are None when the manifest writes no `authority.holds` row.
-pub struct JetDriverAuthorityPolicy {
-    pub manifest_path: String?
-    pub allow: [String]?
-    pub deny: [String]?
+struct JetDriverAuthorityPolicy {
+    manifest_path: String?
+    allow: [String]?
+    deny: [String]?
 }
 
-pub struct JetDriverCompileResult {
-    pub diagnostics: [Diagnostic]
-    pub generated_source_files: [MIRSourceFile]
+struct JetDriverCompileResult {
+    diagnostics: [Diagnostic]
+    generated_source_files: [MIRSourceFile]
     package_identity: String
     entry_module_identity: String
-    pub entry_function: MIRFunctionID?
+    entry_function: MIRFunctionID?
     runtime_artifact: MIRArtifactID?
     web_artifact: MIRArtifactID?
     web_artifacts: JetWebArtifacts?
-    pub mir: MIRProgram?
-    pub emitted_source: String?
+    mir: MIRProgram?
+    emitted_source: String?
     emit_manifest: JetRustEmitManifest?
-    pub comptime_stdout: String
-    pub comptime_stderr: String
+    comptime_stdout: String
+    comptime_stderr: String
     soft_stop: Bool
     exit_code: Int?
     failed_stage: JetDriverStage?
-    pub complete: Bool
-    pub internal_problem: String?
+    complete: Bool
+    internal_problem: String?
     // JET_KEEP_GOING (jet_driver_compile_keep_going): every failure the
     // compile recorded, one TSV row each: phase, item, code, message, span.
-    pub keep_going_rows: [String]{[String]{}}
-    pub authority_policy: JetDriverAuthorityPolicy?{None}
+    keep_going_rows: [String]{[String]{}}
+    authority_policy: JetDriverAuthorityPolicy?{None}
 }
 
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read
 // by the bootstrap entry). Its output is never shipped: a failed item is
 // recorded and replaced by a typed trap so every later phase still runs.
-pub struct JetDriverKeepGoing {
+struct JetDriverKeepGoing {
     // Traps an earlier run asked for after it crashed inside one function,
     // `<phase>:<name>@<position>`: `lower` positions index the lowering
     // list, `emit` positions the optimized program's functions (the
     // `index` of the trace's `lower.function`/`emit.function` spans).
-    pub skip: [String]
+    skip: [String]
 }
 
 fn jet_driver_source_identity(package_identity: String, path: String) -> String Never! {
@@ -444,16 +444,16 @@ fn jet_driver_build_source_index(source_units: [JetDriverSourceUnit]) -> JetDriv
 // option that changes what the verb checks, and each authorized source's
 // root identity, root-relative path, and SHA-256 of its exact bytes. Equal
 // digests mean the recorded diagnostics are this request's diagnostics.
-pub struct JetDriverReceipt {
-    pub closure: String
-    pub diagnostics: [Diagnostic]
+struct JetDriverReceipt {
+    closure: String
+    diagnostics: [Diagnostic]
 }
 
 fn jet_driver_receipt_field(label: String, value: String) -> String Never! {
     "{label.len()}:{label}{value.len()}:{value}"
 }
 
-pub fn jet_driver_receipt_closure(verb: String, request: JetDriverCompileRequest, options: [String]) -> String Never! {
+fn jet_driver_receipt_closure(verb: String, request: JetDriverCompileRequest, options: [String]) -> String Never! {
     compiler :: request.host_facts.compiler_identity ?? ""
     target :: request.host_facts.target_triple ?? ""
     closure := jet_driver_receipt_field("schema", "jet.receipt-closure/v1")
@@ -480,7 +480,7 @@ pub fn jet_driver_receipt_closure(verb: String, request: JetDriverCompileRequest
 
 // A recorded Receipt answers the request only when its closure is the
 // request's closure; anything else checks fresh.
-pub fn jet_driver_receipt_answers(receipt: JetDriverReceipt, verb: String, request: JetDriverCompileRequest, options: [String]) -> Bool Never! {
+fn jet_driver_receipt_answers(receipt: JetDriverReceipt, verb: String, request: JetDriverCompileRequest, options: [String]) -> Bool Never! {
     receipt.closure == jet_driver_receipt_closure(verb, request, options)
 }
 
@@ -490,7 +490,7 @@ pub fn jet_driver_receipt_answers(receipt: JetDriverReceipt, verb: String, reque
 // The facts self-hosted sema reads from the request for one package: the
 // active OS, the target triple, the package edition, and whether the build
 // targets the web. The build clock and root policy never enter.
-pub fn jet_driver_package_target_facts(request: JetDriverCompileRequest, package: JetDriverPackageInfo) -> [PackageKeyTargetFact] Never! {
+fn jet_driver_package_target_facts(request: JetDriverCompileRequest, package: JetDriverPackageInfo) -> [PackageKeyTargetFact] Never! {
     web :: if request.target == {
         .Web(_, _, _) -> "true"
         .Native -> "false"
@@ -514,7 +514,7 @@ fn jet_driver_package_manifest_source(package: JetDriverPackageInfo, snapshot: J
 
 // The package's source digest from the authorized snapshot: its loaded
 // member sources and its package.jet manifest.
-pub fn jet_driver_package_source_digest(package: JetDriverPackageInfo, snapshot: JetDriverAuthorizedSourceSnapshot, source_units: [JetDriverSourceUnit]) -> String Never! {
+fn jet_driver_package_source_digest(package: JetDriverPackageInfo, snapshot: JetDriverAuthorizedSourceSnapshot, source_units: [JetDriverSourceUnit]) -> String Never! {
     files := [PackageKeySourceFile]{}
     loop unit in source_units {
         if unit.package_identity != package.identity -> next
@@ -527,7 +527,7 @@ pub fn jet_driver_package_source_digest(package: JetDriverPackageInfo, snapshot:
 // The package check key: `None` when the host names no compiler identity or
 // a direct dependency has no interface digest yet (it must be checked
 // first). `interface_digests` maps package identity to interface digest.
-pub fn jet_driver_package_check_key(package: JetDriverPackageInfo, packages: [JetDriverPackageInfo], interface_digests: [String:String], request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit]) -> String? Never! {
+fn jet_driver_package_check_key(package: JetDriverPackageInfo, packages: [JetDriverPackageInfo], interface_digests: [String:String], request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit]) -> String? Never! {
     compiler :: request.host_facts.compiler_identity ?? return None
     dependencies := [PackageKeyDependency]{}
     loop dependency in package.dependencies {
@@ -544,7 +544,7 @@ pub fn jet_driver_package_check_key(package: JetDriverPackageInfo, packages: [Je
 
 // Read one record through the host store. A missing store, a missing record,
 // or bytes that do not open under `schema` are all a miss.
-pub fn jet_driver_load_record(request: JetDriverCompileRequest, schema: String, key: String) -> Record? Never! {
+fn jet_driver_load_record(request: JetDriverCompileRequest, schema: String, key: String) -> Record? Never! {
     if request.record_store == .Val(store) {
         bytes :: store.record(schema, key) ?? return None
         record :: record_decode(bytes).record ?? return None
@@ -558,7 +558,7 @@ pub fn jet_driver_load_record(request: JetDriverCompileRequest, schema: String, 
 // `None` and are addressed by their content. Returns the key published
 // under, or `None` when there is no store or the record cannot be encoded
 // or written.
-pub fn jet_driver_publish_record(request: JetDriverCompileRequest, schema: String, key: String?, sections: [RecordSection]) -> String? Never! {
+fn jet_driver_publish_record(request: JetDriverCompileRequest, schema: String, key: String?, sections: [RecordSection]) -> String? Never! {
     if request.record_store == .Val(store) {
         encoded :: record_encode(schema, sections)
         bytes :: encoded.bytes ?? return None

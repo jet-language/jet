@@ -31,17 +31,17 @@ use jet_foundation.[
     diagnostic_with_detail,
 ]
 
-pub struct SemaUserDeriveProvider {
-    pub module_index: Int
-    pub definition: DeriveDef
+struct SemaUserDeriveProvider {
+    module_index: Int
+    definition: DeriveDef
 }
 
 // One member a generated method may collide with: its name, how the
 // diagnostic names it, and where it is declared.
-pub struct SemaUserMemberSite {
-    pub name: String
-    pub site: String
-    pub span: Span
+struct SemaUserMemberSite {
+    name: String
+    site: String
+    span: Span
 }
 
 // ---------------------------------------------------------------------------
@@ -164,7 +164,7 @@ fn sema_user_template_function_info(function: Func) -> CtValue? {
 
 // Expands the root `prep loop` items of `items` in place; a list without one
 // is left untouched (not copied).
-pub fn sema_derive_expand_template_loops(items: &[Item], diagnostics: &[Diagnostic]) {
+fn sema_derive_expand_template_loops(items: &[Item], diagnostics: &[Diagnostic]) {
     has_loop :: loop item in items {
         if item == .TemplateLoop(_) -> break true
     } ?? false
@@ -446,7 +446,7 @@ fn sema_user_rule_expand_module(graph: &SemaRegistrationGraph, module_index: Int
 // every registered declaration; generated items register into the target's
 // module before any body is checked.
 
-pub fn sema_registration_expand_user_templates(graph: &SemaRegistrationGraph) {
+fn sema_registration_expand_user_templates(graph: &SemaRegistrationGraph) {
     if !graph.complete -> return
     providers := [SemaUserDeriveProvider]{}
     declarations := [MarkerDecl]{}

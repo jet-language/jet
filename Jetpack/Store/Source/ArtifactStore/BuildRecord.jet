@@ -5,20 +5,20 @@
 STORE_BUILD_RECORD_SCHEMA :: prep { "jet.build-record/v1" }
 
 // One compiler-owned node execution recorded for `explain-build`.
-pub struct BuildNodeRecord {
-    pub kind: String
-    pub key: String
-    pub subject: String
-    pub duration_ms: Float
-    pub why_ran: String
-    pub inputs: [String]
+struct BuildNodeRecord {
+    kind: String
+    key: String
+    subject: String
+    duration_ms: Float
+    why_ran: String
+    inputs: [String]
 }
 
 // Immutable per-build node evidence stored in the machine-wide CAS.
-pub struct BuildRecord {
-    pub schema: String
-    pub program: String
-    pub nodes: [BuildNodeRecord]
+struct BuildRecord {
+    schema: String
+    program: String
+    nodes: [BuildNodeRecord]
 
     fn new(program: String, nodes: [BuildNodeRecord]) -> BuildRecord Never! {
         BuildRecord{schema: STORE_BUILD_RECORD_SCHEMA, program, nodes}
@@ -85,8 +85,8 @@ pub struct BuildRecord {
 
 // Why a build record payload was refused (the Rust `String` error).
 #Error
-pub struct BuildRecordError {
-    pub reason: String
+struct BuildRecordError {
+    reason: String
 }
 
 fn store_build_record_string_field(node: [String: DataTree], name: String) -> String BuildRecordError! {

@@ -1,7 +1,7 @@
 // Canonical typed source-call contracts shared by source sema and the
 // Core-call registry. These rows mirror the native Core signature authority;
 // an absent row is deliberately uncovered rather than inferred from arity.
-pub enum CoreCallDefault {
+enum CoreCallDefault {
     Bool(value: Bool)
     Int(value: Int)
     Float(value: Float)
@@ -12,57 +12,57 @@ pub enum CoreCallDefault {
     StaticEnum(type_name: String, variant: String)
 }
 
-pub enum CoreCallTypeConstraint { Any Numeric Integer Floating FloatingOrExact SquareRootInput Comparable Debuggable }
+enum CoreCallTypeConstraint { Any Numeric Integer Floating FloatingOrExact SquareRootInput Comparable Debuggable }
 
-pub enum CoreCallResultRule {
+enum CoreCallResultRule {
     Declared
     AbsoluteValue(parameter_index: Int)
     FloatIfExactElseParameter(parameter_index: Int)
 }
 
-pub struct CoreCallTypedParameter {
-    pub name: String
-    pub label: String
-    pub zone: ParamZone
-    pub access: AccessConvention
-    pub ty: Type
-    pub default: CoreCallDefault?
+struct CoreCallTypedParameter {
+    name: String
+    label: String
+    zone: ParamZone
+    access: AccessConvention
+    ty: Type
+    default: CoreCallDefault?
 }
 
-pub struct CoreCallTypeParameter {
-    pub name: String
-    pub bounds: [String]
-    pub constraint: CoreCallTypeConstraint
+struct CoreCallTypeParameter {
+    name: String
+    bounds: [String]
+    constraint: CoreCallTypeConstraint
 }
 
-pub struct CoreTypedCallSignature {
-    pub module_name: String
-    pub member: String
-    pub min_arity: Int
-    pub max_arity: Int
-    pub parameters: [CoreCallTypedParameter]
-    pub return_type: Type?
-    pub type_parameters: [CoreCallTypeParameter]
-    pub result_rule: CoreCallResultRule
+struct CoreTypedCallSignature {
+    module_name: String
+    member: String
+    min_arity: Int
+    max_arity: Int
+    parameters: [CoreCallTypedParameter]
+    return_type: Type?
+    type_parameters: [CoreCallTypeParameter]
+    result_rule: CoreCallResultRule
 }
 
-pub struct CoreCallSignatureRequest {
-    pub module_name: String
-    pub member: String
-    pub actual_arity: Int
-    pub actual_accesses: [AccessConvention]
-    pub type_args: [Type]
+struct CoreCallSignatureRequest {
+    module_name: String
+    member: String
+    actual_arity: Int
+    actual_accesses: [AccessConvention]
+    type_args: [Type]
 }
 
-pub struct CoreCallParameterContract {
-    pub label: String
-    pub zone: ParamZone
-    pub default: CoreCallDefault?
+struct CoreCallParameterContract {
+    label: String
+    zone: ParamZone
+    default: CoreCallDefault?
 }
 
-pub struct CoreCallLabelRequirement {
-    pub argument_index: Int
-    pub label: String
+struct CoreCallLabelRequirement {
+    argument_index: Int
+    label: String
 }
 
 fn core_sig_parameter(name: String, label: String, zone: ParamZone, access: AccessConvention, ty: Type, default: CoreCallDefault?) -> CoreCallTypedParameter Never! {
@@ -145,7 +145,7 @@ fn core_param_optional(label: String, zone: ParamZone, default: CoreCallDefault)
     CoreCallParameterContract{label: label, zone: zone, default: Val(default)}
 }
 
-pub fn core_call_parameter_contract(module_name: String, member: String) -> [CoreCallParameterContract]? {
+fn core_call_parameter_contract(module_name: String, member: String) -> [CoreCallParameterContract]? {
     absent :: CoreCallDefault.Absent
     limits :: CoreCallDefault.StaticCall{type_name: "EncodingLimits", method: "safe"}
     if {
@@ -547,7 +547,7 @@ fn core_sig_fixed(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? 
     core_platform_fixed_signature(request.module_name, request.member)
 }
 
-pub fn core_call_typed_signature_for(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
+fn core_call_typed_signature_for(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
     row :: core_call(request.module_name, request.member) ?? return None
     if !core_call_coverage_contains(row.coverage, CORE_CALL_COVERAGE_SEMA) -> return None
     resolved_signature := core_sig_fixed(request) ?? return None
@@ -561,7 +561,7 @@ pub fn core_call_typed_signature_for(request: CoreCallSignatureRequest) -> CoreT
     Val(resolved_signature)
 }
 
-pub fn core_call_typed_signature(module_name: String, member: String, actual_arity: Int) -> CoreTypedCallSignature? {
+fn core_call_typed_signature(module_name: String, member: String, actual_arity: Int) -> CoreTypedCallSignature? {
     core_call_typed_signature_for(CoreCallSignatureRequest{
         module_name: module_name,
         member: member,
@@ -571,7 +571,7 @@ pub fn core_call_typed_signature(module_name: String, member: String, actual_ari
     })
 }
 
-pub fn core_call_label_requirements(module_name: String, member: String, actual_arity: Int) -> [CoreCallLabelRequirement] Never! {
+fn core_call_label_requirements(module_name: String, member: String, actual_arity: Int) -> [CoreCallLabelRequirement] Never! {
     if module_name == "core.net.tls" && member == "client" && actual_arity == 3 -> return [CoreCallLabelRequirement]{
         CoreCallLabelRequirement{argument_index: 1, label: "server_name"}, CoreCallLabelRequirement{argument_index: 2, label: "deadline"},
     }

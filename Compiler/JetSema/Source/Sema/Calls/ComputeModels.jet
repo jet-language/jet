@@ -24,9 +24,9 @@ use jet_foundation.[
     is_compute_tensor_family,
 ]
 
-pub struct SemaComputeModelsSpecialCheck {
-    pub handled: Bool
-    pub value: TExpr?
+struct SemaComputeModelsSpecialCheck {
+    handled: Bool
+    value: TExpr?
 }
 
 fn sema_call_compute_gradient_value_type(output: Type) -> Type? {
@@ -420,7 +420,7 @@ fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [Ca
 
 // The caller owns route selection and invokes this helper before the generic
 // Core-call producer.
-pub fn sema_call_try_compute_models_core_call(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
+fn sema_call_try_compute_models_core_call(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
     if record.module_name != "core.compute" -> return SemaComputeModelsSpecialCheck{handled: false, value: None}
     if record.member == "gradient" || record.member == "value_and_gradient" || record.member == "vjp" || record.member == "jvp" {
         return sema_call_compute_transform(record, record.member, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)

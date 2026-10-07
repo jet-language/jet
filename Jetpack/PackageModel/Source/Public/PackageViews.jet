@@ -9,111 +9,111 @@
 PACKAGE_MODEL_SCHEMA_VERSION :: prep { 1 }
 
 // One declared dependency (source redacted by `pkg_dep_display_redacted`).
-pub struct DependencyView {
-    pub name: String
-    pub source: String
+struct DependencyView {
+    name: String
+    source: String
 }
 
 // One declared package target and its ordered target kinds.
-pub struct PackageTargetView {
-    pub name: String
-    pub targets: [String]
+struct PackageTargetView {
+    name: String
+    targets: [String]
 }
 
 // One package target name and its exact selected profile identity.
-pub struct TargetProfileView {
-    pub name: String
-    pub profile: String
+struct TargetProfileView {
+    name: String
+    profile: String
 }
 
 // One declared output.
-pub struct OutputView {
-    pub name: String
-    pub kind: String
-    pub entry: String?
+struct OutputView {
+    name: String
+    kind: String
+    entry: String?
 }
 
 // One named build profile from the package's `build: { … }` declarations.
-pub struct BuildProfileView {
-    pub name: String
-    pub optimize: String
-    pub debug_info: Bool
-    pub small: Bool
-    pub panic: String?
-    pub game_development_stripping: Bool?
-    pub game_cook_mode: String?
+struct BuildProfileView {
+    name: String
+    optimize: String
+    debug_info: Bool
+    small: Bool
+    panic: String?
+    game_development_stripping: Bool?
+    game_cook_mode: String?
 }
 
 // The uncomposed `package.jet` declaration view.
-pub struct ManifestView {
-    pub schema_version: Int
-    pub file: String
-    pub jet: String?
-    pub edition: String?
-    pub description: String?
-    pub license: String?
-    pub repository: String?
-    pub layer: String?
-    pub targets: [TargetProfileView]
-    pub dependencies: [DependencyView]
-    pub packages: [PackageTargetView]
-    pub outputs: [OutputView]
-    pub build_profiles: [BuildProfileView]
+struct ManifestView {
+    schema_version: Int
+    file: String
+    jet: String?
+    edition: String?
+    description: String?
+    license: String?
+    repository: String?
+    layer: String?
+    targets: [TargetProfileView]
+    dependencies: [DependencyView]
+    packages: [PackageTargetView]
+    outputs: [OutputView]
+    build_profiles: [BuildProfileView]
 }
 
 // The composed package-facts view.
-pub struct PackageView {
-    pub schema_version: Int
-    pub file: String
-    pub jet: String?
-    pub edition: String?
-    pub description: String?
-    pub license: String?
-    pub repository: String?
-    pub layer: String?
-    pub targets: [TargetProfileView]
-    pub dependencies: [DependencyView]
-    pub packages: [PackageTargetView]
-    pub outputs: [OutputView]
-    pub build_profiles: [BuildProfileView]
+struct PackageView {
+    schema_version: Int
+    file: String
+    jet: String?
+    edition: String?
+    description: String?
+    license: String?
+    repository: String?
+    layer: String?
+    targets: [TargetProfileView]
+    dependencies: [DependencyView]
+    packages: [PackageTargetView]
+    outputs: [OutputView]
+    build_profiles: [BuildProfileView]
 }
 
 // One resolved lock entry in the public lock view.
-pub struct LockedPackageView {
-    pub name: String
-    pub version: String
-    pub source_kind: String
-    pub source: String?
-    pub revision: String?
-    pub fingerprint: String
-    pub content_hash: String?
-    pub dependencies: [String]
-    pub layer: String?
-    pub inferred_layer: String?
+struct LockedPackageView {
+    name: String
+    version: String
+    source_kind: String
+    source: String?
+    revision: String?
+    fingerprint: String
+    content_hash: String?
+    dependencies: [String]
+    layer: String?
+    inferred_layer: String?
 }
 
 // The public projection of `.jet/lock`.
-pub struct LockView {
-    pub schema_version: Int
-    pub file: String
-    pub version: Int
-    pub root_dependencies: [String]
-    pub packages: [LockedPackageView]
+struct LockView {
+    schema_version: Int
+    file: String
+    version: Int
+    root_dependencies: [String]
+    packages: [LockedPackageView]
 }
 
 // One collision entry in a profile declaration.
-pub struct KeyValueView {
-    pub key: String
-    pub value: String
+struct KeyValueView {
+    key: String
+    value: String
 }
 
 // One evaluated package profile declaration.
-pub struct ProfileView {
-    pub name: String
-    pub extends: [String]
-    pub packages: [String]
-    pub collisions: [KeyValueView]
-    pub sources: [String]
+struct ProfileView {
+    name: String
+    extends: [String]
+    packages: [String]
+    collisions: [KeyValueView]
+    sources: [String]
 
     // A canonical profile projection from an environment-model declaration,
     // without coupling the package model to the EnvModel area.
@@ -125,10 +125,10 @@ pub struct ProfileView {
 }
 
 // The public projection of the package profile set.
-pub struct ProfileSetView {
-    pub schema_version: Int
-    pub file: String
-    pub profiles: [ProfileView]
+struct ProfileSetView {
+    schema_version: Int
+    file: String
+    profiles: [ProfileView]
 
     // A schema-versioned profile set that keeps profile order.
     fn from_profiles(profiles: [ProfileView]) -> ProfileSetView Never! {
@@ -137,7 +137,7 @@ pub struct ProfileSetView {
 }
 
 // Project one uncomposed package declaration into the public manifest view.
-pub fn pkg_manifest_view_from_facts(facts: PackageFacts) -> ManifestView Never! {
+fn pkg_manifest_view_from_facts(facts: PackageFacts) -> ManifestView Never! {
     ManifestView{
         schema_version: PACKAGE_MODEL_SCHEMA_VERSION,
         file: PACKAGE_FILE,
@@ -156,7 +156,7 @@ pub fn pkg_manifest_view_from_facts(facts: PackageFacts) -> ManifestView Never! 
 }
 
 // Project composed package facts into the public package view.
-pub fn pkg_package_view_from_facts(facts: PackageFacts) -> PackageView Never! {
+fn pkg_package_view_from_facts(facts: PackageFacts) -> PackageView Never! {
     PackageView{
         schema_version: PACKAGE_MODEL_SCHEMA_VERSION,
         file: PACKAGE_FILE,
@@ -175,7 +175,7 @@ pub fn pkg_package_view_from_facts(facts: PackageFacts) -> PackageView Never! {
 }
 
 // Project the lock model without authority or secret-bearing source fields.
-pub fn pkg_lock_view_from_lock(lock: LockFile) -> LockView Never! {
+fn pkg_lock_view_from_lock(lock: LockFile) -> LockView Never! {
     packages := [LockedPackageView]{}
     loop package in lock.packages {
         revision :: if package.locked == {
@@ -327,7 +327,7 @@ fn pkg_lock_source_reference(source: LockSource) -> String? Never! {
 
 // Drop query/fragment text and any `user[:password]@` from a repository URL's
 // authority; a URL without `://` keeps everything before `?`/`#`.
-pub fn pkg_redact_repository_url(value: String) -> String Never! {
+fn pkg_redact_repository_url(value: String) -> String Never! {
     raw :: value.bytes()
     end := raw.len()
     loop index in 0..<raw.len() {

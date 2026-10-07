@@ -705,14 +705,14 @@ fn generated_decode_dispatches_across_module_boundaries() {
     fs::create_dir_all(&dir).unwrap();
     let lib = r#"
 #Codable
-pub struct Address { pub city: String }
+struct Address { city: String }
 
 #Codable
-pub struct Order {
-    pub shipping: Address
-    pub quantities: [Int]
-    pub coupon: String?
-    pub labels: [String:Int]
+struct Order {
+    shipping: Address
+    quantities: [Int]
+    coupon: String?
+    labels: [String:Int]
 }
 
 "#;
@@ -749,9 +749,9 @@ derive T.RemoteLabel {
 }
 
 #LocalLabel
-pub struct RemoteType { pub value: Int }
+struct RemoteType { value: Int }
 
-pub fn remote_type_label() -> String {
+fn remote_type_label() -> String {
     value := RemoteType{ value: 2 }
     return value.local_label()
 }

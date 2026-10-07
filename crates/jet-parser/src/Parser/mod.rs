@@ -234,7 +234,6 @@ fn parse_for_check_inner(
         type_generic_depth: 0,
         type_generic_chain: Vec::new(),
         type_generic_truncated: false,
-        pub_file_default: false,
         in_layout_body: 0,
         adjacent_if_body_depth: 0,
         block_depth: 0,
@@ -290,7 +289,6 @@ fn parse_inner(
         type_generic_depth: 0,
         type_generic_chain: Vec::new(),
         type_generic_truncated: false,
-        pub_file_default: false,
         in_layout_body: 0,
         adjacent_if_body_depth: 0,
         block_depth: 0,
@@ -453,8 +451,6 @@ struct Parser<'a> {
     type_generic_chain: Vec<String>,
     /// Set when generic depth exceeds the limit mid-parse.
     type_generic_truncated: bool,
-    /// D-VISDEFAULT2=A: when true, top-level items default to public unless `priv`.
-    pub_file_default: bool,
     /// D-LAYOUT1 / D-LAYOUT-CTOR1: >0 while parsing a `Layout.{ … }` body.
     /// Retained for forks/probes; constraint elements are parsed as typed-
     /// literal exprs (not bare expression statements), so the E0003
@@ -2072,7 +2068,7 @@ prep loop T in [Point] {
                 "#[Target(Web), HTML(\"index.html\")]",
             ),
             (
-                "#PubFile\n#NoPrelude\nfn main() {}\n",
+                "\n#NoPrelude\nfn main() {}\n",
                 "#[PubFile, NoPrelude]",
             ),
             (
@@ -2222,44 +2218,64 @@ prep loop T in [Point] {
         }
     }
 
-    /// D-VISDEFAULT2=A: `#PubFile` flips default top-level visibility; `priv` opts out.
+    /// D-VIS-MODULE1: declarations are public by default; members of a
+    /// `priv module` take the module's privacy, `priv(package)` its package's;
+    /// fields keep their own `priv`.
     #[test]
-    fn pub_file_marker_sets_default_visibility() {
-        let src = r#"#PubFile
-
-fn greet() -> String {
+    fn visibility_is_public_by_default_and_private_by_module() {
+        let src = r#"fn greet() -> String {
     return "hi"
 }
 
-priv fn secret() -> Int {
-    return 0
+struct Secret {
+    priv value: String
+    label: String
 }
 
-fn run() {
-    return
+priv module internal {
+    fn helper() -> Int { return 0 }
+}
+
+priv(package) module shared {
+    fn bump() -> Int { return 1 }
 }"#;
         let p = program(src);
-        assert!(p.pub_file);
-        let mut funcs: Vec<_> = p
+        let func = |items: &[crate::AST::Item], name: &str| -> (bool, bool) {
+            items
+                .iter()
+                .find_map(|item| match item {
+                    crate::AST::Item::Func(f) if f.name == name => Some((f.is_pub, f.is_package_pub)),
+                    _ => None,
+                })
+                .expect(name)
+        };
+        assert_eq!(func(&p.items, "greet"), (true, false));
+        let module = |name: &str| {
+            p.items
+                .iter()
+                .find_map(|item| match item {
+                    crate::AST::Item::CodeModule(m) if m.name == name => Some(m),
+                    _ => None,
+                })
+                .expect(name)
+        };
+        assert_eq!(func(module("internal").body.as_deref().unwrap(), "helper"), (false, false));
+        assert_eq!(func(module("shared").body.as_deref().unwrap(), "bump"), (true, true));
+        let secret = p
             .items
             .iter()
-            .filter_map(|i| match i {
-                crate::AST::Item::Func(f) => Some(f),
+            .find_map(|item| match item {
+                crate::AST::Item::Struct(s) if s.name == "Secret" => Some(s),
                 _ => None,
             })
-            .collect();
-        funcs.sort_by_key(|f| f.name.as_str());
-        let greet = funcs.iter().find(|f| f.name == "greet").expect("greet");
-        let secret = funcs.iter().find(|f| f.name == "secret").expect("secret");
-        let run = funcs.iter().find(|f| f.name == "run").expect("run");
-        assert!(greet.is_pub);
-        assert!(!secret.is_pub);
-        assert!(run.is_pub);
+            .expect("Secret");
+        assert!(!secret.fields[0].is_pub);
+        assert!(secret.fields[1].is_pub);
     }
 
     #[test]
     fn pub_file_section_label_emits_e0415() {
-        let src = "#PubFile\n\npriv:\nfn run() { return }\n";
+        let src = "\n\npriv:\nfn run() { return }\n";
         let (toks, errs) = lex(src);
         assert!(errs.is_empty(), "lex errors: {errs:?}");
         let toks = crate::Lexer::without_comments(&toks);
@@ -2276,7 +2292,6 @@ fn run() {
             type_generic_depth: 0,
             type_generic_chain: Vec::new(),
             type_generic_truncated: false,
-            pub_file_default: false,
             in_layout_body: 0,
             adjacent_if_body_depth: 0,
             block_depth: 0,

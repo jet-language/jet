@@ -13,7 +13,7 @@ AUTHORITY_KIND_SYMLINK :: prep { "symlink" }
 AUTHORITY_HARDLINK_DETAIL :: prep { "authority file must have exactly one hard link" }
 
 // The kind proven by a checked open.
-pub enum AuthorityKind {
+enum AuthorityKind {
     File
     Directory
 
@@ -33,12 +33,12 @@ pub enum AuthorityKind {
 // itself (kind plus device and inode): its length and mtime change whenever a
 // legitimate writer creates or removes an entry below the authority root, and
 // a path swapped between two observations still yields a different inode.
-pub struct FileIdentity {
-    pub kind: AuthorityKind
-    pub length: Int
-    pub modified_ns: Int?
-    pub device: Int
-    pub inode: Int
+struct FileIdentity {
+    kind: AuthorityKind
+    length: Int
+    modified_ns: Int?
+    device: Int
+    inode: Int
 
     fn from_stat(info: files.Stat, kind: AuthorityKind) -> FileIdentity Never! {
         if kind == AuthorityKind.Directory {
@@ -49,12 +49,12 @@ pub struct FileIdentity {
 }
 
 // One no-follow opened file and the bytes read from that same handle.
-pub struct CheckedFile {
-    pub path: String
-    pub relative: String
-    pub identity: FileIdentity
-    pub handle: FileReader
-    pub bytes: [U8]
+struct CheckedFile {
+    path: String
+    relative: String
+    identity: FileIdentity
+    handle: FileReader
+    bytes: [U8]
 
     // Decode the bytes that were read from the opened object.
     fn text(self) -> String AuthorityError! {
@@ -64,35 +64,35 @@ pub struct CheckedFile {
 }
 
 // One no-follow opened directory.
-pub struct CheckedDirectory {
-    pub path: String
-    pub relative: String
-    pub identity: FileIdentity
-    pub handle: Directory
-    allow_hardlinks: Bool
+struct CheckedDirectory {
+    path: String
+    relative: String
+    identity: FileIdentity
+    handle: Directory
+    priv allow_hardlinks: Bool
 }
 
 // A parsed canonical `package.jet` plus the opened manifest snapshot.
-pub struct CheckedManifest {
-    pub file: CheckedFile
-    pub facts: PackageFacts
+struct CheckedManifest {
+    file: CheckedFile
+    facts: PackageFacts
 }
 
 // A checked member directory and its canonical manifest.
-pub struct CheckedMember {
-    pub directory: CheckedDirectory
-    pub manifest: CheckedManifest
+struct CheckedMember {
+    directory: CheckedDirectory
+    manifest: CheckedManifest
 }
 
 // A member snapshot after checked Config composition and member validation.
-pub struct CheckedPackage {
-    pub member: CheckedMember
-    pub facts: PackageFacts
+struct CheckedPackage {
+    member: CheckedMember
+    facts: PackageFacts
 }
 
 // Failure from the shared authority resolver.
 #Error
-pub enum AuthorityError {
+enum AuthorityError {
     Missing(String)
     // `package.jet` parsed as text but violates the manifest vocabulary; kept
     // typed so the registered manifest diagnostics reach the user.

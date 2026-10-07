@@ -221,8 +221,8 @@ pub(crate) fn expand_generic_module_aliases(
                             "`{original}` is private in module `{}`",
                             module_aliases[source_idx]
                         ),
-                        "only `pub` items can be brought into scope with `use`".to_string(),
-                        format!("add `pub` before `module {original}` in the defining file"),
+                        "an item of a `priv module` is usable only by its enclosing module (D-VIS-MODULE1)".to_string(),
+                        "import it from inside its enclosing module, or remove `priv` from its module".to_string(),
                         Some(import.span),
                     ));
                     continue;

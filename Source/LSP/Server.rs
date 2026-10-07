@@ -3976,7 +3976,7 @@ mod project_part_tests {
         let helper = root.join("helper.jet");
         let src = "fn run() { print(answer()) }\n";
         std::fs::write(&main, src).unwrap();
-        std::fs::write(&helper, "pub fn answer() -> Int { return 42 }\n").unwrap();
+        std::fs::write(&helper, "fn answer() -> Int { return 42 }\n").unwrap();
 
         let path = main.to_string_lossy().into_owned();
         let uri = path_to_uri(&path);
@@ -4009,7 +4009,7 @@ mod project_part_tests {
         let main = root.join("main.jet");
         let helper = root.join("helper.jet");
         let src = "fn run() { print(answer()) }\n";
-        let saved_helper = "pub fn answer() -> Int { return 42 }\n";
+        let saved_helper = "fn answer() -> Int { return 42 }\n";
         let unsaved_helper = "fn answer() -> Int { return 42 }\n";
         std::fs::write(&main, src).unwrap();
         std::fs::write(&helper, saved_helper).unwrap();
@@ -4469,7 +4469,7 @@ mod project_part_tests {
 
     fn run_incremental_lsp_query_diagnostics_match_fresh_check_bytes() {
         let path = "/tmp/lsp_incremental_diagnostic_parity.jet";
-        let before = "pub fn alpha() -> Int { return 1 }\npub fn beta() -> Int { return 2 }\n";
+        let before = "fn alpha() -> Int { return 1 }\npub fn beta() -> Int { return 2 }\n";
         let mut doc = Document::new(path.to_string(), before.to_string(), 1);
         let server = Server::new();
         assert!(server.check_with_bundle(&doc).diags.is_empty());
@@ -4626,7 +4626,7 @@ mod project_part_tests {
         let main_path = root.join("main.jet");
         let dependency_path = root.join("b.jet");
         let main_source = "module b\nfn run() -> Int { return b.value() }\n";
-        std::fs::write(&dependency_path, "pub fn value() -> Int { return 1 }\n").unwrap();
+        std::fs::write(&dependency_path, "fn value() -> Int { return 1 }\n").unwrap();
         let main_uri = path_to_uri(&main_path.to_string_lossy());
         let dependency_uri = path_to_uri(&dependency_path.to_string_lossy());
         let mut server = Server::new();
@@ -4642,7 +4642,7 @@ mod project_part_tests {
             dependency_uri.clone(),
             Document::new(
                 dependency_path.to_string_lossy().into_owned(),
-                "pub fn value() -> String { return \"unsaved\" }\n".into(),
+                "fn value() -> String { return \"unsaved\" }\n".into(),
                 1,
             ),
         );
@@ -4656,7 +4656,7 @@ mod project_part_tests {
             .docs
             .get_mut(&dependency_uri)
             .unwrap()
-            .replace_text("pub fn value() -> Int { return 2 }\n".into());
+            .replace_text("fn value() -> Int { return 2 }\n".into());
         let repaired = server.check_with_bundle(server.docs.get(&main_uri).unwrap());
 
         assert!(repaired.diags.is_empty(), "{:#?}", repaired.diags);
@@ -4760,7 +4760,7 @@ mod project_part_tests {
         let helper = root.join("helper.jet");
         let source = "fn run() { print(answer()) }\n";
         std::fs::write(&main, source).unwrap();
-        std::fs::write(&helper, "pub fn answer() -> Int { return 42 }\n").unwrap();
+        std::fs::write(&helper, "fn answer() -> Int { return 42 }\n").unwrap();
 
         let path = main.to_string_lossy().into_owned();
         let uri = path_to_uri(&path);
@@ -4818,8 +4818,8 @@ mod project_part_tests {
         let right = root.join("right.jet");
         let source = "fn run() { print(answer()) }\n";
         std::fs::write(&main, source).unwrap();
-        std::fs::write(&left, "pub fn answer() -> Int { return 1 }\n").unwrap();
-        std::fs::write(&right, "pub fn answer() -> Int { return 2 }\n").unwrap();
+        std::fs::write(&left, "fn answer() -> Int { return 1 }\n").unwrap();
+        std::fs::write(&right, "fn answer() -> Int { return 2 }\n").unwrap();
 
         let path = main.to_string_lossy().into_owned();
         let uri = path_to_uri(&path);

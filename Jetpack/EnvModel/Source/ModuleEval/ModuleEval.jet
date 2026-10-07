@@ -6,7 +6,7 @@
 // Parse `src` and evaluate every enabled module it declares. `base_dir`
 // resolves `embed_file` inside contribution expressions, same as ordinary
 // comptime evaluation.
-pub fn envmodel_evaluate_source(src: String, base_dir: String) -[Env]> [EvaluatedModule] EnvModelEvalError! {
+fn envmodel_evaluate_source(src: String, base_dir: String) -[Env]> [EvaluatedModule] EnvModelEvalError! {
     program :: envmodel_parse_program(src)
     Ok(envmodel_evaluate_modules(program.items, src, base_dir))
 }
@@ -31,7 +31,7 @@ fn envmodel_last_error(diagnostics: [Diagnostic]) -> Diagnostic? Never! {
 // Lex + parse `src` to a `Program`, collapsing any lex/parse failure to a
 // single diagnostic. The module surface is evaluated, not type-checked, here,
 // so the first lexer error (or the parser's final error) is enough to stop.
-pub fn envmodel_parse_program(src: String) -> Program EnvModelEvalError! {
+fn envmodel_parse_program(src: String) -> Program EnvModelEvalError! {
     source :: src.bytes()
     lexed :: lex_config(source)
     if envmodel_first_error(lexed.diagnostics) == {
@@ -51,7 +51,7 @@ pub fn envmodel_parse_program(src: String) -> Program EnvModelEvalError! {
 // such as `"echo $HOME"` is not mistaken for a Jet environment read. String
 // interpolation token streams are walked recursively because they are parsed
 // as expressions by the config parser.
-pub fn envmodel_environment_reads(src: String) -> [EnvironmentRead] EnvModelEvalError! {
+fn envmodel_environment_reads(src: String) -> [EnvironmentRead] EnvModelEvalError! {
     lexed :: lex(src.bytes())
     if lexed.diagnostics.len() > 0 -> return Err(EnvModelEvalError{diagnostic: lexed.diagnostics[0]})
     reads := [EnvironmentRead]{}
@@ -90,7 +90,7 @@ fn envmodel_environment_globals(reads: [EnvironmentRead]) -[Env]> [String: CtVal
 }
 
 // Evaluate every enabled `Item.Module` in `items` (already parsed).
-pub fn envmodel_evaluate_modules(items: [Item], src: String, base_dir: String) -[Env]> [EvaluatedModule] EnvModelEvalError! {
+fn envmodel_evaluate_modules(items: [Item], src: String, base_dir: String) -[Env]> [EvaluatedModule] EnvModelEvalError! {
     scope :: ModuleEvalScope{base_dir: base_dir, funcs: envmodel_collect_funcs(items)}
     reads :: envmodel_environment_reads(src)
     globals :: envmodel_collect_comptime_globals(items, scope, envmodel_environment_globals(reads))
@@ -188,7 +188,7 @@ fn envmodel_evaluate_module(decl: ModuleDecl, src: String, scope: ModuleEvalScop
 
 // Merge every evaluated module's contributions through the §6 engine,
 // grouping by `(namespace, path)` first, in first-seen key order.
-pub fn envmodel_merge_all(modules: [EvaluatedModule]) -> [MergedModuleEntry] MergeError! {
+fn envmodel_merge_all(modules: [EvaluatedModule]) -> [MergedModuleEntry] MergeError! {
     keys := [ModuleEntryKey]{}
     grouped := [[EntryContribution]]{}
     loop evaluated in modules {
@@ -216,13 +216,13 @@ pub fn envmodel_merge_all(modules: [EvaluatedModule]) -> [MergedModuleEntry] Mer
 }
 
 // One merged `(namespace, path)` entry.
-pub struct MergedModuleEntry {
-    pub key: ModuleEntryKey
-    pub entry: MergedEntry
+struct MergedModuleEntry {
+    key: ModuleEntryKey
+    entry: MergedEntry
 }
 
 // The merged entry for `key`, if any module contributed to it.
-pub fn envmodel_merged_entry(merged: [MergedModuleEntry], key: ModuleEntryKey) -> MergedEntry? Never! {
+fn envmodel_merged_entry(merged: [MergedModuleEntry], key: ModuleEntryKey) -> MergedEntry? Never! {
     loop item in merged {
         if item.key == key -> return Val(item.entry)
     }
@@ -231,7 +231,7 @@ pub fn envmodel_merged_entry(merged: [MergedModuleEntry], key: ModuleEntryKey) -
 
 // Render one merged `Pkg` as a `<package>@<source>` ref. A bare package (the
 // sugar's empty source) resolves against the conventional `default` source.
-pub fn envmodel_pkg_ref(pkg: Pkg) -> String Never! {
+fn envmodel_pkg_ref(pkg: Pkg) -> String Never! {
     if pkg.source == "" && pkg.name.contains(REF_PROVIDER_AT) -> return pkg.name
     source :: if pkg.source == "" -> DEFAULT_SOURCE else -> pkg.source
     "{pkg.name}{REF_PROVIDER_AT}{source}"

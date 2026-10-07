@@ -9,7 +9,7 @@
 // `.jet/` when absent and keeping every unrelated lock record. A failed write
 // is returned to the caller.
 // Reuse the command's declaration cache when checking the plan's authority.
-pub fn env_workspace_lock_write(cache: &WorkspaceDeclarationCache, workspace_root: String, plan: WorkspacePlan) EnvironmentError! -[FS, Env, Exec, Time, Time.Wait]> {
+fn env_workspace_lock_write(cache: &WorkspaceDeclarationCache, workspace_root: String, plan: WorkspacePlan) EnvironmentError! -[FS, Env, Exec, Time, Time.Wait]> {
     if env_workspace_lock_write_locked(&cache, workspace_root, plan) == .Err(error) {
         return Err(EnvironmentError.Other("could not write workspace lock: {error.message()}"))
     }

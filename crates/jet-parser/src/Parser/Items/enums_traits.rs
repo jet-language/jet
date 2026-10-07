@@ -653,7 +653,6 @@ impl<'a> Parser<'a> {
                 | Syntax::KW_SANITIZER
                 | Syntax::KW_STATE
                 | Syntax::KW_TRANSITION
-                | Syntax::MARKER_PUB_FILE
                 | Syntax::MARKER_UNIT_FAMILY
                 | Syntax::MARKER_LAYOUT
                 | Syntax::MARKER_PUBLISHED_SCHEMA

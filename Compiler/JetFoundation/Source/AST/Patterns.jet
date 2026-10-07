@@ -1,7 +1,7 @@
 // Rust-shaped pattern and destructuring nodes. Span is shared with JetLexer;
 // semantic types are the canonical JetFoundation::Type.
 
-pub enum Pattern {
+enum Pattern {
     Variant(variant: String, bindings: [PatSlot], leading_dot: Bool, span: Span)
     // S31: `inner` holds a nested payload pattern (`.Val(.Rect(w, h))`,
     // `.Err(.Low)`); the binding is then `_`.
@@ -16,7 +16,7 @@ pub enum Pattern {
     BinMatch(parts: [BinMatchPart], span: Span)
 }
 
-pub enum PatSlot {
+enum PatSlot {
     Wildcard
     Bind(name: String, span: Span)
     Range(lo: Int, hi: Int)
@@ -30,51 +30,51 @@ pub enum PatSlot {
     Rest(span: Span)
 }
 
-pub enum BinMatchPart {
+enum BinMatchPart {
     Lit(bytes: [U8])
     Hole(name: String, spec: BinSpec, span: Span)
 }
 
-pub enum BinSpec {
+enum BinSpec {
     Bits(width: Int, endian: BinEndian)
     Rest
 }
 
-pub enum BinEndian {
+enum BinEndian {
     Unspecified
     Big
     Little
 }
 
-pub enum StrMatchPart {
+enum StrMatchPart {
     Lit(text: String)
     Hole(name: String, ty: Type?, span: Span)
 }
 
-pub enum StructPatField {
+enum StructPatField {
     Bind(field: String, field_span: Span, local: String, local_span: Span)
     Value(field: String, field_span: Span, value: Expr)
 }
 
-pub struct BindName {
-    pub name: String
-    pub span: Span
-    pub rename: BindNameRename?
+struct BindName {
+    name: String
+    span: Span
+    rename: BindNameRename?
 }
 
-pub struct BindNameRename {
-    pub name: String
-    pub span: Span
+struct BindNameRename {
+    name: String
+    span: Span
 }
 
-pub enum BindPattern {
+enum BindPattern {
     Struct(type_name: String, type_span: Span, fields: [BindName], rest: Span?, span: Span)
     List(elems: [BindName], span: Span)
     Tuple(elems: [BindName], span: Span)
     Refutable(pattern: Pattern, fallback: OrFallback, names: [BindName], span: Span)
 }
 
-pub enum OrFallback {
+enum OrFallback {
     Value(value: Expr)
     Block(body: [Stmt], value: Expr?, span: Span)
     Return(value: Expr?, span: Span)
@@ -88,7 +88,7 @@ pub enum OrFallback {
 // Rust `Pattern::binding_names`: the capture names a successful match
 // introduces. The parser turns a pattern test with a diverging fallback into
 // a binding of exactly these names (D-CHOOSE-TEST1); sema types each one.
-pub fn pattern_binding_names(pattern: Pattern) -> [BindName] Never! {
+fn pattern_binding_names(pattern: Pattern) -> [BindName] Never! {
     names := [BindName]{}
     pattern_collect_binding_names(pattern, &names)
     names

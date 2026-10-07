@@ -8,18 +8,18 @@
 // name table (`//`: names ending "/\n", referenced as `/<offset>`). Members
 // are read in place: the archive keeps offsets into its own bytes.
 
-pub struct LinkArchive {
-    pub path: String
+struct LinkArchive {
+    path: String
     // Per member, in archive order: its name, where its bytes start and how
     // many there are. Special members are not listed.
-    pub names: [String]
-    pub starts: [Int]
-    pub sizes: [Int]
+    names: [String]
+    starts: [Int]
+    sizes: [Int]
     // The symbol index in archive order: each name and the ordinal of the
     // member that defines it (an earlier entry wins over a later one).
-    pub symbol_names: [String]
-    pub symbol_members: [Int]
-    pub errors: [String]
+    symbol_names: [String]
+    symbol_members: [Int]
+    errors: [String]
 }
 
 LINK_AR_HEADER_SIZE :: prep { 60 }
@@ -53,7 +53,7 @@ fn link_ar_failure(path: String, message: String) -> LinkArchive Never! {
 }
 
 // Read the member table and symbol index of the archive `bytes` (from `path`).
-pub fn link_read_archive(path: String, bytes: [U8]) -> LinkArchive Never! {
+fn link_read_archive(path: String, bytes: [U8]) -> LinkArchive Never! {
     magic :: [Int]{0x21, 0x3c, 0x61, 0x72, 0x63, 0x68, 0x3e, 0x0a}
     if bytes.len() < 8 -> return link_ar_failure(path, "not an archive (too short)")
     loop (k, byte) in magic {

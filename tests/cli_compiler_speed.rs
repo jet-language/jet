@@ -1688,10 +1688,10 @@ fn run() {
             .unwrap();
         fs::write(
             scratch.join("helper.jet"),
-            "pub fn double(value: Int) -> Int { value * 2 }\n\
-             pub fn label(value: Int) -> String { value }\n\
-             pub fn ratio(total: Int, count: Int) -> Int { total / count + missing }\n\
-             pub fn flag(value: Int) -> Bool { value + 1 }\n",
+            "fn double(value: Int) -> Int { value * 2 }\n\
+             fn label(value: Int) -> String { value }\n\
+             fn ratio(total: Int, count: Int) -> Int { total / count + missing }\n\
+             fn flag(value: Int) -> Bool { value + 1 }\n",
         )
         .unwrap();
         fs::write(

@@ -2,7 +2,7 @@
 // helpers. Maps render in key order (Rust `BTreeMap`); length-framed
 // `label:len:value` lines keep every field boundary unambiguous.
 
-pub fn trust_canonical_root(root: TUFRootMetadata) -> String Never! {
+fn trust_canonical_root(root: TUFRootMetadata) -> String Never! {
     out := [String]{"jet-tuf-root-v1\n", "version={root.version}\n", "expires={root.expires_unix}\n", "consistent_snapshot={root.consistent_snapshot}\n"}
     roles :: MetadataRole.all()
     loop role in roles {
@@ -16,7 +16,7 @@ pub fn trust_canonical_root(root: TUFRootMetadata) -> String Never! {
     out.join("")
 }
 
-pub fn trust_canonical_targets(targets: TargetsMetadata) -> String Never! {
+fn trust_canonical_targets(targets: TargetsMetadata) -> String Never! {
     out := [String]{"jet-tuf-targets-v1\nversion={targets.version}\nexpires={targets.expires_unix}\n"}
     paths := targets.targets.keys().to_list()
     &paths.sort()
@@ -31,7 +31,7 @@ pub fn trust_canonical_targets(targets: TargetsMetadata) -> String Never! {
     out.join("")
 }
 
-pub fn trust_canonical_snapshot(snapshot: SnapshotMetadata) -> String Never! {
+fn trust_canonical_snapshot(snapshot: SnapshotMetadata) -> String Never! {
     out := [String]{"jet-tuf-snapshot-v1\nversion={snapshot.version}\nexpires={snapshot.expires_unix}\n"}
     names := snapshot.meta.keys().to_list()
     &names.sort()
@@ -45,7 +45,7 @@ pub fn trust_canonical_snapshot(snapshot: SnapshotMetadata) -> String Never! {
     out.join("")
 }
 
-pub fn trust_canonical_timestamp(timestamp: TimestampMetadata) -> String Never! {
+fn trust_canonical_timestamp(timestamp: TimestampMetadata) -> String Never! {
     entry :: timestamp.snapshot
     hash :: entry.hashes.get("sha256") ?? ""
     out := [String]{"jet-tuf-timestamp-v1\nversion={timestamp.version}\nexpires={timestamp.expires_unix}\nsnapshot={entry.version}:{hash}:{entry.length}\n"}
@@ -75,18 +75,18 @@ fn trust_sign_canonical(canonical: String, keys: [TrustKey]) -> [TrustSignature]
     signatures
 }
 
-pub fn trust_sign_root(root: TUFRootMetadata, keys: [TrustKey]) -> SignedMetadata<TUFRootMetadata> TrustRootError! {
+fn trust_sign_root(root: TUFRootMetadata, keys: [TrustKey]) -> SignedMetadata<TUFRootMetadata> TrustRootError! {
     Ok(SignedMetadata<TUFRootMetadata>{signed: root, signatures: trust_sign_canonical(trust_canonical_root(root), keys)})
 }
 
-pub fn trust_sign_targets(targets: TargetsMetadata, keys: [TrustKey]) -> SignedMetadata<TargetsMetadata> TrustRootError! {
+fn trust_sign_targets(targets: TargetsMetadata, keys: [TrustKey]) -> SignedMetadata<TargetsMetadata> TrustRootError! {
     Ok(SignedMetadata<TargetsMetadata>{signed: targets, signatures: trust_sign_canonical(trust_canonical_targets(targets), keys)})
 }
 
-pub fn trust_sign_snapshot(snapshot: SnapshotMetadata, keys: [TrustKey]) -> SignedMetadata<SnapshotMetadata> TrustRootError! {
+fn trust_sign_snapshot(snapshot: SnapshotMetadata, keys: [TrustKey]) -> SignedMetadata<SnapshotMetadata> TrustRootError! {
     Ok(SignedMetadata<SnapshotMetadata>{signed: snapshot, signatures: trust_sign_canonical(trust_canonical_snapshot(snapshot), keys)})
 }
 
-pub fn trust_sign_timestamp(timestamp: TimestampMetadata, keys: [TrustKey]) -> SignedMetadata<TimestampMetadata> TrustRootError! {
+fn trust_sign_timestamp(timestamp: TimestampMetadata, keys: [TrustKey]) -> SignedMetadata<TimestampMetadata> TrustRootError! {
     Ok(SignedMetadata<TimestampMetadata>{signed: timestamp, signatures: trust_sign_canonical(trust_canonical_timestamp(timestamp), keys)})
 }

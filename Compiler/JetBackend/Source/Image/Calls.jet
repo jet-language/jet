@@ -3,20 +3,20 @@
 // one zeroed result cell. It therefore handles register/stack/Float placement
 // exactly as every other native call. Cells carry bits, not converted numbers.
 
-pub struct X64CallImage {
-    pub image: X64MemoryImage
-    pub params: [LIRLayout]
-    pub result: LIRLayout?
+struct X64CallImage {
+    image: X64MemoryImage
+    params: [LIRLayout]
+    result: LIRLayout?
 }
 
-pub struct X64CallResult {
-    pub word: Int
-    pub errors: [String]
+struct X64CallResult {
+    word: Int
+    errors: [String]
 }
 
 // The caller owns the carriers and must obey the target's ownership contract.
 // No argument/result value is cloned or dropped by this ABI-only adapter.
-pub fn x64_call_image(program: LIRModule, target: LIRFunctionID) -> X64CallImage Never! {
+fn x64_call_image(program: LIRModule, target: LIRFunctionID) -> X64CallImage Never! {
     if target.value < 0 || target.value >= program.functions.len() -> return X64CallImage{image: x64_memory_image_failure([String]{"call target {target.value} is not in the module"}), params: [LIRLayout]{}, result: None}
     signature :: lir_signature(program, program.functions[target.value].signature) ?? return X64CallImage{image: x64_memory_image_failure([String]{"call target has no signature"}), params: [LIRLayout]{}, result: None}
     callable := program
@@ -43,7 +43,7 @@ pub fn x64_call_image(program: LIRModule, target: LIRFunctionID) -> X64CallImage
 
 // Loaded must be the image from this exact call descriptor, retained together
 // with its runtime until the return. The descriptor is never a jet_rt_main entry.
-pub fn x64_call_loaded(loaded: X64LoadedImage, call: X64CallImage, words: [Int]) -> X64CallResult {
+fn x64_call_loaded(loaded: X64LoadedImage, call: X64CallImage, words: [Int]) -> X64CallResult {
     if call.image.errors.len() > 0 -> return X64CallResult{word: 0, errors: call.image.errors}
     if loaded.errors.len() > 0 -> return X64CallResult{word: 0, errors: loaded.errors}
     if loaded.entry == 0 -> return X64CallResult{word: 0, errors: [String]{"the call image is not loaded"}}

@@ -190,7 +190,7 @@ fn sema_call_collections_literal_remove_mode(method: String, args: [CallArg]) ->
     }
 }
 
-pub fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     updated_args := args
     if method == "zip" || method == "zip_short" || method == "zip_pad" || method == "para_map" || method == "para_filter" || method == "para_partition" || method == "para_fold" -> return SemaMethodSpecialCheck{handled: false, value: None}
     // E0964: length-changing methods are forbidden on a fixed-size `[T#N]`.

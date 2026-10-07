@@ -164,7 +164,7 @@ fn store_optimize_same_file(left: String, right: String) -[FS, Env]> Bool Never!
 
 // Rust `optimize_cas_pool`: the CAS-pool optimizer under the Hangar lock
 // (also run by `clean`).
-pub fn store_optimize_cas_pool(roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
+fn store_optimize_cas_pool(roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
     store_optimize_objects_cas_pool(roots)
 }
@@ -202,7 +202,7 @@ fn store_hardlink_replace(first: String, file: String) StoreError! -[FS, Env]> {
 
 // Rust `verify_hangar_object`: re-hash a Hangar object under the Hangar lock
 // with the CAS-peer hardlink law (Hangar-internal peers are accepted).
-pub fn store_verify_hangar_object(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) IngestError! -[FS, Env, Time]> {
+fn store_verify_hangar_object(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) IngestError! -[FS, Env, Time]> {
     hangar_lock :: env_acquire_lock(roots.root, "hangar") ?? return Err(IngestError.IO("{err}"))
     store_verify_hangar_object_unlocked(&verification, roots, entry)
 }
@@ -210,7 +210,7 @@ pub fn store_verify_hangar_object(verification: &StoreVerification, roots: Hanga
 // Rust `verify_hangar_object_unlocked`: the closure graph must agree with the
 // record's primary, action key, references and output map; every named
 // output must re-hash to its recorded digest; every reference must exist.
-pub fn store_verify_hangar_object_unlocked(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) IngestError! -[FS, Env, Time]> {
+fn store_verify_hangar_object_unlocked(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) IngestError! -[FS, Env, Time]> {
     hangar :: roots.hangar_dir()
     allow :: entry.platform_artifact_kind != ""
     graph :: store_lifecycle_closure_graph_unlocked(&verification, roots) ?? return Err(IngestError.Invalid(err.message()))

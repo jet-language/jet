@@ -23,32 +23,32 @@ use jet_foundation.[
     TypedLitBody,
 ]
 
-pub struct SemaFunctionMemoryModuleInput {
-    pub module_identity: String
-    pub package_identity: String
-    pub policy_declarations: [PolicyDeclaration]
+struct SemaFunctionMemoryModuleInput {
+    module_identity: String
+    package_identity: String
+    policy_declarations: [PolicyDeclaration]
 }
 
-pub struct SemaFunctionMemoryFunction {
-    pub module_identity: String
+struct SemaFunctionMemoryFunction {
+    module_identity: String
     // The leaf name of the type that owns a method, "" for a free function.
-    pub owner: String
+    owner: String
     // The declaration as the plan rewrote it. None when no scoped-GC policy
     // reaches it and no other function shares its key: the plan then leaves
     // it exactly as written, so the checker reads its own declaration.
-    pub function: Func?
-    pub diagnostics: [Diagnostic]
-    pub transfer_root: Bool
-    pub complete: Bool
+    function: Func?
+    diagnostics: [Diagnostic]
+    transfer_root: Bool
+    complete: Bool
 }
 
-pub struct SemaFunctionMemoryPlan {
-    pub functions: [SemaFunctionMemoryFunction]
+struct SemaFunctionMemoryPlan {
+    functions: [SemaFunctionMemoryFunction]
     // Row position of the first function per `sema_function_memory_key`, so
     // every body check finds its row without scanning the whole plan.
-    pub positions: [String:Int]
-    pub diagnostics: [Diagnostic]
-    pub complete: Bool
+    positions: [String:Int]
+    diagnostics: [Diagnostic]
+    complete: Bool
 }
 
 struct SemaFunctionMemorySource {
@@ -422,7 +422,7 @@ fn sema_function_memory_boundary_diagnostics(function: Func, promoted: [String])
 // A declaration no scoped-GC policy reaches is not copied into the plan (its
 // row has no function); the walk revisits the items only when a shared key or
 // an E2111 boundary check needs such a declaration after all.
-pub fn sema_function_memory_plan_from_graph(graph: SemaRegistrationGraph) -> SemaFunctionMemoryPlan {
+fn sema_function_memory_plan_from_graph(graph: SemaRegistrationGraph) -> SemaFunctionMemoryPlan {
     walk := sema_function_memory_walk_new()
     limit :: sema_function_memory_walk_graph(graph, &walk)
     plan := sema_function_memory_plan_new()
@@ -437,7 +437,7 @@ pub fn sema_function_memory_plan_from_graph(graph: SemaRegistrationGraph) -> Sem
     plan
 }
 
-pub fn sema_function_memory_plan_for_program(program: Program, module_identity: String, package_identity: String) -> SemaFunctionMemoryPlan {
+fn sema_function_memory_plan_for_program(program: Program, module_identity: String, package_identity: String) -> SemaFunctionMemoryPlan {
     walk := sema_function_memory_walk_new()
     limit :: sema_function_memory_walk_program(program, module_identity, package_identity, &walk)
     plan := sema_function_memory_plan_new()
@@ -452,7 +452,7 @@ pub fn sema_function_memory_plan_for_program(program: Program, module_identity: 
     plan
 }
 
-pub fn sema_function_memory_has_unsupported_policies(declarations: [PolicyDeclaration]) -> Bool Never! {
+fn sema_function_memory_has_unsupported_policies(declarations: [PolicyDeclaration]) -> Bool Never! {
     loop declaration in declarations {
         // `copies: .Explicit` only adds refusals (Ownership/StringViews.jet).
         if declaration.key != PolicyKey.ScopedGC && declaration.key != PolicyKey.Copies -> return true
@@ -462,14 +462,14 @@ pub fn sema_function_memory_has_unsupported_policies(declarations: [PolicyDeclar
 
 // `owner` is the owning type of a method (any spelling; its leaf name is
 // used), or "" for a free function.
-pub fn sema_function_memory_find(plan: SemaFunctionMemoryPlan, module_identity: String, owner: String, span: Span) -> SemaFunctionMemoryFunction? {
+fn sema_function_memory_find(plan: SemaFunctionMemoryPlan, module_identity: String, owner: String, span: Span) -> SemaFunctionMemoryFunction? {
     position :: plan.positions.get(sema_function_memory_key(module_identity, sema_serde_named_leaf(owner), span)) ?? return None
     Val(plan.functions[position])
 }
 
 // The owner name a method's memory row is found by: the base name of its
 // owning type, "" for a free function.
-pub fn sema_function_memory_owner(kind: TFuncKind) -> String Never! {
+fn sema_function_memory_owner(kind: TFuncKind) -> String Never! {
     if kind == {
         .Method(_, owner_type) -> sema_type_graph_base_name(owner_type) ?? ""
         .TraitMethod(_, _, owner_type, _, _) -> sema_type_graph_base_name(owner_type) ?? ""
@@ -477,7 +477,7 @@ pub fn sema_function_memory_owner(kind: TFuncKind) -> String Never! {
     }
 }
 
-pub fn sema_function_memory_tir_promotion(promotion: GCPromotion) -> TGCPromotion Never! {
+fn sema_function_memory_tir_promotion(promotion: GCPromotion) -> TGCPromotion Never! {
     edges := [TGCPromotionEdge]{}
     loop edge in promotion.edges {
         &edges.push(TGCPromotionEdge{binding: edge.binding, slot: edge.slot, group: edge.group})

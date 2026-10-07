@@ -18,11 +18,11 @@ use jet_foundation.[
     type_name,
 ]
 
-pub struct SemaCallGeometryTransformParts {
-    pub scalar: Type
-    pub from: Type
-    pub to: Type
-    pub name: String
+struct SemaCallGeometryTransformParts {
+    scalar: Type
+    from: Type
+    to: Type
+    name: String
 }
 
 fn sema_call_geometry_intrinsic_type(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
@@ -31,7 +31,7 @@ fn sema_call_geometry_intrinsic_type(ty: Type, environment: SemaScopeEnvironment
     sema_type_resolve_nominal_row(graph, ty, environment.module_identity) == None
 }
 
-pub fn sema_call_geometry_transform_parts(ty: Type, environment: SemaScopeEnvironment) -> SemaCallGeometryTransformParts? {
+fn sema_call_geometry_transform_parts(ty: Type, environment: SemaScopeEnvironment) -> SemaCallGeometryTransformParts? {
     resolved :: sema_call_resolved_type(ty, environment)
     matches := if resolved == {
         .Apply(name, args) -> (name == "Transform" && args.len() == 2) || (name == "Transform2" && args.len() == 3)
@@ -104,7 +104,7 @@ fn sema_call_geometry_transform_type(parts: SemaCallGeometryTransformParts, from
     }
 }
 
-pub fn sema_call_geometry_transform_method_return(receiver_type: Type, method: String, args: [Type], environment: SemaScopeEnvironment) -> Type? {
+fn sema_call_geometry_transform_method_return(receiver_type: Type, method: String, args: [Type], environment: SemaScopeEnvironment) -> Type? {
     parts :: sema_call_geometry_transform_parts(receiver_type, environment) ?? return None
     if method == "then" && args.len() == 1 {
         next :: sema_call_geometry_transform_parts(args[0], environment) ?? return None
@@ -192,7 +192,7 @@ fn sema_call_geometry_method_params(types: [Type]) -> [SemaCallParam] Never! {
     params
 }
 
-pub fn sema_call_try_geometry(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_geometry(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     updated_args := args
     parts :: sema_call_geometry_transform_parts(receiver_value.ty, environment) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     expected_count :: sema_call_geometry_method_arg_count(method)

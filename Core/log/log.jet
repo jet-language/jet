@@ -19,70 +19,70 @@ use core as core
 //
 // Filtering, sampling, JSON line layout, and redaction are Jet. The sink
 // write and the process-global level/trace cells are host.
-pub struct LogField {
-    pub key: String
-    pub value: String
-    pub kind: String
-    pub redacted: Bool
+struct LogField {
+    key: String
+    value: String
+    kind: String
+    redacted: Bool
 }
 
-pub fn debug(message: String) Never! -[Log]> { emit("debug", message, [LogField]{}) }
+fn debug(message: String) Never! -[Log]> { emit("debug", message, [LogField]{}) }
 
-pub fn info(message: String) Never! -[Log]> { emit("info", message, [LogField]{}) }
+fn info(message: String) Never! -[Log]> { emit("info", message, [LogField]{}) }
 
-pub fn warn(message: String) Never! -[Log]> { emit("warn", message, [LogField]{}) }
+fn warn(message: String) Never! -[Log]> { emit("warn", message, [LogField]{}) }
 
-pub fn error(message: String) Never! -[Log]> { emit("error", message, [LogField]{}) }
+fn error(message: String) Never! -[Log]> { emit("error", message, [LogField]{}) }
 /// Emit a message at a caller-selected level.
-pub fn log(level: String, message: String) Never! -[Log]> { emit(level, message, [LogField]{}) }
+fn log(level: String, message: String) Never! -[Log]> { emit(level, message, [LogField]{}) }
 
 /// Python-compatible warning spelling.
-pub fn warning(message: String) Never! -[Log]> { warn(message) }
+fn warning(message: String) Never! -[Log]> { warn(message) }
 
 
-pub fn critical(message: String) Never! -[Log]> { emit("critical", message, [LogField]{}) }
+fn critical(message: String) Never! -[Log]> { emit("critical", message, [LogField]{}) }
 
-pub fn fatal(message: String) Never! -[Log]> { emit("fatal", message, [LogField]{}) }
+fn fatal(message: String) Never! -[Log]> { emit("fatal", message, [LogField]{}) }
 
-pub fn debug_fields(message: String, fields: [LogField]) Never! -[Log]> { emit("debug", message, fields) }
+fn debug_fields(message: String, fields: [LogField]) Never! -[Log]> { emit("debug", message, fields) }
 
-pub fn info_fields(message: String, fields: [LogField]) Never! -[Log]> { emit("info", message, fields) }
+fn info_fields(message: String, fields: [LogField]) Never! -[Log]> { emit("info", message, fields) }
 
-pub fn warn_fields(message: String, fields: [LogField]) Never! -[Log]> { emit("warn", message, fields) }
+fn warn_fields(message: String, fields: [LogField]) Never! -[Log]> { emit("warn", message, fields) }
 
-pub fn error_fields(message: String, fields: [LogField]) Never! -[Log]> { emit("error", message, fields) }
+fn error_fields(message: String, fields: [LogField]) Never! -[Log]> { emit("error", message, fields) }
 
-pub fn field(key: String, value: String) -> LogField Never! {
+fn field(key: String, value: String) -> LogField Never! {
     LogField{key: key, value: value, kind: "string", redacted: false}
 }
 
-pub fn int(key: String, value: Int) -> LogField Never! {
+fn int(key: String, value: Int) -> LogField Never! {
     LogField{key: key, value: "{value}", kind: "int", redacted: false}
 }
 
-pub fn float(key: String, value: Float) -> LogField Never! {
+fn float(key: String, value: Float) -> LogField Never! {
     LogField{key: key, value: "{value}", kind: "float", redacted: false}
 }
 
-pub fn bool(key: String, value: Bool) -> LogField Never! {
+fn bool(key: String, value: Bool) -> LogField Never! {
     LogField{key: key, value: "{value}", kind: "bool", redacted: false}
 }
 
-pub fn redact(key: String) -> LogField Never! {
+fn redact(key: String) -> LogField Never! {
     LogField{key: key, value: "[redacted]", kind: "redacted", redacted: true}
 }
 
-pub fn span(name: String) -[Log]> LogSpan Never! { core.log.span(name) }
+fn span(name: String) -[Log]> LogSpan Never! { core.log.span(name) }
 
-pub fn enter(span: LogSpan) Never! -[Log]> { core.log.enter(span) }
+fn enter(span: LogSpan) Never! -[Log]> { core.log.enter(span) }
 
-pub fn close(span: LogSpan) Never! -[Log]> { core.log.close(span) }
+fn close(span: LogSpan) Never! -[Log]> { core.log.close(span) }
 
 /// Select the record sink. `stderr` (JSON lines on stderr) and the `json`,
 /// `jsonl` and `text` file sinks are supported. An unsupported kind, or a
 /// file sink without a path, leaves the sink unchanged and logs an error
 /// record that names the rejected setting instead of returning silently.
-pub fn set_sink(kind: String, path: String) Never! -[Log]> {
+fn set_sink(kind: String, path: String) Never! -[Log]> {
     normalized :: ascii_lower(trim(kind))
     if normalized == "stderr" -> return core.log.set_sink("json", "")
     if normalized != "json" && normalized != "jsonl" && normalized != "text" {
@@ -94,22 +94,22 @@ pub fn set_sink(kind: String, path: String) Never! -[Log]> {
     core.log.set_sink(normalized, path)
 }
 
-pub fn sample_every(n: Int) Never! -[Log]> {
+fn sample_every(n: Int) Never! -[Log]> {
     if n > 0 -> core.log.sample_every(n)
 }
 
-pub fn counter(name: String, value: Int) -> LogField Never! { core.log.counter(name, value) }
+fn counter(name: String, value: Int) -> LogField Never! { core.log.counter(name, value) }
 
-pub fn otlp_file(path: String) Never! -[Log, FS]> {
+fn otlp_file(path: String) Never! -[Log, FS]> {
     if trim(path).len() > 0 -> core.log.otlp_file(path)
 }
 
-pub fn set_level(level: String) Never! -[Log]> {
+fn set_level(level: String) Never! -[Log]> {
     normalized :: canon_level(level)
     if normalized.len() > 0 -> core.log.set_level(normalized)
 }
 
-pub fn set_trace_id(id: String) Never! -[Log]> {
+fn set_trace_id(id: String) Never! -[Log]> {
     if trim(id).len() > 0 -> core.log.set_trace_id(id)
 }
 
@@ -119,7 +119,7 @@ pub fn set_trace_id(id: String) Never! -[Log]> {
 /// `text` selects the record format (D-LOGFMT1). An unknown setting or value
 /// is reported as an error record and otherwise ignored. The host owns the
 /// sink and process-global cells; Jet owns normalization and dispatch.
-pub fn setup(spec: String) Never! -[Log]> {
+fn setup(spec: String) Never! -[Log]> {
     loop raw in split_csv(spec) {
         if trim(raw).len() == 0 -> next
         pair :: split_once(raw, "=")
@@ -149,11 +149,11 @@ fn reject_setting(message: String) -[Log]> {
     emit("error", message, [LogField]{})
 }
 
-pub fn disable() Never! -[Log]> { core.log.disable() }
+fn disable() Never! -[Log]> { core.log.disable() }
 
-pub fn flush() Never! -[Log]> { core.log.flush() }
+fn flush() Never! -[Log]> { core.log.flush() }
 
-pub fn enabled(level: String) -[Log]> Bool Never! {
+fn enabled(level: String) -[Log]> Bool Never! {
     normalized :: canon_level(level)
     if normalized.len() == 0 -> return false
     core.log.enabled(normalized)
@@ -346,47 +346,47 @@ fn split_csv(text: String) -> [String] {
 }
 
 /// A structured log event shared by formatters and handlers.
-pub struct LogRecord {
-    pub level: String
-    pub message: String
-    pub fields: [LogField]
+struct LogRecord {
+    level: String
+    message: String
+    fields: [LogField]
 }
 
 /// A deterministic formatter. `text` is human-readable; every other mode is
 /// the canonical JSON line used by `emit`.
-pub struct Formatter {
-    pub mode: String
+struct Formatter {
+    mode: String
 }
 
 /// A level-filtered sink. `handle` applies the threshold before formatting.
-pub struct Handler {
-    pub minimum: String
-    pub mode: String
+struct Handler {
+    minimum: String
+    mode: String
 }
 
-pub fn record(level: String, message: String, fields: [LogField]) -> LogRecord Never! {
+fn record(level: String, message: String, fields: [LogField]) -> LogRecord Never! {
     LogRecord{level: default_level(level), message: message, fields: fields}
 }
 
-pub fn formatter(mode: String) -> Formatter Never! {
+fn formatter(mode: String) -> Formatter Never! {
     Formatter{mode: canon_mode(mode)}
 }
 
-pub fn handler(level: String) -> Handler Never! {
+fn handler(level: String) -> Handler Never! {
     Handler{minimum: default_level(level), mode: "json"}
 }
 
-pub fn handler_format(target: Handler, mode: String) -> Handler Never! {
+fn handler_format(target: Handler, mode: String) -> Handler Never! {
     Handler{minimum: default_level(target.minimum), mode: canon_mode(mode)}
 }
 
-pub fn format(target: Formatter, event: LogRecord) -> String Never! {
+fn format(target: Formatter, event: LogRecord) -> String Never! {
     mode :: canon_mode(target.mode)
     if mode == "text" -> return render_text(event)
     render_json(event)
 }
 
-pub fn handle(target: Handler, event: LogRecord) Never! -[Log]> {
+fn handle(target: Handler, event: LogRecord) Never! -[Log]> {
     minimum :: default_level(target.minimum)
     if rank(event.level) < rank(minimum) -> return
     formatter :: Formatter{mode: canon_mode(target.mode)}
@@ -423,9 +423,9 @@ fn render_json(event: LogRecord) -> String {
     line
 }
 
-pub struct Pair {
-    pub left: String
-    pub right: String
+struct Pair {
+    left: String
+    right: String
 }
 
 fn split_once(text: String, sep: String) -> Pair {
@@ -479,18 +479,18 @@ fn parse_int(text: String) -> Int? {
     if !any -> return None
     Val(n)
 }
-pub fn add(event: LogRecord, field: LogField) -> LogRecord Never! {
+fn add(event: LogRecord, field: LogField) -> LogRecord Never! {
     fields := event.fields
     &fields.push(field)
     LogRecord{level: event.level, message: event.message, fields: fields}
 }
 
-pub fn group(event: LogRecord, prefix: String) -> LogRecord Never! {
+fn group(event: LogRecord, prefix: String) -> LogRecord Never! {
     fields := [LogField]{}
     loop field in event.fields -> &fields.push(LogField{key: "{prefix}.{field.key}", value: field.value, kind: field.kind, redacted: field.redacted})
     LogRecord{level: event.level, message: event.message, fields: fields}
 }
 
-pub fn time(event: LogRecord, timestamp: Int) -> LogRecord Never! { add(event, int("time", timestamp)) }
+fn time(event: LogRecord, timestamp: Int) -> LogRecord Never! { add(event, int("time", timestamp)) }
 
-pub fn clear(event: LogRecord) -> LogRecord Never! { record(event.level, event.message, [LogField]{}) }
+fn clear(event: LogRecord) -> LogRecord Never! { record(event.level, event.message, [LogField]{}) }

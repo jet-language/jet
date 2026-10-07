@@ -164,7 +164,7 @@ fn selfhost_parser_diagnostic(facts: &[Int], diagnostic: Diagnostic) {
     }
 }
 
-pub fn selfhost_parser_probe(source: [U8]) -> [Int] {
+fn selfhost_parser_probe(source: [U8]) -> [Int] {
     parsed := parse_source(source)
     facts := [Int]{}
     &facts.push(parsed.diagnostics.len())

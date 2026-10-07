@@ -16,16 +16,16 @@ TOOL_PROFILE_FAILPOINT_ENV :: prep { "JETPACK_INTERNAL_TEST_PROFILE_FAILPOINT" }
 TOOL_LEGACY_GENERATIONS_DIR :: prep { "legacy-generations" }
 
 // One installed tool as a generation records it.
-pub struct InstalledUserTool {
-    pub name: String
-    pub version: String
-    pub source: String
-    pub reference: String
-    pub bins: [String]
-    pub members: [String]
-    pub member_digests: [String]
-    pub output_hash: String
-    pub store_root: String
+struct InstalledUserTool {
+    name: String
+    version: String
+    source: String
+    reference: String
+    bins: [String]
+    members: [String]
+    member_digests: [String]
+    output_hash: String
+    store_root: String
 
     // Two records name the same authority (projection digests aside).
     fn same_authority(self, other: InstalledUserTool) -> Bool Never! {
@@ -34,27 +34,27 @@ pub struct InstalledUserTool {
 }
 
 // A complete generation's tools and its completion witness.
-pub struct ToolGenerationRecord {
-    pub tools: [InstalledUserTool]
-    pub witness: String
+struct ToolGenerationRecord {
+    tools: [InstalledUserTool]
+    witness: String
 }
 
 // ── Paths ──
 
-pub fn cli_user_jet_dir() -[Env]> String Never! {
+fn cli_user_jet_dir() -[Env]> String Never! {
     home :: sys.get("HOME") ?? "."
     files.join(home, CONFIG_DEFAULT_DIR)
 }
 
-pub fn cli_user_bin_dir() -[Env]> String Never! {
+fn cli_user_bin_dir() -[Env]> String Never! {
     files.join(cli_user_jet_dir(), TOOL_BIN_DIR)
 }
 
-pub fn cli_tools_state_dir() -[Env]> String Never! {
+fn cli_tools_state_dir() -[Env]> String Never! {
     files.join(cli_user_jet_dir(), TOOL_STATE_DIR)
 }
 
-pub fn cli_tool_generations_dir() -[Env]> String Never! {
+fn cli_tool_generations_dir() -[Env]> String Never! {
     files.join(cli_tools_state_dir(), "generations")
 }
 
@@ -66,21 +66,21 @@ fn cli_tool_profile_path() -[Env]> String Never! {
     files.join(cli_tools_state_dir(), "profile.json")
 }
 
-pub fn cli_tool_current_path() -[Env]> String Never! {
+fn cli_tool_current_path() -[Env]> String Never! {
     files.join(cli_tools_state_dir(), TOOL_PROFILE_CURRENT_FILE)
 }
 
-pub fn cli_tool_manifest_path() -[Env]> String Never! {
+fn cli_tool_manifest_path() -[Env]> String Never! {
     files.join(cli_tools_state_dir(), TOOL_MANIFEST_FILE)
 }
 
 // The profile lock; released at scope exit.
-pub fn cli_tool_profile_lock() -[FS, Env, Time]> RuntimeLock IOError! {
+fn cli_tool_profile_lock() -[FS, Env, Time]> RuntimeLock IOError! {
     env_runtime_lock(cli_tools_state_dir(), TOOL_PROFILE_LOCK_SCOPE)
 }
 
 // Unix seconds now.
-pub fn cli_now_secs() -[Time]> Int Never! {
+fn cli_now_secs() -[Time]> Int Never! {
     time.unix_seconds(time.now())
 }
 
@@ -93,13 +93,13 @@ fn cli_profile_failpoint(phase: String) CLIError! -[Env]> {
 
 // ── Manifest I/O ──
 
-pub fn cli_read_tool_manifest() -[FS, Env]> ToolManifest CLIError! {
+fn cli_read_tool_manifest() -[FS, Env]> ToolManifest CLIError! {
     path :: cli_tool_manifest_path()
     if !files.is_file(path) -> return Ok(ToolManifest.empty())
     ToolManifest.parse(cli_read_bounded(path))
 }
 
-pub fn cli_write_tool_manifest(manifest: ToolManifest) CLIError! -[FS, Env]> {
+fn cli_write_tool_manifest(manifest: ToolManifest) CLIError! -[FS, Env]> {
     files.create_dir_all(cli_tools_state_dir())
     partial :: files.join(cli_tools_state_dir(), TOOL_MANIFEST_PARTIAL)
     if cli_stat_optional(partial) != None -> files.remove(partial)
@@ -111,7 +111,7 @@ pub fn cli_write_tool_manifest(manifest: ToolManifest) CLIError! -[FS, Env]> {
 // Record the installed tools in the manifest: sources merge the old
 // declarations with the realization table, and each tool keeps its declared
 // reference and tier unless this install overrides its policy.
-pub fn cli_record_tool_manifest_locked(tools: [InstalledUserTool], declared_sources: SourceTable, override_ref: String?, override_policy: ChannelPolicy) CLIError! -[FS, Env]> {
+fn cli_record_tool_manifest_locked(tools: [InstalledUserTool], declared_sources: SourceTable, override_ref: String?, override_policy: ChannelPolicy) CLIError! -[FS, Env]> {
     old :: cli_read_tool_manifest()
     source_map := [String: ToolManifestSource]{}
     loop source in old.sources -> source_map[source.name] = source
@@ -143,7 +143,7 @@ pub fn cli_record_tool_manifest_locked(tools: [InstalledUserTool], declared_sour
 
 // ── Generation records ──
 
-pub fn cli_format_tool_generation_meta(generation: Int, tools: [InstalledUserTool]) -[Time]> String CLIError! {
+fn cli_format_tool_generation_meta(generation: Int, tools: [InstalledUserTool]) -[Time]> String CLIError! {
     rows := [ToolGenerationTool]{}
     loop tool in tools {
         &rows.push(ToolGenerationTool{
@@ -161,7 +161,7 @@ pub fn cli_format_tool_generation_meta(generation: Int, tools: [InstalledUserToo
     ToolGenerationMetadata{generation: generation, created_at: cli_now_secs(), tools: rows}.format()
 }
 
-pub fn cli_parse_tool_generation_meta(text: String, expected_generation: Int) -> [InstalledUserTool] CLIError! {
+fn cli_parse_tool_generation_meta(text: String, expected_generation: Int) -> [InstalledUserTool] CLIError! {
     metadata :: ToolGenerationMetadata.parse(text, expected_generation)
     tools := [InstalledUserTool]{}
     loop tool in metadata.tools {
@@ -186,7 +186,7 @@ fn cli_tool_generation_record_witness(metadata: String, generation: Int) -> Stri
 }
 
 // A complete generation whose completion marker matches its metadata.
-pub fn cli_read_tool_generation_record(generation: Int) -[FS, Env]> ToolGenerationRecord CLIError! {
+fn cli_read_tool_generation_record(generation: Int) -[FS, Env]> ToolGenerationRecord CLIError! {
     path :: files.join(cli_tool_generation_dir(generation), TOOL_PROFILE_META_FILE)
     if !files.is_file(path) -> return Err(CLIError.Other("tool generation {generation} has no metadata"))
     text :: cli_read_bounded(path)
@@ -198,7 +198,7 @@ pub fn cli_read_tool_generation_record(generation: Int) -[FS, Env]> ToolGenerati
 }
 
 // The tools of the published generation; none before the first publish.
-pub fn cli_read_current_tools() -[FS, Env]> [InstalledUserTool] CLIError! {
+fn cli_read_current_tools() -[FS, Env]> [InstalledUserTool] CLIError! {
     path :: cli_tool_current_path()
     if !files.is_file(path) -> return Ok([InstalledUserTool]{})
     pointer :: ToolProfilePointer.parse(cli_read_bounded(path))
@@ -208,7 +208,7 @@ pub fn cli_read_current_tools() -[FS, Env]> [InstalledUserTool] CLIError! {
     Ok(record.tools)
 }
 
-pub fn cli_tool_current_generation_locked() -[FS, Env]> Int? CLIError! {
+fn cli_tool_current_generation_locked() -[FS, Env]> Int? CLIError! {
     path :: cli_tool_current_path()
     if !files.is_file(path) -> return Ok(None)
     pointer :: ToolProfilePointer.parse(cli_read_bounded(path))
@@ -218,7 +218,7 @@ pub fn cli_tool_current_generation_locked() -[FS, Env]> Int? CLIError! {
 
 // Every generation directory's number, ascending; a non-numeric or zero
 // directory name is an error.
-pub fn cli_tool_generation_numbers() -[FS, Env]> [Int] CLIError! {
+fn cli_tool_generation_numbers() -[FS, Env]> [Int] CLIError! {
     if !files.is_dir(cli_tool_generations_dir()) -> return Ok([Int]{})
     generations := [Int]{}
     loop entry in files.list_dir(cli_tool_generations_dir()) {
@@ -247,15 +247,15 @@ fn cli_tool_next_generation() -[FS, Env]> Int CLIError! {
 
 // ── Disk usage ──
 
-pub fn cli_tool_generation_disk_bytes(generation: Int) -[FS, Env]> Int CLIError! {
+fn cli_tool_generation_disk_bytes(generation: Int) -[FS, Env]> Int CLIError! {
     cli_disk_file_bytes(cli_tool_generation_dir(generation), None)
 }
 
-pub fn cli_tool_profile_state_disk_bytes() -[FS, Env]> Int CLIError! {
+fn cli_tool_profile_state_disk_bytes() -[FS, Env]> Int CLIError! {
     cli_disk_file_bytes(cli_tools_state_dir(), Val("generations"))
 }
 
-pub fn cli_tool_profile_bin_disk_bytes() -[FS, Env]> Int CLIError! {
+fn cli_tool_profile_bin_disk_bytes() -[FS, Env]> Int CLIError! {
     cli_disk_file_bytes(cli_user_bin_dir(), None)
 }
 
@@ -279,7 +279,7 @@ fn cli_disk_file_bytes(path: String, excluded: String?) -[FS]> Int CLIError! {
 // Write a new generation for `tools` (projecting bins, recording metadata
 // and its witness, rooting targets) and publish it. A generation that never
 // completed is removed on failure.
-pub fn cli_write_tool_generation_locked(verification: &StoreVerification, tools: [InstalledUserTool], live: ToolLiveInstall?) -[FS, Env, Time]> Int CLIError! {
+fn cli_write_tool_generation_locked(verification: &StoreVerification, tools: [InstalledUserTool], live: ToolLiveInstall?) -[FS, Env, Time]> Int CLIError! {
     generation :: cli_tool_next_generation()
     generation_dir :: cli_tool_generation_dir(generation)
     files.create_dir(generation_dir)
@@ -314,7 +314,7 @@ fn cli_tool_write_generation_body(verification: &StoreVerification, generation: 
 }
 
 // Reactivate an existing complete generation.
-pub fn cli_activate_tool_generation_locked(verification: &StoreVerification, generation: Int) CLIError! -[FS, Env, Time]> {
+fn cli_activate_tool_generation_locked(verification: &StoreVerification, generation: Int) CLIError! -[FS, Env, Time]> {
     record :: cli_read_tool_generation_record(generation)
     cli_validate_generation_bins(&verification, generation, record.tools)
     if record.tools.len() > 0 -> cli_ensure_tool_generation_roots(&verification, generation, record.tools, record.witness)
@@ -395,7 +395,7 @@ fn cli_tool_json_str(value: String) -> String Never! {
 // Remove abandoned partial pointers and projection staging, migrate legacy
 // generations, revalidate and re-root every complete generation, and
 // republish the requested (or newest complete) generation.
-pub fn cli_recover_tool_profile_state(verification: &StoreVerification) CLIError! -[FS, Env, Time]> {
+fn cli_recover_tool_profile_state(verification: &StoreVerification) CLIError! -[FS, Env, Time]> {
     files.create_dir_all(cli_tools_state_dir())
     partials :: [String]{TOOL_PROFILE_POINTER_PARTIAL, TOOL_PROFILE_CURRENT_PARTIAL, TOOL_MANIFEST_PARTIAL}
     loop name in partials {

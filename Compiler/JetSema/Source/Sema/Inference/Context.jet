@@ -11,88 +11,88 @@ use jet_foundation.[
     type_identity_equal,
 ]
 
-pub struct SemaInferenceTypeParam {
-    pub name: String
-    pub bounds: [String]
-    pub span: Span
-    pub identity_key: String
+struct SemaInferenceTypeParam {
+    name: String
+    bounds: [String]
+    span: Span
+    identity_key: String
 }
 
-pub struct SemaInferenceBinding {
-    pub name: String
-    pub ty: Type
-    pub source: String
+struct SemaInferenceBinding {
+    name: String
+    ty: Type
+    source: String
 }
 
-pub struct SemaInferenceConflict {
-    pub param: String
-    pub first: Type
-    pub first_source: String
-    pub second: Type
-    pub second_source: String
+struct SemaInferenceConflict {
+    param: String
+    first: Type
+    first_source: String
+    second: Type
+    second_source: String
 }
 
-pub struct SemaInferenceBoundEvidence {
-    pub param: String
-    pub actual: Type
-    pub bound: String
-    pub satisfied: Bool
-    pub source: Span
+struct SemaInferenceBoundEvidence {
+    param: String
+    actual: Type
+    bound: String
+    satisfied: Bool
+    source: Span
 }
 
 // The registration graph is not part of the context: solver entry points take
 // it as a read parameter, so building a context never copies the graph.
-pub struct SemaInferenceContext {
-    pub caller_module_identity: String
-    pub caller_package_identity: String
-    pub type_params: [SemaInferenceTypeParam]
-    pub lexical_generic_params: [TGenericParam]
-    pub expected: Type?
+struct SemaInferenceContext {
+    caller_module_identity: String
+    caller_package_identity: String
+    type_params: [SemaInferenceTypeParam]
+    lexical_generic_params: [TGenericParam]
+    expected: Type?
 }
 
-pub struct SemaInferenceResult {
-    pub substitutions: [SemaInferenceBinding]
-    pub type_args: [Type]
-    pub parameters: [Type]
-    pub return_type: Type?
-    pub evidence: [SemaInferenceBoundEvidence]
-    pub complete: Bool
-    pub compatible: Bool
+struct SemaInferenceResult {
+    substitutions: [SemaInferenceBinding]
+    type_args: [Type]
+    parameters: [Type]
+    return_type: Type?
+    evidence: [SemaInferenceBoundEvidence]
+    complete: Bool
+    compatible: Bool
 }
 
-pub fn sema_inference_type_params(parameters: [TypeParam]) -> [SemaInferenceTypeParam] Never! {
+fn sema_inference_type_params(parameters: [TypeParam]) -> [SemaInferenceTypeParam] Never! {
     result :: loop parameter in parameters -> SemaInferenceTypeParam{name: parameter.name, bounds: parameter.bounds, span: parameter.name_span, identity_key: ""}
     result
 }
 
-pub fn sema_inference_registration_params(parameters: [SemaRegistrationGenericParam]) -> [SemaInferenceTypeParam] Never! {
+fn sema_inference_registration_params(parameters: [SemaRegistrationGenericParam]) -> [SemaInferenceTypeParam] Never! {
     result :: loop parameter in parameters -> SemaInferenceTypeParam{name: parameter.name, bounds: parameter.bounds, span: parameter.span, identity_key: parameter.identity_key}
     result
 }
 
-pub fn sema_inference_bindings_for_type_args(parameters: [SemaInferenceTypeParam], type_args: [Type]) -> [SemaInferenceBinding] Never! {
+fn sema_inference_bindings_for_type_args(parameters: [SemaInferenceTypeParam], type_args: [Type]) -> [SemaInferenceBinding] Never! {
     if parameters.len() != type_args.len() -> return [SemaInferenceBinding]{}
     result :: loop (index, parameter) in parameters -> SemaInferenceBinding{name: parameter.name, ty: type_args[index], source: "explicit type argument"}
     result
 }
 
-pub fn sema_inference_context(caller_module_identity: String, caller_package_identity: String, type_params: [SemaInferenceTypeParam], lexical_generic_params: [TGenericParam], expected: Type?) -> SemaInferenceContext Never! {
+fn sema_inference_context(caller_module_identity: String, caller_package_identity: String, type_params: [SemaInferenceTypeParam], lexical_generic_params: [TGenericParam], expected: Type?) -> SemaInferenceContext Never! {
     SemaInferenceContext{caller_module_identity: caller_module_identity, caller_package_identity: caller_package_identity, type_params: type_params, lexical_generic_params: lexical_generic_params, expected: expected}
 }
 
-pub fn sema_inference_binding_at(bindings: [SemaInferenceBinding], name: String) -> SemaInferenceBinding? {
+fn sema_inference_binding_at(bindings: [SemaInferenceBinding], name: String) -> SemaInferenceBinding? {
     loop binding in bindings {
         if binding.name == name -> return Val(binding)
     }
     None
 }
 
-pub fn sema_inference_result_binding(result: SemaInferenceResult, name: String) -> Type? {
+fn sema_inference_result_binding(result: SemaInferenceResult, name: String) -> Type? {
     binding :: sema_inference_binding_at(result.substitutions, name) ?? return None
     Val(binding.ty)
 }
 
-pub fn sema_inference_bounds_checked(parameters: [SemaInferenceTypeParam], evidence: [SemaInferenceBoundEvidence], substitutions: [SemaInferenceBinding]) -> Bool Never! {
+fn sema_inference_bounds_checked(parameters: [SemaInferenceTypeParam], evidence: [SemaInferenceBoundEvidence], substitutions: [SemaInferenceBinding]) -> Bool Never! {
     required_count := 0
     loop parameter in parameters {
         loop bound in parameter.bounds {
@@ -131,6 +131,6 @@ pub fn sema_inference_bounds_checked(parameters: [SemaInferenceTypeParam], evide
     true
 }
 
-pub fn sema_inference_result_bounds_checked(result: SemaInferenceResult, parameters: [SemaInferenceTypeParam]) -> Bool Never! {
+fn sema_inference_result_bounds_checked(result: SemaInferenceResult, parameters: [SemaInferenceTypeParam]) -> Bool Never! {
     result.complete && sema_inference_bounds_checked(parameters, result.evidence, result.substitutions)
 }

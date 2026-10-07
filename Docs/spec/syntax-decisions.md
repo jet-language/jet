@@ -1800,7 +1800,7 @@ use math.[sin, cos as c]         // grouped + aliased selective import
 ```
 
 Two-step dot access; `use math.*` wildcard rejected (E0612, D-GLOBIMPORT1).
-Re-export is `pub use` (D-MOD4); a directory module's summary file is
+Re-export is `pub use` (D-MOD4, ballot pending; see S18); a directory module's summary file is
 `module.jet`. Ambiguous module resolution E0606/E0607. `import` is not a
 keyword.
 
@@ -1817,11 +1817,30 @@ namespace like any other, so `use` and `pub use` are legal inside
 `module name { }`. They resolve in the enclosing file's scope and bind only
 inside that body.
 
-**S18 — Visibility** *(D-MOD3, D-VISDEFAULT2, D-PUBPKG1)*: private by
-default; `pub` exports. `#PubFile` flips a file to public-by-default with
-`priv` marking exceptions (E0412–E0418). `pub(package)` exposes to the same
-package/workspace only (other `pub(...)` forms E0411). Cross-file private
-access E0605/E0609.
+**S18 — Visibility** *(D-VIS-MODULE1, owner directive 2026-10-07, card #4723;
+supersedes D-MOD3, D-VISDEFAULT2, D-PUBPKG1)*: everything is public by default,
+and declarations never carry a visibility marker. The only visibility keyword is
+`priv`, and it marks only two things:
+
+- a module: `priv module name { … }` or the file-module form `priv module name`.
+  Its contents are usable only by the enclosing module and that module's other
+  children. `priv(package) module` makes them usable by every module of the same
+  package and invisible to other packages (other `priv(…)` qualifiers: E0414).
+- a struct field: `priv value: T` is readable and writable only by code in the
+  type's own module (and its children). Invariant carriers such as secrets,
+  native handles and validated values use it.
+
+Removed forms are compile errors whose fix deletes the marker: `pub` and
+`pub(…)` on a declaration, method or field (E0411), `private` (E0412), `priv`
+on any other declaration (E0413), `pub:`/`priv:` section labels (E0415),
+`priv(package)` on a field (E0417), and `#PubFile` (E0418). Reaching into a
+`priv module` or a `priv` field from outside is E0605/E0609. There is no
+package-level privacy yet (it will come through the manifest).
+`Tools/agent/vis-cutover.mjs` migrates source written for the retired model.
+
+Re-export (`pub use`) is not decided: it stays the only `pub` form until the
+re-export ballot is ratified (the owner leans toward imports being public by
+default with `priv use` keeping one local).
 
 **U3 / D-SHAPE-MODULEINTERNAL1=A — Module declarations and internal discovery**
 *(ratified 2026-07-15, card #602)*: `module name { … }` is the single outermost
@@ -2813,10 +2832,10 @@ used through dynamic dispatch keeps its declared upper-bound contract.
 fn twice(n: Int) -> Int { n * 2 }
 // inferred []: pure
 
-pub fn load(path: String) -> String { core.files.read(path) }
+fn load(path: String) -> String { core.files.read(path) }
 // API snapshot: load -[FS.Read]> String
 
-pub fn bounded(path: String) String -[FS.Read]> { core.files.read(path) }
+fn bounded(path: String) String -[FS.Read]> { core.files.read(path) }
 fn hash(text: String) Int -[]> { text.length() }
 
 trait Renderer { fn render(self) Image -[GPU]> }

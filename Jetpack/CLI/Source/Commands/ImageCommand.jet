@@ -6,7 +6,7 @@
 // or publish it.
 
 // Where `--push` sends the built layout.
-pub enum ImagePushDestination {
+enum ImagePushDestination {
     Local(String)
     Registry(String)
 }
@@ -40,7 +40,7 @@ fn cli_render_env_diagnostic(src: String, error: EnvModelEvalError) Never! -[IO,
     terminal_write_output(diagnostics_render_all(ENV_FILE, src, [Diagnostic]{error.diagnostic}))
 }
 
-pub fn cli_cmd_image(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_image(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     dir :: cli_current_dir()
     src :: files.read(EnvFile.path_in(dir)) ?? {
         theme.error("no image here", "there is no {ENV_FILE} declaring any `image.<name>`.", "declare `module image.<name> {{ kind: .Oci, from: packages.<name> }}`, then `jet image <name>`.")
@@ -271,8 +271,8 @@ pub fn cli_cmd_image(verification: &StoreVerification, theme: Theme, parsed: CLI
 
 // The resolved `--push` destination (None without `--push`); a refused
 // reference is rendered and returns None from the outer optional.
-pub struct ImagePushChoice {
-    pub destination: ImagePushDestination?
+struct ImagePushChoice {
+    destination: ImagePushDestination?
 }
 
 fn cli_image_push_destination(theme: Theme, name: String, push: String?) -[IO, Time.Wait]> ImagePushChoice? Never! {
@@ -292,8 +292,8 @@ fn cli_image_push_destination(theme: Theme, name: String, push: String?) -[IO, T
 
 // The verified local base layout directory (None path without `base:`); a
 // refused base is rendered and returns None from the outer optional.
-pub struct ImageBaseChoice {
-    pub path: String?
+struct ImageBaseChoice {
+    path: String?
 }
 
 fn cli_image_base_directory(theme: Theme, dir: String, base: String?) -[IO, FS, Time.Wait]> ImageBaseChoice? Never! {
@@ -446,9 +446,9 @@ fn cli_read_project_image_file(root: String, relative: String) -[FS]> [U8] CLIEr
 
 // The supervised services of an environment image in dependency order, as
 // their foreground run commands and names.
-pub struct ImageServiceProjection {
-    pub commands: [[String]]
-    pub names: [String]
+struct ImageServiceProjection {
+    commands: [[String]]
+    names: [String]
 }
 
 fn cli_image_service_commands(plan: EnvPlan, image: ImagePlan, layer_files: [LayerFile]) -> ImageServiceProjection CLIError! {
@@ -689,9 +689,9 @@ fn cli_verify_realized_hangar_package(verification: &StoreVerification, roots: H
 }
 
 // One realized executable: its name and bytes.
-pub struct RealizedBinary {
-    pub name: String
-    pub data: [U8]
+struct RealizedBinary {
+    name: String
+    data: [U8]
 }
 
 // The regular files of the entry's real bin directory, by name.

@@ -57,18 +57,18 @@ use jet_lexer.[
     lex_generated,
 ]
 
-pub fn parse_source(source: [U8]) -> ParseResult {
+fn parse_source(source: [U8]) -> ParseResult {
     parser_parse_lexed_lines(lex(source), source, parser_line_starts(source))
 }
 
 // Embedded Core library sources are vetted stdlib internals: they may spell
 // the reserved `__name` namespace (Rust `Lexer::lex_generated`). Only the
 // loader's embedded-Core path parses this way; a user file never does.
-pub fn parse_generated_source(source: [U8]) -> ParseResult {
+fn parse_generated_source(source: [U8]) -> ParseResult {
     parser_parse_lexed_lines(lex_generated(source), source, parser_line_starts(source))
 }
 
-pub fn parse_lexed(lexed: Lexed) -> ParseResult {
+fn parse_lexed(lexed: Lexed) -> ParseResult {
     parser_parse_lexed_lines(lexed, [U8]{}, [Int]{})
 }
 
@@ -85,7 +85,7 @@ fn parser_line_starts(source: [U8]) -> [Int] Never! {
     starts
 }
 
-pub fn parse_tokens(tokens: [Token]) -> ParseResult {
+fn parse_tokens(tokens: [Token]) -> ParseResult {
     source_end :: if {
         tokens.len() > 0 -> {
             last :: tokens[tokens.len() - 1]
@@ -469,15 +469,8 @@ fn parser_apply_file_marker(state: &JetParserState, program: &Program, marker: M
     hash :: Span{start: marker.span.start, end: marker.span.start + 1}
     repeat_span :: if single -> hash else -> marker.span
     if marker.name == {
-        "PubFile" | "PublicFile" -> {
-            if marker.name == "PublicFile" -> parser_add_error_code(&state, "E0418", hash, "write `#PubFile`, not `#PublicFile`", "`#PubFile` flips this file to public-by-default (D-VISDEFAULT2)", "write `#PubFile` at the top of the file")
-            if program.pub_file {
-                parser_report_repeated_file_marker(&state, "PubFile", repeat_span)
-                return
-            }
-            program.pub_file = true
-            state.pub_file_default = true
-        }
+        // D-VIS-MODULE1: the retired file marker; E0418 deletes it.
+        "PubFile" | "PublicFile" -> parser_add_error_code(&state, "E0418", marker.span, "`#PubFile` was removed: every file is public by default", "declarations are public by default, so the file marker has nothing left to flip", "delete the marker")
         "NoPrelude" -> {
             if program.no_prelude {
                 parser_report_repeated_file_marker(&state, "NoPrelude", repeat_span)
@@ -600,7 +593,7 @@ fn parser_section_label_ahead(state: &JetParserState) -> Bool Never! {
 fn parser_report_section_label(state: &JetParserState) {
     first :: parser_bump(&state)
     colon :: parser_bump(&state)
-    parser_add_error_code(&state, "E0415", parser_cover(first.span, colon.span), "section visibility labels like `pub:` / `priv:` are not supported", "moving an item above or below a label would silently change whether it exports", "write `#PubFile` once at the top of the file, then mark exceptions with `priv`")
+    parser_add_error_code(&state, "E0415", parser_cover(first.span, colon.span), "section visibility labels like `pub:` / `priv:` are not supported", "moving an item above or below a label would silently change its visibility", "delete the label; group internal declarations in a `priv module`")
 }
 
 fn parser_item_ahead(state: &JetParserState) -> Bool Never! {

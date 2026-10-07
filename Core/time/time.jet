@@ -26,50 +26,50 @@ use core as core
 // `t + 5min` is an Instant and `b - a` is a Duration. Wall-clock Unix
 // nanoseconds come only from `unix_ns()`. Everything else is pure.
 #Error
-pub struct TimeError {
-    pub reason: String
+struct TimeError {
+    reason: String
 }
 
 impl TimeError {
-    pub fn new(reason: String) -> TimeError Never! { TimeError{reason: reason} }
+    fn new(reason: String) -> TimeError Never! { TimeError{reason: reason} }
 }
 
 /// A running stopwatch started at a Unix-nanosecond wall-clock sample.
-pub struct Stopwatch {
-    pub start_ns: Int
+struct Stopwatch {
+    start_ns: Int
 }
 
 impl Stopwatch {
     /// Whole milliseconds since `start()`.
-    pub fn elapsed_millis(self) -[Time]> Int Never! { duration_as_ms(elapsed(self)) }
+    fn elapsed_millis(self) -[Time]> Int Never! { duration_as_ms(elapsed(self)) }
 }
 
 /// The offset of `zone` from UTC in seconds at the Unix epoch. Numeric and UTC
 /// zones have exactly one offset.
-pub fn utcoffset(zone: Zone) -> Int Never! {
+fn utcoffset(zone: Zone) -> Int Never! {
     core.time.zoned(core.time.from_unix_seconds(0), zone).offset_seconds()
 }
 
-pub fn gmtime(seconds: Int) -> DateTime Never! { core.time.from_unix_seconds(seconds) }
+fn gmtime(seconds: Int) -> DateTime Never! { core.time.from_unix_seconds(seconds) }
 
-pub fn ctime(seconds: Int) -> String Never! { asctime(gmtime(seconds)) }
+fn ctime(seconds: Int) -> String Never! { asctime(gmtime(seconds)) }
 
-pub fn asctime(dt: DateTime) -> String Never! {
+fn asctime(dt: DateTime) -> String Never! {
     days :: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
     months :: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     date :: dt.date()
     "{days[date.weekday()]} {months[date.month() - 1]} {pad2(date.day(), 2)} {pad2(dt.hour(), 2)}:{pad2(dt.minute(), 2)}:{pad2(dt.second(), 2)} {date.year()}"
 }
 
-pub fn start() -[Time]> Stopwatch Never! { Stopwatch{start_ns: unix_ns()} }
+fn start() -[Time]> Stopwatch Never! { Stopwatch{start_ns: unix_ns()} }
 
-pub fn sleep(duration: Duration) Never! -[Time]> {
+fn sleep(duration: Duration) Never! -[Time]> {
     if duration.ns > 0 -> host_sleep_ns(duration.ns)
 }
 
 /// Wall-clock time as Unix nanoseconds. `time.instant()` is the monotonic
 /// point for measuring; this is the timestamp for stamps, nonces, and expiry.
-pub fn unix_ns() -[Time]> Int Never! {
+fn unix_ns() -[Time]> Int Never! {
     core.time.now_utc().to_unix_ns() ?? panic("the wall clock is outside the Unix nanosecond range")
 }
 
@@ -99,22 +99,22 @@ fn saturating_scale_ns(value: Int, scale: Int) -> Int Never! {
 }
 
 /// Weekday index with Sunday as 0.
-pub fn weekday(date: LocalDate) -> Int Never! { date.weekday() }
+fn weekday(date: LocalDate) -> Int Never! { date.weekday() }
 
-pub fn isoformat_date(date: LocalDate) -> String Never! { "{pad2(date.year(), 4)}-{pad2(date.month(), 2)}-{pad2(date.day(), 2)}" }
+fn isoformat_date(date: LocalDate) -> String Never! { "{pad2(date.year(), 4)}-{pad2(date.month(), 2)}-{pad2(date.day(), 2)}" }
 
-pub fn isoformat_time(t: LocalTime) -> String Never! {
+fn isoformat_time(t: LocalTime) -> String Never! {
     base :: "{pad2(t.hour(), 2)}:{pad2(t.minute(), 2)}:{pad2(t.second(), 2)}"
     if t.nanosecond() == 0 -> return base
     "{base}.{pad2(t.nanosecond(), 9)}"
 }
 
-pub fn isoformat(dt: DateTime) -> String Never! { "{isoformat_date(dt.date())}T{isoformat_time(dt.time())}" }
+fn isoformat(dt: DateTime) -> String Never! { "{isoformat_date(dt.date())}T{isoformat_time(dt.time())}" }
 
 // Copy literal UTF-8 bytes unchanged; only complete output is decoded.
 // Native cutover still requires borrowed String.bytes and consuming from_bytes
 // ownership; bootstrap materialization is not allocation/retention parity.
-pub fn strftime(format: String, dt: DateTime) -> String Never! {
+fn strftime(format: String, dt: DateTime) -> String Never! {
     days :: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
     days_long :: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
     months_short :: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -175,38 +175,38 @@ pub fn strftime(format: String, dt: DateTime) -> String Never! {
 }
 
 
-pub fn unix_seconds(dt: DateTime) -> Int Never! { dt.to_timestamp() }
+fn unix_seconds(dt: DateTime) -> Int Never! { dt.to_timestamp() }
 
-pub fn unix_ms(dt: DateTime) -> Int Never! { dt.to_unix_ms() }
+fn unix_ms(dt: DateTime) -> Int Never! { dt.to_unix_ms() }
 
-pub fn add_days(date: LocalDate, days: Int) -> LocalDate Never! { date.add_days(days) }
+fn add_days(date: LocalDate, days: Int) -> LocalDate Never! { date.add_days(days) }
 
-pub fn add_duration(dt: DateTime, duration: Duration) -> DateTime Never! { dt.plus_duration(duration) }
+fn add_duration(dt: DateTime, duration: Duration) -> DateTime Never! { dt.plus_duration(duration) }
 
-pub fn since(later: DateTime, earlier: DateTime) -> Duration Never! { later.difference(earlier) }
+fn since(later: DateTime, earlier: DateTime) -> Duration Never! { later.difference(earlier) }
 
-pub fn duration_seconds(seconds: Int) -> Duration Never! { duration_ns(saturating_scale_ns(seconds, 1000000000)) }
+fn duration_seconds(seconds: Int) -> Duration Never! { duration_ns(saturating_scale_ns(seconds, 1000000000)) }
 
-pub fn duration_ms(ms: Int) -> Duration Never! { duration_ns(saturating_scale_ns(ms, 1000000)) }
+fn duration_ms(ms: Int) -> Duration Never! { duration_ns(saturating_scale_ns(ms, 1000000)) }
 
 /// `Duration` is the compiler-owned nanosecond quantity, so it is built
 /// through its checked constructor; every Int is a valid nanosecond count.
-pub fn duration_ns(ns: Int) -> Duration Never! { Duration.nanoseconds(ns) ?? panic("every Int is a nanosecond Duration") }
+fn duration_ns(ns: Int) -> Duration Never! { Duration.nanoseconds(ns) ?? panic("every Int is a nanosecond Duration") }
 
-pub fn duration_as_seconds(d: Duration) -> Int Never! { d.ns /% 1000000000 }
+fn duration_as_seconds(d: Duration) -> Int Never! { d.ns /% 1000000000 }
 
-pub fn elapsed(watch: Stopwatch) -[Time]> Duration Never! {
+fn elapsed(watch: Stopwatch) -[Time]> Duration Never! {
     duration_ns(saturating_sub_ns(unix_ns(), watch.start_ns))
 }
 
-pub fn compare_date(a: LocalDate, b: LocalDate) -> Int Never! {
+fn compare_date(a: LocalDate, b: LocalDate) -> Int Never! {
     days :: a.diff_days(b)
     if days < 0 -> return -1
     if days > 0 -> return 1
     0
 }
 
-pub fn date_equals(a: LocalDate, b: LocalDate) -> Bool Never! { a == b }
+fn date_equals(a: LocalDate, b: LocalDate) -> Bool Never! { a == b }
 
 fn pad2(n: Int, width: Int) -> String {
     s := "{n}"
@@ -214,90 +214,90 @@ fn pad2(n: Int, width: Int) -> String {
     s
 }
 
-pub fn combine(date: LocalDate, t: LocalTime) -> DateTime Never! {
+fn combine(date: LocalDate, t: LocalTime) -> DateTime Never! {
     core.time.datetime(date.year(), date.month(), date.day(), t.hour(), t.minute(), t.second()).add_nanoseconds(t.nanosecond())
 }
 
-pub fn date_of(dt: DateTime) -> LocalDate Never! { dt.date() }
+fn date_of(dt: DateTime) -> LocalDate Never! { dt.date() }
 
-pub fn time_of(dt: DateTime) -> LocalTime Never! { dt.time() }
+fn time_of(dt: DateTime) -> LocalTime Never! { dt.time() }
 
-pub fn replace_date(dt: DateTime, date: LocalDate) -> DateTime Never! { combine(date, dt.time()) }
+fn replace_date(dt: DateTime, date: LocalDate) -> DateTime Never! { combine(date, dt.time()) }
 
-pub fn replace_time(dt: DateTime, t: LocalTime) -> DateTime Never! { combine(dt.date(), t) }
+fn replace_time(dt: DateTime, t: LocalTime) -> DateTime Never! { combine(dt.date(), t) }
 
-pub fn isoweekday(date: LocalDate) -> Int Never! { date.iso_weekday() }
+fn isoweekday(date: LocalDate) -> Int Never! { date.iso_weekday() }
 
-pub fn weekday_sun0(date: LocalDate) -> Int Never! { date.weekday() }
+fn weekday_sun0(date: LocalDate) -> Int Never! { date.weekday() }
 
-pub fn duration_minutes(minutes: Int) -> Duration Never! { duration_ns(saturating_scale_ns(minutes, 60000000000)) }
+fn duration_minutes(minutes: Int) -> Duration Never! { duration_ns(saturating_scale_ns(minutes, 60000000000)) }
 
-pub fn duration_hours(hours: Int) -> Duration Never! { duration_ns(saturating_scale_ns(hours, 3600000000000)) }
+fn duration_hours(hours: Int) -> Duration Never! { duration_ns(saturating_scale_ns(hours, 3600000000000)) }
 
-pub fn duration_days(days: Int) -> Duration Never! { duration_ns(saturating_scale_ns(days, 86400000000000)) }
+fn duration_days(days: Int) -> Duration Never! { duration_ns(saturating_scale_ns(days, 86400000000000)) }
 
-pub fn duration_as_ms(d: Duration) -> Int Never! { d.ns /% 1000000 }
+fn duration_as_ms(d: Duration) -> Int Never! { d.ns /% 1000000 }
 
-pub fn duration_as_minutes(d: Duration) -> Int Never! { d.ns /% 60000000000 }
+fn duration_as_minutes(d: Duration) -> Int Never! { d.ns /% 60000000000 }
 
-pub fn duration_as_hours(d: Duration) -> Int Never! { d.ns /% 3600000000000 }
+fn duration_as_hours(d: Duration) -> Int Never! { d.ns /% 3600000000000 }
 
-pub fn add_seconds(dt: DateTime, seconds: Int) -> DateTime Never! { add_duration(dt, duration_seconds(seconds)) }
+fn add_seconds(dt: DateTime, seconds: Int) -> DateTime Never! { add_duration(dt, duration_seconds(seconds)) }
 
-pub fn add_minutes(dt: DateTime, minutes: Int) -> DateTime Never! { add_duration(dt, duration_minutes(minutes)) }
+fn add_minutes(dt: DateTime, minutes: Int) -> DateTime Never! { add_duration(dt, duration_minutes(minutes)) }
 
-pub fn add_hours(dt: DateTime, hours: Int) -> DateTime Never! { add_duration(dt, duration_hours(hours)) }
+fn add_hours(dt: DateTime, hours: Int) -> DateTime Never! { add_duration(dt, duration_hours(hours)) }
 
-pub fn start_of_day(date: LocalDate) -> DateTime Never! { core.time.datetime(date.year(), date.month(), date.day(), 0, 0, 0) }
+fn start_of_day(date: LocalDate) -> DateTime Never! { core.time.datetime(date.year(), date.month(), date.day(), 0, 0, 0) }
 
-pub fn end_of_day(date: LocalDate) -> DateTime Never! {
+fn end_of_day(date: LocalDate) -> DateTime Never! {
     core.time.datetime(date.year(), date.month(), date.day(), 23, 59, 59).add_nanoseconds(999999999)
 }
 
-pub fn date_before(a: LocalDate, b: LocalDate) -> Bool Never! { a < b }
+fn date_before(a: LocalDate, b: LocalDate) -> Bool Never! { a < b }
 
-pub fn date_after(a: LocalDate, b: LocalDate) -> Bool Never! { a > b }
+fn date_after(a: LocalDate, b: LocalDate) -> Bool Never! { a > b }
 
-pub fn between(dt: DateTime, start: DateTime, end: DateTime) -> Bool Never! { dt >= start && dt <= end }
+fn between(dt: DateTime, start: DateTime, end: DateTime) -> Bool Never! { dt >= start && dt <= end }
 
-pub fn duration_zero() -> Duration Never! { duration_ns(0) }
+fn duration_zero() -> Duration Never! { duration_ns(0) }
 
-pub fn duration_is_zero(d: Duration) -> Bool Never! { d.ns == 0 }
+fn duration_is_zero(d: Duration) -> Bool Never! { d.ns == 0 }
 
-pub fn duration_abs(d: Duration) -> Duration Never! {
+fn duration_abs(d: Duration) -> Duration Never! {
     if d.ns == time_int_min() -> return duration_ns(time_int_max())
     if d.ns < 0 -> return duration_ns(0 - d.ns)
     ~d
 }
 
-pub fn duration_add(a: Duration, b: Duration) -> Duration Never! {
+fn duration_add(a: Duration, b: Duration) -> Duration Never! {
     duration_ns(saturating_add_ns(a.ns, b.ns))
 }
 
-pub fn duration_sub(a: Duration, b: Duration) -> Duration Never! {
+fn duration_sub(a: Duration, b: Duration) -> Duration Never! {
     duration_ns(saturating_sub_ns(a.ns, b.ns))
 }
 
-pub fn min_date(a: LocalDate, b: LocalDate) -> LocalDate Never! {
+fn min_date(a: LocalDate, b: LocalDate) -> LocalDate Never! {
     if a <= b -> return ~a
     ~b
 }
 
-pub fn max_date(a: LocalDate, b: LocalDate) -> LocalDate Never! {
+fn max_date(a: LocalDate, b: LocalDate) -> LocalDate Never! {
     if a >= b -> return ~a
     ~b
 }
 
-pub fn days_between(a: LocalDate, b: LocalDate) -> Int Never! { b.diff_days(a) }
+fn days_between(a: LocalDate, b: LocalDate) -> Int Never! { b.diff_days(a) }
 // Compatibility spellings shared by Python-style date/time surfaces.
-pub fn fromhours(hours: Int) -> Duration Never! { duration_hours(hours) }
+fn fromhours(hours: Int) -> Duration Never! { duration_hours(hours) }
 
-pub fn before(a: LocalDate, b: LocalDate) -> Bool Never! { date_before(a, b) }
+fn before(a: LocalDate, b: LocalDate) -> Bool Never! { date_before(a, b) }
 
-pub fn after(a: LocalDate, b: LocalDate) -> Bool Never! { date_after(a, b) }
+fn after(a: LocalDate, b: LocalDate) -> Bool Never! { date_after(a, b) }
 
-pub fn dayofweek(date: LocalDate) -> Int Never! { weekday(date) }
+fn dayofweek(date: LocalDate) -> Int Never! { weekday(date) }
 
-pub fn todate(dt: DateTime) -> LocalDate Never! { date_of(dt) }
+fn todate(dt: DateTime) -> LocalDate Never! { date_of(dt) }
 
-pub fn totime(dt: DateTime) -> LocalTime Never! { time_of(dt) }
+fn totime(dt: DateTime) -> LocalTime Never! { time_of(dt) }

@@ -12,11 +12,11 @@ NATIVE_SANDBOX_MAX_OUTPUT_BYTES :: prep { 67108864 }
 NATIVE_SANDBOX_MACOS_EXEC :: prep { "/usr/bin/sandbox-exec" }
 NATIVE_SANDBOX_NOT_ENFORCED :: prep { "not-enforced" }
 
-pub struct NativeSandboxStatus {
-    pub available: Bool
-    pub mechanism: String
-    pub policy: String
-    pub reason: String
+struct NativeSandboxStatus {
+    available: Bool
+    mechanism: String
+    policy: String
+    reason: String
 
     fn unavailable(mechanism: String, reason: String) -> NativeSandboxStatus Never! {
         NativeSandboxStatus{available: false, mechanism, policy: NATIVE_SANDBOX_NOT_ENFORCED, reason}
@@ -24,7 +24,7 @@ pub struct NativeSandboxStatus {
 }
 
 #Error
-pub enum NativeSandboxError {
+enum NativeSandboxError {
     Unsupported(String)
     IO(String)
 
@@ -38,20 +38,20 @@ pub enum NativeSandboxError {
 
 // One immutable host directory exposed read-only to a sandboxed child at
 // `destination`; no adapter adds an implicit host search path.
-pub struct NativeSandboxMount {
-    pub source: String
-    pub destination: String
+struct NativeSandboxMount {
+    source: String
+    destination: String
 }
 
 // One sandboxed action's captured result and the boundary it ran under.
-pub struct NativeSandboxOutput {
-    pub receipt: ProcessReceipt
-    pub mechanism: String
-    pub policy: String
+struct NativeSandboxOutput {
+    receipt: ProcessReceipt
+    mechanism: String
+    policy: String
 }
 
 // The filesystem, process, network and resource policy text of the backend.
-pub fn foundation_native_sandbox_policy(output_is_separate: Bool, share_network: Bool) -[Env]> String Never! {
+fn foundation_native_sandbox_policy(output_is_separate: Bool, share_network: Bool) -[Env]> String Never! {
     if sys.is_linux() {
         filesystem :: if output_is_separate -> "source-readonly,output-private-copy" else -> "private-workspace-readwrite"
         network :: if share_network -> "declared-shared" else -> "isolated"
@@ -63,7 +63,7 @@ pub fn foundation_native_sandbox_policy(output_is_separate: Bool, share_network:
 }
 
 // Probe the exact native backend before a build claims strong isolation.
-pub fn foundation_native_sandbox_status() -[FS, Env, Exec, Time.Wait]> NativeSandboxStatus Never! {
+fn foundation_native_sandbox_status() -[FS, Env, Exec, Time.Wait]> NativeSandboxStatus Never! {
     if sys.get(NATIVE_SANDBOX_FAKE_ENV) != None {
         return NativeSandboxStatus.unavailable("test-sandbox-unavailable", "test sandbox override prevents the native backend probe")
     }
@@ -101,13 +101,13 @@ fn foundation_macos_sandbox_status() -[FS, Env, Exec, Time.Wait]> NativeSandboxS
 // is read-only when `output_dir` is present, and only that output directory
 // is writable; without one the private work tree is writable. Captured output
 // is bounded at 64 MiB.
-pub fn foundation_run_native_sandboxed(executable: String, args: [String], source_dir: String, output_dir: String?, env: [String: String], share_network: Bool) -[FS, Env, Exec, Time.Wait]> NativeSandboxOutput NativeSandboxError! {
+fn foundation_run_native_sandboxed(executable: String, args: [String], source_dir: String, output_dir: String?, env: [String: String], share_network: Bool) -[FS, Env, Exec, Time.Wait]> NativeSandboxOutput NativeSandboxError! {
     foundation_run_native_sandboxed_with_mounts(executable, args, source_dir, output_dir, env, share_network, [NativeSandboxMount]{})
 }
 
 // Run one action with additional immutable host directories projected
 // read-only at their declared destinations.
-pub fn foundation_run_native_sandboxed_with_mounts(executable: String, args: [String], source_dir: String, output_dir: String?, env: [String: String], share_network: Bool, mounts: [NativeSandboxMount]) -[FS, Env, Exec, Time.Wait]> NativeSandboxOutput NativeSandboxError! {
+fn foundation_run_native_sandboxed_with_mounts(executable: String, args: [String], source_dir: String, output_dir: String?, env: [String: String], share_network: Bool, mounts: [NativeSandboxMount]) -[FS, Env, Exec, Time.Wait]> NativeSandboxOutput NativeSandboxError! {
     if sys.is_windows() -> return Err(NativeSandboxError.Unsupported("the native Windows AppContainer backend has no Core process-isolation API"))
     if !sys.is_linux() && !sys.is_macos() -> return Err(NativeSandboxError.Unsupported("Jetpack's native child sandbox is implemented only on Linux, macOS, and Windows"))
     if sys.get(NATIVE_SANDBOX_FAKE_ENV) != None -> return Err(NativeSandboxError.Unsupported("test sandbox override prevents child execution"))

@@ -2037,7 +2037,6 @@ pub fn format_template_items(items: Vec<crate::AST::Item>) -> String {
         block_spans: Vec::new(),
         fenced_statements: Vec::new(),
         web_target_ceiling: None,
-        pub_file: false,
         no_prelude: false,
         default_target: None,
         html_path: None,

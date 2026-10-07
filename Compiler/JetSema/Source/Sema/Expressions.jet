@@ -2335,7 +2335,7 @@ fn sema_expr_check_unit_conversion_source(argument: Expr, method: String, rounde
 // so the probe leaves nothing behind except what it reports to `diagnostics`.
 // This replaces whole-table snapshots, which copied every module binding and
 // every row the function had accumulated, per probe.
-pub fn sema_probe_expression(value: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_probe_expression(value: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     scope_mark :: sema_scope_mark(&scopes)
     context_mark :: sema_check_context_mark(&context)
     probe_state := sema_ownership_state_snapshot(state)
@@ -3285,7 +3285,7 @@ fn sema_expr_copy_string_view(value: Expr, scopes: &SemaScopeTable) -> Bool Neve
 
 // `share`: a D-COPY-DEFAULT1 share site (sema_expr_check_shared_identifier),
 // whose copy MIR records with the Share fact, not the authored `~`.
-pub fn sema_expr_check_copy_typed(checked: TExpr, span: Span, expected: Type?, environment: SemaScopeEnvironment, context: &SemaCheckContext, diagnostics: &[Diagnostic], string_view: Bool, share: Bool) -> TExpr? {
+fn sema_expr_check_copy_typed(checked: TExpr, span: Span, expected: Type?, environment: SemaScopeEnvironment, context: &SemaCheckContext, diagnostics: &[Diagnostic], string_view: Bool, share: Bool) -> TExpr? {
     facts := sema_copy_classify(checked.ty, SemaCopyIntent.Explicit, environment, context.generic_params, string_view)
     effect_name := sema_copy_effect_name(facts)
     if effect_name != None -> &context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
@@ -3535,7 +3535,7 @@ SEMA_MAX_SOURCE_NESTING :: 256
 // Enter one checked source form (a statement list or an expression level).
 // Past the shared limit this reports E1403 and refuses the form, so nothing
 // beneath it is checked; a refused form is not entered.
-pub fn sema_enter_source_nesting(context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_enter_source_nesting(context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     depth :: context.source_nesting + 1
     if depth > SEMA_MAX_SOURCE_NESTING {
         &diagnostics.push(sema_error("E1403", span, "this code nests {depth} levels deep; the limit is {SEMA_MAX_SOURCE_NESTING}", "each nested source form needs one compiler checking frame, and the parser, sema, and TIR evaluator enforce the same published limit (D-COMPILE-STACK1=A)", "pull inner parts out into named bindings or helper functions"))
@@ -3545,7 +3545,7 @@ pub fn sema_enter_source_nesting(context: &SemaCheckContext, span: Span, diagnos
     true
 }
 
-pub fn sema_leave_source_nesting(context: &SemaCheckContext) Never! {
+fn sema_leave_source_nesting(context: &SemaCheckContext) Never! {
     context.source_nesting -= 1
 }
 
@@ -3594,7 +3594,7 @@ fn sema_expr_replace_bare_subject(expr: Expr, subject: String) -> Expr Never! {
 // expected, a bare member chain is that callable's subject shorthand, the
 // ordinary lambda `(__jet_subject: T) -> __jet_subject.chain`. None when the
 // expectation is no unary callable or a bindingless loop owns the subject.
-pub fn sema_expr_subject_shorthand(expr: Expr, expected: Type?, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Lambda? {
+fn sema_expr_subject_shorthand(expr: Expr, expected: Type?, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Lambda? {
     if context.implicit_loop_subject_depth > 0 || !sema_expr_is_bare_member_chain(expr) -> return None
     required :: expected ?? return None
     if required == .Fn(params, _, _, _, _, _) {
@@ -3634,7 +3634,7 @@ fn sema_expr_check_bare_member_chain(expr: Expr, expected: Type?, environment: S
     SemaMethodSpecialCheck{handled: true, value: None}
 }
 
-pub fn sema_check_expression(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_check_expression(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     bare_member :: sema_expr_check_bare_member_chain(expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if bare_member.handled -> return bare_member.value
     if !sema_enter_source_nesting(&context, expr_span(expr), &diagnostics) -> return None
@@ -3667,13 +3667,13 @@ pub fn sema_check_expression(expr: Expr, expected: Type?, environment: SemaScope
 
 // Check a carrier consumer's subject (`??`, `?`, an `.Ok`/`.Err` pattern): the
 // call root keeps its Result carrier; nested calls still propagate.
-pub fn sema_check_expression_carrier(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_check_expression_carrier(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     context.failure_carrier_root = true
     checked := sema_check_expression(expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     context.failure_carrier_root = false
     checked
 }
-pub fn sema_check_expression_with_lambda_escapes(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, lambda_escapes: Bool?, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_check_expression_with_lambda_escapes(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, lambda_escapes: Bool?, diagnostics: &[Diagnostic]) -> TExpr? {
     previous_lambda_escapes := context.lambda_escapes
     context.lambda_escapes = lambda_escapes
     checked := sema_check_expression(expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)

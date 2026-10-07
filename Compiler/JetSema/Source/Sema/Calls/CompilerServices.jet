@@ -17,29 +17,29 @@ use jet_foundation.[
     Type,
 ]
 
-pub struct SemaCompilerServicesCallContract {
-    pub module_name: String
-    pub member: String
-    pub parameters: [Type]
-    pub result_type: Type
-    pub failure_carrier: TFailureCarrier
+struct SemaCompilerServicesCallContract {
+    module_name: String
+    member: String
+    parameters: [Type]
+    result_type: Type
+    failure_carrier: TFailureCarrier
 }
 
-pub struct SemaCompilerServicesCallCheck {
-    pub recognized: Bool
-    pub arguments_complete: Bool
-    pub module_name: String
-    pub member: String
-    pub arguments: [TExpr]
-    pub result_type: Type
-    pub failure_carrier: TFailureCarrier
+struct SemaCompilerServicesCallCheck {
+    recognized: Bool
+    arguments_complete: Bool
+    module_name: String
+    member: String
+    arguments: [TExpr]
+    result_type: Type
+    failure_carrier: TFailureCarrier
 }
 
 fn sema_compiler_services_result(value_name: String, error_name: String) -> Type Never! {
     Type.Result{ok: Type.Named{name: value_name}, err: Type.Named{name: error_name}}
 }
 
-pub fn sema_compiler_services_call_contract(module_name: String, member: String) -> SemaCompilerServicesCallContract? {
+fn sema_compiler_services_call_contract(module_name: String, member: String) -> SemaCompilerServicesCallContract? {
     if module_name == "core.compiler" {
         value_name := if {
             member == "lex" -> "CompilerLexed"
@@ -108,7 +108,7 @@ fn sema_compiler_services_compile_time_gate(module_name: String, member: String,
 // compiler-approved regions; SemaScopeTable separately records comptime depth.
 // The result/failure carrier remains available for recovery after diagnostics;
 // `arguments_complete` describes only whether every supplied argument checked.
-pub fn sema_compiler_services_check_call(module_name: String, member: String, args: [CallArg], span: Span, compiler_api_allowed: Bool, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCompilerServicesCallCheck {
+fn sema_compiler_services_check_call(module_name: String, member: String, args: [CallArg], span: Span, compiler_api_allowed: Bool, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCompilerServicesCallCheck {
     contract := sema_compiler_services_call_contract(module_name, member)
     if contract == None {
         &diagnostics.push(sema_call_core_unknown(module_name, member, span))
@@ -156,7 +156,7 @@ pub fn sema_compiler_services_check_call(module_name: String, member: String, ar
     SemaCompilerServicesCallCheck{recognized: true, arguments_complete: arguments_complete, module_name: module_name, member: member, arguments: values, result_type: selected.result_type, failure_carrier: selected.failure_carrier}
 }
 
-pub fn sema_compiler_services_lower_core_call(check: SemaCompilerServicesCallCheck, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_compiler_services_lower_core_call(check: SemaCompilerServicesCallCheck, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if !check.recognized || !check.arguments_complete || check.module_name != "core.compiler" -> return None
     record :: sema_call_core_record(check.module_name, check.member, check.arguments.len(), span, &diagnostics) ?? return None
     if !sema_call_core_record_effects(record, span, [Type]{}, check.result_type, check.failure_carrier, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return None
@@ -322,7 +322,7 @@ fn sema_call_compiler_value_method_type(owner: String, method: String) -> Type? 
     None
 }
 
-pub fn sema_call_try_compiler_value_method(
+fn sema_call_try_compiler_value_method(
     receiver: Expr,
     receiver_value: TExpr,
     method: String,

@@ -2,21 +2,21 @@
 // module's data out in one block. Code references are rel32; pointer words in
 // data are rebased at the static ELF or memory image origin.
 
-pub struct X64ImageDataReloc { pub at: Int, pub target: Int }
+struct X64ImageDataReloc { at: Int, target: Int }
 
-pub struct X64LinkedText {
-    pub text: [U8]
+struct X64LinkedText {
+    text: [U8]
     // Required alignment of the block's absolute origin; relative alignment
     // alone cannot guarantee aligned function or data addresses.
-    pub align: Int
+    align: Int
     // offsets[i] is where functions[i] starts in `text`, runtime_offsets[i]
     // where runtime[i] starts.
-    pub offsets: [Int]
-    pub runtime_offsets: [Int]
+    offsets: [Int]
+    runtime_offsets: [Int]
     // Where the data starts in `text` (text.len() without data).
-    pub data_offset: Int
-    pub data_relocs: [X64ImageDataReloc]
-    pub errors: [String]
+    data_offset: Int
+    data_relocs: [X64ImageDataReloc]
+    errors: [String]
 }
 
 X64_FUNCTION_ALIGN :: prep { 16 }
@@ -37,7 +37,7 @@ fn x64_link_place(text: &[U8], function: X64CompiledFunction) -> Int Never! {
 
 // `data_page` starts the data on a page of its own (and the block on a page
 // boundary), so a static executable can map it writable apart from the code.
-pub fn x64_link_text(functions: [X64CompiledFunction], runtime: [X64CompiledFunction], data: [LIRData], data_page: Bool) -> X64LinkedText Never! {
+fn x64_link_text(functions: [X64CompiledFunction], runtime: [X64CompiledFunction], data: [LIRData], data_page: Bool) -> X64LinkedText Never! {
     data_align :: x64_data_align(data)
     align := if data_align > X64_FUNCTION_ALIGN -> data_align else -> X64_FUNCTION_ALIGN
     paged :: data_page && data.len() > 0

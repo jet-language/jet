@@ -3257,7 +3257,7 @@ fn fmt_selective_import_d_selimport1_stability() {
     // D-SELIMPORT1=A: `use mod.[a, b as c]` must survive fmt unchanged.
     let src = "\
 module math {
-    pub fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+    fn clamp(x: Int, lo: Int, hi: Int) -> Int {
         if x < lo { return lo }
         if x > hi { return hi }
         return x
@@ -3949,19 +3949,6 @@ fn fmt_os_target_marker_stability() {
 // no error, it just emitted wrong or missing output.
 
 #[test]
-fn fmt_pub_file_precedes_imports() {
-    // D-VISDEFAULT2: `#PubFile` carries no span (a fixed-position file
-    // marker, like `#Target(Web)`), so it used to render *after* the
-    // imports loop. But an import's `priv`/`pub` qualifier is chosen
-    // relative to `#PubFile` being in effect — emitting the marker after the
-    // import it gates produced `priv use …` with no preceding `#PubFile`,
-    // which doesn't even reparse (E0413). `#PubFile` must render before
-    // imports, not after.
-    let src = "#PubFile\n\nuse core.term\n\nfn run() {\n    print(\"hi\")\n}\n";
-    assert_fmt_stable(src, "#PubFile before imports");
-}
-
-#[test]
 fn fmt_typed_derive_body_comment_not_duplicated() {
     // D-META-CODE1: a derive body is a typed item template. Its comments are
     // walked with the ordinary formatter and must remain attached exactly
@@ -4221,11 +4208,11 @@ fn generic_modules_roundtrip_templates_symbolic_lengths_nested_items_and_alias_c
     let src = r#"module ring<T>(capacity: Int, label: String) {
 #Meta(category: label)
 SIZE :: prep { capacity }
-pub struct Buffer { slots: [T#capacity] }
-module nested<U> { pub fn keep(value: U) -> U { return ~value } }
+struct Buffer { slots: [T#capacity] }
+module nested<U> { fn keep(value: U) -> U { return ~value } }
 module inner :: nested<T>
 #Meta(category: label)
-pub fn adjusted() -> Int { return capacity + 1 }
+fn adjusted() -> Int { return capacity + 1 }
 }
 module a :: ring<Int>(2 + 2, "ring")
 module b :: a

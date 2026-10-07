@@ -6,7 +6,7 @@
 
 // Rust Platform::clean_path: the minimal host-independent PATH available to
 // clean child processes. Declared Jet bins are prepended by the caller.
-pub fn env_shell_clean_path() -[Env]> String Never! {
+fn env_shell_clean_path() -[Env]> String Never! {
     if sys.is_windows() -> return "C:\\Windows\\System32;C:\\Windows"
     "/usr/bin:/bin"
 }
@@ -34,18 +34,18 @@ struct ShellRunOptions {
 }
 
 // A composed environment: what to expose and how to label the prompt.
-pub struct ShellEnv {
-    pub bin_dirs: [String]
+struct ShellEnv {
+    bin_dirs: [String]
     // Provider-owned runtime search paths projected into child processes.
-    pub vars: [String: String]
+    vars: [String: String]
     // Variables that must not leak from the parent shell into this env.
-    pub unset_vars: [String]
-    pub refs: [String]
-    pub label: String
-    pub prompt_path: PromptPathMode
-    pub prompt_strip: PromptStripMode
+    unset_vars: [String]
+    refs: [String]
+    label: String
+    prompt_path: PromptPathMode
+    prompt_strip: PromptStripMode
     // Cache verification leases stay live through child process handoff.
-    pub cache_leases: [CacheLease]
+    cache_leases: [CacheLease]
 
     // Prepend our bin dirs to `base_path`, deduping while preserving order.
     fn composed_path(self, base_path: String) -[Env]> String Never! {

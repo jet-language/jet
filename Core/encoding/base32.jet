@@ -9,34 +9,34 @@
 use core as core
 
 #Error
-pub struct Base32Error {
-    pub reason: String
+struct Base32Error {
+    reason: String
 }
 
 impl Base32Error {
-    pub fn new(reason: String) -> Base32Error Never! { Base32Error{reason: reason} }
+    fn new(reason: String) -> Base32Error Never! { Base32Error{reason: reason} }
 }
 
-pub fn encode(data: [U8]) -> String Never! { core.encoding.base32.b32encode(data) }
+fn encode(data: [U8]) -> String Never! { core.encoding.base32.b32encode(data) }
 
 /// Decode the canonical padded RFC 4648 alphabet.
-pub fn decode(text: String) -> [U8] Base32Error! {
+fn decode(text: String) -> [U8] Base32Error! {
     if core.encoding.base32.b32decode(text) == {
         .Ok(value) -> return Ok(value)
         .Err(reason) -> return Err(Base32Error{reason: reason})
     }
 }
 
-pub fn is_base32(text: String) -> Bool Never! {
+fn is_base32(text: String) -> Bool Never! {
     decode(text) == .Ok(_)
 }
 
-pub fn b32encode(data: [U8]) -> String Never! { encode(data) }
-pub fn b32decode(text: String) -> [U8] Base32Error! { decode(text) }
+fn b32encode(data: [U8]) -> String Never! { encode(data) }
+fn b32decode(text: String) -> [U8] Base32Error! { decode(text) }
 
-pub fn b32hexencode(data: [U8]) -> String Never! { core.encoding.base32.b32hexencode(data) }
+fn b32hexencode(data: [U8]) -> String Never! { core.encoding.base32.b32hexencode(data) }
 
-pub fn b32hexdecode(text: String) -> [U8] Base32Error! {
+fn b32hexdecode(text: String) -> [U8] Base32Error! {
     if core.encoding.base32.b32hexdecode(text) == {
         .Ok(value) -> return Ok(value)
         .Err(reason) -> return Err(Base32Error{reason: reason})

@@ -5,14 +5,14 @@
 // computed setting.
 
 // Everything one `env.<name>` contribution produced besides dev services.
-pub struct EnvCapture {
-    pub entry: EntryContribution
-    pub secrets: [SecretSpec]
-    pub adapters: [AdapterPlan]
-    pub lifecycle: EnvironmentLifecycle
-    pub presets: [PresetSpec]
-    pub languages: [LanguageSpec]
-    pub files: [ManagedFile]
+struct EnvCapture {
+    entry: EntryContribution
+    secrets: [SecretSpec]
+    adapters: [AdapterPlan]
+    lifecycle: EnvironmentLifecycle
+    presets: [PresetSpec]
+    languages: [LanguageSpec]
+    files: [ManagedFile]
 
     // The environment-scoped facts of this capture under `name`.
     fn contribution(self, name: String, reads: [EnvironmentRead], services: [DevServicePlan]) -> EnvironmentContribution Never! {
@@ -66,7 +66,7 @@ enum EnvFieldKind {
 // U18: a bare `{ … }` elaborates to the namespace type; an explicit
 // `Env { … }` stays legal. A non-record value (or the wrong type name) is
 // E0966.
-pub fn envmodel_evaluate_env_contribution(value: Expr, src: String, scope: ModuleEvalScope, globals: [String: CtValue], source: String) -> EnvCapture EnvModelEvalError! {
+fn envmodel_evaluate_env_contribution(value: Expr, src: String, scope: ModuleEvalScope, globals: [String: CtValue], source: String) -> EnvCapture EnvModelEvalError! {
     if value == {
         .StructLit(type_name, _, _, _, fields, _, _) -> {
             if type_name != "" && type_name != TYPE_ENV -> return Err(envmodel_wrong_namespace_type(TYPE_ENV, type_name, expr_span(value)))
@@ -81,7 +81,7 @@ pub fn envmodel_evaluate_env_contribution(value: Expr, src: String, scope: Modul
 // Module fields are a small pure dependency graph: a valid `port: base + 1,
 // base: 8000` must not depend on declaration order. Every sibling dependency
 // resolves first, then each field is lowered with the resolved values.
-pub fn envmodel_evaluate_env_fields(fields: [NamedExpr], src: String, scope: ModuleEvalScope, globals: [String: CtValue], source: String) -> EnvCapture EnvModelEvalError! {
+fn envmodel_evaluate_env_fields(fields: [NamedExpr], src: String, scope: ModuleEvalScope, globals: [String: CtValue], source: String) -> EnvCapture EnvModelEvalError! {
     capture := EnvCapture{
         entry: EntryContribution{packages: [Pkg]{}, settings: [String: [FactContribution]]{}},
         secrets: [SecretSpec]{},
@@ -208,7 +208,7 @@ fn envmodel_scalar_ct_key(value: CtValue) -> CtKey? Never! {
 
 // The dotted name an identifier/field path spells; any other expression is
 // named by its start offset.
-pub fn envmodel_expression_name(expr: Expr) -> String Never! {
+fn envmodel_expression_name(expr: Expr) -> String Never! {
     if expr == {
         .Ident(name, _) -> name
         .Field(base, member, _) -> "{envmodel_expression_name(base)}.{member}"
@@ -293,7 +293,7 @@ fn envmodel_prompt_word(value: CtValue) -> String? Never! {
 
 // Fold one contribution's lifecycle into the selected environment's.
 // Sequences concatenate; single-valued facts must agree across modules.
-pub fn envmodel_lifecycle_merge(target: &EnvironmentLifecycle, incoming: EnvironmentLifecycle, module_name: String) EnvModelEvalError! {
+fn envmodel_lifecycle_merge(target: &EnvironmentLifecycle, incoming: EnvironmentLifecycle, module_name: String) EnvModelEvalError! {
     loop item in incoming.dotenv -> { &target.dotenv.push(item) }
     loop item in incoming.unset -> { &target.unset.push(item) }
     loop item in incoming.on_enter -> { &target.on_enter.push(item) }

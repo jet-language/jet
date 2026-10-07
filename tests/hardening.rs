@@ -392,7 +392,7 @@ fn hyphenated_file_name_gets_sane_module_alias() {
     let dir = temp_project("hyphen");
     fs::write(
         dir.join("my-utils.jet"),
-        "pub fn helper() -> Int {\n    return 42\n}\n",
+        "fn helper() -> Int {\n    return 42\n}\n",
     )
     .unwrap();
     fs::write(
@@ -413,7 +413,7 @@ fn imported_struct_constructs_and_reads_fields() {
     let dir = temp_project("structs");
     fs::write(
         dir.join("shapes.jet"),
-        "pub struct Point {\n    pub x: Int\n    pub y: Int\n}\n",
+        "struct Point {\n    x: Int\n    y: Int\n}\n",
     )
     .unwrap();
     fs::write(
@@ -441,12 +441,12 @@ fn duplicate_file_stems_get_unique_module_names() {
     fs::create_dir_all(dir.join("b")).unwrap();
     fs::write(
         dir.join("a/util.jet"),
-        "pub fn one() -> Int {\n    return 1\n}\n",
+        "fn one() -> Int {\n    return 1\n}\n",
     )
     .unwrap();
     fs::write(
         dir.join("b/util.jet"),
-        "pub fn two() -> Int {\n    return 2\n}\n",
+        "fn two() -> Int {\n    return 2\n}\n",
     )
     .unwrap();
     fs::write(

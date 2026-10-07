@@ -27,12 +27,12 @@ use jet_foundation.[
     tir_stmt_children,
 ]
 
-pub struct SemaServiceCoreMethodContract {
-    pub member: String
-    pub parameters: [Type]
-    pub result_type: Type
-    pub receiver_access: AccessConvention
-    pub argument_accesses: [AccessConvention]
+struct SemaServiceCoreMethodContract {
+    member: String
+    parameters: [Type]
+    result_type: Type
+    receiver_access: AccessConvention
+    argument_accesses: [AccessConvention]
 }
 
 fn sema_services_error_type() -> Type Never! {
@@ -304,7 +304,7 @@ fn sema_services_delivery_contract(method: String) -> SemaServiceCoreMethodContr
     None
 }
 
-pub fn sema_check_service_tree_method(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+fn sema_check_service_tree_method(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
     updated_args := args
     if method == "worker" {
         if updated_args.len() != 3 {
@@ -405,7 +405,7 @@ pub fn sema_check_service_tree_method(method: String, receiver: Expr, receiver_v
     Val(result)
 }
 
-pub fn sema_check_service_workflow_method(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+fn sema_check_service_workflow_method(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
     contract :: sema_services_workflow_contract(method) ?? return None
     result := sema_services_check_core_method("ServiceWorkflow.{method}", contract, receiver, receiver_value, args, [String]{}, expected, span, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if method == "sleep" -> sema_services_record_direct_effect(environment, &scopes, &context, "Time", "ServiceWorkflow.sleep", span, &diagnostics)
@@ -413,23 +413,23 @@ pub fn sema_check_service_workflow_method(method: String, receiver: Expr, receiv
     Val(result)
 }
 
-pub fn sema_check_service_endpoint_method(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+fn sema_check_service_endpoint_method(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
     contract :: sema_services_endpoint_contract(method) ?? return None
     Val(sema_services_check_core_method("ServiceEndpoint.{method}", contract, receiver, receiver_value, args, [String]{}, expected, span, environment, &scopes, &state, &tail_store, &context, &diagnostics))
 }
 
-pub fn sema_check_delivery_method(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+fn sema_check_delivery_method(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
     contract :: sema_services_delivery_contract(method) ?? return None
     Val(sema_services_check_core_method("Delivery.{method}", contract, receiver, receiver_value, args, [String]{}, expected, span, environment, &scopes, &state, &tail_store, &context, &diagnostics))
 }
 
-pub fn sema_check_delivery_state_method(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+fn sema_check_delivery_state_method(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
     if method != "show" -> return None
     contract := sema_services_contract("delivery_state_show", [Type]{}, Type.String, AccessConvention.Read)
     Val(sema_services_check_core_method("DeliveryState.show", contract, receiver, receiver_value, args, [String]{}, expected, span, environment, &scopes, &state, &tail_store, &context, &diagnostics))
 }
 
-pub fn sema_check_service_runtime_method(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+fn sema_check_service_runtime_method(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
     updated_args := args
     operation := if {
         method == "send" -> THandleOp.ServiceRuntimeSend
@@ -479,7 +479,7 @@ pub fn sema_check_service_runtime_method(method: String, receiver: Expr, receive
     Val(SemaMethodSpecialCheck{handled: true, value: checked})
 }
 
-pub fn sema_call_try_service_core_call(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_try_service_core_call(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     updated_args := args
     if module_name != "core.service" || (member != "tree" && member != "runtime") -> return SemaDirectSpecialCheck{handled: false, value: None}
     _ := type_args
@@ -524,10 +524,10 @@ pub fn sema_call_try_service_core_call(module_name: String, member: String, args
     SemaDirectSpecialCheck{handled: true, value: checked.value}
 }
 
-pub struct SemaServiceWorkerHandler {
-    pub key: String
-    pub name: String
-    pub span: Span
+struct SemaServiceWorkerHandler {
+    key: String
+    name: String
+    span: Span
 }
 
 fn sema_services_find_handlers_expr(expression: TExpr, handlers: &[SemaServiceWorkerHandler]) {
@@ -583,7 +583,7 @@ fn sema_services_worker_reaches(start: String, target: String, functions: [TFunc
     false
 }
 
-pub fn sema_validate_service_handler_graph(modules: [SemaGraphModuleResult]) -> [Diagnostic] {
+fn sema_validate_service_handler_graph(modules: [SemaGraphModuleResult]) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
     functions := [TFunc]{}
     handlers := [SemaServiceWorkerHandler]{}

@@ -22,8 +22,8 @@ use jet_foundation.[
     type_name,
 ]
 
-pub struct SemaGameCoreStaticTarget {
-    pub type_name: String
+struct SemaGameCoreStaticTarget {
+    type_name: String
 }
 
 fn sema_game_static_target(receiver: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> SemaGameCoreStaticTarget? {
@@ -119,14 +119,14 @@ fn sema_game_static_call(target: SemaGameCoreStaticTarget, method: String, args:
 
 // Handles only the three reserved static Core paths before ordinary CoreCall
 // and registered static method resolution.
-pub fn sema_call_try_game_static(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_game_static(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     target :: sema_game_static_target(receiver, environment, scopes) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     sema_game_static_call(target, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
 // Canonical Core-owned fields are projected by exact owner identity, never by
 // a same-spelled user field.
-pub fn sema_game_core_field_type(owner: Type, field: String) -> Type? {
+fn sema_game_core_field_type(owner: Type, field: String) -> Type? {
     if owner == {
         .Named(name) -> {
             if name == "GameScene" {
@@ -302,7 +302,7 @@ fn sema_game_check_backend_method(receiver: Expr, receiver_value: TExpr, method:
 
 // Scene setup is editable; frame/input queries are read-only. on_frame carries
 // only the callback's checked schedule and derivation, never a fabricated one.
-pub fn sema_call_try_game_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+fn sema_call_try_game_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
     if receiver_value.ty == (Type.Named{name: "GameScene"}) -> return sema_game_check_scene_method(receiver, receiver_value, method, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if receiver_value.ty == (Type.Named{name: "GameAssets"}) -> return sema_game_check_assets_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if receiver_value.ty == (Type.Named{name: "GameInputMap"}) || receiver_value.ty == (Type.Named{name: "GameInputSnapshot"}) -> return sema_game_check_input_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)

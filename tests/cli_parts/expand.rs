@@ -1179,7 +1179,7 @@ fn plugin_text_export_allows_guest_memory_allocation() {
     let dir = isolated_cwd("plugin_text_memory_allowed");
     fs::write(
         dir.join("main.jet"),
-        "pub fn echo(value: String) -> String { ~value }\n\nfn run() {}\n",
+        "fn echo(value: String) -> String { ~value }\n\nfn run() {}\n",
     )
     .unwrap();
     let out = Command::new(jet())
@@ -1224,7 +1224,7 @@ fn plugin_missing_wasm_tools_is_e1259() {
     let dir = isolated_cwd("plugin_no_wasmtools");
     fs::write(
         dir.join("main.jet"),
-        "pub fn scale(a: Float, b: Float) -> Float {\n    return a * b\n}\n\nfn run() {}\n",
+        "fn scale(a: Float, b: Float) -> Float {\n    return a * b\n}\n\nfn run() {}\n",
     )
     .unwrap();
 

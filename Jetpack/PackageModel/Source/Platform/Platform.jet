@@ -17,9 +17,9 @@ TIER_ONE_ARCHES :: prep { [String]{ARCH_X64, ARCH_ARM64} }
 
 // An `arch-os` target identity. The fields stay open strings because a host
 // key may name a platform outside tier one; `is_tier_one` reports that fact.
-pub struct PlatformKey {
-    pub arch: String
-    pub os: String
+struct PlatformKey {
+    arch: String
+    os: String
 
     // A tier-one key, or None when either half is outside tier one.
     fn new(arch: String, os: String) -> PlatformKey? Never! {
@@ -55,7 +55,7 @@ pub struct PlatformKey {
 }
 
 // The host's `arch-os` envelope key (Rust `host_key`).
-pub fn pkg_host_key() -[Env]> String Never! {
+fn pkg_host_key() -[Env]> String Never! {
     PlatformKey.host().envelope_key()
 }
 
@@ -71,12 +71,12 @@ fn pkg_is_tier_one(arch: String, os: String) -> Bool Never! {
     arch_ok && os_ok
 }
 
-pub fn pkg_path_separator_for_os(os: String) -> String Never! {
+fn pkg_path_separator_for_os(os: String) -> String Never! {
     if os == OS_WINDOWS -> return ";"
     ":"
 }
 
-pub fn pkg_exe_suffix_for_os(os: String) -> String Never! {
+fn pkg_exe_suffix_for_os(os: String) -> String Never! {
     if os == OS_WINDOWS -> return ".exe"
     ""
 }

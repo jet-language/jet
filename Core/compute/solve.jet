@@ -7,15 +7,15 @@ use core.math as math
 use core as core
 use core.compute.[Tensor, ComputeError]
 
-pub struct LinearSolver {
-    pub kind: String
-    pub dimension: Int
-    pub factors: [Float]
-    pub pivots: [Int]
-    pub device: String
+struct LinearSolver {
+    kind: String
+    dimension: Int
+    factors: [Float]
+    pivots: [Int]
+    device: String
 }
 
-pub fn dense(a: Tensor, b: Tensor) -> Tensor ComputeError! {
+fn dense(a: Tensor, b: Tensor) -> Tensor ComputeError! {
     validate_matrix(a)
     validate_rhs(b)
     a_device :: canonical_device(a.device) ?? return Err(ComputeError.Device)
@@ -31,7 +31,7 @@ pub fn dense(a: Tensor, b: Tensor) -> Tensor ComputeError! {
     Ok(Tensor{shape: copy_i(b.shape), data: data, device: a_device, numeric_profile: tensor_profile(a), requested: "CPU"})
 }
 
-pub fn lu(a: Tensor) -> LinearSolver ComputeError! {
+fn lu(a: Tensor) -> LinearSolver ComputeError! {
     validate_matrix(a)
     device :: canonical_device(a.device) ?? return Err(ComputeError.Device)
     if device != "CPU" -> return Err(ComputeError.Unsupported)

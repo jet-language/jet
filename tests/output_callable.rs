@@ -227,7 +227,7 @@ fn interpreter_hot_swap_session() {
 fn qualified_entry_keeps_one_definition_and_effect_identity() {
     let dir = common::unique_tmp("jet_output_callable_qualified");
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("helper.jet"), "pub fn start() { print(\"ok\") }\n").unwrap();
+    std::fs::write(dir.join("helper.jet"), "fn start() { print(\"ok\") }\n").unwrap();
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
@@ -275,12 +275,12 @@ fn qualified_entry_follows_nested_quoted_import_graph() {
     std::fs::create_dir_all(dir.join("src")).unwrap();
     std::fs::write(
         dir.join("src/command.jet"),
-        "pub fn run() { print(\"nested\") }\n",
+        "fn run() { print(\"nested\") }\n",
     )
     .unwrap();
     std::fs::write(
         dir.join("src/cli.jet"),
-        "pub use \"command\" as command\npub fn run() { print(\"reexport\") }\n",
+        "pub use \"command\" as command\nfn run() { print(\"reexport\") }\n",
     )
     .unwrap();
     std::fs::write(
@@ -357,7 +357,7 @@ fn manifest_output_root_alias_is_live_for_direct_check() {
         "use \"src/cli/main\" as app\n",
     )
     .unwrap();
-    std::fs::write(dir.join("src/cli/main.jet"), "pub fn run() {}\n").unwrap();
+    std::fs::write(dir.join("src/cli/main.jet"), "fn run() {}\n").unwrap();
 
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["check", "run.jet"])
@@ -395,7 +395,7 @@ fn nested_output_links_report_e1321_before_codegen() {
     let missing = codes(
         "jet_output_nested_missing",
         "pub use \"cli\" as cli;\n",
-        "pub fn run() {}\n",
+        "fn run() {}\n",
         "app.cli.missing",
     );
     assert!(
@@ -406,7 +406,7 @@ fn nested_output_links_report_e1321_before_codegen() {
     let private = codes(
         "jet_output_nested_private",
         "use \"cli\" as cli;\n",
-        "pub fn run() {}\n",
+        "fn run() {}\n",
         "app.cli.run",
     );
     assert!(
@@ -687,7 +687,7 @@ fn renamed_entry_is_not_recovered_from_a_stale_lock() {
         "version = 1\nentry = \"helper.start\"\n",
     )
     .unwrap();
-    std::fs::write(dir.join("helper.jet"), "pub fn renamed() {}\n").unwrap();
+    std::fs::write(dir.join("helper.jet"), "fn renamed() {}\n").unwrap();
     let file = dir.join("main.jet");
     std::fs::write(
         &file,

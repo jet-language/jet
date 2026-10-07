@@ -7,7 +7,7 @@
 // use that same relative coordinate system. The compiler-facing package
 // reader supplies an authority-backed implementation so profile evaluation
 // cannot fall back to ambient filesystem reads.
-pub trait SourceLoader {
+trait SourceLoader {
     fn read_file(&self, relative: String) -[FS, Env]> String EnvModelEvalError!
 
     fn list_jet_files(&self, relative: String) -[FS, Env]> [String] EnvModelEvalError!
@@ -19,8 +19,8 @@ pub trait SourceLoader {
 }
 
 // The ambient-filesystem loader below one canonical environment root.
-pub struct FileSystemSourceLoader {
-    pub root: String
+struct FileSystemSourceLoader {
+    root: String
 
     // `relative` below the root, canonicalized and proven still inside it.
     fn checked_path(self, relative: String) -[FS, Env]> String EnvModelEvalError! {
@@ -110,18 +110,18 @@ fn envmodel_normalize_relative_path(path: String) -> String Never! {
 // file discovered through `imports: find(…)` (U4). Spans in `items` index into
 // this unit's own `src`; `base_dir` is the dir the file's relative refs and
 // `embed_file` calls resolve against.
-pub struct EvalUnit {
-    pub items: [Item]
-    pub src: String
-    pub base_dir: String
-    pub source_path: String
+struct EvalUnit {
+    items: [Item]
+    src: String
+    base_dir: String
+    source_path: String
 }
 
 // Walk every `imports: find("<dir>")` directive in the root unit's modules,
 // skipping recognized typed integrations, and return one `EvalUnit` per
 // discovered `*.jet` file. Discovery is one level deep: a discovered file may
 // not itself import (the liftability law, E0971).
-pub fn envmodel_discover_imports<L: SourceLoader>(root: EvalUnit, base_dir: String, loader: &L) -[FS, Env]> [EvalUnit] EnvModelEvalError! {
+fn envmodel_discover_imports<L: SourceLoader>(root: EvalUnit, base_dir: String, loader: &L) -[FS, Env]> [EvalUnit] EnvModelEvalError! {
     out := [EvalUnit]{}
     environment_root :: files.canonicalize(base_dir) ?? return Err(envmodel_error("E1331", "environment root `{base_dir}` cannot be resolved: {err}", "imports follow physical paths and cannot be evaluated from an unresolved root", "run the command from an existing project directory", None))
     seen_files := [String]{}
@@ -207,7 +207,7 @@ fn envmodel_find_dir_arg(directive: Expr) -> String EnvModelEvalError! {
 // discovered unit — into one `(name -> upstream)` table (U5: same name +
 // different ref conflicts, E0967). Each `target@provider` ref (D-JPK-REF1) is
 // translated to the colon/flake upstream the providers realize.
-pub fn envmodel_build_source_table(units: [EvalUnit]) -[FS]> SourceTable EnvModelEvalError! {
+fn envmodel_build_source_table(units: [EvalUnit]) -[FS]> SourceTable EnvModelEvalError! {
     maps := [[String: String]]{}
     policies := [String: ChannelPolicy]{}
     raw_refs := [String: String]{}

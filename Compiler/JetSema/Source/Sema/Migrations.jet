@@ -15,16 +15,16 @@ use jet_foundation.[
     ast_func,
 ]
 
-pub struct SemaMigrationFieldName {
-    pub field: String
-    pub json_key: String
+struct SemaMigrationFieldName {
+    field: String
+    json_key: String
 }
 
-pub struct SemaMigrationCanonicalShape {
-    pub names: [SemaMigrationFieldName]
-    pub current: [String]
-    pub historical: [[String]]
-    pub skipped: [String]
+struct SemaMigrationCanonicalShape {
+    names: [SemaMigrationFieldName]
+    current: [String]
+    historical: [[String]]
+    skipped: [String]
 }
 
 fn sema_migration_insert_sorted(values: [String], value: String) -> [String] Never! {
@@ -56,7 +56,7 @@ fn sema_migration_rename_all(definition: StructDef) -> String? {
     sema_checked_marker_text(marker ?? panic("checked RenameAll marker disappeared"))
 }
 
-pub fn sema_migration_wire_name(style: String?, name: String) -> String Never! {
+fn sema_migration_wire_name(style: String?, name: String) -> String Never! {
     sema_checked_wire_case(style, name)
 }
 
@@ -70,7 +70,7 @@ fn sema_migration_json_key(definition: StructDef, style: String?, name: String) 
     sema_migration_wire_name(style, name)
 }
 
-pub fn sema_migration_canonical_shape(definition: StructDef, migrations: [MigrationDecl]) -> SemaMigrationCanonicalShape Never! {
+fn sema_migration_canonical_shape(definition: StructDef, migrations: [MigrationDecl]) -> SemaMigrationCanonicalShape Never! {
     style := sema_migration_rename_all(definition)
     names := [SemaMigrationFieldName]{}
     current := [String]{}
@@ -194,7 +194,7 @@ fn sema_migration_type_is_enabled(type_name: String, enabled_types: [String]) ->
     false
 }
 
-pub fn sema_migration_desugar(migrations: &[MigrationDecl], enabled_types: [String]) -> [Func] Never! {
+fn sema_migration_desugar(migrations: &[MigrationDecl], enabled_types: [String]) -> [Func] Never! {
     functions := [Func]{}
     migration_index := 0
     loop migration in migrations {

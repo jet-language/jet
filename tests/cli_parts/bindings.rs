@@ -654,9 +654,9 @@ func main() {}
         String::from_utf8_lossy(&bind.stderr)
     );
     let generated = fs::read_to_string(dir.join(".jet/bindings/go/handles.jet")).unwrap();
-    assert!(generated.contains("pub struct Handle { value: Int }"));
-    assert!(generated.contains("pub fn new_handle(value: Int) -> Handle {"));
-    assert!(generated.contains("pub fn consume_handle(handle: Handle) -> Int {"));
+    assert!(generated.contains("struct Handle { value: Int }"));
+    assert!(generated.contains("fn new_handle(value: Int) -> Handle {"));
+    assert!(generated.contains("fn consume_handle(handle: Handle) -> Int {"));
 
     fs::write(
         dir.join("main.jet"),
@@ -917,7 +917,7 @@ fn tcl_bind_runs_one_shot_and_persistent_typed_sessions() {
     let generated = fs::read_to_string(dir.join(".jet/bindings/tcl/eda.jet")).unwrap();
     assert!(generated.contains("String !TclError -[FFI.Tcl]>"));
     assert!(generated
-        .contains("pub fn close(session: ^Session) -[FFI.Tcl]> { abi.close(session.value) }"));
+        .contains("fn close(session: ^Session) -[FFI.Tcl]> { abi.close(session.value) }"));
     assert!(!generated.contains("=>"));
     fs::write(
         dir.join("main.jet"),

@@ -25,27 +25,27 @@ IMAGE_MAX_LAYER_PATH_BYTES :: prep { 100 }
 
 // One file layered into the image, relative to the image root (no leading
 // `/`), e.g. `usr/local/bin/myapp`. `mode` is the tar entry's permission bits.
-pub struct LayerFile {
-    pub path: String
-    pub data: [U8]
-    pub mode: Int
+struct LayerFile {
+    path: String
+    data: [U8]
+    mode: Int
 }
 
 // Everything needed to build one `.Oci` image (Rust `BuildSpec`). Pure data;
 // `files` need not be sorted because the build sorts by path.
-pub struct OCIBuildSpec {
-    pub files: [LayerFile]
+struct OCIBuildSpec {
+    files: [LayerFile]
     // The single platform represented by this OCI layout.
-    pub platform: String
+    platform: String
     // The container `Entrypoint`, e.g. `["/usr/local/bin/myapp"]`.
-    pub entrypoint: [String]
-    pub env: [ImageEnvVar]
+    entrypoint: [String]
+    env: [ImageEnvVar]
     // `expose:` TCP ports, rendered as `"<port>/tcp"` keys.
-    pub expose: [Int]
+    expose: [Int]
     // D-ENV-IMAGE1: the non-root container user.
-    pub user: Int
+    user: Int
     // D-ENV-IMAGE1: optional `CMD-SHELL` health command.
-    pub healthcheck: String?
+    healthcheck: String?
 
     // Rust `BuildSpec::default()`.
     fn defaults() -> OCIBuildSpec Never! {
@@ -62,12 +62,12 @@ pub struct OCIBuildSpec {
 }
 
 // Where a successful build landed and the manifest digest naming it.
-pub struct OCIBuiltImage {
-    pub out_dir: String
+struct OCIBuiltImage {
+    out_dir: String
     // `sha256:<hex>`: the image manifest's own digest.
-    pub manifest_digest: String
+    manifest_digest: String
     // Total bytes across the layer, config, and manifest blobs.
-    pub total_bytes: Int
+    total_bytes: Int
 }
 
 struct OCILayerDescriptor {
@@ -109,13 +109,13 @@ enum OCINode {
 
 // Build the OCI layout into `out_dir` (created if absent). `ref_name` is the
 // human label recorded in `index.json`; it never enters a digest.
-pub fn image_build(spec: OCIBuildSpec, out_dir: String, ref_name: String) -[FS, Env]> OCIBuiltImage ImageError! {
+fn image_build(spec: OCIBuildSpec, out_dir: String, ref_name: String) -[FS, Env]> OCIBuiltImage ImageError! {
     image_build_with_base(spec, out_dir, ref_name, None)
 }
 
 // Build an OCI layout and append the new layer to a local OCI base layout. The
 // base is a directory obtained through a separately verified transport.
-pub fn image_build_with_base(spec: OCIBuildSpec, out_dir: String, ref_name: String, base: String?) -[FS, Env]> OCIBuiltImage ImageError! {
+fn image_build_with_base(spec: OCIBuildSpec, out_dir: String, ref_name: String, base: String?) -[FS, Env]> OCIBuiltImage ImageError! {
     image_ensure_real_layout_directory(out_dir)
     architecture :: image_oci_architecture(spec.platform)
     layer_files :: image_sorted_layer_files(spec.files)
@@ -173,7 +173,7 @@ pub fn image_build_with_base(spec: OCIBuildSpec, out_dir: String, ref_name: Stri
 // Copy a validated local OCI layout to another local layout root. Every
 // regular file is compared before reuse; symlinks and special files are never
 // allowed. This is the local half of `--push`.
-pub fn image_copy_layout(source: String, destination: String) ImageError! -[FS, Env, Rand]> {
+fn image_copy_layout(source: String, destination: String) ImageError! -[FS, Env, Rand]> {
     _ :: image_load_base(source)
     if source == destination -> return
     canonical_source :: files.canonicalize(source)
@@ -701,7 +701,7 @@ fn image_ensure_real_layout_directory(path: String) ImageError! -[FS, Env]> {
 }
 
 // Rust `sorted_env`: key-sorted, with the last value for a repeated key.
-pub fn image_sorted_env(entries: [ImageEnvVar]) -> [ImageEnvVar] Never! {
+fn image_sorted_env(entries: [ImageEnvVar]) -> [ImageEnvVar] Never! {
     by_key := [String: String]{}
     loop entry in entries -> by_key[entry.key] = entry.value
     keys := by_key.keys().to_list()

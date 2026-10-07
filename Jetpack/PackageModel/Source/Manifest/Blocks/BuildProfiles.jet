@@ -3,7 +3,7 @@
 // (D-LIVE1) (Package/Blocks.rs).
 
 // Rust `BuildOptimize::None` is spelled `Off`: `None` is reserved in Jet.
-pub enum BuildOptimize {
+enum BuildOptimize {
     Off
     Basic
     Full
@@ -25,38 +25,38 @@ pub enum BuildOptimize {
     }
 }
 
-pub enum BuildPanic {
+enum BuildPanic {
     Unwind
     Abort
 }
 
 // Development-time replay policy from the package's `dev: { … }` block.
-pub struct DevRecordsBudget {
-    pub max_bytes: Int
+struct DevRecordsBudget {
+    max_bytes: Int
 
     fn default() -> DevRecordsBudget Never! {
         DevRecordsBudget{max_bytes: 268435456}
     }
 }
 
-pub enum DevCaptureSetting {
+enum DevCaptureSetting {
     Default
     On
     Off
 }
 
-pub struct DevRecordsPolicy {
-    pub capture: DevCaptureSetting
-    pub budget: DevRecordsBudget
+struct DevRecordsPolicy {
+    capture: DevCaptureSetting
+    budget: DevRecordsBudget
 
     fn default() -> DevRecordsPolicy Never! {
         DevRecordsPolicy{capture: DevCaptureSetting.Default, budget: DevRecordsBudget.default()}
     }
 }
 
-pub struct DevPolicy {
-    pub swap: Bool
-    pub records: DevRecordsPolicy
+struct DevPolicy {
+    swap: Bool
+    records: DevRecordsPolicy
 
     fn default() -> DevPolicy Never! {
         DevPolicy{swap: true, records: DevRecordsPolicy.default()}
@@ -64,19 +64,19 @@ pub struct DevPolicy {
 }
 
 // One named build profile declared in `build: { … }`.
-pub struct BuildProfileDef {
-    pub name: String
-    pub optimize: BuildOptimize
-    pub debug_info: Bool
-    pub small: Bool
-    pub panic: BuildPanic?
+struct BuildProfileDef {
+    name: String
+    optimize: BuildOptimize
+    debug_info: Bool
+    small: Bool
+    panic: BuildPanic?
     // D-CONF-MODULE1=A: profile contributions to declared typed settings.
-    pub settings: [String: String]
+    settings: [String: String]
     // D-DX-PROD1: release-only devtools presence form.
-    pub inspect: JetReleaseInspect
+    inspect: JetReleaseInspect
     // Game packaging policy resolved from this named profile.
-    pub game_development_stripping: Bool?
-    pub game_cook_mode: String?
+    game_development_stripping: Bool?
+    game_cook_mode: String?
 }
 
 // `Blocks::record_body`: the text between the first `{` and the last `}`.
@@ -86,7 +86,7 @@ fn pkg_block_record_body(value: String, field: String) -> String PackageParseErr
     Ok(pkg_binder_slice(value, open + 1, close))
 }
 
-pub fn pkg_parse_dev(value: String) -> DevPolicy PackageParseError! {
+fn pkg_parse_dev(value: String) -> DevPolicy PackageParseError! {
     body :: pkg_block_record_body(value, "dev")
     policy := DevPolicy.default()
     seen_swap := false
@@ -184,7 +184,7 @@ fn pkg_parse_dev_record_bytes(value: String) -> Int PackageParseError! {
 }
 
 // Parse every named profile of a `build: { … }` body (`allow` is skipped).
-pub fn pkg_parse_build(body: String) -> [BuildProfileDef] PackageParseError! {
+fn pkg_parse_build(body: String) -> [BuildProfileDef] PackageParseError! {
     profiles := [BuildProfileDef]{}
     seen := [String]{}
     loop entry in pkg_key_value_entries(body) {
@@ -275,7 +275,7 @@ fn pkg_parse_build_profile(name: String, value: String) -> BuildProfileDef Packa
 }
 
 // D-CTEFFECT1: `build: { allow: #(FS, Exec) }`.
-pub fn pkg_parse_build_allow(body: String) -> [String] PackageParseError! {
+fn pkg_parse_build_allow(body: String) -> [String] PackageParseError! {
     allow := [String]{}
     seen_allow := false
     loop entry in pkg_key_value_entries(body) {

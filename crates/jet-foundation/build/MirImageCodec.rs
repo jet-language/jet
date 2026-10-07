@@ -1913,7 +1913,7 @@ mod tests {
 
     #[test]
     fn character_mask_preserves_lifetimes_and_nested_field_delimiters() {
-        let source = "pub struct Rows { pub rows: &'static [(&'static str, Kind)], pub next: u64 }";
+        let source = "struct Rows { rows: &'static [(&'static str, Kind)], next: u64 }";
         let masked = mask_comments_and_literals(source);
         assert_eq!(masked, source);
         let definitions = parse_definitions(&masked, "crate::Rows", &BTreeMap::new()).unwrap();
@@ -1949,7 +1949,7 @@ mod tests {
     #[test]
     fn recursive_self_type_resolves_to_its_declaring_definition() {
         let definitions = parse_definitions(
-            "pub enum Node { Leaf, Child(Box<Self>) }",
+            "enum Node { Leaf, Child(Box<Self>) }",
             "crate::Graph",
             &BTreeMap::new(),
         ).unwrap();
@@ -1969,7 +1969,7 @@ mod tests {
         let imports = parse_imports(&source, "crate::MIR");
         let definitions = parse_definitions(&source, "crate::MIR", &imports).unwrap();
         let kind_definitions = parse_definitions(
-            "pub type Code = u8; pub struct Kind { pub code: Code }",
+            "type Code = u8; struct Kind { code: Code }",
             "crate::Kinds",
             &BTreeMap::new(),
         )
@@ -2011,9 +2011,9 @@ mod tests {
     #[test]
     fn reachable_alias_only_cycles_are_rejected_without_recursing_forever() {
         let definitions = parse_definitions(
-            "pub type First = Option<Second>;
-             pub type Second = Box<First>;
-             pub struct MirProgram { pub value: First }",
+            "type First = Option<Second>;
+             type Second = Box<First>;
+             struct MirProgram { value: First }",
             "crate::MIR",
             &BTreeMap::new(),
         )
@@ -2052,7 +2052,7 @@ mod tests {
     fn public_paths_follow_reexports_instead_of_private_modules() {
         let mut schema = Schema::default();
         for module in ["crate::AST::details", "crate::Syntax::details"] {
-            let definition = parse_definitions("pub enum Kind { One }", module, &BTreeMap::new()).unwrap().remove(0);
+            let definition = parse_definitions("enum Kind { One }", module, &BTreeMap::new()).unwrap().remove(0);
             schema.definitions.insert(definition.key.clone(), definition);
         }
         parse_public_uses("pub use details::Kind;", "crate::AST", &mut schema);

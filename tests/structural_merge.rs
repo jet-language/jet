@@ -481,7 +481,7 @@ fn nonexistent_relative_out_uses_its_real_import_root() {
     write(
         &project,
         "support.jet",
-        "pub fn value() -[]> Int { return 7 }\n",
+        "fn value() -[]> Int { return 7 }\n",
     );
     let source = "use support.value\nfn run() { print(value()) }\n";
     let base = write(&project, "base.jet", source);

@@ -1,12 +1,12 @@
 use core as core
 
 #Error
-pub struct HexError {
-    pub reason: String
+struct HexError {
+    reason: String
 }
 
 impl HexError {
-    pub fn new(reason: String) -> HexError Never! { HexError{reason: reason} }
+    fn new(reason: String) -> HexError Never! { HexError{reason: reason} }
 }
 
 // core.encoding.hex — RFC 4648 §8 hexadecimal alphabet.
@@ -22,11 +22,11 @@ fn u8_int(b: U8) -> Int Never! { Int.from_u8(b) }
 
 
 /// Encode `data` as lowercase hexadecimal text.
-pub fn encode(data: [U8]) -> String Never! { core.encoding.hex.encode(data) }
+fn encode(data: [U8]) -> String Never! { core.encoding.hex.encode(data) }
 
 /// Decode hexadecimal text into bytes. Fails when the length is odd or a digit
 /// is outside `0-9A-Fa-f`.
-pub fn decode(text: String) -> [U8] HexError! {
+fn decode(text: String) -> [U8] HexError! {
     if core.encoding.hex.decode(text) == {
         .Ok(value) -> return Ok(value)
         .Err(reason) -> return Err(HexError{reason: reason})
@@ -41,11 +41,11 @@ fn digit(b: U8) -> Int? {
     None
 }
 
-pub fn encode_upper(data: [U8]) -> String Never! { core.encoding.hex.encode_upper(data) }
+fn encode_upper(data: [U8]) -> String Never! { core.encoding.hex.encode_upper(data) }
 
-pub fn encode_prefixed(data: [U8]) -> String Never! { "0x{encode(data)}" }
+fn encode_prefixed(data: [U8]) -> String Never! { "0x{encode(data)}" }
 
-pub fn is_hex(text: String) -> Bool Never! { core.encoding.hex.is_hex(text) }
+fn is_hex(text: String) -> Bool Never! { core.encoding.hex.is_hex(text) }
 
 fn nibble_upper(n: Int) -> U8 {
     if n < 10 -> return (U8{48 + n})
@@ -53,20 +53,20 @@ fn nibble_upper(n: Int) -> U8 {
 }
 
 /// Python `binascii.hexlify`.
-pub fn hexlify(data: [U8]) -> String Never! { encode(data) }
+fn hexlify(data: [U8]) -> String Never! { encode(data) }
 
 /// Python `binascii.unhexlify`.
-pub fn unhexlify(text: String) -> [U8] HexError! { decode(text) }
+fn unhexlify(text: String) -> [U8] HexError! { decode(text) }
 
-pub fn b2a_hex(data: [U8]) -> String Never! { encode(data) }
+fn b2a_hex(data: [U8]) -> String Never! { encode(data) }
 
-pub fn a2b_hex(text: String) -> [U8] HexError! { decode(text) }
+fn a2b_hex(text: String) -> [U8] HexError! { decode(text) }
 
 /// Python `binascii.b2a_base64`: one unwrapped standard Base64 line. The
 /// `core.encoding.hex.b2a_base64` row is the bare encoder; the newline is added here.
-pub fn b2a_base64(data: [U8]) -> String Never! { "{core.encoding.hex.b2a_base64(data)}\n" }
+fn b2a_base64(data: [U8]) -> String Never! { "{core.encoding.hex.b2a_base64(data)}\n" }
 
-pub fn a2b_base64(text: String) -> [U8] HexError! {
+fn a2b_base64(text: String) -> [U8] HexError! {
     if core.encoding.hex.a2b_base64(text) == {
         .Ok(value) -> return Ok(value)
         .Err(reason) -> return Err(HexError{reason: reason})
@@ -74,13 +74,13 @@ pub fn a2b_base64(text: String) -> [U8] HexError! {
 }
 
 /// Python `binascii.crc_hqx` (CRC-CCITT).
-pub fn crc_hqx(data: [U8], value: Int) -> Int Never! { core.encoding.hex.crc_hqx(data, value) }
+fn crc_hqx(data: [U8], value: Int) -> Int Never! { core.encoding.hex.crc_hqx(data, value) }
 
 /// Python `binascii.crc32` (ISO 3309, non-negative result).
-pub fn crc32(data: [U8]) -> Int Never! { core.encoding.hex.crc32(data) }
+fn crc32(data: [U8]) -> Int Never! { core.encoding.hex.crc32(data) }
 
 /// Python `binascii.b2a_qp` basic text form.
-pub fn b2a_qp(data: [U8]) -> String Never! {
+fn b2a_qp(data: [U8]) -> String Never! {
     out := ""
     loop byte in data {
         n :: u8_int(byte)
@@ -95,7 +95,7 @@ pub fn b2a_qp(data: [U8]) -> String Never! {
     out
 }
 
-pub fn a2b_qp(text: String) -> [U8] Never! {
+fn a2b_qp(text: String) -> [U8] Never! {
     raw :: text.bytes()
     out := [U8]{}
     i := 0
@@ -125,7 +125,7 @@ pub fn a2b_qp(text: String) -> [U8] Never! {
     out
 }
 
-pub fn b2a_uu(data: [U8]) -> String Never! {
+fn b2a_uu(data: [U8]) -> String Never! {
     out := ""
     i := 0
     if data.len() == 0 -> return "{uu_char(0)}\n"
@@ -148,7 +148,7 @@ pub fn b2a_uu(data: [U8]) -> String Never! {
     out
 }
 
-pub fn a2b_uu(text: String) -> [U8] Never! {
+fn a2b_uu(text: String) -> [U8] Never! {
     raw :: text.bytes()
     out := [U8]{}
     i := 0
@@ -198,10 +198,10 @@ fn uu_value(byte: U8) -> Int {
     (n - 32) & 63
 }
 
-pub fn encode_sep(data: [U8], sep: String) -> String Never! { core.encoding.hex.encode_sep(data, sep) }
+fn encode_sep(data: [U8], sep: String) -> String Never! { core.encoding.hex.encode_sep(data, sep) }
 
 /// 16-byte rows of offset, hex, and ASCII. Unprintable bytes become `.`.
-pub fn dump(data: [U8]) -> String Never! { core.encoding.hex.dump(data) }
+fn dump(data: [U8]) -> String Never! { core.encoding.hex.dump(data) }
 
 /// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
 /// checked `U8{}` conversion.

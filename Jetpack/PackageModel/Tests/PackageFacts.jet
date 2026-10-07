@@ -201,7 +201,7 @@ fn pkg_facts_test_write(dir: String, relative: String, text: String) Never! -[FS
 #Test("output entry resolves a nested main module") {
     dir :: pkg_facts_test_dir("output-entry-nested-main")
     pkg_facts_test_write(dir, "entry.jet", "use \"src/cli/main\" as app\n")
-    pkg_facts_test_write(dir, "src/cli/main.jet", "pub fn cli_run() {{}}\nfn run() {{ cli_run() }}\n")
+    pkg_facts_test_write(dir, "src/cli/main.jet", "fn cli_run() {{}}\nfn run() {{ cli_run() }}\n")
     facts :: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: app.cli_run }} }}", "package.jet") ?? panic("parses")
     expected :: files.join(dir, "src/cli/main.jet")
     assert_eq(facts.entry_path(dir, facts.outputs["app"]) ?? panic("entry"), Val(expected))
@@ -216,7 +216,7 @@ fn pkg_facts_test_write(dir: String, relative: String, text: String) Never! -[FS
     pkg_facts_test_write(dir, "entry.jet", "use \"runner\" as runner\n")
     pkg_facts_test_write(dir, "runner.jet", "use \"bridge\" as bridge\n")
     pkg_facts_test_write(dir, "bridge.jet", "use \"src/cli/main\" as app\n")
-    pkg_facts_test_write(dir, "src/cli/main.jet", "pub fn cli_run() {{}}\n")
+    pkg_facts_test_write(dir, "src/cli/main.jet", "fn cli_run() {{}}\n")
     facts :: PackageFacts.parse("name: \"demo\"\noutputs: {{ app: .Executable{{ entry: app.cli_run }} }}", "package.jet") ?? panic("parses")
     assert_eq(facts.entry_path(dir, facts.outputs["app"]) ?? panic("entry"), Val(files.join(dir, "src/cli/main.jet")))
 }
@@ -236,8 +236,8 @@ fn pkg_facts_assert_nested_entry_rejected(label: String, entry_source: String, e
 #Test("nested output entries fail closed for missing ambiguous and escaping imports") {
     pkg_facts_assert_nested_entry_rejected("output-entry-nested-missing", "use \"src/cli/missing\" as app\n", [ManifestEntry]{})
     pkg_facts_assert_nested_entry_rejected("output-entry-nested-ambiguous", "use \"src/cli/main\" as app\n", [ManifestEntry]{
-        ManifestEntry{key: "src/cli/main.jet", value: "pub fn cli_run() {{}}\n"},
-        ManifestEntry{key: "src/cli/main/module.jet", value: "pub fn cli_run() {{}}\n"},
+        ManifestEntry{key: "src/cli/main.jet", value: "fn cli_run() {{}}\n"},
+        ManifestEntry{key: "src/cli/main/module.jet", value: "fn cli_run() {{}}\n"},
     })
     pkg_facts_assert_nested_entry_rejected("output-entry-nested-escaping", "use \"../../outside/main\" as app\n", [ManifestEntry]{})
 }

@@ -108,7 +108,7 @@ fn jet_eval_task_roots_fixture_ok_payload(value: JetEvalRuntimeValue) -> JetEval
 // Stable owner for the real checked callback selected by the fixture harness.
 // Returning the lambda makes its capture escape; the generated lambda MIR row
 // has one capture parameter and escaping capture facts.
-pub fn jet_eval_task_roots_fixture_escaping_callback_owner(seed: Int) -> fn(Int) -> Int {
+fn jet_eval_task_roots_fixture_escaping_callback_owner(seed: Int) -> fn(Int) -> Int {
     (value: Int) -> seed + value
 }
 
@@ -214,7 +214,7 @@ fn jet_eval_task_roots_fixture_checked_nominal(machine: &JetEvalMachine, name: S
 // This producer owns the Source Machine only for the duration of creating and
 // exporting one pre-adopted Shared carrier. Its OwnedRoot is the only Source
 // runtime authority that survives the return.
-pub fn jet_eval_task_roots_fixture_shared_produce(program: ^MIRProgram, config: ^JetEvalConfig, span: Span) -> JetEvalSharedHostCarrier? {
+fn jet_eval_task_roots_fixture_shared_produce(program: ^MIRProgram, config: ^JetEvalConfig, span: Span) -> JetEvalSharedHostCarrier? {
     source_config := jet_eval_runtime_config(config)
     source_machine := jet_eval_machine(~program, ^source_config)
     int_type :: mir_type_from_kind(MIRTypeKind.Int)
@@ -387,7 +387,7 @@ pub fn jet_eval_task_roots_fixture_shared_produce(program: ^MIRProgram, config: 
 // B runs with its own Source Machine after the producer's Machine has returned.
 // Its final strong release must run the Source-owned payload finalizer, then its
 // weak capability must observe the missing physical owner.
-pub fn jet_eval_task_roots_fixture_shared_consume(
+fn jet_eval_task_roots_fixture_shared_consume(
     program: ^MIRProgram,
     config: ^JetEvalConfig,
     carrier: ^JetEvalSharedHostCarrier,
@@ -1208,7 +1208,7 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MIRF
 // `callback` must be a real checked escaping closure function with one capture
 // parameter. The harness supplies its ID from the fixture MIR; this function
 // deliberately never fabricates capture facts for a zero-capture function.
-pub fn jet_eval_task_roots_fixture(program: ^MIRProgram, config: ^JetEvalConfig, callback: MIRFunctionID, resource_handle: MIRHandleID, resource_raw: Int, span: Span) -> Bool {
+fn jet_eval_task_roots_fixture(program: ^MIRProgram, config: ^JetEvalConfig, callback: MIRFunctionID, resource_handle: MIRHandleID, resource_raw: Int, span: Span) -> Bool {
     // D-PATTERN-HOLE-NAME1=A: EvalValues must compare the decimal value,
     // not match an always-successful text hole, in either operand order.
     if !jet_eval_value_equal(TComptimeValue.BigInt{decimal: "7"}, TComptimeValue.Int{value: 7}) -> return false

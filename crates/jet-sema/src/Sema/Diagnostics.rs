@@ -2381,10 +2381,10 @@ pub(crate) fn computed_field_not_settable(field: &str, span: Span) -> Diagnostic
 pub(crate) fn private_item(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0605",
-        format!("`{}` exists but is private to its file", name),
-        "only names marked `pub` can be used from another file (S18)".to_string(),
+        format!("`{}` is private to its module", name),
+        "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module (D-VIS-MODULE1)".to_string(),
         format!(
-            "add `pub` before `{}`, or don't reach across files here",
+            "use `{}` from inside its module, or remove `priv` from its module or field",
             name
         ),
         Some(span),

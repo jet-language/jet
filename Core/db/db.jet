@@ -16,60 +16,60 @@ use core as core
 // here; this source module is the stable facade used by applications. Every
 // fallible operation reports on the module's one failure domain, `DBError`.
 
-pub fn open(url: String) -[DB]> DBConnection Never! {
+fn open(url: String) -[DB]> DBConnection Never! {
     core.db.open(url)
 }
 
-pub fn open_memory() -[DB]> DBConnection Never! {
+fn open_memory() -[DB]> DBConnection Never! {
     core.db.open_memory()
 }
 
-pub fn pool(url: String, max: Int) -[DB]> DBPool DBError! {
+fn pool(url: String, max: Int) -[DB]> DBPool DBError! {
     core.db.pool(url, max: max)
 }
 
 // D-DBPOLICY1=A: the closed row-policy language (table identifier, `true` or
 // `owner == user`, bounded text) is compiled once by the provider, so this
 // facade cannot accept a policy the scope would reject.
-pub fn policy(table: String, expression: String) -[DB]> RowPolicy DBError! {
+fn policy(table: String, expression: String) -[DB]> RowPolicy DBError! {
     core.db.policy(table, expression)
 }
 
-pub fn policy_audit(scope: DBScope) -[DB]> String Never! {
+fn policy_audit(scope: DBScope) -[DB]> String Never! {
     core.db.policy_audit(scope)
 }
 
-pub fn row_value(row: [String: DBValue], column: String) -[DB]> DBValue DBError! {
+fn row_value(row: [String: DBValue], column: String) -[DB]> DBValue DBError! {
     core.db.row_value(row, column)
 }
 
-pub fn row_int(row: [String: DBValue], column: String) -[DB]> Int DBError! {
+fn row_int(row: [String: DBValue], column: String) -[DB]> Int DBError! {
     core.db.row_int(row, column)
 }
 
-pub fn row_float(row: [String: DBValue], column: String) -[DB]> Float DBError! {
+fn row_float(row: [String: DBValue], column: String) -[DB]> Float DBError! {
     core.db.row_float(row, column)
 }
 
-pub fn row_text(row: [String: DBValue], column: String) -[DB]> String DBError! {
+fn row_text(row: [String: DBValue], column: String) -[DB]> String DBError! {
     core.db.row_text(row, column)
 }
 
-pub fn row_bool(row: [String: DBValue], column: String) -[DB]> Bool DBError! {
+fn row_bool(row: [String: DBValue], column: String) -[DB]> Bool DBError! {
     core.db.row_bool(row, column)
 }
 
 // Typed row projection is a compiler lowering. Keeping the call routed through
 // core.db.decode preserves checked field names and the provider's DBValue
 // conversion instead of introducing a second parser in Jet source.
-pub fn decode<T: Decode>(row: [String: DBValue]) -[DB]> T [FieldError]! {
+fn decode<T: Decode>(row: [String: DBValue]) -[DB]> T [FieldError]! {
     return core.db.decode<T>(row)
 }
 
-pub fn transaction(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError! {
+fn transaction(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError! {
     core.db.transaction(scope, name, steps)
 }
 
-pub fn migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError! {
+fn migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError! {
     core.db.migrate(scope, name, steps)
 }

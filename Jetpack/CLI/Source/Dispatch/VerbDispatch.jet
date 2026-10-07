@@ -5,7 +5,7 @@
 // `studio`, `push`) are not part of this port.
 
 // Every verb this dispatcher routes.
-pub enum JetpackVerb {
+enum JetpackVerb {
     Doctor
     Env
     Use
@@ -72,9 +72,9 @@ pub enum JetpackVerb {
 
 // A retired top-level spelling that now belongs to `jet` or to an option:
 // why it moved and what to run instead.
-pub struct RetiredSpelling {
-    pub why: String
-    pub fix: String
+struct RetiredSpelling {
+    why: String
+    fix: String
 }
 
 fn cli_retired_shell_spelling(verb: String) -> RetiredSpelling? Never! {
@@ -135,7 +135,7 @@ fn cli_read_only_command(verb: String, parsed: CLIParsed) -> Bool Never! {
 }
 
 // Process entry after invocation setup. Returns the process exit code.
-pub fn cli_main(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_main(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     verification := StoreVerification.new()
     // Bare `jetpack` is the keyboard-first dashboard; its own TTY guard keeps
     // the status-summary floor for pipes, CI, and redirected output.

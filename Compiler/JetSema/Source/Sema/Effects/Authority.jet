@@ -492,7 +492,7 @@ fn sema_authority_region_caps_valid(caps: [NamedSpan]) -> Bool Never! {
 // pass checks each lowered region (the `TStmt.Region` with the same span)
 // against its caps (E0712). A region with an invalid cap is skipped, like
 // Rust's `bad` cap set: the cap diagnostic is the real problem to fix.
-pub fn sema_authority_fx_regions(statements: [Stmt]) -> [SemaEffectFxRegion] {
+fn sema_authority_fx_regions(statements: [Stmt]) -> [SemaEffectFxRegion] {
     regions := [SemaEffectFxRegion]{}
     sema_authority_collect_fx_regions(statements, &regions)
     regions
@@ -620,7 +620,7 @@ fn sema_authority_check_items(items: [Item], diagnostics: &[Diagnostic]) {
 
 // E0711 over every source module. Returns true when a diagnostic was
 // reported.
-pub fn sema_effect_check_authority_handles(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_effect_check_authority_handles(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
     found := false
     loop source_module in graph.modules {
         start :: diagnostics.len()

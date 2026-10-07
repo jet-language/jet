@@ -24,11 +24,11 @@ use jet_foundation.[MIRProgram, MIRType, MIRTypeDef, mir_type_display_name]
 // same name with any other shape is not a record, so a changed Core type is
 // reported at its route instead of being marshaled with stale offsets.
 struct LowerRecordSchema {
-    pub jet_name: String
+    jet_name: String
     // An enum's variant names in the runtime's order ("" for a struct).
-    pub variants: String
+    variants: String
     // A struct's stored field names in constructor order ("" for an enum).
-    pub fields: String
+    fields: String
 }
 
 LOWER_RECORD_SCHEMAS :: prep { [LowerRecordSchema]{
@@ -271,17 +271,17 @@ fn lower_record_list_element(p: MIRProgram, ty: MIRType, carrier: LowerRouteCarr
 
 // A List of records lent to a route: its type, handle buffer and length.
 struct LowerRecordList {
-    pub ty: MIRType
-    pub buffer: LIRValueID
-    pub length: LIRValueID
+    ty: MIRType
+    buffer: LIRValueID
+    length: LIRValueID
 }
 
 // A counted loop over 0..<count: `lower_record_loop_start` leaves its body
 // block open; `lower_record_loop_end` closes it and continues after the loop.
 struct LowerRecordLoop {
-    pub head: LIRBlockID
-    pub done: LIRBlockID
-    pub index: LIRValueID
+    head: LIRBlockID
+    done: LIRBlockID
+    index: LIRValueID
 }
 
 fn lower_record_loop_start(f: &LowerFunction, count: LIRValueID) -> LowerRecordLoop Never! {

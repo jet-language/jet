@@ -97,14 +97,14 @@ fn sema_ui_handle_interactive_role(expr: Expr, environment: SemaScopeEnvironment
     None
 }
 
-pub fn sema_call_core_ui_node_role_lint(args: [CallArg], span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) {
+fn sema_call_core_ui_node_role_lint(args: [CallArg], span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) {
     if args.len() != 4 -> return
     if sema_ui_handle_literal_string(args[0].expr) != .Val("") -> return
     role :: sema_ui_handle_interactive_role(args[3].expr, environment, scopes) ?? return
     &diagnostics.push(sema_lint("E2930", span, "This {role} has no accessible label", "Screen readers announce a control by its accessible label; an empty label is invisible to assistive tech.", "Pass a real label, e.g. `ui.node_role(\"Submit\", w, h, ui.aria_role_button())`."))
 }
 
-pub fn sema_call_core_ui_focus_group_lint(args: [CallArg], span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) {
+fn sema_call_core_ui_focus_group_lint(args: [CallArg], span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) {
     if args.len() == 0 -> return
     if args[0].expr == {
         .ListLit(items, _) -> {
@@ -269,7 +269,7 @@ fn sema_ui_handle_text_input(module_name: String, args: [CallArg], type_args: [T
     return SemaDirectSpecialCheck{handled: true, value: Val(checked)}
 }
 
-pub fn sema_call_try_ui_core_call(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_try_ui_core_call(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if module_name != "core.ui" -> return SemaDirectSpecialCheck{handled: false, value: None}
     if member == "node_role" {
         sema_call_core_ui_node_role_lint(args, span, environment, &scopes, &diagnostics)
@@ -314,7 +314,7 @@ fn sema_ui_backend_result(owner: String, method: String, argc: Int) -> Type? {
     None
 }
 
-pub fn sema_call_try_ui_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_ui_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     owner :: sema_expr_type_base_name(receiver_value.ty) ?? type_name(receiver_value.ty)
     if sema_ui_backend_owner(owner) && sema_ui_backend_known_method(owner, method) {
         result_type :: sema_ui_backend_result(owner, method, args.len()) ?? {

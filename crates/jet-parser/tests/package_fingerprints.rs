@@ -27,7 +27,6 @@ fn module(path: &Path, source: &str) -> LoadedModule {
         script_body: std::mem::take(&mut program.script_body),
         block_spans: std::mem::take(&mut program.block_spans),
         web_target_ceiling: program.web_target_ceiling,
-        pub_file: program.pub_file,
         no_prelude: program.no_prelude,
         default_target: program.default_target.clone(),
         html_path: program.html_path.clone(),
@@ -54,8 +53,8 @@ fn bundle(root: &Path, lib_a: &str) -> ProgramBundle {
     let modules = vec![
         module(&root.join("main.jet"), "fn run() {\n    print(\"hi\")\n}\n"),
         module(&lib.join("a.jet"), lib_a),
-        module(&lib.join("b.jet"), "pub fn b() -> Int {\n    2\n}\n"),
-        module(Path::new("<corelib>/text.jet"), "pub fn len() -> Int {\n    0\n}\n"),
+        module(&lib.join("b.jet"), "fn b() -> Int {\n    2\n}\n"),
+        module(Path::new("<corelib>/text.jet"), "fn len() -> Int {\n    0\n}\n"),
     ];
     let mut name_ledger = NameLedger::default();
     name_ledger.set_module_namespace(1, lib.display().to_string());
@@ -86,11 +85,11 @@ fn bundle(root: &Path, lib_a: &str) -> ProgramBundle {
     }
 }
 
-const LIB_A: &str = "pub fn add(a: Int, b: Int) -> Int {\n    a + b\n}\n\nfn helper() -> Int {\n    1\n}\n";
+const LIB_A: &str = "fn add(a: Int, b: Int) -> Int {\n    a + b\n}\n\nfn helper() -> Int {\n    1\n}\n";
 
 #[test]
 fn item_fingerprints_ignore_whitespace_and_comments() {
-    let plain = only_item("pub fn add(a: Int, b: Int) -> Int {\n    a + b\n}\n");
+    let plain = only_item("fn add(a: Int, b: Int) -> Int {\n    a + b\n}\n");
     let spaced = only_item(
         "// adds two numbers\n\n\npub fn add(a: Int,   b: Int) -> Int {\n\n    // the sum\n    a  +  b\n}\n",
     );
@@ -103,9 +102,9 @@ fn item_fingerprints_ignore_whitespace_and_comments() {
 
 #[test]
 fn body_edit_keeps_interface_fingerprint_and_signature_edit_changes_it() {
-    let plain = only_item("pub fn add(a: Int, b: Int) -> Int {\n    a + b\n}\n");
-    let body = only_item("pub fn add(a: Int, b: Int) -> Int {\n    b + a\n}\n");
-    let signature = only_item("pub fn add(a: Int, b: Int, c: Int) -> Int {\n    a + b\n}\n");
+    let plain = only_item("fn add(a: Int, b: Int) -> Int {\n    a + b\n}\n");
+    let body = only_item("fn add(a: Int, b: Int) -> Int {\n    b + a\n}\n");
+    let signature = only_item("fn add(a: Int, b: Int, c: Int) -> Int {\n    a + b\n}\n");
     assert_ne!(item_source_fingerprint(&plain), item_source_fingerprint(&body));
     assert_eq!(
         item_interface_fingerprint(&plain, false),
@@ -117,8 +116,8 @@ fn body_edit_keeps_interface_fingerprint_and_signature_edit_changes_it() {
     );
     // Generic bodies are templates importers instantiate, so they stay in the
     // interface.
-    let generic = only_item("pub fn same<T>(x: T) -> T {\n    x\n}\n");
-    let generic_body = only_item("pub fn same<T>(x: T) -> T {\n    y :: x\n    y\n}\n");
+    let generic = only_item("fn same<T>(x: T) -> T {\n    x\n}\n");
+    let generic_body = only_item("fn same<T>(x: T) -> T {\n    y :: x\n    y\n}\n");
     assert_ne!(
         item_interface_fingerprint(&generic, false),
         item_interface_fingerprint(&generic_body, false)

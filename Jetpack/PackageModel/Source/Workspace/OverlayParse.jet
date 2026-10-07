@@ -5,7 +5,7 @@
 // stripped before the ordinary module evaluator runs, so policy facts never
 // enter module evaluation.
 
-pub fn pkg_parse_workspace_policy(src: String) -> OverlayPolicy OverlayError! {
+fn pkg_parse_workspace_policy(src: String) -> OverlayPolicy OverlayError! {
     body :: pkg_overlay_workspace_body(src) ?? return Ok(OverlayPolicy.empty())
     policy := OverlayPolicy.empty()
     policy.allow_unfree = pkg_overlay_parse_allow_unfree(body)
@@ -527,7 +527,7 @@ fn pkg_overlay_first_word(text: String) -> String Never! {
 // build `policy: { … }` record, and every `overlay` block. An empty body stays
 // empty so role-aware evaluation can tell a policy-only authority from the
 // strict index role.
-pub fn pkg_strip_overlay_policy(src: String) -> String Never! {
+fn pkg_strip_overlay_policy(src: String) -> String Never! {
     body_start :: pkg_overlay_find_workspace_body_start(src) ?? return src
     raw :: src.bytes()
     block :: pkg_overlay_balanced(raw, body_start + 1)

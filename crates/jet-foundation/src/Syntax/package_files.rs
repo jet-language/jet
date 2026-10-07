@@ -462,7 +462,7 @@ pub const METHOD_DROP: &str = "drop"; // D-IGNORERET2 method; distinct from cons
 /// FOREIGN_* teaching-error words must NOT appear here — they are recognized only
 /// to emit a diagnostic, not valid syntax.
 pub const JET_KEYWORD_LIST: &[&str] = &[
-    // Core structure (S1, S18, D-VISDEFAULT2, S16, S50, U3)
+    // Core structure (S1, D-VIS-MODULE1, S16, S50, U3)
     KW_FN,
     KW_PUB,
     KW_PRIV,

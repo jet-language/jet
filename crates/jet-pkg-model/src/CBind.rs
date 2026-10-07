@@ -5236,7 +5236,7 @@ mod tests {
             int gzclose(gzFile file);
         "#;
         let result = generate(header, "zlib").unwrap();
-        assert!(result.source.contains("pub struct GzFile {}"));
+        assert!(result.source.contains("struct GzFile {}"));
         assert!(result
             .source
             .contains("#Close(gzclose)\nfn gzopen(path: String, mode: String) -> GzFile = \"gzopen\"\n"));

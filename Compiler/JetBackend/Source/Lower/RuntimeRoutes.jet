@@ -6,16 +6,16 @@
 // `HandleMut` lends the handle of the caller's Write place: the runtime
 // mutates the value in that box. A `Tuple` result writes item `i` through its
 // `i`-th out pointer (one zeroed eight-byte slot each) and returns nothing.
-pub enum LowerRouteCarrier { Word Flag Float Text Unit Handle(name: String) HandleMut(name: String) List(elem: LowerRouteCarrier) Tag(name: String, variants: String) }
+enum LowerRouteCarrier { Word Flag Float Text Unit Handle(name: String) HandleMut(name: String) List(elem: LowerRouteCarrier) Tag(name: String, variants: String) }
 
-pub enum LowerRouteResult {
+enum LowerRouteResult {
     Plain(carrier: LowerRouteCarrier)
     Option(some: LowerRouteCarrier)
     Result(ok: LowerRouteCarrier, err: LowerRouteCarrier)
     Tuple(items: [LowerRouteCarrier])
 }
 
-pub struct LowerRoute { pub symbol: String, pub export: String, pub params: [LowerRouteCarrier], pub result: LowerRouteResult }
+struct LowerRoute { symbol: String, export: String, params: [LowerRouteCarrier], result: LowerRouteResult }
 
 LOWER_RUNTIME_ROUTES :: prep { [LowerRoute]{
     LowerRoute{symbol: "jet_app_auth", export: "jet_app_auth", params: [LowerRouteCarrier]{LowerRouteCarrier.Text}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Handle{name: "JetAuthApp"}}},
@@ -1562,7 +1562,7 @@ LOWER_RUNTIME_ROUTES :: prep { [LowerRoute]{
     LowerRoute{symbol: "JetZonedDateTime::zone", export: "JetZonedDateTime_zone", params: [LowerRouteCarrier]{LowerRouteCarrier.Handle{name: "JetZonedDateTime"}}, result: LowerRouteResult.Plain{carrier: LowerRouteCarrier.Handle{name: "JetZone"}}},
 } }
 
-pub fn lower_runtime_route(symbol: String) -> LowerRoute? {
+fn lower_runtime_route(symbol: String) -> LowerRoute? {
     loop route in LOWER_RUNTIME_ROUTES {
         if route.symbol == symbol -> return Val(route)
     }
@@ -1578,7 +1578,7 @@ pub fn lower_runtime_route(symbol: String) -> LowerRoute? {
 // `jet_rt_handle_display_<runtime>` / `jet_rt_handle_show_<runtime>` /
 // `jet_rt_handle_debug_<runtime>` when `display` / `show` / `debug`; compared
 // by `jet_rt_handle_eq_<runtime>` when `eq`.
-pub struct LowerRuntimeHandle { pub jet_name: String, pub runtime: String, pub clone: Bool, pub display: Bool, pub show: Bool, pub debug: Bool, pub eq: Bool }
+struct LowerRuntimeHandle { jet_name: String, runtime: String, clone: Bool, display: Bool, show: Bool, debug: Bool, eq: Bool }
 
 LOWER_RUNTIME_HANDLES :: prep { [LowerRuntimeHandle]{
     LowerRuntimeHandle{jet_name: "<corelib>/Core/app::Core/app/app.jet::Auth", runtime: "JetAuthApp", clone: true, display: false, show: false, debug: false, eq: false},
@@ -2148,7 +2148,7 @@ LOWER_RUNTIME_HANDLES :: prep { [LowerRuntimeHandle]{
     LowerRuntimeHandle{jet_name: "ZonedDateTime", runtime: "JetZonedDateTime", clone: true, display: true, show: true, debug: true, eq: true},
 } }
 
-pub fn lower_runtime_handle(name: String) -> LowerRuntimeHandle? {
+fn lower_runtime_handle(name: String) -> LowerRuntimeHandle? {
     loop handle in LOWER_RUNTIME_HANDLES {
         if handle.jet_name == name -> return Val(~handle)
     }
@@ -2334,7 +2334,7 @@ LOWER_GENERATED_RECORDS :: prep { [LowerRecordSchema]{
 // Fields of runtime handle structs readable in place (Places.jet):
 // `jet_rt_handle_field_<runtime>_<field>(h)` lends the field's address; kind is
 // Text, Float, Flag or Handle.<runtime>.
-pub struct LowerHandleField { pub runtime: String, pub field: String, pub kind: String }
+struct LowerHandleField { runtime: String, field: String, kind: String }
 
 LOWER_HANDLE_FIELDS :: prep { [LowerHandleField]{
     LowerHandleField{runtime: "Attachment", field: "filename", kind: "Text"},
@@ -2588,7 +2588,7 @@ LOWER_HANDLE_FIELDS :: prep { [LowerHandleField]{
     LowerHandleField{runtime: "XMLWriter", field: "finished", kind: "Flag"},
 } }
 
-pub fn lower_handle_field(runtime: String, field: String) -> LowerHandleField? {
+fn lower_handle_field(runtime: String, field: String) -> LowerHandleField? {
     loop row in LOWER_HANDLE_FIELDS {
         if row.runtime == runtime && row.field == field -> return Val(~row)
     }

@@ -69,9 +69,9 @@ struct SemaComptimeReflectionField {
     value: TComptimeValue
 }
 
-pub struct SemaComptimeReflectionStateView {
-    pub states: TComptimeValue
-    pub transitions: TComptimeValue
+struct SemaComptimeReflectionStateView {
+    states: TComptimeValue
+    transitions: TComptimeValue
 }
 
 fn sema_comptime_reflection_struct(type_name: String, fields: [SemaComptimeReflectionField]) -> TComptimeValue Never! {
@@ -147,7 +147,7 @@ fn sema_comptime_reflection_append_method_transitions(owner: String, methods: [F
 // Preserve declaration order and use the checked graph only for the terminal
 // and reachability facts it owns. The transition list follows reflection's
 // struct-local method surface, including nested trait implementations.
-pub fn sema_comptime_reflection_state_view(definition: StructDef, graph: SemaStateGraphFact?) -> SemaComptimeReflectionStateView Never! {
+fn sema_comptime_reflection_state_view(definition: StructDef, graph: SemaStateGraphFact?) -> SemaComptimeReflectionStateView Never! {
     states := [TComptimeValue]{}
     if definition.state == .Val(declaration) {
         loop state in declaration.states -> &states.push(sema_comptime_reflection_state_info(definition.name, state.name, graph))
@@ -171,9 +171,9 @@ struct SemaComptimeReflectionMarkerRule {
     repeatable: Bool
 }
 
-pub struct SemaComptimeReflectionMarkerViews {
-    pub markers: [TComptimeValue]
-    pub expanded_markers: [TComptimeValue]
+struct SemaComptimeReflectionMarkerViews {
+    markers: [TComptimeValue]
+    expanded_markers: [TComptimeValue]
 }
 
 fn sema_comptime_reflection_marker_rule(registry: SemaScopeMembersMarkerRegistry, name: String) -> SemaComptimeReflectionMarkerRule? {
@@ -344,7 +344,7 @@ fn sema_comptime_reflection_derived_marker(name: String) -> TComptimeValue Never
     })
 }
 
-pub fn sema_comptime_reflection_marker_views(type_markers: [Marker], serde_markers: [Marker], derives: [NamedSpan], registry: SemaScopeMembersMarkerRegistry) -> SemaComptimeReflectionMarkerViews Never! {
+fn sema_comptime_reflection_marker_views(type_markers: [Marker], serde_markers: [Marker], derives: [NamedSpan], registry: SemaScopeMembersMarkerRegistry) -> SemaComptimeReflectionMarkerViews Never! {
     written := type_markers
     if written.len() == 0 -> written = serde_markers
     markers := [TComptimeValue]{}
@@ -362,7 +362,7 @@ pub fn sema_comptime_reflection_marker_views(type_markers: [Marker], serde_marke
 
 // The complete Prelude catalog is an explicit input. Marker declarations from
 // source modules are merged by ScopeMembers using the checked graph/program.
-pub fn sema_comptime_reflection_marker_views_for_program(
+fn sema_comptime_reflection_marker_views_for_program(
     graph: SemaRegistrationGraph,
     module_identity: String,
     program: Program,
@@ -755,7 +755,7 @@ fn sema_comptime_reflection_marker_name(value: TComptimeValue) -> String? {
 
 // The native comptime evaluator accepts exactly these three reflected
 // metadata records and reads only their written `markers` list.
-pub fn sema_comptime_reflection_has_marker(value: TComptimeValue, wanted: String) -> Bool? {
+fn sema_comptime_reflection_has_marker(value: TComptimeValue, wanted: String) -> Bool? {
     if value == {
         .Struct(type_name, fields) -> {
             if type_name != "TypeInfo" && type_name != "FieldInfo" && type_name != "MethodInfo" -> return None
@@ -1076,7 +1076,7 @@ fn sema_comptime_reflection_append_arithmetic_stmts(body: [Stmt], values: &[TCom
     }
 }
 
-pub fn sema_comptime_reflection_arithmetic_facts(body: [Stmt]) -> [TComptimeValue] {
+fn sema_comptime_reflection_arithmetic_facts(body: [Stmt]) -> [TComptimeValue] {
     values := [TComptimeValue]{}
     sema_comptime_reflection_append_arithmetic_stmts(body, &values)
     values
@@ -1116,7 +1116,7 @@ fn sema_comptime_reflection_view_provenance(value: ViewProvenance) -> TComptimeV
     })
 }
 
-pub fn sema_comptime_reflection_declared_function_facts(method: Func, path: String) -> [TComptimeValue] Never! {
+fn sema_comptime_reflection_declared_function_facts(method: Func, path: String) -> [TComptimeValue] Never! {
     facts := [TComptimeValue]{}
     sendability :: sema_comptime_reflection_struct("SendabilityInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "known", value: TComptimeValue.Bool{value: true}},
@@ -1556,7 +1556,7 @@ fn sema_comptime_reflection_distinct_type_info(
 // Resolve only the exact registered module/type identity. The complete graph
 // supplies original declarations, checked state facts, and target layout; the
 // complete applied-rule catalog is intentionally explicit.
-pub fn sema_comptime_reflection_type_info(
+fn sema_comptime_reflection_type_info(
     graph: SemaRegistrationGraph,
     module_identity: String,
     type_name: String,

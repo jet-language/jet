@@ -3,33 +3,33 @@
 // that kept the base identity yields to the other, and two changed sides
 // conflict only when one owner package explains both.
 
-pub struct LockConflict {
-    pub semantic_key: String
-    pub owner_package: String
-    pub left_identity: String
-    pub right_identity: String
-    pub left_reason: String
-    pub right_reason: String
+struct LockConflict {
+    semantic_key: String
+    owner_package: String
+    left_identity: String
+    right_identity: String
+    left_reason: String
+    right_reason: String
 }
 
-pub struct MergeOutcome {
-    pub merged: SemanticLockFile
-    pub conflicts: [LockConflict]
+struct MergeOutcome {
+    merged: SemanticLockFile
+    conflicts: [LockConflict]
 }
 
-pub struct ExplainFact {
-    pub semantic_key: String
-    pub owners: [String]
+struct ExplainFact {
+    semantic_key: String
+    owners: [String]
     // Every rationale that competed for this resolved record. The first
     // rationale is not a sufficient explanation when overlays merge several
     // declarations into one winner.
-    pub contenders: [LockRationale]
-    pub provider: String
-    pub platform: String
-    pub exact_artifact: String
-    pub policy_fingerprint: String
-    pub update_command: String
-    pub offline_satisfied: Bool
+    contenders: [LockRationale]
+    provider: String
+    platform: String
+    exact_artifact: String
+    policy_fingerprint: String
+    update_command: String
+    offline_satisfied: Bool
 }
 
 // The resolution of one semantic key present on both sides.
@@ -38,7 +38,7 @@ enum LockMergeStep {
     Conflict(LockConflict)
 }
 
-pub fn trust_merge_semantic_locks(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> MergeOutcome Never! {
+fn trust_merge_semantic_locks(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> MergeOutcome Never! {
     base_by_key :: trust_lock_records_by_key(base)
     left_by_key :: trust_lock_records_by_key(left)
     right_by_key :: trust_lock_records_by_key(right)
@@ -162,7 +162,7 @@ fn trust_lock_conflict(left: SemanticRecord, right: SemanticRecord) -> LockConfl
 }
 
 // Rust `SemanticLock::explain`.
-pub fn trust_explain_semantic_lock(lock: SemanticLockFile, key: String) -> ExplainFact? Never! {
+fn trust_explain_semantic_lock(lock: SemanticLockFile, key: String) -> ExplainFact? Never! {
     loop record in lock.records {
         if record.identity.semantic_key() != key -> next
         owners := [String]{}

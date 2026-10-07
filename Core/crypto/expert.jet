@@ -481,13 +481,13 @@ fn xchacha_open(key: [U8], nonce24: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
     chacha_poly_open(sub, nonce, aad, cipher)
 }
 
-pub fn aes256gcm_seal(key: [U8], nonce: [U8], plain: [U8], aad: [U8]) -> [U8] CryptoError! {
+fn aes256gcm_seal(key: [U8], nonce: [U8], plain: [U8], aad: [U8]) -> [U8] CryptoError! {
     if key.len() != 32 || nonce.len() != 12 -> return Err(.Length)
     if plain.len() > 1073741824 || aad.len() > 16777216 -> return Err(.Length)
     Ok(aes_gcm_seal(key, nonce, aad, plain))
 }
 
-pub fn aes256gcm_open(key: [U8], nonce: [U8], cipher: [U8], aad: [U8]) -> [U8] CryptoError! {
+fn aes256gcm_open(key: [U8], nonce: [U8], cipher: [U8], aad: [U8]) -> [U8] CryptoError! {
     if key.len() != 32 || nonce.len() != 12 || cipher.len() < 16 || cipher.len() > 1073741840 {
         return Err(.Length)
     }
@@ -496,13 +496,13 @@ pub fn aes256gcm_open(key: [U8], nonce: [U8], cipher: [U8], aad: [U8]) -> [U8] C
     Ok(p)
 }
 
-pub fn xchacha20poly1305_seal(key: [U8], nonce: [U8], plain: [U8], aad: [U8]) -> [U8] CryptoError! {
+fn xchacha20poly1305_seal(key: [U8], nonce: [U8], plain: [U8], aad: [U8]) -> [U8] CryptoError! {
     if key.len() != 32 || nonce.len() != 24 -> return Err(.Length)
     if plain.len() > 1073741824 || aad.len() > 16777216 -> return Err(.Length)
     Ok(xchacha_seal(key, nonce, aad, plain))
 }
 
-pub fn xchacha20poly1305_open(key: [U8], nonce: [U8], cipher: [U8], aad: [U8]) -> [U8] CryptoError! {
+fn xchacha20poly1305_open(key: [U8], nonce: [U8], cipher: [U8], aad: [U8]) -> [U8] CryptoError! {
     if key.len() != 32 || nonce.len() != 24 || cipher.len() < 16 || cipher.len() > 1073741840 {
         return Err(.Length)
     }
@@ -512,7 +512,7 @@ pub fn xchacha20poly1305_open(key: [U8], nonce: [U8], cipher: [U8], aad: [U8]) -
 }
 
 /// RFC 9106 Argon2id with bounded portable memory and one to eight lanes.
-pub fn argon2id(password: Secret, salt: [U8], memory_kib: Int, iterations: Int, lanes: Int, output_len: Int) -> Secret CryptoError! {
+fn argon2id(password: Secret, salt: [U8], memory_kib: Int, iterations: Int, lanes: Int, output_len: Int) -> Secret CryptoError! {
     if password.bytes.len() > 1048576 || salt.len() < 8 || salt.len() > 64 || memory_kib < 8192 || memory_kib > 262144 || iterations < 1 || iterations > 10 || lanes < 1 || lanes > 8 || output_len < 16 || output_len > 64 {
         return Err(.Length)
     }
@@ -522,12 +522,12 @@ pub fn argon2id(password: Secret, salt: [U8], memory_kib: Int, iterations: Int, 
     Ok(Secret{bytes: argon2id_raw(password.bytes, salt, memory_kib, iterations, lanes, output_len)})
 }
 
-pub fn ed25519_sign(secret: [U8], bytes: [U8]) -> Signature CryptoError! {
+fn ed25519_sign(secret: [U8], bytes: [U8]) -> Signature CryptoError! {
     if secret.len() != 32 -> return Err(.KeyRejected)
     Ok(Signature{bytes: ed25519_sign_raw(secret, bytes)})
 }
 
-pub fn ed25519_verify_strict(public: [U8], message: [U8], signature: [U8]) -> Bool CryptoError! {
+fn ed25519_verify_strict(public: [U8], message: [U8], signature: [U8]) -> Bool CryptoError! {
     if public.len() != 32 || signature.len() != 64 || message.len() > 1073741824 {
         return Err(.Length)
     }
@@ -556,7 +556,7 @@ fn ed_small_order(point: EdPoint) -> Bool Never! {
     q.x == 0 && q.y == 1
 }
 
-pub fn hkdf_sha256_raw(ikm: [U8], salt: [U8], info: [U8], len: Int) -> Secret CryptoError! {
+fn hkdf_sha256_raw(ikm: [U8], salt: [U8], info: [U8], len: Int) -> Secret CryptoError! {
     if len < 0 || len > 8160 -> return Err(.Length)
     prk := hmac_sha256_local(salt, ikm)
     out := [U8]{}
@@ -579,7 +579,7 @@ pub fn hkdf_sha256_raw(ikm: [U8], salt: [U8], info: [U8], len: Int) -> Secret Cr
 
 fn hmac_sha256_local(key: [U8], data: [U8]) -> [U8] Never! { crypto.hmac_sha256(key, data) }
 
-pub fn x25519_raw(secret_bytes: [U8], public_bytes: [U8]) -> Secret CryptoError! {
+fn x25519_raw(secret_bytes: [U8], public_bytes: [U8]) -> Secret CryptoError! {
     if secret_bytes.len() != 32 || public_bytes.len() != 32 -> return Err(.KeyRejected)
     shared :: x25519_scalarmult(secret_bytes, public_bytes)
     if all_zero(shared) -> return Err(.KeyRejected)
@@ -592,13 +592,13 @@ fn all_zero(bytes: [U8]) -> Bool Never! {
     diff == 0
 }
 
-pub fn secret_bytes(secret: Secret) -> [U8] Never! { ~secret.bytes }
+fn secret_bytes(secret: Secret) -> [U8] Never! { ~secret.bytes }
 
-pub fn shared_secret_bytes(secret: SharedSecret) -> [U8] Never! { ~secret.bytes }
+fn shared_secret_bytes(secret: SharedSecret) -> [U8] Never! { ~secret.bytes }
 
-pub fn signing_key_bytes(key: SigningKey) -> [U8] Never! { ~key.bytes }
+fn signing_key_bytes(key: SigningKey) -> [U8] Never! { ~key.bytes }
 
-pub fn x25519_secret_bytes(key: X25519SecretKey) -> [U8] Never! { ~key.bytes }
+fn x25519_secret_bytes(key: X25519SecretKey) -> [U8] Never! { ~key.bytes }
 
 fn open_v1_body(key: [U8], mode: U8, nonce: [U8], body: [U8]) -> [U8]? {
     if mode == (U8{1}) -> return chacha_poly_open(key, nonce, [U8]{}, body)
@@ -606,7 +606,7 @@ fn open_v1_body(key: [U8], mode: U8, nonce: [U8], body: [U8]) -> [U8]? {
     None
 }
 
-pub fn open_v1(key: [U8], envelope: [U8]) -> [U8] CryptoError! {
+fn open_v1(key: [U8], envelope: [U8]) -> [U8] CryptoError! {
     if key.len() != 32 || envelope.len() < 34 || envelope.len() > 1073741856 {
         return Err(.OpenFailed)
     }
@@ -620,7 +620,7 @@ pub fn open_v1(key: [U8], envelope: [U8]) -> [U8] CryptoError! {
     Ok(opened_bytes)
 }
 
-pub fn migrate_v1(key: [U8], source: Path, recipients: [X25519PublicKey], destination: Path) -[FS, Rand]> Bool FileCryptoError! {
+fn migrate_v1(key: [U8], source: Path, recipients: [X25519PublicKey], destination: Path) -[FS, Rand]> Bool FileCryptoError! {
     data :: host_read_file(source.to_string()) ?? return Err(.SourceMissing)
     plain :: open_v1(key, data) ?? return Err(.OpenFailed)
     sealed :: crypto.seal(recipients, plain, [U8]{}) ?? return Err(.PublishFailed)

@@ -67,122 +67,122 @@ use jet_sema.[
 ]
 
 struct JetCodegenBinding {
-    pub name: String
-    pub symbol_key: String
-    pub ty: Type
-    pub place: MIRPlaceID
-    pub local: MIRLocalID
-    pub depth: Int
+    name: String
+    symbol_key: String
+    ty: Type
+    place: MIRPlaceID
+    local: MIRLocalID
+    depth: Int
 }
 struct JetCodegenDropLive {
-    pub place: MIRPlaceID
-    pub live: MIRPlaceID
-    pub ty: Type
-    pub kind: MIRDropKind
-    pub span: Span
+    place: MIRPlaceID
+    live: MIRPlaceID
+    ty: Type
+    kind: MIRDropKind
+    span: Span
 }
 enum JetCodegenCleanupAction {
     DeferredCall(thunk: MIRValueID)
     DropPlace(record: JetCodegenDropLive)
 }
 struct JetCodegenCleanupFrame {
-    pub owner: MIRScopeID?
-    pub depth: Int
-    pub binding_start: Int
-    pub drop_live_start: Int
-    pub actions: [JetCodegenCleanupAction]
+    owner: MIRScopeID?
+    depth: Int
+    binding_start: Int
+    drop_live_start: Int
+    actions: [JetCodegenCleanupAction]
     // Actions other than DropPlace: they run unconditionally, so only on the
     // exits registered after them.
-    pub explicit: Int
+    explicit: Int
     // Drop-chain entry blocks the frame's exits jump to, filled when the frame
     // closes (jet_codegen_seal_exit_chains).
-    pub pending_exits: [JetCodegenPendingExit]
+    pending_exits: [JetCodegenPendingExit]
 }
 // One drop-chain entry of a frame: exits toward the target `key` names taken
 // after the frame's first `explicit` explicit actions. `terminator` is the
 // exit that ends the chain (a returned value travels in `slot`); `cut` is the
 // frame depth the target's cleanup stops at.
 struct JetCodegenPendingExit {
-    pub key: String
-    pub terminator: MIRTerminator
-    pub slot: MIRPlaceID?
-    pub explicit: Int
-    pub cut: Int
-    pub block: MIRBlockID
+    key: String
+    terminator: MIRTerminator
+    slot: MIRPlaceID?
+    explicit: Int
+    cut: Int
+    block: MIRBlockID
 }
 // A local that carries a returned value through a shared drop chain.
 struct JetCodegenExitValueSlot {
-    pub ty: MIRType
-    pub place: MIRPlaceID
+    ty: MIRType
+    place: MIRPlaceID
 }
 
 struct JetCodegenContractScopeState {
-    pub result: TContractResult
-    pub carrier_place: MIRPlaceID
-    pub binding_place: MIRPlaceID
-    pub post: [TContract]
+    result: TContractResult
+    carrier_place: MIRPlaceID
+    binding_place: MIRPlaceID
+    post: [TContract]
 }
 
 struct JetCodegenLoopTarget {
-    pub label: String?
-    pub break_target: MIRBlockID
-    pub continue_target: MIRBlockID
-    pub break_scope_depth: Int
-    pub continue_scope_depth: Int
-    pub break_cleanup_depth: Int
-    pub continue_cleanup_depth: Int
-    pub break_seen: Bool
+    label: String?
+    break_target: MIRBlockID
+    continue_target: MIRBlockID
+    break_scope_depth: Int
+    continue_scope_depth: Int
+    break_cleanup_depth: Int
+    continue_cleanup_depth: Int
+    break_seen: Bool
 }
 struct JetCodegenTransactionSnapshot {
-    pub local: TLocal
-    pub ty: Type
-    pub saved_ty: Type
-    pub place: MIRPlaceID
-    pub saved_local: TLocal
-    pub saved_place: MIRPlaceID
-    pub rollback_type: Type?
-    pub restore_method: TMethodRef?
+    local: TLocal
+    ty: Type
+    saved_ty: Type
+    place: MIRPlaceID
+    saved_local: TLocal
+    saved_place: MIRPlaceID
+    rollback_type: Type?
+    restore_method: TMethodRef?
 }
 struct JetCodegenTransactionState {
-    pub scope: MIRScopeID
-    pub stm_place: MIRPlaceID?
-    pub handle_place: MIRPlaceID?
-    pub snapshots: [JetCodegenTransactionSnapshot]
-    pub loop_depth: Int
+    scope: MIRScopeID
+    stm_place: MIRPlaceID?
+    handle_place: MIRPlaceID?
+    snapshots: [JetCodegenTransactionSnapshot]
+    loop_depth: Int
 }
 struct JetCodegenSourceLocation {
-    pub line: Int
-    pub source_line: String?
+    line: Int
+    source_line: String?
 }
 
 struct JetCodegenSwitchSubject {
-    pub value: MIRValueID
-    pub ty: Type
+    value: MIRValueID
+    ty: Type
 }
 
 // D-OPT-WRITE1 (#3974): a pattern subject read from a `&place` write window.
 struct JetCodegenPatternWindow {
-    pub value: MIRValueID
-    pub place: MIRPlaceID
+    value: MIRValueID
+    place: MIRPlaceID
 }
 
 // Line starts and bytes of one checked source file, built once per lowering
 // run so source locations binary-search and index the file in place instead
 // of rescanning or re-encoding (copying) its text per location.
-pub struct JetCodegenSourceLines {
-    pub path: String
-    pub line_starts: [Int]
-    pub bytes: [U8]
+struct JetCodegenSourceLines {
+    path: String
+    line_starts: [Int]
+    bytes: [U8]
 }
 
 // Every checked source file's line index, in `source_files` order, with the
 // first row per path and per file id: a location lookup is one map read
 // instead of a scan that copied the matching file's whole text.
-pub struct JetCodegenSourceIndex {
-    pub rows: [JetCodegenSourceLines]
-    pub by_path: [String:Int]
-    pub by_id: [U64:Int]
-    pub duplicate_paths: [String:Bool]
+struct JetCodegenSourceIndex {
+    rows: [JetCodegenSourceLines]
+    by_path: [String:Int]
+    by_id: [U64:Int]
+    duplicate_paths: [String:Bool]
 }
 
 fn jet_codegen_source_index(source_files: [MIRSourceFile]) -> JetCodegenSourceIndex Never! {
@@ -243,13 +243,13 @@ fn jet_codegen_builder_source_row(builder: JetCodegenBuilder, program: JetCodege
 
 // Checked rows in input order. Unqualified calls keep the first match;
 // qualified duplicates are recorded, but rejected only when looked up.
-pub struct JetCodegenFunctionIndex {
-    pub rows: [TFunc]
-    pub first_by_key: [String:Int]
-    pub first_by_name: [String:Int]
-    pub next_by_key: [Int]
-    pub next_by_name: [Int]
-    pub qualified_rows: [String:Int]
+struct JetCodegenFunctionIndex {
+    rows: [TFunc]
+    first_by_key: [String:Int]
+    first_by_name: [String:Int]
+    next_by_key: [Int]
+    next_by_name: [Int]
+    qualified_rows: [String:Int]
 }
 
 fn jet_codegen_qualified_function_key(module_identity: String, key: String) -> String Never! {
@@ -324,7 +324,7 @@ fn jet_codegen_function_index_append(index: &JetCodegenFunctionIndex, functions:
 
 // Moves every row of `from` onto the end of `to` in order, leaving `from`
 // empty. Each pop moves one row, so the rows are never resident twice.
-pub fn jet_codegen_move_function_rows(to: &[TFunc], from: &[TFunc]) Never! {
+fn jet_codegen_move_function_rows(to: &[TFunc], from: &[TFunc]) Never! {
     reversed := [TFunc]{}
     loop from.len() > 0 {
         function := &from.pop() ?? { break }
@@ -340,95 +340,95 @@ pub fn jet_codegen_move_function_rows(to: &[TFunc], from: &[TFunc]) Never! {
 // function taking a builder takes this beside it, so compiler threads can
 // share one program while each lowers on its own builder.
 struct JetCodegenProgram {
-    pub function_index: JetCodegenFunctionIndex
-    pub modules: [SemaGraphModuleResult]
+    function_index: JetCodegenFunctionIndex
+    modules: [SemaGraphModuleResult]
     // Method owner metadata over `modules` (jet_codegen_owner_index).
-    pub owners: JetCodegenOwnerIndex
+    owners: JetCodegenOwnerIndex
     // Program-wide field symbol index (jet_codegen_field_symbol_index).
-    pub field_symbols: [String:[JetCodegenFieldSymbolRow]]
-    pub source_files: [MIRSourceFile]
-    pub source_index: JetCodegenSourceIndex
+    field_symbols: [String:[JetCodegenFieldSymbolRow]]
+    source_files: [MIRSourceFile]
+    source_index: JetCodegenSourceIndex
 }
 
 // One lowering's state: the function being lowered (every field but
 // `constant_copies` is per function, JetCodegenFunctionState) beside a
 // JetCodegenProgram.
 struct JetCodegenBuilder {
-    pub function: TFunc
+    function: TFunc
     // Card #4258: whether each constant (by symbol key) copies into its use
     // sites, decided on its first read (jet_codegen_constant_copies_into_uses
     // reads only the program, so every builder decides alike).
-    pub constant_copies: [String:Bool]
-    pub current_span: Span
-    pub current_line: Int?
-    pub generic_type_names: [String]
-    pub current: MIRBlockID
-    pub entry: MIRBlockID
-    pub next_identity: Int
-    pub scope_depth: Int
-    pub blocks: [MIRBasicBlock]
+    constant_copies: [String:Bool]
+    current_span: Span
+    current_line: Int?
+    generic_type_names: [String]
+    current: MIRBlockID
+    entry: MIRBlockID
+    next_identity: Int
+    scope_depth: Int
+    blocks: [MIRBasicBlock]
     // MIR block id value -> position in `blocks`, kept by `jet_codegen_new_block`
     // so emitting into the current block never scans the block list.
-    pub block_positions: [U64:Int]
-    pub locals: [MIRLocal]
+    block_positions: [U64:Int]
+    locals: [MIRLocal]
     // First row for each local id, including repeated symbol-backed locals.
-    pub local_positions: [U64:Int]
-    pub values: [MIRValueFact]
+    local_positions: [U64:Int]
+    values: [MIRValueFact]
     // Last row for each value id, matching reverse ownership lookup.
-    pub value_positions: [U64:Int]
-    pub places: [MIRPlace]
+    value_positions: [U64:Int]
+    places: [MIRPlace]
     // First row for each place id, matching `jet_codegen_find_place`.
-    pub place_positions: [U64:Int]
-    pub scopes: [MIRScope]
-    pub contract_scopes: [JetCodegenContractScopeState]
-    pub params: [MIRParam]
-    pub capture_params: [MIRCaptureParam]
-    pub capture_facts: MIRCaptureFacts?
-    pub bindings: [JetCodegenBinding]
-    pub loops: [JetCodegenLoopTarget]
-    pub prelude_calls: [MIRPreludeCall]
+    place_positions: [U64:Int]
+    scopes: [MIRScope]
+    contract_scopes: [JetCodegenContractScopeState]
+    params: [MIRParam]
+    capture_params: [MIRCaptureParam]
+    capture_facts: MIRCaptureFacts?
+    bindings: [JetCodegenBinding]
+    loops: [JetCodegenLoopTarget]
+    prelude_calls: [MIRPreludeCall]
     // Row position of each prelude_calls id, kept by every push.
-    pub prelude_call_positions: [U64:Int]
-    pub core_calls: [MIRCoreCall]
-    pub used_core: [String]
-    pub nested_functions: [MIRFunction]
-    pub callbacks: [MIRCallbackAdapter]
-    pub checked_vector_facts: [MIRVectorFact]
-    pub transactions: [JetCodegenTransactionState]
-    pub transaction_cleanup_active: Bool
-    pub drop_live_places: [JetCodegenDropLive]
+    prelude_call_positions: [U64:Int]
+    core_calls: [MIRCoreCall]
+    used_core: [String]
+    nested_functions: [MIRFunction]
+    callbacks: [MIRCallbackAdapter]
+    checked_vector_facts: [MIRVectorFact]
+    transactions: [JetCodegenTransactionState]
+    transaction_cleanup_active: Bool
+    drop_live_places: [JetCodegenDropLive]
     // Every drop-live record the function registered, kept after its frame
     // closes for the last-use pass (jet_codegen_move_last_uses).
-    pub drop_live_all: [JetCodegenDropLive]
-    pub cleanup_frames: [JetCodegenCleanupFrame]
+    drop_live_all: [JetCodegenDropLive]
+    cleanup_frames: [JetCodegenCleanupFrame]
     // The final block (id value) of each shared drop chain, by exit target key.
-    pub exit_tails: [String:U64]
+    exit_tails: [String:U64]
     // Locals that carry a returned value through a shared drop chain, one per
     // returned type.
-    pub exit_value_slots: [JetCodegenExitValueSlot]
-    pub switch_subject: JetCodegenSwitchSubject?
-    pub spawn_occurrences: [String:Int]
+    exit_value_slots: [JetCodegenExitValueSlot]
+    switch_subject: JetCodegenSwitchSubject?
+    spawn_occurrences: [String:Int]
     // Pattern subjects read through `&place`, and generated locals aliased
     // to one; their payload bindings alias the place (MIRProjection.Payload).
-    pub pattern_windows: [JetCodegenPatternWindow]
-    pub window_aliases: [String]
+    pattern_windows: [JetCodegenPatternWindow]
+    window_aliases: [String]
     // D-MEM-COPYSEM1: window places (by place ID) rooted at a read
     // parameter. A pattern on one tests it in place and binds each payload
     // name as a read-only alias: the parameter cannot change while the
     // function runs, so the alias reads exactly what a copy would hold.
-    pub read_windows: [U64:Bool]
+    read_windows: [U64:Bool]
     // Read-only alias locals' places (by place ID): a walked list's item or
     // a read window binding names another value's slot, so a consuming use
     // copies it instead of moving the slot out of its owner.
-    pub read_alias_places: [U64:Bool]
+    read_alias_places: [U64:Bool]
     // D-MEM-COPYSEM1: the immutable place bindings of the function whose root
     // their scope leaves alone (jet_codegen_stable_element_lets), by
     // jet_codegen_element_let_key.
-    pub stable_element_lets: [String:Bool]
+    stable_element_lets: [String:Bool]
     // #3740: the plain-return call a propagating `Try` consumes directly
     // (`jet_codegen_plain_try_identity`), and whether that call took it.
-    pub plain_try_operand: String?
-    pub plain_try_taken: Bool
+    plain_try_operand: String?
+    plain_try_taken: Bool
 }
 
 fn jet_codegen_source_location(builder: JetCodegenBuilder, program: JetCodegenProgram, include_source_line: Bool) -> JetCodegenSourceLocation Never! {
@@ -499,19 +499,19 @@ fn jet_codegen_assignment_panic_location(builder: &JetCodegenBuilder, program: J
 }
 
 
-pub struct JetCodegenLoweredFunction {
-    pub function: MIRFunction
-    pub nested_functions: [MIRFunction]
-    pub callbacks: [MIRCallbackAdapter]
-    pub fields: [MIRFieldRow]
-    pub prelude_calls: [MIRPreludeCall]
-    pub core_calls: [MIRCoreCall]
-    pub used_core: [String]
+struct JetCodegenLoweredFunction {
+    function: MIRFunction
+    nested_functions: [MIRFunction]
+    callbacks: [MIRCallbackAdapter]
+    fields: [MIRFieldRow]
+    prelude_calls: [MIRPreludeCall]
+    core_calls: [MIRCoreCall]
+    used_core: [String]
 }
 
 struct JetCodegenLambdaValue {
-    pub value: MIRValueID
-    pub function: MIRFunctionID
+    value: MIRValueID
+    function: MIRFunctionID
 }
 
 
@@ -525,29 +525,29 @@ fn jet_codegen_identity(builder: &JetCodegenBuilder, program: JetCodegenProgram,
 // `jet_codegen_qualified_function_key(module, function key)`, built once per
 // builder: asking per function scanned every type definition and impl.
 // Each map keeps the first row in module, then declaration, order.
-pub struct JetCodegenOwnerIndex {
+struct JetCodegenOwnerIndex {
     // Generic parameter names of the type definition that lists the method.
-    pub type_method_generics: [String:[String]]
+    type_method_generics: [String:[String]]
     // Target type of the first impl that declares the method.
-    pub impl_method_targets: [String:Type]
+    impl_method_targets: [String:Type]
     // Generic parameter names of each type definition, by qualified name.
-    pub type_generics_by_name: [String:[String]]
+    type_generics_by_name: [String:[String]]
     // Where each type definition sits in `modules`, by qualified name.
-    pub type_def_rows: [String:JetCodegenTypeDefRow]
+    type_def_rows: [String:JetCodegenTypeDefRow]
     // Ordered candidate rows for Index/IndexMut and serde hook lookups.
-    pub hooks: JetCodegenHookIndex
+    hooks: JetCodegenHookIndex
     // Checked constant positions and lazy use-site classification, program-wide.
-    pub constants: JetCodegenConstantIndex
+    constants: JetCodegenConstantIndex
     // Set by a comptime session for the closure it lowers: a type row then
     // lists only the methods in `closure_methods` (qualified keys of the
     // closure's functions), as if every other method were absent from it.
-    pub closure_only: Bool
-    pub closure_methods: [String:Bool]
+    closure_only: Bool
+    closure_methods: [String:Bool]
 }
 
-pub struct JetCodegenTypeDefRow {
-    pub module_index: Int
-    pub definition_index: Int
+struct JetCodegenTypeDefRow {
+    module_index: Int
+    definition_index: Int
 }
 
 fn jet_codegen_type_generic_names(definition: TTypeDef) -> [String] Never! {
@@ -592,10 +592,10 @@ fn jet_codegen_owner_index(modules: [SemaGraphModuleResult]) -> JetCodegenOwnerI
     JetCodegenOwnerIndex{type_method_generics: type_method_generics, impl_method_targets: impl_method_targets, type_generics_by_name: type_generics_by_name, type_def_rows: type_def_rows, hooks: jet_codegen_hook_index(modules), constants: jet_codegen_constant_index(modules), closure_only: false, closure_methods: [String:Bool]{}}
 }
 
-pub struct JetCodegenOwnerTypeBindings {
-    pub names: [String]
-    pub arguments: [Type]
-    pub complete: Bool
+struct JetCodegenOwnerTypeBindings {
+    names: [String]
+    arguments: [Type]
+    complete: Bool
 }
 
 fn jet_codegen_function_owner_pattern(function: TFunc, owners: JetCodegenOwnerIndex) -> Type? {
@@ -765,7 +765,7 @@ fn jet_codegen_bind_owner_type_pattern(pattern: Type, actual: Type, owner_names:
     }
 }
 
-pub fn jet_codegen_function_owner_bindings(function: TFunc, receiver_type: Type, owners: JetCodegenOwnerIndex) -> JetCodegenOwnerTypeBindings Never! {
+fn jet_codegen_function_owner_bindings(function: TFunc, receiver_type: Type, owners: JetCodegenOwnerIndex) -> JetCodegenOwnerTypeBindings Never! {
     owner_pattern :: jet_codegen_function_owner_pattern(function, owners) ?? return JetCodegenOwnerTypeBindings{names: [String]{}, arguments: [Type]{}, complete: true}
     owner_names := jet_codegen_function_type_generic_names(function, owners)
     bound_names := [String]{}
@@ -866,52 +866,52 @@ fn jet_codegen_new_builder(function: TFunc, program: JetCodegenProgram) -> JetCo
 // added here, to `jet_codegen_begin_function`, `jet_codegen_function_state`
 // and `jet_codegen_restore_function_state`, or it leaks between functions.
 struct JetCodegenFunctionState {
-    pub function: TFunc
-    pub current_span: Span
-    pub current_line: Int?
-    pub generic_type_names: [String]
-    pub current: MIRBlockID
-    pub entry: MIRBlockID
-    pub next_identity: Int
-    pub scope_depth: Int
-    pub blocks: [MIRBasicBlock]
-    pub block_positions: [U64:Int]
-    pub locals: [MIRLocal]
-    pub local_positions: [U64:Int]
-    pub values: [MIRValueFact]
-    pub value_positions: [U64:Int]
-    pub places: [MIRPlace]
-    pub place_positions: [U64:Int]
-    pub scopes: [MIRScope]
-    pub contract_scopes: [JetCodegenContractScopeState]
-    pub params: [MIRParam]
-    pub capture_params: [MIRCaptureParam]
-    pub capture_facts: MIRCaptureFacts?
-    pub bindings: [JetCodegenBinding]
-    pub loops: [JetCodegenLoopTarget]
-    pub prelude_calls: [MIRPreludeCall]
-    pub prelude_call_positions: [U64:Int]
-    pub core_calls: [MIRCoreCall]
-    pub used_core: [String]
-    pub nested_functions: [MIRFunction]
-    pub callbacks: [MIRCallbackAdapter]
-    pub checked_vector_facts: [MIRVectorFact]
-    pub transactions: [JetCodegenTransactionState]
-    pub transaction_cleanup_active: Bool
-    pub drop_live_places: [JetCodegenDropLive]
-    pub drop_live_all: [JetCodegenDropLive]
-    pub cleanup_frames: [JetCodegenCleanupFrame]
-    pub exit_tails: [String:U64]
-    pub exit_value_slots: [JetCodegenExitValueSlot]
-    pub switch_subject: JetCodegenSwitchSubject?
-    pub spawn_occurrences: [String:Int]
-    pub pattern_windows: [JetCodegenPatternWindow]
-    pub window_aliases: [String]
-    pub read_windows: [U64:Bool]
-    pub read_alias_places: [U64:Bool]
-    pub stable_element_lets: [String:Bool]
-    pub plain_try_operand: String?
-    pub plain_try_taken: Bool
+    function: TFunc
+    current_span: Span
+    current_line: Int?
+    generic_type_names: [String]
+    current: MIRBlockID
+    entry: MIRBlockID
+    next_identity: Int
+    scope_depth: Int
+    blocks: [MIRBasicBlock]
+    block_positions: [U64:Int]
+    locals: [MIRLocal]
+    local_positions: [U64:Int]
+    values: [MIRValueFact]
+    value_positions: [U64:Int]
+    places: [MIRPlace]
+    place_positions: [U64:Int]
+    scopes: [MIRScope]
+    contract_scopes: [JetCodegenContractScopeState]
+    params: [MIRParam]
+    capture_params: [MIRCaptureParam]
+    capture_facts: MIRCaptureFacts?
+    bindings: [JetCodegenBinding]
+    loops: [JetCodegenLoopTarget]
+    prelude_calls: [MIRPreludeCall]
+    prelude_call_positions: [U64:Int]
+    core_calls: [MIRCoreCall]
+    used_core: [String]
+    nested_functions: [MIRFunction]
+    callbacks: [MIRCallbackAdapter]
+    checked_vector_facts: [MIRVectorFact]
+    transactions: [JetCodegenTransactionState]
+    transaction_cleanup_active: Bool
+    drop_live_places: [JetCodegenDropLive]
+    drop_live_all: [JetCodegenDropLive]
+    cleanup_frames: [JetCodegenCleanupFrame]
+    exit_tails: [String:U64]
+    exit_value_slots: [JetCodegenExitValueSlot]
+    switch_subject: JetCodegenSwitchSubject?
+    spawn_occurrences: [String:Int]
+    pattern_windows: [JetCodegenPatternWindow]
+    window_aliases: [String]
+    read_windows: [U64:Bool]
+    read_alias_places: [U64:Bool]
+    stable_element_lets: [String:Bool]
+    plain_try_operand: String?
+    plain_try_taken: Bool
 }
 
 // Starts lowering `function` on a builder that already holds the program

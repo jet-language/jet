@@ -16,11 +16,11 @@ STORE_ARTIFACT_U64_MAX :: prep { 18446744073709551615 }
 // The machine-wide store configuration. The optional cap is an explicit host
 // override; without it the effective limit is adaptive. Lock acquisition
 // waits up to the default lock wait unless overridden.
-pub struct ArtifactStoreConfig {
-    root_value: String
-    cap_bytes_value: Int?
-    reserve_bytes_value: Int
-    lock_wait_value: Duration
+struct ArtifactStoreConfig {
+    priv root_value: String
+    priv cap_bytes_value: Int?
+    priv reserve_bytes_value: Int
+    priv lock_wait_value: Duration
 
     fn new(root: String) -> ArtifactStoreConfig Never! {
         ArtifactStoreConfig{
@@ -134,7 +134,7 @@ fn store_artifact_size_units() -> [StoreArtifactSizeUnit] Never! {
 }
 
 // Parse a byte size such as `4G`, `512MiB`, or a bare byte count.
-pub fn store_artifact_parse_size(value: String) -> Int ArtifactStoreError! {
+fn store_artifact_parse_size(value: String) -> Int ArtifactStoreError! {
     // #4303: Main-approved host-emitter binding workaround; restore :: with the emitter fix.
     trimmed := value.trim()
     if trimmed == "" -> return Err(ArtifactStoreError.Config("size cannot be empty"))

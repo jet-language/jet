@@ -4,12 +4,12 @@
 // source text, so no span becomes a line and column here.
 
 // Rust `Diagnostic::error(code, what, why, fix, None).to_report(&ReportPath::from_process(""), "")`.
-pub fn cli_diagnostic_report(code: String, what: String, why: String, fix: String) -[FS, Env]> ReportEnvelope Never! {
+fn cli_diagnostic_report(code: String, what: String, why: String, fix: String) -[FS, Env]> ReportEnvelope Never! {
     cli_diagnostic_to_report(diagnostic_from_registry(code, None, what, why, fix), ReportPath.from_process(""))
 }
 
 // Rust `diagnostic.to_report(&file, "")`.
-pub fn cli_diagnostic_to_report(diagnostic: Diagnostic, file: ReportPath) -> ReportEnvelope Never! {
+fn cli_diagnostic_to_report(diagnostic: Diagnostic, file: ReportPath) -> ReportEnvelope Never! {
     moment :: if diagnostic.moment == {
         .Compile -> "compile"
         .Run -> "run"

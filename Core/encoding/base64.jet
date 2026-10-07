@@ -9,12 +9,12 @@ use core as core
 use core.encoding.hex as hex
 use core.encoding.base32 as base32
 #Error
-pub struct Base64Error {
-    pub reason: String
+struct Base64Error {
+    reason: String
 }
 
 impl Base64Error {
-    pub fn new(reason: String) -> Base64Error Never! { Base64Error{reason: reason} }
+    fn new(reason: String) -> Base64Error Never! { Base64Error{reason: reason} }
 }
 
 fn rewrap(reason: String) -> Base64Error Never! { Base64Error{reason: reason} }
@@ -22,62 +22,62 @@ fn rewrap(reason: String) -> Base64Error Never! { Base64Error{reason: reason} }
 
 fn u8_int(b: U8) -> Int Never! { Int.from_u8(b) }
 
-pub fn encode(data: [U8]) -> String Never! { core.encoding.base64.encode(data) }
+fn encode(data: [U8]) -> String Never! { core.encoding.base64.encode(data) }
 
-pub fn encode_url(data: [U8]) -> String Never! { core.encoding.base64.encode_url(data) }
+fn encode_url(data: [U8]) -> String Never! { core.encoding.base64.encode_url(data) }
 
-pub fn decode(text: String) -> [U8] Base64Error! {
+fn decode(text: String) -> [U8] Base64Error! {
     if core.encoding.base64.decode(text) == {
         .Ok(value) -> return Ok(value)
         .Err(reason) -> return Err(rewrap(reason))
     }
 }
 
-pub fn decode_url(text: String) -> [U8] Base64Error! {
+fn decode_url(text: String) -> [U8] Base64Error! {
     if core.encoding.base64.decode_url(text) == {
         .Ok(value) -> return Ok(value)
         .Err(reason) -> return Err(rewrap(reason))
     }
 }
 
-pub fn b64encode(data: [U8]) -> String Never! { encode(data) }
-pub fn standard_b64encode(data: [U8]) -> String Never! { encode(data) }
-pub fn urlsafe_b64encode(data: [U8]) -> String Never! { encode_url(data) }
-pub fn b64decode(text: String) -> [U8] Base64Error! { decode(text) }
-pub fn standard_b64decode(text: String) -> [U8] Base64Error! { decode(text) }
-pub fn urlsafe_b64decode(text: String) -> [U8] Base64Error! { decode_url(text) }
+fn b64encode(data: [U8]) -> String Never! { encode(data) }
+fn standard_b64encode(data: [U8]) -> String Never! { encode(data) }
+fn urlsafe_b64encode(data: [U8]) -> String Never! { encode_url(data) }
+fn b64decode(text: String) -> [U8] Base64Error! { decode(text) }
+fn standard_b64decode(text: String) -> [U8] Base64Error! { decode(text) }
+fn urlsafe_b64decode(text: String) -> [U8] Base64Error! { decode_url(text) }
 
-pub fn b16encode(data: [U8]) -> String Never! { hex.encode_upper(data) }
-pub fn b16decode(text: String) -> [U8] Base64Error! { decode_hex(text) }
-pub fn b32encode(data: [U8]) -> String Never! { base32.encode(data) }
-pub fn b32decode(text: String) -> [U8] Base64Error! { decode_base32(text) }
-pub fn b32hexencode(data: [U8]) -> String Never! { base32.b32hexencode(data) }
-pub fn b32hexdecode(text: String) -> [U8] Base64Error! { decode_base32hex(text) }
+fn b16encode(data: [U8]) -> String Never! { hex.encode_upper(data) }
+fn b16decode(text: String) -> [U8] Base64Error! { decode_hex(text) }
+fn b32encode(data: [U8]) -> String Never! { base32.encode(data) }
+fn b32decode(text: String) -> [U8] Base64Error! { decode_base32(text) }
+fn b32hexencode(data: [U8]) -> String Never! { base32.b32hexencode(data) }
+fn b32hexdecode(text: String) -> [U8] Base64Error! { decode_base32hex(text) }
 
 /// Adobe Ascii85 without optional `<~` framing.
-pub fn a85encode(data: [U8]) -> String Never! { ascii85_encode(data) }
-pub fn a85decode(text: String) -> [U8] Base64Error! { ascii85_decode(text) }
+fn a85encode(data: [U8]) -> String Never! { ascii85_encode(data) }
+fn a85decode(text: String) -> [U8] Base64Error! { ascii85_decode(text) }
 
 /// RFC 1924 Base85.
-pub fn b85encode(data: [U8]) -> String Base64Error! { base85_encode(data, C_B85_ALPHABET, false) }
-pub fn b85decode(text: String) -> [U8] Base64Error! { base85_decode(text, C_B85_ALPHABET, false) }
+fn b85encode(data: [U8]) -> String Base64Error! { base85_encode(data, C_B85_ALPHABET, false) }
+fn b85decode(text: String) -> [U8] Base64Error! { base85_decode(text, C_B85_ALPHABET, false) }
 
 /// ZeroMQ Z85. Z85 intentionally requires complete 4-byte/5-character
 /// quanta; silently padding a key would change its value.
-pub fn z85encode(data: [U8]) -> String Base64Error! { base85_encode(data, C_Z85_ALPHABET, true) }
-pub fn z85decode(text: String) -> [U8] Base64Error! { base85_decode(text, C_Z85_ALPHABET, true) }
+fn z85encode(data: [U8]) -> String Base64Error! { base85_encode(data, C_Z85_ALPHABET, true) }
+fn z85decode(text: String) -> [U8] Base64Error! { base85_decode(text, C_Z85_ALPHABET, true) }
 
-pub fn encodebytes(data: [U8]) -> String Never! { core.encoding.base64.encodebytes(data) }
+fn encodebytes(data: [U8]) -> String Never! { core.encoding.base64.encodebytes(data) }
 
-pub fn decodebytes(text: String) -> [U8] Base64Error! {
+fn decodebytes(text: String) -> [U8] Base64Error! {
     if core.encoding.base64.decodebytes(text) == {
         .Ok(value) -> return Ok(value)
         .Err(reason) -> return Err(rewrap(reason))
     }
 }
 
-pub fn b2a_base64(data: [U8]) -> String Never! { "{encode(data)}\n" }
-pub fn a2b_base64(text: String) -> [U8] Base64Error! { decodebytes(text) }
+fn b2a_base64(data: [U8]) -> String Never! { "{encode(data)}\n" }
+fn a2b_base64(text: String) -> [U8] Base64Error! { decodebytes(text) }
 fn decode_hex(text: String) -> [U8] Base64Error! {
     if hex.decode(text) == {
         .Ok(value) -> return Ok(value)
@@ -99,15 +99,15 @@ fn decode_base32hex(text: String) -> [U8] Base64Error! {
     }
 }
 
-pub fn encode_url_padded(data: [U8]) -> String Never! { core.encoding.base64.encode_url_padded(data) }
+fn encode_url_padded(data: [U8]) -> String Never! { core.encoding.base64.encode_url_padded(data) }
 
-pub fn decode_padded(text: String) -> [U8] Base64Error! { decode(text) }
+fn decode_padded(text: String) -> [U8] Base64Error! { decode(text) }
 
-pub fn pad(text: String) -> String Never! { core.encoding.base64.pad(text) }
+fn pad(text: String) -> String Never! { core.encoding.base64.pad(text) }
 
-pub fn unpad(text: String) -> String Never! { core.encoding.base64.unpad(text) }
+fn unpad(text: String) -> String Never! { core.encoding.base64.unpad(text) }
 
-pub fn is_base64(text: String) -> Bool Never! {
+fn is_base64(text: String) -> Bool Never! {
     decode(text) == .Ok(_)
 }
 

@@ -419,7 +419,7 @@ fn render_jet(lib: &str, s: &Surface) -> String {
     o.push_str(") -[FFI.DotNet]> Handle DotNetError! {\n    value :: abi.new(");
     args(&mut o, s.ctor.len());
     o.push_str(")\n    code :: abi.take_error()\n    if code != 0 { return Err(error(code)) }\n    return Ok(Handle{ value: value })\n}\n\n");
-    o.push_str("pub fn close(^handle: Handle) -[FFI.DotNet]> {}\n\nimpl Handle.Close {\n    fn close(^self) {\n        abi.close(self.value)\n        if abi.take_error() != 0 { panic(\".NET handle close failed\") }\n    }\n}\n\n");
+    o.push_str("fn close(^handle: Handle) -[FFI.DotNet]> {}\n\nimpl Handle.Close {\n    fn close(^self) {\n        abi.close(self.value)\n        if abi.take_error() != 0 { panic(\".NET handle close failed\") }\n    }\n}\n\n");
     for m in &s.methods {
         o.push_str("pub fn ");
         o.push_str(&m.name);
@@ -708,7 +708,7 @@ mod tests {
     fn reflection_schema_projects_typed_owned_surface() {
         let s=super::parse_surface(b"CLASS\tCounter\nCTOR\tint\nMETHOD\tadd\tI\tint\tint\nMETHOD\tscale\tS\tfloat\tfloat\n","Counter").unwrap();
         let jet = super::render_jet("counter", &s);
-        assert!(jet.contains("pub struct Handle { value: Int }"));
+        assert!(jet.contains("struct Handle { value: Int }"));
         assert!(jet.contains("impl Handle.Close"));
         assert!(jet.contains("fn close(^self)"));
         assert!(jet.contains("pub fn close(^handle: Handle)"));

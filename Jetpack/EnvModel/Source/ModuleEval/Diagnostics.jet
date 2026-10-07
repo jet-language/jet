@@ -6,14 +6,14 @@
 // evaluator stopped on. Module surfaces are evaluated, not type-checked, so
 // the first diagnostic is the whole failure.
 #Error
-pub struct EnvModelEvalError {
-    pub diagnostic: Diagnostic
+struct EnvModelEvalError {
+    diagnostic: Diagnostic
 }
 
 impl ComptimeEvalError -> EnvModelEvalError { return EnvModelEvalError{diagnostic: self.diagnostic} }
 
 // Rust `Diagnostic::error(code, what, why, fix, span)`.
-pub fn envmodel_error(code: String, what: String, why: String, fix: String, span: Span?) -> EnvModelEvalError Never! {
+fn envmodel_error(code: String, what: String, why: String, fix: String, span: Span?) -> EnvModelEvalError Never! {
     EnvModelEvalError{diagnostic: diagnostic_from_registry(code, span, what, why, fix)}
 }
 
@@ -117,7 +117,7 @@ fn envmodel_image_field_shape(field: String, expected: String, span: Span) -> En
 }
 
 // Wrap a merge conflict (§6) as a user-facing diagnostic (I4).
-pub fn envmodel_merge_error_to_diagnostic(error: MergeError) -> EnvModelEvalError Never! {
+fn envmodel_merge_error_to_diagnostic(error: MergeError) -> EnvModelEvalError Never! {
     if error == {
         .SourceConflict(name, a, b) -> envmodel_error("E0967", "Source `{name}` is declared with two different refs", "One module declares `{name}` as `{a}`, another as `{b}` — sources merge by name, so the refs must agree", "Make every declaration of this source agree, or rename one of them", None)
         .FactConflict(fact_error) -> {

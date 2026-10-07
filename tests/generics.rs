@@ -26,8 +26,8 @@ build: {
     .expect("write profile fact manifest");
     let source = r#"
 module cache<K>(capacity: Int) {
-    pub struct Buffer { items: [K#capacity] }
-    pub fn slots() -> Int { capacity }
+    struct Buffer { items: [K#capacity] }
+    fn slots() -> Int { capacity }
 }
 PROFILE_SLOTS :: prep { $build.settings.cache_slots }
 module tuned :: cache<Int>($build.settings.cache_slots)
@@ -249,14 +249,14 @@ BASE :: prep { 40 }
 
 module cache<K>(capacity: Int) {
     COMPUTED_SIZE :: prep { BASE + capacity }
-    pub struct Entry { items: [K#capacity] }
-    pub fn size() -> Int { COMPUTED_SIZE }
+    struct Entry { items: [K#capacity] }
+    fn size() -> Int { COMPUTED_SIZE }
 }
 
 module x :: cache<Int>(64)
 
 module plain_template<K> {
-    pub fn identity(value: K) -> K { value }
+    fn identity(value: K) -> K { value }
 }
 module plain :: plain_template<Int>
 
@@ -274,7 +274,7 @@ fn generic_module_diagnostics_hide_instance_mangling() {
     let diagnostics = jet::compile(
         r#"
 module box<T> {
-    pub struct Entry { value: T }
+    struct Entry { value: T }
 }
 module boxed :: box<Int>
 fn wrong(value: boxed.Entry) -> String { return value }
@@ -309,7 +309,7 @@ fn generic_modules_complete_instantiation() {
     let nested = r#"
 module outer<T>(count: Int) {
     module inner<U>(extra: Int) {
-        pub fn total(first: T, second: U) -> Int { return count + extra }
+        fn total(first: T, second: U) -> Int { return count + extra }
     }
     module closed :: inner<T>(count)
 }
@@ -334,11 +334,11 @@ module complete<T>(count: Int, label: String) {
     impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
     #Target(OS.Linux)
     impl Wrapped { fn linux_value(self) -> T { return self.value } }
-    module plain { pub fn value() -> Int { return count } }
-    module nested<U> { pub fn keep(value: U) -> U { return ~value } }
+    module plain { fn value() -> Int { return count } }
+    module nested<U> { fn keep(value: U) -> U { return ~value } }
     module nested_use :: nested<T>
     #Meta(category: label)
-    pub fn marked(value: ^#Marked T) -> #Marked T {
+    fn marked(value: ^#Marked T) -> #Marked T {
         #Meta(category: label)
         local := T{ value }
         return local
@@ -353,8 +353,8 @@ fn run() {}
         .unwrap_or_else(|diags| panic!("generic-module body substitution failed: {diags:#?}"));
 
     let distinct_generated_names = r#"
-module with_bar_baz<T> { pub struct BarBaz { value: T } }
-module with_baz<T> { pub struct Baz { value: T } }
+module with_bar_baz<T> { struct BarBaz { value: T } }
+module with_baz<T> { struct Baz { value: T } }
 module foo :: with_bar_baz<Int>
 module foo_bar :: with_baz<Int>
 fn run() {
@@ -379,12 +379,12 @@ fn run() {
     .expect("write generic-module package");
     std::fs::write(
         root.join("left.jet"),
-        "pub module boxed<T>(n: Int) { pub fn value() -> Int { return n } }\n",
+        "module boxed<T>(n: Int) { fn value() -> Int { return n } }\n",
     )
     .expect("write left template");
     std::fs::write(
         root.join("right.jet"),
-        "pub module boxed<T>(n: Int) { pub fn value() -> Int { return n } }\n",
+        "module boxed<T>(n: Int) { fn value() -> Int { return n } }\n",
     )
     .expect("write right template");
     let main = root.join("main.jet");
@@ -449,11 +449,11 @@ fn generic_module_local_bindings_shadow_substitution_values() {
     let source = r#"
 module box(capacity: Int) {
     BASE :: prep { capacity }
-    pub fn shadowed() -> Int {
+    fn shadowed() -> Int {
         base :: prep { 5 }
         return base
     }
-    pub fn plain_shadowed() -> Int {
+    fn plain_shadowed() -> Int {
         capacity := 5
         return capacity
     }
@@ -507,15 +507,15 @@ fn assert_nested_generic_module_execution() {
 module outer<T>(count: Int) {
     module plain {
         module inner<U> {
-            pub fn total(value: U) -> Int { return count }
+            fn total(value: U) -> Int { return count }
         }
         module closed :: inner<T>
         module forwarded :: closed
-        pub fn result(value: T) -> Int {
+        fn result(value: T) -> Int {
             return closed.total(value) + forwarded.total(value)
         }
     }
-    pub fn result(value: T) -> Int {
+    fn result(value: T) -> Int {
         return plain.result(value)
     }
 }
@@ -580,7 +580,7 @@ fn assert_closed_value_identity() {
     let source = r#"
 enum Mode { Fast Safe }
 module keyed(flag: Bool, count: Int, letter: Char, label: String, mode: Mode) {
-    pub fn value() -> Int { return count }
+    fn value() -> Int { return count }
 }
 module same :: keyed(true, 3, 'a', "x", Mode.Fast)
 module equivalent :: keyed(1 < 2, 1 + 2, 'a', "x", Mode.Fast)
@@ -925,7 +925,7 @@ fn generic_call_formatter_keeps_adjacent_angles() {
 fn namespaced_generic_calls_support_explicit_and_inferred_arguments() {
     let source = r#"
 module helpers {
-    pub fn identity<T>(value: ^T) -> T {
+    fn identity<T>(value: ^T) -> T {
         return value
     }
 }

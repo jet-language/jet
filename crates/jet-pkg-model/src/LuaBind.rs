@@ -161,21 +161,21 @@ impl TableView.Close {
     fn close(^self) { abi.view_release(self.session, self.table) }
 }
 
-pub fn open() -> Session LuaError! {
+fn open() -> Session LuaError! {
     handle :: abi.open()
     decode_status(abi.take_error())
     return Ok(Session{ value: handle })
 }
 
-pub fn cancel(session: Session) { abi.cancel(session.value) }
+fn cancel(session: Session) { abi.cancel(session.value) }
 
-pub fn view_get_int(view: TableView, key: String) -> Int LuaError! {
+fn view_get_int(view: TableView, key: String) -> Int LuaError! {
     value :: abi.view_get_int(view.session, view.table, key)
     decode_status(abi.take_error())
     return Ok(value)
 }
 
-pub fn view_set_int(view: TableView, key: String, value: Int) -> Bool LuaError! {
+fn view_set_int(view: TableView, key: String, value: Int) -> Bool LuaError! {
     abi.view_set_int(view.session, view.table, key, value)
     decode_status(abi.take_error())
     return Ok(true)

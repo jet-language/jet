@@ -550,7 +550,7 @@ fn local_cell_runtime_releases_original_loans_on_drop_and_unwind() {
     let carrier = "pub type JetOutcome<T, E> = Result<T, E>;";
     let absent_derive =
         "#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Debug)]";
-    let absent = "pub struct JetAbsent;";
+    let absent = "struct JetAbsent;";
     for line in [carrier, absent_derive, absent] {
         assert!(
             outcome.contains(line),
@@ -2347,7 +2347,7 @@ fn imported_call_uses_the_same_place_access_rule() {
     fs::create_dir_all(&root).unwrap();
     fs::write(
         root.join("helper.jet"),
-        "pub fn both(a: &Int, b: Int) { a += b }\n",
+        "fn both(a: &Int, b: Int) { a += b }\n",
     )
     .unwrap();
     let entry = root.join("main.jet");
@@ -2411,7 +2411,7 @@ fn run() {
 "#,
         r#"
 module helper {
-    pub fn both(a: &Int, b: Int) { a += b }
+    fn both(a: &Int, b: Int) { a += b }
 }
 fn run() {
     value := 1
@@ -3807,7 +3807,7 @@ fn run() {
 fn inline_module_write_argument_conflicts_with_live_view_once() {
     let src = r#"
 module edit {
-    pub fn touch(values: &[Int]) {
+    fn touch(values: &[Int]) {
         &values.push(9)
     }
 }
@@ -5680,7 +5680,7 @@ fn run() {
         jet::compile(src).expect("a cloneable read parameter materializes at an owned return");
     assert!(
         out.rust
-            .contains("pub fn __jet_identity<T: Clone>(__jet_value: &T) -> JetOutcome<T, JetErr> {"),
+            .contains("fn __jet_identity<T: Clone>(__jet_value: &T) -> JetOutcome<T, JetErr> {"),
         "the escape must be paid for in the signature, not laundered: {}",
         out.rust
     );

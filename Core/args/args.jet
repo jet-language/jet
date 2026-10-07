@@ -19,8 +19,8 @@ use core.process as process
 // `--flag` (true), and `--no-flag` (false). A bare `--` ends options.
 // Positionals land in the `_` array.
 
-pub struct ArgsSpec {
-    pub flags: [String]
+struct ArgsSpec {
+    flags: [String]
 }
 fn slice_str(text: String, start: Int, end: Int) -> String {
     raw :: text.bytes()
@@ -43,15 +43,15 @@ fn drop_prefix(text: String, count: Int) -> String {
 }
 
 
-pub fn spec() -> ArgsSpec Never! { ArgsSpec{flags: [String]{}} }
+fn spec() -> ArgsSpec Never! { ArgsSpec{flags: [String]{}} }
 
 /// Decode process argv into a `DataTree` object. `--help` / `-h` set `help`.
-pub fn decode() -[Env, Exec.Args]> DataTree Never! {
+fn decode() -[Env, Exec.Args]> DataTree Never! {
     argv :: process.argv()
     decode_argv(argv)
 }
 
-pub fn decode_argv(argv: [String]) -> DataTree Never! {
+fn decode_argv(argv: [String]) -> DataTree Never! {
     entries := [String: DataTree]{}
     positionals := [DataTree]{}
     i := 0
@@ -121,7 +121,7 @@ pub fn decode_argv(argv: [String]) -> DataTree Never! {
 
 /// Overlay `overlay` onto `base`. Object keys in overlay replace; arrays
 /// replace (they are not concatenated). Scalars replace.
-pub fn merge(base: DataTree, overlay: DataTree) -> DataTree Never! {
+fn merge(base: DataTree, overlay: DataTree) -> DataTree Never! {
     if overlay == {
         .Object(over) -> {
             if base == {
@@ -249,7 +249,7 @@ fn index_of(text: String, needle: String) -> Int {
 }
 
 
-pub fn get_text(tree: DataTree, key: String) -> String Never! {
+fn get_text(tree: DataTree, key: String) -> String Never! {
     if tree == {
         .Object(entries) -> {
             v :: entries.get(key)
@@ -270,7 +270,7 @@ pub fn get_text(tree: DataTree, key: String) -> String Never! {
     ""
 }
 
-pub fn get_bool(tree: DataTree, key: String) -> Bool Never! {
+fn get_bool(tree: DataTree, key: String) -> Bool Never! {
     if tree == {
         .Object(entries) -> {
             v :: entries.get(key)
@@ -290,7 +290,7 @@ pub fn get_bool(tree: DataTree, key: String) -> Bool Never! {
     false
 }
 
-pub fn get_int(tree: DataTree, key: String) -> Int Never! {
+fn get_int(tree: DataTree, key: String) -> Int Never! {
     if tree == {
         .Object(entries) -> {
             v :: entries.get(key)
@@ -305,7 +305,7 @@ pub fn get_int(tree: DataTree, key: String) -> Int Never! {
     0
 }
 
-pub fn positionals(tree: DataTree) -> [String] Never! {
+fn positionals(tree: DataTree) -> [String] Never! {
     out := [String]{}
     if tree == {
         .Object(entries) -> {
@@ -328,17 +328,17 @@ pub fn positionals(tree: DataTree) -> [String] Never! {
     out
 }
 
-pub fn program(tree: DataTree) -> String Never! { get_text(tree, "0") }
+fn program(tree: DataTree) -> String Never! { get_text(tree, "0") }
 
-pub fn help_text(name: String, summary: String) -> String Never! { "{name} — {summary}\n\nOptions:\n  -h, --help    Show this help\n  --flag        Boolean flag\n  --key value   Key/value option\n" }
-pub fn flag(spec: ArgsSpec, name: String) -> ArgsSpec Never! {
+fn help_text(name: String, summary: String) -> String Never! { "{name} — {summary}\n\nOptions:\n  -h, --help    Show this help\n  --flag        Boolean flag\n  --key value   Key/value option\n" }
+fn flag(spec: ArgsSpec, name: String) -> ArgsSpec Never! {
     flags := [String]{}
     loop item in spec.flags -> &flags.push(~item)
     &flags.push(~name)
     ArgsSpec{flags: flags}
 }
 
-pub fn has(tree: DataTree, key: String) -> Bool Never! {
+fn has(tree: DataTree, key: String) -> Bool Never! {
     if tree == {
         .Object(entries) -> {
             v :: entries.get(key)
@@ -350,18 +350,18 @@ pub fn has(tree: DataTree, key: String) -> Bool Never! {
     false
 }
 
-pub struct ArgDef {
-    pub name: String
-    pub dest: String
-    pub help: String
-    pub flag: Bool
-    pub required: Bool
-    pub default_text: String
+struct ArgDef {
+    name: String
+    dest: String
+    help: String
+    flag: Bool
+    required: Bool
+    default_text: String
 }
 
-pub fn argument(spec: ArgsSpec, name: String) -> ArgsSpec Never! { flag(spec, name) }
+fn argument(spec: ArgsSpec, name: String) -> ArgsSpec Never! { flag(spec, name) }
 
-pub fn define(name: String, help: String, flag: Bool) -> ArgDef Never! {
+fn define(name: String, help: String, flag: Bool) -> ArgDef Never! {
     ArgDef{
     name: name,
     dest: name,
@@ -372,7 +372,7 @@ pub fn define(name: String, help: String, flag: Bool) -> ArgDef Never! {
     }
 }
 
-pub fn dest(def: ArgDef, dest: String) -> ArgDef Never! {
+fn dest(def: ArgDef, dest: String) -> ArgDef Never! {
     ArgDef{
     name: def.name,
     dest: dest,
@@ -383,7 +383,7 @@ pub fn dest(def: ArgDef, dest: String) -> ArgDef Never! {
     }
 }
 
-pub fn required(def: ArgDef) -> ArgDef Never! {
+fn required(def: ArgDef) -> ArgDef Never! {
     ArgDef{
     name: def.name,
     dest: def.dest,
@@ -394,7 +394,7 @@ pub fn required(def: ArgDef) -> ArgDef Never! {
     }
 }
 
-pub fn default_value(def: ArgDef, value: String) -> ArgDef Never! {
+fn default_value(def: ArgDef, value: String) -> ArgDef Never! {
     ArgDef{
     name: def.name,
     dest: def.dest,
@@ -405,11 +405,11 @@ pub fn default_value(def: ArgDef, value: String) -> ArgDef Never! {
     }
 }
 
-pub fn get_or(tree: DataTree, key: String, fallback: String) -> String Never! {
+fn get_or(tree: DataTree, key: String, fallback: String) -> String Never! {
     if has(tree, key) -> return get_text(tree, key)
     ~fallback
 }
-pub fn get_choice(tree: DataTree, key: String, choices: [String]) -> String? Never! {
+fn get_choice(tree: DataTree, key: String, choices: [String]) -> String? Never! {
     v :: get_text(tree, key)
     if v.bytes().len() == 0 -> return None
     result :: ~v
@@ -419,14 +419,14 @@ pub fn get_choice(tree: DataTree, key: String, choices: [String]) -> String? Nev
     None
 }
 
-pub fn missing_required(tree: DataTree, defs: [ArgDef]) -> [String] Never! {
+fn missing_required(tree: DataTree, defs: [ArgDef]) -> [String] Never! {
     out := [String]{}
     loop d in defs {
         if d.required && !has(tree, d.dest) && !has(tree, d.name) -> &out.push(~d.name)
     }
     out
 }
-pub fn apply_defaults(tree: DataTree, defs: [ArgDef]) -> DataTree Never! {
+fn apply_defaults(tree: DataTree, defs: [ArgDef]) -> DataTree Never! {
     out := tree
     loop d in defs {
         if d.default_text.bytes().len() == 0 -> next
@@ -444,7 +444,7 @@ pub fn apply_defaults(tree: DataTree, defs: [ArgDef]) -> DataTree Never! {
     out
 }
 
-pub fn usage(name: String, defs: [ArgDef]) -> String Never! {
+fn usage(name: String, defs: [ArgDef]) -> String Never! {
     s := "usage: {name}"
     loop d in defs {
         token := "--{d.name}"
@@ -458,7 +458,7 @@ pub fn usage(name: String, defs: [ArgDef]) -> String Never! {
     "{s} [args...]"
 }
 
-pub fn help_from(name: String, summary: String, defs: [ArgDef]) -> String Never! {
+fn help_from(name: String, summary: String, defs: [ArgDef]) -> String Never! {
     s := "{usage(name, defs)}\n\n{summary}\n\nOptions:\n"
     loop d in defs {
         flag := "--{d.name}"
@@ -473,13 +473,13 @@ pub fn help_from(name: String, summary: String, defs: [ArgDef]) -> String Never!
     s
 }
 
-pub fn remainder(tree: DataTree) -> [String] Never! { positionals(tree) }
+fn remainder(tree: DataTree) -> [String] Never! { positionals(tree) }
 
-pub fn count_flag(tree: DataTree, key: String) -> Int Never! {
+fn count_flag(tree: DataTree, key: String) -> Int Never! {
     n :: get_int(tree, key)
     if n > 0 -> return n
     if get_bool(tree, key) -> return 1
     0
 }
 
-pub fn wants_help(tree: DataTree) -> Bool Never! { get_bool(tree, "help") || has(tree, "h") }
+fn wants_help(tree: DataTree) -> Bool Never! { get_bool(tree, "help") || has(tree, "h") }

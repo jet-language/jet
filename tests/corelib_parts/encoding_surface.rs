@@ -129,7 +129,7 @@ fn run() {
     let compiled = compile_temp("date_today_immutable", src);
     let user_run = compiled
         .rust
-        .split_once("pub fn __jet_run() {")
+        .split_once("fn __jet_run() {")
         .and_then(|(_, body)| body.split_once("\n}\n").map(|(body, _)| body))
         .expect("generated Rust must contain the __jet_run body");
     assert_eq!(
@@ -170,7 +170,7 @@ fn run() {
     let compiled = compile_temp("time_now_immutable", src);
     let user_run = compiled
         .rust
-        .split_once("pub fn __jet_run() {")
+        .split_once("fn __jet_run() {")
         .and_then(|(_, body)| body.split_once("\n}\n").map(|(body, _)| body))
         .expect("generated Rust must contain the __jet_run body");
     assert_eq!(

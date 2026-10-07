@@ -168,7 +168,7 @@ fn run() {
 
     std::fs::write(
         dir.join("fake.jet"),
-        "pub struct SigningKey {}\npub fn inspect_key(key: SigningKey) -> Bool { return true }\n",
+        "struct SigningKey {}\npub fn inspect_key(key: SigningKey) -> Bool { return true }\n",
     )
     .unwrap();
     let hostile = r#"

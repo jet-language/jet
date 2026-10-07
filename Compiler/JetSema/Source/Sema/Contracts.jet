@@ -43,15 +43,15 @@ use jet_foundation.[
     type_name,
 ]
 
-pub struct SemaContractDeclaration {
-    pub complete: Bool
-    pub post: [TContract]
-    pub result: TContractResult
+struct SemaContractDeclaration {
+    complete: Bool
+    post: [TContract]
+    result: TContractResult
 }
 
-pub struct SemaContractCall {
-    pub bindings: [TStmt]
-    pub contracts: [TContract]
+struct SemaContractCall {
+    bindings: [TStmt]
+    contracts: [TContract]
 }
 
 fn sema_contract_success_type(return_type: Type?) -> Type Never! {
@@ -617,7 +617,7 @@ fn sema_contract_result_binding_symbol(environment: SemaScopeEnvironment, owner:
     Symbol{id: id, kind: SymbolKind.Local, name: "result", module_name: environment.module_identity, owner: Val(result_owner), span: span, ty: Val(ty), visibility: 0}
 }
 
-pub fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaContractDeclaration {
+fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaContractDeclaration {
     declared_return := func.return_type
     if environment.registration_graph == .Val(graph) && declared_return == .Val(declared) {
         declared_return = Val(sema_type_resolve_declared_with_generics(graph, declared, environment.module_identity, environment.generic_params))
@@ -682,7 +682,7 @@ fn sema_contract_method_function_for_item(item: Item, target: SymbolID, module_i
     None
 }
 
-pub fn sema_contract_function_for_symbol(environment: SemaScopeEnvironment, target: SymbolID) -> Func? {
+fn sema_contract_function_for_symbol(environment: SemaScopeEnvironment, target: SymbolID) -> Func? {
     if environment.registration_graph == .Val(graph) {
         declaration :: sema_registration_callable_declaration(graph, target)
         if declaration != None -> return declaration
@@ -700,9 +700,9 @@ pub fn sema_contract_function_for_symbol(environment: SemaScopeEnvironment, targ
 // What a call needs to know about its callee's contract, read from the
 // declaration in place: a call checks `pre` clauses only when there are any,
 // so it copies the callee's declaration (and its body) only then.
-pub struct SemaContractCalleeFacts {
-    pub pre_count: Int
-    pub is_pure: Bool
+struct SemaContractCalleeFacts {
+    pre_count: Int
+    is_pure: Bool
 }
 
 fn sema_contract_callee_facts(func: Func) -> SemaContractCalleeFacts Never! {
@@ -743,7 +743,7 @@ fn sema_contract_method_facts_for_item(item: Item, target: SymbolID, module_iden
 
 // The facts of the declaration `sema_contract_function_for_symbol` resolves
 // `target` to (same lookup order), without copying it.
-pub fn sema_contract_function_facts(environment: SemaScopeEnvironment, target: SymbolID) -> SemaContractCalleeFacts? {
+fn sema_contract_function_facts(environment: SemaScopeEnvironment, target: SymbolID) -> SemaContractCalleeFacts? {
     if environment.registration_graph == .Val(graph) {
         registered :: sema_contract_registered_facts(graph, target)
         if registered != None -> return registered
@@ -759,7 +759,7 @@ pub fn sema_contract_function_facts(environment: SemaScopeEnvironment, target: S
 }
 
 // True when a call to `target` has `pre` clauses to check.
-pub fn sema_contract_function_has_pre(environment: SemaScopeEnvironment, target: SymbolID) -> Bool Never! {
+fn sema_contract_function_has_pre(environment: SemaScopeEnvironment, target: SymbolID) -> Bool Never! {
     facts :: sema_contract_function_facts(environment, target) ?? return false
     facts.pre_count > 0
 }
@@ -800,7 +800,7 @@ fn sema_contract_pin_argument(environment: SemaScopeEnvironment, owner: String, 
     local
 }
 
-pub fn sema_contract_check_call(func: Func, args: &[TCallArg], slots: [Int], call_span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaContractCall? {
+fn sema_contract_check_call(func: Func, args: &[TCallArg], slots: [Int], call_span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaContractCall? {
     if func.pre.len() == 0 -> return Val(SemaContractCall{bindings: [TStmt]{}, contracts: [TContract]{}})
     if args.len() != slots.len() -> return None
     if func.params.len() == 0 && args.len() > 0 -> return None

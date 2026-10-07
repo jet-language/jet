@@ -24,16 +24,16 @@ use jet_foundation.[
     type_name,
 ]
 
-pub struct SemaJobArtifactCheckResult {
-    pub fact: TJobFact?
-    pub schedule: EverySchedule?
-    pub diagnostics: [Diagnostic]
-    pub complete: Bool
+struct SemaJobArtifactCheckResult {
+    fact: TJobFact?
+    schedule: EverySchedule?
+    diagnostics: [Diagnostic]
+    complete: Bool
 }
 
-pub struct SemaJobScheduleResolution {
-    pub schedule: EverySchedule?
-    pub error: EveryScheduleError?
+struct SemaJobScheduleResolution {
+    schedule: EverySchedule?
+    error: EveryScheduleError?
 }
 
 fn sema_job_schedule_unit(suffix: String, environment: SemaScopeEnvironment) -> SemaRegistrationUnitFact? {
@@ -210,7 +210,7 @@ fn sema_job_argument_facts(function: Func) -> [TJobArgumentFact] Never! {
     arguments
 }
 
-pub fn sema_check_job_artifact(function: Func, checked_function: TFunc, environment: SemaScopeEnvironment) -> SemaJobArtifactCheckResult {
+fn sema_check_job_artifact(function: Func, checked_function: TFunc, environment: SemaScopeEnvironment) -> SemaJobArtifactCheckResult {
     diagnostics := [Diagnostic]{}
     schedule := EverySchedule?{None}
     complete := true
@@ -275,7 +275,7 @@ fn sema_job_duplicate_error(name: String, scope: JobScope, span: Span) -> Diagno
 
 /// E0928: a `#Job fn` takes a reserved name, or two jobs share one name in
 /// the same scope of a module.
-pub fn sema_check_job_names(items: [Item]) -> [Diagnostic] {
+fn sema_check_job_names(items: [Item]) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
     seen_names := [String]{}
     seen_scopes := [JobScope]{}

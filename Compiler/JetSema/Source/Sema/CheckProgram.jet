@@ -69,80 +69,80 @@ use jet_foundation.[
     type_with_effective_fn_returns,
 ]
 
-pub struct SemaResult {
-    pub module_name: String
-    pub functions: [TFunc]
-    pub call_facts: [SemaCallSiteFact]
-    pub hardware_use: MIRTargetHardwareUse
-    pub name_references: [SemaNameReferenceFact]
-    pub comptime_requests: [SemaComptimeRequest]
-    pub comptime_body_sources: [SemaComptimeBodySource]
-    pub compute_facts: [SemaComputeFunctionFacts]
-    pub exact_int_reachable: Bool
-    pub copy_events: [SemaCopyEvent]
-    pub diagnostics: [Diagnostic]
-    pub complete: Bool
+struct SemaResult {
+    module_name: String
+    functions: [TFunc]
+    call_facts: [SemaCallSiteFact]
+    hardware_use: MIRTargetHardwareUse
+    name_references: [SemaNameReferenceFact]
+    comptime_requests: [SemaComptimeRequest]
+    comptime_body_sources: [SemaComptimeBodySource]
+    compute_facts: [SemaComputeFunctionFacts]
+    exact_int_reachable: Bool
+    copy_events: [SemaCopyEvent]
+    diagnostics: [Diagnostic]
+    complete: Bool
 }
 
-pub struct SemaGraphModuleResult {
-    pub module_identity: String
-    pub module_name: String
-    pub package_identity: String
-    pub module_path: String
-    pub source_file: String
-    pub declarations: TDeclarationFacts
-    pub functions: [TFunc]
-    pub nominals: [SemaRegistrationNominal]
+struct SemaGraphModuleResult {
+    module_identity: String
+    module_name: String
+    package_identity: String
+    module_path: String
+    source_file: String
+    declarations: TDeclarationFacts
+    functions: [TFunc]
+    nominals: [SemaRegistrationNominal]
     // Position in `nominals` of the first nominal per declared name, so a
     // nominal spelling resolves without scanning every module's nominals.
-    pub nominal_positions: [String:Int]
-    pub constants: [SemaRegistrationConstant]
-    pub impls: [SemaRegistrationImpl]
-    pub exports: [SemaRegistrationExport]
-    pub imports: [SemaRegistrationImport]
-    pub foreign_functions: [SemaCheckedForeignFunction]
-    pub foreign_providers: [SemaCheckedForeignProvider]
-    pub call_facts: [SemaCallSiteFact]
-    pub hardware_use: MIRTargetHardwareUse
-    pub name_references: [SemaNameReferenceFact]
-    pub comptime_requests: [SemaComptimeRequest]
-    pub comptime_body_sources: [SemaComptimeBodySource]
-    pub compute_facts: [SemaComputeFunctionFacts]
-    pub exact_int_reachable: Bool
-    pub copy_events: [SemaCopyEvent]
-    pub diagnostics: [Diagnostic]
-    pub complete: Bool
+    nominal_positions: [String:Int]
+    constants: [SemaRegistrationConstant]
+    impls: [SemaRegistrationImpl]
+    exports: [SemaRegistrationExport]
+    imports: [SemaRegistrationImport]
+    foreign_functions: [SemaCheckedForeignFunction]
+    foreign_providers: [SemaCheckedForeignProvider]
+    call_facts: [SemaCallSiteFact]
+    hardware_use: MIRTargetHardwareUse
+    name_references: [SemaNameReferenceFact]
+    comptime_requests: [SemaComptimeRequest]
+    comptime_body_sources: [SemaComptimeBodySource]
+    compute_facts: [SemaComputeFunctionFacts]
+    exact_int_reachable: Bool
+    copy_events: [SemaCopyEvent]
+    diagnostics: [Diagnostic]
+    complete: Bool
     // #3708: the failure rows of this module's checked top-level functions.
-    pub failure_facts: [SemaFunctionFailureFacts]{[SemaFunctionFailureFacts]{}}
+    failure_facts: [SemaFunctionFailureFacts]{[SemaFunctionFailureFacts]{}}
     // Why `complete` is false, one line per cause, so a no-diagnostic
     // incomplete module still names what stopped it.
-    pub incomplete_reasons: [String]{[String]{}}
+    incomplete_reasons: [String]{[String]{}}
     // D-FAIL-CONV2=A: keys of the Prelude error conversions sema injected
     // into this module after its bodies. They have no registration row (the
     // Rust reference pushes them as module items), so the driver's identity
     // check admits exactly these keys beside the registered declarations.
-    pub injected_function_keys: [String]{[String]{}}
+    injected_function_keys: [String]{[String]{}}
     // Test mode (Rust `CompileMode::Test`): one fact per named `#Test` of this
     // module whose body checked, in declaration order; the checked synthetic
     // function is in `functions` and its key in `injected_function_keys`.
-    pub tests: [TTestFact]{[TTestFact]{}}
+    tests: [TTestFact]{[TTestFact]{}}
 }
 
 // #3708: what one checked function body propagates: the keys of the declared
 // functions whose failures pass up ("" for a source of its own) and whether a
 // statement or returned value is a direct failure source.
-pub struct SemaFunctionFailureFacts {
-    pub function_key: String
-    pub direct: Bool
-    pub edges: [String]
+struct SemaFunctionFailureFacts {
+    function_key: String
+    direct: Bool
+    edges: [String]
     // D-FAIL-INFER-UNION1=A / D-ERR-CASES1=A: this body's default-route row.
-    pub union_members: [Type]{[Type]{}}
-    pub union_cases: [SemaFailureCase]{[SemaFailureCase]{}}
-    pub union_edges: [String]{[String]{}}
-    pub union_general: Bool{false}
+    union_members: [Type]{[Type]{}}
+    union_cases: [SemaFailureCase]{[SemaFailureCase]{}}
+    union_edges: [String]{[String]{}}
+    union_general: Bool{false}
 }
 
-pub enum SemaComptimeItemKind {
+enum SemaComptimeItemKind {
     Constant
     MarkerArgument
     FieldDefault
@@ -151,45 +151,45 @@ pub enum SemaComptimeItemKind {
     BodyExpression
 }
 
-pub struct SemaComptimeItemSource {
-    pub module_identity: String
-    pub key: String
-    pub destination_key: String
-    pub name: String
-    pub source_file: String
-    pub kind: SemaComptimeItemKind
-    pub expression: Expr
-    pub expected_type: Type?
-    pub span: Span
-    pub dependencies: [String]
-    pub checked_text: SemaCheckedTextEvaluation?
+struct SemaComptimeItemSource {
+    module_identity: String
+    key: String
+    destination_key: String
+    name: String
+    source_file: String
+    kind: SemaComptimeItemKind
+    expression: Expr
+    expected_type: Type?
+    span: Span
+    dependencies: [String]
+    checked_text: SemaCheckedTextEvaluation?
 }
 
-pub struct SemaComptimeItemRequest {
-    pub module_identity: String
-    pub key: String
-    pub destination_key: String
-    pub source_file: String
-    pub kind: SemaComptimeItemKind
-    pub expression: TExpr
-    pub expected_type: Type?
-    pub span: Span
-    pub dependencies: [String]
-    pub calls: [SemaComptimeRequest]
-    pub hardware_use: MIRTargetHardwareUse
-    pub reachable_function_keys: [String]
+struct SemaComptimeItemRequest {
+    module_identity: String
+    key: String
+    destination_key: String
+    source_file: String
+    kind: SemaComptimeItemKind
+    expression: TExpr
+    expected_type: Type?
+    span: Span
+    dependencies: [String]
+    calls: [SemaComptimeRequest]
+    hardware_use: MIRTargetHardwareUse
+    reachable_function_keys: [String]
 }
 
-pub struct SemaComptimeItemValue {
-    pub module_identity: String
-    pub key: String
-    pub destination_key: String
-    pub kind: SemaComptimeItemKind
-    pub value: TComptimeValue
-    pub ty: Type
+struct SemaComptimeItemValue {
+    module_identity: String
+    key: String
+    destination_key: String
+    kind: SemaComptimeItemKind
+    value: TComptimeValue
+    ty: Type
 }
 
-pub fn sema_comptime_body_values_from_items(values: [SemaComptimeItemValue]) -> [SemaComptimeBodyValue] Never! {
+fn sema_comptime_body_values_from_items(values: [SemaComptimeItemValue]) -> [SemaComptimeBodyValue] Never! {
     result := [SemaComptimeBodyValue]{}
     loop value in values {
         if value.kind != SemaComptimeItemKind.BodyExpression -> next
@@ -204,76 +204,76 @@ pub fn sema_comptime_body_values_from_items(values: [SemaComptimeItemValue]) -> 
     result
 }
 
-pub struct SemaRegistrationPackagePolicy {
-    pub package_identity: String
-    pub authority_allow: [String]?
-    pub authority_deny: [String]?
-    pub authority_needs: [String]
-    pub runtime_ceiling: MIRRuntimeLayer?
-    pub edition: String
+struct SemaRegistrationPackagePolicy {
+    package_identity: String
+    authority_allow: [String]?
+    authority_deny: [String]?
+    authority_needs: [String]
+    runtime_ceiling: MIRRuntimeLayer?
+    edition: String
 }
 
-pub struct SemaComptimeDeclarationStage {
-    pub modules: [SemaGraphModuleResult]
-    pub imports: [SemaRegistrationImport]
-    pub package_policies: [SemaRegistrationPackagePolicy]
-    pub names: MIRNameFacts
-    pub sources: [SemaComptimeItemSource]
-    pub diagnostics: [Diagnostic]
-    pub complete: Bool
+struct SemaComptimeDeclarationStage {
+    modules: [SemaGraphModuleResult]
+    imports: [SemaRegistrationImport]
+    package_policies: [SemaRegistrationPackagePolicy]
+    names: MIRNameFacts
+    sources: [SemaComptimeItemSource]
+    diagnostics: [Diagnostic]
+    complete: Bool
     // The declaration pass environment's own copy of the registration graph,
     // handed to the comptime run (jet_driver_run_comptime `staged`) so the run
     // does not copy the graph again; None once taken.
-    pub graph: SemaRegistrationGraph?{None}
+    graph: SemaRegistrationGraph?{None}
 }
 
-pub struct SemaComptimeItemCheck {
-    pub request: SemaComptimeItemRequest?
-    pub dependencies: [String]
-    pub waiting_dependencies: [String]
-    pub diagnostics: [Diagnostic]
-    pub complete: Bool
+struct SemaComptimeItemCheck {
+    request: SemaComptimeItemRequest?
+    dependencies: [String]
+    waiting_dependencies: [String]
+    diagnostics: [Diagnostic]
+    complete: Bool
 }
 
-pub struct SemaComptimeFunctionResult {
-    pub module_identity: String
-    pub function_key: String
-    pub function: TFunc?
-    pub dependencies: [String]
-    pub waiting_dependencies: [String]
-    pub calls: [SemaComptimeRequest]
-    pub reachable_function_keys: [String]
-    pub call_facts: [SemaCallSiteFact]
-    pub hardware_use: MIRTargetHardwareUse
-    pub name_references: [SemaNameReferenceFact]
-    pub comptime_body_sources: [SemaComptimeBodySource]
-    pub compute_facts: SemaComputeFunctionFacts
-    pub diagnostics: [Diagnostic]
-    pub exact_int_reachable: Bool
-    pub copy_events: [SemaCopyEvent]
-    pub complete: Bool
+struct SemaComptimeFunctionResult {
+    module_identity: String
+    function_key: String
+    function: TFunc?
+    dependencies: [String]
+    waiting_dependencies: [String]
+    calls: [SemaComptimeRequest]
+    reachable_function_keys: [String]
+    call_facts: [SemaCallSiteFact]
+    hardware_use: MIRTargetHardwareUse
+    name_references: [SemaNameReferenceFact]
+    comptime_body_sources: [SemaComptimeBodySource]
+    compute_facts: SemaComputeFunctionFacts
+    diagnostics: [Diagnostic]
+    exact_int_reachable: Bool
+    copy_events: [SemaCopyEvent]
+    complete: Bool
     // Why an incomplete result has no diagnostic, for the driver's report.
-    pub incomplete_reasons: [String]{[String]{}}
+    incomplete_reasons: [String]{[String]{}}
 }
 
-pub struct SemaGraphResult {
-    pub package_identity: String
-    pub entry_module_identity: String
-    pub modules: [SemaGraphModuleResult]
-    pub imports: [SemaRegistrationImport]
-    pub package_policies: [SemaRegistrationPackagePolicy]
-    pub core_usage: SemaCoreUsageResult
-    pub call_facts: [SemaCallSiteFact]
-    pub hardware_use: MIRTargetHardwareUse
-    pub comptime_requests: [SemaComptimeRequest]
-    pub comptime_body_sources: [SemaComptimeBodySource]
-    pub compute_facts: [SemaComputeFunctionFacts]
-    pub names: MIRNameFacts
-    pub diagnostics: [Diagnostic]
-    pub complete: Bool
+struct SemaGraphResult {
+    package_identity: String
+    entry_module_identity: String
+    modules: [SemaGraphModuleResult]
+    imports: [SemaRegistrationImport]
+    package_policies: [SemaRegistrationPackagePolicy]
+    core_usage: SemaCoreUsageResult
+    call_facts: [SemaCallSiteFact]
+    hardware_use: MIRTargetHardwareUse
+    comptime_requests: [SemaComptimeRequest]
+    comptime_body_sources: [SemaComptimeBodySource]
+    compute_facts: [SemaComputeFunctionFacts]
+    names: MIRNameFacts
+    diagnostics: [Diagnostic]
+    complete: Bool
     // #3708: the unannotated top-level functions the bundle failure solve
     // proved infallible, by symbol key.
-    pub inferred_infallible: [String]{[String]{}}
+    inferred_infallible: [String]{[String]{}}
 }
 
 struct SemaFunctionResult {
@@ -1213,7 +1213,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     }
 }
 
-pub fn check_program(program: Program, module_name: String, source_file: String, source_segments: [SemaSourceSegment]) -> SemaResult {
+fn check_program(program: Program, module_name: String, source_file: String, source_segments: [SemaSourceSegment]) -> SemaResult {
     diagnostics := [Diagnostic]{}
     functions := [TFunc]{}
     call_facts := [SemaCallSiteFact]{}
@@ -1303,7 +1303,7 @@ fn sema_comptime_checked_function_rows(functions: [SemaComptimeFunctionResult]) 
     rows
 }
 
-pub fn sema_comptime_append_checked_function(result: SemaComptimeFunctionResult, functions: &[TFunc], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> Bool Never! {
+fn sema_comptime_append_checked_function(result: SemaComptimeFunctionResult, functions: &[TFunc], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> Bool Never! {
     function :: result.function ?? return false
     &functions.push(function)
     loop fact in result.call_facts -> &call_facts.push(fact)
@@ -1314,7 +1314,7 @@ pub fn sema_comptime_append_checked_function(result: SemaComptimeFunctionResult,
 
 // sema_comptime_append_checked_function into one module result in place,
 // carrying the function's exact-int and copy facts as well.
-pub fn sema_comptime_append_checked_function_to_module(result: SemaComptimeFunctionResult, module_row: &SemaGraphModuleResult) -> Bool Never! {
+fn sema_comptime_append_checked_function_to_module(result: SemaComptimeFunctionResult, module_row: &SemaGraphModuleResult) -> Bool Never! {
     if !sema_comptime_append_checked_function(result, &module_row.functions, &module_row.call_facts, &module_row.comptime_requests, &module_row.name_references) -> return false
     module_row.exact_int_reachable = module_row.exact_int_reachable || result.exact_int_reachable
     loop event in result.copy_events -> &module_row.copy_events.push(event)
@@ -1338,7 +1338,7 @@ fn sema_comptime_method_kind(function: Func, owner_type: Type, trait_symbol: Sym
 }
 
 
-pub fn sema_comptime_find_function_source(graph: SemaRegistrationGraph, module_identity: String, function_key: String) -> SemaComptimeFunctionSource? {
+fn sema_comptime_find_function_source(graph: SemaRegistrationGraph, module_identity: String, function_key: String) -> SemaComptimeFunctionSource? {
     module_index :: sema_registration_module_index(graph, module_identity) ?? return None
     sema_comptime_indexed_function_source(graph, module_index, function_key)
 }
@@ -1388,7 +1388,7 @@ fn sema_comptime_owner_generic_params(environment: SemaScopeEnvironment, owner: 
 // instead of calling this again.
 // `probe` is the run's module scope (sema_comptime_probe_init), lent to every
 // item and function check of the run.
-pub fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &SemaScopeEnvironment, probe: &SemaScopeProbe, available: SemaComptimeAvailableConstants, memory_plan: SemaFunctionMemoryPlan, values: [SemaComptimeItemValue], module_identity: String, function_key: String) -> SemaComptimeFunctionResult {
+fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &SemaScopeEnvironment, probe: &SemaScopeProbe, available: SemaComptimeAvailableConstants, memory_plan: SemaFunctionMemoryPlan, values: [SemaComptimeItemValue], module_identity: String, function_key: String) -> SemaComptimeFunctionResult {
     unresolved := SemaComptimeFunctionResult{
         module_identity: module_identity,
         function_key: function_key,
@@ -2686,7 +2686,7 @@ fn sema_name_add_alias(facts: &MIRNameFacts, module_index: Int, name: String, ta
     &facts.aliases.push(MIRNameAlias{module_index: module_index, name: name, target: target, target_module: target_module, span: span, visibility: sema_name_visibility(visibility)})
 }
 
-pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> MIRNameFacts Never! {
+fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> MIRNameFacts Never! {
     facts := MIRNameFacts{modules: [MIRNameModule]{}, declarations: [MIRNameDeclaration]{}, aliases: [MIRNameAlias]{}, references: [MIRNameReference]{}, structure_facts: [MIRStructureFact]{}}
     loop graph_module in graph.modules -> &facts.modules.push(MIRNameModule{alias: graph_module.module_name, path: graph_module.module_path, package: graph_module.package_identity})
     owner_names :: sema_name_owner_index(graph)
@@ -2775,7 +2775,7 @@ fn sema_comptime_symbol_with_values(symbol: ^Symbol, module_identity: String, co
 
 // A constant still waiting for its known-time type: the only symbol a staged
 // value changes (first value wins, so a typed constant never changes again).
-pub fn sema_comptime_symbol_waits(symbol: Symbol) -> Bool Never! {
+fn sema_comptime_symbol_waits(symbol: Symbol) -> Bool Never! {
     symbol.kind == SymbolKind.Constant && symbol.ty == None
 }
 
@@ -2783,7 +2783,7 @@ pub fn sema_comptime_symbol_waits(symbol: Symbol) -> Bool Never! {
 // module is read in place and rewritten only when one of its rows takes a
 // value. (The old row-by-row copy cloned the whole module list for every
 // symbol it visited.)
-pub fn sema_comptime_graph_with_values(graph: SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> SemaRegistrationGraph Never! {
+fn sema_comptime_graph_with_values(graph: SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> SemaRegistrationGraph Never! {
     resolved := graph
     sema_comptime_graph_apply_values(&resolved, values)
     resolved
@@ -2793,7 +2793,7 @@ pub fn sema_comptime_graph_with_values(graph: SemaRegistrationGraph, values: [Se
 // earlier value keeps it (first value wins), so a staging loop applies only
 // the values that landed since its last call instead of rebuilding the graph
 // for every item.
-pub fn sema_comptime_graph_apply_values(graph: &SemaRegistrationGraph, values: [SemaComptimeItemValue]) Never! {
+fn sema_comptime_graph_apply_values(graph: &SemaRegistrationGraph, values: [SemaComptimeItemValue]) Never! {
     if values.len() == 0 -> return
     constants :: sema_comptime_constant_values(values)
     loop module_index in 0..<graph.modules.len() {
@@ -2890,7 +2890,7 @@ fn sema_comptime_constant_has_ast_value(graph: SemaRegistrationGraph, module_ide
 
 // An empty probe scope: the first sema_comptime_probe_prepare builds it. The
 // caller that runs a series of probes owns one and lends it to each.
-pub fn sema_comptime_probe_init(host_hooks: SemaHostHookAccess?) -> SemaScopeProbe Never! {
+fn sema_comptime_probe_init(host_hooks: SemaHostHookAccess?) -> SemaScopeProbe Never! {
     SemaScopeProbe{module_identity: "", table: sema_scope_init(""), applied: false, diagnostics: [Diagnostic]{}, constants: [SemaScopeProbeConstant]{}, host_hooks: host_hooks}
 }
 
@@ -3163,13 +3163,13 @@ fn sema_comptime_dependencies_from_references(graph: SemaRegistrationGraph, refe
 // the key of every constant value staged so far. Built once per run and
 // extended as values land, instead of rescanning every value and every
 // module's constants for each waiting check.
-pub struct SemaComptimeAvailableConstants {
-    pub keys: [String:Bool]
+struct SemaComptimeAvailableConstants {
+    keys: [String:Bool]
     // How many of the run's append-only values `keys` already covers.
-    pub counted_values: Int
+    counted_values: Int
 }
 
-pub fn sema_comptime_available_constants(graph: SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> SemaComptimeAvailableConstants Never! {
+fn sema_comptime_available_constants(graph: SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> SemaComptimeAvailableConstants Never! {
     available := SemaComptimeAvailableConstants{keys: [String:Bool]{}, counted_values: 0}
     loop graph_module in graph.modules {
         loop constant in graph_module.constants {
@@ -3181,7 +3181,7 @@ pub fn sema_comptime_available_constants(graph: SemaRegistrationGraph, values: [
 }
 
 // Counts the values that landed since the last call.
-pub fn sema_comptime_available_constants_add(available: &SemaComptimeAvailableConstants, values: [SemaComptimeItemValue]) Never! {
+fn sema_comptime_available_constants_add(available: &SemaComptimeAvailableConstants, values: [SemaComptimeItemValue]) Never! {
     loop index in available.counted_values..<values.len() {
         if values[index].kind == SemaComptimeItemKind.Constant -> available.keys[values[index].key] = true
     }
@@ -3216,7 +3216,7 @@ fn sema_comptime_reachable_function_keys(graph: SemaRegistrationGraph, call_fact
     }
     keys
 }
-pub fn sema_comptime_checked_text_source(evaluation: SemaCheckedTextEvaluation) -> SemaComptimeItemSource Never! {
+fn sema_comptime_checked_text_source(evaluation: SemaCheckedTextEvaluation) -> SemaComptimeItemSource Never! {
     SemaComptimeItemSource{
         module_identity: evaluation.module_identity,
         key: evaluation.key,
@@ -3415,7 +3415,7 @@ fn sema_comptime_collect_module_sources(graph: SemaRegistrationGraph, source_mod
 
 // `threads` admits the compiler threads of the source dependency probes
 // (sema_comptime_probe_workers).
-pub fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_policies: [SemaRegistrationPackagePolicy], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> SemaComptimeDeclarationStage {
+fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_policies: [SemaRegistrationPackagePolicy], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> SemaComptimeDeclarationStage {
     diagnostics := [Diagnostic]{}
     loop diagnostic in graph.diagnostics -> &diagnostics.push(diagnostic)
     modules := [SemaGraphModuleResult]{}
@@ -3486,7 +3486,7 @@ pub fn sema_collect_comptime_declarations(graph: SemaRegistrationGraph, package_
 
 // `resolved_graph` already carries `values` (the run's sema_comptime_environment
 // graph), so it is read in place rather than rebuilt from the bare graph.
-pub fn sema_comptime_modules_with_values(resolved_graph: SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> [SemaGraphModuleResult] {
+fn sema_comptime_modules_with_values(resolved_graph: SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> [SemaGraphModuleResult] {
     memory_plan := sema_function_memory_plan_from_graph(resolved_graph)
     environment := sema_check_pass_environment(resolved_graph, [TTypeDef]{})
     modules := [SemaGraphModuleResult]{}
@@ -3506,7 +3506,7 @@ pub fn sema_comptime_modules_with_values(resolved_graph: SemaRegistrationGraph, 
 // constant rows of the graph, which no other declaration reads), so a run
 // joins these rows to its staged modules instead of rechecking every module.
 // As there, the first value of a constant key wins.
-pub fn sema_comptime_staged_constant_rows(resolved_graph: SemaRegistrationGraph, values: [SemaComptimeItemValue], from: Int) -> [TConstantDef] {
+fn sema_comptime_staged_constant_rows(resolved_graph: SemaRegistrationGraph, values: [SemaComptimeItemValue], from: Int) -> [TConstantDef] {
     rows := [TConstantDef]{}
     // Staging diagnostics are never reported (as for the module rechecks).
     diagnostics := [Diagnostic]{}
@@ -3536,7 +3536,7 @@ pub fn sema_comptime_staged_constant_rows(resolved_graph: SemaRegistrationGraph,
 // check re-targets it (sema_scope_environment_enter_probe_module) instead of
 // copying the graph. The caller applies each later value to its graph in
 // place.
-pub fn sema_comptime_environment(graph: ^SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> SemaScopeEnvironment Never! {
+fn sema_comptime_environment(graph: ^SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> SemaScopeEnvironment Never! {
     resolved := ^graph
     sema_comptime_graph_apply_values(&resolved, values)
     sema_scope_environment_init(Val(^resolved), "", "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [TTypeDef]{}, [SemaScopeDeclaration]{})
@@ -3546,7 +3546,7 @@ pub fn sema_comptime_environment(graph: ^SemaRegistrationGraph, values: [SemaCom
 // carries `values`; `available` covers the same values.
 // `probe` is the run's module scope (sema_comptime_probe_init), lent to every
 // item and function check of the run.
-pub fn sema_check_comptime_item(environment: &SemaScopeEnvironment, probe: &SemaScopeProbe, available: SemaComptimeAvailableConstants, source: SemaComptimeItemSource, values: [SemaComptimeItemValue]) -> SemaComptimeItemCheck {
+fn sema_check_comptime_item(environment: &SemaScopeEnvironment, probe: &SemaScopeProbe, available: SemaComptimeAvailableConstants, source: SemaComptimeItemSource, values: [SemaComptimeItemValue]) -> SemaComptimeItemCheck {
     if source.checked_text == .Val(evaluation) {
         dependencies := evaluation.dependencies
         waiting := sema_comptime_waiting_dependencies(available, dependencies)
@@ -3625,7 +3625,7 @@ fn sema_check_comptime_item_in(environment: SemaScopeEnvironment, probe: &SemaSc
     SemaComptimeItemCheck{request: Val(request), dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0)}
 }
 
-pub fn sema_comptime_dependency_cycle_diagnostic(name: String, span: Span) -> Diagnostic {
+fn sema_comptime_dependency_cycle_diagnostic(name: String, span: Span) -> Diagnostic {
     sema_unknown_name(name, span)
 }
 
@@ -3976,7 +3976,7 @@ fn sema_check_script_entries(graph: SemaRegistrationGraph, diagnostics: &[Diagno
 // compiler threads of the body pass (sema_finalize_check_modules). `resolved`
 // is `graph` with `values` already applied when the caller owns one (the
 // comptime run's graph, JetDriverComptimeRunResult.graph); None copies `graph`.
-pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: ^SemaRegistrationGraph?, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> SemaGraphResult {
+fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: ^SemaRegistrationGraph?, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> SemaGraphResult {
     owned := ^resolved
     resolved_graph := ^owned ?? sema_comptime_graph_with_values(graph, values)
     // #4319 lookup counters are traced through `sema.check` only; counting

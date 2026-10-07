@@ -778,11 +778,11 @@ fn render_jet(lib: &str, s: &Schema) -> String {
         "#Error\npub enum ComError { WrongApartment InvalidHandle InvalidArgument MemberFailed TypeMismatch Limit }\n\n",
     );
     o.push_str(&format!(
-        "pub fn open() -[FFI.Com]> {} !ComError {{\n    value :: abi.open()\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    return Ok({}.{{ value: value }})\n}}\n\n",
+        "fn open() -[FFI.Com]> {} !ComError {{\n    value :: abi.open()\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    return Ok({}.{{ value: value }})\n}}\n\n",
         s.root_interface, s.root_interface
     ));
     o.push_str(&format!(
-        "pub fn close(^object: {}) -[FFI.Com]> {{\n    abi.close(object.value)\n    if abi.take_error() != 0 {{ panic(\"COM resource close failed\") }}\n}}\n\n",
+        "fn close(^object: {}) -[FFI.Com]> {{\n    abi.close(object.value)\n    if abi.take_error() != 0 {{ panic(\"COM resource close failed\") }}\n}}\n\n",
         s.root_interface
     ));
     for interface in interfaces(s) {

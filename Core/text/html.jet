@@ -13,9 +13,9 @@ use core.text as unicode
 
 // XML-safe escaping and bounded entity decoding. Decoding preserves literal
 // UTF-8 and unknown entities; tag stripping is a span operation, not a parser.
-pub fn escape(text: String) -> String Never! { escape_quote(text, true) }
+fn escape(text: String) -> String Never! { escape_quote(text, true) }
 
-pub fn escape_quote(text: String, quote: Bool) -> String Never! {
+fn escape_quote(text: String, quote: Bool) -> String Never! {
     out := ""
     loop ch in unicode.scalars(text) {
         if ch == "&" -> out = "{out}&amp;"
@@ -28,7 +28,7 @@ pub fn escape_quote(text: String, quote: Bool) -> String Never! {
     out
 }
 
-pub fn unescape(text: String) -> String Never! {
+fn unescape(text: String) -> String Never! {
     raw :: text.bytes()
     out := [U8]{}
     i := 0
@@ -59,7 +59,7 @@ pub fn unescape(text: String) -> String Never! {
     String.from_bytes(out) ?? text
 }
 
-pub fn strip_tags(text: String) -> String Never! {
+fn strip_tags(text: String) -> String Never! {
     raw :: text.bytes()
     out := [U8]{}
     i := 0
@@ -81,9 +81,9 @@ pub fn strip_tags(text: String) -> String Never! {
     String.from_bytes(out) ?? text
 }
 
-pub fn unescape_and_strip(text: String) -> String Never! { unescape(strip_tags(text)) }
-pub fn attr_escape(text: String) -> String Never! { escape_quote(text, true) }
-pub fn text_escape(text: String) -> String Never! { escape_quote(text, false) }
+fn unescape_and_strip(text: String) -> String Never! { unescape(strip_tags(text)) }
+fn attr_escape(text: String) -> String Never! { escape_quote(text, true) }
+fn text_escape(text: String) -> String Never! { escape_quote(text, false) }
 
 fn entity(name: String) -> String {
     if name == "amp" -> return "&"

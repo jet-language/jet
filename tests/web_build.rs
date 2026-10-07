@@ -3495,11 +3495,11 @@ fn web_inline_modules_keep_qualified_function_identity() {
     let src = r#"#Target(Web)
 module left {
     #Target(JS)
-    pub fn value() -> Int { return 1 }
+    fn value() -> Int { return 1 }
 }
 module right {
     #Target(JS)
-    pub fn value() -> Int { return 2 }
+    fn value() -> Int { return 2 }
 }
 #Target(JS)
 fn run() { print(left.value() + right.value()) }
@@ -3529,8 +3529,8 @@ fn web_wasm_inline_modules_emit_distinct_qualified_calls() {
         return;
     }
     let src = r#"#Target(Web)
-module left { pub fn value() -> Int { return 1 } }
-module right { pub fn value() -> Int { return 2 } }
+module left { fn value() -> Int { return 1 } }
+module right { fn value() -> Int { return 2 } }
 #WasmExport
 fn total() -> Int { return left.value() + right.value() }
 #Target(JS)
@@ -3611,8 +3611,8 @@ fn web_file_modules_emit_distinct_qualified_wasm_calls() {
                 "main.jet",
                 "#Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n#WasmExport\nfn total() -> Int { return left.value() + right.value() }\n#Target(JS)\nfn run() { print(total()) }\n",
             ),
-            ("left.jet", "pub fn value() -> Int { return 1 }\n"),
-            ("right.jet", "pub fn value() -> Int { return 2 }\n"),
+            ("left.jet", "fn value() -> Int { return 1 }\n"),
+            ("right.jet", "fn value() -> Int { return 2 }\n"),
         ],
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
@@ -3732,7 +3732,7 @@ fn module_local_run_cannot_hijack_web_entrypoint() {
         return;
     }
     let src = r#"#Target(Web)
-module helper { pub fn run() -[]> Int { return 7 } }
+module helper { fn run() -[]> Int { return 7 } }
 #Target(JS)
 fn run() { print("top-level") }
 "#;
@@ -4263,7 +4263,7 @@ fn web_trace_map_keeps_qualified_handler_identity() {
 use core.web as web
 module handlers {
     #Target(JS)
-    pub fn init() { web.on("#new-task", "input", (ev) -> {}) }
+    fn init() { web.on("#new-task", "input", (ev) -> {}) }
 }
 #Target(JS)
 fn init() { handlers.init() }
@@ -4426,7 +4426,7 @@ fn web_grouped_use_list_wasm_bridge_roundtrip() {
 use core.math.[abs, min, max, clamp]
 
 #WasmExport
-pub fn compute() -[]> Int {
+fn compute() -[]> Int {
     return abs(-8) + min(9, 4) + max(0, 0) + clamp(0, 0, 0)
 }
 

@@ -420,7 +420,7 @@ fn run() CryptoError! {
     let return_type = format!("JetOutcome<(), {}::JetCryptoError>", ffi.crate_name);
     assert!(
         out.rust
-            .contains(&format!("pub fn __jet_run() -> {return_type}")),
+            .contains(&format!("fn __jet_run() -> {return_type}")),
         "CryptoError run should retain its error type:\n{}",
         out.rust
     );

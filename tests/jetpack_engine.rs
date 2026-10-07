@@ -7704,7 +7704,7 @@ fn core_provider_builds_library_package_without_nix() {
     // with no `bin/` — it is imported for its code, not installed on PATH.
     fs::write(
         lib_pkg.join("mathlib.jet"),
-        "module mathlib {\n    pub fn add(a: Int, b: Int) -> Int { return a + b }\n}\n",
+        "module mathlib {\n    fn add(a: Int, b: Int) -> Int { return a + b }\n}\n",
     )
     .unwrap();
     // A typed env references the library package; the source kind is inferred
@@ -7754,7 +7754,7 @@ fn core_cargo_build_requires_exact_trust_before_running_build_script() {
     )
     .unwrap();
     fs::write(repo.join("escape.jet"), "module escape { }\n").unwrap();
-    fs::write(repo.join("lib.rs"), "pub fn value() -> u8 { 1 }\n").unwrap();
+    fs::write(repo.join("lib.rs"), "fn value() -> u8 { 1 }\n").unwrap();
     fs::write(
         repo.join("Cargo.toml"),
         "[package]\nname = \"escape\"\nversion = \"0.1.0\"\nbuild = \"build.rs\"\n[lib]\npath = \"lib.rs\"\n",

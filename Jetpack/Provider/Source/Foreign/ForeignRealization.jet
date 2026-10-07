@@ -5,16 +5,16 @@
 // provenance sidecar.
 
 // The result of one package-provider projection.
-pub struct ForeignRealization {
-    pub name: String
-    pub language: ForeignLanguage
+struct ForeignRealization {
+    name: String
+    language: ForeignLanguage
     // The provider ref inside the language-qualified manifest value.
-    pub reference: String
+    reference: String
     // The canonical cache/lock identity (`<language>@<provider-ref>`).
-    pub provider_reference: String
-    pub entry: StoreEntry
-    pub binding: String
-    pub provenance: String
+    provider_reference: String
+    entry: StoreEntry
+    binding: String
+    provenance: String
 }
 
 // Realize every foreign dependency of a compiler manifest. Missing or
@@ -22,7 +22,7 @@ pub struct ForeignRealization {
 // fallback. The project lock is published only after every artifact passed
 // Hangar ingest and projection, so a later failure never leaves a lock that
 // claims an earlier dependency succeeded.
-pub fn provider_realize_foreign_dependencies(verification: &StoreVerification, roots: HangarRoots, project_root: String, manifest: Manifest, ctx: ProviderCtx) -[FS, Env, Exec, Time, Time.Wait]> [ForeignRealization] ProviderError! {
+fn provider_realize_foreign_dependencies(verification: &StoreVerification, roots: HangarRoots, project_root: String, manifest: Manifest, ctx: ProviderCtx) -[FS, Env, Exec, Time, Time.Wait]> [ForeignRealization] ProviderError! {
     realized := [ForeignRealization]{}
     names := manifest.dependencies.keys().to_list()
     &names.sort()
@@ -95,12 +95,12 @@ fn provider_foreign_binding_in(root: String, language: ForeignLanguage, name: St
 }
 
 // The project-side binding the compiler foreign loader reads.
-pub fn provider_foreign_binding_path(project_root: String, language: ForeignLanguage, name: String) -> String Never! {
+fn provider_foreign_binding_path(project_root: String, language: ForeignLanguage, name: String) -> String Never! {
     provider_foreign_binding_in(project_root, language, name)
 }
 
 // The provenance sidecar beside the project binding.
-pub fn provider_foreign_provenance_path(project_root: String, language: ForeignLanguage, name: String) -> String Never! {
+fn provider_foreign_provenance_path(project_root: String, language: ForeignLanguage, name: String) -> String Never! {
     files.join(files.join(files.join(project_root, SOURCE_ROOT_DIR), language.bindings_subdir()), "{name}.provenance")
 }
 

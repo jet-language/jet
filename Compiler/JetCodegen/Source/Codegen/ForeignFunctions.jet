@@ -16,21 +16,21 @@ use jet_sema.[
     SemaCheckedForeignOwner,
 ]
 
-pub struct JetCodegenForeignArtifactIdentityField {
-    pub name: String
-    pub value: [U8]
+struct JetCodegenForeignArtifactIdentityField {
+    name: String
+    value: [U8]
 }
 
-pub struct JetCodegenInlineAssemblyArtifact {
-    pub function_identity: String
-    pub foreign_key: String
-    pub function_name: String
-    pub wrapper_name: String
-    pub symbol: String
-    pub selected_target: String
-    pub assembly: TInlineAssembly
-    pub rust_source: String
-    pub cache_identity_fields: [JetCodegenForeignArtifactIdentityField]
+struct JetCodegenInlineAssemblyArtifact {
+    function_identity: String
+    foreign_key: String
+    function_name: String
+    wrapper_name: String
+    symbol: String
+    selected_target: String
+    assembly: TInlineAssembly
+    rust_source: String
+    cache_identity_fields: [JetCodegenForeignArtifactIdentityField]
 }
 
 fn jet_codegen_inline_assembly_normalize_register(register: String) -> String Never! {
@@ -198,7 +198,7 @@ fn jet_codegen_inline_assembly_rust_source(row: SemaCheckedForeignFunction, inli
     return "#[no_mangle]\npub unsafe extern \"C\" fn {symbol}({params_text}){ret_decl} {{\n{declarations}    unsafe {{ core::arch::asm!(\n            {all_arguments_text}\n        ); }}\n    {result_expression}\n}}\npub fn {wrapper}({params_text}){ret_decl} {{ unsafe {{ {symbol}({args_text}) }} }}\n"
 }
 
-pub fn jet_codegen_prepare_inline_assembly_artifact(function: Func, function_identity: String, row: SemaCheckedForeignFunction, selected_target: String) -> JetCodegenInlineAssemblyArtifact Never! {
+fn jet_codegen_prepare_inline_assembly_artifact(function: Func, function_identity: String, row: SemaCheckedForeignFunction, selected_target: String) -> JetCodegenInlineAssemblyArtifact Never! {
     inline :: function.inline_foreign ?? panic("checked inline assembly function lost its InlineForeign payload")
     contract :: row.asm_contract ?? panic("checked inline assembly row lost its normalized operand contract")
     if function.name != row.name || function_identity != row.symbol_id.key || row.owner != SemaCheckedForeignOwner.Inline || inline.lang != "asm" || row.language != "asm" -> panic("inline assembly artifact identity does not match its checked function")
@@ -264,60 +264,60 @@ pub fn jet_codegen_prepare_inline_assembly_artifact(function: Func, function_ide
         cache_identity_fields: identity_fields,
     }
 }
-pub struct JetCodegenInlineNativeTool {
-    pub path: String
-    pub identity: String
-    pub target_arg: String?
+struct JetCodegenInlineNativeTool {
+    path: String
+    identity: String
+    target_arg: String?
 }
 
-pub struct JetCodegenInlineNativeToolchain {
-    pub target: String
-    pub cc: JetCodegenInlineNativeTool?
-    pub cxx: JetCodegenInlineNativeTool?
-    pub ar: JetCodegenInlineNativeTool
+struct JetCodegenInlineNativeToolchain {
+    target: String
+    cc: JetCodegenInlineNativeTool?
+    cxx: JetCodegenInlineNativeTool?
+    ar: JetCodegenInlineNativeTool
 }
 
-pub struct JetCodegenInlineNativeEntry {
-    pub function: Func
-    pub function_identity: String
-    pub row: SemaCheckedForeignFunction
-    pub index: Int
-    pub foreign_descriptor: String
+struct JetCodegenInlineNativeEntry {
+    function: Func
+    function_identity: String
+    row: SemaCheckedForeignFunction
+    index: Int
+    foreign_descriptor: String
 }
 
-pub struct JetCodegenInlineNativeSourceFile {
-    pub path: String
-    pub source: String
+struct JetCodegenInlineNativeSourceFile {
+    path: String
+    source: String
 }
 
-pub struct JetCodegenInlineNativeEntryArtifact {
-    pub function_identity: String
-    pub foreign_key: String
-    pub index: Int
-    pub language: String
-    pub wrapper_name: String
-    pub symbol: String
-    pub wrapper_source: String
-    pub native_source: JetCodegenInlineNativeSourceFile
-    pub cache_identity_fields: [JetCodegenForeignArtifactIdentityField]
+struct JetCodegenInlineNativeEntryArtifact {
+    function_identity: String
+    foreign_key: String
+    index: Int
+    language: String
+    wrapper_name: String
+    symbol: String
+    wrapper_source: String
+    native_source: JetCodegenInlineNativeSourceFile
+    cache_identity_fields: [JetCodegenForeignArtifactIdentityField]
 }
 
-pub struct JetCodegenInlineNativeBuildConfig {
-    pub has_cpp: Bool
-    pub cxx_runtime: String
-    pub proof_suffix: String
-    pub undefined_symbol_flag: String
-    pub archive_name: String
-    pub cargo_build_script_line: String
+struct JetCodegenInlineNativeBuildConfig {
+    has_cpp: Bool
+    cxx_runtime: String
+    proof_suffix: String
+    undefined_symbol_flag: String
+    archive_name: String
+    cargo_build_script_line: String
 }
 
-pub struct JetCodegenInlineNativeArtifacts {
-    pub selected_target: String
-    pub build_config: JetCodegenInlineNativeBuildConfig
-    pub toolchain_identity: String
-    pub build_script: String
-    pub entries: [JetCodegenInlineNativeEntryArtifact]
-    pub cache_identity_fields: [JetCodegenForeignArtifactIdentityField]
+struct JetCodegenInlineNativeArtifacts {
+    selected_target: String
+    build_config: JetCodegenInlineNativeBuildConfig
+    toolchain_identity: String
+    build_script: String
+    entries: [JetCodegenInlineNativeEntryArtifact]
+    cache_identity_fields: [JetCodegenForeignArtifactIdentityField]
 }
 
 fn jet_codegen_inline_native_rust_quote(value: String) -> String Never! {
@@ -568,7 +568,7 @@ fn jet_codegen_inline_native_build_script(entries: [JetCodegenInlineNativeEntryA
     script
 }
 
-pub fn jet_codegen_prepare_inline_native_artifacts(entries: [JetCodegenInlineNativeEntry], selected_target: String, toolchain: JetCodegenInlineNativeToolchain) -> JetCodegenInlineNativeArtifacts Never! {
+fn jet_codegen_prepare_inline_native_artifacts(entries: [JetCodegenInlineNativeEntry], selected_target: String, toolchain: JetCodegenInlineNativeToolchain) -> JetCodegenInlineNativeArtifacts Never! {
     if entries.len() == 0 -> panic("inline native artifact generation requires at least one checked C or C++ function")
     if toolchain.target != selected_target -> panic("inline native toolchain target differs from the selected artifact target")
     has_c := false

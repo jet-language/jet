@@ -4,35 +4,35 @@
 // structs `Name { field: value }`, tuple variants `V(x)`, maps `{"k": v}`,
 // sets `{"a"}`, lists `[a, b]`, and options `Some(x)`/`None`.
 
-pub fn pkg_debug_str(value: String) -> String Never! {
+fn pkg_debug_str(value: String) -> String Never! {
     pkg_cbind_debug_quote(value)
 }
 
-pub fn pkg_debug_opt_str(value: String?) -> String Never! {
+fn pkg_debug_opt_str(value: String?) -> String Never! {
     if value == {
         .Val(text) -> "Some({pkg_debug_str(text)})"
         .None -> "None"
     }
 }
 
-pub fn pkg_debug_bool(value: Bool) -> String Never! {
+fn pkg_debug_bool(value: Bool) -> String Never! {
     if value -> "true" else -> "false"
 }
 
-pub fn pkg_debug_opt_bool(value: Bool?) -> String Never! {
+fn pkg_debug_opt_bool(value: Bool?) -> String Never! {
     if value == {
         .Val(flag) -> "Some({pkg_debug_bool(flag)})"
         .None -> "None"
     }
 }
 
-pub fn pkg_debug_str_list(values: [String]) -> String Never! {
+fn pkg_debug_str_list(values: [String]) -> String Never! {
     parts := [String]{}
     loop value in values -> &parts.push(pkg_debug_str(value))
     "[{parts.join(", ")}]"
 }
 
-pub fn pkg_debug_opt_str_list(values: [String]?) -> String Never! {
+fn pkg_debug_opt_str_list(values: [String]?) -> String Never! {
     if values == {
         .Val(list) -> "Some({pkg_debug_str_list(list)})"
         .None -> "None"
@@ -40,13 +40,13 @@ pub fn pkg_debug_opt_str_list(values: [String]?) -> String Never! {
 }
 
 // A sorted string set (`BTreeSet<String>`).
-pub fn pkg_debug_str_set(values: [String]) -> String Never! {
+fn pkg_debug_str_set(values: [String]) -> String Never! {
     parts := [String]{}
     loop value in pkg_manifest_sorted(values) -> &parts.push(pkg_debug_str(value))
     "{{{parts.join(", ")}}}"
 }
 
-pub fn pkg_debug_str_map(map: [String: String]) -> String Never! {
+fn pkg_debug_str_map(map: [String: String]) -> String Never! {
     parts := [String]{}
     loop key in pkg_manifest_sorted(map.keys().to_list()) -> &parts.push("{pkg_debug_str(key)}: {pkg_debug_str(map[key])}")
     "{{{parts.join(", ")}}}"
@@ -73,7 +73,7 @@ fn pkg_debug_ref_source(source: RefSource) -> String Never! {
     }
 }
 
-pub fn pkg_debug_git_selector(selector: GitSelector) -> String Never! {
+fn pkg_debug_git_selector(selector: GitSelector) -> String Never! {
     if selector == {
         .Tag(value) -> "Tag({pkg_debug_str(value)})"
         .Branch(value) -> "Branch({pkg_debug_str(value)})"
@@ -81,7 +81,7 @@ pub fn pkg_debug_git_selector(selector: GitSelector) -> String Never! {
     }
 }
 
-pub fn pkg_debug_dep_source(source: DepSource) -> String Never! {
+fn pkg_debug_dep_source(source: DepSource) -> String Never! {
     if source == {
         .Version(value) -> "Version({pkg_debug_str(value)})"
         .Provider(provider, target) -> "Provider {{ provider: {pkg_debug_ref_source(provider)}, target: {pkg_debug_str(target)} }}"
@@ -91,7 +91,7 @@ pub fn pkg_debug_dep_source(source: DepSource) -> String Never! {
     }
 }
 
-pub fn pkg_debug_deps(deps: [String: DepSource]) -> String Never! {
+fn pkg_debug_deps(deps: [String: DepSource]) -> String Never! {
     parts := [String]{}
     loop key in pkg_manifest_sorted(deps.keys().to_list()) -> &parts.push("{pkg_debug_str(key)}: {pkg_debug_dep_source(deps[key])}")
     "{{{parts.join(", ")}}}"
@@ -127,19 +127,19 @@ fn pkg_debug_boundaries(boundaries: [ImportBoundary]) -> String Never! {
     "[{parts.join(", ")}]"
 }
 
-pub fn pkg_debug_service(service: ServiceFact) -> String Never! {
+fn pkg_debug_service(service: ServiceFact) -> String Never! {
     ports := [String]{}
     loop port in service.ports -> &ports.push("{port}")
     "ServiceFact {{ enable: {pkg_debug_bool(service.enable)}, ports: [{ports.join(", ")}], ready: {pkg_debug_opt_str(service.ready)}, fields: {pkg_debug_str_map(service.fields)} }}"
 }
 
-pub fn pkg_debug_services(services: [String: ServiceFact]) -> String Never! {
+fn pkg_debug_services(services: [String: ServiceFact]) -> String Never! {
     parts := [String]{}
     loop key in pkg_manifest_sorted(services.keys().to_list()) -> &parts.push("{pkg_debug_str(key)}: {pkg_debug_service(services[key])}")
     "{{{parts.join(", ")}}}"
 }
 
-pub fn pkg_debug_payload(payload: OutputPayload) -> String Never! {
+fn pkg_debug_payload(payload: OutputPayload) -> String Never! {
     if payload == {
         .Null -> "Null"
         .Bool(flag) -> "Bool({pkg_debug_bool(flag)})"
@@ -158,17 +158,17 @@ pub fn pkg_debug_payload(payload: OutputPayload) -> String Never! {
     }
 }
 
-pub fn pkg_debug_output(output: OutputFact) -> String Never! {
+fn pkg_debug_output(output: OutputFact) -> String Never! {
     "OutputFact {{ kind: {output.kind.debug_name()}, name: {pkg_debug_str(output.name)}, entry: {pkg_debug_opt_str(output.entry)}, fields: {pkg_debug_str_map(output.fields)}, payload: {pkg_debug_payload(output.payload)} }}"
 }
 
-pub fn pkg_debug_outputs(outputs: [String: OutputFact]) -> String Never! {
+fn pkg_debug_outputs(outputs: [String: OutputFact]) -> String Never! {
     parts := [String]{}
     loop key in pkg_manifest_sorted(outputs.keys().to_list()) -> &parts.push("{pkg_debug_str(key)}: {pkg_debug_output(outputs[key])}")
     "{{{parts.join(", ")}}}"
 }
 
-pub fn pkg_debug_environments(environments: [String: EnvironmentFact]) -> String Never! {
+fn pkg_debug_environments(environments: [String: EnvironmentFact]) -> String Never! {
     parts := [String]{}
     loop key in pkg_manifest_sorted(environments.keys().to_list()) {
         environment :: environments[key]
@@ -237,7 +237,7 @@ fn pkg_debug_opt_trust_decision(decision: TrustDecision?) -> String Never! {
     }
 }
 
-pub fn pkg_debug_grants(grants: [PackageGrant]) -> String Never! {
+fn pkg_debug_grants(grants: [PackageGrant]) -> String Never! {
     parts := [String]{}
     loop grant in grants -> &parts.push("({pkg_debug_str(grant.package)}, {pkg_debug_str_list(grant.rights)})")
     "[{parts.join(", ")}]"
@@ -280,20 +280,20 @@ fn pkg_debug_claims(grade: ClaimsGrade?) -> String Never! {
 
 // Shared by package facts and publication policy fingerprints; both identities
 // use these exact Rust-derived Debug bytes, not a second formatter.
-pub fn pkg_debug_source_maps(maps: [PolicySourceMap]) -> String Never! {
+fn pkg_debug_source_maps(maps: [PolicySourceMap]) -> String Never! {
     parts := [String]{}
     loop map in maps -> &parts.push("({pkg_debug_str(map.pattern)}, {pkg_debug_str_list(map.sources)})")
     "[{parts.join(", ")}]"
 }
 
-pub fn pkg_debug_exceptions(exceptions: [PackagePolicyException]) -> String Never! {
+fn pkg_debug_exceptions(exceptions: [PackagePolicyException]) -> String Never! {
     parts := [String]{}
     loop exception in exceptions -> &parts.push("PackagePolicyException {{ id: {pkg_debug_str(exception.id)}, scope: {pkg_debug_str(exception.scope)}, reason: {pkg_debug_str(exception.reason)}, expires_at: {exception.expires_at} }}")
     "[{parts.join(", ")}]"
 }
 
 // The exact preimage of `PackageFacts::semantic_digest`.
-pub fn pkg_facts_semantic_text(facts: PackageFacts) -> String Never! {
+fn pkg_facts_semantic_text(facts: PackageFacts) -> String Never! {
     policy :: facts.policy
     lines := [String]{
         "name={pkg_debug_str(facts.name)};version={pkg_debug_opt_str(facts.version)};jet={pkg_debug_opt_str(facts.jet)};source={pkg_debug_opt_str(facts.source)};",

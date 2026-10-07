@@ -6,11 +6,11 @@
 // owns dependency admission, so this host never runs predecessors itself.
 
 // `jet run <entry> -- <name> <job-args>`.
-pub fn cli_run_project_job(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, job: String) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_run_project_job(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, job: String) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cli_run_project_job_with_mode(&verification, &cache, theme, parsed, roots, project_dir, entry, job, false, false)
 }
 
-pub fn cli_run_project_job_with_mode(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, job: String, clean: Bool, silent: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_run_project_job_with_mode(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, job: String, clean: Bool, silent: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     registry :: cli_checked_project_job_registry(entry) ?? {
         loop diagnostic in err.diagnostics -> theme.error_coded(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
         return EXIT_USAGE
@@ -43,7 +43,7 @@ pub fn cli_run_project_job_with_mode(verification: &StoreVerification, cache: &W
 // Report a `CliError` from a helper as the command's exit code. A helper's
 // already-rendered refusal carries its code; any other failure is rendered
 // here as an operational error.
-pub fn cli_exit_for(theme: Theme, error: CLIError) -[IO, Time.Wait]> Int Never! {
+fn cli_exit_for(theme: Theme, error: CLIError) -[IO, Time.Wait]> Int Never! {
     if error == {
         .Reported(code) -> code
         else -> {
@@ -235,7 +235,7 @@ fn cli_empty_job_env() -> ShellEnv Never! {
 
 // `JET_TASK_LIMIT_<NAME>`: ASCII alphanumerics upper-cased, anything else
 // becomes `_`.
-pub fn cli_task_limit_env_name(name: String) -> String Never! {
+fn cli_task_limit_env_name(name: String) -> String Never! {
     out := "JET_TASK_LIMIT_"
     loop scalar in name.chars() {
         text :: "{scalar}"
@@ -256,7 +256,7 @@ fn cli_job_skip_reason(skip: JobSkip?) -[Env]> String? Never! {
 // `JobSkip::reason_for_host`, which has no Compiler/ Jet port). Platform
 // names use the canonical Jet spellings and the target model's host
 // suffixes.
-pub fn cli_job_skip_reason_for_host(rule: JobSkip, host: String) -> String? Never! {
+fn cli_job_skip_reason_for_host(rule: JobSkip, host: String) -> String? Never! {
     if rule == {
         .Always(reason) -> Val(reason)
         .UnlessPlatform(platform) -> {

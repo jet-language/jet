@@ -712,7 +712,6 @@ impl<'a> Parser<'a> {
         let mut default_target: Option<String> = None;
         let mut html_path: Option<String> = None;
         let mut html_seen = false;
-        let mut pub_file = false;
         let mut no_prelude = false;
         loop {
             // D-STRUCT-POLICY1=A: these contextual declarations live at
@@ -722,14 +721,7 @@ impl<'a> Parser<'a> {
             if matches!(self.peek().kind, TokKind::KwPub)
                 && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::KW_POLICY)
             {
-                self.bump(); // `pub`
-                match self.user_policy_decl(true) {
-                    Ok(declaration) => self.user_policy_declarations.push(declaration),
-                    Err(diagnostic) => {
-                        self.diags.push(diagnostic);
-                        self.sync_top();
-                    }
-                }
+                self.reject_retired_pub();
                 continue;
             }
             if matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::KW_POLICY) {
@@ -810,106 +802,33 @@ impl<'a> Parser<'a> {
                         continue;
                     }
                 }
-                TokKind::Hash if self.at_pub_file() && !self.file_marker_stack_starts_here() => {
-                    if pub_file {
-                        let span = self.peek().span;
-                        self.diags.push(crate::Policy::marker_repeated_error(
-                            Syntax::MARKER_PUB_FILE,
-                            "file",
-                            span,
-                        ));
-                        self.bump();
-                        self.bump();
-                        self.sync_top();
-                        continue;
-                    }
-                    self.bump(); // `#`
-                    self.bump(); // `PubFile`
-                    pub_file = true;
-                    self.pub_file_default = true;
-                    continue;
-                }
-                TokKind::Hash if self.at_no_prelude() && !self.file_marker_stack_starts_here() => {
-                    if no_prelude {
-                        let span = self.peek().span;
-                        self.diags.push(crate::Policy::marker_repeated_error(
-                            Syntax::MARKER_NO_PRELUDE,
-                            "file",
-                            span,
-                        ));
-                        self.bump();
-                        self.bump();
-                        self.sync_top();
-                        continue;
-                    }
-                    self.bump(); // `#`
-                    self.bump(); // `NoPrelude`
-                    no_prelude = true;
-                    continue;
-                }
-                TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PUBLIC_FILE) =>
+                // D-VIS-MODULE1: `#PubFile` (and its foreign spelling
+                // `#PublicFile`) is retired; E0418 deletes it.
+                TokKind::Hash
+                    if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PUB_FILE || n == Syntax::MARKER_PUBLIC_FILE)
+                        && !self.file_marker_stack_starts_here() =>
                 {
-                    let span = self.peek().span;
-                    self.diags.push(Diagnostic::error(
-                        "E0418",
-                        format!(
-                            "write `#{}`, not `#{}`",
-                            Syntax::MARKER_PUB_FILE,
-                            Syntax::MARKER_PUBLIC_FILE
-                        ),
-                        format!(
-                            "`#{}` flips this file to public-by-default (D-VISDEFAULT2)",
-                            Syntax::MARKER_PUB_FILE
-                        ),
-                        format!(
-                            "write `#{}` at the top of the file",
-                            Syntax::MARKER_PUB_FILE
-                        ),
-                        Some(span),
-                    ));
-                    if pub_file {
-                        self.diags.push(crate::Policy::marker_repeated_error(
-                            Syntax::MARKER_PUB_FILE,
-                            "file",
-                            span,
-                        ));
-                    } else {
-                        pub_file = true;
-                        self.pub_file_default = true;
-                    }
+                    let span = Span::new(self.peek().span.start, self.peek2().span.end);
                     self.bump();
                     self.bump();
+                    self.reject_retired_file_marker(span);
                     continue;
                 }
                 TokKind::Hash if self.file_marker_stack_starts_here() => {
                     match self.parse_file_marker_sequence() {
                         Ok(markers) => {
                             let mut failed = false;
-                            let ordered_markers = markers.clone();
+                            let mut ordered_markers = markers.clone();
+                            ordered_markers.retain(|marker| marker.name != Syntax::MARKER_PUB_FILE);
                             // A repeat *inside* this group was already
                             // reported by the shared D-MARK-REPEAT1 check.
                             // Only a repeat of a marker seen in an earlier
                             // top-level group is news here.
-                            let had_pub_file = pub_file;
                             let had_no_prelude = no_prelude;
                             for marker in markers {
                                 match marker.name.as_str() {
                                     Syntax::MARKER_PUB_FILE => {
-                                        if pub_file {
-                                            if had_pub_file {
-                                                self.diags.push(
-                                                    crate::Policy::marker_repeated_error(
-                                                        Syntax::MARKER_PUB_FILE,
-                                                        "file",
-                                                        marker.span,
-                                                    ),
-                                                );
-                                            }
-                                            failed = true;
-                                        } else {
-                                            pub_file = true;
-                                            self.pub_file_default = true;
-                                        }
+                                        self.reject_retired_file_marker(marker.span);
                                     }
                                     Syntax::MARKER_NO_PRELUDE => {
                                         if no_prelude {
@@ -1061,7 +980,7 @@ impl<'a> Parser<'a> {
                         Ok(TargetMarker::Bucket(target)) => {
                             if matches!(self.peek().kind, TokKind::KwModule) {
                                 match self.code_module_with_pkg_and_target(
-                                    false,
+                                    true,
                                     false,
                                     Some(target),
                                 ) {
@@ -1207,126 +1126,47 @@ impl<'a> Parser<'a> {
                     self.func_with_modifiers(false, true).map(Item::Func)
                 }
                 TokKind::KwPriv | TokKind::KwPub if matches!(self.peek2().kind, TokKind::Colon) => {
-                    let span = Span::new(self.peek().span.start, self.peek2().span.end);
-                    self.bump();
-                    self.bump();
-                    self.diags.push(Diagnostic::error(
-                            "E0415",
-                            "section visibility labels like `pub:` / `priv:` are not supported"
-                                .to_string(),
-                            "moving an item above or below a label would silently change whether it exports"
-                                .to_string(),
-                            format!(
-                                "write `#{}` once at the top of the file, then mark exceptions with `{}`",
-                                Syntax::MARKER_PUB_FILE,
-                                Syntax::KW_PRIV
-                            ),
-                            Some(span),
-                        ));
+                    self.reject_section_label();
                     continue;
                 }
+                // D-VIS-MODULE1: `priv module` / `priv(package) module`; every
+                // other `priv` or `private` is reported and the declaration
+                // parses as if it were absent.
                 TokKind::KwPriv => {
                     let (is_pub, is_package_pub) = self.parse_item_visibility();
+                    if !matches!(self.peek().kind, TokKind::KwModule) {
+                        continue;
+                    }
                     self.item_after_visibility(is_pub, is_package_pub)
                 }
                 TokKind::Ident(n) if n == Syntax::FOREIGN_PRIVATE => {
-                    let (is_pub, is_package_pub) = self.parse_item_visibility();
-                    self.item_after_visibility(is_pub, is_package_pub)
+                    let _ = self.parse_item_visibility();
+                    continue;
                 }
+                // D-MOD4: `pub use` re-export stays; every other `pub` was
+                // removed (D-VIS-MODULE1, E0411) and the declaration parses as
+                // if it were absent.
                 TokKind::KwPub => {
-                    // D-PUBPKG1=A: `pub(package)` qualifier — peek2 is `(`.
-                    if matches!(self.peek2().kind, TokKind::LParen) {
-                        let (is_pub, is_package_pub) = self.parse_pub_qualifier();
-                        // Imports are collected separately because `Item` has no
-                        // import variant; all declarations share the canonical
-                        // visibility dispatcher.
-                        if matches!(self.peek().kind, TokKind::KwUse) {
-                            match self.import_decl() {
-                                Ok(mut imp) => {
-                                    imp.is_pub = is_pub;
-                                    imp.is_package_pub = is_package_pub;
-                                    imports.push(imp);
-                                    continue;
-                                }
-                                Err(d) => {
-                                    self.diags.push(d);
-                                    self.sync_stmt();
-                                    continue;
-                                }
-                            }
+                    let reexport = matches!(self.peek2().kind, TokKind::KwUse)
+                        || (matches!(self.peek2().kind, TokKind::LParen)
+                            && matches!(self.peek5().kind, TokKind::KwUse));
+                    if !reexport {
+                        self.reject_retired_pub();
+                        continue;
+                    }
+                    let is_pub = self.parse_reexport_qualifier();
+                    match self.import_decl() {
+                        Ok(mut imp) => {
+                            imp.is_pub = is_pub;
+                            imp.is_package_pub = false;
+                            imports.push(imp);
                         }
-                        self.item_after_visibility(is_pub, is_package_pub)
-                    } else {
-                        // Marker-bearing public types have a distinct parser
-                        // because the marker precedes the type keyword.
-                        match self.peek2().kind {
-                            // D-REPRC1: `pub #layout(c) struct Name { … }`
-                            TokKind::Hash
-                                if matches!(
-                                    &self.peek3().kind,
-                                    TokKind::Ident(n) if n == Syntax::MARKER_LAYOUT
-                                ) =>
-                            {
-                                self.bump(); // consume `pub`
-                                self.layout_type_def(true)
-                            }
-                            // D-MIGRATE1/D-VERDICT-732-1 (formerly D-MARKERMOVE1):
-                            // `pub #PublishedSchema struct Name { … }` (retired
-                            // `pub #PublishedSchema` teaches E0062).
-                            TokKind::Hash
-                                if matches!(
-                                    &self.peek3().kind,
-                                    TokKind::Ident(n)
-                                        if n == Syntax::MARKER_PUBLISHED_SCHEMA
-                                ) =>
-                            {
-                                self.bump(); // consume `pub`
-                                self.published_schema_struct_def(true).map(Item::Struct)
-                            }
-                            // D-LIN1: `pub #SingleUse struct|enum Name { … }`
-                            TokKind::Hash
-                                if matches!(
-                                    &self.peek3().kind,
-                                    TokKind::Ident(n) if n == Syntax::MARKER_SINGLE_USE
-                                ) =>
-                            {
-                                self.bump(); // consume `pub`
-                                self.single_use_type_def(true)
-                            }
-                            // D-MUSTUSE1/D-VERDICT-732-1 (formerly D-MARKERMOVE1):
-                            // `pub #MustUse struct|enum Name { … }` (retired
-                            // `pub #MustUse` teaches E0062).
-                            TokKind::Hash
-                                if matches!(
-                                    &self.peek3().kind,
-                                    TokKind::Ident(n) if n == Syntax::MARKER_MUST_USE
-                                ) =>
-                            {
-                                self.bump(); // consume `pub`
-                                self.must_use_type_def(true)
-                            }
-                            _ => {
-                                let (is_pub, is_package_pub) =
-                                    self.parse_item_visibility();
-                                if matches!(self.peek().kind, TokKind::KwUse) {
-                                    match self.import_decl() {
-                                        Ok(mut imp) => {
-                                            imp.is_pub = is_pub;
-                                            imp.is_package_pub = is_package_pub;
-                                            imports.push(imp);
-                                            continue;
-                                        }
-                                        Err(d) => {
-                                            self.diags.push(d);
-                                            self.sync_stmt();
-                                            continue;
-                                        }
-                                    }
-                                }
-                                self.item_after_visibility(is_pub, is_package_pub)
-                            }
+                        Err(d) => {
+                            self.diags.push(d);
+                            self.sync_stmt();
                         }
                     }
+                    continue;
                 }
                 // D-S14-PAUSE: bare lowercase `test "name" { … }` teaching is paused.
                 TokKind::Ident(n)
@@ -1336,7 +1176,7 @@ impl<'a> Parser<'a> {
                     self.diags.push(self.foreign_test_diag(t.span));
                     self.test_def_after_kw(None).map(Item::Test)
                 }
-                TokKind::KwModule if self.is_code_module_at(1) => self.code_module(false),
+                TokKind::KwModule if self.is_code_module_at(1) => self.code_module(true),
                 TokKind::KwModule => self.module_decl().map(Item::Module),
                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
@@ -1669,6 +1509,7 @@ impl<'a> Parser<'a> {
                 }
             }
         }
+        Self::apply_module_visibility(&mut items, (true, false));
         Program {
             imports,
             items,
@@ -1676,7 +1517,6 @@ impl<'a> Parser<'a> {
             block_spans: std::mem::take(&mut self.block_spans),
             fenced_statements: Vec::new(),
             web_target_ceiling,
-            pub_file,
             no_prelude,
             default_target,
             html_path,

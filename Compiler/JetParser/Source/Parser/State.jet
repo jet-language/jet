@@ -44,67 +44,65 @@ use jet_lexer.[
     TokenPayload,
 ]
 
-pub struct JetParserState {
-    pub tokens: [Token]
-    pub position: Int
-    pub diagnostics: [Diagnostic]
-    pub source_end: Int
-    pub block_spans: [Span]
-    pub pending_type_gt: Bool
-    pub pending_type_gt_span: Span
-    pub result_handler_depth: Int
+struct JetParserState {
+    tokens: [Token]
+    position: Int
+    diagnostics: [Diagnostic]
+    source_end: Int
+    block_spans: [Span]
+    pending_type_gt: Bool
+    pending_type_gt_span: Span
+    result_handler_depth: Int
     // Byte offset where the statement being parsed starts; a retired `++`/`--`
     // that spans the whole statement gets a Safe compound-assignment edit.
-    pub statement_start: Int
+    statement_start: Int
     // Byte offsets where each source line starts, when the source text is
     // known; E0083 names the opener's line from it.
-    pub line_starts: [Int]{[Int]{}}
+    line_starts: [Int]{[Int]{}}
     // L0303 (#3716): the `else` arm of every dispatch table parsed so far.
-    pub else_arms: [ElseArmSpan]{[ElseArmSpan]{}}
+    else_arms: [ElseArmSpan]{[ElseArmSpan]{}}
     // D-MARK-SCOPE1: block `#Policy(...) { … }` declarations, joined to the
     // program's policy declarations after the parse.
-    pub block_policy_declarations: [PolicyDeclaration]{[PolicyDeclaration]{}}
-    // D-VISDEFAULT2=A: after `#PubFile`, top-level items default to public.
-    pub pub_file_default: Bool{false}
+    block_policy_declarations: [PolicyDeclaration]{[PolicyDeclaration]{}}
     // D-SEMI1=A: an authored `;` reports E0373 once per file.
-    pub explicit_semicolon_reported: Bool{false}
+    explicit_semicolon_reported: Bool{false}
     // The source text, when known; L0507 and E0373 build their edits from it.
-    pub source: [U8]{[U8]{}}
+    source: [U8]{[U8]{}}
     // Rust stops a statement or item at its first fatal error and resumes at
     // the next boundary, so one mistake reports once. `abort_mark` is the
     // diagnostics length just after that error (0 = none; a rewind below it
     // cancels the abort); `abort_position` is the cursor where it was found.
-    pub abort_mark: Int{0}
-    pub abort_position: Int{0}
+    abort_mark: Int{0}
+    abort_position: Int{0}
     // Depth of one-statement `->` bodies; their statement may end before `else`.
-    pub adjacent_if_body_depth: Int{0}
+    adjacent_if_body_depth: Int{0}
     // Rust `block_depth`: braced statement lists entered so far. Value
     // blocks read their lines at the enclosing depth, as in Rust.
-    pub block_depth: Int{0}
+    block_depth: Int{0}
     // Rust `callable_tail_block_depth`: the block depth of the innermost
     // callable body (-1 = none). Its last line may be a bare value.
-    pub callable_tail_depth: Int{-1}
+    callable_tail_depth: Int{-1}
     // Rust `retired_step`: the whole span of the last retired `++`/`--`
     // step. E0160 covers it, so its recovered operand is no second error.
-    pub retired_step: Span?{None}
+    retired_step: Span?{None}
     // Rust `derive_template_depth`: derive, marker and declaration-loop
     // template bodies entered so far. A `prep loop` inside one is a
     // template loop the derive expansion unrolls.
-    pub derive_template_depth: Int{0}
+    derive_template_depth: Int{0}
 }
 
 // One authored piece of a classic branch chain: an arm's condition and body,
 // or the final `else` body. The L0507 fix rebuilds the chain from these.
-pub struct ParserBranchPart {
-    pub is_else: Bool
-    pub cond: Span
-    pub body: Span
+struct ParserBranchPart {
+    is_else: Bool
+    cond: Span
+    body: Span
 }
 
-pub struct ParsedBlock {
-    pub span: Span
-    pub statements: [Stmt]
-    pub tail: Expr?
+struct ParsedBlock {
+    span: Span
+    statements: [Stmt]
+    tail: Expr?
 }
 
 fn parser_synthetic_token(kind: Int, span: Span) -> Token Never! {

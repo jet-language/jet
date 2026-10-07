@@ -12,29 +12,29 @@
 // loader's (`Compiler/JetDriver/Source/Driver/ForeignProviders.jet`).
 
 // One C library a program brings in, with its header for the header form.
-pub struct CBindingImport {
-    pub lib: String
-    pub header: String?
+struct CBindingImport {
+    lib: String
+    header: String?
 }
 
 // One generated source the loader must parse.
-pub struct CBindingLoad {
-    pub path: String
-    pub lib: String
-    pub source: String
+struct CBindingLoad {
+    path: String
+    lib: String
+    source: String
 }
 
 // The prepared caches, their collected metadata, and any refusals.
-pub struct CBindingPreparation {
-    pub loads: [CBindingLoad]
-    pub metadata: CBindingMetadata
-    pub diagnostics: [Diagnostic]
+struct CBindingPreparation {
+    loads: [CBindingLoad]
+    metadata: CBindingMetadata
+    diagnostics: [Diagnostic]
 }
 
 // Admit close contracts written in a source `#Import` overlay to the typed
 // binder seam before a header is generated. Caller-supplied facts stay
 // authoritative; source markers only fill missing close mappings.
-pub fn pkg_cffi_admit_source_handle_overlays(program: RustBridgeProgram, supplied: [String: HandleOverlay]) -> [String: HandleOverlay] Never! {
+fn pkg_cffi_admit_source_handle_overlays(program: RustBridgeProgram, supplied: [String: HandleOverlay]) -> [String: HandleOverlay] Never! {
     admitted := supplied
     loop program_module in program.modules {
         items :: program_module.items
@@ -385,7 +385,7 @@ fn pkg_cffi_resolve_header_path(header_path: String, project_root: String) -> St
 
 // A generated `#Bindgen` cache must carry the current C descriptor stamp;
 // a stale one is refused before the loader parses it.
-pub fn pkg_cffi_check_cache_descriptor(source: String, path: String, lib: String) -> Diagnostic? Never! {
+fn pkg_cffi_check_cache_descriptor(source: String, path: String, lib: String) -> Diagnostic? Never! {
     if !source.contains("#Bindgen") -> return None
     descriptor :: pkg_binder_descriptor(ForeignLanguage.C) ?? return None
     expected :: descriptor.stamp()
@@ -410,7 +410,7 @@ fn pkg_cffi_queue_load(preparation: &CBindingPreparation, source: String, path: 
 // Discover, generate, and refresh the binding caches of every C library the
 // program brings in. The first header seen for a library wins. A cache path
 // already loaded by the program is not queued again; its facade still is.
-pub fn pkg_cffi_prepare_binding_caches(project_root: String, imports: [CBindingImport], loaded_paths: [String], entry: String?, overlays: [String: HandleOverlay]) -[FS, Env, Exec, Time.Wait]> CBindingPreparation Never! {
+fn pkg_cffi_prepare_binding_caches(project_root: String, imports: [CBindingImport], loaded_paths: [String], entry: String?, overlays: [String: HandleOverlay]) -[FS, Env, Exec, Time.Wait]> CBindingPreparation Never! {
     preparation := CBindingPreparation{loads: [CBindingLoad]{}, metadata: CBindingMetadata.empty(), diagnostics: [Diagnostic]{}}
     libs := [String]{}
     headers := [String: String]{}

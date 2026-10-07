@@ -23,28 +23,28 @@ use core.text.parse as parse
 /// library. `Unsupported`: another Jet version, ABI or platform built it, or
 /// loading is not available here. Each case holds the provider's reason.
 #Error
-pub enum ModError {
+enum ModError {
     Denied(String)
     NotFound(String)
     Invalid(String)
     Unsupported(String)
 }
 
-pub fn load(path: String, grant: ModGrant) -[FS, Exec]> Mod ModError! {
+fn load(path: String, grant: ModGrant) -[FS, Exec]> Mod ModError! {
     if core.mod.load(path, grant: grant) == {
         .Ok(loaded) -> Ok(loaded)
         .Err(reason) -> Err(mod_error(reason))
     }
 }
-pub struct CompiledModule {
-    pub path: String
-    pub handle: Int
+struct CompiledModule {
+    path: String
+    handle: Int
 }
 
 // The provider exposes no `jet_mod_unload` operation.  `Mod` owns its native
 // handle and unloads on drop; a legacy value cannot truthfully be turned into
 // a detached carrier, so preserve the export as a typed refusal.
-pub fn unload(compiled: CompiledModule) -[FS]> CompiledModule ModError! {
+fn unload(compiled: CompiledModule) -[FS]> CompiledModule ModError! {
     Err(ModError.Unsupported("core.mod.unload is unavailable: loaded Mod handles are provider-owned and unload on drop"))
 }
 
@@ -58,11 +58,11 @@ fn mod_error(reason: String) -> ModError Never! {
     ModError.Invalid(reason)
 }
 
-pub fn is_loaded(compiled: CompiledModule) -> Bool Never! {
+fn is_loaded(compiled: CompiledModule) -> Bool Never! {
     compiled.handle > 0
 }
 
-pub fn path(compiled: CompiledModule) -> String Never! {
+fn path(compiled: CompiledModule) -> String Never! {
     compiled.path
 }
 

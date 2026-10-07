@@ -127,7 +127,7 @@ pub fn build_doc_graph(bundle: &ProgramBundle, index: &SemIndex) -> DocGraph {
         graph.modules.push(DocModule {
             name: module_name.clone(),
             path: module_path.clone(),
-            public: module.pub_file,
+            public: true,
             summary: leading_summary(&module.source),
             source: module_source,
         });
@@ -144,7 +144,7 @@ pub fn build_doc_graph(bundle: &ProgramBundle, index: &SemIndex) -> DocGraph {
             &module.items,
             &module_path,
             "",
-            module.pub_file,
+            false,
             &module.path,
             &module.display,
             &module.source,

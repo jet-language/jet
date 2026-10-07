@@ -5,7 +5,7 @@ use jet_foundation.[
     UnitRatio,
 ]
 
-pub enum SemaNumericUnitConversionProof {
+enum SemaNumericUnitConversionProof {
     Exact(value: Float)
     Inexact
     Unavailable
@@ -17,22 +17,22 @@ pub enum SemaNumericUnitConversionProof {
 // wanted them in the shared `wanted` row, and its function is checked again on
 // the owning thread. A check with no access at all (no registration graph) has
 // no callbacks.
-pub enum SemaHostHookAccess {
+enum SemaHostHookAccess {
     Callbacks(hooks: Shared<SemaRegistrationHostHooks>)
     Withheld(wanted: Shared<SemaHostHookWanted>)
 }
 
-pub struct SemaHostHookWanted {
-    pub wanted: Bool
+struct SemaHostHookWanted {
+    wanted: Bool
 }
 
-pub fn sema_host_hook_access(hooks: Shared<SemaRegistrationHostHooks>) -> SemaHostHookAccess? {
+fn sema_host_hook_access(hooks: Shared<SemaRegistrationHostHooks>) -> SemaHostHookAccess? {
     Val(SemaHostHookAccess.Callbacks{hooks: hooks})
 }
 
 // The callbacks behind `access`, or None. A withheld access records that this
 // check wanted them.
-pub fn sema_host_hook_callbacks(access: SemaHostHookAccess?) -> Shared<SemaRegistrationHostHooks>? {
+fn sema_host_hook_callbacks(access: SemaHostHookAccess?) -> Shared<SemaRegistrationHostHooks>? {
     row :: access ?? return None
     if row == {
         .Callbacks(hooks) -> Val(hooks)
@@ -46,7 +46,7 @@ pub fn sema_host_hook_callbacks(access: SemaHostHookAccess?) -> Shared<SemaRegis
 }
 
 // Whether `access` withholds the callbacks (a check on a compiler thread).
-pub fn sema_host_hooks_withheld(access: SemaHostHookAccess?) -> Bool {
+fn sema_host_hooks_withheld(access: SemaHostHookAccess?) -> Bool {
     row :: access ?? return false
     if row == {
         .Callbacks(_) -> false
@@ -54,7 +54,7 @@ pub fn sema_host_hooks_withheld(access: SemaHostHookAccess?) -> Bool {
     }
 }
 
-pub fn sema_numeric_unit_conversion_exact(access: SemaHostHookAccess?, value: Float, scale: UnitRatio, offset: UnitRatio) -> SemaNumericUnitConversionProof {
+fn sema_numeric_unit_conversion_exact(access: SemaHostHookAccess?, value: Float, scale: UnitRatio, offset: UnitRatio) -> SemaNumericUnitConversionProof {
     hooks :: sema_host_hook_callbacks(access) ?? return SemaNumericUnitConversionProof.Unavailable
     callback_option :: hooks.numeric_unit_conversion_exact
     callback :: callback_option ?? return SemaNumericUnitConversionProof.Unavailable

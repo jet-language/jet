@@ -740,13 +740,13 @@ fn c_member_lists_resolve_each_library_and_alias_through_cffi() {
 
 module c_scope {
     use c.[c as lib]
-    pub fn call() -> Int {
+    fn call() -> Int {
         return lib.clamp(1, 2, 3)
     }
 }
 module m_scope {
     use c.[m as lib]
-    pub fn call() -> Int {
+    fn call() -> Int {
         return lib.version(1, 2, 3)
     }
 }
@@ -816,7 +816,7 @@ fn inline_foreign_alias_collision_is_rejected_in_one_scope() {
 
 module duplicate {
     use c.[c as lib, m as lib]
-    pub fn call() -> Int {
+    fn call() -> Int {
         return lib.first()
     }
 }
@@ -902,12 +902,12 @@ fn foreign_js_import_uses_generated_binding_cache_for_symbols() {
     fs::create_dir_all(&cache_dir).unwrap();
     fs::write(
         cache_dir.join("plotly.jet"),
-        "pub fn scatter() -> Int {\n    return 7\n}\n",
+        "fn scatter() -> Int {\n    return 7\n}\n",
     )
     .unwrap();
     fs::write(
         cache_dir.join("d3.jet"),
-        "pub fn select() -> Int {\n    return 8\n}\n",
+        "fn select() -> Int {\n    return 8\n}\n",
     )
     .unwrap();
     let main = dir.join("main.jet");
@@ -925,16 +925,16 @@ fn foreign_js_inline_member_list_uses_the_same_binding_cache() {
     fs::create_dir_all(&cache_dir).unwrap();
     fs::write(
         cache_dir.join("plotly.jet"),
-        "pub fn scatter() -> Int {\n    return 7\n}\n",
+        "fn scatter() -> Int {\n    return 7\n}\n",
     )
     .unwrap();
     fs::write(
         cache_dir.join("d3.jet"),
-        "pub fn select() -> Int {\n    return 8\n}\n",
+        "fn select() -> Int {\n    return 8\n}\n",
     )
     .unwrap();
     let main = dir.join("main.jet");
-    let src = "use js.[d3]\nmodule nested {\n    use js.[plotly as inner_plot]\n    pub fn inner() -> Int {\n        return inner_plot.scatter()\n    }\n}\nfn run() {\n    print(d3.select())\n    print(nested.inner())\n}\n";
+    let src = "use js.[d3]\nmodule nested {\n    use js.[plotly as inner_plot]\n    fn inner() -> Int {\n        return inner_plot.scatter()\n    }\n}\nfn run() {\n    print(d3.select())\n    print(nested.inner())\n}\n";
     fs::write(&main, src).unwrap();
 
     jet::compile_with_path(src, main.to_str().unwrap())
@@ -948,7 +948,7 @@ fn foreign_js_inline_pub_member_list_reexports_the_namespace() {
     fs::create_dir_all(&cache_dir).unwrap();
     fs::write(
         cache_dir.join("plotly.jet"),
-        "pub fn scatter() -> Int {\n    return 7\n}\n",
+        "fn scatter() -> Int {\n    return 7\n}\n",
     )
     .unwrap();
     let main = dir.join("main.jet");
@@ -2220,7 +2220,7 @@ fn cffi_string_returns_are_borrowed_non_null_utf8_and_copied() {
         });
         let wrapper = out
             .rust
-            .split_once("pub fn __jet_get() -> String {\n")
+            .split_once("fn __jet_get() -> String {\n")
             .unwrap_or_else(|| panic!("missing generated C wrapper for {name}"))
             .1
             .split_once("\n}\n")

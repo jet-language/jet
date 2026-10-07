@@ -31,7 +31,6 @@ fn err_codes(src: &str) -> Vec<String> {
             block_spans: std::mem::take(&mut prog.block_spans),
             source: src.to_string(),
             web_target_ceiling: prog.web_target_ceiling,
-            pub_file: prog.pub_file,
             no_prelude: prog.no_prelude,
             default_target: prog.default_target,
             html_path: prog.html_path.clone(),

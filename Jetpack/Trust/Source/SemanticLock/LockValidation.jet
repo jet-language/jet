@@ -3,7 +3,7 @@
 // consistency, and source authority. An empty issue list means the lock may
 // be committed.
 
-pub enum ValidationIssue {
+enum ValidationIssue {
     InputCycle(String)
     MissingFollows(input: String, follows: String)
     MissingHash(semantic_key: String)
@@ -27,7 +27,7 @@ pub enum ValidationIssue {
 
 // Every issue that blocks a write, in check order: input graph, records,
 // then source maps.
-pub fn trust_semantic_lock_issues(lock: SemanticLockFile) -> [ValidationIssue] Never! {
+fn trust_semantic_lock_issues(lock: SemanticLockFile) -> [ValidationIssue] Never! {
     issues := trust_lock_input_issues(lock.inputs)
     loop issue in trust_lock_record_issues(lock) -> &issues.push(issue)
     loop issue in trust_lock_source_map_issues(lock) -> &issues.push(issue)
@@ -35,14 +35,14 @@ pub fn trust_semantic_lock_issues(lock: SemanticLockFile) -> [ValidationIssue] N
 }
 
 // Rust `revalidate`: the lock may be written, or `Rejected` with every issue.
-pub fn trust_revalidate_semantic_lock(lock: SemanticLockFile) TrustError! {
+fn trust_revalidate_semantic_lock(lock: SemanticLockFile) TrustError! {
     issues :: trust_semantic_lock_issues(lock)
     if issues.len() > 0 -> return Err(TrustError.Rejected(issues))
 }
 
 // The pure half of `merge_revalidate_commit`: merge three ways, refuse
 // conflicts as domain conflicts, and revalidate the result before any write.
-pub fn trust_merge_for_commit(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> SemanticLockFile TrustError! {
+fn trust_merge_for_commit(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> SemanticLockFile TrustError! {
     outcome :: trust_merge_semantic_locks(base, left, right)
     if outcome.conflicts.len() > 0 {
         issues := [ValidationIssue]{}

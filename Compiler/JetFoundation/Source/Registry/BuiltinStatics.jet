@@ -13,7 +13,7 @@
 // the owner's explicit type arguments; the rest bind from the checked
 // arguments, then the expected result, and otherwise default to `Int`.
 
-pub enum BuiltinStaticLowering {
+enum BuiltinStaticLowering {
     // The first value argument becomes the builtin receiver.
     ArgumentBuiltin(operation: TBuiltinOp)
     // `Int.from_radix(text, base)`: the text is the receiver; the op carries the call line.
@@ -35,42 +35,42 @@ pub enum BuiltinStaticLowering {
     Precise(type_name: String, function: String)
 }
 
-pub enum BuiltinStaticOwnerRule {
+enum BuiltinStaticOwnerRule {
     Inferred
     // `Atomic<T>`: the owner names T explicitly and T is a lock-free scalar.
     AtomicScalar
 }
 
-pub struct BuiltinStaticRow {
+struct BuiltinStaticRow {
     // "" is an ambient built-in owner; otherwise the Core module exporting it.
-    pub module_name: String
-    pub owner: String
-    pub method: String
-    pub type_params: [String]
-    pub owner_type_params: Int
-    pub owner_rule: BuiltinStaticOwnerRule
-    pub parameters: [Type]
+    module_name: String
+    owner: String
+    method: String
+    type_params: [String]
+    owner_type_params: Int
+    owner_rule: BuiltinStaticOwnerRule
+    parameters: [Type]
     // How every argument passes: Read, or Move for a row that owns its
     // payload (`shared expr`).
-    pub parameter_convention: AccessConvention
-    pub return_type: Type
-    pub lowering: BuiltinStaticLowering
-    pub arity_code: String
+    parameter_convention: AccessConvention
+    return_type: Type
+    lowering: BuiltinStaticLowering
+    arity_code: String
 }
 
-pub struct BuiltinNumericKind {
-    pub name: String
-    pub ty: Type
-    pub rust: String
-    pub integer: Bool
-    pub fixed: Bool
-    pub signed: Bool
-    pub bits: Int
+struct BuiltinNumericKind {
+    name: String
+    ty: Type
+    rust: String
+    integer: Bool
+    fixed: Bool
+    signed: Bool
+    bits: Int
 }
 
-pub struct BuiltinNumericSource {
-    pub method: String
-    pub source: String
+struct BuiltinNumericSource {
+    method: String
+    source: String
 }
 
 fn builtin_static(owner: String, method: String, parameters: [Type], return_type: Type, lowering: BuiltinStaticLowering) -> BuiltinStaticRow Never! {
@@ -238,7 +238,7 @@ BUILTIN_NUMERIC_SOURCES :: prep { [BuiltinNumericSource]{
     BuiltinNumericSource{method: "from_fraction", source: "Fraction"}
 } }
 
-pub fn builtin_numeric_kind(name: String) -> BuiltinNumericKind? {
+fn builtin_numeric_kind(name: String) -> BuiltinNumericKind? {
     loop kind in BUILTIN_NUMERIC_KINDS {
         if kind.name == name -> return Val(kind)
     }
@@ -322,7 +322,7 @@ fn builtin_static_numeric_row(owner: String, method: String) -> BuiltinStaticRow
 
 // Every row for `owner.method`, across modules; the caller admits the one
 // whose module matches how the owner was named.
-pub fn builtin_static_rows(owner: String, method: String) -> [BuiltinStaticRow] Never! {
+fn builtin_static_rows(owner: String, method: String) -> [BuiltinStaticRow] Never! {
     rows := builtin_static_rows_in(BUILTIN_STATIC_ROWS, owner, method)
     if builtin_static_numeric_row(owner, method) == .Val(row) -> &rows.push(row)
     rows
@@ -337,7 +337,7 @@ fn builtin_static_rows_in(table: [BuiltinStaticRow], owner: String, method: Stri
     rows
 }
 
-pub fn builtin_static_is_type_param(row: BuiltinStaticRow, name: String) -> Bool Never! {
+fn builtin_static_is_type_param(row: BuiltinStaticRow, name: String) -> Bool Never! {
     loop param in row.type_params {
         if param == name -> return true
     }

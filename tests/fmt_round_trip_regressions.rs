@@ -74,7 +74,7 @@ fn generic_module_and_library_bodies_round_trip_retired_signatures() {
     let generic = include_str!("../Examples/features/modules/generic_modules.jet");
     let formatted = jet::format_source(generic).expect("generic module should format");
     assert!(
-        formatted.contains("pub fn slot(k: K) -> Slot { Slot.Value(k) }"),
+        formatted.contains("fn slot(k: K) -> Slot { Slot.Value(k) }"),
         "generic module callable was not canonicalized:\n{formatted}"
     );
     assert_eq!(

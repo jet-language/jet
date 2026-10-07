@@ -49,7 +49,7 @@ struct PrivateStage {
 }
 
 // Run a recipe under the sandbox and return the build provenance.
-pub fn recipe_run(recipe: BuildRecipe, ctx: RecipeBuildContext, transport: RecipeTransport?) -[FS, Env, Exec, Net, Rand, Time.Wait]> RunReport RecipeDiagnostic! {
+fn recipe_run(recipe: BuildRecipe, ctx: RecipeBuildContext, transport: RecipeTransport?) -[FS, Env, Exec, Net, Rand, Time.Wait]> RunReport RecipeDiagnostic! {
     recipe_validate(recipe, ctx)
     // Every run lowers through the one BuildPlan IR before sandbox steps
     // execute; cache identity consumers use its fingerprint.
@@ -71,7 +71,7 @@ pub fn recipe_run(recipe: BuildRecipe, ctx: RecipeBuildContext, transport: Recip
 
 // Run with per-step logging into `attempt` (`jet logs`, `jet explain`, and
 // preserved failed scratch).
-pub fn recipe_run_logged(recipe: BuildRecipe, ctx: RecipeBuildContext, transport: RecipeTransport?, attempt: &BuildAttempt) -[FS, Env, Exec, Net, Rand, Time.Wait]> RunReport RecipeDiagnostic! {
+fn recipe_run_logged(recipe: BuildRecipe, ctx: RecipeBuildContext, transport: RecipeTransport?, attempt: &BuildAttempt) -[FS, Env, Exec, Net, Rand, Time.Wait]> RunReport RecipeDiagnostic! {
     recipe_validate(recipe, ctx)
     plan :: recipe_lower_to_plan(recipe, "pkg", ctx.tools)
     plan_fingerprint :: recipe_plan_fingerprint(plan)
@@ -292,6 +292,6 @@ fn recipe_step_command(step: BuildStep) -> String Never! {
 
 // U19 trust gate: record trust for a recipe hash in the canonical trust
 // store. True when the hash is new, false when it was already granted.
-pub fn recipe_trust_first_build(recipe_hash: String, trust_store: String) -[FS]> Bool Never! {
+fn recipe_trust_first_build(recipe_hash: String, trust_store: String) -[FS]> Bool Never! {
     trust_grant_hash(trust_store, recipe_hash)
 }

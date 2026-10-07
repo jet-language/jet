@@ -7,7 +7,7 @@
 // the Phase-1 `pkg.*` directive surface. A file that declares the `module`
 // keyword stays on this path even when its later syntax is malformed; only
 // the legacy directive surface uses the tolerant fallback scanner.
-pub fn envmodel_is_module_surface(src: String) -> Bool Never! {
+fn envmodel_is_module_surface(src: String) -> Bool Never! {
     source :: src.bytes()
     lexed :: lex_config(source)
     has_module := false
@@ -29,21 +29,21 @@ pub fn envmodel_is_module_surface(src: String) -> Bool Never! {
 // Evaluate a typed `env.jet` into an `EnvPlan`. Sources merge across modules
 // by key (U5); package sugar resolves to `package@source` refs; the `prompt`
 // fact becomes the label.
-pub fn envmodel_evaluate_env(src: String, base_dir: String) -[FS, Env]> EnvPlan EnvModelEvalError! {
+fn envmodel_evaluate_env(src: String, base_dir: String) -[FS, Env]> EnvPlan EnvModelEvalError! {
     Ok(envmodel_evaluate_env_with_selections(src, base_dir, None, None))
 }
 
 // Evaluate a typed environment with one authoritative preset selection. An
 // explicit CLI choice is resolved before ambient hostname/user matching, so
 // an unrelated ambient preset cannot reject or augment the requested plan.
-pub fn envmodel_evaluate_env_with_preset(src: String, base_dir: String, requested_preset: String?) -[FS, Env]> EnvPlan EnvModelEvalError! {
+fn envmodel_evaluate_env_with_preset(src: String, base_dir: String, requested_preset: String?) -[FS, Env]> EnvPlan EnvModelEvalError! {
     Ok(envmodel_evaluate_env_with_selections(src, base_dir, requested_preset, None))
 }
 
 // Evaluate an environment while explicitly selecting one `env.<name>` module.
 // The ordinary CLI uses the deterministic default (`dev`, then `default`,
 // then lexical order) when it has no selector.
-pub fn envmodel_evaluate_env_with_environment(src: String, base_dir: String, requested_environment: String?) -[FS, Env]> EnvPlan EnvModelEvalError! {
+fn envmodel_evaluate_env_with_environment(src: String, base_dir: String, requested_environment: String?) -[FS, Env]> EnvPlan EnvModelEvalError! {
     Ok(envmodel_evaluate_env_with_selections(src, base_dir, None, requested_environment))
 }
 
@@ -51,7 +51,7 @@ fn envmodel_unresolved_root(base_dir: String, cause: IOError) -> EnvModelEvalErr
     envmodel_error("E1331", "environment root `{base_dir}` cannot be resolved: {cause}", "one environment graph must resolve from a real project directory before it follows imports or path-backed facts", "run the command from an existing project directory", None)
 }
 
-pub fn envmodel_evaluate_env_with_selections(src: String, base_dir: String, requested_preset: String?, requested_environment: String?) -[FS, Env]> EnvPlan EnvModelEvalError! {
+fn envmodel_evaluate_env_with_selections(src: String, base_dir: String, requested_preset: String?, requested_environment: String?) -[FS, Env]> EnvPlan EnvModelEvalError! {
     environment_root :: files.canonicalize(base_dir) ?? return Err(envmodel_unresolved_root(base_dir, err))
     loader := FileSystemSourceLoader{root: environment_root}
     Ok(envmodel_evaluate_env_with_source_loader(src, environment_root, &loader, requested_preset, requested_environment))
@@ -61,7 +61,7 @@ pub fn envmodel_evaluate_env_with_selections(src: String, base_dir: String, requ
 // the store. This is the production path for `jet profile plan`: provider
 // identity, source provenance, and collision selections come from the same
 // graph used by environment evaluation.
-pub fn envmodel_evaluate_package_profile(src: String, base_dir: String, name: String) -[FS, Env]> PackageProfilePlan EnvModelEvalError! {
+fn envmodel_evaluate_package_profile(src: String, base_dir: String, name: String) -[FS, Env]> PackageProfilePlan EnvModelEvalError! {
     env :: envmodel_evaluate_env(src, base_dir)
     profiles := PackageProfileSet{}
     loop profile in env.package_profiles {
@@ -204,7 +204,7 @@ fn envmodel_classify_profile_ref(raw: String, table: SourceTable) -> RefSpec Ref
 // This is the same graph evaluator as `envmodel_evaluate_env_with_selections`;
 // only the file and directory boundary changes. Package tooling uses it to
 // keep every imported profile source inside the already-pinned package root.
-pub fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, base_dir: String, loader: &L, requested_preset: String?, requested_environment: String?) -[FS, Env]> EnvPlan EnvModelEvalError! {
+fn envmodel_evaluate_env_with_source_loader<L: SourceLoader>(src: String, base_dir: String, loader: &L, requested_preset: String?, requested_environment: String?) -[FS, Env]> EnvPlan EnvModelEvalError! {
     program :: envmodel_parse_program(src)
     environment_root :: files.canonicalize(base_dir) ?? return Err(envmodel_unresolved_root(base_dir, err))
     // The root `env.jet` plus every file reachable through `imports: find(…)`

@@ -16,7 +16,7 @@ use jet_foundation.[
     type_name,
 ]
 
-pub fn sema_loop_value_check_result_exit(context: &SemaCheckContext, frame_index: Int, value: TExpr, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_loop_value_check_result_exit(context: &SemaCheckContext, frame_index: Int, value: TExpr, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
     frame :: if frame_index >= 0 && frame_index < context.loop_value_frames.len() -> Val(context.loop_value_frames[frame_index]) else -> None
     target :: frame ?? return None
     if target.kind != SemaLoopValueKind.Result -> return None
@@ -39,7 +39,7 @@ pub fn sema_loop_value_check_result_exit(context: &SemaCheckContext, frame_index
     Val(value)
 }
 
-pub fn sema_loop_value_check_collecting_item(value: Expr, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_loop_value_check_collecting_item(value: Expr, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if context.collect_item_types.len() == 0 -> return None
     expected := sema_loop_value_collecting_type(context)
     checked_expected := expected
@@ -250,7 +250,7 @@ fn sema_loop_value_rewrite_collecting_statements(statements: &[TStmt], local: TL
     true
 }
 
-pub fn sema_loop_value_lower_collecting_body(body: [TStmt], item_type: Type, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> [TStmt]? {
+fn sema_loop_value_lower_collecting_body(body: [TStmt], item_type: Type, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> [TStmt]? {
     collector_type := Type.List{element: item_type}
     local := tir_generated_local("__jet_collect_{span.start}", span)
     local.mutable = true
@@ -437,6 +437,6 @@ fn sema_loop_value_widen_result_breaks_in(statements: &[TStmt], root_label: Stri
     true
 }
 
-pub fn sema_loop_value_widen_result_breaks(body: &[TStmt], root_label: String?, result_type: Type, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_loop_value_widen_result_breaks(body: &[TStmt], root_label: String?, result_type: Type, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
     sema_loop_value_widen_result_breaks_in(&body, root_label, result_type, true, environment, &diagnostics)
 }

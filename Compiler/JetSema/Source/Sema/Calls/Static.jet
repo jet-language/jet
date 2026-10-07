@@ -44,11 +44,11 @@ use jet_foundation.[
 ]
 
 struct SemaStaticMethodTarget {
-    pub owner_name: String
-    pub owner_type: Type
-    pub method: TMethodRef
-    pub target: SemaCallDirectTarget
-    pub function: Func?
+    owner_name: String
+    owner_type: Type
+    method: TMethodRef
+    target: SemaCallDirectTarget
+    function: Func?
 }
 
 fn sema_call_static_registered_method_exists(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, method: String, environment: SemaScopeEnvironment) -> Bool Never! {
@@ -592,7 +592,7 @@ fn sema_call_try_builtin_static_field(base: Expr, owner: String, method: String,
     sema_call_try_builtin_static(owner, module_name, method, owner_type_args, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
-pub fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver == .Call(descriptor) -> return sema_call_try_inline_range_conversion(descriptor, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if receiver == .Field(base, owner_leaf, _) -> return sema_call_try_builtin_static_field(base, owner_leaf, method, owner_type_args, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     type_name :: if receiver == {

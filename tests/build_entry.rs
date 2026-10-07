@@ -126,10 +126,10 @@ fn multi_dependency_fixture(name: &str) -> (PathBuf, PathBuf) {
     );
     write(
         &dep_a.join("dep_a.jet"),
-        "pub fn value() -> Int { return 1 }\n",
+        "fn value() -> Int { return 1 }\n",
     );
     let dep_b_source = dep_b.join("dep_b.jet");
-    write(&dep_b_source, "pub fn value() -> Int { return 2 }\n");
+    write(&dep_b_source, "fn value() -> Int { return 2 }\n");
     write(
         &root.join("main.jet"),
         r#"
@@ -423,15 +423,15 @@ fn enum_dependency_change_invalidates_compiler_package_chain() {
     let producer_source = producer.join("producer.jet");
     let producer_fixture = r#"
 #Layout(c, tag: U8)
-pub enum Packet {
+enum Packet {
     Ping(value: Int) = 3
 }
 
-pub fn make() -> Packet {
+fn make() -> Packet {
     return Packet.Ping{value: 7}
 }
 
-pub fn seed__MARKER__() -> Int {
+fn seed__MARKER__() -> Int {
     return 0
 }
 "#
@@ -442,7 +442,7 @@ pub fn seed__MARKER__() -> Int {
         r#"
 use producer
 
-pub fn inspect(value: producer.Packet) -> Int {
+fn inspect(value: producer.Packet) -> Int {
     return 7
 }
 "#,
@@ -499,16 +499,16 @@ fn run() {
 
     let changed_fixture = r#"
 #Layout(c, tag: U8)
-pub enum Packet {
+enum Packet {
     Ping(value: Int, extra: Int) = 9
     Pong(value: Int) = 11
 }
 
-pub fn make() -> Packet {
+fn make() -> Packet {
     return Packet.Ping{value: 7, extra: 1}
 }
 
-pub fn seed__MARKER__() -> Int {
+fn seed__MARKER__() -> Int {
     return 0
 }
 "#
@@ -608,7 +608,7 @@ fn warm_dependency_cache_still_runs_frontend_diagnostics() {
     assert!(artifact.is_file(), "first build must seal dep_b");
     fs::remove_file(&artifact).unwrap();
 
-    write(&dep_b_source, "pub fn value() -> Int { return 2\n");
+    write(&dep_b_source, "fn value() -> Int { return 2\n");
     let errors = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap_err();
     assert!(!errors.is_empty());
     assert!(errors.iter().all(|diagnostic| diagnostic.code != "ICE"));
@@ -1101,7 +1101,7 @@ fn explain_build_reports_package_reuse_reasons() {
     );
     write(&dep.join("package.jet"), "name: \"dep_b\"\nversion: \"0.1.0\"\n");
     let dep_source = dep.join("dep_b.jet");
-    write(&dep_source, "pub fn value() -> Int { return 2 }\n");
+    write(&dep_source, "fn value() -> Int { return 2 }\n");
     write(&root.join("main.jet"), "use dep_b\n\nfn run() { print(dep_b.value()) }\n");
     let store = root.join("store");
     let check = || {
@@ -1135,7 +1135,7 @@ fn explain_build_reports_package_reuse_reasons() {
     assert!(first.len() >= 2, "{first:?}");
     assert!(first.iter().all(|(_, why)| why == "first-run"), "{first:?}");
 
-    write(&dep_source, "pub fn value() -> Int { return 3 }\n");
+    write(&dep_source, "fn value() -> Int { return 3 }\n");
     let body = check();
     assert_eq!(reason(&body, "dep_b"), "red:source+cutoff", "{body:?}");
     assert!(
@@ -1147,7 +1147,7 @@ fn explain_build_reports_package_reuse_reasons() {
 
     write(
         &dep_source,
-        "pub fn value() -> Int { return 3 }\npub fn unused() -> Int { return 4 }\n",
+        "fn value() -> Int { return 3 }\npub fn unused() -> Int { return 4 }\n",
     );
     let interface = check();
     assert_eq!(reason(&interface, "dep_b"), "red:source", "{interface:?}");
@@ -1190,7 +1190,7 @@ fn body_edit_in_root_reuses_dependency_package_record() {
     write(&dep.join("package.jet"), "name: \"util\"\nversion: \"0.1.0\"\n");
     write(
         &dep.join("util.jet"),
-        "pub fn shout(text: String) -> String {\n    print(text)\n    return \"{text}!\"\n}\n\npub fn twice(n: Int) -> Int { return helper(n) + helper(n) }\n\nfn helper(n: Int) -> Int { return n * 2 }\n",
+        "fn shout(text: String) -> String {\n    print(text)\n    return \"{text}!\"\n}\n\nfn twice(n: Int) -> Int { return helper(n) + helper(n) }\n\nfn helper(n: Int) -> Int { return n * 2 }\n",
     );
     let lib = root.join("lib.jet");
     let source = |extra: &str| {
@@ -1249,7 +1249,7 @@ fn body_edit_rechecks_only_the_edited_item() {
     let shapes = root.join("shapes.jet");
     let source = |factor: &str| {
         format!(
-            "pub fn area(n: Int) -> Int {{\n    n * n{factor}\n}}\n\npub fn edge(n: Int) -> Int {{\n    helper(n) + 4\n}}\n\nfn helper(n: Int) -> Int {{\n    n - 1\n}}\n\npub fn perimeter(n: Int) -> Int {{\n    doubled :: n + n\n    doubled + doubled\n}}\n"
+            "fn area(n: Int) -> Int {{\n    n * n{factor}\n}}\n\npub fn edge(n: Int) -> Int {{\n    helper(n) + 4\n}}\n\nfn helper(n: Int) -> Int {{\n    n - 1\n}}\n\npub fn perimeter(n: Int) -> Int {{\n    doubled :: n + n\n    doubled + doubled\n}}\n"
         )
     };
     let check = |store: &Path| {
@@ -1303,7 +1303,7 @@ fn body_edit_reevaluates_the_constants_that_read_it() {
     let lib = root.join("lib.jet");
     let source = |size: &str| {
         format!(
-            "pub fn size() -> Int {{\n    {size}\n}}\n\npub fn check_size(n: Int) -> Bool {{\n    assert((n == 4), \"size must stay 4\")\n    true\n}}\n\npub SIZE :: prep {{ size() }}\n\npub OK :: prep {{ check_size(SIZE) }}\n"
+            "fn size() -> Int {{\n    {size}\n}}\n\nfn check_size(n: Int) -> Bool {{\n    assert((n == 4), \"size must stay 4\")\n    true\n}}\n\nSIZE :: prep {{ size() }}\n\nOK :: prep {{ check_size(SIZE) }}\n"
         )
     };
     let check = |store: &Path| {
@@ -1966,7 +1966,7 @@ fn build(b: BuildContext) -> BuildPlan {
     }
     return b.plan()
 }
-pub fn helper() {}
+fn helper() {}
 "#,
     );
     let entry = root.join("main.jet");
@@ -2499,7 +2499,7 @@ fn program_info_uses_qualified_collision_free_type_function_and_method_identitie
 fn run_program_info_uses_qualified_collision_free_type_function_and_method_identities() {
     let root = project("program-identities");
     write(&root.join("left.jet"), "use core.net as net\npub enum Choice { A }\nfn helper() { net.tcp_connect(\"127.0.0.1:1\") ?? panic(\"net\") }\npub fn same() {\n    helper()\n    panic(\"left\")\n}\npub fn answer() -> Int { return 7 }\n");
-    write(&root.join("right.jet"), "pub struct Choice { value: Int }\nimpl Choice { pub fn inspect(self) {} }\nfn helper() {}\npub fn same() { helper() }\n");
+    write(&root.join("right.jet"), "struct Choice { value: Int }\nimpl Choice { fn inspect(self) {} }\nfn helper() {}\npub fn same() { helper() }\n");
     let entry = root.join("main.jet");
     write(
         &entry,
@@ -2784,10 +2784,10 @@ fn generated_sources_materialize_and_compile_as_one_program() {
         r#"
 fn build(b: BuildContext) -> BuildPlan {
     b.generate("consumer") {
-        pub fn generated_value() -> String { "round two" }
+        fn generated_value() -> String { "round two" }
     }
     b.generate("provider") {
-        pub fn message() -> String { "round two" }
+        fn message() -> String { "round two" }
         }
     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/consumer.jet", ".jet/generated/main/provider.jet"], [])
     return b.plan(app)
@@ -2812,10 +2812,10 @@ fn duplicate_generated_modules_fail_before_any_file_is_written() {
         r#"
 fn build(b: BuildContext) -> BuildPlan {
     b.generate("alpha") {
-        pub fn alpha() {}
+        fn alpha() {}
     }
     b.generate("alpha") {
-        pub fn beta() {}
+        fn beta() {}
         }
     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/alpha.jet", ".jet/generated/main/beta.jet"], [])
     return b.plan(app)
@@ -3113,7 +3113,7 @@ fn nested_workspace_is_the_module_import_root() {
     );
     write(
         &root.join("outside.jet"),
-        "module _outside { pub fn fixture() {} }\n",
+        "module _outside { fn fixture() {} }\n",
     );
     write(
         &child.join("boundary.jet"),
@@ -3149,7 +3149,7 @@ fn module_directory_entry_requires_run_jet_not_main_jet() {
     let root = project("module-run-entry");
     let module = root.join("tool");
     fs::create_dir_all(&module).unwrap();
-    write(&module.join("main.jet"), "pub fn run() {}\n");
+    write(&module.join("main.jet"), "fn run() {}\n");
     let entry = root.join("run.jet");
     write(&entry, "use tool\nfn run() {}\n");
 
@@ -3354,7 +3354,7 @@ fn build(b: BuildContext) -> BuildPlan {
     plugin :: b.add_library("plugin", ["main.jet"], [])
     return b.plan(plugin)
 }
-pub fn transform(value: Int) -> Int { return value + 1 }
+fn transform(value: Int) -> Int { return value + 1 }
 "#,
     );
     let mut plugin = BuildRunOptions::default();

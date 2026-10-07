@@ -4,10 +4,10 @@
 // substrate: a package sees its declared dependencies only, plus catalog
 // edges a caller-owned surface already selected.
 
-pub struct PackageNode {
-    pub name: String
-    pub direct_deps: [String]
-    pub transitive_deps: [String]
+struct PackageNode {
+    name: String
+    direct_deps: [String]
+    transitive_deps: [String]
 
     fn new(name: String) -> PackageNode Never! {
         PackageNode{name: name, direct_deps: [String]{}, transitive_deps: [String]{}}
@@ -26,30 +26,30 @@ pub struct PackageNode {
     }
 }
 
-pub struct CatalogEntry {
-    pub logical_name: String
-    pub provider_ref: String
-    pub version_rule: String
-    pub allowed_packages: [String]
-    pub owner_workspace: String
-    pub rationale: String
+struct CatalogEntry {
+    logical_name: String
+    provider_ref: String
+    version_rule: String
+    allowed_packages: [String]
+    owner_workspace: String
+    rationale: String
 }
 
-pub enum VisibleEdgeKind {
+enum VisibleEdgeKind {
     DirectDep
     Catalog
 }
 
-pub struct VisibleEdge {
-    pub owner_package: String
-    pub dependency: String
-    pub provider_ref: String
-    pub kind: VisibleEdgeKind
-    pub rationale: String
+struct VisibleEdge {
+    owner_package: String
+    dependency: String
+    provider_ref: String
+    kind: VisibleEdgeKind
+    rationale: String
 }
 
 // How a package can make a hidden dependency visible.
-pub enum MissingDependencyFix {
+enum MissingDependencyFix {
     DirectAddPath(dep: String, path: String)
     DirectAddGit(dep: String, url: String, tag_name: String)
     CatalogData(logical_name: String, packages: [String])
@@ -58,11 +58,11 @@ pub enum MissingDependencyFix {
 
 // A dependency a package asked for but cannot see.
 #Error
-pub struct MissingDependency {
-    pub owner_package: String
-    pub requested: String
-    pub reason: String
-    pub fix: MissingDependencyFix
+struct MissingDependency {
+    owner_package: String
+    requested: String
+    reason: String
+    fix: MissingDependencyFix
 
     // The fix as one teaching sentence.
     fn fix_text(self) -> String Never! {
@@ -75,10 +75,10 @@ pub struct MissingDependency {
     }
 }
 
-pub struct PackageGraph {
-    packages: [String: PackageNode]
-    catalogs: [CatalogEntry]
-    workspace_members: [String: [String]]
+struct PackageGraph {
+    priv packages: [String: PackageNode]
+    priv catalogs: [CatalogEntry]
+    priv workspace_members: [String: [String]]
 
     fn new() -> PackageGraph Never! {
         PackageGraph{packages: [String: PackageNode]{}, catalogs: [CatalogEntry]{}, workspace_members: [String: [String]]{}}

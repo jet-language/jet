@@ -162,7 +162,7 @@ fn sema_value_method_option_or_err(receiver: Expr, receiver_value: TExpr, inner:
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
 }
 
-pub fn sema_call_try_value_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_value_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if sema_expr_unwrap_tag(receiver_value.ty) == .Option(inner) && args.len() == 1 {
         if method == "map" -> return sema_value_method_option_map(receiver, receiver_value, inner, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         if method == "or_err" -> return sema_value_method_option_or_err(receiver, receiver_value, inner, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)

@@ -58,7 +58,7 @@ fn assert_bodyless_module_runs(name: &str, declaration: &str) {
         ("lib.jet", lib_src.as_str()),
         (
             "helper.jet",
-            "pub fn value() -> String { return \"visible\" }\n",
+            "fn value() -> String { return \"visible\" }\n",
         ),
     ];
 
@@ -600,7 +600,7 @@ fn bodyless_private_module_stays_hidden_outside_owner_file() {
             ("lib.jet", "module helper;\n"),
             (
                 "helper.jet",
-                "pub fn value() -> String { return \"private\" }\n",
+                "fn value() -> String { return \"private\" }\n",
             ),
         ],
     );
@@ -630,10 +630,10 @@ fn bodyless_package_module_stays_hidden_across_packages() {
                 "use dep\nuse dep.[helper]\nfn run() { print(helper.value()) }\n",
             ),
             ("dep/package.jet", "name: \"dep\"\nversion: \"0.1.0\"\n"),
-            ("dep/dep.jet", "pub(package) module helper;\n"),
+            ("dep/dep.jet", "module helper;\n"),
             (
                 "dep/helper.jet",
-                "pub fn value() -> String { return \"hidden\" }\n",
+                "fn value() -> String { return \"hidden\" }\n",
             ),
         ],
     );

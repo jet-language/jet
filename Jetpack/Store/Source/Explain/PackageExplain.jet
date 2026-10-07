@@ -5,7 +5,7 @@
 // attempt, and cache admission records. Explaining never repairs: a missing,
 // unsafe, or mismatched proof is reported as a loss or a conflict.
 
-pub enum ExplainLens {
+enum ExplainLens {
     All
     WhyDepends
     WhatDepends
@@ -38,7 +38,7 @@ pub enum ExplainLens {
 
 // One persisted fact the explanation could not prove (`loss`) or two facts
 // that disagree (`conflict`).
-pub enum ExplainReportKind {
+enum ExplainReportKind {
     Loss
     Conflict
 
@@ -50,9 +50,9 @@ pub enum ExplainReportKind {
     }
 }
 
-pub struct ExplainReport {
-    pub kind: ExplainReportKind
-    pub message: String
+struct ExplainReport {
+    kind: ExplainReportKind
+    message: String
 
     fn loss(message: String) -> ExplainReport Never! {
         ExplainReport{kind: ExplainReportKind.Loss, message: message}
@@ -85,18 +85,18 @@ pub struct ExplainReport {
     }
 }
 
-pub struct ExplainEntry {
-    pub id: String
-    pub name: String
-    pub version: String
-    pub reference: String
-    pub output_hash: String
-    pub output_path: String
-    pub bin_path: String
-    pub rlib_path: String
-    pub receipt: String
-    pub realized_at: Int
-    pub last_used_at: Int
+struct ExplainEntry {
+    id: String
+    name: String
+    version: String
+    reference: String
+    output_hash: String
+    output_path: String
+    bin_path: String
+    rlib_path: String
+    receipt: String
+    realized_at: Int
+    last_used_at: Int
 
     fn to_tree(self) -> DataTree Never! {
         object := [String: DataTree]{}
@@ -115,12 +115,12 @@ pub struct ExplainEntry {
     }
 }
 
-pub struct ExplainObject {
-    pub digest: String
-    pub path: String
-    pub external: Bool
-    pub known: Bool
-    pub owners: [String]
+struct ExplainObject {
+    digest: String
+    path: String
+    external: Bool
+    known: Bool
+    owners: [String]
 
     fn to_tree(self) -> DataTree Never! {
         object := [String: DataTree]{}
@@ -133,12 +133,12 @@ pub struct ExplainObject {
     }
 }
 
-pub struct ExplainGraph {
-    pub direct_dependencies: [ExplainObject]
-    pub dependencies: [ExplainObject]
-    pub direct_referrers: [ExplainObject]
-    pub referrers: [ExplainObject]
-    pub closure: [ExplainObject]
+struct ExplainGraph {
+    direct_dependencies: [ExplainObject]
+    dependencies: [ExplainObject]
+    direct_referrers: [ExplainObject]
+    referrers: [ExplainObject]
+    closure: [ExplainObject]
 
     fn empty() -> ExplainGraph Never! {
         ExplainGraph{direct_dependencies: [ExplainObject]{}, dependencies: [ExplainObject]{}, direct_referrers: [ExplainObject]{}, referrers: [ExplainObject]{}, closure: [ExplainObject]{}}
@@ -161,11 +161,11 @@ fn store_explain_objects_tree(objects: [ExplainObject]) -> DataTree Never! {
     DataTree.Array(items)
 }
 
-pub struct ExplainProfile {
-    pub profile: String
-    pub generation: Int
-    pub output_hash: String
-    pub provider_facts: ProviderFacts
+struct ExplainProfile {
+    profile: String
+    generation: Int
+    output_hash: String
+    provider_facts: ProviderFacts
 
     fn to_tree(self) -> DataTree Never! {
         object := [String: DataTree]{}
@@ -177,17 +177,17 @@ pub struct ExplainProfile {
     }
 }
 
-pub struct ExplainProvider {
-    pub provider: String
-    pub immutable_source: String
-    pub source_digest: String
-    pub toolchain_facts: String
-    pub policy_facts: String
-    pub producer_facts: [String: String]
-    pub provider_facts: ProviderFacts?
-    pub locked_provider_facts: ProviderFacts?
-    pub profile_facts: [ExplainProfile]
-    pub native_document: String
+struct ExplainProvider {
+    provider: String
+    immutable_source: String
+    source_digest: String
+    toolchain_facts: String
+    policy_facts: String
+    producer_facts: [String: String]
+    provider_facts: ProviderFacts?
+    locked_provider_facts: ProviderFacts?
+    profile_facts: [ExplainProfile]
+    native_document: String
 
     fn to_tree(self) -> DataTree Never! {
         facts := [String: DataTree]{}
@@ -217,15 +217,15 @@ fn store_explain_facts_tree(facts: ProviderFacts?) -> DataTree Never! {
     }
 }
 
-pub struct ExplainRoot {
-    pub kind: String
-    pub id: String
-    pub producer: String
-    pub phase: String
-    pub label: String
-    pub reference: String
-    pub targets: [String]
-    pub reason: String
+struct ExplainRoot {
+    kind: String
+    id: String
+    producer: String
+    phase: String
+    label: String
+    reference: String
+    targets: [String]
+    reason: String
 
     fn to_tree(self) -> DataTree Never! {
         object := [String: DataTree]{}
@@ -241,10 +241,10 @@ pub struct ExplainRoot {
     }
 }
 
-pub struct ExplainLiveness {
-    pub live: Bool
-    pub roots: [ExplainRoot]
-    pub reason: String
+struct ExplainLiveness {
+    live: Bool
+    roots: [ExplainRoot]
+    reason: String
 
     fn empty() -> ExplainLiveness Never! {
         ExplainLiveness{live: false, roots: [ExplainRoot]{}, reason: ""}
@@ -261,15 +261,15 @@ pub struct ExplainLiveness {
     }
 }
 
-pub struct ExplainAttempt {
-    pub id: String
-    pub package: String
-    pub reference: String
-    pub provider: String
-    pub status: String
-    pub failed_step: Int
-    pub scratch_dir: String
-    pub log_dir: String
+struct ExplainAttempt {
+    id: String
+    package: String
+    reference: String
+    provider: String
+    status: String
+    failed_step: Int
+    scratch_dir: String
+    log_dir: String
 
     fn from_attempt(attempt: BuildAttempt) -> ExplainAttempt Never! {
         ExplainAttempt{id: attempt.id, package: attempt.package, reference: attempt.reference, provider: attempt.provider, status: attempt.status, failed_step: attempt.failed_step, scratch_dir: attempt.scratch_dir, log_dir: attempt.log_dir}
@@ -289,14 +289,14 @@ pub struct ExplainAttempt {
     }
 }
 
-pub struct ExplainCacheAdmission {
-    pub role: String
-    pub decision: String
-    pub builder: String
-    pub provenance: String
-    pub receipt_version: Int?
-    pub receipt_expires_unix: Int?
-    pub reason: String
+struct ExplainCacheAdmission {
+    role: String
+    decision: String
+    builder: String
+    provenance: String
+    receipt_version: Int?
+    receipt_expires_unix: Int?
+    reason: String
 
     fn to_tree(self) -> DataTree Never! {
         object := [String: DataTree]{}
@@ -326,14 +326,14 @@ fn store_explain_optional_int_text(value: Int?) -> String Never! {
     }
 }
 
-pub struct ExplainRebuild {
-    pub decision: String
-    pub reason: String
-    pub action_key: String
-    pub cache_identity: [String: String]
-    pub cache_admissions: [ExplainCacheAdmission]
-    pub checks: [String: String]
-    pub attempt: ExplainAttempt?
+struct ExplainRebuild {
+    decision: String
+    reason: String
+    action_key: String
+    cache_identity: [String: String]
+    cache_admissions: [ExplainCacheAdmission]
+    checks: [String: String]
+    attempt: ExplainAttempt?
 
     fn empty() -> ExplainRebuild Never! {
         ExplainRebuild{decision: "", reason: "", action_key: "", cache_identity: [String: String]{}, cache_admissions: [ExplainCacheAdmission]{}, checks: [String: String]{}, attempt: None}
@@ -365,16 +365,16 @@ fn store_explain_sorted_text_map(map: [String: String]) -> DataTree Never! {
     DataTree.Object(object)
 }
 
-pub struct PackageExplain {
-    pub schema: String
-    pub query: String
-    pub lens: String
-    pub entry: ExplainEntry?
-    pub provider: ExplainProvider?
-    pub graph: ExplainGraph
-    pub liveness: ExplainLiveness
-    pub rebuild: ExplainRebuild
-    pub reports: [ExplainReport]
+struct PackageExplain {
+    schema: String
+    query: String
+    lens: String
+    entry: ExplainEntry?
+    provider: ExplainProvider?
+    graph: ExplainGraph
+    liveness: ExplainLiveness
+    rebuild: ExplainRebuild
+    reports: [ExplainReport]
 
     // The `jet.status/v1` `explain` object; any conflict makes `ok` false.
     fn to_json(self) -> String Never! {
@@ -508,7 +508,7 @@ fn store_explain_empty_dash(value: String) -> String Never! {
 // records. None means neither a realized entry nor a recorded build attempt
 // exists for the query. The read-only listing preserves damaged state long
 // enough to report the missing proof instead of replaying recovery.
-pub fn store_explain_package(roots: HangarRoots, query: String, lens: ExplainLens) -> PackageExplain? StoreError! {
+fn store_explain_package(roots: HangarRoots, query: String, lens: ExplainLens) -> PackageExplain? StoreError! {
     entries :: store_list_read_only(roots)
     found :: store_explain_find_entry(entries, query)
     entry :: found ?? return store_explain_without_entry(roots, query, lens)

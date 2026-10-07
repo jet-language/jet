@@ -1,20 +1,20 @@
 use core.math as math
 
 #Codable
-pub struct Rational {
-    pub numerator: Int
-    pub denominator: Int
+struct Rational {
+    numerator: Int
+    denominator: Int
 }
 
 #Codable
-pub struct BuiltInExact {
-    pub amount: Decimal
-    pub whole: Int
+struct BuiltInExact {
+    amount: Decimal
+    whole: Int
 }
 
 // Construction is the one fallible boundary. Arithmetic below keeps the
 // reduced representation invariant without routing through this helper.
-pub fn rational(numerator: Int, denominator: Int) -> Rational? {
+fn rational(numerator: Int, denominator: Int) -> Rational? {
     if denominator == 0 -> return None
     gcd :: math.gcd(numerator, denominator)
     n :: numerator /% gcd
@@ -139,9 +139,9 @@ impl Rational.Display {
 }
 
 #Codable
-pub struct ScaledDecimal {
-    pub coefficient: Int
-    pub scale: Int
+struct ScaledDecimal {
+    coefficient: Int
+    scale: Int
 }
 
 impl ScaledDecimal.Literal.Float {
@@ -314,15 +314,15 @@ impl ScaledDecimal.Display {
     fn display(self) -> String { "{self.coefficient}e-{self.scale}" }
 }
 
-pub enum Rounding {
+enum Rounding {
     Down
     Up
     HalfUp
 }
 
 #Codable
-pub struct Money {
-    pub cents: Int
+struct Money {
+    cents: Int
 }
 
 impl Money.Literal.Int {
@@ -372,7 +372,7 @@ impl Money.Display {
     fn display(self) -> String { "{self.cents} cents" }
 }
 
-pub fn round_tax(amount: Money, basis_points: Int, mode: Rounding) -> Money {
+fn round_tax(amount: Money, basis_points: Int, mode: Rounding) -> Money {
     scaled :: amount.cents * basis_points
     whole := scaled /% 10000
     remainder :: scaled % 10000
@@ -381,9 +381,9 @@ pub fn round_tax(amount: Money, basis_points: Int, mode: Rounding) -> Money {
     return Money{cents: whole}
 }
 
-pub fn pair_add<T: Add>(left: T, right: T) -> T { left + right }
+fn pair_add<T: Add>(left: T, right: T) -> T { left + right }
 
-pub fn largest<T: Comparable>(values: [T]) -> T? {
+fn largest<T: Comparable>(values: [T]) -> T? {
     if values.len() == 0 -> return None
     best := ~values[0]
     index := 1
@@ -394,15 +394,15 @@ pub fn largest<T: Comparable>(values: [T]) -> T? {
     return Val(best)
 }
 
-pub fn accept_rational(value: Rational) -> Rational { value }
+fn accept_rational(value: Rational) -> Rational { value }
 
-pub fn accept_decimal(value: ScaledDecimal) -> ScaledDecimal { value }
+fn accept_decimal(value: ScaledDecimal) -> ScaledDecimal { value }
 
-pub fn accept_money(value: Money) -> Money { value }
+fn accept_money(value: Money) -> Money { value }
 
-pub fn add_decimals(left: ScaledDecimal, right: ScaledDecimal) -> ScaledDecimal { left + right }
+fn add_decimals(left: ScaledDecimal, right: ScaledDecimal) -> ScaledDecimal { left + right }
 
-pub fn million_money() -> Money {
+fn million_money() -> Money {
     total := Money{cents: 0}
     loop i in 0..<1_000_000 -> total += Money{cents: i % 100}
     return total

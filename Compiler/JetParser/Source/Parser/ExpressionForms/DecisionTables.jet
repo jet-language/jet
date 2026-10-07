@@ -45,15 +45,15 @@ use jet_lexer.[
 ]
 
 struct ParserExpressionFormValueBranch {
-    pub body: [Stmt]
-    pub value: Expr
-    pub span: Span
+    body: [Stmt]
+    value: Expr
+    span: Span
 }
 
 struct ParserExpressionFormArm {
-    pub cond: Expr
-    pub body: [Stmt]
-    pub value: Expr
+    cond: Expr
+    body: [Stmt]
+    value: Expr
 }
 
 fn parser_expression_form_error(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String) {
@@ -93,11 +93,11 @@ fn parser_expression_form_if_ahead(state: &JetParserState) -> Bool Never! {
 // `allow_bare_lambda` is false inside a control header, where a trailing
 // `->` introduces the body (`if ready -> stmt`), so `name ->` is no lambda.
 // `if` and `loop` reach `parser_parse_expression_form` from the prefix parser.
-pub fn parser_expression_form_ahead(state: &JetParserState, allow_bare_lambda: Bool) -> Bool Never! {
+fn parser_expression_form_ahead(state: &JetParserState, allow_bare_lambda: Bool) -> Bool Never! {
     allow_bare_lambda && parser_current_kind(&state) == TOKEN_IDENT && (parser_kind_at(&state, 1) == TOKEN_UNIFIED_ARROW || parser_kind_at(&state, 1) == TOKEN_LAMBDA_ARROW || (parser_kind_at(&state, 1) == TOKEN_MINUS && parser_kind_at(&state, 2) == TOKEN_LBRACKET))
 }
 
-pub fn parser_parse_expression_form(state: &JetParserState, depth: Int) -> ParsedExpr {
+fn parser_parse_expression_form(state: &JetParserState, depth: Int) -> ParsedExpr {
     if parser_current_kind(&state) == {
         TOKEN_KW_IF -> {
             parts := [ParserBranchPart]{}

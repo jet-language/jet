@@ -20,7 +20,7 @@ use core.text.fmt as fmt
 
 
 #Error
-pub enum ComputeError {
+enum ComputeError {
     Shape
     RankMismatch
     OutOfBounds
@@ -33,41 +33,41 @@ pub enum ComputeError {
     Serialization
 }
 
-pub struct ComputeDevice {
-    pub kind: String
-    pub index: Int
+struct ComputeDevice {
+    kind: String
+    index: Int
 }
 
-pub struct Tensor {
-    pub shape: [Int]
-    pub data: [Float]
-    pub device: String
-    pub numeric_profile: String
+struct Tensor {
+    shape: [Int]
+    data: [Float]
+    device: String
+    numeric_profile: String
     // The device the caller asked for when this tensor's storage was placed:
     // "Auto" when placement was automatic, otherwise the explicit device.
     // Derived tensors inherit it, as the placement receipt reports.
-    pub requested: String
+    requested: String
 }
 
-pub struct ComputeStream {
-    pub id: Int
-    pub device: String
+struct ComputeStream {
+    id: Int
+    device: String
 }
 
-pub struct SparseTensor {
-    pub rows: Int
-    pub cols: Int
-    pub values: [Float]
-    pub col_idx: [Int]
-    pub row_ptr: [Int]
+struct SparseTensor {
+    rows: Int
+    cols: Int
+    values: [Float]
+    col_idx: [Int]
+    row_ptr: [Int]
 }
 
 // The source-tier transform is the eager dense MSE contract.  Higher-order
 // transforms (arbitrary loss closures, pullbacks, and wrt records) are owned by
 // the native dispatcher; this record remains useful and honest for source use.
-pub struct VJPRun {
-    pub value: Tensor
-    pub gradient: Tensor
+struct VJPRun {
+    value: Tensor
+    gradient: Tensor
 }
 
 C_MAX_TENSOR_ELEMENTS :: 16777216
@@ -81,24 +81,24 @@ ABILITIES_F64_JSON :: "[\"ranked-storage\", \"strided-view\", \"checked-bounds\"
 ABILITIES_F32_JSON :: "[\"ranked-storage\", \"strided-view\", \"checked-bounds\", \"f32-arithmetic\", \"cpu-simd-dispatch\", \"simd-tail\", \"blocked-matmul\", \"differential-oracle\"]"
 C_MASK64 :: 18446744073709551615
 
-pub fn device_cpu() -> ComputeDevice Never! { ComputeDevice{kind: "CPU", index: 0} }
-pub fn device_auto() -> ComputeDevice Never! { ComputeDevice{kind: "Auto", index: 0} }
-pub fn device_cuda() -> ComputeDevice Never! { ComputeDevice{kind: "CUDA", index: 0} }
-pub fn device_metal() -> ComputeDevice Never! { ComputeDevice{kind: "Metal", index: 0} }
-pub fn device_vulkan() -> ComputeDevice Never! { ComputeDevice{kind: "Vulkan", index: 0} }
-pub fn device_webgpu() -> ComputeDevice Never! { ComputeDevice{kind: "WebGPU", index: 0} }
+fn device_cpu() -> ComputeDevice Never! { ComputeDevice{kind: "CPU", index: 0} }
+fn device_auto() -> ComputeDevice Never! { ComputeDevice{kind: "Auto", index: 0} }
+fn device_cuda() -> ComputeDevice Never! { ComputeDevice{kind: "CUDA", index: 0} }
+fn device_metal() -> ComputeDevice Never! { ComputeDevice{kind: "Metal", index: 0} }
+fn device_vulkan() -> ComputeDevice Never! { ComputeDevice{kind: "Vulkan", index: 0} }
+fn device_webgpu() -> ComputeDevice Never! { ComputeDevice{kind: "WebGPU", index: 0} }
 
 // Device is an accessor, not a string-to-device constructor.  Unknown device
 // strings are rejected when a tensor is validated rather than silently mapped.
-pub fn device(tensor: Tensor) -> String Never! {
+fn device(tensor: Tensor) -> String Never! {
     tensor_device_name(tensor.device)
 }
 
-pub fn zeros(shape: [Int]) -> Tensor ComputeError! { filled(shape, Float{0.0}) }
-pub fn ones(shape: [Int]) -> Tensor ComputeError! { filled(shape, Float{1.0}) }
-pub fn full(shape: [Int], value: Float) -> Tensor ComputeError! { filled(shape, value) }
+fn zeros(shape: [Int]) -> Tensor ComputeError! { filled(shape, Float{0.0}) }
+fn ones(shape: [Int]) -> Tensor ComputeError! { filled(shape, Float{1.0}) }
+fn full(shape: [Int], value: Float) -> Tensor ComputeError! { filled(shape, value) }
 
-pub fn eye(n: Int) -> Tensor ComputeError! {
+fn eye(n: Int) -> Tensor ComputeError! {
     if n < 0 -> return Err(ComputeError.Shape)
     shape :: [Int]{n, n}
     _ :: checked_numel(shape) ?? return Err(ComputeError.Shape)
@@ -115,7 +115,7 @@ pub fn eye(n: Int) -> Tensor ComputeError! {
     Ok(make_tensor(shape, data, "CPU", c_profile_f64()))
 }
 
-pub fn from_list(values: [Float]) -> Tensor ComputeError! {
+fn from_list(values: [Float]) -> Tensor ComputeError! {
     loop value in values {
         _ :: finite_or_error(value)
     }
@@ -124,7 +124,7 @@ pub fn from_list(values: [Float]) -> Tensor ComputeError! {
     Ok(make_tensor(shape, copy_f(values), "Auto", c_profile_f64()))
 }
 
-pub fn vec(length: Int, value: Float) -> Tensor ComputeError! {
+fn vec(length: Int, value: Float) -> Tensor ComputeError! {
     if length < 0 -> return Err(ComputeError.Shape)
     _ :: finite_or_error(value)
     shape :: [Int]{length}
@@ -134,7 +134,7 @@ pub fn vec(length: Int, value: Float) -> Tensor ComputeError! {
     Ok(make_tensor(shape, data, "CPU", c_profile_f64()))
 }
 
-pub fn matrix(rows: Int, cols: Int, value: Float) -> Tensor ComputeError! {
+fn matrix(rows: Int, cols: Int, value: Float) -> Tensor ComputeError! {
     if rows < 0 || cols < 0 -> return Err(ComputeError.Shape)
     _ :: finite_or_error(value)
     shape :: [Int]{rows, cols}
@@ -144,35 +144,35 @@ pub fn matrix(rows: Int, cols: Int, value: Float) -> Tensor ComputeError! {
     Ok(make_tensor(shape, data, "CPU", c_profile_f64()))
 }
 
-pub fn to_list(tensor: Tensor) -> [Float] Never! { copy_f(tensor.data) }
-pub fn shape(tensor: Tensor) -> [Int] Never! { copy_i(tensor.shape) }
-pub fn rank(tensor: Tensor) -> Int Never! { tensor.shape.len() }
-pub fn numel(tensor: Tensor) -> Int Never! { tensor.data.len() }
+fn to_list(tensor: Tensor) -> [Float] Never! { copy_f(tensor.data) }
+fn shape(tensor: Tensor) -> [Int] Never! { copy_i(tensor.shape) }
+fn rank(tensor: Tensor) -> Int Never! { tensor.shape.len() }
+fn numel(tensor: Tensor) -> Int Never! { tensor.data.len() }
 
-pub fn placement(tensor: Tensor) -> String Never! {
+fn placement(tensor: Tensor) -> String Never! {
     profile_placement(tensor_requested(tensor), tensor_profile(tensor))
 }
 
-pub fn on_device(tensor: Tensor, target: ComputeDevice) -[Env]> Tensor ComputeError! {
+fn on_device(tensor: Tensor, target: ComputeDevice) -[Env]> Tensor ComputeError! {
     _ :: validate_tensor(tensor)
     selected :: select_device(target.kind) ?? return Err(ComputeError.Device)
     if selected != "CPU" -> return Err(ComputeError.Unsupported)
     Ok(make_tensor(copy_i(tensor.shape), copy_f(tensor.data), tensor_device_name(target.kind), tensor_profile(tensor)))
 }
 
-pub fn transfer(tensor: Tensor, target: ComputeDevice) -[Env]> Tensor ComputeError! {
+fn transfer(tensor: Tensor, target: ComputeDevice) -[Env]> Tensor ComputeError! {
     on_device(tensor, target)
 }
 
-pub fn transfer_show(tensor: Tensor) -> String Never! {
+fn transfer_show(tensor: Tensor) -> String Never! {
     name :: tensor_device_name(tensor.device)
     "Transfer(from={name}, to={name}, bytes=0, fallback=none)"
 }
 
-pub fn profile_f32_strict() -> String Never! { c_profile_f32_receipt() }
-pub fn profile_show() -> String Never! { c_profile_f32_receipt() }
+fn profile_f32_strict() -> String Never! { c_profile_f32_receipt() }
+fn profile_show() -> String Never! { c_profile_f32_receipt() }
 
-pub fn kernel_bounds_ok(shape: [Int], index: [Int]) -> Bool ComputeError! {
+fn kernel_bounds_ok(shape: [Int], index: [Int]) -> Bool ComputeError! {
     _ :: checked_numel(shape)
     if shape.len() != index.len() -> return Err(ComputeError.RankMismatch)
     loop axis in 0..<shape.len() {
@@ -181,14 +181,14 @@ pub fn kernel_bounds_ok(shape: [Int], index: [Int]) -> Bool ComputeError! {
     Ok(true)
 }
 
-pub fn get(tensor: Tensor, index: [Int]) -> Float ComputeError! {
+fn get(tensor: Tensor, index: [Int]) -> Float ComputeError! {
     _ :: validate_tensor(tensor)
     if tensor.shape.len() != index.len() -> return Err(ComputeError.RankMismatch)
     o :: offset_of(tensor.shape, index) ?? return Err(ComputeError.OutOfBounds)
     Ok(tensor.data[o])
 }
 
-pub fn set(tensor: &Tensor, index: [Int], value: Float) ComputeError! {
+fn set(tensor: &Tensor, index: [Int], value: Float) ComputeError! {
     _ :: validate_tensor_ref(&tensor)
     if tensor.shape.len() != index.len() -> return Err(ComputeError.RankMismatch)
     _ :: finite_or_error(value)
@@ -203,14 +203,14 @@ pub fn set(tensor: &Tensor, index: [Int], value: Float) ComputeError! {
 
 }
 
-pub fn reshape(tensor: Tensor, new_shape: [Int]) -> Tensor ComputeError! {
+fn reshape(tensor: Tensor, new_shape: [Int]) -> Tensor ComputeError! {
     _ :: validate_tensor(tensor)
     n :: checked_numel(new_shape)
     if n != tensor.data.len() -> return Err(ComputeError.Shape)
     Ok(make_tensor(copy_i(new_shape), copy_f(tensor.data), tensor_requested(tensor), tensor_profile(tensor)))
 }
 
-pub fn broadcast_to(tensor: Tensor, new_shape: [Int]) -> Tensor ComputeError! {
+fn broadcast_to(tensor: Tensor, new_shape: [Int]) -> Tensor ComputeError! {
     _ :: validate_tensor(tensor)
     _ :: checked_numel(new_shape)
     if new_shape.len() < tensor.shape.len() -> return Err(ComputeError.RankMismatch)
@@ -220,7 +220,7 @@ pub fn broadcast_to(tensor: Tensor, new_shape: [Int]) -> Tensor ComputeError! {
     Ok(make_tensor(copy_i(new_shape), data, tensor.device, tensor_profile(tensor)))
 }
 
-pub fn transpose(tensor: Tensor) -> Tensor ComputeError! {
+fn transpose(tensor: Tensor) -> Tensor ComputeError! {
     _ :: validate_tensor(tensor)
     if tensor.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
     m :: tensor.shape[0]
@@ -232,27 +232,27 @@ pub fn transpose(tensor: Tensor) -> Tensor ComputeError! {
     Ok(make_tensor([Int]{n, m}, data, tensor_requested(tensor), tensor_profile(tensor)))
 }
 
-pub fn add(a: Tensor, b: Tensor) -> Tensor ComputeError! { binop(a, b, 0) }
-pub fn sub(a: Tensor, b: Tensor) -> Tensor ComputeError! { binop(a, b, 1) }
-pub fn mul(a: Tensor, b: Tensor) -> Tensor ComputeError! { binop(a, b, 2) }
-pub fn div(a: Tensor, b: Tensor) -> Tensor ComputeError! { binop(a, b, 3) }
-pub fn maximum(a: Tensor, b: Tensor) -> Tensor ComputeError! { binop(a, b, 4) }
-pub fn minimum(a: Tensor, b: Tensor) -> Tensor ComputeError! { binop(a, b, 5) }
+fn add(a: Tensor, b: Tensor) -> Tensor ComputeError! { binop(a, b, 0) }
+fn sub(a: Tensor, b: Tensor) -> Tensor ComputeError! { binop(a, b, 1) }
+fn mul(a: Tensor, b: Tensor) -> Tensor ComputeError! { binop(a, b, 2) }
+fn div(a: Tensor, b: Tensor) -> Tensor ComputeError! { binop(a, b, 3) }
+fn maximum(a: Tensor, b: Tensor) -> Tensor ComputeError! { binop(a, b, 4) }
+fn minimum(a: Tensor, b: Tensor) -> Tensor ComputeError! { binop(a, b, 5) }
 
-pub fn abs(tensor: Tensor) -> Tensor ComputeError! { unary(tensor, 0) }
-pub fn negate(tensor: Tensor) -> Tensor ComputeError! { unary(tensor, 1) }
-pub fn exp(tensor: Tensor) -> Tensor ComputeError! { unary(tensor, 2) }
-pub fn log(tensor: Tensor) -> Tensor ComputeError! { unary(tensor, 3) }
-pub fn sqrt(tensor: Tensor) -> Tensor ComputeError! { unary(tensor, 4) }
+fn abs(tensor: Tensor) -> Tensor ComputeError! { unary(tensor, 0) }
+fn negate(tensor: Tensor) -> Tensor ComputeError! { unary(tensor, 1) }
+fn exp(tensor: Tensor) -> Tensor ComputeError! { unary(tensor, 2) }
+fn log(tensor: Tensor) -> Tensor ComputeError! { unary(tensor, 3) }
+fn sqrt(tensor: Tensor) -> Tensor ComputeError! { unary(tensor, 4) }
 
-pub fn matmul(a: Tensor, b: Tensor) -> Tensor ComputeError! {
+fn matmul(a: Tensor, b: Tensor) -> Tensor ComputeError! {
     _ :: validate_matmul_inputs(a, b)
     matmul_blocked(a, b, 8, tensor_profile(a))
 }
 
 // The tile is fixed by the F32Strict profile.  Exposing a tile argument would
 // make the source contract diverge from the native dispatcher.
-pub fn matmul_f32_tile(a: Tensor, b: Tensor) -> Tensor ComputeError! {
+fn matmul_f32_tile(a: Tensor, b: Tensor) -> Tensor ComputeError! {
     _ :: validate_matmul_inputs(a, b)
     loop value in a.data {
         _ :: finite_or_error(value)
@@ -265,7 +265,7 @@ pub fn matmul_f32_tile(a: Tensor, b: Tensor) -> Tensor ComputeError! {
     matmul_blocked(a, b, 8, c_profile_f32())
 }
 
-pub fn sum_axis(tensor: Tensor, axis: Int) -> Tensor ComputeError! {
+fn sum_axis(tensor: Tensor, axis: Int) -> Tensor ComputeError! {
     _ :: validate_tensor(tensor)
     if axis < 0 || axis >= tensor.shape.len() -> return Err(ComputeError.OutOfBounds)
     out_shape := [Int]{}
@@ -304,7 +304,7 @@ pub fn sum_axis(tensor: Tensor, axis: Int) -> Tensor ComputeError! {
     Ok(make_tensor(out_shape, out, tensor_requested(tensor), profile))
 }
 
-pub fn mse_loss(pred: Tensor, target: Tensor) -> Tensor ComputeError! {
+fn mse_loss(pred: Tensor, target: Tensor) -> Tensor ComputeError! {
     _ :: validate_same_tensor_inputs(pred, target)
     if pred.data.len() == 0 -> return Err(ComputeError.Shape)
     profile :: tensor_profile(pred)
@@ -318,7 +318,7 @@ pub fn mse_loss(pred: Tensor, target: Tensor) -> Tensor ComputeError! {
     Ok(make_tensor([Int]{1}, [Float]{value}, tensor_requested(pred), profile))
 }
 
-pub fn sgd_step(weights: Tensor, grad: Tensor, lr: Float) -> Tensor ComputeError! {
+fn sgd_step(weights: Tensor, grad: Tensor, lr: Float) -> Tensor ComputeError! {
     _ :: validate_same_tensor_inputs(weights, grad)
     profile :: tensor_profile(weights)
     lr_value :: profile_round(lr, profile) ?? return Err(ComputeError.Arithmetic)
@@ -333,7 +333,7 @@ pub fn sgd_step(weights: Tensor, grad: Tensor, lr: Float) -> Tensor ComputeError
     Ok(make_tensor(copy_i(weights.shape), data, tensor_requested(weights), profile))
 }
 
-pub fn value_and_gradient(pred: Tensor, target: Tensor) -> VJPRun ComputeError! {
+fn value_and_gradient(pred: Tensor, target: Tensor) -> VJPRun ComputeError! {
     loss :: mse_loss(pred, target)
     _ :: validate_same_tensor_inputs(pred, target)
     n :: pred.data.len()
@@ -349,14 +349,14 @@ pub fn value_and_gradient(pred: Tensor, target: Tensor) -> VJPRun ComputeError! 
     Ok(VJPRun{value: loss, gradient: gradient})
 }
 
-pub fn vjp(pred: Tensor, target: Tensor) -> VJPRun ComputeError! { value_and_gradient(pred, target) }
+fn vjp(pred: Tensor, target: Tensor) -> VJPRun ComputeError! { value_and_gradient(pred, target) }
 
-pub fn gradient(pred: Tensor, target: Tensor) -> Tensor ComputeError! {
+fn gradient(pred: Tensor, target: Tensor) -> Tensor ComputeError! {
     run :: value_and_gradient(pred, target)
     Ok(run.gradient)
 }
 
-pub fn jvp(pred: Tensor, target: Tensor, tangent: Tensor) -> Tensor ComputeError! {
+fn jvp(pred: Tensor, target: Tensor, tangent: Tensor) -> Tensor ComputeError! {
     _ :: validate_same_tensor_inputs(pred, target)
     _ :: validate_tensor(tangent)
     if tangent.shape != pred.shape || tensor_device_name(tangent.device) != tensor_device_name(pred.device) || tensor_profile(tangent) != tensor_profile(pred) -> return Err(ComputeError.Shape)
@@ -373,7 +373,7 @@ pub fn jvp(pred: Tensor, target: Tensor, tangent: Tensor) -> Tensor ComputeError
     Ok(make_tensor([Int]{1}, [Float]{total}, tensor_requested(pred), profile))
 }
 
-pub fn det(tensor: Tensor) -> Float ComputeError! {
+fn det(tensor: Tensor) -> Float ComputeError! {
     _ :: validate_square(tensor)
     n :: tensor.shape[0]
     work := copy_f(tensor.data)
@@ -419,7 +419,7 @@ pub fn det(tensor: Tensor) -> Float ComputeError! {
     Ok(value)
 }
 
-pub fn inv(tensor: Tensor) -> Tensor ComputeError! {
+fn inv(tensor: Tensor) -> Tensor ComputeError! {
     _ :: validate_square(tensor)
     n :: tensor.shape[0]
     width :: n * 2
@@ -482,7 +482,7 @@ pub fn inv(tensor: Tensor) -> Tensor ComputeError! {
     Ok(make_tensor([Int]{n, n}, data, tensor.device, profile))
 }
 
-pub fn solve(a: Tensor, b: Tensor) -> Tensor ComputeError! {
+fn solve(a: Tensor, b: Tensor) -> Tensor ComputeError! {
     _ :: validate_square(a)
     _ :: validate_tensor(b)
     a_name :: tensor_device_name(a.device)
@@ -568,7 +568,7 @@ pub fn solve(a: Tensor, b: Tensor) -> Tensor ComputeError! {
 // FFT output is interleaved [re0, im0, re1, im1, ...], matching the native
 // wire shape [2*n].  Radix-2 inputs use the iterative CPU kernel; other lengths
 // use a bounded DFT rather than returning a fabricated zero spectrum.
-pub fn fft(tensor: Tensor) -> Tensor ComputeError! {
+fn fft(tensor: Tensor) -> Tensor ComputeError! {
     _ :: validate_tensor(tensor)
     if tensor.shape.len() != 1 -> return Err(ComputeError.RankMismatch)
     n :: tensor.shape[0]
@@ -600,7 +600,7 @@ pub fn fft(tensor: Tensor) -> Tensor ComputeError! {
     Ok(make_tensor([Int]{n * 2}, data, tensor.device, profile))
 }
 
-pub fn to_sparse(tensor: Tensor) -> SparseTensor ComputeError! {
+fn to_sparse(tensor: Tensor) -> SparseTensor ComputeError! {
     _ :: validate_tensor(tensor)
     if tensor.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
     if tensor_device_name(tensor.device) != "CPU" -> return Err(ComputeError.Unsupported)
@@ -623,13 +623,13 @@ pub fn to_sparse(tensor: Tensor) -> SparseTensor ComputeError! {
     Ok(SparseTensor{rows: m, cols: n, values: values, col_idx: col_idx, row_ptr: row_ptr})
 }
 
-pub fn sparse_nnz(sp: SparseTensor) -> Int Never! { sp.values.len() }
+fn sparse_nnz(sp: SparseTensor) -> Int Never! { sp.values.len() }
 
-pub fn sparse_show(sp: SparseTensor) -> String Never! {
+fn sparse_show(sp: SparseTensor) -> String Never! {
     "SparseCsr({sp.rows}x{sp.cols}, nnz={sp.values.len()})"
 }
 
-pub fn sparse_mv(sp: SparseTensor, x: Tensor) -> Tensor ComputeError! {
+fn sparse_mv(sp: SparseTensor, x: Tensor) -> Tensor ComputeError! {
     _ :: validate_sparse(sp)
     _ :: validate_tensor(x)
     if tensor_device_name(x.device) != "CPU" -> return Err(ComputeError.Unsupported)
@@ -648,7 +648,7 @@ pub fn sparse_mv(sp: SparseTensor, x: Tensor) -> Tensor ComputeError! {
     Ok(make_tensor([Int]{sp.rows}, out, "CPU", tensor_profile(x)))
 }
 
-pub fn serialize(tensor: Tensor) -> String ComputeError! {
+fn serialize(tensor: Tensor) -> String ComputeError! {
     _ :: validate_tensor(tensor)
     profile :: tensor_profile(tensor)
     if profile != c_profile_f64() && profile != c_profile_f32() -> return Err(ComputeError.Serialization)
@@ -673,7 +673,7 @@ pub fn serialize(tensor: Tensor) -> String ComputeError! {
     "{body};checksum={checksum}"
 }
 
-pub fn deserialize(text: String) -> Tensor ComputeError! {
+fn deserialize(text: String) -> Tensor ComputeError! {
     fields :: split_byte(text, 59) ?? return Err(ComputeError.Parse)
     if fields.len() != 4 -> return Err(ComputeError.Parse)
     shape_text := ""
@@ -741,19 +741,19 @@ pub fn deserialize(text: String) -> Tensor ComputeError! {
     Ok(make_tensor(shape, data, "CPU", profile))
 }
 
-pub fn stream_new() -> ComputeStream Never! { ComputeStream{id: 1, device: "CPU"} }
+fn stream_new() -> ComputeStream Never! { ComputeStream{id: 1, device: "CPU"} }
 
-pub fn stream_new_on(target: ComputeDevice) -> ComputeStream ComputeError! {
+fn stream_new_on(target: ComputeDevice) -> ComputeStream ComputeError! {
     selected :: select_device(target.kind) ?? return Err(ComputeError.Device)
     if selected != "CPU" -> return Err(ComputeError.Unsupported)
     Ok(ComputeStream{id: 1, device: selected})
 }
 
-pub fn stream_show(stream: ComputeStream) -> String Never! {
+fn stream_show(stream: ComputeStream) -> String Never! {
     "ComputeStream(device={tensor_device_name(stream.device)})"
 }
 
-pub fn stream_sync(stream: ComputeStream) ComputeError! {
+fn stream_sync(stream: ComputeStream) ComputeError! {
     if stream.id <= 0 -> return Err(ComputeError.Device)
     if tensor_device_name(stream.device) != "CPU" -> return Err(ComputeError.Unsupported)
     return

@@ -215,7 +215,7 @@ fn sema_reactive_loadable_value(member: String, type_args: [Type], span: Span, e
     SemaDirectSpecialCheck{handled: true, value: value_out}
 }
 
-pub fn sema_call_try_reactive_core_call(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_try_reactive_core_call(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if module_name == "core.reactive" {
         if member == "signal" -> return sema_reactive_signal_value(type_args, span, expected, environment, &scopes, &state, &tail_store, &context, args, &diagnostics)
         if member == "derived" || member == "computed" -> return sema_reactive_derived_value(member, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, args, &diagnostics)
@@ -260,7 +260,7 @@ fn sema_reactive_checked_handle_args(owner: String, method: String, args: [CallA
     Val(typed.values)
 }
 
-pub fn sema_call_try_reactive_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_reactive_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     owner :: sema_reactive_type_name(receiver_value.ty)
     if !sema_reactive_handle_member(owner, method) -> return SemaMethodSpecialCheck{handled: false, value: None}
     expected_arity := if method == "set" -> 1 else -> 0

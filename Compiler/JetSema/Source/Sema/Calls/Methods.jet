@@ -26,12 +26,12 @@ use jet_foundation.[
     type_name,
 ]
 
-pub struct SemaMethodSpecialCheck {
-    pub handled: Bool
-    pub value: TExpr?
+struct SemaMethodSpecialCheck {
+    handled: Bool
+    value: TExpr?
 }
 
-pub fn sema_call_shared_access_forbidden_diagnostic(method: String, span: Span) -> Diagnostic {
+fn sema_call_shared_access_forbidden_diagnostic(method: String, span: Span) -> Diagnostic {
     sema_error("E1116", span, "`Shared.{method}(…)` is the retired closure form for shared access.", "D-CONC-SHARE1=A made a shared value read and write like a value: a field read is one locked read, a field write is one locked write, and each statement is one atomic step. The closure per touch proved nothing the compiler did not already know.", "Read the field directly (`config.name`) and write it directly (`config.hits += 1`); group several steps under `#Transact {{ … }}`, or take an expert guard with `.guard_edit()`.")
 }
 
@@ -56,7 +56,7 @@ fn sema_call_try_distinct_raw_value(receiver_value: TExpr, args: [CallArg], span
     finished
 }
 
-pub fn sema_call_try_distinct_raw(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_distinct_raw(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if method != "raw" -> return SemaMethodSpecialCheck{handled: false, value: None}
     gate_scope :: sema_call_enter_gate(&scopes, SemaKnowledgeGate.RawProjection)
     allowed :: sema_scope_require_knowledge_gate(&scopes, SemaKnowledgePlane.Range, SemaKnowledgeGate.RawProjection, span, &diagnostics)
@@ -67,7 +67,7 @@ pub fn sema_call_try_distinct_raw(receiver: Expr, method: String, args: [CallArg
     sema_call_distinct_raw_finish(receiver_value, args, span, expected, environment, &scopes, &diagnostics)
 }
 
-pub fn sema_call_try_transaction_hook(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_transaction_hook(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty != (Type.Named{name: "Transaction"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
     if method != "on_commit" && method != "on_rollback" -> return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
@@ -102,7 +102,7 @@ pub fn sema_call_try_transaction_hook(receiver: Expr, receiver_value: TExpr, met
     SemaMethodSpecialCheck{handled: true, value: checked_value}
 }
 
-pub fn sema_call_shared_access_result_type(receiver_ty: Type, method: String, result_type: Type, transaction_depth: Int) -> Type Never! {
+fn sema_call_shared_access_result_type(receiver_ty: Type, method: String, result_type: Type, transaction_depth: Int) -> Type Never! {
     if sema_shared_access_is_shared_type(receiver_ty) && method == "edit" && transaction_depth > 0 -> Type.Tuple{fields: [TypeTupleField]{}} else -> result_type
 }
 
@@ -159,7 +159,7 @@ fn sema_call_try_builtin_host_route(receiver: Expr, receiver_value: TExpr, metho
 // One pre-candidate seam for compiler-owned method routes. Callers must pass
 // the already checked receiver so builtin identity comes from its Type rather
 // than from a user spelling or a basename.
-pub fn sema_call_try_builtin_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_builtin_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     // The retired collection alias has no constructor or lookup route.
     // Parse its arguments normally, then teach the bracket-place spelling.
     if method == "view" {
@@ -318,7 +318,7 @@ fn sema_call_method_candidate_ready(candidate: SemaCallMethodCandidate, diagnost
     true
 }
 
-pub fn sema_call_method_candidate_with_inference(candidate: SemaCallMethodCandidate, result: SemaInferenceResult) -> SemaCallMethodCandidate? {
+fn sema_call_method_candidate_with_inference(candidate: SemaCallMethodCandidate, result: SemaInferenceResult) -> SemaCallMethodCandidate? {
     if !result.complete -> return None
     specialized := candidate
     specialized.signature = sema_inference_substitute_type_bindings(candidate.signature, result.substitutions)
@@ -328,7 +328,7 @@ pub fn sema_call_method_candidate_with_inference(candidate: SemaCallMethodCandid
     Val(specialized)
 }
 
-pub fn sema_call_infer_method_candidate_from_types(candidate: SemaCallMethodCandidate, parameter_types: [Type], arg_types: [Type], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
+fn sema_call_infer_method_candidate_from_types(candidate: SemaCallMethodCandidate, parameter_types: [Type], arg_types: [Type], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
     if candidate.generic_params.len() == 0 -> return Val(candidate)
     return_type :: sema_call_signature_return(candidate.signature) ?? return None
     caller_module :: if scopes.frames.len() > 0 -> scopes.frames[0].owner else -> ""
@@ -380,7 +380,7 @@ fn sema_call_method_candidate_types_compatible(candidate: SemaCallMethodCandidat
     true
 }
 
-pub fn sema_call_resolve_method_with_inference(receiver_type: Type, method: String, args: [CallArg], argument_types: [Type?], expected: Type?, candidates: [SemaCallMethodCandidate], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
+fn sema_call_resolve_method_with_inference(receiver_type: Type, method: String, args: [CallArg], argument_types: [Type?], expected: Type?, candidates: [SemaCallMethodCandidate], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
     shape_matches := [SemaCallMethodCandidate]{}
     loop candidate in candidates {
         if candidate.method.name == method {
@@ -610,21 +610,21 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
     Val(SemaCallChecked{value: checked, binding: resolved_binding, facts: facts, return_view_facts: return_view_facts})
 }
 
-pub fn sema_call_check_method_candidate_from_value_owned(state: &SemaOwnershipState, receiver: Expr, receiver_value: TExpr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
+fn sema_call_check_method_candidate_from_value_owned(state: &SemaOwnershipState, receiver: Expr, receiver_value: TExpr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
     sema_call_method_checked_from_value(&state, receiver, receiver_value, candidate, args, defaults, expected, environment, &scopes, &tail_store, &context, span, &diagnostics)
 }
 
-pub fn sema_call_check_method_candidate_owned(state: &SemaOwnershipState, receiver: Expr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
+fn sema_call_check_method_candidate_owned(state: &SemaOwnershipState, receiver: Expr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
     receiver_value :: sema_check_expression(receiver, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     sema_call_method_checked_from_value(&state, receiver, receiver_value, candidate, args, defaults, expected, environment, &scopes, &tail_store, &context, span, &diagnostics)
 }
 
-pub fn sema_call_check_method_candidate(state: &SemaOwnershipState, receiver: Expr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_check_method_candidate(state: &SemaOwnershipState, receiver: Expr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     checked :: sema_call_check_method_candidate_owned(&state, receiver, candidate, args, defaults, span, expected, environment, &scopes, &tail_store, &context, &diagnostics) ?? return None
     Val(checked.value)
 }
 
-pub fn sema_call_check_method(state: &SemaOwnershipState, receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_check_method(state: &SemaOwnershipState, receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     receiver_value :: sema_check_expression(receiver, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     candidates := sema_call_local_method_candidates(environment, method, owner_type_args, type_args)
     if environment.registration_graph == .Val(graph) {

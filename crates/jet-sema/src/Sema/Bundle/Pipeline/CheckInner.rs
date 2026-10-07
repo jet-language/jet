@@ -1986,17 +1986,6 @@ pub(super) fn check_bundle_opts_for_output_inner(
                             "make sure the name is spelled correctly".to_string(),
                             Some(*module_alias_span),
                         ));
-                    } else if !name_ledger.exported(idx, &mangled) {
-                        diags.push(Diagnostic::error(
-                            "E0609",
-                            format!("`{}` is private in module `{}`", orig, module_alias),
-                            "only `pub` items can be brought into scope with `use`".to_string(),
-                            format!(
-                                "add `pub` before `fn {}` in module `{}`",
-                                orig, module_alias
-                            ),
-                            Some(*module_alias_span),
-                        ));
                     } else {
                         st.unqualified.insert(local.clone(), mangled.clone());
                         inserted_unqualified.push(local.clone());
@@ -2128,7 +2117,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
                                 format!("`{}` is private in module `{}`", orig, module_alias),
                                 "only public modules can be brought into scope with `use`"
                                     .to_string(),
-                                format!("add `pub` before `module {}` in the imported file", orig),
+                                "import it from inside its enclosing module, or remove `priv` from its module".to_string(),
                                 Some(*module_alias_span),
                             ));
                         } else {
@@ -2165,14 +2154,11 @@ pub(super) fn check_bundle_opts_for_output_inner(
                         diags.push(Diagnostic::error(
                             "E0609",
                             format!("`{}` is private in module `{}`", orig, module_alias),
-                            "only `pub` items can be brought into scope with `use`".to_string(),
+                            "an item of a `priv module` is usable only by its enclosing module (D-VIS-MODULE1)".to_string(),
                             if is_function {
-                                format!("add `pub` before `fn {}` in the imported file", orig)
+                                "import it from inside its enclosing module, or remove `priv` from its module".to_string()
                             } else {
-                                format!(
-                                    "add `pub` before the declaration of `{}` in the imported file",
-                                    orig
-                                )
+                                "import it from inside its enclosing module, or remove `priv` from its module".to_string()
                             },
                             Some(*module_alias_span),
                         ));

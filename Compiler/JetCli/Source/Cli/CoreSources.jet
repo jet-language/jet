@@ -6,12 +6,12 @@ use jet_driver.[
 ]
 
 // The canonical effect source the Rust host embeds as `Effects::EFFECT_SOURCE`.
-pub JET_CLI_EFFECT_SOURCE :: prep { "// D-META-ONE1=A: the effect vocabulary is written here, not in Rust.\n//\n// This is ordinary Jet source. Each line declares one effect root or leaf.\n// Effect parsing, marker arguments (`#FX(Net, FS)`), fact registration,\n// diagnostics, and reflection all read this list, so an effect exists exactly\n// when it is written here.\n\neffect Net $irreversible\neffect FS\neffect FS.Read\neffect FS.Write $irreversible\neffect IO\neffect DB\neffect Time\neffect Rand\neffect Env\neffect Exec $irreversible\neffect Log\neffect GPU\neffect FFI $irreversible\neffect Browser\neffect Secret\n" }
+JET_CLI_EFFECT_SOURCE :: prep { "// D-META-ONE1=A: the effect vocabulary is written here, not in Rust.\n//\n// This is ordinary Jet source. Each line declares one effect root or leaf.\n// Effect parsing, marker arguments (`#FX(Net, FS)`), fact registration,\n// diagnostics, and reflection all read this list, so an effect exists exactly\n// when it is written here.\n\neffect Net $irreversible\neffect FS\neffect FS.Read\neffect FS.Write $irreversible\neffect IO\neffect DB\neffect Time\neffect Rand\neffect Env\neffect Exec $irreversible\neffect Log\neffect GPU\neffect FFI $irreversible\neffect Browser\neffect Secret\n" }
 
 // Every public Core source module row in table order, then each
 // compiler-private part with the public module that owns it. `source` is
 // empty here; the host reads `<toolchain root>/<path>` before compiling.
-pub JET_CLI_CORE_SOURCE_ROWS :: prep { [JetDriverCoreSource]{
+JET_CLI_CORE_SOURCE_ROWS :: prep { [JetDriverCoreSource]{
     JetDriverCoreSource{module_name: "app", alias: "app", path: "Core/app/app.jet", owner: "", owned_members: [String]{"auth", "auth_oauth", "auth_routes", "auth_show", "live", "live_get", "live_show", "live_stats", "subscribe", "invalidate", "transact_invalidate", "signal_push", "sync"}, source: ""},
     JetDriverCoreSource{module_name: "core.archive", alias: "core_archive", path: "Core/archive/archive.jet", owner: "", owned_members: [String]{"crc32", "adler32", "deflate", "inflate", "compress", "decompress", "zip_decompress", "zip_names_json", "list", "zip_open", "zip_next", "zip_read", "zip_write", "zip_close", "zip_extract", "unzip", "tar_add", "tar_get", "tar_names_json", "create"}, source: ""},
     JetDriverCoreSource{module_name: "core.archive.gzip", alias: "core_core_archive_gzip", path: "Core/archive/gzip.jet", owner: "", owned_members: [String]{"compress", "compress_file", "compress_text", "crc", "decompress", "decompress_file", "decompress_text", "is_gzip", "isize", "magic", "peek_isize"}, source: ""},

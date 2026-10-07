@@ -1823,13 +1823,11 @@ items are public unless they carry `priv` (S18, D-VISDEFAULT1=C,
 D-VISDEFAULT2=A).
 
 ```jet
-#PubFile
-
 fn greet() -> String {
     "hello"
 }
 
-priv fn secret() -> Int {
+fn secret() -> Int {
     42
 }
 ```
@@ -1850,7 +1848,7 @@ file.
 
 ```jet
 module math {
-    pub fn clamp(value: Int, low: Int, high: Int) -> Int {
+    fn clamp(value: Int, low: Int, high: Int) -> Int {
         if value < low -> low
         else if value > high -> high
         else -> value
@@ -1919,7 +1917,7 @@ D-GENMOD-IDENTITY1).
 
 ```jet
 module cache<K: Hash>(capacity: Int) {
-    pub fn key_of(k: K) -> String {
+    fn key_of(k: K) -> String {
         "key"
     }
 }
@@ -3990,7 +3988,7 @@ package {
     version: "0.1.0"
 }
 
-pub(package) fn helper() -> String {
+fn helper() -> String {
     "same package"
 }
 
@@ -4075,7 +4073,7 @@ version: "0.1.0"
 
 ```jet
 // sandbox source; it is loaded, not a run entry
-pub fn scale(a: Float, b: Float) -> Float {
+fn scale(a: Float, b: Float) -> Float {
     a * b
 }
 ```

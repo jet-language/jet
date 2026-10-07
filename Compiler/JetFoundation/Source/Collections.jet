@@ -10,7 +10,7 @@
 // `node Tools/agent/gen-core-tables.mjs --write` projects both tables into
 // Docs/spec/reference/core-library.md; `--check` rejects a stale projection.
 
-pub enum SemaCollectionKind {
+enum SemaCollectionKind {
     List(element: Type)
     FixedList(element: Type)
     Iter(element: Type)
@@ -26,7 +26,7 @@ pub enum SemaCollectionKind {
     PriorityQueue(element: Type)
 }
 
-pub enum SemaCollectionOperation {
+enum SemaCollectionOperation {
     Builtin(operation: TBuiltinOp)
     Closure(operation: TClosureOp)
     ListShuffle
@@ -37,14 +37,14 @@ pub enum SemaCollectionOperation {
 
 // Receiver families a row applies to. `List` covers fixed lists and `Iter`
 // covers view iterators; `Sequence` is the shared list-and-iterator surface.
-pub enum CollectionReceivers { List Iter View Sequence Map Set Rank Bits Tally Cache Queue PriorityQueue }
+enum CollectionReceivers { List Iter View Sequence Map Set Rank Bits Tally Cache Queue PriorityQueue }
 
 // Receiver ownership. `Sequence` borrows a list or view and consumes an iterator.
-pub enum CollectionAccess { Read Write Move Sequence }
+enum CollectionAccess { Read Write Move Sequence }
 
 // Positional argument shapes. The callback shapes name their parameter and
 // return types; `Seed` is checked from the written expression.
-pub enum CollectionArg {
+enum CollectionArg {
     Element
     Key
     Value
@@ -70,7 +70,7 @@ pub enum CollectionArg {
 }
 
 // Result projections over the receiver element, key, callback result and seed.
-pub enum CollectionResult {
+enum CollectionResult {
     Unit
     Bool
     Int
@@ -119,7 +119,7 @@ pub enum CollectionResult {
 
 // TIR producer. Fixed operations carry their TIR op; the others select one from
 // the checked callback and element facts at the call site.
-pub enum CollectionOp {
+enum CollectionOp {
     Builtin(op: TBuiltinOp)
     Closure(op: TClosureOp)
     SetClosure(op: TClosureOp)
@@ -154,7 +154,7 @@ pub enum CollectionOp {
     ListMinMaxBy
 }
 
-pub enum CollectionLaw {
+enum CollectionLaw {
     Measure
     Lookup
     Mutate
@@ -180,42 +180,42 @@ pub enum CollectionLaw {
 // Current: checked and lowered on every engine. SourceOnly: checked by the
 // self-hosted compiler before every engine carries it. Proposed: ratified but
 // not accepted by the checker yet.
-pub enum CollectionStatus { Current SourceOnly Proposed }
+enum CollectionStatus { Current SourceOnly Proposed }
 
-pub struct CollectionLawFacts {
-    pub law: CollectionLaw
-    pub timing: String
-    pub result: String
-    pub callbacks: String
-    pub stop: String
-    pub failure: String
-    pub buffering: String
+struct CollectionLawFacts {
+    law: CollectionLaw
+    timing: String
+    result: String
+    callbacks: String
+    stop: String
+    failure: String
+    buffering: String
 }
 
-pub struct CollectionOperationRow {
-    pub receivers: CollectionReceivers
-    pub name: String
-    pub minimum_arity: Int
-    pub maximum_arity: Int
-    pub access: CollectionAccess
-    pub args: [CollectionArg]
-    pub result: CollectionResult
-    pub op: CollectionOp
-    pub law: CollectionLaw
-    pub empty: String
-    pub status: CollectionStatus
+struct CollectionOperationRow {
+    receivers: CollectionReceivers
+    name: String
+    minimum_arity: Int
+    maximum_arity: Int
+    access: CollectionAccess
+    args: [CollectionArg]
+    result: CollectionResult
+    op: CollectionOp
+    law: CollectionLaw
+    empty: String
+    status: CollectionStatus
 }
 
-pub struct SemaCollectionMethodContract {
-    pub receiver: Type
-    pub kind: SemaCollectionKind
-    pub row: CollectionOperationRow
-    pub minimum_arity: Int
-    pub maximum_arity: Int
-    pub receiver_access: AccessConvention
-    pub callback_indices: [Int]
-    pub seed_indices: [Int]
-    pub accepts_comparator: Bool
+struct SemaCollectionMethodContract {
+    receiver: Type
+    kind: SemaCollectionKind
+    row: CollectionOperationRow
+    minimum_arity: Int
+    maximum_arity: Int
+    receiver_access: AccessConvention
+    callback_indices: [Int]
+    seed_indices: [Int]
+    accepts_comparator: Bool
 }
 
 fn collection_law(law: CollectionLaw, timing: String, result: String, callbacks: String, stop: String, failure: String, buffering: String) -> CollectionLawFacts Never! {
@@ -532,7 +532,7 @@ fn sema_collection_kind(ty: Type) -> SemaCollectionKind? {
     }
 }
 
-pub fn sema_collection_kind_element(kind: SemaCollectionKind) -> Type Never! {
+fn sema_collection_kind_element(kind: SemaCollectionKind) -> Type Never! {
     if kind == {
         .List(element) | .FixedList(element) | .Iter(element) | .ViewIter(element) | .View(element) | .Set(element) | .Rank(element) | .Tally(element) | .Queue(element) | .PriorityQueue(element) -> element
         .Map(_, value) | .Cache(_, value) -> value
@@ -590,26 +590,26 @@ fn collection_arg_is_callback(arg: CollectionArg) -> Bool Never! {
 // reference's `Collections::RESERVED_TYPES` reserves it with the other
 // built-in type names; porting the rest of that list is the E0106 row of the
 // Rust-Jet parity ledger.
-pub fn sema_reserved_type_name(name: String) -> Bool Never! {
+fn sema_reserved_type_name(name: String) -> Bool Never! {
     name == "Unit"
 }
 
-pub fn sema_collection_receiver_element(receiver: Type) -> Type? {
+fn sema_collection_receiver_element(receiver: Type) -> Type? {
     kind :: sema_collection_kind(receiver) ?? return None
     Val(sema_collection_kind_element(kind))
 }
 
-pub fn sema_collection_is_list(receiver: Type) -> Bool Never! {
+fn sema_collection_is_list(receiver: Type) -> Bool Never! {
     kind :: sema_collection_kind(receiver) ?? return false
     sema_collection_family(kind) == CollectionReceivers.List
 }
 
-pub fn sema_collection_is_iter(receiver: Type) -> Bool Never! {
+fn sema_collection_is_iter(receiver: Type) -> Bool Never! {
     kind :: sema_collection_kind(receiver) ?? return false
     sema_collection_family(kind) == CollectionReceivers.Iter
 }
 
-pub fn sema_collection_is_view_iter(receiver: Type) -> Bool Never! {
+fn sema_collection_is_view_iter(receiver: Type) -> Bool Never! {
     kind :: sema_collection_kind(receiver) ?? return false
     if kind == {
         .ViewIter(_) -> true
@@ -617,19 +617,19 @@ pub fn sema_collection_is_view_iter(receiver: Type) -> Bool Never! {
     }
 }
 
-pub fn sema_collection_is_map(receiver: Type) -> Bool Never! {
+fn sema_collection_is_map(receiver: Type) -> Bool Never! {
     kind :: sema_collection_kind(receiver) ?? return false
     sema_collection_family(kind) == CollectionReceivers.Map
 }
 
-pub fn sema_collection_is_set(receiver: Type) -> Bool Never! {
+fn sema_collection_is_set(receiver: Type) -> Bool Never! {
     kind :: sema_collection_kind(receiver) ?? return false
     sema_collection_family(kind) == CollectionReceivers.Set
 }
 
 // The one lookup: the checked row for this receiver and method, with its
 // receiver-specific access and callback positions resolved.
-pub fn sema_collection_method_contract(receiver: Type, method: String) -> SemaCollectionMethodContract? {
+fn sema_collection_method_contract(receiver: Type, method: String) -> SemaCollectionMethodContract? {
     sema_collection_method_contract_in(COLLECTION_OPERATIONS, receiver, method)
 }
 
@@ -654,7 +654,7 @@ fn sema_collection_method_contract_in(rows: [CollectionOperationRow], receiver: 
 }
 
 // Mem is the effect of every exclusive (in-place) collection operation.
-pub fn sema_collection_method_effect_row(contract: SemaCollectionMethodContract, span: Span) -> [EffectRowEntry] Never! {
+fn sema_collection_method_effect_row(contract: SemaCollectionMethodContract, span: Span) -> [EffectRowEntry] Never! {
     if contract.row.access == CollectionAccess.Write -> return [EffectRowEntry]{EffectRowEntry{name: "Mem", span: span}}
     [EffectRowEntry]{}
 }
@@ -679,7 +679,7 @@ fn sema_collection_same_kind(kind: SemaCollectionKind, element: Type) -> Type Ne
     }
 }
 
-pub fn sema_collection_method_argument_type(contract: SemaCollectionMethodContract, index: Int, seed: Type?, comparator: Bool) -> Type? {
+fn sema_collection_method_argument_type(contract: SemaCollectionMethodContract, index: Int, seed: Type?, comparator: Bool) -> Type? {
     if index < 0 || index >= contract.row.args.len() -> return None
     element := sema_collection_kind_element(contract.kind)
     key := sema_collection_kind_key(contract.kind)
@@ -712,7 +712,7 @@ pub fn sema_collection_method_argument_type(contract: SemaCollectionMethodContra
 }
 
 // Result-returning set and sequence filters preserve the error type and require Bool success.
-pub fn sema_collection_method_result_type(contract: SemaCollectionMethodContract, callback_return: Type?, seed: Type?) -> Type? {
+fn sema_collection_method_result_type(contract: SemaCollectionMethodContract, callback_return: Type?, seed: Type?) -> Type? {
     element := sema_collection_kind_element(contract.kind)
     key := sema_collection_kind_key(contract.kind)
     family := sema_collection_family(contract.kind)
@@ -834,7 +834,7 @@ fn sema_collection_filtered(filtered: Type, callback: Type) -> Type? {
 
 // `literal_remove_mode` is the removal mode a literal `RemoveBy` selector fixed;
 // only a run-time selector keeps the dynamic two-kernel removal.
-pub fn sema_collection_method_operation(contract: SemaCollectionMethodContract, argument_count: Int, literal_remove_mode: TListRemoveMode?, line: Int, callback_return: Type?, callback_mutable: Bool, comparator: Bool, tuple_struct: String) -> SemaCollectionOperation Never! {
+fn sema_collection_method_operation(contract: SemaCollectionMethodContract, argument_count: Int, literal_remove_mode: TListRemoveMode?, line: Int, callback_return: Type?, callback_mutable: Bool, comparator: Bool, tuple_struct: String) -> SemaCollectionOperation Never! {
     element := sema_collection_kind_element(contract.kind)
     is_view := sema_collection_family(contract.kind) == CollectionReceivers.View
     is_float := element == Type.Float || element == Type.Float32

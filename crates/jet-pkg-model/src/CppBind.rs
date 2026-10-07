@@ -1414,7 +1414,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         if !class.methods.is_empty() {
             out.push_str("}\n\n");
         }
-        out.push_str(&format!("pub fn close_{name}(value: ^{}) -[FFI.Cpp]> {{\n    abi.{name}_close(value.value)\n    if abi.take_error() != 0 {{ panic(\"C++ handle close failed\") }}\n}}\n\n", class.name));
+        out.push_str(&format!("fn close_{name}(value: ^{}) -[FFI.Cpp]> {{\n    abi.{name}_close(value.value)\n    if abi.take_error() != 0 {{ panic(\"C++ handle close failed\") }}\n}}\n\n", class.name));
     }
     for function in &surface.functions {
         out.push_str(&format!("pub fn {}(", function.jet_name));

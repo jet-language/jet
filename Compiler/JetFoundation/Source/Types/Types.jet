@@ -1,7 +1,7 @@
 // Canonical semantic type and declaration identities shared by every compiler
 // phase. Keep this separate from target layout and backend representations.
 
-pub enum Type {
+enum Type {
     Int
     Float
     Bool
@@ -27,15 +27,15 @@ pub enum Type {
     Measure(measure: Measure)
 }
 
-pub struct TypeTupleField {
-    pub name: String
-    pub ty: Type
+struct TypeTupleField {
+    name: String
+    ty: Type
 }
 
 // S73: named tuple fields sorted by name, so type identity ignores source
 // order (the Rust reference's `canonicalize_tuple_fields`). The sort is stable,
 // so positional members keep their written order.
-pub fn type_tuple_fields_canonical(fields: [TypeTupleField]) -> [TypeTupleField] Never! {
+fn type_tuple_fields_canonical(fields: [TypeTupleField]) -> [TypeTupleField] Never! {
     sorted := fields
     index := 1
     loop index < sorted.len() {
@@ -51,13 +51,13 @@ pub fn type_tuple_fields_canonical(fields: [TypeTupleField]) -> [TypeTupleField]
     sorted
 }
 
-pub enum AccessConvention {
+enum AccessConvention {
     Read
     Write
     Move
 }
 
-pub fn access_sigil(access: AccessConvention) -> String Never! {
+fn access_sigil(access: AccessConvention) -> String Never! {
     if access == {
         .Write -> "&"
         .Move -> "^"
@@ -65,12 +65,12 @@ pub fn access_sigil(access: AccessConvention) -> String Never! {
     }
 }
 
-pub enum TagMarker {
+enum TagMarker {
     User(name: String)
     Internal(internal_tag: InternalTag)
 }
 
-pub enum InternalTag {
+enum InternalTag {
     CoreCryptoNominal
     DeterministicClock
     SystemClock
@@ -82,20 +82,20 @@ pub enum InternalTag {
     AllocatorView
 }
 
-pub enum MeasureRule {
+enum MeasureRule {
     Add
     Mul
     Match
 }
 
-pub enum Measure {
+enum Measure {
     Literal(kind: String, value: Int)
     SignedLiteral(kind: String, value: Int)
     Symbol(kind: String, name: String)
     Combined(kind: String, rule: MeasureRule, left: Measure, right: Measure)
 }
 
-pub fn measure_kind(measure: Measure) -> String Never! {
+fn measure_kind(measure: Measure) -> String Never! {
     if measure == {
         .Literal(kind, _) -> kind
         .SignedLiteral(kind, _) -> kind
@@ -104,7 +104,7 @@ pub fn measure_kind(measure: Measure) -> String Never! {
     }
 }
 
-pub fn measure_literal_value(measure: Measure) -> Int? {
+fn measure_literal_value(measure: Measure) -> Int? {
     if measure == {
         .Literal(_, value) -> Val(value)
         .Combined(_, rule, left, right) -> {
@@ -126,7 +126,7 @@ pub fn measure_literal_value(measure: Measure) -> Int? {
     }
 }
 
-pub fn measure_signed_value(measure: Measure) -> Int? {
+fn measure_signed_value(measure: Measure) -> Int? {
     if measure == {
         .SignedLiteral(_, value) -> Val(value)
         .Literal(_, value) -> Val(value)
@@ -149,7 +149,7 @@ pub fn measure_signed_value(measure: Measure) -> Int? {
     }
 }
 
-pub fn measure_expression(measure: Measure) -> String Never! {
+fn measure_expression(measure: Measure) -> String Never! {
     if measure == {
         .Literal(_, value) -> "{value}"
         .SignedLiteral(_, value) -> "{value}"
@@ -166,20 +166,20 @@ pub fn measure_expression(measure: Measure) -> String Never! {
     }
 }
 
-pub fn measure_key(measure: Measure) -> String Never! {
+fn measure_key(measure: Measure) -> String Never! {
     "{measure_kind(measure)}:{measure_expression(measure)}"
 }
 
-pub struct DimensionAxis {
-    pub name: String
-    pub exponent: Measure
+struct DimensionAxis {
+    name: String
+    exponent: Measure
 }
 
-pub struct Dimension {
-    pub axes: [DimensionAxis]
+struct Dimension {
+    axes: [DimensionAxis]
 }
 
-pub fn dimension_identity(dimension: Dimension) -> String Never! {
+fn dimension_identity(dimension: Dimension) -> String Never! {
     parts := [String]{}
     loop axis in dimension.axes {
         exponent :: measure_signed_value(axis.exponent).map(value -> "{value}") ?? measure_expression(axis.exponent)
@@ -188,7 +188,7 @@ pub fn dimension_identity(dimension: Dimension) -> String Never! {
     parts.join(";")
 }
 
-pub fn dimension_display_name(dimension: Dimension) -> String Never! {
+fn dimension_display_name(dimension: Dimension) -> String Never! {
     parts := [String]{}
     loop axis in dimension.axes {
         leaf := axis.name.split("::").to_list()
@@ -211,13 +211,13 @@ fn escape_dimension_axis(axis: String) -> String Never! {
     axis.replace("%", "%25").replace(";", "%3B").replace(":", "%3A")
 }
 
-pub enum Exactness {
+enum Exactness {
     Exact
     Approximate(precision: Int)
     Measured
 }
 
-pub enum KnowledgeFact {
+enum KnowledgeFact {
     Interval(lo: Int, hi: Int)
     Layout(bytes: Int)
     Measure(value: Measure)
@@ -228,103 +228,103 @@ pub enum KnowledgeFact {
     Obligation(value: FunctionObligations)
 }
 
-pub struct KnowledgeEntry {
-    pub path: [String]
-    pub plane: String
-    pub fact: KnowledgeFact
+struct KnowledgeEntry {
+    path: [String]
+    plane: String
+    fact: KnowledgeFact
 }
 
-pub struct KnowledgeVector {
-    pub entries: [KnowledgeEntry]
+struct KnowledgeVector {
+    entries: [KnowledgeEntry]
 }
 
-pub struct TypeIdentity {
-    pub carrier: String
-    pub knowledge: KnowledgeVector
+struct TypeIdentity {
+    carrier: String
+    knowledge: KnowledgeVector
 }
 
-pub enum ParamZone {
+enum ParamZone {
     PositionalOnly
     Either
     LabelOnly
 }
 
-pub struct CallContractRow {
-    pub label: String
-    pub zone: ParamZone
+struct CallContractRow {
+    label: String
+    zone: ParamZone
 }
 
-pub struct EffectRowEntry {
-    pub name: String
-    pub span: Span
+struct EffectRowEntry {
+    name: String
+    span: Span
 }
 
-pub struct FunctionObligations {
-    pub effect_bound: [String]?
-    pub param_contract: [CallContractRow]?
-    pub variadic: [Bool]?
-    pub return_view_provenance: ViewProvenanceMap?
+struct FunctionObligations {
+    effect_bound: [String]?
+    param_contract: [CallContractRow]?
+    variadic: [Bool]?
+    return_view_provenance: ViewProvenanceMap?
 }
 
-pub struct CallablePolicy {
-    pub name: String
-    pub arguments: [String]
+struct CallablePolicy {
+    name: String
+    arguments: [String]
 }
 
-pub struct CallablePolicyChain {
-    pub policies: [CallablePolicy]
+struct CallablePolicyChain {
+    policies: [CallablePolicy]
 }
 
 // Callable defaults refer back to their owning declaration instead of copying
 // an AST expression into the shared type. This keeps Type usable by parsing and
 // sema without a Type <-> Expr module cycle; source+owner+index resolves a node.
-pub struct FunctionCallMetadata {
-    pub names: [String]
-    pub defaults: [FunctionDefaultRef?]
-    pub variadic: [Bool]
-    pub conventions: [AccessConvention]
-    pub policies: CallablePolicyChain
+struct FunctionCallMetadata {
+    names: [String]
+    defaults: [FunctionDefaultRef?]
+    variadic: [Bool]
+    conventions: [AccessConvention]
+    policies: CallablePolicyChain
 }
 
-pub struct FunctionDefaultRef {
-    pub source_file: String
-    pub owner_key: String
-    pub parameter_index: Int
-    pub span: Span
+struct FunctionDefaultRef {
+    source_file: String
+    owner_key: String
+    parameter_index: Int
+    span: Span
 }
 
-pub enum ViewSource {
+enum ViewSource {
     Receiver
     Parameter(index: Int)
     Static(module_path: String, name: String)
 }
 
-pub enum ViewSourceProjection {
+enum ViewSourceProjection {
     Field(name: String)
     Index
     Range
 }
 
-pub struct ViewSourcePath {
-    pub source: ViewSource
-    pub projections: [ViewSourceProjection]
+struct ViewSourcePath {
+    source: ViewSource
+    projections: [ViewSourceProjection]
 }
 
-pub struct ViewProvenance {
-    pub sources: [ViewSourcePath]
-    pub mutable: Bool
+struct ViewProvenance {
+    sources: [ViewSourcePath]
+    mutable: Bool
 }
 
-pub struct ViewProvenanceEntry {
-    pub slot: [String]
-    pub value: ViewProvenance
+struct ViewProvenanceEntry {
+    slot: [String]
+    value: ViewProvenance
 }
 
-pub struct ViewProvenanceMap {
-    pub entries: [ViewProvenanceEntry]
+struct ViewProvenanceMap {
+    entries: [ViewProvenanceEntry]
 }
 
-pub enum SymbolKind {
+enum SymbolKind {
     Module
     Function
     Type
@@ -342,26 +342,26 @@ pub enum SymbolKind {
 
 // The canonical key, rather than allocation order, is declaration identity.
 // Numeric MIR IDs are derived separately at the backend-neutral lowering edge.
-pub struct SymbolID {
-    pub key: String
+struct SymbolID {
+    key: String
 }
 
-pub struct Symbol {
-    pub id: SymbolID
-    pub kind: SymbolKind
-    pub name: String
-    pub module_name: String
-    pub owner: String?
-    pub span: Span
-    pub ty: Type?
-    pub visibility: Int
+struct Symbol {
+    id: SymbolID
+    kind: SymbolKind
+    name: String
+    module_name: String
+    owner: String?
+    span: Span
+    ty: Type?
+    visibility: Int
 }
 
-pub fn symbol_id(kind: SymbolKind, module_name: String, owner: String, name: String) -> SymbolID Never! {
+fn symbol_id(kind: SymbolKind, module_name: String, owner: String, name: String) -> SymbolID Never! {
     SymbolID{key: "{symbol_kind_name(kind)}:{module_name}:{owner}:{name}"}
 }
 
-pub fn symbol_kind_name(kind: SymbolKind) -> String Never! {
+fn symbol_kind_name(kind: SymbolKind) -> String Never! {
     if kind == {
         .Module -> "module"
         .Function -> "function"
@@ -379,7 +379,7 @@ pub fn symbol_kind_name(kind: SymbolKind) -> String Never! {
     }
 }
 
-pub fn type_carrier_identity(ty: Type) -> String Never! {
+fn type_carrier_identity(ty: Type) -> String Never! {
     if ty == {
         .Int -> "Int"
         .Float -> "Float"
@@ -430,7 +430,7 @@ pub fn type_carrier_identity(ty: Type) -> String Never! {
     }
 }
 
-pub fn type_name(ty: Type) -> String Never! {
+fn type_name(ty: Type) -> String Never! {
     if ty == {
         .FixedList(elem, len) -> "[{type_name(elem)}#{measure_expression(len)}]"
         .IntN(signed, bits) -> {
@@ -550,7 +550,7 @@ fn type_marked_name(ty: Type) -> String Never! {
     }
 }
 
-pub fn type_is_unit_callable_return(ty: Type) -> Bool Never! {
+fn type_is_unit_callable_return(ty: Type) -> Bool Never! {
     if ty == {
         .Named(name) -> name == "Unit"
         .Result(ok, err) -> ok == Type.Named{name: "Unit"} && err == Type.Named{name: "Err"}
@@ -558,11 +558,11 @@ pub fn type_is_unit_callable_return(ty: Type) -> Bool Never! {
     }
 }
 
-pub fn type_identity(ty: Type) -> TypeIdentity Never! {
+fn type_identity(ty: Type) -> TypeIdentity Never! {
     TypeIdentity{carrier: type_carrier_identity(ty), knowledge: type_identity_knowledge(ty)}
 }
 
-pub fn type_identity_key(ty: Type) -> String Never! {
+fn type_identity_key(ty: Type) -> String Never! {
     identity_key(type_identity(ty))
 }
 
@@ -572,7 +572,7 @@ pub fn type_identity_key(ty: Type) -> String Never! {
 // identity-bearing Core crypto tag. Without the tag, `SharedGuard<T>` behind its
 // read/edit tag and its untagged inner share one canonical instance row, whose
 // inner type then names the row itself. User tags stay transparent, as in Rust.
-pub fn type_mir_identity_key(ty: Type) -> String Never! {
+fn type_mir_identity_key(ty: Type) -> String Never! {
     key :: type_identity_key(ty)
     if !type_has_mir_identity_tag(ty) -> return key
     tags := [String]{}
@@ -666,7 +666,7 @@ fn type_internal_tag_name(internal_tag: InternalTag) -> String Never! {
 
 // Compare declaration identity without allocating a serialized key. Compile-
 // time facts and directional callable obligations remain separate judgments.
-pub fn type_identity_equal(left: Type, right: Type) -> Bool Never! {
+fn type_identity_equal(left: Type, right: Type) -> Bool Never! {
     if left == {
         .Tagged(marker, inner) -> {
             if tag_is_identity_bearing(marker) {
@@ -818,7 +818,7 @@ fn dimension_identity_equal(left: Dimension, right: Dimension) -> Bool Never! {
     true
 }
 
-pub fn type_with_effective_fn_returns(ty: Type) -> Type Never! {
+fn type_with_effective_fn_returns(ty: Type) -> Type Never! {
     if ty == {
         .List(inner) -> Type.List{element: type_with_effective_fn_returns(inner)}
         .Map(key, key_span, value) -> Type.Map{key: type_with_effective_fn_returns(key), key_span: key_span, value: type_with_effective_fn_returns(value)}
@@ -863,11 +863,11 @@ fn effective_callable_return(ty: Type) -> Type Never! {
     }
 }
 
-pub fn compute_dimension_type(value: Int) -> Type Never! {
+fn compute_dimension_type(value: Int) -> Type Never! {
     Type.Measure{measure: Measure.Literal{kind: "shape", value: value}}
 }
 
-pub fn compute_dimension_value(ty: Type) -> Int? {
+fn compute_dimension_value(ty: Type) -> Int? {
     if ty == {
         .Measure(value) -> {
             if measure_kind(value) != "shape" -> return None
@@ -877,12 +877,12 @@ pub fn compute_dimension_value(ty: Type) -> Int? {
     }
 }
 
-pub fn compute_shape_type(name: String, dimensions: [Int]) -> Type Never! {
+fn compute_shape_type(name: String, dimensions: [Int]) -> Type Never! {
     args :: loop dimension in dimensions -> compute_dimension_type(dimension)
     Type.Apply{name: name, args: args}
 }
 
-pub fn compute_shape_measures(ty: Type) -> [Measure]? {
+fn compute_shape_measures(ty: Type) -> [Measure]? {
     if ty == {
         .Apply(name, args) -> compute_shape_measures_apply(name, args)
         else -> None
@@ -909,7 +909,7 @@ fn compute_shape_measures_apply(name: String, args: [Type]) -> [Measure]? {
     Val(measures)
 }
 
-pub fn compute_shape_dimensions(ty: Type) -> [Int]? {
+fn compute_shape_dimensions(ty: Type) -> [Int]? {
     measures :: compute_shape_measures(ty) ?? return None
     dimensions := [Int]{}
     loop measure in measures {
@@ -921,7 +921,7 @@ pub fn compute_shape_dimensions(ty: Type) -> [Int]? {
 
 // D-COMPUTE-TYPE1: the source-owned `core.compute` declaration is the one
 // Tensor owner, so its canonical nominal is the same family as `Tensor`.
-pub fn is_compute_tensor_family(ty: Type) -> Bool Never! {
+fn is_compute_tensor_family(ty: Type) -> Bool Never! {
     if ty == {
         .Tagged(_, inner) -> is_compute_tensor_family(inner)
         .Named(name) -> name == "Tensor" || name == "<corelib>/Core/compute::Core/compute/compute.jet::Tensor"
@@ -945,7 +945,7 @@ fn is_compute_tensor_application(name: String, args: [Type]) -> Bool Never! {
     true
 }
 
-pub fn is_compute_view_mut(ty: Type) -> Bool Never! {
+fn is_compute_view_mut(ty: Type) -> Bool Never! {
     if ty == {
         .Apply(name, args) -> name == "ComputeViewMut" && args.len() == 1 && args[0] == Type.Float
         else -> false
@@ -988,7 +988,7 @@ fn type_simd_lane_arity(name: String) -> Int? {
     }
 }
 
-pub fn identity_key(identity: TypeIdentity) -> String Never! {
+fn identity_key(identity: TypeIdentity) -> String Never! {
     facts := [String]{}
     loop entry in identity.knowledge.entries {
         path :: if entry.path.len() == 0 -> "self" else -> entry.path.join(".")
@@ -998,7 +998,7 @@ pub fn identity_key(identity: TypeIdentity) -> String Never! {
     "{identity.carrier}|{facts.join("|")}"
 }
 
-pub fn knowledge_fact_key(fact: KnowledgeFact) -> String Never! {
+fn knowledge_fact_key(fact: KnowledgeFact) -> String Never! {
     if fact == {
         .Interval(lo, hi) -> "interval:{lo}..{hi}"
         .Layout(bytes) -> "layout:{bytes}"
@@ -1017,7 +1017,7 @@ pub fn knowledge_fact_key(fact: KnowledgeFact) -> String Never! {
     }
 }
 
-pub fn function_obligations_key(value: FunctionObligations) -> String Never! {
+fn function_obligations_key(value: FunctionObligations) -> String Never! {
     contract := [String]{}
     contract_rows :: value.param_contract ?? [CallContractRow]{}
     loop row in contract_rows -> &contract.push("{row.label}:{param_zone_name(row.zone)}")
@@ -1027,7 +1027,7 @@ pub fn function_obligations_key(value: FunctionObligations) -> String Never! {
     "contract=[{contract.join(",")}];variadic=[{variadic.join(",")}]"
 }
 
-pub fn param_zone_name(zone: ParamZone) -> String Never! {
+fn param_zone_name(zone: ParamZone) -> String Never! {
     if zone == {
         .PositionalOnly -> "positional-only"
         .Either -> "either"

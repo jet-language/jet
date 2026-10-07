@@ -9,9 +9,9 @@
 // runtime sources, and renders the helper binaries the CLI shells out to.
 
 // One pinned crate: name and Cargo version requirement.
-pub struct FFICrateSpec {
-    pub name: String
-    pub version: String
+struct FFICrateSpec {
+    name: String
+    version: String
 }
 
 // The `rusqlite` crate that backs `core.db` (D-DEP-DB1).
@@ -48,9 +48,9 @@ FFI_AGE_CRATE_SPEC :: prep { FFICrateSpec{name: "age", version: "0.10"} }
 
 // Crate dependencies whose Cargo value needs a full TOML table (feature
 // flags); emitted verbatim as the right-hand side of `name = …`.
-pub struct FFIFeaturedDep {
-    pub name: String
-    pub toml: String
+struct FFIFeaturedDep {
+    name: String
+    toml: String
 }
 
 FFI_FEATURED_DEPS :: prep { [FFIFeaturedDep]{
@@ -126,18 +126,18 @@ fn pkg_ffi_standalone_outcome_runtime() -> String Never! {
 // Which bridge-backed Core providers one bridge carries. The regex, archive,
 // and stream-codec surfaces are compiled from their canonical Jet source
 // modules, so those three are always false for a prepared program.
-pub struct RustBridgeNeeds {
-    pub regex: Bool
-    pub archive: Bool
-    pub db: Bool
-    pub parquet: Bool
-    pub http_client: Bool
-    pub http_server_tls: Bool
-    pub net_tls: Bool
-    pub crypto: Bool
-    pub compress: Bool
-    pub plugin: Bool
-    pub secrets: Bool
+struct RustBridgeNeeds {
+    regex: Bool
+    archive: Bool
+    db: Bool
+    parquet: Bool
+    http_client: Bool
+    http_server_tls: Bool
+    net_tls: Bool
+    crypto: Bool
+    compress: Bool
+    plugin: Bool
+    secrets: Bool
 
     fn none() -> RustBridgeNeeds Never! {
         RustBridgeNeeds{regex: false, archive: false, db: false, parquet: false, http_client: false, http_server_tls: false, net_tls: false, crypto: false, compress: false, plugin: false, secrets: false}
@@ -206,7 +206,7 @@ fn pkg_ffi_is_crypto_usage(usage: String) -> Bool Never! {
 // Whether the native whole-program cache can skip Rust code generation for
 // this program. FFI and C-linked programs stay on the ordinary path because
 // their artifacts depend on bridge and link inputs outside the AST key.
-pub fn pkg_ffi_native_cacheable(program: RustBridgeProgram) -> Bool Never! {
+fn pkg_ffi_native_cacheable(program: RustBridgeProgram) -> Bool Never! {
     if program.cffi.links_c() || pkg_ffi_collect_externs(program).len() > 0 -> return false
     loop usage in program.used_core {
         if usage == "core.db" || usage.starts_with("core.db::") || pkg_ffi_needs_parquet_provider(usage) || pkg_ffi_is_http_client_usage(usage) || usage == "core.http.server::tls" || pkg_ffi_needs_net_tls_provider(usage) -> return false
@@ -440,14 +440,14 @@ FFI_JET_FOUNDATION_TEXT_INPUTS :: prep { [String]{"string.jet"} }
 FFI_JET_FOUNDATION_TEST_INPUTS :: prep { [String]{"diagnostics_coverage_baseline.txt"} }
 
 // The verified jet-foundation source directories and their input digest.
-pub struct JetFoundationSources {
-    pub foundation: String
-    pub unicode: String
-    pub codegen_prelude: String
-    pub archive_source: String
-    pub text_source: String
-    pub tests: String
-    pub digest: String
+struct JetFoundationSources {
+    foundation: String
+    unicode: String
+    codegen_prelude: String
+    archive_source: String
+    text_source: String
+    tests: String
+    digest: String
 }
 
 // The absolute path of the bridge's jet-foundation path dependency.

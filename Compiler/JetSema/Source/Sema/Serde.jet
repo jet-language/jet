@@ -4,7 +4,7 @@ use jet_foundation.[
     Type,
 ]
 
-pub enum SemaSerdeDirection {
+enum SemaSerdeDirection {
     Encode
     Decode
 }
@@ -153,7 +153,7 @@ fn sema_serde_core_data_name(environment: SemaScopeEnvironment, name: String, di
     graph.modules[module_index].module_name == "core.data" || graph.modules[module_index].module_name == "core.encoding"
 }
 
-pub fn sema_serde_type_is_admissible(environment: SemaScopeEnvironment, ty: Type, direction: SemaSerdeDirection) -> Bool Never! {
+fn sema_serde_type_is_admissible(environment: SemaScopeEnvironment, ty: Type, direction: SemaSerdeDirection) -> Bool Never! {
     resolved := ty
     if environment.registration_graph == .Val(graph) -> resolved = sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
     return if resolved == {

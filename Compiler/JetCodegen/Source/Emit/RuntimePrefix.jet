@@ -28,21 +28,21 @@ use jet_foundation.[
     mir_sha256_hex,
 ]
 
-pub struct JetRustRuntimeSource { pub path: String, pub text: String }
+struct JetRustRuntimeSource { path: String, text: String }
 
-pub struct JetRustRuntimeAsset { pub path: String, pub bytes: [U8] }
+struct JetRustRuntimeAsset { path: String, bytes: [U8] }
 
-pub struct JetRustRuntimePrefixInputs {
+struct JetRustRuntimePrefixInputs {
     // rustc target triple (OS fallback when the package facts name none).
-    pub target_triple: String
-    pub policy: JetReleaseDevtoolsPolicy
+    target_triple: String
+    policy: JetReleaseDevtoolsPolicy
     // The FFI link crate (`FfiLink.crate_name`); None without foreign Rust.
-    pub ffi_crate: String?
-    pub sources: [JetRustRuntimeSource]
-    pub assets: [JetRustRuntimeAsset]
+    ffi_crate: String?
+    sources: [JetRustRuntimeSource]
+    assets: [JetRustRuntimeAsset]
 }
 
-pub enum JetRustRuntimePrefix {
+enum JetRustRuntimePrefix {
     Text(text: String)
     // A required source or marker is missing, or the target is not hosted.
     Refused(message: String)
@@ -145,7 +145,7 @@ JET_RUST_PREFIX_FOUNDATION_FILES :: [String]{
 }
 
 // Every text source the assembler may read, relative to the toolchain root.
-pub fn jet_rust_runtime_source_paths() -> [String] Never! {
+fn jet_rust_runtime_source_paths() -> [String] Never! {
     paths := [String]{JET_RUST_PREFIX_CODEGEN_MOD, JET_RUST_PREFIX_CARGO, JET_RUST_PREFIX_STACK, JET_RUST_PREFIX_SYNTAX, "crates/jet-rt/src/__gc_core.rs", "crates/jet-rt/src/__gc_host.rs"}
     loop file in JET_RUST_PREFIX_PRELUDE_FILES -> &paths.push("{JET_RUST_PREFIX_PRELUDE}{file}")
     loop file in JET_RUST_PREFIX_FOUNDATION_FILES -> &paths.push("{JET_RUST_PREFIX_FOUNDATION}{file}")
@@ -153,11 +153,11 @@ pub fn jet_rust_runtime_source_paths() -> [String] Never! {
 }
 
 // The binary assets the assembler may read: the canonical UI fonts.
-pub fn jet_rust_runtime_asset_paths() -> [String] Never! { JET_RUST_PREFIX_FONTS }
+fn jet_rust_runtime_asset_paths() -> [String] Never! { JET_RUST_PREFIX_FONTS }
 
 // The unique Rust AOT artifact a native build emits (Emit/Entry.jet
 // `jet_rust_emit_selected_artifact`).
-pub fn jet_rust_runtime_artifact(program: MIRProgram) -> MIRArtifactPlan? Never! {
+fn jet_rust_runtime_artifact(program: MIRProgram) -> MIRArtifactPlan? Never! {
     selected := MIRArtifactPlan?{None}
     loop artifact in program.artifacts {
         if artifact.target != MIRArtifactTarget.RustAOT -> next
@@ -1626,7 +1626,7 @@ fn jet_rust_prefix_active_linux(active_os: String, triple: String) -> Bool Never
 }
 
 // MIRRust `emit_mir_runtime_text` for `artifact` under `inputs`.
-pub fn jet_rust_runtime_prefix(program: MIRProgram, artifact: MIRArtifactPlan, inputs: JetRustRuntimePrefixInputs) -> JetRustRuntimePrefix Never! {
+fn jet_rust_runtime_prefix(program: MIRProgram, artifact: MIRArtifactPlan, inputs: JetRustRuntimePrefixInputs) -> JetRustRuntimePrefix Never! {
     if program.facts.target_dossier.machine == .Val(machine) {
         if machine.no_os -> return JetRustRuntimePrefix.Refused{message: "the Jet host does not assemble the no-OS portable runtime yet; build this target with the Rust `jet`"}
     }
@@ -1653,7 +1653,7 @@ pub fn jet_rust_runtime_prefix(program: MIRProgram, artifact: MIRArtifactPlan, i
 // Package ReleaseDevtoolsPolicy: `development()` for None, else
 // `from_manifest_profile(inspect)` (the deployment comes from the environment
 // and does not reach the runtime prefix).
-pub fn jet_rust_release_devtools_policy(inspect: JetReleaseInspect?) -> JetReleaseDevtoolsPolicy Never! {
+fn jet_rust_release_devtools_policy(inspect: JetReleaseInspect?) -> JetReleaseDevtoolsPolicy Never! {
     endpoint := JetReleaseDevtoolsEndpoint.Absent
     local_rail := true
     panel_code := true

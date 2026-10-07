@@ -35,9 +35,9 @@ struct PublicationCheckpoint {
     public_key: String
     signature: String
 }
-pub struct PublicationRegistryMetadataFiles {
-    pub paths: [String]
-    pub checkpoint: String
+struct PublicationRegistryMetadataFiles {
+    paths: [String]
+    checkpoint: String
 }
 struct PublicationMetadataFileSnapshot {
     path: String
@@ -46,7 +46,7 @@ struct PublicationMetadataFileSnapshot {
 
 // Rust refresh_registry_metadata: snapshot every destination before the first
 // write; restore all snapshots on ANY later failure, retaining rollback errors.
-pub fn publication_refresh_registry_metadata(repo: String, registry_name: String) -[FS, Env, Time]> PublicationRegistryMetadataFiles PublicationDiagnosticError! {
+fn publication_refresh_registry_metadata(repo: String, registry_name: String) -[FS, Env, Time]> PublicationRegistryMetadataFiles PublicationDiagnosticError! {
     root_key :: publication_read_registry_root_key(registry_name) ?? return Err(publication_tuf_metadata_diagnostic("{err}"))
     grouped :: publication_tuf_all_index_entries(repo) ?? return Err(publication_tuf_metadata_diagnostic("{err}"))
     if grouped.len() == 0 -> return Err(publication_tuf_metadata_diagnostic("registry index has no package metadata to publish"))
@@ -104,7 +104,7 @@ fn publication_tuf_refresh_transaction(repo: String, registry_name: String, root
     Ok(PublicationRegistryMetadataFiles{paths: paths, checkpoint: checkpoint})
 }
 
-pub fn publication_verify_registry_package(repo: String, registry_name: String, name: String) -[FS, Env, Time]> [PublicationIndexEntry] PublicationDiagnosticError! {
+fn publication_verify_registry_package(repo: String, registry_name: String, name: String) -[FS, Env, Time]> [PublicationIndexEntry] PublicationDiagnosticError! {
     metadata :: publication_tuf_read_sparse_metadata(repo, name) ?? return Err(publication_tuf_metadata_diagnostic("{err}"))
     root_key :: publication_read_registry_root_key(registry_name) ?? return Err(publication_tuf_metadata_diagnostic("{err}"))
     if metadata.public_key != root_key -> return Err(publication_tuf_metadata_diagnostic("registry sparse metadata is signed by an unpinned root key"))
@@ -484,7 +484,7 @@ fn publication_tuf_validate_entries(name: String, entries: &[PublicationIndexEnt
         prior = Val(entry.version)
     }
 }
-pub fn publication_registry_package_metadata_path(repo: String, name: String) -> String IOError! {
+fn publication_registry_package_metadata_path(repo: String, name: String) -> String IOError! {
     _ :: publication_index_entry_path(repo, name)
     Ok(files.join(files.join(repo, "metadata"), "{name}.json"))
 }

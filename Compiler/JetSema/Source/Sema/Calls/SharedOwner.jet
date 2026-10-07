@@ -165,7 +165,7 @@ fn sema_call_shared_owner_guard(receiver: Expr, receiver_value: TExpr, inner: Ty
     sema_call_shared_owner_nullary(receiver, receiver_value, method, result, span, expected, environment, &scopes, &state, &diagnostics)
 }
 
-pub fn sema_call_try_shared_owner_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_shared_owner_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty == {
         .Shared(inner) -> {
             if method == "capture" -> return sema_call_shared_owner_capture(receiver, receiver_value, inner, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)

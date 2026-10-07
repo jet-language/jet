@@ -1,7 +1,7 @@
 // Source/Publish/SBOM.rs: deterministic SPDX 2.3 and CycloneDX 1.5.
 // Namespace/serial identity is the canonical PackageModel lock writer's bytes,
 // hashed by the Compiler-owned SHA kernel. Production never samples a clock.
-pub fn publication_emit_spdx(lock: LockFile, root_name: String, root_version: String) -> String Never! {
+fn publication_emit_spdx(lock: LockFile, root_name: String, root_version: String) -> String Never! {
     digest :: publication_lock_digest(lock)
     root_checksum := "NOASSERTION"
     // First matching record, even when its content hash is not SHA-256.
@@ -23,7 +23,7 @@ pub fn publication_emit_spdx(lock: LockFile, root_name: String, root_version: St
     out.join("")
 }
 
-pub fn publication_emit_cyclonedx(lock: LockFile, root_name: String, root_version: String) -> String Never! {
+fn publication_emit_cyclonedx(lock: LockFile, root_name: String, root_version: String) -> String Never! {
     digest :: publication_lock_digest(lock)
     components := [String]{}
     loop index in 0..<lock.packages.len() {
@@ -46,7 +46,7 @@ fn publication_spdx_checksum(value: String) -> String? Never! {
 
 // Registry referrers bind both the exact arbitrary OCI subject marker and,
 // when present, the lock identity. The absent-lock document has no heading.
-pub fn publication_registry_spdx(lock: LockFile?, root_name: String, root_version: String, subject: String) -> String Never! {
+fn publication_registry_spdx(lock: LockFile?, root_name: String, root_version: String, subject: String) -> String Never! {
     if lock == .Val(present) {
         return "{publication_emit_spdx(present, root_name, root_version)}# JetSubject: {subject}\n# JetLockDigest: {publication_lock_digest(present)}\n"
     }

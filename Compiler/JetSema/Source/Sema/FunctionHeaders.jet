@@ -14,12 +14,12 @@ use jet_foundation.[
     Stmt,
 ]
 
-pub struct SemaFunctionHeaderMarkerGate {
-    pub name: String
-    pub span: Span
+struct SemaFunctionHeaderMarkerGate {
+    name: String
+    span: Span
 }
 
-pub fn sema_function_header_normalize_external_method(function: Func) -> Item Never! {
+fn sema_function_header_normalize_external_method(function: Func) -> Item Never! {
     external :: function.external_type ?? return Item.Func{value: function}
     method := function
     method.external_type = None
@@ -39,7 +39,7 @@ pub fn sema_function_header_normalize_external_method(function: Func) -> Item Ne
     }}
 }
 
-pub fn sema_function_header_check_root_params(function: Func, is_method: Bool, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_function_header_check_root_params(function: Func, is_method: Bool, diagnostics: &[Diagnostic]) -> Bool {
     valid := true
     if is_method || function.external_type != None {
         loop parameter in function.params {
@@ -65,7 +65,7 @@ pub fn sema_function_header_check_root_params(function: Func, is_method: Bool, d
 
 // D-NARG-D2 (E0126): a default expression may name only parameters written
 // before its own; defaults fill left to right. `self` is not a parameter here.
-pub fn sema_function_header_check_default_forward_refs(function: Func, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_function_header_check_default_forward_refs(function: Func, diagnostics: &[Diagnostic]) -> Bool {
     names := [String]{}
     loop parameter in function.params {
         if parameter.name != "self" -> &names.push(parameter.name)
@@ -134,7 +134,7 @@ fn sema_function_header_default_idents(value: Expr, found: &[Expr]) {
     }
 }
 
-pub fn sema_function_header_active_marker_gates(function: Func) -> [SemaFunctionHeaderMarkerGate] Never! {
+fn sema_function_header_active_marker_gates(function: Func) -> [SemaFunctionHeaderMarkerGate] Never! {
     gates := [SemaFunctionHeaderMarkerGate]{}
     if function.is_unsafe -> &gates.push(SemaFunctionHeaderMarkerGate{name: "Unsafe", span: function.unsafe_span ?? function.name_span})
     if function.is_replayable -> &gates.push(SemaFunctionHeaderMarkerGate{name: "Replayable", span: function.replayable_span ?? function.name_span})
@@ -145,7 +145,7 @@ pub fn sema_function_header_active_marker_gates(function: Func) -> [SemaFunction
     gates
 }
 
-pub fn sema_function_header_check_marker_gates(function: Func, function_allowed_markers: [String], diagnostics: &[Diagnostic]) -> Bool {
+fn sema_function_header_check_marker_gates(function: Func, function_allowed_markers: [String], diagnostics: &[Diagnostic]) -> Bool {
     valid := true
     loop gate in sema_function_header_active_marker_gates(function) {
         allowed := false
@@ -169,7 +169,7 @@ fn sema_function_header_marker_projected(name: String) -> Bool Never! {
 
 // The header forms the body checker does not handle yet. Each one records
 // why on `context`, so an incomplete function never fails without a cause.
-pub fn sema_function_header_supported(function: Func, context: &SemaCheckContext) -> Bool Never! {
+fn sema_function_header_supported(function: Func, context: &SemaCheckContext) -> Bool Never! {
     supported := true
     if function.head_pattern != None {
         sema_check_unsupported(&context, "the multi-head pattern function `{function.name}` reached body checking without being desugared")
@@ -237,7 +237,7 @@ fn sema_function_header_inline_has_core_mem(module_row: SemaRegistrationModule) 
 // trait-bounded variadic parameter (`...Trait` / `...[A, B]`) has no single
 // Rust type, so its only supported use is the collection of one top-level
 // `loop x in name { … }` loop. Every other reference is reported.
-pub fn sema_function_header_check_variadic_bound_shape(function: Func, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_function_header_check_variadic_bound_shape(function: Func, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
     if function.params.len() == 0 -> return true
     last :: function.params[function.params.len() - 1]
     if !last.variadic -> return true

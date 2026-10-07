@@ -19,7 +19,7 @@ ENV_HOOK_GIT_CONFIG_VALUE_0 :: prep { "GIT_CONFIG_VALUE_0" }
 // uses. The model rejects lexical escapes; this runtime check also rejects a
 // symlinked directory that leaves the project and requires the target to
 // exist before entry can claim the hook path is active.
-pub fn env_hook_git_hooks_environment(root: String, relative: String) -[FS, Env]> [String: String] EnvironmentError! {
+fn env_hook_git_hooks_environment(root: String, relative: String) -[FS, Env]> [String: String] EnvironmentError! {
     if relative.trim() == "" || files.is_absolute(relative) || env_hook_has_parent_component(relative) {
         return Err(EnvironmentError.Activation("git hook path `{relative}` must be a non-empty project-relative path without `..`"))
     }
@@ -56,7 +56,7 @@ fn env_hook_path_within(path: String, root: String) -> Bool Never! {
 // The nearest directory at or above `start` that contains an `env.jet`.
 // This keeps an env active across `cd` into a project subdirectory (direnv
 // semantics): the whole subtree under an `env.jet` root is inside that env.
-pub fn env_hook_find_env_root(start: String) -[FS]> String? Never! {
+fn env_hook_find_env_root(start: String) -[FS]> String? Never! {
     dir := start
     loop {
         if files.is_file(files.join(dir, ENV_FILE)) -> return Val(dir)
@@ -70,7 +70,7 @@ pub fn env_hook_find_env_root(start: String) -[FS]> String? Never! {
 // double-registers. It also installs the `jet ?` / Alt-? help-app prefill
 // widgets so a normal shell gets the same editable-buffer behavior as a
 // branded jetpack subshell.
-pub fn env_hook_render_hook(kind: ShellKind) -> String Never! {
+fn env_hook_render_hook(kind: ShellKind) -> String Never! {
     export :: ENV_EXPORT_VERB
     lines :: if kind == {
         .Bash -> [String]{
@@ -104,19 +104,19 @@ pub fn env_hook_render_hook(kind: ShellKind) -> String Never! {
 }
 
 // The activation facts a load emits into the shell.
-pub struct EnvHookActivation {
+struct EnvHookActivation {
     // The `PATH` the shell had before this env loaded, saved so unload can
     // restore it verbatim.
-    pub base_path: String
+    base_path: String
     // The composed `PATH` (env bin dirs prepended to `base_path`).
-    pub composed_path: String
+    composed_path: String
     // The realized package refs, space-joined (as ShellEnv applies them).
-    pub refs: String
+    refs: String
     // The absolute `env.jet` root directory this activation is anchored to.
-    pub root: String
-    pub vars: [String: String]
-    pub unset: [String]
-    pub plan_hash: String
+    root: String
+    vars: [String: String]
+    unset: [String]
+    plan_hash: String
 
     // The statements that load this env into the current shell. Variable
     // names are checked here, at the render boundary, so no name can carry
@@ -162,7 +162,7 @@ fn env_hook_invalid_name(name: String) -> EnvironmentError Never! {
 
 // The statements that unload the active env: restore `base_path` (the
 // `PATH` from before the env loaded) and clear every marker.
-pub fn env_hook_render_unload(kind: ShellKind, base_path: String) -> String Never! {
+fn env_hook_render_unload(kind: ShellKind, base_path: String) -> String Never! {
     names :: [String]{
         JETPACK_ENV_MARKER,
         JETPACK_REF_VAR,

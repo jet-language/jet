@@ -12,15 +12,15 @@ DIAGNOSTIC_THEME_ERROR :: "31"
 DIAGNOSTIC_THEME_BOLD :: "1"
 
 // One `Theme` role: `ESC [ sgr m text ESC [ 0 m` when color is on.
-pub fn diagnostic_theme_paint(color: Bool, sgr: String, text: String) -> String Never! {
+fn diagnostic_theme_paint(color: Bool, sgr: String, text: String) -> String Never! {
     if !color -> return ~text
     escape :: String.from_bytes([U8]{"\x1b"}) ?? ""
     "{escape}[{sgr}m{text}{escape}[0m"
 }
 
-pub fn diagnostic_theme_accent(color: Bool, text: String) -> String Never! { diagnostic_theme_paint(color, DIAGNOSTIC_THEME_ACCENT, text) }
-pub fn diagnostic_theme_dim(color: Bool, text: String) -> String Never! { diagnostic_theme_paint(color, DIAGNOSTIC_THEME_DIM, text) }
-pub fn diagnostic_theme_bold(color: Bool, text: String) -> String Never! { diagnostic_theme_paint(color, DIAGNOSTIC_THEME_BOLD, text) }
+fn diagnostic_theme_accent(color: Bool, text: String) -> String Never! { diagnostic_theme_paint(color, DIAGNOSTIC_THEME_ACCENT, text) }
+fn diagnostic_theme_dim(color: Bool, text: String) -> String Never! { diagnostic_theme_paint(color, DIAGNOSTIC_THEME_DIM, text) }
+fn diagnostic_theme_bold(color: Bool, text: String) -> String Never! { diagnostic_theme_paint(color, DIAGNOSTIC_THEME_BOLD, text) }
 
 fn diagnostic_theme_severity(color: Bool, severity: Int, text: String) -> String Never! {
     if severity == DIAGNOSTIC_LINT -> return diagnostic_theme_paint(color, DIAGNOSTIC_THEME_WARN, text)
@@ -77,7 +77,7 @@ fn diagnostic_lower_hex(value: Int, min_digits: Int) -> String Never! {
 
 // Escape untrusted text before it is projected to a terminal. Display-only:
 // C0/C1 controls, line separators, and line breaks become visible escapes.
-pub fn diagnostic_escape_terminal_text(value: String) -> String Never! {
+fn diagnostic_escape_terminal_text(value: String) -> String Never! {
     bytes :: value.bytes()
     out := [U8]{}
     index := 0
@@ -115,7 +115,7 @@ fn diagnostic_clamp_offset(bytes: [U8], offset: Int) -> Int Never! {
 }
 
 // 1-based line of `offset`; offsets past the end read as the end.
-pub fn diagnostic_line_at(source: String, offset: Int) -> Int Never! {
+fn diagnostic_line_at(source: String, offset: Int) -> Int Never! {
     bytes :: source.bytes()
     limit :: diagnostic_clamp_offset(bytes, offset)
     line := 1
@@ -126,7 +126,7 @@ pub fn diagnostic_line_at(source: String, offset: Int) -> Int Never! {
 }
 
 // 1-based column of `offset`: every character that starts before it counts.
-pub fn diagnostic_column_at(source: String, offset: Int) -> Int Never! {
+fn diagnostic_column_at(source: String, offset: Int) -> Int Never! {
     bytes :: source.bytes()
     limit :: diagnostic_clamp_offset(bytes, offset)
     column := 1
@@ -244,7 +244,7 @@ fn diagnostic_join_escaped(parts: [String], separator: String) -> String Never! 
 
 // One diagnostic as terminal text. `file` and `source` name the checked
 // source; a diagnostic's own origin replaces both.
-pub fn diagnostic_render(diagnostic: Diagnostic, file: String, source: String, color: Bool) -> String Never! {
+fn diagnostic_render(diagnostic: Diagnostic, file: String, source: String, color: Bool) -> String Never! {
     display := file
     text := source
     if diagnostic.origin == .Val(origin) {
@@ -291,7 +291,7 @@ pub fn diagnostic_render(diagnostic: Diagnostic, file: String, source: String, c
 }
 
 // A batch of diagnostics, one blank line between each.
-pub fn diagnostic_render_all(file: String, source: String, diagnostics: [Diagnostic], color: Bool) -> String Never! {
+fn diagnostic_render_all(file: String, source: String, diagnostics: [Diagnostic], color: Bool) -> String Never! {
     rendered := ""
     loop (index, diagnostic) in diagnostics {
         text :: diagnostic_render(diagnostic, file, source, color)

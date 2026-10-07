@@ -18,43 +18,43 @@ use jet_foundation.[
     type_name,
 ]
 
-pub enum SemaCopyIntent {
+enum SemaCopyIntent {
     Explicit
     Clone
     Materialize
 }
 
-pub enum SemaCopyLowering {
+enum SemaCopyLowering {
     ExplicitCopy
     Clone
     MaterializeView
 }
 
-pub enum SemaCopyMemoryKind {
+enum SemaCopyMemoryKind {
     NoEvent
     Allocation
     RetainRelease
 }
 
-pub struct SemaCopyFacts {
-    pub source: Type
-    pub target: Type
-    pub intent: SemaCopyIntent
-    pub lowering: SemaCopyLowering
-    pub materializes_view: Bool
-    pub observable_clock: Bool
-    pub memory: SemaCopyMemoryKind
-    pub resource: Bool
-    pub dynamic_loan: Bool
-    pub copyable: Bool
-    pub cloneable: Bool
-    pub accepted: Bool
-    pub complete: Bool
+struct SemaCopyFacts {
+    source: Type
+    target: Type
+    intent: SemaCopyIntent
+    lowering: SemaCopyLowering
+    materializes_view: Bool
+    observable_clock: Bool
+    memory: SemaCopyMemoryKind
+    resource: Bool
+    dynamic_loan: Bool
+    copyable: Bool
+    cloneable: Bool
+    accepted: Bool
+    complete: Bool
 }
 
-pub struct SemaCopyEvent {
-    pub span: Span
-    pub facts: SemaCopyFacts
+struct SemaCopyEvent {
+    span: Span
+    facts: SemaCopyFacts
 }
 
 struct SemaCopyTypeFacts {
@@ -518,7 +518,7 @@ fn sema_copy_apply_facts(
     sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), nested.cloneable, nested.heap, nested.observable_clock, false, dynamic_loan || nested.dynamic_loan, nested.complete)
 }
 
-pub fn sema_copy_classify(
+fn sema_copy_classify(
     source: Type,
     intent: SemaCopyIntent,
     env: SemaScopeEnvironment,
@@ -559,7 +559,7 @@ pub fn sema_copy_classify(
     }
 }
 
-pub fn sema_copy_diagnostic(facts: SemaCopyFacts, span: Span) -> Diagnostic? {
+fn sema_copy_diagnostic(facts: SemaCopyFacts, span: Span) -> Diagnostic? {
     if facts.accepted || !facts.complete -> return None
     cell_guard :: facts.dynamic_loan
     shown := type_name(facts.source)
@@ -578,11 +578,11 @@ pub fn sema_copy_diagnostic(facts: SemaCopyFacts, span: Span) -> Diagnostic? {
     }
 }
 
-pub fn sema_copy_effect_name(facts: SemaCopyFacts) -> String? {
+fn sema_copy_effect_name(facts: SemaCopyFacts) -> String? {
     if facts.observable_clock -> Val("Time") else -> None
 }
 
-pub fn sema_copy_memory_operation(facts: SemaCopyFacts) -> String? {
+fn sema_copy_memory_operation(facts: SemaCopyFacts) -> String? {
     if !facts.accepted -> return None
     prefix :: if facts.intent == SemaCopyIntent.Explicit -> "`copy`" else -> "implicit copy"
     if facts.memory == {

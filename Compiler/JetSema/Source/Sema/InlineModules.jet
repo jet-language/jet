@@ -203,7 +203,7 @@ fn sema_inline_decode_generated_suffix(suffix: String) -> String? Never! {
     Val(String.from_bytes(out) ?? return None)
 }
 
-pub fn sema_inline_member_name(module_path: String, name: String) -> String Never! {
+fn sema_inline_member_name(module_path: String, name: String) -> String Never! {
     stripped :: if module_path.starts_with("__jet_") -> String.from_bytes(module_path.bytes()[6..<module_path.bytes().len()]) ?? ~module_path else -> ~module_path
     decoded :: sema_inline_decode_generated_suffix(stripped) ?? stripped
     sema_inline_generated_path("{decoded}.{name}")
@@ -212,7 +212,7 @@ pub fn sema_inline_member_name(module_path: String, name: String) -> String Neve
 // The source name of a lifted member function (`__jet_bank_dopen` -> `open`),
 // so its own body diagnostics name it as written. Any other name is returned
 // unchanged.
-pub fn sema_inline_member_source_name(name: String) -> String Never! {
+fn sema_inline_member_source_name(name: String) -> String Never! {
     if !name.starts_with("__jet_") -> return ~name
     decoded :: sema_inline_decode_generated_suffix(String.from_bytes(name.bytes()[6..<name.bytes().len()]) ?? "") ?? return ~name
     if !decoded.contains(".") || sema_inline_generated_path(decoded) != name -> return ~name
@@ -269,7 +269,7 @@ fn sema_inline_mapped_names(rewrite: SemaInlineRewrite, names: [NamedSpan]) -> [
 
 // A program a `module` lowering leaves complete: nothing but nested modules
 // that are themselves lowered.
-pub fn sema_inline_module_lowered(definition: CodeModule) -> Bool Never! {
+fn sema_inline_module_lowered(definition: CodeModule) -> Bool Never! {
     body :: definition.body ?? return false
     loop item in body {
         if item == .CodeModule(child) {
@@ -532,7 +532,7 @@ fn sema_inline_rewrite_module_call(rewrite: &SemaInlineRewrite, surface: SemaInl
         return None
     }
     if !is_pub {
-        &rewrite.diagnostics.push(sema_error("E0609", alias_span, "`{method}` is private in module `{surface.name}`", "only `pub` items in an inline module are reachable from outside it", "add `pub` before `fn {method}` in module `{surface.name}`"))
+        &rewrite.diagnostics.push(sema_error("E0609", alias_span, "`{method}` is private in module `{surface.name}`", "an item of a `priv module` is usable only by its enclosing module (D-VIS-MODULE1)", "import it from inside its enclosing module, or remove `priv` from its module"))
     }
     call :: Call{name: sema_inline_member_name(surface.name, method), name_span: method_span, type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(&rewrite, args), resolved_ret: None, range_checked: false, widen_approx: false}
     Val(Expr.Call{call: call})
@@ -1137,7 +1137,7 @@ fn sema_inline_bind_imports(program: Program, surfaces: [SemaInlineModuleSurface
                 if {
                     seen.get(local) != None -> &rewrite.diagnostics.push(sema_error("E0105", declaration.alias_span, "the import name `{local}` is used twice", "each import needs a unique namespace name in this file", "rename one with `as alias`"))
                     members.functions.get(item.original) == None -> &rewrite.diagnostics.push(sema_error("E0611", module_alias_span, "`{item.original}` is not defined in module `{module_alias}`", "check the module body for the item you're importing", "make sure the name is spelled correctly"))
-                    !(members.functions.get(item.original) ?? true) -> &rewrite.diagnostics.push(sema_error("E0609", module_alias_span, "`{item.original}` is private in module `{module_alias}`", "only `pub` items can be brought into scope with `use`", "add `pub` before `fn {item.original}` in module `{module_alias}`"))
+                    !(members.functions.get(item.original) ?? true) -> &rewrite.diagnostics.push(sema_error("E0609", module_alias_span, "`{item.original}` is private in module `{module_alias}`", "an item of a `priv module` is usable only by its enclosing module (D-VIS-MODULE1)", "import it from inside its enclosing module, or remove `priv` from its module"))
                     else -> {
                         seen[local] = true
                         rewrite.imported[local] = sema_inline_member_name(target, item.original)
@@ -1181,7 +1181,7 @@ fn sema_inline_bind_module_imports(definition: CodeModule, surfaces: [SemaInline
                                 &bound_locals.push(local)
                                 &bound_targets.push(SemaInlineTarget{module_alias: module_alias, member: item.original, qualified: false})
                             } else {
-                                &rewrite.diagnostics.push(sema_error("E0609", module_alias_span, "`{item.original}` is private in module `{module_alias}`", "only public items can be brought into scope with use", "add pub before fn {item.original} in module {module_alias}"))
+                                &rewrite.diagnostics.push(sema_error("E0609", module_alias_span, "`{item.original}` is private in module `{module_alias}`", "an item of a `priv module` is usable only by its enclosing module (D-VIS-MODULE1)", "import it from inside its enclosing module, or remove `priv` from its module"))
                             }
                         }
                     }
@@ -1231,8 +1231,8 @@ fn sema_inline_modules_collect_import_diagnostics(graph: SemaRegistrationGraph, 
                         declared :: sema_registration_direct_symbol(graph.modules[target_index], original)
                         if declared == {
                             .Val(export) -> {
-                                fix :: if export.symbol.kind == SymbolKind.Function -> "add pub before fn {original} in the imported file" else -> "add pub before the declaration of {original} in the imported file"
-                                &diagnostics.push(sema_error("E0609", module_alias_span, "`{original}` is private in module `{module_alias}`", "only public items can be brought into scope with use", fix))
+                                fix :: if export.symbol.kind == SymbolKind.Function -> "import it from inside its enclosing module, or remove `priv` from its module" else -> "import it from inside its enclosing module, or remove `priv` from its module"
+                                &diagnostics.push(sema_error("E0609", module_alias_span, "`{original}` is private in module `{module_alias}`", "an item of a `priv module` is usable only by its enclosing module (D-VIS-MODULE1)", fix))
                             }
                             .None -> &diagnostics.push(sema_error("E0611", module_alias_span, "`{original}` is not defined in module `{module_alias}`", "check the module for the item you are importing", "make sure the name is spelled correctly"))
                         }
@@ -1243,7 +1243,7 @@ fn sema_inline_modules_collect_import_diagnostics(graph: SemaRegistrationGraph, 
     }
 }
 
-pub fn sema_inline_modules_check_imports(graph: &SemaRegistrationGraph, module_index: Int) {
+fn sema_inline_modules_check_imports(graph: &SemaRegistrationGraph, module_index: Int) {
     diagnostics := [Diagnostic]{}
     sema_inline_modules_collect_import_diagnostics(graph, module_index, &diagnostics)
     loop diagnostic in diagnostics -> sema_registration_push_graph_diagnostic(&graph, module_index, diagnostic)
@@ -1302,7 +1302,6 @@ fn sema_program_with_items(program: Program, items: ^[Item]) -> Program Never! {
         block_spans: program.block_spans,
         fenced_statements: program.fenced_statements,
         web_target_ceiling: program.web_target_ceiling,
-        pub_file: program.pub_file,
         no_prelude: program.no_prelude,
         default_target: program.default_target,
         html_path: program.html_path,
@@ -1318,7 +1317,7 @@ fn sema_program_with_items(program: Program, items: ^[Item]) -> Program Never! {
 
 // Lowers `program`'s inline modules in place; a program without one is left
 // untouched (not copied).
-pub fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) {
+fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) {
     has_module := false
     loop item in program.items {
         if item == .CodeModule(definition) {

@@ -452,7 +452,7 @@ fn sema_process_stream_method(receiver: Expr, receiver_value: TExpr, method: Str
 
 // Projects the public ProcessChild handle fields using the compiler's builtin
 // nominal/field identity, so Places can share the ordinary TField path.
-pub fn sema_process_child_field(base: TExpr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_process_child_field(base: TExpr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if sema_process_handle_receiver_name(base.ty) != "ProcessChild" -> return None
     field_ty :: if member == {
         "stdin" -> Val(sema_process_named("ProcessStdin"))
@@ -470,7 +470,7 @@ pub fn sema_process_child_field(base: TExpr, member: String, span: Span, expecte
     sema_expr_expected(value, expected, environment, &diagnostics)
 }
 
-pub fn sema_call_try_process_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_process_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     receiver_name :: sema_process_handle_receiver_name(receiver_value.ty)
     if receiver_name == "ArgsSpec" -> return sema_process_args_spec_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if receiver_name == "ParsedArgs" -> return sema_process_parsed_args_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)

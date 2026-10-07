@@ -120,7 +120,7 @@ fn sema_call_memory_check_fixed_buffer(argument: CallArg, value: TExpr, environm
 
 // Handles `mem.{Arena,Bump,Pool,Fixed}.{new,over}` before normal receiver
 // checking, since the imported Core fields are constructor sentinels.
-pub fn sema_call_try_memory_static(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_memory_static(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     return if receiver == {
         .Field(base, name, _) -> {
             alias := if base == {
@@ -256,9 +256,9 @@ fn sema_call_memory_allocator_method(receiver: Expr, receiver_value: TExpr, name
 }
 
 struct SemaCallMemoryGuard {
-    pub value_type: Type
-    pub marker: TagMarker
-    pub editable: Bool
+    value_type: Type
+    marker: TagMarker
+    editable: Bool
 }
 
 fn sema_call_memory_guard_shape(receiver: Expr, ty: Type, scopes: SemaScopeTable) -> SemaCallMemoryGuard? {
@@ -478,7 +478,7 @@ fn sema_call_memory_shared_guard_method(receiver: Expr, receiver_value: TExpr, g
     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
 }
 
-pub fn sema_call_try_memory_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_memory_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     allocator :: sema_call_memory_allocator_name(receiver_value.ty)
     if allocator != None -> return sema_call_memory_allocator_method(receiver, receiver_value, allocator, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     guard :: sema_call_memory_guard_shape(receiver, receiver_value.ty, scopes)

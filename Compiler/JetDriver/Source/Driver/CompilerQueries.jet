@@ -26,17 +26,17 @@ use jet_eval.[
     jet_eval_compiler_services_checked,
 ]
 
-pub struct JetDriverCompilerCheckInput {
-    pub parsed: JetCompilerServicesParseFacts
-    pub request: JetDriverCompileRequest
+struct JetDriverCompilerCheckInput {
+    parsed: JetCompilerServicesParseFacts
+    request: JetDriverCompileRequest
 }
 
-pub struct JetDriverCompilerCheckResult {
-    pub checked: JetCompilerServicesCheckedFacts?
-    pub diagnostics: [Diagnostic]
-    pub failed_stage: JetDriverStage?
-    pub complete: Bool
-    pub internal_problem: String?
+struct JetDriverCompilerCheckResult {
+    checked: JetCompilerServicesCheckedFacts?
+    diagnostics: [Diagnostic]
+    failed_stage: JetDriverStage?
+    complete: Bool
+    internal_problem: String?
 }
 
 fn jet_driver_compiler_check_failure(load: JetDriverLoadResult, stage: JetDriverStage, problem: String?) -> JetDriverCompilerCheckResult Never! {
@@ -150,7 +150,7 @@ fn jet_driver_compiler_check_parse_only(load: JetDriverLoadResult) -> Bool Never
 }
 
 
-pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCompilerCheckResult {
+fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCompilerCheckResult {
     load := jet_driver_load(input.request)
     parse_only := jet_driver_compiler_check_parse_only(load)
     if (!load.complete || jet_driver_has_errors(load.diagnostics)) && !parse_only -> return jet_driver_compiler_check_failure(load, load.failed_stage ?? JetDriverStage.Load, None)

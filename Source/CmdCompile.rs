@@ -15865,7 +15865,7 @@ mod missing_c_lib_tests {
     ) {
         let project = ScratchProject::new();
         let main = "use defs.box\nmodule defs\n\nmodule selected :: box<Int>(3)\nfn run() { print(selected.value()) }\n";
-        let dependency = "pub module box<T>(n: Int) { pub fn value() -> Int { return n } }\n";
+        let dependency = "module box<T>(n: Int) { fn value() -> Int { return n } }\n";
         let manifest_v1 = "name: \"cache-proof\"\nversion: \"1.0.0\"\n";
         project.write("main.jet", main);
         project.write("defs.jet", dependency);
@@ -15923,7 +15923,7 @@ mod missing_c_lib_tests {
         project.write("main.jet", main);
         project.write(
             "defs.jet",
-            "pub module box<T>(n: Int) { pub fn value() -> Int { return n + 1 } }\n",
+            "module box<T>(n: Int) { fn value() -> Int { return n + 1 } }\n",
         );
         let dependency_body = native_cache_key(&project.main(), "dev", "default", "run", None)
             .expect("dependency cache key");

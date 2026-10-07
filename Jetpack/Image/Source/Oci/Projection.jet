@@ -6,11 +6,11 @@
 // never exposes partial JSON.
 
 // What the environment image included, changed, omitted, or rejected.
-pub struct ProjectionReport {
-    pub included: [String]
-    pub changed: [String]
-    pub omitted: [String]
-    pub rejected: [String]
+struct ProjectionReport {
+    included: [String]
+    changed: [String]
+    omitted: [String]
+    rejected: [String]
 
     // Rust `ProjectionReport::default()`.
     fn empty() -> ProjectionReport Never! {
@@ -21,29 +21,29 @@ pub struct ProjectionReport {
 // Secret-free realization facts written beside the OCI layout. Hangar,
 // `.jet/lock`, and the remote binding policy stay the owners of content,
 // cache, provenance, and transport facts.
-pub struct ProjectionPlan {
-    pub source: String
-    pub platform: String
-    pub entrypoint: [String]
-    pub user: Int
-    pub expose: [Int]
-    pub healthcheck: Bool
-    pub env_keys: [String]
-    pub layer_paths: [String]
-    pub services: [String]
-    pub base: Bool
-    pub lock: String
+struct ProjectionPlan {
+    source: String
+    platform: String
+    entrypoint: [String]
+    user: Int
+    expose: [Int]
+    healthcheck: Bool
+    env_keys: [String]
+    layer_paths: [String]
+    services: [String]
+    base: Bool
+    lock: String
 }
 
 // Write the classification ledger and the plan and dossier inspection views.
-pub fn image_write_projection_artifacts(layout: String, manifest_digest: String, plan: ProjectionPlan, report: ProjectionReport) ImageError! -[FS, Env]> {
+fn image_write_projection_artifacts(layout: String, manifest_digest: String, plan: ProjectionPlan, report: ProjectionReport) ImageError! -[FS, Env]> {
     image_write_projection_report(layout, manifest_digest, report)
     image_write_atomic_json(layout, "plan.json", image_render_projection_plan(manifest_digest, plan))
     image_write_atomic_json(layout, "dossier.json", image_render_projection_dossier(manifest_digest, plan, report))
 }
 
 // Write `projection.json`: the sorted, deduplicated classification ledger.
-pub fn image_write_projection_report(layout: String, manifest_digest: String, report: ProjectionReport) ImageError! -[FS, Env]> {
+fn image_write_projection_report(layout: String, manifest_digest: String, report: ProjectionReport) ImageError! -[FS, Env]> {
     path :: files.join(layout, "projection.json")
     document := [String: DataTree]{}
     document["schema"] = DataTree.Text("jet.image.projection")

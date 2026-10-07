@@ -218,7 +218,7 @@ fn sema_ownership_last_use_statements(statements: [Stmt], name: String) -> Bool 
 // answer: some enclosing tail frame reads `name` at or after its start). The
 // last reading statement of each body is computed once per name and reused,
 // instead of rewalking every remaining statement on each query.
-pub fn sema_ownership_name_live_after(name: String, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
+fn sema_ownership_name_live_after(name: String, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
     frame_index := context.lambda_statement_tails.len() - 1
     loop frame_index >= 0 {
         body_id :: context.lambda_statement_tails[frame_index].body_id

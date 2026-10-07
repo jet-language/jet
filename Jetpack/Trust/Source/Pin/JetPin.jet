@@ -16,10 +16,10 @@
 // keeps `name`, `version`, and `jet` at top level; migration-era `pkg.jet`
 // keeps them inside `payload`. `jet` is the raw channel ref; None is
 // unpinned (the running `jet` is used with no fetch).
-pub struct JetPinIdentity {
-    pub payload_name: String
-    pub payload_version: String
-    pub jet: String?
+struct JetPinIdentity {
+    payload_name: String
+    payload_version: String
+    jet: String?
 
     fn empty() -> JetPinIdentity Never! {
         JetPinIdentity{payload_name: "", payload_version: "", jet: None}
@@ -29,7 +29,7 @@ pub struct JetPinIdentity {
 // Frozen-forward identity pre-parse. Reads only the Package identity
 // fields and tolerates any other key, block, or syntax around them. This
 // grammar is CONTRACT-FROZEN (Docs/spec/spec.md) and must never narrow.
-pub fn trust_pin_identity_preparse(text: String) -> JetPinIdentity Never! {
+fn trust_pin_identity_preparse(text: String) -> JetPinIdentity Never! {
     stripped :: trust_pin_strip_line_comments(text)
     if trust_pin_top_block_body(stripped, "payload") == .Val(body) {
         return JetPinIdentity{
@@ -277,7 +277,7 @@ fn trust_pin_unquote(value: String) -> String Never! {
 // A `jet:` pin is a channel ref (D-JPK-CHANNEL1): `MAJOR.MINOR`,
 // `MAJOR.MINOR.PATCH`, or a lowercase named channel. Ranges, empty values,
 // and a bare major are E1249.
-pub fn trust_pin_classify_channel(raw: String) -> String TrustError! {
+fn trust_pin_classify_channel(raw: String) -> String TrustError! {
     channel :: trust_pin_channel_text(raw)
     if trust_pin_is_version_channel(channel) || trust_pin_is_named_channel(channel) -> return Ok(channel)
     Err(TrustError.Pin(trust_pin_e1249(raw)))
@@ -322,7 +322,7 @@ fn trust_pin_is_named_channel(channel: String) -> Bool Never! {
 }
 
 // The channel of a running version: its `MAJOR.MINOR` (`jet init` pins it).
-pub fn trust_pin_channel_of(version: String) -> String Never! {
+fn trust_pin_channel_of(version: String) -> String Never! {
     parts :: trust_text_split(version, TRUST_DOT)
     if parts.len() >= 2 -> return "{parts[0]}.{parts[1]}"
     ~version
@@ -332,7 +332,7 @@ pub fn trust_pin_channel_of(version: String) -> String Never! {
 
 // A version channel resolves offline (`0.4` -> `0.4.0`, `0.4.2` -> itself).
 // A named channel needs a realizable object, so it is E1251 here.
-pub fn trust_pin_resolve_channel(channel: String) -[Env]> String TrustError! {
+fn trust_pin_resolve_channel(channel: String) -[Env]> String TrustError! {
     if !trust_pin_is_version_channel(channel) -> return Err(TrustError.Pin(trust_pin_e1251(channel, channel, trust_pin_current_platform())))
     Ok(trust_pin_version_of_channel(channel))
 }
@@ -347,7 +347,7 @@ fn trust_pin_version_of_channel(channel: String) -> String Never! {
 
 // The locked compiler pin: the `[[toolchain]]` whose object id starts with
 // `jet-`, never a co-located bridge build toolchain (`toolchain-<v>`).
-pub fn trust_pin_locked_toolchain(root: String) -[FS]> LockedToolchain? {
+fn trust_pin_locked_toolchain(root: String) -[FS]> LockedToolchain? {
     lock :: pkg_lock_load(root) ?? return None
     loop toolchain in lock.toolchains {
         if toolchain.id.starts_with("jet-") -> return Val(toolchain)
@@ -356,13 +356,13 @@ pub fn trust_pin_locked_toolchain(root: String) -[FS]> LockedToolchain? {
 }
 
 // `jet-<version>-<fp>` with a short platform-qualified fingerprint (D-PM1).
-pub fn trust_pin_object_id(version: String) -[Env]> String {
+fn trust_pin_object_id(version: String) -[Env]> String {
     fingerprint :: pkg_sha256_hex("{version}:{trust_pin_current_platform()}".bytes())
     "jet-{version}-{pkg_bytes_text(fingerprint.bytes(), 0, 8)}"
 }
 
 // The `[[toolchain]]` lock record of a resolved pin.
-pub fn trust_pin_toolchain_record(channel: String, version: String) -[Env]> LockedToolchain {
+fn trust_pin_toolchain_record(channel: String, version: String) -[Env]> LockedToolchain {
     envelope := LockEnvelope.empty()
     envelope.platform = trust_pin_current_platform()
     envelope.provenance = "jet-{version} via toolchain"
@@ -370,7 +370,7 @@ pub fn trust_pin_toolchain_record(channel: String, version: String) -[Env]> Lock
 }
 
 // `<arch>-<os>` as Rust `std::env::consts` spells it.
-pub fn trust_pin_current_platform() -[Env]> String {
+fn trust_pin_current_platform() -[Env]> String {
     os :: sys.name().to_lower()
     shown :: if os == {
         "darwin" | "osx" | "macos" -> "macos"
@@ -381,7 +381,7 @@ pub fn trust_pin_current_platform() -[Env]> String {
 
 // ── T3: realize + re-exec the pinned toolchain ──
 
-pub enum JetPinDecision {
+enum JetPinDecision {
     // No pin, an in-channel running `jet`, or already the exec'd child.
     RunNative
     // Re-exec into the realized pinned toolchain, marking the child with
@@ -394,7 +394,7 @@ pub enum JetPinDecision {
 // Native-first dispatch: a running `jet` in the pinned channel runs the
 // build directly with no fetch, lock write, or exec. The channel resolves
 // and the lock is written only when a genuine mismatch forces realization.
-pub fn trust_pin_decide(root: String, running_version: String, offline: Bool) -[FS, Env, Exec, Time, Time.Wait]> JetPinDecision {
+fn trust_pin_decide(root: String, running_version: String, offline: Bool) -[FS, Env, Exec, Time, Time.Wait]> JetPinDecision {
     if sys.get(TOOLCHAIN_EXEC_MARKER_ENV) != None -> return JetPinDecision.RunNative
     manifest :: trust_pin_read_manifest(root) ?? return JetPinDecision.RunNative
     raw_pin :: trust_pin_identity_preparse(manifest).jet ?? return JetPinDecision.RunNative
@@ -426,7 +426,7 @@ pub fn trust_pin_decide(root: String, running_version: String, offline: Bool) -[
 }
 
 // The honest one-liner printed before handing off to a pinned toolchain.
-pub fn trust_pin_handoff_line(channel: String, pinned_version: String, installed_version: String) -> String Never! {
+fn trust_pin_handoff_line(channel: String, pinned_version: String, installed_version: String) -> String Never! {
     "jet: project pins toolchain {channel} ({pinned_version}); installed {installed_version} — realizing and exec"
 }
 
@@ -440,7 +440,7 @@ fn trust_pin_read_manifest(root: String) -[FS]> String? {
 // Realize the pinned toolchain object and return its `jet` binary
 // (D-JPK-CACHE1 substitution boundary; `JET_TOOLCHAIN_FIXTURE` stands in
 // for the fetched prebuilt). Never a source build; a miss is E1251.
-pub fn trust_pin_realize_jet_binary(channel: String, version: String) -[FS, Env]> String TrustError! {
+fn trust_pin_realize_jet_binary(channel: String, version: String) -[FS, Env]> String TrustError! {
     binary :: trust_pin_realized_binary() ?? return Err(TrustError.Pin(trust_pin_e1251(channel, version, trust_pin_current_platform())))
     Ok(binary)
 }
@@ -462,7 +462,7 @@ fn trust_pin_is_executable(path: String) -[FS, Env]> Bool {
 // ── T4: verbs ──
 
 // `jet self toolchain`: a read-only pin, lock, and realization report.
-pub fn trust_pin_report(root: String) -[FS, Env]> String {
+fn trust_pin_report(root: String) -[FS, Env]> String {
     manifest :: trust_pin_read_manifest(root)
     identity :: if manifest == {
         .Val(text) -> trust_pin_identity_preparse(text)
@@ -490,7 +490,7 @@ pub fn trust_pin_report(root: String) -[FS, Env]> String {
 
 // `jet update jet [<channel>]`: the only place the pin moves. Re-resolves
 // the channel and rewrites the lock's `[[toolchain]]` record.
-pub fn trust_pin_move(root: String, channel_arg: String?, running_version: String) -[FS, Env, Exec, Time, Time.Wait]> String TrustError! {
+fn trust_pin_move(root: String, channel_arg: String?, running_version: String) -[FS, Env, Exec, Time, Time.Wait]> String TrustError! {
     pin :: if trust_pin_read_manifest(root) == {
         .Val(text) -> trust_pin_identity_preparse(text).jet
         .None -> None
@@ -510,7 +510,7 @@ pub fn trust_pin_move(root: String, channel_arg: String?, running_version: Strin
 
 // `jet init`: write a `package.jet` pinned to the running toolchain's
 // channel. Never clobbers a manifest or writes beside a migration-era one.
-pub fn trust_pin_write_init(dir: String, name: String, running_version: String) -[FS]> String TrustError! {
+fn trust_pin_write_init(dir: String, name: String, running_version: String) -[FS]> String TrustError! {
     if files.is_file(files.join(dir, PAYLOAD_FILE)) {
         return Err(TrustError.Pin(diagnostic_from_registry("E1252", None, "a `{PAYLOAD_FILE}` already exists here", "`jet init` will not create a second manifest root beside migration-era input.", "migrate or remove `{PAYLOAD_FILE}` before running `jet init`")))
     }
@@ -524,24 +524,24 @@ pub fn trust_pin_write_init(dir: String, name: String, running_version: String) 
 }
 
 // The canonical `package.jet` body `jet init` writes.
-pub fn trust_pin_init_manifest(name: String, channel: String) -> String Never! {
+fn trust_pin_init_manifest(name: String, channel: String) -> String Never! {
     "name: \"{name}\"\nversion: \"0.1.0\"\njet: {channel}\n\ndeps: {{}}\n"
 }
 
 // ── Diagnostics (E1249 / E1250 / E1251 / E1206) ──
 
 // E1249: a `jet:` value is not a valid version/channel ref.
-pub fn trust_pin_e1249(value: String) -> Diagnostic Never! {
+fn trust_pin_e1249(value: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1249", None, "`{value.trim()}` is not a valid toolchain pin", "the `jet:` field pins which Jet toolchain builds this project — its value is a channel ref, not a version range.", "write a channel: `jet: 0.4` (track the 0.4 series), `jet: 0.4.2` (exact), or a named channel like `jet: main`.")
 }
 
 // E1250: an unlocked channel pin under `--offline`/CI.
-pub fn trust_pin_e1250(channel: String) -> Diagnostic Never! {
+fn trust_pin_e1250(channel: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1250", None, "toolchain channel `{channel}` is pinned but not locked", "an `--offline`/CI build won't resolve a channel — it needs the exact toolchain version recorded in `{UNIFIED_LOCK_FILE}`, and none is present.", "run `jet update jet` to resolve `{channel}` to an exact version and commit `{UNIFIED_LOCK_FILE}`.")
 }
 
 // E1251: the pinned toolchain has no prebuilt for this platform.
-pub fn trust_pin_e1251(channel: String, version: String, platform: String) -> Diagnostic Never! {
+fn trust_pin_e1251(channel: String, version: String, platform: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1251", None, "toolchain {channel} ({version}) isn't available for {platform}", "this project pins a Jet toolchain, but no prebuilt object for it was found for this platform. Jet realizes the pinned compiler as a prebuilt — it never builds the compiler from source and never silently falls back to a different `jet`.", "move the pin with `jet update jet <channel>` to a toolchain your platform has, or install the pinned toolchain from the release page.")
 }
 

@@ -31,15 +31,15 @@ ELF64_OBJECT_STRTAB :: prep { 5 }
 ELF64_OBJECT_SHSTRTAB :: prep { 6 }
 ELF64_OBJECT_SECTIONS :: prep { 9 }
 
-struct X64ObjectRela { pub at: Int, pub symbol: Int, pub kind: Int, pub addend: Int }
+struct X64ObjectRela { at: Int, symbol: Int, kind: Int, addend: Int }
 
 struct X64ObjectSymbol {
-    pub name: String
+    name: String
     // (bind << 4) | type
-    pub info: Int
-    pub section: Int
-    pub value: Int
-    pub size: Int
+    info: Int
+    section: Int
+    value: Int
+    size: Int
 }
 
 // Append `text` to a string table; returns its offset.
@@ -82,7 +82,7 @@ fn x64_object_main(entry: LIRFunctionID) -> X64CompiledFunction Never! {
 
 // Compile `program` into a relocatable object whose `main` runs `entry`,
 // which takes no parameters and returns nothing.
-pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64ExecutableResult Never! {
+fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64ExecutableResult Never! {
     if entry.value < 0 || entry.value >= program.functions.len() -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {entry.value} is not in the module"}}
     signature :: lir_signature(program, program.functions[entry.value].signature) ?? return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function has no signature"}}
     returns_nothing := false

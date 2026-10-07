@@ -6,7 +6,7 @@
 // Realize an adapter plan whose cache expectation was already approved. The
 // source and build identity are rederived and must equal the approved
 // expectation before any executable step runs.
-pub fn provider_realize_adapter(plan: AdapterPlan, ctx: ProviderCtx, expected: CacheExpectation, tools: [String: String], table: SourceTable) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
+fn provider_realize_adapter(plan: AdapterPlan, ctx: ProviderCtx, expected: CacheExpectation, tools: [String: String], table: SourceTable) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
     source_ref :: ProviderRef.classify(plan.source) ?? return Err(ProviderError.Adapter("adapter source `{plan.source}` is not a provider ref"))
     staged :: provider_stage_adapter_source(source_ref, ctx)
     recipe :: provider_adapter_recipe_to_build(plan.recipe)
@@ -120,7 +120,7 @@ fn provider_adapter_is_build(recipe: AdapterRecipe) -> Bool Never! {
 }
 
 // The build recipe an adapter recipe lowers to.
-pub fn provider_adapter_recipe_to_build(recipe: AdapterRecipe) -> BuildRecipe Never! {
+fn provider_adapter_recipe_to_build(recipe: AdapterRecipe) -> BuildRecipe Never! {
     if recipe == {
         .Copy -> BuildRecipe{steps: [BuildStep]{BuildStep.InstallTree{src: ".", dest: "."}}}
         .Prebuilt(bin, as_name) -> BuildRecipe{steps: [BuildStep]{BuildStep.Install{src: bin, dest: "bin/{as_name}"}}}
@@ -130,7 +130,7 @@ pub fn provider_adapter_recipe_to_build(recipe: AdapterRecipe) -> BuildRecipe Ne
 
 // Stage an adapter's declared source bytes: a local directory in place, or a
 // fetched GitHub checkout. Index and registry refs are not source bytes.
-pub fn provider_stage_adapter_source(source: ProviderRef, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time.Wait, Rand]> String ProviderError! {
+fn provider_stage_adapter_source(source: ProviderRef, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time.Wait, Rand]> String ProviderError! {
     if source.provider == {
         .Path -> {
             target :: pkg_split_channel_ref(source.target).base

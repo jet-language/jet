@@ -301,7 +301,7 @@ fn jet_rust_emit_program_header(ctx: &JetRustEmitContext, lines: &[String]) Neve
     }
 }
 
-pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig, trace_sink: CompilerTraceSink?) -> JetRustEmitResult Never! {
+fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig, trace_sink: CompilerTraceSink?) -> JetRustEmitResult Never! {
     ctx := jet_rust_emit_context(program, config)
     jet_rust_emit_program_items(&ctx, trace_sink)
 }
@@ -310,12 +310,12 @@ pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig, tra
 // function being printed. Past the emitter's own tables (whose failure still
 // stops it), a failure no longer stops emission: the result is the complete
 // text with each failed construct's placeholder, never a shippable artifact.
-pub struct JetRustEmitKeepGoing {
-    pub result: JetRustEmitResult
-    pub failures: [JetRustEmitKeptFailure]
+struct JetRustEmitKeepGoing {
+    result: JetRustEmitResult
+    failures: [JetRustEmitKeptFailure]
 }
 
-pub fn jet_rust_emit_program_keep_going(program: MIRProgram, config: JetRustEmitConfig, trace_sink: CompilerTraceSink?) -> JetRustEmitKeepGoing Never! {
+fn jet_rust_emit_program_keep_going(program: MIRProgram, config: JetRustEmitConfig, trace_sink: CompilerTraceSink?) -> JetRustEmitKeepGoing Never! {
     kept_config := config
     kept_config.keep_going = true
     ctx := jet_rust_emit_context(program, kept_config)
@@ -498,17 +498,17 @@ JET_RUST_EMIT_PRINT_BYTES_PER_INSTRUCTION :: 4096
 // One function row a printing thread holds, and whether it prints it. A row
 // it does not print travels with its part, so every row comes back in order.
 struct JetRustEmitJob {
-    pub prints: Bool
-    pub function: MIRFunction
+    prints: Bool
+    function: MIRFunction
 }
 
 // One printing thread's result: its rows in order, the lines of each row it
 // printed, and the failures printing them reported.
 struct JetRustEmitPart {
-    pub functions: [MIRFunction]
-    pub texts: [[String]]
-    pub failure: JetRustEmitFailure?
-    pub kept_failures: [JetRustEmitKeptFailure]
+    functions: [MIRFunction]
+    texts: [[String]]
+    failure: JetRustEmitFailure?
+    kept_failures: [JetRustEmitKeptFailure]
 }
 
 // MIRRust emit_mir_program_items: a function prints when its module is
@@ -689,24 +689,24 @@ JET_RUST_EMIT_UNIT_END_MARKER :: "// jet:unit-end "
 JET_RUST_EMIT_BASE_UNIT :: "base"
 
 struct JetRustEmitUnitStart {
-    pub offset: Int
-    pub unit: String
+    offset: Int
+    unit: String
 }
 
 struct JetRustEmitUnits {
-    pub split: Bool
+    split: Bool
     // Source file id key -> (byte offset where a marked file's text starts,
     // unit), in source order.
-    pub starts: [String:[JetRustEmitUnitStart]]
+    starts: [String:[JetRustEmitUnitStart]]
     // Module id key -> source file id key.
-    pub module_files: [String:String]
+    module_files: [String:String]
 }
 
 // The emitted lines `start..<end` of one package-unit item.
 struct JetRustEmitUnitPiece {
-    pub unit: String
-    pub start: Int
-    pub end: Int
+    unit: String
+    start: Int
+    end: Int
 }
 
 fn jet_rust_emit_units(program: MIRProgram) -> JetRustEmitUnits Never! {

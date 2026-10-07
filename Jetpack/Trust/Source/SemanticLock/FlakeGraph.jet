@@ -6,15 +6,15 @@
 // Declared facts that are not graph data; `checks` is an ordinary output.
 TRUST_FLAKE_UNSUPPORTED_FIELDS :: prep { [String]{"shellHook", "inputsFrom", "processes", "services", "nixosConfigurations", "homeConfigurations", "darwinConfigurations"} }
 
-pub struct FlakeGraph {
-    pub source: String
-    pub source_fingerprint: String
-    pub inputs: [FlakeInput]
-    pub lock_nodes: [FlakeLockNode]
-    pub registries: [FlakeRegistryEntry]
-    pub outputs: [FlakeOutput]
-    pub composition: FlakeComposition?
-    pub unsupported: [String]
+struct FlakeGraph {
+    source: String
+    source_fingerprint: String
+    inputs: [FlakeInput]
+    lock_nodes: [FlakeLockNode]
+    registries: [FlakeRegistryEntry]
+    outputs: [FlakeOutput]
+    composition: FlakeComposition?
+    unsupported: [String]
 
     // Parse the stable declarative subset of a foreign flake and validate
     // it. Arbitrary Nix expressions stay inside the private compatibility
@@ -538,7 +538,7 @@ fn trust_flake_follow_revision(name: String, facts: [String: FlakeInput], stack:
 
 // The declaration shape a semantic lock must still match: input spelling,
 // the flake-parts composition, output facts, and every unsupported fact.
-pub fn trust_flake_validate_lock_shape(source: FlakeGraph, locked: FlakeGraph) TrustError! {
+fn trust_flake_validate_lock_shape(source: FlakeGraph, locked: FlakeGraph) TrustError! {
     if trust_flake_input_shape(source.inputs) != trust_flake_input_shape(locked.inputs) {
         return Err(TrustError.StaleSemanticLock("flake input declarations differ from the lock"))
     }
@@ -589,12 +589,12 @@ fn trust_flake_output_shape(outputs: [FlakeOutput]) -> [FlakeOutputShape] Never!
 }
 
 // `imports` of one flake-parts module, comments removed.
-pub fn trust_flake_module_imports(module_text: String) -> [String] Never! {
+fn trust_flake_module_imports(module_text: String) -> [String] Never! {
     trust_nix_list_assignment_values(trust_nix_strip_comments(module_text), "imports")
 }
 
 // The fingerprint line an imported module contributes to the composition.
-pub fn trust_flake_module_source(source_name: String, bytes: [U8]) -> String Never! {
+fn trust_flake_module_source(source_name: String, bytes: [U8]) -> String Never! {
     "{source_name}\t{pkg_sha256_hex(bytes)}"
 }
 
@@ -603,7 +603,7 @@ pub fn trust_flake_module_source(source_name: String, bytes: [U8]) -> String Nev
 // unqualified module output expands across the declared systems with the
 // module path as its provenance, without evaluating arbitrary Nix. Outputs
 // already in `imported` (by name, kind, system, and attribute) are skipped.
-pub fn trust_flake_module_outputs(module_text: String, source_name: String, composition: FlakeComposition, imported: &[FlakeOutput]) Never! {
+fn trust_flake_module_outputs(module_text: String, source_name: String, composition: FlakeComposition, imported: &[FlakeOutput]) Never! {
     loop assignment in trust_nix_output_assignments(module_text) {
         systems := [String]{}
         if {
@@ -627,7 +627,7 @@ pub fn trust_flake_module_outputs(module_text: String, source_name: String, comp
 
 // Whether a semantic lock carries flake facts, so a load must read the
 // graph from it instead of from `flake.lock`.
-pub fn trust_flake_lock_has_facts(lock: SemanticLockFile) -> Bool Never! {
+fn trust_flake_lock_has_facts(lock: SemanticLockFile) -> Bool Never! {
     loop input in lock.inputs {
         if input.name.starts_with("flake-") -> return true
     }

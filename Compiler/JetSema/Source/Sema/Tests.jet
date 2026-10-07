@@ -27,7 +27,7 @@ fn sema_property_param_generatable(ty: Type) -> Bool Never! {
 // E0613 (Rust `property_param_unsupported`): one row per parameter of a
 // parameterized `#Test fn` whose type has no automatic generator, reported
 // before the test body's own diagnostics.
-pub fn sema_property_param_diagnostics(test: TestDef) -> [Diagnostic] Never! {
+fn sema_property_param_diagnostics(test: TestDef) -> [Diagnostic] Never! {
     diagnostics := [Diagnostic]{}
     loop parameter in test.params {
         if sema_property_param_generatable(parameter.ty) -> next
@@ -42,18 +42,18 @@ pub fn sema_property_param_diagnostics(test: TestDef) -> [Diagnostic] Never! {
     diagnostics
 }
 
-pub struct SemaTestFunctionCheckResult {
-    pub function: TFunc?
-    pub call_facts: [SemaCallSiteFact]
-    pub comptime_requests: [SemaComptimeRequest]
-    pub name_references: [SemaNameReferenceFact]
-    pub diagnostics: [Diagnostic]
-    pub exact_int_reachable: Bool
-    pub copy_events: [SemaCopyEvent]
-    pub complete: Bool
+struct SemaTestFunctionCheckResult {
+    function: TFunc?
+    call_facts: [SemaCallSiteFact]
+    comptime_requests: [SemaComptimeRequest]
+    name_references: [SemaNameReferenceFact]
+    diagnostics: [Diagnostic]
+    exact_int_reachable: Bool
+    copy_events: [SemaCopyEvent]
+    complete: Bool
 }
 
-pub fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment, module_scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaTestFunctionCheckResult {
+fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment, module_scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaTestFunctionCheckResult {
     key := tir_test_artifact_key(environment.module_identity, test)
     owner_id := SymbolID{key: key}
     scopes := sema_scope_snapshot(module_scopes)

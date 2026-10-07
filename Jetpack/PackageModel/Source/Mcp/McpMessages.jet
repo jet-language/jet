@@ -31,7 +31,7 @@ impl MCPCodec {
 }
 
 // JSON-RPC request identifier. Fractional and null IDs are rejected.
-pub enum MCPRequestID {
+enum MCPRequestID {
     Number(Int)
     Text(String)
 
@@ -52,10 +52,10 @@ pub enum MCPRequestID {
 }
 
 // JSON-RPC request.
-pub struct MCPRequest {
-    pub id: MCPRequestID
-    pub method: String
-    pub params: DataTree?
+struct MCPRequest {
+    id: MCPRequestID
+    method: String
+    params: DataTree?
 
     // A request with an optional object or array params value.
     fn new(id: MCPRequestID, method: String, params: DataTree?) -> MCPRequest MCPCodecError! {
@@ -71,9 +71,9 @@ pub struct MCPRequest {
 }
 
 // JSON-RPC notification.
-pub struct MCPNotification {
-    pub method: String
-    pub params: DataTree?
+struct MCPNotification {
+    method: String
+    params: DataTree?
 
     // A notification with an optional object or array params value.
     fn new(method: String, params: DataTree?) -> MCPNotification MCPCodecError! {
@@ -89,10 +89,10 @@ pub struct MCPNotification {
 }
 
 // JSON-RPC protocol error payload.
-pub struct MCPRPCError {
-    pub code: Int
-    pub message: String
-    pub data: DataTree?
+struct MCPRPCError {
+    code: Int
+    message: String
+    data: DataTree?
 
     fn new(code: Int, message: String, data: DataTree?) -> MCPRPCError Never! {
         MCPRPCError{code: code, message: message, data: data}
@@ -121,10 +121,10 @@ pub struct MCPRPCError {
 
 // JSON-RPC response, carrying exactly one result or error. A `None` id is
 // the JSON-RPC null response id.
-pub struct MCPResponse {
-    pub id: MCPRequestID?
-    pub result: DataTree?
-    pub error: MCPRPCError?
+struct MCPResponse {
+    id: MCPRequestID?
+    result: DataTree?
+    error: MCPRPCError?
 
     fn success(id: MCPRequestID, result: DataTree) -> MCPResponse Never! {
         MCPResponse{id: Val(id), result: Val(result), error: None}
@@ -149,7 +149,7 @@ pub struct MCPResponse {
 }
 
 // One JSON-RPC message in the MCP protocol core.
-pub enum MCPMessage {
+enum MCPMessage {
     Request(MCPRequest)
     Notification(MCPNotification)
     Response(MCPResponse)
@@ -247,8 +247,8 @@ pub enum MCPMessage {
 
 // Capabilities exchanged by initialize. Unknown capability objects are
 // retained so peers can extend the protocol without changing this core.
-pub struct MCPCapabilities {
-    pub values: [String: DataTree]
+struct MCPCapabilities {
+    values: [String: DataTree]
 
     fn empty() -> MCPCapabilities Never! {
         MCPCapabilities{values: [String: DataTree]{}}
@@ -285,10 +285,10 @@ pub struct MCPCapabilities {
 }
 
 // Parameters carried by the stable `initialize` request.
-pub struct MCPInitializeParams {
-    pub protocol_version: String
-    pub capabilities: MCPCapabilities
-    pub client_info: MCPImplementation?
+struct MCPInitializeParams {
+    protocol_version: String
+    capabilities: MCPCapabilities
+    client_info: MCPImplementation?
 
     fn new(protocol_version: MCPRevision, capabilities: MCPCapabilities, client_info: MCPImplementation?) -> MCPInitializeParams Never! {
         MCPInitializeParams{protocol_version: protocol_version.as_str(), capabilities: capabilities, client_info: client_info}
@@ -331,10 +331,10 @@ pub struct MCPInitializeParams {
 }
 
 // Result carried by the stable `initialize` response.
-pub struct MCPInitializeResult {
-    pub protocol_version: MCPRevision
-    pub capabilities: MCPCapabilities
-    pub server_info: MCPImplementation
+struct MCPInitializeResult {
+    protocol_version: MCPRevision
+    capabilities: MCPCapabilities
+    server_info: MCPImplementation
 
     fn new(protocol_version: MCPRevision, capabilities: MCPCapabilities, server_info: MCPImplementation) -> MCPInitializeResult Never! {
         MCPInitializeResult{protocol_version: protocol_version, capabilities: capabilities, server_info: server_info}

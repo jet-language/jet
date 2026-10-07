@@ -7,27 +7,27 @@ use core.net as net
 // validation, configuration carriers, ALPN checks, and the explicit boundary
 // where a provider cannot consume a source-level configuration.
 
-pub struct ClientConfig { pub host: String, pub alpn: [String] }
-pub struct ClientIdentity { pub cert: String, pub key: String }
-pub struct RootCertificates { pub path: String }
-pub struct TLSCertificate {
-    pub der: [U8]
-    pub sha256: [U8]
-    pub spki_sha256: [U8]
-    pub dns_names: [String]
-    pub valid_from_unix_ms: Int
-    pub valid_until_unix_ms: Int
-    pub subject: String
-    pub issuer: String
+struct ClientConfig { host: String, alpn: [String] }
+struct ClientIdentity { cert: String, key: String }
+struct RootCertificates { path: String }
+struct TLSCertificate {
+    der: [U8]
+    sha256: [U8]
+    spki_sha256: [U8]
+    dns_names: [String]
+    valid_from_unix_ms: Int
+    valid_until_unix_ms: Int
+    subject: String
+    issuer: String
 }
-pub struct TLSPeerIdentity {
-    pub verified_server_name: String
-    pub leaf: TLSCertificate
-    pub certificate_chain: [TLSCertificate]
-    pub cipher_suite: String
-    pub tls_version: TLSVersion
+struct TLSPeerIdentity {
+    verified_server_name: String
+    leaf: TLSCertificate
+    certificate_chain: [TLSCertificate]
+    cipher_suite: String
+    tls_version: TLSVersion
 }
-pub enum TLSVersion {
+enum TLSVersion {
     TLS12
     TLS13
 }
@@ -35,7 +35,7 @@ pub enum TLSVersion {
 // The two-argument native leaf consumes a connected TCPStream and a server
 // name. Do not manufacture a descriptor or call the leaf with host/port text:
 // the transport and TLS capabilities are separate typed boundaries.
-pub fn client(host: String, port: Int) -[Net, Time.Wait]> TLSStream IOError! {
+fn client(host: String, port: Int) -[Net, Time.Wait]> TLSStream IOError! {
     if !valid_host(host) -> return Err(tls_error("client", host, "host is empty or contains invalid endpoint syntax"))
     if port <= 0 || port > 65535 -> return Err(tls_error("client", host, "port must be in 1..=65535"))
     tcp :: if net.tcp_connect(format_host_port(host, port)) == {
@@ -45,39 +45,39 @@ pub fn client(host: String, port: Int) -[Net, Time.Wait]> TLSStream IOError! {
     core.net.tls.client(^tcp, host)
 }
 
-pub fn read(stream: TLSStream, n: Int) -[Net, Time.Wait]> [U8] IOError! {
+fn read(stream: TLSStream, n: Int) -[Net, Time.Wait]> [U8] IOError! {
     if n <= 0 -> return Err(tls_error("read", "", "read limit must be positive"))
     working := stream
     core.net.tls.read(&working, n)
 }
 
-pub fn read_text(stream: TLSStream, n: Int) -[Net, Time.Wait]> String IOError! {
+fn read_text(stream: TLSStream, n: Int) -[Net, Time.Wait]> String IOError! {
     if n <= 0 -> return Err(tls_error("read_text", "", "read limit must be positive"))
     bytes :: read(stream, n)
     Ok(String.from_bytes(bytes) ?? return Err(tls_error("read_text", "", "read bytes are not UTF-8")))
 }
 
-pub fn write(stream: TLSStream, bytes: [U8]) -[Net, Time.Wait]> Int IOError! {
+fn write(stream: TLSStream, bytes: [U8]) -[Net, Time.Wait]> Int IOError! {
     working := stream
     core.net.tls.write(&working, bytes)
 }
 
-pub fn write_all(stream: TLSStream, bytes: [U8]) IOError! {
+fn write_all(stream: TLSStream, bytes: [U8]) IOError! {
     working := stream
     core.net.tls.write_all(&working, bytes)
 }
 
-pub fn write_text(stream: TLSStream, text: String) IOError! {
+fn write_text(stream: TLSStream, text: String) IOError! {
     working := stream
     core.net.tls.write_text(&working, text)
 }
 
-pub fn close(stream: TLSStream) IOError! {
+fn close(stream: TLSStream) IOError! {
     working := stream
     working.close()
 }
 
-pub fn sni(stream: TLSStream) -[Net]> String Never! {
+fn sni(stream: TLSStream) -[Net]> String Never! {
     peer :: stream.peer_identity()
     peer.verified_server_name
 }
@@ -85,21 +85,21 @@ pub fn sni(stream: TLSStream) -[Net]> String Never! {
 // TLSStream deliberately does not expose a transport socket address. Keeping
 // a source-level port field would be an invalid nominal identity for the native
 // provider, so report the missing capability instead of fabricating a value.
-pub fn peer_port(stream: TLSStream) -[Net]> Int IOError! {
+fn peer_port(stream: TLSStream) -[Net]> Int IOError! {
     Err(tls_error("peer_port", "", "TLS provider does not expose the peer port"))
 }
 
 // A TLS stream deliberately cannot be downgraded: doing so would make the
 // caller believe plaintext bytes are protected by the old connection state.
-pub fn unwrap(stream: TLSStream) -[Net]> TCPStream IOError! {
+fn unwrap(stream: TLSStream) -[Net]> TCPStream IOError! {
     Err(tls_error("unwrap", "", "TLS stream cannot be downgraded"))
 }
-pub fn version_name(v: TLSVersion) -> String Never! {
+fn version_name(v: TLSVersion) -> String Never! {
     if v == TLSVersion.TLS12 -> return "TLSv1.2"
     return "TLSv1.3"
 }
 
-pub fn parse_version(name: String) -> TLSVersion? Never! {
+fn parse_version(name: String) -> TLSVersion? Never! {
     n := ascii_lower(trim_ascii(name))
     if n == {
         "tlsv1.2" | "tls1.2" | "1.2" | "tls12" -> Val(TLSVersion.TLS12)
@@ -108,15 +108,15 @@ pub fn parse_version(name: String) -> TLSVersion? Never! {
     }
 }
 
-pub fn is_tls13(v: TLSVersion) -> Bool Never! { v == TLSVersion.TLS13 }
+fn is_tls13(v: TLSVersion) -> Bool Never! { v == TLSVersion.TLS13 }
 
-pub fn is_tls12(v: TLSVersion) -> Bool Never! { v == TLSVersion.TLS12 }
+fn is_tls12(v: TLSVersion) -> Bool Never! { v == TLSVersion.TLS12 }
 
 // Constructors are pure carriers. Endpoint, ALPN, identity, and root policy
 // is checked at the operation boundary instead of being silently dropped.
-pub fn config(host: String) -> ClientConfig Never! { ClientConfig{host: host, alpn: [String]{}} }
+fn config(host: String) -> ClientConfig Never! { ClientConfig{host: host, alpn: [String]{}} }
 
-pub fn with_alpn(cfg: ClientConfig, proto: String) -> ClientConfig Never! {
+fn with_alpn(cfg: ClientConfig, proto: String) -> ClientConfig Never! {
     alpn := [String]{}
     loop p in cfg.alpn -> &alpn.push(p)
     // Keep the requested value visible. connect_host validates the complete
@@ -126,22 +126,22 @@ pub fn with_alpn(cfg: ClientConfig, proto: String) -> ClientConfig Never! {
     ClientConfig{host: cfg.host, alpn: alpn}
 }
 
-pub fn alpn_h2(cfg: ClientConfig) -> ClientConfig Never! {
+fn alpn_h2(cfg: ClientConfig) -> ClientConfig Never! {
     with_alpn(with_alpn(cfg, "h2"), "http/1.1")
 }
 
-pub fn identity(cert: String, key: String) -> ClientIdentity Never! {
+fn identity(cert: String, key: String) -> ClientIdentity Never! {
     ClientIdentity{cert: cert, key: key}
 }
 
-pub fn roots(path: String) -> RootCertificates Never! {
+fn roots(path: String) -> RootCertificates Never! {
     RootCertificates{path: path}
 }
 
 // This legacy carrier has no native leaf that accepts the source ClientConfig
 // (ALPN, identity, and root stores). Refuse configured policy explicitly rather
 // than connecting with a silently downgraded system-only configuration.
-pub fn connect_host(cfg: ClientConfig, port: Int) -[Net, Time.Wait]> TLSStream IOError! {
+fn connect_host(cfg: ClientConfig, port: Int) -[Net, Time.Wait]> TLSStream IOError! {
     if !valid_host(cfg.host) -> return Err(tls_error("connect_host", cfg.host, "host is empty or contains invalid endpoint syntax"))
     if port <= 0 || port > 65535 -> return Err(tls_error("connect_host", cfg.host, "port must be in 1..=65535"))
     if !valid_alpn_list(cfg.alpn) -> return Err(tls_error("connect_host", cfg.host, "ALPN protocol must contain 1..255 non-control bytes"))
@@ -151,9 +151,9 @@ pub fn connect_host(cfg: ClientConfig, port: Int) -[Net, Time.Wait]> TLSStream I
     client(cfg.host, port)
 }
 
-pub fn flags(cfg: ClientConfig) -> [String] Never! { cfg.alpn }
+fn flags(cfg: ClientConfig) -> [String] Never! { cfg.alpn }
 
-pub fn has_alpn(cfg: ClientConfig, proto: String) -> Bool Never! {
+fn has_alpn(cfg: ClientConfig, proto: String) -> Bool Never! {
     loop p in cfg.alpn {
         if p == proto -> return true
     }

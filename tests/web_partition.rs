@@ -194,7 +194,6 @@ fn dom_fn() {
             script_body: std::mem::take(&mut prog.script_body),
             block_spans: std::mem::take(&mut prog.block_spans),
             web_target_ceiling: prog.web_target_ceiling,
-            pub_file: prog.pub_file,
             no_prelude: prog.no_prelude,
             default_target: prog.default_target,
             html_path: prog.html_path.clone(),
@@ -339,7 +338,7 @@ fn inline_module_callback_keeps_qualified_js_partition() {
     let src = r#"#Target(Web)
 module handlers {
     #Target(JS)
-    pub fn init() { print("ready") }
+    fn init() { print("ready") }
 }
 #Target(JS)
 fn run() { handlers.init() }

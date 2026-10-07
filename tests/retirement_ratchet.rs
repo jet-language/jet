@@ -1761,7 +1761,7 @@ fn ref_provider_set_has_one_definition_site() {
     let ref_spec = fs::read_to_string(root.join("crates/jet-pkg-model/src/RefSpec.rs"))
         .expect("RefSpec.rs is readable");
     let is_builtin_body = ref_spec
-        .split("pub fn is_builtin(name: &str) -> bool {")
+        .split("fn is_builtin(name: &str) -> bool {")
         .nth(1)
         .and_then(|tail| tail.split_once('}').map(|(body, _)| body))
         .expect("RefSpec::Source::is_builtin body");

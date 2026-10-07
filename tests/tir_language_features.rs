@@ -945,17 +945,17 @@ fn foreign_enum_matching_and_payload() {
     // the foreign-LOCAL `NoteType`; the entry matches the foreign `NoteType` via a local
     // `Query`'s `Kind(NoteType)` payload + constructs `NoteType.User` cross-module.
     let note = "\
-pub enum NoteType { User Feedback Project Reference }
-pub struct Note {
-    pub name: String
-    pub note_type: NoteType
-    pub parent: String?
+enum NoteType { User Feedback Project Reference }
+struct Note {
+    name: String
+    note_type: NoteType
+    parent: String?
 }
 
-pub fn make_note(name: ^String, t: ^NoteType) -> Note {
+fn make_note(name: ^String, t: ^NoteType) -> Note {
     return Note{name: name, note_type: t, parent: None}
 }
-pub fn kind_str(n: Note) -> String {
+fn kind_str(n: Note) -> String {
     k :: ~n.note_type
     if k == {
         .User -> { return \"user\" }

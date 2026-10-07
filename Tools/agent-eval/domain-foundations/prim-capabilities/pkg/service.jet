@@ -1,6 +1,6 @@
 use core.process as process
 
-pub fn lifecycle() {
+fn lifecycle() {
     policy :: Authority.from_rights(["Exec:/nix/store/xgqww6fdbdpkmh1gffhxjhd5bwwnf0hz-coreutils-full-9.11/bin/coreutils"])
     spec :: process.cmd(["/run/current-system/sw/bin/sleep", "5"]).stdout(.Capture).stderr(.Capture).under(policy)
     child :: spec.spawn() ?? {

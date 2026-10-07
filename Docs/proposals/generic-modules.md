@@ -18,7 +18,7 @@ instantiation uses `::`.
 
 ```jet
 module ring<T>(capacity: Int) {
-    pub struct Buffer { slots: [T#capacity] }
+    struct Buffer { slots: [T#capacity] }
 }
 
 module packet_ring :: ring<Packet>(64)

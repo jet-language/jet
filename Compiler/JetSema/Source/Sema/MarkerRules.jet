@@ -34,31 +34,31 @@ use jet_foundation.[
     type_name,
 ]
 
-pub struct SemaMarkerRuleArgumentObservation {
-    pub ty: Type?
-    pub constant: TComptimeValue?
-    pub checked_expression: TExpr?
-    pub comptime_requests: [SemaComptimeRequest]
-    pub comptime_source: SemaComptimeItemSource?
-    pub diagnostics: [Diagnostic]
+struct SemaMarkerRuleArgumentObservation {
+    ty: Type?
+    constant: TComptimeValue?
+    checked_expression: TExpr?
+    comptime_requests: [SemaComptimeRequest]
+    comptime_source: SemaComptimeItemSource?
+    diagnostics: [Diagnostic]
 }
 
-pub struct SemaMarkerRuleArgumentFact {
-    pub marker_span: Span
-    pub source_index: Int
-    pub parameter_index: Int?
-    pub kind: TAppliedRuleArgKind
-    pub ty: Type?
-    pub constant: TComptimeValue?
-    pub checked_expression: TExpr?
-    pub comptime_requests: [SemaComptimeRequest]
+struct SemaMarkerRuleArgumentFact {
+    marker_span: Span
+    source_index: Int
+    parameter_index: Int?
+    kind: TAppliedRuleArgKind
+    ty: Type?
+    constant: TComptimeValue?
+    checked_expression: TExpr?
+    comptime_requests: [SemaComptimeRequest]
 }
 
-pub struct SemaMarkerRulesCheckResult {
-    pub diagnostics: [Diagnostic]
-    pub argument_facts: [SemaMarkerRuleArgumentFact]
-    pub comptime_sources: [SemaComptimeItemSource]
-    pub comptime_requests: [SemaComptimeRequest]
+struct SemaMarkerRulesCheckResult {
+    diagnostics: [Diagnostic]
+    argument_facts: [SemaMarkerRuleArgumentFact]
+    comptime_sources: [SemaComptimeItemSource]
+    comptime_requests: [SemaComptimeRequest]
 }
 
 struct SemaMarkerRuleArgumentBinding {
@@ -382,7 +382,7 @@ fn sema_marker_rules_catalog_has_menu(menus: [TAppliedRuleArgumentMenu], name: S
 // row source. Menu rows are explicit carrier input because their canonical
 // source is Core.jet's specialized `types { … }` metadata, not marker sites or
 // Program policy declarations.
-pub fn sema_marker_rules_build_catalog(marker_source: Program, marker_source_text: String, argument_menus: [TAppliedRuleArgumentMenu]) -> TAppliedRuleCatalog? {
+fn sema_marker_rules_build_catalog(marker_source: Program, marker_source_text: String, argument_menus: [TAppliedRuleArgumentMenu]) -> TAppliedRuleCatalog? {
     rows := [TAppliedRule]{}
     loop item in marker_source.items {
         if item == .MarkerDecl(declaration) {
@@ -1459,7 +1459,7 @@ fn sema_marker_rules_validate_arguments(registry: SemaScopeMembersMarkerRegistry
     }
 }
 
-pub fn sema_marker_rules_check(registry: SemaScopeMembersMarkerRegistry, program: Program, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, values: [SemaComptimeItemValue]) -> SemaMarkerRulesCheckResult {
+fn sema_marker_rules_check(registry: SemaScopeMembersMarkerRegistry, program: Program, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, values: [SemaComptimeItemValue]) -> SemaMarkerRulesCheckResult {
     result := SemaMarkerRulesCheckResult{
         diagnostics: [Diagnostic]{},
         argument_facts: [SemaMarkerRuleArgumentFact]{},
@@ -1474,10 +1474,10 @@ pub fn sema_marker_rules_check(registry: SemaScopeMembersMarkerRegistry, program
     result
 }
 
-pub struct SemaMarkerRulesDeclaredTypeCheck {
-    pub resolved_type: Type?
-    pub diagnostics: [Diagnostic]
-    pub complete: Bool
+struct SemaMarkerRulesDeclaredTypeCheck {
+    resolved_type: Type?
+    diagnostics: [Diagnostic]
+    complete: Bool
 }
 
 fn sema_marker_rules_builtin_type(name: String) -> Type? {
@@ -1532,7 +1532,7 @@ fn sema_marker_rules_builtin_type(name: String) -> Type? {
     None
 }
 
-pub fn sema_marker_rules_check_declared_type_argument(argument: SemaScopeMembersDeclaredTypeArgument, environment: SemaScopeEnvironment) -> SemaMarkerRulesDeclaredTypeCheck {
+fn sema_marker_rules_check_declared_type_argument(argument: SemaScopeMembersDeclaredTypeArgument, environment: SemaScopeEnvironment) -> SemaMarkerRulesDeclaredTypeCheck {
     if argument.ty != (Type.Named{name: argument.name}) {
         return SemaMarkerRulesDeclaredTypeCheck{resolved_type: None, diagnostics: [Diagnostic]{}, complete: false}
     }
@@ -1768,7 +1768,7 @@ fn sema_inline_always_check_function(function: Func, diagnostics: &[Diagnostic])
 // Every body of the bundle has been checked, so the function references
 // read as values are complete for the whole-program E0918 half. Methods
 // cannot be read as bare values, so E0918 applies to top-level functions.
-pub fn sema_marker_rules_check_inline_always(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> Bool Never! {
+fn sema_marker_rules_check_inline_always(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> Bool Never! {
     address_taken := [String:Bool]{}
     loop module_result in modules {
         loop reference in module_result.name_references {
@@ -1803,7 +1803,7 @@ pub fn sema_marker_rules_check_inline_always(graph: SemaRegistrationGraph, modul
 // D-PRELUDEX1=A: `#NoPrelude` turns the curated prelude names `print` and
 // `input` off for its file (E0429) unless the file declares its own. The
 // arguments are still checked; the call reports once and yields no value.
-pub fn sema_marker_rules_no_prelude_call(call: Call, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_marker_rules_no_prelude_call(call: Call, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if call.name != "print" && call.name != "input" -> return false
     if !sema_module_no_prelude(environment) || !sema_call_gate_is_unshadowed(call.name, scopes) -> return false
     name :: call.name

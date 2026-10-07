@@ -22,7 +22,7 @@ use jet_foundation.[
     diagnostic_render_all,
 ]
 
-pub enum JetCLIPlan {
+enum JetCLIPlan {
     // The command finished: write these bytes and exit with this status.
     Done(output: JetDriverVerbOutput)
     // `jet check <file>`: the entry as the user typed it, its bytes, the
@@ -50,15 +50,15 @@ pub enum JetCLIPlan {
 // The `jet test` options the Jet host carries out (Source/CmdCompile.rs
 // `TestRunOpts`). `capture` is `failed`, `all`, or `none`; `status` is the
 // stderr status text the Rust host writes before the compile.
-pub struct JetCLITestOptions {
-    pub capture: String
-    pub filter: String?
-    pub shuffle_seed: String?
-    pub serial: Bool
-    pub trace_tiers: Bool
-    pub update_snapshots: Bool
-    pub project_root: String?
-    pub status: String
+struct JetCLITestOptions {
+    capture: String
+    filter: String?
+    shuffle_seed: String?
+    serial: Bool
+    trace_tiers: Bool
+    update_snapshots: Bool
+    project_root: String?
+    status: String
 }
 
 // Commands that validate their own flags (CLI.rs `owns_flag_vocabulary`).
@@ -109,7 +109,7 @@ fn jet_cli_why(code: String) -> String Never! {
 }
 
 // One spanless CLI diagnostic, rendered as the host prints it.
-pub fn jet_cli_report(code: String, what: String, why: String, fix: String, color: Bool) -> String Never! {
+fn jet_cli_report(code: String, what: String, why: String, fix: String, color: Bool) -> String Never! {
     diagnostic_render_all("", "", [Diagnostic]{diagnostic_from_registry(code, None, what, why, fix)}, color)
 }
 
@@ -750,7 +750,7 @@ fn jet_cli_new(jet_argv: [String], args: [String], color: Bool, quiet: Bool) -[F
 }
 
 // Plan one `jet` invocation; `raw` is argv without the program name.
-pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
+fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
     // Output flags, parsed once from the jet-owned prefix before `--`.
     output_end := raw.len()
     loop (index, argument) in raw {

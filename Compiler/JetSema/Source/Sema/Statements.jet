@@ -82,14 +82,14 @@ use jet_foundation.[
     type_name,
 ]
 
-pub struct SemaStatementResult {
-    pub value: [TStmt]
-    pub complete: Bool
+struct SemaStatementResult {
+    value: [TStmt]
+    complete: Bool
 }
 
 struct SemaStatementRollbackMethods {
-    pub snapshot: TMethodRef
-    pub restore: TMethodRef
+    snapshot: TMethodRef
+    restore: TMethodRef
 }
 
 
@@ -294,7 +294,7 @@ fn sema_stmt_close_loop_value_frame(context: &SemaCheckContext, frame_index: Int
     valid
 }
 
-pub fn sema_stmt_block_has_no_fallthrough(statements: [Stmt]) -> Bool Never! {
+fn sema_stmt_block_has_no_fallthrough(statements: [Stmt]) -> Bool Never! {
     if statements.len() == 0 -> return false
     last :: statements[statements.len() - 1]
     if last == {
@@ -354,7 +354,7 @@ fn sema_stmt_value_tail_marker(statements: [Stmt]) -> Span? {
 // value block: an empty block, or one whose last line is a statement that can
 // still reach the end, reports E0114. A value line and a table report their
 // own errors. False when E0114 was reported.
-pub fn sema_stmt_check_value_block_end(statements: [Stmt], checked: [TStmt], expected: Type?, block_span: Span, function_name: String, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_stmt_check_value_block_end(statements: [Stmt], checked: [TStmt], expected: Type?, block_span: Span, function_name: String, diagnostics: &[Diagnostic]) -> Bool {
     if statements.len() == 0 {
         &diagnostics.push(sema_stmt_missing_value(expected, None, function_name, block_span))
         return false
@@ -1402,12 +1402,12 @@ fn sema_stmt_for_in_stable_list(collection_type: Type) -> Bool Never! {
 // Rust `collection_changed_in_loop` / `collection_changed_by_method_in_loop`
 // (E0507): a change to a collection an active loop is reading. `operation`
 // is `` `name.method()` `` or `a mutation of `name``.
-pub fn sema_collection_changed_in_loop(name: String, operation: String, span: Span) -> Diagnostic {
+fn sema_collection_changed_in_loop(name: String, operation: String, span: Span) -> Diagnostic {
     sema_error("E0507", span, "While the loop is reading `{name}`, nothing may change it", "The loop reads `{name}` across its body, so {operation} can change the visited domain, element order, or termination.", "Choose the collection intent explicitly: use a separate result when the original traversal should stay unchanged; snapshot `{name}` and iterate the fixed original set when only the original values belong in the traversal; or use an explicit work queue when newly added values should be visited. Do not use index traversal unless its fixed domain and result meaning are intended.")
 }
 
 // The root local of a written place such as `xs`, `&xs`, or `a.b[i]`.
-pub fn sema_expr_place_root_ident(expression: Expr) -> String? {
+fn sema_expr_place_root_ident(expression: Expr) -> String? {
     if expression == {
         .Place(inner, _, _) | .Paren(inner, _) -> return sema_expr_place_root_ident(inner)
         else -> return sema_stmt_for_in_expr_root_ident(expression)
@@ -1425,7 +1425,7 @@ fn sema_stmt_index_write_is_collection(ty: Type) -> Bool Never! {
 
 // D-SOA1 (E1108): the element name of a `[S]` whose struct is
 // `#Layout(columnar)`; v1 supports only the core read surface on it.
-pub fn sema_columnar_list_element(environment: SemaScopeEnvironment, ty: Type) -> String? {
+fn sema_columnar_list_element(environment: SemaScopeEnvironment, ty: Type) -> String? {
     if sema_expr_unwrap_tag(ty) == .List(inner) {
         if inner == .Named(element) && sema_stmt_for_in_columnar(environment, inner) -> return Val(element)
     }
@@ -2193,10 +2193,10 @@ fn sema_stmt_destructure_moves_field(ty: Type, pattern: BindPattern, environment
 }
 
 struct SemaRefutableFallbackCheck {
-    pub tir: TOrFallback?
-    pub statements: [TStmt]
-    pub complete: Bool
-    pub ambient_err: TLocal?
+    tir: TOrFallback?
+    statements: [TStmt]
+    complete: Bool
+    ambient_err: TLocal?
 }
 
 fn sema_stmt_refutable_expr_diverges(expr: Expr) -> Bool Never! {
@@ -2743,7 +2743,7 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
                                 &context.name_references.push(SemaNameReferenceFact{span: selected_field.span, symbol: field.symbol, kind: "field"})
                             }
                             else -> {
-                                &diagnostics.push(sema_error("E0605", selected_field.span, "`{selected_field.name}` exists but is private to its file", "only names marked `pub` can be used from another file (S18)", "add `pub` before `{selected_field.name}`, or don't reach across files here"))
+                                &diagnostics.push(sema_error("E0605", selected_field.span, "`{selected_field.name}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module (D-VIS-MODULE1)", "use `{selected_field.name}` from inside its module, or remove `priv` from its module or field"))
                                 field_type = Val(Type.Int)
                             }
                         }
@@ -3276,7 +3276,7 @@ fn sema_stmt_compound_widens(source: Type, target: Type) -> Bool {
 // (`n = bytes[i]` with `n: Int`, `f(id.value)` of `U64` into `Int`). A name,
 // field, or index read has its own type whatever the hint, so it checks
 // without one and `sema_stmt_numeric_slot_value` fits it into the slot.
-pub fn sema_stmt_numeric_slot_self_typed(expr: Expr, required: Type) -> Bool Never! {
+fn sema_stmt_numeric_slot_self_typed(expr: Expr, required: Type) -> Bool Never! {
     if !sema_expr_is_numeric(required) -> return false
     if expr == {
         .Ident(_, _) | .Field(_, _, _) | .Index(_, _, _, _) -> return true
@@ -3288,7 +3288,7 @@ pub fn sema_stmt_numeric_slot_self_typed(expr: Expr, required: Type) -> Bool Nev
 // A self-typed value in a numeric slot: widened (Rust `widen_numeric_expr`)
 // when its numeric type widens into the slot, else the ordinary expected-type
 // check.
-pub fn sema_stmt_numeric_slot_value(value: TExpr, required: Type, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_stmt_numeric_slot_value(value: TExpr, required: Type, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
     if sema_expr_is_numeric(value.ty) && sema_stmt_compound_widens(value.ty, required) {
         line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
         return sema_expr_numeric_literal_conversion(value, required, value.span, line, &diagnostics)
@@ -4524,7 +4524,7 @@ fn sema_stmt_check_dead_value_tail(tail: Expr, return_type: Type?, environment: 
     sema_check_expression(tail, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) != None
 }
 
-pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> SemaStatementResult {
+fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> SemaStatementResult {
     // D-COMPILE-STACK1=A (E1403): a statement list is one source nesting level
     // below its owner, as each of its statements is in the Rust checker.
     entered_nesting := false

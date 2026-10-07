@@ -2401,7 +2401,7 @@ mod generic_instance_tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("main.jet");
-        let source = "module value(n: Int) { pub fn get() -> Int { return n } }\nmodule a :: value(3)\nmodule b :: value(3)\nfn run() { print(a.get())\nprint(b.get()) }\n";
+        let source = "module value(n: Int) { fn get() -> Int { return n } }\nmodule a :: value(3)\nmodule b :: value(3)\nfn run() { print(a.get())\nprint(b.get()) }\n";
         std::fs::write(&path, source).unwrap();
         let shown = path.to_string_lossy().into_owned();
         let mut bundle = crate::Loader::load_entry(&shown).unwrap();
@@ -2444,8 +2444,8 @@ mod generic_instance_tests {
         let main = root.join("main.jet");
         let left = root.join("left.jet");
         let right = root.join("right.jet");
-        let left_source = "module value(n: Int) { pub fn get() -> Int { return n } }\nmodule same :: value(3)\nfn left_value() -> Int { return same.get() }\n";
-        let right_source = "module value(n: Int) { pub fn get() -> Int { return n } }\nmodule same :: value(4)\nfn right_value() -> Int { return same.get() }\n";
+        let left_source = "module value(n: Int) { fn get() -> Int { return n } }\nmodule same :: value(3)\nfn left_value() -> Int { return same.get() }\n";
+        let right_source = "module value(n: Int) { fn get() -> Int { return n } }\nmodule same :: value(4)\nfn right_value() -> Int { return same.get() }\n";
         std::fs::write(&main, "module left\nmodule right\nfn run() {}\n").unwrap();
         std::fs::write(&left, left_source).unwrap();
         std::fs::write(&right, right_source).unwrap();
@@ -2495,7 +2495,7 @@ mod generic_instance_tests {
         let library = root.join("library.jet");
         let main = root.join("main.jet");
         let source = "use \"./library\" as api\nfn run() { api.report() }\n";
-        std::fs::write(&library, "pub fn report() { print(\"library\") }\n").unwrap();
+        std::fs::write(&library, "fn report() { print(\"library\") }\n").unwrap();
         std::fs::write(&main, source).unwrap();
         let shown = main.to_string_lossy().into_owned();
         let mut bundle = crate::Loader::load_entry(&shown).unwrap();

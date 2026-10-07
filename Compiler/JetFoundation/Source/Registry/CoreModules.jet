@@ -1,38 +1,38 @@
-pub struct CoreModuleExportNames {
-    pub module_name: String
-    pub members: [String]
-    pub type_exports: [String]
+struct CoreModuleExportNames {
+    module_name: String
+    members: [String]
+    type_exports: [String]
 }
 
-pub enum CoreLeafKind {
+enum CoreLeafKind {
     Plain
     Enum(variants: [String])
     Generic(arity: Int)
     CryptoNominal
 }
 
-pub struct CoreModuleTypeExport {
-    pub name: String
-    pub kind: CoreLeafKind
+struct CoreModuleTypeExport {
+    name: String
+    kind: CoreLeafKind
 }
 
 // One variant of a compiler-owned Core enum family (Rust
 // `resolve_enum_variants_cloned` tables) and its positional payload types;
 // an empty payload is a unit variant.
-pub struct CoreEnumPayloadRow {
-    pub enum_name: String
-    pub variant: String
-    pub payload: [Type]
+struct CoreEnumPayloadRow {
+    enum_name: String
+    variant: String
+    payload: [Type]
 }
 
-pub struct CoreModuleDeclaration {
-    pub module_name: String
-    pub members: [String]
-    pub type_exports: [CoreModuleTypeExport]
-    pub dependencies: [String]
+struct CoreModuleDeclaration {
+    module_name: String
+    members: [String]
+    type_exports: [CoreModuleTypeExport]
+    dependencies: [String]
 }
 
-pub fn core_module_export(module_name: String) -> CoreModuleExportNames? {
+fn core_module_export(module_name: String) -> CoreModuleExportNames? {
     core_module_export_in(CORE_MODULE_EXPORTS, module_name)
 }
 
@@ -46,17 +46,17 @@ fn core_module_export_in(rows: [CoreModuleExportNames], module_name: String) -> 
 
 // A removed Core namespace and its canonical home (Rust `Syntax::RETIREMENTS`
 // semantic rows with code E1001).
-pub struct CoreModuleRetirement {
-    pub retired: String
-    pub canonical: String
-    pub decision: String
+struct CoreModuleRetirement {
+    retired: String
+    canonical: String
+    decision: String
 }
 
 fn core_module_retirement_row(retired: String, canonical: String) -> CoreModuleRetirement Never! {
     CoreModuleRetirement{retired: retired, canonical: canonical, decision: "D-CORE-TREE1=A"}
 }
 
-pub fn core_module_retirements() -> [CoreModuleRetirement] Never! {
+fn core_module_retirements() -> [CoreModuleRetirement] Never! {
     [CoreModuleRetirement]{
         CoreModuleRetirement{retired: "core.path.join/parent/extension/normalize", canonical: "Path.from(value).join(part), .parent(), .extension(), .normalize()", decision: "D-CORE-PATH1"},
         core_module_retirement_row("core.io", "core.term, core.process, or the prelude"),
@@ -95,7 +95,7 @@ pub fn core_module_retirements() -> [CoreModuleRetirement] Never! {
 
 // Rust `retired_core_module`: the longest retired namespace that is `name`
 // itself or a dotted prefix of it.
-pub fn core_module_retirement(name: String) -> CoreModuleRetirement? {
+fn core_module_retirement(name: String) -> CoreModuleRetirement? {
     found := CoreModuleRetirement?{None}
     best := -1
     loop row in core_module_retirements() {
@@ -108,24 +108,24 @@ pub fn core_module_retirement(name: String) -> CoreModuleRetirement? {
     found
 }
 
-pub fn core_module_export_has_name(names: [String], name: String) -> Bool Never! {
+fn core_module_export_has_name(names: [String], name: String) -> Bool Never! {
     loop item in names {
         if item == name -> return true
     }
     false
 }
 
-pub fn core_module_has_member(module_name: String, member: String) -> Bool Never! {
+fn core_module_has_member(module_name: String, member: String) -> Bool Never! {
     row :: core_module_export(module_name) ?? return false
     core_module_export_has_name(row.members, member)
 }
 
-pub fn core_module_has_type(module_name: String, name: String) -> Bool Never! {
+fn core_module_has_type(module_name: String, name: String) -> Bool Never! {
     row :: core_module_export(module_name) ?? return false
     core_module_export_has_name(row.type_exports, name)
 }
 
-pub fn core_module_type_leaf(name: String) -> String Never! {
+fn core_module_type_leaf(name: String) -> String Never! {
     bytes :: name.bytes()
     namespace_separator := -1
     module_separator := -1
@@ -149,7 +149,7 @@ pub fn core_module_type_leaf(name: String) -> String Never! {
     }
 }
 
-pub fn core_type_modules(name: String) -> [String] Never! {
+fn core_type_modules(name: String) -> [String] Never! {
     core_type_modules_in(CORE_MODULE_EXPORTS, core_module_type_leaf(name))
 }
 
@@ -164,7 +164,7 @@ fn core_type_modules_in(rows: [CoreModuleExportNames], leaf: String) -> [String]
 
 // Rust `CoreModuleExports::core_enum_variants`: the canonical variant names of
 // a Core enum leaf. Payload shape stays with the checked source declaration.
-pub fn core_enum_variants(name: String) -> [String]? {
+fn core_enum_variants(name: String) -> [String]? {
     core_enum_variants_in(CORE_ENUM_ROWS, name)
 }
 
@@ -178,7 +178,7 @@ fn core_enum_variants_in(rows: [CoreModuleTypeExport], name: String) -> [String]
 
 // The variant names of a compiler-owned Core enum family with payload rows
 // (`IOError`, `IOOperation`, `ProcessStreamMode`, ...), in table order.
-pub fn core_enum_payload_variants(name: String) -> [String]? {
+fn core_enum_payload_variants(name: String) -> [String]? {
     variants := [String]{}
     loop row in CORE_ENUM_PAYLOAD_ROWS {
         if row.enum_name == name -> &variants.push(row.variant)
@@ -190,7 +190,7 @@ pub fn core_enum_payload_variants(name: String) -> [String]? {
 // payload rows of a compiler-owned family, otherwise a Core.jet enum leaf's
 // unit variant (Rust `core_declared_enum_variants`). `None` when the enum or
 // its variant is not a Core enum case.
-pub fn core_enum_variant_payload(name: String, variant: String) -> [Type]? {
+fn core_enum_variant_payload(name: String, variant: String) -> [Type]? {
     family := false
     loop row in CORE_ENUM_PAYLOAD_ROWS {
         if row.enum_name != name -> next
@@ -302,7 +302,7 @@ fn core_module_source_type_export(text: String) -> CoreModuleTypeExport? {
 
 // Parse the generated module declaration syntax directly from canonical
 // Prelude/Core.jet text. Export-name rows cross-check this specialized view.
-pub fn core_module_declaration_from_source(source_text: String, module_name: String) -> CoreModuleDeclaration? {
+fn core_module_declaration_from_source(source_text: String, module_name: String) -> CoreModuleDeclaration? {
     registry :: core_module_export(module_name) ?? return None
     line :: core_module_source_declaration_line(source_text, module_name) ?? return None
     exports :: core_module_source_brace_clause(line, "exports") ?? return None
@@ -330,17 +330,17 @@ pub fn core_module_declaration_from_source(source_text: String, module_name: Str
 
 // One field of a builtin Core record (Rust `core_struct_field`); rows are
 // generated into CoreRecordRows.jet in the oracle's first-match order.
-pub struct CoreRecordFieldRow {
-    pub owner: String
-    pub field: String
-    pub ty: Type
+struct CoreRecordFieldRow {
+    owner: String
+    field: String
+    ty: Type
 }
 
 // The declared field list of a Core record users can build with a struct
 // literal (Rust `core_constructable_fields`), in declaration order.
-pub struct CoreRecordLiteralRow {
-    pub owner: String
-    pub fields: [TypeTupleField]
+struct CoreRecordLiteralRow {
+    owner: String
+    fields: [TypeTupleField]
 }
 
 // Corelib nominal types carry a source identity; the record oracle is keyed
@@ -351,7 +351,7 @@ fn core_record_leaf(owner: String) -> String Never! {
     "{parts[parts.len() - 1]}"
 }
 
-pub fn core_record_field(owner: String, field: String) -> Type? {
+fn core_record_field(owner: String, field: String) -> Type? {
     core_record_field_in(CORE_RECORD_FIELD_ROWS, core_record_leaf(owner), field)
 }
 
@@ -363,7 +363,7 @@ fn core_record_field_in(rows: [CoreRecordFieldRow], owner: String, field: String
     None
 }
 
-pub fn core_record_literal_fields(owner: String) -> [TypeTupleField]? {
+fn core_record_literal_fields(owner: String) -> [TypeTupleField]? {
     core_record_literal_fields_in(CORE_RECORD_LITERAL_ROWS, core_record_leaf(owner))
 }
 

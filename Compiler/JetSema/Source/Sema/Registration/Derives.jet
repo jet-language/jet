@@ -72,9 +72,9 @@ use jet_parser.[
     parse_source,
 ]
 
-pub struct SemaDeriveExpansion {
-    pub scope: [NamedCtValue]
-    pub failure: Diagnostic?
+struct SemaDeriveExpansion {
+    scope: [NamedCtValue]
+    failure: Diagnostic?
 }
 
 fn sema_derive_bare(name: String) -> String Never! {
@@ -1330,7 +1330,7 @@ fn sema_derive_stmt_span(stmt: Stmt) -> Span Never! {
 
 // Rust `Comptime::expand_derive_body`: `name` and the provider's type
 // parameter are bound to the target's reflected handle.
-pub fn sema_derive_expand_provider_body(body: [DeriveBodyItem], type_param: String, type_info: CtValue, diagnostics: &[Diagnostic]) -> [Item]? {
+fn sema_derive_expand_provider_body(body: [DeriveBodyItem], type_param: String, type_info: CtValue, diagnostics: &[Diagnostic]) -> [Item]? {
     scope := [NamedCtValue]{}
     if sema_derive_struct_field(type_info, "name") == .Val(.Str(name)) -> &scope.push(NamedCtValue{name: "name", value: CtValue.Str{value: name}})
     &scope.push(NamedCtValue{name: type_param, value: type_info})
@@ -1340,7 +1340,7 @@ pub fn sema_derive_expand_provider_body(body: [DeriveBodyItem], type_param: Stri
 // Rust `Comptime::expand_template_body`: expand one typed item template in
 // the caller's compile-time scope. A failed expansion reports its one
 // diagnostic and generates nothing.
-pub fn sema_derive_expand_template_body(body: [DeriveBodyItem], scope: [NamedCtValue], diagnostics: &[Diagnostic]) -> [Item]? {
+fn sema_derive_expand_template_body(body: [DeriveBodyItem], scope: [NamedCtValue], diagnostics: &[Diagnostic]) -> [Item]? {
     expansion := SemaDeriveExpansion{scope: scope, failure: None}
     items := [Item]{}
     sema_derive_expand_body(&expansion, body, &items)
@@ -1356,7 +1356,7 @@ pub fn sema_derive_expand_template_body(body: [DeriveBodyItem], scope: [NamedCtV
 // spans are offsets into `Prelude/Derives.jet`. Its advice is dropped; its
 // errors are kept and land on `anchor`, the derived type's name (the only
 // authored location the derive has), once per distinct problem.
-pub fn sema_author_facing_diagnostics(anchor: Span, generated: [Diagnostic], diagnostics: &[Diagnostic]) {
+fn sema_author_facing_diagnostics(anchor: Span, generated: [Diagnostic], diagnostics: &[Diagnostic]) {
     kept := [Diagnostic]{}
     loop diagnostic in generated {
         if diagnostic.severity != DIAGNOSTIC_ERROR -> next
@@ -1550,10 +1550,10 @@ fn sema_derive_has_name(derives: [NamedSpan], name: String) -> Bool {
 
 // Membership facts over one module's items, built once per expansion so
 // readiness and selection ask keyed questions instead of rescanning items.
-pub struct SemaDeriveItemIndex {
-    pub trait_impls: [String:Bool]
-    pub nominals: [String:Int]
-    pub distincts: [String:Bool]
+struct SemaDeriveItemIndex {
+    trait_impls: [String:Bool]
+    nominals: [String:Int]
+    distincts: [String:Bool]
 }
 
 fn sema_derive_item_index(items: [Item]) -> SemaDeriveItemIndex {
@@ -1591,11 +1591,11 @@ fn sema_derive_has_trait_impl(index: SemaDeriveItemIndex, type_name: String, tra
 // declaration is first assumed to derive; one whose own fields fail, and
 // every declaration that relied on it, transitively, loses the derive.
 
-pub struct SemaDeriveReadiness {
-    pub index: SemaDeriveItemIndex
-    pub trait_name: String
-    pub candidates: [String:Int]
-    pub relied_on: [Int]
+struct SemaDeriveReadiness {
+    index: SemaDeriveItemIndex
+    trait_name: String
+    candidates: [String:Int]
+    relied_on: [Int]
 }
 
 fn sema_derive_builtin_supports(name: String, trait_name: String) -> Bool {
@@ -1782,7 +1782,7 @@ fn sema_derive_builtin_traits() -> [String] {
 // requested. A declaration that already implements the capability keeps its
 // own implementation. `items` is updated in place: only an expanded
 // declaration is rewritten, and generated impls are appended.
-pub fn sema_derive_expand_builtin_items(items: &[Item], diagnostics: &[Diagnostic]) {
+fn sema_derive_expand_builtin_items(items: &[Item], diagnostics: &[Diagnostic]) {
     facts :: sema_derive_item_index(items)
     auto_equatable :: sema_derive_auto_selected(items, facts, "Equatable")
     auto_comparable :: sema_derive_auto_selected(items, facts, "Comparable")

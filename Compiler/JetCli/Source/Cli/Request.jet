@@ -31,9 +31,9 @@ use jet_eval.[
 
 // Names the Jet toolchain source tree: the directory that holds `Core/`. The
 // Rust host embeds those bodies; the Jet host reads them from this tree.
-pub JET_CLI_TOOLCHAIN_ROOT_ENV :: "JET_TOOLCHAIN_ROOT"
+JET_CLI_TOOLCHAIN_ROOT_ENV :: "JET_TOOLCHAIN_ROOT"
 // Raw build identity supplied by the packaging host, never a guessed version.
-pub JET_CLI_COMPILER_IDENTITY_ENV :: "JET_COMPILER_IDENTITY"
+JET_CLI_COMPILER_IDENTITY_ENV :: "JET_COMPILER_IDENTITY"
 
 // crates/jet-foundation/src/SHA256.rs `MAX_TREE_DEPTH`.
 JET_CLI_MAX_TREE_DEPTH :: 256
@@ -51,7 +51,7 @@ JET_CLI_SKIPPED_NAMES :: [String]{"target", "build", "node_modules", "bin"}
 JET_CLI_FOREIGN_CACHE_DIRECTORIES :: [String]{".jet/bindings/c", ".jet/bindings/cpp"}
 JET_CLI_FOREIGN_CACHE_SIDECARS :: [String]{"metadata", "provenance"}
 
-pub enum JetCLICompiled {
+enum JetCLICompiled {
     // The driver ran; `snapshot` is the source snapshot it compiled, kept for
     // presenting diagnostics against the files that own them.
     Compiled(result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot)
@@ -237,7 +237,7 @@ fn jet_cli_cgroup_bytes(file: String) -[FS]> Int? Never! {
 // adapter makes dynamic calls with no effect bound), so this function and the
 // host verbs above it stay unannotated, like the bootstrap entry
 // (Compiler/Bootstrap/Host/Entry.jet).
-pub fn jet_cli_compile_file(file: String, color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLICompiled {
+fn jet_cli_compile_file(file: String, color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLICompiled {
     entry_path :: cli_files.realpath(file) ?? return jet_cli_refused("can't securely read the file `{file}`", "check the spelling, or run jet from the folder that contains it", color)
     root :: jet_cli_source_root(entry_path)
     root_stat :: cli_files.stat(root) ?? return jet_cli_refused("can't securely read the source root `{root}`", "check that the directory exists and is readable", color)

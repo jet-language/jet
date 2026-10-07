@@ -44,7 +44,7 @@ fn jet_target_machine_base(name: String, triple: String, no_os: Bool, linker: MI
     }
 }
 
-pub fn jet_target_machine_hosted(triple: String, package_version: String) -> MIRTargetMachine Never! {
+fn jet_target_machine_hosted(triple: String, package_version: String) -> MIRTargetMachine Never! {
     jet_target_machine_base(
         "hosted",
         triple,
@@ -68,7 +68,7 @@ pub fn jet_target_machine_hosted(triple: String, package_version: String) -> MIR
     )
 }
 
-pub fn jet_target_machine_bare_metal(name: String, triple: String, package_version: String) -> MIRTargetMachine Never! {
+fn jet_target_machine_bare_metal(name: String, triple: String, package_version: String) -> MIRTargetMachine Never! {
     jet_target_machine_base(
         name,
         triple,
@@ -461,7 +461,7 @@ fn jet_target_max_runtime_layer(machine: MIRTargetMachine) -> MIRRuntimeLayer Ne
     }
 }
 
-pub fn jet_target_machine_for_facts(no_os: Bool, web_target: Bool, target_triple: String, package_version: String) -> MIRTargetMachine Never! {
+fn jet_target_machine_for_facts(no_os: Bool, web_target: Bool, target_triple: String, package_version: String) -> MIRTargetMachine Never! {
     if {
         web_target -> jet_target_machine_wasm_browser(package_version)
         target_triple == "wasm32-wasip2" -> jet_target_machine_wasm_wasi(package_version)
@@ -526,7 +526,7 @@ fn jet_target_machine_wasm_wasi(package_version: String) -> MIRTargetMachine Nev
     machine
 }
 
-pub fn jet_target_dossier_for_usage(machine: MIRTargetMachine, used_core: [String], tier: String, compiler_identity: String, dependency_identity: String) -> MIRTargetDossier Never! {
+fn jet_target_dossier_for_usage(machine: MIRTargetMachine, used_core: [String], tier: String, compiler_identity: String, dependency_identity: String) -> MIRTargetDossier Never! {
     closure :: jet_ring_classify_prelude_closure(used_core)
     closure_bytes := [U8]{}
     layer := MIRRuntimeLayer.Core
@@ -548,7 +548,7 @@ pub fn jet_target_dossier_for_usage(machine: MIRTargetMachine, used_core: [Strin
     }
 }
 
-pub fn jet_target_package_version_from_compiler_identity(identity: String) -> String? {
+fn jet_target_package_version_from_compiler_identity(identity: String) -> String? {
     identity_parts := identity.split("@").to_list()
     if identity_parts.len() != 2 || identity_parts[0].len() == 0 -> return None
     build_parts := identity_parts[1].split("#").to_list()
@@ -556,7 +556,7 @@ pub fn jet_target_package_version_from_compiler_identity(identity: String) -> St
     Val(build_parts[0])
 }
 
-pub fn jet_target_active_os_name(target_triple: String, host_os: String) -> String Never! {
+fn jet_target_active_os_name(target_triple: String, host_os: String) -> String Never! {
     if {
         target_triple.contains("windows") -> "Windows"
         target_triple.contains("apple") || target_triple.contains("darwin") -> "MacOS"

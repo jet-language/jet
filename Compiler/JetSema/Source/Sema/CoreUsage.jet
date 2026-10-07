@@ -36,47 +36,47 @@ use jet_foundation.[
     symbol_id,
 ]
 
-pub struct SemaCoreImport {
-    pub alias: String
-    pub module_name: String
-    pub item: String?
-    pub span: Span
+struct SemaCoreImport {
+    alias: String
+    module_name: String
+    item: String?
+    span: Span
 }
 
-pub struct SemaCoreModuleInput {
-    pub module_identity: String
-    pub program: Program
+struct SemaCoreModuleInput {
+    module_identity: String
+    program: Program
     // The Core source module name (`core.ui`) and its functions no sibling
     // calls (sema_core_source_unshared_functions); empty for non-Core modules.
-    pub core_owner: String
-    pub unshared_functions: [String]
-    pub imports: [SemaCoreImport]
-    pub registered_type_names: [String]
-    pub exact_int_reachable: Bool
-    pub generated_roots: [String]
+    core_owner: String
+    unshared_functions: [String]
+    imports: [SemaCoreImport]
+    registered_type_names: [String]
+    exact_int_reachable: Bool
+    generated_roots: [String]
 }
 
-pub struct SemaCoreUsageSpan {
-    pub usage: String
-    pub span: Span
+struct SemaCoreUsageSpan {
+    usage: String
+    span: Span
 }
 
-pub struct SemaCoreModuleUsageResult {
-    pub module_identity: String
-    pub used_core: [String]
-    pub usage_spans: [SemaCoreUsageSpan]
-    pub ffi_callback_keys: [String]
-    pub closure: [String]
-    pub inferred_layer: MIRRuntimeLayer
+struct SemaCoreModuleUsageResult {
+    module_identity: String
+    used_core: [String]
+    usage_spans: [SemaCoreUsageSpan]
+    ffi_callback_keys: [String]
+    closure: [String]
+    inferred_layer: MIRRuntimeLayer
 }
 
-pub struct SemaCoreUsageResult {
-    pub used_core: [String]
-    pub usage_spans: [SemaCoreUsageSpan]
-    pub ffi_callback_keys: [String]
-    pub closure: [String]
-    pub inferred_layer: MIRRuntimeLayer
-    pub modules: [SemaCoreModuleUsageResult]
+struct SemaCoreUsageResult {
+    used_core: [String]
+    usage_spans: [SemaCoreUsageSpan]
+    ffi_callback_keys: [String]
+    closure: [String]
+    inferred_layer: MIRRuntimeLayer
+    modules: [SemaCoreModuleUsageResult]
 }
 
 fn sema_core_string_contains(values: [String], value: String) -> Bool Never! {
@@ -99,7 +99,7 @@ fn sema_core_string_add(values: &[String], value: String) Never! {
     }
     values[index] = value
 }
-pub fn sema_core_type_uses_default_int(ty: Type) -> Bool Never! {
+fn sema_core_type_uses_default_int(ty: Type) -> Bool Never! {
     if ty == {
         .Int -> true
         .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) |
@@ -401,7 +401,7 @@ fn sema_core_generated_roots_from_used(used: [String]) -> [String] Never! {
 }
 
 
-pub fn sema_core_generated_roots(graph: SemaRegistrationGraph, registration_module: SemaRegistrationModule) -> [String] {
+fn sema_core_generated_roots(graph: SemaRegistrationGraph, registration_module: SemaRegistrationModule) -> [String] {
     markers := [String]{}
     sema_core_generated_context_markers(graph, registration_module, &markers)
     imports :: sema_core_registration_imports(registration_module)
@@ -491,7 +491,7 @@ fn sema_core_has_source_package(module_name: String) -> Bool Never! {
     module_name == "core.archive"
 }
 
-pub fn sema_expand_core_reachable_closure(roots: [String]) -> [String] Never! {
+fn sema_expand_core_reachable_closure(roots: [String]) -> [String] Never! {
     used := [String]{}
     loop root in roots -> sema_core_string_add(&used, root)
     direct := [String]{}
@@ -705,7 +705,7 @@ fn sema_core_collect_source_wrapper(function: Func, owner: String, imports: [Sem
 // module calls. Self-recursion is not a sibling call: a wrapper's own
 // `core.ui.gtk_backend()` may resolve to itself. Rust: CoreUsage.rs
 // core_source_sibling_calls.
-pub fn sema_core_source_unshared_functions(registration_module: SemaRegistrationModule, call_facts: [SemaCallSiteFact]) -> [String] Never! {
+fn sema_core_source_unshared_functions(registration_module: SemaRegistrationModule, call_facts: [SemaCallSiteFact]) -> [String] Never! {
     unshared := [String]{}
     if !registration_module.module_identity.starts_with("<corelib>/") -> return unshared
     called := [String:Bool]{}
@@ -865,7 +865,7 @@ fn sema_core_import_usage(row: SemaCoreImport, fallback: String) -> String Never
     }
 }
 
-pub fn sema_core_helper_import_chain(usage: String, imports: [SemaCoreImport]) -> String Never! {
+fn sema_core_helper_import_chain(usage: String, imports: [SemaCoreImport]) -> String Never! {
     if usage == "core.term::input" -> return "ambient `input()` (helper `{usage}`)"
     parts := usage.split("::").to_list()
     module_name := if parts.len() > 0 -> parts[0] else -> usage
@@ -1282,14 +1282,14 @@ fn sema_core_collect_program(program: Program, owner: String, unshared: [String]
 
 // `unshared_functions` is sema_core_source_unshared_functions over the
 // module's checked call facts.
-pub fn sema_core_module_usage_from_registration(registration_module: SemaRegistrationModule, unshared_functions: [String], exact_int_reachable: Bool, generated_roots: [String]) -> SemaCoreModuleUsageResult {
+fn sema_core_module_usage_from_registration(registration_module: SemaRegistrationModule, unshared_functions: [String], exact_int_reachable: Bool, generated_roots: [String]) -> SemaCoreModuleUsageResult {
     owner :: if registration_module.module_identity.starts_with("<corelib>/") -> registration_module.module_name else -> ""
     sema_core_collect_source_usage(registration_module.module_identity, registration_module.program, owner, unshared_functions, sema_core_registration_imports(registration_module), sema_core_registration_type_names(registration_module), exact_int_reachable, generated_roots)
 }
 
 // The module's Core-visible imports, read from its registration rows without
 // copying the module's program.
-pub fn sema_core_registration_imports(registration_module: SemaRegistrationModule) -> [SemaCoreImport] Never! {
+fn sema_core_registration_imports(registration_module: SemaRegistrationModule) -> [SemaCoreImport] Never! {
     imports := [SemaCoreImport]{}
     loop registration in registration_module.imports {
         declaration := registration.declaration
@@ -1349,13 +1349,13 @@ fn sema_core_collect_source_usage(module_identity: String, program: Program, own
     }
 }
 
-pub fn sema_collect_used_core(inputs: [SemaCoreModuleInput]) -> SemaCoreUsageResult {
+fn sema_collect_used_core(inputs: [SemaCoreModuleInput]) -> SemaCoreUsageResult {
     modules := [SemaCoreModuleUsageResult]{}
     loop input in inputs -> &modules.push(sema_core_collect_module_usage(input))
     sema_core_combine_module_usage(modules)
 }
 
-pub fn sema_core_combine_module_usage(modules: [SemaCoreModuleUsageResult]) -> SemaCoreUsageResult {
+fn sema_core_combine_module_usage(modules: [SemaCoreModuleUsageResult]) -> SemaCoreUsageResult {
     used := [String]{}
     spans := [SemaCoreUsageSpan]{}
     callbacks := [String]{}
@@ -1372,6 +1372,6 @@ fn sema_core_collect_module_usage(input: SemaCoreModuleInput) -> SemaCoreModuleU
     sema_core_collect_source_usage(input.module_identity, input.program, input.core_owner, input.unshared_functions, input.imports, input.registered_type_names, input.exact_int_reachable, input.generated_roots)
 }
 
-pub fn sema_collect_used_core_module(input: SemaCoreModuleInput) -> SemaCoreModuleUsageResult {
+fn sema_collect_used_core_module(input: SemaCoreModuleInput) -> SemaCoreModuleUsageResult {
     sema_core_collect_module_usage(input)
 }

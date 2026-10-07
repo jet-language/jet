@@ -194,24 +194,24 @@ use jet_sema.[
     SemaGraphModuleResult,
 ]
 
-pub struct JetCodegenFunctions {
-    pub functions: [MIRFunction]
-    pub nested_functions: [MIRFunction]
-    pub callbacks: [MIRCallbackAdapter]
-    pub types: [MIRTypeDef]
-    pub core_owners: [MIRCoreOwner]
-    pub traits: [MIRTraitDef]
-    pub impls: [MIRImplDef]
-    pub constants: [MIRConstantDef]
-    pub fields: [MIRFieldRow]
-    pub core_calls: [MIRCoreCall]
-    pub prelude_calls: [MIRPreludeCall]
-    pub used_core: [String]
+struct JetCodegenFunctions {
+    functions: [MIRFunction]
+    nested_functions: [MIRFunction]
+    callbacks: [MIRCallbackAdapter]
+    types: [MIRTypeDef]
+    core_owners: [MIRCoreOwner]
+    traits: [MIRTraitDef]
+    impls: [MIRImplDef]
+    constants: [MIRConstantDef]
+    fields: [MIRFieldRow]
+    core_calls: [MIRCoreCall]
+    prelude_calls: [MIRPreludeCall]
+    used_core: [String]
 }
-pub struct JetCodegenForeignArtifacts {
-    pub foreign: [MIRForeign]
-    pub links: [MIRLinkUnit]
-    pub handles: [MIRHandleLifecycle]
+struct JetCodegenForeignArtifacts {
+    foreign: [MIRForeign]
+    links: [MIRLinkUnit]
+    handles: [MIRHandleLifecycle]
 }
 fn jet_codegen_lower_declaration_ownership_mode(ownership: TDeclarationOwnership) -> MIROwnershipMode Never! {
     if ownership == {
@@ -827,15 +827,15 @@ fn jet_codegen_constant_is_output_type(ty: Type, modules: [SemaGraphModuleResult
     }
 }
 
-pub struct JetCodegenConstantIndex {
-    pub rows: [String:JetCodegenConstantRow]
-    pub forced_static: [String:Bool]
-    pub forced_inline: [String:Bool]
+struct JetCodegenConstantIndex {
+    rows: [String:JetCodegenConstantRow]
+    forced_static: [String:Bool]
+    forced_inline: [String:Bool]
 }
 
-pub struct JetCodegenConstantRow {
-    pub module_index: Int
-    pub definition_index: Int
+struct JetCodegenConstantRow {
+    module_index: Int
+    definition_index: Int
 }
 
 // A checked read names a module constant by its symbol (`ConstRef`), whose
@@ -2259,7 +2259,7 @@ fn jet_codegen_comptime_item_function(request: SemaComptimeItemRequest, modules:
 // item lowers its closure and itself on the one builder; per item only the
 // closure-sized function index and closure method set change, never a
 // whole-program walk.
-pub struct JetCodegenComptimeSession {
+struct JetCodegenComptimeSession {
     program: JetCodegenProgram
     builder: JetCodegenBuilder
     // The staged modules' constant rows (jet_codegen_lower_constant_rows),
@@ -2289,7 +2289,7 @@ pub struct JetCodegenComptimeSession {
     row_keys: [String:Bool]
 }
 
-pub fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_files: [MIRSourceFile]) -> JetCodegenComptimeSession {
+fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_files: [MIRSourceFile]) -> JetCodegenComptimeSession {
     field_symbols := jet_codegen_field_symbol_index(modules)
     source_index := jet_codegen_source_index(source_files)
     function_index := jet_codegen_function_index([TFunc]{})
@@ -2352,7 +2352,7 @@ pub fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_fi
 // already has a row keeps it, as the first staged value of a key wins.
 // Returns the lowered rows it added, in order; the session's rows are sorted
 // again only when a program takes them (lower_comptime_closure), not per add.
-pub fn jet_codegen_comptime_session_add_constants(session: &JetCodegenComptimeSession, definitions: [TConstantDef]) -> [MIRConstantDef] {
+fn jet_codegen_comptime_session_add_constants(session: &JetCodegenComptimeSession, definitions: [TConstantDef]) -> [MIRConstantDef] {
     added := [MIRConstantDef]{}
     loop definition in definitions {
         key :: jet_codegen_constant_symbol_key(definition)
@@ -2402,7 +2402,7 @@ fn jet_codegen_comptime_types(session: JetCodegenComptimeSession) -> [MIRTypeDef
 // (jet_codegen_function_type_generic_names) and type rows drop methods
 // outside the closure's function index (jet_codegen_type_method_ids), so the
 // staged modules are never rewritten per program.
-pub fn lower_comptime_closure(session: &JetCodegenComptimeSession, functions: [TFunc]) -> JetCodegenFunctions {
+fn lower_comptime_closure(session: &JetCodegenComptimeSession, functions: [TFunc]) -> JetCodegenFunctions {
     jet_codegen_comptime_session_restore(&session, functions)
     rows := jet_codegen_lower_each_function(&session.builder, session.program, functions, None)
     if !session.constants_sorted {
@@ -2417,7 +2417,7 @@ pub fn lower_comptime_closure(session: &JetCodegenComptimeSession, functions: [T
 // Makes `functions` the session's closure (its function index and closure
 // method set), as lower_comptime_closure does before lowering them: a growing
 // program's closure again, after the session lowered another program's.
-pub fn jet_codegen_comptime_session_restore(session: &JetCodegenComptimeSession, functions: [TFunc]) {
+fn jet_codegen_comptime_session_restore(session: &JetCodegenComptimeSession, functions: [TFunc]) {
     closure_methods := [String:Bool]{}
     loop function in functions -> closure_methods[jet_codegen_qualified_function_key(function.module_identity, function.key)] = true
     session.program.owners.closure_methods = ^closure_methods
@@ -2426,7 +2426,7 @@ pub fn jet_codegen_comptime_session_restore(session: &JetCodegenComptimeSession,
 
 // The item function of one comptime `request`, lowered against the closure
 // the last lower_comptime_closure set up on `session`.
-pub fn lower_comptime_item(session: &JetCodegenComptimeSession, request: SemaComptimeItemRequest) -> JetCodegenLoweredFunction {
+fn lower_comptime_item(session: &JetCodegenComptimeSession, request: SemaComptimeItemRequest) -> JetCodegenLoweredFunction {
     item_function := jet_codegen_comptime_item_function(request, session.program.modules)
     jet_codegen_lower_function(&session.builder, session.program, item_function, [TStmt]{}, Val(request.expression), None)
 }
@@ -2448,7 +2448,7 @@ pub fn lower_comptime_item(session: &JetCodegenComptimeSession, request: SemaCom
 // the new closure functions name, which the program must already have. None,
 // before the session changes, when a new function is not such a free
 // function.
-pub fn lower_comptime_growth(session: &JetCodegenComptimeSession, functions: [TFunc], requests: [SemaComptimeItemRequest], constants: [MIRConstantDef]) -> JetCodegenFunctions? {
+fn lower_comptime_growth(session: &JetCodegenComptimeSession, functions: [TFunc], requests: [SemaComptimeItemRequest], constants: [MIRConstantDef]) -> JetCodegenFunctions? {
     loop function in functions {
         free := if function.kind == {
             .TopLevel -> true
@@ -2513,7 +2513,7 @@ fn jet_codegen_growth_add(grown: &JetCodegenFunctions, seen: &JetCodegenGrowthSe
 // or `ties` list compares as all-equal. Bottom-up merge sort: O(n log n) on
 // the hash-ordered ids the canonical row sorts see, where insertion sort was
 // quadratic.
-pub fn jet_codegen_sorted_order(keys: [U64], ties: [String]) -> [Int] Never! {
+fn jet_codegen_sorted_order(keys: [U64], ties: [String]) -> [Int] Never! {
     count :: if keys.len() > ties.len() -> keys.len() else -> ties.len()
     order := [Int]{}
     loop index in 0..<count -> &order.push(index)
@@ -2586,9 +2586,9 @@ fn jet_codegen_sort_type_definitions(rows: &[MIRTypeDef]) Never! {
     loop (index, row) in sorted -> rows[index] = row
 }
 struct JetCodegenUnionIndex {
-    pub rows: [MIRType]
-    pub positions: [U64:Int]
-    pub canonical_keys: [String]
+    rows: [MIRType]
+    positions: [U64:Int]
+    canonical_keys: [String]
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_anonymous_union_type_defs
@@ -3122,13 +3122,13 @@ fn jet_codegen_canonical_impl_key(module_identity: String, owner: MIRType, trait
 }
 
 struct JetCodegenImplOwnerIndex {
-    pub identities: [String:Int]
-    pub heads: [String:Int]
-    pub tails: [String:Int]
-    pub next_rows: [Int]
-    pub fallback_heads: [String:Int]
-    pub fallback_tails: [String:Int]
-    pub next_fallback_rows: [Int]
+    identities: [String:Int]
+    heads: [String:Int]
+    tails: [String:Int]
+    next_rows: [Int]
+    fallback_heads: [String:Int]
+    fallback_tails: [String:Int]
+    next_fallback_rows: [Int]
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::find_impl_index
@@ -3332,7 +3332,7 @@ fn jet_codegen_lower_core_builtin_owner(owner: TCoreBuiltinOwner, module_info: S
 // keeps them and the checked program is never resident twice. With more than
 // one admitted thread (jet_codegen_lower_threads) the program moves into the
 // threads' shared slot for the lowering and back out after it.
-pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], source_files: [MIRSourceFile], threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> JetCodegenFunctions {
+fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], source_files: [MIRSourceFile], threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> JetCodegenFunctions {
     if functions.len() == 0 {
         constants := jet_codegen_lower_constant_rows(modules)
         empty_index := jet_codegen_function_index([TFunc]{})
@@ -3833,9 +3833,9 @@ fn jet_codegen_foreign_effects(effect_root: String?, span: Span) -> MIREffectFac
 }
 
 struct JetCodegenForeignHookIndex {
-    pub functions: [String:MIRFunctionID]
-    pub foreign: [String:MIRForeignID]
-    pub ambiguous: [String:Bool]
+    functions: [String:MIRFunctionID]
+    foreign: [String:MIRForeignID]
+    ambiguous: [String:Bool]
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_foreign_rows
@@ -4104,7 +4104,7 @@ fn jet_codegen_same_foreign_handle(left: MIRHandleLifecycle, right: MIRHandleLif
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_foreign_rows
-pub fn lower_foreign_artifacts(modules: [SemaGraphModuleResult], package_facts: MIRPackageFacts) -> JetCodegenForeignArtifacts Never! {
+fn lower_foreign_artifacts(modules: [SemaGraphModuleResult], package_facts: MIRPackageFacts) -> JetCodegenForeignArtifacts Never! {
     direct_links := [String]{}
     transitive_links := [String]{}
     libraries := [String]{}

@@ -517,15 +517,15 @@ fn render_jet(lib: &str, functions: &[String]) -> String {
     fn close(^self) { abi.close(self.value) }
 }
 
-pub fn close(^session: Session) { abi.close(session.value) }
+fn close(^session: Session) { abi.close(session.value) }
 
-pub fn open() -> Session RError! {
+fn open() -> Session RError! {
     handle :: abi.open()
     if abi.take_error() != 0 -> return Err(RError.NotRunning)
     return Ok(Session{ value: handle })
 }
 
-pub fn cancel(session: Session) { abi.cancel(session.value) }
+fn cancel(session: Session) { abi.cancel(session.value) }
 
 "#,
     );

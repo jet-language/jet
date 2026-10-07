@@ -21,8 +21,6 @@ pub struct Program {
     pub fenced_statements: Vec<FencedStatement>,
     /// D-WASM1 (c123): optional file-level web bucket ceiling (`js target;` / `wasm target;`).
     pub web_target_ceiling: Option<crate::WebPartition::WebBucket>,
-    /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `#PubFile` flips default top-level export visibility.
-    pub pub_file: bool,
     /// D-PRELUDEX1=A: `#NoPrelude` disables the readable Core prelude in this file.
     pub no_prelude: bool,
     /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `#Target(Web)` — this file's default CLI
@@ -722,8 +720,6 @@ pub struct LoadedModule {
     pub block_spans: Vec<Span>,
     /// D-WASM1: optional file-level web bucket ceiling.
     pub web_target_ceiling: Option<crate::WebPartition::WebBucket>,
-    /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `#PubFile` flips default top-level export visibility.
-    pub pub_file: bool,
     /// D-PRELUDEX1=A: `#NoPrelude` disables the readable Core prelude in this file.
     pub no_prelude: bool,
     /// D-APP-UNIFY1=B / D-WEBDEFAULT1: the file-level `#Target(Web)` default

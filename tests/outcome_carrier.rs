@@ -272,7 +272,7 @@ fn run() {
     assert!(
         web.wasm_rust
             .contains("pub type JetOutcome<T, E> = Result<T, E>;")
-            && web.wasm_rust.contains("pub struct JetAbsent;"),
+            && web.wasm_rust.contains("struct JetAbsent;"),
         "the wasm module must include the one carrier file:\n{}",
         web.wasm_rust
     );
@@ -310,7 +310,7 @@ fn run() {
         .unwrap_or_else(|diags| panic!("web Err fixture rejected: {diags:?}"));
     let web = out.web.expect("web target must produce artifacts");
 
-    assert!(web.wasm_rust.contains("pub struct JetErr {"));
+    assert!(web.wasm_rust.contains("struct JetErr {"));
     assert!(web.wasm_rust.contains("jet_err("));
     assert!(web.wasm_rust.contains("jet_err_message"));
 

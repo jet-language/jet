@@ -35,7 +35,6 @@ fn check_at(src: &str, root: &str) -> (ProgramBundle, Vec<Diagnostic>) {
             source: src.into(),
             block_spans: std::mem::take(&mut program.block_spans),
             web_target_ceiling: program.web_target_ceiling,
-            pub_file: program.pub_file,
             no_prelude: program.no_prelude,
             default_target: program.default_target,
             html_path: program.html_path,
@@ -111,7 +110,6 @@ fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, 
             source: (*src).into(),
             block_spans: std::mem::take(&mut program.block_spans),
             web_target_ceiling: program.web_target_ceiling,
-            pub_file: program.pub_file,
             no_prelude: program.no_prelude,
             default_target: program.default_target,
             html_path: program.html_path,
@@ -283,13 +281,13 @@ fn run() {}
 #[test]
 fn imported_template_is_interned_once_across_consumers() {
     let template = r#"
-pub module boxed<T>(size: Int) { pub struct Box { value: T } }
-pub module other<T>(size: Int) { pub struct Box { value: T } }
+module boxed<T>(size: Int) { struct Box { value: T } }
+module other<T>(size: Int) { struct Box { value: T } }
 "#;
     let first = r#"
 use "./templates" as templates
 use templates.[boxed]
-pub module first :: boxed<Int>(3)
+module first :: boxed<Int>(3)
 fn run() {}
 "#;
     let second = r#"
@@ -332,25 +330,25 @@ fn run() {}
 #[test]
 fn imported_struct_returns_expose_all_fields_but_scalars_keep_e0302() {
     let provider = r#"
-pub struct IngestResult {
-    pub provider: String
-    pub name: String
-    pub version: String
-    pub reference: String
-    pub source: String
-    pub expected_hash: String
+struct IngestResult {
+    provider: String
+    name: String
+    version: String
+    reference: String
+    source: String
+    expected_hash: String
 }
 
-pub struct RealizeResult {
-    pub provider: String
-    pub name: String
-    pub version: String
-    pub reference: String
-    pub source: String
-    pub expected_hash: String
+struct RealizeResult {
+    provider: String
+    name: String
+    version: String
+    reference: String
+    source: String
+    expected_hash: String
 }
 
-pub fn ingest() -> IngestResult {
+fn ingest() -> IngestResult {
     return IngestResult{
         provider: "local",
         name: "demo",
@@ -361,7 +359,7 @@ pub fn ingest() -> IngestResult {
     }
 }
 
-pub fn realize() -> RealizeResult {
+fn realize() -> RealizeResult {
     return RealizeResult{
         provider: "local",
         name: "demo",
@@ -406,15 +404,15 @@ fn run() {
 #[test]
 fn imported_module_alias_preserves_local_struct_fields() {
     let records = r#"
-pub struct Record {
-    pub value: String
+struct Record {
+    value: String
 }
 
-pub fn inspect(record: Record) -> String {
+fn inspect(record: Record) -> String {
     return record.value
 }
 
-pub fn make() -> Record {
+fn make() -> Record {
     return Record{value: "ok"}
 }
 "#;
@@ -675,7 +673,7 @@ fn nested_generic_alias_closes_over_outer_type_and_value_arguments() {
     let (bundle, diagnostics) = check(
         r#"
 module outer<T>(count: Int) {
-    module inner<U> { pub fn keep(value: T, other: U) -> T { return ~value } }
+    module inner<U> { fn keep(value: T, other: U) -> T { return ~value } }
     module fixed :: inner<Int>
     module forward :: fixed
 }
@@ -733,11 +731,11 @@ fn ordinary_nested_module_recursively_expands_generic_aliases() {
         r#"
 module outer<T>(count: Int) {
     module plain {
-        module inner<U> { pub fn total(value: U) -> Int { return count } }
+        module inner<U> { fn total(value: U) -> Int { return count } }
         module closed :: inner<T>
-        pub fn result(value: T) -> Int { return closed.total(value) }
+        fn result(value: T) -> Int { return closed.total(value) }
     }
-    pub fn result(value: T) -> Int { return plain.result(value) }
+    fn result(value: T) -> Int { return plain.result(value) }
 }
 module selected :: outer<Int>(6)
 fn run() { print(selected.result(1)) }
@@ -891,8 +889,8 @@ fn run() {
 fn selective_alias_ledger_keeps_local_binding_span() {
     let src = r#"
 module util {
-    pub fn double(x: Int) -> Int { x * 2 }
-    pub fn triple(x: Int) -> Int { x * 3 }
+    fn double(x: Int) -> Int { x * 2 }
+    fn triple(x: Int) -> Int { x * 3 }
 }
 use util.[double as d, triple as t]
 fn run() { print(d(5)) }
@@ -916,12 +914,12 @@ fn run() { print(d(5)) }
 #[test]
 fn imported_signatures_keep_nested_record_owners_and_generic_parameters() {
     let provider = r#"
-pub struct Handle {}
-pub struct Feature { pub value: Int }
-pub struct Box<T> { pub value: T }
-pub fn open() -> Handle Never! { Handle{} }
-pub fn inspect(handle: Handle, features: [Feature]) -> Int Never! { features.len() }
-pub fn boxed<T>(value: T) -> Box<T> Never! { Box<T>{value: value} }
+struct Handle {}
+struct Feature { value: Int }
+struct Box<T> { value: T }
+fn open() -> Handle Never! { Handle{} }
+fn inspect(handle: Handle, features: [Feature]) -> Int Never! { features.len() }
+fn boxed<T>(value: T) -> Box<T> Never! { Box<T>{value: value} }
 "#;
     let consumer = r#"
 use provider as native
@@ -944,12 +942,12 @@ fn run() {
 #[test]
 fn imported_signature_does_not_equate_same_shaped_local_record() {
     let provider = r#"
-pub struct Feature { pub value: Int }
-pub fn inspect(features: [Feature]) -> Int Never! { features.len() }
+struct Feature { value: Int }
+fn inspect(features: [Feature]) -> Int Never! { features.len() }
 "#;
     let consumer = r#"
 use provider as native
-struct Feature { pub value: Int }
+struct Feature { value: Int }
 fn run() { print(native.inspect([Feature{value: 7}])) }
 "#;
     let (_, diagnostics) = check_modules(&[

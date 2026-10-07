@@ -230,7 +230,7 @@ fn run() {
 "#;
 
 const CANVAS_FUNCTION_EVENT_FIXTURE: &str = r#"/// Starts the scene.
-pub fn on_start(limit: Int{1}) -> Int {
+fn on_start(limit: Int{1}) -> Int {
     total := limit + 1
     return total
 }
@@ -2725,7 +2725,7 @@ fn canvas_project_rename_preview_and_atomic_commit_use_semantic_sites() {
     let entry = dir.join("main.jet");
     fs::write(
         &entry,
-        "pub fn helper() -> Int {\n    return 1\n}\n\nfn run() {\n    print(helper())\n}\n",
+        "fn helper() -> Int {\n    return 1\n}\n\nfn run() {\n    print(helper())\n}\n",
     )
     .unwrap();
     let other = dir.join("other.jet");
@@ -3255,7 +3255,7 @@ fn canvas_actions_preserve_nested_imported_module_callee() {
     let dir = temp_dir("actions_nested_import");
     fs::write(
         dir.join("helper.jet"),
-        "module tools {\n    pub fn square(n: Int) -> Int {\n        return n * n\n    }\n}\n",
+        "module tools {\n    fn square(n: Int) -> Int {\n        return n * n\n    }\n}\n",
     )
     .unwrap();
     let path = dir.join("main.jet");
@@ -4249,7 +4249,7 @@ fn canvas_proof_projects_canonical_budget_report_read_only() {
         limit: .AtMost(10),
     }],
 }
-pub fn api() {}
+fn api() {}
 fn run() {}
 "#,
     )

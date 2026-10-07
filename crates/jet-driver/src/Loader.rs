@@ -2808,7 +2808,6 @@ fn load_entry_with_overlays_mode_on_stack(
             script_body: program.script_body,
             block_spans: program.block_spans,
             web_target_ceiling: program.web_target_ceiling,
-            pub_file: program.pub_file,
             no_prelude: program.no_prelude,
             default_target: program.default_target,
             html_path: program.html_path,
@@ -4628,7 +4627,6 @@ fn load_file_located(
         script_body: prog.script_body,
         block_spans: prog.block_spans,
         web_target_ceiling: prog.web_target_ceiling,
-        pub_file: prog.pub_file,
         no_prelude: prog.no_prelude,
         default_target: prog.default_target,
         html_path: prog.html_path.clone(),
@@ -5976,7 +5974,7 @@ mod stale_manifest_name_tests {
         let entry = dir.join("main.jet");
         let dependency = dir.join("dep.jet");
         let entry_source = "module dep\nfn run() -> Int { return dep.value() }\n";
-        let valid_dependency = "pub fn value() -> Int { return 7 }\n";
+        let valid_dependency = "fn value() -> Int { return 7 }\n";
         fs::write(&entry, entry_source).unwrap();
         fs::write(&dependency, valid_dependency).unwrap();
 
@@ -5995,7 +5993,7 @@ mod stale_manifest_name_tests {
             "valid staged batch diagnosed: {diagnostics:?}"
         );
 
-        let invalid_dependency = "pub fn value() -> Int { return 7 }\n::\n";
+        let invalid_dependency = "fn value() -> Int { return 7 }\n::\n";
         let invalid_overlays = [
             (entry.as_path(), entry_source),
             (dependency.as_path(), invalid_dependency),
@@ -6204,7 +6202,7 @@ mod stale_manifest_name_tests {
         let outside = tempdir("file-import-symlink-outside");
         let entry = root.join("run.jet");
         fs::write(&entry, "use \"./escape\" as escape\nfn run() {}\n").unwrap();
-        fs::write(outside.join("secret.jet"), "pub fn fixture() {}\n").unwrap();
+        fs::write(outside.join("secret.jet"), "fn fixture() {}\n").unwrap();
         symlink(outside.join("secret.jet"), root.join("escape.jet")).unwrap();
 
         let diagnostics = load_entry(entry.to_str().unwrap()).unwrap_err();
@@ -6351,11 +6349,11 @@ mod stale_manifest_name_tests {
         let dir = tempdir("module-directory-entry");
         let module_dir = dir.join("tool");
         fs::create_dir_all(&module_dir).unwrap();
-        fs::write(module_dir.join("main.jet"), "pub fn run() {}").unwrap();
+        fs::write(module_dir.join("main.jet"), "fn run() {}").unwrap();
         assert!(find_module_files("tool", &dir).unwrap().is_empty());
 
         let run = module_dir.join(Syntax::DEFAULT_ENTRY_FILE);
-        fs::write(&run, "pub fn run() {}\n").unwrap();
+        fs::write(&run, "fn run() {}\n").unwrap();
         assert_eq!(
             find_module_files("tool", &dir).unwrap(),
             vec![normalize_path(&run)]

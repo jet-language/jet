@@ -2976,7 +2976,7 @@ fn generic_module_instance_runs_identically_in_resident_jit_and_aot() {
         return;
     }
     let src = r#"
-module value(n: Int) { pub fn get() -> Int { return n } }
+module value(n: Int) { fn get() -> Int { return n } }
 module three :: value(3)
 module same :: value(3)
 fn run() {
@@ -3207,11 +3207,11 @@ fn nested_ordinary_module_generic_instance_matches_resident_jit_and_aot() {
     let src = r#"
 module outer<T>(n: Int) {
     module plain {
-        module inner<U> { pub fn total(value: U) -> Int { return n } }
+        module inner<U> { fn total(value: U) -> Int { return n } }
         module closed :: inner<T>
-        pub fn result(value: T) -> Int { return closed.total(value) }
+        fn result(value: T) -> Int { return closed.total(value) }
     }
-    pub fn result(value: T) -> Int { return plain.result(value) }
+    fn result(value: T) -> Int { return plain.result(value) }
 }
 module selected :: outer<Int>(6)
 fn run() { print(selected.result(1)) }

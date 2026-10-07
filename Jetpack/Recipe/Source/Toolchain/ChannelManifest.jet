@@ -22,52 +22,52 @@ TOOLCHAIN_MAX_CLOCK_SKEW_SECONDS :: prep { 300 }
 TOOLCHAIN_MAX_MANIFEST_AGE_SECONDS :: prep { 2592000 }
 
 // What one `jet self update` invocation asks for.
-pub struct ToolchainUpdateOptions {
-    pub endpoint: String
-    pub channel: String
-    pub platform: String
-    pub trust_key: String
-    pub dry_run: Bool
-    pub apply: Bool
+struct ToolchainUpdateOptions {
+    endpoint: String
+    channel: String
+    platform: String
+    trust_key: String
+    dry_run: Bool
+    apply: Bool
     // Permit an explicitly selected local file endpoint without signature
     // sidecars. Never applies to HTTP(S) endpoints.
-    pub allow_unofficial: Bool
+    allow_unofficial: Bool
     // The running client's version: a channel cannot raise this floor, and a
     // toolchain cannot move backwards.
-    pub running_version: String
+    running_version: String
     // Per-channel/platform monotonic state, written only after a successful
     // activation.
-    pub state_path: String
+    state_path: String
 }
 
 // The trust tier a verified plan came from.
-pub enum ToolchainUpdateTrust {
+enum ToolchainUpdateTrust {
     Signed
     UnofficialKeyless
 }
 
 // A fully verified update candidate.
-pub struct ToolchainUpdatePlan {
-    pub endpoint: String
-    pub channel: String
-    pub version: String
-    pub platform: String
-    pub artifact_path: String
-    pub artifact_url: String
-    pub sha256: String
-    pub size: Int
-    pub key_id: String?
-    pub trust: ToolchainUpdateTrust
-    pub sequence: Int
-    pub published_at: Int
-    pub expires_at: Int
-    pub min_version: String
+struct ToolchainUpdatePlan {
+    endpoint: String
+    channel: String
+    version: String
+    platform: String
+    artifact_path: String
+    artifact_url: String
+    sha256: String
+    size: Int
+    key_id: String?
+    trust: ToolchainUpdateTrust
+    sequence: Int
+    published_at: Int
+    expires_at: Int
+    min_version: String
 }
 
-pub struct ToolchainUpdateResult {
-    pub plan: ToolchainUpdatePlan
-    pub applied: Bool
-    pub deferred: Bool
+struct ToolchainUpdateResult {
+    plan: ToolchainUpdatePlan
+    applied: Bool
+    deferred: Bool
 }
 
 // The channel manifest document.
@@ -532,7 +532,7 @@ fn recipe_update_validate_digest(value: String, label: String) RecipeError! {
 }
 
 // The target spelling the default release channel uses on this host.
-pub fn recipe_toolchain_default_target() -[Env]> String Never! {
+fn recipe_toolchain_default_target() -[Env]> String Never! {
     host :: PlatformKey.host()
     if host.envelope_key() == {
         "x86_64-linux" -> "x86_64-unknown-linux-gnu"

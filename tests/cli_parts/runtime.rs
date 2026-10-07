@@ -16,19 +16,19 @@ fn jet_fix_edition_2027_rewrites_json_canonical_and_is_idempotent() {
         &file,
         r#"use core.encoding.json as json
 
-pub fn show() Never! {
+fn show() Never! {
     data :: json.parse(`{"a":1}`) ?? panic("json")
     r :: json.canonical(data)
     print(r)
 }
 
-pub fn sign() -> String {
+fn sign() -> String {
     data :: json.parse(`{"a":1}`)
     r :: json.canonical(data)
     r
 }
 
-pub fn already_migrated() Never! {
+fn already_migrated() Never! {
     data :: json.parse(`{"a":1}`) ?? panic("json")
     r :: json.canonical(data) ?? panic("value is not canonical JSON")
     print(r)

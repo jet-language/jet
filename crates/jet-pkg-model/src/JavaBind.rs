@@ -477,7 +477,7 @@ fn render_jet(lib: &str, s: &Surface) -> String {
     o.push_str(") -[FFI.Java]> Handle JavaError! {\n    value :: abi.new(");
     args(&mut o, s.ctor.len(), 0);
     o.push_str(")\n    if abi.take_error() != 0 { return Err(JavaError.Exception) }\n    return Ok(Handle{ value: value })\n}\n\n");
-    o.push_str("pub fn close(^handle: Handle) -[FFI.Java]> {}\n\nimpl Handle.Close {\n    fn close(^self) { abi.close(self.value) }\n}\n\n");
+    o.push_str("fn close(^handle: Handle) -[FFI.Java]> {}\n\nimpl Handle.Close {\n    fn close(^self) { abi.close(self.value) }\n}\n\n");
     for m in &s.methods {
         o.push_str("pub fn ");
         o.push_str(&m.name);

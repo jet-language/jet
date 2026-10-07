@@ -4,25 +4,25 @@ use core.math as math
 // and are compressed in that order, so the result does not depend on hash
 // iteration or provider row order.  `add` updates the digest in place
 // through a write receiver.
-pub struct TDigest {
-    pub delta: Float
-    pub means: [Float]
-    pub weights: [Float]
-    pub total: Float
+struct TDigest {
+    delta: Float
+    means: [Float]
+    weights: [Float]
+    total: Float
 }
 
-pub struct Centroid {
-    pub mean: Float
-    pub weight: Float
+struct Centroid {
+    mean: Float
+    weight: Float
 }
 
-pub fn new() -> TDigest Never! {
+fn new() -> TDigest Never! {
     {delta: Float{100.0}, means: [Float]{}, weights: [Float]{}, total: Float{0.0}}
 }
 
 impl TDigest {
     /// Record one finite sample with a positive weight (1.0 by default).
-    pub fn add(&self, x: Float, w: Float{1.0}) Never! {
+    fn add(&self, x: Float, w: Float{1.0}) Never! {
         if !math.is_finite(x) || !math.is_finite(w) || w <= (Float{0.0}) -> return
         if !digest_shape_ok(self) {
             self.means = [Float]{}
@@ -44,7 +44,7 @@ impl TDigest {
     }
 
     /// The interpolated value at quantile `q` in `0.0..=1.0`.
-    pub fn quantile(self, q: Float) -> Float Never! { digest_quantile(self, q) }
+    fn quantile(self, q: Float) -> Float Never! { digest_quantile(self, q) }
 }
 
 fn digest_quantile(td: TDigest, q: Float) -> Float Never! {
@@ -73,9 +73,9 @@ fn digest_quantile(td: TDigest, q: Float) -> Float Never! {
     td.means[td.means.len() - 1]
 }
 
-pub struct Packed {
-    pub means: [Float]
-    pub weights: [Float]
+struct Packed {
+    means: [Float]
+    weights: [Float]
 }
 
 fn compress(means: [Float], weights: [Float], delta: Float, total: Float) -> Packed {

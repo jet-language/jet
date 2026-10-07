@@ -26,7 +26,7 @@ module plot
 module sketch
 
 #Equatable
-pub enum DataFormat {
+enum DataFormat {
     CSV
     JSON
     JSONL
@@ -35,7 +35,7 @@ pub enum DataFormat {
 }
 
 
-pub enum DataErrorKind {
+enum DataErrorKind {
     Decode
     Limit
     IO
@@ -54,18 +54,18 @@ pub enum DataErrorKind {
 }
 
 #Error
-pub struct DataError {
-    pub kind: DataErrorKind
-    pub operation: String
-    pub row: Int?
-    pub column: Int?
-    pub index: Int?
-    pub reason: String
-    pub cause: EncodingError?
+struct DataError {
+    kind: DataErrorKind
+    operation: String
+    row: Int?
+    column: Int?
+    index: Int?
+    reason: String
+    cause: EncodingError?
 }
 
 impl DataError {
-    pub fn new(kind: DataErrorKind, message: String, path: String) -> DataError Never! {
+    fn new(kind: DataErrorKind, message: String, path: String) -> DataError Never! {
         return DataError{
             kind: kind,
             operation: ~path,
@@ -107,19 +107,19 @@ fn nonfinite(value: Float) -> Bool Never! {
 }
 
 
-pub struct DataLineOptions {
-    pub title: String
-    pub x_label: String
-    pub y_label: String
-    pub markers: Bool
-    pub reference: Float?
-    pub style: String
-    pub color: String
-    pub legend: String
+struct DataLineOptions {
+    title: String
+    x_label: String
+    y_label: String
+    markers: Bool
+    reference: Float?
+    style: String
+    color: String
+    legend: String
 }
 
 
-pub enum DataFreshness {
+enum DataFreshness {
     Pending
     Fresh
     Stale
@@ -128,7 +128,7 @@ pub enum DataFreshness {
     Cancelled
 }
 #Equatable
-pub enum DataInvalidationCause {
+enum DataInvalidationCause {
     NoCause
     Loader
     Input
@@ -140,185 +140,185 @@ pub enum DataInvalidationCause {
 }
 
 
-pub struct DataStatus {
-    pub step: String
-    pub path: String
-    pub clone_value: String
-    pub ownership: String
-    pub trust: String
-    pub fallback: String
-    pub replacement: String
+struct DataStatus {
+    step: String
+    path: String
+    clone_value: String
+    ownership: String
+    trust: String
+    fallback: String
+    replacement: String
 }
 
 
-pub struct DataLimits {
-    pub encoding: EncodingLimits
-    pub max_groups: Int
-    pub max_sort_rows: Int
-    pub max_join_rows: Int
-    pub max_output_rows: Int
-}
-
-
-
-pub struct DataAuthority {
-    pub scope: String
-    pub revision: String
-}
-
-pub struct DataSourceIdentity {
-    pub kind: DataLoaderKind
-    pub locator: String
-    pub member: String
-    pub parameters: [String]
-}
-
-pub struct DataSnapshotIdentity {
-    pub id: String
-    pub source: String
-    pub content: String
-    pub schema: String
-    pub format: DataFormat
-}
-
-pub struct DataProvenance {
-    pub source: DataSourceIdentity
-    pub format: DataFormat
-    pub authority: DataAuthority
-}
-
-pub struct DataColumn {
-    pub id: String
-    pub name: String
-    pub type_name: String
-    pub nullable: Bool
-}
-
-pub struct DataSchema {
-    pub identity: String
-    pub format: DataFormat
-    pub columns: [DataColumn]
-    pub projection: String?
-}
-
-pub struct DataSnapshot<T> {
-    pub value: T
-    pub identity: DataSnapshotIdentity
-    pub provenance: DataProvenance
-    pub schema: DataSchema
-    pub status: DataLoaderStatus
-    pub content: [U8]
-}
-
-pub struct DataLoader<T> {
-    pub source: DataSourceIdentity
-    pub format: DataFormat
-    pub authority: DataAuthority
-    pub limits: DataLimits
-    pub payload: [U8]?
-    pub last_good: [U8]?
-    pub cancelled: Bool
-    pub offline: Bool
-    pub status: DataLoaderStatus
-}
-
-pub struct DataLoaderStatus {
-    pub identity: String
-    pub freshness: DataFreshness
-    pub invalidated_by: DataInvalidationCause
-    pub error: String
-    pub cleanup: String
-    pub buffered_bytes: Int
-    pub backpressure: Bool
-    pub last_good: Bool
-}
-
-pub struct DataWatchStatus {
-    pub mode: String
-    pub revision: Int
-    pub retained_rows: Int
-    pub recomputations: Int
-    pub active: Bool
-    pub generation: Int
-    pub dirty: Bool
-    pub error: String
-    pub freshness_ms: Int
-    pub invalidation_cause: String
-    pub refreshing: Bool
-    pub cancelled: Bool
-}
-
-pub struct DataStream<T> {
-    pub items: [T]
-    pub index: Int
-    pub cancelled: Bool
+struct DataLimits {
+    encoding: EncodingLimits
+    max_groups: Int
+    max_sort_rows: Int
+    max_join_rows: Int
+    max_output_rows: Int
 }
 
 
 
-
-pub struct DataPivotCell {
-    pub row_key: String
-    pub column_key: String
-    pub count: Int
-    pub sum: Float
-    pub mean: Float
-}
-pub struct DataSummary {
-    pub count: Int
-    pub sum: Float
-    pub mean: Float
-    pub min: Float
-    pub max: Float
-    pub median: Float
-    pub variance: Float
-    pub stddev: Float
+struct DataAuthority {
+    scope: String
+    revision: String
 }
 
-pub struct DataJoin<L, R> {
-    pub left: L
-    pub right: R
+struct DataSourceIdentity {
+    kind: DataLoaderKind
+    locator: String
+    member: String
+    parameters: [String]
 }
 
-pub struct JetDataPlot<T> {
-    pub rows: [T]
-    pub plan: JetDataPlotPlan
+struct DataSnapshotIdentity {
+    id: String
+    source: String
+    content: String
+    schema: String
+    format: DataFormat
 }
 
-pub struct Group<K, V> {
-    pub key: K
-    pub value: V
+struct DataProvenance {
+    source: DataSourceIdentity
+    format: DataFormat
+    authority: DataAuthority
 }
 
-pub struct Query<T> {
-    pub rows: [T]
-    pub sql: String
-    pub operations: [String]
+struct DataColumn {
+    id: String
+    name: String
+    type_name: String
+    nullable: Bool
 }
 
-pub struct DataTracked<T, K> {
-    pub snapshot: DataSnapshot<[T]>
+struct DataSchema {
+    identity: String
+    format: DataFormat
+    columns: [DataColumn]
+    projection: String?
 }
 
-pub struct DataWatch<T> {
-    pub query: Query<T>
-    pub status: DataWatchStatus
+struct DataSnapshot<T> {
+    value: T
+    identity: DataSnapshotIdentity
+    provenance: DataProvenance
+    schema: DataSchema
+    status: DataLoaderStatus
+    content: [U8]
 }
 
-pub enum JetDataPlotMark {
+struct DataLoader<T> {
+    source: DataSourceIdentity
+    format: DataFormat
+    authority: DataAuthority
+    limits: DataLimits
+    payload: [U8]?
+    last_good: [U8]?
+    cancelled: Bool
+    offline: Bool
+    status: DataLoaderStatus
+}
+
+struct DataLoaderStatus {
+    identity: String
+    freshness: DataFreshness
+    invalidated_by: DataInvalidationCause
+    error: String
+    cleanup: String
+    buffered_bytes: Int
+    backpressure: Bool
+    last_good: Bool
+}
+
+struct DataWatchStatus {
+    mode: String
+    revision: Int
+    retained_rows: Int
+    recomputations: Int
+    active: Bool
+    generation: Int
+    dirty: Bool
+    error: String
+    freshness_ms: Int
+    invalidation_cause: String
+    refreshing: Bool
+    cancelled: Bool
+}
+
+struct DataStream<T> {
+    items: [T]
+    index: Int
+    cancelled: Bool
+}
+
+
+
+
+struct DataPivotCell {
+    row_key: String
+    column_key: String
+    count: Int
+    sum: Float
+    mean: Float
+}
+struct DataSummary {
+    count: Int
+    sum: Float
+    mean: Float
+    min: Float
+    max: Float
+    median: Float
+    variance: Float
+    stddev: Float
+}
+
+struct DataJoin<L, R> {
+    left: L
+    right: R
+}
+
+struct JetDataPlot<T> {
+    rows: [T]
+    plan: JetDataPlotPlan
+}
+
+struct Group<K, V> {
+    key: K
+    value: V
+}
+
+struct Query<T> {
+    rows: [T]
+    sql: String
+    operations: [String]
+}
+
+struct DataTracked<T, K> {
+    snapshot: DataSnapshot<[T]>
+}
+
+struct DataWatch<T> {
+    query: Query<T>
+    status: DataWatchStatus
+}
+
+enum JetDataPlotMark {
     Bar
     Line
     Point
 }
 
-pub enum JetDataPlotChannel {
+enum JetDataPlotChannel {
     X
     Y
     Color
     Size
 }
 
-pub enum JetDataPlotAggregate {
+enum JetDataPlotAggregate {
     Sum
     Mean
     Count
@@ -326,7 +326,7 @@ pub enum JetDataPlotAggregate {
     Max
 }
 
-pub enum JetDataPlotFilterOp {
+enum JetDataPlotFilterOp {
     Eq
     Ne
     Lt
@@ -335,170 +335,170 @@ pub enum JetDataPlotFilterOp {
     Ge
 }
 
-pub enum JetDataPlotValue {
+enum JetDataPlotValue {
     Number
     Text
     Bool
 }
 
-pub enum JetDataPlotTransform {
+enum JetDataPlotTransform {
     Identity
     Filter
     Aggregate
 }
 
-pub enum JetDataPlotScaleKind {
+enum JetDataPlotScaleKind {
     Linear
     Log
     Band
 }
 
-pub enum JetDataPlotDomain {
+enum JetDataPlotDomain {
     Auto
     Explicit
 }
 
-pub enum JetDataPlotLegendPosition {
+enum JetDataPlotLegendPosition {
     Top
     Bottom
     Left
     Right
 }
 
-pub enum JetDataPlotFacetKind {
+enum JetDataPlotFacetKind {
     Wrap
     Grid
 }
 
-pub enum JetDataPlotInteraction {
+enum JetDataPlotInteraction {
     Hover
     Select
     Pan
 }
 
-pub enum JetDataPlotBackend {
+enum JetDataPlotBackend {
     SVG
     Text
 }
 
-pub enum JetDataPlotSupport {
+enum JetDataPlotSupport {
     Full
     Partial
     Unsupported
 }
 
-pub enum JetDataPlotErrorKind {
+enum JetDataPlotErrorKind {
     Schema
     Encoding
     Render
 }
 
-pub enum JetDataPlotRenderFormat {
+enum JetDataPlotRenderFormat {
     SVG
     Text
     JSON
 }
 
-pub struct JetDataPlotField {
-    pub name: String
-    pub kind: JetDataPlotValue
+struct JetDataPlotField {
+    name: String
+    kind: JetDataPlotValue
 }
 
-pub struct JetDataPlotSchema {
-    pub fields: [JetDataPlotField]
+struct JetDataPlotSchema {
+    fields: [JetDataPlotField]
 }
 
-pub struct JetDataPlotSourceFacts {
-    pub rows: Int
-    pub columns: Int
+struct JetDataPlotSourceFacts {
+    rows: Int
+    columns: Int
 }
 
-pub struct JetDataPlotEncoding {
-    pub x: String
-    pub y: String
-    pub mark: JetDataPlotMark
+struct JetDataPlotEncoding {
+    x: String
+    y: String
+    mark: JetDataPlotMark
 }
 
-pub struct JetDataPlotScale {
-    pub kind: JetDataPlotScaleKind
-    pub field: String
+struct JetDataPlotScale {
+    kind: JetDataPlotScaleKind
+    field: String
 }
 
-pub struct JetDataPlotAxis {
-    pub field: String
-    pub title: String
+struct JetDataPlotAxis {
+    field: String
+    title: String
 }
 
-pub struct JetDataPlotLegend {
-    pub position: JetDataPlotLegendPosition
+struct JetDataPlotLegend {
+    position: JetDataPlotLegendPosition
 }
 
-pub struct JetDataPlotFacet {
-    pub kind: JetDataPlotFacetKind
-    pub field: String
+struct JetDataPlotFacet {
+    kind: JetDataPlotFacetKind
+    field: String
 }
 
-pub struct JetDataPlotLayer {
-    pub mark: JetDataPlotMark
-    pub encoding: JetDataPlotEncoding
+struct JetDataPlotLayer {
+    mark: JetDataPlotMark
+    encoding: JetDataPlotEncoding
 }
 
-pub struct JetDataPlotAccessibility {
-    pub title: String
-    pub summary: String
+struct JetDataPlotAccessibility {
+    title: String
+    summary: String
 }
 
-pub struct JetDataPlotLayout {
-    pub width: Int
-    pub height: Int
+struct JetDataPlotLayout {
+    width: Int
+    height: Int
 }
 
-pub struct JetDataPlotCapability {
-    pub backend: JetDataPlotBackend
-    pub support: JetDataPlotSupport
+struct JetDataPlotCapability {
+    backend: JetDataPlotBackend
+    support: JetDataPlotSupport
 }
 
 #Error
-pub struct JetDataPlotError {
-    pub kind: JetDataPlotErrorKind
-    pub message: String
+struct JetDataPlotError {
+    kind: JetDataPlotErrorKind
+    message: String
 }
 
-pub struct JetDataPlotColumn {
-    pub name: String
-    pub values: [String]
+struct JetDataPlotColumn {
+    name: String
+    values: [String]
 }
 
-pub struct JetDataPlotSelectedRow {
-    pub index: Int
+struct JetDataPlotSelectedRow {
+    index: Int
 }
 
-pub struct JetDataPlotInspection {
-    pub text: String
+struct JetDataPlotInspection {
+    text: String
 }
 
-pub struct JetDataPlotRender {
-    pub format: JetDataPlotRenderFormat
-    pub body: String
+struct JetDataPlotRender {
+    format: JetDataPlotRenderFormat
+    body: String
 }
 
-pub struct JetDataPlotProjection {
-    pub start: Int
-    pub end: Int
+struct JetDataPlotProjection {
+    start: Int
+    end: Int
 }
 
-pub struct JetDataPlotPlan {
-    pub mark: JetDataPlotMark
-    pub labels: [String]
-    pub values: [Float]
-    pub layout: JetDataPlotLayout
-    pub encoding: JetDataPlotEncoding
-    pub schema: JetDataPlotSchema
+struct JetDataPlotPlan {
+    mark: JetDataPlotMark
+    labels: [String]
+    values: [Float]
+    layout: JetDataPlotLayout
+    encoding: JetDataPlotEncoding
+    schema: JetDataPlotSchema
 }
 
 // Typed data declarations and provider-backed boundaries.
 impl DataLimits {
-    pub fn safe() -> DataLimits Never! {
+    fn safe() -> DataLimits Never! {
         DataLimits{
             encoding: encoding.EncodingLimits.safe(),
             max_groups: 100000,
@@ -509,57 +509,57 @@ impl DataLimits {
     }
 }
 
-pub fn track<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> DataError! {
+fn track<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> DataError! {
     Ok(DataTracked<T, K>{snapshot: snapshot_from_rows<T>(rows)})
 }
 
-pub fn file<T>(path: String, format: String, limits: DataLimits) -> DataLoader<T> DataError! {
+fn file<T>(path: String, format: String, limits: DataLimits) -> DataLoader<T> DataError! {
     make_loader<T>(DataLoaderKind.File, path, "", [String]{}, format, "local", limits)
 }
 
-pub fn file_member<T>(path: String, member: String, format: String, limits: DataLimits) -> DataLoader<T> DataError! {
+fn file_member<T>(path: String, member: String, format: String, limits: DataLimits) -> DataLoader<T> DataError! {
     make_loader<T>(DataLoaderKind.File, path, member, [String]{}, format, "local", limits)
 }
 
-pub fn url<T>(href: String, format: String, authority: String, limits: DataLimits) -> DataLoader<T> DataError! {
+fn url<T>(href: String, format: String, authority: String, limits: DataLimits) -> DataLoader<T> DataError! {
     make_loader<T>(DataLoaderKind.URL, href, "", [String]{}, format, authority, limits)
 }
 
-pub fn database<T>(query: String, parameters: [String], authority: String, limits: DataLimits) -> DataLoader<T> DataError! {
+fn database<T>(query: String, parameters: [String], authority: String, limits: DataLimits) -> DataLoader<T> DataError! {
     make_loader<T>(DataLoaderKind.Database, query, "", parameters, "json", authority, limits)
 }
 
-pub fn value<T: Encode>(value: T, limits: DataLimits) -> DataLoader<T> DataError! {
+fn value<T: Encode>(value: T, limits: DataLimits) -> DataLoader<T> DataError! {
     core.data.value<T>(value, limits)
 }
 
-pub fn load_default<T>(locator: String) -> DataLoader<T> DataError! {
+fn load_default<T>(locator: String) -> DataLoader<T> DataError! {
     core.data.load_default<T>(locator)
 }
 
-pub fn load<T>(locator: String, limits: DataLimits) -[FS, Net, DB]> DataLoader<T> DataError! {
+fn load<T>(locator: String, limits: DataLimits) -[FS, Net, DB]> DataLoader<T> DataError! {
     core.data.load<T>(locator, limits)
 }
 
-pub fn csv<T: Decode>(text: String) -> [T] DataError! {
+fn csv<T: Decode>(text: String) -> [T] DataError! {
     rows :: core.data.csv<T>(text) ?? return Err(data_error(DataErrorKind.Decode, "CSV decode failed", "csv"))
     Ok(rows)
 }
 
-pub fn json<T: Decode>(text: String) -> [T] DataError! {
+fn json<T: Decode>(text: String) -> [T] DataError! {
     rows :: core.data.json<T>(text) ?? return Err(data_error(DataErrorKind.Decode, "JSON decode failed", "json"))
     Ok(rows)
 }
 
-pub fn csv_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStream<T> DataError! {
+fn csv_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStream<T> DataError! {
     core.data.csv_reader<T>(^reader, limits)
 }
 
-pub fn json_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStream<T> DataError! {
+fn json_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStream<T> DataError! {
     core.data.json_reader<T>(^reader, limits)
 }
 
-pub fn snapshot<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSnapshot<T> DataError! {
+fn snapshot<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSnapshot<T> DataError! {
     if loader.cancelled {
         return Err(data_error(DataErrorKind.State, "loader was cancelled before snapshot", loader.source.locator))
     }
@@ -567,11 +567,11 @@ pub fn snapshot<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> Dat
 }
 
 
-pub fn schema<T>(rows: [T]) -> [DataColumn] Never! { core.data.schema(rows) }
+fn schema<T>(rows: [T]) -> [DataColumn] Never! { core.data.schema(rows) }
 
-pub fn count<T>(rows: [T]) -> Int Never! { rows.len() }
+fn count<T>(rows: [T]) -> Int Never! { rows.len() }
 
-pub fn describe(values: [Float]) -> DataSummary DataError! {
+fn describe(values: [Float]) -> DataSummary DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "describe of empty data is undefined", "describe"))
     total := Float{0.0}
     if compensated_sum(values, "describe") == {
@@ -603,11 +603,11 @@ pub fn describe(values: [Float]) -> DataSummary DataError! {
 }
 
 
-pub fn sum(values: [Float]) -> Float DataError! {
+fn sum(values: [Float]) -> Float DataError! {
     compensated_sum(values, "sum")
 }
 
-pub fn mean(values: [Float]) -> Float DataError! {
+fn mean(values: [Float]) -> Float DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "mean of empty data is undefined", "mean"))
     total := Float{0.0}
     if compensated_sum(values, "mean") == {
@@ -619,7 +619,7 @@ pub fn mean(values: [Float]) -> Float DataError! {
     Ok(normalize_zero(mean_value))
 }
 
-pub fn min(values: [Float]) -> Float DataError! {
+fn min(values: [Float]) -> Float DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "min of empty data is undefined", "min"))
     first :: values[0]
     if nonfinite(first) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "min"))
@@ -631,7 +631,7 @@ pub fn min(values: [Float]) -> Float DataError! {
     Ok(normalize_zero(out))
 }
 
-pub fn max(values: [Float]) -> Float DataError! {
+fn max(values: [Float]) -> Float DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "max of empty data is undefined", "max"))
     first :: values[0]
     if nonfinite(first) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "max"))
@@ -643,7 +643,7 @@ pub fn max(values: [Float]) -> Float DataError! {
     Ok(normalize_zero(out))
 }
 
-pub fn variance(values: [Float]) -> Float DataError! {
+fn variance(values: [Float]) -> Float DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "variance of empty data is undefined", "variance"))
     mean_value := Float{0.0}
     m2 := Float{0.0}
@@ -663,7 +663,7 @@ pub fn variance(values: [Float]) -> Float DataError! {
     Ok(normalize_zero(result))
 }
 
-pub fn stddev(values: [Float]) -> Float DataError! {
+fn stddev(values: [Float]) -> Float DataError! {
     value := Float{0.0}
     if variance(values) == {
         .Ok(result) -> value = result
@@ -675,11 +675,11 @@ pub fn stddev(values: [Float]) -> Float DataError! {
 
 }
 
-pub fn median(values: [Float]) -> Float DataError! {
+fn median(values: [Float]) -> Float DataError! {
     quantile(values, Float{0.5})
 }
 
-pub fn quantile(values: [Float], q: Float) -> Float DataError! {
+fn quantile(values: [Float], q: Float) -> Float DataError! {
     if nonfinite(q) || q < (Float{0.0}) || q > (Float{1.0}) {
         return Err(data_error(DataErrorKind.InvalidArgument, "quantile q must be in 0.0 through 1.0", "quantile"))
     }
@@ -702,7 +702,7 @@ pub fn quantile(values: [Float], q: Float) -> Float DataError! {
     Ok(normalize_zero(result))
 }
 
-pub fn rolling_mean(values: [Float], window: Int) -> [Float] DataError! {
+fn rolling_mean(values: [Float], window: Int) -> [Float] DataError! {
     if window < 1 -> return Err(data_error(DataErrorKind.InvalidArgument, "rolling width must be positive", "rolling_mean"))
     limits := DataLimits.safe()
     if values.len() > limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows exceeded", "rolling_mean"))
@@ -728,11 +728,11 @@ pub fn rolling_mean(values: [Float], window: Int) -> [Float] DataError! {
     Ok(out)
 }
 
-pub fn query<T>(rows: [T]) -> Query<T> Never! {
+fn query<T>(rows: [T]) -> Query<T> Never! {
     Query<T>{rows: rows, sql: "", operations: [String]{"scan"}}
 }
 
-pub fn inner_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U>] DataError! {
+fn inner_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U>] DataError! {
     limits := DataLimits.safe()
     left_keys := [String]{}
     right_keys := [String]{}
@@ -769,7 +769,7 @@ pub fn inner_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_
     Ok(out)
 }
 
-pub fn left_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U?>] DataError! {
+fn left_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U?>] DataError! {
     limits := DataLimits.safe()
     left_keys := [String]{}
     right_keys := [String]{}
@@ -818,7 +818,7 @@ fn join_key_counts(keys: [String]) -> [String:Int] Never! {
     counts
 }
 
-pub fn pivot_sum<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> String, value_fn: fn(T) -> Float) -> [DataPivotCell] DataError! {
+fn pivot_sum<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> String, value_fn: fn(T) -> Float) -> [DataPivotCell] DataError! {
     limits := DataLimits.safe()
     cells := [DataPivotCell]{}
     loop index in 0..<rows.len() {
@@ -866,35 +866,35 @@ pub fn pivot_sum<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> St
     Ok(cells)
 }
 
-pub fn plot<T: Encode>(rows: [T]) -> JetDataPlot<T> DataError! {
+fn plot<T: Encode>(rows: [T]) -> JetDataPlot<T> DataError! {
     core.data.plot<T>(rows)
 }
 
-pub fn inspect<T>(plot: JetDataPlot<T>) -> JetDataPlotInspection DataError! {
+fn inspect<T>(plot: JetDataPlot<T>) -> JetDataPlotInspection DataError! {
     plan :: normalize_plot_plan(plot.plan)
     Ok(JetDataPlotInspection{text: plot_inspection_text(plan, plot.rows.len())})
 }
 
-pub fn inspect_json<T>(plot: JetDataPlot<T>) -> String DataError! {
+fn inspect_json<T>(plot: JetDataPlot<T>) -> String DataError! {
     plan :: normalize_plot_plan(plot.plan)
     Ok(plot_plan_json(plan))
 }
 
-pub fn text<T>(plot: JetDataPlot<T>) -> String DataError! {
+fn text<T>(plot: JetDataPlot<T>) -> String DataError! {
     plan :: normalize_plot_plan(plot.plan)
     Ok(render_plot_text(plan))
 }
 
-pub fn svg<T>(plot: JetDataPlot<T>) -> String DataError! {
+fn svg<T>(plot: JetDataPlot<T>) -> String DataError! {
     plan :: normalize_plot_plan(plot.plan)
     Ok(render_plot_svg(plan))
 }
 
-pub fn show<T>(plot: JetDataPlot<T>) -> JetDataPlotRender DataError! {
+fn show<T>(plot: JetDataPlot<T>) -> JetDataPlotRender DataError! {
     render<T>(plot, JetDataPlotBackend.SVG)
 }
 
-pub fn render<T>(plot: JetDataPlot<T>, backend: JetDataPlotBackend) -> JetDataPlotRender DataError! {
+fn render<T>(plot: JetDataPlot<T>, backend: JetDataPlotBackend) -> JetDataPlotRender DataError! {
     plan :: normalize_plot_plan(plot.plan)
     if backend == JetDataPlotBackend.Text {
         return Ok(JetDataPlotRender{format: JetDataPlotRenderFormat.Text, body: render_plot_text(plan)})
@@ -902,7 +902,7 @@ pub fn render<T>(plot: JetDataPlot<T>, backend: JetDataPlotBackend) -> JetDataPl
     Ok(JetDataPlotRender{format: JetDataPlotRenderFormat.SVG, body: render_plot_svg(plan)})
 }
 
-pub fn bar_text(groups: [Group<String, Int>]) -> String DataError! {
+fn bar_text(groups: [Group<String, Int>]) -> String DataError! {
     labels := [String]{}
     values := [Float]{}
     loop index in 0..<groups.len() {
@@ -920,7 +920,7 @@ pub fn bar_text(groups: [Group<String, Int>]) -> String DataError! {
     Ok(render_bar_text(labels, values))
 }
 
-pub fn bar_svg(groups: [Group<String, Int>]) -> String DataError! {
+fn bar_svg(groups: [Group<String, Int>]) -> String DataError! {
     labels := [String]{}
     values := [Float]{}
     loop index in 0..<groups.len() {
@@ -938,7 +938,7 @@ pub fn bar_svg(groups: [Group<String, Int>]) -> String DataError! {
     Ok(render_bar_svg(labels, values))
 }
 
-pub fn line_text(groups: [Group<String, Float>], options: DataLineOptions) -> String DataError! {
+fn line_text(groups: [Group<String, Float>], options: DataLineOptions) -> String DataError! {
     _ :: validate_line_options(options, "line_text")
     labels := [String]{}
     values := [Float]{}
@@ -953,7 +953,7 @@ pub fn line_text(groups: [Group<String, Float>], options: DataLineOptions) -> St
     Ok(render_line_options_text(labels, values, options))
 }
 
-pub fn line_svg(groups: [Group<String, Float>], options: DataLineOptions) -> String DataError! {
+fn line_svg(groups: [Group<String, Float>], options: DataLineOptions) -> String DataError! {
     _ :: validate_line_options(options, "line_svg")
     labels := [String]{}
     values := [Float]{}
@@ -968,9 +968,9 @@ pub fn line_svg(groups: [Group<String, Float>], options: DataLineOptions) -> Str
     Ok(render_line_options_svg(labels, values, options))
 }
 
-pub fn status() -> [DataStatus] Never! { core.data.status() }
+fn status() -> [DataStatus] Never! { core.data.status() }
 
-pub fn require_bridge(provider: String) DataError! {
+fn require_bridge(provider: String) DataError! {
     core.data.require_bridge(provider)
 }
 

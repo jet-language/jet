@@ -58,8 +58,6 @@ fn append_module_semantics(s: &mut String, module: &crate::AST::LoadedModule) {
     s.push('\u{1}');
     // Visibility + web-target markers change what codegen emits, so they are
     // part of the program's meaning. All are small deterministic values.
-    let _ = write!(s, "{:?}", module.pub_file);
-    s.push('\u{1}');
     let _ = write!(s, "{:?}", module.no_prelude);
     s.push('\u{1}');
     let _ = write!(s, "{:?}", module.web_target_ceiling);

@@ -49,13 +49,13 @@ use jet_foundation.[
     type_name,
 ]
 
-pub struct SemaCompilerSemanticIndexFacts {
-    pub value: TComptimeValue
-    pub complete: Bool
+struct SemaCompilerSemanticIndexFacts {
+    value: TComptimeValue
+    complete: Bool
 }
-pub struct SemaCompilerModuleSource {
-    pub module_identity: String
-    pub source: String
+struct SemaCompilerModuleSource {
+    module_identity: String
+    source: String
 }
 
 fn sema_compiler_index_module_sources_valid(registration: SemaRegistrationGraph, module_sources: [SemaCompilerModuleSource]) -> Bool Never! {
@@ -812,7 +812,7 @@ fn sema_compiler_index_stmt_shape(statement: Stmt) -> String Never! {
     "Discriminant({index})"
 }
 
-pub fn sema_compiler_index_stmt_span(statement: Stmt) -> Span {
+fn sema_compiler_index_stmt_span(statement: Stmt) -> Span {
     if statement == {
         .Expr(value) -> expr_span(value)
         .Val(binding) -> Span{start: if binding.sigil_span == .Val(sigil) -> sigil.start else -> binding.name_span.start, end: expr_span(binding.init).end}
@@ -1623,7 +1623,7 @@ fn sema_compiler_index_collect_checked_locals(body: [TStmt], module_identity: St
     }
 }
 
-pub fn sema_compiler_semantic_index_from_checked(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource]) -> SemaCompilerSemanticIndexFacts {
+fn sema_compiler_semantic_index_from_checked(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource]) -> SemaCompilerSemanticIndexFacts {
     definitions := [TComptimeValue]{}
     definition_keys := [String]{}
     checked_functions := [TFunc]{}

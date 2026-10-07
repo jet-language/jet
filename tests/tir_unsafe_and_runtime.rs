@@ -600,7 +600,7 @@ fn foreign_struct_construction() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("note.jet"),
-        "pub struct Note {\n    pub title: String\n    pub pages: Int\n}\n",
+        "struct Note {\n    title: String\n    pages: Int\n}\n",
     )
     .unwrap();
     let main_src = "\

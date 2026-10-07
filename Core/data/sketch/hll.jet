@@ -10,18 +10,18 @@ C_REGISTERS :: 256
 C_MAX_RHO :: 57
 
 
-pub struct HLL {
-    pub m: Int
-    pub regs: [Int]
+struct HLL {
+    m: Int
+    regs: [Int]
 }
 
-pub fn new() -> HLL Never! {
+fn new() -> HLL Never! {
     HLL{m: C_REGISTERS, regs: zero_registers(C_REGISTERS)}
 }
 
 impl HLL {
     /// Record one key.
-    pub fn add(&self, key: String) Never! {
+    fn add(&self, key: String) Never! {
         width := hll_width(self)
         if width <= 0 -> width = C_REGISTERS
         if self.m != width || self.regs.len() != width {
@@ -37,7 +37,7 @@ impl HLL {
     }
 
     /// The estimated number of distinct keys.
-    pub fn count(self) -> Int Never! { hll_estimate(self) }
+    fn count(self) -> Int Never! { hll_estimate(self) }
 }
 
 fn hll_estimate(hll: HLL) -> Int Never! {

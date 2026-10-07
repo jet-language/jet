@@ -41,76 +41,76 @@ use jet_foundation.[
     mir_type_id, mir_type_with_identity, stable_id, mir_tag_name,
 ]
 
-pub struct LowerFunctionSource { pub instance: Bool, pub index: Int }
+struct LowerFunctionSource { instance: Bool, index: Int }
 
 // One function of the inventory. `instance_row` is -1 for a borrowed
 // original (its body is program.functions[source_row]), else the row of its
 // body in LowerPrepared.instances (-2 while queued, before materialization).
-pub struct LowerPreparedFunction {
-    pub id: MIRFunctionID
-    pub original: MIRFunctionID
-    pub source_row: Int
-    pub instance_row: Int
-    pub key: String
+struct LowerPreparedFunction {
+    id: MIRFunctionID
+    original: MIRFunctionID
+    source_row: Int
+    instance_row: Int
+    key: String
     // An instance's LIR function name: the original's key and its bound
     // types (`identity<Int>`); the original's key for an original.
-    pub name: String
-    pub bindings: LowerBindings
-    pub parent: Int
+    name: String
+    bindings: LowerBindings
+    parent: Int
 }
 
-struct LowerMonoAncestor { pub parent: Int, pub label: String, pub depth: Int }
-struct LowerMonoType { pub ty: MIRType, pub parent: Int }
+struct LowerMonoAncestor { parent: Int, label: String, depth: Int }
+struct LowerMonoType { ty: MIRType, parent: Int }
 enum LowerMonoPending { Function(row: Int) Type(row: Int) Render(row: Int, show: Bool) }
 // A shared dependency list node: a function to request, or a branch into
 // another list (close adapters shared by several handle types).
-struct LowerMonoEdge { pub function: MIRFunctionID?, pub branch: Int, pub next: Int }
+struct LowerMonoEdge { function: MIRFunctionID?, branch: Int, next: Int }
 
-pub struct LowerPrepared {
+struct LowerPrepared {
     // Final order: reached originals in declaration order, then instances in
     // first-request order.
-    pub functions: [LowerPreparedFunction]
-    pub instances: [MIRFunction]
+    functions: [LowerPreparedFunction]
+    instances: [MIRFunction]
     // Original MIR function ID -> its row in program.functions.
-    pub source_rows: [U64:Int]
+    source_rows: [U64:Int]
     // Concrete MIR function ID -> its row in `functions`.
-    pub mir_rows: [U64:Int]
-    pub entry: MIRFunctionID?
+    mir_rows: [U64:Int]
+    entry: MIRFunctionID?
     // Preparation failed when non-empty; `functions` is then empty.
-    pub issues: [LIRLoweringIssue]
+    issues: [LIRLoweringIssue]
     // Instance key -> descriptor row while the queue runs.
-    pub instance_rows: [String:Int]
-    pub original_descriptors: [U64:Int]
-    pub reserved_ids: [U64:String]
+    instance_rows: [String:Int]
+    original_descriptors: [U64:Int]
+    reserved_ids: [U64:String]
     // Declaration MIRTypeID -> its row in program.types.
-    pub declaration_rows: [U64:Int]
+    declaration_rows: [U64:Int]
     // Checked type identity -> type; resolves ID-only type operands.
-    pub checked_types: LowerTypeIndex
+    checked_types: LowerTypeIndex
     // Concrete type fingerprint -> its row in type_work.
-    pub type_rows: [String:Int]
-    pub type_work: [LowerMonoType]
-    pub render_seen: [String:Bool]
-    pub free_binders: [String:Bool]
+    type_rows: [String:Int]
+    type_work: [LowerMonoType]
+    render_seen: [String:Bool]
+    free_binders: [String:Bool]
     // "key:<function key>" / "name:<function name>" -> MIR function ID value.
-    pub function_names: [String:U64]
-    pub callbacks: [U64:Int]
-    pub callbacks_seen: [U64:Bool]
-    pub foreign_rows: [U64:Int]
-    pub foreign_seen: [U64:Bool]
-    pub constant_rows: [String:Int]
-    pub constants_seen: [Int:Bool]
+    function_names: [String:U64]
+    callbacks: [U64:Int]
+    callbacks_seen: [U64:Bool]
+    foreign_rows: [U64:Int]
+    foreign_seen: [U64:Bool]
+    constant_rows: [String:Int]
+    constants_seen: [Int:Bool]
     // Handle type fingerprint -> first lifecycle edge.
-    pub lifecycle: [String:Int]
+    lifecycle: [String:Int]
     // Trait method ID -> first edge to its default body and implementations.
-    pub trait_targets: [U64:Int]
-    pub trait_seen: [U64:Bool]
-    pub edges: [LowerMonoEdge]
-    pub edges_seen: [Int:Bool]
-    pub ancestors: [LowerMonoAncestor]
-    pub pending: [LowerMonoPending]
+    trait_targets: [U64:Int]
+    trait_seen: [U64:Bool]
+    edges: [LowerMonoEdge]
+    edges_seen: [Int:Bool]
+    ancestors: [LowerMonoAncestor]
+    pending: [LowerMonoPending]
 }
 
-pub fn lower_prepared_source(prepared: LowerPrepared, row: Int) -> LowerFunctionSource Never! {
+fn lower_prepared_source(prepared: LowerPrepared, row: Int) -> LowerFunctionSource Never! {
     descriptor :: prepared.functions[row]
     if descriptor.instance_row >= 0 -> return LowerFunctionSource{instance: true, index: descriptor.instance_row}
     LowerFunctionSource{instance: false, index: descriptor.source_row}
@@ -122,7 +122,7 @@ pub fn lower_prepared_source(prepared: LowerPrepared, row: Int) -> LowerFunction
 // The types a direct call binds, in instance-key order: the callee owner's
 // applied arguments (a method of `Pair<Int>` binds Pair's parameters), then
 // the call's own type arguments.
-pub fn lower_call_bindings(owner: MIRType?, type_args: [MIRType]) -> [MIRType] Never! {
+fn lower_call_bindings(owner: MIRType?, type_args: [MIRType]) -> [MIRType] Never! {
     bound := [MIRType]{}
     if owner == .Val(ty) {
         if ty.kind == .Apply(_, args) {
@@ -133,13 +133,13 @@ pub fn lower_call_bindings(owner: MIRType?, type_args: [MIRType]) -> [MIRType] N
     bound
 }
 
-pub fn lower_instance_key(original: MIRFunctionID, bound: [MIRType]) -> String Never! {
+fn lower_instance_key(original: MIRFunctionID, bound: [MIRType]) -> String Never! {
     "function:{original.value}:{lower_mono_type_list_key(bound)}"
 }
 
 // The concrete MIR function a direct call of `original` binding `bound`
 // runs: the original itself when nothing binds.
-pub fn lower_instance_id(original: MIRFunctionID, bound: [MIRType]) -> MIRFunctionID Never! {
+fn lower_instance_id(original: MIRFunctionID, bound: [MIRType]) -> MIRFunctionID Never! {
     if bound.len() == 0 -> return ~original
     MIRFunctionID{value: stable_id("mir-function-instance", lower_instance_key(original, bound))}
 }
@@ -157,7 +157,7 @@ fn lower_mono_access(access: MIRAccess) -> String Never! {
     }
 }
 
-pub fn lower_mono_fingerprint(ty: MIRType) -> String Never! {
+fn lower_mono_fingerprint(ty: MIRType) -> String Never! {
     if ty.kind == {
         .Int -> "int"
         .Float -> "float"
@@ -248,10 +248,10 @@ fn lower_mono_measure_key(measure: MIRMeasure) -> String Never! {
 // operands. An unchanged row keeps its identity and layout.
 
 // Generic parameter name -> its row in `types`.
-pub struct LowerBindings { pub rows: [String:Int], pub types: [MIRType] }
+struct LowerBindings { rows: [String:Int], types: [MIRType] }
 
 // Checked type identity value -> its row in `types`.
-pub struct LowerTypeIndex { pub rows: [U64:Int], pub types: [MIRType] }
+struct LowerTypeIndex { rows: [U64:Int], types: [MIRType] }
 
 fn lower_bindings_empty() -> LowerBindings Never! { LowerBindings{rows: [String:Int]{}, types: [MIRType]{}} }
 
@@ -273,7 +273,7 @@ fn lower_index_type(index: &LowerTypeIndex, id: MIRTypeID, ty: MIRType) Never! {
     &index.types.push(ty)
 }
 
-pub fn lower_subst_type(ty: MIRType, bindings: LowerBindings) -> MIRType Never! {
+fn lower_subst_type(ty: MIRType, bindings: LowerBindings) -> MIRType Never! {
     if ty.kind == .Apply(name, args) {
         if args.len() == 0 {
             if lower_bound(bindings, name.name) == .Val(bound) {
@@ -380,7 +380,7 @@ fn lower_subst_cli(entry: MIRCLIEntry?, bindings: LowerBindings) -> MIRCLIEntry?
 // The declaration `definition` instantiated with `args` (one per generic
 // parameter, in order). The declaration and field IDs are kept: a concrete
 // view, never a new declaration.
-pub fn lower_instantiate_definition(definition: MIRTypeDef, args: [MIRType]) -> MIRTypeDef Never! {
+fn lower_instantiate_definition(definition: MIRTypeDef, args: [MIRType]) -> MIRTypeDef Never! {
     bindings := lower_bindings_empty()
     loop (index, parameter) in definition.generic_params {
         if index < args.len() -> lower_bind(&bindings, parameter.name, args[index])
@@ -947,7 +947,7 @@ fn lower_mono_run(p: MIRProgram, q: &LowerPrepared) Never! {
 }
 
 // The executable inventory reached from `entry`.
-pub fn lower_prepare_entry(program: MIRProgram, entry: MIRFunctionID) -> LowerPrepared Never! {
+fn lower_prepare_entry(program: MIRProgram, entry: MIRFunctionID) -> LowerPrepared Never! {
     q := lower_mono_empty()
     lower_mono_index(program, &q)
     if q.issues.len() == 0 -> q.entry = lower_mono_request(program, &q, entry, None, [MIRType]{}, -1, "entry")

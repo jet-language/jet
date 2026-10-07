@@ -78,7 +78,7 @@ fn jet_eval_reflection_metadata_method_list_contains(fields: [TComptimeField], w
     }
 }
 
-pub fn jet_eval_route_reflection_host(row: MIRPreludeCall, args: [TComptimeValue], machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
+fn jet_eval_route_reflection_host(row: MIRPreludeCall, args: [TComptimeValue], machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if row.family != MIRPreludeFamily.StaticPrelude || row.module_name != "core.host" || mir_symbol_name(row.symbol) != "jet_comptime_host_method" {
         jet_eval_compiler_fail(&machine, span, "invalid reflection metadata Prelude route")
         return None

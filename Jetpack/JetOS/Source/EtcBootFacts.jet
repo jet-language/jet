@@ -1,7 +1,7 @@
 // Rust crates/jetpack/src/JetOS/etc_boot_facts.rs. Native generation writes
 // require canonical RootProjection/StoreRealize (#4262); no copier or realized
 // package substitute lives here. Compiler protocol JSON integration is #4262.
-pub fn jetos_write_etc_tree(dir: String, system: SystemPlan) IOError! -[FS]> {
+fn jetos_write_etc_tree(dir: String, system: SystemPlan) IOError! -[FS]> {
     etc :: files.join(dir, "etc")
     files.create_dir_all(etc)
     host :: jetos_option_value(system, [String]{"network.hostName", "network.hostname"}) ?? system.name
@@ -81,13 +81,13 @@ fn jetos_write_pam_files(etc: String) IOError! -[FS]> {
     loop name in names -> files.write(files.join(pam, name), login)
 }
 
-pub fn jetos_is_linux_kernel_image(path: String) -[FS]> Bool Never! {
+fn jetos_is_linux_kernel_image(path: String) -[FS]> Bool Never! {
     bytes :: files.read_bytes(path) ?? return false
     jetos_is_linux_kernel_image_bytes(bytes)
 }
 
 // Rust is_linux_kernel_image's byte predicate, shared with its path entry.
-pub fn jetos_is_linux_kernel_image_bytes(bytes: [U8]) -> Bool Never! {
+fn jetos_is_linux_kernel_image_bytes(bytes: [U8]) -> Bool Never! {
     if bytes.len() >= 4 && bytes[0] == 127 && bytes[1] == 69 && bytes[2] == 76 && bytes[3] == 70 -> return true
     if bytes.len() < 4 || bytes[0] != 77 || bytes[1] != 90 -> return false
     loop offset in 0..<(bytes.len() - 3) {
@@ -96,13 +96,13 @@ pub fn jetos_is_linux_kernel_image_bytes(bytes: [U8]) -> Bool Never! {
     false
 }
 
-pub fn jetos_is_initrd_image(path: String) -[FS]> Bool Never! {
+fn jetos_is_initrd_image(path: String) -[FS]> Bool Never! {
     bytes :: files.read_bytes(path) ?? return false
     jetos_is_initrd_image_bytes(bytes)
 }
 
 // Rust is_initrd_image's byte predicate, shared with its path entry.
-pub fn jetos_is_initrd_image_bytes(bytes: [U8]) -> Bool Never! {
+fn jetos_is_initrd_image_bytes(bytes: [U8]) -> Bool Never! {
     if bytes.len() >= 2 && bytes[0] == 31 && bytes[1] == 139 -> return true
     bytes.len() >= 6 && bytes[0] == 48 && bytes[1] == 55 && bytes[2] == 48 && bytes[3] == 55 && bytes[4] == 48 && (bytes[5] == 49 || bytes[5] == 50)
 }
@@ -114,7 +114,7 @@ fn jetos_render_boot_facts_parts(boot: JetOSBootProfile, kernel_package: String)
 }
 
 // Rust cachyos_kernel_entry: first match, not latest or a fallback package.
-pub fn jetos_cachyos_kernel_entry(realized: [JetOSRealizedPackage]) -> JetOSRealizedPackage? Never! {
+fn jetos_cachyos_kernel_entry(realized: [JetOSRealizedPackage]) -> JetOSRealizedPackage? Never! {
     loop entry in realized {
         if entry.entry.name == JETOS_CACHYOS_KERNEL_PACKAGE -> return Val(entry)
     }
@@ -130,7 +130,7 @@ fn jetos_render_boot_facts(system: SystemPlan, realized: [JetOSRealizedPackage])
     jetos_render_boot_facts_parts(boot, kernel_package)
 }
 
-pub fn jetos_kernel_package_json(entry: JetOSRealizedPackage) -[FS]> String Never! {
+fn jetos_kernel_package_json(entry: JetOSRealizedPackage) -[FS]> String Never! {
     source :: jetos_kernel_source_json(entry)
     "{{\"name\":{foundation_json_quote(entry.entry.name)},\"reference\":{foundation_json_quote(entry.entry.reference)},\"out\":{foundation_json_quote(entry.entry.out)},\"output_hash\":{foundation_json_quote(entry.entry.envelope.output_hash)},\"provenance\":{foundation_json_quote(entry.entry.envelope.provenance)},\"bootstrap\":\"source-built\",\"source_recipe\":{source}}}"
 }
@@ -160,7 +160,7 @@ fn jetos_kernel_source_json(entry: JetOSRealizedPackage) -[FS]> String Never! {
 }
 
 // Rust boot_artifact: lease-projected consumption; projection refusal is None.
-pub fn jetos_boot_artifact(entry: JetOSRealizedPackage, candidates: [String]) -[FS, Env, Rand]> String? Never! {
+fn jetos_boot_artifact(entry: JetOSRealizedPackage, candidates: [String]) -[FS, Env, Rand]> String? Never! {
     out :: entry.consumption_path(entry.entry.out) ?? return None
     loop relative in candidates {
         path :: files.join(out, relative)
@@ -169,7 +169,7 @@ pub fn jetos_boot_artifact(entry: JetOSRealizedPackage, candidates: [String]) -[
     None
 }
 
-pub fn jetos_missing_kernel_source_files(entry: JetOSRealizedPackage) -[FS, Env, Rand]> String? Never! {
+fn jetos_missing_kernel_source_files(entry: JetOSRealizedPackage) -[FS, Env, Rand]> String? Never! {
     out :: entry.consumption_path(entry.entry.out) ?? return None
     relatives :: [String]{"source/recipe.jet", "source/build.sh", "source/config", "source/patches.manifest", "source/initrd-inputs.manifest"}
     loop relative in relatives {
@@ -185,7 +185,7 @@ pub fn jetos_missing_kernel_source_files(entry: JetOSRealizedPackage) -[FS, Env,
 // metadata/set_readonly(false)/set_permissions with their actual IO failures.
 // Core files.copy2 cannot provide this contract; its byte-only auto-parent
 // behavior must not be substituted while the canonical provider is #3593.
-pub fn jetos_write_boot_facts(dir: String, system: SystemPlan, realized: [JetOSRealizedPackage]) IOError! -[FS, Env, Rand]> {
+fn jetos_write_boot_facts(dir: String, system: SystemPlan, realized: [JetOSRealizedPackage]) IOError! -[FS, Env, Rand]> {
     boot :: jetos_boot_profile(system)
     boot_dir :: files.join(dir, "boot")
     files.create_dir_all(boot_dir)

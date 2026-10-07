@@ -333,7 +333,7 @@ fn sema_stream_file_scope_read(receiver: Expr, receiver_value: TExpr, args: [Cal
 
 
 // Called before ordinary method lookup for canonical Core handle types.
-pub fn sema_call_try_stream_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_stream_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     owner :: sema_stream_handle_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_stream_handle_is_canonical(receiver_value.ty, owner, environment) -> return SemaMethodSpecialCheck{handled: false, value: None}
     if owner == "FileScope" && method == "read" -> return sema_stream_file_scope_read(receiver, receiver_value, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -381,7 +381,7 @@ fn sema_stream_handle_static_owner_is_canonical(owner: String, scopes: &SemaScop
 }
 
 // Static reserved constructors. Callers must still prefer a shadowing user type.
-pub fn sema_call_try_stream_handle_static(owner: String, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_stream_handle_static(owner: String, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     known := (owner == "Path" && (method == "from" || method == "home")) || (owner == "Reader" && method == "over") || (owner == "Cursor" && method == "over")
     if !known || !sema_stream_handle_static_owner_is_canonical(owner, &scopes, environment) -> return SemaMethodSpecialCheck{handled: false, value: None}
     expected_count := if method == "home" -> 0 else -> 1
@@ -452,7 +452,7 @@ fn sema_stream_handle_registered_owner(owner: String, environment: SemaScopeEnvi
 
 // Core's file handles and temporary filesystem objects expose a checked
 // `path` projection; reader/writer paths lower through their typed handle ops.
-pub fn sema_call_try_core_file_path_field(base: TExpr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_try_core_file_path_field(base: TExpr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if member != "path" -> return None
     owner :: sema_stream_handle_owner(base.ty) ?? return None
     if owner != "FileReader" && owner != "FileWriter" && owner != "TempDir" && owner != "TempFile" && owner != "FileLock" -> return None
@@ -489,7 +489,7 @@ fn sema_stream_handle_fact_has_effect(context: &SemaCheckContext, span: Span, ef
 
 // Statement checking calls this at the collection expression's span for
 // special stream sources that do not have an intrinsic method-call node.
-pub fn sema_call_stream_record_for_in_fact(collection: TExpr, method_kind: TForInMethod, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
+fn sema_call_stream_record_for_in_fact(collection: TExpr, method_kind: TForInMethod, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
     effect_name := if method_kind == {
         .LinesFile -> "FS"
         .LinesStdin -> "IO"

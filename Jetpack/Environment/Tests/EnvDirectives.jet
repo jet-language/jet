@@ -2,7 +2,7 @@
 
 ENV_FILE_TEST_SAMPLE :: prep { """
 use jetpack as pkg
-pub fn shell() -> [JSON] {{
+fn shell() -> [JSON] {{
     return [
         pkg.source("nixpkgs"),
         pkg.packages(["ripgrep", "fd", "claude-code"]),
@@ -13,7 +13,7 @@ pub fn shell() -> [JSON] {{
 
 ENV_FILE_TEST_NAMED :: prep { """
 use jetpack as pkg
-pub fn shell() -> [JSON] {{
+fn shell() -> [JSON] {{
     return [
         pkg.source("stable", "NixOS/nixpkgs/nixos-24.05@github"),
         pkg.source("unstable", "NixOS/nixpkgs/nixpkgs-unstable@github"),
@@ -25,7 +25,7 @@ pub fn shell() -> [JSON] {{
 
 ENV_FILE_TEST_CORE_REPO :: prep { """
 use jetpack as pkg
-pub fn shell() -> [JSON] {{
+fn shell() -> [JSON] {{
     return [
         pkg.source("mine", "./jet-pkgs", "core"),
         pkg.packages(["hello@mine"])
@@ -89,7 +89,7 @@ fn env_file_test_sorted(values: [String]) -> [String] {
 #Test("render roundtrips named") {
     file :: EnvFile.parse(ENV_FILE_TEST_NAMED)
     rendered :: file.render()
-    assert(rendered.contains("pub fn shell() -> [JSON]"))
+    assert(rendered.contains("fn shell() -> [JSON]"))
     assert(rendered.contains("pkg.packages([\"ripgrep@stable\", \"neovim@unstable\"]),"))
     reparsed :: EnvFile.parse(rendered)
     assert_eq(file.named, reparsed.named)

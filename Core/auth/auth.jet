@@ -22,33 +22,33 @@ use core.time as time
 // PASETO surface verifies v4.public with the local Ed25519 primitive; the
 // extended footer/implicit form is a host provider call.
 #Error
-pub enum AuthError {
+enum AuthError {
     Rejected
     Expired
     Malformed
     Unavailable
 }
 
-pub struct Claims {
-    pub issuer: String
-    pub audience: String
-    pub subject: String
-    pub expires_at: Int
-    pub json: String
+struct Claims {
+    issuer: String
+    audience: String
+    subject: String
+    expires_at: Int
+    json: String
 }
 
-pub struct Session {
-    pub id: String
-    pub user_id: String
-    pub cookie: String
-    pub expires_at: Int
+struct Session {
+    id: String
+    user_id: String
+    cookie: String
+    expires_at: Int
 }
 
-pub struct Auth {
-    pub issuer: String
+struct Auth {
+    issuer: String
 }
 
-pub fn verify_jwt(token: String, key: [U8], audience: String, issuer: String, clock_skew: Duration) -[Time]> Claims AuthError! {
+fn verify_jwt(token: String, key: [U8], audience: String, issuer: String, clock_skew: Duration) -[Time]> Claims AuthError! {
     token_raw :: token.bytes()
     if token_raw.len() == 0 || token_raw.len() > 1048576 -> return Err(AuthError.Malformed)
     if key.len() < 32 -> return Err(AuthError.Rejected)
@@ -102,7 +102,7 @@ pub fn verify_jwt(token: String, key: [U8], audience: String, issuer: String, cl
     Ok(Claims{issuer: iss, audience: claims_aud, subject: sub, expires_at: exp, json: payload})
 }
 
-pub fn verify_paseto(token: String, key: [U8], audience: String) -[Time]> Claims AuthError! {
+fn verify_paseto(token: String, key: [U8], audience: String) -[Time]> Claims AuthError! {
     token_raw :: token.bytes()
     if token_raw.len() == 0 || token_raw.len() > 1048576 -> return Err(AuthError.Malformed)
     if key.len() != 32 || audience.len() == 0 || has_control(audience) || audience != trim_ascii(audience) {
@@ -152,7 +152,7 @@ pub fn verify_paseto(token: String, key: [U8], audience: String) -[Time]> Claims
 }
 
 
-pub fn register_user(name: String, password: String) -[Rand, DB, Time]> Session AuthError! {
+fn register_user(name: String, password: String) -[Rand, DB, Time]> Session AuthError! {
     if !valid_identity(name) || !valid_password_hash(password) -> return Err(AuthError.Rejected)
     core.auth.register_user(~name, ~password) ?? return Err(AuthError.Rejected)
     ttl := 86400
@@ -166,7 +166,7 @@ pub fn register_user(name: String, password: String) -[Rand, DB, Time]> Session 
     })
 }
  
-pub fn password_login(name: String, password: String, ttl_s: Int, flags: Int) -[Rand, DB, Time]> Session AuthError! {
+fn password_login(name: String, password: String, ttl_s: Int, flags: Int) -[Rand, DB, Time]> Session AuthError! {
     if !valid_identity(name) || !valid_password_hash(password) -> return Err(AuthError.Rejected)
     if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
     if flags != 0 -> return Err(AuthError.Malformed)
@@ -179,13 +179,13 @@ pub fn password_login(name: String, password: String, ttl_s: Int, flags: Int) -[
 }
 
 
-pub fn oauth_begin(provider: String) -[DB]> String AuthError! {
+fn oauth_begin(provider: String) -[DB]> String AuthError! {
     if provider.len() == 0 || provider.len() > 128 || has_control(provider) || provider != trim_ascii(provider) -> return Err(AuthError.Malformed)
     state :: core.auth.oauth_begin(provider) ?? return Err(AuthError.Unavailable)
     Ok(state)
 }
 
-pub fn oauth_finish(state: String, assertion: String, ttl_s: Int, flags: Int) -[DB, Time]> Session AuthError! {
+fn oauth_finish(state: String, assertion: String, ttl_s: Int, flags: Int) -[DB, Time]> Session AuthError! {
     if state.len() == 0 || assertion.len() == 0 -> return Err(AuthError.Malformed)
     if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
     if has_control(state) || has_control(assertion) -> return Err(AuthError.Malformed)
@@ -200,7 +200,7 @@ pub fn oauth_finish(state: String, assertion: String, ttl_s: Int, flags: Int) -[
     })
 }
 
-pub fn magic_link_issue(email: String, ttl_s: Int, flags: Int) -[DB, Time]> String AuthError! {
+fn magic_link_issue(email: String, ttl_s: Int, flags: Int) -[DB, Time]> String AuthError! {
     if !valid_email(email) -> return Err(AuthError.Malformed)
     if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
     if flags != 0 -> return Err(AuthError.Malformed)
@@ -209,7 +209,7 @@ pub fn magic_link_issue(email: String, ttl_s: Int, flags: Int) -[DB, Time]> Stri
     Ok(token)
 }
 
-pub fn magic_link_consume(token: String, ttl_s: Int, flags: Int) -[DB, Time]> Session AuthError! {
+fn magic_link_consume(token: String, ttl_s: Int, flags: Int) -[DB, Time]> Session AuthError! {
     if token.len() == 0 || has_control(token) -> return Err(AuthError.Rejected)
     if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
     if flags != 0 -> return Err(AuthError.Malformed)
@@ -221,7 +221,7 @@ pub fn magic_link_consume(token: String, ttl_s: Int, flags: Int) -[DB, Time]> Se
     Ok(Session{id: id, user_id: user, cookie: cookie, expires_at: now + ttl_s})
 }
 
-pub fn session_validate(cookie: String, ttl_s: Int) -[DB, Time]> Session AuthError! {
+fn session_validate(cookie: String, ttl_s: Int) -[DB, Time]> Session AuthError! {
     if cookie.len() == 0 || has_control(cookie) -> return Err(AuthError.Rejected)
     if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
     id :: session_id_from_cookie(cookie) ?? return Err(AuthError.Malformed)
@@ -254,12 +254,12 @@ fn session_id_from_cookie(cookie: String) -> String? {
 }
 
 
-pub fn session_user(session: Session) -> String Never! { session.user_id }
+fn session_user(session: Session) -> String Never! { session.user_id }
 
-pub fn session_cookie(session: Session) -> String Never! { session.cookie }
+fn session_cookie(session: Session) -> String Never! { session.cookie }
 
-pub fn session_id(session: Session) -> String Never! { session.id }
-pub fn session_show(session: Session) -> String Never! {
+fn session_id(session: Session) -> String Never! { session.id }
+fn session_show(session: Session) -> String Never! {
     cookie_len :: session.cookie.bytes().len()
     return "Session(id=<redacted>, user={session.user_id}, exp={session.expires_at}, cookie_len={cookie_len})"
 }

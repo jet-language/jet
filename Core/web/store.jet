@@ -5,62 +5,62 @@ C_MAX_STORE_SUBSCRIBERS :: 1000000
 // core.web.store — typed state history, transactions, and patches.
 
 #Error
-pub enum WebStoreError {
+enum WebStoreError {
     NotFound
     Invalid
 }
 
-pub struct WebStore<T> {
-    pub name: String
-    pub value: T
-    pub history: [T]
-    pub cursor: Int
-    pub generation: Int
-    pub history_enabled: Bool
-    pub history_limit: Int
-    pub subs: Int
+struct WebStore<T> {
+    name: String
+    value: T
+    history: [T]
+    cursor: Int
+    generation: Int
+    history_enabled: Bool
+    history_limit: Int
+    subs: Int
 }
 
-pub struct WebStoreEvent {
-    pub kind: String
-    pub cursor: Int
-    pub generation: Int
-    pub diff: String
+struct WebStoreEvent {
+    kind: String
+    cursor: Int
+    generation: Int
+    diff: String
 }
 
-pub struct WebStoreTransaction<T> {
-    pub label: String
-    pub value: T
+struct WebStoreTransaction<T> {
+    label: String
+    value: T
 }
 
-pub struct WebStorePatch<T> {
-    pub store: WebStore<T>
-    pub backup: T
-    pub active: Bool
+struct WebStorePatch<T> {
+    store: WebStore<T>
+    backup: T
+    active: Bool
 }
 
-pub struct WebStoreSubscription {
-    pub id: Int
-    pub active: Bool
-    pub selector: String
+struct WebStoreSubscription {
+    id: Int
+    active: Bool
+    selector: String
 }
 
-pub struct WebStoreInspection {
-    pub name: String
-    pub cursor: Int
-    pub generation: Int
-    pub history_len: Int
+struct WebStoreInspection {
+    name: String
+    cursor: Int
+    generation: Int
+    history_len: Int
 }
 
-pub struct Derived<T> {
-    pub value: T
+struct Derived<T> {
+    value: T
 }
 
-pub fn new<T>(name: String, value: T) -> WebStore<T> Never! {
+fn new<T>(name: String, value: T) -> WebStore<T> Never! {
     WebStore<T>{name: name, value: value, history: [T]{value}, cursor: 0, generation: 1, history_enabled: true, history_limit: 1000, subs: 0}
 }
 
-pub fn with_history<T>(name: String, value: T, limit: Int) -> WebStore<T> Never! {
+fn with_history<T>(name: String, value: T, limit: Int) -> WebStore<T> Never! {
     store := new<T>(name, value)
     n := limit
     if n < 1 -> n = 1
@@ -69,57 +69,57 @@ pub fn with_history<T>(name: String, value: T, limit: Int) -> WebStore<T> Never!
     store
 }
 
-pub fn value<T>(store: WebStore<T>) -> T Never! { store.value }
-pub fn get<T>(store: WebStore<T>) -> T Never! { store.value }
-pub fn signal<T>(store: WebStore<T>) -> String Never! { "{store.name}:{store.generation}" }
-pub fn state_signal<T>(store: WebStore<T>) -> String Never! { signal<T>(store) }
+fn value<T>(store: WebStore<T>) -> T Never! { store.value }
+fn get<T>(store: WebStore<T>) -> T Never! { store.value }
+fn signal<T>(store: WebStore<T>) -> String Never! { "{store.name}:{store.generation}" }
+fn state_signal<T>(store: WebStore<T>) -> String Never! { signal<T>(store) }
 
-pub fn transaction<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(T)) -> WebStoreTransaction<T> Never! {
+fn transaction<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(T)) -> WebStoreTransaction<T> Never! {
     apply(store.value)
     record<T>(&store)
     WebStoreTransaction<T>{label: label, value: store.value}
 }
 
-pub fn update<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(T)) -> WebStoreTransaction<T> Never! {
+fn update<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(T)) -> WebStoreTransaction<T> Never! {
     transaction<T>(&store, label, values, apply)
 }
 
-pub fn batch<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(T)) -> WebStoreTransaction<T> Never! {
+fn batch<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(T)) -> WebStoreTransaction<T> Never! {
     transaction<T>(&store, label, values, apply)
 }
 
-pub fn set<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never! {
+fn set<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never! {
     store.value = value
     record<T>(&store)
     WebStoreTransaction<T>{label: "set", value: store.value}
 }
 
-pub fn set_state<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never! { set<T>(&store, value) }
+fn set_state<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never! { set<T>(&store, value) }
 
-pub fn optimistic<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(T)) -> WebStorePatch<T> Never! {
+fn optimistic<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(T)) -> WebStorePatch<T> Never! {
     backup := store.value
     apply(store.value)
     record<T>(&store)
     WebStorePatch<T>{store: ~store, backup: backup, active: true}
 }
 
-pub fn patch<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(T)) -> WebStorePatch<T> Never! {
+fn patch<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(T)) -> WebStorePatch<T> Never! {
     optimistic<T>(&store, label, values, apply)
 }
 
-pub fn patch_generation<T>(patch: WebStorePatch<T>) -> Int Never! { patch.store.generation }
-pub fn patch_active<T>(patch: WebStorePatch<T>) -> Bool Never! { patch.active }
+fn patch_generation<T>(patch: WebStorePatch<T>) -> Int Never! { patch.store.generation }
+fn patch_active<T>(patch: WebStorePatch<T>) -> Bool Never! { patch.active }
 
-pub fn patch_transaction<T>(patch: WebStorePatch<T>) -> WebStoreTransaction<T> Never! {
+fn patch_transaction<T>(patch: WebStorePatch<T>) -> WebStoreTransaction<T> Never! {
     WebStoreTransaction<T>{label: "patch", value: patch.store.value}
 }
 
-pub fn patch_commit<T>(patch: &WebStorePatch<T>) -> WebStoreTransaction<T> Never! {
+fn patch_commit<T>(patch: &WebStorePatch<T>) -> WebStoreTransaction<T> Never! {
     patch.active = false
     WebStoreTransaction<T>{label: "patch_commit", value: patch.store.value}
 }
 
-pub fn patch_rollback<T>(patch: &WebStorePatch<T>) -> WebStore<T>? Never! {
+fn patch_rollback<T>(patch: &WebStorePatch<T>) -> WebStore<T>? Never! {
     if !patch.active -> return None
     store := patch.store
     store.value = patch.backup
@@ -128,20 +128,20 @@ pub fn patch_rollback<T>(patch: &WebStorePatch<T>) -> WebStore<T>? Never! {
     Val(store)
 }
 
-pub fn back<T>(store: &WebStore<T>) -> WebStore<T>? Never! {
+fn back<T>(store: &WebStore<T>) -> WebStore<T>? Never! {
     cursor :: store.cursor
     jump<T>(&store, cursor - 1)
 }
-pub fn forward<T>(store: &WebStore<T>) -> WebStore<T>? Never! {
+fn forward<T>(store: &WebStore<T>) -> WebStore<T>? Never! {
     cursor :: store.cursor
     jump<T>(&store, cursor + 1)
 }
-pub fn restore<T>(store: &WebStore<T>) -> WebStore<T>? Never! {
+fn restore<T>(store: &WebStore<T>) -> WebStore<T>? Never! {
     cursor :: store.cursor
     jump<T>(&store, cursor)
 }
 
-pub fn jump<T>(store: &WebStore<T>, index: Int) -> WebStore<T>? Never! {
+fn jump<T>(store: &WebStore<T>, index: Int) -> WebStore<T>? Never! {
     if index < 0 || index >= store.history.len() -> return None
     store.value = store.history[index]
     store.cursor = index
@@ -149,26 +149,26 @@ pub fn jump<T>(store: &WebStore<T>, index: Int) -> WebStore<T>? Never! {
     Val(store)
 }
 
-pub fn scrub<T>(store: &WebStore<T>, index: Int) -> WebStore<T>? Never! { jump<T>(&store, index) }
+fn scrub<T>(store: &WebStore<T>, index: Int) -> WebStore<T>? Never! { jump<T>(&store, index) }
 
-pub fn history<T>(store: WebStore<T>) -> [WebStoreTransaction<T>] Never! {
+fn history<T>(store: WebStore<T>) -> [WebStoreTransaction<T>] Never! {
     out := [WebStoreTransaction<T>]{ }
     loop value in store.history -> &out.push(WebStoreTransaction<T>{label: "history", value: value})
     out
 }
 
-pub fn history_at<T>(store: WebStore<T>, index: Int) -> WebStoreTransaction<T>? Never! {
+fn history_at<T>(store: WebStore<T>, index: Int) -> WebStoreTransaction<T>? Never! {
     if index < 0 || index >= store.history.len() -> return None
     Val(WebStoreTransaction<T>{label: "history", value: store.history[index]})
 }
 
-pub fn events<T>(store: WebStore<T>) -> [WebStoreEvent] Never! {
+fn events<T>(store: WebStore<T>) -> [WebStoreEvent] Never! {
     out := [WebStoreEvent]{ }
     loop i in 0..<store.history.len() -> &out.push(WebStoreEvent{kind: "commit", cursor: i, generation: store.generation - (store.history.len() - 1 - i), diff: "history"})
     out
 }
 
-pub fn events_since<T>(store: WebStore<T>, cursor: Int) -> [WebStoreEvent] Never! {
+fn events_since<T>(store: WebStore<T>, cursor: Int) -> [WebStoreEvent] Never! {
     out := [WebStoreEvent]{ }
     loop event in events<T>(store) {
         if event.cursor >= cursor -> &out.push(event)
@@ -176,13 +176,13 @@ pub fn events_since<T>(store: WebStore<T>, cursor: Int) -> [WebStoreEvent] Never
     out
 }
 
-pub fn clear_history<T>(store: &WebStore<T>) Never! {
+fn clear_history<T>(store: &WebStore<T>) Never! {
     store.history = [T]{store.value}
     store.cursor = 0
     store.generation = store.generation + 1
 }
 
-pub fn set_history_limit<T>(store: &WebStore<T>, limit: Int) Never! {
+fn set_history_limit<T>(store: &WebStore<T>, limit: Int) Never! {
     n := limit
     if n < 1 -> n = 1
     if n > 1000 -> n = 1000
@@ -193,40 +193,40 @@ pub fn set_history_limit<T>(store: &WebStore<T>, limit: Int) Never! {
     store.generation = store.generation + 1
 }
 
-pub fn history_enabled<T>(store: WebStore<T>) -> Bool Never! { store.history_enabled }
-pub fn history_limit<T>(store: WebStore<T>) -> Int Never! { store.history_limit }
-pub fn cursor<T>(store: WebStore<T>) -> Int Never! { store.cursor }
-pub fn current_generation<T>(store: WebStore<T>) -> Int Never! { store.generation }
+fn history_enabled<T>(store: WebStore<T>) -> Bool Never! { store.history_enabled }
+fn history_limit<T>(store: WebStore<T>) -> Int Never! { store.history_limit }
+fn cursor<T>(store: WebStore<T>) -> Int Never! { store.cursor }
+fn current_generation<T>(store: WebStore<T>) -> Int Never! { store.generation }
 
-pub fn subscribe<T>(store: &WebStore<T>, callback: fn(T)) -> WebStoreSubscription Never! {
+fn subscribe<T>(store: &WebStore<T>, callback: fn(T)) -> WebStoreSubscription Never! {
     if store.subs >= C_MAX_STORE_SUBSCRIBERS -> return WebStoreSubscription{id: store.subs, active: false, selector: ""}
     callback(store.value)
     store.subs = store.subs + 1
     WebStoreSubscription{id: store.subs, active: true, selector: ""}
 }
 
-pub fn subscription_unsubscribe(subscription: &WebStoreSubscription) Never! { subscription.active = false }
-pub fn subscription_active(subscription: WebStoreSubscription) -> Bool Never! { subscription.active }
+fn subscription_unsubscribe(subscription: &WebStoreSubscription) Never! { subscription.active = false }
+fn subscription_active(subscription: WebStoreSubscription) -> Bool Never! { subscription.active }
 
-pub fn subscribe_selector<T, U, E>(store: &WebStore<T>, project: fn(T) -> U E!, callback: fn(U)) -> WebStoreSubscription E! {
+fn subscribe_selector<T, U, E>(store: &WebStore<T>, project: fn(T) -> U E!, callback: fn(U)) -> WebStoreSubscription E! {
     if store.subs >= C_MAX_STORE_SUBSCRIBERS -> return WebStoreSubscription{id: store.subs, active: false, selector: "derived"}
     callback(project(store.value))
     store.subs = store.subs + 1
     WebStoreSubscription{id: store.subs, active: true, selector: "derived"}
 }
 
-pub fn derived<T, U, E>(store: WebStore<T>, project: fn(T) -> U E!) -> Derived<U> E! { Derived<U>{value: project(store.value)} }
-pub fn selector<T, U, E>(store: WebStore<T>, project: fn(T) -> U E!) -> Derived<U> E! { derived<T, U, E>(store, project) }
+fn derived<T, U, E>(store: WebStore<T>, project: fn(T) -> U E!) -> Derived<U> E! { Derived<U>{value: project(store.value)} }
+fn selector<T, U, E>(store: WebStore<T>, project: fn(T) -> U E!) -> Derived<U> E! { derived<T, U, E>(store, project) }
 
-pub fn inspect<T>(store: WebStore<T>) -> WebStoreInspection Never! {
+fn inspect<T>(store: WebStore<T>) -> WebStoreInspection Never! {
     WebStoreInspection{name: store.name, cursor: store.cursor, generation: store.generation, history_len: store.history.len()}
 }
 
-pub fn facts_json<T>(store: WebStore<T>) -> String Never! {
+fn facts_json<T>(store: WebStore<T>) -> String Never! {
     "{{\"name\":\"{esc_json(store.name)}\",\"cursor\":{store.cursor},\"generation\":{store.generation},\"history\":{store.history.len()}}}"
 }
 
-pub fn event_json<T>(store: WebStore<T>) -> String Never! {
+fn event_json<T>(store: WebStore<T>) -> String Never! {
     "{{\"name\":\"{esc_json(store.name)}\",\"cursor\":{store.cursor},\"generation\":{store.generation}}}"
 }
 

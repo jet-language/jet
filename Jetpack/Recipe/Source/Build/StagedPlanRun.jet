@@ -8,26 +8,26 @@
 // an artifact. Validation and graph admission happen before publication.
 
 // The only host state exposed while a staged plan action emits its fragment.
-pub struct StagedPlanContext {
-    pub source_dir: String
-    pub artifact_root: String
+struct StagedPlanContext {
+    source_dir: String
+    artifact_root: String
 }
 
 // A successful staged plan publication. The artifact directory is committed
 // only after the fragment passes model validation and the complete BuildPlan
 // graph is admitted.
-pub struct StagedPlanReport {
-    pub action_identity: String
-    pub fragment_digest: String
-    pub plan_fingerprint: String
-    pub artifact_dir: String
-    pub lock: StagedPlanLock
+struct StagedPlanReport {
+    action_identity: String
+    fragment_digest: String
+    plan_fingerprint: String
+    artifact_dir: String
+    lock: StagedPlanLock
 }
 
 // A plan callback failed, was cancelled, or reached outside its declared
 // input authority; the last names the violated sandbox rule.
 #Error
-pub enum StagedPlanActionError {
+enum StagedPlanActionError {
     Cancelled
     Failed(String)
     UndeclaredAccess(String)
@@ -42,15 +42,15 @@ pub enum StagedPlanActionError {
 }
 
 // The staged plan callback: emit one typed fragment from the sandbox view.
-pub struct StagedPlanEmitter {
-    pub emit: fn(PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError!
+struct StagedPlanEmitter {
+    emit: fn(PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError!
 }
 
 // Capability-limited input view for the plan callback.
-pub struct PlanSandbox {
-    source_dir: String
-    declared_inputs: [String: String]
-    observed_inputs: [String]
+struct PlanSandbox {
+    priv source_dir: String
+    priv declared_inputs: [String: String]
+    priv observed_inputs: [String]
 
     fn new(source_dir: String, inputs: [PlanInput]) -> PlanSandbox Never! {
         declared := [String: String]{}
@@ -107,7 +107,7 @@ pub struct PlanSandbox {
 
 // Run one finite sandboxed plan action, lower its fragment into the ordinary
 // BuildPlan graph, and atomically publish the resulting stage.
-pub fn recipe_run_staged_plan_action(action: StagedPlanAction, ctx: StagedPlanContext, tools: [String: String], emitter: StagedPlanEmitter) -[FS, Env, Rand]> StagedPlanReport RecipeDiagnostic! {
+fn recipe_run_staged_plan_action(action: StagedPlanAction, ctx: StagedPlanContext, tools: [String: String], emitter: StagedPlanEmitter) -[FS, Env, Rand]> StagedPlanReport RecipeDiagnostic! {
     if action.validate_declaration() == {
         .Ok(_) -> {}
         .Err(error) -> { return Err(recipe_staged_plan_model_error(error)) }
@@ -149,7 +149,7 @@ fn recipe_staged_plan_facts(action: StagedPlanAction, fragment: BuildPlanFragmen
 // Lower a validated staged fragment into the same finite action graph
 // ordinary package recipes use. The planner node owns the canonical fragment;
 // every emitted action depends on it and on its declared predecessors.
-pub fn recipe_lower_staged_plan_action(action: StagedPlanAction, fragment: BuildPlanFragment, tools: [String: String]) -[FS, Env]> ComptimeBuildPlan RecipeDiagnostic! {
+fn recipe_lower_staged_plan_action(action: StagedPlanAction, fragment: BuildPlanFragment, tools: [String: String]) -[FS, Env]> ComptimeBuildPlan RecipeDiagnostic! {
     if action.validate(fragment) == {
         .Ok(_) -> {}
         .Err(error) -> { return Err(recipe_staged_plan_model_error(error)) }

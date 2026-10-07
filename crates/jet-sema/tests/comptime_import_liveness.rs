@@ -31,7 +31,6 @@ fn check(source: &str) -> Vec<Diagnostic> {
             source: source.into(),
             block_spans: std::mem::take(&mut program.block_spans),
             web_target_ceiling: program.web_target_ceiling,
-            pub_file: program.pub_file,
             no_prelude: program.no_prelude,
             default_target: program.default_target,
             html_path: program.html_path,

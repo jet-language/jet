@@ -30,64 +30,64 @@ use jet_parser.[
     parse_source,
 ]
 
-pub struct SemaPluginInterfaceExport {
-    pub name: String
-    pub signature: String
-    pub params: [SemaPluginExportParam]
-    pub return_type: Type?
+struct SemaPluginInterfaceExport {
+    name: String
+    signature: String
+    params: [SemaPluginExportParam]
+    return_type: Type?
 }
 
-pub struct SemaPluginExportParam {
-    pub convention: AccessConvention
-    pub ty: Type
+struct SemaPluginExportParam {
+    convention: AccessConvention
+    ty: Type
 }
 
-pub struct SemaPluginInterface {
-    pub artifact: String
-    pub identity: String
-    pub digest: String
-    pub exports: [SemaPluginInterfaceExport]
+struct SemaPluginInterface {
+    artifact: String
+    identity: String
+    digest: String
+    exports: [SemaPluginInterfaceExport]
 }
 
-pub struct SemaPluginArtifactAlias {
-    pub artifact: String
-    pub identity: String
+struct SemaPluginArtifactAlias {
+    artifact: String
+    identity: String
 }
 
-pub struct SemaPluginFrozenExportInput {
-    pub name: String
-    pub signature: String
+struct SemaPluginFrozenExportInput {
+    name: String
+    signature: String
 }
 
 // Canonical ApiFreeze snapshot contract input; its capability digest is
 // recomputed from the stored signatures.
-pub struct SemaPluginFrozenSnapshotInput {
-    pub package: String
-    pub funcs: [SemaPluginFrozenExportInput]
+struct SemaPluginFrozenSnapshotInput {
+    package: String
+    funcs: [SemaPluginFrozenExportInput]
 }
 
-pub struct SemaPluginInterfaceFacts {
-    pub interfaces: [SemaPluginInterface]
-    pub artifacts: [SemaPluginArtifactAlias]
-    pub digest: String
-    pub complete: Bool
+struct SemaPluginInterfaceFacts {
+    interfaces: [SemaPluginInterface]
+    artifacts: [SemaPluginArtifactAlias]
+    digest: String
+    complete: Bool
 }
 
-pub struct SemaPluginUnitDimension {
-    pub name: String
-    pub identity: String
+struct SemaPluginUnitDimension {
+    name: String
+    identity: String
 }
 
-pub struct SemaPluginInterfaceBuildInput {
-    pub package_name: String
-    pub entry_artifact: String
-    pub entry_aliases: [String]
-    pub frozen_snapshots: [SemaPluginFrozenSnapshotInput]
+struct SemaPluginInterfaceBuildInput {
+    package_name: String
+    entry_artifact: String
+    entry_aliases: [String]
+    frozen_snapshots: [SemaPluginFrozenSnapshotInput]
 }
 
 struct SemaPluginResolvedUnitDimension {
-    pub family: String
-    pub dimension: Dimension
+    family: String
+    dimension: Dimension
 }
 fn sema_plugin_put_export(exports: &[SemaPluginInterfaceExport], export: SemaPluginInterfaceExport) Never! {
     loop index in 0..<exports.len() {
@@ -758,7 +758,7 @@ fn sema_plugin_frozen_interface(snapshot: SemaPluginFrozenSnapshotInput, complet
     Val(SemaPluginInterface{artifact: snapshot.package, identity: sema_plugin_identity(snapshot.package, digest), digest: digest, exports: exports})
 }
 
-pub fn sema_plugin_interface_facts(graph: SemaRegistrationGraph, input: SemaPluginInterfaceBuildInput) -> SemaPluginInterfaceFacts {
+fn sema_plugin_interface_facts(graph: SemaRegistrationGraph, input: SemaPluginInterfaceBuildInput) -> SemaPluginInterfaceFacts {
     interfaces := [SemaPluginInterface]{}
     artifacts := [SemaPluginArtifactAlias]{}
     complete := true
@@ -792,7 +792,7 @@ fn sema_plugin_strip_prefix(value: String, prefix: String) -> String {
     String.from_bytes(bytes.slice(prefix_bytes.len(), bytes.len())) ?? value
 }
 
-pub fn sema_plugin_interface_by_artifact(facts: SemaPluginInterfaceFacts, artifact: String) -> SemaPluginInterface? {
+fn sema_plugin_interface_by_artifact(facts: SemaPluginInterfaceFacts, artifact: String) -> SemaPluginInterface? {
     normalized :: sema_plugin_normalize_artifact(artifact) ?? return None
     found :: loop alias in facts.artifacts {
         if alias.artifact == normalized {
@@ -807,7 +807,7 @@ pub fn sema_plugin_interface_by_artifact(facts: SemaPluginInterfaceFacts, artifa
     None
 }
 
-pub fn sema_plugin_interface_by_identity(facts: SemaPluginInterfaceFacts, identity: String) -> SemaPluginInterface? {
+fn sema_plugin_interface_by_identity(facts: SemaPluginInterfaceFacts, identity: String) -> SemaPluginInterface? {
     loop interface in facts.interfaces {
         if interface.identity == identity {
             return Val(interface)

@@ -17,7 +17,7 @@ use core.ui.[Rect, UINode]
 // Models and layout are pure.  Terminal dimensions are the sole provider
 // seam; drawing remains owned by the selected UI backend.
 
-pub enum TUIEvent {
+enum TUIEvent {
     Key(code: String, modifiers: Int)
     Resize(size: ui.Size)
     Timer(id: String, elapsed_ms: Int)
@@ -27,25 +27,25 @@ pub enum TUIEvent {
     Close
 }
 
-pub enum TUIColorProfile {
+enum TUIColorProfile {
     ANSI16
     ANSI256
     TrueColor
     ASCII
 }
 
-pub enum TUIColor {
+enum TUIColor {
     ANSI16(Int)
     ANSI256(Int)
     RGB(red: Int, green: Int, blue: Int)
 }
 
-pub enum TUIDirection {
+enum TUIDirection {
     Horizontal
     Vertical
 }
 
-pub enum TUIConstraint {
+enum TUIConstraint {
     Length(Float)
     Min(Float)
     Max(Float)
@@ -53,107 +53,107 @@ pub enum TUIConstraint {
     Fill(Float)
 }
 
-pub struct TUICapabilities {
-    pub color_profile: TUIColorProfile
-    pub color: Bool
-    pub unicode: Bool
-    pub mouse: Bool
-    pub resize: Bool
-    pub clipboard: Bool
-    pub width: Int
-    pub height: Int
+struct TUICapabilities {
+    color_profile: TUIColorProfile
+    color: Bool
+    unicode: Bool
+    mouse: Bool
+    resize: Bool
+    clipboard: Bool
+    width: Int
+    height: Int
 }
 
-pub struct TUIStyle {
-    pub foreground: TUIColor?
-    pub background: TUIColor?
-    pub bold: Bool
-    pub dim: Bool
-    pub underline: Bool
+struct TUIStyle {
+    foreground: TUIColor?
+    background: TUIColor?
+    bold: Bool
+    dim: Bool
+    underline: Bool
 }
 
-pub struct TUIListState {
-    pub selected: Int
-    pub offset: Int
+struct TUIListState {
+    selected: Int
+    offset: Int
 }
 
-pub fn capabilities() -> TUICapabilities Never! {
+fn capabilities() -> TUICapabilities Never! {
     core.tui.capabilities()
 }
 
-pub fn ascii(value: String) -> String Never! { core.tui.ascii(value) }
-pub fn color_ansi16(index: Int) -> TUIColor Never! { core.tui.color_ansi16(index) }
-pub fn color_ansi256(index: Int) -> TUIColor Never! { core.tui.color_ansi256(index) }
-pub fn color_rgb(red: Int, green: Int, blue: Int) -> TUIColor Never! {
+fn ascii(value: String) -> String Never! { core.tui.ascii(value) }
+fn color_ansi16(index: Int) -> TUIColor Never! { core.tui.color_ansi16(index) }
+fn color_ansi256(index: Int) -> TUIColor Never! { core.tui.color_ansi256(index) }
+fn color_rgb(red: Int, green: Int, blue: Int) -> TUIColor Never! {
     core.tui.color_rgb(red, green, blue)
 }
 
-pub fn style() -> TUIStyle Never! { core.tui.style() }
-pub fn style_bold(s: TUIStyle, enabled: Bool) -> TUIStyle Never! {
+fn style() -> TUIStyle Never! { core.tui.style() }
+fn style_bold(s: TUIStyle, enabled: Bool) -> TUIStyle Never! {
     core.tui.style_bold(^s, enabled)
 }
-pub fn style_dim(s: TUIStyle, enabled: Bool) -> TUIStyle Never! {
+fn style_dim(s: TUIStyle, enabled: Bool) -> TUIStyle Never! {
     core.tui.style_dim(^s, enabled)
 }
-pub fn style_underline(s: TUIStyle, enabled: Bool) -> TUIStyle Never! {
+fn style_underline(s: TUIStyle, enabled: Bool) -> TUIStyle Never! {
     core.tui.style_underline(^s, enabled)
 }
-pub fn style_foreground(s: TUIStyle, color: TUIColor) -> TUIStyle Never! {
+fn style_foreground(s: TUIStyle, color: TUIColor) -> TUIStyle Never! {
     core.tui.style_foreground(^s, color)
 }
-pub fn style_background(s: TUIStyle, color: TUIColor) -> TUIStyle Never! {
+fn style_background(s: TUIStyle, color: TUIColor) -> TUIStyle Never! {
     core.tui.style_background(^s, color)
 }
-pub fn style_text(value: String, s: TUIStyle, caps: TUICapabilities) -> String Never! {
+fn style_text(value: String, s: TUIStyle, caps: TUICapabilities) -> String Never! {
     core.tui.style_text(value, s, caps)
 }
-pub fn display_width(value: String) -> Int Never! { core.tui.display_width(value) }
+fn display_width(value: String) -> Int Never! { core.tui.display_width(value) }
 
-pub fn length(value: Float) -> TUIConstraint Never! { core.tui.length(value) }
-pub fn min(value: Float) -> TUIConstraint Never! { core.tui.min(value) }
-pub fn max(value: Float) -> TUIConstraint Never! { core.tui.max(value) }
-pub fn percent(value: Float) -> TUIConstraint Never! { core.tui.percent(value) }
-pub fn fill(weight: Float) -> TUIConstraint Never! { core.tui.fill(weight) }
-pub fn horizontal() -> TUIDirection Never! { core.tui.horizontal() }
-pub fn vertical() -> TUIDirection Never! { core.tui.vertical() }
+fn length(value: Float) -> TUIConstraint Never! { core.tui.length(value) }
+fn min(value: Float) -> TUIConstraint Never! { core.tui.min(value) }
+fn max(value: Float) -> TUIConstraint Never! { core.tui.max(value) }
+fn percent(value: Float) -> TUIConstraint Never! { core.tui.percent(value) }
+fn fill(weight: Float) -> TUIConstraint Never! { core.tui.fill(weight) }
+fn horizontal() -> TUIDirection Never! { core.tui.horizontal() }
+fn vertical() -> TUIDirection Never! { core.tui.vertical() }
 
-pub fn layout(area: Rect, direction: TUIDirection, constraints: [TUIConstraint]) -> [Rect] Never! {
+fn layout(area: Rect, direction: TUIDirection, constraints: [TUIConstraint]) -> [Rect] Never! {
     core.tui.layout(area, direction, ^constraints)
 }
 
-pub fn list(items: [String]) -> UINode Never! {
+fn list(items: [String]) -> UINode Never! {
     core.tui.list(^items)
 }
 
-pub fn table(headers: [String], rows: [[String]]) -> ui.UINode Never! {
+fn table(headers: [String], rows: [[String]]) -> ui.UINode Never! {
     core.tui.table(^headers, ^rows)
 }
 
-pub fn list_state() -> TUIListState Never! { core.tui.list_state() }
-pub fn list_state_select(state: TUIListState, index: Int) -> TUIListState Never! {
+fn list_state() -> TUIListState Never! { core.tui.list_state() }
+fn list_state_select(state: TUIListState, index: Int) -> TUIListState Never! {
     core.tui.list_state_select(^state, index)
 }
-pub fn list_state_selected(state: TUIListState) -> Int Never! {
+fn list_state_selected(state: TUIListState) -> Int Never! {
     core.tui.list_state_selected(state)
 }
-pub fn list_state_offset(state: TUIListState, offset: Int) -> TUIListState Never! {
+fn list_state_offset(state: TUIListState, offset: Int) -> TUIListState Never! {
     core.tui.list_state_offset(^state, offset)
 }
 
-pub fn key_event(code: String) -> TUIEvent Never! { core.tui.key_event(code) }
-pub fn key_event_modifiers(code: String, modifiers: Int) -> TUIEvent Never! {
+fn key_event(code: String) -> TUIEvent Never! { core.tui.key_event(code) }
+fn key_event_modifiers(code: String, modifiers: Int) -> TUIEvent Never! {
     core.tui.key_event_modifiers(code, modifiers)
 }
-pub fn resize_event(width: Float, height: Float) -> TUIEvent Never! {
+fn resize_event(width: Float, height: Float) -> TUIEvent Never! {
     core.tui.resize_event(width, height)
 }
-pub fn timer_event(id: String, elapsed_ms: Int) -> TUIEvent Never! {
+fn timer_event(id: String, elapsed_ms: Int) -> TUIEvent Never! {
     core.tui.timer_event(id, elapsed_ms)
 }
-pub fn io_event(channel: String, payload: [U8]) -> TUIEvent Never! {
+fn io_event(channel: String, payload: [U8]) -> TUIEvent Never! {
     core.tui.io_event(channel, ^payload)
 }
-pub fn focus_event(focused: Bool) -> TUIEvent Never! { core.tui.focus_event(focused) }
-pub fn interrupt_event() -> TUIEvent Never! { core.tui.interrupt_event() }
-pub fn close_event() -> TUIEvent Never! { core.tui.close_event() }
+fn focus_event(focused: Bool) -> TUIEvent Never! { core.tui.focus_event(focused) }
+fn interrupt_event() -> TUIEvent Never! { core.tui.interrupt_event() }
+fn close_event() -> TUIEvent Never! { core.tui.close_event() }
 

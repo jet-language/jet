@@ -71,7 +71,7 @@ struct PerlBoundFunction {
 }
 
 // Bind the named top-level subs of the Perl script at `path`.
-pub fn pkg_perl_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
+fn pkg_perl_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
     language :: WorkerLanguage.Perl
     pkg_worker_require_supported_host(language, pkg_binder_host_is_unix())
     pkg_binder_require_lib_name(lib)
@@ -190,13 +190,13 @@ fn pkg_perl_render_jet(lib: String, functions: [PerlBoundFunction]) -> String Ne
     &out.push(pkg_render_decode_response("PerlError", DecoderProtocol.StandardEnvelope))
     loop function in functions {
         name :: function.jet
-        &out.push("pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -[FFI.Perl]> DataTree PerlError! {{\n    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
+        &out.push("fn {name}(session: Session, input: DataTree, deadline_ms: Int) -[FFI.Perl]> DataTree PerlError! {{\n    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
     }
     out.join("")
 }
 
 // The generated surface for the binder registry's rendering probe.
-pub fn pkg_perl_render_probe() -> String Never! {
+fn pkg_perl_render_probe() -> String Never! {
     pkg_perl_render_jet("registry", [PerlBoundFunction]{PerlBoundFunction{perl: "Transform", jet: "transform"}})
 }
 

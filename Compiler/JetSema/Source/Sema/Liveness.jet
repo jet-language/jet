@@ -14,7 +14,7 @@ use jet_foundation.[
     diagnostic_with_edit,
 ]
 
-pub fn sema_liveness_unused_imports(program: Program, foreign_aliases: [String]) -> [Diagnostic] {
+fn sema_liveness_unused_imports(program: Program, foreign_aliases: [String]) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
     loop declaration in program.imports {
         if declaration.is_pub || declaration.is_package_pub -> next
@@ -68,11 +68,11 @@ fn sema_liveness_note_import(program: Program, foreign_aliases: [String], name: 
 // entry, jobs, wasm exports) are never reported. Only snapshot (user) modules
 // are judged; every module's references count.
 
-pub struct SemaLivenessCandidate {
-    pub module_index: Int
-    pub body: Span
-    pub package_identity: String
-    pub private: Bool
+struct SemaLivenessCandidate {
+    module_index: Int
+    body: Span
+    package_identity: String
+    private: Bool
 }
 
 fn sema_liveness_ignored(name: String) -> Bool Never! {
@@ -114,7 +114,7 @@ fn sema_liveness_note_site(candidates: [String:SemaLivenessCandidate], reached: 
     if !candidate.private || sema_registration_package_is_namespace(candidate.package_identity) -> reached[key] = true
 }
 
-pub fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> [Diagnostic] {
+fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
     if modules.len() != graph.modules.len() -> return diagnostics
     candidates := [String:SemaLivenessCandidate]{}

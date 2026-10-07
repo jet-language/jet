@@ -1361,7 +1361,7 @@ extern rust "std" {
     #Undo(undo_mutate) fn mutate(value: Int) -> Int = "std::convert::identity"
 }
 fn undo_mutate(value: Int) { print("left") }
-pub fn exercise() {
+fn exercise() {
     #Transact(tx) {
         mutate(1)
         return
@@ -1377,7 +1377,7 @@ extern rust "std" {
     #Undo(undo_mutate) fn mutate(value: Int) -> Int = "std::convert::identity"
 }
 fn undo_mutate(value: Int) { print("right") }
-pub fn exercise() {
+fn exercise() {
     #Transact(tx) {
         mutate(2)
         return
