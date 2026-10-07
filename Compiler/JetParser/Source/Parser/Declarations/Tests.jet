@@ -7,13 +7,14 @@ use jet_foundation.[
     expr_span,
 ]
 use jet_lexer.[
+    TOKEN_DOT,
     TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_KW_FN,
 ]
 
 fn parser_test_ahead(state: &JetParserState) -> Bool Never! {
-    parser_current_kind(&state) == TOKEN_HASH && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_lookahead(&state, 1).payload.decoded == "Test"
+    parser_current_kind(&state) == TOKEN_HASH && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) != TOKEN_DOT && parser_lookahead(&state, 1).payload.decoded == "Test"
 }
 
 fn parser_test_name(value: Expr) -> (name: String?, span: Span) {

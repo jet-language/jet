@@ -331,9 +331,8 @@ fn run() (HTTPError | NetError | TaskFailure)! {
     state :: shared HandlerState{label: "before registration"}
     mux :: server.mux()
     mux.get("/zero", () -> Ok(server.response(200, "zero")))
-    mux.get("/items/:id", (req: HTTPRequest) HTTPResponse HTTPError! -> {
+    mux.get("/items/:id", (req: HTTPRequest, id: String) HTTPResponse HTTPError! -> {
         header :: &req.header("x-state") ?? "missing"
-        id :: req.param("id") ?? "missing"
         path :: req.path()
         return Ok(server.response(200, "{path}|{id}|{header}|{state.label}"))
     })
@@ -385,8 +384,8 @@ fn run() (HTTPError | NetError | TaskFailure)! {
     store :: shared [String:String]{}
     mux :: server.mux()
     mux.get("/health", () -> reply(200, "{{\"status\":\"ok\"}}"))
-    mux.put("/kv/:key", (req: HTTPRequest) -> kv(req.param("key") ?? "", req, store, true))
-    mux.get("/kv/:key", (req: HTTPRequest) -> kv(req.param("key") ?? "", req, store, false))
+    mux.put("/kv/:key", (req: HTTPRequest, key: String) -> kv(key, req, store, true))
+    mux.get("/kv/:key", (req: HTTPRequest, key: String) -> kv(key, req, store, false))
     mux.get("/shutdown", () -> reply(200, "{{\"bye\":true}}"))
     server_task :: task {
         server.serve_once_listener(listener, mux) ?? panic("serve")

@@ -423,6 +423,8 @@ pub struct SemaForeignImportBinding {
 
 pub struct SemaRegistrationImportEdge {
     pub source_module_identity: String
+    pub source_scope: String{""}
+    pub source_scope_exported: Bool{false}
     pub target_module_identity: String
     pub target_package_identity: String
     pub foreign_binding: SemaForeignImportBinding?
@@ -2168,7 +2170,8 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
     // is the only row (Rust `Bundle/ItemReuse.rs` `by_identity`).
     module_rows := [String:Int]{}
     loop input in inputs {
-        prepared := sema_registration_prepare_module_with(input, sema_generic_modules_imported(inputs, edges, input.module_identity))
+        bound_input :: sema_marker_module_bind_input(inputs, edges, input)
+        prepared := sema_registration_prepare_module_with(bound_input, sema_generic_modules_imported(inputs, edges, input.module_identity))
         loop diagnostic in prepared.diagnostics -> &diagnostics.push(diagnostic)
         duplicate :: module_rows.get(prepared.module_row.module_identity) != None
         if !duplicate -> module_rows[prepared.module_row.module_identity] = modules.len()
@@ -2210,6 +2213,20 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
             graph.complete = false
         }
     }
+    // Marker namespace/declaration laws precede import member registration and
+    // generated rule bodies. The complete loader edge set detects ambiguous
+    // qualified markers even when two imports share their local alias.
+    if sema_marker_module_check(graph) == .Val(marker_diagnostics) {
+        loop diagnostic in marker_diagnostics -> &graph.diagnostics.push(diagnostic)
+        if marker_diagnostics.len() > 0 {
+            graph.complete = false
+            return graph
+        }
+    } else {
+        graph.internal_problem = Val("the canonical Prelude marker registry is unavailable")
+        graph.complete = false
+        return graph
+    }
     sema_registration_attach_namespace_impls(&graph)
     sema_registration_inject_compiler_builtins(&graph)
     graph.unit_facts = sema_registration_unit_facts(graph)
@@ -2222,13 +2239,15 @@ pub fn sema_registration_prepare_graph(inputs: [SemaRegistrationModuleInput], ed
             next
         }
         source_module_index :: source_index ?? 0
-        declared :: loop source_declaration in graph.modules[source_module_index].program.imports {
+        root_declared :: loop source_declaration in graph.modules[source_module_index].program.imports {
             if source_declaration.span.start == edge.declaration.span.start && source_declaration.span.end == edge.declaration.span.end -> break true
         } ?? false
+        declared :: if edge.source_scope == "" -> root_declared else -> sema_marker_module_import_declared(graph.modules[source_module_index].program.items, edge.source_scope, edge.declaration.span, "")
         if {
             !declared -> sema_registration_push_graph_diagnostic(&graph, source_module_index, sema_error("E0003", edge.declaration.span, "an import edge has no source declaration", "semantic preparation only registers imports present in the source program", "retain the original ImportDecl when constructing the resolved edge"))
             edge.target_package_identity != "" && edge.target_package_identity != graph.modules[target_index ?? 0].package_identity -> sema_registration_push_graph_diagnostic(&graph, source_module_index, sema_error("E0003", edge.declaration.span, "an import edge has the wrong target package identity", "package visibility follows the loaded target module identity", "copy the target package identity from the resolved module"))
             else -> {
+                if edge.source_scope != "" -> next
                 target_package := edge.target_package_identity
                 if target_package == "" -> target_package = graph.modules[target_index ?? 0].package_identity
                 sema_registration_add_import(&graph, source_module_index, edge.declaration, edge.target_module_identity, target_package)

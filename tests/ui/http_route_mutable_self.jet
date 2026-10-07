@@ -1,0 +1,15 @@
+use core.http.server as server
+
+struct Jokes {
+    count: Int
+    #server.Get("/jokes")
+    fn joke(&self) -> HTTPResponse HTTPError! {
+        self.count += 1
+        Ok(server.response(200, "joke"))
+    }
+}
+
+fn run() {
+    mux :: server.mux()
+    mux.mount(Jokes{count: 0})
+}

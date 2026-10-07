@@ -2325,6 +2325,23 @@ impl<'a> Checker<'a> {
         if let Some(alias) = alias.filter(|_| core_call_is_known(module, name)) {
             self.record_import_alias_reference(alias, alias_span);
         }
+        if module == "core.web" && name == "openapi" {
+            if args.len() != 1 {
+                self.diags.push(wrong_core_arity("openapi", 1, args.len(), span));
+                return None;
+            }
+            let ty = self.infer(&mut args[0].expr)?;
+            let generic = matches!(&ty, Type::Named(name) if self.type_param_scope.iter().any(|parameter| &parameter.name == name));
+            if !generic && !matches!(&ty, Type::Named(name) if matches!(name.as_str(), "HTTPRouter" | "HTTPMux")) {
+                self.diags.push(Diagnostic::error("E0112",
+                    format!("web.openapi needs an HTTPRouter or HTTPMux, not {}", ty.show()),
+                    "OpenAPI reads the checked route facts of the value the program serves".to_string(),
+                    "pass your router or mux to web.openapi".to_string(), Some(args[0].expr.span())));
+                return None;
+            }
+            *resolved_ret_out = Some(Type::String);
+            return Some(Type::String);
+        }
         let fixed_sig =
             resolved_core_fixed_sig(module, name, type_args, span, &mut self.diags);
         // D-A11YGATE1=B (c134 Phase 6): E2930 (empty accessible label on an

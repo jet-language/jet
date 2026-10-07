@@ -124,7 +124,8 @@ struct ParserFenceNumberedRange {
 // Ordinary source has no fences: keep the lexer's token list untouched, since
 // the parser skips comment trivia itself. A fenced source is expanded over its
 // comment-free tokens, so a comment never splits or joins a fence entry.
-fn parser_prepare_tokens(tokens: [Token]) -> ParserFenceExpansion {
+fn parser_prepare_tokens(input: [Token]) -> ParserFenceExpansion {
+    tokens :: expand_named_marker_groups(input, [NamedMarkerGroupTokens]{})
     has_fences :: loop token in tokens {
         if token.kind == TOKEN_FENCE_OPEN || token.kind == TOKEN_FENCE_CLOSE -> break true
     } ?? false

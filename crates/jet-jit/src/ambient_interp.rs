@@ -229,44 +229,6 @@ struct InterpreterHttpTransport {
     next_pending: i64,
 }
 
-fn http_mux_invocation(
-    route: &InterpreterHttpRoute,
-    request: &MirRuntimeValue,
-) -> Result<MirRuntimeValue, String> {
-    let (method, path, _body) = http_route_request(request)?;
-    if !route.method.eq_ignore_ascii_case(method)
-        || !crate::net_http_rt::jet_http_route_matches_path(&route.parsed_pattern, path)
-    {
-        return Err("HTTP mux route was selected for a non-matching request".to_string());
-    }
-    if route.handler_param_names.len() > 1 {
-        return Err("HTTP mux handler accepts at most one request parameter".to_string());
-    }
-    let mut request = request.clone();
-    if let MirRuntimeValue::Struct { fields, .. } = &mut request {
-        let params = crate::net_http_rt::jet_http_route_params_path(&route.parsed_pattern, path)?
-            .into_iter()
-            .map(|(name, value)| (MirConstKey::String(name), MirRuntimeValue::String(value)))
-            .collect();
-        if let Some((_, value)) = fields.iter_mut().find(|(name, _)| name == "params") {
-            *value = MirRuntimeValue::Map(params);
-        } else {
-            fields.push(("params".to_string(), MirRuntimeValue::Map(params)));
-        }
-    }
-    let args = if route.handler_param_names.is_empty() {
-        Vec::new()
-    } else {
-        vec![request]
-    };
-    Ok(MirRuntimeValue::Struct {
-        type_name: "HTTPRouteInvocation".to_string(),
-        fields: vec![
-            ("handler".to_string(), route.handler.clone()),
-            ("args".to_string(), MirRuntimeValue::List(args)),
-        ],
-    })
-}
 
 fn http_router_diag(message: impl Into<String>, span: Span) -> Diagnostic {
     Diagnostic::error(
@@ -857,7 +819,18 @@ fn http_route_invocation(
                 return Err("HTTP route has more than one unbound handler parameter".to_string());
             }
             request_seen = true;
-            args.push(request.clone());
+            let mut bound_request = request.clone();
+            if let MirRuntimeValue::Struct { fields, .. } = &mut bound_request {
+                let params = MirRuntimeValue::Map(path_params.iter().map(|(name, value)|
+                    (MirConstKey::String(name.clone()), MirRuntimeValue::String(value.clone()))
+                ).collect());
+                if let Some((_, value)) = fields.iter_mut().find(|(name, _)| name == "params") {
+                    *value = params;
+                } else {
+                    fields.push(("params".to_string(), params));
+                }
+            }
+            args.push(bound_request);
             continue;
         };
         let raw = match parameter.location.as_str() {
@@ -1079,7 +1052,7 @@ impl InterpreterAmbientContext {
         args: Vec<MirRuntimeValue>,
         span: Span,
     ) -> Option<Result<AmbientMirHandleResult, Diagnostic>> {
-        if operation == "http_router.openapi" {
+        if matches!(operation, "http_router.openapi" | "http_mux.openapi") {
             let Some(handle) = handle else {
                 return Some(Err(http_router_diag(
                     "HTTPRouter OpenAPI export has no typed router receiver",
@@ -1094,14 +1067,15 @@ impl InterpreterAmbientContext {
             }
             let routes = {
                 let state = self.state();
-                let Some(router) = state.http_routers.get(&handle) else {
-                    return Some(Err(http_router_diag(
-                        "HTTPRouter OpenAPI export used an unknown interpreter handle",
-                        span,
-                    )));
+                let routes = if operation == "http_mux.openapi" {
+                    state.http_muxes.get(&handle).map(|mux| &mux.routes)
+                } else {
+                    state.http_routers.get(&handle).map(|router| &router.routes)
                 };
-                router
-                    .routes
+                let Some(routes) = routes else {
+                    return Some(Err(http_router_diag("OpenAPI export used an unknown route handle", span)));
+                };
+                routes
                     .iter()
                     .map(|route| {
                         (
@@ -1212,6 +1186,9 @@ impl InterpreterAmbientContext {
         args: Vec<MirRuntimeValue>,
         span: Span,
     ) -> Option<Result<AmbientMirHandleResult, Diagnostic>> {
+        if operation == "http_mux.openapi" {
+            return self.mir_http_router(operation, handle, args, span);
+        }
         if operation == "http_mux.serve_once" {
             return self.mir_http_serve_once(handle, &args, span);
         }
@@ -1742,19 +1719,14 @@ impl InterpreterAmbientState {
                         span,
                     )));
                 };
-                let (method, pattern, handler, names) = match args.as_slice() {
-                    [
-                        MirRuntimeValue::String(method),
-                        MirRuntimeValue::String(pattern),
-                        handler,
-                    ] => (method, pattern, handler, Vec::new()),
+                let (method, pattern, handler, contract_json, names) = match args.as_slice() {
                     [
                         MirRuntimeValue::String(method),
                         MirRuntimeValue::String(pattern),
                         handler,
                         MirRuntimeValue::String(_source_file),
                         MirRuntimeValue::Int(_source_line),
-                        MirRuntimeValue::String(_contract_json),
+                        MirRuntimeValue::String(contract_json),
                         MirRuntimeValue::List(names),
                     ] => {
                         let names = match names
@@ -1773,7 +1745,7 @@ impl InterpreterAmbientState {
                             Ok(names) => names,
                             Err(error) => return Some(Err(error)),
                         };
-                        (method, pattern, handler, names)
+                        (method, pattern, handler, contract_json, names)
                     }
                     _ => {
                         return Some(Err(http_router_diag(
@@ -1797,12 +1769,10 @@ impl InterpreterAmbientState {
                         span,
                     )));
                 }
-                if names.len() > 1 {
-                    return Some(Err(http_router_diag(
-                        "HTTP mux handler accepts at most one request parameter",
-                        span,
-                    )));
-                }
+                let contract_json = match crate::net_http_rt::jet_http_route_complete_contract(method, pattern, contract_json.clone()) {
+                    Ok(contract) => contract,
+                    Err(error) => return Some(Err(http_router_diag(error, span))),
+                };
                 let parsed_pattern = match crate::net_http_rt::jet_http_route_pattern(pattern) {
                     Ok(pattern) => pattern,
                     Err(error) => return Some(Err(http_router_diag(error, span))),
@@ -1830,7 +1800,7 @@ impl InterpreterAmbientState {
                     parsed_pattern,
                     handler: handler.clone(),
                     handler_param_names: names,
-                    contract_json: String::new(),
+                    contract_json,
                 });
                 Some(Ok(AmbientMirHandleResult::Value(MirRuntimeValue::Unit)))
             }
@@ -1906,7 +1876,7 @@ impl InterpreterAmbientState {
                     ))));
                 };
                 let route = &mux.routes[index];
-                Some(Ok(match http_mux_invocation(route, request) {
+                Some(Ok(match http_route_invocation(route, request) {
                     Ok(invocation) => AmbientMirHandleResult::Value(invocation),
                     Err(error) => AmbientMirHandleResult::Value(http_route_error_response(&error)),
                 }))
@@ -2186,6 +2156,7 @@ fn dispatch_mir_handle(
         operation,
         "http_mux.new"
             | "http_mux.register"
+            | "http_mux.openapi"
             | "http_mux.dispatch"
             | "http_mux.serve_once"
             | "http_mux.respond"

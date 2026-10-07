@@ -234,7 +234,7 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
             return ParsedItemOrImport{item: Val(value), import: None, handled: true}
         }
         parser_marker_decl_ahead(&state) -> {
-            value :: parser_parse_marker_decl(&state)
+            value :: parser_parse_marker_decl(&state, modifiers)
             return ParsedItemOrImport{item: Val(value), import: None, handled: true}
         }
         parser_fact_decl_ahead(&state) -> {
@@ -451,6 +451,17 @@ fn parser_foreign_private_ahead(state: &JetParserState) -> Bool Never! {
     parser_is_item_keyword(next_kind) || next_kind == TOKEN_KW_PUB || next_kind == TOKEN_HASH
 }
 
+fn parser_expect_marker_path(state: &JetParserState, reason: String) -> Token {
+    name := parser_expect_name(&state, reason)
+    loop parser_current_kind(&state) == TOKEN_DOT {
+        parser_bump(&state)
+        member :: parser_expect_name(&state, "a library marker path segment")
+        name.payload.decoded = "{name.payload.decoded}.{member.payload.decoded}"
+        name.span.end = member.span.end
+    }
+    name
+}
+
 fn parser_parse_marker(state: &JetParserState) -> Marker {
     hash :: parser_expect(&state, TOKEN_HASH, "`#` before a marker")
     negated := false
@@ -459,7 +470,7 @@ fn parser_parse_marker(state: &JetParserState) -> Marker {
         bang_start = parser_bump(&state).span.start
         negated = true
     }
-    name :: parser_expect_name(&state, "after `#` in a declaration marker")
+    name :: parser_expect_marker_path(&state, "after `#` in a declaration marker")
     if negated -> parser_check_signed_marker(&state, bang_start, name)
     args := ParsedMarkerArgs{args: [MarkerCallArg]{}, labels: [CallLabel?]{}}
     end := name.span

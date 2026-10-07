@@ -468,8 +468,23 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_marker_decl(&mut self, declaration: &crate::AST::MarkerDecl) {
+        if declaration.is_pub {
+            self.write("pub ");
+        } else if declaration.is_package_pub {
+            self.write("pub(package) ");
+        }
         self.write("marker ");
         self.write(&declaration.name);
+        if let Some(members) = &declaration.group {
+            self.write(" = #[");
+            for (index, member) in members.iter().enumerate() {
+                if index > 0 { self.write(", "); }
+                self.fmt_marker(member);
+            }
+            self.write("]");
+            self.newline();
+            return;
+        }
         self.write("(");
         self.fmt_marker_decl_params(&declaration.params, declaration.name_span.end);
         self.write(")");

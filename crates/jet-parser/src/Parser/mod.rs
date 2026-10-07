@@ -27,6 +27,8 @@ mod Items;
 mod Modules;
 mod Statements;
 mod Types;
+mod NamedMarkerGroups;
+pub use NamedMarkerGroups::{expand_named_marker_groups, expand_named_marker_groups_with_uses, map_marker_group_members, marker_path_at, marker_path_end, named_marker_groups, NamedMarkerGroupTokens};
 
 /// D-TAIL-RETURN1=A: value-block parsers accept a final control statement
 /// only when it cannot fall through to the closing brace. Keep this structural
@@ -182,6 +184,7 @@ pub fn parse_for_check_with_source(
 
 fn prepare_tokens<'a>(
     toks: &'a [Token],
+    expand_groups: bool,
 ) -> Result<(Cow<'a, [Token]>, Vec<crate::AST::FencedStatement>), Vec<Diagnostic>> {
     // Ordinary source has neither comments nor fences. Keep its lexer-owned
     // token slice: the parser only reads tokens, and every span is already a
@@ -205,6 +208,12 @@ fn prepare_tokens<'a>(
     } else {
         Cow::Borrowed(toks)
     };
+    let code = if expand_groups {
+        match expand_named_marker_groups(code.as_ref(), &[]) {
+            Cow::Borrowed(_) => code,
+            Cow::Owned(expanded) => Cow::Owned(expanded),
+        }
+    } else { code };
     if has_fences {
         let (expanded, fenced_statements) = crate::FencedNames::expand(code.as_ref())?;
         check_token_nesting(&expanded)?;
@@ -219,7 +228,7 @@ fn parse_for_check_inner(
     toks: &[Token],
     source: Option<&str>,
 ) -> Result<(Program, Vec<Diagnostic>), Vec<Diagnostic>> {
-    let (toks, fenced_statements) = prepare_tokens(toks)?;
+    let (toks, fenced_statements) = prepare_tokens(toks, true)?;
 
     let mut p = Parser {
         toks: &toks,
@@ -275,7 +284,7 @@ fn parse_inner(
     allow_environment_reads: bool,
     source: Option<&str>,
 ) -> Result<Program, Vec<Diagnostic>> {
-    let (toks, fenced_statements) = prepare_tokens(toks)?;
+    let (toks, fenced_statements) = prepare_tokens(toks, !for_fmt)?;
     let mut p = Parser {
         toks: &toks,
         source: source.map(str::to_owned),

@@ -2328,7 +2328,7 @@ pub fn format_source_with_options(
     // `parse_for_check` is the entry that reports the diagnostics
     // `parse_for_fmt` drops; a source it rejects outright is recovered too.
     let prog = match crate::Parser::parse_for_check_with_source(&toks, &migrated) {
-        Ok((prog, parse_diags)) => {
+        Ok((_, parse_diags)) => {
             // The retired callable/result arrow shapes preserve the function
             // body AST, so simplify may still run and canonicalize them. A
             // recovered control-body diagnostic does not: its AST is only a
@@ -2341,7 +2341,9 @@ pub fn format_source_with_options(
             {
                 options.simplify = false;
             }
-            prog
+            // Checking expands fixed groups; formatting must retain the
+            // authored group application rather than print its lowered stack.
+            crate::Parser::parse_for_fmt(&toks)?
         }
         Err(_) => {
             options.simplify = false;

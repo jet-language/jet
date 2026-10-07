@@ -68,6 +68,8 @@ mod web_kernel {
         pub(crate) mod jet_std {
             use super::JetShow;
             pub(crate) use jet_foundation::Outcome::{jet_outcome_of, JetTaskFailure};
+            use crate::Comptime::SyncLite::jet_int_to_string;
+            use jet_foundation::EncodingJson::quote_json;
             pub(crate) use crate::Comptime::UrlLite::url_percent_decode_str
                 as jet_url_percent_decode_str;
             pub(crate) use crate::Comptime::UrlLite::url_percent_encode

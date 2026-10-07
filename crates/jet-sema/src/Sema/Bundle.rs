@@ -2320,6 +2320,7 @@ mod structure_tests {
                 path: std::path::PathBuf::from("cache-accounting.jet"),
                 display: "cache-accounting.jet".to_string(),
                 source: source.to_string(),
+                frontend_source: None,
                 alias: "main".to_string(),
                 imports: std::mem::take(&mut program.imports),
                 items: std::mem::take(&mut program.items),

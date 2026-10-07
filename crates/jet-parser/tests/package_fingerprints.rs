@@ -21,6 +21,7 @@ fn module(path: &Path, source: &str) -> LoadedModule {
         path: path.to_path_buf(),
         display: path.display().to_string(),
         source: source.to_string(),
+        frontend_source: None,
         alias: path.file_stem().unwrap().to_string_lossy().into_owned(),
         imports: std::mem::take(&mut program.imports),
         items: std::mem::take(&mut program.items),
