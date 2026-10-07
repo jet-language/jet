@@ -16,6 +16,8 @@ fn trap_flush_stdout() {
     error_slot :: root + I64{4088}
     // The foreign error-pointer store is non-atomic: serialize failed flushes
     // separately from the heap lock, which Rust error construction may need.
+    // This lock is not reentrant: the current Rust flush only returns an
+    // error. A future hook must not raise a trap while this lock is held.
     alloc_lock(flush_lock)
     #Unsafe("the zero-sized stdout box and aligned error slot remain live; the dedicated flush lock excludes concurrent foreign pointer stores") {
         stdout :: trap_rust_stdout()
