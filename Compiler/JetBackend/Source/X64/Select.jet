@@ -555,6 +555,7 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
         }
         .Move(dst, src) -> x64_emit_move(&emitter, locations[src.value], locations[dst.value])
         .Copy(dst, src) -> x64_emit_move(&emitter, locations[src.value], locations[dst.value])
+        .Bitcast(dst, src) -> x64_emit_move(&emitter, locations[src.value], locations[dst.value])
         .Call(dst, _, callee, args) -> {
             target :: if callee == {
                 .Function(id) -> X64CallTarget.Direct{target: X64RelocTarget.Function{id: id}}
