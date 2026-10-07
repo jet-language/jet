@@ -663,7 +663,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     let rust_code = compiled.rust;
     let ffi_link = compiled.ffi;
     let user_code = strip_vetted_prelude_modules(&rust_code);
-
+    if let Some(dir) = std::env::var_os("TF5_DUMP_RUST") { let _ = fs::write(PathBuf::from(dir).join(stem.replace('/', "__") + ".rs"), &rust_code); }
     if GATED_UNSAFE_STEMS.contains(stem) {
         assert!(
             user_code
