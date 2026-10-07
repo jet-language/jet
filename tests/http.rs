@@ -197,7 +197,7 @@ struct Jokes {
 }
 fn run() {
     mux :: server.mux()
-    mux.get("/direct/:id", (id: JokeID) HTTPResponse HTTPError! -> Ok(server.response(200, "joke={id.value}")))
+    mux.get("/direct/:id", (id: JokeID) -> Ok(server.response(200, "joke={id.value}")))
     mux.mount(Jokes{})
     schema :: web.openapi(mux)
     print(schema.contains("\"value\"") && schema.contains("/mounted/") && schema.contains("/direct/"))
