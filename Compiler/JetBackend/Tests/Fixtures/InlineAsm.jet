@@ -68,6 +68,7 @@ fn fx_asm_program(functions: [MIRFunction]) -> MIRProgram Never! {
             close_function: None,
             close_foreign: None,
             undo_function: None,
+            unsafe_gate: function.unsafe_gate,
         },
         )
     }
@@ -119,7 +120,7 @@ fn fx_inline_asm_memory() -> MIRProgram Never! {
 fn fx_inline_asm_call(two: Bool) -> LIRModule Never! {
     name :: if two -> "os_call_address_two" else -> "os_call_address"
     params :: if two -> [String]{"address", "first", "second"} else -> [String]{"address", "argument"}
-    lowered :: lir_lower_callable(fx_asm_program([MIRFunction]{fx_asm_leaf(name, params, true)}), mir_function_id(name))
+    lowered :: lir_lower_callables(fx_asm_program([MIRFunction]{fx_asm_leaf(name, params, true)}), [MIRFunctionID]{mir_function_id(name)})
     if lowered.issues.len() > 0 -> panic("assembly callable refused: {lowered.issues}")
     p := lowered.lir
     callback_id :: LIRFunctionID{value: p.functions.len()}
@@ -195,7 +196,7 @@ fn fx_inline_asm_refusals() -> Bool Never! {
     leaf.span = Span{start: 0, end: source.bytes().len()}
     p.functions = [MIRFunction]{leaf}
     p.source_files = [MIRSourceFile]{MIRSourceFile{id: fx_source_file(), path: "bad.jet", source: source}}
-    refused :: lir_lower_callable(p, leaf.id)
+    refused :: lir_lower_callables(p, [MIRFunctionID]{leaf.id})
     refused.issues.len() > 0 && refused.entry == .None && refused.issues[0].message.starts_with("inline asm:")
 }
 
@@ -255,7 +256,7 @@ fn fx_inline_asm_fixed() -> MIRProgram Never! {
 
 fn fx_inline_asm_int_input() -> LIRModule Never! {
     leaf :: fx_asm_leaf("os_load_word", [String]{"address"}, true)
-    lowered :: lir_lower_callable(fx_asm_program([MIRFunction]{leaf}), leaf.id)
+    lowered :: lir_lower_callables(fx_asm_program([MIRFunction]{leaf}), [MIRFunctionID]{leaf.id})
     if lowered.issues.len() > 0 -> panic("checked Int asm leaf refused")
     p := lowered.lir
     signature :: LIRSignatureID{value: p.signatures.len()}
