@@ -373,6 +373,7 @@ const PRELUDE_PARTS: &[&str] = &[
     RESOURCE_FACTS_PRELUDE,
     include_str!("../../../jet-foundation/src/Evidence.rs"),
     include_str!("../Prelude/Core/TestEvidence.rs"),
+    include_str!("../Prelude/Core/NativeTaskBody.rs"),
     include_str!("../Prelude/Core.rs"),
     include_str!("../Prelude/Core/ViewAccess.rs"),
     // D-EXPOP1=A / D-EXPSEM1=A: `^`. Shared verbatim with the wasm module
@@ -1293,6 +1294,14 @@ struct JetTestOutcome {
     stdout: String,
     stderr: String,
     property_cases: Option<u64>,
+}
+
+// One unit outcome constructor for Rust-emitted and native callback harnesses.
+fn jet_test_unit_outcome(name: String, expected_failure: bool, result: Result<(), String>) -> JetTestOutcome {
+    let stdout = jet_test_take_output();
+    let (failed, stderr) = match result { Ok(()) => (false, String::new()), Err(error) => (true, error) };
+    let skipped = jet_test_take_whole_skip();
+    JetTestOutcome { name, ok: skipped || (failed == expected_failure), expected_failure, skipped, stdout, stderr, property_cases: None }
 }
 
 fn jet_test_filter() -> Option<String> {
@@ -2329,6 +2338,7 @@ fn push_corelib_prelude_for_test_harness_with_forces(
     out.push_str(TESTING_SHARED_PRELUDE);
     out.push_str(TEST_PRELUDE);
     out.push_str(PROP_PRELUDE);
+    out.push_str(include_str!("../Prelude/Core/CAbiTest.rs"));
 }
 
 fn push_corelib_prelude_inner(
@@ -3655,6 +3665,7 @@ fn push_corelib_prelude_body(
     );
     out.push_str(include_str!("../Prelude/Core/CAbi.rs"));
     out.push_str("\n// JET_VETTED_UNSAFE_END: jet_c_abi\n");
+    out.push_str(include_str!("../Prelude/Core/CAbiSession.rs"));
     // Card #1751: the one 80x24 terminal default, read by CommonTypes.rs's
     // TerminalPolicy::default (in the kernel closure above) and by
     // ProcessPty.rs's PtyConfig::default when process/PTY support is emitted.

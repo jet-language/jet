@@ -5,7 +5,7 @@
 // jet_option_map_ref). The receiver is a borrowed read, so kept elements are
 // copies; a closure argument moved into the method is dropped after it.
 use jet_foundation.[
-    MIRCallArg, MIRInstruction, MIRPreludeCallID, MIRProgram, MIRType,
+    MIRCallArg, MIRInstruction, MIRPreludeCall, MIRPreludeCallID, MIRProgram, MIRType,
     MIRTypeKind, MIRValueID, mir_nominal_ref, mir_type_display_name,
     mir_type_from_kind,
 ]
@@ -93,8 +93,14 @@ fn lower_call_closure_box(p: MIRProgram, m: &LowerModule, f: &LowerFunction, clo
 
 fn lower_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, args: [MIRCallArg], call: MIRPreludeCallID) Never! {
     row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "ClosureMethod names missing Prelude call {call.value}")
+    if lower_parallel_method(p, c, &m, &f, instruction, receiver, args, row) -> return
     if lower_lazy_closure_method(p, c, &m, &f, instruction, receiver, args, row) -> return
     unsupported :: "semantic operation ClosureMethod {row.module_name}.{row.member} is not lowered at O0 yet"
+    // An inline element loop would keep running past a callback that ended
+    // in Stopped and consume its unwritten result; in a stop-point module
+    // (#4720) only the OCB1 runtime kernels (LazyIter.jet) carry callbacks.
+    if m.stop_points -> return lower_fail(&m, &f, "inline ClosureMethod {row.module_name}.{row.member} in a stop-point module is not lowered at O0 yet")
+    if lower_map_closure_method(p, c, &m, &f, instruction, receiver, args, row) -> return
     symbol :: lower_runtime_symbol(row)
     receiver_ty :: lower_value_type(c, receiver) ?? return lower_fail(&m, &f, unsupported)
     result_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, unsupported)
@@ -285,6 +291,129 @@ fn lower_closure_search(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     } else {
         lower_emit(&f, LIRInst.Move{dst: dst, src: each.exit[0]})
     }
+    if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
+}
+
+// Map callbacks receive the borrowed key and value separately, in key order.
+// Explicit Move parameters get their own copies, not the Map's stored owners.
+fn lower_map_callback_input(p: MIRProgram, m: &LowerModule, f: &LowerFunction, closure_ty: MIRType, index: Int, value: LIRValueID, ty: MIRType) -> LIRValueID Never! {
+    if !lower_closure_param_moves(closure_ty, index) || !lower_needs_drop(p, ty) -> return ~value
+    copied :: lower_new_like(&f, value)
+    lower_clone_into(p, &m, &f, value, copied, ty)
+    copied
+}
+
+fn lower_map_closure_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, args: [MIRCallArg], row: MIRPreludeCall) -> Bool Never! {
+    symbol :: lower_runtime_symbol(row)
+    searching :: symbol == "jet_map_any" || symbol == "jet_map_all"
+    filtering :: symbol == "jet_map_filter"
+    mapping :: symbol == "jet_map_map_values"
+    folding :: symbol == "jet_map_fold"
+    if !searching && !filtering && !mapping && !folding -> return false
+    receiver_ty :: lower_value_type(c, receiver) ?? return false
+    shape :: lower_map_shape(p, receiver_ty) ?? return false
+    if args.len() != (if folding -> 2 else -> 1) {
+        lower_fail(&m, &f, "Map {row.member} has no checked callback")
+        return true
+    }
+    closure_arg :: args[args.len() - 1]
+    closure_ty :: lower_value_type(c, closure_arg.value) ?? return true
+    result_ty :: lower_checked_type(c, instruction) ?? return true
+    if folding {
+        lower_map_closure_fold(p, c, &m, &f, instruction, receiver, shape, args[0], closure_arg, closure_ty, result_ty)
+        return true
+    }
+    map :: lower_use(&m, &f, receiver) ?? return true
+    closure :: lower_use(&m, &f, closure_arg.value) ?? return true
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    if searching {
+        all :: symbol == "jet_map_all"
+        start :: lower_const_flag(&f, if all -> 1 else -> 0)
+        each :: lower_each_begin(p, &f, map, shape.entry, [LIRValueID]{start})
+        key :: lower_read_at(p, &f, each.address, shape.key_offset, shape.key) ?? return true
+        value :: lower_read_at(p, &f, each.address, shape.value_offset, shape.value) ?? return true
+        key_arg :: lower_map_callback_input(p, &m, &f, closure_ty, 0, key, shape.key)
+        value_arg :: lower_map_callback_input(p, &m, &f, closure_ty, 1, value, shape.value)
+        keep :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{key_arg, value_arg}, mir_type_from_kind(MIRTypeKind.Bool)) ?? return true
+        next_block :: lower_new_block(&f)
+        done :: lower_target(each.done, [LIRValueID]{keep})
+        next_target :: lower_target(next_block, [LIRValueID]{})
+        lower_seal(&f, LIRTerminator.Branch{condition: keep, then_target: if all -> next_target else -> done, else_target: if all -> done else -> next_target})
+        lower_start(&f, next_block, [LIRValueID]{})
+        lower_each_end(&f, each, [LIRValueID]{keep})
+        lower_emit(&f, LIRInst.Move{dst: dst, src: each.exit[0]})
+    } else {
+        output :: lower_map_shape(p, result_ty) ?? return true
+        list_ty :: mir_type_from_kind(MIRTypeKind.List{inner: output.entry})
+        lower_storage_into(p, &f, dst, result_ty)
+        lower_store_word(&f, dst, 0, 0)
+        lower_store_word(&f, dst, 8, 0)
+        lower_store_word(&f, dst, 16, 0)
+        each :: lower_each_begin(p, &f, map, shape.entry, [LIRValueID]{})
+        key :: lower_read_at(p, &f, each.address, shape.key_offset, shape.key) ?? return true
+        value :: lower_read_at(p, &f, each.address, shape.value_offset, shape.value) ?? return true
+        key_arg :: lower_map_callback_input(p, &m, &f, closure_ty, 0, key, shape.key)
+        value_arg :: lower_map_callback_input(p, &m, &f, closure_ty, 1, value, shape.value)
+        call_ty :: if filtering -> mir_type_from_kind(MIRTypeKind.Bool) else -> output.value
+        out :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{key_arg, value_arg}, call_ty) ?? return true
+        skipped := LIRBlockID?{None}
+        if filtering {
+            kept :: lower_new_block(&f)
+            skip :: lower_new_block(&f)
+            lower_seal(&f, LIRTerminator.Branch{condition: out, then_target: lower_target(kept, [LIRValueID]{}), else_target: lower_target(skip, [LIRValueID]{})})
+            lower_start(&f, kept, [LIRValueID]{})
+            skipped = Val(skip)
+        }
+        entry :: lower_new_storage(p, &f, output.entry)
+        owned_key :: lower_new_like(&f, key)
+        lower_clone_into(p, &m, &f, key, owned_key, shape.key)
+        lower_write_at(p, &f, entry, output.key_offset, owned_key, output.key)
+        stored := out
+        if filtering {
+            stored = lower_new_like(&f, value)
+            lower_clone_into(p, &m, &f, value, stored, shape.value)
+        }
+        lower_write_at(p, &f, entry, output.value_offset, stored, output.value)
+        // The Map header is the same List-of-entry layout; appending preserves
+        // its already sorted keys without another lookup or reordering pass.
+        lower_call_helper(&m, &f, "list.push", list_ty, [LIRValueID]{dst, entry}, None)
+        if skipped == .Val(skip) {
+            lower_seal(&f, LIRTerminator.Jump{target: lower_target(skip, [LIRValueID]{})})
+            lower_start(&f, skip, [LIRValueID]{})
+        }
+        lower_each_end(&f, each, [LIRValueID]{})
+    }
+    if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
+    true
+}
+
+fn lower_map_closure_fold(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, shape: LowerMapShape, init_arg: MIRCallArg, closure_arg: MIRCallArg, closure_ty: MIRType, result_ty: MIRType) Never! {
+    if lower_repr_layout(lower_repr(p, result_ty)) == None -> return lower_fail(&m, &f, "Map fold has no native accumulator representation")
+    map :: lower_use(&m, &f, receiver) ?? return
+    init :: lower_use(&m, &f, init_arg.value) ?? return
+    closure :: lower_use(&m, &f, closure_arg.value) ?? return
+    start := init
+    if init_arg.access != .Move || !lower_value_owned(c, init_arg.value) {
+        start = lower_new_like(&f, init)
+        lower_clone_into(p, &m, &f, init, start, result_ty)
+    }
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    inline :: lower_is_inline(p, result_ty)
+    if inline {
+        lower_storage_into(p, &f, dst, result_ty)
+        lower_write_at(p, &f, dst, 0, start, result_ty)
+    }
+    each :: lower_each_begin(p, &f, map, shape.entry, if inline -> [LIRValueID]{} else -> [LIRValueID]{start})
+    current :: if inline -> dst else -> each.state[0]
+    key :: lower_read_at(p, &f, each.address, shape.key_offset, shape.key) ?? return
+    value :: lower_read_at(p, &f, each.address, shape.value_offset, shape.value) ?? return
+    key_arg :: lower_map_callback_input(p, &m, &f, closure_ty, 1, key, shape.key)
+    value_arg :: lower_map_callback_input(p, &m, &f, closure_ty, 2, value, shape.value)
+    out :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{current, key_arg, value_arg}, result_ty) ?? return
+    if !lower_closure_param_moves(closure_ty, 0) -> lower_map_drop_value(p, &m, &f, current, result_ty)
+    if inline -> lower_write_at(p, &f, dst, 0, out, result_ty)
+    lower_each_end(&f, each, if inline -> [LIRValueID]{} else -> [LIRValueID]{out})
+    if !inline -> lower_emit(&f, LIRInst.Move{dst: dst, src: each.exit[0]})
     if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
 }
 

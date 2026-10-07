@@ -84,6 +84,7 @@ fn write_native_scheduler(manifest: &Path) {
     let sources = [
         (manifest.join("../jet-codegen/src/Prelude/Deadline.rs"), false),
         (manifest.join("../jet-codegen/src/Prelude/WorkflowWait.rs"), false),
+        (manifest.join("../jet-codegen/src/Prelude/Core/NativeTaskBody.rs"), false),
         (manifest.join("../jet-codegen/src/SchedulerHost.rs"), false),
         (manifest.join("../jet-codegen/src/Prelude/Core/TimeMonotonic.rs"), false),
         (manifest.join("../jet-codegen/src/Prelude/Core/TimeInstant.rs"), false),

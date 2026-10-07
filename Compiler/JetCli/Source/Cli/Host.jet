@@ -34,6 +34,8 @@ use jet_eval.[
 use jet_foundation.[
     CtValue,
     Diagnostic,
+    MIRTestCase,
+    MIROutputCheck,
     DIAGNOSTIC_ERROR,
     DIAGNOSTIC_LINT,
     Span,
@@ -41,6 +43,7 @@ use jet_foundation.[
     ast_comptime_value_json,
     ast_comptime_value_show,
     diagnostic_from_registry,
+    diagnostic_registry_row,
     diagnostic_render_all,
     mir_sha256_hex,
 ]
@@ -484,18 +487,16 @@ fn jet_cli_compile_run(file: String, source: String, color: Bool, release: Bool,
     }
     output
 }
+fn jet_cli_native_test_unrun_check_report() -> String Never! {
+    row :: diagnostic_registry_row("E3015") ?? panic("native output-check failure is registered")
+    diagnostic :: diagnostic_from_registry(row.code, None, row.what, row.why, row.fix)
+    diagnostic_render_all("", "", [Diagnostic]{diagnostic}, false)
+}
 
-// `jet test <file>` after the compile (Source/CmdCompile.rs `run_test_target`):
-// errors stop it with exit 1; `--verbose` lints precede the run. The harness
-// builds as `.jet/build/.test_<stem>.<pid>` through the rustc path for either
-// profile (the Jet-native backend has no harness entry) and runs with its
-// output captured; its selections reach it as environment: the project root,
-// snapshot updates, the name filter, the shuffle seed, serial runs, the tier
-// marker, and the capture policy. Its stdout and stderr are shown when
-// `--capture=all`, or on a failed run under the default `failed`; the binary
-// is removed, and the exit is 0 when the harness passed, else 1. The evidence
-// report, the claims floor, and the result cache are not ported yet; without
-// a package claims floor the outcome is the harness exit, as in the Rust host.
+
+// `jet test <file>`: native O0 dispatch consumes the NativeTests module API.
+// ProcessSpec retains the project/snapshot/filter/shuffle/serial/capture policy;
+// its stdout is ordinary output, never the framed outcome transport.
 fn jet_cli_test_result(file: String, source: String, color: Bool, verbose: Bool, options: JetCLITestOptions, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
     diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
     if jet_cli_errors(diagnostics).len() > 0 {
@@ -511,8 +512,20 @@ fn jet_cli_test_result(file: String, source: String, color: Bool, verbose: Bool,
     // an executable another is launching.
     stem :: ".test_{jet_cli_stem(file)}.{cli_process.current_pid()}"
     binary :: "{build_dir}/{stem}"
-    built :: jet_cli_build_release(file, result, root, build_dir, stem, binary, color)
-    if built.exit_code != JET_DRIVER_EXIT_OK -> return built
+    native_tests := [MIRTestCase]{}
+    native_checks := [MIROutputCheck]{}
+    if options.release {
+        built :: jet_cli_build_release(file, result, root, build_dir, stem, binary, color)
+        if built.exit_code != JET_DRIVER_EXIT_OK -> return built
+    } else {
+        program :: result.mir ?? return jet_cli_ice("the Jet compiler finished tests without checked MIR")
+        harness :: jet_cli_native_test_harness(program) ?? return jet_cli_ice(err.message)
+        native_checks = harness.output_checks
+        native_tests = jet_cli_native_test_selection(program, harness, options.filter, options.shuffle_seed) ?? return jet_cli_build_failed(err.message, jet_cli_why("E2104"), "correct the selected native test harness", color)
+        runtime_dir :: jet_cli_runtime_dir()
+        key :: jet_cli_runtime_key(runtime_dir) ?? return jet_cli_build_failed("couldn't read the Jet test runtime key {runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}", jet_cli_why("E2105"), "package the matching test runtime beside jet", color)
+        jet_cli_native_test_build(program, native_tests, harness, options.serial, binary, "{runtime_dir}/{key}/{JET_CLI_RUNTIME_PACK_FILE}") ?? return jet_cli_build_failed(err.message, jet_cli_why("E2104"), "correct the named native lowering or runtime problem", color)
+    }
     spec := cli_process.cmd([String]{binary})
     if options.project_root == .Val(project_root) -> spec = spec.env("JET_PROJECT_ROOT", project_root)
     if options.update_snapshots -> spec = spec.env("JET_UPDATE_SNAPSHOTS", "1")
@@ -521,21 +534,33 @@ fn jet_cli_test_result(file: String, source: String, color: Bool, verbose: Bool,
     if options.serial -> spec = spec.env("JET_TEST_SERIAL", "1")
     if options.trace_tiers -> spec = spec.env("JET_TEST_TRACE_TIERS", "1")
     spec = spec.env("JET_TEST_CAPTURE", options.capture)
-    receipt :: spec.run() ?? {
-        cli_files.remove(binary).drop("the run already failed; a leftover harness binary is harmless")
-        return JetDriverVerbOutput{
-            stdout: "",
-            stderr: jet_cli_report("E2105", "couldn't run tests in `{file}`: {err}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color),
-            exit_code: JET_DRIVER_EXIT_USER_ERROR,
+    receipt := ProcessReceipt?{None}
+    output_text := ""
+    error_text := ""
+    if options.release {
+        ran :: spec.run() ?? {
+            cli_files.remove(binary).drop("the run already failed")
+            return jet_cli_build_failed("couldn't run tests in `{file}`: {err}", jet_cli_why("E2105"), "correct the named process problem", color)
         }
+        receipt = Val(ran)
+        output_text = ran.output
+        error_text = ran.errors
+    } else {
+        ran :: jet_cli_native_test_run(spec, native_tests, native_checks, jet_cli_native_test_unrun_check_report, options.serial, "{binary}.records") ?? {
+            cli_files.remove(binary).drop("the native run already failed")
+            return jet_cli_ice(err.message)
+        }
+        receipt = Val(ran.receipt)
+        output_text = ran.output
+        error_text = ran.errors
     }
     cli_files.remove(binary).drop("the harness is one-shot; a leftover binary is harmless")
-    passed :: receipt.success
+    passed :: (receipt ?? panic("both test dispatch paths produce a receipt")).success
     show :: options.capture == "all" || (!passed && options.capture == "failed")
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: if passed -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR}
     if show {
-        output.stdout = receipt.output
-        output.stderr = receipt.errors
+        output.stdout = output_text
+        output.stderr = error_text
     }
     output
 }
@@ -546,7 +571,7 @@ fn jet_cli_compile_test(file: String, source: String, color: Bool, verbose: Bool
         &stderr_handle.write(options.status).drop("jet stderr")
     }
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color, true, threads, JetDriverCompileMode.Test)
+    compiled :: jet_cli_compile_file(file, color, options.release, threads, JetDriverCompileMode.Test)
     if compiled == {
         .Refused(refusal) -> output = ~refusal
         .Compiled(result, snapshot) -> output = jet_cli_test_result(file, source, color, verbose, options, result, snapshot)

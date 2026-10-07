@@ -17,8 +17,9 @@
 //   in the low byte.
 // - A cursor handle is an owned `Box<JetLoopRangeCursor>`.
 //
-// Generated code has no unwind tables, so no unwind may leave an export. A
-// stop renders and exits the process exactly as the AOT entry boundary does.
+// Generated code has no unwind tables, so no unwind may leave an export.
+// Canonical cancellation/deadline transfers become the current task's MIR stop
+// rail. Panics and traps still render/terminate and invalidate the session.
 #[cfg(not(target_arch = "wasm32"))]
 mod jet_c_abi {
     #![allow(non_snake_case)]
@@ -38,19 +39,51 @@ mod jet_c_abi {
 
     pub(crate) type JetCString = *mut JetCText;
 
-    /// No Rust unwind may leave an export. Compiler workers publish a typed
-    /// internal failure; ordinary calls keep the shared AOT stop boundary.
-    #[inline(always)]
-    pub(crate) fn guard<T>(run: impl FnOnce() -> T) -> T {
-        match catch_unwind(AssertUnwindSafe(run)) {
-            Ok(value) => value,
-            Err(payload) if super::jet_native_comptime_active() => {
-                let message = payload.downcast_ref::<String>().map(String::as_str)
-                    .or_else(|| payload.downcast_ref::<&str>().copied())
-                    .unwrap_or("native compiler runtime carried an unknown panic payload");
-                super::jet_native_comptime_fail(4, message)
+    /// The word is unused after a typed transfer: MIR requires a Poll before
+    /// any read or drop of a can-stop call result. This is not a constructed
+    /// Jet value, nor a default value returned to user code.
+    pub(crate) trait StoppedCarrier {
+        fn stopped() -> Self;
+    }
+    macro_rules! stopped_word {
+        ($($ty:ty => $zero:expr),* $(,)?) => {$(
+            impl StoppedCarrier for $ty {
+                fn stopped() -> Self { $zero }
             }
-            Err(payload) => stop(payload),
+        )*};
+    }
+    stopped_word! {
+        () => (), bool => false,
+        i8 => 0, i16 => 0, i32 => 0, i64 => 0, isize => 0,
+        u8 => 0, u16 => 0, u32 => 0, u64 => 0, usize => 0,
+        f32 => 0.0, f64 => 0.0,
+    }
+    impl<T> StoppedCarrier for *mut T {
+        fn stopped() -> Self { std::ptr::null_mut() }
+    }
+    impl<T> StoppedCarrier for *const T {
+        fn stopped() -> Self { std::ptr::null() }
+    }
+
+    /// No Rust unwind may leave an export. Reuse the scheduler's foreign
+    /// boundary; this catch itself is not a new task cancellation wait point.
+    /// Canonical cancellation/deadline transfers become the task's stop rail
+    /// (a comptime request's too); any other payload inside a comptime request
+    /// is a fatal host fault.
+    #[inline(always)]
+    pub(crate) fn guard<T: StoppedCarrier>(run: impl FnOnce() -> T) -> T {
+        match super::jet_scheduler_catch_foreign_boundary(run) {
+            Ok(value) => value,
+            Err(payload) => match super::jet_scheduler_native_record_unwind(payload) {
+                Ok(()) => T::stopped(),
+                Err(payload) if super::jet_native_comptime_active() => {
+                    let message = payload.downcast_ref::<String>().map(String::as_str)
+                        .or_else(|| payload.downcast_ref::<&str>().copied())
+                        .unwrap_or("native compiler runtime carried an unknown panic payload");
+                    super::jet_native_comptime_fail(4, message)
+                }
+                Err(payload) => stop(payload),
+            },
         }
     }
 
@@ -170,21 +203,134 @@ mod jet_c_abi {
         })
     }
 
-    // Installed by the isolated worker, never ordinary program entry.
+    // A native comptime request (unified host/stop contract, #4720). begin
+    // enters the request's own task control on the calling thread; a budget
+    // operation that runs out publishes the request's first budget stop on the
+    // current task's control and returns, so its MIR Propagate takes the stop
+    // edge. The host reports that record (jet_rt_comptime_stop_write) or the
+    // fatal one comptime_fatal writes.
+    static COMPTIME_STOP: std::sync::Mutex<Option<super::JetStopRecord>> = std::sync::Mutex::new(None);
+    static COMPTIME_STOPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    thread_local! {
+        static COMPTIME_SCOPE: std::cell::RefCell<Option<super::JetNativeTaskControlScope>> = const { std::cell::RefCell::new(None) };
+    }
+
+    fn comptime_site(kind: super::JetStopKind, status: u32, message: String) -> super::JetStopRecord {
+        let (_, owner, start, end) = super::jet_native_comptime_frame();
+        super::JetStopRecord {
+            kind,
+            jct_status: Some(status),
+            owner: Some(owner),
+            start: Some(start),
+            end: Some(end),
+            message,
+        }
+    }
+
+    // Fatal hook (jet_native_comptime_fail): status 1 runtime panic, 4
+    // foreign/host panic. Writes the stop record and exits.
+    fn comptime_fatal(status: u32, message: &str) -> ! {
+        let kind = if status == 4 { super::JetStopKind::HostFault } else { super::JetStopKind::Panic };
+        super::jet_native_comptime_channel_write(&comptime_site(kind, status, message.to_string()).encode());
+        std::process::exit(if status == 4 { 101 } else { 80 + status as i32 })
+    }
+
+    // The request's budget stop: the first one wins (from any thread, at that
+    // thread's frame), the remaining fuel is spent so every thread's next
+    // charge stops too, and the first record goes on the current control.
+    fn comptime_budget_stop(kind: super::JetStopKind, status: u32) {
+        let record = COMPTIME_STOP.lock().unwrap_or_else(|poison| poison.into_inner())
+            .get_or_insert_with(|| comptime_site(kind, status, String::new()))
+            .clone();
+        super::jet_native_comptime_spend_all();
+        COMPTIME_STOPPED.store(true, std::sync::atomic::Ordering::Release);
+        super::jet_scheduler_native_publish(record);
+    }
+
+    fn comptime_stop() -> Option<super::JetStopRecord> {
+        COMPTIME_STOP.lock().unwrap_or_else(|poison| poison.into_inner()).clone()
+    }
+
+    /// Charges `units` of comptime fuel from a runtime kernel; true when the
+    /// request's budget stop is now published on the current control.
+    pub(crate) fn comptime_charge(units: u64) -> bool {
+        if super::jet_native_comptime_work(units) {
+            comptime_budget_stop(super::JetStopKind::BudgetFuel, 2);
+            return true;
+        }
+        false
+    }
+
     #[no_mangle]
     pub extern "C" fn jet_rt_comptime_begin(fuel: u64, max_depth: u64) -> bool {
-        guard(|| super::jet_native_comptime_begin(fuel, max_depth))
+        guard(|| {
+            if !super::jet_native_comptime_begin(fuel, max_depth, comptime_fatal) { return false; }
+            *COMPTIME_STOP.lock().unwrap_or_else(|poison| poison.into_inner()) = None;
+            COMPTIME_STOPPED.store(false, std::sync::atomic::Ordering::Release);
+            let scope = super::JetNativeTaskControlScope::enter(super::JetTaskControl::new());
+            COMPTIME_SCOPE.with(|slot| *slot.borrow_mut() = Some(scope));
+            true
+        })
     }
     #[no_mangle]
-    pub extern "C" fn jet_rt_comptime_step(owner: u64, start: u64, end: u64) { super::jet_native_comptime_step(owner, start, end); }
+    pub extern "C" fn jet_rt_comptime_step(owner: u64, start: u64, end: u64) {
+        if super::jet_native_comptime_step(owner, start, end) {
+            comptime_budget_stop(super::JetStopKind::BudgetFuel, 2);
+        }
+    }
     #[no_mangle]
-    pub extern "C" fn jet_rt_comptime_work(units: u64) { super::jet_native_comptime_work(units); }
+    pub extern "C" fn jet_rt_comptime_work(units: u64) { let _ = comptime_charge(units); }
     #[no_mangle]
-    pub extern "C" fn jet_rt_comptime_enter(owner: u64, start: u64, end: u64) { super::jet_native_comptime_enter(owner, start, end); }
+    pub extern "C" fn jet_rt_comptime_enter(owner: u64, start: u64, end: u64) {
+        if super::jet_native_comptime_enter(owner, start, end) {
+            comptime_budget_stop(super::JetStopKind::BudgetDepth, 3);
+        } else if COMPTIME_STOPPED.load(std::sync::atomic::Ordering::Acquire) {
+            // Another thread spent the request's budget.
+            if let Some(record) = comptime_stop() { super::jet_scheduler_native_publish(record); }
+        }
+    }
     #[no_mangle]
     pub extern "C" fn jet_rt_comptime_leave() { super::jet_native_comptime_leave(); }
     #[no_mangle]
-    pub extern "C" fn jet_rt_comptime_end() { super::jet_native_comptime_end(); }
+    pub extern "C" fn jet_rt_comptime_end() {
+        super::jet_native_comptime_end();
+        let scope = COMPTIME_SCOPE.with(|slot| slot.borrow_mut().take());
+        drop(scope);
+    }
+    /// Writes the request's budget stop record to the private channel and
+    /// returns its JCT1 status (2 fuel, 3 depth); 0 when the request did not
+    /// stop on its budget.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_comptime_stop_write() -> u32 {
+        let Some(record) = comptime_stop() else { return 0 };
+        super::jet_native_comptime_channel_write(&record.encode());
+        record.jct_status.unwrap_or(0)
+    }
+
+    /// Plain internal runtime imports for MIR Poll and Stopped. Neither
+    /// consumes the status nor alters Task.cancel's wait-point delivery.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_session_poll() -> u64 {
+        super::jet_scheduler_native_poll()
+    }
+    #[no_mangle]
+    pub extern "C" fn jet_rt_session_propagate() -> u64 {
+        super::jet_scheduler_native_propagate()
+    }
+    #[no_mangle]
+    pub extern "C" fn jet_rt_session_status() -> u64 {
+        super::jet_scheduler_native_status()
+    }
+
+    // These are the canonical nesting Shield operations, not a second mask.
+    #[no_mangle]
+    pub extern "C" fn jet_rt_session_shield_enter() {
+        guard(super::jet_scheduler_shield_enter)
+    }
+    #[no_mangle]
+    pub extern "C" fn jet_rt_session_shield_leave() {
+        guard(super::jet_scheduler_shield_leave)
+    }
 
     // Entry error edge (MIRRust.rs entry_error_exit): a failing entry ends
     // the process with its report and exit status 1.

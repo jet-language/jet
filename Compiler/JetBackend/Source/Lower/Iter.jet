@@ -52,7 +52,7 @@ fn lower_iter_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     range :: lower_range_members(p, ty)
     if range == None && lower_sequence_element(ty) == None -> return lower_fail(&m, &f, "non-List, non-Map iteration is not lowered at O0 yet")
     if lower_sequence_element(ty) == .Val(elem) {
-        if lower_task_element(elem) != None -> return lower_fail(&m, &f, "iteration over owning Task handles is not lowered at O0 yet")
+        if lower_task_element(elem) != None && !by_value -> return lower_fail(&m, &f, "borrowed iteration over owning Task handles is not lowered at O0 yet")
     }
     // A View's snapshot is its borrowed header: the cursor must never drop
     // (or move out) elements the window does not own.

@@ -158,5 +158,43 @@ for (const fixture of process.argv.includes("--abi") ? [] : expected.filter(({ n
   }
   check(`${fixture.name} (compiled runtime)`, program, fixture);
 }
+
+// Stop points (#4720): stop-points.o linked with the compiled runtime and a
+// scripted session rail (check-stop-points.c) that stops it at chosen polls;
+// stderr counts the program's String from static text and its drops.
+if (runtimeLib && !process.argv.includes("--abi") && existsSync(`${outDir}/stop-points.o`)) {
+  const rail = `${dirname(fileURLToPath(import.meta.url))}/check-stop-points.c`;
+  const program = `${outDir}/stop-points.rail`;
+  const link = spawnSync(process.env.CC ?? "cc", [`${outDir}/stop-points.o`, rail, runtimeLib, "-Wl,--wrap=jet_rt_string_from_static,--wrap=jet_rt_string_drop", "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
+  if (link.status !== 0) {
+    console.log(`stop-points (session rail): LINK FAILED\n${link.stderr}`);
+    failures += 1;
+  } else {
+    const cases = [
+      ["no stop", {}, "42\n0\n1\n6\n10\nkept\n", "polls=8 made=1 dropped=1\n"],
+      ["stop at run's entry Check", { JET_FX_STOP_AT: "1" }, "", "polls=1 made=0 dropped=0\n"],
+      ["stop at twice's entry Check, propagated", { JET_FX_STOP_AT: "2" }, "", "polls=2 made=0 dropped=0\n"],
+      ["stop at label's entry Check, before its String", { JET_FX_STOP_AT: "3" }, "42\n", "polls=3 made=0 dropped=0\n"],
+      ["stop at the first loop Check", { JET_FX_STOP_AT: "4" }, "42\n", "polls=4 made=1 dropped=1\n"],
+      ["stop at the second loop Check", { JET_FX_STOP_AT: "5" }, "42\n0\n", "polls=5 made=1 dropped=1\n"],
+      ["pending inside the Shield, delivered at the next Check", { JET_FX_STOP_AT: "7" }, "42\n0\n1\n6\n", "polls=8 made=1 dropped=1\n"],
+      ["signal before label's Propagate: result kept, dropped once at the next Check", { JET_FX_SIGNAL_AT_PROPAGATE: "2" }, "42\n", "polls=4 made=1 dropped=1\n"],
+    ];
+    for (const [label, env, stdout, stderr] of cases) {
+      check(`stop-points (session rail: ${label})`, program, { name: "stop-points", stdout, stderr }, [], { env: { ...process.env, ...env } });
+    }
+  }
+}
+if (runtimeLib && !process.argv.includes("--abi")) {
+  const source = `${dirname(fileURLToPath(import.meta.url))}/check-record-sequences.c`;
+  const program = `${outDir}/record-sequences.hosted`;
+  const link = spawnSync(process.env.CC ?? "cc", [source, runtimeLib, "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
+  if (link.status !== 0) {
+    console.log(`record-sequences: LINK FAILED\n${link.stderr}`);
+    failures += 1;
+  } else {
+    check("record-sequences (borrowed storage, duplicate order)", program, { stdout: "", status: 0 });
+  }
+}
 console.log(failures === 0 ? "all native fixtures match" : `${failures} native fixture check(s) failed`);
 process.exit(failures === 0 ? 0 : 1);

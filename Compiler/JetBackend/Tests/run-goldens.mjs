@@ -35,6 +35,11 @@
 //        [JET_LOWER_ASSEMBLE_ONLY=1] stops the lower stage after assembling its unit (for focused `jet check`).
 //        node Compiler/JetBackend/Tests/run-goldens.mjs <outdir> [--stage mir|convert|lower|run] [--until mir|convert|lower|run] [--case-list FILE | filter...]
 // A later stage reuses the files of the earlier ones in <outdir>.
+// --front jet uses candidate_jetc0 (or JET_FRONT_JETC0) in factory/AOT mode:
+// the mir stage compiles, lowers and links in one process, and the convert/lower
+// stages are unnecessary. No Rust dump, generated lowering driver or rustc is
+// involved. Rebuild older candidates lacking JET_FRONT_NATIVE_OUTPUT; they are
+// reported as no-mir, never silently used as a Rust-front fallback.
 // Writes <outdir>/results.tsv and <outdir>/summary.txt.
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
@@ -42,6 +47,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Converter, SUPPORT_ITEMS, encode, jetDecoder, loadMirSchema, parseRustDebug } from "./mir-debug.mjs";
+import { candidateJetc0, runJetFront } from "./jet-front.mjs";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const args = process.argv.slice(2);
@@ -53,10 +59,12 @@ if (!outDir) {
 let first = "mir";
 let last = "run";
 const filters = [];
+let front = "rust";
 let selectedStems = null;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--stage") first = args[++i];
   else if (args[i] === "--until") last = args[++i];
+  else if (args[i] === "--front") front = args[++i];
   else if (args[i] === "--case-list") {
     selectedStems = readFileSync(args[++i], "utf8").split("\n").map((stem) => stem.trim()).filter(Boolean);
     if (!selectedStems.length || new Set(selectedStems).size !== selectedStems.length) throw new Error("case list must be nonempty and unique");
@@ -67,6 +75,8 @@ const STAGES = ["mir", "convert", "lower", "run"];
 const from = STAGES.indexOf(first);
 const until = STAGES.indexOf(last);
 if (from < 0 || until < from) throw new Error(`bad stage range ${first}..${last}`);
+if (!["rust", "jet"].includes(front)) throw new Error("--front must be rust or jet");
+const candidate = front === "jet" ? candidateJetc0() : null;
 const safeJet = `${process.env.HOME}/.cache/jet-dev/safe-jet.sh`;
 const runtimeLib = process.env.JET_RUNTIME_C_LIB;
 const runtimePack = process.env.JET_RUNTIME_PACK;
@@ -129,6 +139,19 @@ if (from <= 0 && until >= 0) {
     const dump = join(dirs.mir, `${c.slug}.mir`);
     rmSync(dump, { force: true });
     const cwd = stage(c);
+    if (front === "jet") {
+      const file = join(cwd, relative(checkout, c.entry.path));
+      const project = featureProjectRoot(c.entry);
+      const root = project ? join(cwd, relative(checkout, project)) : dirname(file);
+      const problem = runJetFront({
+        candidate, file, root, cwd, prefix: join(dirs.lower, c.slug),
+        receipt: join(dirs.mir, `${c.slug}.receipt`), pack: runtimePack,
+        store: join(outDir, "store", c.slug),
+      });
+      if (problem) Object.assign(c, problem);
+      console.log(`jet-front ${c.slug}: ${problem?.detail ?? "compiled directly to native"}`);
+      continue;
+    }
     const emit = process.env.JET_MIR_EMIT === "1";
     const command = emit ? ["emit", "--rust", c.entry.shown] : ["run", c.entry.shown];
     const run = spawnSync(safeJet, command, {
@@ -136,7 +159,7 @@ if (from <= 0 && until >= 0) {
       input: c.stdin ?? "",
       encoding: "utf8",
       stdio: ["pipe", emit ? "ignore" : "pipe", "pipe"],
-      env: { ...process.env, JET_DUMP_MIR: resolve(dump), SAFE_JET_TIMEOUT: process.env.SAFE_JET_TIMEOUT ?? "120" },
+      env: { ...process.env, [process.env.JET_NATIVE_STOP_POINTS === "1" ? "JET_DUMP_NATIVE_MIR" : "JET_DUMP_MIR"]: resolve(dump), SAFE_JET_TIMEOUT: process.env.SAFE_JET_TIMEOUT ?? "120" },
       maxBuffer: 1 << 28,
     });
     writeFileSync(join(dirs.mir, `${c.slug}.ref`), JSON.stringify({ mode: emit ? "emit" : "run", status: run.status, stdout: run.stdout ?? "", stderr: run.stderr ?? "" }));
@@ -290,7 +313,7 @@ function pruneTables(program) {
   if (instances) instances.items = instances.items.filter((ty) => typeIds(ty).every((id) => refs.get("MirTypeId").has(id)));
 }
 
-if (from <= 1 && until >= 1) {
+if (front === "rust" && from <= 1 && until >= 1) {
   for (const c of open()) {
     const dump = join(dirs.mir, `${c.slug}.mir`);
     const mird = join(dirs.lower, `${c.slug}.mird`);
@@ -312,7 +335,7 @@ if (from <= 1 && until >= 1) {
     }
   }
 }
-for (const c of open()) {
+for (const c of front === "rust" ? open() : []) {
   if (!existsSync(join(dirs.mir, `${c.slug}.mir`))) {
     c.verdict = "no-mir";
     const ref = join(dirs.mir, `${c.slug}.ref`);
@@ -494,7 +517,7 @@ function runShard(command, index, shard) {
   });
 }
 
-if (from <= 2 && until >= 2) {
+if (front === "rust" && from <= 2 && until >= 2) {
   const resume = process.env.JET_LOWER_RESUME === "1";
   if (resume && !existsSync(join(dirs.lower, "unit.jet"))) throw new Error("resume requires the original frozen lower/unit.jet");
   if (!resume) assembleUnit();
@@ -603,6 +626,7 @@ for (const c of cases.filter((c) => c.verdict === "unsupported" || c.verdict ===
 }
 const summary = [
   `goldens: ${cases.length}`,
+  `front: ${front}`,
   ...[...counts].sort((a, b) => b[1] - a[1]).map(([verdict, count]) => `${verdict}: ${count}`),
   "",
   "first blocker per unsupported case (count):",
