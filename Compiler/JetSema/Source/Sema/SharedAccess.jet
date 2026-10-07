@@ -18,6 +18,7 @@ use jet_foundation.[
     Type,
     ast_empty_call_arg_flags,
     ast_empty_lambda_meta,
+    expr_span,
 ]
 
 SEMA_SHARED_PAYLOAD_PARAM :: prep { "__jet_shared_value" }
@@ -305,7 +306,7 @@ fn sema_shared_access_place_type(value: Expr, environment: SemaScopeEnvironment,
                 else -> {}
             }
         }
-        else -> {}
+        else -> return sema_stmt_return_known_type(value, scopes)
     }
     None
 }
