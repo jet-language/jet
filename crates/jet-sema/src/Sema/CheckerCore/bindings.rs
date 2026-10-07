@@ -493,16 +493,259 @@ impl<'a> Checker<'a> {
         checked_comptime_nominals_for_context(modules, self.module_idx, self.name_ledger)
     }
 }
+/// A comptime projection one `ModuleState` remembers. It is closed (`None`)
+/// unless a [`FragmentMemoScope`] opened it, and a scope is opened only while
+/// its caller holds the module states shared and the name ledger's lookup
+/// tables final (body checking), so a remembered projection cannot go stale.
+/// A cloned state starts closed.
+pub(crate) struct FragmentMemo<T>(std::sync::Mutex<Option<Option<std::sync::Arc<T>>>>);
+
+impl<T> Default for FragmentMemo<T> {
+    fn default() -> Self {
+        Self(std::sync::Mutex::new(None))
+    }
+}
+
+impl<T> Clone for FragmentMemo<T> {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl<T> FragmentMemo<T> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<Option<std::sync::Arc<T>>>> {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The remembered projection, or a fresh one that an open memo keeps.
+    /// An open memo stays locked while projecting, so parallel bodies of one
+    /// module project it once.
+    fn get_or_project(&self, project: impl FnOnce() -> T) -> std::sync::Arc<T> {
+        let mut memo = self.lock();
+        match &mut *memo {
+            Some(Some(value)) => std::sync::Arc::clone(value),
+            Some(slot) => std::sync::Arc::clone(slot.insert(std::sync::Arc::new(project()))),
+            None => {
+                drop(memo);
+                std::sync::Arc::new(project())
+            }
+        }
+    }
+}
+
+/// Keeps the memos it opened open, and closes them when dropped. A memo
+/// already open belongs to an outer scope.
+pub(crate) struct FragmentMemoScope<'m, T> {
+    opened: Vec<&'m FragmentMemo<T>>,
+}
+
+impl<'m, T> FragmentMemoScope<'m, T> {
+    fn open(memos: impl IntoIterator<Item = &'m FragmentMemo<T>>) -> Self {
+        let opened = memos.into_iter().filter(|memo| {
+            let mut memo = memo.lock();
+            let closed = memo.is_none();
+            if closed {
+                *memo = Some(None);
+            }
+            closed
+        }).collect();
+        Self { opened }
+    }
+}
+
+impl<T> Drop for FragmentMemoScope<'_, T> {
+    fn drop(&mut self) {
+        for memo in &self.opened {
+            *memo.lock() = None;
+        }
+    }
+}
+
+/// Share each module's loaded-callee projection across every evaluating
+/// module of one body-checking pass, which holds `states` shared and the
+/// name ledger's lookup tables final.
+pub(crate) fn open_fragment_module_memos(
+    states: &[crate::Sema::ModuleState],
+) -> FragmentMemoScope<'_, FragmentModuleRows> {
+    FragmentMemoScope::open(states.iter().map(|state| &state.fragment_rows))
+}
+
+/// Share one module's evaluating-context projection across its bodies while
+/// they are checked. It is closed afterwards: only this module reads it.
+pub(crate) fn open_fragment_context_memo(
+    state: &crate::Sema::ModuleState,
+) -> FragmentMemoScope<'_, crate::Comptime::MirBridge::MirFragmentNominalFacts> {
+    FragmentMemoScope::open([&state.fragment_facts])
+}
+
+/// A checked nominal row a loaded module exports to comptime fragments.
+enum FragmentNominalRow {
+    Enum(crate::AST::EnumDef),
+    Struct(crate::AST::StructDef),
+}
+
+/// One module's projection as a module a comptime fragment loads: its source
+/// row and the nominal rows it exports, by canonical identity. It does not
+/// depend on the evaluating module, so every context shares it.
+pub(crate) struct FragmentModuleRows {
+    row_key: String,
+    body: std::sync::Arc<crate::Comptime::MirBridge::MirFragmentCoreSourceModule>,
+    core_source_sigs: Vec<((String, String), crate::Comptime::MirBridge::MirFragmentCoreSourceSignature)>,
+    nominals: Vec<(String, FragmentNominalRow)>,
+}
+
+fn project_fragment_module(
+    target: usize,
+    state: &crate::Sema::ModuleState,
+    modules: &[crate::Sema::ModuleState],
+    source_paths: &jet_foundation::Names::NameLedger,
+    struct_identities: &FragmentNominalIndex<'_>,
+) -> FragmentModuleRows {
+    let source_module =
+        jet_foundation::CoreModuleExports::core_source_module_by_alias(&state.module_alias);
+    let mut body = crate::Comptime::MirBridge::MirFragmentCoreSourceModule {
+        alias: state.module_alias.clone(),
+        module_identity: source_paths
+            .module_identity(target)
+            .unwrap_or_else(|| state.module_path.clone()),
+        core_imports: state.core_imports.clone(),
+        functions: HashMap::new(),
+        function_signatures: HashMap::new(),
+        constants: Vec::new(),
+        module_imports: HashMap::new(),
+        imported_functions: HashMap::new(),
+        import_signatures: HashMap::new(),
+        nominal_identities: HashMap::new(),
+    };
+    let mut core_source_sigs = Vec::new();
+    for item in &state.items {
+        let function = match item {
+            crate::AST::Item::Func(function) => function,
+            crate::AST::Item::Const(constant) => {
+                body.constants.push(constant.clone());
+                continue;
+            }
+            _ => continue,
+        };
+        body.functions.insert(function.name.clone(), function.clone());
+        let signature = fragment_signature(function, target, modules, source_paths, struct_identities);
+        body.function_signatures.insert(function.name.clone(), signature.clone());
+        let Some(source) = source_module else {
+            continue;
+        };
+        if !function.is_pub
+            || !jet_foundation::CoreModuleExports::core_source_owns(
+                source.module,
+                &function.name,
+            )
+        {
+            continue;
+        }
+        core_source_sigs.push(((source.module.to_string(), function.name.clone()), signature));
+    }
+    // A Core row is keyed by its Core module path; a user file module's
+    // row by its loader alias, the name its import aliases resolve to.
+    let row_key = match source_module {
+        Some(source) => source.module.to_string(),
+        None => {
+            let (module_imports, imported_functions, import_signatures) =
+                fragment_module_imports(target, modules, source_paths, struct_identities);
+            body.module_imports = module_imports;
+            body.imported_functions = imported_functions;
+            body.import_signatures = import_signatures;
+            body.nominal_identities =
+                fragment_module_nominals(target, modules, source_paths, struct_identities);
+            state.module_alias.clone()
+        }
+    };
+    // A Core module exposes only its public leaves; every nominal of a
+    // user module is declared, since its demanded bodies may name a
+    // private type.
+    let source_leaf_visible = |name: &str| {
+        source_module.is_none_or(|source| {
+            jet_foundation::CoreModuleExports::core_leaf_kind(source.module, name).is_some()
+        })
+    };
+    let canonicalize = |ty: &mut Type| {
+        *ty = canonical_fragment_type(ty, target, modules, source_paths, struct_identities);
+    };
+    let mut nominals = Vec::new();
+    for item in &state.items {
+        let name = match item {
+            crate::AST::Item::Enum(def) => &def.name,
+            crate::AST::Item::Struct(def) => &def.name,
+            _ => continue,
+        };
+        if !source_leaf_visible(name) {
+            continue;
+        }
+        let Some(identity) = struct_identities.get(target, name).map(str::to_owned) else {
+            continue;
+        };
+        let row = match item {
+            crate::AST::Item::Enum(def) => {
+                let mut row = def.clone();
+                row.name = identity.clone();
+                row.methods.clear();
+                row.trait_impls.clear();
+                row.derives.clear();
+                for variant in &mut row.variants {
+                    match &mut variant.payload {
+                        crate::AST::VariantPayload::Unit => {}
+                        crate::AST::VariantPayload::Single(ty, _) => canonicalize(ty),
+                        crate::AST::VariantPayload::Named(fields) => {
+                            for field in fields {
+                                canonicalize(&mut field.ty);
+                            }
+                        }
+                    }
+                }
+                FragmentNominalRow::Enum(row)
+            }
+            crate::AST::Item::Struct(def) => {
+                let mut row = def.clone();
+                row.name = identity.clone();
+                row.methods.clear();
+                row.trait_impls.clear();
+                row.derives.clear();
+                for field in &mut row.fields {
+                    canonicalize(&mut field.ty);
+                }
+                FragmentNominalRow::Struct(row)
+            }
+            _ => continue,
+        };
+        nominals.push((identity, row));
+    }
+    FragmentModuleRows { row_key, body: std::sync::Arc::new(body), core_source_sigs, nominals }
+}
+
 /// Project the checked nominal/import rows needed by an isolated comptime
 /// fragment before a `Checker` exists for the current module. Derive and
 /// marker expansion runs at that earlier bundle phase, but it must carry the
-/// same declaration identities that body checking later supplies.
+/// same declaration identities that body checking later supplies. While body
+/// checking holds the memos open, each module projects its context once and
+/// each loaded module its rows once, shared by every evaluation.
 pub(crate) fn checked_comptime_nominals_for_context(
     modules: &[crate::Sema::ModuleState],
     module_idx: usize,
     name_ledger: &jet_foundation::Names::NameLedger,
 ) -> Option<crate::Comptime::MirBridge::MirFragmentNominalFacts> {
     let current = modules.get(module_idx)?;
+    let facts = current.fragment_facts.get_or_project(|| {
+        project_comptime_nominals(modules, module_idx, current, name_ledger)
+    });
+    let mut facts = std::sync::Arc::unwrap_or_clone(facts);
+    facts.name_ledger = name_ledger.body_snapshot();
+    Some(facts)
+}
+
+fn project_comptime_nominals(
+    modules: &[crate::Sema::ModuleState],
+    module_idx: usize,
+    current: &crate::Sema::ModuleState,
+    name_ledger: &jet_foundation::Names::NameLedger,
+) -> crate::Comptime::MirBridge::MirFragmentNominalFacts {
     let reexports = &current.reexports;
     let struct_identities = FragmentNominalIndex { modules, names: name_ledger, fragment_module: None };
     // The fragment lowers this module's own functions beside its own items,
@@ -551,13 +794,13 @@ pub(crate) fn checked_comptime_nominals_for_context(
     }
 
     let mut facts = crate::Comptime::MirBridge::MirFragmentNominalFacts {
-        name_ledger: name_ledger.body_snapshot(),
         module_idx,
         ..Default::default()
     };
+    let function_signatures = std::sync::Arc::make_mut(&mut facts.function_signatures);
     for item in &current.items {
         if let crate::AST::Item::Func(function) = item {
-            facts.function_signatures.insert(function.name.clone(),
+            function_signatures.insert(function.name.clone(),
                 fragment_signature(function, module_idx, modules, source_paths, &fragment_identities));
         }
         if let crate::AST::Item::Enum(def) = item {
@@ -585,6 +828,7 @@ pub(crate) fn checked_comptime_nominals_for_context(
         }
     }
 
+    let mut bodies = HashMap::new();
     let mut visited_namespaces = HashSet::new();
     while let Some(target) = queue.pop_front() {
         let Some(state) = modules.get(target) else {
@@ -615,136 +859,25 @@ pub(crate) fn checked_comptime_nominals_for_context(
                 }
             }
         }
-        let source_module =
-            jet_foundation::CoreModuleExports::core_source_module_by_alias(&state.module_alias);
-        let mut body_module = crate::Comptime::MirBridge::MirFragmentCoreSourceModule {
-            alias: state.module_alias.clone(),
-            module_identity: name_ledger
-                .module_identity(target)
-                .unwrap_or_else(|| state.module_path.clone()),
-            core_imports: state.core_imports.clone(),
-            functions: HashMap::new(),
-            function_signatures: HashMap::new(),
-            constants: Vec::new(),
-            module_imports: HashMap::new(),
-            imported_functions: HashMap::new(),
-            import_signatures: HashMap::new(),
-            nominal_identities: HashMap::new(),
-        };
-        for item in &state.items {
-            let function = match item {
-                crate::AST::Item::Func(function) => function,
-                crate::AST::Item::Const(constant) => {
-                    body_module.constants.push(constant.clone());
-                    continue;
-                }
-                _ => continue,
-            };
-            body_module
-                .functions
-                .insert(function.name.clone(), function.clone());
-            let signature = fragment_signature(function, target, modules, source_paths, &struct_identities);
-            body_module.function_signatures.insert(function.name.clone(), signature.clone());
-            let Some(source) = source_module else {
-                continue;
-            };
-            if !function.is_pub
-                || !jet_foundation::CoreModuleExports::core_source_owns(
-                    source.module,
-                    &function.name,
-                )
-            {
-                continue;
-            }
-            facts.core_source_sigs.insert(
-                (source.module.to_string(), function.name.clone()),
-                signature,
-            );
-        }
-        // A Core row is keyed by its Core module path; a user file module's
-        // row by its loader alias, the name its import aliases resolve to.
-        let row_key = match source_module {
-            Some(source) => source.module.to_string(),
-            None => {
-                let (module_imports, imported_functions, import_signatures) =
-                    fragment_module_imports(target, modules, source_paths, &struct_identities);
-                body_module.module_imports = module_imports;
-                body_module.imported_functions = imported_functions;
-                body_module.import_signatures = import_signatures;
-                body_module.nominal_identities =
-                    fragment_module_nominals(target, modules, source_paths, &struct_identities);
-                state.module_alias.clone()
-            }
-        };
-        std::sync::Arc::make_mut(&mut facts.core_source_bodies).insert(row_key, body_module);
+        let rows = state.fragment_rows.get_or_project(|| {
+            project_fragment_module(target, state, modules, source_paths, &struct_identities)
+        });
+        facts.core_source_sigs.extend(rows.core_source_sigs.iter().cloned());
+        bodies.insert(rows.row_key.clone(), std::sync::Arc::clone(&rows.body));
         if target == module_idx { continue }
-        // A Core module exposes only its public leaves; every nominal of a
-        // user module is declared, since its demanded bodies may name a
-        // private type.
-        let source_leaf_visible = |name: &str| {
-            source_module.is_none_or(|source| {
-                jet_foundation::CoreModuleExports::core_leaf_kind(source.module, name).is_some()
-            })
-        };
-        for item in &state.items {
-            if let crate::AST::Item::Enum(def) = item {
-                if !source_leaf_visible(&def.name) {
-                    continue;
+        for (identity, row) in &rows.nominals {
+            facts.foreign_modules.insert(identity.clone(), state.module_alias.clone());
+            match row {
+                FragmentNominalRow::Enum(def) => {
+                    facts.enums.entry(identity.clone()).or_insert_with(|| def.clone());
                 }
-                let Some(identity) = struct_identities.get(target, &def.name).map(str::to_owned)
-                else {
-                    continue;
-                };
-                let mut row = def.clone();
-                row.name = identity.clone();
-                row.methods.clear();
-                row.trait_impls.clear();
-                row.derives.clear();
-                for variant in &mut row.variants {
-                    let canonicalize = |ty: &mut Type| {
-                        *ty = canonical_fragment_type(
-                            ty, target, modules, source_paths, &struct_identities);
-                    };
-                    match &mut variant.payload {
-                        crate::AST::VariantPayload::Unit => {}
-                        crate::AST::VariantPayload::Single(ty, _) => canonicalize(ty),
-                        crate::AST::VariantPayload::Named(fields) => {
-                            for field in fields {
-                                canonicalize(&mut field.ty);
-                            }
-                        }
-                    }
+                FragmentNominalRow::Struct(def) => {
+                    facts.structs.entry(identity.clone()).or_insert_with(|| def.clone());
                 }
-                facts
-                    .foreign_modules
-                    .insert(identity.clone(), state.module_alias.clone());
-                facts.enums.entry(identity).or_insert(row);
-                continue;
             }
-            let crate::AST::Item::Struct(def) = item else {
-                continue;
-            };
-            if !source_leaf_visible(&def.name) {
-                continue;
-            }
-            let Some(identity) = struct_identities.get(target, &def.name).map(str::to_owned) else {
-                continue;
-            };
-            let mut row = def.clone();
-            row.name = identity.clone();
-            row.methods.clear();
-            row.trait_impls.clear();
-            row.derives.clear();
-            for field in &mut row.fields {
-                field.ty = canonical_fragment_type(
-                    &field.ty, target, modules, source_paths, &struct_identities);
-            }
-            facts
-                .foreign_modules
-                .insert(identity.clone(), state.module_alias.clone());
-            facts.structs.entry(identity).or_insert(row);
         }
     }
+    facts.core_source_bodies = std::sync::Arc::new(bodies);
     let (_, imported_functions, import_signatures) =
         fragment_module_imports(module_idx, modules, source_paths, &struct_identities);
     facts.imported_functions = imported_functions;
@@ -839,7 +972,7 @@ pub(crate) fn checked_comptime_nominals_for_context(
         }
     }
 
-    Some(facts)
+    facts
 }
 
 fn direct_fixed_constructor(expr: &Expr) -> bool {

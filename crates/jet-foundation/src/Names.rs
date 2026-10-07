@@ -78,7 +78,19 @@ pub struct NameModule {
     pub alias: String,
     pub path: String,
     pub package: String,
+    /// D-MOD-CYCLE1=A: the package root this module is a member file of;
+    /// `None` for loose files, one-file packages, Core and synthetic modules.
+    pub namespace: Option<String>,
 }
+
+/// The source-facing path of one compiler-owned declaration path in a module.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NameDisplayPath {
+    pub module: usize,
+    pub internal_path: String,
+    pub display_path: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NameDeclaration {
     pub module: usize,
@@ -195,6 +207,9 @@ struct NameTables {
     module_identities: HashMap<usize, String>,
     identity_modules: HashMap<String, usize>,
     declarations: HashMap<usize, HashMap<String, NameDeclaration>>,
+    /// Per module, how many declarations carry each canonical path, so a
+    /// path lookup is a hash probe rather than a scan of the module.
+    declaration_paths: HashMap<usize, HashMap<String, usize>>,
     declaration_identities: HashMap<usize, HashMap<String, String>>,
     declaration_names: HashMap<String, Vec<(usize, String)>>,
     generated_types: HashMap<String, usize>,
@@ -263,7 +278,8 @@ impl NameLedger {
             tables.declaration_identities.insert(module, declarations.keys()
                 .map(|name| (name.clone(), format!("{identity}::{name}"))).collect());
         }
-        tables.modules.insert(module, NameModule { alias, path, package });
+        let namespace = tables.namespaces.get(&module).cloned();
+        tables.modules.insert(module, NameModule { alias, path, package, namespace });
     }
 
     pub fn module(&self, module: usize) -> Option<&NameModule> {
@@ -288,6 +304,9 @@ impl NameLedger {
             if let Some(names) = tables.namespace_names.get_mut(&previous) {
                 names.retain(|_, owner| *owner != module);
             }
+        }
+        if let Some(row) = tables.modules.get_mut(&module) {
+            row.namespace = Some(package_root.clone());
         }
         let members = tables.namespace_members.entry(package_root).or_default();
         if members.last().is_none_or(|&last| last < module) {
@@ -385,10 +404,18 @@ impl NameLedger {
                 .insert(name.clone(), format!("{identity}::{name}"));
         }
         let declarations = tables.declarations.entry(module).or_default();
-        let fresh = !declarations.contains_key(&name);
-        declarations.insert(name.clone(), NameDeclaration {
-            module, name: name.clone(), path, kind, span, visibility,
+        let previous = declarations.insert(name.clone(), NameDeclaration {
+            module, name: name.clone(), path: path.clone(), kind, span, visibility,
         });
+        let fresh = previous.is_none();
+        let paths = tables.declaration_paths.entry(module).or_default();
+        if let Some(previous) = previous {
+            if let Some(count) = paths.get_mut(&previous.path) {
+                *count -= 1;
+                if *count == 0 { paths.remove(&previous.path); }
+            }
+        }
+        *paths.entry(path).or_default() += 1;
         if fresh {
             tables.declaration_names.entry(name_leaf(&name).to_string())
                 .or_default().push((module, name));
@@ -405,6 +432,11 @@ impl NameLedger {
 
     pub fn module_declarations(&self, module: usize) -> impl Iterator<Item = &NameDeclaration> {
         self.tables.declarations.get(&module).into_iter().flat_map(HashMap::values)
+    }
+
+    /// Whether some declaration of `module` has canonical path `path`.
+    pub fn declares_path(&self, module: usize, path: &str) -> bool {
+        self.tables.declaration_paths.get(&module).is_some_and(|paths| paths.contains_key(path))
     }
 
     pub fn declarations_named<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a NameDeclaration> + 'a {
@@ -466,6 +498,17 @@ impl NameLedger {
         tables.display_names.entry(module).or_default()
             .entry(display_path.clone()).or_default().push(internal_path.clone());
         tables.display_paths.entry(module).or_default().insert(internal_path, display_path);
+    }
+
+    /// Every recorded source-facing path, in unspecified order.
+    pub fn display_paths(&self) -> impl Iterator<Item = NameDisplayPath> + '_ {
+        self.tables.display_paths.iter().flat_map(|(&module, paths)| {
+            paths.iter().map(move |(internal_path, display_path)| NameDisplayPath {
+                module,
+                internal_path: internal_path.clone(),
+                display_path: display_path.clone(),
+            })
+        })
     }
 
     pub fn display_declarations<'a>(
@@ -744,14 +787,18 @@ impl NameLedger {
     /// import projections. Comptime needs only keys actually used by types.
     pub fn canonical_source_path(&self, module: usize, key: &str) -> Option<String> {
         let mut path = self.canonical_path(module, key);
-        for declaration in self.module_declarations(module) {
-            if declaration.path == key
-                || (declaration.kind == "type" && self.nominal_identity(module, &declaration.name).as_deref() == Some(key))
-            {
-                if path.as_ref().is_none_or(|path| path < &declaration.path) {
-                    path = Some(declaration.path.clone());
-                }
+        let mut offer = |candidate: &str| {
+            if path.as_deref().is_none_or(|path| path < candidate) {
+                path = Some(candidate.to_owned());
             }
+        };
+        // A declaration whose path is the key, or a type whose nominal
+        // identity (`{module identity}::{name}`) is the key.
+        if self.declares_path(module, key) { offer(key) }
+        let identity_name = self.tables.module_identities.get(&module)
+            .and_then(|identity| key.strip_prefix(identity.as_str())?.strip_prefix("::"));
+        if let Some(declaration) = identity_name.and_then(|name| self.declaration(module, name)) {
+            if declaration.kind == "type" { offer(&declaration.path) }
         }
         for (position, _) in key.match_indices('.') {
             let Some(alias) = self.alias(module, &key[..position]) else { continue };
@@ -759,11 +806,7 @@ impl NameLedger {
             let Some(target) = alias.target_module else { continue };
             let Some(target_alias) = self.module_alias(target) else { continue };
             let candidate = format!("{target_alias}.{}", &key[position + 1..]);
-            if self.module_declarations(target).any(|declaration| declaration.path == candidate)
-                && path.as_ref().is_none_or(|path| path < &candidate)
-            {
-                path = Some(candidate);
-            }
+            if self.declares_path(target, &candidate) { offer(&candidate) }
         }
         path
     }
@@ -1001,6 +1044,7 @@ impl NameLedger {
         tables.identity_modules.clear();
         tables.declaration_identities.clear();
         tables.declarations.clear();
+        tables.declaration_paths.clear();
         tables.declaration_names.clear();
         tables.generated_types.clear();
         tables.display_paths.clear();
