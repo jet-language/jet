@@ -181,6 +181,11 @@ fn thread_test_parks(entry: I64, detached: Bool) {
     state :: jet_rt_alloc(I64{16}, I64{8})
     parker :: sync_park_new()
     notifier :: sync_park_new()
+    thread_test_require(sync_load(parker + I64{24}) == I64{1})
+    sync_park_retain(parker)
+    thread_test_require(sync_load(parker + I64{24}) == I64{2})
+    sync_park_drop(parker)
+    thread_test_require(sync_load(parker + I64{24}) == I64{1})
     sync_store(state, parker)
     sync_store(state + I64{8}, notifier)
     // Wake-before-park and repeated wake coalescing are explicit witnesses.
