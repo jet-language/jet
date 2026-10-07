@@ -24,6 +24,24 @@ let prepared = [...lines.slice(0, start), canonical.slice(canonicalStart), ...li
 // A full-pack proof must include the current canonical adapters together.
 // Seed proofs retain their emitted, paired route set instead.
 if (mode === '--allparts') {
+  // A frozen native MIR producer may predate callback scope sharing. Refresh
+  // this shared canonical fragment with the adapters that call it; Scheduler
+  // itself must still come from the producer's checked stop-rail dependency.
+  const bodyStart = prepared.indexOf('// One thread-confined native callback boundary, shared by emitted Core and');
+  const panicMarker = 'pub struct JetNativeTaskPanic(pub String);';
+  const bodyEnd = prepared.indexOf(panicMarker, bodyStart);
+  if (bodyStart < 0 || bodyEnd < 0) throw new Error('allparts input lacks the native task panic boundary');
+  let stop = bodyEnd + panicMarker.length;
+  const callback = prepared.indexOf('pub fn jet_native_callback_body', stop);
+  const nextCore = prepared.indexOf('// Installed only in the isolated persistent compiler worker.', stop);
+  if (callback >= 0 && callback < nextCore) {
+    stop = prepared.indexOf('\n}', callback) + 2;
+    if (stop < 2) throw new Error('input native callback body is unterminated');
+    const comment = prepared.indexOf('// Every native callback body which belongs', bodyEnd);
+    if (comment < 0 || comment > callback) throw new Error('input native callback scope marker is missing');
+  }
+  const body = readFileSync(resolve(repo, 'crates/jet-codegen/src/Prelude/Core/NativeTaskBody.rs'), 'utf8');
+  prepared = prepared.slice(0, bodyStart) + body + prepared.slice(stop);
   for (const [module, file] of [
     ['jet_c_abi_routes', 'CAbiRoutes.rs'],
     ['jet_c_abi_iter', 'CAbiIter.rs'],
