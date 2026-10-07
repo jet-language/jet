@@ -4,7 +4,7 @@
 // Only initialized payload bytes are read (Bool is one byte; Unit is empty).
 // One native List<U8> epoch fact shared by network/time/transport adapters.
 // NativeInteg flips this one constant alongside the canonical packed ABI.
-RT_HOST_U8_STRIDE :: prep { I64{8} }
+RT_HOST_U8_STRIDE :: prep { I64{1} }
 fn host_u8_get(data: I64, index: I64) -> I64 {
     #Unsafe("data lends index's initialized native U8 element; low byte is meaningful in either epoch") {
         return os_load_u8(wrapping(data + index * RT_HOST_U8_STRIDE))
@@ -153,7 +153,7 @@ fn coll_list_drop(header: I64, meta: I64, start: I64) {
     coll_zero(header, I64{24})
 }
 
-// Native byte lists have word-stride elements; C borrows packed bytes instead.
+// Native byte lists have packed one-byte elements; C borrows packed bytes.
 // Empty packed bytes use E4's non-null dangling convention, without allocation.
 #Export(c) fn jet_rt_bytes_pack(list: I64) -> I64 {
     length :: trap_word(list)
