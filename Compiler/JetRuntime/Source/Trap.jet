@@ -10,11 +10,18 @@
 #Import(c) fn trap_rust_stdout_flush(handle: I64, error_slot: I64) -> I64 = "jet_std_io_stdout_flush"
 
 fn trap_flush_stdout() {
-    error_slot :: jet_rt_alloc(I64{8}, I64{8})
-    #Unsafe("the Rust stdout handle is a zero-sized box; error_slot is an aligned live output pointer, and both die at this process edge") {
+    root :: alloc_root
+    if (root == I64{0}) -> return
+    flush_lock :: root + I64{4080}
+    error_slot :: root + I64{4088}
+    // The foreign error-pointer store is non-atomic: serialize failed flushes
+    // separately from the heap lock, which Rust error construction may need.
+    alloc_lock(flush_lock)
+    #Unsafe("the zero-sized stdout box and aligned error slot remain live; the dedicated flush lock excludes concurrent foreign pointer stores") {
         stdout :: trap_rust_stdout()
         _ := trap_rust_stdout_flush(stdout, error_slot)
     }
+    alloc_unlock(flush_lock)
 }
 
 fn trap_word(address: I64) -> I64 {
@@ -382,8 +389,9 @@ fn trap_scalar(address: I64) -> TrapScalar {
     TrapScalar{code: (first & I64{7}) * I64{262144} + second * I64{4096} + third * I64{64} + fourth, width: I64{4}}
 }
 
+// D-STR-ESCAPE1: NUL uses the generic \u{0} escape, CR uses \r, and
+// printable braces are copied unchanged so the result lexes to equal text.
 fn trap_debug_short(code: I64) -> I64 Never! {
-    if (code == I64{0}) -> return I64{48}
     if (code == I64{9}) -> return I64{116}
     if (code == I64{10}) -> return I64{110}
     if (code == I64{13}) -> return I64{114}
