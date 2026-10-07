@@ -664,7 +664,7 @@ pub(super) type ContractSamplingPlan = BTreeMap<String, Option<String>>;
 /// `Some(None)` for a sampled candidate, and `Some(Some(reason))` for an
 /// explicit unavailable record.
 pub(super) fn contract_sampling_reason(function: &Func, covered: bool) -> Option<Option<String>> {
-    if function.pre.is_empty() || function.params.is_empty() {
+    if !crate::Sema::is_contract_sampling_candidate(function) {
         return None;
     }
     let precondition_calls_function = function.pre.iter().any(|clause| {
@@ -695,7 +695,7 @@ fn lower_contract_test(
     module: &str,
     contract_rows: &ContractSamplingPlan,
 ) -> Option<TirTestFact> {
-    if function.pre.is_empty() || function.params.is_empty() {
+    if !crate::Sema::is_contract_sampling_candidate(function) {
         return None;
     }
     let key = contract_key(module, function);
@@ -1455,8 +1455,10 @@ fn collect_items(
                 if let Some(job) = lower_job(bundle, function, module) {
                     facts.jobs.push(job);
                 }
-                if let Some(test) = lower_contract_test(function, module, contract_rows) {
-                    facts.tests.push(test);
+                if module_index == bundle.entry {
+                    if let Some(test) = lower_contract_test(function, module, contract_rows) {
+                        facts.tests.push(test);
+                    }
                 }
             }
             Item::Struct(definition) => {
@@ -1520,7 +1522,8 @@ fn collect_items(
                     push_function(facts, module, function, name);
                 }
             }
-            Item::Test(test) => facts.tests.push(lower_test(test, module)),
+            Item::Test(test) if module_index == bundle.entry => facts.tests.push(lower_test(test, module)),
+            Item::Test(_) => {}
             Item::ExternRust(block) => {
                 for function in &block.functions {
                     let row = lower_foreign(function, module, &block.crate_spec, target);

@@ -3,10 +3,11 @@
 // in dependency order with recorded provenance.
 
 // What every module value evaluation reads besides its own expression: the
-// directory `embed_file` resolves against and the source's top-level pure
-// functions.
+// directory `embed_file` resolves against, the source text the values and
+// functions are spelled in, and the source's top-level pure functions.
 pub struct ModuleEvalScope {
     pub base_dir: String
+    pub source: String
     pub funcs: [String: Func]
 }
 
@@ -81,12 +82,12 @@ pub fn envmodel_evaluate_expression(expr: Expr, globals: [String: CtValue], scop
         }
         .ListLit(values, _) -> {
             items := [CtValue]{}
-            loop value in values -> { &items.push(envmodel_evaluate_expression(value, globals, scope)) }
+            loop value in values -> &items.push(envmodel_evaluate_expression(value, globals, scope))
             return Ok(CtValue.List{values: items})
         }
         .StructLit(type_name, _, _, _, fields, _, _) -> {
             lowered := [NamedCtValue]{}
-            loop field in fields -> { &lowered.push(NamedCtValue{name: field.name, value: envmodel_evaluate_expression(field.value, globals, scope)}) }
+            loop field in fields -> &lowered.push(NamedCtValue{name: field.name, value: envmodel_evaluate_expression(field.value, globals, scope)})
             return Ok(CtValue.Struct{type_name: type_name, fields: lowered})
         }
         .EnumLit(type_name, variant, _, args, _, _) -> {
@@ -116,10 +117,11 @@ pub fn envmodel_evaluate_expression(expr: Expr, globals: [String: CtValue], scop
     envmodel_comptime_evaluate(expr, globals, scope)
 }
 
-// The canonical Compiler comptime interpreter over this source's pure
-// functions; module values never declare extern names.
+// One module value through the Compiler's canonical comptime path (typed Jet
+// code checked, lowered to MIR, and evaluated by JetEval) over this source's
+// pure functions; module values never declare extern names.
 pub fn envmodel_comptime_evaluate(expr: Expr, globals: [String: CtValue], scope: ModuleEvalScope) -> CtValue EnvModelEvalError! {
-    Ok(comptime_evaluate(expr, scope.funcs, [String]{}, scope.base_dir, globals))
+    comptime_evaluate(expr, scope.source, scope.funcs, scope.base_dir, globals) ?? return Err(EnvModelEvalError{diagnostic: err.diagnostic})
 }
 
 // Insert into a key-ordered comptime map (Rust `BTreeMap::insert`); false when
@@ -172,7 +174,7 @@ fn envmodel_resolve_named_field(name: String, fields: [String: NamedFieldExpr], 
             }
         }
         cycle := [String]{}
-        loop index in start..<stack.len() -> { &cycle.push(stack[index]) }
+        loop index in start..<stack.len() -> &cycle.push(stack[index])
         &cycle.push(name)
         return Err(envmodel_error("E0338", "computed module fields form a cycle: {cycle.join(" -> ")}", cycle_why, cycle_fix, Val(named.span)))
     }

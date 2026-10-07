@@ -3242,6 +3242,9 @@ canonical: E0373 supplies the behavior-preserving line-break or end-of-line
 fix. Comments are retained and reattached by source span. A real parse error
 blocks formatting. (D-TRAILCOMMA1, D-SEMI1)
 
+Source-edit migrations reject out-of-range, overlapping, or reversed spans and
+spans that split a UTF-8 scalar. No edit is applied when the edit set is invalid.
+
 `package.jet` is formatted by its typed closed-record formatter rather than the
 ordinary Jet formatter. If that path cannot place an authored comment safely,
 it fails closed instead of declaring the file clean. A leading inline package

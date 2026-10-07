@@ -6694,10 +6694,11 @@ fn persist_evidence_report_for_inputs_with_retention(
         .map_err(|error| format!("could not read the current directory: {error}"))?;
     let project_root = jet::Loader::selected_project_root(&cwd)
         .map_err(|diagnostic| format!("could not resolve evidence project root: {diagnostic:?}"))?;
+    let bytes = report.encode()?;
+    let artifact_id = jet::SHA256::sha256_hex(&bytes);
     let path = project_root
         .join(".jet/evidence")
-        .join(format!("{report_id}.json"));
-    let bytes = report.encode()?;
+        .join(format!("{artifact_id}.json"));
     let size = write_test_evidence_bytes(&path, &bytes)?;
     let identity = RecordIdentity::new(
         target_inputs_sha256.to_string(),
@@ -6708,7 +6709,7 @@ fn persist_evidence_report_for_inputs_with_retention(
         &project_root,
         identity,
         RecordKind::Evidence,
-        report_id.to_string(),
+        artifact_id,
         path,
         size,
         RecordCapture::Safe,

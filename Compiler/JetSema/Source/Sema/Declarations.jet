@@ -18,7 +18,8 @@ use jet_foundation.[
     SymbolID,
     Type,
     expr_span,
-    type_name,
+    failure_contract_from_return_type,
+    failure_contract_source,
     type_with_effective_fn_returns,
 ]
 
@@ -65,17 +66,7 @@ pub fn sema_checked_return_type(return_type: Type?, raw_protocol_return: Bool) -
 // from its written return type (the Rust reference's
 // `FailureContract::from_return_type(..).source()`).
 pub fn sema_failure_contract_source(return_type: Type?) -> String Never! {
-    declared :: return_type ?? return "implicit default !Err"
-    if declared == {
-        .Named(name) -> if name == "Never" -> return "declared Never return"
-        .Option(_) -> return "optional success"
-        .Result(_, error) -> {
-            if error == .Named(name) && name == "Never" -> return "explicit !Never (proven unreachable)"
-            return "explicit !{type_name(error)}"
-        }
-        else -> {}
-    }
-    "implicit default !Err"
+    failure_contract_source(failure_contract_from_return_type(return_type))
 }
 
 fn sema_callable_policy_string_text(parts: [StrPart]) -> String Never! {

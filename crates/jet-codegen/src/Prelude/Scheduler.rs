@@ -3664,72 +3664,60 @@ pub fn jet_scheduler_metric_io_operations() -> (usize, usize, usize) {
     )
 }
 
-// ── M1: work-stealing pool ───────────────────────────────────────────────────
-
-struct WorkerSlot {
-    queue: Mutex<VecDeque<Job>>,
-}
+// ── M1: shared-queue worker pool ─────────────────────────────────────────────
 
 // Fixed ceiling prevents blocking waiters from turning scheduler progress into an unbounded thread source.
 const JET_BLOCKING_COMPENSATION_LIMIT:usize=8;
 struct BlockingWaitState { waits:usize,threads:usize,peak:usize,reserve:bool }
 
 struct Scheduler {
-    workers: Vec<WorkerSlot>,
     global: Mutex<VecDeque<Job>>,
+    /// Idle pool workers park here with no timeout. Every push to `global`
+    /// notifies it, and a worker parks only after seeing `global` empty under
+    /// its lock, so no submit is lost and an idle pool costs no CPU.
+    work_ready: Condvar,
+    /// Blocking-wait compensation threads poll here; it also wakes them when
+    /// the blocking-wait count drops so they can retire.
     notify: Condvar,
     live: AtomicUsize,
-    shutdown: AtomicBool,
     blocking_wait:Mutex<BlockingWaitState>,
 }
 
 impl Scheduler {
-    fn pop_local(&self, id: usize,allow_blocking:bool) -> Option<Job> {
-        let mut queue=self.workers[id].queue.lock().unwrap();if allow_blocking{queue.pop_back()}else{queue.iter().rposition(|job|!job.blocking).map(|index|queue.remove(index).unwrap())}
+    fn pop(queue:&mut VecDeque<Job>,allow_blocking:bool) -> Option<Job> {
+        if allow_blocking{queue.pop_front()}else{queue.iter().position(|job|!job.blocking).map(|index|queue.remove(index).unwrap())}
     }
 
-    fn pop_global(&self,allow_blocking:bool) -> Option<Job> {
-        let mut queue=self.global.lock().unwrap();if allow_blocking{queue.pop_front()}else{queue.iter().position(|job|!job.blocking).map(|index|queue.remove(index).unwrap())}
+    /// No queued job, no job in hand, and no outstanding I/O. `live` is read
+    /// under the `global` lock, where workers count a popped job live.
+    fn quiescent(&self) -> bool {
+        let queue = self.global.lock().unwrap();
+        queue.is_empty()
+            && self.live.load(Ordering::Relaxed) == 0
+            && METRIC_IO_ACTIVE.load(Ordering::Acquire) == 0
+            && METRIC_IO_ALLOCATED.load(Ordering::Acquire)
+                == METRIC_IO_RETIRED.load(Ordering::Acquire)
     }
 
-    fn steal_from(&self, thief: usize,allow_blocking:bool) -> Option<Job> {
-        for (idx, w) in self.workers.iter().enumerate() {
-            if idx == thief {
-                continue;
-            }
-            let mut q = w.queue.lock().unwrap();
-            let job=if allow_blocking{q.pop_front()}else{q.iter().position(|job|!job.blocking).map(|index|q.remove(index).unwrap())};
-            if let Some(job) = job {
-                return Some(job);
-            }
-        }
-        None
+    /// The caller pops `job` and counts it live under the `global` lock, so a
+    /// drain never sees an empty queue with no live job while one is in hand.
+    fn run_job(&self,job:Job) {
+        JET_OBSERVE_QUEUED.fetch_sub(1, Ordering::Relaxed);
+        (job.run)();
+        self.live.fetch_sub(1, Ordering::Relaxed);
     }
 
-    fn take_work(&self, id: usize,allow_blocking:bool) -> Option<Job> {
-        self.pop_local(id,allow_blocking)
-            .or_else(|| self.pop_global(allow_blocking))
-            .or_else(|| self.steal_from(id,allow_blocking))
-    }
-
-    fn worker_loop(self: &Arc<Self>, id: usize) {
+    fn worker_loop(self: &Arc<Self>) {
+        let mut queue = self.global.lock().unwrap();
         loop {
-            if let Some(job) = self.take_work(id,true) {
-                JET_OBSERVE_QUEUED.fetch_sub(1, Ordering::Relaxed);
+            if let Some(job) = queue.pop_front() {
                 self.live.fetch_add(1, Ordering::Relaxed);
-                (job.run)();
-                self.live.fetch_sub(1, Ordering::Relaxed);
-                self.notify.notify_one();
+                drop(queue);
+                self.run_job(job);
+                queue = self.global.lock().unwrap();
                 continue;
             }
-            if self.shutdown.load(Ordering::Relaxed) {
-                break;
-            }
-            let g = self.global.lock().unwrap();
-            let _ = self
-                .notify
-                .wait_timeout(g, Duration::from_millis(10))
-                .unwrap();
+            queue = self.work_ready.wait(queue).unwrap();
         }
     }
 
@@ -3747,14 +3735,16 @@ impl Scheduler {
     fn compensation_loop(self:&Arc<Self>,reserve:bool){
         loop{
             {let mut state=self.blocking_wait.lock().unwrap();if (reserve&&state.waits<=JET_BLOCKING_COMPENSATION_LIMIT)||(!reserve&&state.waits==0){state.threads-=1;if reserve{state.reserve=false}return}}
-            if let Some(job)=self.take_work(0,!reserve){JET_OBSERVE_QUEUED.fetch_sub(1,Ordering::Relaxed);self.live.fetch_add(1,Ordering::Relaxed);(job.run)();self.live.fetch_sub(1,Ordering::Relaxed);self.notify.notify_one();continue}
-            let guard=self.global.lock().unwrap();let _=self.notify.wait_timeout(guard,Duration::from_millis(2)).unwrap();
+            let mut queue=self.global.lock().unwrap();
+            if let Some(job)=Self::pop(&mut queue,!reserve){self.live.fetch_add(1,Ordering::Relaxed);drop(queue);self.run_job(job);continue}
+            let _=self.notify.wait_timeout(queue,Duration::from_millis(2)).unwrap();
         }
     }
 
     fn submit(self: &Arc<Self>, job: Job) {
         JET_OBSERVE_QUEUED.fetch_add(1, Ordering::Relaxed);
         self.global.lock().unwrap().push_back(job);
+        self.work_ready.notify_one();
         self.notify.notify_one();
     }
 }
@@ -3789,20 +3779,15 @@ fn scheduler() -> Arc<Scheduler> {
             let n = worker_count();
             JET_OBSERVE_WORKERS.store(n, Ordering::Relaxed);
             let sched = Arc::new(Scheduler {
-                workers: (0..n)
-                    .map(|_| WorkerSlot {
-                        queue: Mutex::new(VecDeque::new()),
-                    })
-                    .collect(),
                 global: Mutex::new(VecDeque::new()),
+                work_ready: Condvar::new(),
                 notify: Condvar::new(),
                 live: AtomicUsize::new(0),
-                shutdown: AtomicBool::new(false),
                 blocking_wait:Mutex::new(BlockingWaitState{waits:0,threads:0,peak:0,reserve:false}),
             });
             for id in 0..n {
                 let s = sched.clone();
-                spawn_scheduler_worker(format!("jet-scheduler-{id}"), move || s.worker_loop(id));
+                spawn_scheduler_worker(format!("jet-scheduler-{id}"), move || s.worker_loop());
             }
             sched
         })
@@ -4409,18 +4394,8 @@ pub fn jet_scheduler_drain() {
         if jet_observe_has_parked_tasks() {
             return;
         }
-        if sched.live.load(Ordering::Relaxed) == 0 {
-            let g = sched.global.lock().unwrap();
-            let pending_local = sched
-                .workers
-                .iter()
-                .any(|w| !w.queue.lock().unwrap().is_empty());
-            let io_drained = METRIC_IO_ACTIVE.load(Ordering::Acquire) == 0
-                && METRIC_IO_ALLOCATED.load(Ordering::Acquire)
-                    == METRIC_IO_RETIRED.load(Ordering::Acquire);
-            if g.is_empty() && !pending_local && io_drained {
-                return;
-            }
+        if sched.quiescent() {
+            return;
         }
         thread::sleep(Duration::from_millis(1));
     }
@@ -4433,20 +4408,56 @@ pub fn jet_scheduler_drain() {
 pub fn jet_scheduler_drain_after_exit() {
     let sched = scheduler();
     loop {
-        if sched.live.load(Ordering::Relaxed) == 0 {
-            let g = sched.global.lock().unwrap();
-            let pending_local = sched
-                .workers
-                .iter()
-                .any(|w| !w.queue.lock().unwrap().is_empty());
-            let io_drained = METRIC_IO_ACTIVE.load(Ordering::Acquire) == 0
-                && METRIC_IO_ALLOCATED.load(Ordering::Acquire)
-                    == METRIC_IO_RETIRED.load(Ordering::Acquire);
-            if g.is_empty() && !pending_local && io_drained {
-                return;
-            }
+        if sched.quiescent() {
+            return;
         }
         thread::yield_now();
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod idle_pool_park_tests {
+    use super::*;
+
+    /// Voluntary context switches of each pool worker thread, keyed by tid.
+    fn pool_worker_switches() -> Vec<(String, u64)> {
+        let mut workers = Vec::new();
+        for entry in std::fs::read_dir("/proc/self/task").unwrap().flatten() {
+            let path = entry.path();
+            let Ok(comm) = std::fs::read_to_string(path.join("comm")) else { continue };
+            if !comm.starts_with("jet-scheduler-") {
+                continue;
+            }
+            let Ok(status) = std::fs::read_to_string(path.join("status")) else { continue };
+            let switches = status
+                .lines()
+                .find_map(|line| line.strip_prefix("voluntary_ctxt_switches:"))
+                .and_then(|count| count.trim().parse().ok())
+                .expect("/proc task status reports voluntary_ctxt_switches");
+            workers.push((entry.file_name().to_string_lossy().into_owned(), switches));
+        }
+        workers
+    }
+
+    #[test]
+    fn every_submitted_job_runs_and_idle_pool_workers_park() {
+        let mut joins: Vec<_> = (0..2000i64).map(|n| jet_scheduler_spawn(move || n * 2)).collect();
+        let total: i64 = joins.iter_mut().map(|join| join.join().unwrap()).sum();
+        assert_eq!(total, 2 * (0..2000i64).sum::<i64>());
+        thread::sleep(Duration::from_millis(100));
+        let before = pool_worker_switches();
+        assert!(!before.is_empty(), "the scheduler started no jet-scheduler workers");
+        thread::sleep(Duration::from_millis(300));
+        let after = pool_worker_switches();
+        // A worker polling its queue on a timer wakes dozens of times in this
+        // window; a parked worker wakes only for submitted work. Other tests
+        // in this process may submit jobs, so require one quiet worker, not all.
+        let quietest = before
+            .iter()
+            .filter_map(|(tid, was)| after.iter().find(|(id, _)| id == tid).map(|(_, now)| now - was))
+            .min()
+            .expect("pool workers outlive the idle window");
+        assert!(quietest <= 2, "every idle pool worker woke {quietest}+ times in 300 ms: the pool polls instead of parking");
     }
 }
 

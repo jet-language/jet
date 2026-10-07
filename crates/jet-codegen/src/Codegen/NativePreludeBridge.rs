@@ -18,6 +18,7 @@ mod typed_text_prelude {
 }
 #[allow(dead_code)]
 mod time_prelude {
+    use crate::scheduler::jet_time_wall_override_ms;
     fn jet_scheduler_world_now_ms() -> Option<i64> {
         crate::scheduler::jet_scheduler_world_now_ms()
     }

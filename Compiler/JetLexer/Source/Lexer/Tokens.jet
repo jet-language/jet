@@ -147,3 +147,13 @@ pub TOKEN_SHL_EQ :: 104
 pub TOKEN_SHR_EQ :: 105
 pub TOKEN_HASH :: 106
 pub TOKEN_DOLLAR :: 107
+
+// Tokens.rs `without_comments`: the code tokens of `tokens`, comment trivia
+// dropped, in source order.
+pub fn lexer_without_comments(tokens: [Token]) -> [Token] Never! {
+    kept := [Token]{}
+    loop token in tokens {
+        if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> &kept.push(token)
+    }
+    kept
+}
