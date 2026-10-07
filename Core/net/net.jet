@@ -367,38 +367,38 @@ pub fn sendfile(&stream: TCPStream, path: String) -[Net, FS, Time.Wait]> Int Net
 
 pub fn udp_bind(addr: String) -[Net, Time.Wait]> UDPSocket NetError! {
     if !valid_text(addr) -> return Err(net_err("udp_bind", addr, "bind address is empty or contains control bytes"))
-    core.net.udp_bind(addr)
+    core.net.__udp_bind(addr)
 }
 
 pub fn udp_bind_addr(addr: SocketAddr) -[Net, Time.Wait]> UDPSocket NetError! {
-    core.net.udp_bind_addr(addr)
+    core.net.__udp_bind_addr(addr)
 }
 
 pub fn udp_local_addr(socket: UDPSocket) -[Net, Time.Wait]> SocketAddr NetError! {
-    core.net.udp_local_addr(socket)
+    core.net.__udp_local_addr(socket)
 }
 
 pub fn udp_set_timeout(socket: UDPSocket, timeout_ms: Int) NetError! -[Net, Time.Wait]> {
     if !valid_timeout(timeout_ms) -> return Err(net_err("udp_set_timeout", "", "timeout must be non-negative"))
-    core.net.udp_set_timeout(socket, timeout_ms)
+    core.net.__udp_set_timeout(socket, timeout_ms)
 }
 
 pub fn udp_send_to(socket: UDPSocket, text: String, addr: SocketAddr) -[Net, Time.Wait]> Int NetError! {
-    core.net.udp_send_to(socket, text, addr)
+    core.net.__udp_send_to(socket, text, addr)
 }
 
 pub fn udp_recv_from(socket: UDPSocket, limit: Int) -[Net, Time.Wait]> UDPPacket NetError! {
     if limit <= 0 -> return Err(net_err("udp_recv_from", "", "receive limit must be positive"))
-    core.net.udp_recv_from(socket, limit)
+    core.net.__udp_recv_from(socket, limit)
 }
 
 pub fn udp_send_bytes_to(socket: UDPSocket, bytes: [U8], addr: SocketAddr) -[Net, Time.Wait]> Int NetError! {
-    core.net.udp_send_bytes_to(socket, bytes, addr)
+    core.net.__udp_send_bytes_to(socket, bytes, addr)
 }
 
 pub fn udp_receive(socket: UDPSocket, limit: Int) -[Net, Time.Wait]> UDPPacket NetError! {
     if limit < 0 -> return Err(net_err("udp_receive", "", "receive limit must be non-negative"))
-    core.net.udp_receive(socket, limit)
+    core.net.__udp_receive(socket, limit)
 }
 
 pub fn udp_packet_data(packet: UDPPacket) -> String Never! { decode_utf8_lossy(packet.data) }
