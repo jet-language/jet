@@ -2,6 +2,7 @@
 // semantic intent. Hand edits never manufacture a rename receipt.
 use core.files as cli_files
 use core.encoding.json as cli_sem_json
+use jet_driver.JetDriverCompileMode
 
 pub struct JetCLISemOpTarget {
     pub stable_id: String
@@ -132,4 +133,51 @@ pub fn jet_cli_sem_op_value(operation: JetCLISemOp) -> JetCLIStatusValue Never! 
         jet_cli_status_field("replace", jet_cli_status_optional_text(operation.replace_template)),
     },
     )
+}
+
+// SemanticOps.rs semantic_rename_ops: only the tool's checked before/after
+// snapshots can record rename intent; ordinary review never infers a receipt.
+fn jet_cli_semantic_rename_ops(before: [JetCLISemDefinitionFact], after: [JetCLISemDefinitionFact]) -> [JetCLISemOp] Never! {
+    used := [Int]{}
+    operations := [JetCLISemOp]{}
+    loop (old_index, old) in before {
+        candidates := [Int]{}
+        loop (new_index, candidate) in after {
+            if !used.contains(new_index) && old.kind == candidate.kind && old.module_path == candidate.module_path && old.signature_id == candidate.signature_id && old.name != candidate.name {
+                &candidates.push(new_index)
+            }
+        }
+        if candidates.len() != 1 -> next
+        index :: candidates[0]
+        candidate :: after[index]
+        reverse := 0
+        loop (other_index, other) in before {
+            if other_index == old_index || (other.kind == candidate.kind && other.module_path == candidate.module_path && other.signature_id == candidate.signature_id && other.name != candidate.name) -> reverse += 1
+        }
+        if reverse != 1 -> next
+        &used.push(index)
+        target :: JetCLISemOpTarget{stable_id: old.stable_id, before: old.human_identity, after: candidate.human_identity, kind: candidate.kind, module_path: candidate.module_path}
+        &operations.push(JetCLISemOp{kind: "rename", rule_id: Val("jet-fix"), from: Val(old.name), to: Val(candidate.name), node: None, match_template: None, replace_template: None, targets: [JetCLISemOpTarget]{target}, files: [JetCLISemOpFile]{}})
+    }
+    operations
+}
+
+// A refused/invalid structural check has no rename authority. Rust's fix
+// receipt then records the exact changed byte region instead.
+fn jet_cli_fix_definition_facts(file: String, source: String) -> [JetCLISemDefinitionFact]? {
+    if jet_cli_compile_entry(file, false, false, None, JetDriverCompileMode.Doc, Val(source)) == {
+        .Refused(_) -> return None
+        .Compiled(result, _) -> {
+            if !result.complete || result.internal_problem != None || jet_cli_errors(result.diagnostics).len() > 0 -> return None
+            return Val(jet_cli_checked_semindex(result).definition_facts)
+        }
+    }
+}
+
+fn jet_cli_fix_semantic_ops(file: String, before: [U8], after: [U8]) -> [JetCLISemOp] {
+    old :: String.from_bytes(before) ?? return [JetCLISemOp]{}
+    new :: String.from_bytes(after) ?? return [JetCLISemOp]{}
+    old_facts :: jet_cli_fix_definition_facts(file, old) ?? return [JetCLISemOp]{}
+    new_facts :: jet_cli_fix_definition_facts(file, new) ?? return [JetCLISemOp]{}
+    jet_cli_semantic_rename_ops(old_facts, new_facts)
 }
