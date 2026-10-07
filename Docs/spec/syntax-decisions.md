@@ -617,7 +617,7 @@ Range arm heads and `distinct Int(0..10)` constraints stay literal-only.
 D-SHAPE-PLACE1's retired `.view(range)` method remains retired; bracket slicing
 is the one live range-place surface. A bare place projection such as
 `window :: values[range]` is a no-copy `View`; `&values[range]` is a
-write-through `ViewMut`. Write `~values[range]` when an independent list copy
+write-through `ViewMut`. Write `values[range].copy()` when an independent list copy
 must outlive or detach from the owner.
 The parser keeps a retired `.view(range)` as an ordinary call for the E0214
 teaching diagnostic; it must not split the range into constructor arguments.
@@ -2397,9 +2397,9 @@ stays a verb — no third sigil (D-CAP2). Dereference is **postfix `p.*`**
 keywords (E0056/E0057 retired by D-S14-PAUSE; E0058 retired earlier by
 D-MEM1/S3).
 
-*Supersession (D-SHAPE-COPY1=A, ratified 2026-07-15):* `copy x` is
-historical text in this frozen entry, not current syntax. The current copy
-form is `~x`; the retired `copy` word produces E0991.
+*Supersession (D-COPY-WORD1=A, confirmed by D-COPY-MOVE-SPELL1=A):* `copy x`
+and `~x` are historical text in this frozen entry, not current syntax. The
+current copy form is `x.copy()`; the retired forms teach E0991 and E0941.
 
 *History:* D-CAP7's original text (pre-2026-07-03) had a third visible
 parameter sigil `~T` (edit/mutate), a fourth `*T` in parameter position, and
