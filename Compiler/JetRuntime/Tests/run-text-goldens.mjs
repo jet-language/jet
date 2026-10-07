@@ -74,9 +74,14 @@ if (mode !== "--plan") {
     failures.push(`raw witness assembly: ${assemble.error?.message ?? `rc=${assemble.status}`}`);
   } else {
     try {
-      const prefix = join(raw, "text-test");
+      // Keep the executable outside raw/package.jet's library boundary.
+      const executableRoot = join(out, "raw-native");
+      mkdirSync(executableRoot, { recursive: true });
+      const program = join(executableRoot, "unit.jet");
+      writeFileSync(program, `${readFileSync(join(raw, "unit.jet"), "utf8")}\nfn run() { text_tests() }\n`);
+      const prefix = join(executableRoot, "text-test");
       const problem = runJetFront({
-        candidate: candidateJetc0(), file: join(raw, "unit.jet"), root: raw,
+        candidate: candidateJetc0(), file: program, root: executableRoot,
         cwd: root, prefix, receipt: join(raw, "front.receipt"), pack, store: join(raw, "store"),
       });
       if (problem) failures.push(`raw witness compile: ${problem.detail}`);
