@@ -136,7 +136,7 @@ fn rt_tls_shared_destructor_address() -> I64 {
 
 #Export(c) fn jet_rt_tls_shared_key(site: I64) -> I64 {
     existing :: sync_load(site)
-    if (existing != I64{0}) -> return existing
+    if (existing != I64{0}) { return existing }
     sync_mutex_lock(thread_tls_registry)
     key := sync_load(site)
     if (key == I64{0}) {
@@ -156,7 +156,9 @@ fn thread_tls_destroy(table: I64, key: I64, attempt_only: Bool) {
     closure :: sync_load(sync_load(thread_tls_registry + I64{16}) + (key - I64{1}) * I64{8})
     scope :: sync_load(sync_load(thread_tls_registry + I64{40}) + (key - I64{1}) * I64{8})
     sync_mutex_unlock(thread_tls_registry)
-    if (attempt_only && scope != I64{1}) -> return
+    if (attempt_only && scope != I64{1}) {
+        return
+    }
     value :: sync_load(sync_load(table) + (key - I64{1}) * I64{8})
     // Clear first: a destructor can reenter reset_attempt without double-drop.
     // Reload data on every key because a destructor may grow its TLS table.
@@ -170,7 +172,9 @@ fn thread_tls_destroy(table: I64, key: I64, attempt_only: Bool) {
 
 #Export(c) fn jet_rt_tls_reset_attempt() {
     table :: sync_load(thread_base() + I64{208})
-    if (table == I64{0}) -> return
+    if (table == I64{0}) {
+        return
+    }
     key := sync_load(table + I64{8})
     loop key > (I64{0}) {
         thread_tls_destroy(table, key, true)

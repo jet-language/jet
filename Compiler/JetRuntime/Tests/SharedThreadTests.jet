@@ -12,9 +12,7 @@
 }
 
 #Export(c) fn jet_rt_shared_tls_fixture_site_worker(site: I64) -> I64 {
-    loop sync_load(site + I64{8}) == (I64{0}) {
-        _ := sync_wait(site + I64{8}, I64{0}, I64{-1})
-    }
+    loop sync_load(site + I64{8}) == (I64{0}) -> _ := sync_wait(site + I64{8}, I64{0}, I64{-1})
     jet_rt_tls_shared_key(site)
 }
 
