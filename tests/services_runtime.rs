@@ -2424,3 +2424,58 @@ fn durable_lifecycle_crash_window_recovers_and_replays_one_identity() {
         "crash-window replay did not rebuild the signed history: {recovered}"
     );
 }
+
+#[test]
+fn state_store_metadata_policy_matches_all_tiers() {
+    let scratch = common::Scratch::new("service_state_store_metadata");
+    fs::write(scratch.path.join("state"), b"state").unwrap();
+    let root = scratch.path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+    let source = r#"
+package { authority: { holds: { allow: [FS.Read, IO, Mem.Alloc] } } }
+use core.service as service
+fn policy_reason(error: ServiceError) -> String Never! {
+    if error == .Policy(reason) -> return reason
+    panic("expected policy refusal")
+}
+fn run() {
+    service.state_store("__ROOT__/state") ?? panic("existing file")
+    print("file")
+    service.state_store("__ROOT__/absent/store") ?? panic("absent file")
+    print("absent")
+    if service.state_store("__ROOT__") == {
+        .Err(error) -> print(policy_reason(error) == "service state store is not a regular file; repair or replace the state store before retrying")
+        .Ok(_) -> panic("directory accepted as state store")
+    }
+    if service.state_store("__ROOT__/state/child") == {
+        .Err(error) -> {
+            reason :: policy_reason(error)
+            print(reason.starts_with("cannot inspect service state store: "))
+            print(reason.ends_with("; repair or replace the state store before retrying"))
+        }
+        .Ok(_) -> panic("non-directory path component accepted")
+    }
+}
+"#.replace("__ROOT__", &root);
+    tir_support::assert_tiers_agree("state_store_metadata", &source, "file\nabsent\ntrue\ntrue\ntrue\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn state_store_keeps_lexical_symlink_ancestor_before_dotdot_on_all_tiers() {
+    let scratch = common::Scratch::new("service_state_store_lexical_link");
+    fs::create_dir(scratch.path.join("real")).unwrap();
+    std::os::unix::fs::symlink(scratch.path.join("real"), scratch.path.join("link")).unwrap();
+    let root = scratch.path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+    let source = r#"
+package { authority: { holds: { allow: [FS.Read, IO, Mem.Alloc] } } }
+use core.service as service
+fn run() {
+    if service.state_store("__ROOT__/link/../store") == {
+        .Err(.Policy(reason)) -> print(reason == "service state parent is a symlink: __ROOT__/link; repair or replace the state store before retrying")
+        .Err(_) -> panic("wrong refusal kind")
+        .Ok(_) -> panic("lexical symlink ancestor disappeared")
+    }
+}
+"#.replace("__ROOT__", &root);
+    tir_support::assert_tiers_agree("state_store_lexical_link", &source, "true\n");
+}

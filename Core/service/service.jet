@@ -10,7 +10,6 @@ package {
 }
 
 use core as core
-use core.files as files
 
 // core.service is the typed Jet facade for the registered service provider.
 // Topology, authority, delivery, state, and workflow values are provider
@@ -50,10 +49,10 @@ pub fn state_store(path: String) -[FS.Read]> ServiceStateStore ServiceError! {
     if !valid_store_text(path) {
         return Err(ServiceError.Policy("service state store is empty, too long, or contains control characters"))
     }
-    if files.stat(path) == {
-        .Ok(info) -> {
-            if info.kind == "symlink" -> return Err(state_error("service state store must not be a symlink"))
-            if info.kind != "file" -> return Err(state_error("service state store is not a regular file"))
+    if state_path_kind(path) == {
+        .Ok(kind) -> {
+            if kind == 2 -> return Err(state_error("service state store must not be a symlink"))
+            if kind != 0 -> return Err(state_error("service state store is not a regular file"))
         }
         .Err(.NotFound(_)) -> {}
         .Err(error) -> return Err(state_error("cannot inspect service state store: {stat_cause(error)}"))
@@ -62,10 +61,10 @@ pub fn state_store(path: String) -[FS.Read]> ServiceStateStore ServiceError! {
     parent := state_parent_lex(path, windows)
     loop {
         ancestor :: parent ?? break
-        if files.stat(ancestor) == {
-            .Ok(info) -> {
-                if info.kind == "symlink" -> return Err(state_error("service state parent is a symlink: {ancestor}"))
-                if info.kind != "dir" -> return Err(state_error("service state parent is not a directory: {ancestor}"))
+        if state_path_kind(ancestor) == {
+            .Ok(kind) -> {
+                if kind == 2 -> return Err(state_error("service state parent is a symlink: {ancestor}"))
+                if kind != 1 -> return Err(state_error("service state parent is not a directory: {ancestor}"))
             }
             .Err(.NotFound(_)) -> {}
             .Err(error) -> return Err(state_error("cannot inspect service state parent: {stat_cause(error)}"))
@@ -73,6 +72,14 @@ pub fn state_store(path: String) -[FS.Read]> ServiceStateStore ServiceError! {
         parent = state_parent_lex(ancestor, windows)
     }
     ServiceStateStore{path: path}
+}
+
+// Metadata-only raw read: Windows identity acquisition would add failures that
+// the constructor's native symlink_metadata contract never had.
+fn state_path_kind(path: String) -[FS.Read]> Int IOError! {
+    #Unsafe("read the final path component's OS metadata kind without opening an identity handle") {
+        core.files.__path_kind(path)
+    }
 }
 
 pub fn restart_one_for_one() -> ServiceRestart Never! {

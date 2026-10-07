@@ -1,0 +1,37 @@
+package {
+    name: "net-http-service-policy-tests"
+    authority: { holds: { allow: [Net, Time.Wait, FS.Read, IO, Mem.Alloc] } }
+}
+
+// Import the canonical Core owners: a Core/... file used as the entry is user
+// source and cannot directly exercise its compiler-reserved carrier leaves.
+use core.net as net
+use core.http.client as client
+use core.http.server as server
+use core.service as service
+use core.jobs as jobs
+
+#Test("imported network policy owns canonical address text")
+fn _() {
+    ip :: net.ip_addr("2001:0db8:0:0:0:0:0:1") ?? panic("IP")
+    assert(net.ip_to_string(ip) == "2001:db8::1")
+    socket :: net.socket_addr_parse("[fe80::1%4294967295]:65535") ?? panic("socket")
+    assert(net.socket_to_string(socket) == "[fe80::1%4294967295]:65535")
+}
+
+#Test("imported server policy preserves credentials and formats access logs")
+fn _() {
+    credentials :: server.tls("not yet validated", "")
+    assert(credentials.cert_pem == "not yet validated" && credentials.key_pem == "")
+    request :: client.request("GET", "http://127.0.0.1/logs/42?secret=x")
+    assert(server.access_log(request, -7) == "GET /logs/42 -7")
+}
+
+#Test("imported service and jobs policy is value policy, not copied runtime state")
+fn _() {
+    assert(service.restart_one_for_one() == ServiceRestart.OneForOne)
+    assert(service.delivery_at_most_once() == ServiceDelivery.AtMostOnce)
+    assert(jobs.is_terminal(JobQueueState.Completed))
+    assert(!jobs.is_terminal(JobQueueState.Queued))
+    assert(jobs.is_cancelled(JobQueueState.Cancelled))
+}

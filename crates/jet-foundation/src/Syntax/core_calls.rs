@@ -490,6 +490,7 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "__close_directory",
                 "__list_directory",
                 "__stat_at",
+                "__path_kind",
                 "__read_link_at",
                 "__xattr_names",
                 "__xattr_get",
@@ -1431,7 +1432,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 17cd58397a55de067c06ce735ac5cd999424b3c3e78c794ec94bb92cada0e434
+// Source SHA-256: 3d270eb503c5a93f8977daf6cb132084ba5c1874ce617d3560b4cd65cb6714ad
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1528,6 +1529,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.files", "canonicalize"),
     ("core.files", "absolute"),
     ("core.files", "__stat_at"),
+    ("core.files", "__path_kind"),
     ("core.files", "set_mode"),
     ("core.files", "__open_reader"),
     ("core.files", "__open_writer"),
@@ -1685,11 +1687,9 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.http.server", "static_file_range"),
     ("core.http.server", "mux"),
     ("core.http.server", "response"),
-    ("core.http.server", "tls"),
     ("core.http.server", "sse"),
     ("core.http.server", "json"),
     ("core.http.server", "cors"),
-    ("core.http.server", "access_log"),
     ("core.http.server", "request_id"),
     ("core.files", "write_at"),
     ("core.files", "write_bytes"),
@@ -2432,6 +2432,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.files", "__create_directory", "jet_std::jet_fs_directory_create", true, &[false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__list_directory", "jet_std::jet_fs_directory_list", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__stat_at", "jet_std::jet_fs_stat_at", true, &[false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_native_int_result(),
+    CoreCallRecord::new("core.files", "__path_kind", "jet_std::jet_fs_path_kind", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_native_int_result(),
     CoreCallRecord::new("core.files", "__rename_at", "jet_std::jet_fs_rename_at", true, &[false, true, false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__remove_at", "jet_std::jet_fs_remove_at", true, &[false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "__read_link_at", "jet_std::jet_fs_read_link_at", true, &[false, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
@@ -3071,11 +3072,10 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.http.server", "static_files", "jet_http_srv_static_files_mount_defaulted", false, &[true, true, true], ) .with_max_arity(6) .without_direct_aot(),
     CoreCallRecord::new("core.http.server", "mux", "jet_http_mux_new", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.http.server", "response", "jet_http_srv_response", false, &[false, true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.http.server", "tls", "jet_http_srv_tls", false, &[true, true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.http.server", "sse", "jet_http_srv_sse", false, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.http.server", "json", "jet_http_srv_json", false, &[false, true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.http.server", "cors", "jet_http_srv_install_cors", false, &[true, true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.http.server", "access_log", "jet_http_srv_access_log", false, &[true, false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.http.server", "__route_template", "jet_http_srv_raw_route_template", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.http.server", "request_id", "jet_http_srv_install_request_id", false, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::receiver_with_symbol(&["HTTPMux"], "middleware", "jet_http_mux_middleware", false, &[true, false]),
     CoreCallRecord::new("core.net.ws", "connect", "jet_ws_connect", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),

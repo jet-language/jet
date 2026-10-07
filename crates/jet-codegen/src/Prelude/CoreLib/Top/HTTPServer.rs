@@ -777,12 +777,6 @@ fn jet_http_mux_new() -> JetHTTPMux {
     JetHTTPMux::new()
 }
 
-fn jet_http_srv_tls(cert_pem: &String, key_pem: &String) -> JetHTTPServerTls {
-    JetHTTPServerTls {
-        cert_pem: cert_pem.clone(),
-        key_pem: key_pem.clone(),
-    }
-}
 
 fn jet_http_mux_add<F>(mux: &JetHTTPMux, method: &str, pattern: &str, f: F)
 where
@@ -6294,9 +6288,9 @@ fn jet_http_srv_access_event(
     }
 }
 
-fn jet_http_srv_access_log(req: &JetHTTPRequest, status: i64) -> String {
-    let route = req.route_template.as_deref().unwrap_or_else(|| req.path.split('?').next().unwrap_or(&req.path));
-    format!("{} {} {}", req.method, route, status)
+// Stored request metadata only; formatting and fallback path policy are Jet.
+fn jet_http_srv_raw_route_template(req: &JetHTTPRequest) -> Option<String> {
+    req.route_template.clone()
 }
 
 /// D-HTTP-SERVER2 built-in `request_id` middleware: ordinary Handler wrapper.

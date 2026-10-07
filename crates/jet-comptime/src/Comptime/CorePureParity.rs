@@ -2796,7 +2796,7 @@ fn net_raw_carrier(member: &str, args: &[CtValue], span: Span) -> EvalResult {
             let ip = field(socket, "SocketAddr", "ip")
                 .ok_or_else(|| unsupported("malformed SocketAddr.ip carrier", span))?;
             if net_raw_ip_len(ip, span)? == 4 {
-                Ok(CtValue::Failed(CtReport::Clean(Type::Int)))
+                Ok(CtValue::absent(Type::Int))
             } else {
                 let value = field(socket, "SocketAddr", "scope")
                     .ok_or_else(|| unsupported("malformed SocketAddr.scope carrier", span))?;

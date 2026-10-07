@@ -115,8 +115,8 @@ module core.http.client exports { Client, Proxy, RedirectPolicy, delete, get, he
 source_module core.http.client path Core/http/client.jet alias core_core_http_client owns { accept, bearer, content_type, cookie_header, header, redirect_limit, session, session_auth, session_cookie, session_delete, session_form, session_get, session_head, session_header, session_json, session_patch, session_post, session_proxy, session_put, session_redirects, session_request, session_retries, session_timeout, set_header, timeout_redirects, user_agent, with_proxy, send }
 module core.http.server exports { access_log, bind, cors, cors_policy, json, mux, request_id, response, serve, serve_once, serve_once_listener, sse, static_file, static_file_range, static_files, tls } depends_on [core.http]
 source_module core.http.server path Core/http/server.jet alias core_core_http_server owns { access_log, cors, cors_policy, json, mux, request_id, response, serve_once, serve_once_listener, sse, static_file, static_file_range, static_files, tls }
-module core.jobs exports { JobQueue, JobPayload, JobResult, JobError, JobQueueReceipt, JobQueueClaim, JobQueueDeliveryPolicy, JobQueueEvent, JobQueueRecord, JobQueueState, JobQueueStatus, queue, ack, cancel, claim, enqueue, fail, named, status, with_max_attempts, queue_name, state, attempts, payload, event, events, is_terminal, is_cancelled } types { JobQueue:plain, JobPayload:plain, JobResult:plain, JobError:plain(Empty|Duplicate|Failed|Missing), JobQueueReceipt:plain, JobQueueClaim:plain, JobQueueDeliveryPolicy:plain(AtLeastOnce), JobQueueEvent:plain, JobQueueRecord:plain, JobQueueState:plain(Queued|Running|Retrying|Completed|Failed|DeadLettered|Cancelled), JobQueueStatus:plain } depends_on []
-source_module core.jobs path Core/jobs/jobs.jet alias core_core_jobs owns { ack, cancel, claim, enqueue, fail, named, queue, status, with_max_attempts, queue_name, state, attempts, payload, event, events, is_terminal, is_cancelled }
+module core.jobs exports { JobQueue, JobPayload, JobResult, JobError, JobQueueReceipt, JobQueueClaim, JobQueueDeliveryPolicy, JobQueueEvent, JobQueueRecord, JobQueueState, JobQueueStatus, queue, is_terminal, is_cancelled } types { JobQueue:plain, JobPayload:plain, JobResult:plain, JobError:plain, JobQueueReceipt:plain, JobQueueClaim:plain, JobQueueDeliveryPolicy:plain(AtLeastOnce), JobQueueEvent:plain, JobQueueRecord:plain, JobQueueState:plain(Queued|Running|Retrying|Completed|Failed|DeadLettered|Cancelled), JobQueueStatus:plain } depends_on []
+source_module core.jobs path Core/jobs/jobs.jet alias core_core_jobs owns { queue, is_terminal, is_cancelled }
 module core.log exports { bool, close, counter, critical, debug, debug_fields, disable, enabled, enter, error, error_fields, fatal, field, float, flush, info, info_fields, int, otlp_file, redact, sample_every, set_level, set_sink, set_trace_id, setup, span, warn, warn_fields, LogField, Pair, LogRecord, Formatter, Handler, record, formatter, handler, handler_format, format, handle, add, group, time, clear, log, warning, __trace_store, __level_load, __level_store, __disabled_load, __disabled_store, __format_store, __sink_store, __sample_store, __sample_count_store } types { LogRecord:plain, Formatter:plain, Handler:plain, LogField:plain, Pair:plain } depends_on []
 source_module core.log path Core/log/log.jet alias core_core_log owns { bool, close, counter, critical, debug, debug_fields, disable, enabled, enter, error, error_fields, fatal, field, float, flush, format, formatter, handle, handler, handler_format, info, info_fields, int, log, otlp_file, record, redact, sample_every, set_level, set_sink, set_trace_id, setup, span, warn, warn_fields, warning, add, group, time, clear }
 module core.math exports { abs, acos, acosh, asin, asinh, atan, atan2, atanh, binomial, cbrt, ceil, checked_abs, checked_add, checked_div, checked_mul, checked_neg, checked_pow, checked_rem, checked_sub, clamp, cmp, copy, copysign, conj, cos, cosh, cot, decimal, degrees, digits, div_mod, div_rem, e, erf, erfc, exp, exp2, exp_m1, factorial, floor, fma, float32, float64, fract, fraction, frexp, from_bits, gamma, gcd, hypot, ilogb, imag, infinity, int_pow, inv, is_canonical, is_even, is_finite, is_inf, is_integer, is_nan, is_normal, is_odd, is_signed, is_subnormal, is_zero, isqrt, lcm, ldexp, leading_ones, lerp, lgamma, ln, ln_1p, log, log10, log2, logb, max, min, modf, muladd, nan, next_after, nextafter, next_down, next_up, pi, pow, radians, radix, real, round, saturating_add, saturating_mul, saturating_sub, scaleb, sign, sign_bit, significand, signum, sin, sin_cos, sinh, sqrt, tan, tanh, tau, to_bits, trailing_ones, trunc, truncate, ulp, zero, Fraction, abs_diff, abs_float, clamp_float, comb, dist, even, fmod, fsum, gcd_many, hypot3, in_range, isclose, isfinite, isinf, isnan, lcm_many, max_float, midpoint, min_float, odd, perm, powmod, prod, prod_int, remainder, sum_int, sumprod, tau_const, log1p, xor, random, fabs, expm1 } types { Fraction:plain } depends_on []
@@ -947,6 +947,7 @@ dispatcher_row adapter core.files __fsync_directory | CoreCallRecord::new("core.
 dispatcher_row adapter core.files __create_directory | CoreCallRecord::new("core.files", "__create_directory", "jet_std::jet_fs_directory_create", true, &[false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row adapter core.files __list_directory | CoreCallRecord::new("core.files", "__list_directory", "jet_std::jet_fs_directory_list", true, &[false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row adapter core.files __stat_at | CoreCallRecord::new("core.files", "__stat_at", "jet_std::jet_fs_stat_at", true, &[false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_native_int_result()
+dispatcher_row adapter core.files __path_kind | CoreCallRecord::new("core.files", "__path_kind", "jet_std::jet_fs_path_kind", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).with_native_int_result()
 dispatcher_row adapter core.files __rename_at | CoreCallRecord::new("core.files", "__rename_at", "jet_std::jet_fs_rename_at", true, &[false, true, false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row adapter core.files __remove_at | CoreCallRecord::new("core.files", "__remove_at", "jet_std::jet_fs_remove_at", true, &[false, true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row adapter core.files __read_link_at | CoreCallRecord::new("core.files", "__read_link_at", "jet_std::jet_fs_read_link_at", true, &[false, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
@@ -1587,11 +1588,10 @@ dispatcher_row plain core.http.server static_file_range | CoreCallRecord::new( "
 dispatcher_row plain core.http.server static_files | CoreCallRecord::new( "core.http.server", "static_files", "jet_http_srv_static_files_mount_defaulted", false, &[true, true, true], ) .with_max_arity(6) .without_direct_aot()
 dispatcher_row plain core.http.server mux | CoreCallRecord::new("core.http.server", "mux", "jet_http_mux_new", false, &[])
 dispatcher_row plain core.http.server response | CoreCallRecord::new( "core.http.server", "response", "jet_http_srv_response", false, &[false, true], )
-dispatcher_row plain core.http.server tls | CoreCallRecord::new( "core.http.server", "tls", "jet_http_srv_tls", false, &[true, true], )
 dispatcher_row plain core.http.server sse | CoreCallRecord::new( "core.http.server", "sse", "jet_http_srv_sse", false, &[true], )
 dispatcher_row plain core.http.server json | CoreCallRecord::new( "core.http.server", "json", "jet_http_srv_json", false, &[false, true], )
 dispatcher_row plain core.http.server cors | CoreCallRecord::new( "core.http.server", "cors", "jet_http_srv_install_cors", false, &[true, true], )
-dispatcher_row plain core.http.server access_log | CoreCallRecord::new( "core.http.server", "access_log", "jet_http_srv_access_log", false, &[true, false], )
+dispatcher_row adapter core.http.server __route_template | CoreCallRecord::new("core.http.server", "__route_template", "jet_http_srv_raw_route_template", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient)
 dispatcher_row plain core.http.server request_id | CoreCallRecord::new( "core.http.server", "request_id", "jet_http_srv_install_request_id", false, &[true], )
 dispatcher_row receiver - middleware | CoreCallRecord::receiver_with_symbol(&["HTTPMux"], "middleware", "jet_http_mux_middleware", false, &[true, false])
 dispatcher_row plain core.net.ws connect | CoreCallRecord::new("core.net.ws", "connect", "jet_ws_connect", false, &[true])
@@ -1932,6 +1932,7 @@ ambient_route core.files glob
 ambient_route core.files canonicalize
 ambient_route core.files absolute
 ambient_route core.files __stat_at
+ambient_route core.files __path_kind
 ambient_route core.files set_mode
 ambient_route core.files __open_reader
 ambient_route core.files __open_writer
@@ -2089,11 +2090,9 @@ ambient_route core.http.server static_file
 ambient_route core.http.server static_file_range
 ambient_route core.http.server mux
 ambient_route core.http.server response
-ambient_route core.http.server tls
 ambient_route core.http.server sse
 ambient_route core.http.server json
 ambient_route core.http.server cors
-ambient_route core.http.server access_log
 ambient_route core.http.server request_id
 ambient_route core.files write_at
 ambient_route core.files write_bytes

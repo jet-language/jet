@@ -4144,13 +4144,13 @@ fn canonical_router_precedence_methods_and_conflicts() {
 
     let logs = jet_http_mux_new();
     jet_http_mux_add(&logs, "GET", "/logs/:id/*rest", |req| {
-        jet_http_srv_response(200, &jet_http_srv_access_log(&req, 200))
+        jet_http_srv_response(200, &jet_http_srv_raw_route_template(&req).expect("selected route template"))
     });
     assert_eq!(
         jet_http_mux_dispatch(&logs, request("GET", "/logs/42/a/b?secret=x"))
             .unwrap()
             .body,
-        "GET /logs/:id/*rest 200"
+        "/logs/:id/*rest"
     );
 }
 

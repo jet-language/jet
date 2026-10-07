@@ -880,6 +880,30 @@ fn format_ip_bytes(bytes: [U8]) -> String Never! {
     assert(format_ip_bytes(bytes) == "2001:db8::1:0:0:1")
 }
 
+#Test("IP and socket raw carriers preserve source policy values") {
+    ipv4 :: ip_addr("192.0.2.1") ?? panic("IPv4 carrier")
+    assert(ip_is_ipv4(ipv4))
+    assert(ip_to_string(ipv4) == "192.0.2.1")
+    ipv6 :: ip_addr("2001:0DB8:0:0:1:0:0:1") ?? panic("IPv6 carrier")
+    assert(!ip_is_ipv4(ipv6))
+    assert(ip_to_string(ipv6) == "2001:db8::1:0:0:1")
+    loop text in [String]{"127.0.0.1:0", "192.0.2.1:65535", "[::1]:80", "[fe80::1%4294967295]:65535", "[::ffff:192.0.2.1]:53"} {
+        address :: socket_addr_parse(text) ?? panic("socket carrier")
+        assert(socket_to_string(address) == text)
+        roundtrip :: socket_addr_parse(socket_to_string(address)) ?? panic("socket roundtrip")
+        assert(socket_host(address) == socket_host(roundtrip))
+        assert(socket_port(address) == socket_port(roundtrip))
+    }
+    unscoped :: socket_addr_parse("[fe80::1%0]:80") ?? panic("zero scope")
+    assert(socket_to_string(unscoped) == "[fe80::1]:80")
+    loop text in [String]{"[::1%4294967296]:80", "[::1%eth0]:80", "[::1]:65536", "127.0.0.1:-1"} {
+        if socket_addr_parse(text) == {
+            .Err(_) -> {}
+            .Ok(_) -> panic("invalid socket carrier accepted")
+        }
+    }
+}
+
 fn parse_scope(text: String) -> Int? Never! {
     raw :: text.bytes()
     if raw.len() == 0 -> return None

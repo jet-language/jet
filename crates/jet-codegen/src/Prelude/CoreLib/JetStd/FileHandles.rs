@@ -687,6 +687,24 @@ pub(crate) fn jet_fs_stat_file(file: &std::fs::File, shown: &str) -> Result<Vec<
     Ok(row)
 }
 
+/// Raw metadata-only classification, without following the final link.
+/// Unlike stat's identity row, this never opens a Windows handle; the caller
+/// owns target/ancestor validation and wording. 0=file, 1=dir, 2=link, 7=other.
+pub(crate) fn jet_fs_path_kind(path: &String) -> Result<i64, IOError> {
+    let file_type = std::fs::symlink_metadata(path)
+        .map_err(|error| io_error_at(IOOperation::Read, path, error))?
+        .file_type();
+    Ok(if file_type.is_symlink() {
+        2
+    } else if file_type.is_dir() {
+        1
+    } else if file_type.is_file() {
+        0
+    } else {
+        7
+    })
+}
+
 /// Metadata for `name` relative to `handle` (negative: a path). An empty
 /// `name` with a held key describes the held directory. `follow` applies
 /// only to a path; held-directory entries are never followed.
@@ -1048,3 +1066,84 @@ pub(crate) fn jet_fs_xattr_set(path: &String, name: &String, value: &Vec<u8>) ->
     }
 }
 // JET_VETTED_UNSAFE_END: jet_fs_handles
+
+#[cfg(test)]
+mod path_kind_tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    struct Fixture(PathBuf);
+
+    impl Fixture {
+        fn new() -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "jet-path-kind-{}-{now}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed),
+            ));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn metadata_kind_preserves_links_and_os_errors() {
+        let fixture = Fixture::new();
+        let root = fixture.0.to_string_lossy().into_owned();
+        let file = fixture.0.join("state");
+        std::fs::write(&file, b"state").unwrap();
+        let shown = file.to_string_lossy().into_owned();
+        assert_eq!(jet_fs_path_kind(&root).unwrap(), 1);
+        assert_eq!(jet_fs_path_kind(&shown).unwrap(), 0);
+        let missing = fixture.0.join("missing").to_string_lossy().into_owned();
+        assert!(matches!(jet_fs_path_kind(&missing), Err(IOError::NotFound(_))));
+        let obstructed = file.join("child").to_string_lossy().into_owned();
+        let error = std::fs::symlink_metadata(&obstructed).unwrap_err();
+        assert_eq!(
+            format!("{:?}", jet_fs_path_kind(&obstructed).unwrap_err()),
+            format!("{:?}", io_error_at(IOOperation::Read, &obstructed, error)),
+        );
+        #[cfg(unix)]
+        {
+            let link = fixture.0.join("link");
+            std::os::unix::fs::symlink(&file, &link).unwrap();
+            assert_eq!(jet_fs_path_kind(&link.to_string_lossy().into_owned()).unwrap(), 2);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_exclusive_file_matches_metadata_without_an_identity_open() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let fixture = Fixture::new();
+        let path = fixture.0.join("state");
+        std::fs::write(&path, b"state").unwrap();
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&path)
+            .unwrap();
+        let shown = path.to_string_lossy().into_owned();
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => {
+                assert!(metadata.is_file());
+                assert_eq!(jet_fs_path_kind(&shown).unwrap(), 0);
+            }
+            Err(error) => assert_eq!(
+                format!("{:?}", jet_fs_path_kind(&shown).unwrap_err()),
+                format!("{:?}", io_error_at(IOOperation::Read, &shown, error)),
+            ),
+        }
+        drop(held);
+    }
+}

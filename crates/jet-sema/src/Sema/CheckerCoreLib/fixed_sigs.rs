@@ -3755,6 +3755,10 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Int), (read, Type::String), (read, Type::Bool)],
             Some(result_ty(Type::List(Box::new(Type::Int)), io.clone())),
         )),
+        ("core.files", "__path_kind") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Int, io.clone())),
+        )),
         ("core.files", "__rename_at") => Some((
             vec![
                 (read, Type::Int),
@@ -5272,6 +5276,10 @@ fn core_fixed_sig_impl(
         ("core.net", "dns_srv_port" | "dns_srv_priority" | "dns_srv_weight") => Some((
             vec![(read, Type::Named("DNSSRV".to_string()))],
             Some(Type::Int),
+        )),
+        ("core.http.server", "__route_template") => Some((
+            vec![(read, Type::Named("HTTPRequest".to_string()))],
+            Some(Type::Option(Box::new(Type::String))),
         )),
         ("core.net", "tls_connect") => Some((
             vec![
