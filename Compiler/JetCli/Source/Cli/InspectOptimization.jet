@@ -240,13 +240,14 @@ pub fn jet_cli_acceleration_report(query: JetDriverOptimizationQueryResult, scop
     if !json && vector_count == 0 -> text = "{text}No vector facts declared.\n"
     if !json && acceleration_count == 0 -> text = "{text}No acceleration facts declared.\n"
     if !json -> return text
-    "{jet_cli_status_render("inspect.accel", true, [
+    fields :: [JetCLIStatusField]{
         jet_cli_status_field("scope", jet_cli_status_text(scope)), jet_cli_status_field("source", jet_cli_status_text(file)),
         jet_cli_status_field("profile", jet_cli_status_text(query.profile)), jet_cli_status_field("release_build", jet_cli_status_bool(query.release_build)),
         jet_cli_status_field("runtime_profile", jet_cli_status_text(runtime_profile)), jet_cli_status_field("measurement_source", jet_cli_status_text(measurement_source)),
         jet_cli_status_field("vectors", jet_cli_status_array(vectors)), jet_cli_status_field("decisions", jet_cli_status_array(accelerations)),
         jet_cli_status_field("runtime_decisions", jet_cli_status_array(runtime_values)), jet_cli_status_field("gate", jet_cli_optimization_gate_value()),
-    ])}\n"
+    }
+    "{jet_cli_status_render("inspect.accel", true, fields)}\n"
 }
 fn jet_cli_optimization_kind(kind: MIRDecisionKind) -> String Never! {
     if kind == { .Tier -> "tier" .Inline -> "inline" .Vectorize -> "vectorize" .Parallel -> "parallel" .Copy -> "copy" .Bounds -> "bounds" .Deopt -> "deopt" .Unreachable -> "unreachable" .LoopInvariant -> "loop-invariant" }
