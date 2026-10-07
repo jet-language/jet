@@ -1498,7 +1498,7 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         .MovePlace(place) -> lower_read_place(p, c, &m, &f, instruction, place, true)
         .WritePlace(place, value) -> lower_write_place(p, c, &m, &f, place, value, false)
         .ReplacePlace(place, value) -> lower_write_place(p, c, &m, &f, place, value, true)
-        .InitializeUninit(_) -> {}
+        .InitializeUninit(place) -> lower_initialize_uninit(p, c, &m, &f, place)
         .Unary(op, value) -> lower_unary(p, c, &m, &f, instruction, op, value)
         .Binary(op, dispatch, overflow, left, right) -> lower_binary(p, c, &m, &f, instruction, op, dispatch, overflow, left, right)
         .BuildString(parts) -> lower_build_string(p, c, &m, &f, instruction, parts)
@@ -1878,6 +1878,32 @@ fn lower_write_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     walk :: lower_walk_projections(p, &m, &f, root, c.slots[slot].ty, row.projections) ?? return
     if replace -> lower_drop_stored(p, &m, &f, walk.base, walk.offset, row.ty)
     lower_write_at(p, &f, walk.base, walk.offset, lowered, row.ty)
+}
+
+// `[T#N]{ uninit }` (D-UNINIT-SENTINEL2): the List of its N slots, without
+// writing any payload; sema admits reads only after every slot is written.
+// Any other uninit place needs no storage before its first write.
+fn lower_initialize_uninit(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, place: MIRPlaceID) Never! {
+    row :: lower_place_row(c.mir, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
+    fixed := false
+    count := -1
+    elem := row.ty
+    if row.ty.kind == .FixedList(inner, len) {
+        fixed = true
+        elem = inner
+        if len == .Literal(_, value) -> count = value
+    }
+    if !fixed -> return
+    if count < 0 || row.projections.len() != 0 || row.base == .Static(_) -> return lower_fail(&m, &f, "uninit {mir_type_display_name(row.ty)} of this shape is not lowered at O0 yet")
+    slot :: c.place_slots.get(place.value) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
+    if c.slots[slot].cell || c.slots[slot].write_param >= 0 -> return lower_fail(&m, &f, "uninit {mir_type_display_name(row.ty)} in a cell or Write parameter is not lowered at O0 yet")
+    length :: lower_const(&f, count)
+    data :: lower_list_buffer(&m, &f, length, lower_list_stride(p, elem))
+    header :: lower_new_storage(p, &f, row.ty)
+    lower_emit(&f, LIRInst.Store{base: header, offset: 0, value: length})
+    lower_emit(&f, LIRInst.Store{base: header, offset: 8, value: length})
+    lower_emit(&f, LIRInst.Store{base: header, offset: 16, value: data})
+    lower_set_slot(&f, slot, Val(header))
 }
 
 struct LowerFieldAddress {
