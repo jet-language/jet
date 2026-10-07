@@ -39,7 +39,7 @@ struct Jokes {
 
 fn run() (HTTPError | NetError | TaskFailure)! {
     mux :: server.mux()
-    state :: Shared(JokeState{added: 0})
+    state :: shared JokeState{added: 0}
     mux.get("/before/:name", (name: String) HTTPResponse HTTPError! -> Ok(server.response(200, "before:{name}")))
     mux.mount(Jokes{prefix: "joke", state: state})
     mux.get("/order/after", () HTTPResponse HTTPError! -> Ok(server.response(200, "after")))

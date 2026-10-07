@@ -1126,8 +1126,8 @@ fn sema_marker_rules_item_applications(item: Item, applications: &[AppliedRuleAp
         .Impl(implementation) -> {
             loop method in implementation.methods -> sema_marker_rules_function_applications(method, RuleSite.Method, &applications)
         }
-        .CodeModule(module) -> {
-            if module.body == .Val(body) {
+        .CodeModule(code_module) -> {
+            if code_module.body == .Val(body) {
                 loop nested in body -> sema_marker_rules_item_applications(nested, &applications)
             }
         }
