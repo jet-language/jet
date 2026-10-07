@@ -1823,7 +1823,7 @@ fn jet_std_json_decode_lenient(text: &String) -> Result<jet_std::DataTree, jet_s
     jet_std::jet_std_json_decode_lenient(text, &mut |line| eprintln!("{}", line))
 }
 
-fn jet_string_bytes(s: &String) -> Vec<u8> {
+fn jet_string_bytes(s: &str) -> Vec<u8> {
     s.as_bytes().to_vec()
 }
 fn jet_string_from_bytes(bs: &Vec<u8>) -> Result<String, jet_std::UTF8Error> {

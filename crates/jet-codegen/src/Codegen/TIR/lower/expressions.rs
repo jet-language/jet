@@ -1192,24 +1192,28 @@ pub(super) fn lower_or_fallback(
         let Some(return_ty) = env.ret_ty.clone() else {
             return value;
         };
-        // A typed empty list is rewritten by sema to `ListLit([])`, so its
-        // element type is absent from the AST by the time TIR lowers it.
-        // Restore the enclosing return payload before constructing the carrier.
+        // Contextual literals have no payload from which to recover their
+        // checked type. A Result's success slot, not its outer carrier,
+        // supplies the type of `None` in `T? E!`.
         let payload_ty = match &return_ty {
-            Type::Result { ok, .. } | Type::Option(ok) => ok.as_ref(),
+            Type::Result { ok, .. } => ok.as_ref(),
             other => other,
         };
         let value = if matches!(&value.kind, TExprKind::Absent)
-            && matches!(&return_ty, Type::Option(_))
+            && matches!(payload_ty, Type::Option(_))
         {
             TExpr {
-                ty: return_ty.clone(),
+                ty: payload_ty.clone(),
                 kind: TExprKind::Absent,
             }
         } else if matches!(&value.ty, Type::Result { .. } | Type::Option(_)) {
             value
         } else {
-            preserve_typed_list_shape(value, payload_ty, cx)
+            let list_payload = match payload_ty {
+                Type::Option(inner) => inner.as_ref(),
+                other => other,
+            };
+            preserve_typed_list_shape(value, list_payload, cx)
         };
         // An explicit `Err(...)`/`Ok(...)` (or any carrier-typed expression)
         // already IS the failure carrier; wrapping it again emits the invalid

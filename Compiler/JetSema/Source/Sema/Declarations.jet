@@ -18,24 +18,16 @@ use jet_foundation.[
     SymbolID,
     Type,
     expr_span,
+    failure_contract_effective_type,
     failure_contract_from_return_type,
     failure_contract_source,
     type_with_effective_fn_returns,
 ]
 
 pub fn sema_effective_return_type(return_type: Type?) -> Type Never! {
-    if return_type == None -> return Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "Err"}}
-    raw :: return_type
-    if raw == {
-        .Named(name) -> if name == "Never" -> return raw
-        .Option(_) -> return raw
-        .Result(ok, err) -> {
-            if err == .Named(name) && name == "Never" -> return Type.Result{ok: ok, err: err}
-            return raw
-        }
-        else -> {}
-    }
-    Type.Result{ok: raw, err: Type.Named{name: "Err"}}
+    // Imported declarations and local calls use the same canonical failure
+    // projection; a written success type is not the callable's Result type.
+    failure_contract_effective_type(failure_contract_from_return_type(return_type))
 }
 
 // D-FAILURE-FOUNDATION1: these traits are raw protocol ABIs (String, Bool,

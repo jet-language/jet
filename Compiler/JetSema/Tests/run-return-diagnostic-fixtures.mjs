@@ -26,6 +26,11 @@ const builders = [
   "fn sema_return_value_fix(", "pub fn sema_return_value_mismatch(",
 ].map((head) => item(diagnosticPath, head));
 builders.push(item("Compiler/JetSema/Source/Sema/Expressions.jet", "fn sema_expr_unwrap_tag("));
+builders.push(item("Compiler/JetSema/Source/Sema/Declarations.jet", "pub fn sema_effective_return_type("));
+builders.push(item("Compiler/JetSema/Source/Sema/Statements.jet", "fn sema_stmt_return_required_type("));
+builders.push(item("Compiler/JetSema/Source/Sema/Statements.jet", "fn sema_stmt_return_success_type("));
+builders.push(item("Compiler/JetSema/Source/Sema/Expressions.jet", "fn sema_tir_expr("));
+builders.push(item("Compiler/JetSema/Source/Sema/Expressions/Control.jet", "fn sema_expression_absent("));
 const foundation = readFileSync(join(rungs, "L1/project/src/compiler.jet"), "utf8");
 const fixtures = readFileSync(join(repo, "Compiler/JetSema/Tests/ReturnDiagnosticFixtures.jet"), "utf8");
 mkdirSync(join(out, "project/src"), { recursive: true });

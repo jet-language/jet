@@ -362,7 +362,7 @@ fn lower_after_sema(src: &str, fn_name: &str) -> TFunc {
 
 
 #[test]
-fn loaded_core_source_signatures_include_transitive_files_calls() {
+fn loaded_core_source_signatures_preserve_implicit_error_carriers() {
     fn loaded_module(alias: &str, source: &str) -> crate::AST::LoadedModule {
         let (tokens, diagnostics) = crate::Lexer::lex(source);
         assert!(diagnostics.is_empty(), "lex errors: {diagnostics:?}");
@@ -431,7 +431,9 @@ fn loaded_core_source_signatures_include_transitive_files_calls() {
     assert!(matches!(&read.params[0].1, crate::AST::Type::String));
     assert!(matches!(
         read.return_type.as_ref(),
-        Some(crate::AST::Type::List(inner)) if matches!(inner.as_ref(), crate::AST::Type::String)
+        Some(crate::AST::Type::Result { ok, err })
+            if matches!(ok.as_ref(), crate::AST::Type::List(inner) if matches!(inner.as_ref(), crate::AST::Type::String))
+                && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "Err")
     ));
     let write = signatures
         .get(&("core.files".to_string(), "write_lines".to_string()))
@@ -442,7 +444,12 @@ fn loaded_core_source_signatures_include_transitive_files_calls() {
         &write.params[1].1,
         crate::AST::Type::List(inner) if matches!(inner.as_ref(), crate::AST::Type::String)
     ));
-    assert!(write.return_type.is_none());
+    assert!(matches!(
+        write.return_type.as_ref(),
+        Some(crate::AST::Type::Result { ok, err })
+            if matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == "Unit")
+                && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "Err")
+    ));
 }
 
 #[test]

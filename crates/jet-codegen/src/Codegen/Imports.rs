@@ -1685,10 +1685,12 @@ pub(crate) fn core_source_sig_map(
                     )
                 })
                 .collect();
-            let return_type = function
-                .return_type
-                .as_ref()
-                .map(|ty| qualify_imported_call_type(bundle, target, source.alias, ty));
+            let return_type = Some(qualify_imported_call_type(
+                bundle,
+                target,
+                source.alias,
+                &function.callable_value_return_type(),
+            ));
             map.insert(
                 (source.module.to_string(), function.name.clone()),
                 super::CoreSourceFunctionSignature {
@@ -1743,9 +1745,12 @@ pub(crate) fn core_source_sig_map(
                         )
                     })
                     .collect();
-                let return_type = function.return_type.as_ref().map(|ty| {
-                    qualify_imported_call_type(bundle, target, part.source.alias, ty)
-                });
+                let return_type = Some(qualify_imported_call_type(
+                    bundle,
+                    target,
+                    part.source.alias,
+                    &function.callable_value_return_type(),
+                ));
                 map.insert(
                     (part.source.module.to_string(), function.name.clone()),
                     super::CoreSourceFunctionSignature {
