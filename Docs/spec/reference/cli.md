@@ -437,3 +437,9 @@ The hosted `cache status`, `cache prune --to <size>`, and
 journal, live-owner leases, and deterministic pruning order. Text and
 `jet.status/v1` JSON retain the Rust command's fields and size formatting.
 The CLI does not introduce another store or emulate cache mutation.
+
+Environment inspection's `.Oci` image/package cross-check now uses Jetpack's
+authority-backed `PackageFacts.load` reader, including inline package conflict
+checks and composed manifest facts. A present package is no longer refused by
+a compiler-only loader substitute; absent and malformed package outcomes keep
+the environment model's existing E1267 behavior.
