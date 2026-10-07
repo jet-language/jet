@@ -837,7 +837,7 @@ fn jet_args_parse_mode(
 
 fn jet_args_parse_or_exit(spec: &JetArgsSpec, argv: &Vec<String>) -> JetParsedArgs {
     match jet_args_parse(spec, argv) {
-        Ok(parsed) if jet_parsed_flag(&parsed, &"help".to_string()) => {
+        Ok(parsed) if jet_parsed_flag(&parsed, "help") => {
             println!("{}", spec.help());
             std::process::exit(0);
         }
@@ -957,11 +957,11 @@ fn jet_args_edit_distance(a: &str, b: &str) -> usize {
 }
 
 fn jet_parsed_flag(parsed: &JetParsedArgs, name: &str) -> bool {
-    *parsed.flags.get((&name[..])).unwrap_or(&false)
+    *parsed.flags.get(name).unwrap_or(&false)
 }
 
 fn jet_parsed_option(parsed: &JetParsedArgs, name: &str) -> JetOutcome<String, JetAbsent> {
-    jet_outcome_of(parsed.options.get((&name[..])).and_then(|v| v.last().cloned()))
+    jet_outcome_of(parsed.options.get(name).and_then(|v| v.last().cloned()))
 }
 
 fn jet_parsed_option_int(parsed: &JetParsedArgs, name: &str) -> JetOutcome<i64, JetAbsent> {
@@ -973,7 +973,7 @@ fn jet_parsed_option_float(parsed: &JetParsedArgs, name: &str) -> JetOutcome<f64
 }
 
 fn jet_parsed_options(parsed: &JetParsedArgs, name: &str) -> Vec<String> {
-    parsed.options.get((&name[..])).cloned().unwrap_or_default()
+    parsed.options.get(name).cloned().unwrap_or_default()
 }
 
 fn jet_parsed_positional(parsed: &JetParsedArgs, idx: i64) -> JetOutcome<String, JetAbsent> {
@@ -991,9 +991,9 @@ fn jet_parsed_subcommand(parsed: &JetParsedArgs) -> JetOutcome<String, JetAbsent
 /// `core.log` levels. `--quiet` wins when both switches are present so a
 /// script can silence a verbose default explicitly.
 fn jet_args_standard_log_level(parsed: &JetParsedArgs) -> String {
-    if jet_parsed_flag(parsed, &"quiet".to_string()) {
+    if jet_parsed_flag(parsed, "quiet") {
         "error".to_string()
-    } else if jet_parsed_flag(parsed, &"verbose".to_string()) {
+    } else if jet_parsed_flag(parsed, "verbose") {
         "debug".to_string()
     } else {
         "info".to_string()
@@ -1003,7 +1003,7 @@ fn jet_args_standard_log_level(parsed: &JetParsedArgs) -> String {
 /// D-CLI-GLOBAL1=E: normalize the Standard color choice once. `auto` follows
 /// `NO_COLOR`; explicit `always` and `never` are expert overrides.
 fn jet_args_standard_color_mode(parsed: &JetParsedArgs) -> String {
-    let requested = jet_parsed_option(parsed, &"color".to_string())
+    let requested = jet_parsed_option(parsed, "color")
         .ok()
         .unwrap_or_else(|| "auto".to_string());
     match requested.as_str() {

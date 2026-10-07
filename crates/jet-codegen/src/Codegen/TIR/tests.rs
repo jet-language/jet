@@ -1837,6 +1837,81 @@ fn copy_borrow_primitive_place_reads_are_bitwise() {
 }
 
 #[test]
+fn copy_borrow_read_text_abi_and_owned_sink() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust("fn length(text: String) -> Int { text.len() }\nfn forward(text: String) -> Int { length(text) }\nfn owned(text: String) -> String { return text }\nfn run() {}\n");
+        let forward = emitted_fn_body(&rust, "forward");
+        assert!(forward.contains("__jet_text: &str"), "Read text must lend its contents:\n{forward}");
+        assert_eq!(forward.matches(".clone()").count() + forward.matches(".to_owned()").count(), 0, "forwarding must not materialize text:\n{forward}");
+        let owned = emitted_fn_body(&rust, "owned");
+        assert_eq!(owned.matches(".to_owned()").count(), 1, "an owned return materializes once:\n{owned}");
+        println!("copy_borrow forward copies=0 owned_return copies=1");
+    });
+}
+#[test]
+fn copy_borrow_trim_view_to_string_read_never_copies() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust(
+            "fn lend(right: String) -> Int { right.len() }\n\
+             fn authority(raw: String) -> Int {\n\
+                 right :: raw.trim()\n\
+                 lend(right)\n\
+             }\n\
+             fn run() {}\n",
+        );
+        let body = emitted_fn_body(&rust, "authority");
+        assert_eq!(body.matches("jet_string_view_copy").count(), 0,
+            "a trim view lent to a String Read formal is already &str:\n{body}");
+        assert_eq!(body.matches(".clone()").count() + body.matches(".to_owned()").count(), 0,
+            "the borrowed call must not materialize the view by another spelling:\n{body}");
+        println!("copy_borrow trim_view_read copies=0 view_copies=0");
+    });
+}
+
+
+#[test]
+fn copy_borrow_all_runtime_kernel_signatures_compile() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        use jet_foundation::MIR::MirRuntimePartId as Part;
+        let (mut mir, _) = emitted_rust("fn run() {}\n");
+        let artifact = mir.artifacts.first_mut().expect("probe has an artifact");
+        artifact.runtime_parts.extend([
+            Part::Gc, Part::Event, Part::Realtime, Part::EmbeddedHardware,
+            Part::Ui, Part::Devtools, Part::Gtk, Part::Apps, Part::Email,
+            Part::Game, Part::Files, Part::Interrupt, Part::FsRuntime,
+            Part::Process, Part::Crypto, Part::Math, Part::Encoding,
+            Part::Data, Part::Fmt, Part::DataFmt, Part::Compute, Part::Http,
+            Part::WebSocket, Part::Browser, Part::Args, Part::Reflect,
+            Part::AuthTokens, Part::AuthSession, Part::Sync, Part::Services,
+            Part::Mod,
+        ]);
+        let execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact.id);
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution,
+            },
+        );
+        let directory = std::env::temp_dir().join(format!("jet_copy_borrow_kernels_{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("runtime.rs");
+        std::fs::write(&source, &rust).unwrap();
+        if let Some(output) = std::env::var_os("COPY_BORROW_KERNEL_SOURCE") {
+            std::fs::write(output, &rust).unwrap();
+        }
+        let output = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-type=lib", "--emit=metadata", "-Awarnings"])
+            .arg(&source).arg("-o").arg(directory.join("runtime.rmeta"))
+            .output().expect("kernel signature proof requires rustc");
+        assert!(output.status.success(), "all runtime kernels must agree on the Read ABI:\n{}", String::from_utf8_lossy(&output.stderr));
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
+
+#[test]
 fn copy_borrow_text_interpolation_appends_a_borrow() {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let (_, rust) = emitted_rust("fn wrap(text: String) -> String {\n \"<{text}>\"\n}\nfn run() {}\n");

@@ -256,7 +256,7 @@
                 return JetURLParts::parse(&format!("{}:{}", self.scheme, rel));
             }
             let mut out = self.clone();
-            let mut rest = (&rel[..]);
+            let mut rest = rel;
             out.fragment = None;
             if let Some(i) = rest.find('#') {
                 out.fragment = Some(jet_url_percent_decode_str(&rest[i + 1..])?);
@@ -1123,7 +1123,7 @@
                 return rel.to_string();
             }
         }
-        let Ok(parsed) = JetURLParts::parse(&base.to_string()) else {
+        let Ok(parsed) = JetURLParts::parse(base) else {
             return rel.to_string();
         };
         if rel.starts_with("//") {
@@ -1132,7 +1132,7 @@
                 .unwrap_or_else(|_| rel.to_string());
         }
         parsed
-            .join(&rel.to_string())
+            .join(rel)
             .map(|url| url.to_string_value())
             .unwrap_or_else(|_| rel.to_string())
     }

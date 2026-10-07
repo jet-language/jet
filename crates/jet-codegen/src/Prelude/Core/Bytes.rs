@@ -193,13 +193,13 @@ impl JetByteBuffer {
         self.as_text()
     }
     pub(crate) fn contains(&self, needle: &str) -> bool {
-        self.as_text().contains((&needle[..]))
+        self.as_text().contains(needle)
     }
     pub(crate) fn starts_with(&self, prefix: &str) -> bool {
-        self.as_text().starts_with((&prefix[..]))
+        self.as_text().starts_with(prefix)
     }
     pub(crate) fn ends_with(&self, suffix: &str) -> bool {
-        self.as_text().ends_with((&suffix[..]))
+        self.as_text().ends_with(suffix)
     }
     pub(crate) fn trim(&self) -> JetByteBuffer {
         JetByteBuffer::from(&self.as_text().trim().as_bytes().to_vec())
@@ -241,7 +241,7 @@ impl JetByteBuffer {
         self.to_title()
     }
     pub(crate) fn replace(&self, from: &str, to: &str) -> JetByteBuffer {
-        JetByteBuffer::from(&self.as_text().replace((&from[..]), (&to[..])).into_bytes())
+        JetByteBuffer::from(&self.as_text().replace(from, to).into_bytes())
     }
     pub(crate) fn split(&self, sep: &str) -> Vec<String> {
         let text = self.as_text();
@@ -253,7 +253,7 @@ impl JetByteBuffer {
             out.push(String::new());
             return out;
         }
-        text.split((&sep[..])).map(|s| s.to_string()).collect()
+        text.split(sep).map(|s| s.to_string()).collect()
     }
     pub(crate) fn partition(
         &self,
@@ -286,10 +286,10 @@ impl JetByteBuffer {
         self.as_text().lines().map(|s| s.to_string()).collect()
     }
     pub(crate) fn index_of(&self, needle: &str) -> JetOutcome<i64, JetAbsent> {
-        jet_outcome_of(self.as_text().find((&needle[..])).map(|i| i as i64))
+        jet_outcome_of(self.as_text().find(needle).map(|i| i as i64))
     }
     pub(crate) fn last_index_of(&self, needle: &str) -> JetOutcome<i64, JetAbsent> {
-        jet_outcome_of(self.as_text().rfind((&needle[..])).map(|i| i as i64))
+        jet_outcome_of(self.as_text().rfind(needle).map(|i| i as i64))
     }
     pub(crate) fn is_ascii(&self) -> bool {
         self.bytes.is_ascii()

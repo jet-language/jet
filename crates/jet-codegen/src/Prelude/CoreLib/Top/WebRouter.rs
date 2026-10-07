@@ -302,7 +302,7 @@ fn jet_web_router_parse_value(
     field: &JetWebRouterField,
     raw: Option<&str>,
 ) -> Result<Option<String>, String> {
-    let Some(raw) = raw.or(field.default.as_ref()) else {
+    let Some(raw) = raw.or(field.default.as_deref()) else {
         if field.required {
             return Err(format!("missing required parameter `{}`", field.name));
         }
@@ -314,7 +314,7 @@ fn jet_web_router_parse_value(
             .parse::<i64>()
             .map(|value| value.to_string())
             .map_err(|_| format!("parameter `{}` expects Int, got `{raw}`", field.name))?,
-        JetWebRouterValueType::Bool => match (&raw[..]) {
+        JetWebRouterValueType::Bool => match raw {
             "true" | "1" => "true".to_string(),
             "false" | "0" => "false".to_string(),
             _ => {
@@ -373,7 +373,7 @@ fn jet_web_router_typed_values(
 ) -> Result<BTreeMap<String, String>, String> {
     let mut typed = BTreeMap::new();
     for field in fields {
-        let value = jet_web_router_parse_value(field, values.get(&field.name))?;
+        let value = jet_web_router_parse_value(field, values.get(&field.name).map(String::as_str))?;
         if let Some(value) = value {
             typed.insert(field.name.clone(), value);
         }

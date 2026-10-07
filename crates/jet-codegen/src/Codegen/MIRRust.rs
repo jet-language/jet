@@ -23123,8 +23123,7 @@ impl<'a> RustEmitter<'a> {
                 if !row.capture_params.is_empty() {
                     panic!("MIR captured function called without a Closure operation");
                 }
-                let borrow_mask = self.parameter_borrow_mask(&row.params);
-                self.call_symbol_for_function(
+                self.call_declared_symbol(
                     function,
                     self.function_name(*id),
                     args,
@@ -23133,7 +23132,7 @@ impl<'a> RustEmitter<'a> {
                     } else {
                         type_args
                     },
-                    Some(&borrow_mask),
+                    &row.params,
                 )
             }
             MirCallee::Associated {
@@ -23341,8 +23340,7 @@ impl<'a> RustEmitter<'a> {
                 );
             }
         };
-        let borrow_mask = self.parameter_borrow_mask(&row.params);
-        self.call_symbol_for_function(
+        self.call_declared_symbol(
             caller,
             symbol,
             args,
@@ -23351,7 +23349,7 @@ impl<'a> RustEmitter<'a> {
             } else {
                 type_args
             },
-            Some(&borrow_mask),
+            &row.params,
         )
     }
     fn foreign_abi_name(&self, abi: &MirForeignAbi) -> String {
@@ -24584,7 +24582,7 @@ impl<'a> RustEmitter<'a> {
                     || declared
                         .get(index)
                         .is_some_and(|param| self.parameter_borrowed(param));
-                self.call_arg_for_function(caller, arg, borrowed)
+                self.call_arg_for_formal(caller, arg, &declared[index].ty, borrowed)
             })
             .collect::<Vec<_>>()
             .join(", ");
@@ -24676,7 +24674,7 @@ impl<'a> RustEmitter<'a> {
             .iter()
             .zip(&method.params)
             .map(|(arg, param)| {
-                self.call_arg_for_function(caller, arg, self.parameter_borrowed(param))
+                self.call_arg_for_formal(caller, arg, &param.ty, self.parameter_borrowed(param))
             })
             .collect::<Vec<_>>()
             .join(", ");
@@ -25019,7 +25017,9 @@ impl<'a> RustEmitter<'a> {
                         .as_ref()
                         .map(|metadata| metadata.conventions.as_slice());
                     let access = Self::callable_parameter_access(conventions, index);
-                    if self.callable_parameter_borrowed(ty, access) {
+                    if self.read_text_parameter(ty, access) {
+                        format!("__jet_compute_arg_{index}.to_owned()")
+                    } else if self.callable_parameter_borrowed(ty, access) {
                         format!("(*__jet_compute_arg_{index}).clone()")
                     } else {
                         format!("__jet_compute_arg_{index}")
@@ -25716,6 +25716,15 @@ impl<'a> RustEmitter<'a> {
                 };
                 if let Some(value) = native_int {
                     return value;
+                }
+                // Optional text kernels lend the payload; `.ok()` would move
+                // or copy the String and would produce Option<String>.
+                if !row.aot_direct && matches!(declared,
+                    Some(crate::AST::Type::Option(inner)) if matches!(inner.as_ref(), crate::AST::Type::String))
+                    && matches!(self.value_type(function, arg.value).kind(), MirTypeKind::Option(_))
+                {
+                    let reference = self.call_arg_for_function(function, arg, true);
+                    return format!("({reference}).as_ref().ok().map(String::as_str)");
                 }
                 let path_argument = self.core_call_path_argument(function, arg, declared);
                 let value = if path_argument {
@@ -27573,6 +27582,61 @@ impl<'a> RustEmitter<'a> {
             );
         reads_view.then(|| self.string_view_read(function, arg.value))
     }
+    /// An abstract formal borrows its owned carrier (`&T`), not the concrete
+    /// String read ABI (`&str`). Keep an available String owner; materialize
+    /// only when the source is itself a view and that owner does not exist.
+    fn call_arg_for_formal(
+        &self,
+        function: &MirFunction,
+        arg: &MirCallArg,
+        formal: &MirType,
+        borrowed: bool,
+    ) -> String {
+        if !borrowed || arg.access != MirAccess::Read
+            || !self.read_text_parameter(self.value_type(function, arg.value), MirAccess::Read)
+            || self.read_text_parameter(formal, MirAccess::Read)
+        {
+            return self.call_arg_for_function(function, arg, borrowed);
+        }
+        if let Some(text) = self.literal_string_value(function, arg.value).filter(|_| !self.is_no_os()) {
+            return format!("{{ static __JET_LITERAL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {text:?}.to_owned()); &*__JET_LITERAL }}");
+        }
+        let place = arg.place.or_else(|| match self.value_definition(function, arg.value) {
+            Some(MirOperation::ReadPlace(place)) => Some(*place),
+            _ => None,
+        }).and_then(|place| self.place_row(function, place));
+        let view = self.string_view_argument(function, arg).is_some()
+            || place.is_some_and(|place| place.projections.is_empty() && match place.base {
+                MirPlaceBase::Parameter(value) | MirPlaceBase::Capture(value) => {
+                    self.history_binding(value).is_some_and(|(_, access)| access == MirAccess::Read)
+                }
+                MirPlaceBase::Local(local) => self.ref_binding_local(function, local),
+                _ => false,
+            })
+            || matches!(self.value_definition(function, arg.value),
+                Some(MirOperation::Parameter { .. } | MirOperation::Capture { .. }))
+                && self.history_binding(arg.value).is_some_and(|(_, access)| access == MirAccess::Read);
+        let reference = self.call_arg_for_function(function, arg, true);
+        if view { format!("&({reference}).to_owned()") } else { reference }
+    }
+
+    fn call_declared_symbol(
+        &self,
+        function: &MirFunction,
+        symbol: String,
+        args: &[MirCallArg],
+        type_args: &[MirType],
+        params: &[jet_foundation::MIR::MirParam],
+    ) -> String {
+        let generic = if type_args.is_empty() { String::new() } else {
+            format!("::<{}>", type_args.iter().map(|ty| self.rust_type(ty)).collect::<Vec<_>>().join(", "))
+        };
+        let arguments = args.iter().zip(params).map(|(arg, param)| {
+            self.call_arg_for_formal(function, arg, &param.ty, self.parameter_borrowed(param))
+        }).collect::<Vec<_>>().join(", ");
+        split_local_field_borrows(&format!("{symbol}{generic}"), &arguments)
+    }
+
     fn call_arg_for_function(
         &self,
         function: &MirFunction,
@@ -28098,12 +28162,7 @@ impl<'a> RustEmitter<'a> {
             .params
             .iter()
             .map(|param| {
-                let ty = self.rust_local_type(&param.ty);
-                let ty = match param.access {
-                    MirAccess::Write => format!("&mut {ty}"),
-                    MirAccess::Read if self.parameter_borrowed(param) => format!("&{ty}"),
-                    MirAccess::Read | MirAccess::Move => ty,
-                };
+                let ty = self.callable_parameter_type(&param.ty, param.access);
                 format!("mut {}: {}", mangle(&param.name), ty)
             })
             .collect::<Vec<_>>()
@@ -28277,6 +28336,7 @@ impl<'a> RustEmitter<'a> {
         params: &[MirType],
         borrow_inputs: bool,
         adapt_unit_result: bool,
+        text_views: bool,
     ) -> String {
         let send_fn = matches!(
             self.value_type(function, callable).kind(),
@@ -28288,11 +28348,12 @@ impl<'a> RustEmitter<'a> {
             .iter()
             .enumerate()
             .map(|(index, ty)| {
-                format!(
-                    "__jet_callback_arg_{index}: {}{}",
-                    if borrow_inputs { "&" } else { "" },
-                    self.rust_type(ty)
-                )
+                let rendered = if borrow_inputs && text_views && self.read_text_parameter(ty, MirAccess::Read) {
+                    "&str".to_string()
+                } else {
+                    format!("{}{}", if borrow_inputs { "&" } else { "" }, self.rust_type(ty))
+                };
+                format!("__jet_callback_arg_{index}: {rendered}")
             })
             .collect::<Vec<_>>()
             .join(", ");
@@ -30072,7 +30133,7 @@ impl<'a> RustEmitter<'a> {
                     .unwrap_or(emitted)
             }
             MirSemanticOp::HostBorrowCallback { callable, params } => {
-                self.host_callback(function, *callable, params, true, false)
+                self.host_callback(function, *callable, params, true, false, true)
             }
             MirSemanticOp::NumericMethod { call, receiver } => {
                 self.prelude_values(*call, &[*receiver])
@@ -31387,6 +31448,7 @@ impl<'a> RustEmitter<'a> {
                             params,
                             true,
                             adapt_unit_result,
+                            false,
                         );
                         let callback = if parallel_adapter
                             && matches!(
@@ -31460,6 +31522,7 @@ impl<'a> RustEmitter<'a> {
                 &params,
                 borrow_inputs,
                 adapt_unit_result,
+                false,
             );
             if row.member.starts_with("para_")
                 && matches!(

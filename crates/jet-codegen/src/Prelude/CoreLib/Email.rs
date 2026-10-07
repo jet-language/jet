@@ -868,8 +868,8 @@ pub mod jet_email {
             stream.set_read_timeout(None).map_err(|e| format!("TLS socket setup failed: {e}"))?;
             stream.set_write_timeout(None).map_err(|e| format!("TLS socket setup failed: {e}"))?;
             let id = match trust {
-                TLSTrust::System => (self.runtime.tls_begin)(stream, &server.to_string()),
-                TLSTrust::SystemPlusCa { pem } => (self.runtime.tls_begin_ca)(stream, &server.to_string(), pem),
+                TLSTrust::System => (self.runtime.tls_begin)(stream, server),
+                TLSTrust::SystemPlusCa { pem } => (self.runtime.tls_begin_ca)(stream, server, pem),
             }?;
             self.stream = RuntimeStream::TLS(id);
             loop {

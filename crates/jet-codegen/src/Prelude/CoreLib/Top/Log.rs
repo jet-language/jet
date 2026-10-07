@@ -100,7 +100,7 @@ fn jet_ring_log_enabled(level: &str) -> bool {
 
 // D-LOGFMT1=A: explicit format override.
 fn jet_ring_log_setup(format: &str) {
-    let n: u8 = match (&format[..]) {
+    let n: u8 = match format {
         "json" => 1,
         "text" => 2,
         _ => 0,
@@ -109,7 +109,7 @@ fn jet_ring_log_setup(format: &str) {
 }
 
 fn jet_ring_log_set_sink(kind: &str, path: &str) {
-    let n: u8 = match (&kind[..]) {
+    let n: u8 = match kind {
         "jsonl" | "json" => 1,
         "text" => 2,
         _ => 1,
@@ -119,7 +119,7 @@ fn jet_ring_log_set_sink(kind: &str, path: &str) {
 }
 
 fn jet_ring_log_otlp_file(path: &str) {
-    jet_ring_log_set_sink(&"jsonl".to_string(), path);
+    jet_ring_log_set_sink("jsonl", path);
 }
 
 fn jet_ring_log_sample_every(n: i64) {

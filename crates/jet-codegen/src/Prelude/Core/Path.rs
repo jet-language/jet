@@ -4,7 +4,7 @@ fn jet_std_path_lexical_source(path: &str) -> std::borrow::Cow<'_, str> {
     if path.contains('\\') {
         std::borrow::Cow::Owned(path.replace('\\', "/"))
     } else {
-        std::borrow::Cow::Borrowed((&path[..]))
+        std::borrow::Cow::Borrowed(path)
     }
 }
 
@@ -171,7 +171,7 @@ fn jet_std_path_validate_walk_root(path: &std::path::Path) -> std::io::Result<()
 }
 
 pub(crate) fn jet_std_path_walk(path: &str) -> Vec<String> {
-    let root = std::path::Path::new((&path[..]));
+    let root = std::path::Path::new(path);
     if jet_std_path_validate_walk_root(root).is_err() {
         return Vec::new();
     }

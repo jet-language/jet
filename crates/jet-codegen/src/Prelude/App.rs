@@ -67,8 +67,7 @@ mod jet_app_impl {
         let output_type = type_name::<O>().to_string();
         let error_type = type_name::<E>().to_string();
         let dispatch: super::JetWebServerFnHandler = Arc::new(move |_context, body| {
-            let body = body.to_string();
-            let input = super::jet_enc_json_decode::<I>(&body).map_err(|errors| {
+            let input = super::jet_enc_json_decode::<I>(body).map_err(|errors| {
                 super::JetWebServerFnError::InvalidInput(format!("{errors:?}"))
             })?;
             match handler(input) {

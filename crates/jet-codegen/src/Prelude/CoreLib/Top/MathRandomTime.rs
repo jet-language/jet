@@ -1756,7 +1756,7 @@ fn jet_std_jsonl_parse(text: &str) -> Result<Vec<jet_std::DataTree>, jet_std::En
         if trimmed.is_empty() {
             continue;
         }
-        match jet_std_json_parse(&trimmed.to_string()) {
+        match jet_std_json_parse(trimmed) {
             Ok(v) => out.push(v),
             Err(mut error) => {
                 error.format = jet_std::EncodingFormat::JSONL;
@@ -1802,7 +1802,7 @@ fn jet_std_jsonl_first(
         if trimmed.is_empty() {
             continue;
         }
-        match jet_std_json_parse(&trimmed.to_string()) {
+        match jet_std_json_parse(trimmed) {
             Ok(value) => return Ok(Some(value)),
             Err(mut error) => {
                 error.format = jet_std::EncodingFormat::JSONL;

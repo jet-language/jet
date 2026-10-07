@@ -718,7 +718,7 @@ fn jet_db_decode<T: __jet_Decode>(
 // becomes a DataTree::Object of Text cells, then decodes to `T`. A short row or a
 // per-row decode failures are typed `[FieldError]` values naming the 1-based row.
 fn jet_enc_csv_decode<T: __jet_Decode>(text: &str) -> Result<Vec<T>, Vec<jet_std::FieldError>> {
-    let rows = jet_ring_csv_parse(text, &",".to_string(), false, false)
+    let rows = jet_ring_csv_parse(text, ",", false, false)
         .map_err(jet_std::FieldError::one)?;
     jet_std::jet_enc_csv_decode_rows(
         rows,

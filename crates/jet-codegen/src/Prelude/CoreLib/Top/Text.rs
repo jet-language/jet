@@ -914,7 +914,7 @@ fn jet_text_cluster_width(cluster: &str, ambiguous_wide: bool, controls_reject: 
     Ok(1)
 }
 fn jet_text_display_width_default(s: &str) -> i64 {
-    jet_text_grapheme_views((&s[..]))
+    jet_text_grapheme_views(s)
         .into_iter()
         .map(|g| jet_text_cluster_width(g, false, false).unwrap_or(0))
         .sum()
@@ -925,7 +925,7 @@ fn jet_text_display_width_policy(
     controls_reject: bool,
 ) -> Result<i64, String> {
     let mut total = 0i64;
-    for g in jet_text_grapheme_views((&s[..])) {
+    for g in jet_text_grapheme_views(s) {
         total += jet_text_cluster_width(g, ambiguous_wide, controls_reject)?;
     }
     Ok(total)
@@ -1013,13 +1013,13 @@ fn jet_text_swapcase(s: &str) -> String {
     out
 }
 fn jet_text_remove_prefix(s: &str, prefix: &str) -> String {
-    match s.strip_prefix((&prefix[..])) {
+    match s.strip_prefix(prefix) {
         Some(rest) => rest.to_string(),
         None => s.to_owned(),
     }
 }
 fn jet_text_remove_suffix(s: &str, suffix: &str) -> String {
-    match s.strip_suffix((&suffix[..])) {
+    match s.strip_suffix(suffix) {
         Some(rest) => rest.to_string(),
         None => s.to_owned(),
     }
@@ -1053,7 +1053,7 @@ fn jet_text_rsplitn(s: &str, pat: &str, n: i64) -> Vec<String> {
     out
 }
 fn jet_text_fill_columns(fill: &str, columns: i64) -> String {
-    let Some(unit) = jet_text_grapheme_views((&fill[..])).into_iter().next() else {
+    let Some(unit) = jet_text_grapheme_views(fill).into_iter().next() else {
         return " ".repeat(columns.max(0) as usize);
     };
     let width = jet_text_cluster_width(unit, false, false).unwrap_or(0);
@@ -1149,7 +1149,7 @@ pub(crate) fn jet_text_parse_split(text: &str, separator: &str) -> Vec<String> {
     if separator.is_empty() {
         return text.chars().map(|character| character.to_string()).collect();
     }
-    text.split((&separator[..]))
+    text.split(separator)
         .map(str::to_string)
         .collect()
 }
@@ -1162,10 +1162,10 @@ pub(crate) fn jet_text_parse_rsplit(
         return text.chars().map(|character| character.to_string()).collect();
     }
     if maxsplit < 0 {
-        return text.split((&separator[..])).map(str::to_string).collect();
+        return text.split(separator).map(str::to_string).collect();
     }
     let mut parts = text
-        .rsplitn(maxsplit.saturating_add(1) as usize, (&separator[..]))
+        .rsplitn(maxsplit.saturating_add(1) as usize, separator)
         .map(str::to_string)
         .collect::<Vec<_>>();
     parts.reverse();
@@ -1175,7 +1175,7 @@ pub(crate) fn jet_text_parse_split_once(
     text: &str,
     separator: &str,
 ) -> (bool, String, String) {
-    match text.find((&separator[..])) {
+    match text.find(separator) {
         Some(index) => (
             true,
             text[..index].to_string(),
@@ -1188,7 +1188,7 @@ pub(crate) fn jet_text_parse_partition(
     text: &str,
     separator: &str,
 ) -> (String, String, String) {
-    match text.find((&separator[..])) {
+    match text.find(separator) {
         Some(index) => (
             text[..index].to_string(),
             separator.to_owned(),
@@ -1201,7 +1201,7 @@ pub(crate) fn jet_text_parse_rpartition(
     text: &str,
     separator: &str,
 ) -> (String, String, String) {
-    match text.rfind((&separator[..])) {
+    match text.rfind(separator) {
         Some(index) => (
             text[..index].to_string(),
             separator.to_owned(),
@@ -1239,16 +1239,16 @@ pub(crate) fn jet_text_parse_float(text: &str) -> Option<f64> {
     text.trim().parse::<f64>().ok()
 }
 pub(crate) fn jet_text_parse_find(text: &str, needle: &str) -> i64 {
-    text.find((&needle[..])).map_or(-1, |index| index as i64)
+    text.find(needle).map_or(-1, |index| index as i64)
 }
 pub(crate) fn jet_text_parse_rfind(text: &str, needle: &str) -> i64 {
-    text.rfind((&needle[..])).map_or(-1, |index| index as i64)
+    text.rfind(needle).map_or(-1, |index| index as i64)
 }
 pub(crate) fn jet_text_parse_count(text: &str, needle: &str) -> i64 {
     if needle.is_empty() {
         return text.chars().count() as i64 + 1;
     }
-    text.match_indices((&needle[..])).count() as i64
+    text.match_indices(needle).count() as i64
 }
 pub(crate) fn jet_text_parse_replace_n(
     text: &str,
@@ -1260,9 +1260,9 @@ pub(crate) fn jet_text_parse_replace_n(
         return text.to_owned();
     }
     if count < 0 {
-        text.replace((&old[..]), (&new[..]))
+        text.replace(old, new)
     } else {
-        text.replacen((&old[..]), (&new[..]), count as usize)
+        text.replacen(old, new, count as usize)
     }
 }
 pub(crate) fn jet_text_parse_kv(
@@ -1272,7 +1272,7 @@ pub(crate) fn jet_text_parse_kv(
     if separator.is_empty() {
         return (text.trim().to_string(), false, String::new());
     }
-    match text.find((&separator[..])) {
+    match text.find(separator) {
         Some(index) => (
             text[..index].trim().to_string(),
             true,
@@ -1282,7 +1282,7 @@ pub(crate) fn jet_text_parse_kv(
     }
 }
 pub(crate) fn jet_text_parse_join(parts: &Vec<String>, separator: &str) -> String {
-    parts.join((&separator[..]))
+    parts.join(separator)
 }
 pub(crate) fn jet_text_parse_splitlines(text: &str, keepends: bool) -> Vec<String> {
     let mut out = Vec::new();
@@ -1359,7 +1359,7 @@ pub(crate) fn jet_text_indent_with(
 pub(crate) fn jet_text_wrap_paragraphs(text: &str, width: i64) -> String {
     text.split("\n\n")
         .filter(|paragraph| !paragraph.trim().is_empty())
-        .map(|paragraph| jet_text_fill(&paragraph.to_string(), width))
+        .map(|paragraph| jet_text_fill(paragraph, width))
         .collect::<Vec<_>>()
         .join("\n\n")
 }
@@ -1375,7 +1375,7 @@ pub(crate) fn jet_text_hanging_indent(
     }
     let mut lines = Vec::new();
     let mut current = String::new();
-    let mut prefix = (&first[..]);
+    let mut prefix = first;
     for word in words {
         let limit = (width - prefix.len() as i64).max(1) as usize;
         let trial = if current.is_empty() {
@@ -1385,7 +1385,7 @@ pub(crate) fn jet_text_hanging_indent(
         };
         if !current.is_empty() && trial.len() > limit {
             lines.push(format!("{prefix}{current}"));
-            prefix = (&rest[..]);
+            prefix = rest;
             current = word.to_string();
         } else {
             current = trial;
@@ -1504,7 +1504,7 @@ pub(crate) fn jet_text_html_escape(text: &str, quote: bool) -> String {
 }
 pub(crate) fn jet_text_html_unescape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
-    let mut rest = (&text[..]);
+    let mut rest = text;
     while let Some(start) = rest.find('&') {
         out.push_str(&rest[..start]);
         let after = &rest[start + 1..];
@@ -1549,7 +1549,7 @@ pub(crate) fn jet_text_html_unescape_and_strip(text: &str) -> String {
 }
 pub(crate) fn jet_text_parse_capwords(text: &str) -> String {
     text.split_whitespace()
-        .map(|word| jet_text_capitalize(&word.to_string()))
+        .map(jet_text_capitalize)
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -1558,7 +1558,7 @@ pub(crate) fn jet_text_parse_find_from(text: &str, needle: &str, start: i64) -> 
     let Some(rest) = text.get(start..) else {
         return -1;
     };
-    rest.find((&needle[..]))
+    rest.find(needle)
         .map_or(-1, |index| (start + index) as i64)
 }
 pub(crate) fn jet_text_parse_rfind_from(text: &str, needle: &str, end: i64) -> i64 {
@@ -1566,13 +1566,13 @@ pub(crate) fn jet_text_parse_rfind_from(text: &str, needle: &str, end: i64) -> i
     let Some(prefix) = text.get(..end) else {
         return -1;
     };
-    prefix.rfind((&needle[..])).map_or(-1, |index| index as i64)
+    prefix.rfind(needle).map_or(-1, |index| index as i64)
 }
 pub(crate) fn jet_text_parse_index(text: &str, needle: &str) -> i64 {
     jet_text_parse_find(text, needle)
 }
 pub(crate) fn jet_text_parse_contains(text: &str, needle: &str) -> bool {
-    text.contains((&needle[..]))
+    text.contains(needle)
 }
 pub(crate) fn jet_text_parse_lstrip(text: &str) -> String {
     text.trim_start().to_string()
@@ -1709,7 +1709,7 @@ fn jet_text_zfill(s: &str, width: i64) -> String {
     } else if let Some(rest) = s.strip_prefix('-') {
         ("-", rest)
     } else {
-        ("", (&s[..]))
+        ("", s)
     };
     format!("{sign}{}{}", "0".repeat((width - length) as usize), body)
 }
@@ -1810,7 +1810,7 @@ fn jet_std_fs_list_dir(path: &str) -> Result<Vec<jet_std::DirEntry>, jet_std::IO
     for entry in rd {
         let entry = entry.map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
         let name = entry.file_name().to_string_lossy().to_string();
-        let full_path = std::path::Path::new((&path[..]))
+        let full_path = std::path::Path::new(path)
             .join(&name)
             .to_string_lossy()
             .to_string();
