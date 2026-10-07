@@ -72,7 +72,8 @@ fn jet_codegen_auto_derives_boxed(definition: MIRTypeDef, edge: String) -> Bool 
 }
 
 fn jet_codegen_auto_derives_field_value(ctx: &JetRustEmitContext, definition: MIRTypeDef, field: MIRField, receiver: String, method: String, edge: String) -> String Never! {
-    jet_codegen_auto_derives_member_text(&ctx, field.ty, "({receiver}).{jet_rust_emit_field_name(&ctx, field.id)}", jet_codegen_auto_derives_boxed(definition, edge), method)
+    place :: "({receiver}).{jet_rust_emit_field_name(&ctx, field.id)}"
+    jet_codegen_auto_derives_member_text(&ctx, field.ty, place, jet_codegen_auto_derives_boxed(definition, edge), method)
 }
 
 // MIRRust structural_member_text: the `method` text of one structural member
