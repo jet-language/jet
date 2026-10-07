@@ -25799,6 +25799,15 @@ impl<'a> RustEmitter<'a> {
                         location.line
                     );
                 }
+                MirTypeKind::IntN { .. } => {
+                    let value = self.value_owned(index);
+                    let file = self.source_file_path(location.file);
+                    let root = &self.config.root_prefix;
+                    return format!(
+                        "i64::try_from({value}).unwrap_or_else(|_| {root}jet_arithmetic_stop({file:?}, {}u32, \"index exceeds host range\"))",
+                        location.line
+                    );
+                }
                 _ => return self.value_owned(index),
             }
         }
