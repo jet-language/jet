@@ -725,10 +725,22 @@ pub fn lir_simplify_function(original: LIRFunction) -> LIRFunction Never! {
         if opt_merge(&function, &facts) -> changed = true
         if !changed -> break
     }
-    // Merging leaves aliases a final rename must apply before liveness.
-    _ := opt_fold_sweep(&function, &facts)
+    // A sweep that removed a definition renamed only the uses after it, and
+    // merging adds aliases: rename every use once more (renaming alone creates
+    // no aliases and folds no branch) before liveness.
+    opt_rename_all(&function, facts)
     loop _ in 0..<OPT_SIMPLIFY_ROUNDS {
         if !opt_dead_code(&function) -> break
     }
     opt_compact(function)
+}
+
+fn opt_rename_all(function: &LIRFunction, facts: OptFacts) Never! {
+    blocks := [LIRBlock]{}
+    loop block in function.blocks {
+        insts := [LIRInst]{}
+        loop inst in block.insts -> &insts.push(opt_rename_inst(facts, inst))
+        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: opt_rename_terminator(facts, block.terminator)})
+    }
+    function.blocks = blocks
 }
