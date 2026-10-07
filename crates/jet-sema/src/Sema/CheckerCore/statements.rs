@@ -1191,7 +1191,7 @@ impl<'a> Checker<'a> {
     }
 
     fn check_stmt_inner(&mut self, stmt: &mut Stmt) {
-        // D-CONC-SHARE1=A (card #1561): a plain field write on a
+        // D-CONC-SHARE1=A (card #1561): a projected write through a
         // `Shared<T>` handle is one atomic locked step. Rewrite before the
         // compound-assignment expansion below, so a read-modify-write
         // stays inside one lock and cannot lose an update.
