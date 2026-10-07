@@ -1976,3 +1976,5 @@ this ledgered mechanical import is not a pathname-policy replacement.
 Owner directive #33 defines an empty exec-candidate set as ENOENT, without an
 execve attempt. This is the intentional I9 delta from glibc's oversized-PATH
 case that otherwise returns whichever stale errno happened to be present.
+Child setup retains its reference error precedence: an invalid cwd or descriptor
+still fails at its own stage before the empty candidate set reports exec ENOENT.
