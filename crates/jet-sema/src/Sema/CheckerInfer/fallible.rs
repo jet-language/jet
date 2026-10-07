@@ -435,7 +435,7 @@ impl<'a> Checker<'a> {
                         .modules?
                         .iter()
                         .position(|candidate| candidate.module_alias == source.alias)?;
-                    self.resolve_failure_function_in_module(source_idx, method.clone())?
+                    self.resolve_failure_function_in_module(source_idx, method.to_string())?
                 } else {
                     let Expr::Ident(alias, _) = receiver.without_parens() else {
                         return None;

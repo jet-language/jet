@@ -4243,3 +4243,74 @@ fn jet_enc_json_canonical(
         )
     })
 }
+
+// Compiler-private representation/OS leaves; codec policy is authored in Jet.
+fn jet_raw_list_capacity<T>(values: &Vec<T>) -> i64 {
+    values.capacity() as i64
+}
+
+fn jet_raw_list_reserve_exact<T>(values: &mut Vec<T>, additional: i64) -> bool {
+    usize::try_from(additional).is_ok_and(|additional| values.try_reserve_exact(additional).is_ok())
+}
+
+fn jet_raw_type_size<T>() -> i64 {
+    std::mem::size_of::<T>() as i64
+}
+
+fn jet_raw_encoding_cause(error: std::io::Error) -> jet_std::EncodingCause {
+    jet_std::EncodingCause {
+        kind: format!("{:?}", error.kind()),
+        os_code: jet_outcome_of(error.raw_os_error().map(i64::from)),
+        message: error.to_string(),
+    }
+}
+
+fn jet_raw_encoding_read_byte(reader: &mut JetFileReader) -> Result<JetOutcome<u8, JetAbsent>, jet_std::EncodingCause> {
+    let mut byte = [0u8; 1];
+    jet_encoding_file_read(reader, &mut byte)
+        .map(|count| if count == 0 { Err(JetAbsent) } else { Ok(byte[0]) })
+        .map_err(jet_raw_encoding_cause)
+}
+
+fn jet_raw_encoding_write_bytes(writer: &mut JetFileWriter, bytes: &[u8]) -> Result<(), jet_std::EncodingCause> {
+    jet_encoding_file_write_all(writer, bytes).map_err(jet_raw_encoding_cause)
+}
+
+fn jet_raw_encoding_flush(writer: &mut JetFileWriter) -> Result<(), jet_std::EncodingCause> {
+    jet_encoding_file_flush(writer).map_err(jet_raw_encoding_cause)
+}
+
+// #4737: ordered Object carrier transfers; all codec policy stays in Jet.
+fn jet_raw_object_from_entries(entries: Vec<(String, jet_std::DataTree)>) -> jet_std::DataTree {
+    jet_std::DataTree::Object(entries)
+}
+
+fn jet_raw_object_into_entries(value: jet_std::DataTree) -> Vec<(String, jet_std::DataTree)> {
+    let jet_std::DataTree::Object(entries) = value else {
+        unreachable!("vetted Core caller must check the Object variant before transferring it")
+    };
+    entries
+}
+
+fn jet_raw_encoding_write_text(writer: &mut JetFileWriter, text: &str) -> Result<(), jet_std::EncodingCause> {
+    jet_encoding_file_write_all(writer, text.as_bytes()).map_err(jet_raw_encoding_cause)
+}
+
+fn jet_raw_typed_text(text: String) -> jet_std::DataTree {
+    jet_std::DataTree::TypedText(text)
+}
+
+fn jet_raw_tree_tag(value: &jet_std::DataTree) -> u8 {
+    match value {
+        jet_std::DataTree::Null => 0,
+        jet_std::DataTree::Bool(_) => 1,
+        jet_std::DataTree::Int(_) => 2,
+        jet_std::DataTree::Float(_) => 3,
+        jet_std::DataTree::Number(_) => 4,
+        jet_std::DataTree::TypedText(_) => 5,
+        jet_std::DataTree::Text(_) => 6,
+        jet_std::DataTree::Bytes(_) => 7,
+        jet_std::DataTree::Array(_) => 8,
+        jet_std::DataTree::Object(_) => 9,
+    }
+}

@@ -30,6 +30,7 @@
 
 use core.encoding.[DataEvent, DataTree, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
 use core.math as math
+use __core_encoding_stream as stream
 
 fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
     {
@@ -707,16 +708,16 @@ fn write_canonical(out: &[U8], value: DataTree, path: &[String], depth: Int) -> 
             else -> write_ascii(&out, "false")
         }
         .Int(n) -> {
-            if !int_is_binary64(n) {
+            if !stream.int_is_binary64(n) {
                 return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text"))
             }
-            write_ascii(&out, jcs_number(Float{n}))
+            write_ascii(&out, stream.jcs_number(Float{n}))
         }
         .Float(n) -> {
             if !math.is_finite(n) {
                 return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JCS cannot encode a non-finite Float"))
             }
-            write_ascii(&out, jcs_number(n))
+            write_ascii(&out, stream.jcs_number(n))
         }
         .Text(s) -> write_json_string(&out, s)
         .Array(items) -> {
@@ -736,15 +737,15 @@ fn write_canonical(out: &[U8], value: DataTree, path: &[String], depth: Int) -> 
             loop pair in entries {
                 &keys.push(pair.key)
                 &values.push(pair.value)
-                &units.push(utf16_units(pair.key))
+                &units.push(stream.utf16_units(pair.key))
             }
-            order :: sort_by_units(units)
+            order :: stream.sort_by_units(units)
             &out.push(U8{123})
             loop i in 0..<order.len() {
                 at :: order[i]
                 &path.push(keys[at])
                 if i > 0 {
-                    if compare_units(units[order[i - 1]], units[at]) == 0 {
+                    if stream.compare_units(units[order[i - 1]], units[at]) == 0 {
                         return Err(value_error(EncodingErrorKind.Syntax, pointer_text(path, path.len()), "JCS requires unique object keys"))
                     }
                     &out.push(U8{44})
@@ -760,167 +761,6 @@ fn write_canonical(out: &[U8], value: DataTree, path: &[String], depth: Int) -> 
     true
 }
 
-// RFC 8785 admits an Int only when binary64 holds it exactly: its odd part
-// must fit in the 53-bit significand.
-fn int_is_binary64(n: Int) -> Bool Never! {
-    odd := n
-    loop odd != 0 && odd %% 2 == 0 {
-        odd = odd /% 2
-    }
-    if odd < 0 -> odd = -odd
-    odd <= 9007199254740992
-}
-
-// ECMAScript Number::toString (ECMA-262 7.1.12.1) for a finite binary64, as
-// RFC 8785 requires. `"{value}"` supplies the shortest round-trip digits; this
-// function only re-spells them: exponent form below 1e-6 and from 1e21,
-// positional otherwise, `e+`/`e-` exponents, and `-0` as `0`.
-fn jcs_number(value: Float) -> String Never! {
-    if value == (Float{0.0}) -> return "0"
-    negative :: value < (Float{0.0})
-    magnitude := value
-    if negative -> magnitude = -value
-    digits := [U8]{}
-    exponent_bytes := [U8]{}
-    decimal := -1
-    in_exponent := false
-    loop b in "{magnitude}".bytes() {
-        if in_exponent {
-            &exponent_bytes.push(b)
-            next
-        }
-        if b == (U8{101}) || b == (U8{69}) {
-            in_exponent = true
-            next
-        }
-        if b == (U8{46}) {
-            decimal = digits.len()
-            next
-        }
-        &digits.push(b)
-    }
-    if decimal < 0 -> decimal = digits.len()
-    exponent := 0
-    if exponent_bytes.len() > 0 -> exponent = Int.parse(String.from_bytes(exponent_bytes) ?? "0") ?? 0
-    leading := 0
-    loop leading < digits.len() && digits[leading] == (U8{48}) {
-        leading += 1
-    }
-    significant := [U8]{}
-    loop i in leading..<digits.len() -> &significant.push(digits[i])
-    loop significant.len() > 1 && significant[significant.len() - 1] == (U8{48}) {
-        _ :: &significant.pop()
-    }
-    n :: decimal + exponent - leading
-    k :: significant.len()
-    out := [U8]{}
-    if negative -> &out.push(U8{45})
-    if n > 0 && n <= 21 {
-        if k <= n {
-            loop b in significant -> &out.push(b)
-            loop _ in 0..<(n - k) -> &out.push(U8{48})
-        } else {
-            loop i in 0..<n -> &out.push(significant[i])
-            &out.push(U8{46})
-            loop i in n..<k -> &out.push(significant[i])
-        }
-        return String.from_bytes(out) ?? ""
-    }
-    if n > -6 && n <= 0 {
-        write_ascii(&out, "0.")
-        loop _ in 0..<(0 - n) -> &out.push(U8{48})
-        loop b in significant -> &out.push(b)
-        return String.from_bytes(out) ?? ""
-    }
-    &out.push(significant[0])
-    if k > 1 {
-        &out.push(U8{46})
-        loop i in 1..<k -> &out.push(significant[i])
-    }
-    &out.push(U8{101})
-    e :: n - 1
-    if e >= 0 -> &out.push(U8{43})
-    write_ascii(&out, "{e}")
-    String.from_bytes(out) ?? ""
-}
-
-// UTF-16 code units of a key, the RFC 8785 sort order.
-fn utf16_units(text: String) -> [Int] Never! {
-    units := [Int]{}
-    raw :: text.bytes()
-    i := 0
-    loop i < raw.len() {
-        b :: Int.from_u8(raw[i])
-        cp := b
-        width := 1
-        if b >= 240 {
-            cp = ((b & 7) << 18) | ((Int.from_u8(raw[i + 1]) & 63) << 12) | ((Int.from_u8(raw[i + 2]) & 63) << 6) | (Int.from_u8(raw[i + 3]) & 63)
-            width = 4
-        }
-        if b >= 224 && b < 240 {
-            cp = ((b & 15) << 12) | ((Int.from_u8(raw[i + 1]) & 63) << 6) | (Int.from_u8(raw[i + 2]) & 63)
-            width = 3
-        }
-        if b >= 192 && b < 224 {
-            cp = ((b & 31) << 6) | (Int.from_u8(raw[i + 1]) & 63)
-            width = 2
-        }
-        if cp >= 65536 {
-            &units.push(55296 + ((cp - 65536) >> 10))
-            &units.push(56320 + ((cp - 65536) & 1023))
-        } else {
-            &units.push(cp)
-        }
-        i += width
-    }
-    units
-}
-
-fn compare_units(left: [Int], right: [Int]) -> Int Never! {
-    n := left.len()
-    if right.len() < n -> n = right.len()
-    loop i in 0..<n {
-        if left[i] < right[i] -> return -1
-        if left[i] > right[i] -> return 1
-    }
-    if left.len() < right.len() -> return -1
-    if left.len() > right.len() -> return 1
-    0
-}
-
-// Stable bottom-up merge sort of key indices: O(n log n) comparisons.
-fn sort_by_units(units: [[Int]]) -> [Int] Never! {
-    order := [Int]{}
-    loop i in 0..<units.len() -> &order.push(i)
-    width := 1
-    loop width < order.len() {
-        merged := [Int]{}
-        start := 0
-        loop start < order.len() {
-            middle := start + width
-            if middle > order.len() -> middle = order.len()
-            end := start + 2 * width
-            if end > order.len() -> end = order.len()
-            left := start
-            right := middle
-            loop left < middle || right < end {
-                take_left := right >= end
-                if !take_left && left < middle -> take_left = compare_units(units[order[left]], units[order[right]]) <= 0
-                if take_left {
-                    &merged.push(order[left])
-                    left += 1
-                } else {
-                    &merged.push(order[right])
-                    right += 1
-                }
-            }
-            start = end
-        }
-        order = merged
-        width = width * 2
-    }
-    order
-}
 
 fn write_json(out: &[U8], value: DataTree, pretty: Bool, indent: Int) Never! {
     if value == {
