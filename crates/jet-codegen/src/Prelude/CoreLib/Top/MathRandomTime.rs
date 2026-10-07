@@ -75,14 +75,8 @@ fn jet_det_rng_next(r: &mut jet_std::Rng) -> u64 {
     jet_seeded_rng_next(&mut r.state)
 }
 fn jet_rng_int(r: &mut jet_std::Rng, lo: i64, hi: i64) -> i64 {
-    let lo = jet_std::jet_int_to_i64(lo).unwrap_or_else(|| {
-        jet_runtime_stop("E1003", file!(), line!(), jet_c_int_range_message())
-    });
-    let hi = jet_std::jet_int_to_i64(hi).unwrap_or_else(|| {
-        jet_runtime_stop("E1003", file!(), line!(), jet_c_int_range_message())
-    });
     match jet_seeded_rng_int_checked(&mut r.state, lo, hi) {
-        Ok(value) => jet_std::jet_int_from_i64(value),
+        Ok(value) => value,
         Err(message) => jet_runtime_stop("E3010", "", 0, message),
     }
 }
