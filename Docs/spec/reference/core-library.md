@@ -1336,6 +1336,9 @@ registration method.
 handling a closed event enum. See
 [`watcher.jet`](../../../Examples/features/io/watcher.jet).
 
+`WatchHandle` and `WatchSet` retain the provider's live lifecycle state; their
+metadata is inspected through methods, not constructed as source record fields.
+
 ### `core.term` — terminal input and output
 
 `core.term` owns UTF-8 stdio, prompts, raw-key input, terminal size, and ANSI
@@ -1375,17 +1378,20 @@ fn run() {
 | `read_key()` | `Key` | Read a decoded key event. |
 | `progress(label)` | `!IOError` | Write a progress update through the terminal stream. |
 
-`style` is a no-op when output is not a TTY unless `style_force` is used. The
-`Key` enum contains `Char`, `Escape`, `Backspace`, `Tab`, the four arrow keys,
-and `Unknown`. `confirm` treats a bare Enter as no; `choose` returns an input
-error after its finite retry budget or when stdin closes.
+`style` is a no-op when output is not a TTY unless `style_force` is used.
+`Key` carries `Char(Char)`, `F(Int)`, and `Ctrl(Char)` payloads. Its unit variants
+are `Enter`, `Escape`, `Backspace`, `Tab`, `Delete`, the four arrow keys, and
+`Unknown`. `confirm` treats a bare Enter as no; `choose` returns an input error
+after its finite retry budget or when stdin closes.
 
 ### `core.args` — declarative command-line parsing (D-ARGS1)
 
-`core.args` provides both a direct `DataTree` decoder and an `ArgsSpec` builder.
-The builder consumes a spec and returns a new value at each method call; parsing
-is separate from process execution so tests can pass an explicit argument
-vector.
+`core.args` provides an `ArgsSpec` builder, explicit `decode_argv` tree parsing,
+and typed `decode<T>` / `merge<T>` using the target's checked `#CLI` shape.
+`ArgsSpec` is the checked builder handle, not a record containing only flag
+names. The builder consumes a spec and returns a new value at each method call;
+parsing is separate from process execution so tests can pass an explicit
+argument vector.
 
 ```jet
 use core.args as args
@@ -1536,10 +1542,10 @@ fn run() {
 | `sync()` | `Unit -[FS, Env]>` | Flush filesystem buffers. |
 | `getpgid(pid)` / `getsid(pid)` | `Int !IOError -[Env]>` | Inspect POSIX process-group or session state. |
 
-The source-compatible `set` form reports an invalid environment call as E3001;
-its future typed error form is a language-edition change, not a second Core
-namespace. Names must be non-empty and contain neither NUL nor `=`; values
-cannot contain NUL. `vars` does not silently skip an unrepresentable entry:
+`set` reports an invalid environment call as E3001. Lowering calls the shared
+checked environment kernel and uses its error to report that stop; the public
+call returns no error value. Names must be non-empty and contain neither NUL
+nor `=`; values cannot contain NUL. `vars` does not silently skip an unrepresentable entry:
 `EnvError.NonUnicode` reports it.
 
 POSIX process/session controls are `#Unsafe` functions: every call needs an OS

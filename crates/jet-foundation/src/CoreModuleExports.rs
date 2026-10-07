@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 1c2f12657c2df3c0965f1c559bf386b7c39814229bd98a60ab845d2949ba5531
+// Source SHA-256: 98b4ba2b3e450a7f2786f285d8cded36e02559ef8fab5675227481353842416a
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -750,7 +750,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.archive", alias: "core_archive", path: "Core/archive/archive.jet", owned_members: &["crc32", "adler32", "deflate", "inflate", "compress", "decompress", "zip_decompress", "zip_names_json", "list", "zip_open", "zip_next", "zip_read", "zip_write", "zip_close", "zip_extract", "unzip", "tar_add", "tar_get", "tar_names_json", "create"] },
     CoreSourceModule { module: "core.archive.gzip", alias: "core_core_archive_gzip", path: "Core/archive/gzip.jet", owned_members: &["compress", "compress_file", "compress_text", "crc", "decompress", "decompress_file", "decompress_text", "is_gzip", "isize", "magic", "peek_isize"] },
     CoreSourceModule { module: "core.archive.zstd", alias: "core_core_archive_zstd", path: "Core/archive/zstd.jet", owned_members: &["compress", "compress_file", "compress_text", "decompress", "decompress_file", "decompress_text", "is_zstd", "magic"] },
-    CoreSourceModule { module: "core.args", alias: "core_core_args", path: "Core/args/args.jet", owned_members: &["decode", "decode_argv", "get_bool", "get_int", "get_text", "merge", "spec", "positionals", "program", "help_text", "flag", "has", "argument", "define", "dest", "required", "default_value", "get_or", "get_choice", "missing_required", "apply_defaults", "usage", "help_from", "remainder", "count_flag", "wants_help"] },
+    CoreSourceModule { module: "core.args", alias: "core_core_args", path: "Core/args/args.jet", owned_members: &["decode_argv", "get_bool", "get_int", "get_text", "positionals", "program", "help_text", "has", "define", "dest", "required", "default_value", "get_or", "get_choice", "missing_required", "apply_defaults", "usage", "help_from", "remainder", "count_flag", "wants_help"] },
     CoreSourceModule { module: "core.auth", alias: "core_core_auth", path: "Core/auth/auth.jet", owned_members: &["magic_link_consume", "magic_link_issue", "oauth_begin", "oauth_finish", "password_login", "register_user", "session_cookie", "session_id", "session_show", "session_user", "session_validate", "verify_jwt", "verify_paseto"] },
     CoreSourceModule { module: "core.build", alias: "core_core_build", path: "Core/build/build.jet", owned_members: &["graph", "receipt_diff"] },
     CoreSourceModule { module: "core.compiler", alias: "core_core_compiler", path: "Core/compiler/compiler.jet", owned_members: &["check", "lex", "lock", "manifest", "package", "parse", "profiles", "source_map"] },

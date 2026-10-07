@@ -1407,7 +1407,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 1c2f12657c2df3c0965f1c559bf386b7c39814229bd98a60ab845d2949ba5531
+// Source SHA-256: 98b4ba2b3e450a7f2786f285d8cded36e02559ef8fab5675227481353842416a
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1846,7 +1846,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.term", "progress", "jet_std_io_progress", true, &[true]).with_max_arity(3).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.term", "progress_iter", "jet_std_io_progress_iter", true, &[false, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.sys", "get", "jet_std_env_get", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.sys", "set", "jet_std_env_set", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.sys", "set", "jet_std_env_try_set", true, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.sys", "unset", "jet_std_env_unset", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.sys", "vars", "jet_std_env_vars", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.sys", "current_dir", "jet_std_env_current_dir", true, &[], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),

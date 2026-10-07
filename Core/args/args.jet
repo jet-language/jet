@@ -9,19 +9,13 @@ package {
     }
 }
 use core as core
-use core.process as process
 
 
 // core.args — argv decoding against a declarative spec.
 //
-// `spec` is the empty builder. `decode` reads process argv. `merge` overlays
-// two configuration trees (later wins). Flags are `--key=value`, `--key value`
-// `--flag` (true), and `--no-flag` (false). A bare `--` ends options.
-// Positionals land in the `_` array.
-
-pub struct ArgsSpec {
-    pub flags: [String]
-}
+// `ArgsSpec` and typed `decode`/`merge` use the one checked native contract.
+// Source helpers below inspect untyped argv trees; they do not redeclare the
+// builder or replace #CLI projection with a generic DataTree parser.
 fn slice_str(text: String, start: Int, end: Int) -> String {
     raw :: text.bytes()
     s := start
@@ -43,13 +37,6 @@ fn drop_prefix(text: String, count: Int) -> String {
 }
 
 
-pub fn spec() -> ArgsSpec Never! { ArgsSpec{flags: [String]{}} }
-
-/// Decode process argv into a `DataTree` object. `--help` / `-h` set `help`.
-pub fn decode() -[Env, Exec.Args]> DataTree Never! {
-    argv :: process.argv()
-    decode_argv(argv)
-}
 
 pub fn decode_argv(argv: [String]) -> DataTree Never! {
     entries := [String: DataTree]{}
@@ -119,32 +106,6 @@ pub fn decode_argv(argv: [String]) -> DataTree Never! {
     DataTree.Object(entries)
 }
 
-/// Overlay `overlay` onto `base`. Object keys in overlay replace; arrays
-/// replace (they are not concatenated). Scalars replace.
-pub fn merge(base: DataTree, overlay: DataTree) -> DataTree Never! {
-    if overlay == {
-        .Object(over) -> {
-            if base == {
-                .Object(under) -> {
-                    out := ~under
-                    loop key in over.keys() {
-                        ov :: over.get(key) ?? DataTree.Null
-                        un :: under.get(key)
-                        if un == .None {
-                            _ :: &out.add(key, ov)
-                        } else {
-                            under_value :: un
-                            _ :: &out.add(key, merge(under_value, ov))
-                        }
-                    }
-                    return DataTree.Object(out)
-                }
-                else -> return ~overlay
-            }
-        }
-        else -> return ~overlay
-    }
-}
 
 fn parse_atom(text: String) -> DataTree {
     if text == {
@@ -331,12 +292,6 @@ pub fn positionals(tree: DataTree) -> [String] Never! {
 pub fn program(tree: DataTree) -> String Never! { get_text(tree, "0") }
 
 pub fn help_text(name: String, summary: String) -> String Never! { "{name} — {summary}\n\nOptions:\n  -h, --help    Show this help\n  --flag        Boolean flag\n  --key value   Key/value option\n" }
-pub fn flag(spec: ArgsSpec, name: String) -> ArgsSpec Never! {
-    flags := [String]{}
-    loop item in spec.flags -> &flags.push(~item)
-    &flags.push(~name)
-    ArgsSpec{flags: flags}
-}
 
 pub fn has(tree: DataTree, key: String) -> Bool Never! {
     if tree == {
@@ -359,7 +314,6 @@ pub struct ArgDef {
     pub default_text: String
 }
 
-pub fn argument(spec: ArgsSpec, name: String) -> ArgsSpec Never! { flag(spec, name) }
 
 pub fn define(name: String, help: String, flag: Bool) -> ArgDef Never! {
     ArgDef{
