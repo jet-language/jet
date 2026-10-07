@@ -1774,7 +1774,7 @@ pub(super) fn lower_regex_literal(
     let Some(return_type) = signature.return_type.as_ref() else {
         return invariant_method_expr(span, "source Regex literal producer has no return type");
     };
-    let ty = cx.canonical_checked_type(return_type);
+    let ty = cx.canonicalize_checked_type(return_type, std::iter::empty());
     let Type::Result { ok, .. } = &ty else {
         return invariant_method_expr(span, "source Regex compile producer is not fallible");
     };
