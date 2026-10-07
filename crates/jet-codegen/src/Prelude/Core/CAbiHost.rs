@@ -4,6 +4,8 @@
 #[cfg(not(target_arch = "wasm32"))]
 mod jet_c_abi_host {
     use crate::jet_c_abi::{handle, view, JetCString};
+    #[cfg(not(jet_native_pack))]
+    use crate::jet_c_abi::release;
     use crate::jet_std::{IOContext, IOError, IOOperation, ProcessResourceLimit};
 
     #[repr(C)]
@@ -18,7 +20,10 @@ mod jet_c_abi_host {
     }
     unsafe extern "C" {
         fn jet_rt_alloc(size: usize, align: usize) -> *mut u8;
+        #[cfg(jet_native_pack)]
         fn jet_rt_handle_drop_IOError(value: *mut JetCIOError);
+        #[cfg(not(jet_native_pack))]
+        fn jet_rt_free(pointer: *mut u8, size: usize, align: usize);
     }
 
     pub(crate) fn error_handle(value: IOError) -> *mut JetCIOError {
@@ -101,8 +106,21 @@ mod jet_c_abi_host {
     }
 
     pub(crate) fn error_drop(pointer: *mut JetCIOError) {
+        #[cfg(jet_native_pack)]
         // SAFETY: this boundary consumes one carrier allocated by Jet.
         unsafe { jet_rt_handle_drop_IOError(pointer) };
+        #[cfg(not(jet_native_pack))]
+        {
+            if pointer.is_null() { return; }
+            // SAFETY: consume the same C layout on the Rust tier; never a
+            // Box<IOError>, and never an extern call back into this wrapper.
+            unsafe {
+                let value = &*pointer;
+                if !value.resource.is_null() { release(value.resource); }
+                if !value.cause.is_null() { release(value.cause); }
+                jet_rt_free(pointer.cast(), 56, 8);
+            }
+        }
     }
     pub(crate) fn error_take(pointer: *mut JetCIOError) -> IOError {
         let value = error_view(pointer);

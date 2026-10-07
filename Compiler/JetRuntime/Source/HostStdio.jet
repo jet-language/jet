@@ -1,0 +1,120 @@
+// Raw process-stream transport. Core wrappers own IO.Write/IO.Flush faults;
+// runtime print/panic bypass those wrappers by design. Stream tokens have no
+// mutable payload. Only explicit owning drops release their one-byte carrier.
+#Export(c) fn jet_std_io_stdout() -> I64 { jet_rt_alloc(I64{1}, I64{1}) }
+
+#Export(c) fn jet_std_io_stderr() -> I64 { jet_rt_alloc(I64{1}, I64{1}) }
+
+#Export(c) fn jet_rt_handle_drop_JetStdout(value: I64) { jet_rt_free(value, I64{1}, I64{1}) }
+
+#Export(c) fn jet_rt_handle_drop_JetStderr(value: I64) { jet_rt_free(value, I64{1}, I64{1}) }
+
+#Export(c) fn jet_std_io_stdout_write(token: I64, text: I64, error: I64) -> I64 {
+    #Unsafe("text lends the E4 header and readable bytes for this synchronous write") {
+        failure :: host_stdout_write(os_load_i64(text), os_load_i64(wrapping(text + I64{8})), I64{1}, false, false)
+        return host_stdio_result(failure, HOST_IO_OP_WRITE, false, error)
+    }
+}
+
+#Export(c) fn jet_std_io_stdout_write_line(token: I64, text: I64, error: I64) -> I64 {
+    #Unsafe("text lends the E4 header and readable bytes; the LF enters the same stream buffer without a temporary String") {
+        failure :: host_stdout_write(os_load_i64(text), os_load_i64(wrapping(text + I64{8})), I64{1}, true, false)
+        return host_stdio_result(failure, HOST_IO_OP_WRITE, false, error)
+    }
+}
+
+#Export(c) fn jet_std_io_stdout_write_bytes(token: I64, words: I64, length: I64, error: I64) -> I64 {
+    failure :: host_stdout_write(words, length, I64{8}, false, false)
+    host_stdio_result(failure, HOST_IO_OP_WRITE, false, error)
+}
+
+#Export(c) fn jet_std_io_stdout_flush(token: I64, error: I64) -> I64 {
+    host_lock()
+    failure :: host_stdout_flush_locked()
+    host_unlock()
+    host_stdio_result(failure, HOST_IO_OP_FLUSH, false, error)
+}
+
+#Export(c) fn jet_std_io_stdout_is_tty(token: I64) -> Bool { host_is_tty(I64{1}) }
+
+#Export(c) fn jet_std_io_stderr_write(token: I64, text: I64, error: I64) -> I64 {
+    #Unsafe("text lends the E4 header and readable bytes for this synchronous write") {
+        failure :: host_stderr_write(os_load_i64(text), os_load_i64(wrapping(text + I64{8})))
+        return host_stdio_result(failure, HOST_IO_OP_WRITE, true, error)
+    }
+}
+
+#Export(c) fn jet_std_io_stderr_write_line(token: I64, text: I64, error: I64) -> I64 {
+    #Unsafe("text lends the E4 header and readable bytes; writev borrows a stack LF, never an allocated line String") {
+        failure :: host_stderr_line(os_load_i64(text), os_load_i64(wrapping(text + I64{8})))
+        return host_stdio_result(failure, HOST_IO_OP_WRITE, true, error)
+    }
+}
+
+#Export(c) fn jet_std_io_stderr_write_bytes(token: I64, words: I64, length: I64, error: I64) -> I64 {
+    failure :: host_stderr_words(words, length)
+    host_stdio_result(failure, HOST_IO_OP_WRITE, true, error)
+}
+
+#Export(c) fn jet_std_io_stderr_flush(token: I64, error: I64) -> I64 {
+    // stderr has no pending buffer and therefore no fsync operation. Draining
+    // stdout preserves the same stdout-before-stderr ordering as stderr writes.
+    failure :: host_stderr_write(I64{0}, I64{0})
+    host_stdio_result(failure, HOST_IO_OP_FLUSH, true, error)
+}
+
+#Export(c) fn jet_std_io_stderr_is_tty(token: I64) -> Bool { host_is_tty(I64{2}) }
+
+// Core source wrappers own error selection and fault checks. Private raw
+// leaves expose only the kernel errno and a separate WriteZero fact.
+fn host_stdio_facts(failure: I64, errno: I64, write_zero: I64) {
+    #Unsafe("the caller lends the tuple's exact-Int word and Bool byte outputs") {
+        os_store_i64(errno, if (failure < I64{0} && failure != HOST_WRITE_ZERO) -> wrapping(-failure) else -> I64{0})
+        os_store_u8(write_zero, if (failure == HOST_WRITE_ZERO) -> I64{1} else -> I64{0})
+    }
+}
+
+#Export(c) fn jet_stdio_stdout_write_raw(text: I64, newline: Bool, errno: I64, write_zero: I64) {
+    #Unsafe("text lends an E4 header and its bytes for the synchronous buffered write") {
+        failure :: host_stdout_write(os_load_i64(text), os_load_i64(wrapping(text + I64{8})), I64{1}, newline, false)
+        host_stdio_facts(failure, errno, write_zero)
+    }
+}
+
+#Export(c) fn jet_stdio_stdout_bytes_raw(words: I64, length: I64, errno: I64, write_zero: I64) {
+    host_stdio_facts(host_stdout_write(words, length, I64{8}, false, false), errno, write_zero)
+}
+
+#Export(c) fn jet_stdio_stdout_flush_raw(errno: I64, write_zero: I64) {
+    host_lock()
+    failure :: host_stdout_flush_locked()
+    host_unlock()
+    host_stdio_facts(failure, errno, write_zero)
+}
+
+#Export(c) fn jet_stdio_stderr_write_raw(text: I64, newline: Bool, errno: I64, write_zero: I64) {
+    #Unsafe("text lends an E4 header and its bytes; writev borrows its own stack LF") {
+        bytes :: os_load_i64(text)
+        length :: os_load_i64(wrapping(text + I64{8}))
+        failure :: if {
+            newline -> host_stderr_line(bytes, length)
+            else -> host_stderr_write(bytes, length)
+        }
+        host_stdio_facts(failure, errno, write_zero)
+    }
+}
+
+#Export(c) fn jet_stdio_stderr_bytes_raw(words: I64, length: I64, errno: I64, write_zero: I64) {
+    host_stdio_facts(host_stderr_words(words, length), errno, write_zero)
+}
+
+#Export(c) fn jet_stdio_stderr_flush_raw(errno: I64, write_zero: I64) {
+    host_stdio_facts(host_stderr_write(I64{0}, I64{0}), errno, write_zero)
+}
+
+#Export(c) fn jet_stdio_stdout_tty_raw() -> Bool { host_is_tty(I64{1}) }
+#Export(c) fn jet_stdio_stderr_tty_raw() -> Bool { host_is_tty(I64{2}) }
+
+#Export(c) fn jet_sys_errno_text_raw(errno: I64) -> I64 {
+    host_errno_cause(host_i32(errno))
+}

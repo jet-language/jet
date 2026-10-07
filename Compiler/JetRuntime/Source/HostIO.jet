@@ -2,30 +2,171 @@
 // layout. IOError tags are the CoreEnumPayloadRows declaration-order ordinals.
 // IOError: [kind, operation, resource-text?, has-os-code, os-code, cause-text?,
 // limit]. Text children use the one E4 carrier and are independently owned.
-
-#Export(c)
-fn jet_rt_handle_drop_IOError(value: I64) {
-    if (value == I64{0}) -> return
+#Export(c) fn jet_rt_handle_drop_IOError(value: I64) {
+    if (value == I64{0}) {
+        return
+    }
     #Unsafe("value transfers one 56-byte error header and its nullable owned E4 text children") {
         resource :: os_load_i64(wrapping(value + I64{16}))
         cause :: os_load_i64(wrapping(value + I64{40}))
-        if (resource != I64{0}) -> jet_rt_string_drop(resource)
-        if (cause != I64{0}) -> jet_rt_string_drop(cause)
+        if (resource != I64{0}) { jet_rt_string_drop(resource) }
+        if (cause != I64{0}) { jet_rt_string_drop(cause) }
     }
     jet_rt_free(value, I64{56}, I64{8})
 }
 
-#Export(c)
-fn jet_rt_handle_clone_IOError(value: I64) -> I64 {
-    copy :: jet_rt_alloc(I64{56}, I64{8})
-    #Unsafe("value borrows the complete error header; copy exclusively owns 56 fresh bytes") {
+#Export(c) fn jet_rt_handle_clone_IOError(value: I64) -> I64 {
+    result :: jet_rt_alloc(I64{56}, I64{8})
+    #Unsafe("value borrows the complete error header; result exclusively owns 56 fresh bytes") {
         offset := I64{0}
         loop offset < (I64{56}) {
             word := os_load_i64(wrapping(value + offset))
-            if (offset == I64{16} || offset == I64{40}) && word != (I64{0}) -> word = jet_rt_string_clone(word)
-            os_store_i64(wrapping(copy + offset), word)
+            if (offset == I64{16} || offset == I64{40}) && word != (I64{0}) {
+                word = jet_rt_string_clone(word)
+            }
+            os_store_i64(wrapping(result + offset), word)
             offset = wrapping(offset + I64{8})
         }
     }
-    copy
+    result
+}
+
+// Match jet_stdio_error -> IOError::other: cause contains the OS description,
+// but os_code itself is absent. Resources and causes are owned only on error.
+fn host_stdio_result(failure: I64, operation: I64, stderr: Bool, error: I64) -> I64 {
+    if (failure == I64{0}) { return I64{1} }
+    resource :: if {
+        stderr -> host_stderr_name()
+        else -> host_stdout_name()
+    }
+    cause :: if {
+        failure == HOST_WRITE_ZERO -> host_write_zero_text()
+        else -> host_errno_cause(wrapping(-failure))
+    }
+    value :: jet_rt_alloc(I64{56}, I64{8})
+    #Unsafe("value exclusively owns a new initialized IOError with two owned text children; error lends the caller's pointer slot") {
+        os_store_i64(value, HOST_IO_KIND_OTHER)
+        os_store_i64(wrapping(value + I64{8}), operation)
+        os_store_i64(wrapping(value + I64{16}), resource)
+        os_store_i64(wrapping(value + I64{24}), I64{0})
+        os_store_i64(wrapping(value + I64{32}), I64{0})
+        os_store_i64(wrapping(value + I64{40}), cause)
+        os_store_i64(wrapping(value + I64{48}), I64{0})
+        os_store_i64(error, value)
+    }
+    I64{0}
+}
+
+// IOContext is the contiguous five-word payload at IOError+8, independently
+// owned when projected. OS code is i64 internally, exact Int at its C seam.
+fn host_context_copy(value: I64) -> I64 {
+    result :: jet_rt_alloc(I64{40}, I64{8})
+    #Unsafe("value lends five initialized context words; result exclusively owns its header and cloned nullable E4 children") {
+        offset := I64{0}
+        loop offset < (I64{40}) {
+            word := os_load_i64(wrapping(value + offset))
+            if ((offset == I64{8} || offset == I64{32}) && word != I64{0}) -> word = jet_rt_string_clone(word)
+            os_store_i64(wrapping(result + offset), word)
+            offset = wrapping(offset + I64{8})
+        }
+    }
+    result
+}
+
+#Export(c) fn jet_rt_handle_clone_IOContext(value: I64) -> I64 { host_context_copy(value) }
+
+#Export(c) fn jet_rt_handle_drop_IOContext(value: I64) {
+    if (value == I64{0}) -> return
+    #Unsafe("value transfers its 40-byte header and two independently owned nullable text children") {
+        resource :: os_load_i64(wrapping(value + I64{8}))
+        cause :: os_load_i64(wrapping(value + I64{32}))
+        if (resource != I64{0}) -> jet_rt_string_drop(resource)
+        if (cause != I64{0}) -> jet_rt_string_drop(cause)
+    }
+    jet_rt_free(value, I64{40}, I64{8})
+}
+
+#Export(c) fn jet_rt_record_new_IOContext(operation: I64, resource: I64, os_code: I64, cause: I64) -> I64 {
+    if (operation < I64{0} || operation >= HOST_IO_OP_COUNT) -> host_record_index_refused()
+    value :: jet_rt_alloc(I64{40}, I64{8})
+    #Unsafe("nullable option boxes lend one initialized payload word; value owns cloned texts and the complete new context") {
+        os_store_i64(value, operation)
+        os_store_i64(wrapping(value + I64{8}), if (resource == I64{0}) -> I64{0} else -> jet_rt_string_clone(os_load_i64(resource)))
+        os_store_i64(wrapping(value + I64{16}), if (os_code == I64{0}) -> I64{0} else -> I64{1})
+        os_store_i64(wrapping(value + I64{24}), if (os_code == I64{0}) -> I64{0} else -> jet_int_owned_to_i64(os_load_i64(os_code)))
+        os_store_i64(wrapping(value + I64{32}), if (cause == I64{0}) -> I64{0} else -> jet_rt_string_clone(os_load_i64(cause)))
+    }
+    value
+}
+
+#Export(c) fn jet_rt_record_get_IOContext_operation(value: I64) -> I64 {
+    #Unsafe("value borrows an initialized context header") { return os_load_i64(value) }
+}
+
+fn host_context_text(value: I64, offset: I64, some: I64) -> I64 {
+    #Unsafe("value borrows a context; some lends the writable pointer output for a present field") {
+        text :: os_load_i64(wrapping(value + offset))
+        if (text == I64{0}) -> return I64{0}
+        os_store_i64(some, jet_rt_string_clone(text))
+    }
+    I64{1}
+}
+
+#Export(c) fn jet_rt_record_get_IOContext_resource(value: I64, some: I64) -> I64 { host_context_text(value, I64{8}, some) }
+#Export(c) fn jet_rt_record_get_IOContext_cause(value: I64, some: I64) -> I64 { host_context_text(value, I64{32}, some) }
+
+#Export(c) fn jet_rt_record_get_IOContext_os_code(value: I64, some: I64) -> I64 {
+    #Unsafe("value borrows a context; some lends the writable exact-Int word output for a present field") {
+        if (os_load_i64(wrapping(value + I64{16})) == I64{0}) -> return I64{0}
+        os_store_i64(some, jet_int_owned_from_i64(os_load_i64(wrapping(value + I64{24}))))
+    }
+    I64{1}
+}
+
+#Export(c) fn jet_rt_record_tag_IOError(value: I64) -> I64 {
+    #Unsafe("value borrows an initialized error header") { return os_load_i64(value) }
+}
+
+fn host_error_context(value: I64, kind: I64) -> I64 {
+    #Unsafe("value borrows a complete error header; the selected payload must match its canonical tag") {
+        if (os_load_i64(value) != kind) -> host_record_index_refused()
+    }
+    host_context_copy(wrapping(value + I64{8}))
+}
+
+fn host_error_with_context(context: I64, kind: I64) -> I64 {
+    value :: jet_rt_alloc(I64{56}, I64{8})
+    #Unsafe("context transfers its initialized five words and text owners into the fresh error; only the context header is then freed") {
+        os_store_i64(value, kind)
+        offset := I64{0}
+        loop offset < (I64{40}) {
+            os_store_i64(wrapping(value + I64{8} + offset), os_load_i64(wrapping(context + offset)))
+            offset = wrapping(offset + I64{8})
+        }
+        os_store_i64(wrapping(value + I64{48}), I64{0})
+    }
+    jet_rt_free(context, I64{40}, I64{8})
+    value
+}
+
+#Export(c) fn jet_rt_record_get_IOError_ResourceLimit(value: I64) -> I64 {
+    #Unsafe("value borrows an initialized ResourceLimit error") {
+        if (os_load_i64(value) != HOST_IO_KIND_RESOURCE_LIMIT) -> host_record_index_refused()
+        return os_load_i64(wrapping(value + I64{48}))
+    }
+}
+
+#Export(c) fn jet_rt_record_new_IOError_ResourceLimit(limit: I64) -> I64 {
+    if (limit < I64{0} || limit >= HOST_PROCESS_LIMIT_COUNT) -> host_record_index_refused()
+    value :: jet_rt_alloc(I64{56}, I64{8})
+    #Unsafe("value exclusively owns seven initialized words; ResourceLimit has no text children") {
+        os_store_i64(value, HOST_IO_KIND_RESOURCE_LIMIT)
+        offset := I64{8}
+        loop offset < (I64{56}) {
+            os_store_i64(wrapping(value + offset), I64{0})
+            offset = wrapping(offset + I64{8})
+        }
+        os_store_i64(wrapping(value + I64{48}), limit)
+    }
+    value
 }
