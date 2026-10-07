@@ -4,7 +4,7 @@ use core.files as cli_files
 use core.process as cli_process
 use core.sys as cli_sys
 use jet_driver.[JetDriverAuthorizedSourceSnapshot, jet_driver_c_dependencies]
-use jet_foundation.[MIRProgram, MIRLinkArtifactKind, mir_sha256_hex]
+use jet_foundation.[MIRProgram, MIRLinkArtifactKind, mir_sha256_bytes, mir_sha256_hex_bytes]
 
 struct JetCLIForeignInputs {
     names: [String]
@@ -23,10 +23,10 @@ fn jet_cli_foreign_add(inputs: &JetCLIForeignInputs, path: String) -[FS]> String
 
 // A length-delimited identity avoids concatenation aliases.
 fn jet_cli_foreign_hash_field(identity: &[U8], name: String, value: [U8]) Never! {
-    loop word in [Int]{name.len(), value.len()} {
-        loop shift in 0..<8 -> &identity.push(U8{(word >> (shift * 8)) & 255})
-    }
-    loop byte in name.bytes() -> &identity.push(byte)
+    name_bytes :: name.bytes()
+    loop shift in 0..<8 -> &identity.push(U8{(name_bytes.len() >> (shift * 8)) & 255})
+    loop byte in name_bytes -> &identity.push(byte)
+    loop shift in 0..<8 -> &identity.push(U8{(value.len() >> (shift * 8)) & 255})
     loop byte in value -> &identity.push(byte)
 }
 
@@ -54,7 +54,7 @@ fn jet_cli_foreign_compile(lib: String, directory: String, cache: String) -[FS, 
     archiver :: cli_process.which(cli_sys.get("AR") ?? "ar") ?? return Err("the C archiver is not installed")
     target :: cli_process.cmd([String]{compiler, "-dumpmachine"}).run() ?? return Err("couldn't query C compiler target: {err}")
     if !target.success || !target.output.trim().starts_with("x86_64") -> return Err("C compiler must target x86_64 for the native linker: {target.output}{target.errors}")
-    flags := [String]{"-std=c11", "-O2", "-fno-pic", "-fno-pie", "-fno-stack-protector", "-fno-asynchronous-unwind-tables", "-fno-unwind-tables", "-D_GNU_SOURCE"}
+    flags := [String]{"-std=c11", "-O2", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables", "-fno-unwind-tables", "-D_GNU_SOURCE"}
     if lib == "sqlite3" {
         loop flag in jet_cli_sqlite_c_flags() -> &flags.push(flag)
     }
@@ -68,9 +68,9 @@ fn jet_cli_foreign_compile(lib: String, directory: String, cache: String) -[FS, 
     identity := [U8]{}
     jet_cli_foreign_hash_field(&identity, "schema", "jet-native-c-v1".bytes())
     jet_cli_foreign_hash_field(&identity, "target", target.output.bytes())
-    loop tool in [String]{compiler, archiver} {
+    loop (index, tool) in [String]{compiler, archiver} {
         content :: cli_files.read_bytes(tool) ?? return Err("couldn't read C tool `{tool}`: {err}")
-        jet_cli_foreign_hash_field(&identity, "tool", content)
+        jet_cli_foreign_hash_field(&identity, if index == 0 -> "compiler" else -> "archiver", content)
     }
     loop flag in flags -> jet_cli_foreign_hash_field(&identity, "flag", flag.bytes())
     loop path in paths {
@@ -80,24 +80,38 @@ fn jet_cli_foreign_compile(lib: String, directory: String, cache: String) -[FS, 
         if path.ends_with(".c") -> &sources.push(path)
     }
     if sources.len() == 0 -> return Err("C dependency `{lib}` has neither a static archive nor C sources in `{directory}`")
-    key :: mir_sha256_hex(identity)
+    // Hash what the compiler will consume, including every system/header
+    // input. Compile these immutable preprocessed bytes on a cache miss.
+    preprocessed := [String]{}
+    loop source in sources {
+        argv := [String]{compiler}
+        loop flag in flags -> &argv.push(flag)
+        loop flag in [String]{"-ffile-prefix-map={directory}=/jet/c", "-I", directory, "-E", "-P", source} -> &argv.push(flag)
+        receipt :: cli_process.cmd(argv).run() ?? return Err("couldn't preprocess C dependency `{lib}`: {err}")
+        if !receipt.success -> return Err("C compiler rejected `{source}`: {receipt.errors}")
+        jet_cli_foreign_hash_field(&identity, "preprocessed", receipt.output.bytes())
+        &preprocessed.push(receipt.output)
+    }
+    key :: mir_sha256_hex_bytes(mir_sha256_bytes(identity))
     store :: "{cache}/{key}"
     archive :: "{store}/lib{lib}.a"
     if cli_files.read_bytes(archive) == .Ok(bytes) {
         digest :: cli_files.read("{archive}.sha256") ?? ""
-        if digest.trim() == mir_sha256_hex(bytes) -> return Ok(archive)
+        if digest.trim() == mir_sha256_hex_bytes(mir_sha256_bytes(bytes)) -> return Ok(archive)
     }
     cli_files.create_dir_all(store) ?? return Err("couldn't create C object cache `{store}`: {err}")
     temporary :: "{store}/build-{cli_sys.pid()}"
     cli_files.create_dir_all(temporary) ?? return Err("couldn't create C build directory: {err}")
     objects := [String]{}
-    loop (index, source) in sources {
+    loop (index, source) in preprocessed {
+        staged_source :: "{temporary}/{index}.i"
+        cli_files.write(staged_source, source) ?? return Err("couldn't stage preprocessed C source: {err}")
         object :: "{temporary}/{index}.o"
         argv := [String]{compiler}
         loop flag in flags -> &argv.push(flag)
-        loop flag in [String]{"-ffile-prefix-map={directory}=/jet/c", "-I", directory, "-c", source, "-o", object} -> &argv.push(flag)
+        loop flag in [String]{"-c", staged_source, "-o", object} -> &argv.push(flag)
         receipt :: cli_process.cmd(argv).run() ?? return Err("couldn't compile C dependency `{lib}`: {err}")
-        if !receipt.success -> return Err("C compiler rejected `{source}`: {receipt.errors}")
+        if !receipt.success -> return Err("C compiler rejected `{sources[index]}`: {receipt.errors}")
         &objects.push(object)
     }
     staged :: "{temporary}/lib{lib}.a"
@@ -106,7 +120,7 @@ fn jet_cli_foreign_compile(lib: String, directory: String, cache: String) -[FS, 
     receipt :: cli_process.cmd(argv).run() ?? return Err("couldn't archive C dependency `{lib}`: {err}")
     if !receipt.success -> return Err("C archiver rejected `{lib}`: {receipt.errors}")
     bytes :: cli_files.read_bytes(staged) ?? return Err("couldn't read compiled C archive: {err}")
-    digest :: mir_sha256_hex(bytes)
+    digest :: mir_sha256_hex_bytes(mir_sha256_bytes(bytes))
     cli_files.rename(staged, archive) ?? return Err("couldn't publish C archive: {err}")
     cli_files.write("{temporary}/digest", digest) ?? return Err("couldn't write C archive digest: {err}")
     cli_files.rename("{temporary}/digest", "{archive}.sha256") ?? return Err("couldn't publish C archive digest: {err}")
@@ -132,7 +146,11 @@ fn jet_cli_foreign_static_archive(lib: String, directories: [String], cache: Str
 
 fn jet_cli_native_c_inputs(program: MIRProgram, snapshot: JetDriverAuthorizedSourceSnapshot, runtime_dir: String) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs String! {
     inputs := JetCLIForeignInputs{names: [String]{}, bytes: [[U8]]{}, paths: [String]{}}
-    root :: snapshot.roots[0].canonical_path
+    root := ""
+    loop candidate in snapshot.roots {
+        if candidate.identity == snapshot.entry_root_identity -> root = candidate.canonical_path
+    }
+    if root == "" -> return Err("C link resolution has no authorized entry source root")
     cache :: "{root}/.jet/clinks/objects"
     declarations :: jet_driver_c_dependencies(snapshot)
     libraries := program.cffi.direct_links
@@ -149,8 +167,12 @@ fn jet_cli_native_c_inputs(program: MIRProgram, snapshot: JetDriverAuthorizedSou
             if declaration.library != lib -> next
             target :: declaration.target
             if target == "system" -> next
-            if target.starts_with("nixpkgs:") -> return Err("native C dependency `{lib}` must first be realized to a local static archive")
-            directory :: cli_files.canonicalize(cli_files.join(declaration.root, target)) ?? return Err("couldn't resolve C dependency `{lib}` at `{target}`: {err}")
+            directory := ""
+            if target.starts_with("nixpkgs:") {
+                directory = jet_cli_foreign_nix_directory(lib, target.removeprefix("nixpkgs:"), declaration.root) ?? return Err(err)
+            } else {
+                directory = cli_files.canonicalize(cli_files.join(declaration.root, target)) ?? return Err("couldn't resolve C dependency `{lib}` at `{target}`: {err}")
+            }
             if !directories.contains(directory) -> &directories.push(directory)
         }
         if directories.len() > 1 -> return Err("C dependency `{lib}` has conflicting declarations")
@@ -185,4 +207,19 @@ fn jet_cli_native_c_inputs(program: MIRProgram, snapshot: JetDriverAuthorizedSou
         }
     }
     Ok(inputs)
+}
+
+// The same declared nixpkgs provisioning as the seed C resolver. A native
+// link still selects static archive bytes, never a dynamic loader fallback.
+fn jet_cli_foreign_nix_directory(lib: String, attr: String, root: String) -[FS, Env, Exec, Time.Wait]> String String! {
+    cache :: "{root}/.jet/clinks/{lib}"
+    stored :: (cli_files.read(cache) ?? "").trim()
+    if stored.len() > 0 && cli_files.is_dir(stored) -> return Ok("{stored}/lib")
+    receipt :: cli_process.cmd([String]{"nix", "build", "--no-link", "--print-out-paths", "nixpkgs#{attr}"}).run() ?? return Err("couldn't provision C dependency `{lib}`: {err}")
+    if !receipt.success -> return Err("couldn't provision C dependency `{lib}`: {receipt.errors}")
+    lines :: receipt.output.trim().split("\n").to_list()
+    if lines.len() != 1 || !cli_files.is_dir(lines[0]) -> return Err("C dependency `{lib}` provisioning returned no single store directory")
+    cli_files.create_dir_all("{root}/.jet/clinks") ?? return Err("couldn't create C dependency cache: {err}")
+    cli_files.write(cache, lines[0]) ?? return Err("couldn't write C dependency cache: {err}")
+    Ok("{lines[0]}/lib")
 }

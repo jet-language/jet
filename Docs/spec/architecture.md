@@ -586,6 +586,21 @@ and include their checked signature, target, raw body, and schema in the cache
 identity. C/C++ wrappers and asm lower only after sema proves their boundary
 contracts.
 
+The native C path consumes the same checked direct/transitive library closure
+and object/archive link units. A local `c@path` source directory is realized
+with the installed C toolchain into a content-addressed static archive; source
+and header bytes, exact compiler flags, target and tool identities determine
+its key. Cache hits check the archive digest. System V scalar calls preserve
+their declared widths and floating-point register classes, and writable scalar
+arguments use C-width temporary slots followed by native writeback.
+
+SQLite uses the sanctioned 3.45.0 amalgamation from `libsqlite3-sys` 0.28.0 in
+`Core/vendor/sqlite3`, with the seed's bundled feature flags, never a system
+SQLite. Packaging ships those sources beside the runtime. User foreign
+dependencies are program link inputs; a runtime pack includes only the foreign
+closure reached by its own declared sources, keeping the shared pack independent
+of user projects.
+
 `jet inspect bind cpp` is owned by `CppBind.rs`: clang AST discovery produces a
 deterministic Jet module and C-linkage shim/archive under
 `.jet/bindings/cpp/`, with provenance for the declaration, toolchain, target,

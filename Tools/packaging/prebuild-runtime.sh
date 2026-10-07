@@ -31,6 +31,10 @@ out=${2:-$(dirname "$jet")/jet-runtime}
 work=$(mktemp -d "${TMPDIR:-/tmp}/jet-prebuild-runtime.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$out" "$work/home" "$work/release"
+# Source, not a system sqlite: installed native C resolution compiles the
+# sanctioned amalgamation with the same bundled feature flags as the seed.
+mkdir -p "$out/foreign/sqlite3"
+cp "$repo/Core/vendor/sqlite3/"{sqlite3.c,sqlite3.h,sqlite3ext.h,LICENSE} "$out/foreign/sqlite3/"
 printf 'fn run() {\n    print("hello")\n}\n' > "$work/seed.jet"
 for profile in default release; do
   flags=()

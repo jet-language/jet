@@ -2937,13 +2937,18 @@ fn lower_prelude_render(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
 fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, callee: MIRCallee, args: [MIRCallArg], type_args: [MIRType]) Never! {
     if callee == .TraitMethod(method, bound, receiver) -> return lower_trait_call(p, c, &m, &f, instruction, method, bound, receiver, args, type_args)
     if callee == .Foreign(foreign) && m.asm_foreign.get(foreign.value) == .None {
-        lower_asm_import_call(p, c, &m, &f, instruction, foreign.value, args, type_args)
+        lower_c_import_call(p, c, &m, &f, instruction, foreign.value, args, type_args)
         return
     }
     if callee == .Prelude(call) {
         if lower_lazy_call(p, c, &m, &f, instruction, call, args) -> return
         if lower_queue_call(p, c, &m, &f, instruction, call, args) -> return
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "call names missing Prelude call {call.value}")
+        if row.module_name == "core.mem" {
+            values := [MIRValueID]{}
+            loop arg in args -> &values.push(arg.value)
+            if lower_c_mem_route(p, c, &m, &f, instruction, call, values) -> return
+        }
         symbol :: lower_runtime_symbol(row)
         if lower_typed_call(p, c, &m, &f, instruction, symbol, args) -> return
         if args.len() == 1 {

@@ -3920,13 +3920,140 @@ fn clib_link(lib: &str, target: &str, project_root: &Path) -> Result<LinkFlags, 
         return provision_from_nixpkgs(lib, lib, project_root);
     }
 
-    // Local dir: link from `<path>` with the lib's own name.
+    // Seed/verification seam; dies at cutover. Local source declarations use
+    // the same C toolchain and bundled feature set as the native host.
+    let directory = project_root.join(target);
+    let archive = directory.join(format!("lib{lib}.a"));
+    let realized = if archive.is_file() {
+        directory.clone()
+    } else if directory.is_dir() {
+        compile_local_c_library(lib, &directory, project_root).map_err(|reason| {
+            Diagnostic::error(
+                "E2105",
+                format!("Couldn't compile C dependency `{lib}`."),
+                reason,
+                "Check the declared C source directory and installed C toolchain.",
+                None,
+            )
+        })?
+    } else {
+        directory.clone()
+    };
     Ok(LinkFlags {
-        include_dirs: vec![target.to_string()],
-        lib_dirs: vec![target.to_string()],
-        link_names: vec![lib.to_string()],
+        include_dirs: vec![directory.display().to_string()],
+        lib_dirs: vec![realized.display().to_string()],
+        link_names: vec![format!("static={lib}")],
         rpath_dirs: Vec::new(),
     })
+}
+
+// The local c@path provider has no second user-facing recipe syntax.
+fn compile_local_c_library(lib: &str, directory: &Path, root: &Path) -> Result<PathBuf, String> {
+    fn inputs(directory: &Path, paths: &mut Vec<PathBuf>) -> Result<(), String> {
+        for entry in std::fs::read_dir(directory).map_err(|error| error.to_string())? {
+            let path = entry.map_err(|error| error.to_string())?.path();
+            if path.is_dir() {
+                inputs(&path, paths)?;
+            } else if matches!(path.extension().and_then(|value| value.to_str()), Some("c" | "h")) {
+                paths.push(path);
+            }
+        }
+        Ok(())
+    }
+    fn checked(command: &mut Command) -> Result<(), String> {
+        let output = command.output().map_err(|error| error.to_string())?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).into_owned())
+        }
+    }
+    let compiler = std::env::var("CC").unwrap_or_else(|_| "cc".into());
+    let archiver = std::env::var("AR").unwrap_or_else(|_| "ar".into());
+    let mut flags = vec![
+        "-std=c11", "-O2", "-fPIC", "-fno-stack-protector",
+        "-fno-asynchronous-unwind-tables", "-fno-unwind-tables", "-D_GNU_SOURCE",
+    ];
+    if lib == "sqlite3" {
+        flags.extend([
+            "-DSQLITE_CORE", "-DSQLITE_DEFAULT_FOREIGN_KEYS=1",
+            "-DSQLITE_ENABLE_API_ARMOR", "-DSQLITE_ENABLE_COLUMN_METADATA",
+            "-DSQLITE_ENABLE_DBSTAT_VTAB", "-DSQLITE_ENABLE_FTS3",
+            "-DSQLITE_ENABLE_FTS3_PARENTHESIS", "-DSQLITE_ENABLE_FTS5",
+            "-DSQLITE_ENABLE_JSON1", "-DSQLITE_ENABLE_LOAD_EXTENSION=1",
+            "-DSQLITE_ENABLE_MEMORY_MANAGEMENT", "-DSQLITE_ENABLE_RTREE",
+            "-DSQLITE_ENABLE_STAT2", "-DSQLITE_ENABLE_STAT4", "-DSQLITE_SOUNDEX",
+            "-DSQLITE_THREADSAFE=1", "-DSQLITE_USE_URI", "-DHAVE_USLEEP=1",
+            "-D_POSIX_THREAD_SAFE_FUNCTIONS", "-DHAVE_ISNAN", "-DHAVE_LOCALTIME_R", "-w",
+        ]);
+    }
+    let target = Command::new(&compiler).arg("-dumpmachine").output().map_err(|error| error.to_string())?;
+    if !target.status.success() {
+        return Err(String::from_utf8_lossy(&target.stderr).into_owned());
+    }
+    let mut paths = Vec::new();
+    inputs(directory, &mut paths)?;
+    paths.sort();
+    let mut identity = crate::ForeignBridge::IdentityBuilder::new("jet-native-c-v1");
+    identity.field("target", &target.stdout);
+    let compiler_path = crate::ForeignBridge::tool_path(&compiler).ok_or_else(|| format!("C compiler `{compiler}` was not found"))?;
+    let archiver_path = crate::ForeignBridge::tool_path(&archiver).ok_or_else(|| format!("C archiver `{archiver}` was not found"))?;
+    identity.field("compiler", &std::fs::read(compiler_path).map_err(|error| error.to_string())?);
+    identity.field("archiver", &std::fs::read(archiver_path).map_err(|error| error.to_string())?);
+    for flag in &flags {
+        identity.field("flag", flag.as_bytes());
+    }
+    let mut sources = Vec::new();
+    for path in paths {
+        let content = std::fs::read(&path).map_err(|error| error.to_string())?;
+        identity.field(&path.strip_prefix(directory).map_err(|error| error.to_string())?.display().to_string(), &content);
+        if path.extension().and_then(|value| value.to_str()) == Some("c") {
+            sources.push(path);
+        }
+    }
+    if sources.is_empty() {
+        return Err(format!("C dependency `{lib}` has neither a static archive nor C sources in {}", directory.display()));
+    }
+    let mut preprocessed = Vec::new();
+    for source in &sources {
+        let output = Command::new(&compiler).args(&flags)
+            .arg(format!("-ffile-prefix-map={}=/jet/c", directory.display()))
+            .arg("-I").arg(directory).arg("-E").arg("-P").arg(source)
+            .output().map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+        }
+        identity.field("preprocessed", &output.stdout);
+        preprocessed.push(output.stdout);
+    }
+    let store = root.join(".jet/clinks/objects").join(identity.finish());
+    let archive = store.join(format!("lib{lib}.a"));
+    let digest_path = store.join(format!("lib{lib}.a.sha256"));
+    if archive.is_file() {
+        let expected = std::fs::read_to_string(&digest_path).unwrap_or_default();
+        if crate::ForeignBridge::sha_file(&archive)? == expected.trim() {
+            return Ok(store);
+        }
+    }
+    let work = store.join(format!("build-{}", std::process::id()));
+    std::fs::create_dir_all(&work).map_err(|error| error.to_string())?;
+    let mut objects = Vec::new();
+    for (index, source) in preprocessed.iter().enumerate() {
+        let staged_source = work.join(format!("{index}.i"));
+        std::fs::write(&staged_source, source).map_err(|error| error.to_string())?;
+        let object = work.join(format!("{index}.o"));
+        checked(Command::new(&compiler).args(&flags)
+            .arg("-c").arg(staged_source).arg("-o").arg(&object))?;
+        objects.push(object);
+    }
+    let staged = work.join(format!("lib{lib}.a"));
+    checked(Command::new(&archiver).arg("rcsD").arg(&staged).args(&objects))?;
+    let digest = crate::ForeignBridge::sha_file(&staged)?;
+    std::fs::rename(&staged, &archive).map_err(|error| error.to_string())?;
+    std::fs::write(work.join("digest"), digest).map_err(|error| error.to_string())?;
+    std::fs::rename(work.join("digest"), &digest_path).map_err(|error| error.to_string())?;
+    std::fs::remove_dir_all(work).map_err(|error| error.to_string())?;
+    Ok(store)
 }
 
 /// `target` prefix selecting an explicit nixpkgs attribute for a C dep.

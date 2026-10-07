@@ -304,7 +304,7 @@ fn jet_cli_runtime_key(runtime_dir: String) -[FS]> String? Never! {
 // A program it cannot lower yet is refused with the backend's first
 // finding, never built another way; `command` is the verb (`build` or `run`)
 // the fix names.
-fn jet_cli_build_native(file: String, command: String, result: JetDriverCompileResult, binary: String, color: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
+fn jet_cli_build_native(file: String, command: String, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, binary: String, color: Bool) -[FS, Env, Exec, Time.Wait]> JetDriverVerbOutput Never! {
     unpruned :: result.mir ?? return jet_cli_ice("the Jet compiler finished `{file}` without a MIR program")
     entry_id :: result.entry_function ?? return jet_cli_build_failed("`{file}` has no `fn run` to build", "an executable starts at the program's `fn run`", "add `fn run()` to the file, or check it with `jet check {file}`", color)
     // Only functions the entry reaches are lowered, generic ones per instance.
@@ -331,7 +331,12 @@ fn jet_cli_build_native(file: String, command: String, result: JetDriverCompileR
     key :: jet_cli_runtime_key(runtime_dir) ?? return jet_cli_build_failed("couldn't read the Jet runtime key {runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}", jet_cli_why("E2105"), "package the runtime beside jet with `Tools/packaging/prebuild-runtime.sh <jet>`, which writes the key and the runtime pack", color)
     pack_path :: "{runtime_dir}/{key}/{JET_CLI_RUNTIME_PACK_FILE}"
     pack :: cli_files.read_bytes(pack_path) ?? return jet_cli_build_failed("couldn't read the Jet runtime {pack_path}: {err}", jet_cli_why("E2105"), "package the runtime beside jet with `Tools/packaging/prebuild-runtime.sh <jet>`, which writes the runtime pack", color)
-    image :: x64_link_executable([String]{"{binary}.o", pack_path}, ^[[U8]]{object.bytes, pack})
+    foreign :: jet_cli_native_c_inputs(unpruned, snapshot, runtime_dir) ?? return jet_cli_build_failed("couldn't realize C dependencies for `{file}`: {err}", jet_cli_why("E2105"), "check the declared C source/library paths and the installed C toolchain", color)
+    names := [String]{"{binary}.o", pack_path}
+    bytes := [[U8]]{object.bytes, pack}
+    loop name in foreign.names -> &names.push(name)
+    loop input in foreign.bytes -> &bytes.push(input)
+    image :: x64_link_executable(names, ^bytes)
     if image.errors.len() > 0 -> return jet_cli_ice("linking `{file}` with the Jet runtime failed: {image.errors[0]}")
     cli_files.write_bytes(binary, image.bytes) ?? return jet_cli_build_failed("couldn't write {binary}: {err}", jet_cli_why("E2105"), "check that the build directory is writable", color)
     cli_files.set_mode(binary, 0o755) ?? return jet_cli_build_failed("couldn't make {binary} executable: {err}", jet_cli_why("E2105"), "check that the build directory is writable", color)
@@ -389,7 +394,7 @@ fn jet_cli_build_binary(file: String, command: String, color: Bool, release: Boo
     cli_files.create_dir_all(build_dir) ?? return JetCLIBuilt.Failed{output: jet_cli_build_failed("couldn't create the build directory {build_dir}: {err}", jet_cli_why("E2105"), "check that the project directory is writable", color)}
     stem :: jet_cli_stem(file)
     binary :: "{build_dir}/{stem}"
-    built :: if release -> jet_cli_build_release(file, result, root, build_dir, stem, binary, color) else -> jet_cli_build_native(file, command, result, binary, color)
+    built :: if release -> jet_cli_build_release(file, result, root, build_dir, stem, binary, color) else -> jet_cli_build_native(file, command, result, snapshot, binary, color)
     if built.exit_code != JET_DRIVER_EXIT_OK -> return JetCLIBuilt.Failed{output: built}
     JetCLIBuilt.Binary{path: binary}
 }
