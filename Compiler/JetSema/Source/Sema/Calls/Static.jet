@@ -592,16 +592,39 @@ fn sema_call_try_builtin_static_field(base: Expr, owner: String, method: String,
     sema_call_try_builtin_static(owner, module_name, method, owner_type_args, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
+// Resolve associated methods through the declaration graph before trying an
+// intrinsic row. Core source carriers use the same SymbolId as imported user
+// carriers; a qualified owner is not a runtime field access.
+fn sema_call_static_source_owner(receiver: Expr, method: String, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Symbol? Never! {
+    owner_name :: if receiver == {
+        .Ident(name, _) -> {
+            if sema_scope_resolve_index(scopes, name) == .Val(index) -> return Val(scopes.bindings[index].symbol)
+            name
+        }
+        .Field(base, leaf, _) -> {
+            alias :: if base == {.Ident(name, _) -> name else -> { return None }}
+            if !sema_expr_core_module_alias_visible(alias, scopes) -> return None
+            "{alias}.{leaf}"
+        }
+        else -> { return None }
+    }
+    graph :: environment.registration_graph ?? return None
+    resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, owner_name) ?? return None
+    if resolved.symbol.kind != SymbolKind.Type -> return None
+    row :: sema_type_graph_nominal_row(graph, resolved.symbol.id.key) ?? return None
+    nominal :: graph.modules[row.module_index].nominals[row.row]
+    if !sema_call_static_registered_method_exists(graph, nominal, method, environment) -> return None
+    Val(resolved.symbol)
+}
+
 pub fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver == .Call(descriptor) -> return sema_call_try_inline_range_conversion(descriptor, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-    if receiver == .Field(base, owner_leaf, _) -> return sema_call_try_builtin_static_field(base, owner_leaf, method, owner_type_args, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-    type_name :: if receiver == {
-        .Ident(name, _) -> name
-        else -> { return SemaMethodSpecialCheck{handled: false, value: None} }
+    owner_symbol :: sema_call_static_source_owner(receiver, method, environment, scopes) ?? {
+        if receiver == .Field(base, owner_leaf, _) -> return sema_call_try_builtin_static_field(base, owner_leaf, method, owner_type_args, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if receiver == .Ident(name, _) -> return sema_call_try_builtin_static(name, "", method, owner_type_args, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: false, value: None}
     }
-    // An unbound owner can only be an ambient built-in; a value binding shadows it.
-    binding_index :: sema_scope_resolve_index(scopes, type_name) ?? return sema_call_try_builtin_static(type_name, "", method, owner_type_args, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-    owner_symbol := scopes.bindings[binding_index].symbol
+    type_name :: owner_symbol.name
     if owner_symbol.kind != SymbolKind.Type -> return SemaMethodSpecialCheck{handled: false, value: None}
 
     diagnostics_before := diagnostics.len()

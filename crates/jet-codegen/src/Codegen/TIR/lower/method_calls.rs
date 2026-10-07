@@ -10635,29 +10635,6 @@ fn lower_method_call_impl(
                 });
             }
         }
-        if let Expr::Ident(type_name, _) = receiver {
-            if type_name == "Limits"
-                && cx
-                    .core_imports
-                    .values()
-                    .any(|module| module == "core.email")
-            {
-                return in_own_frame(|| TExpr {
-                    ty: Type::Named("Limits".to_string()),
-                    kind: TExprKind::StaticCall {
-                        owner: TStaticOwner::Prelude {
-                            rooted: false,
-                            path: "core.email".to_string(),
-                            generics: Vec::new(),
-                        },
-                        owner_type: None,
-                        method: TMethodRef::bare("limits_safe"),
-                        type_args: Vec::new(),
-                        args: vec![],
-                    },
-                });
-            }
-        }
         if let Expr::Field(base, leaf, _) = receiver {
             if leaf == "EncodingLimits"
                 && core_module_path_from_receiver(base, cx, env).as_deref() == Some("core.encoding")
@@ -10737,26 +10714,6 @@ fn lower_method_call_impl(
                             owner: rooted_owner(format!("jet_std::{leaf}")),
                             owner_type: None,
                             method: TMethodRef::bare("safe"),
-                            type_args: Vec::new(),
-                            args: vec![],
-                        },
-                    };
-                });
-            }
-            if leaf == "Limits"
-                && core_module_path_from_receiver(base, cx, env).as_deref() == Some("core.email")
-            {
-                return in_own_frame(|| {
-                    return TExpr {
-                        ty: Type::Named("Limits".to_string()),
-                        kind: TExprKind::StaticCall {
-                            owner: TStaticOwner::Prelude {
-                                rooted: false,
-                                path: "core.email".to_string(),
-                                generics: Vec::new(),
-                            },
-                            owner_type: None,
-                            method: TMethodRef::bare("limits_safe"),
                             type_args: Vec::new(),
                             args: vec![],
                         },

@@ -411,7 +411,7 @@ fn core_email_smtp_transaction_require_all_and_delivery_unknown_are_honest() {
 fn core_email_limits_are_constructible_real_jet_values() {
     let dir = std::env::temp_dir().join(format!("jet_email_limits_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
-    let (code, stdout, stderr) = build_and_run(&dir, "email_limits", r#"
+    let source = r#"
 use core.email as email
 
 fn run() {
@@ -427,9 +427,21 @@ fn run() {
     }
     print("{strict.max_reply_line_bytes},{strict.max_auth_challenge_bytes}")
 }
-"#, &[], None);
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "email_limits", source, &[], None);
     assert_eq!(code, 0, "stderr: {stderr}");
     assert_eq!(stdout, "512,100,100,100,33554432,4096\n64,5\n");
+    let file = dir.join("email_limits.jet");
+    fs::write(&file, source).unwrap();
+    for (tier, interpreter) in [("resident JIT", false), ("forced interpreter", true)] {
+        match common::dev_run(file.to_str().unwrap(), false, interpreter) {
+            jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+                assert_eq!(exit_code, 0, "{tier}: {stderr}");
+                assert_eq!(stdout, "512,100,100,100,33554432,4096\n64,5\n", "{tier}");
+            }
+            other => panic!("{tier}: {other:?}"),
+        }
+    }
 }
 
 #[test]
