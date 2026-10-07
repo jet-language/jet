@@ -29,6 +29,6 @@ for (const [name, path] of fixtures) {
     const project = join(out, name);
     mkdirSync(join(project, "src"), { recursive: true });
     writeFileSync(join(project, "src/compiler.jet"), production + "\n" + readFileSync(join(repo, path), "utf8"));
-    writeFileSync(join(project, "package.jet"), `name: "${name}"\nversion: "0.1.0"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n`);
+    writeFileSync(join(project, "package.jet"), `name: "${name}"\nversion: "0.1.0"\nauthority: { holds: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] } }\n`);
     console.log(join(project, "src/compiler.jet"));
 }

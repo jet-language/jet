@@ -1,13 +1,13 @@
 // Rust Expr/Stmt preorder visitor, reused from origin/port/compiler.
 // A visit reads the original checked parser node; no source-text discovery.
-pub trait ASTExprVisitor { fn visit(&self, expression: Expr) Never! }
+pub trait ASTExprVisitor { fn visit(&self, expression: Expr) Never! -[Mem.Alloc, Mem.Rc, Time.Wait]> }
 pub fn ast_expr_for_each_expr<V: ASTExprVisitor>(expression: Expr, visitor: &V) Never! {
     ast_visit_expr(expression, (value: Expr) -> &visitor.visit(value))
 }
 pub fn ast_stmt_for_each_expr<V: ASTExprVisitor>(statement: Stmt, visitor: &V) Never! {
     ast_visit_statement(statement, (value: Expr) -> &visitor.visit(value), false)
 }
-fn ast_visit_expr(expression: Expr, visitor: fn(Expr) Never!) Never! {
+fn ast_visit_expr(expression: Expr, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     visitor(expression)
     if expression == {
         .Str(parts, _) -> loop part in parts { if part == .Interp(value, _) -> ast_visit_expr(value, visitor) }
@@ -78,20 +78,20 @@ fn ast_visit_expr(expression: Expr, visitor: fn(Expr) Never!) Never! {
         else -> {}
     }
 }
-fn ast_visit_body(body: [Stmt], visitor: fn(Expr) Never!, nested_expression: Bool) Never! {
+fn ast_visit_body(body: [Stmt], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!, nested_expression: Bool) Never! {
     loop statement in body -> ast_visit_statement(statement, visitor, nested_expression)
 }
-fn ast_visit_call_args(args: [CallArg], visitor: fn(Expr) Never!) Never! {
+fn ast_visit_call_args(args: [CallArg], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     loop argument in args -> ast_visit_expr(argument.expr, visitor)
 }
-fn ast_visit_pattern(pattern: Pattern, visitor: fn(Expr) Never!) Never! {
+fn ast_visit_pattern(pattern: Pattern, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if pattern == {
         .Or(alternatives, _) -> loop alternative in alternatives -> ast_visit_pattern(alternative, visitor)
         .Struct(fields, _, _) -> loop field in fields { if field == .Value(_, _, value) -> ast_visit_expr(value, visitor) }
         else -> {}
     }
 }
-fn ast_visit_fallback(fallback: OrFallback, visitor: fn(Expr) Never!) Never! {
+fn ast_visit_fallback(fallback: OrFallback, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if fallback == {
         .Value(value) -> ast_visit_expr(value, visitor)
         .Block(body, value, _) -> {
@@ -103,7 +103,7 @@ fn ast_visit_fallback(fallback: OrFallback, visitor: fn(Expr) Never!) Never! {
         else -> {}
     }
 }
-fn ast_visit_statement(statement: Stmt, visitor: fn(Expr) Never!, nested_expression: Bool) Never! {
+fn ast_visit_statement(statement: Stmt, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!, nested_expression: Bool) Never! {
     if statement == {
         .Expr(expression) | .DeferClose(expression, _) -> ast_visit_expr(expression, visitor)
         .Val(binding) -> {
