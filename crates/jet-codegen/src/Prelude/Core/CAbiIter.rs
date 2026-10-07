@@ -429,7 +429,7 @@ pub(crate) mod jet_c_abi_iter {
         guard(|| {
             let meta = Meta::copy(meta);
             let source = jet_iter_indexes(count);
-            handle(JetIter(Box::new(source.0.map(move |index| NativeValue::scalar(meta.clone(), crate::jet_std::jet_int_owned_from_i64(index).into_raw() as u64)))))
+            handle(JetIter(Box::new(source.0.map(move |index| NativeValue::scalar(meta.clone(), index.into_raw() as u64)))))
         })
     }
     #[no_mangle]
