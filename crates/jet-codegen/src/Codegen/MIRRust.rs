@@ -17,6 +17,8 @@ use jet_foundation::Shape::ShapeProjectionKind;
 use jet_foundation::Syntax::CoreCallSymbol;
 use jet_foundation::MIR::*;
 
+const CORE_NET_RESOLVE_ERROR_TYPE: &str = "<corelib>/Core/net::Core/net/net.jet::__ResolveError";
+
 /// Which MIR target partition this printer emits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MirRustTarget {
@@ -5752,6 +5754,9 @@ impl<'a> RustEmitter<'a> {
         }
         if args.is_empty() && name.name == STM_TYPE {
             return format!("{}JetSharedTransaction", self.config.root_prefix);
+        }
+        if args.is_empty() && name.name == CORE_NET_RESOLVE_ERROR_TYPE {
+            return format!("{}Jet__ResolveError", self.config.root_prefix);
         }
         if name.name == jet_foundation::Syntax::TYPE_PTR {
             let [element] = args else {

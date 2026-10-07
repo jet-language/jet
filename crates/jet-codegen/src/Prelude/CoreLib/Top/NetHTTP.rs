@@ -1952,6 +1952,8 @@ fn jet_net_raw_ip_is_v4(ip: &JetIpAddr) -> bool {
     matches!(ip.inner, std::net::IpAddr::V4(_))
 }
 
+// Unreferenced seed retained only for the stale generated CABI adapter.
+// CoreReview3: delete with that adapter at the next central allparts emission.
 fn jet_net_socket_addr(host: &String, port: i64) -> Result<JetSocketAddr, JetNetError> {
     if port < 0 || port > u16::MAX as i64 {
         return Err(JetNetError::InvalidInput(jet_net_detail(
@@ -1978,6 +1980,51 @@ fn jet_net_socket_addr(host: &String, port: i64) -> Result<JetSocketAddr, JetNet
     resolved
         .map(|inner| JetSocketAddr { inner })
         .map_err(|e| jet_net_io_error("resolve socket address", Some(text), e))
+}
+
+#[derive(Clone)]
+struct Jet__ResolveError {
+    kind: jet_foundation::Numeric::JetInt,
+    has_os_code: bool,
+    os_code: jet_foundation::Numeric::JetInt,
+    message: String,
+}
+
+// Temporary Rust seed for the platform resolver transfer. Core owns the
+// numeric fast path, address context, error construction and first selection.
+// RtL7's getaddrinfo/freeaddrinfo implementation replaces this at cutover.
+fn jet_net_raw_resolve_ordered(
+    host: &String,
+    port: u16,
+) -> Result<Vec<JetSocketAddr>, Jet__ResolveError> {
+    assert!(!host.as_bytes().contains(&0), "ordered resolver host contains NUL");
+    use std::net::ToSocketAddrs;
+    format!("{host}:{port}")
+        .to_socket_addrs()
+        .map(|answers| answers.map(|inner| JetSocketAddr { inner }).collect())
+        .map_err(|error| {
+            let kind = match error.kind() {
+                std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => 1,
+                std::io::ErrorKind::PermissionDenied => 2,
+                std::io::ErrorKind::AddrInUse => 3,
+                std::io::ErrorKind::AddrNotAvailable => 4,
+                std::io::ErrorKind::ConnectionRefused => 5,
+                std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::ConnectionAborted
+                | std::io::ErrorKind::BrokenPipe => 6,
+                std::io::ErrorKind::NotConnected => 7,
+                std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => 8,
+                std::io::ErrorKind::Unsupported => 9,
+                _ => 0,
+            };
+            let os_code = error.raw_os_error();
+            Jet__ResolveError {
+                kind: jet_foundation::Numeric::JetInt::from_i64(kind),
+                has_os_code: os_code.is_some(),
+                os_code: jet_foundation::Numeric::JetInt::from_i64(i64::from(os_code.unwrap_or(0))),
+                message: error.to_string(),
+            }
+        })
 }
 
 fn jet_net_raw_socket_from_parts(ip: JetIpAddr, port: u16, flow: u32, scope: u32) -> JetSocketAddr {

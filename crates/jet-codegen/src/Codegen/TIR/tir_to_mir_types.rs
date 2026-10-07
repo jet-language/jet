@@ -2400,6 +2400,7 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
         "NetErrorDetail",
         &["operation", "address", "name", "message", "os_code"],
     ),
+    ("__ResolveError", &["kind", "has_os_code", "os_code", "message"]),
     ("AsyncPolicy", &["capacity", "overflow"]),
     ("CSVRow", &["fields", "line"]),
     (

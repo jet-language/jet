@@ -1610,6 +1610,7 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
         "TLSCertificate" => Some("JetTLSCertificate"),
         "NetError" => Some("JetNetError"),
         "NetErrorDetail" => Some("JetNetErrorDetail"),
+        "__ResolveError" => Some("Jet__ResolveError"),
         "NetDnsError" => Some("JetNetDnsError"),
         "NetShutdown" => Some("JetNetShutdown"),
         "NetReadyInterest" => Some("JetNetReadyInterest"),
@@ -6005,6 +6006,18 @@ pub(crate) fn build_cx_items(
     cx.struct_fields
         .insert("NetErrorDetail".to_string(), net_error_detail_fields);
     cx.cloneable.insert("NetErrorDetail".to_string());
+    let resolver_fields = ["kind", "has_os_code", "os_code", "message"]
+        .into_iter()
+        .map(|field| {
+            (
+                field.to_string(),
+                crate::Sema::core_struct_field_type("__ResolveError", field, &[])
+                    .unwrap_or_else(|| panic!("missing canonical __ResolveError field {field}")),
+            )
+        })
+        .collect();
+    cx.struct_fields.insert("__ResolveError".to_string(), resolver_fields);
+    cx.cloneable.insert("__ResolveError".to_string());
     for enum_name in ["NetDnsError", "NetError"] {
         let mut variant_payloads = crate::Sema::core_net_error_variants(enum_name)
             .unwrap_or_else(|| panic!("missing canonical Core enum {enum_name}"));
