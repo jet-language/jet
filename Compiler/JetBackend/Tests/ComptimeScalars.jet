@@ -3,7 +3,7 @@
 // library's constructor/projection exports, including UTF-8 and embedded NUL.
 use core.process as process
 use jet_foundation.[MIRTypeKind, TComptimeValue, mir_type_from_kind]
-use jet_backend.[x64_comptime_encode_scalar, x64_comptime_decode_scalar, x64_comptime_scalar_supported, x64_runtime_open]
+use jet_backend.[x64_comptime_encode_scalar, x64_comptime_decode_scalar, x64_comptime_drop_scalar, x64_comptime_scalar_supported, x64_runtime_open]
 
 fn ci_scalar(kind: MIRTypeKind, value: TComptimeValue, layout: LIRLayout, runtime: X64Runtime) {
     ty :: mir_type_from_kind(kind)
@@ -17,19 +17,19 @@ fn ci_scalar(kind: MIRTypeKind, value: TComptimeValue, layout: LIRLayout, runtim
     parameter :: lir_builder_value(&builder, layout, LIRDrop.Trivial, None)
     lir_builder_seal(&builder, block, [LIRValueID]{parameter}, LIRTerminator.Return{value: Val(parameter)})
     program :: LIRModule{signatures: [LIRSignature]{LIRSignature{id: signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{layout}, result: Val(layout)}}, functions: [LIRFunction]{lir_builder_finish(builder)}, data: [LIRData]{}}
-    call :: x64_call_image(program, LIRFunctionID{value: 0})
+    call :: x64_call_image(program, LIRFunctionID{value: 0}, None)
     loaded :: x64_load_image(call.image, runtime)
     answer :: x64_call_loaded(loaded, call, [Int]{encoded.word})
     ci_require(answer.errors.len() == 0, "native compiler scalar call")
     decoded :: x64_comptime_decode_scalar(runtime, ty, answer.word)
     loop error in decoded.errors -> print(error)
     ci_require(decoded.errors.len() == 0 && decoded.value == Val(value), "detached compiler value equality")
-    if kind == MIRTypeKind.String {
-        drop :: os_library_symbol(runtime.library, "jet_rt_string_drop")
-        #Unsafe("the identity returns its single owning String unchanged; decoding has copied it") {
-            _ := os_call_address(drop, answer.word)
-        }
+    // The identity returns its single owner unchanged; decoding has copied it.
+    released :: x64_comptime_drop_scalar(runtime, ty, answer.word)
+    loop error in released {
+        print(error)
     }
+    ci_require(released.len() == 0, "release compiler scalar")
     ci_require(x64_unload_image(loaded), "unload compiler scalar")
 }
 

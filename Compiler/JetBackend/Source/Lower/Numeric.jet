@@ -346,6 +346,7 @@ fn lower_narrow_overflow(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     mode :: parts[1]
     operation :: parts[2]
     checked :: mode == "checked"
+    if (mode == "rotate_left" || mode == "rotate_right") && operation == "rotate" -> return lower_narrow_rotate(p, c, &m, &f, instruction, row, ty, left, right, location, mode)
     if !(mode == "checked" || mode == "checked_policy" || mode == "wrapping" || mode == "saturating") || !(operation == "add" || operation == "sub" || operation == "mul") -> return lower_fail(&m, &f, "{width} overflow policy {mode} {operation} is not lowered at O0 yet")
     arity :: if mode == "checked_policy" -> 4 else -> 2
     runtime_mode :: if mode == "checked_policy" -> "trap" else -> mode
@@ -388,6 +389,32 @@ fn lower_narrow_overflow(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
         value = lower_numeric_choose(&f, above, bound, exact)
     }
     lower_numeric_finish(&m, &f, dst, value, checked, absent, merge)
+}
+
+// Narrow unsigned rotation (FixedArithmetic.rs jet_u{N}_rotate_*: the
+// count modulo N, as the 64-bit path masks with 63). The canonical narrow word
+// holds only N bits, so the two shifted halves are or-ed and cut back to N bits.
+fn lower_narrow_rotate(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, ty: MIRType, left: MIRValueID, right: MIRValueID, location: MIRPanicLoc?, mode: String) Never! {
+    bits :: lower_narrow_bits(ty)
+    unsupported :: "{mir_type_display_name(ty)} overflow policy {mode} rotate is not lowered at O0 yet"
+    if lower_narrow_signed(ty) || (bits != 8 && bits != 16 && bits != 32) -> return lower_fail(&m, &f, unsupported)
+    right_ty :: lower_value_type(c, right) ?? return lower_fail(&m, &f, unsupported)
+    result_ty :: instruction.ty ?? return lower_fail(&m, &f, unsupported)
+    arity :: row.signature.arity
+    if right_ty.kind != ty.kind || result_ty.kind != ty.kind || mir_symbol_name(row.symbol) != "jet_u{bits}_{mode}" || (arity != 2 && arity != 4) || (arity == 4 && location == None) || (arity == 2 && location != None) -> return lower_fail(&m, &f, unsupported)
+    a :: lower_use(&m, &f, left) ?? return
+    b :: lower_use(&m, &f, right) ?? return
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    count_mask :: lower_const(&f, bits - 1)
+    count :: lower_numeric_binary(&f, LIRBinaryOp.And, b, count_mask)
+    width_word :: lower_const(&f, bits)
+    reverse :: lower_numeric_binary(&f, LIRBinaryOp.Sub, width_word, count)
+    first :: lower_numeric_binary(&f, if mode == "rotate_left" -> LIRBinaryOp.Shl else -> LIRBinaryOp.UShr, a, count)
+    second :: lower_numeric_binary(&f, if mode == "rotate_left" -> LIRBinaryOp.UShr else -> LIRBinaryOp.Shl, a, reverse)
+    joined :: lower_numeric_binary(&f, LIRBinaryOp.Or, first, second)
+    // A count of 0 shifts the other half by N, below the word's 64: it is 0.
+    value_mask :: lower_const(&f, (1 << bits) - 1)
+    lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.And, left: joined, right: value_mask})
 }
 
 // Exponentiation by squaring, with policy applied to each needed product.

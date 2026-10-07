@@ -924,13 +924,21 @@ fn jet_scheduler_panic_should_unwind() -> bool {
     jet_runtime_should_unwind()
 }
 
-// Installed only in the isolated persistent compiler worker. Ordinary runtime
-// execution never activates this context. Fuel is shared with native callbacks
-// on other threads; each actual native stack has its own depth and source site.
+// Installed only for a native comptime request (Prelude/Core/CAbi.rs
+// `jet_rt_comptime_begin`), never by ordinary runtime execution. Fuel is shared
+// with native callbacks on other threads; each actual native stack has its own
+// depth and source site. Budget exhaustion is a recoverable stop (unified
+// host/stop contract, #4720): these counters only report it, and the C ABI
+// publishes BudgetFuel/BudgetDepth on the task control and returns, so the MIR
+// Propagate after the budget operation takes the stop edge. A runtime panic
+// stays fatal: the request's fatal hook writes the stop record and exits. This
+// file ships without the scheduler, so the stop record and the task control
+// stay with the C ABI.
 static JET_NATIVE_COMPTIME_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static JET_NATIVE_COMPTIME_FUEL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static JET_NATIVE_COMPTIME_DEPTH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static JET_NATIVE_COMPTIME_STATUS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static JET_NATIVE_COMPTIME_FATAL: std::sync::OnceLock<fn(u32, &str) -> !> = std::sync::OnceLock::new();
 thread_local! {
     static JET_NATIVE_COMPTIME_FRAME: std::cell::Cell<(u64, u64, u64, u64)> = const { std::cell::Cell::new((0, 0, 0, 0)) };
 }
@@ -939,9 +947,11 @@ pub(crate) fn jet_native_comptime_active() -> bool {
     JET_NATIVE_COMPTIME_ACTIVE.load(std::sync::atomic::Ordering::Acquire)
 }
 
-pub(crate) fn jet_native_comptime_begin(fuel: u64, max_depth: u64) -> bool {
-    // The worker serves one request at a time and joins native work before end.
+// `fatal` writes a fatal stop's record and exits (jet_native_comptime_fail).
+pub(crate) fn jet_native_comptime_begin(fuel: u64, max_depth: u64, fatal: fn(u32, &str) -> !) -> bool {
+    // The host serves one request at a time and joins native work before end.
     if jet_native_comptime_active() { return false; }
+    let _ = JET_NATIVE_COMPTIME_FATAL.get_or_init(|| fatal);
     JET_NATIVE_COMPTIME_FUEL.store(fuel, std::sync::atomic::Ordering::Relaxed);
     JET_NATIVE_COMPTIME_DEPTH.store(max_depth, std::sync::atomic::Ordering::Relaxed);
     JET_NATIVE_COMPTIME_STATUS.store(0, std::sync::atomic::Ordering::Relaxed);
@@ -973,51 +983,66 @@ mod jet_native_comptime_channel {
 }
 // JET_VETTED_UNSAFE_END: jet_native_comptime_channel
 
-pub(crate) fn jet_native_comptime_fail(status: u32, message: &str) -> ! {
+// Writes one stop-record frame to the private channel, after the program's
+// own output.
+pub(crate) fn jet_native_comptime_channel_write(frame: &[u8]) {
     use std::io::Write;
-    // Exactly one failing thread writes the private protocol envelope.
-    if JET_NATIVE_COMPTIME_STATUS.compare_exchange(0, status, std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire).is_err() {
-        loop { std::thread::park(); }
-    }
-    let (_, owner, start, end) = JET_NATIVE_COMPTIME_FRAME.with(std::cell::Cell::get);
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
     if let Some(mut channel) = jet_native_comptime_channel::protocol_channel() {
-        let header = format!("JCT1 {status} {owner} {start} {end} {}\n", message.len());
-        let _ = channel.write_all(header.as_bytes());
-        let _ = channel.write_all(message.as_bytes());
+        let _ = channel.write_all(frame);
         let _ = channel.flush();
     }
+}
+
+// The current thread's comptime frame: (depth, owner row, start, end).
+pub(crate) fn jet_native_comptime_frame() -> (u64, u64, u64, u64) {
+    JET_NATIVE_COMPTIME_FRAME.with(std::cell::Cell::get)
+}
+
+// A fatal comptime stop: status 1 (runtime panic) or 4 (foreign/host panic).
+// Exactly one failing thread hands it to the request's fatal hook, which
+// writes the stop record and exits; the host restarts the child.
+pub(crate) fn jet_native_comptime_fail(status: u32, message: &str) -> ! {
+    if JET_NATIVE_COMPTIME_STATUS.compare_exchange(0, status, std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire).is_err() {
+        loop { std::thread::park(); }
+    }
+    if let Some(fatal) = JET_NATIVE_COMPTIME_FATAL.get() { fatal(status, message) }
     std::process::exit(if status == 4 { 101 } else { 80 + status as i32 })
 }
 
-pub(crate) fn jet_native_comptime_work(units: u64) {
-    if !jet_native_comptime_active() { return; }
-    if JET_NATIVE_COMPTIME_FUEL.fetch_update(std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed, |remaining| remaining.checked_sub(units)).is_err() {
-        jet_native_comptime_fail(2, "");
-    }
+// Spends `units` of fuel; true when the request's fuel ran out (the caller
+// publishes the stop and returns).
+pub(crate) fn jet_native_comptime_work(units: u64) -> bool {
+    if !jet_native_comptime_active() { return false; }
+    JET_NATIVE_COMPTIME_FUEL.fetch_update(std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed, |remaining| remaining.checked_sub(units)).is_err()
+}
+
+// After a budget stop every thread's next fuel charge stops too.
+pub(crate) fn jet_native_comptime_spend_all() {
+    JET_NATIVE_COMPTIME_FUEL.store(0, std::sync::atomic::Ordering::Relaxed);
 }
 
 // owner is a dense row in the retained MIRProgram, never an exact-Int ID.
-pub(crate) fn jet_native_comptime_step(owner: u64, start: u64, end: u64) {
+// True when the request's fuel ran out.
+pub(crate) fn jet_native_comptime_step(owner: u64, start: u64, end: u64) -> bool {
     JET_NATIVE_COMPTIME_FRAME.with(|frame| {
         let (depth, _, _, _) = frame.get();
         frame.set((depth, owner, start, end));
     });
-    jet_native_comptime_work(1);
+    jet_native_comptime_work(1)
 }
 
-pub(crate) fn jet_native_comptime_enter(owner: u64, start: u64, end: u64) {
-    if !jet_native_comptime_active() { return; }
+// True when entering exceeds the request's depth.
+pub(crate) fn jet_native_comptime_enter(owner: u64, start: u64, end: u64) -> bool {
+    if !jet_native_comptime_active() { return false; }
     let depth = JET_NATIVE_COMPTIME_FRAME.with(|frame| {
         let (depth, _, _, _) = frame.get();
         let depth = depth.saturating_add(1);
         frame.set((depth, owner, start, end));
         depth
     });
-    if depth > JET_NATIVE_COMPTIME_DEPTH.load(std::sync::atomic::Ordering::Relaxed) {
-        jet_native_comptime_fail(3, "");
-    }
+    depth > JET_NATIVE_COMPTIME_DEPTH.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 pub(crate) fn jet_native_comptime_leave() {

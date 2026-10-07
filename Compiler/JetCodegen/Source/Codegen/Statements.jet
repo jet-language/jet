@@ -626,6 +626,8 @@ fn jet_codegen_loop_terminator_targets(terminator: MIRTerminator) -> [MIRBlockID
         .Continue(target) -> [MIRBlockID]{target}
         .Return(_) -> [MIRBlockID]{}
         .Unreachable(_) -> [MIRBlockID]{}
+        .Poll(_, resume, stop) -> [MIRBlockID]{resume, stop}
+        .Stopped -> [MIRBlockID]{}
     }
 }
 

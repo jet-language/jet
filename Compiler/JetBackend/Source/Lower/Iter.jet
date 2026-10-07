@@ -5,7 +5,8 @@
 // loop_iter_init's byte-slice fast path) walks the same box: its observable
 // order, values and stops are a List cursor's.
 use jet_foundation.[
-    MIRInstruction, MIRLoopSourceKind, MIRPreludeCallID, MIRProgram, MIRType, MIRValueID,
+    MIRInstruction, MIRLoopSourceKind, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeKind, MIRValueID,
+    mir_type_display_name, mir_type_from_kind,
 ]
 
 fn lower_is_iter_cursor(ty: MIRType) -> Bool Never! {
@@ -42,6 +43,8 @@ fn lower_iter_route(p: MIRProgram, m: &LowerModule, f: &LowerFunction, call: MIR
 fn lower_iter_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, collection: MIRValueID, step: MIRValueID?, by_value: Bool, source_kind: MIRLoopSourceKind) Never! {
     if lower_lazy_cursor_init(p, c, &m, &f, instruction, call, collection, step, by_value, source_kind) -> return
     if lower_channel_cursor_init(p, c, &m, &f, instruction, call, collection, step, by_value, source_kind) -> return
+    if source_kind == .Chars -> return lower_chars_cursor_init(p, c, &m, &f, instruction, call, collection, step, by_value)
+    if source_kind == .Iterable(_, _, iter_symbol, next_symbol) -> return lower_iterable_cursor_init(p, c, &m, &f, instruction, call, collection, step, by_value, iter_symbol, next_symbol)
     if source_kind != .Plain -> return lower_fail(&m, &f, "this iterator source kind is not lowered at O0 yet")
     if !lower_iter_route(p, &m, &f, call, "jet_loop_iter_init", 5) -> return
     ty :: lower_value_type(c, collection) ?? return lower_fail(&m, &f, "iterator collection without a checked type is not lowered at O0 yet")
@@ -92,6 +95,40 @@ fn lower_iter_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: list})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: zero})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: stride})
+    lower_store_word(&f, dst, 24, release.value)
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 32, value: zero})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 40, value: zero})
+}
+
+// `loop c in text.chars()`: MIRRust.rs loop_iter_init walks JetStringChars,
+// the text's Unicode scalars in order. Natively the cursor walks the List of
+// them (the jet_string_chars route, String.chars's adapter) it owns, as a
+// by-value List cursor. A moved text is released once its scalars are copied.
+fn lower_chars_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, collection: MIRValueID, step: MIRValueID?, by_value: Bool) Never! {
+    if !lower_iter_route(p, &m, &f, call, "jet_loop_iter_init", 5) -> return
+    ty :: lower_value_type(c, collection) ?? return lower_fail(&m, &f, "character iteration without a checked source type is not lowered at O0 yet")
+    if !lower_text_type(ty) -> return lower_fail(&m, &f, "character iteration over {mir_type_display_name(ty)} is not lowered at O0 yet")
+    if step != None -> return lower_fail(&m, &f, "stepped character iteration is not lowered at O0 yet")
+    route :: lower_runtime_route("jet_string_chars") ?? return lower_fail(&m, &f, "character iteration has no runtime C-ABI route (jet_string_chars)")
+    cursor_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "iterator cursor without a checked type is not lowered at O0 yet")
+    if !lower_is_iter_cursor(cursor_ty) -> return lower_fail(&m, &f, "this iterator cursor type is not lowered at O0 yet")
+    text :: lower_use(&m, &f, collection) ?? return
+    out :: lower_route_tagged_call(&m, &f, route.export, [LIRValueID]{text}, 1)
+    if by_value && lower_value_owned(c, collection) -> lower_emit(&f, LIRInst.Drop{value: text})
+    list_ty :: mir_type_from_kind(MIRTypeKind.List{inner: mir_type_from_kind(MIRTypeKind.Char)})
+    data :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: data, base: out.slot, offset: 0})
+    list :: lower_new_storage(p, &f, list_ty)
+    lower_emit(&f, LIRInst.Store{base: list, offset: 0, value: out.word})
+    lower_emit(&f, LIRInst.Store{base: list, offset: 8, value: out.word})
+    lower_emit(&f, LIRInst.Store{base: list, offset: 16, value: data})
+    release :: lower_helper_id(&m, "iter.release", list_ty)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    zero :: lower_const(&f, 0)
+    lower_alloc(&m, &f, dst, 48)
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: list})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: zero})
+    lower_store_word(&f, dst, 16, 1)
     lower_store_word(&f, dst, 24, release.value)
     lower_emit(&f, LIRInst.Store{base: dst, offset: 32, value: zero})
     lower_emit(&f, LIRInst.Store{base: dst, offset: 40, value: zero})
@@ -168,6 +205,7 @@ fn lower_iter_drop_range(p: MIRProgram, m: &LowerModule, f: &LowerFunction, list
 fn lower_helper_iter_typed(p: MIRProgram, m: &LowerModule, glue: LowerGlue, advance: Bool) -> LIRFunction Never! {
     if lower_lazy_element(glue.ty) != None -> return lower_lazy_cursor_helper(p, &m, glue, advance)
     if lower_range_members(p, glue.ty) != None -> return lower_range_cursor_helper(&m, glue, advance)
+    if lower_iterable_next(p, glue.ty) == .Val(next) -> return lower_iterable_cursor_helper(p, &m, glue, next, advance)
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
     cursor :: ~f.open_params[0]
     elem :: lower_sequence_element(glue.ty) ?? {

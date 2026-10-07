@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Prebuild the Jet runtime rlib for the default build-fact set beside a jet binary,
-# and link the runtime pack the Jet-native dev build links against (#4549).
+# Prebuild the canonical all-parts runtime beside a jet binary and link the
+# runtime pack the Jet-native build links against (#4549, #4720).
 #
 # usage: [JET_PACK_MUSL_LIB=<dir with musl's static libc.a>]
 #        Tools/packaging/prebuild-runtime.sh <jet-binary> [<prebuilt-dir>]
@@ -31,7 +31,7 @@ out=${2:-$(dirname "$jet")/jet-runtime}
 work=$(mktemp -d "${TMPDIR:-/tmp}/jet-prebuild-runtime.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$out" "$work/home" "$work/release"
-printf 'fn run() {\n    print("hello")\n}\n' > "$work/seed.jet"
+cp "$repo/Compiler/JetBackend/Tests/allparts-seed.jet" "$work/seed.jet"
 for profile in default release; do
   flags=()
   [ "$profile" = release ] && flags=(--release)
@@ -49,12 +49,22 @@ fi
 key=$(basename "$(dirname "${rlibs[0]}")")
 mkdir -p "$out/$key"
 [ -f "$out/$key/libjet_runtime.rlib" ] || cp "${rlibs[0]}" "$out/$key/libjet_runtime.rlib"
+# The pack and execution child must share one runtime compilation, not two
+# independently reconstructed libraries. The ordinary Rust-build cache above
+# remains separate from this native-only artifact.
+node "$repo/Compiler/JetBackend/Tests/emit-allparts-runtime.mjs" "$jet" "$work/runtime.rs"
+mkdir -p "$work/native-runtime"
+rustc --edition=2021 --crate-type=rlib,cdylib --crate-name jet_runtime \
+  -Awarnings -C opt-level=3 -C codegen-units=16 \
+  "$work/runtime.rs" --out-dir "$work/native-runtime"
+mv "$work/native-runtime/libjet_runtime.rlib" "$out/$key/libjet_runtime_native.rlib"
+mv "$work/native-runtime/libjet_runtime.so" "$out/$key/libjet_runtime.so"
 count=$(find "$out" -name libjet_runtime.rlib | wc -l)
 echo "prebuild-runtime: $count runtime rlib(s) in $out; pack key $key"
 
 # The runtime archive set, the runtime rlib first.
 sysroot_lib=$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/lib
-archives=("$out/$key/libjet_runtime.rlib")
+archives=("$out/$key/libjet_runtime_native.rlib")
 for name in std panic_unwind object memchr addr2line gimli rustc_demangle std_detect hashbrown rustc_std_workspace_alloc miniz_oxide adler2 unwind cfg_if libc alloc rustc_std_workspace_core core compiler_builtins; do
   rlib=("$sysroot_lib"/lib"$name"-*.rlib)
   if [ ! -f "${rlib[0]}" ]; then
@@ -74,6 +84,7 @@ done
 node "$repo/Compiler/JetBackend/Tests/run-link.mjs" "$work/link" > /dev/null
 (cd "$work/link" && "$jet" run unit.jet -- --pack "$work/jet_runtime.pack.o" "${archives[@]}")
 mv "$work/jet_runtime.pack.o" "$out/$key/jet_runtime.pack.o"
+node "$repo/Tools/packaging/write-runtime-manifest.mjs" "$repo" "$out/$key" "$jet"
 printf '%s\n' "$key" > "$work/native.key"
 mv "$work/native.key" "$out/native.key"
 echo "prebuild-runtime: runtime pack $out/$key/jet_runtime.pack.o; $out/native.key names it"

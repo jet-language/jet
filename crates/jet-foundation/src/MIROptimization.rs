@@ -5363,6 +5363,9 @@ fn inline_call(
         || inline_has_return_drop(callee)
         || callee.capture_params.len() != 0
         || (caller.generator.is_none() && callee.generator.is_some())
+        // A callee's stop edge must reach the caller's own cleanup, which a
+        // remapped Stopped cannot: a stop-point body is never inlined.
+        || callee.blocks.iter().any(|block| matches!(block.terminator, MirTerminator::Poll { .. } | MirTerminator::Stopped))
         || block_index >= caller.blocks.len()
         || instruction_index >= caller.blocks[block_index].instructions.len()
     {
@@ -7096,6 +7099,13 @@ fn inline_terminator(terminator: &MirTerminator, ids: &InlineIdMaps) -> MirTermi
         MirTerminator::Unreachable { reason } => MirTerminator::Unreachable {
             reason: reason.clone(),
         },
+        // Unreachable from inline_call (a stop-point body is never inlined).
+        MirTerminator::Poll { kind, resume, stop } => MirTerminator::Poll {
+            kind: *kind,
+            resume: inline_block(ids, *resume),
+            stop: inline_block(ids, *stop),
+        },
+        MirTerminator::Stopped => MirTerminator::Stopped,
     }
 }
 

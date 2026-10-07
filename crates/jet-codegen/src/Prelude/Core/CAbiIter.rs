@@ -237,9 +237,16 @@ pub(crate) mod jet_c_abi_iter {
     }
     pub(crate) enum Failure { Absent, Error(NativeValue) }
     type NativeIter = JetIter<NativeValue>;
+    // A comptime request charges one unit of fuel per item. When the budget
+    // runs out the stop is published on the task control and the kernel leaves
+    // through the canonical cancellation transfer, which its export's guard
+    // turns back into the (already budget-stopped) rail; a Shield keeps it
+    // running until its own exit delivers.
     fn handle(iter: NativeIter) -> *mut NativeIter {
         let iter = if jet_native_comptime_active() {
-            JetIter(Box::new(iter.0.inspect(|_| jet_native_comptime_work(1))))
+            JetIter(Box::new(iter.0.inspect(|_| {
+                if super::jet_c_abi::comptime_charge(1) && !jet_scheduler_shielded() { jet_task_unwind_cancel() }
+            })))
         } else { iter };
         Box::into_raw(Box::new(iter))
     }
@@ -395,7 +402,7 @@ pub(crate) mod jet_c_abi_iter {
         guard(|| {
             let meta = Meta::copy(meta);
             let source = jet_iter_indexes(count);
-            handle(JetIter(Box::new(source.0.map(move |index| NativeValue::scalar(meta.clone(), crate::jet_std::jet_int_owned_from_i64(index).into_raw() as u64)))))
+            handle(JetIter(Box::new(source.0.map(move |index| NativeValue::scalar(meta.clone(), index.into_raw() as u64)))))
         })
     }
     #[no_mangle]
