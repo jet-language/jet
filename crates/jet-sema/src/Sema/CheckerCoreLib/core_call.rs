@@ -5167,7 +5167,8 @@ impl<'a> Checker<'a> {
                         .push(wrong_core_arity(name, wanted, args.len(), span));
                 }
                 if name == "cmp" || name == "next_after" || name == "nextafter" {
-                    let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
+                    // An unsuffixed float literal operand is a Float here, not a Decimal.
+                    let Some(first) = args.get_mut(0).and_then(|a| self.infer_with_expected(&mut a.expr, &Type::Float)) else {
                         for a in args.iter_mut().skip(1) {
                             self.infer(&mut a.expr);
                         }
@@ -5187,7 +5188,9 @@ impl<'a> Checker<'a> {
                         ));
                         return None;
                     }
-                    if let Some(got) = args.get_mut(1).and_then(|a| self.infer(&mut a.expr)) {
+                    // The second operand takes the first's float width, so an
+                    // unsuffixed literal (`cmp(nan(), 1.0)`) checks as that width.
+                    if let Some(got) = args.get_mut(1).and_then(|a| self.infer_with_expected(&mut a.expr, &first)) {
                         if got != first {
                             self.diags.push(Diagnostic::error(
                                 "E0112",
