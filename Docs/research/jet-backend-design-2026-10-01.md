@@ -462,6 +462,15 @@ a Rust tree clone. Native-freed row and handle-array buffers use `jet_rt_alloc`
 and `jet_rt_free` with the same byte count and eight-byte alignment as lowering.
 Opaque runtime FieldError boxes retain their matching runtime handle-drop
 provider; they are converted to native records, never freed as native records.
+For every supported row type, `lower_lazy_meta` stores exactly
+`lower_list_stride(p, target)` in descriptor word zero. CSV checks its success
+List's element is that same checked `target`; `lower_helper_list_drop` uses the
+same `lower_list_stride` for all elements (including records), and frees
+`cap * stride` at alignment eight. Empty callback error arrays are null:
+`list.record_handles` calls `lower_list_buffer(length, 8)`, whose zero-length
+branch returns null; the runtime bridge asserts that invariant before accepting
+an empty failure vector.
+
 
 
 

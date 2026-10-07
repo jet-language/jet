@@ -1439,7 +1439,10 @@ rs.push(`
                     if tag.assume_init() != 0 {
                         Ok(value.initialized())
                     } else {
-                        let failures = if count == 0 { Vec::new() } else {
+                        let failures = if count == 0 {
+                            assert!(errors.is_null(), "empty native FieldError handle array is null");
+                            Vec::new()
+                        } else {
                             let failures = std::slice::from_raw_parts(errors.cast::<*mut crate::jet_std::FieldError>(), count as usize)
                                 .iter().map(|error| *Box::from_raw(*error)).collect();
                             codec_free(errors.cast(), count as usize * std::mem::size_of::<u64>(), 8);
