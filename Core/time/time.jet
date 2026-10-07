@@ -1206,7 +1206,7 @@ fn civil_format_checked(pattern: String, date: LocalDate, t: LocalTime, zone: (n
         if byte == (U8{37}) {
             if i + 1 >= raw.len() -> return Err(TextError{message: "E2703: format ends after `%`"})
             code :: civil_byte_character(raw[i + 1])
-            if ![String]{"%", "A", "a", "B", "b", "Y", "y", "m", "d", "e", "j", "H", "I", "M", "S", "p", "z", "Z", "F", "T", "R", "D", "f"}.contains(code) -> return Err(TextError{message: "E2703: unsupported format token `%{code}`"})
+            if !([String]{"%", "A", "a", "B", "b", "Y", "y", "m", "d", "e", "j", "H", "I", "M", "S", "p", "z", "Z", "F", "T", "R", "D", "f"}.contains(code)) -> return Err(TextError{message: "E2703: unsupported format token `%{code}`"})
             if (code == "z" || code == "Z") && zone == None -> return Err(TextError{message: "E2703: format token `%{code}` requires a zone"})
             normalized = "{normalized}%{code}"
             i = i + 2
