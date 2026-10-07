@@ -143,7 +143,8 @@ fn sema_pattern_core_payload(owner: String, variant: String) -> [Type]? {
             "Text" -> Val([Type.String])
             "Array" -> Val([Type.List{element: Type.Named{name: "Data"}}])
             "Object" -> Val([Type.Map{key: Type.String, key_span: None, value: Type.Named{name: "Data"}}])
-            "Number" -> Val([Type.String])
+            "Number" | "TypedText" -> Val([Type.String])
+            "Bytes" -> Val([Type.List{element: Type.IntN{signed: false, bits: 8}}])
             else -> None
         }
         "DataEvent" -> if variant == {
@@ -511,6 +512,11 @@ fn sema_pattern_validate_variant(subject_ty: Type, variant: String, written_slot
     // D-FACT-ENUM-TIR: a compiler-owned fact enum has no registered nominal.
     fact_enum :: sema_fact_enum_pattern(carrier, variant, written_slots, leading_dot, span, env, &diagnostics)
     if fact_enum == .Val(validation) -> return validation
+    private_carrier :: (sema_pattern_base_name(carrier) == Val("DataTree") || sema_pattern_base_name(carrier) == Val("JSON")) && (variant == "Bytes" || variant == "TypedText")
+    if private_carrier && !(context.unsafe_depth > 0 && (env.source_file.starts_with("<corelib>/") || env.module_name == "__core_encoding_stream")) {
+        &diagnostics.push(sema_error("E0510", span, "private DataTree carrier pattern", "native carrier payloads may be borrowed only by vetted Core internals inside #Unsafe", "use the public DataTree variants"))
+        return SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: [TPatternBinding]{}, leading_dot: leading_dot, span: span}, enum_type: None, bindings: [TPatternBindingFact]{}, complete: false}
+    }
     payload :: sema_pattern_payload(subject_ty, variant, env, span, &diagnostics)
     facts := [TPatternBindingFact]{}
     tir_bindings := [TPatternBinding]{}

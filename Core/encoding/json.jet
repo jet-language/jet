@@ -210,6 +210,7 @@ struct Parser {
     parsed: Bool
     recording: Bool
     allow_duplicates: Bool
+    typed_numbers: Bool
 }
 
 impl Parser {
@@ -226,6 +227,7 @@ impl Parser {
             parsed: false,
             recording: recording,
             allow_duplicates: allow_duplicates,
+            typed_numbers: false,
         }
     }
 
@@ -317,7 +319,7 @@ impl Parser {
                 } else {
                     if n == 34 {
                         s :: &self.parse_string()
-                        value = DataTree.Text(s)
+                        value = if self.typed_numbers -> stream.typed_string(^s) else -> DataTree.Text(s)
                     } else {
                         if n != 45 && (n < 48 || n > 57) -> return Err(self.err("expected a JSON value (object, array, string, number, true, false, or null)"))
                         value = &self.parse_number()
@@ -472,6 +474,7 @@ impl Parser {
             }
         }
         token :: String.from_bytes(self.bytes[start..self.index - 1]) ?? return Err(self.err("invalid number token"))
+        if self.typed_numbers -> return Ok(stream.typed_number(^token))
         if fractional || exp {
             f :: Float.parse(token) ?? return Err(self.err("number does not fit in Float"))
             if !math.is_finite(f) -> return Err(self.err("non-finite JSON numbers are not allowed"))
@@ -519,13 +522,14 @@ impl Parser {
         if !&self.expect(U8{123}) -> return Err(self.err("expected '{{'"))
         if !&self.enter() -> return Err(self.err("nesting exceeds EncodingLimits.safe().max_depth (256)"))
         if self.recording -> &self.pending.push(DataEvent.ObjectStart)
-        entries := [String: DataTree]{}
+        entries := [(key: String, value: DataTree)]{}
+        positions := [String: Int]{}
         &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
         if (self.peek() ?? (U8{0})) == (U8{125}) {
             _ :: &self.bump()
             self.depth -= 1
             if self.recording -> &self.pending.push(DataEvent.ObjectEnd)
-            return Ok(DataTree.Object(entries))
+            return Ok(stream.object_from_entries(^entries))
         }
         loop {
             &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
@@ -535,17 +539,18 @@ impl Parser {
             if !&self.expect(U8{58}) -> return Err(self.err("expected ':' after an object key"))
             &self.path.push(key)
             if self.recording -> &self.pending.push(DataEvent.Key(key))
-            if entries.has_key(key) {
+            if positions.get(key) == .Val(position) {
                 if !self.allow_duplicates {
                     error :: self.err("duplicate object key `{key}`")
                     _ :: &self.path.pop()
                     return Err(error)
                 }
                 later :: &self.parse_value()
-                entries = object_with(entries, key, later)
+                entries[position].value = later
             } else {
                 value :: &self.parse_value()
-                _ :: &entries.add(key, value)
+                _ :: &positions.add(key, entries.len())
+                &entries.push((key: key, value: value))
             }
             _ :: &self.path.pop()
             &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
@@ -554,7 +559,7 @@ impl Parser {
                 _ :: &self.bump()
                 self.depth -= 1
                 if self.recording -> &self.pending.push(DataEvent.ObjectEnd)
-                return Ok(DataTree.Object(entries))
+                return Ok(stream.object_from_entries(^entries))
             }
             if b != (U8{44}) -> return Err(self.err("expected ',' or '}}' after an object member"))
             _ :: &self.bump()
@@ -599,25 +604,25 @@ fn parse_json(text: String, allow_duplicates: Bool) -> DataTree EncodingError! {
     if !p.eof() -> return Err(p.err("unexpected trailing data after the JSON value"))
     Ok(value)
 }
-
-// Rebuild an object with `key` bound to `value`, keeping member order: an
-// existing key keeps its position, a new key goes last.
-fn object_with(entries: [String: DataTree], key: String, value: DataTree) -> [String: DataTree] Never! {
-    out := [String: DataTree]{}
-    found := false
-    loop pair in entries {
-        if pair.key == key {
-            found = true
-            _ :: &out.add(key, value)
-        } else {
-            _ :: &out.add(pair.key, pair.value)
-        }
-    }
-    if !found -> _ :: &out.add(key, value)
-    out
+// Compiler-private typed decoder entry; number lexemes retain their target-free carriers.
+fn __parse_typed(text: String) -> DataTree EncodingError! {
+    raw :: text.bytes()
+    if raw.len() > safe_limits().max_item_bytes -> return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds EncodingLimits.safe().max_item_bytes"))
+    parser := Parser.new(raw, false, false)
+    parser.typed_numbers = true
+    value :: &parser.parse_value()
+    &parser.skip_ws() ?? return Err(parser.err("failed while scanning JSON whitespace"))
+    if !parser.eof() -> return Err(parser.err("unexpected trailing data after the JSON value"))
+    Ok(value)
 }
 
+
 fn append_events(value: DataTree) -> [DataEvent] Never! {
+    #Unsafe("preserve the native compiler-private DataTree carriers in Core JSON event projection") {
+        if value == .Number(text) -> return [DataEvent]{DataEvent.Number(text)}
+        if value == .TypedText(text) -> return [DataEvent]{DataEvent.Text(text)}
+        if value == .Bytes(bytes) -> return [DataEvent]{DataEvent.Bytes(bytes)}
+    }
     out := [DataEvent]{}
     if value == {
         .Null -> &out.push(DataEvent.Null)
@@ -633,7 +638,8 @@ fn append_events(value: DataTree) -> [DataEvent] Never! {
             }
             &out.push(DataEvent.ArrayEnd)
         }
-        .Object(entries) -> {
+        .Object(_) -> {
+            entries :: stream.object_entries(value)
             &out.push(DataEvent.ObjectStart)
             loop pair in entries {
                 &out.push(DataEvent.Key(pair.key))
@@ -730,29 +736,26 @@ fn write_canonical(out: &[U8], value: DataTree, path: &[String], depth: Int) -> 
             }
             &out.push(U8{93})
         }
-        .Object(entries) -> {
-            keys := [String]{}
-            values := [DataTree]{}
+        .Object(_) -> {
+            entries :: stream.object_entries(value)
             units := [[Int]]{}
             loop pair in entries {
-                &keys.push(pair.key)
-                &values.push(pair.value)
                 &units.push(stream.utf16_units(pair.key))
             }
             order :: stream.sort_by_units(units)
             &out.push(U8{123})
             loop i in 0..<order.len() {
                 at :: order[i]
-                &path.push(keys[at])
+                &path.push(entries[at].key)
                 if i > 0 {
                     if stream.compare_units(units[order[i - 1]], units[at]) == 0 {
                         return Err(value_error(EncodingErrorKind.Syntax, pointer_text(path, path.len()), "JCS requires unique object keys"))
                     }
                     &out.push(U8{44})
                 }
-                write_json_string(&out, keys[at])
+                write_json_string(&out, entries[at].key)
                 &out.push(U8{58})
-                write_canonical(&out, values[at], &path, depth + 1) ?? return Err(err)
+                write_canonical(&out, entries[at].value, &path, depth + 1) ?? return Err(err)
                 _ :: &path.pop()
             }
             &out.push(U8{125})
@@ -763,6 +766,19 @@ fn write_canonical(out: &[U8], value: DataTree, path: &[String], depth: Int) -> 
 
 
 fn write_json(out: &[U8], value: DataTree, pretty: Bool, indent: Int) Never! {
+    #Unsafe("Core JSON rendering borrows native private payloads without exposing their constructors") {
+        if value == .Number(text) { write_ascii(&out, text); return }
+        if value == .TypedText(text) { write_json_string(&out, text); return }
+        if value == .Bytes(bytes) {
+            &out.push(U8{91})
+            loop index in 0..<bytes.len() {
+                if index > 0 -> &out.push(U8{44})
+                write_ascii(&out, "{bytes[index]}")
+            }
+            &out.push(U8{93})
+            return
+        }
+    }
     if value == {
         .Null -> write_ascii(&out, "null")
         .Bool(v) -> {
@@ -792,7 +808,8 @@ fn write_json(out: &[U8], value: DataTree, pretty: Bool, indent: Int) Never! {
             }
             &out.push(U8{93})
         }
-        .Object(entries) -> {
+        .Object(_) -> {
+            entries :: stream.object_entries(value)
             &out.push(U8{123})
             if entries.len() == 0 {
                 &out.push(U8{125})
@@ -837,7 +854,8 @@ fn write_indent(out: &[U8], n: Int) Never! {
 
 fn write_json_string(out: &[U8], text: String) Never! {
     &out.push(U8{34})
-    loop b in text.bytes() {
+    loop index in 0..<text.count_bytes() {
+        b :: stream.byte_at(text, index)
         n :: b
         if n == 34 {
             write_ascii(&out, "\\\"")
@@ -1261,4 +1279,21 @@ fn patch_step(doc: DataTree, op: PatchOp) -> DataTree EncodingError! {
         return patch_edit(doc, op.path, 0, PATCH_ADD, copied)
     }
     patch_edit(doc, op.path, 0, op.kind, op.value)
+}
+
+#Test("JSON ordered Object backing survives compact and pretty rendering") {
+    tree :: parse("{{\"z\":1,\"a\":2}}") ?? panic("JSON parse")
+    assert_eq(to_string(tree), "{{\"z\":1,\"a\":2}}")
+    assert_eq(to_string_pretty(tree), "{{\n  \"z\": 1,\n  \"a\": 2\n}}")
+}
+
+#Test("JSON duplicate replacement retains the first member position") {
+    tree :: parse_allow_duplicates("{{\"z\":1,\"a\":2,\"z\":3}}") ?? panic("JSON parse")
+    assert_eq(to_string(tree), "{{\"z\":3,\"a\":2}}")
+}
+
+#Test("typed JSON retains number lexemes until Decode") {
+    tree :: __parse_typed("[9007199254740993,1e2]") ?? panic("typed JSON parse")
+    rows :: tree.decode<[Int]>() ?? panic("typed JSON decode")
+    assert_eq(rows, [Int]{9007199254740993, 100})
 }

@@ -3105,6 +3105,16 @@ impl<'a> Checker<'a> {
             ..
         } = init
         {
+            if method == "__object_entries_view"
+                && matches!(receiver.as_ref().without_parens(), Expr::Ident(alias, _)
+                    if self.core_imports.get(alias).is_some_and(|module| module == "core.encoding"))
+            {
+                let Some(place) = args.first().and_then(|arg| self.place_from_expr(&arg.expr)) else {
+                    return Vec::new();
+                };
+                let kind = self.view_kind_for_place(&place);
+                return vec![(Vec::new(), place, kind, ViewAccess::Read)];
+            }
             if method == "split_write" || method == "get_disjoint_write" {
                 let Some(place) = self.place_from_expr(receiver) else {
                     return Vec::new();

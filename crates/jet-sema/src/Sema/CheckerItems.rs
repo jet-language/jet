@@ -4714,6 +4714,16 @@ impl<'a> Checker<'a> {
             ) => {
                 let display_enum_name = self.display_type_name(enum_name, None);
                 if is_json_type_name(enum_name) {
+                    if matches!(variant.as_str(), "Bytes" | "TypedText")
+                        && !(self.in_unsafe && self.name_ledger.module_alias(self.module_idx).is_some_and(|alias|
+                            jet_foundation::CoreModuleExports::CORE_SOURCE_MODULES.iter().any(|source| source.alias == alias)
+                            || jet_foundation::CoreSourceParts::core_private_source_part_by_alias(alias).is_some()))
+                    {
+                        self.diags.push(Diagnostic::error("E0510", "private DataTree carrier pattern".to_string(),
+                            "native carrier payloads may be borrowed only by vetted Core internals inside #Unsafe".to_string(),
+                            "use the public DataTree variants".to_string(), Some(span)));
+                        return HashMap::new();
+                    }
                     let Some(expected) = core_json_pattern_types(variant) else {
                         self.diags.push(Diagnostic::error(
                             "E0305",

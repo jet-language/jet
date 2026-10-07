@@ -607,8 +607,16 @@ pub fn csv<T: Decode>(text: String) -> [T] DataError! {
 }
 
 pub fn json<T: Decode>(text: String) -> [T] DataError! {
-    rows :: core.data.json<T>(text) ?? return Err(data_error(DataErrorKind.Decode, "JSON decode failed", "json"))
-    Ok(rows)
+    tree :: core.encoding.json.__parse_typed(text) ?? return Err(data_error(DataErrorKind.Decode, "JSON decode failed", "json"))
+    if tree == .Array(items) {
+        rows := [T]{}
+        loop item in items {
+            row :: item.decode<T>() ?? return Err(data_error(DataErrorKind.Decode, "JSON decode failed", "json"))
+            &rows.push(row)
+        }
+        return Ok(rows)
+    }
+    Err(data_error(DataErrorKind.Decode, "typed JSON requires a top-level array", "json"))
 }
 
 pub fn csv_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStream<T> DataError! {
