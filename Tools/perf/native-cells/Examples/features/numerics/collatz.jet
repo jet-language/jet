@@ -1,0 +1,17 @@
+// Native O1 cell collatz (numerics, scalar integer loop and calls): total
+// Collatz steps for every start below 1,000,000.
+fn steps(start: Int) -> Int {
+    n := start
+    count := 0
+    loop n != 1 {
+        if n % 2 == 0 -> n = n /% 2 else -> n = 3 * n + 1
+        count += 1
+    }
+    count
+}
+
+fn run() {
+    total := 0
+    loop i in 1..<1000000 -> total += steps(i)
+    print(total)
+}

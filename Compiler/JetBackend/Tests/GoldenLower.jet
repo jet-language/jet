@@ -3,7 +3,8 @@
 // backend. For every case named in `cases.txt` it reads `<case>.mird` (the
 // entry function id, then the program in the line stream the generated
 // `mird_*` decoder reads), keeps the functions the entry reaches, lowers the
-// program, and either writes the relocatable object `<case>.o` plus, when
+// program, optimizes it at the level `opt-level.txt` names (0 without one), and
+// either writes the relocatable object `<case>.o` plus, when
 // `runtime-pack.txt` names a runtime pack, `<case>.exe`: the object linked with
 // that pack by the in-process linker, exactly as native `jet build` links
 // (wall time in `<case>.link-ms`; or the link error in `<case>.pack-issues`),
@@ -13,7 +14,7 @@
 // per case goes to stdout as soon as the case is done, so run-goldens.mjs can
 // restart after a crash. The unit is assembled by run-goldens.mjs and never
 // listed in Compiler/Bootstrap/sources.list.
-use jet_backend.[lir_lower_entry, lir_print_module, lir_sanitize_module, x64_link_executable, x64_relocatable_object, x64_static_executable]
+use jet_backend.[lir_lower_entry, lir_optimize_module, lir_print_module, lir_sanitize_module, x64_link_executable, x64_relocatable_object, x64_static_executable]
 use core.files as files
 use core.math as math
 use core.time as time
@@ -79,7 +80,7 @@ fn gl_write_issues(name: String, lines: [String]) {
     files.write("{name}.issues", text) ?? panic("cannot write {name}.issues")
 }
 
-fn gl_case(name: String, pack: GLPack?) -> String {
+fn gl_case(name: String, pack: GLPack?, level: Int) -> String {
     text :: files.read("{name}.mird") ?? return "missing"
     r := MIRDReader{lines: text.split("\n").to_list(), at: 0}
     entry_id :: mird_u64(&r)
@@ -91,11 +92,12 @@ fn gl_case(name: String, pack: GLPack?) -> String {
         return "unsupported"
     }
     entry :: lowered.entry ?? panic("lowering without issues has an entry")
-    // A `<case>.want-lir` marker asks for the lowered LIR as `<case>.lir`.
+    lir :: lir_optimize_module(lowered.lir, level)
+    // A `<case>.want-lir` marker asks for the (optimized) LIR as `<case>.lir`.
     if files.exists("{name}.want-lir") {
-        files.write("{name}.lir", lir_print_module(lowered.lir)) ?? panic("cannot write {name}.lir")
+        files.write("{name}.lir", lir_print_module(lir)) ?? panic("cannot write {name}.lir")
     }
-    object :: x64_relocatable_object(lowered.lir, entry)
+    object :: x64_relocatable_object(lir, entry)
     if object.errors.len() > 0 {
         lines := [String]{}
         loop error in object.errors -> &lines.push("native\t{error}")
@@ -106,7 +108,7 @@ fn gl_case(name: String, pack: GLPack?) -> String {
     // `sanitize.txt` asks for the AddressSanitizer-instrumented object too, as
     // `<case>.asan.o` (run-sanitized.mjs links it with an ASan runtime).
     if files.exists("sanitize.txt") {
-        instrumented :: x64_relocatable_object(lir_sanitize_module(lowered.lir), entry)
+        instrumented :: x64_relocatable_object(lir_sanitize_module(lir), entry)
         if instrumented.errors.len() > 0 {
             files.write("{name}.asan-issues", "{instrumented.errors[0]}\n") ?? panic("cannot write {name}.asan-issues")
         } else {
@@ -126,7 +128,7 @@ fn gl_case(name: String, pack: GLPack?) -> String {
             files.set_mode("{name}.exe", 0o755) ?? panic("cannot make {name}.exe executable")
         }
     }
-    image :: x64_static_executable(lowered.lir, entry)
+    image :: x64_static_executable(lir, entry)
     if image.errors.len() > 0 {
         files.write("{name}.static-issues", "{image.errors[0]}\n") ?? panic("cannot write {name}.static-issues")
         return "object"
@@ -143,11 +145,18 @@ fn gl_pack() -> GLPack? {
     Val(GLPack{path: path, bytes: files.read_bytes(path) ?? panic("cannot read the runtime pack {path}")})
 }
 
+// The optimization level `opt-level.txt` names (Compiler/JetBackend/Docs/O1.md); 0 without one.
+fn gl_level() -> Int {
+    text :: files.read("opt-level.txt") ?? return 0
+    Int.parse(text.trim()) ?? panic("opt-level.txt holds `{text.trim()}`, not a level")
+}
+
 fn run() {
     list :: files.read("cases.txt") ?? panic("cannot read cases.txt")
     pack :: gl_pack()
+    level :: gl_level()
     loop name in list.split("\n").to_list() {
         if name == "" -> next
-        print("{name}\t{gl_case(name, pack)}")
+        print("{name}\t{gl_case(name, pack, level)}")
     }
 }
