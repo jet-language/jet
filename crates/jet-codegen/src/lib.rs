@@ -20,6 +20,8 @@ pub(crate) mod jet_encoding_json {
 }
 mod BrowserHost;
 pub mod Codegen;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub mod NativeSession;
 /// D-FAIL-BREACH1=A: the same task-local runtime stack kernel used by emitted
 /// AOT code. Resident engines marshal source locations into their own report
 /// carrier, but depth policy stays in this Prelude part.
@@ -44,6 +46,10 @@ pub mod program_allocator {
 pub mod development_receipt {
     include!("Prelude/DevelopmentReceipt.rs");
 }
+
+#[cfg(test)]
+#[path = "Prelude/Core/CAbiSession.rs"]
+mod session_runtime_tests;
 
 #[cfg(test)]
 mod development_receipt_tests {
