@@ -179,9 +179,9 @@ layout. Box payloads and list elements use the same byte layout, so an inline
 aggregate stored in one is its bytes. Boxes come from `jet_rt_alloc(size,
 align)` and return to `jet_rt_free(ptr, size, align)` with the same size (one
 size function per box kind serves construction and glue). A variant's
-discriminant is its index. Unions and trait objects are not lowered yet and
-are reported; generic instances lower as their concrete instances
-(above). Function values are closure boxes ("Closures" below).
+discriminant is its index. Unions use their structural enum's box layout.
+Trait values use the owned payload layout below. Generic instances lower as
+their concrete instances (above). Function values are closure boxes.
 
 Inline aggregates. A `Struct`/`Tuple` builds into a fresh `StackSlot`. The
 storage's holder owns it: the value never frees it, and MIR `Drop`/`Copy` of an
@@ -288,9 +288,8 @@ function parameters and jumps to it (LIR forbids jumps to the entry).
 | `BuildMap(entries)` / Map `Index` / `m[k] = v` | an empty header, then per-type helpers `map.set` / `map.find` (a missing key stops) / `map.set` with a copy of the borrowed key; `get`, `has_key`, `insert`, `pop`, `len`, `is_empty` call `map.get`, `map.find`, `map.insert`, `map.remove` or read the length |
 | `Capture(slot)` | the capture's box field (by value) or the address it holds (by reference) |
 
-Every other operation (the remaining Map methods, trait objects, pattern
-captures, the remaining semantic operations) is reported as not lowered yet,
-by name.
+Operations without a complete lowering report an issue by construct, rather
+than supplying partial machine code.
 
 ### Closures
 
@@ -313,6 +312,31 @@ borrowed, as the Prelude kernels call `f(&item)`: List `filter` (kept
 elements copied), `map`, `count_where`, `fold` with an accumulator that owns
 nothing, and Option `map`. A closure moved into the method is dropped after
 the loop. Other closure methods are reported.
+
+### Trait values and checked text
+
+A single-bound trait value (`Lower/Traits.jet`) is a heap box containing a
+concrete drop-helper ID at offset zero and the concrete value's ordinary
+stored layout at offset eight. Boxing reaches every method of the checked
+implementation. Drop and clone glue dispatch over the module's closed set of
+payload helpers; an unknown key is unreachable. Trait method calls evaluate
+arguments once and dispatch to the concrete implementation. A Write receiver
+lends the payload cell; a Read receiver lends inline storage or loads a scalar.
+Inline results use caller storage; scalar results join as a block parameter.
+A Move receiver transfers its payload and releases the outer shell after the
+call. Generic dynamic methods and missing checked default bodies remain
+explicit refusals. `MIRCallArg.box_as_trait` uses the same boxing mechanism,
+including release of borrowed-call temporaries and no second box when the
+source already has a trait representation.
+
+Structured SQL, Sh and URL heads cross `CAbiTypedText.rs` into the existing
+typed-text kernels. Literal slices borrow static UTF-8; holes transfer owned
+carriers. SQL keeps DBValue bindings separate from its template, Sh keeps each
+hole as one argv element, and URL uses the shared parser's opaque-hole law.
+No backend substitutes textual escaping for those structured meanings.
+Ordering of runtime-owned time values uses existing comparison routes;
+Duration compares the runtime's nanosecond value, never handle addresses.
+
 
 ### Calls into the compiled runtime
 
@@ -388,12 +412,11 @@ input or clones a borrowed input, and the returned consume mask disarms only mov
 owners. Write uses a genuinely mutable owned local; a borrowed kernel input may
 not be made mutable by casting its shared reference. That unsupported adaptation
 is reported as a native lowering failure, not silently changed to Read.
-`Tests/prepare-call-runtime.mjs --allparts` refreshes the current C ABI, generated
-routes and iterator/task adapters together for full-pack proofs; its default mode
-retains an emitted seed's paired route set. Generated Rust programs carry only
-`CAbi.rs`: the routes name optional runtime modules a program gets only when it
-uses them, so `CAbiIter.rs`, `CAbiTask.rs` and `CAbiRoutes.rs` exist only in the
-all-parts native runtime crate.
+`Tests/prepare-call-runtime.mjs --allparts` refreshes the current C ABI,
+generated routes and iterator/task/typed-text adapters together for full-pack
+proofs; its default mode retains an emitted seed's paired route set. Generated
+Rust programs carry only `CAbi.rs`: the other adapters name optional runtime
+modules and exist only in the all-parts native runtime crate.
 
 Task and channel adapters share the iterator's typed slot descriptors rather
 than introducing another erased value ABI. A native SendFn body writes its
