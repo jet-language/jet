@@ -623,6 +623,8 @@ fn verify_program_rows(
             if constant.is_storage || !matches!(constant.ty.kind, MirTypeKind::Shared(_))
                 || initializer.module_id != constant.module || !initializer.params.is_empty()
                 || !initializer.generic_params.is_empty() || !initializer.capture_params.is_empty()
+                || initializer.kind != crate::MIR::MirFunctionKind::Jet
+                || !matches!(initializer.form, crate::MIR::MirFunctionForm::TopLevel)
                 || initializer.failure != MirFailureCarrier::Infallible
                 || !initializer.return_type.same_checked_type(&constant.ty)
                 || constant.key != format!("shared-site:{}", site.initializer.0)

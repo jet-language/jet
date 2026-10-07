@@ -186,6 +186,7 @@ fn mir_pass_validate_program_scan(program: MIRProgram, pass: MIROptimizationPass
                         || function.module_id != constant.module_id || function.params.len() != 0
                         || function.generic_params.len() != 0 || function.capture_params.len() != 0
                         || function.failure != .Infallible || !mir_type_same_checked_type(function.return_type, constant.ty)
+                        || function.kind != .Jet || !(function.form == {.TopLevel -> true else -> false})
                         || constant.key != "shared-site:{site.initializer.value}"
                         || site_initializers.get(site.initializer.value) != None {
                         problem = Val("invalid checked Core publication site")
