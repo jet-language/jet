@@ -3,9 +3,9 @@
 // and infinities come from arithmetic, not math.to_bits (Tower #4340).
 use jet_foundation.[
     MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRConstant, MIRDropKind,
-    MIRFunction, MIROperation, MIRPanicLoc, MIRPreludeABI, MIRPreludeFamily,
-    MIRProgram, MIRSemanticOp, MIRTerminator, MIRType, MIRTypeDef, MIRTypeKind,
-    MIRUnaryOp, MIRValueID, mir_type_from_kind,
+    MIRCallArg, MIREnumArg, MIRFunction, MIRFunctionID, MIROperation, MIRPanicLoc, MIRPreludeABI, MIRPreludeFamily, MIRPreludeTypeArg,
+    MIRProgram, MIRSemanticOp, MIRTerminator, MIRType, MIRTypeDef, MIRTypeDefKind, MIRTypeKind,
+    MIRUnaryOp, MIRValueID, MIRVariant, MIRVariantPayload, mir_function_id, mir_type_from_kind, mir_type_id,
 ]
 
 fn fx_numeric_program(b: FxBuilder) -> MIRProgram Never! {
@@ -290,3 +290,61 @@ fn fx_numeric_rotate_stop() -> MIRProgram Never! { fx_numeric_stop("rotate_left"
 // expect-exit numeric-euclid-zero-stop: 70
 // expect-stderr numeric-euclid-zero-stop: "Stop [E3010]: `divided by zero`\n  --> fixture.jet:1\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
 fn fx_numeric_euclid_zero_stop() -> MIRProgram Never! { fx_numeric_stop("exact", "div_euclid", -7, 0) }
+
+// Canonical saturated nanoseconds, including both I64 boundaries. The modeled
+// constructors use the same Result/Duration carrier as real-source lowering.
+// expect-stdout duration-arithmetic: "0ns\n0ns\ntrue\n-4ns\n-10ns\nfalse\n9223372036854775807ns\n9223372036854775806ns\nfalse\n-9223372036854775808ns\n-9223372036854775807ns\nfalse\n-1ns\n9223372036854775807ns\nfalse\n-1ns\n-9223372036854775808ns\nfalse\n"
+// expect-runtime-only duration-arithmetic
+// expect-requires-route duration-arithmetic jet_rt_int_drop
+fn fx_duration_operand(b: &FxBuilder, number: Int) -> (owner: MIRValueID, value: MIRValueID) Never! {
+    integer :: fx_int_const(&b, number)
+    unit :: fx_copy(&b, fx_named("DurationUnit"), MIROperation.Enum{type_id: mir_type_id("DurationUnit"), variant: "Nanoseconds", args: [MIREnumArg]{}})
+    duration :: fx_named("Duration")
+    result :: mir_type_from_kind(MIRTypeKind.Result{ok: duration, err: fx_named("RangeError")})
+    owner :: fx_owned(&b, result, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("core.time", "duration_from_int"), args: [MIRCallArg]{fx_arg(integer, .Read), fx_arg(unit, .Read)}, owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
+    fx_do(&b, MIROperation.Drop{value: integer, kind: MIRDropKind.Value})
+    value :: fx_value(&b, duration, fx_borrow(), MIROperation.ResultValue{subject: owner, ok: true})
+    (owner: owner, value: value)
+}
+
+fn fx_duration_arithmetic() -> MIRProgram Never! {
+    b := fx_builder()
+    pairs :: [[Int]]{[Int]{0, 0}, [Int]{-7, 3}, [Int]{9223372036854775807, 1}, [Int]{-9223372036854775808, -1}, [Int]{9223372036854775807, -9223372036854775808}, [Int]{-9223372036854775808, 9223372036854775807}}
+    loop pair in pairs {
+        left :: fx_duration_operand(&b, pair[0])
+        right :: fx_duration_operand(&b, pair[1])
+        sum :: fx_owned(&b, fx_named("Duration"), MIROperation.Binary{op: .Add, left: left.value, right: right.value, dispatch: .Primitive, overflow: .Unchecked})
+        fx_print(&b, sum)
+        fx_do(&b, MIROperation.Drop{value: sum, kind: MIRDropKind.Value})
+        difference :: fx_owned(&b, fx_named("Duration"), MIROperation.Binary{op: .Sub, left: left.value, right: right.value, dispatch: .Primitive, overflow: .Unchecked})
+        fx_print(&b, difference)
+        fx_do(&b, MIROperation.Drop{value: difference, kind: MIRDropKind.Value})
+        equal :: fx_copy(&b, fx_bool(), MIROperation.Binary{op: .Eq, left: left.value, right: right.value, dispatch: .Primitive, overflow: .Unchecked})
+        fx_print(&b, equal)
+        fx_do(&b, MIROperation.Drop{value: left.owner, kind: MIRDropKind.Value})
+        fx_do(&b, MIROperation.Drop{value: right.owner, kind: MIRDropKind.Value})
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    units :: [String]{"Nanoseconds", "Microseconds", "Milliseconds", "Seconds", "Minutes", "Hours"}
+    variants := [MIRVariant]{}
+    loop unit in units -> &variants.push(fx_variant(unit, MIRVariantPayload.Unit))
+    definition :: fx_type_def("DurationUnit", MIRTypeDefKind.Enum{variants: variants, methods: [MIRFunctionID]{}})
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{definition})
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "core.time", "duration_from_int", "jet_duration_from_int", 2, MIRPreludeABI.Value))
+    p
+}
+
+fn fx_duration_arithmetic_check() -> Bool Never! {
+    program :: fx_duration_arithmetic()
+    if lower_runtime_route("jet_rt_int_drop") != None -> return fx_report_runtime("duration-arithmetic", program)
+    lowered :: lir_lower_entry(program, mir_function_id("run"))
+    expected :: "Duration arithmetic requires the canonical exact-Int lifetime runtime ABI"
+    loop issue in lowered.issues {
+        if issue.message == expected {
+            print("duration-arithmetic: REFUSED until the canonical exact-Int lifetime ABI is present")
+            return true
+        }
+    }
+    print("duration-arithmetic: missing expected lifetime-ABI refusal")
+    false
+}

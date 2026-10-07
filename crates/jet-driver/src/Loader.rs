@@ -2663,11 +2663,18 @@ fn load_entry_with_overlays_mode_on_stack(
         .modules
         .iter()
         .any(|module| source_names_identifier(&module.source, "URL"));
+    // Ambient Option.or_err reaches the ordinary Core source body without an
+    // explicit import, just as the URL carrier reaches its source record.
+    let names_option_or_err = bundle
+        .modules
+        .iter()
+        .any(|module| source_names_identifier(&module.source, "or_err"));
     let mut core_source_modules = jet_foundation::CoreModuleExports::core_source_modules()
         .iter()
         .copied()
         .filter(|source_module| {
             (names_url_carrier && Some(source_module.module) == url_carrier)
+                || (names_option_or_err && source_module.module == "core.prelude")
                 || bundle.modules.iter().any(|module| {
                     module.imports.iter().any(|import| {
                         core_source_import_module(import).as_deref() == Some(source_module.module)

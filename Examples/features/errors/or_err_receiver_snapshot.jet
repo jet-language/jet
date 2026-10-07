@@ -1,0 +1,12 @@
+// A Read receiver is materialized before evaluating the reason expression.
+fn overwrite(value: &String?) -> String {
+    value = Val("after")
+    "unused reason"
+}
+
+fn run() {
+    optional := String?{Val("before")}
+    result :: optional.or_err(overwrite(&optional)) ?? "unexpected absence"
+    print(result)
+    print(optional ?? "unexpected absence")
+}

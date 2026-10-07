@@ -1745,10 +1745,9 @@ pub fn apply_method(
         // mutable tree (no shared/interior-mutable state in this value model),
         // so a deep clone is just `Clone::clone`.
         (v, "clone") => Ok(v.clone()),
-        // D-FAIL-CARRIER1=A: `.or_err("why")` lifts a clean absence into a
-        // failure. One carrier, so the payload rides through untouched and only
-        // the report changes — the same move the prelude's
-        // `JetOptionalView::or_err` makes.
+        // D-FAIL-CARRIER1=A: the AST comptime carrier view matches the canonical
+        // Jet optional-to-failure body. Its arguments were evaluated eagerly
+        // before reaching this value dispatcher.
         (CtValue::Present(payload), "or_err") => Ok(CtValue::Present(payload.clone())),
         (CtValue::Failed(CtReport::Clean(_)), "or_err") => match args.into_iter().next() {
             Some(CtValue::Str(message)) => Ok(CtValue::failed(Box::new(CtValue::from_jet_err(
