@@ -46,7 +46,9 @@ pub fn asctime(dt: DateTime) -> String Never! {
 pub fn start() -[Time]> Stopwatch Never! { Stopwatch{start_ns: unix_ns()} }
 
 pub fn sleep(duration: Duration) Never! -[Time]> {
-    if duration.ns > 0 -> host_sleep_ns(duration.ns)
+    // Even a zero or negative delay is a deadline/cancellation wait boundary.
+    // The shared scheduler clamps the delay and owns pre/post wait checks.
+    core.time.__sleep_ns(duration.ns)
 }
 
 /// Wall-clock time as Unix nanoseconds. `time.instant()` is the monotonic
@@ -55,8 +57,6 @@ pub fn unix_ns() -[Time]> Int Never! {
     now_utc().to_unix_ns() ?? panic("the wall clock is outside the Unix nanosecond range")
 }
 
-// Host kernel: the Duration sleep.
-fn host_sleep_ns(ns: Int) -[Time]> { core.time.sleep(duration_ns(ns)) }
 
 fn time_int_min() -> Int Never! { -9223372036854775808 }
 fn time_int_max() -> Int Never! { 9223372036854775807 }
@@ -1254,7 +1254,7 @@ fn civil_monotonic_ns() -[Time]> Int Never! {
 pub fn instant() -[Time]> Instant Never! { Instant{start_ns: civil_monotonic_ns()} }
 pub fn sleep_until(deadline: Instant) Never! -[Time]> {
     remaining :: saturating_sub_ns(deadline.start_ns, civil_monotonic_ns())
-    if remaining > 0 -> sleep(duration_ns(remaining))
+    sleep(duration_ns(remaining))
 }
 impl Instant {
     pub fn elapsed(self) -[Time]> Duration Never! { duration_ns(saturating_sub_ns(civil_monotonic_ns(), self.start_ns)) }
@@ -1491,4 +1491,77 @@ impl Instant {
     assert_eq(last.minus_duration(duration_ns(25)), first)
     assert_eq(Instant{start_ns: time_int_max()}.plus_duration(duration_ns(1)).start_ns, time_int_max())
     assert_eq(Instant{start_ns: time_int_min()}.difference(Instant{start_ns: time_int_max()}).ns, time_int_min())
+}
+
+#Test("Date alias receivers retain projections and ISO year boundaries") {
+    date: Date :: new(2021, 1, 1)
+    assert_eq(date.year(), 2021)
+    assert_eq(date.month(), 1)
+    assert_eq(date.day(), 1)
+    assert_eq(date.to_string(), "2021-01-01")
+    assert(date.equal(new(2021, 1, 1)))
+    assert(!date.equal(new(2021, 1, 2)))
+    assert_eq(date.compare(new(2021, 1, 2)), Ordering.Less)
+    assert_eq(date.compare(new(2021, 1, 1)), Ordering.Equal)
+    assert_eq(date.compare(new(2020, 12, 31)), Ordering.Greater)
+    assert_eq(date.weekday(), 5)
+    assert_eq(date.iso_weekday(), 5)
+    assert_eq(date.day_of_year(), 1)
+    assert_eq(date.iso_week(), 53)
+    assert_eq(date.iso_week_year(), 2020)
+}
+
+#Test("Date alias arithmetic preserves leap clamps and signed periods") {
+    date: Date :: new(2024, 2, 29)
+    assert_eq(date.quarter_of_year(), 1)
+    assert_eq(new(2024, 12, 1).quarter_of_year(), 4)
+    assert_eq(date.days_in_month(), 29)
+    assert(date.is_leap_year())
+    assert(!new(1900, 2, 1).is_leap_year())
+    assert_eq(date.replace(2023, 2, 29), new(2023, 2, 28))
+    assert_eq(date.add_days(1), new(2024, 3, 1))
+    assert_eq(date.add_days(-60), new(2023, 12, 31))
+    assert_eq(new(2024, 1, 31).add_months(1), date)
+    assert_eq(new(2024, 1, 31).add_months(-1), new(2023, 12, 31))
+    assert_eq(date.diff_days(new(2024, 3, 1)), -1)
+    assert_eq(date.add_period(period(1, -12, 1)), new(2024, 3, 1))
+    assert_eq(date.subtract_period(period_days(-1)), new(2024, 3, 1))
+}
+
+#Test("Date alias truncation formatting and rounded differences preserve errors") {
+    date: Date :: new(2024, 2, 29)
+    assert_eq(date.truncate("year"), new(2024, 1, 1))
+    assert_eq(date.truncate("month"), new(2024, 2, 1))
+    assert_eq(date.truncate("unknown"), date)
+    assert_eq(date.format("yyyy-MM-dd"), "2024-02-29")
+    assert_eq(date.format_checked("yyyy-MM-dd 'λ'") ?? panic("checked date format"), "2024-02-29 λ")
+    assert_eq(date.until(new(2024, 3, 1)).ns, 86400000000000)
+    assert_eq(date.since(new(2024, 3, 1)).ns, -86400000000000)
+    assert_eq(date.until(new(2024, 3, 1), "day", "day", "half_even", 2).ns, 0)
+    assert_eq(date.until(new(2024, 3, 1), "day", "day", "half_expand", 2).ns, 172800000000000)
+    assert_eq(date.with(2023, 2, 29, "clamp") ?? panic("date clamp"), new(2023, 2, 28))
+    if date.with(2024, -1, -1, "reject") == {
+        .Err(reason) -> assert_eq(reason, "date fields are outside the valid range: 2024--1--1")
+        .Ok(_) -> assert(false)
+    }
+    if date.with(2024, 2, 29, "unknown") == {
+        .Err(reason) -> assert_eq(reason, "invalid overflow policy: unknown")
+        .Ok(_) -> assert(false)
+    }
+    if date.format_checked("QQ") == {
+        .Err(_) -> assert(true)
+        .Ok(_) -> assert(false)
+    }
+}
+
+#Test("Nonpositive sleeps and elapsed deadlines still check the task deadline") {
+    .expect_fail(E3003) {
+        #Context(deadline: 0) { sleep(duration_ns(0)) }
+    }
+    .expect_fail(E3003) {
+        #Context(deadline: 0) { sleep(duration_ns(-1)) }
+    }
+    .expect_fail(E3003) {
+        #Context(deadline: 0) { sleep_until(Instant{start_ns: time_int_min()}) }
+    }
 }

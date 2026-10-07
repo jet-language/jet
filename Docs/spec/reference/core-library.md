@@ -2217,7 +2217,10 @@ The civil carriers (`Date`/`LocalDate`, `LocalTime`, `DateTime`, `Period`,
 formatting, and text codecs are implemented in `Core/time/time.jet` on all
 tiers. `Date` aliases `LocalDate`; zone data is shared rather than copied
 when a zoned value is copied. Native seams supply raw clock samples,
-environment values, TZif bytes, and the host sleep operation.
+environment values and TZif bytes. Sleep delegates to the shared scheduler,
+including its deadline, shielding, cancellation, and timer policy; it is not a
+separate host wait. Zero and negative durations still check the wait boundary
+(their parked duration is zero), as do already-elapsed `sleep_until` deadlines.
 Wall-clock selection prefers a deterministic-world sample, then a replay
 override, then the raw host clock; calendar policy does not live in those
 adapters. Browser hosts supply bundled TZif bytes and report environment and
