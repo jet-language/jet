@@ -5194,6 +5194,36 @@ mod interrupt_boundary_tests {
     }
 
     #[test]
+    fn select_deregistration_hands_consumed_late_arm_wake_to_plain_receiver() {
+        let early = JetSchedulerChannel::<u64>::new();
+        let late = JetSchedulerChannel::<u64>::new();
+        let early_sender = early.sender();
+        let late_sender = late.sender();
+        let plain = ParkSlot::new();
+        let master = ParkSlot::new();
+        late.inner.register_select_waiter(plain.clone());
+        let inners = vec![early.inner.clone(), late.inner.clone()];
+        let registration = SelectRegistration::new(&inners, master, None);
+
+        assert!(early_sender.send(10));
+        assert!(late_sender.send(20));
+        assert!(!plain.notified.load(Ordering::Acquire));
+        assert_eq!(late.inner.state.lock().unwrap().queue.len(), 1);
+        assert!(matches!(
+            jet_scheduler_try_select(inners, Vec::new()),
+            Some(JetSelectOutcome::Recv { arm: 0, value: 10 })
+        ));
+
+        // The earlier arm won; dropping the actual registration must return
+        // the later arm's consumed wake while its message remains queued.
+        drop(registration);
+        assert!(plain.notified.load(Ordering::Acquire));
+        assert!(late.inner.state.lock().unwrap().recv_waiters.is_empty());
+        assert_eq!(late.inner.state.lock().unwrap().queue.len(), 1);
+        assert_eq!(late.inner.try_pop(), Some(20));
+    }
+
+    #[test]
     fn closed_select_failure_unwinds_inside_runtime_boundary() {
         jet_scheduler_task_panic_enter();
         let result = std::panic::catch_unwind(|| jet_scheduler_fatal("select closed"));
