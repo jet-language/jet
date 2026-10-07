@@ -308,18 +308,18 @@ const cfgsBefore = (lineStart) => attributesBefore(lineStart).filter((line) => l
           }
           return base;
         };
-        const m = /^\s+((?:[a-z_][a-z0-9_]*::)*)\*\s*;/.exec(text.slice(j, j + 120));
+        const m = /^\s+((?:[A-Za-z_][A-Za-z0-9_]*::)*)\*\s*;/.exec(text.slice(j, j + 120));
         if (m) {
           const key = here.join("::");
           globs.set(key, [...(globs.get(key) ?? []), resolve(m[1]).join("::")]);
         }
-        // Renamed imports (`use super::{JetTempDirOwner as TempDir, ...};`).
-        const renamed = /^\s+((?:[a-z_][a-z0-9_]*::)*)(?:\{([^{}]*)\}|([A-Z][A-Za-z0-9_]*\s+as\s+[A-Z][A-Za-z0-9_]*))\s*;/.exec(text.slice(j, j + 2000));
+        // Explicit type imports, with or without an `as` spelling.
+        const renamed = /^\s+((?:[A-Za-z_][A-Za-z0-9_]*::)*)(?:\{([^{}]*)\}|([A-Z][A-Za-z0-9_]*(?:\s+as\s+[A-Z][A-Za-z0-9_]*)?))\s*;/.exec(text.slice(j, j + 2000));
         if (renamed) {
           const base = resolve(renamed[1]);
           for (const entry of (renamed[2] ?? renamed[3]).split(",")) {
-            const rename = /^\s*([A-Z][A-Za-z0-9_]*)\s+as\s+([A-Z][A-Za-z0-9_]*)\s*$/.exec(entry);
-            if (rename) renames.set([...here, rename[2]].join("::"), [...base, rename[1]].join("::"));
+            const rename = /^\s*([A-Z][A-Za-z0-9_]*)(?:\s+as\s+([A-Z][A-Za-z0-9_]*))?\s*$/.exec(entry);
+            if (rename) renames.set([...here, rename[2] ?? rename[1]].join("::"), [...base, rename[1]].join("::"));
           }
         }
       }
@@ -439,7 +439,7 @@ const qualify = (ty, path) => {
   if (ty.startsWith("super::")) return `crate::${path.split("::").slice(0, -1).filter(Boolean).concat(ty.slice(7)).join("::")}`;
   return path ? `crate::${path}::${ty}` : `crate::${ty}`;
 };
-const opaqueName = /^(?:(?:crate|super|[a-z_][a-z0-9_]*)::)*([A-Z][A-Za-z0-9_]*)$/;
+const opaqueName = /^(?:[A-Za-z_][A-Za-z0-9_]*::)*([A-Z][A-Za-z0-9_]*)$/;
 
 // A fieldless runtime enum crosses as its variant index in a word; the Jet
 // table names its variants in declaration order so the lowering checks that
@@ -471,7 +471,7 @@ function tagCarrier(ty, path) {
 function elementCarrier(ty) {
   if (ty === "String") return { jet: "Text", read: "view(w as JetCString).to_owned()", write: "handle(e) as u64" };
   if (ty === "i64") return { jet: "Word", read: "w as i64", write: "e as u64" };
-  if (fixedInts.has(ty)) return { jet: "Word", read: `w as ${ty}`, write: "e as u64" };
+  if (fixedInts.has(ty)) return { jet: "Word", slot: ty, read: `w as ${ty}`, write: "e" };
   if (ty === "bool") return { jet: "Flag", read: "w != 0", write: "e as u64" };
   if (ty === "f64") return { jet: "Float", read: "f64::from_bits(w)", write: "e.to_bits()" };
   if (ty === "char") return { jet: "Word", read: "scalar(w as i64)", write: "e as u64" };
@@ -520,7 +520,7 @@ function paramCarrier(ty, path) {
     const element = elementCarrier(list[2] ?? list[3]) ?? handleElement(list[2] ?? list[3], path);
     if (!element) return null;
     const items = (d, n) => `list_in(${d}, ${n}, |w| ${element.read})`;
-    return { jet: `List{elem: LowerRouteCarrier.${element.jet}}`, ctys: ["*const u64", "i64"], expr: ([d, n]) => (list[1] === "&" ? `&${items(d, n)}` : items(d, n)), handle: element.handle };
+    return { jet: `List{elem: LowerRouteCarrier.${element.jet}}`, ctys: [`*const ${element.slot ?? "u64"}`, "i64"], expr: ([d, n]) => (list[1] === "&" ? `&${items(d, n)}` : items(d, n)), handle: element.handle };
   }
   // A mutably borrowed handle: the adapter mutates the runtime value in the
   // caller's own box (the lowering lends the handle of its Write place).
@@ -655,7 +655,7 @@ function resultShape(ty, path, nativeInt) {
     const element = resultElement(list[1]);
     if (!element) return null;
     return {
-      jet: `Plain{carrier: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "data", cty: "*mut u64" }], handles: element.handle ? [element.handle] : [],
+      jet: `Plain{carrier: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "data", cty: `*mut ${element.slot ?? "u64"}` }], handles: element.handle ? [element.handle] : [],
       body: (call) => `list_out(${call}.into_iter().map(|e| ${element.write}).collect(), data)`,
     };
   }
@@ -684,7 +684,7 @@ function resultShape(ty, path, nativeInt) {
     const element = listOf(args[0]);
     if (element) {
       return {
-        jet: `Option{some: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "some", cty: "*mut u64" }, { name: "some_len", cty: "i64" }], handles: element.handle ? [element.handle] : [],
+        jet: `Option{some: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "some", cty: `*mut ${element.slot ?? "u64"}` }, { name: "some_len", cty: "i64" }], handles: element.handle ? [element.handle] : [],
         body: (call) => `match ${call} {\n            ${listArm("some", element, somePattern, 1)}\n            ${nonePattern} => 0,\n        }`,
       };
     }
@@ -698,19 +698,25 @@ function resultShape(ty, path, nativeInt) {
   if (args.length !== 2) return null;
   const okList = listOf(args[0]);
   const ok = okList ? null : valueCarrier(args[0], path, nativeInt);
-  const err = valueCarrier(args[1], path, false);
-  if ((!ok && !okList) || !err || !err.cty) return null;
+  const errList = listOf(args[1]);
+  const err = errList ? null : valueCarrier(args[1], path, false);
+  if ((!ok && !okList) || (!errList && (!err || !err.cty))) return null;
   const outs = [];
-  if (okList) outs.push({ name: "ok", cty: "*mut u64" }, { name: "ok_len", cty: "i64" });
+  if (okList) outs.push({ name: "ok", cty: `*mut ${okList.slot ?? "u64"}` }, { name: "ok_len", cty: "i64" });
   else if (ok.cty) outs.push({ name: "ok", cty: ok.cty });
-  outs.push({ name: "err", cty: err.cty });
+  if (errList) outs.push({ name: "err", cty: `*mut ${errList.slot ?? "u64"}` }, { name: "err_len", cty: "i64" });
+  else outs.push({ name: "err", cty: err.cty });
   const okArm = okList
     ? listArm("ok", okList, "Ok", 1)
     : ok.cty ? `Ok(value) => { unsafe { ok.write(${ok.wrap("value")}) }; 1 }` : "Ok(()) => 1,";
   const okJet = okList ? `List{elem: LowerRouteCarrier.${okList.jet}}` : ok.jet;
+  const errJet = errList ? `List{elem: LowerRouteCarrier.${errList.jet}}` : err.jet;
+  const errArm = errList
+    ? listArm("err", errList, "Err", 0)
+    : `Err(error) => { unsafe { err.write(${err.wrap("error")}) }; 0 }`;
   return {
-    jet: `Result{ok: LowerRouteCarrier.${okJet}, err: LowerRouteCarrier.${err.jet}}`, ret: "i64", outs, handles: [ok?.handle, okList?.handle, err.handle].filter(Boolean),
-    body: (call) => `match ${call} {\n            ${okArm}\n            Err(error) => { unsafe { err.write(${err.wrap("error")}) }; 0 }\n        }`,
+    jet: `Result{ok: LowerRouteCarrier.${okJet}, err: LowerRouteCarrier.${errJet}}`, ret: "i64", outs, handles: [ok?.handle, okList?.handle, err?.handle, errList?.handle].filter(Boolean),
+    body: (call) => `match ${call} {\n            ${okArm}\n            ${errArm}\n        }`,
   };
 }
 
@@ -780,10 +786,11 @@ const syntaxConstants = new Map();
 // arms of one name table (`Some(name)` maps a name to itself).
 const nameTable = (source, name) => {
   const table = new Map();
-  for (const m of fnBody(source, name).matchAll(/((?:"[^"]+"\s*\|\s*)*"[^"]+"|n if [^=>{}]*==[^>{}]*?)\s*=>\s*Some\((?:"([^"]+)"|name)\)/g)) {
+  for (const m of fnBody(source, name).matchAll(/((?:"[^"]+"\s*\|\s*)*"[^"]+"|(?:Syntax::)?[A-Z][A-Z0-9_]*|n if [^=>{}]*==[^>{}]*?)\s*=>\s*Some\((?:"([^"]+)"|name)\)/g)) {
     const names = m[1].startsWith("n if")
       ? [...m[1].matchAll(/Syntax::([A-Z][A-Z0-9_]*)|"([^"]+)"/g)].map((k) => k[2] ?? syntaxConstants.get(k[1]))
-      : [...m[1].matchAll(/"([^"]+)"/g)].map((k) => k[1]);
+      : m[1].startsWith('"') ? [...m[1].matchAll(/"([^"]+)"/g)].map((k) => k[1])
+      : [syntaxConstants.get(m[1].replace(/^Syntax::/, ""))];
     for (const jetName of names) {
       if (!jetName) throw new Error(`gen-c-abi-routes: unresolved Syntax constant in ${name}: ${m[1]}`);
       if (!table.has(jetName)) table.set(jetName, m[2] ?? jetName);
@@ -856,7 +863,7 @@ const nativeType = (name) => {
 // struct or enum, spelled at its declaration (a private glob import does not
 // re-export it).
 const handleOf = (rustPath) => {
-  if (!rustPath || !/^(?:[a-z_][a-z0-9_]*::)*[A-Z][A-Za-z0-9_]*$/.test(rustPath)) return null;
+  if (!rustPath || !/^(?:[A-Za-z_][A-Za-z0-9_]*::)*[A-Z][A-Za-z0-9_]*$/.test(rustPath)) return null;
   const name = rustPath.split("::").pop();
   if (handles.get(name) === `crate::${rustPath}`) return { name, full: `crate::${rustPath}` };
   const found = declarationOf(rustPath);
@@ -921,8 +928,8 @@ rs.push("    fn scalar(value: i64) -> char {");
 rs.push("        u32::try_from(value).ok().and_then(char::from_u32).unwrap_or(char::REPLACEMENT_CHARACTER)");
 rs.push("    }");
 rs.push("");
-rs.push("    /// A List argument's `len` eight-byte slots at `data`, as Rust values.");
-rs.push("    fn list_in<T>(data: *const u64, len: i64, item: impl Fn(u64) -> T) -> Vec<T> {");
+rs.push("    /// A List argument uses its declared fixed-integer width or word carrier.");
+rs.push("    fn list_in<S: Copy, T>(data: *const S, len: i64, item: impl Fn(S) -> T) -> Vec<T> {");
 rs.push("        if len <= 0 || data.is_null() {");
 rs.push("            return Vec::new();");
 rs.push("        }");
@@ -932,14 +939,14 @@ rs.push("    }");
 rs.push("");
 rs.push("    /// A List result: a slot buffer from the allocator `jet_rt_free` returns");
 rs.push("    /// to (null when empty), written to `data`; returns the length.");
-rs.push("    fn list_out(words: Vec<u64>, data: *mut *mut u64) -> i64 {");
+rs.push("    fn list_out<S: Copy>(words: Vec<S>, data: *mut *mut S) -> i64 {");
 rs.push("        let len = words.len();");
 rs.push("        let buffer = if len == 0 {");
 rs.push("            std::ptr::null_mut()");
 rs.push("        } else {");
-rs.push("            let layout = std::alloc::Layout::from_size_align(len * 8, 8).unwrap_or_else(|_| range_stop());");
+rs.push("            let layout = std::alloc::Layout::from_size_align(len * std::mem::size_of::<S>(), 8).unwrap_or_else(|_| range_stop());");
 rs.push("            // SAFETY: `layout` has a nonzero size.");
-rs.push("            let buffer = unsafe { std::alloc::alloc(layout) } as *mut u64;");
+rs.push("            let buffer = unsafe { std::alloc::alloc(layout) } as *mut S;");
 rs.push("            if buffer.is_null() {");
 rs.push("                std::alloc::handle_alloc_error(layout);");
 rs.push("            }");
@@ -1049,6 +1056,9 @@ for (const [name, full] of handleRows) {
 }
 // A member's carrier: { kind, ret, outCty, get(place), cty, make(param) }, or
 // null when no export carries it. `place` is a Rust place of the member.
+// Recursive DataTree collections cross as temporary owned Vec holders. These
+// exports only marshal storage; ordering/duplicate policy remains in Jet.
+const recordSequences = new Map();
 const recordMember = (ty, path) => {
   const exact = /^(?:[a-z_][a-z0-9_]*::)*(?:Numeric::)?JetInt$/.test(ty);
   if (ty === "String") return { kind: "Text", ret: "JetCString", get: (v) => `handle(${v}.clone())`, cty: "JetCString", make: (p) => `view(${p}).to_owned()` };
@@ -1056,6 +1066,20 @@ const recordMember = (ty, path) => {
   if (exact) return { kind: "Int", ret: "i64", get: (v) => `${v}.clone().into_raw()`, cty: "i64", make: (p) => `unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(${p}) }` };
   if (ty === "bool") return { kind: "Flag", ret: "bool", get: (v) => `${v}`, cty: "u8", make: (p) => `${p} != 0` };
   if (ty === "f64") return { kind: "Float", ret: "f64", get: (v) => `${v}`, cty: "f64", make: (p) => p };
+  const list = /^Vec<(.*)>$/.exec(ty);
+  if (list) {
+    const entries = /^\(String,([A-Z][A-Za-z0-9_:]*)\)$/.exec(list[1]);
+    const elementTy = entries ? entries[1] : list[1];
+    const element = elementTy === "u8" ? null : recordMember(elementTy, path);
+    if (elementTy !== "u8" && !element?.kind.startsWith("Rec.")) return null;
+    const kind = `${entries ? "Entries" : "List"}.${element ? element.kind : "Byte"}`;
+    const elementFull = element ? element.cty.replace(/^\*mut /, "") : "u8";
+    const full = `Vec<${entries ? `(String, ${elementFull})` : elementFull}>`;
+    const prefix = `jet_rt_record_seq_${kind.replaceAll(".", "_")}`;
+    recordSequences.set(kind, { kind, prefix, full, entries: !!entries, element, elementFull });
+    return { kind, ret: `*mut ${full}`, get: (v) => `&${v} as *const ${full} as *mut ${full}`,
+      cty: `*mut ${full}`, make: (p) => `*unsafe { Box::from_raw(${p}) }` };
+  }
   const tag = tagCarrier(ty, path);
   if (tag) return { kind: `Tag.${opaqueName.exec(ty)[1]}`, ret: "i64", get: (v) => tag.write(`&${v}`), cty: "i64", make: tag.read };
   const option = /^(Option|JetOutcome)<(.+?)(?:,JetAbsent|,(?:crate::|super::)*JetAbsent)?>$/.exec(ty);
@@ -1090,11 +1114,26 @@ for (const [name, record] of recordable) {
 for (let changed = true; changed;) {
   changed = false;
   for (const [name, members] of recordMembers) {
-    const nestedKinds = members.map((member) => member.carrier?.kind.replace(/^Opt/, "") ?? "").filter((kind) => kind.startsWith("Rec."));
-    if (nestedKinds.every((kind) => recordMembers.has(kind.slice(4)))) continue;
+    const nestedKinds = members.map((member) => member.carrier?.kind.replace(/^(?:Opt|List\.|Entries\.)/, "") ?? "").filter((kind) => kind.startsWith("Rec."));
+    if (nestedKinds.every((kind) => recordMembers.has(kind.slice(4)) || handExports.has(`jet_rt_record_new_${kind.slice(4)}`))) continue;
     recordMembers.delete(name);
     changed = true;
   }
+}
+for (const { prefix, full, entries, element, elementFull } of recordSequences.values()) {
+  rs.push("", "    #[no_mangle]");
+  rs.push(`    pub extern "C" fn ${prefix}_new(capacity: i64) -> *mut ${full} { guard(|| Box::into_raw(Box::new(Vec::with_capacity(capacity as usize)))) }`);
+  rs.push("    #[no_mangle]");
+  rs.push(`    pub extern "C" fn ${prefix}_len(value: *mut ${full}) -> i64 { guard(|| unsafe { &*value }.len() as i64) }`);
+  rs.push("    #[no_mangle]");
+  rs.push(`    pub extern "C" fn ${prefix}_get(value: *mut ${full}, index: i64${entries ? ", key: *mut JetCString" : ""}) -> ${element ? element.cty : "u64"} {`);
+  const place = entries ? "item.1" : "(*item)";
+  rs.push(`        guard(|| { let item = &unsafe { &*value }[index as usize]; ${entries ? "unsafe { key.write(handle(item.0.clone())) }; " : ""}${element ? `&${place} as *const ${elementFull} as *mut ${elementFull}` : "*item as u64"} })`);
+  rs.push("    }", "    #[no_mangle]");
+  rs.push(`    pub extern "C" fn ${prefix}_push(value: *mut ${full}${entries ? ", key: JetCString" : ""}, item: ${element ? element.cty : "u64"}) {`);
+  const item = element ? element.make("item") : "u8::try_from(item).unwrap_or_else(|_| range_stop())";
+  rs.push(`        guard(|| unsafe { &mut *value }.push(${entries ? `(view(key).to_owned(), ${item})` : item}));`);
+  rs.push("    }");
 }
 const recordSchemas = [];
 for (const [name, members] of [...recordMembers].sort((a, b) => a[0].localeCompare(b[0]))) {
