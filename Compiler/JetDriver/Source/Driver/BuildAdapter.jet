@@ -294,7 +294,7 @@ fn jet_driver_build_find(host: JetDriverBuildInputs, base_dir: String, args: [Bu
     &matches.sort()
     values := [BuildSessionValue]{}
     loop relative in matches {
-        _ := host.read(jet_driver_build_join(base_dir, relative), JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return jet_driver_build_input_fail("E0955", "`find` can't open `{relative}`", "{err} (matched while expanding `{raw}`)", "check the path — it is relative to the file's own directory", span)
+        _ := host.read_rooted(base_dir, relative, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return jet_driver_build_input_fail("E0955", "`find` can't open `{relative}`", "{err} (matched while expanding `{raw}`)", "check the path — it is relative to the file's own directory", span)
         &values.push(.Text(relative))
     }
     .Value(.List(values))
@@ -309,7 +309,7 @@ fn jet_driver_build_embed(host: JetDriverBuildInputs, base_dir: String, args: [B
         if part == ".." -> escapes = true
     }
     if escapes -> return jet_driver_build_input_fail("E0957", "`b.embed` path `{relative}` escapes the build root", "locked build inputs must stay beneath the selected source directory", "use a relative path returned by `b.find`, without `..`", span)
-    bytes :: host.read(jet_driver_build_join(base_dir, relative), JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return jet_driver_build_input_fail("E0955", "`b.embed` cannot open `{relative}`", err, "check the locked relative path", span)
+    bytes :: host.read_rooted(base_dir, relative, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return jet_driver_build_input_fail("E0955", "`b.embed` cannot open `{relative}`", err, "check the locked relative path", span)
     text :: String.from_bytes(bytes) ?? return jet_driver_build_input_fail("E0955", "`b.embed` cannot decode `{relative}` as text", "the embedded file is not valid UTF-8", "embed a UTF-8 text file", span)
     .Value(.Text(text))
 }
