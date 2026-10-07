@@ -979,6 +979,9 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "NullBackend" => Some("JetNullBackend"),
         "TUIBackend" => Some("JetTuiBackend"),
         "GtkBackend" => Some("JetGtkBackend"),
+        // D-WEBAPP1=D: these graph carriers have no source record layout.
+        "App" => Some("JetApp"),
+        "WebPage" => Some("JetWebPage"),
         // D-AUTH1=A: authentication carriers are Prelude-root values.
         "Session" => Some("JetAuthSession"),
         "Auth" => Some("JetAuthApp"),
