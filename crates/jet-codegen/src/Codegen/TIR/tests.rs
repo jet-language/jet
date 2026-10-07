@@ -1732,6 +1732,44 @@ fn mir_lowers_default_err_return() {
             .unwrap_or_else(|err| panic!("default Err return failed to lower to MIR: {err:?}"));
     });
 }
+
+#[test]
+fn native_stop_producer_checks_entry_calls_loops_and_panic_cleanup() {
+    use jet_foundation::MIR::{MirPollKind, MirTerminator};
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let bundle = checked_bundle(
+            "fn child(x: Int) -> Int { if x == 0 -> panic(\"boom\")\n x }\n\
+             fn run() { name :: \"owned\"\n n := 0\n loop n < 2 { print(child(n))\n n += 1 }\n print(name) }\n",
+        );
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (native, _) = super::lower_checked_native_mir_program_for(&bundle, request.clone()).unwrap();
+        native.validate().unwrap();
+        let mut checks = 0;
+        let mut propagates = 0;
+        let mut stopped = 0;
+        for function in &native.functions {
+            for block in &function.blocks {
+                match block.terminator {
+                    MirTerminator::Poll { kind: MirPollKind::Check, .. } => checks += 1,
+                    MirTerminator::Poll { kind: MirPollKind::Propagate, .. } => propagates += 1,
+                    MirTerminator::Stopped => stopped += 1,
+                    _ => {}
+                }
+            }
+        }
+        assert!(checks >= 3, "two entries and one loop header");
+        assert!(propagates >= 3, "child, print and checked panic");
+        assert!(stopped > 0);
+        let (aot, _) = super::lower_checked_mir_program_for(&bundle, request).unwrap();
+        assert!(aot.functions.iter().flat_map(|function| &function.blocks).all(|block| {
+            !matches!(block.terminator, MirTerminator::Poll { .. } | MirTerminator::Stopped)
+        }));
+    });
+}
 /// #4318 §4: lower `src`, returning per-function loop-cursor counts and the
 /// `.clone()` count of the emitted Rust (runtime and types left out).
 fn stable_loop_probe(src: &str) -> (HashMap<String, usize>, usize) {

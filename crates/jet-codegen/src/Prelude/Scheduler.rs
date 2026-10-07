@@ -776,15 +776,18 @@ fn current_task_control() -> Option<Arc<JetTaskControl>> {
     TASK_CONTROL.with(|t| t.borrow().clone())
 }
 
+
 pub const JET_NATIVE_STOP_CANCELLED: u64 = 1;
 pub const JET_NATIVE_STOP_DEADLINE: u64 = 2;
 pub const JET_NATIVE_STOP_BUDGET_FUEL: u64 = 3;
 pub const JET_NATIVE_STOP_BUDGET_DEPTH: u64 = 4;
+pub const JET_NATIVE_STOP_TASK_PANIC: u64 = 5;
 
 /// Why a native execution stopped (unified host/stop contract, #4720). The
 /// first four are recoverable: they travel on the task control's stop rail and
-/// leave through explicit MIR cleanup. Panic, HostFault and Trap invalidate the
-/// child; the host restarts it with a fresh session.
+/// leave through explicit MIR cleanup. A native SendFn's intentional Panic
+/// becomes TaskFailure after its callback returns; a root panic, host fault
+/// or trap invalidates the child.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JetStopKind {
     Cancelled,
@@ -817,6 +820,7 @@ impl JetStopKind {
             JetStopKind::Deadline => Some(JET_NATIVE_STOP_DEADLINE),
             JetStopKind::BudgetFuel => Some(JET_NATIVE_STOP_BUDGET_FUEL),
             JetStopKind::BudgetDepth => Some(JET_NATIVE_STOP_BUDGET_DEPTH),
+            JetStopKind::Panic if jet_scheduler_native_task_body_active() => Some(JET_NATIVE_STOP_TASK_PANIC),
             JetStopKind::Panic | JetStopKind::HostFault | JetStopKind::Trap => None,
         }
     }
@@ -947,6 +951,12 @@ pub fn jet_scheduler_native_propagate() -> u64 {
 pub fn jet_scheduler_native_record_unwind(
     payload: Box<dyn std::any::Any + Send>,
 ) -> Result<(), Box<dyn std::any::Any + Send>> {
+    if jet_scheduler_native_task_body_active() && payload.is::<JetNativeTaskPanic>() {
+        let Some(control) = current_task_control() else { return Err(payload) };
+        let panic = payload.downcast::<JetNativeTaskPanic>().unwrap_or_else(|_| unreachable!("checked native task panic marker"));
+        publish_native_stop(&control, JetStopRecord::signal(JetStopKind::Panic, panic.0));
+        return Ok(());
+    }
     if !jet_scheduler_is_cancel_unwind(&*payload)
         && !jet_scheduler_is_deadline_unwind(&*payload)
     {
@@ -974,7 +984,8 @@ pub fn jet_scheduler_resume_native_stop() -> ! {
     match record.kind {
         JetStopKind::Cancelled | JetStopKind::BudgetFuel | JetStopKind::BudgetDepth => jet_task_unwind_cancel(),
         JetStopKind::Deadline => std::panic::panic_any(JetDeadlineUnwind { rendered: record.message }),
-        JetStopKind::Panic | JetStopKind::HostFault | JetStopKind::Trap => {
+        JetStopKind::Panic => std::panic::resume_unwind(Box::new(record.message)),
+        JetStopKind::HostFault | JetStopKind::Trap => {
             unreachable!("a fatal stop never reaches the native stop rail")
         }
     }
@@ -1188,6 +1199,23 @@ mod native_status_tests {
         let signal = JetStopRecord::signal(JetStopKind::Trap, String::new()).encode();
         let body = "{\"kind\":\"Trap\",\"jct_status\":null,\"owner\":null,\"start\":null,\"end\":null,\"message\":\"\"}";
         assert_eq!(signal, format!("{}\n{body}", body.len()).into_bytes());
+    }
+    #[test]
+    fn native_task_panic_keeps_exact_reason_and_does_not_stop_the_root() {
+        let _root = JetNativeTaskControlScope::enter(JetTaskControl::new());
+        assert!(jet_scheduler_native_record_unwind(Box::new(JetNativeTaskPanic("outside".into()))).is_err());
+        {
+            let _child = JetNativeTaskControlScope::enter(JetTaskControl::new());
+            let _body = JetNativeTaskBodyScope::enter();
+            let reason = "boom: λ\npayload";
+            assert!(jet_scheduler_native_record_unwind(Box::new(JetNativeTaskPanic(reason.into()))).is_ok());
+            assert_eq!(jet_scheduler_native_propagate(), JET_NATIVE_STOP_TASK_PANIC);
+            let payload = jet_scheduler_catch_foreign_boundary(|| jet_scheduler_resume_native_stop())
+                .expect_err("native callback has returned before Rust resumes the panic");
+            assert_eq!(payload.downcast_ref::<String>().map(String::as_str), Some(reason));
+        }
+        assert_eq!(jet_scheduler_native_status(), 0);
+        assert!(!jet_scheduler_native_task_body_active());
     }
 }
 

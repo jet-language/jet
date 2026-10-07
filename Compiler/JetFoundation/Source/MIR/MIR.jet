@@ -2243,9 +2243,10 @@ pub fn mir_terminator_value_uses(terminator: MIRTerminator) -> [MIRValueID] Neve
 // before it returns. Only such an operation may precede a Propagate poll.
 pub fn mir_operation_can_stop(operation: MIROperation) -> Bool Never! {
     if operation == {
-        .Call(_, _, _) | .IndirectCall(_, _, _) | .CoreCall(_, _, _, _, _, _) -> true
+        .Call(_, _, _) | .IndirectCall(_, _, _) | .CoreCall(_, _, _, _, _, _) | .ScopeExit(_) -> true
         .Semantic(semantic) -> if semantic == {
             .ClosureMethod(_, _, _) | .CoreClosureCall(_, _, _, _, _, _) | .PluginInvoke(_, _, _, _, _) | .TaskGroup(_, _, _) | .Select(_, _, _) | .PolicyFunction(_, _) | .InterruptFunction(_, _) | .HostCall(_, _) -> true
+            .RequireStop(_, _, _, _, _, _, _) -> true
             else -> false
         }
         else -> false

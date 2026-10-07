@@ -175,6 +175,7 @@ struct LowerModule {
     // stopped callback's result unwritten, and its program entry returns
     // without reading a stopped result.
     pub stop_points: Bool
+    pub task_stop_points: Bool
 }
 
 // Read-only facts about the MIR function being lowered.
@@ -277,6 +278,7 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
         glue_rows: [String:Int]{},
         issues: [LIRLoweringIssue]{},
         stop_points: lower_has_stop_points(program, prepared.functions),
+        task_stop_points: lower_task_stop_program(program, prepared.functions),
     }
     loop (index, file) in program.source_files {
         if m.source_rows.get(file.id.value) == None -> &m.source_rows.add(file.id.value, index).drop("checked absent above")
@@ -1168,6 +1170,7 @@ fn lower_is_noreturn(operation: MIROperation) -> Bool Never! {
 }
 
 fn lower_block_returns(block: MIRBasicBlock) -> Bool Never! {
+    if block.terminator == .Poll(_, _, _) -> return true
     loop instruction in block.instructions {
         if lower_is_noreturn(instruction.operation) -> return false
     }
@@ -1307,7 +1310,7 @@ fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
         if f.failed -> return
         if instruction.operation == .Phi(_) -> next
         lower_instruction(p, c, &m, &f, instruction)
-        if lower_is_noreturn(instruction.operation) -> return
+        if lower_is_noreturn(instruction.operation) && block.terminator != .Poll(_, _, _) -> return
     }
     if f.failed -> return
     lower_terminator(p, c, &m, &f, block)

@@ -1091,6 +1091,9 @@ struct JetRenderedRuntimeStop {
 /// the report. End that path at the shared process boundary instead.
 fn jet_runtime_stop_unwind(rendered: String, exit_code: i32, message: &str) -> ! {
     if jet_native_comptime_active() { jet_native_comptime_fail(1, message); }
+    if jet_scheduler_native_task_body_active() {
+        std::panic::resume_unwind(Box::new(JetNativeTaskPanic(message.to_string())));
+    }
     if jet_scheduler_in_task() {
         std::panic::resume_unwind(Box::new(message.to_string()));
     }

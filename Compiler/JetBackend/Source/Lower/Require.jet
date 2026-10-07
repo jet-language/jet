@@ -151,7 +151,11 @@ fn lower_require_stop(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     descriptor :: lower_pointer(&f)
     lower_emit(&f, LIRInst.DataAddress{dst: descriptor, data: data})
     ordinal :: lower_const(&f, if kind == .Require -> 0 else -> if kind == .RequireEq -> 1 else -> 2)
-    lower_noreturn_call(&m, &f, "jet_rt_require_stop", [LIRValueID]{ordinal, descriptor, message, left, right, locals})
+    if m.stop_points {
+        lower_call_runtime(&m, &f, "jet_rt_require_stop", [LIRValueID]{ordinal, descriptor, message, left, right, locals}, None)
+    } else {
+        lower_noreturn_call(&m, &f, "jet_rt_require_stop", [LIRValueID]{ordinal, descriptor, message, left, right, locals})
+    }
     if conditional {
         lower_start(&f, next_block, [LIRValueID]{})
         lower_alias_absent(&f, instruction)

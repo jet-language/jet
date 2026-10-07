@@ -194,6 +194,7 @@ pub mod scheduler {
     };
     include!("Prelude/Deadline.rs");
     include!("Prelude/WorkflowWait.rs");
+    include!("Prelude/Core/NativeTaskBody.rs");
     include!("SchedulerHost.rs");
     include!("Prelude/Core/TimeMonotonic.rs");
     include!("Prelude/Core/Duration.rs");

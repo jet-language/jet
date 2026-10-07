@@ -373,6 +373,7 @@ const PRELUDE_PARTS: &[&str] = &[
     RESOURCE_FACTS_PRELUDE,
     include_str!("../../../jet-foundation/src/Evidence.rs"),
     include_str!("../Prelude/Core/TestEvidence.rs"),
+    include_str!("../Prelude/Core/NativeTaskBody.rs"),
     include_str!("../Prelude/Core.rs"),
     include_str!("../Prelude/Core/ViewAccess.rs"),
     // D-EXPOP1=A / D-EXPSEM1=A: `^`. Shared verbatim with the wasm module

@@ -883,8 +883,10 @@ mapping of the whole process is ever writable and executable at once.
 The unified execution host (#4720) runs session turns and native comptime in
 one persistent child. Interrupts, deadlines and comptime fuel/depth limits
 stop recoverably inside that child and leave through explicit MIR cleanup;
-a panic or trap invalidates the child and the host restarts it. MIR carries
-the stop paths, so no backend call falls through after a flag is set:
+a root panic or trap invalidates the child and the host restarts it. A
+SendFn task's intentional program panic instead remains the Rust-tier
+`TaskFailure.Panicked(reason)` value for its joiner. MIR carries the stop
+paths, so no backend call falls through after a flag is set:
 
 - `Poll { kind: Check | Propagate, resume, stop }` (MIR.jet `MIRPollKind`,
   MIR.rs `MirPollKind`). `Check` delivers a pending session interrupt; it
@@ -904,12 +906,26 @@ dominated by the resume edge; a function with Stopped has one Shield depth
 per block and zero at every Stopped. Cleanup, Shield and transaction regions
 carry no stop points (cleanup is Shield-masked).
 
-Only host compilations produce stop points (`JetCodegenProgram.stop_points`;
-for comptime the driver's `JetDriverCompileRequest.comptime_stop_points`,
-set by the native comptime selection); the Rust and web emitters, the
-evaluator and the inliner refuse them. O0 lowers `Check` to
-`jet_rt_session_poll()`, `Propagate` to `jet_rt_session_propagate()` (any
-nonzero word takes the stop edge) and `Stopped` to a return.
+Native host and runtime compilations produce stop points
+(`JetCodegenProgram.stop_points`; Rust checked TIR's
+`lower_checked_native_mir_program_for`). The ordinary Rust/web emitters,
+evaluator and inliner refuse them; their programs retain their existing
+unwind-based semantics. The golden harness's `JET_NATIVE_STOP_POINTS=1`
+requests a fresh native MIR dump (`JET_DUMP_NATIVE_MIR`) without changing
+the Rust reference artifact. O0 lowers `Check` to `jet_rt_session_poll()`,
+`Propagate` to `jet_rt_session_propagate()` (any nonzero word takes the stop
+edge) and `Stopped` to a return. Shield exit and checked program stops are
+can-stop operations too, so their delivered transfer is observed before
+the next ordinary instruction.
+
+Task callbacks use OCB1's zero-input consumed mask (zero). Their result cell
+starts non-owned and uninitialized; only a zero delivered-only Propagate
+allows its bytes to become an owned `NativeValue`. A stopped body resumes
+the canonical cancellation, deadline or program-panic transfer only after
+returning to its Rust task boundary. Body release is Shield-masked. A typed
+native task-panic marker distinguishes a program's exact reason from an
+unknown runtime/host payload; it uses rail word 5 only inside a native
+SendFn body. Session/comptime root panics and host faults remain fatal.
 
 Comptime budgets are can-stop operations too (`comptime_budget`, compiler
 callables only): a Prelude call `jet_rt_comptime_enter(start, end)` after the

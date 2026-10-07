@@ -22,15 +22,21 @@ mod jet_c_abi_task {
     impl Body {
         fn run(self) -> NativeValue {
             let invoke: unsafe extern "C" fn(*mut u8, *mut u8) -> u64 = unsafe { std::mem::transmute(self.invoke) };
-            let mut value = NativeValue::zeroed(self.output.clone());
+            let _scope = super::JetNativeTaskBodyScope::enter();
+            let mut value = NativeValue::uninitialized(self.output.clone());
             unsafe { invoke(self.env as *mut u8, value.slot_mut()) };
-            value
+            if super::jet_scheduler_native_propagate() != 0 {
+                super::jet_scheduler_resume_native_stop();
+            }
+            value.initialized()
         }
     }
     impl Drop for Body {
         fn drop(&mut self) {
             let release: unsafe extern "C" fn(*mut u8) = unsafe { std::mem::transmute(self.release) };
+            super::jet_c_abi::jet_rt_session_shield_enter();
             unsafe { release(self.env as *mut u8) };
+            super::jet_c_abi::jet_rt_session_shield_leave();
         }
     }
 
