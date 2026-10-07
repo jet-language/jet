@@ -21,7 +21,8 @@
 
 // Process lifetime root: mutex@0, atomic next-key counter@8, destructor native
 // List header@16, scope native List header@40 (0 thread, 1 attempt). Headers
-// are [data,len,cap]. Closures transfer to the registry for key lifetime.
+// use native List order [len@0,cap@8,data@16]. Closures transfer to the
+// registry for key lifetime.
 thread_tls_registry := I64{0}
 
 fn thread_zero(address: I64, bytes: I64) {
@@ -78,7 +79,7 @@ fn thread_set_base(base: I64) {
 
 // Word-only native List growth: no Core List indexing or exact-Int carrier.
 fn thread_words_grow(header: I64, needed: I64) {
-    capacity :: sync_load(header + I64{16})
+    capacity :: sync_load(header + I64{8})
     if needed <= capacity {
         return
     }
@@ -86,15 +87,15 @@ fn thread_words_grow(header: I64, needed: I64) {
     loop next < needed -> next = next * I64{2}
     data :: jet_rt_alloc(next * I64{8}, I64{8})
     thread_zero(data, next * I64{8})
-    old :: sync_load(header)
-    count :: sync_load(header + I64{8})
+    old :: sync_load(header + I64{16})
+    count :: sync_load(header)
     at := I64{0}
     loop at < count {
         sync_store(data + at * I64{8}, sync_load(old + at * I64{8}))
         at += I64{1}
     }
-    sync_store(header, data)
-    sync_store(header + I64{16}, next)
+    sync_store(header + I64{16}, data)
+    sync_store(header + I64{8}, next)
     if (capacity != I64{0}) { jet_rt_free(old, capacity * I64{8}, I64{8}) }
 }
 
@@ -107,10 +108,10 @@ fn thread_tls_key_new_locked(destructor: I64, scope: I64) -> I64 {
     scopes :: root + I64{40}
     thread_words_grow(header, key)
     thread_words_grow(scopes, key)
-    sync_store(sync_load(header) + (key - I64{1}) * I64{8}, destructor)
-    sync_store(sync_load(scopes) + (key - I64{1}) * I64{8}, scope)
-    sync_store(header + I64{8}, key)
-    sync_store(scopes + I64{8}, key)
+    sync_store(sync_load(header + I64{16}) + (key - I64{1}) * I64{8}, destructor)
+    sync_store(sync_load(scopes + I64{16}) + (key - I64{1}) * I64{8}, scope)
+    sync_store(header, key)
+    sync_store(scopes, key)
     key
 }
 
@@ -151,23 +152,26 @@ fn rt_tls_shared_destructor_address() -> I64 {
     key
 }
 
-fn thread_tls_destroy(table: I64, key: I64, attempt_only: Bool) {
+fn thread_tls_destroy(table: I64, key: I64, attempt_only: Bool) -> Bool {
+    value :: sync_load(sync_load(table + I64{16}) + (key - I64{1}) * I64{8})
+    if (value == I64{0}) { return false }
     sync_mutex_lock(thread_tls_registry)
-    closure :: sync_load(sync_load(thread_tls_registry + I64{16}) + (key - I64{1}) * I64{8})
-    scope :: sync_load(sync_load(thread_tls_registry + I64{40}) + (key - I64{1}) * I64{8})
+    closure :: sync_load(sync_load(thread_tls_registry + I64{32}) + (key - I64{1}) * I64{8})
+    scope :: sync_load(sync_load(thread_tls_registry + I64{56}) + (key - I64{1}) * I64{8})
     sync_mutex_unlock(thread_tls_registry)
     if (attempt_only && scope != I64{1}) {
-        return
+        return false
     }
-    value :: sync_load(sync_load(table) + (key - I64{1}) * I64{8})
     // Clear first: a destructor can reenter reset_attempt without double-drop.
     // Reload data on every key because a destructor may grow its TLS table.
-    sync_store(sync_load(table) + (key - I64{1}) * I64{8}, I64{0})
-    if (value != I64{0} && closure != I64{0}) {
+    sync_store(sync_load(table + I64{16}) + (key - I64{1}) * I64{8}, I64{0})
+    if (closure != I64{0}) {
         #Unsafe("the registry owns this live closure header whose code accepts header and one I64 value") {
             _ := os_call_address_two_i64(sync_load(closure + I64{8}), closure, value)
         }
+        return true
     }
+    false
 }
 
 #Export(c) fn jet_rt_tls_reset_attempt() {
@@ -175,9 +179,9 @@ fn thread_tls_destroy(table: I64, key: I64, attempt_only: Bool) {
     if (table == I64{0}) {
         return
     }
-    key := sync_load(table + I64{8})
+    key := sync_load(table)
     loop key > (I64{0}) {
-        thread_tls_destroy(table, key, true)
+        _ := thread_tls_destroy(table, key, true)
         key -= I64{1}
     }
 }
@@ -185,8 +189,8 @@ fn thread_tls_destroy(table: I64, key: I64, attempt_only: Bool) {
 #Export(c) fn jet_rt_tls_get(key: I64) -> I64 {
     table :: sync_load(thread_base() + I64{208})
     if (table == I64{0} || key <= I64{0}) { return I64{0} }
-    if key > sync_load(table + I64{8}) -> return I64{0}
-    sync_load(sync_load(table) + (key - I64{1}) * I64{8})
+    if key > sync_load(table) -> return I64{0}
+    sync_load(sync_load(table + I64{16}) + (key - I64{1}) * I64{8})
 }
 
 #Export(c) fn jet_rt_tls_set(key: I64, value: I64) {
@@ -201,20 +205,30 @@ fn thread_tls_destroy(table: I64, key: I64, attempt_only: Bool) {
         sync_store(tcb + I64{208}, table)
     }
     thread_words_grow(table, key)
-    if key > sync_load(table + I64{8}) -> sync_store(table + I64{8}, key)
-    sync_store(sync_load(table) + (key - I64{1}) * I64{8}, value)
+    if key > sync_load(table) -> sync_store(table, key)
+    sync_store(sync_load(table + I64{16}) + (key - I64{1}) * I64{8}, value)
 }
 
 #Export(c) fn jet_rt_thread_detach() {
     tcb :: thread_base()
     table :: sync_load(tcb + I64{208})
     if (table != I64{0}) {
-        key := sync_load(table + I64{8})
-        loop key > (I64{0}) {
-            thread_tls_destroy(table, key, false)
-            key -= I64{1}
+        // Match musl pthread_key destructors: PTHREAD_DESTRUCTOR_ITERATIONS
+        // is 4 (musl src/thread/pthread_key_create.c). Each pass sees
+        // keys installed by the previous pass; values rearmed after the fourth
+        // pass are left undestroyed, exactly as pthread termination permits.
+        pass := I64{0}
+        loop pass < (I64{4}) {
+            invoked := false
+            key := sync_load(table)
+            loop key > (I64{0}) {
+                if thread_tls_destroy(table, key, false) -> invoked = true
+                key -= I64{1}
+            }
+            if !invoked -> break
+            pass += I64{1}
         }
-        jet_rt_free(sync_load(table), sync_load(table + I64{16}) * I64{8}, I64{8})
+        jet_rt_free(sync_load(table + I64{16}), sync_load(table + I64{8}) * I64{8}, I64{8})
         jet_rt_free(table, I64{24}, I64{8})
     }
     thread_set_base(I64{0})

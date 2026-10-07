@@ -19,6 +19,19 @@ fn thread_test_require(ok: Bool) {
     I64{0}
 }
 
+#Export(c) fn jet_rt_thread_fixture_rearm_destructor(closure: I64, _value: I64) -> I64 {
+    count :: sync_load(closure + I64{32})
+    sync_store(count, sync_load(count) + I64{1})
+    // Deliberately never stops rearming; the detach bound must stop at four.
+    jet_rt_tls_set(sync_load(closure + I64{24}), I64{1})
+    I64{0}
+}
+
+#Export(c) fn jet_rt_thread_fixture_rearm_worker(closure: I64) -> I64 {
+    jet_rt_tls_set(sync_load(closure + I64{24}), I64{1})
+    I64{0}
+}
+
 #Export(c) fn jet_rt_thread_fixture_worker(descriptor: I64) -> I64 {
     pair :: sync_load(descriptor)
     id :: sync_load(descriptor + I64{8})
@@ -192,6 +205,25 @@ fn thread_test_clone(entry: I64) {
     jet_rt_free(state, I64{24}, I64{8})
 }
 
+fn thread_test_rearm(entry: I64, destructor: I64) {
+    count :: jet_rt_alloc(I64{8}, I64{8})
+    sync_store(count, I64{0})
+    closure :: jet_rt_alloc(I64{40}, I64{8})
+    sync_store(closure, I64{1})
+    sync_store(closure + I64{8}, destructor)
+    sync_store(closure + I64{16}, I64{0})
+    key :: jet_rt_tls_key_new(closure)
+    sync_store(closure + I64{24}, key)
+    sync_store(closure + I64{32}, count)
+    handle :: thread_spawn(entry, closure)
+    thread_test_require(handle > I64{0})
+    thread_test_require(thread_join(handle, I64{0}) == I64{0})
+    thread_test_require(sync_load(count) == I64{4})
+    // The process registry owns the header until exit; no thread retains a
+    // nonzero value for this key, so its captured counter is now unreachable.
+    jet_rt_free(count, I64{8}, I64{8})
+}
+
 #Export(c) fn jet_rt_thread_fixture_run(callbacks: I64) -> I64 {
     // .init_array already initialized alloc/thread; repeated init is harmless.
     parent :: thread_base()
@@ -201,6 +233,7 @@ fn thread_test_clone(entry: I64) {
     thread_test_parks(sync_load(callbacks + I64{8}), false)
     thread_test_parks(sync_load(callbacks + I64{8}), true)
     thread_test_clone(sync_load(callbacks + I64{16}))
+    thread_test_rearm(sync_load(callbacks + I64{40}), sync_load(callbacks + I64{32}))
     #Unsafe("heap-free fixture success line is one eight-byte write") {
         _ := os_write_word_i64(I64{1}, I64{2932874797083764}, I64{7})
     }
