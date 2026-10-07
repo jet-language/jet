@@ -39,16 +39,8 @@ const sourceRoots = [
 const excludedSourceRoots = [
   // Native host glue remains a Rust/backend concern, not aggregate Jet input.
   "Compiler/Bootstrap/Host",
-  // Unwired CLI leaves excluded from sources.list until their typed error domains land.
-  "Compiler/JetCli/Source/Cli/FixMemory.jet",
+  // Unwired CLI leaf excluded from sources.list until its typed error domain lands.
   "Compiler/JetCli/Source/Cli/LspFixes.jet",
-  "Compiler/JetCli/Source/Cli/TestCompare.jet",
-  "Compiler/JetCli/Source/Cli/ReceiptCodec.jet",
-  "Compiler/JetCli/Source/Cli/ReceiptSections.jet",
-  "Compiler/JetCli/Source/Cli/ReceiptStore.jet",
-  "Compiler/JetCli/Source/Cli/RecordCodec.jet",
-  "Compiler/JetCli/Source/Cli/RecordSnapshot.jet",
-  "Compiler/JetCli/Source/Cli/RecordIndex.jet",
 ];
 
 function fail(message) {

@@ -10,7 +10,9 @@ struct JetCLIProjectClaim {
     reason: String
 }
 
-fn jet_cli_project_status_target(args: [String], default_target: String) -> String String! {
+// CmdStatus.rs `target_arg` up to its default: the one explicit target, or
+// None when the caller must select the stock project entry.
+fn jet_cli_project_status_target(args: [String]) -> String? String! {
     target := String?{None}
     skip := false
     loop arg in args {
@@ -27,7 +29,7 @@ fn jet_cli_project_status_target(args: [String], default_target: String) -> Stri
         if target != None -> return Err("`jet status` accepts at most one target")
         target = Val(arg)
     }
-    Ok(target ?? default_target)
+    Ok(target)
 }
 
 fn jet_cli_project_status_matches(receipt: JetCLIReceipt, target: String, directory: Bool) -[FS]> Bool Never! {

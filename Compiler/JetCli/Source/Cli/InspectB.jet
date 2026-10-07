@@ -29,7 +29,7 @@ use jet_parser.[
 
 // `argv` is the normalized argv with its `--` tail (main.rs `raw`), `jet_argv`
 // the words before `--`, and `args` their positional words.
-pub fn jet_cli_inspect_b(argv: [String], command: String, jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan? Never! {
+pub fn jet_cli_inspect_b(argv: [String], command: String, jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, threads: Int?) -[FS, Env, Time.Wait]> JetCLIPlan? Never! {
     rest :: jet_cli_tail(argv, 1)
     if command == {
         "reserved" -> return Val(jet_cli_reserved(json))
@@ -904,7 +904,7 @@ fn jet_cli_codemod(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPl
 // right after `require_manifest_root` until D-FSDIR1 (#4697); the host port is
 // in commit bf658e410 (InspectB.jet).
 fn jet_cli_audit(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
-    if args.len() > 0 && args[0] == "memory" -> return jet_cli_audit_memory(jet_cli_tail(args, 1), color, json)
+    if args.len() > 0 && args[0] == "memory" -> return jet_cli_audit_memory_at(jet_cli_selected_root_or_cwd(), jet_cli_tail(args, 1), color, json)
     if args.len() > 0 && (args[0] == "copies" || args[0].ends_with(".jet")) -> return jet_cli_not_ported("inspect audit copies", color)
     if jet_cli_inspect_project_root("inspect audit", "error: no package.jet found — run `jet inspect audit` inside a project", color) == .Refused(plan) -> return plan
     jet_cli_not_ported("inspect audit", color)
@@ -918,18 +918,22 @@ fn jet_cli_sbom(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan 
 }
 
 // `jet inspect bind …` / `jet bind …` (CmdDevTools.rs `run_bind`): the usage
-// page, and the data-schema binders (`json|csv|sql|xml|proto`, Bindings.jet)
-// with an explicit `-o`. Their default output needs canonical
-// `Loader::selected_project_root` (workspace > repository > package), which
-// the bootstrap host does not have yet; the language binders and the C header
+// page, and the data-schema binders (`json|csv|sql|xml|proto`, Bindings.jet).
+// A default output lands under the selected project root of the input's
+// directory (lib.rs `build_project_root`); a root that cannot be selected is
+// its registered diagnostic, exit 1. The language binders and the C header
 // backend are not ported.
-fn jet_cli_bind(args: [String], color: Bool) -[FS]> JetCLIPlan Never! {
+fn jet_cli_bind(args: [String], color: Bool) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
     if args.len() > 0 && (args[0] == "json" || args[0] == "csv" || args[0] == "sql" || args[0] == "xml" || args[0] == "proto") {
         if jet_cli_data_bind_prepare(args[0], jet_cli_tail(args, 1), color) == {
             .Done(plan) -> return plan
             .Prepared(job) -> {
                 if job.output != None -> return jet_cli_data_bind_finish(job, "")
-                return jet_cli_not_ported("inspect bind {job.format} <default output>", color)
+                cwd :: cli_files.cwd() ?? "."
+                absolute :: if job.input_path.starts_with("/") -> job.input_path else -> jet_cli_entry_join(cwd, job.input_path)
+                cache := WorkspaceDeclarationCache.new()
+                root :: jet_cli_selected_project_root(&cache, jet_cli_parent(absolute) ?? ".") ?? return jet_cli_done("", diagnostic_render_all(job.input_path, job.input, [Diagnostic]{err.diagnostic}, false), JET_DRIVER_EXIT_USER_ERROR)
+                return jet_cli_data_bind_finish(job, root)
             }
         }
     }

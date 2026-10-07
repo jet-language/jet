@@ -94,6 +94,12 @@ pub enum JetCLIPlan {
     // host checks `file` (none: the language catalog alone) and searches
     // its semantic symbols for `mode`; `query` is the joined text words.
     Find(file: String?, query: String, mode: JetCLIFindMode, json: Bool)
+    // `jet cache status|prune|limit` (CmdStatus.rs `run_cache`): `args` is the
+    // raw tail after `cache`, option spellings and order intact.
+    Cache(args: [String], json: Bool)
+    // `jet remote …` (main.rs `run_remote`): `argv` is the full normalized
+    // argv, starting at `remote`.
+    Remote(argv: [String], json: Bool, color: Bool)
 }
 
 // One native `jet fmt` invocation (Source/main.rs `"fmt"` -> `run_fmt`).
@@ -380,6 +386,62 @@ fn jet_cli_manifest_root(directory: String) -[FS]> String? Never! {
             return None
         }
     }
+}
+
+// CmdMemory.rs / CmdGc.rs `project_root`: the working directory's selected
+// project root (ProjectRoot.jet), else the working directory itself.
+fn jet_cli_selected_root_or_cwd() -[FS, Env]> String Never! {
+    cwd :: cli_files.cwd() ?? "."
+    cache := WorkspaceDeclarationCache.new()
+    jet_cli_selected_project_root(&cache, cwd) ?? cwd
+}
+
+// Source/main.rs `"gc"`: `gc report` (CmdGc.rs `run`) is the only subcommand.
+fn jet_cli_gc(argv: [String], args: [String], color: Bool, json: Bool) -[FS, Env, Time, Time.Wait]> JetCLIPlan Never! {
+    if args.len() < 2 {
+        return jet_cli_fail("E2101", "`gc` isn't a jet command", "`jet clean` is the sole package-store cleanup entry (D-CLI-STORE2=A)", "run `jet clean`", color, JET_DRIVER_EXIT_USAGE)
+    }
+    if args[1] != "report" {
+        return jet_cli_fail("E2101", "`{args[1]}` isn't a jet gc command", "jet gc currently exposes only the automatic-promotion report", "run `jet gc report`", color, JET_DRIVER_EXIT_USAGE)
+    }
+    jet_cli_gc_report_at(jet_cli_selected_root_or_cwd(), jet_cli_tail(argv, 2), color, json)
+}
+
+// Source/CmdStatus.rs `run_status`: the one target (by default the stock
+// project entry, relative to the working directory) read against the
+// receipt root `jet prove <target>` selects (ReceiptStore.rs
+// `receipt_root_for` / `target_path`).
+fn jet_cli_status(status_args: [String], color: Bool, json: Bool) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
+    cwd :: cli_files.cwd() ?? "."
+    explicit := String?{None}
+    if jet_cli_project_status_target(status_args) == {
+        .Ok(found) -> explicit = found
+        .Err(message) -> return jet_cli_fail("E2102", message, "jet status accepts one project target and registered output flags", "run `jet status [<file.jet|dir>]` with one target", color, JET_DRIVER_EXIT_USAGE)
+    }
+    notices := [String]{}
+    target := explicit ?? ""
+    if explicit == None {
+        root :: jet_cli_manifest_root(cwd) ?? cwd
+        entry := ""
+        if jet_cli_find_project_entry(root, "status", color, &notices) == {
+            .Entry(found) -> entry = found.path
+            .Refused(plan) -> return jet_cli_with_notices(notices, plan)
+            .Absent -> entry = jet_cli_entry_join(cli_files.realpath(root) ?? root, JET_CLI_DEFAULT_ENTRY_FILE)
+        }
+        prefix :: if cwd.ends_with("/") -> cwd else -> "{cwd}/"
+        target = if entry == cwd -> "" else if entry.starts_with(prefix) -> entry.slice(prefix.len()..<entry.len()) else -> entry
+    }
+    candidate :: if target.starts_with("/") -> target else -> jet_cli_entry_join(cwd, target)
+    start := cwd
+    if cli_files.exists(candidate) || candidate.ends_with(".jet") {
+        start = candidate
+    } else if cli_files.is_file("{candidate}.jet") {
+        start = "{candidate}.jet"
+    }
+    if !cli_files.is_dir(start) -> start = jet_cli_parent(start) ?? start
+    cache := WorkspaceDeclarationCache.new()
+    root :: jet_cli_receipt_project_root(&cache, start)
+    jet_cli_with_notices(notices, jet_cli_project_status_at(root, cwd, target, json))
 }
 
 // `jet <word>` sugar for `jet run <word>` (Source/main.rs `looks_like_jet_source`).
@@ -818,13 +880,15 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
     JetCLIPlan.Test{file: file, source: source, color: color, verbose: verbose, threads: threads, options: options}
 }
 
-// `jet explain [<CODE>|<syntax>|<policy>]` (CmdDevTools.rs `run_explain`,
-// Explain.rs `lookup`): registered diagnostic essays render through
-// Explain.jet; an unregistered code-shaped subject keeps the driver's
-// unknown-code report; offline syntax (and its E2106 typo report) and
-// standalone policies render through SyntaxExplain.jet. Build facts, `marker`
-// sites, and a policy with a source file are load-only source queries and
-// stay refused until the loader leaf lands, as do the views.
+// `jet explain [<CODE>|<syntax>|<policy>|<registration>]` (CmdDevTools.rs
+// `run_explain`, Explain.rs `lookup`): registered diagnostic essays render
+// through Explain.jet; an unregistered code-shaped subject keeps the driver's
+// unknown-code report; offline syntax and standalone policies render through
+// SyntaxExplain.jet, then registered facts and corpus truths through
+// RegistrationExplain.jet; only then is a syntax-shaped miss the E2106 typo
+// report. Build facts, `marker` sites, and a policy with a source file are
+// load-only source queries and stay refused until the loader leaf lands, as
+// do the views.
 fn jet_cli_explain(jet_argv: [String], args: [String], color: Bool, json: Bool) -> JetCLIPlan Never! {
     if jet_cli_has(jet_argv, "--reload") || jet_cli_has(jet_argv, "--web-graph") || jet_cli_has(jet_argv, "--cost") -> return jet_cli_not_ported("explain", color)
     if jet_cli_explain_diagnostic(args, color, json) == .Val(plan) -> return plan
@@ -832,8 +896,11 @@ fn jet_cli_explain(jet_argv: [String], args: [String], color: Bool, json: Bool) 
     query :: args[1]
     if query == "marker" || jet_cli_explain_build_fact_name(query) != None -> return jet_cli_not_ported("explain", color)
     if args.len() > 2 && policy_key_parse(query.trim().removeprefix("@")) != None -> return jet_cli_not_ported("explain", color)
-    if jet_cli_explain_syntax(query, jet_cli_has(jet_argv, "--verbose"), color, json) == .Val(plan) -> return plan
+    verbose :: jet_cli_has(jet_argv, "--verbose")
+    if jet_cli_syntax_lookup(query) != None && jet_cli_explain_syntax(query, verbose, color, json) == .Val(plan) -> return plan
     if args.len() == 2 && jet_cli_explain_policy(query, color, json) == .Val(plan) -> return plan
+    if jet_cli_explain_registration(query, color, json) == .Val(plan) -> return plan
+    if jet_cli_explain_syntax(query, verbose, color, json) == .Val(plan) -> return plan
     jet_cli_not_ported("explain", color)
 }
 
@@ -1047,7 +1114,7 @@ fn jet_cli_wants_json(owned: [String]) -> Bool Never! {
 // Plan one `jet` invocation; `raw` is argv without the program name. Under
 // `--json` a refusal is the `cli` status envelope on stdout (main.rs
 // `emit_cli_report`).
-pub fn jet_cli_front(raw: [String]) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
+pub fn jet_cli_front(raw: [String]) -[FS, Env, Time, Time.Wait]> JetCLIPlan Never! {
     plan :: jet_cli_plan(raw)
     if plan == {
         .Refused(report, _, exit_code, notice) -> {
@@ -1058,7 +1125,7 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
     plan
 }
 
-fn jet_cli_plan(raw: [String]) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
+fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Time.Wait]> JetCLIPlan Never! {
     // D-ADOPT-CCSPELL1=A: the engine compiler aliases own every raw argument
     // (Source/main.rs `dispatch_alias`), before Jet's output/flag parsing.
     if raw.len() > 0 && (raw[0] == "cc" || raw[0] == "c++") -> return jet_cli_foreign_compile(raw)
@@ -1256,6 +1323,16 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
         "fmt" -> return jet_cli_fmt(argv, jet_argv, args, color, quiet)
         "find" -> return jet_cli_find(jet_cli_tail(argv, 1), color, json)
         "parts" -> return jet_cli_project_parts(jet_cli_tail(argv, 1), color, json)
+        // Source/main.rs dispatch arms over the raw argv (`raw[1..]` etc.).
+        "status" -> return jet_cli_status(jet_cli_tail(argv, 1), color, json)
+        "fix" -> {
+            if args.len() > 1 && args[1] == "memory" -> return jet_cli_fix_memory_at(jet_cli_selected_root_or_cwd(), jet_cli_tail(argv, 2), color, json)
+        }
+        "gc" -> return jet_cli_gc(argv, args, color, json)
+        "cache" -> return JetCLIPlan.Cache{args: jet_cli_tail(argv, 1), json: json}
+        "remote" -> return JetCLIPlan.Remote{argv: argv, json: json, color: color}
+        // `jet self toolchain` (main.rs `run_toolchain`): read-only pin report.
+        "toolchain" -> return jet_cli_self_toolchain(json)
         else -> {}
     }
     if jet_cli_inspect_word(command) -> return jet_cli_inspect(argv, jet_argv, args, color, quiet, json, threads)
