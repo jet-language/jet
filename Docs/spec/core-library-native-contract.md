@@ -278,6 +278,46 @@ before the lowering invokes the existing release helper exactly once.
 There is no Rust helper seed or second closure carrier. Admission requires a
 fresh pack containing these exports together with their lowering callers,
 and an N-thread Shared-held closure witness with allocator balance.
+
+### Internal Core publication ABI
+
+Sema publishes the checked initializer identity and source-selected lifetime
+for Core-only `core.mem.__*_shared(init)` operations. Lowering creates one typed
+MIR `Global` site per initializer, never a hardcoded initializer-name table or a
+per-caller cache.
+
+All native site cells belong to one pinned Core image. Dynamic images import
+its getters and never own or register cells. Before publishing getters, the
+host executes the image's no-argument `Unit` startup once; that startup performs
+frozen-static fixups only, not a normalized application entry or finalizer.
+Process/World first publication calls the canonical runtime
+`jet_rt_shared_site_publish(cell, candidate, lifetime)` with tags Process=0 and
+World=1. It transfers the candidate's existing owner, drops a losing candidate,
+and returns a borrowed winner. The getter clones before returning its owning
+result. The common read is an ordinary typed `Global` load.
+
+Thread/Attempt project the same pinned site identity through native TLS, with
+Thread scope 0 and Attempt scope 1. World/Attempt retirement occurs only after
+the corresponding tasks and guards are quiescent; it releases site owners,
+never outstanding clones. Thread is an OS-thread lifetime, not an evaluator
+session or host lease lifetime. Process state is never reset for world reloads
+or schema changes; a mismatched factory schema must be refused without changing
+the retained state.
+
+Source runtime evaluation forwards a typed publication site through
+`JetEvalHostCallTarget.SharedSite(site, ty)` to that same pinned image.
+It owns no replacement Process table or session-scoped Thread projection.
+Comptime evaluation alone caches initializer results locally, retiring those
+owners with its evaluation machine. Attempt retirement is a typed host reset
+after the selected unit's callbacks and frames retire; World retirement is an
+explicit quiescent host boundary.
+
+Before any pinned getter is available to a factory, the host checks the
+canonical Core source package/module owner identity and seal together with the
+sorted site-key/lifetime/payload-physical-layout/getter inventory. An incompatible
+factory receives the registered `E0956` refusal without resetting Process state.
+The runtime shared-library admission receipt is checked separately and is not
+part of the Core schema hash.
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are

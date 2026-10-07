@@ -20,6 +20,27 @@ const WASIP2_UNSUPPORTED_SURFACES: &[&str] = &[
     "core.email",
 ];
 
+// Exact registered APIs without a browser host provider. Keep the Jet-half
+// list in CheckProgram.jet identical; the compiler witness pins both lists.
+const WEB_HOST_UNSUPPORTED_CORE_APIS: &[&str] = &[
+    "core.auth::magic_link_consume",
+    "core.auth::magic_link_issue",
+    "core.auth::oauth_begin",
+    "core.auth::oauth_finish",
+    "core.auth::password_login",
+    "core.auth::register_user",
+    "core.auth::session_validate",
+    "core.sys::decode",
+    "core.sys::expand",
+    "core.sys::get",
+    "core.sys::getenv",
+    "core.sys::home_dir",
+    "core.sys::set",
+    "core.sys::temp_dir",
+    "core.sys::unset",
+    "core.sys::vars",
+];
+
 /// D-WASISRV1=A: reject a reachable Core socket surface before codegen when
 /// the selected target has no socket runtime that the Prelude can use.
 pub fn check_target_surface(bundle: &ProgramBundle, target: &str) -> Vec<Diagnostic> {
@@ -28,16 +49,8 @@ pub fn check_target_surface(bundle: &ProgramBundle, target: &str) -> Vec<Diagnos
         target == Syntax::BUILD_TARGET_WEB || bundle.web_partition_enforced;
     let web_unsupported = if web_target {
         bundle.used_core.iter().filter_map(|usage| {
-            let (module, member) = usage.split_once("::")?;
-            let unsupported = match module {
-                "core.sys" => matches!(member, "get" | "getenv" | "set" | "unset" | "vars" | "decode"
-                    | "home_dir" | "temp_dir" | "expand" | "env_get"),
-                "core.auth" => matches!(member, "register_user" | "password_login" | "session_validate"
-                    | "magic_link_issue" | "magic_link_consume" | "oauth_begin" | "oauth_finish"),
-                "core.testing" => member.starts_with("__fault_"),
-                _ => false,
-            };
-            unsupported.then(|| format!("{module}.{member}"))
+            WEB_HOST_UNSUPPORTED_CORE_APIS.contains(&usage.as_str())
+                .then(|| usage.replace("::", "."))
         }).collect::<BTreeSet<_>>()
     } else {
         BTreeSet::new()
