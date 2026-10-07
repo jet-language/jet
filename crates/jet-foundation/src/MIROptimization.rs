@@ -4183,6 +4183,48 @@ impl<'a> BooleanLocals<'a> {
     }
 }
 
+/// Whole-owner `MovePlace` results that only feed a releasing `Drop`: the
+/// scope-end cleanup of an owner. After a field of that owner was moved
+/// (`x := ^run.graph`) the cleanup releases the remaining fields, which
+/// every backend's partial-move plan does (MIRRust `partial_drop_node`).
+fn partial_move_remainder_drops(
+    function: &MirFunction,
+    place_map: &HashMap<crate::MIR::MirPlaceId, &MirPlace>,
+) -> HashSet<MirValueId> {
+    let mut drops: HashMap<MirValueId, bool> = HashMap::new();
+    for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+        if let (MirOperation::MovePlace { place }, Some(result)) = (&instruction.operation, instruction.result) {
+            if place_map.get(place).is_some_and(|row| row.projections.is_empty()) {
+                drops.insert(result, false);
+            }
+        }
+    }
+    if drops.is_empty() {
+        return HashSet::new();
+    }
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            let releases = match &instruction.operation {
+                MirOperation::Drop { value, kind } if *kind != crate::MIR::MirDropKind::None => Some(*value),
+                _ => None,
+            };
+            for value in instruction.operation.value_uses() {
+                if let Some(dropped) = drops.get_mut(&value) {
+                    if releases == Some(value) {
+                        *dropped = true;
+                    } else {
+                        drops.remove(&value);
+                    }
+                }
+            }
+        }
+        for value in block.terminator.value_uses() {
+            drops.remove(&value);
+        }
+    }
+    drops.into_iter().filter_map(|(value, dropped)| dropped.then_some(value)).collect()
+}
+
 fn verify_moves_and_borrows(
     function: &MirFunction,
     defs: &HashMap<MirValueId, (MirBlockId, usize, MirType, MirOwnership)>,
@@ -4197,6 +4239,7 @@ fn verify_moves_and_borrows(
     for scope in &function.scopes {
         scope_deadlines.entry(scope.id).or_insert(scope.deadline);
     }
+    let remainder_drops = partial_move_remainder_drops(function, place_map);
     // Only paths under one root can overlap, so events are grouped by root:
     // each use scans its own root's moves, not every move in the function.
     type PlaceEvents = HashMap<String, Vec<(MirPlacePath, MirBlockId, usize)>>;
@@ -4310,6 +4353,14 @@ fn verify_moves_and_borrows(
                     let conflicts = match use_kind {
                         MirPlaceUse::Reinitialize => {
                             mir_place_path_is_prefix(moved_path, &path) && moved_path != &path
+                        }
+                        // The remainder drop of a partly moved owner releases
+                        // only the fields still in place: an earlier move of
+                        // a field below it is not a second move of that field.
+                        MirPlaceUse::Move
+                            if instruction.result.is_some_and(|value| remainder_drops.contains(&value)) =>
+                        {
+                            mir_place_path_is_prefix(moved_path, &path)
                         }
                         _ => mir_place_paths_overlap(moved_path, &path),
                     };
