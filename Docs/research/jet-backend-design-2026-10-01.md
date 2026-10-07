@@ -1000,15 +1000,22 @@ Shared getter imports resolve only through this pinned inventory, never
 through a runtime-library fallback. Closing a logical session cannot finalize
 or unmap the Core image; a restarted child admits its own fresh image.
 
-The evaluator's persistent host likewise owns one ordinary typed
-`JetEvalSharedSiteContext` and injects it into runtime configurations. Config
-forks retain that physical registry rather than copying payloads or retaining
-session-local indices into a replacement registry. Process entries survive
-session retirement and reload; World entries reset only after world quiescence.
-The native child's pinned image is its separate physical namespace: no live
-payload is serialized across the child boundary. Outermost host creation,
-thread attachment/teardown and the bootstrap typed bridge remain required
-integration work; configuration fields alone do not establish these lifetimes.
+Source runtime evaluation delegates `GlobalShared` to the typed host
+`SharedSite` target. Each factory keeps only its local logical registry; the
+persistent parent host owns the canonical pinned Core image and its physical
+Shared roots. No old factory's typed evaluator context, Rust type identity,
+adapter or callback projector may be retained across factory unload.
+The parent and native child are separate physical namespaces: no live payload
+or pointer is serialized between them. Attachment compares the canonical Core
+owner identity and seal plus the sorted site/lifetime/payload-layout/getter
+inventory before invoking a getter. A mismatch is a registered named E0956
+refusal: old Process state stays intact and incompatible new code cannot attach.
+World resets at the mapped one-shot/reload boundary; Thread persists until OS
+thread retirement, and Attempt resets only at the selected-unit attempt boundary.
+The parent runtime admission record is private, build-time embedded metadata
+from the same producer as the host binary and runtime library, not a user flag,
+environment lookup or receipt self-hash. Parent admission, getter dispatch and
+native physical Shared interop remain required integration work.
 
 `x64_memory_core_shared_image` consumes the explicit pinned-Core lowering
 inventory, rather than guessing exports from MIR function numbers. Getter names
