@@ -1181,11 +1181,11 @@ fn prove_solver_counterexample_is_checked_producer_evidence() {
 }
 
 #[test]
-fn prove_caught_property_stop_does_not_capture_later_unit_stop() {
+fn prove_caught_property_stop_does_not_capture_later_unit_panic() {
     let root = workspace("property_capture_boundary");
     fs::write(
         root.join("mixed.jet"),
-        "#[Pre(value > 0, \"positive\"), Post(result > value, \"fee grows\")] fn add_fee(value: Int) -[]> Int { return value }\n#Test(\"ordinary later stop\") { add_fee(1) }\n",
+        "#[Pre(value > 0, \"positive\"), Post(result > value, \"fee grows\")] fn add_fee(value: Int) -[]> Int { return value }\n#Test(\"ordinary same site\") { assert_eq(add_fee(1), 1) }\n#Test(\"ordinary later panic\") { panic(\"ordinary later panic\"); assert(true) }\n",
     )
     .unwrap();
     let out = Command::new(jet())
@@ -1220,6 +1220,14 @@ fn prove_caught_property_stop_does_not_capture_later_unit_stop() {
             record.kind == jet_foundation::Evidence::EvidenceKind::Runtime
                 && !record.is_caught_property_case()
                 && record.detail.contains("fee grows")
+        }),
+        "{records:?}"
+    );
+    assert!(
+        records.iter().any(|record| {
+            record.kind == jet_foundation::Evidence::EvidenceKind::Runtime
+                && !record.is_caught_property_case()
+                && record.detail.contains("ordinary later panic")
         }),
         "{records:?}"
     );
