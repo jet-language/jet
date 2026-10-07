@@ -442,6 +442,26 @@ the complete source/configuration/profile/target/implementation/artifact/run
 identity and checked derivation references for live snapshots and replay;
 readers reject altered identities, row IDs, derivations, and noncanonical bytes.
 
+Canonical-route evidence is opt-in through the existing adapter evidence
+environment (`JET_ADAPTER_MODE` and comma-separated `JET_ADAPTER_OPERATION_IDS`),
+not an additional public compiler flag. The source driver receives these
+choices as typed request options from its host and passes them to an
+invocation-owned journal; ordinary compiles allocate no boundary snapshots.
+Selected pass boundaries retain their actual input/output representations,
+payloads and identities, source provenance, occurrence/order, and preservation
+premises. Decision inspection consumes these captured records directly, never
+reconstructing a route from decision rows, work counters, or a digest.
+Requested Rust boundaries with no separate Jet producer have explicit
+`no Jet pass` availability rows. These are not pass records and do not prove
+whether the language meaning is folded into another Jet pass or is absent.
+
+The source loader also exposes the physical manifests and module paths it
+actually read, including failed-load diagnostics. This is not the full watched
+input closure: embedded Core/generated paths are excluded, and its comptime
+input coverage is explicitly uncertified until actual evaluator reads are
+retained. Receipt consumers must not substitute all authorized sources for
+that missing read set.
+
 Output inspection consumes sema's checked callable links and selection facts,
 including the original source/semantic/machine names, typed parameters, inferred
 failure contract, solved effects, and reference/declaration spans. The driver

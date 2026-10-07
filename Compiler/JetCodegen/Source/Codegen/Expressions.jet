@@ -1,6 +1,7 @@
 // Typed expression lowering preserves checked MIR types and ownership facts.
 // Every produced MIR value retains its checked type, span, and ownership.
 use jet_foundation.[
+    canonical_pass_debug_snapshot,
     AccessConvention,
     BinEndian,
     CoreCallRecord,
@@ -3371,6 +3372,7 @@ fn jet_codegen_host_call_value_arg(value: MIRValueID, span: Span, access: MIRAcc
 }
 
 fn jet_codegen_lower_host_method(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, method: String, args: [TExpr]) -> MIRValueID {
+    if jet_codegen_build_context_host_method(receiver.ty) -> return jet_codegen_lower_build_context_host_method(&builder, program, expression, receiver, method, args)
     if jet_codegen_reflection_host_method(receiver.ty, method, args.len()) -> return jet_codegen_lower_reflection_host_method(&builder, program, expression, receiver, method, args)
     if jet_codegen_compiler_value_host_method(receiver.ty, method, args.len()) -> return jet_codegen_lower_compiler_value_host_method(&builder, program, expression, receiver, method, args)
     if jet_codegen_shared_owner_host_method(receiver.ty, method, args.len()) -> return jet_codegen_lower_shared_owner_host_method(&builder, program, expression, receiver, method, args)
@@ -4966,6 +4968,16 @@ fn jet_codegen_lower_host_call(builder: &JetCodegenBuilder, program: JetCodegenP
 }
 
 fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr) -> MIRValueID {
+    value :: jet_codegen_lower_expr_inner(&builder, program, expression)
+    if jet_codegen_journal_requested(program, "mir.lower-expression") {
+        input :: canonical_pass_debug_snapshot("tir", "mir.lower-expression", "{expression}")
+        output :: canonical_pass_debug_snapshot("mir", "mir.lower-expression", "MirValueId({value.value})")
+        jet_codegen_journal_record(program, "mir.lower-expression", "crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs", input, output)
+    }
+    value
+}
+
+fn jet_codegen_lower_expr_inner(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr) -> MIRValueID {
     if expression.kind == {
         .IntLit(value, width) -> {
             mir_width := if width == {

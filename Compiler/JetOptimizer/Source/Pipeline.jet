@@ -2,6 +2,12 @@
 // The optimizer consumes the shared MIR schema and owns the one target-neutral
 // legality, transformation, proof-fact, and deterministic-order pipeline.
 use jet_foundation.[
+    CanonicalPassJournal,
+    CanonicalPassSnapshot,
+    canonical_pass_enabled,
+    canonical_pass_requested,
+    canonical_pass_record,
+    canonical_pass_mir_snapshot,
     CompilerThreads,
     MIRAccelerationFact,
     MIRBoundsFact,
@@ -121,10 +127,12 @@ fn mir_optimizer_succeeded(report: MIROptimizationReport) -> MIROptimizationResu
 // entry check (Rust MIROptimization `validate_after`). The per-function
 // passes run in waves on up to `threads` compiler threads (mir_pass_wave);
 // the result is the same for every thread count.
-pub fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threads: CompilerThreads) -> MIROptimizationResult {
+pub fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threads: CompilerThreads, journal: &CanonicalPassJournal) -> MIROptimizationResult {
     report := mir_optimizer_empty_report()
+    pipeline_before :: mir_pass_journal_before(program, journal, "mir.optimize-pipeline")
     validation := mir_pass_check(program, .LegalityVerification, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
+    mir_pass_journal_check(program, &journal, "mir.legality-verification")
     if mir_optimizer_has_complete_seal(program) {
         report.completed = mir_optimizer_production_order()
         loop function in program.functions {
@@ -136,16 +144,21 @@ pub fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threa
         }
         validation = mir_pass_lint(program, .CanonicalLoopFacts)
         if validation == .Val(error) -> return mir_optimizer_failed(error, report)
+        mir_pass_journal_after(program, &journal, "mir.optimize-pipeline", pipeline_before)
         return mir_optimizer_succeeded(report)
     }
 
     mir_pass_clear_batch_facts(&program)
 
+    inline_before :: mir_pass_journal_before(program, journal, "mir.inline-always")
     inline_result :: mir_pass_expand_inline_always(&program)
     report.inline_calls_expanded = inline_result.expanded
     report.reachable_blocks_removed += inline_result.blocks_removed
     if inline_result.error == .Val(error) -> return mir_optimizer_failed(error, report)
+    mir_pass_journal_after(program, &journal, "mir.inline-always", inline_before)
+    mark_before :: mir_pass_journal_before(program, journal, "mir.pass-order-facts")
     mir_pass_mark(&program, .LegalityVerification)
+    mir_pass_journal_after(program, &journal, "mir.pass-order-facts", mark_before)
     &report.completed.push(.LegalityVerification)
     validation = mir_pass_validate_after(program, .LegalityVerification, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
@@ -153,11 +166,34 @@ pub fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threa
     // A wave ends where the next step needs the whole program: after every
     // step under full verification, else only at the two fixed-reduction
     // barriers.
-    wave_ends :: if full_verification -> [Int]{1, 2, 3, 4, 5, 6, 7, 8, 9} else -> [Int]{6, 7, 9}
-    inputs := MIRPassWaveInputs{prelude_calls: program.prelude_calls, purity: mir_pass_prelude_purity(program.prelude_calls), cleanup: false}
+    capturing :: canonical_pass_enabled(journal.options)
+    wave_ends :: if full_verification || capturing -> [Int]{1, 2, 3, 4, 5, 6, 7, 8, 9} else -> [Int]{6, 7, 9}
+    inputs := MIRPassWaveInputs{prelude_calls: program.prelude_calls, purity: mir_pass_prelude_purity(program.prelude_calls), cleanup: false, mark: !capturing}
     first := MIR_PASS_STEP_UNREACHABLE
     loop last in wave_ends {
-        counts :: mir_pass_wave(&program, first, last, inputs, threads)
+        operation :: if capturing -> mir_pass_journal_step_operation(first) else -> ""
+        before :: if capturing -> mir_pass_journal_before(program, journal, operation) else -> None
+        counts := mir_pass_wave_counts()
+        if capturing && first == MIR_PASS_STEP_REDUCE {
+            // The reference records fact derivation and reduction separately.
+            // Capture the intermediate program, not the completed wave twice.
+            loop index in 0..<program.functions.len() {
+                facts :: mir_pass_function_loop_and_vector_facts(&program.functions[index], inputs.prelude_calls)
+                counts.first_loops += facts.loops
+                counts.first_vectors += facts.vectors
+            }
+            mir_pass_journal_after(program, &journal, operation, before)
+            reduction_before :: mir_pass_journal_before(program, journal, "mir.fixed-reduction-normalization")
+            loop index in 0..<program.functions.len() {
+                normalized :: mir_pass_fixed_reduction_normalize_function(&program.functions[index], inputs.prelude_calls)
+                counts.normalized += normalized
+                if normalized > 0 -> counts.rewrote = true
+            }
+            mir_pass_journal_after(program, &journal, "mir.fixed-reduction-normalization", reduction_before)
+        } else {
+            counts = mir_pass_wave(&program, first, last, inputs, threads)
+            if capturing -> mir_pass_journal_after(program, &journal, operation, before)
+        }
         report.reachable_blocks_removed += counts.blocks_removed
         report.folded_values += counts.folded
         report.dead_values_removed += counts.dead
@@ -176,6 +212,11 @@ pub fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threa
         inputs.cleanup = counts.rewrote
         loop step in first..<(last + 1) {
             pass :: mir_pass_step_completes(step) ?? next
+            if capturing {
+                pass_before :: mir_pass_journal_before(program, journal, "mir.pass-order-facts")
+                mir_pass_mark(&program, pass)
+                mir_pass_journal_after(program, &journal, "mir.pass-order-facts", pass_before)
+            }
             &report.completed.push(pass)
             validation = mir_pass_validate_after(program, pass, full_verification)
             if validation == .Val(error) -> return mir_optimizer_failed(error, report)
@@ -183,7 +224,9 @@ pub fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threa
         first = last + 1
     }
 
+    order_before :: mir_pass_journal_before(program, journal, "mir.canonical-program-order")
     mir_pass_canonicalize_program_order(&program)
+    mir_pass_journal_after(program, &journal, "mir.canonical-program-order", order_before)
     if full_verification {
         validation = mir_pass_validate_program(program, .CanonicalLoopFacts)
         if validation == .Val(error) -> return mir_optimizer_failed(error, report)
@@ -194,6 +237,7 @@ pub fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threa
     mir_pass_sort_decision_rows_for_program(&program)
     digest :: mir_program_digest(program)
     loop index in 0..<program.functions.len() -> program.functions[index].optimization.derived_from_digest = Val(digest)
+    mir_pass_journal_after(program, &journal, "mir.optimize-pipeline", pipeline_before)
     mir_optimizer_succeeded(report)
 }
 
@@ -235,6 +279,7 @@ struct MIRPassWaveInputs {
     pub prelude_calls: [MIRPreludeCall]
     pub purity: [U64:Bool]
     pub cleanup: Bool
+    pub mark: Bool
 }
 
 // What a wave's steps did, summed over functions. `first_bounds`,
@@ -336,7 +381,7 @@ fn mir_pass_function_steps(function: &MIRFunction, first: Int, last: Int, inputs
             counts.acceleration += facts.len()
             function.optimization.acceleration_facts = facts
         }
-        if mir_pass_step_completes(step) == .Val(pass) -> &function.optimization.pass_ids.push(pass)
+        if inputs.mark && mir_pass_step_completes(step) == .Val(pass) -> &function.optimization.pass_ids.push(pass)
     }
 }
 
@@ -549,4 +594,32 @@ fn mir_pass_block_count(program: &MIRProgram) -> Int Never! {
     total := 0
     loop function in program.functions -> total += function.blocks.len()
     total
+}
+
+fn mir_pass_journal_before(program: MIRProgram, journal: CanonicalPassJournal, operation: String) -> CanonicalPassSnapshot? Never! {
+    if operation.len() == 0 || !canonical_pass_requested(journal, operation) -> return None
+    Val(canonical_pass_mir_snapshot(program))
+}
+fn mir_pass_journal_after(program: MIRProgram, journal: &CanonicalPassJournal, operation: String, before: CanonicalPassSnapshot?) Never! {
+    snapshot :: before ?? return
+    source :: if operation == "mir.pass-order-facts" -> "crates/jet-foundation/src/MIR.rs" else -> "crates/jet-foundation/src/MIROptimization.rs"
+    canonical_pass_record(&journal, "optimization", operation, source, snapshot, canonical_pass_mir_snapshot(program), "preserve")
+}
+fn mir_pass_journal_check(program: MIRProgram, journal: &CanonicalPassJournal, operation: String) Never! {
+    if !canonical_pass_requested(journal, operation) -> return
+    snapshot :: canonical_pass_mir_snapshot(program)
+    canonical_pass_record(&journal, "optimization", operation, "crates/jet-foundation/src/MIROptimization.rs", snapshot, snapshot, "checked")
+}
+fn mir_pass_journal_step_operation(step: Int) -> String Never! {
+    if {
+        step == MIR_PASS_STEP_UNREACHABLE -> "mir.unreachable-block-elimination"
+        step == MIR_PASS_STEP_CFG -> "mir.cfg-simplification"
+        step == MIR_PASS_STEP_FOLD -> "mir.exact-constant-folding"
+        step == MIR_PASS_STEP_BOUNDS -> "mir.bounds-check-elimination"
+        step == MIR_PASS_STEP_DEAD -> "mir.dead-pure-value-elimination"
+        step == MIR_PASS_STEP_REDUCE -> "mir.canonical-loop-facts"
+        step == MIR_PASS_STEP_ACCELERATION -> "mir.acceleration-facts"
+        // The Rust journal does not capture the second reduction or cleanup.
+        else -> ""
+    }
 }

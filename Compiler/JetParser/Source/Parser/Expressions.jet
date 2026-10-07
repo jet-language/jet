@@ -1530,6 +1530,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
                     args = parser_parse_call_args(&state, depth + 1, false)
                 }
             }
+            generated_block :: parser_parse_generate_template_arg(&state, method_name, &args)
             // D-UI-CLOSURE1=A: a direct call may carry one trailing block
             // closure, kept as a typed lambda argument; sema assigns its
             // parameter label after resolving the call.
@@ -1537,7 +1538,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
                 .OptField(_, _, _, _, _) -> true
                 else -> false
             }
-            if allow_struct_lit && !optional_call && parser_current_kind(&state) == TOKEN_LBRACE {
+            if allow_struct_lit && !optional_call && !generated_block && parser_current_kind(&state) == TOKEN_LBRACE {
                 lambda :: parser_parse_trailing_lambda(&state)
                 lambda_span :: lambda.span
                 flags := ast_empty_call_arg_flags()

@@ -1,5 +1,15 @@
 // Checked Jet front-end pipeline: parse, check, lower, and assemble package MIR.
 use jet_foundation.[
+    CanonicalPassJournal,
+    CanonicalPassOptions,
+    CanonicalPassSnapshot,
+    canonical_pass_requested,
+    canonical_pass_record,
+    canonical_pass_mir_snapshot,
+    canonical_pass_debug_snapshot,
+    foundation_json_quote,
+    canonical_pass_journal,
+    canonical_pass_take,
     AccessConvention,
     CompilerThreads,
     CompilerTraceSink,
@@ -3780,7 +3790,7 @@ fn jet_driver_keep_going_trap_emission(kg: &JetDriverKeepGoingLog, program: &MIR
 // function it rejects in the program as it stands; all of them become traps
 // together and the optimizer runs again on the program, so reruns grow with
 // the failing checks rather than with the failing functions.
-fn jet_driver_keep_going_optimize(kg: &JetDriverKeepGoingLog, program: &MIRProgram, first: ^MIROptimizationResult, full_verification: Bool, threads: CompilerThreads) -> MIROptimizationResult {
+fn jet_driver_keep_going_optimize(kg: &JetDriverKeepGoingLog, program: &MIRProgram, first: ^MIROptimizationResult, full_verification: Bool, threads: CompilerThreads, journal: &CanonicalPassJournal) -> MIROptimizationResult {
     optimization := ^first
     attempts := 0
     traps := 0
@@ -3807,7 +3817,7 @@ fn jet_driver_keep_going_optimize(kg: &JetDriverKeepGoingLog, program: &MIRProgr
         if trapped == 0 -> break
         traps += trapped
         attempts += 1
-        optimization = optimize_mir_program(&program, full_verification, threads)
+        optimization = optimize_mir_program(&program, full_verification, threads, &journal)
     }
     if optimization.error != None -> jet_driver_keep_going_row(&kg, "optimize", "-", "STOPPED", "the optimizer still fails after {traps} keep-going traps in {attempts} reruns; emission runs on the program as the optimizer left it", "-")
     optimization
@@ -3848,7 +3858,10 @@ fn jet_driver_native_emit_config(threads: CompilerThreads, mode: MIRArtifactBuil
 
 pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
     kg := jet_driver_keep_going_log(None)
-    jet_driver_compile_stages(^request, &kg, true)
+    journal := canonical_pass_journal(CanonicalPassOptions{adapter_mode: request.adapter_mode, operation_ids: request.adapter_operation_ids})
+    result := jet_driver_compile_stages(^request, &kg, true, &journal)
+    result.canonical_routes = canonical_pass_take(&journal)
+    result
 }
 
 // Native code generation consumes checked MIR directly. Emitting Rust is not
@@ -3856,7 +3869,10 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
 // their diagnostics are identical to the ordinary compile path.
 pub fn jet_driver_compile_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
     kg := jet_driver_keep_going_log(None)
-    jet_driver_compile_stages(^request, &kg, false)
+    journal := canonical_pass_journal(CanonicalPassOptions{adapter_mode: request.adapter_mode, operation_ids: request.adapter_operation_ids})
+    result := jet_driver_compile_stages(^request, &kg, false, &journal)
+    result.canonical_routes = canonical_pass_take(&journal)
+    result
 }
 
 // JET_KEEP_GOING (the bootstrap entry reads it): every phase runs past the
@@ -3866,7 +3882,9 @@ pub fn jet_driver_compile_mir(request: ^JetDriverCompileRequest) -> JetDriverCom
 // the trace sink.
 pub fn jet_driver_compile_keep_going(request: ^JetDriverCompileRequest, options: JetDriverKeepGoing) -> JetDriverCompileResult {
     kg := jet_driver_keep_going_log(Val(options))
-    result := jet_driver_compile_stages(^request, &kg, true)
+    journal := canonical_pass_journal(CanonicalPassOptions{adapter_mode: request.adapter_mode, operation_ids: request.adapter_operation_ids})
+    result := jet_driver_compile_stages(^request, &kg, true, &journal)
+    result.canonical_routes = canonical_pass_take(&journal)
     if result.internal_problem == .Val(problem) -> jet_driver_keep_going_row(&kg, "internal", "-", "ICE", problem, "-")
     // Reports of a stage that returned early; recorded rows are not repeated.
     kg.diagnostic_mark = 0
@@ -3875,7 +3893,7 @@ pub fn jet_driver_compile_keep_going(request: ^JetDriverCompileRequest, options:
     result
 }
 
-fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKeepGoingLog, emit_rust: Bool) -> JetDriverCompileResult {
+fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKeepGoingLog, emit_rust: Bool, journal: &CanonicalPassJournal) -> JetDriverCompileResult {
     trace := jet_driver_empty_compile_trace()
     // Phase spans for the host trace (JET_TRACE_FILE). A phase an early
     // return abandons is closed by the next enclosing end the host records.
@@ -4266,7 +4284,13 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
 
-    lowered := lower_functions(&sema_functions, &runtime_semantic_modules, load.source_files, request.compiler_threads, request.trace_sink)
+    journal_edition := String?{None}
+    if canonical_pass_requested(journal, "tir.lower-checked-program") {
+        loop package in load.packages { if package.identity == load.package_identity -> journal_edition = Val(package.edition) }
+        edition :: journal_edition ?? return jet_driver_compile_internal_result(load, trace, "canonical journal lost its checked package edition")
+        jet_driver_journal_checked_program(resolved_registration, sema_functions, request.authorized_sources.entry_path, edition, &journal)
+    }
+    lowered := lower_functions(&sema_functions, &runtime_semantic_modules, load.source_files, request.compiler_threads, request.trace_sink, &journal)
     if request.trace_sink == .Val(sink) -> sink.end("lower", lowered.functions.len())
     if lowered.functions.len() != sema_functions.len() {
         &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "MIR lowering did not return every checked function", "a successful lowering preserves the complete checked function set", "report this incomplete codegen result as a compiler defect"))
@@ -4420,9 +4444,9 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     // every compile and every pass when the request asks for full verification.
     function_owners_for_errors := jet_driver_mir_function_owners(program_value)
     if request.trace_sink == .Val(sink) -> sink.begin("optimize", "", -1, -1)
-    optimization := optimize_mir_program(&program_value, request.mir_lint_every_pass, request.compiler_threads)
+    optimization := optimize_mir_program(&program_value, request.mir_lint_every_pass, request.compiler_threads, &journal)
     if kg.enabled {
-        optimization = jet_driver_keep_going_optimize(&kg, &program_value, ^optimization, request.mir_lint_every_pass, request.compiler_threads)
+        optimization = jet_driver_keep_going_optimize(&kg, &program_value, ^optimization, request.mir_lint_every_pass, request.compiler_threads, &journal)
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
     if request.trace_sink == .Val(sink) -> sink.end("optimize", function_owners_for_errors.len())
@@ -4532,6 +4556,8 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
         jet_driver_keep_going_trap_emission(&kg, &optimized_program)
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
+    emitter_before := CanonicalPassSnapshot?{None}
+    if canonical_pass_requested(journal, "mir.rust-emitter") -> emitter_before = Val(canonical_pass_mir_snapshot(optimized_program))
     emitted := if kg.enabled -> jet_driver_keep_going_emit(&kg, &optimized_program, request.trace_sink, request.compiler_threads) else -> jet_rust_emit_program(optimized_program, jet_driver_native_emit_config(request.compiler_threads, request.build_mode), request.trace_sink)
     if request.trace_sink == .Val(sink) -> sink.end("emit", optimized_program.functions.len())
     emitted_source := String?{None}
@@ -4539,6 +4565,11 @@ fn jet_driver_compile_stages(request: ^JetDriverCompileRequest, kg: &JetDriverKe
     emission_complete := false
     if emitted == {
         .Complete(source, manifest) -> {
+            if emitter_before == .Val(input) {
+                output := canonical_pass_debug_snapshot("mir", "mir.rust-emitter", "{source}")
+                output.identity = "{{\"representation\":\"mir\",\"artifact_id\":{foundation_json_quote("{artifact_plan.id.value}")},\"target\":{foundation_json_quote(target_machine.triple)}}}"
+                canonical_pass_record(&journal, "lowering", "mir.rust-emitter", "crates/jet-codegen/src/Codegen/MIRRust.rs", input, output, "checked")
+            }
             if {
                 manifest.schema_version != MIR_SCHEMA_VERSION || manifest.target != "rust_aot" || manifest.package_identity != load.package_identity || manifest.function_count != optimized_program.functions.len() || manifest.type_count != optimized_program.types.len() || manifest.foreign_count != optimized_program.foreign.len() -> {
                     &load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "Rust emission returned a manifest inconsistent with the checked MIR artifact", "emitter output identity and row counts are bound to the optimized program", "preserve the manifest facts produced by the canonical Rust emitter"))

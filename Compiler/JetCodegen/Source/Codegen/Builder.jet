@@ -1,6 +1,7 @@
 // Per-function MIR construction primitives shared by expression and statement
 // lowering. IDs are stable for the checked function and source traversal.
 use jet_foundation.[
+    CanonicalPassJournal,
     MIRAccess,
     MIRBasicBlock,
     MIRBlockID,
@@ -348,6 +349,7 @@ struct JetCodegenProgram {
     pub field_symbols: [String:[JetCodegenFieldSymbolRow]]
     pub source_files: [MIRSourceFile]
     pub source_index: JetCodegenSourceIndex
+    pub canonical_journal: Shared<CanonicalPassJournal>?{None}
 }
 
 // One lowering's state: the function being lowered (every field but

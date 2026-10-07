@@ -1,5 +1,6 @@
 // Source, module, and package identities remain separate at the driver boundary.
 use jet_foundation.[
+    CanonicalPassRecord,
     AppAuthorizedDirectory,
     CompilerThreads,
     CompilerTraceSink,
@@ -203,6 +204,10 @@ pub struct JetDriverCompileRequest {
     // Hosts with an already captured schema cache can supply it explicitly.
     // None reads the canonical project's schema cache once for this compile.
     pub schema_snapshots: [String:SchemaSnapshot]?{None}
+    // Host maps the existing adapter evidence environment to these options.
+    // Ordinary compilations allocate no pass snapshots.
+    pub adapter_mode: String{""}
+    pub adapter_operation_ids: [String]{[String]{}}
 }
 
 pub struct JetDriverGatePolicy {
@@ -414,6 +419,7 @@ pub struct JetDriverCompileResult {
     pub comptime_values: [SemaComptimeItemValue]{[SemaComptimeItemValue]{}}
     // A Repl compile retains its checked scope and canonical MIR machine.
     pub repl_session: ReplSession?{None}
+    pub canonical_routes: [CanonicalPassRecord]{[CanonicalPassRecord]{}}
 }
 
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read
