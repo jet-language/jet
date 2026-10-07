@@ -400,6 +400,15 @@ fn loaded_core_source_signatures_preserve_implicit_error_carriers() {
              pub fn write_lines(path: String, lines: [String]) {}",
         ),
     ];
+    let mut name_ledger = crate::AST::NameLedger::default();
+    for (index, module) in modules.iter().enumerate() {
+        name_ledger.set_module(
+            index,
+            module.alias.clone(),
+            module.display.clone(),
+            "signature-fixture".to_string(),
+        );
+    }
     let bundle = crate::AST::ProgramBundle {
         entry: 0,
         project_root: std::path::PathBuf::new(),
@@ -410,7 +419,7 @@ fn loaded_core_source_signatures_preserve_implicit_error_carriers() {
         ffi_callback_fns: HashSet::new(),
         cffi: crate::AST::CFfi::default(),
         comptime_inputs: Vec::new(),
-        name_ledger: crate::AST::NameLedger::default(),
+        name_ledger,
         layer_ceiling: None,
         inferred_layer: crate::Syntax::RuntimeLayer::Core,
         web_partitions: HashMap::new(),
