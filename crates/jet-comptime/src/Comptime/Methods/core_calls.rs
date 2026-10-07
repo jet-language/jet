@@ -207,11 +207,12 @@ use self::random::ambient_random_kernel;
 /// synchronous adapter call. Outside the scope, MathRandomFns keeps its
 /// ordinary thread-local stream.
 pub fn with_world_rng_provider<T>(
-    next: fn() -> Option<u64>,
     seed: fn(i64) -> bool,
+    state: fn() -> Option<u64>,
+    try_update: fn(u64, u64) -> Option<bool>,
     callback: impl FnOnce() -> T,
 ) -> T {
-    ambient_random_kernel::with_world_rng_provider(next, seed, callback)
+    ambient_random_kernel::with_world_rng_provider(seed, state, try_update, callback)
 }
 
 

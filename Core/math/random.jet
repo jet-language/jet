@@ -21,15 +21,25 @@ C_MASK63 :: 9223372036854775807
 C_BASE63 :: 9223372036854775808
 C_BASE53_FLOAT :: 9007199254740992.0
 
-// Draw one non-negative 63-bit word from the shared deterministic provider.
-// The provider's getrandbits(63) is the only host boundary; all composition,
-// rejection, and distribution logic below is Jet-owned.
-fn next_bits63() -[Rand]> Int Never! { core.math.random.getrandbits(63) }
+// The world owns synchronization and journaling. Jet owns the transition;
+// compare/exchange keeps concurrent draws on that same serialized stream.
+pub fn __word() -[Rand]> Int Never! {
+    loop {
+        previous :: core.math.random.__rng_state()
+        word := Int{previous}
+        word = (word ~| (word << 7)) & 18446744073709551615
+        word = word ~| (word >> 9)
+        word = (word * 11400714819323198485) & 18446744073709551615
+        if core.math.random.__rng_try_update(previous, U64{word}) -> return word
+    }
+}
+
+fn next_bits63() -[Rand]> Int Never! { __word() >> 1 }
 
 // A 53-bit draw is exactly representable, so the unit float needs no lossy
 // Int-to-Float crossing.
 fn unit() -[Rand]> Float Never! {
-    Float{core.math.random.getrandbits(53)} / C_BASE53_FLOAT
+    Float{__word() >> 11} / C_BASE53_FLOAT
 }
 
 fn unit_open() -[Rand]> Float {
@@ -89,7 +99,12 @@ pub fn rng(seed_value: Int) -> RNG Never! {
 /// Construct a deterministic child capability from `seed_value` while mixing
 /// one word from the ambient stream. The explicit effect documents that mix.
 pub fn split(seed_value: Int) -[Rand]> RNG Never! {
-    core.math.random.split(seed_value)
+    word :: __word()
+    rotated :: ((word << 17) | (word >> 47)) & 18446744073709551615
+    mixed :: (seed_value & 18446744073709551615) ~| rotated
+    signed := mixed
+    if signed > C_MASK63 -> signed = signed - 18446744073709551616
+    rng(signed)
 }
 
 /// Inclusive integer range. An empty range (`lo > hi`) returns `lo` and does

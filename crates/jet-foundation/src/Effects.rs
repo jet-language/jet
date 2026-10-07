@@ -378,6 +378,7 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
         // D-RAYLIB1=A: windowing/drawing/input/audio bridge.
         "core.game.raylib" => Effect::GPU,
         "core.time" => Effect::Time,
+        "core.math" if method == "random" => Effect::Rand,
         "core.math.random" | "core.crypto.random" => Effect::Rand,
         "core.sys" => Effect::Env,
         "core.process" => Effect::Exec,

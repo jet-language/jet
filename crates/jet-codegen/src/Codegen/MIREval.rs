@@ -22460,8 +22460,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             };
             let (function, captures, capture_cells) = self.closure_parts(callback.clone(), span)?;
             return crate::Comptime::with_world_rng_provider(
-                crate::scheduler::jet_scheduler_world_rng_next,
                 crate::scheduler::jet_scheduler_world_rng_seed,
+                crate::scheduler::jet_scheduler_world_rng_state,
+                crate::scheduler::jet_scheduler_world_rng_try_update,
                 || {
                     crate::scheduler::jet_testing_world(|world| {
                         let raw = register_deterministic_world(world);

@@ -1431,7 +1431,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 35051c24c4965b0aa319ed58c68973d90d30fdb792a360615a442780f25223c6
+// Source SHA-256: 965115f8b178608a9af04294a10692f9171fda3ab6da5c79f4f9b6cf87a909bc
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1612,7 +1612,8 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.testing", "temp_dir"),
     ("core.math", "from_bits"),
     ("core.math.random", "seed"),
-    ("core.math.random", "split"),
+    ("core.math.random", "__rng_state"),
+    ("core.math.random", "__rng_try_update"),
     ("core.crypto.random", "__os_entropy"),
     ("core.time", "now"),
     ("core.time", "sleep"),
@@ -2044,7 +2045,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.math", "odd", "jet_std_math_is_odd", true, &[false]) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "in_range", "jet_std_math_in_range", true, &[false, false, false]) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "log1p", "jet_std_math_ln_1p", true, &[false]) .with_pure_route(CoreCallPureRoute::Math),
-    CoreCallRecord::new("core.math", "random", "jet_std_random_float", true, &[]),
     CoreCallRecord::new("core.math", "saturating_add", "jet_std_math_saturating_add", true, &[false, false]) .with_native_int_result(),
     CoreCallRecord::new("core.math", "fma", "jet_std_math_fma", true, &[false, false, false]) .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "muladd", "jet_std_math_fma", true, &[false, false, false]) .with_pure_route(CoreCallPureRoute::Math),
@@ -2106,10 +2106,10 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.math.stats", "pearson", "jet_stats_correlation", true, &[true, true]),
     CoreCallRecord::new("core.math.stats", "covariance_population", "jet_stats_covariance_population", true, &[true, true]),
     CoreCallRecord::new( "core.math.random", "seed", "jet_std_random_seed", true, &[false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.math.random", "getrandbits", "jet_std_random_getrandbits", true, &[false], ) .with_native_int_result(),
+    CoreCallRecord::new("core.math.random", "__rng_state", "jet_random_state_raw", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.math.random", "__rng_try_update", "jet_random_try_update_raw", true, &[false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.crypto.random", "__os_entropy", "jet_random_os_entropy", true, &[false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.math.random", "rng", "jet_std_rng_new", true, &[false]),
-    CoreCallRecord::new( "core.math.random", "split", "jet_std_random_split", true, &[false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.time", "now", "jet_time_now_utc", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.time", "sleep", "jet_std_time_sleep_duration", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.time", "sleep_until", "jet_time_sleep_until", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),

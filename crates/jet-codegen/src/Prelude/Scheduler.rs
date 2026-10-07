@@ -985,6 +985,20 @@ impl JetDeterministicWorld {
         }
     }
 
+    fn rng_state(&self) -> u64 {
+        self.state.lock().unwrap_or_else(|error| error.into_inner()).rng
+    }
+
+    fn rng_try_update(&self, expected: u64, replacement: u64) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        if state.rng != expected {
+            return false;
+        }
+        state.rng = replacement;
+        state.history.push(format!("rng:{replacement}"));
+        true
+    }
+
     fn rng_next(&self) -> u64 {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         let mut x = state.rng;
@@ -1052,6 +1066,14 @@ pub fn jet_scheduler_world_reject_uncontrolled(effect: &'static str) {
     };
     jet_scheduler_fatal(message);
 }
+pub fn jet_scheduler_world_rng_state() -> Option<u64> {
+    jet_scheduler_current_world().map(|world| world.rng_state())
+}
+
+pub fn jet_scheduler_world_rng_try_update(expected: u64, replacement: u64) -> Option<bool> {
+    jet_scheduler_current_world().map(|world| world.rng_try_update(expected, replacement))
+}
+
 
 pub fn jet_scheduler_world_rng_next() -> Option<u64> {
     jet_scheduler_current_world().map(|world| world.rng_next())

@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 35051c24c4965b0aa319ed58c68973d90d30fdb792a360615a442780f25223c6
+// Source SHA-256: 965115f8b178608a9af04294a10692f9171fda3ab6da5c79f4f9b6cf87a909bc
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -408,7 +408,7 @@ const CORE_MODULE_56_MEMBERS: &[&str] = &["abs", "acos", "acosh", "asin", "asinh
 const CORE_MODULE_56_TYPES: &[(&str, CoreLeafKind)] = &[("Fraction", CoreLeafKind::Plain)];
 const CORE_MODULE_56_DEPENDENCIES: &[&str] = &[];
 
-const CORE_MODULE_57_MEMBERS: &[&str] = &["bool", "bytes", "exponential", "float", "float_range", "int", "normal", "pick", "rng", "sample", "seed", "shuffle", "split", "weighted_pick", "random", "randint", "uniform", "normalvariate", "gauss", "expovariate", "randbytes", "getrandbits", "randrange", "choice", "choices", "triangular", "gammavariate", "betavariate", "lognormvariate", "paretovariate", "weibullvariate", "vonmisesvariate", "binomialvariate"];
+const CORE_MODULE_57_MEMBERS: &[&str] = &["bool", "bytes", "exponential", "float", "float_range", "int", "normal", "pick", "rng", "sample", "seed", "shuffle", "split", "weighted_pick", "random", "randint", "uniform", "normalvariate", "gauss", "expovariate", "randbytes", "getrandbits", "randrange", "choice", "choices", "triangular", "gammavariate", "betavariate", "lognormvariate", "paretovariate", "weibullvariate", "vonmisesvariate", "binomialvariate", "__rng_state", "__rng_try_update", "__word"];
 const CORE_MODULE_57_TYPES: &[(&str, CoreLeafKind)] = &[];
 const CORE_MODULE_57_DEPENDENCIES: &[&str] = &["core.math"];
 
@@ -805,8 +805,8 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.http.server", alias: "core_core_http_server", path: "Core/http/server.jet", owned_members: &["access_log", "cors", "cors_policy", "json", "mux", "request_id", "response", "serve_once", "serve_once_listener", "sse", "static_file", "static_file_range", "static_files", "tls"] },
     CoreSourceModule { module: "core.jobs", alias: "core_core_jobs", path: "Core/jobs/jobs.jet", owned_members: &["ack", "cancel", "claim", "enqueue", "fail", "named", "queue", "status", "with_max_attempts", "queue_name", "state", "attempts", "payload", "event", "events", "is_terminal", "is_cancelled"] },
     CoreSourceModule { module: "core.log", alias: "core_core_log", path: "Core/log/log.jet", owned_members: &["bool", "close", "counter", "critical", "debug", "debug_fields", "disable", "enabled", "enter", "error", "error_fields", "fatal", "field", "float", "flush", "format", "formatter", "handle", "handler", "handler_format", "info", "info_fields", "int", "log", "otlp_file", "record", "redact", "sample_every", "set_level", "set_sink", "set_trace_id", "setup", "span", "warn", "warn_fields", "warning", "add", "group", "time", "clear"] },
-    CoreSourceModule { module: "core.math", alias: "core_math", path: "Core/math/math.jet", owned_members: &["abs", "abs_float", "min", "max", "clamp", "is_even", "is_odd", "sign", "isqrt", "gcd", "lcm", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "cbrt", "ceil", "checked_abs", "checked_add", "checked_div", "checked_mul", "checked_neg", "checked_pow", "checked_rem", "checked_sub", "conj", "copysign", "cos", "cosh", "cot", "degrees", "e", "erf", "erfc", "exp", "exp2", "exp_m1", "expm1", "fabs", "factorial", "float32", "float64", "floor", "fma", "fract", "frexp", "from_bits", "gamma", "hypot", "ilogb", "imag", "infinity", "int_pow", "inv", "is_canonical", "is_inf", "is_integer", "is_nan", "is_normal", "is_signed", "is_subnormal", "is_zero", "isfinite", "isinf", "isnan", "ldexp", "lerp", "lgamma", "ln", "ln_1p", "log", "log10", "log1p", "log2", "logb", "modf", "muladd", "nan", "next_after", "nextafter", "next_down", "next_up", "pi", "pow", "radians", "radix", "real", "round", "saturating_add", "saturating_mul", "saturating_sub", "scaleb", "sign_bit", "significand", "signum", "sin", "sin_cos", "sinh", "sqrt", "tan", "tanh", "tau", "tau_const", "to_bits", "trunc", "truncate", "ulp", "zero", "binomial", "comb", "perm", "gcd_many", "lcm_many", "powmod", "div_mod", "div_rem", "digits", "leading_ones", "trailing_ones", "abs_diff", "even", "odd", "xor", "in_range", "sum_int", "prod_int", "prod", "fmod", "remainder", "isclose", "dist", "hypot3", "clamp_float", "min_float", "max_float", "midpoint", "fsum", "sumprod", "random", "fraction", "decimal", "copy"] },
-    CoreSourceModule { module: "core.math.random", alias: "core_core_math_random", path: "Core/math/random.jet", owned_members: &["betavariate", "binomialvariate", "bool", "bytes", "choice", "choices", "exponential", "expovariate", "float", "float_range", "gammavariate", "gauss", "getrandbits", "int", "lognormvariate", "normal", "normalvariate", "paretovariate", "pick", "randbytes", "randint", "random", "randrange", "rng", "sample", "seed", "shuffle", "split", "triangular", "uniform", "vonmisesvariate", "weibullvariate", "weighted_pick"] },
+    CoreSourceModule { module: "core.math", alias: "core_math", path: "Core/math/math.jet", owned_members: &["abs", "abs_float", "min", "max", "clamp", "is_even", "is_odd", "sign", "isqrt", "gcd", "lcm", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "cbrt", "ceil", "checked_abs", "checked_add", "checked_div", "checked_mul", "checked_neg", "checked_pow", "checked_rem", "checked_sub", "conj", "copysign", "cos", "cosh", "cot", "degrees", "e", "erf", "erfc", "exp", "exp2", "exp_m1", "expm1", "fabs", "factorial", "float32", "float64", "floor", "fma", "fract", "frexp", "from_bits", "gamma", "hypot", "ilogb", "imag", "infinity", "int_pow", "inv", "is_canonical", "is_inf", "is_integer", "is_nan", "is_normal", "is_signed", "is_subnormal", "is_zero", "isfinite", "isinf", "isnan", "ldexp", "lerp", "lgamma", "ln", "ln_1p", "log", "log10", "log1p", "log2", "logb", "modf", "muladd", "nan", "next_after", "nextafter", "next_down", "next_up", "pi", "pow", "radians", "radix", "real", "round", "saturating_add", "saturating_mul", "saturating_sub", "scaleb", "sign_bit", "significand", "signum", "sin", "sin_cos", "sinh", "sqrt", "tan", "tanh", "tau", "tau_const", "to_bits", "trunc", "truncate", "ulp", "zero", "binomial", "comb", "perm", "gcd_many", "lcm_many", "powmod", "div_mod", "div_rem", "digits", "leading_ones", "trailing_ones", "abs_diff", "even", "odd", "xor", "in_range", "sum_int", "prod_int", "prod", "fmod", "remainder", "isclose", "dist", "hypot3", "clamp_float", "min_float", "max_float", "midpoint", "fsum", "sumprod", "random", "fraction", "decimal", "copy", "cmp", "is_finite"] },
+    CoreSourceModule { module: "core.math.random", alias: "core_core_math_random", path: "Core/math/random.jet", owned_members: &["betavariate", "binomialvariate", "bool", "bytes", "choice", "choices", "exponential", "expovariate", "float", "float_range", "gammavariate", "gauss", "getrandbits", "int", "lognormvariate", "normal", "normalvariate", "paretovariate", "pick", "randbytes", "randint", "random", "randrange", "rng", "sample", "seed", "shuffle", "split", "triangular", "uniform", "vonmisesvariate", "weibullvariate", "weighted_pick", "__word"] },
     CoreSourceModule { module: "core.math.combinatorics", alias: "core_core_math_combinatorics", path: "Core/math/combinatorics.jet", owned_members: &["batched", "binomial", "cartesian", "chain", "chain_from", "combinations", "combinations_count", "combinations_with_replacement", "compress", "count_from", "drop", "dropwhile", "factorial", "falling_factorial", "multinomial", "ncr", "npr", "pairwise", "permutations", "permutations_count", "product", "repeat", "rising_factorial", "takewhile", "unique", "take_n", "count", "filterfalse", "islice", "groupby", "starmap", "tee", "cycle", "zip_longest", "accumulate", "powerset", "windows", "reverse", "flatten"] },
     CoreSourceModule { module: "core.math.stats", alias: "core_core_math_stats", path: "Core/math/stats.jet", owned_members: &["correlation", "covariance", "cumsum", "fmean", "geometric_mean", "harmonic_mean", "kde", "kde_random", "linear_regression", "max", "mean", "median", "median_grouped", "median_high", "median_low", "min", "mode", "multimode", "percentile", "prod", "pstdev", "pvariance", "quantile", "range", "stdev", "sum", "variance", "zscore", "normal_dist", "count", "sumprod", "weighted_mean", "quantiles", "iqr", "mad", "mean_abs_deviation", "skew", "kurtosis", "moving_average", "ewma", "cumprod", "diff", "rank", "spearman", "r_squared", "residuals", "histogram", "describe", "clip", "winsorize", "pearson", "covariance_population"] },
     CoreSourceModule { module: "core.mem", alias: "core_core_mem", path: "Core/mem/mem.jet", owned_members: &["address_of", "from_addr", "volatile_read", "volatile_write"] },
@@ -1026,7 +1026,7 @@ pub fn core_source_owns(module: &str, member: &str) -> bool {
     if module == "core.math"
         && matches!(
             member,
-            "cmp" | "cos" | "exp" | "fabs" | "is_finite" | "ln" | "sin" | "sqrt"
+            "cos" | "exp" | "ln" | "sin" | "sqrt"
         )
     {
         return false;
@@ -1140,7 +1140,9 @@ mod tests {
 
     #[test]
     fn transparent_math_primitives_keep_the_fixed_provider_route() {
-        assert!(!core_source_owns("core.math", "is_finite"));
+        assert!(core_source_owns("core.math", "is_finite"));
+        assert!(core_source_owns("core.math", "fabs"));
+        assert!(core_source_owns("core.math", "cmp"));
         assert!(!core_source_owns("core.math", "sqrt"));
         assert!(core_source_owns("core.math", "is_even"));
     }
