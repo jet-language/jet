@@ -1892,6 +1892,7 @@ fn native_backend_stop_and_euclid_exports() {
         )
     };
     assert_eq!(run("values"), (0, "-4\n1\n\"a\\\"b\\n\"\n".to_string(), String::new()));
+    assert_eq!(run("text-carriers"), (0, String::new(), String::new()));
     let context = "  --> main.jet:3 in run\n    |\n3 |     #require_eq(total, 2)\n    |     ^^^^^^^^^^^^^^^^^^^^^^^\n";
     for (case, head) in [
         ("euclid-by-zero", "Stop [E3010]: `divided by zero`\n  --> main.jet:6\n".to_string()),
