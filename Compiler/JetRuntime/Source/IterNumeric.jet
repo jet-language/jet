@@ -55,6 +55,7 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
 
 #Export(c) fn jet_rt_native_iter_average_float(source: I64) -> Float {
     node :: iter_collect_node(source)
+    if (node == I64{0}) -> return 0.0
     header :: trap_word(node + I64{112})
     data :: trap_word(header + I64{16})
     length :: trap_word(header)
@@ -70,6 +71,7 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
 
 #Export(c) fn jet_rt_native_iter_average_int(source: I64) -> Float {
     node :: iter_collect_node(source)
+    if (node == I64{0}) -> return 0.0
     meta :: iter_meta(node)
     kind :: trap_word(meta + I64{48}) & I64{4294967295}
     width :: trap_word(meta + I64{48}) >> I64{32}

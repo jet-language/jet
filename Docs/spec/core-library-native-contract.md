@@ -115,6 +115,15 @@ reads and writes through static-rooted places address that same cell, including
 when the shared object writer packages a runtime library. Atomic values still
 require their typed allocation, ordering and ownership contract; a raw machine
 compare-and-swap primitive does not establish that contract.
+
+Native iterator operations preserve the delivered stop rail. A stopped callback
+does not initialize its result slot. Borrowed pulls and cursor advances leave
+their input owner for caller cleanup; owning eager operations and cursor
+initialization discard every partial result before returning a neutral, unread
+value. Collection outputs in caller-provided storage are dropped and zeroed,
+not deallocated. Join checks the rail before using a show callback's text, and
+numeric terminals abandon partial reductions after a stopped drain.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
