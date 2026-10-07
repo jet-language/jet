@@ -2050,7 +2050,7 @@ resulting parts (D-TEXTUNICODE1=A).
 | `text.center(value, width, fill)` | `String` | Center a value in a requested width. |
 | `text.starts_any(value, prefixes)` / `ends_any(value, suffixes)` | `Bool` | Test any of several prefixes or suffixes. |
 | `text.splitn(value, separator, limit)` / `rsplitn(value, separator, limit)` | `[String]` | Split from the left or right with a maximum part count. |
-| `text.inspect(value)` | `[String]` | Return escaped scalar inspection values. |
+| `text.inspect(value)` | `[String]` | Return each scalar as `U+XXXX NAME`, using pinned Unicode names (Unicode 1.0 names for controls, `UNASSIGNED` where no name is recorded). |
 | `text.Cursor` / `text.cursor(value)` / `text.cursor_advance(text, cursor)` | type / cursor | Construct and advance a text cursor. |
 
 `String.len()` is the compiler-owned receiver-first method and counts Unicode
