@@ -2116,6 +2116,38 @@ fn xml_options(
     Ok(options)
 }
 
+fn xml_render_error_value(error: jet_foundation::XmlPull::Error) -> CtValue {
+    CtValue::Struct {
+        type_name: "XMLError".to_string(),
+        fields: vec![
+            (
+                "kind".to_string(),
+                CtValue::Enum {
+                    type_name: "XMLReason".to_string(),
+                    variant: format!("{:?}", error.kind),
+                    args: Vec::new(),
+                },
+            ),
+            (
+                "byte_offset".to_string(),
+                CtValue::Present(Box::new(CtValue::Int(error.offset as i64))),
+            ),
+            (
+                "line".to_string(),
+                error.line.map(|value| CtValue::Present(Box::new(CtValue::Int(value as i64))))
+                    .unwrap_or(CtValue::absent(Type::Int)),
+            ),
+            (
+                "column".to_string(),
+                error.column.map(|value| CtValue::Present(Box::new(CtValue::Int(value as i64))))
+                    .unwrap_or(CtValue::absent(Type::Int)),
+            ),
+            ("path".to_string(), CtValue::Str(error.path)),
+            ("reason".to_string(), CtValue::Str(error.reason)),
+        ],
+    }
+}
+
 fn xml_error_kind(kind: jet_foundation::XmlPull::Reason) -> &'static str {
     use jet_foundation::XmlPull::Reason;
     match kind {
@@ -2157,12 +2189,23 @@ pub(super) fn xml_shape_error_value(reason: String) -> CtValue {
     encoding_error_value_fields("XML", "Syntax", 0, None, None, String::new(), reason)
 }
 
-pub(super) fn xml_render(value: &CtValue) -> String {
-    xml_from_ct(value)
-        .and_then(|value| {
-            jet_foundation::XmlKernel::render_document(&value).map_err(|error| error.reason)
-        })
-        .unwrap_or_default()
+pub(super) fn xml_render(value: &CtValue) -> Result<String, CtValue> {
+    let converted = if json_payload(value, "Float").is_some() || json_payload(value, "Bytes").is_some() {
+        Err("XML tree cannot contain Float or Bytes values".to_string())
+    } else if json_payload(value, "Number").is_some() || json_payload(value, "TypedText").is_some() {
+        Err("internal JSON carrier escaped typed decode".to_string())
+    } else {
+        xml_from_ct(value)
+    };
+    let value = converted.map_err(|reason| xml_render_error_value(jet_foundation::XmlPull::Error {
+        kind: jet_foundation::XmlPull::Reason::Shape,
+        offset: 0,
+        line: None,
+        column: None,
+        path: String::new(),
+        reason,
+    }))?;
+    jet_foundation::XmlKernel::render_document(&value).map_err(xml_render_error_value)
 }
 
 pub(super) fn xml_root(document: &CtValue) -> Result<CtValue, CtValue> {
@@ -2288,7 +2331,29 @@ mod xml_tests {
     fn parse_render_preserves_element_open_lexical_snapshot() {
         let source = "<r xmlns='urn:\tfoo\r\nbar' a='x\t y\r\nz\ru\nv' b='&#xD;&#xA;&#x9;'/>";
         let tree = xml_parse(&source).expect("parse XML");
-        assert_eq!(xml_render(&tree), source);
+        assert_eq!(xml_render(&tree).expect("render XML"), source);
+    }
+
+    #[test]
+    fn xml_render_failure_preserves_native_error_carrier() {
+        let invalid = json_variant("Float", Some(CtValue::Float(1.5)));
+        let actual = xml_render(&invalid).expect_err("invalid XML tree must not render empty text");
+        let expected = CtValue::Struct {
+            type_name: "XMLError".to_string(),
+            fields: vec![
+                ("kind".to_string(), CtValue::Enum {
+                    type_name: "XMLReason".to_string(),
+                    variant: "Shape".to_string(),
+                    args: Vec::new(),
+                }),
+                ("byte_offset".to_string(), CtValue::Present(Box::new(CtValue::Int(0)))),
+                ("line".to_string(), CtValue::absent(Type::Int)),
+                ("column".to_string(), CtValue::absent(Type::Int)),
+                ("path".to_string(), CtValue::Str(String::new())),
+                ("reason".to_string(), CtValue::Str("XML tree cannot contain Float or Bytes values".to_string())),
+            ],
+        };
+        assert_eq!(actual, expected);
     }
 
     #[test]
@@ -2399,7 +2464,7 @@ mod xml_tests {
         let parsed = || jet_foundation::XmlPull::parse_document(SOURCE).expect("parse XML");
         let assert_parity = |value: jet_foundation::XmlPull::Value, source: &str, label: &str| {
             let runtime = jet_foundation::XmlPull::render_document(&value).expect("runtime render");
-            let comptime = xml_render(&xml_to_ct(value));
+            let comptime = xml_render(&xml_to_ct(value)).expect("comptime render");
             assert_eq!(comptime, runtime, "{label}");
             assert_ne!(runtime, source, "{label} trusted stale raw");
         };

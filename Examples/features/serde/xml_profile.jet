@@ -17,7 +17,8 @@ fn show(label: String, text: String) {
         print("{label}: rejected {kind}: {err.reason}")
         return
     }
-    print("{label}: accepted {xml.to_string(tree)}")
+    rendered :: xml.to_string(tree) ?? panic(err.reason)
+    print("{label}: accepted {rendered}")
 }
 
 fn nested(depth: Int) -> String {
@@ -50,6 +51,7 @@ fn run() {
             print("depth {depth}: rejected {kind}: {err.reason}")
             next
         }
-        print("depth {depth}: accepted {xml.to_string(tree).len()} bytes")
+        rendered :: xml.to_string(tree) ?? panic(err.reason)
+        print("depth {depth}: accepted {rendered.len()} bytes")
     }
 }

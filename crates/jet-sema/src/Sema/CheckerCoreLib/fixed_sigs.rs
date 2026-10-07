@@ -3714,9 +3714,10 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(json.clone(), Type::Named("XMLError".to_string()))),
         )),
-        ("core.encoding.xml", "to_string") => {
-            Some((vec![(read, json.clone())], Some(Type::String)))
-        }
+        ("core.encoding.xml", "to_string") => Some((
+            vec![(read, json.clone())],
+            Some(result_ty(Type::String, Type::Named("XMLError".to_string()))),
+        )),
         ("core.encoding.xml", "to_bytes") => Some((
             vec![
                 (read, json.clone()),
