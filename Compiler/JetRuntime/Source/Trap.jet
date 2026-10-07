@@ -226,6 +226,7 @@ fn trap_native_index_range_stop() {
 }
 
 #Export(c) fn jet_rt_panic_message(message: I64, message_len: I64) {
+    if rt_task_panic_publish(message, message_len, I64{0}) -> return
     trap_header(I64{0})
     trap_write(message, message_len)
     trap_msg_prelude_end()

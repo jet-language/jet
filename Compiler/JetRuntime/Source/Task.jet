@@ -1,0 +1,319 @@
+// Native Task state192B, one ref per handle/group plus a worker ref:
+// refs0 control8 mutex16 done24 stopKind32 ownedMeta40 resultSlot48 initialized56
+// env64 invoke72 release80 deadlinePresent88 deadlineMs96 completionPark104
+// completionLo112/Hi120 identity128 group136 permit144 taken152 inlineSlot160..183
+// typedDeadline184. Result initialization happens only after Propagate == 0.
+// JetTaskFailure: Outcome.rs:2185-2188 / TaskGroup.rs:77-82 ordinals 0/1/2.
+fn task_failure_new(tag: I64, owned_reason: I64) -> I64 {
+    failure :: jet_rt_alloc(I64{16}, I64{8})
+    sync_store(failure, tag)
+    sync_store(failure + I64{8}, owned_reason)
+    failure
+}
+#Export(c) fn jet_rt_record_tag_JetTaskFailure(failure: I64) -> I64 { sync_load(failure) }
+#Export(c) fn jet_rt_record_get_JetTaskFailure_Panicked(failure: I64) -> I64 {
+    if sync_load(failure) != I64{2} -> jet_rt_unreachable(I64{0}, I64{0})
+    jet_rt_string_clone(sync_load(failure + I64{8}))
+}
+#Export(c) fn jet_rt_record_new_JetTaskFailure_Cancelled() -> I64 { task_failure_new(I64{0}, I64{0}) }
+#Export(c) fn jet_rt_record_new_JetTaskFailure_DeadlineBlown() -> I64 { task_failure_new(I64{1}, I64{0}) }
+#Export(c) fn jet_rt_record_new_JetTaskFailure_Panicked(reason: I64) -> I64 { task_failure_new(I64{2}, jet_rt_string_clone(reason)) }
+#Export(c) fn jet_rt_handle_clone_JetTaskFailure(failure: I64) -> I64 {
+    reason :: sync_load(failure + I64{8})
+    task_failure_new(sync_load(failure), if reason == I64{0} -> I64{0} else -> jet_rt_string_clone(reason))
+}
+#Export(c) fn jet_rt_handle_drop_JetTaskFailure(failure: I64) {
+    if failure == I64{0} -> return
+    jet_rt_string_drop(sync_load(failure + I64{8}))
+    jet_rt_free(failure, I64{16}, I64{8})
+}
+
+fn task_retain(task: I64) { _ := sync_add(task, I64{1}) }
+fn task_drop(task: I64) {
+    if task == I64{0} -> return
+    if sync_add(task, I64{-1}) != I64{1} -> return
+    meta :: sync_load(task + I64{40})
+    slot :: sync_load(task + I64{48})
+    if sync_load(task + I64{56}) != I64{0} -> coll_slot_drop(slot, meta)
+    if slot != task + I64{160} -> jet_rt_free(slot, coll_size(meta), I64{8})
+    coll_meta_drop(meta)
+    scheduler_control_drop(sync_load(task + I64{8}))
+    sync_park_drop(sync_load(task + I64{104}))
+    jet_rt_string_drop(sync_load(task + I64{128}))
+    jet_rt_free(task, I64{192}, I64{8})
+}
+
+fn task_spawn_state(site: I64, label: I64, env: I64, invoke: I64, release: I64, meta: I64, group: I64, permit: I64) -> I64 {
+    if site < I64{0} -> jet_rt_unreachable(I64{0}, I64{0})
+    task :: jet_rt_alloc(I64{192}, I64{8})
+    thread_zero(task, I64{192})
+    sync_store(task, I64{2})
+    control :: scheduler_control_new()
+    sync_store(task + I64{8}, control)
+    copied :: coll_meta_copy(meta)
+    sync_store(task + I64{40}, copied)
+    slot :: if coll_size(copied) <= I64{24} -> task + I64{160} else -> coll_slot_new(copied)
+    sync_store(task + I64{48}, slot)
+    sync_store(task + I64{64}, env)
+    sync_store(task + I64{72}, invoke)
+    sync_store(task + I64{80}, release)
+    sync_store(task + I64{88}, sync_load(thread_base() + I64{48}))
+    sync_store(task + I64{96}, sync_load(thread_base() + I64{56}))
+    sync_store(task + I64{104}, sync_park_new())
+    sync_store(task + I64{136}, group)
+    sync_store(task + I64{144}, permit)
+    id :: scheduler_observe_register(control, site, label)
+    sync_store(control + I64{56}, id)
+    sync_store(task + I64{128}, scheduler_observe_identity(id))
+    if group != I64{0} -> task_group_register(group, task)
+    scheduler_submit(I64{0}, task, true)
+    task
+}
+
+#Export(c) fn jet_rt_native_task_spawn(site: I64, label: I64, env: I64, invoke: I64, release: I64, meta: I64) -> I64 {
+    task_spawn_state(site, label, env, invoke, release, meta, I64{0}, I64{0})
+}
+#Export(c) fn jet_rt_native_group_spawn(group: I64, site: I64, label: I64, env: I64, invoke: I64, release: I64, meta: I64) -> I64 {
+    state :: sync_load(group)
+    permit :: task_group_admit(state)
+    if jet_scheduler_native_propagate() != I64{0} {
+        jet_scheduler_shield_enter()
+        _ := coll_call1(release, env)
+        jet_scheduler_shield_leave()
+        return I64{0}
+    }
+    task_spawn_state(site, label, env, invoke, release, meta, state, permit)
+}
+#Export(c) fn jet_rt_native_task_cancel(task: I64) { scheduler_control_cancel(sync_load(task + I64{8})) }
+#Export(c) fn jet_rt_native_task_pause(task: I64) { scheduler_control_pause(sync_load(task + I64{8}), I64{0}) }
+#Export(c) fn jet_rt_native_task_resume(task: I64) { scheduler_control_resume(sync_load(task + I64{8})) }
+#Export(c) fn jet_rt_native_task_detach(task: I64) { task_drop(task) }
+#Export(c) fn jet_rt_native_task_drop(task: I64) { task_drop(task) }
+
+fn task_run(task: I64) {
+    control :: sync_load(task + I64{8})
+    base :: thread_base()
+    saved_control :: sync_load(base + I64{16})
+    saved_shield :: sync_load(base + I64{24})
+    saved_wait :: sync_load(base + I64{32})
+    saved_body :: sync_load(base + I64{64})
+    saved_present :: sync_load(base + I64{48})
+    saved_deadline :: sync_load(base + I64{56})
+    sync_store(base + I64{16}, control)
+    sync_store(base + I64{24}, I64{0})
+    sync_store(base + I64{32}, saved_wait + I64{1})
+    sync_store(base + I64{64}, I64{0})
+    sync_store(thread_base() + I64{48}, sync_load(task + I64{88}))
+    sync_store(thread_base() + I64{56}, sync_load(task + I64{96}))
+    scheduler_observe_enter(sync_load(control + I64{56}))
+    _ := scheduler_wait_while_paused()
+    aborted :: sync_load(control + I64{8}) != I64{0} && sync_load(control + I64{16}) != I64{0}
+    if aborted -> scheduler_deliver_cancel()
+    frame :: scheduler_task_completion_begin()
+    if !aborted && jet_scheduler_native_propagate() == I64{0} {
+        body :: scheduler_body_enter()
+        _ := coll_call2(sync_load(task + I64{72}), sync_load(task + I64{64}), sync_load(task + I64{48}))
+        if jet_scheduler_native_propagate() == I64{0} -> sync_store(task + I64{56}, I64{1})
+        scheduler_body_leave(body)
+    }
+    jet_scheduler_shield_enter()
+    _ := coll_call1(sync_load(task + I64{80}), sync_load(task + I64{64}))
+    jet_scheduler_shield_leave()
+    scheduler_task_completion_end(frame)
+    if sync_load(task + I64{144}) != I64{0} -> task_group_release(sync_load(task + I64{136}))
+    status :: jet_scheduler_native_status()
+    sync_store(task + I64{32}, status)
+    if status != I64{0} && sync_load(task + I64{56}) != I64{0} {
+        jet_scheduler_shield_enter()
+        coll_slot_drop(sync_load(task + I64{48}), sync_load(task + I64{40}))
+        sync_store(task + I64{56}, I64{0})
+        jet_scheduler_shield_leave()
+    }
+    scheduler_observe_finish(sync_load(control + I64{56}))
+    sync_store(base + I64{48}, saved_present)
+    sync_store(base + I64{56}, saved_deadline)
+    sync_store(base + I64{16}, saved_control)
+    sync_store(base + I64{24}, saved_shield)
+    sync_store(base + I64{32}, saved_wait)
+    sync_store(base + I64{64}, saved_body)
+    scheduler_completion_order(task + I64{112})
+    sync_store(task + I64{24}, I64{1})
+    sync_park_wake(sync_load(task + I64{104}))
+    task_drop(task)
+}
+
+fn task_drain(task: I64) {
+    scheduler_blocking_wait_enter()
+    loop sync_load(task + I64{24}) == I64{0} -> sync_park(sync_load(task + I64{104}), I64{-1})
+    scheduler_blocking_wait_leave()
+}
+
+fn task_join_wait(task: I64) -> I64 {
+    kind :: scheduler_msg_join()
+    if sync_load(task + I64{184}) == I64{0} -> _ := scheduler_deadline_check(kind)
+    loop jet_scheduler_native_propagate() == I64{0} {
+        if scheduler_wait_point_cancel_check() != I64{0} -> break
+        if sync_load(task + I64{24}) != I64{0} -> break
+        _ := scheduler_yield(kind, sync_load(task + I64{104}), I64{-1})
+    }
+    if sync_load(task + I64{184}) == I64{0} -> _ := scheduler_deadline_check(kind)
+    jet_rt_string_drop(kind)
+    jet_scheduler_native_propagate()
+}
+
+fn task_panic_reason(task: I64) -> I64 {
+    control :: sync_load(task + I64{8})
+    record :: sync_load(control + I64{40})
+    message :: sync_load(record + I64{40})
+    separator :: scheduler_msg_separator()
+    head :: scheduler_text_concat(sync_load(task + I64{128}), separator)
+    result :: scheduler_text_concat(head, message)
+    jet_rt_string_drop(separator)
+    jet_rt_string_drop(head)
+    result
+}
+
+// Converts one owned ready Task into the route result. Success moves only
+// initialized payload bytes. A parent stop never manufactures an out value.
+fn task_take_outcome(task: I64, flatten: Bool, out: I64) -> I64 {
+    sync_mutex_lock(task + I64{16})
+    if sync_load(task + I64{152}) != I64{0} -> jet_rt_unreachable(I64{0}, I64{0})
+    sync_store(task + I64{152}, I64{1})
+    status :: sync_load(task + I64{32})
+    success := I64{0}
+    if status == I64{0} {
+        slot :: sync_load(task + I64{48})
+        meta :: sync_load(task + I64{40})
+        if !flatten {
+            coll_copy(slot, out, coll_payload(meta))
+            sync_store(task + I64{56}, I64{0})
+            success = I64{1}
+        } else {
+            raw :: sync_load(slot)
+            ok_meta :: sync_load(meta + I64{56})
+            error_meta :: sync_load(meta + I64{64})
+            if sync_load(raw) != I64{0} {
+                coll_copy(raw + I64{8}, out, coll_payload(ok_meta))
+                success = I64{1}
+            } else {
+                reason :: coll_call1(sync_load(error_meta + I64{24}), raw + I64{8})
+                coll_slot_drop(raw + I64{8}, error_meta)
+                sync_store(out, task_failure_new(I64{2}, reason))
+            }
+            size_a :: coll_size(ok_meta)
+            size_b :: coll_size(error_meta)
+            jet_rt_free(raw, I64{8} + (if size_a > size_b -> size_a else -> size_b), I64{8})
+            sync_store(task + I64{56}, I64{0})
+        }
+    } else if status == I64{2} {
+        sync_store(out, task_failure_new(I64{1}, I64{0}))
+    } else if status == I64{5} {
+        sync_store(out, task_failure_new(I64{2}, task_panic_reason(task)))
+    } else {
+        sync_store(out, task_failure_new(I64{0}, I64{0}))
+    }
+    sync_mutex_unlock(task + I64{16})
+    task_drop(task)
+    success
+}
+
+#Export(c) fn jet_rt_native_task_join(task: I64, flatten: I64, out: I64) -> I64 {
+    if task_join_wait(task) != I64{0} {
+        scheduler_control_cancel(sync_load(task + I64{8}))
+        task_drain(task)
+        task_drop(task)
+        return I64{0}
+    }
+    task_take_outcome(task, (flatten & I64{255}) != I64{0}, out)
+}
+#Export(c) fn jet_task_join_result(task: I64, out: I64) -> I64 { jet_rt_native_task_join(task, I64{1}, out) }
+
+// Completion frames are nested native List headers at TCB@80. Each callback
+// is a closure header [refs,code,release]. Batch-reverse order matches Rust;
+// callbacks registered by callbacks drain in the next batch of this frame.
+fn scheduler_task_completion_begin() -> I64 {
+    stack := sync_load(thread_base() + I64{80})
+    if stack == I64{0} {
+        stack = jet_rt_alloc(I64{24}, I64{8})
+        thread_zero(stack, I64{24})
+        sync_store(thread_base() + I64{80}, stack)
+    }
+    frame :: jet_rt_alloc(I64{24}, I64{8})
+    thread_zero(frame, I64{24})
+    scheduler_words_push(stack, frame)
+    frame
+}
+fn scheduler_closure_drop(closure: I64) {
+    count :: sync_load(closure) - I64{1}
+    sync_store(closure, count)
+    if count == I64{0} -> _ := coll_call1(sync_load(closure + I64{16}), closure)
+}
+fn scheduler_task_completion_register(closure: I64) {
+    stack :: sync_load(thread_base() + I64{80})
+    if stack == I64{0} || sync_load(stack) == I64{0} {
+        scheduler_closure_drop(closure)
+        return
+    }
+    frame :: sync_load(sync_load(stack + I64{16}) + (sync_load(stack) - I64{1}) * I64{8})
+    scheduler_words_push(frame, closure)
+}
+fn scheduler_task_completion_end(frame: I64) {
+    stack :: sync_load(thread_base() + I64{80})
+    index :: sync_load(stack) - I64{1}
+    if sync_load(sync_load(stack + I64{16}) + index * I64{8}) != frame -> jet_rt_unreachable(I64{0}, I64{0})
+    loop sync_load(frame) != I64{0} {
+        count := sync_load(frame)
+        capacity :: sync_load(frame + I64{8})
+        data :: sync_load(frame + I64{16})
+        thread_zero(frame, I64{24})
+        loop count > I64{0} {
+            count -= I64{1}
+            closure :: sync_load(data + count * I64{8})
+            _ := coll_call1(sync_load(closure + I64{8}), closure)
+            jet_scheduler_shield_enter()
+            scheduler_closure_drop(closure)
+            jet_scheduler_shield_leave()
+        }
+        jet_rt_free(data, capacity * I64{8}, I64{8})
+    }
+    sync_store(stack, index)
+    scheduler_words_drop(frame)
+}
+
+// Rust Core.rs:1122 and Outcome.rs:2333-2342: thread-confined exit queue,
+// drained exactly once in reverse registration order at the common exit edge.
+task_exit_key := I64{0}
+// runtime-init: 3
+#Export(c) fn jet_rt_task_exit_init() {
+    if task_exit_key != I64{0} -> return
+    task_exit_key = jet_rt_tls_key_new(I64{0})
+}
+fn task_exit_queue() -> I64 {
+    queue := jet_rt_tls_get(task_exit_key)
+    if queue == I64{0} {
+        queue = jet_rt_alloc(I64{24}, I64{8})
+        thread_zero(queue, I64{24})
+        jet_rt_tls_set(task_exit_key, queue)
+    }
+    queue
+}
+#Export(c) fn jet_rt_native_atexit(closure: I64) {
+    scheduler_words_push(task_exit_queue(), closure)
+}
+#Export(c) fn jet_rt_task_exit_handlers() {
+    queue :: jet_rt_tls_get(task_exit_key)
+    if queue == I64{0} -> return
+    count := sync_load(queue)
+    capacity :: sync_load(queue + I64{8})
+    data :: sync_load(queue + I64{16})
+    thread_zero(queue, I64{24})
+    loop count > I64{0} {
+        count -= I64{1}
+        closure :: sync_load(data + count * I64{8})
+        _ := coll_call1(sync_load(closure + I64{8}), closure)
+        jet_scheduler_shield_enter()
+        scheduler_closure_drop(closure)
+        jet_scheduler_shield_leave()
+    }
+    if capacity != I64{0} -> jet_rt_free(data, capacity * I64{8}, I64{8})
+}
