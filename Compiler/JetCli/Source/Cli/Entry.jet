@@ -52,6 +52,8 @@ TOKEN_RBRACKET,
 TOKEN_RPAREN,
 TOKEN_STRING,
 Token,
+TokenTables,
+token_decoded,
 lex,
 lex_config,
 ]
@@ -201,11 +203,11 @@ fn jet_cli_matching_close(tokens: [Token], open: Int) -> Int Never! {
 
 // A `members:` value: `["./a", "./b"]`, `find("./dir")`, or a list mixing
 // both. `None` when the value is any other (computed) expression.
-fn jet_cli_member_refs(tokens: [Token], value: Int) -> [JetCLIMemberRef]? Never! {
+fn jet_cli_member_refs(tokens: [Token], tables: TokenTables, value: Int) -> [JetCLIMemberRef]? Never! {
     refs := [JetCLIMemberRef]{}
     if value >= tokens.len() -> return None
     if tokens[value].kind == TOKEN_IDENT {
-        found :: jet_cli_find_member_ref(tokens, value) ?? return None
+        found :: jet_cli_find_member_ref(tokens, tables, value) ?? return None
         &refs.push(found)
         return Val(refs)
     }
@@ -218,11 +220,11 @@ fn jet_cli_member_refs(tokens: [Token], value: Int) -> [JetCLIMemberRef]? Never!
         if {
             token.kind == TOKEN_COMMA -> index += 1
             jet_cli_is_manifest_string(token.kind) -> {
-                &refs.push(JetCLIMemberRef{path: token.payload.decoded, find: false})
+                &refs.push(JetCLIMemberRef{path: token_decoded(tables, token), find: false})
                 index += 1
             }
             token.kind == TOKEN_IDENT -> {
-                found :: jet_cli_find_member_ref(tokens, index) ?? return None
+                found :: jet_cli_find_member_ref(tokens, tables, index) ?? return None
                 &refs.push(found)
                 index += 4
             }
@@ -233,34 +235,34 @@ fn jet_cli_member_refs(tokens: [Token], value: Int) -> [JetCLIMemberRef]? Never!
 }
 
 // `find("./dir")` at `index`.
-fn jet_cli_find_member_ref(tokens: [Token], index: Int) -> JetCLIMemberRef? Never! {
-    if index + 3 >= tokens.len() || tokens[index].payload.decoded != "find" -> return None
+fn jet_cli_find_member_ref(tokens: [Token], tables: TokenTables, index: Int) -> JetCLIMemberRef? Never! {
+    if index + 3 >= tokens.len() || token_decoded(tables, tokens[index]) != "find" -> return None
     if tokens[index + 1].kind != TOKEN_LPAREN || !jet_cli_is_manifest_string(tokens[index + 2].kind) || tokens[index + 3].kind != TOKEN_RPAREN {
         return None
     }
-    Val(JetCLIMemberRef{path: tokens[index + 2].payload.decoded, find: true})
+    Val(JetCLIMemberRef{path: token_decoded(tables, tokens[index + 2]), find: true})
 }
 
 // `entry: name`, `entry: file.name`, or `entry: "file.name"` inside one
 // output body.
-fn jet_cli_output_entry(tokens: [Token], open: Int, close: Int) -> String? Never! {
+fn jet_cli_output_entry(tokens: [Token], tables: TokenTables, open: Int, close: Int) -> String? Never! {
     loop index in open + 1..<close {
-        if tokens[index].kind != TOKEN_IDENT || tokens[index].payload.decoded != "entry" || index + 2 >= close || tokens[index + 1].kind != TOKEN_COLON {
+        if tokens[index].kind != TOKEN_IDENT || token_decoded(tables, tokens[index]) != "entry" || index + 2 >= close || tokens[index + 1].kind != TOKEN_COLON {
             next
         }
         value :: tokens[index + 2]
-        if jet_cli_is_manifest_string(value.kind) -> return Val(value.payload.decoded)
+        if jet_cli_is_manifest_string(value.kind) -> return Val(token_decoded(tables, value))
         if value.kind != TOKEN_IDENT -> return None
         if index + 4 < close && tokens[index + 3].kind == TOKEN_DOT && tokens[index + 4].kind == TOKEN_IDENT {
-            return Val("{value.payload.decoded}.{tokens[index + 4].payload.decoded}")
+            return Val("{token_decoded(tables, value)}.{token_decoded(tables, tokens[index + 4])}")
         }
-        return Val(value.payload.decoded)
+        return Val(token_decoded(tables, value))
     }
     None
 }
 
 // `outputs: { app: Executable{ entry: app.run }, lib: Library{} }`.
-fn jet_cli_outputs(tokens: [Token], open: Int, close: Int) -> [JetCLIOutputFact] Never! {
+fn jet_cli_outputs(tokens: [Token], tables: TokenTables, open: Int, close: Int) -> [JetCLIOutputFact] Never! {
     outputs := [JetCLIOutputFact]{}
     index := open + 1
     loop index < close {
@@ -268,14 +270,14 @@ fn jet_cli_outputs(tokens: [Token], open: Int, close: Int) -> [JetCLIOutputFact]
             index += 1
             next
         }
-        name :: tokens[index].payload.decoded
-        kind :: tokens[index + 2].payload.decoded
+        name :: token_decoded(tables, tokens[index])
+        kind :: token_decoded(tables, tokens[index + 2])
         entry := String?{None}
         index += 3
         if index < close && tokens[index].kind == TOKEN_LBRACE {
             body_close :: jet_cli_matching_close(tokens, index)
             if body_close < 0 -> break
-            entry = jet_cli_output_entry(tokens, index, body_close)
+            entry = jet_cli_output_entry(tokens, tables, index, body_close)
             index = body_close + 1
         }
         &outputs.push(JetCLIOutputFact{name: name, kind: kind, entry: entry})
@@ -288,7 +290,8 @@ fn jet_cli_outputs(tokens: [Token], open: Int, close: Int) -> [JetCLIOutputFact]
 // shape errors.
 fn jet_cli_manifest_facts(source: String, origin: String) -> JetCLIManifest Never! {
     facts := JetCLIManifest{name: "", origin: origin, members: [JetCLIMemberRef]{}, outputs: [JetCLIOutputFact]{}, default_run: None}
-    tokens :: jet_cli_significant_tokens(lex_config(source.bytes()).tokens)
+    lexed :: lex_config(source.bytes())
+    tokens :: jet_cli_significant_tokens(lexed.tokens)
     depth := 0
     index := 0
     loop index < tokens.len() {
@@ -308,21 +311,21 @@ fn jet_cli_manifest_facts(source: String, origin: String) -> JetCLIManifest Neve
             index += 1
             next
         }
-        field :: token.payload.decoded
+        field :: token_decoded(lexed.tables, token)
         value := index + 2
         if field == {
             "name" -> {
                 if jet_cli_is_manifest_string(tokens[value].kind) {
-                    facts.name = tokens[value].payload.decoded
+                    facts.name = token_decoded(lexed.tables, tokens[value])
                 }
             }
-            "members" -> facts.members = jet_cli_member_refs(tokens, value) ?? [JetCLIMemberRef]{}
+            "members" -> facts.members = jet_cli_member_refs(tokens, lexed.tables, value) ?? [JetCLIMemberRef]{}
             "outputs" -> {
                 if tokens[value].kind == TOKEN_DOT -> value += 1
                 if value < tokens.len() && tokens[value].kind == TOKEN_LBRACE {
                     close :: jet_cli_matching_close(tokens, value)
                     if close > value {
-                        facts.outputs = jet_cli_outputs(tokens, value, close)
+                        facts.outputs = jet_cli_outputs(tokens, lexed.tables, value, close)
                         index = close + 1
                         next
                     }
@@ -332,12 +335,12 @@ fn jet_cli_manifest_facts(source: String, origin: String) -> JetCLIManifest Neve
                 if tokens[value].kind == TOKEN_LBRACE {
                     close :: jet_cli_matching_close(tokens, value)
                     loop field_index in value + 1..<close {
-                        if tokens[field_index].kind != TOKEN_IDENT || tokens[field_index].payload.decoded != "run" || field_index + 2 >= close || tokens[field_index + 1].kind != TOKEN_COLON {
+                        if tokens[field_index].kind != TOKEN_IDENT || token_decoded(lexed.tables, tokens[field_index]) != "run" || field_index + 2 >= close || tokens[field_index + 1].kind != TOKEN_COLON {
                             next
                         }
                         selected :: tokens[field_index + 2]
                         if selected.kind == TOKEN_IDENT || jet_cli_is_manifest_string(selected.kind) {
-                            facts.default_run = Val(selected.payload.decoded)
+                            facts.default_run = Val(token_decoded(lexed.tables, selected))
                         }
                     }
                 }
@@ -846,13 +849,14 @@ fn jet_cli_find_command_entry(root: String, command: String, use_override: Bool,
 // WorkspacePlan.rs `declares_workspace_module`: a top-level
 // `module workspace` declaration.
 fn jet_cli_declares_workspace_module(source: String) -> Bool Never! {
-    tokens :: jet_cli_significant_tokens(lex(source.bytes()).tokens)
+    lexed :: lex(source.bytes())
+    tokens :: jet_cli_significant_tokens(lexed.tokens)
     depth := 0
     loop index in 0..<tokens.len() {
         kind :: tokens[index].kind
         if kind == TOKEN_LBRACE -> depth += 1
         if kind == TOKEN_RBRACE -> depth -= 1
-        if kind == TOKEN_KW_MODULE && depth == 0 && index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_IDENT && tokens[index + 1].payload.decoded == "workspace" {
+        if kind == TOKEN_KW_MODULE && depth == 0 && index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_IDENT && token_decoded(lexed.tables, tokens[index + 1]) == "workspace" {
             return true
         }
     }
@@ -862,8 +866,9 @@ fn jet_cli_declares_workspace_module(source: String) -> Bool Never! {
 // WorkspacePlan.rs `declares_workspace_members`.
 fn jet_cli_declares_workspace_members(source: String) -> Bool Never! {
     if !jet_cli_declares_workspace_module(source) -> return false
-    loop token in jet_cli_significant_tokens(lex(source.bytes()).tokens) {
-        if token.kind == TOKEN_IDENT && token.payload.decoded == "members" -> return true
+    lexed :: lex(source.bytes())
+    loop token in jet_cli_significant_tokens(lexed.tokens) {
+        if token.kind == TOKEN_IDENT && token_decoded(lexed.tables, token) == "members" -> return true
     }
     false
 }
@@ -947,13 +952,14 @@ fn jet_cli_workspace_source(dir: String, color: Bool) -[FS]> JetCLIWorkspaceSour
 // The `members:` references of a `workspace.jet` index: the field of its
 // one `module workspace { }` body.
 fn jet_cli_workspace_module_members(source: String) -> [JetCLIMemberRef]? Never! {
-    tokens :: jet_cli_significant_tokens(lex(source.bytes()).tokens)
+    lexed :: lex(source.bytes())
+    tokens :: jet_cli_significant_tokens(lexed.tokens)
     depth := 0
     loop index in 0..<tokens.len() {
         kind :: tokens[index].kind
         if kind == TOKEN_LBRACE -> depth += 1
         if kind == TOKEN_RBRACE -> depth -= 1
-        if kind != TOKEN_KW_MODULE || depth != 0 || index + 2 >= tokens.len() || tokens[index + 1].payload.decoded != "workspace" || tokens[index + 2].kind != TOKEN_LBRACE {
+        if kind != TOKEN_KW_MODULE || depth != 0 || index + 2 >= tokens.len() || token_decoded(lexed.tables, tokens[index + 1]) != "workspace" || tokens[index + 2].kind != TOKEN_LBRACE {
             next
         }
         close :: jet_cli_matching_close(tokens, index + 2)
@@ -967,8 +973,8 @@ fn jet_cli_workspace_module_members(source: String) -> [JetCLIMemberRef]? Never!
             if field_kind == TOKEN_RBRACE || field_kind == TOKEN_RBRACKET || field_kind == TOKEN_RPAREN {
                 inner -= 1
             }
-            if inner == 0 && field_kind == TOKEN_IDENT && tokens[field].payload.decoded == "members" && field + 1 < close && tokens[field + 1].kind == TOKEN_COLON {
-                return jet_cli_member_refs(tokens, field + 2)
+            if inner == 0 && field_kind == TOKEN_IDENT && token_decoded(lexed.tables, tokens[field]) == "members" && field + 1 < close && tokens[field + 1].kind == TOKEN_COLON {
+                return jet_cli_member_refs(tokens, lexed.tables, field + 2)
             }
         }
         return Val([JetCLIMemberRef]{})
@@ -1330,7 +1336,7 @@ pub fn jet_cli_missing_project_context(file: String, source: String) -[FS, Env]>
         tokens :: lexed.tokens
         loop index in 0..<tokens.len() {
             if index + 3 >= tokens.len() -> break
-            if tokens[index].kind == TOKEN_KW_USE && tokens[index + 1].kind == TOKEN_IDENT && tokens[index + 1].payload.decoded == "project" && tokens[index + 2].kind == TOKEN_DOT && tokens[index + 3].kind == TOKEN_IDENT {
+            if tokens[index].kind == TOKEN_KW_USE && tokens[index + 1].kind == TOKEN_IDENT && token_decoded(lexed.tables, tokens[index + 1]) == "project" && tokens[index + 2].kind == TOKEN_DOT && tokens[index + 3].kind == TOKEN_IDENT {
                 span = Val(Span{start: tokens[index + 1].span.start, end: tokens[index + 3].span.end})
                 break
             }

@@ -41,7 +41,7 @@ pub fn envmodel_parse_program(src: String) -> Program EnvModelEvalError! {
         .Val(diagnostic) -> { return Err(EnvModelEvalError{diagnostic: diagnostic}) }
         .None -> {}
     }
-    parsed :: parse_config_with_source(lexed, source)
+    parsed :: parse_config_with_source(^lexed, source)
     if envmodel_last_error(parsed.diagnostics) == {
         .Val(diagnostic) -> { return Err(EnvModelEvalError{diagnostic: diagnostic}) }
         .None -> {}
@@ -58,16 +58,16 @@ pub fn envmodel_environment_reads(src: String) -> [EnvironmentRead] EnvModelEval
     lexed :: lex(src.bytes())
     if lexed.diagnostics.len() > 0 -> return Err(EnvModelEvalError{diagnostic: lexed.diagnostics[0]})
     reads := [EnvironmentRead]{}
-    envmodel_collect_environment_reads(lexed.tokens, &reads)
+    envmodel_collect_environment_reads(lexed.tokens, lexed.tables, &reads)
     Ok(reads)
 }
 
-fn envmodel_collect_environment_reads(all_tokens: [Token], reads: &[EnvironmentRead]) Never! {
+fn envmodel_collect_environment_reads(all_tokens: [Token], tables: TokenTables, reads: &[EnvironmentRead]) Never! {
     tokens :: lexer_without_comments(all_tokens)
     loop token in tokens {
         // The lexer reads `$NAME` as one identifier word (D-ONCE-DOLLAR1=B).
-        if token.kind == TOKEN_IDENT && token.payload.decoded.starts_with(COMPTIME_MARK) {
-            name :: token.payload.decoded
+        if token.kind == TOKEN_IDENT && token_decoded(tables, token).starts_with(COMPTIME_MARK) {
+            name :: token_decoded(tables, token)
             seen := false
             loop read in reads {
                 if read.name == name -> seen = true
@@ -75,8 +75,8 @@ fn envmodel_collect_environment_reads(all_tokens: [Token], reads: &[EnvironmentR
             if !seen { &reads.push(EnvironmentRead{name: name, ty: TYPE_STRING}) }
         }
         if token.kind == TOKEN_STRING {
-            loop part in token.payload.string_parts {
-                if part.kind == STRING_PART_INTERPOLATION -> envmodel_collect_environment_reads(part.tokens, &reads)
+            loop part in token_string_parts(tables, token) {
+                if part.kind == STRING_PART_INTERPOLATION -> envmodel_collect_environment_reads(part.tokens, tables, &reads)
             }
         }
     }

@@ -54,6 +54,9 @@ use jet_lexer.[
     TOKEN_STRING,
     TOKEN_UNIFIED_ARROW,
     Token,
+    TokenTables,
+    token_decoded,
+    token_string_parts,
     lex,
 ]
 
@@ -1410,8 +1413,8 @@ fn jfmt_retired_type_target(name: String) -> String? Never! {
     }
 }
 
-fn jfmt_token_ident(token: Token) -> String Never! {
-    if token.kind == TOKEN_IDENT -> token.payload.decoded else -> ""
+fn jfmt_token_ident(tables: TokenTables, token: Token) -> String Never! {
+    if token.kind == TOKEN_IDENT -> token_decoded(tables, token) else -> ""
 }
 
 fn jfmt_apply_source_edits(src: String, edits: [TextEdit]) -> String? Never! {
@@ -1478,7 +1481,7 @@ pub fn jfmt_retired_interpolation_selector_edits(src: String) -> [TextEdit] Neve
     lexed :: lex(src.bytes())
     if lexed.diagnostics.len() > 0 -> return [TextEdit]{}
     edits := [TextEdit]{}
-    jfmt_collect_retired_selector_edits(lexed.tokens, &edits)
+    jfmt_collect_retired_selector_edits(lexed.tokens, lexed.tables, &edits)
     edits
 }
 
@@ -1489,19 +1492,19 @@ fn jfmt_is_interpolation_selector(name: String) -> Bool Never! {
     }
 }
 
-fn jfmt_collect_retired_selector_edits(tokens: [Token], edits: &[TextEdit]) Never! {
+fn jfmt_collect_retired_selector_edits(tokens: [Token], tables: TokenTables, edits: &[TextEdit]) Never! {
     loop token in tokens {
         if token.kind != TOKEN_STRING -> next
-        loop part in token.payload.string_parts {
+        loop part in token_string_parts(tables, token) {
             if part.kind != STRING_PART_INTERPOLATION -> next
             inner :: part.tokens
             loop index in 1..<inner.len() {
                 if inner[index - 1].kind != TOKEN_HASH -> next
                 if inner[index].kind != TOKEN_IDENT -> next
-                if !jfmt_is_interpolation_selector(inner[index].payload.decoded) -> next
+                if !jfmt_is_interpolation_selector(token_decoded(tables, inner[index])) -> next
                 &edits.push(TextEdit{span: inner[index - 1].span, new_text: ":"})
             }
-            jfmt_collect_retired_selector_edits(inner, &edits)
+            jfmt_collect_retired_selector_edits(inner, tables, &edits)
         }
     }
 }
@@ -1512,19 +1515,19 @@ pub fn jfmt_retired_type_edits(src: String) -> [TextEdit] Never! {
     lexed :: lex(src.bytes())
     if lexed.diagnostics.len() > 0 -> return [TextEdit]{}
     edits := [TextEdit]{}
-    jfmt_collect_retired_type_edits(lexed.tokens, &edits)
+    jfmt_collect_retired_type_edits(lexed.tokens, lexed.tables, &edits)
     edits
 }
 
-fn jfmt_collect_retired_type_edits(tokens: [Token], edits: &[TextEdit]) Never! {
+fn jfmt_collect_retired_type_edits(tokens: [Token], tables: TokenTables, edits: &[TextEdit]) Never! {
     loop token in tokens {
         if token.kind == TOKEN_IDENT {
-            if jfmt_retired_type_target(token.payload.decoded) == .Val(canonical) -> &edits.push(TextEdit{span: token.span, new_text: canonical})
+            if jfmt_retired_type_target(token_decoded(tables, token)) == .Val(canonical) -> &edits.push(TextEdit{span: token.span, new_text: canonical})
             next
         }
         if token.kind == TOKEN_STRING {
-            loop part in token.payload.string_parts {
-                if part.kind == STRING_PART_INTERPOLATION -> jfmt_collect_retired_type_edits(part.tokens, &edits)
+            loop part in token_string_parts(tables, token) {
+                if part.kind == STRING_PART_INTERPOLATION -> jfmt_collect_retired_type_edits(part.tokens, tables, &edits)
             }
         }
     }
@@ -1598,7 +1601,7 @@ fn jfmt_retired_html_marker_edits(src: String) -> [TextEdit] Never! {
             open :: tokens[index + 2]
             argument :: tokens[index + 3]
             close :: tokens[index + 4]
-            if hash.kind != TOKEN_HASH || jfmt_token_ident(name) != "HTML" || open.kind != TOKEN_LPAREN || !jfmt_is_string_token(argument.kind) || close.kind != TOKEN_RPAREN -> next
+            if hash.kind != TOKEN_HASH || jfmt_token_ident(lexed.tables, name) != "HTML" || open.kind != TOKEN_LPAREN || !jfmt_is_string_token(argument.kind) || close.kind != TOKEN_RPAREN -> next
             if !(argument.span.start >= 0 && argument.span.end <= source.len()) -> next
             literal :: jfmt_bytes_text(source, argument.span.start, argument.span.end)
             &edits.push(TextEdit{span: Span{start: hash.span.start, end: close.span.end}, new_text: "#HTML(Path{{{literal}}})"})
@@ -1610,7 +1613,7 @@ fn jfmt_retired_html_marker_edits(src: String) -> [TextEdit] Never! {
             open :: tokens[index + 2]
             argument :: tokens[index + 3]
             close :: tokens[index + 4]
-            if !(previous.kind == TOKEN_COMMA || previous.kind == TOKEN_LBRACKET) || jfmt_token_ident(name) != "HTML" || open.kind != TOKEN_LPAREN || !jfmt_is_string_token(argument.kind) || close.kind != TOKEN_RPAREN || !jfmt_marker_group_contains(tokens, index + 1) -> next
+            if !(previous.kind == TOKEN_COMMA || previous.kind == TOKEN_LBRACKET) || jfmt_token_ident(lexed.tables, name) != "HTML" || open.kind != TOKEN_LPAREN || !jfmt_is_string_token(argument.kind) || close.kind != TOKEN_RPAREN || !jfmt_marker_group_contains(tokens, index + 1) -> next
             if !(argument.span.start >= 0 && argument.span.end <= source.len()) -> next
             literal :: jfmt_bytes_text(source, argument.span.start, argument.span.end)
             &edits.push(TextEdit{span: Span{start: name.span.start, end: close.span.end}, new_text: "HTML(Path{{{literal}}})"})
@@ -1678,7 +1681,7 @@ fn jfmt_matching_call_close(code: [Token], open_index: Int) -> Int Never! {
     -1
 }
 
-fn jfmt_collect_retired_print_calls(tokens: [Token], aliases: [String], calls: &[JetFmtRetiredPrintCall]) Never! {
+fn jfmt_collect_retired_print_calls(tokens: [Token], tables: TokenTables, aliases: [String], calls: &[JetFmtRetiredPrintCall]) Never! {
     code := [Token]{}
     loop token in tokens {
         if !jfmt_is_comment_kind(token.kind) -> &code.push(token)
@@ -1686,11 +1689,11 @@ fn jfmt_collect_retired_print_calls(tokens: [Token], aliases: [String], calls: &
     limit :: jfmt_saturating_sub(code.len(), 3)
     loop index in 0..<limit {
         if code[index].kind != TOKEN_IDENT -> next
-        alias :: code[index].payload.decoded
+        alias :: token_decoded(tables, code[index])
         if !aliases.contains(alias) -> next
         if index > 0 && (code[index - 1].kind == TOKEN_DOT || code[index - 1].kind == TOKEN_QUESTION_DOT) -> next
         if code[index + 1].kind != TOKEN_DOT || code[index + 2].kind != TOKEN_IDENT -> next
-        kind :: jfmt_retired_print_kind(code[index + 2].payload.decoded)
+        kind :: jfmt_retired_print_kind(token_decoded(tables, code[index + 2]))
         if kind == 0 || code[index + 3].kind != TOKEN_LPAREN -> next
         close_index :: jfmt_matching_call_close(code, index + 3)
         if close_index < 0 -> next
@@ -1698,8 +1701,8 @@ fn jfmt_collect_retired_print_calls(tokens: [Token], aliases: [String], calls: &
     }
     loop token in tokens {
         if token.kind != TOKEN_STRING -> next
-        loop part in token.payload.string_parts {
-            if part.kind == STRING_PART_INTERPOLATION -> jfmt_collect_retired_print_calls(part.tokens, aliases, &calls)
+        loop part in token_string_parts(tables, token) {
+            if part.kind == STRING_PART_INTERPOLATION -> jfmt_collect_retired_print_calls(part.tokens, tables, aliases, &calls)
         }
     }
 }
@@ -1730,7 +1733,7 @@ fn jfmt_rewrite_print_family_fragment(src: String, aliases: [String]) -> String 
     lexed :: lex(src.bytes())
     if lexed.diagnostics.len() > 0 -> return ~src
     calls := [JetFmtRetiredPrintCall]{}
-    jfmt_collect_retired_print_calls(lexed.tokens, aliases, &calls)
+    jfmt_collect_retired_print_calls(lexed.tokens, lexed.tables, aliases, &calls)
     jfmt_apply_source_edits(src, jfmt_print_family_edits(src, aliases, calls)) ?? src
 }
 
@@ -1743,7 +1746,7 @@ pub fn jfmt_retired_print_family_edits(src: String) -> [TextEdit] {
     aliases :: jfmt_core_term_aliases(parsed.program.imports)
     if aliases.len() == 0 -> return [TextEdit]{}
     calls := [JetFmtRetiredPrintCall]{}
-    jfmt_collect_retired_print_calls(lexed.tokens, aliases, &calls)
+    jfmt_collect_retired_print_calls(lexed.tokens, lexed.tables, aliases, &calls)
     jfmt_print_family_edits(src, aliases, calls)
 }
 

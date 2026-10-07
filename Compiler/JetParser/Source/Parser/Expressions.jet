@@ -761,10 +761,10 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
     // identifier. Only a config surface reads it as an environment read; in
     // ordinary source a `$` word must be a subjectless fact root (or a
     // template binding inside a template body).
-    if kind == TOKEN_IDENT && token.payload.decoded.starts_with("$") && !state.allow_environment_reads && state.derive_template_depth == 0 && !parser_fact_root(token.payload.decoded) {
+    if kind == TOKEN_IDENT && word.starts_with("$") && !state.allow_environment_reads && state.derive_template_depth == 0 && !parser_fact_root(word) {
         parser_bump(&state)
-        parser_report_unknown_fact_root(&state, token.payload.decoded, token.span)
-        return ParsedExpr{expr: Expr.Ident{name: token.payload.decoded, span: token.span}, span: token.span}
+        parser_report_unknown_fact_root(&state, word, token.span)
+        return ParsedExpr{expr: Expr.Ident{name: word, span: token.span}, span: token.span}
     }
     if kind == TOKEN_IDENT || kind == TOKEN_SELF || kind == TOKEN_KW_IT {
         parser_bump(&state)

@@ -68,7 +68,8 @@ impl ConfigFacts {
 // The retired `.{` record heads: each `.` token directly before `{`, outside
 // strings and comments. A text that does not lex has none.
 pub fn pkg_retired_record_head_spans(text: String) -> [Span] Never! {
-    tokens :: pkg_manifest_tokens(text) ?? return [Span]{}
+    lexed :: pkg_manifest_lexed(text) ?? return [Span]{}
+    tokens :: lexed.tokens
     spans := [Span]{}
     loop index in 1..<tokens.len() {
         if tokens[index - 1].kind == TOKEN_DOT && tokens[index].kind == TOKEN_LBRACE -> &spans.push(tokens[index - 1].span)
@@ -76,17 +77,18 @@ pub fn pkg_retired_record_head_spans(text: String) -> [Span] Never! {
     spans
 }
 
-// The compiler lexer's tokens without comments and EOF, or None when the
-// text has lexer diagnostics.
-pub fn pkg_manifest_tokens(text: String) -> [Token]? Never! {
-    lexed :: lex(text.bytes())
+// The compiler lexer's token stream without comments and EOF, retaining
+// its spelling/literal tables; None when the text has lexer diagnostics.
+pub fn pkg_manifest_lexed(text: String) -> Lexed? Never! {
+    lexed := lex(text.bytes())
     if lexed.diagnostics.len() > 0 -> return None
     tokens := [Token]{}
     loop token in lexed.tokens {
         if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT || token.kind == TOKEN_EOF -> next
         &tokens.push(token)
     }
-    Val(tokens)
+    lexed.tokens = ^tokens
+    Val(^lexed)
 }
 
 // Parse the shared Package/Config field vocabulary. `config` rejects the

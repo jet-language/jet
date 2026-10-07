@@ -572,3 +572,51 @@ fn run() {{
     assert_eq!(code, 0, "integer overflow lexer run failed:\n{stderr}");
     assert_eq!(stdout, "9223372036854775807\n0\n9223372036854775807\n0\n0\n49\n");
 }
+
+#[test]
+fn jet_lexer_interns_repeated_names_and_relocates_literal_tables() {
+    let source = format!(
+        r####"{}
+fn run() {{
+    result := lex_payload(`alpha alpha "{{alpha}}"`.bytes(), false)
+    print(result.tokens[0].decoded.id == result.tokens[1].decoded.id)
+    literal :: result.tokens[2].literal
+    nested :: result.tables.literals[literal].string_parts[0].tokens[0]
+    print(result.tokens[0].decoded.id == nested.decoded.id)
+    before :: nested.span.start
+    token_shift_spans(&result.tokens[2], 100, &result.tables.literals)
+    print(result.tables.literals[literal].string_parts[0].tokens[0].span.start == before + 100)
+    print(token_decoded(result.tables, result.tables.literals[literal].string_parts[0].tokens[0]))
+    print(result.tokens[2].span.start)
+}}
+"####,
+        pass_source(),
+    );
+    let (code, stdout, stderr) = tir_support::default_run("selfhost_interned_token_tables", &source);
+    assert_eq!(code, 0, "interned token table run failed:\n{stderr}");
+    assert_eq!(stdout, "true\ntrue\ntrue\nalpha\n112\n");
+}
+
+#[test]
+fn jet_name_table_preserves_first_seen_ids_across_growth() {
+    let source = format!(
+        r####"{}
+fn run() {{
+    table := name_table()
+    first :: name_intern(&table, "μ_name")
+    loop index in 0..<600 -> _ := name_intern(&table, "name{{index}}")
+    again :: name_intern(&table, "μ_name")
+    print(first.id == again.id)
+    print(name_count(table))
+    print(name_text(table, first))
+    found :: name_find(table, "name599") ?? return
+    print(name_text(table, found))
+    print(name_find(table, "absent") == None)
+}}
+"####,
+        pass_source(),
+    );
+    let (code, stdout, stderr) = tir_support::default_run("selfhost_interned_names_growth", &source);
+    assert_eq!(code, 0, "name table growth run failed:\n{stderr}");
+    assert_eq!(stdout, "true\n602\nμ_name\nname599\ntrue\n");
+}

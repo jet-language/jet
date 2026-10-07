@@ -138,12 +138,12 @@ fn pkg_lex_workspace_declaration(src: [U8]) -> WorkspaceDeclarationProbe Never! 
         if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT -> next
         &tokens.push(token)
     }
-    declares_module :: pkg_workspace_tokens_declare_module(tokens)
-    WorkspaceDeclarationProbe{declares_module: declares_module, declares_members: declares_module && pkg_workspace_tokens_name_members(tokens)}
+    declares_module :: pkg_workspace_tokens_declare_module(tokens, lexed.tables)
+    WorkspaceDeclarationProbe{declares_module: declares_module, declares_members: declares_module && pkg_workspace_tokens_name_members(tokens, lexed.tables)}
 }
 
 // A top-level `module workspace` token pair.
-fn pkg_workspace_tokens_declare_module(tokens: [Token]) -> Bool Never! {
+fn pkg_workspace_tokens_declare_module(tokens: [Token], tables: TokenTables) -> Bool Never! {
     depth := 0
     loop index in 0..<(tokens.len() - 1) {
         kind :: tokens[index].kind
@@ -152,7 +152,7 @@ fn pkg_workspace_tokens_declare_module(tokens: [Token]) -> Bool Never! {
             kind == TOKEN_RBRACE -> depth -= 1
             kind == TOKEN_KW_MODULE && depth == 0 -> {
                 next_token :: tokens[index + 1]
-                name :: next_token.payload.text
+                name :: token_text(tables, next_token)
                 if next_token.kind == TOKEN_IDENT && name == NS_WORKSPACE && !name.starts_with(MODULE_INTERNAL_PREFIX) -> return true
             }
             else -> {}
@@ -162,9 +162,9 @@ fn pkg_workspace_tokens_declare_module(tokens: [Token]) -> Bool Never! {
 }
 
 // The `members:` field name appears among the tokens.
-fn pkg_workspace_tokens_name_members(tokens: [Token]) -> Bool Never! {
+fn pkg_workspace_tokens_name_members(tokens: [Token], tables: TokenTables) -> Bool Never! {
     loop token in tokens {
-        if token.kind == TOKEN_IDENT && token.payload.text == MODULE_FIELD_MEMBERS -> return true
+        if token.kind == TOKEN_IDENT && token_text(tables, token) == MODULE_FIELD_MEMBERS -> return true
     }
     false
 }
