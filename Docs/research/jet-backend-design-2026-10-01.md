@@ -484,6 +484,21 @@ still borrowed by libc. The musl imports are the ledgered interim platform
 floor, not a hosts-only fallback; hosted CLI cutover requires glibc dynamic
 linking under D-NETDNS2 and D-OS-FLOOR1.
 
+Raw clock samples carry exact Int words, not truncated i64 timestamps. Wall
+samples preserve the unsigned duration magnitude and an independent
+before-epoch flag, including normalized negative POSIX timespecs. Host
+monotonic samples use one lazily published process-relative origin, mirroring
+Rust's `TimeMonotonic.rs` static `OnceLock<Instant>`, rather than substituting
+the scheduler's absolute monotonic clock. Clock syscalls borrow the calling
+thread's existing timespec scratch and read both words before any other call
+can reuse it. Core alone selects world, replay or host samples and clamps
+the public Instant scalar.
+Time-zone environment reads lend the immutable startup snapshot and decode
+invalid UTF-8 lossily, matching `var_os(...).to_string_lossy()` independently
+of the logical environment overlay. File-zone reads transfer owned native
+byte lists; native embedded-zone absence is the platform seed's actual fact
+(the embedded TZif table is a wasm fact), not a file-system fallback.
+
 A Jet type that generated Rust holds as a native runtime type crosses as an owned
 `Box<T>` handle. The generator reads Context.rs and predicates.rs name tables and the
 explicit names in MIRRust `rust_apply_type`, using the same canonical-Core probe as
