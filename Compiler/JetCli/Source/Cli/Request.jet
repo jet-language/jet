@@ -313,12 +313,110 @@ impl JetCLIBuildInputs.JetDriverBuildInputs {
         Ok(out)
     }
     fn read(self, path: String, limit: Int) -[FS.Read]> [U8] String! {
-        info :: cli_files.stat(path) ?? return Err(jet_cli_io_error_text(err))
-        if info.is_symlink -> return Err("Too many levels of symbolic links (os error 40)")
-        if info.size > limit -> return Err("file exceeds its size bound")
-        bytes :: cli_files.read_bytes(path) ?? return Err(jet_cli_io_error_text(err))
+        if limit < 0 || limit > 536870912 -> return Err("file read bound exceeds the tree hashing bound")
+        expected :: cli_files.stat(path) ?? return Err(jet_cli_io_error_text(err))
+        if expected.is_symlink || !expected.is_file -> return Err("file is not a regular file")
+        reader :: cli_files.open(path, cli_files.LinkPolicy.Refuse) ?? return Err(jet_cli_io_error_text(err))
+        opened :: reader.stat() ?? return Err(jet_cli_io_error_text(err))
+        if !opened.is_file || expected.id != opened.id || expected.size != opened.size || expected.modified != opened.modified || expected.changed != opened.changed -> return Err("file changed before reading")
+        if expected.size > limit -> return Err("file exceeds its read bound")
+        bytes := [U8].with_capacity(if expected.size < 65536 -> expected.size else -> 65536)
+        loop {
+            remaining :: limit + 1 - bytes.len()
+            chunk :: reader.read(if remaining < 65536 -> remaining else -> 65536) ?? return Err(jet_cli_io_error_text(err))
+            if chunk.len() == 0 -> break
+            &bytes.extend(chunk)
+            if bytes.len() > limit -> return Err("file exceeds its read bound")
+        }
+        after :: reader.stat() ?? return Err(jet_cli_io_error_text(err))
+        path_after :: cli_files.stat(path) ?? return Err(jet_cli_io_error_text(err))
+        if !after.is_file || !path_after.is_file || expected.id != after.id || expected.id != path_after.id || expected.size != after.size || expected.size != path_after.size || expected.modified != after.modified || expected.modified != path_after.modified || expected.changed != after.changed || expected.changed != path_after.changed || bytes.len() != expected.size {
+            return Err("file changed while reading")
+        }
         Ok(bytes)
     }
+    fn read_rooted(self, root: String, relative: String, limit: Int) -[FS.Read]> [U8] String! {
+        jet_cli_build_read_rooted(root, relative, limit)
+    }
+}
+
+// CheckReads::read_nofollow_at_root's raw transport. Keep every directory
+// pinned and recheck its parent entry; no canonicalize-then-read window can
+// follow a replaced intermediate component outside the authorized build root.
+fn jet_cli_build_read_rooted(root: String, relative: String, limit: Int) -[FS.Read]> [U8] String! {
+    if limit < 0 || limit > 536870912 -> return Err("file read bound exceeds the tree hashing bound")
+    if relative.starts_with("/") -> return Err("file authority path must be relative and normalized")
+    parts := [String]{}
+    loop part in relative.split("/") {
+        if part == "" || part == "." -> next
+        if part == ".." -> return Err("file authority path must be relative and normalized")
+        loop byte in part.bytes() -> if byte == (U8{0}) -> return Err("file authority path contains NUL")
+        &parts.push(part)
+    }
+    initial :: if root.starts_with("/") -> "/" else -> "."
+    directories := [cli_files.Directory]{cli_files.open_directory(initial) ?? return Err(jet_cli_io_error_text(err))}
+    names := [String]{}
+    loop part in root.split("/") {
+        if part == "" || part == "." -> next
+        if part == ".." -> return Err("file authority root must not contain parent components")
+        loop byte in part.bytes() -> if byte == (U8{0}) -> return Err("file authority path contains NUL")
+        opened :: directories[directories.len() - 1].open_directory(part) ?? return Err(jet_cli_build_rooted_open_error(err))
+        &directories.push(opened)
+        &names.push(part)
+    }
+    if parts.len() == 0 -> return Err("file authority path is empty")
+    loop index in 0..<(parts.len() - 1) {
+        opened :: directories[directories.len() - 1].open_directory(parts[index]) ?? return Err(jet_cli_build_rooted_open_error(err))
+        &directories.push(opened)
+        &names.push(parts[index])
+    }
+    name :: parts[parts.len() - 1]
+    reader :: directories[directories.len() - 1].open(name) ?? return Err(jet_cli_build_rooted_open_error(err))
+    expected :: reader.stat() ?? return Err(jet_cli_io_error_text(err))
+    if !expected.is_file -> return Err("file authority input is not a regular file")
+    if expected.links != 1 -> return Err("file authority input has multiple hard links")
+    if jet_cli_build_read_chain_current(&directories, &names, initial) == .Err(error) -> return Err(error)
+    current :: directories[directories.len() - 1].entry_stat(name) ?? return Err(jet_cli_io_error_text(err))
+    if !current.is_file -> return Err("file authority input is not a regular file")
+    if current.links != 1 -> return Err("file authority input has multiple hard links")
+    if !jet_cli_build_read_same_file(expected, current) -> return Err("file authority input moved while it was held")
+    if expected.size > limit -> return Err("file exceeds its read bound")
+    bytes := [U8].with_capacity(if expected.size < 65536 -> expected.size else -> 65536)
+    loop {
+        remaining :: limit + 1 - bytes.len()
+        chunk :: reader.read(if remaining < 65536 -> remaining else -> 65536) ?? return Err(jet_cli_io_error_text(err))
+        if chunk.len() == 0 -> break
+        &bytes.extend(chunk)
+        if bytes.len() > limit -> return Err("file exceeds its read bound")
+    }
+    after :: reader.stat() ?? return Err(jet_cli_io_error_text(err))
+    path_after :: directories[directories.len() - 1].entry_stat(name) ?? return Err("file changed while it was being read")
+    if jet_cli_build_read_chain_current(&directories, &names, initial) == .Err(_) -> return Err("file changed while it was being read")
+    if !jet_cli_build_read_same_file(expected, after) || !jet_cli_build_read_same_file(expected, path_after) || after.size != bytes.len() {
+        return Err("file changed while it was being read")
+    }
+    Ok(bytes)
+}
+
+fn jet_cli_build_read_same_file(left: cli_files.Stat, right: cli_files.Stat) -> Bool Never! {
+    right.is_file && right.links == 1 && left.id == right.id && left.size == right.size && left.modified == right.modified && left.changed == right.changed
+}
+
+fn jet_cli_build_read_chain_current(directories: &[cli_files.Directory], names: &[String], initial: String) -[FS.Read]> Bool String! {
+    base :: cli_files.stat(initial) ?? return Err(jet_cli_io_error_text(err))
+    held_base :: directories[0].stat() ?? return Err(jet_cli_io_error_text(err))
+    if !base.is_dir || base.is_symlink || base.id != held_base.id -> return Err("file authority directory moved while it was held")
+    loop index in 0..<names.len() {
+        named :: directories[index].entry_stat(names[index]) ?? return Err(jet_cli_io_error_text(err))
+        held :: directories[index + 1].stat() ?? return Err(jet_cli_io_error_text(err))
+        if !named.is_dir || named.is_symlink || named.id != held.id -> return Err("file authority directory moved while it was held")
+    }
+    Ok(true)
+}
+
+fn jet_cli_build_rooted_open_error(error: IOError) -> String Never! {
+    message :: jet_cli_io_error_text(error)
+    if message.ends_with("(os error 40)") || message.ends_with("(os error 62)") -> "file authority path contains a symlink" else -> message
 }
 
 // Where absolute `path` resolves with every link followed (fs::canonicalize
