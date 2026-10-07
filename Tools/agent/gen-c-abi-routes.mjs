@@ -471,7 +471,7 @@ function tagCarrier(ty, path) {
 function elementCarrier(ty) {
   if (ty === "String") return { jet: "Text", read: "view(w as JetCString).to_owned()", write: "handle(e) as u64" };
   if (ty === "i64") return { jet: "Word", read: "w as i64", write: "e as u64" };
-  if (fixedInts.has(ty)) return { jet: "Word", read: `w as ${ty}`, write: "e as u64" };
+  if (fixedInts.has(ty)) return { jet: "Word", slot: ty, read: `w as ${ty}`, write: "e" };
   if (ty === "bool") return { jet: "Flag", read: "w != 0", write: "e as u64" };
   if (ty === "f64") return { jet: "Float", read: "f64::from_bits(w)", write: "e.to_bits()" };
   if (ty === "char") return { jet: "Word", read: "scalar(w as i64)", write: "e as u64" };
@@ -496,6 +496,7 @@ function paramCarrier(ty, path) {
   const one = (jet, cty, expr) => ({ jet, ctys: [cty], expr: ([a]) => expr(a) });
   if (ty === "&str") return one("Text", "JetCString", (a) => `view(${a})`);
   if (ty === "&String") return one("Text", "JetCString", (a) => `unsafe { &*${a} }`);
+  if (ty === "Option<&String>") return one("Text", "JetCString", (a) => `(!${a}.is_null()).then(|| unsafe { &*${a} })`);
   if (ty === "String") return one("Text", "JetCString", (a) => `view(${a}).to_owned()`);
   if (ty === "&i64") return one("Word", "i64", (a) => `&${a}`);
   // The prelude Ordering (by value or borrowed): the Jet enum's variant index.
@@ -520,7 +521,7 @@ function paramCarrier(ty, path) {
     const element = elementCarrier(list[2] ?? list[3]) ?? handleElement(list[2] ?? list[3], path);
     if (!element) return null;
     const items = (d, n) => `list_in(${d}, ${n}, |w| ${element.read})`;
-    return { jet: `List{elem: LowerRouteCarrier.${element.jet}}`, ctys: ["*const u64", "i64"], expr: ([d, n]) => (list[1] === "&" ? `&${items(d, n)}` : items(d, n)), handle: element.handle };
+    return { jet: `List{elem: LowerRouteCarrier.${element.jet}}`, ctys: [`*const ${element.slot ?? "u64"}`, "i64"], expr: ([d, n]) => (list[1] === "&" ? `&${items(d, n)}` : items(d, n)), handle: element.handle };
   }
   // A mutably borrowed handle: the adapter mutates the runtime value in the
   // caller's own box (the lowering lends the handle of its Write place).
@@ -655,7 +656,7 @@ function resultShape(ty, path, nativeInt) {
     const element = resultElement(list[1]);
     if (!element) return null;
     return {
-      jet: `Plain{carrier: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "data", cty: "*mut u64" }], handles: element.handle ? [element.handle] : [],
+      jet: `Plain{carrier: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "data", cty: `*mut ${element.slot ?? "u64"}` }], handles: element.handle ? [element.handle] : [],
       body: (call) => `list_out(${call}.into_iter().map(|e| ${element.write}).collect(), data)`,
     };
   }
@@ -684,7 +685,7 @@ function resultShape(ty, path, nativeInt) {
     const element = listOf(args[0]);
     if (element) {
       return {
-        jet: `Option{some: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "some", cty: "*mut u64" }, { name: "some_len", cty: "i64" }], handles: element.handle ? [element.handle] : [],
+        jet: `Option{some: LowerRouteCarrier.List{elem: LowerRouteCarrier.${element.jet}}}`, ret: "i64", outs: [{ name: "some", cty: `*mut ${element.slot ?? "u64"}` }, { name: "some_len", cty: "i64" }], handles: element.handle ? [element.handle] : [],
         body: (call) => `match ${call} {\n            ${listArm("some", element, somePattern, 1)}\n            ${nonePattern} => 0,\n        }`,
       };
     }
@@ -702,9 +703,9 @@ function resultShape(ty, path, nativeInt) {
   const err = errList ? null : valueCarrier(args[1], path, false);
   if ((!ok && !okList) || (!errList && (!err || !err.cty))) return null;
   const outs = [];
-  if (okList) outs.push({ name: "ok", cty: "*mut u64" }, { name: "ok_len", cty: "i64" });
+  if (okList) outs.push({ name: "ok", cty: `*mut ${okList.slot ?? "u64"}` }, { name: "ok_len", cty: "i64" });
   else if (ok.cty) outs.push({ name: "ok", cty: ok.cty });
-  if (errList) outs.push({ name: "err", cty: "*mut u64" }, { name: "err_len", cty: "i64" });
+  if (errList) outs.push({ name: "err", cty: `*mut ${errList.slot ?? "u64"}` }, { name: "err_len", cty: "i64" });
   else outs.push({ name: "err", cty: err.cty });
   const okArm = okList
     ? listArm("ok", okList, "Ok", 1)
@@ -786,10 +787,11 @@ const syntaxConstants = new Map();
 // arms of one name table (`Some(name)` maps a name to itself).
 const nameTable = (source, name) => {
   const table = new Map();
-  for (const m of fnBody(source, name).matchAll(/((?:"[^"]+"\s*\|\s*)*"[^"]+"|n if [^=>{}]*==[^>{}]*?)\s*=>\s*Some\((?:"([^"]+)"|name)\)/g)) {
+  for (const m of fnBody(source, name).matchAll(/((?:"[^"]+"\s*\|\s*)*"[^"]+"|(?:Syntax::)?[A-Z][A-Z0-9_]*|n if [^=>{}]*==[^>{}]*?)\s*=>\s*Some\((?:"([^"]+)"|name)\)/g)) {
     const names = m[1].startsWith("n if")
       ? [...m[1].matchAll(/Syntax::([A-Z][A-Z0-9_]*)|"([^"]+)"/g)].map((k) => k[2] ?? syntaxConstants.get(k[1]))
-      : [...m[1].matchAll(/"([^"]+)"/g)].map((k) => k[1]);
+      : m[1].startsWith('"') ? [...m[1].matchAll(/"([^"]+)"/g)].map((k) => k[1])
+      : [syntaxConstants.get(m[1].replace(/^Syntax::/, ""))];
     for (const jetName of names) {
       if (!jetName) throw new Error(`gen-c-abi-routes: unresolved Syntax constant in ${name}: ${m[1]}`);
       if (!table.has(jetName)) table.set(jetName, m[2] ?? jetName);
@@ -927,8 +929,8 @@ rs.push("    fn scalar(value: i64) -> char {");
 rs.push("        u32::try_from(value).ok().and_then(char::from_u32).unwrap_or(char::REPLACEMENT_CHARACTER)");
 rs.push("    }");
 rs.push("");
-rs.push("    /// A List argument's `len` eight-byte slots at `data`, as Rust values.");
-rs.push("    fn list_in<T>(data: *const u64, len: i64, item: impl Fn(u64) -> T) -> Vec<T> {");
+rs.push("    /// A List argument uses its declared fixed-integer width or word carrier.");
+rs.push("    fn list_in<S: Copy, T>(data: *const S, len: i64, item: impl Fn(S) -> T) -> Vec<T> {");
 rs.push("        if len <= 0 || data.is_null() {");
 rs.push("            return Vec::new();");
 rs.push("        }");
@@ -938,14 +940,14 @@ rs.push("    }");
 rs.push("");
 rs.push("    /// A List result: a slot buffer from the allocator `jet_rt_free` returns");
 rs.push("    /// to (null when empty), written to `data`; returns the length.");
-rs.push("    fn list_out(words: Vec<u64>, data: *mut *mut u64) -> i64 {");
+rs.push("    fn list_out<S: Copy>(words: Vec<S>, data: *mut *mut S) -> i64 {");
 rs.push("        let len = words.len();");
 rs.push("        let buffer = if len == 0 {");
 rs.push("            std::ptr::null_mut()");
 rs.push("        } else {");
-rs.push("            let layout = std::alloc::Layout::from_size_align(len * 8, 8).unwrap_or_else(|_| range_stop());");
+rs.push("            let layout = std::alloc::Layout::from_size_align(len * std::mem::size_of::<S>(), 8).unwrap_or_else(|_| range_stop());");
 rs.push("            // SAFETY: `layout` has a nonzero size.");
-rs.push("            let buffer = unsafe { std::alloc::alloc(layout) } as *mut u64;");
+rs.push("            let buffer = unsafe { std::alloc::alloc(layout) } as *mut S;");
 rs.push("            if buffer.is_null() {");
 rs.push("                std::alloc::handle_alloc_error(layout);");
 rs.push("            }");
