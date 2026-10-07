@@ -27,6 +27,9 @@ with the implementation; they do not add a second mechanism.
 Use plain English words rather than abbreviations (`remove`, not `rm`). The
 closed exception list is `len`, plus the module names `fmt`, `args`, and `mem`
 (D-API-LEN1=A; a ballot is required to extend it).
+Component Model plugin export names use canonical kebab-case. A Jet method
+spelling such as `is_enabled` resolves to the published `is-enabled` export;
+generated guest exports and host invocation must use the same conversion.
 
 Use `has(value)` and `has_key(key)` for membership predicates
 (D-API-CONTAINS1=B). Use `add` for storage: keyed `add(key, value)` returns the
