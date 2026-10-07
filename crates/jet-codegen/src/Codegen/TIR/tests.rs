@@ -1786,29 +1786,55 @@ fn emitted_rust(src: &str) -> (jet_foundation::MIR::MirProgram, String) {
 
 /// `.clone()` calls in emitted Rust whose receiver is not a scalar: index
 /// arithmetic clones `JetInt` values and bools, which are not the copies a
-/// loop-source probe measures (the list snapshot).
+/// loop-source probe measures (the list snapshot). Scalars are the `let`
+/// bindings and function parameters of such a type (a parameter through its
+/// borrow); the receiver is the binding the clone reads, through any
+/// parentheses, dereference and slot unwrapping
+/// (`(_v3.as_ref().expect("MIR value")).clone()` reads `_v3`).
 fn non_scalar_clone_count(rust: &str) -> usize {
+    let scalar = |ty: &str| {
+        let ty = ty.trim_start().trim_start_matches('&');
+        ty.contains("JetInt") || ty.starts_with("bool") || ty.starts_with("Option<bool>")
+    };
     let mut scalars = std::collections::HashSet::new();
     for line in rust.lines() {
-        let Some(rest) = line.trim_start().strip_prefix("let ") else {
-            continue;
-        };
-        let rest = rest.strip_prefix("mut ").unwrap_or(rest);
-        let Some((name, ty)) = rest.split_once(':') else {
-            continue;
-        };
-        let ty = ty.trim_start();
-        if ty.contains("JetInt") || ty.starts_with("bool") || ty.starts_with("Option<bool>") {
-            scalars.insert(name.trim());
+        let line = line.trim_start();
+        if let Some(rest) = line.strip_prefix("let ") {
+            let rest = rest.strip_prefix("mut ").unwrap_or(rest);
+            if let Some((name, ty)) = rest.split_once(':') {
+                if scalar(ty) {
+                    scalars.insert(name.trim());
+                }
+            }
+        } else if line.starts_with("fn ") || line.starts_with("pub fn ") {
+            let Some((_, params)) = line.split_once('(') else {
+                continue;
+            };
+            let params = params.rsplit_once(')').map_or(params, |(params, _)| params);
+            for param in params.split(", ") {
+                if let Some((name, ty)) = param.split_once(':') {
+                    if scalar(ty) {
+                        scalars.insert(name.trim().trim_start_matches("mut "));
+                    }
+                }
+            }
         }
     }
     rust.match_indices(".clone()")
         .filter(|(at, _)| {
-            let prefix = &rust[..*at];
-            let prefix = prefix
-                .strip_suffix(".as_ref().expect(\"MIR local\")")
-                .or_else(|| prefix.strip_suffix(".as_ref().expect(\"MIR value\")"))
-                .unwrap_or(prefix);
+            let mut prefix = &rust[..*at];
+            loop {
+                let stripped = prefix
+                    .strip_suffix(')')
+                    .filter(|inner| !inner.ends_with('('))
+                    .filter(|inner| !inner.ends_with("\"MIR local\"") && !inner.ends_with("\"MIR value\""))
+                    .or_else(|| prefix.strip_suffix(".as_ref().expect(\"MIR local\")"))
+                    .or_else(|| prefix.strip_suffix(".as_ref().expect(\"MIR value\")"));
+                match stripped {
+                    Some(inner) => prefix = inner,
+                    None => break,
+                }
+            }
             let start = prefix
                 .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
                 .map_or(0, |index| index + 1);
@@ -1861,7 +1887,7 @@ fn mir_walks_stable_loop_sources_in_place() {
     // copy counts compare the loop lowering alone. The source is a `:=`
     // binding, which `fold_pure_calls` leaves alone, so its length is not a
     // folded constant. A field source (`bag.names`, which sema wraps in a
-    // share copy) walks the same way as a local.
+    // share copy) walks the same way as a local or fixed list.
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let program = |setup: &str, source: &str, inside: &str, after: &str| {
             format!(
@@ -1892,6 +1918,8 @@ fn run() {{
         for (setup, source) in [
             ("names := make_names(3)", "names"),
             ("bag := Bag{names: make_names(3)}", "bag.names"),
+            // A fixed list walks over its literal length (#4566 slice 2).
+            ("fixed := [String#3]{\"a\", \"b\", \"c\"}", "fixed"),
         ] {
             let mention = format!("_ := {source}.len()");
             let exit = format!("{mention}\n        if n > 1000 -> break");
@@ -1912,6 +1940,71 @@ fn run() {{
                 "`{source}`: read-only walk emitted {read_clones} clones, snapshot {snapshot_clones}"
             );
         }
+    });
+}
+#[test]
+fn split_feeding_only_join_fuses_in_place() {
+    // #4566 slice 6: `text.split(sep).join(joiner)` splits and joins the
+    // source in place; a split iterator with another consumer keeps the
+    // iterator.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "fn fused(text: String) -> String {\n    return text.split(\",\").join(\";\")\n}\n\nfn kept(seed: String) -> Int {\n    text := seed\n    n := 0\n    loop piece in text.split(\",\") {\n        n += piece.len()\n        text = \"x\"\n    }\n    return n\n}\n\nfn run() {\n    print(fused(\"a,b\"))\n    print(kept(\"a,b\"))\n}\n";
+        let (_, rust) = emitted_rust(src);
+        let fused = emitted_fn_body(&rust, "fused");
+        assert!(
+            fused.contains("jet_string_split_join(") && !fused.contains("jet_iter_string_split("),
+            "a split feeding only a join must fuse:\n{fused}"
+        );
+        let kept = emitted_fn_body(&rust, "kept");
+        assert!(
+            kept.contains("jet_iter_string_split(") && !kept.contains("jet_loop_split_init("),
+            "a loop over a split of a source its body changes keeps the iterator:\n{kept}"
+        );
+    });
+}
+#[test]
+fn split_feeding_a_loop_iterates_views() {
+    // #4566 slice 6: a loop over the split of a source nothing can change
+    // while it runs (a read parameter, an immutable local) walks the pieces
+    // as views of the borrowed source; the source is never copied.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "fn views_count(text: String) -> Int {\n    n := 0\n    loop piece in text.split(\",\") -> n += piece.len()\n    return n\n}\n\nfn views_words(seed: String) -> Int {\n    text :: \"{seed}, tail\"\n    out := [String]{}\n    loop piece in text.split(\", \") -> &out.push(piece)\n    return out.len()\n}\n\nfn run() {\n    print(views_count(\"a,bb,ccc\"))\n    print(views_words(\"x, y\"))\n}\n";
+        let (_, rust) = emitted_rust(src);
+        for name in ["views_ucount", "views_uwords"] {
+            let body = emitted_fn_body(&rust, name);
+            assert!(
+                body.contains("jet_loop_split_init(")
+                    && !body.contains("jet_iter_string_split(")
+                    && !body.contains("jet_loop_iter_init("),
+                "a loop over a stable source's split must walk views:\n{body}"
+            );
+        }
+    });
+}
+#[test]
+fn eager_adapters_inline_callbacks_and_fuse_pure_stages() {
+    // #4566 slice 5: eager list adapters borrow their source and take plain
+    // closures; a map chain whose later callbacks are pure and total runs as
+    // one pass, while a later callback that can stop (a division by a
+    // non-literal) keeps the passes apart.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "fn adapters_fused(xs: [Int], r: Int) -> [Int] {\n    return xs.map(x -> x * 3 + r).filter(x -> x % 2 == 0).map(x -> x + 1)\n}\n\nfn adapters_kept(xs: [Int], r: Int) -> [Int] {\n    return xs.map(x -> x + 1).filter(x -> x / r > 1)\n}\n\nfn run() {\n    print(adapters_fused([1, 2, 3], 1))\n    print(adapters_kept([1, 2, 3], 1))\n}\n";
+        let (_, rust) = emitted_rust(src);
+        let chain = emitted_fn_body(&rust, "adapters_ufused");
+        assert!(
+            chain.contains("jet_list_map_chain(")
+                && !chain.contains("jet_list_filter(")
+                && !chain.contains("RefCell"),
+            "a pure map/filter/map chain must fuse over plain closures:\n{chain}"
+        );
+        let split = emitted_fn_body(&rust, "adapters_ukept");
+        assert!(
+            split.contains("jet_list_map(")
+                && split.contains("jet_list_filter(")
+                && !split.contains("jet_list_map_chain(")
+                && !split.contains("RefCell"),
+            "a filter that can stop keeps its own pass, still over plain closures:\n{split}"
+        );
     });
 }
 #[test]

@@ -12870,9 +12870,9 @@ pub enum TNumericOp {
 pub enum TClosureOp {
     /// Prove two indexes before lending their mutable views to one callback.
     EditDisjoint,
-    /// `map` on a list — `jet_list_map((recv).clone(), f)`.
+    /// `map` on a list — `jet_list_map(&recv, f)`.
     Map,
-    /// `map` on a list whose lambda is FnMut — `jet_list_map_mut((recv).clone(), f)`.
+    /// `map` on a list whose lambda is FnMut — `jet_list_map_mut(&recv, f)`.
     MapMut,
     /// Fallible `map` — the callback owns the failure row and the collection
     /// helper returns `Result<Collection<U>, E>`.
