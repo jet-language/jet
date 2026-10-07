@@ -4846,7 +4846,7 @@ impl<'a> Checker<'a> {
                 ),
                 format!(
                     "write `{}` to pass a copy, or the move marker `{}` (`{}{name}`) where the call hands `{name}` over",
-                    Syntax::copy_call(name),
+                    Syntax::copy_call(&name),
                     Syntax::SIGIL_MOVE,
                     Syntax::SIGIL_MOVE,
                 ),
