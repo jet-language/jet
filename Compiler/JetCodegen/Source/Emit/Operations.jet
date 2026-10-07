@@ -4959,9 +4959,9 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
         .Parameter(index, _) -> {
             // A window parameter is a `&mut [T]` slice; its whole read is an owned copy.
             if jet_rust_emit_window_param(ctx, function.id, index) -> return "(*{jet_rust_emit_parameter_name(function, index)}).to_vec()"
-            return jet_rust_emit_parameter_expression(function, index, jet_rust_emit_find_parameter(function, index).access)
+            return jet_rust_emit_parameter_expression(&ctx, function, index, jet_rust_emit_find_parameter(function, index).access)
         }
-        .Capture(slot) -> return jet_rust_emit_capture_expression(function, slot)
+        .Capture(slot) -> return jet_rust_emit_capture_expression(&ctx, function, slot)
         .Global(name) -> return jet_rust_emit_global_symbol(&ctx, name)
         .Phi(incoming) -> {
             if jet_rust_emit_phi_is_trivial(incoming) -> return jet_rust_emit_value_transfer(ctx, function, incoming[0].value)

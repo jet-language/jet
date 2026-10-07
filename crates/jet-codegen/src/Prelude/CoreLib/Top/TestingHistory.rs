@@ -56,6 +56,7 @@ fn jet_history_encode_type<T: 'static>(
 macro_rules! jet_history_callable_argument {
     (owned, $arg:ident, $lifetime:lifetime) => { $arg };
     (read, $arg:ident, $lifetime:lifetime) => { &$lifetime $arg };
+    (text, $arg:ident, $lifetime:lifetime) => { &$lifetime str };
     (write, $arg:ident, $lifetime:lifetime) => { &$lifetime mut $arg };
 }
 

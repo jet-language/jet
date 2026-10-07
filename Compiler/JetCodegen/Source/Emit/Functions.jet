@@ -45,6 +45,7 @@ fn jet_rust_emit_function_param_type(ctx: &JetRustEmitContext, function: MIRFunc
 fn jet_rust_emit_capture_param(ctx: &JetRustEmitContext, capture: MIRCaptureParam) -> String Never! {
     rendered :: jet_rust_emit_type(&ctx, capture.ty)
     name :: jet_rust_emit_capture_name(capture.slot)
+    if jet_rust_emit_read_text_parameter(&ctx, capture.ty, capture.access) -> return "{name}: &str"
     if capture.access == {
         .Read -> "{name}: &{rendered}"
         .Write -> "{name}: &mut {rendered}"
@@ -64,6 +65,7 @@ fn jet_rust_emit_local_declaration(ctx: &JetRustEmitContext, local: MIRLocal) ->
     // MIRRust: a shared-capture local is one shared cell (S47/M2).
     if jet_rust_emit_local_is_shared(&ctx, local.id) -> return "let {jet_rust_emit_local_slot(local.id)}: std::rc::Rc<std::cell::RefCell<Option<{jet_rust_emit_type(&ctx, local.ty)}>>> = std::rc::Rc::new(std::cell::RefCell::new(None));"
     // MIRRust emit_slots: a reference binding holds the value it binds in place.
+    if ctx.ref_bindings.locals.get(local.id.value) != None && jet_rust_emit_read_text_parameter(&ctx, local.ty, MIRAccess.Read) -> return "let mut {jet_rust_emit_local_slot(local.id)}: Option<&str> = None;"
     borrow :: if ctx.ref_bindings.locals.get(local.id.value) != None -> "&" else -> ""
     "let mut {jet_rust_emit_local_slot(local.id)}: Option<{borrow}{jet_rust_emit_type(&ctx, local.ty)}> = None;"
 }

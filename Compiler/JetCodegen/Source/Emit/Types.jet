@@ -54,7 +54,19 @@ fn jet_rust_emit_type_is_borrowed(ty: MIRType) -> Bool Never! {
     if ty.kind == MIRTypeKind.Int -> true else -> !mir_type_is_scalar(ty)
 }
 
+// MIRRust read_text_parameter: read text borrows its contents, not its
+// allocation. Core-layer text already uses its static scalar carrier.
+fn jet_rust_emit_read_text_parameter(ctx: &JetRustEmitContext, source: MIRType, access: MIRAccess) -> Bool Never! {
+    if access != MIRAccess.Read || jet_rust_emit_is_core_layer(&ctx) -> return false
+    ty := source
+    if source.identity == .Val(identity) {
+        if jet_rust_emit_type_instance(ctx, identity, true) == .Val(instance) -> ty = instance
+    }
+    ty.kind == MIRTypeKind.String
+}
+
 fn jet_rust_emit_callable_param_type(ctx: &JetRustEmitContext, ty: MIRType, access: MIRAccess) -> String Never! {
+    if jet_rust_emit_read_text_parameter(&ctx, ty, access) -> return "&str"
     rendered :: jet_rust_emit_type(&ctx, ty)
     if access == {
         .Write -> "&mut {rendered}"
