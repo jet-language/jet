@@ -80,6 +80,25 @@ fn jet_codegen_core_reach_function_keys(function: TFunc) -> [String] Never! {
     keys
 }
 
+// Reachability precedes concrete instance lowering. A checked generic/operator
+// target keeps its declaration, without stripping the owner's own arguments.
+fn jet_codegen_core_reach_template_key(key: String) -> String Never! {
+    bytes :: key.bytes()
+    if bytes.len() == 0 || Int.from_u8(bytes[bytes.len() - 1]) != 62 -> return key
+    depth := 0
+    position := bytes.len() - 1
+    loop position >= 0 {
+        byte :: Int.from_u8(bytes[position])
+        if byte == 62 -> depth += 1
+        if byte == 60 {
+            depth -= 1
+            if depth == 0 -> return key.slice(0, position)
+        }
+        position -= 1
+    }
+    key
+}
+
 // Which checked functions to lower: one flag per row of `functions`, read in
 // place (never copied). Only rows flagged in `candidates` take part: every
 // candidate outside `core_module_identities` (user code and compiler-private
@@ -112,7 +131,7 @@ pub fn jet_codegen_reachable_core_rows(functions: [TFunc], candidates: ^[Bool], 
     loop pending.len() > 0 {
         caller :: &pending.pop() ?? { break }
         loop key in jet_codegen_core_reach_function_keys(functions[caller]) {
-            target :: by_key.get(key) ?? next
+            target :: by_key.get(key) ?? by_key.get(jet_codegen_core_reach_template_key(key)) ?? next
             if !reachable[target] {
                 reachable[target] = true
                 &pending.push(target)

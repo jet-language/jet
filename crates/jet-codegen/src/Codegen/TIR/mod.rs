@@ -10567,6 +10567,30 @@ fn checked_function_reference_identity(
     }
 }
 
+/// Reachability is computed over declarations, before concrete generic and
+/// operator instances are lowered. Retain the exact owner, stripping only the
+/// final balanced method/function argument list (never `<corelib>` or owner
+/// arguments).
+fn checked_callable_template_identity(identity: &str) -> &str {
+    if !identity.ends_with('>') {
+        return identity;
+    }
+    let mut depth = 0;
+    for (offset, byte) in identity.bytes().enumerate().rev() {
+        match byte {
+            b'>' => depth += 1,
+            b'<' => {
+                depth -= 1;
+                if depth == 0 {
+                    return &identity[..offset];
+                }
+            }
+            _ => {}
+        }
+    }
+    identity
+}
+
 fn is_checked_function_reference(reference: &jet_foundation::Names::NameReference) -> bool {
     reference.kind == "function" || checked_function_reference_identity(reference).is_some()
 }
@@ -10579,7 +10603,9 @@ fn callable_for_reference(
 ) -> Option<usize> {
     if reference.kind == "semantic" {
         let identity = checked_function_reference_identity(reference)?;
-        return index.with_identity(identity).first().copied();
+        return index.with_identity(identity).first().copied().or_else(|| {
+            index.with_identity(checked_callable_template_identity(identity)).first().copied()
+        });
     }
     if reference.kind != "function" {
         return None;
@@ -10781,6 +10807,17 @@ mod checked_function_reference_tests {
             Some("<corelib>/Core/http::Core/http/client.jet::request")
         );
         assert!(is_checked_function_reference(&reference));
+        assert_eq!(
+            checked_callable_template_identity(
+                "<corelib>/Core/data::Core/data/data.jet::DataErrorKind::Comparable::compare<DataErrorKind>"
+            ),
+            "<corelib>/Core/data::Core/data/data.jet::DataErrorKind::Comparable::compare"
+        );
+        assert_eq!(
+            checked_callable_template_identity("pkg::Box<Int>::convert<List<String>>"),
+            "pkg::Box<Int>::convert"
+        );
+        assert_eq!(checked_callable_template_identity("<corelib>/Core/data::run"), "<corelib>/Core/data::run");
     }
 
     #[test]

@@ -3147,6 +3147,14 @@ impl<'a> Checker<'a> {
                 return false;
             }
         }
+        // A generic codec bound uses the same structural and imported-nominal
+        // contract as an ordinary encode/decode call, not a second trait test.
+        if bound == crate::Generics::ENCODE {
+            return self.is_encodable(ty);
+        }
+        if bound == crate::Generics::DECODE {
+            return self.is_decodable(ty);
+        }
         self.trait_reg.type_implements_trait(ty, bound)
     }
 
