@@ -683,6 +683,8 @@ fn apply_source_edits(src: &str, edits: &[TextEdit]) -> Option<String> {
         if edit.span.end > src.len()
             || edit.span.start > edit.span.end
             || edit.span.end > replaced_start
+            || !src.is_char_boundary(edit.span.start)
+            || !src.is_char_boundary(edit.span.end)
         {
             return None;
         }
@@ -2455,6 +2457,21 @@ mod tests {
         format_program, format_source, format_source_with_options,
         retired_interpolation_selector_edits, retired_type_edits, FormatOptions,
     };
+
+    #[test]
+    fn formatter_edits_refuse_non_utf8_boundaries() {
+        let edit = |start, end| super::TextEdit {
+            span: super::Span::new(start, end),
+            new_text: "a".to_owned(),
+        };
+        for (start, end) in [(1, 2), (0, 1), (0, 4), (2, 1)] {
+            assert_eq!(super::apply_source_edits("éx", &[edit(start, end)]), None);
+        }
+        assert_eq!(
+            super::apply_source_edits("éx", &[edit(0, 2)]),
+            Some("ax".to_owned())
+        );
+    }
 
     #[test]
     fn retired_selector_rewrites_through_the_parser_and_formatter() {
