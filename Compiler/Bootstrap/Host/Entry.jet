@@ -43,7 +43,7 @@ fn jet_bootstrap_native(request: ^JetDriverCompileRequest, prefix: String) -> Je
         library :: x64_runtime_library(program, symbols)
         if library.object.errors.len() > 0 {
             cli_files.write("{prefix}.issues", library.object.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime library findings")
-            return result
+            return jet_driver_compile_escaped_failure("runtime library object failed; see {prefix}.issues")
         }
         cli_files.write_bytes("{prefix}.o", library.object.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime library object")
         symbols_out :: loop entry_row in library.exports -> entry_row.symbol

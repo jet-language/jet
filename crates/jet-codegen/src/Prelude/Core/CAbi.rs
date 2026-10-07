@@ -113,8 +113,11 @@ mod jet_c_abi {
 
     fn text_handle(value: &str) -> JetCString {
         let len = value.len();
-        let ptr = if len == 0 { std::ptr::NonNull::<u8>::dangling().as_ptr() } else { jet_rt_alloc(len, 1) };
-        let carrier = jet_rt_alloc(std::mem::size_of::<JetCText>(), std::mem::align_of::<JetCText>()) as JetCString;
+        // SAFETY: a nonempty UTF-8 byte buffer has the valid (len, 1) layout;
+        // the runtime pack's init array initializes the shared Jet heap first.
+        let ptr = if len == 0 { std::ptr::NonNull::<u8>::dangling().as_ptr() } else { unsafe { jet_rt_alloc(len, 1) } };
+        // SAFETY: the header has its exact nonzero C-layout size/alignment.
+        let carrier = unsafe { jet_rt_alloc(std::mem::size_of::<JetCText>(), std::mem::align_of::<JetCText>()) } as JetCString;
         // SAFETY: both fresh allocations have exactly the requested sizes;
         // the input is valid UTF-8 and disjoint from the new buffer.
         unsafe {
@@ -579,33 +582,11 @@ mod jet_c_abi {
         guard(|| record(super::JetTaskFailure::Panicked(view(reason).to_owned())))
     }
 
-    // Memory for boxes owned by generated code.
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_alloc(size: usize, align: usize) -> *mut u8 {
-        guard(|| {
-            let layout = std::alloc::Layout::from_size_align(size.max(1), align)
-                .unwrap_or_else(|_| super::jet_panic("<core.prelude>", 0, "invalid box layout"));
-            // SAFETY: the layout has a non-zero size.
-            let ptr = unsafe { std::alloc::alloc(layout) };
-            if ptr.is_null() {
-                std::alloc::handle_alloc_error(layout);
-            }
-            ptr
-        })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_free(ptr: *mut u8, size: usize, align: usize) {
-        guard(|| {
-            if ptr.is_null() {
-                return;
-            }
-            let layout = std::alloc::Layout::from_size_align(size.max(1), align)
-                .unwrap_or_else(|_| super::jet_panic("<core.prelude>", 0, "invalid box layout"));
-            // SAFETY: `ptr` came from `jet_rt_alloc` with this size and align.
-            unsafe { std::alloc::dealloc(ptr, layout) }
-        })
+    // The Jet object owns the shared allocation domain; these are imports,
+    // not a second allocator implementation or competing C definitions.
+    unsafe extern "C" {
+        fn jet_rt_alloc(size: usize, align: usize) -> *mut u8;
+        fn jet_rt_free(ptr: *mut u8, size: usize, align: usize);
     }
 
     // Strings.

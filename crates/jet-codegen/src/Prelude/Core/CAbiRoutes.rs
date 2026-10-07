@@ -17271,18 +17271,6 @@ mod jet_c_abi_routes {
         guard(|| match crate::jet_ordering_then(&match a0 { 0 => crate::__jet_Ordering::__jet_Less, 1 => crate::__jet_Ordering::__jet_Equal, 2 => crate::__jet_Ordering::__jet_Greater, _ => range_stop() }, &match a1 { 0 => crate::__jet_Ordering::__jet_Less, 1 => crate::__jet_Ordering::__jet_Equal, 2 => crate::__jet_Ordering::__jet_Greater, _ => range_stop() }) { crate::__jet_Ordering::__jet_Less => 0, crate::__jet_Ordering::__jet_Equal => 1, crate::__jet_Ordering::__jet_Greater => 2 })
     }
 
-    /// core.index.index_miss
-    #[no_mangle]
-    pub extern "C" fn jet_panic(a0: JetCString, a1: i64, a2: JetCString) {
-        guard(|| crate::jet_panic(view(a0), fixed::<u32>(a1), view(a2)))
-    }
-
-    /// TIR/routes.rs
-    #[no_mangle]
-    pub extern "C" fn jet_panic_rich(a0: JetCString, a1: i64, a2: JetCString, a3: JetCString, a4: i64, a5: i64, a6: JetCString, a7: JetCString) {
-        guard(|| crate::jet_panic_rich(view(a0), fixed::<u32>(a1), view(a2), view(a3), fixed::<u32>(a4), fixed::<u32>(a5), view(a6), view(a7)))
-    }
-
     /// core.handle.path.extension
     #[no_mangle]
     pub extern "C" fn jet_path_extension(a0: *mut crate::JetPath, some: *mut JetCString) -> i64 {
@@ -22880,12 +22868,6 @@ mod jet_c_abi_routes {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
-    }
-
-    /// TIR/routes.rs
-    #[no_mangle]
-    pub extern "C" fn jet_todo_stop(a0: JetCString, a1: i64, a2: JetCString) {
-        guard(|| crate::jet_todo_stop(view(a0), fixed::<u32>(a1), view(a2)))
     }
 
     /// TIR/tir_to_mir_stmt.rs

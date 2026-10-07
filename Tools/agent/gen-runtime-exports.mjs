@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const args = process.argv.slice(2);
 if (args.length > 1 || args.some((arg) => !["--check", "--print"].includes(arg))) throw new Error("usage: gen-runtime-exports.mjs [--check|--print]");
-const sources = ["Compiler/JetRuntime/Source/Alloc.jet", "Compiler/JetRuntime/Source/Trap.jet"];
+const sources = readFileSync(join(root, "Compiler/JetRuntime/sources.list"), "utf8").split("\n")
+  .map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
 const symbols = sources.flatMap((path) => [...readFileSync(join(root, path), "utf8").matchAll(/^#Export\(c\)\s+(?:pub\s+)?fn\s+([A-Za-z_]\w*)\s*\(/gm)].map((match) => match[1]));
 if (!symbols.length || new Set(symbols).size !== symbols.length) throw new Error("empty or duplicate runtime #Export(c) declarations");
 // Lead-reviewed ABI metadata, emitted into the explicit list (not a lowering

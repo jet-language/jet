@@ -384,6 +384,11 @@ const handExports = new Set([...handTable.matchAll(/pub extern "C" fn ([A-Za-z0-
 for (const m of handTable.matchAll(/exact_int_(?:binary|located)!\s*\{?\(?([^)}]*)/g)) {
   for (const name of m[1].split(",").map((s) => s.trim()).filter(Boolean)) handExports.add(name);
 }
+// The audited runtime cutover list owns these C definitions in the Jet object.
+// Keep route carrier metadata below: only Rust adapter bodies disappear.
+const jetRuntimeExports = new Set(readFileSync(`${repo}/Compiler/JetRuntime/exports.list`, "utf8")
+  .split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("#"))
+  .map((line) => line.split(/\s+/u)[0]));
 const fixedInts = new Set(["u8", "u16", "u32", "u64", "usize", "i8", "i16", "i32", "isize"]);
 
 // A handle type whose runtime declaration derives `Clone` also gets a clone
@@ -1220,6 +1225,7 @@ for (const [name, full] of handleRows) {
   }
 }
 for (const adapter of adapters) {
+  if (adapter.external || jetRuntimeExports.has(adapter.name)) continue;
   const params = [];
   const names = adapter.params.map((param, index) => param.ctys.map((cty, k) => {
     const name = param.ctys.length === 1 ? `a${index}` : `a${index}_${k}`;
