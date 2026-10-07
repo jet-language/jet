@@ -73,6 +73,36 @@ fn run() {
     assert_eq!(stdout, "9\n9223372036854775811\n27670116110564327429\n");
 }
 
+#[test]
+fn eager_string_callbacks_adapt_borrowed_storage_to_read_text() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+fn lengths(xs: [String]) -> [Int] {
+    xs.map(x -> x.len())
+}
+fn longer(xs: [String]) -> [String] {
+    xs.filter(x -> x.len() > 1)
+}
+fn run() {
+    words :: ["a", "bb"]
+    counts :: lengths(words)
+    print("{counts[0]} {counts[1]}")
+    kept :: longer(words)
+    print(kept[0])
+}
+"#;
+    let rust = compile("tir_eager_string_read_text", src);
+    assert!(
+        rust.contains("move |__jet_callback_arg_0: &String| __jet_callback(__jet_callback_arg_0)"),
+        "inline String callbacks adapt &String to the Read &str formal without an owner copy"
+    );
+    let (code, stdout) = build_and_run("tir_eager_string_read_text", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1 2\nbb\n");
+}
+
 /// D-OPDEF1=A: user arithmetic/equality/order reuse ordinary trait methods.
 #[test]
 fn user_operator_traits_route_through_tir() {
