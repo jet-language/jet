@@ -39,7 +39,7 @@ fn lower_equal_values(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIR
         return Val(dst)
     }
     if repr == {
-        .Word | .Flag | .FloatBits | .Discriminant -> lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Eq, left: a, right: b})
+        .Word | .Flag | .FloatBits | .Float32Bits | .Discriminant -> lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Eq, left: a, right: b})
         .Handle(_, _) -> {
             symbol :: lower_equal_handle_symbol(p, ty) ?? return lower_equal_fail(&m, &f, ty)
             lower_call_runtime(&m, &f, symbol, [LIRValueID]{a, b}, Val(dst))

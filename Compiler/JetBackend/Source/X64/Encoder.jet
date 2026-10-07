@@ -181,6 +181,20 @@ pub fn x64_store(code: &[U8], base: Int, disp: Int, src: Int) Never! {
     x64_modrm_mem(&code, src, base, disp)
 }
 
+// mov dst32, [base + disp] (REX 8B /r): four bytes, zero-extended into dst.
+pub fn x64_load32(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
+    x64_rex(&code, false, dst, base)
+    x64_byte(&code, 0x8b)
+    x64_modrm_mem(&code, dst, base, disp)
+}
+
+// mov [base + disp], src32 (REX 89 /r): the low four bytes of src.
+pub fn x64_store32(code: &[U8], base: Int, disp: Int, src: Int) Never! {
+    x64_rex(&code, false, src, base)
+    x64_byte(&code, 0x89)
+    x64_modrm_mem(&code, src, base, disp)
+}
+
 // lea dst, [base + disp] (REX.W 8D /r)
 pub fn x64_lea(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
     x64_rex(&code, true, dst, base)
@@ -361,12 +375,13 @@ pub fn x64_patch_rel32(code: &[U8], at: Int, target: Int) Never! {
     loop shift in 0..<4 -> code[at + shift] = U8{(relative >> (8 * shift)) & 255}
 }
 
-// SSE2 scalar double. Float values live in general registers as their bits;
-// selection moves them through xmm0-xmm7 around each operation. Encoding:
-// mandatory prefix (66 or F2), REX when W or an extended register is needed,
-// then 0F opcode /r.
+// SSE2 scalar double and single. Float and Float32 values live in general
+// registers as their bits (a Float32's zero-extended); selection moves them
+// through xmm0-xmm7 around each operation. Encoding: mandatory prefix (66, F2
+// or F3; 0 for none), REX when W or an extended register is needed, then 0F
+// opcode /r.
 fn x64_sse(code: &[U8], prefix: Int, wide: Bool, opcode: Int, reg: Int, rm: Int) Never! {
-    x64_byte(&code, prefix)
+    if prefix != 0 -> x64_byte(&code, prefix)
     if wide || reg >= 8 || rm >= 8 -> x64_rex(&code, wide, reg, rm)
     x64_byte(&code, 0x0f)
     x64_byte(&code, opcode)
@@ -379,24 +394,43 @@ pub fn x64_movq_to_xmm(code: &[U8], xmm: Int, src: Int) Never! { x64_sse(&code, 
 // movq r64, xmm (66 REX.W 0F 7E /r)
 pub fn x64_movq_from_xmm(code: &[U8], dst: Int, xmm: Int) Never! { x64_sse(&code, 0x66, true, 0x7e, xmm, dst) }
 
+// movd r32, xmm (66 0F 7E /r): the low 32 bits, zero-extended into the r64.
+pub fn x64_movd_from_xmm(code: &[U8], dst: Int, xmm: Int) Never! { x64_sse(&code, 0x66, false, 0x7e, xmm, dst) }
+
 pub enum X64FloatOp { Add Sub Mul Div }
 
-// addsd/subsd/mulsd/divsd dst, src (F2 0F 58|5C|59|5E /r)
-pub fn x64_float_op(code: &[U8], op: X64FloatOp, dst: Int, src: Int) Never! {
+// addsd/subsd/mulsd/divsd dst, src (F2 0F 58|5C|59|5E /r), or with `single`
+// addss/subss/mulss/divss (F3 0F 58|5C|59|5E /r).
+pub fn x64_float_op(code: &[U8], op: X64FloatOp, single: Bool, dst: Int, src: Int) Never! {
     opcode :: if op == {
         .Add -> 0x58
         .Sub -> 0x5c
         .Mul -> 0x59
         .Div -> 0x5e
     }
-    x64_sse(&code, 0xf2, false, opcode, dst, src)
+    x64_sse(&code, if single -> 0xf3 else -> 0xf2, false, opcode, dst, src)
 }
 
 // ucomisd left, right (66 0F 2E /r): ZF, PF and CF all set when unordered.
 pub fn x64_ucomisd(code: &[U8], left: Int, right: Int) Never! { x64_sse(&code, 0x66, false, 0x2e, left, right) }
 
+// ucomiss left, right (0F 2E /r): the single-precision ucomisd.
+pub fn x64_ucomiss(code: &[U8], left: Int, right: Int) Never! { x64_sse(&code, 0, false, 0x2e, left, right) }
+
 // cvtsi2sd xmm, r64 (F2 REX.W 0F 2A /r)
 pub fn x64_cvtsi2sd(code: &[U8], xmm: Int, src: Int) Never! { x64_sse(&code, 0xf2, true, 0x2a, xmm, src) }
 
+// cvtsi2ss xmm, r64 (F3 REX.W 0F 2A /r): rounds to nearest (MXCSR default).
+pub fn x64_cvtsi2ss(code: &[U8], xmm: Int, src: Int) Never! { x64_sse(&code, 0xf3, true, 0x2a, xmm, src) }
+
 // cvttsd2si r64, xmm (F2 REX.W 0F 2C /r): truncates; NaN and out-of-range give the minimum.
 pub fn x64_cvttsd2si(code: &[U8], dst: Int, xmm: Int) Never! { x64_sse(&code, 0xf2, true, 0x2c, dst, xmm) }
+
+// cvttss2si r64, xmm (F3 REX.W 0F 2C /r): the single-precision cvttsd2si.
+pub fn x64_cvttss2si(code: &[U8], dst: Int, xmm: Int) Never! { x64_sse(&code, 0xf3, true, 0x2c, dst, xmm) }
+
+// cvtss2sd xmm, xmm (F3 0F 5A /r): exact widening.
+pub fn x64_cvtss2sd(code: &[U8], dst: Int, src: Int) Never! { x64_sse(&code, 0xf3, false, 0x5a, dst, src) }
+
+// cvtsd2ss xmm, xmm (F2 0F 5A /r): rounds to nearest (MXCSR default).
+pub fn x64_cvtsd2ss(code: &[U8], dst: Int, src: Int) Never! { x64_sse(&code, 0xf2, false, 0x5a, dst, src) }

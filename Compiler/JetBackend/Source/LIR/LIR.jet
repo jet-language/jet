@@ -44,7 +44,8 @@ pub struct LIRValue {
 // divide unsigned operands and UShr is logical. Lowering checks zero divisors
 // and signed MIN/-1 before division. UAdd/USub/UMul have the same result bits
 // as Add/Sub/Mul but use unsigned range tests in Overflows.
-// Float Add/Sub/Mul/Div are IEEE double arithmetic; Xor acts on their bits.
+// Float Add/Sub/Mul/Div are IEEE double arithmetic, or single precision on
+// Float32 operands; Xor acts on their bits.
 pub enum LIRBinaryOp { Add Sub Mul Div Rem And Or Xor Shl Shr UAdd USub UMul UDiv URem UShr }
 
 // Lt/Le/Gt/Ge are signed integer or ordered IEEE comparisons (NaN is false
@@ -83,7 +84,8 @@ pub enum LIRInst {
     // The code address of a module function.
     FunctionAddress(dst: LIRValueID, function: LIRFunctionID)
     // Numeric conversion between the layouts of `src` and `dst`: a signed
-    // Integer word to Float, or a Float to an Integer word (truncating).
+    // Integer word to Float or Float32, a Float or Float32 to an Integer word
+    // (truncating), or between Float and Float32 (IEEE rounding to nearest).
     Convert(dst: LIRValueID, src: LIRValueID)
     // The address of `size` bytes of storage aligned to `align` (1, 2, 4, 8
     // or 16) in the function's frame, live until the function returns. Each
@@ -162,6 +164,12 @@ pub fn lir_layout_pointer() -> LIRLayout Never! {
 
 pub fn lir_layout_float() -> LIRLayout Never! {
     LIRLayout{size: 8, align: 8, class: LIRABIClass.Float}
+}
+
+// An IEEE single (F32): its 32 bits, zero-extended in a word wherever it is
+// held, loaded or stored as 4 bytes.
+pub fn lir_layout_float32() -> LIRLayout Never! {
+    LIRLayout{size: 4, align: 4, class: LIRABIClass.Float}
 }
 
 pub fn lir_inst_def(inst: LIRInst) -> LIRValueID? {

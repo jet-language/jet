@@ -89,6 +89,8 @@ enum LowerRepr {
     Word
     // Float: the IEEE double's bits in one word (LIR Float layout).
     FloatBits
+    // F32: the IEEE single's bits, zero-extended in a word (LIR Float32 layout).
+    Float32Bits
     // Bool: one byte holding 0 or 1.
     Flag
     // A runtime-owned object (String, loop cursor): a pointer the runtime
@@ -388,6 +390,7 @@ fn lower_repr(p: MIRProgram, ty: MIRType) -> LowerRepr Never! {
         .Char -> LowerRepr.Word
         .Bool -> LowerRepr.Flag
         .Float -> LowerRepr.FloatBits
+        .Float32 -> LowerRepr.Float32Bits
         .IntN(_, bits) -> if bits <= 64 -> LowerRepr.Word else -> LowerRepr.Unsupported{reason: "{bits}-bit integers"}
         .String -> LowerRepr.Handle{drop: "jet_rt_string_drop", clone: "jet_rt_string_clone"}
         .Tagged(_, inner) -> lower_repr(p, inner)
@@ -483,6 +486,7 @@ fn lower_repr_layout(repr: LowerRepr) -> LIRLayout? {
         .Discriminant -> Val(lir_layout_word())
         .Flag -> Val(lir_layout_bool())
         .FloatBits -> Val(lir_layout_float())
+        .Float32Bits -> Val(lir_layout_float32())
         .Handle(_, _) -> Val(lir_layout_pointer())
         .Boxed(_) | .Inline(_) -> Val(lir_layout_pointer())
         else -> None
@@ -1723,8 +1727,8 @@ fn lower_constant(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunc
         .Bool(value) -> lower_emit(&f, LIRInst.Const{dst: dst, value: if value -> 1 else -> 0})
         .Char(value) -> lower_emit(&f, LIRInst.Const{dst: dst, value: value})
         .Float(value, f32, _) -> {
-            if f32 -> return lower_fail(&m, &f, "Float32 values are not lowered at O0 yet")
-            lower_emit(&f, LIRInst.Const{dst: dst, value: math.to_bits(value)})
+            bits :: lower_float_constant_bits(&m, &f, value, f32) ?? return
+            lower_emit(&f, LIRInst.Const{dst: dst, value: bits})
         }
         .String(value) -> {
             args :: lower_static_text(&m, &f, value)
@@ -2401,7 +2405,7 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
             no :: lower_const_flag(&f, 0)
             return lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Eq, left: equal, right: no})
         }
-        if (condition == .Eq || condition == .Ne) && left_layout.class != .Integer && left_layout != lir_layout_float() {
+        if (condition == .Eq || condition == .Ne) && left_layout.class != .Integer && left_layout.class != .Float {
             same :: lower_equal_values(p, &m, &f, left_ty, Val(left_value), Val(right_value)) ?? return
             if condition == .Eq -> return lower_emit(&f, LIRInst.Move{dst: dst, src: same})
             no :: lower_const_flag(&f, 0)
@@ -2416,14 +2420,14 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
                 return lower_emit(&f, LIRInst.Compare{dst: dst, condition: condition, left: order, right: zero})
             }
         }
-        if left_layout.class != .Integer && left_layout != lir_layout_float() -> return lower_fail(&m, &f, "comparison of {mir_type_display_name(left_ty)} is not lowered at O0 yet")
+        if left_layout.class != .Integer && left_layout.class != .Float -> return lower_fail(&m, &f, "comparison of {mir_type_display_name(left_ty)} is not lowered at O0 yet")
         return lower_emit(&f, LIRInst.Compare{dst: dst, condition: if unsigned -> lower_unsigned_condition(condition) else -> condition, left: left_value, right: right_value})
     }
     if op == .And | .Or {
         if left_layout != lir_layout_bool() -> return lower_fail(&m, &f, "logical operator on a non-Bool")
         return lower_logic(&f, dst, op == .And, left_value, right_value)
     }
-    if left_layout == lir_layout_float() -> return lower_float_binary(&m, &f, dst, op, left_ty, left_value, right_value)
+    if left_layout.class == .Float -> return lower_float_binary(&m, &f, dst, op, left_ty, left_layout == lir_layout_float32(), left_value, right_value)
     word_op :: lower_word_op(op) ?? return lower_fail(&m, &f, "operator {lower_binary_name(op)} on {mir_type_display_name(left_ty)} is not lowered at O0 yet")
     if exact -> return lower_fail(&m, &f, "exact Int operator {lower_binary_name(op)} without a Prelude route")
     if left_layout != lir_layout_word() -> return lower_fail(&m, &f, "operator {lower_binary_name(op)} on {mir_type_display_name(left_ty)} is not lowered at O0 yet")
@@ -2476,16 +2480,17 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
     lower_emit(&f, LIRInst.Binary{dst: dst, op: if unsigned && word_op == .Shr -> LIRBinaryOp.UShr else -> word_op, left: left_value, right: right_value})
 }
 
-// Float arithmetic: SSE2 for `+ - * /`; `%` (truncated remainder) and `**`
-// are the C library's fmod and pow, which the compiled runtime links (-lm).
-fn lower_float_binary(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: MIRBinaryOp, ty: MIRType, left: LIRValueID, right: LIRValueID) Never! {
+// Float and F32 arithmetic: SSE2 for `+ - * /`; `%` (truncated remainder) and
+// `**` are the C library's fmod/fmodf and pow/powf, which the compiled runtime
+// links (-lm).
+fn lower_float_binary(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, op: MIRBinaryOp, ty: MIRType, single: Bool, left: LIRValueID, right: LIRValueID) Never! {
     if op == {
         .Add -> lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Add, left: left, right: right})
         .Sub -> lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Sub, left: left, right: right})
         .Mul -> lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Mul, left: left, right: right})
         .Div -> lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Div, left: left, right: right})
-        .Rem -> lower_call_runtime(&m, &f, "fmod", [LIRValueID]{left, right}, Val(dst))
-        .Pow -> lower_call_runtime(&m, &f, "pow", [LIRValueID]{left, right}, Val(dst))
+        .Rem -> lower_call_runtime(&m, &f, if single -> "fmodf" else -> "fmod", [LIRValueID]{left, right}, Val(dst))
+        .Pow -> lower_call_runtime(&m, &f, if single -> "powf" else -> "pow", [LIRValueID]{left, right}, Val(dst))
         else -> lower_fail(&m, &f, "operator {lower_binary_name(op)} on {mir_type_display_name(ty)} is not lowered at O0 yet")
     }
 }
@@ -2529,10 +2534,11 @@ fn lower_unary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunctio
         }
         return lower_fail(&m, &f, "`not` on {mir_type_display_name(ty)} is not lowered at O0 yet")
     }
-    if layout == lir_layout_float() {
-        // IEEE negation flips the sign bit (so -0.0 and NaN keep their meaning).
-        sign :: lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
-        lower_emit(&f, LIRInst.Const{dst: sign, value: -9223372036854775807 - 1})
+    if layout.class == .Float {
+        // IEEE negation flips the sign bit (so -0.0 and NaN keep their meaning);
+        // an F32's is bit 31 of its zero-extended word.
+        sign :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
+        lower_emit(&f, LIRInst.Const{dst: sign, value: if layout == lir_layout_float32() -> 2147483648 else -> -9223372036854775807 - 1})
         return lower_emit(&f, LIRInst.Binary{dst: dst, op: LIRBinaryOp.Xor, left: operand, right: sign})
     }
     if layout != lir_layout_word() -> return lower_fail(&m, &f, "negation of {mir_type_display_name(ty)} is not lowered at O0 yet")
@@ -2573,7 +2579,7 @@ fn lower_display(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
     // its erased scalar representation (MIRRust.rs selected_trait_impl_for_type).
     if lower_type_def(p, ty) == .Val(_) -> return lower_display_boxed(p, c, &m, &f, ty, lowered)
     if lower_repr(p, ty) == {
-        .Word | .Flag | .FloatBits -> {}
+        .Word | .Flag | .FloatBits | .Float32Bits -> {}
         else -> return lower_display_boxed(p, c, &m, &f, ty, lowered)
     }
     symbol :: if lower_repr(p, ty) == {
@@ -2585,6 +2591,7 @@ fn lower_display(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunct
         }
         .Flag -> "jet_rt_bool_to_string"
         .FloatBits -> "jet_rt_float_to_string"
+        .Float32Bits -> "jet_rt_float32_to_string"
         else -> "jet_rt_i64_to_string"
     }
     text :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_string_drop"}, None)

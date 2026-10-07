@@ -97,13 +97,14 @@ fn lower_convert_char(m: &LowerModule, f: &LowerFunction, value: LIRValueID) Nev
 
 // The scalar a NumericCast operand is carried as. Narrow is a fixed-width
 // integer below 64 bits, already sign- or zero-extended in its word.
-enum LowerScalar { Exact I64 Narrow Float Char Other }
+enum LowerScalar { Exact I64 Narrow Float Float32 Char Other }
 
 fn lower_convert_scalar(ty: MIRType) -> LowerScalar Never! {
     if lower_convert_type(ty).kind == {
         .Int -> LowerScalar.Exact
         .IntN(signed, bits) -> if bits < 64 -> LowerScalar.Narrow else -> if signed -> LowerScalar.I64 else -> LowerScalar.Other
         .Float -> LowerScalar.Float
+        .Float32 -> LowerScalar.Float32
         .Char -> LowerScalar.Char
         else -> LowerScalar.Other
     }
@@ -122,6 +123,15 @@ fn lower_convert_numeric(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     from_char :: source == .Char
     to_char :: destination == .Char
     if source != .Other && source == destination -> return lower_forward(c, &m, &f, instruction, value)
+    // MIRRust.rs NumericCast is Rust `as`: F32 -> Float widens exactly; Float
+    // and a narrow or I64 word -> F32 round to nearest (SSE's default mode).
+    // F32 -> integer `as` saturates, which a truncating convert does not.
+    to_float32 :: destination == .Float32
+    if (source == .Float32 && to_float) || ((from_float || source == .Narrow || from_i64) && to_float32) {
+        operand :: lower_use(&m, &f, value) ?? return
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return
+        return lower_emit(&f, LIRInst.Convert{dst: dst, src: operand})
+    }
     if (from_exact && (to_i64 || to_float || to_char)) || (from_i64 && (to_exact || to_float)) || (from_char && to_exact) {
         operand :: lower_use(&m, &f, value) ?? return
         // MIRRust.rs:23498/:23519 call the owned exact-Int adapters. The

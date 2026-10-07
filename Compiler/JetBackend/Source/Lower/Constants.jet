@@ -19,6 +19,54 @@ fn lower_constant_field(fields: [MIRConstField], name: String) -> MIRConstant? N
     None
 }
 
+// The IEEE single bits (zero-extended) of an F32 literal whose value MIR
+// carries as the nearest double: that double rounded to the nearest single. A
+// double exactly halfway between two singles is refused (None): the literal's
+// decimal may lie on either side, so rounding twice could pick the wrong one.
+fn lower_f32_bits(value: Float) -> Int? Never! {
+    bits :: math.to_bits(value)
+    sign :: if bits < 0 -> 2147483648 else -> 0
+    // The low 63 bits (exponent and fraction), as a non-negative Int.
+    magnitude :: if bits < 0 -> bits + 9223372036854775807 + 1 else -> bits
+    exponent :: magnitude >> 52
+    fraction :: magnitude % 4503599627370496
+    if exponent == 2047 {
+        if fraction == 0 -> return Val(sign + 2139095040)
+        // NaN: quiet, keeping the payload's top bits.
+        return Val(sign + 2139095040 + 4194304 + (fraction >> 29) % 4194304)
+    }
+    // Zero and double subnormals are far below the smallest single subnormal.
+    if exponent == 0 -> return Val(sign)
+    biased := exponent - 1023 + 127
+    if biased >= 255 -> return Val(sign + 2139095040)
+    significand :: fraction + 4503599627370496
+    // Normal singles keep 24 significant bits; subnormals keep fewer.
+    shift :: if biased >= 1 -> 29 else -> 30 - biased
+    if shift > 60 -> return Val(sign)
+    kept := significand >> shift
+    rest :: significand - (kept << shift)
+    half :: 1 << (shift - 1)
+    if rest == half -> return None
+    if rest > half -> kept += 1
+    if biased < 1 -> return Val(sign + kept)
+    if kept == 16777216 {
+        kept = 8388608
+        biased += 1
+        if biased >= 255 -> return Val(sign + 2139095040)
+    }
+    Val(sign + (biased << 23) + kept - 8388608)
+}
+
+// A Float or F32 literal's carried bits; an unrepresentable F32 midpoint fails.
+fn lower_float_constant_bits(m: &LowerModule, f: &LowerFunction, value: Float, f32: Bool) -> Int? {
+    if !f32 -> return Val(math.to_bits(value))
+    bits :: lower_f32_bits(value) ?? {
+        lower_fail(&m, &f, "F32 literal {value} halfway between two singles is not lowered at O0 yet")
+        return None
+    }
+    Val(bits)
+}
+
 // A Struct constant's member. Sema's folded interval facts
 // (Comptime/Reflection.jet sema_comptime_reflection_range) are the closed
 // Range{start, end}: the absent `exclusive` member is false.
@@ -123,11 +171,8 @@ fn lower_constant_tree_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
         .Bool(value) -> lower_emit(&f, LIRInst.Const{dst: dst, value: if value -> 1 else -> 0})
         .Char(value) -> lower_emit(&f, LIRInst.Const{dst: dst, value: value})
         .Float(value, f32, _) -> {
-            if f32 {
-                lower_fail(&m, &f, "Float32 values are not lowered at O0 yet")
-                return None
-            }
-            lower_emit(&f, LIRInst.Const{dst: dst, value: math.to_bits(value)})
+            bits :: lower_float_constant_bits(&m, &f, value, f32) ?? return None
+            lower_emit(&f, LIRInst.Const{dst: dst, value: bits})
         }
         .String(value) -> {
             args :: lower_static_text(&m, &f, value)

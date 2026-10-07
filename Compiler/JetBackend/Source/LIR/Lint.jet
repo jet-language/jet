@@ -70,7 +70,7 @@ fn lir_lint_is_integer(layout: LIRLayout) -> Bool Never! {
 }
 
 fn lir_lint_is_float(layout: LIRLayout) -> Bool Never! {
-    layout == lir_layout_float()
+    layout == lir_layout_float() || layout == lir_layout_float32()
 }
 
 fn lir_lint_function(program: LIRModule, function: LIRFunction) -> [LIRLintIssue] Never! {
@@ -317,7 +317,8 @@ fn lir_lint_inst(program: LIRModule, function: LIRFunction, inst: LIRInst) -> [S
             to :: function.values[dst.value].layout
             word_to_float :: from == lir_layout_word() && lir_lint_is_float(to)
             float_to_word :: lir_lint_is_float(from) && to == lir_layout_word()
-            if !word_to_float && !float_to_word -> &messages.push("conversion v{src.value} -> v{dst.value} is not between a word and a Float")
+            float_width :: lir_lint_is_float(from) && lir_lint_is_float(to) && from != to
+            if !word_to_float && !float_to_word && !float_width -> &messages.push("conversion v{src.value} -> v{dst.value} is not between a word and a Float, or a Float and a Float32")
         }
         .StackSlot(dst, size, align) -> {
             if function.values[dst.value].layout != lir_layout_pointer() -> &messages.push("stack slot v{dst.value} is not a pointer")

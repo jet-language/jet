@@ -168,6 +168,8 @@ fn lower_render_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIR
         }
         .Flag -> "jet_rt_bool_to_string"
         .FloatBits -> if mode == .Debug -> "jet_rt_float_debug" else -> "jet_rt_float_to_string"
+        // F32 Display and Debug are one text (Values.rs: `{:?}`).
+        .Float32Bits -> "jet_rt_float32_to_string"
         .Boxed(_) | .Inline(_) | .Discriminant -> ""
         else -> {
             lower_fail(&m, &f, "displaying {mir_type_display_name(ty)} is not lowered at O0 yet")
