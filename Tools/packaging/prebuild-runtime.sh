@@ -17,8 +17,8 @@
 # The Jet runtime library is assembled/lowered by run-runtime.mjs (or supplied
 # through JET_RUNTIME_JET_OBJECT). Its #Export(c) definitions precede the
 # remaining --release Rust runtime, Rust standard libraries, musl and libgcc.
-# Replaced Rust exports must be deleted by their layer owner: duplicate strong
-# definitions are errors, never overridden or stripped at packaging time.
+# Replaced exports are absent from the native Rust archive (seed-only allocator
+# bodies are cfg-disabled); duplicate strong definitions are never stripped.
 # The in-process linker (`x64_link_runtime_pack`, run through Tests/run-link.mjs)
 # into <prebuilt-dir>/<key>/jet_runtime.pack.o, and <prebuilt-dir>/native.key
 # names that key: the Jet-hosted `jet build` reads it (Host.jet

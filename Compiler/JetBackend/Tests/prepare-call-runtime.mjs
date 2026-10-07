@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Refresh the canonical C ABI and compiler-call process boundary in emitted
 // runtime Rust. Keep its paired generated routes: never mix seed/full routes.
-// Compile with rustc --crate-type cdylib for native loader/worker proofs.
+// Native packs compile with --cfg jet_native_pack and link jet_runtime_jet.o
+// first, with check-runtime-exports.mjs enforcing one definition per symbol.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
