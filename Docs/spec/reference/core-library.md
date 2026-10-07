@@ -2916,6 +2916,12 @@ The module source is [`Core/web/web.jet`](../../../Core/web/web.jet).
 that typed request/response contract rather than opening sockets directly.
 Storage adapters are named below because they are separate built modules.
 
+`core.web.store.set(&store, value)` mutates one persistent store binding and
+returns a transaction value. Successive updates must reuse that binding to
+retain its history; constructing a fresh store for each update resets history.
+The source `facts_json` and `event_json` summaries describe that store's current
+cursor and generation rather than a separate runtime transaction log.
+
 ### `core.web.storage` — browser storage adapters
 
 `core.web.storage` names the storage interface used by web applications, while
