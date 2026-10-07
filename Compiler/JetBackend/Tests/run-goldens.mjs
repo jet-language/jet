@@ -182,11 +182,20 @@ function prune(program, entryId) {
     metadata.get(key).push(row);
   };
   for (const row of field(program, "types")?.items ?? []) index("MirTypeId", idOf(field(row, "id")), row);
+  for (const row of field(program, "type_instances")?.items ?? []) {
+    const identity = field(row, "identity");
+    if (identity?.name === "Some") index("MirTypeId", idOf(identity.items[0]), row);
+  }
   for (const row of field(program, "impls")?.items ?? []) {
-    const self = field(row, "self_type");
-    for (const id of typeIds(self)) index("MirTypeId", id, row);
     const trait = field(row, "trait_ref");
-    if (trait?.name === "Some") index("MirTraitId", idOf(field(trait.items[0], "id")), row);
+    if (trait?.name !== "Some") continue;
+    const bound = trait.items[0];
+    index("MirTraitId", idOf(field(bound, "id")), row);
+    // Rendering has no direct callee edge. Other impls are reached through the
+    // selected trait identity, not every derived codec of a mentioned type.
+    if (["Printable", "Display"].includes(field(bound, "name")?.v?.split("::").pop())) {
+      for (const id of typeIds(field(row, "self_type"))) index("MirTypeId", id, row);
+    }
   }
   for (const row of field(program, "traits")?.items ?? []) index("MirTraitId", idOf(field(row, "id")), row);
   for (const row of field(program, "handles")?.items ?? []) {
