@@ -979,8 +979,7 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "NullBackend" => Some("JetNullBackend"),
         "TUIBackend" => Some("JetTuiBackend"),
         "GtkBackend" => Some("JetGtkBackend"),
-        // D-AUTH1=A: authentication carriers are Prelude-root values.
-        "Session" => Some("JetAuthSession"),
+        // D-AUTH1=A: the `app.auth` carrier is a Prelude-root value.
         "Auth" => Some("JetAuthApp"),
         // D-DBPOLICY-BIND1: RowPolicy is re-exported by the root Sync carrier.
         "RowPolicy" => Some("JetRowPolicy"),
@@ -2445,9 +2444,6 @@ impl Cx {
         }
         match (self.any_core_import_module(alias), leaf) {
             (Some("core.crypto"), leaf) => core_crypto_type_name(leaf),
-            (Some("core.auth"), "Claims") => Some("Claims"),
-            (Some("core.auth"), "AuthError") => Some("AuthError"),
-            (Some("core.auth"), "Session") => Some("Session"),
             (Some("core.auth"), "Auth") => Some("Auth"),
             (Some("core.sync"), "SyncText") => Some("SyncText"),
             (Some("core.sync"), "SyncCounter") => Some("SyncCounter"),
@@ -3387,15 +3383,6 @@ impl Cx {
             Type::Named(name) if name == Syntax::TYPE_ALLOC_ERROR => {
                 format!("{}AllocError", self.root_prefix)
             }
-            Type::Named(name) if name == "Claims" && !self.type_names.contains(name) => {
-                format!("{}JetAuthClaims", self.root_prefix)
-            }
-            Type::Named(name) if name == "AuthError" && !self.type_names.contains(name) => {
-                format!("{}JetAuthError", self.root_prefix)
-            }
-            Type::Named(name) if name == "Session" && !self.type_names.contains(name) => {
-                format!("{}JetAuthSession", self.root_prefix)
-            }
             Type::Named(name) if name == "Auth" && !self.type_names.contains(name) => {
                 format!("{}JetAuthApp", self.root_prefix)
             }
@@ -3901,10 +3888,7 @@ impl Cx {
                 if resolved == "AllocError" {
                     return format!("{}AllocError", self.root_prefix);
                 }
-                if resolved == "Claims"
-                    || resolved == "AuthError"
-                    || resolved == "Session"
-                    || resolved == "Auth"
+                if resolved == "Auth"
                     || resolved == "SyncText"
                     || resolved == "SyncCounter"
                     || resolved == "SyncMap"
@@ -3916,9 +3900,6 @@ impl Cx {
                     || resolved == "RowPolicy"
                 {
                     let rust = match resolved {
-                        "Claims" => "JetAuthClaims",
-                        "AuthError" => "JetAuthError",
-                        "Session" => "JetAuthSession",
                         "Auth" => "JetAuthApp",
                         "SyncText" => "JetSyncText",
                         "SyncCounter" => "JetSyncCounter",
@@ -5393,53 +5374,6 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         cx.enum_variants
             .insert("ServiceError".to_string(), error_variants);
         cx.cloneable.insert("ServiceError".to_string());
-    }
-    if cx.core_imports.values().any(|module| module == "core.auth") {
-        let zero = Span::new(0, 0);
-        let field = |name: &str, ty: Type| VariantField {
-            name: name.to_string(),
-            name_span: zero,
-            ty,
-            ty_span: zero,
-        };
-        let mut variants = vec![
-            ("InvalidSignature".to_string(), VariantPayload::Unit),
-            ("WeakKey".to_string(), VariantPayload::Unit),
-            ("TokenExpired".to_string(), VariantPayload::Unit),
-        ];
-        variants.extend(
-            [
-                "MalformedToken",
-                "UnsupportedToken",
-                "MissingClaim",
-                "DecodeError",
-            ]
-            .into_iter()
-            .map(|name| (name.to_string(), VariantPayload::Single(Type::String, zero))),
-        );
-        variants.push((
-            "WrongAudience".to_string(),
-            VariantPayload::Named(vec![
-                field("expected", Type::String),
-                field("actual", Type::String),
-            ]),
-        ));
-        variants.push((
-            "WrongIssuer".to_string(),
-            VariantPayload::Named(vec![
-                field("expected", Type::String),
-                field("actual", Type::Option(Box::new(Type::String))),
-            ]),
-        ));
-        // Keep the existing discriminants stable; append the new unit
-        // variant to the canonical AuthError surface.
-        variants.push(("TokenNotYetValid".to_string(), VariantPayload::Unit));
-        for (variant, _) in &variants {
-            cx.variant_owner
-                .insert(variant.clone(), "AuthError".to_string());
-        }
-        cx.enum_variants.insert("AuthError".to_string(), variants);
-        cx.cloneable.insert("AuthError".to_string());
     }
     if cx
         .core_imports

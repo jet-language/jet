@@ -14229,7 +14229,6 @@ fn encode_runtime_part(writer: &mut CanonicalWriter, part: crate::MIR::MirRuntim
         crate::MIR::MirRuntimePartId::Browser => 23,
         crate::MIR::MirRuntimePartId::Args => 24,
         crate::MIR::MirRuntimePartId::Reflect => 25,
-        crate::MIR::MirRuntimePartId::AuthTokens => 26,
         crate::MIR::MirRuntimePartId::AuthSession => 27,
         crate::MIR::MirRuntimePartId::Sync => 28,
         crate::MIR::MirRuntimePartId::Services => 29,

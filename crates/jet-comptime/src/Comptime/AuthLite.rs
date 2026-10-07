@@ -1,67 +1,27 @@
 //! D-AUTH1=A / I9: `core.auth` ambient includes Prelude `AuthSession.rs` — the
-//! session, password, magic-link, OAuth-state, and `app.auth` mechanisms. It does
-//! NOT include `Auth.rs`, so `verify_jwt`/`verify_paseto` have no comptime
-//! implementation; `Comptime/Methods/core_calls.rs` routes them to the AOT/subset
-//! path instead. That is a named tier gap, not a second policy: no token rule is
-//! re-encoded here.
+//! auth store byte cell behind the Jet store (`Core/auth/auth.jet`) and
+//! `app.auth`. The `Session` carrier and every session, password, magic-link,
+//! OAuth and token policy is the Jet source on every tier; this adapter only
+//! marshals the cell and the `app.auth` descriptor.
 
 use super::Diagnostics::unsupported;
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::AST::{CtValue, Type};
+use crate::AST::CtValue;
 
-#[allow(unused_imports)]
-pub use jet_foundation::Outcome::*;
-include!("../../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
-use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
-include!("../../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
-#[allow(unused_imports)]
-pub use jet_foundation::Outcome::*;
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs");
 
-fn session_to_ct(s: &JetAuthSession) -> CtValue {
-    CtValue::Struct {
-        type_name: "Session".to_string(),
-        fields: vec![
-            ("id".to_string(), CtValue::Str(s.id.clone())),
-            ("user_id".to_string(), CtValue::Str(s.user_id.clone())),
-            ("expires_at".to_string(), CtValue::Int(s.expires_at)),
-            ("cookie".to_string(), CtValue::Str(s.cookie.clone())),
-        ],
-    }
-}
-
-fn ct_to_session(v: &CtValue, span: Span) -> Result<JetAuthSession, Diagnostic> {
-    let CtValue::Struct { type_name, fields } = v else {
-        return Err(unsupported("Session", span));
-    };
-    if type_name != "Session" && type_name != "JetAuthSession" {
-        return Err(unsupported("Session", span));
-    }
-    let field = |name: &str| {
-        fields
+fn store_bytes(value: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
+    match value {
+        CtValue::Bytes(bytes) => Ok(bytes.clone()),
+        CtValue::List(values) => values
             .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, v)| v)
-            .ok_or_else(|| unsupported("Session field", span))
-    };
-    Ok(JetAuthSession {
-        id: match field("id")? {
-            CtValue::Str(s) => s.clone(),
-            _ => return Err(unsupported("id", span)),
-        },
-        user_id: match field("user_id")? {
-            CtValue::Str(s) => s.clone(),
-            _ => return Err(unsupported("user_id", span)),
-        },
-        expires_at: match field("expires_at")? {
-            CtValue::Int(n) => *n,
-            _ => return Err(unsupported("expires_at", span)),
-        },
-        cookie: match field("cookie")? {
-            CtValue::Str(s) => s.clone(),
-            _ => return Err(unsupported("cookie", span)),
-        },
-    })
+            .map(|value| match value {
+                CtValue::Int(value) if (0..=255).contains(value) => Ok(*value as u8),
+                _ => Err(unsupported("auth store bytes must be a [U8] value", span)),
+            })
+            .collect(),
+        _ => Err(unsupported("auth store bytes must be a [U8] value", span)),
+    }
 }
 
 fn auth_to_ct(a: &JetAuthApp) -> CtValue {
@@ -110,28 +70,6 @@ fn ct_to_auth(v: &CtValue, span: Span) -> Result<JetAuthApp, Diagnostic> {
         providers,
     })
 }
-
-fn result_session(r: Result<JetAuthSession, String>) -> CtValue {
-    match r {
-        Ok(s) => CtValue::Present(Box::new(session_to_ct(&s))),
-        Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
-    }
-}
-
-fn result_unit(r: Result<(), String>) -> CtValue {
-    match r {
-        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-        Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
-    }
-}
-
-fn result_str(r: Result<String, String>) -> CtValue {
-    match r {
-        Ok(s) => CtValue::Present(Box::new(CtValue::Str(s))),
-        Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
-    }
-}
-
 pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
     let one = |i: usize| {
         args.get(i)
@@ -141,54 +79,11 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
         CtValue::Str(s) => Ok(s.clone()),
         _ => Err(unsupported("String", span)),
     };
-    let as_int = |i: usize| match one(i)? {
-        CtValue::Int(n) => Ok(*n),
-        _ => Err(unsupported("Int", span)),
-    };
     match method {
-        "register_user" => Ok(result_unit(jet_auth_register_user(as_str(0)?, as_str(1)?))),
-        "password_login" => Ok(result_session(jet_auth_password_login(
-            as_str(0)?,
-            as_str(1)?,
-            as_int(2)?,
-            as_int(3)?,
-        ))),
-        "session_validate" => Ok(result_session(jet_auth_session_validate(
-            &as_str(0)?,
-            as_int(1)?,
-        ))),
-        "session_show" => Ok(CtValue::Str(jet_auth_session_show(&ct_to_session(
-            one(0)?,
-            span,
-        )?))),
-        "session_user" => Ok(CtValue::Str(jet_auth_session_user(&ct_to_session(
-            one(0)?,
-            span,
-        )?))),
-        "session_cookie" => Ok(CtValue::Str(jet_auth_session_cookie(&ct_to_session(
-            one(0)?,
-            span,
-        )?))),
-        "session_id" => Ok(CtValue::Str(jet_auth_session_id(&ct_to_session(
-            one(0)?,
-            span,
-        )?))),
-        "magic_link_issue" => Ok(result_str(jet_auth_magic_link_issue(
-            as_str(0)?,
-            as_int(1)?,
-            as_int(2)?,
-        ))),
-        "magic_link_consume" => Ok(result_session(jet_auth_magic_link_consume(
-            as_str(0)?,
-            as_int(1)?,
-            as_int(2)?,
-        ))),
-        "oauth_begin" => Ok(result_str(jet_auth_oauth_begin(as_str(0)?))),
-        "oauth_finish" => Ok(result_session(jet_auth_oauth_finish(
-            as_str(0)?,
-            as_str(1)?,
-            as_int(2)?,
-            as_int(3)?,
+        "__store_load" => Ok(CtValue::Bytes(jet_auth_store_load())),
+        "__store_replace" => Ok(CtValue::Bool(jet_auth_store_replace(
+            &store_bytes(one(0)?, span)?,
+            store_bytes(one(1)?, span)?,
         ))),
         "auth" => Ok(auth_to_ct(&jet_app_auth(as_str(0)?))),
         "auth_oauth" => Ok(auth_to_ct(&jet_app_auth_oauth(
@@ -204,7 +99,3 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
     }
 }
 
-#[allow(dead_code)]
-fn _type_anchor() -> Type {
-    Type::Named("Session".to_string())
-}

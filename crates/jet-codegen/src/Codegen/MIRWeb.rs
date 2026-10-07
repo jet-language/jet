@@ -8362,7 +8362,6 @@ fn runtime_part_descriptor(value: jet_foundation::MIR::MirRuntimePartId) -> &'st
         jet_foundation::MIR::MirRuntimePartId::Browser => "browser",
         jet_foundation::MIR::MirRuntimePartId::Args => "args",
         jet_foundation::MIR::MirRuntimePartId::Reflect => "reflect",
-        jet_foundation::MIR::MirRuntimePartId::AuthTokens => "auth-tokens",
         jet_foundation::MIR::MirRuntimePartId::AuthSession => "auth-session",
         jet_foundation::MIR::MirRuntimePartId::Sync => "sync",
         jet_foundation::MIR::MirRuntimePartId::Services => "services",

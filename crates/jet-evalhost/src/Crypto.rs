@@ -25,10 +25,8 @@ pub(crate) mod runtime {
     include!("../../jet-pkg-model/src/Prelude/SecretsCrypto.rs");
     include!("../../jet-pkg-model/src/Prelude/VaultKeyWrap.rs");
 
-    use crate::Encoding::json_rt as jet_std;
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
-    include!("../../jet-codegen/src/Prelude/CoreLib/Top/Auth.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs");
 
     pub fn clone_secret(secret: &Secret) -> Secret {
