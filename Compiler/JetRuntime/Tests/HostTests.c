@@ -69,10 +69,15 @@ static Text borrowed(const char *value) {
 
 int main(void) {
     static char *args[] = {"exe", "\xff", "", NULL};
-    static char *env[] = {"A=1", "broken", "=FOO=bar", "=bad", "", "NONUTF_\xff=val_\xfe", "EMPTY=", "A=last", NULL};
+    static char mutable_entry[] = "A=1";
+    static char *env[] = {mutable_entry, "broken", "=FOO=bar", "=bad", "", "NONUTF_\xff=val_\xfe", "EMPTY=", "A=last", NULL};
     // Garbage upper bits in argc must not enter the startup snapshot.
     jet_rt_host_arguments(INT64_C(0x123400000003), args, env);
     jet_rt_host_arguments(3, args, env);
+    // Entryless hosts may reuse their capture buffers after the call. Both
+    // key and value must remain the originally captured bytes.
+    mutable_entry[0] = 'Z';
+    mutable_entry[2] = '9';
     assert(jet_rt_arg_count() == 3);
     assert(jet_rt_env_count() == 5 && jet_sys_startup_env_count_raw() == 5);
     const char *names[] = {"A", "=FOO", "NONUTF_\xff", "EMPTY", "A"};
@@ -114,6 +119,7 @@ int main(void) {
     jet_rt_handle_drop_IOContext(projected);
     jet_rt_handle_drop_IOError(context_error);
     void *out = jet_std_io_stdout(), *err = jet_std_io_stderr();
+    assert(out == (void *)(uintptr_t)1 && err == (void *)(uintptr_t)1);
     IOError *error = NULL;
     Text one = borrowed("one"), two = borrowed("two\n"), report = borrowed("err"), pending = borrowed("B");
     assert(jet_std_io_stdout_write_line(out, &one, &error) == 1);

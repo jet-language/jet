@@ -1,13 +1,13 @@
 // Raw process-stream transport. Core wrappers own IO.Write/IO.Flush faults;
 // runtime print/panic bypass those wrappers by design. Stream tokens have no
-// mutable payload. Only explicit owning drops release their one-byte carrier.
-#Export(c) fn jet_std_io_stdout() -> I64 { jet_rt_alloc(I64{1}, I64{1}) }
+// mutable payload: like Closed, word 1 is a permanent non-null zero-size token.
+#Export(c) fn jet_std_io_stdout() -> I64 { I64{1} }
 
-#Export(c) fn jet_std_io_stderr() -> I64 { jet_rt_alloc(I64{1}, I64{1}) }
+#Export(c) fn jet_std_io_stderr() -> I64 { I64{1} }
 
-#Export(c) fn jet_rt_handle_drop_JetStdout(value: I64) { jet_rt_free(value, I64{1}, I64{1}) }
+#Export(c) fn jet_rt_handle_drop_JetStdout(value: I64) {}
 
-#Export(c) fn jet_rt_handle_drop_JetStderr(value: I64) { jet_rt_free(value, I64{1}, I64{1}) }
+#Export(c) fn jet_rt_handle_drop_JetStderr(value: I64) {}
 
 #Export(c) fn jet_std_io_stdout_write(token: I64, text: I64, error: I64) -> I64 {
     #Unsafe("text lends the E4 header and readable bytes for this synchronous write") {
