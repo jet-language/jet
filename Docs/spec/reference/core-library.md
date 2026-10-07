@@ -2013,6 +2013,9 @@ mapping and property assets, including the native runtime's fixed-word
 lookup functions. Regenerate them from `tests/data/unicode/ucd`; never copy
 host Unicode tables or hand-maintain a native whitespace/casing list.
 
+`String.equal` borrows both operands and uses the same native UTF-8 byte
+comparison as `==`; it does not normalize or clone either string.
+
 | Function | Returns | Description |
 | --- | --- | --- |
 | `text.byte_count(value)` | `Int` | Count UTF-8 bytes. |

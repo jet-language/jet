@@ -17,7 +17,7 @@ if (!output || (mode && mode !== "--plan") || process.argv.length > 4) {
 const out = resolve(output);
 const symbols = ["count", "index_of", "last_index_of", "lower", "trim", "upper"].map((name) => `jet_unicode_${name}`);
 const stems = collectGoldenEntries(join(root, "Examples/features")).map(({ stem }) => stem)
-  .filter((stem) => /^text\/(?:unicode_.*|runtime_unicode|strings|core_text_calls|text_tabs_title|text_boundaries)$/u.test(stem) || stem.startsWith("conformance/core/text/"))
+  .filter((stem) => /^text\/(?:unicode_.*|runtime_unicode|runtime_string_equal|strings|core_text_calls|text_tabs_title|text_boundaries)$/u.test(stem) || stem.startsWith("conformance/core/text/"))
   .sort();
 if (!stems.includes("text/runtime_unicode") || !stems.includes("text/unicode_17") || !stems.includes("text/unicode_text")) {
   throw new Error("Unicode exit corpus lacks a required witness");
