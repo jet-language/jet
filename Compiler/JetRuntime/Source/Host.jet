@@ -21,6 +21,16 @@ host_root := I64{0}
     }
 }
 
+// Rust lang_start ignores SIGPIPE for program mains, not for host-loaded
+// libraries. The native program-main wrapper calls this after init arrays;
+// entryless hosts retain their signal disposition unless opting in explicitly.
+#Export(c) fn jet_rt_host_program_start() {
+    #Unsafe("rt_sigaction synchronously borrows the four-word SIG_IGN action; no signal handler or restorer runs for ignored SIGPIPE") {
+        status :: os_syscall_stack4_i64(I64{13}, I64{13}, I64{1}, I64{0}, I64{0}, I64{0}, I64{8})
+        if (status < I64{0}) -> host_sigpipe_refused()
+    }
+}
+
 fn host_lock() {
     #Unsafe("the init-array-created lock word is live; CAS protects all host metadata and output") {
         loop os_cas_i64(host_root, I64{0}, I64{1}) != (I64{0}) -> os_spin_pause()

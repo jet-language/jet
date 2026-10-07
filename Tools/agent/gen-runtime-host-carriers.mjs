@@ -25,6 +25,7 @@ for (const [name, message] of [
   ["host_environment_index_refused", "startup environment index out of range"],
   ["host_argument_index_refused", "startup argument index out of range"],
   ["host_record_index_refused", "record variant index out of range"],
+  ["host_sigpipe_refused", "failed to initialize SIGPIPE handling"],
 ]) {
   jet.push("", `fn ${name}() {`, "    jet_rt_stdout_flush()", "    trap_header(I64{0})");
   const bytes = Buffer.from(message);
