@@ -19,6 +19,7 @@
 # Usage:
 #   Tools/agent/lane-check.sh                 # whole workspace, all targets
 #   Tools/agent/lane-check.sh -p jet-sema     # one crate while iterating
+#   Tools/agent/lane-check.sh --rust-exit-only # registry + LOC tooling slice
 #
 # Reading the output: errors are grouped by file. An error in a file YOU did not
 # touch belongs to another worker editing the same checkout — report it in your
@@ -26,6 +27,15 @@
 set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1
+
+# Rust-exit coverage and the per-area LOC ceiling apply to every lane, including
+# narrow Cargo checks. The tooling-only slice avoids building untouched crates.
+node Tools/agent/rust-exit.mjs --check || exit 1
+if [ "$#" -eq 1 ] && [ "$1" = "--rust-exit-only" ]; then
+  node --test Tools/agent/rust-exit.test.mjs || exit 1
+  echo "CHECK OK"
+  exit 0
+fi
 
 # The default run also checks the feature-gated bootstrap host
 # (Compiler/Bootstrap/Host), so drift against the Jet compiler fails here (#3874).
