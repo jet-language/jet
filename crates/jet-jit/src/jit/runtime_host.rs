@@ -13561,27 +13561,6 @@ mod service_adapter {
 
 
 
-    fn job_dyn_to_cbor(value: &crate::Encoding::json_rt::Dyn) -> CborValue {
-        match value {
-            crate::Encoding::json_rt::Dyn::Null => CborValue::Null,
-            crate::Encoding::json_rt::Dyn::Bool(value) => CborValue::Bool(*value),
-            crate::Encoding::json_rt::Dyn::Int(value) => CborValue::Int(*value),
-            crate::Encoding::json_rt::Dyn::Float(value) => CborValue::Float(*value),
-            crate::Encoding::json_rt::Dyn::Number(value)
-            | crate::Encoding::json_rt::Dyn::TypedText(value)
-            | crate::Encoding::json_rt::Dyn::Text(value) => CborValue::Text(value.clone()),
-            crate::Encoding::json_rt::Dyn::Bytes(value) => CborValue::Bytes(value.clone()),
-            crate::Encoding::json_rt::Dyn::Array(values) => {
-                CborValue::Array(values.iter().map(job_dyn_to_cbor).collect())
-            }
-            crate::Encoding::json_rt::Dyn::Object(entries) => CborValue::Object(
-                entries
-                    .iter()
-                    .map(|(name, value)| (name.clone(), job_dyn_to_cbor(value)))
-                    .collect(),
-            ),
-        }
-    }
 
     fn job_encode_payload(
         rt: &mut JitRuntime,
@@ -13589,7 +13568,8 @@ mod service_adapter {
         descriptor: &RuntimeTypeDescriptor,
     ) -> Result<Vec<u8>, String> {
         let tree = crate::Receipt::encode_jit_value(rt, raw, descriptor)?;
-        CborKernel::encode(&job_dyn_to_cbor(&tree), true)
+        CborKernel::encode(&CborKernel::from_dyn_at(&tree, "$")
+            .map_err(|error| format!("queued #Job result CBOR encoding failed: {error:?}"))?, true)
             .map_err(|error| format!("queued #Job result CBOR encoding failed: {error:?}"))
     }
 
@@ -13701,7 +13681,7 @@ mod service_adapter {
                     )),
                 ));
             }
-            let value = CborKernel::decode(&payload.bytes, &CborKernel::Options::safe(), true)
+            let value = CborKernel::decode(&payload.bytes, &CborKernel::Options::safe())
                 .map_err(|error| job_error(payload, "decode", Some(format!("{error:?}"))))?;
             let value = job_decode_value(rt, &value, &descriptor, 0)
                 .map_err(|error| job_error(payload, "decode", Some(error)))?;

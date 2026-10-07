@@ -802,7 +802,7 @@ impl EditorHostTransport {
         };
         let field_u64 = |key: &str| -> Result<u64, EditorHostError> {
             match params.get(key) {
-                Some(Dyn::Int(value)) if *value >= 0 => Ok(*value as u64),
+                Some(Dyn::Int(value)) => value.to_u64().ok_or_else(|| EditorHostError::InvalidRequest(format!("editor request field `{key}` must be a nonnegative integer"))),
                 Some(Dyn::Float(value))
                     if value.is_finite()
                         && *value >= 0.0

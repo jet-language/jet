@@ -350,10 +350,8 @@ fn tree_value(field: &ArrowFieldSpec, cell: ArrowCell<'_>) -> Result<Dyn, ArrowE
     Ok(match cell {
         ArrowCell::Null => Dyn::Null,
         ArrowCell::Bool(value) => Dyn::Bool(value),
-        ArrowCell::Signed(value) => Dyn::Int(value),
-        ArrowCell::Unsigned(value) => i64::try_from(value)
-            .map(Dyn::Int)
-            .unwrap_or_else(|_| Dyn::Number(value.to_string())),
+        ArrowCell::Signed(value) => Dyn::Int((value).into()),
+        ArrowCell::Unsigned(value) => Dyn::Int(value.into()),
         ArrowCell::Float(value) => Dyn::Float(value),
         ArrowCell::Utf8(value) => Dyn::Text(value.to_owned()),
         ArrowCell::Binary(value) => Dyn::Bytes(value.to_vec()),
@@ -409,7 +407,7 @@ fn temporal_tree_value(
                 format!("duration value {value} is outside Jet's nanosecond range"),
             )
         })?;
-        return Ok(Some(Dyn::Int(nanos)));
+        return Ok(Some(Dyn::Int((nanos).into())));
     } else if metadata.starts_with("jet.logical=") {
         return Err(ArrowError::new(
             ArrowErrorCode::UnsupportedSchema,
@@ -419,7 +417,7 @@ fn temporal_tree_value(
     } else {
         return Ok(None);
     };
-    Ok(Some(Dyn::TypedText(text)))
+    Ok(Some(Dyn::Text(text)))
 }
 
 fn scale_temporal(value: i64, unit: &str) -> Result<i128, ArrowError> {

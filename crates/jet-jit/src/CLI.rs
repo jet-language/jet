@@ -937,8 +937,8 @@ fn typed_cli_tree(
                                     ));
                                 }
                             }
-                            match crate::Encoding::json_rt::jet_int_from_str(&value) {
-                                Ok(value) => crate::Encoding::json_rt::Dyn::Int(value),
+                            match jet_foundation::Numeric::CtBigInt::from_str(&value) {
+                                Ok(value) => crate::Encoding::json_rt::Dyn::Int(jet_foundation::Numeric::JetInt::from_big(value)),
                                 Err(_) => {
                                     return Err(crate::Encoding::json_rt::FieldError::at(
                                         input.name.clone(),

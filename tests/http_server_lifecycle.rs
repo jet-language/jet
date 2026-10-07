@@ -39,7 +39,7 @@ impl __jet_Decode for String {
 fn jet_enc_json_decode<T: __jet_Decode>(
     text: &str,
 ) -> Result<T, Vec<jet_std::FieldError>> {
-    let tree = jet_std::parse_json_typed_dyn(text)
+    let tree = jet_std::parse_json_dyn(text)
         .map_err(|error| jet_std::FieldError::one(error.reason))?;
     T::jet_decode(&tree)
 }
@@ -167,7 +167,7 @@ mod jet_std {
     pub struct JetMIME {
         pub top: String,
         pub sub: String,
-        pub params: Vec<(String, String)>,
+        pub parameters: Vec<Vec<String>>,
     }
 
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");

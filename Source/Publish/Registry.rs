@@ -2129,7 +2129,7 @@ fn parse_oci_index(bytes: &[u8], subject: &str) -> io::Result<Vec<(String, Strin
         .as_object()
         .map_err(|_| invalid_oci("OCI referrer index is not an object"))?;
     require_oci_keys(object, &["schemaVersion", "subject", "manifests"], "index")?;
-    if !matches!(object_get(object, "schemaVersion"), Some(Dyn::Int(2))) {
+    if !matches!(object_get(object, "schemaVersion"), Some(Dyn::Int(value)) if value.to_i64() == Some(2)) {
         return Err(invalid_oci(
             "OCI referrer index has an unsupported schema version",
         ));
@@ -2195,7 +2195,8 @@ fn parse_oci_index(bytes: &[u8], subject: &str) -> io::Result<Vec<(String, Strin
             .to_string();
         validate_oci_digest(&digest)?;
         let size = match object_get(manifest, "size") {
-            Some(Dyn::Int(value)) if *value >= 0 => *value as u64,
+            Some(Dyn::Int(value)) => value.to_u64().ok_or_else(|| invalid_oci(
+                "OCI referrer descriptor size is not a non-negative integer"))?,
             _ => {
                 return Err(invalid_oci(
                     "OCI referrer descriptor size is not a non-negative integer",

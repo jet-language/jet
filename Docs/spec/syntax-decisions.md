@@ -1307,7 +1307,10 @@ index then item; one-binding stays item-only. `xs.indexes()` yields every valid
 `Int` index.
 
 **S39 — Indexing**: `xs[i]` / `m[k]` stop with a friendly report on
-OOB/missing key; `xs.get(i) -> (?T)` safe access; `m[k] = v` inserts.
+OOB/missing key; `xs.get(i) -> (?T)` safe access; `m[k] = v` inserts. `Dyn`
+follows the same rule (D-DATATREE-PATH1=A): `d[key]` reads an object member,
+`d[i]` an array item, `d.get(key)` / `d.get(i)` give `Dyn?`, and writes on a
+mutable binding insert or replace without creating missing containers.
 
 **D-INDEXOF1=A — `index_of` searches by value** *(ratified 2026-10-01, card
 #4010; owner: "d-indexof1 by value, A")*: `[T].index_of(item: T) -> Int?` and
@@ -1361,9 +1364,11 @@ Every form stays lazy and has the same AOT, dev/JIT, and interpreter meaning.
 **D-COLLBREADTH1 / D-ITERTOOLS1=A**: `Set<T: [Hash, Eq]>`,
 `Rank<T>`, ring-buffer `Queue<T>`, `PriorityQueue<T>`, `Cache<K,V>`,
 `Tally<T>`, `Bits`, and `Bytes` in Core (E0506). `[K:V]` is the default
-ordered map spelling; specialized map names stay reserved. **D-ENC-DYN1**:
-`Dyn` is the single dynamic value
-(`.Object/.Array/.Int/.Float/.Text/.Bool/.Null`); `JSON`/`TOML`/`YAML`/`CSV`
+ordered map spelling; specialized map names stay reserved. **D-ENC-DYN1**
+(amended by D-INFER-PRIVATE1=A and the owner's 2026-10-02 direction): `Dyn` is
+the single dynamic value, closed to
+`.Null/.Bool/.Int/.Float/.Text/.Bytes/.DateTime/.Array/.Object`;
+`JSON`/`TOML`/`YAML`/`CSV`
 are aliases over it. **Declined**: `[..]T` spelling — zero-copy comes as
 `View<T>` library type (D-DYNARRAY1).
 
@@ -3918,6 +3923,34 @@ unchanged. `equal_unordered(other)` ignores object insertion order, preserves
 array order, keeps `Int` and `Float` distinct, and never equates `NaN`. No
 `Dyn.truthy()` operation is added; domain-specific truthiness remains
 explicit at its call site.
+
+**D-INFER-PRIVATE1 = A** *(ratified 2026-10-02, card #4306)*: `Dyn` replaces
+`DataTree` as the one dynamic data value; there is no `DataTree` spelling. It
+keeps every former feature (every codec, pointer, patch, canonical bytes,
+events, typed encode and decode) and holds data only: no functions, handles,
+or arbitrary structs (D-ANY-JAI1 stands). Its cases are `Null`, `Bool`, `Int`,
+`Float`, `Text`, `Bytes([U8])`, `DateTime(ZonedDateTime)` (an instant with a
+fixed UTC offset), `Array([Dyn])`, and `Object`, an insertion-ordered object
+whose literal is the map literal (D-SERDE15). On a mutable binding `row.price =
+2.5` adds or replaces a field and `row.price` reads one; a missing field stops
+with the S39 report and `row.get("price")` gives `Dyn?`. `Int`, `Float`,
+`String`, `Bool`, `[U8]`, `DateTime`, `ZonedDateTime`, and lists and maps of
+these wrap automatically where a `Dyn` is expected; other `Encode` values go in
+with `Dyn.from(value)`, and E0172 names the fix. `decode<T>()` returns `T
+[FieldError]!`. `+ - * /` with a `Dyn` operand give `Dyn`, checked while
+running: `Int` mixed with `Float` gives `Float`, `/` always gives `Float`, and
+any other mismatch stops naming both kinds. `==`/`!=` compare contents and keep
+`Int` and `Float` distinct; `< <= > >=` mix numbers, compare `Text` and `Bytes`
+in order and `DateTime` by instant, and stop on other kinds. A `Dyn` is never a
+condition (E0170). Its own members are `get`, `has`, `keys`, `remove`, `len`,
+`decode`, `to_text`, `field`, `at`, `int`, `float`, `text`, `bool`,
+`equal_unordered`, and `encode`; a field with one of those names is reached
+with `row["len"]` (E0171). Printing shows a value's `to_text()` and containers
+as compact JSON. Codecs: CBOR carries `Bytes` as byte strings and `DateTime` as
+tag 0 (tag 1 also decodes); TOML carries offset date-times natively; YAML uses
+`!!binary` and timestamps; JSON, JSONL, CSV, and XML write base64 and RFC 3339
+text, which typed decode into `[U8]`, `DateTime`, and `ZonedDateTime` accepts.
+`time.zone("+05:30")` gives the fixed-offset zone a `DateTime` case carries.
 
 **CLI & IO**: builder-spec arg parsing `args.spec().flag(…).option(…)
 .positional(…)` with generated `--help` (D-ARGS1). `io.stdin()` handle with

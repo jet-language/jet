@@ -156,6 +156,37 @@ fn error_codes(diags: &[Diagnostic]) -> Vec<&str> {
 }
 
 #[test]
+fn dyn_surface_wraps_reads_writes_and_numeric_operands() {
+    let (_, diagnostics) = check(r#"
+use core.encoding.[Dyn]
+fn make() -> Dyn {
+    row := Dyn.object()
+    row.user = ["name": "Ada", "active": true]
+    row["values"] = [1, 2.5]
+    row["values"][0] = 4
+    return row.user
+}
+fn arithmetic(d: Dyn) -> Dyn -> 2.5 + (d * 3)
+fn optional(d: Dyn) -> Dyn? -> d.get("missing")
+"#);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
+}
+
+#[test]
+fn dyn_condition_member_and_automatic_wrap_have_dedicated_diagnostics() {
+    for (source, code) in [
+        ("use core.encoding.[Dyn]\nfn bad(d: Dyn) -> Bool -> if d -> true else -> false", "E0170"),
+        ("use core.encoding.[Dyn]\nfn bad(d: Dyn) -> Dyn -> d.len", "E0171"),
+        ("use core.encoding.[Dyn]\nstruct Record { n: Int }\nfn bad(v: Record) -> Dyn -> v", "E0172"),
+        ("use core.encoding.[Dyn]\nfn bad(d: Dyn) -> Dyn -> d[true]", "E0505"),
+    ] {
+        let (_, diagnostics) = check(source);
+        assert!(error_codes(&diagnostics).contains(&code), "{code}: {diagnostics:#?}");
+    }
+}
+
+
+#[test]
 fn equivalent_instances_are_interned_and_project_one_nominal_identity() {
     let src = r#"
 module boxed<T>(size: Int) {

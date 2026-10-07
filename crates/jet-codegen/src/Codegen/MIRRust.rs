@@ -768,7 +768,22 @@ pub fn mir_rust_aot_metadata(
 /// The runtime and Core block for one artifact (gated by
 /// `config.execution.emit_runtime`): decided by build facts only, never by user
 /// source, so `jet_store::runtime::prepare` links it as the `jet_runtime` rlib.
+/// Its Prelude sources' test-only items are left out: generated programs are
+/// never built with `--test`, so they would only be written, hashed and parsed.
+/// The cache identities (`cached_runtime_fingerprint`, the Core closure
+/// fingerprint) hash the Prelude text before this deterministic removal.
 fn emit_runtime_block(
+    emitter: &RustEmitter<'_>,
+    program: &MirProgram,
+    config: &MirRustConfig<'_>,
+    out: &mut String,
+) {
+    let mut block = String::new();
+    push_runtime_block(emitter, program, config, &mut block);
+    out.push_str(&jet_foundation::RustSource::strip_test_items(&block));
+}
+
+fn push_runtime_block(
     emitter: &RustEmitter<'_>,
     program: &MirProgram,
     config: &MirRustConfig<'_>,
@@ -969,8 +984,24 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
                 );
             }
         }
+        // Card #4258: a constant whose every read was copied into its use
+        // sites (TIR→MIR `inline_known_constant_reads`) needs no accessor;
+        // storage cells and every constant still read through `Global` keep
+        // their item.
+        let global_reads = program
+            .functions
+            .iter()
+            .flat_map(|function| &function.blocks)
+            .flat_map(|block| &block.instructions)
+            .filter_map(|instruction| match &instruction.operation {
+                MirOperation::Global { name } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
         for constant in &program.constants {
-            if emitter.module_selected(constant.module) {
+            if emitter.module_selected(constant.module)
+                && (constant.is_storage || global_reads.contains(constant.key.as_str()))
+            {
                 let unit = units
                     .as_ref()
                     .map(|units| units.module_unit(constant.module, constant.span.start));
@@ -2255,16 +2286,16 @@ fn compact_function_text(out: &mut String, start: usize) {
     }
 }
 
-/// A folded list constant whose rows exceed this many bytes of Rust is cached.
+/// A folded list constant whose rows exceed this many bytes of Rust is built
+/// by row-chunk helpers.
 const CACHED_CONSTANT_BYTES: usize = 16 * 1024;
 /// Upper bound on the rows one cached-constant chunk helper pushes.
 const CONSTANT_CHUNK_BYTES: usize = 64 * 1024;
 
-/// Emits a large folded list constant as a per-thread cache that row-chunk
-/// helpers of at most `CONSTANT_CHUNK_BYTES` fill once; the accessor clones
-/// the cached rows. No emitted function then holds the whole table, and a
-/// read no longer rebuilds every row from code.
-fn emit_cached_list_constant(out: &mut String, visibility: &str, name: &str, ty: &str, rows: &[String]) {
+/// The initializer of a large folded list constant: row-chunk helpers of at
+/// most `CONSTANT_CHUNK_BYTES` each fill the rows, so no emitted function
+/// holds the whole table. The helpers are written to `out`.
+fn emit_list_constant_chunks(out: &mut String, name: &str, ty: &str, rows: &[String]) -> String {
     let mut chunks: Vec<&[String]> = Vec::new();
     let mut start = 0;
     let mut bytes = 0;
@@ -2284,16 +2315,37 @@ fn emit_cached_list_constant(out: &mut String, visibility: &str, name: &str, ty:
         }
         let _ = writeln!(out, "}}\n");
     }
-    let _ = writeln!(out, "thread_local! {{");
-    let _ = writeln!(out, "    static {name}_ROWS: {ty} = {{");
-    let _ = writeln!(out, "        let mut rows: {ty} = Vec::with_capacity({});", rows.len());
+    let mut init = format!("{{\n        let mut rows: {ty} = Vec::with_capacity({});\n", rows.len());
     for index in 0..chunks.len() {
-        let _ = writeln!(out, "        {name}_rows_{index}(&mut rows);");
+        let _ = writeln!(init, "        {name}_rows_{index}(&mut rows);");
     }
-    let _ = writeln!(out, "        rows\n    }};\n}}\n");
+    init.push_str("        rows\n    }");
+    init
+}
+
+/// Emits a folded aggregate constant as one per-thread value built once, at
+/// its first read. `NAME_shared()` hands a read that value itself (a
+/// `JetSharedSlot`, which readers borrow in place), and only the owned
+/// accessor `NAME()` copies it.
+fn emit_shared_constant(
+    out: &mut String,
+    root: &str,
+    visibility: &str,
+    name: &str,
+    ty: &str,
+    init: &str,
+) {
     let _ = writeln!(
         out,
-        "#[inline]\n{visibility}fn {name}() -> {ty} {{ {name}_ROWS.with(|rows| rows.clone()) }}\n"
+        "thread_local! {{\n    static {name}_SHARED: std::rc::Rc<{ty}> = std::rc::Rc::new({init});\n}}\n"
+    );
+    let _ = writeln!(
+        out,
+        "#[inline]\n{visibility}fn {name}() -> {ty} {{ {name}_SHARED.with(|value| (**value).clone()) }}\n"
+    );
+    let _ = writeln!(
+        out,
+        "#[inline]\n{visibility}fn {name}_shared() -> {root}JetSharedSlot<{ty}> {{ {name}_SHARED.with(|value| {root}JetSharedSlot::new(std::rc::Rc::clone(value))) }}\n"
     );
 }
 
@@ -6410,31 +6462,29 @@ impl<'a> RustEmitter<'a> {
         let name = mangle_path(&constant.key);
         let visibility = self.visibility(constant.visibility);
         let ty = self.rust_type(&constant.ty);
-        // A large folded list is cached and built by row chunks; a smaller
-        // one keeps the inline `vec![..]` accessor from the same rows.
-        let rows = match (constant.ty.kind(), &constant.value) {
-            (MirTypeKind::List(inner), MirConstant::List(values))
-                if !constant.is_storage && !self.is_no_os() =>
-            {
-                Some(
-                    values
+        // D-MEM-COPYSEM1: a folded aggregate is one per-thread value built
+        // once; reads borrow it (`NAME_shared`). A large list is filled by
+        // row chunks, a smaller one by the inline `vec![..]` of the same rows.
+        let root = &self.config.root_prefix;
+        if self.shared_constant(constant) {
+            let init = match (constant.ty.kind(), &constant.value) {
+                (MirTypeKind::List(inner), MirConstant::List(values)) => {
+                    let rows = values
                         .iter()
                         .map(|value| self.constant_for_type(value, inner))
-                        .collect::<Vec<_>>(),
-                )
-            }
-            _ => None,
-        };
-        if let Some(rows) = &rows {
-            if rows.iter().map(String::len).sum::<usize>() > CACHED_CONSTANT_BYTES {
-                emit_cached_list_constant(out, visibility, &name, &ty, rows);
-                return;
-            }
+                        .collect::<Vec<_>>();
+                    if rows.iter().map(String::len).sum::<usize>() > CACHED_CONSTANT_BYTES {
+                        emit_list_constant_chunks(out, &name, &ty, &rows)
+                    } else {
+                        format!("vec![{}]", rows.join(", "))
+                    }
+                }
+                _ => self.constant_for_type(&constant.value, &constant.ty),
+            };
+            emit_shared_constant(out, root, visibility, &name, &ty, &init);
+            return;
         }
-        let value = match rows {
-            Some(rows) => format!("vec![{}]", rows.join(", ")),
-            None => self.constant_for_type(&constant.value, &constant.ty),
-        };
+        let value = self.constant_for_type(&constant.value, &constant.ty);
         if constant.is_storage {
             let cell = format!("{}JetPersistCell", self.config.root_prefix);
             if matches!(constant.ty.kind(), MirTypeKind::Int) {
@@ -6458,6 +6508,51 @@ impl<'a> RustEmitter<'a> {
                 "#[inline]\n{visibility}fn {name}() -> {ty} {{ {value} }}\n"
             );
         }
+    }
+
+    /// D-MEM-COPYSEM1: a folded aggregate constant (text, list, map, option,
+    /// result, tuple, or nominal value) on a hosted target is one shared
+    /// per-thread value; a read holds it in a `JetSharedSlot` and borrows it
+    /// in place, and only an owned use copies it. Scalars stay plain values.
+    fn shared_constant(&self, constant: &MirConstantDef) -> bool {
+        !constant.is_storage
+            && !self.is_no_os()
+            && matches!(
+                constant.ty.kind(),
+                MirTypeKind::String
+                    | MirTypeKind::List(_)
+                    | MirTypeKind::Map { .. }
+                    | MirTypeKind::Option(_)
+                    | MirTypeKind::Result { .. }
+                    | MirTypeKind::Tuple(_)
+                    | MirTypeKind::Apply { .. }
+            )
+    }
+
+    /// The shared-value accessor a `Global` read of `name` stores in its
+    /// value slot, when `name` is a shared constant.
+    fn shared_constant_accessor(&self, name: &str) -> Option<String> {
+        let constant = self
+            .program
+            .constants
+            .iter()
+            .find(|constant| constant.key.as_str() == name)?;
+        self.shared_constant(constant).then(|| {
+            format!(
+                "{}{}_shared()",
+                self.config.root_prefix,
+                mangle_path(&constant.key)
+            )
+        })
+    }
+
+    /// Whether `value` is a `Global` read of a shared constant, whose slot
+    /// is a `JetSharedSlot`.
+    fn shared_constant_value(&self, function: &MirFunction, value: MirValueId) -> bool {
+        matches!(
+            self.value_definition(function, value),
+            Some(MirOperation::Global { name }) if self.shared_constant_accessor(name).is_some()
+        )
     }
 
     fn global_expression(&self, name: &str) -> String {
@@ -8261,7 +8356,7 @@ impl<'a> RustEmitter<'a> {
             .map_or(nominal_name, |(_, leaf)| leaf);
         match nominal_name {
             "HandleID" | "TaskID" | "EventID" => {
-                format!("jet_std::Dyn::Int({value}.value as i64)")
+                format!("jet_std::Dyn::Int(({value}.value as i64).into())")
             }
             _ => format!("{value}.jet_encode()"),
         }
@@ -17378,6 +17473,15 @@ impl<'a> RustEmitter<'a> {
                 continue;
             }
             let ty = self.rust_local_type(ty);
+            if self.shared_constant_value(function, *value) {
+                let root = &self.config.root_prefix;
+                let _ = writeln!(
+                    out,
+                    "    let mut {}: {root}JetSharedSlot<{ty}> = {root}JetSharedSlot::empty();",
+                    value_slot(*value)
+                );
+                continue;
+            }
             let _ = writeln!(
                 out,
                 "    let mut {}: Option<{ty}> = None;",
@@ -17753,6 +17857,22 @@ impl<'a> RustEmitter<'a> {
             }
         }
         match &instruction.operation {
+            // A read of a shared constant holds the shared value; its readers
+            // borrow it in place (`JetSharedSlot`).
+            MirOperation::Global { name }
+                if instruction
+                    .result
+                    .is_some_and(|value| self.shared_constant_value(function, value)) =>
+            {
+                let accessor = self
+                    .shared_constant_accessor(name)
+                    .expect("checked shared constant");
+                let _ = writeln!(
+                    out,
+                    "{pad}{} = {accessor};",
+                    value_slot(instruction.result.expect("checked Global result"))
+                );
+            }
             MirOperation::InitializeUninit { place } => {
                 let _ = writeln!(
                     out,
@@ -22503,7 +22623,7 @@ impl<'a> RustEmitter<'a> {
             let root = &self.config.root_prefix;
             let target_ty = self.rust_type(target);
             return format!(
-                "{{ let __jet_db_entries = {root}jet_std::jet_db_row_project({}, {names}, |value| match value {{ {root}jet_std::DBValue::Null => {root}jet_std::Dyn::Null, {root}jet_std::DBValue::Int(value) => {root}jet_std::Dyn::Int(*value), {root}jet_std::DBValue::Float(value) => {root}jet_std::Dyn::Float(*value), {root}jet_std::DBValue::Text(value) => {root}jet_std::Dyn::Text(value.clone()), {root}jet_std::DBValue::Bool(value) => {root}jet_std::Dyn::Bool(*value), {root}jet_std::DBValue::Blob(value) => {root}jet_std::Dyn::Bytes(value.clone()) }}); {root}jet_db_decode::<{target_ty}>(&__jet_db_entries) }}",
+                "{{ let __jet_db_entries = {root}jet_std::jet_db_row_project({}, {names}, |value| match value {{ {root}jet_std::DBValue::Null => {root}jet_std::Dyn::Null, {root}jet_std::DBValue::Int(value) => {root}jet_std::Dyn::Int((*value).into()), {root}jet_std::DBValue::Float(value) => {root}jet_std::Dyn::Float(*value), {root}jet_std::DBValue::Text(value) => {root}jet_std::Dyn::Text(value.clone()), {root}jet_std::DBValue::Bool(value) => {root}jet_std::Dyn::Bool(*value), {root}jet_std::DBValue::Blob(value) => {root}jet_std::Dyn::Bytes(value.clone()) }}); {root}jet_db_decode::<{target_ty}>(&__jet_db_entries) }}",
                 values.join(", ")
             );
         }
@@ -23828,6 +23948,13 @@ impl<'a> RustEmitter<'a> {
             && self.byte_loop_collection(function, collection);
         let collection = if by_value {
             self.value_move(collection)
+        } else if !byte_loop
+            && matches!(self.value_type(function, collection).kind(), MirTypeKind::List(_))
+            && self.shared_constant_value(function, collection)
+        {
+            // A loop over a shared list constant walks a borrowed slice; the
+            // shared value itself is never made unique.
+            format!("&mut ({}).as_slice()", self.value_slot_reference(collection, false))
         } else {
             self.value_borrow_mut(collection)
         };
@@ -23941,6 +24068,22 @@ impl<'a> RustEmitter<'a> {
             }
             return self.prelude_call_args_exact(call, &[]);
         }
+        if route.module == "core.encoding.dyn" && route.member == "set_path" {
+            let receiver = self.borrowed_value_reference(function, receiver, MirAccess::Write);
+            let count = args.len().checked_sub(2).expect("Dyn setter value and site");
+            let steps = args[..count].iter().map(|step| {
+                let value = self.value_move(*step);
+                match self.value_type(function, *step).kind() {
+                    MirTypeKind::String => format!("{}jet_std::JetDynStep::Key({value})", self.config.root_prefix),
+                    MirTypeKind::Int => format!("{}jet_std::JetDynStep::At({})", self.config.root_prefix,
+                        self.native_int_argument(value, location)),
+                    _ => panic!("checked Dyn step is not String or Int"),
+                }
+            }).collect::<Vec<_>>().join(", ");
+            let value = self.value_move(args[count]);
+            let site = self.borrowed_value_reference(function, args[count + 1], MirAccess::Read);
+            return format!("{}({receiver}, &[{steps}], {value}, {site})", self.prelude_symbol(call));
+        }
         let mut values = vec![(Some(receiver), None)];
         values.extend(args.iter().map(|value| (Some(*value), None)));
         if let Some(metadata) = route.db_metadata.as_ref() {
@@ -23992,7 +24135,7 @@ impl<'a> RustEmitter<'a> {
                                     | "reader.skip"
                                     | "reader.take"
                             ))
-                        || (route.module == "core.encoding.dyn" && route.member == "at")
+                        || (route.module == "core.encoding.dyn" && matches!(route.member.as_str(), "at" | "index_at" | "get_at"))
                         || route.member == "shutdown_report_field")
                         && index > 0
                         && !route.signature.borrow_mask[index]
@@ -24015,6 +24158,7 @@ impl<'a> RustEmitter<'a> {
                                 ));
                         let access = if reader_consumes
                             || (route.module == "core.transaction" && route.member == "commit")
+                            || (index == 0 && route.module == "core.encoding.dyn" && route.member == "remove")
                         {
                             MirAccess::Write
                         } else {
@@ -24039,6 +24183,11 @@ impl<'a> RustEmitter<'a> {
                 }
             })
             .collect::<Vec<_>>();
+        let mut values = values;
+        if route.module == "core.encoding.dyn" && matches!(route.member.as_str(), "binary" | "compare") {
+            let op = values.remove(2);
+            values.insert(0, op);
+        }
         self.prelude_call_args_exact(call, &values)
     }
 
@@ -24295,6 +24444,11 @@ impl<'a> RustEmitter<'a> {
                 if self.is_dyn_int(owner, variant) {
                     return format!("{}jet_std::jet_dyn_int({value})", self.config.root_prefix);
                 }
+                if variant == "DateTime"
+                    && crate::Codegen::core_rust_type_name(&self.type_def(owner).key) == Some("Dyn")
+                {
+                    return format!("{}jet_std::jet_dyn_datetime(&{value})", self.config.root_prefix);
+                }
                 let mut value = if native {
                     self.native_int_input(&value, payload, location)
                         .unwrap_or(value)
@@ -24402,9 +24556,22 @@ impl<'a> RustEmitter<'a> {
             .unwrap_or(owner);
         // A moved subject that only feeds this block's bindings is taken
         // apart once instead of cloning each payload out of it.
+        if variant == "DateTime"
+            && crate::Codegen::core_rust_type_name(&self.type_def(effective_owner).key) == Some("Dyn")
+        {
+            let value = self.inspected_value_reference(function, subject);
+            return format!("{}jet_std::jet_dyn_datetime_payload(&{value}).expect(\"MIR enum payload variant mismatch\")",
+                self.config.root_prefix);
+        }
         if let Some(taken) = result.and_then(|result| {
             self.payload_take(function, result, subject, effective_owner, variant)
         }) {
+            if variant == "Object"
+                && crate::Codegen::core_rust_type_name(&self.type_def(effective_owner).key) == Some("Dyn")
+                && result.is_some_and(|result| matches!(self.value_type(function, result).kind(), MirTypeKind::Map { .. }))
+            {
+                return format!("{}jet_data_entries_to_map({taken})", self.config.root_prefix);
+            }
             return taken;
         }
         // A payload read only inspects its subject; the payload is cloned out.
@@ -25625,6 +25792,10 @@ impl<'a> RustEmitter<'a> {
         {
             return "()".to_string();
         }
+        if self.shared_constant_value(function, value) {
+            // Dropping a shared-constant read ends the borrow; it never copies.
+            return format!("{{ {}.release(); () }}", value_slot(value));
+        }
         if matches!(kind, MirDropKind::ForeignHandle) {
             let ty = self.value_type(function, value);
             let handle = self
@@ -26421,6 +26592,15 @@ impl<'a> RustEmitter<'a> {
             } else {
                 format!("(*({reference})).clone()")
             }
+        } else if let Some(place) = self.elided_shared_guard_base(function, base) {
+            // The guard deref (or guard field) feeding this read is a borrow
+            // projection that is never stored in its value slot; read the
+            // field through the guard's own place instead of that empty slot.
+            if self.boxed_field(field) {
+                format!("({place}).{field_name}.as_ref().clone()")
+            } else {
+                format!("({place}).{field_name}.clone()")
+            }
         } else if self.boxed_field(field) {
             if self.history_runtime_metadata_enabled() {
                 format!(
@@ -26482,6 +26662,16 @@ impl<'a> RustEmitter<'a> {
             Some(owner) => self.history_source_field_value(owner, &field_name, value),
             None => value,
         }
+    }
+
+    /// A shared-guard deref or guard field whose instruction is elided as a
+    /// direct borrow projection (see the `direct_borrow_projection` skip):
+    /// its value slot is never assigned, so readers use the guard place.
+    fn elided_shared_guard_base(&self, function: &MirFunction, base: MirValueId) -> Option<String> {
+        if !self.shared_guard_borrow_origin(function, base) || !self.direct_borrow_only(function, base) {
+            return None;
+        }
+        self.shared_guard_borrow_place(function, base, MirAccess::Read)
     }
 
     fn history_struct_field_value(

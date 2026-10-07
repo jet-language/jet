@@ -781,9 +781,7 @@ fn find_integer(value: &jet_foundation::Dyn::Dyn, names: &[&str]) -> Option<u64>
                 if names.contains(&key.as_str()) {
                     match value {
                         jet_foundation::Dyn::Dyn::Number(value) => value.parse().ok(),
-                        jet_foundation::Dyn::Dyn::Int(value) if *value >= 0 => {
-                            Some(*value as u64)
-                        }
+                        jet_foundation::Dyn::Dyn::Int(value) => value.to_u64(),
                         _ => find_integer(value, names),
                     }
                 } else {

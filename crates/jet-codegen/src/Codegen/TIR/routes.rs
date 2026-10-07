@@ -4111,6 +4111,9 @@ impl THandleOp {
             | HTTPRespField(_)
             | HTTPRespHeader
             | ArgsSpecHelp
+            | DynIndexKey { .. } | DynIndexAt { .. } | DynGetKey | DynGetAt
+            | DynHas | DynKeys | DynRemove | DynLen { .. }
+            | DynBinary { .. } | DynCompare { .. } | DynSetPath { .. }
             | DynField
             | DynAt
             | DynInt

@@ -121,6 +121,7 @@ fn jet_codegen_collection_boxed_expr(builder: JetCodegenBuilder, value: TExpr, t
     }
 }
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::lower_index_place
 fn jet_codegen_collection_index_place(builder: &JetCodegenBuilder, base: TExpr, index: TExpr, kind: TIndexKind, result_ty: Type, location: TPanicLoc, span: Span) -> MIRPlaceID {
     base_type := jet_codegen_unwrap_pattern_tags(base.ty)
     if base_type == base.ty -> return jet_codegen_index_place(&builder, base, index, kind, result_ty, MIRAccess.Read, location, span)
@@ -151,7 +152,7 @@ fn jet_codegen_collection_index_place(builder: &JetCodegenBuilder, base: TExpr, 
     identity := jet_codegen_identity(&builder, "place", span, "index", "{root.id.value}:{index_value.value}")
     id := MIRPlaceID{value: stable_id("mir-place", identity)}
     lowered_ty :: jet_codegen_lower_type_for_function(result_ty, builder)
-    &builder.places.push(MIRPlace{
+    jet_codegen_push_place(&builder, MIRPlace{
         id: id,
         span: span,
         ty: lowered_ty,

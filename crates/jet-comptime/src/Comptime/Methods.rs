@@ -13,6 +13,7 @@ mod time_deadline_kernel;
 
 pub(crate) use core_calls::as_string;
 pub(crate) use core_calls::data_plot_rt;
+pub use core_calls::dyn_datetime_value;
 pub use core_calls::{
     apply_core_call, apply_core_call_with_type, apply_core_call_without_ambient,
     apply_core_call_without_ambient_with_type, apply_core_call_without_ambient_with_type_args,

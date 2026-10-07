@@ -405,7 +405,7 @@ fn jet_driver_parse_dependency_entries(source: String, source_path: String, toke
                     cursor == value_index + 1 && jet_driver_is_manifest_string(tokens[value_index].kind) -> tokens[value_index].payload.decoded
                     else -> {
                         value_start :: tokens[value_index].span.start
-                        if value_start >= 0 && value_end >= value_start && value_end <= source_bytes.len() -> (String.from_bytes(source_bytes[value_start..value_end]) ?? "").trim() else -> ""
+                        if value_start >= 0 && value_end >= value_start && value_end <= source_bytes.len() -> (String.from_bytes(source_bytes[value_start..<value_end]) ?? "").trim() else -> ""
                     }
                 }
                 duplicate :: loop existing in dependencies {
@@ -459,22 +459,27 @@ fn jet_driver_manifest_field_value(source: String, tokens: [Token], start_index:
             start :: token.span.start
             end :: token.span.end
             if start >= 0 && end >= start && end <= source_bytes.len() {
-                text = "{text}{String.from_bytes(source_bytes[start..end]) ?? ""}"
+                text = "{text}{String.from_bytes(source_bytes[start..<end]) ?? ""}"
             }
         }
     }
     JetDriverManifestFieldValue{text: text.trim(), next_index: cursor}
 }
 
+// Rust `Blocks.rs` `parse_allocator_bytes`: the unit suffix follows the last
+// `.` (`rsplit_once`), and the count is a `u64` spelling (one optional `+`).
 fn jet_driver_parse_allocator_bytes(value: String, span: Span, diagnostics: &[Diagnostic]) -> Int? {
-    parts :: value.split(".").to_list()
-    if parts.len() > 2 {
-        &diagnostics.push(jet_driver_diagnostic("E1206", span, "invalid hosted program allocator", "`cap:` uses exact bytes or a `.kb`, `.mb`, or `.gb` byte quantity", "use a positive whole-byte quantity such as `2.gb`"))
-        return None
+    value_bytes :: value.bytes()
+    dot := -1
+    loop (index, byte) in value_bytes {
+        if Int.from_u8(byte) == 46 -> dot = index
     }
+    digits_text := ~value
     multiplier := 1
-    if parts.len() == 2 {
-        if parts[1] == {
+    if dot >= 0 {
+        digits_text = String.from_bytes(value_bytes[0..<dot]) ?? ""
+        suffix :: String.from_bytes(value_bytes[dot + 1..<value_bytes.len()]) ?? ""
+        if suffix == {
             "kb" | "kib" -> multiplier = 1024
             "mb" | "mib" -> multiplier = 1048576
             "gb" | "gib" -> multiplier = 1073741824
@@ -485,7 +490,8 @@ fn jet_driver_parse_allocator_bytes(value: String, span: Span, diagnostics: &[Di
             }
         }
     }
-    digits :: parts[0].replace("_", "")
+    digits := digits_text.replace("_", "")
+    if digits.starts_with("+") -> digits = digits.slice(1, digits.len())
     if digits.len() == 0 {
         &diagnostics.push(jet_driver_diagnostic("E1206", span, "invalid hosted program allocator", "`cap:` must be a positive whole-byte quantity such as `2.gb`", "use a positive whole-byte quantity that fits in 64 bits"))
         return None
@@ -512,6 +518,51 @@ fn jet_driver_parse_allocator_bytes(value: String, span: Span, diagnostics: &[Di
     Val(count * multiplier)
 }
 
+// Rust `Blocks.rs` `top_level_commas`: split on commas outside `()`/`[]`/`{}`
+// and string literals; a final blank component is dropped.
+fn jet_driver_top_level_commas(body: String) -> [String] Never! {
+    parts := [String]{}
+    current := [U8]{}
+    depth := 0
+    quoted := false
+    escaped := false
+    loop byte in body.bytes() {
+        code :: Int.from_u8(byte)
+        if quoted {
+            &current.push(byte)
+            if {
+                escaped -> escaped = false
+                code == 92 -> escaped = true
+                code == 34 -> quoted = false
+                else -> {}
+            }
+            next
+        }
+        if {
+            code == 34 -> {
+                quoted = true
+                &current.push(byte)
+            }
+            code == 40 || code == 91 || code == 123 -> {
+                depth += 1
+                &current.push(byte)
+            }
+            code == 41 || code == 93 || code == 125 -> {
+                depth -= 1
+                &current.push(byte)
+            }
+            code == 44 && depth == 0 -> {
+                &parts.push(String.from_bytes(current) ?? "")
+                current = [U8]{}
+            }
+            else -> &current.push(byte)
+        }
+    }
+    last :: String.from_bytes(current) ?? ""
+    if last.trim() != "" -> &parts.push(last)
+    parts
+}
+
 fn jet_driver_parse_program_allocator(value: String, span: Span, diagnostics: &[Diagnostic]) -> MIRAllocatorPolicy? {
     compact :: value.trim().replace(" ", "").replace("\t", "").replace(String.from_bytes([U8]{U8{13}}) ?? "", "").replace("\n", "")
     if compact == "mem.Heap" -> return Val(MIRAllocatorPolicy.HostedDefault)
@@ -519,8 +570,8 @@ fn jet_driver_parse_program_allocator(value: String, span: Span, diagnostics: &[
     if compact.starts_with(prefix) && compact.ends_with(")") {
         bytes :: compact.bytes()
         prefix_len :: prefix.bytes().len()
-        inner :: String.from_bytes(bytes[prefix_len..bytes.len() - 1]) ?? ""
-        args :: inner.split(",").to_list()
+        inner :: String.from_bytes(bytes[prefix_len..<bytes.len() - 1]) ?? ""
+        args :: jet_driver_top_level_commas(inner)
         if args.len() == 0 || args[0] != "mem.Heap" || args.len() > 2 {
             &diagnostics.push(jet_driver_diagnostic("E1206", span, "invalid hosted program allocator", "`mem.Counting.over` wraps `mem.Heap` and accepts only the optional `cap:` argument", "use `allocator: mem.Heap` or `mem.Counting.over(mem.Heap, cap: 2.gb)`"))
             return None
@@ -1390,11 +1441,19 @@ fn jet_driver_collect_source_files(snapshot: JetDriverAuthorizedSourceSnapshot, 
             if segment.line_starts.len() == 0 || segment.line_starts[0] != 0 {
                 &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "source provenance has no line-zero byte offset", "line starts are fragment-local UTF-8 byte offsets", "provide line_starts beginning with zero"))
             }
-            loop line_index in 1..<segment.line_starts.len() {
-                if segment.line_starts[line_index] <= segment.line_starts[line_index - 1] || segment.line_starts[line_index] > segment_length {
+            // One pass over the starts (indexing `segment.line_starts[i]` copied
+            // the whole list per index in emitted code: quadratic per segment).
+            // Every start after the first is checked against its predecessor,
+            // whatever the first value is.
+            previous_line_start := 0
+            first_line_start := true
+            loop line_start in segment.line_starts {
+                if !first_line_start && (line_start <= previous_line_start || line_start > segment_length) {
                     &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "source provenance line starts are outside the exact generated fragment", "line starts are increasing fragment-local UTF-8 byte offsets", "regenerate line_starts from the exact source fragment"))
                     break
                 }
+                first_line_start = false
+                previous_line_start = line_start
             }
             if segment.origin == {
                 .Snapshot -> {
@@ -1681,6 +1740,35 @@ fn jet_driver_lookup_file_target(source_units: [JetDriverSourceUnit], importing_
         return None
     }
     jet_driver_find_source_path(source_units, importing_unit.root_index, [String]{resolved.path}, &diagnostics, span)
+}
+
+// D-MOD1 (Rust `resolve_code_module_file`): the source unit a body-less
+// `module name` declares, `name.jet` beside the declaring file, else
+// `name/module.jet`; E0607 when neither is in the source snapshot.
+fn jet_driver_code_module_file(source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit, name: String, name_span: Span, diagnostics: &[Diagnostic]) -> Int? {
+    candidates :: [String]{name, "{name}/module"}
+    loop candidate in candidates {
+        resolved :: jet_driver_file_import_path(unit.relative_path, candidate)
+        if !resolved.valid -> next
+        loop (index, source_unit) in source_units {
+            if source_unit.root_index == unit.root_index && source_unit.relative_path == resolved.path -> return Val(index)
+        }
+    }
+    &diagnostics.push(jet_driver_diagnostic("E0607", name_span, "module `{name}` not found", "looked for `{name}.jet` and `{name}/module.jet` next to this file", "create `{name}.jet` next to this file"))
+    None
+}
+
+// E0604 for an import that closes a cycle. Rust lists the load stack: the
+// entry's import chain down to the file that is imported again, then the
+// circle itself.
+fn jet_driver_import_cycle(resolved_imports: [SemaRegistrationImportEdge], source_units: [JetDriverSourceUnit], entry_identity: String, target_identity: String, module_identity: String) -> Diagnostic {
+    lead :: jet_driver_module_path(resolved_imports, entry_identity, target_identity) ?? [String]{target_identity}
+    chain :: jet_driver_module_path(resolved_imports, target_identity, module_identity) ?? [String]{module_identity}
+    circle := [String]{}
+    loop index in 0..<lead.len() - 1 -> &circle.push(jet_driver_cycle_member(source_units, lead[index]))
+    loop identity in chain -> &circle.push(jet_driver_cycle_member(source_units, identity))
+    &circle.push(jet_driver_cycle_member(source_units, target_identity))
+    jet_driver_diagnostic_without_span("E0604", "these files import each other in a circle", "Jet loads every imported file before compiling, so imports can't loop", "break the cycle: {circle.join(" → ")}")
 }
 
 fn jet_driver_validate_alias(aliases: [String:Int], alias: String, span: Span, diagnostics: &[Diagnostic]) -> Bool {
@@ -2236,6 +2324,7 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
         program := parse_result.program
         jet_driver_bind_dependency_imports(&program, unit, catalog.packages)
         module_identity :: jet_driver_unit_module_identity(unit)
+        module_position :: modules.len()
         &modules.push(JetDriverLoadedModule{
             source_unit_index: source_unit_index,
             source_identity: jet_driver_source_identity(unit.package_identity, unit.path),
@@ -2319,16 +2408,7 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
             // Core library modules import one another like the Rust loader's
             // transitive Core closure; only user module edges must be acyclic.
             if !jet_driver_unit_is_core(target_unit) && jet_driver_module_reaches(resolved_imports, target_identity, module_identity) {
-                // Rust lists the load stack: the entry's import chain down to
-                // the file that is imported again, then the circle itself.
-                entry_identity :: jet_driver_unit_module_identity(source_units[entry_index ?? 0])
-                lead :: jet_driver_module_path(resolved_imports, entry_identity, target_identity) ?? [String]{target_identity}
-                chain :: jet_driver_module_path(resolved_imports, target_identity, module_identity) ?? [String]{module_identity}
-                circle := [String]{}
-                loop index in 0..<lead.len() - 1 -> &circle.push(jet_driver_cycle_member(source_units, lead[index]))
-                loop identity in chain -> &circle.push(jet_driver_cycle_member(source_units, identity))
-                &circle.push(jet_driver_cycle_member(source_units, target_identity))
-                &diagnostics.push(jet_driver_diagnostic_without_span("E0604", "these files import each other in a circle", "Jet loads every imported file before compiling, so imports can't loop", "break the cycle: {circle.join(" → ")}"))
+                &diagnostics.push(jet_driver_import_cycle(resolved_imports, source_units, jet_driver_unit_module_identity(source_units[entry_index ?? 0]), target_identity, module_identity))
                 failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
             }
             &resolved_imports.push(SemaRegistrationImportEdge{
@@ -2341,6 +2421,45 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
             if !queued[target_unit_index] {
                 queued[target_unit_index] = true
                 &pending.push(target_unit_index)
+            }
+        }
+        // D-MOD1 (Rust `load_file`): a body-less `module name` loads the file
+        // it declares and binds it as a synthetic file import aliased `name`,
+        // after the file's own imports. Body-less modules of Core sources
+        // name sibling Core files the catalog already holds as modules.
+        if !is_core {
+            loop item in program.items {
+                if item == .CodeModule(definition) {
+                    if definition.body != None -> next
+                    target_unit_index :: jet_driver_code_module_file(source_units, unit, definition.name, definition.name_span, &diagnostics) ?? {
+                        failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
+                        next
+                    }
+                    target_unit :: source_units[target_unit_index]
+                    target_identity :: jet_driver_unit_module_identity(target_unit)
+                    if jet_driver_module_reaches(resolved_imports, target_identity, module_identity) {
+                        &diagnostics.push(jet_driver_import_cycle(resolved_imports, source_units, jet_driver_unit_module_identity(source_units[entry_index ?? 0]), target_identity, module_identity))
+                        failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
+                    }
+                    // Rust names the file relative to the declaring file,
+                    // without its extension: `name` or `name/module`.
+                    direct :: jet_driver_file_import_path(unit.relative_path, definition.name)
+                    import_path :: if direct.valid && direct.path == target_unit.relative_path -> definition.name else -> "{definition.name}/module"
+                    synthetic :: ImportDecl{kind: ImportKind.File{path: import_path, span: definition.name_span}, alias: definition.name, alias_span: definition.name_span, span: definition.span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, inline_version: None}
+                    &modules[module_position].program.imports.push(synthetic)
+                    if aliases.get(definition.name) == None -> _ := &aliases.add(definition.name, target_unit_index)
+                    &resolved_imports.push(SemaRegistrationImportEdge{
+                        source_module_identity: module_identity,
+                        target_module_identity: target_identity,
+                        target_package_identity: target_unit.package_identity,
+                        declaration: synthetic,
+                        foreign_binding: None,
+                    })
+                    if !queued[target_unit_index] {
+                        queued[target_unit_index] = true
+                        &pending.push(target_unit_index)
+                    }
+                }
             }
         }
         loop declaration in program.imports {

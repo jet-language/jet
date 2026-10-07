@@ -5593,6 +5593,24 @@ fn lower_method_call_impl(
     // variant). Lower to `TExprKind::JSONLit`, carrying the payload's `implicit_clone`
     // flag as a total fact. The result type is `Data`.
     if let Expr::Ident(type_name, _) = receiver {
+        if !env.locals.contains_key(type_name) && is_json_type_name(type_name) {
+            if method == "from" && args.len() == 1 {
+                return lower_serde_encode_node(lower_expr(&args[0].expr, cx, env), cx);
+            }
+            if method == "object" && args.is_empty() {
+                return TExpr {
+                    ty: Type::Named("Dyn".to_string()),
+                    kind: TExprKind::JSONLit {
+                        variant: "Object".to_string(),
+                        arg: Some(Box::new((TExpr {
+                            ty: Type::Map { key: Box::new(Type::String), key_span: None,
+                                value: Box::new(Type::Named("Dyn".to_string())) },
+                            kind: TExprKind::MapLit(Vec::new()),
+                        }, false))),
+                    },
+                };
+            }
+        }
         if !env.locals.contains_key(type_name)
             && is_json_type_name(type_name)
             && is_json_variant(method)
@@ -10372,6 +10390,67 @@ fn lower_method_call_impl(
         }
     }
     if let Some(handle) = recv_type {
+        if matches!(handle.as_str(), "__DynOp__" | "__DynField__")
+            || (handle == "Dyn" && matches!(method, "get" | "has" | "keys" | "remove" | "len"))
+        {
+            let recv = lower_expr(receiver, cx, env);
+            let mut values = args.iter().map(|arg| lower_expr(&arg.expr, cx, env)).collect::<Vec<_>>();
+            let literal = |arg: &crate::AST::CallArg| match &arg.expr {
+                Expr::Str(parts, _) => parts.iter().map(|part| match part {
+                    StrPart::Lit(text) => text.as_str(), _ => "",
+                }).collect::<String>(),
+                _ => String::new(),
+            };
+            let location = crate::Codegen::TIR::capture_panic_loc(&method_span, cx, env);
+            let op = match method {
+                "__dyn_index_key" => {
+                    let site = literal(args.last().expect("checked Dyn site")); values.pop();
+                    THandleOp::DynIndexKey { site, location }
+                }
+                "__dyn_index_at" => {
+                    let site = literal(args.last().expect("checked Dyn site")); values.pop();
+                    THandleOp::DynIndexAt { site, location }
+                }
+                "__dyn_binary" | "__dyn_compare" => {
+                    let site = literal(&args[2]); let op = literal(&args[1]); values.truncate(1);
+                    if method == "__dyn_binary" { THandleOp::DynBinary { op, site, location } }
+                    else { THandleOp::DynCompare { op, site, location } }
+                }
+                "__dyn_set_path" => {
+                    let site = literal(args.last().expect("checked Dyn site"));
+                    let count = (args.len() - 2) / 2;
+                    let keys = (0..count).map(|i| matches!(args[i * 2].expr, Expr::Bool(true, _))).collect();
+                    let mut steps = (0..count).map(|i| values[i * 2 + 1].clone()).collect::<Vec<_>>();
+                    steps.push(values[args.len() - 2].clone()); values = steps;
+                    THandleOp::DynSetPath { keys, site, location }
+                }
+                "get" => if values[0].ty == Type::String { THandleOp::DynGetKey } else { THandleOp::DynGetAt },
+                "has" => THandleOp::DynHas,
+                "keys" => THandleOp::DynKeys,
+                "remove" => THandleOp::DynRemove,
+                "len" => {
+                    let end = cx.src.get(method_span.end..).and_then(|suffix| {
+                        let suffix = suffix.trim_start();
+                        suffix.strip_prefix('(').and_then(|tail| {
+                            let tail = tail.trim_start();
+                            tail.starts_with(')').then(|| {
+                                cx.src.len() - tail.len() + 1
+                            })
+                        })
+                    }).unwrap_or(method_span.end);
+                    let span = Span::new(receiver.span().start, end);
+                    THandleOp::DynLen {
+                        site: cx.src.get(span.start..span.end).unwrap_or("…").to_string(),
+                        location: crate::Codegen::TIR::capture_panic_loc(&span, cx, env),
+                    }
+                }
+                _ => return invariant_method_expr(method_span, "unknown checked Dyn operation"),
+            };
+            return TExpr {
+                ty: resolved_ret.cloned().expect("checked Dyn operation return"),
+                kind: TExprKind::HandleMethod { recv: Box::new(recv), op, args: values },
+            };
+        }
         if handle == "__SerdeEncode__" && method == "encode" && args.is_empty() {
             let recv = lower_expr(receiver, cx, env);
             return lower_serde_encode_node(recv, cx);

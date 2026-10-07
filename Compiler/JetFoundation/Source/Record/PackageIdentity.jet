@@ -20,18 +20,10 @@ pub struct PackageKeyDependency {
 }
 
 // Indexes of `names` in ascending UTF-8 byte order.
+// Rust: crates/jet-foundation/src/PackageIdentity.rs::source_digest
 fn package_key_byte_order(names: [String]) -> [Int] Never! {
-    order := [Int]{}
-    loop index in 0..<names.len() {
-        &order.push(index)
-        position := order.len() - 1
-        loop position > 0 && record_bytes_before(names[index].bytes(), names[order[position - 1]].bytes()) {
-            order[position] = order[position - 1]
-            order[position - 1] = index
-            position -= 1
-        }
-    }
-    order
+    bytes :: loop name in names -> name.bytes()
+    record_sorted_order(bytes)
 }
 
 // SHA-256 over the package's member files sorted by package-relative path,

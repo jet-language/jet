@@ -576,34 +576,46 @@ pub fn sema_ownership_finalize_references(state: &SemaOwnershipState, diagnostic
 }
 
 fn sema_ownership_recompute_reference_counts(state: &SemaOwnershipState) Never! {
+    positions := [String:Int]{}
     loop index in 0..<state.declarations.len() {
         state.declarations[index].references = 0
         state.declarations[index].writes = 0
+        key :: state.declarations[index].key
+        if positions.get(key) == None -> positions[key] = index
     }
     loop reference in state.references {
-        loop declaration_index in 0..<state.declarations.len() {
-            if state.declarations[declaration_index].key == reference.def_key {
-                state.declarations[declaration_index].references += 1
-                if reference.kind == SemaOwnershipReferenceKind.Write -> state.declarations[declaration_index].writes += 1
-                break
-            }
-        }
+        declaration_index :: positions.get(reference.def_key) ?? next
+        state.declarations[declaration_index].references += 1
+        if reference.kind == SemaOwnershipReferenceKind.Write -> state.declarations[declaration_index].writes += 1
+    }
+}
+
+// Exact reference anchor: definition key plus use span.
+fn sema_ownership_reference_anchor(reference: SemaOwnershipReference) -> String Never! {
+    "{reference.use_span.start}:{reference.use_span.end}:{reference.def_key}"
+}
+
+fn sema_ownership_reference_anchors(references: [SemaOwnershipReference]) -> [String:Bool] Never! {
+    anchors := [String:Bool]{}
+    loop reference in references -> anchors[sema_ownership_reference_anchor(reference)] = true
+    anchors
+}
+
+// Appends each reference whose anchor `anchors` does not hold yet.
+fn sema_ownership_admit_references(merged: &[SemaOwnershipReference], anchors: &[String:Bool], references: [SemaOwnershipReference]) Never! {
+    loop reference in references {
+        anchor :: sema_ownership_reference_anchor(reference)
+        if anchors.get(anchor) != None -> next
+        anchors[anchor] = true
+        &merged.push(reference)
     }
 }
 
 // Merge only reference anchors from a deferred body.  Moves and write windows
 // in a lambda body belong to the lambda's execution state, not construction.
 pub fn sema_ownership_merge_references(state: &SemaOwnershipState, deferred: SemaOwnershipState) Never! {
-    loop reference in deferred.references {
-        duplicate := false
-        loop existing in state.references {
-            if existing.def_key == reference.def_key && sema_ownership_span_same(existing.use_span, reference.use_span) {
-                duplicate = true
-                break
-            }
-        }
-        if !duplicate -> &state.references.push(reference)
-    }
+    anchors := sema_ownership_reference_anchors(state.references)
+    sema_ownership_admit_references(&state.references, &anchors, deferred.references)
     sema_ownership_recompute_reference_counts(&state)
 }
 
@@ -1881,7 +1893,20 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
             complete = false
             next
         }
-        if !sema_single_use_check_argument(state, callee, param.convention, arg.expr, scopes, &diagnostics) {
+        // Rust CallBinder `substitute_param_refs`: a default's reads of
+        // earlier parameters name the call's own slot temporaries, never a
+        // caller place, so those places take no part in the caller's checks.
+        binder_names :: loop reference in arg.flags.binder_refs -> reference.name
+        binder_rooted := false
+        places := [SemaOwnershipPlace]{}
+        loop place in sema_ownership_places_from_expr_in_state(arg.expr, scopes, &state) {
+            if binder_names.contains(place.root) {
+                binder_rooted = true
+                next
+            }
+            &places.push(place)
+        }
+        if !binder_rooted && !sema_single_use_check_argument(state, callee, param.convention, arg.expr, scopes, &diagnostics) {
             accepted = false
             next
         }
@@ -1914,7 +1939,6 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
                 else -> {}
             }
         }
-        places := sema_ownership_places_from_expr_in_state(arg.expr, scopes, &state)
         if places.len() > 0 && write_place_ok {
             loop actual in places {
                 if sema_ownership_call_access_conflict(accesses, actual, arg.convention) {
@@ -1922,8 +1946,10 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
                     &diagnostics.push(sema_ownership_diag_alias(sema_ownership_place_name(actual), arg.convention == AccessConvention.Write, arg.span))
                 }
             }
-            checked :: if arg.convention == AccessConvention.Write -> sema_ownership_check_write(&state, arg.expr, "be passed with write access", scopes, &diagnostics) else -> sema_ownership_check_use(&state, arg.expr, scopes, &diagnostics)
-            if !checked -> accepted = false
+            if !binder_rooted {
+                checked :: if arg.convention == AccessConvention.Write -> sema_ownership_check_write(&state, arg.expr, "be passed with write access", scopes, &diagnostics) else -> sema_ownership_check_use(&state, arg.expr, scopes, &diagnostics)
+                if !checked -> accepted = false
+            }
             if arg.convention != AccessConvention.Move || !sema_ownership_type_is_copy(param.ty ?? Type.Named{name: "Unit"}) {
                 loop place in places -> &accesses.push(SemaOwnershipCallAccess{place: place, access: arg.convention, span: arg.span})
             }
@@ -1946,7 +1972,7 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
                 }
             }
         }
-        if param.convention == AccessConvention.Move && arg.convention == AccessConvention.Move {
+        if param.convention == AccessConvention.Move && arg.convention == AccessConvention.Move && !binder_rooted {
             if !sema_ownership_mark_move(&state, arg.expr, scopes, "`{callee}`", &diagnostics) -> accepted = false
         }
         if mark_implicit_clone -> args[index].flags.implicit_clone = true
@@ -2413,25 +2439,17 @@ pub fn sema_ownership_join_paths(state: &SemaOwnershipState, before: SemaOwnersh
     if then_state.next_seq > state.next_seq -> state.next_seq = then_state.next_seq
     if else_state.next_seq > state.next_seq -> state.next_seq = else_state.next_seq
     state.declarations = base.declarations
+    declaration_keys := [String:Bool]{}
+    loop declaration in state.declarations -> declaration_keys[declaration.key] = true
     loop fact in then_state.declarations {
-        known := false
-        loop declaration in state.declarations {
-            if declaration.key == fact.key {
-                known = true
-                break
-            }
-        }
-        if !known -> &state.declarations.push(fact)
+        if declaration_keys.get(fact.key) != None -> next
+        declaration_keys[fact.key] = true
+        &state.declarations.push(fact)
     }
     loop fact in else_state.declarations {
-        known := false
-        loop declaration in state.declarations {
-            if declaration.key == fact.key {
-                known = true
-                break
-            }
-        }
-        if !known -> &state.declarations.push(fact)
+        if declaration_keys.get(fact.key) != None -> next
+        declaration_keys[fact.key] = true
+        &state.declarations.push(fact)
     }
 
     merged_moves := [SemaOwnershipMovedPlace]{}
@@ -2515,26 +2533,9 @@ pub fn sema_ownership_join_paths(state: &SemaOwnershipState, before: SemaOwnersh
     }
     state.views = merged_views
     merged_references := base.references
-    loop reference in then_state.references {
-        duplicate := false
-        loop merged in merged_references {
-            if merged.def_key == reference.def_key && sema_ownership_span_same(merged.use_span, reference.use_span) {
-                duplicate = true
-                break
-            }
-        }
-        if !duplicate -> &merged_references.push(reference)
-    }
-    loop reference in else_state.references {
-        duplicate := false
-        loop merged in merged_references {
-            if merged.def_key == reference.def_key && sema_ownership_span_same(merged.use_span, reference.use_span) {
-                duplicate = true
-                break
-            }
-        }
-        if !duplicate -> &merged_references.push(reference)
-    }
+    anchors := sema_ownership_reference_anchors(merged_references)
+    sema_ownership_admit_references(&merged_references, &anchors, then_state.references)
+    sema_ownership_admit_references(&merged_references, &anchors, else_state.references)
     state.references = merged_references
     sema_ownership_recompute_reference_counts(&state)
 }

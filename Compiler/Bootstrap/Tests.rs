@@ -2743,27 +2743,31 @@ struct BackendShard {
     cold: bool,
 }
 
-/// An emitted program split along its unit sections (MIRRust
-/// `EmissionUnits`): the exported `jet_runtime` crate, the unit crates in
-/// dependency order, and the main crate — everything outside the sections
-/// (Host/Runner glue, the embedded compiler image, the artifact main).
+/// An emitted program split into crates: the exported `jet_runtime` crate
+/// (its runtime/Core block), the crates of its unit sections (MIRRust
+/// `EmissionUnits`) in dependency order, and the main crate — everything
+/// outside the sections (Host/Runner glue, the embedded compiler image, the
+/// artifact main).
 struct BackendWorkspace {
     runtime_lib: String,
     units: Vec<BackendUnit>,
     main: String,
 }
 
-/// Split a unit-marked backend source into crates. Unit dependencies come
-/// from the names each unit's text actually uses (every program item is a
-/// unique `__jet_` symbol); units that name each other cyclically merge into
-/// one crate. `None` when the source has no unit sections.
+/// Split a backend source into crates, as `jet_store::runtime::prepare`
+/// splits a real build: the runtime/Core block always builds as its own
+/// crate, so programs with the same block share one built runtime. Unit
+/// dependencies come from the names each unit's text actually uses (every
+/// program item is a unique `__jet_` symbol); units that name each other
+/// cyclically merge into one crate. A source without unit sections has no
+/// unit crates. `None` when the source has no runtime block.
 fn split_backend_workspace(source: &str) -> Option<BackendWorkspace> {
-    if !source.contains(UNIT_BEGIN_MARKER) {
+    let Some(split) = jet_store::runtime::split_runtime_crate(source)
+        .unwrap_or_else(|error| panic!("backend source: {error}"))
+    else {
+        assert!(!source.contains(UNIT_BEGIN_MARKER), "unit-split backend source has no runtime block");
         return None;
-    }
-    let split = jet_store::runtime::split_runtime_crate(source)
-        .unwrap_or_else(|error| panic!("unit-split backend source: {error}"))
-        .unwrap_or_else(|| panic!("unit-split backend source has no runtime block"));
+    };
     let mut sections: Vec<(String, String)> = Vec::new();
     let mut main = String::new();
     let mut open: Option<usize> = None;
@@ -3037,22 +3041,30 @@ fn strongly_connected_units(edges: &[BTreeSet<usize>]) -> Vec<Vec<usize>> {
 
 /// Write the runtime and unit crates under `units_root`; returns the main
 /// manifest's dependency rows for them. Every crate may name the FFI bridge,
-/// so each depends on it. Files are rewritten only when their bytes change,
-/// so cargo keeps unchanged crates built.
+/// so each depends on it. The runtime crate's directory is named by the
+/// digest of its source and bridge row, so programs that alternate between
+/// runtime/Core blocks (their runtime parts differ) each keep their built
+/// runtime instead of rewriting one directory. Files are rewritten only when
+/// their bytes change, so cargo keeps unchanged crates built.
 fn write_backend_workspace(
     units_root: &Path,
     workspace: &BackendWorkspace,
     ffi: Option<&BackendFfiCrate>,
 ) -> String {
     let ffi_dependency = ffi.map_or_else(String::new, BackendFfiCrate::dependency);
-    let runtime_dir = units_root.join("jet_runtime");
+    let runtime_digest = jet_foundation::SHA256::sha256_hex(
+        format!("{ffi_dependency}\0{}", workspace.runtime_lib).as_bytes(),
+    );
+    let runtime_dir_name = format!("jet_runtime_{}", &runtime_digest[..16]);
+    let runtime_dir = units_root.join(&runtime_dir_name);
     write_backend_crate(&runtime_dir, "jet_runtime", &[], &ffi_dependency, &workspace.runtime_lib);
     let mut dependencies = format!("jet_runtime = {{ path = {:?} }}\n", runtime_dir.display().to_string());
+    // Unit and shard crates name the runtime by its digest directory.
+    let unit_extra_dependencies = format!("jet_runtime = {{ path = \"../{runtime_dir_name}\" }}\n{ffi_dependency}");
     for unit in &workspace.units {
         let dir = units_root.join(&unit.crate_name);
-        let mut deps = vec!["jet_runtime".to_string()];
-        deps.extend(unit.deps.iter().cloned());
-        write_backend_crate(&dir, &unit.crate_name, &deps, &ffi_dependency, &unit.source);
+        let mut deps = unit.deps.clone();
+        write_backend_crate(&dir, &unit.crate_name, &deps, &unit_extra_dependencies, &unit.source);
         dependencies.push_str(&format!(
             "{} = {{ path = {:?} }}\n",
             unit.crate_name,
@@ -3061,7 +3073,7 @@ fn write_backend_workspace(
         deps.push(unit.crate_name.clone());
         for shard in &unit.shards {
             let dir = units_root.join(&shard.name);
-            write_backend_crate(&dir, &shard.name, &deps, &ffi_dependency, &shard.source);
+            write_backend_crate(&dir, &shard.name, &deps, &unit_extra_dependencies, &shard.source);
             dependencies.push_str(&format!("{} = {{ path = {:?} }}\n", shard.name, dir.display().to_string()));
         }
     }
@@ -3152,7 +3164,7 @@ fn shard_unit(text: &str, shard_bytes: usize) -> Option<ShardedUnit> {
     if text.len() <= shard_bytes {
         return None;
     }
-    let mask = jet_store::runtime::rust_code_mask(text);
+    let mask = jet_foundation::RustSource::rust_code_mask(text);
     let (items, end) = masked_items(&mask);
     let mut facade = String::new();
     let mut uses = String::new();
@@ -3465,7 +3477,7 @@ fn delegated_method(
         &method[body..]
     );
     let function = replace_self_tokens(&function, self_type);
-    let moved = movable_function(&function, &jet_store::runtime::rust_code_mask(&function))?;
+    let moved = movable_function(&function, &jet_foundation::RustSource::rust_code_mask(&function))?;
     let call = format!("{{ {function_name}({}) }}", arguments.join(", "));
     Some((format!("{}{call}", &method[..body]), moved))
 }
@@ -3473,7 +3485,7 @@ fn delegated_method(
 /// `text` with its code tokens `self` renamed `__jet_self` and `Self`
 /// replaced by `self_type`.
 fn replace_self_tokens(text: &str, self_type: &str) -> String {
-    let code = jet_store::runtime::rust_code_mask(text);
+    let code = jet_foundation::RustSource::rust_code_mask(text);
     let bytes = code.as_bytes();
     let identifier = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
     let mut out = String::with_capacity(text.len());
@@ -3547,10 +3559,19 @@ fn backend_workspace_orders_units_and_merges_cycles() {
     assert!(!workspace.main.contains("__jet_alpha"));
 }
 
-/// A program without unit sections stays one crate.
+/// A program without unit sections still links its runtime/Core block as
+/// the separate `jet_runtime` crate (shared by every program with the same
+/// block); a source without a runtime block stays one crate.
 #[test]
-fn backend_workspace_needs_unit_sections() {
-    assert!(split_backend_workspace("// jet:cached-runtime-begin\nfn f() {}\n// jet:cached-runtime-end\nfn main() {}\n").is_none());
+fn backend_workspace_splits_runtime_without_unit_sections() {
+    let workspace = split_backend_workspace("// jet:cached-runtime-begin\nfn f() {}\n// jet:cached-runtime-end\nfn main() { f(); }\n")
+        .expect("runtime block split");
+    assert!(workspace.units.is_empty());
+    assert!(workspace.runtime_lib.contains("pub fn f()"));
+    assert!(workspace.main.contains("use jet_runtime::*;\n"));
+    assert!(workspace.main.ends_with("fn main() { f(); }\n"));
+    assert!(!workspace.main.contains("fn f()"));
+    assert!(split_backend_workspace("fn main() {}\n").is_none());
 }
 
 /// `shard_unit` packs cold code (cold-trait impl methods, constant tables,
@@ -3667,10 +3688,11 @@ fn write_backend_project(
     fs::write(&generated_path, source).unwrap_or_else(|error| {
         panic!("cannot write backend source `{}`: {error}", generated_path.display())
     });
-    // A unit-split program builds as a workspace: the runtime crate and one
-    // crate per unit live in a stable directory per artifact (outside the
-    // repository's cargo workspace), rewritten only when their bytes change,
-    // so unchanged crates stay built across runs.
+    // A program with a runtime block builds as a workspace: the runtime
+    // crate and one crate per unit live in a stable directory per artifact
+    // (outside the repository's cargo workspace), rewritten only when their
+    // bytes change, so unchanged crates stay built across runs and programs
+    // that share a runtime/Core block share its built crate.
     let (main_source, unit_dependencies, unit_profiles) = match split_backend_workspace(source) {
         Some(workspace) => {
             let units_root = home_path()

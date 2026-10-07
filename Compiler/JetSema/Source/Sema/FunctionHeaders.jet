@@ -12,7 +12,6 @@ use jet_foundation.[
     NamedType,
     Span,
     Stmt,
-    Type,
 ]
 
 pub struct SemaFunctionHeaderMarkerGate {
@@ -180,8 +179,13 @@ pub fn sema_function_header_supported(function: Func, context: &SemaCheckContext
         sema_check_unsupported(&context, "the external method header `fn Type.{function.name}` is not normalized into an impl by the self-hosted checker yet")
         supported = false
     }
+    // D-FFI-INLINE1=A (Rust `check_fn`): an `#FFI(<lang>)` body is foreign
+    // source, never Jet statements. The registration foreign stage validates
+    // it (E3220/E3215/E3222/E3102/E3223) and calls bind to its checked foreign
+    // row, so the module loops never send it here; any other route has no Jet
+    // body to produce.
     if function.inline_foreign != None {
-        sema_check_unsupported(&context, "the inline foreign (`#FFI`) body of `{function.name}` is not checked by the self-hosted checker yet")
+        sema_check_unsupported(&context, "the inline foreign (`#FFI`) function `{function.name}` has no Jet body; calls bind to its checked foreign row, so it cannot be checked or run as a Jet function")
         supported = false
     }
     if function.is_reactive {
@@ -210,32 +214,16 @@ pub fn sema_function_header_supported(function: Func, context: &SemaCheckContext
     supported
 }
 
-fn sema_function_header_inline_scalar(ty: Type, asm: Bool) -> Bool Never! {
-    if ty == {
-        .Int -> true
-        .IntN(_, bits) -> bits == 8 || bits == 16 || bits == 32 || bits == 64
-        .InlineRange(_, _, _) -> true
-        .Float | .Float32 | .Bool -> !asm
-        .Named(name) -> !asm && name == "Unit"
-        else -> false
-    }
-}
-
-fn sema_function_header_inline_asm_return(ty: Type) -> Bool Never! {
-    is_unit :: if ty == {
-        .Named(name) -> name == "Unit"
-        else -> false
-    }
-    if is_unit {
-        return true
-    }
-    sema_function_header_inline_scalar(ty, true)
-}
-
+// Rust `core_imports.values().any(|m| m == "core.mem")`: `use core.mem` parses
+// as the unqualified member `mem` of `core`, so the imported module path is
+// the alias joined with the member; `use core.mem.[...]` names it directly.
 fn sema_function_header_inline_has_core_mem(module_row: SemaRegistrationModule) -> Bool Never! {
     loop declaration in module_row.program.imports {
         has_core_mem :: if declaration.kind == {
-            .Module(name, _) | .Unqualified(name, _, _, _, _) -> name == "core.mem"
+            .Module(name, _) -> name == "core.mem"
+            .Unqualified(module_alias, _, items, _, _) -> module_alias == "core.mem" || (loop item in items {
+                if "{module_alias}.{item.original}" == "core.mem" -> break true
+            } ?? false)
             else -> false
         }
         if has_core_mem {
@@ -243,39 +231,6 @@ fn sema_function_header_inline_has_core_mem(module_row: SemaRegistrationModule) 
         }
     }
     false
-}
-
-pub fn sema_function_header_check_inline_foreign(function: Func, module_row: SemaRegistrationModule, unsafe_gate_valid: Bool, diagnostics: &[Diagnostic]) -> Bool {
-    inline :: function.inline_foreign ?? return true
-    if inline.lang != "c" && inline.lang != "cpp" && inline.lang != "asm" {
-        &diagnostics.push(sema_error("E3220", inline.lang_span, "no inline foreign binder for `{inline.lang}` yet", "the inline foreign tier ships `c`, `cpp`, and `asm` first (the systems floor, card #501); other languages arrive on later polyglot cards", "use `#FFI(c)`, `#FFI(cpp)`, or `#FFI(asm)`"))
-        return false
-    }
-    if !function.is_unsafe {
-        &diagnostics.push(sema_error("E3215", inline.marker_span, "`#FFI({inline.lang})` needs an `#Unsafe(\"reason\")` gate", "`{inline.lang}` is an unsafe foreign language — an inline `{inline.lang}` body can break memory safety, so Jet requires you to state why it is sound to call (I1/S58)", "add the gate: `#Unsafe(\"…\") #FFI({inline.lang}) fn …`"))
-        return false
-    }
-    asm :: inline.lang == "asm"
-    scalar_valid := function.type_params.len() == 0
-    loop parameter in function.params {
-        if !sema_function_header_inline_scalar(parameter.ty, asm) -> scalar_valid = false
-    }
-    if function.return_type == .Val(return_type) {
-        return_scalar :: if asm -> sema_function_header_inline_asm_return(return_type) else -> sema_function_header_inline_scalar(return_type, false)
-        if !return_scalar -> scalar_valid = false
-    }
-    if !scalar_valid {
-        message :: if asm -> "`#FFI(asm)` has a signature its register binder can't represent" else -> "`#FFI({inline.lang})` has a signature its binder can't represent"
-        explanation :: if asm -> "the audited assembly bridge uses general-purpose integer registers; floats and Bool need explicit conversion in Jet before the boundary" else -> "inline foreign contracts are ABI boundaries; this systems tier accepts concrete integer, float, and Bool values only"
-        suggestion :: if asm -> "use Int or I8/I16/I32/I64/U8/U16/U32/U64 parameters and return values" else -> "replace generic, collection, String, callback, or user-defined values with an explicit scalar ABI contract"
-        &diagnostics.push(sema_error("E3222", function.name_span, message, explanation, suggestion))
-        return false
-    }
-    if asm && !sema_function_header_inline_has_core_mem(module_row) {
-        &diagnostics.push(sema_error("E3102", inline.marker_span, "inline assembly is part of the low-level memory tier", "assembly can read registers and memory outside Jet's safe value model, so discovery requires the explicit `core.mem` opt-in", "add `use core.mem` at the top of this file"))
-        return false
-    }
-    !asm && unsafe_gate_valid
 }
 
 // D-ANY-JAI1 (Rust `check_variadic_bound_body_shape`, E1314): a

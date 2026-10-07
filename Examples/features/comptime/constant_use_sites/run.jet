@@ -1,0 +1,28 @@
+// An immutable module constant with a known value is copied into each place
+// that reads it: a number, text, or a small record becomes a literal at the
+// use site, in this file or another one, so no accessor runs and the
+// optimizer can fold further. A table such as `POOL` is read through one
+// shared item instead. `#Static` keeps one addressable item that every read
+// goes through; `#Inline` copies even a table into its use sites
+// (D-CONSTMARK1).
+use "limits"
+use limits.[PAGE, GREETING, ORIGIN, POOL]
+
+STEP :: 8
+#Static LIMIT :: prep { 10 }
+#Inline PAIR :: prep { [Int]{3, 5} }
+
+fn round_up(size: Int) -> Int {
+    size + (PAGE - size % PAGE) % PAGE
+}
+
+fn run() {
+    print(round_up(5000))
+    print(GREETING)
+    print(ORIGIN.x * ORIGIN.y)
+    total := 0
+    loop reg in POOL -> total += reg
+    print(total)
+    print(LIMIT + STEP)
+    print(PAIR[0] + PAIR[1])
+}

@@ -411,14 +411,11 @@ fn pkg_mcp_ensure_depth(value: Dyn, depth: Int, maximum: Int) McpCodecError! {
     }
 }
 
-// Every number is finite and every lexical number is valid JSON.
+// Every JSON number is finite; Bytes and DateTime render as canonical text.
 fn pkg_mcp_ensure_encodable(value: Dyn) McpCodecError! {
     if value == {
         .Float(number) -> {
             if number - number != 0.0 -> return Err(McpCodecError.InvalidMessage("JSON numbers must be finite"))
-        }
-        .Number(text) -> {
-            if !pkg_mcp_valid_json_number(text) -> return Err(McpCodecError.InvalidMessage("JSON number is invalid"))
         }
         .Array(items) -> {
             loop item in items -> pkg_mcp_ensure_encodable(item)
@@ -430,56 +427,6 @@ fn pkg_mcp_ensure_encodable(value: Dyn) McpCodecError! {
     }
 }
 
-// RFC 8259 number grammar; an integer must fit Int and a float be finite.
-fn pkg_mcp_valid_json_number(value: String) -> Bool Never! {
-    bytes :: value.bytes()
-    index := 0
-    if pkg_bytes_code(bytes, index) == 45 -> index += 1
-    lead :: pkg_bytes_code(bytes, index)
-    if {
-        lead == 48 -> {
-            index += 1
-            if pkg_mcp_is_digit(pkg_bytes_code(bytes, index)) -> return false
-        }
-        lead >= 49 && lead <= 57 -> {
-            loop pkg_mcp_is_digit(pkg_bytes_code(bytes, index)) -> index += 1
-        }
-        else -> return false
-    }
-    floating := false
-    if pkg_bytes_code(bytes, index) == 46 {
-        floating = true
-        index += 1
-        start :: index
-        loop pkg_mcp_is_digit(pkg_bytes_code(bytes, index)) -> index += 1
-        if index == start -> return false
-    }
-    exponent :: pkg_bytes_code(bytes, index)
-    if exponent == 101 || exponent == 69 {
-        floating = true
-        index += 1
-        sign :: pkg_bytes_code(bytes, index)
-        if sign == 43 || sign == 45 -> index += 1
-        start :: index
-        loop pkg_mcp_is_digit(pkg_bytes_code(bytes, index)) -> index += 1
-        if index == start -> return false
-    }
-    if index != bytes.len() -> return false
-    if floating {
-        if Float.parse(value) == {
-            .Ok(number) -> return number - number == 0.0
-            .Err(_) -> return false
-        }
-    }
-    if Int.parse(value) == {
-        .Ok(_) -> true
-        .Err(_) -> false
-    }
-}
-
-fn pkg_mcp_is_digit(code: Int) -> Bool Never! {
-    code >= 48 && code <= 57
-}
 
 fn pkg_mcp_sorted(values: [String]) -> [String] Never! {
     out := values

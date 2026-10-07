@@ -413,8 +413,31 @@ impl<'a> Checker<'a> {
             Expr::Index { base, .. } => match self.compound_expr_type(base)? {
                 Type::List(elem) | Type::FixedList { elem, .. } => Some(*elem),
                 Type::Map { value, .. } => Some(*value),
+                ty if crate::Sema::CheckerCoreLib::is_dyn_type(&ty) => Some(ty),
                 _ => None,
             },
+            _ => None,
+        }
+    }
+
+    fn dyn_write_path(&self, expr: &Expr) -> Option<(Expr, Vec<(Option<String>, Expr)>)> {
+        match expr {
+            Expr::Field(base, field, span)
+                if self.compound_expr_type(base).as_ref().is_some_and(crate::Sema::CheckerCoreLib::is_dyn_type) =>
+            {
+                let (root, mut steps) = self.dyn_write_path(base)?;
+                steps.push((Some(field.clone()), Expr::Str(vec![crate::AST::StrPart::Lit(field.clone())], *span)));
+                Some((root, steps))
+            }
+            Expr::Index { base, index, .. }
+                if self.compound_expr_type(base).as_ref().is_some_and(crate::Sema::CheckerCoreLib::is_dyn_type) =>
+            {
+                let (root, mut steps) = self.dyn_write_path(base)?;
+                steps.push((None, *index.clone()));
+                Some((root, steps))
+            }
+            _ if self.compound_expr_type(expr).as_ref().is_some_and(crate::Sema::CheckerCoreLib::is_dyn_type) =>
+                Some((expr.clone(), Vec::new())),
             _ => None,
         }
     }
@@ -439,6 +462,11 @@ impl<'a> Checker<'a> {
     }
 
     fn compound_field_type(&self, base: &Expr, field: &str) -> Option<Type> {
+        if let Some(ty) = self.compound_expr_type(base) {
+            if crate::Sema::CheckerCoreLib::is_dyn_type(&ty) {
+                return Some(ty);
+            }
+        }
         let owner = self.compound_expr_type(base)?;
         self.compound_owner_field_type(&owner, field)
     }
@@ -1224,6 +1252,63 @@ impl<'a> Checker<'a> {
             self.fx_memory_unbounded_control.push(*span);
             for region in &mut self.memory_policy_stack {
                 region.unbounded_control.push(*span);
+            }
+        }
+        if let Stmt::Assign { target, op: None, value, .. } = stmt {
+            let place = match &*target {
+                LValue::Field { base, field, span } => Some(Expr::Field(base.clone(), field.clone(), *span)),
+                LValue::Index { base, index, span, kind } => Some(Expr::Index {
+                    base: base.clone(), index: index.clone(), span: *span, kind: kind.clone(),
+                }),
+                _ => None,
+            };
+            if let Some(place) = place {
+                if let Some((mut root, steps)) = self.dyn_write_path(&place) {
+                    if !steps.is_empty() {
+                        let span = place.span();
+                        self.check_lvalue_change(target, "be assigned");
+                        if let Some(name) = expr_root_ident(&root) { self.mark_local_write(name); }
+                        let mut args = Vec::with_capacity(steps.len() * 2 + 2);
+                        let saved = self.expected_type.take();
+                        self.borrow_ctx = true;
+                        if self.infer(&mut root).is_none() {
+                            self.expected_type = saved;
+                            return;
+                        }
+                        for (field, mut step) in steps {
+                            if let Some(field) = field {
+                                if crate::Sema::CheckerCoreLib::dyn_member(&field) {
+                                    self.diags.push(Diagnostic::error("E0171",
+                                        format!("`{field}` is a `Dyn` method, not a field"),
+                                        "Dyn member names are reserved for methods".to_string(),
+                                        format!("use indexing, for example `d[\"{field}\"]`"), Some(span)));
+                                    self.expected_type = saved;
+                                    return;
+                                }
+                            }
+                            let Some(ty) = self.infer(&mut step) else {
+                                self.expected_type = saved; return;
+                            };
+                            if ty != Type::String && ty != Type::Int {
+                                self.diags.push(Diagnostic::error("E0505",
+                                    format!("Dyn index must be String or Int, not {}", ty.show()),
+                                    "Dyn indexes object keys and array positions".to_string(),
+                                    "use a String key or an Int index".to_string(), Some(step.span())));
+                                self.expected_type = saved; return;
+                            }
+                            args.push(Expr::Bool(ty == Type::String, span));
+                            args.push(step);
+                        }
+                        let result = self.infer_with_expected(value, &Type::Named("Dyn".to_string()));
+                        self.expected_type = saved;
+                        if result.is_none() { return; }
+                        args.push(std::mem::replace(value, Expr::Absent(span)));
+                        args.push(self.dyn_site(span));
+                        *stmt = Stmt::Expr(crate::Sema::CheckerCoreLib::dyn_call(root,
+                            "__dyn_set_path", args, Type::Named("Unit".to_string()), span));
+                        return;
+                    }
+                }
             }
         }
         if let Stmt::Assign {

@@ -2412,7 +2412,7 @@ fn standalone_outcome_runtime() -> String {
 /// through `crate::`/`super::`, so they stay at the bridge crate root.
 #[doc(hidden)]
 pub fn crypto_bridge_root_modules() -> String {
-    let mut out = String::new();
+    let mut out = "use jet_foundation::Numeric;\n".to_string();
     for (name, source) in [
         ("jet_encoding_errors", ENCODING_ERRORS_RUNTIME),
         ("jet_json_number", JSON_NUMBER_RUNTIME),
@@ -2879,6 +2879,7 @@ fn build_bridge_full(
         );
     }
     if needs_crypto {
+        deps.insert("jet-foundation".to_string(), JET_FOUNDATION_CRATE_PATH.to_string());
         deps.insert(
             AES_GCM_CRATE_SPEC.0.to_string(),
             AES_GCM_CRATE_SPEC.1.to_string(),
@@ -2926,7 +2927,7 @@ fn build_bridge_full(
             JET_FOUNDATION_CRATE_PATH.to_string(),
         );
     }
-    let foundation_sources = if needs_parquet || needs_plugin {
+    let foundation_sources = if needs_parquet || needs_plugin || needs_crypto {
         Some(jet_foundation_sources().map_err(|error| tool_error(&error))?)
     } else {
         None

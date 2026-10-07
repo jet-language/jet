@@ -1,6 +1,7 @@
 // Sema emits the shared Lexer Diagnostic value; it does not define a second
 // diagnostic payload or rebase the aggregate UTF-8 byte spans.
 use jet_foundation.[
+    DIAGNOSTIC_ERROR,
     Diagnostic,
     Span,
     Type,
@@ -102,6 +103,13 @@ pub fn sema_diagnostic_with_source_location(diagnostic: ^Diagnostic, segments: [
             return updated
         }
     }
+    // Compiler-generated source has no author to edit it: its diagnostic keeps
+    // the report but proposes no source edit (the codec rejects one).
+    if location.origin == SemaSourceOrigin.CompilerGenerated {
+        updated.edit = None
+        updated.applicability = None
+        updated.safety = None
+    }
     if updated.source_path != None {
         if updated.source_path != Val(location.source_path) || updated.source_offset != Val(location.aggregate_start) || updated.source_start != Val(location.source_start) {
             updated.source_path = None
@@ -119,6 +127,15 @@ pub fn sema_attach_diagnostic_source_locations(diagnostics: &[Diagnostic], start
     }
 }
 
+
+// Whether any diagnostic from `start` on is an error. Completeness follows
+// errors only: a warning-only module still lowers and emits.
+pub fn sema_has_error_since(diagnostics: [Diagnostic], start: Int) -> Bool Never! {
+    loop index in start..<diagnostics.len() {
+        if diagnostics[index].severity == DIAGNOSTIC_ERROR -> return true
+    }
+    false
+}
 pub fn sema_source_line_at(segments: [SemaSourceSegment], site: Span) -> Int? {
     loop segment in segments {
         if site.start >= segment.generated.start && site.start < segment.generated.end {

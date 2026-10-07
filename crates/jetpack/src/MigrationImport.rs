@@ -445,15 +445,9 @@ fn nix_json_value(value: &Dyn) -> String {
         Dyn::Int(value) => value.to_string(),
         Dyn::Float(value) => value.to_string(),
         Dyn::Number(value) => value.clone(),
-        Dyn::Text(value) | Dyn::TypedText(value) => JSON::quote(value),
-        Dyn::Bytes(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(u8::to_string)
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
+        Dyn::Text(value) => JSON::quote(value),
+        Dyn::Bytes(values) => JSON::quote(&Dyn::bytes_text(values)),
+        Dyn::DateTime(value) => JSON::quote(&value.to_rfc3339()),
         Dyn::Array(values) => format!(
             "[{}]",
             values
@@ -477,7 +471,7 @@ fn nix_import_package(
     value: &Dyn,
 ) -> Option<(String, String, String, Option<String>, bool)> {
     let (name, source, version, revision, digest, reference) = match value {
-        Dyn::Text(raw) | Dyn::TypedText(raw) => {
+        Dyn::Text(raw) => {
             let raw = raw.trim();
             if raw.is_empty() {
                 return None;
@@ -832,7 +826,7 @@ pub fn import_npm(package_json: &str) -> ImportPlan {
     {
         if !bundled.is_empty() {
             for (index, value) in bundled.iter().enumerate() {
-                if !matches!(value, Dyn::Text(_) | Dyn::TypedText(_)) {
+                if !matches!(value, Dyn::Text(_)) {
                     plan.record_provider_finding(
                         "package.json".to_string(),
                         format!(

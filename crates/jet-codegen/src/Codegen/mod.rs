@@ -653,6 +653,7 @@ fn push_foundation_facade(out: &mut String, include_arrow: bool) {
         };
         out.push_str(&format!("    pub mod {module} {{ pub use {target}::*; }}\n"));
     }
+    out.push_str("    pub mod base_encoding_strict { pub use crate::jet_base_encoding_strict::*; }\n");
     out.push_str("}\n");
 }
 
@@ -1832,11 +1833,12 @@ fn jet_prop_trace_sample(engine: &str, case_index: u64, seed: u64, input: &str) 
 /// encoding kernels, and let `jet_std` re-export that same type below.
 const DYN_FOUNDATION_ROOT: &str = concat!(
     "\n// D-SERDE2: the generated Prelude uses Foundation's canonical carrier.\n",
+    "use jet_foundation::Numeric;\n",
     "mod jet_foundation_dyn {\n",
     include_str!("../../../jet-foundation/src/Dyn.rs"),
     "\n}\n",
     "#[allow(non_snake_case)]\nmod Dyn {\n",
-    "    pub use crate::jet_foundation_dyn::Dyn;\n",
+    "    pub use crate::jet_foundation_dyn::{Dyn, DynDateTime};\n",
     "}\n",
 );
 
@@ -1932,6 +1934,7 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     // below, the Cranelift host, and the TIR evaluator cannot drift (I9).
     DYN_PRELUDE_REEXPORT,
     include_str!("../Prelude/CoreLib/JetStd/Dyn.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/DynRuntime.rs"),
     include_str!("../Prelude/CoreLib/JetStd/TestingComparison.rs"),
     "\njet_dyn_decode_helpers!();\n",
     // `EncodingStream.rs` validates exact JSON number tokens through

@@ -35,7 +35,7 @@ fn jet_args_decode<T: __jet_Decode>(
 fn jet_args_shape_value_to_dyn(value: JetArgsShapeValue) -> jet_std::Dyn {
     match value {
         JetArgsShapeValue::Bool(value) => jet_std::Dyn::Bool(value),
-        JetArgsShapeValue::Int(value) => jet_std::Dyn::Int(value),
+        JetArgsShapeValue::Int(value) => jet_std::Dyn::Int((value).into()),
         JetArgsShapeValue::Float(value) => jet_std::Dyn::Float(value),
         JetArgsShapeValue::Text(value) => jet_std::Dyn::Text(value),
         JetArgsShapeValue::Array(values) => jet_std::Dyn::Array(

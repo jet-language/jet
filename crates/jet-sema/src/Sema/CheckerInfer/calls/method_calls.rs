@@ -6902,6 +6902,9 @@ impl<'a> Checker<'a> {
         if let Type::Named(ref tn) = recv_ty {
             if is_json_type_name(tn) {
                 if let Some(ret) = dyn_method_return(method, args.len()) {
+                    if method == "remove" {
+                        self.check_mutating_method_receiver(receiver, method, span);
+                    }
                     let json_ret = match ret {
                         Type::Result { ok, err } => Type::Result {
                             ok: if matches!(*ok, Type::Named(ref n) if n == "Dyn") {
@@ -6913,20 +6916,31 @@ impl<'a> Checker<'a> {
                         },
                         other => other,
                     };
+                    let saved = self.expected_type.take();
                     for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
+                        let expected = match method {
+                            "has" | "remove" | "field" => Some(Type::String),
+                            "at" => Some(Type::Int),
+                            "equal_unordered" => Some(json_ty()),
+                            _ => None,
+                        };
+                        let got = match expected.as_ref() {
+                            Some(want) => self.infer_with_expected(&mut a.expr, want),
+                            None => self.infer(&mut a.expr),
+                        };
+                        if let (Some(want), Some(got)) = (expected.as_ref(), got.as_ref()) {
+                            self.check_type_assignable(want, got, a.span);
+                        }
+                        if method == "get" && got.as_ref().is_some_and(|ty| *ty != Type::String && *ty != Type::Int) {
+                            self.diags.push(Diagnostic::error("E0505",
+                                "Dyn.get requires a String key or Int index".to_string(),
+                                "Dyn reads object keys and array positions".to_string(),
+                                "use a String or Int".to_string(), Some(a.span)));
+                        }
                     }
-                    *recv_type_out = Some(tn.clone());
-                    return Some(json_ret);
-                }
-            }
-            if tn == "Dyn" {
-                if let Some(ret) = dyn_method_return(method, args.len()) {
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
-                    }
+                    self.expected_type = saved;
                     *recv_type_out = Some("Dyn".to_string());
-                    return Some(ret);
+                    return Some(json_ret);
                 }
             }
             // D-DBDRIVER1: accessor methods on `DBValue` (`.int()`/`.text()`/

@@ -728,7 +728,7 @@ fn dap_response(output: &str, request_seq: u32, command: &str) -> Option<String>
         };
         let type_name = json_get(&value, "type").and_then(json_str);
         let actual_request_seq = match json_get(&value, "request_seq") {
-            Some(Dyn::Int(value)) => Some(*value),
+            Some(Dyn::Int(value)) => value.to_i64(),
             _ => None,
         };
         let success = json_get(&value, "success");

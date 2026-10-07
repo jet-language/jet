@@ -77,7 +77,7 @@ fn jet_xml_to_dyn(value: crate::jet_xml_pull::Value) -> jet_std::Dyn {
     match value {
         crate::jet_xml_pull::Value::Null => jet_std::Dyn::Null,
         crate::jet_xml_pull::Value::Bool(value) => jet_std::Dyn::Bool(value),
-        crate::jet_xml_pull::Value::Int(value) => jet_std::Dyn::Int(value),
+        crate::jet_xml_pull::Value::Int(value) => jet_std::Dyn::Int((value).into()),
         crate::jet_xml_pull::Value::Text(value) => jet_std::Dyn::Text(value),
         crate::jet_xml_pull::Value::Array(values) => jet_std::Dyn::Array(
             values.into_iter().map(jet_xml_to_dyn).collect(),
@@ -95,10 +95,9 @@ fn jet_xml_from_dyn(value: &jet_std::Dyn) -> Result<crate::jet_xml_pull::Value, 
     match value {
         jet_std::Dyn::Null => Ok(crate::jet_xml_pull::Value::Null),
         jet_std::Dyn::Bool(value) => Ok(crate::jet_xml_pull::Value::Bool(*value)),
-        jet_std::Dyn::Int(value) => Ok(crate::jet_xml_pull::Value::Int(*value)),
-        jet_std::Dyn::Number(_) | jet_std::Dyn::TypedText(_) => {
-            Err("internal JSON carrier escaped typed decode".to_string())
-        }
+        jet_std::Dyn::Int(value) => value.to_i64().map(crate::jet_xml_pull::Value::Int)
+            .ok_or_else(|| jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, 0, 1, 1, "XML integer is outside I64")),
+        jet_std::Dyn::Number(text) => Ok(crate::jet_xml_pull::Value::Text(text.clone())),
         jet_std::Dyn::Text(value) => Ok(crate::jet_xml_pull::Value::Text(value.clone())),
         jet_std::Dyn::Array(values) => Ok(crate::jet_xml_pull::Value::Array(
             values
@@ -112,8 +111,8 @@ fn jet_xml_from_dyn(value: &jet_std::Dyn) -> Result<crate::jet_xml_pull::Value, 
                 .map(|(key, value)| Ok((key.clone(), jet_xml_from_dyn(value)?)))
                 .collect::<Result<Vec<_>, String>>()?,
         )),
-        jet_std::Dyn::Float(_) | jet_std::Dyn::Bytes(_) => {
-            Err("XML tree cannot contain Float or Bytes values".to_string())
+        jet_std::Dyn::Float(_) | jet_std::Dyn::Bytes(_) | jet_std::Dyn::DateTime(_) => {
+            Err("XML tree cannot contain Float, Bytes or DateTime values".to_string())
         }
     }
 }
@@ -364,57 +363,12 @@ fn jet_enc_xml_decode_bytes<T: __jet_Decode>(
     T::jet_decode(&jet_xml_to_dyn(projected))
 }
 
-fn jet_cbor_value_error(
-    path: &str,
-    reason: impl Into<String>,
-) -> jet_std::EncodingError {
-    jet_std::EncodingError::new(
-        jet_std::EncodingFormat::CBOR,
-        jet_std::EncodingErrorKind::Unsupported,
-        0,
-        Err(JetAbsent),
-        Err(JetAbsent),
-        path,
-        reason,
-    )
-}
 
 fn jet_cbor_value_at(
     value: &jet_std::Dyn,
     path: &str,
 ) -> Result<crate::jet_cbor_kernel::Value, jet_std::EncodingError> {
-    match value {
-        jet_std::Dyn::Null => Ok(crate::jet_cbor_kernel::Value::Null),
-        jet_std::Dyn::Bool(value) => Ok(crate::jet_cbor_kernel::Value::Bool(*value)),
-        jet_std::Dyn::Int(value) => Ok(crate::jet_cbor_kernel::Value::Int(*value)),
-        jet_std::Dyn::Float(value) => Ok(crate::jet_cbor_kernel::Value::Float(*value)),
-        jet_std::Dyn::Number(text) => Err(jet_cbor_value_error(
-            path,
-            format!("JSON number carrier {text:?} is not a CBOR value"),
-        )),
-        jet_std::Dyn::TypedText(text) => Err(jet_cbor_value_error(
-            path,
-            format!("typed text carrier {text:?} is not a CBOR value"),
-        )),
-        jet_std::Dyn::Text(value) => Ok(crate::jet_cbor_kernel::Value::Text(value.clone())),
-        jet_std::Dyn::Bytes(value) => Ok(crate::jet_cbor_kernel::Value::Bytes(value.clone())),
-        jet_std::Dyn::Array(values) => {
-            let mut output = Vec::with_capacity(values.len());
-            for (index, value) in values.iter().enumerate() {
-                let child_path = format!("{path}[{index}]");
-                output.push(jet_cbor_value_at(value, &child_path)?);
-            }
-            Ok(crate::jet_cbor_kernel::Value::Array(output))
-        }
-        jet_std::Dyn::Object(entries) => {
-            let mut output = Vec::with_capacity(entries.len());
-            for (key, value) in entries {
-                let child_path = format!("{path}[{key:?}]");
-                output.push((key.clone(), jet_cbor_value_at(value, &child_path)?));
-            }
-            Ok(crate::jet_cbor_kernel::Value::Object(output))
-        }
-    }
+    crate::jet_cbor_kernel::from_dyn_at(value, path).map_err(jet_cbor_error)
 }
 
 fn jet_cbor_value(
@@ -427,10 +381,11 @@ fn jet_cbor_tree(value: crate::jet_cbor_kernel::Value) -> jet_std::Dyn {
     match value {
         crate::jet_cbor_kernel::Value::Null => jet_std::Dyn::Null,
         crate::jet_cbor_kernel::Value::Bool(value) => jet_std::Dyn::Bool(value),
-        crate::jet_cbor_kernel::Value::Int(value) => jet_std::Dyn::Int(value),
+        crate::jet_cbor_kernel::Value::Int(value) => jet_std::Dyn::Int((value).into()),
         crate::jet_cbor_kernel::Value::Float(value) => jet_std::Dyn::Float(value),
         crate::jet_cbor_kernel::Value::Text(value) => jet_std::Dyn::Text(value),
         crate::jet_cbor_kernel::Value::Bytes(value) => jet_std::Dyn::Bytes(value),
+        crate::jet_cbor_kernel::Value::DateTime(value) => jet_std::Dyn::DateTime(value),
         crate::jet_cbor_kernel::Value::Array(values) => {
             jet_std::Dyn::Array(values.into_iter().map(jet_cbor_tree).collect())
         }
@@ -521,9 +476,8 @@ fn jet_enc_cbor_decode_legacy(bytes: &Vec<u8>) -> Result<jet_std::Dyn, String> {
 fn jet_enc_cbor_parse_with(
     bytes: &Vec<u8>,
     options: jet_std::CBOROptions,
-    allow_bytes: bool,
 ) -> Result<jet_std::Dyn, jet_std::EncodingError> {
-    crate::jet_cbor_kernel::decode(bytes, &jet_cbor_options(&options), allow_bytes)
+    crate::jet_cbor_kernel::decode(bytes, &jet_cbor_options(&options))
         .map(jet_cbor_tree)
         .map_err(jet_cbor_error)
 }
@@ -532,7 +486,7 @@ fn jet_enc_cbor_parse(
     bytes: &Vec<u8>,
     options: jet_std::CBOROptions,
 ) -> Result<jet_std::Dyn, jet_std::EncodingError> {
-    jet_enc_cbor_parse_with(bytes, options, false)
+    jet_enc_cbor_parse_with(bytes, options)
 }
 
 fn jet_cbor_decode_source_error(error: jet_std::EncodingError) -> Vec<jet_std::FieldError> {
@@ -543,7 +497,7 @@ fn jet_enc_cbor_decode<T: __jet_Decode>(
     bytes: &Vec<u8>,
     options: jet_std::CBOROptions,
 ) -> Result<T, Vec<jet_std::FieldError>> {
-    let tree = jet_enc_cbor_parse_with(bytes, options, true)
+    let tree = jet_enc_cbor_parse_with(bytes, options)
         .map_err(jet_cbor_decode_source_error)?;
     T::jet_decode(&tree)
 }

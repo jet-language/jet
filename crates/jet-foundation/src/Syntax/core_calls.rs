@@ -1465,7 +1465,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: bf1ce2d4e62af90c68111a66b61a92e4dc7cf7873f3419ee3ebfe31c34a49a66
+// Source SHA-256: 7e587af59d3159b5eab2df421b39544e025bff571a6e8300c269799f3abbd7f3
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2268,7 +2268,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.time", "clock", "jet_std_clock_new", true, &[false]),
     CoreCallRecord::new( "core.encoding.json", "parse", "jet_std_json_parse", true, &[true], ),
     CoreCallRecord::new( "core.encoding.json", "loads", "jet_std_json_parse", true, &[true], ),
-    CoreCallRecord::new( "core.encoding.json", "decode", "jet_std_json_decode_lenient", true, &[true], ) .without_direct_aot() .without_direct_jit().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new( "core.encoding.json", "decode", "jet_std_json_parse", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.encoding.json", "to_string", "jet_std_json_render", true, &[true], ) .with_jit_symbol("jet_jit_json_to_string"),
     CoreCallRecord::new( "core.encoding.json", "dumps", "jet_std_json_render", true, &[true], ) .with_jit_symbol("jet_jit_json_to_string"),
     CoreCallRecord::new( "core.encoding.json", "to_string_pretty", "jet_std_json_render_pretty", true, &[true], ) .with_jit_symbol("jet_jit_json_to_string_pretty"),

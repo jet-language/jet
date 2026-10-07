@@ -202,7 +202,7 @@ pub fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDrive
             packet := jet_driver_compiler_check_diagnostic_packet(input, registration, provisional, module_sources, load.diagnostics)
             if packet == .Val(result) -> return result
         }
-        if load.diagnostics.len() == 0 -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val(jet_driver_incomplete_graph_problem("semantic declaration checking did not return a complete resolved package graph ({stage.modules.len()} of {registration_inputs.len()} modules checked)", stage.modules)))
+        if !jet_driver_has_errors(load.diagnostics) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val(jet_driver_incomplete_graph_problem("semantic declaration checking did not return a complete resolved package graph ({stage.modules.len()} of {registration_inputs.len()} modules checked)", stage.modules)))
         return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)
     }
     initial_values := [SemaComptimeItemValue]{ }

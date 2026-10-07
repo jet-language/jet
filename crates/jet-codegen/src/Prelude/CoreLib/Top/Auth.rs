@@ -323,7 +323,7 @@ fn jet_auth_optional_text(
 ) -> Result<Option<String>, JetAuthError> {
     match jet_auth_get(fields, name) {
         None => Ok(None),
-        Some(jet_std::Dyn::Text(value) | jet_std::Dyn::TypedText(value)) => {
+        Some(jet_std::Dyn::Text(value)) => {
             Ok(Some(value.clone()))
         }
         Some(_) => Err(JetAuthError::MalformedToken(format!("claim `{name}` must be text"))),
@@ -368,7 +368,7 @@ fn jet_auth_optional_i64(
 
 fn jet_auth_audience_values(value: &jet_std::Dyn) -> Result<Vec<String>, JetAuthError> {
     match value {
-        jet_std::Dyn::Text(value) | jet_std::Dyn::TypedText(value) => {
+        jet_std::Dyn::Text(value) => {
             Ok(vec![value.clone()])
         }
         jet_std::Dyn::Array(values) if values.is_empty() => {
@@ -379,7 +379,7 @@ fn jet_auth_audience_values(value: &jet_std::Dyn) -> Result<Vec<String>, JetAuth
         jet_std::Dyn::Array(values) => values
             .iter()
             .map(|value| match value {
-                jet_std::Dyn::Text(value) | jet_std::Dyn::TypedText(value) => {
+                jet_std::Dyn::Text(value) => {
                     Ok(value.clone())
                 }
                 _ => Err(JetAuthError::MalformedToken(
@@ -539,9 +539,9 @@ fn jet_auth_verify_jwt_impl(
         .map_err(|_| JetAuthError::MalformedToken("JWT header is not valid UTF-8".to_string()))?;
     let header = jet_auth_object(header)?;
     match jet_auth_get(&header, "alg") {
-        Some(jet_std::Dyn::Text(algorithm) | jet_std::Dyn::TypedText(algorithm))
+        Some(jet_std::Dyn::Text(algorithm))
             if algorithm == "HS256" => {}
-        Some(jet_std::Dyn::Text(algorithm) | jet_std::Dyn::TypedText(algorithm)) => {
+        Some(jet_std::Dyn::Text(algorithm)) => {
             return Err(JetAuthError::UnsupportedToken(format!(
                 "unsupported JWT algorithm `{algorithm}`"
             )));

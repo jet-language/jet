@@ -958,6 +958,8 @@ pub(crate) fn variant_payload_types(
                     "Int" => Ok(vec![Type::Int]),
                     "Float" => Ok(vec![Type::Float]),
                     "Text" => Ok(vec![Type::String]),
+                    "Bytes" => Ok(vec![Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))]),
+                    "DateTime" => Ok(vec![Type::Named("ZonedDateTime".to_string())]),
                     "Array" => Ok(vec![Type::List(Box::new(Type::Named(
                         crate::Syntax::TYPE_DATA.to_string(),
                     )))]),

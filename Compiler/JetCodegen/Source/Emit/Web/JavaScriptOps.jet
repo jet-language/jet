@@ -1278,7 +1278,7 @@ fn jet_web_js_codec_descriptor(ctx: &JetWebEmitContext, value: MIRType) -> Strin
         }
         .Tagged(_, inner) -> return jet_web_js_codec_descriptor(&ctx, inner)
         .Apply(name, _) -> {
-            if name.name == "Data" || name.name == "Dyn" -> return "{{ kind: \"dyn\" }}"
+            if name.name == "Dyn" -> return "{{ kind: \"dyn\" }}"
             if name.name == "Date" -> return "{{ kind: \"date\" }}"
             if name.name == "LocalDate" -> return "{{ kind: \"local_date\" }}"
             if name.name == "LocalTime" -> return "{{ kind: \"local_time\" }}"
@@ -1535,6 +1535,10 @@ fn jet_web_js_dyn_call(ctx: &JetWebEmitContext, call: MIRPreludeCallID, receiver
         values := [String]{receiver}
         loop arg in args -> &values.push(arg)
         return jet_web_js_route_call(&ctx, call, values)
+    }
+    if route.member == "index_key" || route.member == "index_at" || route.member == "get_key" || route.member == "get_at" || route.member == "has" || route.member == "keys" || route.member == "remove" || route.member == "len" || route.member == "binary" || route.member == "compare" || route.member == "set_path" {
+        jet_web_fail(&ctx, JetWebEmitFailureKind.MissingPreludeCall, "E0003", "MIR Prelude symbol has no direct Web binding", mir_symbol_name(route.symbol), None)
+        return "__jet_missing_prelude"
     }
     arity :: if route.member == {
         "field" | "at" | "equal_unordered" -> 2

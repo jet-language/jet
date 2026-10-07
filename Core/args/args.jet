@@ -52,7 +52,7 @@ pub fn decode() -[Env, Exec.Args]> Dyn Never! {
 }
 
 pub fn decode_argv(argv: [String]) -> Dyn Never! {
-    entries := [String: Dyn]{}
+    entries := Dyn.object()
     positionals := [Dyn]{}
     i := 0
     // Skip argv[0] (program name) when present.
@@ -115,29 +115,29 @@ pub fn decode_argv(argv: [String]) -> Dyn Never! {
         i = i + 1
     }
     if argv.len() > 0 -> put_entry(&entries, "0", Dyn.Text(~argv[0]))
-    _ :: &entries.add("_", Dyn.Array(positionals))
-    Dyn.Object(entries)
+    entries["_"] = Dyn.Array(positionals)
+    entries
 }
 
 /// Overlay `overlay` onto `base`. Object keys in overlay replace; arrays
 /// replace (they are not concatenated). Scalars replace.
 pub fn merge(base: Dyn, overlay: Dyn) -> Dyn Never! {
     if overlay == {
-        .Object(over) -> {
+        .Object(_) -> {
             if base == {
-                .Object(under) -> {
-                    out := ~under
-                    loop key in over.keys() {
-                        ov :: over.get(key) ?? Dyn.Null
-                        un :: under.get(key)
+                .Object(_) -> {
+                    out := ~base
+                    loop key in overlay.keys() {
+                        ov :: overlay[key]
+                        un :: base.get(key)
                         if un == .None {
-                            _ :: &out.add(key, ov)
+                            out[key] = ov
                         } else {
                             under_value :: un
-                            _ :: &out.add(key, merge(under_value, ov))
+                            out[key] = merge(under_value, ov)
                         }
                     }
-                    return Dyn.Object(out)
+                    return out
                 }
                 else -> return ~overlay
             }
@@ -181,30 +181,30 @@ fn negative_number(text: String) -> Bool {
     true
 }
 
-fn add_flag_entry(entries: &[String: Dyn], key: String, old: Dyn, value: Dyn) {
+fn add_flag_entry(entries: &Dyn, key: String, old: Dyn, value: Dyn) {
     if old == {
         .Bool(previous) -> {
             if previous {
-                _ :: &entries.add(key, Dyn.Int(2))
+                entries[key] = Dyn.Int(2)
             } else {
-                _ :: &entries.add(key, value)
+                entries[key] = value
             }
         }
         .Int(count) -> {
             if count > 0 {
-                _ :: &entries.add(key, Dyn.Int(count + 1))
+                entries[key] = Dyn.Int(count + 1)
             } else {
-                _ :: &entries.add(key, value)
+                entries[key] = value
             }
         }
-        else -> { _ :: &entries.add(key, value) }
+        else -> { entries[key] = value }
     }
 }
 
-fn put_entry(entries: &[String: Dyn], key: String, value: Dyn) {
+fn put_entry(entries: &Dyn, key: String, value: Dyn) {
     old :: entries.get(key)
     if old == .None {
-        _ :: &entries.add(key, value)
+        entries[key] = value
         return
     }
     previous :: old
@@ -213,11 +213,11 @@ fn put_entry(entries: &[String: Dyn], key: String, value: Dyn) {
             if flag_value {
                 add_flag_entry(&entries, key, previous, value)
             } else {
-                _ :: &entries.add(key, value)
+                entries[key] = value
             }
         }
         else -> {
-            _ :: &entries.add(key, value)
+            entries[key] = value
         }
     }
 }

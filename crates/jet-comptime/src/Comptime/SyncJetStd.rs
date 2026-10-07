@@ -74,22 +74,15 @@ pub fn render_dyn_json(tree: &Dyn, pretty: bool, depth: usize) -> String {
     match tree {
         Dyn::Null => "null".to_string(),
         Dyn::Bool(value) => value.to_string(),
-        Dyn::Int(value) => jet_int_to_string(*value),
+        Dyn::Int(value) => value.to_string_rep(),
         Dyn::Float(value) => {
             assert!(value.is_finite(), "JSON cannot encode a non-finite Float");
             format!("{:?}", value)
         }
         Dyn::Number(text) => text.clone(),
-        Dyn::TypedText(text) => quote_json(text),
         Dyn::Text(value) => quote_json(value),
-        Dyn::Bytes(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(u8::to_string)
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
+        Dyn::Bytes(values) => quote_json(&Dyn::bytes_text(values)),
+        Dyn::DateTime(value) => quote_json(&value.to_rfc3339()),
         Dyn::Array(values) => {
             if values.is_empty() {
                 return "[]".to_string();

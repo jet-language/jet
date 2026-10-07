@@ -660,7 +660,8 @@ fn import_render_json_value(value: &Dyn) -> String {
             }
         }
         Dyn::Number(value) => value.clone(),
-        Dyn::TypedText(value) | Dyn::Text(value) => import_render_string(value),
+        Dyn::Text(value) => import_render_string(value),
+        Dyn::DateTime(value) => import_render_string(&value.to_rfc3339()),
         Dyn::Bytes(values) => format!(
             "[{}]",
             values
@@ -688,15 +689,9 @@ fn import_render_json_for_audit(value: &Dyn) -> String {
         Dyn::Int(value) => value.to_string(),
         Dyn::Float(value) => value.to_string(),
         Dyn::Number(value) => value.clone(),
-        Dyn::TypedText(value) | Dyn::Text(value) => JSON::quote(value),
-        Dyn::Bytes(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(u8::to_string)
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
+        Dyn::Text(value) => JSON::quote(value),
+        Dyn::Bytes(values) => JSON::quote(&Dyn::bytes_text(values)),
+        Dyn::DateTime(value) => JSON::quote(&value.to_rfc3339()),
         Dyn::Array(values) => {
             let parts = values
                 .iter()

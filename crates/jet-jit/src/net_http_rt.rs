@@ -78,7 +78,7 @@ trait __jet_Encode {
 }
 impl __jet_Encode for i64 {
     fn jet_encode(&self) -> JetDyn {
-        JetDyn::Int(*self)
+        JetDyn::Int((*self).into())
     }
 }
 // Keep the generated Rust codec trait spelling stable; Codegen emits `__jet_Decode`.
@@ -90,7 +90,7 @@ fn jet_enc_json_to_string<T: __jet_Encode>(v: &T) -> String {
     crate::Encoding::json_rt::render_dyn_json(&v.jet_encode(), false, 0)
 }
 fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
-    let tree = crate::Encoding::json_rt::parse_dyn_typed_ordered(text).map_err(|error| {
+    let tree = crate::Encoding::json_rt::parse_dyn(text).map_err(|error| {
         let line = error.line.ok().unwrap_or(0);
         jet_std::FieldError::one(format!(
             "invalid JSON (line {}): {}",
@@ -202,8 +202,9 @@ pub mod jet_std {
     pub(crate) use crate::Encoding::json_rt::{
         dyn_kind_for, decode_bool, decode_f32, decode_float, decode_int, decode_int_with, decode_string,
         jet_dyn_encode_i64, jet_dyn_encode_u64, jet_dyn_decode_fixed_integer,
-        jet_dyn_project, jet_enc_csv_decode_rows, jet_int_to_i128, jet_int_to_i64, jet_int_to_string,
-        parse_json_typed_dyn, Dyn, EncodingCause, EncodingError, EncodingErrorKind,
+        jet_dyn_project, jet_decode_text_cells, jet_text_cells_active, jet_enc_csv_decode_rows, jet_int_to_i128,
+        jet_int_to_i64, jet_int_to_string, parse_json_dyn, Dyn, EncodingCause,
+        EncodingError, EncodingErrorKind,
         EncodingFormat, EncodingLimits, FieldError, JetDynAccess,
     };
 

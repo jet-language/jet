@@ -98,6 +98,12 @@ fn mir_pass_legality_tables(program: MIRProgram) -> MIRPassLegalityTables {
     loop row in program.functions -> &functions.add(row.id.value, true).drop("an identity may repeat")
     types := [Int:Bool]{}
     loop row in program.types -> &types.add(row.id.value, true).drop("an identity may repeat")
+    // Rust `verify_mir_legality`: canonical type instances (intrinsic
+    // nominals such as `Fraction`, applied generics) are known types too.
+    loop row in program.type_instances {
+        identity :: row.identity ?? next
+        &types.add(identity.value, true).drop("an identity may repeat")
+    }
     fields := [Int:Bool]{}
     loop row in program.fields -> &fields.add(row.id.value, true).drop("an identity may repeat")
     source_files := [Int:Bool]{}

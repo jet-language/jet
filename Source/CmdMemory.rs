@@ -397,7 +397,7 @@ fn uint(
     line: usize,
 ) -> Result<u64, String> {
     match field(object, name, line)? {
-        Dyn::Int(value) if *value >= 0 => u64::try_from(*value).map_err(|_| {
+        Dyn::Int(value) => value.to_u64().ok_or_else(|| {
             format!("memory ledger row {line} `{name}` is not a non-negative integer")
         }),
         _ => Err(format!(

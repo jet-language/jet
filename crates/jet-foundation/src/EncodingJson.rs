@@ -21,7 +21,7 @@ mod tests {
     fn integer_tokens_never_round_through_float() {
         assert_eq!(
             parse_json("-9223372036854775808", false),
-            Ok(Dyn::Int(i64::MIN))
+            Ok(Dyn::Int(i64::MIN.into()))
         );
         assert_eq!(
             parse_json("9223372036854775808", false),
@@ -34,17 +34,14 @@ mod tests {
     }
 
     #[test]
-    fn typed_json_keeps_quoted_numbers_distinct() {
+    fn exact_json_keeps_quoted_numbers_distinct() {
         assert_eq!(
-            parse_json_typed(r#"["123",123]"#, false),
+            parse_json_exact_numbers(r#"["123",123,1.50]"#, false),
             Ok(Dyn::Array(vec![
-                Dyn::TypedText("123".to_string()),
+                Dyn::Text("123".to_string()),
                 Dyn::Number("123".to_string()),
+                Dyn::Number("1.50".to_string()),
             ]))
-        );
-        assert_eq!(
-            parse_json_exact_numbers(r#""123""#, false),
-            Ok(Dyn::Text("123".to_string()))
         );
     }
 
@@ -54,6 +51,19 @@ mod tests {
             parse_json(input, false).expect_err("invalid JSON must be rejected");
         }
     }
+
+    #[test]
+    fn native_dyn_scalars_render_as_text_without_changing_json_parse_kinds() {
+        let tree = Dyn::Object(vec![
+            ("b".into(), Dyn::Bytes(vec![0, 255])),
+            ("a".into(), Dyn::parse_datetime("2024-01-01T05:30:00.120+05:30").unwrap()),
+        ]);
+        let text = render_json(&tree, false, 0);
+        assert_eq!(text, r#"{"b":"AP8=","a":"2024-01-01T05:30:00.12+05:30"}"#);
+        let parsed = parse_json(&text, false).unwrap();
+        assert!(matches!(parsed.get("b").unwrap(), Dyn::Text(_)));
+        assert!(matches!(parsed.get("a").unwrap(), Dyn::Text(_)));
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -62,36 +72,31 @@ pub struct Error {
     pub message: String,
 }
 
+/// Host-internal parse: integers that fit `i64` become `Int`, other integers
+/// keep their lexeme as `Number`, and fractions become `Float`.
 pub fn parse_json(text: &str, reject_duplicate_keys: bool) -> Result<Dyn, Error> {
-    parse_json_with_modes(text, reject_duplicate_keys, false, false)
+    parse_json_with_modes(text, reject_duplicate_keys, false)
 }
 
+/// The Jet `json.parse` meaning (#4602): every number token keeps its exact
+/// lexeme as `Number` until a typed read range-checks it.
 pub fn parse_json_exact_numbers(
     text: &str,
     reject_duplicate_keys: bool,
 ) -> Result<Dyn, Error> {
-    parse_json_with_modes(text, reject_duplicate_keys, true, false)
-}
-
-pub fn parse_json_typed(
-    text: &str,
-    reject_duplicate_keys: bool,
-) -> Result<Dyn, Error> {
-    parse_json_with_modes(text, reject_duplicate_keys, true, true)
+    parse_json_with_modes(text, reject_duplicate_keys, true)
 }
 
 fn parse_json_with_modes(
     text: &str,
     reject_duplicate_keys: bool,
     preserve_numbers: bool,
-    preserve_strings: bool,
 ) -> Result<Dyn, Error> {
     let mut parser = Parser {
         chars: text.chars().collect(),
         pos: 0,
         reject_duplicate_keys,
         preserve_numbers,
-        preserve_strings,
     };
     let value = parser.value(0)?;
     parser.ws();
@@ -110,7 +115,6 @@ struct Parser {
     pos: usize,
     reject_duplicate_keys: bool,
     preserve_numbers: bool,
-    preserve_strings: bool,
 }
 
 impl Parser {
@@ -142,14 +146,7 @@ impl Parser {
             Some('n') => self.word("null", Dyn::Null),
             Some('t') => self.word("true", Dyn::Bool(true)),
             Some('f') => self.word("false", Dyn::Bool(false)),
-            Some('"') => {
-                let text = self.string()?;
-                Ok(if self.preserve_strings {
-                    Dyn::TypedText(text)
-                } else {
-                    Dyn::Text(text)
-                })
-            }
+            Some('"') => Ok(Dyn::Text(self.string()?)),
             Some('[') => self.array(depth),
             Some('{') => self.object(depth),
             Some('-') | Some('0'..='9') => self.number(),
@@ -299,7 +296,7 @@ impl Parser {
         }
         if is_integer {
             if let Ok(value) = text.parse::<i64>() {
-                return Ok(Dyn::Int(value));
+                return Ok(Dyn::Int((value).into()));
             }
             super::jet_json_number::validate_json_number(&text)
                 .map_err(|message| self.err(&message))?;
@@ -403,8 +400,9 @@ impl Parser {
                 format!("{value:?}")
             }
             Dyn::Number(value) => value.clone(),
-            Dyn::TypedText(value) | Dyn::Text(value) => quote_json(value),
-            Dyn::Bytes(_) => panic!("JSON cannot encode Bytes"),
+            Dyn::Text(value) => quote_json(value),
+            Dyn::Bytes(value) => quote_json(&Dyn::bytes_text(value)),
+            Dyn::DateTime(value) => quote_json(&value.to_rfc3339()),
             Dyn::Array(items) => {
                 if items.is_empty() {
                     return "[]".to_string();

@@ -14,19 +14,19 @@ use jet_foundation.[
 ]
 
 fn jet_eval_route_prelude_row(machine: &JetEvalMachine, call: MIRPreludeCallID, span: Span) -> MIRPreludeCall? {
-    loop row in machine.program.prelude_calls {
-        if row.id == call -> return Val(row)
+    row :: machine.rows.prelude_calls.get(call.value) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR Prelude route is missing from the program registry")
+        return None
     }
-    jet_eval_compiler_fail(&machine, span, "MIR Prelude route is missing from the program registry")
-    None
+    Val(machine.program.prelude_calls[row])
 }
 
 fn jet_eval_route_core_row(machine: &JetEvalMachine, call: MIRCoreCallID, span: Span) -> MIRCoreCall? {
-    loop row in machine.program.core_calls {
-        if row.id == call -> return Val(row)
+    row :: machine.rows.core_calls.get(call.value) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR Core route is missing from the program registry")
+        return None
     }
-    jet_eval_compiler_fail(&machine, span, "MIR Core route is missing from the program registry")
-    None
+    Val(machine.program.core_calls[row])
 }
 
 fn jet_eval_route_arity(arity: Int, minimum: Int, maximum: Int, name: String, machine: &JetEvalMachine, span: Span) -> Bool Never! {
@@ -98,11 +98,11 @@ fn jet_eval_route_args(values: [JetEvalRuntimeValue], machine: &JetEvalMachine, 
 }
 
 fn jet_eval_route_source_path(machine: &JetEvalMachine, file: MIRSourceFileID, span: Span) -> String? {
-    loop source in machine.program.source_files {
-        if source.id == file -> return Val(source.path)
+    row :: machine.rows.source_files.get(file.value) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR route location refers to a missing source file")
+        return None
     }
-    jet_eval_compiler_fail(&machine, span, "MIR route location refers to a missing source file")
-    None
+    Val(machine.program.source_files[row].path)
 }
 
 fn jet_eval_route_failure_is_optional(fallibility: MIRCallFallibility) -> Bool Never! {

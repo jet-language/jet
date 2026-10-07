@@ -214,8 +214,11 @@ fn parser_marker_decl_params(state: &JetParserState) -> [MarkerDeclParam] {
     params
 }
 
+// Rust `derive_body_items`: the body is a template, so nested `prep loop`
+// statements are template loops.
 fn parser_marker_body(state: &JetParserState) -> [DeriveBodyItem] {
     parser_expect(&state, TOKEN_LBRACE, "`{{` before a marker body")
+    state.derive_template_depth += 1
     body := [DeriveBodyItem]{}
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
         parser_skip_semicolons(&state)
@@ -238,6 +241,7 @@ fn parser_marker_body(state: &JetParserState) -> [DeriveBodyItem] {
             else -> &body.push(DeriveBodyItem.Stmt{value: parser_parse_statement(&state)})
         }
     }
+    state.derive_template_depth -= 1
     parser_expect(&state, TOKEN_RBRACE, "`}}` after a marker body")
     body
 }

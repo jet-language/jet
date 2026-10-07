@@ -2,57 +2,49 @@
 // each field name and canonical type spelling is followed by the Rust str
 // Hash terminator byte. This is not the FNV namespace/identity ID format.
 struct TupleNameHashState {
-    pub v0: Int
-    pub v1: Int
-    pub v2: Int
-    pub v3: Int
-    pub tail: Int
+    pub v0: U64
+    pub v1: U64
+    pub v2: U64
+    pub v3: U64
+    pub tail: U64
     pub tail_len: Int
     pub length: Int
 }
 
-fn tuple_name_hash_rotate(value: Int, count: Int) -> Int Never! {
-    ((value << count) | (value >> (64 - count))) & 0xffffffffffffffff
-}
-
 fn tuple_name_hash_round(state: &TupleNameHashState) Never! {
-    state.v0 = (state.v0 + state.v1) & 0xffffffffffffffff
-    state.v1 = tuple_name_hash_rotate(state.v1, 13)
-    state.v1 = state.v1 ^ state.v0
-    state.v0 = tuple_name_hash_rotate(state.v0, 32)
-    state.v2 = (state.v2 + state.v3) & 0xffffffffffffffff
-    state.v3 = tuple_name_hash_rotate(state.v3, 16)
-    state.v3 = state.v3 ^ state.v2
-    state.v0 = (state.v0 + state.v3) & 0xffffffffffffffff
-    state.v3 = tuple_name_hash_rotate(state.v3, 21)
-    state.v3 = state.v3 ^ state.v0
-    state.v2 = (state.v2 + state.v1) & 0xffffffffffffffff
-    state.v1 = tuple_name_hash_rotate(state.v1, 17)
-    state.v1 = state.v1 ^ state.v2
-    state.v2 = tuple_name_hash_rotate(state.v2, 32)
+    state.v0 = state.v0.wrapping_add(state.v1)
+    state.v1 = state.v1.rotate_left(13) ~| state.v0
+    state.v0 = state.v0.rotate_left(32)
+    state.v2 = state.v2.wrapping_add(state.v3)
+    state.v3 = state.v3.rotate_left(16) ~| state.v2
+    state.v0 = state.v0.wrapping_add(state.v3)
+    state.v3 = state.v3.rotate_left(21) ~| state.v0
+    state.v2 = state.v2.wrapping_add(state.v1)
+    state.v1 = state.v1.rotate_left(17) ~| state.v2
+    state.v2 = state.v2.rotate_left(32)
 }
 
-fn tuple_name_hash_word(state: &TupleNameHashState, word: Int) Never! {
-    state.v3 = state.v3 ^ word
+fn tuple_name_hash_word(state: &TupleNameHashState, word: U64) Never! {
+    state.v3 = state.v3 ~| word
     tuple_name_hash_round(&state)
-    state.v0 = state.v0 ^ word
+    state.v0 = state.v0 ~| word
 }
 
-fn tuple_name_hash_byte(state: &TupleNameHashState, byte: Int) Never! {
-    state.tail = state.tail | (byte << (state.tail_len * 8))
+fn tuple_name_hash_byte(state: &TupleNameHashState, byte: U8) Never! {
+    state.tail = state.tail | (U64.from_u8(byte) << (state.tail_len * 8))
     state.tail_len += 1
     state.length += 1
     if state.tail_len == 8 {
         word := state.tail
         tuple_name_hash_word(&state, word)
-        state.tail = 0
+        state.tail = U64{0}
         state.tail_len = 0
     }
 }
 
 fn tuple_name_hash_string(state: &TupleNameHashState, value: String) Never! {
-    loop byte in value.bytes() -> tuple_name_hash_byte(&state, Int.from_u8(byte))
-    tuple_name_hash_byte(&state, 255)
+    loop byte in value.bytes() -> tuple_name_hash_byte(&state, byte)
+    tuple_name_hash_byte(&state, U8{255})
 }
 
 fn tuple_name_hash_hex(value: Int) -> String Never! {
@@ -70,11 +62,11 @@ fn tuple_name_hash_hex(value: Int) -> String Never! {
 
 pub fn type_tuple_struct_name(fields: [TypeTupleField]) -> String Never! {
     state := TupleNameHashState{
-        v0: 0x736f6d6570736575,
-        v1: 0x646f72616e646f6d,
-        v2: 0x6c7967656e657261,
-        v3: 0x7465646279746573,
-        tail: 0,
+        v0: U64{0x736f6d6570736575},
+        v1: U64{0x646f72616e646f6d},
+        v2: U64{0x6c7967656e657261},
+        v3: U64{0x7465646279746573},
+        tail: U64{0},
         tail_len: 0,
         length: 0,
     }
@@ -82,12 +74,12 @@ pub fn type_tuple_struct_name(fields: [TypeTupleField]) -> String Never! {
         tuple_name_hash_string(&state, field.name)
         tuple_name_hash_string(&state, type_name(field.ty))
     }
-    final_word := state.tail | ((state.length & 255) << 56)
+    final_word := state.tail | (U64.from_u8(U8{state.length & 255}) << 56)
     tuple_name_hash_word(&state, final_word)
-    state.v2 = state.v2 ^ 255
+    state.v2 = state.v2 ~| 255
     tuple_name_hash_round(&state)
     tuple_name_hash_round(&state)
     tuple_name_hash_round(&state)
-    hash := state.v0 ^ state.v1 ^ state.v2 ^ state.v3
-    "__jet_JetTup_{tuple_name_hash_hex(hash)}"
+    hash := state.v0 ~| state.v1 ~| state.v2 ~| state.v3
+    "__jet_JetTup_{tuple_name_hash_hex(Int.from_u64(hash))}"
 }

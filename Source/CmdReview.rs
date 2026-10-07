@@ -2262,15 +2262,9 @@ fn canonical_json(value: &Dyn) -> String {
         Dyn::Int(value) => value.to_string(),
         Dyn::Float(value) => value.to_string(),
         Dyn::Number(value) => value.clone(),
-        Dyn::TypedText(value) | Dyn::Text(value) => json_string(value),
-        Dyn::Bytes(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(|value| value.to_string())
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
+        Dyn::Text(value) => json_string(value),
+        Dyn::Bytes(values) => json_string(&Dyn::bytes_text(values)),
+        Dyn::DateTime(value) => json_string(&value.to_rfc3339()),
         Dyn::Array(values) => format!(
             "[{}]",
             values

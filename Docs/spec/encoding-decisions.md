@@ -20,12 +20,23 @@ citations; a narrower decision controls the public surface where it says so.
 ## Shared value and error model
 
 Use one `Dyn` for untyped values. Its closed variants are `Null`, `Bool`,
-`Int`, `Float`, `Text`, `Array`, and `Object`; objects preserve insertion
-order, and integers and floats remain distinct. A codec must reject malformed
+`Int`, `Float`, `Number`, `Text`, `Bytes`, `DateTime`, `Array`, and `Object`
+(D-INFER-PRIVATE1=A; D-DATATREE-RULES1=A). `Int` owns an exact Jet integer,
+including values wider than machine integers; `Number` owns a parsed number's
+exact source spelling until a typed read checks the destination's range.
+Objects preserve insertion order; duplicate keys are a parse error, except
+`parse_allow_duplicates`, which keeps the later value. Integers and floats
+remain distinct. A codec must reject malformed
 input instead of fabricating a value. Base64, base32, and hex are scalar byte
 helpers, not `Dyn` adapters. This keeps one tree walker and one set of
 format adapters while preserving the distinction between text serialization
 and byte alphabets.
+
+Typed decoding is strict: a text leaf is not an integer, float, or Boolean.
+Only text-native sources (environment variables, CSV cells, route and query
+parameters) parse text into scalar destinations. This is a property of the
+source decoder, not a second public value-tree case. CBOR byte strings become
+`Bytes`; temporal leaves use `DateTime` with their fixed RFC 3339 offset.
 
 Use one adapter identity per format for whole-value operations and bounded
 reader/writer operations. The streaming formats are JSON, JSONL, CSV, XML,
@@ -149,19 +160,20 @@ constructor neither leaks nor returns it. (D-MEM1; D-ENCSTREAM-SURFACE1=A)
 The format-specific item rules are these:
 
 - JSON reader/writer uses `DataEvent` and accepts exactly one root. CBOR uses
-  the same event algebra and rejects tags, non-text map keys, bignums, and
-  values outside `Dyn` as `Unsupported`, without coercion. The event
-  variants are `Null`, `Bool(Bool)`, `Int(Int)`, `Float(Float)`,
-  `Text(String)`, `Bytes([U8])`, `ArrayStart`, `ArrayEnd`, `ObjectStart`,
-  `Key(String)`, and `ObjectEnd`.
+  the same event algebra and rejects tags other than 0 and 1, non-text map
+  keys, bignums, and values outside `Dyn` as `Unsupported`, without coercion.
+  The event variants are `Null`, `Bool(Bool)`, `Int(Int)`, `Float(Float)`,
+  `Text(String)`, `Bytes([U8])`, `DateTime(ZonedDateTime)`, `ArrayStart`,
+  `ArrayEnd`, `ObjectStart`, `Key(String)`, and `ObjectEnd`.
 
-The Prelude carrier may also carry `Number(String)` for exact-token JSON
-decoding; this preserves number text without adding a `Dyn` variant.
-The event list above remains the public reader/writer algebra for this
-decision.
+`Number(String)` preserves exact parsed number spelling in `Dyn`
+(D-DATATREE-RULES1=A). The incremental JSON reader exposes the same lexical
+number event; typed decoding performs numeric conversion only at the read
+boundary, without rounding through binary64.
 
-- A JSON writer rejects `DataEvent.Bytes` with kind `Unsupported` and reason
-  `JSON cannot encode Bytes; encode bytes as Text explicitly`. It rejects a
+- A JSON writer writes `DataEvent.Bytes` as a standard padded base64 string and
+  `DataEvent.DateTime` as its canonical RFC 3339 string, exactly as whole-value
+  JSON renders `Dyn.Bytes` and `Dyn.DateTime` (D-INFER-PRIVATE1=A). It rejects a
   `Float` whose value is NaN or positive or negative infinity with kind
   `Unsupported` and reason `JSON cannot encode a non-finite Float`. Validate
   an event before accepting or emitting its bytes; earlier accepted events may
@@ -388,8 +400,9 @@ line and column copy unchanged. (D-ENCXML1=A; D-ENCSTREAM-SURFACE1=A)
 
 
 Public XML values use only `encoding.Dyn` variants `Null`, `Bool`, `Int`,
-`Text`, `Array`, and `Object`. Encode byte sequences as `Dyn.Array<Int>`
-with each integer in `0..255`; do not add a `Dyn.Bytes` variant. Every
+`Text`, `Array`, and `Object`. Encode byte sequences inside the XML schema as
+`Dyn.Array<Int>` with each integer in `0..255`; a `Dyn.Bytes` or
+`Dyn.DateTime` anywhere in an XML tree is outside the schema and rejects. Every
 object has exactly its listed keys, every listed key is required even when its
 value is `Null`, and unknown or missing keys reject. `XMLName` is
 `{raw:Text,prefix:Text|Null,local:Text,namespace_uri:Text|Null}`.
@@ -876,11 +889,13 @@ analogues of text `parse` and `to_string`. (D-ENC-CBOR-SURFACE1=A; I8)
 Map Codable `[U8]` to CBOR major type 2 and decode it back; never degrade it to
 an integer array. Other Codable lists use major type 4, structs/maps use major
 type 5 with text keys, strings use major type 3, and scalar mappings follow
-Jet types. `parse` into `Dyn` rejects a major-type-2 byte string as
-`Unsupported` because D-ENC-DYN1 has no lossless public `Dyn` case;
-callers needing bytes use `decode<[U8]>` or a Codable field. Reject tags,
-bignums outside `Int`, non-text map keys, duplicate text keys,
-undefined/unsupported simple values, and all values outside `Dyn`; never
+Jet types. `parse` into `Dyn` maps a major-type-2 byte string to `Dyn.Bytes`,
+tag 0 (RFC 3339 text) to `Dyn.DateTime` with the written offset, and tag 1
+(epoch seconds, Int or Float) to `Dyn.DateTime` at offset `+00:00`; encoding
+writes `Dyn.Bytes` as major type 2 and `Dyn.DateTime` as tag 0 with its
+canonical RFC 3339 text, in both preferred and canonical form (D-INFER-PRIVATE1=A).
+Reject every other tag, bignums outside `Int`, non-text map keys, duplicate text
+keys, undefined/unsupported simple values, and all values outside `Dyn`; never
 coerce. Typed `decode<T>` accepts only shapes admitted by `T`'s one Codable
 schema. (D-ENC-DYN1; D-ENC-CBOR-SURFACE1=A)
 

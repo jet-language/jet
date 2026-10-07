@@ -236,7 +236,7 @@ impl JetOpenApiSchema {
                 }
             }
             Self::String => {
-                if matches!(value, jet_std::Dyn::Text(_) | jet_std::Dyn::TypedText(_)) {
+                if matches!(value, jet_std::Dyn::Text(_)) {
                     Vec::new()
                 } else {
                     vec![JetOpenApiValidationError::new(path, "expected string")]
@@ -1285,7 +1285,7 @@ fn jet_openapi_contract_text(
     name: &str,
 ) -> Result<String, String> {
     match jet_openapi_contract_field(object, name)? {
-        jet_std::Dyn::Text(value) | jet_std::Dyn::TypedText(value) => Ok(value.clone()),
+        jet_std::Dyn::Text(value) => Ok(value.clone()),
         _ => Err(format!("OpenAPI route contract field `{name}` must be text")),
     }
 }
@@ -1306,7 +1306,7 @@ fn jet_openapi_contract_optional_text(
 ) -> Result<Option<String>, String> {
     match jet_openapi_contract_field(object, name)? {
         jet_std::Dyn::Null => Ok(None),
-        jet_std::Dyn::Text(value) | jet_std::Dyn::TypedText(value) => {
+        jet_std::Dyn::Text(value) => {
             Ok(Some(value.clone()))
         }
         _ => Err(format!(
@@ -1330,7 +1330,8 @@ fn jet_openapi_contract_integer(
     name: &str,
 ) -> Result<i64, String> {
     match jet_openapi_contract_field(object, name)? {
-        jet_std::Dyn::Int(value) => Ok(*value),
+        jet_std::Dyn::Int(value) => value.to_i64()
+            .ok_or_else(|| format!("OpenAPI route contract field `{name}` is out of range")),
         jet_std::Dyn::Number(value) => value
             .parse::<i64>()
             .map_err(|_| format!("OpenAPI route contract field `{name}` is out of range")),
@@ -1369,7 +1370,7 @@ fn jet_openapi_contract_schema(
         }
         return Ok(JetOpenApiSchema::Any);
     };
-    let (jet_std::Dyn::Text(kind) | jet_std::Dyn::TypedText(kind)) = kind else {
+    let jet_std::Dyn::Text(kind) = kind else {
         return Err("OpenAPI schema `type` must be text".to_string());
     };
     match kind.as_str() {
@@ -1393,7 +1394,7 @@ fn jet_openapi_contract_schema(
                 Some(jet_std::Dyn::Array(values)) => values
                     .iter()
                     .map(|value| match value {
-                        jet_std::Dyn::Text(name) | jet_std::Dyn::TypedText(name) => {
+                        jet_std::Dyn::Text(name) => {
                             Ok(name.clone())
                         }
                         _ => Err("OpenAPI schema `required` names must be text".to_string()),
@@ -1492,7 +1493,7 @@ fn jet_openapi_contract_security(
     let scopes = jet_openapi_contract_array(object, "scopes")?
         .iter()
         .map(|scope| match scope {
-            jet_std::Dyn::Text(scope) | jet_std::Dyn::TypedText(scope) => {
+            jet_std::Dyn::Text(scope) => {
                 Ok(scope.clone())
             }
             _ => Err("OpenAPI security scopes must be text".to_string()),

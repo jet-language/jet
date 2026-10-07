@@ -257,6 +257,33 @@ if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("unexpected W
     let _ = fs::remove_dir_all(dir);
 }
 
+#[test]
+fn dyn_exact_int_and_strict_json_match_web_js_and_wasm_goldens() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping Dyn web parity test (need rustc + node)");
+        return;
+    }
+    for stem in ["dyn_exact_int", "json_coerce", "json_duplicate_keys"] {
+        let shown = format!("Examples/features/serde/{stem}.jet");
+        let source = fs::read_to_string(&shown).unwrap();
+        let expected = fs::read_to_string(format!("Examples/features/expected/serde/{stem}.out")).unwrap();
+        let dir = build_web_fixture(stem, &source, &shown);
+        assert_eq!(run_web_app(&dir), expected, "{stem} JS output changed");
+        let harness = r#"
+const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
+const instance = await instantiateWasm("./app.wasm");
+instance.exports.jet_export_run();
+if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("unexpected Wasm outcome");
+"#;
+        assert_eq!(
+            run_node_harness(&dir, "dyn_rules_wasm_harness.mjs", harness),
+            expected,
+            "{stem} Wasm output changed",
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+}
+
 /// D-CONC-ALLNAMED1=A: the web adapters preserve heterogeneous named fields
 /// when the first authored branch yields after the second branch. The nested
 /// task makes that reverse completion observable in JavaScript; Wasm uses its

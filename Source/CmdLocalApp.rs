@@ -112,7 +112,7 @@ fn fail_preflight(message: &str, json: bool) -> ! {
                         return None;
                     }
                     match value {
-                        Dyn::Text(value) | Dyn::TypedText(value) => Some(value.clone()),
+                        Dyn::Text(value) => Some(value.clone()),
                         _ => None,
                     }
                 })
@@ -378,7 +378,7 @@ fn required_string(fields: &[(String, Dyn)], key: &str) -> Result<String, String
         .iter()
         .find_map(|(field, value)| (field == key).then_some(value))
     {
-        Some(Dyn::Text(value)) | Some(Dyn::TypedText(value)) => Ok(value.clone()),
+        Some(Dyn::Text(value)) => Ok(value.clone()),
         _ => Err(format!("local-app identity field `{key}` is not text")),
     }
 }
@@ -1044,13 +1044,13 @@ fn parse_values(body: &str) -> Result<BTreeMap<String, String>, String> {
         .iter()
         .map(|(name, value)| {
             let value = match value {
-                Dyn::Text(value) | Dyn::TypedText(value) => value.clone(),
+                Dyn::Text(value) => value.clone(),
                 Dyn::Bool(value) => value.to_string(),
                 Dyn::Int(value) => value.to_string(),
                 Dyn::Float(value) => value.to_string(),
                 Dyn::Number(value) => value.clone(),
                 Dyn::Null => "null".into(),
-                Dyn::Array(_) | Dyn::Object(_) | Dyn::Bytes(_) => {
+                Dyn::Array(_) | Dyn::Object(_) | Dyn::Bytes(_) | Dyn::DateTime(_) => {
                     return Err(format!("local-app control `{name}` must be a scalar Jet literal"))
                 }
             };

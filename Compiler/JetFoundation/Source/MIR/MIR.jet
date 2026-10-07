@@ -71,13 +71,13 @@ pub struct MIRSiteID { pub value: Int }
 // Stable FNV-1a over namespace, NUL, and canonical identity; IDs never depend
 // on process hash seeds, allocation order, or a backend's naming scheme.
 pub fn stable_id(namespace: String, identity: String) -> Int Never! {
-    mask :: 0xffffffffffffffff
-    hash := 0xcbf29ce484222325
-    loop byte in namespace.bytes() -> hash = ((hash ^ Int.from_u8(byte)) * 0x100000001b3) & mask
-    hash = (hash * 0x100000001b3) & mask
-    loop byte in identity.bytes() -> hash = ((hash ^ Int.from_u8(byte)) * 0x100000001b3) & mask
+    prime :: U64{0x100000001b3}
+    hash := U64{0xcbf29ce484222325}
+    loop byte in namespace.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
+    hash = hash.wrapping_mul(prime)
+    loop byte in identity.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
     if hash == 0 -> return 1
-    hash
+    Int.from_u64(hash)
 }
 
 pub fn mir_function_id(identity: String) -> MIRFunctionID Never! { MIRFunctionID{value: stable_id("mir-function", identity)} }

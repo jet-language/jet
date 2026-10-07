@@ -364,7 +364,7 @@ fn field<'a>(object: &'a [(String, Dyn)], key: &str) -> Option<&'a Dyn> {
 
 fn string(object: &[(String, Dyn)], key: &str) -> Option<String> {
     field(object, key).and_then(|value| match value {
-        Dyn::Text(value) | Dyn::TypedText(value) => Some(value.clone()),
+        Dyn::Text(value) => Some(value.clone()),
         _ => None,
     })
 }

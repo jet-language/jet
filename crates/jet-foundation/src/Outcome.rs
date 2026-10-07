@@ -808,8 +808,8 @@ fn jet_error_json_u32(
     name: &str,
 ) -> Result<u32, String> {
     match value {
-        crate::Dyn::Dyn::Int(value) => u32::try_from(*value)
-            .map_err(|_| format!("error report {name} is not a u32")),
+        crate::Dyn::Dyn::Int(value) => value.to_i64().and_then(|value| u32::try_from(value).ok())
+            .ok_or_else(|| format!("error report {name} is not a u32")),
         _ => Err(format!("error report {name} is not an integer")),
     }
 }
@@ -888,17 +888,11 @@ fn jet_error_json_encode_value(value: &crate::Dyn::Dyn) -> String {
         crate::Dyn::Dyn::Int(value) => value.to_string(),
         crate::Dyn::Dyn::Float(value) => value.to_string(),
         crate::Dyn::Dyn::Number(value) => value.clone(),
-        crate::Dyn::Dyn::Text(value) | crate::Dyn::Dyn::TypedText(value) => {
+        crate::Dyn::Dyn::Text(value) => {
             format!("\"{}\"", jet_error_json_escape(value))
         }
-        crate::Dyn::Dyn::Bytes(bytes) => format!(
-            "[{}]",
-            bytes
-                .iter()
-                .map(|byte| byte.to_string())
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
+        crate::Dyn::Dyn::Bytes(bytes) => format!("\"{}\"", crate::Dyn::Dyn::bytes_text(bytes)),
+        crate::Dyn::Dyn::DateTime(value) => format!("\"{}\"", value.to_rfc3339()),
         crate::Dyn::Dyn::Array(values) => format!(
             "[{}]",
             values
@@ -2470,6 +2464,11 @@ pub fn jet_missing_map_key_message(key: Option<&str>) -> String {
 /// carry the full JetShow trait into their boundary.
 pub fn jet_missing_map_key_value(key: impl std::fmt::Display) -> String {
     jet_missing_map_key_message(Some(&key.to_string()))
+}
+
+/// Dyn accesses share the map-index stop envelope; this helper owns only wording.
+pub fn jet_dyn_stop_message(site: &str, detail: &str) -> String {
+    format!("{site}: {detail}")
 }
 
 pub fn jet_test_expect_fail_message(expected_code: Option<&str>) -> String {

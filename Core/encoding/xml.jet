@@ -218,11 +218,11 @@ fn parse_xml_limited(text: String, limits: XMLLimits) -> Dyn EncodingError! {
 }
 
 fn element_tree(name: String, attrs: [Dyn], children: [Dyn]) -> Dyn Never! {
-    entries := [String:Dyn]{}
-    _ :: &entries.add("name", Dyn.Text(~name))
-    _ :: &entries.add("attrs", Dyn.Array(~attrs))
-    _ :: &entries.add("children", Dyn.Array(~children))
-    Dyn.Object(entries)
+    entries := Dyn.object()
+    entries["name"] = Dyn.Text(~name)
+    entries["attrs"] = Dyn.Array(~attrs)
+    entries["children"] = Dyn.Array(~children)
+    entries
 }
 
 struct XMLParser {
@@ -540,6 +540,7 @@ fn tree_field_or(value: Dyn, name: String, fallback: Dyn) -> Dyn Never! {
     }
     ~fallback
 }
+
 
 fn render_xml(value: Dyn) -> String Never! {
     name_tree :: tree_field_or(value, "name", Dyn.Text("root"))

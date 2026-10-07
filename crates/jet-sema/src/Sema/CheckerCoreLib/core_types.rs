@@ -64,6 +64,21 @@ pub(crate) fn json_ty() -> Type {
     Type::Named(Syntax::TYPE_DATA.to_string())
 }
 
+pub(crate) fn is_dyn_type(ty: &Type) -> bool {
+    matches!(ty.without_user_tags(), Type::Named(name) if Syntax::is_data_type_name(name))
+}
+
+pub(crate) fn dyn_wrappable(ty: &Type) -> bool {
+    match ty.without_user_tags() {
+        Type::Int | Type::Float | Type::String | Type::Bool => true,
+        Type::Named(name) => Syntax::is_data_type_name(name)
+            || matches!(name.as_str(), "DateTime" | "ZonedDateTime"),
+        Type::List(elem) | Type::FixedList { elem, .. } => is_u8_ty(elem) || dyn_wrappable(elem),
+        Type::Map { key, value, .. } => **key == Type::String && dyn_wrappable(value),
+        _ => false,
+    }
+}
+
 /// The ordered `Dyn.Object` payload a compiler-generated struct encoder
 /// accumulates: `[(key: String, value: Dyn)]`, one row per emitted field
 /// in declaration order. It is the pair list every engine already stores for
@@ -111,7 +126,7 @@ pub(crate) fn data_renamed_to_dyn(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0351",
         "the value tree is named `Dyn`, not `Data`".to_string(),
-        "`Dyn` is the one name a hand codec constructs and returns and every format's `parse` yields — its variants are `.Null`/`.Bool`/`.Int`/`.Float`/`.Text`/`.Array`/`.Object`".to_string(),
+        "`Dyn` is the one name a hand codec constructs and returns and every format's `parse` yields — its variants are `.Null`/`.Bool`/`.Int`/`.Float`/`.Number`/`.Text`/`.Bytes`/`.DateTime`/`.Array`/`.Object`".to_string(),
         "write `Dyn` instead of `Data`".to_string(),
         Some(span),
     )
@@ -2786,15 +2801,16 @@ pub fn core_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
         "Int" => Some(vec![Type::Int]),
         "Float" => Some(vec![Type::Float]),
         "Text" => Some(vec![Type::String]),
+        "Bytes" => Some(vec![Type::List(Box::new(u8_ty()))]),
+        "DateTime" => Some(vec![Type::Named("ZonedDateTime".to_string())]),
         "Array" => Some(vec![Type::List(Box::new(json.clone()))]),
         "Object" => Some(vec![Type::Map {
             key: Box::new(Type::String),
             key_span: None,
             value: Box::new(json),
         }]),
-        // `Number` is the compiler-only lexical carrier used by typed JSON
-        // parsing. It is accepted in generated union decoder patterns, but
-        // has no public `Dyn.Number(...)` constructor.
+        // `Number` is the exact parsed lexeme (#4602): matchable, but only a
+        // parser constructs it.
         "Number" => Some(vec![Type::String]),
         _ => None,
     }
@@ -4466,6 +4482,7 @@ pub(crate) fn core_encoding_variants(
             ("Float", Type::Float),
             ("Text", Type::String),
             (Syntax::TYPE_BYTES, Type::List(Box::new(u8_ty()))),
+            ("DateTime", Type::Named("ZonedDateTime".to_string())),
             ("Key", Type::String),
         ] {
             variants.insert(name.to_string(), (zero, VariantPayload::Single(ty, zero)));

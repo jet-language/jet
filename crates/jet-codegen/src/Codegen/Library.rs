@@ -784,7 +784,7 @@ fn render_component_wrapper(program: &MirProgram, export: &RichExport) -> String
 pub extern "C" fn {wrapper}(input: JetComponent) -> JetComponent {{
     let run = || -> Result<JetComponent, String> {{
         let text = {read}(input)?;
-        let __jet_tree = jet_std::parse_json_typed_dyn(&text)
+        let __jet_tree = jet_std::parse_json_dyn(&text)
             .map_err(|_| "component input is not valid JSON".to_string())?;
         {parse_values}
         {locals}

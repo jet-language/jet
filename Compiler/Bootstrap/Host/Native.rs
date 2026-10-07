@@ -4151,7 +4151,6 @@ fn emit_bootstrap_callback(
     out: &mut String,
     symbols: &BootstrapCodecSymbols<'_>,
 ) -> Result<(), BootstrapHostCodecError> {
-    let row = symbols.type_symbol("MIRPreludeCall")?;
     let shape = symbols.type_symbol("JetEvalHostTypeShape")?;
     let host_argument = symbols.type_symbol("JetEvalHostArgument")?;
     let host_argument_value = symbols.field_symbol("JetEvalHostArgument", "value")?;

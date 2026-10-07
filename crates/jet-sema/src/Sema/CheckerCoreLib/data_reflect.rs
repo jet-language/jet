@@ -1,6 +1,38 @@
 use super::core_types::{decode_error_ty, u8_ty};
 use crate::AST::Type;
 
+pub(crate) fn dyn_float_literal(expr: &crate::AST::Expr) -> bool {
+    use crate::AST::{Expr, UnOp};
+    match expr {
+        Expr::Float(_, _, false, Some(_)) => true,
+        Expr::Paren(inner, _) | Expr::Unary(UnOp::Neg, inner, _) => dyn_float_literal(inner),
+        _ => false,
+    }
+}
+
+pub(crate) fn dyn_member(name: &str) -> bool {
+    matches!(name, "get" | "has" | "keys" | "remove" | "len" | "decode" | "to_text"
+        | "field" | "at" | "int" | "float" | "text" | "bool" | "equal_unordered" | "encode")
+}
+
+pub(crate) fn dyn_call(receiver: crate::AST::Expr, method: &str, values: Vec<crate::AST::Expr>, ret: Type, span: crate::Diagnostics::Span) -> crate::AST::Expr {
+    use crate::AST::{AccessConvention, CallArg, CallArgFlags, Expr};
+    Expr::MethodCall {
+        receiver: Box::new(receiver),
+        method: method.to_string(),
+        method_span: span,
+        owner_type_args: Vec::new(),
+        type_args: Vec::new(),
+        args: values.into_iter().map(|expr| CallArg {
+            span: expr.span(), expr, convention: AccessConvention::Read,
+            flags: CallArgFlags::default(), label: None, spread: false,
+        }).collect(),
+        recv_type: Some("__DynOp__".to_string()),
+        resolved_ret: Some(ret),
+        operator_rhs: None,
+        checked_widen: false,
+    }
+}
 /// D-SERDE-ACCESS=B + D-SERDE14=A: accessor methods on `Dyn`. Every read
 /// yields `T ![FieldError]` so automatic propagation composes with no mapping ceremony
 /// inside a hand `decode`; `.field` and `.at` fill `FieldError.path` from the
@@ -17,6 +49,10 @@ use crate::AST::Type;
 pub fn dyn_method_return(method: &str, n_args: usize) -> Option<Type> {
     let decode_err = || Box::new(decode_error_ty());
     match (method, n_args) {
+        ("get" | "remove", 1) => Some(Type::Option(Box::new(Type::Named("Dyn".to_string())))),
+        ("has", 1) => Some(Type::Bool),
+        ("keys", 0) => Some(Type::List(Box::new(Type::String))),
+        ("len", 0) => Some(Type::Int),
         ("field", 1) => Some(Type::Result {
             ok: Box::new(Type::Named("Dyn".to_string())),
             err: decode_err(),

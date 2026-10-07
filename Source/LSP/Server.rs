@@ -728,7 +728,7 @@ fn publish_after_change_impl(
         None => return Ok(()),
     };
     let Some(version) = json_get(td, "version").and_then(|value| match value {
-        Dyn::Int(version) => i32::try_from(*version).ok(),
+        Dyn::Int(version) => version.to_i64().and_then(|value| i32::try_from(value).ok()),
         _ => None,
     }) else {
         return Ok(());
@@ -2800,7 +2800,7 @@ fn signature_change_response(
 
 fn dyn_text(value: &Dyn) -> Option<&str> {
     match value {
-        Dyn::Text(value) | Dyn::TypedText(value) => Some(value),
+        Dyn::Text(value) => Some(value),
         _ => None,
     }
 }
@@ -3525,7 +3525,7 @@ mod project_part_tests {
             end.character,
         ))
         .unwrap();
-        code_action_response(server, Some(&params), &Dyn::Int(1)).unwrap()
+        code_action_response(server, Some(&params), &Dyn::Int((1).into())).unwrap()
     }
 
     #[test]
@@ -4280,10 +4280,10 @@ mod project_part_tests {
             worker_rendezvous.wait();
         });
 
-        let response = cancellable_response(&cancelled, "7", &Dyn::Int(7), || {
+        let response = cancellable_response(&cancelled, "7", &Dyn::Int((7).into()), || {
             rendezvous.wait();
             rendezvous.wait();
-            Some(response(&Dyn::Int(7), "true"))
+            Some(response(&Dyn::Int((7).into()), "true"))
         })
         .expect("cancel response");
         canceller.join().unwrap();

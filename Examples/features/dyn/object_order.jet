@@ -1,0 +1,24 @@
+// Tower #4304: a Dyn object keeps insertion order in every renderer; only the
+// canonical encoders sort. A Jet map value has key order, so it keeps that.
+use core.encoding.json as json
+
+fn run() {
+    parsed :: json.parse("{{\"name\":\"jet\",\"ok\":true,\"items\":[1,2]}}") ?? panic("parse")
+    print(json.to_string(parsed))
+    print(json.canonical(parsed) ?? panic("canonical"))
+
+    replaced :: json.parse_allow_duplicates("{{\"z\":1,\"a\":2,\"z\":3}}") ?? panic("allow duplicates")
+    print(json.to_string(replaced))
+
+    report := Dyn.object()
+    report.schema = "jet.report"
+    report.action = "check"
+    report.ok = true
+    print(json.to_string(report))
+    print(json.to_string_pretty(report))
+
+    print(json.to_string(Dyn.Object(["ok": true, "n": 7])))
+
+    values :: [String:Int]{"z": 26, "a": 1, "m": 13}
+    print(json.to_string(values))
+}

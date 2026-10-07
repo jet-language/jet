@@ -604,7 +604,7 @@ mod jet_app_impl {
                         .collect(),
                 ),
                 // Loader data is JSON text; the tier's JSON decoder owns it.
-                JetAppRouteBinding::Data => jet_std::Dyn::TypedText(self.data.to_string()),
+                JetAppRouteBinding::Data => jet_std::Dyn::Text(self.data.to_string()),
             })
         }
 
@@ -645,7 +645,9 @@ mod jet_app_impl {
                     );
                 }
             };
-            T::jet_decode(&tree)
+            // Path and search parameters are text-native: their scalars are
+            // text by construction, so they decode inside the text-cell scope.
+            jet_std::jet_decode_text_cells(|| T::jet_decode(&tree))
                 .map_err(|errors| format!("route `{route}` {}: {errors:?}", binding.label()))
         }
     }

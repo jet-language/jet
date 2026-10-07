@@ -59,7 +59,13 @@ fn jet_rust_emit_local_declaration(ctx: &JetRustEmitContext, local: MIRLocal) ->
     "let mut {jet_rust_emit_local_slot(local.id)}: Option<{jet_rust_emit_type(&ctx, local.ty)}> = None;"
 }
 
-fn jet_rust_emit_value_declaration(ctx: &JetRustEmitContext, value: MIRValueFact) -> String Never! {
+// MIRRust emit_slots: a `Global` read of a shared constant holds the shared
+// value in a `JetSharedSlot`, whose readers borrow it in place.
+fn jet_rust_emit_value_declaration(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueFact) -> String Never! {
+    if jet_rust_emit_shared_constant_value(&ctx, function, value.id) {
+        root :: ~ctx.config.root_prefix
+        return "let mut {jet_rust_emit_value_slot(value.id)}: {root}JetSharedSlot<{jet_rust_emit_type(&ctx, value.ty)}> = {root}JetSharedSlot::empty();"
+    }
     "let mut {jet_rust_emit_value_slot(value.id)}: Option<{jet_rust_emit_type(&ctx, value.ty)}> = None;"
 }
 
@@ -1006,6 +1012,7 @@ fn jet_rust_emit_trait_default_args(method: MIRTraitMethod) -> String Never! {
     args.join(", ")
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::emit_trait_method
 fn jet_rust_emit_trait_method_definition(ctx: &JetRustEmitContext, definition: MIRTraitDef, method: MIRTraitMethod, lines: &[String]) Never! {
     default_id :: method.default ?? {
         &lines.push("    {jet_rust_emit_trait_method_signature(&ctx, definition.name, method)}")
@@ -1013,21 +1020,21 @@ fn jet_rust_emit_trait_method_definition(ctx: &JetRustEmitContext, definition: M
     }
     found := false
     valid := true
-    loop function in jet_rust_emit_function_rows(ctx, default_id) {
-        if function.id == default_id {
+    if jet_rust_emit_function_index(ctx, default_id) == .Val(function_index) {
+        if ctx.program.functions[function_index].id == default_id {
             found = true
-            if function.name != method.name || function.generic_params.len() > 0 || function.capture_params.len() > 0 || function.failure != method.failure || !mir_type_same_checked_type(function.return_type, method.return_type) {
+            if ctx.program.functions[function_index].name != method.name || ctx.program.functions[function_index].generic_params.len() > 0 || ctx.program.functions[function_index].capture_params.len() > 0 || ctx.program.functions[function_index].failure != method.failure || !mir_type_same_checked_type(ctx.program.functions[function_index].return_type, method.return_type) {
                 valid = false
             }
-            if function.form == {
+            if ctx.program.functions[function_index].form == {
                 .TraitMethod(_, trait_ref, self_access, serde) -> {
                     if trait_ref.id != definition.id || trait_ref.name != definition.key || self_access != method.self_access || serde != None -> valid = false
                 }
                 else -> valid = false
             }
             expected_index := 0
-            loop parameter in function.params {
-                if jet_rust_emit_is_receiver(function, parameter.index) -> next
+            loop parameter in ctx.program.functions[function_index].params {
+                if jet_rust_emit_is_receiver(ctx.program.functions[function_index], parameter.index) -> next
                 if expected_index >= method.params.len() {
                     valid = false
                     next
@@ -1049,10 +1056,10 @@ fn jet_rust_emit_trait_method_definition(ctx: &JetRustEmitContext, definition: M
         &lines.push("    {jet_rust_emit_trait_method_signature(&ctx, definition.name, method)}")
         return
     }
-    loop function in jet_rust_emit_function_rows(ctx, default_id) {
-        if function.id == default_id {
+    if jet_rust_emit_function_index(ctx, default_id) == .Val(function_index) {
+        if ctx.program.functions[function_index].id == default_id {
             &lines.push("    {jet_rust_emit_trait_method_head(&ctx, definition.name, method)} {{")
-            &lines.push("        {jet_rust_emit_function_name(&ctx, function.id)}({jet_rust_emit_trait_default_args(method)})")
+            &lines.push("        {jet_rust_emit_function_name(&ctx, default_id)}({jet_rust_emit_trait_default_args(method)})")
             &lines.push("    }}")
         }
     }
@@ -1253,6 +1260,7 @@ fn jet_rust_emit_impl_method(ctx: &JetRustEmitContext, implementation: MIRImplDe
     &lines.push("")
 }
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::emit_impl
 fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRImplDef, lines: &[String]) Never! {
     previous_generic_params := ctx.current_generic_params
     impl_type_params :: jet_rust_emit_type_application_generic_params(&ctx, implementation.self_type)
@@ -1279,8 +1287,8 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRIm
                     if implementation.serde == None && (required.default == None || implementation.delegation != None) {
                         implemented := false
                         loop method_id in implementation.methods {
-                            loop function in jet_rust_emit_function_rows(ctx, method_id) {
-                                if function.id == method_id && function.name == required.name && (ctx.config.web_bucket == None || jet_rust_emit_function_target_enabled(ctx.config, function)) -> implemented = true
+                            if jet_rust_emit_function_index(ctx, method_id) == .Val(function_index) {
+                                if ctx.program.functions[function_index].id == method_id && ctx.program.functions[function_index].name == required.name && (ctx.config.web_bucket == None || jet_rust_emit_function_target_enabled(ctx.config, ctx.program.functions[function_index])) -> implemented = true
                             }
                         }
                         if !implemented -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "trait impl omits a required method", "every checked trait method without a default must have one impl method row", Val(implementation.span))
@@ -1297,7 +1305,10 @@ fn jet_rust_emit_impl_definition(ctx: &JetRustEmitContext, implementation: MIRIm
     }
     loop method_id in implementation.methods {
         found := false
-        loop function in jet_rust_emit_function_rows(ctx, method_id) {
+        if jet_rust_emit_function_index(ctx, method_id) == .Val(function_index) {
+            // The emitters below write through `ctx`, so they take a copy of
+            // the row, as the one-row adapter this replaces did.
+            function :: ~ctx.program.functions[function_index]
             if function.id == method_id {
                 found = true
                 if ctx.config.web_bucket == None || jet_rust_emit_function_target_enabled(ctx.config, function) {
@@ -1479,6 +1490,7 @@ struct JetRustEmitCodecTemplate {
     origin: String
 }
 
+// Rust: none (Jet-only pass)
 fn jet_rust_emit_codec_call_allowed(ctx: &JetRustEmitContext, codec: MIRSerdeCodec?, callee: MIRCallee) -> Bool Never! {
     if codec == None -> return false
     target := MIRFunctionID?{None}
@@ -1489,8 +1501,8 @@ fn jet_rust_emit_codec_call_allowed(ctx: &JetRustEmitContext, codec: MIRSerdeCod
         else -> {}
     }
     id :: target ?? return false
-    loop candidate in jet_rust_emit_function_rows(ctx, id) {
-        if candidate.id == id && candidate.form == .TraitMethod(_, _, _, serde) -> return serde == codec
+    if jet_rust_emit_function_index(ctx, id) == .Val(candidate_index) {
+        if ctx.program.functions[candidate_index].id == id && ctx.program.functions[candidate_index].form == .TraitMethod(_, _, _, serde) -> return serde == codec
     }
     false
 }
@@ -1814,7 +1826,7 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     loop line in partial_lines -> &lines.push("    {line}")
     loop local in function.locals -> &lines.push("    {jet_rust_emit_local_declaration(&ctx, local)}")
     values_start :: lines.len()
-    loop value in function.values -> &lines.push("    {jet_rust_emit_value_declaration(&ctx, value)}")
+    loop value in function.values -> &lines.push("    {jet_rust_emit_value_declaration(&ctx, function, value)}")
     values_end :: lines.len()
     // Slots that park later payloads of a moved enum subject.
     loop value in function.values {

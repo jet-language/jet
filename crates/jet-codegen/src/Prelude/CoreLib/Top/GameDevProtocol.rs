@@ -1296,7 +1296,7 @@ fn jet_game_control_required_text(
     name: &str,
 ) -> Result<String, String> {
     match jet_game_control_field(fields, name) {
-        Some(jet_std::Dyn::Text(value) | jet_std::Dyn::TypedText(value))
+        Some(jet_std::Dyn::Text(value))
             if !value.is_empty() =>
         {
             Ok(value.clone())
@@ -1312,7 +1312,7 @@ fn jet_game_control_optional_text(
 ) -> Result<Option<String>, String> {
     match jet_game_control_field(fields, name) {
         None | Some(jet_std::Dyn::Null) => Ok(None),
-        Some(jet_std::Dyn::Text(value) | jet_std::Dyn::TypedText(value))
+        Some(jet_std::Dyn::Text(value))
             if !value.is_empty() =>
         {
             Ok(Some(value.clone()))
@@ -1327,7 +1327,8 @@ fn jet_game_control_optional_u64(
 ) -> Result<Option<u64>, String> {
     match jet_game_control_field(fields, name) {
         None | Some(jet_std::Dyn::Null) => Ok(None),
-        Some(jet_std::Dyn::Int(value)) if *value >= 0 => Ok(Some(*value as u64)),
+        Some(jet_std::Dyn::Int(value)) => value.to_u64().map(Some)
+            .ok_or_else(|| format!("{name} must be a non-negative integer")),
         Some(jet_std::Dyn::Number(value)) => value
             .parse::<u64>()
             .map(Some)
@@ -3075,13 +3076,13 @@ fn jet_game_asset_watch_events(
                 _ => return Err("game asset watch event requires root".to_string()),
             };
             let root_id = match jet_game_control_field(root, "id") {
-                Some(jet_std::Dyn::Text(value) | jet_std::Dyn::TypedText(value)) => {
+                Some(jet_std::Dyn::Text(value)) => {
                     value.clone()
                 }
                 _ => return Err("game asset watch root requires id".to_string()),
             };
             let root_path = match jet_game_control_field(root, "path") {
-                Some(jet_std::Dyn::Text(value) | jet_std::Dyn::TypedText(value)) => {
+                Some(jet_std::Dyn::Text(value)) => {
                     value.clone()
                 }
                 _ => return Err("game asset watch root requires path".to_string()),

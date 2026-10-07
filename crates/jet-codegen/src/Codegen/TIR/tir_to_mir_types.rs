@@ -343,6 +343,13 @@ pub(super) struct TirConstantDef {
     pub is_comptime: bool,
     /// Mutable and persisted module bindings need owning runtime storage.
     pub is_storage: bool,
+    /// D-CONSTMARK1: `#Static` keeps one addressable item; reads then never
+    /// copy the value into the use site. (`rust_kind` is not used: sema's
+    /// address-taken walk marks every plain read of a local constant.)
+    pub addressable: bool,
+    /// D-CONSTMARK1: `#Inline` copies the value into every use site, tables
+    /// included.
+    pub force_inline: bool,
     pub value: CtValue,
 }
 
@@ -2140,6 +2147,8 @@ pub(super) fn lower_constant(definition: &ConstDef, module: &str) -> TirConstant
         ty,
         is_comptime: definition.is_comptime,
         is_storage: !definition.is_comptime && (definition.is_persist || definition.mutable),
+        addressable: definition.attrs.contains(&crate::AST::ConstAttr::ForceStatic),
+        force_inline: definition.attrs.contains(&crate::AST::ConstAttr::ForceInline),
         value,
     }
 }
@@ -2287,9 +2296,9 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
             "Int",
             "Float",
             "Number",
-            "TypedText",
             "Text",
             "Bytes",
+            "DateTime",
             "Array",
             "Object",
         ],
@@ -2307,6 +2316,7 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
             "Float",
             "Text",
             "Bytes",
+            "DateTime",
             "Key",
         ],
     ),
@@ -3644,6 +3654,7 @@ fn compiler_owned_type_defs<'a>(
                                 "Int" => TirVariantPayload::Single(Type::Int),
                                 "Float" => TirVariantPayload::Single(Type::Float),
                                 "Text" | "Key" => TirVariantPayload::Single(Type::String),
+                                "DateTime" => TirVariantPayload::Single(Type::Named("ZonedDateTime".to_string())),
                                 "Bytes" => {
                                     TirVariantPayload::Single(Type::List(Box::new(Type::IntN {
                                         signed: false,
@@ -3657,7 +3668,8 @@ fn compiler_owned_type_defs<'a>(
                                 "Bool" => TirVariantPayload::Single(Type::Bool),
                                 "Int" => TirVariantPayload::Single(Type::Int),
                                 "Float" => TirVariantPayload::Single(Type::Float),
-                                "Number" | "TypedText" | "Text" => {
+                                "DateTime" => TirVariantPayload::Single(Type::Named("ZonedDateTime".to_string())),
+                                "Number" | "Text" => {
                                     TirVariantPayload::Single(Type::String)
                                 }
                                 "Bytes" => {

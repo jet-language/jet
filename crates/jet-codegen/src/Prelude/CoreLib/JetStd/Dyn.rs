@@ -2,7 +2,37 @@
 // The shared Foundation Dyn carrier is embedded by Codegen before this
 // runtime extension. The built-in `#[Codable]` derive (D-ENC1) lowers
 // `encode`/`decode` to walks over the carrier; adapters turn it into wire data.
-// The carrier preserves field order (ordered `Object`) and keeps Int vs Float.
+// The carrier preserves field order (ordered `Object`), keeps Int vs Float, and
+// keeps a parsed number's exact lexeme as `Number` until a typed read (#4602).
+
+// #4602: decoding is strict. A `Text` leaf never becomes an Int, Float, or
+// Bool, so JSON `"42"` does not decode into an `Int` field. The one exception
+// is a text-native source (environment variables, CSV cells, route and query
+// parameters), where every scalar is text by construction: its adapter runs
+// the decode inside `jet_decode_text_cells`, and only there a `Text` leaf
+// parses into a scalar target.
+std::thread_local! {
+    static JET_TEXT_CELLS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+struct JetTextCellsScope(bool);
+
+impl Drop for JetTextCellsScope {
+    fn drop(&mut self) {
+        let previous = self.0;
+        JET_TEXT_CELLS.with(|cell| cell.set(previous));
+    }
+}
+
+/// Run a text-native source's decode with scalar parsing of `Text` leaves.
+pub fn jet_decode_text_cells<R>(decode: impl FnOnce() -> R) -> R {
+    let _scope = JetTextCellsScope(JET_TEXT_CELLS.with(|cell| cell.replace(true)));
+    decode()
+}
+
+pub fn jet_text_cells_active() -> bool {
+    JET_TEXT_CELLS.with(|cell| cell.get())
+}
 
 // D-VALIDATE-DECODE1=B (ratified 2026-08-03): every typed decoder returns
 // the same accumulated field-error list. Structural failures use the empty
@@ -48,7 +78,7 @@ impl FieldError {
 
 impl super::JetShow for Dyn {
     fn jet_show(&self) -> String {
-        render_dyn_json(self, false, 0)
+        self.to_text().unwrap_or_else(|| render_dyn_json(self, false, 0))
     }
 }
 
@@ -60,52 +90,30 @@ impl super::JetDisplay for Dyn {
 
 impl super::JetDebug for Dyn {
     fn jet_debug(&self) -> String {
-        <Self as super::JetShow>::jet_show(self)
+        render_dyn_json(self, false, 0)
     }
 }
-/// Preserve exact integer semantics at the Dyn boundary. The Int variant
-/// carries only the inline JetInt payload; larger values stay lexical Numbers
-/// so a tagged owner word is never mistaken for a host integer.
+/// Native integer encoders construct an owned exact Int, never a Number token.
 pub(crate) fn jet_dyn_encode_i64(value: i64) -> Dyn {
-    if (jet_foundation::Numeric::JetInt::inline_min()
-        ..=jet_foundation::Numeric::JetInt::inline_max())
-        .contains(&value)
-    {
-        Dyn::Int(value)
-    } else {
-        Dyn::Number(value.to_string())
-    }
+    Dyn::Int(value.into())
 }
 
 pub(crate) fn jet_dyn_encode_u64(value: u64) -> Dyn {
-    if value <= jet_foundation::Numeric::JetInt::inline_max() as u64 {
-        Dyn::Int(value as i64)
-    } else {
-        Dyn::Number(value.to_string())
-    }
+    Dyn::Int(value.into())
 }
 
-/// Jet's `Dyn.Int` holds an exact `Int`. The native carrier keeps a value
-/// that does not fit the inline slot as its decimal `Number` lexeme (the rule
-/// `jet_encode` uses), and these three functions are the one crossing of the
-/// Jet variant over that carrier: construct, test, and read the payload.
+/// Construct the canonical owned payload. Parsed Number tokens stay distinct.
 pub fn jet_dyn_int(value: jet_foundation::Numeric::JetInt) -> Dyn {
-    value
-        .to_i64()
-        .map(jet_dyn_encode_i64)
-        .unwrap_or_else(|| Dyn::Number(value.to_string_rep()))
+    Dyn::Int(value)
 }
 
 pub fn jet_dyn_is_int(tree: &Dyn) -> bool {
-    jet_dyn_int_payload(tree).is_some()
+    matches!(tree, Dyn::Int(_))
 }
 
 pub fn jet_dyn_int_payload(tree: &Dyn) -> Option<jet_foundation::Numeric::JetInt> {
     match tree {
-        Dyn::Int(value) => Some(jet_foundation::Numeric::JetInt::from(*value)),
-        Dyn::Number(text) => jet_foundation::Numeric::CtBigInt::from_str(text)
-            .map(jet_foundation::Numeric::JetInt::from_big)
-            .ok(),
+        Dyn::Int(value) => Some(value.clone()),
         _ => None,
     }
 }
@@ -181,9 +189,9 @@ pub fn dyn_kind_for(t: &Dyn) -> &'static str {
         Dyn::Int(_) => "Int",
         Dyn::Float(_) => "Float",
         Dyn::Number(_) => "Number",
-        Dyn::TypedText(_) => "Text",
         Dyn::Text(_) => "Text",
         Dyn::Bytes(_) => "Bytes",
+        Dyn::DateTime(_) => "DateTime",
         Dyn::Array(_) => "Array",
         Dyn::Object(_) => "Object",
     };
@@ -267,11 +275,10 @@ impl JetDynAccess for Dyn {
     }
     fn int(&self) -> Result<i64, Vec<FieldError>> {
         match self {
-            Dyn::Int(n) => Ok(*n),
-            // D-SERDE2: a hand `decode` runs inside the typed walk, so the
-            // lexical `Number`/`TypedText` carriers reach these accessors.
-            // Project them here exactly as the `decode_*` helpers do for
-            // derived codecs — one protocol for hand and derived codecs.
+            Dyn::Int(n) => Ok(n.clone().into_raw()),
+            // #4602: a parsed number keeps its lexeme as `Number`; reading it
+            // as an Int range-checks it exactly as the `decode_*` helpers do
+            // for derived codecs — one protocol for hand and derived codecs.
             Dyn::Number(text) => crate::jet_json_number::json_exact_integer_text(text)
                 .ok()
                 .and_then(|digits| jet_int_from_str(&digits).ok())
@@ -289,7 +296,7 @@ impl JetDynAccess for Dyn {
     }
     fn text(&self) -> Result<String, Vec<FieldError>> {
         match self {
-            Dyn::Text(s) | Dyn::TypedText(s) => Ok(s.clone()),
+            Dyn::Text(s) => Ok(s.clone()),
             _ => Err(FieldError::one(format!(
                 "expected text, got {}",
                 render_dyn_json(self, false, 0)
@@ -309,7 +316,7 @@ impl JetDynAccess for Dyn {
         match self {
             Dyn::Float(f) => Ok(*f),
             Dyn::Int(n) => {
-                let value = jet_int_to_f64(*n);
+                let value = n.to_f64();
                 if value.is_finite() {
                     Ok(value)
                 } else {
@@ -336,12 +343,14 @@ impl JetDynAccess for Dyn {
 
     fn to_text(&self) -> Option<String> {
         match self {
-            Dyn::Text(text) | Dyn::TypedText(text) => Some(text.clone()),
-            Dyn::Int(value) => Some(jet_int_to_string(*value)),
+            Dyn::Text(text) => Some(text.clone()),
+            Dyn::Int(value) => Some(value.to_string_rep()),
             Dyn::Float(value) => Some(format!("{:?}", value)),
             Dyn::Bool(value) => Some(value.to_string()),
             Dyn::Number(text) => Some(text.clone()),
-            Dyn::Null | Dyn::Bytes(_) | Dyn::Array(_) | Dyn::Object(_) => None,
+            Dyn::Bytes(bytes) => Some(Dyn::bytes_text(bytes)),
+            Dyn::DateTime(value) => Some(value.to_rfc3339()),
+            Dyn::Null | Dyn::Array(_) | Dyn::Object(_) => None,
         }
     }
 
@@ -354,9 +363,9 @@ impl JetDynAccess for Dyn {
                 !left.is_nan() && !right.is_nan() && left == right
             }
             (Dyn::Number(left), Dyn::Number(right)) => left == right,
-            (Dyn::TypedText(left), Dyn::TypedText(right)) => left == right,
             (Dyn::Text(left), Dyn::Text(right)) => left == right,
             (Dyn::Bytes(left), Dyn::Bytes(right)) => left == right,
+            (Dyn::DateTime(left), Dyn::DateTime(right)) => left == right,
             (Dyn::Array(left), Dyn::Array(right)) => {
                 left.len() == right.len()
                     && left
@@ -397,8 +406,9 @@ impl JetDynAccess for Dyn {
 /// Decode one fixed-width integer from the exact Dyn number carrier.
 ///
 /// The result is an exact `i128` after the shared numeric kernel has checked
-/// the destination width. `TypedText` never reaches `decode_int_with`, so JSON
-/// quoted numerals remain rejected; callers perform the final native cast.
+/// the destination width. A `Text` leaf decodes only inside a text-native
+/// source, so JSON quoted numerals stay rejected; callers perform the final
+/// native cast.
 pub(crate) fn jet_dyn_decode_fixed_integer(
     t: &Dyn,
     signed: bool,
@@ -423,6 +433,7 @@ pub(crate) fn jet_dyn_decode_fixed_integer(
     let value = decode_int_with(
         t,
         i128::from,
+        |value| value.to_i128().ok_or_else(|| "exact Int is outside i128".to_string()),
         |text| {
             text.parse::<i128>()
                 .map_err(|_| "exact Int is outside i128".to_string())
@@ -451,10 +462,11 @@ macro_rules! jet_dyn_decode_helpers {
         pub fn decode_int_with<T>(
             t: &Dyn,
             from_i64: impl Fn(i64) -> T,
+            from_exact: impl Fn(&jet_foundation::Numeric::JetInt) -> Result<T, String>,
             parse_exact: impl Fn(&str) -> Result<T, String>,
         ) -> Result<T, Vec<FieldError>> {
             match t {
-                Dyn::Int(n) => Ok(from_i64(*n)),
+                Dyn::Int(n) => from_exact(n).map_err(FieldError::one),
                 Dyn::Float(f)
                     if f.is_finite()
                         && f.fract() == 0.0
@@ -469,12 +481,12 @@ macro_rules! jet_dyn_decode_helpers {
                     parse_exact(&integer)
                         .map_err(|_| FieldError::one(format!("expected Int, found number {text}")))
                 }
-                Dyn::TypedText(text) => Err(FieldError::one(format!(
+                Dyn::Text(text) if jet_text_cells_active() => parse_exact(text.trim())
+                    .map_err(|_| FieldError::one(format!("expected Int, found text {:?}", text))),
+                Dyn::Text(text) => Err(FieldError::one(format!(
                     "expected Int, found text {:?}",
                     text
                 ))),
-                Dyn::Text(text) => parse_exact(text.trim())
-                    .map_err(|_| FieldError::one(format!("expected Int, found text {:?}", text))),
                 other => Err(FieldError::one(format!(
                     "expected Int, found {}",
                     dyn_kind_for(other)
@@ -485,30 +497,29 @@ macro_rules! jet_dyn_decode_helpers {
         /// Resident raw exact-Int wrapper. Every successful result is a
         /// managed carrier, including a large `Dyn::Int`.
         pub fn decode_int(t: &Dyn) -> Result<i64, Vec<FieldError>> {
-            decode_int_with(t, jet_int_from_i64, |text| jet_int_from_str(text))
+            decode_int_with(t, jet_int_from_i64, |value| Ok(value.clone().into_raw()), |text| jet_int_from_str(text))
         }
         pub fn decode_float(t: &Dyn) -> Result<f64, Vec<FieldError>> {
             match t {
                 Dyn::Float(f) => Ok(*f),
                 Dyn::Int(n) => {
-                    let value = jet_int_to_f64(*n);
+                    let value = n.to_f64();
                     if value.is_finite() {
                         Ok(value)
                     } else {
                         Err(FieldError::one("expected float, got out-of-range Int"))
                     }
                 }
-                Dyn::Number(text) | Dyn::Text(text) => {
-                    let value = text.trim().parse::<f64>().map_err(|_| {
+                Dyn::Number(text) => decode_finite_lexeme(text, "Float"),
+                Dyn::Text(text) if jet_text_cells_active() => text
+                    .trim()
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|value| value.is_finite())
+                    .ok_or_else(|| {
                         FieldError::one(format!("expected Float, found text {:?}", text))
-                    })?;
-                    if value.is_finite() {
-                        Ok(value)
-                    } else {
-                        Err(FieldError::one("expected Float, found out-of-range Float"))
-                    }
-                }
-                Dyn::TypedText(text) => Err(FieldError::one(format!(
+                    }),
+                Dyn::Text(text) => Err(FieldError::one(format!(
                     "expected Float, found text {:?}",
                     text
                 ))),
@@ -522,11 +533,7 @@ macro_rules! jet_dyn_decode_helpers {
         pub fn decode_bool(t: &Dyn) -> Result<bool, Vec<FieldError>> {
             match t {
                 Dyn::Bool(value) => Ok(*value),
-                Dyn::TypedText(text) => Err(FieldError::one(format!(
-                    "expected Bool, found text {:?}",
-                    text
-                ))),
-                Dyn::Text(text) => match text.trim() {
+                Dyn::Text(text) if jet_text_cells_active() => match text.trim() {
                     "true" => Ok(true),
                     "false" => Ok(false),
                     _ => Err(FieldError::one(format!(
@@ -534,6 +541,10 @@ macro_rules! jet_dyn_decode_helpers {
                         text
                     ))),
                 },
+                Dyn::Text(text) => Err(FieldError::one(format!(
+                    "expected Bool, found text {:?}",
+                    text
+                ))),
                 other => Err(FieldError::one(format!(
                     "expected Bool, found {}",
                     dyn_kind_for(other)
@@ -543,13 +554,10 @@ macro_rules! jet_dyn_decode_helpers {
 
         pub fn decode_string(t: &Dyn) -> Result<String, Vec<FieldError>> {
             match t {
-                Dyn::Text(text) | Dyn::TypedText(text) => Ok(text.clone()),
+                Dyn::Text(text) => Ok(text.clone()),
                 Dyn::Number(text) => Err(FieldError::one(format!(
                     "expected Text, found number {text}"
                 ))),
-                Dyn::Int(n) => Ok(jet_int_to_string(*n)),
-                Dyn::Float(f) => Ok(format!("{:?}", f)),
-                Dyn::Bool(value) => Ok(value.to_string()),
                 other => Err(FieldError::one(format!(
                     "expected Text, found {}",
                     dyn_kind_for(other)
@@ -557,15 +565,30 @@ macro_rules! jet_dyn_decode_helpers {
             }
         }
 
+        /// Range-check a `Number` lexeme read as a binary64 value: `1e400`
+        /// keeps its exact text in the tree and fails only here.
+        pub fn decode_finite_lexeme(text: &str, target: &str) -> Result<f64, Vec<FieldError>> {
+            match text.parse::<f64>() {
+                Ok(value) if value.is_finite() => Ok(value),
+                Ok(_) => Err(FieldError::one(format!(
+                    "expected {target}, found out-of-range number {text}"
+                ))),
+                Err(_) => Err(FieldError::one(format!(
+                    "expected {target}, found number {text}"
+                ))),
+            }
+        }
+
         pub fn decode_f32(t: &Dyn) -> Result<f32, Vec<FieldError>> {
             let value = match t {
                 Dyn::Float(value) => *value,
-                Dyn::Int(value) => jet_int_to_f64(*value),
-                Dyn::Number(text) | Dyn::Text(text) => text
+                Dyn::Int(value) => value.to_f64(),
+                Dyn::Number(text) => decode_finite_lexeme(text, "F32")?,
+                Dyn::Text(text) if jet_text_cells_active() => text
                     .trim()
                     .parse::<f64>()
                     .map_err(|_| FieldError::one(format!("expected F32, found text {:?}", text)))?,
-                Dyn::TypedText(text) => {
+                Dyn::Text(text) => {
                     return Err(FieldError::one(format!(
                         "expected F32, found text {:?}",
                         text

@@ -4025,6 +4025,22 @@ fn datetime_value(seconds: i64, nanos: u32, leap_second: bool) -> CtValue {
     )
 }
 
+pub fn dyn_datetime_value(value: jet_foundation::Dyn::DynDateTime) -> CtValue {
+    structure(
+        "ZonedDateTime",
+        vec![
+            ("instant", datetime_value(value.unix_seconds, value.nanos, value.leap_second)),
+            ("zone", structure(
+                "Zone",
+                vec![
+                    ("name", CtValue::Str(value.offset_text())),
+                    ("offset", CtValue::Int(i64::from(value.offset_seconds))),
+                ],
+            )),
+        ],
+    )
+}
+
 fn instant_start_ns(value: &CtValue, span: Span) -> Result<i64, Diagnostic> {
     int_field(value, "Instant", "start_ns", span)
 }

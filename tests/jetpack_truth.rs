@@ -235,7 +235,7 @@ fn ingest_tower_card(
     let num = match card.get("num").unwrap() {
         // One JSON model now: an exact integer stays an integer, and a decimal
         // is a separate variant (jet-foundation JSON.rs).
-        Dyn::Int(num) => *num as u64,
+        Dyn::Int(num) => num.to_u64().expect("JSON count is in u64 range"),
         Dyn::Float(num) => *num as u64,
         Dyn::Number(num) => num
             .parse::<f64>()

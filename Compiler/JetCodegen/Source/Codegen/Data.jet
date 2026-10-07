@@ -1,5 +1,6 @@
 // Source lowering for checked dynamic data literals and canonical Serde encoding.
 use jet_foundation.[
+    MIRAccess,
     Effect,
     MIRCallArg,
     MIRCallSignature,
@@ -29,7 +30,9 @@ use jet_foundation.[
     TExprKind,
     TFunc,
     THandleOp,
+    TLocal,
     TMapEntry,
+    TPanicLoc,
     TStmt,
     Type,
     TypeTupleField,
@@ -140,7 +143,7 @@ fn jet_codegen_typed_codec_target(ty: Type) -> Bool Never! {
         .IntN(_, _) | .List(_) | .FixedList(_, _) | .Option(_) -> return true
         .Map(key, _, _) -> return jet_codegen_unwrap_pattern_tags(key) == Type.String
         .Named(name) -> {
-            if name == "Data" || name == "Dyn" || name == "U8" || name == "I8" || name == "I16" || name == "I32" || name == "I64" || name == "I128" || name == "U16" || name == "U32" || name == "U64" || name == "U128" || name == "Secret" -> return true
+            if name == "Dyn" || name == "ZonedDateTime" || name == "U8" || name == "I8" || name == "I16" || name == "I32" || name == "I64" || name == "I128" || name == "U16" || name == "U32" || name == "U64" || name == "U128" || name == "Secret" -> return true
             return name.ends_with(".Secret")
         }
         .Tagged(_, inner) -> return jet_codegen_typed_codec_target(inner)
@@ -239,16 +242,14 @@ fn jet_codegen_lower_container_encode(builder: &JetCodegenBuilder, expression: T
     _ := jet_codegen_emit(&builder, expression.span, None, MIROperation.WritePlace{place: output_place, value: empty})
 
     loop_body := [TStmt]{}
-    variable := "encode_item_{source_value.value}"
-    variable_two := String?{None}
+    variable := tir_user_local("encode_item_{source_value.value}", expression.span)
+    variable_two := TLocal?{None}
     encoded_value := if {
         map -> {
-            key_name := "encode_key_{source_value.value}"
-            value_name := "encode_value_{source_value.value}"
-            variable = key_name
-            variable_two = Val(value_name)
-            key_local := tir_user_local(key_name, expression.span)
-            item_local := tir_user_local(value_name, expression.span)
+            key_local := tir_user_local("encode_key_{source_value.value}", expression.span)
+            item_local := tir_user_local("encode_value_{source_value.value}", expression.span)
+            variable = key_local
+            variable_two = Val(item_local)
             key_expr := jet_codegen_data_expr(Type.String, expression.span, TExprKind.Local{local: key_local})
             item_expr := jet_codegen_data_expr(element, expression.span, TExprKind.Local{local: item_local})
             jet_codegen_data_expr(
@@ -257,8 +258,7 @@ fn jet_codegen_lower_container_encode(builder: &JetCodegenBuilder, expression: T
                 TExprKind.Tuple{values: [TExpr]{key_expr, jet_codegen_data_encode_node(item_expr)}},
             )
         } else -> {
-            item_local := tir_user_local(variable, expression.span)
-            item_expr := jet_codegen_data_expr(element, expression.span, TExprKind.Local{local: item_local})
+            item_expr := jet_codegen_data_expr(element, expression.span, TExprKind.Local{local: variable})
             jet_codegen_data_encode_node(item_expr)
         }
     }
@@ -292,6 +292,7 @@ fn jet_codegen_data_union_enum_name(members: [Type]) -> String Never! {
     "__JetUnion_{tags.join("_")}"
 }
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs::lower_serde_encode / lower_dyn_decode
 fn jet_codegen_data_codec_function(builder: JetCodegenBuilder, ty: Type, codec: String, method_name: String) -> TFunc? {
     owner_type := if ty == {
         .Union(members) -> Type.Named{name: jet_codegen_data_union_enum_name(members)}
@@ -305,30 +306,23 @@ fn jet_codegen_data_codec_function(builder: JetCodegenBuilder, ty: Type, codec: 
     owner_identity := jet_codegen_find_nominal_identity(builder.modules, builder.function.module_identity, owner_name, builder.generic_type_names)
     if owner_identity == None -> return None
     identity :: owner_identity ?? return None
-    target_identity_key := String?{None}
-    loop semantic_module in builder.modules {
-        if semantic_module.module_identity != identity.module_identity -> next
-        loop nominal in semantic_module.nominals {
-            if nominal.symbol.name != identity.name -> next
-            if target_identity_key != None -> panic("ambiguous checked Serde {codec} owner identity")
-            target_identity_key = Val(nominal.identity_key)
-        }
-    }
-    target_key :: target_identity_key ?? return None
+    owner_key :: jet_codegen_qualified_function_key(identity.module_identity, identity.name)
+    owner_row :: builder.owners.hooks.nominal_by_owner.get(owner_key) ?? return None
+    if builder.owners.hooks.nominal_rows[owner_row].next_owner >= 0 -> panic("ambiguous checked Serde {codec} owner identity")
+    module_index :: builder.owners.hooks.nominal_rows[owner_row].module_index
+    nominal_index :: builder.owners.hooks.nominal_rows[owner_row].nominal_index
+    target_key :: builder.modules[module_index].nominals[nominal_index].identity_key
     selected := TFunc?{None}
-    loop semantic_module in builder.modules {
-        loop implementation in semantic_module.impls {
-            trait_symbol :: implementation.trait_symbol ?? next
-            if trait_symbol.name != codec || implementation.target_identity_key != target_key -> next
-            loop method in implementation.methods {
-                if method.symbol.name != method_name -> next
-                if selected != None -> panic("ambiguous checked Serde {codec} implementation")
-                selected = Val(
-                    jet_codegen_find_function(builder.function_index, method.symbol.id.key)
-                        ?? panic("checked Serde {codec}::{method_name} method is not reachable")
-                )
-            }
-        }
+    key :: jet_codegen_hook_method_key(target_key, codec, method_name)
+    row := builder.owners.hooks.exact_methods.get(key) ?? -1
+    loop row >= 0 {
+        if selected != None -> panic("ambiguous checked Serde {codec} implementation")
+        candidate :: builder.owners.hooks.implementation_rows[row]
+        selected = Val(
+            jet_codegen_find_function(builder.function_index, builder.modules[candidate.module_index].impls[candidate.implementation_index].methods[candidate.method_index].symbol.id.key)
+                ?? panic("checked Serde {codec}::{method_name} method is not reachable")
+        )
+        row = candidate.next_exact
     }
     selected
 }
@@ -642,6 +636,121 @@ fn jet_codegen_data_handle_route(builder: &JetCodegenBuilder, expression: TExpr,
         jet_codegen_failure_carrier_for_type(expression.ty),
         MIRPreludeABI.Value,
     ))
+}
+
+// The logical MIR operands keep the receiver first. The Rust emitter adapts
+// binary operand order and packs path steps into the Prelude's borrowed slice.
+fn jet_codegen_lower_dyn_operation(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, operation: THandleOp, args: [TExpr]) -> MIRValueID {
+    member := ""
+    symbol := ""
+    expected_args := 0
+    borrow_mask := [Bool]{true}
+    site := String?{None}
+    operator := String?{None}
+    location := TPanicLoc?{None}
+    mutating := false
+    if operation == {
+        .DynIndexKey(value, loc) -> {
+            member = "index_key"
+            symbol = "jet_dyn_index_key"
+            expected_args = 1
+            borrow_mask = [Bool]{true, true, true}
+            site = Val(value)
+            location = Val(loc)
+        }
+        .DynIndexAt(value, loc) -> {
+            member = "index_at"
+            symbol = "jet_dyn_index_at"
+            expected_args = 1
+            borrow_mask = [Bool]{true, false, true}
+            site = Val(value)
+            location = Val(loc)
+        }
+        .DynGetKey -> {
+            member = "get_key"
+            symbol = "jet_dyn_get_key"
+            expected_args = 1
+            borrow_mask = [Bool]{true, true}
+        }
+        .DynGetAt -> {
+            member = "get_at"
+            symbol = "jet_dyn_get_at"
+            expected_args = 1
+            borrow_mask = [Bool]{true, false}
+        }
+        .DynHas -> {
+            member = "has"
+            symbol = "jet_dyn_has"
+            expected_args = 1
+            borrow_mask = [Bool]{true, true}
+        }
+        .DynKeys -> {
+            member = "keys"
+            symbol = "jet_dyn_keys"
+        }
+        .DynLen(value, loc) -> {
+            member = "len"
+            symbol = "jet_dyn_len"
+            borrow_mask = [Bool]{true, true}
+            site = Val(value)
+            location = Val(loc)
+        }
+        .DynRemove -> {
+            member = "remove"
+            symbol = "jet_dyn_remove"
+            expected_args = 1
+            borrow_mask = [Bool]{true, true}
+            mutating = true
+        }
+        .DynBinary(op, value, loc) | .DynCompare(op, value, loc) -> {
+            compare :: operation == .DynCompare(_, _, _)
+            member = if compare -> "compare" else -> "binary"
+            symbol = if compare -> "jet_dyn_compare" else -> "jet_dyn_binary"
+            expected_args = 1
+            borrow_mask = [Bool]{true, true, true, true}
+            operator = Val(op)
+            site = Val(value)
+            location = Val(loc)
+        }
+        .DynSetPath(keys, value, loc) -> {
+            member = "set_path"
+            symbol = "jet_dyn_set_path"
+            expected_args = keys.len() + 1
+            if args.len() != expected_args -> panic("checked Dyn setter has unexpected arguments")
+            loop (index, key) in keys {
+                expected :: if key -> Type.String else -> Type.Int
+                if jet_codegen_unwrap_pattern_tags(args[index].ty) != expected -> panic("checked Dyn path step has the wrong type")
+                &borrow_mask.push(false)
+            }
+            &borrow_mask.push(false)
+            &borrow_mask.push(true)
+            site = Val(value)
+            location = Val(loc)
+            mutating = true
+        }
+        else -> panic("checked Dyn operation has no lowering")
+    }
+    if args.len() != expected_args -> panic("checked Dyn operation has unexpected arguments")
+    receiver_value :: if mutating -> jet_codegen_method_receiver_arg(&builder, receiver, MIRAccess.Write).value else -> jet_codegen_lower_expr(&builder, receiver)
+    lowered_args := [MIRValueID]{}
+    loop argument in args -> &lowered_args.push(jet_codegen_lower_expr(&builder, argument))
+    if operator == .Val(value) -> &lowered_args.push(jet_codegen_emit_value(&builder, expression.span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: value}}))
+    if site == .Val(value) -> &lowered_args.push(jet_codegen_emit_value(&builder, expression.span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: value}}))
+    result_type :: if location != None -> Type.Result{ok: expression.ty, err: Type.String} else -> expression.ty
+    route :: jet_codegen_intern_route(&builder, MIRPreludeFamily.HandleMethod, "core.encoding.dyn", member, symbol, borrow_mask.len(), borrow_mask, None, jet_codegen_failure_carrier_for_type(result_type), MIRPreludeABI.Value)
+    result :: jet_codegen_emit_value(&builder, expression.span, result_type, MIROperation.Semantic{operation: MIRSemanticOp.HandleMethod{call: route, receiver: receiver_value, args: lowered_args, frame_schedule: None, frame_schedule_derivation: None}})
+    if location == .Val(loc) {
+        condition :: jet_codegen_emit_value(&builder, expression.span, Type.Bool, MIROperation.ResultIsOk{subject: result})
+        success :: jet_codegen_new_block(&builder, expression.span, "dyn-success")
+        failure :: jet_codegen_new_block(&builder, expression.span, "dyn-stop")
+        jet_codegen_terminate(&builder, MIRTerminator.Branch{condition: condition, then_target: success, else_target: failure})
+        jet_codegen_switch_block(&builder, failure)
+        message :: jet_codegen_emit_value(&builder, expression.span, Type.String, MIROperation.ResultValue{subject: result, ok: false})
+        jet_codegen_lower_panic_value(&builder, expression, message, loc)
+        jet_codegen_switch_block(&builder, success)
+        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.ResultValue{subject: result, ok: true})
+    }
+    result
 }
 
 fn jet_codegen_lower_data_handle_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, operation: THandleOp, args: [TExpr]) -> MIRValueID {

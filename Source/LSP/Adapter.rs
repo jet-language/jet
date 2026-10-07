@@ -325,7 +325,8 @@ fn optional_string_alias(
 
 fn required_u64(object: &[(String, Dyn)], key: &str) -> Result<u64, EditorHostError> {
     match object_get(object, key) {
-        Some(Dyn::Int(value)) if *value >= 0 => Ok(*value as u64),
+        Some(Dyn::Int(value)) => value.to_u64().ok_or_else(|| EditorHostError::InvalidRequest(format!(
+            "editor host field `{key}` must be a nonnegative integer"))),
         _ => Err(EditorHostError::InvalidRequest(format!(
             "editor host field `{key}` must be a nonnegative integer"
         ))),
@@ -338,7 +339,8 @@ fn optional_u64(
 ) -> Result<Option<u64>, EditorHostError> {
     match object_get(object, key) {
         None | Some(Dyn::Null) => Ok(None),
-        Some(Dyn::Int(value)) if *value >= 0 => Ok(Some(*value as u64)),
+        Some(Dyn::Int(value)) => value.to_u64().map(Some).ok_or_else(|| EditorHostError::InvalidRequest(format!(
+            "editor host field `{key}` must be a nonnegative integer or null"))),
         _ => Err(EditorHostError::InvalidRequest(format!(
             "editor host field `{key}` must be a nonnegative integer or null"
         ))),
