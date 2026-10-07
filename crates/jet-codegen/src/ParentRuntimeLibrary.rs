@@ -73,12 +73,18 @@ struct Symbol {
 pub struct RuntimeLibrary {
     image: Image,
     receipt_identity: [u8; 32],
+    library_identity: [u8; 32],
     exports: Vec<Symbol>,
 }
 
 impl RuntimeLibrary {
     pub fn receipt_identity(&self) -> &[u8; 32] {
         &self.receipt_identity
+    }
+
+    /// The actual library-byte SHA validated before initialization, cached once.
+    pub fn library_identity(&self) -> &[u8; 32] {
+        &self.library_identity
     }
 
     /// The returned address borrows the process-pinned runtime. Callers must
@@ -106,6 +112,7 @@ static RESIDENT: OnceLock<Resident> = OnceLock::new();
 
 struct Prepared {
     bytes: Vec<u8>,
+    library_identity: [u8; 32],
     exports: Vec<Symbol>,
 }
 
@@ -136,6 +143,7 @@ pub fn admit(
             .map(|image| RuntimeLibrary {
                 image,
                 receipt_identity: *authoritative_receipt_sha256,
+                library_identity: prepared.library_identity,
                 exports: prepared.exports,
             })
             .map_err(|_| Refusal::RuntimeLibraryLoadFailed),
@@ -205,7 +213,15 @@ fn prepare(path: &Path, receipt_bytes: &[u8]) -> Result<Prepared, Refusal> {
         return Err(Refusal::RuntimeLibraryExportSealMismatch);
     }
     let bytes = read_library(path)?;
-    if SHA256::sha256_hex(&bytes) != text(&receipt, "librarySHA256")? {
+    let library_identity = SHA256::sha256(&bytes);
+    let expected_library = text(&receipt, "librarySHA256")?.as_bytes();
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    if expected_library.len() != 64
+        || library_identity.iter().enumerate().any(|(index, byte)| {
+            expected_library[index * 2] != HEX[usize::from(byte >> 4)]
+                || expected_library[index * 2 + 1] != HEX[usize::from(byte & 15)]
+        })
+    {
         return Err(Refusal::RuntimeLibraryLibraryHashMismatch);
     }
     let elf = Elf::new(&bytes)?;
@@ -254,6 +270,7 @@ fn prepare(path: &Path, receipt_bytes: &[u8]) -> Result<Prepared, Refusal> {
     // No symbol use and no constructor execution precede the byte/seal checks.
     Ok(Prepared {
         bytes,
+        library_identity,
         exports: exports
             .into_iter()
             .map(|name| Symbol {

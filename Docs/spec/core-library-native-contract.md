@@ -197,6 +197,9 @@ only when an open is attempted, including a failed open that could have run
 constructors. Pre-open hash/file/seal refusals are stateless and do not prevent
 a later correct admission. `RuntimeLibrary::symbol` exposes only
 inventory-checked addresses, caching each lookup without per-call allocation.
+`RuntimeLibrary::receipt_identity` and `library_identity` borrow the validated,
+cached SHA-256 values, allowing the private host record to compare both pins
+without re-reading library bytes or recomputing their hash.
 The caller supplies the declared C ABI. The Source host maps named refusals into
 the registered adapter-failure channel. This Rust bootstrap seam dies at the
 Jet-hosted cutover; it does not define runtime behavior.
