@@ -78,10 +78,10 @@ extern void jet_rt_channel_fixture_reservations(const Meta *);
 extern W jet_rt_channel_fixture_stop(W,W,W);
 extern void jet_rt_channel_fixture_stops(const Meta *,W,const Meta *,W);
 extern W jet_rt_channel_fixture_writers_waiting(W);
-extern W jet_rt_channel_fixture_select_wake_gap(const Meta *);
+extern W jet_rt_channel_fixture_select_wake_handoff(const Meta *);
 #endif
 #if defined(JET_SEED) || defined(JET_CLOSED_CROSS)
-extern uint8_t jet_fixture_rust_select_wake_gap(void);
+extern uint8_t jet_fixture_rust_select_wake_handoff(void);
 #endif
 
 static const Meta word_meta = {8,0,0,0,0,0,2,0,0};
@@ -100,7 +100,7 @@ static void queue_tests(void) {
 #endif
 #ifdef JET_CHANNEL_INTERNAL
     jet_rt_channel_fixture_reservations(&word_meta);
-    assert(jet_rt_channel_fixture_select_wake_gap(&word_meta) == 1);
+    assert(jet_rt_channel_fixture_select_wake_handoff(&word_meta) == 1);
     unsigned cancelled_drops = atomic_load(&drops);
     jet_rt_channel_fixture_stops(&word_meta, (W)jet_rt_channel_fixture_stop,
                                 &owned_meta, (W)inspect);
@@ -108,8 +108,8 @@ static void queue_tests(void) {
     puts("reservations/stopped output/permit cleanup ok");
 #endif
 #if defined(JET_SEED) || defined(JET_CLOSED_CROSS)
-    assert(jet_fixture_rust_select_wake_gap() == 1);
-    puts("canonical select wake-steal gap parity ok");
+    assert(jet_fixture_rust_select_wake_handoff() == 1);
+    puts("select wake handoff parity ok");
 #endif
     W tx,rx;jet_rt_native_channel(1,2,&tx,&rx);
     W alias=jet_rt_native_sender_clone(tx),rxa=jet_rt_native_receiver_clone(rx);

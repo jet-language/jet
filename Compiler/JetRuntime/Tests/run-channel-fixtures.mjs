@@ -36,7 +36,7 @@ const bridge = `
 #[no_mangle] pub unsafe extern "C" fn jet_fixture_rust_closed_eq(a: usize, b: usize) -> bool {
     &*(a as *mut jet_std::Closed) == &*(b as *mut jet_std::Closed)
 }
-#[no_mangle] pub extern "C" fn jet_fixture_rust_select_wake_gap() -> bool {
+#[no_mangle] pub extern "C" fn jet_fixture_rust_select_wake_handoff() -> bool {
     let early = JetSchedulerChannel::<u64>::new();
     let late = JetSchedulerChannel::<u64>::new();
     let early_sender = early.sender();
@@ -52,7 +52,7 @@ const bridge = `
                     Some(JetSelectOutcome::Recv { arm: 0, value: 10 })));
     drop(registration);
     let queued = late.inner.state.lock().unwrap().queue.len();
-    queued == 1 && !plain.notified.load(std::sync::atomic::Ordering::Acquire)
+    queued == 1 && plain.notified.load(std::sync::atomic::Ordering::Acquire)
 }
 `;
 if (mode === 'assemble') {
@@ -125,7 +125,7 @@ if (mode === 'assemble') {
   const result=command(binary,[],{timeout:120000});
   writeFileSync(join(out,`${mode}.txt`),result.stdout+result.stderr);
   if(result.stderr!=='')throw Error('fixture wrote stderr');
-  for(const text of ['queue/close/owners ok','select source-order/probe/timers ok','shared concurrent edits/drop ok','canonical select wake-steal gap parity ok'])if(!result.stdout.includes(text+'\n'))throw Error(`missing ${text}`);
+  for(const text of ['queue/close/owners ok','select source-order/probe/timers ok','shared concurrent edits/drop ok','select wake handoff parity ok'])if(!result.stdout.includes(text+'\n'))throw Error(`missing ${text}`);
   if(!seed)for(const text of ['reservations/stopped output/permit cleanup ok','shared concurrent readers/writer priority ok'])if(!result.stdout.includes(text+'\n'))throw Error(`missing ${text}`);
   if(mode==='cross'&&!result.stdout.includes('Closed Rust/Jet ownership cross ok\n'))throw Error('cross ownership fixture did not execute');
 }
