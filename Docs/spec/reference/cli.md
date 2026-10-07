@@ -708,3 +708,17 @@ input closure: embedded Core/generated paths are excluded, and its comptime
 input coverage is explicitly uncertified until actual evaluator reads are
 retained. Receipt consumers must not substitute all authorized sources for
 that missing read set.
+
+Checked build-input HTTP fetches use a build-only transport, not the ordinary
+comptime host adapter. The selected `fn build` must explicitly declare both
+`Net` and `Time.Wait`. Jet checks every DNS answer against the existing public
+destination rule (including IPv4-mapped IPv6) and passes only that checked answer
+set to the connection leaf. The leaf performs no second DNS lookup and retains
+the original host for HTTP Host and TLS SNI/certificate verification.
+
+Fetch policy remains source-owned: a 30-second transport deadline, a 64-MiB
+body bound, SHA-256 verification before UTF-8 decoding, and the existing E3413/
+E3414 diagnostics. Status codes do not change which bytes are pinned: redirects
+are not followed, and the original response body is verified for any status.
+Missing build transport or execution/session providers remains an explicit
+refusal rather than a successful empty response.

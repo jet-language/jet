@@ -1,14 +1,16 @@
 // Invocation-owned adapter for checked fn-build calls. Unrelated Core and
 // native operations keep their original adapter and ownership receipts.
-use jet_foundation.[MIRCallFallibility, MIRForeign, MIRHandleID, MIRPreludeCall, MIRScopeKind, MIRSelectKind, MIRTaskGroupKind, Span, TComptimeField, TComptimeReport, TComptimeValue]
-use jet_eval.[JetEvalMachine, JetEvalHostAdapter, JetEvalHostArgument, JetEvalHostCallTarget, JetEvalHostStaticOperand, JetEvalHostTypeShape, JetEvalHostResult, JetEvalHostOutcome, JetEvalHostValue, JetEvalErrorKind, JetEvalHostFixedBackingStorage, JetEvalHostFixedBackingOperation, JetEvalHostFixedBackingAccessResult, JetEvalNativeCallBinding, JetEvalSharedPhysicalOp, JetEvalRuntimeValue, jet_eval_build_context_host_id, jet_eval_build_session_host_input, jet_eval_build_session_output, jet_eval_build_session_diagnostic, jet_eval_build_graph_value]
+use jet_foundation.[MIRCallFallibility, MIRScopeKind, Span, TComptimeValue]
+use jet_eval.[JetEvalMachine, JetEvalBuildHostAdapter, JetEvalHostArgument, JetEvalHostCallTarget, JetEvalHostResult, JetEvalHostOutcome, JetEvalHostValue, JetEvalErrorKind, jet_eval_build_context_host_id, jet_eval_build_session_host_input, jet_eval_build_session_output, jet_eval_build_session_diagnostic, jet_eval_build_graph_value]
 
 use core.crypto as build_input_crypto
+use core.net.url as build_input_url
 use jet_eval.jet_eval_build_failed_value
 
 struct JetDriverBuildAdapter {
     session: BuildSession
-    parent: JetEvalHostAdapter
+    http_inputs: JetDriverBuildHTTPInputs?
+    network_declared: Bool
     // The host's raw build-input transport and the build file's canonical
     // directory, which `b.find`, `b.embed` and `b.fetch` paths are relative to.
     inputs: JetDriverBuildInputs?
@@ -40,7 +42,7 @@ fn jet_driver_build_impure(machine: JetEvalMachine) -> Bool Never! {
     }
     false
 }
-fn jet_driver_build_host_call(session: &BuildSession, inputs: JetDriverBuildInputs?, base_dir: String, machine: &JetEvalMachine, target: JetEvalHostCallTarget, args: [JetEvalHostArgument], span: Span) -[FS.Read]> JetEvalHostResult? {
+fn jet_driver_build_host_call(session: &BuildSession, inputs: JetDriverBuildInputs?, http_inputs: JetDriverBuildHTTPInputs?, network_declared: Bool, base_dir: String, machine: &JetEvalMachine, target: JetEvalHostCallTarget, args: [JetEvalHostArgument], span: Span) -[FS.Read, Net, Time.Wait]> JetEvalHostResult? {
     if target == .Prelude(row) {
         if row.module_name != "core.host" -> return None
         if row.member == "BuildPlan.graph" {
@@ -66,7 +68,7 @@ fn jet_driver_build_host_call(session: &BuildSession, inputs: JetDriverBuildInpu
             } else -> &values.push(value)
         }
         reply := build_session_call(&session, method, values, generated, jet_driver_build_impure(machine), span.start, span.end)
-        if reply == .HostRequest(service, request_args) -> reply = jet_driver_build_input_reply(inputs, base_dir, service, request_args, span)
+        if reply == .HostRequest(service, request_args) -> reply = jet_driver_build_input_reply(inputs, http_inputs, network_declared, base_dir, service, request_args, span)
         if reply == {
             .Value(value) -> {
                 data := jet_eval_build_session_output(value)
@@ -85,25 +87,11 @@ fn jet_driver_build_host_call(session: &BuildSession, inputs: JetDriverBuildInpu
     None
 }
 
-impl JetDriverBuildAdapter.JetEvalHostAdapter {
-    fn new_session(self) -[]> JetEvalHostAdapter { JetDriverBuildAdapter{session: self.session, parent: self.parent.new_session(), inputs: self.inputs, base_dir: self.base_dir} }
-    fn clone_adapter(self) -[]> JetEvalHostAdapter { JetDriverBuildAdapter{session: self.session, parent: self.parent.clone_adapter(), inputs: self.inputs, base_dir: self.base_dir} }
-    fn poll_callbacks(self, machine: &JetEvalMachine) -[FS.Read]> Bool { self.parent.poll_callbacks(&machine) }
-    fn drain_callbacks(self, machine: &JetEvalMachine) -[FS.Read]> Bool { self.parent.drain_callbacks(&machine) }
-    fn host_call(self, machine: &JetEvalMachine, target: JetEvalHostCallTarget, static_operand: JetEvalHostStaticOperand?, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, arg_shapes: [JetEvalHostTypeShape], span: Span) -[FS.Read]> JetEvalHostResult? {
+impl JetDriverBuildAdapter.JetEvalBuildHostAdapter {
+    fn build_call(self, machine: &JetEvalMachine, target: JetEvalHostCallTarget, args: ^[JetEvalHostArgument], span: Span) -[FS.Read, Net, Time.Wait]> JetEvalHostResult? {
         session := self.session
-        if jet_driver_build_host_call(&session, self.inputs, self.base_dir, &machine, target, args, span) == .Val(result) -> return Val(result)
-        self.parent.host_call(&machine, target, static_operand, ^args, result_shape, arg_shapes, span)
+        jet_driver_build_host_call(&session, self.inputs, self.http_inputs, self.network_declared, self.base_dir, &machine, target, args, span)
     }
-    fn foreign_call(self, machine: &JetEvalMachine, row: MIRForeign, args: ^[JetEvalHostArgument], span: Span) -[FS.Read]> JetEvalHostResult? { self.parent.foreign_call(&machine, row, ^args, span) }
-    fn handle_call(self, machine: &JetEvalMachine, operation: String, handle: MIRHandleID, raw: Int, span: Span) -[FS.Read]> JetEvalHostResult? { self.parent.handle_call(&machine, operation, handle, raw, span) }
-    fn fixed_backing_release(self, machine: &JetEvalMachine, handle: MIRHandleID, raw: Int, lease: Int?, span: Span) -[]> JetEvalHostResult? { self.parent.fixed_backing_release(&machine, handle, raw, lease, span) }
-    fn fixed_backing_access(self, machine: &JetEvalMachine, root: JetEvalHostFixedBackingStorage, operation: JetEvalHostFixedBackingOperation, span: Span) -[]> JetEvalHostFixedBackingAccessResult? { self.parent.fixed_backing_access(&machine, root, operation, span) }
-    fn physical_binding(self) -[]> JetEvalHostValue { self.parent.physical_binding() }
-    fn native_call(self, machine: &JetEvalMachine, binding: JetEvalNativeCallBinding, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[FS.Read]> JetEvalHostResult? { self.parent.native_call(&machine, binding, ^args, result_shape, span) }
-    fn channel_select(self, machine: &JetEvalMachine, row: MIRPreludeCall, kind: MIRSelectKind, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[]> JetEvalHostResult? { self.parent.channel_select(&machine, row, kind, ^args, result_shape, span) }
-    fn task_group(self, machine: &JetEvalMachine, row: MIRPreludeCall, kind: MIRTaskGroupKind, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[]> JetEvalHostResult? { self.parent.task_group(&machine, row, kind, ^args, result_shape, span) }
-    fn shared_call(self, machine: &JetEvalMachine, operation: JetEvalSharedPhysicalOp, row: MIRPreludeCall, map_row: MIRPreludeCall?, shared: JetEvalRuntimeValue, guard: JetEvalRuntimeValue?, condition: JetEvalRuntimeValue?, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[]> JetEvalHostResult? { self.parent.shared_call(&machine, operation, row, map_row, shared, guard, condition, ^args, result_shape, span) }
 }
 
 // D-CTIO1 bounds shared with the Rust reference: one tree file (SHA256.rs
@@ -126,12 +114,12 @@ fn jet_driver_build_input_text(args: [BuildSessionValue], index: Int) -> String?
 // (runtime_bridge.rs `eval_program_build_input_method`), answered over the
 // host's raw transport. A host without one, and the plugin and legacy
 // importer services, keep the request: the caller refuses it.
-fn jet_driver_build_input_reply(inputs: JetDriverBuildInputs?, base_dir: String, method: String, args: [BuildSessionValue], span: Span) -[FS.Read]> BuildSessionReply {
+fn jet_driver_build_input_reply(inputs: JetDriverBuildInputs?, http_inputs: JetDriverBuildHTTPInputs?, network_declared: Bool, base_dir: String, method: String, args: [BuildSessionValue], span: Span) -[FS.Read, Net, Time.Wait]> BuildSessionReply {
+    if method == "fetch" -> return jet_driver_build_fetch(inputs, http_inputs, network_declared, base_dir, args, span)
     host :: inputs ?? return .HostRequest(method, args)
     if method == {
         "find" -> return jet_driver_build_find(host, base_dir, args, span)
         "embed" -> return jet_driver_build_embed(host, base_dir, args, span)
-        "fetch" -> return jet_driver_build_fetch(host, base_dir, args, span)
         else -> {}
     }
     .HostRequest(method, args)
@@ -319,32 +307,107 @@ fn jet_driver_build_fetch_error(url: String, detail: String, span: Span) -> Buil
     jet_driver_build_input_fail("E3414", "fetch failed: {detail}", "could not retrieve `{url}`", "check the URL is reachable and the network is available; use `file://` for a local path inside the compile-time source directory", span)
 }
 
-// runtime_bridge.rs `b.fetch` -> dispatch.rs `eval_net_fetch` over jet-net
-// `fetch_in_root`: a sha256-pinned UTF-8 resource. A `file://` URL reads a
-// regular, unshared file inside the build file's directory; this host
-// transport performs no network fetch, so an `http(s)://` URL is refused.
-fn jet_driver_build_fetch(host: JetDriverBuildInputs, base_dir: String, args: [BuildSessionValue], span: Span) -[FS.Read]> BuildSessionReply {
+// Exact restricted_resolver policy, over the raw DNS answer's octets. Check
+// every answer (including IPv4-mapped IPv6), not only the chosen socket.
+fn jet_driver_build_public_address(address: [U8]) -> Bool Never! {
+    if address.len() == 4 {
+        a :: Int.from_u8(address[0])
+        b :: Int.from_u8(address[1])
+        c :: Int.from_u8(address[2])
+        return !(a == 0 || a == 10 || (a == 100 && (b & 192) == 64) || a == 127
+            || (a == 169 && b == 254) || (a == 172 && b >= 16 && b <= 31)
+            || (a == 192 && b == 0 && (c == 0 || c == 2)) || (a == 192 && b == 168)
+            || (a == 198 && (b == 18 || b == 19)) || (a == 198 && b == 51 && c == 100)
+            || (a == 203 && b == 0 && c == 113) || a >= 224)
+    }
+    if address.len() != 16 -> return false
+    mapped := true
+    loop index in 0..<10 -> if address[index] != (U8{0}) -> mapped = false
+    if mapped && address[10] == (U8{255}) && address[11] == (U8{255}) -> return jet_driver_build_public_address(address[12..<16])
+    first :: Int.from_u8(address[0]) * 256 + Int.from_u8(address[1])
+    second :: Int.from_u8(address[2]) * 256 + Int.from_u8(address[3])
+    (first & 57344) == 8192 && !(first == 8193 && second == 3512)
+}
+
+fn jet_driver_build_http_length(headers: [[U8]]) -> Unit String! {
+    loop bytes in headers {
+        line :: String.from_bytes(bytes) ?? next
+        colon :: line.find(":")
+        if colon < 0 -> next
+        if line.slice(0..<colon).lower() != "content-length" -> next
+        value :: line.slice(colon + 1..<line.len()).trim()
+        length :: Int.parse(value) ?? return Err("invalid Content-Length")
+        if length < 0 || length > 18446744073709551615 -> return Err("invalid Content-Length")
+        if length > JET_DRIVER_BUILD_MAX_FETCH_BYTES -> return Err("response exceeds its size bound")
+        // The reference reads the first header of this name.
+        return Ok(())
+    }
+    Ok(())
+}
+
+// Keep the reference's TLS diagnostics, but classify the provider's raw text
+// here instead of making a host transport understand Jet errors.
+fn jet_driver_build_http_error(url: String, detail: String, span: Span) -> BuildSessionReply Never! {
+    if !url.starts_with("https://") -> return jet_driver_build_fetch_error(url, detail, span)
+    lower :: detail.lower()
+    host :: url.slice(8..<url.len()).split("/").to_list()[0]
+    if lower.contains("no valid certificates loaded") || lower.contains("no root cert") || lower.contains("no roots") || lower.contains("empty root") || lower.contains("trust store") {
+        return jet_driver_build_input_fail("E3414", "HTTPS could not find system certificate roots", "Jet uses rustls with the system trust store for default HTTPS, but no usable roots were available", "install the system certificate bundle (for example `ca-certificates`) or run in an image that includes it", span)
+    }
+    if lower.contains("certificate") || lower.contains("unknownissuer") || lower.contains("notvalid") || lower.contains("expired") || lower.contains("hostname") || lower.contains("cert") {
+        return jet_driver_build_input_fail("E3414", "TLS certificate for `{host}` could not be trusted", "`{url}` presented a certificate Jet could not verify for that host", "use a certificate whose subject matches the host and chains to a trusted root; for tests, trust the local fixture CA explicitly", span)
+    }
+    if lower.contains("tls") || lower.contains("rustls") || lower.contains("handshake") || lower.contains("alert") {
+        return jet_driver_build_input_fail("E3414", "TLS handshake with `{host}` failed", "`{url}` reached the server, but the connection did not complete a secure HTTPS handshake", "verify the URL points at an HTTPS server, not plain HTTP; for local tests, start the TLS fixture server", span)
+    }
+    jet_driver_build_fetch_error(url, detail, span)
+}
+
+// The raw transport never follows Location, interprets status codes, chooses
+// bounds/timeouts, verifies a digest or decodes text. Any status's original
+// body is a pinned input, exactly like the reference's redirect-free fetch.
+fn jet_driver_build_fetch(inputs: JetDriverBuildInputs?, http_inputs: JetDriverBuildHTTPInputs?, network_declared: Bool, base_dir: String, args: [BuildSessionValue], span: Span) -[FS.Read, Net, Time.Wait]> BuildSessionReply {
     url :: jet_driver_build_input_text(args, 0) ?? return jet_driver_build_input_fail("E3414", "fetch: first argument must be a string URL", "`core.net.fetch` expects a string URL as its first argument", "pass a string literal: `net.fetch('https://example.com/data.txt', sha256: '…')`", span)
     expected :: jet_driver_build_input_text(args, 1) ?? return jet_driver_build_input_fail("E3414", "fetch: `sha256:` argument missing or not a string", "`core.net.fetch` requires a `sha256:` labelled argument for content verification", "add `sha256: '<64-hex-chars>'` as the second argument", span)
-    if url.starts_with("http://") || url.starts_with("https://") -> return .HostRequest("fetch", args)
-    if !url.starts_with("file://") {
-        scheme :: url.split("://").to_list()[0]
-        return jet_driver_build_fetch_error(url, "unsupported URL scheme `{scheme}`; expected `file://`, `http://`, or `https://`", span)
+    bytes := [U8]{}
+    if url.starts_with("http://") || url.starts_with("https://") {
+        if !network_declared -> return jet_driver_build_input_fail("E3414", "HTTP build fetch requires declared Net and Time.Wait", "the selected fn build did not explicitly declare both transport effects", "declare `-[Net, Time.Wait]` on fn build before fetching an HTTP input", span)
+        transport :: http_inputs ?? return .HostRequest("fetch", args)
+        parsed :: build_input_url.parse(url) ?? return jet_driver_build_fetch_error(url, "invalid URL", span)
+        host :: parsed.host() ?? return jet_driver_build_fetch_error(url, "URL has no host", span)
+        port :: parsed.port() ?? parsed.default_port() ?? return jet_driver_build_fetch_error(url, "URL has no port", span)
+        addresses :: transport.resolve(host, port) ?? return jet_driver_build_http_error(url, err, span)
+        if addresses.len() == 0 -> return jet_driver_build_http_error(url, "compile-time network destination is not public", span)
+        loop address in addresses {
+            if !jet_driver_build_public_address(address) -> return jet_driver_build_http_error(url, "compile-time network destination is not public", span)
+        }
+        // DNS is performed once. The leaf can connect ONLY to this exact
+        // checked address set; the URL's host is retained for Host/SNI.
+        response :: transport.get(url, addresses, port, 30000, JET_DRIVER_BUILD_MAX_FETCH_BYTES) ?? return jet_driver_build_http_error(url, err, span)
+        if jet_driver_build_http_length(response.headers) == .Err(detail) -> return jet_driver_build_http_error(url, detail, span)
+        if response.body.len() > JET_DRIVER_BUILD_MAX_FETCH_BYTES -> return jet_driver_build_http_error(url, "fetch response exceeds {JET_DRIVER_BUILD_MAX_FETCH_BYTES} bytes", span)
+        bytes = response.body
+    } else {
+        if !url.starts_with("file://") {
+            scheme :: url.split("://").to_list()[0]
+            return jet_driver_build_fetch_error(url, "unsupported URL scheme `{scheme}`; expected `file://`, `http://`, or `https://`", span)
+        }
+        host :: inputs ?? return .HostRequest("fetch", args)
+        raw :: url.slice(7..<url.len())
+        path := raw
+        if raw != "/dev/null" {
+            root :: host.resolve(base_dir) ?? return jet_driver_build_fetch_error(url, err, span)
+            if !root.exists -> return jet_driver_build_fetch_error(url, JET_DRIVER_BUILD_NOT_FOUND, span)
+            if root.file || root.path != base_dir -> return jet_driver_build_fetch_error(url, "compile-time source directory must be a real directory", span)
+            requested :: if raw.starts_with("/") -> raw else -> jet_driver_build_join(root.path, raw)
+            target :: host.resolve(requested) ?? return jet_driver_build_fetch_error(url, err, span)
+            if !target.exists -> return jet_driver_build_fetch_error(url, JET_DRIVER_BUILD_NOT_FOUND, span)
+            if !jet_driver_build_within(target.path, root.path) -> return jet_driver_build_fetch_error(url, "file URL resolves outside the compile-time source directory", span)
+            if !target.file || target.links != 1 -> return jet_driver_build_fetch_error(url, "file URL must name a regular, unshared file", span)
+            path = target.path
+        }
+        bytes = host.read(path, JET_DRIVER_BUILD_MAX_FETCH_BYTES) ?? return jet_driver_build_fetch_error(url, err, span)
     }
-    raw :: url.slice(7..<url.len())
-    path := raw
-    if raw != "/dev/null" {
-        root :: host.resolve(base_dir) ?? return jet_driver_build_fetch_error(url, err, span)
-        if !root.exists -> return jet_driver_build_fetch_error(url, JET_DRIVER_BUILD_NOT_FOUND, span)
-        if root.file || root.path != base_dir -> return jet_driver_build_fetch_error(url, "compile-time source directory must be a real directory", span)
-        requested :: if raw.starts_with("/") -> raw else -> jet_driver_build_join(root.path, raw)
-        target :: host.resolve(requested) ?? return jet_driver_build_fetch_error(url, err, span)
-        if !target.exists -> return jet_driver_build_fetch_error(url, JET_DRIVER_BUILD_NOT_FOUND, span)
-        if !jet_driver_build_within(target.path, root.path) -> return jet_driver_build_fetch_error(url, "file URL resolves outside the compile-time source directory", span)
-        if !target.file || target.links != 1 -> return jet_driver_build_fetch_error(url, "file URL must name a regular, unshared file", span)
-        path = target.path
-    }
-    bytes :: host.read(path, JET_DRIVER_BUILD_MAX_FETCH_BYTES) ?? return jet_driver_build_fetch_error(url, err, span)
     actual :: build_input_crypto.sha256(bytes).hex()
     if actual != expected -> return jet_driver_build_input_fail("E3413", "fetch: sha256 mismatch for `{url}`", "expected `{expected}` but content hashes to `{actual}`", "update the `sha256:` pin to match the content, or verify the URL is correct", span)
     text :: String.from_bytes(bytes) ?? return jet_driver_build_input_fail("E3414", "fetch: content at `{url}` is not valid UTF-8", "the downloaded bytes could not be decoded as UTF-8 text", "binary content is not supported by comptime fetch; use `embed_bytes` for binary data", span)

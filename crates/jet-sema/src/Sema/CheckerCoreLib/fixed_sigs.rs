@@ -3754,6 +3754,18 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Int), (read, Type::String), (read, Type::Bool)],
             Some(result_ty(Type::List(Box::new(Type::Int)), io.clone())),
         )),
+        ("core.http.client", "__build_resolve") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::List(Box::new(Type::List(Box::new(u8_ty())))), Type::String)),
+        )),
+        ("core.http.client", "__build_get") => Some((
+            vec![
+                (read, Type::String), (read, Type::String), (read, Type::String), (read, Type::Bool),
+                (read, Type::List(Box::new(Type::List(Box::new(u8_ty()))))),
+                (read, Type::Int), (read, Type::Int), (read, Type::Int),
+            ],
+            Some(result_ty(Type::List(Box::new(Type::List(Box::new(u8_ty())))), Type::String)),
+        )),
         ("core.files", "__rename_at") => Some((
             vec![
                 (read, Type::Int),

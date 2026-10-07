@@ -634,7 +634,7 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
             ],
         ))
         || (same_text(module, "core.http.client")
-            && one_of(method, &["get", "post", "request"]))
+            && one_of(method, &["get", "post", "request", "__build_resolve", "__build_get"]))
         || (same_text(module, "core.http")
             && same_text(method, "get"))
         || (same_text(module, "core.http.server")
@@ -1431,7 +1431,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 5e0edd8adc55e77c2b168ca6983eec8167601a565a6e5e8fbe595a7c7513bdf0
+// Source SHA-256: 08eac41eb426a7f72b1a0b7a3ea6a555e6d322c6371c0d3df3a006ec11990d63
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1548,6 +1548,8 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.files", "__xattr_set"),
     ("core.files", "__reader_stat"),
     ("core.files", "__writer_stat"),
+    ("core.http.client", "__build_resolve"),
+    ("core.http.client", "__build_get"),
     ("core.files", "__writer_set_mode"),
     ("core.files", "hard_link"),
     ("core.files", "lock"),
@@ -2748,6 +2750,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.http.client", "get", "jet_http_client_get", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.http.client", "post", "jet_http_client_post", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.http.client", "request", "jet_http_client_request_new", true, &[true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.http.client", "__build_resolve", "jet_http_build_resolve", true, &[true, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.http.client", "__build_get", "jet_http_build_get", true, &[true, true, true, false, true, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.regex", "flags", "jet_std::jet_regex_flags", true, &[false, false, false], ),
     CoreCallRecord::new( "core.regex", "escape", "jet_std::jet_regex_escape", true, &[true], ),
     CoreCallRecord::new( "core.regex", "compile", "jet_std::jet_regex_compile", true, &[true], ),
