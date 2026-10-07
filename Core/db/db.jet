@@ -10,6 +10,7 @@ package {
 }
 
 use core as core
+use core.text as unicode
 
 // core.db keeps the checked SQL and policy model in Jet's core call layer. The
 // provider owns connection state and executes only the typed operations exposed
@@ -54,7 +55,7 @@ pub fn policy_show(policy: RowPolicy) -[DB]> String Never! {
 }
 
 fn policy_token(value: String) -> Bool Never! {
-    value.trim() != "" && value.len() <= 1048576 && !core.text.has_control(value)
+    value.trim() != "" && value.len() <= 1048576 && !unicode.has_control(value)
 }
 
 pub fn row_value(row: [String: DBValue], column: String) -[DB]> DBValue DBError! {

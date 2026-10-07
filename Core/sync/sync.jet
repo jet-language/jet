@@ -16,7 +16,7 @@ package {
 // truncating. Database row policies are not here: they live in core.db
 // (D-DBPOLICY-CHECK1=A); the RowPolicy below is the closed allow/deny action
 // list.
-use core.text as text
+use core.text as unicode
 
 MAX_TEXT :: 1048576
 MAX_ATOMS :: 4194304
@@ -84,7 +84,7 @@ pub struct RowPolicy {
 pub fn text_new(replica: String, value: String) -> SyncText Never! {
     doc :: SyncText{atoms: [SyncTextAtom]{}, valid: true}
     if !valid_token(replica) || value.len() > MAX_TEXT -> return invalid_text()
-    inserted :: text.scalars(value)
+    inserted :: unicode.scalars(value)
     if inserted.len() > MAX_ATOMS -> return invalid_text()
     insert_after(doc, replica, "", inserted)
 }
@@ -94,7 +94,7 @@ pub fn text_new(replica: String, value: String) -> SyncText Never! {
 // tombstones still converges after a merge.
 pub fn text_set(doc: SyncText, replica: String, value: String) -> SyncText Never! {
     if !doc.valid || !valid_token(replica) || value.len() > MAX_TEXT -> return ~doc
-    inserted :: text.scalars(value)
+    inserted :: unicode.scalars(value)
     if doc.atoms.len() + inserted.len() > MAX_ATOMS || clock_exhausted(doc, inserted.len()) -> return ~doc
     deleted :: mark_deleted(doc, text_visible(doc))
     insert_after(deleted, replica, "", inserted)
@@ -106,7 +106,7 @@ pub fn text_set(doc: SyncText, replica: String, value: String) -> SyncText Never
 // concurrent edit of that range.
 pub fn text_edit(doc: SyncText, replica: String, index: Int, delete_count: Int, value: String) -> SyncText Never! {
     if !doc.valid || !valid_token(replica) || index < 0 || delete_count < 0 || value.len() > MAX_TEXT -> return ~doc
-    inserted :: text.scalars(value)
+    inserted :: unicode.scalars(value)
     if doc.atoms.len() + inserted.len() > MAX_ATOMS || clock_exhausted(doc, inserted.len()) -> return ~doc
     visible :: text_visible(doc)
     if index > visible.len() || delete_count > visible.len() - index -> return ~doc
@@ -130,7 +130,7 @@ pub fn text_merge(left: SyncText, right: SyncText) -> SyncText Never! {
     sides :: [[SyncTextAtom]]{left.atoms, right.atoms}
     loop side in sides {
         loop atom in side {
-            if !valid_token(atom.replica) || atom.counter <= 0 || text.scalars(atom.scalar).len() != 1 -> return invalid_text()
+            if !valid_token(atom.replica) || atom.counter <= 0 || unicode.scalars(atom.scalar).len() != 1 -> return invalid_text()
             id :: atom_id(atom.replica, atom.counter)
             previous :: merged.get(id)
             if previous == .None {
@@ -393,7 +393,7 @@ pub fn policy_show(policy: RowPolicy) -> String Never! {
 // A replica name, key, or writer: not blank, bounded, and free of control
 // characters.
 fn valid_token(value: String) -> Bool Never! {
-    value.trim() != "" && value.len() <= MAX_TEXT && !text.has_control(value)
+    value.trim() != "" && value.len() <= MAX_TEXT && !unicode.has_control(value)
 }
 
 fn atom_id(replica: String, counter: Int) -> String Never! {
@@ -563,7 +563,7 @@ fn insert_item(items: [RGAItem], item: RGAItem) -> [RGAItem] Never! {
 // uses, so the text reads back unambiguously.
 fn escape_display(value: String) -> String Never! {
     out := ""
-    loop scalar in text.scalars(value) {
+    loop scalar in unicode.scalars(value) {
         if scalar == "\\" || scalar == "," || scalar == "=" || scalar == "|" || scalar == ":" || scalar == "/" -> out = "{out}\\"
         out = "{out}{scalar}"
     }
