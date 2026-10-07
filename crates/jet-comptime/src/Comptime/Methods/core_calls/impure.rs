@@ -455,14 +455,6 @@ pub fn apply_impure_core_call_with_type_args(
         // it replaces are why `create_dir_all` and `remove_all` had no arm at
         // all: a shipped example (`io/watcher`) passed sema and then died at
         // run time on E0956 while AOT ran the same source.
-        ("core.files", "absolute") => {
-            let path = as_string(one(0)?, span)?;
-            use crate::Comptime::TextLite as files_kernel;
-            Ok(match files_kernel::fs_absolute(path) {
-                Ok(path) => CtValue::Present(Box::new(CtValue::Str(path))),
-                Err(error) => CtValue::failed(Box::new(error)),
-            })
-        }
         // #3593: the policy-free provider leaves behind Core/files/files.jet.
         ("core.files", leaf) if leaf.starts_with("__") => {
             match crate::Comptime::TextLite::apply_files_leaf(leaf, &args) {

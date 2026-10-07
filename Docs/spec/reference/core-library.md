@@ -736,6 +736,11 @@ Whole-file and metadata functions:
 false. Their false-on-host-error policy is Jet-owned; the host boundary
 supplies only the following-metadata fact or the host error.
 
+`absolute` keeps host lexical spelling, including `.` and `..`, repeated
+separators, and nonexistent paths. It leaves a host-absolute input unchanged;
+otherwise Jet obtains the current directory and joins using host path grammar.
+It does not apply the portable `collapse` operation.
+
 `walk`, `walk_parallel`, and `walk_files` accept the optional `ignore` value;
 `fs.walk(root)` is the convenience form. `DirEntry` has `name`, `path`, and
 `is_dir`. `Stat` has `size`, `kind`, `mode`, `readonly`, `is_file`, `is_dir`,

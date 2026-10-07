@@ -758,10 +758,11 @@ fn join_impl(a: String, b: String) -> String Never! {
 pub fn join(a: String, b: String) -> String Never! { join_impl(a, b) }
 
 
-pub fn absolute(path: String) -[FS, Env]> String IOError! {
-    if is_abs_impl(path) -> return Ok(collapse_impl(path))
+fn absolute(path: String | Path) -[FS, Env]> String IOError! {
+    text :: path_text(path)
+    if core.files.__host_path_is_absolute(~text) -> return Ok(text)
     cwd :: sys.current_dir()
-    Ok(collapse_impl(join_impl(cwd, path)))
+    Ok(core.files.__host_path_join(cwd, text))
 }
 
 

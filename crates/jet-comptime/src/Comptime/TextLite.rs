@@ -1098,9 +1098,6 @@ pub(super) fn fs_read_link(path: &str) -> FsResult<String> {
 pub(super) fn fs_canonicalize(path: &str) -> FsResult<String> {
     text_kernel::jet_std_fs_canonicalize(&path.to_string()).map_err(io_error_ct)
 }
-pub(super) fn fs_absolute(path: &str) -> FsResult<String> {
-    text_kernel::jet_std_fs_absolute(&path.to_string()).map_err(io_error_ct)
-}
 /// #3593: the interpreter adapter for the `core.files.__*` provider leaves.
 /// Each arm only converts CtValue arguments and results; the leaf itself is
 /// the shared Prelude FileHandles.rs / FileStream.rs function AOT calls.
@@ -1142,6 +1139,8 @@ pub(crate) fn apply_files_leaf(
     let unit = |_: ()| CtValue::Unit;
     let run = || -> Result<CtValue, String> {
         Ok(match method {
+            "__host_path_is_absolute" => CtValue::Bool(text_kernel::jet_std::jet_fs_host_path_is_absolute_raw(&text(0)?)),
+            "__host_path_join" => CtValue::Str(text_kernel::jet_std::jet_fs_host_path_join_raw(&text(0)?, &text(1)?)),
             "__metadata_directory" => match text_kernel::jet_std::jet_fs_metadata_directory_raw(&text(0)?) {
                 Ok(value) => CtValue::Present(Box::new(CtValue::Bool(value))),
                 Err(cause) => CtValue::failed(Box::new(CtValue::Str(cause))),

@@ -268,3 +268,27 @@ fn run() {
         "true\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\n",
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn core_files_absolute_preserves_host_lexical_paths_without_collapsing() {
+    let source = r#"
+use core.files as files
+use core.files.path as path
+use core.sys as sys
+
+fn run() {
+    cwd :: sys.current_dir() ?? panic("current_dir")
+    print((files.absolute("/absent//a/../b") ?? panic("absolute")) == "/absent//a/../b")
+    print((files.absolute("./a//../b") ?? panic("relative")) == "{cwd}/./a//../b")
+    print((files.absolute("C:\\absent") ?? panic("drive text")) == "{cwd}/C:\\absent")
+    print((files.absolute("a\\b") ?? panic("backslash")) == "{cwd}/a\\b")
+    print((files.absolute(path.of("/absent/./child")) ?? panic("Path")) == "/absent/./child")
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "core_files_absolute",
+        source,
+        "true\ntrue\ntrue\ntrue\ntrue\n",
+    );
+}

@@ -1086,3 +1086,12 @@ pub(crate) fn jet_fs_link_fd_at_raw(
 pub(crate) fn jet_fs_metadata_directory_raw(path: &String) -> Result<bool, String> {
     std::fs::metadata(path).map(|metadata| metadata.is_dir()).map_err(|error| error.to_string())
 }
+
+/// Host path grammar facts; Jet owns the current-directory/error policy.
+pub(crate) fn jet_fs_host_path_is_absolute_raw(path: &String) -> bool {
+    std::path::Path::new(path).is_absolute()
+}
+
+pub(crate) fn jet_fs_host_path_join_raw(base: &String, path: &String) -> String {
+    std::path::Path::new(base).join(path).to_string_lossy().into_owned()
+}

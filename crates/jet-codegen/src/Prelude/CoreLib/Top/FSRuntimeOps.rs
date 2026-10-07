@@ -13,17 +13,6 @@ extern "C" {
     fn chown(path: *const std::ffi::c_char, owner: u32, group: u32) -> i32;
 }
 
-pub(crate) fn jet_std_fs_absolute(path: &String) -> Result<String, jet_std::IOError> {
-    let p = std::path::Path::new(path);
-    let abs = if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Resolve, None, e))?
-            .join(p)
-    };
-    Ok(abs.to_string_lossy().to_string())
-}
 
 /// D-FILES-SCOPE1: capture only the explicit FS.Read resource roots from the
 /// checked Authority. The handle owns that attenuation and never accepts a
