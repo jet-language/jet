@@ -665,6 +665,9 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
     if canonical_record.module_name == "core.sys" && context.unsafe_depth == 0 && sema_call_core_posix_control(canonical_record.member) {
         &diagnostics.push(sema_error("E3101", span, "`core.sys.{canonical_record.member}` requires an audited `#Unsafe` region", "POSIX process and session control can change credentials, signals, and process topology (I1)", "wrap the call in `#Unsafe(\"posix {canonical_record.member}: …\") {{ … }}` and gate the host OS with `prep if $build.os` / `#Target(OS.*)`"))
     }
+    if canonical_record.module_name == "core.mem" && context.unsafe_depth == 0 && (canonical_record.member == "__string_data" || canonical_record.member == "__string_byte_len" || canonical_record.member == "__bytes_pack" || canonical_record.member == "__bytes_free" || canonical_record.member == "__bytes_unpack") {
+        &diagnostics.push(sema_error("E3101", span, "`core.mem.{canonical_record.member}` requires an audited `#Unsafe` region", "raw C byte carriers require a live unmodified String or a bounded owned byte buffer, and a matching packed-buffer release", "use a vetted Core adapter or wrap the call in `#Unsafe(\"C byte carrier: …\") {{ … }}`"))
+    }
     actual_accesses :: loop argument in args -> argument.convention
     signature :: sema_call_core_typed_signature(canonical_record, args.len(), actual_accesses, [Type]{}) ?? {
         &diagnostics.push(sema_error("E0904", span, "`{canonical_record.module_name}.{canonical_record.member}` has no fixed source typed call contract", "fixed Core checking consumes only a complete Source signature", "use the source-owned special checker for a polymorphic Core operation without a fixed row"))

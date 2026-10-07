@@ -2399,6 +2399,12 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error("E0510", what, why, fix, Some(span)));
             }
         }
+        if module == "core.mem"
+            && matches!(name, "__string_data" | "__string_byte_len" | "__bytes_pack" | "__bytes_free" | "__bytes_unpack")
+            && !self.in_unsafe
+        {
+            self.diags.push(e3101(name, span));
+        }
         // Source-owned Core members are ordinary checked Jet functions: the
         // caller sees the wrapper's declared contract (`-> T Never!`,
         // `-> T E!`), the same row every backend calls. Only the source module
