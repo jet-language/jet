@@ -254,14 +254,14 @@ struct LowerFunction {
 // Lowers the functions `entry` reaches (Mono.jet: generic functions and
 // methods of generic types once per concrete instance) plus their glue.
 pub fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
-    intrinsics := [U64:LowerRuntimeIntrinsic]{}
+    intrinsics :: [U64:LowerRuntimeIntrinsic]{}
     lower_selected(program, [MIRFunctionID]{entry}, true, ^intrinsics)
 }
 
 // Compiler and test callbacks retain return carriers; only program entries
 // consume Option/Result success and turn failure into a process exit.
 pub fn lir_lower_callables(program: MIRProgram, roots: [MIRFunctionID]) -> LIRLowering Never! {
-    intrinsics := [U64:LowerRuntimeIntrinsic]{}
+    intrinsics :: [U64:LowerRuntimeIntrinsic]{}
     lower_selected(program, roots, false, ^intrinsics)
 }
 
