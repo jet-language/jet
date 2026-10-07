@@ -42,7 +42,7 @@ if (mode === "assemble") {
   // The Shared factory, wrapper, import and private address intrinsic form
   // one explicit block. They belong only to the actual-Shared fixture, never
   // to the standalone musl/Jet witness or its pthread-only import census.
-  const sharedBlock = /\/\/ Interim Shared ABI import dies at L8a-4[\s\S]*?(?=^fn thread_tls_destroy)/m;
+  const sharedBlock = /(?:\/\/ Interim Shared ABI import dies at L8a-4[\s\S]*?)?^#Export\(c\) fn jet_rt_tls_shared_destructor[\s\S]*?(?=^fn thread_tls_destroy)/m;
   if (!sharedBlock.test(complete)) throw Error("missing Shared TLS source block");
   const unit = complete.replace(sharedBlock, "");
   function exportList(text) {

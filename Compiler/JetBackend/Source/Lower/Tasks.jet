@@ -714,7 +714,8 @@ fn lower_channel_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
     receiver :: lower_use(&m, &f, collection) ?? return true
     moved :: lower_const_flag(&f, if by_value && lower_value_owned(c, collection) -> 1 else -> 0)
     source :: lower_pointer(&f)
-    lower_call_runtime(&m, &f, "jet_rt_native_receiver_iter", [LIRValueID]{receiver, moved}, Val(source))
+    meta :: lower_lazy_meta(p, &m, &f, elem)
+    lower_call_runtime(&m, &f, "jet_rt_native_receiver_iter", [LIRValueID]{receiver, moved, meta}, Val(source))
     stride :: lower_const(&f, 1)
     has_step :: lower_const_flag(&f, 0)
     handle :: lower_pointer(&f)

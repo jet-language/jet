@@ -3975,11 +3975,22 @@ impl<T> ChannelInner<T> {
     }
 
     fn remove_waiter(&self, slot: &ParkSlot) {
-        self.state
-            .lock()
-            .unwrap()
-            .recv_waiters
-            .retain(|w| !std::ptr::eq(Arc::as_ptr(w), std::ptr::from_ref(slot)));
+        let waiter = {
+            let mut state = self.state.lock().unwrap();
+            let before = state.recv_waiters.len();
+            state.recv_waiters
+                .retain(|w| !std::ptr::eq(Arc::as_ptr(w), std::ptr::from_ref(slot)));
+            // A send already consumed this selector's registration, but the
+            // selector may have chosen an earlier arm. Hand its wake onward.
+            if before == state.recv_waiters.len() && !state.queue.is_empty() {
+                state.recv_waiters.pop()
+            } else {
+                None
+            }
+        };
+        if let Some(waiter) = waiter {
+            waiter.wake();
+        }
     }
 }
 

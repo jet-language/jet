@@ -195,6 +195,24 @@ Result boxes reserve at least one eight-byte payload word after the tag,
 including zero-sized payloads. Runtime marshaling uses the same minimum,
 alignment and size as native construction and drop glue.
 
+`Compiler/JetRuntime/Source/Text.jet` owns the native text exports. Headers are
+24-byte allocations aligned to 8; buffers are allocated with alignment 1 and
+freed with their recorded capacity. Empty buffers have pointer 1 and capacity
+0. Builders transfer their header unchanged on finish and preserve self-append
+when growing. Static bytes use Rust-compatible lossy UTF-8 conversion; range
+slices count Unicode scalars, not bytes. Split iterators clone their borrowed
+input once and produce owned pieces lazily; nonempty `rsplit` materializes
+rightmost nonoverlapping matches, then yields the pieces left-to-right.
+The raw `TextTests` library exposes `text_tests`, not an executable entry.
+Its runner adds `run` in a sibling executable directory, outside the runtime
+package manifest, before compiling the ownership and UTF-8 witnesses.
+C foreign String arguments use a separate byte buffer with a trailing NUL;
+the caller frees it with its length including that terminator. Unpacking
+validates UTF-8 while finding the terminator and copies into an owned E4
+header before argument buffers are freed, including interior-pointer returns.
+Interior NUL, null results and invalid UTF-8 use the exact Rust panic messages
+through the shared panic stop path; raw text witnesses cover all three stops.
+
 Sizes: a word, handle or box pointer is 8 bytes (align 8), a Bool 1 byte, Unit
 0. An inline aggregate is 8-aligned and padded to whole words, so copies move
 words; a member sits at the next multiple of its alignment, and a recursive
@@ -299,7 +317,7 @@ function parameters and jumps to it (LIR forbids jumps to the entry).
 | `ResultOk` / `ResultErr` | box, word at 0 = 1 / 0, payload at 8 |
 | `ResultIsOk` / `ResultValue` | `Load` offset 0 and `Compare Ne 0` / read at offset 8 |
 | `BuildString(parts)` | `jet_rt_string_builder_new`, `..._push_static(b, ptr, len)` per literal, `..._push(b, text)` per Display or Debug interpolation, `..._finish(b) -> String` |
-| `Semantic(Print(call, v))` | Display text of v (the String itself, or `jet_rt_int_to_string` / `jet_rt_i64_to_string` / `jet_rt_char_to_string` / `jet_rt_bool_to_string`, dropped after the call), then the route's symbol (`jet_term_write_stdout_line`) with `(text, flush = 1)` |
+| `Semantic(Print(call, v))` | Display text of v (the String itself, or `jet_rt_int_to_string` / `jet_rt_i64_to_string` / `jet_rt_char_to_string` / `jet_rt_bool_to_string`, dropped after the call), then the route's symbol (`jet_term_write_stdout_line`) with `(text, flush = 0)`; the shared runtime owns terminal-line versus file/pipe buffering |
 | `Call` of a user function, method or associated function | `Call Function(id)` with the callee's signature; Unit arguments are omitted |
 | `Call` of a Prelude route | `Call Runtime(symbol)` |
 | `LoopRangeInit/HasNext/Value/Advance` | the route's symbols; init takes `(start, end, step, has_step, exclusive)` |
@@ -417,6 +435,55 @@ marshaling continues to use `jet_rt_string_data`/`jet_rt_string_byte_len`,
 never Rust layout. This contract applies to the linked runtime pack; the
 standalone freestanding image runtime is separate and retires with L3.
 
+The Jet runtime-only source manifest is assembled by the runtime-object path,
+never the compiler bootstrap unit. Adjacent `// runtime-init: N` and
+`// runtime-fini: N` comments on `#Export(c)` declarations produce explicit
+`symbol init N` / `symbol fini N` export-list rows. Lifecycle functions take
+no arguments and return nothing; the object writer emits the corresponding
+priority-suffixed ELF init/fini arrays, without special-casing function names.
+Allocator initialization has priority zero; host stdio initializes after it.
+
+D-STDOUT-BUFFER1=A gives stdout one locked 8192-byte process-wide buffer:
+newline flushing on terminals, full-buffer flushing on files and pipes.
+stderr drains stdout first and writes immediately. The shared
+`jet_rt_stdout_flush` hook is also a fini entry and is called at input,
+blocking, child-launch, error-report and explicit-exit boundaries. Print
+borrows the E4 text and appends its newline without allocating a second frame.
+IOError crosses host C boundaries as seven eight-byte fields: kind, operation,
+nullable owned resource text, OS-code presence, OS code, nullable owned cause
+text, and resource-limit tag. Tags are generated from the canonical Core enum
+registry; no Rust enum or String layout is inspected.
+IOContext uses a 40-byte owner: operation, nullable resource text, OS-code
+presence, raw i64 OS code, nullable cause text. It is the contiguous payload
+at IOError+8; variant getters deep-clone it, while constructors consume its
+header and transfer the text owners. The OS-code projection encodes exact Int
+through the canonical numeric seam, never by treating a boxed Int as i64.
+Core stdio wrappers check `IO.Write`/`IO.Flush` faults before entering the
+raw transport. Runtime print, panic and abort do not consult those switches.
+stderr text lines use a borrowed text iovec and a stack-local LF, avoiding a
+temporary line allocation; byte lists compact eight-byte slots into bounded
+mapping-owned scratch. A zero write keeps a distinct WriteZero sentinel,
+not a fabricated errno. OS causes use pinned musl 1.2.5 wording from
+`JetRuntime/Assets/MuslErrno1_2_5`, with source hashes and MIT attribution.
+
+The native main wrapper captures argc/argv/envp through the explicit
+`jet_rt_host_arguments` entry before user code. Runtime-private module globals
+are the sole raw startup snapshot, not foreign data imports or a second
+environment map. Entryless hosts must call that entry explicitly before
+argument/environment access. Core owns the once-published logical Shared
+environment and all subsequent writes; raw startup bytes remain immutable.
+Entryless hosts lend environment arrays only during capture: valid entries
+are copied once into a single runtime-owned NUL-terminated byte block and the
+index points into it. Later host `setenv`/`putenv` cannot invalidate the
+snapshot. argv remains borrowed for the runtime lifetime. Zero-sized process
+stream tokens are the constant non-null word 1 and have no allocation/drop.
+Startup indexing follows Rust 1.90 `sys/env/unix.rs`: skip empty/malformed
+entries and search `=` after byte zero, preserving names beginning with `=`,
+non-UTF-8 bytes, duplicate rows and host order. Core transfers use owned
+List<U8> headers with eight-byte slots. Runtime-only scheduler/deadline flags
+read this immutable snapshot through an internal helper; Core overlay writes
+do not alter those flags. No overlay-provider callback is registered.
+
 A Jet type that generated Rust holds as a native runtime type crosses as an owned
 `Box<T>` handle. The generator reads Context.rs and predicates.rs name tables and the
 explicit names in MIRRust `rust_apply_type`, using the same canonical-Core probe as
@@ -498,6 +565,40 @@ successful values into the checked tuple's field offsets. Readiness tables
 normalize to owned receiver/timer Lists; blocking and else-arm waits delegate
 to the canonical selector and initialize their arm/payload tuple only after
 the runtime returns normally.
+
+The Jet channel state owns a homogeneous payload descriptor and a ring buffer;
+ordinary send/receive moves need no per-message owner allocation. Bounded sends
+count both queued values and prepared-send reservations against capacity.
+Reservations retain physical queue state across preparation, and commit checks
+close again before transferring a payload. Single sender/receiver wakeups are
+LIFO; close wakes all registrations in insertion order. The selector probes
+receiver arms first in source order, then timer arms, and rechecks readiness
+after registering its park slot. An `else` probe reports arm -1 without parking.
+`jet_rt_native_receiver_iter(receiver, by_value, meta)` copies the supplied
+descriptor before its first pull; a receiver iterator can therefore be created
+before any sender initializes the channel descriptor. Iterator kind 28 delegates
+pull and drop to the channel owner, including closed and stopped pulls.
+
+Shared cells retain their payload and recursive descriptor independently of
+endpoint handles. Callback reads can run concurrently; edits are exclusive,
+and waiting writers precede new readers. No recursive-lock exception is added.
+Callback environments are borrowed, and callback outputs remain unread on a
+delivered stop. Every callback releases its permit even when stopped; payload
+destructors run outside the permit lock. Process/World site publication returns
+the borrowed winning cell, drops losing candidates through the uniform Shared
+drop door, and registers only World sites for quiescent reset. Reset preserves
+outstanding clones and retains registry nodes for later republishing.
+Revision exhaustion is checked before invoking an edit callback and becomes a
+task panic inside a task body, not an initialized callback result. The runtime
+fixtures exercise prepared-send rollback, stopped iterator/output ownership,
+failed-send payload disposal, simultaneous read permits, writer priority and
+revision exhaustion. Their Closed crossing uses the actual Rust Prelude enum,
+and their paired one-million-message ping-pong records Jet and Rust timings.
+Once selection has transferred a payload/arm to the caller, a later stop does
+not discard that completed selection. Select deregistration returns a consumed
+wake to another receiver when an earlier arm won but this channel still holds
+a queued item. Paired private-kernel witnesses exercise the same handoff in
+Jet and the Rust seed; no tier-specific wake-stealing policy remains.
 Opaque runtime-owned enums do not expose a native discriminant or payload
 layout. Their construction, variant tests and payload projections report a
 native unsupported issue unless an explicit record adapter supplies that layout.
@@ -1514,3 +1615,38 @@ using the native runner's same-head host/reference protocol checks.
 `run-test-runtime.mjs OUT NATIVE_STATICLIB JET_OBJECT HOSTED_JET REFERENCE_JET`
 checks the object's audited undefined-symbol set, builds/runs that fixture,
 and runs the three-example native CLI parity checks with the fresh pack.
+### Native collection runtime
+
+The runtime-only collection unit implements the current
+`jet_rt_native_iter_*` slot ABI, not the Rust generic `jet_iter_*` names.
+List and Map operations already emitted as typed LIR retain that lowering;
+there is no unused parallel set of generic C exports.
+
+Lists carry an inline `[len, cap, data]` header. Element descriptors have nine
+words: stride, clone, drop, show, equality, comparison, kind, and two child
+descriptors. Iterator owners copy the descriptors because the caller's
+descriptor storage may expire. Pulls use reusable payload slots; Bool copies
+one byte and Unit copies none. Moves, borrowed snapshots, closure release,
+early termination, and buffered cursor stride have the same ownership rules
+at the slot boundary. Collection buffers crossing that boundary belong to
+`jet_rt_alloc`/`jet_rt_free`, including buffers from remaining Rust adapters.
+
+Laziness remains operation-specific. Map/filter/take/skip and cursor pulls are
+lazy; repeat/cycle/shuffle, fallible map/filter, keyed dedup/sorted checks, and
+chunk-while retain the reference kernels' eager consumption. Integer averages
+sum fixed-width values in a signed two-word accumulator before one binary64
+rounding; exact-Int averages borrow the numeric layer.
+
+The remaining progress-state and comptime-fuel leaves are opaque policy seams
+owned by the host/session layers, not Rust iterator owners. Their Rust bodies
+are seed/verification paths scheduled to die at cutover. The collection exit
+harness checks the Jet object's definitions, unresolved pack imports, all
+selected baseline stems, raw slot witnesses, and the count of newly passing
+collection stems; preparation is not behavioral proof.
+
+Stopped splits discard both partial lists; owned search needles, zip inputs,
+chunks, progress outputs, and unboxed failure payloads are also released before
+returning their neutral stopped result. Zip checks the stop rail before padding
+or reporting unequal lengths. A partially consumed step-by hint counts only
+remaining complete steps, and Float averaging preserves the reference sum's
+negative-zero identity.

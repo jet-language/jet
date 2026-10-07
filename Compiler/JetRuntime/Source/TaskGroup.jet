@@ -221,6 +221,7 @@ fn task_selection(handles: I64, count: I64, kind: I64, flatten: Bool) -> I64 {
                     if failed && (first_error < I64{0} || task_order_before(child, sync_load(handles + first_error * I64{8}))) -> first_error = at
                 }
             }
+            }
             at += I64{1}
         }
         winner := I64{-1}
@@ -308,6 +309,7 @@ fn task_group_handles(list: I64, spawn: Bool, meta: I64, invoke: I64, release: I
                 jet_rt_free(values, I64{24}, I64{8})
                 task_selection_drain(data, count, success == I64{0})
             }
+
         }
     }
     scheduler_words_drop(handles)
@@ -371,6 +373,8 @@ fn task_group_handles(list: I64, spawn: Bool, meta: I64, invoke: I64, release: I
                 }
                 jet_rt_free(prepared, count * I64{16}, I64{8})
             }
+
+        }
         }
     }
     jet_rt_free(owned_handles, count * I64{8}, I64{8})

@@ -1,0 +1,166 @@
+// Raw ABI ownership witnesses alongside the high-level collection goldens.
+fn coll_test_require(ok: Bool) {
+    if ok {
+        return
+    }
+    trap_exit(I64{1})
+    loop {
+
+    }
+}
+
+fn coll_test_meta() -> I64 {
+    meta :: jet_rt_alloc(I64{72}, I64{8})
+    coll_zero(meta, I64{72})
+    trap_store(meta, I64{8})
+    trap_store(meta + I64{48}, I64{274877906946})
+    meta
+}
+
+fn coll_test_source() -> I64 {
+    meta :: coll_test_meta()
+    header :: coll_list_new()
+    slot :: jet_rt_alloc(I64{8}, I64{8})
+    at := I64{1}
+    loop at <= (I64{5}) {
+        trap_store(slot, at)
+        coll_list_push(header, slot, meta)
+        at += I64{1}
+    }
+    source :: jet_rt_native_iter_from_list(header, meta, I64{1})
+    coll_test_require(trap_word(header) == I64{0} && trap_word(header + I64{8}) == I64{0} && trap_word(header + I64{16}) == I64{0})
+    jet_rt_free(header, I64{24}, I64{8})
+    jet_rt_free(slot, I64{8}, I64{8})
+    // The node must own the descriptor, not borrow this expired one.
+    coll_meta_drop(meta)
+    source
+}
+
+// Single-threaded bounded fixtures never fill a slab or allocate directly.
+// Count each available slab's live payloads, excluding bounded empty caches.
+fn coll_test_live(width: I64) -> I64 {
+    total := I64{0}
+    slab := trap_word(alloc_head(alloc_root, width))
+    loop slab != (I64{0}) {
+        total += trap_word(slab + I64{24})
+        slab = trap_word(slab)
+    }
+    total
+}
+
+fn coll_test_bytes() {
+    snapshot :: jet_rt_alloc(I64{64}, I64{8})
+    width := I64{32}
+    at := I64{0}
+    loop at < (I64{8}) {
+        trap_store(snapshot + at * I64{8}, coll_test_live(width))
+        width *= I64{2}
+        at += I64{1}
+    }
+    meta :: coll_test_meta()
+    trap_store(meta + I64{48}, I64{34359738371})
+    slot :: coll_slot_new(meta)
+    case := I64{0}
+    loop case < (I64{3}) {
+        length :: if (case == I64{0}) -> I64{0} else if (case == I64{1}) -> I64{1} else -> I64{255}
+        input :: coll_list_new()
+        at = I64{0}
+        loop at < length {
+            trap_store(slot, if (length == I64{1}) -> I64{255} else -> at)
+            coll_list_push(input, slot, meta)
+            at += I64{1}
+        }
+        packed :: jet_rt_bytes_pack(input)
+        coll_test_require(packed != I64{0})
+        output :: jet_rt_bytes_unpack(packed, length)
+        coll_test_require(trap_word(input) == length && trap_word(output) == length)
+        if (length == I64{0}) {
+            coll_test_require(packed == I64{1} && trap_word(output + I64{8}) == I64{0} && trap_word(output + I64{16}) == I64{0})
+        } else {
+            original :: trap_word(input + I64{16})
+            restored :: trap_word(output + I64{16})
+            coll_test_require(packed != original && restored != original && restored != packed)
+            at = I64{0}
+            loop at < length {
+                expected :: if (length == I64{1}) -> I64{255} else -> at
+                coll_test_require(trap_byte(packed + at) == expected && trap_word(original + at * I64{8}) == expected && trap_word(restored + at * I64{8}) == expected)
+                at += I64{1}
+            }
+            // Unpack copies, rather than adopting the borrowed C buffer.
+            trap_put(packed, I64{99})
+            coll_test_require(trap_word(restored) == (if (length == I64{1}) -> I64{255} else -> I64{0}))
+        }
+        jet_rt_bytes_free(packed, length)
+        coll_list_drop(input, meta, I64{0})
+        coll_list_drop(output, meta, I64{0})
+        jet_rt_free(input, I64{24}, I64{8})
+        jet_rt_free(output, I64{24}, I64{8})
+        case += I64{1}
+    }
+    jet_rt_free(slot, coll_size(meta), I64{8})
+    coll_meta_drop(meta)
+    width = I64{32}
+    at = I64{0}
+    loop at < (I64{8}) {
+        coll_test_require(coll_test_live(width) == trap_word(snapshot + at * I64{8}))
+        width *= I64{2}
+        at += I64{1}
+    }
+    jet_rt_free(snapshot, I64{64}, I64{8})
+}
+
+fn run() {
+    jet_rt_alloc_init()
+    coll_test_bytes()
+    source :: coll_test_source()
+    first :: jet_rt_native_iter_next(source)
+    coll_test_require(trap_word(first) == I64{1})
+    jet_rt_free(first, I64{8}, I64{8})
+    tail :: jet_rt_native_iter_step_by(source, I64{2})
+    output :: coll_list_new()
+    jet_rt_native_iter_to_list(tail, output)
+    coll_test_require(trap_word(output) == I64{2})
+    data :: trap_word(output + I64{16})
+    coll_test_require(trap_word(data) == I64{2} && trap_word(data + I64{8}) == I64{4})
+    meta :: coll_test_meta()
+    coll_list_drop(output, meta, I64{0})
+    jet_rt_free(output, I64{24}, I64{8})
+    cursor :: jet_rt_native_iter_cursor_init(coll_test_source(), I64{2}, I64{1})
+    slot :: coll_slot_new(meta)
+    coll_test_require(jet_rt_native_iter_cursor_test(cursor) == I64{1})
+    jet_rt_native_iter_cursor_value(cursor, slot, I64{0})
+    coll_test_require(trap_word(slot) == I64{1})
+    jet_rt_native_iter_cursor_advance(cursor)
+    jet_rt_native_iter_cursor_value(cursor, slot, I64{1})
+    coll_test_require(trap_word(slot) == I64{3})
+    jet_rt_native_iter_cursor_advance(cursor)
+    jet_rt_native_iter_cursor_value(cursor, slot, I64{1})
+    coll_test_require(trap_word(slot) == I64{5})
+    jet_rt_native_iter_cursor_advance(cursor)
+    coll_test_require(jet_rt_native_iter_cursor_test(cursor) == I64{0})
+    jet_rt_native_iter_cursor_advance(cursor)
+    jet_rt_native_iter_cursor_drop(cursor)
+    coll_test_require(jet_rt_native_iter_len(coll_test_source()) == I64{5})
+    coll_test_require(jet_rt_native_iter_len(jet_rt_native_iter_take(coll_test_source(), I64{0})) == I64{0})
+    coll_test_require(jet_rt_native_iter_len(jet_rt_native_iter_skip(coll_test_source(), I64{99})) == I64{0})
+    coll_test_require(jet_rt_native_iter_len(jet_rt_native_iter_drop_last(coll_test_source(), I64{99})) == I64{0})
+    coll_test_require(jet_rt_native_iter_average_int(coll_test_source()) == 3.0)
+    // Rounding boundaries exercise carry into exponent and ties-to-even.
+    coll_test_require(iter_wide_float(I64{0}, U64{9007199254740993}) == 9007199254740992.0)
+    coll_test_require(iter_wide_float(I64{0}, U64{9007199254740995}) == 9007199254740996.0)
+    coll_test_require(iter_wide_float(I64{1}, U64{0}) == 18446744073709551616.0)
+    coll_test_require(iter_wide_float(I64{-1}, U64{0}) == -18446744073709551616.0)
+    // Bool/Unit copies never read uninitialized padding bytes.
+    trap_store(meta + I64{48}, I64{9})
+    trap_store(slot, I64{0})
+    tiny :: jet_rt_alloc(I64{1}, I64{1})
+    trap_put(tiny, I64{1})
+    coll_copy(tiny, slot, coll_payload(meta))
+    coll_test_require(trap_word(slot) == I64{1})
+    trap_store(meta + I64{48}, I64{11})
+    coll_test_require(coll_payload(meta) == I64{0})
+    coll_copy(I64{0}, slot, coll_payload(meta))
+    jet_rt_free(tiny, I64{1}, I64{1})
+    jet_rt_free(slot, I64{8}, I64{8})
+    coll_meta_drop(meta)
+}

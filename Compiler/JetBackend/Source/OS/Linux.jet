@@ -362,6 +362,39 @@ fn os_write_word_i64(fd: I64, word: I64, count: I64) -> I64 {
     """
 }
 
+// Borrow two iovecs and their LF byte only for the synchronous writev call.
+// The return count includes the LF if the complete frame was accepted.
+#[Unsafe("bytes lends length readable bytes; the second iovec lends a stack-local LF; writev retains neither pointer and every push is balanced"), FFI(asm)]
+fn os_write_line_i64(fd: I64, bytes: I64, length: I64) -> I64 {
+    """
+    push {fd}
+    push {bytes}
+    push {length}
+    pop rdx
+    pop rsi
+    pop rdi
+    mov rax, 10
+    push rax
+    mov rcx, rsp
+    mov rax, 1
+    push rax
+    push rcx
+    push rdx
+    push rsi
+    mov rsi, rsp
+    mov rdx, 2
+    mov rax, 20
+    syscall
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    pop rdx
+    mov rax, rax ; -> return
+    ; clobbers rcx, r11, rdi, rsi, rdx
+    """
+}
+
 // Invoke a syscall whose second argument borrows four stack-local words in
 // order [w0, w1, w2, w3], whose third argument is null, and whose fourth is a4.
 // This permits allocation-free rt_sigprocmask/rt_sigaction even before heap
@@ -503,5 +536,69 @@ fn os_clone_i64(flags: I64, stack: I64, parent_tid: I64, child_tid: I64) -> I64 
     pop rdi
     mov rax, rax ; -> return
     ; clobbers rcx, r11
+    """
+}
+
+#[Unsafe("calls a checked native runtime callback with one machine-word argument"), FFI(asm)]
+fn os_call1_i64(address: I64, a: I64) -> I64 {
+    """
+    push {address}
+    push {a}
+    pop rdi
+    pop r11
+    call r11
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
+    """
+}
+
+#[Unsafe("calls a checked native runtime callback with two machine-word arguments"), FFI(asm)]
+fn os_call2_i64(address: I64, a: I64, b: I64) -> I64 {
+    """
+    push {address}
+    push {a}
+    push {b}
+    pop rsi
+    pop rdi
+    pop r11
+    call r11
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
+    """
+}
+
+#[Unsafe("calls a checked native runtime callback with three machine-word arguments"), FFI(asm)]
+fn os_call3_i64(address: I64, a: I64, b: I64, c: I64) -> I64 {
+    """
+    push {address}
+    push {a}
+    push {b}
+    push {c}
+    pop rdx
+    pop rsi
+    pop rdi
+    pop r11
+    call r11
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
+    """
+}
+
+#[Unsafe("calls a checked native runtime callback with four machine-word arguments"), FFI(asm)]
+fn os_call4_i64(address: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
+    """
+    push {address}
+    push {a}
+    push {b}
+    push {c}
+    push {d}
+    pop rcx
+    pop rdx
+    pop rsi
+    pop rdi
+    pop r11
+    call r11
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
     """
 }
