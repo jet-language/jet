@@ -3598,10 +3598,15 @@ struct JetCodegenTypeSlot {
 // loaded source declares, `FieldError`, `Range`, the carrier records, the Core
 // records and the math records), each unless a row already owns its canonical
 // key, then the compiler-owned `ParseError` alias. With `defer_cli`, a
-// definition with a CLI entry or binding keeps no row.
+// definition with a CLI entry or binding keeps no row. A plain Core enum row
+// also stays out when a program declaration (outside `<corelib>/`) spells its
+// leaf: declared keys are module-qualified, so the key check never sees it,
+// and the bootstrap host codec resolves enum owners by leaf name, so a second
+// `Effect` row shadows the compiler's own `Effect` (every variant missing).
 fn jet_codegen_declared_type_slots(function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], closure_only: Bool, defer_cli: Bool) -> [JetCodegenTypeSlot] {
     slots := [JetCodegenTypeSlot]{}
     declared_keys := [String:Bool]{}
+    program_type_names := [String:Bool]{}
     parse_error_declared := false
     loop module_index in 0..<modules.len() {
         loop definition_index in 0..<modules[module_index].declarations.type_defs.len() {
@@ -3609,6 +3614,7 @@ fn jet_codegen_declared_type_slots(function_index: JetCodegenFunctionIndex, modu
             // core.term stream handles lower to their native carrier, never a record row.
             if jet_codegen_is_core_term_stream_carrier(modules, definition.module_identity, definition.name) -> next
             declared_keys[definition.key] = true
+            if !definition.key.starts_with("<corelib>/") -> program_type_names[definition.name] = true
             if definition.key == JET_CODEGEN_PARSE_ERROR_ALIAS -> parse_error_declared = true
             row := MIRTypeDef?{None}
             if !defer_cli || (definition.cli == None && definition.cli_bindings.len() == 0) -> row = Val(jet_codegen_lower_type_definition(definition, function_index, modules, closure_only))
@@ -3627,7 +3633,7 @@ fn jet_codegen_declared_type_slots(function_index: JetCodegenFunctionIndex, modu
         // keeps no plain row.
         source_enum_counts := jet_codegen_core_source_enum_counts(modules)
         loop core_row in CORE_ENUM_ROWS {
-            if declared_keys.get(core_row.name) != None -> next
+            if declared_keys.get(core_row.name) != None || program_type_names.get(core_row.name) != None -> next
             if (source_enum_counts.get(core_row.name) ?? 0) == 1 -> next
             if core_row.kind == .Enum(variants) {
                 declared_keys[core_row.name] = true
