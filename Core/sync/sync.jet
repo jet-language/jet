@@ -4,22 +4,42 @@ package {
     edition: "2026"
     description: "CRDT counters, maps, lists, and text."
     license: "MIT"
-    outputs: {
-        sync: .Library{ entry: sync }
-    }
-}
-// core.sync — state-based CRDTs. G-counters, LWW-registers in a map
-// RGA-ish lists (id + value + tombstone), and LWW text. Merge is a
-// join: max per replica, last-writer-wins by timestamp.
-pub struct SyncCounter {
-    pub replica: String
-    pub counts: [String:Int]
+    outputs: { sync: .Library{ entry: sync } }
 }
 
-pub struct SyncMap {
+// D-SYNC1=A / D-DBPOLICY1=A: identities survive merges and policy authority
+// binds a row owner to a user, rather than an unrelated list of actions.
+use core.text as text
+
+MAX_TEXT :: 1048576
+MAX_ATOMS :: 4194304
+MAX_REPLICAS :: 4096
+MAX_ENTRIES :: 100000
+MAX_CLOCK :: 18446744073709551615
+MIN_VALUE :: -9223372036854775808
+MAX_VALUE :: 9223372036854775807
+
+pub struct SyncTextAtom {
     pub replica: String
-    pub clock: Int
-    pub entries: [String:LWW]
+    pub counter: Int
+    pub after: String
+    pub scalar: String
+    pub deleted: Bool
+}
+
+pub struct SyncText {
+    pub atoms: [SyncTextAtom]
+    pub valid: Bool
+}
+
+pub struct CounterCount {
+    pub positive: Int
+    pub negative: Int
+}
+
+pub struct SyncCounter {
+    pub counts: [String:CounterCount]
+    pub valid: Bool
 }
 
 pub struct LWW {
@@ -29,376 +49,372 @@ pub struct LWW {
     pub deleted: Bool
 }
 
-pub struct SyncList {
+pub struct SyncMap {
     pub replica: String
     pub clock: Int
-    pub items: [RGAItem]
+    pub entries: [String:LWW]
+    pub valid: Bool
 }
 
 pub struct RGAItem {
-    pub id: String
+    pub replica: String
     pub value: String
-    pub tombstone: Bool
 }
 
-pub struct SyncText {
-    pub replica: String
-    pub clock: Int
-    pub value: String
-    pub ts: Int
+pub struct SyncList {
+    pub items: [RGAItem]
+    pub valid: Bool
+}
+
+pub enum RowPolicyExpr {
+    AllowAll
+    OwnerEqualsUser
 }
 
 pub struct RowPolicy {
-    pub allow: [String]
-    pub deny: [String]
+    pub table: String
+    pub expression: RowPolicyExpr
 }
 
-pub fn counter_new() -> SyncCounter Never! { counter_for("local") }
-
-pub fn counter_for(replica: String) -> SyncCounter Never! {
-    id := replica
-    if id.len() == 0 -> id = "local"
-    if !valid_sync_text(id, 1048576, false) -> id = ""
-    SyncCounter{replica: id, counts: [String:Int]{}}
+fn valid_token(value: String) -> Bool Never! {
+    value.trim() != "" && value.bytes().len() <= MAX_TEXT && !text.has_control(value)
 }
 
-pub fn counter_inc(counter: SyncCounter) -> SyncCounter Never! {
-    if !valid_sync_text(counter.replica, 1048576, false) -> return ~counter
-    cur :: counter.counts.get(counter.replica) ?? 0
-    if cur >= 2147483646 -> return ~counter
-    if counter.counts.len() >= 4096 && counter.counts.get(counter.replica) == None -> return ~counter
-    counts := counter.counts
-    _ :: &counts.add(counter.replica, cur + 1)
-    SyncCounter{replica: counter.replica, counts: counts}
+fn atom_id(replica: String, counter: Int) -> String Never! {
+    "{replica.bytes().len()}:{replica}:{counter}"
+}
+
+fn invalid_text() -> SyncText Never! { SyncText{atoms: [SyncTextAtom]{}, valid: false} }
+fn invalid_counter() -> SyncCounter Never! { SyncCounter{counts: [String:CounterCount]{}, valid: false} }
+fn invalid_map() -> SyncMap Never! { SyncMap{replica: "", clock: 0, entries: [String:LWW]{}, valid: false} }
+fn invalid_list() -> SyncList Never! { SyncList{items: [RGAItem]{}, valid: false} }
+
+// RGA traversal groups siblings by their anchor. Later Lamport writes precede
+// older siblings, with replica names breaking a concurrent-clock tie.
+fn text_order(doc: SyncText) -> [Int] Never! {
+    children := [String:[Int]]{}
+    loop (index, atom) in doc.atoms {
+        siblings := children.get(atom.after) ?? [Int]{}
+        &siblings.push(index)
+        _ :: &children.add(atom.after, siblings)
+    }
+    loop anchor in children.keys() {
+        siblings := children.get(anchor) ?? [Int]{}
+        &siblings.sort_by((left: Int, right: Int) -> {
+            a :: doc.atoms[left]
+            b :: doc.atoms[right]
+            if a.counter == b.counter -> b.replica <=> a.replica else -> b.counter <=> a.counter
+        })
+        _ :: &children.add(anchor, siblings)
+    }
+    pending := children.get("") ?? [Int]{}
+    &pending.reverse()
+    order := [Int]{}
+    seen := [Int:Bool]{}
+    loop pending.len() > 0 {
+        index :: &pending.pop() ?? break
+        if seen.get(index) != None -> break
+        _ :: &seen.add(index, true)
+        &order.push(index)
+        atom :: doc.atoms[index]
+        siblings := children.get(atom_id(atom.replica, atom.counter)) ?? [Int]{}
+        &siblings.reverse()
+        loop child in siblings -> &pending.push(child)
+    }
+    order
+}
+
+fn text_visible(doc: SyncText) -> [Int] Never! {
+    visible := [Int]{}
+    loop index in text_order(doc) {
+        if !doc.atoms[index].deleted -> &visible.push(index)
+    }
+    visible
+}
+
+fn text_clock(doc: SyncText) -> Int Never! {
+    clock := 0
+    loop atom in doc.atoms {
+        if atom.counter > clock -> clock = atom.counter
+    }
+    clock
+}
+
+fn insert_after(doc: &SyncText, replica: String, anchor: String, inserted: [String]) Never! {
+    after := anchor
+    clock := text_clock(doc)
+    loop scalar in inserted {
+        clock += 1
+        &doc.atoms.push(SyncTextAtom{replica: replica, counter: clock, after: after, scalar: scalar, deleted: false})
+        after = atom_id(replica, clock)
+    }
+}
+
+pub fn text_new(replica: String, value: String) -> SyncText Never! {
+    if !valid_token(replica) || value.bytes().len() > MAX_TEXT -> return invalid_text()
+    doc := SyncText{atoms: [SyncTextAtom]{}, valid: true}
+    insert_after(&doc, replica, "", text.scalars(value))
+    doc
+}
+
+pub fn text_set(doc: SyncText, replica: String, value: String) -> SyncText Never! {
+    inserted :: text.scalars(value)
+    if !doc.valid || !valid_token(replica) || value.bytes().len() > MAX_TEXT
+        || doc.atoms.len() + inserted.len() > MAX_ATOMS
+        || text_clock(doc) + 1 + inserted.len() > MAX_CLOCK -> return ~doc
+    updated := doc
+    loop index in text_visible(updated) -> updated.atoms[index].deleted = true
+    insert_after(&updated, replica, "", inserted)
+    updated
+}
+
+pub fn text_edit(doc: SyncText, replica: String, index: Int, delete_count: Int, value: String) -> SyncText Never! {
+    inserted :: text.scalars(value)
+    if !doc.valid || !valid_token(replica) || index < 0 || delete_count < 0
+        || value.bytes().len() > MAX_TEXT || doc.atoms.len() + inserted.len() > MAX_ATOMS
+        || text_clock(doc) + 1 + inserted.len() > MAX_CLOCK -> return ~doc
+    visible :: text_visible(doc)
+    if index > visible.len() || delete_count > visible.len() - index -> return ~doc
+    anchor := ""
+    if index > 0 {
+        atom :: doc.atoms[visible[index - 1]]
+        anchor = atom_id(atom.replica, atom.counter)
+    }
+    updated := doc
+    loop offset in 0..<delete_count -> updated.atoms[visible[index + offset]].deleted = true
+    insert_after(&updated, replica, anchor, inserted)
+    updated
+}
+
+pub fn text_merge(left: SyncText, right: SyncText) -> SyncText Never! {
+    if !left.valid || !right.valid -> return invalid_text()
+    merged := [String:SyncTextAtom]{}
+    loop atoms in [left.atoms, right.atoms] {
+        loop atom in atoms {
+            if !valid_token(atom.replica) || atom.counter <= 0 || atom.counter > MAX_CLOCK
+                || text.scalars(atom.scalar).len() != 1 -> return invalid_text()
+            id :: atom_id(atom.replica, atom.counter)
+            previous :: merged.get(id)
+            if previous == .Val(existing) {
+                if existing.scalar != atom.scalar || existing.after != atom.after -> return invalid_text()
+                updated := existing
+                updated.deleted = existing.deleted || atom.deleted
+                _ :: &merged.add(id, updated)
+            } else -> _ :: &merged.add(id, atom)
+        }
+    }
+    if merged.len() > MAX_ATOMS -> return invalid_text()
+    atoms := [SyncTextAtom]{}
+    ids := merged.keys().to_list()
+    &ids.sort()
+    loop id in ids -> &atoms.push(merged.get(id) ?? return invalid_text())
+    doc :: SyncText{atoms: atoms, valid: true}
+    if text_order(doc).len() != doc.atoms.len() -> return invalid_text()
+    doc
+}
+
+pub fn text_show(doc: SyncText) -> String Never! {
+    if !doc.valid -> return "SyncError(invalid SyncText)"
+    parts := [String]{}
+    loop index in text_visible(doc) -> &parts.push(doc.atoms[index].scalar)
+    "SyncText({parts.join("")})"
+}
+
+pub fn text_metadata(doc: SyncText) -> String Never! {
+    if !doc.valid -> return "SyncError(invalid SyncText)"
+    clocks := [String:Int]{}
+    loop atom in doc.atoms {
+        previous :: clocks.get(atom.replica) ?? 0
+        if atom.counter > previous -> _ :: &clocks.add(atom.replica, atom.counter)
+    }
+    replicas := clocks.keys().to_list()
+    &replicas.sort()
+    parts := [String]{}
+    loop replica in replicas -> &parts.push("{replica}={clocks.get(replica) ?? 0}")
+    "LamportClock({parts.join(",")})"
+}
+
+pub fn counter_new(replica: String, value: Int) -> SyncCounter Never! {
+    if !valid_token(replica) || value < MIN_VALUE || value > MAX_VALUE -> return invalid_counter()
+    counts := [String:CounterCount]{}
+    _ :: &counts.add(replica, CounterCount{positive: if value >= 0 -> value else -> 0, negative: if value < 0 -> -value else -> 0})
+    SyncCounter{counts: counts, valid: true}
+}
+
+pub fn counter_inc(counter: SyncCounter, replica: String, delta: Int) -> SyncCounter Never! {
+    if !counter.valid || !valid_token(replica) -> return ~counter
+    if delta < MIN_VALUE || delta > MAX_VALUE -> return invalid_counter()
+    updated := counter
+    count := updated.counts.get(replica) ?? CounterCount{positive: 0, negative: 0}
+    if delta >= 0 -> count.positive += delta else -> count.negative -= delta
+    if count.positive > MAX_CLOCK || count.negative > MAX_CLOCK -> return invalid_counter()
+    _ :: &updated.counts.add(replica, count)
+    if updated.counts.len() > MAX_REPLICAS || !counter_total_valid(updated) -> return invalid_counter()
+    updated
+}
+
+fn counter_total(counter: SyncCounter) -> Int Never! {
+    total := 0
+    loop replica in counter.counts.keys() {
+        count :: counter.counts.get(replica) ?? CounterCount{positive: 0, negative: 0}
+        total += count.positive - count.negative
+    }
+    total
+}
+
+fn counter_total_valid(counter: SyncCounter) -> Bool Never! {
+    total :: counter_total(counter)
+    total >= MIN_VALUE && total <= MAX_VALUE
 }
 
 pub fn counter_merge(left: SyncCounter, right: SyncCounter) -> SyncCounter Never! {
-    out := left.counts
-    loop k in right.counts.keys() {
-        rv :: right.counts.get(k) ?? 0
-        lv :: out.get(k) ?? 0
-        if rv > lv -> _ :: &out.add(k, rv)
+    if !left.valid || !right.valid -> return invalid_counter()
+    counts := [String:CounterCount]{}
+    loop source in [left.counts, right.counts] {
+        loop replica in source.keys() {
+            if !valid_token(replica) -> return invalid_counter()
+            incoming :: source.get(replica) ?? return invalid_counter()
+            count := counts.get(replica) ?? CounterCount{positive: 0, negative: 0}
+            if incoming.positive < 0 || incoming.negative < 0 || incoming.positive > MAX_CLOCK || incoming.negative > MAX_CLOCK -> return invalid_counter()
+            if incoming.positive > count.positive -> count.positive = incoming.positive
+            if incoming.negative > count.negative -> count.negative = incoming.negative
+            _ :: &counts.add(replica, count)
+        }
     }
-    SyncCounter{replica: left.replica, counts: out}
+    merged :: SyncCounter{counts: counts, valid: true}
+    if merged.counts.len() > MAX_REPLICAS || !counter_total_valid(merged) -> return invalid_counter()
+    merged
 }
 
 pub fn counter_value(counter: SyncCounter) -> Int Never! {
-    n := 0
-    loop k in counter.counts.keys() -> n += (counter.counts.get(k) ?? 0)
-    n
+    if !counter.valid -> return 0
+    counter_total(counter)
 }
 
-pub fn map_new() -> SyncMap Never! { map_for("local") }
-
-pub fn map_for(replica: String) -> SyncMap Never! {
-    id := replica
-    if id.len() == 0 -> id = "local"
-    if !valid_sync_text(id, 1048576, false) -> id = ""
-    SyncMap{replica: id, clock: 0, entries: [String:LWW]{}}
-}
+pub fn map_new() -> SyncMap Never! { SyncMap{replica: "local", clock: 0, entries: [String:LWW]{}, valid: true} }
 
 pub fn map_set(map: SyncMap, key: String, value: String) -> SyncMap Never! {
-    invalid := !valid_sync_text(map.replica, 1048576, false)
-        || !valid_sync_text(key, 1048576, false)
-        || !valid_sync_text(value, 1048576, true)
-        || map.clock >= 2147483646
-        || (map.entries.len() >= 100000 && map.entries.get(key) == None)
-    if invalid -> return ~map
-    ts :: map.clock + 1
-    e :: LWW{value: value, ts: ts, replica: ~map.replica, deleted: false}
+    if !map.valid || !valid_token(map.replica) || !valid_token(key) || value.bytes().len() > MAX_TEXT -> return ~map
+    if map.clock >= MAX_CLOCK -> return invalid_map()
     entries := map.entries
-    _ :: &entries.add(key, e)
-    SyncMap{replica: ~map.replica, clock: ts, entries: entries}
-}
-
-pub fn map_delete(map: SyncMap, key: String) -> SyncMap Never! {
-    invalid := !valid_sync_text(map.replica, 1048576, false)
-        || !valid_sync_text(key, 1048576, false)
-        || map.clock >= 2147483646
-        || (map.entries.len() >= 100000 && map.entries.get(key) == None)
-    if invalid -> return ~map
-    ts :: map.clock + 1
-    entries := map.entries
-    _ :: &entries.add(key, LWW{value: "", ts: ts, replica: ~map.replica, deleted: true})
-    SyncMap{replica: ~map.replica, clock: ts, entries: entries}
-}
-
-pub fn map_contains(map: SyncMap, key: String) -> Bool Never! {
-    map_get(map, key) != .None
-}
-
-pub fn map_keys(map: SyncMap) -> [String] Never! {
-    out := [String]{}
-    loop key in map.entries.keys() {
-        entry :: map.entries.get(key) ?? next
-        if !entry.deleted -> &out.push(key)
-    }
-    out
+    _ :: &entries.add(key, LWW{value: value, ts: map.clock + 1, replica: map.replica, deleted: false})
+    if entries.len() > MAX_ENTRIES -> return invalid_map()
+    SyncMap{replica: map.replica, clock: map.clock + 1, entries: entries, valid: true}
 }
 
 pub fn map_get(map: SyncMap, key: String) -> String? Never! {
-    e :: map.entries.get(key) ?? return None
-    if e.deleted -> return None
-    Val(e.value)
+    if !map.valid -> return None
+    entry :: map.entries.get(key) ?? return None
+    if entry.deleted -> return None
+    Val(entry.value)
 }
+
 pub fn map_merge(left: SyncMap, right: SyncMap) -> SyncMap Never! {
-    out := left.entries
-    loop k in right.entries.keys() {
-        rv :: right.entries.get(k) ?? next
-        lv :: out.get(k)
-        if lv == .None {
-            _ :: &out.add(k, rv)
-        } else {
-            l :: lv
-            // Equal timestamps need a stable order even when a replica forks.
-            // A deletion wins a same-replica fork; otherwise order by value.
-            right_wins := rv.ts > l.ts
-            if rv.ts == l.ts {
-                if rv.replica > l.replica {
-                    right_wins = true
-                } else if rv.replica == l.replica {
-                    if rv.deleted != l.deleted {
-                        right_wins = rv.deleted
-                    } else if rv.value > l.value {
-                        right_wins = true
-                    }
-                }
+    if !left.valid || !right.valid -> return invalid_map()
+    entries := [String:LWW]{}
+    clock := 0
+    loop source in [left.entries, right.entries] {
+        loop key in source.keys() {
+            incoming :: source.get(key) ?? return invalid_map()
+            if !valid_token(key) || !valid_token(incoming.replica) || incoming.ts <= 0
+                || incoming.ts > MAX_CLOCK || incoming.value.bytes().len() > MAX_TEXT -> return invalid_map()
+            if incoming.ts > clock -> clock = incoming.ts
+            previous :: entries.get(key)
+            replace := true
+            if previous == .Val(existing) {
+                replace = incoming.ts > existing.ts || (incoming.ts == existing.ts
+                    && (incoming.replica > existing.replica || (incoming.replica == existing.replica && incoming.value > existing.value)))
             }
-            if right_wins -> _ :: &out.add(k, rv)
+            if replace -> _ :: &entries.add(key, incoming)
         }
     }
-    clock := left.clock
-    if right.clock > clock -> clock = right.clock
-    SyncMap{replica: left.replica, clock: clock, entries: out}
+    if entries.len() > MAX_ENTRIES -> return invalid_map()
+    SyncMap{replica: left.replica, clock: clock, entries: entries, valid: true}
+}
+
+fn escape_display(value: String) -> String Never! {
+    parts := [String]{}
+    loop scalar in text.scalars(value) {
+        if scalar == "\\" || scalar == "," || scalar == "=" || scalar == "|" || scalar == ":" || scalar == "/" -> &parts.push("\\")
+        &parts.push(scalar)
+    }
+    parts.join("")
 }
 
 pub fn map_show(map: SyncMap) -> String Never! {
-    out := "{{"
-    first := true
-    loop k in map.entries.keys() {
-        e :: map.entries.get(k) ?? next
-        if e.deleted -> next
-        if !first -> out = "{out},"
-        first = false
-        out = "{out}{k}:{e.value}"
+    if !map.valid -> return "SyncError(invalid SyncMap)"
+    keys := map.entries.keys().to_list()
+    &keys.sort()
+    parts := [String]{}
+    loop key in keys {
+        entry :: map.entries.get(key) ?? next
+        if !entry.deleted -> &parts.push("{escape_display(key)}={escape_display(entry.value)}")
     }
-    "{out}}}"
+    "SyncMap({parts.join(",")})"
 }
 
-pub fn list_new() -> SyncList Never! { list_for("local") }
+pub fn list_new() -> SyncList Never! { SyncList{items: [RGAItem]{}, valid: true} }
 
-pub fn list_for(replica: String) -> SyncList Never! {
-    id := replica
-    if id.len() == 0 -> id = "local"
-    if !valid_sync_text(id, 1048576, false) -> id = ""
-    SyncList{replica: id, clock: 0, items: [RGAItem]{}}
-}
-
-pub fn list_push(list: SyncList, value: String) -> SyncList Never! {
-    invalid := !valid_sync_text(list.replica, 1048576, false)
-        || !valid_sync_text(value, 1048576, true)
-        || list.clock >= 2147483646
-        || list.items.len() >= 100000
-    if invalid -> return ~list
-    clock :: list.clock + 1
-    id :: "{list.replica}:{clock}"
-    items := [RGAItem]{}
-    loop item in list.items -> &items.push(item)
-    &items.push(RGAItem{id: id, value: value, tombstone: false})
-    SyncList{replica: list.replica, clock: clock, items: items}
-}
-
-pub fn list_remove(list: SyncList, id: String) -> SyncList Never! {
-    if id.len() == 0 || !valid_sync_text(list.replica, 1048576, false) -> return ~list
-    items := [RGAItem]{}
-    found := false
-    changed := false
-    loop item in ~list.items {
-        if item.id == id {
-            found = true
-            if item.tombstone {
-                &items.push(item)
-            } else {
-                &items.push(RGAItem{id: item.id, value: item.value, tombstone: true})
-                changed = true
-            }
-        } else {
-            &items.push(item)
-        }
+pub fn list_push(list: SyncList, replica: String, value: String) -> SyncList Never! {
+    if !list.valid || !valid_token(replica) || value.bytes().len() > MAX_TEXT -> return ~list
+    loop item in list.items {
+        if item.replica == replica && item.value == value -> return ~list
     }
-    if !found || !changed || list.clock >= 2147483646 -> return ~list
-    SyncList{replica: list.replica, clock: list.clock + 1, items: items}
-}
-
-pub fn list_contains(list: SyncList, id: String) -> Bool Never! {
-    loop item in ~list.items {
-        if item.id == id && !item.tombstone -> return true
-    }
-    false
+    if list.items.len() >= MAX_ENTRIES -> return invalid_list()
+    updated := list
+    &updated.items.push(RGAItem{replica: replica, value: value})
+    &updated.items.sort_by((left: RGAItem, right: RGAItem) -> if left.replica == right.replica -> left.value <=> right.value else -> left.replica <=> right.replica)
+    updated
 }
 
 pub fn list_merge(left: SyncList, right: SyncList) -> SyncList Never! {
-    seen := [String:RGAItem]{}
-    order := [String]{}
-    loop item in left.items {
-        old :: seen.get(item.id)
-        if old == .None {
-            _ :: &seen.add(~item.id, ~item)
-            &order.push(item.id)
-        } else {
-            current :: old
-            if item.tombstone && !current.tombstone {
-                _ :: &seen.add(~item.id, ~item)
-            } else if item.tombstone == current.tombstone && item.value > current.value {
-                _ :: &seen.add(~item.id, ~item)
-            }
-        }
-    }
+    if !left.valid || !right.valid -> return invalid_list()
+    merged := left
     loop item in right.items {
-        old :: seen.get(item.id)
-        if old == .None {
-            _ :: &seen.add(~item.id, ~item)
-            &order.push(item.id)
-        } else {
-            current :: old
-            if item.tombstone && !current.tombstone {
-                _ :: &seen.add(~item.id, ~item)
-            } else if item.tombstone == current.tombstone && item.value > current.value {
-                _ :: &seen.add(~item.id, ~item)
-            }
-        }
+        if !valid_token(item.replica) || item.value.bytes().len() > MAX_TEXT -> return invalid_list()
+        merged = list_push(merged, item.replica, item.value)
     }
-    i := 1
-    loop i < order.len() {
-        key :: ~order[i]
-        j := i
-        loop j > 0 && order[j - 1] > key {
-            order[j] = order[j - 1]
-            j -= 1
-        }
-        order[j] = key
-        i += 1
+    loop item in merged.items {
+        if !valid_token(item.replica) || item.value.bytes().len() > MAX_TEXT -> return invalid_list()
     }
-    items := [RGAItem]{}
-    loop id in order -> &items.push(seen.get(id) ?? RGAItem{id: id, value: "", tombstone: true})
-    clock := left.clock
-    if right.clock > clock -> clock = right.clock
-    SyncList{replica: left.replica, clock: clock, items: items}
+    merged
 }
 
 pub fn list_show(list: SyncList) -> String Never! {
-    out := "["
-    first := true
-    loop item in list.items {
-        if item.tombstone -> next
-        if !first -> out = "{out},"
-        first = false
-        out = "{out}{item.value}"
+    if !list.valid -> return "SyncError(invalid SyncList)"
+    parts := [String]{}
+    loop item in list.items -> &parts.push("{escape_display(item.replica)}:{escape_display(item.value)}")
+    "SyncList({parts.join("|")})"
+}
+
+pub fn policy_new(table: String, expression: String) -> RowPolicy String! {
+    name :: table.trim()
+    value :: expression.trim()
+    if !valid_token(name) || !valid_token(value) -> return Err("row policy needs a table and expression")
+    index := 0
+    loop byte in name.bytes() {
+        n :: Int.from_u8(byte)
+        letter :: (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95
+        if !letter && (index == 0 || n < 48 || n > 57) -> return Err("row policy table must be a simple identifier")
+        index += 1
     }
-    "{out}]"
+    if value == "true" -> return Ok(RowPolicy{table: name, expression: RowPolicyExpr.AllowAll})
+    if value == "owner == user" -> return Ok(RowPolicy{table: name, expression: RowPolicyExpr.OwnerEqualsUser})
+    Err("unsupported row policy expression `{value}`; supported forms are `true` and `owner == user`")
 }
 
-pub fn text_new() -> SyncText Never! { text_for("local") }
-
-pub fn text_for(replica: String) -> SyncText Never! {
-    id := replica
-    if id.len() == 0 -> id = "local"
-    if !valid_sync_text(id, 1048576, false) -> id = ""
-    SyncText{replica: id, clock: 0, value: "", ts: 0}
-}
-pub fn text_set(text: SyncText, value: String) -> SyncText Never! {
-    invalid := !valid_sync_text(text.replica, 1048576, false)
-        || !valid_sync_text(value, 1048576, true)
-        || text.clock >= 2147483646
-    if invalid -> return ~text
-    ts :: text.clock + 1
-    SyncText{replica: text.replica, clock: ts, value: value, ts: ts}
-}
-
-pub fn text_edit(text: SyncText, value: String) -> SyncText Never! { text_set(text, value) }
-
-pub fn text_merge(left: SyncText, right: SyncText) -> SyncText Never! {
-    invalid := !valid_sync_text(left.replica, 1048576, false)
-        || !valid_sync_text(right.replica, 1048576, false)
-    if invalid -> return ~left
-    if right.ts > left.ts || (right.ts == left.ts && right.replica > left.replica) {
-        clock := left.clock
-        if right.clock > clock -> clock = right.clock
-        return SyncText{replica: left.replica, clock: clock, value: right.value, ts: right.ts}
+pub fn policy_allows(policy: RowPolicy, user: String, row_owner: String) -> Bool Never! {
+    if !valid_token(user) || !valid_token(row_owner) -> return false
+    if policy.expression == {
+        .AllowAll -> true
+        .OwnerEqualsUser -> user == row_owner
     }
-    clock := left.clock
-    if right.clock > clock -> clock = right.clock
-    SyncText{replica: left.replica, clock: clock, value: left.value, ts: left.ts}
-}
-
-pub fn text_append(text: SyncText, suffix: String) -> SyncText Never! {
-    if text.value.len() + suffix.len() > 1048576 -> return ~text
-    text_set(text, "{text.value}{suffix}")
-}
-
-pub fn text_clock(text: SyncText) -> Int Never! { text.clock }
-pub fn text_replica(text: SyncText) -> String Never! { text.replica }
-
-pub fn policy_grant(policy: RowPolicy, action: String) -> RowPolicy Never! {
-    if action.len() == 0 || contains(policy.allow, action) -> return ~policy
-    allow := ~policy.allow
-    &allow.push(action)
-    RowPolicy{allow: allow, deny: ~policy.deny}
-}
-
-pub fn policy_deny(policy: RowPolicy, action: String) -> RowPolicy Never! {
-    if action.len() == 0 || contains(policy.deny, action) -> return ~policy
-    deny := ~policy.deny
-    &deny.push(action)
-    RowPolicy{allow: ~policy.allow, deny: deny}
-}
-
-pub fn policy_revoke(policy: RowPolicy, action: String) -> RowPolicy Never! {
-    allow := [String]{}
-    loop item in ~policy.allow {
-        if item != action -> &allow.push(item)
-    }
-    deny := [String]{}
-    loop item in ~policy.deny {
-        if item != action -> &deny.push(item)
-    }
-    RowPolicy{allow: allow, deny: deny}
-}
-
-fn valid_sync_text(text: String, limit: Int, allow_empty: Bool) -> Bool {
-    if !allow_empty && text.len() == 0 -> return false
-    if text.len() > limit -> return false
-    loop b in text.bytes() {
-        n :: Int.from_u8(b)
-        if n < 32 || n == 127 -> return false
-    }
-    true
-}
-
-fn contains(items: [String], value: String) -> Bool {
-    loop item in items {
-        if item == value -> return true
-    }
-    false
-}
-
-pub fn text_show(text: SyncText) -> String Never! { text.value }
-
-pub fn text_metadata(text: SyncText) -> String Never! { "{text.replica}@{text.ts}" }
-
-pub fn policy_new() -> RowPolicy Never! { RowPolicy{allow: [String]{}, deny: [String]{}} }
-
-pub fn policy_allows(policy: RowPolicy, action: String) -> Bool Never! {
-    loop d in policy.deny {
-        if d == action || d == "*" -> return false
-    }
-    if policy.allow.len() == 0 -> return true
-    loop a in policy.allow {
-        if a == action || a == "*" -> return true
-    }
-    false
 }
 
 pub fn policy_show(policy: RowPolicy) -> String Never! {
-    "allow={policy.allow.len()} deny={policy.deny.len()}"
+    expression :: if policy.expression == {
+        .AllowAll -> "true"
+        .OwnerEqualsUser -> "owner == user"
+    }
+    "RowPolicy(table={policy.table}, expr={expression})"
 }
