@@ -113,7 +113,7 @@ pub fn canonical(value: DataTree) -> String EncodingError! {
     out := [U8]{}
     path := [String]{}
     write_canonical(&out, value, &path, 1) ?? return Err(err)
-    Ok(String.from_bytes(out) ?? "")
+    Ok(stream.text_from_bytes(^out) ?? "")
 }
 
 /// A pull reader over text already held by the caller. File readers use the
@@ -348,7 +348,7 @@ impl Parser {
             b :: &self.bump() ?? return Err(self.err("unterminated string"))
             n :: b
             if n == 34 {
-                s :: String.from_bytes(out) ?? return Err(self.err("invalid UTF-8 in string"))
+                s :: stream.text_from_bytes(^out) ?? return Err(self.err("invalid UTF-8 in string"))
                 return Ok(s)
             }
             if n < 32 -> return Err(self.err("unescaped control character in string; use a JSON escape"))
@@ -687,7 +687,7 @@ fn utf8_bytes(cp: Int) -> [U8] Never! {
 fn render_json(value: DataTree, pretty: Bool) -> String Never! {
     out := [U8]{}
     write_json(&out, value, pretty, 0)
-    String.from_bytes(out) ?? ""
+    stream.text_from_bytes(^out) ?? ""
 }
 
 fn value_error(kind: EncodingErrorKind, path: String, reason: String) -> EncodingError Never! {
@@ -918,7 +918,7 @@ fn pointer_escape(segment: String) -> String Never! {
         }
         &out.push(b)
     }
-    String.from_bytes(out) ?? ""
+    stream.text_from_bytes(^out) ?? ""
 }
 
 // Pointer text for the first `count` decoded steps.
@@ -939,7 +939,7 @@ fn pointer_segments(path: String) -> [String] EncodingError! {
     loop i < raw.len() {
         b :: raw[i]
         if b == (U8{47}) {
-            &segments.push(String.from_bytes(current) ?? "")
+            &segments.push(stream.text_from_bytes(^current) ?? "")
             current = [U8]{}
             i += 1
             next
@@ -965,7 +965,7 @@ fn pointer_segments(path: String) -> [String] EncodingError! {
         &current.push(b)
         i += 1
     }
-    &segments.push(String.from_bytes(current) ?? "")
+    &segments.push(stream.text_from_bytes(^current) ?? "")
     Ok(segments)
 }
 

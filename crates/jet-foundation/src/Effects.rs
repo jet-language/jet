@@ -347,6 +347,13 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
             _ => Some(Effect::Net),
         };
     }
+    // I/O through an already-owned encoding handle retains the native
+    // possession-method effect; it does not acquire ambient FS authority.
+    if module == "core.encoding"
+        && matches!(method, "__read_byte" | "__write_bytes" | "__write_text" | "__flush")
+    {
+        return Some(Effect::IO);
+    }
     // Encoding stream constructors own a live file handle.  Whole-value
     // codecs remain pure; only reader/writer construction reaches the host.
     if matches!(
