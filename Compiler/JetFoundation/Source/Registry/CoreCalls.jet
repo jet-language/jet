@@ -159,6 +159,7 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
         module_name == "core.math.random" || module_name == "core.crypto.random" -> Val(Effect.Rand)
         // Key generation draws from the OS generator, like crypto.random.bytes.
         module_name == "core.crypto" && core_call_one_of(member, [String]{"__x25519_generate", "__signing_generate"}) -> Val(Effect.Rand)
+        module_name == "core.perf" && core_call_one_of(member, [String]{"__read_bits", "__write_bits", "fidelity", "override_fidelity", "reset_fidelity"}) -> Val(Effect.Env)
         module_name == "core.sys" && member == "success" -> None
         module_name == "core.sys" -> Val(Effect.Env)
         module_name == "core.process" && member == "status_ok" -> None

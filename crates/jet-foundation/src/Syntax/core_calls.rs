@@ -239,6 +239,11 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
     {
         return Some(Effect::Rand);
     }
+    if same_text(module, "core.perf")
+        && one_of(method, &["__read_bits", "__write_bits", "fidelity", "override_fidelity", "reset_fidelity"])
+    {
+        return Some(Effect::Env);
+    }
     if same_text(module, "core.sys") && same_text(method, "success") {
         return None;
     }
@@ -1426,7 +1431,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 75d1e40b1ea56740b7a55c463a25d79bc0bfe5d41712a1034fa2ded5d6470c5b
+// Source SHA-256: 2cc76cbe3e2facb7ba5bceda80e9c6a2361ef5679ce3fbf214b6cccd6db1be68
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2799,8 +2804,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.db", "transaction", "jet_db_scope_transaction", false, &[true, true, true], ) .without_direct_aot() .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_native_int_result(),
     CoreCallRecord::new( "core.db", "migrate", "jet_db_scope_migrate", false, &[true, true, true], ) .without_direct_aot() .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_native_int_result(),
     CoreCallRecord::new("core.term", "read_key", "jet_term_read_key", true, &[]),
-    CoreCallRecord::new("core.perf", "__read_bits", "jet_perf_read_bits", false, &[]) .with_native_int_result(),
-    CoreCallRecord::new("core.perf", "__write_bits", "jet_perf_write_bits", false, &[false]),
+    CoreCallRecord::new("core.perf", "__read_bits", "jet_perf_read_bits", false, &[]) .with_native_int_result() .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.perf", "__write_bits", "jet_perf_write_bits", false, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui", "null_backend", "jet_ui_null", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui", "tui_backend", "jet_ui_tui", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui", "gtk_backend", "jet_ui_gtk", true, &[]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
