@@ -141,6 +141,15 @@ before each mutation and replaced atomically with mode `0600`. FIFO eviction
 removes only unreferenced disposable groups; removed artifacts are cleaned up
 after the new index is published, without following links.
 
+`jet test-compare <corpus.json>` compares recorded reference and candidate
+observations using the shared finite-sample verdict. It records the canonical
+comparison payload as an immutable receipt section, consumes its protected
+evidence report, and publishes comparison/receipt index links together.
+Evidence publication selects the project from the working directory; receipt
+publication selects it from the corpus target. Generated inputs participate
+in receipt invalidation but not the canonical target-input identity. Optional
+history failures do not change the comparison's verdict or exit status.
+
 `gc report` reads the selected project's bounded, complete GC identity trace
 without running a producer. It rejects missing, stale, unsafe, incompatible,
 oversized, malformed, or incomplete traces with E2110. Counters must match
