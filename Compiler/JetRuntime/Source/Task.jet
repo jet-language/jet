@@ -78,6 +78,7 @@ fn task_spawn_state(site: I64, label: I64, env: I64, invoke: I64, release: I64, 
     permit :: task_group_admit(state)
     if jet_scheduler_native_propagate() != I64{0} {
         jet_scheduler_shield_enter()
+        if permit != I64{0} -> task_group_release(state)
         _ := coll_call1(release, env)
         jet_scheduler_shield_leave()
         return I64{0}
@@ -151,6 +152,9 @@ fn task_drain(task: I64) {
     scheduler_blocking_wait_leave()
 }
 
+// Core Task is move-only (Sema/Ownership/Copy.jet:132-143); Rust's
+// MathTaskMem.rs:606 has no Clone and join(self):717 consumes the sole handle.
+// Lexical group cleanup is a separate retained drain, using done@24 wake-all.
 fn task_join_wait(task: I64) -> I64 {
     kind :: scheduler_msg_join()
     if sync_load(task + I64{184}) == I64{0} -> _ := scheduler_deadline_check(kind)
@@ -259,9 +263,7 @@ fn task_take_outcome(task: I64, flatten: Bool, out: I64) -> I64 {
                 coll_slot_drop(raw + I64{8}, error_meta)
                 sync_store(out, task_failure_new(I64{2}, reason))
             }
-            size_a :: coll_size(ok_meta)
-            size_b :: coll_size(error_meta)
-            jet_rt_free(raw, I64{8} + (if size_a > size_b -> size_a else -> size_b), I64{8})
+            jet_rt_free(raw, coll_result_size(ok_meta, error_meta), I64{8})
             sync_store(task + I64{56}, I64{0})
         }
     } else if status == I64{2} {
@@ -345,7 +347,28 @@ task_exit_key := I64{0}
 // runtime-init: 3
 #Export(c) fn jet_rt_task_exit_init() {
     if task_exit_key != I64{0} -> return
-    task_exit_key = jet_rt_tls_key_new(I64{0})
+    destructor :: jet_rt_alloc(I64{24}, I64{8})
+    sync_store(destructor, I64{1})
+    sync_store(destructor + I64{8}, rt_task_exit_destructor_address())
+    sync_store(destructor + I64{16}, I64{0})
+    task_exit_key = jet_rt_tls_key_new(destructor)
+}
+// RuntimeLower resolves this checked address through its sole intrinsic table.
+fn rt_task_exit_destructor_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+#Export(c) fn jet_rt_task_exit_destructor(_header: I64, queue: I64) -> I64 {
+    // Rust's TLS Vec drops unrun exit closures, never invokes their bodies.
+    jet_scheduler_shield_enter()
+    count := sync_load(queue)
+    data :: sync_load(queue + I64{16})
+    loop count > I64{0} {
+        count -= I64{1}
+        scheduler_closure_drop(sync_load(data + count * I64{8}))
+    }
+    scheduler_words_drop(queue)
+    jet_scheduler_shield_leave()
+    I64{0}
 }
 fn task_exit_queue() -> I64 {
     queue := jet_rt_tls_get(task_exit_key)

@@ -24,6 +24,24 @@ fn scheduler_test_env(log: I64, mode: I64, value: I64) -> I64 {
     jet_rt_free(env, I64{32}, I64{8})
     I64{0}
 }
+#Export(c) fn jet_rt_scheduler_fixture_exit_body(_closure: I64) -> I64 {
+    scheduler_test_require(false)
+    I64{0}
+}
+#Export(c) fn jet_rt_scheduler_fixture_exit_release(closure: I64) -> I64 {
+    _ := sync_add(sync_load(closure + I64{24}), I64{1})
+    jet_rt_free(closure, I64{32}, I64{8})
+    I64{0}
+}
+#Export(c) fn jet_rt_scheduler_fixture_exit_worker(arguments: I64) -> I64 {
+    closure :: jet_rt_alloc(I64{32}, I64{8})
+    sync_store(closure, I64{1})
+    sync_store(closure + I64{8}, sync_load(arguments))
+    sync_store(closure + I64{16}, sync_load(arguments + I64{8}))
+    sync_store(closure + I64{24}, sync_load(arguments + I64{16}))
+    jet_rt_native_atexit(closure)
+    I64{0}
+}
 #Export(c) fn jet_rt_scheduler_fixture_body(env: I64, out: I64) -> I64 {
     mode :: sync_load(env + I64{8})
     log :: sync_load(env)
@@ -62,6 +80,16 @@ fn scheduler_test_spawn(callbacks: I64, meta: I64, log: I64, mode: I64, value: I
     sync_store(meta + I64{48}, I64{274877906946})
     log :: jet_rt_alloc(I64{24}, I64{8})
     thread_zero(log, I64{24})
+    // An OS worker exits without the process exit edge: drop, never run, its
+    // queued closure via the real dynamic TLS destructor and free queue storage.
+    exit_args :: jet_rt_alloc(I64{24}, I64{8})
+    sync_store(exit_args, sync_load(callbacks + I64{32}))
+    sync_store(exit_args + I64{8}, sync_load(callbacks + I64{40}))
+    sync_store(exit_args + I64{16}, log + I64{16})
+    exit_thread :: thread_spawn(sync_load(callbacks + I64{24}), exit_args)
+    scheduler_test_require(exit_thread > I64{0} && thread_join(exit_thread, I64{0}) == I64{0})
+    scheduler_test_require(sync_load(log + I64{16}) == I64{1})
+    jet_rt_free(exit_args, I64{24}, I64{8})
     out :: jet_rt_alloc(I64{32}, I64{8})
     root :: scheduler_control_new()
     save :: jet_rt_alloc(I64{32}, I64{8})
@@ -152,6 +180,18 @@ fn scheduler_test_spawn(callbacks: I64, meta: I64, log: I64, mode: I64, value: I
     // Bounded admission can park without starving a one-worker pool. A cloned
     // group handle is non-owning and must not close the lexical owner.
     group :: jet_rt_native_task_group_with_limit(I64{1})
+    // Admission can claim a permit after a stop was published. Rejected spawn
+    // must return that permit/ref and release the callback without registering.
+    stopped_state :: sync_load(group)
+    label_stopped :: scheduler_text_new(I64{0})
+    released_before :: sync_load(log)
+    _ := scheduler_control_publish(root, scheduler_stop_new(I64{1}, scheduler_text_new(I64{0})))
+    rejected :: jet_rt_native_group_spawn(group, I64{3}, label_stopped, scheduler_test_env(log, I64{0}, I64{0}), sync_load(callbacks), sync_load(callbacks + I64{8}), meta)
+    scheduler_test_require(rejected == I64{0} && sync_load(stopped_state + I64{32}) == I64{0})
+    scheduler_test_require(sync_load(stopped_state) == I64{1} && sync_load(stopped_state + I64{48}) == I64{0})
+    scheduler_test_require(sync_load(log) == released_before + I64{1})
+    scheduler_control_discard_stop(root)
+    jet_rt_string_drop(label_stopped)
     group_clone :: jet_rt_handle_clone_JetTaskGroup(group)
     jet_rt_handle_drop_JetTaskGroup(group_clone)
     label :: scheduler_text_new(I64{0})
@@ -171,7 +211,7 @@ fn scheduler_test_spawn(callbacks: I64, meta: I64, log: I64, mode: I64, value: I
     scheduler_test_require(sync_load(out) == I64{91} && sync_load(out + I64{8}) == I64{92})
     jet_rt_free(handles, I64{16}, I64{8})
     jet_rt_free(offsets, I64{16}, I64{8})
-    scheduler_test_require(sync_load(log) == I64{10006})
+    scheduler_test_require(sync_load(log) == I64{10007})
     stats :: jet_rt_alloc(I64{24}, I64{8})
     jet_scheduler_blocking_wait_stats(stats)
     scheduler_test_require(sync_load(stats) == I64{0} && sync_load(stats + I64{16}) <= I64{9})
