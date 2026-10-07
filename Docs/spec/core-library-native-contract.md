@@ -122,23 +122,26 @@ production. The E2-only canonical writer must reproduce FINAL's object bytes.
 
 The candidate exports exactly the composed runtime `exports.list`, with no
 Rust runtime providers. `LINK_INIT` and `LINK_FINI` entries retain their
-canonical priorities and emitted equal-priority order. Sealing checks the ELF
-export inventory and lifecycle targets, rejects text relocations and writable
-executable mappings, and binds compiler, object, source, and library hashes in
+canonical priorities and lexical export-symbol order at equal priorities.
+Sealing checks exports, undefined dynamic imports, `DT_NEEDED` dependencies,
+and lifecycle targets, rejects text relocations and writable executable
+mappings, and binds compiler, object, source, and library hashes in
 `runtime-shared.json`. A failed producer publishes no receipt.
 
 This receipt is not admission. The private parent runtime loader must verify
-its externally pinned receipt hash, the library hash, and the exact export and
-lifecycle seals before opening the image or exposing symbols. The process
-retains one admitted runtime; constructors run only at that initial load.
+its externally pinned receipt hash, the library hash, and exact export,
+dependency, and lifecycle seals before opening the image or exposing symbols.
+The process retains one admitted runtime; constructors run only at that initial load.
 Changing its identity is a named refusal, not a reset or a second runtime.
 The bootstrap host seam is `jet_codegen::ParentRuntimeLibrary::admit(path,
 receipt_bytes, authoritative_receipt_sha256)`. It validates the exact bytes
 written to a sealed memfd, then uses the extracted private image transport to
-open that immutable descriptor. Its process-owned `OnceLock` retains both the
-image and a failed first admission, preventing a replacement/reinitialization
-path. `RuntimeLibrary::symbol` exposes only inventory-checked addresses for
-the caller's declared C ABI. The Source host maps its named refusal keys into
+open that immutable descriptor. Its process-owned `OnceLock` pins the image
+only when an open is attempted, including a failed open that could have run
+constructors. Pre-open hash/file/seal refusals are stateless and do not prevent
+a later correct admission. `RuntimeLibrary::symbol` exposes only
+inventory-checked addresses, caching each lookup without per-call allocation.
+The caller supplies the declared C ABI. The Source host maps named refusals into
 the registered adapter-failure channel. This Rust bootstrap seam dies at the
 Jet-hosted cutover; it does not define runtime behavior.
 Pinned Core image schema/getter identity is separate from the runtime library:

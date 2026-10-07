@@ -32,10 +32,15 @@ impl Refusal {
     }
 }
 
+struct Symbol {
+    name: CString,
+    address: OnceLock<Result<usize, Refusal>>,
+}
+
 pub struct RuntimeLibrary {
     image: Image,
     receipt_identity: [u8; 32],
-    exports: BTreeSet<String>,
+    exports: Vec<Symbol>,
 }
 
 impl RuntimeLibrary {
@@ -44,9 +49,11 @@ impl RuntimeLibrary {
     /// The returned address borrows the process-pinned runtime. Callers must
     /// marshal the declared C ABI; pinned Core getters are not runtime symbols.
     pub fn symbol(&self, name: &str) -> Result<usize, Refusal> {
-        if !self.exports.contains(name) { return Err(Refusal::RuntimeLibraryExportSealMismatch); }
-        let name = CString::new(name).map_err(|_| Refusal::RuntimeLibraryExportSealMismatch)?;
-        self.image.symbol(&name).map(|address| address as usize).map_err(|_| Refusal::RuntimeLibraryLoadFailed)
+        let index = self.exports.binary_search_by(|symbol| symbol.name.to_bytes().cmp(name.as_bytes()))
+            .map_err(|_| Refusal::RuntimeLibraryExportSealMismatch)?;
+        let symbol = &self.exports[index];
+        *symbol.address.get_or_init(|| self.image.symbol(&symbol.name)
+            .map(|address| address as usize).map_err(|_| Refusal::RuntimeLibraryLoadFailed))
     }
 }
 
@@ -56,6 +63,11 @@ struct Resident {
 }
 static RESIDENT: OnceLock<Resident> = OnceLock::new();
 
+struct Prepared {
+    bytes: Vec<u8>,
+    exports: Vec<Symbol>,
+}
+
 /// `authoritative_receipt_sha256` comes from the compiler's admitted record,
 /// never the candidate's self-declared hash or a user environment variable.
 /// A different runtime cannot replace a resident instance. The process-owned
@@ -64,9 +76,18 @@ pub fn admit(path: &Path, receipt_bytes: &[u8], authoritative_receipt_sha256: &[
     if SHA256::sha256(receipt_bytes) != *authoritative_receipt_sha256 {
         return Err(Refusal::RuntimeLibraryReceiptHashMismatch);
     }
+    if let Some(resident) = RESIDENT.get() {
+        if resident.identity != *authoritative_receipt_sha256 { return Err(Refusal::RuntimeLibraryIdentityMismatch); }
+        return resident.result.as_ref().map_err(|error| *error);
+    }
+    // Hash/file/ELF refusals are stateless. Only an actual open attempt can
+    // have executed constructors and therefore pins this process's identity.
+    let prepared = prepare(path, receipt_bytes)?;
     let resident = RESIDENT.get_or_init(|| Resident {
         identity: *authoritative_receipt_sha256,
-        result: load(path, receipt_bytes, *authoritative_receipt_sha256),
+        result: Image::open_sealed(&prepared.bytes)
+            .map(|image| RuntimeLibrary { image, receipt_identity: *authoritative_receipt_sha256, exports: prepared.exports })
+            .map_err(|_| Refusal::RuntimeLibraryLoadFailed),
     });
     if resident.identity != *authoritative_receipt_sha256 { return Err(Refusal::RuntimeLibraryIdentityMismatch); }
     resident.result.as_ref().map_err(|error| *error)
@@ -86,7 +107,7 @@ fn read_library(path: &Path) -> Result<Vec<u8>, Refusal> {
     Ok(bytes)
 }
 
-fn load(path: &Path, receipt_bytes: &[u8], identity: [u8; 32]) -> Result<RuntimeLibrary, Refusal> {
+fn prepare(path: &Path, receipt_bytes: &[u8]) -> Result<Prepared, Refusal> {
     let receipt = JSON::parse_json(std::str::from_utf8(receipt_bytes).map_err(|_| Refusal::RuntimeLibraryReceiptHashMismatch)?)
         .map_err(|_| Refusal::RuntimeLibraryReceiptHashMismatch)?;
     if text(&receipt, "kind")? != "jet-parent-runtime-candidate" || text(&receipt, "optimization")? != "O0" {
@@ -106,6 +127,8 @@ fn load(path: &Path, receipt_bytes: &[u8], identity: [u8; 32]) -> Result<Runtime
     let elf = Elf::new(&bytes)?;
     let actual = elf.exports()?;
     if actual.len() != exports.len() || actual.keys().any(|name| !exports.contains(*name)) { return Err(Refusal::RuntimeLibraryExportSealMismatch); }
+    exact_names(&receipt, "imports", &elf.imports()?)?;
+    exact_names(&receipt, "needed", &elf.needed()?)?;
     let lifecycle = receipt.get("lifecycle").map_err(|_| Refusal::RuntimeLibraryInitializerSealMismatch)?;
     for (kind, section_type) in [("init", 14), ("fini", 15)] {
         let entries = lifecycle.get(kind).and_then(DataTree::as_array).map_err(|_| Refusal::RuntimeLibraryInitializerSealMismatch)?;
@@ -118,18 +141,28 @@ fn load(path: &Path, receipt_bytes: &[u8], identity: [u8; 32]) -> Result<Runtime
                 Ok(DataTree::Int(value)) if (0..=65535).contains(value) => *value,
                 _ => return Err(Refusal::RuntimeLibraryInitializerSealMismatch),
             };
-            if last_priority.is_some_and(|previous| previous > priority) || !names.insert(name) {
+            if last_priority.is_some_and(|(previous, previous_name)| previous > priority || (previous == priority && previous_name > name)) || !names.insert(name) {
                 return Err(Refusal::RuntimeLibraryInitializerSealMismatch);
             }
-            last_priority = Some(priority);
+            last_priority = Some((priority, name));
             addresses.push(*actual.get(name).ok_or(Refusal::RuntimeLibraryInitializerSealMismatch)?);
         }
         if kind == "init" && addresses.is_empty() { return Err(Refusal::RuntimeLibraryInitializerSealMismatch); }
         elf.lifecycle(section_type, &addresses)?;
     }
     // No symbol use and no constructor execution precede the byte/seal checks.
-    let image = Image::open_sealed(&bytes).map_err(|_| Refusal::RuntimeLibraryLoadFailed)?;
-    Ok(RuntimeLibrary { image, receipt_identity: identity, exports })
+    Ok(Prepared { bytes, exports: exports.into_iter().map(|name| Symbol {
+        name: CString::new(name).expect("validated ASCII export has no NUL"),
+        address: OnceLock::new(),
+    }).collect() })
+}
+
+fn exact_names(receipt: &DataTree, key: &str, actual: &[&str]) -> Result<(), Refusal> {
+    let expected = receipt.get(key).and_then(DataTree::as_array).map_err(|_| Refusal::RuntimeLibraryExportSealMismatch)?;
+    if expected.len() != actual.len() || expected.iter().zip(actual).any(|(value, name)| value.as_str().ok() != Some(*name)) {
+        return Err(Refusal::RuntimeLibraryExportSealMismatch);
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -199,16 +232,16 @@ impl<'a> Elf<'a> {
         Ok((0..table.size / 24).map(move |index| table.offset + index * 24))
     }
     fn symbol_name(&self, table: Section, at: usize) -> Result<&'a str, Refusal> {
-        let strings = self.sections[table.link];
+        self.string_at(self.sections[table.link], self.u32(at)? as usize)
+    }
+    fn string_at(&self, strings: Section, offset: usize) -> Result<&'a str, Refusal> {
         let bytes = self.span(strings.offset, strings.size)?;
-        let tail = bytes.get(self.u32(at)? as usize..).ok_or(Refusal::RuntimeLibraryExportSealMismatch)?;
+        let tail = bytes.get(offset..).ok_or(Refusal::RuntimeLibraryExportSealMismatch)?;
         let end = tail.iter().position(|byte| *byte == 0).ok_or(Refusal::RuntimeLibraryExportSealMismatch)?;
         std::str::from_utf8(&tail[..end]).map_err(|_| Refusal::RuntimeLibraryExportSealMismatch)
     }
     fn exports(&self) -> Result<BTreeMap<&'a str, u64>, Refusal> {
-        let tables: Vec<_> = self.sections.iter().filter(|section| section.kind == 11).collect();
-        if tables.len() != 1 { return Err(Refusal::RuntimeLibraryExportSealMismatch); }
-        let table = *tables[0];
+        let table = self.dynamic_symbols()?;
         let mut result = BTreeMap::new();
         for at in self.symbols(table)? {
             let info = self.span(at + 4, 1)?[0];
@@ -217,6 +250,39 @@ impl<'a> Elf<'a> {
             if info != 0x12 || name.is_empty() || result.insert(name, self.u64(at + 8)?).is_some() { return Err(Refusal::RuntimeLibraryExportSealMismatch); }
         }
         Ok(result)
+    }
+    fn dynamic_symbols(&self) -> Result<Section, Refusal> {
+        let mut tables = self.sections.iter().filter(|section| section.kind == 11);
+        let table = *tables.next().ok_or(Refusal::RuntimeLibraryExportSealMismatch)?;
+        if tables.next().is_some() { return Err(Refusal::RuntimeLibraryExportSealMismatch); }
+        Ok(table)
+    }
+    fn imports(&self) -> Result<Vec<&'a str>, Refusal> {
+        let table = self.dynamic_symbols()?;
+        let mut result = Vec::new();
+        for at in self.symbols(table)? {
+            if self.span(at + 4, 1)?[0] >> 4 == 0 || self.u16(at + 6)? != 0 { continue; }
+            let name = self.symbol_name(table, at)?;
+            if !name.is_empty() { result.push(name); }
+        }
+        result.sort_unstable();
+        Ok(result)
+    }
+    fn needed(&self) -> Result<Vec<&'a str>, Refusal> {
+        let mut offsets = Vec::new();
+        let mut strings_address = None;
+        for section in self.sections.iter().filter(|section| section.kind == 6) {
+            for offset in (0..section.size).step_by(16) {
+                let tag = self.u64(section.offset + offset)?;
+                let value = self.u64(section.offset + offset + 8)?;
+                if tag == 1 { offsets.push(usize::try_from(value).map_err(|_| Refusal::RuntimeLibraryExportSealMismatch)?); }
+                if tag == 5 { strings_address = Some(value); }
+            }
+        }
+        if offsets.is_empty() { return Ok(Vec::new()); }
+        let strings = *self.sections.iter().find(|section| section.kind == 3 && Some(section.address) == strings_address)
+            .ok_or(Refusal::RuntimeLibraryExportSealMismatch)?;
+        offsets.into_iter().map(|offset| self.string_at(strings, offset)).collect()
     }
     fn lifecycle(&self, kind: u32, expected: &[u64]) -> Result<(), Refusal> {
         let refusal = Refusal::RuntimeLibraryInitializerSealMismatch;
@@ -268,5 +334,22 @@ mod tests {
     #[test]
     fn mismatched_receipt_refuses_before_opening_a_path() {
         assert!(matches!(admit(Path::new("/path/does/not/exist"), b"{}", &[0; 32]), Err(Refusal::RuntimeLibraryReceiptHashMismatch)));
+    }
+    #[test]
+    fn stateless_refusal_does_not_pin_a_failed_identity() {
+        let path = Path::new("/path/does/not/exist");
+        let bad = b"{}";
+        assert!(matches!(admit(path, bad, &SHA256::sha256(bad)), Err(Refusal::RuntimeLibraryReceiptHashMismatch)));
+        let good = br#"{"kind":"jet-parent-runtime-candidate","optimization":"O0","exports":["jet_rt_alloc"]}"#;
+        assert!(matches!(admit(path, good, &SHA256::sha256(good)), Err(Refusal::RuntimeLibraryLoadFailed)));
+        assert!(RESIDENT.get().is_none(), "pre-open refusals must leave runtime identity unpinned");
+    }
+    #[test]
+    fn dependency_inventory_is_exact() {
+        let receipt = JSON::parse_json(r#"{"imports":["pthread_create"],"needed":["libc.so.6"]}"#).unwrap();
+        assert!(exact_names(&receipt, "imports", &["pthread_create"]).is_ok());
+        assert!(exact_names(&receipt, "needed", &["libc.so.6"]).is_ok());
+        assert!(exact_names(&receipt, "imports", &[]).is_err());
+        assert!(exact_names(&receipt, "needed", &["libevil.so"]).is_err());
     }
 }

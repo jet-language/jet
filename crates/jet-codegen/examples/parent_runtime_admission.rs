@@ -13,13 +13,15 @@ fn main() {
         *byte = u8::from_str_radix(&pin[index * 2..index * 2 + 2], 16).expect("SHA-256 hex");
     }
     let receipt = std::fs::read(out.join("runtime-shared.json")).expect("producer receipt");
+    let mut tampered = receipt.clone();
+    tampered.push(b' ');
+    assert!(matches!(admit(&out.join("jet_runtime.so"), &tampered, &hash), Err(Refusal::RuntimeLibraryReceiptHashMismatch)));
+    assert!(matches!(admit(&out.join("missing-runtime.so"), &receipt, &hash), Err(Refusal::RuntimeLibraryLoadFailed)));
     let library = admit(&out.join("jet_runtime.so"), &receipt, &hash).expect("admitted Jet runtime");
     let again = admit(&out.join("jet_runtime.so"), &receipt, &hash).expect("same runtime identity");
     assert!(std::ptr::eq(library, again), "same pin must reuse the process runtime without another constructor call");
     assert_eq!(library.receipt_identity(), &hash);
     assert!(matches!(library.symbol("jet_core_shared_0123456789abcdef"), Err(Refusal::RuntimeLibraryExportSealMismatch)));
-    let mut tampered = receipt.clone();
-    tampered.push(b' ');
     assert!(matches!(admit(&out.join("jet_runtime.so"), &tampered, &hash), Err(Refusal::RuntimeLibraryReceiptHashMismatch)));
     let new_hash = jet_codegen::SHA256::sha256(&tampered);
     assert!(matches!(admit(&out.join("jet_runtime.so"), &tampered, &new_hash), Err(Refusal::RuntimeLibraryIdentityMismatch)));
