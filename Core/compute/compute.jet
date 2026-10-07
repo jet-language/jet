@@ -773,7 +773,7 @@ fn c_two_pi() -> Float Never! { TWO_PI }
 // the only provider this source tier owns.
 fn make_tensor(shape: [Int], data: [Float], requested: String, profile: String) -> Tensor Never! {
     asked :: tensor_device_name(requested)
-    placed := ~asked
+    placed := asked.copy()
     if placed == "Auto" -> placed = "CPU"
     Tensor{shape: shape, data: data, device: placed, numeric_profile: profile, requested: asked}
 }
@@ -797,7 +797,7 @@ fn tensor_device_name(device: String) -> String Never! {
     if device == "metal" || device == "Metal" -> return "Metal"
     if device == "vulkan" || device == "Vulkan" -> return "Vulkan"
     if device == "webgpu" || device == "WebGPU" -> return "WebGPU"
-    return ~device
+    return device.copy()
 }
 
 fn select_device(kind: String) -> String? {
@@ -808,10 +808,10 @@ fn select_device(kind: String) -> String? {
 }
 
 fn profile_placement(requested: String, profile: String) -> String {
-    requested_f32 := ~requested
-    requested_default := ~requested
-    requested_unavailable := ~requested
-    selected := ~requested
+    requested_f32 := requested.copy()
+    requested_default := requested.copy()
+    requested_unavailable := requested.copy()
+    selected := requested.copy()
     if selected == "Auto" -> selected = "CPU"
     if selected != "CPU" -> return "Placement(requested={requested_unavailable}, selected={selected}, backend=unavailable, version=none, profile={profile}, cache=none, abilities=[], reason=provider=unavailable)"
     if profile == c_profile_f32() {

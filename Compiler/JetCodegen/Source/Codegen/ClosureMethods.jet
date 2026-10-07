@@ -49,10 +49,10 @@ fn jet_codegen_closure_receiver_without_user_tags(receiver: Type) -> Type Never!
         .Tagged(marker, inner) -> {
             if marker == {
                 .User(_) -> return jet_codegen_closure_receiver_without_user_tags(inner)
-                else -> return ~receiver
+                else -> return receiver.copy()
             }
         }
-        else -> return ~receiver
+        else -> return receiver.copy()
     }
 }
 
@@ -265,7 +265,7 @@ fn jet_codegen_lower_closure_method(builder: &JetCodegenBuilder, program: JetCod
 // kernel cannot accept. `Never Never!` keeps its carrier, as the function does.
 fn jet_codegen_plain_callback_argument(builder: JetCodegenBuilder, program: JetCodegenProgram, operation: TClosureOp, argument: TExpr) -> TExpr Never! {
     if operation == {
-        .TryMap | .TryFilter | .TrySortBy | .TrySortByDesc | .EachRef -> return ~argument
+        .TryMap | .TryFilter | .TrySortBy | .TrySortByDesc | .EachRef -> return argument.copy()
         else -> {}
     }
     named := if argument.kind == {
@@ -276,16 +276,16 @@ fn jet_codegen_plain_callback_argument(builder: JetCodegenBuilder, program: JetC
         .ConstRef(symbol) -> jet_codegen_find_function_row(program.function_index, symbol.key) != None
         else -> false
     }
-    if !named -> return ~argument
+    if !named -> return argument.copy()
     fn_type := jet_codegen_unwrap_pattern_tags(argument.ty)
     if fn_type == .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) {
-        declared :: ret ?? return ~argument
-        success :: jet_codegen_never_carrier_success(declared) ?? return ~argument
-        if jet_codegen_unwrap_pattern_tags(success) == (Type.Named{name: "Never"}) -> return ~argument
+        declared :: ret ?? return argument.copy()
+        success :: jet_codegen_never_carrier_success(declared) ?? return argument.copy()
+        if jet_codegen_unwrap_pattern_tags(success) == (Type.Named{name: "Never"}) -> return argument.copy()
         plain := argument
         plain.ty = Type.Fn{params: params, ret: Val(success), effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
         return plain
     }
-    ~argument
+    argument.copy()
 }
 

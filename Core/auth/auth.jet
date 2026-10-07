@@ -154,10 +154,10 @@ pub fn verify_paseto(token: String, key: [U8], audience: String) -[Time]> Claims
 
 pub fn register_user(name: String, password: String) -[Rand, DB, Time]> Session AuthError! {
     if !valid_identity(name) || !valid_password_hash(password) -> return Err(AuthError.Rejected)
-    core.auth.register_user(~name, ~password) ?? return Err(AuthError.Rejected)
+    core.auth.register_user(name.copy(), password.copy()) ?? return Err(AuthError.Rejected)
     ttl := 86400
     now :: host_unix_s()
-    native :: core.auth.password_login(~name, ~password, now * 1000, ttl * 1000) ?? return Err(AuthError.Unavailable)
+    native :: core.auth.password_login(name.copy(), password.copy(), now * 1000, ttl * 1000) ?? return Err(AuthError.Unavailable)
     Ok(Session{
         id: core.auth.session_id(native),
         user_id: core.auth.session_user(native),
@@ -171,7 +171,7 @@ pub fn password_login(name: String, password: String, ttl_s: Int, flags: Int) -[
     if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
     if flags != 0 -> return Err(AuthError.Malformed)
     now :: host_unix_s()
-    native :: core.auth.password_login(~name, ~password, now * 1000, ttl_s * 1000) ?? return Err(AuthError.Rejected)
+    native :: core.auth.password_login(name.copy(), password.copy(), now * 1000, ttl_s * 1000) ?? return Err(AuthError.Rejected)
     user :: core.auth.session_user(native)
     cookie :: core.auth.session_cookie(native)
     id :: core.auth.session_id(native)

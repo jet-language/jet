@@ -787,8 +787,8 @@ pub fn sema_plugin_interface_facts(graph: SemaRegistrationGraph, input: SemaPlug
 fn sema_plugin_strip_prefix(value: String, prefix: String) -> String {
     bytes := value.bytes()
     prefix_bytes := prefix.bytes()
-    if bytes.len() < prefix_bytes.len() -> return ~value
-    if String.from_bytes(bytes.slice(0, prefix_bytes.len())) != prefix -> return ~value
+    if bytes.len() < prefix_bytes.len() -> return value.copy()
+    if String.from_bytes(bytes.slice(0, prefix_bytes.len())) != prefix -> return value.copy()
     String.from_bytes(bytes.slice(prefix_bytes.len(), bytes.len())) ?? value
 }
 

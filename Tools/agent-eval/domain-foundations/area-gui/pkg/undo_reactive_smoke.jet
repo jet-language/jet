@@ -9,7 +9,7 @@ use core.reactive as reactive
 fn run() {
     body := reactive.signal("old")
     backend := ui.tui_backend()
-    render_backend :: ~backend
+    render_backend :: backend.copy()
     ui.reactive_render(() -> {
         ui.mount(render_backend, ui.text(body.get()))
     })

@@ -310,7 +310,7 @@ fn scheduled_transfer_reuses_move_checks_for_every_second_use() {
     assert!(double_close.contains(&"E0121".into()), "{double_close:?}");
 
     let copied = codes(&format!(
-        "{SIMPLE}\nfn bad() {{\n    resource := Resource{{ name: \"x\" }}\n    copied := ~resource\n    print(copied.name)\n}}"
+        "{SIMPLE}\nfn bad() {{\n    resource := Resource{{ name: \"x\" }}\n    copied := resource.copy()\n    print(copied.name)\n}}"
     ));
     assert!(copied.contains(&"E0211".into()), "{copied:?}");
 }

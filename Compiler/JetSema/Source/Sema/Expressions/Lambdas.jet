@@ -1276,7 +1276,7 @@ fn sema_expression_lambda_is_view_type(ty: Type, string_view: Bool) -> Bool Neve
 }
 
 fn sema_expression_lambda_block_value_type(statements: [TStmt], fallback: Type) -> Type Never! {
-    if statements.len() == 0 -> return ~fallback
+    if statements.len() == 0 -> return fallback.copy()
     index := statements.len() - 1
     loop index >= 0 {
         if statements[index] == {
@@ -1291,7 +1291,7 @@ fn sema_expression_lambda_block_value_type(statements: [TStmt], fallback: Type) 
         }
         index -= 1
     }
-    ~fallback
+    fallback.copy()
 }
 
 fn sema_expression_lambda_capture_diagnostic(name: String, ty: Type, span: Span) -> Diagnostic {
@@ -1400,7 +1400,7 @@ pub fn sema_expression_lambda_host_callback_stored(expr: Expr, expected: Type?, 
 }
 
 fn sema_expression_lambda_rewrite_arm_labels(arms: [SwitchArm], old_label: String, new_label: String) -> [SwitchArm] Never! {
-    updated := ~arms
+    updated := arms.copy()
     loop index in 0..<updated.len() {
         body := updated[index].body
         sema_expression_lambda_rewrite_loop_label(&body, old_label, new_label)
@@ -1411,7 +1411,7 @@ fn sema_expression_lambda_rewrite_arm_labels(arms: [SwitchArm], old_label: Strin
 
 fn sema_expression_lambda_rewrite_optional_labels(statements: [Stmt]?, old_label: String, new_label: String) -> [Stmt]? Never! {
     present :: statements ?? return None
-    body := ~present
+    body := present.copy()
     sema_expression_lambda_rewrite_loop_label(&body, old_label, new_label)
     Val(body)
 }
@@ -1572,8 +1572,8 @@ fn sema_expression_lambda_install_loop_label(lambda: &Lambda, label: NamedSpan) 
 // back, instead of on a copy of the whole table (every module binding) per
 // lambda; no scope state of the lambda flows back to the enclosing table.
 fn sema_expression_lambda_with_host(lambda: Lambda, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], host_callback: Bool, host_write: Bool, host_stored: Bool, open_result: Bool) -> TExpr? {
-    outer_return_type :: ~scopes.return_type
-    outer_failure_carrier :: ~scopes.failure_carrier
+    outer_return_type :: scopes.return_type.copy()
+    outer_failure_carrier :: scopes.failure_carrier.copy()
     lambda_mark :: sema_scope_mark(&scopes)
     checked :: sema_expression_lambda_with_host_in_frame(lambda, expected, environment, &scopes, outer_return_type, outer_failure_carrier, &state, &tail_store, &context, &diagnostics, host_callback, host_write, host_stored, open_result)
     sema_scope_rollback(&scopes, lambda_mark)
@@ -2120,9 +2120,9 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     if inline_loop {
         // An inline loop body is the owner's body: its default-route failures
         // join the owner's failure-union row.
-        context.failure_union_members = ~lambda_context.failure_union_members
-        context.failure_union_cases = ~lambda_context.failure_union_cases
-        context.failure_union_edges = ~lambda_context.failure_union_edges
+        context.failure_union_members = lambda_context.failure_union_members.copy()
+        context.failure_union_cases = lambda_context.failure_union_cases.copy()
+        context.failure_union_edges = lambda_context.failure_union_edges.copy()
         context.failure_union_general = context.failure_union_general || lambda_context.failure_union_general
     }
     Val(checked)
@@ -2142,19 +2142,19 @@ fn sema_expression_lambda_lift_value(value: TExpr, carrier: Type) -> TExpr Never
                 rehomed.ty = carrier
                 return rehomed
             }
-            return ~value
+            return value.copy()
         }
-        if value.ty == (Type.Named{name: "Never"}) -> return ~value
+        if value.ty == (Type.Named{name: "Never"}) -> return value.copy()
         return sema_tir_expr(carrier, TExprKind.Ok{value: value}, value.span)
     }
-    ~value
+    value.copy()
 }
 
 // Rust `lift_fallible_lambda_returns`: lift the expression body, or every
 // `return` of a block body (its tail is one), into the `Result` carrier. A
 // shared block body stays as checked, as Rust reuses it unlifted.
 fn sema_expression_lambda_lift_returns(executable: TLambdaBody, carrier: Type) -> TLambdaBody Never! {
-    if !sema_expression_lambda_type_is_result(carrier) -> return ~executable
+    if !sema_expression_lambda_type_is_result(carrier) -> return executable.copy()
     if executable == {
         .Expr(value) -> TLambdaBody.Expr{value: sema_expression_lambda_lift_value(value, carrier)}
         .Block(body) -> {
@@ -2162,7 +2162,7 @@ fn sema_expression_lambda_lift_returns(executable: TLambdaBody, carrier: Type) -
             sema_expression_lambda_lift_block(&lifted, carrier)
             TLambdaBody.Block{body: lifted}
         }
-        .SharedBlock(_) -> ~executable
+        .SharedBlock(_) -> executable.copy()
     }
 }
 
@@ -2225,14 +2225,14 @@ fn sema_expression_lambda_lift_block(statements: &[TStmt], carrier: Type) Never!
                 sema_expression_lambda_lift_block(&updated_then, carrier)
                 updated_else := else_body
                 if else_body == .Val(else_statements) {
-                    lifted := ~else_statements
+                    lifted := else_statements.copy()
                     sema_expression_lambda_lift_block(&lifted, carrier)
                     updated_else = Val(lifted)
                 }
                 statements[index] = TStmt.If{condition: condition, then_body: updated_then, else_body: updated_else, else_is_elseif: else_is_elseif, span: span}
             }
             .Match(subject, arms, exhaustive, span) -> {
-                updated_arms := ~arms
+                updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
                     sema_expression_lambda_lift_block(&arm_body, carrier)
@@ -2241,7 +2241,7 @@ fn sema_expression_lambda_lift_block(statements: &[TStmt], carrier: Type) Never!
                 statements[index] = TStmt.Match{subject: subject, arms: updated_arms, exhaustive: exhaustive, span: span}
             }
             .EnumMatch(subject, clone_subject, arms, else_body, fallthrough, span) -> {
-                updated_arms := ~arms
+                updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
                     sema_expression_lambda_lift_block(&arm_body, carrier)
@@ -2249,14 +2249,14 @@ fn sema_expression_lambda_lift_block(statements: &[TStmt], carrier: Type) Never!
                 }
                 updated_else := else_body
                 if else_body == .Val(else_statements) {
-                    lifted := ~else_statements
+                    lifted := else_statements.copy()
                     sema_expression_lambda_lift_block(&lifted, carrier)
                     updated_else = Val(lifted)
                 }
                 statements[index] = TStmt.EnumMatch{scrutinee: subject, clone_subject: clone_subject, arms: updated_arms, else_body: updated_else, fallthrough: fallthrough, span: span}
             }
             .RangeSwitch(subject, arms, else_body, span) -> {
-                updated_arms := ~arms
+                updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
                     sema_expression_lambda_lift_block(&arm_body, carrier)
@@ -2267,7 +2267,7 @@ fn sema_expression_lambda_lift_block(statements: &[TStmt], carrier: Type) Never!
                 statements[index] = TStmt.RangeSwitch{subject: subject, arms: updated_arms, else_body: updated_else, span: span}
             }
             .MixedSwitch(subject, branch_class, arms, else_body, span) -> {
-                updated_arms := ~arms
+                updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
                     sema_expression_lambda_lift_block(&arm_body, carrier)
@@ -2275,7 +2275,7 @@ fn sema_expression_lambda_lift_block(statements: &[TStmt], carrier: Type) Never!
                 }
                 updated_else := else_body
                 if else_body == .Val(else_statements) {
-                    lifted := ~else_statements
+                    lifted := else_statements.copy()
                     sema_expression_lambda_lift_block(&lifted, carrier)
                     updated_else = Val(lifted)
                 }

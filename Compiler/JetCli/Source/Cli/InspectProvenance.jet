@@ -485,7 +485,7 @@ fn jet_cli_provenance_reports(packages: [JetCLILockPackage], target: String?) ->
         &reports.push(jet_cli_provenance_report(package))
     }
     loop index in 1..<reports.len() {
-        value :: ~reports[index]
+        value :: reports[index].copy()
         position := index
         loop position > 0 && (reports[position - 1].name > value.name || (reports[position - 1].name == value.name && reports[position - 1].version > value.version)) {
             reports[position] = reports[position - 1]

@@ -23,7 +23,7 @@ fn backpressure_cell() {
     (started_tx, started) :: channel<Int>(capacity: 4)
     (sent_tx, sent) :: channel<Int>(capacity: 4)
     tx.send(10)
-    second_tx :: ~tx
+    second_tx :: tx.copy()
     sender :: task {
         started_tx.send(1)
         second_tx.send(20)
@@ -56,14 +56,14 @@ fn worker_limit_cell() {
     (events_tx, events) :: channel<Int>(capacity: 16)
     token_tx.send(1)
     token_tx.send(2)
-    t1 :: ~token_tx
-    t2 :: ~token_tx
-    t3 :: ~token_tx
-    t4 :: ~token_tx
-    e1 :: ~events_tx
-    e2 :: ~events_tx
-    e3 :: ~events_tx
-    e4 :: ~events_tx
+    t1 :: token_tx.copy()
+    t2 :: token_tx.copy()
+    t3 :: token_tx.copy()
+    t4 :: token_tx.copy()
+    e1 :: events_tx.copy()
+    e2 :: events_tx.copy()
+    e3 :: events_tx.copy()
+    e4 :: events_tx.copy()
     a :: task worker(1, tokens.receive() ?? panic("tokens"), t1, e1)
     b :: task worker(2, tokens.receive() ?? panic("tokens"), t2, e2)
     c :: task worker(3, tokens.receive() ?? panic("tokens"), t3, e3)

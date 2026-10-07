@@ -3766,7 +3766,7 @@ fn web_missing_return_is_a_preflight_diagnostic() {
 #[test]
 fn wasm_unsupported_export_abi_is_a_preflight_diagnostic() {
     let src =
-        "#Target(Web)\n#WasmExport\nfn echo(xs: [Float]) -[]> [Float] { return ~xs }\nfn run() {}\n";
+        "#Target(Web)\n#WasmExport\nfn echo(xs: [Float]) -[]> [Float] { return xs.copy() }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_bad_wasm_abi.jet")
         .expect_err("unsupported Wasm ABI must be rejected before emission");
     assert!(
@@ -3777,7 +3777,7 @@ fn wasm_unsupported_export_abi_is_a_preflight_diagnostic() {
 
 #[test]
 fn wasm_unsupported_internal_abi_is_a_preflight_diagnostic() {
-    let src = "#Target(Web)\nfn helper(xs: [Float]) -[]> [Float] { return ~xs }\nfn run() {}\n";
+    let src = "#Target(Web)\nfn helper(xs: [Float]) -[]> [Float] { return xs.copy() }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_bad_internal_wasm_abi.jet")
         .expect_err("unsupported internal Wasm ABI must be rejected before emission");
     assert!(
@@ -4880,7 +4880,7 @@ fn web_wasm_fixed_int_list_rejects_forged_ownership() {
     }
     let src = r#"
 #WasmExport
-fn echo_fixed(xs: [I64]) -> [I64] { ~xs }
+fn echo_fixed(xs: [I64]) -> [I64] { xs.copy() }
 
 #Target(JS)
 fn run() {

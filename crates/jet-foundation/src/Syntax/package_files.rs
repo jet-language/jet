@@ -499,8 +499,8 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_CHANGE,
     KW_VIA,
     // Ownership / borrow keywords (S10, M2). D-MEM1 retired KW_MUTATE/KW_MOVE
-    // in favor of the `&`/`^` sigils, and D-SHAPE-COPY1=A retired KW_COPY in
-    // favor of the `~` sigil — they live only as teaching errors (E0056/E0057/
+    // in favor of the `&`/`^` sigils, and D-SHAPE-COPY1=A retired KW_COPY (a
+    // copy is now the method `x.copy()`, D-COPY-WORD1=A) — they live only as teaching errors (E0056/E0057/
     // E0991) now, so none of them are in the keyword list. The retired
     // `ref[label]` field spelling (once taught via KW_STORED) is gone
     // outright with stored-reference fields (D-MEM1/S3) — `ref` is an

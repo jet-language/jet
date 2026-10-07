@@ -377,7 +377,7 @@ pub fn pkg_record_provenance(provenance: &[String: [String]], field: String, ori
 }
 
 fn pkg_provenance_origin(provenance: [String: [String]], field: String, fallback: String) -> String Never! {
-    origins :: provenance.get(field) ?? return ~fallback
-    if origins.len() == 0 -> return ~fallback
+    origins :: provenance.get(field) ?? return fallback.copy()
+    if origins.len() == 0 -> return fallback.copy()
     origins[origins.len() - 1]
 }

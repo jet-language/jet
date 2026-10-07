@@ -21,7 +21,7 @@ fn spawn_later(_group: Group) -> Shared<Gate> {
         print("task")
     }
     loop gate.step == 0 {}
-    return ~gate
+    return gate.copy()
 }
 
 fn run() {

@@ -483,7 +483,7 @@ fn jet_rust_emit_output_check(ctx: &JetRustEmitContext, check: MIROutputCheck, l
 
 fn jet_rust_emit_harness_main(ctx: &JetRustEmitContext, artifact: MIRArtifactPlan, run: String, dispatch_jobs: Bool, lines: &[String]) Never! {
     if artifact.entry != None || artifact.kind == MIRArtifactKind.NativeLibrary || artifact.kind == MIRArtifactKind.SandboxPlugin -> return
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     &lines.push("fn main() {{")
     &lines.push("    {root}jet_std_env_init();")
     &lines.push("    {root}jet_gc::runtime_or_exit({root}jet_gc::initialize_trace());")
@@ -561,7 +561,7 @@ fn jet_rust_emit_harness(ctx: &JetRustEmitContext, artifact: MIRArtifactPlan, li
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR harness identity has no row", "a harness artifact names one checked harness plan", None)
         return
     }
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     selected :: if harness.selected_test == .Val(test_id) -> "Some(MirTestId({test_id.value}))" else -> "None"
     &lines.push("// jet-mir-harness: id={harness.id.value} kind={jet_rust_emit_harness_kind_debug(harness.kind)} selected_test={selected} command_override={jet_rust_emit_bool_text(harness.command_override)}")
     tests :: jet_rust_emit_selected_tests(&ctx, harness)

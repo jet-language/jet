@@ -47,7 +47,7 @@ fn lower_record_schema(p: MIRProgram, ty: MIRType) -> LowerRecordSchema? {
             if schema.jet_name != name.name -> next
             definition :: lower_type_def(p, ty) ?? return None
             if !lower_record_shape_matches(p, definition, schema) -> return None
-            return Val(~schema)
+            return Val(schema.copy())
         }
         // A generated row (RuntimeRoutes.jet) is keyed by the runtime type the
         // Jet type's handle row names.
@@ -310,7 +310,7 @@ fn lower_record_loop_end(f: &LowerFunction, counted: LowerRecordLoop) Never! {
 // "list.record_handles" (List header) -> buffer of one new handle per element.
 fn lower_helper_record_handles(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
-    list :: ~f.open_params[0]
+    list :: f.open_params[0].copy()
     elem :: lower_list_element(glue.ty) ?? panic("list.record_handles helper has no List type")
     length :: lower_list_word(&f, list, 0)
     buffer :: lower_list_buffer(&m, &f, length, 8)
@@ -332,8 +332,8 @@ fn lower_helper_record_handles(p: MIRProgram, m: &LowerModule, glue: LowerGlue) 
 // the buffer.
 fn lower_helper_record_handles_free(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_word()}, None)
-    buffer :: ~f.open_params[0]
-    length :: ~f.open_params[1]
+    buffer :: f.open_params[0].copy()
+    length :: f.open_params[1].copy()
     elem :: lower_list_element(glue.ty) ?? panic("list.record_handles_free helper has no List type")
     runtime :: lower_record_handle(p, elem) ?? panic("list.record_handles_free is requested for record Lists")
     counted :: lower_record_loop_start(&f, length)
@@ -355,8 +355,8 @@ fn lower_helper_record_handles_free(p: MIRProgram, m: &LowerModule, glue: LowerG
 // a payload enum's box pointer).
 fn lower_helper_record_in(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
-    handle :: ~f.open_params[0]
-    target :: ~f.open_params[1]
+    handle :: f.open_params[0].copy()
+    target :: f.open_params[1].copy()
     runtime :: lower_record_handle(p, glue.ty) ?? panic("record.in is requested for records")
     definition :: lower_type_def(p, glue.ty) ?? panic("a record has a definition")
     if !lower_record_members_cross(p, glue.ty) {
@@ -472,7 +472,7 @@ fn lower_record_load_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ha
 // the borrowed native record.
 fn lower_helper_record_out(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
-    value :: ~f.open_params[0]
+    value :: f.open_params[0].copy()
     runtime :: lower_record_handle(p, glue.ty) ?? panic("record.out is requested for records")
     schema :: lower_record_schema(p, glue.ty) ?? panic("a record has a schema")
     definition :: lower_type_def(p, glue.ty) ?? panic("a record has a definition")

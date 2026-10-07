@@ -83,7 +83,7 @@ pub struct AuthorityResolver {
         AuthorityResolver{
             root: directory.path,
             root_identity: directory.identity,
-            root_handle: ~directory.handle,
+            root_handle: directory.handle.copy(),
             allow_hardlinks: directory.allow_hardlinks
         }
     }
@@ -129,7 +129,7 @@ pub struct AuthorityResolver {
     fn checked_directory(self, path: String) -[FS, Env]> CheckedDirectory AuthorityError! {
         relative :: self.relative_path(path)
         full :: pkg_authority_join(self.root, relative)
-        handle := ~self.root_handle
+        handle := self.root_handle.copy()
         if relative != "" {
             handle = self.root_handle.open_directory(relative) ?? return Err(pkg_authority_map_io(full, err, true))
         }
@@ -516,7 +516,7 @@ pub struct AuthorityResolver {
 // callers walking up from an entry file mean the current directory.
 fn pkg_authority_effective_root(root: String) -> String Never! {
     if root == "" -> return "."
-    ~root
+    root.copy()
 }
 
 fn pkg_authority_inspect_root(root: String) -[FS]> files.Stat AuthorityError! {
@@ -555,7 +555,7 @@ fn pkg_authority_is_symlink(error: AuthorityError) -> Bool Never! {
 
 // Join a root-relative directory and a name (`PathBuf::join` on `""`).
 fn pkg_authority_relative_join(relative: String, name: String) -> String Never! {
-    if relative == "" -> return ~name
+    if relative == "" -> return name.copy()
     "{relative}/{name}"
 }
 

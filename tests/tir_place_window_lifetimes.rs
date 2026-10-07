@@ -230,8 +230,8 @@ fn run() {
     record :: split(header, payload)
     kind :: record.kind
     body :: record.body
-    print(~kind)
-    print(~body)
+    print(kind.copy())
+    print(body.copy())
 }
 "###;
 

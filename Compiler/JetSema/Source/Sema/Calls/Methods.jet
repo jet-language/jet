@@ -187,7 +187,7 @@ fn sema_call_method_candidate_from_func(func: Func, module_name: String, owner_n
     if raw_signature == {
         .Fn(params, ret, effects, contract, metadata, provenance) -> {
             if params.len() == 0 -> return None
-            updated_params := ~params
+            updated_params := params.copy()
             updated_params[0] = owner_type
             signature = Type.Fn{params: updated_params, ret: ret, effect_bound: effects, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
         }

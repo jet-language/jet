@@ -541,7 +541,7 @@ pub fn cancel(session: Session) { abi.cancel(session.value) }
         ));
         out.push_str(&format!(
             r#"pub fn {name}_table<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {{
-    raw :: abi.{name}_table(session.value, json.to_string(~rows), deadline_ms)
+    raw :: abi.{name}_table(session.value, json.to_string(rows.copy()), deadline_ms)
     code :: abi.take_error()
     value :: decode_response(raw, code)
     return Ok(json.decode<[T]>(json.to_string(value)) ?? return Err(RError.Protocol))

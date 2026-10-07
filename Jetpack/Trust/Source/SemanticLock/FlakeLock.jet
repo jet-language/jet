@@ -82,14 +82,14 @@ fn trust_json_parse_lenient(input: String) -> TrustJSONDocument Never! {
         }
         start = end
     }
-    if trust_json_parse(String.from_bytes(kept) ?? ~input) == {
+    if trust_json_parse(String.from_bytes(kept) ?? input.copy()) == {
         .Parsed(tree) -> TrustJSONDocument.Parsed(tree)
         .Failed(reason) -> TrustJSONDocument.Failed(trust_json_with_noise(reason, noise))
     }
 }
 
 fn trust_json_with_noise(error: String, noise: [String]) -> String Never! {
-    if noise.len() == 0 -> return ~error
+    if noise.len() == 0 -> return error.copy()
     lines := [String]{"{error}\nfiltered provider noise:"}
     loop line in noise -> &lines.push("\n  {line}")
     lines.join("")
@@ -185,12 +185,12 @@ fn trust_json_canonical_field(object: [String: DataTree], key: String) -> String
 }
 
 fn trust_json_quote(text: String) -> String Never! {
-    trust_json_canonical(DataTree.Text(~text))
+    trust_json_canonical(DataTree.Text(text.copy()))
 }
 
 fn trust_json_texts(values: [String]) -> DataTree Never! {
     items := [DataTree]{}
-    loop value in values -> &items.push(DataTree.Text(~value))
+    loop value in values -> &items.push(DataTree.Text(value.copy()))
     DataTree.Array(items)
 }
 
@@ -267,11 +267,11 @@ fn trust_flake_resolve_follow_path(segments: [DataTree], nodes: [String: DataTre
         direct :: trust_json_string(segments[0]) ?? ""
         if direct != "" && nodes.has_key(direct) -> return Ok(Val(direct))
     }
-    current := ~start_node
+    current := start_node.copy()
     loop value in segments {
         segment :: trust_json_string(value) ?? return Err(TrustError.IO("flake.lock node reference array must contain strings: {TRUST_JSON_NOT_STRING}"))
         if segment == "" -> return Err(TrustError.IO("flake.lock node reference array must contain non-empty strings"))
-        step :: FlakeFollowStep{node: ~current, input: ~segment}
+        step :: FlakeFollowStep{node: current.copy(), input: segment.copy()}
         if path.contains(step) -> return Err(TrustError.IO("flake.lock follow path cycles at `{segment}`"))
         node :: nodes.get(current) ?? return Err(TrustError.IO("flake.lock follow path starts at missing node `{current}`"))
         inputs :: trust_json_object_field(node, "inputs") ?? return Err(TrustError.IO("flake.lock follow path node `{current}` has no inputs map"))
@@ -472,7 +472,7 @@ fn trust_flake_registry_json(entry: FlakeRegistryEntry) -> String Never! {
 // Rust `composition_json`.
 fn trust_flake_composition_json(composition: FlakeComposition) -> String Never! {
     trust_json_object_text([TrustJSONField]{
-        TrustJSONField{key: "framework", value: DataTree.Text(~composition.framework)},
+        TrustJSONField{key: "framework", value: DataTree.Text(composition.framework.copy())},
         TrustJSONField{key: "modules", value: trust_json_texts(composition.modules)},
         TrustJSONField{key: "moduleSources", value: trust_json_texts(composition.module_sources)},
         TrustJSONField{key: "perSystem", value: DataTree.Bool(composition.per_system)},

@@ -31,7 +31,7 @@ fn source_http_parsers_bound_body_before_one_copy_projection() {
         .expect("byte projection");
     assert!(slice.contains("raw.slice(start, end)"));
     assert!(!slice.contains("push("), "projection must not grow a second list");
-    assert!(!slice.contains("~out"), "projection must not copy the result again");
+    assert!(!slice.contains("out.copy()"), "projection must not copy the result again");
 }
 struct Output {
     stdout: String,

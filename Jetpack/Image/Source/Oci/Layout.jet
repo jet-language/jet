@@ -164,7 +164,7 @@ pub fn image_build_with_base(spec: OCIBuildSpec, out_dir: String, ref_name: Stri
     image_write_layout_file(files.join(out_dir, "oci-layout"), "{{\"imageLayoutVersion\":\"{IMAGE_LAYOUT_VERSION}\"}}".bytes())
 
     Ok(OCIBuiltImage{
-        out_dir: ~out_dir,
+        out_dir: out_dir.copy(),
         manifest_digest: "sha256:{manifest_digest}",
         total_bytes: layer_tar.len() + config_json.bytes().len() + manifest_json.bytes().len()
     })
@@ -504,7 +504,7 @@ fn image_read_text(path: String) -[FS]> String ImageError! {
 fn image_read_blob(root: String, digest: String) -[FS]> [U8] ImageError! {
     if image_node(root) != OCINode.Directory -> return Err(image_invalid("OCI layout root is not a real directory"))
     hex :: image_digest_hex(digest)
-    cursor := ~root
+    cursor := root.copy()
     components :: [String]{"blobs", "sha256", hex}
     loop component in components {
         cursor = files.join(cursor, component)
@@ -665,14 +665,14 @@ fn image_with_extension(path: String, extension: String) -> String Never! {
     raw :: name.bytes()
     dot := raw.len() - 1
     loop dot > 0 && Int.from_u8(raw[dot]) != 46 -> dot -= 1
-    stem :: if dot > 0 -> pkg_bytes_text(raw, 0, dot) else -> ~name
+    stem :: if dot > 0 -> pkg_bytes_text(raw, 0, dot) else -> name.copy()
     files.with_name(path, "{stem}.{extension}")
 }
 
 // Component-wise `Path::starts_with`.
 fn image_path_starts_with(path: String, prefix: String) -> Bool Never! {
     if path == prefix -> return true
-    base :: if prefix.ends_with("/") -> ~prefix else -> "{prefix}/"
+    base :: if prefix.ends_with("/") -> prefix.copy() else -> "{prefix}/"
     path.starts_with(base)
 }
 
@@ -710,7 +710,7 @@ pub fn image_sorted_env(entries: [ImageEnvVar]) -> [ImageEnvVar] Never! {
 }
 
 fn image_sorted_unique_ints(values: [Int]) -> [Int] Never! {
-    sorted := ~values
+    sorted := values.copy()
     &sorted.sort()
     unique := [Int]{}
     loop value in sorted {

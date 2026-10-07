@@ -1179,7 +1179,7 @@ fn plugin_text_export_allows_guest_memory_allocation() {
     let dir = isolated_cwd("plugin_text_memory_allowed");
     fs::write(
         dir.join("main.jet"),
-        "pub fn echo(value: String) -> String { ~value }\n\nfn run() {}\n",
+        "pub fn echo(value: String) -> String { value.copy() }\n\nfn run() {}\n",
     )
     .unwrap();
     let out = Command::new(jet())

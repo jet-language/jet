@@ -11,7 +11,7 @@ fn jet_cli_lint_errors(file: String, source: String, diagnostics: [Diagnostic], 
 pub fn jet_cli_lint_a11y(file: String, source: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
     compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Program)
     if compiled == {
-        .Refused(refusal) -> return ~refusal
+        .Refused(refusal) -> return refusal.copy()
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             errors :: jet_cli_errors(diagnostics)
@@ -79,11 +79,11 @@ fn jet_cli_lint_architecture(file: String, color: Bool) -> JetCLIArchitectureIns
 pub fn jet_cli_lint_complexity(file: String, source: String, raw: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
     budget :: if jet_cli_lint_max(raw, color) == {
         .Value(value) -> value
-        .Refused(output) -> return ~output
+        .Refused(output) -> return output.copy()
     }
     compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Program)
     if compiled == {
-        .Refused(refusal) -> return ~refusal
+        .Refused(refusal) -> return refusal.copy()
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             errors :: jet_cli_errors(diagnostics)

@@ -1132,7 +1132,7 @@ fn run() {
     values := [10, 20, 30, 40, 50]
     band :: 1..<4
     window :: values[band]
-    print(~window)
+    print(window.copy())
     edit :: &values[band]
     edit[1] = 99
     print(values)
@@ -1493,7 +1493,7 @@ struct Raw {
 }
 
 fn hold(value: Int | Raw) -> Int | Raw {
-    return ~value
+    return value.copy()
 }
 
 #Codable
@@ -1762,7 +1762,7 @@ fn run() {
     }
     print(total)
     xs :: [10, 20, 30, 40, 50, 60, 70, 80]
-    print(~xs[band])
+    print(xs[band].copy())
 }
 ";
     let (code, stdout) = build_and_run("tir_range_values", src);

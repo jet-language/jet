@@ -323,8 +323,8 @@ unit from `Jetpack/PackageModel`): an unreadable manifest stops the run with
 its E1206-family diagnostic, and a layout the model declines (authored
 comments) is left as written. `--changed` formats the `.jet` files git reports
 changed against `HEAD` or staged (exit 2 outside a git worktree).
-`--explicit-copies` checks each file, then writes `~` at every implicit copy
-site: the Safe `~` edits sema gives the same source under
+`--explicit-copies` checks each file, then writes `.copy()` at every implicit copy
+site: the Safe `.copy()` edits sema gives the same source under
 `#Policy(copies: .Explicit)`; marks that would not parse report E0122.
 With `--json`, a clean `--check` emits the `fmt` status envelope; dirty
 checks emit `status: "dirty"` with paths, or path/diff objects with `--diff`.

@@ -207,7 +207,7 @@ fn jet_rust_emit_constant_definition(ctx: &JetRustEmitContext, definition: MIRCo
     name :: jet_rust_emit_generated_path(definition.key)
     // A constant's views can only borrow static data (D-MEM-VIEWRET1).
     ty :: jet_rust_emit_type_with_view_lifetime(&ctx, definition.ty, "'static")
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     if jet_rust_emit_shared_constant(jet_rust_emit_is_no_os(&ctx), definition) {
         chunks := [String]{}
         init := ""
@@ -730,7 +730,7 @@ fn jet_rust_emit_units(program: MIRProgram) -> JetRustEmitUnits Never! {
             marker :: line.trim_end()
             if !marker.ends_with("]") -> next
             bytes :: marker.bytes()
-            path :: String.from_bytes(~(bytes[marker_length..<bytes.len() - 1])) ?? ""
+            path :: String.from_bytes(bytes[marker_length..<bytes.len() - 1].copy()) ?? ""
             parts :: path.split("/").to_list()
             unit :: if parts.len() > 1 -> parts[1] else -> JET_RUST_EMIT_BASE_UNIT
             names[unit] = true

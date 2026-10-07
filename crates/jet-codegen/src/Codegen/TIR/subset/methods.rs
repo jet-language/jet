@@ -1766,7 +1766,7 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         | "to_string" | "map" | "filter" | "each" | "find" | "any" | "all" | "count_where"
         | "sort_by" | "sort_by_desc" | "reduce" | "update_first"
         | "is_lower" | "is_upper" | "capitalize" | "swapcase" | "normalize"
-        | "remove_prefix" | "remove_suffix" | "rsplit" | "equal" | "copy"
+        | "remove_prefix" | "remove_suffix" | "rsplit" | "equal"
         | "rfind" | "rpartition"
         // D-ITER1: lazy iterator adapters.
         | "take" | "skip" | "step_by" | "dedup" | "chunks" | "windows"

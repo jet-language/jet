@@ -11,18 +11,18 @@ fn promoted_cycle() -> Link {
     // The payloads remain finite value snapshots. Their promoted identities
     // form the cycle: second -> first at construction, then first -> second.
     first := Link.End(1)
-    second :: Link.Next(~first)
-    first = Link.Next(~second)
+    second :: Link.Next(first.copy())
+    first = Link.Next(second.copy())
     return first
 }
 
 fn promoted_replacement() -> Link {
     stale :: Link.End(2)
-    current := Link.Next(~stale)
+    current := Link.Next(stale.copy())
     fresh :: Link.End(3)
     // Whole-value replacement removes current -> stale before adding
     // current -> fresh; the trace must not retain the stale identity.
-    current = Link.Next(~fresh)
+    current = Link.Next(fresh.copy())
     return current
 }
 

@@ -477,7 +477,7 @@ fn jet_driver_parse_allocator_bytes(value: String, span: Span, diagnostics: &[Di
     loop (index, byte) in value_bytes {
         if Int.from_u8(byte) == 46 -> dot = index
     }
-    digits_text := ~value
+    digits_text := value.copy()
     multiplier := 1
     if dot >= 0 {
         digits_text = String.from_bytes(value_bytes[0..<dot]) ?? ""
@@ -919,7 +919,7 @@ fn jet_driver_root_inline_carrier(snapshot: JetDriverAuthorizedSourceSnapshot, r
         block :: jet_driver_inline_package(file.source)
         carrier_path :: jet_driver_display_path(entry_root, file.path)
         if block.error == .Val(failure) {
-            &diagnostics.push(diagnostic_with_source_path(~failure, carrier_path, 0))
+            &diagnostics.push(diagnostic_with_source_path(failure.copy(), carrier_path, 0))
             return None
         }
         if !block.found -> next
@@ -1787,7 +1787,7 @@ fn jet_driver_cycle_member(source_units: [JetDriverSourceUnit], module_identity:
     loop unit in source_units {
         if jet_driver_unit_module_identity(unit) == module_identity -> return unit.relative_path
     }
-    ~module_identity
+    module_identity.copy()
 }
 
 // A loose source root has no package manifest (`jet_driver_parse_package_root`
@@ -2347,13 +2347,13 @@ fn jet_driver_blank_source_range(source: String, start: Int, end: Int) -> String
     loop offset in start..<end {
         if bytes[offset] != (U8{10}) && bytes[offset] != (U8{13}) -> bytes[offset] = U8{32}
     }
-    String.from_bytes(bytes) ?? ~source
+    String.from_bytes(bytes) ?? source.copy()
 }
 
 // The source an ordinary parse reads: the inline carrier masked away (Rust
 // `Package::mask_inline_package_source`).
 pub fn jet_driver_mask_inline_package(source: String, carrier: JetDriverInlinePackage) -> String {
-    if !carrier.found -> return ~source
+    if !carrier.found -> return source.copy()
     jet_driver_blank_source_range(source, carrier.start, carrier.end)
 }
 
@@ -2774,7 +2774,7 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
         source_unit_index := pending[pending_index]
         pending_index += 1
         // A copy: loading a Core import appends to `source_units`.
-        unit :: ~source_units[source_unit_index]
+        unit :: source_units[source_unit_index].copy()
         is_core :: jet_driver_unit_is_core(unit)
         // D-MOD-CYCLE1=A: a package is one namespace. Loading any file of a
         // package loads every other file of it (and, through their imports,

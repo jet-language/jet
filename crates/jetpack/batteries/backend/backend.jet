@@ -396,8 +396,8 @@ pub fn load_test(address: String) -> LoadSummary {
     loop worker < worker_limit {
         count := users / worker_limit
         if worker < users % worker_limit -> count += 1
-        tx :: ~sender
-        addr :: ~address
+        tx :: sender.copy()
+        addr :: address.copy()
         &workers.push(task {
             load_worker(addr, count, tx)
         })

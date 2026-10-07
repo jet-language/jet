@@ -783,7 +783,7 @@ pub fn password_hash_with_salt(password: Secret, salt: [U8]) -> PasswordHash Cry
     }
     dk := Secret{bytes: [U8]{}}
     #Unsafe("crypto expert: Argon2id password hashing") {
-        dk = rawcrypto.argon2id(password, ~salt, 65536, 3, 1, 32) ?? return Err(CryptoError.Unavailable)
+        dk = rawcrypto.argon2id(password, salt.copy(), 65536, 3, 1, 32) ?? return Err(CryptoError.Unavailable)
     }
     text :: "$argon2id$v=19$m=65536,t=3,p=1${phc_b64_encode(salt)}${phc_b64_encode(dk.bytes)}"
     Ok(PasswordHash{text: text})
@@ -1418,7 +1418,7 @@ fn hex_decode(text: String) -> [U8]? {
     out := [U8]{}
     i := 0
     loop {
-        if i >= raw.len() -> return Val(~out)
+        if i >= raw.len() -> return Val(out.copy())
         hi :: hex_val(raw[i]) ?? return None
         lo :: hex_val(raw[i + 1]) ?? return None
         &out.push(to_u8(hi * 16 + lo))

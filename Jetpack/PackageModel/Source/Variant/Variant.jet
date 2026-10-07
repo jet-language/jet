@@ -266,7 +266,7 @@ pub struct PackageVariant {
         os :: VariantOS.from_platform_os(platform.os)
         PackageVariant{
             role: VariantRole.Host,
-            os: ~os,
+            os: os.copy(),
             arch: VariantArch.from_platform_arch(platform.arch),
             libc: VariantLibc.default_for(os),
             linkage: VariantLinkage.Shared,
@@ -280,7 +280,7 @@ pub struct PackageVariant {
     fn cross_target(os: VariantOS, arch: VariantArch, libc: VariantLibc) -> PackageVariant Never! {
         PackageVariant{
             role: VariantRole.Target,
-            os: ~os,
+            os: os.copy(),
             arch: arch,
             libc: libc,
             linkage: VariantLinkage.Shared,

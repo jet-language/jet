@@ -370,7 +370,7 @@ fn bare(values: [Float#4]) -> [Float#4] {
 }
 
 fn explicit(values: [Float#4]) -> [Float#4] {
-    output := ~values
+    output := values.copy()
     loop i in 0..<4 {
         output[i] = values[i] * 2.0
     }

@@ -25,8 +25,8 @@ fn lower_entry_id(p: MIRProgram, m: &LowerModule, row: Int) -> LIRFunctionID Nev
 fn lower_entry_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{}, None)
     lower_static_fixups(&m, &f)
-    signature :: ~m.mir_signatures[glue.function]
-    target :: ~m.signatures[signature.value]
+    signature :: m.mir_signatures[glue.function].copy()
+    target :: m.signatures[signature.value].copy()
     entry :: LIRFunctionID{value: glue.function}
     ty :: glue.ty
     layout :: target.result ?? {

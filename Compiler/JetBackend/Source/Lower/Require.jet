@@ -21,7 +21,7 @@ fn lower_require_null(f: &LowerFunction) -> LIRValueID Never! {
 
 fn lower_require_static_text(m: &LowerModule, descriptor: LIRDataID, offset: Int, text: String) Never! {
     data :: lower_data(&m, text)
-    length :: ~m.data[data.value].bytes.len()
+    length :: m.data[data.value].bytes.len().copy()
     lower_static_store(&m, descriptor, offset, lower_static_pointer(data))
     lower_static_store(&m, descriptor, offset + 8, lower_static_word(length))
 }
@@ -65,7 +65,7 @@ fn lower_require_locals(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
             return None
         }
         if slot.write_param >= 0 && !lower_is_inline(p, slot.ty) {
-            parameter :: ~f.params[slot.write_param]
+            parameter :: f.params[slot.write_param].copy()
             address :: parameter ?? return None
             layout :: lower_value_layout(f, value)
             loaded :: lower_new_value(&f, layout, LIRDrop.Trivial, None)

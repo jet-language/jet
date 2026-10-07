@@ -47,14 +47,14 @@ pub fn jetos_resolved_option(system: SystemPlan, key: String) -> JetOSResolvedOp
     loop index in 0..<system.options.len() {
         option :: system.options[index]
         if option.key == key {
-            &contenders.push(JetOSOptionContender{value: jetos_clean_value(option.value), tier: ~tier, priority: priority, source_order: index, winner: false})
+            &contenders.push(JetOSOptionContender{value: jetos_clean_value(option.value), tier: tier.copy(), priority: priority, source_order: index, winner: false})
         }
     }
     if contenders.len() == 0 -> return None
     // All contenders have the metadata priority; source order is increasing.
     winner_index :: contenders.len() - 1
     contenders[winner_index].winner = true
-    value :: ~contenders[winner_index].value
+    value :: contenders[winner_index].value.copy()
     Val(JetOSResolvedOption{key: key, value: value, tier: tier, priority: priority, contenders: contenders})
 }
 
@@ -245,7 +245,7 @@ pub fn jetos_parse_list_items(value: String) -> [String] Never! {
 // classify or resolve a package reference or consult a source table.
 pub fn jetos_package_path_or_literal(value: String) -> String Never! {
     if value.starts_with("packages.") -> return "/run/current-system/sw/bin/{value.removeprefix("packages.")}"
-    ~value
+    value.copy()
 }
 
 pub fn jetos_service_extra(service: ServicePlan, keys: [String]) -> String? Never! {

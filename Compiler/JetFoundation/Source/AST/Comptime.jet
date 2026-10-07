@@ -646,7 +646,7 @@ fn ast_comptime_loadable(variant: String, args: [CtEnumArg], debug: Bool) -> Str
         inner :: if debug -> ast_comptime_value_debug(args[0].value) else -> ast_comptime_value_show(args[0].value)
         return "{variant}({inner})"
     }
-    ~variant
+    variant.copy()
 }
 
 // Rust `CtFloat::render` (`{:?}`), which Jet's Float interpolation matches.
@@ -689,7 +689,7 @@ fn ast_comptime_debug_escape(text: String, in_char: Bool) -> String Never! {
 // plain name once, `generated_suffix` drops the prefix, and `generated_path`
 // encodes a path identity as one injective Rust identifier suffix.
 fn ast_comptime_generated_name(name: String) -> String Never! {
-    if name.starts_with("__jet_") -> return ~name
+    if name.starts_with("__jet_") -> return name.copy()
     "__jet_{name}"
 }
 

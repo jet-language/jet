@@ -265,7 +265,7 @@ pub fn evidence_completeness_reason(value: EvidenceCompleteness) -> String? Neve
 }
 
 pub fn evidence_completeness_merge(value: &EvidenceCompleteness, other: EvidenceCompleteness) Never! {
-    if evidence_completeness_code(other) > evidence_completeness_code(value) -> value = ~other
+    if evidence_completeness_code(other) > evidence_completeness_code(value) -> value = other.copy()
 }
 
 pub fn evidence_source_empty() -> EvidenceSource Never! {
@@ -449,9 +449,9 @@ pub fn evidence_report_try_from_records(report_id: String, records: ^[EvidenceRe
     report := evidence_report_new(report_id, EvidenceProducerKind.Test, evidence_source_empty(), evidence_build_empty(), evidence_revision_empty())
     if records.len() > 0 {
         report.producer = records[0].producer
-        report.source = ~records[0].source
-        report.build = ~records[0].build
-        report.revision = ~records[0].revision
+        report.source = records[0].source.copy()
+        report.build = records[0].build.copy()
+        report.revision = records[0].revision.copy()
     }
     loop derivation_item in derivations {
         if !derivation_record_validate(derivation_item) {
@@ -476,8 +476,8 @@ pub fn evidence_report_from_records(report_id: String, records: ^[EvidenceRecord
 
 pub fn evidence_report_merge(reports: [EvidenceReport]) -> EvidenceReport EvidenceMergeError! {
     if reports.len() == 0 -> return Err(EvidenceMergeError.Empty)
-    merged := ~reports[0]
-    loop record in reports[0].records -> evidence_report_add_record(&merged, ~record)
+    merged := reports[0].copy()
+    loop record in reports[0].records -> evidence_report_add_record(&merged, record.copy())
     loop index in 1..<reports.len() {
         report :: reports[index]
         if report.schema_version != merged.schema_version {
@@ -487,13 +487,13 @@ pub fn evidence_report_merge(reports: [EvidenceReport]) -> EvidenceReport Eviden
         evidence_check_identity("claim_id", merged.identity.claim_id, report.identity.claim_id)
         evidence_check_identity("evidence_id", merged.identity.evidence_id, report.identity.evidence_id)
         evidence_completeness_merge(&merged.completeness, report.completeness)
-        loop item in report.derivations -> _ :: evidence_report_intern_derivation(&merged, ~item)
-        loop record in report.records -> evidence_report_add_record(&merged, ~record)
+        loop item in report.derivations -> _ :: evidence_report_intern_derivation(&merged, item.copy())
+        loop record in report.records -> evidence_report_add_record(&merged, record.copy())
         loop item in report.attachments {
-            if !merged.attachments.contains(item) -> &merged.attachments.push(~item)
+            if !merged.attachments.contains(item) -> &merged.attachments.push(item.copy())
         }
         loop item in report.diagnostics {
-            if !merged.diagnostics.contains(item) -> &merged.diagnostics.push(~item)
+            if !merged.diagnostics.contains(item) -> &merged.diagnostics.push(item.copy())
         }
     }
     &merged.attachments.sort_by((left: EvidenceAttachment, right: EvidenceAttachment) -> evidence_attachment_order(left, right))
@@ -532,7 +532,7 @@ pub fn evidence_report_query(report: EvidenceReport, claim_id: String?) -> [Evid
 }
 
 fn evidence_projection_from_record(record: EvidenceRecord) -> EvidenceProjection Never! {
-    chain := ~record.chain
+    chain := record.chain.copy()
     &chain.sort_by((left: EvidenceChainLink, right: EvidenceChainLink) -> evidence_chain_order(left, right))
     EvidenceProjection{evidence_id: record.identity.evidence_id, claim_id: record.identity.claim_id, kind: record.kind, facet: record.facet, producer: record.producer, expectation: record.expectation, outcome: record.outcome, source: record.source, completeness: record.completeness, chain: chain, derivation: record.derivation}
 }

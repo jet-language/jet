@@ -284,7 +284,7 @@ pub fn diagnostic_registry_with_alternative_edit(diagnostic: ^Diagnostic, edit: 
     structured :: updated.structured ?? return updated
     if structured == {
         .SuggestedEdits(edits) -> {
-            alternatives := ~edits
+            alternatives := edits.copy()
             &alternatives.push(edit)
             updated.structured = Val(DiagnosticStructured.SuggestedEdits{edits: alternatives})
             updated

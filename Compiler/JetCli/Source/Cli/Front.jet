@@ -108,7 +108,7 @@ pub struct JetCLIFmtRequest {
     pub diff: Bool
     // `--changed`: only the VCS-changed `.jet` files (git).
     pub changed: Bool
-    // `--explicit-copies`: write `~` at each implicit copy site sema reports.
+    // `--explicit-copies`: write `.copy()` at each implicit copy site sema reports.
     pub explicit_copies: Bool
     pub simplify: Bool
     pub color: Bool
@@ -1084,7 +1084,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
 
     // Retired, moved, and grouped spellings (Source/main.rs `normalize_frequency_ring_argv`).
     if jet_cli_retired_report(raw, color) == .Val(report) -> return jet_cli_done("", report, JET_DRIVER_EXIT_USAGE)
-    argv := ~raw
+    argv := raw.copy()
     if jet_cli_moved_command(argv[0]) == .Val(moved) {
         group :: JET_CLI_COMMANDS[moved.group].name
         return jet_cli_fail(
@@ -1096,7 +1096,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
             JET_DRIVER_EXIT_USAGE,
         )
     }
-    group :: ~argv[0]
+    group :: argv[0].copy()
     exhaustive := false
     if jet_cli_group_index(group) == .Val(index) {
         exhaustive = JET_CLI_COMMANDS[index].exhaustive
@@ -1105,7 +1105,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
         if (exhaustive || group == "env") && asks_help -> return jet_cli_renderable(jet_cli_group_help(group), json)
     }
     if argv.len() > 1 {
-        sub :: ~argv[1]
+        sub :: argv[1].copy()
         nested :: jet_cli_nested_command(group, sub)
         if exhaustive && nested == None {
             return jet_cli_fail("E2101", "`{sub}` isn't a jet {group} command.", "jet {group} accepts only commands in its named area.", "run `jet {group} help`.", color, JET_DRIVER_EXIT_USAGE)

@@ -188,7 +188,7 @@ pub fn set_mode(path: String, mode: Int) IOError! -[FS.Write]> { core.files.set_
 
 
 fn anchor_for_parts(drive: String, absolute: Bool) -> String Never! {
-    if drive.bytes().len() > 0 -> return ~drive
+    if drive.bytes().len() > 0 -> return drive.copy()
     if absolute -> return "/"
     ""
 }
@@ -319,11 +319,11 @@ fn strip_leading_separators(path: String) -> String Never! {
 
 
 fn join_impl(a: String, b: String) -> String Never! {
-    if b.bytes().len() == 0 -> return ~a
-    if is_abs_impl(b) -> return ~b
-    if a.bytes().len() == 0 -> return ~b
+    if b.bytes().len() == 0 -> return a.copy()
+    if is_abs_impl(b) -> return b.copy()
+    if a.bytes().len() == 0 -> return b.copy()
     clean_b :: strip_leading_separators(b)
-    if clean_b.bytes().len() == 0 -> return ~a
+    if clean_b.bytes().len() == 0 -> return a.copy()
     last :: a.bytes()[a.bytes().len() - 1]
     if is_separator(last) -> return "{a}{clean_b}"
     "{a}/{clean_b}"
@@ -411,7 +411,7 @@ fn copy_file_impl(from: String, to: String) IOError! -[FS]> {
     bytes :: core.files.read_bytes(from)
     parent :: dirname_impl(to)
     if parent.bytes().len() > 0 -> core.files.create_dir_all(parent)
-    core.files.write_bytes(~to, bytes)
+    core.files.write_bytes(to.copy(), bytes)
 }
 
 
@@ -649,7 +649,7 @@ fn ignored(name: String, path: String, root: String, skip: [String]) -> Bool Nev
 
 fn walk_rec(path: String, root: String, skip: [String], files_only: Bool) -[FS]> [WalkEntry] IOError! {
     out := [WalkEntry]{}
-    entries :: core.files.list_dir(~path)
+    entries :: core.files.list_dir(path.copy())
     loop e in entries {
         if ignored(e.name, e.path, root, skip) -> next
         rel :: relative_impl(e.path, root)
@@ -742,15 +742,15 @@ fn glob_root(pattern: String) -> String Never! {
 
 pub fn glob(pattern: String) -[FS]> [String] IOError! {
     if !has_meta(pattern) {
-        if exists_impl(pattern) -> return Ok([String]{~pattern})
+        if exists_impl(pattern) -> return Ok([String]{pattern.copy()})
         return Ok([String]{})
     }
     root :: glob_root(pattern)
-    entries :: core.files.walk(~root)
+    entries :: core.files.walk(root.copy())
     out := [String]{}
     loop e in entries {
         candidate := e.path
-        relative_candidate := ~candidate
+        relative_candidate := candidate.copy()
         cbytes :: candidate.bytes()
         if cbytes.len() >= 2 && cbytes[0] == (U8{46}) && is_separator(cbytes[1]) {
             relative_candidate = slice(cbytes, 2, cbytes.len())
@@ -782,7 +782,7 @@ pub fn basename(path: String) -> String Never! {
         if raw[i] == (U8{47}) || raw[i] == (U8{92}) -> return slice(raw, i + 1, raw.len())
         i = i - 1
     }
-    ~path
+    path.copy()
 }
 
 
@@ -821,7 +821,7 @@ pub fn with_suffix(path: String, next: String) -> String Never! {
 
 pub fn with_name(path: String, name: String) -> String Never! {
     dir :: dirname(path)
-    if dir.bytes().len() == 0 -> return ~name
+    if dir.bytes().len() == 0 -> return name.copy()
     join(dir, name)
 }
 
@@ -853,11 +853,11 @@ pub fn home() -[FS, Env]> String IOError! {
 
 pub fn expanduser(path: String) -[FS, Env]> String IOError! {
     raw :: path.bytes()
-    if raw.len() == 0 || raw[0] != (U8{126}) -> return Ok(~path)
+    if raw.len() == 0 || raw[0] != (U8{126}) -> return Ok(path.copy())
     h :: home()
     if raw.len() == 1 -> return Ok(h)
     if raw[1] == (U8{47}) || raw[1] == (U8{92}) -> return Ok(join_impl(h, slice(raw, 2, raw.len())))
-    Ok(~path)
+    Ok(path.copy())
 }
 
 
@@ -1000,7 +1000,7 @@ fn split_path_env(text: String) -> [String] Never! {
 
 pub fn which(name: String) -[FS, Env]> String? Never! {
     if is_abs_impl(name) {
-        if is_file_impl(name) -> return Val(~name)
+        if is_file_impl(name) -> return Val(name.copy())
         return None
     }
     path_var :: sys.get("PATH") ?? ""
@@ -1028,7 +1028,7 @@ fn slice_path(text: String, start: Int, end: Int) -> String Never! {
 
 pub fn splitext(path: String) -> (ext: String, root: String) Never! {
     ext :: suffix(path)
-    if ext.bytes().len() == 0 -> return (root: ~path, ext: "")
+    if ext.bytes().len() == 0 -> return (root: path.copy(), ext: "")
     root :: slice_path(path, 0, path.bytes().len() - ext.bytes().len())
     (root: root, ext: ext)
 }
@@ -1068,7 +1068,7 @@ pub fn samefile(a: String, b: String) -[FS]> Bool IOError! {
 
 pub fn commonprefix(paths: [String]) -> String Never! {
     if paths.len() == 0 -> return ""
-    pref := ~paths[0]
+    pref := paths[0].copy()
     loop p in paths {
         n := pref.bytes().len()
         if p.bytes().len() < n -> n = p.bytes().len()
@@ -1146,7 +1146,7 @@ pub fn fnmatch_filter(names: [String], pattern: String) -> [String] Never! {
 
 
 pub fn is_mount(path: String) -[FS]> Bool Never! {
-    if !core.files.is_dir(~path) -> return false
+    if !core.files.is_dir(path.copy()) -> return false
     parent :: dirname(path)
     if parent == path -> return true
     false
@@ -1175,13 +1175,13 @@ pub fn walkdir(root: String, ignore: String?) -[FS]> [WalkEntry] IOError! { walk
 
 pub fn truncate(path: String, size: Int) IOError! -[FS]> {
     if size < 0 -> return Err(io_err("truncate", path, "negative size"))
-    bytes :: core.files.read_bytes(~path)
+    bytes :: core.files.read_bytes(path.copy())
     if size < bytes.len() {
-        core.files.write_bytes(~path, slice_bytes(bytes, 0, size))
+        core.files.write_bytes(path.copy(), slice_bytes(bytes, 0, size))
     } else {
         out := bytes
         loop out.len() < size -> &out.push(U8{0})
-        core.files.write_bytes(~path, out)
+        core.files.write_bytes(path.copy(), out)
     }
 }
 

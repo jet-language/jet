@@ -4908,7 +4908,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::RawOf(Box::new(operand)),
             }
         }),
-        // D-CAP2 (D-MEM1/S4): `~x` — a fresh, independent value. Keep this
+        // D-CAP2 (D-MEM1/S4): `x.copy()` — a fresh, independent value. Keep this
         // signal distinct from compiler-inserted Clone nodes: Tensor's explicit
         // copy is a Prelude storage operation, while ordinary Clone shares its
         // Arc-backed storage.
@@ -4918,7 +4918,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 let view_owned_ty = view_copy_owned_type(&operand.ty);
                 let is_view_type = view_owned_ty.is_some();
                 let ty = view_owned_ty.unwrap_or_else(|| operand.ty.clone());
-                // D-MEM-COPYSEM1: both written `~` and sema-inserted copies of
+                // D-MEM-COPYSEM1: both written `.copy()` and sema-inserted copies of
                 // read-only views use the shared materialization path. A string
                 // view's Rust place is a bare `&str`, so cloning it would return
                 // another `&str`; the Prelude must produce the owned `String`.
@@ -4931,7 +4931,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 .split_view_handle(name)
                                 .is_some_and(|ty| view_copy_owned_type(&ty).is_some())
                     );
-                // Parser-created `~` spans begin at the sigil. Sema-created
+                // Parser-created `.copy()` spans begin at the sigil. Sema-created
                 // ownership clones reuse the operand span. Preserve that
                 // existing provenance fact as a TIR distinction; do not inspect
                 // source text or make a backend guess.

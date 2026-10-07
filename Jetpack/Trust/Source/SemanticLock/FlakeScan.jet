@@ -60,7 +60,7 @@ fn trust_nix_strip_comments(text: String) -> String Never! {
         }
         &out.push(byte)
     }
-    String.from_bytes(out) ?? ~text
+    String.from_bytes(out) ?? text.copy()
 }
 
 // The offset just past the string whose opening quote is at `start`, or
@@ -205,7 +205,7 @@ fn trust_nix_block_assignments(text: String, parent: String) -> [FlakeAssignment
             cursor += 1
             next
         }
-        start :: ~cursor
+        start :: cursor.copy()
         loop cursor < raw.len() && trust_nix_is_name_byte(Int.from_u8(raw[cursor])) -> cursor += 1
         local :: pkg_bytes_text(raw, start, cursor)
         after := trust_text_skip_ascii_space(raw, cursor)
@@ -260,9 +260,9 @@ fn trust_nix_output_assignments(text: String) -> [FlakeOutputAssignment] Never! 
                 parts.len() > 1 -> {
                     attribute := [String]{}
                     loop index in 1..<parts.len() -> &attribute.push(parts[index])
-                    &found.push(FlakeOutputAssignment{prefix: ~kind, system: parts[0], attribute: attribute.join(".")})
+                    &found.push(FlakeOutputAssignment{prefix: kind.copy(), system: parts[0], attribute: attribute.join(".")})
                 }
-                else -> &found.push(FlakeOutputAssignment{prefix: ~kind, system: "", attribute: parts[0]})
+                else -> &found.push(FlakeOutputAssignment{prefix: kind.copy(), system: "", attribute: parts[0]})
             }
         }
     }
@@ -306,7 +306,7 @@ fn trust_nix_assignment_paths(text: String, prefix: String) -> [String] Never! {
 }
 
 fn trust_nix_trim_trailing_dots(text: String) -> String Never! {
-    trimmed := ~text
+    trimmed := text.copy()
     loop trimmed.ends_with(".") -> trimmed = trimmed.removesuffix(".")
     trimmed
 }

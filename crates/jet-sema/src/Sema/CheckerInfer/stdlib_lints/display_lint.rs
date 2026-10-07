@@ -36,13 +36,11 @@ fn authored_expr_span(checker: &Checker<'_>, expr: &Expr) -> Option<Span> {
         .map(|_| span)
 }
 
-/// Prefix an authored expression with Jet's canonical explicit-copy sigil.
+/// Rewrite an authored expression into Jet's canonical explicit copy,
+/// `x.copy()` (D-COPY-WORD1=A).
 pub(crate) fn explicit_copy_edit(checker: &Checker<'_>, expr: &Expr) -> Option<TextEdit> {
     let span = authored_expr_span(checker, expr)?;
-    Some(TextEdit {
-        span: Span::new(span.start, span.start),
-        new_text: crate::Syntax::SIGIL_COPY.to_string(),
-    })
+    crate::Sema::CheckerOwnership::copy_edit(checker.source, span)
 }
 
 /// Replace a bare authored interpolation expression with its explicit Debug

@@ -99,7 +99,7 @@ pub fn nix_fallback_decide(offline: Bool, ci: Bool, interactive: Bool, policy: S
         mode,
         allowed,
         explicit,
-        policy_value: if explicit -> ~policy else -> "unset",
+        policy_value: if explicit -> policy.copy() else -> "unset",
         reason,
         invocations: if allowed -> 1 else -> 0,
     }
@@ -189,7 +189,7 @@ fn nix_fallback_discover_executable() -[FS, Env]> String NixError! {
 // At most `limit` bytes of `text`, cut back to a UTF-8 scalar boundary.
 fn nix_truncate_utf8(text: String, limit: Int) -> String Never! {
     raw :: text.bytes()
-    if raw.len() <= limit -> return ~text
+    if raw.len() <= limit -> return text.copy()
     end := limit
     loop end > 0 && (Int.from_u8(raw[end]) & 192) == 128 -> end -= 1
     pkg_bytes_text(raw, 0, end)
