@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 1fb0588dc66f0b018bcbdd36f2d9530b157ab06a0616755388066a9e70d354b5
+// Source SHA-256: 5def286dad51222dc76d55594b9e8ff32a9ddcd936b88b1afab35a9d839e7cd6
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -877,12 +877,8 @@ pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[
     CoreSourceOwnedType { path: "Core/http/http.jet", name: "Headers" },
     CoreSourceOwnedType { path: "Core/http/http.jet", name: "Header" },
     CoreSourceOwnedType { path: "Core/http/http.jet", name: "Query" },
-    CoreSourceOwnedType { path: "Core/net/net.jet", name: "SocketAddr" },
-    CoreSourceOwnedType { path: "Core/net/net.jet", name: "UDPPacket" },
     CoreSourceOwnedType { path: "Core/net/net.jet", name: "SRVRecord" },
     CoreSourceOwnedType { path: "Core/net/mime.jet", name: "MIME" },
-    CoreSourceOwnedType { path: "Core/net/tls.jet", name: "TLSCertificate" },
-    CoreSourceOwnedType { path: "Core/net/tls.jet", name: "TLSPeerIdentity" },
     CoreSourceOwnedType { path: "Core/regex/regex.jet", name: "Regex" },
     CoreSourceOwnedType { path: "Core/regex/regex.jet", name: "Match" },
     CoreSourceOwnedType { path: "Core/regex/regex.jet", name: "RegexFlags" },

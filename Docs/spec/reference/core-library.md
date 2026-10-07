@@ -3240,6 +3240,12 @@ provider report a typed `NetError` or `IOError`; the module does not silently
 turn a missing transport into a successful no-op. The implementation is
 [`Core/net/net.jet`](../../../Core/net/net.jet).
 
+`SocketAddr` and `UDPPacket` retain the native provider carrier. Replacing them
+with independent Jet records would disconnect resolver/socket results from the
+same nominal types accepted by transport operations; there is no record ABI
+conversion at that boundary. Jet wrappers still own input validation and
+service policy, and `SRVRecord` is explicitly assembled from resolver fields.
+
 | Signature | Result | Description |
 |---|---|---|
 | `gethostname() -> String` | text | Read the local host name. |
@@ -3325,6 +3331,11 @@ protocols are passed through the native TLS provider. See [`Core/net/tls.jet`](.
 TLS handshake, read, write, and close-notify use the consumed socket's shared
 readiness path. Handshake failures use `NetError`; stream failures use the
 `IOError` tree, including cancellation, timeout, closed, and protocol errors.
+
+`TLSCertificate` and `TLSPeerIdentity` also retain the provider carrier: peer
+identity returns verified native certificate values, not independent Jet
+records. Keeping one nominal carrier avoids missing declarations and mismatched
+certificate-chain layouts without changing the public API.
 
 ### `core.db` — checked database boundaries
 

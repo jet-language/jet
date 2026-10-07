@@ -3239,17 +3239,20 @@ mod core_native_projection_tests {
         let source_owned_policy = "<corelib>/Core/sync::Core/sync/policy.jet::RowPolicy";
         assert_eq!(core_native_probe_name(source_owned_policy), source_owned_policy);
         assert!(!is_canonical_core_native_type(source_owned_policy));
-        for source_record in [
-            "<corelib>/Core/net::Core/net/net.jet::SocketAddr",
-            "<corelib>/Core/net::Core/net/net.jet::UDPPacket",
-            "<corelib>/Core/net::Core/net/net.jet::UnixListener",
-            "<corelib>/Core/net::Core/net/net.jet::UnixStream",
-            "<corelib>/Core/net/tls::Core/net/tls.jet::TLSCertificate",
-            "<corelib>/Core/net/tls::Core/net/tls.jet::TLSPeerIdentity",
+        for (source_record, native_record) in [
+            ("<corelib>/Core/net::Core/net/net.jet::SocketAddr", "JetSocketAddr"),
+            ("<corelib>/Core/net::Core/net/net.jet::UDPPacket", "JetUDPPacket"),
+            ("<corelib>/Core/net::Core/net/net.jet::UnixListener", "JetUnixListener"),
+            ("<corelib>/Core/net::Core/net/net.jet::UnixStream", "JetUnixStream"),
+            ("<corelib>/Core/net/tls::Core/net/tls.jet::TLSCertificate", "JetTLSCertificate"),
+            ("<corelib>/Core/net/tls::Core/net/tls.jet::TLSPeerIdentity", "JetTLSPeerIdentity"),
         ] {
-            assert_eq!(core_native_probe_name(source_record), source_record);
-            assert!(!is_canonical_core_native_type(source_record));
+            assert!(is_canonical_core_native_type(source_record));
+            assert_eq!(crate::Codegen::core_rust_type_name(source_record), Some(native_record));
         }
+        let srv_record = "<corelib>/Core/net::Core/net/net.jet::SRVRecord";
+        assert!(!is_canonical_core_native_type(srv_record));
+        assert_eq!(crate::Codegen::core_rust_type_name(srv_record), None);
 
         let user_name = "app::ComputeError";
         assert_eq!(core_native_probe_name(user_name), user_name);
