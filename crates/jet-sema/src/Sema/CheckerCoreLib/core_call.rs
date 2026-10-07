@@ -3921,15 +3921,8 @@ impl<'a> Checker<'a> {
                 self.check_cli_shape(&t, span);
                 return Some(result_ty(t, decode_error_ty()));
             }
-            // D-JSON3: the UNTYPED `json.decode(text)` form is the lenient
-            // dynamic decode — same `Dyn !EncodingError` shape as `parse`, with
-            // string→number/bool coercions surfaced as log lines
-            // (Docs/spec/reference/core-library.md, `jet_std_json_decode_lenient`
-            // in the Prelude, `enc_ok_is_json` in emit). `decode` is registered
-            // in `is_polymorphic_core_special`, so its `core_fixed_sig` row is
-            // never consulted; without this arm the call fell through to
-            // `unknown_core_item` and E1004 claimed `core.encoding.json` has no
-            // item `decode` while suggesting `decode`.
+            // Untyped JSON decode uses the same strict Dyn parse as `parse`.
+            // `decode` is polymorphic, so its fixed signature is not consulted.
             ("core.encoding.json", "decode") if type_args.is_empty() => {
                 if args.len() != 1 {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
