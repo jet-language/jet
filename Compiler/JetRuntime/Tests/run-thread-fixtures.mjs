@@ -3,6 +3,7 @@
 // Separate modes permit one held keep-going proof: assemble, lower (including
 // negative intrinsic witnesses), audit, link, run. Standalone uses no Rust;
 // shared-link/shared-run exercise the real remaining Shared implementation.
+// rust-link/rust-run use the actual remaining attachment guard on Rust spawns.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -11,8 +12,8 @@ import { candidateJetc0, frontReceipt } from "../../JetBackend/Tests/jet-front.m
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const [output, mode] = process.argv.slice(2);
-if (!output || !["assemble", "lower", "audit", "link", "run", "shared-link", "shared-run"].includes(mode)) {
-  throw Error("usage: run-thread-fixtures.mjs OUT assemble|lower|audit|link|run|shared-link|shared-run");
+if (!output || !["assemble", "lower", "audit", "link", "run", "shared-link", "shared-run", "rust-link", "rust-run"].includes(mode)) {
+  throw Error("usage: run-thread-fixtures.mjs OUT assemble|lower|audit|link|run|shared-link|shared-run|rust-link|rust-run");
 }
 const out = resolve(output);
 const read = (path) => readFileSync(join(repo, path), "utf8");
@@ -120,6 +121,15 @@ if (mode === "assemble") {
   const result = command(join(out, "shared-thread-fixture"), [], { timeout: 30000 });
   writeFileSync(join(out, "shared-result.txt"), `status=${result.status}\nstdout=${JSON.stringify(result.stdout)}\nstderr=${JSON.stringify(result.stderr)}\n`);
   if (result.stdout !== "" || result.stderr !== "") throw Error("Shared attempt fixture stdout/stderr changed");
+} else if (mode === "rust-link") {
+  const library = process.env.JET_RUNTIME_NATIVE_RLIB;
+  if (!library || !existsSync(library)) throw Error("JET_RUNTIME_NATIVE_RLIB must name the freshly built remaining Rust native-pack rlib");
+  command("rustc", ["--edition", "2021", join(repo, "Compiler/JetRuntime/Tests/thread-rust-fixture.rs"),
+    "--extern", `jet_runtime=${library}`, "-C", `link-arg=${join(out, "good/fixture.o")}`, "-o", join(out, "rust-thread-fixture")]);
+} else if (mode === "rust-run") {
+  const result = command(join(out, "rust-thread-fixture"), [], { timeout: 30000 });
+  writeFileSync(join(out, "rust-result.txt"), `status=${result.status}\nstdout=${JSON.stringify(result.stdout)}\nstderr=${JSON.stringify(result.stderr)}\n`);
+  if (result.stdout !== "" || result.stderr !== "") throw Error("Rust-spawned attachment fixture stdout/stderr changed");
 } else {
   const result = command(join(out, "thread-fixture"), [], { timeout: 3600000 });
   writeFileSync(join(out, "result.txt"), `status=${result.status}\nstdout=${JSON.stringify(result.stdout)}\nstderr=${JSON.stringify(result.stderr)}\n`);

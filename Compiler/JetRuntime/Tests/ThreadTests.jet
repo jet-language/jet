@@ -32,6 +32,35 @@ fn thread_test_require(ok: Bool) {
     I64{0}
 }
 
+fn thread_test_identity() {
+    #Unsafe("gettid verifies identity without trusting the TCB under test") {
+        tid :: os_syscall_i64(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        thread_test_require(sync_load(thread_base() + I64{8}) == tid)
+    }
+}
+
+#Export(c) fn jet_rt_thread_fixture_parent() -> I64 { thread_base() }
+
+#Export(c) fn jet_rt_thread_fixture_inherited_base(scratch: I64, expected: I64) {
+    #Unsafe("ARCH_GET_GS writes a caller-owned word; the inherited pointer is compared, never dereferenced") {
+        status :: os_syscall_i64(I64{158}, I64{4100}, scratch, I64{0}, I64{0}, I64{0}, I64{0})
+        thread_test_require(status == I64{0} && sync_load(scratch) == expected)
+    }
+}
+
+#Export(c) fn jet_rt_thread_fixture_attached_child(parent: I64) -> I64 {
+    thread_test_require(thread_base() != parent)
+    jet_rt_thread_fixture_attached()
+}
+
+#Export(c) fn jet_rt_thread_fixture_attached() -> I64 {
+    thread_test_identity()
+    own :: thread_base()
+    jet_rt_thread_attach()
+    thread_test_require(thread_base() == own)
+    I64{0}
+}
+
 #Export(c) fn jet_rt_thread_fixture_worker(descriptor: I64) -> I64 {
     pair :: sync_load(descriptor)
     id :: sync_load(descriptor + I64{8})
@@ -39,6 +68,7 @@ fn thread_test_require(ok: Bool) {
     second :: sync_load(descriptor + I64{24})
     sync_store(descriptor + I64{40}, thread_base())
     sync_store(descriptor + I64{48}, sync_load(thread_base() + I64{8}))
+    thread_test_identity()
     thread_test_require(jet_rt_tls_get(first) == I64{0} && jet_rt_tls_get(second) == I64{0})
     jet_rt_tls_set(first, descriptor)
     jet_rt_tls_set(second, descriptor)
@@ -78,10 +108,9 @@ fn thread_test_require(ok: Bool) {
 }
 
 #Export(c) fn jet_rt_thread_fixture_clone_worker(state: I64) -> I64 {
-    // clone inherits GS as well as FS. Clear only this child's GS before
-    // explicit attach, so it can never borrow/free the parent's TCB.
-    thread_set_base(I64{0})
-    jet_rt_thread_attach()
+    // Raw clone inherits GS and FS, but bootstrap must ignore the old base.
+    jet_rt_thread_bootstrap()
+    _ := jet_rt_thread_fixture_attached_child(sync_load(state + I64{8}))
     key :: sync_load(state)
     jet_rt_tls_set(key, state)
     thread_test_require(jet_rt_tls_get(key) == state)
@@ -196,6 +225,7 @@ fn thread_test_clone(entry: I64) {
     key :: jet_rt_tls_key_new(I64{0})
     sync_store(state, key)
     parent :: thread_base()
+    sync_store(state + I64{8}, parent)
     control :: thread_clone_fixture(entry, state)
     thread_test_require(control > I64{0})
     thread_clone_join(control)
@@ -224,6 +254,17 @@ fn thread_test_rearm(entry: I64, destructor: I64) {
     jet_rt_free(count, I64{8}, I64{8})
 }
 
+fn thread_test_inherited(entry: I64) {
+    parent :: thread_base()
+    result :: jet_rt_alloc(I64{8}, I64{8})
+    handle :: thread_spawn(entry, parent)
+    thread_test_require(handle > I64{0})
+    thread_test_require(thread_join(handle, result) == I64{0} && sync_load(result) == I64{0})
+    thread_test_require(thread_base() == parent)
+    thread_test_identity()
+    jet_rt_free(result, I64{8}, I64{8})
+}
+
 #Export(c) fn jet_rt_thread_fixture_run(callbacks: I64) -> I64 {
     // .init_array already initialized alloc/thread; repeated init is harmless.
     parent :: thread_base()
@@ -234,6 +275,7 @@ fn thread_test_rearm(entry: I64, destructor: I64) {
     thread_test_parks(sync_load(callbacks + I64{8}), true)
     thread_test_clone(sync_load(callbacks + I64{16}))
     thread_test_rearm(sync_load(callbacks + I64{40}), sync_load(callbacks + I64{32}))
+    thread_test_inherited(sync_load(callbacks + I64{48}))
     #Unsafe("heap-free fixture success line is one eight-byte write") {
         _ := os_write_word_i64(I64{1}, I64{2932874797083764}, I64{7})
     }
