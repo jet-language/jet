@@ -10475,11 +10475,7 @@ impl<'a> LowerCtx<'a> {
             source_span: lambda.source_span,
             failure_carrier: lambda.failure_carrier.clone(),
             effects: lambda.effects.clone(),
-            target_applicability: TTargetApplicability {
-                rust_aot: true,
-                interpreter: true,
-                web: true,
-            },
+            target_applicability: self.function.target_applicability,
             web_bucket: self.function.web_bucket,
             web_marker: None,
             visibility: TVisibility::Private,
