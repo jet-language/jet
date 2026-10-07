@@ -22,6 +22,10 @@ mod BrowserHost;
 pub mod Codegen;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub mod NativeSession;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+mod NativeLibraryImage;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub mod ParentRuntimeLibrary;
 /// D-FAIL-BREACH1=A: the same task-local runtime stack kernel used by emitted
 /// AOT code. Resident engines marshal source locations into their own report
 /// carrier, but depth policy stays in this Prelude part.
