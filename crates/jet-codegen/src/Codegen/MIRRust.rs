@@ -25136,6 +25136,16 @@ impl<'a> RustEmitter<'a> {
                 &route_row.signature.borrow_mask,
             );
         }
+        if row.module == "core.sys" && row.member == "atexit" {
+            let [handler] = args else {
+                panic!("MIR core.sys.atexit must have one checked handler");
+            };
+            let handler = self.host_callback_with_inputs(function, handler.value, &[]);
+            return format!(
+                "{}jet_std_os_atexit(std::rc::Rc::new({handler}))",
+                self.config.root_prefix
+            );
+        }
         if row.module == "core.compute"
             && matches!(
                 row.member.as_str(),
