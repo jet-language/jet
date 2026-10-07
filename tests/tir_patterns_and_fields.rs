@@ -929,6 +929,115 @@ fn run() {
     assert_eq!(stdout, "3\n");
 }
 
+#[test]
+fn owned_call_destructure_moves_fields_and_keeps_omitted_cleanup() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+struct Parts { left: [Int], right: [Int], spare: String }
+fn pair(seed: Int) -> (left: [Int], right: [Int]) {
+    (left: [seed, seed + 1], right: [seed + 2])
+}
+fn parts(seed: Int) -> Parts {
+    Parts{left: [seed], right: [seed + 1], spare: "omitted"}
+}
+fn run() {
+    acc := 0
+    loop i in 0..<4 {
+        (left, right) :: pair(i)
+        acc += left[1] + right[0]
+        Parts{left: a, right: b, ..} :: parts(i)
+        acc += a[0] + b[0]
+    }
+    print(acc)
+}
+"#;
+    let (code, stdout) = build_and_run("tir_owned_call_destructure", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "40\n");
+}
+
+#[test]
+fn owned_destructure_preserves_observable_drop_order_on_every_tier() {
+    if !have_rustc() {
+        return;
+    }
+    assert_tiers_agree(
+        "tir_owned_destructure_drop_order",
+        include_str!("../Examples/features/memory/destructure_drop_order.jet"),
+        include_str!("../Examples/features/expected/memory/destructure_drop_order.out"),
+    );
+}
+
+#[test]
+fn close_owner_destructure_keeps_close_once_on_every_tier() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+struct Resource { name: String, payload: String }
+impl Resource.Close {
+    fn close(^self) { print("close {self.name} {self.payload}") }
+}
+fn make() -> Resource { Resource{name: "call", payload: "intact"} }
+fn ordered(early: Bool) {
+    Resource{name: call_name, ..} :: make()
+    Resource{name: literal_name, ..} :: Resource{name: "literal", payload: "intact"}
+    print("names {call_name} {literal_name}")
+    if early -> return
+    print("normal")
+}
+fn run() { ordered(false); ordered(true) }
+"#;
+    assert_tiers_agree(
+        "tir_close_owner_destructure",
+        src,
+        "names call literal\nnormal\nclose literal intact\nclose call intact\nnames call literal\nclose literal intact\nclose call intact\n",
+    );
+}
+
+#[test]
+fn recursive_scalar_record_uses_caller_destination() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+struct Stats { count: Int, sum: Int, low: Int, high: Int }
+fn stats(lo: Int, hi: Int) -> Stats {
+    if hi - lo <= 1 {
+        leaf := Stats{count: 0, sum: 0, low: lo, high: lo}
+        loop i in lo..<hi {
+            leaf.count += 1
+            leaf.sum += i
+            leaf.high = i
+        }
+        return leaf
+    }
+    mid :: lo + (hi - lo) /% 2
+    a :: stats(lo, mid)
+    b :: stats(mid, hi)
+    Stats{count: a.count + b.count, sum: a.sum + b.sum, low: a.low, high: b.high}
+}
+fn run() {
+    s :: stats(0, 8)
+    print(s.count)
+    print(s.sum)
+    print(s.low)
+    print(s.high)
+}
+"#;
+    let rust = compile("tir_recursive_scalar_record", src);
+    assert!(rust.contains("__jet_into"), "scalar aggregates above the register ABI need a caller slot");
+    assert!(
+        !rust.contains("__jet_return_slot.insert((_l") && !rust.contains("__jet_return_slot.insert(_l"),
+        "the leaf builder must already reside in caller storage, not transfer into it"
+    );
+    let (code, stdout) = build_and_run("tir_recursive_scalar_record", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "8\n28\n0\n7\n");
+}
+
 /// D-DESTRUCT1: struct-shaped dispatch arm heads bind fields and test literal
 /// fields in the same arm. This is the source-level dispatch spelling; the
 /// internal Rust lowering may still call the helper path a switch.

@@ -1559,6 +1559,28 @@ fn jet_rust_emit_return_slot_bytes(ty: MIRType) -> Int? {
     }
 }
 
+// MIRRust scalar_record_return_bytes / return_slot_value_bytes.
+fn jet_rust_emit_scalar_record_return_bytes(ctx: &JetRustEmitContext, ty: MIRType) -> Int? {
+    definition :: jet_rust_emit_structural_type_def(ctx, ty) ?? return None
+    if definition.generic_params.len() > 0 || definition.compiler_builtin != None -> return None
+    if definition.kind == .Struct(fields, _) {
+        bytes := 0
+        loop field in fields {
+            if field.computed -> next
+            if field.ty.kind == .FixedList(_, _) -> return None
+            size :: jet_rust_emit_return_slot_bytes(field.ty) ?? return None
+            bytes += size
+        }
+        return Val(bytes)
+    }
+    None
+}
+
+fn jet_rust_emit_return_slot_value_bytes(ctx: &JetRustEmitContext, ty: MIRType) -> Int? {
+    if jet_rust_emit_return_slot_bytes(ty) == .Val(bytes) -> return Val(bytes)
+    jet_rust_emit_scalar_record_return_bytes(ctx, ty)
+}
+
 // #4566 slice 7 capacity reuse (research 4.3): the payload a reuse write of a
 // return-slot function's place carries until jet_rust_emit_bind_return_slot
 // turns it into `jet_reuse_slot(__jet_return_slot)`.
@@ -1714,7 +1736,8 @@ fn jet_rust_emit_return_slot_args_keep(function: MIRFunction, index: JetRustEmit
 fn jet_rust_emit_plan_return_slot(ctx: &JetRustEmitContext, function: MIRFunction) -> JetRustEmitReturnSlot? Never! {
     // The buffer helpers live in the hosted collections prelude.
     buffer :: jet_rust_emit_reusable_buffer_type(function.return_type) && !jet_rust_emit_is_core_layer(&ctx) && !jet_rust_emit_is_no_os(&ctx)
-    if !buffer {
+    scalar_bytes :: jet_rust_emit_scalar_record_return_bytes(ctx, function.return_type) ?? 0
+    if !buffer && scalar_bytes <= 16 {
         bytes :: jet_rust_emit_return_slot_bytes(function.return_type) ?? return None
         if bytes < JET_RUST_EMIT_RETURN_SLOT_MIN_BYTES -> return None
     }
@@ -1760,6 +1783,19 @@ fn jet_rust_emit_plan_return_slot(ctx: &JetRustEmitContext, function: MIRFunctio
                                     &exit_tail.push(instruction.id.value)
                                     &exit_values.push(value.value)
                                     accepted = true
+                                }
+                            }
+                        }
+                        // A full scalar constructor can use the same caller
+                        // slot as the already-identified moved builder.
+                        if !accepted && scalar_bytes > 16 {
+                            if source == .Val(source_local) {
+                                definition_block := index.definition_blocks.get(value.value)
+                                definition_position := index.definition_positions.get(value.value)
+                                if definition_block == .Val(def_block) && definition_position == .Val(def_position) {
+                                    if function.blocks[def_block].instructions[def_position].operation == .Struct(_, _) {
+                                        accepted = jet_rust_emit_return_slot_reaches_return(function, index, block_position, position, source_local)
+                                    }
                                 }
                             }
                         }
@@ -1858,8 +1894,35 @@ fn jet_rust_emit_return_slot_reads_local(function: MIRFunction, index: JetRustEm
     false
 }
 
+// MIRRust call_destination_gap: infallible Bool flag initialization between
+// an initializer call and its local store does not block caller storage.
+fn jet_rust_emit_call_destination_gap(function: MIRFunction, index: JetRustEmitBodyIndex, instruction: MIRInstruction) -> Bool Never! {
+    if instruction.operation == .Constant(constant) {
+        if constant == .Bool(_) -> return true
+    }
+    if instruction.operation == .WritePlace(place, value) {
+        row :: index.place_rows.get(place.value) ?? return false
+        owner :: function.places[row]
+        local := MIRLocalID?{None}
+        if owner.base == .Local(id) -> local = Val(id)
+        id :: local ?? return false
+        if owner.projections.len() > 0 || owner.persist_key != None || index.escaped_locals.get(id.value) != None -> return false
+        scalar := false
+        loop candidate in function.locals {
+            if candidate.id == id -> scalar = !candidate.uninit && candidate.ty.kind == MIRTypeKind.Bool && candidate.ownership.mode == MIROwnershipMode.Copy
+        }
+        if !scalar -> return false
+        definition_block :: index.definition_blocks.get(value.value) ?? return false
+        definition_position :: index.definition_positions.get(value.value) ?? return false
+        if function.blocks[definition_block].instructions[definition_position].operation == .Constant(constant) {
+            if constant == .Bool(_) -> return true
+        }
+    }
+    false
+}
+
 // MIRRust plan_call_destinations (#4566): the calls in `function` of a
-// return-slot function whose result the next instruction writes, as its only
+// return-slot function whose result the next non-administrative instruction writes, as its only
 // read, to a whole local. The callee fills that local's slot in place
 // (`f(.., &mut slot)`), which replaces the write. The local is a plain
 // `Option` slot of the result type: not `function`'s own return place, never
@@ -1892,9 +1955,8 @@ fn jet_rust_emit_plan_call_destinations(ctx: &JetRustEmitContext, function: MIRF
     own :: ctx.return_slots.get(function.id.value)
     loop block in function.blocks {
         if block.instructions.len() < 2 -> next
-        loop position in 1..<block.instructions.len() {
-            call :: block.instructions[position - 1]
-            write :: block.instructions[position]
+        loop position in 0..<block.instructions.len() {
+            call :: block.instructions[position]
             result :: call.result ?? next
             target := MIRFunctionID?{None}
             call_args := [MIRCallArg]{}
@@ -1907,6 +1969,10 @@ fn jet_rust_emit_plan_call_destinations(ctx: &JetRustEmitContext, function: MIRF
             target_id :: target ?? next
             if ctx.return_slots.get(target_id.value) == None -> next
             target_index :: jet_rust_emit_function_index(ctx, target_id) ?? next
+            write_position := position + 1
+            loop write_position < block.instructions.len() && jet_rust_emit_call_destination_gap(function, index, block.instructions[write_position]) -> write_position += 1
+            if write_position >= block.instructions.len() -> next
+            write :: block.instructions[write_position]
             written_place := MIRPlaceID?{None}
             written_value := MIRValueID?{None}
             if write.operation == {
@@ -1930,7 +1996,7 @@ fn jet_rust_emit_plan_call_destinations(ctx: &JetRustEmitContext, function: MIRF
                 }
             }
             destination :: local_row ?? next
-            if value != result || function.places[row].projections.len() > 0 || function.places[row].persist_key != None || destination.uninit || (jet_rust_emit_return_slot_bytes(destination.ty) == None && !jet_rust_emit_reusable_buffer_type(destination.ty)) || !mir_type_same_checked_type(destination.ty, ctx.program.functions[target_index].return_type) -> next
+            if value != result || function.places[row].projections.len() > 0 || function.places[row].persist_key != None || destination.uninit || (jet_rust_emit_return_slot_value_bytes(ctx, destination.ty) == None && !jet_rust_emit_reusable_buffer_type(destination.ty)) || !mir_type_same_checked_type(destination.ty, ctx.program.functions[target_index].return_type) -> next
             if own == .Val(slot) {
                 if slot.local == local || slot.exit == (Val(local)) -> next
             }
@@ -2241,10 +2307,11 @@ fn jet_rust_emit_native_int_writes(function: MIRFunction, index: JetRustEmitBody
 // between the read and the comparison's other operand. Such a read is in the
 // comparison's taken block, whose only predecessor ends in a branch on
 // `local < bound` (or `<=`, `>`, `>=`, either operand order), or in a block
-// reached from it through blocks that each have one predecessor; the compared
-// read is in the branching block, and no write of the local runs after the
-// compared read or before the guarded one: `loop i < 512 { out[i] = ..;
-// i = i + 1 }` guards both reads of `i`.
+// every predecessor of which is a guarded block that does not write the local
+// (so an `if` inside the loop body keeps the join after it guarded); the
+// compared read is in the branching block, and no write of the local runs
+// after the compared read or before the guarded one: `loop i < 512 {
+// out[i] = ..; i = i + 1 }` guards both reads of `i`.
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::native_int_read_guards
 fn jet_rust_emit_native_int_read_guards(ctx: &JetRustEmitContext, function: MIRFunction, index: JetRustEmitBodyIndex) -> [U64:JetRustEmitNativeIntGuard] Never! {
     guards := [U64:JetRustEmitNativeIntGuard]{}
@@ -2293,14 +2360,14 @@ fn jet_rust_emit_native_int_read_guards(ctx: &JetRustEmitContext, function: MIRF
                     if jet_rust_emit_native_int_writes(function, index, header.instructions[at], local) -> written = true
                 }
                 if written -> next
-                // The taken block and the blocks only it reaches, up to the
-                // first write of the local.
+                // The taken block, then each block all of whose predecessors
+                // are guarded blocks that leave the local unwritten, up to
+                // the first write of the local.
                 pending := [Int]{position}
-                seen := [Int:Bool]{}
+                clean := [Int:Bool]{}
                 loop pending.len() > 0 {
                     at :: &pending.pop() ?? { break }
-                    if seen.get(at) != None -> next
-                    _ := &seen.add(at, true)
+                    if clean.get(at) != None -> next
                     region :: function.blocks[at]
                     region_written := false
                     loop instruction in region.instructions {
@@ -2315,9 +2382,16 @@ fn jet_rust_emit_native_int_read_guards(ctx: &JetRustEmitContext, function: MIRF
                         }
                     }
                     if region_written -> next
+                    _ := &clean.add(at, true)
                     loop target in mir_terminator_targets(region.terminator) {
                         if index.block_positions.get(target.value) == .Val(target_position) {
-                            if target_position < index.predecessors.len() && index.predecessors[target_position].len() == 1 && index.predecessors[target_position][0] == at -> &pending.push(target_position)
+                            if target_position < index.predecessors.len() {
+                                all_clean := true
+                                loop predecessor in index.predecessors[target_position] {
+                                    if clean.get(predecessor) == None -> all_clean = false
+                                }
+                                if all_clean -> &pending.push(target_position)
+                            }
                         }
                     }
                 }
@@ -2469,10 +2543,33 @@ fn jet_rust_emit_native_param_read(ctx: &JetRustEmitContext, function: MIRFuncti
     if params.len() == 0 -> return None
     row :: ctx.body_index.place_rows.get(place.value) ?? return None
     if function.places[row].projections.len() > 0 -> return None
-    if function.places[row].base == .Parameter(value) {
-        definition :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return None
-        if definition.operation == .Parameter(param, _) {
-            if params.get(param) != None -> return Val(param)
+    if function.places[row].base == {
+        .Parameter(value) | .Capture(value) -> {
+            definition :: jet_rust_emit_find_value_instruction(ctx, function, value) ?? return None
+            if definition.operation == {
+                .Parameter(param, _) -> { if params.get(param) != None -> return Val(param) }
+                .Capture(slot) -> {
+                    param :: function.params.len() + slot
+                    if params.get(param) != None -> return Val(param)
+                }
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    None
+}
+
+// MIRRust native_read_call_arg / native_read_call_args.
+fn jet_rust_emit_native_read_call_arg(arg: MIRCallArg) -> Bool Never! {
+    arg.access == MIRAccess.Read && arg.place != None && !arg.authority_boundary && !arg.implicit_clone && !arg.shared_auto_clone && !arg.widen_fixed_to_list && arg.widen_to_union == None && arg.box_as_trait == None && arg.fn_coercion == None
+}
+
+fn jet_rust_emit_native_read_call_args(operation: MIROperation) -> [MIRCallArg]? Never! {
+    if operation == .Call(callee, args, _) {
+        if callee == {
+            .User(_) | .Associated(_, _) | .Method(_, _) -> return Val(args)
+            else -> {}
         }
     }
     None
@@ -2500,6 +2597,19 @@ fn jet_rust_emit_native_int_use(function: MIRFunction, index: JetRustEmitBodyInd
             if written != value -> return false
             local :: jet_rust_emit_native_int_whole_local(function, index, place) ?? return false
             return jet_rust_emit_native_int_flag(locals, local.value)
+        }
+        .Call(_, _, _) -> {
+            args :: jet_rust_emit_native_read_call_args(instruction.operation) ?? return false
+            found := false
+            loop arg in args {
+                if arg.value != value -> next
+                found = true
+                if !jet_rust_emit_native_read_call_arg(arg) -> return false
+                place :: arg.place ?? return false
+                local :: jet_rust_emit_native_int_whole_local(function, index, place) ?? return false
+                if !jet_rust_emit_native_int_flag(locals, local.value) -> return false
+            }
+            return found
         }
         else -> return false
     }
@@ -2573,6 +2683,14 @@ fn jet_rust_emit_plan_native_ints(ctx: &JetRustEmitContext, function: MIRFunctio
         loop instruction in block.instructions {
             loop place in jet_rust_emit_return_slot_named_places(instruction.operation) {
                 local :: jet_rust_emit_return_slot_place_local(function, index, place) ?? next
+                call_read := false
+                if jet_rust_emit_native_read_call_args(instruction.operation) == .Val(args) {
+                    call_read = true
+                    loop arg in args {
+                        if arg.place == .Val(place) && !jet_rust_emit_native_read_call_arg(arg) -> call_read = false
+                    }
+                }
+                if call_read -> next
                 if instruction.operation == {
                     .ReadPlace(_) -> {}
                     .WritePlace(_, value) | .ReplacePlace(_, value) -> {
@@ -2874,16 +2992,18 @@ fn jet_rust_emit_native_int_inline(range: JetRustEmitIntRange) -> Bool Never! {
 }
 
 // MIRRust plan_native_version (#4566 loop versioning): the native version of
-// `function`, when its loops compute from exact Int Read parameters and
-// admitting those parameters to a range (jet_rust_emit_native_version_ranges)
-// makes more of its arithmetic native than `base`, the unversioned plan. The
-// version keeps only the parameters some native read takes. Its body is the
-// function's own symbol, which checks those parameters once on entry and sends
-// any call outside the ranges to the exact body (`{name}__jet_exact`), so every
-// path keeps exact Int meaning.
+// `function`, when its arithmetic computes from exact Int Read parameters and
+// admitting those parameters to a range (jet_rust_emit_native_version_ranges,
+// or its positive part for a parameter read as a divisor) makes more of it
+// native than `base`, the unversioned plan. Read captures use indices after
+// ordinary parameters; one extra operation suffices for loops and lambdas alike.
+// It keeps only parameters some native read takes. Its body is the function's own symbol,
+// which checks those parameters once on entry and sends any call outside the
+// ranges to the exact body (`{name}__jet_exact`), so every path keeps exact
+// Int meaning.
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::plan_native_version
 fn jet_rust_emit_plan_native_version(ctx: &JetRustEmitContext, function: MIRFunction, base: JetRustEmitNativeInts) -> JetRustEmitNativeInts? Never! {
-    if function.form != MIRFunctionForm.TopLevel || function.kind != MIRFunctionKind.Jet || function.generic_params.len() > 0 || function.capture_params.len() > 0 || function.is_unsafe || function.memo_bound != None || function.is_reactive -> return None
+    if function.form != MIRFunctionForm.TopLevel || function.kind != MIRFunctionKind.Jet || function.generic_params.len() > 0 || function.is_unsafe || function.memo_bound != None || function.is_reactive -> return None
     loop test in ctx.program.tests {
         if test.function == function.id -> return None
     }
@@ -2891,20 +3011,49 @@ fn jet_rust_emit_plan_native_version(ctx: &JetRustEmitContext, function: MIRFunc
     loop parameter in function.params {
         if parameter.access == MIRAccess.Read && parameter.ty.kind == MIRTypeKind.Int -> &candidates.push(parameter.index)
     }
+    loop capture in function.capture_params {
+        if capture.access == MIRAccess.Read && capture.ty.kind == MIRTypeKind.Int -> &candidates.push(function.params.len() + capture.slot)
+    }
     if candidates.len() == 0 -> return None
-    // A loop: some block an edge from it or a later block re-enters.
-    looped := false
-    loop (position, predecessors) in ctx.body_index.predecessors {
-        loop predecessor in predecessors {
-            if predecessor >= position -> looped = true
+    // One eliminated exact operation is native work, including loop-free lambdas.
+    best_count := jet_rust_emit_native_version_arithmetic(&ctx, function, base)
+    // A parameter read whole as the divisor of `/`, `/%`, `%` or `rem` is
+    // also tried at the positive part of each range, where the division runs
+    // natively.
+    whole := [Int:JetRustEmitIntRange]{}
+    loop candidate in candidates -> whole[candidate] = JetRustEmitIntRange{low: -9223372036854775808, high: 9223372036854775807}
+    divisors := [Int:Bool]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .Binary(op, _, _, _, right) {
+                if op == MIRBinaryOp.Div || op == MIRBinaryOp.FloorDiv || op == MIRBinaryOp.Rem || op == MIRBinaryOp.Mod {
+                    definition :: jet_rust_emit_find_value_instruction(ctx, function, right) ?? next
+                    if definition.operation == .ReadPlace(place) {
+                        if jet_rust_emit_native_param_read(&ctx, function, whole, place) == .Val(param) -> divisors[param] = true
+                    }
+                }
+            }
         }
     }
-    if !looped -> return None
-    best_count := jet_rust_emit_native_version_arithmetic(&ctx, function, base)
-    best := JetRustEmitNativeInts?{None}
+    tries := [[Int:JetRustEmitIntRange]]{}
     loop range in jet_rust_emit_native_version_ranges() {
         params := [Int:JetRustEmitIntRange]{}
         loop candidate in candidates -> params[candidate] = range
+        &tries.push(params)
+        if divisors.len() > 0 {
+            positive := [Int:JetRustEmitIntRange]{}
+            loop candidate in candidates {
+                if divisors.get(candidate) != None {
+                    positive[candidate] = JetRustEmitIntRange{low: 1, high: range.high}
+                } else {
+                    positive[candidate] = range
+                }
+            }
+            &tries.push(positive)
+        }
+    }
+    best := JetRustEmitNativeInts?{None}
+    loop params in tries {
         plan :: jet_rust_emit_plan_native_ints(&ctx, function, params)
         count :: jet_rust_emit_native_version_arithmetic(&ctx, function, plan)
         if count > best_count {
@@ -2944,16 +3093,19 @@ fn jet_rust_emit_native_version_ranges() -> [JetRustEmitIntRange] Never! {
     [JetRustEmitIntRange]{JetRustEmitIntRange{low: 0 - wide, high: wide - 1}, JetRustEmitIntRange{low: 0 - narrow, high: narrow - 1}}
 }
 
-// MIRRust plan_native_version `arithmetic`: the native Binary values of a plan.
+// MIRRust plan_native_version `arithmetic`: the native work of a plan, its
+// native Binary values and its comparisons of two native values.
 fn jet_rust_emit_native_version_arithmetic(ctx: &JetRustEmitContext, function: MIRFunction, plan: JetRustEmitNativeInts) -> Int Never! {
     count := 0
     loop block in function.blocks {
         loop instruction in block.instructions {
             result :: instruction.result ?? next
-            if plan.values.get(result.value) == None -> next
-            if instruction.operation == {
-                .Binary(_, _, _, _, _) -> count += 1
-                else -> {}
+            if instruction.operation == .Binary(op, _, _, left, right) {
+                if plan.values.get(result.value) != None {
+                    count += 1
+                } else if jet_rust_emit_native_int_comparison(op) && plan.values.get(left.value) != None && plan.values.get(right.value) != None {
+                    count += 1
+                }
             }
         }
     }
@@ -4672,6 +4824,15 @@ fn jet_rust_emit_function_text(ctx: &JetRustEmitContext, function: MIRFunction, 
     if ctx.native_ints.params.len() > 0 {
         checks := [String]{}
         args := [String]{}
+        loop capture in function.capture_params {
+            name :: jet_rust_emit_capture_name(capture.slot)
+            &args.push(name)
+            index :: function.params.len() + capture.slot
+            admitted :: ctx.native_ints.params.get(index) ?? next
+            shadow :: jet_rust_emit_native_param_slot(index)
+            &lines.push("    let {shadow}: i64 = {name}.to_raw();")
+            &checks.push("({admitted.low}i64..={admitted.high}i64).contains(&{shadow})")
+        }
         loop parameter in function.params {
             name :: jet_rust_emit_parameter_name(function, parameter.index)
             &args.push(name)
