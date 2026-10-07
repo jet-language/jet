@@ -433,12 +433,12 @@ fn decode_compat(text: String, url: Bool) -> [U8] Base64Error! {
     aot :: compat_quanta(stripped, true)
     end := raw.len()
     loop end > 0 && raw[end - 1] == (U8{61}) -> end -= 1
-    comptime :: compat_quanta(raw[0..<end], false)
-    if aot == .Val(a) && comptime == .Val(b) {
+    folded :: compat_quanta(raw[0..<end], false)
+    if aot == .Val(a) && folded == .Val(b) {
         if a != b -> return Err(decode_error(url, text.bytes().len(), "historical decoders disagree"))
     }
     if aot == .Val(a) -> return Ok(a)
-    if comptime == .Val(b) -> return Ok(b)
+    if folded == .Val(b) -> return Ok(b)
     original :: text.bytes()
     loop i in 0..<original.len() {
         byte :: original[i]
@@ -456,13 +456,13 @@ fn decode_compat(text: String, url: Bool) -> [U8] Base64Error! {
 }
 
 #Test("base64 edition-selected decode policy") {
-    assert(decode_for_edition("Zg==", 2027, false, false, false) == Ok("f".bytes()))
-    assert(decode_for_edition("Zg", 2026, false, false, false) == Ok("f".bytes()))
+    assert_eq(decode_for_edition("Zg==", 2027, false, false, false), Ok("f".bytes()))
+    assert_eq(decode_for_edition("Zg", 2026, false, false, false), Ok("f".bytes()))
     assert(decode_for_edition("Zg", 2027, false, false, false) == .Err(_))
     assert(decode_for_edition("Zh==", 2027, false, false, false) == .Err(_))
     assert(decode_for_edition("Zg==ignored", 2026, false, false, false) == .Err(_))
-    assert(decode_for_edition("Zg=*", 2026, false, false, false) == Ok("f".bytes()))
-    assert(decode_for_edition("-_8", 2027, true, false, false) == Ok([U8]{251, 255}))
+    assert_eq(decode_for_edition("Zg=*", 2026, false, false, false), Ok("f".bytes()))
+    assert_eq(decode_for_edition("-_8", 2027, true, false, false), Ok([U8]{251, 255}))
     assert(decode_for_edition("-_8=", 2027, true, false, false) == .Err(_))
-    assert(decode_for_edition("Zg==\n", 2027, false, true, false) == Ok("f".bytes()))
+    assert_eq(decode_for_edition("Zg==\n", 2027, false, true, false), Ok("f".bytes()))
 }

@@ -767,8 +767,14 @@ fn write_canonical(out: &[U8], value: DataTree, path: &[String], depth: Int) -> 
 
 fn write_json(out: &[U8], value: DataTree, pretty: Bool, indent: Int) Never! {
     #Unsafe("Core JSON rendering borrows native private payloads without exposing their constructors") {
-        if value == .Number(text) { write_ascii(&out, text); return }
-        if value == .TypedText(text) { write_json_string(&out, text); return }
+        if value == .Number(text) {
+            write_ascii(&out, text)
+            return
+        }
+        if value == .TypedText(text) {
+            write_json_string(&out, text)
+            return
+        }
         if value == .Bytes(bytes) {
             &out.push(U8{91})
             loop index in 0..<bytes.len() {

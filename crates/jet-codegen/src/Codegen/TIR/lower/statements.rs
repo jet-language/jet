@@ -3431,7 +3431,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         Type::Named(n) if n == "FileReader" || n == "FileWriter"
                             || n == "JSONReader" || n == "JSONWriter"
                             || n == "JSONLReader" || n == "JSONLWriter"
-                            || n == "CSVReader" || n == "CSVWriter"
+                            || n == "CSVReader"
                             || n == "XMLReader" || n == "XMLWriter"
                             || n == "CBORReader" || n == "CBORWriter"
                             || n == "Stdout" || n == "Stderr"

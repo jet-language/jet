@@ -1,16 +1,47 @@
 // Whole-value CBOR parser; policy and allocation accounting stay in Jet.
 use core.encoding.[DataTree]
 use core.encoding.cbor.[CBOROptions, CBORError, CBORErrorKind]
-use core.encoding.cbor as cbor
-use core.encoding.stream as stream
+use __core_encoding_stream as stream
 use core.math as math
 use core.mem as mem
+// Exact representability, rather than a rounded conversion, selects the RFC
+// preferred float width. Inexact values retain all their original f64 bits.
+pub fn narrow_bits(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Int? Never! {
+    negative :: bits < 0
+    sign :: if negative -> 1 << (exponent_bits + fraction_bits) else -> 0
+    exponent :: (bits >> 52) & 2047
+    fraction :: bits & 4503599627370495
+    max_exponent :: (1 << exponent_bits) - 1
+    if exponent == 2047 {
+        if fraction != 0 -> return Val((max_exponent << fraction_bits) | (1 << (fraction_bits - 1)))
+        return Val(sign | (max_exponent << fraction_bits))
+    }
+    if exponent == 0 {
+        if fraction == 0 -> return Val(sign)
+        return None
+    }
+    bias :: (1 << (exponent_bits - 1)) - 1
+    target_exponent :: exponent - 1023 + bias
+    if target_exponent >= max_exponent -> return None
+    shift := 52 - fraction_bits
+    significand := fraction
+    if target_exponent <= 0 {
+        shift += 1 - target_exponent
+        if shift > 52 + fraction_bits -> return None
+        significand = significand | 4503599627370496
+    }
+    if shift >= 63 -> return None
+    if (significand & ((1 << shift) - 1)) != 0 -> return None
+    mantissa :: significand >> shift
+    if target_exponent <= 0 -> return Val(sign | mantissa)
+    Val(sign | (target_exponent << fraction_bits) | mantissa)
+}
 
 fn failure(kind: CBORErrorKind, offset: Int, path: String, reason: String) -> CBORError Never! {
     CBORError{kind: kind, byte_offset: offset, path: path, reason: reason}
 }
 
-fn parse(bytes: [U8], options: CBOROptions) -> DataTree CBORError! {
+pub fn parse(bytes: [U8], options: CBOROptions) -> DataTree CBORError! {
     if options.max_depth < 1 || options.max_depth > 4096 -> return Err(failure(.Limit, 0, "$", "max_depth must be in 1..4096"))
     if options.max_items < 1 || options.max_items > 1000000000 -> return Err(failure(.Limit, 0, "$", "max_items must be in 1..1000000000"))
     if options.max_bytes < 0 || options.max_bytes > 1073741824 -> return Err(failure(.Limit, 0, "$", "max_bytes must be in 0..1073741824"))
@@ -231,7 +262,7 @@ impl Parser {
         if self.options.require_canonical {
             if width == 2 {
                 if math.is_nan(value) && bits != 32256 -> return Err(failure(.NonCanonical, start, path, "CBOR NaN is not the canonical 0xf97e00 encoding"))
-            } else if math.is_nan(value) || cbor.narrow_bits(math.to_bits(value), 5, 10) != None || (width == 8 && cbor.narrow_bits(math.to_bits(value), 8, 23) != None) {
+            } else if math.is_nan(value) || narrow_bits(math.to_bits(value), 5, 10) != None || (width == 8 && narrow_bits(math.to_bits(value), 8, 23) != None) {
                 return Err(failure(.NonCanonical, start, path, "CBOR Float does not use its preferred shortest encoding"))
             }
         }
@@ -283,7 +314,7 @@ fn widen_float(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Float Never
     if exponent == 0 {
         if fraction == 0 -> return math.from_bits(sign)
         lead := fraction_bits - 1
-        loop (fraction & (1 << lead)) == 0 -> lead -= 1
+        loop 0 == (fraction & (1 << lead)) -> lead -= 1
         normal_exponent :: 1 - bias - fraction_bits + lead
         mantissa :: (fraction - (1 << lead)) << (52 - lead)
         return math.from_bits(sign | ((normal_exponent + 1023) << 52) | mantissa)

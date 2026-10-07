@@ -10,7 +10,7 @@
 
 use core.encoding.[DataTree, EncodingError, EncodingErrorKind, EncodingFormat]
 use core.encoding.json as json
-use core.encoding.stream as stream
+use __core_encoding_stream as stream
 
 fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
     {
@@ -716,7 +716,7 @@ fn all_objects(items: [DataTree]) -> Bool {
 
 fn toml_leaf(value: DataTree) -> String Never! {
     #Unsafe("inspect compiler-private Bytes and typed carriers; public DataTree variants are unchanged") {
-        if value == {
+        return if value == {
             .Null -> "\"\""
             .Bool(v) -> "{v}"
             .Int(n) -> "{n}"

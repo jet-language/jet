@@ -3107,7 +3107,9 @@ impl<'a> Checker<'a> {
         {
             if method == "__object_entries_view"
                 && matches!(receiver.as_ref().without_parens(), Expr::Ident(alias, _)
-                    if self.core_imports.get(alias).is_some_and(|module| module == "core.encoding"))
+                    if self.core_imports.get(alias).is_some_and(|module| module == "core.encoding")
+                        || jet_foundation::CoreModuleExports::core_source_module_by_alias(alias)
+                            .is_some_and(|source| source.module == "core.encoding"))
             {
                 let Some(place) = args.first().and_then(|arg| self.place_from_expr(&arg.expr)) else {
                     return Vec::new();

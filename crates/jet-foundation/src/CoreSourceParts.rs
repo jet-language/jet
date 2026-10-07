@@ -17,6 +17,10 @@ pub const CORE_ENCODING_STREAM_OWNER: &str = "core.encoding";
 pub const CORE_ENCODING_STREAM_MODULE: &str = "__core_encoding_stream";
 pub const CORE_ENCODING_STREAM_ALIAS: &str = "__core_encoding_stream";
 
+pub const CORE_ENCODING_CBOR_PARSE_OWNER: &str = "core.encoding.cbor";
+pub const CORE_ENCODING_CBOR_PARSE_MODULE: &str = "__core_encoding_cbor_parse";
+pub const CORE_ENCODING_CBOR_PARSE_ALIAS: &str = "__core_encoding_cbor_parse";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CorePrivateSourcePart {
     /// Public source module that schedules this part.
@@ -46,11 +50,21 @@ pub const CORE_ENCODING_STREAM_SOURCE_PART: CorePrivateSourcePart = CorePrivateS
     },
 };
 
+pub const CORE_ENCODING_CBOR_PARSE_SOURCE_PART: CorePrivateSourcePart = CorePrivateSourcePart {
+    owner: CORE_ENCODING_CBOR_PARSE_OWNER,
+    source: CoreSourceModule {
+        module: CORE_ENCODING_CBOR_PARSE_MODULE,
+        alias: CORE_ENCODING_CBOR_PARSE_ALIAS,
+        path: "Core/encoding/cbor_parse.jet",
+        owned_members: &["parse", "narrow_bits"],
+    },
+};
+
 /// All compiler-private source parts. Keep this separate from
 /// `CoreModuleExports::CORE_SOURCE_MODULES`: adding a row there would make the
 /// part publicly importable.
 pub const CORE_PRIVATE_SOURCE_PARTS: &[CorePrivateSourcePart] =
-    &[CORE_TEXT_STRING_SOURCE_PART, CORE_ENCODING_STREAM_SOURCE_PART];
+    &[CORE_TEXT_STRING_SOURCE_PART, CORE_ENCODING_STREAM_SOURCE_PART, CORE_ENCODING_CBOR_PARSE_SOURCE_PART];
 
 pub fn core_private_source_part(owner: &str) -> Option<&'static CorePrivateSourcePart> {
     CORE_PRIVATE_SOURCE_PARTS

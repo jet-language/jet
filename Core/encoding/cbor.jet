@@ -2,9 +2,9 @@
 use core.encoding.[DataTree]
 use core.encoding.cbor.[CBORError, CBORErrorKind]
 use core.encoding.cbor.[CBOROptions]
-use core.encoding.stream as stream
+use __core_encoding_stream as stream
 use core.math as math
-use core.encoding.cbor_parse as parser
+use __core_encoding_cbor_parse as parser
 
 pub fn to_bytes<T: Encode>(value: T) -> [U8] CBORError! { encode(value.encode(), false) }
 pub fn to_bytes_canonical<T: Encode>(value: T) -> [U8] CBORError! { encode(value.encode(), true) }
@@ -50,45 +50,13 @@ fn append_length(out: &[U8], major: Int, value: Int) Never! {
     }
 }
 
-// Exact representability, rather than a rounded conversion, selects the RFC
-// preferred float width. Inexact values retain all their original f64 bits.
-fn narrow_bits(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Int? Never! {
-    negative :: bits < 0
-    sign :: if negative -> 1 << (exponent_bits + fraction_bits) else -> 0
-    exponent :: (bits >> 52) & 2047
-    fraction :: bits & 4503599627370495
-    max_exponent :: (1 << exponent_bits) - 1
-    if exponent == 2047 {
-        if fraction != 0 -> return Val((max_exponent << fraction_bits) | (1 << (fraction_bits - 1)))
-        return Val(sign | (max_exponent << fraction_bits))
-    }
-    if exponent == 0 {
-        if fraction == 0 -> return Val(sign)
-        return None
-    }
-    bias :: (1 << (exponent_bits - 1)) - 1
-    target_exponent :: exponent - 1023 + bias
-    if target_exponent >= max_exponent -> return None
-    shift := 52 - fraction_bits
-    significand := fraction
-    if target_exponent <= 0 {
-        shift += 1 - target_exponent
-        if shift > 52 + fraction_bits -> return None
-        significand = significand | 4503599627370496
-    }
-    if shift >= 63 -> return None
-    if (significand & ((1 << shift) - 1)) != 0 -> return None
-    mantissa :: significand >> shift
-    if target_exponent <= 0 -> return Val(sign | mantissa)
-    Val(sign | (target_exponent << fraction_bits) | mantissa)
-}
 
 fn append_float(out: &[U8], value: Float) Never! {
     bits :: math.to_bits(value)
-    if narrow_bits(bits, 5, 10) == .Val(half) {
+    if parser.narrow_bits(bits, 5, 10) == .Val(half) {
         &out.push(U8{249})
         append_uint(&out, half, 2)
-    } else if narrow_bits(bits, 8, 23) == .Val(single) {
+    } else if parser.narrow_bits(bits, 8, 23) == .Val(single) {
         &out.push(U8{250})
         append_uint(&out, single, 4)
     } else {
@@ -167,11 +135,11 @@ fn encode_value(value: DataTree, out: &[U8], canonical: Bool) CBORError! {
 }
 
 #Test("CBOR preferred float widths and integer encoding") {
-    assert(to_bytes(DataTree.Null) == Ok([U8]{246}))
-    assert(to_bytes(DataTree.Int(-1)) == Ok([U8]{32}))
-    assert(to_bytes(DataTree.Int(256)) == Ok([U8]{25, 1, 0}))
-    assert(to_bytes(DataTree.Float(Float{1.5})) == Ok([U8]{249, 62, 0}))
-    assert(narrow_bits(4607182418800017408, 5, 10) == Val(15360))
+    assert_eq(to_bytes(DataTree.Null), Ok([U8]{246}))
+    assert_eq(to_bytes(DataTree.Int(-1)), Ok([U8]{32}))
+    assert_eq(to_bytes(DataTree.Int(256)), Ok([U8]{25, 1, 0}))
+    assert_eq(to_bytes(DataTree.Float(Float{1.5})), Ok([U8]{249, 62, 0}))
+    assert_eq(parser.narrow_bits(4607182418800017408, 5, 10), Val(15360))
 }
 
 pub fn parse(bytes: [U8], options: CBOROptions{CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false}}) -> DataTree CBORError! {
@@ -179,9 +147,9 @@ pub fn parse(bytes: [U8], options: CBOROptions{CBOROptions{max_depth: 256, max_i
 }
 
 #Test("CBOR whole-value parser preserves limits and indefinite forms") {
-    assert(parse([U8]{24, 24}) == Ok(DataTree.Int(24)))
-    assert(parse([U8]{159, 1, 2, 255}) == Ok(DataTree.Array([DataTree]{DataTree.Int(1), DataTree.Int(2)})))
-    assert(parse([U8]{249, 62, 0}) == Ok(DataTree.Float(Float{1.5})))
+    assert_eq(parse([U8]{24, 24}), Ok(DataTree.Int(24)))
+    assert_eq(parse([U8]{159, 1, 2, 255}), Ok(DataTree.Array([DataTree]{DataTree.Int(1), DataTree.Int(2)})))
+    assert_eq(parse([U8]{249, 62, 0}), Ok(DataTree.Float(Float{1.5})))
     if parse([U8]{65, 0}) == .Err(error) -> assert(error.kind == .Unsupported) else -> panic("dynamic bytes accepted")
     if parse([U8]{1, 2}) == .Err(error) -> assert(error.kind == .TrailingData) else -> panic("trailing root accepted")
 }

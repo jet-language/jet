@@ -4221,6 +4221,7 @@ fn jet_raw_object_entries_view(value: &jet_std::DataTree) -> &[(String, jet_std:
 
 // Runtime consumers borrow the pair slice. Native Jet projects its own
 // Object backing directly; neither path clones a tree or sorts its keys.
+#[cfg(all(not(jet_evalhost), not(target_arch = "wasm32")))]
 #[no_mangle]
 pub extern "C" fn jet_rt_encoding_object_entries_view(value: *const jet_std::DataTree, data: *mut *const (String, jet_std::DataTree)) -> usize {
     jet_c_abi::guard(|| {

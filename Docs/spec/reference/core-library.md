@@ -2319,12 +2319,18 @@ The text and file overloads retain separate checked layouts. A consumed
 `^FileReader` selects the bounded file contract; a `String` selects the source
 text parser. Neither overload constructs the other overload's handle.
 
+Typed `core.data.json<T>` reuses the source JSON parser while retaining exact
+number lexemes until `Decode<T>` selects the destination representation. Its
+parser entry is compiler-private, not an application-visible JSON function.
+
 ### `core.encoding.jsonl` — line-delimited JSON
 
 `core.encoding.jsonl` parses one JSON value per nonblank line. Blank lines are
 skipped, each nonblank line is parsed independently, and one malformed line
 returns an `EncodingError`. Compact output writes one value and a trailing
 newline per row.
+Records end at LF; a CR immediately before LF is stripped. A final bare CR
+is retained and counts as nonblank (only spaces and tabs make a blank record).
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
@@ -2348,6 +2354,9 @@ ending, otherwise an `Unsupported` error), drops the first record when
 blank physical rows (D-ROWS1).
 The filesystem query helper decodes header-named records into a typed query;
 it is distinct from the physical row parser.
+The public file-backed `CSVReader` and `CSVWriter` are ordinary source-owned
+holders, not native resource-table handles. The typed `core.data.csv_reader<T>`
+stream retains its separate native callback carrier.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
@@ -2411,6 +2420,8 @@ Dynamic `parse` rejects byte strings; typed `decode<[U8]>` preserves them.
 Tags and duplicate text map keys are unsupported. Canonical mode requires
 shortest arguments and float widths, a canonical NaN, definite containers,
 and bytewise map-key order. Encoding uses the shortest exact float width.
+Whole-value parsing and preferred float-width checks share a sealed source
+part; its helper functions are not exports of the public CBOR module.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |

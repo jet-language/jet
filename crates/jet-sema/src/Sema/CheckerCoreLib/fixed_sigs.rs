@@ -1313,7 +1313,7 @@ fn core_fixed_sig_impl(
             Some(Type::String),
         )),
         ("core.encoding", "__string_byte") => Some((
-            vec![(read, Type::String), (read, Type::Named("U64".to_string()))],
+            vec![(read, Type::String), (read, Type::IntN { signed: false, bits: 64 })],
             Some(u8_ty()),
         )),
         ("core.encoding", "__object_from_entries") => Some((

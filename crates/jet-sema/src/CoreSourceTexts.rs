@@ -35,6 +35,7 @@ const CORE_SOURCE_TEXTS: &[(&str, &str)] = &[
     ("core.encoding.base32", include_str!("../../../Core/encoding/base32.jet")),
     ("core.encoding.base64", include_str!("../../../Core/encoding/base64.jet")),
     ("core.encoding.binary", include_str!("../../../Core/encoding/binary.jet")),
+    ("core.encoding.cbor", include_str!("../../../Core/encoding/cbor.jet")),
     ("core.encoding.csv", include_str!("../../../Core/encoding/csv.jet")),
     ("core.encoding.hex", include_str!("../../../Core/encoding/hex.jet")),
     ("core.encoding.ini", include_str!("../../../Core/encoding/ini.jet")),

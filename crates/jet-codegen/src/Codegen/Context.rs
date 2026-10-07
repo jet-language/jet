@@ -1314,7 +1314,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "JSONLReader" => Some("JSONLReader"),
         "JSONLWriter" => Some("JSONLWriter"),
         "CSVReader" => Some("CSVReader"),
-        "CSVWriter" => Some("CSVWriter"),
         "CSVRow" => Some("CSVRow"),
         "XMLReader" => Some("XMLReader"),
         "XMLWriter" => Some("XMLWriter"),
@@ -2484,7 +2483,6 @@ impl Cx {
             (Some("core.encoding.jsonl"), "JSONLReader") => Some("JSONLReader"),
             (Some("core.encoding.jsonl"), "JSONLWriter") => Some("JSONLWriter"),
             (Some("core.encoding.csv"), "CSVReader") => Some("CSVReader"),
-            (Some("core.encoding.csv"), "CSVWriter") => Some("CSVWriter"),
             (Some("core.encoding.csv"), "CSVRow") => Some("CSVRow"),
             (Some("core.encoding.xml"), "XMLReader") => Some("XMLReader"),
             (Some("core.encoding.xml"), "XMLWriter") => Some("XMLWriter"),
@@ -7425,7 +7423,6 @@ fn core_type_cloneable(name: &str) -> bool {
                 | "JSONLReader"
                 | "JSONLWriter"
                 | "CSVReader"
-                | "CSVWriter"
                 | "XMLReader"
                 | "XMLWriter"
                 | "CBORReader"

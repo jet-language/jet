@@ -65,13 +65,18 @@ impl JSONLReader {
         start :: self.offset
         line :: self.line
         bytes := [U8]{}
+        terminated := false
         loop self.offset < self.text.count_bytes() {
             byte :: stream.byte_at(self.text, self.offset)
             self.offset += 1
-            if byte == (U8{10}) { self.line += 1; break }
+            if byte == (U8{10}) {
+                self.line += 1
+                terminated = true
+                break
+            }
             &bytes.push(byte)
         }
-        if bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{13}) -> _ :: &bytes.pop()
+        if terminated && bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{13}) -> _ :: &bytes.pop()
         Val(JSONLRecord{text: stream.text_from_bytes(^bytes) ?? "", line: line, offset: start})
     }
 }
@@ -94,7 +99,7 @@ pub fn count_rows(text: String) -> Int Never! {
             if nonblank -> n += 1
             nonblank = false
         } else if byte != (U8{32}) && byte != (U8{9}) {
-            trailing_cr :: byte == (U8{13}) && (index + 1 == text.count_bytes() || stream.byte_at(text, index + 1) == (U8{10}))
+            trailing_cr :: byte == (U8{13}) && index + 1 < text.count_bytes() && stream.byte_at(text, index + 1) == (U8{10})
             if !trailing_cr -> nonblank = true
         }
     }
@@ -155,17 +160,18 @@ fn is_blank(text: String) -> Bool Never! {
 
 
 #Test("JSONL text cursor skips blank records and retains record order") {
-    cursor := reader("\t\r\n{{\"z\":1,\"a\":2}}\r\n \n3")
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR text")
+    cursor := reader("\t{cr}\n{{\"z\":1,\"a\":2}}{cr}\n \n3")
     first :: &cursor.next() ?? panic("first record")
     if first == .Val(row) -> assert_eq(json.to_string(row), "{{\"z\":1,\"a\":2}}") else -> panic("missing row")
     second :: &cursor.next() ?? panic("second record")
     assert_eq(second, Val(DataTree.Int(3)))
     assert_eq(&cursor.next() ?? panic("EOF"), None)
-    assert_eq(count_rows("\t\r\n{{\"z\":1}}\r\n \n3"), 2)
+    assert_eq(count_rows("\t{cr}\n{{\"z\":1}}{cr}\n \n3"), 2)
 }
 
 #Test("JSONL anchors a record-local parse error to the whole text") {
-    if parse(" \n1\n[}\n") == {
+    if parse(" \n1\n[}}\n") == {
         .Ok(_) -> panic("invalid record accepted")
         .Err(error) -> {
             assert(error.format == .JSONL)
@@ -173,4 +179,20 @@ fn is_blank(text: String) -> Bool Never! {
             assert(error.path.starts_with("/1"))
         }
     }
+}
+
+#Test("JSONL only strips CR from LF-terminated records") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR text")
+    assert_eq(count_rows("{cr}\n"), 0)
+    assert_eq(count_rows(cr), 1)
+    assert_eq(count_rows(" \t{cr}"), 1)
+    assert_eq(count_rows("1\n{cr}"), 2)
+    cursor := reader("1{cr}")
+    assert_eq(&cursor.next() ?? panic("JSON value with trailing whitespace"), Val(DataTree.Int(1)))
+    assert_eq(&cursor.next() ?? panic("EOF"), None)
+    if parse(cr) == .Err(error) {
+        assert_eq(error.byte_offset, 1)
+        assert_eq(error.line, Val(1))
+        assert_eq(error.path, "/0")
+    } else { panic("bare CR was skipped as a blank record") }
 }

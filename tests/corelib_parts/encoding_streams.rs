@@ -1,7 +1,98 @@
 #[test]
 fn json_private_typed_parser_is_not_a_public_core_api() {
-    let source = "use core.encoding.json as json\nfn run() { value :: json.__parse_typed(\"[1]\") ?? panic(\"parse\"); print(value) }\n";
-    assert!(jet::compile_with_path(source, "private_json_parser.jet").is_err());
+    let source = "use core.encoding.json as json\nfn run() {\n    value :: json.__parse_typed(\"[1]\") ?? panic(\"parse\")\n    print(value)\n}\n";
+    // Bypass only the reserved-name lexical gate, so this test exercises the
+    // semantic privacy boundary even for compiler-generated application code.
+    let dir = std::env::temp_dir().join(format!("jet_json_private_parser_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("private_json_parser.jet");
+    fs::write(&path, source.replace("__parse_typed", "parse")).unwrap();
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).expect("load JSON source closure");
+    let (tokens, lexical) = jet::Lexer::lex_generated(source);
+    assert!(lexical.is_empty(), "{lexical:?}");
+    let (program, _) = jet::Parser::parse_for_check_with_source(&tokens, source).expect("parse private call");
+    bundle.modules[bundle.entry].items = program.items;
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E0605" && diagnostic.what.contains("__parse_typed")
+        }),
+        "expected E0605 naming __parse_typed, got: {diagnostics:?}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn typed_data_json_reuses_exact_number_parser() {
+    let dir = std::env::temp_dir().join(format!("jet_data_json_exact_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.data as data
+fn run() {
+    rows :: data.json<Int>("[9007199254740993,1e2,-9007199254740993]") ?? panic("typed data JSON")
+    print(rows[0])
+    print(rows[1])
+    print(rows[2])
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "data_json_exact", source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "9007199254740993\n100\n-9007199254740993\n");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cbor_sealed_parser_helpers_resolve_across_source_parts() {
+    use jet_foundation::CoreSourceParts::{
+        core_private_source_part, CORE_ENCODING_CBOR_PARSE_MODULE,
+    };
+    let part = core_private_source_part("core.encoding.cbor").expect("CBOR sealed source part");
+    assert_eq!(part.source.module, CORE_ENCODING_CBOR_PARSE_MODULE);
+    assert_eq!(part.source.path, "Core/encoding/cbor_parse.jet");
+    assert_eq!(part.source.owned_members, &["parse", "narrow_bits"]);
+    assert!(jet_foundation::CoreModuleExports::core_source_module(CORE_ENCODING_CBOR_PARSE_MODULE).is_none());
+    assert!(!jet_foundation::CoreModuleExports::CORE_MODULE_NAMES.contains(&CORE_ENCODING_CBOR_PARSE_MODULE));
+    let source = r#"
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+fn run() {
+    encoded :: cbor.to_bytes_canonical(encoding.DataTree.Float(Float{1.5})) ?? panic("encode")
+    value :: cbor.parse(encoded, cbor.CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true}) ?? panic("parse")
+    print(value)
+}
+"#;
+    compile_temp("cbor_sealed_parts.jet", source);
+}
+
+#[test]
+fn jsonl_eof_bare_cr_is_a_nonblank_record() {
+    let dir = std::env::temp_dir().join(format!("jet_jsonl_bare_cr_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.encoding.jsonl as jsonl
+fn run() {
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR text")
+    print(jsonl.count_rows("{cr}\n"))
+    print(jsonl.count_rows(cr))
+    print(jsonl.count_rows(" \t{cr}"))
+    print(jsonl.count_rows("1\n{cr}"))
+    rows :: jsonl.parse("1{cr}") ?? panic("value ending in bare CR")
+    print(rows.len())
+    if jsonl.parse(cr) == {
+        .Ok(_) -> panic("bare CR skipped")
+        .Err(error) -> {
+            print(error.byte_offset)
+            print(error.path)
+        }
+    }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "jsonl_bare_cr", source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "0\n1\n1\n2\n1\n1\n/0\n");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -12,7 +103,7 @@ fn json_object_entry_view_borrows_original_storage_without_allocating() {
     let source = r#"
 use core.encoding.json as json
 fn run() {
-    tree :: json.parse("\u{7b}\"z\":[1,2],\"a\":\"kept\"\u{7d}") ?? panic("parse")
+    tree :: json.parse("{{\"z\":[1,2],\"a\":\"kept\"}}") ?? panic("parse")
     print(json.to_string(tree))
     print(json.canonical(tree) ?? panic("canonical"))
 }

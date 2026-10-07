@@ -131,7 +131,7 @@ fn decode_for_edition(text: String, edition: Int) -> [U8] Base32Error! {
     tail :: count %% 8
     expected :: if tail == 2 -> 6 else if tail == 4 -> 4 else if tail == 5 -> 3 else if tail == 7 -> 1 else -> 0
     if padding > 0 {
-        if tail == 0 || padding > expected && expected > 0 -> return Err(decode_error(pad_start, "unexpected padding"))
+        if tail == 0 || (padding > expected && expected > 0) -> return Err(decode_error(pad_start, "unexpected padding"))
         if expected == 0 || padding < expected -> return Err(decode_error(pad_start, "expected {expected} padding characters"))
     } else if tail != 0 {
         if expected == 0 -> return Err(decode_error(eof, "encoded length cannot represent whole bytes"))
@@ -142,11 +142,11 @@ fn decode_for_edition(text: String, edition: Int) -> [U8] Base32Error! {
 }
 
 #Test("base32 edition-selected decode policy") {
-    assert(decode_for_edition("MZXW6===", 2027) == Ok("foo".bytes()))
-    assert(decode_for_edition("mzxw6", 2026) == Ok("foo".bytes()))
+    assert_eq(decode_for_edition("MZXW6===", 2027), Ok("foo".bytes()))
+    assert_eq(decode_for_edition("mzxw6", 2026), Ok("foo".bytes()))
     assert(decode_for_edition("mzxw6", 2027) == .Err(_))
     assert(decode_for_edition("MY", 2027) == .Err(_))
     assert(decode_for_edition("MZ======", 2027) == .Err(_))
-    assert(decode_for_edition("M Y======", 2026) == Ok("f".bytes()))
+    assert_eq(decode_for_edition("M Y======", 2026), Ok("f".bytes()))
     assert(decode_for_edition("M Y======", 2027) == .Err(_))
 }

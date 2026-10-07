@@ -446,8 +446,11 @@ impl<'a> Checker<'a> {
             // Reuse the source JSON lexer for typed core.data rows without
             // making its private entry point an application-visible API.
             let private_typed_json_seam = semantic_name == "__parse_typed"
-                && target.module_alias == "__core_encoding_json"
-                && self.name_ledger.module_alias(self.module_idx) == Some("__core_data");
+                && jet_foundation::CoreModuleExports::core_source_module_by_alias(&target.module_alias)
+                    .is_some_and(|source| source.module == "core.encoding.json")
+                && self.name_ledger.module_alias(self.module_idx)
+                    .and_then(jet_foundation::CoreModuleExports::core_source_module_by_alias)
+                    .is_some_and(|source| source.module == "core.data");
             if !is_pub && mod_idx != self.module_idx && !private_typed_json_seam {
                 self.diags.push(private_item(name, span));
                 for a in args.iter_mut() {

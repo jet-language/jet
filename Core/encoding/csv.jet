@@ -1,7 +1,7 @@
 use core as core
 use core.encoding.[DataTree, EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
 use core.encoding.json as json
-use core.encoding.stream as stream
+use __core_encoding_stream as stream
 use core.encoding as encoding
 use core.files.[FileReader, FileWriter]
 use core.mem as mem
@@ -419,13 +419,13 @@ pub struct CSVWriter {
         error
     }
 
-    fn byte(&self, value: U8, count: Int) -[IO]> EncodingError! {
+    fn byte(&self, value: U8, count: Int) EncodingError! -[IO]> {
         self.buffer[0] = value
         self.buffer[1] = value
         encoding.__write_bytes(&self.output, self.buffer[0..<count]) ?? return Err(self.io_error(err))
     }
 
-    fn close_record(&self) -[IO]> EncodingError! {
+    fn close_record(&self) EncodingError! -[IO]> {
         if !self.pending_crlf -> return
         if self.limits.max_total_bytes == .Val(limit) {
             if self.total > limit - 2 -> return Err(self.error(.Limit, 0, "max_total_bytes {limit} exceeded"))
@@ -437,7 +437,7 @@ pub struct CSVWriter {
         self.pending_crlf = false
     }
 
-    fn write_inner(&self, row: [String]) -[IO]> EncodingError! {
+    fn write_inner(&self, row: [String]) EncodingError! -[IO]> {
         if self.finished -> return Err(self.error(.State, 0, "write called after finish"))
         &self.close_record() ?? return Err(err)
         decoded := 0
@@ -449,7 +449,7 @@ pub struct CSVWriter {
             quoted := false
             quotes := 0
             loop at in 0..<field.count_bytes() {
-                byte :: encoding.__string_byte(field, at)
+                byte :: stream.byte_at(field, at)
                 if byte == (U8{34}) -> quotes += 1
                 if byte == (U8{44}) || byte == (U8{34}) || byte == (U8{13}) || byte == (U8{10}) -> quoted = true
             }
@@ -466,24 +466,24 @@ pub struct CSVWriter {
             field :: row[i]
             quoted := false
             loop at in 0..<field.count_bytes() {
-                byte :: encoding.__string_byte(field, at)
+                byte :: stream.byte_at(field, at)
                 if byte == (U8{44}) || byte == (U8{34}) || byte == (U8{13}) || byte == (U8{10}) -> quoted = true
             }
             if quoted {
                 &self.byte(U8{34}, 1) ?? return Err(err)
                 loop at in 0..<field.count_bytes() {
-                    byte :: encoding.__string_byte(field, at)
+                    byte :: stream.byte_at(field, at)
                     &self.byte(byte, if byte == (U8{34}) -> 2 else -> 1) ?? return Err(err)
                 }
                 &self.byte(U8{34}, 1) ?? return Err(err)
-            } else -> encoding.__write_text(&self.output, field) ?? return Err(self.io_error(err))
+            } else { encoding.__write_text(&self.output, field) ?? return Err(self.io_error(err)) }
         }
         self.total += wire
         self.pending_crlf = true
         self.record_index += 1
     }
 
-    pub fn write(&self, row: ^[String]) -[IO]> EncodingError! {
+    pub fn write(&self, row: ^[String]) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         &self.write_inner(row) ?? {
             self.terminal = Val(err)
@@ -491,7 +491,7 @@ pub struct CSVWriter {
         }
     }
 
-    pub fn flush(&self) -[IO]> EncodingError! {
+    pub fn flush(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         encoding.__flush(&self.output) ?? {
             error :: self.io_error(err)
@@ -500,7 +500,7 @@ pub struct CSVWriter {
         }
     }
 
-    pub fn finish(&self) -[IO]> EncodingError! {
+    pub fn finish(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
         if self.finished -> return
         &self.close_record() ?? {
@@ -574,10 +574,10 @@ pub struct CSVReader {
         }
         self.total += 1
         self.offset += 1
-        if byte == Val(U8{10}) {
+        if byte == (Val(U8{10})) {
             self.line += 1
             self.column = 1
-        } else -> self.column += 1
+        } else { self.column += 1 }
         Ok(byte)
     }
 
@@ -631,8 +631,9 @@ pub struct CSVReader {
             if !stream.reserve<String>(self.allocation, &self.fields, grown - self.fields.len()) -> return Err(self.capacity_error())
         }
         self.fields_heap += mem.__list_capacity<U8>(self.field)
-        text :: #Unsafe("each completed UTF-8 scalar was validated before its original bytes entered this field") {
-            encoding.__bytes_into_text(^self.field)
+        text := ""
+        #Unsafe("each completed UTF-8 scalar was validated before its original bytes entered this field") {
+            text = encoding.__bytes_into_text(^self.field)
         }
         self.field = [U8]{}
         &self.fields.push(text)

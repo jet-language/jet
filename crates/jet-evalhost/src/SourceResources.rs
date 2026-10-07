@@ -195,18 +195,6 @@ impl SourceResourceKind {
                 },
                 0,
             ),
-            "CSVReader" => (
-                Self::EncodingReader {
-                    reader_type: "CSVReader".to_string()
-                },
-                0,
-            ),
-            "CSVWriter" => (
-                Self::EncodingWriter {
-                    writer_type: "CSVWriter".to_string()
-                },
-                0,
-            ),
             "XMLReader" => (
                 Self::EncodingReader {
                     reader_type: "XMLReader".to_string()
@@ -1008,7 +996,6 @@ pub struct SourceEncodingReader(EncodingReader);
 enum EncodingReader {
     Json(crate::enc_stream::runtime::jet_std::JSONReader),
     Jsonl(crate::enc_stream::runtime::jet_std::JSONLReader),
-    Csv(crate::enc_stream::runtime::jet_std::CSVReader),
     Xml(crate::enc_stream::runtime::jet_std::XMLReader),
     Cbor(crate::enc_stream::runtime::jet_std::CBORReader)
 }
@@ -1017,7 +1004,7 @@ impl SourceEncodingReader {
     fn validate_type(reader_type: &str) -> Result<(), MirNativeCursorError> {
         if matches!(
             reader_type,
-            "JSONReader" | "JSONLReader" | "CSVReader" | "XMLReader" | "CBORReader"
+            "JSONReader" | "JSONLReader" | "XMLReader" | "CBORReader"
         ) {
             Ok(())
         } else {
@@ -1039,35 +1026,14 @@ impl SourceEncodingReader {
         reader_type: &str,
         limits: SourceEncodingLimits,
     ) -> Result<Self, MirNativeCursorError> {
-        Self::from_file_with_options(file, reader_type, limits, ",", false, false)
+        Self::from_file_with_xml_options(file, reader_type, limits, SourceXmlParseOptions::safe())
     }
 
-    pub fn from_file_with_options(
-        file: SourceFileReader,
-        reader_type: &str,
-        limits: SourceEncodingLimits,
-        delimiter: &str,
-        header: bool,
-        skip_blank: bool,
-    ) -> Result<Self, MirNativeCursorError> {
-        Self::from_file_with_xml_options(
-            file,
-            reader_type,
-            limits,
-            delimiter,
-            header,
-            skip_blank,
-            SourceXmlParseOptions::safe(),
-        )
-    }
 
     pub fn from_file_with_xml_options(
         file: SourceFileReader,
         reader_type: &str,
         limits: SourceEncodingLimits,
-        delimiter: &str,
-        header: bool,
-        skip_blank: bool,
         xml_options: SourceXmlParseOptions,
     ) -> Result<Self, MirNativeCursorError> {
         let limits = limits.into_runtime();
@@ -1077,14 +1043,6 @@ impl SourceEncodingReader {
                 .map(EncodingReader::Json),
             "JSONLReader" => crate::enc_stream::runtime::enc_jsonl_reader(file.0, limits.clone())
                 .map(EncodingReader::Jsonl),
-            "CSVReader" => crate::enc_stream::runtime::enc_csv_reader(
-                file.0,
-                limits.clone(),
-                delimiter.to_string(),
-                header,
-                skip_blank,
-            )
-            .map(EncodingReader::Csv),
             "XMLReader" => crate::enc_stream::runtime::enc_xml_reader(
                 file.0,
                 limits.clone(),
@@ -1108,7 +1066,6 @@ impl SourceEncodingReader {
         match &self.0 {
             EncodingReader::Json(_) => "JSONReader",
             EncodingReader::Jsonl(_) => "JSONLReader",
-            EncodingReader::Csv(_) => "CSVReader",
             EncodingReader::Xml(_) => "XMLReader",
             EncodingReader::Cbor(_) => "CBORReader"
         }
@@ -1122,7 +1079,6 @@ pub struct SourceEncodingWriter(EncodingWriter);
 enum EncodingWriter {
     Json(crate::enc_stream::runtime::jet_std::JSONWriter),
     Jsonl(crate::enc_stream::runtime::jet_std::JSONLWriter),
-    Csv(crate::enc_stream::runtime::jet_std::CSVWriter),
     Xml(crate::enc_stream::runtime::jet_std::XMLWriter),
     Cbor(crate::enc_stream::runtime::jet_std::CBORWriter)
 }
@@ -1131,7 +1087,7 @@ impl SourceEncodingWriter {
     fn validate_type(writer_type: &str) -> Result<(), MirNativeCursorError> {
         if matches!(
             writer_type,
-            "JSONWriter" | "JSONLWriter" | "CSVWriter" | "XMLWriter" | "CBORWriter"
+            "JSONWriter" | "JSONLWriter" | "XMLWriter" | "CBORWriter"
         ) {
             Ok(())
         } else {
@@ -1185,8 +1141,6 @@ impl SourceEncodingWriter {
                 .map(EncodingWriter::Json),
             "JSONLWriter" => crate::enc_stream::runtime::enc_jsonl_writer(file.0, limits.clone())
                 .map(EncodingWriter::Jsonl),
-            "CSVWriter" => crate::enc_stream::runtime::enc_csv_writer(file.0, limits.clone())
-                .map(EncodingWriter::Csv),
             "XMLWriter" => crate::enc_stream::runtime::enc_xml_writer(
                 file.0,
                 limits.clone(),
@@ -1210,7 +1164,6 @@ impl SourceEncodingWriter {
         match &self.0 {
             EncodingWriter::Json(_) => "JSONWriter",
             EncodingWriter::Jsonl(_) => "JSONLWriter",
-            EncodingWriter::Csv(_) => "CSVWriter",
             EncodingWriter::Xml(_) => "XMLWriter",
             EncodingWriter::Cbor(_) => "CBORWriter"
         }
@@ -3658,41 +3611,16 @@ impl SourceResourceArena {
         file_raw: i64,
         reader_type: &str,
     ) -> SourceResourceTransferOutcome {
-        self.register_encoding_reader_from_file_with_options(
-            output_handle,
-            file_handle,
-            file_raw,
-            reader_type,
-            SourceEncodingLimits::safe(),
-            ",",
-            false,
-            false,
-        )
-    }
-
-    pub fn register_encoding_reader_from_file_with_options(
-        &self,
-        output_handle: MirHandleId,
-        file_handle: MirHandleId,
-        file_raw: i64,
-        reader_type: &str,
-        limits: SourceEncodingLimits,
-        delimiter: &str,
-        header: bool,
-        skip_blank: bool,
-    ) -> SourceResourceTransferOutcome {
         self.register_encoding_reader_from_file_with_xml_options(
             output_handle,
             file_handle,
             file_raw,
             reader_type,
-            limits,
-            delimiter,
-            header,
-            skip_blank,
+            SourceEncodingLimits::safe(),
             SourceXmlParseOptions::safe(),
         )
     }
+
 
     pub fn register_encoding_reader_from_file_with_xml_options(
         &self,
@@ -3701,9 +3629,6 @@ impl SourceResourceArena {
         file_raw: i64,
         reader_type: &str,
         limits: SourceEncodingLimits,
-        delimiter: &str,
-        header: bool,
-        skip_blank: bool,
         xml_options: SourceXmlParseOptions,
     ) -> SourceResourceTransferOutcome {
         if let Err(error) = SourceEncodingReader::validate_type(reader_type) {
@@ -3730,9 +3655,6 @@ impl SourceResourceArena {
             file,
             reader_type,
             limits,
-            delimiter,
-            header,
-            skip_blank,
             xml_options,
         ) {
             Ok(reader) => reader,
@@ -3853,28 +3775,6 @@ impl SourceResourceArena {
             .map_err(MirNativeCursorError::internal)
     }
 
-    pub fn open_encoding_reader_with_options(
-        &self,
-        handle: MirHandleId,
-        path: &str,
-        reader_type: &str,
-        limits: SourceEncodingLimits,
-        delimiter: &str,
-        header: bool,
-        skip_blank: bool,
-    ) -> Result<SourceResourceHandle, MirNativeCursorError> {
-        let file = SourceFileReader::open(path)?;
-        let reader = SourceEncodingReader::from_file_with_options(
-            file,
-            reader_type,
-            limits,
-            delimiter,
-            header,
-            skip_blank,
-        )?;
-        self.register_encoding_reader(handle, reader)
-            .map_err(MirNativeCursorError::internal)
-    }
 
     /// Insert a native cursor carrier under the private checked cursor handle.
     /// The raw slot and generation are allocated by this arena, not supplied by
@@ -4945,11 +4845,6 @@ impl SourceResourceArena {
                 crate::enc_stream::runtime::enc_jsonl_writer_write(writer, tree)
                     .map_err(|error| encoding_error(&error))
             }
-            EncodingWriter::Csv(writer) => {
-                let row = csv_row_from_value(value)?;
-                crate::enc_stream::runtime::enc_csv_writer_write(writer, row)
-                    .map_err(|error| encoding_error(&error))
-            }
             EncodingWriter::Xml(writer) => {
                 let tree = data_tree_from_value(value)?;
                 crate::enc_stream::runtime::enc_xml_writer_write(writer, tree)
@@ -4985,8 +4880,6 @@ impl SourceResourceArena {
                 .map_err(|error| encoding_error(&error)),
             EncodingWriter::Jsonl(writer) => crate::enc_stream::runtime::enc_jsonl_writer_flush(writer)
                 .map_err(|error| encoding_error(&error)),
-            EncodingWriter::Csv(writer) => crate::enc_stream::runtime::enc_csv_writer_flush(writer)
-                .map_err(|error| encoding_error(&error)),
             EncodingWriter::Xml(writer) => crate::enc_stream::runtime::enc_xml_writer_flush(writer)
                 .map_err(|error| encoding_error(&error)),
             EncodingWriter::Cbor(writer) => crate::enc_stream::runtime::enc_cbor_writer_flush(writer)
@@ -5016,8 +4909,6 @@ impl SourceResourceArena {
                 .map_err(|error| encoding_error(&error)),
             EncodingWriter::Jsonl(writer) => crate::enc_stream::runtime::enc_jsonl_writer_finish(writer)
                 .map_err(|error| encoding_error(&error)),
-            EncodingWriter::Csv(writer) => crate::enc_stream::runtime::enc_csv_writer_finish(writer)
-                .map_err(|error| encoding_error(&error)),
             EncodingWriter::Xml(writer) => crate::enc_stream::runtime::enc_xml_writer_finish(writer)
                 .map_err(|error| encoding_error(&error)),
             EncodingWriter::Cbor(writer) => crate::enc_stream::runtime::enc_cbor_writer_finish(writer)
@@ -5045,7 +4936,6 @@ impl SourceResourceArena {
         let path = match &writer.0 {
             EncodingWriter::Json(writer) => &writer.output.path,
             EncodingWriter::Jsonl(writer) => &writer.json.output.path,
-            EncodingWriter::Csv(writer) => &writer.output.path,
             EncodingWriter::Xml(writer) => &writer.output.path,
             EncodingWriter::Cbor(writer) => &writer.output.path
         };
@@ -5557,9 +5447,6 @@ fn encoding_next(
         EncodingReader::Jsonl(reader) => crate::enc_stream::runtime::enc_jsonl_reader_next(reader)
             .map(|value| value.map(data_tree_value))
             .map_err(|error| encoding_error(&error)),
-        EncodingReader::Csv(reader) => crate::enc_stream::runtime::enc_csv_reader_next(reader)
-            .map(|value| value.map(csv_row_value))
-            .map_err(|error| encoding_error(&error)),
         EncodingReader::Xml(reader) => crate::enc_stream::runtime::enc_xml_reader_next(reader)
             .map(|value| value.map(data_tree_value))
             .map_err(|error| encoding_error(&error)),
@@ -5638,23 +5525,6 @@ fn data_tree_value(tree: crate::enc_stream::runtime::jet_std::DataTree) -> MirRu
     }
 }
 
-fn csv_row_value(row: crate::enc_stream::runtime::jet_std::CSVRow) -> MirRuntimeValue {
-    MirRuntimeValue::Struct {
-        type_name: "CSVRow".to_string(),
-        fields: vec![
-            (
-                "fields".to_string(),
-                MirRuntimeValue::List(
-                    row.fields
-                        .into_iter()
-                        .map(MirRuntimeValue::String)
-                        .collect(),
-                ),
-            ),
-            ("line".to_string(), MirRuntimeValue::Int(row.line)),
-        ]
-    }
-}
 
 fn data_event_from_value(
     value: &MirRuntimeValue,
@@ -5927,35 +5797,6 @@ fn named_field<'a>(
         })
 }
 
-fn csv_row_from_value(value: &MirRuntimeValue) -> Result<Vec<String>, MirNativeCursorError> {
-    let fields = match value {
-        MirRuntimeValue::List(values) => values,
-        MirRuntimeValue::Struct { type_name, fields } if type_name == "CSVRow" => {
-            match named_field(fields, "fields")? {
-                MirRuntimeValue::List(values) => values,
-                _ => {
-                    return Err(MirNativeCursorError::internal(
-                        "CSVRow.fields is not a list",
-                    ))
-                }
-            }
-        }
-        _ => {
-            return Err(MirNativeCursorError::internal(
-                "CSV writer expects a CSVRow or string list",
-            ))
-        }
-    };
-    fields
-        .iter()
-        .map(|value| match value {
-            MirRuntimeValue::String(value) => Ok(value.clone()),
-            _ => Err(MirNativeCursorError::internal(
-                "CSV writer row contains a non-string field",
-            ))
-        })
-        .collect()
-}
 
 #[cfg(test)]
 mod tests {
@@ -8165,15 +8006,13 @@ mod tests {
                 post_take_path.to_str().expect("utf8 scratch path"),
             )
             .expect("admit post-take reader");
-        let post_take = arena.register_encoding_reader_from_file_with_options(
+        let post_take = arena.register_encoding_reader_from_file_with_xml_options(
             test_handle(28),
             post_take_file.handle,
             post_take_file.raw,
-            "CSVReader",
-            SourceEncodingLimits::safe(),
-            ",",
-            false,
-            false,
+            "JSONReader",
+            SourceEncodingLimits { max_depth: 0, ..SourceEncodingLimits::safe() },
+            SourceXmlParseOptions::safe(),
         );
         assert!(post_take.consumed.is_some());
         assert!(post_take.result.is_err());
