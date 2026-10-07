@@ -31,6 +31,9 @@ pub struct X64MemoryImage {
     // Compiler-owned callable offsets, keyed by LIR identity. These remain
     // child-local after loading and let typed ownership glue share one image.
     pub functions: [Int]{[Int]{}}
+    // Only the canonical pinned Core producer fills these checked code offsets.
+    // Dynamic images import the getters and export no site storage of their own.
+    pub exports: [String:Int]{[String:Int]{}}
     // First data byte, page-aligned when data exists; text.len() otherwise.
     pub data_offset: Int
     // imports[i] names a runtime symbol; slots[i] is the offset in `text` of
