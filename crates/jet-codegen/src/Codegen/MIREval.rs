@@ -664,6 +664,7 @@ mod mir_csv_prelude {
 }
 #[allow(dead_code)]
 mod mir_time_prelude {
+    use crate::scheduler::jet_time_wall_override_ms;
     // The interpreter owns the Scheduler scope used by testing.world. Outside
     // that scope the provider returns None, preserving the explicit ambient
     // fallback; inside it, civil time reads the controlled world origin.
