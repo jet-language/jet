@@ -418,17 +418,17 @@ fn opt_thread_target(function: LIRFunction, rows: [Int:Int], target: LIRJumpTarg
     if row == 0 -> return ~target
     hop :: function.blocks[row]
     if hop.insts.len() != 0 -> return ~target
-    if hop.terminator == .Jump(next) {
-        if next.block == hop.id -> return ~target
+    if hop.terminator == .Jump(onward) {
+        if onward.block == hop.id -> return ~target
         args := [LIRValueID]{}
-        loop arg in next.args {
+        loop arg in onward.args {
             mapped := arg
             loop (position, param) in hop.params {
                 if param == arg -> mapped = target.args[position]
             }
             &args.push(mapped)
         }
-        return LIRJumpTarget{block: next.block, args: args}
+        return LIRJumpTarget{block: onward.block, args: args}
     }
     ~target
 }

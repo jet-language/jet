@@ -328,6 +328,8 @@ const BACKEND = [
   "Compiler/JetBackend/Source/Opt/Simplify.jet",
   "Compiler/JetBackend/Source/Opt/Strength.jet",
   "Compiler/JetBackend/Source/Opt/Inline.jet",
+  "Compiler/JetBackend/Source/Opt/Facts.jet",
+  "Compiler/JetBackend/Source/Opt/CSE.jet",
   "Compiler/JetBackend/Source/Opt/Opt.jet",
   "Compiler/JetBackend/Source/X64/Encoder.jet",
   "Compiler/JetBackend/Source/X64/RegAlloc.jet",

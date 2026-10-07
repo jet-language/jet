@@ -24,14 +24,14 @@ fn opt_dominators(function: LIRFunction) -> OptDominators Never! {
     parent := [Int]{}
     rank := [Int]{}
     visited := [Bool]{}
-    next := [Int]{}
+    edge_cursor := [Int]{}
     loop _ in function.blocks {
         &successors.push([Int]{})
         &predecessors.push([Int]{})
         &parent.push(-1)
         &rank.push(-1)
         &visited.push(false)
-        &next.push(0)
+        &edge_cursor.push(0)
     }
     loop (index, block) in function.blocks {
         loop target in lir_terminator_targets(block.terminator) {
@@ -51,9 +51,9 @@ fn opt_dominators(function: LIRFunction) -> OptDominators Never! {
     postorder := [Int]{}
     loop depth > 0 {
         current :: ~stack[depth - 1]
-        if next[current] < successors[current].len() {
-            child :: ~successors[current][next[current]]
-            next[current] = next[current] + 1
+        if edge_cursor[current] < successors[current].len() {
+            child :: ~successors[current][edge_cursor[current]]
+            edge_cursor[current] = edge_cursor[current] + 1
             if !visited[child] {
                 visited[child] = true
                 if depth < stack.len() -> stack[depth] = child else -> &stack.push(child)
