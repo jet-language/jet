@@ -555,6 +555,11 @@ runtime String bytes through `jet_rt_string_data` and
 depends on Rust's private String representation.
 Signed and unsigned 64-bit compiler values preserve their full bit patterns;
 unsigned values above `i64::MAX` detach as decimal `BigInt` compiler values.
+Exact Int is a trivial lowering word, including promoted nodes: node lifetime
+belongs to the canonical runtime's reference/retirement machinery, not a new
+boundary drop rail. An Int stored beyond its producing turn uses the published
+`jet_rt_int_clone` retain projection. Stringifying it borrows the Int and owns
+only the temporary String, which must be dropped after its bytes are detached.
 Runtime effects, stop recovery, execution limits and composite ownership are compiler-call
 prerequisites, not properties inferred from a successful memory mapping.
 

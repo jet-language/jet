@@ -1,6 +1,6 @@
 // Compiler-owned native layouts. This is boundary metadata, not a second
 // codec policy: every size/offset comes from the ordinary lowering layout.
-use jet_foundation.[MIRProgram, MIRType, MIRTypeKind, mir_type_display_name]
+use jet_foundation.[MIRFunctionID, MIRProgram, MIRType, MIRTypeKind, mir_nominal_ref, mir_type_display_name, mir_type_from_kind]
 pub struct X64ValueMember {
     pub name: String
     pub offset: Int
@@ -11,6 +11,7 @@ pub struct X64ValueVariant {
     pub name: String
     pub selector: Int
     pub members: [X64ValueMember]
+    pub named: Bool{true}
 }
 pub struct X64ValueDescriptor {
     pub kind: String
@@ -26,6 +27,12 @@ pub struct X64ValueBoundary {
     pub root: Int
     pub descriptors: [X64ValueDescriptor]
     pub errors: [String]
+}
+pub struct LIRClosureValueLayout {
+    pub code: LIRFunctionID
+    pub function: MIRFunctionID
+    pub boundary: X64ValueBoundary
+    pub captures: [X64ValueMember]
 }
 
 struct LowerValueBoundary {
@@ -90,6 +97,7 @@ fn lower_value_descriptor(p: MIRProgram, state: &LowerValueBoundary, ty: MIRType
         }
         .Tuple(_) -> {
             descriptor.kind = "Struct"
+            descriptor.name = "Tuple"
             descriptor.members = lower_value_members(p, &state, lower_inline_members(p, ty))
         }
         .Fn(_) | .SendFn(_, _, _) -> descriptor.kind = "Closure"
@@ -114,7 +122,7 @@ fn lower_value_descriptor(p: MIRProgram, state: &LowerValueBoundary, ty: MIRType
                         descriptor.name = definition.name
                         loop (index, variant) in variants {
                             members :: lower_value_members(p, &state, lower_variant_members(p, definition, variant))
-                            &descriptor.variants.push(X64ValueVariant{name: variant.name, selector: lower_discriminant(index), members: members})
+                            &descriptor.variants.push(X64ValueVariant{name: variant.name, selector: lower_discriminant(index), members: members, named: variant.payload == .Named(_)})
                         }
                     }
                     else -> {}
@@ -128,7 +136,7 @@ fn lower_value_descriptor(p: MIRProgram, state: &LowerValueBoundary, ty: MIRType
                 descriptor.name = found.name
                 loop (index, variant) in variants {
                     members :: lower_value_members(p, &state, lower_variant_members(p, found, variant))
-                    &descriptor.variants.push(X64ValueVariant{name: variant.name, selector: lower_discriminant(index), members: members})
+                    &descriptor.variants.push(X64ValueVariant{name: variant.name, selector: lower_discriminant(index), members: members, named: variant.payload == .Named(_)})
                 }
             }
         }
@@ -186,4 +194,28 @@ fn lower_value_release(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFu
     lower_drop_stored(p, &m, &f, out, 0, glue.ty)
     lower_seal(&f, LIRTerminator.Return{value: None})
     lir_builder_finish(f.builder)
+}
+
+fn lower_closure_value_layouts(program: MIRProgram, prepared: LowerPrepared, m: LowerModule) -> [LIRClosureValueLayout] Never! {
+    layouts := [LIRClosureValueLayout]{}
+    loop (index, row) in prepared.functions {
+        original :: program.functions[row.source_row]
+        source :: if row.instance_row >= 0 -> prepared.instances[row.instance_row] else -> original
+        code := LIRFunctionID{value: index}
+        if source.capture_params.len() == 0 {
+            thunk :: m.glue_rows.get(lower_glue_row_key("h:closure.thunk", "{index}")) ?? next
+            code = m.glue[thunk].id
+        }
+        layout :: lower_closure_layout(program, source)
+        state := LowerValueBoundary{rows: [String:Int]{}, descriptors: [X64ValueDescriptor]{}, errors: [String]{}}
+        unit :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: [MIRType]{}})
+        root :: lower_value_descriptor(program, &state, unit)
+        captures := [X64ValueMember]{}
+        loop (position, capture) in source.capture_params {
+            descriptor :: lower_value_descriptor(program, &state, capture.ty)
+            &captures.push(X64ValueMember{name: capture.name, offset: layout.offsets[position], descriptor: descriptor, boxed: layout.by_ref[position]})
+        }
+        &layouts.push(LIRClosureValueLayout{code: code, function: original.id, boundary: X64ValueBoundary{root: root, descriptors: state.descriptors, errors: state.errors}, captures: captures})
+    }
+    layouts
 }

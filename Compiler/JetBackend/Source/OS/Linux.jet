@@ -142,6 +142,14 @@ fn os_load_byte(address: Int) -> Int {
     """
 }
 
+#[Unsafe("stores one byte at an address the caller owns and has mapped writable"), FFI(asm)]
+fn os_store_byte(address: Int, value: Int) {
+    """
+    mov rax, {value}
+    mov byte ptr [{address}], al
+    """
+}
+
 // Copy `bytes` to `address` one little-endian word at a time. The last word
 // is padded with zero bytes, so the destination must hold `bytes.len()`
 // rounded up to 8 bytes (a page-rounded mapping always does).

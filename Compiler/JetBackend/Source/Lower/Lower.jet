@@ -89,6 +89,7 @@ pub struct LIRLowering {
     // The matching release borrows that storage and drops its initialized value.
     pub value_callables: [U64:LIRFunctionID]{[U64:LIRFunctionID]{}}
     pub value_releases: [U64:LIRFunctionID]{[U64:LIRFunctionID]{}}
+    pub closures: [LIRClosureValueLayout]{[LIRClosureValueLayout]{}}
 }
 
 // How one checked MIR type is carried in LIR.
@@ -354,6 +355,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool)
         }
         cursor += 1
     }
+    closures :: if !wrap_entry && m.issues.len() == 0 -> lower_closure_value_layouts(program, prepared, m) else -> [LIRClosureValueLayout]{}
     lowered :: LIRModule{signatures: ~m.signatures, functions: functions, data: ~m.data}
     issues := ~m.issues
     if issues.len() == 0 {
@@ -366,7 +368,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool)
         value_callables = [U64:LIRFunctionID]{}
         value_releases = [U64:LIRFunctionID]{}
     }
-    LIRLowering{lir: lowered, issues: issues, entry: lowered_entry, finalizer: finalizer, callables: callables, value_callables: value_callables, value_releases: value_releases}
+    LIRLowering{lir: lowered, issues: issues, entry: lowered_entry, finalizer: finalizer, callables: callables, value_callables: value_callables, value_releases: value_releases, closures: if issues.len() == 0 -> closures else -> [LIRClosureValueLayout]{}}
 }
 
 // ---------------------------------------------------------------------------
