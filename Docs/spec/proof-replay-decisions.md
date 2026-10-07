@@ -200,8 +200,9 @@ serialization choice, or a later signature. Consumers can recompute the hash
 before trusting a receipt.
 
 **Consequence.** The canonical path is
-`.jet/proofs/<kind>/<name>/<first-16-report-id>.jetproof`. Identical existing
-bytes remain unchanged; different bytes refuse overwrite. Privacy omits
+`.jet/proofs/<file|package|workspace>/<sanitized-target>/<first-16-artifact-id>.jetproof`.
+An existing artifact with identical bytes remains unchanged; different bytes
+refuse overwrite. Privacy omits
 absolute paths, argv, environment, full source, and producer transcripts;
 D-OBS2 governs safe-local redaction. Project-relative paths, spans, semantic
 messages, property counterexamples and shrink values, budget values, and any
@@ -214,7 +215,15 @@ The source writer's concrete envelope uses `schema:"jet.jproof"`,
 `proofReport`. Those links are delivery metadata and do not change report
 identity. Proof links use `RecordKind::Proof` in
 `.jet/records/index.jsonl`. Test evidence is written as a typed report under
-`.jet/evidence/<report-id>.json`.
+`.jet/evidence/<artifact-id>.json`.
+The envelope contains the complete `ProofReport` and its `report_id`. Version 2 separately
+identifies the delivery as `artifact_id = SHA-256(JCS({report_id, consumed,
+produced}) + LF)`, where the links are canonical sets. Artifact paths and record
+index keys use `artifact_id`, not `report_id`: repeated runs and presentation
+lenses preserve semantic report identity while retaining different delivery
+links without replacing immutable evidence. Test evidence is likewise stored
+and indexed by the hash of its encoded bytes, independently of its semantic
+producer identity.
 
 **Rule.** A-canonical JSON is UTF-8 without a BOM or insignificant whitespace,
 with one trailing LF, recursively Unicode-scalar-sorted object keys, preserved
@@ -439,6 +448,11 @@ replacement and fsyncs the directory. An identical final path is accepted as
 names are `.jet/replays/<sanitized-entry>-<artifact-id[0..12]>.jetproof-replay`.
 Explicit paths must stay project-relative, use safe parents, and not already
 exist. A crash temporary is not evidence.
+An explicit capture path is an export: the record index retains an identical
+canonical copy at `.jet/replays/<artifact-id>.jetproof-replay`. Subsequent save,
+replay, and evidence links resolve that indexed copy; changing an export cannot
+change the indexed evidence. A supplied unsafe replay path is E3622 before it
+can be read or resolved through the index.
 
 **Reason.** The artifact must be durable and content-addressed without allowing
 a concurrent or untrusted writer to replace evidence.
