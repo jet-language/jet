@@ -462,3 +462,20 @@ fn os_call4_i64(address: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
     ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
     """
 }
+
+// The native backend keeps Float SSA values as raw bits in GPRs/spills.
+// System V entry/return bridges those bits to/from xmm registers; these
+// identity templates therefore never perform a numeric conversion.
+#[Unsafe("copies the complete IEEE binary64 representation without arithmetic, payload canonicalization or memory access"), FFI(asm)]
+fn os_f64_bits(value: Float) -> I64 {
+    """
+    mov rax, {value} ; -> return
+    """
+}
+
+#[Unsafe("reinterprets one complete IEEE binary64 word; every bit pattern including signaling NaNs is valid"), FFI(asm)]
+fn os_f64_from_bits(bits: I64) -> Float {
+    """
+    mov rax, {bits} ; -> return
+    """
+}
