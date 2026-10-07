@@ -1,5 +1,5 @@
-use Exec
-use Expect
+use "Exec" as exec
+use "Expect" as expect
 use core.files as files
 
 struct Assertion {
@@ -82,7 +82,7 @@ fn parse(source: String) -> Plan {
         line_number += 1
         line :: raw.trim()
         if line == "" || line.starts_with("#") -> next
-        colon :: line.index(":")
+        colon :: line.index(":") ?? -1
         if colon < 0 {
             plan.error = "line {line_number}: missing ':'"
             return plan
@@ -106,7 +106,7 @@ fn parse(source: String) -> Plan {
             next
         }
         if key == "ref-audit" {
-            if value.split(" #")[0].trim() != "bridge" {
+            if value.slice(0, value.index(" #") ?? value.len()).trim() != "bridge" {
                 plan.error = "line {line_number}: unknown ref-audit"
                 return plan
             }
@@ -183,16 +183,16 @@ fn parse(source: String) -> Plan {
                 return plan
             }
             if mode == "~" || mode == "one-of" {
-                reason :: value.split(" #")
-                if reason.len() < 2 || reason[1].trim() == "" {
+                reason_start :: value.index(" #") ?? value.len()
+                if reason_start == value.len() || value.slice(reason_start + 2, value.len()).trim() == "" {
                     plan.error = "line {line_number}: nondeterministic assertion requires a reason comment"
                     return plan
                 }
             }
-            start :: value.index(mode) + mode.len()
+            start :: (value.index(mode) ?? panic("parsed assertion mode missing")) + mode.len()
             data = value.slice(start, value.len()).trim()
             // Inline comments document nondeterministic substring assertions.
-            if mode == "~" || mode == "!~" || mode == "one-of" -> data = data.split(" #")[0].trim()
+            if mode == "~" || mode == "!~" || mode == "one-of" -> data = data.slice(0, data.index(" #") ?? data.len()).trim()
             if mode != "one-of" && (data.starts_with("\"") || data.starts_with("'")) -> data = (words(data) ?? [data])[0]
         }
         path :: if key == "file" -> parts[0] else -> ""
@@ -201,138 +201,138 @@ fn parse(source: String) -> Plan {
     plan
 }
 
-fn expand(value: String, env: Exec.Env, work: String, scratch: String, built: String) -> String {
+fn expand(value: String, env: exec.Env, work: String, scratch: String, built: String) -> String {
     value.replace("{{work}}", work).replace("{{root}}", env.root).replace("{{scratch}}", scratch)
         .replace("{{jetpack}}", env.jetpack).replace("{{jet}}", env.jet).replace("{{built}}", built)
 }
 
-fn required(plan: Plan, env: Exec.Env, work: String, scratch: String) -> Expect.Verdict? {
+fn required(plan: Plan, env: exec.Env, work: String, scratch: String) -> expect.Verdict? {
     loop requirement in plan.requires {
-        missing :: Exec.requires(requirement, env, work, scratch)
+        missing :: exec.requires(requirement, env, work, scratch)
         if missing != None -> return missing
     }
     None
 }
 
-fn bless_plan(plan: Plan, id: String, bless: Expect.Bless) -> Expect.Verdict? {
-    if !bless.all && !Expect.named(bless.ids, id) -> return None
+fn bless_plan(plan: Plan, id: String, bless: expect.Bless) -> expect.Verdict? {
+    if !bless.all && !expect.named(bless.ids, id) -> return None
     loop step in plan.steps {
         loop assertion in step.assertions {
-            if assertion.mode == "one-of" -> return Val(Expect.verdict("REFUSED", "one-of snapshots: edit by hand"))
+            if assertion.mode == "one-of" -> return Val(expect.verdict("REFUSED", "one-of snapshots: edit by hand"))
         }
     }
     None
 }
 
 struct Outcome {
-    verdict: Expect.Verdict
-    run: Exec.Run
+    verdict: expect.Verdict
+    run: exec.Run
     tier: String{"-"}
 }
 
-fn environment(plan: Plan, env: Exec.Env, work: String, scratch: String, built: String) -> [Exec.EnvVar] {
-    overlay := [Exec.EnvVar]{}
+fn environment(plan: Plan, env: exec.Env, work: String, scratch: String, built: String) -> [exec.EnvVar] {
+    overlay := [exec.EnvVar]{}
     loop assignment in plan.environment {
-        equals :: assignment.index("=")
+        equals :: assignment.index("=") ?? -1
         if equals <= 0 -> panic("env requires NAME=VALUE")
         name :: assignment.slice(0, equals)
         value :: expand(assignment.slice(equals + 1, assignment.len()), env, work, scratch, built)
-        &overlay.push(Exec.EnvVar{name: name, value: Val(value)})
+        &overlay.push(exec.EnvVar{name: name, value: Val(value)})
     }
     overlay
 }
 
-fn invoke_step(step: Step, env: Exec.Env, work: String, scratch: String, snapshots: String, built: String, overlay: [Exec.EnvVar]) -> Exec.Run {
+fn invoke_step(step: Step, env: exec.Env, work: String, scratch: String, snapshots: String, built: String, overlay: [exec.EnvVar]) -> exec.Run {
     argv := [String]{}
     loop argument in step.argv -> &argv.push(expand(argument, env, work, scratch, built))
     if argv[0] == "jet" -> argv[0] = env.jet
     if argv[0] == "jetpack" {
-        if env.jetpack == "" -> return Exec.failed("jetpack binary required")
+        if env.jetpack == "" -> return exec.failed("jetpack binary required")
         argv[0] = env.jetpack
     }
     if argv[0] == "built" {
-        if built == "" -> return Exec.failed("built step has no artifact")
+        if built == "" -> return exec.failed("built step has no artifact")
         argv[0] = built
     }
-    stdin :: if step.stdin == "" -> "" else -> files.read(files.join(snapshots, step.stdin)) ?? return Exec.failed("stdin snapshot: {err}")
-    Exec.invoke_with_env(env, argv, work, scratch, stdin, overlay)
+    stdin :: if step.stdin == "" -> "" else -> files.read(files.join(snapshots, step.stdin)) ?? return exec.failed("stdin snapshot: {err}")
+    exec.invoke_with_env(env, argv, work, scratch, stdin, overlay)
 }
 
-fn one_of(id: String, directory: String, snapshots: String, actual: String, bless: Expect.Bless) -> Expect.Verdict {
-    if bless.all || Expect.named(bless.ids, id) -> return Expect.verdict("REFUSED", "one-of snapshots: edit by hand")
-    alternatives :: words(snapshots) ?? return Expect.verdict("REFUSED", "invalid one-of snapshots")
-    if alternatives.len() < 2 -> return Expect.verdict("REFUSED", "one-of needs at least two snapshots")
+fn one_of(id: String, directory: String, snapshots: String, actual: String, bless: expect.Bless) -> expect.Verdict {
+    if bless.all || expect.named(bless.ids, id) -> return expect.verdict("REFUSED", "one-of snapshots: edit by hand")
+    alternatives :: words(snapshots) ?? return expect.verdict("REFUSED", "invalid one-of snapshots")
+    if alternatives.len() < 2 -> return expect.verdict("REFUSED", "one-of needs at least two snapshots")
     loop file in alternatives {
-        expected :: Exec.optional(files.join(directory, file)) ?? return Expect.verdict("FAIL", "missing one-of snapshot: {file}")
-        if actual == expected -> return Expect.verdict("PASS", "")
+        expected :: exec.optional(files.join(directory, file)) ?? return expect.verdict("FAIL", "missing one-of snapshot: {file}")
+        if actual == expected -> return expect.verdict("PASS", "")
     }
-    Expect.verdict("FAIL", "stdout matches none of the exact alternatives")
+    expect.verdict("FAIL", "stdout matches none of the exact alternatives")
 }
 
-fn check_assertion(assertion: Assertion, id: String, result: Exec.Run, env: Exec.Env, work: String, scratch: String, snapshots: String, bless: Expect.Bless, normalize: [String], built: String, source_name: String) -> Expect.Verdict {
+fn check_assertion(assertion: Assertion, id: String, result: exec.Run, env: exec.Env, work: String, scratch: String, snapshots: String, bless: expect.Bless, normalize: [String], built: String, source_name: String) -> expect.Verdict {
     actual := if assertion.stream == "stderr" -> result.stderr else -> result.stdout
     if assertion.stream == "file" {
         relative :: expand(assertion.path, env, work, scratch, built)
         path :: files.collapse(files.join(work, relative))
-        if path != work && !path.starts_with("{work}/") -> return Expect.verdict("REFUSED", "file assertion escapes work directory")
-        exists :: files.exists(path) ?? false
-        if assertion.mode == "exists" -> return if exists -> Expect.verdict("PASS", "") else -> Expect.verdict("FAIL", "missing file: {relative}")
-        if assertion.mode == "absent" -> return if !exists -> Expect.verdict("PASS", "") else -> Expect.verdict("FAIL", "unexpected file: {relative}")
-        if !exists -> return Expect.verdict("FAIL", "missing file: {relative}")
-        actual = files.read(path) ?? return Expect.verdict("ERROR", "read assertion file: {err}")
+        if path != work && !path.starts_with("{work}/") -> return expect.verdict("REFUSED", "file assertion escapes work directory")
+        exists :: files.exists(path)
+        if assertion.mode == "exists" -> return if exists -> expect.verdict("PASS", "") else -> expect.verdict("FAIL", "missing file: {relative}")
+        if assertion.mode == "absent" -> return if !exists -> expect.verdict("PASS", "") else -> expect.verdict("FAIL", "unexpected file: {relative}")
+        if !exists -> return expect.verdict("FAIL", "missing file: {relative}")
+        actual = files.read(path) ?? return expect.verdict("ERROR", "read assertion file: {err}")
     }
-    if Expect.named(normalize, "argv0") && built != "" {
-        name :: built.split("/").last() ?? built
-        actual = Expect.argv0(actual, name, source_name)
+    if expect.named(normalize, "argv0") && built != "" {
+        name :: files.basename(built)
+        actual = expect.argv0(actual, name, source_name)
     }
-    if Expect.named(normalize, "paths") -> actual = Expect.paths(actual, work, env.root, scratch)
-    if assertion.mode == "=" -> return Expect.exact(id, files.join(snapshots, assertion.value), Exec.optional(files.join(snapshots, assertion.value)), actual, bless, false)
+    if expect.named(normalize, "paths") -> actual = expect.paths(actual, work, env.root, scratch)
+    if assertion.mode == "=" -> return expect.exact(id, files.join(snapshots, assertion.value), exec.optional(files.join(snapshots, assertion.value)), actual, bless, false)
     if assertion.mode == "one-of" -> return one_of(id, snapshots, assertion.value, actual, bless)
-    if assertion.mode == "empty" -> return if actual == "" -> Expect.verdict("PASS", "") else -> Expect.verdict("FAIL", "{assertion.stream} is not empty")
-    if assertion.mode == "~" -> return if actual.contains(assertion.value) -> Expect.verdict("PASS", "") else -> Expect.verdict("FAIL", "{assertion.stream} missing substring: {assertion.value}")
-    if assertion.mode == "!~" -> return if !actual.contains(assertion.value) -> Expect.verdict("PASS", "") else -> Expect.verdict("FAIL", "{assertion.stream} contains forbidden substring: {assertion.value}")
-    Expect.verdict("REFUSED", "unsupported assertion: {assertion.mode}")
+    if assertion.mode == "empty" -> return if actual == "" -> expect.verdict("PASS", "") else -> expect.verdict("FAIL", "{assertion.stream} is not empty")
+    if assertion.mode == "~" -> return if actual.contains(assertion.value) -> expect.verdict("PASS", "") else -> expect.verdict("FAIL", "{assertion.stream} missing substring: {assertion.value}")
+    if assertion.mode == "!~" -> return if !actual.contains(assertion.value) -> expect.verdict("PASS", "") else -> expect.verdict("FAIL", "{assertion.stream} contains forbidden substring: {assertion.value}")
+    expect.verdict("REFUSED", "unsupported assertion: {assertion.mode}")
 }
 
-fn check(step: Step, id: String, result: Exec.Run, env: Exec.Env, work: String, scratch: String, snapshots: String, bless: Expect.Bless, normalize: [String], built: String, source_name: String) -> Expect.Verdict {
-    failure :: Exec.process_failure(result)
+fn check(step: Step, id: String, result: exec.Run, env: exec.Env, work: String, scratch: String, snapshots: String, bless: expect.Bless, normalize: [String], built: String, source_name: String) -> expect.Verdict {
+    failure :: exec.process_failure(result)
     if failure == {
         .Val(value) -> return value
         .None -> {}
     }
     if step.exit == "nonzero" {
-        if result.code == 0 -> return Expect.verdict("FAIL", "exit 0; expected nonzero")
-    } else if result.code != (Int.parse(step.exit) ?? 0) -> return Expect.verdict("FAIL", "exit {result.code}; expected {step.exit}")
+        if result.code == 0 -> return expect.verdict("FAIL", "exit 0; expected nonzero")
+    } else if result.code != (Int.parse(step.exit) ?? 0) -> return expect.verdict("FAIL", "exit {result.code}; expected {step.exit}")
     loop assertion in step.assertions {
         verdict :: check_assertion(assertion, id, result, env, work, scratch, snapshots, bless, normalize, built, source_name)
         if verdict.status != "PASS" -> return verdict
     }
-    Expect.verdict("PASS", "")
+    expect.verdict("PASS", "")
 }
 
-fn execute(plan: Plan, id: String, env: Exec.Env, work: String, scratch: String, snapshots: String, bless: Expect.Bless) -> Outcome {
-    last := Exec.failed("no steps")
-    if plan.error != "" -> return Outcome{verdict: Expect.verdict("REFUSED", plan.error), run: last}
+fn execute(plan: Plan, id: String, env: exec.Env, work: String, scratch: String, snapshots: String, bless: expect.Bless) -> Outcome {
+    last := exec.failed("no steps")
+    if plan.error != "" -> return Outcome{verdict: expect.verdict("REFUSED", plan.error), run: last}
     requirement :: required(plan, env, work, scratch)
     if requirement == {
         .Val(value) -> return Outcome{verdict: value, run: last}
         .None -> {}
     }
-    if plan.compile_only -> return Outcome{verdict: Expect.verdict("REFUSED", "run: none is golden-only"), run: last}
-    if plan.refused != "" -> return Outcome{verdict: Expect.verdict("REFUSED", plan.refused), run: last}
-    if plan.steps.len() == 0 -> return Outcome{verdict: Expect.verdict("REFUSED", "case has no steps"), run: last}
+    if plan.compile_only -> return Outcome{verdict: expect.verdict("REFUSED", "run: none is golden-only"), run: last}
+    if plan.refused != "" -> return Outcome{verdict: expect.verdict("REFUSED", plan.refused), run: last}
+    if plan.steps.len() == 0 -> return Outcome{verdict: expect.verdict("REFUSED", "case has no steps"), run: last}
     blessing :: bless_plan(plan, id, bless)
     if blessing == {
         .Val(value) -> return Outcome{verdict: value, run: last}
         .None -> {}
     }
-    if plan.fixture != "" -> Exec.copy_tree(files.join(snapshots, plan.fixture), work, true)
+    if plan.fixture != "" -> exec.copy_tree(files.join(snapshots, plan.fixture), work, true)
     overlay :: environment(plan, env, work, scratch, "")
     loop step in plan.steps {
-        if step.argv[0] == "build" || step.argv[0] == "built" -> return Outcome{verdict: Expect.verdict("REFUSED", "build/built steps require golden entry"), run: last}
+        if step.argv[0] == "build" || step.argv[0] == "built" -> return Outcome{verdict: expect.verdict("REFUSED", "build/built steps require golden entry"), run: last}
         last = invoke_step(step, env, work, scratch, snapshots, "", overlay)
         verdict :: check(step, id, last, env, work, scratch, snapshots, bless, plan.normalize, "", "")
         if verdict.status != "PASS" -> return Outcome{verdict: verdict, run: last}
     }
-    Outcome{verdict: Expect.verdict("PASS", ""), run: last}
+    Outcome{verdict: expect.verdict("PASS", ""), run: last}
 }

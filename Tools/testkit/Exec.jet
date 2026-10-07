@@ -1,4 +1,4 @@
-use Expect
+use "Expect" as expect
 use core.process as process
 use core.files as files
 use core.sys as sys
@@ -48,7 +48,7 @@ struct Options {
     results: String
     list: Bool
     coverage: Bool
-    bless: Expect.Bless
+    bless: expect.Bless
     error: String
 }
 
@@ -57,11 +57,11 @@ struct Ctx {
     env: Env
     root: String
     scratch: String
-    bless: Expect.Bless
+    bless: expect.Bless
 }
 
 fn defaults() -> Options {
-    Options{suite: "golden", jet: "", jetpack: "", tiers: ["ref"], filter: "", cases: "", shard_index: 1, shard_count: 1, sharded: false, timeout: 600, scratch: "", results: "", list: false, coverage: false, bless: Expect.Bless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}, error: ""}
+    Options{suite: "golden", jet: "", jetpack: "", tiers: ["ref"], filter: "", cases: "", shard_index: 1, shard_count: 1, sharded: false, timeout: 600, scratch: "", results: "", list: false, coverage: false, bless: expect.Bless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}, error: ""}
 }
 
 struct Selection {
@@ -76,21 +76,21 @@ fn select_ids(all_ids: [String], options: Options) -> Selection {
         loop raw in text.split("\n") {
             id :: raw.trim()
             if id == "" || id.starts_with("#") -> next
-            if Expect.named(requested, id) -> return Selection{ids: [], error: "duplicate case ID: {id}"}
-            if !Expect.named(all_ids, id) -> return Selection{ids: [], error: "unknown case ID: {id}"}
+            if expect.named(requested, id) -> return Selection{ids: [], error: "duplicate case ID: {id}"}
+            if !expect.named(all_ids, id) -> return Selection{ids: [], error: "unknown case ID: {id}"}
             &requested.push(id)
         }
     }
     seen := [String]{}
     loop id in options.bless.ids {
-        if Expect.named(seen, id) -> return Selection{ids: [], error: "duplicate bless ID: {id}"}
-        if !Expect.named(all_ids, id) -> return Selection{ids: [], error: "unknown bless ID: {id}"}
+        if expect.named(seen, id) -> return Selection{ids: [], error: "duplicate bless ID: {id}"}
+        if !expect.named(all_ids, id) -> return Selection{ids: [], error: "unknown bless ID: {id}"}
         &seen.push(id)
     }
     selected := [String]{}
     loop (index, id) in all_ids {
-        if requested.len() > 0 && !Expect.named(requested, id) -> next
-        if options.bless.ids.len() > 0 && !Expect.named(options.bless.ids, id) -> next
+        if requested.len() > 0 && !expect.named(requested, id) -> next
+        if options.bless.ids.len() > 0 && !expect.named(options.bless.ids, id) -> next
         if options.filter != "" && !id.contains(options.filter) -> next
         if index % options.shard_count != options.shard_index - 1 -> next
         &selected.push(id)
@@ -134,14 +134,14 @@ fn invoke_with_env(env: Env, argv: [String], cwd: String, scratch: String, stdin
 }
 
 fn invoke(env: Env, argv: [String], cwd: String, scratch: String, stdin: String) -> Run {
-    invoke_with_env(env, argv, cwd, scratch, stdin, [])
+    invoke_with_env(env, argv, cwd, scratch, stdin, [EnvVar]{})
 }
 
-fn process_failure(run: Run) -> Expect.Verdict? {
-    if run.error != "" -> return Val(Expect.verdict("ERROR", run.error))
-    if run.timed_out -> return Val(Expect.verdict("TIMEOUT", "wall-clock limit"))
-    if run.signal != None -> return Val(Expect.verdict("ERROR", "child terminated by signal"))
-    if run.code == 101 -> return Val(Expect.verdict("FAIL", "internal compiler error (exit 101)"))
+fn process_failure(run: Run) -> expect.Verdict? {
+    if run.error != "" -> return Val(expect.verdict("ERROR", run.error))
+    if run.timed_out -> return Val(expect.verdict("TIMEOUT", "wall-clock limit"))
+    if run.signal != None -> return Val(expect.verdict("ERROR", "child terminated by signal"))
+    if run.code == 101 -> return Val(expect.verdict("FAIL", "internal compiler error (exit 101)"))
     None
 }
 
@@ -160,7 +160,7 @@ fn copy_file(source: String, destination: String) {
 
 fn copy_siblings(source: String, destination: String) {
     parent :: files.dirname(source)
-    name :: source.split("/").last() ?? ""
+    name :: files.basename(source)
     stem :: if name.ends_with(".jet") -> name.slice(0, name.len() - 4) else -> name
     files.create_dir_all(destination) ?? panic("mkdir {destination}: {err}")
     loop entry in (files.list_dir(parent) ?? panic("list {parent}: {err}")) {
@@ -171,7 +171,7 @@ fn copy_siblings(source: String, destination: String) {
 }
 
 fn optional(path: String) -> String? {
-    if !(files.exists(path) ?? false) -> return None
+    if !files.exists(path) -> return None
     Val(files.read(path) ?? panic("read {path}: {err}"))
 }
 
@@ -188,29 +188,29 @@ fn copy_tree(source: String, destination: String, fixture_state: Bool) {
     }
 }
 
-fn requires(requirement: String, env: Env, work: String, scratch: String) -> Expect.Verdict? {
+fn requires(requirement: String, env: Env, work: String, scratch: String) -> expect.Verdict? {
     if requirement.starts_with("env:") {
         assignment :: requirement.slice(4, requirement.len())
-        equals :: assignment.index("=")
-        if equals <= 0 -> return Val(Expect.verdict("REFUSED", "invalid requires: {requirement}"))
+        equals :: assignment.index("=") ?? -1
+        if equals <= 0 -> return Val(expect.verdict("REFUSED", "invalid requires: {requirement}"))
         name :: assignment.slice(0, equals)
         value :: assignment.slice(equals + 1, assignment.len())
-        if (sys.get(name) ?? "") != value -> return Val(Expect.verdict("SKIP-HOST", requirement))
+        if (sys.get(name) ?? "") != value -> return Val(expect.verdict("SKIP-HOST", requirement))
     } else if requirement.starts_with("os:") {
-        if requirement.slice(3, requirement.len()) != sys.family() -> return Val(Expect.verdict("SKIP-HOST", requirement))
+        if requirement.slice(3, requirement.len()) != sys.family() -> return Val(expect.verdict("SKIP-HOST", requirement))
     } else {
         argv := [String]{}
         if {
             requirement == "gtk4" -> argv = ["pkg-config", "--exists", "gtk4"]
             requirement.starts_with("tool:") -> {
                 name :: requirement.slice(5, requirement.len())
-                executable :: process.which(name) ?? return Val(Expect.verdict("SKIP-HOST", requirement))
+                executable :: process.which(name) ?? return Val(expect.verdict("SKIP-HOST", requirement))
                 argv = [executable, "--version"]
             }
-            else -> return Val(Expect.verdict("REFUSED", "unknown host requirement: {requirement}"))
+            else -> return Val(expect.verdict("REFUSED", "unknown host requirement: {requirement}"))
         }
         run :: invoke(env, argv, work, scratch, "")
-        if run.code != 0 || run.error != "" -> return Val(Expect.verdict("SKIP-HOST", requirement))
+        if run.code != 0 || run.error != "" -> return Val(expect.verdict("SKIP-HOST", requirement))
     }
     None
 }

@@ -1,9 +1,9 @@
-use Exec
-use Expect
-use Steps
-use Report
+use "Exec" as exec
+use "Expect" as expect
+use "Steps" as steps
+use "Report" as report
 use core.files as files
-use Exec.Entry
+use exec.[Entry]
 
 struct Tier {
     name: String
@@ -19,7 +19,7 @@ fn tiers() -> [Tier] {
      Tier{name: "o2", flags: ["--release"], direct: false, audit: false}]
 }
 
-fn exists(path: String) -> Bool { files.exists(path) ?? false }
+fn exists(path: String) -> Bool { files.exists(path) }
 
 fn collect(root: String, directory: String, expected_root: String, prefix: String) -> [Entry] {
     entries := [Entry]{}
@@ -58,24 +58,24 @@ fn discover(root: String) -> [Entry] {
     all
 }
 
-fn stream_verdict(id: String, expected: String, result: Exec.Run, bless: Expect.Bless, argv0: String, source_name: String) -> Expect.Verdict {
-    failure :: Exec.process_failure(result)
+fn stream_verdict(id: String, expected: String, result: exec.Run, bless: expect.Bless, argv0: String, source_name: String) -> expect.Verdict {
+    failure :: exec.process_failure(result)
     if failure == {
         .Val(value) -> return value
         .None -> {}
     }
-    error :: Exec.optional("{expected}.err.out")
+    error :: exec.optional("{expected}.err.out")
     if error != None {
-        if result.code != 1 && result.code != 70 -> return Expect.verdict("FAIL", "exit {result.code}; expected 1 or 70")
-        return Expect.exact(id, "{expected}.err.out", error, result.stderr, bless, false)
+        if result.code != 1 && result.code != 70 -> return expect.verdict("FAIL", "exit {result.code}; expected 1 or 70")
+        return expect.exact(id, "{expected}.err.out", error, result.stderr, bless, false)
     }
-    if result.code != 0 -> return Expect.verdict("FAIL", "exit {result.code}; expected 0")
+    if result.code != 0 -> return expect.verdict("FAIL", "exit {result.code}; expected 0")
     stdout := result.stdout
-    if argv0 != "" -> stdout = Expect.argv0(stdout, argv0, source_name)
-    verdict :: Expect.exact(id, "{expected}.out", Exec.optional("{expected}.out"), stdout, bless, false)
+    if argv0 != "" -> stdout = expect.argv0(stdout, argv0, source_name)
+    verdict :: expect.exact(id, "{expected}.out", exec.optional("{expected}.out"), stdout, bless, false)
     if verdict.status != "PASS" -> return verdict
-    stderr :: Exec.optional("{expected}.stderr.out")
-    if stderr != None -> return Expect.exact(id, "{expected}.stderr.out", stderr, result.stderr, bless, false)
+    stderr :: exec.optional("{expected}.stderr.out")
+    if stderr != None -> return expect.exact(id, "{expected}.stderr.out", stderr, result.stderr, bless, false)
     verdict
 }
 
@@ -170,24 +170,23 @@ fn rust_code(source: String) -> String {
 fn erase_regions(source: String, begin: String, end: String) -> String {
     text := source
     loop {
-        start :: text.index(begin)
+        start :: text.index(begin) ?? -1
         if start < 0 -> break
         tail :: text.slice(start + begin.len(), text.len())
-        stop :: tail.index(end)
-        if stop < 0 -> panic("unclosed vetted region {begin}")
+        stop :: tail.index(end) ?? panic("unclosed vetted region {begin}")
         text = "{text.slice(0, start)}{tail.slice(stop + end.len(), tail.len())}"
     }
     text
 }
 
 fn strip_vetted(source: String, registry: String) -> String {
-    section :: registry.split("pub fn strip_vetted_prelude_modules(")
+    section :: registry.split("pub fn strip_vetted_prelude_modules(").to_list()
     if section.len() != 2 -> panic("missing canonical vetted Prelude registry")
-    body :: section[1].split("\n}}\n")[0]
+    body :: section[1].slice(0, section[1].index("\n}}\n") ?? section[1].len())
     text := source
     names := [String]{}
     loop line in body.split("\n") {
-        parts :: line.split("\"")
+        parts :: line.split("\"").to_list()
         if parts.len() < 3 -> next
         if line.contains("strip_vetted_module(") -> text = erase_regions(text, "// JET_VETTED_UNSAFE_BEGIN: {parts[1]}", "// JET_VETTED_UNSAFE_END: {parts[1]}")
         if line.contains("strip_mod(") -> &names.push(parts[1])
@@ -202,7 +201,7 @@ fn strip_vetted(source: String, registry: String) -> String {
             j := i + 4
             loop j < code.len() && code[j] != (U8{32}) && code[j] != (U8{123}) && code[j] != (U8{59}) -> j += 1
             name :: String.from_bytes(code.slice(i + 4, j)) ?? panic("module name UTF-8")
-            if Expect.named(names, name) || name.starts_with("__jet___c_") {
+            if expect.named(names, name) || name.starts_with("__jet___c_") {
                 loop j < code.len() && code[j] != (U8{123}) && code[j] != (U8{59}) -> j += 1
                 if j >= code.len() -> panic("unclosed vetted module {name}")
                 if code[j] == (U8{59}) -> j += 1
@@ -241,9 +240,9 @@ fn unsafe_keyword(bytes: [U8], index: Int) -> Bool {
     true
 }
 
-fn audit_code(source: String, gated: Bool, bridge: Bool) -> Expect.Verdict {
+fn audit_code(source: String, gated: Bool, bridge: Bool) -> expect.Verdict {
     code :: rust_code(source)
-    if !code.contains("fn main()") -> return Expect.verdict("FAIL", "generated program has no fn main()")
+    if !code.contains("fn main()") -> return expect.verdict("FAIL", "generated program has no fn main()")
     bytes :: code.bytes()
     count := 0
     loop i in 0..<bytes.len() {
@@ -256,37 +255,37 @@ fn audit_code(source: String, gated: Bool, bridge: Bool) -> Expect.Verdict {
             if function {
                 j += 3
                 loop j < bytes.len() && whitespace_byte(bytes[j]) -> j += 1
-                if at(bytes, j, U8{95}) && at(bytes, j + 1, U8{95}) && at(bytes, j + 2, U8{106}) && at(bytes, j + 3, U8{101}) && at(bytes, j + 4, U8{116}) && at(bytes, j + 5, U8{95}) -> return Expect.verdict("FAIL", "bridge user function is unsafe")
+                if at(bytes, j, U8{95}) && at(bytes, j + 1, U8{95}) && at(bytes, j + 2, U8{106}) && at(bytes, j + 3, U8{101}) && at(bytes, j + 4, U8{116}) && at(bytes, j + 5, U8{95}) -> return expect.verdict("FAIL", "bridge user function is unsafe")
             }
             next
         }
-        if !gated -> return Expect.verdict("FAIL", "I1: unsafe outside vetted runtime modules")
-        if !at(bytes, j, U8{123}) && !function -> return Expect.verdict("FAIL", "I1: ungated unsafe form")
+        if !gated -> return expect.verdict("FAIL", "I1: unsafe outside vetted runtime modules")
+        if !at(bytes, j, U8{123}) && !function -> return expect.verdict("FAIL", "I1: ungated unsafe form")
     }
-    if gated && !bridge && count == 0 -> return Expect.verdict("FAIL", "gated example does not exercise unsafe")
-    Expect.verdict("PASS", "")
+    if gated && !bridge && count == 0 -> return expect.verdict("FAIL", "gated example does not exercise unsafe")
+    expect.verdict("PASS", "")
 }
 
 fn gated(root: String, path: String) -> Bool {
     baseline :: files.read(files.join(root, "Docs/spec/safety.md")) ?? panic("read unsafe-ratchet: {err}")
-    pieces :: baseline.split("<!-- unsafe-ratchet:data")
+    pieces :: baseline.split("<!-- unsafe-ratchet:data").to_list()
     if pieces.len() != 2 -> panic("missing unsafe-ratchet baseline")
-    data :: pieces[1].split("\n-->")[0]
+    data :: pieces[1].slice(0, pieces[1].index("\n-->") ?? pieces[1].len())
     loop line in data.split("\n") {
         trimmed :: line.trim()
         if !trimmed.starts_with("\"file\":") -> next
-        quoted :: trimmed.split("\"")
+        quoted :: trimmed.split("\"").to_list()
         if quoted.len() >= 4 && quoted[3] == path -> return true
     }
     false
 }
 
 fn source_name(entry: Entry) -> String {
-    file :: entry.path.split("/").last() ?? ""
+    file :: files.basename(entry.path)
     file.slice(0, file.len() - 4)
 }
 
-fn tier_independent(plan: Steps.Plan) -> Bool {
+fn tier_independent(plan: steps.Plan) -> Bool {
     if plan.steps.len() == 0 -> return false
     loop step in plan.steps {
         if step.argv[0] == "build" || step.argv[0] == "built" -> return false
@@ -294,68 +293,71 @@ fn tier_independent(plan: Steps.Plan) -> Bool {
     true
 }
 
-fn build(entry: Entry, tier: Tier, plan: Steps.Plan, env: Exec.Env, source: String, work: String, scratch: String) -> Steps.Outcome {
+fn build(entry: Entry, tier: Tier, plan: steps.Plan, env: exec.Env, source: String, work: String, scratch: String) -> steps.Outcome {
     args := [String]{env.jet, if tier.direct -> "check" else -> "build", entry.path}
     if !tier.direct {
         loop flag in tier.flags -> &args.push(flag)
     }
-    overlay :: Steps.environment(plan, env, work, scratch, "")
-    result :: Exec.invoke_with_env(env, args, source, scratch, "", overlay)
-    failure :: Exec.process_failure(result)
+    overlay :: steps.environment(plan, env, work, scratch, "")
+    result :: exec.invoke_with_env(env, args, source, scratch, "", overlay)
+    failure :: exec.process_failure(result)
     if failure == {
-        .Val(value) -> return Steps.Outcome{verdict: value, run: result}
+        .Val(value) -> return steps.Outcome{verdict: value, run: result}
         .None -> {}
     }
-    if result.stderr.contains("Warning [L0507]") -> return Steps.Outcome{verdict: Expect.verdict("FAIL", "feature example emitted L0507"), run: result}
+    if result.stderr.contains("Warning [L0507]") -> return steps.Outcome{verdict: expect.verdict("FAIL", "feature example emitted L0507"), run: result}
     if result.code != 0 {
         unsupported :: tier.name != "ref" && result.stderr.contains("Error [E2104]")
-        verdict :: Expect.verdict(if unsupported -> "UNSUPPORTED" else -> "FAIL", "front end/build exit {result.code}: {result.stderr}")
-        return Steps.Outcome{verdict: verdict, run: result}
+        verdict :: expect.verdict(if unsupported -> "UNSUPPORTED" else -> "FAIL", "front end/build exit {result.code}: {result.stderr}")
+        return steps.Outcome{verdict: verdict, run: result}
     }
     if tier.audit {
-        emitted :: Exec.invoke_with_env(env, [env.jet, "emit", "--rust", entry.path], source, scratch, "", overlay)
-        failed :: Exec.process_failure(emitted)
+        emitted :: exec.invoke_with_env(env, [env.jet, "emit", "--rust", entry.path], source, scratch, "", overlay)
+        failed :: exec.process_failure(emitted)
         if failed == {
-            .Val(value) -> return Steps.Outcome{verdict: value, run: emitted}
+            .Val(value) -> return steps.Outcome{verdict: value, run: emitted}
             .None -> {}
         }
-        if emitted.code != 0 || emitted.stderr.contains("Warning [L0507]") -> return Steps.Outcome{verdict: Expect.verdict("FAIL", "ref emission failed or L0507: {emitted.stderr}"), run: emitted}
-        registry :: files.read(files.join(env.root, "tests/common/mod.rs")) ?? return Steps.Outcome{verdict: Expect.verdict("ERROR", "canonical vetted registry: {err}"), run: emitted}
+        if emitted.code != 0 || emitted.stderr.contains("Warning [L0507]") -> return steps.Outcome{verdict: expect.verdict("FAIL", "ref emission failed or L0507: {emitted.stderr}"), run: emitted}
+        registry :: files.read(files.join(env.root, "tests/common/mod.rs")) ?? return steps.Outcome{verdict: expect.verdict("ERROR", "canonical vetted registry: {err}"), run: emitted}
         audit :: audit_code(strip_vetted(emitted.stdout, registry), gated(env.root, entry.path), plan.ref_audit == "bridge")
-        if audit.status != "PASS" -> return Steps.Outcome{verdict: audit, run: emitted}
+        if audit.status != "PASS" -> return steps.Outcome{verdict: audit, run: emitted}
     }
-    Steps.Outcome{verdict: Expect.verdict("PASS", ""), run: result}
+    steps.Outcome{verdict: expect.verdict("PASS", ""), run: result}
 }
 
-fn artifact(result: Exec.Run, source: String) -> String {
+fn artifact(result: exec.Run, source: String) -> String {
     loop line in result.stdout.split("\n") {
-        if line.starts_with("built: ") -> return files.join(source, line.slice(7, line.len()).split(" (")[0].trim())
+        if line.starts_with("built: ") {
+            path :: line.slice(7, line.len())
+            return files.join(source, path.slice(0, path.index(" (") ?? path.len()).trim())
+        }
     }
     ""
 }
 
-fn default_step(word: String) -> Steps.Step {
-    Steps.Step{argv: [word], stdin: "", exit: "0", assertions: []}
+fn default_step(word: String) -> steps.Step {
+    steps.Step{argv: [word], stdin: "", exit: "0", assertions: []}
 }
 
-fn run_entry(entry: Entry, tier: Tier, env: Exec.Env, scratch: String, bless: Expect.Bless) -> Steps.Outcome {
+fn run_entry(entry: Entry, tier: Tier, env: exec.Env, scratch: String, bless: expect.Bless) -> steps.Outcome {
     expected :: files.join(env.root, entry.expected)
-    plan := Steps.parse(Exec.optional("{expected}.case") ?? "")
-    last := Exec.failed("case has not run")
-    if plan.error != "" -> return Steps.Outcome{verdict: Expect.verdict("REFUSED", plan.error), run: last}
-    if plan.fixture != "" -> return Steps.Outcome{verdict: Expect.verdict("REFUSED", "golden fixture is the staged project; fixture: is case-only"), run: last}
+    plan := steps.parse(exec.optional("{expected}.case") ?? "")
+    last := exec.failed("case has not run")
+    if plan.error != "" -> return steps.Outcome{verdict: expect.verdict("REFUSED", plan.error), run: last}
+    if plan.fixture != "" -> return steps.Outcome{verdict: expect.verdict("REFUSED", "golden fixture is the staged project; fixture: is case-only"), run: last}
     source :: files.join(scratch, "source")
     work :: files.join(source, entry.project)
-    Exec.copy_tree(files.join(env.root, entry.project), work, true)
-    required :: Steps.required(plan, env, work, scratch)
+    exec.copy_tree(files.join(env.root, entry.project), work, true)
+    required :: steps.required(plan, env, work, scratch)
     if required == {
-        .Val(value) -> return Steps.Outcome{verdict: value, run: last}
+        .Val(value) -> return steps.Outcome{verdict: value, run: last}
         .None -> {}
     }
-    if plan.refused != "" -> return Steps.Outcome{verdict: Expect.verdict("REFUSED", plan.refused), run: last}
-    blessing :: Steps.bless_plan(plan, entry.path, bless)
+    if plan.refused != "" -> return steps.Outcome{verdict: expect.verdict("REFUSED", plan.refused), run: last}
+    blessing :: steps.bless_plan(plan, entry.path, bless)
     if blessing == {
-        .Val(value) -> return Steps.Outcome{verdict: value, run: last}
+        .Val(value) -> return steps.Outcome{verdict: value, run: last}
         .None -> {}
     }
     if plan.steps.len() == 0 {
@@ -364,15 +366,15 @@ fn run_entry(entry: Entry, tier: Tier, env: Exec.Env, scratch: String, bless: Ex
     }
     if plan.compile_only {
         loop step in plan.steps {
-            if step.argv[0] != "build" -> return Steps.Outcome{verdict: Expect.verdict("REFUSED", "run: none cannot have runtime steps"), run: last}
+            if step.argv[0] != "build" -> return steps.Outcome{verdict: expect.verdict("REFUSED", "run: none cannot have runtime steps"), run: last}
         }
     }
     last_explicit := false
     loop assertion in plan.steps[plan.steps.len() - 1].assertions {
         if assertion.stream == "stdout" || assertion.stream == "stderr" -> last_explicit = true
     }
-    can_create :: bless.first_tier && (bless.all || Expect.named(bless.ids, entry.path))
-    if !plan.compile_only && !last_explicit && !can_create && !exists("{expected}.out") && !exists("{expected}.err.out") -> return Steps.Outcome{verdict: Expect.verdict("FAIL", "missing expected stream: {expected}"), run: last}
+    can_create :: bless.first_tier && (bless.all || expect.named(bless.ids, entry.path))
+    if !plan.compile_only && !last_explicit && !can_create && !exists("{expected}.out") && !exists("{expected}.err.out") -> return steps.Outcome{verdict: expect.verdict("FAIL", "missing expected stream: {expected}"), run: last}
     snapshots :: files.dirname(expected)
     built := ""
     built_once := false
@@ -383,19 +385,19 @@ fn run_entry(entry: Entry, tier: Tier, env: Exec.Env, scratch: String, bless: Ex
             if compiled.verdict.status != "PASS" -> return compiled
             last = compiled.run
             built = if tier.direct -> env.jet else -> artifact(last, source)
-            if built == "" -> return Steps.Outcome{verdict: Expect.verdict("ERROR", "CLI build did not report its executable artifact"), run: last}
+            if built == "" -> return steps.Outcome{verdict: expect.verdict("ERROR", "CLI build did not report its executable artifact"), run: last}
             built_once = true
         }
         if command == "build" {
-            if step.argv.len() != 1 -> return Steps.Outcome{verdict: Expect.verdict("REFUSED", "build step takes no arguments"), run: last}
+            if step.argv.len() != 1 -> return steps.Outcome{verdict: expect.verdict("REFUSED", "build step takes no arguments"), run: last}
             compiled :: build(entry, tier, plan, env, source, work, scratch)
             if compiled.verdict.status != "PASS" -> return compiled
             last = compiled.run
             built = if tier.direct -> env.jet else -> artifact(last, source)
-            if built == "" -> return Steps.Outcome{verdict: Expect.verdict("ERROR", "CLI build did not report its executable artifact"), run: last}
+            if built == "" -> return steps.Outcome{verdict: expect.verdict("ERROR", "CLI build did not report its executable artifact"), run: last}
             built_once = true
-            checked :: Steps.check(step, entry.path, last, env, work, scratch, snapshots, bless, plan.normalize, built, source_name(entry))
-            if checked.status != "PASS" -> return Steps.Outcome{verdict: checked, run: last}
+            checked :: steps.check(step, entry.path, last, env, work, scratch, snapshots, bless, plan.normalize, built, source_name(entry))
+            if checked.status != "PASS" -> return steps.Outcome{verdict: checked, run: last}
             next
         }
         actual_step := step
@@ -408,31 +410,31 @@ fn run_entry(entry: Entry, tier: Tier, env: Exec.Env, scratch: String, bless: Ex
             actual_step.argv = argv
         }
         if index == plan.steps.len() - 1 && actual_step.stdin == "" && exists("{expected}.stdin") -> actual_step.stdin = "{expected}.stdin"
-        overlay :: Steps.environment(plan, env, work, scratch, built)
+        overlay :: steps.environment(plan, env, work, scratch, built)
         cwd :: if command == "built" && tier.direct -> source else -> work
-        last = Steps.invoke_step(actual_step, env, cwd, scratch, snapshots, built, overlay)
-        if last.stderr.contains("Warning [L0507]") -> return Steps.Outcome{verdict: Expect.verdict("FAIL", "feature example emitted L0507"), run: last}
+        last = steps.invoke_step(actual_step, env, cwd, scratch, snapshots, built, overlay)
+        if last.stderr.contains("Warning [L0507]") -> return steps.Outcome{verdict: expect.verdict("FAIL", "feature example emitted L0507"), run: last}
         final_step :: index == plan.steps.len() - 1
         if final_step && !last_explicit {
-            normalized :: Expect.named(plan.normalize, "argv0")
-            name :: if normalized && command == "built" -> (built.split("/").last() ?? "") else -> ""
+            normalized :: expect.named(plan.normalize, "argv0")
+            name :: if normalized && command == "built" -> files.basename(built) else -> ""
             verdict :: stream_verdict(entry.path, expected, last, bless, name, source_name(entry))
-            if verdict.status != "PASS" -> return Steps.Outcome{verdict: verdict, run: last}
+            if verdict.status != "PASS" -> return steps.Outcome{verdict: verdict, run: last}
             // File assertions and explicit non-default exit remain enforceable.
             checked := actual_step
             checked.exit = "{last.code}"
             if step.exit != "0" -> checked.exit = step.exit
-            check :: Steps.check(checked, entry.path, last, env, work, scratch, snapshots, bless, plan.normalize, built, source_name(entry))
-            if check.status != "PASS" -> return Steps.Outcome{verdict: check, run: last}
+            check :: steps.check(checked, entry.path, last, env, work, scratch, snapshots, bless, plan.normalize, built, source_name(entry))
+            if check.status != "PASS" -> return steps.Outcome{verdict: check, run: last}
         } else {
-            check :: Steps.check(actual_step, entry.path, last, env, work, scratch, snapshots, bless, plan.normalize, built, source_name(entry))
-            if check.status != "PASS" -> return Steps.Outcome{verdict: check, run: last}
+            check :: steps.check(actual_step, entry.path, last, env, work, scratch, snapshots, bless, plan.normalize, built, source_name(entry))
+            if check.status != "PASS" -> return steps.Outcome{verdict: check, run: last}
         }
     }
-    Steps.Outcome{verdict: Expect.verdict("PASS", ""), run: last}
+    steps.Outcome{verdict: expect.verdict("PASS", ""), run: last}
 }
 
-fn mark_tier_splits(results: &[Report.CaseResult]) {
+fn mark_tier_splits(results: &[report.CaseResult]) {
     loop i in 0..<results.len() {
         loop j in 0..<i {
             if results[i].case != results[j].case -> next
@@ -444,12 +446,12 @@ fn mark_tier_splits(results: &[Report.CaseResult]) {
     }
 }
 
-fn discover_suite(context: Exec.Ctx) -> [Entry] { discover(context.root) }
+fn discover_suite(context: exec.Ctx) -> [Entry] { discover(context.root) }
 
-fn run_suite(entry: Entry, context: Exec.Ctx) -> [Steps.Outcome] {
-    plan :: Steps.parse(Exec.optional(files.join(context.root, "{entry.expected}.case")) ?? "")
+fn run_suite(entry: Entry, context: exec.Ctx) -> [steps.Outcome] {
+    plan :: steps.parse(exec.optional(files.join(context.root, "{entry.expected}.case")) ?? "")
     independent :: tier_independent(plan)
-    results := [Steps.Outcome]{}
+    results := [steps.Outcome]{}
     loop (index, tier_name) in context.options.tiers {
         if independent && index > 0 -> next
         tier := tiers()[0]
@@ -458,7 +460,7 @@ fn run_suite(entry: Entry, context: Exec.Ctx) -> [Steps.Outcome] {
         }
         scratch :: files.join(context.scratch, "{index}")
         files.create_dir_all(scratch) ?? {
-            &results.push(Steps.Outcome{verdict: Expect.verdict("ERROR", "tier scratch: {err}"), run: Exec.failed("{err}"), tier: tier_name})
+            &results.push(steps.Outcome{verdict: expect.verdict("ERROR", "tier scratch: {err}"), run: exec.failed("{err}"), tier: tier_name})
             next
         }
         bless := context.bless
@@ -466,7 +468,7 @@ fn run_suite(entry: Entry, context: Exec.Ctx) -> [Steps.Outcome] {
         outcome := run_entry(entry, tier, context.env, scratch, bless)
         outcome.tier = if independent -> "-" else -> tier_name
         files.remove_all(scratch) ?? {
-            outcome.verdict = Expect.verdict("ERROR", "remove tier scratch: {err}")
+            outcome.verdict = expect.verdict("ERROR", "remove tier scratch: {err}")
             ()
         }
         &results.push(outcome)

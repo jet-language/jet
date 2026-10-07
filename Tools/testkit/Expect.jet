@@ -20,16 +20,14 @@ fn verdict(status: String, detail: String) -> Verdict {
 
 // A bounded whole-file unified hunk: exact comparison never trims stream bytes.
 fn unified(path: String, expected: String, actual: String) -> String {
-    old :: expected.split("\n")
-    new :: actual.split("\n")
-    out := "--- expected/{path}\n+++ actual\n@@ -1,{old.len()} +1,{new.len()} @@\n"
+    out := "--- expected/{path}\n+++ actual\n@@ -1,{expected.split("\n").len()} +1,{actual.split("\n").len()} @@\n"
     count := 0
-    loop line in old {
+    loop line in expected.split("\n") {
         if count >= 37 -> break
         out = "{out}-{line}\n"
         count += 1
     }
-    loop line in new {
+    loop line in actual.split("\n") {
         if count >= 37 -> break
         out = "{out}+{line}\n"
         count += 1
@@ -58,7 +56,7 @@ fn bless_error(bless: Bless, sharded: Bool) -> String {
     ""
 }
 
-fn exact_with_count(id: String, path: String, expected: String?, actual: String, bless: Bless, count: fn(String) -> Int) -> Verdict {
+fn exact_with_count(id: String, path: String, expected: String?, actual: String, bless: Bless, count: fn(String) -[]> Int) -> Verdict {
     present := false
     old := ""
     if expected == {
@@ -92,7 +90,6 @@ fn paths(actual: String, work: String, root: String, scratch: String) -> String 
 
 fn argv0(actual: String, binary: String, source: String) -> String {
     usage :: "Usage: {binary}"
-    start :: actual.index(usage)
-    if start < 0 -> return actual
+    start :: actual.index(usage) ?? return ~actual
     "{actual.slice(0, start)}Usage: {source}{actual.slice(start + usage.len(), actual.len())}"
 }
