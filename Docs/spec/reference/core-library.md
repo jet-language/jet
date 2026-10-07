@@ -1929,6 +1929,9 @@ fn run() {
 | `random.randint`, `uniform`, `normalvariate`, `gauss`, `expovariate`, `randbytes`, `getrandbits`, `randrange`, `choice`, `choices`, `triangular`, `gammavariate`, `betavariate`, `lognormvariate`, `paretovariate`, `weibullvariate`, `vonmisesvariate`, `binomialvariate` | varies | Compatibility aliases and distributions exposed by the random module. |
 An explicit `RNG` is a seeded capability: its draw methods advance that
 capability without requiring the ambient `Rand` effect (D-DET-CAPAPI).
+The seeded integer kernel takes and returns native signed words. Exact Jet
+integers are range-checked once when entering that boundary and widened once
+on return; a native word is never reinterpreted as a numeric handle.
 
 ### `core.compute.solve` — dense linear solves
 
