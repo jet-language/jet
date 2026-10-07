@@ -339,6 +339,19 @@ temporary directory, and runs `jetpack env … -- <formatter> <staged…>`;
 `--check`/`--diff`/`--dry-run` report the files whose bytes changed (exit 1),
 otherwise those files are written back. No formatter declared is E1340.
 
+The Jet-hosted `lint --a11y` and `lint --complexity` leaves use the checked
+compiler diagnostics. Accessibility findings exit 1 and go to stderr, as
+diagnostic JSON Lines under `--json`; a clean machine invocation emits no
+bytes. Check errors use the `diagnostics` status envelope on stdout.
+Complexity scores count parser control-flow nodes, enclosing structures,
+mixed boolean sequences, and direct recursion. Reports sort by descending
+score, source position, then name. `--max=<n>` accepts a non-negative 32-bit
+budget; its JSON result remains an array, and an exceeded budget exits 1.
+Without a budget, the `lint.complexity` machine envelope also carries checked
+architecture advice and check provenance. Shared-callee and consumer-agreement
+candidates retain definition/call-site spans, effects, behavioral-check
+statuses, and uncertainty; they neither execute user code nor apply a refactor.
+
 Unsafe-gate inspection reads the parser's audited regions and scoped policy
 declarations. It retains each low-level operation, its typed obligations
 (`valid_ptr`, `aligned`, `no_alias`), the immediately following assertion, and
