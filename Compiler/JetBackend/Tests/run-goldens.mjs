@@ -254,6 +254,18 @@ if (from <= 1 && until >= 1) {
     if (!existsSync(dump)) continue;
     try {
       const program = parseRustDebug(readFileSync(dump, "utf8"));
+      if (c.entry.stem === "errors/prelude_load_absent") {
+        // mir.rs ensure_artifact_source_files includes every loaded artifact
+        // module; inspect this inventory before reachable-function pruning.
+        const sourceFiles = field(program, "source_files")?.items;
+        if (!sourceFiles?.length) throw new Error("absent-prelude test has no loaded-source inventory");
+        for (const source of sourceFiles) {
+          const path = field(source, "path")?.v;
+          if (path === "Core/prelude/prelude.jet" || path?.endsWith("/Core/prelude/prelude.jet")) {
+            throw new Error("unmentioned optional-to-failure body loaded core.prelude");
+          }
+        }
+      }
       const entryId = entryFunction(program);
       if (!entryId) throw new Error("no artifact names an entry function");
       prune(program, entryId);

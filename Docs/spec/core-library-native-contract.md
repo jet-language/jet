@@ -196,6 +196,10 @@ absence constructs the default error from the reason. The body returns the
 joined carrier without recording a new Core error origin; the first user
 propagation site retains its ordinary journey behavior. There is no separate
 native runtime route or backend-local error policy.
+The absent-trigger golden also asserts the loaded source inventory: the Rust
+feed checks all artifact source files before reachability pruning, and the Jet
+feed checks the loader's exact generated Core source closure. An unnecessary
+`core.prelude` load is a test failure even if its functions would be pruned.
 
 `core.data.sketch.tdigest` has one source-owned `TDigest` carrier over `Shared`
 centroid storage. It retains the shipped unit-weight insertion/compression and
@@ -209,6 +213,7 @@ reservoir minimum capacity, xorshift seed and replacement order. CMS `merge`
 keeps its existing source-level additive counter operation. The native sketch
 kernel and the divergent configurable/weighted/SplitMix source carriers are
 removed; copying a handle still shares updates.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
