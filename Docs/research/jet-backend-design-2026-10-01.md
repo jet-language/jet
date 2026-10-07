@@ -980,6 +980,23 @@ The pinned image is loaded once per child generation and is excluded from
 logical-close and dynamic-image unload. This producer/linking prerequisite is
 not replaced by an unload-time `global_forget_range` export.
 
+`x64_memory_core_shared_image` consumes the explicit pinned-Core lowering
+inventory, rather than guessing exports from MIR function numbers. Getter names
+are `jet_core_shared_` followed by the initializer's sixteen lowercase hex
+digits. Each export offset comes from the linked compiled function identity,
+must lie in executable code, and must have the no-argument System V
+eight-byte Integer/Pointer result ABI. Empty SiteKeys, noncanonical names,
+initializer/SiteKey collisions, duplicate symbols, missing functions, and
+invalid signatures fail image construction. Ordinary dynamic images leave
+the export table empty.
+
+The pinned lowering supplies a separate no-argument Unit startup that
+initializes canonical frozen-static fixups; it is not a normalized user entry
+and does not eagerly run shared initializers. The host invokes this startup
+once before publishing getter addresses, rejects a stopped startup, and skips
+startup when reusing the same already-pinned image digest. Shared getters stay
+lazy. There is no image finalizer or unload-time forget operation for Core.
+
 Checked closure source is retained separately from MIR. Codegen records each
 original `TLambda` with its `MIRFunctionID` and source file, carries nested
 receipts through ordinary and incremental lowering, and the compiler host
