@@ -8771,6 +8771,7 @@ fn validate_function(
 pub fn mir_operation_can_stop(operation: &MirOperation) -> bool {
     match operation {
         MirOperation::Call { .. } | MirOperation::IndirectCall { .. } | MirOperation::CoreCall { .. } => true,
+        MirOperation::LoopIterInit { .. } | MirOperation::LoopIterAdvance { .. } => true,
         MirOperation::Semantic(semantic) => matches!(
             semantic,
             MirSemanticOp::ClosureMethod { .. }

@@ -10,16 +10,19 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const args = process.argv.slice(2);
 const output = args.shift();
-const assembleOnly = args.includes("--assemble-only");
-const tests = args.includes("--tests");
-if (!output || args.some((arg) => arg !== "--assemble-only" && arg !== "--tests") || new Set(args).size !== args.length) {
-  throw new Error("usage: check-runtime.mjs OUT [--assemble-only] [--tests]");
+let assembleOnly = false;
+let test = null;
+for (let at = 0; at < args.length; at++) {
+  if (args[at] === "--assemble-only" && !assembleOnly) assembleOnly = true;
+  else if (args[at] === "--test" && test === null && /^[A-Z][A-Za-z0-9]*$/u.test(args[at + 1] ?? "")) test = args[++at];
+  else throw new Error("usage: check-runtime.mjs OUT [--assemble-only] [--test NAME]");
 }
+if (!output) throw new Error("usage: check-runtime.mjs OUT [--assemble-only] [--test NAME]");
 const out = resolve(output);
 const paths = readFileSync(join(root, "Compiler/JetRuntime/sources.list"), "utf8").split("\n")
   .map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
 if (!paths.length || new Set(paths).size !== paths.length) throw new Error("empty or duplicate runtime source manifest");
-if (tests) paths.push("Compiler/JetRuntime/Tests/AllocTests.jet");
+if (test !== null) paths.push(`Compiler/JetRuntime/Tests/${test}Tests.jet`);
 const uses = new Set();
 const bodies = paths.map((path) => {
   const lines = readFileSync(join(root, path), "utf8").split("\n");

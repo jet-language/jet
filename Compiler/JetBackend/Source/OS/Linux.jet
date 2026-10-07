@@ -505,3 +505,67 @@ fn os_clone_i64(flags: I64, stack: I64, parent_tid: I64, child_tid: I64) -> I64 
     ; clobbers rcx, r11
     """
 }
+
+#[Unsafe("calls a checked native runtime callback with one machine-word argument"), FFI(asm)]
+fn os_call1_i64(address: I64, a: I64) -> I64 {
+    """
+    push {address}
+    push {a}
+    pop rdi
+    pop r11
+    call r11
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
+    """
+}
+
+#[Unsafe("calls a checked native runtime callback with two machine-word arguments"), FFI(asm)]
+fn os_call2_i64(address: I64, a: I64, b: I64) -> I64 {
+    """
+    push {address}
+    push {a}
+    push {b}
+    pop rsi
+    pop rdi
+    pop r11
+    call r11
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
+    """
+}
+
+#[Unsafe("calls a checked native runtime callback with three machine-word arguments"), FFI(asm)]
+fn os_call3_i64(address: I64, a: I64, b: I64, c: I64) -> I64 {
+    """
+    push {address}
+    push {a}
+    push {b}
+    push {c}
+    pop rdx
+    pop rsi
+    pop rdi
+    pop r11
+    call r11
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
+    """
+}
+
+#[Unsafe("calls a checked native runtime callback with four machine-word arguments"), FFI(asm)]
+fn os_call4_i64(address: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
+    """
+    push {address}
+    push {a}
+    push {b}
+    push {c}
+    push {d}
+    pop rcx
+    pop rdx
+    pop rsi
+    pop rdi
+    pop r11
+    call r11
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx, rsi, rdi, r8, r9, r10, r11
+    """
+}

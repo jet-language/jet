@@ -195,6 +195,15 @@ Result boxes reserve at least one eight-byte payload word after the tag,
 including zero-sized payloads. Runtime marshaling uses the same minimum,
 alignment and size as native construction and drop glue.
 
+`Compiler/JetRuntime/Source/Text.jet` owns the native text exports. Headers are
+24-byte allocations aligned to 8; buffers are allocated with alignment 1 and
+freed with their recorded capacity. Empty buffers have pointer 1 and capacity
+0. Builders transfer their header unchanged on finish and preserve self-append
+when growing. Static bytes use Rust-compatible lossy UTF-8 conversion; range
+slices count Unicode scalars, not bytes. Split iterators clone their borrowed
+input once and produce owned pieces lazily; nonempty `rsplit` materializes
+rightmost nonoverlapping matches, then yields the pieces left-to-right.
+
 Sizes: a word, handle or box pointer is 8 bytes (align 8), a Bool 1 byte, Unit
 0. An inline aggregate is 8-aligned and padded to whole words, so copies move
 words; a member sits at the next multiple of its alignment, and a recursive
@@ -400,6 +409,11 @@ are never freed or grown, and owning reads clone it. Native compiler text
 marshaling continues to use `jet_rt_string_data`/`jet_rt_string_byte_len`,
 never Rust layout. This contract applies to the linked runtime pack; the
 standalone freestanding image runtime is separate and retires with L3.
+List result slot buffers use the same `jet_rt_alloc`/`jet_rt_free` domain,
+including lists returned inside an Option or Result. Rust `Vec` storage is
+only temporary marshaling storage: adapters copy its words into the shared
+runtime allocation before returning a buffer to native lowering. Empty lists
+keep the null-buffer/zero-length convention.
 
 A Jet type that generated Rust holds as a native runtime type crosses as an owned
 `Box<T>` handle. The generator reads Context.rs and predicates.rs name tables and the
@@ -1400,3 +1414,66 @@ ambiguous pairing is reported, never treated as equality. `--bootstrap JETC0`
 provides a front-end diagnostic census before the probe can be built.
 Preparation and a receipt-only census never establish differential parity;
 only `summary.json` with `differential_verified: true` does.
+
+### Native collection runtime
+
+The runtime-only collection unit implements the current
+`jet_rt_native_iter_*` slot ABI, not the Rust generic `jet_iter_*` names.
+List and Map operations already emitted as typed LIR retain that lowering;
+there is no unused parallel set of generic C exports.
+
+Lists carry an inline `[len, cap, data]` header. Element descriptors have nine
+words: stride, clone, drop, show, equality, comparison, kind, and two child
+descriptors. Iterator owners copy the descriptors because the caller's
+descriptor storage may expire. Pulls use reusable payload slots; Bool copies
+one byte and Unit copies none. Moves, borrowed snapshots, closure release,
+early termination, and buffered cursor stride have the same ownership rules
+at the slot boundary. Collection buffers crossing that boundary belong to
+`jet_rt_alloc`/`jet_rt_free`, including buffers from remaining Rust adapters.
+
+Laziness remains operation-specific. Map/filter/take/skip and cursor pulls are
+lazy; repeat/cycle/shuffle, fallible map/filter, keyed dedup/sorted checks, and
+chunk-while retain the reference kernels' eager consumption. Integer averages
+sum fixed-width values in a signed two-word accumulator before one binary64
+rounding; exact-Int averages borrow the numeric layer.
+
+The remaining progress-state and comptime-fuel leaves are opaque policy seams
+owned by the host/session layers, not Rust iterator owners. Their Rust bodies
+are seed/verification paths scheduled to die at cutover. The collection exit
+harness checks the Jet object's definitions, unresolved pack imports, all
+selected baseline stems, raw slot witnesses, and the count of newly passing
+collection stems; preparation is not behavioral proof.
+
+Lazy cursor initialization and advancement may invoke user callbacks. Both
+are can-stop MIR operations: their results are usable only on the immediately
+following Propagate poll's resume edge. Prefetched HasNext/Value operations
+remain non-stopping. A cancelled map callback must report task cancellation,
+never return a short successful collection or silently end a for-loop.
+
+### Jet-authored runtime object
+
+`Compiler/JetRuntime` is a separate package, assembled from its own
+`sources.list`; it is never part of the compiler bootstrap inventory.
+`JetBackend/Tests/run-runtime.mjs` sends that checked library directly through
+the Jet frontend's library-object hook. The explicit `exports.list` is checked
+against adjacent `#Export(c)` declarations and scalar C signatures. I64/U64,
+U8, Bool and Float/F64 are admitted (F64 arguments/results use the System V
+xmm ABI); the annotated exact-Int bounds-index seam is the sole exception.
+The runtime's private allocator root uses the shared MIR `.Global` lowering.
+`jet_rt_alloc_init` is a void/no-argument constructor in `.init_array.00000`.
+
+`prebuild-runtime.sh` keeps the Rust-tier seed/verification rlib separate from
+`libjet_runtime_native.rlib`, built from fresh all-parts source with
+`--cfg jet_native_pack`. The latter imports the Jet allocator and is packed
+after `jet_runtime_jet.o`; the strong-definition check rejects any replaced
+Rust export. Rust-tier allocator bodies are seed/verification inputs only,
+recorded for deletion at cutover, not a second native-pack implementation.
+
+`JetRuntime/Tests/check-object.mjs` checks exact exports and the audited
+`imports.list`, including the allocator constructor relocation.
+`run-object-fixtures.mjs` prepares actual checked-source I64 global store/load
+exports, an F64 ABI identity, and the allocator tests. A foreign caller tests
+the globals; executable startup and an entryless `dlopen` library inspect the
+allocator root before any explicit init call, then check repeated init leaves
+it unchanged. The pack-linked `run-cabi-driver.mjs` preserves all C-ABI trap
+cases, while the Rust-tier cargo driver only calls remaining Rust-tier routes.

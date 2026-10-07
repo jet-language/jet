@@ -110,6 +110,28 @@ runtime's ABI, error behavior, or observable output. Report an unsupported
 construct before producing an executable; do not marshal an unproved carrier
 or run a backend-local approximation. A focused same-program regression must
 exercise either the shared meaning or that explicit refusal.
+Module scalar storage has one local data cell per checked declaration. Global
+reads and writes through static-rooted places address that same cell, including
+when the shared object writer packages a runtime library. Atomic values still
+require their typed allocation, ordering and ownership contract; a raw machine
+compare-and-swap primitive does not establish that contract.
+
+Native iterator operations preserve the delivered stop rail. A stopped callback
+does not initialize its result slot. Borrowed pulls and cursor advances leave
+their input owner for caller cleanup; owning eager operations and cursor
+initialization discard every partial result before returning a neutral, unread
+value. Collection outputs in caller-provided storage are dropped and zeroed,
+not deallocated. Join checks the rail before using a show callback's text, and
+numeric terminals abandon partial reductions after a stopped drain.
+
+At native C byte boundaries, `List<U8>` retains its word-stride layout.
+`jet_rt_bytes_pack` borrows that header and returns an independently owned
+packed byte buffer; `jet_rt_bytes_free` releases it with its original length
+and alignment one. Empty packed bytes use the non-null dangling pointer `1`
+and require no deallocation. `jet_rt_bytes_unpack` copies C bytes into a fresh
+owned native list header and word-stride buffer; the empty header has all three
+words zero. Neither conversion transfers or frees its borrowed input.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
