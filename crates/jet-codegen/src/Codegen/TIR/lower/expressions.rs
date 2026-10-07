@@ -8533,7 +8533,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     env.fallback_subject = fallback_subject;
                     inner_t
                 };
-                if matches!(&inner_t.ty, Type::Named(name) if name == Syntax::TYPE_NEVER) {
+                // The failure solve can erase an inferred carrier after sema
+                // installed this automatic propagation node. Its checked
+                // operand then already is the success value.
+                if !inner_t.ty.is_fallible() {
                     return inner_t;
                 }
                 let note_t = note

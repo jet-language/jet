@@ -3755,6 +3755,9 @@ fn jet_codegen_lower_try(builder: &JetCodegenBuilder, program: JetCodegenProgram
     builder.plain_try_operand = previous_operand
     if taken -> return input
     input_type := jet_codegen_expression_call_return_type(builder, program, inner) ?? inner.ty
+    // The solved callable may have erased an inferred failure carrier after
+    // the automatic Try was installed. No failure route remains to consume.
+    if inner.ty != .Result(_, _) && inner.ty != .Option(_) && input_type != .Result(_, _) && input_type != .Option(_) -> return input
     jet_codegen_lower_try_value(&builder, program, expression, input, input_type, inner.span, note, conversion, file, line, function, jet_codegen_try_operand_starts_failure(inner))
 }
 
