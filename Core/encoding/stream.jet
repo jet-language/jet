@@ -1,0 +1,1279 @@
+// Compiler-private encoding stream policy shared by JSON and JSONL.
+// The public wrappers preserve the shipped text/file return shapes.
+use core.encoding.[DataEvent, DataTree, EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
+use core.encoding as encoding
+use core.files.[FileReader, FileWriter]
+use core.mem as mem
+use core.math as math
+
+struct AllocationState {
+    used: Int
+    limit: Int
+}
+
+struct AllocationBudget {
+    state: Shared<AllocationState>
+
+    fn charge(self, bytes: Int) -> Bool Never! {
+        guard := self.state.guard_edit()
+        updated :: guard.value.used + bytes
+        if updated > guard.value.limit -> return false
+        guard.value.used = updated
+        true
+    }
+
+    fn release(self, bytes: Int) Never! {
+        guard := self.state.guard_edit()
+        updated :: guard.value.used - bytes
+        guard.value.used = if updated < 0 -> 0 else -> updated
+    }
+}
+
+fn heap_ceiling(limits: EncodingLimits) -> Int Never! {
+    limits.buffer_bytes + limits.max_item_bytes + limits.max_expansion_bytes + limits.max_depth * 256 + 65536
+}
+
+fn budget(limits: EncodingLimits) -> AllocationBudget Never! {
+    AllocationBudget{state: shared AllocationState{used: 0, limit: heap_ceiling(limits)}}
+}
+
+fn reserve<T>(allocation: AllocationBudget, values: &[T], additional: Int) -> Bool Never! {
+    old :: mem.__list_capacity<T>(values) * mem.__type_size<T>()
+    requested :: (values.len() + additional) * mem.__type_size<T>()
+    if additional == 0 || requested <= old -> return true
+    growth :: requested - old
+    if !allocation.charge(growth) {
+        values = [T]{}
+        allocation.release(old)
+        return false
+    }
+    if !mem.__list_reserve_exact<T>(&values, additional) {
+        allocation.release(growth)
+        actual :: mem.__list_capacity<T>(values) * mem.__type_size<T>()
+        values = [T]{}
+        allocation.release(actual)
+        return false
+    }
+    actual :: mem.__list_capacity<T>(values) * mem.__type_size<T>()
+    if actual < old || (actual > requested && !allocation.charge(actual - requested)) {
+        values = [T]{}
+        allocation.release(requested)
+        return false
+    }
+    if actual < requested -> allocation.release(requested - actual)
+    true
+}
+
+fn validate_limits(limits: EncodingLimits) EncodingError! {
+    reason := ""
+    if limits.buffer_bytes < 4096 || limits.buffer_bytes > 16777216 -> reason = "buffer_bytes {limits.buffer_bytes} is outside 4096..16777216"
+    else if limits.max_depth < 1 || limits.max_depth > 4096 -> reason = "max_depth {limits.max_depth} is outside 1..4096"
+    else if limits.max_item_bytes < 1 || limits.max_item_bytes > 1073741824 -> reason = "max_item_bytes {limits.max_item_bytes} is outside 1..1073741824"
+    else if limits.max_total_bytes == .Val(total) {
+        if total < 0 -> reason = "max_total_bytes {total} is outside 0..Int.max"
+    } else if limits.max_expansion_depth < 0 || limits.max_expansion_depth > 256 -> reason = "max_expansion_depth {limits.max_expansion_depth} is outside 0..256"
+    else if limits.max_expansion_bytes < 0 || limits.max_expansion_bytes > 1073741824 -> reason = "max_expansion_bytes {limits.max_expansion_bytes} is outside 0..1073741824"
+    if reason != "" -> return Err(stream_error(EncodingErrorKind.Limit, 0, 1, 1, reason))
+}
+
+fn stream_error(kind: EncodingErrorKind, offset: Int, line: Int, column: Int, reason: String) -> EncodingError Never! {
+    EncodingError{format: .JSON, kind: kind, byte_offset: offset, line: Val(line), column: Val(column), path: "", reason: reason, cause: None}
+}
+
+fn io_error(offset: Int, line: Int, column: Int, cause: EncodingCause) -> EncodingError Never! {
+    error := stream_error(.IO, offset, line, column, "file IO failed")
+    error.cause = Val(cause)
+    error
+}
+
+// Size-compatible frame slots use machine integers, not exact Int carriers.
+enum ReadFrame {
+    ArrayValueOrEnd(first: Bool, index: U64)
+    ArrayCommaOrEnd(index: U64)
+    ObjectKeyOrEnd(first: Bool)
+    ObjectColonValue(key: String, key_heap: U64)
+    ObjectCommaOrEnd(key: String, key_heap: U64)
+}
+
+pub struct JsonPull {
+    input: FileReader
+    limits: EncodingLimits
+    total: Int
+    offset: Int
+    line: Int
+    column: Int
+    lookahead: U8?
+    frames: [ReadFrame]
+    root_started: Bool
+    eof: Bool
+    record_mode: Bool
+    terminal: EncodingError?
+    allocation: AllocationBudget
+    output_heap: Int
+
+    pub fn next(&self) -> DataEvent? EncodingError! {
+        if self.terminal == .Val(first) -> return Err(first)
+        result :: &self.next_inner() ?? {
+            error := err
+            if error.path == "" -> error.path = self.path()
+            &self.discard()
+            self.terminal = Val(error)
+            return Err(error)
+        }
+        self.allocation.release(self.output_heap)
+        self.output_heap = 0
+        if result == None && self.eof -> &self.discard()
+        Ok(result)
+    }
+
+    fn path(self) -> String Never! {
+        out := "$"
+        loop frame in self.frames {
+            if frame == {
+                .ArrayValueOrEnd(_, index) | .ArrayCommaOrEnd(index) -> out = "{out}[{index}]"
+                .ObjectColonValue(key, _) | .ObjectCommaOrEnd(key, _) -> out = "{out}[{quote_path(key)}]"
+                .ObjectKeyOrEnd(_) -> {}
+            }
+        }
+        out
+    }
+
+    fn discard(&self) Never! {
+        bytes := mem.__list_capacity<ReadFrame>(self.frames) * mem.__type_size<ReadFrame>()
+        loop frame in self.frames {
+            if frame == {
+                .ObjectColonValue(_, heap) | .ObjectCommaOrEnd(_, heap) -> bytes += Int.from_u64(heap)
+                else -> {}
+            }
+        }
+        self.frames = [ReadFrame]{}
+        self.allocation.release(bytes + self.output_heap)
+        self.output_heap = 0
+    }
+
+    fn error(self, kind: EncodingErrorKind, reason: String) -> EncodingError Never! {
+        stream_error(kind, self.offset, self.line, self.column, reason)
+    }
+
+    fn item_error(self, item: String) -> EncodingError Never! {
+        self.error(.Limit, "JSON {item} allocation exceeded the bounded codec heap ceiling")
+    }
+
+    fn fill(&self) -> U8? EncodingError! {
+        if self.lookahead != None -> return Ok(self.lookahead)
+        byte :: encoding.__read_byte(&self.input) ?? return Err(io_error(self.offset, self.line, self.column, err))
+        self.lookahead = byte
+        Ok(byte)
+    }
+
+    fn take(&self) -> U8? EncodingError! {
+        byte :: &self.fill() ?? return Err(err)
+        if byte == None -> return Ok(None)
+        if self.limits.max_total_bytes == .Val(max) {
+            if self.total >= max -> return Err(self.error(.Limit, "max_total_bytes {max} exceeded"))
+        }
+        self.lookahead = None
+        self.total += 1
+        self.offset += 1
+        if byte == Val(U8{10}) {
+            self.line += 1
+            self.column = 1
+        } else -> self.column += 1
+        Ok(byte)
+    }
+
+    fn skip_ws(&self) EncodingError! {
+        loop {
+            byte :: &self.fill()
+            if byte == Val(U8{32}) || byte == Val(U8{9}) || (!self.record_mode && (byte == Val(U8{10}) || byte == Val(U8{13}))) {
+                _ :: &self.take()
+            } else -> return
+        }
+    }
+
+    fn expect(&self, want: U8, context: String) EncodingError! {
+        byte :: &self.take()
+        if byte == .Val(got) {
+            if got == want -> return
+            column :: if self.column > 0 -> self.column - 1 else -> 0
+            return Err(stream_error(.Syntax, self.offset - 1, self.line, column, "expected {context} but found {debug_byte(got)}"))
+        }
+        Err(self.error(.Truncated, "expected {context} before end of input"))
+    }
+
+    fn append(&self, bytes: &[U8], byte: U8, item: String) EncodingError! {
+        needed :: bytes.len() + 1
+        if needed > self.limits.max_item_bytes -> return Err(self.error(.Limit, "max_item_bytes {self.limits.max_item_bytes} exceeded"))
+        capacity :: mem.__list_capacity<U8>(bytes)
+        if needed > capacity {
+            grown := if capacity < 1 -> 2 else -> capacity * 2
+            if grown < needed -> grown = needed
+            if !reserve<U8>(self.allocation, &bytes, grown - bytes.len()) -> return Err(self.item_error(item))
+        }
+        &bytes.push(byte)
+    }
+
+    fn hex4(&self) -> Int EncodingError! {
+        value := 0
+        loop _ in 0..<4 {
+            byte :: &self.take() ?? return Err(err)
+            if byte == None -> return Err(self.error(.Truncated, "incomplete Unicode escape"))
+            got :: byte
+            digit :: encoding.hex_value(got) ?? return Err(stream_error(.Syntax, self.offset - 1, self.line, self.column - 1, "Unicode escape contains a non-hex digit"))
+            value = value * 16 + digit
+        }
+        Ok(value)
+    }
+
+    fn read_string(&self) -> String EncodingError! {
+        &self.expect(U8{34}, "a string")
+        bytes := [U8]{}
+        &self.read_string_bytes(&bytes) ?? {
+            self.allocation.release(mem.__list_capacity<U8>(bytes))
+            return Err(err)
+        }
+        capacity :: mem.__list_capacity<U8>(bytes)
+        encoding.__utf8_validate(bytes) ?? {
+            self.allocation.release(capacity)
+            return Err(self.error(.Syntax, "JSON string is not valid UTF-8"))
+        }
+        text := ""
+        #Unsafe("the shared UTF-8 validator just accepted this owned byte allocation") {
+            text = encoding.__bytes_into_text(^bytes)
+        }
+        self.output_heap = capacity
+        Ok(text)
+    }
+
+    fn read_string_bytes(&self, bytes: &[U8]) EncodingError! {
+        loop {
+            byte :: &self.take()
+            if byte == None -> return Err(self.error(.Truncated, "unterminated JSON string"))
+            got :: byte
+            if got == (U8{34}) -> return
+            if got <= (U8{31}) -> return Err(stream_error(.Syntax, self.offset - 1, self.line, self.column - 1, "unescaped control byte in JSON string"))
+            if got != (U8{92}) {
+                &self.append(&bytes, got, "string")
+                next
+            }
+            escaped :: &self.take()
+            if escaped == None -> return Err(self.error(.Truncated, "incomplete JSON escape"))
+            esc :: escaped
+            if esc == (U8{34}) || esc == (U8{92}) || esc == (U8{47}) -> &self.append(&bytes, esc, "string")
+            else if esc == (U8{98}) -> &self.append(&bytes, U8{8}, "string")
+            else if esc == (U8{102}) -> &self.append(&bytes, U8{12}, "string")
+            else if esc == (U8{110}) -> &self.append(&bytes, U8{10}, "string")
+            else if esc == (U8{114}) -> &self.append(&bytes, U8{13}, "string")
+            else if esc == (U8{116}) -> &self.append(&bytes, U8{9}, "string")
+            else if esc == (U8{117}) {
+                cp := &self.hex4()
+                if cp >= 55296 && cp <= 56319 {
+                    &self.expect(U8{92}, "a low-surrogate escape")
+                    &self.expect(U8{117}, "a low-surrogate escape")
+                    low :: &self.hex4()
+                    if low < 56320 || low > 57343 -> return Err(stream_error(.Syntax, self.offset - 4, self.line, self.column - 4, "high surrogate is not followed by a low surrogate"))
+                    cp = 65536 + ((cp - 55296) << 10) + low - 56320
+                } else if cp >= 56320 && cp <= 57343 -> return Err(stream_error(.Syntax, self.offset - 4, self.line, self.column - 4, "unpaired low surrogate"))
+                if cp < 128 -> &self.append(&bytes, U8{cp}, "string")
+                else if cp < 2048 {
+                    &self.append(&bytes, U8{192 | (cp >> 6)}, "string")
+                    &self.append(&bytes, U8{128 | (cp & 63)}, "string")
+                } else if cp < 65536 {
+                    &self.append(&bytes, U8{224 | (cp >> 12)}, "string")
+                    &self.append(&bytes, U8{128 | ((cp >> 6) & 63)}, "string")
+                    &self.append(&bytes, U8{128 | (cp & 63)}, "string")
+                } else {
+                    &self.append(&bytes, U8{240 | (cp >> 18)}, "string")
+                    &self.append(&bytes, U8{128 | ((cp >> 12) & 63)}, "string")
+                    &self.append(&bytes, U8{128 | ((cp >> 6) & 63)}, "string")
+                    &self.append(&bytes, U8{128 | (cp & 63)}, "string")
+                }
+            } else -> return Err(stream_error(.Syntax, self.offset - 1, self.line, self.column - 1, "unknown JSON escape"))
+        }
+    }
+
+    fn number(&self, first: U8) -> DataEvent EncodingError! {
+        bytes := [U8]{}
+        &self.number_bytes(&bytes, first) ?? {
+            self.allocation.release(mem.__list_capacity<U8>(bytes))
+            return Err(err)
+        }
+        start :: self.offset - bytes.len()
+        if !valid_number(bytes) {
+            self.allocation.release(mem.__list_capacity<U8>(bytes))
+            return Err(stream_error(.Syntax, start, self.line, self.column, "invalid JSON number"))
+        }
+        capacity :: mem.__list_capacity<U8>(bytes)
+        encoding.__utf8_validate(bytes) ?? {
+            self.allocation.release(capacity)
+            return Err(stream_error(.Syntax, start, self.line, self.column, "JSON number is not valid UTF-8"))
+        }
+        text := ""
+        #Unsafe("the shared UTF-8 validator just accepted this owned ASCII token") {
+            text = encoding.__bytes_into_text(^bytes)
+        }
+        if parse_int64(text) == .Val(value) {
+            self.allocation.release(capacity)
+            return Ok(DataEvent.Int(value))
+        }
+        value :: Float.parse(text) ?? {
+            self.allocation.release(capacity)
+            return Err(stream_error(.Unsupported, start, self.line, self.column, "JSON number is outside the DataTree numeric range"))
+        }
+        self.allocation.release(capacity)
+        if !math.is_finite(value) -> return Err(stream_error(.Unsupported, start, self.line, self.column, "JSON number is outside the DataTree numeric range"))
+        Ok(DataEvent.Float(value))
+    }
+
+    fn number_bytes(&self, bytes: &[U8], first: U8) EncodingError! {
+        &self.append(&bytes, first, "number")
+        loop {
+            byte :: &self.fill()
+            if byte == None -> return
+            got :: byte
+            n :: Int.from_u8(got)
+            if !((n >= 48 && n <= 57) || n == 45 || n == 43 || n == 46 || n == 101 || n == 69) -> return
+            &self.append(&bytes, got, "number")
+            _ :: &self.take()
+        }
+    }
+
+    fn literal(&self, tail: View<U8>, value: DataEvent) -> DataEvent EncodingError! {
+        loop byte in tail -> &self.expect(byte, "JSON literal")
+        Ok(value)
+    }
+
+    fn push_frame(&self, frame: ReadFrame) EncodingError! {
+        count :: self.frames.len()
+        if count >= mem.__list_capacity<ReadFrame>(self.frames) {
+            capacity :: mem.__list_capacity<ReadFrame>(self.frames)
+            next_capacity :: if capacity == 0 -> 1 else -> capacity * 2
+            if !reserve<ReadFrame>(self.allocation, &self.frames, next_capacity - count) -> return Err(self.error(.Limit, "JSON reader frame allocation exceeded the bounded codec heap ceiling"))
+        }
+        &self.frames.push(frame)
+    }
+
+    fn parse_value(&self) -> DataEvent EncodingError! {
+        &self.skip_ws()
+        first :: &self.take()
+        if first == None -> return Err(self.error(.Truncated, "expected a JSON value"))
+        byte :: first
+        if byte == (U8{110}) -> return &self.literal([U8#3]{117, 108, 108}[0..<3], DataEvent.Null)
+        if byte == (U8{116}) -> return &self.literal([U8#3]{114, 117, 101}[0..<3], DataEvent.Bool(true))
+        if byte == (U8{102}) -> return &self.literal([U8#4]{97, 108, 115, 101}[0..<4], DataEvent.Bool(false))
+        if byte == (U8{34}) {
+            self.lookahead = Val(byte)
+            self.offset -= 1
+            self.total -= 1
+            self.column -= 1
+            text :: &self.read_string()
+            return Ok(DataEvent.Text(text))
+        }
+        if byte == (U8{91}) || byte == (U8{123}) {
+            if self.frames.len() >= self.limits.max_depth -> return Err(stream_error(.Limit, self.offset - 1, self.line, self.column - 1, "max_depth {self.limits.max_depth} exceeded"))
+            if byte == (U8{91}) {
+                &self.push_frame(.ArrayValueOrEnd(true, U64{0}))
+                return Ok(DataEvent.ArrayStart)
+            }
+            &self.push_frame(.ObjectKeyOrEnd(true))
+            return Ok(DataEvent.ObjectStart)
+        }
+        if byte == (U8{45}) || (byte >= (U8{48}) && byte <= (U8{57})) -> return &self.number(byte)
+        Err(stream_error(.Syntax, self.offset - 1, self.line, self.column - 1, "unexpected byte {debug_byte(byte)} while reading a JSON value"))
+    }
+
+    fn next_inner(&self) -> DataEvent? EncodingError! {
+        if self.eof -> return Ok(None)
+        loop {
+            &self.skip_ws()
+            count :: self.frames.len()
+            if count == 0 {
+                if !self.root_started {
+                    self.root_started = true
+                    value :: &self.parse_value()
+                    return Ok(Val(value))
+                }
+                byte :: &self.fill()
+                if byte == None {
+                    self.eof = true
+                    return Ok(None)
+                }
+                if self.record_mode {
+                    if byte == Val(U8{13}) {
+                        _ :: &self.take()
+                        if &self.fill() != Val(U8{10}) -> return Err(stream_error(.Syntax, self.offset - 1, self.line, self.column - 1, "JSONL records use LF or CRLF; bare CR is not a record ending"))
+                    } else if byte != Val(U8{10}) -> return Err(self.error(.Syntax, "trailing input after JSONL record value"))
+                    _ :: &self.take()
+                    self.root_started = false
+                    return Ok(None)
+                }
+                return Err(self.error(.Syntax, "trailing input after JSON root"))
+            }
+            frame :: self.frames[count - 1]
+            if frame == {
+                .ArrayValueOrEnd(first, index) -> {
+                    byte :: &self.fill()
+                    if byte == Val(U8{93}) {
+                        if !first -> return Err(self.error(.Syntax, "expected a JSON value after `,`"))
+                        _ :: &self.take()
+                        _ :: &self.frames.pop()
+                        return Ok(Val(DataEvent.ArrayEnd))
+                    }
+                    if !first && byte == None -> return Err(self.error(.Truncated, "unterminated JSON array"))
+                    self.frames[count - 1] = .ArrayCommaOrEnd(index)
+                    event :: &self.parse_value()
+                    return Ok(Val(event))
+                }
+                .ArrayCommaOrEnd(index) -> {
+                    byte :: &self.fill()
+                    if byte == Val(U8{44}) {
+                        _ :: &self.take()
+                        self.frames[count - 1] = .ArrayValueOrEnd(false, index + U64{1})
+                    } else if byte == Val(U8{93}) {
+                        _ :: &self.take()
+                        _ :: &self.frames.pop()
+                        return Ok(Val(DataEvent.ArrayEnd))
+                    } else if byte == None -> return Err(self.error(.Truncated, "unterminated JSON array"))
+                    else -> return Err(self.error(.Syntax, "expected `,` or `]` after array value"))
+                }
+                .ObjectKeyOrEnd(first) -> {
+                    byte :: &self.fill()
+                    if byte == Val(U8{125}) {
+                        if !first -> return Err(self.error(.Syntax, "expected an object key after `,`"))
+                        _ :: &self.take()
+                        _ :: &self.frames.pop()
+                        return Ok(Val(DataEvent.ObjectEnd))
+                    }
+                    if !first && byte == None -> return Err(self.error(.Truncated, "unterminated JSON object"))
+                    if byte != Val(U8{34}) -> return Err(self.error(.Syntax, "expected a quoted object key"))
+                    key :: &self.read_string()
+                    heap :: key.count_bytes()
+                    if !self.allocation.charge(heap) -> return Err(self.item_error("string"))
+                    self.frames[count - 1] = .ObjectColonValue(~key, U64{heap})
+                    return Ok(Val(DataEvent.Key(key)))
+                }
+                .ObjectColonValue(key, heap) -> {
+                    &self.expect(U8{58}, "`:` after object key")
+                    self.frames[count - 1] = .ObjectCommaOrEnd(key, heap)
+                    event :: &self.parse_value()
+                    return Ok(Val(event))
+                }
+                .ObjectCommaOrEnd(_, heap) -> {
+                    byte :: &self.fill()
+                    if byte == Val(U8{44}) {
+                        _ :: &self.take()
+                        self.frames[count - 1] = .ObjectKeyOrEnd(false)
+                        self.allocation.release(Int.from_u64(heap))
+                    } else if byte == Val(U8{125}) {
+                        _ :: &self.take()
+                        _ :: &self.frames.pop()
+                        self.allocation.release(Int.from_u64(heap))
+                        return Ok(Val(DataEvent.ObjectEnd))
+                    } else if byte == None -> return Err(self.error(.Truncated, "unterminated JSON object"))
+                    else -> return Err(self.error(.Syntax, "expected `,` or `}}` after object value"))
+                }
+            }
+        }
+    }
+}
+
+pub fn json_reader(input: ^FileReader, limits: EncodingLimits) -> JsonPull EncodingError! {
+    validate_limits(limits)
+    Ok(JsonPull{input: input, limits: limits, total: 0, offset: 0, line: 1, column: 1, lookahead: None, frames: [ReadFrame]{}, root_started: false, eof: false, record_mode: false, terminal: None, allocation: budget(limits), output_heap: 0})
+}
+
+fn valid_number(bytes: [U8]) -> Bool Never! {
+    i := 0
+    if bytes.len() > 0 && bytes[0] == (U8{45}) -> i = 1
+    if i >= bytes.len() -> return false
+    if bytes[i] == (U8{48}) -> i += 1
+    else if bytes[i] >= (U8{49}) && bytes[i] <= (U8{57}) {
+        i += 1
+        loop i < bytes.len() && bytes[i] >= (U8{48}) && bytes[i] <= (U8{57}) -> i += 1
+    } else -> return false
+    if i < bytes.len() && bytes[i] == (U8{46}) {
+        i += 1
+        start :: i
+        loop i < bytes.len() && bytes[i] >= (U8{48}) && bytes[i] <= (U8{57}) -> i += 1
+        if i == start -> return false
+    }
+    if i < bytes.len() && (bytes[i] == (U8{101}) || bytes[i] == (U8{69})) {
+        i += 1
+        if i < bytes.len() && (bytes[i] == (U8{43}) || bytes[i] == (U8{45})) -> i += 1
+        start :: i
+        loop i < bytes.len() && bytes[i] >= (U8{48}) && bytes[i] <= (U8{57}) -> i += 1
+        if i == start -> return false
+    }
+    i == bytes.len()
+}
+
+fn debug_byte(byte: U8) -> String Never! {
+    n :: Int.from_u8(byte)
+    if n == 39 -> return "'\\''"
+    if n == 34 -> return "'\"'"
+    bytes := [U8]{}
+    if n < 128 -> &bytes.push(byte)
+    else {
+        &bytes.push(U8{192 | (n >> 6)})
+        &bytes.push(U8{128 | (n & 63)})
+    }
+    shown :: (String.from_bytes(bytes) ?? "").debug()
+    "'{shown.slice(1, shown.len() - 1)}'"
+}
+
+fn quote_path(text: String) -> String Never! { text.debug() }
+// RFC 8785 admits an Int only when binary64 holds it exactly: its odd part
+// must fit in the 53-bit significand.
+pub fn int_is_binary64(n: Int) -> Bool Never! {
+    odd := n
+    loop odd != 0 && odd %% 2 == 0 {
+        odd = odd /% 2
+    }
+    if odd < 0 -> odd = -odd
+    odd <= 9007199254740992
+}
+
+// ECMAScript Number::toString (ECMA-262 7.1.12.1) for a finite binary64, as
+// RFC 8785 requires. `"{value}"` supplies the shortest round-trip digits; this
+// function only re-spells them: exponent form below 1e-6 and from 1e21,
+// positional otherwise, `e+`/`e-` exponents, and `-0` as `0`.
+pub fn jcs_number(value: Float) -> String Never! {
+    if value == (Float{0.0}) -> return "0"
+    negative :: value < (Float{0.0})
+    magnitude := value
+    if negative -> magnitude = -value
+    digits := [U8]{}
+    exponent_bytes := [U8]{}
+    decimal := -1
+    in_exponent := false
+    loop b in "{magnitude}".bytes() {
+        if in_exponent {
+            &exponent_bytes.push(b)
+            next
+        }
+        if b == (U8{101}) || b == (U8{69}) {
+            in_exponent = true
+            next
+        }
+        if b == (U8{46}) {
+            decimal = digits.len()
+            next
+        }
+        &digits.push(b)
+    }
+    if decimal < 0 -> decimal = digits.len()
+    exponent := 0
+    if exponent_bytes.len() > 0 -> exponent = Int.parse(String.from_bytes(exponent_bytes) ?? "0") ?? 0
+    leading := 0
+    loop leading < digits.len() && digits[leading] == (U8{48}) {
+        leading += 1
+    }
+    significant := [U8]{}
+    loop i in leading..<digits.len() -> &significant.push(digits[i])
+    loop significant.len() > 1 && significant[significant.len() - 1] == (U8{48}) {
+        _ :: &significant.pop()
+    }
+    n :: decimal + exponent - leading
+    k :: significant.len()
+    out := [U8]{}
+    if negative -> &out.push(U8{45})
+    if n > 0 && n <= 21 {
+        if k <= n {
+            loop b in significant -> &out.push(b)
+            loop _ in 0..<(n - k) -> &out.push(U8{48})
+        } else {
+            loop i in 0..<n -> &out.push(significant[i])
+            &out.push(U8{46})
+            loop i in n..<k -> &out.push(significant[i])
+        }
+        return String.from_bytes(out) ?? ""
+    }
+    if n > -6 && n <= 0 {
+        write_ascii(&out, "0.")
+        loop _ in 0..<(0 - n) -> &out.push(U8{48})
+        loop b in significant -> &out.push(b)
+        return String.from_bytes(out) ?? ""
+    }
+    &out.push(significant[0])
+    if k > 1 {
+        &out.push(U8{46})
+        loop i in 1..<k -> &out.push(significant[i])
+    }
+    &out.push(U8{101})
+    e :: n - 1
+    if e >= 0 -> &out.push(U8{43})
+    write_ascii(&out, "{e}")
+    String.from_bytes(out) ?? ""
+}
+
+// UTF-16 code units of a key, the RFC 8785 sort order.
+pub fn utf16_units(text: String) -> [Int] Never! {
+    units := [Int]{}
+    bytes :: text.bytes()
+    length :: bytes.len()
+    i := 0
+    loop i < length {
+        b :: Int.from_u8(bytes[i])
+        cp := b
+        width := 1
+        if b >= 240 {
+            cp = ((b & 7) << 18) | ((Int.from_u8(bytes[i + 1]) & 63) << 12) | ((Int.from_u8(bytes[i + 2]) & 63) << 6) | (Int.from_u8(bytes[i + 3]) & 63)
+            width = 4
+        }
+        if b >= 224 && b < 240 {
+            cp = ((b & 15) << 12) | ((Int.from_u8(bytes[i + 1]) & 63) << 6) | (Int.from_u8(bytes[i + 2]) & 63)
+            width = 3
+        }
+        if b >= 192 && b < 224 {
+            cp = ((b & 31) << 6) | (Int.from_u8(bytes[i + 1]) & 63)
+            width = 2
+        }
+        if cp >= 65536 {
+            &units.push(55296 + ((cp - 65536) >> 10))
+            &units.push(56320 + ((cp - 65536) & 1023))
+        } else {
+            &units.push(cp)
+        }
+        i += width
+    }
+    units
+}
+
+pub fn compare_units(left: [Int], right: [Int]) -> Int Never! {
+    n := left.len()
+    if right.len() < n -> n = right.len()
+    loop i in 0..<n {
+        if left[i] < right[i] -> return -1
+        if left[i] > right[i] -> return 1
+    }
+    if left.len() < right.len() -> return -1
+    if left.len() > right.len() -> return 1
+    0
+}
+
+// Stable bottom-up merge sort of key indices: O(n log n) comparisons.
+pub fn sort_by_units(units: [[Int]]) -> [Int] Never! {
+    order := [Int]{}
+    loop i in 0..<units.len() -> &order.push(i)
+    width := 1
+    loop width < order.len() {
+        merged := [Int]{}
+        start := 0
+        loop start < order.len() {
+            middle := start + width
+            if middle > order.len() -> middle = order.len()
+            end := start + 2 * width
+            if end > order.len() -> end = order.len()
+            left := start
+            right := middle
+            loop left < middle || right < end {
+                take_left := right >= end
+                if !take_left && left < middle -> take_left = compare_units(units[order[left]], units[order[right]]) <= 0
+                if take_left {
+                    &merged.push(order[left])
+                    left += 1
+                } else {
+                    &merged.push(order[right])
+                    right += 1
+                }
+            }
+            start = end
+        }
+        order = merged
+        width = width * 2
+    }
+    order
+}
+
+fn byte_at(text: String, index: Int) -> U8 Never! {
+    length :: text.count_bytes()
+    if index < 0 || index >= length -> panic("the list has {length} items, so position {index} doesn't exist")
+    result := U8{0}
+    #Unsafe("the byte position was checked against this String's storage length") {
+        result = encoding.__string_byte(text, U64{index})
+    }
+    result
+}
+
+fn write_ascii(out: &[U8], text: String) Never! {
+    loop b in text.bytes() -> &out.push(b)
+}
+
+enum WriteFrame {
+    Array(first: Bool)
+    ObjectKey(first: Bool)
+    ObjectValue
+}
+
+struct CanonicalFrame {
+    is_object: Bool
+    first: Bool
+    entries: [(key: String, value: [U8])]
+    key: String?
+    value: [U8]
+    retained: U64
+}
+
+pub struct JsonPush {
+    output: FileWriter
+    limits: EncodingLimits
+    frames: [WriteFrame]
+    root_written: Bool
+    finished: Bool
+    terminal: EncodingError?
+    total: Int
+    canonical: Bool
+    canonical_frames: [CanonicalFrame]
+    canonical_retained: Int
+
+    fn error(self, kind: EncodingErrorKind, reason: String) -> EncodingError Never! {
+        stream_error(kind, self.total, 1, self.total + 1, reason)
+    }
+
+    fn state_error(self, reason: String) -> EncodingError Never! { self.error(.State, reason) }
+
+    fn discard(&self) Never! {
+        self.frames = [WriteFrame]{}
+        self.canonical_frames = [CanonicalFrame]{}
+        self.canonical_retained = 0
+    }
+
+    fn ensure_total(self, additional: Int) EncodingError! {
+        if self.limits.max_total_bytes == .Val(max) {
+            if self.total + additional > max -> return Err(self.error(.Limit, "max_total_bytes {max} exceeded"))
+        }
+    }
+
+    fn write_bytes(&self, bytes: View<U8>) EncodingError! {
+        self.ensure_total(bytes.len())
+        encoding.__write_bytes(&self.output, bytes) ?? return Err(io_error(self.total, 1, self.total + 1, err))
+        self.total += bytes.len()
+    }
+
+    fn write_text(&self, text: String) EncodingError! {
+        self.ensure_total(text.count_bytes())
+        encoding.__write_text(&self.output, text) ?? return Err(io_error(self.total, 1, self.total + 1, err))
+        self.total += text.count_bytes()
+    }
+
+    fn quoted_len(self, text: String) -> Int EncodingError! {
+        size := 0
+        loop i in 0..<text.count_bytes() {
+            byte :: Int.from_u8(byte_at(text, i))
+            size += if byte == 34 || byte == 92 || byte == 10 || byte == 13 || byte == 9 || byte == 8 || byte == 12 -> 2 else if byte < 32 -> 6 else -> 1
+        }
+        if size > self.limits.max_item_bytes -> return Err(self.error(.Limit, "max_item_bytes {self.limits.max_item_bytes} exceeded"))
+        Ok(size)
+    }
+
+    fn quote_into(self, out: &[U8], text: String) Never! {
+        &out.push(U8{34})
+        i := 0
+        loop i < text.count_bytes() {
+            scratch := [U8#6]{0, 0, 0, 0, 0, 0}
+            count :: escaped_unit(text, i, &scratch)
+            loop j in 0..<count -> &out.push(scratch[j])
+            i += scalar_width(byte_at(text, i))
+        }
+        &out.push(U8{34})
+    }
+
+    fn write_quoted(&self, text: String) EncodingError! {
+        _ :: self.quoted_len(text)
+        &self.write_bytes([U8#1]{34}[0..<1])
+        i := 0
+        loop i < text.count_bytes() {
+            scratch := [U8#6]{0, 0, 0, 0, 0, 0}
+            count :: escaped_unit(text, i, &scratch)
+            &self.write_bytes(scratch[0..<count])
+            i += scalar_width(byte_at(text, i))
+        }
+        &self.write_bytes([U8#1]{34}[0..<1])
+    }
+
+    fn value_prefix_len(self) -> Int EncodingError! {
+        if self.frames.len() == 0 {
+            if self.root_written -> return Err(self.state_error("JSON writer accepts exactly one root"))
+            return Ok(0)
+        }
+        if self.frames[self.frames.len() - 1] == {
+            .Array(first) -> Ok(if first -> 0 else -> 1)
+            .ObjectValue -> Ok(0)
+            .ObjectKey(_) -> Err(self.state_error("JSON object expects Key before a value"))
+        }
+    }
+
+    fn before_value(&self) EncodingError! {
+        if self.frames.len() == 0 {
+            if self.root_written -> return Err(self.state_error("JSON writer accepts exactly one root"))
+            self.root_written = true
+            return
+        }
+        at :: self.frames.len() - 1
+        if self.frames[at] == {
+            .Array(first) -> {
+                if !first -> &self.write_bytes([U8#1]{44}[0..<1])
+                self.frames[at] = .Array(false)
+            }
+            .ObjectValue -> self.frames[at] = .ObjectKey(false)
+            .ObjectKey(_) -> return Err(self.state_error("JSON object expects Key before a value"))
+        }
+    }
+
+    pub fn write(&self, event: ^DataEvent) EncodingError! {
+        if self.terminal == .Val(error) -> return Err(error)
+        if self.canonical {
+            &self.write_canonical(^event) ?? {
+                &self.discard()
+                self.terminal = Val(err)
+                return Err(err)
+            }
+        } else {
+            &self.write_normal(^event) ?? {
+                &self.discard()
+                self.terminal = Val(err)
+                return Err(err)
+            }
+        }
+    }
+
+    fn write_normal(&self, event: ^DataEvent) EncodingError! {
+        if self.finished -> return Err(self.state_error("write called after finish"))
+        if event == {
+            .Key(key) -> {
+                if self.frames.len() == 0 -> return Err(self.state_error("Key is only valid while an object expects a key"))
+                at :: self.frames.len() - 1
+                first :: if self.frames[at] == .ObjectKey(first) -> first else -> return Err(self.state_error("Key is only valid while an object expects a key"))
+                inner :: self.quoted_len(key)
+                self.ensure_total(inner + 3 + if first -> 0 else -> 1)
+                if !first -> &self.write_bytes([U8#1]{44}[0..<1])
+                &self.write_quoted(key)
+                &self.write_bytes([U8#1]{58}[0..<1])
+                self.frames[at] = .ObjectValue
+                return
+            }
+            .ArrayEnd -> {
+                if self.frames.len() == 0 -> return Err(self.state_error("ArrayEnd does not match an open array"))
+                if self.frames[self.frames.len() - 1] != .Array(_) -> return Err(self.state_error("ArrayEnd does not match an open array"))
+                &self.write_bytes([U8#1]{93}[0..<1])
+                _ :: &self.frames.pop()
+                return
+            }
+            .ObjectEnd -> {
+                if self.frames.len() == 0 -> return Err(self.state_error("ObjectEnd does not match an open object"))
+                if self.frames[self.frames.len() - 1] == .ObjectValue -> return Err(self.state_error("object key has no value"))
+                if self.frames[self.frames.len() - 1] != .ObjectKey(_) -> return Err(self.state_error("ObjectEnd does not match an open object"))
+                &self.write_bytes([U8#1]{125}[0..<1])
+                _ :: &self.frames.pop()
+                return
+            }
+            else -> {}
+        }
+        payload := ""
+        size := 0
+        if event == {
+            .Null -> size = 4
+            .Bool(value) -> size = if value -> 4 else -> 5
+            .Int(value) -> { payload = "{value}"; size = payload.count_bytes() }
+            .Float(value) -> {
+                if !math.is_finite(value) -> return Err(self.error(.Unsupported, "JSON cannot encode a non-finite Float"))
+                payload = wire_float(value)
+                size = payload.count_bytes()
+            }
+            .Text(value) -> size = self.quoted_len(value) + 2
+            .ArrayStart | .ObjectStart -> {
+                if self.frames.len() >= self.limits.max_depth -> return Err(self.error(.Limit, "max_depth {self.limits.max_depth} exceeded"))
+                size = 1
+            }
+            else -> return Err(self.error(.Unsupported, "internal JSON carriers cannot be written as DataEvent values"))
+        }
+        self.ensure_total(self.value_prefix_len() + size)
+        &self.before_value()
+        if event == {
+            .Null -> &self.write_bytes([U8#4]{110, 117, 108, 108}[0..<4])
+            .Bool(value) -> {
+                if value -> &self.write_bytes([U8#4]{116, 114, 117, 101}[0..<4])
+                else -> &self.write_bytes([U8#5]{102, 97, 108, 115, 101}[0..<5])
+            }
+            .Text(value) -> &self.write_quoted(value)
+            .ArrayStart -> {
+                &self.write_bytes([U8#1]{91}[0..<1])
+                &self.frames.push(.Array(true))
+            }
+            .ObjectStart -> {
+                &self.write_bytes([U8#1]{123}[0..<1])
+                &self.frames.push(.ObjectKey(true))
+            }
+            else -> &self.write_text(payload)
+        }
+    }
+
+    fn canonical_charge(&self, at: Int, bytes: Int) EncodingError! {
+        updated :: self.canonical_retained + bytes
+        ceiling :: self.limits.max_item_bytes * 2 + self.limits.buffer_bytes + self.limits.max_depth * 128
+        if updated > ceiling -> return Err(self.error(.Limit, "canonical JSON workspace exceeded bounded max_item_bytes {self.limits.max_item_bytes}"))
+        self.canonical_frames[at].retained += U64{bytes}
+        self.canonical_retained = updated
+    }
+
+    fn canonical_sink(self) -> Int? Never! {
+        at := self.canonical_frames.len()
+        loop at > 0 {
+            at -= 1
+            if self.canonical_frames[at].is_object -> return Val(at)
+        }
+        None
+    }
+
+    fn canonical_emit(&self, bytes: View<U8>) EncodingError! {
+        if self.canonical_sink() == .Val(at) {
+            needed :: self.canonical_frames[at].value.len() + bytes.len()
+            if needed > self.limits.max_item_bytes -> return Err(self.error(.Limit, "max_item_bytes {self.limits.max_item_bytes} exceeded by canonical object"))
+            capacity :: mem.__list_capacity<U8>(self.canonical_frames[at].value)
+            growth :: if needed > capacity -> needed - capacity else -> 0
+            &self.canonical_charge(at, growth)
+            if growth > 0 && !mem.__list_reserve_exact<U8>(&self.canonical_frames[at].value, growth) -> return Err(self.error(.Limit, "canonical JSON object allocation failed within configured bounds"))
+            loop byte in bytes -> &self.canonical_frames[at].value.push(byte)
+        } else -> &self.write_bytes(bytes)
+    }
+
+    fn canonical_quote(self, text: String) -> [U8] EncodingError! {
+        size :: self.quoted_len(text) + 2
+        out := [U8]{}
+        if !mem.__list_reserve_exact<U8>(&out, size) -> return Err(self.error(.Limit, "canonical JSON string allocation failed within configured bounds"))
+        self.quote_into(&out, text)
+        Ok(out)
+    }
+
+    fn canonical_before_value(&self) EncodingError! {
+        if self.canonical_frames.len() == 0 {
+            if self.root_written -> return Err(self.state_error("JSON writer accepts exactly one root"))
+            self.root_written = true
+            return
+        }
+        at :: self.canonical_frames.len() - 1
+        if !self.canonical_frames[at].is_object {
+            if !self.canonical_frames[at].first -> &self.canonical_emit([U8#1]{44}[0..<1])
+            self.canonical_frames[at].first = false
+        } else {
+            if self.canonical_frames[at].key == None -> return Err(self.state_error("canonical JSON object expects Key before a value"))
+            if self.canonical_frames[at].value.len() != 0 -> return Err(self.state_error("canonical JSON object value is already active"))
+        }
+    }
+
+    fn canonical_complete_value(&self) EncodingError! {
+        if self.canonical_frames.len() == 0 -> return
+        at :: self.canonical_frames.len() - 1
+        if !self.canonical_frames[at].is_object || self.canonical_frames[at].key == None -> return
+        capacity :: mem.__list_capacity<(key: String, value: [U8])>(self.canonical_frames[at].entries)
+        length :: self.canonical_frames[at].entries.len()
+        growth :: if length == capacity -> (if capacity < 1 -> 2 else -> capacity * 2) - capacity else -> 0
+        bytes :: growth * mem.__type_size<(key: String, value: [U8])>()
+        &self.canonical_charge(at, bytes)
+        if growth > 0 && !mem.__list_reserve_exact<(key: String, value: [U8])>(&self.canonical_frames[at].entries, growth) -> return Err(self.error(.Limit, "canonical JSON entry allocation failed within configured bounds"))
+        key :: ^self.canonical_frames[at].key ?? ""
+        value :: ^self.canonical_frames[at].value
+        self.canonical_frames[at].key = None
+        self.canonical_frames[at].value = [U8]{}
+        &self.canonical_frames[at].entries.push((key: key, value: value))
+    }
+
+    fn canonical_render_object(&self) -> [U8] EncodingError! {
+        frame := &self.canonical_frames.pop() ?? return Err(self.state_error("ObjectEnd does not match a complete canonical object"))
+        if !frame.is_object || frame.key != None -> return Err(self.state_error("ObjectEnd does not match a complete canonical object"))
+        if frame.value.len() != 0 -> return Err(self.state_error("canonical JSON object value was not completed"))
+        &frame.entries.sort_by((left: (key: String, value: [U8]), right: (key: String, value: [U8])) -> compare_text_units(left.key, right.key))
+        loop i in 1..<frame.entries.len() {
+            if frame.entries[i - 1].key == frame.entries[i].key {
+                self.canonical_retained -= Int.from_u64(frame.retained)
+                return Err(self.error(.Syntax, "JCS requires unique object keys"))
+            }
+        }
+        size := 2
+        quoted := [[U8]]{}
+        loop i in 0..<frame.entries.len() {
+            text :: self.canonical_quote(frame.entries[i].key)
+            size += (if i > 0 -> 1 else -> 0) + text.len() + 1 + frame.entries[i].value.len()
+            &quoted.push(text)
+        }
+        if size > self.limits.max_item_bytes {
+            self.canonical_retained -= Int.from_u64(frame.retained)
+            return Err(self.error(.Limit, "max_item_bytes {self.limits.max_item_bytes} exceeded by canonical object"))
+        }
+        out := [U8]{}
+        if !mem.__list_reserve_exact<U8>(&out, size) {
+            self.canonical_retained -= Int.from_u64(frame.retained)
+            return Err(self.error(.Limit, "canonical JSON object allocation failed within configured bounds"))
+        }
+        &out.push(U8{123})
+        loop i in 0..<frame.entries.len() {
+            if i > 0 -> &out.push(U8{44})
+            loop byte in quoted[i] -> &out.push(byte)
+            &out.push(U8{58})
+            loop byte in frame.entries[i].value -> &out.push(byte)
+        }
+        &out.push(U8{125})
+        self.canonical_retained -= Int.from_u64(frame.retained)
+        Ok(out)
+    }
+
+    fn write_canonical(&self, event: ^DataEvent) EncodingError! {
+        if self.finished -> return Err(self.state_error("write called after finish"))
+        if event == {
+            .Key(key) -> {
+                if self.canonical_frames.len() == 0 -> return Err(self.state_error("Key is only valid while an object expects a key"))
+                at :: self.canonical_frames.len() - 1
+                if !self.canonical_frames[at].is_object -> return Err(self.state_error("Key is only valid while an object expects a key"))
+                if self.canonical_frames[at].key != None -> return Err(self.state_error("canonical JSON object key has no value"))
+                loop entry in self.canonical_frames[at].entries {
+                    if entry.key == key -> return Err(self.error(.Syntax, "JCS requires unique object keys"))
+                }
+                &self.canonical_charge(at, key.count_bytes())
+                self.canonical_frames[at].key = Val(key)
+                return
+            }
+            .ArrayEnd -> {
+                if self.canonical_frames.len() == 0 || self.canonical_frames[self.canonical_frames.len() - 1].is_object -> return Err(self.state_error("ArrayEnd does not match an open array"))
+                &self.canonical_emit([U8#1]{93}[0..<1])
+                _ :: &self.canonical_frames.pop()
+                &self.canonical_complete_value()
+                return
+            }
+            .ObjectEnd -> {
+                if self.canonical_frames.len() == 0 -> return Err(self.state_error("ObjectEnd does not match an open object"))
+                at :: self.canonical_frames.len() - 1
+                if self.canonical_frames[at].is_object && self.canonical_frames[at].key != None -> return Err(self.state_error("object key has no value"))
+                if !self.canonical_frames[at].is_object -> return Err(self.state_error("ObjectEnd does not match an open object"))
+                object :: &self.canonical_render_object()
+                &self.canonical_emit(object[0..<object.len()])
+                &self.canonical_complete_value()
+                return
+            }
+            else -> {}
+        }
+        if (event == .ArrayStart || event == .ObjectStart) && self.canonical_frames.len() >= self.limits.max_depth -> return Err(self.error(.Limit, "max_depth {self.limits.max_depth} exceeded"))
+        encoded := [U8]{}
+        if event == {
+            .Null -> encoded = [U8]{110, 117, 108, 108}
+            .Bool(value) -> encoded = if value -> [U8]{116, 114, 117, 101} else -> [U8]{102, 97, 108, 115, 101}
+            .Int(value) -> {
+                if !int_is_binary64(value) -> return Err(self.error(.Unsupported, "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text"))
+                number :: jcs_number(Float{value})
+                encoded = encoding.__text_into_bytes(^number)
+            }
+            .Float(value) -> {
+                if !math.is_finite(value) -> return Err(self.error(.Unsupported, "JCS cannot encode a non-finite Float"))
+                number :: jcs_number(value)
+                encoded = encoding.__text_into_bytes(^number)
+            }
+            .Text(value) -> encoded = self.canonical_quote(value)
+            .ArrayStart | .ObjectStart -> {}
+            else -> return Err(self.error(.Unsupported, "internal JSON carriers cannot be written as DataEvent values"))
+        }
+        &self.canonical_before_value()
+        if event == {
+            .ArrayStart -> {
+                &self.canonical_emit([U8#1]{91}[0..<1])
+                &self.canonical_frames.push(canonical_frame(false))
+            }
+            .ObjectStart -> &self.canonical_frames.push(canonical_frame(true))
+            else -> {
+                &self.canonical_emit(encoded[0..<encoded.len()])
+                &self.canonical_complete_value()
+            }
+        }
+    }
+
+    pub fn flush(&self) EncodingError! {
+        if self.terminal == .Val(error) -> return Err(error)
+        encoding.__flush(&self.output) ?? {
+            error :: io_error(self.total, 1, self.total + 1, err)
+            &self.discard()
+            self.terminal = Val(error)
+            return Err(error)
+        }
+    }
+
+    pub fn finish(&self) EncodingError! {
+        if self.terminal == .Val(error) -> return Err(error)
+        if self.finished -> return
+        open :: if self.canonical -> self.canonical_frames.len() != 0 else -> self.frames.len() != 0
+        if !self.root_written || open {
+            error :: self.state_error("finish requires one structurally complete JSON root")
+            &self.discard()
+            self.terminal = Val(error)
+            return Err(error)
+        }
+        &self.flush()
+        self.finished = true
+    }
+}
+
+fn scalar_width(byte: U8) -> Int Never! {
+    if byte < (U8{128}) -> 1 else if byte < (U8{224}) -> 2 else if byte < (U8{240}) -> 3 else -> 4
+}
+
+fn escaped_unit(text: String, at: Int, out: &[U8#6]) -> Int Never! {
+    byte :: byte_at(text, at)
+    n :: Int.from_u8(byte)
+    if n == 34 || n == 92 || n == 10 || n == 13 || n == 9 || n == 8 || n == 12 {
+        out[0] = U8{92}
+        out[1] = if n == 10 -> U8{110} else if n == 13 -> U8{114} else if n == 9 -> U8{116} else if n == 8 -> U8{98} else if n == 12 -> U8{102} else -> byte
+        return 2
+    }
+    if n < 32 {
+        out[0] = U8{92}
+        out[1] = U8{117}
+        out[2] = U8{48}
+        out[3] = U8{48}
+        out[4] = encoding.hex_nibble(n >> 4)
+        out[5] = encoding.hex_nibble(n & 15)
+        return 6
+    }
+    width :: scalar_width(byte)
+    loop i in 0..<width -> out[i] = byte_at(text, at + i)
+    width
+}
+
+pub fn json_writer(output: ^FileWriter, limits: EncodingLimits, canonical: Bool) -> JsonPush EncodingError! {
+    validate_limits(limits)
+    Ok(JsonPush{output: output, limits: limits, frames: [WriteFrame]{}, root_written: false, finished: false, terminal: None, total: 0, canonical: canonical, canonical_frames: [CanonicalFrame]{}, canonical_retained: 0})
+}
+
+fn canonical_frame(is_object: Bool) -> CanonicalFrame Never! {
+    CanonicalFrame{is_object: is_object, first: true, entries: [(key: String, value: [U8])]{}, key: None, value: [U8]{}, retained: U64{0}}
+}
+
+fn next_text_unit(text: String, at: Int) -> (unit: Int, position: Int, pending: Int) Never! {
+    first :: Int.from_u8(byte_at(text, at))
+    width :: scalar_width(U8{first})
+    codepoint := first
+    if width == 2 -> codepoint = ((first & 31) << 6) | (Int.from_u8(byte_at(text, at + 1)) & 63)
+    else if width == 3 -> codepoint = ((first & 15) << 12) | ((Int.from_u8(byte_at(text, at + 1)) & 63) << 6) | (Int.from_u8(byte_at(text, at + 2)) & 63)
+    else if width == 4 -> codepoint = ((first & 7) << 18) | ((Int.from_u8(byte_at(text, at + 1)) & 63) << 12) | ((Int.from_u8(byte_at(text, at + 2)) & 63) << 6) | (Int.from_u8(byte_at(text, at + 3)) & 63)
+    if codepoint < 65536 -> return (unit: codepoint, position: at + width, pending: -1)
+    (unit: 55296 + ((codepoint - 65536) >> 10), position: at + width, pending: 56320 + ((codepoint - 65536) & 1023))
+}
+
+fn compare_text_units(left: String, right: String) -> Int Never! {
+    li := 0
+    ri := 0
+    lp := -1
+    rp := -1
+    loop {
+        left_end :: li >= left.count_bytes() && lp < 0
+        right_end :: ri >= right.count_bytes() && rp < 0
+        if left_end && right_end -> return 0
+        if left_end -> return -1
+        if right_end -> return 1
+        lu := lp
+        ru := rp
+        if lp >= 0 -> lp = -1
+        else {
+            decoded :: next_text_unit(left, li)
+            lu = decoded.unit
+            li = decoded.position
+            lp = decoded.pending
+        }
+        if rp >= 0 -> rp = -1
+        else {
+            decoded :: next_text_unit(right, ri)
+            ru = decoded.unit
+            ri = decoded.position
+            rp = decoded.pending
+        }
+        if lu < ru -> return -1
+        if lu > ru -> return 1
+    }
+}
+
+fn parse_int64(text: String) -> Int? Never! {
+    length :: text.count_bytes()
+    if length == 0 || length > 20 -> return None
+    negative :: byte_at(text, 0) == (U8{45})
+    at := if negative -> 1 else -> 0
+    if at == length -> return None
+    magnitude := U64{0}
+    loop at < length {
+        byte :: Int.from_u8(byte_at(text, at))
+        if byte < 48 || byte > 57 -> return None
+        digit :: U64{byte - 48}
+        if magnitude > (U64{922337203685477580}) -> return None
+        if magnitude == (U64{922337203685477580}) && digit > (if negative -> U64{8} else -> U64{7}) -> return None
+        magnitude = magnitude * U64{10} + digit
+        at += 1
+    }
+    if negative {
+        if magnitude == (U64{9223372036854775808}) -> return Val(-9223372036854775808)
+        return Val(-Int.from_u64(magnitude))
+    }
+    Val(Int.from_u64(magnitude))
+}
+
+fn ascii_text(bytes: ^[U8]) -> String Never! {
+    encoding.__utf8_validate(bytes) ?? panic("Core ASCII formatter produced invalid UTF-8")
+    out := ""
+    #Unsafe("the shared UTF-8 validator accepted this exact owned formatter buffer") {
+        out = encoding.__bytes_into_text(^bytes)
+    }
+    out
+}
+
+// Rust's shipped stream writer used binary64 Display, not Jet's Debug-style
+// Float display. Re-spell the existing shortest digits without another kernel.
+fn wire_float(value: Float) -> String Never! {
+    shown :: "{value}"
+    bytes := encoding.__text_into_bytes(^shown)
+    negative :: bytes[0] == (U8{45})
+    start :: if negative -> 1 else -> 0
+    decimal := -1
+    exponent_at := bytes.len()
+    loop i in start..<bytes.len() {
+        if bytes[i] == (U8{46}) -> decimal = i - start
+        if bytes[i] == (U8{101}) || bytes[i] == (U8{69}) { exponent_at = i; break }
+    }
+    if decimal < 0 -> decimal = exponent_at - start
+    exponent := 0
+    if exponent_at < bytes.len() {
+        at := exponent_at + 1
+        exponent_negative := false
+        if bytes[at] == (U8{45}) || bytes[at] == (U8{43}) {
+            exponent_negative = bytes[at] == (U8{45})
+            at += 1
+        }
+        loop at < bytes.len() {
+            exponent = exponent * 10 + Int.from_u8(bytes[at]) - 48
+            at += 1
+        }
+        if exponent_negative -> exponent = -exponent
+        loop bytes.len() > exponent_at -> _ :: &bytes.pop()
+    }
+    dot := -1
+    loop i in start..<bytes.len() {
+        if bytes[i] == (U8{46}) { dot = i; break }
+    }
+    if dot >= 0 {
+        loop i in dot..<(bytes.len() - 1) -> bytes[i] = bytes[i + 1]
+        _ :: &bytes.pop()
+    }
+    position :: decimal + exponent
+    loop bytes.len() - start > 1 && bytes[bytes.len() - 1] == (U8{48}) && bytes.len() - start > position -> _ :: &bytes.pop()
+    digits :: bytes.len() - start
+    if position >= digits {
+        loop _ in 0..<(position - digits) -> &bytes.push(U8{48})
+    } else if position > 0 {
+        &bytes.push(U8{0})
+        i := bytes.len() - 1
+        loop i > start + position { bytes[i] = bytes[i - 1]; i -= 1 }
+        bytes[start + position] = U8{46}
+    } else {
+        prefix :: 2 - position
+        loop _ in 0..<prefix -> &bytes.push(U8{0})
+        i := bytes.len() - 1
+        loop i >= start + prefix { bytes[i] = bytes[i - prefix]; i -= 1 }
+        bytes[start] = U8{48}
+        bytes[start + 1] = U8{46}
+        loop i in (start + 2)..<(start + prefix) -> bytes[i] = U8{48}
+    }
+    ascii_text(^bytes)
+}
