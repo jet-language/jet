@@ -62,7 +62,7 @@ impl<K: Eq + Clone, V: Clone> JetCache<K, V> {
         self.lru.add_new(key, value)
     }
     fn get<Q: ?Sized>(&mut self, key: &Q) -> Option<V> where K: std::borrow::Borrow<Q>, Q: PartialEq {
-        self.lru.get(key)
+        self.lru.get_matching(|stored| stored.borrow() == key)
     }
     fn remove<Q: ?Sized>(&mut self, key: &Q) -> Option<V> where K: std::borrow::Borrow<Q>, Q: PartialEq {
         self.lru.remove(key)

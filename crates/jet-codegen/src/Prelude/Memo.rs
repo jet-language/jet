@@ -44,6 +44,13 @@ impl<K: PartialEq + Clone, V: Clone> JetLru<K, V> {
         displaced
     }
 
+    fn get_matching(&mut self, mut matches: impl FnMut(&K) -> bool) -> Option<V> {
+        let index = self.entries.iter().position(|(stored, _)| matches(stored))?;
+        let (stored, value) = self.entries.remove(index);
+        let out = value.clone();
+        self.entries.insert(0, (stored, value));
+        Some(out)
+    }
 }
 
 #[derive(Clone)]
@@ -126,15 +133,12 @@ impl<K: PartialEq + Clone, V: Clone> JetMemo<K, V> {
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(index) = state.cache.entries.iter().position(|(stored, _)| stored.as_ref().is_some_and(|stored| stored.borrow() == key)) else {
+        let Some(value) = state.cache.get_matching(|stored| stored.as_ref().is_some_and(|stored| stored.borrow() == key)) else {
             state.misses += 1;
             return None;
         };
-        let (stored, value) = state.cache.entries.remove(index);
-        let out = value.clone();
-        state.cache.entries.insert(0, (stored, value));
         state.hits += 1;
-        Some(out)
+        Some(value)
     }
 
     pub fn put(&self, key: K, value: V) {
