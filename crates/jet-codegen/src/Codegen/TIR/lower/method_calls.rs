@@ -10360,9 +10360,6 @@ fn lower_method_call_impl(
                         | THandleOp::FileWriterFlush
                         | THandleOp::FileWriterWriteAll
                         | THandleOp::FileWriterFsync
-                        | THandleOp::CSVWriterWrite
-                        | THandleOp::CSVWriterFlush
-                        | THandleOp::CSVWriterFinish
                 ) {
                     lower_expr_as_mut_place(receiver, cx, env)
                 } else {

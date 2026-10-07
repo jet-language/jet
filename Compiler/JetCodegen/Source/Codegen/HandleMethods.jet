@@ -983,7 +983,6 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .JSONLWriterWrite -> return Val(jet_codegen_handle_h("jsonl_writer.write", "jet_enc_jsonl_writer_write", [Bool]{true, false}, Val(Effect.IO)))
         .JSONLWriterFlush -> return Val(jet_codegen_handle_h("jsonl_writer.flush", "jet_enc_jsonl_writer_flush", [Bool]{true}, Val(Effect.IO)))
         .JSONLWriterFinish -> return Val(jet_codegen_handle_h("jsonl_writer.finish", "jet_enc_jsonl_writer_finish", [Bool]{true}, Val(Effect.IO)))
-        .CSVReaderNext -> return Val(jet_codegen_handle_h("csv_reader.next", "jet_enc_csv_reader_next", [Bool]{true}, Val(Effect.IO)))
         .DataStreamNext -> return Val(jet_codegen_handle_h("data_stream.next", "jet_data_stream_next", [Bool]{true}, Val(Effect.IO)))
         .StreamWithEventTime -> return Val(jet_codegen_handle_h("stream.with_event_time", "jet_stream_with_event_time", [Bool]{false, false}, Val(Effect.IO)))
         .StreamWithEventTimeNs -> return Val(jet_codegen_handle_h("stream.with_event_time.datetime", "jet_stream_with_event_time_ns", [Bool]{false, false}, Val(Effect.IO)))
@@ -993,9 +992,6 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .XMLWriterWrite -> return Val(jet_codegen_handle_h("xml_writer.write", "jet_enc_xml_writer_write", [Bool]{true, false}, Val(Effect.IO)))
         .XMLWriterFlush -> return Val(jet_codegen_handle_h("xml_writer.flush", "jet_enc_xml_writer_flush", [Bool]{true}, Val(Effect.IO)))
         .XMLWriterFinish -> return Val(jet_codegen_handle_h("xml_writer.finish", "jet_enc_xml_writer_finish", [Bool]{true}, Val(Effect.IO)))
-        .CSVWriterWrite -> return Val(jet_codegen_handle_h("csv_writer.write", "jet_enc_csv_writer_write", [Bool]{true, false}, Val(Effect.IO)))
-        .CSVWriterFlush -> return Val(jet_codegen_handle_h("csv_writer.flush", "jet_enc_csv_writer_flush", [Bool]{true}, Val(Effect.IO)))
-        .CSVWriterFinish -> return Val(jet_codegen_handle_h("csv_writer.finish", "jet_enc_csv_writer_finish", [Bool]{true}, Val(Effect.IO)))
         .CBORReaderNext -> return Val(jet_codegen_handle_h("cbor_reader.next", "jet_enc_cbor_reader_next", [Bool]{true}, Val(Effect.IO)))
         .CBORWriterWrite -> return Val(jet_codegen_handle_h("cbor_writer.write", "jet_enc_cbor_writer_write", [Bool]{true, false}, Val(Effect.IO)))
         .CBORWriterFlush -> return Val(jet_codegen_handle_h("cbor_writer.flush", "jet_enc_cbor_writer_flush", [Bool]{true}, Val(Effect.IO)))
@@ -1351,7 +1347,7 @@ fn jet_codegen_handle_receiver_is_mutating(operation: THandleOp) -> Bool Never! 
         else -> {}
     }
     if operation == {
-        .FileReaderReadLine | .FileReaderRead | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .CSVWriterWrite | .CSVWriterFlush | .CSVWriterFinish | .ClockTick | .ClockAdvance | .ClockWait | .FakeName | .FakeEmail | .FakeHost | .FakeAddress | .TCPStreamRead | .TCPStreamWrite | .TCPStreamClose | .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite | .SolverRequire -> true
+        .FileReaderReadLine | .FileReaderRead | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .ClockTick | .ClockAdvance | .ClockWait | .FakeName | .FakeEmail | .FakeHost | .FakeAddress | .TCPStreamRead | .TCPStreamWrite | .TCPStreamClose | .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite | .SolverRequire -> true
         else -> false
     }
 }

@@ -1088,10 +1088,16 @@ fn bridge_tool_on_path(tool: String) -[FS, Env]> Bool Never! {
                 next
             }
         }
-        if directory.len() > 0 -> &directory.push(U8{47})
+        if directory.len() > 0 {
+            last :: directory[directory.len() - 1]
+            drive_relative :: windows && directory.len() == 2 && directory[1] == (U8{58})
+            if last != (U8{47}) && (!windows || last != (U8{92})) && !drive_relative {
+                &directory.push(if windows -> U8{92} else -> U8{47})
+            }
+        }
         loop b in tool.bytes() -> &directory.push(b)
         is_file :: #Unsafe("native path bytes originate from the host environment and are split at ASCII boundaries") {
-            core.data.__host_path_is_file(directory)
+            core.data.__host_path_is_file(directory) ?? false
         }
         if is_file -> return true
         directory = [U8]{}

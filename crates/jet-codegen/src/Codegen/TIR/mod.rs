@@ -14141,7 +14141,6 @@ pub enum THandleOp {
     JSONLWriterWrite,
     JSONLWriterFlush,
     JSONLWriterFinish,
-    CSVReaderNext,
     /// D-DATAFLOW1=A: typed pull `DataStream<T>.next()` → `?T !DataError`.
     DataStreamNext,
     /// D-FOUND-COREAPI1 / #2853: shared event-time stream operators.
@@ -14154,9 +14153,6 @@ pub enum THandleOp {
     XMLWriterWrite,
     XMLWriterFlush,
     XMLWriterFinish,
-    CSVWriterWrite,
-    CSVWriterFlush,
-    CSVWriterFinish,
     CBORReaderNext,
     CBORWriterWrite,
     CBORWriterFlush,

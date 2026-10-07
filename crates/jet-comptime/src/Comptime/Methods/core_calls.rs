@@ -601,6 +601,13 @@ mod data_kernel {
         #[derive(Clone, Debug, PartialEq, Eq)]
         pub(crate) struct EncodingError;
 
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub(crate) struct EncodingCause {
+            pub(crate) kind: String,
+            pub(crate) os_code: JetOutcome<i64, JetAbsent>,
+            pub(crate) message: String,
+        }
+
         #[derive(Clone, Debug)]
         pub(crate) struct DataError {
             pub(crate) kind: DataErrorKind,

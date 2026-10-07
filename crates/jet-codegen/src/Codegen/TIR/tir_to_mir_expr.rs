@@ -4539,9 +4539,6 @@ pub(super) fn lower_expr(
                         | THandleOp::FileWriterFlush
                         | THandleOp::FileWriterWriteAll
                         | THandleOp::FileWriterFsync
-                        | THandleOp::CSVWriterWrite
-                        | THandleOp::CSVWriterFlush
-                        | THandleOp::CSVWriterFinish
                         | THandleOp::ClockTick
                         | THandleOp::ClockAdvance
                         | THandleOp::ClockWait

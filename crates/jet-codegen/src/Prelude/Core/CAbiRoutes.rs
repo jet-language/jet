@@ -13292,15 +13292,6 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.encoding.cbor.parse
-    #[no_mangle]
-    pub extern "C" fn jet_enc_cbor_parse(a0_0: *const u64, a0_1: i64, a1: *mut crate::jet_std::CBOROptions, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut crate::jet_std::CBORError) -> i64 {
-        guard(|| match crate::jet_enc_cbor_parse(&list_in(a0_0, a0_1, |w| w as u8), unsafe { &*a1 }.clone()) {
-            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
     /// core.handle.cbor_writer.finish
     #[no_mangle]
     pub extern "C" fn jet_enc_cbor_writer_finish(a0: *mut crate::jet_std::CBORWriter, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
@@ -13323,33 +13314,6 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_enc_cbor_writer_write(a0: *mut crate::jet_std::CBORWriter, a1: *mut crate::jet_std::DataEvent, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
         guard(|| match crate::jet_enc_cbor_writer_write(unsafe { &mut *a0 }, unsafe { &*a1 }.clone()) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.handle.csv_writer.finish
-    #[no_mangle]
-    pub extern "C" fn jet_enc_csv_writer_finish(a0: *mut crate::jet_std::CSVWriter, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
-        guard(|| match crate::jet_enc_csv_writer_finish(unsafe { &mut *a0 }) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.handle.csv_writer.flush
-    #[no_mangle]
-    pub extern "C" fn jet_enc_csv_writer_flush(a0: *mut crate::jet_std::CSVWriter, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
-        guard(|| match crate::jet_enc_csv_writer_flush(unsafe { &mut *a0 }) {
-            Ok(()) => 1,
-            Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
-        })
-    }
-
-    /// core.handle.csv_writer.write
-    #[no_mangle]
-    pub extern "C" fn jet_enc_csv_writer_write(a0: *mut crate::jet_std::CSVWriter, a1_0: *const u64, a1_1: i64, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
-        guard(|| match crate::jet_enc_csv_writer_write(unsafe { &mut *a0 }, list_in(a1_0, a1_1, |w| view(w as JetCString).to_owned())) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -22230,6 +22194,7 @@ mod jet_c_abi_routes {
 //   jet_data_count (core.data.count): generic
 //   jet_data_csv_reader (core.data.csv_reader): generic
 //   jet_data_entries_to_map (core.collections.entries_to_map): generic
+//   jet_data_host_path_is_file (core.data.__host_path_is_file): no runtime function
 //   jet_data_inner_join_checked_default (core.data.inner_join): generic
 //   jet_data_json_decode (core.data.json): generic
 //   jet_data_json_reader (core.data.json_reader): generic
@@ -22317,15 +22282,9 @@ mod jet_c_abi_routes {
 //   jet_edit_disjoint (TIR/routes.rs): generic
 //   jet_enc_cbor_reader (core.encoding.cbor.reader): parameter types input: JetFileReader, limits: jet_std::EncodingLimits
 //   jet_enc_cbor_reader_next (core.handle.cbor_reader.next): result type Result<JetOutcome<jet_std::DataEvent, JetAbsent>, jet_std::EncodingError>
-//   jet_enc_cbor_to_bytes (core.encoding.cbor.to_bytes): generic
-//   jet_enc_cbor_to_bytes_canonical (core.encoding.cbor.to_bytes_canonical): generic
 //   jet_enc_cbor_writer (core.encoding.cbor.writer): parameter types output: JetFileWriter, limits: jet_std::EncodingLimits
 //   jet_enc_csv_decode (core.encoding.csv.decode): generic
 //   jet_enc_csv_query (core.encoding.csv.query): generic
-//   jet_enc_csv_reader (core.encoding.csv.reader): parameter types  input: JetFileReader, limits: jet_std::EncodingLimits, delimiter: String, header: bool, skip_blank: bool, 
-//   jet_enc_csv_reader_next (core.handle.csv_reader.next): result type Result<JetOutcome<jet_std::CSVRow, JetAbsent>, jet_std::EncodingError>
-//   jet_enc_csv_to_string (core.encoding.csv.to_string): generic
-//   jet_enc_csv_writer (core.encoding.csv.writer): parameter types output: JetFileWriter, limits: jet_std::EncodingLimits
 //   jet_enc_json_reader (core.encoding.json.reader): parameter types  input: JetFileReader, limits: jet_std::EncodingLimits, 
 //   jet_enc_json_reader_next (core.handle.json_reader.next): result type Result<JetOutcome<jet_std::DataEvent, JetAbsent>, jet_std::EncodingError>
 //   jet_enc_json_writer (core.encoding.json.writer): parameter types  output: JetFileWriter, limits: jet_std::EncodingLimits, canonical: bool, 
@@ -22333,12 +22292,10 @@ mod jet_c_abi_routes {
 //   jet_enc_jsonl_reader_next (core.handle.jsonl_reader.next): result type Result<JetOutcome<jet_std::DataTree, JetAbsent>, jet_std::EncodingError>
 //   jet_enc_jsonl_writer (core.encoding.jsonl.writer): parameter types  output: JetFileWriter, limits: jet_std::EncodingLimits, 
 //   jet_enc_toml_decode (TIR/lower/method_calls.rs): generic
-//   jet_enc_toml_to_string (core.encoding.toml.to_string): generic
 //   jet_enc_xml_decode (core.encoding.xml.decode): generic
 //   jet_enc_xml_reader (core.encoding.xml.reader): parameter types  input: JetFileReader, limits: jet_std::EncodingLimits, xml: jet_std::XMLParseOptions, 
 //   jet_enc_xml_reader_next (core.handle.xml_reader.next): result type Result<JetOutcome<jet_std::DataTree, JetAbsent>, jet_std::EncodingError>
 //   jet_enc_yaml_decode (TIR/lower/method_calls.rs): generic
-//   jet_enc_yaml_to_string (core.encoding.yaml.to_string): generic
 //   jet_eq (TIR/routes.rs): generic
 //   jet_expect_snapshot (core.test.expect_snapshot): no runtime function
 //   jet_expiring_get (core.handle.expiring.get): generic
@@ -22651,6 +22608,21 @@ mod jet_c_abi_routes {
 //   jet_process_stdin_close (core.handle.process.stdin_close): parameter types  handle: &std::rc::Rc<std::cell::RefCell<Option<jet_std::ProcessStdin>>>, 
 //   jet_process_stdin_write (core.handle.process.stdin_write): platform-gated
 //   jet_random_os_entropy (core.crypto.random.__os_entropy): no runtime function
+//   jet_raw_bytes_into_text (core.encoding.__bytes_into_text): no runtime function
+//   jet_raw_encoding_flush (core.encoding.__flush): no runtime function
+//   jet_raw_encoding_read_byte (core.encoding.__read_byte): no runtime function
+//   jet_raw_encoding_write_bytes (core.encoding.__write_bytes): no runtime function
+//   jet_raw_encoding_write_text (core.encoding.__write_text): no runtime function
+//   jet_raw_list_capacity (core.mem.__list_capacity): no runtime function
+//   jet_raw_list_reserve_exact (core.mem.__list_reserve_exact): no runtime function
+//   jet_raw_object_entries_view (core.encoding.__object_entries_view): no runtime function
+//   jet_raw_object_from_entries (core.encoding.__object_from_entries): no runtime function
+//   jet_raw_object_into_entries (core.encoding.__object_into_entries): no runtime function
+//   jet_raw_string_byte (core.encoding.__string_byte): no runtime function
+//   jet_raw_text_into_bytes (core.encoding.__text_into_bytes): no runtime function
+//   jet_raw_tree_tag (core.encoding.__tree_tag): no runtime function
+//   jet_raw_type_size (core.mem.__type_size): no runtime function
+//   jet_raw_typed_text (core.encoding.__typed_text): no runtime function
 //   jet_reader_read_f32_be (core.handle.reader.read_f32_be): result type Result<f32, String>
 //   jet_reader_read_f32_le (core.handle.reader.read_f32_le): result type Result<f32, String>
 //   jet_receipt_attach (receipt.attach): generic
@@ -22809,6 +22781,7 @@ mod jet_c_abi_routes {
 //   jet_string_after_view (core.builtin.string_after_view): generic
 //   jet_string_before_view (core.builtin.string_before_view): generic
 //   jet_string_try_push (core.builtin.string_try_push): parameter types text: &mut String, addition: &str
+//   jet_string_validate_utf8 (core.encoding.__utf8_validate): no runtime function
 //   jet_sync_counter_merge (core.sync.counter_merge): no runtime function
 //   jet_sync_counter_value (core.sync.counter_value): no runtime function
 //   jet_sync_list_merge (core.sync.list_merge): no runtime function
