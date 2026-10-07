@@ -1245,10 +1245,71 @@ thread safety or change language borrow rules.
 This ABI is not an implicit transaction: explicit writes to live mutable
 bindings retain their ordinary meaning. A recoverable interrupt must propagate
 through MIR-visible polling and normal cleanup, leaving the host alive. The
-current comptime failure boundary exits the process; it cannot implement that
-contract. No `longjmp` may skip owners' drops. Panic/trap terminates the worker
-and invalidates its session. The host/slot substrate alone does not activate a
-REPL cutover or claim interruptible native lowering.
+shared task-control stop record distinguishes recoverable fuel/depth and
+cancel/deadline stops from fatal panic/trap. No `longjmp` may skip owners'
+drops. Panic/trap terminates the child and invalidates every live binding.
+
+The Jet service (`Image/SessionHost.jet`) owns the runtime and all mapped
+images on one thread. The CLI private `--native-session-host` entry starts a
+fresh process with `posix_spawn`, not a fork of compiler locks. Its fd 3 is
+one private duplex socket: decimal UTF-8 byte length, newline, exactly that
+many JSON body bytes. User stdout/stderr never participate in framing.
+`JetDriverCompileRequest.execution_host` is the compiler's host capability.
+The CLI's `JetCliNativeExecutor` owns the child for the compilation/session
+lifetime and explicitly closes it after the last request. Both comptime and
+turn requests use this same child and canonical task control; each request
+ends its scope before the next starts. Successful scalar replies tag their
+type and carry exact integers/IEEE bits as strings. Compiler-generated turn
+wrappers may return type-directed JSON, never rendered Display reinjection.
+Stopped calls never read or drop their uninitialized output cell. Fatal
+records retain exact messages and optional sites; a signal without a record
+becomes Trap with absent site fields. The host reaps and starts a fresh child,
+but never retries a failed request, reinstalls previous images, or replays
+side effects.
+
+
+## Stop points
+
+The unified execution host (#4720) runs session turns and native comptime in
+one persistent child. Interrupts, deadlines and comptime fuel/depth limits
+stop recoverably inside that child and leave through explicit MIR cleanup;
+a panic or trap invalidates the child and the host restarts it. MIR carries
+the stop paths, so no backend call falls through after a flag is set:
+
+- `Poll { kind: Check | Propagate, resume, stop }` (MIR.jet `MIRPollKind`,
+  MIR.rs `MirPollKind`). `Check` delivers a pending session interrupt; it
+  sits at function entry and at each loop continue target, where every live
+  value is owned by a cleanup frame. `Propagate` directly follows a can-stop
+  operation (`mir_operation_can_stop`: calls, Core calls, callbacks, waits)
+  and reads only a stop that operation already delivered, so a result that
+  initialized before a late interrupt stays owned until the next Check.
+- `Stopped` ends the stop edge after canonical cleanup. The function returns
+  with the stop still delivered on the task control and no result written;
+  its value ABI does not change.
+
+Legality (Legality.jet `mir_pass_validate_stop_points`, MIR.rs
+`validate_stop_points`): a Propagate follows a can-stop operation; every
+read, projection or drop of its result (a phi input by its incoming edge) is
+dominated by the resume edge; a function with Stopped has one Shield depth
+per block and zero at every Stopped. Cleanup, Shield and transaction regions
+carry no stop points (cleanup is Shield-masked).
+
+Only host compilations produce stop points (`JetCodegenProgram.stop_points`;
+for comptime the driver's `JetDriverCompileRequest.comptime_stop_points`,
+set by the native comptime selection); the Rust and web emitters, the
+evaluator and the inliner refuse them. O0 lowers `Check` to
+`jet_rt_session_poll()`, `Propagate` to `jet_rt_session_propagate()` (any
+nonzero word takes the stop edge) and `Stopped` to a return.
+
+Comptime budgets are can-stop operations too (`comptime_budget`, compiler
+callables only): a Prelude call `jet_rt_comptime_enter(start, end)` after the
+parameters and `jet_rt_comptime_step(start, end)` at each loop continue
+target, each followed by its Propagate, and `jet_rt_comptime_leave()` (depth
+bookkeeping, no poll) before each Return. MIR carries the site's source span;
+O0 prepends the function's owner row in the program it lowers, the dense row
+the stop record names. When fuel or depth runs out the runtime publishes a
+BudgetFuel/BudgetDepth stop on the task control and returns; the Propagate
+takes the stop edge.
 ## Tiered recompilation
 
 The tier model (D-TIER-FORM1, D-TIER-ONEIR1) recompiles a hot function at a
