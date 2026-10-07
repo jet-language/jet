@@ -3,22 +3,12 @@
 // uses fewer blocks per class than one slab can hold, so no full slab can be
 // unlinked during the live-total snapshot. No direct allocations are used.
 // C callbacks deliver the real budget stop rail, leaving result slots unwritten.
-fn coll_stop_live(width: I64) -> I64 {
-    total := I64{0}
-    slab := trap_word(alloc_head(alloc_root, width))
-    loop slab != (I64{0}) {
-        total += trap_word(slab + I64{24})
-        slab = trap_word(slab)
-    }
-    total
-}
-
 #Export(c) fn collections_stop_test(family: I64, unary: I64, binary: I64, show: I64, release: I64, list_drop: I64) {
     snapshot :: jet_rt_alloc(I64{64}, I64{8})
     width := I64{32}
     at := I64{0}
     loop at < (I64{8}) {
-        trap_store(snapshot + at * I64{8}, coll_stop_live(width))
+        trap_store(snapshot + at * I64{8}, coll_test_live(width))
         width *= I64{2}
         at += I64{1}
     }
@@ -71,7 +61,7 @@ fn coll_stop_live(width: I64) -> I64 {
     width = I64{32}
     at = I64{0}
     loop at < (I64{8}) {
-        coll_test_require(coll_stop_live(width) == trap_word(snapshot + at * I64{8}))
+        coll_test_require(coll_test_live(width) == trap_word(snapshot + at * I64{8}))
         width *= I64{2}
         at += I64{1}
     }
