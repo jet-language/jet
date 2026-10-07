@@ -293,7 +293,6 @@ fn jet_history_dyn_capture(value: &jet_std::Dyn, depth: usize) -> Result<jet_std
         Tree::Float(value) => ("float", Tree::Text(value.to_bits().to_string())),
         Tree::Number(value) => ("number", Tree::Text(value.clone())),
         Tree::Text(value) => ("text", Tree::Text(value.clone())),
-        Tree::TypedText(value) => ("typed_text", Tree::Text(value.clone())),
         Tree::Bytes(value) => ("bytes", Tree::Array(value.iter().map(|value| Tree::Int(i64::from(*value))).collect())),
         Tree::Array(values) => ("array", Tree::Array(values.iter().map(|value| {
             jet_history_dyn_capture(value, depth + 1)
@@ -816,7 +815,7 @@ mod jet_testing_history_web {
 
     fn required_text(root: &Tree, name: &str) -> Result<String, String> {
         match field(root, name) {
-            Some(Tree::Text(value) | Tree::TypedText(value)) => Ok(value.clone()),
+            Some(Tree::Text(value)) => Ok(value.clone()),
             Some(_) => Err(format!("{name} must be text")),
             None => Err(format!("history wire field `{name}` is missing")),
         }
@@ -956,7 +955,7 @@ mod jet_testing_history_web {
 
     fn required_text_any(root: &Tree, names: &[&str], label: &str) -> Result<String, String> {
         match required_any(root, names, label)? {
-            Tree::Text(value) | Tree::TypedText(value) => Ok(value.clone()),
+            Tree::Text(value) => Ok(value.clone()),
             _ => Err(format!("{label} must be text")),
         }
     }
@@ -987,7 +986,7 @@ mod jet_testing_history_web {
 
     fn tagged<'a>(value: &'a Tree, label: &str) -> Result<(&'a str, &'a [Tree]), String> {
         let tag = match field(value, "tag") {
-            Some(Tree::Text(tag) | Tree::TypedText(tag)) => tag.as_str(),
+            Some(Tree::Text(tag)) => tag.as_str(),
             _ => return Err(format!("{label}.tag must be text")),
         };
         let values = match required_any(value, &["values"], label)? {
@@ -1006,7 +1005,7 @@ mod jet_testing_history_web {
                     .map(HistoryValue::Integer)
                     .map_err(|_| format!("{label} integer is out of range")),
                 Tree::Bool(value) => Ok(HistoryValue::Boolean(*value)),
-                Tree::Text(value) | Tree::TypedText(value) => Ok(HistoryValue::Text(value.clone())),
+                Tree::Text(value) => Ok(HistoryValue::Text(value.clone())),
                 _ => Err(format!("{label} is not a HistoryValue")),
             };
         };
@@ -1014,11 +1013,11 @@ mod jet_testing_history_web {
         match (tag, values) {
             ("Integer", [value]) => Ok(HistoryValue::Integer(integer(value, label)?)),
             ("Boolean", [Tree::Bool(value)]) => Ok(HistoryValue::Boolean(*value)),
-            ("Text", [Tree::Text(value) | Tree::TypedText(value)]) => Ok(HistoryValue::Text(value.clone())),
+            ("Text", [Tree::Text(value)]) => Ok(HistoryValue::Text(value.clone())),
             ("Handle", [value]) => Ok(HistoryValue::Handle(crate::jet_testing_history_foundation::HandleId {
                 value: history_id(value, label)?,
             })),
-            ("Redacted", [Tree::Text(value) | Tree::TypedText(value)]) => Ok(HistoryValue::Redacted(value.clone())),
+            ("Redacted", [Tree::Text(value)]) => Ok(HistoryValue::Redacted(value.clone())),
             _ => Err(format!("{label} has an invalid HistoryValue variant")),
         }
     }
@@ -1028,7 +1027,7 @@ mod jet_testing_history_web {
             return Ok(None);
         }
         if let Tree::Object(_) = value {
-            if let Some(Tree::Text(tag) | Tree::TypedText(tag)) = field(value, "tag") {
+            if let Some(Tree::Text(tag)) = field(value, "tag") {
                 let values = match required_any(value, &["values"], label)? {
                     Tree::Array(values) => values,
                     _ => return Err(format!("{label}.values must be an array")),
@@ -1045,7 +1044,7 @@ mod jet_testing_history_web {
 
     fn history_precondition(value: &Tree, label: &str) -> Result<HistoryPrecondition, String> {
         if let Tree::Object(_) = value {
-            if let Some(Tree::Text(kind) | Tree::TypedText(kind)) = field(value, "kind") {
+            if let Some(Tree::Text(kind)) = field(value, "kind") {
                 return match kind.as_str() {
                     "handle_live" => Ok(HistoryPrecondition::HandleLive(
                         crate::jet_testing_history_foundation::HandleId {
@@ -1079,7 +1078,7 @@ mod jet_testing_history_web {
                     value: history_id(value, label)?,
                 },
             )),
-            ("HandleState", [handle, Tree::Text(state) | Tree::TypedText(state)]) => {
+            ("HandleState", [handle, Tree::Text(state)]) => {
                 Ok(HistoryPrecondition::HandleState {
                     handle: crate::jet_testing_history_foundation::HandleId {
                         value: history_id(handle, label)?,
@@ -1207,7 +1206,7 @@ mod jet_testing_history_web {
             return Ok(None);
         }
         if let Tree::Object(_) = value {
-            if let Some(Tree::Text(tag) | Tree::TypedText(tag)) = field(value, "tag") {
+            if let Some(Tree::Text(tag)) = field(value, "tag") {
                 let values = match required_any(value, &["values"], label)? {
                     Tree::Array(values) => values,
                     _ => return Err(format!("{label}.values must be an array")),
@@ -1470,7 +1469,7 @@ mod jet_testing_history_web {
             };
             std::str::from_utf8(bytes)
                 .ok()
-                .and_then(|value| jet_std::parse_json_typed_dyn(value).ok())
+                .and_then(|value| jet_std::parse_json_dyn(value).ok())
         });
         OUTPUT.with(|cell| cell.borrow_mut().clear());
         let parsed = parsed.ok_or_else(|| format!("{role} callback returned invalid JSON"))?;
@@ -1484,7 +1483,7 @@ mod jet_testing_history_web {
                 .ok_or_else(|| format!("{role} callback omitted its value"))
         } else {
             match field(&parsed, "reason") {
-                Some(Tree::Text(reason) | Tree::TypedText(reason)) => Err(format!(
+                Some(Tree::Text(reason)) => Err(format!(
                     "{role} callback failed: {reason}"
                 )),
                 _ => Err(format!("{role} callback failed without a reason")),
@@ -1719,7 +1718,7 @@ mod jet_testing_history_web {
         let run = runner
             .run_strategy::<Command, _, _>(&strategy, |typed| {
                 let case = &typed.case;
-                let input = match jet_std::parse_json_typed_dyn(&case.json()) {
+                let input = match jet_std::parse_json_dyn(&case.json()) {
                     Ok(input) => input,
                     Err(error) => {
                         return ComparisonRecord::terminal(
@@ -1869,7 +1868,7 @@ mod jet_testing_history_web {
         });
         let result = input
             .and_then(|bytes| std::str::from_utf8(&bytes).ok().map(str::to_string))
-            .and_then(|wire| jet_std::parse_json_typed_dyn(&wire).ok())
+            .and_then(|wire| jet_std::parse_json_dyn(&wire).ok())
             .map_or_else(
                 || Err("invalid testing history WebWasm wire JSON".to_string()),
                 |wire| run_wire(&wire),

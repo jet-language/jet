@@ -1791,7 +1791,7 @@ fn check_json_snapshots_for_edits(path: &PathBuf, failures: &mut Vec<String>) {
             }
             let has_applicability = matches!(
                 jet_foundation::JSON::json_get(&report, "applicability"),
-                Some(Dyn::Text(value) | Dyn::TypedText(value))
+                Some(Dyn::Text(value))
                     if value == "safe" || value == "suggested"
             );
             if !has_applicability {
@@ -1806,7 +1806,7 @@ fn check_json_snapshots_for_edits(path: &PathBuf, failures: &mut Vec<String>) {
                 Some(Dyn::Array(edits))
                     if edits.iter().all(|edit| matches!(
                         jet_foundation::JSON::json_get(edit, "safety"),
-                        Some(Dyn::Text(value) | Dyn::TypedText(value))
+                        Some(Dyn::Text(value))
                             if [
                                 jet_foundation::Report::FixSafety::Formatting,
                                 jet_foundation::Report::FixSafety::BehaviorPreserving,

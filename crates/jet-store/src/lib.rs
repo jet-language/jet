@@ -481,7 +481,7 @@ impl BuildRecord {
             let duration_ms = match field(node, "duration_ms")
                 .ok_or_else(|| "build record node is missing duration_ms".to_string())?
             {
-                Dyn::Int(value) => *value as f64,
+                Dyn::Int(value) => value.to_f64(),
                 Dyn::Float(value) => *value,
                 _ => return Err("build record node duration_ms is invalid".to_string()),
             };

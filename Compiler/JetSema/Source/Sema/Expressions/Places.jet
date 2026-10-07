@@ -368,6 +368,16 @@ fn sema_expression_field(base: Expr, member: String, span: Span, expected: Type?
     }
     sema_scope_commit(&scopes, base_scope_mark)
     checked_base :: checked_base_value ?? return None
+    if sema_dyn_is_type(sema_expr_expected_type(checked_base.ty, environment)) {
+        if sema_dyn_is_member(member) {
+            &diagnostics.push(sema_dyn_member_error(member, member_span))
+            return None
+        }
+        key :: sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: member}}}, member_span)
+        operation :: THandleOp.DynIndexKey{site: "{sema_dyn_site(base)}.{member}", location: sema_expression_panic_location(environment, scopes, span)}
+        value :: sema_tir_expr(sema_dyn_type(), TExprKind.HandleMethod{receiver: checked_base, operation: operation, args: [TExpr]{key}}, span)
+        return sema_expr_expected(value, expected, environment, &diagnostics)
+    }
     if !sema_expression_secret_exposure_allowed(checked_base.ty, member, span, environment, &context, &diagnostics) -> return None
     sema_expression_field_checked(checked_base, member, span, expected, environment, &scopes, &context, &diagnostics)
 }

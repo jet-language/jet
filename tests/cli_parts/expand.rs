@@ -7,7 +7,7 @@ fn normalize_expand_json(text: &str) -> Dyn {
             Dyn::Object(fields) => {
                 for (key, value) in fields {
                     if key == "elapsed_ms" {
-                        *value = Dyn::Int(0);
+                        *value = Dyn::Int((0).into());
                     } else {
                         scrub(value);
                     }

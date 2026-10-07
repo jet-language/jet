@@ -13,6 +13,7 @@ use jet_foundation.[
     TExprKind,
     TFailureCarrier,
     THandleOp,
+    TMapEntry,
     THostCall,
     TTypedTextForm,
     Type,
@@ -44,6 +45,109 @@ fn sema_data_source_type_name(environment: SemaScopeEnvironment, leaf: String) -
     "{leaf}"
 }
 
+fn sema_dyn_is_type(ty: Type) -> Bool Never! {
+    ty == (Type.Named{name: "Dyn"})
+}
+
+fn sema_dyn_is_member(name: String) -> Bool Never! {
+    name == "get" || name == "has" || name == "keys" || name == "remove" || name == "len" || name == "decode" || name == "to_text" || name == "field" || name == "at" || name == "int" || name == "float" || name == "text" || name == "bool" || name == "equal_unordered" || name == "encode"
+}
+
+fn sema_dyn_member_error(name: String, span: Span) -> Diagnostic {
+    sema_error("E0171", span, "`{name}` is a `Dyn` method, not a field", "Dyn member names are reserved for methods", "use indexing, for example `d[\"{name}\"]`")
+}
+
+fn sema_dyn_condition_error(span: Span) -> Diagnostic {
+    sema_error("E0170", span, "a `Dyn` value is not a condition", "Dyn has no implicit truthiness", "write `if d.decode<Bool>() ?? false -> …`")
+}
+
+fn sema_dyn_wrappable(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int | .Float | .String | .Bool -> true
+        .Named(name) -> name == "Dyn" || name == "DateTime" || name == "ZonedDateTime"
+        .List(element) | .FixedList(element, _) -> element == (Type.IntN{signed: false, bits: 8}) || sema_dyn_wrappable(element)
+        .Map(key, _, value) -> key == Type.String && sema_dyn_wrappable(value)
+        else -> false
+    }
+}
+
+fn sema_dyn_site(expr: Expr) -> String Never! {
+    return if expr == {
+        .Ident(name, _) -> name
+        .Field(base, member, _) -> "{sema_dyn_site(base)}.{member}"
+        .Index(base, index, _, _) -> "{sema_dyn_site(base)}[{sema_dyn_site(index)}]"
+        .Paren(inner, _) | .Place(inner, _, _) -> sema_dyn_site(inner)
+        .Int(value, _, _, _) -> "{value}"
+        .Float(value, _, _, raw) -> raw ?? "{value}"
+        .Bool(value, _) -> if value -> "true" else -> "false"
+        .Unary(op, inner, _) -> {
+            literal :: if inner == {
+                .Int(_, _, _, _) | .Float(_, _, _, _) -> true
+                else -> false
+            }
+            if op == UnOp.Neg && literal -> return "-{sema_dyn_site(inner)}"
+            "…"
+        }
+        .Str(parts, _) -> {
+            text := ""
+            loop part in parts {
+                if part == .Lit(piece) -> text = "{text}{piece}" else -> return "…"
+            }
+            "\"{text}\""
+        }
+        else -> "…"
+    }
+}
+
+fn sema_dyn_index_operation(ty: Type, site: String, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> THandleOp? {
+    location :: sema_expression_panic_location(environment, scopes, span)
+    resolved :: sema_expr_expected_type(ty, environment)
+    if resolved == Type.String -> return Val(THandleOp.DynIndexKey{site: site, location: location})
+    if resolved == Type.Int -> return Val(THandleOp.DynIndexAt{site: site, location: location})
+    &diagnostics.push(sema_error("E0505", span, "a Dyn index must be String or Int, not {type_name(ty)}", "Dyn objects use String keys and Dyn arrays use Int positions", "use a String key or Int index"))
+    None
+}
+
+fn sema_dyn_try_member(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if method != "get" && method != "has" && method != "keys" && method != "remove" && method != "len" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    count :: if method == "keys" || method == "len" -> 0 else -> 1
+    if !sema_data_check_explicit_type_args(method, type_args, 0, span, &diagnostics) || args.len() != count {
+        if args.len() != count -> sema_data_arity_diagnostic(method, count, args.len(), span, &diagnostics)
+        sema_data_check_discarded_arguments(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    typed := [TExpr]{}
+    operation := THandleOp.DynKeys
+    result_ty := Type.List{element: Type.String}
+    if method == "len" {
+        operation = THandleOp.DynLen{site: "{sema_dyn_site(receiver)}.len()", location: sema_expression_panic_location(environment, scopes, span)}
+        result_ty = Type.Int
+    }
+    if count == 1 {
+        sema_data_check_labels(method, args, [String]{}, span, &diagnostics)
+        if args[0].convention == AccessConvention.Move -> &diagnostics.push(sema_error("E0203", args[0].span, "a value was passed with the move marker `^` to a parameter that does not consume", "these Core arguments are read-only", "remove the move marker `^` here"))
+        argument :: sema_check_expression(args[0].expr, if method == "get" -> None else -> Val(Type.String), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        &typed.push(argument)
+        result_ty = Type.Option{inner: sema_dyn_type()}
+        if method == "get" {
+            index_ty :: sema_expr_expected_type(argument.ty, environment)
+            if index_ty != Type.String && index_ty != Type.Int {
+                &diagnostics.push(sema_error("E0505", args[0].span, "a Dyn index must be String or Int, not {type_name(argument.ty)}", "Dyn objects use String keys and Dyn arrays use Int positions", "use a String key or Int index"))
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
+            operation = if index_ty == Type.String -> THandleOp.DynGetKey else -> THandleOp.DynGetAt
+        }
+        if method == "has" {
+            operation = THandleOp.DynHas
+            result_ty = Type.Bool
+        }
+        if method == "remove" -> operation = THandleOp.DynRemove
+    }
+    convention :: if method == "remove" -> AccessConvention.Write else -> AccessConvention.Read
+    if !sema_ownership_check_call_receiver(&state, receiver, convention, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    value :: sema_tir_expr(result_ty, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: typed}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
+}
 fn sema_data_is_json_name(name: String) -> Bool Never! {
     name == "Dyn" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV"
 }
@@ -210,6 +314,10 @@ pub fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: 
     if resolved_ty == {
         .Named(name) -> {
             if sema_data_is_json_name(name) {
+                if name == "Dyn" {
+                    special :: sema_dyn_try_member(receiver, receiver_value, method, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+                    if special.handled -> return special
+                }
                 if method == "decode" {
                     if args.len() != 0 {
                         sema_data_arity_diagnostic("Dyn.decode<T>", 0, args.len(), span, &diagnostics)
@@ -350,6 +458,8 @@ fn sema_data_literal_expected(ty: Type, variant: String) -> Type? {
         "Int" -> { return Val(Type.Int) }
         "Float" -> { return Val(Type.Float) }
         "Text" -> { return Val(Type.String) }
+        "Bytes" -> { return Val(Type.List{element: Type.IntN{signed: false, bits: 8}}) }
+        "DateTime" -> { return Val(Type.Named{name: "ZonedDateTime"}) }
         "Array" -> { return Val(Type.List{element: sema_dyn_type()}) }
         "Object" -> { return Val(Type.Map{key: Type.String, key_span: None, value: sema_dyn_type()}) }
         else -> { return None }
@@ -358,7 +468,7 @@ fn sema_data_literal_expected(ty: Type, variant: String) -> Type? {
 
 fn sema_data_literal_variant_valid(ty: Type, variant: String) -> Bool Never! {
     if ty == (Type.Named{name: "DBValue"}) -> return variant == "Null" || variant == "Int" || variant == "Float" || variant == "Text" || variant == "Bool" || variant == "Blob"
-    sema_data_is_json_name(sema_data_type_name(ty) ?? "") && (variant == "Null" || variant == "Bool" || variant == "Int" || variant == "Float" || variant == "Text" || variant == "Array" || variant == "Object")
+    sema_data_is_json_name(sema_data_type_name(ty) ?? "") && (variant == "Null" || variant == "Bool" || variant == "Int" || variant == "Float" || variant == "Text" || variant == "Bytes" || variant == "DateTime" || variant == "Array" || variant == "Object")
 }
 
 fn sema_data_argument_is_borrowed(argument: Expr, scopes: SemaScopeTable) -> Bool Never! {
@@ -398,6 +508,23 @@ pub fn sema_call_try_html_raw(owner: String, method: String, args: [CallArg], sp
 pub fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     known_type :: sema_data_type_name(ty) ?? ""
     if ty != (Type.Named{name: "DBValue"}) && !sema_data_is_json_name(known_type) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if known_type == "Dyn" && (variant == "object" || variant == "from") {
+        count :: if variant == "object" -> 0 else -> 1
+        if args.len() != count {
+            sema_data_arity_diagnostic("Dyn.{variant}", count, args.len(), span, &diagnostics)
+            sema_data_check_discarded_arguments(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        if variant == "object" {
+            map :: sema_tir_expr(Type.Map{key: Type.String, key_span: None, value: sema_dyn_type()}, TExprKind.MapLit{entries: [TMapEntry]{}}, span)
+            value :: sema_tir_expr(sema_dyn_type(), TExprKind.JSONLit{variant: "Object", arg: Val(map), clone_arg: false}, span)
+            return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
+        }
+        sema_data_check_labels("Dyn.from", args, [String]{}, span, &diagnostics)
+        if args[0].convention == AccessConvention.Move -> &diagnostics.push(sema_error("E0203", args[0].span, "a value was passed with the move marker `^` to a parameter that does not consume", "Dyn.from reads the value's Encode contract", "remove the move marker `^` here"))
+        value :: sema_check_expression(args[0].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        return sema_data_check_encode(args[0].expr, value, [CallArg]{}, [Type]{}, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     if !sema_data_literal_variant_valid(ty, variant) {
         &diagnostics.push(sema_error("E0304", span, "`{type_name(ty)}` has no variant `{variant}`", "Dyn and DBValue expose closed compiler-owned literal variants", "check the variant name"))
         sema_data_check_discarded_arguments(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)

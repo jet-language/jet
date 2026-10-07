@@ -1171,7 +1171,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                     )))
                 }
             };
-            match crate::Comptime::EncodingLite::cbor_decode(&bytes, &options, false) {
+            match crate::Comptime::EncodingLite::cbor_decode(&bytes, &options) {
                 Ok(v) => Ok(CtValue::Present(Box::new(v))),
                 Err(error) => Ok(CtValue::failed(Box::new(
                     crate::Comptime::EncodingLite::cbor_encoding_error_value(error),
@@ -1184,7 +1184,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         ("core.encoding.cbor", "decode") => {
             let bytes = as_bytes(one(0)?, span)?;
             let options = crate::Comptime::EncodingLite::cbor_safe_options();
-            match crate::Comptime::EncodingLite::cbor_decode(&bytes, &options, false) {
+            match crate::Comptime::EncodingLite::cbor_decode(&bytes, &options) {
                 Ok(v) => Ok(CtValue::Present(Box::new(v))),
                 Err(e) => Ok(CtValue::failed(Box::new(CtValue::Str(e.reason)))),
             }

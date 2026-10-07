@@ -795,7 +795,7 @@ fn report_text(value: &Dyn) -> &str {
 
 fn report_int(value: &Dyn) -> i64 {
     match value {
-        Dyn::Int(value) => *value,
+        Dyn::Int(value) => value.to_i64().expect("JSON field integer is in range"),
         Dyn::Number(value) => value
             .parse()
             .unwrap_or_else(|_| panic!("JSON field must be an integer: {value}")),
@@ -806,7 +806,7 @@ fn report_int(value: &Dyn) -> i64 {
 fn report_float(value: &Dyn) -> f64 {
     match value {
         Dyn::Float(value) => *value,
-        Dyn::Int(value) => *value as f64,
+        Dyn::Int(value) => value.to_f64(),
         Dyn::Number(value) => value
             .parse()
             .unwrap_or_else(|_| panic!("JSON field must be numeric: {value}")),

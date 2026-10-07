@@ -155,10 +155,10 @@ fn binding_text(root: &Dyn, key: &str) -> Result<Option<String>, String> {
         return Ok(None);
     };
     match value {
-        Dyn::Text(value) | Dyn::TypedText(value) if !value.trim().is_empty() => {
+        Dyn::Text(value) if !value.trim().is_empty() => {
             Ok(Some(value.clone()))
         }
-        Dyn::Text(_) | Dyn::TypedText(_) => {
+        Dyn::Text(_) => {
             Err(format!("foreign binding `{key}` must not be empty"))
         }
         _ => Err(format!("foreign binding `{key}` must be a string")),
@@ -174,10 +174,10 @@ fn binding_strings(root: &Dyn, key: &str) -> Result<Vec<String>, String> {
         .map_err(|_| format!("foreign binding `{key}` must be an array"))?
         .iter()
         .map(|value| match value {
-            Dyn::Text(value) | Dyn::TypedText(value) if !value.trim().is_empty() => {
+            Dyn::Text(value) if !value.trim().is_empty() => {
                 Ok(value.clone())
             }
-            Dyn::Text(_) | Dyn::TypedText(_) => {
+            Dyn::Text(_) => {
                 Err(format!("foreign binding `{key}` entries must not be empty"))
             }
             _ => Err(format!("foreign binding `{key}` entries must be strings")),
@@ -455,7 +455,7 @@ fn parse_observation(
     let raw_value = object_value(object, prefix)
         .ok_or_else(|| format!("case observation `{prefix}` is missing"))?;
     let raw = match raw_value {
-        Dyn::Text(value) | Dyn::TypedText(value) => value.clone(),
+        Dyn::Text(value) => value.clone(),
         value => canonical_dyn(value),
     };
     let failure = object_text(object, &format!("{prefix}_failure"));
@@ -558,14 +558,14 @@ fn object_value<'a>(value: &'a Dyn, key: &str) -> Option<&'a Dyn> {
 
 fn object_text<'a>(value: &'a Dyn, key: &str) -> Option<&'a str> {
     match object_value(value, key)? {
-        Dyn::Text(value) | Dyn::TypedText(value) => Some(value),
+        Dyn::Text(value) => Some(value),
         _ => None,
     }
 }
 
 fn object_int(value: &Dyn, key: &str) -> Option<i64> {
     match object_value(value, key)? {
-        Dyn::Int(value) => Some(*value),
+        Dyn::Int(value) => value.to_i64(),
         Dyn::Number(value) => value.parse().ok(),
         _ => None,
     }
@@ -587,7 +587,7 @@ fn object_strings(value: &Dyn, key: &str) -> Result<Vec<String>, String> {
         .map_err(|_| format!("`{key}` must be an array"))?
         .iter()
         .map(|value| match value {
-            Dyn::Text(value) | Dyn::TypedText(value) => Ok(value.clone()),
+            Dyn::Text(value) => Ok(value.clone()),
             _ => Err(format!("`{key}` entries must be strings")),
         })
         .collect()
@@ -600,10 +600,11 @@ fn canonical_dyn(value: &Dyn) -> String {
         Dyn::Int(value) => value.to_string(),
         Dyn::Float(value) => value.to_string(),
         Dyn::Number(value) => value.clone(),
-        Dyn::TypedText(value) | Dyn::Text(value) => {
+        Dyn::Text(value) => {
             format!("\"{}\"", json_escape(value))
         }
         Dyn::Bytes(value) => format!("bytes:{}", value.len()),
+        Dyn::DateTime(value) => format!("\"{}\"", value.to_rfc3339()),
         Dyn::Array(values) => format!(
             "[{}]",
             values

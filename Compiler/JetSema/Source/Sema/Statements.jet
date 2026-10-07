@@ -36,6 +36,7 @@ use jet_foundation.[
     TFailureCarrier,
     TForInMethod,
     TGenericParam,
+    THandleOp,
     THostCall,
     TIntegerBounds,
     TLambda,
@@ -3949,11 +3950,44 @@ fn sema_stmt_check_assignment_place(target: LValue, compound: Bool, environment:
             checked_base_value :: sema_check_expression(base, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
             context.suppress_partial_move_root_read = previous_root_read
             checked_base :: checked_base_value ?? return None
+            if sema_dyn_is_type(sema_expr_expected_type(checked_base.ty, environment)) {
+                if sema_dyn_is_member(member) {
+                    &diagnostics.push(sema_dyn_member_error(member, span))
+                    return None
+                }
+                key :: sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: member}}}, span)
+                operation :: THandleOp.DynIndexKey{site: "{sema_dyn_site(base)}.{member}", location: sema_expression_panic_location(environment, scopes, span)}
+                return Val(sema_tir_expr(sema_dyn_type(), TExprKind.HandleMethod{receiver: checked_base, operation: operation, args: [TExpr]{key}}, span))
+            }
             return sema_expression_field_checked(checked_base, member, span, None, environment, &scopes, &context, &diagnostics)
         }
         .Index(base, index, span, kind) -> sema_expression_index(base, index, kind, span, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         else -> None
     }
+}
+
+fn sema_stmt_is_dyn_index(operation: THandleOp) -> Bool Never! {
+    if operation == {
+        .DynIndexKey(_, _) | .DynIndexAt(_, _) -> true
+        else -> false
+    }
+}
+
+// Collect the access chain without materializing intermediate Dyn copies:
+// the runtime setter walks the original root place and never grows prefixes.
+fn sema_stmt_dyn_path_root(place: ^TExpr, keys: &[Bool], steps: &[TExpr]) -> TExpr Never! {
+    if place.kind == .HandleMethod(receiver, operation, args) {
+        if operation == {
+            .DynIndexKey(_, _) | .DynIndexAt(_, _) -> {
+                root :: sema_stmt_dyn_path_root(^receiver, &keys, &steps)
+                &keys.push(if operation == {.DynIndexKey(_, _) -> true else -> false})
+                &steps.push(args[0])
+                return root
+            }
+            else -> {}
+        }
+    }
+    place
 }
 
 fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
@@ -3977,6 +4011,28 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
         }
     }
     place := sema_stmt_check_assignment_place(target, op != None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if place.kind == .HandleMethod(_, operation, _) && sema_stmt_is_dyn_index(operation) {
+        if op != None {
+            &diagnostics.push(sema_error("E0164", place.span, "compound assignment can't target a Dyn path", "a compound update reads the path before it writes", "write the Dyn path assignment explicitly"))
+            return None
+        }
+        keys := [Bool]{}
+        steps := [TExpr]{}
+        span :: ~place.span
+        site :: if operation == {
+            .DynIndexKey(text, _) | .DynIndexAt(text, _) -> text
+            else -> "…"
+        }
+        root :: sema_stmt_dyn_path_root(^place, &keys, &steps)
+        checked :: sema_check_expression(expr, Val(sema_dyn_type()), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+        if sema_copy_site_check_assignment(expr, environment, scopes, context, &diagnostics) -> return None
+        if !sema_ownership_check_lvalue_write(&state, target, scopes, &diagnostics) -> return None
+        if !sema_stmt_move_direct(expr, &state, scopes, "the assignment", &diagnostics) -> return None
+        &steps.push(checked)
+        set :: THandleOp.DynSetPath{keys: keys, site: site, location: sema_expression_panic_location(environment, scopes, span)}
+        value :: sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: root, operation: set, args: steps}, span)
+        return Val(TStmt.ExprStmt{value: value, span: Span{start: span.start, end: expr_span(expr).end}})
+    }
     if target == .Index(index_base, _, index_span, _) && place.kind == .Index(checked_base, _, _, _, _, _) {
         if sema_columnar_list_element(environment, checked_base.ty) == .Val(element) {
             &diagnostics.push(sema_error("E1108", index_span, "writing through `[ ]` isn't supported on a columnar list `{sema_type_show(sema_expr_unwrap_tag(checked_base.ty))}` yet", "`#Layout(columnar)` lists support reading in v1 (indexing, field access, `len`, `is_empty`, `push`, iteration); index-write is deferred", "drop `#Layout(columnar)` from `{element}` to assign through `[ ]`, or rebuild the list with `push`"))
@@ -5006,7 +5062,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                 cond_valid := cond_tir != None
                 if cond_tir != None && (cond_tir ?? sema_tir_expr(Type.Bool, TExprKind.BoolLit{value: false}, span)).ty != Type.Bool {
                     cond_ty :: (cond_tir ?? sema_tir_expr(Type.Bool, TExprKind.BoolLit{value: false}, span)).ty
-                    &diagnostics.push(sema_error("E0110", span, "the counted loop condition must be Bool, but this is {type_name(cond_ty)}", "the program needs a clear yes or no here", "compare the value to produce Bool"))
+                    &diagnostics.push(if sema_dyn_is_type(sema_expr_expected_type(cond_ty, environment)) -> sema_dyn_condition_error(span) else -> sema_error("E0110", span, "the counted loop condition must be Bool, but this is {type_name(cond_ty)}", "the program needs a clear yes or no here", "compare the value to produce Bool"))
                     cond_valid = false
                 }
                 before_iteration := sema_ownership_state_snapshot(state)
@@ -5054,7 +5110,7 @@ pub fn sema_check_statements(statements: [Stmt], return_type: Type?, environment
                     }
                     (cond ?? sema_tir_expr(Type.Bool, TExprKind.BoolLit{value: false}, span)).ty != Type.Bool -> {
                         cond_ty :: (cond ?? sema_tir_expr(Type.Bool, TExprKind.BoolLit{value: false}, span)).ty
-                        &diagnostics.push(sema_error("E0110", span, "the while condition must be Bool, but this is {type_name(cond_ty)}", "the program needs a clear yes or no here", "compare the value to produce Bool"))
+                        &diagnostics.push(if sema_dyn_is_type(sema_expr_expected_type(cond_ty, environment)) -> sema_dyn_condition_error(span) else -> sema_error("E0110", span, "the while condition must be Bool, but this is {type_name(cond_ty)}", "the program needs a clear yes or no here", "compare the value to produce Bool"))
                         complete = false
                     }
                     else -> {

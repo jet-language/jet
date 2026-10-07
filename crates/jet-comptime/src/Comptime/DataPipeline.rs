@@ -125,7 +125,7 @@ fn query_cell_sql_value(value: &CtValue) -> Option<sql_query::JetSqlValue> {
         } if matches!(type_name.as_str(), "Dyn" | "TOML" | "YAML" | "CSV") => {
             match variant.as_str() {
                 "Null" => Some(sql_query::JetSqlValue::Null),
-                "Bool" | "Int" | "Number" | "Float" | "TypedText" | "Text" => args
+                "Bool" | "Int" | "Number" | "Float" | "Text" => args
                     .first()
                     .and_then(|(_, value)| query_cell_sql_value(value)),
                 _ => Some(sql_query::JetSqlValue::Text(query_cell_text(value))),
@@ -1528,16 +1528,6 @@ fn data_typed_tree(value: &CtValue) -> CtValue {
             type_name,
             variant,
             args,
-        } if type_name == "Dyn" && variant == "TypedText" => {
-            super::JSONInterp::json_variant(
-                "Text",
-                args.first().map(|(_, value)| data_typed_tree(value)),
-            )
-        }
-        CtValue::Enum {
-            type_name,
-            variant,
-            args,
         } if type_name == "Dyn" => CtValue::Enum {
             type_name: type_name.clone(),
             variant: variant.clone(),
@@ -1620,7 +1610,7 @@ fn data_arrow_tree_value(value: jet_foundation::Dyn::Dyn) -> CtValue {
             super::JSONInterp::json_variant("Bool", Some(CtValue::Bool(value)))
         }
         jet_foundation::Dyn::Dyn::Int(value) => {
-            super::JSONInterp::json_variant("Int", Some(CtValue::Int(value)))
+            super::JSONInterp::json_variant("Int", Some(super::Builtins::exact_int_value(value.to_big())))
         }
         jet_foundation::Dyn::Dyn::Float(value) => super::JSONInterp::json_variant(
             "Float",
@@ -1629,13 +1619,13 @@ fn data_arrow_tree_value(value: jet_foundation::Dyn::Dyn) -> CtValue {
         jet_foundation::Dyn::Dyn::Number(value) => {
             super::JSONInterp::json_variant("Number", Some(CtValue::Str(value)))
         }
-        jet_foundation::Dyn::Dyn::TypedText(value)
-        | jet_foundation::Dyn::Dyn::Text(value) => {
+        jet_foundation::Dyn::Dyn::Text(value) => {
             super::JSONInterp::json_variant("Text", Some(CtValue::Str(value)))
         }
         jet_foundation::Dyn::Dyn::Bytes(value) => {
             super::JSONInterp::json_variant("Bytes", Some(CtValue::Bytes(value)))
         }
+        jet_foundation::Dyn::Dyn::DateTime(_) => unreachable!("Arrow temporal cells are typed text"),
         jet_foundation::Dyn::Dyn::Array(values) => data_dynamic_array(
             values
                 .into_iter()
@@ -1697,7 +1687,7 @@ fn data_dynamic_tree(
         )
     })?;
     let tree = match format {
-        "json" => super::JSONInterp::parse_json_typed_ordered(&text).map_err(|error| {
+        "json" => super::JSONInterp::parse_json(&text).map_err(|error| {
             data_loader_failure(
                 "Decode",
                 "data.loader.json",
@@ -1718,7 +1708,7 @@ fn data_dynamic_tree(
                         format!("max_output_rows {} exceeded", limits.max_output_rows),
                     ));
                 }
-                let value = super::JSONInterp::parse_json_typed_ordered(line).map_err(|error| {
+                let value = super::JSONInterp::parse_json(line).map_err(|error| {
                     data_loader_failure(
                         "Decode",
                         "data.loader.jsonl",
@@ -1787,7 +1777,7 @@ fn data_dynamic_tree(
                                 .get(index)
                                 .map(|value| {
                                     super::JSONInterp::json_variant(
-                                        "TypedText",
+                                        "Text",
                                         Some(CtValue::Str(value.clone())),
                                     )
                                 })
@@ -1865,7 +1855,7 @@ fn data_dynamic_scalar_type(value: &CtValue) -> (&'static str, bool) {
             "Null" => ("null", true),
             "Bool" => ("bool", false),
             "Number" => ("float", false),
-            "TypedText" | "Text" => ("text", false),
+            "Text" => ("text", false),
             "Array" => ("array", false),
             "Object" => ("object", false),
             _ => ("Any", false),
@@ -2306,7 +2296,7 @@ fn data_state_plain_tree(value: &CtValue) -> CtValue {
             args,
         } if type_name == "Dyn" => match variant.as_str() {
             "Null" => CtValue::Unit,
-            "Bool" | "Int" | "Float" | "Text" | "TypedText" | "Bytes" => args
+            "Bool" | "Int" | "Float" | "Text" | "Bytes" => args
                 .first()
                 .map(|(_, value)| data_state_plain_tree(value))
                 .unwrap_or(CtValue::Unit),

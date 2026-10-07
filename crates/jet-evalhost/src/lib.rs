@@ -47,6 +47,8 @@ pub fn scheduler_sleep_ms(millis: u64) {
 
 #[allow(unused_imports)]
 pub(crate) use jet_foundation::EncodingErrors as jet_encoding_errors;
+// Included Foundation and Prelude sources name the exact-Int carrier through `crate::Numeric`.
+pub(crate) use jet_foundation::Numeric;
 pub(crate) mod jet_json_number {
     include!("../../jet-foundation/src/JSONNumber.rs");
 }

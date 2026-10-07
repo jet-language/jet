@@ -400,14 +400,14 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Dyn", "to_text", 0) => THandleOp::DynToText,
         ("Dyn", "equal_unordered", 1) => THandleOp::DynEqualUnordered,
         // D-SERDE-ACCESS=B: same accessors on JSON/Data (the dynamic parse result).
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "field", 1) => THandleOp::JSONField,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "at", 1) => THandleOp::JSONAt,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "int", 0) => THandleOp::JSONInt,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "text", 0) => THandleOp::JSONText,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "bool", 0) => THandleOp::JSONBool,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "float", 0) => THandleOp::JSONFloat,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "to_text", 0) => THandleOp::JSONToText,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "equal_unordered", 1) => {
+        ("JSON" | "TOML" | "YAML" | "CSV", "field", 1) => THandleOp::JSONField,
+        ("JSON" | "TOML" | "YAML" | "CSV", "at", 1) => THandleOp::JSONAt,
+        ("JSON" | "TOML" | "YAML" | "CSV", "int", 0) => THandleOp::JSONInt,
+        ("JSON" | "TOML" | "YAML" | "CSV", "text", 0) => THandleOp::JSONText,
+        ("JSON" | "TOML" | "YAML" | "CSV", "bool", 0) => THandleOp::JSONBool,
+        ("JSON" | "TOML" | "YAML" | "CSV", "float", 0) => THandleOp::JSONFloat,
+        ("JSON" | "TOML" | "YAML" | "CSV", "to_text", 0) => THandleOp::JSONToText,
+        ("JSON" | "TOML" | "YAML" | "CSV", "equal_unordered", 1) => {
             THandleOp::JSONEqualUnordered
         }
         ("MIME", "media_type" | "subtype" | "essence" | "params" | "to_string", 0) => {

@@ -320,8 +320,8 @@ pub const TYPE_ENCODING_ERROR: &str = "EncodingError";
 /// a teaching error, E0351, not an alias, per I8). `JSON`/`TOML`/`YAML`/`CSV` are
 /// format-tagged aliases over the same structure, so `json.parse` is typed
 /// `JSON`, `toml.parse` is typed `TOML`, etc., but one walker and one accessor
-/// set back them. Variants: `Null`, `Bool`, `Int`, `Float`, `Text`, `Array`,
-/// `Object`.
+/// set back them. Variants: `Null`, `Bool`, `Int`, `Float`, `Text`, `Bytes`,
+/// `DateTime`, `Array`, `Object`.
 pub const TYPE_DATA: &str = "Dyn";
 /// D-SERDE16=A (ratified 2026-07-11): public target-directed subtree dispatch.
 /// `tree.decode<T>()` calls only `T`'s ordinary `Decode` protocol impl.
@@ -338,12 +338,13 @@ pub fn is_data_type_name(name: &str) -> bool {
     matches!(name, "Dyn" | "JSON" | "TOML" | "YAML" | "CSV")
 }
 
-/// The variants of the dynamic `Data` value (D-ENC-DYN1=A+), the user-facing face
-/// of `Dyn`. `Bytes` stays internal (no dynamic constructor).
+/// The constructible variants of the dynamic `Dyn` value (D-ENC-DYN1=A+,
+/// #4602). `Number` (an exact parsed lexeme) is matchable but only parsers
+/// build it.
 pub fn is_data_variant(variant: &str) -> bool {
     matches!(
         variant,
-        "Null" | "Bool" | "Int" | "Float" | "Text" | "Array" | "Object"
+        "Null" | "Bool" | "Int" | "Float" | "Text" | "Bytes" | "DateTime" | "Array" | "Object"
     )
 }
 

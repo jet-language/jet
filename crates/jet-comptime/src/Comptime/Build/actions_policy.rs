@@ -1043,7 +1043,7 @@ fn parse_cargo_import(
 use jet_foundation::Dyn::Dyn;
 fn json_string(value: Option<&Dyn>) -> Option<String> {
     match value {
-        Some(Dyn::Text(value) | Dyn::TypedText(value)) => Some(value.clone()),
+        Some(Dyn::Text(value)) => Some(value.clone()),
         _ => None,
     }
 }
@@ -1219,7 +1219,7 @@ fn parse_npm_import(
     } else if let Some(value) = json_object_field(object, "module") {
         import.outputs_explicit = true;
         match value {
-            Dyn::Text(path) | Dyn::TypedText(path) => path.clone(),
+            Dyn::Text(path) => path.clone(),
             Dyn::Array(values) => {
                 if values.len() != 1 {
                     return Err(legacy_import_error(
@@ -1227,7 +1227,7 @@ fn parse_npm_import(
                         "package module must contain exactly one string path",
                     ));
                 }
-                let Some(Dyn::Text(path) | Dyn::TypedText(path)) = values.first() else {
+                let Some(Dyn::Text(path)) = values.first() else {
                     return Err(legacy_import_error(
                         LegacyWrapperKind::Npm,
                         "package module must contain one string path",

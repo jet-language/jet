@@ -72,6 +72,7 @@ mod file_stream {
 /// Canonical stream runtime (jet_std types + EncodingStream algorithm).
 #[allow(unused_imports, unused_variables, clippy::all)]
 pub(crate) mod runtime {
+    use crate::Time::time_rt::{JetDateTime, JetZone, JetZonedDateTime};
     pub(crate) use jet_foundation::CsvKernel as jet_csv_kernel;
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
@@ -149,6 +150,7 @@ pub(crate) mod runtime {
             Number(String),
             Text(String),
             Bytes(Vec<u8>),
+            DateTime(crate::Time::time_rt::JetZonedDateTime),
             ArrayStart,
             ArrayEnd,
             ObjectStart,
@@ -294,7 +296,7 @@ pub(crate) mod runtime {
         match value {
             crate::jet_xml_pull::Value::Null => jet_std::Dyn::Null,
             crate::jet_xml_pull::Value::Bool(value) => jet_std::Dyn::Bool(value),
-            crate::jet_xml_pull::Value::Int(value) => jet_std::Dyn::Int(value),
+            crate::jet_xml_pull::Value::Int(value) => jet_std::Dyn::Int((value).into()),
             crate::jet_xml_pull::Value::Text(value) => jet_std::Dyn::Text(value),
             crate::jet_xml_pull::Value::Array(values) => {
                 jet_std::Dyn::Array(values.into_iter().map(jet_xml_to_dyn).collect())
@@ -314,10 +316,9 @@ pub(crate) mod runtime {
         match value {
             jet_std::Dyn::Null => Ok(crate::jet_xml_pull::Value::Null),
             jet_std::Dyn::Bool(value) => Ok(crate::jet_xml_pull::Value::Bool(*value)),
-            jet_std::Dyn::Int(value) => Ok(crate::jet_xml_pull::Value::Int(*value)),
-            jet_std::Dyn::Number(_) | jet_std::Dyn::TypedText(_) => {
-                Err("internal JSON carrier escaped typed decode".to_string())
-            }
+            jet_std::Dyn::Int(value) => value.to_i64().map(crate::jet_xml_pull::Value::Int)
+                .ok_or_else(|| "XML integer is outside I64".to_string()),
+            jet_std::Dyn::Number(text) => Ok(crate::jet_xml_pull::Value::Text(text.clone())),
             jet_std::Dyn::Text(value) => Ok(crate::jet_xml_pull::Value::Text(value.clone())),
             jet_std::Dyn::Array(values) => Ok(crate::jet_xml_pull::Value::Array(
                 values
@@ -331,8 +332,8 @@ pub(crate) mod runtime {
                     .map(|(key, value)| Ok((key.clone(), jet_xml_from_dyn(value)?)))
                     .collect::<Result<Vec<_>, String>>()?,
             )),
-            jet_std::Dyn::Float(_) | jet_std::Dyn::Bytes(_) => {
-                Err("XML tree cannot contain Float or Bytes values".to_string())
+            jet_std::Dyn::Float(_) | jet_std::Dyn::Bytes(_) | jet_std::Dyn::DateTime(_) => {
+                Err("XML tree cannot contain Float, Bytes or DateTime values".to_string())
             }
         }
     }

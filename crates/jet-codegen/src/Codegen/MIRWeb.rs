@@ -4575,7 +4575,7 @@ fn js_codec_type_descriptor(
             js_codec_type_descriptor(program, inner)
         }
         MirTypeKind::Apply { name, .. } => match name.name.as_str() {
-            "Data" | "Dyn" => Ok("{ kind: \"dyn\" }".to_string()),
+            "Dyn" => Ok("{ kind: \"dyn\" }".to_string()),
             "Date" => Ok("{ kind: \"date\" }".to_string()),
             "LocalDate" => Ok("{ kind: \"local_date\" }".to_string()),
             "LocalTime" => Ok("{ kind: \"local_time\" }".to_string()),
@@ -4614,10 +4614,7 @@ fn js_codec_type_descriptor(
 fn js_codec_tree_text_expression(tree: &str) -> String {
     format!(
         "(() => {{ const __jet_tree = {tree}; switch (__jet_tree?.tag) {{ \
-         case \"Text\": case \"TypedText\": return String(__jet_tree.values?.[0]); \
-         case \"Int\": return BigInt(__jet_tree.values?.[0]).toString(); \
-         case \"Float\": return String(__jet_tree.values?.[0]); \
-         case \"Bool\": return __jet_tree.values?.[0] ? \"true\" : \"false\"; \
+         case \"Text\": return String(__jet_tree.values?.[0]); \
          case \"Number\": throw new Error(\"expected Text, found number \" + String(__jet_tree.values?.[0])); \
          default: throw new Error(\"expected Text, found \" + String(__jet_tree?.tag ?? \"value\")); \
          }} }})()"
@@ -4628,10 +4625,15 @@ fn js_codec_tree_integer_expression(tree: &str) -> String {
     format!(
         "(() => {{ const __jet_tree = {tree}; switch (__jet_tree?.tag) {{ \
          case \"Int\": return BigInt(__jet_tree.values?.[0]); \
-         case \"Number\": case \"Text\": {{ \
+         case \"Number\": {{ \
+           const __jet_value = jet_codec_json_exact_integer(String(__jet_tree.values?.[0])); \
+           if (__jet_value == null) throw new Error(\"expected Int, found number \" + String(__jet_tree.values?.[0])); \
+           return __jet_value; \
+         }} \
+         case \"Text\": {{ \
            const __jet_text = String(__jet_tree.values?.[0]).trim(); \
-           try {{ return BigInt(__jet_text); }} \
-           catch (_) {{ throw new Error(\"expected Int, found text \" + JSON.stringify(__jet_text)); }} \
+           if (jet_text_cells_depth > 0 && /^[+-]?\\d+$/.test(__jet_text)) return BigInt(__jet_text); \
+           throw new Error(\"expected Int, found text \" + JSON.stringify(String(__jet_tree.values?.[0]))); \
          }} \
          case \"Float\": {{ \
            const __jet_number = Number(__jet_tree.values?.[0]); \
@@ -4652,8 +4654,6 @@ fn js_codec_tree_decimal_expression(tree: &str) -> String {
            return jet_decimal_from_str(String(__jet_tree.values?.[0])); \
          case \"Int\": \
            return jet_decimal_from_str(BigInt(__jet_tree.values?.[0]).toString()); \
-         case \"TypedText\": \
-           throw new Error(\"expected Decimal, found text \" + JSON.stringify(__jet_tree.values?.[0])); \
          default: throw new Error(\"expected Decimal, found \" + String(__jet_tree?.tag ?? \"value\")); \
          }} }})()"
     )

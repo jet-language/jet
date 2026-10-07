@@ -2511,7 +2511,7 @@ fn jet_rust_emit_core_shape_expression(ctx: &JetRustEmitContext, function: MIRFu
         names := jet_rust_emit_shape_name_map(&ctx, target_type, "db", "core.db.decode")
         rendered := jet_rust_emit_call_arguments(&ctx, function, args, route_info.signature.borrow_mask)
         target := jet_rust_emit_type(&ctx, target_type)
-        return Val("{{ let __jet_db_entries = {root}jet_std::jet_db_row_project({rendered}, {names}, |value| match value {{ {root}jet_std::DBValue::Null => {root}jet_std::Dyn::Null, {root}jet_std::DBValue::Int(value) => {root}jet_std::Dyn::Int(*value), {root}jet_std::DBValue::Float(value) => {root}jet_std::Dyn::Float(*value), {root}jet_std::DBValue::Text(value) => {root}jet_std::Dyn::Text(value.clone()), {root}jet_std::DBValue::Bool(value) => {root}jet_std::Dyn::Bool(*value), {root}jet_std::DBValue::Blob(value) => {root}jet_std::Dyn::Bytes(value.clone()) }}); {root}jet_db_decode::<{target}>(&__jet_db_entries) }}")
+        return Val("{{ let __jet_db_entries = {root}jet_std::jet_db_row_project({rendered}, {names}, |value| match value {{ {root}jet_std::DBValue::Null => {root}jet_std::Dyn::Null, {root}jet_std::DBValue::Int(value) => {root}jet_std::Dyn::Int((*value).into()), {root}jet_std::DBValue::Float(value) => {root}jet_std::Dyn::Float(*value), {root}jet_std::DBValue::Text(value) => {root}jet_std::Dyn::Text(value.clone()), {root}jet_std::DBValue::Bool(value) => {root}jet_std::Dyn::Bool(*value), {root}jet_std::DBValue::Blob(value) => {root}jet_std::Dyn::Bytes(value.clone()) }}); {root}jet_db_decode::<{target}>(&__jet_db_entries) }}")
     }
     if module_name == "core.sys" && member == "decode" {
         if type_args.len() != 1 {
@@ -3008,6 +3008,7 @@ fn jet_rust_emit_enum_value(ctx: &JetRustEmitContext, function: MIRFunction, own
                 return "unreachable!(\"MIR HTTP Body variant\")"
             }
             if dyn_value && variant == "Int" -> return "{root}jet_std::jet_dyn_int({value})"
+            if dyn_value && variant == "DateTime" -> return "{root}jet_std::jet_dyn_datetime(&({value}))"
             if native {
                 if jet_rust_emit_native_int_input(&ctx, value, payload_type, location) == .Val(narrowed) -> value = narrowed
             }
@@ -3389,6 +3390,7 @@ fn jet_rust_emit_enum_payload(ctx: &JetRustEmitContext, function: MIRFunction, r
                                 .Single(payload_type) -> {
                                     if index != 0 -> return "unreachable!(\"MIR enum payload index out of range\")"
                                     if dyn_value && variant == "Int" -> return "{root}jet_std::jet_dyn_int_payload(&{value}).expect(\"MIR enum payload variant mismatch\")"
+                                    if dyn_value && variant == "DateTime" -> return "{root}jet_std::jet_dyn_datetime_payload({value}).expect(\"MIR enum payload variant mismatch\")"
                                     payload := "payload.clone()"
                                     object_map := false
                                     if dyn_value && variant == "Object" && result == .Val(result_id) {
@@ -4765,6 +4767,57 @@ fn jet_rust_emit_prelude_receiver_call(ctx: &JetRustEmitContext, function: MIRFu
     emitted
 }
 
+// Dyn routes retain logical operands in MIR: receiver, checked arguments,
+// then operator/site constants. Only this host crossing packs path steps.
+fn jet_rust_emit_dyn_values(ctx: &JetRustEmitContext, function: MIRFunction, row: MIRPreludeCall, values: [MIRValueID]) -> String Never! {
+    root :: ~ctx.config.root_prefix
+    symbol :: "{root}jet_std::{mir_symbol_name(row.symbol)}"
+    receiver :: if row.member == "remove" || row.member == "set_path" -> jet_rust_emit_mutable_receiver_reference(&ctx, function, values[0]) else -> jet_rust_emit_borrowed_value_reference(&ctx, function, values[0], MIRAccess.Read)
+    if row.member == "set_path" {
+        if values.len() < 4 {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Dyn setter has no path", "a Dyn setter has at least one step, a new value and source text", Val(function.span))
+            return "unreachable!(\"MIR Dyn setter path\")"
+        }
+        steps := [String]{}
+        loop (index, value) in values {
+            if index == 0 || index >= values.len() - 2 -> next
+            step := jet_rust_emit_value_consume(ctx, function, value)
+            if jet_rust_emit_value_type(ctx, function, value).kind == {
+                .String -> &steps.push("{root}jet_std::JetDynStep::Key({step})")
+                .Int -> &steps.push("{root}jet_std::JetDynStep::At({jet_rust_emit_native_int_argument(&ctx, step, None)})")
+                else -> {
+                    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR Dyn path step has an invalid type", "checked Dyn paths contain only String keys and Int indices", Val(function.span))
+                    return "unreachable!(\"MIR Dyn path step\")"
+                }
+            }
+        }
+        value :: jet_rust_emit_value_consume(ctx, values[values.len() - 2])
+        site :: jet_rust_emit_borrowed_value_reference(&ctx, function, values[values.len() - 1], MIRAccess.Read)
+        return "{symbol}({receiver}, &[{steps.join(", ")}], {value}, {site})"
+    }
+    if row.member == "binary" || row.member == "compare" {
+        right :: jet_rust_emit_borrowed_value_reference(&ctx, function, values[1], MIRAccess.Read)
+        operator :: jet_rust_emit_borrowed_value_reference(&ctx, function, values[2], MIRAccess.Read)
+        site :: jet_rust_emit_borrowed_value_reference(&ctx, function, values[3], MIRAccess.Read)
+        return "{symbol}({operator}, {receiver}, {right}, {site})"
+    }
+    rendered := [String]{receiver}
+    loop (index, value) in values {
+        if index == 0 -> next
+        if (row.member == "index_at" || row.member == "get_at") && index == 1 {
+            consumed :: jet_rust_emit_value_consume(ctx, function, value)
+            &rendered.push(jet_rust_emit_native_int_argument(&ctx, consumed, None))
+        } else if row.signature.borrow_mask[index] {
+            &rendered.push(jet_rust_emit_borrowed_value_reference(&ctx, function, value, MIRAccess.Read))
+        } else {
+            &rendered.push(jet_rust_emit_value_consume(ctx, function, value))
+        }
+    }
+    emitted :: "{symbol}({rendered.join(", ")})"
+    if row.member == "len" -> return "({emitted}).map(jet_foundation::Numeric::JetInt::from_i64)"
+    emitted
+}
+
 fn jet_rust_emit_semantic_values(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, values: [MIRValueID]) -> String Never! {
     route := jet_rust_emit_prelude_route(ctx, call, false)
     if route == None {
@@ -4776,6 +4829,7 @@ fn jet_rust_emit_semantic_values(ctx: &JetRustEmitContext, function: MIRFunction
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR semantic Prelude arity is invalid", "semantic operation values must match the checked route arity and borrow ABI", Val(function.span))
         return "unreachable!(\"semantic Prelude arity\")"
     }
+    if row.module_name == "core.encoding.dyn" && (row.member == "index_key" || row.member == "index_at" || row.member == "get_key" || row.member == "get_at" || row.member == "has" || row.member == "keys" || row.member == "remove" || row.member == "len" || row.member == "binary" || row.member == "compare" || row.member == "set_path") -> return jet_rust_emit_dyn_values(&ctx, function, row, values)
     rendered := [String]{}
     index := 0
     loop value in values {

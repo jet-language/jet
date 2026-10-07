@@ -1,5 +1,6 @@
 use core.encoding.[Dyn, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
 use core.math as math
+use core.time as time
 
 fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
     {
@@ -28,13 +29,11 @@ fn safe_limits() -> EncodingLimits Never! {
 
 // core.encoding.cbor — RFC 8949 definite-length CBOR as Dyn.
 //
-// Major types 0–5 and common simple values (false, true, null) are
-// implemented in Jet. Definite-length text, arrays, maps, and float64 are
-// supported. Indefinite-length items, tags, half/single-precision floats, and
-// bstr → `Dyn` (no Bytes variant on the public tree) are rejected as
-// `Unsupported` rather than silently coerced. Canonical encode
-// (`to_bytes_canonical`) uses shortest integer forms and sorted map keys by
-// encoded byte order.
+// Major types 0–5, byte strings, float64, and false/true/null are implemented
+// in Jet. DateTime decodes tag 0 RFC 3339 text or tag 1 epoch seconds and
+// encodes canonical tag 0 text. Other tags, indefinite-length items, and
+// half/single-precision floats fail as Unsupported. Canonical encode uses
+// shortest integer forms and sorts map keys by encoded byte order.
 pub struct CBOROptions {
     pub max_depth: Int
     pub max_items: Int
@@ -158,7 +157,33 @@ impl CBORReader {
             return Err(self.fail(EncodingErrorKind.Unsupported, "unsupported CBOR simple value or floating-point width"))
         }
         if major == 6 {
-            return Err(self.fail(EncodingErrorKind.Unsupported, "CBOR tags are not projected into Dyn"))
+            tag :: &self.read_length(extra)
+            if tag != 0 && tag != 1 -> return Err(self.fail(EncodingErrorKind.Unsupported, "unsupported CBOR tag {tag}"))
+            payload :: &self.read_value(depth + 1)
+            if tag == 0 {
+                text :: payload.text() ?? return Err(self.fail(EncodingErrorKind.Syntax, "CBOR tag 0 requires RFC 3339 text"))
+                raw :: text.bytes()
+                if raw.len() >= 28 && (raw[raw.len() - 9] == (U8{43}) || raw[raw.len() - 9] == (U8{45})) && raw[raw.len() - 6] == (U8{58}) && raw[raw.len() - 3] == (U8{58}) {
+                    return Err(self.fail(EncodingErrorKind.Unsupported, "date-time offsets with seconds are unsupported"))
+                }
+                stamp :: Dyn.Text(text)
+                z :: stamp.decode<ZonedDateTime>() ?? return Err(self.fail(EncodingErrorKind.Syntax, "invalid CBOR tag 0 date-time"))
+                if z.offset_seconds() %% 60 != 0 -> return Err(self.fail(EncodingErrorKind.Unsupported, "date-time offset must be whole minutes"))
+                return Ok(Dyn.DateTime(z))
+            }
+            if payload == {
+                .Int(seconds) -> return Ok(Dyn.DateTime(time.zoned(time.from_unix_seconds(seconds), time.utc())))
+                .Float(seconds) -> {
+                    if !math.is_finite(seconds) || seconds < -9223372036854775808.0 || seconds >= 9223372036854775808.0 {
+                        return Err(self.fail(EncodingErrorKind.Unsupported, "CBOR epoch seconds are outside the supported range"))
+                    }
+                    whole :: math.floor(seconds)
+                    nanos :: Int{math.round((seconds - whole) * 1000000000.0)}
+                    dt :: time.from_unix_seconds(Int{whole}).plus_duration(time.duration_ns(nanos))
+                    return Ok(Dyn.DateTime(time.zoned(dt, time.utc())))
+                }
+                else -> return Err(self.fail(EncodingErrorKind.Syntax, "CBOR tag 1 requires Int or Float epoch seconds"))
+            }
         }
         n :: &self.read_length(extra)
         if major == {
@@ -167,7 +192,13 @@ impl CBORReader {
             else -> { _ := 0 }
         }
         if major == 2 {
-            return Err(self.fail(EncodingErrorKind.Unsupported, "CBOR byte strings have no Dyn.Bytes variant; encode as text or use a typed field"))
+            if n > safe_limits().max_item_bytes -> return Err(self.fail(EncodingErrorKind.Limit, "CBOR byte string exceeds EncodingLimits.safe().max_item_bytes"))
+            raw := [U8]{}
+            loop _ in 0..<n {
+                b :: &self.read_byte()
+                &raw.push(b)
+            }
+            return Ok(Dyn.Bytes(raw))
         }
         if major == 3 {
             if n > safe_limits().max_item_bytes {
@@ -196,15 +227,15 @@ impl CBORReader {
             if n > safe_limits().max_item_bytes {
                 return Err(self.fail(EncodingErrorKind.Limit, "CBOR map exceeds EncodingLimits.safe().max_item_bytes"))
             }
-            entries := [String:Dyn]{}
+            entries := Dyn.object()
             loop _ in 0..<n {
                 key_tree :: &self.read_value(depth + 1)
                 key :: key_tree.text() ?? return Err(self.fail(EncodingErrorKind.Unsupported, "CBOR map keys must be text to land in Dyn.Object"))
-                if entries.has_key(key) -> return Err(self.fail(EncodingErrorKind.Syntax, "duplicate CBOR map key `{key}`"))
+                if entries.has(key) -> return Err(self.fail(EncodingErrorKind.Syntax, "duplicate CBOR map key `{key}`"))
                 value :: &self.read_value(depth + 1)
-                _ :: &entries.add(key, value)
+                entries[key] = value
             }
-            return Ok(Dyn.Object(entries))
+            return Ok(entries)
         }
         Err(self.fail(EncodingErrorKind.Unsupported, "unsupported CBOR major type"))
     }
@@ -261,13 +292,33 @@ fn write_cbor(out: &[U8], value: Dyn, canonical: Bool) Never! {
         }
         .Int(n) -> { write_cbor_int(&out, n) }
         .Float(n) -> { write_cbor_float(&out, n) }
+        .Number(s) -> {
+            // A lexeme is a JSON number token, so it is an integer or a float64.
+            if Int.parse(s) == .Ok(n) {
+                write_cbor_int(&out, n)
+            } else {
+                write_cbor_float(&out, Float.parse(s) ?? 0.0)
+            }
+        }
+        .Bytes(b) -> {
+            write_cbor_head(&out, 2, b.len())
+            loop x in b { cbor_push(&out, x) }
+        }
         .Text(s) -> {
             raw :: s.bytes()
             write_cbor_head(&out, 3, raw.len())
             loop b in raw { cbor_push(&out, b) }
         }
+        .Bytes(raw) -> {
+            write_cbor_head(&out, 2, raw.len())
+            loop b in raw -> cbor_push(&out, b)
+        }
+        .DateTime(_) -> {
+            write_cbor_head(&out, 6, 0)
+            write_cbor(&out, Dyn.Text(value.to_text() ?? ""), canonical)
+        }
         .Array(items) -> { write_cbor_array(&out, items, canonical) }
-        .Object(entries) -> { write_cbor_object(&out, entries, canonical) }
+        .Object(_) -> { write_cbor_object(&out, value, canonical) }
     }
 }
 
@@ -276,17 +327,16 @@ fn write_cbor_array(out: &[U8], items: [Dyn], canonical: Bool) {
     loop item in items -> write_cbor(&out, item, canonical)
 }
 
-fn write_cbor_object(out: &[U8], entries: [String:Dyn], canonical: Bool) {
+fn write_cbor_object(out: &[U8], entries: Dyn, canonical: Bool) {
     write_cbor_head(&out, 5, entries.len())
     if !canonical {
-        loop pair in entries {
-            write_cbor(&out, Dyn.Text(pair.key), canonical)
-            write_cbor(&out, pair.value, canonical)
+        loop key in entries.keys() {
+            write_cbor(&out, Dyn.Text(key), canonical)
+            write_cbor(&out, entries[key], canonical)
         }
         return
     }
-    keys := [String]{}
-    loop pair in entries -> &keys.push(pair.key)
+    keys := entries.keys()
     loop i in 0..<keys.len() {
         loop j in (i + 1)..<keys.len() {
             if compare_cbor_text(keys[j], keys[i]) < 0 {
@@ -298,7 +348,7 @@ fn write_cbor_object(out: &[U8], entries: [String:Dyn], canonical: Bool) {
     }
     loop key in keys {
         write_cbor(&out, Dyn.Text(key), canonical)
-        write_cbor(&out, entries.get(key) ?? Dyn.Null, canonical)
+        write_cbor(&out, entries[key], canonical)
     }
 }
 

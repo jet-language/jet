@@ -178,7 +178,7 @@ fn machine_rows(output: &Output) -> Vec<Dyn> {
         "project check machine contract changed"
     );
     assert!(
-        matches!(json_get(&report, "elapsed_ms"), Some(Dyn::Int(milliseconds)) if *milliseconds >= 0),
+        matches!(json_get(&report, "elapsed_ms"), Some(Dyn::Int(milliseconds)) if milliseconds.to_u64().is_some()),
         "project check machine result must record elapsed_ms"
     );
     match json_get(&report, "rows") {

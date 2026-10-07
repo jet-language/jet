@@ -26,7 +26,7 @@ pub trait __jet_Decode: Sized {
     fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>>;
 
     fn jet_decode_byte(value: u8) -> Result<Self, Vec<jet_std::FieldError>> {
-        Self::jet_decode(&jet_std::Dyn::Int(i64::from(value)))
+        Self::jet_decode(&jet_std::Dyn::Int((i64::from(value)).into()))
     }
 }
 
@@ -36,14 +36,10 @@ impl __jet_Encode for i64 {
     }
 }
 
-// Exact `Int` owns its one-word carrier.  Values that fit the physical
-// Dyn::Int slot stay there; spilled values retain their decimal lexeme in
-// Dyn::Number instead of exposing the tagged owner word as a number.
+// Encoding exact Int retains its owner and its Int variant at every magnitude.
 impl __jet_Encode for jet_foundation::Numeric::JetInt {
     fn jet_encode(&self) -> jet_std::Dyn {
-        self.to_i64()
-            .map(jet_std::jet_dyn_encode_i64)
-            .unwrap_or_else(|| jet_std::Dyn::Number(self.to_string_rep()))
+        jet_std::Dyn::Int(self.clone())
     }
 }
 
@@ -83,23 +79,20 @@ impl __jet_Encode for JetLocalTime {
 }
 impl __jet_Encode for JetDateTime {
     fn jet_encode(&self) -> jet_std::Dyn {
-        jet_std::Dyn::Text(jet_codec_datetime_encode(
-            self.unix_seconds_anchor(),
-            self.nanosecond() as u32,
-            self.is_leap_second(),
-        ))
+        jet_std::Dyn::datetime(self.unix_seconds_anchor(), self.nanosecond() as u32,
+            self.is_leap_second(), 0)
     }
 }
 impl __jet_Encode for jet_std::Duration {
     fn jet_encode(&self) -> jet_std::Dyn {
-        jet_std::Dyn::Int(jet_codec_duration_encode(self.ns))
+        jet_std::Dyn::Int((jet_codec_duration_encode(self.ns)).into())
     }
 }
 impl __jet_Encode for u8 {
     const __JET_IS_BYTE: bool = true;
 
     fn jet_encode(&self) -> jet_std::Dyn {
-        jet_std::Dyn::Int(i64::from(*self))
+        jet_std::Dyn::Int((i64::from(*self)).into())
     }
 
     fn jet_encode_byte(&self) -> u8 {
@@ -115,7 +108,7 @@ macro_rules! jet_impl_sized_int_encode {
     ($($ty:ty),* $(,)?) => {$(
         impl __jet_Encode for $ty {
             fn jet_encode(&self) -> jet_std::Dyn {
-                jet_std::Dyn::Int(*self as i64)
+                jet_std::Dyn::Int((*self as i64).into())
             }
         }
     )*};
@@ -134,10 +127,7 @@ impl __jet_Encode for jet_std::JetDecimal {
 }
 impl<T: __jet_Encode> __jet_Encode for Vec<T> {
     fn jet_encode(&self) -> jet_std::Dyn {
-        // D-ENC-CBOR-SURFACE1: `[U8]` carries binary identity through the shared
-        // Codable tree. Text codecs already render Bytes as a number list, while
-        // CBOR emits major type 2. The byte fact is carried by the scalar
-        // implementation rather than inferred from a Rust type name.
+        // Byte lists retain binary identity; text codecs render standard base64.
         if <T as __jet_Encode>::__JET_IS_BYTE {
             let mut bytes = Vec::with_capacity(self.len());
             for value in self {
@@ -205,6 +195,7 @@ impl __jet_Decode for jet_foundation::Numeric::JetInt {
         jet_std::decode_int_with(
             t,
             jet_foundation::Numeric::JetInt::from_i64,
+            |value| Ok(value.clone()),
             |text| {
                 jet_foundation::Numeric::CtBigInt::from_str(text)
                     .map(jet_foundation::Numeric::JetInt::from_big)
@@ -372,12 +363,16 @@ impl __jet_Decode for JetLocalTime {
 }
 impl __jet_Decode for JetDateTime {
     fn jet_decode(t: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>> {
-        let value = String::jet_decode(t)?;
-        jet_codec_datetime_decode(&value)
-            .map(|(secs, nanos, leap_second)| {
-                JetDateTime::from_timestamp_ns_with_leap(secs, nanos, leap_second)
-            })
-            .map_err(|error| jet_std::FieldError::one(format!("expected DateTime: {error}")))
+        let tree = match t {
+            jet_std::Dyn::DateTime(_) => t.clone(),
+            jet_std::Dyn::Text(text) =>
+                jet_std::Dyn::parse_datetime(text).map_err(jet_std::FieldError::one)?,
+            other => return Err(jet_std::FieldError::one(format!(
+                "expected DateTime, found {}", jet_std::dyn_kind_for(other)))),
+        };
+        let jet_std::Dyn::DateTime(value) = tree else { unreachable!() };
+        Ok(JetDateTime::from_timestamp_ns_with_leap(
+            value.unix_seconds, value.nanos, value.leap_second))
     }
 }
 impl __jet_Decode for jet_std::Duration {
@@ -385,6 +380,7 @@ impl __jet_Decode for jet_std::Duration {
         let ns = jet_std::decode_int_with(
             t,
             |value| value,
+            |value| value.to_i64().ok_or_else(|| "exact Int is outside i64".to_owned()),
             |text| {
                 text.parse::<i64>()
                     .map_err(|_| "exact Int is outside i64".to_owned())
@@ -445,16 +441,12 @@ impl __jet_Decode for jet_std::JetDecimal {
                     jet_std::FieldError::one(format!("expected Decimal: {error}"))
                 })
             }
-            jet_std::Dyn::TypedText(text) => Err(jet_std::FieldError::one(format!(
-                "expected Decimal, found text {:?}",
-                text
-            ))),
-            jet_std::Dyn::Text(text) => {
+            jet_std::Dyn::Text(text) if jet_std::jet_text_cells_active() => {
                 jet_codec_decimal_decode_text(text).map_err(|error| {
                     jet_std::FieldError::one(format!("expected Decimal: {error}"))
                 })
             }
-            jet_std::Dyn::Int(n) => jet_codec_decimal_decode_int(*n)
+            jet_std::Dyn::Int(n) => jet_std::JetDecimal::from_json_number(&n.to_string_rep())
                 .map_err(jet_std::FieldError::one),
             other => Err(jet_std::FieldError::one(format!(
                 "expected Decimal, found {}", jet_std::dyn_kind_for(other)
@@ -466,6 +458,12 @@ impl<T: __jet_Decode> __jet_Decode for Vec<T> {
     fn jet_decode(t: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>> {
         match t {
             jet_std::Dyn::Bytes(bytes) if <T as __jet_Decode>::__JET_IS_BYTE => {
+                jet_decode_sequence(bytes.len(), |index| T::jet_decode_byte(bytes[index]))
+            }
+            jet_std::Dyn::Text(text)
+                if <T as __jet_Decode>::__JET_IS_BYTE => {
+                let bytes = jet_foundation::base_encoding_strict::decode_base64(text, false, false)
+                    .map_err(|error| jet_std::FieldError::one(error.to_string()))?;
                 jet_decode_sequence(bytes.len(), |index| T::jet_decode_byte(bytes[index]))
             }
             jet_std::Dyn::Array(items) => {
@@ -693,7 +691,7 @@ fn jet_enc_json_to_string_shape_pretty<T: __jet_Encode>(
     Ok(jet_std::render_dyn_json(&projected, true, 0))
 }
 fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
-    let tree = jet_std::parse_json_typed_dyn(text).map_err(|e| {
+    let tree = jet_std::parse_json_dyn(text).map_err(|e| {
         let line = e.line.ok().unwrap_or(0);
         jet_std::FieldError::one(format!("invalid JSON (line {}): {}", line, e.reason))
     })?;
@@ -722,7 +720,8 @@ fn jet_enc_csv_decode<T: __jet_Decode>(text: &String) -> Result<Vec<T>, Vec<jet_
         .map_err(jet_std::FieldError::one)?;
     jet_std::jet_enc_csv_decode_rows(
         rows,
-        |tree| T::jet_decode(&tree),
+        // CSV cells are text-native: each row decodes inside the text-cell scope.
+        |tree| jet_std::jet_decode_text_cells(|| T::jet_decode(&tree)),
         |row, error| jet_std::FieldError::under_errors(row, error),
         jet_std::Dyn::Text,
         jet_std::Dyn::Object,

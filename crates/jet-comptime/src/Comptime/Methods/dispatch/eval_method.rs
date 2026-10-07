@@ -771,7 +771,7 @@ impl<'a> Interp<'a> {
                         }
                     };
                     let tree = match super::super::super::EncodingLite::cbor_decode(
-                        &bytes, &options, true,
+                        &bytes, &options,
                     ) {
                         Ok(tree) => tree,
                         Err(error) => {

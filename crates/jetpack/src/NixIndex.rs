@@ -2460,7 +2460,7 @@ fn string_field<'a>(map: &'a [(String, Dyn)], name: &str) -> Result<&'a str, Nix
 fn u64_value(value: &Dyn, label: &str) -> Result<u64, NixIndexError> {
     let text = match value {
         Dyn::Number(text) => text,
-        Dyn::Int(value) if *value >= 0 => return Ok(*value as u64),
+        Dyn::Int(value) => return value.to_u64().ok_or_else(|| NixIndexError::invalid(format!("{label} is out of range"))),
         _ => {
             return Err(NixIndexError::invalid(format!(
                 "{label} must be an integer"

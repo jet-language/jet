@@ -436,7 +436,7 @@ fn num_field(obj: &[(String, Dyn)], key: &str) -> usize {
         .iter()
         .find_map(|(name, value)| (name == key).then_some(value))
     {
-        Some(Dyn::Int(value)) => (*value).try_into().unwrap_or(0),
+        Some(Dyn::Int(value)) => value.to_usize().unwrap_or(0),
         Some(Dyn::Float(value)) if value.is_finite() && *value >= 0.0 => *value as usize,
         Some(Dyn::Number(value)) => value.parse().unwrap_or(0),
         _ => 0,

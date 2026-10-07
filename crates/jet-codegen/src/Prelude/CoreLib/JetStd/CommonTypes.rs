@@ -287,6 +287,7 @@ pub enum DataEvent {
     Number(String),
     Text(String),
     Bytes(Vec<u8>),
+    DateTime(super::JetZonedDateTime),
     ArrayStart,
     ArrayEnd,
     ObjectStart,
@@ -907,8 +908,9 @@ impl DataSchema {
                 Dyn::Bool(_) => "bool",
                 Dyn::Int(_) => "int",
                 Dyn::Float(_) | Dyn::Number(_) => "float",
-                Dyn::TypedText(_) | Dyn::Text(_) => "text",
+                Dyn::Text(_) => "text",
                 Dyn::Bytes(_) => "bytes",
+                Dyn::DateTime(_) => "datetime",
                 Dyn::Array(_) => "array",
                 Dyn::Object(_) => "object",
             }

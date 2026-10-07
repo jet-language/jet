@@ -5,6 +5,51 @@ mod tests {
     use crate::AST::Type;
 
     #[test]
+    fn dyn_cutover_has_closed_payloads_and_members() {
+        use super::super::{core_json_pattern_types, dyn_member, dyn_method_return};
+        let dyn_ty = Type::Named("Dyn".to_string());
+        assert_eq!(core_json_pattern_types("Bytes"), Some(vec![Type::List(Box::new(
+            Type::IntN { signed: false, bits: 8 },
+        ))]));
+        assert_eq!(core_json_pattern_types("DateTime"),
+            Some(vec![Type::Named("ZonedDateTime".to_string())]));
+        for member in ["get", "has", "keys", "remove", "len", "decode", "to_text",
+            "field", "at", "int", "float", "text", "bool", "equal_unordered", "encode"] {
+            assert!(dyn_member(member), "{member}");
+        }
+        assert!(!dyn_member("user"));
+        assert_eq!(dyn_method_return("get", 1), Some(Type::Option(Box::new(dyn_ty.clone()))));
+        assert_eq!(dyn_method_return("remove", 1), Some(Type::Option(Box::new(dyn_ty))));
+        assert_eq!(dyn_method_return("has", 1), Some(Type::Bool));
+        assert_eq!(dyn_method_return("keys", 0), Some(Type::List(Box::new(Type::String))));
+        assert_eq!(dyn_method_return("len", 0), Some(Type::Int));
+        assert_eq!(dyn_method_return("get", 0), None);
+    }
+
+    #[test]
+    fn dyn_automatic_wrap_is_recursive_and_not_encode_in_general() {
+        use super::super::dyn_wrappable;
+        for ty in [Type::Int, Type::Float, Type::String, Type::Bool,
+            Type::Named("Dyn".to_string()), Type::Named("DateTime".to_string()),
+            Type::Named("ZonedDateTime".to_string()),
+            Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))] {
+            assert!(dyn_wrappable(&ty), "{}", ty.show());
+            assert!(dyn_wrappable(&Type::List(Box::new(ty.clone()))));
+            assert!(dyn_wrappable(&Type::Map {
+                key: Box::new(Type::String), key_span: None, value: Box::new(ty),
+            }));
+        }
+        for ty in [Type::Named("Record".to_string()), Type::Named("Decimal".to_string()),
+            Type::Char, Type::IntN { signed: true, bits: 32 }, Type::Option(Box::new(Type::Int))] {
+            assert!(!dyn_wrappable(&ty), "{}", ty.show());
+            assert!(!dyn_wrappable(&Type::List(Box::new(ty))));
+        }
+        assert!(!dyn_wrappable(&Type::Map {
+            key: Box::new(Type::Int), key_span: None, value: Box::new(Type::String),
+        }));
+    }
+
+    #[test]
     fn raylib_skeleton_signatures_are_registered() {
         let window = core_fixed_sig("core.game.raylib", "window_open")
             .expect("raylib window_open signature")

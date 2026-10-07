@@ -643,7 +643,7 @@ static GATED_UNSAFE_REGIONS: std::sync::LazyLock<
             };
             let position = |key| match row.get(key).unwrap() {
                 jet_foundation::Dyn::Dyn::Int(value) => {
-                    usize::try_from(*value).expect("audit position must be nonnegative")
+                    value.to_usize().expect("audit position must be nonnegative")
                 }
                 _ => panic!("audit {key} must be an integer"),
             };

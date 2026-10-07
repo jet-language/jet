@@ -5552,8 +5552,8 @@ fn encoding_next(
 ) -> Result<Option<MirRuntimeValue>, MirNativeCursorError> {
     match reader {
         EncodingReader::Json(reader) => crate::enc_stream::runtime::enc_json_reader_next(reader)
-            .map(|value| value.map(data_event_value))
-            .map_err(|error| encoding_error(&error)),
+            .map_err(|error| encoding_error(&error))
+            .and_then(|value| value.map(data_event_value).transpose()),
         EncodingReader::Jsonl(reader) => crate::enc_stream::runtime::enc_jsonl_reader_next(reader)
             .map(|value| value.map(dyn_value))
             .map_err(|error| encoding_error(&error)),
@@ -5564,12 +5564,20 @@ fn encoding_next(
             .map(|value| value.map(dyn_value))
             .map_err(|error| encoding_error(&error)),
         EncodingReader::Cbor(reader) => crate::enc_stream::runtime::enc_cbor_reader_next(reader)
-            .map(|value| value.map(data_event_value))
             .map_err(|error| encoding_error(&error))
+            .and_then(|value| value.map(data_event_value).transpose())
     }
 }
 
-fn data_event_value(event: crate::enc_stream::runtime::jet_std::DataEvent) -> MirRuntimeValue {
+pub(crate) fn dyn_datetime_payload(value: jet_foundation::Dyn::DynDateTime) -> MirRuntimeValue {
+    jet_codegen::Comptime::MirBridge::ct_to_mir_value(
+        jet_codegen::Comptime::dyn_datetime_value(value),
+        jet_foundation::Diagnostics::Span::new(0, 0),
+    )
+    .expect("Dyn DateTime payload contains only canonical scalar fields")
+}
+
+fn data_event_value(event: crate::enc_stream::runtime::jet_std::DataEvent) -> Result<MirRuntimeValue, MirNativeCursorError> {
     use crate::enc_stream::runtime::jet_std::DataEvent;
     let (variant, args) = match event {
         DataEvent::Null => ("Null", Vec::new()),
@@ -5582,17 +5590,27 @@ fn data_event_value(event: crate::enc_stream::runtime::jet_std::DataEvent) -> Mi
         DataEvent::Number(value) => ("Number", vec![MirRuntimeValue::String(value)]),
         DataEvent::Text(value) => ("Text", vec![MirRuntimeValue::String(value)]),
         DataEvent::Bytes(value) => ("Bytes", vec![MirRuntimeValue::Bytes(value)]),
+        DataEvent::DateTime(value) => {
+            let instant = value.to_datetime();
+            let payload = jet_foundation::Dyn::DynDateTime {
+                unix_seconds: instant.unix_seconds_anchor(),
+                nanos: instant.nanosecond() as u32,
+                leap_second: instant.is_leap_second(),
+                offset_seconds: value.zone().offset_at_utc(instant.unix_seconds_anchor()) as i32,
+            };
+            ("DateTime", vec![dyn_datetime_payload(payload)])
+        }
         DataEvent::ArrayStart => ("ArrayStart", Vec::new()),
         DataEvent::ArrayEnd => ("ArrayEnd", Vec::new()),
         DataEvent::ObjectStart => ("ObjectStart", Vec::new()),
         DataEvent::Key(value) => ("Key", vec![MirRuntimeValue::String(value)]),
         DataEvent::ObjectEnd => ("ObjectEnd", Vec::new())
     };
-    MirRuntimeValue::Enum {
+    Ok(MirRuntimeValue::Enum {
         type_name: "DataEvent".to_string(),
         variant: variant.to_string(),
         args: args.into_iter().map(|value| (None, value)).collect()
-    }
+    })
 }
 
 fn dyn_value(tree: crate::enc_stream::runtime::jet_std::Dyn) -> MirRuntimeValue {
@@ -5600,15 +5618,18 @@ fn dyn_value(tree: crate::enc_stream::runtime::jet_std::Dyn) -> MirRuntimeValue 
     let (variant, args) = match tree {
         Dyn::Null => ("Null", Vec::new()),
         Dyn::Bool(value) => ("Bool", vec![MirRuntimeValue::Bool(value)]),
-        Dyn::Int(value) => ("Int", vec![MirRuntimeValue::Int(value)]),
+        Dyn::Int(value) => ("Int", vec![match value.to_i64() {
+            Some(value) => MirRuntimeValue::Int(value),
+            None => MirRuntimeValue::BigInt(value.to_string_rep()),
+        }]),
         Dyn::Float(value) => (
             "Float",
             vec![MirRuntimeValue::Float { value, f32: false }],
         ),
         Dyn::Number(value) => ("Number", vec![MirRuntimeValue::String(value)]),
-        Dyn::TypedText(value) => ("TypedText", vec![MirRuntimeValue::String(value)]),
         Dyn::Text(value) => ("Text", vec![MirRuntimeValue::String(value)]),
         Dyn::Bytes(value) => ("Bytes", vec![MirRuntimeValue::Bytes(value)]),
+        Dyn::DateTime(value) => ("DateTime", vec![dyn_datetime_payload(value)]),
         Dyn::Array(values) => (
             "Array",
             vec![MirRuntimeValue::List(
@@ -5813,7 +5834,10 @@ fn dyn_from_value(
             ))
         },
         "Int" => match arg(0)? {
-            MirRuntimeValue::Int(value) if args.len() == 1 => Ok(Dyn::Int(*value)),
+            MirRuntimeValue::Int(value) if args.len() == 1 => Ok(Dyn::Int((*value).into())),
+            MirRuntimeValue::BigInt(value) if args.len() == 1 => jet_foundation::Numeric::CtBigInt::from_str(value)
+                .map(|value| Dyn::Int(jet_foundation::Numeric::JetInt::from_big(value)))
+                .map_err(|message| MirNativeCursorError::internal(&message)),
             _ => Err(MirNativeCursorError::internal(
                 "Dyn.Int carrier has the wrong payload",
             ))
@@ -5834,14 +5858,7 @@ fn dyn_from_value(
                 "Dyn.Number carrier has the wrong payload",
             ))
         },
-        "TypedText" => match arg(0)? {
-            MirRuntimeValue::String(value) if args.len() == 1 => {
-                Ok(Dyn::TypedText(value.clone()))
-            }
-            _ => Err(MirNativeCursorError::internal(
-                "Dyn.TypedText carrier has the wrong payload",
-            ))
-        },
+
         "Text" => match arg(0)? {
             MirRuntimeValue::String(value) if args.len() == 1 => {
                 Ok(Dyn::Text(value.clone()))

@@ -391,7 +391,7 @@ impl TypedSnapshot {
                     .collect(),
             ),
         );
-        obj.insert("protocol".into(), Dyn::Int(self.protocol as i64));
+        obj.insert("protocol".into(), Dyn::Int((self.protocol as i64).into()));
         obj.insert(
             "spans".into(),
             Dyn::Array(self.spans.iter().map(span_to_json).collect()),
@@ -532,7 +532,7 @@ impl AnalyzeResponse {
             "findings".into(),
             Dyn::Array(self.findings.iter().map(finding_to_json).collect()),
         );
-        obj.insert("protocol".into(), Dyn::Int(self.protocol as i64));
+        obj.insert("protocol".into(), Dyn::Int((self.protocol as i64).into()));
         obj.insert(
             "proposed_edits".into(),
             Dyn::Array(self.proposed_edits.iter().map(edit_to_json).collect()),
@@ -983,15 +983,9 @@ fn stringify(v: &Dyn) -> String {
         Dyn::Int(n) => n.to_string(),
         Dyn::Float(n) => format!("{n}"),
         Dyn::Number(text) => text.clone(),
-        Dyn::TypedText(text) | Dyn::Text(text) => JSON::quote(text),
-        Dyn::Bytes(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(u8::to_string)
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
+        Dyn::Text(text) => JSON::quote(text),
+        Dyn::Bytes(values) => JSON::quote(&Dyn::bytes_text(values)),
+        Dyn::DateTime(value) => JSON::quote(&value.to_rfc3339()),
         Dyn::Array(items) => {
             let mut out = String::from("[");
             for (i, item) in items.iter().enumerate() {
@@ -1021,25 +1015,25 @@ fn stringify(v: &Dyn) -> String {
 
 fn limits_to_json(l: &ResourceLimits) -> Dyn {
     let mut m = BTreeMap::new();
-    m.insert("max_edits".into(), Dyn::Int(l.max_edits as i64));
+    m.insert("max_edits".into(), Dyn::Int((l.max_edits as i64).into()));
     m.insert(
         "max_findings".into(),
-        Dyn::Int(l.max_findings as i64),
+        Dyn::Int((l.max_findings as i64).into()),
     );
-    m.insert("max_fuel".into(), Dyn::Int(l.max_fuel as i64));
+    m.insert("max_fuel".into(), Dyn::Int((l.max_fuel as i64).into()));
     m.insert(
         "max_memory_bytes".into(),
-        Dyn::Int(l.max_memory_bytes as i64),
+        Dyn::Int((l.max_memory_bytes as i64).into()),
     );
     m.insert(
         "max_response_bytes".into(),
-        Dyn::Int(l.max_response_bytes as i64),
+        Dyn::Int((l.max_response_bytes as i64).into()),
     );
     m.insert(
         "max_table_elements".into(),
-        Dyn::Int(l.max_table_elements as i64),
+        Dyn::Int((l.max_table_elements as i64).into()),
     );
-    m.insert("timeout_ms".into(), Dyn::Int(l.timeout_ms as i64));
+    m.insert("timeout_ms".into(), Dyn::Int((l.timeout_ms as i64).into()));
     object(m)
 }
 
@@ -1077,10 +1071,10 @@ fn limits_from_json(v: &Dyn) -> Result<ResourceLimits, ProtocolError> {
 
 fn span_to_json(s: &SpanFact) -> Dyn {
     let mut m = BTreeMap::new();
-    m.insert("end".into(), Dyn::Int(s.end as i64));
+    m.insert("end".into(), Dyn::Int((s.end as i64).into()));
     m.insert("file".into(), Dyn::Text(s.file.clone()));
     m.insert("id".into(), Dyn::Text(s.id.clone()));
-    m.insert("start".into(), Dyn::Int(s.start as i64));
+    m.insert("start".into(), Dyn::Int((s.start as i64).into()));
     object(m)
 }
 
@@ -1243,7 +1237,8 @@ fn require_keys_with_optional(
 
 fn json_u32(v: &Dyn, name: &str) -> Result<u32, ProtocolError> {
     match v {
-        Dyn::Int(n) if *n >= 0 && *n <= u32::MAX as i64 => Ok(*n as u32),
+        Dyn::Int(n) => n.to_u64().and_then(|value| u32::try_from(value).ok())
+            .ok_or_else(|| ProtocolError::new(format!("`{name}` must be a u32"))),
         Dyn::Float(n) if n.fract() == 0.0 && *n >= 0.0 && *n <= u32::MAX as f64 => {
             Ok(*n as u32)
         }
@@ -1253,7 +1248,7 @@ fn json_u32(v: &Dyn, name: &str) -> Result<u32, ProtocolError> {
 
 fn json_u64(v: &Dyn, name: &str) -> Result<u64, ProtocolError> {
     match v {
-        Dyn::Int(n) if *n >= 0 => Ok(*n as u64),
+        Dyn::Int(n) => n.to_u64().ok_or_else(|| ProtocolError::new(format!("`{name}` must be a u64"))),
         Dyn::Float(n) if n.fract() == 0.0 && *n >= 0.0 && *n <= (u64::MAX as f64) => {
             Ok(*n as u64)
         }

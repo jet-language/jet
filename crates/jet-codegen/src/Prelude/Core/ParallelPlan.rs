@@ -348,7 +348,7 @@ fn jet_acceleration_receipt_payload(
         ),
         (
             "loop_header".into(),
-            jet_std::Dyn::Int(i64::from(loop_header)),
+            jet_std::Dyn::Int(i64::from(loop_header).into()),
         ),
         (
             "source".into(),
@@ -362,7 +362,7 @@ fn jet_acceleration_receipt_payload(
 
 #[cfg(not(target_arch = "wasm32"))]
 fn jet_acceleration_int(value: impl TryInto<i64> + Copy) -> jet_std::Dyn {
-    jet_std::Dyn::Int(value.try_into().unwrap_or(i64::MAX))
+    jet_std::Dyn::Int((value.try_into().unwrap_or(i64::MAX)).into())
 }
 
 #[cfg(not(target_arch = "wasm32"))]

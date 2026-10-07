@@ -894,6 +894,21 @@ fn sema_expr_expected(value: TExpr, expected: Type?, environment: SemaScopeEnvir
     if expected == None -> return Val(value)
     required := sema_expr_expected_type(expected, environment)
     offered := sema_expr_expected_type(value.ty, environment)
+    if required == Type.Bool && sema_dyn_is_type(offered) {
+        &diagnostics.push(sema_dyn_condition_error(value.span))
+        return None
+    }
+    if sema_dyn_is_type(required) && !sema_dyn_is_type(offered) {
+        if !sema_dyn_wrappable(offered) {
+            &diagnostics.push(sema_error("E0172", value.span, "`{type_name(offered)}` does not wrap into `Dyn` automatically", "only primitive data and recursively wrappable collections wrap automatically", "write `Dyn.from(value)` (the type must implement `Encode`)"))
+            return None
+        }
+        if value.kind == .Map(entries) {
+            payload :: sema_tir_expr(value.ty, TExprKind.MapLit{entries: entries}, value.span)
+            return Val(sema_tir_expr(required, TExprKind.JSONLit{variant: "Object", arg: Val(payload), clone_arg: false}, value.span))
+        }
+        return Val(sema_tir_expr(required, TExprKind.HandleMethod{receiver: value, operation: THandleOp.SerdeEncode, args: [TExpr]{}}, value.span))
+    }
     lifted :: sema_expr_optional_lift(value, required, offered, environment)
     if lifted != None -> return lifted
     if sema_expr_strict_zone_erased(required, offered, environment) {
@@ -2602,6 +2617,10 @@ fn sema_expr_try_method_static_routes(receiver: Expr, method: String, method_spa
         if stream.handled -> return stream
         time := sema_call_try_time_static_method(owner, method, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         if time.handled -> return time
+        if owner == "Dyn" && !sema_data_check_explicit_type_args("Dyn.{method}", type_args, 0, method_span, &diagnostics) {
+            sema_data_check_discarded_arguments(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
         data := sema_call_try_data_literal(Type.Named{name: owner}, method, args, method_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
         if data.handled -> return data
     }
@@ -2996,7 +3015,7 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
     // Rust checks the operand under the surrounding expectation; only a
     // Float carrier changes how a decimal literal operand elaborates.
     operand_expected := Type?{None}
-    if op == UnOp.Neg && sema_expr_expects_machine_float(expected) && sema_expr_decimal_literal_operand(operand, true) -> operand_expected = ~expected
+    if op == UnOp.Neg && sema_expr_expects_machine_float(expected) && sema_expr_decimal_literal_operand(operand, true) -> operand_expected = if expected == (Val(sema_dyn_type())) -> Val(Type.Float) else -> ~expected
     value :: sema_check_expression(operand, operand_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if op == UnOp.Neg {
         if value.ty == {
@@ -3016,6 +3035,10 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
         result_ty := sema_expr_numeric_base(value.ty)
         return sema_expr_expected(sema_tir_expr(result_ty, TExprKind.Unary{op: TUnaryOp.Neg, operand: value}, span), expected, environment, &diagnostics)
     }
+    if sema_dyn_is_type(sema_expr_expected_type(value.ty, environment)) {
+        &diagnostics.push(sema_dyn_condition_error(span))
+        return None
+    }
     if value.ty == Type.Bool || sema_expr_is_integer(value.ty) {
         result_ty := if value.ty == Type.Bool -> Type.Bool else -> sema_expr_numeric_base(value.ty)
         return sema_expr_expected(sema_tir_expr(result_ty, TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span), expected, environment, &diagnostics)
@@ -3028,7 +3051,7 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
 // and adopts the machine carrier only where Float or F32 is expected (Rust
 // `Expr::Float` inference).
 fn sema_expr_expects_machine_float(expected: Type?) -> Bool Never! {
-    expected == (Val(Type.Float)) || expected == (Val(Type.Float32))
+    expected == (Val(Type.Float)) || expected == (Val(Type.Float32)) || expected == (Val(sema_dyn_type()))
 }
 
 fn sema_expr_decimal_literal(text: String, span: Span) -> TExpr Never! {
@@ -3043,6 +3066,17 @@ fn sema_expr_float_literal(value: Float, is_f32: Bool, raw: String?, span: Span,
     ty := Type.Float
     if expected == (Val(Type.Float32)) || (is_f32 && expected != (Val(Type.Float))) -> ty = Type.Float32
     sema_expr_expected(sema_tir_expr(ty, TExprKind.FloatLit{value: value}, span), expected, environment, &diagnostics)
+}
+
+// The opposite Dyn operand contextualizes a fractional literal without
+// rechecking either expression (Decimal variables still do not auto-wrap).
+fn sema_dyn_float_literal_value(expr: Expr) -> Float? Never! {
+    if expr == {
+        .Float(value, _, is_f32, _) -> if is_f32 -> None else -> Val(value)
+        .Paren(inner, _) -> sema_dyn_float_literal_value(inner)
+        .Unary(op, inner, _) -> if op == UnOp.Neg -> Val(-(sema_dyn_float_literal_value(inner) ?? return None)) else -> None
+        else -> None
+    }
 }
 
 // Rust `expr_wants_expected_type` for a decimal literal operand. A binary's
@@ -3100,6 +3134,7 @@ fn sema_expr_decimal_lhs_expected(op: BinOp, left: Expr, right: Expr, expected: 
 fn sema_expr_decimal_rhs_expected(op: BinOp, lhs: Type, environment: SemaScopeEnvironment) -> Type? {
     if !sema_expr_same_type_operator(op) -> return None
     if sema_expr_measurement_type(lhs) -> return Val(Type.Float)
+    if sema_dyn_is_type(sema_expr_expected_type(lhs, environment)) -> return Val(Type.Float)
     if (op == BinOp.Mul || op == BinOp.Div) && sema_expr_scalable_unit_type(lhs, environment) -> return Val(Type.Float)
     // Any other left type is no Float carrier, so the literal stays Decimal
     // and the operator check reports the pairing.
@@ -3156,6 +3191,9 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         else -> {}
     }
     checked_rhs :: sema_check_expression(right, rhs_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if sema_dyn_is_type(sema_expr_expected_type(checked_rhs.ty, environment)) && sema_dyn_float_literal_value(left) == .Val(number) {
+        checked_lhs = sema_tir_expr(Type.Float, TExprKind.FloatLit{value: number}, checked_lhs.span)
+    }
     // D-OPT-LIFT1=A: `x == 5` holds only when the optional `x` holds 5, and
     // `x != 5` is its opposite. The plain side lifts once, so the comparison
     // is the existing optional equality.
@@ -3173,6 +3211,30 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         }
     }
     line :: sema_source_line_at(environment.source_segments, span) ?? return None
+    if sema_dyn_is_type(sema_expr_expected_type(lhs.ty, environment)) || sema_dyn_is_type(sema_expr_expected_type(rhs.ty, environment)) {
+        if op == BinOp.And || op == BinOp.Or {
+            &diagnostics.push(sema_dyn_condition_error(span))
+            return None
+        }
+        arithmetic :: op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div
+        ordering :: op == BinOp.Lt || op == BinOp.Le || op == BinOp.Gt || op == BinOp.Ge
+        if !arithmetic && !ordering && !equality {
+            &diagnostics.push(sema_error("E0109", span, "`{sema_expr_binary_name(op)}` is not defined for Dyn", "Dyn supports arithmetic, equality and ordered comparisons only", "use a supported Dyn operator"))
+            return None
+        }
+        dynamic_left :: sema_expr_expected(lhs, Val(sema_dyn_type()), environment, &diagnostics) ?? return None
+        dynamic_right :: sema_expr_expected(rhs, Val(sema_dyn_type()), environment, &diagnostics) ?? return None
+        ty :: if arithmetic -> sema_dyn_type() else -> Type.Bool
+        if equality {
+            value :: sema_tir_expr(ty, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: dynamic_left, rhs: dynamic_right}, span)
+            return sema_expr_expected(value, expected, environment, &diagnostics)
+        }
+        site :: "{sema_dyn_site(left)} {sema_expr_binary_name(op)} {sema_dyn_site(right)}"
+        location :: sema_expression_panic_location(environment, scopes, span)
+        operation :: if arithmetic -> THandleOp.DynBinary{op: sema_expr_binary_name(op), site: site, location: location} else -> THandleOp.DynCompare{op: sema_expr_binary_name(op), site: site, location: location}
+        value :: sema_tir_expr(ty, TExprKind.HandleMethod{receiver: dynamic_left, operation: operation, args: [TExpr]{dynamic_right}}, span)
+        return sema_expr_expected(value, expected, environment, &diagnostics)
+    }
     if op == BinOp.And || op == BinOp.Or {
         ty :: sema_expr_binary_type(op, lhs.ty, rhs.ty, span, &diagnostics) ?? return None
         value := sema_tir_expr(ty, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span)

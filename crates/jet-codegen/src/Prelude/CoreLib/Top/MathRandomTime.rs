@@ -1699,15 +1699,12 @@ fn jet_std_json_render_canonical(d: &jet_std::Dyn) -> String {
         match t {
             jet_std::Dyn::Null => "null".to_string(),
             jet_std::Dyn::Bool(b) => b.to_string(),
-            jet_std::Dyn::Int(n) => jet_std::jet_int_to_string(*n),
+            jet_std::Dyn::Int(n) => n.to_string_rep(),
             jet_std::Dyn::Float(f) => format!("{:?}", f),
-            jet_std::Dyn::Number(_) | jet_std::Dyn::TypedText(_) => {
-                unreachable!("internal JSON carrier escaped typed decode")
-            }
+            jet_std::Dyn::Number(text) => text.clone(),
             jet_std::Dyn::Text(s) => jet_quote_json_local(s),
-            jet_std::Dyn::Bytes(bs) => {
-                format!("[{}]", bs.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(","))
-            }
+            jet_std::Dyn::Bytes(bs) => jet_quote_json_local(&jet_std::Dyn::bytes_text(bs)),
+            jet_std::Dyn::DateTime(value) => jet_quote_json_local(&value.to_rfc3339()),
             jet_std::Dyn::Array(xs) => {
                 format!("[{}]", xs.iter().map(render).collect::<Vec<_>>().join(","))
             }
@@ -1812,15 +1809,6 @@ fn jet_std_jsonl_first(
         }
     }
     Ok(None)
-}
-
-// D-JSON1-decode + D-JSON3: lenient JSON decode with coercion surfacing. The
-// walk, the coercion message and the audit-line shape are ONE policy in
-// `CoreLib/JetStd/JSONDyn.rs`, shared with the resident JIT host that
-// used to carry a byte-equivalent copy (I8/I9). AOT supplies only the sink it
-// owns: the process's own stderr.
-fn jet_std_json_decode_lenient(text: &String) -> Result<jet_std::Dyn, jet_std::EncodingError> {
-    jet_std::jet_std_json_decode_lenient(text, &mut |line| eprintln!("{}", line))
 }
 
 fn jet_string_bytes(s: &String) -> Vec<u8> {

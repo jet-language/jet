@@ -14555,6 +14555,17 @@ pub enum THandleOp {
         kind: String,
         method: String,
     },
+    DynIndexKey { site: String, location: TPanicLoc },
+    DynIndexAt { site: String, location: TPanicLoc },
+    DynGetKey,
+    DynGetAt,
+    DynHas,
+    DynKeys,
+    DynRemove,
+    DynLen { site: String, location: TPanicLoc },
+    DynBinary { op: String, site: String, location: TPanicLoc },
+    DynCompare { op: String, site: String, location: TPanicLoc },
+    DynSetPath { keys: Vec<bool>, site: String, location: TPanicLoc },
     /// D-SERDE-ACCESS=B: `Dyn.field(name)` → `(recv).field(&a0)`.
     DynField,
     /// D-SERDE-ACCESS=B: `Dyn.at(i)` → `(recv).at(a0)`.

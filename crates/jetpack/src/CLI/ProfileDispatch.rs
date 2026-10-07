@@ -469,7 +469,7 @@ fn bounded_string(object: &[(String, Dyn)], key: &str) -> io::Result<String> {
 
 fn integer_field(object: &[(String, Dyn)], key: &str) -> io::Result<u64> {
     match tree_field(object, key) {
-        Some(Dyn::Int(value)) if *value >= 0 => Ok(*value as u64),
+        Some(Dyn::Int(value)) => value.to_u64().ok_or_else(|| invalid(format!("profile field `{key}` is not an exact integer"))),
         Some(Dyn::Float(value))
             if value.is_finite()
                 && *value >= 0.0

@@ -969,7 +969,7 @@ fn required_string(object: &BTreeMap<String, Dyn>, key: &str) -> Result<String, 
 
 fn required_u64(object: &BTreeMap<String, Dyn>, key: &str) -> Result<u64, RecordingError> {
     match object.get(key) {
-        Some(Dyn::Int(value)) => u64::try_from(*value).map_err(|_| {
+        Some(Dyn::Int(value)) => value.to_u64().ok_or_else(|| {
             RecordingError::InvalidEvent(format!("event `{key}` must be a non-negative integer"))
         }),
         Some(_) => Err(RecordingError::InvalidEvent(format!(
@@ -1051,15 +1051,9 @@ fn canonical_json(value: &Dyn) -> String {
         Dyn::Int(value) => value.to_string(),
         Dyn::Float(value) => value.to_string(),
         Dyn::Number(value) => value.clone(),
-        Dyn::TypedText(value) | Dyn::Text(value) => quoted(value),
-        Dyn::Bytes(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(|value| value.to_string())
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
+        Dyn::Text(value) => quoted(value),
+        Dyn::Bytes(values) => quoted(&Dyn::bytes_text(values)),
+        Dyn::DateTime(value) => quoted(&value.to_rfc3339()),
         Dyn::Array(values) => format!(
             "[{}]",
             values

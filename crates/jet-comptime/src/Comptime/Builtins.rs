@@ -1874,7 +1874,6 @@ pub fn apply_method(
         }
         (v @ CtValue::Enum { .. }, "text") if is_dyn(v) => {
             let value = dyn_payload(v, "Text")
-                .or_else(|| dyn_payload(v, "TypedText"))
                 .and_then(|value| matches!(value, CtValue::Str(_)).then(|| value.clone()));
             Ok(value
                 .map(|value| CtValue::Present(Box::new(value)))

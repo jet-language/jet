@@ -839,10 +839,10 @@ fn jet_http_route_param<T: __jet_Decode>(
         return Ok(None);
     };
     let text = jet_std::Dyn::Text(raw.clone());
-    if let Ok(value) = T::jet_decode(&text) {
+    if let Ok(value) = jet_std::jet_decode_text_cells(|| T::jet_decode(&text)) {
         return Ok(Some(value));
     }
-    let tree = jet_std::parse_json_typed_dyn(&raw).map_err(|_| ())?;
+    let tree = jet_std::parse_json_dyn(&raw).map_err(|_| ())?;
     T::jet_decode(&tree).map(Some).map_err(|_| ())
 }
 
@@ -854,10 +854,10 @@ fn jet_http_route_optional<T: __jet_Decode>(
         return T::jet_decode(&jet_std::Dyn::Null).map_err(|_| ());
     };
     let text = jet_std::Dyn::Text(raw.clone());
-    if let Ok(value) = T::jet_decode(&text) {
+    if let Ok(value) = jet_std::jet_decode_text_cells(|| T::jet_decode(&text)) {
         return Ok(value);
     }
-    let tree = jet_std::parse_json_typed_dyn(&raw).map_err(|_| ())?;
+    let tree = jet_std::parse_json_dyn(&raw).map_err(|_| ())?;
     T::jet_decode(&tree).map_err(|_| ())
 }
 
@@ -882,7 +882,7 @@ fn jet_http_contract_text<'a>(
     name: &str,
 ) -> Option<&'a str> {
     match jet_http_contract_field(object, name)? {
-        jet_std::Dyn::Text(value) | jet_std::Dyn::TypedText(value) => Some(value),
+        jet_std::Dyn::Text(value) => Some(value),
         _ => None,
     }
 }
@@ -931,7 +931,7 @@ pub(crate) fn jet_http_route_schema_matches(
         ),
         "string" => matches!(
             value,
-            jet_std::Dyn::Text(_) | jet_std::Dyn::TypedText(_)
+            jet_std::Dyn::Text(_)
         ),
         "array" => {
             let jet_std::Dyn::Array(items) = value else {
@@ -966,8 +966,7 @@ pub(crate) fn jet_http_route_schema_matches(
                 Some(jet_std::Dyn::Array(names)) => names
                     .iter()
                     .filter_map(|name| match name {
-                        jet_std::Dyn::Text(name)
-                        | jet_std::Dyn::TypedText(name) => Some(name.as_str()),
+                        jet_std::Dyn::Text(name) => Some(name.as_str()),
                         _ => None,
                     })
                     .collect::<Vec<_>>(),
@@ -1018,7 +1017,7 @@ fn jet_http_route_validate_body(
         return Ok(request);
     }
     let text = String::from_utf8(bytes.clone()).map_err(|_| ())?;
-    let value = jet_std::parse_json_typed_dyn(&text).map_err(|_| ())?;
+    let value = jet_std::parse_json_dyn(&text).map_err(|_| ())?;
     if !jet_http_route_schema_matches(&value, schema) {
         return Err(());
     }

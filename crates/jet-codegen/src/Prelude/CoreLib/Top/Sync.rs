@@ -1273,7 +1273,7 @@ fn jet_sync_decode_u64(
 ) -> Result<u64, Vec<jet_std::FieldError>> {
     let value = match tree {
         jet_std::Dyn::Text(value) => value.clone(),
-        jet_std::Dyn::Int(value) if *value >= 0 => value.to_string(),
+        jet_std::Dyn::Int(value) if value >= &jet_foundation::Numeric::JetInt::from_i64(0) => value.to_string(),
         other => {
             return Err(jet_sync_decode_error(format!(
                 "{label} must be a non-negative integer, got {}",

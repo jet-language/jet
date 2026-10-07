@@ -1874,9 +1874,7 @@ fn object_kind(value: &Dyn) -> Result<&str, &'static str> {
 
 fn json_usize(value: Option<&Dyn>) -> Result<usize, &'static str> {
     match value {
-        Some(Dyn::Int(value)) if *value >= 0 => {
-            usize::try_from(*value).map_err(|_| "certificate_invalid")
-        }
+        Some(Dyn::Int(value)) => value.to_usize().ok_or("certificate_invalid"),
         _ => Err("certificate_invalid"),
     }
 }
@@ -1900,15 +1898,9 @@ fn canonical_json_value(value: &Dyn) -> Result<String, &'static str> {
         Dyn::Float(value) if value.is_finite() => Ok(value.to_string()),
         Dyn::Float(_) => Err("certificate_invalid"),
         Dyn::Number(value) => Ok(value.clone()),
-        Dyn::TypedText(value) | Dyn::Text(value) => Ok(json_str(value)),
-        Dyn::Bytes(values) => Ok(format!(
-            "[{}]",
-            values
-                .iter()
-                .map(|value| value.to_string())
-                .collect::<Vec<_>>()
-                .join(",")
-        )),
+        Dyn::Text(value) => Ok(json_str(value)),
+        Dyn::Bytes(values) => Ok(json_str(&Dyn::bytes_text(values))),
+        Dyn::DateTime(value) => Ok(json_str(&value.to_rfc3339())),
         Dyn::Array(values) => Ok(format!(
             "[{}]",
             values

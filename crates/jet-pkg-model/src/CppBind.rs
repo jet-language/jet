@@ -1056,7 +1056,7 @@ fn object(value: &Dyn) -> Option<&[(String, Dyn)]> {
 }
 fn string<'a>(map: &'a [(String, Dyn)], key: &str) -> Option<&'a str> {
     field(map, key).and_then(|value| match value {
-        Dyn::Text(value) | Dyn::TypedText(value) => Some(value.as_str()),
+        Dyn::Text(value) => Some(value.as_str()),
         _ => None,
     })
 }

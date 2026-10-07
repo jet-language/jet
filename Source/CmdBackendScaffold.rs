@@ -1415,7 +1415,7 @@ fn parse_receipt_inputs(value: &Dyn) -> Option<Options> {
     };
     let version = match json_value(fields, "version")? {
         Dyn::Null => None,
-        Dyn::Int(value) if *value > 0 => Some(*value as u64),
+        Dyn::Int(value) => value.to_u64().filter(|value| *value > 0),
         Dyn::Number(value) => {
             let value = value.parse::<u64>().ok()?;
             (value > 0).then_some(value)

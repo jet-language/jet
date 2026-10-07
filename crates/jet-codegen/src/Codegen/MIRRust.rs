@@ -9700,7 +9700,7 @@ impl<'a> RustEmitter<'a> {
             .map_or(nominal_name, |(_, leaf)| leaf);
         match nominal_name {
             "HandleID" | "TaskID" | "EventID" => {
-                format!("jet_std::Dyn::Int({value}.value as i64)")
+                format!("jet_std::Dyn::Int(({value}.value as i64).into())")
             }
             _ => format!("{value}.jet_encode()"),
         }
@@ -25173,7 +25173,7 @@ impl<'a> RustEmitter<'a> {
             let root = &self.config.root_prefix;
             let target_ty = self.rust_type(target);
             return format!(
-                "{{ let __jet_db_entries = {root}jet_std::jet_db_row_project({}, {names}, |value| match value {{ {root}jet_std::DBValue::Null => {root}jet_std::Dyn::Null, {root}jet_std::DBValue::Int(value) => {root}jet_std::Dyn::Int(*value), {root}jet_std::DBValue::Float(value) => {root}jet_std::Dyn::Float(*value), {root}jet_std::DBValue::Text(value) => {root}jet_std::Dyn::Text(value.clone()), {root}jet_std::DBValue::Bool(value) => {root}jet_std::Dyn::Bool(*value), {root}jet_std::DBValue::Blob(value) => {root}jet_std::Dyn::Bytes(value.clone()) }}); {root}jet_db_decode::<{target_ty}>(&__jet_db_entries) }}",
+                "{{ let __jet_db_entries = {root}jet_std::jet_db_row_project({}, {names}, |value| match value {{ {root}jet_std::DBValue::Null => {root}jet_std::Dyn::Null, {root}jet_std::DBValue::Int(value) => {root}jet_std::Dyn::Int((*value).into()), {root}jet_std::DBValue::Float(value) => {root}jet_std::Dyn::Float(*value), {root}jet_std::DBValue::Text(value) => {root}jet_std::Dyn::Text(value.clone()), {root}jet_std::DBValue::Bool(value) => {root}jet_std::Dyn::Bool(*value), {root}jet_std::DBValue::Blob(value) => {root}jet_std::Dyn::Bytes(value.clone()) }}); {root}jet_db_decode::<{target_ty}>(&__jet_db_entries) }}",
                 values.join(", ")
             );
         }
@@ -26735,6 +26735,22 @@ impl<'a> RustEmitter<'a> {
             }
             return self.prelude_call_args_exact(call, &[]);
         }
+        if route.module == "core.encoding.dyn" && route.member == "set_path" {
+            let receiver = self.borrowed_value_reference(function, receiver, MirAccess::Write);
+            let count = args.len().checked_sub(2).expect("Dyn setter value and site");
+            let steps = args[..count].iter().map(|step| {
+                let value = self.value_move(*step);
+                match self.value_type(function, *step).kind() {
+                    MirTypeKind::String => format!("{}jet_std::JetDynStep::Key({value})", self.config.root_prefix),
+                    MirTypeKind::Int => format!("{}jet_std::JetDynStep::At({})", self.config.root_prefix,
+                        self.native_int_argument(value, location)),
+                    _ => panic!("checked Dyn step is not String or Int"),
+                }
+            }).collect::<Vec<_>>().join(", ");
+            let value = self.value_move(args[count]);
+            let site = self.borrowed_value_reference(function, args[count + 1], MirAccess::Read);
+            return format!("{}({receiver}, &[{steps}], {value}, {site})", self.prelude_symbol(call));
+        }
         let mut values = vec![(Some(receiver), None)];
         values.extend(args.iter().map(|value| (Some(*value), None)));
         if let Some(metadata) = route.db_metadata.as_ref() {
@@ -26803,7 +26819,7 @@ impl<'a> RustEmitter<'a> {
                                     | "http.request_first_byte_timeout"
                                     | "http.request_redirects"
                             ))
-                        || (route.module == "core.encoding.dyn" && route.member == "at")
+                        || (route.module == "core.encoding.dyn" && matches!(route.member.as_str(), "at" | "index_at" | "get_at"))
                         || route.member == "shutdown_report_field")
                         && index > 0
                         && !route.signature.borrow_mask[index]
@@ -26827,6 +26843,7 @@ impl<'a> RustEmitter<'a> {
                                 ));
                         let access = if reader_consumes
                             || (route.module == "core.transaction" && route.member == "commit")
+                            || (index == 0 && route.module == "core.encoding.dyn" && route.member == "remove")
                         {
                             MirAccess::Write
                         } else {
@@ -26851,6 +26868,11 @@ impl<'a> RustEmitter<'a> {
                 }
             })
             .collect::<Vec<_>>();
+        let mut values = values;
+        if route.module == "core.encoding.dyn" && matches!(route.member.as_str(), "binary" | "compare") {
+            let op = values.remove(2);
+            values.insert(0, op);
+        }
         self.prelude_call_args_exact(call, &values)
     }
 
@@ -27107,6 +27129,11 @@ impl<'a> RustEmitter<'a> {
                 if self.is_dyn_int(owner, variant) {
                     return format!("{}jet_std::jet_dyn_int({value})", self.config.root_prefix);
                 }
+                if variant == "DateTime"
+                    && crate::Codegen::core_rust_type_name(&self.type_def(owner).key) == Some("Dyn")
+                {
+                    return format!("{}jet_std::jet_dyn_datetime(&{value})", self.config.root_prefix);
+                }
                 let mut value = if native {
                     self.native_int_input(&value, payload, location)
                         .unwrap_or(value)
@@ -27214,9 +27241,22 @@ impl<'a> RustEmitter<'a> {
             .unwrap_or(owner);
         // A moved subject that only feeds this block's bindings is taken
         // apart once instead of cloning each payload out of it.
+        if variant == "DateTime"
+            && crate::Codegen::core_rust_type_name(&self.type_def(effective_owner).key) == Some("Dyn")
+        {
+            let value = self.inspected_value_reference(function, subject);
+            return format!("{}jet_std::jet_dyn_datetime_payload(&{value}).expect(\"MIR enum payload variant mismatch\")",
+                self.config.root_prefix);
+        }
         if let Some(taken) = result.and_then(|result| {
             self.payload_take(function, result, subject, effective_owner, variant)
         }) {
+            if variant == "Object"
+                && crate::Codegen::core_rust_type_name(&self.type_def(effective_owner).key) == Some("Dyn")
+                && result.is_some_and(|result| matches!(self.value_type(function, result).kind(), MirTypeKind::Map { .. }))
+            {
+                return format!("{}jet_data_entries_to_map({taken})", self.config.root_prefix);
+            }
             return taken;
         }
         // A payload read only inspects its subject; the payload is cloned out.

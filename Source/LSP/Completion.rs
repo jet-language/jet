@@ -976,7 +976,8 @@ fn option_u64(
         if let Some(value) = object_get(object, *key) {
             return match value {
                 Dyn::Null => Ok(None),
-                Dyn::Int(number) if *number >= 0 => Ok(Some(*number as u64)),
+                Dyn::Int(number) => number.to_u64().map(Some).ok_or_else(|| format!(
+                    "jetCompletion.{key} must be a nonnegative integer or null")),
                 _ => Err(format!(
                     "jetCompletion.{key} must be a nonnegative integer or null"
                 )),

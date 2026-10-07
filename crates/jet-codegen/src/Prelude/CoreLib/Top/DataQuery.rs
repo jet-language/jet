@@ -294,10 +294,10 @@ fn jet_analytics_sql_value(value: &jet_std::Dyn) -> jet_sql_query::JetSqlValue {
     match value {
         jet_std::Dyn::Null => jet_sql_query::JetSqlValue::Null,
         jet_std::Dyn::Bool(value) => jet_sql_query::JetSqlValue::Bool(*value),
-        jet_std::Dyn::Int(value) => jet_sql_query::JetSqlValue::Int(*value),
+        jet_std::Dyn::Int(value) => jet_sql_query::JetSqlValue::literal(&value.to_string_rep()),
         jet_std::Dyn::Float(value) => jet_sql_query::JetSqlValue::Float(*value),
         jet_std::Dyn::Number(value) => jet_sql_query::JetSqlValue::literal(value),
-        jet_std::Dyn::TypedText(value) | jet_std::Dyn::Text(value) => {
+        jet_std::Dyn::Text(value) => {
             jet_sql_query::JetSqlValue::Text(value.clone())
         }
         other => jet_sql_query::JetSqlValue::Text(jet_std::render_dyn_json(other, false, 0)),
@@ -308,7 +308,7 @@ fn jet_analytics_sql_tree(value: jet_sql_query::JetSqlValue) -> jet_std::Dyn {
     match value {
         jet_sql_query::JetSqlValue::Null => jet_std::Dyn::Null,
         jet_sql_query::JetSqlValue::Bool(value) => jet_std::Dyn::Bool(value),
-        jet_sql_query::JetSqlValue::Int(value) => jet_std::Dyn::Int(value),
+        jet_sql_query::JetSqlValue::Int(value) => jet_std::Dyn::Int((value).into()),
         jet_sql_query::JetSqlValue::Float(value) => jet_std::Dyn::Float(value),
         jet_sql_query::JetSqlValue::Text(value) => jet_std::Dyn::Text(value),
     }

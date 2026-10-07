@@ -1869,3 +1869,26 @@ fn run() {
     assert_eq!(dev, aot, "default run exact JSON drifted from AOT");
     assert_eq!(interpreter, aot, "interpreter exact JSON drifted from AOT");
 }
+
+#[test]
+fn owned_dyn_int_and_strict_decode_match_all_tiers() {
+    on_encoding_stack(|| {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        for stem in ["dyn_exact_int", "dyn_strict_decode", "dyn_number_lexeme", "dyn_cbor_bytes"] {
+            let source = fs::read_to_string(root.join(format!("Examples/features/serde/{stem}.jet")))
+                .expect("Dyn rules fixture");
+            let expected = fs::read_to_string(root.join(format!("Examples/features/expected/serde/{stem}.out")))
+                .expect("reviewed Dyn rules golden");
+            let scratch = Scratch::new(stem);
+            let path = scratch.write_project("2026", &source);
+            let aot = run_aot(&path, scratch.path());
+            let dev = run_default_dev(path.to_str().unwrap());
+            let interpreter = run_forced_interpreter(path.to_str().unwrap());
+            for (tier, output) in [("AOT", &aot), ("default", &dev), ("interpreter", &interpreter)] {
+                assert_eq!(output.exit, 0, "{stem} {tier}: {}", output.stderr);
+                assert_eq!(output.stdout, expected, "{stem} {tier} output");
+                assert_eq!(output.stderr, "", "{stem} {tier} diagnostics");
+            }
+        }
+    });
+}

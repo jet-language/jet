@@ -19,7 +19,7 @@ impl<'a> Checker<'a> {
         // module item lookup.
         if module == "core.encoding"
             && alias == "Dyn"
-            && matches!(name, "Null" | "Bool" | "Int" | "Float" | "Text" | "Array" | "Object")
+            && matches!(name, "Null" | "Bool" | "Int" | "Float" | "Text" | "Bytes" | "DateTime" | "Array" | "Object")
         {
             self.record_import_alias_reference(alias, alias_span);
             return Some(json_ty());

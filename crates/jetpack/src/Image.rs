@@ -1465,7 +1465,7 @@ fn string_field<'a>(
 
 fn number_field(object: &[(String, Dyn)], field_name: &str) -> io::Result<u64> {
     match field(object, field_name) {
-        Some(Dyn::Int(value)) if *value >= 0 => Ok(*value as u64),
+        Some(Dyn::Int(value)) => value.to_u64().ok_or_else(|| invalid(&format!("OCI object field `{field_name}` is not a non-negative integer"))),
         Some(Dyn::Float(value))
             if value.is_finite()
                 && *value >= 0.0

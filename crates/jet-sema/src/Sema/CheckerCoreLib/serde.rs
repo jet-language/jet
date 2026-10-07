@@ -82,7 +82,7 @@ impl<'a> Checker<'a> {
                     || n == "Dyn"
                     || matches!(
                         n.as_str(),
-                        "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Duration"
+                        "Date" | "LocalDate" | "LocalTime" | "DateTime" | "ZonedDateTime" | "Duration"
                     )
                     || is_json_type_name(n)
                     || self.serde_trait_impl(n, crate::Generics::ENCODE)
@@ -143,7 +143,7 @@ impl<'a> Checker<'a> {
                     || core_secret
                     || matches!(
                         n.as_str(),
-                        "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Duration"
+                        "Date" | "LocalDate" | "LocalTime" | "DateTime" | "ZonedDateTime" | "Duration"
                     )
                     || self.serde_trait_impl(n, crate::Generics::DECODE)
                     || self.type_param_scope.iter().any(|p| {

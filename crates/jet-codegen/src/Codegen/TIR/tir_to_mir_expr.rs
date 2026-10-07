@@ -4396,6 +4396,13 @@ pub(super) fn lower_expr(
                     }),
                 );
             }
+            if matches!(op, THandleOp::DynIndexKey { .. } | THandleOp::DynIndexAt { .. }
+                | THandleOp::DynGetKey | THandleOp::DynGetAt | THandleOp::DynHas
+                | THandleOp::DynKeys | THandleOp::DynRemove | THandleOp::DynLen { .. }
+                | THandleOp::DynBinary { .. } | THandleOp::DynCompare { .. } | THandleOp::DynSetPath { .. })
+            {
+                return lower_dyn_surface(ctx, expr, recv, args, op);
+            }
             if dyn_access_route(op, &carrier).is_some() {
                 return lower_dyn_access(ctx, expr, recv, args, op, &carrier);
             }
@@ -10068,6 +10075,97 @@ fn lower_fn_value(
     }
 }
 
+fn lower_dyn_surface(
+    ctx: &mut LowerCtx, expr: &TExpr, recv: &TExpr, source_args: &[TExpr], op: &THandleOp,
+) -> Result<MirValueId, LowerError> {
+    let (member, site, location, binary_op) = match op {
+        THandleOp::DynIndexKey { site, location } => ("index_key", Some(site), Some(location), None),
+        THandleOp::DynIndexAt { site, location } => ("index_at", Some(site), Some(location), None),
+        THandleOp::DynLen { site, location } => ("len", Some(site), Some(location), None),
+        THandleOp::DynBinary { op, site, location } => ("binary", Some(site), Some(location), Some(op)),
+        THandleOp::DynCompare { op, site, location } => ("compare", Some(site), Some(location), Some(op)),
+        THandleOp::DynSetPath { site, location, .. } => ("set_path", Some(site), Some(location), None),
+        THandleOp::DynGetKey => ("get_key", None, None, None),
+        THandleOp::DynGetAt => ("get_at", None, None, None),
+        THandleOp::DynHas => ("has", None, None, None),
+        THandleOp::DynKeys => ("keys", None, None, None),
+        THandleOp::DynRemove => ("remove", None, None, None),
+        _ => return unsupported_expr(ctx, "unknown Dyn surface operation"),
+    };
+    let mutating = matches!(member, "set_path" | "remove");
+    let (receiver, place) = lower_builtin_receiver(ctx, recv, mutating)?;
+    if mutating && place.is_none() {
+        return Err(ctx.error(ctx.span(), "Dyn write receiver has no checked mutable place"));
+    }
+    let mut args = lower_values(ctx, source_args)?;
+    let mut borrow_mask = vec![true];
+    for arg in source_args {
+        borrow_mask.push(matches!(arg.ty, Type::String) && member != "set_path"
+            || matches!(member, "binary" | "compare"));
+    }
+    if let Some(op) = binary_op {
+        args.push(ctx.emit("dyn-operator", Some(Type::String),
+            MirOperation::Constant(MirConstant::String(op.clone())))?);
+        borrow_mask.push(true);
+    }
+    if let Some(site) = site {
+        args.push(ctx.emit("dyn-site", Some(Type::String),
+            MirOperation::Constant(MirConstant::String(site.clone())))?);
+        borrow_mask.push(true);
+    }
+    let result_ty = if location.is_some() {
+        Type::Result { ok: Box::new(expr.ty.clone()), err: Box::new(Type::String) }
+    } else { expr.ty.clone() };
+    let arity = args.len() + 1;
+    let route = TPreludeRoute {
+        family: MirPreludeFamily::HandleMethod,
+        module: "core.encoding.dyn".to_string(), member: member.to_string(),
+        symbol: MirSymbol::Prelude(format!("jet_dyn_{member}")),
+        signature: MirCallSignature { arity, max_arity: arity, borrow_mask },
+        effect: None, fallibility: TFailureCarrier::from_checked_type(&result_ty),
+        abi: MirPreludeAbi::Value, authority: None, db_metadata: None,
+    };
+    let call = ctx.intern_prelude_route(route)?;
+    let result = ctx.emit("dyn-operation", Some(result_ty),
+        MirOperation::Semantic(MirSemanticOp::HandleMethod {
+            call, receiver, args, frame_schedule: None, frame_schedule_derivation: None,
+        }))?;
+    let Some(loc) = location else { return Ok(result); };
+    let condition = ctx.emit("dyn-operation-ok", Some(Type::Bool),
+        MirOperation::ResultIsOk { subject: result })?;
+    let success = ctx.new_block(ctx.span(), "dyn.success")?;
+    let failure = ctx.new_block(ctx.span(), "dyn.failure")?;
+    ctx.terminate(MirTerminator::Branch { condition, then_target: success, else_target: failure });
+    ctx.switch_to(failure);
+    let message = ctx.emit("dyn-operation-error", Some(Type::String),
+        MirOperation::ResultValue { subject: result, ok: false })?;
+    let unit = Type::Named("Unit".to_string());
+    let route = super::require_stop_route("panic", 1, &unit, &TFailureCarrier::Infallible)?;
+    let call = ctx.intern_prelude_route(route)?;
+    let location = MirPanicLoc {
+        file: ctx.source_file_id_for(&loc.file), line: loc.line, column: loc.col,
+    };
+    let mut context = MirPanicContext {
+        function: loc.fn_name.clone(), source_line: loc.src_line.clone(), caret: loc.caret,
+        locals: loc.locals.iter().filter_map(|(name, local)|
+            ctx.local_id_for(local).ok().map(|id| (name.clone(), id))).collect(),
+    };
+    if ctx.has_stop_path_cleanups() {
+        let moved = ctx.stop_path_moved_locals();
+        context.locals.retain(|(_, local)| !moved.contains(local));
+        ctx.emit_stop_path_cleanups()?;
+    }
+    ctx.emit("dyn-operation-stop", Some(unit),
+        MirOperation::Semantic(MirSemanticOp::RequireStop {
+            call, kind: MirRequireKind::Panic, condition: None, location, context,
+            values: vec![message], always_stops: true,
+        }))?;
+    ctx.terminate(MirTerminator::Unreachable { reason: "Dyn runtime stop".to_string() });
+    ctx.switch_to(success);
+    ctx.emit("dyn-operation-value", Some(expr.ty.clone()),
+        MirOperation::ResultValue { subject: result, ok: true })
+}
+
 fn dyn_access_route(op: &THandleOp, carrier: &TFailureCarrier) -> Option<TPreludeRoute> {
     let (member, symbol, arity, borrow_mask) = match op {
         THandleOp::DynField | THandleOp::JSONField => {
@@ -10167,8 +10265,8 @@ fn typed_codec_target(ty: &Type) -> bool {
         Type::Named(name) => {
             matches!(
                 name.as_str(),
-                "Data"
-                    | "Dyn"
+                "Dyn"
+                    | "ZonedDateTime"
                     | "U8"
                     | "I8"
                     | "I16"

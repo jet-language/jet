@@ -258,7 +258,7 @@ fn jet_web_router_parse_json_search(
 
 fn jet_web_router_json_value_text(value: &jet_std::Dyn) -> Result<String, String> {
     match value {
-        jet_std::Dyn::Text(text) | jet_std::Dyn::TypedText(text) => Ok(text.clone()),
+        jet_std::Dyn::Text(text) => Ok(text.clone()),
         jet_std::Dyn::Bool(value) => Ok(value.to_string()),
         jet_std::Dyn::Int(value) => Ok(value.to_string()),
         jet_std::Dyn::Float(value) if value.is_finite() => Ok(value.to_string()),
@@ -267,7 +267,7 @@ fn jet_web_router_json_value_text(value: &jet_std::Dyn) -> Result<String, String
         jet_std::Dyn::Null
         | jet_std::Dyn::Array(_)
         | jet_std::Dyn::Object(_)
-        | jet_std::Dyn::Bytes(_) => Ok(jet_std::render_json(value, false, 0)),
+        | jet_std::Dyn::Bytes(_) | jet_std::Dyn::DateTime(_) => Ok(jet_std::render_json(value, false, 0)),
     }
 }
 
@@ -349,7 +349,7 @@ fn jet_web_router_json_value_for_field(
         JetWebRouterValueType::String => Ok(jet_std::Dyn::Text(raw.to_string())),
         JetWebRouterValueType::Int => raw
             .parse::<i64>()
-            .map(jet_std::Dyn::Int)
+            .map(|value| jet_std::Dyn::Int(value.into()))
             .map_err(|_| format!("parameter `{}` expects Int, got {raw}", field.name)),
         JetWebRouterValueType::Bool => match raw {
             "true" => Ok(jet_std::Dyn::Bool(true)),

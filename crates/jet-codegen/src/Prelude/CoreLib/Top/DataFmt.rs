@@ -51,9 +51,11 @@ fn jet_enc_csv_to_string<T: __jet_Encode>(values: &Vec<T>) -> String {
             for key in &header {
                 let cell = match jet_std::dyn_get(tree, key) {
                     Some(jet_std::Dyn::Text(s)) => s.clone(),
-                    Some(jet_std::Dyn::Int(n)) => jet_std::jet_int_to_string(*n),
+                    Some(jet_std::Dyn::Int(n)) => n.to_string_rep(),
                     Some(jet_std::Dyn::Float(f)) => format!("{:?}", f),
                     Some(jet_std::Dyn::Bool(b)) => b.to_string(),
+                    Some(jet_std::Dyn::Bytes(bytes)) => jet_std::Dyn::bytes_text(bytes),
+                    Some(jet_std::Dyn::DateTime(value)) => value.to_rfc3339(),
                     Some(jet_std::Dyn::Null) | None => String::new(),
                     Some(other) => jet_std::render_dyn_json(other, false, 0),
                 };
@@ -75,9 +77,11 @@ fn jet_enc_csv_to_string<T: __jet_Encode>(values: &Vec<T>) -> String {
                     .iter()
                     .map(|cell| match cell {
                         jet_std::Dyn::Text(s) => s.clone(),
-                        jet_std::Dyn::Int(n) => jet_std::jet_int_to_string(*n),
+                        jet_std::Dyn::Int(n) => n.to_string_rep(),
                         jet_std::Dyn::Float(f) => format!("{:?}", f),
                         jet_std::Dyn::Bool(b) => b.to_string(),
+                        jet_std::Dyn::Bytes(bytes) => jet_std::Dyn::bytes_text(bytes),
+                        jet_std::Dyn::DateTime(value) => value.to_rfc3339(),
                         jet_std::Dyn::Null => String::new(),
                         other => jet_std::render_dyn_json(other, false, 0),
                     })
@@ -90,13 +94,13 @@ fn jet_enc_csv_to_string<T: __jet_Encode>(values: &Vec<T>) -> String {
 
 // D-ENC-DYN1=A+ (c152): TOML is a full serde-equivalent adapter over the one rich
 // `Dyn` — nested `[table]`s, arrays-of-tables, dotted keys, and typed scalars.
-// The dynamic `parse` returns the `Data` value; `decode<T>` walks the rich tree;
+// The dynamic `parse` returns a `Dyn` value; `decode<T>` walks the rich tree;
 // `to_string` renders a `Dyn` back to a nested document.
 fn jet_std_toml_parse(text: &String) -> Result<jet_std::Dyn, jet_std::EncodingError> {
     jet_std::toml::parse_to_tree(text).map_err(|e| {
         jet_std::EncodingError::new(
             jet_std::EncodingFormat::TOML,
-            jet_std::EncodingErrorKind::Syntax,
+            if e.unsupported { jet_std::EncodingErrorKind::Unsupported } else { jet_std::EncodingErrorKind::Syntax },
             0,
             Ok(e.line as i64),
             Err(JetAbsent),
@@ -125,7 +129,7 @@ fn jet_std_yaml_parse(text: &String) -> Result<jet_std::Dyn, jet_std::EncodingEr
     jet_std::yaml::parse_to_tree(text).map_err(|e| {
         jet_std::EncodingError::new(
             jet_std::EncodingFormat::YAML,
-            jet_std::EncodingErrorKind::Syntax,
+            if e.unsupported { jet_std::EncodingErrorKind::Unsupported } else { jet_std::EncodingErrorKind::Syntax },
             0,
             Ok(e.line as i64),
             Err(JetAbsent),

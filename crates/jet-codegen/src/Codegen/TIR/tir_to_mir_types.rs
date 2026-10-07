@@ -2292,9 +2292,9 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
             "Int",
             "Float",
             "Number",
-            "TypedText",
             "Text",
             "Bytes",
+            "DateTime",
             "Array",
             "Object",
         ],
@@ -2312,6 +2312,7 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
             "Float",
             "Text",
             "Bytes",
+            "DateTime",
             "Key",
         ],
     ),
@@ -3681,6 +3682,7 @@ fn compiler_owned_type_defs<'a>(
                                 "Int" => TirVariantPayload::Single(Type::Int),
                                 "Float" => TirVariantPayload::Single(Type::Float),
                                 "Text" | "Key" => TirVariantPayload::Single(Type::String),
+                                "DateTime" => TirVariantPayload::Single(Type::Named("ZonedDateTime".to_string())),
                                 "Bytes" => {
                                     TirVariantPayload::Single(Type::List(Box::new(Type::IntN {
                                         signed: false,
@@ -3694,7 +3696,8 @@ fn compiler_owned_type_defs<'a>(
                                 "Bool" => TirVariantPayload::Single(Type::Bool),
                                 "Int" => TirVariantPayload::Single(Type::Int),
                                 "Float" => TirVariantPayload::Single(Type::Float),
-                                "Number" | "TypedText" | "Text" => {
+                                "DateTime" => TirVariantPayload::Single(Type::Named("ZonedDateTime".to_string())),
+                                "Number" | "Text" => {
                                     TirVariantPayload::Single(Type::String)
                                 }
                                 "Bytes" => {

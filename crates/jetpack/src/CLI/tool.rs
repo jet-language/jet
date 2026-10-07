@@ -2785,7 +2785,7 @@ fn bounded_json_string(
 
 fn json_field_u64(object: &[(String, Dyn)], key: &str) -> Result<u64, String> {
     match tree_field(object, key) {
-        Some(Dyn::Int(value)) if *value >= 0 => Ok(*value as u64),
+        Some(Dyn::Int(value)) => value.to_u64().ok_or_else(|| format!("profile field `{key}` is not an exact integer")),
         Some(Dyn::Float(value))
             if value.is_finite()
                 && *value >= 0.0

@@ -632,7 +632,8 @@ fn jet_std_env_decode<T: __jet_Decode>(
         origins.push((entry.name, entry.segments.join(".")));
         jet_env_insert_tree(&mut tree, &entry.segments, entry.value);
     }
-    T::jet_decode(&tree).map_err(|errors| {
+    // Environment variables are text-native: every value is text.
+    jet_std::jet_decode_text_cells(|| T::jet_decode(&tree)).map_err(|errors| {
         errors
             .into_iter()
             .map(|mut error| {

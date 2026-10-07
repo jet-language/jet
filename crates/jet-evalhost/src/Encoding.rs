@@ -136,11 +136,6 @@ pub(crate) mod json_rt {
     pub fn jet_int_to_f64(value: i64) -> f64 {
         value as f64
     }
-
-    pub fn parse_dyn_typed_ordered(text: &str) -> Result<Dyn, EncodingError> {
-        parse_json_typed_dyn(text)
-    }
-
 }
 /// Shared CSV/data query kernel. The resident layer only marshals heap
 /// `Dyn` values; plan parsing and comparison stay in the Prelude.

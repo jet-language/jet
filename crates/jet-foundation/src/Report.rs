@@ -105,7 +105,8 @@ impl StatusValue {
         match value {
             crate::Dyn::Dyn::Null => Ok(Self::Null),
             crate::Dyn::Dyn::Bool(value) => Ok(Self::Bool(*value)),
-            crate::Dyn::Dyn::Int(value) => Ok(Self::Integer(i128::from(*value))),
+            crate::Dyn::Dyn::Int(value) => value.to_i128().map(Self::Integer)
+                .ok_or_else(|| "report integer is outside i128".to_string()),
             crate::Dyn::Dyn::Float(value) if value.is_finite() => {
                 Ok(Self::Float(value.to_string()))
             }
@@ -119,14 +120,9 @@ impl StatusValue {
                     Ok(Self::Float(value.clone()))
                 }
             }
-            crate::Dyn::Dyn::TypedText(value)
-            | crate::Dyn::Dyn::Text(value) => Ok(Self::String(value.clone())),
-            crate::Dyn::Dyn::Bytes(values) => Ok(Self::Array(
-                values
-                    .iter()
-                    .map(|value| Self::Integer(i128::from(*value)))
-                    .collect(),
-            )),
+            crate::Dyn::Dyn::Text(value) => Ok(Self::String(value.clone())),
+            crate::Dyn::Dyn::Bytes(values) => Ok(Self::String(crate::Dyn::Dyn::bytes_text(values))),
+            crate::Dyn::Dyn::DateTime(value) => Ok(Self::String(value.to_rfc3339())),
             crate::Dyn::Dyn::Array(values) => Ok(Self::Array(
                 values
                     .iter()

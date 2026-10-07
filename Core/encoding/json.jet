@@ -1,11 +1,12 @@
 
 // core.encoding.json — RFC 8259 JSON as Dyn.
 //
-// `parse` is the strict codec: objects keep insertion order, whole numbers
-// become `Dyn.Int` (exact `Int`, not binary64), fractions become
-// `Dyn.Float`, and `NaN` / `Infinity` are syntax errors. `decode` is the
-// same tree with the historical lenient name; typed `decode<T>` stays a
-// compiler lowering over this tree and is not reimplemented here.
+// `parse` is the strict codec: objects keep insertion order, every number
+// becomes `Dyn.Number` holding its exact lexeme (`1.50` stays `1.50`,
+// `1e400` and integers wider than `Int` are kept exactly; a typed read
+// range-checks them), and `NaN` / `Infinity` are syntax errors (#4602).
+// `decode` is the same parse; typed `decode<T>` stays a compiler lowering over
+// this tree and is not reimplemented here.
 //
 // `to_string` is compact. `to_string_pretty` uses two-space indent. Neither
 // emits a trailing newline, sorts keys, or is a hashing contract: insertion
@@ -450,9 +451,7 @@ impl Parser {
                 }
             }
         }
-        fractional := false
         if (self.peek() ?? (U8{0})) == (U8{46}) {
-            fractional = true
             _ :: &self.bump()
             digit :: self.peek() ?? return Err(self.err("decimal point must be followed by a digit"))
             dn :: digit
@@ -467,11 +466,9 @@ impl Parser {
                 }
             }
         }
-        exp := false
         ebyte :: self.peek() ?? (U8{0})
         en :: ebyte
         if en == 101 || en == 69 {
-            exp = true
             _ :: &self.bump()
             sign :: self.peek() ?? (U8{0})
             sn :: sign
@@ -490,13 +487,7 @@ impl Parser {
             }
         }
         token :: String.from_bytes(self.bytes[start..self.index - 1]) ?? return Err(self.err("invalid number token"))
-        if fractional || exp {
-            f :: Float.parse(token) ?? return Err(self.err("number does not fit in Float"))
-            if !math.is_finite(f) -> return Err(self.err("non-finite JSON numbers are not allowed"))
-            return Ok(Dyn.Float(f))
-        }
-        n :: Int.parse(token) ?? return Err(self.err("number does not fit in Int"))
-        Ok(Dyn.Int(n))
+        Ok(Dyn.Number(token))
     }
 
     fn parse_array(&self) -> Dyn EncodingError! {
@@ -537,13 +528,13 @@ impl Parser {
         if !&self.expect(U8{123}) -> return Err(self.err("expected '{{'"))
         if !&self.enter() -> return Err(self.err("nesting exceeds EncodingLimits.safe().max_depth (256)"))
         if self.recording -> &self.pending.push(DataEvent.ObjectStart)
-        entries := [String: Dyn]{}
+        entries := Dyn.object()
         &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
         if (self.peek() ?? (U8{0})) == (U8{125}) {
             _ :: &self.bump()
             self.depth -= 1
             if self.recording -> &self.pending.push(DataEvent.ObjectEnd)
-            return Ok(Dyn.Object(entries))
+            return Ok(entries)
         }
         loop {
             &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
@@ -553,17 +544,17 @@ impl Parser {
             if !&self.expect(U8{58}) -> return Err(self.err("expected ':' after an object key"))
             &self.path.push(key)
             if self.recording -> &self.pending.push(DataEvent.Key(key))
-            if entries.has_key(key) {
+            if entries.has(key) {
                 if !self.allow_duplicates {
                     error :: self.err("duplicate object key `{key}`")
                     _ :: &self.path.pop()
                     return Err(error)
                 }
                 later :: &self.parse_value()
-                entries = object_with(entries, key, later)
+                entries[key] = later
             } else {
                 value :: &self.parse_value()
-                _ :: &entries.add(key, value)
+                entries[key] = value
             }
             _ :: &self.path.pop()
             &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
@@ -572,7 +563,7 @@ impl Parser {
                 _ :: &self.bump()
                 self.depth -= 1
                 if self.recording -> &self.pending.push(DataEvent.ObjectEnd)
-                return Ok(Dyn.Object(entries))
+                return Ok(entries)
             }
             if b != (U8{44}) -> return Err(self.err("expected ',' or '}}' after an object member"))
             _ :: &self.bump()
@@ -627,23 +618,6 @@ fn parse_json(text: String, allow_duplicates: Bool) -> Dyn EncodingError! {
     Ok(value)
 }
 
-// Rebuild an object with `key` bound to `value`, keeping member order: an
-// existing key keeps its position, a new key goes last.
-fn object_with(entries: [String: Dyn], key: String, value: Dyn) -> [String: Dyn] Never! {
-    out := [String: Dyn]{}
-    found := false
-    loop pair in entries {
-        if pair.key == key {
-            found = true
-            _ :: &out.add(key, value)
-        } else {
-            _ :: &out.add(pair.key, pair.value)
-        }
-    }
-    if !found -> _ :: &out.add(key, value)
-    out
-}
-
 fn append_events(value: Dyn) -> [DataEvent] Never! {
     out := [DataEvent]{}
     if value == {
@@ -651,7 +625,11 @@ fn append_events(value: Dyn) -> [DataEvent] Never! {
         .Bool(v) -> &out.push(DataEvent.Bool(v))
         .Int(n) -> &out.push(DataEvent.Int(n))
         .Float(n) -> &out.push(DataEvent.Float(n))
+        .Number(s) -> &out.push(DataEvent.Number(s))
+        .Bytes(b) -> &out.push(DataEvent.Bytes(b))
         .Text(s) -> &out.push(DataEvent.Text(s))
+        .Bytes(bytes) -> &out.push(DataEvent.Bytes(bytes))
+        .DateTime(z) -> &out.push(DataEvent.DateTime(z))
         .Array(items) -> {
             &out.push(DataEvent.ArrayStart)
             loop item in items {
@@ -660,11 +638,11 @@ fn append_events(value: Dyn) -> [DataEvent] Never! {
             }
             &out.push(DataEvent.ArrayEnd)
         }
-        .Object(entries) -> {
+        .Object(_) -> {
             &out.push(DataEvent.ObjectStart)
-            loop pair in entries {
-                &out.push(DataEvent.Key(pair.key))
-                chunk := append_events(pair.value)
+            loop key in value.keys() {
+                &out.push(DataEvent.Key(key))
+                chunk := append_events(value[key])
                 loop event in chunk -> &out.push(event)
             }
             &out.push(DataEvent.ObjectEnd)
@@ -746,7 +724,17 @@ fn write_canonical(out: &[U8], value: Dyn, path: &[String], depth: Int) -> Bool 
             }
             write_ascii(&out, jcs_number(n))
         }
+        .Number(s) -> {
+            f :: Float.parse(s) ?? return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JCS cannot encode number {s}"))
+            if !math.is_finite(f) {
+                return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JCS requires a number within IEEE 754 binary64; {s} is out of range"))
+            }
+            write_ascii(&out, jcs_number(f))
+        }
+        .Bytes(_) -> return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JSON cannot encode Bytes; encode bytes as Text explicitly"))
         .Text(s) -> write_json_string(&out, s)
+        .Bytes(_) -> write_json_string(&out, value.to_text() ?? "")
+        .DateTime(_) -> write_json_string(&out, value.to_text() ?? "")
         .Array(items) -> {
             &out.push(U8{91})
             loop i in 0..<items.len() {
@@ -757,14 +745,14 @@ fn write_canonical(out: &[U8], value: Dyn, path: &[String], depth: Int) -> Bool 
             }
             &out.push(U8{93})
         }
-        .Object(entries) -> {
+        .Object(_) -> {
             keys := [String]{}
             values := [Dyn]{}
             units := [[Int]]{}
-            loop pair in entries {
-                &keys.push(pair.key)
-                &values.push(pair.value)
-                &units.push(utf16_units(pair.key))
+            loop key in value.keys() {
+                &keys.push(key)
+                &values.push(value[key])
+                &units.push(utf16_units(key))
             }
             order :: sort_by_units(units)
             &out.push(U8{123})
@@ -958,8 +946,12 @@ fn write_json(out: &[U8], value: Dyn, pretty: Bool, indent: Int) Never! {
             else -> write_ascii(&out, "false")
         }
         .Int(n) -> write_ascii(&out, "{n}")
+        .Number(s) -> write_ascii(&out, s)
+        .Bytes(b) -> write_json_bytes(&out, b)
         .Float(n) -> write_json_float(&out, n)
         .Text(s) -> write_json_string(&out, s)
+        .Bytes(_) -> write_json_string(&out, value.to_text() ?? "")
+        .DateTime(_) -> write_json_string(&out, value.to_text() ?? "")
         .Array(items) -> {
             &out.push(U8{91})
             if items.len() == 0 {
@@ -980,28 +972,27 @@ fn write_json(out: &[U8], value: Dyn, pretty: Bool, indent: Int) Never! {
             }
             &out.push(U8{93})
         }
-        .Object(entries) -> {
+        .Object(_) -> {
             &out.push(U8{123})
-            if entries.len() == 0 {
+            if value.len() == 0 {
                 &out.push(U8{125})
                 return
             }
             i := 0
-            loop pair in entries {
+            loop key in value.keys() {
                 if pretty {
                     &out.push(U8{10})
                     write_indent(&out, indent + 1)
                 }
-                write_json_string(&out, pair.key)
+                write_json_string(&out, key)
                 &out.push(U8{58})
                 if pretty -> &out.push(U8{32})
-                write_json(&out, pair.value, pretty, indent + 1)
+                write_json(&out, value[key], pretty, indent + 1)
                 i += 1
-                if i < entries.len() -> &out.push(U8{44})
+                if i < value.len() -> &out.push(U8{44})
             }
             if pretty {
                 &out.push(U8{10})
-
                 write_indent(&out, indent)
             }
             &out.push(U8{125})
@@ -1010,6 +1001,15 @@ fn write_json(out: &[U8], value: Dyn, pretty: Bool, indent: Int) Never! {
 }
 fn write_json_float(out: &[U8], n: Float) Never! {
     if math.is_finite(n) -> write_ascii(&out, "{n}") else -> write_ascii(&out, "null")
+}
+// Bytes render as their byte values, `[1,255]`, the same text every tier writes.
+fn write_json_bytes(out: &[U8], bytes: [U8]) Never! {
+    &out.push(U8{91})
+    loop i in 0..<bytes.len() {
+        if i > 0 -> &out.push(U8{44})
+        write_ascii(&out, "{Int.from_u8(bytes[i])}")
+    }
+    &out.push(U8{93})
 }
 
 fn write_ascii(out: &[U8], text: String) Never! {
@@ -1290,27 +1290,27 @@ fn patch_edit(node: Dyn, segments: [String], depth: Int, kind: Int, value: Dyn) 
     at :: pointer_text(segments, depth + 1)
     last :: depth + 1 == segments.len()
     if node == {
-        .Object(entries) -> {
-            out := [String: Dyn]{}
+        .Object(_) -> {
+            out := Dyn.object()
             found := false
-            loop pair in entries {
-                if pair.key != segment {
-                    _ :: &out.add(pair.key, pair.value)
+            loop key in node.keys() {
+                if key != segment {
+                    out[key] = node[key]
                     next
                 }
                 found = true
                 if !last {
-                    child :: patch_edit(pair.value, segments, depth + 1, kind, value)
-                    _ :: &out.add(pair.key, child)
+                    child :: patch_edit(node[key], segments, depth + 1, kind, value)
+                    out[key] = child
                     next
                 }
-                if kind != PATCH_REMOVE -> _ :: &out.add(pair.key, value)
+                if kind != PATCH_REMOVE -> out[key] = value
             }
             if !found {
                 if !last || kind != PATCH_ADD -> return Err(value_error(EncodingErrorKind.Syntax, at, "no object member named `{segment}`"))
-                _ :: &out.add(segment, value)
+                out[segment] = value
             }
-            return Ok(Dyn.Object(out))
+            return Ok(out)
         }
         .Array(items) -> {
             appending :: last && kind == PATCH_ADD && segment == "-"
@@ -1365,6 +1365,7 @@ fn json_equal(left: Dyn, right: Dyn) -> Bool Never! {
             if right == {
                 .Int(b) -> return a == b
                 .Float(b) -> return Float{a} == b
+                .Number(b) -> return Float{a} == (Float.parse(b) ?? return false)
                 else -> return false
             }
         }
@@ -1372,6 +1373,21 @@ fn json_equal(left: Dyn, right: Dyn) -> Bool Never! {
             if right == {
                 .Float(b) -> return a == b
                 .Int(b) -> return a == Float{b}
+                .Number(b) -> return a == (Float.parse(b) ?? return false)
+                else -> return false
+            }
+        }
+        .Number(a) -> {
+            if right == {
+                .Number(b) -> return a == b || (Float.parse(a) ?? return false) == (Float.parse(b) ?? return false)
+                .Int(b) -> return (Float.parse(a) ?? return false) == Float{b}
+                .Float(b) -> return (Float.parse(a) ?? return false) == b
+                else -> return false
+            }
+        }
+        .Bytes(a) -> {
+            if right == {
+                .Bytes(b) -> return a == b
                 else -> return false
             }
         }
@@ -1381,6 +1397,8 @@ fn json_equal(left: Dyn, right: Dyn) -> Bool Never! {
                 else -> return false
             }
         }
+        .Bytes(_) -> return left == right
+        .DateTime(_) -> return left == right
         .Array(a) -> {
             if right == {
                 .Array(b) -> {
@@ -1420,9 +1438,9 @@ fn tree_depth(value: Dyn) -> Int Never! {
             }
             return deepest + 1
         }
-        .Object(entries) -> {
-            loop pair in entries {
-                d :: tree_depth(pair.value)
+        .Object(_) -> {
+            loop key in value.keys() {
+                d :: tree_depth(value[key])
                 if d > deepest -> deepest = d
             }
             return deepest + 1

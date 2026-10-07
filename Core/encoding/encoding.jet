@@ -26,6 +26,10 @@ package {
 // Invariants:
 // - `Dyn` is the only user-facing dynamic tree. There is no `Data` alias.
 // - Objects keep insertion order. Integers and floats stay distinct variants.
+// - The closed cases are Null, Bool, Int, Float, Text, Bytes, DateTime, Array,
+//   and Object. Bytes text is padded RFC 4648 base64; DateTime text is canonical
+//   RFC 3339 with a fixed offset. TOML/YAML/CBOR retain their native kinds;
+//   JSON/JSONL/CSV render them as text. XML retains its separate node schema.
 // - No codec fabricates a value for malformed input. Syntax problems are
 //   `EncodingError`; alphabet helpers use their local typed errors.
 // - Whole-value codecs are pure (`->`) and callers pass text or bytes directly.

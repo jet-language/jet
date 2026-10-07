@@ -1,0 +1,11 @@
+// #4602: a CBOR byte string decodes to `Dyn.Bytes` and encodes back as
+// the same byte string; JSON represents binary leaves as base64 text.
+use core.encoding.cbor as cbor
+use core.encoding.json as json
+
+fn run() {
+    tree :: cbor.parse([U8]{U8{66}, U8{1}, U8{255}}) ?? panic("parse")
+    if tree == .Bytes(bytes) -> print("bytes {bytes.len()}")
+    print(json.to_string(tree))
+    print(cbor.to_bytes(tree).len())
+}

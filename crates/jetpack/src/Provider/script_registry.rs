@@ -883,7 +883,7 @@ fn fetch_packagist(
             if let Some(Dyn::Object(mappings)) = object_field(autoload, "psr-4") {
                 for (prefix, value) in mappings {
                     let paths = match value {
-                        Dyn::Text(path) | Dyn::TypedText(path) => vec![path.clone()],
+                        Dyn::Text(path) => vec![path.clone()],
                         Dyn::Array(paths) => paths
                             .iter()
                             .map(|path| {
@@ -959,7 +959,7 @@ fn expand_packagist_releases(
         for (key, value) in changes {
             if matches!(
                 value,
-                Dyn::Text(value) | Dyn::TypedText(value) if value == "__unset"
+                Dyn::Text(value) if value == "__unset"
             ) {
                 previous.retain(|(existing, _)| existing != key);
             } else if let Some((_, existing)) =

@@ -4342,6 +4342,7 @@ fn jet_codegen_lower_handle_method(builder: &JetCodegenBuilder, program: JetCode
                 }
             }
         }
+        .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) -> jet_codegen_lower_dyn_operation(&builder, program, expression, receiver, operation, args)
         .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_) -> jet_codegen_lower_data_handle_method(&builder, program, expression, receiver, operation, args)
         .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered -> jet_codegen_lower_data_handle_method(&builder, program, expression, receiver, operation, args)
         .DBValueInt | .DBValueFloat | .DBValueText | .DBValueBool | .DBValueBlob | .DBValueIsNull | .DBQuery(_) | .DBQueryOne(_) | .DBExecute(_) -> jet_codegen_lower_data_handle_method(&builder, program, expression, receiver, operation, args)

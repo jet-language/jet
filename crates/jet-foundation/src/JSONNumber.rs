@@ -28,6 +28,82 @@ pub fn validate_json_number(text: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether `text` is exactly one RFC 8259 number token:
+/// `-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?`. A `Dyn.Number`
+/// lexeme always has this spelling, so every renderer emits it verbatim.
+pub fn is_json_number_token(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let mut index = usize::from(bytes.first() == Some(&b'-'));
+    let digits = |index: &mut usize| {
+        let start = *index;
+        while bytes.get(*index).is_some_and(u8::is_ascii_digit) {
+            *index += 1;
+        }
+        *index > start
+    };
+    match bytes.get(index) {
+        Some(b'0') => index += 1,
+        Some(b'1'..=b'9') => {
+            digits(&mut index);
+        }
+        _ => return false,
+    }
+    if bytes.get(index) == Some(&b'.') {
+        index += 1;
+        if !digits(&mut index) {
+            return false;
+        }
+    }
+    if matches!(bytes.get(index), Some(b'e' | b'E')) {
+        index += 1;
+        if matches!(bytes.get(index), Some(b'+' | b'-')) {
+            index += 1;
+        }
+        if !digits(&mut index) {
+            return false;
+        }
+    }
+    index == bytes.len()
+}
+
+/// Spell a TOML or YAML numeric scalar as its exact JSON number lexeme
+/// (#4602): `_` separators and a leading `+` drop, `0x`/`0o`/`0b` integers
+/// become decimal digits, and `.5`/`5.` gain their zero. The value is
+/// unchanged; `None` means the scalar is not a finite number (`inf`, `nan`,
+/// text).
+pub fn number_lexeme(scalar: &str) -> Option<String> {
+    let text: String = scalar.trim().chars().filter(|ch| *ch != '_').collect();
+    let text = text.strip_prefix('+').unwrap_or(&text);
+    let (sign, body) = match text.strip_prefix('-') {
+        Some(body) => ("-", body),
+        None => ("", text),
+    };
+    for (prefix, radix) in [("0x", 16), ("0o", 8), ("0b", 2)] {
+        if let Some(digits) = body.strip_prefix(prefix) {
+            let value = crate::Numeric::CtBigInt::from_radix(digits, radix).ok()?;
+            return Some(if value.is_zero() { "0".to_string() } else { format!("{sign}{}", value.to_string_rep()) });
+        }
+    }
+    let mut body = body.to_string();
+    if body.starts_with('.') {
+        body.insert(0, '0');
+    }
+    let integer_end = body.find(|ch: char| !ch.is_ascii_digit()).unwrap_or(body.len());
+    let significant = body[..integer_end].trim_start_matches('0');
+    if integer_end > 0 && significant.len() < integer_end {
+        let kept = if significant.is_empty() { "0" } else { significant };
+        body = format!("{kept}{}", &body[integer_end..]);
+    }
+    if let Some(dot) = body.find('.') {
+        let after = body.as_bytes().get(dot + 1).copied();
+        if !after.is_some_and(|byte| byte.is_ascii_digit()) {
+            body.insert(dot + 1, '0');
+        }
+    }
+    let lexeme = format!("{sign}{body}");
+    is_json_number_token(&lexeme).then_some(lexeme)
+}
+
 /// Return sign, integer mantissa digits, and decimal scale for one exact
 /// decimal lexeme. The caller owns whether leading `+` is legal at its surface.
 pub fn json_decimal_lexeme(s: &str) -> Result<(bool, Vec<u8>, u32), String> {

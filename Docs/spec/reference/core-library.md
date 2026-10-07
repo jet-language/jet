@@ -2152,7 +2152,7 @@ shared codec shape and value tree follow D-ENC1, D-JSONVERB1, and D-SERDE13.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
-| `encoding.Dyn` | type | Dynamic tree of null, Boolean, integer, float, lexical number, typed text, string, bytes, array, and ordered-object values. |
+| `encoding.Dyn` | type | Dynamic tree with `Null`, `Bool`, owned exact `Int`, `Float`, lexical `Number`, `Text`, `Bytes`, `DateTime`, `Array`, and ordered `Object` cases. |
 | `encoding.DataEvent` | type | Event emitted by an incremental reader. |
 | `encoding.EncodingCause`, `EncodingErrorKind`, `EncodingError` | types | Structured encoding failure information. |
 | `encoding.EncodingFormat` | type | Format selector used by generic readers and writers. |
@@ -2175,6 +2175,12 @@ maps a declared Jet type to and from that tree. `#Codable`, `#Encode`, and
 ignored unless a type opts into rejection. A field conversion or missing
 required field is reported as a `FieldError` rather than silently defaulting to
 an unrelated type.
+Text never implicitly decodes as an integer, float, or Boolean, except in
+text-native sources: environment variables, CSV cells, route and query
+parameters. `Dyn.Int` owns its exact integer even beyond machine range.
+`Dyn.Number` retains a parsed number's spelling; `.int()`, `.float()` and
+typed decoding check the destination range when reading it. There is no
+public typed-text carrier.
 `#Codable` requests both directions; `#Encode` and `#Decode` request one-way derivation, and derivation is compiler-owned rather than macro- or reflection-driven (`D-SERDE1–8`). Typed `decode<T>` produces `T ![FieldError]` (or `[T] ![FieldError]` for CSV); each failure preserves its path and reason, and generic codec bounds are injected at the use site (`D-GENERIC-CALL1`; `D-SERDE6`; `D-SERDE9–12`). Hand-written codecs use the same `Encode`/`Decode` protocol and field-path accumulation (`D-SERDE2`; `D-SERDE13–16`).
 
 Validation can be declared as `validate { check(...) }`: all failed checks accumulate, and conditions and messages are purity-checked (`D-VALIDATE1`; `D-FIELDPOL1`; `S60/E3401`).
@@ -2187,10 +2193,11 @@ use an untyped string round trip as a substitute for a typed codec.
 
 ### `core.encoding.json` — JSON trees
 
-`core.encoding.json` parses strict RFC 8259-style JSON into `Dyn`. Integer
-literals remain exact integers; fractional values are floats. NaN and infinity
-syntax is rejected. `decode` has the same strict behavior as `parse`, despite
-its historical name. Compact output retains insertion order, pretty output
+`core.encoding.json` parses strict RFC 8259-style JSON into `Dyn`. Every
+number token remains a `Number` with its exact spelling, including trailing
+zeroes, exponent spelling, and numbers outside machine range. NaN and infinity
+syntax is rejected. Typed `decode<T>` checks numbers when projecting into `T`;
+quoted numbers stay text. Compact output retains insertion order, pretty output
 uses two-space indentation, and `canonical` is RFC 8785 JCS with UTF-16 key
 order. `parse`, `decode`, and `reader` reject a repeated object name with its
 path and position; the `_allow_duplicates` siblings are the explicit opt-in.
@@ -2255,8 +2262,10 @@ The query helper is filesystem-only and supports `SELECT *` and
 
 `core.encoding.toml` supports the common TOML 1.0 document forms: comments,
 dotted keys, tables, array tables, strings, integers, floats, booleans,
-inline tables, and arrays. TOML datetimes remain text in `Dyn`. Unsupported
-syntax fails closed, and output is minimal rather than comment-preserving.
+inline tables, and arrays. Numeric spellings remain `Dyn.Number`; duplicate
+keys (including inline tables) are errors. Offset datetimes become `Dyn.DateTime`;
+local dates and times remain text. Unsupported syntax fails closed, and output
+is minimal rather than comment-preserving.
 
 | Function | Returns | Description |
 | --- | --- | --- |
@@ -2293,10 +2302,11 @@ Canonicalization.
 
 ### `core.encoding.cbor` — definite-length CBOR
 
-`core.encoding.cbor` handles RFC 8949 definite-length major types `0` through
-`5` and common simple and float64 values. It rejects indefinite-length items,
-tags, half and single floats, and byte strings that cannot be represented in
-`Dyn`. Canonical output sorts map keys by encoded byte order.
+`core.encoding.cbor` handles RFC 8949 definite-length values, binary strings
+as `Dyn.Bytes`, finite and non-finite floating-point wire values, and tags
+0/1 as `Dyn.DateTime`. It rejects unsupported tags, indefinite-length items,
+non-text or duplicate map keys, and integers outside its supported wire range.
+Canonical output sorts map keys by encoded byte order.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |

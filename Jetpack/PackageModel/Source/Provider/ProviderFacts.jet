@@ -51,8 +51,9 @@ pub enum ProviderFactValue {
             .Bool(flag) -> ProviderFactValue.Bool(flag)
             .Int(number) -> ProviderFactValue.Number("{number}")
             .Float(number) -> ProviderFactValue.Number("{number}")
-            .Number(text) -> ProviderFactValue.Number(text)
             .Text(text) -> ProviderFactValue.Text(text)
+            .Bytes(_) -> ProviderFactValue.Text(value.to_text() ?? "")
+            .DateTime(_) -> ProviderFactValue.Text(value.to_text() ?? "")
             .Array(items) -> {
                 values := [ProviderFactValue]{}
                 loop item in items -> &values.push(ProviderFactValue.from_json_tree(item))

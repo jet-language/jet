@@ -3060,20 +3060,14 @@ fn jet_data_loader_canonical_tree(tree: &jet_std::Dyn) -> String {
     match tree {
         jet_std::Dyn::Null => "null".to_string(),
         jet_std::Dyn::Bool(value) => value.to_string(),
-        jet_std::Dyn::Int(value) => jet_std::jet_int_to_string(*value),
+        jet_std::Dyn::Int(value) => value.to_string_rep(),
         jet_std::Dyn::Float(value) => format!("{value:?}"),
         jet_std::Dyn::Number(value) => value.clone(),
-        jet_std::Dyn::TypedText(value) | jet_std::Dyn::Text(value) => {
+        jet_std::Dyn::Text(value) => {
             jet_data_loader_quote(value)
         }
-        jet_std::Dyn::Bytes(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(|value| value.to_string())
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
+        jet_std::Dyn::Bytes(values) => jet_data_loader_quote(&jet_std::Dyn::bytes_text(values)),
+        jet_std::Dyn::DateTime(value) => jet_data_loader_quote(&value.to_rfc3339()),
         jet_std::Dyn::Array(values) => format!(
             "[{}]",
             values
@@ -3195,7 +3189,7 @@ fn jet_data_loader_jsonl_tree(
                 format!("max_output_rows {} exceeded", limits.max_output_rows),
             ));
         }
-        let value = jet_std::parse_json_typed_dyn(line).map_err(|error| {
+        let value = jet_std::parse_json_dyn(line).map_err(|error| {
             jet_data_loader_error(
                 jet_std::DataErrorKind::Decode,
                 "data.loader.jsonl",
@@ -3340,7 +3334,7 @@ fn jet_data_loader_tree(
     })?;
     let tree = match format {
         jet_std::DataFormat::JSON => {
-            jet_std::parse_json_typed_dyn(&text).map_err(|error| {
+            jet_std::parse_json_dyn(&text).map_err(|error| {
                 jet_data_loader_error(
                     jet_std::DataErrorKind::Decode,
                     "data.loader.json",
@@ -4101,7 +4095,7 @@ mod jet_data_web {
     }
     fn text(value: &jet_std::Dyn, operation: &str) -> Result<String, jet_std::DataError> {
         match value {
-            jet_std::Dyn::Text(value) | jet_std::Dyn::TypedText(value) => Ok(value.clone()),
+            jet_std::Dyn::Text(value) => Ok(value.clone()),
             _ => Err(error(jet_std::DataErrorKind::InvalidArgument, operation, "expected text")),
         }
     }
@@ -4113,7 +4107,8 @@ mod jet_data_web {
     }
     fn integer(value: &jet_std::Dyn, operation: &str) -> Result<i64, jet_std::DataError> {
         match value {
-            jet_std::Dyn::Int(value) => Ok(*value),
+            jet_std::Dyn::Int(value) => value.to_i64().ok_or_else(|| error(
+                jet_std::DataErrorKind::InvalidArgument, operation, "expected exact integer")),
             jet_std::Dyn::Number(value) => value.parse::<i64>().map_err(|_| error(
                 jet_std::DataErrorKind::InvalidArgument, operation, "expected exact integer",
             )),
@@ -4201,7 +4196,7 @@ mod jet_data_web {
     }
     fn handle_tree(handle: usize, kind: &str) -> jet_std::Dyn {
         result_tree(vec![
-            ("handle", jet_std::Dyn::Int(handle as i64)),
+            ("handle", jet_std::Dyn::Int((handle as i64).into())),
             ("kind", text_tree(kind)),
         ])
     }
@@ -4351,7 +4346,7 @@ mod jet_data_web {
             }
         };
         INPUTS.with(|cell| cell.borrow_mut()[3].clear());
-        let value = jet_std::parse_json_typed_dyn(&value).map_err(|_| {
+        let value = jet_std::parse_json_dyn(&value).map_err(|_| {
             error(
                 jet_std::DataErrorKind::Decode,
                 operation,
@@ -4366,7 +4361,7 @@ mod jet_data_web {
         operation: &str,
     ) -> Result<f64, jet_std::DataError> {
         match callback_value(callback, row, operation)? {
-            jet_std::Dyn::Int(value) => Ok(value as f64),
+            jet_std::Dyn::Int(value) => Ok(value.to_f64()),
             jet_std::Dyn::Float(value) => Ok(value),
             jet_std::Dyn::Number(value) => value.parse::<f64>().map_err(|_| {
                 error(
@@ -4384,7 +4379,7 @@ mod jet_data_web {
     }
     fn callback_key_value(value: &jet_std::Dyn) -> String {
         match value {
-            jet_std::Dyn::Text(value) | jet_std::Dyn::TypedText(value) => value.clone(),
+            jet_std::Dyn::Text(value) => value.clone(),
             jet_std::Dyn::Int(value) => value.to_string(),
             jet_std::Dyn::Float(value) => value.to_string(),
             jet_std::Dyn::Number(value) => value.clone(),
@@ -4411,7 +4406,7 @@ mod jet_data_web {
             ("invalidated_by", text_tree(format!("{:?}", value.invalidated_by))),
             ("error", text_tree(value.error.clone())),
             ("cleanup", text_tree(value.cleanup.clone())),
-            ("buffered_bytes", jet_std::Dyn::Int(value.buffered_bytes)),
+            ("buffered_bytes", jet_std::Dyn::Int(value.buffered_bytes.into())),
             ("backpressure", jet_std::Dyn::Bool(value.backpressure)),
             ("last_good", jet_std::Dyn::Bool(value.last_good)),
         ])
@@ -4455,14 +4450,14 @@ mod jet_data_web {
     fn watch_status(value: &jet_std::DataWatchStatus) -> jet_std::Dyn {
         result_tree(vec![
             ("mode", text_tree(value.mode.clone())),
-            ("revision", jet_std::Dyn::Int(value.revision)),
-            ("retained_rows", jet_std::Dyn::Int(value.retained_rows)),
-            ("recomputations", jet_std::Dyn::Int(value.recomputations)),
+            ("revision", jet_std::Dyn::Int(value.revision.into())),
+            ("retained_rows", jet_std::Dyn::Int(value.retained_rows.into())),
+            ("recomputations", jet_std::Dyn::Int(value.recomputations.into())),
             ("active", jet_std::Dyn::Bool(value.active)),
-            ("generation", jet_std::Dyn::Int(value.generation)),
+            ("generation", jet_std::Dyn::Int(value.generation.into())),
             ("dirty", jet_std::Dyn::Bool(value.dirty)),
             ("error", text_tree(value.error.clone())),
-            ("freshness_ms", jet_std::Dyn::Int(value.freshness_ms)),
+            ("freshness_ms", jet_std::Dyn::Int(value.freshness_ms.into())),
             ("invalidation_cause", text_tree(value.invalidation_cause.clone())),
             ("refreshing", jet_std::Dyn::Bool(value.refreshing)),
             ("cancelled", jet_std::Dyn::Bool(value.cancelled)),
@@ -4897,7 +4892,7 @@ mod jet_data_web {
                 let index = handle(value(0)?, &operation)?;
                 let query = with_grouped(index, &operation, |grouped| Ok(jet_data_group_count_query(grouped)))?;
                 Ok(store(Handle::Query(jet_data_query_map(&query, |row| {
-                    result_tree(vec![("key", text_tree(row.key)), ("value", jet_std::Dyn::Int(row.value))])
+                    result_tree(vec![("key", text_tree(row.key)), ("value", jet_std::Dyn::Int(row.value.into()))])
                 }))))
             }
             "group_sum" => {
@@ -4925,10 +4920,10 @@ mod jet_data_web {
                 }))))
             }
             "count" => match value(0)? {
-                jet_std::Dyn::Array(values) => Ok(jet_std::Dyn::Int(values.len() as i64)),
+                jet_std::Dyn::Array(values) => Ok(jet_std::Dyn::Int((values.len() as i64).into())),
                 value => {
                     let query = clone_query(handle(value, &operation)?)?;
-                    Ok(jet_std::Dyn::Int(jet_data_query_collect(&query)?.len() as i64))
+                    Ok(jet_std::Dyn::Int((jet_data_query_collect(&query)?.len() as i64).into()))
                 }
             },
             "snapshot_reusable" => {
@@ -4989,7 +4984,7 @@ mod jet_data_web {
     #[no_mangle]
     pub extern "C" fn jet_data_web_call(pointer: u32, length: u32) -> i32 {
         let input = unsafe { std::slice::from_raw_parts(pointer as *const u8, length as usize) };
-        let parsed = std::str::from_utf8(input).ok().and_then(|value| jet_std::parse_json_typed_dyn(value).ok());
+        let parsed = std::str::from_utf8(input).ok().and_then(|value| jet_std::parse_json_dyn(value).ok());
         let result = parsed.map_or_else(
             || Err(error(jet_std::DataErrorKind::Decode, "data.web", "invalid Web DataFlow wire JSON")),
             |value| dispatch(&value),

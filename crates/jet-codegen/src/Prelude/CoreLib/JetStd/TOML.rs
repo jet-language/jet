@@ -12,7 +12,9 @@
         #[derive(Clone, Debug, PartialEq)]
         pub enum Value {
             String(String),
-            Integer(i64),
+            /// A finite number's exact lexeme in JSON number spelling (#4602).
+            Number(String),
+            /// `inf` and `nan`, which have no number lexeme.
             Float(f64),
             Boolean(bool),
             Datetime(String),
@@ -30,6 +32,7 @@
         pub struct ParseError {
             pub line: usize,
             pub message: String,
+            pub unsupported: bool,
         }
 
         pub fn parse_to_tree(raw: &str) -> Result<Dyn, ParseError> {
@@ -45,21 +48,22 @@
                 if p.peek().is_none() {
                     break;
                 }
+                let line = p.line;
                 if let Some(item) = p.statement()? {
                     if let Item::Header { path, .. } = &item {
                         p.current_path_len = path.len();
                     }
-                    items.push(item);
+                    items.push((line, item));
                 }
             }
-            Ok(assemble(items))
+            assemble(items)
         }
 
         // ── Assembly: a flat Item list → a nested ordered `Dyn::Object` ──────
-        fn assemble(items: Vec<Item>) -> Dyn {
+        fn assemble(items: Vec<(usize, Item)>) -> Result<Dyn, ParseError> {
             let mut root = Dyn::Object(Vec::new());
             let mut current: Vec<String> = Vec::new();
-            for item in items {
+            for (line, item) in items {
                 match item {
                     Item::Header { path, array } => {
                         if array {
@@ -71,11 +75,13 @@
                         current = path;
                     }
                     Item::KeyVal { path, value } => {
-                        set_key(&mut root, &current, &path, value_to_tree(value));
+                        set_key(&mut root, &current, &path, value_to_tree(value)).map_err(
+                            |message| ParseError { line, message, unsupported: false },
+                        )?;
                     }
                 }
             }
-            root
+            Ok(root)
         }
 
         // Navigate to (creating along the way) the table at `path`. When a segment is
@@ -132,27 +138,33 @@
             }
         }
 
-        fn set_key(root: &mut Dyn, current: &[String], key_path: &[String], value: Dyn) {
+        // #4602: a repeated key is a parse error, never a silent overwrite.
+        fn set_key(
+            root: &mut Dyn,
+            current: &[String],
+            key_path: &[String],
+            value: Dyn,
+        ) -> Result<(), String> {
             let mut full: Vec<String> = current.to_vec();
             full.extend_from_slice(&key_path[..key_path.len() - 1]);
             let table = table_at(root, &full);
             let fk = &key_path[key_path.len() - 1];
             if let Dyn::Object(entries) = table {
-                if let Some(slot) = entries.iter_mut().find(|(k, _)| k == fk) {
-                    slot.1 = value;
-                } else {
-                    entries.push((fk.clone(), value));
+                if entries.iter().any(|(k, _)| k == fk) {
+                    return Err(format!("duplicate key `{fk}`"));
                 }
+                entries.push((fk.clone(), value));
             }
+            Ok(())
         }
 
         fn value_to_tree(v: Value) -> Dyn {
             match v {
                 Value::String(s) => Dyn::Text(s),
-                Value::Integer(n) => Dyn::Int(n),
+                Value::Number(lexeme) => Dyn::Number(lexeme),
                 Value::Float(f) => Dyn::Float(f),
                 Value::Boolean(b) => Dyn::Bool(b),
-                Value::Datetime(s) => Dyn::Text(s),
+                Value::Datetime(s) => Dyn::parse_datetime(&s).unwrap_or_else(|_| Dyn::Text(s)),
                 Value::Array(xs) => Dyn::Array(xs.into_iter().map(value_to_tree).collect()),
                 Value::InlineTable(es) => {
                     Dyn::Object(es.into_iter().map(|(k, v)| (k, value_to_tree(v))).collect())
@@ -208,14 +220,10 @@
                 Dyn::Bool(b) => b.to_string(),
                 Dyn::Int(n) => n.to_string(),
                 Dyn::Float(f) => format!("{:?}", f),
-                Dyn::Number(_) | Dyn::TypedText(_) => {
-                    unreachable!("internal JSON carrier escaped typed decode")
-                }
+                Dyn::Number(text) => text.clone(),
                 Dyn::Text(s) => super::quote_json(s),
-                Dyn::Bytes(bs) => {
-                    let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
-                    format!("[{}]", parts.join(", "))
-                }
+                Dyn::Bytes(bs) => super::quote_json(&Dyn::bytes_text(bs)),
+                Dyn::DateTime(value) => value.to_rfc3339(),
                 Dyn::Array(items) => {
                     let parts: Vec<String> = items.iter().map(render_value).collect();
                     format!("[{}]", parts.join(", "))
@@ -257,6 +265,7 @@
                 ParseError {
                     line: self.line,
                     message: message.into(),
+                    unsupported: false,
                 }
             }
             fn skip_inline_ws(&mut self) {
@@ -649,7 +658,11 @@
                     }
                     self.skip_inline_ws();
                     let value = self.value(depth + 1)?;
-                    entries.push((path.join("."), value));
+                    let key = path.join(".");
+                    if entries.iter().any(|(name, _)| name == &key) {
+                        return Err(self.err(format!("duplicate key `{key}`")));
+                    }
+                    entries.push((key, value));
                     self.skip_inline_ws();
                     match self.bump() {
                         Some(',') => continue,
@@ -706,6 +719,11 @@
                         break;
                     }
                 }
+                if s.len() >= 20 && (s.ends_with(['Z', 'z']) || s[19..].contains(['+', '-'])) {
+                    Dyn::parse_datetime(&s).map_err(|message| ParseError {
+                        line: self.line, message, unsupported: true,
+                    })?;
+                }
                 Ok(Value::Datetime(s))
             }
             fn number(&mut self) -> Result<Value, ParseError> {
@@ -737,7 +755,6 @@
                         }
                     }
                 }
-                let mut is_float = false;
                 while let Some(c) = self.peek() {
                     match c {
                         '0'..='9' | '_' => {
@@ -745,24 +762,15 @@
                             self.pos += 1;
                         }
                         '.' | 'e' | 'E' | '+' | '-' => {
-                            is_float = true;
                             tok.push(c);
                             self.pos += 1;
                         }
                         _ => break,
                     }
                 }
-                let clean: String = tok.chars().filter(|c| *c != '_').collect();
-                if is_float {
-                    clean
-                        .parse::<f64>()
-                        .map(Value::Float)
-                        .map_err(|_| self.err(crate::jet_encoding_errors::toml_invalid_number(&tok)))
-                } else {
-                    clean
-                        .parse::<i64>()
-                        .map(Value::Integer)
-                        .map_err(|_| self.err(crate::jet_encoding_errors::toml_invalid_number(&tok)))
+                match crate::jet_json_number::number_lexeme(&tok) {
+                    Some(lexeme) => Ok(Value::Number(lexeme)),
+                    _ => Err(self.err(crate::jet_encoding_errors::toml_invalid_number(&tok))),
                 }
             }
             fn radix_integer(&mut self) -> Result<Value, ParseError> {
@@ -788,9 +796,11 @@
                 if tok.is_empty() {
                     return Err(self.err(crate::jet_encoding_errors::TOML_EXPECTED_RADIX_DIGITS));
                 }
-                i64::from_str_radix(&tok, radix)
-                    .map(Value::Integer)
-            .map_err(|_| self.err(crate::jet_encoding_errors::toml_invalid_radix_integer(radix, &tok)))
+                crate::Numeric::CtBigInt::from_radix(&tok, radix)
+                    .map(|value| Value::Number(value.to_string_rep()))
+                    .map_err(|_| {
+                        self.err(crate::jet_encoding_errors::toml_invalid_radix_integer(radix, &tok))
+                    })
             }
         }
 
@@ -801,6 +811,22 @@
         #[cfg(test)]
         mod tests {
             use super::{parse_to_tree, MAX_TOML_DEPTH};
+
+            #[test]
+            fn dyn_rules_reject_duplicate_keys_in_every_map_form() {
+                for text in ["a = 1\na = 2", "a = { x = 1, x = 2 }", "a.x = 1\n[a]\nx = 2"] {
+                    assert!(parse_to_tree(text).is_err(), "host TOML accepted {text}");
+                }
+            }
+
+            #[test]
+            fn dyn_rules_preserve_huge_number_lexemes() {
+                let huge = "12345678901234567890123456789012345678901234567890";
+                for token in [huge, "1e400"] {
+                    let tree = parse_to_tree(&format!("a = {token}")).expect("host TOML number");
+                    assert!(matches!(&tree, super::Dyn::Object(fields) if fields.iter().any(|(key, value)| key == "a" && matches!(value, super::Dyn::Number(text) if text == token))));
+                }
+            }
 
             fn dotted_path(depth: usize) -> String {
                 (0..depth)

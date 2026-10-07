@@ -17,6 +17,8 @@ pub(crate) fn variant_binding_types(cx: &Cx, variant: &str) -> Option<Vec<Type>>
             "Int" => Some(vec![Type::Int]),
             "Float" => Some(vec![Type::Float]),
             "Text" => Some(vec![Type::String]),
+            "Bytes" => Some(vec![Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))]),
+            "DateTime" => Some(vec![Type::Named("ZonedDateTime".to_string())]),
             "Array" => Some(vec![Type::List(Box::new(data.clone()))]),
             "Object" => Some(vec![Type::Map {
                 key: Box::new(Type::String),

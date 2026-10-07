@@ -119,6 +119,8 @@ pub fn encode_typed_value_for_mir(
 ) -> Option<Result<CtValue, String>> {
     TypedDecode::encode_typed_value_with(ty, value, encode_nominal)
 }
+#[doc(hidden)]
+pub use Methods::dyn_datetime_value;
 pub use ArgsLite::{core_args_spec, eval_handle as eval_args_handle};
 pub use EventLite::{
     core_event_async_result, core_event_decision_hook, core_event_hook, core_event_new,
@@ -587,10 +589,17 @@ pub fn render_dyn_pretty_for_tir(value: &CtValue) -> String {
 /// TIR typed JSON decode uses the ordered Dyn shape. Dynamic JSON keeps
 /// its BTreeMap shape, so this adapter is separate from `core.encoding.json.parse`.
 pub fn parse_ordered_json_for_tir(text: &str) -> CtValue {
-    match JSONInterp::parse_json_typed_ordered(text) {
+    match JSONInterp::parse_json(text) {
         Ok(value) => CtValue::Present(Box::new(value)),
         Err(error) => CtValue::failed(Box::new(JSONInterp::encoding_error_value(error))),
     }
+}
+
+/// The interpreter's text-cell decode scope (#4602): a text-native source
+/// (CSV cells, environment, route parameters) decodes inside it, so only
+/// there a `Text` leaf parses into a scalar.
+pub fn decode_text_cells<R>(decode: impl FnOnce() -> R) -> R {
+    SyncLite::decode_text_cells(decode)
 }
 
 /// TIR typed TOML decode parses with the codec's own parser; a failure is the

@@ -1832,7 +1832,7 @@ fn swiftpm_report(document: &str) -> ProviderFactReport {
     let mut conflicts = Vec::new();
     add_json_projection(&mut facts, "provider.swiftpm.native", &root);
     match object_field(&root, "version") {
-        Some(Dyn::Int(version)) if matches!(*version, 1..=3) => {
+        Some(Dyn::Int(version)) if matches!(version.to_i64(), Some(1..=3)) => {
             add_typed_text_fact(
                 &mut facts,
                 "provider.swiftpm.lock.version",
@@ -3410,7 +3410,7 @@ fn vcpkg_report(document: &str) -> ProviderFactReport {
     }
     if let Some(value) = object_field(&object, "port-version") {
         add_typed_json_fact(&mut facts, "provider.vcpkg.variant.port-version", value);
-        if !matches!(value, Dyn::Int(value) if *value >= 0) {
+        if !matches!(value, Dyn::Int(value) if value.to_u64().is_some()) {
             losses.push("vcpkg `port-version` must be a non-negative integer".to_string());
         }
     }
@@ -3462,7 +3462,7 @@ fn vcpkg_report(document: &str) -> ProviderFactReport {
                     }
                 }
                 if let Some(value) = object_field(override_value, "port-version") {
-                    if !matches!(value, Dyn::Int(value) if *value >= 0) {
+                    if !matches!(value, Dyn::Int(value) if value.to_u64().is_some()) {
                         losses.push(format!(
                             "vcpkg override {index} `port-version` must be a non-negative integer"
                         ));
@@ -5265,7 +5265,7 @@ fn json_array_strings(
         Some(Dyn::Array(values)) => values
             .iter()
             .filter_map(|value| match value {
-                Dyn::Text(value) | Dyn::TypedText(value) => Some(value.clone()),
+                Dyn::Text(value) => Some(value.clone()),
                 Dyn::Object(value) => object_field(value, "name")
                     .and_then(|value| value.as_str().ok())
                     .map(str::to_string),
@@ -5356,7 +5356,8 @@ fn json_value_text(value: &Dyn) -> String {
         Dyn::Int(value) => value.to_string(),
         Dyn::Float(value) => value.to_string(),
         Dyn::Number(value) => value.clone(),
-        Dyn::Text(value) | Dyn::TypedText(value) => value.clone(),
+        Dyn::Text(value) => value.clone(),
+        Dyn::DateTime(value) => value.to_rfc3339(),
         Dyn::Bytes(_) | Dyn::Array(_) | Dyn::Object(_) => json_value_json(value),
     }
 }
@@ -5368,15 +5369,9 @@ fn json_value_json(value: &Dyn) -> String {
         Dyn::Int(value) => value.to_string(),
         Dyn::Float(value) => value.to_string(),
         Dyn::Number(value) => value.clone(),
-        Dyn::Text(value) | Dyn::TypedText(value) => JSON::quote(value),
-        Dyn::Bytes(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(u8::to_string)
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
+        Dyn::Text(value) => JSON::quote(value),
+        Dyn::Bytes(values) => JSON::quote(&Dyn::bytes_text(values)),
+        Dyn::DateTime(value) => JSON::quote(&value.to_rfc3339()),
         Dyn::Array(values) => format!(
             "[{}]",
             values

@@ -2476,6 +2476,11 @@ fn jet_codegen_fallback_join_value(builder: &JetCodegenBuilder, program: JetCode
 
 fn jet_codegen_lower_fallback_panic(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, message: TExpr, location: TPanicLoc) {
     value := jet_codegen_lower_expr(&builder, program, message)
+    jet_codegen_lower_panic_value(&builder, program, expression, value, location)
+}
+
+// Shared by source fallback panic and checked Dyn runtime failures.
+fn jet_codegen_lower_panic_value(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, value: MIRValueID, location: TPanicLoc) {
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
     call := jet_codegen_intern_route(
         &builder, program,

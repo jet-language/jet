@@ -302,7 +302,7 @@ fn http_field<'a>(object: &'a [(String, HttpTree)], name: &str) -> Option<&'a Ht
 
 fn http_text<'a>(object: &'a [(String, HttpTree)], name: &str) -> Option<&'a str> {
     match http_field(object, name)? {
-        HttpTree::Text(value) | HttpTree::TypedText(value) => Some(value),
+        HttpTree::Text(value) => Some(value),
         _ => None,
     }
 }
@@ -350,7 +350,10 @@ fn http_tree_runtime(value: &HttpTree) -> MirRuntimeValue {
     match value {
         HttpTree::Null => MirRuntimeValue::Unit,
         HttpTree::Bool(value) => MirRuntimeValue::Bool(*value),
-        HttpTree::Int(value) => MirRuntimeValue::Int(*value),
+        HttpTree::Int(value) => match value.to_i64() {
+            Some(value) => MirRuntimeValue::Int(value),
+            None => MirRuntimeValue::BigInt(value.to_string_rep()),
+        },
         HttpTree::Float(value) => MirRuntimeValue::Float {
             value: *value,
             f32: false,
@@ -363,10 +366,11 @@ fn http_tree_runtime(value: &HttpTree) -> MirRuntimeValue {
                 f32: false,
             }))
             .unwrap_or_else(|_| MirRuntimeValue::String(value.clone())),
-        HttpTree::TypedText(value) | HttpTree::Text(value) => {
+        HttpTree::Text(value) => {
             MirRuntimeValue::String(value.clone())
         }
         HttpTree::Bytes(value) => MirRuntimeValue::Bytes(value.clone()),
+        HttpTree::DateTime(value) => crate::SourceResources::dyn_datetime_payload(*value),
         HttpTree::Array(values) => {
             MirRuntimeValue::List(values.iter().map(http_tree_runtime).collect())
         }
@@ -424,7 +428,8 @@ fn http_decode_route_value(raw: &str, schema: &HttpTree) -> Result<MirRuntimeVal
     let tree = match kind {
         "string" => HttpTree::Text(raw.to_string()),
         "integer" => HttpTree::Int(
-            raw.parse::<i64>()
+            jet_foundation::Numeric::CtBigInt::from_str(raw)
+                .map(jet_foundation::Numeric::JetInt::from_big)
                 .map_err(|_| "HTTP route integer parameter is invalid".to_string())?,
         ),
         "number" => HttpTree::Float(
@@ -442,9 +447,9 @@ fn http_decode_route_value(raw: &str, schema: &HttpTree) -> Result<MirRuntimeVal
             }
             HttpTree::Null
         }
-        "array" | "object" => crate::net_http_rt::jet_std::parse_json_typed_dyn(raw)
+        "array" | "object" => crate::net_http_rt::jet_std::parse_json_dyn(raw)
             .map_err(|_| "HTTP route structured parameter is invalid JSON".to_string())?,
-        _ => crate::net_http_rt::jet_std::parse_json_typed_dyn(raw)
+        _ => crate::net_http_rt::jet_std::parse_json_dyn(raw)
             .unwrap_or_else(|_| HttpTree::Text(raw.to_string())),
     };
     if !crate::net_http_rt::jet_http_route_schema_matches(&tree, schema) {
@@ -456,7 +461,7 @@ fn http_decode_route_value(raw: &str, schema: &HttpTree) -> Result<MirRuntimeVal
 fn http_contract_parts(
     contract_json: &str,
 ) -> Result<(Vec<InterpreterHttpParameter>, Option<(bool, HttpTree)>), String> {
-    let contract = crate::net_http_rt::jet_std::parse_json_typed_dyn(contract_json)
+    let contract = crate::net_http_rt::jet_std::parse_json_dyn(contract_json)
         .map_err(|_| "HTTP route contract is not valid JSON".to_string())?;
     let object = http_object(&contract)
         .ok_or_else(|| "HTTP route contract is not a JSON object".to_string())?;
@@ -841,7 +846,7 @@ fn http_route_invocation(
         } else {
             let text = std::str::from_utf8(body)
                 .map_err(|_| "HTTP route request body is not UTF-8".to_string())?;
-            let tree = crate::net_http_rt::jet_std::parse_json_typed_dyn(text)
+            let tree = crate::net_http_rt::jet_std::parse_json_dyn(text)
                 .map_err(|_| "HTTP route request body is invalid JSON".to_string())?;
             if !crate::net_http_rt::jet_http_route_schema_matches(&tree, &schema) {
                 return Err("HTTP route request body does not match its checked schema".to_string());
@@ -1422,7 +1427,7 @@ impl InterpreterAmbientState {
                     )));
                 };
                 let Ok(contract) =
-                    crate::net_http_rt::jet_std::parse_json_typed_dyn(contract_json)
+                    crate::net_http_rt::jet_std::parse_json_dyn(contract_json)
                 else {
                     return Some(Err(http_router_diag(
                         "HTTPRouter registration contract is not valid JSON",

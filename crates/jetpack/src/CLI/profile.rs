@@ -1386,7 +1386,7 @@ fn read_generation_record(state: &Path, generation: u64) -> io::Result<Generatio
     }
     let actual_generation = profile_tree_field(object, "generation")
         .and_then(|value| match value {
-            Dyn::Int(value) if *value > 0 => Some(*value as u64),
+            Dyn::Int(value) => value.to_u64().filter(|value| *value > 0),
             _ => None,
         })
         .ok_or_else(|| io::Error::other("profile generation metadata lacks generation"))?;
@@ -1579,7 +1579,7 @@ fn read_current_pointer(state: &Path) -> io::Result<Option<CurrentPointer>> {
     }
     let generation = profile_tree_field(object, "generation")
         .and_then(|value| match value {
-            Dyn::Int(value) if *value > 0 => Some(*value as u64),
+            Dyn::Int(value) => value.to_u64().filter(|value| *value > 0),
             _ => None,
         })
         .ok_or_else(|| io::Error::other("profile current pointer lacks generation"))?;

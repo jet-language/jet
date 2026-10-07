@@ -1668,7 +1668,7 @@ fn measured_test_targets_filter_and_json_match_test_runner_contract() {
         assert!(
             matches!(
                 record.get("name").ok(),
-                Some(Dyn::Text(name) | Dyn::TypedText(name))
+                Some(Dyn::Text(name))
                     if name == "measured-needle"
             ),
             "JSON claim name is wrong: {record:?}"

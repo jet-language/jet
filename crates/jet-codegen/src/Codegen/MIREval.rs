@@ -1026,7 +1026,7 @@ pub mod game_dev_protocol {
                 Dyn::Int(value) => value.to_string(),
                 Dyn::Float(value) => format!("{value:?}"),
                 Dyn::Number(value) => value.clone(),
-                Dyn::TypedText(value) | Dyn::Text(value) => quote(value),
+                Dyn::Text(value) => quote(value),
                 Dyn::Array(values) => format!(
                     "[{}]",
                     values
@@ -1045,6 +1045,9 @@ pub mod game_dev_protocol {
                         .collect::<Vec<_>>()
                         .join(",")
                 ),
+                Dyn::DateTime(_) => {
+                    unreachable!("game protocol JSON values cannot contain date-time nodes")
+                }
                 Dyn::Bytes(_) => {
                     unreachable!("game protocol JSON values cannot contain byte nodes")
                 }
@@ -17806,6 +17809,13 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 crate::Comptime::Builtins::apply_method(receiver, method, args.to_vec(), span)?;
             return runtime_from_ct(result, span);
         }
+        if family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
+            && module == "core.encoding.dyn"
+            && matches!(member_name.as_str(), "index_key" | "index_at" | "get_key" | "get_at"
+                | "has" | "keys" | "remove" | "len" | "binary" | "compare" | "set_path")
+        {
+            return Err(mir_error_at("Dyn surface operation requires Rust AOT execution", span));
+        }
         if (family == jet_foundation::MIR::MirPreludeFamily::BuiltinMethod
             && module == "core.builtin"
             && matches!(
@@ -21307,7 +21317,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     )
                 })?;
                 let mut callback_fault = None;
-                let decoded = mir_csv_prelude::jet_enc_csv_decode_rows(
+                // CSV cells are text-native: rows decode inside the text-cell scope.
+                let decoded = crate::Comptime::decode_text_cells(|| mir_csv_prelude::jet_enc_csv_decode_rows(
                     rows.into_iter().map(|row| row.fields),
                     |tree| {
                         if callback_fault.is_some() {
@@ -21360,7 +21371,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         args: vec![(None, MirEvalValue::String(text))],
                     },
                     |fields| Self::dyn_object(fields),
-                );
+                ));
                 if let Some(error) = callback_fault {
                     return Err(error);
                 }
