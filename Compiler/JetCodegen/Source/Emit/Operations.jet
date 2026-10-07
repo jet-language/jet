@@ -5486,7 +5486,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                 .RequireStop(call, kind, condition, stop_location, context, values, _) -> return jet_rust_emit_require_stop(&ctx, function, call, kind, condition, stop_location, context, values)
                 .SharedGuardWait(call, guard, condition, predicate) -> {
                     params :: jet_rust_emit_closure_callback_params(ctx, function, predicate) ?? [MIRType]{}
-                    callback :: jet_rust_emit_host_callback(&ctx, function, predicate, params, true, false)
+                    callback :: jet_rust_emit_host_callback(&ctx, function, predicate, params, true, false, false)
                     guard_text :: jet_rust_emit_borrowed_value_reference(&ctx, function, guard, MIRAccess.Read)
                     condition_text :: jet_rust_emit_value_reference(ctx, condition, false)
                     return "{jet_rust_emit_prelude_symbol(&ctx, call)}({guard_text}, {condition_text}, {callback})"

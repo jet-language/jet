@@ -1873,7 +1873,38 @@ fn copy_borrow_trim_view_to_string_read_never_copies() {
 fn copy_borrow_all_runtime_kernel_signatures_compile() {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         use jet_foundation::MIR::MirRuntimePartId as Part;
-        let (mut mir, _) = emitted_rust("fn run() {}\n");
+        let (mut mir, _) = emitted_rust(r#"
+use core.auth
+fn length(text: String) -> Int { text.len() }
+fn owned(text: String) -> String { return text }
+fn inspect<T>(value: T) -> Int { 7 }
+fn generic(text: String) -> Int { inspect(text) }
+fn apply(callback: fn(String) -> Int, text: String) -> Int { callback(text) }
+fn verify(issuer: String) {
+    token :: #Credential "invalid"
+    key :: [U8]{0, 1, 2}
+    result :: auth.verify_jwt(token, key: key, audience: "gateway", issuer: issuer)
+    if result == { .Ok(_) -> print(true) .Err(_) -> print(false) }
+}
+fn run() {
+    raw := " a "
+    right :: raw.trim()
+    print(length(right))
+    print(owned(right))
+    print(generic(right))
+    print(apply(length, right))
+    reader :: (value: String) -> (length(value) + raw.len())
+    print(apply(reader, right))
+    values :: ["a", "b", "a"]
+    mapping :: [String:Int]{"a": 3}
+    print(values.contains(right))
+    print(values.index_of(right) ?? -1)
+    print(values.count(right))
+    print(mapping.has_key(right))
+    print(mapping.get(right) ?? -1)
+    verify("partner")
+}
+"#);
         let artifact = mir.artifacts.first_mut().expect("probe has an artifact");
         artifact.runtime_parts.extend([
             Part::Gc, Part::Event, Part::Realtime, Part::EmbeddedHardware,

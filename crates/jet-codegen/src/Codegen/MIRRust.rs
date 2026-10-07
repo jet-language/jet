@@ -29995,7 +29995,7 @@ impl<'a> RustEmitter<'a> {
                     self.prelude_symbol(*call),
                     self.borrowed_value_reference(function, *guard, MirAccess::Read),
                     self.value_slot_reference(*condition, false),
-                    self.host_callback(function, *predicate, &params, true, false)
+                    self.host_callback(function, *predicate, &params, true, false, false)
                 )
             }
             MirSemanticOp::ConditionNotify {
