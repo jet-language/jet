@@ -2805,6 +2805,10 @@ fn jet_rust_emit_index_operand(ctx: &JetRustEmitContext, function: MIRFunction, 
                 value :: jet_rust_emit_value_reference(ctx, index, false)
                 return "{ctx.config.root_prefix}jet_std::jet_int_owned_to_i64({value}).unwrap_or_else(|_| {ctx.config.root_prefix}jet_arithmetic_stop({jet_rust_emit_source_path(&ctx, location.file)}, {location.line}u32, \"index exceeds host range\"))"
             }
+            .IntN(_, _) -> {
+                value :: jet_rust_emit_value_owned(ctx, function, index)
+                return "i64::try_from({value}).unwrap_or_else(|_| {ctx.config.root_prefix}jet_arithmetic_stop({jet_rust_emit_source_path(&ctx, location.file)}, {location.line}u32, \"index exceeds host range\"))"
+            }
             else -> return jet_rust_emit_value_owned(ctx, function, index)
         }
     }

@@ -40,6 +40,10 @@ pointer writes; fixed-width values widen when the pointer stores exact `Int`.
 Bounded native collection capacities and bit indexes convert exact `Int`
 only at the shared runtime boundary, with a checked range failure rather than
 an unchecked cast. Read-only keys and byte buffers are borrowed at that boundary.
+List-like indexing also accepts fixed-width integers. Every integer carrier
+crosses into the host index with a checked conversion; an unsigned index above
+the host range stops with the same arithmetic failure as an oversized exact
+`Int`, rather than wrapping into a negative index.
 
 `List.remove(value)` removes the first equal value. Pass `.Slot` for positional
 removal (D-LISTREMOVE1=F). Do not add parallel `remove_value` or `remove_at`
