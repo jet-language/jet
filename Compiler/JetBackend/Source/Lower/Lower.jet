@@ -418,9 +418,10 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
     finalizer := LIRFunctionID?{None}
     value_callables := [U64:LIRFunctionID]{}
     value_releases := [U64:LIRFunctionID]{}
-    if !wrap_entry && m.static_fixups.len() > 0 -> m.static_live = Val(lower_static_object(&m, 8))
+    if shared_sites_dynamic && !wrap_entry && m.static_fixups.len() > 0 -> m.static_live = Val(lower_static_object(&m, 8))
     callables := [U64:LIRFunctionID]{}
     loop root in roots {
+        if !shared_sites_dynamic -> break
         if callables.get(root.value) != None -> next
         concrete :: prepared.roots.get(root.value) ?? {
             &m.issues.push(LIRLoweringIssue{function: "entry preparation", message: "requested root {root.value} has no concrete monomorphization"})
@@ -491,7 +492,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool,
         &functions.push(lower_helper_function(program, &m, m.glue[startup.value - m.glue_base]))
         lowered_entry = Val(startup)
     }
-    closures :: if !wrap_entry && m.issues.len() == 0 -> lower_closure_value_layouts(program, prepared, m) else -> [LIRClosureValueLayout]{}
+    closures :: if shared_sites_dynamic && !wrap_entry && m.issues.len() == 0 -> lower_closure_value_layouts(program, prepared, m) else -> [LIRClosureValueLayout]{}
     lowered :: LIRModule{signatures: ~m.signatures, functions: functions, data: ~m.data}
     issues := ~m.issues
     if issues.len() == 0 {
