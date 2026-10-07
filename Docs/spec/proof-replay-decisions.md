@@ -449,10 +449,12 @@ names are `.jet/replays/<sanitized-entry>-<artifact-id[0..12]>.jetproof-replay`.
 Explicit paths must stay project-relative, use safe parents, and not already
 exist. A crash temporary is not evidence.
 An explicit capture path is an export: the record index retains an identical
-canonical copy at `.jet/replays/<artifact-id>.jetproof-replay`. Subsequent save,
-replay, and evidence links resolve that indexed copy; changing an export cannot
-change the indexed evidence. A supplied unsafe replay path is E3622 before it
-can be read or resolved through the index.
+canonical copy at `.jet/replays/<artifact-id>.jetproof-replay`. Index-based replay
+and evidence links resolve that copy; save validates a supplied export before
+selecting its indexed content identity. Explicit file replay still validates
+the supplied file, including corruption and source divergence. Changing an
+export cannot replace indexed evidence. An unsafe replay path is E3622 before
+it can be read or resolved through the index.
 
 **Reason.** The artifact must be durable and content-addressed without allowing
 a concurrent or untrusted writer to replace evidence.
