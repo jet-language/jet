@@ -56,8 +56,10 @@ use jet_foundation.[
     MIRValueID,
     MIRVariant,
     MIRVariantPayload,
+    mir_operation_value_uses,
     mir_symbol_name,
     mir_terminator_targets,
+    mir_terminator_value_uses,
     mir_type_canonical_key,
     mir_type_display_name,
     mir_type_from_kind,
@@ -2591,13 +2593,34 @@ fn lower_build_string(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     lower_call_runtime(&m, &f, "jet_rt_string_builder_finish", [LIRValueID]{builder}, Val(dst))
 }
 
+// MIR leaves the end of an owned, never-moved temporary implicit (the Rust
+// emitter's `print(&tmp)` drops `tmp` at its block's end). A printed String
+// temporary whose only use is the print is released right after it.
+fn lower_print_releases(c: LowerContext, f: LowerFunction, value: MIRValueID, lowered: LIRValueID) -> Bool Never! {
+    index :: c.fact_index.get(value.value) ?? return false
+    ownership :: c.mir.values[index].ownership
+    if !lower_is_owned(ownership) || ownership.moved || lower_value_drop(f, lowered) == .Trivial -> return false
+    uses := 0
+    loop block in c.mir.blocks {
+        loop instruction in block.instructions {
+            loop used in mir_operation_value_uses(instruction.operation) { if used == value -> uses += 1 }
+        }
+        loop used in mir_terminator_value_uses(block.terminator) { if used == value -> uses += 1 }
+    }
+    uses == 1
+}
+
 fn lower_semantic(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, semantic: MIRSemanticOp) Never! {
     if semantic == .Print(call, value) {
         row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "print names missing Prelude call {call.value}")
         text :: lower_show(p, c, &m, &f, value) ?? return
         flush :: lower_const_flag(&f, 1)
         lower_call_runtime(&m, &f, lower_runtime_symbol(row), [LIRValueID]{text.value, flush}, None)
-        if text.owned -> lower_emit(&f, LIRInst.Drop{value: text.value})
+        if text.owned {
+            lower_emit(&f, LIRInst.Drop{value: text.value})
+        } else if lower_print_releases(c, f, value, text.value) {
+            lower_emit(&f, LIRInst.Drop{value: text.value})
+        }
         return lower_alias_absent(&f, instruction)
     }
     if semantic == .DataEntriesToMap(_, local) -> return lower_data_entries_to_map(p, c, &m, &f, instruction, local)
