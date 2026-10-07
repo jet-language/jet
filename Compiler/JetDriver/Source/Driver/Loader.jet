@@ -1257,6 +1257,40 @@ fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDrive
             })
         }
     }
+    loop generated in request.generated_modules {
+        root_index := Int?{None}
+        loop (index, package) in packages {
+            if package.identity == generated.package_identity {
+                root_index = Val(index)
+                break
+            }
+        }
+        if root_index == None || generated.name == "" || !jet_driver_valid_authority_relative_path(generated.relative_path) || !generated.relative_path.ends_with(".jet") {
+            &diagnostics.push(jet_driver_diagnostic_without_span("E3502", "a generated module has no exact package, name or relative Jet path", "generated source belongs to one checked package and stays beneath its source root", "declare a named module with a package-relative .jet path"))
+            next
+        }
+        owner :: root_index ?? 0
+        collision :: loop unit in source_units {
+            if unit.package_identity == generated.package_identity && unit.relative_path == generated.relative_path -> break true
+        } ?? false
+        if collision {
+            &diagnostics.push(jet_driver_diagnostic_without_span("E3502", "generated module `{generated.relative_path}` aliases another source", "one source path names one immutable byte sequence", "choose a distinct generated module path"))
+            next
+        }
+        path :: jet_driver_generated_module_path(generated.package_identity, generated.relative_path)
+        &source_units.push(JetDriverSourceUnit{
+            root_index: owner,
+            file_index: -1,
+            root_identity: snapshot.roots[owner].identity,
+            package_identity: generated.package_identity,
+            module_name: generated.name,
+            path: path,
+            relative_path: generated.relative_path,
+            source_segments: jet_driver_core_source_segments(path, generated.source),
+            source_origin: SemaSourceOrigin.CompilerGenerated,
+            in_namespace: packages[owner].manifest_path != None && !packages[owner].inline_package,
+        })
+    }
 
     entry_package_identity := ""
     entry_root_index := Int?{None}
@@ -2407,8 +2441,30 @@ enum JetDriverParseJob {
     Missing
 }
 
+fn jet_driver_generated_module_path(package_identity: String, relative_path: String) -> String Never! {
+    "<build-generated>/{package_identity}/{relative_path}"
+}
+fn jet_driver_source_unit_text(request: JetDriverCompileRequest, unit: JetDriverSourceUnit) -> String? Never! {
+    if jet_driver_unit_is_core(unit) {
+        if unit.file_index < 0 || unit.file_index >= request.core_sources.len() -> return None
+        return Val(request.core_sources[unit.file_index].source)
+    }
+    if unit.source_origin == SemaSourceOrigin.CompilerGenerated {
+        loop generated in request.generated_modules {
+            if generated.package_identity == unit.package_identity && generated.relative_path == unit.relative_path && jet_driver_generated_module_path(generated.package_identity, generated.relative_path) == unit.path -> return Val(generated.source)
+        }
+        return None
+    }
+    if unit.root_index < 0 || unit.root_index >= request.authorized_sources.roots.len() -> return None
+    files :: request.authorized_sources.roots[unit.root_index].files
+    if unit.file_index < 0 || unit.file_index >= files.len() -> return None
+    Val(files[unit.file_index].source)
+}
 fn jet_driver_parse_job(request: JetDriverCompileRequest, unit: JetDriverSourceUnit) -> JetDriverParseJob {
-    if !jet_driver_unit_is_core(unit) -> return JetDriverParseJob.Source{text: request.authorized_sources.roots[unit.root_index].files[unit.file_index].source}
+    if !jet_driver_unit_is_core(unit) {
+        text :: jet_driver_source_unit_text(request, unit) ?? return JetDriverParseJob.Missing
+        return JetDriverParseJob.Source{text: text}
+    }
     if unit.file_index < 0 || unit.file_index >= request.core_sources.len() -> return JetDriverParseJob.Missing
     row :: request.core_sources[unit.file_index]
     JetDriverParseJob.Core{text: row.source, owned_members: row.owned_members}
@@ -2789,12 +2845,24 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
     queued := [Bool]{}
     loop unit_index in 0..<source_units.len() -> &queued.push(false)
     queued[entry_index ?? 0] = true
+    // The build plan selected these exact modules. Check every selected output,
+    // including loose-file outputs not named by an import.
+    loop (unit_index, unit) in source_units {
+        if unit.source_origin == SemaSourceOrigin.CompilerGenerated && !queued[unit_index] {
+            queued[unit_index] = true
+            &pending.push(unit_index)
+        }
+    }
     modules := [JetDriverLoadedModule]{}
     namespace_expanded := [Bool]{}
     loop root_index in 0..<request.authorized_sources.roots.len() -> &namespace_expanded.push(false)
     resolved_imports := [SemaRegistrationImportEdge]{}
-    // Exact text records of the embedded Core modules the closure loads.
+    // Exact virtual text records; these are never added to disk authorities.
     core_generated := [MIRSourceFile]{}
+    loop generated in request.generated_modules {
+        path :: jet_driver_generated_module_path(generated.package_identity, generated.relative_path)
+        &core_generated.push(MIRSourceFile{id: mir_source_file_id(path), path: path, source: generated.source})
+    }
     names_url_carrier := false
     pending_index := 0
     // The current parse wave's results, last-first: every unit queued when
@@ -2854,7 +2922,7 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
         // A bare `URL` (a type or a typed `URL{"…"}` head) is the `core.net.url`
         // record, so a module that names it loads that Core source without a
         // `use` (Rust `source_names_identifier` in the loader).
-        if !is_core && jet_driver_source_names_identifier(request.authorized_sources.roots[unit.root_index].files[unit.file_index].source, "URL") {
+        if !is_core && jet_driver_source_names_identifier(jet_driver_source_unit_text(request, unit) ?? "", "URL") {
             names_url_carrier = true
             url_carrier :: mir_boundary_head_carrier_module("URL") ?? ""
             url_index :: jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, url_carrier, Span{start: 0, end: 0}, &diagnostics)

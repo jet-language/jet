@@ -71,7 +71,20 @@ pub fn jet_driver_query_build_plan(request: JetDriverCompileRequest) -> JetDrive
     loop error in finished.diagnostics -> &errors.push(jet_eval_build_session_diagnostic(error))
     plan :: finished.plan ?? return jet_driver_build_query_empty(errors, false, None)
     if jet_driver_has_errors(errors) -> return jet_driver_build_query_empty(errors, false, None)
-    {plan: Val(plan), graph: Val(build_plan_graph(plan)), generated: build_plan_selected_generated(plan), diagnostics: errors, complete: true, internal_problem: None}
+    generated :: build_plan_selected_generated(plan)
+    if generated.len() > 0 {
+        // Re-enter the ordinary compiler with exact virtual source records;
+        // selected outputs are checked even when no disk file exists.
+        checked_request := staged
+        checked_request.capture_build_program = false
+        loop module in generated {
+            &checked_request.generated_modules.push(JetDriverGeneratedModule{package_identity: package, name: module.name, relative_path: module.path, source: module.source})
+        }
+        checked :: jet_driver_compile_mir(^checked_request)
+        loop error in checked.diagnostics -> &errors.push(error)
+        if !checked.complete || checked.internal_problem != None || jet_driver_has_errors(errors) -> return jet_driver_build_query_empty(errors, false, checked.internal_problem)
+    }
+    {plan: Val(plan), graph: Val(build_plan_graph(plan)), generated: generated, diagnostics: errors, complete: true, internal_problem: None}
 }
 pub fn jet_driver_query_build_nodes(request: JetDriverCompileRequest) -> JetDriverBuildQueryResult {
     // Nodes are the checked graph's exact compiler facts, never a projection
