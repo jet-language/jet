@@ -296,7 +296,7 @@ fn lower_closure_search(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
 // Map callbacks receive the borrowed key and value separately, in key order.
 // Explicit Move parameters get their own copies, not the Map's stored owners.
 fn lower_map_callback_input(p: MIRProgram, m: &LowerModule, f: &LowerFunction, closure_ty: MIRType, index: Int, value: LIRValueID, ty: MIRType) -> LIRValueID Never! {
-    if !lower_closure_param_moves(closure_ty, index) || !lower_needs_drop(p, ty) -> return value
+    if !lower_closure_param_moves(closure_ty, index) || !lower_needs_drop(p, ty) -> return ~value
     copied :: lower_new_like(&f, value)
     lower_clone_into(p, &m, &f, value, copied, ty)
     copied
