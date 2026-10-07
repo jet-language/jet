@@ -1399,6 +1399,7 @@ fn jet_codegen_lower_frame_schedule(schedule: FrameSchedule?) -> MIRFrameSchedul
 
 fn jet_codegen_handle_receiver_is_mutating(operation: THandleOp) -> Bool Never! {
     if operation == {
+        .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent -> return true
         .HTTPClientMethod(kind, method) -> return kind == "BrowserTestServer" && method == "stop"
         else -> {}
     }
@@ -1451,6 +1452,9 @@ fn jet_codegen_lower_general_handle_method(builder: &JetCodegenBuilder, program:
         operation == THandleOp.SolverNew -> {
             seed :: jet_codegen_lower_expr(&builder, program, receiver)
             jet_codegen_builtin_native_int(&builder, program, seed, receiver.ty, receiver.span)
+        }
+        route.borrow_mask.len() > 0 && route.borrow_mask[0] && !jet_codegen_builtin_iter_receiver(receiver.ty) -> {
+            jet_codegen_method_receiver_arg(&builder, program, receiver, MIRAccess.Read).value
         }
         else -> {
             jet_codegen_lower_expr(&builder, program, receiver)

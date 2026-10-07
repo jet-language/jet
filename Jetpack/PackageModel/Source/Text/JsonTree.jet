@@ -9,7 +9,12 @@ PKG_JSON_NOT_STRING :: prep { "expected a DataTree string" }
 
 fn pkg_json_object(value: DataTree) -> [String: DataTree]? Never! {
     if value == {
-        .Object(fields) -> Val(fields)
+        // D-DATATREE-ORDER1=A: the object's ordered pairs, indexed by name.
+        .Object(fields) -> {
+            members := [String: DataTree]{}
+            loop pair in fields -> members[pair.key] = pair.value
+            Val(members)
+        }
         else -> None
     }
 }

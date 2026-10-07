@@ -2822,15 +2822,6 @@ impl<K: Ord, V> JetMap<K, V> {
     }
 }
 
-/// Build a typed Jet map from one already-lowered runtime entry vector.
-///
-/// The checked TIR producer has already evaluated each key and value. This
-/// kernel only commits those pairs to the canonical copy-on-write map.
-#[inline(always)]
-fn jet_data_entries_to_map<K: Ord, V>(entries: Vec<(K, V)>) -> JetMap<K, V> {
-    JetMap::from_pairs(entries)
-}
-
 // Codegen lowers map construction from a sequence of pairs to
 // `.into_iter().collect()`, so the map has to be buildable from its own pairs.
 // Without this, decoding a table into a typed map emitted Rust that rustc

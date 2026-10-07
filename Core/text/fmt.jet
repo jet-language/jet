@@ -60,36 +60,104 @@ pub fn sci(n: Float, frac: Int) -> String Never! {
     "{sign}{float_fixed(value, frac)}e{exp_sign}{exp_text}"
 }
 
-pub fn pretty(value: String) -> String Never! {
-    out := ""
-    indent := 0
+/// Expand canonical Debug text with the same layout as the `Pretty` selector.
+/// Quoted strings are opaque: their braces, commas, and escapes stay intact.
+pub fn pretty(value: String) -> String Never! { pretty_fragment(value.trim(), 0) }
+
+fn pretty_fragment(value: String, indent: Int) -> String Never! {
+    raw :: value.bytes()
     quoted := false
     escaped := false
-    loop ch in unicode.scalars(value) {
+    open := -1
+    close := U8{0}
+    loop (index, ch) in raw {
         if quoted {
-            out = "{out}{ch}"
             if escaped -> escaped = false
-            else if ch == "\\" -> escaped = true
-            else if ch == "\"" -> quoted = false
+            else if ch == (U8{92}) -> escaped = true
+            else if ch == (U8{34}) -> quoted = false
             next
         }
-        if ch == "\"" {
-            quoted = true
-            out = "{out}{ch}"
-        } else if ch == "{{" || ch == "[" {
-            indent = indent + 2
-            out = "{out}{ch}\n{spaces(indent)}"
-        } else if ch == "}}" || ch == "]" {
-            indent = indent - 2
-            if indent < 0 -> indent = 0
-            out = "{trim_right(out)}\n{spaces(indent)}{ch}"
-        } else if ch == "," {
-            out = "{trim_right(out)},\n{spaces(indent)}"
-        } else {
-            out = "{out}{ch}"
+        if ch == (U8{34}) -> quoted = true
+        else {
+            close = pretty_close(ch)
+            if close != (U8{0}) {
+                open = index
+                break
+            }
         }
     }
-    trim_right(out)
+    if open < 0 -> return ~value
+    stack := [close]
+    quoted = false
+    escaped = false
+    end := -1
+    index := open + 1
+    loop index < raw.len() {
+        ch :: raw[index]
+        if quoted {
+            if escaped -> escaped = false
+            else if ch == (U8{92}) -> escaped = true
+            else if ch == (U8{34}) -> quoted = false
+        } else if ch == (U8{34}) -> quoted = true
+        else if pretty_close(ch) != (U8{0}) -> &stack.push(pretty_close(ch))
+        else if ch == stack[stack.len() - 1] {
+            _ :: &stack.pop()
+            if stack.len() == 0 {
+                end = index
+                break
+            }
+        }
+        index += 1
+    }
+    if end < 0 -> return ~value
+    if pretty_slice(raw, end + 1, raw.len()).trim() != "" -> return ~value
+    prefix :: pretty_slice(raw, 0, open).trim_end()
+    body :: pretty_slice(raw, open + 1, end)
+    if body.trim() == "" -> return "{prefix} {pretty_slice(raw, open, open + 1)}{pretty_slice(raw, end, end + 1)}".trim_start()
+    if raw[open] == (U8{91}) && (body.trim() == ":" || body.trim().to_lower() == "redacted") -> return ~value
+    out := if prefix == "" -> "" else -> "{prefix} "
+    out = "{out}{pretty_slice(raw, open, open + 1)}"
+    loop item in pretty_items(body) -> out = "{out}\n{spaces(indent + 2)}{pretty_fragment(item, indent + 2)}"
+    "{out}\n{spaces(indent)}{pretty_slice(raw, end, end + 1)}"
+}
+
+fn pretty_close(ch: U8) -> U8 Never! {
+    if ch == (U8{123}) -> return U8{125}
+    if ch == (U8{91}) -> return U8{93}
+    if ch == (U8{40}) -> return U8{41}
+    U8{0}
+}
+
+fn pretty_slice(raw: [U8], start: Int, end: Int) -> String Never! {
+    String.from_bytes(slice_b(raw, start, end)) ?? ""
+}
+
+fn pretty_items(value: String) -> [String] Never! {
+    raw :: value.bytes()
+    items := [String]{}
+    stack := [U8]{}
+    start := 0
+    quoted := false
+    escaped := false
+    loop (index, ch) in raw {
+        if quoted {
+            if escaped -> escaped = false
+            else if ch == (U8{92}) -> escaped = true
+            else if ch == (U8{34}) -> quoted = false
+            next
+        }
+        if ch == (U8{34}) -> quoted = true
+        else if pretty_close(ch) != (U8{0}) -> &stack.push(pretty_close(ch))
+        else if stack.len() > 0 && ch == stack[stack.len() - 1] -> _ :: &stack.pop()
+        else if ch == (U8{44}) && stack.len() == 0 {
+            item :: pretty_slice(raw, start, index).trim()
+            if item != "" -> &items.push(item)
+            start = index + 1
+        }
+    }
+    item :: pretty_slice(raw, start, raw.len()).trim()
+    if item != "" -> &items.push(item)
+    items
 }
 
 /// Decimal byte display (1000-based), with the unit selected before rounding.
@@ -305,12 +373,6 @@ fn spaces(n: Int) -> String {
     out
 }
 
-fn trim_right(text: String) -> String {
-    raw :: text.bytes()
-    i := raw.len()
-    loop i > 0 && (raw[i - 1] == (U8{32}) || raw[i - 1] == (U8{10}) || raw[i - 1] == (U8{9})) -> i = i - 1
-    String.from_bytes(slice_b(raw, 0, i)) ?? text
-}
 
 fn slice(text: String, start: Int, end: Int) -> String Never! {
     units :: unicode.scalars(text)

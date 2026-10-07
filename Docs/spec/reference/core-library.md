@@ -30,6 +30,9 @@ Core is the canonical first-party namespace. Import modules by their `core.*`
 name; there is no `jet.*` or `std.*` library namespace. Core wrappers keep
 source-facing types and policy in Jet while typed provider leaves perform the
 operations that require the host environment.
+Provider record slots preserve optional presence when their host ABI uses
+either native `Option` or the checked outcome carrier. Integer payload
+narrowing and widening do not change which carrier is present or absent.
 
 Types and error enums use PascalCase (`String`, `IOError`, `JSON`); functions
 and module segments use snake_case (`read`, `core.files`) (S54). Acronyms keep
@@ -130,6 +133,9 @@ and `source_map` expose compiler-owned front-end results; `manifest`, `package`,
 not read arbitrary paths, dependencies, or sibling packages, and they do not
 provide a runtime path-loading fallback. A runtime call is E0956.
 
+The source declarations supply the public typed vocabulary; calls retain the
+compiler-owned compile-time provider route even when that source package is loaded.
+
 The package-view field matrix is versioned by
 `PACKAGE_MODEL_SCHEMA_VERSION = 1` (D-PACKAGE-MODEL1). The four views have
 separate meanings:
@@ -157,6 +163,8 @@ codes and logical reasons without authority paths or secret material. Relative
 hashed build inputs record the package manifest and each contributing Config,
 lock, or profile file for build-cache identity. The views do not invent
 field-level source positions.
+Declared Config files contribute package facts and build identity, not ordinary
+source declarations; a Config binding cannot shadow a package function.
 
 ```jet
 use core.compiler as compiler
@@ -950,6 +958,7 @@ rejected without a body allocation.
 | `headers()` / `headers_get(h, name)` | `Headers` / `?String` | Create headers or read a case-insensitive first value. |
 | `headers_all(h, name)` / `headers_set` / `headers_append` / `headers_remove` | header values | Preserve ordered fields while replacing, appending, or removing names. |
 | `body_empty()` / `body_text(text)` / `body_bytes(bytes)` | `Body` | Construct the checked empty, text, or byte body variants. |
+| `request.body()` / `response.body()` | lazy `Body` | Keep the transport body lazy; `body.text(limit)` and `body.bytes(limit)` are fallible, bounded consumption operations, not construction of the owned source variants. |
 | `get(url)` / `post(url, body)` | `HTTPResponse !HTTPError` | Perform one-shot GET or POST calls with URL and body checks. |
 | `put(url, body)` / `patch(url, body)` | `HTTPResponse !HTTPError` | Perform one-shot PUT or PATCH calls. |
 | `delete(url)` / `head(url)` | `HTTPResponse !HTTPError` | Perform one-shot DELETE or HEAD calls. |
@@ -1005,6 +1014,11 @@ explicit bounded byte/text read.
 `serve` accept optional `HTTPServerTLS` and optional deadlines; `serve_once`
 and `serve_once_listener` provide testable one-request entry points.
 
+`core.http.serve(mux, deadline:)` is the loopback lifecycle entry point: it
+returns an `HTTPServer` handle whose `shutdown()` drains pending requests and
+returns an `HTTPShutdownReport`. It is distinct from the blocking
+`core.http.server.serve(addr, mux, ...)` operation.
+
 | API | Result | Description |
 | --- | --- | --- |
 | `mux()` | `HTTPMux` | Create a router carrier. |
@@ -1033,7 +1047,7 @@ fragments, missing hosts, and other schemes before the provider handshake.
 | `upgrade(request)` | `WsConn !WsError` | Validate GET, Upgrade, Connection, version 13, and key headers before upgrading. |
 | `conn.send_text(text)` / `conn.send_bytes(bytes)` | `!WsError` | Send a text or binary frame. |
 | `conn.recv()` | `WsMessage !WsError` | Receive a text, binary, or close message. |
-| `conn.close(code, reason)` | `!WsError` | Send a close frame and shut down the connection. |
+| `conn.close(code, reason)` | `!WsError` | Check the `Int` code at the host-integer boundary, send a close frame, and shut down the connection. |
 
 `WsError` distinguishes invalid URLs, invalid handshakes, protocol/size
 failures, timeout, cancellation, closed connections, and unsupported targets.
@@ -1048,7 +1062,7 @@ only redacted audit facts.
 | API | Result | Description |
 | --- | --- | --- |
 | `config()` / `config_from_env()` | `BrowserTestConfig !BrowserError` | Load checked browser-test configuration. |
-| `make_profile(name)` / `timeout(ms)` | `BrowserProfile` / `BrowserTimeout !BrowserError` | Construct an isolated profile or a checked timeout. |
+| `make_profile(name)` / `profile(name)` / `timeout(ms)` | `BrowserProfile` / `BrowserProfile !BrowserError` / `BrowserTimeout !BrowserError` | Construct an isolated profile, check a pinned BiDi profile (`bidi-2024.11` or `bidi-2025.5`), or check a timeout in `1..=600000` milliseconds. |
 | `locked(engine)` | `BrowserLocked !BrowserError` | Read and verify the provider's locked browser record. |
 | `connect()` / `connect_browser_profile(profile, timeout)` | `Browser !BrowserError` | Connect through the default or named profile. |
 | `browser.context()` | `BrowserContext !BrowserError` | Open an isolated browsing context. |
@@ -1191,6 +1205,9 @@ provider failure and a bounded rejection-sampling exhaustion fail with
 lookup separate from typed `KeyRef<T>` generations. Every vault operation
 carries the `Secret` effect. A `KeyRef<T>` contains name/version identity, not
 key bytes; the provider owns persistence and key-material lifetimes.
+Its `Display` is `repo:{name}@v{version}` for every key type `T`; rendering never
+reads key material or private provider metadata and imposes no `Display` bound
+on `T`.
 
 ```jet
 use core.crypto as crypto
@@ -1244,7 +1261,7 @@ claim and input validation; provider calls handle the database/session boundary.
 | API | Result | Description |
 | --- | --- | --- |
 | `verify_jwt(token, key, audience, issuer, clock_skew)` | `Claims !AuthError` | Verify a three-part HS256 JWT with exact integer `exp`, optional `nbf`/`iat`, and audience/issuer checks. |
-| `verify_paseto(token, key, audience)` | `Claims !AuthError` | Verify `v4.public` with a 32-byte Ed25519 public key and the supplied audience. |
+| `verify_paseto(token, key, audience, issuer?, clock_skew, footer, implicit)` | `Claims !AuthError` | Verify `v4.public` with a 32-byte Ed25519 public key, audience and optional issuer checks, exact-nanosecond leeway, and PAE-bound footer/implicit bytes. Omitted policy arguments mean no issuer constraint, zero leeway, and empty footer/implicit bytes. |
 | `register_user(name, password)` | `Session !AuthError` | Register a validated identity and issue a session. |
 | `password_login(name, password, ttl_s, flags)` | `Session !AuthError` | Validate credentials and issue a bounded session lifetime. |
 | `oauth_begin(provider)` / `oauth_finish(state, assertion, ttl_s, flags)` | state/session `!AuthError` | Start and finish the provider-backed OAuth assertion flow. |
@@ -1331,6 +1348,9 @@ registration method.
 handling a closed event enum. See
 [`watcher.jet`](../../../Examples/features/io/watcher.jet).
 
+`WatchHandle` and `WatchSet` retain the provider's live lifecycle state; their
+metadata is inspected through methods, not constructed as source record fields.
+
 ### `core.term` — terminal input and output
 
 `core.term` owns UTF-8 stdio, prompts, raw-key input, terminal size, and ANSI
@@ -1370,17 +1390,20 @@ fn run() {
 | `read_key()` | `Key` | Read a decoded key event. |
 | `progress(label)` | `!IOError` | Write a progress update through the terminal stream. |
 
-`style` is a no-op when output is not a TTY unless `style_force` is used. The
-`Key` enum contains `Char`, `Escape`, `Backspace`, `Tab`, the four arrow keys,
-and `Unknown`. `confirm` treats a bare Enter as no; `choose` returns an input
-error after its finite retry budget or when stdin closes.
+`style` is a no-op when output is not a TTY unless `style_force` is used.
+`Key` carries `Char(Char)`, `F(Int)`, and `Ctrl(Char)` payloads. Its unit variants
+are `Enter`, `Escape`, `Backspace`, `Tab`, `Delete`, the four arrow keys, and
+`Unknown`. `confirm` treats a bare Enter as no; `choose` returns an input error
+after its finite retry budget or when stdin closes.
 
 ### `core.args` — declarative command-line parsing (D-ARGS1)
 
-`core.args` provides both a direct `DataTree` decoder and an `ArgsSpec` builder.
-The builder consumes a spec and returns a new value at each method call; parsing
-is separate from process execution so tests can pass an explicit argument
-vector.
+`core.args` provides an `ArgsSpec` builder, explicit `decode_argv` tree parsing,
+and typed `decode<T>` / `merge<T>` using the target's checked `#CLI` shape.
+`ArgsSpec` is the checked builder handle, not a record containing only flag
+names. The builder consumes a spec and returns a new value at each method call;
+parsing is separate from process execution so tests can pass an explicit
+argument vector.
 
 ```jet
 use core.args as args
@@ -1482,6 +1505,12 @@ reflection floor has no runtime type registry, string-named field mutation, or
 dynamic code loading; `get`, `set`, `clear`, `copy`, `equal`, `getfile`,
 `getmodule`, and `loadfile` remain declined.
 
+Compiler fact reads such as `@function.effects` are separate from runtime
+reflection. Projections of prepared fact records, including fields reached
+through an optional fact, remain compile-time values. Tests against their
+closed fact-enum variants fold before MIR lowering; ordinary user enums retain
+their nominal owner and are not folded as compiler facts.
+
 ### `core.sys` — environment and system facts
 
 `core.sys` exposes the process environment, working directory, platform facts,
@@ -1525,10 +1554,10 @@ fn run() {
 | `sync()` | `Unit -[FS, Env]>` | Flush filesystem buffers. |
 | `getpgid(pid)` / `getsid(pid)` | `Int !IOError -[Env]>` | Inspect POSIX process-group or session state. |
 
-The source-compatible `set` form reports an invalid environment call as E3001;
-its future typed error form is a language-edition change, not a second Core
-namespace. Names must be non-empty and contain neither NUL nor `=`; values
-cannot contain NUL. `vars` does not silently skip an unrepresentable entry:
+`set` reports an invalid environment call as E3001. Lowering calls the shared
+checked environment kernel and uses its error to report that stop; the public
+call returns no error value. Names must be non-empty and contain neither NUL
+nor `=`; values cannot contain NUL. `vars` does not silently skip an unrepresentable entry:
 `EnvError.NonUnicode` reports it.
 
 POSIX process/session controls are `#Unsafe` functions: every call needs an OS
@@ -1725,6 +1754,9 @@ captured or inherited streams (D-PROCESS-SESSION1=A, D-PROCESS-SESSION2=D).
 predicates, checked and saturating arithmetic, and elementary functions. The
 floating-point constant-like values are functions, so use `math.pi()` and
 `math.e()` rather than treating them as fields.
+The numeric `/%` operator rounds division toward negative infinity for both
+exact `Int` and floating-point operands (`-7 /% 2` is `-4`). Its in-place
+form is `/%=`, and whole-number floor division pairs with floored `%`.
 
 ```jet
 use core.math as math
@@ -1924,6 +1956,15 @@ configured element limit rather than silently moving them to another device.
 backend values. A scene owns its name, frame limit, and tick callback; a replay
 records a path; and the headless backend produces a deterministic frame
 transcript without requiring a renderer or audio device.
+`Scene`, `Replay`, and `Backend` are opaque compiler-owned handles. Their
+registered constructors preserve runtime identity and state; they do not expose
+source-record construction as an alternate scene, replay, or backend model.
+Game-control callbacks and command relays use the shared native devtools
+boundary; the checked command DTOs and queues remain a separate control layer.
+Both Rust emitters project frame and input-snapshot records to the native Game
+carriers. Frame registration and execution borrow the scene mutably; absent
+replay/backend/frame arguments become native optional references, not references
+to the language's optional-result carrier.
 
 ```jet
 use core.game as game
@@ -2025,7 +2066,7 @@ resulting parts (D-TEXTUNICODE1=A).
 | `text.center(value, width, fill)` | `String` | Center a value in a requested width. |
 | `text.starts_any(value, prefixes)` / `ends_any(value, suffixes)` | `Bool` | Test any of several prefixes or suffixes. |
 | `text.splitn(value, separator, limit)` / `rsplitn(value, separator, limit)` | `[String]` | Split from the left or right with a maximum part count. |
-| `text.inspect(value)` | `[String]` | Return escaped scalar inspection values. |
+| `text.inspect(value)` | `[String]` | Return each scalar as `U+XXXX NAME`, using pinned Unicode names (Unicode 1.0 names for controls, `UNASSIGNED` where no name is recorded). |
 | `text.Cursor` / `text.cursor(value)` / `text.cursor_advance(text, cursor)` | type / cursor | Construct and advance a text cursor. |
 
 `String.len()` is the compiler-owned receiver-first method and counts Unicode
@@ -2145,10 +2186,14 @@ are `MONDAY :: 0` through `SUNDAY :: 6`.
 ### `core.encoding` — bounded value codecs
 
 `core.encoding` converts complete values to and from `DataTree`. Objects retain
-insertion order, integers and floating-point numbers remain distinct, and
+arrival order: the `Object` payload is the ordered pair list
+`[(key: String, value: DataTree)]` (D-DATATREE-ORDER1), and a repeated name is a
+`Syntax` error except under `json.parse_allow_duplicates`. Integers and
+floating-point numbers remain distinct, and
 malformed input returns a typed `EncodingError`. The whole-value codecs are
 pure; readers and writers expose the same boundaries incrementally. The
-shared codec shape and value tree follow D-ENC1, D-JSONVERB1, and D-SERDE13.
+shared codec shape and value tree follow D-ENC1, D-JSONVERB1, D-SERDE13, and
+D-DATATREE-ORDER1.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
@@ -2466,6 +2511,10 @@ fn run() {
 Query methods filter, sort, map, extrema, joins, grouping, collection, and
 watching while retaining typed positions for errors. `Query<T>.plan()` returns
 deterministic operation names; `collect()` materializes `[T] !DataError`.
+The source `query(rows)` facade constructs the shared deferred carrier through
+the data provider, rather than rebuilding its private storage as a source
+record. Filter, sort, and grouping selectors receive an owned row value at
+the provider callback boundary.
 Grouped `count`, `sum`, and `mean` return `Query<Group<K, V>>`, and `mean`
 requires a floating numeric selector. `DataTracked<T, K>` supports `query`,
 `insert`, `replace`, and `remove`; `DataWatch<T>` supports `get`, `status`, and
@@ -2728,6 +2777,10 @@ The budget is an execution bound, not a promise of linear-time matching. The
 engine does not expose named capture groups: `Match.groups` is a positional
 list. Use the compiled `Pattern`/`Regex` values when the same expression is
 used repeatedly, and call `escape` for literal user input.
+Checked `Regex{"…"}` literals and inferred-head `.{"…"}` arguments produce the
+same source-owned `Regex` as `compile`; they do not use a separate native regex
+carrier or engine. The compiler validates the complete literal before lowering
+it through the source `compile` function and retaining its checked success value.
 `Match.start` and `Match.end` are UTF-8 byte offsets, and `Match.text` contains
 the entire match. `Match.groups` contains the captured groups in positional
 order, excluding the whole match; use `expand` for numbered substitution.
@@ -2763,6 +2816,10 @@ metadata. It provides portable node construction and backend adapters; it does
 not pretend that a desktop, phone, or terminal backend has the same input or
 rendering capabilities. The source is [`Core/ui/ui.jet`](../../../Core/ui/ui.jet).
 
+`box` stores its children in the returned tree. Its runtime boundary therefore
+accepts an owned child list; compiler borrow-elision must not treat that native
+call as lending the caller's list.
+
 The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 `UI.Pointer`; capability checks and runtime support use the same spelling.
 
@@ -2788,6 +2845,13 @@ The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 | `node_color(label: String, width: Float, height: Float, color: String) -> UINode` | node | Construct a colored node. |
 | `node_role(label: String, width: Float, height: Float, role: UIAriaRole) -> UINode` | node | Construct a node with a role. |
 | `node_shortcut(n: UINode, shortcut: UIShortcut) -> UINode` | node | Attach a shortcut descriptor. |
+
+Preview viewport arguments keep the single optional carrier inserted by the
+checker; lowering does not wrap an already promoted argument again. Preview and
+playground registries can be imported directly as `core.ui.[previews, playgrounds]`.
+Host file-dialog, clipboard, shortcut, accessibility, and IME consumers declare
+their corresponding `UI.*` authority needs and use the current failure carrier;
+IME polling yields an optional event after host failure propagation.
 
 Backends expose their own command or event projection through the backend
 handle. The provider/catalog may add interactive node and mount operations,
@@ -2885,12 +2949,17 @@ The event family is a typed Core value with no additional event syntax (`D-EVENT
 `App` owns routes, live state, sessions, and storage adapters; the browser
 surface is represented by typed effects rather than an assumed browser DOM.
 The module source is [`Core/web/web.jet`](../../../Core/web/web.jet).
+`App` and `WebPage` are opaque compiler-owned carriers, not constructible source
+records. The registered constructors and App builder methods retain the checked
+route graph and its typed handlers across both compiler implementations.
+The selected Apps runtime part emits their native implementations together with
+the development-server and shared web-router dependencies.
 
 | Signature | Result | Description |
 |---|---|---|
 | `app() -> App` | app | Create the default application carrier. |
 | `page(title: String, body: String) -> WebPage` | page | Build a server-rendered page. |
-| `form(input: WebFormInput, action: String) -> WebFormTyped !WebFormError` | form | Convert form input through the typed form boundary. |
+| `form(Model, action: handler) -> WebFormTyped` | form | Derive typed inputs and the named action contract at compile time (D-WEBFORM1=A). |
 | `on(path: String, title: String, handler: fn(WebEvent)) -[Browser]>` | — | Register a browser-facing handler. |
 | `openapi(router: HTTPRouter) -> String` | text | Render the router's OpenAPI description. |
 | `value(key: String) -[Browser]> String` | text | Read a browser value. |
@@ -2907,9 +2976,46 @@ The module source is [`Core/web/web.jet`](../../../Core/web/web.jet).
 | `signal_push(q: LiveQuery, payload: String) -> LiveQuery` | query | Push data and advance query generation. |
 | `sync(key: String, data: String) -> String` | text | Format a synchronized key/value update. |
 
+`app` and `core.web` live-query operations retain the same runtime-owned
+registry as database and data-loader consumers. `LiveQuery` is an opaque
+identity, not a source record snapshot; invalidation, generations, statistics,
+and sync-session publication always inspect or mutate that one registry.
+
 `core.web` delegates HTTP transport to `core.http`; route handlers should use
 that typed request/response contract rather than opening sockets directly.
 Storage adapters are named below because they are separate built modules.
+The high-level `web.form` value keeps its compiler-owned typed-model identity
+and `.set`/`.render` interface. The source `core.web.forms.typed` API remains
+separate for callers that explicitly supply `WebFormInput` and an action name.
+The source query carrier exposes the same receiver state/mutation operations as
+its module functions. Mutating source query, form, table, virtual viewport, and
+store calls take explicit write access. Source table pages keep typed row values
+and separate stable row keys, with `total_rows`, `page_index`, `page_size`, and
+`page_count` facts. Form action failures are a declared `#Error` domain.
+`with_server_page` retains its typed `WebTableError!` loader without fetching.
+Each server-mode `page_state` call passes the current requested boundary to
+that loader, validates its row keys and boundary, and preserves the remote
+`total_rows` instead of filtering or paginating the returned page again.
+Explicit `#Target(JS)` functions and their nested closures are excluded from
+native Rust artifacts; their browser callbacks remain in the web partition.
+
+### `core.web.store` — transaction history
+
+The Jet source store starts at generation zero and keeps an initial state plus
+bounded transaction and event ledgers. A write records its action, changed fields,
+before/after states, generation, and canonical transaction diff. Evicting an old
+entry advances the initial state and adjusts the history cursor; a write after
+navigation discards the abandoned future branch. `facts_json` reports retained
+transaction/event lengths, history limit, cursor, generation, and capture state;
+`event_json` reports the last transaction identity and diff without serializing
+the generic state payload.
+
+Store callbacks take no state parameter: they capture the store's rooted
+reactive handles (D-DX-STORE1). `signal` and `state_signal` return the typed
+`Signal<T>`, not a textual generation token. Writes made during a transaction
+remain staged, are visible to that callback's subsequent reads, and notify
+reactive observers only once at the outermost commit.
+
 
 ### `core.web.storage` — browser storage adapters
 
@@ -2965,12 +3071,27 @@ Arenas are the safe fast-allocation primitive; raw pointers and volatile access
 are separate unsafe operations. The source is
 [`Core/mem/mem.jet`](../../../Core/mem/mem.jet).
 
+The package-level `allocator: mem.Counting.over(mem.Heap, cap: 2.gb)` policy
+wraps the hosted program's heap, not an individual arena. Its checked policy
+travels through MIR and installs the shared allocator kernel once in the emitted
+program. Fallible collection allocation reports `AllocError` when the request
+would exceed that cap; ordinary allocation retains the host's aborting contract.
+
 An allocation view borrows its allocator's storage. It cannot be returned,
 stored, sent, or used after the allocator resets or closes: the checker reports
 **E0631** for an escaping view and **E0632** for a view used after invalidation.
 Copy a value out before leaving the allocator's region. `#Region(name)` creates
 an explicit region when inferred scope is too broad or two allocators must
 share a lexical lifetime.
+
+`mem.address_of(value)` is an inert numeric-address intrinsic: it names the
+caller's place, not a copied function argument. Turning that address back into a
+pointer does not extend the storage lifetime. Sentries therefore distinguish an
+untracked address from an arena allocation invalidated by `reset`.
+
+A list range lent with `&list[a..b]` also retains its owner's place through a
+user function call. The length-preserving callee edits that fixed window in
+place, including when it forwards the window to another such callee.
 
 ```jet
 use core.mem
@@ -3292,6 +3413,17 @@ typed capability error rather than silently falling back. The source is
 [`Core/compute/compute.jet`](../../../Core/compute/compute.jet), with executable
 examples under [`Examples/features/tooling/`](../../../Examples/features/tooling/).
 This is one ranked Tensor operation family with an explicit placement contract (`D-COMPUTE1=D`; `D-COMPUTE-TYPE1=D`; `D-COMPUTE-PLACE1=D`). Gradient and value-and-gradient calls remain explicit, checked value-based transforms (`D-COMPUTE-GRAD1=E`).
+The registered compute vocabulary is the sole nominal owner of tensors,
+devices, streams, and transform receipts. Core source imports that vocabulary;
+it does not declare a second storage record or synthesize empty-record equality.
+Display, equality, checked serialization, device placement, and SIMD receipts
+use the real compute provider in both compiler halves. `profile_show` reports
+the dispatch and vector width that actually execute, not a hardcoded scalar
+receipt. The source LU solver reads tensors through `shape`, `to_list`, `device`,
+and `placement`, and does not construct replacement tensor storage.
+Tensor bracket write windows retain the checked range's inclusive/exclusive
+end and borrow the owner's first-axis storage. Their native call receives
+those bounds and the enclosing source location, rather than a copied slice.
 
 | Signature | Result | Description |
 |---|---|---|
@@ -3345,6 +3477,11 @@ structured values, not an untyped supervisor log. The source is
 [`Core/service/service.jet`](../../../Core/service/service.jet); the service
 runtime model is also exercised by the service examples and tests.
 The tree is the single public topology boundary; workers, delivery, and restart policies remain typed rather than string-keyed (`D-SERVICE1=D`).
+
+A worker handler is a checked, zero-argument top-level function, not a
+captured callback. Ownership transfers of that function value preserve its
+identity; the native dispatcher invokes a non-capturing adapter that reports
+handler failure through the service boundary.
 
 | Signature | Result | Description |
 |---|---|---|

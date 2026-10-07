@@ -36,6 +36,7 @@ fn jet_codegen_prepared_constant_root(modules: [SemaGraphModuleResult], symbol: 
 
 fn jet_codegen_prepared_constant_field(value: TComptimeValue, name: String) -> TComptimeValue? {
     if name.starts_with("$") -> return sema_fact_reflected_field(value, name)
+    if value == .Present(inner) -> return jet_codegen_prepared_constant_field(inner, name)
     if value == .Struct(_, fields) {
         loop field in fields {
             if field.name == name -> return Val(field.value)

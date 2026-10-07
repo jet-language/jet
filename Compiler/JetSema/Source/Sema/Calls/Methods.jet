@@ -16,6 +16,8 @@ use jet_foundation.[
     TCoreClosureKind,
     TExpr,
     TExprKind,
+    TFnValueKind,
+    THandleOp,
     THostCall,
     TMethodRef,
     TStmt,
@@ -634,4 +636,114 @@ pub fn sema_call_check_method(state: &SemaOwnershipState, receiver: Expr, method
     candidate :: sema_call_resolve_method(receiver_value.ty, method, args, method_span, candidates, environment, &diagnostics) ?? return None
     checked :: sema_call_method_checked_from_value(&state, receiver, receiver_value, candidate, args, [SemaCallDefaultValue]{}, expected, environment, &scopes, &tail_store, &context, span, &diagnostics) ?? return None
     Val(checked.value)
+}
+
+// D-WEBAPP1=D: opaque App graph registrations preserve the named handler
+// and its typed input binding rather than pretending App is a plain record.
+fn sema_app_method_arity(method: String, actual: Int) -> Int Never! {
+    if method == {
+        "route" | "page" | "layout" | "action" | "form" | "data" -> 2
+        "loader" -> if actual == 3 -> 3 else -> 2
+        "mount" -> if actual == 3 || actual == 4 -> actual else -> 2
+        "pending" | "not_found" | "error" | "routes" | "security" | "assets" | "split" | "code_split" | "cache" | "a11y" | "adapter" | "serve_on" -> 1
+        "serve" -> if actual == 1 -> 1 else -> 0
+        "csr" | "ssr" | "ssg" | "stream" | "streaming" | "island" | "hydration_dev" | "hydration_release" | "facts_json" -> 0
+        else -> -1
+    }
+}
+
+fn sema_app_route_wire_type(ty: Type) -> String Never! {
+    if ty == {
+        .Int -> "Int"
+        .Float -> "Float"
+        .Bool -> "Bool"
+        .String -> "String"
+        .Named(name) -> name
+        else -> type_name(ty)
+    }
+}
+
+fn sema_app_route_binding(method: String, handler: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> String {
+    shape :: sema_http_route_shape(handler, environment, scopes) ?? return ""
+    parts := [String]{}
+    loop parameter in shape.params {
+        if parameter.name == "data" && method != "loader" {
+            &parts.push("d")
+            next
+        }
+        ty := parameter.ty
+        optional := false
+        if ty == .Option(inner) {
+            ty = inner
+            optional = true
+        }
+        if sema_http_route_find_struct(environment, ty, shape.module_identity) == .Val(definition) {
+            fields := [String]{}
+            loop field in definition.fields {
+                field_type := field.ty
+                suffix := ""
+                if field_type == .Option(inner) {
+                    field_type = inner
+                    suffix = "?"
+                }
+                &fields.push("{field.name}={sema_app_route_wire_type(field_type)}{suffix}")
+            }
+            &parts.push("s=json:{fields.join(",")}")
+            next
+        }
+        suffix :: if optional -> "?" else -> ""
+        wire :: "{sema_app_route_wire_type(ty)}{suffix}"
+        &parts.push(if parameter.name == "search" || parameter.name == "query" -> "s=query:{parameter.name}={wire}" else -> "p:{parameter.name}={wire}")
+    }
+    parts.join(";")
+}
+
+pub fn sema_call_try_app_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if receiver_value.ty != (Type.Named{name: "App"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    arity :: sema_app_method_arity(method, args.len())
+    if arity < 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if args.len() != arity {
+        &diagnostics.push(sema_call_arity_diagnostic(method, arity, args.len(), false, span))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    values := [TExpr]{}
+    binding := ""
+    has_binding :: method == "route" || method == "page" || method == "layout" || method == "loader" || method == "form"
+    loop (index, argument) in args {
+        handler :: if {
+            method == "pending" || method == "not_found" || method == "error" -> index == 0
+            method == "route" || method == "page" || method == "layout" || method == "loader" || method == "action" || method == "form" || method == "data" || method == "mount" -> index == 1
+            else -> false
+        }
+        if handler && method != "mount" {
+            if argument.expr == {
+                .Ident(_, _) -> {}
+                else -> {
+                    &diagnostics.push(sema_error("E2810", argument.span, "App `{method}` requires a named handler", "the statically checked App graph retains the handler's typed input and effect contract", "declare the handler as a function and pass its name"))
+                    return SemaMethodSpecialCheck{handled: true, value: None}
+                }
+            }
+        }
+        wanted :: if handler -> None else -> if (method == "serve" || method == "serve_on") -> Val(Type.Int) else -> Val(Type.String)
+        checked :: sema_check_expression_with_lambda_escapes(argument.expr, wanted, environment, &scopes, &state, &tail_store, &context, Val(handler), &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        value := checked
+        if handler {
+            params :: if checked.ty == {.Fn(parameters, _, _, _, _, _) -> parameters else -> {
+                &diagnostics.push(sema_error("E2810", argument.span, "App `{method}` requires a function handler", "the registered handler must be callable through its checked input contract", "pass the name of a declared function"))
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }}
+            if method != "mount" -> value = sema_tir_expr(checked.ty, TExprKind.HostBorrowCallback{callable: checked, params: params}, checked.span)
+            value = sema_tir_expr(value.ty, TExprKind.FnValue{kind: TFnValueKind.Send{value: value}}, value.span)
+            if has_binding -> binding = sema_app_route_binding(method, argument.expr, environment, scopes)
+        }
+        &values.push(value)
+    }
+    if has_binding -> &values.push(sema_call_http_core_string(binding, span))
+    result :: if method == "facts_json" -> Type.String else -> if method == "serve" || method == "serve_on" -> Type.Named{name: "Unit"} else -> receiver_value.ty
+    value :: sema_tir_expr(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.AppMethod{method: method, args_len: args.len()}, args: values}, span)
+    if method == "serve" || method == "serve_on" {
+        if !sema_network_handle_effect_fact(environment, &scopes, &context, "App.{method}", span, result, Val("Net"), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
 }

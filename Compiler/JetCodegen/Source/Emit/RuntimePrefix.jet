@@ -69,6 +69,7 @@ JET_RUST_PREFIX_FONTS :: [String]{
 // Prelude-relative and Foundation-relative files, in the order mod.rs names them.
 JET_RUST_PREFIX_PRELUDE_FILES :: [String]{
     "Devtools.rs", "DevelopmentReceipt.rs", "Core/Receipt.rs", "FaultInjection.rs", "Core/Keep.rs",
+    "ProgramAllocator.rs",
     "JobQueueTypes.rs", "Job.rs", "Core/Option.rs", "Core/FixedList.rs", "Core/Columns.rs",
     "Core/ColumnList.rs", "Core/UnicodeString.rs", "Core/Ascii.rs", "Core/ProcessArgs.rs",
     "Core/StringConcat.rs", "Core/ViewCopy.rs", "Core/Loadable.rs", "Core/Values.rs",
@@ -130,6 +131,7 @@ JET_RUST_PREFIX_PRELUDE_FILES :: [String]{
     "CoreLib/Top/LiveQuery.rs", "Core/WebPending.rs", "CoreLib/Top/WebRouter.rs", "CoreLib/Top/OpenAPI.rs",
     "CoreLib/Top/WebQuery.rs", "CoreLib/Top/WebForms.rs", "CoreLib/Top/WebTable.rs",
     "CoreLib/Top/WebVirtual.rs", "CoreLib/Top/WebStore.rs", "CoreLib/Top/WebServerFn.rs",
+    "DevServer.rs", "App.rs",
 }
 
 JET_RUST_PREFIX_FOUNDATION_FILES :: [String]{
@@ -970,6 +972,7 @@ fn jet_rust_prefix_kernel_parts(state: &JetRustPrefixState, out: &[String], mapp
 // labels, so only the forces select optional kernels.
 fn jet_rust_prefix_corelib_body(state: &JetRustPrefixState, out: &[String], mapped_file: Bool, shared: Bool, arrow: Bool) Never! {
     &out.push(jet_rust_prefix_foundation(&state, "LiveLifecycle.rs"))
+    &out.push("\n// JET_VETTED_UNSAFE_BEGIN: jet_program_allocator\n// AUDIT: the shared allocator kernel uses System only for its own allocation-free bookkeeping; the checked cap is installed by the program.\npub mod jet_program_allocator {{\n{jet_rust_prefix_prelude(&state, "ProgramAllocator.rs")}\n}}\n// JET_VETTED_UNSAFE_END: jet_program_allocator\n")
     &out.push("\n// D-SERDE2: the generated Prelude uses Foundation's canonical carrier.\nmod jet_foundation_datatree {{\n{jet_rust_prefix_foundation(&state, "DataTree.rs")}\n}}\n#[allow(non_snake_case)]\nmod DataTree {{\n    pub use crate::jet_foundation_datatree::DataTree;\n}}\n")
     &out.push(jet_rust_prefix_prelude(&state, "Core/SimdLanes.rs"))
     &out.push("// JET_VETTED_UNSAFE_BEGIN: jet_atomic_carrier\n")
@@ -1086,7 +1089,9 @@ fn jet_rust_prefix_optional_parts(state: &JetRustPrefixState, out: &[String], pa
         &out.push(jet_rust_prefix_flat_body(jet_rust_prefix_foundation(&state, "Game.rs")))
         jet_rust_prefix_flat_files(&state, &out, [String]{"Core/GameAssetPipeline.rs", "Core/GameHotSwap.rs", "Core/GameWorldInspector.rs", "Core/GameFrameProfiler.rs", "Core/GameOverlay.rs"})
         &out.push("\nmod jet_devtools_control {{\n{jet_rust_prefix_replace(jet_rust_prefix_foundation(&state, "DevtoolsControl.rs"), "crate::Devtools::", "super::")}\n}}\n")
-        &out.push("pub use jet_devtools_control::{{JetDevtoolsCommand, JetDevtoolsCommandReceipt, JetDevtoolsGameControlKind,JetDevtoolsGameControlRequest, JetDevtoolsGameControlCallbackGuard,jet_devtools_install_game_control_callback, jet_devtools_clear_commands,jet_devtools_enqueue_command, jet_devtools_requeue_command_front,jet_devtools_command_count, jet_devtools_poll_command,jet_devtools_poll_database_explain, jet_devtools_enqueue_game_control,jet_devtools_poll_game_control, jet_devtools_record_command_receipt,jet_devtools_update_command_receipt, jet_devtools_poll_command_receipt,jet_devtools_command_receipt_count, jet_devtools_clear_command_receipts,jet_devtools_take_game_control_relays, jet_devtools_clear_game_control_relays}};\n")
+        // DevtoolsNative.rs supplies native callbacks and relay functions at
+        // Prelude root; only control DTOs and command queues belong here.
+        &out.push("pub use jet_devtools_control::{{JetDevtoolsCommand, JetDevtoolsCommandReceipt, JetDevtoolsGameControlKind,JetDevtoolsGameControlRequest, jet_devtools_clear_commands,jet_devtools_enqueue_command, jet_devtools_requeue_command_front,jet_devtools_command_count, jet_devtools_poll_command,jet_devtools_poll_database_explain, jet_devtools_enqueue_game_control,jet_devtools_poll_game_control, jet_devtools_record_command_receipt,jet_devtools_update_command_receipt, jet_devtools_poll_command_receipt,jet_devtools_command_receipt_count, jet_devtools_clear_command_receipts}};\n")
         &out.push(jet_rust_prefix_prelude(&state, "CoreLib/Top/GameDevProtocol.rs"))
         jet_rust_prefix_flat_files(&state, &out, [String]{"CoreLib/Top/GameAssetsImport.rs", "CoreLib/Top/GameAssetsRuntime.rs"})
         &out.push(jet_rust_prefix_prelude(&state, "CoreLib/Top/Game.rs"))
@@ -1162,6 +1167,7 @@ fn jet_rust_prefix_app_parts(state: &JetRustPrefixState, out: &[String], parts: 
     if !apps -> return
     &out.push("mod jet_app_middleware {{\n{jet_rust_prefix_foundation(&state, "AppMiddleware.rs")}\n}}\n")
     jet_rust_prefix_flat_files(&state, &out, [String]{"Core/WebPending.rs", "CoreLib/Top/WebRouter.rs", "CoreLib/Top/OpenAPI.rs", "CoreLib/Top/WebQuery.rs", "CoreLib/Top/WebForms.rs", "CoreLib/Top/WebTable.rs", "CoreLib/Top/WebVirtual.rs", "CoreLib/Top/WebStore.rs", "CoreLib/Top/WebServerFn.rs"})
+    jet_rust_prefix_push_files(&state, &out, [String]{"DevServer.rs", "App.rs"})
 }
 
 // mod.rs `push_full_corelib_prelude_with_policy`.

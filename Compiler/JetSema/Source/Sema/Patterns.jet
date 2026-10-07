@@ -26,6 +26,7 @@ use jet_foundation.[
     TTextPatternPart,
     TextEdit,
     Type,
+    TypeTupleField,
     VariantField,
     VariantPayload,
     core_enum_payload_variants,
@@ -142,7 +143,8 @@ fn sema_pattern_core_payload(owner: String, variant: String) -> [Type]? {
             "Float" -> Val([Type.Float])
             "Text" -> Val([Type.String])
             "Array" -> Val([Type.List{element: Type.Named{name: "Data"}}])
-            "Object" -> Val([Type.Map{key: Type.String, key_span: None, value: Type.Named{name: "Data"}}])
+            // D-DATATREE-ORDER1=A: an object binds its ordered pair list.
+            "Object" -> Val([Type.List{element: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "value", ty: Type.Named{name: "Data"}}}}}])
             "Number" -> Val([Type.String])
             else -> None
         }

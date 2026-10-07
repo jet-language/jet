@@ -6,7 +6,7 @@
 //
 // A block uses a slot when an instruction names one of its places (reads,
 // moves, projected writes, replacements, addresses, receiver and call-argument
-// places, require diagnostics' and DataEntriesToMap's locals) before the block
+// places, require diagnostics' locals) before the block
 // defines it; a whole-root WritePlace, or the value a temporary or parameter
 // place stands for, defines it. A slot no later block uses is not carried, so
 // an edge never passes it; the entry still starts every slot as its
@@ -103,9 +103,6 @@ fn lower_live_slots(function: MIRFunction, slots: [LowerSlot], place_slots: [U64
                         slot :: local_slots.get(local.local.value) ?? next
                         &touched.push(slot)
                     }
-                }
-                if semantic == .DataEntriesToMap(_, local) {
-                    if local_slots.get(local.value) == .Val(slot) -> &touched.push(slot)
                 }
             }
             loop slot in touched {

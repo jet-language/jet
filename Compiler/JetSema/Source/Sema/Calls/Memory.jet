@@ -19,12 +19,25 @@ use jet_foundation.[
     TExprKind,
     TFieldRef,
     THandleOp,
+    TPlace,
     TagMarker,
     Type,
     TypeTupleField,
     measure_literal_value,
     tir_call_arg_copy_fact,
 ]
+
+// S58: an inert numeric address is a place operation, not a by-value
+// forwarding function. Keep the caller's storage identity through TIR.
+fn sema_call_memory_address_of(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if args.len() != 1 {
+        &diagnostics.push(sema_error("E0104", span, "`address_of` expects 1 argument, got {args.len()}", "an address names one value's storage", "pass the value whose address is needed"))
+        sema_call_memory_discard_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return None
+    }
+    value :: sema_check_expression(args[0].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    sema_expr_expected(sema_tir_expr(Type.Int, TExprKind.RawAddressOf{place: TPlace.Expr{value: value}}, span), expected, environment, &diagnostics)
+}
 
 fn sema_call_memory_allocator_name(ty: Type) -> String? {
     if ty == .Named(name) && (name == "Arena" || name == "Bump" || name == "Pool" || name == "Fixed") -> return Val(name)
@@ -122,6 +135,12 @@ fn sema_call_memory_check_fixed_buffer(argument: CallArg, value: TExpr, environm
 // checking, since the imported Core fields are constructor sentinels.
 pub fn sema_call_try_memory_static(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     return if receiver == {
+        .Ident(alias, alias_span) -> {
+            if method != "address_of" -> return SemaMethodSpecialCheck{handled: false, value: None}
+            imported :: sema_call_core_import_target(environment, alias) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+            if imported.module_name != "core.mem" || !sema_call_core_record_import_reference(environment, scopes, imported, alias_span, &context) -> return SemaMethodSpecialCheck{handled: false, value: None}
+            SemaMethodSpecialCheck{handled: true, value: sema_call_memory_address_of(args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)}
+        }
         .Field(base, name, _) -> {
             alias := if base == {
                 .Ident(value, _) -> value
