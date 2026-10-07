@@ -68,6 +68,25 @@ version; they do not substitute a semantic check or reparse a manifest in the
 CLI. Squash uses that declared version (falling back to `0.0.0` only when it
 is absent).
 
+## Executable command metadata
+
+Application completion reads the canonical v8 `JetCommandSchema` carrier,
+including input defaults, subcommands, and all job execution metadata. The
+Foundation byte reader recognizes ELF (both classes and byte orders), PE,
+Mach-O (thin and universal), and Wasm custom sections. It verifies the record
+length, digest, version, and field bounds before publishing a schema; missing,
+duplicate, unsupported-format, and malformed records remain distinct errors.
+PE permits zero alignment padding but not another record or nonzero trailing
+bytes. Every universal Mach-O slice must contain the same single record.
+
+File-size arithmetic is bounded by `JET_COMPILER_TARGET_USIZE_MAX`, a
+compiler-private constant folded from the selected build target's pointer
+layout. It is not inferred from the inspected executable's ISA and requires
+no runtime pointer-width leaf. The explicit bound in the byte-reader API
+also permits portable boundary fixtures. Completion candidates retain written
+order, positional ordering, and duplicate visible job names; internal jobs do
+not become argv-reachable.
+
 ## Root command index
 
 The root index below mirrors `target/debug/jet help` in this checkout. It lists
