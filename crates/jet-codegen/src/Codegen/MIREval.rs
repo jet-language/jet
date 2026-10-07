@@ -24477,6 +24477,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         {
             return Ok(None);
         }
+        if std::env::var_os("JET_VS_DEBUG").is_some() {
+            eprintln!("VSDEBUG view_mut_new args: {values:?}");
+        }
         let Some((RuntimeValue::Address(receiver), bounds)) = values.split_first() else {
             return Ok(None);
         };
@@ -24501,6 +24504,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         else {
             return Ok(None);
         };
+        if std::env::var_os("JET_VS_DEBUG").is_some() {
+            eprintln!("VSDEBUG window_root of {receiver:?} = {:?}", self.window_root(receiver.clone(), span));
+        }
         let Some(mut window) = self.window_root(receiver.clone(), span)? else {
             return Ok(None);
         };
