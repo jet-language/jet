@@ -8,7 +8,9 @@
 // process with the error's report and exit status 1 (the general `Err`
 // through jet_entry_error_exit_jet, any other error through its Printable
 // text and jet_entry_error_exit), a `None` result with "entry returned no
-// value"; success drops the result and returns.
+// value"; success drops the result and returns. In a stop-point module
+// (#4720) an entry that ended in Stopped wrote no result: the raw delivered
+// session status (jet_rt_session_status) sends it straight to the return.
 use jet_foundation.[MIRProgram, MIRType, mir_type_display_name]
 
 fn lower_entry_id(p: MIRProgram, m: &LowerModule, row: Int) -> LIRFunctionID Never! {
@@ -41,6 +43,19 @@ fn lower_entry_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
     }
     result :: lower_new_value(&f, layout, lower_drop(&m, lower_repr(p, ty), true), ty.identity)
     lower_emit(&f, LIRInst.Call{dst: Val(result), signature: signature, callee: LIRCallee.Function{id: entry}, args: [LIRValueID]{}})
+    if m.stop_points {
+        status :: lower_word(&f)
+        lower_call_runtime(&m, &f, "jet_rt_session_status", [LIRValueID]{}, Val(status))
+        zero :: lower_const(&f, 0)
+        stopped :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: stopped, condition: LIRCondition.Ne, left: status, right: zero})
+        leave :: lower_new_block(&f)
+        returned :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: stopped, then_target: lower_target(leave, [LIRValueID]{}), else_target: lower_target(returned, [LIRValueID]{})})
+        lower_start(&f, leave, [LIRValueID]{})
+        lower_seal(&f, LIRTerminator.Return{value: None})
+        lower_start(&f, returned, [LIRValueID]{})
+    }
     failed :: lower_flag(&f)
     if ty.kind == {
         .Result(_, _) -> {

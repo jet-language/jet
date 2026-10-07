@@ -388,6 +388,12 @@ fn lower_map_method_more(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     closure := LIRValueID?{None}
     closure_ty := ty
     if resolving {
+        // The inline merge loop would consume a stopped callback's unwritten
+        // result (#4720; Combinators.jet lower_closure_method).
+        if m.stop_points {
+            lower_fail(&m, &f, "Map merge with a conflict callback in a stop-point module is not lowered at O0 yet")
+            return true
+        }
         closure = lower_use(&m, &f, args[1])
         if closure == None -> return true
         closure_ty = lower_value_type(c, args[1]) ?? {
