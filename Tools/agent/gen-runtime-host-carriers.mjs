@@ -78,12 +78,19 @@ mod jet_c_abi_host {
         pub(crate) os_code: i64,
         pub(crate) cause: JetCString,
     }
+    #[repr(C)]
+    pub(crate) struct JetCTaskFailure {
+        pub(crate) tag: i64,
+        pub(crate) reason: JetCString,
+    }
     unsafe extern "C" {
         fn jet_rt_alloc(size: usize, align: usize) -> *mut u8;
         #[cfg(jet_native_pack)]
         fn jet_rt_handle_drop_IOError(value: *mut JetCIOError);
         #[cfg(jet_native_pack)]
         fn jet_rt_handle_drop_IOContext(value: *mut JetCIOContext);
+        #[cfg(jet_native_pack)]
+        fn jet_rt_handle_drop_JetTaskFailure(value: *mut JetCTaskFailure);
         #[cfg(not(jet_native_pack))]
         fn jet_rt_free(pointer: *mut u8, size: usize, align: usize);
     }
@@ -196,6 +203,49 @@ ${operations.map((name, index) => `            ${index} => IOOperation::${name},
     pub(crate) fn context_take(pointer: *mut JetCIOContext) -> IOContext {
         let value = context_view(pointer);
         context_drop(pointer);
+        value
+    }
+
+    pub(crate) fn failure_handle(failure: crate::JetTaskFailure) -> *mut JetCTaskFailure {
+        let (tag, reason) = match failure {
+            crate::JetTaskFailure::Cancelled => (0, std::ptr::null_mut()),
+            crate::JetTaskFailure::DeadlineBlown => (1, std::ptr::null_mut()),
+            crate::JetTaskFailure::Panicked(reason) => (2, handle(reason)),
+        };
+        // SAFETY: one initialized 16-byte, eight-aligned C carrier.
+        let pointer = unsafe { jet_rt_alloc(16, 8) }.cast::<JetCTaskFailure>();
+        unsafe { pointer.write(JetCTaskFailure { tag, reason }) };
+        pointer
+    }
+
+    pub(crate) fn failure_view(pointer: *mut JetCTaskFailure) -> crate::JetTaskFailure {
+        // SAFETY: caller lends an initialized header and its owned E4 reason.
+        let value = unsafe { &*pointer };
+        match value.tag {
+            0 => crate::JetTaskFailure::Cancelled,
+            1 => crate::JetTaskFailure::DeadlineBlown,
+            2 => crate::JetTaskFailure::Panicked(view(value.reason).to_owned()),
+            _ => panic!("invalid TaskFailure C carrier"),
+        }
+    }
+
+    pub(crate) fn failure_drop(pointer: *mut JetCTaskFailure) {
+        #[cfg(jet_native_pack)]
+        // SAFETY: consume the canonical Jet carrier, not a Rust Box.
+        unsafe { jet_rt_handle_drop_JetTaskFailure(pointer) };
+        #[cfg(not(jet_native_pack))]
+        {
+            if pointer.is_null() { return; }
+            unsafe {
+                if !(*pointer).reason.is_null() { release((*pointer).reason); }
+                jet_rt_free(pointer.cast(), 16, 8);
+            }
+        }
+    }
+
+    pub(crate) fn failure_take(pointer: *mut JetCTaskFailure) -> crate::JetTaskFailure {
+        let value = failure_view(pointer);
+        failure_drop(pointer);
         value
     }
 }

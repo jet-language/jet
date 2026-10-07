@@ -404,7 +404,7 @@ mod jet_c_abi {
     #[cfg(not(jet_native_pack))]
     mod host_records {
         use super::*;
-        use crate::jet_c_abi_host::{JetCIOContext, JetCIOError};
+        use crate::jet_c_abi_host::{JetCIOContext, JetCIOError, JetCTaskFailure};
 
         fn carrier<T>(value: T) -> *mut T {
             // SAFETY: one fresh allocation exactly matching the C header.
@@ -535,36 +535,36 @@ mod jet_c_abi {
             })
         }
 
+        #[no_mangle]
+        pub extern "C" fn jet_rt_record_tag_JetTaskFailure(failure: *mut JetCTaskFailure) -> i64 {
+            guard(|| unsafe { (*failure).tag })
+        }
+
+        #[no_mangle]
+        pub extern "C" fn jet_rt_record_get_JetTaskFailure_Panicked(failure: *mut JetCTaskFailure) -> JetCString {
+            guard(|| {
+                let value = unsafe { &*failure };
+                if value.tag != 2 { record_index_stop(); }
+                clone_text(value.reason)
+            })
+        }
+
+        #[no_mangle]
+        pub extern "C" fn jet_rt_record_new_JetTaskFailure_Cancelled() -> *mut JetCTaskFailure {
+            guard(|| carrier(JetCTaskFailure { tag: 0, reason: std::ptr::null_mut() }))
+        }
+
+        #[no_mangle]
+        pub extern "C" fn jet_rt_record_new_JetTaskFailure_DeadlineBlown() -> *mut JetCTaskFailure {
+            guard(|| carrier(JetCTaskFailure { tag: 1, reason: std::ptr::null_mut() }))
+        }
+
+        #[no_mangle]
+        pub extern "C" fn jet_rt_record_new_JetTaskFailure_Panicked(reason: JetCString) -> *mut JetCTaskFailure {
+            guard(|| carrier(JetCTaskFailure { tag: 2, reason: clone_text(reason) }))
+        }
     }
 
-    // TaskFailure remains the seed representation until the L8 cutover.
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_tag_JetTaskFailure(failure: *mut super::JetTaskFailure) -> i64 {
-        guard(|| crate::jet_std::jet_task_failure_abi(unsafe { &*failure }.clone()).0)
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_get_JetTaskFailure_Panicked(failure: *mut super::JetTaskFailure) -> JetCString {
-        guard(|| match crate::jet_std::jet_task_failure_abi(unsafe { &*failure }.clone()) {
-            (2, Some(reason)) => handle(reason),
-            _ => record_index_stop(),
-        })
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_JetTaskFailure_Cancelled() -> *mut super::JetTaskFailure {
-        guard(|| record(crate::jet_std::jet_task_failure_from_code("TASK_CANCELLED", String::new())))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_JetTaskFailure_DeadlineBlown() -> *mut super::JetTaskFailure {
-        guard(|| record(crate::jet_std::jet_task_failure_from_code("E3003", String::new())))
-    }
-
-    #[no_mangle]
-    pub extern "C" fn jet_rt_record_new_JetTaskFailure_Panicked(reason: JetCString) -> *mut super::JetTaskFailure {
-        guard(|| record(super::JetTaskFailure::Panicked(view(reason).to_owned())))
-    }
 
     // The Jet object owns the shared allocation domain; these are imports,
     // not a second allocator implementation or competing C definitions.

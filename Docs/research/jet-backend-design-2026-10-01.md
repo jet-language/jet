@@ -512,12 +512,12 @@ seed kernels, including nested records and Option/Result/List payloads.
 resource E4 pointer, OS-code presence/value, and cause E4 pointer; it matches
 bytes 8–48 of `JetCIOError`. Its remaining seed-kernel boundaries use
 `context_handle`/`context_view`/`context_take` rather than Rust record addresses.
-Once the L8 task layer owns canonical clone/drop, `JetTaskFailure` uses a
-16-byte, eight-aligned `JetCTaskFailure` (canonical enum tag, nullable owned
-E4 reason) and `failure_handle`/`failure_view`/`failure_take`. Until that
-coordinated cutover the task record retains its seed representation.
+The coordinated L8 cutover uses a 16-byte, eight-aligned `JetCTaskFailure`
+(canonical enum tag, nullable owned E4 reason) and
+`failure_handle`/`failure_view`/`failure_take`. Hand TaskFailure records join
+the same seed-only C-header conversion, never a Rust enum Box.
 Every bridged carrier requires Jet-owned canonical clone/drop before
-route generation. Hand context/error record exports are seed-only under
+route generation. Hand context/error/task record exports are seed-only under
 `cfg(not(jet_native_pack))` and use these same C headers. Context constructors
 transfer child owners and free only the 40-byte header; projections deep-clone
 E4 text directly, without an intermediate Rust String. Native packs contain

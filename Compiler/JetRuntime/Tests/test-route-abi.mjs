@@ -125,7 +125,7 @@ for (const [name, stem] of [["IOError", "error"], ["IOContext", "context"], ["Je
 }
 const handText = readFileSync(join(root, "crates/jet-codegen/src/Prelude/Core/CAbi.rs"), "utf8");
 assert.match(handText, /#\[cfg\(not\(jet_native_pack\)\)\]\s+mod host_records/);
-const handRecords = handText.slice(handText.indexOf("mod host_records"), handText.indexOf("// TaskFailure remains"));
+const handRecords = handText.slice(handText.indexOf("mod host_records"), handText.indexOf("// The Jet object owns"));
 assert.ok(!/\bBox\b|crate::jet_std::(?:IOError|IOContext)|super::JetTaskFailure/.test(handRecords), "hand records must use C headers on the seed tier too");
 assert.ok(!/to_owned|String::/.test(handRecords), "raw record projections must not create intermediate Rust Strings");
 const hostText = readFileSync(join(root, "crates/jet-codegen/src/Prelude/Core/CAbiHost.rs"), "utf8");
