@@ -380,8 +380,10 @@ for (const key of fns.keys()) {
 // ---------------------------------------------------------------------------
 // 3. Carriers.
 
-const handTable = readFileSync(`${repo}/crates/jet-codegen/src/Prelude/Core/CAbi.rs`, "utf8");
-const handExports = new Set([...handTable.matchAll(/pub extern "C" fn ([A-Za-z0-9_]+)/g)].map((m) => m[1]));
+const handDir = `${repo}/crates/jet-codegen/src/Prelude/Core`;
+const handTable = readdirSync(handDir).filter((name) => /^CAbi.*\.rs$/.test(name) && name !== "CAbiRoutes.rs")
+  .sort().map((name) => readFileSync(`${handDir}/${name}`, "utf8")).join("\n");
+const handExports = new Set([...handTable.matchAll(/pub(?:\(crate\))? (?:unsafe )?extern "C" fn ([A-Za-z0-9_]+)/g)].map((m) => m[1]));
 for (const m of handTable.matchAll(/exact_int_(?:binary|located)!\s*\{?\(?([^)}]*)/g)) {
   for (const name of m[1].split(",").map((s) => s.trim()).filter(Boolean)) handExports.add(name);
 }
@@ -737,7 +739,7 @@ const skipped = [];
 const exported = new Set(handExports);
 const handles = new Map();
 const handAbi = new Map();
-for (const match of handTable.matchAll(/pub extern "C" fn ([A-Za-z_]\w*)\s*([^{}]*?)\{/g)) {
+for (const match of handTable.matchAll(/pub(?:\(crate\))? (?:unsafe )?extern "C" fn ([A-Za-z_]\w*)\s*([^{}]*?)\{/g)) {
   handAbi.set(match[1], parseSignature(`fn ${match[1]}${match[2]}`));
 }
 for (const match of handTable.matchAll(/exact_int_(binary|located)!\s*\{?\(?([^)}]*)/g)) {
