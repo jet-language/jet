@@ -264,6 +264,13 @@ fn lir_lint_inst(program: LIRModule, function: LIRFunction, inst: LIRInst) -> [S
             if function.values[src.value].drop != .Trivial -> &messages.push("copy of v{src.value}, which has drop glue; move it instead")
             if function.values[dst.value].layout != function.values[src.value].layout || function.values[dst.value].drop != .Trivial -> &messages.push("copy v{src.value} -> v{dst.value} changes layout or drop glue")
         }
+        .Bitcast(dst, src) -> {
+            loop value in ([LIRValueID]{dst, src}) {
+                layout :: function.values[value.value].layout
+                if layout != lir_layout_word() && layout != lir_layout_float() && layout != lir_layout_pointer() -> &messages.push("bitcast v{src.value} -> v{dst.value} requires two 64-bit scalar layouts")
+                if function.values[value.value].drop != .Trivial -> &messages.push("bitcast v{src.value} -> v{dst.value} requires two trivial values")
+            }
+        }
         .Call(dst, signature_id, callee, args) -> {
             signature :: lir_signature(program, signature_id) ?? return [String]{"call names missing signature {signature_id.value}"}
             if callee == {

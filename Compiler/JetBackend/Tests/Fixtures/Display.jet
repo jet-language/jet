@@ -164,3 +164,97 @@ fn fx_display_list() -> MIRProgram Never! {
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
 }
+
+// The ordinary reference bodies return constants. Only the runtime driver
+// table may substitute them, and both System V Float boundaries are exercised.
+// expect-stdout runtime-bitcast: "true\n"
+fn fx_runtime_bitcast_module() -> LIRModule Never! {
+    word_ty :: mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 64})
+    float_ty :: mir_type_from_kind(MIRTypeKind.Float)
+    bits_body := fx_builder()
+    fx_param(&bits_body, "value", float_ty, mir_copy_ownership()).drop("reference parameter")
+    constant_word :: fx_copy(&bits_body, word_ty, MIROperation.Constant{value: MIRConstant.Int{value: 123, width: None, spelling: None}})
+    fx_block(&bits_body, 0, MIRTerminator.Return{value: Val(constant_word)})
+    bits :: fx_function("rt_f64_bits", bits_body, word_ty)
+    float_body := fx_builder()
+    fx_param(&float_body, "bits", word_ty, mir_copy_ownership()).drop("reference parameter")
+    constant_float :: fx_numeric_float(&float_body, 123.0)
+    fx_block(&float_body, 0, MIRTerminator.Return{value: Val(constant_float)})
+    from_bits :: fx_function("rt_f64_from_bits", float_body, float_ty)
+    program :: fx_program([MIRFunction]{bits, from_bits}, [MIRTypeDef]{})
+    roots :: [MIRFunctionID]{bits.id, from_bits.id}
+    ordinary :: lir_lower_callables(program, roots)
+    if ordinary.issues.len() != 0 -> panic("ordinary reference functions refused")
+    loop function in ordinary.lir.functions {
+        loop block in function.blocks {
+            loop inst in block.insts { if inst == .Bitcast(_, _) -> panic("ordinary lowering enabled a runtime intrinsic") }
+        }
+    }
+    intrinsics := [U64:LowerRuntimeIntrinsic]{}
+    &intrinsics.add(bits.id.value, LowerRuntimeIntrinsic.FloatBits).drop("distinct runtime ID")
+    &intrinsics.add(from_bits.id.value, LowerRuntimeIntrinsic.FloatFromBits).drop("distinct runtime ID")
+    lowered :: lir_lower_runtime_callables(program, roots, ^intrinsics)
+    if lowered.issues.len() != 0 -> panic("runtime scalar functions refused")
+    p := lowered.lir
+    bits_id :: lowered.callables.get(bits.id.value) ?? panic("reachable bits")
+    from_bits_id :: lowered.callables.get(from_bits.id.value) ?? panic("reachable from bits")
+    print_sig :: LIRSignatureID{value: p.signatures.len()}
+    &p.signatures.push(LIRSignature{id: print_sig, convention: .SystemV, params: [LIRLayout]{lir_layout_bool()}, result: Val(lir_layout_pointer())})
+    line_sig :: LIRSignatureID{value: p.signatures.len()}
+    &p.signatures.push(LIRSignature{id: line_sig, convention: .SystemV, params: [LIRLayout]{lir_layout_pointer(), lir_layout_word()}, result: None})
+    entry_sig :: LIRSignatureID{value: p.signatures.len()}
+    &p.signatures.push(LIRSignature{id: entry_sig, convention: .SystemV, params: [LIRLayout]{}, result: None})
+    entry := lir_builder(LIRFunctionID{value: p.functions.len()}, "run", entry_sig)
+    difference := lir_builder_word(&entry)
+    lir_builder_push(&entry, LIRInst.Const{dst: difference, value: 0})
+    loop pattern in ([Int]{0, -9223372036854775808, 1, -9223372036854775807, 0x000fffffffffffff, 0x0010000000000000, 0x3ff0000000000000, 0x7fefffffffffffff, 0x7ff0000000000000, 0xfff0000000000000, 0x7ff0000000000001, 0x7ff8000000000042, 0xfff8000000000042}) {
+        word :: lir_builder_word(&entry)
+        lir_builder_push(&entry, LIRInst.Const{dst: word, value: pattern})
+        floating :: lir_builder_value(&entry, lir_layout_float(), LIRDrop.Trivial, None)
+        lir_builder_push(&entry, LIRInst.Call{dst: Val(floating), signature: p.functions[from_bits_id.value].signature, callee: .Function(from_bits_id), args: [LIRValueID]{word}})
+        roundtrip :: lir_builder_word(&entry)
+        lir_builder_push(&entry, LIRInst.Call{dst: Val(roundtrip), signature: p.functions[bits_id.value].signature, callee: .Function(bits_id), args: [LIRValueID]{floating}})
+        delta :: lir_builder_word(&entry)
+        lir_builder_push(&entry, LIRInst.Binary{dst: delta, op: .Xor, left: word, right: roundtrip})
+        combined :: lir_builder_word(&entry)
+        lir_builder_push(&entry, LIRInst.Binary{dst: combined, op: .Or, left: difference, right: delta})
+        difference = combined
+    }
+    zero :: lir_builder_word(&entry)
+    lir_builder_push(&entry, LIRInst.Const{dst: zero, value: 0})
+    equal :: lir_builder_value(&entry, lir_layout_bool(), LIRDrop.Trivial, None)
+    lir_builder_push(&entry, LIRInst.Compare{dst: equal, condition: .Eq, left: difference, right: zero})
+    text :: lir_builder_value(&entry, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_string_drop"}, None)
+    lir_builder_push(&entry, LIRInst.Call{dst: Val(text), signature: print_sig, callee: .Runtime("jet_rt_bool_to_string"), args: [LIRValueID]{equal}})
+    lir_builder_push(&entry, LIRInst.Call{dst: None, signature: line_sig, callee: .Runtime("jet_term_write_stdout_line"), args: [LIRValueID]{text, zero}})
+    lir_builder_push(&entry, LIRInst.Drop{value: text})
+    lir_builder_seal(&entry, LIRBlockID{value: 0}, [LIRValueID]{}, LIRTerminator.Return{value: None})
+    &p.functions.push(lir_builder_finish(entry))
+    p
+}
+
+fn fx_runtime_bitcast_refusals() -> Bool Never! {
+    program :: fx_runtime_bitcast_module()
+    function :: program.functions[0]
+    inst :: function.blocks[0].insts[0]
+    if lir_inst_def(inst) == None || lir_inst_uses(inst).len() != 1 || lir_inst_consumes(inst).len() != 0 -> return false
+    if lir_lint_inst(program, function, inst).len() != 0 -> return false
+    if inst == .Bitcast(dst, src) {
+        loop layout in ([LIRLayout]{LIRLayout{size: 4, align: 4, class: .Integer}, LIRLayout{size: 4, align: 4, class: .Float}, LIRLayout{size: 4, align: 4, class: .Pointer}, LIRLayout{size: 8, align: 8, class: .Memory}}) {
+            bad := ~function
+            bad.values[src.value].layout = layout
+            if lir_lint_inst(program, bad, inst).len() == 0 -> return false
+            bad = ~function
+            bad.values[dst.value].layout = layout
+            if lir_lint_inst(program, bad, inst).len() == 0 -> return false
+        }
+        bad := ~function
+        bad.values[src.value].drop = LIRDrop.Runtime{symbol: "jet_rt_string_drop"}
+        if lir_lint_inst(program, bad, inst).len() == 0 -> return false
+        bad = ~function
+        bad.values[dst.value].drop = LIRDrop.Runtime{symbol: "jet_rt_string_drop"}
+        if lir_lint_inst(program, bad, inst).len() == 0 -> return false
+        return true
+    }
+    false
+}
