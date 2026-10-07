@@ -6765,13 +6765,6 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
-    fn parameter_borrow_mask(&self, params: &[jet_foundation::MIR::MirParam]) -> Vec<bool> {
-        params
-            .iter()
-            .map(|param| self.parameter_borrowed(param))
-            .collect()
-    }
-
     /// A declared parameter's Rust type inside its own function signature.
     /// A window row (`collect_window_params`) is a `&mut [T]` slice.
     fn function_parameter_type(

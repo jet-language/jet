@@ -44,13 +44,6 @@ impl<K: PartialEq + Clone, V: Clone> JetLru<K, V> {
         displaced
     }
 
-    fn get<Q: ?Sized>(&mut self, key: &Q) -> Option<V> where K: std::borrow::Borrow<Q>, Q: PartialEq {
-        let index = self.entries.iter().position(|(stored, _)| stored.borrow() == key)?;
-        let (stored, value) = self.entries.remove(index);
-        let out = value.clone();
-        self.entries.insert(0, (stored, value));
-        Some(out)
-    }
 }
 
 #[derive(Clone)]
