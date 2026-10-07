@@ -24,7 +24,6 @@ fn lower_asm_source(p: MIRProgram, m: LowerModule, function: MIRFunction) -> Str
     None
 }
 
-
 fn lower_asm_inline_int(m: &LowerModule, f: &LowerFunction, value: LIRValueID) Never! {
     shift62 :: lower_const(&f, 62)
     shift63 :: lower_const(&f, 63)
@@ -40,19 +39,29 @@ fn lower_asm_function(p: MIRProgram, m: &LowerModule, f: &LowerFunction, functio
     args := [LIRValueID]{}
     loop param in function.params {
         layout :: lower_repr_layout(lower_repr(p, param.ty)) ?? return lower_fail(&m, &f, "inline asm: parameter {param.name} is not a machine word")
-        if layout != lir_layout_word() && layout != lir_layout_pointer() -> return lower_fail(&m, &f, "inline asm: parameter {param.name} is not a machine word")
-        if param.access == .Write -> return lower_fail(&m, &f, "inline asm: write parameters are unsupported")
+        if layout != lir_layout_word() && layout != lir_layout_pointer() {
+            return lower_fail(&m, &f, "inline asm: parameter {param.name} is not a machine word")
+        }
+        if param.access == .Write {
+            return lower_fail(&m, &f, "inline asm: write parameters are unsupported")
+        }
         &names.push(param.name)
         &args.push(lower_new_value(&f, layout, LIRDrop.Trivial, param.ty.identity))
     }
     result_layout :: lower_repr_layout(lower_repr(p, function.return_type))
     if result_layout == .Val(layout) {
-        if layout != lir_layout_word() && layout != lir_layout_pointer() -> return lower_fail(&m, &f, "inline asm: result is not a machine word")
-    } else if lower_repr(p, function.return_type) != .Absent -> return lower_fail(&m, &f, "inline asm: unsupported result")
+        if layout != lir_layout_word() && layout != lir_layout_pointer() {
+            return lower_fail(&m, &f, "inline asm: result is not a machine word")
+        }
+    } else if lower_repr(p, function.return_type) != .Absent {
+        return lower_fail(&m, &f, "inline asm: unsupported result")
+    }
     assembled :: x64_assemble_template(source, names, result_layout != None)
     if assembled.error == .Val(reason) -> return lower_fail(&m, &f, reason)
     dst := LIRValueID?{None}
-    if result_layout == .Val(layout) -> dst = Val(lower_new_value(&f, layout, LIRDrop.Trivial, function.return_type.identity))
+    if result_layout == .Val(layout) {
+        dst = Val(lower_new_value(&f, layout, LIRDrop.Trivial, function.return_type.identity))
+    }
     block :: lower_new_block(&f)
     lower_start(&f, block, args)
     loop (i, param) in function.params {
@@ -60,7 +69,9 @@ fn lower_asm_function(p: MIRProgram, m: &LowerModule, f: &LowerFunction, functio
     }
     lower_emit(&f, LIRInst.InlineAsm{dst: dst, args: args, regs: assembled.regs, result: assembled.result, code: assembled.code})
     if dst == .Val(output) {
-        if lower_convert_type(function.return_type).kind == .Int -> lower_asm_inline_int(&m, &f, output)
+        if lower_convert_type(function.return_type).kind == .Int {
+            lower_asm_inline_int(&m, &f, output)
+        }
     }
     lower_seal(&f, LIRTerminator.Return{value: dst})
 }
@@ -77,20 +88,32 @@ fn lower_asm_import_word(ty: MIRType) -> Bool Never! {
 fn lower_asm_import_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, foreign: U64, args: [MIRCallArg], type_args: [MIRType]) Never! {
     index :: m.foreign_rows.get(foreign) ?? return lower_fail(&m, &f, "foreign import names a missing binding")
     row :: p.foreign[index]
-    if row.foreign_language != .C || row.foreign_abi != .C || row.callback != None || row.handle != None || row.link != None || row.close_function != None || row.close_foreign != None || row.undo_function != None || type_args.len() != 0 || row.symbol == "" -> return lower_fail(&m, &f, "foreign import requires a direct raw-word C symbol")
-    if args.len() != row.params.len() -> return lower_fail(&m, &f, "foreign import argument count differs from its checked signature")
+    if row.foreign_language != .C || row.foreign_abi != .C || row.callback != None || row.handle != None || row.link != None || row.close_function != None || row.close_foreign != None || row.undo_function != None || type_args.len() != 0 || row.symbol == "" {
+        return lower_fail(&m, &f, "foreign import requires a direct raw-word C symbol")
+    }
+    if args.len() != row.params.len() {
+        return lower_fail(&m, &f, "foreign import argument count differs from its checked signature")
+    }
     loop param in row.params {
-        if !lower_asm_import_word(param.ty) || param.access == .Write || param.variadic -> return lower_fail(&m, &f, "foreign import parameter is not a raw machine word")
+        if !lower_asm_import_word(param.ty) || param.access == .Write || param.variadic {
+            return lower_fail(&m, &f, "foreign import parameter is not a raw machine word")
+        }
     }
     if row.return_type == .Val(ty) {
-        if lower_repr(p, ty) != .Absent && !lower_asm_import_word(ty) -> return lower_fail(&m, &f, "foreign import result is not a raw machine word")
+        if lower_repr(p, ty) != .Absent && !lower_asm_import_word(ty) {
+            return lower_fail(&m, &f, "foreign import result is not a raw machine word")
+        }
     }
     lowered := [LIRValueID]{}
     writebacks := [LowerWriteBack]{}
-    if !lower_call_args(p, c, &m, &f, args, &lowered, &writebacks) -> return
+    if !lower_call_args(p, c, &m, &f, args, &lowered, &writebacks) {
+        return
+    }
     dst := lower_result(p, c, &m, &f, instruction)
-    if dst == None && row.return_type == .Val(ty) {
-        if lower_repr_layout(lower_repr(p, ty)) == .Val(layout) -> dst = Val(lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity))
+    if dst == .None && row.return_type == .Val(ty) {
+        if lower_repr_layout(lower_repr(p, ty)) == .Val(layout) {
+            dst = Val(lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity))
+        }
     }
     lower_call_runtime(&m, &f, row.symbol, lowered, dst)
 }
