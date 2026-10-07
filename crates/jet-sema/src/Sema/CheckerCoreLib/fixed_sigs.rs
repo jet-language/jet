@@ -2461,6 +2461,18 @@ fn core_fixed_sig_impl(
         ("core.tasks", "__task_paused" | "__task_cancelled") => {
             Some((vec![], Some(Type::Option(Box::new(Type::Bool)))))
         }
+        ("core.time", "__wall_sample") => Some((vec![], Some(Type::Tuple(vec![
+            ("seconds".to_string(), Box::new(Type::Int)),
+            ("nanoseconds".to_string(), Box::new(Type::Int)),
+            ("before_epoch".to_string(), Box::new(Type::Bool)),
+        ])))),
+        ("core.time", "__world_wall_ms" | "__wall_override_ms" | "__controlled_monotonic_ns" | "__world_monotonic_ns") =>
+            Some((vec![], Some(Type::Option(Box::new(Type::Int))))),
+        ("core.time", "__host_monotonic_ns") => Some((vec![], Some(Type::Int))),
+        ("core.time", "__zone_env") =>
+            Some((vec![(read, Type::String)], Some(Type::Option(Box::new(Type::String))))),
+        ("core.time", "__zone_file_bytes" | "__embedded_zone_bytes") =>
+            Some((vec![(read, Type::String)], Some(Type::Option(Box::new(list_u8.clone()))))),
         ("core.time", "start") => Some((vec![], Some(Type::Named("Stopwatch".to_string())))),
         ("core.time", "instant") => Some((vec![], Some(Type::Named("Instant".to_string())))),
         ("core.time", "now") | ("core.time", "now_utc") => {

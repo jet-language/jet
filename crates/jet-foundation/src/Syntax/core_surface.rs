@@ -662,14 +662,13 @@ impl TypedHeadKind {
         }
     }
 
-    /// The Core module whose same-named record IS this built-in value: only
-    /// `core.net.url`'s `URL` declares itself the built-in carrier. Every other
-    /// Core record sharing a head's leaf (`core.files.path`'s `Path`,
-    /// `core.time`'s civil `DateTime`) is a different type.
+    /// The Core module whose same-named source record is this built-in value.
+    /// A different module's same-named record retains its own nominal identity.
     pub const fn carrier_record_module(self) -> Option<&'static str> {
         match self {
             Self::URL => Some("core.net.url"),
-            Self::Path | Self::DateTime | Self::SQL | Self::HTML | Self::Sh => None,
+            Self::DateTime => Some("core.time"),
+            Self::Path | Self::SQL | Self::HTML | Self::Sh => None,
         }
     }
 }

@@ -1549,3 +1549,45 @@ fn jet_int_to_u8(n: i64) -> Result<u8, String> {
         Err("a U8 holds 0..255".to_string())
     }
 }
+
+// Raw samples for the Jet-owned civil carriers. No calendar, selection,
+// validation, or defaulting policy belongs in these temporary host leaves.
+fn jet_time_raw_wall_sample() -> (
+    jet_foundation::Numeric::JetInt,
+    jet_foundation::Numeric::JetInt,
+    bool,
+) {
+    let (seconds, nanoseconds, before_epoch) = jet_time_wall_parts();
+    (
+        jet_std::jet_int_owned_from_i128(seconds as i128),
+        jet_std::jet_int_owned_from_i64(nanoseconds as i64),
+        before_epoch,
+    )
+}
+fn jet_time_raw_world_wall_ms() -> Option<jet_foundation::Numeric::JetInt> {
+    jet_scheduler_world_now_ms().map(jet_std::jet_int_owned_from_i64)
+}
+fn jet_time_raw_wall_override_ms() -> Option<jet_foundation::Numeric::JetInt> {
+    jet_time_wall_override_ms().map(jet_std::jet_int_owned_from_i64)
+}
+fn jet_time_raw_controlled_monotonic_ns() -> Option<jet_foundation::Numeric::JetInt> {
+    jet_time_monotonic_controlled_now_ns().map(jet_std::jet_int_owned_from_i64)
+}
+fn jet_time_raw_world_monotonic_ns() -> Option<jet_foundation::Numeric::JetInt> {
+    jet_scheduler_world_monotonic_now_ns().map(jet_std::jet_int_owned_from_i64)
+}
+fn jet_time_raw_host_monotonic_ns() -> jet_foundation::Numeric::JetInt {
+    jet_std::jet_int_owned_from_i128(jet_time_monotonic_host_sample() as i128)
+}
+fn jet_time_raw_zone_env(name: &String) -> Option<String> {
+    jet_time_zone_environment(name)
+}
+fn jet_time_raw_zone_file_bytes(path: &String) -> Option<Vec<u8>> {
+    jet_time_zone_file(path)
+}
+fn jet_time_raw_embedded_zone_bytes(name: &String) -> Option<Vec<u8>> {
+    #[cfg(target_arch = "wasm32")]
+    { jet_time_embedded_zone_bytes(name).map(|bytes| bytes.to_vec()) }
+    #[cfg(not(target_arch = "wasm32"))]
+    { let _ = name; None }
+}

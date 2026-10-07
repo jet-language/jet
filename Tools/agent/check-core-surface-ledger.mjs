@@ -2138,7 +2138,7 @@ function parseCoreSource(source) {
       }
     }
     const sourceTypes = new Set(Array.from(
-      read(sourceModule.path).matchAll(/^pub\s+(?:struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
+      read(sourceModule.path).matchAll(/^pub\s+(?:struct|enum|alias)\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
     ).map(function (match) { return match[1]; }));
     for (const type of sourceModule.ownedTypes) {
       if (!sourceTypes.has(type)) {

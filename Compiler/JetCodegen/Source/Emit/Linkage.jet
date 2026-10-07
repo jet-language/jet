@@ -1,9 +1,8 @@
 // Program-level adapters emitted between type rows and functions. Ports
-// MIRRust emit_period_anchor_impls, emit_link_closure and
-// emit_callback_trampolines: Date/LocalDate/DateTime unions implement the
-// runtime period-anchor trait, every link unit the selected artifact reaches is
-// declared once in dependency order, and every CCallback adapter reachable from
-// selected functions exports one `#[no_mangle]` trampoline.
+// MIRRust emit_link_closure and emit_callback_trampolines: every link unit
+// the selected artifact reaches is declared once in dependency order, and
+// every CCallback adapter reachable from selected functions exports one
+// `#[no_mangle]` trampoline.
 use jet_foundation.[
     MIRCallbackAdapter,
     MIRFunction,
@@ -12,65 +11,9 @@ use jet_foundation.[
     MIRLinkUnitID,
     MIRPreludeCallID,
     MIRType,
-    MIRVariant,
     mir_type_is_unit,
     mir_type_same_checked_type,
 ]
-
-fn jet_rust_emit_period_anchor_payload(variant: MIRVariant) -> String Never! {
-    if variant.payload == {
-        .Single(value) -> {
-            if value.kind == {
-                .Apply(name, _) -> return name.name
-                else -> {}
-            }
-        }
-        else -> {}
-    }
-    ""
-}
-
-// A three-variant enum whose single payloads are exactly Date, LocalDate and
-// DateTime (in any order) is a period anchor union.
-fn jet_rust_emit_is_period_anchor(variants: [MIRVariant]) -> Bool Never! {
-    if variants.len() != 3 -> return false
-    has_date := false
-    has_local_date := false
-    has_date_time := false
-    loop variant in variants {
-        nominal :: jet_rust_emit_period_anchor_payload(variant)
-        if {
-            nominal == "Date" -> has_date = true
-            nominal == "LocalDate" -> has_local_date = true
-            nominal == "DateTime" -> has_date_time = true
-            else -> return false
-        }
-    }
-    has_date && has_local_date && has_date_time
-}
-
-fn jet_rust_emit_period_anchor_impls(ctx: &JetRustEmitContext, lines: &[String]) Never! {
-    root :: ~ctx.config.root_prefix
-    loop definition in ctx.program.types {
-        if !jet_rust_emit_module_selected(ctx, definition.module_id) -> next
-        if definition.kind == {
-            .Enum(variants, _) -> {
-                if jet_rust_emit_is_period_anchor(variants) {
-                    name :: jet_rust_emit_type_name(&ctx, definition.id)
-                    &lines.push("impl {root}JetPeriodAnchor for {name} {{")
-                    &lines.push("    fn period_total_in(&self, period: &{root}JetPeriod, unit: &String) -> f64 {{")
-                    &lines.push("        match self {{")
-                    loop variant in variants -> &lines.push("            {name}::{jet_rust_emit_variant_name(&ctx, definition.id, variant.name)}(anchor) => anchor.period_total_in(period, unit),")
-                    &lines.push("        }}")
-                    &lines.push("    }}")
-                    &lines.push("}}")
-                    &lines.push("")
-                }
-            }
-            else -> {}
-        }
-    }
-}
 
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::emit_link_closure
 fn jet_rust_emit_link_closure(ctx: &JetRustEmitContext, lines: &[String]) Never! {

@@ -1145,7 +1145,6 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
                 emitter.emit_type_def(def, EmissionUnits::sink(&mut units, out, unit));
             }
         }
-        emitter.emit_period_anchor_impls(EmissionUnits::sink(&mut units, out, None));
         emitter.emit_history_strategies(EmissionUnits::sink(&mut units, out, None));
         for trait_def in &program.traits {
             let emit_compiler_rollback = trait_def.name == crate::Syntax::TRAIT_ROLLBACK;
@@ -3195,19 +3194,26 @@ mod core_native_projection_tests {
             "<corelib>/Core/http::Core/http/http.jet::Body",
             "<corelib>/Core/http::Core/http/http.jet::Headers",
             "<corelib>/Core/http::Core/http/http.jet::Query",
+            "<corelib>/Core/time::Core/time/time.jet::LocalDate",
+            "<corelib>/Core/time::Core/time/time.jet::LocalTime",
+            "<corelib>/Core/time::Core/time/time.jet::DateTime",
+            "<corelib>/Core/time::Core/time/time.jet::Period",
+            "<corelib>/Core/time::Core/time/time.jet::Zone",
+            "<corelib>/Core/time::Core/time/time.jet::ZonedDateTime",
+            "<corelib>/Core/time::Core/time/time.jet::Instant",
+            "<corelib>/Core/time::Core/time/time.jet::TimeError",
         ] {
             assert_eq!(core_native_probe_name(source_record), source_record);
             assert!(!is_canonical_core_native_type(source_record));
             assert!(crate::Codegen::core_rust_type_name(source_record).is_none());
         }
-        assert_eq!(
-            crate::Codegen::core_rust_type_name("<corelib>/Core/time::Core/time/time.jet::TimeError"),
-            Some("String")
-        );
-        assert!(is_canonical_core_native_type(
-            "<corelib>/Core/time::Core/time/time.jet::TimeError"
-        ));
         assert_eq!(crate::Codegen::core_rust_type_name("app::TimeError"), None);
+        for source_type in [
+            "Instant", "Date", "LocalDate", "LocalTime", "DateTime", "Period", "Zone",
+            "ZonedDateTime", "TimeError",
+        ] {
+            assert!(crate::Codegen::root_prelude_rust_type_name(source_type).is_none());
+        }
         assert_eq!(
             crate::Codegen::root_prelude_rust_type_name("WebQuery"),
             Some("JetWebQuery")
@@ -5831,9 +5837,6 @@ impl<'a> RustEmitter<'a> {
                 self.view_lifetime_prefix(),
                 self.rust_type(&args[0])
             );
-        }
-        if name.name == "Instant" {
-            return self.rust_root_prelude_type("JetInstant", args);
         }
         if name.name == "RealtimeStream" {
             return format!("{}jet_std::JetRealtimeStream", self.config.root_prefix);
@@ -10629,80 +10632,6 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
-    fn emit_period_anchor_impls(&self, out: &mut String) {
-        for def in &self.program.types {
-            if !self.module_selected(def.module) {
-                continue;
-            }
-            let MirTypeDefKind::Enum { variants, .. } = &def.kind else {
-                continue;
-            };
-            if variants.len() != 3 {
-                continue;
-            }
-            let mut has_date = false;
-            let mut has_local_date = false;
-            let mut has_date_time = false;
-            for variant in variants {
-                let MirVariantPayload::Single(payload) = &variant.payload else {
-                    has_date = false;
-                    has_local_date = false;
-                    has_date_time = false;
-                    break;
-                };
-                let MirTypeKind::Apply { name: nominal, .. } = payload.kind() else {
-                    has_date = false;
-                    has_local_date = false;
-                    has_date_time = false;
-                    break;
-                };
-                match nominal.name.as_str() {
-                    "Date" => has_date = true,
-                    "LocalDate" => has_local_date = true,
-                    "DateTime" => has_date_time = true,
-                    _ => {
-                        has_date = false;
-                        has_local_date = false;
-                        has_date_time = false;
-                        break;
-                    }
-                }
-            }
-            if !(has_date && has_local_date && has_date_time) {
-                continue;
-            }
-
-            let name = self.type_name(def.id);
-            let trait_name = format!("{}JetPeriodAnchor", self.config.root_prefix);
-            let _ = writeln!(out, "impl {trait_name} for {name} {{");
-            let _ = writeln!(
-                out,
-                "    fn period_total_in(&self, period: &{}JetPeriod, unit: &String) -> f64 {{",
-                self.config.root_prefix
-            );
-            let _ = writeln!(out, "        match self {{");
-            for variant in variants {
-                let MirVariantPayload::Single(payload) = &variant.payload else {
-                    unreachable!("validated period anchor union variant payload");
-                };
-                let MirTypeKind::Apply { name: nominal, .. } = payload.kind() else {
-                    unreachable!("validated period anchor union payload type");
-                };
-                let _ = writeln!(
-                    out,
-                    "            {name}::{}(anchor) => anchor.period_total_in(period, unit),",
-                    mangle_variant(&variant.name)
-                );
-                debug_assert!(matches!(
-                    nominal.name.as_str(),
-                    "Date" | "LocalDate" | "DateTime"
-                ));
-            }
-            let _ = writeln!(out, "        }}");
-            let _ = writeln!(out, "    }}");
-            let _ = writeln!(out, "}}\n");
-        }
-    }
 
     fn emit_columnar_row_adapter(&self, def: &MirTypeDef, declared: &[MirField], out: &mut String) {
         let fields = declared
@@ -25133,7 +25062,6 @@ impl<'a> RustEmitter<'a> {
             type_args,
             location,
         );
-        let emitted = self.core_time_error_result(row, emitted, result_type);
         self.core_native_result(row, emitted, result_type)
     }
 
@@ -25150,34 +25078,6 @@ impl<'a> RustEmitter<'a> {
             .unwrap_or(emitted)
     }
 
-    /// `core.time` kernels report a failure as its reason text; the checked
-    /// signature names the source `TimeError { reason }` record. Build that
-    /// record at the kernel boundary.
-    fn core_time_error_result(&self, row: &MirCoreCall, emitted: String, ty: Option<&MirType>) -> String {
-        if row.module != "core.time" {
-            return emitted;
-        }
-        let Some(MirTypeKind::Result { err, .. }) = ty.map(MirType::kind) else {
-            return emitted;
-        };
-        let Some(owner) = err.identity else {
-            return emitted;
-        };
-        if core_native_probe_name(&self.type_def(owner).key) != "TimeError" {
-            return emitted;
-        }
-        let reason = self
-            .program
-            .fields
-            .iter()
-            .find(|row| row.owner == owner && row.field.name == "reason")
-            .unwrap_or_else(|| panic!("MIR Core TimeError has no reason field row"));
-        format!(
-            "({emitted}).map_err(|__jet_reason| {} {{ {}: __jet_reason }})",
-            self.rust_type(err),
-            self.field_name(reason.id)
-        )
-    }
 
     fn native_optional_result(&self, value: &str, ty: &MirType) -> Option<String> {
         match ty.kind() {

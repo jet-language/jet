@@ -2665,9 +2665,6 @@ fn jet_rust_emit_core_rust_type_name(raw: String) -> String? {
     same :: [String]{"IOError", "IOContext", "IOOperation", "ProcessResourceLimit", "EnvError", "UTF8Error", "ProcessPlan", "ProcessSpec", "ProcessChild", "ProcessStreamMode", "TerminalPolicy", "TerminalSize", "TerminalMode", "TerminalSession", "TextWidth", "TextWidthAmbiguous", "TextWidthControls", "TextError", "DataGroupedQuery", "DataJoin", "TestSuite", "Clock", "Fake", "Solver", "Duration", "DurationUnit", "RangeError", "DataLoaderKind", "DataFormat", "DataFreshness", "DataInvalidationCause", "DataAuthority", "DataSourceIdentity", "DataProvenance", "DataSnapshotIdentity", "DataLoaderStatus", "DataLoader", "DataSnapshot", "RegexFlags", "Closed", "DirEntry", "Stat", "WalkEntry", "WatchEvent", "WatchDomain", "WatchKind", "WatchHandle", "WatchSet", "TempDir", "TempFile", "FileLock", "DataLineOptions", "DataColumn", "DataStatus", "DataSummary", "DataLimits", "DataError", "DataErrorKind", "DataPivotCell", "DataStream", "DataTracked", "DataWatch", "DataWatchStatus", "LogField", "LogSpan", "EncodingLimits", "EncodingError", "EncodingCause", "EncodingFormat", "EncodingErrorKind", "FieldError", "CBOROptions", "CBORError", "CBORErrorKind", "XMLLimits", "XMLParseOptions", "XMLRenderOptions", "XMLEncoding", "XMLLexicalPolicy", "XMLCanonical", "XMLCanonicalMode", "XMLError", "XMLReason", "XMLEntityPolicy", "DataEvent", "JSONReader", "JSONWriter", "JSONLReader", "JSONLWriter", "CSVReader", "CSVWriter", "CSVRow", "XMLReader", "XMLWriter", "DBValue", "DBError", "RaylibWindow", "RaylibColor", "RaylibTextureAtlas", "SQL", "HTML", "Sh"}
     if same.contains(name) -> return Val(~name)
     if name == {
-        // Native civil-time text errors remain one carrier until the complete
-        // authored civil-time cutover, matching the reference emitter.
-        "TimeError" -> Val("String")
         "ProcessResult" | "ProcessReceipt" -> Val("ProcessReceipt")
         "Query" -> Val("DataQuery")
         // D-DET1: the source `RNG` handle's Prelude carrier is `jet_std::Rng`.
@@ -2696,13 +2693,6 @@ fn jet_rust_emit_core_rust_type_name(raw: String) -> String? {
         "EventConfigError" -> Val("JetEventConfigError")
         "TestComparison" -> Val("JetTestComparison")
         "LateEventDisposition" -> Val("JetLateEventDisposition")
-        "Instant" -> Val("JetInstant")
-        "Date" | "LocalDate" -> Val("JetDate")
-        "LocalTime" -> Val("JetLocalTime")
-        "DateTime" -> Val("JetDateTime")
-        "Period" -> Val("JetPeriod")
-        "Zone" -> Val("JetZone")
-        "ZonedDateTime" -> Val("JetZonedDateTime")
         "Regex" -> Val("JetRegex")
         "Match" -> Val("JetRegexMatch")
         "Decimal" -> Val("JetDecimal")
@@ -2909,7 +2899,6 @@ fn jet_rust_emit_native_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef
     if name.name == "Tally" && args.len() == 1 -> return Val("std::collections::HashMap<{jet_rust_emit_type(&ctx, args[0])}, usize>")
     if name.name == "Queue" && args.len() == 1 -> return Val("std::collections::VecDeque<{jet_rust_emit_type(&ctx, args[0])}>")
     if args.len() == 0 && name.name == "Group" -> return Val("{root}jet_std::JetTaskGroup")
-    if name.name == "Instant" -> return Val(jet_rust_emit_root_prelude_type(&ctx, "JetInstant", args))
     if name.name == "RealtimeStream" -> return Val("{root}jet_std::JetRealtimeStream")
     if name.name == "RealtimeReceipt" -> return Val("{root}jet_std::JetRealtimeReceipt")
     if (name.name == "Cell" || name.name == "CellReadGuard" || name.name == "CellEditGuard") && args.len() == 1 {

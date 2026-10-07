@@ -1184,9 +1184,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "TextWidthAmbiguous" => Some("TextWidthAmbiguous"),
         "TextWidthControls" => Some("TextWidthControls"),
         "TextError" => Some("TextError"),
-        // Civil-time kernels still use their native text error carrier until
-        // the authored time carrier cutover lands with all call sites.
-        "TimeError" => Some("String"),
         "Query" => Some("DataQuery"),
         "DataGroupedQuery" => Some("DataGroupedQuery"),
         "Group" => Some("GroupValue"),
@@ -1227,13 +1224,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-FOUND-COREAPI1 / #2853: event-time late-event policy carrier.
         "LateEventDisposition" => Some("JetLateEventDisposition"),
         "RangeError" => Some("RangeError"),
-        "Instant" => Some("JetInstant"),
-        "Date" | "LocalDate" => Some("JetDate"),
-        "LocalTime" => Some("JetLocalTime"),
-        "DateTime" => Some("JetDateTime"),
-        "Period" => Some("JetPeriod"),
-        "Zone" => Some("JetZone"),
-        "ZonedDateTime" => Some("JetZonedDateTime"),
         "DataLoaderKind" => Some("DataLoaderKind"),
         "DataFormat" => Some("DataFormat"),
         "DataFreshness" => Some("DataFreshness"),
@@ -3419,15 +3409,6 @@ impl Cx {
             }
             // D-PENDING1=B: Loadable<Unknown, Unknown> placeholders — Rust infers the type.
             Type::Named(name) if name == "Unknown" => "_".to_string(),
-            // D-TIMEDEPTH1=A: civil-time types → opaque Rust structs.
-            Type::Named(name) if name == "Date" => "JetDate".to_string(),
-            Type::Named(name) if name == "LocalDate" => "JetDate".to_string(),
-            Type::Named(name) if name == "LocalTime" => "JetLocalTime".to_string(),
-            Type::Named(name) if name == "DateTime" => "JetDateTime".to_string(),
-            Type::Named(name) if name == "Instant" => "JetInstant".to_string(),
-            Type::Named(name) if name == "Period" => "JetPeriod".to_string(),
-            Type::Named(name) if name == "Zone" => "JetZone".to_string(),
-            Type::Named(name) if name == "ZonedDateTime" => "JetZonedDateTime".to_string(),
             Type::Named(name)
                 if matches!(
                     name.as_str(),

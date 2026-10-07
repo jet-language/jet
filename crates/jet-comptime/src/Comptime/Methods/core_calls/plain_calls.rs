@@ -1030,6 +1030,51 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 Err(e) => Ok(CtValue::failed(Box::new(CtValue::Str(e.reason)))),
             }
         }
+        // Raw Core time seams: optional scheduler samples are supplied by the
+        // ambient host; the compile-time path has no scheduler world.
+        ("core.time", "__wall_sample") => {
+            let (seconds, nanoseconds, before_epoch) = time_kernel::jet_time_wall_parts();
+            let seconds = match i64::try_from(seconds) {
+                Ok(value) => CtValue::Int(value),
+                Err(_) => CtValue::BigInt(crate::Numeric::CtBigInt::from_u64(seconds)),
+            };
+            Ok(CtValue::Struct {
+                type_name: "(seconds,nanoseconds,before_epoch)".to_string(),
+                fields: vec![
+                    ("seconds".to_string(), seconds),
+                    ("nanoseconds".to_string(), CtValue::Int(nanoseconds as i64)),
+                    ("before_epoch".to_string(), CtValue::Bool(before_epoch)),
+                ],
+            })
+        }
+        ("core.time", "__world_wall_ms" | "__world_monotonic_ns") => Ok(CtValue::absent(Type::Int)),
+        ("core.time", "__wall_override_ms") => Ok(match time_deadline_kernel::jet_time_wall_override_ms() {
+            Some(value) => CtValue::Present(Box::new(CtValue::Int(value))),
+            None => CtValue::absent(Type::Int),
+        }),
+        ("core.time", "__controlled_monotonic_ns") => Ok(match jet_foundation::Monotonic::jet_time_monotonic_controlled_now_ns() {
+            Some(value) => CtValue::Present(Box::new(CtValue::Int(value))),
+            None => CtValue::absent(Type::Int),
+        }),
+        ("core.time", "__host_monotonic_ns") => {
+            let value = jet_foundation::Monotonic::jet_time_monotonic_host_sample();
+            Ok(match i64::try_from(value) {
+                Ok(value) => CtValue::Int(value),
+                Err(_) => CtValue::BigInt(crate::Numeric::CtBigInt::from_str(&value.to_string())
+                    .expect("a host unsigned sample is an exact integer")),
+            })
+        }
+        ("core.time", "__zone_env") => Ok(match time_kernel::jet_time_zone_environment(as_string(one(0)?, span)?) {
+            Some(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+            None => CtValue::absent(Type::String),
+        }),
+        ("core.time", "__zone_file_bytes") => Ok(match time_kernel::jet_time_zone_file(as_string(one(0)?, span)?) {
+            Some(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+            None => CtValue::absent(Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))),
+        }),
+        ("core.time", "__embedded_zone_bytes") => Ok(CtValue::absent(
+            Type::List(Box::new(Type::IntN { signed: false, bits: 8 })),
+        )),
         // --- core.time pure constructors ---
         // Runtime-only clock reads stay on the same Prelude time kernel as
         // AOT/JIT. The fold gate rejects them before this adapter is reached.

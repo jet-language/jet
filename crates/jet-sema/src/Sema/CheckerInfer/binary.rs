@@ -1292,6 +1292,53 @@ impl<'a> Checker<'a> {
         let rt = self.infer(rhs);
         self.expected_type = saved_expected;
         let (mut lt, mut rt) = (lt?, rt?);
+        let source_instant = |ty: &Type| matches!(ty, Type::Named(name)
+            if name.ends_with("::Instant")
+                && jet_foundation::CoreModuleExports::core_source_owns_type(name));
+        let left_point = source_instant(&lt);
+        let right_point = source_instant(&rt);
+        let left_delta = lt == Type::Named(crate::Syntax::DURATION_TYPE.to_string());
+        let right_delta = rt == Type::Named(crate::Syntax::DURATION_TYPE.to_string());
+        let instant_method = match (op, left_point, right_point, left_delta, right_delta) {
+            (BinOp::Add, true, false, false, true) => Some("__add"),
+            (BinOp::Add, false, true, true, false) => Some("__delta_add"),
+            (BinOp::Sub, true, false, false, true) => Some("__subtract"),
+            (BinOp::Sub, true, true, false, false) => Some("__difference"),
+            _ => None,
+        };
+        if let Some(method) = instant_method {
+            let argument = |expr: Expr| crate::AST::CallArg {
+                convention: crate::AST::AccessConvention::Read,
+                expr, span, flags: crate::AST::CallArgFlags::default(),
+                label: None, spread: false,
+            };
+            let mut call = Expr::MethodCall {
+                receiver: Box::new(Expr::Ident("Instant".to_string(), span)),
+                method: method.to_string(), method_span: span,
+                owner_type_args: Vec::new(), type_args: Vec::new(),
+                args: vec![
+                    argument(*std::mem::replace(lhs, Box::new(Expr::Absent(span)))),
+                    argument(*std::mem::replace(rhs, Box::new(Expr::Absent(span)))),
+                ],
+                recv_type: None, resolved_ret: None,
+                operator_rhs: None, checked_widen: false,
+            };
+            let result = self.infer(&mut call);
+            *replacement = Some(call);
+            return result;
+        }
+        if (op == BinOp::Add && left_point && right_point)
+            || (op == BinOp::Sub && left_delta && right_point)
+        {
+            self.diags.push(Diagnostic::error(
+                "E0127", format!("{} is not available between `{}` and `{}`",
+                    operator_label(op), lt.show(), rt.show()),
+                "Time points are positions; only point + delta, point - delta, point - point, and delta + delta are defined".to_string(),
+                "subtract two Instants for a Duration, or add a Duration to an Instant".to_string(),
+                Some(span),
+            ));
+            return None;
+        }
         // D-OPT-LIFT1=A: `x == 5` holds only when the optional `x` holds 5,
         // and `x != 5` is its opposite. The plain side lifts once, so the
         // comparison is the existing optional equality on every tier.

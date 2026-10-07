@@ -776,7 +776,7 @@ fn sema_type_core_leaf_name(graph: SemaRegistrationGraph, name: String, caller_m
     loop index in 0..<last -> &owner_parts.push(parts[index])
     module_name :: sema_registration_module_name(graph, owner_parts.join("::")) ?? return None
     if module_name == "core.crypto" -> return None
-    if (leaf == "SQL" || leaf == "HTML" || leaf == "Sh" || leaf == "URL" || leaf == "Path" || leaf == "DateTime") && !(leaf == "URL" && module_name == "core.net.url") -> return None
+    if (leaf == "SQL" || leaf == "HTML" || leaf == "Sh" || leaf == "URL" || leaf == "Path" || leaf == "DateTime") && !(leaf == "URL" && module_name == "core.net.url") && !(leaf == "DateTime" && module_name == "core.time") -> return None
     exports :: core_module_export(module_name) ?? return None
     if !exports.type_exports.contains(leaf) -> return None
     if sema_type_graph_lookup_symbol(graph, caller_module_identity, leaf) != None -> return None
