@@ -83,6 +83,10 @@ pub fn form(input: WebFormInput, action: String) -> WebFormTyped WebFormError! {
 }
 
 
+// The web backend's DOM binding is DomRuntime.js::on. `jet_web_on` has
+// registry entries but no Rust implementation in this repository; this
+// forwarding declaration is not a Rust-to-Jet implementation or cutover.
+// Native callback admission must keep the actual backend contract.
 pub fn on(path: String, title: String, handler: fn(WebEvent)) Never! -[Browser]> {
     core.web.on(path, title, handler)
 }

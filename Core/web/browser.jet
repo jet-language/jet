@@ -2,21 +2,35 @@ use core as core
 
 // core.web.browser — headed/headless browser control for tests.
 //
-// Connect talks to a host CDP/WebDriver cell. Reports, fixtures, and
-// generated source are Jet: they never need a real browser. Headless CI
-// uses `connect` which may return `BrowserError.Headless`.
+// Connect talks to the host WebSocket transport using versioned BiDi.
+// Profiles and timeout validation remain offline-checkable.
 
 C_MAX_SOURCE_BYTES :: 1048576
 
 C_MAX_SOURCE_NAME :: 256
 
 #Error
-pub enum BrowserError {
-    Connect
-    Headless
-    Timeout
-    Protocol
-    Closed
+pub struct BrowserError {
+    kind: String
+
+    impl Display {
+        fn display(self) -> String {
+            if self.kind == {
+                "invalid profile" -> "browser profile is not supported"
+                "invalid timeout" -> "browser timeout must be between 1 and 600000 milliseconds"
+                "unsupported protocol" -> "browser protocol is not available in this session"
+                "timeout" -> "browser operation timed out"
+                "closed" -> "browser session is closed"
+                "transport" -> "browser transport failed"
+                "missing lock" -> "no locked browser for this engine in .jet/lock"
+                "unknown engine" -> "browser engine is not supported"
+                "missing binary" -> "locked browser binary was not found"
+                "size mismatch" -> "locked browser binary size drifted"
+                "invalid lock" -> "browser lock entry is incomplete"
+                else -> "browser protocol failed"
+            }
+        }
+    }
 }
 
 pub enum BrowserPrivacy {
@@ -30,13 +44,12 @@ pub enum BrowserProtocol {
 }
 
 pub struct BrowserTimeout {
-    pub ms: Int
+    milliseconds: Int
 }
 
 pub struct BrowserProfile {
-    pub name: String
-    pub privacy: BrowserPrivacy
-    pub headless: Bool
+    name: String
+    version: String
 }
 
 pub struct BrowserAbilities {
@@ -129,12 +142,21 @@ pub fn config_from_env() -[Env, FS]> BrowserTestConfig BrowserError! {
 }
 
 
-pub fn make_profile(name: String) -> BrowserProfile Never! {
-    BrowserProfile{name: name, privacy: BrowserPrivacy.Isolated, headless: true}
+pub fn make_profile(name: String) -> BrowserProfile BrowserError! { profile(name) }
+
+// Browser.rs:578-594: no trimming, case folding, timeout clamping, or fallback.
+pub fn profile(name: String) -> BrowserProfile BrowserError! {
+    version :: if name == {
+        "bidi-2025.5" -> "2025.5"
+        "bidi-2024.11" -> "2024.11"
+        else -> return Err(BrowserError{kind: "invalid profile"})
+    }
+    Ok(BrowserProfile{name: name, version: version})
 }
 
 pub fn timeout(ms: Int) -> BrowserTimeout BrowserError! {
-    core.web.browser.timeout(ms)
+    if ms < 1 || ms > 600000 -> return Err(BrowserError{kind: "invalid timeout"})
+    Ok(BrowserTimeout{milliseconds: ms})
 }
 
 pub fn locked(engine: String) -[FS, IO]> BrowserLocked BrowserError! {
@@ -170,14 +192,14 @@ pub fn fixture_source(name: String, body: String) -> String BrowserError! {
 
 pub fn generate_source(name: String, body: String, base_url: String) -> String BrowserError! {
     if name.len() == 0 || name.len() > C_MAX_SOURCE_NAME || body.len() > C_MAX_SOURCE_BYTES || base_url.len() > C_MAX_SOURCE_BYTES {
-        return Err(BrowserError.Protocol)
+        return Err(BrowserError{kind: "protocol"})
     }
     url := base_url
     if url.len() == 0 -> url = "/"
     test_name := source_name(name)
     escaped :: esc_source(url)
     out := "// generated browser test\nfn {test_name}() {{\n    _ :: \"{escaped}\"\n    {body}\n}}\n"
-    if out.len() > C_MAX_SOURCE_BYTES -> return Err(BrowserError.Protocol)
+    if out.len() > C_MAX_SOURCE_BYTES -> return Err(BrowserError{kind: "protocol"})
     Ok(out)
 }
 
@@ -234,7 +256,7 @@ pub fn write_report(report: BrowserReport, path: String) IOError! {
 }
 
 pub fn server_start(root: String) -[Net]> BrowserServer BrowserError! {
-    if root.len() > C_MAX_SOURCE_BYTES -> return Err(BrowserError.Protocol)
+    if root.len() > C_MAX_SOURCE_BYTES -> return Err(BrowserError{kind: "protocol"})
     cfg := BrowserTestConfig{headless: true, timeout_ms: 5000, base_url: root}
     native :: core.web.browser.server_start(cfg)
     Ok(BrowserServer{url: native.url(), running: true, logs: native.logs(), native: Val(native)})
@@ -355,3 +377,43 @@ fn esc_source(text: String) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
+
+#Test("browser profiles keep exact version pins") {
+    current :: profile("bidi-2025.5") ?? panic("current profile rejected")
+    previous :: profile("bidi-2024.11") ?? panic("previous profile rejected")
+    assert_eq(current.name, "bidi-2025.5")
+    assert_eq(current.version, "2025.5")
+    assert_eq(previous.version, "2024.11")
+    loop invalid in [String]{"", "default", "BIDI-2025.5", " bidi-2025.5", "bidi-2025.5 "} {
+        if profile(invalid) == {
+            .Ok(_) -> panic("invalid profile accepted")
+            .Err(error) -> assert_eq("{error}", "browser profile is not supported")
+        }
+    }
+}
+
+#Test("browser timeout preserves both bounds and exact refusal text") {
+    minimum :: timeout(1) ?? panic("minimum timeout rejected")
+    maximum :: timeout(600000) ?? panic("maximum timeout rejected")
+    assert_eq(minimum.milliseconds, 1)
+    assert_eq(maximum.milliseconds, 600000)
+    loop invalid in [Int]{-1, 0, 600001, 9223372036854775807} {
+        if timeout(invalid) == {
+            .Ok(_) -> panic("invalid timeout accepted")
+            .Err(error) -> assert_eq("{error}", "browser timeout must be between 1 and 600000 milliseconds")
+        }
+    }
+}
+
+#Test("browser errors use the shipped display vocabulary") {
+    assert_eq("{BrowserError{kind: "unsupported protocol"}}", "browser protocol is not available in this session")
+    assert_eq("{BrowserError{kind: "timeout"}}", "browser operation timed out")
+    assert_eq("{BrowserError{kind: "closed"}}", "browser session is closed")
+    assert_eq("{BrowserError{kind: "transport"}}", "browser transport failed")
+    assert_eq("{BrowserError{kind: "missing lock"}}", "no locked browser for this engine in .jet/lock")
+    assert_eq("{BrowserError{kind: "unknown engine"}}", "browser engine is not supported")
+    assert_eq("{BrowserError{kind: "missing binary"}}", "locked browser binary was not found")
+    assert_eq("{BrowserError{kind: "size mismatch"}}", "locked browser binary size drifted")
+    assert_eq("{BrowserError{kind: "invalid lock"}}", "browser lock entry is incomplete")
+    assert_eq("{BrowserError{kind: "protocol"}}", "browser protocol failed")
+}
