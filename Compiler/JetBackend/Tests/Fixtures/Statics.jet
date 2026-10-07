@@ -277,6 +277,8 @@ fn fx_shared_site_checks() -> Bool Never! {
         pinned :: lir_lower_core_shared(program, [MIRFunctionID]{initializer})
         if pinned.issues.len() != 0 || pinned.shared_sites.len() != 1 -> return false
         if pinned.shared_sites[0].symbol != getter || pinned.shared_sites[0].initializer != initializer -> return false
+        if pinned.shared_sites[0].lifetime != lifetime -> return false
+        if mir_type_canonical_key(pinned.shared_sites[0].ty) != mir_type_canonical_key(program.constants[0].ty) -> return false
         entry :: pinned.entry ?? return false
         startup :: pinned.lir.functions[entry.value]
         if !startup.name.contains("core.shared.init") -> return false
