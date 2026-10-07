@@ -449,7 +449,7 @@ scoped promotion; #659 owns tracing and reports.
 
 I6 is machine-checked by `tests/truthfulness.rs`: the root compiler and named
 compiler seams may use only workspace path dependencies. Runtime/tool siblings
-such as `jet-jit` and `jet-net` are separate workspace members with their own
+such as `jet-net` are separate workspace members with their own
 owner-approved dependency posture; that does not permit an external dependency
 to leak into a checked compiler manifest.
 
@@ -458,7 +458,8 @@ to leak into a checked compiler manifest.
 may not grow back-edges into driver/codegen clients; tooling and runtime crates
 stay outside the compiler seam unless their dependency row changes here and in
 the test. The package, environment-plan, and JetOS layers are described in the
-crate map above. The root binary owns native build execution:
+crate map above. On the transitional Rust path (until the Jet back end covers
+every program, D-EXEC2), the root binary owns native build execution:
 `Source/CmdCompile.rs` invokes rustc, classifies linker/tool failures, renders
 the I2 ICE banner, and links prepared FFI artifacts.
 D-ARCH-SOURCE1=A also puts command and interactive product ownership behind
@@ -472,11 +473,12 @@ depend inward on compiler seams. Their shared
 interpreter eligibility walk lives in `jet-driver`; stable exit codes and the
 std-only JSON codec live in dependency-free `jet-foundation`. Neither product
 depends on the root package, splices root source with `include!`, or owns rustc
-invocation and ICE classification; R5 remains in `Source/CmdCompile.rs`.
+invocation and ICE classification; on the transitional Rust path R5 remains in
+`Source/CmdCompile.rs`.
 `crates/jet-devserver` likewise owns the web server, Canvas routes, status
 surfaces, client leases, live reload, and last-good swap. `CmdCompile.rs`
-drives its build-state API while retaining compile/codegen/rustc execution;
-there is no callback or dependency edge from the seam back to the root.
+drives its build-state API while retaining the transitional compile/codegen/rustc
+execution; there is no callback or dependency edge from the seam back to the root.
 
 ### Browser automation protocol core
 
@@ -745,15 +747,17 @@ The timing path uses `PhaseTiming` and the typed `CompilerProbe` provider. A
 checked corpus pins source and expected-output digests. A measurement records
 compiler/Core identities, target, profile, backend, linker, host, cache state,
 fixed warmups and samples, process CPU-time variance, peak RSS, and phase totals. The
-`dev` and optimized `release` profiles both invoke the production rustc AOT
-build (D-EXEC2=A). Clean, no-change, and representative-
+`dev` and optimized `release` profiles both invoke the transitional rustc AOT
+build (D-EXEC2=A) until the Jet back end covers every program. Clean, no-change, and representative-
 edit runs are distinct. Partial timing, changed inputs, incompatible
 identities, nondeterminism, pathological inputs, and unstable samples are
 unavailable/failure; they cannot be made green by changing the workload or
 hiding cold-cache work. The checked-corpus report is schema version 4 and emits
 six rows for each active corpus row: `jit-clean`, `jit-no-change`,
 `jit-representative-edit`, `aot-release-clean`, `aot-release-no-change`, and
-`aot-release-representative-edit`. The current corpus has five active rows, so
+`aot-release-representative-edit`. The `jit-*` rows measure `jet run`, which
+today runs the transitional build-and-execute path (D-EXEC2); their names
+predate the Cranelift retirement. The current corpus has five active rows, so
 the matrix has 30 rows. Each row uses one warmup and twenty measured samples.
 Its top-level receipt records verified semantic, diagnostic, effect, and tier
 parity. Its pinned baseline allows at most 15% latency or peak-RSS regression,
@@ -948,9 +952,9 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   is treated as a P0 bug. On the transitional Rust path that banner is owned by
   `Source/CmdCompile.rs` and rustc's stderr is shown only inside it. A missing
   linker or C library is a tool/user diagnostic, not an ICE.
-- **R6 — Name mangling.** User identifiers are emitted as `__jet_<name>`
-  (`main` excepted) so user code can never collide with Rust keywords,
-  macros, or std items. The sema-owned `NameLedger` is the single source for
+- **R6 — Name mangling.** In generated Rust (the transitional path), user
+  identifiers are emitted as `__jet_<name>` (`main` excepted) so user code can
+  never collide with Rust keywords, macros, or std items. The sema-owned `NameLedger` is the single source for
   declaration paths, aliases, visibility, and reference origins; all Rust-name
   projections use its canonical mangle functions. This implements ratified
   D-NAME-TREE1 without adding a user-facing spelling.
@@ -991,9 +995,9 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   still optimize the reachable runtime bitcode at the final link; the rlib
   removes the per-program front-end and runtime codegen cost.
   The linker keeps only what the program uses ("only link what's needed"). The
-  output is one self-contained native binary. Rust's std links a baseline
-  (low-hundreds-of-KB), accepted as the cost of a beginner-friendly std-backed
-  runtime. A size-minimal profile (`opt-level="z"`, possibly `panic=abort`) is
+  output is one self-contained native binary. While programs link Rust's std,
+  it adds a baseline (low-hundreds-of-KB) that leaves with Rust (directive 19).
+  A size-minimal profile (`opt-level="z"`, possibly `panic=abort`) is
   decision S15 and is available as `jet build --small`; the default leans toward
   speed.
 - **R9 — A file is a complete program.** `jet run foo.jet` compiles and
