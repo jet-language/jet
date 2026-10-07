@@ -130,6 +130,9 @@ and `source_map` expose compiler-owned front-end results; `manifest`, `package`,
 not read arbitrary paths, dependencies, or sibling packages, and they do not
 provide a runtime path-loading fallback. A runtime call is E0956.
 
+The source declarations supply the public typed vocabulary; calls retain the
+compiler-owned compile-time provider route even when that source package is loaded.
+
 The package-view field matrix is versioned by
 `PACKAGE_MODEL_SCHEMA_VERSION = 1` (D-PACKAGE-MODEL1). The four views have
 separate meanings:
