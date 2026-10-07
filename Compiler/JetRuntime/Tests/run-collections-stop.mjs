@@ -20,8 +20,18 @@ function run(bin, args, options = {}) {
 if (mode === '--assemble') {
     run(process.execPath, [join(repo, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), out, '--assemble-only', '--test', 'Collections']);
     renameSync(join(out, 'unit.jet'), join(out, 'Source/Fixture.jet'));
+    // Instrument only this fixture's iterator body. The wrappers delegate the
+    // real free/policy call exactly once, then stop via the real budget rail.
+    const unit = join(out, 'Source/Fixture.jet');
+    const assembled = readFileSync(unit, 'utf8');
+    const iterStart = assembled.indexOf('// [unit source: Compiler/JetRuntime/Source/Iter.jet]');
+    const iterEnd = assembled.indexOf('// [unit source:', iterStart + 1);
+    if (iterStart < 0 || iterEnd < 0) throw Error('missing canonical iterator source boundary');
+    const iter = assembled.slice(iterStart, iterEnd).replaceAll('jet_rt_free(', 'coll_stop_free(')
+        .replace('= "jet_rt_progress_state_advance"', '= "coll_stop_progress_advance"');
+    writeFileSync(unit, assembled.slice(0, iterStart) + iter + assembled.slice(iterEnd));
     appendFileSync(join(out, 'Source/Fixture.jet'), '\n' + readFileSync(join(repo, 'Compiler/JetRuntime/Tests/CollectionsStopTests.jet'), 'utf8'));
-    writeFileSync(join(out, 'exports.list'), readFileSync(join(repo, 'Compiler/JetRuntime/exports.list'), 'utf8') + 'collections_stop_test\n');
+    writeFileSync(join(out, 'exports.list'), readFileSync(join(repo, 'Compiler/JetRuntime/exports.list'), 'utf8') + 'collections_stop_test\ncollections_review_test\n');
 } else if (mode === '--lower') {
     const receipt = join(out, 'front.receipt'), prefix = join(out, 'fixture');
     const result = spawnSync(candidateJetc0(), [], {
@@ -44,7 +54,8 @@ if (mode === '--assemble') {
     const result = run(executable, [], { timeout: 30000 });
     writeFileSync(join(out, 'run.stdout'), result.stdout);
     writeFileSync(join(out, 'run.stderr'), result.stderr);
-    const expected = Array.from({ length: 13 }, (_, family) => `family ${family}: live payloads restored\n`).join('');
+    const expected = Array.from({ length: 13 }, (_, family) => `family ${family}: live payloads restored\n`).join('') +
+        Array.from({ length: 11 }, (_, family) => `review ${family}: live payloads restored\n`).join('');
     if (result.stdout !== expected || result.stderr) throw Error('stopped-result witness output changed');
-    console.log('13 stopped-result families: allocator live totals restored');
+    console.log('13 stopped-result families + 11 focused review edges: allocator live totals restored');
 }
