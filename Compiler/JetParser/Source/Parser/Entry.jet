@@ -72,12 +72,11 @@ pub fn parse_lexed(lexed: Lexed) -> ParseResult {
     parser_parse_lexed_lines(~lexed, [U8]{}, [Int]{})
 }
 
-// The lexed tokens move into the parser state (field moves reset the field,
-// so no token list is copied on the way).
+// The lexed tokens move into the parser state (a field move takes the field
+// out of the owned value, so no token list is copied on the way).
 fn parser_parse_lexed_lines(lexed: ^Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
     source_end :: if lexed.tokens.len() > 0 -> lexed.tokens[lexed.tokens.len() - 1].span.start else -> 0
     tokens := ^lexed.tokens
-    lexed.tokens = [Token]{}
     parser_parse_prepared(parser_prepare_tokens(^tokens), lexed.diagnostics, source_end, line_starts, source)
 }
 
@@ -110,7 +109,6 @@ fn parser_parse_prepared(prepared: ^ParserFenceExpansion, lexer_diagnostics: [Di
         return ParseResult{program: ast_program(), diagnostics: diagnostics}
     }
     tokens := ^prepared.tokens
-    prepared.tokens = [Token]{}
     state := JetParserState{tokens: ^tokens, position: 0, diagnostics: lexer_diagnostics, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0, statement_start: -1, line_starts: line_starts, source: source}
     program := parser_parse_program(&state)
     program.block_spans = state.block_spans

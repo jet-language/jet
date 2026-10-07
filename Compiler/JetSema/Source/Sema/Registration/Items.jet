@@ -2332,13 +2332,16 @@ pub fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], e
     // then the inputs are taken in order (popped from the reversed list).
     imported := [[SemaGenericModuleSource]]{}
     loop index in 0..<inputs.len() -> &imported.push(sema_generic_modules_imported(inputs, edges, template_index, inputs[index].module_identity))
+    // The generic-module check reads the programs as written of the few
+    // modules that declare module aliases or templates; only those are kept.
+    written :: sema_generic_modules_written(inputs)
     pending := ^inputs
     &pending.reverse()
     &imported.reverse()
     loop {
         input :: &pending.pop() ?? break
         templates :: &imported.pop() ?? [SemaGenericModuleSource]{}
-        module_row := sema_registration_prepare_module_row(input, templates, &diagnostics)
+        module_row := sema_registration_prepare_module_row(^input, templates, &diagnostics)
         duplicate :: module_rows.get(module_row.module_identity) != None
         if !duplicate -> module_rows[module_row.module_identity] = modules.len()
         if {
@@ -2448,7 +2451,7 @@ pub fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], e
     graph.complete = !sema_has_error_since(graph.diagnostics, 0)
     // D-CONF-GENSPELL1=A: generic-module aliases resolve and check their
     // arguments once every import is bound (Rust's expansion pre-pass).
-    sema_generic_modules_check(&graph, inputs)
+    sema_generic_modules_check(&graph, written)
     graph.complete = !sema_has_error_since(graph.diagnostics, 0)
     // Rust erases templates and aliases once expanded: their symbols stay
     // registered, but no later pass sees an unexpanded body. They are removed

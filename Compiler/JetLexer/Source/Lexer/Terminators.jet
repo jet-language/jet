@@ -2,7 +2,6 @@
 // Each input row is [kind, byte_start, byte_end, first_char_is_uppercase].
 // Each output row is [event, raw_token_index, byte_position].
 use jet_foundation.[
-    Diagnostic,
     Span,
     diagnostic_from_registry,
 ]
@@ -496,11 +495,9 @@ fn split_spelling(kind: Int) -> String Never! {
 fn lexed_with_terminators(facts: [Int], lexed: ^Lexed, events: [Int]) -> Lexed {
     tokens := [Token]{}
     diagnostics := ^lexed.diagnostics
-    lexed.diagnostics = [Diagnostic]{}
     // The payload tokens, last first: each one is moved over (popped), never
     // copied, in the same order the index walk visited them.
     remaining := ^lexed.tokens
-    lexed.tokens = [Token]{}
     &remaining.reverse()
     event_index := 0
     raw_index := 0

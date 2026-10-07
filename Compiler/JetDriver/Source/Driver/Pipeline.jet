@@ -2127,6 +2127,9 @@ struct JetDriverComptimeRunResult {
     internal_problem: String?
     graph: SemaRegistrationGraph?
     partial_graph: SemaRegistrationGraph?
+    // Set by a run that completed: its owner hands the tables' graph on as
+    // `graph` (jet_driver_run_comptime); otherwise as `partial_graph`.
+    graph_finished: Bool
     trail: SemaGraphTrail
     declared: [SemaGraphModuleResult]
 }
@@ -2138,7 +2141,7 @@ fn jet_driver_comptime_run_result(
     complete: Bool,
     soft_stop: Bool,
 ) -> JetDriverComptimeRunResult Never! {
-    JetDriverComptimeRunResult{values: values, functions: functions, trace: trace, complete: complete, soft_stop: soft_stop, internal_problem: None, graph: None, partial_graph: None, trail: sema_graph_trail_init(), declared: [SemaGraphModuleResult]{}}
+    JetDriverComptimeRunResult{values: values, functions: functions, trace: trace, complete: complete, soft_stop: soft_stop, internal_problem: None, graph: None, partial_graph: None, graph_finished: false, trail: sema_graph_trail_init(), declared: [SemaGraphModuleResult]{}}
 }
 
 fn jet_driver_comptime_lost_graph(values: [SemaComptimeItemValue], functions: [SemaComptimeFunctionResult], trace: JetDriverCompileTrace) -> JetDriverComptimeRunResult Never! {
@@ -2340,13 +2343,9 @@ fn jet_driver_comptime_stage(
             None -> return Val(jet_driver_comptime_lost_graph(values, checked_functions, trace))
             .Val(staged_graph) -> {
                 if reused {
-                    staged_modules = ^staging.declared
-                    staging.declared = [SemaGraphModuleResult]{}
+                    jet_driver_comptime_take_modules(&staged_modules, &staging.declared)
                     staging.declared_staged = true
-                    staged_keys := ^staging.staged_keys
-                    staging.staged_keys = [String:Bool]{}
-                    seed_rows = sema_comptime_staged_constant_rows(staged_graph, staging.sites, values, 0, &staged_keys)
-                    staging.staged_keys = ^staged_keys
+                    seed_rows = sema_comptime_staged_constant_rows(staged_graph, staging.sites, values, 0, &staging.staged_keys)
                 } else {
                     staged_modules = sema_comptime_modules_with_values(program, values)
                     sema_comptime_staged_keys(values, &staging.staged_keys)
@@ -2383,10 +2382,7 @@ fn jet_driver_comptime_stage(
         if program.registration_graph == {
             None -> return Val(jet_driver_comptime_lost_graph(values, checked_functions, trace))
             .Val(staged_graph) -> {
-                staged_keys := ^staging.staged_keys
-                staging.staged_keys = [String:Bool]{}
-                rows := sema_comptime_staged_constant_rows(staged_graph, staging.sites, values, staged_count, &staged_keys)
-                staging.staged_keys = ^staged_keys
+                rows := sema_comptime_staged_constant_rows(staged_graph, staging.sites, values, staged_count, &staging.staged_keys)
                 if &staging.session == {
                     None -> return Val(jet_driver_comptime_lost_session(values, checked_functions, trace))
                     .Val(staged_session) -> added = jet_codegen_comptime_session_add_constants(&staged_session, rows)
@@ -2402,6 +2398,20 @@ fn jet_driver_comptime_stage(
 // Moves every row of `from` onto the end of `to`, in order.
 fn jet_driver_comptime_take_constants(to: &[MIRConstantDef], from: &[MIRConstantDef]) Never! {
     reversed := [MIRConstantDef]{}
+    loop from.len() > 0 {
+        row := &from.pop() ?? { break }
+        &reversed.push(^row)
+    }
+    loop reversed.len() > 0 {
+        row := &reversed.pop() ?? { break }
+        &to.push(^row)
+    }
+}
+
+// Moves every module of `from` onto the end of `to`, in order (popped, so no
+// module is copied).
+fn jet_driver_comptime_take_modules(to: &[SemaGraphModuleResult], from: &[SemaGraphModuleResult]) Never! {
+    reversed := [SemaGraphModuleResult]{}
     loop from.len() > 0 {
         row := &from.pop() ?? { break }
         &reversed.push(^row)
@@ -3061,7 +3071,7 @@ fn jet_driver_run_comptime(
     // The run sets `sites` once it has items to check.
     staging := JetDriverComptimeStaging{session: None, runtime_modules: [SemaGraphModuleResult]{}, foreign: None, count: -1, live: [JetDriverComptimeLive]{}, growth_constants: [MIRConstantDef]{}, restore: false, global_keys: [String:Bool]{}, global_count: 0, sites: sema_comptime_value_sites_empty(), staged_keys: [String:Bool]{}, bare: false, bare_ok: bare_ok, declared: ^declared, declared_staged: false}
     result := jet_driver_comptime_run(&program, &trail, keep_going, sources, names, initial_values, initial_functions, load, request, &staging, &counters, &diagnostics)
-    result.declared = jet_driver_comptime_take_declared(&staging)
+    result.declared = jet_driver_comptime_take_declared(^staging)
     if request.trace_sink == .Val(sink) {
         sink.progress("counters.comptime.items_checked", counters.items_checked, -1)
         sink.progress("counters.comptime.programs_built", counters.programs_built, -1)
@@ -3070,9 +3080,13 @@ fn jet_driver_run_comptime(
         sink.progress("counters.comptime.rows_lowered", counters.rows_lowered, -1)
         sink.progress("counters.comptime.items_bare", counters.items_bare, -1)
     }
-    // The completed run moved its graph into `graph`; any other exit hands
-    // the graph back here.
-    result.partial_graph = ^program.registration_graph
+    // The completed run hands the graph on as `graph`; any other exit hands
+    // it back here.
+    if result.graph_finished {
+        result.graph = ^program.registration_graph
+    } else {
+        result.partial_graph = ^program.registration_graph
+    }
     program.registration_graph = None
     result.trail = ^trail
     result
@@ -3082,14 +3096,9 @@ fn jet_driver_run_comptime(
 // the staged session once the first full staging moved them in (the session
 // only joined constant rows to them, jet_codegen_comptime_session_add_constants),
 // else as they were moved in.
-fn jet_driver_comptime_take_declared(staging: &JetDriverComptimeStaging) -> [SemaGraphModuleResult] {
-    if !staging.declared_staged {
-        declared := ^staging.declared
-        staging.declared = [SemaGraphModuleResult]{}
-        return declared
-    }
+fn jet_driver_comptime_take_declared(staging: ^JetDriverComptimeStaging) -> [SemaGraphModuleResult] {
+    if !staging.declared_staged -> return ^staging.declared
     taken := ^staging.session
-    staging.session = None
     session := ^taken ?? panic("a comptime run lost the staged session that holds the declared modules")
     jet_codegen_comptime_session_modules(^session)
 }
@@ -3097,9 +3106,8 @@ fn jet_driver_comptime_take_declared(staging: &JetDriverComptimeStaging) -> [Sem
 // Hands the declaration pass's modules back from a run to its stage, whose
 // finalization reads their type definitions (sema_finalize_registration_graph).
 fn jet_driver_comptime_return_declared(stage: &SemaComptimeDeclarationStage, run: &JetDriverComptimeRunResult) Never! {
-    modules := ^run.declared
-    run.declared = [SemaGraphModuleResult]{}
-    stage.modules = ^modules
+    stage.modules = [SemaGraphModuleResult]{}
+    jet_driver_comptime_take_modules(&stage.modules, &run.declared)
 }
 
 // `program` owns the run's graph, `trail` records its edits; `keep_going`
@@ -3134,8 +3142,7 @@ fn jet_driver_comptime_run(
     // sema_comptime_program), with no run-wide index built over it.
     if sources.len() == 0 {
         finished := jet_driver_comptime_run_result(values, checked_functions, trace, true, false)
-        finished.graph = ^program.registration_graph
-        program.registration_graph = None
+        finished.graph_finished = true
         return finished
     }
     environment := sema_comptime_environment()
@@ -3391,8 +3398,7 @@ fn jet_driver_comptime_run(
         if !jet_driver_comptime_apply_landed(&program, &available, staging.sites, values, resolved_count, &trail) -> return jet_driver_comptime_lost_graph(values, checked_functions, trace)
     }
     finished := jet_driver_comptime_run_result(values, checked_functions, trace, true, false)
-    finished.graph = ^program.registration_graph
-    program.registration_graph = None
+    finished.graph_finished = true
     finished
 }
 
