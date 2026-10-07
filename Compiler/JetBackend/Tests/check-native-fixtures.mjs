@@ -24,6 +24,8 @@ if (!outDir) {
 }
 const runtimeLib = process.env.JET_RUNTIME_C_LIB;
 const jetRun = process.env.JET_RUN;
+// Match run-lower-fixtures.mjs's focused assembly selection.
+const only = new Set((process.env.FX_ONLY ?? "").split(",").filter(Boolean));
 
 // The hand-built fixtures of LowerFixtures.jet, then every
 // `// expect-stdout <name>: <JSON string>` line of Tests/Fixtures/*.jet.
@@ -134,7 +136,7 @@ if (runtimeLib && jetRun) {
   }
 }
 
-for (const fixture of process.argv.includes("--abi") ? [] : expected) {
+for (const fixture of process.argv.includes("--abi") ? [] : expected.filter(({ name }) => only.size === 0 || only.has(name))) {
   const path = `${outDir}/${fixture.name}.elf`;
   if (!existsSync(path)) {
     console.log(`${fixture.name}: MISSING ${path}`);
