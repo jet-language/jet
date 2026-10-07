@@ -396,6 +396,22 @@ printed); `jet_loop_cursor_drop` frees a range cursor. A runtime stop renders
 its report and exits the process; nothing unwinds into generated frames.
 Prelude and Core routes go through adapters that `Tools/agent/gen-c-abi-routes.mjs`
 generates (`CAbiRoutes.rs`, with the carrier table `Lower/RuntimeRoutes.jet`).
+When a route is ported to `Compiler/JetRuntime`, its direct `#Export(c)`
+function is the adapter: it takes raw fixed-width carriers and uses the
+canonical route C symbol. `gen-runtime-exports.mjs` records that definition in
+the single `exports.list`; `gen-c-abi-routes.mjs` keeps the shared lowering
+metadata but omits its Rust adapter body. Both tools read the runtime-only
+`sources.list`. The route generator checks the Jet declaration against the
+derived C ABI, including every flattened list argument and result out-slot,
+and fails rather than silently skipping a Jet-owned route whose ABI cannot
+be derived. Exact `Int`, typed `String`, write borrows, failures, and mismatched
+parameter/result widths are not raw route signatures. `--check` validates
+ownership and signatures as well as generated-file freshness.
+`node Tools/agent/gen-runtime.mjs <allparts.rs> --check` checks trap literals,
+the export list, and routes in one keep-going invocation. Without `--check`
+it regenerates them in dependency order. Narrow worker and held-job checks
+can use `Tools/agent/lane-check.sh --runtime-generators <allparts.rs>` through
+the cheap-check lane; this mode does not invoke Cargo.
 Text has one C-ABI carrier, `JetCText`, not Rust's unspecified `String` layout.
 Owning headers and buffers are allocated/freed by `jet_rt_alloc`/`jet_rt_free`;
 empty buffers have capacity zero and a non-null dangling pointer. The Rust
@@ -1314,12 +1330,14 @@ agreed before and no longer does. It writes `differential.tsv` and
 
 Sanitizer mode (#4619): `Tests/run-sanitized.mjs <outdir> --runtime
 <runtime.rs>` builds the prepared runtime text (the one the corpus's runtime
-pack came from) as a staticlib with `-Zsanitizer=address -Zub-checks=yes`,
-links every native object against it with `clang -fsanitize=address`, and
-runs each golden with every ASan/LSan report written under
-`sanitize/reports/`. The mode checks every runtime and libc call the native
-code makes, turns a native crash into a report with a symbolized stack, and
-finds unreachable heap blocks at exit. Native code itself is checked when
+pack came from) as a staticlib with `--cfg jet_native_pack
+-Zsanitizer=address -Zub-checks=yes`. `JET_RUNTIME_JET_OBJECT` must name the
+same Jet object used in that pack; the strong-definition guard rejects
+replaced Rust exports. Every native object links the Jet provider first, then
+the sanitized remaining Rust archive, with `clang -fsanitize=address`.
+Each golden retains every ASan/LSan report under `sanitize/reports/`. This
+checks the remaining Rust runtime and libc, but rustc does not instrument
+the Jet runtime object's internals. Native code itself is checked when
 run-goldens ran with `JET_LOWER_SANITIZE=1`: GoldenLower then also writes
 `lower/<case>.asan.o`, lowered through `LIR/Sanitize.jet`, which precedes
 every Load and Store whose base is not a stack slot of its own function with
@@ -1477,3 +1495,7 @@ the globals; executable startup and an entryless `dlopen` library inspect the
 allocator root before any explicit init call, then check repeated init leaves
 it unchanged. The pack-linked `run-cabi-driver.mjs` preserves all C-ABI trap
 cases, while the Rust-tier cargo driver only calls remaining Rust-tier routes.
+`run-alloc-parity.mjs` separately checks invalid-layout exit 70 and allocation
+failure `SIGABRT`, including byte-identical stderr against the Rust seed.
+Process-edge stdout flushing uses a dedicated lock and error word in the
+allocator's initialized root page, never a new allocation on the stop path.
