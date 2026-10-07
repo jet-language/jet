@@ -3,7 +3,7 @@
 // unchecked arithmetic and shifts, and widening conversions.
 use jet_foundation.[
     MIRAccess, MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRCallArg,
-    MIRCallee, MIRConstant, MIRConversion, MIRFunction, MIRIntegerWidth,
+    MIRCallee, MIRConstant, MIRConversion, MIRFunction, MIRIntegerWidth, MIRPanicLoc, MIRPreludeABI, MIRPreludeFamily,
     MIROperation, MIRProgram, MIRTerminator, MIRType, MIRTypeDef, MIRTypeKind,
     MIRUnaryOp, MIRValueID, mir_copy_ownership, mir_function_id, mir_type_from_kind,
 ]
@@ -188,4 +188,30 @@ fn fx_narrow_storage() -> MIRProgram Never! {
     }
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     fx_list_program(b)
+}
+
+// Located fixed routes retain the raw source-slice ABI; no String-handle
+// adapter may silently replace it.
+// expect-stdout fixed-located-routes: "-3\n4\n81\n"
+fn fx_fixed_located_routes() -> MIRProgram Never! {
+    b := fx_builder()
+    signedness :: [Bool]{true, false, false}
+    widths :: [Int]{32, 8, 16}
+    members :: [String]{"i32.trap.div", "u8.trap.div", "u16.trap.pow"}
+    symbols :: [String]{"jet_i32_trap_div", "jet_u8_trap_div", "jet_u16_trap_pow"}
+    operations :: [MIRBinaryOp]{MIRBinaryOp.Div, MIRBinaryOp.Div, MIRBinaryOp.Pow}
+    lefts :: [Int]{-10, 9, 3}
+    rights :: [Int]{3, 2, 4}
+    loop index in 0..<3 {
+        ty :: fx_narrow(signedness[index], widths[index])
+        left :: fx_narrow_const(&b, signedness[index], widths[index], lefts[index])
+        right :: fx_narrow_const(&b, signedness[index], widths[index], rights[index])
+        dispatch :: MIRBinaryDispatch.Prelude{call: fx_prelude_id("core.numeric", members[index]), location: Val(MIRPanicLoc{file: fx_source_file(), line: 1, column: 1})}
+        value :: fx_copy(&b, ty, MIROperation.Binary{op: operations[index], dispatch: dispatch, overflow: MIRBinaryOverflow.Trap, left: left, right: right})
+        fx_print(&b, value)
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_list_program(b)
+    loop index in 0..<3 -> &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.Overflow, "core.numeric", members[index], symbols[index], 4, MIRPreludeABI.Value))
+    p
 }
