@@ -678,14 +678,14 @@ fn jet_sync_map_metadata(map: &JetSyncMap) -> String {
 }
 
 fn jet_sync_value_id<T: __jet_Encode>(value: &T) -> String {
-    // Canonical DataTree JSON is the wire identity.  It is deterministic for
+    // Canonical Dyn JSON is the wire identity.  It is deterministic for
     // primitive, collection, and user-derived Codable values, so map keys do
     // not need an invented Rust `Ord` requirement.
-    jet_std::render_datatree_json(&value.jet_encode(), true, 0)
+    jet_std::render_dyn_json(&value.jet_encode(), true, 0)
 }
 
 fn jet_sync_value_show<T: __jet_Encode>(value: &T) -> String {
-    jet_std::render_datatree_json(&value.jet_encode(), false, 0)
+    jet_std::render_dyn_json(&value.jet_encode(), false, 0)
 }
 
 fn jet_sync_map_new_generic<K, V>() -> JetSyncMapGeneric<K, V> {
@@ -1209,22 +1209,22 @@ fn jet_sync_decode_error(message: impl Into<String>) -> Vec<jet_std::FieldError>
 /// must round-trip that state instead of turning it into an ordinary shape
 /// error, otherwise a denied value could become an apparent decode failure at
 /// a tier boundary and lose the carrier's algebraic identity.
-fn jet_sync_is_invalid_marker(tree: &jet_std::DataTree) -> bool {
+fn jet_sync_is_invalid_marker(tree: &jet_std::Dyn) -> bool {
     matches!(
         tree,
-        jet_std::DataTree::Object(fields)
+        jet_std::Dyn::Object(fields)
             if fields.len() == 1
                 && fields[0].0 == "invalid"
-                && matches!(&fields[0].1, jet_std::DataTree::Bool(true))
+                && matches!(&fields[0].1, jet_std::Dyn::Bool(true))
     )
 }
 
 fn jet_sync_object<'a>(
-    tree: &'a jet_std::DataTree,
+    tree: &'a jet_std::Dyn,
     expected: &[&str],
     label: &str,
-) -> Result<&'a Vec<(String, jet_std::DataTree)>, Vec<jet_std::FieldError>> {
-    let jet_std::DataTree::Object(fields) = tree else {
+) -> Result<&'a Vec<(String, jet_std::Dyn)>, Vec<jet_std::FieldError>> {
+    let jet_std::Dyn::Object(fields) = tree else {
         return Err(jet_sync_decode_error(format!("{label} must be an object")));
     };
     if fields.len() != expected.len()
@@ -1243,10 +1243,10 @@ fn jet_sync_object<'a>(
 }
 
 fn jet_sync_object_field<'a>(
-    fields: &'a [(String, jet_std::DataTree)],
+    fields: &'a [(String, jet_std::Dyn)],
     name: &str,
     label: &str,
-) -> Result<&'a jet_std::DataTree, Vec<jet_std::FieldError>> {
+) -> Result<&'a jet_std::Dyn, Vec<jet_std::FieldError>> {
     fields
         .iter()
         .find(|(key, _)| key == name)
@@ -1255,29 +1255,29 @@ fn jet_sync_object_field<'a>(
 }
 
 fn jet_sync_decode_string(
-    tree: &jet_std::DataTree,
+    tree: &jet_std::Dyn,
     label: &str,
 ) -> Result<String, Vec<jet_std::FieldError>> {
     match tree {
-        jet_std::DataTree::Text(value) => Ok(value.clone()),
+        jet_std::Dyn::Text(value) => Ok(value.clone()),
         other => Err(jet_sync_decode_error(format!(
             "{label} must be text, got {}",
-            jet_std::datatree_kind_for(other)
+            jet_std::dyn_kind_for(other)
         ))),
     }
 }
 
 fn jet_sync_decode_u64(
-    tree: &jet_std::DataTree,
+    tree: &jet_std::Dyn,
     label: &str,
 ) -> Result<u64, Vec<jet_std::FieldError>> {
     let value = match tree {
-        jet_std::DataTree::Text(value) => value.clone(),
-        jet_std::DataTree::Int(value) if *value >= 0 => value.to_string(),
+        jet_std::Dyn::Text(value) => value.clone(),
+        jet_std::Dyn::Int(value) if *value >= 0 => value.to_string(),
         other => {
             return Err(jet_sync_decode_error(format!(
                 "{label} must be a non-negative integer, got {}",
-                jet_std::datatree_kind_for(other)
+                jet_std::dyn_kind_for(other)
             )))
         }
     };
@@ -1290,24 +1290,24 @@ fn jet_sync_decode_u64(
 }
 
 fn jet_sync_decode_array<'a>(
-    tree: &'a jet_std::DataTree,
+    tree: &'a jet_std::Dyn,
     label: &str,
-) -> Result<&'a Vec<jet_std::DataTree>, Vec<jet_std::FieldError>> {
+) -> Result<&'a Vec<jet_std::Dyn>, Vec<jet_std::FieldError>> {
     match tree {
-        jet_std::DataTree::Array(values) => Ok(values),
+        jet_std::Dyn::Array(values) => Ok(values),
         other => Err(jet_sync_decode_error(format!(
             "{label} must be an array, got {}",
-            jet_std::datatree_kind_for(other)
+            jet_std::dyn_kind_for(other)
         ))),
     }
 }
 
 fn jet_sync_decode_field<T>(
-    fields: &[(String, jet_std::DataTree)],
+    fields: &[(String, jet_std::Dyn)],
     name: &str,
     label: &str,
     errors: &mut Vec<jet_std::FieldError>,
-    decode: impl FnOnce(&jet_std::DataTree) -> Result<T, Vec<jet_std::FieldError>>,
+    decode: impl FnOnce(&jet_std::Dyn) -> Result<T, Vec<jet_std::FieldError>>,
 ) -> Option<T> {
     match jet_sync_object_field(fields, name, label).and_then(decode) {
         Ok(value) => Some(value),
@@ -1330,40 +1330,40 @@ fn jet_sync_frame_entry(
 }
 
 impl __jet_Encode for JetSyncText {
-    fn jet_encode(&self) -> jet_std::DataTree {
+    fn jet_encode(&self) -> jet_std::Dyn {
         if !self.valid {
-            return jet_std::DataTree::Object(vec![(
+            return jet_std::Dyn::Object(vec![(
                 "invalid".to_string(),
-                jet_std::DataTree::Bool(true),
+                jet_std::Dyn::Bool(true),
             )]);
         }
-        jet_std::DataTree::Object(vec![(
+        jet_std::Dyn::Object(vec![(
             "atoms".to_string(),
-            jet_std::DataTree::Array(
+            jet_std::Dyn::Array(
                 self.atoms
                     .iter()
                     .map(|atom| {
-                        jet_std::DataTree::Object(vec![
+                        jet_std::Dyn::Object(vec![
                             (
                                 "replica".to_string(),
-                                jet_std::DataTree::Text(atom.replica.clone()),
+                                jet_std::Dyn::Text(atom.replica.clone()),
                             ),
                             (
                                 "counter".to_string(),
-                                jet_std::DataTree::Text(atom.counter.to_string()),
+                                jet_std::Dyn::Text(atom.counter.to_string()),
                             ),
                             (
                                 "after".to_string(),
-                                jet_std::DataTree::Text(match &atom.after {
+                                jet_std::Dyn::Text(match &atom.after {
                                     Some((replica, counter)) => format!("{replica}:{counter}"),
                                     None => String::new(),
                                 }),
                             ),
                             (
                                 "ch".to_string(),
-                                jet_std::DataTree::Text(atom.ch.to_string()),
+                                jet_std::Dyn::Text(atom.ch.to_string()),
                             ),
-                            ("deleted".to_string(), jet_std::DataTree::Bool(atom.deleted)),
+                            ("deleted".to_string(), jet_std::Dyn::Bool(atom.deleted)),
                         ])
                     })
                     .collect(),
@@ -1373,7 +1373,7 @@ impl __jet_Encode for JetSyncText {
 }
 
 impl __jet_Decode for JetSyncText {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+    fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>> {
         if jet_sync_is_invalid_marker(tree) {
             return Ok(JetSyncText {
                 atoms: Vec::new(),
@@ -1435,7 +1435,7 @@ impl __jet_Decode for JetSyncText {
                 "SyncText atom",
                 &mut entry_errors,
                 |tree| match tree {
-                    jet_std::DataTree::Bool(value) => Ok(*value),
+                    jet_std::Dyn::Bool(value) => Ok(*value),
                     _ => Err(jet_sync_decode_error("SyncText.deleted expects a Bool")),
                 },
             );
@@ -1513,31 +1513,31 @@ impl __jet_Decode for JetSyncText {
 }
 
 impl __jet_Encode for JetSyncCounter {
-    fn jet_encode(&self) -> jet_std::DataTree {
+    fn jet_encode(&self) -> jet_std::Dyn {
         if !self.valid {
-            return jet_std::DataTree::Object(vec![(
+            return jet_std::Dyn::Object(vec![(
                 "invalid".to_string(),
-                jet_std::DataTree::Bool(true),
+                jet_std::Dyn::Bool(true),
             )]);
         }
-        jet_std::DataTree::Object(vec![(
+        jet_std::Dyn::Object(vec![(
             "counts".to_string(),
-            jet_std::DataTree::Array(
+            jet_std::Dyn::Array(
                 self.counts
                     .iter()
                     .map(|(replica, positive, negative)| {
-                        jet_std::DataTree::Object(vec![
+                        jet_std::Dyn::Object(vec![
                             (
                                 "replica".to_string(),
-                                jet_std::DataTree::Text(replica.clone()),
+                                jet_std::Dyn::Text(replica.clone()),
                             ),
                             (
                                 "positive".to_string(),
-                                jet_std::DataTree::Text(positive.to_string()),
+                                jet_std::Dyn::Text(positive.to_string()),
                             ),
                             (
                                 "negative".to_string(),
-                                jet_std::DataTree::Text(negative.to_string()),
+                                jet_std::Dyn::Text(negative.to_string()),
                             ),
                         ])
                     })
@@ -1548,7 +1548,7 @@ impl __jet_Encode for JetSyncCounter {
 }
 
 impl __jet_Decode for JetSyncCounter {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+    fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>> {
         if jet_sync_is_invalid_marker(tree) {
             return Ok(JetSyncCounter {
                 counts: Vec::new(),
@@ -1632,29 +1632,29 @@ impl __jet_Decode for JetSyncCounter {
 }
 
 impl __jet_Encode for JetSyncMap {
-    fn jet_encode(&self) -> jet_std::DataTree {
+    fn jet_encode(&self) -> jet_std::Dyn {
         if !self.valid {
-            return jet_std::DataTree::Object(vec![(
+            return jet_std::Dyn::Object(vec![(
                 "invalid".to_string(),
-                jet_std::DataTree::Bool(true),
+                jet_std::Dyn::Bool(true),
             )]);
         }
-        jet_std::DataTree::Object(vec![(
+        jet_std::Dyn::Object(vec![(
             "entries".to_string(),
-            jet_std::DataTree::Array(
+            jet_std::Dyn::Array(
                 self.entries
                     .iter()
                     .map(|(key, value, clock, writer)| {
-                        jet_std::DataTree::Object(vec![
-                            ("key".to_string(), jet_std::DataTree::Text(key.clone())),
-                            ("value".to_string(), jet_std::DataTree::Text(value.clone())),
+                        jet_std::Dyn::Object(vec![
+                            ("key".to_string(), jet_std::Dyn::Text(key.clone())),
+                            ("value".to_string(), jet_std::Dyn::Text(value.clone())),
                             (
                                 "clock".to_string(),
-                                jet_std::DataTree::Text(clock.to_string()),
+                                jet_std::Dyn::Text(clock.to_string()),
                             ),
                             (
                                 "writer".to_string(),
-                                jet_std::DataTree::Text(writer.clone()),
+                                jet_std::Dyn::Text(writer.clone()),
                             ),
                         ])
                     })
@@ -1665,7 +1665,7 @@ impl __jet_Encode for JetSyncMap {
 }
 
 impl __jet_Decode for JetSyncMap {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+    fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>> {
         if jet_sync_is_invalid_marker(tree) {
             return Ok(JetSyncMap {
                 entries: Vec::new(),
@@ -1749,25 +1749,25 @@ impl __jet_Decode for JetSyncMap {
 }
 
 impl __jet_Encode for JetSyncList {
-    fn jet_encode(&self) -> jet_std::DataTree {
+    fn jet_encode(&self) -> jet_std::Dyn {
         if !self.valid {
-            return jet_std::DataTree::Object(vec![(
+            return jet_std::Dyn::Object(vec![(
                 "invalid".to_string(),
-                jet_std::DataTree::Bool(true),
+                jet_std::Dyn::Bool(true),
             )]);
         }
-        jet_std::DataTree::Object(vec![(
+        jet_std::Dyn::Object(vec![(
             "items".to_string(),
-            jet_std::DataTree::Array(
+            jet_std::Dyn::Array(
                 self.items
                     .iter()
                     .map(|(replica, item)| {
-                        jet_std::DataTree::Object(vec![
+                        jet_std::Dyn::Object(vec![
                             (
                                 "replica".to_string(),
-                                jet_std::DataTree::Text(replica.clone()),
+                                jet_std::Dyn::Text(replica.clone()),
                             ),
-                            ("item".to_string(), jet_std::DataTree::Text(item.clone())),
+                            ("item".to_string(), jet_std::Dyn::Text(item.clone())),
                         ])
                     })
                     .collect(),
@@ -1777,7 +1777,7 @@ impl __jet_Encode for JetSyncList {
 }
 
 impl __jet_Decode for JetSyncList {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+    fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>> {
         if jet_sync_is_invalid_marker(tree) {
             return Ok(JetSyncList {
                 items: Vec::new(),
@@ -1842,29 +1842,29 @@ where
     K: __jet_Encode,
     V: __jet_Encode,
 {
-    fn jet_encode(&self) -> jet_std::DataTree {
+    fn jet_encode(&self) -> jet_std::Dyn {
         if !self.valid {
-            return jet_std::DataTree::Object(vec![(
+            return jet_std::Dyn::Object(vec![(
                 "invalid".to_string(),
-                jet_std::DataTree::Bool(true),
+                jet_std::Dyn::Bool(true),
             )]);
         }
-        jet_std::DataTree::Object(vec![(
+        jet_std::Dyn::Object(vec![(
             "entries".to_string(),
-            jet_std::DataTree::Array(
+            jet_std::Dyn::Array(
                 self.entries
                     .iter()
                     .map(|(key, value, clock, writer)| {
-                        jet_std::DataTree::Object(vec![
+                        jet_std::Dyn::Object(vec![
                             ("key".to_string(), key.jet_encode()),
                             ("value".to_string(), value.jet_encode()),
                             (
                                 "clock".to_string(),
-                                jet_std::DataTree::Text(clock.to_string()),
+                                jet_std::Dyn::Text(clock.to_string()),
                             ),
                             (
                                 "writer".to_string(),
-                                jet_std::DataTree::Text(writer.clone()),
+                                jet_std::Dyn::Text(writer.clone()),
                             ),
                         ])
                     })
@@ -1879,7 +1879,7 @@ where
     K: __jet_Decode + __jet_Encode,
     V: __jet_Decode + __jet_Encode,
 {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+    fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>> {
         if jet_sync_is_invalid_marker(tree) {
             return Ok(JetSyncMapGeneric {
                 entries: Vec::new(),
@@ -1972,23 +1972,23 @@ impl<T> __jet_Encode for JetSyncListGeneric<T>
 where
     T: __jet_Encode,
 {
-    fn jet_encode(&self) -> jet_std::DataTree {
+    fn jet_encode(&self) -> jet_std::Dyn {
         if !self.valid {
-            return jet_std::DataTree::Object(vec![(
+            return jet_std::Dyn::Object(vec![(
                 "invalid".to_string(),
-                jet_std::DataTree::Bool(true),
+                jet_std::Dyn::Bool(true),
             )]);
         }
-        jet_std::DataTree::Object(vec![(
+        jet_std::Dyn::Object(vec![(
             "items".to_string(),
-            jet_std::DataTree::Array(
+            jet_std::Dyn::Array(
                 self.items
                     .iter()
                     .map(|(replica, item)| {
-                        jet_std::DataTree::Object(vec![
+                        jet_std::Dyn::Object(vec![
                             (
                                 "replica".to_string(),
-                                jet_std::DataTree::Text(replica.clone()),
+                                jet_std::Dyn::Text(replica.clone()),
                             ),
                             ("item".to_string(), item.jet_encode()),
                         ])
@@ -2003,7 +2003,7 @@ impl<T> __jet_Decode for JetSyncListGeneric<T>
 where
     T: __jet_Decode + __jet_Encode,
 {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+    fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>> {
         if jet_sync_is_invalid_marker(tree) {
             return Ok(JetSyncListGeneric {
                 items: Vec::new(),

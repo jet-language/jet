@@ -6,7 +6,7 @@
 //! are versioned so the index can evolve without teaching each artifact codec
 //! about the other record kinds.
 
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_escape, parse_json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
@@ -385,7 +385,7 @@ impl RecordIndexEntry {
         if line.len() > MAX_INDEX_LINE_BYTES {
             return Err("record index line exceeds the 1 MiB limit".into());
         }
-        let DataTree::Object(fields) = parse_json(line)
+        let Dyn::Object(fields) = parse_json(line)
             .map_err(|_| "record index line is not valid JSON".to_string())?
         else {
             return Err("record index line must be a JSON object".into());
@@ -1359,24 +1359,24 @@ fn links_json(links: &[RecordLink]) -> String {
     format!("[{}]", values.join(","))
 }
 
-fn field<'a>(fields: &'a [(String, DataTree)], name: &str) -> Option<&'a DataTree> {
+fn field<'a>(fields: &'a [(String, Dyn)], name: &str) -> Option<&'a Dyn> {
     fields
         .iter()
         .find_map(|(key, value)| (key == name).then_some(value))
 }
 
-fn string_field(fields: &[(String, DataTree)], name: &str) -> Result<String, String> {
+fn string_field(fields: &[(String, Dyn)], name: &str) -> Result<String, String> {
     match field(fields, name) {
-        Some(DataTree::Text(value) | DataTree::TypedText(value)) => Ok(value.clone()),
+        Some(Dyn::Text(value) | Dyn::TypedText(value)) => Ok(value.clone()),
         Some(_) => Err(format!("record index field `{name}` must be a string")),
         None => Err(format!("record index is missing `{name}`")),
     }
 }
 
-fn integer_field(fields: &[(String, DataTree)], name: &str) -> Result<i64, String> {
+fn integer_field(fields: &[(String, Dyn)], name: &str) -> Result<i64, String> {
     match field(fields, name) {
-        Some(DataTree::Int(value)) => Ok(*value),
-        Some(DataTree::Number(value)) => value
+        Some(Dyn::Int(value)) => Ok(*value),
+        Some(Dyn::Number(value)) => value
             .parse::<i64>()
             .map_err(|_| format!("record index field `{name}` must be an integer")),
         Some(_) => Err(format!("record index field `{name}` must be an integer")),
@@ -1384,24 +1384,24 @@ fn integer_field(fields: &[(String, DataTree)], name: &str) -> Result<i64, Strin
     }
 }
 
-fn unsigned_field(fields: &[(String, DataTree)], name: &str) -> Result<u64, String> {
+fn unsigned_field(fields: &[(String, Dyn)], name: &str) -> Result<u64, String> {
     let value = integer_field(fields, name)?;
     u64::try_from(value).map_err(|_| format!("record index field `{name}` must be non-negative"))
 }
 
-fn bool_field(fields: &[(String, DataTree)], name: &str) -> Result<bool, String> {
+fn bool_field(fields: &[(String, Dyn)], name: &str) -> Result<bool, String> {
     match field(fields, name) {
-        Some(DataTree::Bool(value)) => Ok(*value),
+        Some(Dyn::Bool(value)) => Ok(*value),
         Some(_) => Err(format!("record index field `{name}` must be a boolean")),
         None => Err(format!("record index is missing `{name}`")),
     }
 }
 
 fn links_field(
-    fields: &[(String, DataTree)],
+    fields: &[(String, Dyn)],
     name: &str,
 ) -> Result<Vec<RecordLink>, String> {
-    let Some(DataTree::Array(values)) = field(fields, name) else {
+    let Some(Dyn::Array(values)) = field(fields, name) else {
         return Err(format!("record index field `{name}` must be an array"));
     };
     if values.len() > MAX_LINKS_PER_ENTRY {
@@ -1409,7 +1409,7 @@ fn links_field(
     }
     let mut links = Vec::with_capacity(values.len());
     for value in values {
-        let DataTree::Object(fields) = value else {
+        let Dyn::Object(fields) = value else {
             return Err(format!("record index {name} link must be an object"));
 
         };

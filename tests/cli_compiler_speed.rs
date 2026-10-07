@@ -3,7 +3,7 @@ mod common;
 #[cfg(unix)]
 mod production_path {
     use super::common::Scratch;
-    use jet_foundation::DataTree::DataTree;
+    use jet_foundation::Dyn::Dyn;
     use jet_foundation::JSON::{json_get, json_int, json_str, parse};
     use std::env;
     use std::fs;
@@ -33,15 +33,15 @@ mod production_path {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path)
     }
 
-    fn json_field<'a>(value: &'a DataTree, key: &str) -> &'a DataTree {
+    fn json_field<'a>(value: &'a Dyn, key: &str) -> &'a Dyn {
         json_get(value, key).unwrap_or_else(|| panic!("missing JSON field {key}"))
     }
 
-    fn json_text<'a>(value: &'a DataTree, key: &str) -> &'a str {
+    fn json_text<'a>(value: &'a Dyn, key: &str) -> &'a str {
         json_str(json_field(value, key)).unwrap_or_else(|| panic!("JSON field {key} is not text"))
     }
 
-    fn json_number(value: &DataTree, key: &str) -> i64 {
+    fn json_number(value: &Dyn, key: &str) -> i64 {
         json_int(json_field(value, key))
             .unwrap_or_else(|| panic!("JSON field {key} is not numeric"))
     }

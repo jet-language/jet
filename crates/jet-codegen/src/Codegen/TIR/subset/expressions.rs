@@ -96,7 +96,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         // Bool `matches!` (`TExprKind::PatternMatches`). Admission needs a known
         // variant name; lowering resolves the owner from the checked subject type,
         // so a user enum variant spelled like a builtin (`Int`, `Char`) and a
-        // `DataTree`/`Key` subject with the same name each keep their own owner.
+        // `Dyn`/`Key` subject with the same name each keep their own owner.
         Expr::PatternTest {
             subject,
             pattern: Pattern::Variant {

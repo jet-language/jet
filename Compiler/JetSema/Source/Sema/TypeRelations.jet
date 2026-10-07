@@ -666,7 +666,7 @@ pub fn sema_type_bound_satisfied_with_generics(graph: SemaRegistrationGraph, act
 }
 
 // D-SERDE: a list, fixed array, or optional value is codable exactly when its
-// element is, and a map when its key and value are; the dynamic `DataTree` is
+// element is, and a map when its key and value are; the dynamic `Dyn` is
 // the codec tree itself (Rust `TraitRegistry::type_implements_trait`).
 fn sema_type_codec_structural_bound(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller_module_identity: String, generic_params: [TGenericParam]) -> Bool? {
     if bound_name != "Encode" && bound_name != "Decode" && bound_name != "Serialize" -> return None
@@ -678,7 +678,7 @@ fn sema_type_codec_structural_bound(graph: SemaRegistrationGraph, actual_resolve
             return sema_type_bound_satisfied_with_generics(graph, value, bound_name, caller_module_identity, generic_params)
         }
         .Named(name) -> {
-            if name == "DataTree" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV" -> return Val(true)
+            if name == "Dyn" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV" -> return Val(true)
         }
         else -> {}
     }

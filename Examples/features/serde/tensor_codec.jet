@@ -1,6 +1,6 @@
 // CORE-F075: how a 2x3 Tensor crosses Jet's codecs today. `core.compute.Tensor`
 // has no canonical Encode/Decode, so JSON and CBOR carry a matrix only through
-// an explicit DataTree the program builds: shape and row-major order survive as
+// an explicit Dyn the program builds: shape and row-major order survive as
 // plain arrays, while the scalar profile survives only if the program writes it.
 // `compute.serialize` is the module's own text format; it keeps shape, element
 // order and the F64/F32 profile. CBOR tags, including the RFC 8746 typed-array
@@ -14,19 +14,19 @@ fn describe(label: String, t: compute.Tensor) {
 }
 
 // The explicit wire form: {"shape": [...], "data": [...], "profile": "..."}.
-fn to_tree(t: compute.Tensor) -> DataTree {
-    shape := [DataTree]{}
-    loop dim in t.shape -> &shape.push(DataTree.Int(dim))
-    data := [DataTree]{}
-    loop value in t.data -> &data.push(DataTree.Float(value))
-    fields := [String:DataTree]{}
-    fields["shape"] = DataTree.Array(shape)
-    fields["data"] = DataTree.Array(data)
-    fields["profile"] = DataTree.Text(~t.numeric_profile)
-    DataTree.Object(fields)
+fn to_tree(t: compute.Tensor) -> Dyn {
+    shape := [Dyn]{}
+    loop dim in t.shape -> &shape.push(Dyn.Int(dim))
+    data := [Dyn]{}
+    loop value in t.data -> &data.push(Dyn.Float(value))
+    fields := [String:Dyn]{}
+    fields["shape"] = Dyn.Array(shape)
+    fields["data"] = Dyn.Array(data)
+    fields["profile"] = Dyn.Text(~t.numeric_profile)
+    Dyn.Object(fields)
 }
 
-fn elements(tree: DataTree, key: String) -> [DataTree] {
+fn elements(tree: Dyn, key: String) -> [Dyn] {
     field :: &tree.field(key) ?? panic("missing {key}")
     if field == {
         .Array(items) -> items
@@ -35,7 +35,7 @@ fn elements(tree: DataTree, key: String) -> [DataTree] {
 }
 
 // A JSON number without a fraction reads back as an Int.
-fn number(item: DataTree) -> Float {
+fn number(item: Dyn) -> Float {
     if item == {
         .Float(value) -> value
         .Int(value) -> Float.from_int(value)
@@ -43,7 +43,7 @@ fn number(item: DataTree) -> Float {
     }
 }
 
-fn from_tree(tree: DataTree) -> compute.Tensor {
+fn from_tree(tree: Dyn) -> compute.Tensor {
     shape := [Int]{}
     loop item in elements(tree, "shape") -> &shape.push(item.int() ?? panic("dim"))
     data := [Float]{}
@@ -79,12 +79,12 @@ fn run() {
     tagged :: [U8]{216, 40, 130, 130, 2, 3, 134, 1, 2, 3, 4, 5, 6}
     _ :: cbor.parse(tagged) ?? {
         print("cbor tag 40: rejected: {err.reason}")
-        DataTree.Null
+        Dyn.Null
     }
     // RFC 8746: tag 85 (little-endian float32 typed array) over 4 bytes.
     typed :: [U8]{216, 85, 68, 0, 0, 192, 63}
     _ :: cbor.parse(typed) ?? {
         print("cbor tag 85: rejected: {err.reason}")
-        DataTree.Null
+        Dyn.Null
     }
 }

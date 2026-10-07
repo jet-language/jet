@@ -6476,7 +6476,7 @@ fn dart_bind_error(path: &str, why: &str) -> ! {
 }
 
 /// D-FFI-PWSH1=A: validate named script functions, then generate a persistent
-/// PowerShell worker whose object pipeline crosses as canonical DataTree.
+/// PowerShell worker whose object pipeline crosses as canonical Dyn.
 fn run_powershell_bind(args: &[&String]) {
     let usage = || {
         eprintln!(

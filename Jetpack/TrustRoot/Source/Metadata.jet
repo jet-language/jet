@@ -252,33 +252,33 @@ pub fn trust_public_trust_manifest(domain: String, bootstrap: RootBootstrap?, ke
     status :: if sorted.len() == 0 -> "awaiting-key-ceremony" else -> "prepared"
     root :: if bootstrap == {
         .Val(pin) -> {
-            fields := [String: DataTree]{}
-            fields["protocol"] = DataTree.Text("jet-tuf-root-v1")
-            fields["digest"] = DataTree.Text(pin.pin_digest)
-            fields["version"] = DataTree.Int(pin.root_version)
-            fields["consistent_snapshot"] = DataTree.Bool(pin.consistent_snapshot)
-            DataTree.Object(fields)
+            fields := [String: Dyn]{}
+            fields["protocol"] = Dyn.Text("jet-tuf-root-v1")
+            fields["digest"] = Dyn.Text(pin.pin_digest)
+            fields["version"] = Dyn.Int(pin.root_version)
+            fields["consistent_snapshot"] = Dyn.Bool(pin.consistent_snapshot)
+            Dyn.Object(fields)
         }
-        .None -> DataTree.Null
+        .None -> Dyn.Null
     }
-    rendered := [DataTree]{}
+    rendered := [Dyn]{}
     loop key in sorted {
-        fields := [String: DataTree]{}
-        fields["role"] = DataTree.Text(key.role)
-        fields["path"] = DataTree.Text(key.path_for_publication())
-        fields["key_id"] = DataTree.Text(key.key_id)
-        fields["algorithm"] = DataTree.Text(key.algorithm)
-        fields["public_key"] = DataTree.Text(key.public_key)
-        &rendered.push(DataTree.Object(fields))
+        fields := [String: Dyn]{}
+        fields["role"] = Dyn.Text(key.role)
+        fields["path"] = Dyn.Text(key.path_for_publication())
+        fields["key_id"] = Dyn.Text(key.key_id)
+        fields["algorithm"] = Dyn.Text(key.algorithm)
+        fields["public_key"] = Dyn.Text(key.public_key)
+        &rendered.push(Dyn.Object(fields))
     }
-    manifest := [String: DataTree]{}
-    manifest["schema"] = DataTree.Int(1)
-    manifest["domain"] = DataTree.Text(~domain)
-    manifest["status"] = DataTree.Text(status)
+    manifest := [String: Dyn]{}
+    manifest["schema"] = Dyn.Int(1)
+    manifest["domain"] = Dyn.Text(~domain)
+    manifest["status"] = Dyn.Text(status)
     manifest["root"] = root
-    manifest["keys"] = DataTree.Array(rendered)
-    manifest["rotation"] = DataTree.Text("offline threshold root rotation; publish a new manifest only after the old root verifies the new root")
-    Ok("{json.to_string(DataTree.Object(manifest))}\n")
+    manifest["keys"] = Dyn.Array(rendered)
+    manifest["rotation"] = Dyn.Text("offline threshold root rotation; publish a new manifest only after the old root verifies the new root")
+    Ok("{json.to_string(Dyn.Object(manifest))}\n")
 }
 
 // Rust `str::parse::<u64>`: ASCII digits only, no sign.

@@ -417,7 +417,7 @@ fn store_repro_compare_registration_entries(verification: &StoreVerification, le
 // Rust `{:?}` of a `Vec<String>`: `["a", "b"]`.
 fn store_repro_debug_list(values: [String]) -> String Never! {
     quoted := [String]{}
-    loop value in values -> &quoted.push(json.to_string(DataTree.Text(value)))
+    loop value in values -> &quoted.push(json.to_string(Dyn.Text(value)))
     "[{quoted.join(", ")}]"
 }
 
@@ -476,45 +476,45 @@ fn store_repro_remove_report(roots: HangarRoots, action_key: String) StoreError!
 }
 
 fn store_repro_report_json(action_key: String, left_action_key: String, right_action_key: String, left: StoreEntry, right: StoreEntry, left_producer: ProducerRecord, right_producer: ProducerRecord, difference: FirstDifference) -> String Never! {
-    report :: DataTree.Object([String: DataTree]{
-        "action_key": DataTree.Text(action_key),
-        "first_difference": DataTree.Object([String: DataTree]{
-            "kind": DataTree.Text(difference.kind.label()),
-            "left": DataTree.Text(difference.left),
-            "path": DataTree.Text(difference.path),
-            "right": DataTree.Text(difference.right),
+    report :: Dyn.Object([String: Dyn]{
+        "action_key": Dyn.Text(action_key),
+        "first_difference": Dyn.Object([String: Dyn]{
+            "kind": Dyn.Text(difference.kind.label()),
+            "left": Dyn.Text(difference.left),
+            "path": Dyn.Text(difference.path),
+            "right": Dyn.Text(difference.right),
         }),
         "left": store_repro_side_json(left, left_producer, left_action_key),
-        "producer_action": DataTree.Object([String: DataTree]{
-            "left_action_key": DataTree.Text(left_action_key),
-            "left_provider": DataTree.Text(left_producer.provider),
-            "left_source_digest": DataTree.Text(left_producer.source_digest),
-            "left_source": DataTree.Text(left_producer.immutable_source),
-            "right_action_key": DataTree.Text(right_action_key),
-            "right_provider": DataTree.Text(right_producer.provider),
-            "right_source_digest": DataTree.Text(right_producer.source_digest),
-            "right_source": DataTree.Text(right_producer.immutable_source),
+        "producer_action": Dyn.Object([String: Dyn]{
+            "left_action_key": Dyn.Text(left_action_key),
+            "left_provider": Dyn.Text(left_producer.provider),
+            "left_source_digest": Dyn.Text(left_producer.source_digest),
+            "left_source": Dyn.Text(left_producer.immutable_source),
+            "right_action_key": Dyn.Text(right_action_key),
+            "right_provider": Dyn.Text(right_producer.provider),
+            "right_source_digest": Dyn.Text(right_producer.source_digest),
+            "right_source": Dyn.Text(right_producer.immutable_source),
         }),
         "right": store_repro_side_json(right, right_producer, right_action_key),
-        "schema": DataTree.Text(STORE_REPRO_REPORT_SCHEMA),
-        "status": DataTree.Text(STORE_REPRO_REPORT_STATUS),
+        "schema": Dyn.Text(STORE_REPRO_REPORT_SCHEMA),
+        "status": Dyn.Text(STORE_REPRO_REPORT_STATUS),
     })
     "{json.canonical(report) ?? panic("value is not canonical JSON")}\n"
 }
 
-fn store_repro_side_json(entry: StoreEntry, producer: ProducerRecord, action_key: String) -> DataTree Never! {
-    DataTree.Object([String: DataTree]{
-        "action_key": DataTree.Text(action_key),
-        "capabilities": DataTree.Text(producer.facts.get("build.capabilities") ?? ""),
-        "entry": DataTree.Text(store_repro_report_entry_id(entry, action_key)),
-        "output_hash": DataTree.Text(entry.envelope.output_hash),
-        "platform": DataTree.Text(entry.envelope.platform),
+fn store_repro_side_json(entry: StoreEntry, producer: ProducerRecord, action_key: String) -> Dyn Never! {
+    Dyn.Object([String: Dyn]{
+        "action_key": Dyn.Text(action_key),
+        "capabilities": Dyn.Text(producer.facts.get("build.capabilities") ?? ""),
+        "entry": Dyn.Text(store_repro_report_entry_id(entry, action_key)),
+        "output_hash": Dyn.Text(entry.envelope.output_hash),
+        "platform": Dyn.Text(entry.envelope.platform),
         "producer_facts": store_repro_text_object(producer.facts),
-        "provenance": DataTree.Text(entry.envelope.provenance),
+        "provenance": Dyn.Text(entry.envelope.provenance),
         "replay_facts": store_repro_text_object(producer.plan.facts()),
-        "source_fingerprint": DataTree.Text(entry.cache_identity.source_fingerprint),
-        "recipe_fingerprint": DataTree.Text(entry.cache_identity.recipe_fingerprint),
-        "policy_fingerprint": DataTree.Text(entry.cache_identity.policy_fingerprint),
+        "source_fingerprint": Dyn.Text(entry.cache_identity.source_fingerprint),
+        "recipe_fingerprint": Dyn.Text(entry.cache_identity.recipe_fingerprint),
+        "policy_fingerprint": Dyn.Text(entry.cache_identity.policy_fingerprint),
     })
 }
 

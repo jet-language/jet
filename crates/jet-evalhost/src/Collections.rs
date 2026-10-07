@@ -155,7 +155,7 @@ pub(crate) mod collection_semantics {
     // constants and retained-first-chunk decision. These small host shims
     // supply the AOT failure/receipt siblings that the flat Prelude expects.
     mod jet_std {
-        pub(crate) use crate::Encoding::json_rt::{render_datatree_json, DataTree};
+        pub(crate) use crate::Encoding::json_rt::{render_dyn_json, Dyn};
     }
     struct JetParaFailure {
         index: usize,

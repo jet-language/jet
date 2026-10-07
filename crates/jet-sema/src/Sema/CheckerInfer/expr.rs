@@ -7382,9 +7382,9 @@ impl<'a> Checker<'a> {
         }
         if let Expr::Ident(type_name, type_span) = &**inner {
             let display_type_name = self.display_type_name(type_name, None);
-            // D-SERDE13=B: `Data.Null` etc. — retired spelling, point at `DataTree`.
+            // D-SERDE13=B: `Data.Null` etc. — retired spelling, point at `Dyn`.
             if type_name == "Data" {
-                self.diags.push(data_renamed_to_datatree(*type_span));
+                self.diags.push(data_renamed_to_dyn(*type_span));
                 return Some(json_ty());
             }
             if is_json_type_name(type_name) {

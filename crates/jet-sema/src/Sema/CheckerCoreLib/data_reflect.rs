@@ -10,28 +10,28 @@ pub fn data_nominal_leaf(name: &str) -> Option<&str> {
     (!name.contains("::") && !name.contains('.')).then_some(name)
 }
 
-/// D-SERDE-ACCESS=B + D-SERDE14=A: accessor methods on `DataTree`. Every read
+/// D-SERDE-ACCESS=B + D-SERDE14=A: accessor methods on `Dyn`. Every read
 /// yields `T ![FieldError]` so automatic propagation composes with no mapping ceremony
 /// inside a hand `decode`; `.field` and `.at` fill `FieldError.path` from the
 /// segment they read. Scalar readers leave the path empty, so a containing
 /// decoder frames their result with `FieldError.under`.
-/// `.field(name)` → `DataTree ![FieldError]`
-/// `.at(i)` → `DataTree ![FieldError]`
+/// `.field(name)` → `Dyn ![FieldError]`
+/// `.at(i)` → `Dyn ![FieldError]`
 /// `.int()` → `Int ![FieldError]`
 /// `.text()` → `String ![FieldError]`
 /// `.bool()` → `Bool ![FieldError]`
 /// `.float()` → `Float ![FieldError]`
 /// `.to_text()` → `String?`
 /// `.equal_unordered(other)` → `Bool`
-pub fn datatree_method_return(method: &str, n_args: usize) -> Option<Type> {
+pub fn dyn_method_return(method: &str, n_args: usize) -> Option<Type> {
     let decode_err = || Box::new(decode_error_ty());
     match (method, n_args) {
         ("field", 1) => Some(Type::Result {
-            ok: Box::new(Type::Named("DataTree".to_string())),
+            ok: Box::new(Type::Named("Dyn".to_string())),
             err: decode_err(),
         }),
         ("at", 1) => Some(Type::Result {
-            ok: Box::new(Type::Named("DataTree".to_string())),
+            ok: Box::new(Type::Named("Dyn".to_string())),
             err: decode_err(),
         }),
         ("int", 0) => Some(Type::Result {
@@ -57,7 +57,7 @@ pub fn datatree_method_return(method: &str, n_args: usize) -> Option<Type> {
 }
 
 /// D-DBDRIVER1: accessor methods on `DBValue` — read back the tagged value a
-/// query bound or a row column carried. Mirrors `datatree_method_return`'s
+/// query bound or a row column carried. Mirrors `dyn_method_return`'s
 /// shape exactly (`Result<T, String>`); `int` stays 64-bit (never `Float`),
 /// while `blob` returns the exact `[U8]` payload.
 pub fn db_value_method_return(method: &str, n_args: usize) -> Option<Type> {

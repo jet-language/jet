@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 pub(crate) use jet_foundation::Hex::encode as hex;
 use jet_foundation::JSON::{json_int, json_str, json_u32, parse};
 use jet_foundation::Report::{StatusEnvelope, StatusFields, STATUS_SCHEMA};
@@ -517,13 +517,13 @@ fn number(value: Option<String>) -> Result<u64, RecordError> {
         .map_err(|_| RecordError::Malformed)
 }
 
-fn relay_status(line: &str, action: &str) -> Result<DataTree, String> {
+fn relay_status(line: &str, action: &str) -> Result<Dyn, String> {
     let value = parse(line).map_err(|_| "browser trace relay record is malformed")?;
     let object = object_map(&value)?;
     if object.get("schema").and_then(json_str) != Some(STATUS_SCHEMA)
         || object.get("action").and_then(json_str) != Some(action)
-        || !matches!(object.get("ok"), Some(DataTree::Bool(true)))
-        || !matches!(object.get("reports"), Some(DataTree::Array(_)))
+        || !matches!(object.get("ok"), Some(Dyn::Bool(true)))
+        || !matches!(object.get("reports"), Some(Dyn::Array(_)))
         || object.contains_key("status")
     {
         return Err("browser trace relay record is not a shared status".into());
@@ -633,8 +633,8 @@ fn process_start_marker(pid: u32) -> Option<String> {
         let _ = pid;
     }
 }
-fn object_map(value: &DataTree) -> Result<BTreeMap<String, DataTree>, String> {
-    let DataTree::Object(fields) = value else {
+fn object_map(value: &Dyn) -> Result<BTreeMap<String, Dyn>, String> {
+    let Dyn::Object(fields) = value else {
         return Err("browser trace relay record must be an object".to_string());
     };
     Ok(fields.iter().cloned().collect())

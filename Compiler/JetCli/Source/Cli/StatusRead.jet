@@ -15,16 +15,16 @@ pub fn jet_cli_read_error(message: String) -> JetCLIReadError Never! {
     JetCLIReadError{message: message}
 }
 
-pub fn report_status_value_parse(text: String) -> DataTree JetCLIReadError! {
+pub fn report_status_value_parse(text: String) -> Dyn JetCLIReadError! {
     if cli_json.parse(text) == {
         .Ok(tree) -> Ok(tree)
         .Err(error) -> Err(jet_cli_read_error(error.reason))
     }
 }
 
-// Rust StatusValue::from_data_tree. Core's public tree has seven variants;
+// Rust StatusValue::from_dyn. Core's public tree has seven variants;
 // typed text/bytes/number atoms are represented by Text/Array/Int here.
-pub fn jet_cli_status_from_tree(tree: DataTree) -> JetCLIStatusValue JetCLIReadError! {
+pub fn jet_cli_status_from_tree(tree: Dyn) -> JetCLIStatusValue JetCLIReadError! {
     value :: if tree == {
         .Null -> JetCLIStatusValue.Null
         .Bool(value) -> jet_cli_status_bool(value)

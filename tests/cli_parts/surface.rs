@@ -1,5 +1,5 @@
 use super::*;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_get, json_int, json_str};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -1043,7 +1043,7 @@ fn machine_report_paths_stay_resolvable_across_repository_layouts() {
         assert_eq!(stderr.lines().count(), 1, "{stderr}");
         parse_json(stderr.trim()).unwrap_or_else(|_| panic!("invalid diagnostic JSON: {stderr}"))
     };
-    let report_file = |value: &DataTree| {
+    let report_file = |value: &Dyn| {
         jet_foundation::JSON::json_str(jet_foundation::JSON::json_get(value, "file").unwrap())
             .unwrap()
             .to_string()
@@ -1091,12 +1091,12 @@ fn machine_report_paths_stay_resolvable_across_repository_layouts() {
         "safe"
     );
     let edits = match jet_foundation::JSON::json_get(&fix_report, "fix_edits").unwrap() {
-        DataTree::Array(edits) => edits,
+        Dyn::Array(edits) => edits,
         _ => panic!("fix_edits is not an array"),
     };
     assert_eq!(edits.len(), 1);
     let edit = match &edits[0] {
-        DataTree::Object(_) => &edits[0],
+        Dyn::Object(_) => &edits[0],
         _ => panic!("fix edit is not an object"),
     };
     let edit_file =
@@ -1104,7 +1104,7 @@ fn machine_report_paths_stay_resolvable_across_repository_layouts() {
             .unwrap();
     assert_eq!(fix_file, edit_file);
     let span = match jet_foundation::JSON::json_get(edit, "span").unwrap() {
-        span @ DataTree::Object(_) => span,
+        span @ Dyn::Object(_) => span,
         _ => panic!("fix span is not an object"),
     };
     let start =
@@ -1215,7 +1215,7 @@ fn name_suggestion_json_edit_applies_and_rechecks_clean() {
         "E0107"
     );
     let edits = match jet_foundation::JSON::json_get(&report, "fix_edits").unwrap() {
-        DataTree::Array(edits) => edits,
+        Dyn::Array(edits) => edits,
         _ => panic!("fix_edits is not an array"),
     };
     assert_eq!(edits.len(), 1);
@@ -1305,17 +1305,17 @@ struct RepairReport {
 
 type RepairState = BTreeMap<PathBuf, String>;
 
-fn repair_json_field<'a>(value: &'a DataTree, key: &str) -> &'a DataTree {
+fn repair_json_field<'a>(value: &'a Dyn, key: &str) -> &'a Dyn {
     json_get(value, key).unwrap_or_else(|| panic!("machine report missing {key}"))
 }
 
-fn repair_json_string(value: &DataTree, key: &str) -> String {
+fn repair_json_string(value: &Dyn, key: &str) -> String {
     json_str(repair_json_field(value, key))
         .unwrap_or_else(|| panic!("machine report {key} is not a string"))
         .to_string()
 }
 
-fn repair_json_usize(value: &DataTree, key: &str) -> usize {
+fn repair_json_usize(value: &Dyn, key: &str) -> usize {
     usize::try_from(
         json_int(repair_json_field(value, key))
             .unwrap_or_else(|| panic!("machine report {key} is not an integer")),
@@ -1323,11 +1323,11 @@ fn repair_json_usize(value: &DataTree, key: &str) -> usize {
     .unwrap_or_else(|_| panic!("machine report {key} is negative"))
 }
 
-fn parse_repair_report(value: &DataTree) -> RepairReport {
+fn parse_repair_report(value: &Dyn) -> RepairReport {
     assert_eq!(repair_json_string(value, "schema"), "jet.report/v2");
     let code = repair_json_string(value, "code");
     let edits = match repair_json_field(value, "fix_edits") {
-        DataTree::Array(edits) => edits
+        Dyn::Array(edits) => edits
             .iter()
             .map(|edit| {
                 let span = repair_json_field(edit, "span");
@@ -1345,11 +1345,11 @@ fn parse_repair_report(value: &DataTree) -> RepairReport {
     RepairReport { code, edits }
 }
 
-fn parse_repair_reports(value: &DataTree) -> Vec<RepairReport> {
+fn parse_repair_reports(value: &Dyn) -> Vec<RepairReport> {
     assert_eq!(repair_json_string(value, "schema"), "jet.status/v1");
     assert_eq!(repair_json_string(value, "action"), "check");
     match repair_json_field(value, "reports") {
-        DataTree::Array(reports) => reports.iter().map(parse_repair_report).collect(),
+        Dyn::Array(reports) => reports.iter().map(parse_repair_report).collect(),
         _ => panic!("machine status reports is not an array"),
     }
 }
@@ -1381,7 +1381,7 @@ fn check_repair_state(dir: &Path, state: &RepairState) -> Vec<RepairReport> {
         if output.status.success() {
             assert!(matches!(
                 json_get(&status, "ok"),
-                Some(DataTree::Bool(true))
+                Some(Dyn::Bool(true))
             ));
             assert!(
                 parse_repair_reports(&status).is_empty(),
@@ -1689,7 +1689,7 @@ fn fix_safety_tiers_are_reported_and_applied() {
         .unwrap()
         .to_string();
         let edits = match jet_foundation::JSON::json_get(&report, "fix_edits").unwrap() {
-            DataTree::Array(edits) => edits,
+            Dyn::Array(edits) => edits,
             _ => panic!("fix_edits is not an array"),
         };
         assert_eq!(edits.len(), 1);

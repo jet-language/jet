@@ -1,6 +1,6 @@
 #![deny(warnings)]
 
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_escape, parse_json};
 use jet_foundation::SHA256::{sha256, sha256_hex};
 use std::collections::{BTreeMap, BTreeSet};
@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-fn field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+fn field<'a>(object: &'a [(String, Dyn)], key: &str) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(name, value)| (name == key).then_some(value))
@@ -481,8 +481,8 @@ impl BuildRecord {
             let duration_ms = match field(node, "duration_ms")
                 .ok_or_else(|| "build record node is missing duration_ms".to_string())?
             {
-                DataTree::Int(value) => *value as f64,
-                DataTree::Float(value) => *value,
+                Dyn::Int(value) => *value as f64,
+                Dyn::Float(value) => *value,
                 _ => return Err("build record node duration_ms is invalid".to_string()),
             };
             if !duration_ms.is_finite() || duration_ms < 0.0 {

@@ -4,7 +4,7 @@
 // dependency-minimal.
 
 /// Host-neutral environment projection boundary. Hosts provide the process
-/// snapshot and marshal the returned entries into their DataTree carrier.
+/// snapshot and marshal the returned entries into their Dyn carrier.
 pub(crate) fn jet_env_config_entries_for_names<'a>(
     prefix: &str,
     dotenv: Option<&str>,

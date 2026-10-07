@@ -7971,7 +7971,7 @@ impl<'a> RustEmitter<'a> {
                     let (name, return_override) = match codec {
                         Some(MirSerdeCodec::Encode) => (
                             Some("jet_encode"),
-                            Some(format!("{}jet_std::DataTree", self.config.root_prefix)),
+                            Some(format!("{}jet_std::Dyn", self.config.root_prefix)),
                         ),
                         Some(MirSerdeCodec::Decode) => (
                             Some("jet_decode"),
@@ -9671,21 +9671,21 @@ impl<'a> RustEmitter<'a> {
     fn history_tree_expression(kind: Option<HistoryScalarKind>, value: &str) -> String {
         match kind {
             Some(HistoryScalarKind::Integer) => {
-                format!("jet_std::DataTree::Number(({value}).to_string_rep())")
+                format!("jet_std::Dyn::Number(({value}).to_string_rep())")
             }
             Some(HistoryScalarKind::SignedInteger | HistoryScalarKind::UnsignedInteger) => {
-                format!("jet_std::DataTree::Number(({value}).to_string())")
+                format!("jet_std::Dyn::Number(({value}).to_string())")
             }
             Some(HistoryScalarKind::Boolean) => {
-                format!("jet_std::DataTree::Bool({value})")
+                format!("jet_std::Dyn::Bool({value})")
             }
             Some(HistoryScalarKind::Text) => {
-                format!("jet_std::DataTree::Text({value}.clone())")
+                format!("jet_std::Dyn::Text({value}.clone())")
             }
             Some(HistoryScalarKind::Char) => {
-                format!("jet_std::DataTree::Text({value}.to_string())")
+                format!("jet_std::Dyn::Text({value}.to_string())")
             }
-            None => "jet_std::DataTree::Null".to_string(),
+            None => "jet_std::Dyn::Null".to_string(),
         }
     }
 
@@ -9700,7 +9700,7 @@ impl<'a> RustEmitter<'a> {
             .map_or(nominal_name, |(_, leaf)| leaf);
         match nominal_name {
             "HandleID" | "TaskID" | "EventID" => {
-                format!("jet_std::DataTree::Int({value}.value as i64)")
+                format!("jet_std::Dyn::Int({value}.value as i64)")
             }
             _ => format!("{value}.jet_encode()"),
         }
@@ -9935,7 +9935,7 @@ impl<'a> RustEmitter<'a> {
         self.history_capture_encoders
             .borrow_mut()
             .insert(key.clone(), String::new());
-        let tree = format!("{}jet_std::DataTree", self.config.root_prefix);
+        let tree = format!("{}jet_std::Dyn", self.config.root_prefix);
         let unavailable = "return Err(\"history capture is opaque or redacted\".to_string())";
         let inner = |ty: &MirType, value: &str| self.history_capture_expression(ty, value);
         let body = if self.is_handle_type(ty)
@@ -10033,10 +10033,10 @@ impl<'a> RustEmitter<'a> {
                         unavailable.to_string()
                     } else if matches!(
                         nominal.name.as_str(),
-                        "DataTree" | "core.DataTree" | "core::DataTree"
+                        "Dyn" | "core.Dyn" | "core::Dyn"
                     ) {
                         format!(
-                            "{}jet_history_data_tree_capture(value, __jet_history_depth)?",
+                            "{}jet_history_dyn_capture(value, __jet_history_depth)?",
                             self.config.root_prefix
                         )
                     } else if nominal.name.to_ascii_lowercase().contains("secret") {
@@ -10490,7 +10490,7 @@ impl<'a> RustEmitter<'a> {
             if !self.module_selected(def.module) {
                 continue;
             }
-            if crate::Codegen::core_rust_type_name(&def.key) == Some("DataTree") {
+            if crate::Codegen::core_rust_type_name(&def.key) == Some("Dyn") {
                 continue;
             }
             let MirTypeDefKind::Enum { variants, .. } = &def.kind else {
@@ -10669,7 +10669,7 @@ impl<'a> RustEmitter<'a> {
             let encode_name = format!("__jet_history_commands_to_tree_{suffix}");
             let _ = writeln!(
                 out,
-                "fn {encode_name}(commands: &[{command_ty}]) -> jet_std::DataTree {{\n    jet_std::DataTree::Array(commands.iter().map(|command| match command {{"
+                "fn {encode_name}(commands: &[{command_ty}]) -> jet_std::Dyn {{\n    jet_std::Dyn::Array(commands.iter().map(|command| match command {{"
             );
             for variant in variants {
                 let fields = match &variant.payload {
@@ -10713,7 +10713,7 @@ impl<'a> RustEmitter<'a> {
                     .join(", ");
                 let _ = writeln!(
                     out,
-                    "        {pattern} => jet_std::DataTree::Object(vec![(\"tag\".to_string(), jet_std::DataTree::Text({}.to_string())), (\"values\".to_string(), jet_std::DataTree::Array(vec![{values}]))]),",
+                    "        {pattern} => jet_std::Dyn::Object(vec![(\"tag\".to_string(), jet_std::Dyn::Text({}.to_string())), (\"values\".to_string(), jet_std::Dyn::Array(vec![{values}]))]),",
                     quote_rust_string(&variant.wire_name)
                 );
             }
@@ -10757,7 +10757,7 @@ impl<'a> RustEmitter<'a> {
                 },
             );
             let codec_method = format!(
-                "    fn history_commands_to_data_tree(commands: &[Self]) -> Option<jet_std::DataTree> {{ Some({encode_name}(commands)) }}\n"
+                "    fn history_commands_to_dyn(commands: &[Self]) -> Option<jet_std::Dyn> {{ Some({encode_name}(commands)) }}\n"
             );
             let (provenance_source, provenance_tool, provenance_target) =
                 self.history_base_provenance();
@@ -10776,7 +10776,7 @@ impl<'a> RustEmitter<'a> {
                 let dispatch_name = format!("__jet_history_dispatch_{suffix}");
                 let _ = writeln!(
                     out,
-                    "#[cfg(target_arch = \"wasm32\")]\nfn {dispatch_name}(root: &jet_std::DataTree) -> Result<jet_std::JetTestComparison, String> {{\n    crate::jet_testing_history_web::run_wire_with_strategy::<{command_ty}, {foundation}::HistoryGeneratedStrategy<{command_ty}>>(root, <{command_ty} as {foundation}::HistoryCommand>::history_strategy())\n}}\n"
+                    "#[cfg(target_arch = \"wasm32\")]\nfn {dispatch_name}(root: &jet_std::Dyn) -> Result<jet_std::JetTestComparison, String> {{\n    crate::jet_testing_history_web::run_wire_with_strategy::<{command_ty}, {foundation}::HistoryGeneratedStrategy<{command_ty}>>(root, <{command_ty} as {foundation}::HistoryCommand>::history_strategy())\n}}\n"
                 );
                 registrations.push((def.name.clone(), dispatch_name));
             }
@@ -14549,7 +14549,7 @@ impl<'a> RustEmitter<'a> {
         let declared = self.declared_params(function);
         if serde_codec == Some(MirSerdeCodec::Decode) && declared.len() != 1 {
             panic!(
-                "MIR Decode method {:?} has {} parameters; expected one DataTree parameter",
+                "MIR Decode method {:?} has {} parameters; expected one Dyn parameter",
                 function.id,
                 declared.len()
             );
@@ -14559,7 +14559,7 @@ impl<'a> RustEmitter<'a> {
             .iter()
             .map(|param| {
                 if serde_codec == Some(MirSerdeCodec::Decode) {
-                    format!("&{}jet_std::DataTree", self.config.root_prefix)
+                    format!("&{}jet_std::Dyn", self.config.root_prefix)
                 } else if arithmetic && self.is_scalar(&param.ty) {
                     format!("&{}", self.rust_parameter_type(&param.ty))
                 } else {
@@ -22005,7 +22005,7 @@ impl<'a> RustEmitter<'a> {
     /// template, so the printed body is checked against what sema generated
     /// instead of re-deriving serde markers the MIR does not carry
     /// (`#[Flatten]`, a `validate` block, defaults): every literal string in
-    /// body order, the key of every `DataTree.field` lookup in body order, and
+    /// body order, the key of every `Dyn.field` lookup in body order, and
     /// the one journey origin every `Err` return claims (as a call statement).
     /// `None` when the body calls a user function (validate, default
     /// expressions) or its origins differ. A call to another codec method of
@@ -22069,7 +22069,7 @@ impl<'a> RustEmitter<'a> {
                     ) => {}
                 MirOperation::Call { .. } | MirOperation::IndirectCall { .. } => return None,
                 MirOperation::Semantic(MirSemanticOp::HandleMethod { call, args, .. })
-                    if self.prelude_symbol(*call).ends_with("jet_datatree_field") =>
+                    if self.prelude_symbol(*call).ends_with("jet_dyn_field") =>
                 {
                     let [key] = args.as_slice() else {
                         return None;
@@ -22157,7 +22157,7 @@ impl<'a> RustEmitter<'a> {
                     return false;
                 }
                 body.push(format!(
-                    "if !matches!(__jet_tree, {root}jet_std::DataTree::Object(_)) {{ {origin}return Err(vec![{root}jet_std::FieldError {{ path: String::new(), reason: \"expected an object\".to_string() }}]); }}"
+                    "if !matches!(__jet_tree, {root}jet_std::Dyn::Object(_)) {{ {origin}return Err(vec![{root}jet_std::FieldError {{ path: String::new(), reason: \"expected an object\".to_string() }}]); }}"
                 ));
                 body.push(format!(
                     "let mut __jet_errors: Vec<{root}jet_std::FieldError> = Vec::new();"
@@ -22242,7 +22242,7 @@ impl<'a> RustEmitter<'a> {
         }
         let _ = writeln!(
             out,
-            "fn jet_decode(__jet_tree: &{root}jet_std::DataTree) -> Result<Self, Vec<{root}jet_std::FieldError>> {{\n    {}\n}}\n",
+            "fn jet_decode(__jet_tree: &{root}jet_std::Dyn) -> Result<Self, Vec<{root}jet_std::FieldError>> {{\n    {}\n}}\n",
             body.join("\n    ")
         );
         true
@@ -22290,7 +22290,7 @@ impl<'a> RustEmitter<'a> {
         match &definition.kind {
             MirTypeDefKind::Struct { fields, .. } => {
                 body.push(format!(
-                    "let mut __jet_pairs: Vec<(String, {root}jet_std::DataTree)> = Vec::new();"
+                    "let mut __jet_pairs: Vec<(String, {root}jet_std::Dyn)> = Vec::new();"
                 ));
                 // Every key must appear in the template in field order; a
                 // flattened field has no key of its own.
@@ -22315,7 +22315,7 @@ impl<'a> RustEmitter<'a> {
                         format!("__jet_pairs.push(({key:?}.to_string(), {}));", encode(&value))
                     });
                 }
-                body.push(format!("{root}jet_std::DataTree::Object(__jet_pairs)"));
+                body.push(format!("{root}jet_std::Dyn::Object(__jet_pairs)"));
             }
             MirTypeDefKind::Enum { variants, .. } if !variants.is_empty() => {
                 let mut arms = Vec::new();
@@ -22327,10 +22327,10 @@ impl<'a> RustEmitter<'a> {
                     }
                     arms.push(match &variant.payload {
                         MirVariantPayload::Unit => {
-                            format!("{head} => {root}jet_std::DataTree::Text({wire:?}.to_string()),")
+                            format!("{head} => {root}jet_std::Dyn::Text({wire:?}.to_string()),")
                         }
                         MirVariantPayload::Single(_) => format!(
-                            "{head}(__jet_value) => {root}jet_std::DataTree::Object(vec![({wire:?}.to_string(), {})]),",
+                            "{head}(__jet_value) => {root}jet_std::Dyn::Object(vec![({wire:?}.to_string(), {})]),",
                             encode(&read(&variant.name, "__jet_value"))
                         ),
                         MirVariantPayload::Named(fields) => {
@@ -22353,7 +22353,7 @@ impl<'a> RustEmitter<'a> {
                                 bindings.join(", ")
                             };
                             format!(
-                                "{head} {{ {pattern} }} => {root}jet_std::DataTree::Object(vec![({wire:?}.to_string(), {root}jet_std::DataTree::Object(vec![{}]))]),",
+                                "{head} {{ {pattern} }} => {root}jet_std::Dyn::Object(vec![({wire:?}.to_string(), {root}jet_std::Dyn::Object(vec![{}]))]),",
                                 pairs.join(", ")
                             )
                         }
@@ -22365,7 +22365,7 @@ impl<'a> RustEmitter<'a> {
         }
         let _ = writeln!(
             out,
-            "fn jet_encode(&self) -> {root}jet_std::DataTree {{\n    {}\n}}\n",
+            "fn jet_encode(&self) -> {root}jet_std::Dyn {{\n    {}\n}}\n",
             body.join("\n    ")
         );
         true
@@ -25158,7 +25158,7 @@ impl<'a> RustEmitter<'a> {
             );
         }
         // D-SHAPE-ONE1=A: DB decoding applies the checked Db→Json names to
-        // the row carrier, then uses the one typed DataTree decoder. The
+        // the row carrier, then uses the one typed Dyn decoder. The
         // carrier helper is generic so JIT/interpreter hosts can share it
         // without importing AOT's decoder trait.
         if row.module == "core.db" && row.member == "decode" {
@@ -25173,7 +25173,7 @@ impl<'a> RustEmitter<'a> {
             let root = &self.config.root_prefix;
             let target_ty = self.rust_type(target);
             return format!(
-                "{{ let __jet_db_entries = {root}jet_std::jet_db_row_project({}, {names}, |value| match value {{ {root}jet_std::DBValue::Null => {root}jet_std::DataTree::Null, {root}jet_std::DBValue::Int(value) => {root}jet_std::DataTree::Int(*value), {root}jet_std::DBValue::Float(value) => {root}jet_std::DataTree::Float(*value), {root}jet_std::DBValue::Text(value) => {root}jet_std::DataTree::Text(value.clone()), {root}jet_std::DBValue::Bool(value) => {root}jet_std::DataTree::Bool(*value), {root}jet_std::DBValue::Blob(value) => {root}jet_std::DataTree::Bytes(value.clone()) }}); {root}jet_db_decode::<{target_ty}>(&__jet_db_entries) }}",
+                "{{ let __jet_db_entries = {root}jet_std::jet_db_row_project({}, {names}, |value| match value {{ {root}jet_std::DBValue::Null => {root}jet_std::Dyn::Null, {root}jet_std::DBValue::Int(value) => {root}jet_std::Dyn::Int(*value), {root}jet_std::DBValue::Float(value) => {root}jet_std::Dyn::Float(*value), {root}jet_std::DBValue::Text(value) => {root}jet_std::Dyn::Text(value.clone()), {root}jet_std::DBValue::Bool(value) => {root}jet_std::Dyn::Bool(*value), {root}jet_std::DBValue::Blob(value) => {root}jet_std::Dyn::Bytes(value.clone()) }}); {root}jet_db_decode::<{target_ty}>(&__jet_db_entries) }}",
                 values.join(", ")
             );
         }
@@ -26803,7 +26803,7 @@ impl<'a> RustEmitter<'a> {
                                     | "http.request_first_byte_timeout"
                                     | "http.request_redirects"
                             ))
-                        || (route.module == "core.encoding.datatree" && route.member == "at")
+                        || (route.module == "core.encoding.dyn" && route.member == "at")
                         || route.member == "shutdown_report_field")
                         && index > 0
                         && !route.signature.borrow_mask[index]
@@ -27045,11 +27045,11 @@ impl<'a> RustEmitter<'a> {
             (None, true) => panic!("MIR qualified enum variant has no owner type"),
         }
     }
-    /// Jet `DataTree.Int` is exact; the native carrier's crossing lives in the
-    /// Prelude (`jet_datatree_int` and its test and payload readers).
-    fn is_datatree_int(&self, owner: MirTypeId, variant: &str) -> bool {
+    /// Jet `Dyn.Int` is exact; the native carrier's crossing lives in the
+    /// Prelude (`jet_dyn_int` and its test and payload readers).
+    fn is_dyn_int(&self, owner: MirTypeId, variant: &str) -> bool {
         variant == "Int"
-            && crate::Codegen::core_rust_type_name(&self.type_def(owner).key) == Some("DataTree")
+            && crate::Codegen::core_rust_type_name(&self.type_def(owner).key) == Some("Dyn")
     }
     fn enum_value(
         &self,
@@ -27104,8 +27104,8 @@ impl<'a> RustEmitter<'a> {
                 }
                 let boxed = self.declared_boxed_edge(owner, variant);
                 let value = self.enum_arg_value(function, &args[0], payload, boxed, location);
-                if self.is_datatree_int(owner, variant) {
-                    return format!("{}jet_std::jet_datatree_int({value})", self.config.root_prefix);
+                if self.is_dyn_int(owner, variant) {
+                    return format!("{}jet_std::jet_dyn_int({value})", self.config.root_prefix);
                 }
                 let mut value = if native {
                     self.native_int_input(&value, payload, location)
@@ -27115,7 +27115,7 @@ impl<'a> RustEmitter<'a> {
                 };
                 if variant == "Object"
                     && crate::Codegen::core_rust_type_name(&self.type_def(owner).key)
-                        == Some("DataTree")
+                        == Some("Dyn")
                     && matches!(
                         self.value_type(function, args[0].value).kind(),
                         MirTypeKind::Map { .. }
@@ -27189,8 +27189,8 @@ impl<'a> RustEmitter<'a> {
         let head = self.variant_path(Some(effective_owner), variant, false);
         match self.enum_variant_payload(effective_owner, variant) {
             MirVariantPayload::Unit => format!("matches!({reference}, {head})"),
-            MirVariantPayload::Single(_) if self.is_datatree_int(effective_owner, variant) => format!(
-                "{}jet_std::jet_datatree_is_int(&{reference})",
+            MirVariantPayload::Single(_) if self.is_dyn_int(effective_owner, variant) => format!(
+                "{}jet_std::jet_dyn_is_int(&{reference})",
                 self.config.root_prefix,
             ),
             MirVariantPayload::Single(_) => format!("matches!({reference}, {head}(_))"),
@@ -27237,12 +27237,12 @@ impl<'a> RustEmitter<'a> {
         let native = has_native_type_projection(&self.type_def(effective_owner).key);
         match self.enum_variant_payload(effective_owner, variant) {
             MirVariantPayload::Unit => panic!("MIR unit variant has no payload"),
-            MirVariantPayload::Single(_) if self.is_datatree_int(effective_owner, variant) => {
+            MirVariantPayload::Single(_) if self.is_dyn_int(effective_owner, variant) => {
                 if index != 0 {
                     panic!("MIR single variant payload index out of range")
                 }
                 format!(
-                    "{}jet_std::jet_datatree_int_payload(&{value}).expect(\"MIR enum payload variant mismatch\")",
+                    "{}jet_std::jet_dyn_int_payload(&{value}).expect(\"MIR enum payload variant mismatch\")",
                     self.config.root_prefix
                 )
             }
@@ -27252,7 +27252,7 @@ impl<'a> RustEmitter<'a> {
                 }
                 let payload = if variant == "Object"
                     && crate::Codegen::core_rust_type_name(&self.type_def(effective_owner).key)
-                        == Some("DataTree")
+                        == Some("Dyn")
                     && matches!(
                         self.value_type(function, result.expect("MIR enum payload result"))
                             .kind(),
@@ -27928,7 +27928,7 @@ impl<'a> RustEmitter<'a> {
             )
         });
         let root = &self.config.root_prefix;
-        let tree = format!("{root}jet_std::DataTree");
+        let tree = format!("{root}jet_std::Dyn");
         let (owner, cell, read, write, reader_ty, register) = if send {
             (
                 "std::sync::Arc",

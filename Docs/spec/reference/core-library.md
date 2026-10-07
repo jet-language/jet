@@ -1377,7 +1377,7 @@ error after its finite retry budget or when stdin closes.
 
 ### `core.args` — declarative command-line parsing (D-ARGS1)
 
-`core.args` provides both a direct `DataTree` decoder and an `ArgsSpec` builder.
+`core.args` provides both a direct `Dyn` decoder and an `ArgsSpec` builder.
 The builder consumes a spec and returns a new value at each method call; parsing
 is separate from process execution so tests can pass an explicit argument
 vector.
@@ -1427,9 +1427,9 @@ The direct functions are useful when a typed builder is unnecessary:
 
 | API | Result | Description |
 | --- | --- | --- |
-| `decode()` | `DataTree` | Decode the current process arguments, including `help` and `h` flags. |
-| `decode_argv(argv)` | `DataTree` | Decode an explicit argument vector. |
-| `merge(base, overlay)` | `DataTree` | Recursively merge objects; overlay arrays and scalars replace. |
+| `decode()` | `Dyn` | Decode the current process arguments, including `help` and `h` flags. |
+| `decode_argv(argv)` | `Dyn` | Decode an explicit argument vector. |
+| `merge(base, overlay)` | `Dyn` | Recursively merge objects; overlay arrays and scalars replace. |
 | `get_text` / `get_bool` / `get_int` | scalar values | Read typed scalar fields with empty/false/zero fallbacks. |
 | `positionals(tree)` / `remainder(tree)` | `[String]` | Read positional values. |
 | `program(tree)` / `wants_help(tree)` | `String` / `Bool` | Read `argv[0]` or help intent. |
@@ -2144,7 +2144,7 @@ are `MONDAY :: 0` through `SUNDAY :: 6`.
 
 ### `core.encoding` — bounded value codecs
 
-`core.encoding` converts complete values to and from `DataTree`. Objects retain
+`core.encoding` converts complete values to and from `Dyn`. Objects retain
 insertion order, integers and floating-point numbers remain distinct, and
 malformed input returns a typed `EncodingError`. The whole-value codecs are
 pure; readers and writers expose the same boundaries incrementally. The
@@ -2152,7 +2152,7 @@ shared codec shape and value tree follow D-ENC1, D-JSONVERB1, and D-SERDE13.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
-| `encoding.DataTree` | type | Dynamic tree of null, Boolean, integer, float, lexical number, typed text, string, bytes, array, and ordered-object values. |
+| `encoding.Dyn` | type | Dynamic tree of null, Boolean, integer, float, lexical number, typed text, string, bytes, array, and ordered-object values. |
 | `encoding.DataEvent` | type | Event emitted by an incremental reader. |
 | `encoding.EncodingCause`, `EncodingErrorKind`, `EncodingError` | types | Structured encoding failure information. |
 | `encoding.EncodingFormat` | type | Format selector used by generic readers and writers. |
@@ -2167,7 +2167,7 @@ The standard formats are exposed as `core.encoding.base32`, `base64`, `binary`,
 
 #### Typed codecs and validation
 
-A parser returns a `DataTree` (or a format-specific document). A typed codec
+A parser returns a `Dyn` (or a format-specific document). A typed codec
 maps a declared Jet type to and from that tree. `#Codable`, `#Encode`, and
 `#Decode` derive the typed encode/decode routes; field attributes such as
 `#Rename`, `#Skip`, `#Flatten`, `#RenameAll`, `#DenyUnknownFields`,
@@ -2187,7 +2187,7 @@ use an untyped string round trip as a substitute for a typed codec.
 
 ### `core.encoding.json` — JSON trees
 
-`core.encoding.json` parses strict RFC 8259-style JSON into `DataTree`. Integer
+`core.encoding.json` parses strict RFC 8259-style JSON into `Dyn`. Integer
 literals remain exact integers; fractional values are floats. NaN and infinity
 syntax is rejected. `decode` has the same strict behavior as `parse`, despite
 its historical name. Compact output retains insertion order, pretty output
@@ -2198,14 +2198,14 @@ The reader enforces depth `256` and a maximum item size of `16,777,216` bytes.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
-| `json.parse(text)` / `decode(text)` | `DataTree !EncodingError` | Parse one strict JSON value. |
-| `json.loads(text)` / `load(text)` | `DataTree !EncodingError` | Compatibility aliases for parsing text. |
+| `json.parse(text)` / `decode(text)` | `Dyn !EncodingError` | Parse one strict JSON value. |
+| `json.loads(text)` / `load(text)` | `Dyn !EncodingError` | Compatibility aliases for parsing text. |
 | `json.dumps(value)` / `dump(value)` / `to_string(value)` | `String` | Emit compact JSON. |
 | `json.to_string_pretty(value)` | `String` | Emit two-space pretty JSON. |
 | `json.canonical(value)` | `String !EncodingError` | Emit RFC 8785 JCS bytes: UTF-16 key order, ECMAScript numbers; reject NaN, infinities, and an `Int` that binary64 cannot hold exactly. |
-| `json.parse_allow_duplicates(text)` | `DataTree !EncodingError` | Parse like `parse`, but keep the later value of a repeated object name. |
-| `json.pointer(tree, path)` | `DataTree !EncodingError` | Select by RFC 6901 JSON Pointer; a missing member or bad step is a located error, JSON `null` is a value. |
-| `json.patch(doc, ops)` / `patch_with_limits(doc, ops, limits)` | `DataTree !EncodingError` | Apply an RFC 6902 operation array atomically; `doc` is unchanged on failure. |
+| `json.parse_allow_duplicates(text)` | `Dyn !EncodingError` | Parse like `parse`, but keep the later value of a repeated object name. |
+| `json.pointer(tree, path)` | `Dyn !EncodingError` | Select by RFC 6901 JSON Pointer; a missing member or bad step is a located error, JSON `null` is a value. |
+| `json.patch(doc, ops)` / `patch_with_limits(doc, ops, limits)` | `Dyn !EncodingError` | Apply an RFC 6902 operation array atomically; `doc` is unchanged on failure. |
 | `json.events(value)` | `[DataEvent]` | Produce the canonical event sequence for a tree. |
 | `json.reader(text)` / `json.reader_allow_duplicates(text)` / `json.writer()` | `JSONReader` / `JSONWriter` | Construct a pull reader (rejecting, or reporting every repeated name) or a value writer. |
 | `JSONReader.next()` | `DataEvent !EncodingError` | Return the next event. |
@@ -2220,13 +2220,13 @@ newline per row.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
-| `jsonl.parse(text)` / `loads(text)` | `[DataTree] !EncodingError` | Parse all nonblank lines. |
+| `jsonl.parse(text)` / `loads(text)` | `[Dyn] !EncodingError` | Parse all nonblank lines. |
 | `jsonl.to_string(values)` / `dumps(values)` | `String` | Encode values as compact JSON lines with a trailing newline per row. |
 | `jsonl.count_rows(text)` | `Int` | Count nonblank rows. |
 | `jsonl.append_line(text, value)` | `String` | Append one encoded row. |
-| `jsonl.first(text)` | `?DataTree !EncodingError` | Return the first nonblank row. |
+| `jsonl.first(text)` | `?Dyn !EncodingError` | Return the first nonblank row. |
 | `jsonl.reader(text)` / `jsonl.writer()` | `JSONLReader` / `JSONLWriter` | Construct incremental line reader or writer. |
-| `JSONLReader.next()` | `?DataTree !EncodingError` | Return the next row or stable end-of-input. |
+| `JSONLReader.next()` | `?Dyn !EncodingError` | Return the next row or stable end-of-input. |
 | `JSONLWriter.write(value)` / `to_string()` | `Unit` / `String` | Write rows and finish the line stream. |
 
 ### `core.encoding.csv` — comma-separated rows
@@ -2243,24 +2243,24 @@ The query helper is filesystem-only and supports `SELECT *` and
 | Function or type | Returns | Description |
 | --- | --- | --- |
 | `csv.rows(text, delimiter, header, skip_blank)` | `[CSVRow] !EncodingError` | Parse physical rows with explicit delimiter, header and blank-line policy. |
-| `csv.parse(text)` / `decode(text)` | `DataTree !EncodingError` | Parse rows as an array of arrays. |
+| `csv.parse(text)` / `decode(text)` | `Dyn !EncodingError` | Parse rows as an array of arrays. |
 | `csv.to_string(rows)` | `String` | Encode `CSVRow` values. |
 | `csv.reader(text)` / `csv.writer()` | `CSVReader` / `CSVWriter` | Construct incremental CSV objects. |
 | `CSVReader.next()` | `?CSVRow` | Return the next physical row. |
 | `CSVWriter.write_row(fields)` / `to_string()` | `Unit` / `String` | Write a string-field row and finish the CSV value. |
-| `csv.query(path, sql)` | `DataTree !EncodingError -[FS]>` | Run the bounded `SELECT *` or `SELECT COUNT(*)` filesystem query. |
+| `csv.query(path, sql)` | `Dyn !EncodingError -[FS]>` | Run the bounded `SELECT *` or `SELECT COUNT(*)` filesystem query. |
 | `CSVRow` | type | Physical line number and parsed string fields. |
 
 ### `core.encoding.toml` — TOML values
 
 `core.encoding.toml` supports the common TOML 1.0 document forms: comments,
 dotted keys, tables, array tables, strings, integers, floats, booleans,
-inline tables, and arrays. TOML datetimes remain text in `DataTree`. Unsupported
+inline tables, and arrays. TOML datetimes remain text in `Dyn`. Unsupported
 syntax fails closed, and output is minimal rather than comment-preserving.
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `toml.parse(text)` / `decode(text)` / `loads(text)` / `load(text)` | `DataTree !EncodingError` | Parse a TOML document or a compatibility alias. |
+| `toml.parse(text)` / `decode(text)` / `loads(text)` / `load(text)` | `Dyn !EncodingError` | Parse a TOML document or a compatibility alias. |
 | `toml.to_string(value)` | `String` | Emit a minimal TOML document. |
 
 ### `core.encoding.yaml` — bounded YAML input
@@ -2272,7 +2272,7 @@ serializer.
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `yaml.parse(text)` / `decode(text)` | `DataTree !EncodingError` | Parse supported YAML input. |
+| `yaml.parse(text)` / `decode(text)` | `Dyn !EncodingError` | Parse supported YAML input. |
 
 ### `core.encoding.xml` — bounded XML trees
 
@@ -2283,12 +2283,12 @@ parse followed by this module's deterministic serializer; it is not W3C XML
 Canonicalization.
 | Signature | Result | Description |
 | --- | --- | --- |
-| `xml.parse(text)` / `decode(text)` / `parse_bytes(bytes)` | `DataTree !EncodingError` | Parse XML text or bytes without DTD processing. |
-| `xml.parse_with(text, limits)` | `DataTree !EncodingError` | Parse with explicit bounded limits. |
+| `xml.parse(text)` / `decode(text)` / `parse_bytes(bytes)` | `Dyn !EncodingError` | Parse XML text or bytes without DTD processing. |
+| `xml.parse_with(text, limits)` | `Dyn !EncodingError` | Parse with explicit bounded limits. |
 | `xml.to_string(tree)` / `to_bytes(tree)` | `String` / `[U8]` | Serialize an XML tree. |
 | `xml.canonical(text)` | `String !EncodingError` | Parse and produce deterministic module serialization, not W3C C14N. |
 | `xml.reader(text)` | `XMLReader !EncodingError` | Construct an incremental XML reader. |
-| `xml.attribute(name, value)` / `content(text)` / `expanded_name(name)` / `root(tree)` | `DataTree` or `String` | Construct or inspect XML attributes, text content, expanded names, or root. |
+| `xml.attribute(name, value)` / `content(text)` / `expanded_name(name)` / `root(tree)` | `Dyn` or `String` | Construct or inspect XML attributes, text content, expanded names, or root. |
 | `xml.XMLWriter.write(value)` / `to_string()` / `flush()` / `finish()` | varies | Build and finish an XML stream. |
 
 ### `core.encoding.cbor` — definite-length CBOR
@@ -2296,11 +2296,11 @@ Canonicalization.
 `core.encoding.cbor` handles RFC 8949 definite-length major types `0` through
 `5` and common simple and float64 values. It rejects indefinite-length items,
 tags, half and single floats, and byte strings that cannot be represented in
-`DataTree`. Canonical output sorts map keys by encoded byte order.
+`Dyn`. Canonical output sorts map keys by encoded byte order.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
-| `cbor.parse(bytes)` / `decode(bytes)` | `DataTree !EncodingError` | Parse supported definite-length CBOR. |
+| `cbor.parse(bytes)` / `decode(bytes)` | `Dyn !EncodingError` | Parse supported definite-length CBOR. |
 | `cbor.to_bytes(value)` / `to_bytes_canonical(value)` | `[U8]` | Encode ordinary or canonical CBOR. |
 | `cbor.reader(bytes)` / `writer()` | `CBORReader` / `CBORWriter` | Construct byte reader or writer carriers. |
 | `CBORWriter.write(value)` / `write_canonical(value)` / `to_bytes()` | `Unit` / `[U8]` | Append ordinary or canonical values and finish the byte stream. |
@@ -2696,7 +2696,7 @@ or golden file. The public source is
 | Signature | Result | Description |
 |---|---|---|
 | `assert_equal(comparison: TestComparison) -> Bool` | Boolean | Check the comparison's recorded proof fields. |
-| `compare<E>(cases: [DataTree], reference: fn(DataTree) -> DataTree E!, candidate: fn(DataTree) -> DataTree E!, relation: String) -> TestComparison E!` | comparison | Compare reference and candidate outputs over explicit cases. The callbacks' shared failure type passes up (D-CALLBACK-ERR1=A); callbacks that cannot fail make the comparison `Never!`. |
+| `compare<E>(cases: [Dyn], reference: fn(Dyn) -> Dyn E!, candidate: fn(Dyn) -> Dyn E!, relation: String) -> TestComparison E!` | comparison | Compare reference and candidate outputs over explicit cases. The callbacks' shared failure type passes up (D-CALLBACK-ERR1=A); callbacks that cannot fail make the comparison `Never!`. |
 | `snap(name: String, value: String) -[FS]> Bool` | Boolean | Check a named snapshot. |
 | `golden(name: String, value: String) -[FS]> Bool` | Boolean | Check a named golden value. |
 | `fixture(name: String) -[FS]> String` | text | Load a named fixture. |
@@ -3351,7 +3351,7 @@ The tree is the single public topology boundary; workers, delivery, and restart 
 | `tree(name: String) -> ServiceTree` | tree | Create a named service topology. |
 | `tree.worker<T>(name: String, handler, capacity: Int) -> ServiceWorker<T>` | worker | Add a bounded-mailbox worker. |
 | `tree.start()` / `tree.stop()` | — | Start or stop the service tree. |
-| `tree.show() -> DataTree` | tree | Inspect topology and delivery state. |
+| `tree.show() -> Dyn` | tree | Inspect topology and delivery state. |
 | `tree.set_restart(strategy: ServiceRestart)` | — | Select one-for-one, all-for-one, or rest-for-one restart. |
 | `runtime(store: String, retention: Duration) -> ServiceRuntime` | runtime | Describe runtime storage and retention. |
 | `state_store(path: String) -> ServiceStateStore !ServiceError` | store | Open a durable state store. |

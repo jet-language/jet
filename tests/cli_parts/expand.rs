@@ -1,19 +1,19 @@
 use super::*;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 
-fn normalize_expand_json(text: &str) -> DataTree {
-    fn scrub(node: &mut DataTree) {
+fn normalize_expand_json(text: &str) -> Dyn {
+    fn scrub(node: &mut Dyn) {
         match node {
-            DataTree::Object(fields) => {
+            Dyn::Object(fields) => {
                 for (key, value) in fields {
                     if key == "elapsed_ms" {
-                        *value = DataTree::Int(0);
+                        *value = Dyn::Int(0);
                     } else {
                         scrub(value);
                     }
                 }
             }
-            DataTree::Array(values) => {
+            Dyn::Array(values) => {
                 for value in values {
                     scrub(value);
                 }

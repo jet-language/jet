@@ -4342,7 +4342,7 @@ fn jet_codegen_lower_handle_method(builder: &JetCodegenBuilder, program: JetCode
                 }
             }
         }
-        .DataTreeField | .DataTreeAt | .DataTreeInt | .DataTreeText | .DataTreeBool | .DataTreeFloat | .DataTreeToText | .DataTreeEqualUnordered | .DataTreeDecode(_) -> jet_codegen_lower_data_handle_method(&builder, program, expression, receiver, operation, args)
+        .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_) -> jet_codegen_lower_data_handle_method(&builder, program, expression, receiver, operation, args)
         .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered -> jet_codegen_lower_data_handle_method(&builder, program, expression, receiver, operation, args)
         .DBValueInt | .DBValueFloat | .DBValueText | .DBValueBool | .DBValueBlob | .DBValueIsNull | .DBQuery(_) | .DBQueryOne(_) | .DBExecute(_) -> jet_codegen_lower_data_handle_method(&builder, program, expression, receiver, operation, args)
         .DurationNsValue | .DurationSecondsValue -> {
@@ -5706,7 +5706,7 @@ fn jet_codegen_lower_pattern_subject(builder: &JetCodegenBuilder, program: JetCo
 // D-MEM-COPYSEM1: read `subject` as a read window when it names a read
 // parameter's place; None leaves the subject to the ordinary value path.
 // A Core subject with a native Rust carrier keeps the value path: the
-// carrier can hold a payload in a host representation (DataTree.Int is i64)
+// carrier can hold a payload in a host representation (Dyn.Int is i64)
 // that only the checked payload readers widen, so an aliased payload place
 // would read the wrong type.
 fn jet_codegen_lower_read_window(builder: &JetCodegenBuilder, program: JetCodegenProgram, subject: TExpr) -> MIRValueID? {

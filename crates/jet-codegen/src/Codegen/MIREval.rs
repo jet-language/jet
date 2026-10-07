@@ -1015,19 +1015,19 @@ pub mod game_dev_protocol {
     use jet_foundation::DevtoolsControl::*;
     use jet_foundation::Game::*;
 
-    /// Adapter-local rendering uses the canonical Foundation DataTree directly.
+    /// Adapter-local rendering uses the canonical Foundation Dyn directly.
     mod jet_std {
-        pub(crate) use crate::DataTree::DataTree;
+        pub(crate) use crate::Dyn::Dyn;
         pub(crate) use jet_foundation::JSON::parse_json as parse_json_strict;
-        pub fn render_json(value: &DataTree, _pretty: bool, _depth: usize) -> String {
+        pub fn render_json(value: &Dyn, _pretty: bool, _depth: usize) -> String {
             match value {
-                DataTree::Null => "null".to_string(),
-                DataTree::Bool(value) => value.to_string(),
-                DataTree::Int(value) => value.to_string(),
-                DataTree::Float(value) => format!("{value:?}"),
-                DataTree::Number(value) => value.clone(),
-                DataTree::TypedText(value) | DataTree::Text(value) => quote(value),
-                DataTree::Array(values) => format!(
+                Dyn::Null => "null".to_string(),
+                Dyn::Bool(value) => value.to_string(),
+                Dyn::Int(value) => value.to_string(),
+                Dyn::Float(value) => format!("{value:?}"),
+                Dyn::Number(value) => value.clone(),
+                Dyn::TypedText(value) | Dyn::Text(value) => quote(value),
+                Dyn::Array(values) => format!(
                     "[{}]",
                     values
                         .iter()
@@ -1035,7 +1035,7 @@ pub mod game_dev_protocol {
                         .collect::<Vec<_>>()
                         .join(",")
                 ),
-                DataTree::Object(entries) => format!(
+                Dyn::Object(entries) => format!(
                     "{{{}}}",
                     entries
                         .iter()
@@ -1045,7 +1045,7 @@ pub mod game_dev_protocol {
                         .collect::<Vec<_>>()
                         .join(",")
                 ),
-                DataTree::Bytes(_) => {
+                Dyn::Bytes(_) => {
                     unreachable!("game protocol JSON values cannot contain byte nodes")
                 }
             }
@@ -2934,8 +2934,8 @@ fn eval_core_call_binding(
                 .iter()
                 .map(|(key, value)| (crate::AST::CtKey::Str(key.clone()), value.clone()))
                 .collect(),
-            // The checked MIR payload of `DataTree.Object` is the ordered entry
-            // vector `[(key: String, value: DataTree)]`, the same carrier AOT
+            // The checked MIR payload of `Dyn.Object` is the ordered entry
+            // vector `[(key: String, value: Dyn)]`, the same carrier AOT
             // hands to `jet_data_entries_to_map`.
             CtValue::List(items) => items
                 .iter()
@@ -2970,14 +2970,14 @@ fn eval_core_call_binding(
     if module == "core.encoding.json" && matches!(member, "to_string" | "to_string_pretty") {
         let [value] = values.as_slice() else {
             return Err(mir_error_at(
-                "core.encoding.json renderer expects one DataTree value",
+                "core.encoding.json renderer expects one Dyn value",
                 span,
             ));
         };
         let rendered = if member == "to_string_pretty" {
-            crate::Comptime::render_datatree_pretty_for_tir(value)
+            crate::Comptime::render_dyn_pretty_for_tir(value)
         } else {
-            crate::Comptime::render_datatree_for_tir(value)
+            crate::Comptime::render_dyn_for_tir(value)
         };
         return Ok(CtValue::Str(rendered));
     }
@@ -17703,14 +17703,14 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         {
             let [value] = values.as_slice() else {
                 return Err(mir_error_at(
-                    "core.encoding.json renderer expects one DataTree value",
+                    "core.encoding.json renderer expects one Dyn value",
                     span,
                 ));
             };
             let rendered = if member_name == "to_string_pretty" {
-                crate::Comptime::render_datatree_pretty_for_tir(value)
+                crate::Comptime::render_dyn_pretty_for_tir(value)
             } else {
-                crate::Comptime::render_datatree_for_tir(value)
+                crate::Comptime::render_dyn_for_tir(value)
             };
             return Ok(RuntimeValue::Data(MirEvalValue::String(rendered)));
         }
@@ -17821,7 +17821,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     | "bytes"
             ))
             || (family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
-                && module == "core.encoding.datatree"
+                && module == "core.encoding.dyn"
                 // `DBValue` accessors share this route family but belong to the
                 // ambient `core.db` adapter and its wire kernel.
                 && !symbol.starts_with("jet_std::DBValue::")
@@ -20729,7 +20729,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         Ok(Some(function.id))
     }
 
-    /// Decode a DataTree at a checked target: the shared typed walker reads
+    /// Decode a Dyn at a checked target: the shared typed walker reads
     /// containers and scalars, and each nominal leaf (a `#Codable` type) runs
     /// its generated Decode MIR method. `None` when some leaf has neither.
     fn decode_typed_tree(
@@ -20867,16 +20867,16 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         RuntimeValue::Data(MirEvalValue::FailedTold(Box::new(errors)))
     }
 
-    fn data_tree_object_map(fields: Vec<(MirConstKey, MirEvalValue)>) -> MirEvalValue {
+    fn dyn_object_map(fields: Vec<(MirConstKey, MirEvalValue)>) -> MirEvalValue {
         MirEvalValue::Enum {
-            type_name: "DataTree".to_string(),
+            type_name: "Dyn".to_string(),
             variant: "Object".to_string(),
             args: vec![(None, MirEvalValue::Map(fields))],
         }
     }
 
-    fn data_tree_object(fields: Vec<(String, MirEvalValue)>) -> MirEvalValue {
-        Self::data_tree_object_map(
+    fn dyn_object(fields: Vec<(String, MirEvalValue)>) -> MirEvalValue {
+        Self::dyn_object_map(
             fields
                 .into_iter()
                 .map(|(name, value)| (MirConstKey::String(name), value))
@@ -20906,13 +20906,13 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 ),
             };
             MirEvalValue::Enum {
-                type_name: "DataTree".to_string(),
+                type_name: "Dyn".to_string(),
                 variant: variant.to_string(),
                 args: vec![(None, payload)],
             }
         }
 
-        Self::data_tree_object(
+        Self::dyn_object(
             values
                 .into_iter()
                 .map(|(name, value)| (name, convert(value)))
@@ -20963,7 +20963,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 MirEvalValue::String(entry.value),
             );
         }
-        Self::data_tree_object_map(fields)
+        Self::dyn_object_map(fields)
     }
 
     fn db_value_tree(value: &MirEvalValue, span: Span) -> Result<MirEvalValue, Diagnostic> {
@@ -20989,17 +20989,17 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         }
         match (variant.as_str(), args.as_slice()) {
             ("Null", []) => Ok(MirEvalValue::Enum {
-                type_name: "DataTree".to_string(),
+                type_name: "Dyn".to_string(),
                 variant: "Null".to_string(),
                 args: Vec::new(),
             }),
             ("Int", [(_, MirEvalValue::Int(value))]) => Ok(MirEvalValue::Enum {
-                type_name: "DataTree".to_string(),
+                type_name: "Dyn".to_string(),
                 variant: "Int".to_string(),
                 args: vec![(None, MirEvalValue::Int(*value))],
             }),
             ("Float", [(_, MirEvalValue::Float { value, .. })]) => Ok(MirEvalValue::Enum {
-                type_name: "DataTree".to_string(),
+                type_name: "Dyn".to_string(),
                 variant: "Float".to_string(),
                 args: vec![(
                     None,
@@ -21010,17 +21010,17 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 )],
             }),
             ("Text", [(_, MirEvalValue::String(value))]) => Ok(MirEvalValue::Enum {
-                type_name: "DataTree".to_string(),
+                type_name: "Dyn".to_string(),
                 variant: "Text".to_string(),
                 args: vec![(None, MirEvalValue::String(value.clone()))],
             }),
             ("Bool", [(_, MirEvalValue::Bool(value))]) => Ok(MirEvalValue::Enum {
-                type_name: "DataTree".to_string(),
+                type_name: "Dyn".to_string(),
                 variant: "Bool".to_string(),
                 args: vec![(None, MirEvalValue::Bool(*value))],
             }),
             ("Blob", [(_, MirEvalValue::Bytes(value))]) => Ok(MirEvalValue::Enum {
-                type_name: "DataTree".to_string(),
+                type_name: "Dyn".to_string(),
                 variant: "Bytes".to_string(),
                 args: vec![(None, MirEvalValue::Bytes(value.clone()))],
             }),
@@ -21052,7 +21052,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             };
             fields.push((decode_name.clone(), Self::db_value_tree(&value, span)?));
         }
-        Ok(Self::data_tree_object(fields))
+        Ok(Self::dyn_object(fields))
     }
 
     fn eval_typed_core_call(
@@ -21079,7 +21079,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         }
         let [target] = type_args else {
             // `json.decode(text)` without a target type is the untyped
-            // DataTree decode, which the ordinary codec row answers.
+            // Dyn decode, which the ordinary codec row answers.
             if type_args.is_empty()
                 && row.member == "decode"
                 && row.module.starts_with("core.encoding.")
@@ -21176,7 +21176,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     mir_args_prelude::merge(&entry, program, &argv, &names, flags, settings);
                 Ok(Some(match result {
                     Ok(fields) => {
-                        self.invoke_typed_decode(target, Self::data_tree_object(fields), span)?
+                        self.invoke_typed_decode(target, Self::dyn_object(fields), span)?
                     }
                     Err(errors) => Self::shape_error_result(
                         errors.into_iter().map(|error| (error.path, error.reason)),
@@ -21355,11 +21355,11 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         errors
                     },
                     |text| MirEvalValue::Enum {
-                        type_name: "DataTree".to_string(),
+                        type_name: "Dyn".to_string(),
                         variant: "Text".to_string(),
                         args: vec![(None, MirEvalValue::String(text))],
                     },
-                    |fields| Self::data_tree_object(fields),
+                    |fields| Self::dyn_object(fields),
                 );
                 if let Some(error) = callback_fault {
                     return Err(error);

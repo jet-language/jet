@@ -966,7 +966,7 @@ Semantics:
 - Structs: `Type{field: p, ..}`, the D-PAT-NAMED-NEST1 brace form with a
   type head. An inferred `{…}` head is rejected because `{` already opens the
   arm table.
-- The design works the same whether the JSON type keeps the name `DataTree`
+- The design works the same whether the JSON type keeps the name `Dyn`
   or becomes `Dyn` (D-INFER-PRIVATE1=A).
 
 The split between decode and patterns is the teaching rule: **decode for a

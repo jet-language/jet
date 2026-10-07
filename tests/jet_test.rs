@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use std::ops::Deref;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::parse_json;
 
 mod common;
@@ -767,47 +767,47 @@ fn property_distribution(samples: &[PropertySample]) -> [usize; 4] {
     counts
 }
 
-fn report_field<'a>(value: &'a DataTree, key: &str) -> &'a DataTree {
+fn report_field<'a>(value: &'a Dyn, key: &str) -> &'a Dyn {
     value
         .get(key)
         .unwrap_or_else(|error| panic!("missing JSON field `{key}`: {error}"))
 }
 
-fn report_object<'a>(value: &'a DataTree, key: &str) -> &'a DataTree {
+fn report_object<'a>(value: &'a Dyn, key: &str) -> &'a Dyn {
     let field = report_field(value, key);
-    if !matches!(field, DataTree::Object(_)) {
+    if !matches!(field, Dyn::Object(_)) {
         panic!("JSON field `{key}` must be an object: {field:?}");
     }
     field
 }
 
-fn report_array<'a>(value: &'a DataTree, key: &str) -> &'a [DataTree] {
+fn report_array<'a>(value: &'a Dyn, key: &str) -> &'a [Dyn] {
     report_field(value, key)
         .as_array()
         .unwrap_or_else(|error| panic!("JSON field `{key}` must be an array: {error}"))
 }
 
-fn report_text(value: &DataTree) -> &str {
+fn report_text(value: &Dyn) -> &str {
     value
         .as_str()
         .unwrap_or_else(|error| panic!("JSON field must be text: {error}"))
 }
 
-fn report_int(value: &DataTree) -> i64 {
+fn report_int(value: &Dyn) -> i64 {
     match value {
-        DataTree::Int(value) => *value,
-        DataTree::Number(value) => value
+        Dyn::Int(value) => *value,
+        Dyn::Number(value) => value
             .parse()
             .unwrap_or_else(|_| panic!("JSON field must be an integer: {value}")),
         _ => panic!("JSON field must be an integer: {value:?}"),
     }
 }
 
-fn report_float(value: &DataTree) -> f64 {
+fn report_float(value: &Dyn) -> f64 {
     match value {
-        DataTree::Float(value) => *value,
-        DataTree::Int(value) => *value as f64,
-        DataTree::Number(value) => value
+        Dyn::Float(value) => *value,
+        Dyn::Int(value) => *value as f64,
+        Dyn::Number(value) => value
             .parse()
             .unwrap_or_else(|_| panic!("JSON field must be numeric: {value}")),
         _ => panic!("JSON field must be numeric: {value:?}"),
@@ -1275,11 +1275,11 @@ fn jet_test_coverage_reports_branch_taken_and_not_taken_in_text_and_json() {
     };
     assert!(matches!(
         report_field(function_state("used"), "covered"),
-        DataTree::Bool(true)
+        Dyn::Bool(true)
     ));
     assert!(matches!(
         report_field(function_state("unused"), "covered"),
-        DataTree::Bool(false)
+        Dyn::Bool(false)
     ));
     assert_eq!(branches.len(), 2, "test-harness branches must not count as source coverage");
     let outcome = |name: &str| {

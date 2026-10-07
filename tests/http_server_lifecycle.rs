@@ -23,7 +23,7 @@ trait __jet_Encode {}
 impl<T> __jet_Encode for T {}
 
 trait __jet_Decode: Sized {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>;
+    fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>>;
 }
 
 fn jet_enc_json_to_string<T: __jet_Encode>(_value: &T) -> String {
@@ -31,15 +31,15 @@ fn jet_enc_json_to_string<T: __jet_Encode>(_value: &T) -> String {
 }
 
 impl __jet_Decode for String {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
-        Ok(jet_std::render_datatree_json(tree, false, 0))
+    fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>> {
+        Ok(jet_std::render_dyn_json(tree, false, 0))
     }
 }
 
 fn jet_enc_json_decode<T: __jet_Decode>(
     text: &str,
 ) -> Result<T, Vec<jet_std::FieldError>> {
-    let tree = jet_std::parse_json_typed_datatree(text)
+    let tree = jet_std::parse_json_typed_dyn(text)
         .map_err(|error| jet_std::FieldError::one(error.reason))?;
     T::jet_decode(&tree)
 }
@@ -64,7 +64,7 @@ include!("../crates/jet-foundation/src/LiveLifecycle.rs");
 mod jet_std {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
-    pub use jet_foundation::DataTree::DataTree;
+    pub use jet_foundation::Dyn::Dyn;
     use jet_foundation::Shape::ShapeProjection;
 
     include!("../crates/jet-codegen/src/Prelude/TaskGroup.rs");
@@ -130,7 +130,7 @@ mod jet_std {
         Other(IOContext),
     }
 
-    // The canonical DataTree extension calls these exact-Int helpers. This
+    // The canonical Dyn extension calls these exact-Int helpers. This
     // fixture does not exercise large integer ownership, so the host i64
     // carrier is sufficient while the type and decode modules stay canonical.
     pub fn jet_int_from_i64(value: i64) -> i64 {
@@ -173,13 +173,13 @@ mod jet_std {
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
-    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/DynKind.rs");
     include!("../crates/jet-codegen/src/Prelude/Core/FieldError.rs");
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs");
-    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/Dyn.rs");
     use crate::jet_encoding_json::quote_json;
-    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONDataTree.rs");
-    jet_datatree_decode_helpers!();
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONDyn.rs");
+    jet_dyn_decode_helpers!();
 
 }
 

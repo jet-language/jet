@@ -19,7 +19,7 @@ use jet::ExitCodes;
 use jet::RecordIndex::{
     RecordCapture, RecordIdentity, RecordIndex, RecordIndexEntry, RecordKind, RecordLink,
 };
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::Report::{
     render_status, render_status_with_reports, StatusEnvelope, StatusFields, StatusValue,
 };
@@ -244,7 +244,7 @@ fn replay_artifact_id(bytes: &[u8]) -> Result<String, String> {
     }
     let header = std::str::from_utf8(&bytes[16..header_end])
         .map_err(|_| "replay artifact header is not UTF-8".to_string())?;
-    let DataTree::Object(fields) =
+    let Dyn::Object(fields) =
         parse_json(header).map_err(|_| "replay artifact header is not valid JSON".to_string())?
     else {
         return Err("replay artifact header is not a JSON object".into());
@@ -6356,16 +6356,16 @@ fn harness_test_cases(stdout: &str) -> Result<Option<Vec<HarnessTestCase>>, Stri
                 .get("ok")
                 .map_err(|error| format!("test `{name}` has no result: {error}"))?
             {
-                DataTree::Bool(ok) => *ok,
+                Dyn::Bool(ok) => *ok,
                 _ => return Err(format!("test `{name}` has a non-boolean result")),
             };
             let expected_failure = match test.get_opt("expectedFailure") {
-                Some(DataTree::Bool(expected_failure)) => *expected_failure,
+                Some(Dyn::Bool(expected_failure)) => *expected_failure,
                 None => false,
                 _ => return Err(format!("test `{name}` has a non-boolean expectation")),
             };
             let skipped = match test.get_opt("skipped") {
-                Some(DataTree::Bool(skipped)) => *skipped,
+                Some(Dyn::Bool(skipped)) => *skipped,
                 None => false,
                 _ => return Err(format!("test `{name}` has a non-boolean skip flag")),
             };
@@ -6921,7 +6921,7 @@ fn canonical_test_json(stdout: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn object_field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+fn object_field<'a>(object: &'a [(String, Dyn)], key: &str) -> Option<&'a Dyn> {
     object
         .iter()
         .find(|(name, _)| name == key)
@@ -6929,12 +6929,12 @@ fn object_field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a D
 }
 
 fn is_canonical_test_report(candidate: &str) -> bool {
-    let Ok(DataTree::Object(object)) = parse_json(candidate) else {
+    let Ok(Dyn::Object(object)) = parse_json(candidate) else {
         return false;
     };
     let schema = object_field(&object, "schema").and_then(|value| value.as_str().ok());
     matches!(schema, Some("jet.test.v1" | "jet-test-v1"))
-        && matches!(object_field(&object, "tests"), Some(DataTree::Array(_)))
+        && matches!(object_field(&object, "tests"), Some(Dyn::Array(_)))
 }
 fn canonical_status_json(stdout: &str) -> Option<String> {
     let whole = stdout.trim();
@@ -6950,7 +6950,7 @@ fn canonical_status_json(stdout: &str) -> Option<String> {
 }
 
 fn is_canonical_status_report(candidate: &str) -> bool {
-    let Ok(DataTree::Object(object)) = parse_json(candidate) else {
+    let Ok(Dyn::Object(object)) = parse_json(candidate) else {
         return false;
     };
     matches!(
@@ -8189,17 +8189,17 @@ fn test_watch_failure_names(stdout: &str, stderr: &str) -> Vec<String> {
     names
 }
 
-fn is_canonical_test_value(value: &DataTree) -> bool {
-    let DataTree::Object(object) = value else {
+fn is_canonical_test_value(value: &Dyn) -> bool {
+    let Dyn::Object(object) = value else {
         return false;
     };
     let schema = object_field(object, "schema").and_then(|value| value.as_str().ok());
     matches!(schema, Some("jet.test.v1" | "jet-test-v1"))
-        && matches!(object_field(object, "tests"), Some(DataTree::Array(_)))
+        && matches!(object_field(object, "tests"), Some(Dyn::Array(_)))
 }
 
-fn is_canonical_status_value(value: &DataTree) -> bool {
-    let DataTree::Object(object) = value else {
+fn is_canonical_status_value(value: &Dyn) -> bool {
+    let Dyn::Object(object) = value else {
         return false;
     };
     matches!(
@@ -8209,21 +8209,21 @@ fn is_canonical_status_value(value: &DataTree) -> bool {
 }
 
 fn append_status_report_failures(
-    value: &DataTree,
+    value: &Dyn,
     names: &mut Vec<String>,
     seen: &mut BTreeSet<String>,
 ) {
-    let DataTree::Object(object) = value else {
+    let Dyn::Object(object) = value else {
         return;
     };
-    let Some(DataTree::Object(evidence)) = object_field(object, "evidence") else {
+    let Some(Dyn::Object(evidence)) = object_field(object, "evidence") else {
         return;
     };
-    let Some(DataTree::Array(records)) = object_field(evidence, "evidence") else {
+    let Some(Dyn::Array(records)) = object_field(evidence, "evidence") else {
         return;
     };
     for record in records {
-        let DataTree::Object(record) = record else {
+        let Dyn::Object(record) = record else {
             continue;
         };
         let Some(name) = object_field(record, "claim").and_then(|value| value.as_str().ok()) else {
@@ -8243,18 +8243,18 @@ fn append_status_report_failures(
 }
 
 fn append_test_report_failures(
-    value: &DataTree,
+    value: &Dyn,
     names: &mut Vec<String>,
     seen: &mut BTreeSet<String>,
 ) {
-    let DataTree::Object(object) = value else {
+    let Dyn::Object(object) = value else {
         return;
     };
-    let Some(DataTree::Array(tests)) = object_field(object, "tests") else {
+    let Some(Dyn::Array(tests)) = object_field(object, "tests") else {
         return;
     };
     for test in tests {
-        let DataTree::Object(test) = test else {
+        let Dyn::Object(test) = test else {
             continue;
         };
         let Some(name) = object_field(test, "name").and_then(|value| value.as_str().ok()) else {
@@ -8262,12 +8262,12 @@ fn append_test_report_failures(
         };
         let failed = object_field(test, "ok")
             .and_then(|value| match value {
-                DataTree::Bool(ok) => Some(!ok),
+                Dyn::Bool(ok) => Some(!ok),
                 _ => None,
             })
             .or_else(|| {
                 object_field(test, "passed").and_then(|value| match value {
-                    DataTree::Bool(passed) => Some(!passed),
+                    Dyn::Bool(passed) => Some(!passed),
                     _ => None,
                 })
             })
@@ -12869,26 +12869,26 @@ mod foreign_build_import {
         Ok((path, candidate, digest))
     }
 
-    fn tree_field<'a>(tree: &'a DataTree, key: &str) -> Result<&'a DataTree, Failure> {
+    fn tree_field<'a>(tree: &'a Dyn, key: &str) -> Result<&'a Dyn, Failure> {
         tree.get(key)
             .map_err(|error| Failure::internal(format!("candidate {error}")))
     }
 
-    fn tree_string(tree: &DataTree, key: &str) -> Result<String, Failure> {
+    fn tree_string(tree: &Dyn, key: &str) -> Result<String, Failure> {
         tree_field(tree, key)?
             .as_str()
             .map(str::to_string)
             .map_err(|error| Failure::internal(format!("candidate `{key}` {error}")))
     }
 
-    fn tree_array<'a>(tree: &'a DataTree, key: &str) -> Result<&'a [DataTree], Failure> {
+    fn tree_array<'a>(tree: &'a Dyn, key: &str) -> Result<&'a [Dyn], Failure> {
         tree_field(tree, key)?
             .as_array()
             .map(Vec::as_slice)
             .map_err(|error| Failure::internal(format!("candidate `{key}` {error}")))
     }
 
-    fn tree_object_field<'a>(tree: &'a DataTree, key: &str) -> Result<&'a DataTree, Failure> {
+    fn tree_object_field<'a>(tree: &'a Dyn, key: &str) -> Result<&'a Dyn, Failure> {
         let fields = tree
             .as_object()
             .map_err(|error| Failure::internal(format!("candidate object {error}")))?;
@@ -12898,7 +12898,7 @@ mod foreign_build_import {
             .ok_or_else(|| Failure::internal(format!("candidate missing `{key}`")))
     }
 
-    fn candidate_inputs(tree: &DataTree) -> Result<Vec<(String, String)>, Failure> {
+    fn candidate_inputs(tree: &Dyn) -> Result<Vec<(String, String)>, Failure> {
         tree_array(tree, "inputs")?
             .iter()
             .map(|entry| {
@@ -12920,7 +12920,7 @@ mod foreign_build_import {
             .collect()
     }
 
-    fn candidate_strings(tree: &DataTree, key: &str) -> Result<Vec<String>, Failure> {
+    fn candidate_strings(tree: &Dyn, key: &str) -> Result<Vec<String>, Failure> {
         tree_array(tree, key)?
             .iter()
             .map(|value| {
@@ -12931,7 +12931,7 @@ mod foreign_build_import {
             })
             .collect()
     }
-    fn candidate_pairs(tree: &DataTree, key: &str) -> Result<Vec<(String, String)>, Failure> {
+    fn candidate_pairs(tree: &Dyn, key: &str) -> Result<Vec<(String, String)>, Failure> {
         tree_array(tree, key)?
             .iter()
             .map(|entry| {
@@ -12957,7 +12957,7 @@ mod foreign_build_import {
         root: &Path,
         request: &Request,
         expected_digest: Option<&str>,
-    ) -> Result<(DataTree, String, PathBuf), Failure> {
+    ) -> Result<(Dyn, String, PathBuf), Failure> {
         let path = candidate_path(root, &format!("{}:{}", request.kind, request.build_dir));
         let metadata = fs::symlink_metadata(&path).map_err(|error| {
             Failure::user(format!(
@@ -13004,7 +13004,7 @@ mod foreign_build_import {
         Ok((tree, actual, path))
     }
 
-    fn verify_inputs(root: &Path, tree: &DataTree) -> Result<(), Failure> {
+    fn verify_inputs(root: &Path, tree: &Dyn) -> Result<(), Failure> {
         for (relative, expected) in candidate_inputs(tree)? {
             let bytes = read_regular(root, &relative).map_err(|error| match error {
                 Failure::User(message) => Failure::user(format!(

@@ -1284,7 +1284,7 @@ pub(crate) fn check_result_record(check: &CheckResult) -> String {
 pub(crate) fn check_result_from_record(record: &str, elapsed_ms: u64) -> Option<CheckResult> {
     let value = jet_foundation::JSON::parse_json(record).ok()?;
     let object = value.as_object().ok()?;
-    fn text(fields: &[(String, jet_foundation::DataTree::DataTree)], name: &str) -> Option<String> {
+    fn text(fields: &[(String, jet_foundation::Dyn::Dyn)], name: &str) -> Option<String> {
         fields
             .iter()
             .find(|(key, _)| key == name)
@@ -1295,7 +1295,7 @@ pub(crate) fn check_result_from_record(record: &str, elapsed_ms: u64) -> Option<
         .iter()
         .find(|(key, _)| key == "diagnostics")
         .and_then(|(_, value)| match value {
-            jet_foundation::DataTree::DataTree::Int(count) => usize::try_from(*count).ok(),
+            jet_foundation::Dyn::Dyn::Int(count) => usize::try_from(*count).ok(),
             _ => None,
         })?;
     let scope = match text(object, "scope")?.as_str() {

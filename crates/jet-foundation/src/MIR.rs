@@ -2803,7 +2803,7 @@ impl MirDecisionLedger {
         let root = crate::JSON::parse_json(payload)
             .map_err(|()| "decision ledger payload is not valid JSON".to_string())?;
         let root_fields = match root {
-            crate::DataTree::DataTree::Object(fields) => {
+            crate::Dyn::Dyn::Object(fields) => {
                 fields.into_iter().collect::<BTreeMap<_, _>>()
             }
             _ => return Err("decision ledger payload must be an object".to_string()),
@@ -2811,7 +2811,7 @@ impl MirDecisionLedger {
         if root_fields.len() != 3
             || !matches!(
                 root_fields.get("schema"),
-                Some(crate::DataTree::DataTree::Text(schema))
+                Some(crate::Dyn::Dyn::Text(schema))
                     if schema == "jet.mir.decisions.v1"
             )
         {
@@ -2825,7 +2825,7 @@ impl MirDecisionLedger {
         let rows_value = root_fields
             .get("rows")
             .ok_or_else(|| "decision ledger payload has no rows".to_string())?;
-        let crate::DataTree::DataTree::Array(rows_value) = rows_value else {
+        let crate::Dyn::Dyn::Array(rows_value) = rows_value else {
             return Err("decision ledger payload rows must be an array".to_string());
         };
         if rows_value.len() > 4096 {
@@ -2952,10 +2952,10 @@ fn decision_row_json(row: &MirDecisionRow) -> String {
 }
 
 fn decision_object(
-    value: &crate::DataTree::DataTree,
+    value: &crate::Dyn::Dyn,
     label: &str,
-) -> Result<BTreeMap<String, crate::DataTree::DataTree>, String> {
-    let crate::DataTree::DataTree::Object(fields) = value else {
+) -> Result<BTreeMap<String, crate::Dyn::Dyn>, String> {
+    let crate::Dyn::Dyn::Object(fields) = value else {
         return Err(format!("{label} must be an object"));
     };
     let fields = fields.iter().cloned().collect::<BTreeMap<_, _>>();
@@ -2963,12 +2963,12 @@ fn decision_object(
 }
 
 fn decision_text(
-    fields: &BTreeMap<String, crate::DataTree::DataTree>,
+    fields: &BTreeMap<String, crate::Dyn::Dyn>,
     key: &str,
     label: &str,
 ) -> Result<String, String> {
     crate::JSON::json_get(
-        &crate::DataTree::DataTree::Object(
+        &crate::Dyn::Dyn::Object(
             fields.iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
         ),
         key,
@@ -2979,7 +2979,7 @@ fn decision_text(
 }
 
 fn decision_u64(
-    fields: &BTreeMap<String, crate::DataTree::DataTree>,
+    fields: &BTreeMap<String, crate::Dyn::Dyn>,
     key: &str,
     label: &str,
 ) -> Result<u64, String> {
@@ -2987,7 +2987,7 @@ fn decision_u64(
         .get(key)
         .ok_or_else(|| format!("{label} has invalid `{key}`"))?;
     match value {
-        crate::DataTree::DataTree::Text(value) => value
+        crate::Dyn::Dyn::Text(value) => value
             .parse::<u64>()
             .map_err(|_| format!("{label} has invalid `{key}`")),
         _ => Err(format!("{label} has invalid `{key}`")),
@@ -2995,19 +2995,19 @@ fn decision_u64(
 }
 
 fn decision_optional_u64(
-    fields: &BTreeMap<String, crate::DataTree::DataTree>,
+    fields: &BTreeMap<String, crate::Dyn::Dyn>,
     key: &str,
     label: &str,
 ) -> Result<Option<u64>, String> {
     match fields.get(key) {
-        Some(crate::DataTree::DataTree::Null) => Ok(None),
+        Some(crate::Dyn::Dyn::Null) => Ok(None),
         Some(_) => decision_u64(fields, key, label).map(Some),
         None => Err(format!("{label} has no `{key}`")),
     }
 }
 
 fn parse_decision_identity(
-    value: &crate::DataTree::DataTree,
+    value: &crate::Dyn::Dyn,
 ) -> Result<MirDecisionIdentity, String> {
     let fields = decision_object(value, "decision identity")?;
     const KEYS: [&str; 7] = [
@@ -3033,7 +3033,7 @@ fn parse_decision_identity(
     })
 }
 
-fn parse_decision_span(value: &crate::DataTree::DataTree) -> Result<Span, String> {
+fn parse_decision_span(value: &crate::Dyn::Dyn) -> Result<Span, String> {
     let fields = decision_object(value, "decision span")?;
     if fields.len() != 2 || !fields.contains_key("start") || !fields.contains_key("end") {
         return Err("decision span has missing or unsafe fields".to_string());
@@ -3072,21 +3072,21 @@ fn parse_decision_disposition(value: &str) -> Option<MirDecisionDisposition> {
 }
 
 fn parse_decision_optional_identity(
-    value: Option<&crate::DataTree::DataTree>,
+    value: Option<&crate::Dyn::Dyn>,
 ) -> Result<Option<MirDecisionIdentity>, String> {
     match value {
-        None | Some(crate::DataTree::DataTree::Null) => Ok(None),
+        None | Some(crate::Dyn::Dyn::Null) => Ok(None),
         Some(value) => parse_decision_identity(value).map(Some),
     }
 }
 
 fn parse_decision_optional_edit(
-    value: Option<&crate::DataTree::DataTree>,
+    value: Option<&crate::Dyn::Dyn>,
 ) -> Result<Option<MirDecisionEdit>, String> {
     let Some(value) = value else {
         return Err("decision row has no `edit`".to_string());
     };
-    if matches!(value, crate::DataTree::DataTree::Null) {
+    if matches!(value, crate::Dyn::Dyn::Null) {
         return Ok(None);
     }
     let fields = decision_object(value, "decision edit")?;
@@ -3104,12 +3104,12 @@ fn parse_decision_optional_edit(
 }
 
 fn parse_decision_optional_ref(
-    value: Option<&crate::DataTree::DataTree>,
+    value: Option<&crate::Dyn::Dyn>,
 ) -> Result<Option<DerivationRef>, String> {
     let Some(value) = value else {
         return Err("decision row has no `derivation_ref`".to_string());
     };
-    if matches!(value, crate::DataTree::DataTree::Null) {
+    if matches!(value, crate::Dyn::Dyn::Null) {
         return Ok(None);
     }
     let fields = decision_object(value, "decision derivation reference")?;
@@ -3123,7 +3123,7 @@ fn parse_decision_optional_ref(
     )?)))
 }
 
-fn parse_decision_row(value: &crate::DataTree::DataTree) -> Result<MirDecisionRow, String> {
+fn parse_decision_row(value: &crate::Dyn::Dyn) -> Result<MirDecisionRow, String> {
     let fields = decision_object(value, "decision row")?;
     const KEYS: [&str; 16] = [
         "derivation_disposition",
@@ -3179,7 +3179,7 @@ fn parse_decision_row(value: &crate::DataTree::DataTree) -> Result<MirDecisionRo
     row.derivation = parse_decision_optional_ref(fields.get("derivation_ref"))?;
     row.identity = parse_decision_optional_identity(fields.get("identity"))?;
     row.evidence_method = match fields.get("evidence_method") {
-        Some(crate::DataTree::DataTree::Null) => None,
+        Some(crate::Dyn::Dyn::Null) => None,
         Some(value) => {
             let method = crate::JSON::json_str(value)
                 .ok_or_else(|| "decision row has invalid `evidence_method`".to_string())?;
@@ -3191,7 +3191,7 @@ fn parse_decision_row(value: &crate::DataTree::DataTree) -> Result<MirDecisionRo
         None => return Err("decision row has no `evidence_method`".to_string()),
     };
     row.derivation_disposition = match fields.get("derivation_disposition") {
-        Some(crate::DataTree::DataTree::Null) => None,
+        Some(crate::Dyn::Dyn::Null) => None,
         Some(value) => {
             let disposition = crate::JSON::json_str(value).ok_or_else(|| {
                 "decision row has invalid `derivation_disposition`".to_string()

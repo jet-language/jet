@@ -1469,7 +1469,7 @@ pub(crate) fn canonical_enum_owner(cx: &Cx, name: &str) -> String {
 }
 
 /// Seed monomorphize demand for generic Codable from encoding core calls and
-/// SerdeEncode/DataTreeDecode ops already present in lowered bodies.
+/// SerdeEncode/DynDecode ops already present in lowered bodies.
 fn collect_serde_codec_demands(
     funcs: &[TFunc],
     demands: &mut std::collections::BTreeMap<String, (Type, String, Vec<Type>)>,
@@ -1500,7 +1500,7 @@ fn collect_serde_codec_demands(
                 }
                 match op {
                     THandleOp::SerdeEncode => demand_serde_codec(demands, &recv.ty, "encode"),
-                    THandleOp::DataTreeDecode(target) => {
+                    THandleOp::DynDecode(target) => {
                         demand_serde_codec(demands, target, "decode")
                     }
                     _ => {}
@@ -1756,7 +1756,7 @@ fn lower_demanded_generic_methods(
             cx.current_type_params.replace(previous_type_params);
             lowered.key = function_semantic_key(&lowered.module, &key);
             set_lowered_method_name(&mut lowered, || key.clone());
-            // Nested SerdeEncode/DataTreeDecode inside this body may demand more.
+            // Nested SerdeEncode/DynDecode inside this body may demand more.
             collect_serde_codec_demands(std::slice::from_ref(&lowered), &mut pending);
             funcs.push(lowered);
         }
@@ -6963,8 +6963,8 @@ pub struct TWebParamReconstruction {
 }
 
 /// D-SERDE2 (card #131 S1-bridge): which built-in codec trait a hand impl method
-/// bridges to. `Encode` → `jet_encode(&self) -> jet_std::DataTree`; `Decode` →
-/// the static `jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<FieldError>>`.
+/// bridges to. `Encode` → `jet_encode(&self) -> jet_std::Dyn`; `Decode` →
+/// the static `jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<FieldError>>`.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SerdeCodec {
     Encode,
@@ -7005,8 +7005,8 @@ pub enum TFuncKind {
         /// D-SERDE2 (card #131 S1-bridge): a hand-written `impl T.Encode` /
         /// `impl T.Decode` method. The user writes the verbs `encode`/`decode`
         /// with Jet-facing signatures, but the Rust `__jet_Encode`/`__jet_Decode`
-        /// traits declare `jet_encode(&self) -> DataTree` /
-        /// `jet_decode(tree: &DataTree) -> Result<Self, [FieldError]>`. This bridges
+        /// traits declare `jet_encode(&self) -> Dyn` /
+        /// `jet_decode(tree: &Dyn) -> Result<Self, [FieldError]>`. This bridges
         /// the name + signature internally (I2: a sema-accepted hand impl must
         /// produce Rust rustc accepts). `None` for every ordinary trait method.
         serde: Option<SerdeCodec>,
@@ -12135,7 +12135,7 @@ pub enum TExprKind {
     /// parameter/column value. Same shape as `JSONLit` (a FOREIGN prelude enum,
     /// not a user `EnumLit`), kept as its own node rather than reusing `JSONLit`
     /// because `DBValue` renders to a DIFFERENT prelude type (`jet_std::DBValue`,
-    /// not `jet_std::DataTree`) and has no recursive `Array`/`Object`-style
+    /// not `jet_std::Dyn`) and has no recursive `Array`/`Object`-style
     /// payload to special-case.
     DBValueLit {
         variant: String,
@@ -14555,25 +14555,25 @@ pub enum THandleOp {
         kind: String,
         method: String,
     },
-    /// D-SERDE-ACCESS=B: `DataTree.field(name)` → `(recv).field(&a0)`.
-    DataTreeField,
-    /// D-SERDE-ACCESS=B: `DataTree.at(i)` → `(recv).at(a0)`.
-    DataTreeAt,
-    /// D-SERDE-ACCESS=B: `DataTree.int()` → `(recv).int()`.
-    DataTreeInt,
-    /// D-SERDE-ACCESS=B: `DataTree.text()` → `(recv).text()`.
-    DataTreeText,
-    /// D-SERDE-ACCESS=B: `DataTree.bool()` → `(recv).bool()`.
-    DataTreeBool,
-    /// D-SERDE-ACCESS=B: `DataTree.float()` → `(recv).float()`.
-    DataTreeFloat,
-    /// D-DATATREE-ERGO1=A: `DataTree.to_text()` → `(recv).to_text()`.
-    DataTreeToText,
-    /// D-DATATREE-ERGO1=A: `DataTree.equal_unordered(other)` →
+    /// D-SERDE-ACCESS=B: `Dyn.field(name)` → `(recv).field(&a0)`.
+    DynField,
+    /// D-SERDE-ACCESS=B: `Dyn.at(i)` → `(recv).at(a0)`.
+    DynAt,
+    /// D-SERDE-ACCESS=B: `Dyn.int()` → `(recv).int()`.
+    DynInt,
+    /// D-SERDE-ACCESS=B: `Dyn.text()` → `(recv).text()`.
+    DynText,
+    /// D-SERDE-ACCESS=B: `Dyn.bool()` → `(recv).bool()`.
+    DynBool,
+    /// D-SERDE-ACCESS=B: `Dyn.float()` → `(recv).float()`.
+    DynFloat,
+    /// D-DATATREE-ERGO1=A: `Dyn.to_text()` → `(recv).to_text()`.
+    DynToText,
+    /// D-DATATREE-ERGO1=A: `Dyn.equal_unordered(other)` →
     /// `(recv).equal_unordered(&a0)`.
-    DataTreeEqualUnordered,
+    DynEqualUnordered,
     /// D-SERDE16=A: `tree.decode<T>()` dispatches the public `T.Decode` protocol.
-    DataTreeDecode(Type),
+    DynDecode(Type),
     /// D-SERDE2=A: `value.encode()` dispatches the public Encode protocol.
     SerdeEncode,
     /// D-SERDE-ACCESS=B: same accessors on `JSON`/`Data`.

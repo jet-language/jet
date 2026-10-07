@@ -1802,7 +1802,7 @@ fn jet_rust_emit_columnar_row_adapter(ctx: &JetRustEmitContext, definition: MIRT
 JET_RUST_EMIT_COMPILER_OWNED_ENUMS :: prep { [String]{
     "Overflow", "FailurePolicy", "HookPolicy", "HookOutcome", "HookDecision", "DispatchState", "Ordering", "RemoveBy", "TaskFailure", "TaskOutcome",
     "TaskStatus", "DeliveryState", "IOError", "Key", "IOOperation", "ProcessResourceLimit", "ProcessStreamMode", "TerminalMode", "DurationUnit", "FontStyle",
-    "GlyphShaper", "WebFormValueType", "WebFormControl", "DataLoaderKind", "DataErrorKind", "DataFormat", "DataFreshness", "DataInvalidationCause", "DataTree", "DataEvent",
+    "GlyphShaper", "WebFormValueType", "WebFormControl", "DataLoaderKind", "DataErrorKind", "DataFormat", "DataFreshness", "DataInvalidationCause", "Dyn", "DataEvent",
     "XMLCanonicalMode", "EmailError", "SMTPSecurity", "RecipientPolicy", "SMTPAuth", "TLSTrust", "TLSVersion", "TLSClientTrust", "NetDnsError", "NetError",
     "NetShutdown", "WatchDomain", "WatchKind", "NetReadyInterest", "WsError",
     "PluginLimit", "PluginError",
@@ -2680,7 +2680,7 @@ fn jet_rust_emit_core_rust_type_name(raw: String) -> String? {
     if raw.starts_with("<corelib>/Core/sync::") && raw.ends_with("::RowPolicy") -> return None
     if jet_rust_emit_source_owned_core_shape(raw) -> return None
     name :: jet_rust_emit_core_qualified_leaf(jet_rust_emit_core_source_type_leaf(raw)) ?? return None
-    if name == "DataTree" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV" -> return Val("DataTree")
+    if name == "Dyn" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV" -> return Val("Dyn")
     if jet_rust_emit_job_queue_type_name(name) == .Val(queue) -> return Val(queue)
     lanes :: [String]{"F32x4", "F64x2", "F32x8", "F64x4", "I8x16", "I16x8", "I32x4", "I64x2", "U8x16", "U16x8", "U32x4", "U64x2", "I8x32", "I16x16", "I32x8", "I64x4", "U8x32", "U16x16", "U32x8", "U64x4", "Vec2", "Vec3", "Vec4", "Mat3", "Mat4"}
     if lanes.contains(name) -> return Val(~name)

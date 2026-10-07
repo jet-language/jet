@@ -170,10 +170,10 @@ fn pkg_render_effect_line(effects: [String]) -> String Never! {
     "effects: {effects.join(", ")}"
 }
 
-fn pkg_effect_texts(effects: [String]) -> DataTree Never! {
-    items := [DataTree]{}
-    loop effect_name in effects -> &items.push(DataTree.Text(effect_name))
-    DataTree.Array(items)
+fn pkg_effect_texts(effects: [String]) -> Dyn Never! {
+    items := [Dyn]{}
+    loop effect_name in effects -> &items.push(Dyn.Text(effect_name))
+    Dyn.Array(items)
 }
 
 fn pkg_render_effect_json(effects: [String]) -> String Never! {
@@ -225,7 +225,7 @@ pub fn pkg_render_effect_projection_json(projection: EffectProjection) -> String
         .with_field("required_effects", required)
         .with_field("granted_effects", pkg_effect_texts(projection.granted_effects))
         .with_field("denied_effects", pkg_effect_texts(projection.denied_effects))
-        .with_field("authority", DataTree.Text(~projection.authority))
+        .with_field("authority", Dyn.Text(~projection.authority))
         .json()
 }
 

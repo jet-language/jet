@@ -1,6 +1,6 @@
 // Claims ported from crates/jet-pkg-model/src/MCP.rs #[cfg(test)].
 
-fn pkg_test_mcp_list_request(id: Int, params: DataTree) -> MCPMessage {
+fn pkg_test_mcp_list_request(id: Int, params: Dyn) -> MCPMessage {
     MCPMessage.Request(MCPRequest.new(MCPRequestID.Number(id), "tools/list", Val(params)) ?? panic("valid tools/list request"))
 }
 
@@ -43,7 +43,7 @@ fn pkg_test_mcp_codec_error(result: MCPCodecError) -> String {
 }
 
 #Test("mcp codecs round trip messages and enforce bounds") {
-    request :: pkg_test_mcp_list_request(7, DataTree.Object([String: DataTree]{}))
+    request :: pkg_test_mcp_list_request(7, Dyn.Object([String: Dyn]{}))
     codec :: MCPCodec.Stable20251125
     encoded :: codec.encode_message(request, MCPLimits.defaults()) ?? panic("encode")
     assert_eq(codec.decode_message(encoded, MCPLimits.defaults()) ?? panic("decode"), request)
@@ -56,7 +56,7 @@ fn pkg_test_mcp_codec_error(result: MCPCodecError) -> String {
 }
 
 #Test("mcp codec rejects invalid limits and malformed json") {
-    request :: pkg_test_mcp_list_request(1, DataTree.Object([String: DataTree]{}))
+    request :: pkg_test_mcp_list_request(1, Dyn.Object([String: Dyn]{}))
     codec :: MCPCodec.Stable20251125
     zero := MCPLimits.defaults()
     zero.max_message_bytes = 0
@@ -71,7 +71,7 @@ fn pkg_test_mcp_codec_error(result: MCPCodecError) -> String {
 }
 
 #Test("mcp codec rejects nested values beyond the schema bound") {
-    nested :: DataTree.Object(["nested": DataTree.Object(["value": DataTree.Object([String: DataTree]{})])])
+    nested :: Dyn.Object(["nested": Dyn.Object(["value": Dyn.Object([String: Dyn]{})])])
     request :: pkg_test_mcp_list_request(2, nested)
     codec :: MCPCodec.Stable20251125
     encoded :: codec.encode_message(request, MCPLimits.defaults()) ?? panic("encode")

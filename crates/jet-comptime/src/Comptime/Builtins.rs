@@ -82,29 +82,29 @@ pub fn exact_int_value(value: crate::Numeric::CtBigInt) -> CtValue {
         None => CtValue::BigInt(value),
     }
 }
-fn is_datatree(value: &CtValue) -> bool {
+fn is_dyn(value: &CtValue) -> bool {
     matches!(
         value,
-        CtValue::Enum { type_name, .. } if matches!(type_name.as_str(), "JSON" | "DataTree")
+        CtValue::Enum { type_name, .. } if matches!(type_name.as_str(), "JSON" | "Dyn")
     )
 }
 
-fn datatree_payload<'a>(value: &'a CtValue, variant: &str) -> Option<&'a CtValue> {
+fn dyn_payload<'a>(value: &'a CtValue, variant: &str) -> Option<&'a CtValue> {
     match value {
         CtValue::Enum {
             variant: actual,
             args,
             ..
-        } if is_datatree(value) && actual == variant => args.first().map(|(_, value)| value),
+        } if is_dyn(value) && actual == variant => args.first().map(|(_, value)| value),
         _ => None,
     }
 }
 
-fn datatree_render(value: &CtValue) -> String {
-    super::JSONInterp::render_ordered_datatree(value, false, 0)
+fn dyn_render(value: &CtValue) -> String {
+    super::JSONInterp::render_ordered_dyn(value, false, 0)
 }
 
-fn datatree_failure(path: impl Into<String>, reason: impl Into<String>) -> CtValue {
+fn dyn_failure(path: impl Into<String>, reason: impl Into<String>) -> CtValue {
     CtValue::failed(Box::new(super::TypedDecode::decode_error_at(path, reason)))
 }
 
@@ -1772,25 +1772,25 @@ pub fn apply_method(
         }
         // D-DATATREE-ERGO1=A: dynamic tree methods marshal through the shared
         // Prelude implementation. The type guard keeps ordinary user enums
-        // from acquiring DataTree-only operations in the interpreter.
+        // from acquiring Dyn-only operations in the interpreter.
         (v @ CtValue::Enum { type_name, .. }, "to_text")
-            if matches!(type_name.as_str(), "DataTree" | "TOML" | "YAML" | "CSV") =>
+            if matches!(type_name.as_str(), "Dyn" | "TOML" | "YAML" | "CSV") =>
         {
-            Ok(match super::SyncLite::datatree_to_text(v) {
+            Ok(match super::SyncLite::dyn_to_text(v) {
                 Some(text) => CtValue::Present(Box::new(CtValue::Str(text))),
                 None => CtValue::absent(Type::String),
             })
         }
         (v @ CtValue::Enum { type_name, .. }, "equal_unordered")
-            if matches!(type_name.as_str(), "DataTree" | "TOML" | "YAML" | "CSV") =>
+            if matches!(type_name.as_str(), "Dyn" | "TOML" | "YAML" | "CSV") =>
         {
             let Some(other) = args.into_iter().next() else {
                 return Err(unsupported(
-                    "`.equal_unordered` requires one DataTree argument",
+                    "`.equal_unordered` requires one Dyn argument",
                     span,
                 ));
             };
-            Ok(CtValue::Bool(super::SyncLite::datatree_equal_unordered(
+            Ok(CtValue::Bool(super::SyncLite::dyn_equal_unordered(
                 v, &other,
             )))
         }
@@ -1805,34 +1805,34 @@ pub fn apply_method(
             _ => CtValue::absent(Type::Int),
         }),
         (CtValue::Failed(CtReport::Clean(t)), "zip") => Ok(CtValue::absent(t.clone())),
-        // D-SERDE-ACCESS=B: dynamic `JSON`/`DataTree` accessors follow the
+        // D-SERDE-ACCESS=B: dynamic `JSON`/`Dyn` accessors follow the
         // canonical typed-codec contract. Every mismatch returns a told
         // `[FieldError]` value; only a matching read returns `Present`.
-        (v @ CtValue::Enum { .. }, "field") if is_datatree(v) => {
+        (v @ CtValue::Enum { .. }, "field") if is_dyn(v) => {
             let key = match args.into_iter().next() {
                 Some(CtValue::Str(s)) => s,
-                _ => return Ok(datatree_failure("", "field name must be Text")),
+                _ => return Ok(dyn_failure("", "field name must be Text")),
             };
-            Ok(match datatree_payload(v, "Object") {
+            Ok(match dyn_payload(v, "Object") {
                 Some(CtValue::Map(m)) => match m.get(&CtKey::Str(key.clone())) {
                     Some(found) => CtValue::Present(Box::new(found.clone())),
-                    None => datatree_failure(key.clone(), format!("field `{key}` not found")),
+                    None => dyn_failure(key.clone(), format!("field `{key}` not found")),
                 },
                 Some(CtValue::Struct { type_name, fields }) if type_name == "JSONObject" => {
                     match fields.iter().find(|(name, _)| name == &key) {
                         Some((_, found)) => CtValue::Present(Box::new(found.clone())),
-                        None => datatree_failure(key.clone(), format!("field `{key}` not found")),
+                        None => dyn_failure(key.clone(), format!("field `{key}` not found")),
                     }
                 }
-                _ => datatree_failure(key, format!("expected object, got {}", datatree_render(v))),
+                _ => dyn_failure(key, format!("expected object, got {}", dyn_render(v))),
             })
         }
-        (v @ CtValue::Enum { .. }, "at") if is_datatree(v) => {
+        (v @ CtValue::Enum { .. }, "at") if is_dyn(v) => {
             let index = match args.first() {
                 Some(CtValue::Int(index)) => *index,
                 _ => -1,
             };
-            Ok(match datatree_payload(v, "Array") {
+            Ok(match dyn_payload(v, "Array") {
                 Some(CtValue::List(items)) => {
                     let resolved = if index < 0 {
                         index
@@ -1844,22 +1844,22 @@ pub fn apply_method(
                     };
                     match resolved.and_then(|index| items.get(index)) {
                         Some(found) => CtValue::Present(Box::new(found.clone())),
-                        None => datatree_failure(
+                        None => dyn_failure(
                             format!("[{index}]"),
                             format!("index {index} out of bounds (len {})", items.len()),
                         ),
                     }
                 }
-                _ => datatree_failure(
+                _ => dyn_failure(
                     format!("[{index}]"),
-                    format!("expected array, got {}", datatree_render(v)),
+                    format!("expected array, got {}", dyn_render(v)),
                 ),
             })
         }
-        (v @ CtValue::Enum { .. }, "int") if is_datatree(v) => {
-            let value = match datatree_payload(v, "Int") {
+        (v @ CtValue::Enum { .. }, "int") if is_dyn(v) => {
+            let value = match dyn_payload(v, "Int") {
                 Some(value @ (CtValue::Int(_) | CtValue::BigInt(_))) => Some(value.clone()),
-                _ => match datatree_payload(v, "Number") {
+                _ => match dyn_payload(v, "Number") {
                     Some(CtValue::Str(text)) => crate::Numeric::CtBigInt::from_json_number(text)
                         .ok()
                         .map(exact_int_value),
@@ -1869,32 +1869,32 @@ pub fn apply_method(
             Ok(value
                 .map(|value| CtValue::Present(Box::new(value)))
                 .unwrap_or_else(|| {
-                    datatree_failure("", format!("expected int, got {}", datatree_render(v)))
+                    dyn_failure("", format!("expected int, got {}", dyn_render(v)))
                 }))
         }
-        (v @ CtValue::Enum { .. }, "text") if is_datatree(v) => {
-            let value = datatree_payload(v, "Text")
-                .or_else(|| datatree_payload(v, "TypedText"))
+        (v @ CtValue::Enum { .. }, "text") if is_dyn(v) => {
+            let value = dyn_payload(v, "Text")
+                .or_else(|| dyn_payload(v, "TypedText"))
                 .and_then(|value| matches!(value, CtValue::Str(_)).then(|| value.clone()));
             Ok(value
                 .map(|value| CtValue::Present(Box::new(value)))
                 .unwrap_or_else(|| {
-                    datatree_failure("", format!("expected text, got {}", datatree_render(v)))
+                    dyn_failure("", format!("expected text, got {}", dyn_render(v)))
                 }))
         }
-        (v @ CtValue::Enum { .. }, "bool") if is_datatree(v) => {
-            let value = datatree_payload(v, "Bool")
+        (v @ CtValue::Enum { .. }, "bool") if is_dyn(v) => {
+            let value = dyn_payload(v, "Bool")
                 .and_then(|value| matches!(value, CtValue::Bool(_)).then(|| value.clone()));
             Ok(value
                 .map(|value| CtValue::Present(Box::new(value)))
                 .unwrap_or_else(|| {
-                    datatree_failure("", format!("expected bool, got {}", datatree_render(v)))
+                    dyn_failure("", format!("expected bool, got {}", dyn_render(v)))
                 }))
         }
-        (v @ CtValue::Enum { .. }, "float") if is_datatree(v) => {
-            let value = match datatree_payload(v, "Float") {
+        (v @ CtValue::Enum { .. }, "float") if is_dyn(v) => {
+            let value = match dyn_payload(v, "Float") {
                 Some(value @ CtValue::Float(_)) => Some(value.clone()),
-                _ => datatree_payload(v, "Int")
+                _ => dyn_payload(v, "Int")
                     .and_then(|value| match value {
                         CtValue::Int(value) => Some(CtValue::Float(CtFloat::f64(*value as f64))),
                         CtValue::BigInt(value) => value
@@ -1905,7 +1905,7 @@ pub fn apply_method(
                             .map(|value| CtValue::Float(CtFloat::f64(value))),
                         _ => None,
                     })
-                    .or_else(|| match datatree_payload(v, "Number") {
+                    .or_else(|| match dyn_payload(v, "Number") {
                         Some(CtValue::Str(text)) => text
                             .trim()
                             .parse::<f64>()
@@ -1918,7 +1918,7 @@ pub fn apply_method(
             Ok(value
                 .map(|value| CtValue::Present(Box::new(value)))
                 .unwrap_or_else(|| {
-                    datatree_failure("", format!("expected float, got {}", datatree_render(v)))
+                    dyn_failure("", format!("expected float, got {}", dyn_render(v)))
                 }))
         }
         (value @ (CtValue::Int(_) | CtValue::BigInt(_)), "abs") => Ok(exact_int_value(

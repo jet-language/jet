@@ -162,7 +162,7 @@ fn run() {
 // ── card #131 S1-bridge: hand-written `impl T.Encode` / `impl T.Decode` (D-SERDE2) ──
 // A hand codec passes sema and MUST produce Rust rustc accepts (I2). The Jet-facing
 // verbs `encode`/`decode` bridge internally to the Rust `__jet_Encode`/`__jet_Decode`
-// traits' `jet_encode(&self) -> DataTree` / `jet_decode(&DataTree) -> Result<Self, …>`.
+// traits' `jet_encode(&self) -> Dyn` / `jet_decode(&Dyn) -> Result<Self, …>`.
 // The impl uses a custom wire key (`"email"`, not the field name `addr`) so the round
 // trip can only succeed through the HAND methods, never a derive.
 #[test]
@@ -185,15 +185,15 @@ use core.encoding.json as json
 struct Email { addr: String }
 
 impl Email.Encode {
-    fn encode(self) -> DataTree {
-        m :: [String:DataTree]{ "email": DataTree.Text(~self.addr) }
-        return DataTree.Object(m)
+    fn encode(self) -> Dyn {
+        m :: [String:Dyn]{ "email": Dyn.Text(~self.addr) }
+        return Dyn.Object(m)
     }
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) -> Email [FieldError]! {
-        f := &tree.field("email") ?? DataTree.Text("")
+    fn decode(tree: Dyn) -> Email [FieldError]! {
+        f := &tree.field("email") ?? Dyn.Text("")
         s := f.text() ?? ""
         return Ok(Email{addr: s})
     }
@@ -217,7 +217,7 @@ fn run() {
 }
 
 /// D-SERDE2/D-SERDE16: the beginner `#Codable` request and the expert hand
-/// codec both feed the same DataTree protocol, so their wire bytes and decoded
+/// codec both feed the same Dyn protocol, so their wire bytes and decoded
 /// values agree for the same shape.
 #[test]
 fn derive_and_hand_written_codecs_share_one_engine() {
@@ -240,11 +240,11 @@ struct DerivedEmail { address: String }
 
 struct HandEmail { address: String }
 impl HandEmail.Encode {
-    fn encode(self) -> DataTree { DataTree.Object(["address": DataTree.Text(~self.address)]) }
+    fn encode(self) -> Dyn { Dyn.Object(["address": Dyn.Text(~self.address)]) }
 }
 impl HandEmail.Decode {
-    fn decode(tree: DataTree) -> HandEmail [FieldError]! {
-        field :: &tree.field("address") ?? DataTree.Text("")
+    fn decode(tree: Dyn) -> HandEmail [FieldError]! {
+        field :: &tree.field("address") ?? Dyn.Text("")
         address :: field.text() ?? ""
         return Ok(HandEmail{ address: address })
     }
@@ -319,13 +319,13 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// card #131: `DataTree.decode<T>()` dispatches primitive, container,
+/// card #131: `Dyn.decode<T>()` dispatches primitive, container,
 /// generated, and hand-written Decode implementations through one spelling.
 #[test]
-fn datatree_decode_dispatches_all_decode_impl_kinds() {
+fn dyn_decode_dispatches_all_decode_impl_kinds() {
     let have_rustc = common::have_rustc();
     if !have_rustc { return; }
-    let dir = std::env::temp_dir().join(format!("jet_datatree_decode_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("jet_dyn_decode_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let src = r#"
@@ -333,17 +333,17 @@ fn datatree_decode_dispatches_all_decode_impl_kinds() {
 struct Point { x: Int }
 struct Email { addr: String }
 impl Email.Decode {
-    fn decode(tree: DataTree) -> Email [FieldError]! {
-        value := &tree.field("address") ?? DataTree.Text("")
+    fn decode(tree: Dyn) -> Email [FieldError]! {
+        value := &tree.field("address") ?? Dyn.Text("")
         return Ok(Email{ addr: value.text() ?? "" })
     }
 }
 
 fn run() {
-    i_tree := DataTree.Int(41)
-    xs_tree := DataTree.Array([DataTree.Int(1), DataTree.Int(2)])
-    p_tree := DataTree.Object(["x": DataTree.Int(7)])
-    e_tree := DataTree.Object(["address": DataTree.Text("a@b")])
+    i_tree := Dyn.Int(41)
+    xs_tree := Dyn.Array([Dyn.Int(1), Dyn.Int(2)])
+    p_tree := Dyn.Object(["x": Dyn.Int(7)])
+    e_tree := Dyn.Object(["address": Dyn.Text("a@b")])
     i := i_tree.decode<Int>() ?? panic("primitive")
     xs := xs_tree.decode<[Int]>() ?? panic("list")
     p := p_tree.decode<Point>() ?? panic("derive")
@@ -352,12 +352,12 @@ fn run() {
     print(e.addr)
 }
 "#;
-    let out = compile_temp("datatree_decode.jet", src);
+    let out = compile_temp("dyn_decode.jet", src);
     assert!(out.rust.contains("<i64 as __jet_Decode>::jet_decode"));
     assert!(out.rust.contains("<__jet_Point as __jet_Decode>::jet_decode"));
     assert!(out.rust.contains("<__jet_Email as __jet_Decode>::jet_decode"));
-    let (code, stdout, stderr) = build_and_run(&dir, "datatree_decode", src, &[], None);
-    assert_eq!(code, 0, "DataTree.decode dispatch failed: {stderr}");
+    let (code, stdout, stderr) = build_and_run(&dir, "dyn_decode", src, &[], None);
+    assert_eq!(code, 0, "Dyn.decode dispatch failed: {stderr}");
     assert_eq!(stdout, "50\na@b\n");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -1103,23 +1103,23 @@ fn pick() -> Int {
 }
 
 fn encoded(e: Email, i: Int) -> String {
-    shallow := DataTree.Text(~e.addr)
-    nested := DataTree.Text(~e.nested.text)
-    indexed := DataTree.Text(~e.items[0].text)
-    computed := DataTree.Text(~e.items[i + 1].text)
-    called := DataTree.Text(~e.items[pick()].text)
-    parenthesized := DataTree.Text(~e.items[-(-i)].text)
-    conditional := DataTree.Text(~e.items[if i == 0 -> 0 else -> 1].text)
+    shallow := Dyn.Text(~e.addr)
+    nested := Dyn.Text(~e.nested.text)
+    indexed := Dyn.Text(~e.items[0].text)
+    computed := Dyn.Text(~e.items[i + 1].text)
+    called := Dyn.Text(~e.items[pick()].text)
+    parenthesized := Dyn.Text(~e.items[-(-i)].text)
+    conditional := Dyn.Text(~e.items[if i == 0 -> 0 else -> 1].text)
     return "{json.to_string(shallow)}|{json.to_string(nested)}|{json.to_string(indexed)}|{json.to_string(computed)}|{json.to_string(called)}|{json.to_string(parenthesized)}|{json.to_string(conditional)}"
 }
 
-fn slice_data(xs: [DataTree]) -> DataTree {
-    return DataTree.Array(xs[0..1])
+fn slice_data(xs: [Dyn]) -> Dyn {
+    return Dyn.Array(xs[0..1])
 }
 
 fn run() {
     e := Email{addr: "a@b.com", nested: Address{text: "inside"}, items: [Address{text: "zero"}, Address{text: "item"}]}
-    sliced := slice_data([DataTree.Text("slice0"), DataTree.Text("slice1")])
+    sliced := slice_data([Dyn.Text("slice0"), Dyn.Text("slice1")])
     print("{encoded(e, 0)}|{json.to_string(sliced)}")
 }
 "#,

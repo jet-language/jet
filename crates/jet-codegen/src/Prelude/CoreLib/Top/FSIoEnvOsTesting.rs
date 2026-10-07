@@ -616,7 +616,7 @@ fn jet_std_env_decode<T: __jet_Decode>(
     let entries = jet_env_config_entries(prefix, dotenv.as_deref(), allow, process)
         .map_err(|reason| jet_std::FieldError::one(format!("E2416: {reason}")))?;
 
-    let mut tree = jet_std::DataTree::Object(Vec::new());
+    let mut tree = jet_std::Dyn::Object(Vec::new());
     let mut origins = Vec::<(String, String)>::new();
     for mut entry in entries {
         let renamed = names.iter().find(|(env_name, _)| {
@@ -645,8 +645,8 @@ fn jet_std_env_decode<T: __jet_Decode>(
     })
 }
 
-fn jet_env_insert_tree(tree: &mut jet_std::DataTree, segments: &[String], value: String) {
-    let jet_std::DataTree::Object(pairs) = tree else {
+fn jet_env_insert_tree(tree: &mut jet_std::Dyn, segments: &[String], value: String) {
+    let jet_std::Dyn::Object(pairs) = tree else {
         return;
     };
     let Some(segment) = segments.first() else {
@@ -657,18 +657,18 @@ fn jet_env_insert_tree(tree: &mut jet_std::DataTree, segments: &[String], value:
             .iter_mut()
             .find(|(name, _)| name.eq_ignore_ascii_case(segment))
         {
-            *existing = jet_std::DataTree::Text(value);
+            *existing = jet_std::Dyn::Text(value);
         } else {
-            pairs.push((segment.clone(), jet_std::DataTree::Text(value)));
+            pairs.push((segment.clone(), jet_std::Dyn::Text(value)));
         }
         return;
     }
     if let Some((_, child)) = pairs.iter_mut().find(|(name, child)| {
-        name.eq_ignore_ascii_case(segment) && matches!(child, jet_std::DataTree::Object(_))
+        name.eq_ignore_ascii_case(segment) && matches!(child, jet_std::Dyn::Object(_))
     }) {
         jet_env_insert_tree(child, &segments[1..], value);
     } else {
-        let mut child = jet_std::DataTree::Object(Vec::new());
+        let mut child = jet_std::Dyn::Object(Vec::new());
         jet_env_insert_tree(&mut child, &segments[1..], value);
         pairs.push((segment.clone(), child));
     }

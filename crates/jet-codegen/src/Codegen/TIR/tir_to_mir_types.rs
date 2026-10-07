@@ -2285,7 +2285,7 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        "DataTree",
+        "Dyn",
         &[
             "Null",
             "Bool",
@@ -3689,7 +3689,7 @@ fn compiler_owned_type_defs<'a>(
                                 }
                                 _ => TirVariantPayload::Unit,
                             }
-                        } else if *name == "DataTree" {
+                        } else if *name == "Dyn" {
                             match *variant {
                                 "Bool" => TirVariantPayload::Single(Type::Bool),
                                 "Int" => TirVariantPayload::Single(Type::Int),
@@ -3704,14 +3704,14 @@ fn compiler_owned_type_defs<'a>(
                                     })))
                                 }
                                 "Array" => TirVariantPayload::Single(Type::List(Box::new(
-                                    Type::Named("DataTree".to_string()),
+                                    Type::Named("Dyn".to_string()),
                                 ))),
                                 "Object" => TirVariantPayload::Single(Type::List(Box::new(
                                     Type::Tuple(vec![
                                         ("key".to_string(), Box::new(Type::String)),
                                         (
                                             "value".to_string(),
-                                            Box::new(Type::Named("DataTree".to_string())),
+                                            Box::new(Type::Named("Dyn".to_string())),
                                         ),
                                     ]),
                                 ))),

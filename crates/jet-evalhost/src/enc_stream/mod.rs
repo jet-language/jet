@@ -156,7 +156,7 @@ pub(crate) mod runtime {
             ObjectEnd
         }
 
-        pub(crate) use jet_foundation::DataTree::DataTree;
+        pub(crate) use jet_foundation::Dyn::Dyn;
         // `EncodingStream.rs` validates exact JSON number tokens through
         // `jet_std::validate_json_number`; the JIT host reads the same
         // foundation implementation the AOT Prelude embeds.
@@ -290,48 +290,48 @@ pub(crate) mod runtime {
     }
 
     // EncodingCodecs helpers EncodingStream calls for XML.
-    fn jet_xml_to_data_tree(value: crate::jet_xml_pull::Value) -> jet_std::DataTree {
+    fn jet_xml_to_dyn(value: crate::jet_xml_pull::Value) -> jet_std::Dyn {
         match value {
-            crate::jet_xml_pull::Value::Null => jet_std::DataTree::Null,
-            crate::jet_xml_pull::Value::Bool(value) => jet_std::DataTree::Bool(value),
-            crate::jet_xml_pull::Value::Int(value) => jet_std::DataTree::Int(value),
-            crate::jet_xml_pull::Value::Text(value) => jet_std::DataTree::Text(value),
+            crate::jet_xml_pull::Value::Null => jet_std::Dyn::Null,
+            crate::jet_xml_pull::Value::Bool(value) => jet_std::Dyn::Bool(value),
+            crate::jet_xml_pull::Value::Int(value) => jet_std::Dyn::Int(value),
+            crate::jet_xml_pull::Value::Text(value) => jet_std::Dyn::Text(value),
             crate::jet_xml_pull::Value::Array(values) => {
-                jet_std::DataTree::Array(values.into_iter().map(jet_xml_to_data_tree).collect())
+                jet_std::Dyn::Array(values.into_iter().map(jet_xml_to_dyn).collect())
             }
-            crate::jet_xml_pull::Value::Object(entries) => jet_std::DataTree::Object(
+            crate::jet_xml_pull::Value::Object(entries) => jet_std::Dyn::Object(
                 entries
                     .into_iter()
-                    .map(|(key, value)| (key, jet_xml_to_data_tree(value)))
+                    .map(|(key, value)| (key, jet_xml_to_dyn(value)))
                     .collect(),
             )
         }
     }
 
-    fn jet_xml_from_data_tree(
-        value: &jet_std::DataTree,
+    fn jet_xml_from_dyn(
+        value: &jet_std::Dyn,
     ) -> Result<crate::jet_xml_pull::Value, String> {
         match value {
-            jet_std::DataTree::Null => Ok(crate::jet_xml_pull::Value::Null),
-            jet_std::DataTree::Bool(value) => Ok(crate::jet_xml_pull::Value::Bool(*value)),
-            jet_std::DataTree::Int(value) => Ok(crate::jet_xml_pull::Value::Int(*value)),
-            jet_std::DataTree::Number(_) | jet_std::DataTree::TypedText(_) => {
+            jet_std::Dyn::Null => Ok(crate::jet_xml_pull::Value::Null),
+            jet_std::Dyn::Bool(value) => Ok(crate::jet_xml_pull::Value::Bool(*value)),
+            jet_std::Dyn::Int(value) => Ok(crate::jet_xml_pull::Value::Int(*value)),
+            jet_std::Dyn::Number(_) | jet_std::Dyn::TypedText(_) => {
                 Err("internal JSON carrier escaped typed decode".to_string())
             }
-            jet_std::DataTree::Text(value) => Ok(crate::jet_xml_pull::Value::Text(value.clone())),
-            jet_std::DataTree::Array(values) => Ok(crate::jet_xml_pull::Value::Array(
+            jet_std::Dyn::Text(value) => Ok(crate::jet_xml_pull::Value::Text(value.clone())),
+            jet_std::Dyn::Array(values) => Ok(crate::jet_xml_pull::Value::Array(
                 values
                     .iter()
-                    .map(jet_xml_from_data_tree)
+                    .map(jet_xml_from_dyn)
                     .collect::<Result<Vec<_>, _>>()?,
             )),
-            jet_std::DataTree::Object(entries) => Ok(crate::jet_xml_pull::Value::Object(
+            jet_std::Dyn::Object(entries) => Ok(crate::jet_xml_pull::Value::Object(
                 entries
                     .iter()
-                    .map(|(key, value)| Ok((key.clone(), jet_xml_from_data_tree(value)?)))
+                    .map(|(key, value)| Ok((key.clone(), jet_xml_from_dyn(value)?)))
                     .collect::<Result<Vec<_>, String>>()?,
             )),
-            jet_std::DataTree::Float(_) | jet_std::DataTree::Bytes(_) => {
+            jet_std::Dyn::Float(_) | jet_std::Dyn::Bytes(_) => {
                 Err("XML tree cannot contain Float or Bytes values".to_string())
             }
         }
@@ -417,7 +417,7 @@ pub(crate) mod runtime {
     }
     pub(crate) fn enc_jsonl_writer_write(
         writer: &mut jet_std::JSONLWriter,
-        value: jet_std::DataTree,
+        value: jet_std::Dyn,
     ) -> Result<(), jet_std::EncodingError> {
         jet_enc_jsonl_writer_write(writer, value)
     }
@@ -433,7 +433,7 @@ pub(crate) mod runtime {
     }
     pub(crate) fn enc_jsonl_reader_next(
         reader: &mut jet_std::JSONLReader,
-    ) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
+    ) -> Result<Option<jet_std::Dyn>, jet_std::EncodingError> {
         jet_enc_jsonl_reader_next(reader).map(|found| found.ok())
     }
     pub(crate) fn enc_csv_writer(
@@ -522,7 +522,7 @@ pub(crate) mod runtime {
     }
     pub(crate) fn enc_xml_writer_write(
         writer: &mut jet_std::XMLWriter,
-        event: jet_std::DataTree,
+        event: jet_std::Dyn,
     ) -> Result<(), jet_std::EncodingError> {
         jet_enc_xml_writer_write(writer, event)
     }
@@ -538,7 +538,7 @@ pub(crate) mod runtime {
     }
     pub(crate) fn enc_xml_reader_next(
         reader: &mut jet_std::XMLReader,
-    ) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
+    ) -> Result<Option<jet_std::Dyn>, jet_std::EncodingError> {
         jet_enc_xml_reader_next(reader).map(|found| found.ok())
     }
 }

@@ -64,28 +64,28 @@ fn jet_panic(_file: &str, _line: u32, message: &str) -> ! {
     panic!("{message}");
 }
 
-type JetDataTree = jet_foundation::DataTree::DataTree;
+type JetDyn = jet_foundation::Dyn::Dyn;
 
 // Keep the generated Rust codec trait spelling stable; Codegen emits `__jet_Encode`.
 #[allow(non_camel_case_types)]
 trait __jet_Encode {
-    fn jet_encode(&self) -> JetDataTree;
+    fn jet_encode(&self) -> JetDyn;
 }
 impl __jet_Encode for i64 {
-    fn jet_encode(&self) -> JetDataTree {
-        JetDataTree::Int(*self)
+    fn jet_encode(&self) -> JetDyn {
+        JetDyn::Int(*self)
     }
 }
 // Keep the generated Rust codec trait spelling stable; Codegen emits `__jet_Decode`.
 #[allow(non_camel_case_types)]
 trait __jet_Decode: Sized {
-    fn jet_decode(tree: &JetDataTree) -> Result<Self, Vec<jet_std::FieldError>>;
+    fn jet_decode(tree: &JetDyn) -> Result<Self, Vec<jet_std::FieldError>>;
 }
 fn jet_enc_json_to_string<T: __jet_Encode>(v: &T) -> String {
-    crate::Encoding::json_rt::render_datatree_json(&v.jet_encode(), false, 0)
+    crate::Encoding::json_rt::render_dyn_json(&v.jet_encode(), false, 0)
 }
 fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
-    let tree = crate::Encoding::json_rt::parse_datatree_typed_ordered(text).map_err(|error| {
+    let tree = crate::Encoding::json_rt::parse_dyn_typed_ordered(text).map_err(|error| {
         let line = error.line.ok().unwrap_or(0);
         jet_std::FieldError::one(format!(
             "invalid JSON (line {}): {}",
@@ -190,11 +190,11 @@ pub mod jet_std {
     }
 
     pub(crate) use crate::Encoding::json_rt::{
-        datatree_kind_for, decode_bool, decode_f32, decode_float, decode_int, decode_int_with, decode_string,
-        jet_datatree_encode_i64, jet_datatree_encode_u64, jet_datatree_decode_fixed_integer,
-        jet_datatree_project, jet_enc_csv_decode_rows, jet_int_to_string,
-        parse_json_typed_datatree, DataTree, EncodingCause, EncodingError, EncodingErrorKind,
-        EncodingFormat, EncodingLimits, FieldError, JetDataTreeAccess
+        dyn_kind_for, decode_bool, decode_f32, decode_float, decode_int, decode_int_with, decode_string,
+        jet_dyn_encode_i64, jet_dyn_encode_u64, jet_dyn_decode_fixed_integer,
+        jet_dyn_project, jet_enc_csv_decode_rows, jet_int_to_string,
+        parse_json_typed_dyn, Dyn, EncodingCause, EncodingError, EncodingErrorKind,
+        EncodingFormat, EncodingLimits, FieldError, JetDynAccess
     };
 
     pub(crate) use crate::Encoding::codec_rt::jet_std::JetDecimal;
@@ -224,8 +224,8 @@ pub mod jet_std {
         pub redacted: bool
     }
 
-    pub fn render_datatree_json(tree: &DataTree, pretty: bool, indent: i64) -> String {
-        crate::Encoding::json_rt::render_datatree_json(tree, pretty, indent as usize)
+    pub fn render_dyn_json(tree: &Dyn, pretty: bool, indent: i64) -> String {
+        crate::Encoding::json_rt::render_dyn_json(tree, pretty, indent as usize)
     }
 
     pub use jet_foundation::Outcome::*;

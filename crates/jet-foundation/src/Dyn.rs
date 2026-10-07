@@ -6,7 +6,7 @@
 //! through a map.
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum DataTree {
+pub enum Dyn {
     Null,
     Bool(bool),
     Int(i64),
@@ -17,38 +17,38 @@ pub enum DataTree {
     TypedText(String),
     Text(String),
     Bytes(Vec<u8>),
-    Array(Vec<DataTree>),
-    Object(Vec<(String, DataTree)>),
+    Array(Vec<Dyn>),
+    Object(Vec<(String, Dyn)>),
 }
 
-impl DataTree {
-    pub fn as_array(&self) -> Result<&Vec<DataTree>, String> {
+impl Dyn {
+    pub fn as_array(&self) -> Result<&Vec<Dyn>, String> {
         match self {
             Self::Array(values) => Ok(values),
-            _ => Err("expected a DataTree array".to_string()),
+            _ => Err("expected a Dyn array".to_string()),
         }
     }
 
-    pub fn as_object(&self) -> Result<&Vec<(String, DataTree)>, String> {
+    pub fn as_object(&self) -> Result<&Vec<(String, Dyn)>, String> {
         match self {
             Self::Object(values) => Ok(values),
-            _ => Err("expected a DataTree object".to_string()),
+            _ => Err("expected a Dyn object".to_string()),
         }
     }
 
     pub fn as_str(&self) -> Result<&str, String> {
         match self {
             Self::Text(value) | Self::TypedText(value) => Ok(value),
-            _ => Err("expected a DataTree string".to_string()),
+            _ => Err("expected a Dyn string".to_string()),
         }
     }
 
-    pub fn get<'a>(&'a self, key: &str) -> Result<&'a DataTree, String> {
+    pub fn get<'a>(&'a self, key: &str) -> Result<&'a Dyn, String> {
         self.get_opt(key)
             .ok_or_else(|| format!("missing key `{key}`"))
     }
 
-    pub fn get_opt(&self, key: &str) -> Option<&DataTree> {
+    pub fn get_opt(&self, key: &str) -> Option<&Dyn> {
         match self {
             Self::Object(values) => values
                 .iter()
@@ -57,7 +57,7 @@ impl DataTree {
         }
     }
 
-    pub fn object_entries(&self) -> Option<&[(String, DataTree)]> {
+    pub fn object_entries(&self) -> Option<&[(String, Dyn)]> {
         match self {
             Self::Object(values) => Some(values),
             _ => None,

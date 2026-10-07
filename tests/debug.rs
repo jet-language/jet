@@ -21,7 +21,7 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_get, json_str, parse_json};
 use std::ffi::OsStr;
 use std::fmt;
@@ -728,14 +728,14 @@ fn dap_response(output: &str, request_seq: u32, command: &str) -> Option<String>
         };
         let type_name = json_get(&value, "type").and_then(json_str);
         let actual_request_seq = match json_get(&value, "request_seq") {
-            Some(DataTree::Int(value)) => Some(*value),
+            Some(Dyn::Int(value)) => Some(*value),
             _ => None,
         };
         let success = json_get(&value, "success");
         let actual_command = json_get(&value, "command").and_then(json_str);
         if type_name == Some("response")
             && actual_request_seq == Some(i64::from(request_seq))
-            && matches!(success, Some(DataTree::Bool(_)))
+            && matches!(success, Some(Dyn::Bool(_)))
             && actual_command == Some(command)
         {
             return Some(body.to_string());

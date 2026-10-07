@@ -123,12 +123,12 @@ fn assert_generated_project(
     let allowed_dynamic_fields = source_markers
         .iter()
         .flat_map(|marker| marker.lines().map(str::trim))
-        .filter(|marker| marker.contains("DataTree"))
+        .filter(|marker| marker.contains("Dyn"))
         .collect::<Vec<_>>();
     let dynamic_fields = generated
         .lines()
         .map(str::trim)
-        .filter(|line| !line.starts_with("//") && line.contains("DataTree"))
+        .filter(|line| !line.starts_with("//") && line.contains("Dyn"))
         .collect::<Vec<_>>();
     assert_eq!(
         dynamic_fields, allowed_dynamic_fields,
@@ -270,7 +270,7 @@ fn data_bind_generates_all_formats() {
     assert!(json.contains(r#"#Rename("repo-name") repo_name: String"#));
     assert!(json.contains("owner: RepoOwner"));
     assert!(json.contains("tags: [String]"));
-    assert!(json.contains("note: DataTree?"));
+    assert!(json.contains("note: Dyn?"));
 
     let csv = generated(
         "csv",
@@ -513,10 +513,10 @@ fn run() {
         "7\nJet\ntext\nelement\ntext\n",
         &[
             r#"struct Catalog {
-    #Rename("$content") content: DataTree"#,
+    #Rename("$content") content: Dyn"#,
             r#"struct CatalogBook {
     #Rename("@id") id: String
-    #Rename("$content") content: DataTree
+    #Rename("$content") content: Dyn
     title: String
 }"#,
             "book: CatalogBook",
@@ -677,8 +677,8 @@ fn xml_bind_keeps_empty_whitespace_and_mixed_content_projection() {
         "jet inspect bind xml mixed.xml --type Root",
     );
     assert!(
-        mixed.contains(r#"#Rename("$content")"#) && mixed.contains("DataTree"),
-        "mixed XML content lost ordered $content: DataTree:\n{mixed}"
+        mixed.contains(r#"#Rename("$content")"#) && mixed.contains("Dyn"),
+        "mixed XML content lost ordered $content: Dyn:\n{mixed}"
     );
 }
 

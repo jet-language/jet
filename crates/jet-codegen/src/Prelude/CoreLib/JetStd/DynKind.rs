@@ -1,6 +1,6 @@
-// One decode-diagnostic vocabulary for every DataTree representation.
+// One decode-diagnostic vocabulary for every Dyn representation.
 // Engines pass only their resident variant tag; the meaning stays here.
-pub fn datatree_kind(tag: &str) -> &'static str {
+pub fn dyn_kind(tag: &str) -> &'static str {
     match tag {
         "Null" => "null",
         "Bool" => "Bool",

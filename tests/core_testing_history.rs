@@ -6,18 +6,18 @@ mod tir_support;
 const INVALID_SEED_SOURCE: &str = r#"
 use core.testing as api
 
-fn reference_size(commands: [DataTree]) -> DataTree {
-    DataTree.Int(commands.len())
+fn reference_size(commands: [Dyn]) -> Dyn {
+    Dyn.Int(commands.len())
 }
 
-fn candidate_size(commands: [DataTree]) -> DataTree {
-    DataTree.Int(commands.len())
+fn candidate_size(commands: [Dyn]) -> Dyn {
+    Dyn.Int(commands.len())
 }
 
-fn observe(value: DataTree) -> DataTree { ~value }
+fn observe(value: Dyn) -> Dyn { ~value }
 
 fn run() Err! {
-    comparison :: api.histories<DataTree>(
+    comparison :: api.histories<Dyn>(
         seed: -1,
         cases: 1,
         strategy: None,
@@ -35,15 +35,15 @@ enum HistoryStep {
     Step(Int)
 }
 
-fn reference_size(commands: [HistoryStep]) -> DataTree {
-    DataTree.Int(commands.len())
+fn reference_size(commands: [HistoryStep]) -> Dyn {
+    Dyn.Int(commands.len())
 }
 
-fn candidate_size(commands: [HistoryStep]) -> DataTree {
-    DataTree.Int(commands.len())
+fn candidate_size(commands: [HistoryStep]) -> Dyn {
+    Dyn.Int(commands.len())
 }
 
-fn observe(value: DataTree) -> DataTree { ~value }
+fn observe(value: Dyn) -> Dyn { ~value }
 
 fn run() Err! {
     comparison :: api.histories<HistoryStep>(
@@ -61,18 +61,18 @@ fn run() Err! {
 const CALLBACK_FAILURE_SOURCE: &str = r#"
 use core.testing as api
 
-fn failing_model(commands: [DataTree]) -> DataTree Err! {
+fn failing_model(commands: [Dyn]) -> Dyn Err! {
     return Err("history callback marker")
 }
 
-fn candidate_size(commands: [DataTree]) -> DataTree {
-    DataTree.Int(commands.len())
+fn candidate_size(commands: [Dyn]) -> Dyn {
+    Dyn.Int(commands.len())
 }
 
-fn observe(value: DataTree) -> DataTree { ~value }
+fn observe(value: Dyn) -> Dyn { ~value }
 
 fn run() Err! {
-    comparison :: api.histories<DataTree>(
+    comparison :: api.histories<Dyn>(
         seed: 1,
         cases: 1,
         strategy: None,

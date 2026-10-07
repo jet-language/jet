@@ -1090,13 +1090,13 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.encoding.jsonl.to_string: expected a list` | Kernel | JSONL value validation stays with the encoding kernel. |
   | `core.encoding.base32` | Kernel | `Prelude/Core/EncodingBase.rs` owns encode; `BaseEncodingDispatch.rs` owns edition-aware decode; comptime marshals values. |
   | `core.encoding.base64` | Kernel | `Prelude/Core/EncodingBase.rs` owns encode; `BaseEncodingDispatch.rs` owns edition-aware decode; comptime marshals values. |
-  | `core.encoding.cbor` | Kernel | Typed CBOR marshals through the shared DataTree/codec kernel. |
+  | `core.encoding.cbor` | Kernel | Typed CBOR marshals through the shared Dyn/codec kernel. |
   | `core.encoding.csv` | Kernel | Typed CSV marshals through the shared codec kernel. |
   | `core.encoding.hex` | Kernel | `Prelude/Core/EncodingBase.rs` owns encode/decode; comptime marshals values. |
-  | `core.encoding.json` | Kernel | Typed JSON uses the shared DataTree/codec kernel. |
+  | `core.encoding.json` | Kernel | Typed JSON uses the shared Dyn/codec kernel. |
   | `core.encoding.jsonl` | Kernel | JSONL uses the shared typed JSON kernel. |
   | `core.encoding.toml` | Kernel | Typed TOML uses the shared codec kernel. |
-  | `core.encoding.xml` | Kernel | `jet-foundation/XmlKernel.rs`; AOT embeds it and comptime marshals `DataTree` values. |
+  | `core.encoding.xml` | Kernel | `jet-foundation/XmlKernel.rs`; AOT embeds it and comptime marshals `Dyn` values. |
   | `core.encoding.yaml` | Kernel | Typed YAML uses the shared codec kernel. |
   | `core.sys` | Host | Explicit comptime environment authority and policy boundary. |
   | `core.event` | Host | Callback registration crosses the runtime closure boundary; the host only marshals shared event values. |

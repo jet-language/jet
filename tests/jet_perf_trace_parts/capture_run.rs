@@ -129,7 +129,7 @@ fn profile_row_identity(text: &str) -> (String, String, Vec<(String, String, [i6
         .and_then(|content| json_get(content, "profile"))
         .unwrap_or_else(|| panic!("missing profile: {text}"));
     let field = |key: &str| json_get(profile, key).and_then(json_str).unwrap().to_string();
-    let jet_foundation::DataTree::DataTree::Array(rows) = json_get(profile, "rows").unwrap() else {
+    let jet_foundation::Dyn::Dyn::Array(rows) = json_get(profile, "rows").unwrap() else {
         panic!("profile rows are not an array: {text}");
     };
     let rows = rows

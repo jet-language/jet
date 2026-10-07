@@ -65,13 +65,13 @@ pub struct ToolManifest {
         schema :: cli_json_string_field(root, "schema")
         profile :: cli_json_string_field(root, "profile")
         if schema != TOOL_MANIFEST_SCHEMA || profile != TOOL_PROFILE_NAME -> return Err(CLIError.Other("user-tools manifest schema or profile identity mismatch"))
-        source_values :: pkg_json_array(root.get("sources") ?? DataTree.Null) ?? return Err(CLIError.Other("user-tools manifest sources field is not an array"))
+        source_values :: pkg_json_array(root.get("sources") ?? Dyn.Null) ?? return Err(CLIError.Other("user-tools manifest sources field is not an array"))
         if source_values.len() > TOOL_PROFILE_MAX_TOOLS -> return Err(CLIError.Other("user-tools source count exceeds bound"))
         sources := [ToolManifestSource]{}
         source_names := [String]{}
         loop value in source_values -> &sources.push(cli_tool_parse_manifest_source(value, &source_names))
         &sources.sort_by((left: ToolManifestSource, right: ToolManifestSource) -> left.name <=> right.name)
-        tool_values :: pkg_json_array(root.get("tools") ?? DataTree.Null) ?? return Err(CLIError.Other("user-tools manifest tools field is not an array"))
+        tool_values :: pkg_json_array(root.get("tools") ?? Dyn.Null) ?? return Err(CLIError.Other("user-tools manifest tools field is not an array"))
         if tool_values.len() > TOOL_PROFILE_MAX_TOOLS -> return Err(CLIError.Other("user-tools tool count exceeds bound"))
         tools := [ToolManifestEntry]{}
         tool_names := [String]{}
@@ -116,7 +116,7 @@ pub struct ToolManifest {
     }
 }
 
-fn cli_tool_parse_manifest_source(value: DataTree, names: &[String]) -> ToolManifestSource CLIError! {
+fn cli_tool_parse_manifest_source(value: Dyn, names: &[String]) -> ToolManifestSource CLIError! {
     source :: pkg_json_object(value) ?? return Err(CLIError.Other("user-tools manifest source entry is not an object"))
     cli_json_expect_exact_keys(source, [String]{"name", "policy", "provider", "raw", "upstream"}, "user-tools manifest source")
     name :: cli_tool_bounded_json_string(source, "name")
@@ -131,7 +131,7 @@ fn cli_tool_parse_manifest_source(value: DataTree, names: &[String]) -> ToolMani
     Ok(ToolManifestSource{name: name, upstream: upstream, provider: provider, policy: policy, raw: migrated.canonical})
 }
 
-fn cli_tool_parse_manifest_entry(value: DataTree, names: &[String], seen_bins: &[String]) -> ToolManifestEntry CLIError! {
+fn cli_tool_parse_manifest_entry(value: Dyn, names: &[String], seen_bins: &[String]) -> ToolManifestEntry CLIError! {
     tool :: pkg_json_object(value) ?? return Err(CLIError.Other("user-tools manifest tool entry is not an object"))
     cli_json_expect_exact_keys(tool, [String]{"bins", "members", "name", "reference", "resolved", "tier"}, "user-tools manifest tool")
     name :: cli_tool_bounded_json_string(tool, "name")
@@ -156,7 +156,7 @@ fn cli_tool_parse_manifest_entry(value: DataTree, names: &[String], seen_bins: &
 }
 
 // A manifest string field: at most 4096 bytes and no NUL.
-fn cli_tool_bounded_json_string(object: [String: DataTree], key: String) -> String CLIError! {
+fn cli_tool_bounded_json_string(object: [String: Dyn], key: String) -> String CLIError! {
     value :: cli_json_string_field(object, key)
     if value.bytes().len() > TOOL_PROFILE_MAX_STRING || value.bytes().contains(U8{0}) -> return Err(CLIError.Other("profile field `{key}` exceeds bounds"))
     Ok(value)

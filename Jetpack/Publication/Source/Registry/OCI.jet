@@ -310,7 +310,7 @@ pub fn publication_verify_oci_referrers(repo: String, entry: PublicationIndexEnt
     blob_authority.revalidate()
     root_authority.revalidate()
 }
-fn publication_require_oci_keys(object: [String: DataTree], keys: [String], label: String) IOError! {
+fn publication_require_oci_keys(object: [String: Dyn], keys: [String], label: String) IOError! {
     if object.len() != keys.len() -> return Err(publication_invalid_oci("OCI {label} has unknown or missing fields"))
     loop key in object.keys() {
         if !keys.contains(key) -> return Err(publication_invalid_oci("OCI {label} has unknown or missing fields"))

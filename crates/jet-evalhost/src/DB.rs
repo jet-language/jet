@@ -1332,7 +1332,7 @@ fn connection_core_call(
             })
         }
         (
-            "core.encoding.datatree",
+            "core.encoding.dyn",
             "int" | "float" | "text" | "bool" | "blob" | "is_null",
             [value @ CtValue::Enum { type_name, .. }],
         ) if type_name == "DBValue" => ambient_db_value(value, span).map(|value| match method {

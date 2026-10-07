@@ -2511,7 +2511,7 @@ fn jet_rust_emit_core_shape_expression(ctx: &JetRustEmitContext, function: MIRFu
         names := jet_rust_emit_shape_name_map(&ctx, target_type, "db", "core.db.decode")
         rendered := jet_rust_emit_call_arguments(&ctx, function, args, route_info.signature.borrow_mask)
         target := jet_rust_emit_type(&ctx, target_type)
-        return Val("{{ let __jet_db_entries = {root}jet_std::jet_db_row_project({rendered}, {names}, |value| match value {{ {root}jet_std::DBValue::Null => {root}jet_std::DataTree::Null, {root}jet_std::DBValue::Int(value) => {root}jet_std::DataTree::Int(*value), {root}jet_std::DBValue::Float(value) => {root}jet_std::DataTree::Float(*value), {root}jet_std::DBValue::Text(value) => {root}jet_std::DataTree::Text(value.clone()), {root}jet_std::DBValue::Bool(value) => {root}jet_std::DataTree::Bool(*value), {root}jet_std::DBValue::Blob(value) => {root}jet_std::DataTree::Bytes(value.clone()) }}); {root}jet_db_decode::<{target}>(&__jet_db_entries) }}")
+        return Val("{{ let __jet_db_entries = {root}jet_std::jet_db_row_project({rendered}, {names}, |value| match value {{ {root}jet_std::DBValue::Null => {root}jet_std::Dyn::Null, {root}jet_std::DBValue::Int(value) => {root}jet_std::Dyn::Int(*value), {root}jet_std::DBValue::Float(value) => {root}jet_std::Dyn::Float(*value), {root}jet_std::DBValue::Text(value) => {root}jet_std::Dyn::Text(value.clone()), {root}jet_std::DBValue::Bool(value) => {root}jet_std::Dyn::Bool(*value), {root}jet_std::DBValue::Blob(value) => {root}jet_std::Dyn::Bytes(value.clone()) }}); {root}jet_db_decode::<{target}>(&__jet_db_entries) }}")
     }
     if module_name == "core.sys" && member == "decode" {
         if type_args.len() != 1 {
@@ -2979,11 +2979,11 @@ fn jet_rust_emit_enum_value(ctx: &JetRustEmitContext, function: MIRFunction, own
     root :: ~ctx.config.root_prefix
     // MIRRust enum_value: the Core HTTP Body carrier constructs through its
     // native constructors; a native Prelude enum narrows Jet `Int` payloads into
-    // its declared Rust slot; DataTree's exact Int and Map-backed Object cross
+    // its declared Rust slot; Dyn's exact Int and Map-backed Object cross
     // through their Prelude helpers.
     http_body :: jet_rust_emit_is_core_http_type(ctx.program.types[row_index], "Body")
     native :: jet_rust_emit_has_native_type_projection(ctx, ctx.program.types[row_index].key)
-    data_tree :: jet_rust_emit_core_rust_type_name(ctx.program.types[row_index].key) == (Val("DataTree"))
+    dyn_value :: jet_rust_emit_core_rust_type_name(ctx.program.types[row_index].key) == (Val("Dyn"))
     if shape == {
         .Unit -> {
             if args.len() != 0 -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR unit variant construction has payload arguments", "unit variants construct without a payload", Val(function.span))
@@ -3007,11 +3007,11 @@ fn jet_rust_emit_enum_value(ctx: &JetRustEmitContext, function: MIRFunction, own
                 jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedOperation, "E0003", "Core HTTP Body variant has no native constructor projection", "Body constructs through empty/from_text/from_bytes", Val(function.span))
                 return "unreachable!(\"MIR HTTP Body variant\")"
             }
-            if data_tree && variant == "Int" -> return "{root}jet_std::jet_datatree_int({value})"
+            if dyn_value && variant == "Int" -> return "{root}jet_std::jet_dyn_int({value})"
             if native {
                 if jet_rust_emit_native_int_input(&ctx, value, payload_type, location) == .Val(narrowed) -> value = narrowed
             }
-            if data_tree && variant == "Object" {
+            if dyn_value && variant == "Object" {
                 if jet_rust_emit_value_type(ctx, function, args[0].value).kind == {
                     .Map(_, _) -> value = "{root}jet_map_into_entries({value})"
                     else -> {}
@@ -3140,7 +3140,7 @@ fn jet_rust_emit_enum_variant_pattern(ctx: &JetRustEmitContext, owner: MIRTypeID
     "{jet_rust_emit_enum_variant_name(&ctx, owner, variant)}(..)"
 }
 
-// MIRRust enum_is: the HTTP Body carrier and DataTree's exact Int answer through
+// MIRRust enum_is: the HTTP Body carrier and Dyn's exact Int answer through
 // their Prelude predicates; every other variant is a structural `matches!`.
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::enum_is
 fn jet_rust_emit_enum_is(ctx: &JetRustEmitContext, function: MIRFunction, subject: MIRValueID, owner: MIRTypeID, variant: String) -> String Never! {
@@ -3155,7 +3155,7 @@ fn jet_rust_emit_enum_is(ctx: &JetRustEmitContext, function: MIRFunction, subjec
                 else -> return "unreachable!(\"Core HTTP Body variant has no native predicate projection\")"
             }
         }
-        if variant == "Int" && jet_rust_emit_core_rust_type_name(ctx.program.types[definition_index].key) == (Val("DataTree")) -> return "{ctx.config.root_prefix}jet_std::jet_datatree_is_int(&{receiver})"
+        if variant == "Int" && jet_rust_emit_core_rust_type_name(ctx.program.types[definition_index].key) == (Val("Dyn")) -> return "{ctx.config.root_prefix}jet_std::jet_dyn_is_int(&{receiver})"
     }
     "matches!({receiver}, {jet_rust_emit_enum_variant_pattern(&ctx, owner, variant)})"
 }
@@ -3356,7 +3356,7 @@ fn jet_rust_emit_payload_take(ctx: &JetRustEmitContext, result: MIRValueID, subj
 }
 
 // MIRRust enum_payload: reads the payload by reference and clones it out, through
-// boxed recursive edges, the HTTP Body projections, DataTree's exact Int and
+// boxed recursive edges, the HTTP Body projections, Dyn's exact Int and
 // Map-backed Object, and native Prelude enums' Int slots.
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::enum_payload
 fn jet_rust_emit_enum_payload(ctx: &JetRustEmitContext, function: MIRFunction, result: MIRValueID?, subject: MIRValueID, owner: MIRTypeID, variant: String, index: Int) -> String Never! {
@@ -3379,7 +3379,7 @@ fn jet_rust_emit_enum_payload(ctx: &JetRustEmitContext, function: MIRFunction, r
                 }
             }
             native :: jet_rust_emit_has_native_type_projection(ctx, ctx.program.types[definition_index].key)
-            data_tree :: jet_rust_emit_core_rust_type_name(ctx.program.types[definition_index].key) == (Val("DataTree"))
+            dyn_value :: jet_rust_emit_core_rust_type_name(ctx.program.types[definition_index].key) == (Val("Dyn"))
             head :: jet_rust_emit_enum_variant_name(&ctx, owner, variant)
             if ctx.program.types[definition_index].kind == {
                 .Enum(variants, _) -> {
@@ -3388,10 +3388,10 @@ fn jet_rust_emit_enum_payload(ctx: &JetRustEmitContext, function: MIRFunction, r
                             if row.payload == {
                                 .Single(payload_type) -> {
                                     if index != 0 -> return "unreachable!(\"MIR enum payload index out of range\")"
-                                    if data_tree && variant == "Int" -> return "{root}jet_std::jet_datatree_int_payload(&{value}).expect(\"MIR enum payload variant mismatch\")"
+                                    if dyn_value && variant == "Int" -> return "{root}jet_std::jet_dyn_int_payload(&{value}).expect(\"MIR enum payload variant mismatch\")"
                                     payload := "payload.clone()"
                                     object_map := false
-                                    if data_tree && variant == "Object" && result == .Val(result_id) {
+                                    if dyn_value && variant == "Object" && result == .Val(result_id) {
                                         if jet_rust_emit_value_type(ctx, function, result_id).kind == {
                                             .Map(_, _) -> object_map = true
                                             else -> {}
@@ -4838,7 +4838,7 @@ fn jet_rust_emit_handle_native_int_arg(row: MIRPreludeCall, ty: MIRType) -> Bool
     if row.member == "shutdown_report_field" -> return true
     if ty.kind != MIRTypeKind.Int -> return false
     if row.module_name == "core.time" -> return true
-    if row.module_name == "core.encoding.datatree" && row.member == "at" -> return true
+    if row.module_name == "core.encoding.dyn" && row.member == "at" -> return true
     if row.module_name != "core.handle" -> return false
     narrowed :: [String]{"clock.tick", "clock.advance", "Match.group_start", "Match.group_end", "reader.seek", "reader.skip", "reader.take", "http.request_timeout", "http.request_connect_timeout", "http.request_read_timeout", "http.request_total_timeout", "http.request_dns_timeout", "http.request_tls_timeout", "http.request_write_timeout", "http.request_first_byte_timeout", "http.request_redirects"}
     narrowed.contains(row.member)

@@ -17,7 +17,7 @@
 
 mod common;
 
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
@@ -1783,7 +1783,7 @@ fn check_json_snapshots_for_edits(path: &PathBuf, failures: &mut Vec<String>) {
             }
             let has_edit = matches!(
                 jet_foundation::JSON::json_get(&report, "fix_edits"),
-                Some(DataTree::Array(edits)) if !edits.is_empty()
+                Some(Dyn::Array(edits)) if !edits.is_empty()
             );
             if !has_edit {
                 failures.push(format!("{}:{} — {fix}", path.display(), line + 1));
@@ -1791,7 +1791,7 @@ fn check_json_snapshots_for_edits(path: &PathBuf, failures: &mut Vec<String>) {
             }
             let has_applicability = matches!(
                 jet_foundation::JSON::json_get(&report, "applicability"),
-                Some(DataTree::Text(value) | DataTree::TypedText(value))
+                Some(Dyn::Text(value) | Dyn::TypedText(value))
                     if value == "safe" || value == "suggested"
             );
             if !has_applicability {
@@ -1803,10 +1803,10 @@ fn check_json_snapshots_for_edits(path: &PathBuf, failures: &mut Vec<String>) {
             }
             let has_safety = matches!(
                 jet_foundation::JSON::json_get(&report, "fix_edits"),
-                Some(DataTree::Array(edits))
+                Some(Dyn::Array(edits))
                     if edits.iter().all(|edit| matches!(
                         jet_foundation::JSON::json_get(edit, "safety"),
-                        Some(DataTree::Text(value) | DataTree::TypedText(value))
+                        Some(Dyn::Text(value) | Dyn::TypedText(value))
                             if [
                                 jet_foundation::Report::FixSafety::Formatting,
                                 jet_foundation::Report::FixSafety::BehaviorPreserving,

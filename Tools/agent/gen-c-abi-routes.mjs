@@ -358,7 +358,7 @@ for (const key of fns.keys()) {
 }
 
 // Every other Prelude symbol the TIR -> MIR lowering spells as a literal
-// (handle-method, DataTree, HTTP request and Core-type associated rows written
+// (handle-method, Dyn, HTTP request and Core-type associated rows written
 // as `("Type", "member") => "symbol"` arms rather than registry rows) that
 // names a runtime function. MIRRust.rs calls such a row's symbol with its
 // arguments and widens an Int result from the kernel word, as for the handle

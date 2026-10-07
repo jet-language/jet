@@ -467,7 +467,7 @@ fn every_response_binding_renderer_uses_the_shared_decoder_policy() {
         .collect::<Vec<_>>();
     assert_eq!(response_producers.len(), 7);
 
-    let source = "fn decode_response(raw: String, code: Int) -> DataTree Err! { return Ok(DataTree.Null) }";
+    let source = "fn decode_response(raw: String, code: Int) -> Dyn Err! { return Ok(Dyn.Null) }";
     for producer in response_producers {
         let violations = policy
             .evaluate_generated(&producer.selector, source)
@@ -624,21 +624,21 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
     let generic_policy = policy
         .evaluate_source(
             "Tools/tower/run.jet",
-            "fn duplicate_equal(left: DataTree, right: DataTree) -> Bool { return true }",
+            "fn duplicate_equal(left: Dyn, right: Dyn) -> Bool { return true }",
         )
         .unwrap();
     assert!(generic_policy
         .iter()
-        .any(|violation| violation.rule == "datatree-domain-policy"));
+        .any(|violation| violation.rule == "dyn-domain-policy"));
     let named_policy = policy
         .evaluate_source(
             "Tools/tower/run.jet",
-            "fn javascript_truthy(value: DataTree) -> Bool { return true }",
+            "fn javascript_truthy(value: Dyn) -> Bool { return true }",
         )
         .unwrap();
     assert!(!named_policy
         .iter()
-        .any(|violation| violation.rule == "datatree-domain-policy"));
+        .any(|violation| violation.rule == "dyn-domain-policy"));
 
     let mut lower_ladder = String::from("\"text\"");
     for (from, to) in ('A'..='Z').zip('a'..='z') {
@@ -892,7 +892,7 @@ fn generated_decoder_policy_requires_the_canonical_decoder_symbol() {
     let violations = policy
         .evaluate_generated(
             "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet",
-            "fn decode_other(raw: String, code: Int) -> DataTree Err! { return Ok(DataTree.Null) }",
+            "fn decode_other(raw: String, code: Int) -> Dyn Err! { return Ok(Dyn.Null) }",
         )
         .unwrap();
     assert_eq!(violations.len(), 1);
@@ -905,7 +905,7 @@ fn generated_protocol_override_requires_a_distinct_envelope_shape() {
     let raw_json = policy
         .evaluate_generated(
             "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet",
-            "fn decode_response(raw: String, code: Int) -> DataTree Err! { return Ok(json.parse(raw)) }",
+            "fn decode_response(raw: String, code: Int) -> Dyn Err! { return Ok(json.parse(raw)) }",
         )
         .unwrap();
     assert!(raw_json.is_empty(), "raw JSON override is distinct: {raw_json:?}");
@@ -913,7 +913,7 @@ fn generated_protocol_override_requires_a_distinct_envelope_shape() {
     let ordinary = policy
         .evaluate_generated(
             "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet",
-            "fn decode_response(raw: String, code: Int) -> DataTree Err! {
+            "fn decode_response(raw: String, code: Int) -> Dyn Err! {
     response :: json.parse(raw)
     ok :: response.field(\"ok\")
     return Ok(response)

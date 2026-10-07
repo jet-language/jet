@@ -1,10 +1,10 @@
 // D-TEST-HISTORY1=A: typed operation histories share the Foundation runner,
 // comparison record, and shrinker with host-side evidence.
 
-type JetHistoryCaptureReader<'a> = dyn Fn() -> Result<jet_std::DataTree, String> + 'a;
-type JetHistorySendCaptureReader<'a> = dyn Fn() -> Result<jet_std::DataTree, String> + Send + Sync + 'a;
-type JetHistoryWeakReader = crate::jet_testing_history_foundation::HistoryCallbackReader<Result<jet_std::DataTree, String>>;
-type JetHistoryWeakSendReader = crate::jet_testing_history_foundation::HistorySendCallbackReader<Result<jet_std::DataTree, String>>;
+type JetHistoryCaptureReader<'a> = dyn Fn() -> Result<jet_std::Dyn, String> + 'a;
+type JetHistorySendCaptureReader<'a> = dyn Fn() -> Result<jet_std::Dyn, String> + Send + Sync + 'a;
+type JetHistoryWeakReader = crate::jet_testing_history_foundation::HistoryCallbackReader<Result<jet_std::Dyn, String>>;
+type JetHistoryWeakSendReader = crate::jet_testing_history_foundation::HistorySendCallbackReader<Result<jet_std::Dyn, String>>;
 
 // A generic call carries the codecs of its checked type arguments. Factories
 // retain this dictionary with their environment, so invocation after return
@@ -13,7 +13,7 @@ type JetHistoryWeakSendReader = crate::jet_testing_history_foundation::HistorySe
 #[derive(Clone)]
 struct JetHistoryTypeCodec {
     checked_type: String,
-    encode: std::sync::Arc<dyn Fn(&dyn std::any::Any, usize) -> Result<jet_std::DataTree, String> + Send + Sync>,
+    encode: std::sync::Arc<dyn Fn(&dyn std::any::Any, usize) -> Result<jet_std::Dyn, String> + Send + Sync>,
 }
 type JetHistoryTypes = std::collections::BTreeMap<String, JetHistoryTypeCodec>;
 thread_local! {
@@ -34,7 +34,7 @@ fn jet_history_with_types<R>(types: JetHistoryTypes, body: impl FnOnce() -> R) -
 }
 fn jet_history_type_codec<T: 'static>(
     checked_type: String,
-    encode: impl Fn(&T, usize) -> Result<jet_std::DataTree, String> + Send + Sync + 'static,
+    encode: impl Fn(&T, usize) -> Result<jet_std::Dyn, String> + Send + Sync + 'static,
 ) -> JetHistoryTypeCodec {
     JetHistoryTypeCodec { checked_type, encode: std::sync::Arc::new(move |value, depth| {
         let value = value.downcast_ref::<T>().ok_or_else(|| "history capture type does not match its checked instantiation".to_string())?;
@@ -43,7 +43,7 @@ fn jet_history_type_codec<T: 'static>(
 }
 fn jet_history_encode_type<T: 'static>(
     types: &JetHistoryTypes, name: &str, value: &T, depth: usize,
-) -> Result<jet_std::DataTree, String> {
+) -> Result<jet_std::Dyn, String> {
     if depth >= 64 { return Err("history capture exceeds the nesting bound".to_string()); }
     (types.get(name).ok_or_else(|| "history capture type is unresolved".to_string())?.encode)(value, depth)
 }
@@ -238,7 +238,7 @@ fn jet_history_register_send_callback<'a, F: ?Sized + 'a>(
     callback
 }
 
-fn jet_history_callback_captures<F: ?Sized>(callback: &F) -> Result<jet_std::DataTree, String> {
+fn jet_history_callback_captures<F: ?Sized>(callback: &F) -> Result<jet_std::Dyn, String> {
     struct Depth;
     impl Drop for Depth {
         fn drop(&mut self) {
@@ -276,13 +276,13 @@ fn jet_history_callback_fingerprint<F: ?Sized>(callback: &F) -> Result<String, S
     let metadata = jet_history_callback_captures(callback)?;
     let identity = metadata.get("function_identity")?.as_str()?;
     let captures = metadata.get("captures")?;
-    let bytes = jet_std::render_datatree_json(captures, false, 0).into_bytes();
+    let bytes = jet_std::render_dyn_json(captures, false, 0).into_bytes();
     crate::jet_testing_history_foundation::history_callback_value_fingerprint(identity, &bytes)
         .map_err(|error| error.to_string())
 }
 
-fn jet_history_data_tree_capture(value: &jet_std::DataTree, depth: usize) -> Result<jet_std::DataTree, String> {
-    use jet_std::DataTree as Tree;
+fn jet_history_dyn_capture(value: &jet_std::Dyn, depth: usize) -> Result<jet_std::Dyn, String> {
+    use jet_std::Dyn as Tree;
     if depth >= 64 {
         return Err("history capture exceeds the nesting bound".to_string());
     }
@@ -296,28 +296,28 @@ fn jet_history_data_tree_capture(value: &jet_std::DataTree, depth: usize) -> Res
         Tree::TypedText(value) => ("typed_text", Tree::Text(value.clone())),
         Tree::Bytes(value) => ("bytes", Tree::Array(value.iter().map(|value| Tree::Int(i64::from(*value))).collect())),
         Tree::Array(values) => ("array", Tree::Array(values.iter().map(|value| {
-            jet_history_data_tree_capture(value, depth + 1)
+            jet_history_dyn_capture(value, depth + 1)
         }).collect::<Result<_, _>>()?)),
         Tree::Object(fields) => ("object", Tree::Object(fields.iter().map(|(name, value)| {
-            Ok((name.clone(), jet_history_data_tree_capture(value, depth + 1)?))
+            Ok((name.clone(), jet_history_dyn_capture(value, depth + 1)?))
         }).collect::<Result<_, String>>()?)),
     };
     Ok(Tree::Array(vec![Tree::Text(kind.to_string()), value]))
 }
 
 fn jet_testing_history_observation(
-    value: &jet_std::DataTree,
+    value: &jet_std::Dyn,
 ) -> crate::jet_testing_comparison_foundation::ComparisonObservation {
     crate::jet_testing_comparison_foundation::ComparisonObservation::value(
-        jet_std::render_datatree_json(value, false, 0),
+        jet_std::render_dyn_json(value, false, 0),
     )
 }
 
 fn jet_testing_history_apply<Input>(
-    callback: &dyn Fn(&Input) -> JetOutcome<jet_std::DataTree, JetErr>,
+    callback: &dyn Fn(&Input) -> JetOutcome<jet_std::Dyn, JetErr>,
     input: Input,
     role: &str,
-) -> Result<jet_std::DataTree, String> {
+) -> Result<jet_std::Dyn, String> {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(&input)))
         .map_err(|_| format!("{role} callback crashed while replaying a typed history"))?;
     result.map_err(|error| format!("{role} callback failed: {error}"))
@@ -337,14 +337,14 @@ pub(crate) fn jet_testing_history_rng_below(
 }
 
 fn jet_testing_history_execute<Command>(
-    model: &dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr>,
-    actual: &dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr>,
-    observe: &dyn Fn(&jet_std::DataTree) -> JetOutcome<jet_std::DataTree, JetErr>,
+    model: &dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::Dyn, JetErr>,
+    actual: &dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::Dyn, JetErr>,
+    observe: &dyn Fn(&jet_std::Dyn) -> JetOutcome<jet_std::Dyn, JetErr>,
     commands: &[Command],
 ) -> Result<
     (
-        jet_std::DataTree,
-        jet_std::DataTree,
+        jet_std::Dyn,
+        jet_std::Dyn,
         crate::jet_testing_comparison_foundation::ComparisonObservation,
         crate::jet_testing_comparison_foundation::ComparisonObservation,
     ),
@@ -372,9 +372,9 @@ where
 }
 fn jet_testing_history_record(
     record: crate::jet_testing_comparison_foundation::ComparisonRecord,
-    inputs: Vec<jet_std::DataTree>,
-    reference: Vec<jet_std::DataTree>,
-    candidate: Vec<jet_std::DataTree>,
+    inputs: Vec<jet_std::Dyn>,
+    reference: Vec<jet_std::Dyn>,
+    candidate: Vec<jet_std::Dyn>,
     seed: Option<i64>,
     provenance: Option<&crate::jet_testing_history_foundation::HistoryProvenance>,
 ) -> jet_std::JetTestComparison {
@@ -416,9 +416,9 @@ pub(crate) fn jet_testing_histories<Command>(
     seed: i64,
     cases: i64,
     strategy: Option<JetHistoryStrategy<Command>>,
-    model: Box<dyn Fn(Vec<Command>) -> jet_std::DataTree>,
-    actual: Box<dyn Fn(Vec<Command>) -> jet_std::DataTree>,
-    observe: Box<dyn Fn(jet_std::DataTree) -> jet_std::DataTree>,
+    model: Box<dyn Fn(Vec<Command>) -> jet_std::Dyn>,
+    actual: Box<dyn Fn(Vec<Command>) -> jet_std::Dyn>,
+    observe: Box<dyn Fn(jet_std::Dyn) -> jet_std::Dyn>,
 ) -> Result<jet_std::JetTestComparison, String>
 where
     Command: crate::jet_testing_history_foundation::HistoryCommand + 'static,
@@ -429,7 +429,7 @@ where
     let actual = Box::new(move |commands: &Vec<Command>| {
         Ok::<_, JetErr>(actual(commands.clone()))
     });
-    let observe = Box::new(move |value: &jet_std::DataTree| {
+    let observe = Box::new(move |value: &jet_std::Dyn| {
         Ok::<_, JetErr>(observe(value.clone()))
     });
     jet_testing_histories_with_provenance(
@@ -450,13 +450,13 @@ pub(crate) fn jet_testing_histories_with_provenance<'callback, Command>(
     cases: i64,
     strategy: Option<JetHistoryStrategy<Command>>,
     model: Box<
-        dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
+        dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::Dyn, JetErr> + 'callback,
     >,
     actual: Box<
-        dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
+        dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::Dyn, JetErr> + 'callback,
     >,
     observe: Box<
-        dyn Fn(&jet_std::DataTree) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
+        dyn Fn(&jet_std::Dyn) -> JetOutcome<jet_std::Dyn, JetErr> + 'callback,
     >,
     provenance: Option<crate::jet_testing_history_foundation::HistoryProvenance>,
 ) -> Result<jet_std::JetTestComparison, String>
@@ -522,13 +522,13 @@ fn jet_testing_histories_result_with_strategy<'callback, Command, Strategy>(
     seed: i64,
     cases: i64,
     model: Box<
-        dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
+        dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::Dyn, JetErr> + 'callback,
     >,
     actual: Box<
-        dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
+        dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::Dyn, JetErr> + 'callback,
     >,
     observe: Box<
-        dyn Fn(&jet_std::DataTree) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
+        dyn Fn(&jet_std::Dyn) -> JetOutcome<jet_std::Dyn, JetErr> + 'callback,
     >,
     strategy: Strategy,
     provenance: Option<crate::jet_testing_history_foundation::HistoryProvenance>,
@@ -600,7 +600,7 @@ where
     let run = runner
         .run_strategy::<Command, _, _>(&strategy, |typed| {
             let case = &typed.case;
-            let input = match jet_std::parse_json_datatree(&case.json()) {
+            let input = match jet_std::parse_json_dyn(&case.json()) {
                 Ok(input) => input,
                 Err(error) => {
                     return crate::jet_testing_comparison_foundation::ComparisonRecord::terminal(
@@ -708,7 +708,7 @@ mod jet_testing_history_web {
     };
     use std::cell::RefCell;
 
-    type Tree = jet_std::DataTree;
+    type Tree = jet_std::Dyn;
     const MAX_WIRE_BYTES: usize = 8 * 1024 * 1024;
 
     thread_local! {
@@ -1349,7 +1349,7 @@ mod jet_testing_history_web {
             matches!(response, Some(Tree::Bool(true)))
         }
 
-        fn commands_to_data_tree(&self, commands: &[Tree]) -> Option<Tree> {
+        fn commands_to_dyn(&self, commands: &[Tree]) -> Option<Tree> {
             Some(Tree::Array(commands.to_vec()))
         }
     }
@@ -1357,7 +1357,7 @@ mod jet_testing_history_web {
 
     fn set_output(value: Tree) {
         OUTPUT.with(|cell| {
-            *cell.borrow_mut() = jet_std::render_datatree_json(&value, false, 0).into_bytes();
+            *cell.borrow_mut() = jet_std::render_dyn_json(&value, false, 0).into_bytes();
         });
     }
 
@@ -1437,7 +1437,7 @@ mod jet_testing_history_web {
         input: &Tree,
         role: &str,
     ) -> Result<Tree, String> {
-        let encoded = jet_std::render_datatree_json(input, false, 0).into_bytes();
+        let encoded = jet_std::render_dyn_json(input, false, 0).into_bytes();
         if encoded.len() > MAX_WIRE_BYTES {
             return Err(format!("{role} history callback input exceeds the Web limit"));
         }
@@ -1470,7 +1470,7 @@ mod jet_testing_history_web {
             };
             std::str::from_utf8(bytes)
                 .ok()
-                .and_then(|value| jet_std::parse_json_typed_datatree(value).ok())
+                .and_then(|value| jet_std::parse_json_typed_dyn(value).ok())
         });
         OUTPUT.with(|cell| cell.borrow_mut().clear());
         let parsed = parsed.ok_or_else(|| format!("{role} callback returned invalid JSON"))?;
@@ -1533,9 +1533,9 @@ mod jet_testing_history_web {
                 return Err("history derived strategy provenance does not match its descriptor".to_string());
             }
             // The typed JSON parser retains exact integer lexemes and ordered
-            // nested DataTree values. The emitter's capture type tags travel
+            // nested Dyn values. The emitter's capture type tags travel
             // inside this existing wire tree, never through an f64 conversion.
-            let bytes = jet_std::render_datatree_json(captures, false, 0).into_bytes();
+            let bytes = jet_std::render_dyn_json(captures, false, 0).into_bytes();
             let fingerprint = crate::jet_testing_history_foundation::history_callback_value_fingerprint(
                 &identity, &bytes,
             ).map_err(|error| error.to_string())?;
@@ -1590,7 +1590,7 @@ mod jet_testing_history_web {
         Strategy: crate::jet_testing_history_foundation::HistoryStrategyBehavior<Command>,
     {
         let input = strategy
-            .commands_to_data_tree(commands)
+            .commands_to_dyn(commands)
             .ok_or_else(|| "history command codec is unavailable on Web".to_string())?;
         let reference_value = callback(model, &input, "model")?;
         let candidate_value = callback(actual, &input, "actual")?;
@@ -1625,13 +1625,13 @@ mod jet_testing_history_web {
         if let Some(dispatch) = dispatch {
             return dispatch(root);
         }
-        if command_type_matches(&command_type, "DataTree") {
+        if command_type_matches(&command_type, "Dyn") {
             return run_wire_with_strategy::<
-                jet_std::DataTree,
+                jet_std::Dyn,
                 crate::jet_testing_history_foundation::HistorySchemaStrategy,
             >(
                 root,
-                <jet_std::DataTree as crate::jet_testing_history_foundation::HistoryCommand>::history_strategy(),
+                <jet_std::Dyn as crate::jet_testing_history_foundation::HistoryCommand>::history_strategy(),
             );
         }
         Err(crate::jet_testing_history_foundation::history_unsupported_type_reason(
@@ -1719,7 +1719,7 @@ mod jet_testing_history_web {
         let run = runner
             .run_strategy::<Command, _, _>(&strategy, |typed| {
                 let case = &typed.case;
-                let input = match jet_std::parse_json_typed_datatree(&case.json()) {
+                let input = match jet_std::parse_json_typed_dyn(&case.json()) {
                     Ok(input) => input,
                     Err(error) => {
                         return ComparisonRecord::terminal(
@@ -1869,7 +1869,7 @@ mod jet_testing_history_web {
         });
         let result = input
             .and_then(|bytes| std::str::from_utf8(&bytes).ok().map(str::to_string))
-            .and_then(|wire| jet_std::parse_json_typed_datatree(&wire).ok())
+            .and_then(|wire| jet_std::parse_json_typed_dyn(&wire).ok())
             .map_or_else(
                 || Err("invalid testing history WebWasm wire JSON".to_string()),
                 |wire| run_wire(&wire),

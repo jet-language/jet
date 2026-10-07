@@ -766,7 +766,7 @@ pub(crate) fn tir_add_pattern_bindings(
                 Type::Named(name) | Type::Apply { name, .. } => {
                     let resolved = crate::Codegen::TIR::canonical_enum_owner(cx, name);
                     crate::Codegen::is_json_type_name(name)
-                        || resolved == "DataTree"
+                        || resolved == "Dyn"
                         || resolved == crate::Syntax::TYPE_KEY
                 }
                 _ => false,
@@ -946,7 +946,7 @@ pub(crate) fn variant_payload_types(
             .ok_or("union variant payload type"),
         Type::Named(name) | Type::Apply { name, .. } => {
             let resolved = crate::Codegen::TIR::canonical_enum_owner(cx, name);
-            if (crate::Codegen::is_json_type_name(name) || resolved == "DataTree")
+            if (crate::Codegen::is_json_type_name(name) || resolved == "Dyn")
                 && crate::Codegen::is_json_variant(variant)
             {
                 return match variant {

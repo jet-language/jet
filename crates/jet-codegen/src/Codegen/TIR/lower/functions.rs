@@ -1197,7 +1197,7 @@ fn lower_trait_method_inner(
             continue;
         }
         let rust_name = p.name.clone();
-        // D-SERDE2: a `Decode.decode(tree: Data)` param is emitted as `&jet_std::DataTree`
+        // D-SERDE2: a `Decode.decode(tree: Data)` param is emitted as `&jet_std::Dyn`
         // and re-bound to an owned clone at the function head, so the body sees an owned
         // `Data` local — its place is the bare name, NOT `param_place`'s non-scalar deref.
         let place = if serde == Some(SerdeCodec::Decode) {

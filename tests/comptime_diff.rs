@@ -891,7 +891,7 @@ fn xml_hostile_error_matches_comptime_and_runtime() {
     }
     let src = r#"use core.encoding.xml as xml
 
-fn show(result: DataTree XMLError!) -> String {
+fn show(result: Dyn XMLError!) -> String {
     if result == {
         .Ok(_) -> return "ok"
         .Err(e) -> {
@@ -921,7 +921,7 @@ fn cbor_generic_whole_decode_matches_comptime_and_aot() {
     // D-ENC-CBOR-SURFACE1 / #296: current generic whole-value decode,
     // including normal-mode indefinite containers and preferred Float16,
     // is one R12 semantic path at comptime and AOT. This intentionally does
-    // not exercise the retired untyped `decode(DataTree)` compatibility arm.
+    // not exercise the retired untyped `decode(Dyn)` compatibility arm.
     let src = "use core.encoding.cbor as cbor\nCOMPTIME_VALUE :: prep { cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\") }\n\nfn run() {\n    r :: cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n";
     check_comptime_src(2000, "generic CBOR indefinite Float16 decode", src);
 }

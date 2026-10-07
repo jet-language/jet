@@ -703,11 +703,11 @@ use core.text as text
 struct Token { raw: String }
 
 impl Token.Encode {
-    fn encode(self) -> DataTree { DataTree.Text("wire") }
+    fn encode(self) -> Dyn { Dyn.Text("wire") }
 }
 
 impl Token.Decode {
-    fn decode(tree: DataTree) -[]> Token ![FieldError] {
+    fn decode(tree: Dyn) -[]> Token ![FieldError] {
         value :: tree.text()
         if value != "wire" {
             return Err([FieldError{ path: "$xml_event", reason: "bad token" }])
@@ -1060,7 +1060,7 @@ fn forced_deopt() -[]> String {
     narrow := cbor.decode<F32>(~(cbor.to_bytes_canonical(F32{ 1.5 }) ?? panic("f32 encode"))) ?? panic("f32 decode")
     pair := cbor.decode<[Int#2]>(~(cbor.to_bytes_canonical([Int#2]{ 1, 2 }) ?? panic("fixed encode"))) ?? panic("fixed decode")
     bytes := cbor.decode<[U8#2]>(~(cbor.to_bytes_canonical([U8#2]{ 222, 173 }) ?? panic("bytes encode"))) ?? panic("bytes decode")
-    tree := cbor.decode<DataTree>(~(cbor.to_bytes_canonical(DataTree.Object(["n": DataTree.Int(7)])) ?? panic("tree encode"))) ?? panic("tree decode")
+    tree := cbor.decode<Dyn>(~(cbor.to_bytes_canonical(Dyn.Object(["n": Dyn.Int(7)])) ?? panic("tree encode"))) ?? panic("tree decode")
     severity := cbor.decode<Severity>(~(cbor.to_bytes_canonical(Severity.from_int(7)) ?? panic("range encode"))) ?? panic("range decode")
     tree_n := (&tree.field("n") ?? panic("tree field")).int() ?? panic("tree int")
     return "{signed}|{unsigned}|{narrow}|{pair[0]},{pair[1]}|{bytes[0]},{bytes[1]}|{tree_n}|{severity.raw()}|{invalid_i8_rejected()}|{invalid_u32_rejected()}|{invalid_f32_rejected()}|{invalid_fixed_rejected()}|{invalid_range_rejected()}|{invalid_i8_error()}|{invalid_u8_error()}|{invalid_fixed_bytes_error()}"
@@ -1089,27 +1089,27 @@ fn run() {
 }
 
 #[test]
-fn datatree_int_accessor_matches_aot_without_coercion() {
-    on_encoding_stack(datatree_int_accessor_matches_aot_without_coercion_inner);
+fn dyn_int_accessor_matches_aot_without_coercion() {
+    on_encoding_stack(dyn_int_accessor_matches_aot_without_coercion_inner);
 }
 
-fn datatree_int_accessor_matches_aot_without_coercion_inner() {
+fn dyn_int_accessor_matches_aot_without_coercion_inner() {
     if !common::have_rustc() {
-        eprintln!("note: skipping DataTree Int accessor parity (need rustc)");
+        eprintln!("note: skipping Dyn Int accessor parity (need rustc)");
         return;
     }
     let source = r#"
 fn run() {
-    DataTree.Int(7).int() ? value -> print(value) ! error -> print(error)
-    DataTree.Float(7.0).int() ? value -> print(value) ! error -> print(error)
-    DataTree.Text("7").int() ? value -> print(value) ! error -> print(error)
+    Dyn.Int(7).int() ? value -> print(value) ! error -> print(error)
+    Dyn.Float(7.0).int() ? value -> print(value) ! error -> print(error)
+    Dyn.Text("7").int() ? value -> print(value) ! error -> print(error)
 }
 "#;
-    let scratch = Scratch::new("datatree_int");
+    let scratch = Scratch::new("dyn_int");
     let path = scratch.write_project("2026", source);
     checked_bundle(path.to_str().unwrap());
     let aot = run_aot(&path, scratch.path());
-    assert_eq!(aot.exit, 0, "DataTree Int AOT failed: {}", aot.stderr);
+    assert_eq!(aot.exit, 0, "Dyn Int AOT failed: {}", aot.stderr);
     assert_eq!(
         aot.stdout,
         "7\n[expected int, got 7.0]\n[expected int, got \"7\"]\n"
@@ -1119,48 +1119,48 @@ fn run() {
 }
 
 #[test]
-fn datatree_int_accessor_matches_aot_inside_a_helper() {
-    on_encoding_stack(datatree_int_accessor_matches_aot_inside_a_helper_inner);
+fn dyn_int_accessor_matches_aot_inside_a_helper() {
+    on_encoding_stack(dyn_int_accessor_matches_aot_inside_a_helper_inner);
 }
 
 #[test]
-fn datatree_scalar_and_unordered_parity_matches_all_tiers() {
-    on_encoding_stack(datatree_scalar_and_unordered_parity_matches_all_tiers_inner);
+fn dyn_scalar_and_unordered_parity_matches_all_tiers() {
+    on_encoding_stack(dyn_scalar_and_unordered_parity_matches_all_tiers_inner);
 }
 
-fn datatree_scalar_and_unordered_parity_matches_all_tiers_inner() {
+fn dyn_scalar_and_unordered_parity_matches_all_tiers_inner() {
     if !common::have_rustc() {
-        eprintln!("note: skipping DataTree scalar/equality parity (need rustc)");
+        eprintln!("note: skipping Dyn scalar/equality parity (need rustc)");
         return;
     }
     let source = r#"
 use core.encoding.json as json
 
 fn run() {
-    DataTree.Text("strict").text() ? value -> print(value) ! _error -> print("strict-error")
-    DataTree.Int(7).text() ? _value -> print("strict-bad") ! _error -> print("strict-error")
+    Dyn.Text("strict").text() ? value -> print(value) ! _error -> print("strict-error")
+    Dyn.Int(7).text() ? _value -> print("strict-bad") ! _error -> print("strict-error")
 
-    print(DataTree.Text("text").to_text() ?? "none")
-    print(DataTree.Int(-42).to_text() ?? "none")
-    print(DataTree.Float(1.0).to_text() ?? "none")
-    print(DataTree.Bool(false).to_text() ?? "none")
-    print(DataTree.Null.to_text() ?? "none")
-    print(DataTree.Array([DataTree.Int(1)]).to_text() ?? "none")
-    print(DataTree.Object(["a": DataTree.Int(1)]).to_text() ?? "none")
+    print(Dyn.Text("text").to_text() ?? "none")
+    print(Dyn.Int(-42).to_text() ?? "none")
+    print(Dyn.Float(1.0).to_text() ?? "none")
+    print(Dyn.Bool(false).to_text() ?? "none")
+    print(Dyn.Null.to_text() ?? "none")
+    print(Dyn.Array([Dyn.Int(1)]).to_text() ?? "none")
+    print(Dyn.Object(["a": Dyn.Int(1)]).to_text() ?? "none")
 
     left :: json.parse("{{\"outer\":{{\"b\":1.0,\"a\":[1,false]}},\"name\":\"x\"}}") ?? panic("left")
     right :: json.parse("{{\"name\":\"x\",\"outer\":{{\"a\":[1,false],\"b\":1.0}}}}") ?? panic("right")
     print(left.equal_unordered(right))
-    print(DataTree.Null.equal_unordered(DataTree.Null))
-    print(DataTree.Array([DataTree.Int(1), DataTree.Int(2)]).equal_unordered(DataTree.Array([DataTree.Int(2), DataTree.Int(1)])))
-    print(DataTree.Int(1).equal_unordered(DataTree.Float(1.0)))
-    print(DataTree.Bool(false).equal_unordered(DataTree.Bool(false)))
-    print(DataTree.Text("same").equal_unordered(DataTree.Text("same")))
-    print(DataTree.Text("1").equal_unordered(DataTree.Int(1)))
-    print(DataTree.Float(Float.NAN).equal_unordered(DataTree.Float(Float.NAN)))
+    print(Dyn.Null.equal_unordered(Dyn.Null))
+    print(Dyn.Array([Dyn.Int(1), Dyn.Int(2)]).equal_unordered(Dyn.Array([Dyn.Int(2), Dyn.Int(1)])))
+    print(Dyn.Int(1).equal_unordered(Dyn.Float(1.0)))
+    print(Dyn.Bool(false).equal_unordered(Dyn.Bool(false)))
+    print(Dyn.Text("same").equal_unordered(Dyn.Text("same")))
+    print(Dyn.Text("1").equal_unordered(Dyn.Int(1)))
+    print(Dyn.Float(Float.NAN).equal_unordered(Dyn.Float(Float.NAN)))
 }
 "#;
-    let scratch = Scratch::new("datatree_scalar_unordered");
+    let scratch = Scratch::new("dyn_scalar_unordered");
     let path = scratch.write_project("2026", source);
     checked_bundle(path.to_str().unwrap());
     let expected = concat!(
@@ -1171,22 +1171,22 @@ fn run() {
     let aot = run_aot(&path, scratch.path());
     assert_eq!(
         aot.exit, 0,
-        "DataTree scalar/equality AOT failed: {}",
+        "Dyn scalar/equality AOT failed: {}",
         aot.stderr
     );
     assert_eq!(aot.stdout, expected);
     let dev = run_default_dev(path.to_str().unwrap());
-    assert_eq!(dev, aot, "DataTree scalar/equality default run drift");
+    assert_eq!(dev, aot, "Dyn scalar/equality default run drift");
     let interpreter = run_forced_interpreter(path.to_str().unwrap());
     assert_eq!(
         interpreter, aot,
-        "DataTree scalar/equality interpreter drift"
+        "Dyn scalar/equality interpreter drift"
     );
 }
 
-fn datatree_int_accessor_matches_aot_inside_a_helper_inner() {
+fn dyn_int_accessor_matches_aot_inside_a_helper_inner() {
     if !common::have_rustc() {
-        eprintln!("note: skipping DataTree Int deopt parity (need rustc)");
+        eprintln!("note: skipping Dyn Int deopt parity (need rustc)");
         return;
     }
     let source = r#"
@@ -1195,20 +1195,20 @@ use core.text as text
 fn gap() {
     folded := text.casefold("Straße")
     if folded != "strasse" { panic("casefold") }
-    DataTree.Int(7).int() ? value -> print(value) ! error -> print(error)
-    DataTree.Float(7.0).int() ? value -> print(value) ! error -> print(error)
-    DataTree.Text("7").int() ? value -> print(value) ! error -> print(error)
+    Dyn.Int(7).int() ? value -> print(value) ! error -> print(error)
+    Dyn.Float(7.0).int() ? value -> print(value) ! error -> print(error)
+    Dyn.Text("7").int() ? value -> print(value) ! error -> print(error)
 }
 
 fn run() {
     gap()
 }
 "#;
-    let scratch = Scratch::new("datatree_int_deopt");
+    let scratch = Scratch::new("dyn_int_deopt");
     let path = scratch.write_project("2026", source);
     checked_bundle(path.to_str().unwrap());
     let aot = run_aot(&path, scratch.path());
-    assert_eq!(aot.exit, 0, "DataTree Int deopt AOT failed: {}", aot.stderr);
+    assert_eq!(aot.exit, 0, "Dyn Int deopt AOT failed: {}", aot.stderr);
     assert_eq!(
         aot.stdout,
         "7\n[expected int, got 7.0]\n[expected int, got \"7\"]\n"
@@ -1216,7 +1216,7 @@ fn run() {
     let dev = run_default_dev(path.to_str().unwrap());
     assert_eq!(dev, aot);
     let interpreter = run_forced_interpreter(path.to_str().unwrap());
-    assert_eq!(interpreter, aot, "DataTree Int interpreter drift");
+    assert_eq!(interpreter, aot, "Dyn Int interpreter drift");
 }
 
 /// `csv.to_string` takes either the dynamic `[[String]]` rows form or a typed
@@ -1290,7 +1290,7 @@ fn custom_encode_survives_containers() {
 use core.encoding.json as json
 struct Token { raw: String }
 impl Token.Encode {
-    fn encode(self) -> DataTree { DataTree.Text("wire") }
+    fn encode(self) -> Dyn { Dyn.Text("wire") }
 }
 fn token() -> Token? { Val(Token{raw: "raw"}) }
 fn empty() -> Token? { None }
@@ -1451,7 +1451,7 @@ fn run() {
     path := "@DIR@/rows.jsonl"
     output :: files.create(path) ?? panic("create")
     writer :: fmt.writer(^output) ?? panic("writer")
-    writer.write(DataTree.Object(["a": DataTree.Int(1)])) ?? panic("write")
+    writer.write(Dyn.Object(["a": Dyn.Int(1)])) ?? panic("write")
     writer.finish() ?? panic("finish")
     input :: files.open(path) ?? panic("open")
     reader :: fmt.reader(^input) ?? panic("reader")
@@ -1485,12 +1485,12 @@ fn run() {
     assert_aot_dev_stream_parity("csv-stream", &stream_fixture("csv", csv));
 
     let xml = r#"
-fn xml_name(local: String) -[]> DataTree {
-    return DataTree.Object([
-        "raw": DataTree.Text(~local),
-        "prefix": DataTree.Null,
-        "local": DataTree.Text(~local),
-        "namespace_uri": DataTree.Null,
+fn xml_name(local: String) -[]> Dyn {
+    return Dyn.Object([
+        "raw": Dyn.Text(~local),
+        "prefix": Dyn.Null,
+        "local": Dyn.Text(~local),
+        "namespace_uri": Dyn.Null,
     ])
 }
 
@@ -1498,29 +1498,29 @@ fn run() {
     path := "@DIR@/doc.xml"
     output :: files.create(path) ?? panic("create")
     writer :: fmt.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
-    writer.write(DataTree.Object([
-        "$xml_event": DataTree.Text("document_start"),
-        "encoding": DataTree.Null,
-        "bom": DataTree.Array([]),
+    writer.write(Dyn.Object([
+        "$xml_event": Dyn.Text("document_start"),
+        "encoding": Dyn.Null,
+        "bom": Dyn.Array([]),
     ])) ?? panic("document_start")
-    writer.write(DataTree.Object([
-        "$xml_event": DataTree.Text("element_start"),
+    writer.write(Dyn.Object([
+        "$xml_event": Dyn.Text("element_start"),
         "name": xml_name("r"),
-        "namespaces": DataTree.Array([]),
-        "attributes": DataTree.Array([]),
-        "empty_style": DataTree.Text("empty"),
-        "open_lexical": DataTree.Object([
-            "raw_text": DataTree.Null,
-            "raw_bytes": DataTree.Null,
-            "semantic": DataTree.Object([
+        "namespaces": Dyn.Array([]),
+        "attributes": Dyn.Array([]),
+        "empty_style": Dyn.Text("empty"),
+        "open_lexical": Dyn.Object([
+            "raw_text": Dyn.Null,
+            "raw_bytes": Dyn.Null,
+            "semantic": Dyn.Object([
                 "name": xml_name("r"),
-                "namespaces": DataTree.Array([]),
-                "attributes": DataTree.Array([]),
-                "empty_style": DataTree.Text("empty"),
+                "namespaces": Dyn.Array([]),
+                "attributes": Dyn.Array([]),
+                "empty_style": Dyn.Text("empty"),
             ]),
         ]),
     ])) ?? panic("root")
-    writer.write(DataTree.Object(["$xml_event": DataTree.Text("document_end")])) ?? panic("end")
+    writer.write(Dyn.Object(["$xml_event": Dyn.Text("document_end")])) ?? panic("end")
     writer.finish() ?? panic("finish")
     input :: files.open(path) ?? panic("open")
     reader :: fmt.reader(^input) ?? panic("reader")
@@ -1557,11 +1557,11 @@ fn run() {
         .Val(_) -> print(true)
         .None -> print(false)
     }
-    whole := DataTree.Object([
-        "aa": DataTree.Int(1),
-        "b": DataTree.Int(2),
-        "f": DataTree.Float(1.5),
-        "z": DataTree.Float(-0.0),
+    whole := Dyn.Object([
+        "aa": Dyn.Int(1),
+        "b": Dyn.Int(2),
+        "f": Dyn.Float(1.5),
+        "z": Dyn.Float(-0.0),
     ])
     print((fmt.to_bytes_canonical(whole) ?? panic("whole")) == (files.read_bytes(path) ?? panic("bytes")))
 }
@@ -1610,7 +1610,7 @@ fn run() {
     cbor_writer.write(encoding.DataEvent.Int(1)) ?? panic("ci")
     cbor_writer.write(encoding.DataEvent.ObjectEnd) ?? panic("ce")
     cbor_writer.finish() ?? panic("cf")
-    whole_tree := DataTree.Object(["a": DataTree.Int(1)])
+    whole_tree := Dyn.Object(["a": Dyn.Int(1)])
     stream_bytes := files.read_bytes(cbor_path) ?? panic("cbor bytes")
     print((cbor.to_bytes_canonical(whole_tree) ?? panic("canonical")) == stream_bytes)
 }

@@ -190,7 +190,7 @@ fn pkg_perl_render_jet(lib: String, functions: [PerlBoundFunction]) -> String Ne
     &out.push(pkg_render_decode_response("PerlError", DecoderProtocol.StandardEnvelope))
     loop function in functions {
         name :: function.jet
-        &out.push("pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -[FFI.Perl]> DataTree PerlError! {{\n    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
+        &out.push("pub fn {name}(session: Session, input: Dyn, deadline_ms: Int) -[FFI.Perl]> Dyn PerlError! {{\n    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
     }
     out.join("")
 }

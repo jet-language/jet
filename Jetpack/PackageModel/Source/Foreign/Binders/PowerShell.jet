@@ -175,7 +175,7 @@ fn pkg_powershell_render_jet(lib: String, functions: [PwshBoundFunction]) -> Str
     &out.push(pkg_render_decode_response("PowerShellError", DecoderProtocol.StandardEnvelope))
     &out.push(PKG_PWSH_JET_SESSION)
     loop function in functions {
-        &out.push("pub fn {function.jet}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree PowerShellError! {{\n    raw :: abi.{function.jet}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
+        &out.push("pub fn {function.jet}(session: Session, input: Dyn, deadline_ms: Int) -> Dyn PowerShellError! {{\n    raw :: abi.{function.jet}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
     }
     out.join("")
 }

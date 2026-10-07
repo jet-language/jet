@@ -123,7 +123,7 @@ mod web_kernel {
                 }
             }
 
-            pub use jet_foundation::DataTree::DataTree;
+            pub use jet_foundation::Dyn::Dyn;
 
             #[derive(Clone, Debug, PartialEq)]
             pub struct FieldError {
@@ -215,9 +215,9 @@ mod web_kernel {
 
             /// Strict JSON validity through the one Foundation parser; the
             /// server-fn kernel only asks whether a body parses.
-            pub fn parse_json_typed_datatree(
+            pub fn parse_json_typed_dyn(
                 text: &str,
-            ) -> Result<DataTree, jet_foundation::EncodingJson::Error> {
+            ) -> Result<Dyn, jet_foundation::EncodingJson::Error> {
                 jet_foundation::EncodingJson::parse_json_typed(text, true)
             }
         }
@@ -227,7 +227,7 @@ mod web_kernel {
 
     use self::native_scheduler::jet_std;
     pub use self::native_scheduler::jet_std::{
-        DataTree, JetDerived, JetReactiveEffect, JetSignal, jet_reactive_effect,
+        Dyn, JetDerived, JetReactiveEffect, JetSignal, jet_reactive_effect,
         jet_reactive_effect_rooted,
     };
 
@@ -243,24 +243,24 @@ mod web_kernel {
 
     #[allow(non_camel_case_types)]
     pub trait __jet_Encode {
-        fn jet_encode(&self) -> jet_std::DataTree;
+        fn jet_encode(&self) -> jet_std::Dyn;
     }
 
     #[allow(non_camel_case_types)]
     pub trait __jet_Decode: Sized {
-        fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>;
+        fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>>;
     }
 
     impl __jet_Encode for String {
-        fn jet_encode(&self) -> jet_std::DataTree {
-            jet_std::DataTree::Text(self.clone())
+        fn jet_encode(&self) -> jet_std::Dyn {
+            jet_std::Dyn::Text(self.clone())
         }
     }
 
     impl __jet_Decode for String {
-        fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>> {
             match tree {
-                jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value) => {
+                jet_std::Dyn::Text(value) | jet_std::Dyn::TypedText(value) => {
                     Ok(value.clone())
                 }
                 _ => Err(jet_std::FieldError::one("expected Text")),
@@ -1059,42 +1059,42 @@ fn app_callback(
     }
 }
 
-fn tree_text(tree: &web_kernel::DataTree) -> Option<String> {
+fn tree_text(tree: &web_kernel::Dyn) -> Option<String> {
     match tree {
-        web_kernel::DataTree::Text(value) | web_kernel::DataTree::TypedText(value) => {
+        web_kernel::Dyn::Text(value) | web_kernel::Dyn::TypedText(value) => {
             Some(value.clone())
         }
-        web_kernel::DataTree::Int(value) => Some(value.to_string()),
-        web_kernel::DataTree::Float(value) => Some(value.to_string()),
-        web_kernel::DataTree::Bool(value) => Some(value.to_string()),
-        web_kernel::DataTree::Number(value) => Some(value.clone()),
+        web_kernel::Dyn::Int(value) => Some(value.to_string()),
+        web_kernel::Dyn::Float(value) => Some(value.to_string()),
+        web_kernel::Dyn::Bool(value) => Some(value.to_string()),
+        web_kernel::Dyn::Number(value) => Some(value.clone()),
         _ => None,
     }
 }
 
-fn tree_to_untyped(tree: &web_kernel::DataTree, span: Span) -> Result<CtValue, String> {
+fn tree_to_untyped(tree: &web_kernel::Dyn, span: Span) -> Result<CtValue, String> {
     match tree {
-        web_kernel::DataTree::Null => Ok(CtValue::Unit),
-        web_kernel::DataTree::Bool(value) => Ok(CtValue::Bool(*value)),
-        web_kernel::DataTree::Int(value) => Ok(CtValue::Int(*value)),
-        web_kernel::DataTree::Float(value) => Ok(CtValue::Float(crate::AST::CtFloat::f64(*value))),
-        web_kernel::DataTree::Number(value) => value
+        web_kernel::Dyn::Null => Ok(CtValue::Unit),
+        web_kernel::Dyn::Bool(value) => Ok(CtValue::Bool(*value)),
+        web_kernel::Dyn::Int(value) => Ok(CtValue::Int(*value)),
+        web_kernel::Dyn::Float(value) => Ok(CtValue::Float(crate::AST::CtFloat::f64(*value))),
+        web_kernel::Dyn::Number(value) => value
             .parse::<i64>()
             .map(CtValue::Int)
             .or_else(|_| value.parse::<f64>().map(|value| CtValue::Float(crate::AST::CtFloat::f64(value))))
             .map_err(|_| format!("invalid JSON number `{value}`")),
-        web_kernel::DataTree::TypedText(value) => {
+        web_kernel::Dyn::TypedText(value) => {
             let tree = parse_app_json_tree(value)?;
             tree_to_untyped(&tree, span)
         }
-        web_kernel::DataTree::Text(value) => Ok(CtValue::Str(value.clone())),
-        web_kernel::DataTree::Bytes(value) => Ok(CtValue::Bytes(value.clone())),
-        web_kernel::DataTree::Array(values) => values
+        web_kernel::Dyn::Text(value) => Ok(CtValue::Str(value.clone())),
+        web_kernel::Dyn::Bytes(value) => Ok(CtValue::Bytes(value.clone())),
+        web_kernel::Dyn::Array(values) => values
             .iter()
             .map(|value| tree_to_untyped(value, span))
             .collect::<Result<Vec<_>, _>>()
             .map(CtValue::List),
-        web_kernel::DataTree::Object(values) => values
+        web_kernel::Dyn::Object(values) => values
             .iter()
             .map(|(name, value)| Ok((name.clone(), tree_to_untyped(value, span)?)))
             .collect::<Result<Vec<_>, String>>()
@@ -1130,13 +1130,13 @@ fn binding_ast_type(value: &str) -> Type {
 }
 
 fn decode_binding_tree(
-    tree: &web_kernel::DataTree,
+    tree: &web_kernel::Dyn,
     ty: &str,
     span: Span,
 ) -> Result<CtValue, String> {
     let (base, optional) = binding_type(ty);
     if optional {
-        if matches!(tree, web_kernel::DataTree::Null) {
+        if matches!(tree, web_kernel::Dyn::Null) {
             return Ok(CtValue::absent(binding_ast_type(ty)));
         }
         return decode_binding_tree(tree, &base, span)
@@ -1176,21 +1176,21 @@ fn decode_binding_tree(
     }
 }
 
-fn parse_app_json_tree(value: &str) -> Result<web_kernel::DataTree, String> {
+fn parse_app_json_tree(value: &str) -> Result<web_kernel::Dyn, String> {
     jet_foundation::EncodingJson::parse_json(value, true)
         .map(|tree| tree)
         .map_err(|error| error.message)
 }
 
 fn mir_tree_to_ct(
-    tree: &web_kernel::DataTree,
+    tree: &web_kernel::Dyn,
     ty: &jet_foundation::MIR::MirType,
     span: Span,
 ) -> Result<CtValue, String> {
     use jet_foundation::MIR::MirTypeKind;
     match ty.kind() {
         MirTypeKind::Option(inner) => {
-            if matches!(tree, web_kernel::DataTree::Null) {
+            if matches!(tree, web_kernel::Dyn::Null) {
                 Ok(CtValue::absent(crate::Comptime::MirBridge::mir_to_ast_type(inner)))
             } else {
                 mir_tree_to_ct(tree, inner, span).map(|value| CtValue::Present(Box::new(value)))
@@ -1206,7 +1206,7 @@ fn mir_tree_to_ct(
         MirTypeKind::String => decode_binding_tree(tree, "String", span),
         MirTypeKind::Char => decode_binding_tree(tree, "Char", span),
         MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => {
-            let web_kernel::DataTree::Array(values) = tree else {
+            let web_kernel::Dyn::Array(values) = tree else {
                 return Err(format!("route input is not a list: {tree:?}"));
             };
             values
@@ -1216,7 +1216,7 @@ fn mir_tree_to_ct(
                 .map(CtValue::List)
         }
         MirTypeKind::Map { value: value_ty, .. } => {
-            let web_kernel::DataTree::Object(values) = tree else {
+            let web_kernel::Dyn::Object(values) = tree else {
                 return Err(format!("route input is not an object: {tree:?}"));
             };
             values
@@ -1231,7 +1231,7 @@ fn mir_tree_to_ct(
                 .map(CtValue::Map)
         }
         MirTypeKind::Tuple(fields) => {
-            let web_kernel::DataTree::Object(values) = tree else {
+            let web_kernel::Dyn::Object(values) = tree else {
                 return Err(format!("route input is not a tuple object: {tree:?}"));
             };
             fields
@@ -1265,7 +1265,7 @@ fn mir_tree_to_ct(
 }
 
 fn decode_route_inputs(
-    trees: &[web_kernel::DataTree],
+    trees: &[web_kernel::Dyn],
     bindings: &[web_kernel::JetAppRouteBinding],
     types: &[jet_foundation::MIR::MirType],
     span: Span,
@@ -1287,7 +1287,7 @@ fn decode_route_inputs(
                 fields,
                 ..
             } => {
-                let web_kernel::DataTree::Object(values) = tree else {
+                let web_kernel::Dyn::Object(values) = tree else {
                     return Err("route search input is not an object".to_string());
                 };
                 fields
@@ -1312,7 +1312,7 @@ fn decode_route_inputs(
             }
             web_kernel::JetAppRouteBinding::Data => {
                 let tree = match tree {
-                    web_kernel::DataTree::TypedText(value) => parse_app_json_tree(value)?,
+                    web_kernel::Dyn::TypedText(value) => parse_app_json_tree(value)?,
                     tree => tree.clone(),
                 };
                 mir_tree_to_ct(&tree, ty, span)
@@ -1417,18 +1417,18 @@ fn app_loader_callback(
 }
 
 fn ct_to_json_string(value: &CtValue) -> String {
-    fn tree(value: &CtValue) -> web_kernel::DataTree {
+    fn tree(value: &CtValue) -> web_kernel::Dyn {
         match value {
-            CtValue::Int(value) => web_kernel::DataTree::Int(*value),
-            CtValue::Float(value) => web_kernel::DataTree::Float(value.as_f64()),
-            CtValue::Bool(value) => web_kernel::DataTree::Bool(*value),
-            CtValue::Char(value) => web_kernel::DataTree::Text(value.to_string()),
-            CtValue::Str(value) => web_kernel::DataTree::Text(value.clone()),
-            CtValue::Bytes(value) => web_kernel::DataTree::Bytes(value.clone()),
+            CtValue::Int(value) => web_kernel::Dyn::Int(*value),
+            CtValue::Float(value) => web_kernel::Dyn::Float(value.as_f64()),
+            CtValue::Bool(value) => web_kernel::Dyn::Bool(*value),
+            CtValue::Char(value) => web_kernel::Dyn::Text(value.to_string()),
+            CtValue::Str(value) => web_kernel::Dyn::Text(value.clone()),
+            CtValue::Bytes(value) => web_kernel::Dyn::Bytes(value.clone()),
             CtValue::List(values) => {
-                web_kernel::DataTree::Array(values.iter().map(tree).collect())
+                web_kernel::Dyn::Array(values.iter().map(tree).collect())
             }
-            CtValue::Map(values) => web_kernel::DataTree::Object(
+            CtValue::Map(values) => web_kernel::Dyn::Object(
                 values
                     .iter()
                     .filter_map(|(key, value)| match key {
@@ -1437,13 +1437,13 @@ fn ct_to_json_string(value: &CtValue) -> String {
                     })
                     .collect(),
             ),
-            CtValue::Struct { fields, .. } => web_kernel::DataTree::Object(
+            CtValue::Struct { fields, .. } => web_kernel::Dyn::Object(
                 fields.iter().map(|(key, value)| (key.clone(), tree(value))).collect(),
             ),
             CtValue::Enum { variant, .. } if variant == "Null" => {
-                web_kernel::DataTree::Null
+                web_kernel::Dyn::Null
             }
-            CtValue::Enum { args, .. } => web_kernel::DataTree::Object(
+            CtValue::Enum { args, .. } => web_kernel::Dyn::Object(
                 args.iter()
                     .filter_map(|(key, value)| {
                         key.as_ref().map(|key| (key.clone(), tree(value)))
@@ -1451,29 +1451,29 @@ fn ct_to_json_string(value: &CtValue) -> String {
                     .collect(),
             ),
             CtValue::Present(value) => tree(value),
-            CtValue::Failed(_) | CtValue::Unit => web_kernel::DataTree::Null,
-            CtValue::BigInt(value) => web_kernel::DataTree::Number(value.to_string_rep()),
-            CtValue::Closure(_) => web_kernel::DataTree::Null,
+            CtValue::Failed(_) | CtValue::Unit => web_kernel::Dyn::Null,
+            CtValue::BigInt(value) => web_kernel::Dyn::Number(value.to_string_rep()),
+            CtValue::Closure(_) => web_kernel::Dyn::Null,
         }
     }
-    fn render(tree: &web_kernel::DataTree) -> String {
+    fn render(tree: &web_kernel::Dyn) -> String {
         match tree {
-            web_kernel::DataTree::Null => "null".to_string(),
-            web_kernel::DataTree::Bool(value) => value.to_string(),
-            web_kernel::DataTree::Int(value) => value.to_string(),
-            web_kernel::DataTree::Float(value) => format!("{value:?}"),
-            web_kernel::DataTree::Number(value) => value.clone(),
-            web_kernel::DataTree::TypedText(value) | web_kernel::DataTree::Text(value) => {
+            web_kernel::Dyn::Null => "null".to_string(),
+            web_kernel::Dyn::Bool(value) => value.to_string(),
+            web_kernel::Dyn::Int(value) => value.to_string(),
+            web_kernel::Dyn::Float(value) => format!("{value:?}"),
+            web_kernel::Dyn::Number(value) => value.clone(),
+            web_kernel::Dyn::TypedText(value) | web_kernel::Dyn::Text(value) => {
                 format!("{value:?}")
             }
-            web_kernel::DataTree::Bytes(values) => format!(
+            web_kernel::Dyn::Bytes(values) => format!(
                 "[{}]",
                 values.iter().map(u8::to_string).collect::<Vec<_>>().join(",")
             ),
-            web_kernel::DataTree::Array(values) => {
+            web_kernel::Dyn::Array(values) => {
                 format!("[{}]", values.iter().map(render).collect::<Vec<_>>().join(","))
             }
-            web_kernel::DataTree::Object(values) => format!(
+            web_kernel::Dyn::Object(values) => format!(
                 "{{{}}}",
                 values
                     .iter()

@@ -131,7 +131,7 @@ pub fn rule_registry() -> &'static [RuleSpec] {
         RuleSpec { name: "dogfood-list-equality", why: "typed lists already provide the canonical equality operation", replacement: "compare the lists with the resolved equality operation" },
         RuleSpec { name: "dogfood-directory-setup", why: "directory creation must be idempotent", replacement: "use the idempotent directory setup helper" },
         RuleSpec { name: "dogfood-ascii", why: "ASCII case folding must use the canonical ASCII helper", replacement: "call the resolved ASCII case-fold helper" },
-        RuleSpec { name: "datatree-domain-policy", why: "Tower must not duplicate generic DataTree equality or truthiness machinery", replacement: "use DataTree.equal_unordered for mechanical equality and keep named Tower policy helpers" },
+        RuleSpec { name: "dyn-domain-policy", why: "Tower must not duplicate generic Dyn equality or truthiness machinery", replacement: "use Dyn.equal_unordered for mechanical equality and keep named Tower policy helpers" },
         RuleSpec { name: "dogfood-json-url-list", why: "dogfood JSON, URL, and list operations have one typed path", replacement: "use the typed JSON, URL, or list API" },
         RuleSpec { name: "raw-cli-process-boundary", why: "a canonical program must not repeatedly reconstruct the process boundary", replacement: "use the one typed entry boundary or one explicit expert boundary" },
         RuleSpec { name: "product-parser-regression", why: "the parser boundary must reject the recorded invalid shape", replacement: "keep the shared parser regression fixture and assertion" },
@@ -870,7 +870,7 @@ fn is_response_decoder(function: &jet::AST::Func) -> bool {
         && named_type(&function.params[1].ty, "Int")
         && matches!(
                 function.return_type.as_ref(),
-                Some(Type::Result { ok, .. }) if named_type(ok, "DataTree")
+                Some(Type::Result { ok, .. }) if named_type(ok, "Dyn")
         )
 }
 
@@ -2595,8 +2595,8 @@ fn evaluate_program(
             }
         }
     }
-    if applies(manifest, path, row, "datatree-domain-policy") {
-        violations.extend(datatree_domain_policy_violations(path, program));
+    if applies(manifest, path, row, "dyn-domain-policy") {
+        violations.extend(dyn_domain_policy_violations(path, program));
     }
     if applies(manifest, path, row, "walk-files-filter") {
         if let Some(span) = statement_facts.file_walks.first().copied() {
@@ -2779,7 +2779,7 @@ fn named_type(ty: &Type, expected: &str) -> bool {
         )
 }
 
-fn datatree_domain_policy_violations(path: &str, program: &Program) -> Vec<SemanticViolation> {
+fn dyn_domain_policy_violations(path: &str, program: &Program) -> Vec<SemanticViolation> {
     let mut violations = Vec::new();
     for item in &program.items {
         let Item::Func(function) = item else {
@@ -2792,30 +2792,30 @@ fn datatree_domain_policy_violations(path: &str, program: &Program) -> Vec<Seman
             .return_type
             .as_ref()
             .is_some_and(|ty| named_type(ty, "Bool"));
-        let data_tree_pair = function.params.len() == 2
+        let dyn_pair = function.params.len() == 2
             && function
                 .params
                 .iter()
-                .all(|parameter| data_tree_domain_value(&parameter.ty));
+                .all(|parameter| dyn_domain_value(&parameter.ty));
         if returns_bool
-            && data_tree_pair
+            && dyn_pair
             && (body_returns_constant_bool(&function.body) || compares_parameter_pair(function))
         {
             violations.push(SemanticViolation::new(
                 path,
-                "datatree-domain-policy",
+                "dyn-domain-policy",
                 site(&format!("fn:{}", function.name), function.span),
             ));
             continue;
         }
         if function.params.len() == 1
             && returns_bool
-            && named_type(&function.params[0].ty, "DataTree")
+            && named_type(&function.params[0].ty, "Dyn")
             && body_returns_constant_bool(&function.body)
         {
             violations.push(SemanticViolation::new(
                 path,
-                "datatree-domain-policy",
+                "dyn-domain-policy",
                 site(&format!("fn:{}", function.name), function.span),
             ));
         }
@@ -2850,8 +2850,8 @@ fn body_returns_constant_bool(body: &[Stmt]) -> bool {
         }
 }
 
-fn data_tree_domain_value(ty: &Type) -> bool {
-    named_type(ty, "DataTree") || matches!(ty, Type::List(inner) if named_type(inner, "DataTree"))
+fn dyn_domain_value(ty: &Type) -> bool {
+    named_type(ty, "Dyn") || matches!(ty, Type::List(inner) if named_type(inner, "Dyn"))
 }
 
 fn compares_parameter_pair(function: &jet::AST::Func) -> bool {

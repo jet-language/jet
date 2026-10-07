@@ -16,7 +16,7 @@ pub enum DecoderProtocol {
 pub fn pkg_render_decode_response(error: String, protocol: DecoderProtocol) -> String Never! {
     lines :: if protocol == {
         .StandardEnvelope -> [String]{
-            "fn decode_response(raw: String, code: Int) -> DataTree !{error} {{",
+            "fn decode_response(raw: String, code: Int) -> Dyn !{error} {{",
             "    if code == {{",
             "        1 -> {{ return Err({error}.NotRunning) }}",
             "        2 -> {{ return Err({error}.Timeout) }}",
@@ -26,13 +26,13 @@ pub fn pkg_render_decode_response(error: String, protocol: DecoderProtocol) -> S
             "        else -> {{ return Err({error}.Protocol) }}",
             "    }}",
             "    response := json.parse(raw) ?? return Err({error}.Protocol)",
-            "    succeeded := (response.field(\"ok\") ?? DataTree.Bool(false)).bool() ?? false",
+            "    succeeded := (response.field(\"ok\") ?? Dyn.Bool(false)).bool() ?? false",
             "    if !succeeded -> return Err({error}.CommandFailed)",
-            "    return Ok(response.field(\"value\") ?? DataTree.Null)",
+            "    return Ok(response.field(\"value\") ?? Dyn.Null)",
             "}}"
         }
         .LuaRawJSON -> [String]{
-            "fn decode_response(raw: String, code: Int) -> DataTree !{error} {{",
+            "fn decode_response(raw: String, code: Int) -> Dyn !{error} {{",
             "    decode_status(code)",
             "    value := json.parse(raw) ?? return Err({error}.Protocol)",
             "    return Ok(value)",

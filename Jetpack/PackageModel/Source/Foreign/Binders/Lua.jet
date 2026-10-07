@@ -1,6 +1,6 @@
 // In-process Lua binding generator (D-FFI-LUA1=A), ported from
 // jet_pkg_model::LuaBind. Each session owns one embedded Lua state; values
-// cross as JSON DataTrees or as zero-copy table views.
+// cross as JSON Dyns or as zero-copy table views.
 
 // A Lua binding also names the directory holding the embeddable runtime.
 pub struct LuaBindResult {
@@ -65,7 +65,7 @@ pub fn pkg_lua_bind(path: String, source: String, lib: String, cache: String) -[
     pkg_binder_remove_file_quiet(c)
     pkg_binder_remove_file_quiet(object)
     digest :: pkg_binder_identity_digest([String]{"jet-lua-bind-v2", source, root})
-    provenance := "schema=jet-lua-bind-v2\nsha256={digest}\nruntime={root}\nstate=per-session\ntransport=datatree+table-view\ntable-view=zero-copy\nhook=instructions\n"
+    provenance := "schema=jet-lua-bind-v2\nsha256={digest}\nruntime={root}\nstate=per-session\ntransport=dyn+table-view\ntable-view=zero-copy\nhook=instructions\n"
     pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Lua, "Lua", lib, path, archive, "luac={luac};{pkg_binder_cc_ar_identity()}")
     Ok(LuaBindResult{source: pkg_lua_render_jet(abi, functions), bound: functions, archive: archive, lib_dir: lib_dir, provenance: provenance})
 }
@@ -279,7 +279,7 @@ pub fn view_set_int(view: TableView, key: String, value: Int) -> Bool LuaError! 
 ``` }
 
 // The three generated entry points per function. Hole: `name`.
-PKG_LUA_JET_FUNCTION :: prep { ```pub fn @@name@@(session: Session, input: DataTree, deadline_ms: Int) -> DataTree LuaError! {
+PKG_LUA_JET_FUNCTION :: prep { ```pub fn @@name@@(session: Session, input: Dyn, deadline_ms: Int) -> Dyn LuaError! {
     raw :: abi.@@name@@(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)

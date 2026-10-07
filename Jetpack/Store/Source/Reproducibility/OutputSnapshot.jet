@@ -309,10 +309,10 @@ fn store_repro_json_map(map: [String: String]) -> String Never! {
     json.canonical(store_repro_text_object(map)) ?? panic("value is not canonical JSON")
 }
 
-fn store_repro_text_object(map: [String: String]) -> DataTree Never! {
-    object := [String: DataTree]{}
-    loop entry in map -> object[entry.key] = DataTree.Text(entry.value)
-    DataTree.Object(object)
+fn store_repro_text_object(map: [String: String]) -> Dyn Never! {
+    object := [String: Dyn]{}
+    loop entry in map -> object[entry.key] = Dyn.Text(entry.value)
+    Dyn.Object(object)
 }
 
 fn store_repro_path_display(path: String) -> String Never! {

@@ -116,39 +116,39 @@ pub(crate) mod web_rt {
 #[cfg(test)]
 mod tests {
     use super::web_rt::__jet_Decode;
-    use jet_foundation::{DataTree::DataTree, Numeric::JetInt};
+    use jet_foundation::{Dyn::Dyn, Numeric::JetInt};
 
     #[test]
     fn web_decode_preserves_exact_integers_and_fixed_bounds() {
         for expected in [i64::MIN, i64::MAX] {
-            let tree = DataTree::Number(expected.to_string());
+            let tree = Dyn::Number(expected.to_string());
             assert_eq!(<i64 as __jet_Decode>::jet_decode(&tree).unwrap(), expected);
         }
         for text in ["-9223372036854775809", "9223372036854775808"] {
-            let tree = DataTree::Number(text.to_string());
+            let tree = Dyn::Number(text.to_string());
             assert!(<i64 as __jet_Decode>::jet_decode(&tree).is_err());
             assert_eq!(
                 <JetInt as __jet_Decode>::jet_decode(&tree).unwrap().to_string(),
                 text,
             );
         }
-        let tree = DataTree::Number(u64::MAX.to_string());
+        let tree = Dyn::Number(u64::MAX.to_string());
         assert_eq!(<u64 as __jet_Decode>::jet_decode(&tree).unwrap(), u64::MAX);
         for text in ["-1", "18446744073709551616"] {
             assert!(
-                <u64 as __jet_Decode>::jet_decode(&DataTree::Number(text.to_string()))
+                <u64 as __jet_Decode>::jet_decode(&Dyn::Number(text.to_string()))
                     .is_err()
             );
         }
         let text = "12345678901234567890123456789012345678901234567890";
         assert_eq!(
-            <JetInt as __jet_Decode>::jet_decode(&DataTree::Number(text.to_string()))
+            <JetInt as __jet_Decode>::jet_decode(&Dyn::Number(text.to_string()))
                 .unwrap()
                 .to_string(),
             text,
         );
-        assert!(<JetInt as __jet_Decode>::jet_decode(&DataTree::Number("1.5".to_string())).is_err());
-        assert!(<JetInt as __jet_Decode>::jet_decode(&DataTree::TypedText("12".to_string())).is_err());
+        assert!(<JetInt as __jet_Decode>::jet_decode(&Dyn::Number("1.5".to_string())).is_err());
+        assert!(<JetInt as __jet_Decode>::jet_decode(&Dyn::TypedText("12".to_string())).is_err());
     }
 }
 

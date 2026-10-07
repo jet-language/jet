@@ -531,7 +531,7 @@ pub fn cancel(session: Session) { abi.cancel(session.value) }
     );
     for name in functions {
         out.push_str(&format!(
-            r#"pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RError! {{
+            r#"pub fn {name}(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RError! {{
     raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
@@ -550,7 +550,7 @@ pub fn cancel(session: Session) { abi.cancel(session.value) }
 "#
         ));
         out.push_str(&format!(
-            r#"pub fn {name}_plot(session: Session, input: DataTree, deadline_ms: Int) -> String RError! {{
+            r#"pub fn {name}_plot(session: Session, input: Dyn, deadline_ms: Int) -> String RError! {{
     raw :: abi.{name}_plot(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     value :: decode_response(raw, code)

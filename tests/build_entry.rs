@@ -3912,7 +3912,7 @@ fn criterion9_programmable_build_cli_human_and_json_reports_match() {
     let build_error = json_get(&report, "build_error")
         .expect("JSON report has structured build error");
     assert!(
-        matches!(build_error, jet_foundation::DataTree::DataTree::Object(_)),
+        matches!(build_error, jet_foundation::Dyn::Dyn::Object(_)),
         "build_error is an object"
     );
     assert_eq!(
@@ -3922,7 +3922,7 @@ fn criterion9_programmable_build_cli_human_and_json_reports_match() {
     let details = json_get(build_error, "details")
         .expect("structured details stay nested in the jet.err object");
     assert!(
-        matches!(details, jet_foundation::DataTree::DataTree::Object(_)),
+        matches!(details, jet_foundation::Dyn::Dyn::Object(_)),
         "structured details are an object"
     );
     assert_eq!(
@@ -3932,7 +3932,7 @@ fn criterion9_programmable_build_cli_human_and_json_reports_match() {
     let fields = json_get(details, "fields")
         .expect("structured fields stay in the JSON report");
     assert!(
-        matches!(fields, jet_foundation::DataTree::DataTree::Object(_)),
+        matches!(fields, jet_foundation::Dyn::Dyn::Object(_)),
         "structured fields are an object"
     );
     assert_eq!(json_get(fields, "value").and_then(json_str), Some("app"));

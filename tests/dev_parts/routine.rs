@@ -5919,15 +5919,15 @@ use core.encoding.json as json
 struct Email { addr: String }
 
 impl Email.Encode {
-    fn encode(self) -> DataTree {
-        m :: [String:DataTree]{ "email": DataTree.Text(~self.addr) }
-        return DataTree.Object(m)
+    fn encode(self) -> Dyn {
+        m :: [String:Dyn]{ "email": Dyn.Text(~self.addr) }
+        return Dyn.Object(m)
     }
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) -> Email [FieldError]! {
-        f := &tree.field("email") ?? DataTree.Text("")
+    fn decode(tree: Dyn) -> Email [FieldError]! {
+        f := &tree.field("email") ?? Dyn.Text("")
         s := f.text() ?? ""
         return Ok(Email{addr: s})
     }

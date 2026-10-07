@@ -39,10 +39,10 @@ fn cli_hangar_register_external_root(verification: &StoreVerification, theme: Th
     if parsed.flags.json {
         if !parsed.flags.assume_yes {
             cli_hangar_status_json("register-external-root", StatusFields.new()
-                .with("applied", DataTree.Bool(false))
-                .with("label", DataTree.Text(label))
-                .with("reference", DataTree.Text(reference))
-                .with("closure_objects", DataTree.Int(closure_size))
+                .with("applied", Dyn.Bool(false))
+                .with("label", Dyn.Text(label))
+                .with("reference", Dyn.Text(reference))
+                .with("closure_objects", Dyn.Int(closure_size))
                 .with("expires_at", cli_optional_int_tree(expires_at))
                 .with("if_etag", cli_optional_text_tree(expected_etag)))
             return EXIT_OK
@@ -61,9 +61,9 @@ fn cli_hangar_register_external_root(verification: &StoreVerification, theme: Th
     view :: store_register_external_root_at(&verification, roots, principal, label, reference, expires_at, expected_etag, now) ?? return cli_external_root_error(theme, parsed, err)
     if parsed.flags.json {
         cli_hangar_status_json("register-external-root", StatusFields.new()
-            .with("label", DataTree.Text(view.label))
-            .with("reference", DataTree.Text(view.reference))
-            .with("etag", DataTree.Text(view.etag))
+            .with("label", Dyn.Text(view.label))
+            .with("reference", Dyn.Text(view.reference))
+            .with("etag", Dyn.Text(view.etag))
             .with("expires_at", cli_optional_int_tree(view.expires_at)))
     }
     EXIT_OK
@@ -72,15 +72,15 @@ fn cli_hangar_register_external_root(verification: &StoreVerification, theme: Th
 fn cli_hangar_list_external_roots(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
     views :: store_list_external_roots(&verification, pkg_resolve_roots(), cli_external_root_principal()) ?? return cli_external_root_error(theme, parsed, err)
     if parsed.flags.json {
-        machine_roots := [DataTree]{}
+        machine_roots := [Dyn]{}
         loop view in views {
             &machine_roots.push(report_status_object(StatusFields.new()
-                .with("label", DataTree.Text(view.label))
-                .with("reference", DataTree.Text(view.reference))
-                .with("etag", DataTree.Text(view.etag))
+                .with("label", Dyn.Text(view.label))
+                .with("reference", Dyn.Text(view.reference))
+                .with("etag", Dyn.Text(view.etag))
                 .with("expires_at", cli_optional_int_tree(view.expires_at))))
         }
-        cli_hangar_status_json("list-external-roots", StatusFields.new().with("roots", DataTree.Array(machine_roots)))
+        cli_hangar_status_json("list-external-roots", StatusFields.new().with("roots", Dyn.Array(machine_roots)))
         return EXIT_OK
     }
     if views.len() == 0 {
@@ -117,7 +117,7 @@ fn cli_hangar_unregister_external_root(verification: &StoreVerification, theme: 
     if !cli_hangar_confirm_apply(theme, parsed, "unregister-external-root") -> return EXIT_OK
     store_unregister_external_root_at(&verification, pkg_resolve_roots(), cli_external_root_principal(), label, etag, cli_unix_now()) ?? return cli_external_root_error(theme, parsed, err)
     if parsed.flags.json {
-        cli_hangar_status_json("unregister-external-root", StatusFields.new().with("label", DataTree.Text(label)))
+        cli_hangar_status_json("unregister-external-root", StatusFields.new().with("label", Dyn.Text(label)))
     } else {
         theme.status("Removed external root `{label}`.")
     }

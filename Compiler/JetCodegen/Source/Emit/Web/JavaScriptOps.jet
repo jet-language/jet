@@ -710,7 +710,7 @@ fn jet_web_js_copy_shape(ctx: &JetWebEmitContext, ty: MIRType, bindings: JetWebC
             if leaf == "Secret" || leaf == "ExpiringSecret" || leaf == "HistoryRNG" || leaf == "Ptr" -> return "kind: \"opaque\""
             if leaf == "Bytes" -> return "kind: \"bytes\""
             if leaf == "BigInt" -> return "kind: \"integer\""
-            if leaf == "DataTree" -> return "kind: \"data\""
+            if leaf == "Dyn" -> return "kind: \"data\""
             definition := jet_web_js_copy_definition(&ctx, ty)
             if definition == None {
                 jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR nominal copy schema definition is missing", "checked copy facts require every nominal type instance to resolve to a canonical definition", None)
@@ -1279,7 +1279,7 @@ fn jet_web_js_codec_descriptor(ctx: &JetWebEmitContext, value: MIRType) -> Strin
         }
         .Tagged(_, inner) -> return jet_web_js_codec_descriptor(&ctx, inner)
         .Apply(name, _) -> {
-            if name.name == "Data" || name.name == "DataTree" -> return "{{ kind: \"datatree\" }}"
+            if name.name == "Data" || name.name == "Dyn" -> return "{{ kind: \"dyn\" }}"
             if name.name == "Date" -> return "{{ kind: \"date\" }}"
             if name.name == "LocalDate" -> return "{{ kind: \"local_date\" }}"
             if name.name == "LocalTime" -> return "{{ kind: \"local_time\" }}"
@@ -1525,7 +1525,7 @@ fn jet_web_js_frame_schedule_json(value: MIRFrameSchedule) -> String Never! {
     "{{\"schema\":\"jet.frame_schedule/v1\",\"operations\":[{operations_text}],\"dependencies\":[{dependencies_text}],\"transfers\":[{transfers_text}],\"reuse\":[{reuse_text}],\"retentions\":[{retentions_text}],\"conservative\":[{conservative_text}]}}"
 }
 
-fn jet_web_js_datatree_call(ctx: &JetWebEmitContext, call: MIRPreludeCallID, receiver: String, args: [String]) -> String Never! {
+fn jet_web_js_dyn_call(ctx: &JetWebEmitContext, call: MIRPreludeCallID, receiver: String, args: [String]) -> String Never! {
     row := jet_web_find_prelude(ctx.program, call)
     if row == None {
         values := [String]{receiver}
@@ -1543,22 +1543,22 @@ fn jet_web_js_datatree_call(ctx: &JetWebEmitContext, call: MIRPreludeCallID, rec
         else -> 0
     }
     if arity == 0 || args.len() + 1 != arity || route.signature.arity != arity || route.signature.max_arity != arity {
-        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR DataTree call has an invalid signature", "checked DataTree routes preserve their exact receiver and argument ABI", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR Dyn call has an invalid signature", "checked Dyn routes preserve their exact receiver and argument ABI", None)
         return "undefined"
     }
     expected :: if route.member == {
-        "field" -> "jet_datatree_field"
-        "at" -> "jet_datatree_at"
-        "int" -> "jet_datatree_int"
-        "text" -> "jet_datatree_text"
-        "bool" -> "jet_datatree_bool"
-        "float" -> "jet_datatree_float"
-        "to_text" -> "jet_datatree_to_text"
-        "equal_unordered" -> "jet_datatree_equal_unordered"
+        "field" -> "jet_dyn_field"
+        "at" -> "jet_dyn_at"
+        "int" -> "jet_dyn_int"
+        "text" -> "jet_dyn_text"
+        "bool" -> "jet_dyn_bool"
+        "float" -> "jet_dyn_float"
+        "to_text" -> "jet_dyn_to_text"
+        "equal_unordered" -> "jet_dyn_equal_unordered"
         else -> ""
     }
     if mir_symbol_name(route.symbol) != expected {
-        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR DataTree call has an unexpected symbol", "checked DataTree routes preserve their canonical runtime symbol", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR Dyn call has an unexpected symbol", "checked Dyn routes preserve their canonical runtime symbol", None)
         return "undefined"
     }
     values := [String]{receiver}
@@ -1588,10 +1588,10 @@ fn jet_web_js_handle_method_call(ctx: &JetWebEmitContext, call: MIRPreludeCallID
         if route.member == "receiver.receive" || route.member == "sender.send" -> return "await ({expression})"
         return expression
     }
-    if route.module_name == "core.encoding.datatree" {
+    if route.module_name == "core.encoding.dyn" {
         rendered := [String]{}
         loop arg in args -> &rendered.push(jet_web_js_value(arg))
-        return jet_web_js_datatree_call(&ctx, call, receiver, rendered)
+        return jet_web_js_dyn_call(&ctx, call, receiver, rendered)
     }
     if route.module_name == "core.handle" && route.member == "duration.ns_value" {
         if args.len() != 0 {

@@ -1,4 +1,4 @@
-use super::core_types::{data_tree_object_pairs_ty, json_ty, u8_ty};
+use super::core_types::{dyn_object_pairs_ty, json_ty, u8_ty};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::suggest_field;
@@ -21,7 +21,7 @@ impl<'a> Checker<'a> {
             "Array" => vec![Type::List(Box::new(json.clone()))],
             // A compiler-generated struct encoder hands over its ordered pair
             // list directly; source code always builds an Object from a map.
-            "Object" if self.is_generated_object_pairs(args) => vec![data_tree_object_pairs_ty()],
+            "Object" if self.is_generated_object_pairs(args) => vec![dyn_object_pairs_ty()],
             "Object" => vec![Type::Map {
                 key: Box::new(Type::String),
                 key_span: None,
@@ -42,7 +42,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0304",
                     format!("`{}` has no variant `{}`", Syntax::TYPE_DATA, variant),
-                    "the dynamic `DataTree` value exposes Null/Bool/Int/Float/Text/Array/Object"
+                    "the dynamic `Dyn` value exposes Null/Bool/Int/Float/Text/Array/Object"
                         .to_string(),
                     fix,
                     Some(span),
@@ -64,7 +64,7 @@ impl<'a> Checker<'a> {
                         if expected.len() == 1 { "" } else { "s" },
                         args.len()
                     ),
-                    "each `DataTree` variant has a fixed payload (Bool/Int/Float→scalar, Text→String, Array→[DataTree], Object→Map)".to_string(),
+                    "each `Dyn` variant has a fixed payload (Bool/Int/Float→scalar, Text→String, Array→[Dyn], Object→Map)".to_string(),
                     "check the variant payload".to_string(),
                     Some(span),
                 ));
@@ -80,7 +80,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Only compiler-generated bodies may pass the ordered
-    /// `[(key: String, value: DataTree)]` accumulator to `DataTree.Object`.
+    /// `[(key: String, value: Dyn)]` accumulator to `Dyn.Object`.
     fn is_generated_object_pairs(&self, args: &[crate::AST::CallArg]) -> bool {
         if !self.compiler_generated {
             return false;
@@ -92,7 +92,7 @@ impl<'a> Checker<'a> {
             return false;
         };
         self.lookup(name)
-            .is_some_and(|local| local.ty == data_tree_object_pairs_ty())
+            .is_some_and(|local| local.ty == dyn_object_pairs_ty())
     }
 
     /// D-DBDRIVER1: `DBValue.Null` / `.Int(n)` / `.Float(f)` / `.Text(s)` /

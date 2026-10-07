@@ -554,11 +554,11 @@ mod jet_app_impl {
         navigation: &super::JetWebNavigation,
         name: &str,
         fields: &[JetAppSearchField],
-    ) -> Result<jet_std::DataTree, String> {
+    ) -> Result<jet_std::Dyn, String> {
         match navigation.search.get(name) {
-            Some(value) => Ok(jet_std::DataTree::Text(value.clone())),
+            Some(value) => Ok(jet_std::Dyn::Text(value.clone())),
             None if fields.iter().any(|field| field.name == name && !field.required) => {
-                Ok(jet_std::DataTree::Null)
+                Ok(jet_std::Dyn::Null)
             }
             None => Err(format!(
                 "route `{}` has no search field `{name}`",
@@ -578,13 +578,13 @@ mod jet_app_impl {
         /// The checked wire value for one bound input, before typed decoding.
         /// Resident tiers (JIT/interpreter) marshal this tree into their own
         /// runtime values with the same typed decoder they use for JSON.
-        pub fn tree(&self, index: usize) -> Result<jet_std::DataTree, String> {
+        pub fn tree(&self, index: usize) -> Result<jet_std::Dyn, String> {
             let route = &self.navigation.route;
             let Some(binding) = self.binding.get(index) else {
                 return Err(format!("route `{route}` input {index} has no checked binding"));
             };
             Ok(match binding {
-                JetAppRouteBinding::Path { name, .. } => jet_std::DataTree::Text(
+                JetAppRouteBinding::Path { name, .. } => jet_std::Dyn::Text(
                     self.navigation
                         .params
                         .get(name)
@@ -596,15 +596,15 @@ mod jet_app_impl {
                     fields,
                     ..
                 } => jet_app_scalar_search_tree(&self.navigation, name, fields)?,
-                JetAppRouteBinding::Search { .. } => jet_std::DataTree::Object(
+                JetAppRouteBinding::Search { .. } => jet_std::Dyn::Object(
                     self.navigation
                         .search
                         .iter()
-                        .map(|(name, value)| (name.clone(), jet_std::DataTree::Text(value.clone())))
+                        .map(|(name, value)| (name.clone(), jet_std::Dyn::Text(value.clone())))
                         .collect(),
                 ),
                 // Loader data is JSON text; the tier's JSON decoder owns it.
-                JetAppRouteBinding::Data => jet_std::DataTree::TypedText(self.data.to_string()),
+                JetAppRouteBinding::Data => jet_std::Dyn::TypedText(self.data.to_string()),
             })
         }
 
@@ -618,7 +618,7 @@ mod jet_app_impl {
                 return Err(format!("route `{route}` input {index} has no checked binding"));
             };
             let tree = match binding {
-                JetAppRouteBinding::Path { name, .. } => jet_std::DataTree::Text(
+                JetAppRouteBinding::Path { name, .. } => jet_std::Dyn::Text(
                     self.navigation
                         .params
                         .get(name)
@@ -630,11 +630,11 @@ mod jet_app_impl {
                     fields,
                     ..
                 } => jet_app_scalar_search_tree(&self.navigation, name, fields)?,
-                JetAppRouteBinding::Search { .. } => jet_std::DataTree::Object(
+                JetAppRouteBinding::Search { .. } => jet_std::Dyn::Object(
                     self.navigation
                         .search
                         .iter()
-                        .map(|(name, value)| (name.clone(), jet_std::DataTree::Text(value.clone())))
+                        .map(|(name, value)| (name.clone(), jet_std::Dyn::Text(value.clone())))
                         .collect(),
                 ),
                 JetAppRouteBinding::Data => {
@@ -664,13 +664,13 @@ mod jet_app_impl {
     /// typed decoder before invoking the user callable.
     pub struct JetAppTreeRouteCallback<R> {
         arity: usize,
-        call: Arc<dyn Fn(&[jet_std::DataTree]) -> Result<R, String> + Send + Sync + 'static>,
+        call: Arc<dyn Fn(&[jet_std::Dyn]) -> Result<R, String> + Send + Sync + 'static>,
     }
 
     impl<R> JetAppTreeRouteCallback<R> {
         pub fn new(
             arity: usize,
-            call: Arc<dyn Fn(&[jet_std::DataTree]) -> Result<R, String> + Send + Sync + 'static>,
+            call: Arc<dyn Fn(&[jet_std::Dyn]) -> Result<R, String> + Send + Sync + 'static>,
         ) -> Self {
             Self { arity, call }
         }

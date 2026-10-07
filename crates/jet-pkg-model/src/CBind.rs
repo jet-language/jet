@@ -1353,7 +1353,7 @@ impl BoundType {
             Self::Named(name) => name.clone(),
             Self::Array(element) => format!("[{}]", element.render()),
             Self::Optional(value) => format!("{}?", value.render()),
-            Self::Dynamic => "DataTree".to_string(),
+            Self::Dynamic => "Dyn".to_string(),
         }
     }
 }
@@ -3635,7 +3635,7 @@ fn add_xml_record(builder: &mut SchemaBuilder, preferred: &str, nodes: &[&XmlNod
     if mixed_count > 0 {
         fields.push(FieldSeed {
             wire_name: "$content".to_string(),
-            ty: BoundType::Scalar("DataTree"),
+            ty: BoundType::Scalar("Dyn"),
             optional: simple_count > 0,
             note: None,
         });
@@ -4848,7 +4848,7 @@ fn inference_rules(format: &str) -> &'static [&'static str] {
             "NOT NULL and PRIMARY KEY columns stay required; supported constraints are validated.",
         ],
         "xml" => &[
-            "XML attributes use @ wire keys; simple content uses $text and mixed content keeps ordered $content as DataTree.",
+            "XML attributes use @ wire keys; simple content uses $text and mixed content keeps ordered $content as Dyn.",
             "Nested elements become records; repeated child elements become arrays.",
         ],
         "proto" => &[

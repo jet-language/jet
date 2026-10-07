@@ -1,34 +1,34 @@
-// DataTree accessors shared by the PackageModel codecs. Parsing and
+// Dyn accessors shared by the PackageModel codecs. Parsing and
 // rendering are Core's (`json`); these only read one shape out of a tree.
 use core.encoding.json as pkg_json_tree_core
 
-// The Rust `DataTree` accessor failures the reference embeds in its errors.
-PKG_JSON_NOT_OBJECT :: prep { "expected a DataTree object" }
-PKG_JSON_NOT_ARRAY :: prep { "expected a DataTree array" }
-PKG_JSON_NOT_STRING :: prep { "expected a DataTree string" }
+// The Rust `Dyn` accessor failures the reference embeds in its errors.
+PKG_JSON_NOT_OBJECT :: prep { "expected a Dyn object" }
+PKG_JSON_NOT_ARRAY :: prep { "expected a Dyn array" }
+PKG_JSON_NOT_STRING :: prep { "expected a Dyn string" }
 
-fn pkg_json_object(value: DataTree) -> [String: DataTree]? Never! {
+fn pkg_json_object(value: Dyn) -> [String: Dyn]? Never! {
     if value == {
         .Object(fields) -> Val(fields)
         else -> None
     }
 }
 
-fn pkg_json_array(value: DataTree) -> [DataTree]? Never! {
+fn pkg_json_array(value: Dyn) -> [Dyn]? Never! {
     if value == {
         .Array(items) -> Val(items)
         else -> None
     }
 }
 
-fn pkg_json_text(value: DataTree) -> String? Never! {
+fn pkg_json_text(value: Dyn) -> String? Never! {
     if value == {
         .Text(text) -> Val(text)
         else -> None
     }
 }
 
-fn pkg_json_bool(value: DataTree) -> Bool? Never! {
+fn pkg_json_bool(value: Dyn) -> Bool? Never! {
     if value == {
         .Bool(flag) -> Val(flag)
         else -> None
@@ -36,13 +36,13 @@ fn pkg_json_bool(value: DataTree) -> Bool? Never! {
 }
 
 // Compact JSON with object keys in insertion order.
-fn pkg_json_render(value: DataTree) -> String Never! {
+fn pkg_json_render(value: Dyn) -> String Never! {
     pkg_json_tree_core.to_string(value)
 }
 
 // A string array of `values`.
-fn pkg_json_texts(values: [String]) -> DataTree Never! {
-    items := [DataTree]{}
-    loop value in values -> &items.push(DataTree.Text(value))
-    DataTree.Array(items)
+fn pkg_json_texts(values: [String]) -> Dyn Never! {
+    items := [Dyn]{}
+    loop value in values -> &items.push(Dyn.Text(value))
+    Dyn.Array(items)
 }

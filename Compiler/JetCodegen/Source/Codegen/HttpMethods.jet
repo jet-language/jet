@@ -332,7 +332,7 @@ fn jet_codegen_lower_http_text_method(builder: &JetCodegenBuilder, program: JetC
 fn jet_codegen_lower_http_request_json(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, args: [TExpr]) -> MIRValueID {
     if args.len() != 1 -> panic("checked HTTPRequest.json builder has an unexpected argument count")
     if jet_codegen_handle_type_without_tags(receiver.ty) != (Type.Named{name: "HTTPRequest"}) || jet_codegen_handle_type_without_tags(expression.ty) != (Type.Named{name: "HTTPRequest"}) -> panic("checked HTTPRequest.json builder has an unsupported request shape")
-    encoded_expression := jet_codegen_data_expr(jet_codegen_data_tree_type(), args[0].span, TExprKind.Unit)
+    encoded_expression := jet_codegen_data_expr(jet_codegen_dyn_type(), args[0].span, TExprKind.Unit)
     body := jet_codegen_lower_serde_encode(&builder, program, encoded_expression, args[0])
     route := jet_codegen_handle_route(MIRPreludeFamily.HandleMethod, "core.http", "request_json", "jet_http_client_request_json", [Bool]{false, false}, None, MIRPreludeABI.Value)
     route_id := jet_codegen_http_route_call(&builder, program, route, TFailureCarrier.Infallible)

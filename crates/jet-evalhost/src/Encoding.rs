@@ -12,7 +12,7 @@ use crate::{JetDebug, JetDisplay, JetShow};
 use jet_foundation::AST::{CtReport, CtValue, Type};
 use jet_foundation::Diagnostics::{Diagnostic, Span};
 // The Foundation carrier's tier-side accessors are a trait defined by the
-// included Prelude `DataTree.rs`; the host adapters below call them by name.
+// included Prelude `Dyn.rs`; the host adapters below call them by name.
 
 mod encoding_base_rt {
     include!("../../jet-codegen/src/Prelude/Core/EncodingBase.rs");
@@ -42,12 +42,12 @@ pub(crate) mod codec_rt {
     include!("../../jet-codegen/src/Prelude/Core/Codec.rs");
 }
 
-/// Canonical `jet_std` JSON/DataTree runtime — adapter types, shared algorithm via include!
+/// Canonical `jet_std` JSON/Dyn runtime — adapter types, shared algorithm via include!
 pub(crate) mod json_rt {
     pub(crate) use jet_foundation::Shape::ShapeProjection;
-    pub use jet_foundation::DataTree::DataTree;
+    pub use jet_foundation::Dyn::Dyn;
     // AOT places the Foundation JSON kernel at the program root; the
-    // DataTree/TOML renderers name its quoting entry unqualified.
+    // Dyn/TOML renderers name its quoting entry unqualified.
     use crate::jet_encoding_json::quote_json;
 
     // JSON.rs starts with `io_error_at`; provide the IO surface it names.
@@ -102,12 +102,12 @@ pub(crate) mod json_rt {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
-    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
+    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DynKind.rs");
     // The one FieldError projection (I9), included beside its caller so
-    // `DataTree.rs`'s `JetShow`/`JetDisplay` impls resolve it here too.
+    // `Dyn.rs`'s `JetShow`/`JetDisplay` impls resolve it here too.
     include!("../../jet-codegen/src/Prelude/Core/FieldError.rs");
-    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
-    jet_datatree_decode_helpers!();
+    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/Dyn.rs");
+    jet_dyn_decode_helpers!();
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/JSON.rs");
     #[allow(unused_imports)]
@@ -115,7 +115,7 @@ pub(crate) mod json_rt {
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs");
 
     // I9 marshalling adapters for the exact-`Int` carrier (D-INTBIG1), the
-    // same ones the comptime evaluator host uses: evaluator `DataTree` values
+    // same ones the comptime evaluator host uses: evaluator `Dyn` values
     // keep `Int` in a plain `i64`, so the packed carrier collapses to identity.
     // Text still goes through the arbitrary-precision parse the AOT carrier
     // uses, and only genuinely unrepresentable values are refused.
@@ -137,16 +137,16 @@ pub(crate) mod json_rt {
         value as f64
     }
 
-    pub fn parse_datatree_typed_ordered(text: &str) -> Result<DataTree, EncodingError> {
-        parse_json_typed_datatree(text)
+    pub fn parse_dyn_typed_ordered(text: &str) -> Result<Dyn, EncodingError> {
+        parse_json_typed_dyn(text)
     }
 
 }
 /// Shared CSV/data query kernel. The resident layer only marshals heap
-/// `DataTree` values; plan parsing and comparison stay in the Prelude.
+/// `Dyn` values; plan parsing and comparison stay in the Prelude.
 pub(crate) mod data_query_rt {
     pub(crate) mod jet_std {
-        pub(crate) use super::super::json_rt::DataTree;
+        pub(crate) use super::super::json_rt::Dyn;
         // `DataSchema::infer` / `DataFormat` from CommonTypes.rs, cut by
         // build.rs (`write_data_schema_std`).
         include!(concat!(env!("OUT_DIR"), "/data_schema_std.rs"));
@@ -156,7 +156,7 @@ pub(crate) mod data_query_rt {
 
 /// Canonical YAML via build.rs-stripped include (trailing prelude brace removed).
 mod yaml_rt {
-    use super::json_rt::DataTree;
+    use super::json_rt::Dyn;
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!(concat!(env!("OUT_DIR"), "/yaml_std.rs"));
@@ -191,7 +191,7 @@ pub(crate) fn csv_parse(
 
 // ── UUID (marshals through the shared Prelude entropy seam) ─────────────────
 
-// ── JSON / DataTree (core.encoding.json) ─────────────────────────────────────
+// ── JSON / Dyn (core.encoding.json) ─────────────────────────────────────
 
 // ── XML via the shared foundation kernel ────────────────────────────────────
 

@@ -88,10 +88,10 @@ JET_RUST_PREFIX_PRELUDE_FILES :: [String]{
     "CoreLib/JetStd/JSONCodec.rs", "CoreLib/JetStd/EncodingTypes.rs", "CoreLib/JetStd/CommonTypes.rs",
     "CoreLib/JetStd/MappedFile.rs", "CoreLib/JetStd/XmlOptions.rs", "CommandSuite.rs",
     "CoreLib/JetStd/RowPolicy.rs", "CoreLib/JetStd/DBPluginWire.rs", "CoreLib/JetStd/WireOrder.rs",
-    "CoreLib/JetStd/DataTreeKind.rs", "Core/FieldError.rs", "CoreLib/JetStd/DataTree.rs",
+    "CoreLib/JetStd/DynKind.rs", "Core/FieldError.rs", "CoreLib/JetStd/Dyn.rs",
     "CoreLib/JetStd/TestingComparison.rs", "LocalCell.rs", "CoreLib/JetStd/MathTaskMem.rs",
     "CoreLib/JetStd/ReactiveEventWatch.rs", "CoreLib/JetStd/FfiCallbacks.rs",
-    "CoreLib/JetStd/JSONDataTree.rs", "CoreLib/JetStd/TOML.rs", "CoreLib/JetStd/YAML.rs",
+    "CoreLib/JetStd/JSONDyn.rs", "CoreLib/JetStd/TOML.rs", "CoreLib/JetStd/YAML.rs",
     "CoreLib/Top/SharedRoutes.rs", "Core/LazyTablePlan.rs", "CoreLib/Top/CommandSuite.rs", "Core/Fmt.rs",
     "Core/FmtAot.rs", "Core/CAbi.rs", "TerminalDefault.rs", "Core/Raylib.rs",
     "CoreLib/Top/HandlesRaylib.rs", "CoreLib/Top/DbPool.rs", "CoreLib/Top/UnicodeTables.rs",
@@ -137,7 +137,7 @@ JET_RUST_PREFIX_FOUNDATION_FILES :: [String]{
     "StructuralDebug.rs", "StreamCursor.rs", "Prelude/MatchScan.rs", "Outcome.rs",
     "RuntimeDiagnosticCore.rs", "EncodingErrors.rs", "JSONNumber.rs", "EncodingJson.rs", "SHA256.rs",
     "PerformanceBudget.rs", "PreludeDataFlow.rs", "ArrowData.rs", "ArrowFileReader.rs",
-    "ResourceSchedule.rs", "FactsDerivation.rs", "Numeric.rs", "MemSentry.rs", "DataTree.rs",
+    "ResourceSchedule.rs", "FactsDerivation.rs", "Numeric.rs", "MemSentry.rs", "Dyn.rs",
     "LiveLifecycle.rs", "XmlPull.rs", "XmlKernel.rs", "CborBudget.rs", "CborKernel.rs", "CsvKernel.rs",
     "BaseEncodingStrict.rs", "RegexSyntax.rs", "PluginWire.rs", "TestingComparison.rs", "JSON.rs",
     "TestingHistory.rs", "Report.rs", "Prelude/TuiKernel.rs", "DevtoolsControl.rs", "Game.rs",
@@ -489,7 +489,7 @@ JET_RUST_PREFIX_PLACEMENTS :: [String]{
     "Outcome", "", "Shape", "", "Devtools", "", "DevtoolsNative", "", "Evidence", "",
     "NumericConversion", "", "ExactUnitConversion", "", "StructuralDebug", "", "StreamCursor", "",
     "RuntimeDiagnosticCore", "RuntimeDiagnosticCore", "EncodingErrors", "jet_encoding_errors",
-    "JSONNumber", "jet_json_number", "EncodingJson", "jet_encoding_json", "DataTree", "jet_foundation_datatree",
+    "JSONNumber", "jet_json_number", "EncodingJson", "jet_encoding_json", "Dyn", "jet_foundation_dyn",
     "ArrowData", "jet_arrow_data", "ArrowFileReader", "jet_arrow_file_reader",
     "PreludeDataFlow", "jet_prelude_data_flow", "SHA256", "SHA256", "PerformanceBudget", "PerformanceBudget",
     "Numeric", "jet_foundation_numeric", "Facts", "Facts", "ResourceSchedule", "ResourceSchedule",
@@ -944,11 +944,11 @@ fn jet_rust_prefix_kernel_parts(state: &JetRustPrefixState, out: &[String], mapp
     &parts.push("\npub mod plugin_wire {{\n")
     &parts.push(jet_rust_prefix_foundation(&state, "PluginWire.rs"))
     &parts.push("\n}}\n")
-    jet_rust_prefix_push_files(&state, &parts, [String]{"CoreLib/JetStd/DBPluginWire.rs", "CoreLib/JetStd/WireOrder.rs", "CoreLib/JetStd/DataTreeKind.rs", "Core/FieldError.rs"})
-    &parts.push("\npub use crate::DataTree::DataTree;\n")
-    &parts.push(jet_rust_prefix_prelude(&state, "CoreLib/JetStd/DataTree.rs"))
+    jet_rust_prefix_push_files(&state, &parts, [String]{"CoreLib/JetStd/DBPluginWire.rs", "CoreLib/JetStd/WireOrder.rs", "CoreLib/JetStd/DynKind.rs", "Core/FieldError.rs"})
+    &parts.push("\npub use crate::Dyn::Dyn;\n")
+    &parts.push(jet_rust_prefix_prelude(&state, "CoreLib/JetStd/Dyn.rs"))
     &parts.push(jet_rust_prefix_prelude(&state, "CoreLib/JetStd/TestingComparison.rs"))
-    &parts.push("\njet_datatree_decode_helpers!();\n")
+    &parts.push("\njet_dyn_decode_helpers!();\n")
     &parts.push("\n#[allow(unused_imports)]\npub use crate::jet_json_number::validate_json_number;\n")
     &parts.push("\n// JET_VETTED_UNSAFE_BEGIN: jet_cell\nmod jet_cell {{\n#[allow(unused_imports)]\nuse crate::{{JetOutcome, JetAbsent}};\n")
     &parts.push(jet_rust_prefix_prelude(&state, "LocalCell.rs"))
@@ -957,7 +957,7 @@ fn jet_rust_prefix_kernel_parts(state: &JetRustPrefixState, out: &[String], mapp
     &parts.push(jet_rust_prefix_vetted("jet_std_reactive_event_watch", "// AUDIT: D-REACT1/D-DATARACE1 keep re-entrant staged values and synchronized\n// signal storage behind this compiler-owned, opt-in reactive source.\n", jet_rust_prefix_prelude(&state, "CoreLib/JetStd/ReactiveEventWatch.rs"), "jet_std_reactive_event_watch"))
     &parts.push(jet_rust_prefix_vetted("jet_std_ffi_callbacks", "// AUDIT: D-FFI-CALLBACK2 keeps callback registration, in-flight accounting,\n// native shutdown acknowledgement, and release in one managed source.\n", jet_rust_prefix_prelude(&state, "CoreLib/JetStd/FfiCallbacks.rs"), "jet_std_ffi_callbacks"))
     &parts.push("\nuse crate::jet_encoding_json::quote_json;\n")
-    jet_rust_prefix_push_files(&state, &parts, [String]{"CoreLib/JetStd/JSONDataTree.rs", "CoreLib/JetStd/TOML.rs", "CoreLib/JetStd/YAML.rs"})
+    jet_rust_prefix_push_files(&state, &parts, [String]{"CoreLib/JetStd/JSONDyn.rs", "CoreLib/JetStd/TOML.rs", "CoreLib/JetStd/YAML.rs"})
     if shared -> &parts.push(jet_rust_prefix_prelude(&state, "CoreLib/Top/SharedRoutes.rs"))
     // Host crates include UrlMime.rs directly; AOT already embeds the MIME kernel.
     mime :: "    include!(\"Mime.rs\");\n\n"
@@ -970,7 +970,7 @@ fn jet_rust_prefix_kernel_parts(state: &JetRustPrefixState, out: &[String], mapp
 // labels, so only the forces select optional kernels.
 fn jet_rust_prefix_corelib_body(state: &JetRustPrefixState, out: &[String], mapped_file: Bool, shared: Bool, arrow: Bool) Never! {
     &out.push(jet_rust_prefix_foundation(&state, "LiveLifecycle.rs"))
-    &out.push("\n// D-SERDE2: the generated Prelude uses Foundation's canonical carrier.\nmod jet_foundation_datatree {{\n{jet_rust_prefix_foundation(&state, "DataTree.rs")}\n}}\n#[allow(non_snake_case)]\nmod DataTree {{\n    pub use crate::jet_foundation_datatree::DataTree;\n}}\n")
+    &out.push("\n// D-SERDE2: the generated Prelude uses Foundation's canonical carrier.\nmod jet_foundation_dyn {{\n{jet_rust_prefix_foundation(&state, "Dyn.rs")}\n}}\n#[allow(non_snake_case)]\nmod Dyn {{\n    pub use crate::jet_foundation_dyn::Dyn;\n}}\n")
     &out.push(jet_rust_prefix_prelude(&state, "Core/SimdLanes.rs"))
     &out.push("// JET_VETTED_UNSAFE_BEGIN: jet_atomic_carrier\n")
     &out.push(jet_rust_prefix_flat_body(jet_rust_prefix_prelude(&state, "Core/Atomic.rs")))
@@ -989,7 +989,7 @@ fn jet_rust_prefix_corelib_body(state: &JetRustPrefixState, out: &[String], mapp
     &out.push(jet_rust_prefix_flat_body(jet_rust_prefix_prelude(&state, "Core/LazyTablePlan.rs")))
     &out.push(jet_rust_prefix_prelude(&state, "CoreLib/Top/CommandSuite.rs"))
     &out.push("\npub use crate::jet_std::JetTaskGroupRuntime;\n")
-    &out.push("\npub use crate::jet_std::JetDataTreeAccess;\n")
+    &out.push("\npub use crate::jet_std::JetDynAccess;\n")
     &out.push(jet_rust_prefix_prelude(&state, "Core/Fmt.rs"))
     &out.push(jet_rust_prefix_prelude(&state, "Core/FmtAot.rs"))
     &out.push("\n// JET_VETTED_UNSAFE_BEGIN: jet_c_abi\n// AUDIT: D-EXEC1 keeps the raw handle, byte-slice and allocator\n// adapters of the Jet-native backend's runtime ABI in this module.\n")

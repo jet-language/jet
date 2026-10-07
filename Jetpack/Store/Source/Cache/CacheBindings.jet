@@ -102,7 +102,7 @@ pub struct CacheBinding {
 
     // Status object of one binding: role, mirrors, credential label, write.
     fn status_fields(self) -> StatusFields Never! {
-        StatusFields.new().with("role", DataTree.Text(self.role)).with("mirrors", report_texts(self.mirrors)).with("credential_provider", report_optional_text(self.credential_provider)).with("write", DataTree.Bool(self.allow_write))
+        StatusFields.new().with("role", Dyn.Text(self.role)).with("mirrors", report_texts(self.mirrors)).with("credential_provider", report_optional_text(self.credential_provider)).with("write", Dyn.Bool(self.allow_write))
     }
 }
 
@@ -445,7 +445,7 @@ pub fn store_cache_binding_json(binding: CacheBinding) -> String Never! {
 
 // `jet.status/v1` for `cache list`.
 pub fn store_cache_bindings_json(bindings: [CacheBinding]) -> String Never! {
-    values := [DataTree]{}
+    values := [Dyn]{}
     loop binding in bindings -> &values.push(report_status_object(binding.status_fields()))
-    StatusEnvelope.new("cache-list", true).with_fields(StatusFields.new().with("bindings", DataTree.Array(values))).json()
+    StatusEnvelope.new("cache-list", true).with_fields(StatusFields.new().with("bindings", Dyn.Array(values))).json()
 }

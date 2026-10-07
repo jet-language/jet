@@ -79,7 +79,7 @@ impl<'a> Checker<'a> {
             }
             Type::Named(n) => {
                 n == "Decimal"
-                    || n == "DataTree"
+                    || n == "Dyn"
                     || matches!(
                         n.as_str(),
                         "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Duration"
@@ -139,7 +139,7 @@ impl<'a> Checker<'a> {
                                 .is_some_and(|module| module == "core.crypto")
                     });
                 n == "Decimal"
-                    || n == "DataTree"
+                    || n == "Dyn"
                     || core_secret
                     || matches!(
                         n.as_str(),

@@ -41,12 +41,12 @@ use jet_foundation.[
     tir_user_local,
 ]
 
-fn jet_codegen_data_tree_type() -> Type Never! {
-    Type.Named{name: "DataTree"}
+fn jet_codegen_dyn_type() -> Type Never! {
+    Type.Named{name: "Dyn"}
 }
 
-fn jet_codegen_data_tree_type_id(builder: JetCodegenBuilder, program: JetCodegenProgram) -> MIRTypeID Never! {
-    jet_codegen_type_instance_id(jet_codegen_data_tree_type(), program.modules, builder.function.module_identity, builder.generic_type_names)
+fn jet_codegen_dyn_type_id(builder: JetCodegenBuilder, program: JetCodegenProgram) -> MIRTypeID Never! {
+    jet_codegen_type_instance_id(jet_codegen_dyn_type(), program.modules, builder.function.module_identity, builder.generic_type_names)
 }
 
 fn jet_codegen_data_expr(ty: Type, span: Span, kind: TExprKind) -> TExpr Never! {
@@ -55,7 +55,7 @@ fn jet_codegen_data_expr(ty: Type, span: Span, kind: TExprKind) -> TExpr Never! 
 
 fn jet_codegen_data_encode_node(receiver: TExpr) -> TExpr Never! {
     jet_codegen_data_expr(
-        jet_codegen_data_tree_type(),
+        jet_codegen_dyn_type(),
         receiver.span,
         TExprKind.HandleMethod{receiver: receiver, operation: THandleOp.SerdeEncode, args: [TExpr]{}},
     )
@@ -78,7 +78,7 @@ fn jet_codegen_lower_data_enum(builder: &JetCodegenBuilder, program: JetCodegenP
 fn jet_codegen_data_pair_type() -> Type Never! {
     Type.Tuple{fields: [TypeTupleField]{
         TypeTupleField{name: "key", ty: Type.String},
-        TypeTupleField{name: "value", ty: jet_codegen_data_tree_type()},
+        TypeTupleField{name: "value", ty: jet_codegen_dyn_type()},
     }}
 }
 
@@ -96,7 +96,7 @@ fn jet_codegen_lower_ordered_object_encode(builder: &JetCodegenBuilder, program:
     }
     payload_type := Type.List{element: pair_type}
     payload := jet_codegen_emit_value(&builder, program, expression.span, payload_type, MIROperation.BuildList{values: values, trait_coercion: None})
-    type_id := jet_codegen_data_tree_type_id(builder, program)
+    type_id := jet_codegen_dyn_type_id(builder, program)
     jet_codegen_emit_value(
         &builder, program,
         expression.span,
@@ -107,14 +107,14 @@ fn jet_codegen_lower_ordered_object_encode(builder: &JetCodegenBuilder, program:
 
 fn jet_codegen_lower_json_literal(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, variant: String, argument: TExpr?, clone_arg: Bool) -> MIRValueID {
     if variant == "Object" {
-        value :: argument ?? panic("checked DataTree.Object is missing its map payload")
+        value :: argument ?? panic("checked Dyn.Object is missing its map payload")
         if value.kind == {
             .MapLit(entries) -> return jet_codegen_lower_ordered_object_encode(&builder, program, expression, entries)
             else -> {}
         }
-        return jet_codegen_lower_container_encode(&builder, program, expression, value, jet_codegen_data_tree_type(), true)
+        return jet_codegen_lower_container_encode(&builder, program, expression, value, jet_codegen_dyn_type(), true)
     }
-    jet_codegen_lower_data_enum(&builder, program, expression, "DataTree", variant, argument, clone_arg)
+    jet_codegen_lower_data_enum(&builder, program, expression, "Dyn", variant, argument, clone_arg)
 }
 
 fn jet_codegen_lower_db_value_literal(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, variant: String, argument: TExpr?, clone_arg: Bool) -> MIRValueID {
@@ -142,7 +142,7 @@ fn jet_codegen_typed_codec_target(ty: Type) -> Bool Never! {
         .IntN(_, _) | .List(_) | .FixedList(_, _) | .Option(_) -> return true
         .Map(key, _, _) -> return jet_codegen_unwrap_pattern_tags(key) == Type.String
         .Named(name) -> {
-            if name == "Data" || name == "DataTree" || name == "U8" || name == "I8" || name == "I16" || name == "I32" || name == "I64" || name == "I128" || name == "U16" || name == "U32" || name == "U64" || name == "U128" || name == "Secret" -> return true
+            if name == "Data" || name == "Dyn" || name == "U8" || name == "I8" || name == "I16" || name == "I32" || name == "I64" || name == "I128" || name == "U16" || name == "U32" || name == "U64" || name == "U128" || name == "Secret" -> return true
             return name.ends_with(".Secret")
         }
         .Tagged(_, inner) -> return jet_codegen_typed_codec_target(inner)
@@ -201,13 +201,13 @@ fn jet_codegen_lower_optional_encode(builder: &JetCodegenBuilder, program: JetCo
     value := jet_codegen_emit_value(&builder, program, expression.span, inner, MIROperation.OptionValue{subject: subject})
     _ := jet_codegen_emit(&builder, program, expression.span, None, MIROperation.WritePlace{place: place, value: value})
     inner_expr := jet_codegen_data_expr(inner, receiver.span, TExprKind.Local{local: local})
-    encoded_expr := jet_codegen_data_expr(jet_codegen_data_tree_type(), receiver.span, TExprKind.Unit)
+    encoded_expr := jet_codegen_data_expr(jet_codegen_dyn_type(), receiver.span, TExprKind.Unit)
     encoded := jet_codegen_lower_serde_encode(&builder, program, encoded_expr, inner_expr)
     present_end := builder.current
     jet_codegen_terminate(&builder, program, MIRTerminator.Jump{target: join_block})
 
     jet_codegen_switch_block(&builder, program, absent_block)
-    tree_type_id :: jet_codegen_data_tree_type_id(builder, program)
+    tree_type_id :: jet_codegen_dyn_type_id(builder, program)
     null := jet_codegen_emit_value(
         &builder, program,
         expression.span,
@@ -231,7 +231,7 @@ fn jet_codegen_lower_container_encode(builder: &JetCodegenBuilder, program: JetC
     _ := jet_codegen_emit(&builder, program, receiver.span, None, MIROperation.WritePlace{place: source_place, value: source_value})
     source_expr := jet_codegen_data_expr(receiver.ty, receiver.span, TExprKind.Local{local: source_local})
 
-    tree_type := jet_codegen_data_tree_type()
+    tree_type := jet_codegen_dyn_type()
     encoded_element_type := if map -> jet_codegen_data_pair_type() else -> tree_type
     output_type := Type.List{element: encoded_element_type}
     output_local := tir_generated_local("encode_output_{source_value.value}", expression.span)
@@ -276,7 +276,7 @@ fn jet_codegen_lower_container_encode(builder: &JetCodegenBuilder, program: JetC
     output_place = jet_codegen_lower_local_place(&builder, program, output_local)
     payload := jet_codegen_emit_value(&builder, program, expression.span, output_type, MIROperation.MovePlace{place: output_place})
     variant := if map -> "Object" else -> "Array"
-    tree_type_id :: jet_codegen_data_tree_type_id(builder, program)
+    tree_type_id :: jet_codegen_dyn_type_id(builder, program)
     jet_codegen_emit_value(
         &builder, program,
         expression.span,
@@ -291,7 +291,7 @@ fn jet_codegen_data_union_enum_name(members: [Type]) -> String Never! {
     "__JetUnion_{tags.join("_")}"
 }
 
-// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs::lower_serde_encode / lower_datatree_decode
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs::lower_serde_encode / lower_dyn_decode
 fn jet_codegen_data_codec_function(builder: JetCodegenBuilder, program: JetCodegenProgram, ty: Type, codec: String, method_name: String) -> TFunc? {
     owner_type := if ty == {
         .Union(members) -> Type.Named{name: jet_codegen_data_union_enum_name(members)}
@@ -368,7 +368,7 @@ fn jet_codegen_lower_serde_encode(builder: &JetCodegenBuilder, program: JetCodeg
         )
     }
 
-    if ty == (Type.Named{name: "DataTree"}) -> return jet_codegen_lower_expr(&builder, program, receiver)
+    if ty == (Type.Named{name: "Dyn"}) -> return jet_codegen_lower_expr(&builder, program, receiver)
     builtin_kind := jet_codegen_codec_kind(ty)
     if builtin_kind != None -> return jet_codegen_lower_builtin_codec(&builder, program, expression, receiver, ty, builtin_kind ?? 0)
     if ty == {
@@ -381,9 +381,9 @@ fn jet_codegen_lower_serde_encode(builder: &JetCodegenBuilder, program: JetCodeg
     }
     if jet_codegen_typed_codec_target(ty) -> return jet_codegen_lower_typed_encode(&builder, program, expression, receiver, ty)
 
-    variant :: jet_codegen_data_encode_variant(ty) ?? panic("checked Serde encode target has no DataTree variant or encode method")
+    variant :: jet_codegen_data_encode_variant(ty) ?? panic("checked Serde encode target has no Dyn variant or encode method")
     value := jet_codegen_lower_expr(&builder, program, receiver)
-    tree_type_id :: jet_codegen_data_tree_type_id(builder, program)
+    tree_type_id :: jet_codegen_dyn_type_id(builder, program)
     jet_codegen_emit_value(
         &builder, program,
         expression.span,
@@ -393,7 +393,7 @@ fn jet_codegen_lower_serde_encode(builder: &JetCodegenBuilder, program: JetCodeg
 }
 
 
-fn jet_codegen_lower_data_tree_decode(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, target_type: Type) -> MIRValueID {
+fn jet_codegen_lower_dyn_decode(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, target_type: Type) -> MIRValueID {
     target := jet_codegen_unwrap_pattern_tags(target_type)
     function := jet_codegen_data_decode_function(builder, program, target)
     if function != None {
@@ -462,7 +462,7 @@ fn jet_codegen_lower_data_tree_decode(builder: &JetCodegenBuilder, program: JetC
             MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: route, args: args, owner_type_args: [MIRPreludeTypeArg]{}, type_args: type_args}},
         )
     }
-    panic("checked Serde decode target has no DataTree codec or decode method")
+    panic("checked Serde decode target has no Dyn codec or decode method")
 }
 
 
@@ -537,51 +537,51 @@ fn jet_codegen_data_handle_route(builder: &JetCodegenBuilder, program: JetCodege
     arity := 0
     borrow_mask := [Bool]{}
     if operation == {
-        .DataTreeField | .JSONField -> {
+        .DynField | .JSONField -> {
             member = "field"
-            symbol = "jet_datatree_field"
+            symbol = "jet_dyn_field"
             arity = 2
             borrow_mask = [Bool]{true, true}
         }
-        .DataTreeAt | .JSONAt -> {
+        .DynAt | .JSONAt -> {
             member = "at"
-            symbol = "jet_datatree_at"
+            symbol = "jet_dyn_at"
             arity = 2
             borrow_mask = [Bool]{true, false}
         }
-        .DataTreeInt | .JSONInt -> {
+        .DynInt | .JSONInt -> {
             member = "int"
-            symbol = "jet_datatree_int"
+            symbol = "jet_dyn_int"
             arity = 1
             borrow_mask = [Bool]{true}
         }
-        .DataTreeText | .JSONText -> {
+        .DynText | .JSONText -> {
             member = "text"
-            symbol = "jet_datatree_text"
+            symbol = "jet_dyn_text"
             arity = 1
             borrow_mask = [Bool]{true}
         }
-        .DataTreeBool | .JSONBool -> {
+        .DynBool | .JSONBool -> {
             member = "bool"
-            symbol = "jet_datatree_bool"
+            symbol = "jet_dyn_bool"
             arity = 1
             borrow_mask = [Bool]{true}
         }
-        .DataTreeFloat | .JSONFloat -> {
+        .DynFloat | .JSONFloat -> {
             member = "float"
-            symbol = "jet_datatree_float"
+            symbol = "jet_dyn_float"
             arity = 1
             borrow_mask = [Bool]{true}
         }
-        .DataTreeToText | .JSONToText -> {
+        .DynToText | .JSONToText -> {
             member = "to_text"
-            symbol = "jet_datatree_to_text"
+            symbol = "jet_dyn_to_text"
             arity = 1
             borrow_mask = [Bool]{true}
         }
-        .DataTreeEqualUnordered | .JSONEqualUnordered -> {
+        .DynEqualUnordered | .JSONEqualUnordered -> {
             member = "equal_unordered"
-            symbol = "jet_datatree_equal_unordered"
+            symbol = "jet_dyn_equal_unordered"
             arity = 2
             borrow_mask = [Bool]{true, true}
         }
@@ -626,7 +626,7 @@ fn jet_codegen_data_handle_route(builder: &JetCodegenBuilder, program: JetCodege
     Val(jet_codegen_intern_route(
         &builder, program,
         MIRPreludeFamily.HandleMethod,
-        "core.encoding.datatree",
+        "core.encoding.dyn",
         member,
         symbol,
         arity,
@@ -639,15 +639,15 @@ fn jet_codegen_data_handle_route(builder: &JetCodegenBuilder, program: JetCodege
 
 fn jet_codegen_lower_data_handle_method(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, operation: THandleOp, args: [TExpr]) -> MIRValueID {
     if operation == {
-        .DataTreeDecode(target) -> {
-            if args.len() != 0 -> panic("checked DataTree decode has unexpected arguments")
-            return jet_codegen_lower_data_tree_decode(&builder, program, expression, receiver, target)
+        .DynDecode(target) -> {
+            if args.len() != 0 -> panic("checked Dyn decode has unexpected arguments")
+            return jet_codegen_lower_dyn_decode(&builder, program, expression, receiver, target)
         }
         else -> {}
     }
     route :: jet_codegen_data_handle_route(&builder, program, expression, operation) ?? panic("checked data handle operation has no dedicated route")
     expected_args := if operation == {
-        .DataTreeField | .DataTreeAt | .DataTreeEqualUnordered | .JSONField | .JSONAt | .JSONEqualUnordered | .DBQuery(_) | .DBQueryOne(_) | .DBExecute(_) -> 1
+        .DynField | .DynAt | .DynEqualUnordered | .JSONField | .JSONAt | .JSONEqualUnordered | .DBQuery(_) | .DBQueryOne(_) | .DBExecute(_) -> 1
         else -> 0
     }
     if args.len() != expected_args -> panic("checked data handle operation has unexpected arguments")

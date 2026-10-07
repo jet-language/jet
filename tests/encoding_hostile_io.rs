@@ -276,8 +276,8 @@ use core.files as files
 fn run() {{
     output :: files.create("{output_path}") ?? panic("create")
     writer :: jsonl.writer(^output) ?? panic("writer")
-    writer.write(DataTree.Text("alpha")) ?? panic("write")
-    writer.write(DataTree.Int(7)) ?? panic("write2")
+    writer.write(Dyn.Text("alpha")) ?? panic("write")
+    writer.write(Dyn.Int(7)) ?? panic("write2")
     writer.finish() ?? panic("finish")
     print(files.read("{output_path}") ?? panic("read"))
 }}
@@ -749,7 +749,7 @@ use core.files as files
 fn write_partial(path: String) {{
     output :: files.create(path) ?? panic("create")
     writer :: jsonl.writer(^output) ?? panic("writer")
-    writer.write(DataTree.Text("kept")) ?? panic("write")
+    writer.write(Dyn.Text("kept")) ?? panic("write")
     &writer.flush() ?? panic("flush")
 }}
 

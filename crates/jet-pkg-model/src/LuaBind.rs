@@ -91,7 +91,7 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     identity.push(0);
     identity.extend_from_slice(root.to_string_lossy().as_bytes());
     let mut provenance = format!(
-        "schema=jet-lua-bind-v2\nsha256={}\nruntime={}\nstate=per-session\ntransport=datatree+table-view\ntable-view=zero-copy\nhook=instructions\n",
+        "schema=jet-lua-bind-v2\nsha256={}\nruntime={}\nstate=per-session\ntransport=dyn+table-view\ntable-view=zero-copy\nhook=instructions\n",
         crate::SHA256::sha256_hex(&identity),
         root.display()
     );
@@ -185,7 +185,7 @@ pub fn view_set_int(view: TableView, key: String, value: Int) -> Bool LuaError! 
     );
     for name in functions {
         out.push_str(&format!(
-            r#"pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree LuaError! {{
+            r#"pub fn {name}(session: Session, input: Dyn, deadline_ms: Int) -> Dyn LuaError! {{
     raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
@@ -637,7 +637,7 @@ mod tests {
             .unwrap();
         assert!(body.contains("lua_rawget"));
         assert!(
-            !body.contains("decode(") && !body.contains("encode(") && !body.contains("DataTree")
+            !body.contains("decode(") && !body.contains("encode(") && !body.contains("Dyn")
         );
     }
 }

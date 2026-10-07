@@ -1177,14 +1177,14 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
     if let Some(text) = plugin_error_display(value) {
         return Some(text);
     }
-    // DataTree values use the ordered JSON projection on every tier. The
+    // Dyn values use the ordered JSON projection on every tier. The
     // generic enum renderer below is for nominal enums and would expose the
     // erased `Object(JSONObject { ... })` carrier instead.
     if matches!(
         value,
-        CtValue::Enum { type_name, .. } if type_name == "DataTree"
+        CtValue::Enum { type_name, .. } if type_name == "Dyn"
     ) {
-        return Some(crate::Comptime::render_datatree_for_tir(value));
+        return Some(crate::Comptime::render_dyn_for_tir(value));
     }
     if let Some(text) = io_error_display(value) {
         return Some(text);
@@ -4632,7 +4632,7 @@ mod tests {
             ],
         );
         let actual = xml_canonical(&[CtValue::Bytes(vec![1, 2, 3]), options], Span::new(0, 0))
-            .expect("invalid DataTree is a user Result error");
+            .expect("invalid Dyn is a user Result error");
         assert_eq!(
             actual,
             CtValue::failed(Box::new(xml_shape_error(

@@ -29,18 +29,18 @@ pub struct JetCLISemOp {
     pub files: [JetCLISemOpFile]
 }
 
-pub fn jet_cli_sem_json_field(value: DataTree, name: String) -> DataTree? Never! {
+pub fn jet_cli_sem_json_field(value: Dyn, name: String) -> Dyn? Never! {
     if value == .Object(fields) -> return fields.get(name)
     None
 }
 
-pub fn jet_cli_sem_json_text(value: DataTree, name: String) -> String? Never! {
+pub fn jet_cli_sem_json_text(value: Dyn, name: String) -> String? Never! {
     field :: jet_cli_sem_json_field(value, name) ?? return None
     if field == .Text(text) -> return Val(text)
     None
 }
 
-pub fn jet_cli_sem_json_array(value: DataTree, name: String) -> [DataTree]? Never! {
+pub fn jet_cli_sem_json_array(value: Dyn, name: String) -> [Dyn]? Never! {
     field :: jet_cli_sem_json_field(value, name) ?? return None
     if field == .Array(items) -> return Val(items)
     None
@@ -56,10 +56,10 @@ pub fn jet_cli_sem_normalize(path: String) -> String {
     cli_files.realpath(path) ?? if path.starts_with("/") -> path else -> "{cli_files.cwd() ?? "."}/{path}"
 }
 
-fn jet_cli_sem_parse_op(value: DataTree, files: [JetCLISemOpFile]) -> JetCLISemOp? Never! {
+fn jet_cli_sem_parse_op(value: Dyn, files: [JetCLISemOpFile]) -> JetCLISemOp? Never! {
     kind :: jet_cli_sem_json_text(value, "kind") ?? return None
     targets := [JetCLISemOpTarget]{}
-    loop row in (jet_cli_sem_json_array(value, "targets") ?? [DataTree]{}) {
+    loop row in (jet_cli_sem_json_array(value, "targets") ?? [Dyn]{}) {
         stable :: jet_cli_sem_json_text(row, "stable_id") ?? next
         before :: jet_cli_sem_json_text(row, "before") ?? next
         after :: jet_cli_sem_json_text(row, "after") ?? next
@@ -99,7 +99,7 @@ pub fn jet_cli_sem_ops_for_file(raw: String, source_hash: String) -> [JetCLISemO
                 }
             }
             if !matches -> next
-            loop row in (jet_cli_sem_json_array(value, "semantic_ops") ?? [DataTree]{}) {
+            loop row in (jet_cli_sem_json_array(value, "semantic_ops") ?? [Dyn]{}) {
                 if jet_cli_sem_parse_op(row, files) == .Val(operation) -> &output.push(operation)
             }
         }
