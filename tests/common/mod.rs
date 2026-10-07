@@ -878,6 +878,7 @@ pub fn add_generated_rust(
     let prepared = if has_rust_ffi {
         jet_store::runtime::PreparedRuntime::inline(generated)
     } else {
+        let _build_lock = lock_shared_runtime_build(generated, rustc_flags);
         match jet_store::runtime::prepare(
             &store,
             std::ffi::OsStr::new("rustc"),
@@ -906,6 +907,41 @@ pub fn add_generated_rust(
         .arg(path);
     prepared.add_rustc_args(command);
     prepared
+}
+
+/// When a suite shares one prebuilt runtime directory between its example
+/// processes (`JET_RUNTIME_PREBUILD_DIR`, set by `tests/golden.rs` to the
+/// `jet-runtime/` directory beside its binary), hold an exclusive lock per
+/// runtime/Core text while `prepare` runs. The first process to need a runtime
+/// compiles and exports it; the others wait, then link the exported rlib in
+/// place instead of compiling the same ~6 MB closure again. The OS drops the
+/// lock when its holder exits, so a killed process never wedges the key.
+fn lock_shared_runtime_build(generated: &str, rustc_flags: &[&str]) -> Option<fs::File> {
+    use std::hash::{Hash, Hasher};
+    let dir = std::env::var_os(jet_store::runtime::PREBUILD_EXPORT_ENV)
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)?;
+    // The closure between the codegen markers is the runtime crate's whole
+    // input (`jet_store::runtime`); the flags are the rest of its identity.
+    let begin = generated.find("// jet:cached-runtime-begin\n")?;
+    let end = generated
+        .find("// jet:cached-core-end\n")
+        .or_else(|| generated.find("// jet:cached-runtime-end\n"))?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    generated[begin..end].hash(&mut hasher);
+    rustc_flags.hash(&mut hasher);
+    fs::create_dir_all(&dir)
+        .unwrap_or_else(|error| panic!("create prebuilt runtime dir {}: {error}", dir.display()));
+    let path = dir.join(format!(".build-{:016x}.lock", hasher.finish()));
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .unwrap_or_else(|error| panic!("open runtime build lock {}: {error}", path.display()));
+    lock.lock()
+        .unwrap_or_else(|error| panic!("lock runtime build {}: {error}", path.display()));
+    Some(lock)
 }
 
 /// A throwaway directory under the shared disk-backed test scratch root,
