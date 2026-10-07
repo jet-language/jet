@@ -1420,7 +1420,7 @@ impl $TYPE.Select {
 }
 
 #[test]
-fn json_coerce_audit_reports_jit_gap_on_default_dev() {
+fn json_strict_decode_matches_default_dev() {
     let dir = std::env::temp_dir().join(format!(
         "jet_dev_json_coerce_fallback_{}",
         std::process::id()
@@ -1429,23 +1429,14 @@ fn json_coerce_audit_reports_jit_gap_on_default_dev() {
     let stem = "serde/json_coerce";
     let file = example_path(stem);
 
-    // `dev_iteration` returns `Problems` for a front-end rejection and for an
-    // interpreter boundary alike, so the boundary assertion below cannot tell
-    // "the interpreter refused to drop the audit effect" from "the fixture never
-    // type-checked". Separate them here: this stem's whole point is the UNTYPED
-    // D-JSON3 lenient `json.decode(text)` form, so if sema rejects that call the
-    // failure is the stdlib surface, not the interpreter.
+    // Confirm strict typed decoding reaches the runtime on this tier.
     let front_end: Vec<_> = jet::check_with_path(&file)
         .into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(
         front_end.is_empty(),
-        "`{stem}` must type-check before the interpreter boundary means anything; \
-         untyped `json.decode(text)` is the ratified D-JSON3 lenient form \
-         (`module_items.rs` exports `decode`, `core_fixed_sig_impl` types it as \
-         `Result<Data, JSONError>`, AOT lowers it to `jet_std_json_decode_lenient`): \
-         {front_end:?}"
+        "`{stem}` must type-check before its runtime parity is meaningful: {front_end:?}"
     );
 
     assert_default_run_or_named_boundary(stem, &file);
@@ -1453,7 +1444,7 @@ fn json_coerce_audit_reports_jit_gap_on_default_dev() {
         stem,
         compiled_binary_output(&dir, "json_coerce_aot", 0, stem, &file),
     );
-    assert_eq!(expected.stdout, "8081\napi\ntrue\n");
+    assert_eq!(expected.stdout, "8080 true\nrejected\nrejected\n");
     assert_eq!(expected.exit_code, 0);
 }
 

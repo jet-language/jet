@@ -563,21 +563,20 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-// D-JSON3=B: lenient decode (core.encoding.json.decode) surfaces coercions via log lines.
-// Probes: (a) string→number coercion line + plain value; (b) clean JSON = no log lines;
-// (c) multiple coercions = one line each.
+// Untyped JSON decode preserves strings; only typed text-native sources parse
+// scalar text. Neither form emits coercion audit lines.
 #[test]
-fn json_decode_lenient_surfaces_coercions() {
+fn json_decode_preserves_scalar_strings() {
     let have_rustc = common::have_rustc();
     if !have_rustc {
-        eprintln!("note: skipping json_decode_lenient_surfaces_coercions (need rustc)");
+        eprintln!("note: skipping json_decode_preserves_scalar_strings (need rustc)");
         return;
     }
     let dir = std::env::temp_dir().join(format!("jet_json_decode_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
 
-    // Probe (a): string→number coercion appears in stderr; value is usable in arithmetic.
+    // Probe (a): a numeric-looking JSON string remains a string.
     let (code_a, stdout_a, stderr_a) = build_and_run(
         &dir,
         "json_coerce_a",
@@ -586,8 +585,8 @@ use core.encoding.json as json
 fn run() {
     data :: json.decode("{{\"port\":\"8080\"}}") ?? panic("bad json")
     if data == .Object(m) {
-        if m["port"] == .Int(n) {
-            print(n + 1)
+        if m["port"] == .Text(text) {
+            print(text)
         }
     }
 }
@@ -597,14 +596,12 @@ fn run() {
     );
     assert_eq!(code_a, 0, "probe (a) failed: {stderr_a}");
     assert_eq!(
-        stdout_a, "8081\n",
-        "probe (a): decoded value should be plain number + 1"
+        stdout_a, "8080\n",
+        "probe (a): decoded string should remain text"
     );
     assert!(
-        stderr_a.contains("json coerce")
-            && stderr_a.contains("port")
-            && stderr_a.contains("number"),
-        "probe (a): coercion log line missing or malformed; got: {stderr_a}"
+        !stderr_a.contains("json coerce"),
+        "probe (a): strict decoding must not emit coercion lines: {stderr_a}"
     );
 
     // Probe (b): clean JSON (no string values that look like numbers/bools) → no coercion lines.
@@ -632,7 +629,7 @@ fn run() {
         "probe (b): spurious coercion line emitted for clean JSON; got: {stderr_b}"
     );
 
-    // Probe (c): multiple coercions → one log line each.
+    // Probe (c): both numeric-looking and boolean-looking strings remain text.
     let (code_c, stdout_c, stderr_c) = build_and_run(
         &dir,
         "json_coerce_c",
@@ -641,11 +638,11 @@ use core.encoding.json as json
 fn run() {
     data :: json.decode("{{\"port\":\"8080\",\"enabled\":\"true\"}}") ?? panic("bad json")
     if data == .Object(m) {
-        if m["port"] == .Int(n) {
-            print(n)
+        if m["port"] == .Text(text) {
+            print(text)
         }
-        if m["enabled"] == .Bool(b) {
-            print(b)
+        if m["enabled"] == .Text(text) {
+            print(text)
         }
     }
 }
@@ -656,26 +653,11 @@ fn run() {
     assert_eq!(code_c, 0, "probe (c) failed: {stderr_c}");
     assert_eq!(
         stdout_c, "8080\ntrue\n",
-        "probe (c): both coerced values should come back plain"
-    );
-    let coerce_lines: Vec<&str> = stderr_c
-        .lines()
-        .filter(|l| l.contains("json coerce"))
-        .collect();
-    assert_eq!(
-        coerce_lines.len(),
-        2,
-        "probe (c): expected 2 coercion lines, got {}; stderr: {stderr_c}",
-        coerce_lines.len()
-    );
-    // Each line names its field.
-    assert!(
-        coerce_lines.iter().any(|l| l.contains("port")),
-        "probe (c): no coercion line for 'port'"
+        "probe (c): both strings should remain text"
     );
     assert!(
-        coerce_lines.iter().any(|l| l.contains("enabled")),
-        "probe (c): no coercion line for 'enabled'"
+        !stderr_c.contains("json coerce"),
+        "probe (c): strict decoding must not emit coercion lines: {stderr_c}"
     );
 
     let _ = fs::remove_dir_all(&dir);
