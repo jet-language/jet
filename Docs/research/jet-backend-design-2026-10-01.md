@@ -493,6 +493,16 @@ then defers physical close while network references remain, preventing fd
 reuse from retargeting a parked operation. Waits hold no runtime mutex across
 scheduler yield, and do not allocate a worker thread or duplicate a descriptor
 per operation.
+Raw socket syscalls are nonblocking single attempts over the canonical FD72
+owner. Socket creation and accept atomically set CLOEXEC and NONBLOCK. The
+existing host mapping lends bounded address/option scratch under its mutex,
+after the stdout buffer, so address conversion adds no temporary allocation.
+Core distinguishes EINPROGRESS from completion and consults SO_ERROR after
+writable readiness; the raw connect leaf never reports it as success.
+Network close marks the descriptor state closed and unregisters waits, while
+the socket owner retains the physical descriptor until final drop. This
+matches the Rust TCP/UDP logical-close lifetime and preserves descriptor
+ownership even when an operation has already observed closed.
 
 Raw clock samples carry exact Int words, not truncated i64 timestamps. Wall
 samples preserve the unsigned duration magnitude and an independent

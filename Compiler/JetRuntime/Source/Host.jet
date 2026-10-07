@@ -3,7 +3,8 @@
 // All state is protected by the same lock, including the cached TTY fact.
 // The runtime object's init/fini arrays own startup and normal-exit draining.
 // Layout: lock @0, stdout length @8, TTY @16, ioctl scratch @32,
-// 8192 stdout bytes @128. The mapping is process-lifetime runtime metadata.
+// 8192 stdout bytes @128; socket syscall scratch @8448..8703 under this lock.
+// The 12288-byte mapping is process-lifetime runtime metadata.
 host_root := I64{0}
 
 // runtime-init: 1

@@ -1,6 +1,8 @@
 // Link once against the complete composed L4/L7/L8 runtime object.
 // Address byte-list baseline is word stride8; packed epoch flips this fixture.
 #include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -12,6 +14,31 @@ typedef struct { IP ip; int64_t port, flow, scope, reserved; } Address;
 typedef struct { int64_t kind, has_os_code, os_code; Text *message; } ResolveError;
 _Static_assert(sizeof(IP) == 24 && sizeof(Address) == 56, "network carrier sizes");
 _Static_assert(sizeof(ResolveError) == 32, "resolve carrier size");
+typedef struct {
+    int64_t lock, number, closed;
+    Text *path;
+    void *buffer;
+    int64_t capacity, filled, position, references;
+} FD;
+typedef struct {
+    uint32_t domain, stage;
+    int64_t code;
+    uint32_t kind, padding;
+    Text *message;
+} ErrorOut;
+_Static_assert(sizeof(FD) == 72 && sizeof(ErrorOut) == 32, "host descriptor/fact sizes");
+extern FD *jet_socket_create_raw(int64_t, int64_t, int64_t, ErrorOut *);
+extern int64_t jet_socket_bind_raw(FD *, Address *, ErrorOut *);
+extern int64_t jet_socket_connect_raw(FD *, Address *, ErrorOut *);
+extern int64_t jet_socket_listen_raw(FD *, int64_t, ErrorOut *);
+extern FD *jet_socket_accept_raw(FD *, Address *, ErrorOut *);
+extern int64_t jet_socket_address_raw(FD *, bool, Address *, ErrorOut *);
+extern int64_t jet_socket_option_get_raw(FD *, int64_t, int64_t, int64_t *, ErrorOut *);
+extern int64_t jet_socket_option_set_raw(FD *, int64_t, int64_t, int64_t, ErrorOut *);
+extern int64_t jet_socket_shutdown_raw(FD *, int64_t, ErrorOut *);
+extern void jet_socket_mark_closed_raw(FD *);
+extern int64_t jet_socket_ready_raw(FD *, int64_t, int64_t, ErrorOut *);
+extern void jet_fd_drop_raw(FD *);
 extern void *jet_rt_alloc(int64_t, int64_t);
 extern void jet_rt_free(void *, int64_t, int64_t);
 extern void jet_rt_host_arguments(int64_t, char **, char **);
@@ -101,5 +128,42 @@ int main(void) {
     const char expected[] = "file name contained an unexpected NUL byte";
     assert(error->message->len == sizeof(expected) - 1 && memcmp(error->message->ptr, expected, sizeof(expected) - 1) == 0);
     jet_rt_handle_drop_Jet__ResolveError(error);
+    ErrorOut facts = {0};
+    Address endpoint = {.ip = {.family = 4, .octets = {127, 0, 0, 1}}};
+    FD *listener = jet_socket_create_raw(4, SOCK_STREAM, 0, &facts);
+    assert(listener && facts.domain == 0);
+    assert(jet_socket_bind_raw(listener, &endpoint, &facts) == 0);
+    assert(jet_socket_listen_raw(listener, 128, &facts) == 0);
+    assert(jet_socket_address_raw(listener, false, &endpoint, &facts) == 0 && endpoint.port > 0);
+    FD *client = jet_socket_create_raw(4, SOCK_STREAM, 0, &facts);
+    assert(client && (fcntl(client->number, F_GETFL) & O_NONBLOCK) != 0);
+    assert((fcntl(client->number, F_GETFD) & FD_CLOEXEC) != 0);
+    int64_t connected = jet_socket_connect_raw(client, &endpoint, &facts);
+    if (connected < 0) {
+        assert(facts.domain == 1 && facts.code == EINPROGRESS);
+        assert((jet_socket_ready_raw(client, 4, 1000000000, &facts) & 4) != 0);
+    }
+    int64_t option = -1;
+    assert(jet_socket_option_get_raw(client, SOL_SOCKET, SO_ERROR, &option, &facts) == 0 && option == 0);
+    FD *accepted = jet_socket_accept_raw(listener, &endpoint, &facts);
+    if (!accepted) {
+        assert(facts.code == EAGAIN);
+        assert((jet_socket_ready_raw(listener, 1, 1000000000, &facts) & 1) != 0);
+        accepted = jet_socket_accept_raw(listener, &endpoint, &facts);
+    }
+    assert(accepted && endpoint.ip.family == 4);
+    assert((fcntl(accepted->number, F_GETFL) & O_NONBLOCK) != 0);
+    assert((fcntl(accepted->number, F_GETFD) & FD_CLOEXEC) != 0);
+    assert(jet_socket_option_set_raw(client, IPPROTO_TCP, 1, 1, &facts) == 0);
+    assert(jet_socket_option_get_raw(client, IPPROTO_TCP, 1, &option, &facts) == 0 && option == 1);
+    assert(jet_socket_shutdown_raw(accepted, 2, &facts) == 0);
+    int closed_number = (int)accepted->number;
+    jet_socket_mark_closed_raw(accepted);
+    assert(accepted->closed == 1 && fcntl(closed_number, F_GETFD) >= 0);
+    assert(jet_socket_shutdown_raw(accepted, 2, &facts) == -1 && facts.code == EBADF);
+    jet_fd_drop_raw(accepted);
+    assert(fcntl(closed_number, F_GETFD) == -1 && errno == EBADF);
+    jet_fd_drop_raw(client);
+    jet_fd_drop_raw(listener);
     return 0;
 }

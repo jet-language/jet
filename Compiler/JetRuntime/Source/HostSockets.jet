@@ -1,0 +1,136 @@
+// Raw nonblocking socket facts. Core owns retries, deadlines, limits and error
+// selection. Every syscall is a single attempt; readiness uses HostNetPoller.
+// FD72 is the sole descriptor/closed owner, including logical network close.
+// The host mutex lends 256 spare bytes at root@8448, beyond stdout's buffer;
+// no scratch pointer survives a syscall and no operation yields with a lock.
+fn net_socket_domain(family: I64) -> I64 {
+    if (family == I64{4}) -> I64{2} else if (family == I64{6}) -> I64{10} else -> family
+}
+fn net_socket_call(state: I64, number: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: I64) -> I64 {
+    fd_lock(state)
+    result := I64{-9}
+    if (fd_word(state, I64{16}) == I64{0}) {
+        #Unsafe("the FD72 lock prevents native descriptor close/reuse throughout this nonblocking syscall") {
+            result = os_syscall_i64(number, fd_word(state, I64{8}), a2, a3, a4, a5, a6)
+        }
+    }
+    fd_unlock(state)
+    result
+}
+#Export(c) fn jet_socket_create_raw(family: I64, kind: I64, protocol: I64, error: I64) -> I64 {
+    if scheduler_world_refused() -> return I64{0}
+    result :: host_call(I64{41}, net_socket_domain(family), (kind & I64{15}) | I64{526336}, protocol)
+    _ := fd_error(result, error)
+    if (result < I64{0}) -> I64{0} else -> jet_fd_adopt_unbuffered_raw(result, I64{0})
+}
+fn net_socket_address_call(state: I64, address: I64, number: I64) -> I64 {
+    fd_lock(state)
+    result := I64{-9}
+    if (fd_word(state, I64{16}) == I64{0}) {
+        host_lock()
+        scratch :: wrapping(host_root + I64{8448})
+        length :: jet_socket_address_encode_raw(address, scratch)
+        result = host_call(number, fd_word(state, I64{8}), scratch, length)
+        host_unlock()
+    }
+    fd_unlock(state)
+    result
+}
+#Export(c) fn jet_socket_bind_raw(state: I64, address: I64, error: I64) -> I64 {
+    fd_error(net_socket_address_call(state, address, I64{49}), error)
+}
+#Export(c) fn jet_socket_connect_raw(state: I64, address: I64, error: I64) -> I64 {
+    // EINPROGRESS is an errno fact, not a successful connection. Core waits for
+    // writable readiness and reads SO_ERROR before reporting connected.
+    fd_error(net_socket_address_call(state, address, I64{42}), error)
+}
+#Export(c) fn jet_socket_listen_raw(state: I64, backlog: I64, error: I64) -> I64 {
+    fd_error(net_socket_call(state, I64{50}, backlog, I64{0}, I64{0}, I64{0}, I64{0}), error)
+}
+#Export(c) fn jet_socket_accept_raw(state: I64, address_out: I64, error: I64) -> I64 {
+    fd_lock(state)
+    result := I64{-9}
+    if (fd_word(state, I64{16}) == I64{0}) {
+        if (address_out == I64{0}) {
+            #Unsafe("accept4 retains no address pointers and atomically sets CLOEXEC/NONBLOCK on the accepted socket") {
+                result = os_syscall_i64(I64{288}, fd_word(state, I64{8}), I64{0}, I64{0}, I64{526336}, I64{0}, I64{0})
+            }
+        } else {
+            host_lock()
+            scratch :: wrapping(host_root + I64{8448})
+            size :: wrapping(scratch + I64{32})
+            net_store_uint(size, I64{4}, I64{32})
+            #Unsafe("the host mutex lends sockaddr scratch and its exact 4B socklen; accept4 retains neither pointer") {
+                result = os_syscall_i64(I64{288}, fd_word(state, I64{8}), scratch, size, I64{526336}, I64{0}, I64{0})
+            }
+            if (result >= I64{0} && !net_socket_decode(scratch, net_load_uint(size, I64{4}), address_out)) {
+                _ := host_call(I64{3}, result, I64{0}, I64{0})
+                result = I64{-22}
+            }
+            host_unlock()
+        }
+    }
+    fd_unlock(state)
+    _ := fd_error(result, error)
+    if (result < I64{0}) -> I64{0} else -> jet_fd_adopt_unbuffered_raw(result, I64{0})
+}
+#Export(c) fn jet_socket_address_raw(state: I64, peer: Bool, address_out: I64, error: I64) -> I64 {
+    fd_lock(state)
+    result := I64{-9}
+    if (fd_word(state, I64{16}) == I64{0}) {
+        host_lock()
+        scratch :: wrapping(host_root + I64{8448})
+        size :: wrapping(scratch + I64{32})
+        net_store_uint(size, I64{4}, I64{32})
+        result = host_call(if peer -> I64{52} else -> I64{51}, fd_word(state, I64{8}), scratch, size)
+        if (result >= I64{0} && !net_socket_decode(scratch, net_load_uint(size, I64{4}), address_out)) -> result = I64{-22}
+        host_unlock()
+    }
+    fd_unlock(state)
+    fd_error(result, error)
+}
+#Export(c) fn jet_socket_option_get_raw(state: I64, level: I64, option: I64, value_out: I64, error: I64) -> I64 {
+    fd_lock(state)
+    result := I64{-9}
+    if (fd_word(state, I64{16}) == I64{0}) {
+        host_lock()
+        scratch :: wrapping(host_root + I64{8448})
+        size :: wrapping(scratch + I64{8})
+        net_store_uint(size, I64{4}, I64{4})
+        #Unsafe("host scratch lends one native int and its 4B socklen; getsockopt retains neither pointer") {
+            result = os_syscall_i64(I64{55}, fd_word(state, I64{8}), level, option, scratch, size, I64{0})
+        }
+        if (result >= I64{0}) -> net_put(value_out, I64{0}, net_load_uint(scratch, I64{4}))
+        host_unlock()
+    }
+    fd_unlock(state)
+    fd_error(result, error)
+}
+#Export(c) fn jet_socket_option_set_raw(state: I64, level: I64, option: I64, value: I64, error: I64) -> I64 {
+    fd_lock(state)
+    result := I64{-9}
+    if (fd_word(state, I64{16}) == I64{0}) {
+        host_lock()
+        scratch :: wrapping(host_root + I64{8448})
+        net_store_uint(scratch, I64{4}, value)
+        #Unsafe("host scratch lends exactly one native int; setsockopt retains no pointer") {
+            result = os_syscall_i64(I64{54}, fd_word(state, I64{8}), level, option, scratch, I64{4}, I64{0})
+        }
+        host_unlock()
+    }
+    fd_unlock(state)
+    fd_error(result, error)
+}
+#Export(c) fn jet_socket_shutdown_raw(state: I64, how: I64, error: I64) -> I64 {
+    fd_error(net_socket_call(state, I64{48}, how, I64{0}, I64{0}, I64{0}, I64{0}), error)
+}
+#Export(c) fn jet_socket_mark_closed_raw(state: I64) {
+    // Rust network close is logical while the owning socket remains alive.
+    // Last FD72 drop closes its still-owned descriptor, even when closed16=1.
+    fd_lock(state)
+    if (fd_word(state, I64{16}) == I64{0}) {
+        fd_put(state, I64{16}, I64{1})
+        _ := net_fd_closed(state)
+    }
+    fd_unlock(state)
+}
