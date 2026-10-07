@@ -2236,6 +2236,8 @@ the `LocalTime` wire format drops fractional seconds, and the `DateTime`
 wire decoder retains its permissive fraction policy. Existing error
 signatures are unchanged: `.with` and `.with_time` carry `String`, while
 the public parsing and local-zone constructors carry `TimeError`.
+Date `.until` and `.since` round their exact day-to-nanosecond intermediate
+before saturating the final `Duration` to its signed nanosecond range.
 
 `zone` accepts UTC/GMT/Z and numeric offsets; the runtime host also resolves
 named IANA zones from TZif data. On native hosts, lookup checks

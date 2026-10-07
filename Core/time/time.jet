@@ -560,7 +560,9 @@ fn civil_round(value: Int, unit: String, increment: Int, mode: String) -> Int Ne
     if mode == "expand" || mode == "away_from_zero" -> return away * quantum
     if mode == "floor" -> return floor * quantum
     if mode == "ceil" -> return ceil * quantum
-    twice :: civil_abs(remainder * 2)
+    // Round in the exact intermediate domain, then clamp the final Duration.
+    // Date differences can exceed i64 nanoseconds before rounding (Time.rs:257).
+    twice :: (if remainder < 0 -> -remainder else -> remainder) * 2
     half_trunc :: mode == "half_trunc" || mode == "halfTrunc" || mode == "half-toward-zero"
     half_expand :: mode == "half_expand" || mode == "halfExpand" || mode == "half-away-from-zero"
     half_even :: mode == "half_even" || mode == "halfEven"
@@ -1564,4 +1566,15 @@ impl Instant {
     .expect_fail(E3003) {
         #Context(deadline: 0) { sleep_until(Instant{start_ns: time_int_min()}) }
     }
+}
+
+#Test("Date duration rounding keeps wide intermediates until the final clamp") {
+    first :: new(1, 1, 1)
+    later :: first.add_days(150000)
+    // 150000 days is above half a 200000-day quantum, even though both
+    // magnitudes exceed the final signed nanosecond Duration range.
+    assert_eq(first.until(later, "day", "day", "half_expand", 200000).ns, time_int_max())
+    assert_eq(later.until(first, "day", "day", "half_expand", 200000).ns, time_int_min())
+    assert_eq(first.until(later, "day", "day", "half_trunc", 200000).ns, time_int_max())
+    assert_eq(first.until(later, "day", "day", "trunc", 200000).ns, 0)
 }
