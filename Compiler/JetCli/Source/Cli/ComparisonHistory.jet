@@ -76,7 +76,7 @@ pub fn jet_cli_comparison_persist(run: JetCLIComparisonRun, target: String, argv
 
     paths :: jet_cli_comparison_input_paths(&cache, target)
     if paths.len() == 0 -> return Err("comparison corpus has no current input path")
-    claim :: jet_cli_comparison_claim(paths, argv, terminal)
+    claim :: jet_cli_receipt_claim("test-compare", paths, argv, terminal)
     // ReceiptStore's target_path consumes the full normalized argv, not the
     // display path. The dispatcher supplies that same selected corpus here.
     start :: AuthorityResolver.authority_walk_root(target) ?? return Err("could not resolve comparison corpus directory")
@@ -89,12 +89,12 @@ pub fn jet_cli_comparison_persist(run: JetCLIComparisonRun, target: String, argv
     _ :: jet_cli_receipt_publish(receipt_root, receipt)
     current :: jet_cli_receipt_lookup(receipt_root, claim)
     published :: current ?? return Err("receipt was not current after publication")
-    target_digest :: jet_cli_comparison_target_identity(&cache, target, claim.inputs)
+    target_digest :: jet_cli_receipt_target_identity(&cache, target, claim.inputs)
     index := jet_cli_record_index_load(receipt_root)
     path :: ".jet/receipts/objects/{claim.key}"
-    comparison_identity :: JetCLIRecordIdentity{target_inputs_sha256: target_digest, tool_version: JET_CLI_VERSION, engine: "jet-comparison-v1"}
+    comparison_identity :: JetCLIRecordIdentity{target_inputs_sha256: target_digest.input_sha256, tool_version: JET_CLI_VERSION, engine: "jet-comparison-v1"}
     comparison_entry :: jet_cli_comparison_index_entry(index, comparison_identity, "comparison", artifact_id, path, bytes.len(), consumed, [JetCLIRecordLink]{}, false)
-    receipt_identity :: JetCLIRecordIdentity{target_inputs_sha256: target_digest, tool_version: JET_CLI_VERSION, engine: "jet-receipt-v2"}
+    receipt_identity :: JetCLIRecordIdentity{target_inputs_sha256: target_digest.input_sha256, tool_version: JET_CLI_VERSION, engine: "jet-receipt-v2"}
     receipt_bytes :: jet_cli_receipt_encode(published)
     receipt_entry :: jet_cli_comparison_index_entry(index, receipt_identity, "receipt", claim.key, path, receipt_bytes.len(), consumed, produced, false)
     jet_cli_record_index_upsert_many_and_store(&index, receipt_root, [JetCLIRecordIndexEntry]{comparison_entry, receipt_entry})

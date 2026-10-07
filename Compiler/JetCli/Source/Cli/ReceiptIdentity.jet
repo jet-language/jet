@@ -197,8 +197,8 @@ pub fn jet_cli_comparison_input_paths(cache: &WorkspaceDeclarationCache, target:
     Ok(jet_cli_lock_canonical(paths))
 }
 
-pub fn jet_cli_comparison_claim(paths: [String], argv: [String], terminal: [U8]) -[FS, Env, Time.Wait]> JetCLIReceiptClaim String! {
-    identity := jet_cli_receipt_context_identity("test-compare", argv, terminal)
+pub fn jet_cli_receipt_claim(verb: String, paths: [String], argv: [String], terminal: [U8]) -[FS, Env, Time.Wait]> JetCLIReceiptClaim String! {
+    identity := jet_cli_receipt_context_identity(verb, argv, terminal)
     inputs := [JetCLIReceiptInput]{}
     loop path in paths {
         canonical :: cli_files.realpath(path) ?? return Err("could not canonicalize input {path}: {jet_cli_io_error_text(err)}")
@@ -215,7 +215,7 @@ pub fn jet_cli_comparison_claim(paths: [String], argv: [String], terminal: [U8])
         jet_cli_receipt_frame(&identity, input.digest.bytes())
         &unique.push(input)
     }
-    Ok(JetCLIReceiptClaim{verb: "test-compare", key: receipt_crypto.sha256(identity).hex(), inputs: unique})
+    Ok(JetCLIReceiptClaim{verb: verb, key: receipt_crypto.sha256(identity).hex(), inputs: unique})
 }
 
 fn jet_cli_receipt_canonical_member(input: JetCLIReceiptInput, cwd: String, members: &[JetCLIReceiptInput]) String! {
@@ -234,7 +234,11 @@ fn jet_cli_receipt_canonical_member(input: JetCLIReceiptInput, cwd: String, memb
     &members.push(JetCLIReceiptInput{path: path, digest: input.digest})
 }
 
-pub fn jet_cli_comparison_target_identity(cache: &WorkspaceDeclarationCache, target: String, inputs: [JetCLIReceiptInput]) -[FS, Env, Time.Wait]> String String! {
+pub struct JetCLICanonicalTargetIdentity {
+    pub input_sha256: String
+    pub authority_root: String
+}
+pub fn jet_cli_receipt_target_identity(cache: &WorkspaceDeclarationCache, target: String, inputs: [JetCLIReceiptInput]) -[FS, Env, Time.Wait]> JetCLICanonicalTargetIdentity String! {
     info :: cli_files.stat(target) ?? return Err("couldn't inspect canonical target `{target}`: {jet_cli_io_error_text(err)}")
     if info.is_symlink -> return Err("canonical target `{target}` must not be a symlink")
     start :: AuthorityResolver.authority_walk_root(target) ?? return Err("couldn't resolve canonical target directory")
@@ -247,7 +251,7 @@ pub fn jet_cli_comparison_target_identity(cache: &WorkspaceDeclarationCache, tar
         .Ok(found) -> { if found == .Val(root) -> &roots.push(root) }
         .Err(error) -> return Err("couldn't resolve package authority for `{target}`: {error.diagnostic}")
     }
-    _ :: jet_cli_selected_project_root(&cache, start) ?? return Err("couldn't resolve the workspace root for `{target}`: {err.diagnostic}")
+    authority_root :: jet_cli_selected_project_root(&cache, start) ?? return Err("couldn't resolve the workspace root for `{target}`: {err.diagnostic}")
     cwd :: cli_sys.current_dir() ?? "."
     members := [JetCLIReceiptInput]{}
     loop input in inputs -> jet_cli_receipt_canonical_member(input, cwd, &members)
@@ -273,5 +277,5 @@ pub fn jet_cli_comparison_target_identity(cache: &WorkspaceDeclarationCache, tar
     &members.sort_by((left: JetCLIReceiptInput, right: JetCLIReceiptInput) -> left.path <=> right.path)
     text := ""
     loop member in members -> text = "{text}{{\"path\":{foundation_json_quote(member.path)},\"sha256\":{foundation_json_quote(member.digest)}}}\n"
-    Ok(receipt_crypto.sha256(text.bytes()).hex())
+    Ok(JetCLICanonicalTargetIdentity{input_sha256: receipt_crypto.sha256(text.bytes()).hex(), authority_root: authority_root})
 }

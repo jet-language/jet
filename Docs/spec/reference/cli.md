@@ -627,6 +627,28 @@ checks in their canonical order. `inspect.decisions` projects numeric row IDs,
 flat derivation references, per-kind counts, and the actual compiler journal's
 canonical routes; transport-ledger JSON is not a CLI status envelope.
 
+Runtime rows are read from authenticated current receipts through the held
+RecordIndex. Selection rederives the canonical target input identity, filters
+the current tool version, then chooses recorded sequence and receipt ID in
+descending order. A valid newest receipt with no acceleration rows does not
+reuse older measurements. Typed sections retain full-width integer values and
+reject unknown fields, invalid variants, duplicate numeric row sequences,
+reversed ranges, and values exceeding the compiled target's pointer width.
+
+The shared WatchGraph starts from the compiler loader's actual physical input
+paths, adds checked project sidecars, recursively referenced HTML/CSS/JS assets,
+and literal runtime file/directory inputs. It also requires a certified
+comptime-I/O read set. The current compiler does not expose that set: file-target
+receipt discovery refuses with `#4736`, rather than presenting an approximate
+input identity as authenticated. Directory-target collection uses the separate
+canonical tree policy.
+
+Explicit canonical-pass selections may report `canonical_route_gaps` alongside
+actual `canonical_routes`: these producer-owned operation IDs say `no Jet pass`
+only for absent Jet boundaries. They are availability rows, not execution
+receipts. Ordinary invocations preserve the reference status schema and omit
+the extension when there are no gaps.
+
 Output inspection consumes sema's checked callable links and selection facts,
 including the original source/semantic/machine names, typed parameters, inferred
 failure contract, solved effects, and reference/declaration spans. The driver
