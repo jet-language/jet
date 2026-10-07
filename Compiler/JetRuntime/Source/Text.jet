@@ -567,3 +567,66 @@ fn text_iter_drop(state: I64) {
     jet_rt_free(list, I64{24}, I64{8})
     iter
 }
+
+// CString panic text matches MIRRust.rs c_abi_decode_owned/c_abi_arg_expr.
+fn rt_c_string_stop(kind: I64) {
+    capacity :: if (kind == I64{1}) -> I64{23} else -> I64{28}
+    message :: rt_text_builder_with_capacity(capacity)
+    rt_text_push_word(message, I64{4836977559045693806}, I64{8}) // "native C"
+    rt_text_push_word(message, I64{2334956330985739040}, I64{8}) // " String "
+    if {
+        (kind == I64{0}) -> {
+            rt_text_push_word(message, I64{8317701429086023523}, I64{8}) // "contains"
+            rt_text_push_word(message, I64{1280658976}, I64{4}) // " NUL"
+        }
+        (kind == I64{1}) -> {
+            rt_text_push_word(message, I64{30518549099344745}, I64{7}) // "is null"
+        }
+        else -> {
+            rt_text_push_word(message, I64{6134030714416427881}, I64{8}) // "is not U"
+            rt_text_push_word(message, I64{942491220}, I64{4}) // "TF-8"
+        }
+    }
+    jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+    jet_rt_string_drop(message)
+}
+
+#Export(c) fn jet_rt_c_string_pack(text: I64) -> I64 {
+    source :: rt_text_data(text)
+    len :: rt_text_len(text)
+    at := I64{0}
+    loop at < len {
+        if (rt_text_byte(source + at) == I64{0}) {
+            rt_c_string_stop(I64{0})
+            return I64{0}
+        }
+        at += I64{1}
+    }
+    data :: jet_rt_alloc(len + I64{1}, I64{1})
+    rt_text_bytes_copy(data, source, len)
+    rt_text_put(data + len, I64{0})
+    data
+}
+
+#Export(c) fn jet_rt_c_string_unpack(ptr: I64) -> I64 {
+    if (ptr == I64{0}) {
+        rt_c_string_stop(I64{1})
+        return I64{0}
+    }
+    len := I64{0}
+    loop rt_text_byte(ptr + len) != (I64{0}) {
+        // UTF-8 is at most four bytes. The validator rejects NUL as a
+        // continuation before reading any byte beyond that terminator.
+        width :: rt_text_valid_width(ptr + len, I64{4})
+        if (width < I64{0}) {
+            rt_c_string_stop(I64{2})
+            return I64{0}
+        }
+        len += width
+    }
+    rt_text_copy(ptr, len)
+}
+
+#Export(c) fn jet_rt_c_string_free(ptr: I64, size: I64) {
+    jet_rt_free(ptr, size, I64{1})
+}
