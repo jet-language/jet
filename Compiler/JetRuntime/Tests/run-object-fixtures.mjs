@@ -3,7 +3,7 @@
 // OUT --assemble only prepares units. --lower uses the composed Jet candidate;
 // --global/--initializer/--allocator execute separately so a proof keeps going.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.mjs';
@@ -34,6 +34,7 @@ if (mode === '--assemble') {
     unit = unit.replace(runHead, `${runHead}    alloc_test_require(alloc_root != I64{0})\n`);
     unit += '\n#Export(c)\nfn runtime_fixture_root() -> I64 Never! { alloc_root }\n\n#Export(c)\nfn runtime_fixture_tests() { run() }\n';
     writeFileSync(join(out, 'init/Source/Fixture.jet'), unit);
+    rmSync(join(out, 'init/unit.jet'));
     writeFileSync(join(out, 'init/exports.list'), read('Compiler/JetRuntime/exports.list') + 'runtime_fixture_root\nruntime_fixture_tests\n');
     for (const name of ['global', 'init']) writeFileSync(join(out, name, 'package.jet'), read('Compiler/JetRuntime/package.jet'));
 } else if (mode === '--lower') {
