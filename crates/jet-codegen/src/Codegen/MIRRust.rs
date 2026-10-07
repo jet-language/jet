@@ -8554,6 +8554,11 @@ impl<'a> RustEmitter<'a> {
                     return true;
                 }
                 let Some(def) = self.structural_type_def_for(ty) else {
+                    // The process-owning browser server cannot be duplicated
+                    // or structurally formatted like a value carrier.
+                    if name.name == "BrowserTestServer" {
+                        return false;
+                    }
                     // Native carriers make no Rust total-order or hash promise.
                     if matches!(trait_name, "Eq" | "PartialOrd" | "Ord" | "Hash") {
                         return false;
