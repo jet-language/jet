@@ -30,7 +30,8 @@ fn lower_parallel_walk(p: MIRProgram, m: &LowerModule, f: &LowerFunction, closur
     env :: lower_pointer(&f)
     lower_emit(&f, LIRInst.StackSlot{dst: env, size: 24, align: 8})
     lower_emit(&f, LIRInst.Store{base: env, offset: 0, value: closure})
-    lower_emit(&f, LIRInst.Store{base: env, offset: 8, value: lower_list_data(&f, list)})
+    data :: lower_list_data(&f, list)
+    lower_emit(&f, LIRInst.Store{base: env, offset: 8, value: data})
     lower_emit(&f, LIRInst.Store{base: env, offset: 16, value: output})
     invoke :: lower_lazy_helper_address(&m, &f, "para.map.invoke", closure_ty)
     length :: lower_list_word(&f, list, 0)
@@ -65,7 +66,10 @@ fn lower_helper_parallel_map(p: MIRProgram, m: &LowerModule, glue: LowerGlue) ->
     value :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, shape.output) ?? panic("parallel output has storage")
     // List Bool slots cross raw word-carrier boundaries; keep their padding
     // deterministic even though the Bool itself is a one-byte value.
-    if shape.output.kind == .Bool -> lower_emit(&f, LIRInst.Store{base: target, offset: 0, value: lower_const(&f, 0)})
+    if shape.output.kind == .Bool {
+        zero :: lower_const(&f, 0)
+        lower_emit(&f, LIRInst.Store{base: target, offset: 0, value: zero})
+    }
     lower_write_at(p, &f, target, 0, value, shape.output)
     one :: lower_const(&f, 1)
     next_index :: lower_word(&f)
@@ -136,7 +140,10 @@ fn lower_closure_try_map(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     list_ty :: lower_value_type(c, receiver) ?? return lower_fail(&m, &f, "try_map receiver has no checked type")
     elem :: lower_list_element(list_ty) ?? return lower_fail(&m, &f, "try_map receiver is not a List")
     result_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "try_map result has no checked type")
-    if result_ty.kind != .Result(_, _) -> return lower_fail(&m, &f, "try_map result is not a Result")
+    if result_ty.kind == {
+        .Result(_, _) -> {}
+        else -> return lower_fail(&m, &f, "try_map result is not a Result")
+    }
     out_ty :: if result_ty.kind == .Result(ok, _) -> ok else -> panic("checked Result")
     err_ty :: if result_ty.kind == .Result(_, err) -> err else -> panic("checked Result")
     produced :: lower_list_element(out_ty) ?? return lower_fail(&m, &f, "try_map success is not a List")
@@ -144,7 +151,10 @@ fn lower_closure_try_map(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     closure_ty :: lower_value_type(c, closure_arg.value) ?? return lower_fail(&m, &f, "try_map callback has no checked type")
     shape :: lower_parallel_shape(closure_ty) ?? return lower_fail(&m, &f, "try_map callback has no checked single-input type")
     callback_result :: shape.output
-    if callback_result.kind != .Result(_, _) -> return lower_fail(&m, &f, "try_map callback does not return a Result")
+    if callback_result.kind == {
+        .Result(_, _) -> {}
+        else -> return lower_fail(&m, &f, "try_map callback does not return a Result")
+    }
     list :: lower_use(&m, &f, receiver) ?? return
     closure :: lower_use(&m, &f, closure_arg.value) ?? return
     output :: lower_new_storage(p, &f, out_ty)
@@ -167,7 +177,9 @@ fn lower_closure_try_map(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     lower_seal(&f, LIRTerminator.Branch{condition: succeeded, then_target: lower_target(success, [LIRValueID]{}), else_target: lower_target(failure, [LIRValueID]{})})
     lower_start(&f, failure, [LIRValueID]{})
     lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: zero})
-    lower_list_move(p, &f, lower_address(&f, box, 8), lower_address(&f, outcome, 8), err_ty)
+    target_error :: lower_address(&f, box, 8)
+    source_error :: lower_address(&f, outcome, 8)
+    lower_list_move(p, &f, target_error, source_error, err_ty)
     lower_free_shell(&m, &f, outcome, lower_box_size(p, callback_result))
     lower_map_drop_value(p, &m, &f, output, out_ty)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
@@ -178,7 +190,7 @@ fn lower_closure_try_map(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     lower_each_end(&f, each, [LIRValueID]{})
     one :: lower_const(&f, 1)
     lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: one})
-    lower_copy_bytes(&f, box, 8, output, lower_size(p, out_ty).size)
+    lower_copy_bytes(&f, box, 8, output, 0, lower_size(p, out_ty).size)
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
     lower_start(&f, merge, [LIRValueID]{})
     lower_map_drop_value(p, &m, &f, list, list_ty)

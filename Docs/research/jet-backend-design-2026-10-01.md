@@ -1320,9 +1320,9 @@ JET_FRONT_JETC0=CANDIDATE/jetc0 JET_RUNTIME_PACK=RUNTIME/jet_runtime.pack.o \
   --case-list FULL.cases
 ```
 
-The native unit-test producer is `lir_lower_tests(program, roots, serial)`.
-It shares one monomorphization inventory across the selected checked functions
-and emits an AOT entry plus task callbacks. Each callback runs the canonical
+The native unit-test producer is `lir_lower_tests(program, roots, checks, serial)`.
+It shares one monomorphization inventory across selected checked tests and output
+checks, and emits an AOT entry plus task callbacks. Each test callback runs the canonical
 test rail through `CAbiTest`; panic classification, expected failures, skip,
 captured print, and the final report are not reimplemented by the parent.
 Property generation/shrinking is explicitly refused until its Jet implementation
@@ -1341,13 +1341,31 @@ The parent preserves ordinary child stdout/stderr separately, orders canonical
 outcomes by the selected identities, and invokes the same executable with
 `JET_NATIVE_TEST_REPORT_PATH` for the canonical finish and exit status. Protocol
 I/O failure exits 103 and is an infrastructure error, not a failed test.
-The producer/runner checkpoint is unverified and is not yet the hosted CLI
-dispatch; `Host.jet` wiring and full native/CLI proof must precede admission.
+`Host.jet` dispatches non-release tests through the NativeTests module API;
+release tests retain the existing emitted harness path. Output checks run once
+in the same successful batch process after body joins, with static initialization
+and checked result ownership; Bool checks assert, other results are discarded
+as in the canonical runner. After a fatal batch each unrun output check is an
+explicit failed canonical outcome carrying E3015 (what/why/fix); the fresh
+reporter never executes checks against recreated process state. Custom TestSuite
+overrides remain explicitly refused on the native path. Full native/CLI proof
+must precede admission.
 
 Build the candidate and runtime pack from the same composed tree. Matching
 goldens do not prove full frontend equivalence; compare the two modes on the
 same complete case list, retaining both `results.tsv` files and every
 failure, before admitting parity.
+
+The consolidated proof consumers are `Tests/check-front-feed-results.mjs`
+(exact full398 selection, no lost native passes, zero wrong outcomes),
+`Tests/test-native-test-host.mjs` (three Examples and canonical capture,
+filter, serial and shuffle policies), and `Tests/test-native-test-contract.mjs`
+(output checks observe joined batch state; a fatal child preserves completed
+outcomes and reruns only unreported bodies, never output checks). The registered
+E3015 what/why/fix snapshot is exercised by
+`Tests/test-native-output-diagnostic.mjs`. These consumers require the real
+composed candidate, host and matching runtime pack; metadata-only checks do
+not admit execution parity.
 
 
 `Tests/run-front-feed.mjs` selects **every** `pass` row in an explicit native
