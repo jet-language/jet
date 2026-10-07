@@ -127,6 +127,7 @@ fn lower_route_values(p: MIRProgram, m: &LowerModule, f: &LowerFunction, call: M
 fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRValueID], what: String) Never! {
     row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "{what} names missing Prelude call {call.value}")
     if lower_lazy_route(p, c, &m, &f, instruction, row, args) -> return
+    if lower_queue_route(p, c, &m, &f, instruction, row, args) -> return
     name :: "{row.module_name}.{row.member}"
     route :: lower_runtime_route(lower_route_symbol(row)) ?? return lower_fail(&m, &f, "{what} {name} has no runtime C-ABI route ({mir_symbol_name(row.symbol)})")
     // Native adapters for these operations have not established the same
@@ -175,6 +176,29 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     }
 }
 
+// Result arms are exclusive, so each arm writes to the same payload slot.
+// A List on either edge additionally writes its length to the next word.
+fn lower_route_result_call(m: &LowerModule, f: &LowerFunction, symbol: String, args: [LIRValueID], ok: LowerRouteCarrier, err: LowerRouteCarrier) -> LowerRouteOut Never! {
+    slot :: lower_pointer(&f)
+    has_list :: ok == .List(_) || err == .List(_)
+    lower_emit(&f, LIRInst.StackSlot{dst: slot, size: if has_list -> 16 else -> 8, align: 8})
+    zero :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Store{base: slot, offset: 0, value: zero})
+    if has_list -> lower_emit(&f, LIRInst.Store{base: slot, offset: 8, value: zero})
+    call_args := args
+    if ok != .Unit {
+        &call_args.push(slot)
+        if ok == .List(_) -> &call_args.push(lower_address(&f, slot, 8))
+    }
+    if err != .Unit {
+        &call_args.push(slot)
+        if err == .List(_) -> &call_args.push(lower_address(&f, slot, 8))
+    }
+    selector :: lower_word(&f)
+    lower_call_runtime(&m, &f, symbol, call_args, Val(selector))
+    LowerRouteOut{word: selector, slot: slot}
+}
+
 fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, route: LowerRoute, lowered: [LIRValueID], what: String, name: String) Never! {
     result_ty :: lower_checked_type(c, instruction)
     if route.result == {
@@ -198,6 +222,12 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
                 out :: lower_route_tagged_call(&m, &f, route.export, lowered, 1)
                 data :: lower_pointer(&f)
                 lower_emit(&f, LIRInst.Load{dst: data, base: out.slot, offset: 0})
+                if lower_record_list_element(p, list_ty, carrier) != None {
+                    if dst == None -> return lower_call_helper(&m, &f, "list.record_handles_free", list_ty, [LIRValueID]{data, out.word}, None)
+                    kept :: dst
+                    lower_storage_into(p, &f, kept, list_ty)
+                    return lower_record_list_from_runtime(p, &m, &f, list_ty, data, out.word, kept)
+                }
                 box :: dst ?? lower_pointer(&f)
                 lower_storage_into(p, &f, box, list_ty)
                 lower_emit(&f, LIRInst.Store{base: box, offset: 0, value: out.word})
@@ -249,10 +279,9 @@ fn lower_route_result(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
             if !lower_route_shape_matches(p, ty, route.result) -> return lower_fail(&m, &f, "{what} {name} result type {mir_type_display_name(ty)} does not match its runtime route")
             dst :: lower_result(p, c, &m, &f, instruction)
             if f.failed -> return
-            // Alternative success/error out pointers share the payload slot;
-            // a List success has a separate second word for its length.
-            list_payload :: if ok == .List(_) -> true else -> false
-            out :: if list_payload -> lower_route_out_call(&m, &f, route.export, lowered, 3, true) else -> lower_route_tagged_call(&m, &f, route.export, lowered, if ok == .Unit -> 1 else -> 2)
+            // Alternative success/error out pointers share payload storage.
+            list_payload :: ok == .List(_) || err == .List(_)
+            out :: lower_route_result_call(&m, &f, route.export, lowered, ok, err)
             ok_ty :: if ty.kind == .Result(success, _) -> success else -> panic("checked Result route shape")
             err_ty :: if ty.kind == .Result(_, failure) -> failure else -> panic("checked Result route shape")
             box :: dst ?? lower_pointer(&f)
@@ -332,10 +361,10 @@ fn lower_route_shape_matches(p: MIRProgram, ty: MIRType, result: LowerRouteResul
     }
 }
 
-// A result side: handle buffers cross only as arguments (Records.jet), so a
-// List of records never comes back as one.
+// Lists of runtime record handles are rebuilt into native element storage
+// before they become owned results (Records.jet).
 fn lower_route_result_matches(p: MIRProgram, ty: MIRType, carrier: LowerRouteCarrier) -> Bool Never! {
-    lower_record_list_element(p, ty, carrier) == None && lower_route_carrier_matches(p, ty, carrier)
+    lower_route_carrier_matches(p, ty, carrier)
 }
 
 // An adapter's tag word and the stack slot its payload was written to.
@@ -375,6 +404,10 @@ fn lower_route_store_payload(p: MIRProgram, m: &LowerModule, f: &LowerFunction, 
         length :: lower_word(&f)
         lower_emit(&f, LIRInst.Load{dst: data, base: slot, offset: 0})
         lower_emit(&f, LIRInst.Load{dst: length, base: slot, offset: 8})
+        if lower_record_list_element(p, ty, carrier) != None {
+            target :: lower_address(&f, box, offset)
+            return lower_record_list_from_runtime(p, &m, &f, ty, data, length, target)
+        }
         lower_emit(&f, LIRInst.Store{base: box, offset: offset, value: length})
         lower_emit(&f, LIRInst.Store{base: box, offset: offset + 8, value: length})
         lower_emit(&f, LIRInst.Store{base: box, offset: offset + 16, value: data})

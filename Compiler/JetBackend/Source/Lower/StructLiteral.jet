@@ -8,10 +8,22 @@ use jet_foundation.[
     MIRStructExtra,
     MIRTypeDef,
     MIRTypeID,
+    MIRType,
 ]
 
 fn lower_struct_literal(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, type_id: MIRTypeID, fields: [MIRFieldValue], extra: MIRStructExtra?, trait_coercion: MIRTypeID?, boxed_fields: [MIRFieldID]) Never! {
-    if trait_coercion != None -> return lower_fail(&m, &f, "StructLiteral trait coercion is not lowered at O0 yet")
+    if trait_coercion == .Val(target) {
+        if extra != None -> return lower_fail(&m, &f, "StructLiteral HTTPRequestParams extra is not lowered at O0 yet")
+        row :: m.checked_types.rows.get(type_id.value) ?? return lower_fail(&m, &f, "trait record payload has no checked type")
+        ty :: ~m.checked_types.types[row]
+        target_row :: m.checked_types.rows.get(target.value) ?? return lower_fail(&m, &f, "trait record target has no checked type")
+        target_ty :: ~m.checked_types.types[target_row]
+        definition :: lower_type_def_by_id(p, type_id) ?? return lower_fail(&m, &f, "trait record payload has no definition")
+        storage :: lower_new_storage(p, &f, ty)
+        lower_struct_fields(p, c, &m, &f, definition, ty, storage, fields, boxed_fields)
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return
+        return lower_trait_box_value(p, &m, &f, Val(storage), ty, target_ty, dst)
+    }
     // MIRStructExtra has only HTTPRequestParams, not a spread/base value.
     // MIRRust.rs:semantic (26836) ignores that host-only marker;
     // O0 cannot supply its native HTTP request fields and must not omit them.
@@ -29,6 +41,10 @@ fn lower_struct_construct(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     ty :: instruction.ty ?? return lower_fail(&m, &f, "struct literal has no checked type")
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     lower_storage_into(p, &f, dst, ty)
+    lower_struct_fields(p, c, &m, &f, definition, ty, dst, fields, boxed_fields)
+}
+
+fn lower_struct_fields(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, definition: MIRTypeDef, ty: MIRType, dst: LIRValueID, fields: [MIRFieldValue], boxed_fields: [MIRFieldID]) Never! {
     loop value in fields {
         found :: lower_struct_field(p, ty, value.field) ?? return lower_fail(&m, &f, "field {value.field.value} is not a stored field of {definition.name}")
         indirect := found.boxed

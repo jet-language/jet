@@ -1,0 +1,80 @@
+// Range callbacks preserve input order and lend the caller's storage. Owned
+// implicit receiver reads copy before consumption; try_map short-circuits.
+use jet_foundation.[MIRAccess, MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRBlockID, MIRCallArg, MIRCaptureOperand, MIRDropKind, MIRFunctionSignature, MIROperation, MIRPreludeABI, MIRPreludeFamily, MIRProgram, MIRSemanticOp, MIRTerminator, MIRType, MIRTypeKind, MIRValueID, mir_function_id, mir_owned_ownership, mir_type_from_kind]
+
+// expect-stdout para-map: "2\n3\n4\n1\n"
+fn fx_parallel_map() -> MIRProgram Never! {
+    a := fx_builder()
+    n :: fx_param(&a, "n", fx_int(), mir_copy_ownership())
+    one :: fx_int_const(&a, 1)
+    plus :: fx_int_op(&a, MIRBinaryOp.Add, "add", n, one)
+    fx_block(&a, 0, MIRTerminator.Return{value: Val(plus)})
+    b := fx_builder()
+    list_ty :: fx_list_type(fx_int())
+    root :: fx_local(&b, "xs", list_ty, mir_owned_ownership())
+    items := [MIRValueID]{}
+    input_values :: [Int]{1, 2, 3}
+    loop value in input_values -> &items.push(fx_int_const(&b, value))
+    list :: fx_owned(&b, list_ty, MIROperation.BuildList{values: items, trait_coercion: None})
+    fx_do(&b, MIROperation.WritePlace{place: root, value: list})
+    receiver :: fx_owned(&b, list_ty, MIROperation.ReadPlace{place: root})
+    fn_ty :: fx_fn_int_type()
+    callback :: fx_owned(&b, fn_ty, MIROperation.Closure{function: mir_function_id("para_add_one"), captures: [MIRCaptureOperand]{}, facts: fx_capture_facts()})
+    limit :: fx_int_const(&b, 2)
+    mapped :: fx_owned(&b, list_ty, MIROperation.Semantic{operation: MIRSemanticOp.ClosureMethod{receiver: receiver, args: [MIRCallArg]{fx_arg(callback, .Move), fx_arg(limit, .Read)}, call: fx_prelude_id("core.list", "para_map")}})
+    indices :: [Int]{0, 1, 2}
+    loop index in indices {
+        at :: fx_int_const(&b, index)
+        fx_print(&b, fx_list_index(&b, mapped, at, fx_int(), false))
+    }
+    original :: fx_value(&b, list_ty, fx_borrow(), MIROperation.ReadPlace{place: root})
+    zero :: fx_int_const(&b, 0)
+    fx_print(&b, fx_list_index(&b, original, zero, fx_int(), false))
+    fx_do(&b, MIROperation.Drop{value: mapped, kind: MIRDropKind.Value})
+    xs :: fx_owned(&b, list_ty, MIROperation.MovePlace{place: root})
+    fx_do(&b, MIROperation.Drop{value: xs, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_lists_program(b)
+    &p.functions.push(fx_function("para_add_one", a, fx_int()))
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.ClosureMethod, "core.list", "para_map", "jet_list_para_map", 3, MIRPreludeABI.Value))
+    p
+}
+
+// expect-stdout try-map: "1\n2\nstop\n"
+fn fx_closure_try_map_fixture() -> MIRProgram Never! {
+    result_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: fx_int(), err: fx_string()})
+    fn_ty :: mir_type_from_kind(MIRTypeKind.Fn{signature: MIRFunctionSignature{params: [MIRType]{fx_int()}, ret: Val(result_ty), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}})
+    a := fx_builder()
+    n :: fx_param(&a, "n", fx_int(), mir_copy_ownership())
+    fx_print(&a, n)
+    two :: fx_int_const(&a, 2)
+    stop :: fx_copy(&a, fx_bool(), MIROperation.Binary{op: MIRBinaryOp.Eq, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: n, right: two})
+    fx_block(&a, 0, MIRTerminator.Branch{condition: stop, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 2}})
+    error :: fx_owned(&a, fx_string(), MIROperation.Constant{value: .String{value: "stop"}})
+    failure :: fx_owned(&a, result_ty, MIROperation.ResultErr{value: error})
+    fx_block(&a, 1, MIRTerminator.Return{value: Val(failure)})
+    success :: fx_owned(&a, result_ty, MIROperation.ResultOk{value: n})
+    fx_block(&a, 2, MIRTerminator.Return{value: Val(success)})
+    b := fx_builder()
+    list_ty :: fx_list_type(fx_int())
+    mapped_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: list_ty, err: fx_string()})
+    root :: fx_local(&b, "mapped", mapped_ty, mir_owned_ownership())
+    values := [MIRValueID]{}
+    input_values :: [Int]{1, 2, 3}
+    loop value in input_values -> &values.push(fx_int_const(&b, value))
+    list :: fx_owned(&b, list_ty, MIROperation.BuildList{values: values, trait_coercion: None})
+    callback :: fx_owned(&b, fn_ty, MIROperation.Closure{function: mir_function_id("try_map_item"), captures: [MIRCaptureOperand]{}, facts: fx_capture_facts()})
+    mapped :: fx_owned(&b, mapped_ty, MIROperation.Semantic{operation: MIRSemanticOp.ClosureMethod{receiver: list, args: [MIRCallArg]{fx_arg(callback, .Move)}, call: fx_prelude_id("core.list", "try_map")}})
+    fx_do(&b, MIROperation.WritePlace{place: root, value: mapped})
+    borrowed :: fx_value(&b, mapped_ty, fx_borrow(), MIROperation.ReadPlace{place: root})
+    message :: fx_owned(&b, fx_string(), MIROperation.ResultValue{subject: borrowed, ok: false})
+    fx_print(&b, message)
+    fx_do(&b, MIROperation.Drop{value: message, kind: MIRDropKind.Value})
+    outcome :: fx_owned(&b, mapped_ty, MIROperation.MovePlace{place: root})
+    fx_do(&b, MIROperation.Drop{value: outcome, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_lists_program(b)
+    &p.functions.push(fx_function("try_map_item", a, result_ty))
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.ClosureMethod, "core.list", "try_map", "jet_list_try_map", 2, MIRPreludeABI.Value))
+    p
+}

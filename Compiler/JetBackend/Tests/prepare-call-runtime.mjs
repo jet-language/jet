@@ -28,6 +28,8 @@ if (mode === '--allparts') {
     ['jet_c_abi_routes', 'CAbiRoutes.rs'],
     ['jet_c_abi_iter', 'CAbiIter.rs'],
     ['jet_c_abi_task', 'CAbiTask.rs'],
+    ['jet_c_abi_typed_text', 'CAbiTypedText.rs'],
+    ['jet_c_abi_parallel', 'CAbiParallel.rs'],
   ]) {
     const rows = prepared.split('\n');
     const begin = rows.findIndex(line => line === `mod ${module} {` || line === `pub(crate) mod ${module} {`);
@@ -40,6 +42,17 @@ if (mode === '--allparts') {
     }
     prepared += '\n' + readFileSync(resolve(repo, `crates/jet-codegen/src/Prelude/Core/${file}`), 'utf8');
   }
+  // Native test artifacts link the same canonical rails as Rust-emitted
+  // harnesses. A Program seed doesn't select a test artifact, so pull their
+  // unchanged shared prelude text into the all-parts pack explicitly.
+  const runtime = readFileSync(resolve(repo, 'crates/jet-codegen/src/Codegen/mod.rs'), 'utf8');
+  for (const [name, marker] of [['TEST_PRELUDE', 'fn jet_test_finish('], ['PROP_PRELUDE', 'struct JetRng {']]) {
+    if (prepared.includes(marker)) continue;
+    const text = runtime.match(new RegExp(`const ${name}: &str = r#\"([\\s\\S]*?)\"#;`))?.[1];
+    if (!text) throw new Error(`canonical ${name} missing`);
+    prepared += '\n' + text;
+  }
+  prepared += '\n' + readFileSync(resolve(repo, 'crates/jet-codegen/src/Prelude/Core/CAbiTest.rs'), 'utf8');
 }
 const core = readFileSync(resolve(repo, 'crates/jet-codegen/src/Prelude/Core.rs'), 'utf8');
 const marker = '// Installed only in the isolated persistent compiler worker.';

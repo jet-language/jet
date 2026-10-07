@@ -10,8 +10,8 @@
 // failure for the TaskFailure reason with "task.debug" (Rust `{:?}`).
 use jet_foundation.[
     MIRCallee, MIRCallArg, MIRFunctionID, MIRInstruction, MIRLoopSourceKind, MIROperation, MIRPreludeCallID,
-    MIRProgram, MIRTaskGroupKind, MIRType, MIRTypeKind, MIRValueID, mir_nominal_ref,
-    mir_symbol_name, mir_type_display_name, mir_type_from_kind,
+    MIRProgram, MIRSelectKind, MIRTaskGroupKind, MIRType, MIRTypeKind, MIRValueID, mir_nominal_ref,
+    mir_symbol_name, mir_type_display_name, mir_type_from_kind, mir_type_identity_key,
 ]
 
 fn lower_task_element(ty: MIRType) -> MIRType? {
@@ -36,15 +36,42 @@ fn lower_task_handle_repr(ty: MIRType) -> LowerRepr? {
 // The result a task body of closure type `ty` produces.
 fn lower_task_body_result(ty: MIRType) -> MIRType? {
     if ty.kind == {
-        .SendFn(params, ret, _) -> if params.len() == 0 -> ret else -> None
-        .Fn(signature) -> if signature.params.len() == 0 -> signature.ret else -> None
+        .SendFn(params, ret, _) -> if params.len() == 0 -> Val(ret ?? mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: []})) else -> None
+        .Fn(signature) -> if signature.params.len() == 0 -> Val(signature.ret ?? mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Unit"), args: []})) else -> None
         else -> None
     }
 }
 
-// Native frames have no unwind metadata. A runtime stop cannot cross a task
-// callback and become TaskFailure; reject stop-capable task call graphs.
+// Cancellation needs a wholly instrumented native call graph, not merely one
+// unrelated Poll somewhere in the module. Cached AOT MIR remains refused at
+// race/any/cancel sites. Source stops masked inside a Shield/transaction stay
+// refused until they have their own safe stop edge.
+fn lower_task_stop_program(p: MIRProgram, prepared: [LowerPreparedFunction]) -> Bool Never! {
+    loop descriptor in prepared {
+        if descriptor.source_row < 0 -> next
+        source :: p.functions[descriptor.source_row]
+        entry_checked := false
+        loop block in source.blocks {
+            if block.id == source.entry {
+                if block.terminator == .Poll(.Check, _, _) -> entry_checked = true
+            }
+            loop instruction in block.instructions {
+                if instruction.operation == .Semantic(.RequireStop(_, _, _, _, _, _, _)) {
+                    propagated := false
+                    if block.terminator == .Poll(.Propagate, _, _) -> propagated = true
+                    if !propagated -> return false
+                }
+            }
+        }
+        if !entry_checked -> return false
+    }
+    true
+}
+
+// A cached unwind-based graph may still spawn bodies statically known not to
+// stop. Native instrumented graphs use the runtime rail instead of unwinding.
 fn lower_task_can_stop(p: MIRProgram, m: LowerModule, function: MIRFunctionID, seen: &[U64:Bool]) -> Bool Never! {
+    if m.task_stop_points -> return false
     if seen.get(function.value) != None -> return false
     &seen.add(function.value, true).drop("checked absent above")
     index :: lower_function_index(m, function)
@@ -131,9 +158,13 @@ fn lower_task_kind(kind: MIRTaskGroupKind) -> Int Never! {
 // bodies (spawned first); `*_result` routes flatten `T E!` bodies.
 fn lower_task_group(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, kind: MIRTaskGroupKind, tasks: [MIRValueID]) Never! {
     row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "task group names missing Prelude call {call.value}")
-    if kind != .All -> return lower_fail(&m, &f, "task.any/task.race cancellation across native frames is not lowered at O0 yet")
+    if kind != .All && !m.task_stop_points -> return lower_fail(&m, &f, "task.any/task.race requires checked native Poll/Stopped cleanup edges")
     if tasks.len() != 1 -> return lower_fail(&m, &f, "task group over {tasks.len()} operands is not lowered at O0 yet")
     list_ty :: lower_value_type(c, tasks[0]) ?? return lower_fail(&m, &f, "task group operand has no checked type")
+    if list_ty.kind == .Tuple(_) {
+        if kind != .All -> return lower_fail(&m, &f, "heterogeneous task.any/task.race has no single success carrier")
+        return lower_task_tuple_all(p, c, &m, &f, instruction, row, tasks[0], list_ty)
+    }
     elem :: lower_list_element(list_ty) ?? return lower_fail(&m, &f, "task group over {mir_type_display_name(list_ty)} is not lowered at O0 yet")
     // The runtime takes the List's buffer and leaves an empty header.
     if !lower_value_owned(c, tasks[0]) -> return lower_fail(&m, &f, "task group over a borrowed List is not lowered at O0 yet")
@@ -161,6 +192,42 @@ fn lower_task_group(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     lower_task_outcome(p, c, &m, &f, instruction, "jet_rt_native_task_group", args, result_ty)
 }
 
+// A heterogeneous task.all owns the tuple's handles but returns its individual
+// result slots. The runtime still uses the same task-all failure policy.
+fn lower_task_tuple_all(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, tasks: MIRValueID, tuple_ty: MIRType) Never! {
+    if !lower_value_owned(c, tasks) -> return lower_fail(&m, &f, "task.all over a borrowed tuple is not lowered at O0 yet")
+    result_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "task.all tuple has no checked result")
+    success := MIRType?{None}
+    if result_ty.kind == .Result(ok, _) -> success = Val(ok)
+    ok_ty :: success ?? return lower_fail(&m, &f, "task.all tuple has no failure carrier")
+    tuple_result := false
+    if ok_ty.kind == .Tuple(_) -> tuple_result = true
+    if !tuple_result -> return lower_fail(&m, &f, "task.all tuple has no tuple success carrier")
+    fields :: lower_inline_members(p, tuple_ty)
+    outputs :: lower_inline_members(p, ok_ty)
+    if fields.len() != outputs.len() -> return lower_fail(&m, &f, "task.all tuple success arity does not match its handles")
+    flatten :: lower_runtime_symbol(row).ends_with("_result")
+    handles :: lower_pointer(&f)
+    offsets :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: handles, size: fields.len() * 8, align: 8})
+    lower_emit(&f, LIRInst.StackSlot{dst: offsets, size: fields.len() * 8, align: 8})
+    source :: lower_use(&m, &f, tasks) ?? return
+    loop (index, field) in fields {
+        body :: lower_task_element(field.ty) ?? return lower_fail(&m, &f, "task.all tuple field is not a Task")
+        payload := body
+        if flatten {
+            if body.kind == .Result(ok, _) -> payload = ok
+        }
+        if mir_type_identity_key(payload) != mir_type_identity_key(outputs[index].ty) -> return lower_fail(&m, &f, "task.all tuple field has a mismatched result carrier")
+        handle :: lower_read_at(p, &f, source, field.offset, field.ty) ?? return
+        lower_emit(&f, LIRInst.Store{base: handles, offset: index * 8, value: handle})
+        lower_store_word(&f, offsets, index * 8, outputs[index].offset)
+    }
+    count :: lower_const(&f, fields.len())
+    mode :: lower_const_flag(&f, if flatten -> 1 else -> 0)
+    lower_task_outcome(p, c, &m, &f, instruction, "jet_rt_native_task_all_tuple", [LIRValueID]{handles, count, mode, offsets}, result_ty)
+}
+
 // A runtime outcome `export(args..., out) -> verdict` as the instruction's native
 // Result box (1 = Ok at offset 8). The error crosses as a runtime handle: a
 // Core record (TaskFailure) is rebuilt in its native layout (Records.jet); an
@@ -184,17 +251,33 @@ fn lower_task_outcome(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lower
     loop arg in args -> &call_args.push(arg)
     &call_args.push(out)
     verdict :: lower_word(&f)
-    lower_call_runtime(&m, &f, export, call_args, Val(verdict))
-    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: verdict})
-    record :: runtime ?? return
-    zero :: lower_const(&f, 0)
-    failed :: lower_flag(&f)
-    lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: verdict, right: zero})
-    failure :: lower_new_block(&f)
     done :: lower_new_block(&f)
-    lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(failure, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
-    lower_start(&f, failure, [LIRValueID]{})
-    lower_record_store_from_slot(p, &m, &f, err_ty, record, out, dst, 8)
+    lower_call_runtime(&m, &f, export, call_args, Val(verdict))
+    if m.stop_points {
+        status :: lower_word(&f)
+        lower_call_runtime(&m, &f, "jet_rt_session_propagate", [LIRValueID]{}, Val(status))
+        running :: lower_flag(&f)
+        zero :: lower_const(&f, 0)
+        lower_emit(&f, LIRInst.Compare{dst: running, condition: LIRCondition.Eq, left: status, right: zero})
+        resume :: lower_new_block(&f)
+        stopped :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: running, then_target: lower_target(resume, [LIRValueID]{}), else_target: lower_target(stopped, [LIRValueID]{})})
+        lower_start(&f, stopped, [LIRValueID]{})
+        // The runtime left the payload unwritten; release only its container.
+        lower_free_shell(&m, &f, dst, lower_box_size(p, result_ty))
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, resume, [LIRValueID]{})
+    }
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: verdict})
+    if runtime == .Val(record) {
+        zero :: lower_const(&f, 0)
+        failed :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: failed, condition: LIRCondition.Eq, left: verdict, right: zero})
+        failure :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: failed, then_target: lower_target(failure, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, failure, [LIRValueID]{})
+        lower_record_store_from_slot(p, &m, &f, err_ty, record, out, dst, 8)
+    }
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
     lower_start(&f, done, [LIRValueID]{})
 }
@@ -290,7 +373,17 @@ fn lower_task_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     symbol :: lower_runtime_symbol(row)
     handle :: lower_use(&m, &f, receiver) ?? return true
     if symbol == "cancel" {
-        lower_fail(&m, &f, "Task.cancel unwinding across native frames is not lowered at O0 yet")
+        if !m.task_stop_points {
+            lower_fail(&m, &f, "Task.cancel requires checked native Poll/Stopped cleanup edges")
+            return true
+        }
+        lower_call_runtime(&m, &f, "jet_rt_native_task_cancel", [LIRValueID]{handle}, None)
+        lower_alias_absent(&f, instruction)
+        return true
+    }
+    if symbol == "pause" || symbol == "resume" {
+        lower_call_runtime(&m, &f, if row.member == "pause" -> "jet_rt_native_task_pause" else -> "jet_rt_native_task_resume", [LIRValueID]{handle}, None)
+        lower_alias_absent(&f, instruction)
         return true
     }
     consumes :: symbol == "join" || symbol == "jet_task_join_result" || symbol == "detach"
@@ -321,7 +414,7 @@ fn lower_helper_task_body(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LI
     env :: ~f.open_params[0]
     out :: ~f.open_params[1]
     result_ty :: lower_task_body_result(glue.ty) ?? panic("task.body is requested for zero-argument closures")
-    if lower_call_closure_box(p, &m, &f, env, [LIRValueID]{}, result_ty) == .Val(result) -> lower_write_at(p, &f, out, 0, result, result_ty)
+    if lower_call_closure_box(p, &m, &f, env, [LIRValueID]{}, result_ty) == .Val(result) -> lower_callback_store(p, &m, &f, out, result, result_ty)
     zero :: lower_const(&f, 0)
     lower_seal(&f, LIRTerminator.Return{value: Val(zero)})
     lir_builder_finish(f.builder)
@@ -360,6 +453,9 @@ fn lower_task_stored_operands(p: MIRProgram, operation: MIROperation) -> [MIRVal
     if operation == .Semantic(semantic) {
         if semantic == .TaskGroup(_, _, tasks) {
             loop value in tasks -> &stored.push(value)
+        }
+        if semantic == .Select(_, _, values) {
+            loop value in values -> &stored.push(value)
         }
         if semantic == .CoreClosureCall(_, kind, _, closure, _, _) {
             if kind == .Spawn {
@@ -624,4 +720,33 @@ fn lower_channel_cursor_init(p: MIRProgram, c: LowerContext, m: &LowerModule, f:
     lower_store_word(&f, dst, 32, 0)
     lower_store_word(&f, dst, 40, 0)
     true
+}
+
+// A readiness table is normalized by the producer to owned receiver/timer
+// Lists and one Wait. The canonical kernel writes (arm, value: T?).
+fn lower_task_select(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, kind: MIRSelectKind, values: [MIRValueID]) Never! {
+    if kind != .Wait || values.len() != 2 -> return lower_fail(&m, &f, "select has no normalized readiness table")
+    row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "select names a missing Prelude call")
+    symbol :: lower_runtime_symbol(row)
+    probing :: symbol == "jet_select_try_wait_tagged"
+    if symbol != "jet_select_wait_tagged" && !probing -> return lower_fail(&m, &f, "select has no canonical wait route")
+    if !lower_value_owned(c, values[0]) || !lower_value_owned(c, values[1]) -> return lower_fail(&m, &f, "select readiness Lists must be owned")
+    receiver_ty :: lower_value_type(c, values[0]) ?? return lower_fail(&m, &f, "select has no receiver List type")
+    receiver :: lower_list_element(receiver_ty) ?? return lower_fail(&m, &f, "select receivers are not a List")
+    if lower_task_handle_element(receiver, "Receiver") == None -> return lower_fail(&m, &f, "select source is not a Receiver")
+    timer_ty :: lower_value_type(c, values[1]) ?? return lower_fail(&m, &f, "select has no timer List type")
+    timer :: lower_list_element(timer_ty) ?? return lower_fail(&m, &f, "select timers are not a List")
+    if !lower_is_exact_int(timer) -> return lower_fail(&m, &f, "select timers must be exact nanosecond integers")
+    result_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "select has no checked result")
+    members :: lower_inline_members(p, result_ty)
+    if members.len() != 2 -> return lower_fail(&m, &f, "select result is not its arm/payload tuple")
+    if !lower_is_exact_int(members[0].ty) || lower_option_inner(members[1].ty) == None -> return lower_fail(&m, &f, "select result has no canonical arm/payload slots")
+    recvs :: lower_use(&m, &f, values[0]) ?? return
+    timers :: lower_use(&m, &f, values[1]) ?? return
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_storage_into(p, &f, dst, result_ty)
+    mode :: lower_const_flag(&f, if probing -> 1 else -> 0)
+    arm :: lower_address(&f, dst, members[0].offset)
+    value :: lower_address(&f, dst, members[1].offset)
+    lower_call_runtime(&m, &f, "jet_rt_native_select_wait", [LIRValueID]{recvs, timers, mode, arm, value}, None)
 }

@@ -1,9 +1,9 @@
 use jet_foundation.[
-    MIRAccess, MIRDropKind, MIRFunction, MIRIndexKind, MIROperation,
+    MIRAccess, MIRConstant, MIRDropKind, MIRFieldValue, MIRFunction, MIRIndexKind, MIROperation,
     MIRPanicContext, MIRPanicLoc, MIRPanicLocal, MIRPlace, MIRPlaceID,
-    MIRPreludeABI, MIRPreludeFamily, MIRProgram, MIRProjection,
+    MIRPreludeABI, MIRPreludeFamily, MIRProgram, MIRProjection, MIRTupleField,
     MIRSemanticOp, MIRTerminator, MIRType, MIRTypeDef, MIRTypeKind, MIRValueID,
-    mir_owned_ownership, mir_ownership_from_access, mir_type_from_kind,
+    mir_owned_ownership, mir_ownership_from_access, mir_type_from_kind, mir_type_id,
 ]
 
 fn fx_list_type(elem: MIRType) -> MIRType Never! {
@@ -160,6 +160,40 @@ fn fx_lists_oob() -> MIRProgram Never! {
     invalid :: fx_list_index(&b, xs, one, fx_int(), false)
     fx_print(&b, invalid)
     fx_do(&b, MIROperation.Drop{value: xs, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_list_program(b)
+}
+
+// Copying an Object entry list into a Map sorts keys, keeps the final
+// duplicate, and leaves the source's owned String payloads readable.
+// expect-stdout data-entry-map: "last\nfirst\n"
+fn fx_data_entry_map() -> MIRProgram Never! {
+    b := fx_builder()
+    entry :: fx_tuple_type("DataEntryPair", [MIRTupleField]{MIRTupleField{name: "key", ty: fx_string()}, MIRTupleField{name: "value", ty: fx_string()}})
+    list_ty :: fx_list_type(entry)
+    map_ty :: mir_type_from_kind(MIRTypeKind.Map{key: fx_string(), value: fx_string()})
+    root :: fx_local(&b, "entries", list_ty, mir_owned_ownership())
+    pairs := [MIRValueID]{}
+    labels :: [String]{"first", "last", "middle"}
+    loop label in labels {
+        key :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: if label == "middle" -> "aaa" else -> "same"}})
+        value :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: label}})
+        pair :: fx_owned(&b, entry, MIROperation.Tuple{type_id: mir_type_id("DataEntryPair"), fields: [MIRFieldValue]{MIRFieldValue{field: fx_tuple_field_id(entry, "key"), value: key}, MIRFieldValue{field: fx_tuple_field_id(entry, "value"), value: value}}})
+        &pairs.push(pair)
+    }
+    entries :: fx_owned(&b, list_ty, MIROperation.BuildList{values: pairs, trait_coercion: None})
+    fx_do(&b, MIROperation.WritePlace{place: root, value: entries})
+    map :: fx_owned(&b, map_ty, MIROperation.Semantic{operation: MIRSemanticOp.DataEntriesToMap{call: fx_prelude_id("core.encoding", "entries_to_map"), local: b.locals[0].id}})
+    key :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "same"}})
+    selected :: fx_value(&b, fx_string(), fx_borrow(), MIROperation.Index{call: fx_prelude_id("core.list", "get"), base: map, index: key, kind: MIRIndexKind.Map, access: MIRAccess.Read, location: MIRPanicLoc{file: fx_source_file(), line: 1, column: 0}, context: MIRPanicContext{function: "run", source_line: "map[key]", caret: 1, locals: [MIRPanicLocal]{}}})
+    fx_print(&b, selected)
+    zero :: fx_int_const(&b, 0)
+    original :: fx_list_index(&b, entries, zero, entry, false)
+    first :: fx_value(&b, fx_string(), fx_borrow(), MIROperation.Field{base: original, field: fx_tuple_field_id(entry, "value")})
+    fx_print(&b, first)
+    fx_do(&b, MIROperation.Drop{value: key, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: map, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: entries, kind: MIRDropKind.Value})
     fx_block(&b, 0, MIRTerminator.Return{value: None})
     fx_list_program(b)
 }

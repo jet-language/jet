@@ -455,6 +455,22 @@ fn x64_float_compare(emitter: &X64Emitter, condition: LIRCondition, left: Int, r
 fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64Allocation, inst: LIRInst) Never! {
     locations :: allocation.locations
     if inst == {
+        .InlineAsm(dst, args, regs, result, code) -> {
+            // Read all operands before overwriting any bound register.
+            loop arg in args {
+                reg :: x64_operand(&emitter, locations[arg.value], X64_RAX)
+                x64_push(&emitter.code, reg)
+            }
+            i := args.len() - 1
+            loop i >= 0 {
+                x64_pop(&emitter.code, regs[i])
+                i -= 1
+            }
+            loop byte in code -> &emitter.code.push(byte)
+            if dst == .Val(output) {
+                x64_emit_move(&emitter, X64Loc.Reg{reg: result}, locations[output.value])
+            }
+        }
         .Const(dst, value) -> {
             reg :: x64_result_register(locations[dst.value], X64_RAX)
             x64_mov_ri(&emitter.code, reg, value)

@@ -60,7 +60,8 @@ fn lower_payload_info(p: MIRProgram, ty: MIRType, kind: MIRPayloadKind) -> Lower
 fn lower_walk_projections(p: MIRProgram, m: &LowerModule, f: &LowerFunction, root: LIRValueID, root_ty: MIRType, projections: [MIRProjection]) -> LowerFieldAddress? {
     walked :: lower_walk_place(p, &m, &f, root, root_ty, projections) ?? return None
     if walked.borrowed {
-        lower_fail(&m, &f, "writing through a field of runtime handle is not lowered at O0 yet")
+        message :: if walked.ty.kind == .String -> "String field write through a runtime handle is not lowered" else -> "writing through a field of runtime handle is not lowered at O0 yet"
+        lower_fail(&m, &f, message)
         return None
     }
     Val(walked.address)
@@ -161,10 +162,12 @@ fn lower_walk_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, root: LIR
     Val(LowerPlaceAddress{address: LowerFieldAddress{base: base, offset: offset}, ty: ty, borrowed: borrowed})
 }
 
-// The place of field `id` of the runtime handle `handle` of `ty` (RuntimeRoutes.jet
-// LOWER_HANDLE_FIELDS): a Float or Bool is read at the field's own address; a
-// String or nested handle is that address as a borrowed handle, held in a
-// stack slot. None when no export lends the field as its Jet type.
+// Field `id` of a runtime handle (RuntimeRoutes.jet LOWER_HANDLE_FIELDS):
+// Float/Bool and nested handles lend their storage; String writes a borrowed
+// canonical {ptr,len,cap} header into a stack slot. None when no export can
+// project the field as its Jet type. Owning reads clone the borrowed text.
+// Its stack header and Rust-owned bytes must never be released, grown, or
+// transferred to an ownership-taking export. Writes/moves fail before use.
 fn lower_handle_field_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, handle: LIRValueID, ty: MIRType, id: MIRFieldID) -> LowerPlaceAddress? {
     if lower_repr(p, ty) == {
         .Handle(_, _) -> {}
@@ -190,7 +193,12 @@ fn lower_handle_field_place(p: MIRProgram, m: &LowerModule, f: &LowerFunction, h
         }
         if !matches -> return None
         address :: lower_pointer(&f)
-        lower_call_runtime(&m, &f, "jet_rt_handle_field_{runtime.runtime}_{field.name}", [LIRValueID]{handle}, Val(address))
+        if lent.kind == "Text" {
+            lower_emit(&f, LIRInst.StackSlot{dst: address, size: 24, align: 8})
+            lower_call_runtime(&m, &f, "jet_rt_handle_field_{runtime.runtime}_{field.name}", [LIRValueID]{handle, address}, None)
+        } else {
+            lower_call_runtime(&m, &f, "jet_rt_handle_field_{runtime.runtime}_{field.name}", [LIRValueID]{handle}, Val(address))
+        }
         if lent.kind == "Float" || lent.kind == "Flag" {
             return Val(LowerPlaceAddress{address: LowerFieldAddress{base: address, offset: 0}, ty: field.ty, borrowed: true})
         }

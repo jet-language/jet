@@ -77,6 +77,18 @@ function body(path) {
 // Every lowering file (Lower.jet and its sibling family files) and every
 // fixture file under Tests/Fixtures, in name order.
 const sorted = (dir) => existsSync(`${repo}/${dir}`) ? readdirSync(`${repo}/${dir}`).filter((name) => name.endsWith(".jet") && !excluded.has(name)).sort().map((name) => `${dir}/${name}`) : [];
+// Feed the exact audited OS templates into the hand-MIR witnesses; do not
+// maintain a second copy that could diverge from the OS layer.
+const osSource = read("Compiler/JetBackend/Source/OS/Linux.jet");
+const asmLeaves = ["os_syscall", "os_store_word", "os_load_word", "os_load_byte", "os_call_address", "os_call_address_two", "os_syscall_i64", "os_load_i64", "os_store_i64", "os_cas_i64", "os_spin_pause", "os_load_u8", "os_store_u8", "os_write_word_i64", "os_syscall_stack4_i64"];
+const asmSpans = asmLeaves.map((name) => {
+  const start = osSource.indexOf(`fn ${name}(`);
+  const open = osSource.indexOf('"""', start);
+  const close = osSource.indexOf('"""', open + 3);
+  if (start < 0 || open < 0 || close < 0) throw new Error(`missing OS asm leaf ${name}`);
+  return `    if name == "${name}" -> return Span{start: ${Buffer.byteLength(osSource.slice(0, start))}, end: ${Buffer.byteLength(osSource.slice(0, close + 3))}}`;
+});
+const asmWitnessSource = `fn fx_asm_os_source() -> String Never! { ${JSON.stringify(osSource).replaceAll("{", "{{").replaceAll("}", "}}")} }\nfn fx_asm_os_span(name: String) -> Span Never! {\n${asmSpans.join("\n")}\n    panic("unknown OS asm witness {name}")\n}\n`;
 const abiOnly = process.argv.includes("--abi");
 const sanitizeOnly = process.argv.includes("--sanitize");
 const small = abiOnly || sanitizeOnly;
@@ -88,8 +100,23 @@ const parts = [
     "// [unit source: Foundation items named by MIR.jet]",
     item("Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet", "pub struct Span {"),
     item("Compiler/JetFoundation/Source/Registry/CoreCalls.jet", "pub enum Effect "),
+    // MIR.jet's Core-call and layout facts (as run-lint-fixtures.mjs): the Rust emitter needs a declaration row for
+    // every nominal type the unit names.
+    ...[
+      "pub enum SinkClass ",
+      "pub enum CoreCallFallibility ",
+      "pub enum CoreCallPureRoute {",
+      "pub enum CoreCallInterpreterRoute ",
+      "pub enum CoreCallSymbol ",
+      "pub struct CoreMarkerApplication {",
+    ].map((head) => item("Compiler/JetFoundation/Source/Registry/CoreCalls.jet", head)),
     item("Compiler/JetFoundation/Source/Types/Types.jet", "pub enum ParamZone {"),
     item("Compiler/JetFoundation/Source/Types/Types.jet", "pub fn param_zone_name("),
+    ...[
+      "pub struct ByteLayout {",
+      "pub struct FieldLayoutFacts {",
+      "pub struct LayoutFacts {",
+    ].map((head) => item("Compiler/JetFoundation/Source/Target/Layout.jet", head)),
     body("Compiler/JetFoundation/Source/MIR/MIR.jet"),
     body("Compiler/JetFoundation/Source/Text/RustDebug.jet"),
   ]),
@@ -100,7 +127,9 @@ const parts = [
     body("Compiler/JetBackend/Source/LIR/Print.jet"),
     ...sorted("Compiler/JetBackend/Source/Lower").map(body),
   ] : []),
+  ...(!small ? [asmWitnessSource] : []),
   body("Compiler/JetBackend/Source/X64/Encoder.jet"),
+  body("Compiler/JetBackend/Source/X64/InlineAsm.jet"),
   body("Compiler/JetBackend/Source/X64/RegAlloc.jet"),
   body("Compiler/JetBackend/Source/X64/Select.jet"),
   body("Compiler/JetBackend/Source/Image/Link.jet"),

@@ -50,9 +50,12 @@ fn lower_reach_id(q: &LowerPrepared, id: U64, parent: Int) Never! {
     lower_mono_intern_type(&q, ty, parent)
 }
 
-fn lower_reach_arg(q: &LowerPrepared, arg: MIRCallArg, parent: Int) Never! {
+fn lower_reach_arg(p: MIRProgram, q: &LowerPrepared, function: MIRFunction, facts: [U64:Int], arg: MIRCallArg, parent: Int) Never! {
     if arg.fn_coercion == .Val(value) -> lower_mono_intern_type(&q, value.ty, parent)
-    if arg.box_as_trait == .Val(id) -> lower_reach_id(&q, id.value, parent)
+    if arg.box_as_trait == .Val(id) {
+        lower_reach_id(&q, id.value, parent)
+        lower_reach_trait_value(p, &q, function, facts, arg.value, id, parent)
+    }
     if arg.widen_to_union == .Val(value) -> lower_reach_id(&q, value.union.value, parent)
 }
 
@@ -74,8 +77,16 @@ fn lower_reach_callee(p: MIRProgram, q: &LowerPrepared, callee: MIRCallee, type_
             lower_mono_intern_type(&q, owner, parent)
             lower_mono_request(p, &q, id, Val(owner), type_args, parent, site).drop("direct call")
         }
-        .TraitMethod(method, _, receiver) -> {
+        .TraitMethod(method, bound, receiver) -> {
             lower_mono_intern_type(&q, receiver, parent)
+            if lower_trait_ref(p, receiver) == None && lower_trait_impl(p, receiver, bound) == .Val(implementation) {
+                checked :: lower_trait_method(p, bound, method) ?? return
+                loop id in implementation.methods {
+                    row :: q.source_rows.get(id.value) ?? next
+                    if p.functions[row].name == checked.name -> lower_mono_request(p, &q, id, Val(receiver), type_args, parent, site).drop("concrete trait method")
+                }
+                return
+            }
             if q.trait_seen.get(method.value) == None {
                 &q.trait_seen.add(method.value, true).drop("checked absent above")
                 first :: q.trait_targets.get(method.value) ?? -1
@@ -83,6 +94,9 @@ fn lower_reach_callee(p: MIRProgram, q: &LowerPrepared, callee: MIRCallee, type_
             }
         }
         .Foreign(id) -> {
+            if q.asm_foreign.get(id.value) == .Val(function) {
+                lower_mono_request(p, &q, function, None, [MIRType]{}, parent, site).drop("assembly dependency")
+            }
             row :: q.foreign_rows.get(id.value) ?? return
             if q.foreign_seen.get(id.value) != None -> return
             &q.foreign_seen.add(id.value, true).drop("checked absent above")
@@ -123,13 +137,13 @@ fn lower_reach_operation(p: MIRProgram, q: &LowerPrepared, function: MIRFunction
             if conversion == .Prelude(_, _, fallibility) -> lower_reach_fallibility(&q, fallibility, parent)
         }
         .Call(callee, args, type_args) -> {
-            loop arg in args -> lower_reach_arg(&q, arg, parent)
+            loop arg in args -> lower_reach_arg(p, &q, function, facts, arg, parent)
             lower_reach_callee(p, &q, callee, type_args, parent, site)
             if callee == .Prelude(call) -> lower_lazy_reach_call(p, &q, function, facts, call, args, parent)
         }
         .IndirectCall(_, args, type_args) -> {
             loop ty in type_args -> lower_mono_intern_type(&q, ty, parent)
-            loop arg in args -> lower_reach_arg(&q, arg, parent)
+            loop arg in args -> lower_reach_arg(p, &q, function, facts, arg, parent)
         }
         .Closure(id, _, _) -> lower_mono_dependency(p, &q, id, bindings, parent, site)
         .Global(name) -> {
@@ -144,7 +158,7 @@ fn lower_reach_operation(p: MIRProgram, q: &LowerPrepared, function: MIRFunction
         .PtrFromAddr(_, element) -> lower_mono_intern_type(&q, element, parent)
         .CoreCall(_, route, args, type_args, fallibility, plan) -> {
             loop ty in type_args -> lower_mono_intern_type(&q, ty, parent)
-            loop arg in args -> lower_reach_arg(&q, arg, parent)
+            loop arg in args -> lower_reach_arg(p, &q, function, facts, arg, parent)
             lower_lazy_reach_call(p, &q, function, facts, route, args, parent)
             lower_reach_fallibility(&q, fallibility, parent)
             if plan == .Val(data) {
@@ -159,12 +173,30 @@ fn lower_reach_operation(p: MIRProgram, q: &LowerPrepared, function: MIRFunction
             }
         }
         .Todo(_, _, expected) -> { if expected == .Val(ty) -> lower_mono_intern_type(&q, ty, parent) }
-        .TraitBox(_, target) -> lower_reach_id(&q, target.value, parent)
-        .BuildList(_, target) -> { if target == .Val(id) -> lower_reach_id(&q, id.value, parent) }
+        .TraitBox(value, target) -> {
+            lower_reach_id(&q, target.value, parent)
+            lower_reach_trait_value(p, &q, function, facts, value, target, parent)
+        }
+        .BuildList(values, target) -> {
+            if target == .Val(id) {
+                lower_reach_id(&q, id.value, parent)
+                loop value in values -> lower_reach_trait_value(p, &q, function, facts, value, id, parent)
+            }
+        }
         .BuildString(parts) -> {
             loop part in parts {
                 if part.kind == .Interpolation(value, format) {
                     if format == .Display -> lower_reach_render_value(&q, function, facts, value, false, parent)
+                }
+            }
+        }
+        // A user Iterable source's iter/next run from its cursor (Iterable.jet).
+        .LoopIterInit(_, _, _, _, source_kind) -> {
+            if source_kind == .Iterable(_, _, iter_symbol, next_symbol) {
+                hooks :: [String]{iter_symbol, next_symbol}
+                loop key in hooks {
+                    hook :: lower_function_with_key(p, key) ?? next
+                    lower_mono_request(p, &q, hook.id, None, [MIRType]{}, parent, site).drop("Iterable loop hook")
                 }
             }
         }
@@ -181,6 +213,10 @@ fn lower_reach_semantic(p: MIRProgram, q: &LowerPrepared, function: MIRFunction,
             if lower_prelude_row(p, call) == .Val(row) {
                 if lower_runtime_symbol(row) == "jet_iter_join" {
                     lower_lazy_reach_value(&q, function, facts, receiver, parent)
+                } else if lower_runtime_symbol(row) == "jet_deque_join" {
+                    if facts.get(receiver.value) == .Val(index) {
+                        if lower_queue_element(function.values[index].ty) == .Val(elem) -> lower_reach_render_child(&q, elem, true, parent)
+                    }
                 } else if row.member == "join" {
                     lower_reach_render_value(&q, function, facts, receiver, true, parent)
                 }
@@ -188,7 +224,7 @@ fn lower_reach_semantic(p: MIRProgram, q: &LowerPrepared, function: MIRFunction,
         }
         .CCallback(_, callback, _) -> lower_reach_callback(p, &q, callback.value, parent, site)
         .StaticPreludeCall(call, args, owners, types) -> {
-            loop arg in args -> lower_reach_arg(&q, arg, parent)
+            loop arg in args -> lower_reach_arg(p, &q, function, facts, arg, parent)
             lower_lazy_reach_call(p, &q, function, facts, call, args, parent)
             loop owner in owners {
                 if owner == .Type(ty) -> lower_mono_intern_type(&q, ty, parent)
@@ -196,16 +232,24 @@ fn lower_reach_semantic(p: MIRProgram, q: &LowerPrepared, function: MIRFunction,
             loop ty in types -> lower_mono_intern_type(&q, ty, parent)
         }
         .HardwareCall(_, hardware, _, args) -> {
-            loop arg in args -> lower_reach_arg(&q, arg, parent)
+            loop arg in args -> lower_reach_arg(p, &q, function, facts, arg, parent)
             if hardware == {
                 .DMAStart(_, _, ty) | .DMAWait(_, _, ty) -> lower_mono_intern_type(&q, ty, parent)
                 else -> {}
             }
         }
-        .AllocNew(_, _, _, args) | .ClosureMethod(_, args, _) | .HostCall(_, args) -> { loop arg in args -> lower_reach_arg(&q, arg, parent) }
+        .AllocNew(_, _, _, args) | .ClosureMethod(_, args, _) | .HostCall(_, args) -> { loop arg in args -> lower_reach_arg(p, &q, function, facts, arg, parent) }
         .HostBorrowCallback(_, types) -> { loop ty in types -> lower_mono_intern_type(&q, ty, parent) }
         .MathBuiltin(id, _, _) | .PreciseBuiltin(id, _, _) -> lower_reach_id(&q, id.value, parent)
-        .StructLiteral(_, _, _, target, _) -> { if target == .Val(id) -> lower_reach_id(&q, id.value, parent) }
+        .StructLiteral(type_id, _, _, target, _) -> {
+            if target == .Val(id) {
+                lower_reach_id(&q, id.value, parent)
+                if q.checked_types.rows.get(type_id.value) == .Val(row) {
+                    literal_ty :: ~q.checked_types.types[row]
+                    lower_reach_trait_type(p, &q, literal_ty, id, parent)
+                }
+            }
+        }
         .TextPatternMatch(_, _, parts) | .CursorTakePattern(_, _, parts) -> {
             loop part in parts {
                 if part == .Hole(_, ty, _) -> lower_reach_id(&q, ty.value, parent)
@@ -219,6 +263,7 @@ fn lower_reach_semantic(p: MIRProgram, q: &LowerPrepared, function: MIRFunction,
                 }
             }
         }
+        .TypedTextInterp(_, _, _, holes, _) -> { loop hole in holes -> lower_reach_render_value(&q, function, facts, hole, true, parent) }
         else -> {}
     }
 }
