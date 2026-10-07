@@ -45,6 +45,7 @@ fn lower_map_key_kind(p: MIRProgram, ty: MIRType) -> String Never! {
     }
     if lower_is_exact_int(ty) -> return "int"
     if lower_is_unsigned_word(ty) -> return "uword"
+    if lower_order_runtime(p, ty) != None -> return "runtime"
     if lower_type_def(p, ty) == .Val(definition) {
         if definition.kind == {
             .Alias(base) | .Distinct(base, _) -> return lower_map_key_kind(p, base)
@@ -103,6 +104,10 @@ fn lower_map_key_order(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MI
     kind :: lower_map_key_kind(p, ty)
     less :: lower_flag(&f)
     equal :: lower_flag(&f)
+    if kind == "runtime" {
+        lower_runtime_order(p, &m, &f, ty, left, right, less, equal)
+        return LowerMapOrder{less: less, same: equal}
+    }
     if kind == "int" {
         lower_exact_compare(&m, &f, less, LIRCondition.Lt, left, right)
         lower_exact_compare(&m, &f, equal, LIRCondition.Eq, left, right)
