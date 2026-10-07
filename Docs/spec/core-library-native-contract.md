@@ -115,6 +115,38 @@ reads and writes through static-rooted places address that same cell, including
 when the shared object writer packages a runtime library. Atomic values still
 require their typed allocation, ordering and ownership contract; a raw machine
 compare-and-swap primitive does not establish that contract.
+
+### Exact integer carrier
+
+An exact `Int` crosses the scalar ABI in one 64-bit word. Values whose two
+highest bits agree are their signed inline payload (`-2^62..2^62-1`).
+A boxed word has bit 62 set, bit 63 clear, and its remaining bits hold an
+8-byte-aligned pointer. The immutable C-layout node is 48 bytes: atomic owner
+count at byte 0, retired-list link at 8, sign word (`0` or `1`) at 16, limb
+pointer at 24, limb count at 32, and limb capacity at 40. Limbs are 32-bit
+base-1,000,000,000 digits, least-significant first. Zero is nonnegative;
+arithmetic normalizes leading zero limbs and returns to the inline form when
+possible. No Rust `Vec` layout is part of this ABI.
+
+The native runtime allocates nodes with `(size=48, align=8)` and limb buffers
+with `(size=capacity*4, align=4)` through the shared Jet allocator. A zero
+capacity uses the dangling limb pointer `4`, which is never freed. Borrowing
+arithmetic and conversion exports leave their input owners intact; arithmetic
+results and clones return owners. `jet_rt_int_drop` atomically consumes one
+owner. At zero it calls the explicitly registered memory-only
+`jet_rt_int_retire_zero` leaf: the existing shared hazard domain frees
+unhazarded nodes immediately, or links hazarded nodes through byte 8 and
+reclaims them when the last read guard clears. Atomic slots remove their owner
+before dropping it, and stale readers must revalidate the slot under a hazard.
+A second retirement list would be unsafe while Rust atomic consumers remain.
+The hazard-domain leaf dies when that domain ports to Jet. Native lowering
+must pair every owned boxed carrier with drop and copying with retain;
+the runtime export alone does not establish that compiler ownership glue.
+Private unpublished arithmetic workspaces use their unique-owner discard.
+Rust-tier seed/verification transport uses the identical C layout, with its
+allocator paired at construction and release; that registered transport dies
+at the Rust cutover, rather than defining a second numeric representation.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
