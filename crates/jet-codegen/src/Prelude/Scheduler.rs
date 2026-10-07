@@ -1725,16 +1725,22 @@ pub fn jet_scheduler_yield_now() {
     jet_scheduler_yield("task yield", &slot, Some(Duration::ZERO));
 }
 
-/// Control-plane trace for the TLS current task (idle defaults when none).
-pub fn jet_scheduler_current_task_trace() -> String {
-    match current_task_control() {
-        Some(ctrl) => {
-            let paused = ctrl.paused.load(std::sync::atomic::Ordering::Relaxed);
-            let cancel = ctrl.cancelled.load(std::sync::atomic::Ordering::Relaxed);
-            crate::jet_task_control_trace(paused, cancel)
-        }
-        None => crate::jet_task_control_trace(false, false),
-    }
+/// Read the current host task's pause flag; absence is preserved for Jet.
+pub fn jet_scheduler_task_paused() -> Option<bool> {
+    TASK_CONTROL.with(|task| {
+        task.borrow().as_ref().map(|control| {
+            control.paused.load(std::sync::atomic::Ordering::Relaxed)
+        })
+    })
+}
+
+/// Read the current host task's cancellation flag; absence is preserved for Jet.
+pub fn jet_scheduler_task_cancelled_state() -> Option<bool> {
+    TASK_CONTROL.with(|task| {
+        task.borrow().as_ref().map(|control| {
+            control.cancelled.load(std::sync::atomic::Ordering::Relaxed)
+        })
+    })
 }
 
 // ── M2: IO poll substrate (native epoll on Linux; portable fallback elsewhere) ─

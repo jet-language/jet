@@ -76,15 +76,21 @@ fn mime_and_email_have_one_semantic_home() {
 
 #[test]
 fn sketches_have_one_semantic_home() {
+    // HLL/count-min/reservoir/TDigest are ordinary Jet carriers in Core/data/sketch*.jet;
+    // no tier may regain the deleted Rust kernel.
     let kernel = "Core/Sketch.rs";
-    for (path, tier) in [
-        ("crates/jet-codegen/src/Codegen/mod.rs", "AOT"),
-        (
-            "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
-            "comptime/interpreter",
-        ),
+    for path in [
+        "crates/jet-codegen/src/Codegen/mod.rs",
+        "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
+        "Compiler/JetCodegen/Source/Emit/RuntimePrefix.jet",
     ] {
-        assert!(read(path).contains(kernel), "{tier} must include {kernel}");
+        assert!(!read(path).contains(kernel), "{path} must not include {kernel}");
+    }
+    assert!(!Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("crates/jet-codegen/src/Prelude/Core/Sketch.rs")
+        .exists());
+    for path in ["Core/data/sketch/hll.jet", "Core/data/sketch/cms.jet", "Core/data/sketch/reservoir.jet"] {
+        assert!(read(path).contains("#Test"), "{path} must cover its sketch policy");
     }
 
     let pure = read("crates/jet-comptime/src/Comptime/CorePureParity.rs");
@@ -148,7 +154,7 @@ fn civil_time_and_duration_have_one_semantic_home() {
     }
     for path in [
         "crates/jet-comptime/src/Comptime/Builtins.rs",
-        "crates/jet-codegen/src/Codegen/TIR/eval/handles.rs",
+        "crates/jet-codegen/src/Codegen/MIREval.rs",
     ] {
         assert!(
             read(path).contains("Core/Duration.rs"),
@@ -292,13 +298,6 @@ fn round_three_value_kernels_have_one_semantic_home() {
             ],
         ),
         (
-            "Core/EncodingBase.rs",
-            [
-                "crates/jet-codegen/src/Codegen/mod.rs",
-                "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
-            ],
-        ),
-        (
             "Core/NetPure.rs",
             [
                 "crates/jet-codegen/src/Codegen/mod.rs",
@@ -343,13 +342,25 @@ fn round_three_value_kernels_have_one_semantic_home() {
     assert!(!codecs.contains("fn jet_std_hex_encode"));
     assert!(!codecs.contains("fn jet_std_b64_encode"));
     assert!(!codecs.contains("fn jet_std_base32_encode"));
+    let kernel = read("crates/jet-codegen/src/Prelude/Core/EncodingBase.rs");
+    for name in [
+        "jet_std_hex_encode", "jet_std_hex_decode", "jet_std_hex_dump",
+        "jet_std_crc_hqx", "jet_std_crc32", "jet_std_b64_encode",
+        "jet_std_base32_encode", "jet_std_base32hex_encode",
+    ] {
+        assert!(!kernel.contains(name), "{name} must live in Jet Core");
+    }
+    for path in ["Core/encoding/hex.jet", "Core/encoding/base64.jet", "Core/encoding/base32.jet"] {
+        assert!(read(path).contains("#Test"), "{path} must cover its codec kernels");
+    }
     let core_calls = read("crates/jet-comptime/src/Comptime/Methods/core_calls.rs");
+    let plain_calls = read("crates/jet-comptime/src/Comptime/Methods/core_calls/plain_calls.rs");
     for decoder in [
         "base_encoding_dispatch::decode_base64",
         "base_encoding_dispatch::decode_base64url",
         "base_encoding_dispatch::decode_base32",
     ] {
-        assert!(core_calls.contains(decoder), "comptime must use {decoder}");
+        assert!(plain_calls.contains(decoder), "comptime must use {decoder}");
     }
 
     let data_fmt = read("crates/jet-codegen/src/Prelude/CoreLib/Top/DataFmt.rs");

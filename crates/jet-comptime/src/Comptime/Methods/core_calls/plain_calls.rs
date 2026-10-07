@@ -260,7 +260,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         // the AOT-only black-box effect has no observable CtValue equivalent.
         // D-OBS3: retain trace context in the shared log Prelude state even
         // when the default evaluator executes a service call.
-        ("core.log", "set_trace_id") => {
+        ("core.log", "__trace_store") => {
             log_kernel::set_trace_id(as_string(one(0)?, span)?);
             Ok(CtValue::Unit)
         }
@@ -285,34 +285,17 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
             variant: loadable_variant(state).to_string(),
             args: vec![(None, one(0)?.clone())],
         }),
-        // D-FIDELITY-API1=A: explicit runtime-global signal. Interpreter owns
-        // same f32-backed range and validation contract as AOT/JIT.
-        ("core.perf", "fidelity") => Ok(CtValue::Float(CtFloat::f64(f32::from_bits(
-            PERF_FIDELITY.with(Cell::get),
-        ) as f64))),
-        ("core.perf", "default_fidelity") => Ok(CtValue::Float(CtFloat::f64(f32::from_bits(
-            PERF_DEFAULT_FIDELITY_BITS,
-        ) as f64))),
-        ("core.perf", "override_fidelity") => {
-            let value = as_float(one(0)?, span)?;
-            if !value.is_finite() || !(0.0..=1.0).contains(&value) {
-                return Ok(CtValue::failed(Box::new(CtValue::Str(format!(
-                    "core.perf.Perf.override_fidelity needs 0.0 through 1.0, got {}",
-                    value
-                )))));
-            }
-            PERF_FIDELITY.with(|c| c.set((value as f32).to_bits()));
-            Ok(CtValue::Present(Box::new(CtValue::Unit)))
-        }
-        ("core.perf", "reset_fidelity") => {
-            PERF_FIDELITY.with(|c| c.set(PERF_DEFAULT_FIDELITY_BITS));
+        // A raw per-session word; Core/perf owns its interpretation.
+        ("core.perf", "__read_bits") => Ok(CtValue::Int(PERF_FIDELITY.with(Cell::get))),
+        ("core.perf", "__write_bits") => {
+            let bits = as_int(one(0)?, span)?;
+            PERF_FIDELITY.with(|cell| cell.set(bits));
             Ok(CtValue::Unit)
         }
         // --- core.math implementation surface ---
         ("core.math", "sqrt") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.sqrt())),
         ("core.math", "floor") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.floor())),
         ("core.math", "ceil") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.ceil())),
-        ("core.math", "round") => Ok(CtValue::Int(as_ct_float(one(0)?, span)?.round_i64())),
         ("core.math", "abs") => match one(0)? {
             value if exact_big(&value).is_some() => {
                 let value = exact_big(&value).expect("whole-number abs");
@@ -391,6 +374,12 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
             ),
             _ => Err(unsupported("core.math.clamp: non-numeric arguments", span)),
         },
+        ("core.math", "cmp") => Ok(CtValue::Int(math_lib_pure::jet_std_math_cmp(
+            as_float(one(0)?, span)?, as_float(one(1)?, span)?,
+        ))),
+        ("core.math", "is_finite") => Ok(CtValue::Bool(
+            math_lib_pure::jet_std_math_is_finite(as_float(one(0)?, span)?),
+        )),
         ("core.math", "log2") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.log2())),
         ("core.math", "log10") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.log10())),
         // card #392 gap fix: the rest of `core.math` — mechanical ports of
@@ -414,32 +403,12 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         ("core.math", "exp2") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.exp2())),
         ("core.math", "exp_m1") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.exp_m1())),
         ("core.math", "ln_1p") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.ln_1p())),
-        ("core.math", "signum") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.signum())),
         ("core.math", "trunc") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.trunc())),
-        ("core.math", "fract") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.fract())),
-        ("core.math", "degrees") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.to_degrees())),
-        ("core.math", "radians") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.to_radians())),
         ("core.math", "atan2") => {
             let left = as_ct_float(one(0)?, span)?;
             let right = as_ct_float(one(1)?, span)?;
             Ok(CtValue::Float(
                 left.atan2(right)
-                    .ok_or_else(|| unsupported("mixing float widths", span))?,
-            ))
-        }
-        ("core.math", "copysign") => {
-            let left = as_ct_float(one(0)?, span)?;
-            let right = as_ct_float(one(1)?, span)?;
-            Ok(CtValue::Float(
-                left.copysign(right)
-                    .ok_or_else(|| unsupported("mixing float widths", span))?,
-            ))
-        }
-        ("core.math", "log") => {
-            let left = as_ct_float(one(0)?, span)?;
-            let right = as_ct_float(one(1)?, span)?;
-            Ok(CtValue::Float(
-                left.log(right)
                     .ok_or_else(|| unsupported("mixing float widths", span))?,
             ))
         }
@@ -488,17 +457,6 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 value.is_even()
             } else {
                 value.is_odd()
-            }))
-        }
-        ("core.math", method @ ("leading_ones" | "trailing_ones" | "digits")) => {
-            let value = exact_big(one(0)?)
-                .ok_or_else(|| unsupported("this operation needs a whole number", span))?;
-            Ok(CtValue::Int(if method == "leading_ones" {
-                value.leading_ones()
-            } else if method == "trailing_ones" {
-                value.trailing_ones()
-            } else {
-                value.digits()
             }))
         }
         ("core.math", "binomial") => {
@@ -600,117 +558,12 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 ("rem", exact_int_value(remainder)),
             ]))
         }
-        ("core.math", "is_normal") => Ok(CtValue::Bool(
-            as_ct_float(one(0)?, span)?.as_f64().is_normal(),
-        )),
-        ("core.math", "is_subnormal") => Ok(CtValue::Bool(
-            as_ct_float(one(0)?, span)?.as_f64().is_subnormal(),
-        )),
-        ("core.math", "is_canonical") => {
-            let x = as_ct_float(one(0)?, span)?;
-            Ok(CtValue::Bool(x.is_finite() || x.is_nan()))
-        }
-        ("core.math", "is_signed" | "sign_bit") => Ok(CtValue::Bool(
-            as_ct_float(one(0)?, span)?.as_f64().is_sign_negative(),
-        )),
-        ("core.math", "is_zero") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.as_f64() == 0.0)),
-        ("core.math", "is_integer") => {
-            let x = as_ct_float(one(0)?, span)?;
-            Ok(CtValue::Bool(x.is_finite() && x.as_f64().fract() == 0.0))
-        }
-        ("core.math", "next_up") => Ok(CtValue::Float(CtFloat::f64(
-            as_ct_float(one(0)?, span)?.as_f64().next_up(),
-        ))),
-        ("core.math", "next_down") => Ok(CtValue::Float(CtFloat::f64(
-            as_ct_float(one(0)?, span)?.as_f64().next_down(),
-        ))),
-        ("core.math", "copy") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?)),
-        ("core.math", "cot") => {
-            let x = as_ct_float(one(0)?, span)?.as_f64();
-            Ok(CtValue::Float(CtFloat::f64(1.0 / x.tan())))
-        }
-        ("core.math", "inv") => {
-            let x = as_ct_float(one(0)?, span)?.as_f64();
-            Ok(CtValue::Float(CtFloat::f64(1.0 / x)))
-        }
-        ("core.math", "zero") => Ok(CtValue::Float(CtFloat::f64(0.0))),
-        ("core.math", "radix") => Ok(CtValue::Int(2)),
-        ("core.math", "cmp") => {
-            let a = as_ct_float(one(0)?, span)?.as_f64();
-            let b = as_ct_float(one(1)?, span)?.as_f64();
-            Ok(CtValue::Int(math_lib_pure::jet_std_math_cmp(a, b)))
-        }
-        ("core.math", "next_after") => {
-            let a = as_ct_float(one(0)?, span)?.as_f64();
-            let b = as_ct_float(one(1)?, span)?.as_f64();
-            Ok(CtValue::Float(CtFloat::f64(
-                math_lib_pure::jet_std_math_next_after(a, b),
-            )))
-        }
-        ("core.math", "ldexp" | "scaleb") => {
-            let x = as_ct_float(one(0)?, span)?.as_f64();
-            let exp = match one(1)? {
-                CtValue::Int(v) => *v,
-                _ => return Err(unsupported("ldexp needs a whole-number exponent", span)),
-            };
-            Ok(CtValue::Float(CtFloat::f64(
-                math_lib_pure::jet_std_math_ldexp(x, exp),
-            )))
-        }
-        ("core.math", "ilogb") => {
-            let x = as_ct_float(one(0)?, span)?.as_f64();
-            Ok(match math_lib_pure::jet_std_math_ilogb(x) {
-                Some(e) => CtValue::Present(Box::new(CtValue::Int(e))),
-                None => CtValue::absent(Type::Int),
-            })
-        }
-        ("core.math", "logb") => Ok(CtValue::Float(CtFloat::f64(
-            math_lib_pure::jet_std_math_logb(as_ct_float(one(0)?, span)?.as_f64()),
-        ))),
-        ("core.math", "significand") => Ok(CtValue::Float(CtFloat::f64(
-            math_lib_pure::jet_std_math_significand(as_ct_float(one(0)?, span)?.as_f64()),
-        ))),
-        ("core.math", "ulp") => Ok(CtValue::Float(CtFloat::f64(
-            math_lib_pure::jet_std_math_ulp(as_ct_float(one(0)?, span)?.as_f64()),
-        ))),
-        ("core.math", "erf") => Ok(CtValue::Float(CtFloat::f64(
-            math_lib_pure::jet_std_math_erf(as_ct_float(one(0)?, span)?.as_f64()),
-        ))),
-        ("core.math", "erfc") => Ok(CtValue::Float(CtFloat::f64(
-            math_lib_pure::jet_std_math_erfc(as_ct_float(one(0)?, span)?.as_f64()),
-        ))),
-        ("core.math", "gamma") => Ok(CtValue::Float(CtFloat::f64(
-            math_lib_pure::jet_std_math_gamma(as_ct_float(one(0)?, span)?.as_f64()),
-        ))),
-        ("core.math", "lgamma") => Ok(CtValue::Float(CtFloat::f64(
-            math_lib_pure::jet_std_math_lgamma(as_ct_float(one(0)?, span)?.as_f64()),
-        ))),
         ("core.math", "sin_cos") => {
             let x = as_ct_float(one(0)?, span)?.as_f64();
             let (s, c) = x.sin_cos();
             Ok(named_tuple(&[
                 ("sin", CtValue::Float(CtFloat::f64(s))),
                 ("cos", CtValue::Float(CtFloat::f64(c))),
-            ]))
-        }
-        ("core.math", "modf") => {
-            let x = as_ct_float(one(0)?, span)?;
-            Ok(named_tuple(&[
-                ("fract", CtValue::Float(x.fract())),
-                ("whole", CtValue::Float(x.trunc())),
-            ]))
-        }
-        ("core.math", "frexp") => {
-            let x = as_ct_float(one(0)?, span)?.as_f64();
-            let exp = math_lib_pure::jet_std_math_ilogb(x).unwrap_or(0);
-            let frac = if x == 0.0 || !x.is_finite() {
-                x
-            } else {
-                math_lib_pure::jet_std_math_ldexp(x, -exp)
-            };
-            Ok(named_tuple(&[
-                ("frac", CtValue::Float(CtFloat::f64(frac))),
-                ("exp", CtValue::Int(exp)),
             ]))
         }
         ("core.math", "hypot") => {
@@ -721,18 +574,6 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                     .ok_or_else(|| unsupported("mixing float widths", span))?,
             ))
         }
-        ("core.math", "lerp") => {
-            let left = as_ct_float(one(0)?, span)?;
-            let right = as_ct_float(one(1)?, span)?;
-            let t = as_ct_float(one(2)?, span)?;
-            Ok(CtValue::Float(
-                left.lerp(right, t)
-                    .ok_or_else(|| unsupported("mixing float widths", span))?,
-            ))
-        }
-        ("core.math", "is_nan") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.is_nan())),
-        ("core.math", "is_inf") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.is_infinite())),
-        ("core.math", "is_finite") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.is_finite())),
         ("core.math", "sign") => Ok(CtValue::Int(as_ct_float(one(0)?, span)?.sign())),
         // --- core.text module implementation surface (card #392: `"core.string"` was a
         // dead key here — no import ever resolves to it, `core.text` is the
@@ -1495,12 +1336,13 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 fields: vec![("state".to_string(), CtValue::Int(mixed as i64))],
             })
         }
-        // D-CRYPTO-RNG1=A: a missing or rejected provider is `None`; the Jet
-        // wrapper in `Core/crypto/random.jet` reports it as `Unavailable`.
-        ("core.crypto.random", "bytes") => {
+        // D-CRYPTO-RNG1=A: the one OS CSPRNG fill behind the Jet
+        // `core.crypto.random.bytes` policy; a missing or rejected provider is
+        // `None` and the Jet body reports it as `Unavailable`.
+        ("core.crypto.random", "__os_entropy") => {
             let count = match one(0)? {
                 CtValue::Int(value) => *value,
-                _ => return Err(unsupported("crypto.random.bytes expects an Int", span)),
+                _ => return Err(unsupported("crypto.random.__os_entropy expects an Int", span)),
             };
             Ok(match crypto_entropy_kernel::jet_crypto_entropy_bytes(count) {
                 Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
@@ -1691,53 +1533,6 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         // host kernels the Core wrappers forward to; the evaluator binds the
         // same Rust kernels AOT and the JIT call (EncodingBase.rs,
         // BaseEncodingDispatch.rs). ---
-        ("core.encoding.hex", "encode") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Str(hex_encode(bytes)))
-        }
-        ("core.encoding.hex", "encode_upper") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Str(encoding_base_kernel::jet_std_hex_encode_upper(&bytes)))
-        }
-        ("core.encoding.hex", "decode") => {
-            let s = as_string(one(0)?, span)?;
-            Ok(match hex_decode(s) {
-                Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
-            })
-        }
-        ("core.encoding.hex", "is_hex") => {
-            let s = as_string(one(0)?, span)?.to_string();
-            Ok(CtValue::Bool(encoding_base_kernel::jet_std_hex_is_hex(&s)))
-        }
-        ("core.encoding.hex", "crc_hqx") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            let value = as_int(one(1)?, span)?;
-            Ok(CtValue::Int(encoding_base_kernel::jet_std_crc_hqx(&bytes, value)))
-        }
-        ("core.encoding.hex", "crc32") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Int(encoding_base_kernel::jet_std_crc32(&bytes)))
-        }
-        ("core.encoding.hex", "encode_sep") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            let separator = as_string(one(1)?, span)?.to_string();
-            Ok(CtValue::Str(encoding_base_kernel::jet_std_hex_encode_sep(
-                &bytes, &separator,
-            )))
-        }
-        ("core.encoding.hex", "dump") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Str(encoding_base_kernel::jet_std_hex_dump(&bytes)))
-        }
-        ("core.encoding.hex", "b2a_base64") | ("core.encoding.base64", "encode") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Str(base64_encode(bytes)))
-        }
-        ("core.encoding.base64", "encodebytes") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Str(encoding_base_kernel::jet_std_b64_encodebytes(&bytes)))
-        }
         ("core.encoding.base64", "decode") | ("core.encoding.base64", "decodebytes")
         | ("core.encoding.hex", "a2b_base64") => {
             let s = as_string(one(0)?, span)?;
@@ -1757,26 +1552,6 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 },
             )
         }
-        ("core.encoding.base64", "encode_url") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Str(encoding_base_kernel::jet_std_b64url_encode(
-                &bytes,
-            )))
-        }
-        ("core.encoding.base64", "encode_url_padded") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Str(encoding_base_kernel::jet_std_b64url_encode_padded(
-                &bytes,
-            )))
-        }
-        ("core.encoding.base64", "pad") => {
-            let s = as_string(one(0)?, span)?.to_string();
-            Ok(CtValue::Str(encoding_base_kernel::jet_std_b64_pad(&s)))
-        }
-        ("core.encoding.base64", "unpad") => {
-            let s = as_string(one(0)?, span)?.to_string();
-            Ok(CtValue::Str(encoding_base_kernel::jet_std_b64_unpad(&s)))
-        }
         ("core.encoding.base64", "decode_url") => {
             let s = as_string(one(0)?, span)?;
             let allow_whitespace = args_bool(1, false)?;
@@ -1793,14 +1568,6 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                     Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
                 },
             )
-        }
-        ("core.encoding.base32", "encode" | "b32encode") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Str(base32_encode(&bytes)))
-        }
-        ("core.encoding.base32", "b32hexencode") => {
-            let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Str(encoding_base_kernel::jet_std_base32hex_encode(&bytes)))
         }
         ("core.encoding.base32", "decode" | "b32decode") => {
             let s = as_string(one(0)?, span)?;
@@ -1861,7 +1628,7 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
         ("core.net.url", "data") => {
             // `mime` arg is the `core.net.mime.MIME` record (`top`/`sub`/
             // `parameters`); render its essence + parameters the same way
-            // AOT's `JetMIME::to_string_value` does, matching field-for-field.
+            // `MIME.to_string()` (Core/net/mime.jet) does, field-for-field.
             let mime = one(0)?;
             let text = as_string(one(1)?, span)?;
             let rendered = match mime {

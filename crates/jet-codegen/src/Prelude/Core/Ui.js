@@ -352,21 +352,6 @@ function jet_ui_resize_event(width, height) {
   return jet_ui_web_enum("Resize", jet_ui_size(width, height));
 }
 
-function jet_ui_aria_role_button() {
-  return jet_ui_web_enum("Button");
-}
-
-function jet_ui_aria_role_text_input() {
-  return jet_ui_web_enum("TextInput");
-}
-
-function jet_ui_aria_role_label() {
-  return jet_ui_web_enum("Label");
-}
-
-function jet_ui_aria_role_container() {
-  return jet_ui_web_enum("Container");
-}
 
 function jet_ui_node_accessibility(node, accessibility) {
   return { ...node, accessibility: jet_ui_web_some(accessibility) };

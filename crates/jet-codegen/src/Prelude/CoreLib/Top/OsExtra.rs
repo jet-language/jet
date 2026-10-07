@@ -23,18 +23,8 @@ pub(crate) fn jet_std_os_executable() -> String {
 pub(crate) fn jet_std_os_pid() -> i64 {
     std::process::id() as i64
 }
-pub(crate) fn jet_std_os_hostname() -> String {
-    std::env::var("HOSTNAME")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .or_else(|| std::fs::read_to_string("/etc/hostname").ok().map(|s| s.trim().to_string()))
-        .unwrap_or_else(|| "localhost".to_string())
-}
-pub(crate) fn jet_std_os_username() -> String {
-    std::env::var("USER")
-        .ok()
-        .or_else(|| std::env::var("USERNAME").ok())
-        .unwrap_or_default()
+pub(crate) fn jet_sys_host_env_raw(name: &String) -> Option<Vec<u8>> {
+    std::env::var_os(name).map(std::ffi::OsString::into_encoded_bytes)
 }
 
 fn jet_os_unsupported(op: &str) -> jet_std::IOError {
@@ -125,39 +115,6 @@ pub(crate) fn jet_std_os_getpid() -> i64 {
     jet_std_os_pid()
 }
 
-pub(crate) fn jet_std_os_expand(template: &String) -> String {
-    let mut out = String::with_capacity(template.len());
-    let bytes = template.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'$' {
-            i += 1;
-            if i < bytes.len() && bytes[i] == b'{' {
-                i += 1;
-                let start = i;
-                while i < bytes.len() && bytes[i] != b'}' {
-                    i += 1;
-                }
-                let name = &template[start..i];
-                if i < bytes.len() {
-                    i += 1;
-                }
-                out.push_str(&jet_std_env_get(&name.to_string()).unwrap_or_default());
-            } else {
-                let start = i;
-                while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
-                    i += 1;
-                }
-                let name = &template[start..i];
-                out.push_str(&jet_std_env_get(&name.to_string()).unwrap_or_default());
-            }
-        } else {
-            out.push(bytes[i] as char);
-            i += 1;
-        }
-    }
-    out
-}
 
 #[cfg(unix)]
 #[repr(C)]
@@ -239,55 +196,35 @@ fn jet_os_last_err(op: jet_std::IOOperation, path: Option<String>) -> jet_std::I
     jet_std::IOError::other(op, path, std::io::Error::from_raw_os_error(errno))
 }
 
-pub(crate) fn jet_std_os_getppid() -> i64 {
+pub(crate) fn jet_sys_getppid_raw() -> Option<i64> {
     #[cfg(unix)]
-    {
-        return unsafe { jet_os_sys::getppid() as i64 };
-    }
+    { Some(unsafe { jet_os_sys::getppid() as i64 }) }
     #[cfg(not(unix))]
-    {
-        0
-    }
+    { None }
 }
-pub(crate) fn jet_std_os_getuid() -> i64 {
+pub(crate) fn jet_sys_getuid_raw() -> Option<i64> {
     #[cfg(unix)]
-    {
-        return unsafe { jet_os_sys::getuid() as i64 };
-    }
+    { Some(unsafe { jet_os_sys::getuid() as i64 }) }
     #[cfg(not(unix))]
-    {
-        0
-    }
+    { None }
 }
-pub(crate) fn jet_std_os_geteuid() -> i64 {
+pub(crate) fn jet_sys_geteuid_raw() -> Option<i64> {
     #[cfg(unix)]
-    {
-        return unsafe { jet_os_sys::geteuid() as i64 };
-    }
+    { Some(unsafe { jet_os_sys::geteuid() as i64 }) }
     #[cfg(not(unix))]
-    {
-        0
-    }
+    { None }
 }
-pub(crate) fn jet_std_os_getgid() -> i64 {
+pub(crate) fn jet_sys_getgid_raw() -> Option<i64> {
     #[cfg(unix)]
-    {
-        return unsafe { jet_os_sys::getgid() as i64 };
-    }
+    { Some(unsafe { jet_os_sys::getgid() as i64 }) }
     #[cfg(not(unix))]
-    {
-        0
-    }
+    { None }
 }
-pub(crate) fn jet_std_os_getegid() -> i64 {
+pub(crate) fn jet_sys_getegid_raw() -> Option<i64> {
     #[cfg(unix)]
-    {
-        return unsafe { jet_os_sys::getegid() as i64 };
-    }
+    { Some(unsafe { jet_os_sys::getegid() as i64 }) }
     #[cfg(not(unix))]
-    {
-        0
-    }
+    { None }
 }
 pub(crate) fn jet_std_os_getgroups() -> Vec<i64> {
     #[cfg(unix)]
@@ -325,15 +262,11 @@ pub(crate) fn jet_std_os_getpgid(pid: i64) -> Result<i64, jet_std::IOError> {
         Err(jet_os_unsupported("getpgid"))
     }
 }
-pub(crate) fn jet_std_os_getpgrp() -> i64 {
+pub(crate) fn jet_sys_getpgrp_raw() -> Option<i64> {
     #[cfg(unix)]
-    {
-        return unsafe { jet_os_sys::getpgrp() as i64 };
-    }
+    { Some(unsafe { jet_os_sys::getpgrp() as i64 }) }
     #[cfg(not(unix))]
-    {
-        0
-    }
+    { None }
 }
 pub(crate) fn jet_std_os_getsid(pid: i64) -> Result<i64, jet_std::IOError> {
     #[cfg(unix)]

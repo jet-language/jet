@@ -469,28 +469,6 @@ fn jet_codegen_handle_ui_route(receiver: Type, method: String) -> JetCodegenHand
     Val(jet_codegen_handle_core("core.ui", "{name}.{method}", "{backend}::{member}", mask, None))
 }
 
-fn jet_codegen_handle_sketch_route(sketch: String, method: String) -> JetCodegenHandleRoute? {
-    arity := if {
-        (sketch == "HyperLogLog" && method == "add") || (sketch == "CountMinSketch" && (method == "add" || method == "count")) -> {
-            2
-        }
-        (sketch == "HyperLogLog" && method == "count") || (sketch == "ReservoirSampler" && method == "sample") -> {
-            1
-        }
-        (sketch == "TDigest" && (method == "add" || method == "quantile")) || (sketch == "ReservoirSampler" && method == "add") -> {
-            2
-        }
-        else -> {
-            return None
-        }
-    }
-    mask := if {
-        arity == 1 -> [Bool]{true}
-        sketch == "TDigest" || sketch == "ReservoirSampler" -> [Bool]{true, false}
-        else -> [Bool]{true, true}
-    }
-    Val(jet_codegen_handle_h("{sketch}.{method}", "Jet{sketch}::{method}", mask, None))
-}
 
 fn jet_codegen_handle_regex_route(kind: String, method: String) -> JetCodegenHandleRoute? {
     symbol := ""
@@ -534,36 +512,6 @@ fn jet_codegen_handle_regex_route(kind: String, method: String) -> JetCodegenHan
             }
         }
     }
-    Val(jet_codegen_handle_h("{kind}.{method}", symbol, mask, None))
-}
-
-// Checked MIME projections. `URL` is the `core.net.url` record, so its
-// documented methods lower through the declaration, never a handle row.
-fn jet_codegen_handle_url_mime_route(kind: String, method: String) -> JetCodegenHandleRoute? {
-    symbol := ""
-    if {
-        kind == "MIME" -> {
-            if method == {
-                "media_type" | "subtype" | "essence" | "params" -> {
-                    symbol = "jet_std::JetMIME::{method}"
-                }
-                "to_string" -> {
-                    symbol = "jet_std::JetMIME::to_string_value"
-                }
-                "param" -> {
-                    symbol = "jet_std::JetMIME::param"
-                }
-                else -> {
-                    return None
-                }
-            }
-        }
-        else -> {
-            return None
-        }
-    }
-    mask := [Bool]{true}
-    if method == "param" -> mask = [Bool]{true, true}
     Val(jet_codegen_handle_h("{kind}.{method}", symbol, mask, None))
 }
 
@@ -921,9 +869,7 @@ fn jet_codegen_handle_dynamic_route(operation: THandleOp, receiver: Type, argume
         .LayoutMethod(method) -> return jet_codegen_handle_layout_route(method)
         .LoadableMethod(method) -> return jet_codegen_handle_loadable_route(method)
         .UIBackendMethod(method) -> return jet_codegen_handle_ui_route(receiver, method)
-        .SketchMethod(sketch, method) -> return jet_codegen_handle_sketch_route(sketch, method)
         .CivilTimeMethod(kind, method) -> return jet_codegen_handle_civil_time_route(kind, method)
-        .URLMIMEMethod(kind, method) -> return jet_codegen_handle_url_mime_route(kind, method)
         .RegexMethod(kind, method) -> return jet_codegen_handle_regex_route(kind, method)
         .DevServerMethod(method) -> return jet_codegen_handle_devserver_route(method)
         .AppMethod(method, source_arg_count) -> return jet_codegen_handle_app_route(method, source_arg_count)
@@ -1017,6 +963,7 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
             return Val(jet_codegen_handle_core("core.time", "duration_new", symbol, [Bool]{false, false}, None))
         }
         .FileReaderReadLine -> return Val(jet_codegen_handle_h("file_reader.read_line", "jet_std_file_reader_read_line", [Bool]{true}, Val(Effect.FS)))
+        .FileReaderRead -> return Val(jet_codegen_handle_h("file_reader.read", "jet_std_file_reader_read", [Bool]{true, false}, Val(Effect.FS)))
         .FileReaderPath -> return Val(jet_codegen_handle_h("file_reader.path", "jet_std_file_reader_path", [Bool]{true}, None))
         .MappedFileWindow -> return Val(jet_codegen_handle_h("mapped_file.window", "jet_std_fs_map_window_view", [Bool]{true, false, false}, Val(Effect.FS)))
         .MappedFileWindowLen -> return Val(jet_codegen_handle_h("mapped_file.window_len", "jet_std_fs_map_window_len_view", [Bool]{true, false, false}, Val(Effect.FS)))
@@ -1025,6 +972,8 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .MappedFileIsEmpty -> return Val(jet_codegen_handle_h("mapped_file.is_empty", "jet_std_fs_map_is_empty", [Bool]{true}, None))
         .FileWriterWriteLine -> return Val(jet_codegen_handle_h("file_writer.write_line", "jet_std_file_writer_write_line", [Bool]{true, true}, Val(Effect.FS)))
         .FileWriterFlush -> return Val(jet_codegen_handle_h("file_writer.flush", "jet_std_file_writer_flush", [Bool]{true}, Val(Effect.FS)))
+        .FileWriterWriteAll -> return Val(jet_codegen_handle_h("file_writer.write_all", "jet_std_file_writer_write_all", [Bool]{true, true}, Val(Effect.FS)))
+        .FileWriterFsync -> return Val(jet_codegen_handle_h("file_writer.fsync", "jet_std_file_writer_fsync", [Bool]{true}, Val(Effect.FS)))
         .FileWriterPath -> return Val(jet_codegen_handle_h("file_writer.path", "jet_std_file_writer_path", [Bool]{true}, None))
         .JSONReaderNext -> return Val(jet_codegen_handle_h("json_reader.next", "jet_enc_json_reader_next", [Bool]{true}, Val(Effect.IO)))
         .JSONWriterWrite -> return Val(jet_codegen_handle_h("json_writer.write", "jet_enc_json_writer_write", [Bool]{true, false}, Val(Effect.IO)))
@@ -1260,7 +1209,6 @@ fn jet_codegen_general_handle_route(operation: THandleOp, receiver: Type, argume
         .ReflectFieldName -> return Val(jet_codegen_handle_core("core.reflect", "field.name", "jet_jit_reflect_field_name", [Bool]{true}, None))
         .ReflectFieldValue -> return Val(jet_codegen_handle_core("core.reflect", "field.value", "jet_jit_reflect_field_value", [Bool]{true}, None))
         .FFICallbackEventStop -> return Val(jet_codegen_handle_core("core.ffi", "callback_event_stop", "jet_ffi_callback_event_stop_unit", [Bool]{}, Val(Effect.FFI)))
-        .WebVirtualWindowFacts -> return Val(jet_codegen_handle_core("core.web.virtual", "facts_json", "jet_web_virtual_window_facts", [Bool]{true}, None))
         .TaskDetach -> return Val(jet_codegen_handle_core("core.tasks", "detach", "jet_std::JetTask::detach", [Bool]{false}, None))
         .TaskPause -> return Val(jet_codegen_handle_h("task.pause", "jet_std::JetTask::pause", [Bool]{true}, None))
         .TaskResume -> return Val(jet_codegen_handle_h("task.resume", "jet_std::JetTask::resume", [Bool]{true}, None))
@@ -1403,7 +1351,7 @@ fn jet_codegen_handle_receiver_is_mutating(operation: THandleOp) -> Bool Never! 
         else -> {}
     }
     if operation == {
-        .FileReaderReadLine | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .CSVWriterWrite | .CSVWriterFlush | .CSVWriterFinish | .ClockTick | .ClockAdvance | .ClockWait | .FakeName | .FakeEmail | .FakeHost | .FakeAddress | .TCPStreamRead | .TCPStreamWrite | .TCPStreamClose | .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite | .SolverRequire -> true
+        .FileReaderReadLine | .FileReaderRead | .AllocReset | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .CSVWriterWrite | .CSVWriterFlush | .CSVWriterFinish | .ClockTick | .ClockAdvance | .ClockWait | .FakeName | .FakeEmail | .FakeHost | .FakeAddress | .TCPStreamRead | .TCPStreamWrite | .TCPStreamClose | .TCPStreamReadBytes | .TCPStreamReadBytesDeadline | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UnixStreamReadDeadline | .UnixStreamWriteAllDeadline | .UnixStreamClose | .UnixStreamSetTimeout | .TLSStreamReadDeadline | .TLSStreamWriteAllDeadline | .TLSStreamClose | .TLSStreamCloseWrite | .SolverRequire -> true
         else -> false
     }
 }

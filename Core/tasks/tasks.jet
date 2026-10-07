@@ -138,7 +138,15 @@ fn host_sleep_ms(ms: Int) -[Time]> {
 
 fn host_yield() -[Time.Wait]> { core.tasks.yield_now() }
 
-fn host_task_id() -> String { core.tasks.current_task() }
+fn host_task_id() -> String {
+    paused :: core.tasks.__task_paused() ?? false
+    cancel :: core.tasks.__task_cancelled() ?? false
+    task_trace(paused, cancel)
+}
+
+fn task_trace(paused: Bool, cancel: Bool) -> String Never! {
+    "paused={paused},cancel={cancel}"
+}
 
 /// Receiver metadata is owned by the scheduler's typed handle.
 pub fn is_timer(rx: Receiver<Int>) -> Bool Never! { rx.is_timer() }
@@ -181,3 +189,13 @@ pub fn spawn_name(name: String) -> String Never! {
 }
 
 
+
+#Test("current task has idle defaults outside a scheduled task") {
+    assert_eq(current_task(), "paused=false,cancel=false")
+}
+
+#Test("task trace preserves the pause and cancellation fields") {
+    assert_eq(task_trace(true, false), "paused=true,cancel=false")
+    assert_eq(task_trace(false, true), "paused=false,cancel=true")
+    assert_eq(task_trace(true, true), "paused=true,cancel=true")
+}

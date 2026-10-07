@@ -133,11 +133,6 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::Date, "new") => date_new_call(args, span),
         (CoreCallPureRoute::Date, "parse") => date_parse_call(args, span),
         (CoreCallPureRoute::DateTime, "from_timestamp") => datetime_from_timestamp(args, span),
-        // D-APPROX1=A: sketch constructors — same algorithms as AOT Jet* sketches.
-        (CoreCallPureRoute::SketchHll, "new") => Ok(hll_new()),
-        (CoreCallPureRoute::SketchTDigest, "new") => Ok(tdigest_new()),
-        (CoreCallPureRoute::SketchCms, "new") => Ok(cms_new()),
-        (CoreCallPureRoute::SketchReservoir, "new") => reservoir_new(args, span),
         (CoreCallPureRoute::Ui, "point") => ui_point(args, span),
         (CoreCallPureRoute::Ui, "size") => ui_size(args, span),
         (CoreCallPureRoute::Ui, "rect") => ui_rect(args, span),
@@ -1010,11 +1005,6 @@ pub(super) fn evaluate_method(
             measurement_arithmetic(recv, method, &args[0], span)
         }
         ("Measurement", "sqrt", 0) => measurement_sqrt(recv, span),
-        // D-APPROX1=A: non-mutating sketch queries (mutations write back in dispatch).
-        ("HyperLogLog", "count", 0) => hll_count(recv, span),
-        ("CountMinSketch", "count", 1) => cms_count(recv, args, span),
-        ("TDigest", "quantile", 1) => tdigest_quantile(recv, args, span),
-        ("ReservoirSampler", "sample", 0) => reservoir_sample(recv, span),
         // D-SOLVER-LIB1=A: finite solver queries (`.require` mutates in dispatch).
         ("Solver", "failure_count", 0) => solver_failure_count(recv, span),
         ("Solver", "status", 0) => solver_status(recv, span),
@@ -1023,25 +1013,6 @@ pub(super) fn evaluate_method(
     Some(result)
 }
 
-/// D-APPROX1=A: mutating sketch `.add` — returns `(Unit, updated_receiver)`.
-pub(super) fn sketch_add(
-    recv: &CtValue,
-    args: &[CtValue],
-    span: Span,
-) -> Option<Result<(CtValue, CtValue), Diagnostic>> {
-    let CtValue::Struct { type_name, .. } = recv else {
-        return None;
-    };
-    jet_foundation::Syntax::core_receiver_method(type_name, "add")?;
-    let result = match type_name.as_str() {
-        "HyperLogLog" => hll_add(recv, args, span),
-        "TDigest" => tdigest_add(recv, args, span),
-        "CountMinSketch" => cms_add(recv, args, span),
-        "ReservoirSampler" => reservoir_add(recv, args, span),
-        _ => return None,
-    };
-    Some(result.map(|updated| (CtValue::Unit, updated)))
-}
 
 /// D-SOLVER-LIB1=A: `solver.require(ok)` — returns `(Unit, updated_receiver)`.
 pub(super) fn solver_require(
@@ -1388,30 +1359,6 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
                     CtValue::Str(shown) => Some(shown.clone()),
                     _ => None,
                 })
-        }
-        CtValue::Struct { type_name, .. }
-            if core_display.is_some() && type_name == "HyperLogLog" =>
-        {
-            let CtValue::Int(n) = hll_count(value, Span::new(0, 0)).ok()? else {
-                return None;
-            };
-            Some(format!("HyperLogLog(count={n})"))
-        }
-        CtValue::Struct { type_name, .. } if core_display.is_some() && type_name == "TDigest" => {
-            Some("TDigest".to_string())
-        }
-        CtValue::Struct { type_name, .. }
-            if core_display.is_some() && type_name == "CountMinSketch" =>
-        {
-            Some("CountMinSketch".to_string())
-        }
-        CtValue::Struct { type_name, .. }
-            if core_display.is_some() && type_name == "ReservoirSampler" =>
-        {
-            let CtValue::Int(count) = field(value, "ReservoirSampler", "count")? else {
-                return None;
-            };
-            Some(format!("ReservoirSampler(n={count})"))
         }
         CtValue::Struct { type_name, .. }
             if core_display.is_some() && type_name == crate::Syntax::SOLVER_TYPE =>
@@ -1912,6 +1859,8 @@ fn io_error_display(value: &CtValue) -> Option<String> {
         "Closed" => 5,
         "Protocol" => 6,
         "Other" => 7,
+        "AlreadyExists" => 9,
+        "Unsupported" => 10,
         _ => return None,
     };
     let Some((_, CtValue::Struct { type_name, fields })) = args.first() else {
@@ -4317,253 +4266,6 @@ fn xml_shape_error(reason: &str) -> CtValue {
 
 // Email uses the shared Prelude kernel through `EmailAdapter`.
 
-// ── D-APPROX1=A: CtValue adapters for the shared Prelude kernel ──────────────
-
-fn hll_from_value(
-    value: &CtValue,
-    span: Span,
-) -> Result<super::sketch_kernel::JetHyperLogLog, Diagnostic> {
-    let CtValue::List(registers) = field(value, "HyperLogLog", "registers")
-        .ok_or_else(|| unsupported("malformed HyperLogLog.registers value", span))?
-    else {
-        return Err(unsupported("malformed HyperLogLog.registers value", span));
-    };
-    let registers = registers
-        .iter()
-        .map(|value| match value {
-            CtValue::Int(value) if (0..=255).contains(value) => Ok(*value as u8),
-            _ => Err(unsupported("malformed HyperLogLog register", span)),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(super::sketch_kernel::JetHyperLogLog::from_registers(
-        registers,
-    ))
-}
-
-fn hll_value(sketch: &super::sketch_kernel::JetHyperLogLog) -> CtValue {
-    structure(
-        "HyperLogLog",
-        vec![(
-            "registers",
-            CtValue::List(
-                sketch
-                    .registers()
-                    .into_iter()
-                    .map(|value| CtValue::Int(value as i64))
-                    .collect(),
-            ),
-        )],
-    )
-}
-
-fn hll_new() -> CtValue {
-    hll_value(&super::sketch_kernel::JetHyperLogLog::new())
-}
-
-fn hll_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-    let sketch = hll_from_value(recv, span)?;
-    sketch.add(string_arg(args, 0, span)?);
-    Ok(hll_value(&sketch))
-}
-
-fn hll_count(recv: &CtValue, span: Span) -> EvalResult {
-    Ok(CtValue::Int(hll_from_value(recv, span)?.count()))
-}
-
-fn tdigest_from_value(
-    value: &CtValue,
-    span: Span,
-) -> Result<super::sketch_kernel::JetTDigest, Diagnostic> {
-    let CtValue::List(items) = field(value, "TDigest", "centroids")
-        .ok_or_else(|| unsupported("malformed TDigest.centroids value", span))?
-    else {
-        return Err(unsupported("malformed TDigest.centroids value", span));
-    };
-    let centroids = items
-        .iter()
-        .map(|item| match item {
-            CtValue::List(pair) if pair.len() == 2 => {
-                Ok((as_float(&pair[0], span)?, as_float(&pair[1], span)?))
-            }
-            _ => Err(unsupported("malformed TDigest centroid", span)),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(super::sketch_kernel::JetTDigest::from_centroids(centroids))
-}
-
-fn tdigest_value(sketch: &super::sketch_kernel::JetTDigest) -> CtValue {
-    structure(
-        "TDigest",
-        vec![(
-            "centroids",
-            CtValue::List(
-                sketch
-                    .centroids()
-                    .into_iter()
-                    .map(|(mean, weight)| {
-                        CtValue::List(vec![
-                            CtValue::Float(CtFloat::f64(mean)),
-                            CtValue::Float(CtFloat::f64(weight)),
-                        ])
-                    })
-                    .collect(),
-            ),
-        )],
-    )
-}
-
-fn tdigest_new() -> CtValue {
-    tdigest_value(&super::sketch_kernel::JetTDigest::new())
-}
-
-fn tdigest_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-    let sketch = tdigest_from_value(recv, span)?;
-    sketch.add(float_arg(args, 0, span)?);
-    Ok(tdigest_value(&sketch))
-}
-
-fn tdigest_quantile(recv: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
-    let sketch = tdigest_from_value(recv, span)?;
-    Ok(CtValue::Float(CtFloat::f64(
-        sketch.quantile(float_arg(args, 0, span)?),
-    )))
-}
-
-fn cms_from_value(
-    value: &CtValue,
-    span: Span,
-) -> Result<super::sketch_kernel::JetCountMinSketch, Diagnostic> {
-    let CtValue::List(rows) = field(value, "CountMinSketch", "rows")
-        .ok_or_else(|| unsupported("malformed CountMinSketch.rows value", span))?
-    else {
-        return Err(unsupported("malformed CountMinSketch.rows value", span));
-    };
-    if rows.len() != 4 {
-        return Err(unsupported("malformed CountMinSketch.rows value", span));
-    }
-    let mut out = [[0; super::sketch_kernel::JET_CMS_COLS]; 4];
-    for (row_index, row) in rows.iter().enumerate() {
-        let CtValue::List(columns) = row else {
-            return Err(unsupported("malformed CountMinSketch row", span));
-        };
-        if columns.len() != super::sketch_kernel::JET_CMS_COLS {
-            return Err(unsupported("malformed CountMinSketch row", span));
-        }
-        for (column_index, cell) in columns.iter().enumerate() {
-            let CtValue::Int(value) = cell else {
-                return Err(unsupported("malformed CountMinSketch cell", span));
-            };
-            if !(0..=u32::MAX as i64).contains(value) {
-                return Err(unsupported("malformed CountMinSketch cell", span));
-            }
-            out[row_index][column_index] = *value as u32;
-        }
-    }
-    Ok(super::sketch_kernel::JetCountMinSketch::from_rows(out))
-}
-
-fn cms_value(sketch: &super::sketch_kernel::JetCountMinSketch) -> CtValue {
-    structure(
-        "CountMinSketch",
-        vec![(
-            "rows",
-            CtValue::List(
-                sketch
-                    .rows()
-                    .into_iter()
-                    .map(|row| {
-                        CtValue::List(
-                            row.into_iter()
-                                .map(|value| CtValue::Int(value as i64))
-                                .collect(),
-                        )
-                    })
-                    .collect(),
-            ),
-        )],
-    )
-}
-
-fn cms_new() -> CtValue {
-    cms_value(&super::sketch_kernel::JetCountMinSketch::new())
-}
-
-fn cms_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-    let sketch = cms_from_value(recv, span)?;
-    sketch.add(string_arg(args, 0, span)?);
-    Ok(cms_value(&sketch))
-}
-
-fn cms_count(recv: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
-    let sketch = cms_from_value(recv, span)?;
-    Ok(CtValue::Int(sketch.count(string_arg(args, 0, span)?)))
-}
-
-fn reservoir_from_value(
-    value: &CtValue,
-    span: Span,
-) -> Result<super::sketch_kernel::JetReservoirSampler, Diagnostic> {
-    let capacity = int_field(value, "ReservoirSampler", "capacity", span)?;
-    let count = int_field(value, "ReservoirSampler", "count", span)?;
-    let rng = int_field(value, "ReservoirSampler", "rng", span)?;
-    let CtValue::List(items) = value_field(value, "ReservoirSampler", "reservoir", span)? else {
-        return Err(unsupported(
-            "malformed ReservoirSampler.reservoir value",
-            span,
-        ));
-    };
-    let reservoir = items
-        .into_iter()
-        .map(|item| match item {
-            CtValue::Str(item) => Ok(item),
-            _ => Err(unsupported("malformed ReservoirSampler item", span)),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(super::sketch_kernel::JetReservoirSampler::from_parts(
-        capacity as usize,
-        reservoir,
-        count as u64,
-        rng as u64,
-    ))
-}
-
-fn reservoir_value(sketch: &super::sketch_kernel::JetReservoirSampler) -> CtValue {
-    let (capacity, reservoir, count, rng) = sketch.parts();
-    structure(
-        "ReservoirSampler",
-        vec![
-            ("capacity", CtValue::Int(capacity as i64)),
-            ("count", CtValue::Int(count as i64)),
-            ("rng", CtValue::Int(rng as i64)),
-            (
-                "reservoir",
-                CtValue::List(reservoir.into_iter().map(CtValue::Str).collect()),
-            ),
-        ],
-    )
-}
-
-fn reservoir_new(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(reservoir_value(
-        &super::sketch_kernel::JetReservoirSampler::new(int_arg(args, 0, span)?),
-    ))
-}
-
-fn reservoir_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-    let sketch = reservoir_from_value(recv, span)?;
-    sketch.add(string_arg(args, 0, span)?.to_string());
-    Ok(reservoir_value(&sketch))
-}
-
-fn reservoir_sample(recv: &CtValue, span: Span) -> EvalResult {
-    Ok(CtValue::List(
-        reservoir_from_value(recv, span)?
-            .sample()
-            .into_iter()
-            .map(CtValue::Str)
-            .collect(),
-    ))
-}
 
 // ── D-SOLVER-LIB1=A: CtValue adapter for the shared Prelude kernel ──────────
 

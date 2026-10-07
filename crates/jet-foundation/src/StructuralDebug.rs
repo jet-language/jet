@@ -193,6 +193,8 @@ pub fn jet_show_io_error(
         4 => "cancelled",
         5 => "closed",
         6 => "protocol error",
+        9 => "already exists",
+        10 => "unsupported",
         _ => "I/O error",
     };
     let operation = match operation {
@@ -229,19 +231,12 @@ pub fn jet_show_process_resource_limit(variant: i64) -> String {
     .to_string()
 }
 
-/// D-TASK-PAUSE-TIER1: one formatter for Task `paused=` / `cancel=` trace text.
-/// AOT `JetTask::trace` and the TIR evaluator both call this (I9).
-/// D-TASK-PAUSE-TIER1: one formatter for Task `paused=` / `cancel=` trace text.
-/// AOT `JetTask::trace` and the TIR evaluator both call this (I9).
-pub fn jet_task_control_trace(paused: bool, cancel: bool) -> String {
-    format!("paused={paused},cancel={cancel}")
-}
 
 #[cfg(test)]
 mod structural_debug_tests {
     use super::{
         jet_debug_field_metadata, jet_debug_map, jet_debug_record, jet_debug_record_fields,
-        jet_debug_variant, jet_task_control_trace, JetDebugField,
+        jet_debug_variant, JetDebugField,
     };
 
     #[test]
@@ -293,17 +288,6 @@ mod structural_debug_tests {
         assert_eq!(jet_debug_variant("Ready", None), "Ready");
     }
 
-    #[test]
-    fn task_control_trace_is_stable() {
-        assert_eq!(
-            jet_task_control_trace(true, false),
-            "paused=true,cancel=false"
-        );
-        assert_eq!(
-            jet_task_control_trace(false, true),
-            "paused=false,cancel=true"
-        );
-    }
 }
 
 /// D-RANGE-VALUE1=A: the standard structural record form for `Range`.

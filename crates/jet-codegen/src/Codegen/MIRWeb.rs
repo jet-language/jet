@@ -5634,9 +5634,6 @@ fn web_data_symbol_name(name: &str) -> bool {
             | "jet_data_track_insert"
             | "jet_data_track_replace"
             | "jet_data_track_remove"
-            | "jet_data_load"
-            | "jet_data_loader_load"
-            | "jet_data_loader_load_default"
             | "jet_data_loader_file"
             | "jet_data_loader_file_member"
             | "jet_data_loader_url"
@@ -6054,9 +6051,6 @@ const WEB_PRELUDE_LINKS: &[(&str, &str)] = &[
     ("jet_data_track_remove", "jet_data_track_remove"),
     ("jet_data_count", "jet_data_count"),
     ("jet_data_query", "jet_data_query"),
-    ("jet_data_load", "jet_data_loader_load"),
-    ("jet_data_loader_load", "jet_data_loader_load"),
-    ("jet_data_loader_load_default", "jet_data_loader_load_default"),
     ("jet_data_loader_file", "jet_data_loader_file"),
     ("jet_data_loader_file_member", "jet_data_loader_file_member"),
     ("jet_data_loader_url", "jet_data_loader_url"),

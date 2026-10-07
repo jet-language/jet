@@ -1270,19 +1270,6 @@ fn connection_core_call(
                 })
                 .ok_or_else(|| db_diag("unknown database scope handle", span))
         }),
-        (
-            "core.db",
-            "row_value" | "row_int" | "row_float" | "row_text" | "row_bool",
-            [row, CtValue::Str(key)],
-        ) => db_row_from_ct(row, span).map(|row| match method {
-            "row_value" => db_outcome(wire::jet_db_row_value(&row, key), db_value_ct),
-            "row_int" => db_outcome(wire::jet_db_row_int(&row, key), CtValue::Int),
-            "row_float" => db_outcome(wire::jet_db_row_float(&row, key), |value| {
-                CtValue::Float(jet_foundation::AST::CtFloat::f64(value))
-            }),
-            "row_text" => db_outcome(wire::jet_db_row_text(&row, key), CtValue::Str),
-            _ => db_outcome(wire::jet_db_row_bool(&row, key), CtValue::Bool),
-        }),
         ("core.handle", "db.with_policy", [connection, policy, CtValue::Str(user)])
             if is_handle_value(connection, "DBConnection") =>
         {

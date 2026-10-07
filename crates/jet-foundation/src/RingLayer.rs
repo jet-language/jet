@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 /// own semantic part instead of inheriting an unrelated hosted service.
 // BEGIN GENERATED CORE DEPENDENCIES
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 3ddc4c768e3acaef570eed1170c0d78d9a06e96e948eeb9dae759b6d94c92e87
+// Source SHA-256: 858262d9e94bd660d1283be4a74ea546744e62ec55151d65910af0272b53ebf8
 const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("app", &["core.web"]),
     ("core.devtools", &["core"]),
@@ -40,10 +40,10 @@ const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("core.data.stream", &["core.data"]),
     ("core.data.plot", &["core.data"]),
     ("core.data.sketch", &["core.data"]),
-    ("core.data.sketch.cms", &["core.data"]),
-    ("core.data.sketch.hll", &["core.data", "core.math"]),
+    ("core.data.sketch.cms", &["core.data", "core.data.sketch"]),
+    ("core.data.sketch.hll", &["core.data", "core.math", "core.data.sketch"]),
     ("core.data.sketch.reservoir", &["core.data"]),
-    ("core.data.sketch.tdigest", &["core.data", "core.math"]),
+    ("core.data.sketch.tdigest", &["core.data"]),
     ("core.db", &["core.encoding"]),
     ("core.email", &["core.crypto", "core.crypto.expert", "core.encoding.base64", "core.encoding.hex", "core.net", "core.sys", "core.text"]),
     ("core.encoding", &["core"]),
@@ -59,7 +59,7 @@ const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("core.encoding.toml", &["core.encoding"]),
     ("core.encoding.xml", &["core.encoding"]),
     ("core.event", &["core.mem"]),
-    ("core.files", &["core.text", "core.sys"]),
+    ("core.files", &["core.text", "core.sys", "core.time"]),
     ("core.encoding.yaml", &["core.encoding", "core.encoding.json"]),
     ("core.files.path", &["core.files"]),
     ("core.game.raylib", &["core.game"]),
@@ -74,6 +74,7 @@ const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("core.net.tls", &["core.crypto.random", "core.net"]),
     ("core.net.url", &["core.net.mime"]),
     ("core.net.ws", &["core.net", "core.net.url"]),
+    ("core.perf", &["core.math"]),
     ("core.prelude", &["core"]),
     ("core.process", &["core.files", "core.sys", "core.text"]),
     ("core.reactive", &["core.mem"]),
@@ -85,7 +86,7 @@ const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("core.sys", &["core.files"]),
     ("core.tasks", &["core.time"]),
     ("core.term", &["core.files"]),
-    ("core.testing", &["core.files", "core.math.random", "core.time"]),
+    ("core.testing", &["core.files", "core.math.random", "core.sys", "core.time"]),
     ("core.text", &["core"]),
     ("core.text.fmt", &["core.text"]),
     ("core.text.html", &["core.text"]),

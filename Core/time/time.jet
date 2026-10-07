@@ -11,28 +11,15 @@ package {
 use core as core
 
 
-// core.time — Gregorian civil time over the runtime civil-time carriers.
-//
-// `DateTime`, `LocalDate`, `LocalTime`, `Zone`, `ZonedDateTime`, and `Period`
-// are the Prelude carriers; the runtime owns their construction, parsing,
-// zone resolution, and calendar arithmetic, so `datetime`, `new`, `parse`,
-// `zone`, `period`, `now`, and the other constructors are the Prelude rows.
-// This module adds the helpers the runtime has no row for, written over the
-// carrier methods, so every tier reads one implementation.
+// core.time — Gregorian civil time. Calendar predicates are source-owned;
+// carrier construction and host clock access use the remaining runtime leaves.
+// Helpers and predicates below have one implementation on every tier.
 //
 // `start` and `unix_ns` sample the host wall clock as Unix nanoseconds;
 // `sleep` waits through the host sleep kernel. `instant` and `sleep_until` are
 // compiler-owned: `Instant` is the monotonic Time point quantity, so
 // `t + 5min` is an Instant and `b - a` is a Duration. Wall-clock Unix
 // nanoseconds come only from `unix_ns()`. Everything else is pure.
-#Error
-pub struct TimeError {
-    pub reason: String
-}
-
-impl TimeError {
-    pub fn new(reason: String) -> TimeError Never! { TimeError{reason: reason} }
-}
 
 /// A running stopwatch started at a Unix-nanosecond wall-clock sample.
 pub struct Stopwatch {
@@ -96,6 +83,22 @@ fn saturating_scale_ns(value: Int, scale: Int) -> Int Never! {
     if value > 0 && value > time_int_max() /% scale -> return time_int_max()
     if value < 0 && value < time_int_min() /% scale -> return time_int_min()
     value * scale
+}
+
+/// Gregorian leap years, including year zero and negative years.
+pub fn is_leap_year(year: Int) -> Bool Never! {
+    (year %% 4 == 0 && year %% 100 != 0) || year %% 400 == 0
+}
+
+/// Number of days in a Gregorian month. Unrecognized months retain the
+/// civil carrier's 30-day result; constructors constrain months separately.
+pub fn days_in_month(year: Int, month: Int) -> Int Never! {
+    if month == 1 || month == 3 || month == 5 || month == 7 || month == 8 || month == 10 || month == 12 -> return 31
+    if month == 2 {
+        if is_leap_year(year) -> return 29
+        return 28
+    }
+    30
 }
 
 /// Weekday index with Sunday as 0.
@@ -301,3 +304,15 @@ pub fn dayofweek(date: LocalDate) -> Int Never! { weekday(date) }
 pub fn todate(dt: DateTime) -> LocalDate Never! { date_of(dt) }
 
 pub fn totime(dt: DateTime) -> LocalTime Never! { time_of(dt) }
+
+#Test("Gregorian predicates preserve signed years and month defaults") {
+    assert(is_leap_year(-400))
+    assert(!is_leap_year(-100))
+    assert(is_leap_year(0))
+    assert(!is_leap_year(1900))
+    assert(is_leap_year(2000))
+    assert_eq(days_in_month(2024, 2), 29)
+    assert_eq(days_in_month(2023, 2), 28)
+    assert_eq(days_in_month(2024, 0), 30)
+    assert_eq(days_in_month(2024, 13), 30)
+}

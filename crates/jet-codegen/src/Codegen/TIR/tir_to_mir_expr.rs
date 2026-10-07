@@ -4491,9 +4491,12 @@ pub(super) fn lower_expr(
                 matches!(
                     op,
                     THandleOp::FileReaderReadLine
+                        | THandleOp::FileReaderRead
                         | THandleOp::AllocReset
                         | THandleOp::FileWriterWriteLine
                         | THandleOp::FileWriterFlush
+                        | THandleOp::FileWriterWriteAll
+                        | THandleOp::FileWriterFsync
                         | THandleOp::CSVWriterWrite
                         | THandleOp::CSVWriterFlush
                         | THandleOp::CSVWriterFinish

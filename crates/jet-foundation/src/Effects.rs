@@ -162,6 +162,12 @@ pub fn core_effect_leaf(module: &str, method: &str) -> Option<&'static str> {
 }
 
 fn core_effect_leaf_legacy(module: &str, method: &str) -> Option<&'static str> {
+    if matches!(
+        (module, method),
+        ("core.net", "gethostname") | ("core.sys", "hostname")
+    ) {
+        return Some("FS.Read");
+    }
     if (module == "core.tasks" && method == "timeout")
         || (module == "core.http" && method == "serve")
         || (module == "core.http.client" && matches!(method, "get" | "post" | "request"))
@@ -221,6 +227,9 @@ pub const fn receiver_effect_leaf(type_name: &str, method: &str) -> Option<&'sta
 /// Fallback for special calls that do not yet have a plain Core-call row.
 /// Plain rows never reach this resolver; their effect is stored on the row.
 fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
+    if module == "core.net" && method == "gethostname" {
+        return Some(Effect::Env);
+    }
     if matches!(
         (module, method),
         ("core.sys", "success") | ("core.process", "status_ok")

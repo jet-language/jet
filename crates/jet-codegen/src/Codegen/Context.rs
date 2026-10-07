@@ -984,11 +984,6 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "Auth" => Some("JetAuthApp"),
         // D-DBPOLICY-BIND1: RowPolicy is re-exported by the root Sync carrier.
         "RowPolicy" => Some("JetRowPolicy"),
-        // D-APPROX1=A: native sketch carriers are Prelude-root values.
-        "HyperLogLog" => Some("JetHyperLogLog"),
-        "TDigest" => Some("JetTDigest"),
-        "CountMinSketch" => Some("JetCountMinSketch"),
-        "ReservoirSampler" => Some("JetReservoirSampler"),
         "JetDate" | "JetInstant" | "JetLocalTime" | "JetDateTime" | "JetPeriod" | "JetZone"
         | "JetZonedDateTime" => Some(name),
         "WebMutationStatus" => Some("JetWebMutationStatus"),
@@ -1033,8 +1028,6 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "WebTableRow" => Some("JetWebTableRow"),
         "WebTablePage" => Some("JetWebTablePage"),
         "WebTable" => Some("JetWebTable"),
-        "WebVirtualViewport" => Some("JetWebVirtualViewport"),
-        "WebVirtualWindow" => Some("JetWebVirtualWindow"),
         "WebVirtualPlan" => Some("JetWebVirtualPlan"),
         "WebVirtualPlanViewport" => Some("JetWebVirtualPlanViewport"),
         "Atomic" => Some("JetAtomic"),
@@ -1132,30 +1125,14 @@ pub(crate) fn core_source_type_leaf(name: &str) -> &str {
         .unwrap_or(name)
 }
 
-pub(crate) fn core_source_record_owns_layout(name: &str) -> bool {
-    let leaf = core_source_type_leaf(name);
-    (name.starts_with("<corelib>/Core/regex::")
-        && matches!(
-            leaf,
-            "Regex" | "Match" | "RegexFlags" | "RegexFlag" | "Pattern" | "Node"
-        ))
-        || (name.starts_with("<corelib>/Core/web::Core/web/table.jet::")
-            && matches!(
-                leaf,
-                "WebTable" | "WebTableSort" | "WebTableFilter" | "WebTableColumn"
-                    | "WebTableRow" | "WebTablePage" | "WebTableState"
-            ))
-        // core.http's message values are source records; their leaves collide
-        // with the native server carriers (`Body`, `Headers`) and DataQuery.
-        || (name.starts_with("<corelib>/Core/http::Core/http/http.jet::")
-            && matches!(leaf, "Body" | "Headers" | "Header" | "Query"))
-}
-
 pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
     // core.sync's policy list is source-owned (`allow`/`deny`). The root
     // database row policy is a different native carrier (`table`/`expression`).
+    // A source-owned Core nominal (`source_module … types { … }`, e.g. the
+    // core.http message records whose leaves collide with the native server
+    // carriers) keeps its declared layout: no native carrier aliases it.
     if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy"))
-        || core_source_record_owns_layout(name)
+        || jet_foundation::CoreModuleExports::core_source_owns_type(name)
     {
         return None;
     }
@@ -1208,6 +1185,9 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "TextWidthAmbiguous" => Some("TextWidthAmbiguous"),
         "TextWidthControls" => Some("TextWidthControls"),
         "TextError" => Some("TextError"),
+        // Civil-time kernels still use their native text error carrier until
+        // the authored time carrier cutover lands with all call sites.
+        "TimeError" => Some("String"),
         "Query" => Some("DataQuery"),
         "DataGroupedQuery" => Some("DataGroupedQuery"),
         "Group" => Some("GroupValue"),
@@ -1256,7 +1236,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "Zone" => Some("JetZone"),
         "ZonedDateTime" => Some("JetZonedDateTime"),
         "URL" => Some("JetURL"),
-        "MIME" => Some("JetMIME"),
         "DataLoaderKind" => Some("DataLoaderKind"),
         "DataFormat" => Some("DataFormat"),
         "DataFreshness" => Some("DataFreshness"),
@@ -1284,7 +1263,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-LSDIR1=A: fs.list_dir returns [DirEntry].
         "DirEntry" => Some("DirEntry"),
         // D-FSOPS1 / D-WATCH-SCOPE1: typed filesystem and watcher values.
-        "Stat" => Some("Stat"),
         "WalkEntry" => Some("WalkEntry"),
         "WatchEvent" => Some("WatchEvent"),
         // stdlib-api-laws D4: `WatchEvent`'s two closed field enums.
@@ -1365,7 +1343,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-RAYLIB1=A: display-gated graphics bridge types.
         "RaylibWindow" => Some("RaylibWindow"),
         "RaylibColor" => Some("RaylibColor"),
-        "RaylibSound" => Some("RaylibSound"),
         "RaylibTextureAtlas" => Some("RaylibTextureAtlas"),
         // D-TYPEDSQL-SINK1=A: `SQL` is a checked `(String, Vec<DBValue>)`
         // carrier. It remains a known core value type for subset gating; the
@@ -1568,7 +1545,6 @@ pub(crate) fn raylib_handle_rust_type(name: &str) -> Option<&'static str> {
     match name {
         "RaylibWindow" => Some("RaylibWindow"),
         "RaylibColor" => Some("RaylibColor"),
-        "RaylibSound" => Some("RaylibSound"),
         "RaylibTextureAtlas" => Some("RaylibTextureAtlas"),
         _ => None,
     }
@@ -3457,11 +3433,6 @@ impl Cx {
             }
             // D-PENDING1=B: Loadable<Unknown, Unknown> placeholders — Rust infers the type.
             Type::Named(name) if name == "Unknown" => "_".to_string(),
-            // D-APPROX1=A: sketch types → opaque Rust structs.
-            Type::Named(name) if name == "HyperLogLog" => "JetHyperLogLog".to_string(),
-            Type::Named(name) if name == "TDigest" => "JetTDigest".to_string(),
-            Type::Named(name) if name == "CountMinSketch" => "JetCountMinSketch".to_string(),
-            Type::Named(name) if name == "ReservoirSampler" => "JetReservoirSampler".to_string(),
             // D-TIMEDEPTH1=A: civil-time types → opaque Rust structs.
             Type::Named(name) if name == "Date" => "JetDate".to_string(),
             Type::Named(name) if name == "LocalDate" => "JetDate".to_string(),
@@ -3471,12 +3442,9 @@ impl Cx {
             Type::Named(name) if name == "Period" => "JetPeriod".to_string(),
             Type::Named(name) if name == "Zone" => "JetZone".to_string(),
             Type::Named(name) if name == "ZonedDateTime" => "JetZonedDateTime".to_string(),
-            // D-URL1=A: URL/MIME values live in the corelib prelude module.
+            // D-URL1=A: URL values live in the corelib prelude module.
             Type::Named(name) if name == "URL" => {
                 format!("{}jet_std::JetURL", self.root_prefix)
-            }
-            Type::Named(name) if name == "MIME" => {
-                format!("{}jet_std::JetMIME", self.root_prefix)
             }
             Type::Named(name)
                 if matches!(

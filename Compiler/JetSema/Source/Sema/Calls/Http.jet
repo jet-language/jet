@@ -158,6 +158,15 @@ fn sema_call_http_static_value(
     )
 }
 
+// `Body.text(text, mime)`: the source-owned `core.net.mime.MIME` crosses into
+// the native body as its rendered `to_string()` text; the native takes String.
+fn sema_call_http_mime_text(value: TExpr, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> TExpr? {
+    graph :: environment.registration_graph ?? return None
+    candidates :: sema_expr_registration_method_candidates(graph, value.ty, "to_string", [Type]{}, [Type]{}, span, environment, &scopes, &diagnostics)
+    if candidates.len() != 1 -> return None
+    Val(sema_tir_expr(Type.String, TExprKind.MethodCall{receiver: value, method: candidates[0].method, type_args: [Type]{}, args: [TCallArg]{}}, span))
+}
+
 fn sema_call_http_static_known(type_name: String, method: String) -> Bool Never! {
     if type_name == "HTTPClientType" && method == "new" -> return true
     if type_name == "HTTPMethod" && (method == "custom" || method == "get" || method == "head" || method == "post" || method == "put" || method == "delete" || method == "connect" || method == "options" || method == "trace" || method == "patch") -> return true
@@ -327,6 +336,9 @@ pub fn sema_call_try_http_static(
         target.type_name == "Body" && method == "reader" && args.len() == 1 -> "from_reader"
         target.type_name == "Body" && method == "reader" -> "from_reader_with_length"
         else -> method
+    }
+    if target.type_name == "Body" && method == "text" && values.len() == 2 {
+        values[1] = sema_call_http_mime_text(values[1], span, environment, &scopes, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     }
     tir := sema_call_http_static_value(target.type_name, method, rust_method, args, values, result_type, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, &diagnostics)}

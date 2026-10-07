@@ -398,13 +398,14 @@ fn resolve_location(base: String, location: String) -> String? {
 fn is_https_downgrade(base: String, next: String) -> Bool Never! {
     from :: http_url.parse(base) ?? return false
     to :: http_url.parse(next) ?? return false
-    from.scheme == "https" && to.scheme == "http"
+    from.scheme() == "https" && to.scheme() == "http"
 }
 
 fn same_origin(left: String, right: String) -> Bool Never! {
     a :: http_url.parse(left) ?? return false
     b :: http_url.parse(right) ?? return false
-    a.scheme == b.scheme && a.host == b.host && a.port == b.port
+    a.scheme() == b.scheme() && a.host() == b.host() &&
+        (a.port() ?? (a.default_port() ?? -1)) == (b.port() ?? (b.default_port() ?? -1))
 }
 
 fn slice_text(text: String, start: Int, end: Int) -> String Never! {
@@ -493,8 +494,8 @@ fn valid_url(url: String) -> Bool Never! {
     raw :: url.bytes()
     if raw.len() < 8 || raw.len() > C_MAX_URL_BYTES || has_url_ctl(raw) -> return false
     parsed :: http_url.parse(url) ?? return false
-    if parsed.scheme != "http" && parsed.scheme != "https" -> return false
-    if parsed.host.bytes().len() == 0 || parsed.userinfo().bytes().len() > 0 -> return false
+    if parsed.scheme() != "http" && parsed.scheme() != "https" -> return false
+    if parsed.host() == None || parsed.userinfo().bytes().len() > 0 -> return false
     colon := index_byte(raw, 58)
     if colon <= 0 || colon + 2 >= raw.len() -> return false
     if raw[colon + 1] != (U8{47}) || raw[colon + 2] != (U8{47}) -> return false

@@ -338,7 +338,6 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/ColumnList.rs"),
     include_str!("../Prelude/Core/UnicodeString.rs"),
     include_str!("../Prelude/Core/Ascii.rs"),
-    include_str!("../Prelude/Core/ProcessArgs.rs"),
     // D-STR-CONCAT1: the owned String `+`/`+=` result is one kernel for every
     // execution tier; the evaluator and JIT include this same source.
     include_str!("../Prelude/Core/StringConcat.rs"),
@@ -356,7 +355,6 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/Measurement.rs"),
     include_str!("../Prelude/Core/TimeMonotonic.rs"),
     include_str!("../Prelude/Core/Time.rs"),
-    include_str!("../Prelude/Core/Sketch.rs"),
     include_str!("../Prelude/Core/Contracts.rs"),
     include_str!("../Prelude/Core/MapKey.rs"),
     include_str!("../Prelude/Core/RuntimeStack.rs"),
@@ -1904,6 +1902,10 @@ const JETSTD_FFI_CALLBACKS_PRELUDE: &str = concat!(
     include_str!("../Prelude/CoreLib/JetStd/FfiCallbacks.rs"),
     "\n// JET_VETTED_UNSAFE_END: jet_std_ffi_callbacks\n",
 );
+// #3593: held directories, *at(2) opens, identity stat, rename modes, and
+// extended attributes. AOT and the interpreter include this one file.
+const FILE_HANDLES_PRELUDE: &str =
+    include_str!("../Prelude/CoreLib/JetStd/FileHandles.rs");
 const SHARED_ROUTES_PRELUDE: &str =
     include_str!("../Prelude/CoreLib/Top/SharedRoutes.rs");
 
@@ -1917,6 +1919,7 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/EncodingTypes.rs"),
     JETSTD_COMMON_TYPES_PRELUDE,
     MAPPED_FILE_PRELUDE,
+    FILE_HANDLES_PRELUDE,
     JETSTD_XML_OPTIONS_PRELUDE,
     include_str!("../Prelude/CommandSuite.rs"),
     // D-DBPOLICY1=A: the closed row-policy language, compiled once. `DBPluginWire`
@@ -3592,7 +3595,7 @@ fn push_corelib_prelude_body(
     out.push_str(include_str!("../Prelude/Core/FileHandleOwners.rs"));
 
     for part in CORELIB_KERNEL_PARTS {
-        if (!needs_mapped_file && *part == MAPPED_FILE_PRELUDE)
+        if (!needs_mapped_file && (*part == MAPPED_FILE_PRELUDE || *part == FILE_HANDLES_PRELUDE))
             || (!needs_shared && *part == SHARED_ROUTES_PRELUDE)
         {
             continue;

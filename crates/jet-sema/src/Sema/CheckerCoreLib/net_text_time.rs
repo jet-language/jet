@@ -1082,30 +1082,6 @@ pub fn http_type_method_return(
     }
 }
 
-/// D-URL1=A: method return types for typed MIME values. `URL` is the
-/// `core.net.url` source record; its documented fields and methods resolve
-/// through the declaration, with no handle twins.
-pub fn url_mime_method_return(
-    ty: &Type,
-    method: &str,
-    args: &[crate::AST::CallArg],
-) -> Option<Option<Type>> {
-    let argc = args.len();
-    match ty {
-        Type::Named(n) if n == "MIME" => match method {
-            "media_type" | "subtype" | "essence" | "to_string" if argc == 0 => {
-                Some(Some(Type::String))
-            }
-            "param" if argc == 1 => Some(Some(Type::Option(Box::new(Type::String)))),
-            "params" if argc == 0 => Some(Some(Type::List(Box::new(Type::List(Box::new(
-                Type::String,
-            )))))),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
 /// D-TIMEDEPTH1/D-TIME-CALENDAR1: method return types for civil-time values.
 pub fn civil_time_method_return(
     ty: &Type,
@@ -1432,39 +1408,6 @@ pub fn civil_time_method_contract(
     None
 }
 
-/// D-APPROX1=A: return the type name string for a sketch receiver type.
-pub fn sketch_type_name(ty: &Type) -> Option<&'static str> {
-    match ty {
-        Type::Named(n) => match n.as_str() {
-            "HyperLogLog" => Some("HyperLogLog"),
-            "TDigest" => Some("TDigest"),
-            "CountMinSketch" => Some("CountMinSketch"),
-            "ReservoirSampler" => Some("ReservoirSampler"),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-/// D-APPROX1=A: method return types for sketch data structures.
-pub fn sketch_method_return(
-    ty: &Type,
-    method: &str,
-    _args: &[crate::AST::CallArg],
-) -> Option<Option<Type>> {
-    let name = sketch_type_name(ty)?;
-    match (name, method) {
-        ("HyperLogLog", "add") => Some(None), // void
-        ("HyperLogLog", "count") => Some(Some(Type::Int)),
-        ("TDigest", "add") => Some(None),
-        ("TDigest", "quantile") => Some(Some(Type::Float)),
-        ("CountMinSketch", "add") => Some(None),
-        ("CountMinSketch", "count") => Some(Some(Type::Int)),
-        ("ReservoirSampler", "add") => Some(None),
-        ("ReservoirSampler", "sample") => Some(Some(Type::List(Box::new(Type::String)))),
-        _ => None,
-    }
-}
 
 pub fn path_method_return(
     type_name: &str,

@@ -149,7 +149,7 @@ pub use Methods::{
     apply_repl_authorized_core_call_with_type, display_core_pure_value,
     eval_regex_replace_all_with, history_callback_fingerprint, history_command_schema_from_mir,
     jet_crypto_zeroize,
-    set_trace_id, sketch_add, with_world_rng_provider, HistoryCommandSchema,
+    set_trace_id, with_world_rng_provider, HistoryCommandSchema,
 };
 pub use Methods::{apply_seeded_rng_method, apply_seeded_rng_method_with_type};
 // I9: the TIR evaluator in jet-codegen calls this same fake-data kernel, so it

@@ -1,4 +1,139 @@
 #[test]
+fn core_term_source_composes_byte_files_streams_and_stderr() {
+    assert!(common::have_rustc(), "terminal source composition proof requires rustc");
+    let dir = std::env::temp_dir().join(format!("jet_corelib_term_source_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("bytes.bin").to_string_lossy().replace('\\', "\\\\");
+    let source = format!(r#"
+use core.term as term
+
+fn run() {{
+    bytes :: [U8]{{0, 255, 10, 195, 169}}
+    term.binwrite("{path}", bytes) ?? panic("write bytes")
+    actual :: term.binread("{path}") ?? panic("read bytes")
+    print(actual == bytes)
+    term.eprint("héllo")
+    term.eprint("")
+    reader := term.buffered()
+    first :: &reader.read_line() ?? panic("read first")
+    second :: &reader.read_line() ?? panic("read second")
+    end :: &reader.read_line() ?? panic("read end")
+    print(first ?? "missing")
+    print(second ?? "missing")
+    print(end == None)
+}}
+"#);
+    let (code, stdout, stderr) = build_and_run(
+        &dir, "term_source", &source, &[], Some("first\r\nsecond\n"),
+    );
+    assert_eq!(code, 0, "terminal source composition failed: {stderr}");
+    assert_eq!(stdout, "true\nfirst\nsecond\ntrue\n");
+    assert_eq!(stderr, "héllo\n\n");
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn core_term_source_confirmation_preserves_prompt_and_closed_default() {
+    assert!(common::have_rustc(), "terminal confirmation proof requires rustc");
+    let dir = std::env::temp_dir().join(format!("jet_corelib_term_confirm_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.term as term
+
+fn run() {
+    print(term.confirm("Proceed?"))
+    print(term.confirm("Again?"))
+}
+"#;
+    let (code, stdout, stderr) =
+        build_and_run(&dir, "term_confirm", source, &[], Some(" YeS \r\n"));
+    assert_eq!(code, 0, "terminal source confirmation failed: {stderr}");
+    assert_eq!(stdout, "Proceed? [y/N] true\nAgain? [y/N] false\n");
+    assert_eq!(stderr, "");
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn core_tdigest_source_preserves_step_quantiles_aliasing_and_display() {
+    assert!(common::have_rustc(), "source digest proof requires rustc");
+    let dir = std::env::temp_dir().join(format!("jet_corelib_tdigest_source_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir, "tdigest_source", r#"
+use core.data.sketch.tdigest as td
+
+fn run() {
+    digest :: td.new()
+    print(digest)
+    print(digest.quantile(0.5))
+    alias :: ~digest
+    alias.add(2.0)
+    digest.add(1.0)
+    print(digest.quantile(0.5))
+    print(alias.quantile(0.51))
+    print(digest.quantile(-1.0))
+    print(digest.quantile(2.0))
+    repeated :: td.new()
+    loop _ in 0..<500 -> repeated.add(1.0)
+    print(repeated.quantile(0.5))
+}
+"#, &[], None,
+    );
+    assert_eq!(code, 0, "source digest failed: {stderr}");
+    assert_eq!(stdout, "TDigest\n0.0\n1.0\n2.0\n1.0\n2.0\n1.0\n");
+    assert_eq!(stderr, "");
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn core_sketch_source_preserves_native_counts_aliases_and_sampler_display() {
+    assert!(common::have_rustc(), "source sketch proof requires rustc");
+    let dir = std::env::temp_dir().join(format!("jet_corelib_sketch_source_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir, "sketch_source", r#"
+use core.data.sketch.hll as hll
+use core.data.sketch.cms as cms
+use core.data.sketch.reservoir as reservoir
+
+fn run() {
+    cardinality :: hll.new()
+    alias :: ~cardinality
+    alias.add("apple")
+    cardinality.add("banana")
+    cardinality.add("cherry")
+    cardinality.add("apple")
+    print(cardinality)
+    frequencies :: cms.new()
+    frequencies.add("hello")
+    frequencies.add("world")
+    frequencies.add("hello")
+    frequencies.add("hello")
+    print(frequencies)
+    print(frequencies.count("hello"))
+    combined :: cms.merge(frequencies, frequencies)
+    print(combined.count("hello"))
+    sample :: reservoir.new(3)
+    sample.add("x")
+    sample.add("y")
+    sample.add("z")
+    print(sample)
+    print(sample.sample().len())
+    minimum :: reservoir.new(0)
+    minimum.add("first")
+    minimum.add("second")
+    print(minimum)
+    print(minimum.sample().len())
+}
+"#, &[], None,
+    );
+    assert_eq!(code, 0, "source sketches failed: {stderr}");
+    assert_eq!(stdout, "HyperLogLog(count=3)\nCountMinSketch\n3\n6\nReservoirSampler(n=3)\n3\nReservoirSampler(n=2)\n1\n");
+    assert_eq!(stderr, "");
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn text_unicode_audit_surface_runs() {
     let have_rustc = common::have_rustc();
     if !have_rustc {

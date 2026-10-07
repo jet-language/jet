@@ -12,6 +12,10 @@ exercise the contracts. The Rust-hosted compiler remains the reference
 execution path; `Compiler/` is a staged compiler port, not a claim that Jet is
 self-hosted.
 
+Application and `#Test` helper functions retain their canonical entry-module
+call identity in both single-file and multi-file packages; the absence of
+sibling modules does not change callable resolution.
+
 <!-- Stable IDs bind these public Core declarations to reviewed feature depth. -->
 <!-- FEATURE_CLAIMS:BEGIN -->
 <!-- FEATURE_CLAIM: claim.core-foundation | Core foundations are reachable Jet software. -->
@@ -706,15 +710,19 @@ Whole-file and metadata functions:
 | `read_at(path, offset, count)` | `[U8] !IOError` | Read a bounded byte range. |
 | `write_at(path, offset, bytes)` | `!IOError` | Write bytes at an offset. |
 | `write_atomic(path, bytes)` | `!IOError` | Publish bytes through a temporary file and rename. |
-| `fsync(path)` | `!IOError` | Flush a file to stable storage. |
+| `fsync(path)` | `!IOError` | Flush a file, or a folder so earlier renames inside it are durable. |
+| `open(path, links:)` / `create(path, if_exists:, mode:, links:)` / `append(path, mode:, links:)` | `FileReader` / `FileWriter !IOError` | Open a close-on-exec stream handle. `if_exists: .Refuse` creates exclusively, `mode` sets a new file's bits before the umask, and `links: .Refuse` refuses a final symbolic link. |
+| `open_directory(path)` | `Directory !IOError` | Hold a directory whose last part is a real directory, not a link. |
+| `samefile(a, b)` | `Bool !IOError` | Compare the two entries' `FileID`s. |
+| `extended_attribute_names(path)` / `extended_attribute(path, name)` / `set_extended_attribute(path, name, value)` | `[String]` / `[U8]?` / `!IOError` | Act on the path itself, never a final link's target. Names are sorted. |
 | `exists(path)` / `is_dir(path)` / `is_file(path)` | `Bool` | Return false when the path cannot be observed; these helpers do not raise a missing-path error. |
-| `stat(path)` | `Stat !IOError` | Read size, timestamps, mode, permissions, and file-kind facts. |
+| `stat(path)` / `lstat(path)` | `Stat !IOError` | Describe the entry itself, never a final link's target. |
 | `set_mode(path, mode)` | `!IOError` | Set Unix mode bits; non-Unix providers use their documented readonly mapping. |
 | `list_dir(path)` | `[DirEntry] !IOError` | List entries in name order. |
 | `create_dir(path)` / `create_dir_all(path)` | `!IOError` | Create one directory or its missing parents. |
 | `remove(path)` / `remove_dir(path)` / `remove_all(path)` | `!IOError` | Remove a file, empty directory, or tree. |
 | `copy(from, to)` / `copy_dir(from, to)` | `!IOError` | Copy one regular file or a directory tree. Directory copy does not dereference symlinks or special entries. |
-| `rename(from, to)` | `!IOError` | Rename or move a path. |
+| `rename(from, to, if_exists:)` | `!IOError` | Rename or move a path; `.Replace` (default), `.Refuse`, or `.Swap`. |
 | `symlink(original, link)` / `hard_link(original, link)` | `!IOError` | Create symbolic or hard links. |
 | `read_link(path)` | `String !IOError` | Read a symbolic-link target. |
 | `canonicalize(path)` / `absolute(path)` | `String !IOError` | Resolve an existing path with symlinks, or make an absolute lexical path without requiring existence. |
@@ -726,9 +734,57 @@ Whole-file and metadata functions:
 
 `walk`, `walk_parallel`, and `walk_files` accept the optional `ignore` value;
 `fs.walk(root)` is the convenience form. `DirEntry` has `name`, `path`, and
-`is_dir`. `Stat` has `size`, `modified_ms`, `created_ms`, `readonly`, `is_file`,
-`is_dir`, `is_symlink`, `kind`, and `mode`. `WalkEntry` exposes `path`,
+`is_dir`. `Stat` has `size`, `kind`, `mode`, `readonly`, `is_file`, `is_dir`,
+`is_symlink`, `id: FileID{device, inode}`, `links`, `owner: Int?` (None on
+Windows), `size_on_disk`, `modified` and `changed` (`DateTime`, nanosecond
+precision), and `created: DateTime?` (None where the file system keeps no
+birth time). `WalkEntry` exposes `path`,
 `relative`, `is_dir`, and `depth` through the checked type projection.
+
+Store-grade contracts (D-CORE-FILEERROR1, D-CORE-FILEOPEN1, D-CORE-FILESTAT1,
+D-CORE-FILEDIR1, D-CORE-HANDLEFD1, D-CORE-FILERENAME1, D-CORE-FILEXATTR1):
+
+- `IOError.AlreadyExists` reports an existing target a call was asked not to
+  replace (`EEXIST`, `ERROR_FILE_EXISTS`, `ERROR_ALREADY_EXISTS`).
+  `IOError.Unsupported` reports a request this system or file system cannot
+  perform (`ENOTSUP`, `EOPNOTSUPP`, `ENOSYS`, `ERROR_NOT_SUPPORTED`). Both
+  carry the shared `IOContext`; match the kind, never `os_code`.
+- A `Directory` keeps working after its path is renamed or removed. Its
+  methods (`open`, `create`, `open_directory`, `create_directory`, `list`,
+  `stat`, `entry_stat`, `read_link`, `rename(from, to, into:, if_exists:)`,
+  `remove`, `remove_directory`, `fsync`) take a relative name of plain parts
+  separated by `/`. Each part is opened without following a link; `..`, `.`,
+  empty parts, and absolute names are `IOError.InvalidInput`. `create_directory`
+  on an existing name is `AlreadyExists`. The handle is close-on-exec and
+  closes at scope exit.
+  `list()` returns `DirectoryEntry`: `raw_name` preserves the native basename
+  exactly, and `name_is_unicode` says whether `name` is lossless UTF-8. For an
+  invalid UTF-8 name, `name` and `path` are display text, not an identity.
+- `directory.lock()` acquires a nonblocking exclusive advisory flock on the
+  held directory itself. Its `AdvisoryLock` owns an independent close-on-exec
+  descriptor, so renaming the directory or closing the original `Directory`
+  does not release the lock. A contended lock is an `IOError`; explicit
+  `close(^lock)` or scope exit releases it, without deleting a name. Systems
+  without directory flock report `Unsupported`. This differs from the
+  sentinel-file ownership protocol of `files.lock(path)`.
+- Publish through a held directory by exclusively creating a temporary sibling,
+  writing and setting mode through its handle, calling `writer.fsync()`, then
+  `directory.rename(temp, destination)` and `directory.fsync()`. Rename replaces
+  the destination entry atomically: it does not write through a destination
+  symlink or alter another hard link's contents. Metadata from `reader.stat()`
+  describes the opened identity even after the destination is replaced.
+  Read-only kernel calls borrow their argument place; inspecting a held reader
+  or writer does not copy or duplicate the native owner.
+- `rename(..., if_exists: .Refuse)` is `AlreadyExists` when the target exists;
+  a file system without no-replace renames falls back to link-then-unlink for
+  files and reports `Unsupported` for folders. `.Swap` exchanges two existing
+  names in one step; a missing name is `NotFound` and a system without
+  exchange is `Unsupported`.
+- Extended attributes on Windows, or on a file system without them, report
+  no names and no values; writes are `Unsupported`.
+  Native optional replies are converted to the owned absence carrier at the
+  kernel boundary, including inside `IOError!`; an absent value is not an I/O
+  failure, and an actual I/O failure retains its original report.
 
 The retired raw-String `read_dir` helper is not a reserved method name:
 user struct and trait methods named `read_dir` participate in normal resolution.
@@ -760,9 +816,12 @@ fn count_lines(path: String) -> Int IOError! {
 | `create(path)` | `FileWriter !IOError` | Create or replace a buffered writer. |
 | `append(path)` | `FileWriter !IOError` | Open a buffered appending writer. |
 | `reader.read_line()` | `?String !IOError` | Read one line without its newline; return `None` at EOF. |
+| `reader.read(max)` | `[U8] !IOError` | Read up to `max` bytes from the shared position; an empty list is EOF. |
+| `reader.stat()` / `writer.stat()` | `Stat !IOError` | Describe the open file itself (fstat); a writer's buffered bytes count only after a flush. |
 | `reader.lines()` in a loop source | stream of `String` | Pull lines without loading the complete file. |
-| `writer.write_line(text)` | `!IOError` | Write text and a newline. |
-| `writer.flush()` | `!IOError` | Flush pending writer bytes. |
+| `writer.write_line(text)` / `writer.write_all(bytes)` | `!IOError` | Write text and a newline, or every byte of `bytes` (buffered). |
+| `writer.flush()` / `writer.fsync()` | `!IOError` | Flush pending writer bytes; `fsync` also makes the file's data durable. |
+| `writer.set_mode(mode)` | `!IOError` | Set the open file's permission bits; Windows keeps only read-only. |
 
 Readers, writers, temporary resources, and locks own their provider resource
 until lexical scope exit or an explicit `close(^handle)` consumes the handle.
@@ -816,7 +875,8 @@ fn run() {
 | `file(path)` / `data(mime, payload)` | `URL` | Build `file:` and `data:` values. |
 | `query(pairs)` / `urlencode(pairs)` | `String` | Encode repeated query pairs. |
 | `percent_encode(text)` / `percent_decode(text)` | `String` / `String !URLError` | Encode or decode URL components. |
-| `u.scheme` / `u.host` / `u.port` / `u.path` / `u.query` / `u.fragment` | component values | Read the parsed URL fields; `port` uses the default-port convention. |
+| `u.scheme()` / `u.path()` / `u.query()` | `String` | Read parsed URL components. |
+| `u.host()` / `u.port()` / `u.fragment()` | `String?` / `Int?` / `String?` | Read optional components; `port()` is present only for an explicitly written authority port. |
 | `u.path_segments()` / `u.query_pairs()` | `[String]` / `[[String]]` | Read decoded path and repeated query pairs. |
 | `u.normalize()` / `u.join(relative)` | `URL` / `URL !URLError` | Return a normalized URL or resolve a relative reference. |
 | `u.to_string()` / `u.default_port()` | `String` / `?Int` | Render the URL, keeping an explicitly written port, or read the scheme's registered default port. |
@@ -1238,18 +1298,18 @@ adds the `Time` effect. See
 ### `core.auth` — token verification and sessions
 
 `core.auth` verifies the closed JWT and PASETO forms and provides password,
-OAuth, magic-link, and cookie-session helpers. The Jet layer performs strict
-claim and input validation; provider calls handle the database/session boundary.
+OAuth, magic-link, and cookie-session helpers. These APIs retain their native
+authority until a source implementation preserves their complete public contract.
 
 | API | Result | Description |
 | --- | --- | --- |
 | `verify_jwt(token, key, audience, issuer, clock_skew)` | `Claims !AuthError` | Verify a three-part HS256 JWT with exact integer `exp`, optional `nbf`/`iat`, and audience/issuer checks. |
-| `verify_paseto(token, key, audience)` | `Claims !AuthError` | Verify `v4.public` with a 32-byte Ed25519 public key and the supplied audience. |
-| `register_user(name, password)` | `Session !AuthError` | Register a validated identity and issue a session. |
-| `password_login(name, password, ttl_s, flags)` | `Session !AuthError` | Validate credentials and issue a bounded session lifetime. |
-| `oauth_begin(provider)` / `oauth_finish(state, assertion, ttl_s, flags)` | state/session `!AuthError` | Start and finish the provider-backed OAuth assertion flow. |
-| `magic_link_issue(email, ttl_s, flags)` / `magic_link_consume(token, ttl_s, flags)` | token/session `!AuthError` | Issue and consume an email token with a bounded lifetime. |
-| `session_validate(cookie, ttl_s)` | `Session !AuthError` | Validate the signed session cookie and return its session carrier. |
+| `verify_paseto(token, key, audience, issuer, clock_skew, footer, implicit)` | `Claims !AuthError` | Verify `v4.public` with a 32-byte Ed25519 public key; issuer, clock skew, footer, and implicit assertion are optional labeled arguments. |
+| `register_user(user_id, password_hash)` | `Unit !String` | Register an identity with an already-computed password hash. |
+| `password_login(user_id, password_hash, now_ms, ttl_ms)` | `Session !String` | Validate credentials and issue a bounded session lifetime. |
+| `oauth_begin(provider)` / `oauth_finish(state, assertion, now_ms, ttl_ms)` | state/session `!String` | Start and finish the provider-backed OAuth assertion flow. |
+| `magic_link_issue(user_id, now_ms, ttl_ms)` / `magic_link_consume(token, now_ms, ttl_ms)` | token/session `!String` | Issue and consume a token with a bounded lifetime. |
+| `session_validate(session_id, now_ms)` | `Session !String` | Validate the session identifier and return its session carrier. |
 | `session_user(session)` / `session_cookie(session)` / `session_id(session)` | `String` | Project the validated session fields. |
 | `session_show(session)` | `String` | Render a redacted session summary; cookie bytes are not printed. |
 
@@ -1257,13 +1317,15 @@ JWT accepts only HS256 and requires a key of at least 32 bytes. PASETO accepts
 only `v4.public`, a 32-byte key, a non-empty normalized audience, and canonical
 base64url segments. Unknown algorithms, malformed JSON, wrong signatures,
 expired or not-yet-valid claims, wrong audiences, and invalid inputs fail
-closed. `Claims` contains `issuer`, `audience`, `subject`, `expires_at`, and the
-validated payload JSON. `AuthError` has `Rejected`, `Expired`, `Malformed`, and
-`Unavailable` cases.
+closed. `Claims` contains `subject`, `audience`, `issuer`, `expires_at`,
+`not_before`, and `issued_at`; subject, issuer, not-before, and issued-at are
+optional. `AuthError` retains `MalformedToken`, `UnsupportedToken`,
+`InvalidSignature`, `WeakKey`, `MissingClaim`, `WrongAudience`, `WrongIssuer`,
+`TokenExpired`, `DecodeError`, and `TokenNotYetValid`, including their payloads.
 
 Session cookies use the fixed `jet_session=` form with `HttpOnly`, `Secure`,
-`SameSite=Lax`, and `Path=/` attributes. TTL and flags are checked before the
-provider call; the current helper accepts zero flags. See
+`SameSite=Lax`, and `Path=/` attributes. Session helpers take explicit
+millisecond timestamps and lifetimes. See
 [`auth_tokens.jet`](../../../Examples/features/crypto/auth_tokens.jet) and
 [`auth_sessions.jet`](../../../Examples/features/crypto/auth_sessions.jet).
 
@@ -1337,6 +1399,8 @@ handling a closed event enum. See
 style. Terminal stream operations follow the [bounded buffering law](../spec.md#bounded-buffering-law).
 `term.print` and `term.eprint` are variadic like the prelude `print`: each
 argument writes on its own line to stdout or stderr (D-VERDICT-1321-1).
+`eprint` requires `IO` and `Time.Wait`; `binread` and `binwrite` additionally
+require `FS` because they access files rather than terminal streams.
 
 ```jet
 use core.term as term
@@ -2066,7 +2130,7 @@ fn run() {
 | Function or type | Returns | Description |
 | --- | --- | --- |
 | `time.is_leap_year(year)` | `Bool` | Test leap-year status under the proleptic Gregorian calendar. |
-| `time.days_in_month(year, month)` | `Int` | Return the number of days; an invalid month returns `0`. |
+| `time.days_in_month(year, month)` | `Int` | Return the number of days; an invalid month retains the civil calendar's `30`-day default. |
 | `time.period(start, end)` / `period_days(n)` / `period_months(n)` / `period_years(n)` | `Period` | Construct calendar periods. |
 | `time.utc()` / `time.zone(name)` | `Zone` / `Zone !TimeError` | Construct UTC, a numeric-offset zone, or a named IANA TZif zone. |
 | `time.utcoffset(zone)` | `Int` | Return the zone offset represented by the zone. |
@@ -2128,19 +2192,23 @@ replayed (D-TIMERES1=A; D-DET-CAPAPI).
 week calculations without locale tables. Its module-global weekday constants
 are `MONDAY :: 0` through `SUNDAY :: 6`.
 
+All calendar behavior is implemented in the embedded `Core/time/calendar.jet`
+source shared by the execution tiers, including epoch conversion without a
+native date-time carrier.
+
 | Function or value | Returns | Description |
 | --- | --- | --- |
 | `calendar.isleap(year)` | `Bool` | Test leap-year status. |
-| `calendar.leapdays(y1, y2)` | `Int` | Count leap days in a half-open year range. |
+| `calendar.leapdays(y1, y2)` | `Int` | Count leap days between the smaller and larger endpoint, excluding the larger year. |
 | `calendar.weekday(year, month, day)` | `Int` | Return Monday `0` through Sunday `6`. |
-| `calendar.monthrange(year, month)` | `(Int, Int)` | Return the first weekday and day count. |
+| `calendar.monthrange(year, month)` | `(days: Int, weekday: Int)` | Return the day count and Monday-based first weekday. Invalid months retain the `30`-day default. |
 | `calendar.monthcalendar(year, month)` / `monthcalendar_start(year, month, firstweekday)` | `[[Int]]` | Build a month grid. |
 | `calendar.yearcalendar(year)` | `[[[Int]]]` | Build a year calendar. |
 | `calendar.day_name(index)` / `day_abbr(index)` | `String` | Return fixed English day names. |
 | `calendar.month_name(index)` / `month_abbr(index)` | `String` | Return fixed English month names. |
-| `calendar.weekheader(width, firstweekday)` | `[String]` | Format abbreviated weekday headers. |
+| `calendar.weekheader(width, firstweekday)` | `[String]` | Clip abbreviated weekday names or pad them on the right; widths below `1` use `1`. |
 | `calendar.formatmonth(year, month, width)` / `formatyear(year)` | `String` | Render a month or year calendar. |
-| `calendar.timegm(year, month, day, hour, minute, second)` | `Int` | Convert a UTC calendar tuple to Unix seconds. |
+| `calendar.timegm(year, month, day, hour, minute, second)` | `Int` | Convert a UTC calendar tuple to Unix seconds, constraining civil fields and preserving a `23:59:60` leap label as the next epoch second. |
 
 ### `core.encoding` — bounded value codecs
 
@@ -2207,9 +2275,9 @@ The reader enforces depth `256` and a maximum item size of `16,777,216` bytes.
 | `json.pointer(tree, path)` | `DataTree !EncodingError` | Select by RFC 6901 JSON Pointer; a missing member or bad step is a located error, JSON `null` is a value. |
 | `json.patch(doc, ops)` / `patch_with_limits(doc, ops, limits)` | `DataTree !EncodingError` | Apply an RFC 6902 operation array atomically; `doc` is unchanged on failure. |
 | `json.events(value)` | `[DataEvent]` | Produce the canonical event sequence for a tree. |
-| `json.reader(text)` / `json.reader_allow_duplicates(text)` / `json.writer()` | `JSONReader` / `JSONWriter` | Construct a pull reader (rejecting, or reporting every repeated name) or a value writer. |
-| `JSONReader.next()` | `DataEvent !EncodingError` | Return the next event. |
-| `JSONWriter.write(value)` / `to_string()` | `Unit` / `String` | Feed values and finish an encoded value. |
+| `json.reader(^input, limits)` / `json.writer(^output, limits, canonical)` | `JSONReader !EncodingError` / `JSONWriter !EncodingError` | Construct bounded file-backed event streams. |
+| `JSONReader.next()` | `?DataEvent !EncodingError` | Return the next event or stable end-of-input. |
+| `JSONWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write events, flush output, or validate and finish the stream. |
 
 ### `core.encoding.jsonl` — line-delimited JSON
 
@@ -2225,9 +2293,9 @@ newline per row.
 | `jsonl.count_rows(text)` | `Int` | Count nonblank rows. |
 | `jsonl.append_line(text, value)` | `String` | Append one encoded row. |
 | `jsonl.first(text)` | `?DataTree !EncodingError` | Return the first nonblank row. |
-| `jsonl.reader(text)` / `jsonl.writer()` | `JSONLReader` / `JSONLWriter` | Construct incremental line reader or writer. |
+| `jsonl.reader(^input, limits)` / `jsonl.writer(^output, limits)` | `JSONLReader !EncodingError` / `JSONLWriter !EncodingError` | Construct bounded file-backed line streams. |
 | `JSONLReader.next()` | `?DataTree !EncodingError` | Return the next row or stable end-of-input. |
-| `JSONLWriter.write(value)` / `to_string()` | `Unit` / `String` | Write rows and finish the line stream. |
+| `JSONLWriter.write(value)` / `flush()` / `finish()` | `Unit !EncodingError` | Write records, flush output, or finish the stream. |
 
 ### `core.encoding.csv` — comma-separated rows
 
@@ -2276,20 +2344,19 @@ serializer.
 
 ### `core.encoding.xml` — bounded XML trees
 
-`core.encoding.xml` parses well-formed XML 1.0 without DTDs into ordered trees
-with `name`, `attrs`, and `children`. Only predefined and numeric entities are
-accepted. Resource limits apply to depth and input size. `canonical` means
-parse followed by this module's deterministic serializer; it is not W3C XML
-Canonicalization.
+`core.encoding.xml` uses the lossless namespace-aware `DataTree` schema and
+security rules in [encoding-decisions.md](../encoding-decisions.md#xml-representation-and-security).
+Native authority preserves the complete parse/render options, entity policies,
+lexical evidence, encodings, canonical modes, and located `XMLError` payloads.
+
 | Signature | Result | Description |
 | --- | --- | --- |
-| `xml.parse(text)` / `decode(text)` / `parse_bytes(bytes)` | `DataTree !EncodingError` | Parse XML text or bytes without DTD processing. |
-| `xml.parse_with(text, limits)` | `DataTree !EncodingError` | Parse with explicit bounded limits. |
-| `xml.to_string(tree)` / `to_bytes(tree)` | `String` / `[U8]` | Serialize an XML tree. |
-| `xml.canonical(text)` | `String !EncodingError` | Parse and produce deterministic module serialization, not W3C C14N. |
-| `xml.reader(text)` | `XMLReader !EncodingError` | Construct an incremental XML reader. |
-| `xml.attribute(name, value)` / `content(text)` / `expanded_name(name)` / `root(tree)` | `DataTree` or `String` | Construct or inspect XML attributes, text content, expanded names, or root. |
-| `xml.XMLWriter.write(value)` / `to_string()` / `flush()` / `finish()` | varies | Build and finish an XML stream. |
+| `xml.parse(text)` / `parse_with(text, options)` / `parse_bytes(bytes, options)` | `DataTree !XMLError` | Parse Unicode text or supported byte encodings with bounded, non-I/O entity policy. |
+| `xml.to_string(tree)` / `to_bytes(tree, options)` | `String !XMLError` / `[U8] !XMLError` | Render a validated XML document with lexical and encoding options. |
+| `xml.canonical(tree, options)` | `String !XMLError` | Apply Inclusive 1.1 or Exclusive 1.0 canonicalization. |
+| `xml.reader(^input, limits, options)` | `XMLReader !EncodingError` | Construct a bounded file-backed XML event reader. |
+| `xml.attribute(element, name)` / `content(element)` / `expanded_name(node)` / `root(document)` | varies `!XMLError` | Inspect attributes, content, expanded names, and the document root. |
+| `XMLWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write XML events, flush output, or validate and finish the stream. |
 
 ### `core.encoding.cbor` — definite-length CBOR
 
@@ -2302,8 +2369,9 @@ tags, half and single floats, and byte strings that cannot be represented in
 | --- | --- | --- |
 | `cbor.parse(bytes)` / `decode(bytes)` | `DataTree !EncodingError` | Parse supported definite-length CBOR. |
 | `cbor.to_bytes(value)` / `to_bytes_canonical(value)` | `[U8]` | Encode ordinary or canonical CBOR. |
-| `cbor.reader(bytes)` / `writer()` | `CBORReader` / `CBORWriter` | Construct byte reader or writer carriers. |
-| `CBORWriter.write(value)` / `write_canonical(value)` / `to_bytes()` | `Unit` / `[U8]` | Append ordinary or canonical values and finish the byte stream. |
+| `cbor.reader(^input, limits)` / `writer(^output, limits)` | `CBORReader !EncodingError` / `CBORWriter !EncodingError` | Construct bounded file-backed event streams. |
+| `CBORReader.next()` | `?DataEvent !EncodingError` | Return the next event or stable end-of-input. |
+| `CBORWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write events, flush output, or validate and finish the stream. |
 
 ### `core.encoding.hex` — hexadecimal bytes
 
@@ -2697,7 +2765,7 @@ or golden file. The public source is
 |---|---|---|
 | `assert_equal(comparison: TestComparison) -> Bool` | Boolean | Check the comparison's recorded proof fields. |
 | `compare<E>(cases: [DataTree], reference: fn(DataTree) -> DataTree E!, candidate: fn(DataTree) -> DataTree E!, relation: String) -> TestComparison E!` | comparison | Compare reference and candidate outputs over explicit cases. The callbacks' shared failure type passes up (D-CALLBACK-ERR1=A); callbacks that cannot fail make the comparison `Never!`. |
-| `snap(name: String, value: String) -[FS]> Bool` | Boolean | Check a named snapshot. |
+| `snap(name: String, value: String) -[FS, Env]> Bool` | Boolean | Compare or create `__snapshots__/<sanitized-name>.snap`; `JET_UPDATE_SNAPSHOTS=1` rewrites it. Snapshot names retain ASCII letters, digits, `-`, and `_`, replacing other scalars with `_`; an empty name becomes `case`. |
 | `golden(name: String, value: String) -[FS]> Bool` | Boolean | Check a named golden value. |
 | `fixture(name: String) -[FS]> String` | text | Load a named fixture. |
 | `temp_dir(prefix: String) -[FS]> String` | path | Allocate an isolated temporary directory. |

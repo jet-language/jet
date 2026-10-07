@@ -161,7 +161,7 @@ fn core_email_smtp_config_limits_and_trust_follow_ratified_law() {
         dkim: Err(JetAbsent),
     };
     jet_email::validate_smtp_config(&config).unwrap();
-    config.dkim = Ok(jet_email::DkimConfig {
+    config.dkim = Ok(jet_email::DKIMConfig {
         domain: "example.com".to_string(), selector: "login-2026".to_string(),
         private_key: (), signed_headers: vec!["subject".to_string()],
     });

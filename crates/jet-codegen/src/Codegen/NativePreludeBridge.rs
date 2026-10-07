@@ -340,7 +340,6 @@ fn is_native_route(symbol: &str) -> bool {
             | "jet_typed_html_interpolate"
             | "jet_typed_sh_interpolate"
             | "jet_term_write_stdout_line"
-            | "jet_std_io_eprint"
             | "jet_require"
             | "jet_require_eq"
             | "jet_panic_rich"
@@ -453,18 +452,6 @@ fn dispatch_route(
                 value: MirRuntimeValue::Unit,
                 stdout: frame.into_bytes(),
                 stderr: Vec::new(),
-            })
-        })();
-        return Some(result);
-    }
-    if symbol == "jet_std_io_eprint" {
-        let result = (|| -> Result<AmbientMirPreludeResult, Diagnostic> {
-            let text = text(&args, 0, span)?;
-            let frame = crate::terminal_runtime::jet_term_print_frame(text);
-            Ok(AmbientMirPreludeResult::Effect {
-                value: MirRuntimeValue::Unit,
-                stdout: Vec::new(),
-                stderr: frame.into_bytes(),
             })
         })();
         return Some(result);

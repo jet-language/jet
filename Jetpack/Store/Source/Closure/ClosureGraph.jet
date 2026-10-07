@@ -434,7 +434,7 @@ fn store_push_stat(table: &[U8], name: String, metadata: Stat) Never! {
     store_push_u64_le(&table, raw.len())
     store_push_bytes(&table, raw)
     store_push_u64_le(&table, metadata.size)
-    store_push_i128_le(&table, metadata.modified.unix_ns)
+    store_push_i128_le(&table, metadata.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds"))
     kind :: if {
         metadata.is_symlink -> "symlink"
         metadata.is_dir -> "directory"

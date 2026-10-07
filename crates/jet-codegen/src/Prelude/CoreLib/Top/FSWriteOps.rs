@@ -140,13 +140,3 @@ pub(crate) fn jet_std_fs_write_atomic(
     Ok(())
 }
 
-pub(crate) fn jet_std_io_binwrite(
-    path: &String,
-    bytes: &Vec<u8>,
-) -> Result<(), jet_std::IOError> {
-    jet_std_fs_write_bytes(path, bytes)
-}
-
-pub(crate) fn jet_std_io_buffered() -> JetStdinReader {
-    jet_std_io_stdin()
-}
