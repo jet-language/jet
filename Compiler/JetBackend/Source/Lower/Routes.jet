@@ -142,6 +142,20 @@ fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
     record_lists := [LowerRecordList]{}
     loop (index, arg) in args {
         ty :: lower_value_type(c, arg) ?? return lower_fail(&m, &f, "{what} {name} argument {index} has no checked type")
+        // Checked unit conversion MIR carries its rounding mode as the
+        // canonical exact-Int ordinal, not a nominal enum value. Marshal that
+        // one semantic operand to the runtime's unchanged mode tag.
+        rounding_tag := false
+        if route.params[index] == .Tag(tag_name, variants) {
+            rounding_tag = tag_name == "UnitRoundingMode" && variants == "TowardZero,Floor,Ceiling,NearestEven"
+        }
+        if row.module_name == "core.units" && (row.member == "conversion_rounded" || row.member == "conversion_rounded_measurement") && index == 5 && rounding_tag && lower_is_exact_int(ty) {
+            value :: lower_use(&m, &f, arg) ?? return
+            mode :: lower_word(&f)
+            lower_convert_exact(&m, &f, mode, value, "jet_int_owned_to_i64", false)
+            &lowered.push(mode)
+            next
+        }
         if !lower_route_carrier_matches(p, ty, route.params[index]) -> return lower_fail(&m, &f, "{what} {name} argument {index} of type {mir_type_display_name(ty)} does not match its runtime route carrier")
         if route.params[index] == .Unit -> next
         value :: lower_use(&m, &f, arg) ?? return

@@ -133,6 +133,11 @@ length without releasing capacity or the buffer. Repeated empty clear and a
 subsequent push retain normal value semantics, and frozen borrowed trees are
 not released as owned elements.
 
+Unit conversions retain the checked canonical Option/Result carrier and call
+the shared conversion kernel through its declared native route. Absence and
+rounding failure are not replaced with a machine Float approximation; a
+missing conversion route is an explicit refusal.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are

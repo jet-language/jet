@@ -170,6 +170,14 @@ fn lower_convert_prelude(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lo
     symbol :: lower_runtime_symbol(row)
     if (row.member == "int_try_from" || row.member == "fixed_try_from") && fallibility != MIRCallFallibility.Infallible -> return lower_convert_try_fixed(p, c, &m, &f, instruction, row.member, value, fallibility)
     if row.member == "inline_range" && fallibility != MIRCallFallibility.Infallible -> return lower_convert_inline_range(p, c, &m, &f, instruction, value, parameters)
+    // Unit conversions already name the canonical shared kernel. Their
+    // checked Option/Result is the normal runtime route carrier, not a
+    // backend-local rounding or failure policy.
+    if row.module_name == "core.units" && fallibility == .Failure(_) {
+        args := [MIRValueID]{value}
+        loop parameter in parameters -> &args.push(parameter)
+        return lower_route_call(p, c, &m, &f, instruction, call, args, "Prelude conversion")
+    }
     if fallibility != MIRCallFallibility.Infallible || row.fallibility != MIRCallFallibility.Infallible || row.abi == MIRPreludeABI.Aggregate || row.abi == MIRPreludeABI.Control -> return lower_fail(&m, &f, "Prelude conversion {symbol} with a failure or control adapter is not lowered at O0 yet")
     operand :: lower_use(&m, &f, value) ?? return
     args := [LIRValueID]{operand}

@@ -21,6 +21,9 @@ use jet_foundation.[
     MIRTypeDef,
     MIRTypeKind,
     MIRValueID,
+    MIRFailureCarrier,
+    MIRPreludeABI,
+    MIRPreludeFamily,
     mir_copy_ownership,
     mir_function_id,
     mir_type_from_kind,
@@ -199,6 +202,43 @@ fn fx_convert_big_i64_overflow() -> MIRProgram Never! {
     fx_print(&r, fixed)
     fx_block(&r, 0, MIRTerminator.Return{value: None})
     fx_program([MIRFunction]{fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+}
+
+// Preserve the canonical exact affine conversion's Option: representable
+// rational results are present, nonrepresentable ones absent. No backend
+// Float rounding replaces this shared kernel.
+// expect-stdout convert-units: "true\ntrue\nfalse\n"
+fn fx_convert_units() -> MIRProgram Never! {
+    b := fx_builder()
+    number :: fx_copy(&b, fx_convert_float_type(), MIROperation.Constant{value: MIRConstant.Float{value: 0.5, f32: false, spelling: None}})
+    target :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_convert_float_type()})
+    scale_parts :: [[String]]{[String]{"2", "1", "0", "1"}, [String]{"1", "3", "0", "1"}}
+    loop (index, parts) in scale_parts {
+        parameters := [MIRValueID]{}
+        loop text in parts {
+            argument :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: text}})
+            &parameters.push(argument)
+        }
+        converted :: fx_owned(&b, target, MIROperation.Convert{value: number, parameters: parameters, target: target, conversion: MIRConversion.Prelude{
+            call: fx_prelude_id("core.units", "conversion_exact"),
+            location: MIRPanicLoc{file: fx_source_file(), line: 1, column: 0},
+            fallibility: MIRCallFallibility.Failure{failure: MIRFailureCarrier.Optional{value: fx_convert_float_type()}},
+        }})
+        present :: fx_copy(&b, fx_bool(), MIROperation.OptionIsSome{subject: converted})
+        fx_print(&b, present)
+        if index == 0 {
+            result :: fx_copy(&b, fx_convert_float_type(), MIROperation.OptionValue{subject: converted})
+            fx_convert_float_equal(&b, result, 1.0)
+        }
+        fx_do(&b, MIROperation.Drop{value: converted, kind: MIRDropKind.Value})
+        loop parameter in parameters -> fx_do(&b, MIROperation.Drop{value: parameter, kind: MIRDropKind.Value})
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    route := fx_prelude(MIRPreludeFamily.StaticPrelude, "core.units", "conversion_exact", "jet_unit_conversion_exact", 5, MIRPreludeABI.Value)
+    route.fallibility = MIRCallFallibility.Failure{failure: MIRFailureCarrier.Optional{value: fx_convert_float_type()}}
+    &p.prelude_calls.push(route)
+    p
 }
 
 // fn run() { print(Char{Int{I64{4611686018427387904}}}) }
