@@ -354,8 +354,8 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
     {
         return Some(Effect::IO);
     }
-    // Encoding stream constructors own a live file handle.  Whole-value
-    // codecs remain pure; only reader/writer construction reaches the host.
+    // Encoding stream constructors retain FS authority. Whole-value codecs
+    // remain pure; the possession-method I/O leaves are handled above.
     if matches!(
         (module, method),
         (
