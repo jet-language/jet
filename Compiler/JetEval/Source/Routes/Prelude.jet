@@ -301,7 +301,7 @@ fn jet_eval_route_is_mutating_member(member: String) -> Bool Never! {
     if member == {
         "map_insert" | "set_insert" | "set_remove" | "set_replace" | "set_pop" | "sorted_set_insert" | "sorted_set_remove" -> true
         "set_update" | "set_difference_update" | "set_intersection_update" | "set_symmetric_difference_update" -> true
-        "list_push" | "list_extend" | "list_reverse" | "list_sort" | "list_sort_desc" | "list_clear" | "list_try_push" | "list_try_reserve" -> true
+        "list_push" | "list_extend" | "list_reverse" | "list_swap" | "list_sort" | "list_sort_desc" | "list_clear" | "list_try_push" | "list_try_reserve" -> true
         "list_pop" | "list_insert" | "list_remove_value" | "list_remove_slot" | "priority_queue_pop" -> true
         "map_add_new" | "map_setdefault" | "map_try_insert" | "map_remove" | "map_pop_first" | "string_try_push" -> true
         else -> false
@@ -765,6 +765,18 @@ fn jet_eval_route_mutating_collection(member: String, receiver: TComptimeValue, 
             if args.len() != 1 -> return jet_eval_route_mutation_fail(member, "is missing its source", &machine, span)
             other :: jet_eval_route_list(args[0]) ?? return jet_eval_route_mutation_fail(member, "requires two Lists", &machine, span)
             loop item in other -> &items.push(item)
+            Val(JetEvalRouteMutation{receiver: TComptimeValue.List{values: items}, result: unit})
+        }
+        "list_swap" -> {
+            if args.len() != 2 -> return jet_eval_route_mutation_fail(member, "requires two indices", &machine, span)
+            first :: jet_eval_route_int_value(args[0], &machine, span) ?? return None
+            second :: jet_eval_route_int_value(args[1], &machine, span) ?? return None
+            _ := jet_eval_list_position(&machine, first, items.len(), span) ?? return None
+            _ := jet_eval_list_position(&machine, second, items.len(), span) ?? return None
+            // Evaluator values own no user resource; writeback preserves the parent.
+            value :: items[first]
+            items[first] = items[second]
+            items[second] = value
             Val(JetEvalRouteMutation{receiver: TComptimeValue.List{values: items}, result: unit})
         }
         "list_reverse" -> {
