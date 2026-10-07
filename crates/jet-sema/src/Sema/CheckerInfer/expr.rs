@@ -6161,22 +6161,22 @@ impl<'a> Checker<'a> {
                     if self.lift_optional_slot(&head, &got, e).is_some() {
                         return Some(head);
                     }
-                    // A numeric head over a numeric body is the checked scalar
-                    // retag; any other mismatch is an error, never a silent
-                    // re-typing of the body.
-                    let numeric = |ty: &Type| {
-                        matches!(
-                            ty.without_user_tags(),
-                            Type::Int
-                                | Type::IntN { .. }
-                                | Type::Float
-                                | Type::Float32
-                                | Type::InlineRange { .. }
-                        )
-                    };
-                    if !self.check_type_assignable(&head, &got, e.span())
-                        && !(numeric(&head) && numeric(&got))
+                    // D-DOTCTOR3: a scalar body follows parameter acceptance,
+                    // not a representation-only numeric retag. In particular,
+                    // a Float cannot silently become an exact Int.
+                    if matches!(got.without_user_tags(), Type::Float | Type::Float32)
+                        && matches!(head.without_user_tags(), Type::Int | Type::IntN { .. })
                     {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("a `{}` can't be used where a `{}` is expected", got.name(), head.name()),
+                            "a typed literal accepts its body like a parameter; converting a decimal value to a whole number must be explicit".to_string(),
+                            format!("use `{}.from_float(value)` and handle its failure, or `math.round(value)` to round to the nearest Int", head.name()),
+                            Some(e.span()),
+                        ));
+                        return Some(got);
+                    }
+                    if !self.check_type_assignable(&head, &got, e.span()) {
                         let distinct = match &head {
                             Type::Named(name) if self.registry.is_distinct(name) => {
                                 Some(name.clone())

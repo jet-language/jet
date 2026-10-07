@@ -1,0 +1,14 @@
+// core-conformance: core.sys.decode
+use core.sys as env
+
+#Decode
+struct Settings {
+    port: Int
+}
+
+fn run() {
+    env.set("JET_CONFORMANCE_DECODE_PORT", "4580")
+    settings :: env.decode<Settings>(prefix: "JET_CONFORMANCE_DECODE_", file: "", allow: ["JET_CONFORMANCE_DECODE_PORT"]) ?? panic("decode config")
+    print(settings.port)
+    env.unset("JET_CONFORMANCE_DECODE_PORT") ?? panic("unset config")
+}

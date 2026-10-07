@@ -26,6 +26,8 @@ const builders = [
   "fn sema_return_value_fix(", "pub fn sema_return_value_mismatch(",
 ].map((head) => item(diagnosticPath, head));
 builders.push(item("Compiler/JetSema/Source/Sema/Expressions.jet", "fn sema_expr_unwrap_tag("));
+builders.push(item("Compiler/JetSema/Source/Sema/Expressions.jet", "fn sema_expr_is_integer("));
+builders.push(item("Compiler/JetSema/Source/Sema/Expressions/Constructors.jet", "fn sema_expression_typed_literal_float_to_integer("));
 const foundation = readFileSync(join(rungs, "L1/project/src/compiler.jet"), "utf8");
 const fixtures = readFileSync(join(repo, "Compiler/JetSema/Tests/ReturnDiagnosticFixtures.jet"), "utf8");
 mkdirSync(join(out, "project/src"), { recursive: true });
