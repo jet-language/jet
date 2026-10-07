@@ -23,7 +23,6 @@ fn jet_cli_record_text_validate(value: String, field: String, maximum: Int) Stri
     if value == "" || value.bytes().len() > maximum || receipt_text.has_control(value) {
         return Err("{field} is empty, too large, or contains control characters")
     }
-    Ok(())
 }
 
 pub fn jet_cli_record_identity_validate(identity: JetCLIRecordIdentity) String! {
@@ -33,7 +32,6 @@ pub fn jet_cli_record_identity_validate(identity: JetCLIRecordIdentity) String! 
     }
     jet_cli_record_text_validate(identity.tool_version, "tool_version", 512)
     jet_cli_record_text_validate(identity.engine, "engine", 512)
-    Ok(())
 }
 
 fn jet_cli_record_path_validate(path: String) String! {
@@ -59,7 +57,6 @@ fn jet_cli_record_path_validate(path: String) String! {
             return Err("record index path contains an unsafe component")
         }
     }
-    Ok(())
 }
 
 fn jet_cli_record_link_order(left: JetCLIRecordLink, right: JetCLIRecordLink) -> Ordering Never! {
@@ -97,7 +94,6 @@ pub fn jet_cli_record_entry_validate(entry: JetCLIRecordIndexEntry) String! {
     if entry.produced.len() > 1024 -> return Err("record produced has too many links")
     loop link in entry.consumed -> jet_cli_record_link_validate(link)
     loop link in entry.produced -> jet_cli_record_link_validate(link)
-    Ok(())
 }
 
 pub fn jet_cli_record_entry_normalize(entry: JetCLIRecordIndexEntry) -> JetCLIRecordIndexEntry String! {

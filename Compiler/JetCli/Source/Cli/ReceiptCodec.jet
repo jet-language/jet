@@ -73,7 +73,6 @@ fn jet_cli_receipt_section_name_validate(name: String) String! {
     if receipt_text.has_control(name) || name.contains("/") || name.contains("\\") {
         return Err("receipt section name `{name}` is invalid")
     }
-    Ok(())
 }
 
 fn jet_cli_receipt_section_validate(section: JetCLIReceiptSection) String! {
@@ -98,7 +97,7 @@ fn jet_cli_receipt_section_validate(section: JetCLIReceiptSection) String! {
         return Err("receipt section `{section.name}` payload digest does not match its bytes")
     }
     value :: canonical_json_parse(section.bytes) ?? return Err("receipt section `{section.name}` has an invalid schema: canonical JSON is invalid: {err.message}")
-    if value == .Object(_) -> return Ok(())
+    if value == .Object(_) -> return
     Err("receipt section `{section.name}` has an invalid schema: typed section value must be a canonical JSON object")
 }
 
@@ -142,7 +141,6 @@ fn jet_cli_record_link_validate(link: JetCLIRecordLink) String! {
     if link.artifact_id == "." || link.artifact_id == ".." || link.artifact_id.contains("/") || link.artifact_id.contains("\\") {
         return Err("record link artifact_id contains an unsafe path component")
     }
-    Ok(())
 }
 
 fn jet_cli_receipt_link_order(left: JetCLIRecordLink, right: JetCLIRecordLink) -> Ordering Never! {
