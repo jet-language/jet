@@ -2563,8 +2563,8 @@ fn run() {
 | `show(plot)` / `render(plot, backend)` | `JetDataPlotRender !DataError` | Render through the selected backend. |
 | `bar_text(groups)` / `bar_svg(groups)` | `String !DataError` | Render `Group<String, Int>` bars as text or SVG. |
 | `line_text(groups, options)` / `line_svg(groups, options)` | `String !DataError` | Render `Group<String, Float>` lines with `DataLineOptions`. |
-| `status()` | `[DataStatus]` | Report native and bridge path, ownership, trust, fallback, and replacement facts. |
-| `require_bridge(provider)` | `Unit !DataError` | Fail closed when a requested `py`, `r`, or `gpu` bridge is unavailable. |
+| `status()` | `[DataStatus] -[FS, Env]` | Report native and bridge path, ownership, trust, fallback, and replacement facts. Live R availability reads `PATH` and `JET_DATA_R_BRIDGE`, then checks files. |
+| `require_bridge(provider)` | `Unit !DataError -[FS, Env]` | Fail closed when a requested `py`, `r`, or `gpu` bridge is unavailable; use the same live availability facts as `status`. |
 
 Query methods filter, sort, map, extrema, joins, grouping, collection, and
 watching while retaining typed positions for errors. `Query<T>.plan()` returns

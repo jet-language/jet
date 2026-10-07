@@ -508,6 +508,7 @@ fn core_sig_text_and_testing(request: CoreCallSignatureRequest) -> CoreTypedCall
 }
 
 fn core_sig_fixed(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
+    if request.module_name == "core.encoding" && request.member == "__edition" -> return Val(core_sig(request.module_name, request.member, [CoreCallTypedParameter]{}, Val(Type.Int)))
     if core_web_fixed_signature(request.module_name, request.member) == Val(web) -> return Val(web)
     if core_sig_network(request) == Val(network) -> return Val(network)
     if core_sig_text_and_testing(request) == Val(surface) -> return Val(surface)

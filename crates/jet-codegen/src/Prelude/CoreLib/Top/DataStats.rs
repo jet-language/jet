@@ -6,6 +6,13 @@
 // reports the same `DataError`. A second copy of this math on any tier is an
 // I9 violation; `tests/data_one_kernel.rs` fails the build on one.
 
+/// Raw host metadata query. Bytes are split only at ASCII boundaries from
+/// OsString::into_encoded_bytes; all PATH policy remains in Core/data/data.jet.
+pub(crate) fn jet_data_host_path_is_file(path: &Vec<u8>) -> bool {
+    let native = unsafe { std::ffi::OsStr::from_encoded_bytes_unchecked(path) };
+    std::path::Path::new(native).is_file()
+}
+
 pub(crate) fn jet_data_error(
     kind: jet_std::DataErrorKind,
     operation: &str,

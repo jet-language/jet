@@ -2584,6 +2584,7 @@ fn core_fixed_sig_impl(
             ],
             Some(Type::String),
         )),
+        ("core.encoding", "__edition") => Some((vec![], Some(Type::Int))),
         // D-ENC1 + D-JSONVERB1: unified encoding. `parse` → dynamic JSON value; `decode`
         // → lenient typed decode (D-JSON3); `to_string`/`to_string_pretty` → serialize.
         ("core.encoding.json", "parse" | "loads") => Some((
@@ -3513,6 +3514,10 @@ fn core_fixed_sig_impl(
                 )),
             ))
         }
+        ("core.data", "__host_path_is_file") => Some((
+            vec![(read, list_u8.clone())],
+            Some(Type::Bool),
+        )),
         ("core.data", "status") => Some((
             vec![],
             Some(Type::List(Box::new(Type::Named("DataStatus".to_string())))),

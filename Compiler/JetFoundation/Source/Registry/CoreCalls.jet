@@ -155,6 +155,7 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
             "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor"
         }) && core_call_one_of(member, [String]{"reader", "writer"})) || (module_name == "core.encoding.csv" && member == "query") -> Val(Effect.FS)
         module_name == "core.compute" && member != "device_cpu" -> Val(Effect.GPU)
+        module_name == "core.data" && member == "__host_path_is_file" -> Val(Effect.FS)
         module_name == "core.files" -> Val(Effect.FS)
         module_name == "core.net" || module_name == "core.net.tls" || module_name == "core.http.client" || module_name == "core.http.server" || module_name == "core.http.middleware" || (module_name == "core.http" && core_call_one_of(member, [String]{"serve", "get"})) -> Val(Effect.Net)
         module_name == "core.game.raylib" -> Val(Effect.GPU)

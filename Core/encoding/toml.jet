@@ -9,6 +9,8 @@
 // `to_string` emits a minimal table document; it does not preserve comments.
 
 use core.encoding.[DataTree, EncodingError, EncodingErrorKind, EncodingFormat]
+use core.encoding.json as json
+use core.encoding.stream as stream
 
 fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
     {
@@ -28,7 +30,7 @@ pub fn decode(text: String) -> DataTree EncodingError! { parse_toml(text) }
 pub fn loads(text: String) -> DataTree EncodingError! { parse(text) }
 pub fn load(text: String) -> DataTree EncodingError! { parse(text) }
 
-pub fn to_string(value: DataTree) -> String Never! { render_toml(value) }
+pub fn to_string<T: Encode>(value: T) -> String Never! { render_toml(value.encode()) }
 
 fn parse_toml(text: String) -> DataTree EncodingError! {
     p := TOMLParser{bytes: text.bytes(), index: 0, line: 1, column: 1, root: [String:DataTree]{}}
@@ -672,43 +674,29 @@ fn put_path(entries: [String:DataTree], path: [String], i: Int, value: DataTree)
     out
 }
 
-fn render_toml(value: DataTree) -> String {
-    if value == {
-        .Object(entries) -> return render_toml_table(entries, "")
-        else -> return toml_leaf(value)
-    }
+fn render_toml(value: DataTree) -> String Never! {
+    render_toml_table(value, "").trim_end()
 }
 
-fn render_toml_table(entries: [String:DataTree], prefix: String) -> String {
+fn render_toml_table(value: DataTree, prefix: String) -> String Never! {
+    if value != .Object(_) -> return ""
+    entries :: stream.object_entries(value)
     out := ""
     loop pair in entries {
-        if pair.value == {
-            .Object(_) -> next
-            .Array(items) -> {
-                if all_objects(items) -> next
-            }
-            else -> { _ := 0 }
-        }
-        out = "{out}{toml_key(pair.key)} = {toml_leaf(pair.value)}\n"
+        if pair.value == .Object(_) -> next
+        if pair.value == .Array(items) && all_objects(items) -> next
+        out = "{out}{pair.key} = {toml_leaf(pair.value)}\n"
     }
     loop pair in entries {
+        path :: if prefix == "" -> pair.key else -> "{prefix}.{pair.key}"
         if pair.value == {
-            .Object(obj) -> {
-                path :: join_key(prefix, pair.key)
-                out = "{out}\n[{path}]\n{render_toml_table(obj, path)}"
-            }
+            .Object(_) -> out = "{out}\n[{path}]\n{render_toml_table(pair.value, path)}"
             .Array(items) -> {
                 if all_objects(items) {
-                    path :: join_key(prefix, pair.key)
-                    loop item in items {
-                        if item == {
-                            .Object(obj) -> out = "{out}\n[[{path}]]\n{render_toml_table(obj, path)}"
-                            else -> { _ := 0 }
-                        }
-                    }
+                    loop item in items -> out = "{out}\n[[{path}]]\n{render_toml_table(item, path)}"
                 }
             }
-            else -> { _ := 0 }
+            else -> {}
         }
     }
     out
@@ -725,57 +713,48 @@ fn all_objects(items: [DataTree]) -> Bool {
     true
 }
 
-fn join_key(prefix: String, key: String) -> String {
-    if prefix.len() == 0 -> return toml_key(key)
-    "{prefix}.{toml_key(key)}"
-}
 
-fn toml_key(key: String) -> String {
-    raw :: key.bytes()
-    if raw.len() > 0 {
-        valid := true
-        loop b in raw {
-            n :: b
-            if !((n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 95 || n == 45) {
-                valid = false
+fn toml_leaf(value: DataTree) -> String Never! {
+    #Unsafe("inspect compiler-private Bytes and typed carriers; public DataTree variants are unchanged") {
+        if value == {
+            .Null -> "\"\""
+            .Bool(v) -> "{v}"
+            .Int(n) -> "{n}"
+            .Float(n) -> "{n:Debug}"
+            .Number(_) | .TypedText(_) -> panic("internal JSON carrier escaped typed decode")
+            .Text(s) -> json.to_string(DataTree.Text(s))
+            .Bytes(bytes) -> {
+                out := "["
+                loop i in 0..<bytes.len() {
+                    if i > 0 -> out = "{out}, "
+                    out = "{out}{Int.from_u8(bytes[i])}"
+                }
+                "{out}]"
+            }
+            .Array(items) -> {
+                out := "["
+                loop i in 0..<items.len() {
+                    if i > 0 -> out = "{out}, "
+                    out = "{out}{toml_leaf(items[i])}"
+                }
+                "{out}]"
+            }
+            .Object(_) -> {
+                out := "{{ "
+                first := true
+                loop pair in stream.object_entries(value) {
+                    if !first -> out = "{out}, "
+                    first = false
+                    out = "{out}{pair.key} = {toml_leaf(pair.value)}"
+                }
+                "{out} }}"
             }
         }
-        if valid -> return ~key
     }
-    toml_quote(key)
 }
 
-fn toml_quote(text: String) -> String {
-    out := "\""
-    loop b in text.bytes() {
-        if b == (U8{92}) -> out = "{out}\\\\"
-        else if b == (U8{34}) -> out = "{out}\\\""
-        else if b == (U8{10}) -> out = "{out}\\n"
-        else if b == (U8{13}) -> out = "{out}\\r"
-        else if b == (U8{9}) -> out = "{out}\\t"
-        else -> out = "{out}{String.from_bytes([U8]{b}) ?? ""}"
-    }
-    "{out}\""
-}
-
-fn toml_leaf(value: DataTree) -> String {
-    if value == {
-        .Null -> return "\"\""
-        .Bool(v) -> {
-            if v -> return "true"
-            return "false"
-        }
-        .Int(n) -> return "{n}"
-        .Float(n) -> return "{n}"
-        .Text(s) -> return toml_quote(s)
-        .Array(items) -> {
-            out := "["
-            loop i in 0..<items.len() {
-                if i > 0 -> out = "{out}, "
-                out = "{out}{toml_leaf(items[i])}"
-            }
-            return "{out}]"
-        }
-        .Object(_) -> return "{{}}"
-    }
+#Test("TOML renderer preserves typed serializer layout") {
+    assert(to_string(DataTree.Int(3)) == "")
+    assert(toml_leaf(DataTree.Text("é\n")) == "\"é\\n\"")
+    assert(toml_leaf(DataTree.Float(Float{1.0})) == "1.0")
 }

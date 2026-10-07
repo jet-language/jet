@@ -1,4 +1,5 @@
 use core.encoding.[DataTree, EncodingError, EncodingErrorKind, EncodingFormat]
+use core.encoding.stream as stream
 
 fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
     {
@@ -22,6 +23,11 @@ use core.encoding.json as json
 pub fn parse(text: String) -> DataTree EncodingError! { parse_yaml(text) }
 
 pub fn decode(text: String) -> DataTree EncodingError! { parse_yaml(text) }
+
+pub fn to_string<T: Encode>(value: T) -> String Never! {
+    text :: render_yaml(value.encode(), 0).trim_end()
+    if text == "" -> "{}" else -> text
+}
 
 fn parse_yaml(text: String) -> DataTree EncodingError! {
     trimmed :: trim_yaml(text)
@@ -256,31 +262,97 @@ fn parse_scalar(text: String) -> DataTree Never! {
     DataTree.Text(unquote(clean))
 }
 
-fn render_yaml(value: DataTree, indent: Int) -> String {
+fn render_yaml(value: DataTree, indent: Int) -> String Never! {
     if value == {
-        .Null -> return "null"
-        .Bool(v) -> {
-            if v -> return "true"
-            return "false"
-        }
-        .Int(n) -> return "{n}"
-        .Float(n) -> return "{n}"
-        .Text(s) -> return yaml_scalar(s)
-        .Array(items) -> return render_yaml_array(items, indent)
-        .Object(entries) -> return render_yaml_object(entries, indent)
+        .Object(_) -> render_yaml_object(value, indent)
+        .Array(items) -> render_yaml_array(items, indent)
+        else -> "{spaces(indent)}{yaml_leaf(value)}\n"
     }
 }
 
-fn render_yaml_array(items: [DataTree], indent: Int) -> String {
+fn nonempty_collection(value: DataTree) -> Bool Never! {
+    if value == {
+        .Object(_) -> stream.object_entries(value).len() > 0
+        .Array(items) -> items.len() > 0
+        else -> false
+    }
+}
+
+fn render_yaml_array(items: [DataTree], indent: Int) -> String Never! {
+    pad :: spaces(indent)
     out := ""
-    loop item in items -> out = "{out}{spaces(indent)}- {render_yaml(item, indent + 2)}\n"
+    loop item in items {
+        if nonempty_collection(item) {
+            out = "{out}{pad}-\n{render_yaml(item, indent + 2)}"
+        } else {
+            out = "{out}{pad}- {yaml_leaf(item)}\n"
+        }
+    }
     out
 }
 
-fn render_yaml_object(entries: [String:DataTree], indent: Int) -> String {
+fn render_yaml_object(value: DataTree, indent: Int) -> String Never! {
+    pad :: spaces(indent)
+    entries :: stream.object_entries(value)
+    if entries.len() == 0 -> return "{pad}{{}}\n"
     out := ""
-    loop pair in entries -> out = "{out}{spaces(indent)}{pair.key}: {render_yaml(pair.value, indent + 2)}\n"
+    loop pair in entries {
+        key :: yaml_key(pair.key)
+        if nonempty_collection(pair.value) {
+            out = "{out}{pad}{key}:\n"
+            if pair.value == {
+                .Array(items) -> out = "{out}{render_yaml_array(items, indent)}"
+                else -> out = "{out}{render_yaml(pair.value, indent + 2)}"
+            }
+        } else {
+            out = "{out}{pad}{key}: {yaml_leaf(pair.value)}\n"
+        }
+    }
     out
+}
+
+fn yaml_key(key: String) -> String Never! {
+    if key == "" || key.contains(":") || key.contains(" ") || key.contains("#") -> return "{key:Debug}"
+    key
+}
+
+fn yaml_leaf(value: DataTree) -> String Never! {
+    #Unsafe("inspect compiler-private Bytes and typed carriers; public DataTree variants are unchanged") {
+        if value == {
+            .Null -> "null"
+            .Bool(v) -> "{v}"
+            .Int(n) -> "{n}"
+            .Float(n) -> "{n:Debug}"
+            .Number(_) | .TypedText(_) -> panic("internal JSON carrier escaped typed decode")
+            .Text(s) -> yaml_scalar(s)
+            .Bytes(bytes) -> {
+                out := "["
+                loop i in 0..<bytes.len() {
+                    if i > 0 -> out = "{out}, "
+                    out = "{out}{Int.from_u8(bytes[i])}"
+                }
+                "{out}]"
+            }
+            .Array(items) -> {
+                out := "["
+                loop i in 0..<items.len() {
+                    if i > 0 -> out = "{out}, "
+                    out = "{out}{yaml_leaf(items[i])}"
+                }
+                "{out}]"
+            }
+            .Object(_) -> {
+                out := "{{"
+                first := true
+                loop pair in stream.object_entries(value) {
+                    if !first -> out = "{out}, "
+                    first = false
+                    out = "{out}{yaml_key(pair.key)}: {yaml_leaf(pair.value)}"
+                }
+                "{out}}}"
+            }
+        }
+    }
 }
 
 fn trim_yaml(text: String) -> String Never! {
@@ -326,38 +398,31 @@ fn strip_inline_comment(text: String) -> String Never! {
     ~text
 }
 
-fn yaml_scalar(text: String) -> String {
+fn yaml_scalar(text: String) -> String Never! {
+    needs := text == "" || text == "null" || text == "Null" || text == "NULL" || text == "~" || text == "true" || text == "True" || text == "TRUE" || text == "false" || text == "False" || text == "FALSE"
+    if text.starts_with(" ") || text.ends_with(" ") || text.contains(": ") || text.contains(" #") || text.contains("\n") || parses_as_number(text) -> needs = true
     raw :: text.bytes()
-    needs := raw.len() == 0
-    i := 0
-    loop i < raw.len() {
-        n :: raw[i]
-        if n == 32 || n == 9 || n == 35 || n == 58 || n == 91 || n == 93 || n == 123 || n == 125 || n == 44 || n == 34 || n == 39 || n == 10 || n == 13 -> needs = true
-        i += 1
+    if raw.len() > 0 {
+        loop b in "-?:[]{{}}#&*!|>'\"%@`".bytes() {
+            if raw[0] == b -> needs = true
+        }
     }
-    if !needs && text != "null" && text != "true" && text != "false" && !parses_as_number(text) -> return ~text
-    out := "\""
-    loop b in raw {
-        if b == (U8{92}) -> out = "{out}\\\\"
-        else if b == (U8{34}) -> out = "{out}\\\""
-        else if b == (U8{10}) -> out = "{out}\\n"
-        else if b == (U8{13}) -> out = "{out}\\r"
-        else if b == (U8{9}) -> out = "{out}\\t"
-        else -> out = "{out}{String.from_bytes([U8]{b}) ?? ""}"
-    }
-    "{out}\""
+    if needs -> "{text:Debug}" else -> text
 }
 
 fn parses_as_number(text: String) -> Bool Never! {
-    if Int.parse(text) == {
-        .Ok(_) -> return true
-        else -> { _ := 0 }
+    raw :: text.bytes()
+    digits := raw.len() > 0
+    loop i in 0..<raw.len() {
+        n :: Int.from_u8(raw[i])
+        if i == 0 && (n == 43 || n == 45) {
+            if raw.len() == 1 -> digits = false
+            next
+        }
+        if n < 48 || n > 57 -> digits = false
     }
-    if Float.parse(text) == {
-        .Ok(_) -> return true
-        else -> { _ := 0 }
-    }
-    false
+    if digits && Int.parse(text) == .Ok(n) && n >= -9223372036854775808 && n <= 9223372036854775807 -> return true
+    Float.parse(text) == .Ok(_)
 }
 
 fn lstrip(text: String) -> String Never! {
@@ -452,4 +517,12 @@ fn unquote(text: String) -> String Never! {
         i += 1
     }
     String.from_bytes(out) ?? ~text
+}
+
+#Test("YAML renderer preserves scalar quoting") {
+    assert(to_string(DataTree.Text("é")) == "é")
+    assert(to_string(DataTree.Text("NULL")) == "\"NULL\"")
+    assert(to_string(DataTree.Text("a b")) == "a b")
+    assert(to_string(DataTree.Text("a: b")) == "\"a: b\"")
+    assert(to_string(DataTree.Array([DataTree]{})) == "{{}}")
 }

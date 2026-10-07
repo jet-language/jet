@@ -30,6 +30,7 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> CoreTy
     }
 
     if module_name == "core.data" {
+        if member == "__host_path_is_file" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_u8, read)}, Val(Type.Bool)))
         if core_sig_one_of(member, [String]{"sum", "mean", "min", "max", "median", "variance", "stddev"}) {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
                 core_sig_positional(list_float, read),

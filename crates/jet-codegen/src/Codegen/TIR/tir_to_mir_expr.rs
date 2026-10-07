@@ -3341,6 +3341,21 @@ pub(super) fn lower_expr(
             data_plan,
             fallibility,
         } => {
+            if record.module == "core.encoding" && record.member == "__edition" {
+                let edition = jet_foundation::PackageEdition::package_edition();
+                let year = edition.parse::<i64>().map_err(|_| {
+                    ctx.error(ctx.span(), "resolved package edition is not an integer")
+                })?;
+                return ctx.emit(
+                    "package-edition",
+                    Some(expr.ty.clone()),
+                    MirOperation::Constant(MirConstant::Int {
+                        value: year,
+                        width: None,
+                        spelling: None,
+                    }),
+                );
+            }
             if record.module == "core.reflect" && record.member == "of" {
                 let [arg] = args.as_slice() else {
                     return Err(ctx.error(
