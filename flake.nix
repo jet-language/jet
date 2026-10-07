@@ -177,6 +177,8 @@
             pkgs.gcc
             pkgs.clang
             pkgs.lld
+            # D-DBG3/D-DX-DEBUGBACK1: `jet debug` steps and records through LLDB.
+            pkgs.lldb
             pkgs.nodejs_22
             pkgs.bun
             jetVite

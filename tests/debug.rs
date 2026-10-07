@@ -704,6 +704,62 @@ fn native_binary(tag: &str, rust: &str) -> (common::Scratch, PathBuf) {
     (scratch, binary)
 }
 
+/// D-DX-DEBUGBACK1=A: `jet debug --record` records one complete native LLDB
+/// run, and `--replay` browses that history without executing the program.
+#[test]
+fn native_record_then_replay_browses_without_executing() {
+    if !have("rustc") || !have("lldb") {
+        eprintln!("skipping: native record needs rustc and lldb on PATH");
+        return;
+    }
+    let file = native_fixture("record_replay", LOOPS);
+    let dir = Path::new(&*file).parent().unwrap().to_path_buf();
+    let recorded = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .current_dir(&dir)
+        .args(["debug", &*file, "--record=loops"])
+        .stdin(Stdio::null())
+        .output()
+        .expect("run jet debug --record");
+    assert_eq!(
+        recorded.status.code(),
+        Some(0),
+        "native record failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&recorded.stdout),
+        String::from_utf8_lossy(&recorded.stderr)
+    );
+    assert!(
+        dir.join(".jet/replays/loops.jetproof-replay").is_file(),
+        "native record wrote no replay receipt"
+    );
+    let mut replay = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .current_dir(&dir)
+        .args(["debug", &*file, "--replay=loops"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start jet debug --replay");
+    replay
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"when total\nc\n")
+        .unwrap();
+    let output = replay.wait_with_output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "replay failed:\n{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.contains("last change:"), "{stdout}");
+    assert!(
+        !stdout.contains("total is"),
+        "replay re-executed the recorded program: {stdout}"
+    );
+}
+
 fn dap_frame(body: &str) -> String {
     format!("Content-Length: {}\r\n\r\n{}", body.as_bytes().len(), body)
 }
