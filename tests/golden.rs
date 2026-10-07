@@ -54,6 +54,44 @@ impl Drop for GoldenScratch {
     }
 }
 
+/// One example's generated source and executable. Removed when the example's
+/// check passes, so a full run does not leave ~2.5 GB of binaries in the test
+/// temp directory; a failing example keeps them for inspection.
+struct ProgramFiles([PathBuf; 2]);
+
+impl Drop for ProgramFiles {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            return;
+        }
+        for path in &self.0 {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+/// Keep the prebuilt runtime directory to this test build's keys: a runtime
+/// exported before the binary was linked belongs to an earlier build, and a
+/// checkout's long-lived target dir would otherwise gain ~120 MB per stale key
+/// on every rebuild. A pruned key that is still current rebuilds once.
+fn prune_prebuilt_runtimes_older_than(prebuilt: &Path, exe: &Path) {
+    let Ok(built) = fs::metadata(exe).and_then(|meta| meta.modified()) else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(prebuilt) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let stale = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .is_ok_and(|modified| modified < built);
+        if stale && entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
 struct FeatureFixtureScratch {
     root: PathBuf,
     entry: PathBuf,
@@ -414,12 +452,24 @@ fn examples_compile_and_run() {
     let ffi_cache = scratch.join("ffi");
     // #2074/#2516: the store is content-addressed and re-verified against the
     // artifact digest on every hit, so sharing it across runs cannot
-    // resurrect a stale artifact — a wrong key is a miss, never a reuse. A
-    // per-run store would instead pay one cold runtime compile per key on
-    // every golden run, which is the exact cost this substrate exists to
-    // remove. Living under the target dir keeps `cargo clean` as the reset.
+    // resurrect a stale artifact — a wrong key is a miss, never a reuse.
+    // Living under the target dir keeps `cargo clean` as the reset.
     let store = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("jet-golden-store");
     std::env::set_var("JET_STORE_DIR", &store);
+    // D-BUILD-PREBUILT1: the runtime/Core closure is compiled once per test
+    // build, not once per example process. Every example links the
+    // `jet-runtime/<key>` rlib beside this binary in place, the layout a
+    // shipped `jet` reads; the first process to need a key builds and exports
+    // it while the others wait (`common::add_generated_rust`). Without this,
+    // each example process verified and copied a ~120 MB rlib out of its
+    // store, and every golden shard compiled every key it met.
+    let exe = std::env::current_exe().expect("golden test binary path");
+    let prebuilt = exe
+        .parent()
+        .expect("golden test binary has a directory")
+        .join(jet_store::runtime::PREBUILT_DIR_NAME);
+    prune_prebuilt_runtimes_older_than(&prebuilt, &exe);
+    std::env::set_var(jet_store::runtime::PREBUILD_EXPORT_ENV, &prebuilt);
     std::env::set_var("JET_FFI_CACHE_DIR", &ffi_cache);
     let jetpack_root = scratch.join("jetpack-root");
     let _scratch = GoldenScratch { path: scratch };
@@ -933,6 +983,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         flat_stem
     ));
     let bin = dir.join(format!("jet_golden_{}_{}", std::process::id(), flat_stem));
+    let _program_files = ProgramFiles([rs.clone(), bin.clone()]);
     let mut rustc_cmd = Command::new("rustc");
     let _runtime_lease = add_generated_rust(&mut rustc_cmd, &rs, &rust_code, ffi_link.is_some(), &[]);
     rustc_cmd.arg("-o").arg(&bin);
