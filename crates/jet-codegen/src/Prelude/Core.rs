@@ -2588,6 +2588,16 @@ impl JetSliceRange for String {
     }
 }
 
+// A string-view (`&str`) local slices the same way as its owner.
+impl JetSliceRange for str {
+    type Output = String;
+
+    fn slice_range(&self, range: &JetRange, file: &str, line: u32) -> Self::Output {
+        jet_string_slice_value(self, range.start, range.end, range.exclusive)
+            .unwrap_or_else(|message| jet_panic(file, line, &message))
+    }
+}
+
 fn jet_slice_range<T: JetSliceRange + ?Sized>(
     xs: &T,
     range: &JetRange,
@@ -3459,7 +3469,7 @@ fn jet_fixed_list_concat<
     })
 }
 
-fn jet_char_len(s: &String) -> i64 {
+fn jet_char_len(s: &str) -> i64 {
     s.chars().count() as i64
 }
 // Eager materialize of the same pieces as `jet_iter_string_split` (AOT `String.split`
