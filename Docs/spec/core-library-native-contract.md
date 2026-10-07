@@ -116,6 +116,12 @@ failure contract. A sequence of scalar reader calls is not a replacement for a
 pattern scan. When that scan/capture boundary is unavailable, lowering refuses
 the semantic operation rather than emitting a partial parser.
 
+Module scalar storage has one local data cell per checked declaration. Global
+reads and writes through static-rooted places address that same cell, including
+when the shared object writer packages a runtime library. Atomic values still
+require their typed allocation, ordering and ownership contract; a raw machine
+compare-and-swap primitive does not establish that contract.
+
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
