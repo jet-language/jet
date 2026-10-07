@@ -150,6 +150,15 @@ fn fx_inline_asm_call(two: Bool) -> LIRModule Never! {
 
 fn fx_inline_asm_refusals() -> Bool Never! {
     templates :: [String]{"frobnicate rax ; -> return", "mov rdi, 1\nmov rax, {{value}} ; -> return", "ret", "push rax", "pop rax", "push rax\ncall r11\npop rax", "mov rbx, rax", "mov rax, xmm0 ; -> return", "mov rax, 9223372036854775808 ; -> return", "mov rax, rsp", "mov rax, {{missing}} ; -> return", "mov rax, 1 ; -> return\nmov rax, 2 ; -> return"}
+    forbidden :: [String]{"mov rax, qword ptr fs:[0] ; -> return", "mov rax, qword ptr gs:[8] ; -> return", "mov rcx, qword ptr gs:[0] ; -> return", "xadd qword ptr [rdi], rax", "lock xchg qword ptr [rdi], rax", "test rcx, rcx", "jnz 1f", "1:", "and rsp, -16", "xor edi, edi", "mov eax, 60"}
+    loop template in forbidden {
+        result :: x64_assemble_template(template, [String]{}, template.contains("return"))
+        if result.error == None || result.code.len() != 0 -> return false
+    }
+    gs :: x64_assemble_template("mov rax, qword ptr gs:[0] ; -> return", [String]{}, true)
+    if gs.error != None || gs.code != [U8]{0x65, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0} -> return false
+    xadd :: x64_assemble_template("lock xadd qword ptr [rcx], rax\nmov rax, rax ; -> return", [String]{}, true)
+    if xadd.error != None || xadd.code.slice(0, 5) != [U8]{0xf0, 0x48, 0x0f, 0xc1, 0x01} -> return false
     loop template in templates {
         result :: x64_assemble_template(template, [String]{"value"}, template.contains("return"))
         if result.error == None || result.code.len() != 0 -> return false
