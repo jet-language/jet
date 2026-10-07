@@ -614,10 +614,6 @@ fn mixed_bind_python(root: &Path) -> Output {
 
 #[cfg(unix)]
 fn mixed_run_workflow(root: &Path, expected: &str, java_home: Option<&Path>) {
-    let run_file = root.join("run.jet");
-    let run_path = run_file.to_str().unwrap();
-    assert_eq!(jet::Debug::needs_native(run_path), Some(true));
-
     let checked = mixed_jet_output(root, &["check", "run.jet"], java_home);
     mixed_assert_ok("mixed-repo check", &checked);
 

@@ -14913,38 +14913,46 @@ fn persist_build_record(
     let _ = store.publish_last_build_record(workspace_root, &record_key, &record);
 }
 
-/// D-DBG3 step 2 (dap-debugger): build + launch the native lldb-backed `jet
-/// debug` backend — a debug-profile build whose checked MIR source carries
-/// the line-map metadata consumed by `crates/jet-debug/src/Inferior.rs`, then
-/// either the `(jet)` terminal session or the DAP server (`--dap`) drives it.
-/// Returns the process exit code.
-pub(crate) fn run_debug_native(file: &str, raw_frames: bool, dap: bool, mode: OutputMode) -> i32 {
+/// A debug-profile native build of `file` for the lldb-backed `jet debug`
+/// backend: the binary, the generated Rust's basename (lldb's `-f` matches by
+/// basename) and text, and the Jet source. Problems are reported here.
+struct NativeDebugBuild {
+    bin: PathBuf,
+    rust_file: String,
+    rust: String,
+    src: String,
+}
+
+/// D-DBG3 step 2 (dap-debugger): a debug-profile build whose checked MIR
+/// source carries the line-map metadata consumed by
+/// `crates/jet-debug/src/Inferior.rs`. Returns the exit code on failure.
+fn build_debug_native(file: &str, mode: OutputMode) -> Result<NativeDebugBuild, i32> {
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
         Err(_) => {
             crate::cli_error!("E2105", "can't find the file `{}`", file);
-            return ExitCodes::USER_ERROR;
+            return Err(ExitCodes::USER_ERROR);
         }
     };
     let project_root = match jet::build_project_root(file) {
         Ok(root) => root,
         Err(diagnostics) => {
             report_problems(mode, file, &src, &diagnostics);
-            return ExitCodes::USER_ERROR;
+            return Err(ExitCodes::USER_ERROR);
         }
     };
     let out = match jet::compile_for_debug(file) {
         Ok(o) => o,
         Err(diags) => {
             report_problems(mode, file, &src, &diags);
-            return ExitCodes::USER_ERROR;
+            return Err(ExitCodes::USER_ERROR);
         }
     };
     let clinks = match jet::resolve_c_links(file) {
         Ok(a) => a,
         Err(diags) => {
             report_problems(mode, file, &src, &diags);
-            return ExitCodes::USER_ERROR;
+            return Err(ExitCodes::USER_ERROR);
         }
     };
     let bin = build_output_root(&project_root).join(format!("{}_dbg", stem(file)));
@@ -14968,12 +14976,40 @@ pub(crate) fn run_debug_native(file: &str, raw_frames: bool, dap: bool, mode: Ou
     // `build()` always writes the generated Rust to `.jet/build/<stem>.rs` (the
     // debug binary path is the only caller-chosen path) — lldb's `-f` flag
     // matches by basename, so this is what `Inferior::set_breakpoint` needs.
-    let rust_file = format!("{}.rs", stem(file));
+    Ok(NativeDebugBuild {
+        bin,
+        rust_file: format!("{}.rs", stem(file)),
+        rust: out.rust,
+        src,
+    })
+}
+
+/// Build + launch the native lldb-backed `jet debug` backend: the `(jet)`
+/// terminal session, or the DAP server (`--dap`). Returns the exit code.
+pub(crate) fn run_debug_native(file: &str, raw_frames: bool, dap: bool, mode: OutputMode) -> i32 {
+    let built = match build_debug_native(file, mode) {
+        Ok(built) => built,
+        Err(status) => return status,
+    };
     if dap {
-        jet::Debug::run_dap(&bin, &rust_file, &out.rust, file, &src)
+        jet::Debug::run_dap(&built.bin, &built.rust_file, &built.rust, file, &built.src)
     } else {
-        jet::Debug::run_native(&bin, &rust_file, &out.rust, file, &src, raw_frames)
+        jet::Debug::run_native(&built.bin, &built.rust_file, &built.rust, file, &built.src, raw_frames)
     }
+}
+
+/// D-DX-DEBUGBACK1=A: `jet debug --record=NAME` builds the same debug binary
+/// and records one complete native run of it as the replay history.
+pub(crate) fn record_debug_native(
+    file: &str,
+    mode: OutputMode,
+) -> Result<jet::Debug::RecordedExecution, i32> {
+    let built = build_debug_native(file, mode)?;
+    jet::Debug::record_native(&built.bin, &built.rust_file, &built.rust, file, &built.src)
+        .map_err(|message| {
+            crate::cli_error!("E2203", "{}", message);
+            ExitCodes::USER_ERROR
+        })
 }
 
 /// Scan a failed rustc/linker stderr for a missing C library and return its
