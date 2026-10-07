@@ -2424,6 +2424,9 @@ fn jet_rust_emit_constant(ctx: &JetRustEmitContext, constant: MIRConstant, ty: M
             loop field in fields {
                 field_ty :: jet_rust_emit_constant_field_type(&ctx, definition, field.name, ty)
                 value := jet_rust_emit_constant(&ctx, field.value, field_ty)
+                if definition == .Val(resolved) && jet_rust_emit_has_native_type_projection(ctx, resolved.key) {
+                    if jet_rust_emit_native_int_input(&ctx, value, field_ty, None) == .Val(narrowed) -> value = narrowed
+                }
                 if jet_rust_emit_constant_edge_boxed(definition, field.name) -> value = "Box::new({value})"
                 &rendered.push("{jet_rust_emit_named_field(&ctx, owner, field.name)}: {value}")
             }

@@ -32401,6 +32401,11 @@ impl<'a> RustEmitter<'a> {
             let (_, value) = fields.iter().find(|(name, _)| name == &field.name)?;
             let field_ty = Self::history_capture_type(&field.ty, &bindings);
             let mut value = self.constant_for_type(value, &field_ty);
+            if let Some(native) = self.native_host_field_type(field.id)
+                .and_then(|ty| self.native_int_input(&value, ty, None))
+            {
+                value = native;
+            }
             if definition
                 .boxed_edges
                 .iter()
