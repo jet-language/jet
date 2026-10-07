@@ -20,6 +20,7 @@ use jet_foundation.[
     MIRRuntimeLayer,
     MIRSourceFile,
     NameLedger,
+    MIRStructureFact,
     PackageKeyDependency,
     PackageKeySourceFile,
     PackageKeyTargetFact,
@@ -383,6 +384,12 @@ pub struct JetDriverCompileResult {
     pub authority_policy: JetDriverAuthorityPolicy?{None}
     // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
     pub doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}}
+    // `JetDriverCompileMode.Doc` that fails after registration: the structure
+    // facts the registration graph already proved (Sema
+    // `sema_name_structure_facts`), so `jet inspect structure` prints them
+    // ahead of the failure diagnostics. A complete Doc compile carries the
+    // same rows in its modules' NameLedger instead; other modes leave this empty.
+    pub structure_facts: [MIRStructureFact]{[MIRStructureFact]{}}
     // `JetDriverCompileMode.Comptime`: every build-time value the comptime
     // stage produced, constants included. Empty in the other modes.
     pub comptime_values: [SemaComptimeItemValue]{[SemaComptimeItemValue]{}}
