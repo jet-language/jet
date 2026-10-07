@@ -707,13 +707,9 @@ fn spawn_stream_io(child: I64, stream: I64, bytes: I64, length: I64, number: I64
 
 // Mechanical libc OS floor, ledgered like the resolver. realpath writes into
 // caller-owned Jet memory, never libc malloc, so allocator domains cannot mix.
-#Import(c) fn process_realpath(path: I64, buffer: I64) -> I64 {
+#Import(c) fn process_realpath(path: I64, buffer: I64) -> I64 = "realpath"
 
-}
-
-#Import(c) fn process_errno_location() -> I64 {
-
-}
+#Import(c) fn process_errno_location() -> I64 = "__errno_location"
 
 #Export(c) fn jet_process_path_stat_raw(path: I64, facts: I64, error: I64) {
     result := I64{0}
