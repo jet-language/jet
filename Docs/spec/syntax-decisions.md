@@ -1971,6 +1971,10 @@ spellings — inside the type body (`impl Serialize { … }`) or top-level
 attaches traits; `::` exists only inside `extern rust` path strings. Orphan
 rule applies. v1: signatures plus D-LIB2's associated types and default
 bodies.
+Checked implementation ABIs substitute the impl's `Self` and associated
+aliases before comparing parameter and result types with the trait declaration.
+The substitution applies inside containers and callable signatures as well as
+to bare aliases; parameter names, access modes, and failure contracts stay exact.
 
 **S48 — Dynamic dispatch**: a trait name in type position (`[Shape]`,
 `fn f(s: Shape)`) means automatic boxing + dynamic dispatch; `<T: Shape>`
