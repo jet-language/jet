@@ -24,6 +24,12 @@ extern Handle jet_rt_record_seq_Entries_Rec_DataTree_new(int64_t);
 extern int64_t jet_rt_record_seq_Entries_Rec_DataTree_len(Handle);
 extern Handle jet_rt_record_seq_Entries_Rec_DataTree_get(Handle, int64_t, Handle *);
 extern void jet_rt_record_seq_Entries_Rec_DataTree_push(Handle, Handle, Handle);
+extern Handle jet_rt_record_seq_List_Byte_new(int64_t);
+extern int64_t jet_rt_record_seq_List_Byte_len(Handle);
+extern int64_t jet_rt_record_seq_List_Byte_get(Handle, int64_t);
+extern void jet_rt_record_seq_List_Byte_push(Handle, int64_t);
+extern Handle jet_rt_record_new_DataTree_Bytes(Handle);
+extern Handle jet_rt_record_get_DataTree_Bytes(Handle);
 
 static Handle text(const char *s, int64_t n) {
     Handle str = jet_rt_string_from_static(s, n);
@@ -33,6 +39,20 @@ static Handle text(const char *s, int64_t n) {
 }
 
 int main(void) {
+    Handle bytes = jet_rt_record_seq_List_Byte_new(4);
+    jet_rt_record_seq_List_Byte_push(bytes, 0);
+    jet_rt_record_seq_List_Byte_push(bytes, 127);
+    jet_rt_record_seq_List_Byte_push(bytes, 128);
+    jet_rt_record_seq_List_Byte_push(bytes, 255);
+    Handle binary = jet_rt_record_new_DataTree_Bytes(bytes);
+    Handle borrowed_bytes = jet_rt_record_get_DataTree_Bytes(binary);
+    assert(borrowed_bytes == jet_rt_record_get_DataTree_Bytes(binary));
+    assert(jet_rt_record_seq_List_Byte_len(borrowed_bytes) == 4);
+    assert(jet_rt_record_seq_List_Byte_get(borrowed_bytes, 0) == 0);
+    assert(jet_rt_record_seq_List_Byte_get(borrowed_bytes, 1) == 127);
+    assert(jet_rt_record_seq_List_Byte_get(borrowed_bytes, 2) == 128);
+    assert(jet_rt_record_seq_List_Byte_get(borrowed_bytes, 3) == 255);
+    jet_rt_handle_drop_DataTree(binary);
     Handle key = jet_rt_string_from_static("same", 4);
     Handle entries = jet_rt_record_seq_Entries_Rec_DataTree_new(2);
     jet_rt_record_seq_Entries_Rec_DataTree_push(entries, key, text("first", 5));

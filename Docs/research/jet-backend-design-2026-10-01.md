@@ -396,6 +396,25 @@ in source order, so the last duplicate wins without changing the original
 DataTree. Record getters lend collection and nested-element storage while
 rebuilding native values; constructors consume the freshly built holders.
 
+The route generator discovers declarations produced by invoked non-repeating
+runtime macros, retaining their invocation's module and platform guards.
+The all-parts seed includes HTTP and database route-demand bodies so importing
+their modules cannot silently omit the host bridge instantiations. A source
+registry ownership change regenerates both adapter and carrier tables together;
+for example, `core.time.now` uses the DateTime-bearing `jet_time_now_utc` route,
+not the former millisecond integer route.
+
+`Lower/Codecs.jet` reaches the checked Encode/Decode implementation for the
+concrete receiver and invokes its ordinary monomorphic Jet method. Finite
+scalar specializations marshal into the existing canonical runtime traits;
+they do not duplicate codec acceptance or diagnostics. Typed JSON/TOML/YAML
+parse-to-tree specializations use the existing typed intrinsic's DataTree
+instantiation before native Decode dispatch, preserving its error envelope.
+`DecodeUnder` prefixes failures through the canonical FieldError helper and
+leaves successful payloads intact. Unsupported container/callback carrier
+edges remain explicit refusals rather than a second codec policy.
+
+
 
 Lazy collection routes use the existing `Collections.rs` and `LoopCursor.rs`
 kernels through `CAbiIter.rs`; lowering does not recreate their iteration or

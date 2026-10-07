@@ -125,7 +125,10 @@ fn lower_reach_operation(p: MIRProgram, q: &LowerPrepared, function: MIRFunction
         .Call(callee, args, type_args) -> {
             loop arg in args -> lower_reach_arg(&q, arg, parent)
             lower_reach_callee(p, &q, callee, type_args, parent, site)
-            if callee == .Prelude(call) -> lower_lazy_reach_call(p, &q, function, facts, call, args, parent)
+            if callee == .Prelude(call) {
+                lower_lazy_reach_call(p, &q, function, facts, call, args, parent)
+                lower_codec_reach(p, &q, call, type_args, parent, site)
+            }
         }
         .IndirectCall(_, args, type_args) -> {
             loop ty in type_args -> lower_mono_intern_type(&q, ty, parent)
@@ -146,6 +149,7 @@ fn lower_reach_operation(p: MIRProgram, q: &LowerPrepared, function: MIRFunction
             loop ty in type_args -> lower_mono_intern_type(&q, ty, parent)
             loop arg in args -> lower_reach_arg(&q, arg, parent)
             lower_lazy_reach_call(p, &q, function, facts, route, args, parent)
+            lower_codec_reach(p, &q, route, type_args, parent, site)
             lower_reach_fallibility(&q, fallibility, parent)
             if plan == .Val(data) {
                 loop node in data.logical {
@@ -200,6 +204,7 @@ fn lower_reach_semantic(p: MIRProgram, q: &LowerPrepared, function: MIRFunction,
         .StaticPreludeCall(call, args, owners, types) -> {
             loop arg in args -> lower_reach_arg(&q, arg, parent)
             lower_lazy_reach_call(p, &q, function, facts, call, args, parent)
+            lower_codec_reach(p, &q, call, types, parent, site)
             loop owner in owners {
                 if owner == .Type(ty) -> lower_mono_intern_type(&q, ty, parent)
             }

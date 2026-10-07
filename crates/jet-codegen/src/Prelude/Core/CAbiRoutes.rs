@@ -25672,6 +25672,234 @@ mod jet_c_abi_routes {
     pub extern "C" fn JetZonedDateTime_zone(a0: *mut crate::JetZonedDateTime) -> *mut crate::JetZone {
         guard(|| Box::into_raw(Box::new(crate::JetZonedDateTime::zone(unsafe { &*a0 }))))
     }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_Int(a0: i64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a0) })))))
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_Int(a0: *mut crate::jet_std::DataTree, ok: *mut i64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<crate::jet_foundation::Numeric::JetInt>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value.into_raw()) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_Bool(a0: u8) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(a0 != 0)))))
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_Bool(a0: *mut crate::jet_std::DataTree, ok: *mut u8, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<bool>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value as u8) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_Float(a0: f64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(a0)))))
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_Float(a0: *mut crate::jet_std::DataTree, ok: *mut f64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<f64>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_String(a0: JetCString) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, unsafe { &*a0 }))))
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_String(a0: *mut crate::jet_std::DataTree, ok: *mut JetCString, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<String>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_Char(a0: i64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(scalar(a0))))))
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_Char(a0: *mut crate::jet_std::DataTree, ok: *mut i64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<char>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value as i64) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_U8(a0: i64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(a0 as u8)))))
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_U8(a0: *mut crate::jet_std::DataTree, ok: *mut i64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<u8>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value as i64) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_U16(a0: i64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(a0 as u16)))))
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_U16(a0: *mut crate::jet_std::DataTree, ok: *mut i64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<u16>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value as i64) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_U32(a0: i64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(a0 as u32)))))
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_U32(a0: *mut crate::jet_std::DataTree, ok: *mut i64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<u32>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value as i64) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_U64(a0: i64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(a0 as u64)))))
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_U64(a0: *mut crate::jet_std::DataTree, ok: *mut i64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<u64>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value as i64) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_I8(a0: i64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(a0 as i8)))))
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_I8(a0: *mut crate::jet_std::DataTree, ok: *mut i64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<i8>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value as i64) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_I16(a0: i64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(a0 as i16)))))
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_I16(a0: *mut crate::jet_std::DataTree, ok: *mut i64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<i16>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value as i64) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_I32(a0: i64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(a0 as i32)))))
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_I32(a0: *mut crate::jet_std::DataTree, ok: *mut i64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<i32>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value as i64) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_encode_I64(a0: i64) -> *mut crate::jet_std::DataTree {
+        guard(|| Box::into_raw(Box::new(crate::jet_codec_encode(0, &(a0 as i64)))))
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_decode_I64(a0: *mut crate::jet_std::DataTree, ok: *mut i64, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_codec_decode::<i64>(0, unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(value as i64) }; 1 }
+            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }
+        })
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_parse_json(a0: JetCString, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_enc_json_decode::<crate::jet_std::DataTree>(unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(len) }; 0 }
+        })
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_parse_toml(a0: JetCString, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_enc_toml_decode::<crate::jet_std::DataTree>(unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(len) }; 0 }
+        })
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_parse_yaml(a0: JetCString, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut u64, err_len: *mut i64) -> i64 {
+        guard(|| match crate::jet_enc_yaml_decode::<crate::jet_std::DataTree>(unsafe { &*a0 }) {
+            Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
+            Err(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(len) }; 0 }
+        })
+    }
+
+    /// 
+    #[no_mangle]
+    pub extern "C" fn jet_rt_codec_under(a0: JetCString, a1_0: *const u64, a1_1: i64, data: *mut *mut u64) -> i64 {
+        guard(|| list_out(crate::jet_std::FieldError::under_errors(view(a0), list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_std::FieldError) }.clone())).into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), data))
+    }
 }
 // Skipped routes (no C carrier yet):
 //   jet_app_sync (app.sync): no runtime function

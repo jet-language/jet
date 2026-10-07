@@ -1,0 +1,229 @@
+// Checked codec intrinsic dispatch. Reuses the selected-method discovery from
+// BackendBoost2 (52f103e67), not its unwired runtime/container policy. User and
+// compiler-generated implementations remain ordinary monomorphic Jet methods;
+// scalar adapters invoke the canonical runtime traits without a second codec.
+use jet_foundation.[MIRCallArg, MIRFunctionID, MIRInstruction, MIRNominalRef, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeKind, MIRValueID, mir_type_display_name, mir_type_from_kind]
+
+struct LowerCodecMethod { pub function: MIRFunctionID, pub owner: MIRType }
+
+fn lower_codec_method(p: MIRProgram, ty: MIRType, encode: Bool) -> LowerCodecMethod? Never! {
+    selected := LowerCodecMethod?{None}
+    loop implementation in p.impls {
+        codec :: if encode -> "Encode" else -> "Decode"
+        trait_ref :: implementation.trait_ref ?? next
+        if trait_ref.name != codec -> next
+        if !implementation.target_applicability.rust_aot -> next
+        if implementation.target_os == .Val(os) {
+            name :: if os == {
+                .Linux -> "linux"
+                .MacOS -> "macos"
+                .Windows -> "windows"
+            }
+            if name != p.facts.active_os -> next
+        }
+        if lower_mono_fingerprint(implementation.self_type) != lower_mono_fingerprint(ty) && !lower_render_template(p, implementation.self_type, ty) -> next
+        loop id in implementation.methods {
+            loop function in p.functions {
+                if function.id != id || function.name != (if encode -> "encode" else -> "decode") -> next
+                if selected != None -> return None
+                selected = Val(LowerCodecMethod{function: id, owner: ty})
+            }
+        }
+    }
+    selected
+}
+
+fn lower_codec_reach(p: MIRProgram, q: &LowerPrepared, route: MIRPreludeCallID, types: [MIRType], parent: Int, site: String) Never! {
+    row :: lower_prelude_row(p, route) ?? return
+    if types.len() != 1 -> return
+    encode :: row.module_name == "core.encoding.codec" && row.member == "encode"
+    decode :: (row.module_name == "core.encoding.codec" && (row.member == "decode" || row.member == "decode_typed"))
+        || (row.module_name.starts_with("core.encoding.") && row.member == "decode")
+    if !encode && !decode -> return
+    if lower_codec_method(p, types[0], encode) == .Val(method) -> lower_mono_request(p, &q, method.function, Val(method.owner), [MIRType]{}, parent, site).drop("selected codec method")
+}
+
+fn lower_codec_scalar(ty: MIRType) -> String? Never! {
+    if ty.kind == {
+        .Int -> Val("Int")
+        .Bool -> Val("Bool")
+        .Float -> Val("Float")
+        .String -> Val("String")
+        .Char -> Val("Char")
+        .IntN(signed, bits) -> {
+            if bits != 8 && bits != 16 && bits != 32 && bits != 64 -> return None
+            prefix :: if signed -> "I" else -> "U"
+            Val("{prefix}{bits}")
+        }
+        else -> None
+    }
+}
+
+fn lower_codec_tree(p: MIRProgram) -> MIRType? Never! {
+    loop definition in p.types {
+        ty :: mir_type_from_kind(MIRTypeKind.Apply{name: MIRNominalRef{id: definition.id, name: definition.name}, args: [MIRType]{}})
+        if lower_record_handle(p, ty) == .Val("DataTree") -> return Val(ty)
+    }
+    None
+}
+
+fn lower_codec_method_call(p: MIRProgram, m: &LowerModule, f: &LowerFunction, method: LowerCodecMethod, source: LIRValueID, dst: LIRValueID) Never! {
+    target :: lower_instance_id(method.function, lower_call_bindings(Val(method.owner), [MIRType]{}))
+    index :: lower_function_index(m, target)
+    if index < 0 -> return lower_fail(&m, &f, "selected codec method {target.value} was not reached")
+    signature :: ~m.mir_signatures[index]
+    result_bytes :: ~m.mir_results[index]
+    if result_bytes > 0 {
+        lower_emit(&f, LIRInst.StackSlot{dst: dst, size: result_bytes, align: 8})
+        lower_emit(&f, LIRInst.Call{dst: None, signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: [LIRValueID]{dst, source}})
+    } else {
+        lower_emit(&f, LIRInst.Call{dst: Val(dst), signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: index}}, args: [LIRValueID]{source}})
+    }
+}
+
+fn lower_codec_decode_into(p: MIRProgram, m: &LowerModule, f: &LowerFunction, target: MIRType, result: MIRType, tree: MIRType, source: LIRValueID, dst: LIRValueID) Never! {
+    if lower_codec_method(p, target, false) == .Val(method) -> return lower_codec_method_call(p, &m, &f, method, source, dst)
+    scalar :: lower_codec_scalar(target) ?? return lower_fail(&m, &f, "Decode<{mir_type_display_name(target)}> has no reachable selected method or canonical scalar carrier")
+    route :: lower_runtime_route("jet_rt_codec_decode_{scalar}") ?? return lower_fail(&m, &f, "canonical scalar Decode adapter is missing")
+    if !lower_route_shape_matches(p, result, route.result) -> return lower_fail(&m, &f, "canonical scalar Decode result does not match checked FieldError storage")
+    runtime :: lower_record_to_runtime(p, &m, &f, tree, "DataTree", source)
+    if route.result == .Result(ok, err) {
+        out :: lower_route_result_call(&m, &f, route.export, [LIRValueID]{runtime}, ok, err)
+        lower_alloc(&m, &f, dst, lower_box_size(p, result))
+        lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: out.word})
+        errors :: if result.kind == .Result(_, failure) -> failure else -> panic("checked Decode Result")
+        success :: lower_new_block(&f)
+        failure :: lower_new_block(&f)
+        merge :: lower_new_block(&f)
+        yes :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: yes, condition: LIRCondition.Ne, left: out.word, right: lower_const(&f, 0)})
+        lower_seal(&f, LIRTerminator.Branch{condition: yes, then_target: lower_target(success, [LIRValueID]{}), else_target: lower_target(failure, [LIRValueID]{})})
+        lower_start(&f, success, [LIRValueID]{})
+        lower_route_store_payload(p, &m, &f, dst, 8, target, ok, out.slot)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
+        lower_start(&f, failure, [LIRValueID]{})
+        lower_route_store_payload(p, &m, &f, dst, 8, errors, err, out.slot)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
+        lower_start(&f, merge, [LIRValueID]{})
+    }
+    lower_call_runtime(&m, &f, "jet_rt_handle_drop_DataTree", [LIRValueID]{runtime}, None)
+}
+
+fn lower_codec_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg], types: [MIRType]) -> Bool Never! {
+    row :: lower_prelude_row(p, call) ?? return false
+    codec :: row.module_name == "core.encoding.codec" && (row.member == "encode" || row.member == "decode" || row.member == "decode_typed")
+    parsed :: (row.module_name == "core.encoding.json" || row.module_name == "core.encoding.toml" || row.module_name == "core.encoding.yaml") && row.member == "decode"
+    if types.len() != 1 || (!codec && !parsed) -> return false
+    source_index :: if codec && row.member != "decode_typed" -> 1 else -> 0
+    if args.len() != source_index + 1 {
+        lower_fail(&m, &f, "codec intrinsic has an incompatible checked argument list")
+        return true
+    }
+    target :: types[0]
+    source :: lower_use(&m, &f, args[source_index].value) ?? return true
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    if codec && row.member == "encode" {
+        if lower_codec_method(p, target, true) == .Val(method) {
+            lower_codec_method_call(p, &m, &f, method, source, dst)
+            return true
+        }
+        scalar :: lower_codec_scalar(target) ?? {
+            lower_fail(&m, &f, "Encode<{mir_type_display_name(target)}> has no reachable selected method or canonical scalar carrier")
+            return true
+        }
+        route :: lower_runtime_route("jet_rt_codec_encode_{scalar}") ?? {
+            lower_fail(&m, &f, "canonical scalar Encode adapter is missing")
+            return true
+        }
+        result :: lower_checked_type(c, instruction) ?? return true
+        if !lower_route_shape_matches(p, result, route.result) {
+            lower_fail(&m, &f, "canonical scalar Encode result does not match checked DataTree storage")
+            return true
+        }
+        runtime :: lower_pointer(&f)
+        lower_call_runtime(&m, &f, route.export, [LIRValueID]{source}, Val(runtime))
+        lower_record_from_runtime(p, &m, &f, result, runtime, Val(dst))
+        return true
+    }
+    tree :: lower_codec_tree(p) ?? {
+        lower_fail(&m, &f, "typed Decode has no checked DataTree declaration")
+        return true
+    }
+    result :: lower_checked_type(c, instruction) ?? return true
+    if !parsed {
+        lower_codec_decode_into(p, &m, &f, target, result, tree, source, dst)
+        return true
+    }
+    format :: row.module_name.split(".").to_list().last() ?? ""
+    route :: lower_runtime_route("jet_rt_codec_parse_{format}") ?? {
+        lower_fail(&m, &f, "canonical typed parser adapter is missing")
+        return true
+    }
+    if route.result == .Result(ok, err) {
+        errors :: if result.kind == .Result(_, failure) -> failure else -> {
+            lower_fail(&m, &f, "typed parse does not return a checked Result")
+            return true
+        }
+        out :: lower_route_result_call(&m, &f, route.export, [LIRValueID]{source}, ok, err)
+        yes :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: yes, condition: LIRCondition.Ne, left: out.word, right: lower_const(&f, 0)})
+        success :: lower_new_block(&f)
+        failure :: lower_new_block(&f)
+        merge :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: yes, then_target: lower_target(success, [LIRValueID]{}), else_target: lower_target(failure, [LIRValueID]{})})
+        lower_start(&f, failure, [LIRValueID]{})
+        failed :: lower_pointer(&f)
+        lower_alloc(&m, &f, failed, lower_box_size(p, result))
+        lower_emit(&f, LIRInst.Store{base: failed, offset: 0, value: out.word})
+        lower_route_store_payload(p, &m, &f, failed, 8, errors, err, out.slot)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{failed})})
+        lower_start(&f, success, [LIRValueID]{})
+        runtime :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Load{dst: runtime, base: out.slot, offset: 0})
+        native :: lower_pointer(&f)
+        lower_record_from_runtime(p, &m, &f, tree, runtime, Val(native))
+        decoded :: lower_pointer(&f)
+        lower_codec_decode_into(p, &m, &f, target, result, tree, native, decoded)
+        lower_map_drop_value(p, &m, &f, native, tree)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{decoded})})
+        lower_start(&f, merge, [LIRValueID]{dst})
+    }
+    true
+}
+
+fn lower_codec_under(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, segment: MIRValueID, inner: MIRValueID) Never! {
+    ty :: lower_value_type(c, inner) ?? return lower_fail(&m, &f, "DecodeUnder has no checked inner Result")
+    errors :: if ty.kind == .Result(_, failure) -> failure else -> {
+        lower_fail(&m, &f, "DecodeUnder inner value is not a Result")
+        return
+    }
+    route :: lower_runtime_route("jet_rt_codec_under") ?? return lower_fail(&m, &f, "canonical FieldError prefix adapter is missing")
+    carrier :: if route.result == .Plain(value) -> value else -> {
+        lower_fail(&m, &f, "canonical FieldError prefix adapter has the wrong result rail")
+        return
+    }
+    if !lower_route_result_matches(p, errors, carrier) -> return lower_fail(&m, &f, "DecodeUnder error storage does not match FieldError")
+    value :: lower_use(&m, &f, inner) ?? return
+    text :: lower_use(&m, &f, segment) ?? return
+    selector :: lower_word(&f)
+    lower_emit(&f, LIRInst.Load{dst: selector, base: value, offset: 0})
+    yes :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: yes, condition: LIRCondition.Ne, left: selector, right: lower_const(&f, 0)})
+    failure :: lower_new_block(&f)
+    merge :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: yes, then_target: lower_target(merge, [LIRValueID]{}), else_target: lower_target(failure, [LIRValueID]{})})
+    lower_start(&f, failure, [LIRValueID]{})
+    source :: lower_address(&f, value, 8)
+    length :: lower_list_word(&f, source, 0)
+    buffer :: lower_pointer(&f)
+    lower_call_helper(&m, &f, "list.record_handles", errors, [LIRValueID]{source}, Val(buffer))
+    out :: lower_route_out_call(&m, &f, route.export, [LIRValueID]{text, buffer, length}, 1, false)
+    lower_call_helper(&m, &f, "list.record_handles_free", errors, [LIRValueID]{buffer, length}, None)
+    lower_map_drop_value(p, &m, &f, source, errors)
+    data :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: data, base: out.slot, offset: 0})
+    lower_record_list_from_runtime(p, &m, &f, errors, data, out.word, source)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
+    lower_start(&f, merge, [LIRValueID]{})
+    lower_alias(c, &f, instruction, value)
+}

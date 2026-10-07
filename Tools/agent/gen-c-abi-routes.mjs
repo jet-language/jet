@@ -670,7 +670,7 @@ function valueCarrier(ty, path, nativeInt) {
   if (ty === "()") return { jet: "Unit", cty: null, wrap: () => "()" };
   if (ty === "String") return { jet: "Text", cty: "JetCString", wrap: (v) => `handle(${v})` };
   if (ty === "i64") return { jet: "Word", cty: "i64", wrap: (v) => (nativeInt ? `crate::jet_std::jet_int_from_i64(${v})` : v) };
-  if (fixedInts.has(ty)) return { jet: "Word", cty: "i64", wrap: (v) => `crate::jet_std::jet_int_from_i64(i64::try_from(${v}).unwrap_or_else(|_| range_stop()))` };
+  if (fixedInts.has(ty)) return { jet: "Word", cty: "i64", wrap: (v) => nativeInt ? `crate::jet_std::jet_int_from_i64(i64::try_from(${v}).unwrap_or_else(|_| range_stop()))` : `(${v}) as i64` };
   if (ty === "bool") return { jet: "Flag", cty: "bool", wrap: (v) => v };
   if (ty === "f64") return { jet: "Float", cty: "f64", wrap: (v) => v };
   if (ty === "char") return { jet: "Word", cty: "i64", wrap: (v) => `(${v}) as i64` };
@@ -881,6 +881,67 @@ for (const [symbol, route] of [...routes].sort((a, b) => a[0].localeCompare(b[0]
   if (!exported.has(name)) continue;
   adapters.push({ symbol, target, name, label, params, result, rows: route.rows });
 }
+
+// Finite scalar specializations of the existing canonical codec intrinsics.
+// These adapters marshal native storage only; Encode/Decode implementations
+// (including exact-number acceptance and diagnostics) remain the sole policy.
+const codecScalars = [
+  ["Int", "crate::jet_foundation::Numeric::JetInt", "Word", "i64", (a) => `unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(${a}) }`, (v) => `${v}.into_raw()`],
+  ["Bool", "bool", "Flag", "u8", (a) => `${a} != 0`, (v) => `${v} as u8`],
+  ["Float", "f64", "Float", "f64", (a) => a, (v) => v],
+  ["String", "String", "Text", "JetCString", (a) => `view(${a}).to_owned()`, (v) => `handle(${v})`],
+  ["Char", "char", "Word", "i64", (a) => `scalar(${a})`, (v) => `${v} as i64`],
+  ...[...fixedInts, "i64"].filter((ty) => ty !== "usize" && ty !== "isize").map((ty) => [ty.toUpperCase(), ty, "Word", "i64", (a) => `${a} as ${ty}`, (v) => `${v} as i64`]),
+];
+for (const [name, rust, jet, cty, read, write] of codecScalars) {
+  const tree = { name: "DataTree", full: "crate::jet_std::DataTree" };
+  const error = { name: "FieldError", full: "crate::jet_std::FieldError" };
+  handles.set(tree.name, tree.full);
+  handles.set(error.name, error.full);
+  const encode = `jet_rt_codec_encode_${name}`;
+  const decode = `jet_rt_codec_decode_${name}`;
+  adapters.push({
+    symbol: encode, target: "jet_codec_encode", name: encode, label: "canonical scalar Encode", rows: [],
+    params: [{ jet, ctys: [cty], expr: ([a]) => name === "String" ? `0, ${paramCarrier("&String", "").expr([a])}` : `0, &(${read(a)})` }],
+    result: { jet: 'Plain{carrier: LowerRouteCarrier.Handle{name: "DataTree"}}', ret: "*mut crate::jet_std::DataTree", outs: [], handles: [tree],
+      body: (call) => `Box::into_raw(Box::new(${call}))` },
+  });
+  adapters.push({
+    symbol: decode, target: `jet_codec_decode::<${rust}>`, name: decode, label: "canonical scalar Decode", rows: [],
+    params: [{ jet: 'Handle{name: "DataTree"}', ctys: ["*mut crate::jet_std::DataTree"], expr: ([a]) => `0, unsafe { &*${a} }`, handle: tree }],
+    result: { jet: `Result{ok: LowerRouteCarrier.${jet}, err: LowerRouteCarrier.List{elem: LowerRouteCarrier.Handle{name: "FieldError"}}}`, ret: "i64",
+      outs: [{ name: "ok", cty }, { name: "err", cty: "*mut u64" }, { name: "err_len", cty: "i64" }], handles: [error],
+      body: (call) => `match ${call} {\n            Ok(value) => { unsafe { ok.write(${write("value")}) }; 1 }\n            Err(errors) => { let n = list_out(errors.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), err); unsafe { err_len.write(n) }; 0 }\n        }` },
+  });
+}
+
+// Parse-to-tree specialization retains the typed intrinsic's exact parser and
+// FieldError envelope, then the native backend invokes the checked Decode impl.
+for (const format of ["json", "toml", "yaml"]) {
+  const symbol = `jet_rt_codec_parse_${format}`;
+  const result = resultShape("Result<jet_std::DataTree,Vec<jet_std::FieldError>>", "", false);
+  if (!result) throw new Error(`gen-c-abi-routes: missing ${format} typed tree carriers`);
+  adapters.push({ symbol, target: `jet_enc_${format}_decode::<crate::jet_std::DataTree>`, name: symbol,
+    label: `canonical typed ${format.toUpperCase()} parse`, rows: [],
+    params: [paramCarrier("&String", "")], result });
+}
+{
+  const symbol = "jet_rt_codec_under";
+  const params = [paramCarrier("&str", ""), paramCarrier("Vec<jet_std::FieldError>", "")];
+  const result = resultShape("Vec<jet_std::FieldError>", "", false);
+  if (params.some((param) => !param) || !result) throw new Error("gen-c-abi-routes: missing FieldError prefix carriers");
+  adapters.push({ symbol, target: "jet_std::FieldError::under_errors", name: symbol,
+    label: "canonical FieldError path prefix", rows: [], params, result });
+}
+
+// Numeric lowering has a raw, source-owned CAbi export: the fixed-width value
+// stays raw, while the operation/width exact-Int words are decoded by that ABI.
+// Enumerate it without generating a second wrapper under its exported name.
+adapters.push({
+  symbol: "jet_numeric_bit_count", name: "jet_numeric_bit_count", external: true,
+  rows: ["source numeric bit count"], params: Array.from({ length: 3 }, () => ({ jet: "Word" })),
+  result: { jet: "Plain{carrier: LowerRouteCarrier.Word}" },
+});
 
 // Core types the runtime holds natively: the Jet name -> native Rust type
 // tables generated Rust spells its types with (Codegen/Context.rs and
@@ -1327,6 +1388,7 @@ for (const [name, full] of handleRows) {
   }
 }
 for (const adapter of adapters) {
+  if (adapter.external) continue;
   const params = [];
   const names = adapter.params.map((param, index) => param.ctys.map((cty, k) => {
     const name = param.ctys.length === 1 ? `a${index}` : `a${index}_${k}`;
