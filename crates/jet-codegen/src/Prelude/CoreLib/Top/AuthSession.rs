@@ -667,7 +667,7 @@ fn jet_auth_password_login(
 }
 
 fn jet_auth_session_validate(
-    session_id: &String,
+    session_id: &str,
     now_ms: i64,
 ) -> Result<JetAuthSession, String> {
     if !jet_auth_valid_session_id(session_id) {
@@ -902,7 +902,7 @@ pub fn auth_password_login(
 }
 
 pub fn auth_session_validate(
-    session_id: &String,
+    session_id: &str,
     now_ms: i64,
 ) -> Result<JetAuthSession, String> {
     jet_auth_session_validate(session_id, now_ms)

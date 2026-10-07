@@ -203,14 +203,14 @@ fn jet_duration_negated(d: &jet_std::Duration) -> jet_std::Duration {
 fn jet_duration_sign(d: &jet_std::Duration) -> i64 {
     jet_duration_kernel_sign(d.ns)
 }
-fn jet_duration_total_in(d: &jet_std::Duration, unit: &String) -> f64 {
+fn jet_duration_total_in(d: &jet_std::Duration, unit: &str) -> f64 {
     jet_duration_kernel_total_in(d.ns, unit)
 }
 fn jet_duration_round(
     d: &jet_std::Duration,
-    unit: &String,
+    unit: &str,
     increment: &i64,
-    mode: &String,
+    mode: &str,
 ) -> jet_std::Duration {
     let ns = jet_duration_kernel_round(d.ns, unit, *increment, mode).unwrap_or(d.ns);
     jet_std::Duration { ns }
@@ -825,7 +825,7 @@ fn jet_time_now_utc() -> JetDateTime {
 fn jet_time_today() -> JetDate {
     JetDate::today_utc()
 }
-fn jet_time_zone_named(name: &String) -> Result<JetZone, String> {
+fn jet_time_zone_named(name: &str) -> Result<JetZone, String> {
     JetZone::named(name)
 }
 fn jet_time_zone_utc() -> JetZone {
@@ -838,7 +838,7 @@ fn jet_time_zoned_local(
     date: &JetDate,
     time: &JetLocalTime,
     zone: &JetZone,
-    disambiguation: &String,
+    disambiguation: &str,
 ) -> Result<JetZonedDateTime, String> {
     JetZonedDateTime::from_local_with_disambiguation(date, time, zone, disambiguation)
 }
@@ -877,9 +877,9 @@ impl JetDate {
     fn until_duration(
         &self,
         other: JetDate,
-        largest_unit: &String,
-        smallest_unit: &String,
-        rounding_mode: &String,
+        largest_unit: &str,
+        smallest_unit: &str,
+        rounding_mode: &str,
         increment: i64,
     ) -> jet_std::Duration {
         jet_std::Duration {
@@ -896,9 +896,9 @@ impl JetDate {
     fn since_duration(
         &self,
         other: JetDate,
-        largest_unit: &String,
-        smallest_unit: &String,
-        rounding_mode: &String,
+        largest_unit: &str,
+        smallest_unit: &str,
+        rounding_mode: &str,
         increment: i64,
     ) -> jet_std::Duration {
         jet_std::Duration {
@@ -912,7 +912,7 @@ impl JetDate {
         }
     }
 
-    fn format_checked_text(&self, pattern: &String) -> Result<String, jet_std::TextError> {
+    fn format_checked_text(&self, pattern: &str) -> Result<String, jet_std::TextError> {
         self.format_checked(pattern).map_err(jet_time_text_error)
     }
 
@@ -937,9 +937,9 @@ impl JetLocalTime {
     fn until_duration(
         &self,
         other: JetLocalTime,
-        largest_unit: &String,
-        smallest_unit: &String,
-        rounding_mode: &String,
+        largest_unit: &str,
+        smallest_unit: &str,
+        rounding_mode: &str,
         increment: i64,
     ) -> jet_std::Duration {
         jet_std::Duration {
@@ -956,9 +956,9 @@ impl JetLocalTime {
     fn since_duration(
         &self,
         other: JetLocalTime,
-        largest_unit: &String,
-        smallest_unit: &String,
-        rounding_mode: &String,
+        largest_unit: &str,
+        smallest_unit: &str,
+        rounding_mode: &str,
         increment: i64,
     ) -> jet_std::Duration {
         jet_std::Duration {
@@ -972,7 +972,7 @@ impl JetLocalTime {
         }
     }
 
-    fn format_checked_text(&self, pattern: &String) -> Result<String, jet_std::TextError> {
+    fn format_checked_text(&self, pattern: &str) -> Result<String, jet_std::TextError> {
         self.format_checked(pattern).map_err(jet_time_text_error)
     }
 
@@ -1035,9 +1035,9 @@ impl JetDateTime {
     fn until_duration(
         &self,
         other: JetDateTime,
-        largest_unit: &String,
-        smallest_unit: &String,
-        rounding_mode: &String,
+        largest_unit: &str,
+        smallest_unit: &str,
+        rounding_mode: &str,
         increment: i64,
     ) -> jet_std::Duration {
         jet_std::Duration {
@@ -1054,9 +1054,9 @@ impl JetDateTime {
     fn since_duration(
         &self,
         other: JetDateTime,
-        largest_unit: &String,
-        smallest_unit: &String,
-        rounding_mode: &String,
+        largest_unit: &str,
+        smallest_unit: &str,
+        rounding_mode: &str,
         increment: i64,
     ) -> jet_std::Duration {
         jet_std::Duration {
@@ -1074,7 +1074,7 @@ impl JetDateTime {
         self.in_zone(&zone)
     }
 
-    fn format_checked_text(&self, pattern: &String) -> Result<String, jet_std::TextError> {
+    fn format_checked_text(&self, pattern: &str) -> Result<String, jet_std::TextError> {
         self.format_checked(pattern).map_err(jet_time_text_error)
     }
 
@@ -1114,23 +1114,23 @@ impl JetPeriod {
 }
 
 pub(crate) trait JetPeriodAnchor {
-    fn period_total_in(&self, period: &JetPeriod, unit: &String) -> f64;
+    fn period_total_in(&self, period: &JetPeriod, unit: &str) -> f64;
 }
 
 impl JetPeriodAnchor for JetDate {
-    fn period_total_in(&self, period: &JetPeriod, unit: &String) -> f64 {
+    fn period_total_in(&self, period: &JetPeriod, unit: &str) -> f64 {
         period.total_in_date(unit, self)
     }
 }
 
 impl JetPeriodAnchor for JetDateTime {
-    fn period_total_in(&self, period: &JetPeriod, unit: &String) -> f64 {
+    fn period_total_in(&self, period: &JetPeriod, unit: &str) -> f64 {
         period.total_in_datetime(unit, self)
     }
 }
 
 impl JetPeriod {
-    fn total_in_value<A: JetPeriodAnchor>(&self, unit: &String, anchor: &A) -> f64 {
+    fn total_in_value<A: JetPeriodAnchor>(&self, unit: &str, anchor: &A) -> f64 {
         anchor.period_total_in(self, unit)
     }
 }
@@ -1173,9 +1173,9 @@ impl JetZonedDateTime {
     fn until_duration(
         &self,
         other: JetZonedDateTime,
-        largest_unit: &String,
-        smallest_unit: &String,
-        rounding_mode: &String,
+        largest_unit: &str,
+        smallest_unit: &str,
+        rounding_mode: &str,
         increment: i64,
     ) -> jet_std::Duration {
         jet_std::Duration {
@@ -1192,9 +1192,9 @@ impl JetZonedDateTime {
     fn since_duration(
         &self,
         other: JetZonedDateTime,
-        largest_unit: &String,
-        smallest_unit: &String,
-        rounding_mode: &String,
+        largest_unit: &str,
+        smallest_unit: &str,
+        rounding_mode: &str,
         increment: i64,
     ) -> jet_std::Duration {
         jet_std::Duration {
@@ -1216,7 +1216,7 @@ impl JetZonedDateTime {
         jet_outcome_of(self.previous_transition())
     }
 
-    fn format_checked_text(&self, pattern: &String) -> Result<String, jet_std::TextError> {
+    fn format_checked_text(&self, pattern: &str) -> Result<String, jet_std::TextError> {
         self.format_checked(pattern).map_err(jet_time_text_error)
     }
 
@@ -1230,7 +1230,7 @@ impl JetZonedDateTime {
 }
 
 
-fn jet_url_parse(s: &String) -> Result<crate::jet_std::JetURL, String> {
+fn jet_url_parse(s: &str) -> Result<crate::jet_std::JetURL, String> {
     crate::jet_std::JetURLParts::parse(s).map(crate::jet_std::JetURL::from_url_parts)
 }
 
@@ -1245,19 +1245,19 @@ fn jet_typed_datetime_literal(literals: &[&str], holes: Vec<String>) -> JetDateT
 }
 
 fn jet_url_from_parts(
-    scheme: &String,
-    host: &String,
-    path: &String,
+    scheme: &str,
+    host: &str,
+    path: &str,
     query: &Vec<Vec<String>>,
-    fragment: &String,
+    fragment: &str,
 ) -> Result<crate::jet_std::JetURL, String> {
     crate::jet_std::JetURLParts::from_parts(scheme, host, path, query, fragment)
         .map(crate::jet_std::JetURL::from_url_parts)
 }
-fn jet_url_file(path: &String) -> crate::jet_std::JetURL {
+fn jet_url_file(path: &str) -> crate::jet_std::JetURL {
     crate::jet_std::JetURL::from_url_parts(crate::jet_std::JetURLParts::file(path))
 }
-fn jet_url_data(mime: &crate::jet_std::JetMIME, text: &String) -> crate::jet_std::JetURL {
+fn jet_url_data(mime: &crate::jet_std::JetMIME, text: &str) -> crate::jet_std::JetURL {
     crate::jet_std::JetURL::from_url_parts(crate::jet_std::JetURLParts::data(mime, text))
 }
 fn jet_url_query(pairs: &Vec<Vec<String>>) -> String {
@@ -1282,63 +1282,63 @@ fn jet_url_query(pairs: &Vec<Vec<String>>) -> String {
         .collect::<Vec<_>>()
         .join("&")
 }
-fn jet_url_percent_encode_component(s: &String) -> String {
+fn jet_url_percent_encode_component(s: &str) -> String {
     crate::jet_std::jet_url_percent_encode(s, false)
 }
-fn jet_url_percent_decode_component(s: &String) -> Result<String, String> {
+fn jet_url_percent_decode_component(s: &str) -> Result<String, String> {
     crate::jet_std::jet_url_percent_decode_str(s)
 }
-fn jet_url_join(base: &String, rel: &String) -> String {
+fn jet_url_join(base: &str, rel: &str) -> String {
     crate::jet_std::jet_url_join_text(base, rel)
 }
-fn jet_url_parse_qsl(query: &String) -> Vec<Vec<String>> {
+fn jet_url_parse_qsl(query: &str) -> Vec<Vec<String>> {
     crate::jet_std::jet_url_parse_qsl_rows(query)
 }
 fn jet_url_urlencode(pairs: &Vec<Vec<String>>) -> String {
     crate::jet_std::jet_url_query_rows(pairs)
 }
-fn jet_url_split_fragment(text: &String) -> (String, String) {
+fn jet_url_split_fragment(text: &str) -> (String, String) {
     let (url, fragment) = crate::jet_std::jet_url_split_fragment(text);
     (fragment, url)
 }
-fn jet_url_quote(text: &String) -> String {
+fn jet_url_quote(text: &str) -> String {
     crate::jet_std::jet_url_quote(text)
 }
 fn jet_url_quote_from_bytes(data: &Vec<u8>) -> String {
     crate::jet_std::jet_url_quote_from_bytes(data)
 }
-fn jet_url_quote_plus(text: &String) -> String {
+fn jet_url_quote_plus(text: &str) -> String {
     crate::jet_std::jet_url_quote_plus(text)
 }
-fn jet_url_unquote(text: &String) -> Result<String, String> {
+fn jet_url_unquote(text: &str) -> Result<String, String> {
     crate::jet_std::jet_url_unquote(text)
 }
-fn jet_url_unquote_to_bytes(text: &String) -> Result<Vec<u8>, String> {
+fn jet_url_unquote_to_bytes(text: &str) -> Result<Vec<u8>, String> {
     crate::jet_std::jet_url_unquote_to_bytes(text)
 }
-fn jet_url_unquote_plus(text: &String) -> Result<String, String> {
+fn jet_url_unquote_plus(text: &str) -> Result<String, String> {
     crate::jet_std::jet_url_unquote_plus(text)
 }
 fn jet_url_to_string(url: &crate::jet_std::JetURL) -> String {
     url.to_string_value()
 }
-fn jet_url_urldefrag(text: &String) -> (String, String) {
+fn jet_url_urldefrag(text: &str) -> (String, String) {
     crate::jet_std::jet_url_split_fragment(text)
 }
 
-fn jet_mime_parse(s: &String) -> Result<crate::jet_std::JetMIME, String> {
+fn jet_mime_parse(s: &str) -> Result<crate::jet_std::JetMIME, String> {
     crate::jet_std::JetMIME::parse(s)
 }
-fn jet_mime_from_extension(ext: &String) -> Option<String> {
+fn jet_mime_from_extension(ext: &str) -> Option<String> {
     crate::jet_std::jet_mime_from_extension(ext).map(|s| s.to_string())
 }
-fn jet_mime_extension(mime: &String) -> Option<String> {
+fn jet_mime_extension(mime: &str) -> Option<String> {
     crate::jet_std::jet_extension_from_mime(mime).map(|s| s.to_string())
 }
 
 // D-DECIMAL1 / D-NUMTYPE1: precise numeric constructors and methods.
 #[inline(always)]
-fn jet_decimal_from_str(s: &String) -> jet_std::JetDecimal {
+fn jet_decimal_from_str(s: &str) -> jet_std::JetDecimal {
     crate::jet_precise_numeric::decimal_from_str(s)
         .map(crate::jet_std::jet_std_decimal_from_exact)
         .unwrap_or_else(|_| {
@@ -1669,7 +1669,7 @@ fn jet_decimal_to_float(a: &jet_std::JetDecimal) -> f64 {
 // D-ENC-DYN1=A+: the dynamic `parse` returns the one rich `Data` value (the
 // user-facing face of `DataTree`). JSON text parses directly to the canonical
 // ordered `DataTree` carrier.
-fn jet_std_json_parse(text: &String) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+fn jet_std_json_parse(text: &str) -> Result<jet_std::DataTree, jet_std::EncodingError> {
     jet_std::parse_json_datatree(text)
 }
 fn jet_std_json_render(d: &jet_std::DataTree) -> String {
@@ -1749,7 +1749,7 @@ fn jet_std_json_events(d: &jet_std::DataTree) -> String {
     walk(String::new(), d, &mut out);
     out.join("\n")
 }
-fn jet_std_jsonl_parse(text: &String) -> Result<Vec<jet_std::DataTree>, jet_std::EncodingError> {
+fn jet_std_jsonl_parse(text: &str) -> Result<Vec<jet_std::DataTree>, jet_std::EncodingError> {
     let mut out = Vec::new();
     for (idx, line) in text.lines().enumerate() {
         let trimmed = line.trim();
@@ -1778,12 +1778,12 @@ fn jet_std_jsonl_render(rows: &Vec<jet_std::DataTree>) -> String {
     }
     out
 }
-fn jet_std_jsonl_count_rows(text: &String) -> jet_foundation::Numeric::JetInt {
+fn jet_std_jsonl_count_rows(text: &str) -> jet_foundation::Numeric::JetInt {
     jet_std::jet_int_owned_from_i64(
         text.lines().filter(|line| !line.trim().is_empty()).count() as i64,
     )
 }
-fn jet_std_jsonl_append_line(text: &String, value: &jet_std::DataTree) -> String {
+fn jet_std_jsonl_append_line(text: &str, value: &jet_std::DataTree) -> String {
     let rendered = jet_std_json_render_canonical(value);
     if text.is_empty() {
         return format!("{rendered}\n");
@@ -1795,7 +1795,7 @@ fn jet_std_jsonl_append_line(text: &String, value: &jet_std::DataTree) -> String
     }
 }
 fn jet_std_jsonl_first(
-    text: &String,
+    text: &str,
 ) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
     for (idx, line) in text.lines().enumerate() {
         let trimmed = line.trim();
@@ -1819,11 +1819,11 @@ fn jet_std_jsonl_first(
 // `CoreLib/JetStd/JSONDataTree.rs`, shared with the resident JIT host that
 // used to carry a byte-equivalent copy (I8/I9). AOT supplies only the sink it
 // owns: the process's own stderr.
-fn jet_std_json_decode_lenient(text: &String) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+fn jet_std_json_decode_lenient(text: &str) -> Result<jet_std::DataTree, jet_std::EncodingError> {
     jet_std::jet_std_json_decode_lenient(text, &mut |line| eprintln!("{}", line))
 }
 
-fn jet_string_bytes(s: &String) -> Vec<u8> {
+fn jet_string_bytes(s: &str) -> Vec<u8> {
     s.as_bytes().to_vec()
 }
 fn jet_string_from_bytes(bs: &Vec<u8>) -> Result<String, jet_std::UTF8Error> {

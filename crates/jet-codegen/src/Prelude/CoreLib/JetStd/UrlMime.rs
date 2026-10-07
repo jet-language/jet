@@ -1,16 +1,16 @@
     include!("Mime.rs");
 
     impl JetURLParts {
-        pub fn parse(input: &String) -> Result<Self, String> {
+        pub fn parse(input: &str) -> Result<Self, String> {
             Self::parse_without_normalization(input).map(|url| url.normalize())
         }
 
-        fn parse_without_normalization(input: &String) -> Result<Self, String> {
+        fn parse_without_normalization(input: &str) -> Result<Self, String> {
             Self::parse_without_normalization_with_marker(input, None)
         }
 
         fn parse_without_normalization_with_marker(
-            input: &String,
+            input: &str,
             typed_marker: Option<&str>,
         ) -> Result<Self, String> {
             let raw = input.trim();
@@ -76,11 +76,11 @@
         }
 
         pub fn from_parts(
-            scheme: &String,
-            host: &String,
-            path: &String,
+            scheme: &str,
+            host: &str,
+            path: &str,
             query: &Vec<Vec<String>>,
-            fragment: &String,
+            fragment: &str,
         ) -> Result<Self, String> {
             if !jet_url_valid_scheme(scheme) {
                 return Err(format!("invalid URL scheme `{}`", scheme));
@@ -93,7 +93,7 @@
             let fragment = if fragment.is_empty() {
                 None
             } else {
-                Some(fragment.clone())
+                Some(fragment.to_owned())
             };
             Ok(JetURLParts {
                 scheme: scheme.to_ascii_lowercase(),
@@ -101,7 +101,7 @@
                 password: None,
                 host,
                 port: None,
-                path: path.clone(),
+                path: path.to_owned(),
                 query: jet_url_pairs_from_rows(query),
                 fragment,
                 typed_host: None,
@@ -110,7 +110,7 @@
             .normalize())
         }
 
-        pub fn file(path: &String) -> Self {
+        pub fn file(path: &str) -> Self {
             JetURLParts {
                 scheme: "file".to_string(),
                 username: None,
@@ -118,7 +118,7 @@
                 host: Some(String::new()),
                 port: None,
                 path: if path.starts_with('/') {
-                    path.clone()
+                    path.to_owned()
                 } else {
                     format!("/{}", path)
                 },
@@ -129,7 +129,7 @@
             }
         }
 
-        pub fn data(mime: &JetMIME, text: &String) -> Self {
+        pub fn data(mime: &JetMIME, text: &str) -> Self {
             JetURLParts {
                 scheme: "data".to_string(),
                 username: None,
@@ -245,7 +245,7 @@
             }
             out
         }
-        pub fn join(&self, rel: &String) -> Result<Self, String> {
+        pub fn join(&self, rel: &str) -> Result<Self, String> {
             if let Some(colon) = rel.find(':') {
                 let before_slash = rel.find('/').map_or(true, |slash| colon < slash);
                 if before_slash && jet_url_valid_scheme(&rel[..colon]) {
@@ -256,7 +256,7 @@
                 return JetURLParts::parse(&format!("{}:{}", self.scheme, rel));
             }
             let mut out = self.clone();
-            let mut rest = rel.as_str();
+            let mut rest = (&rel[..]);
             out.fragment = None;
             if let Some(i) = rest.find('#') {
                 out.fragment = Some(jet_url_percent_decode_str(&rest[i + 1..])?);
@@ -301,15 +301,15 @@
             // operation can apply its component policy.
             Ok(out)
         }
-        pub fn set_query(&self, key: &String, value: &String) -> Self {
+        pub fn set_query(&self, key: &str, value: &str) -> Self {
             let mut out = self.clone();
             out.query.retain(|(k, _)| k != key);
-            out.query.push((key.clone(), value.clone()));
+            out.query.push((key.to_owned(), value.to_owned()));
             out
         }
-        pub fn add_query(&self, key: &String, value: &String) -> Self {
+        pub fn add_query(&self, key: &str, value: &str) -> Self {
             let mut out = self.clone();
-            out.query.push((key.clone(), value.clone()));
+            out.query.push((key.to_owned(), value.to_owned()));
             out
         }
         pub fn to_string_value(&self) -> String {
@@ -597,7 +597,7 @@
     }
 
     impl JetMIME {
-        pub fn parse(input: &String) -> Result<Self, String> {
+        pub fn parse(input: &str) -> Result<Self, String> {
             let parts = jet_mime_parse_parts(input)?;
             Ok(JetMIME {
                 top: parts.top,
@@ -625,7 +625,7 @@
         pub fn essence(&self) -> String {
             jet_mime_essence(&self.top, &self.sub)
         }
-        pub fn param(&self, name: &String) -> JetOutcome<String, JetAbsent> {
+        pub fn param(&self, name: &str) -> JetOutcome<String, JetAbsent> {
             jet_outcome_of(jet_mime_param(self.parameter_pairs(), name).map(str::to_string))
         }
         pub fn params(&self) -> Vec<Vec<String>> {

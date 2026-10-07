@@ -9802,7 +9802,7 @@ fn jet_compute_serialize(tensor: &JetTensor) -> Result<String, JetComputeError> 
     Ok(format!("{body};checksum={checksum}"))
 }
 
-fn jet_compute_deserialize(payload: &String) -> Result<JetTensor, JetComputeError> {
+fn jet_compute_deserialize(payload: &str) -> Result<JetTensor, JetComputeError> {
     let mut fields = payload.split(';');
     let Some(shape_part) = fields.next() else {
         return Err(JetComputeError::InvalidShape(

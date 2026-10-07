@@ -575,14 +575,14 @@ fn jet_browser_command(
     jet_browser_command_with_timeout(browser, method, params, timeout_ms)
 }
 
-fn jet_browser_profile(name: &String) -> Result<JetBrowserProfile, JetBrowserError> {
-    let version = match name.as_str() {
+fn jet_browser_profile(name: &str) -> Result<JetBrowserProfile, JetBrowserError> {
+    let version = match (&name[..]) {
         "bidi-2025.5" => "2025.5",
         "bidi-2024.11" => "2024.11",
         _ => return Err(JetBrowserError::new("invalid profile")),
     };
     Ok(JetBrowserProfile {
-        name: name.clone(),
+        name: name.to_owned(),
         version: version.to_string(),
     })
 }
@@ -669,9 +669,9 @@ fn jet_browser_parse_locked(raw: &str, engine: &str) -> Result<JetBrowserLocked,
     Ok(locked)
 }
 
-fn jet_browser_locked(engine: &String) -> Result<JetBrowserLocked, JetBrowserError> {
-    let engine_name = match engine.as_str() {
-        "chromium" | "firefox" | "webkit" => engine.as_str(),
+fn jet_browser_locked(engine: &str) -> Result<JetBrowserLocked, JetBrowserError> {
+    let engine_name = match (&engine[..]) {
+        "chromium" | "firefox" | "webkit" => (&engine[..]),
         _ => return Err(JetBrowserError::new("unknown engine")),
     };
     let root = jet_browser_project_root();
@@ -721,7 +721,7 @@ fn jet_browser_locked_verify(locked: &JetBrowserLocked) -> Result<(), JetBrowser
     Ok(())
 }
 
-fn jet_browser_connect(endpoint: &String) -> Result<JetBrowser, JetBrowserError> {
+fn jet_browser_connect(endpoint: &str) -> Result<JetBrowser, JetBrowserError> {
     let profile = jet_browser_profile(&"bidi-2025.5".to_string())?;
     let timeout = JetBrowserTimeout {
         milliseconds: 30_000,
@@ -730,7 +730,7 @@ fn jet_browser_connect(endpoint: &String) -> Result<JetBrowser, JetBrowserError>
 }
 
 fn jet_browser_connect_profile(
-    endpoint: &String,
+    endpoint: &str,
     profile: &JetBrowserProfile,
     timeout: JetBrowserTimeout,
 ) -> Result<JetBrowser, JetBrowserError> {
@@ -813,7 +813,7 @@ fn jet_browser_context(browser: &JetBrowser) -> Result<JetBrowserContext, JetBro
 
 fn jet_browser_subscribe(
     browser: &JetBrowser,
-    event: &String,
+    event: &str,
 ) -> Result<(), JetBrowserError> {
     let events = jet_std::DataTree::Array(vec![jet_browser_text(event)]);
     jet_browser_command(
@@ -858,7 +858,7 @@ fn jet_browser_phase_ok(phase: &str) -> bool {
 
 fn jet_browser_add_intercept(
     browser: &JetBrowser,
-    phase: &String,
+    phase: &str,
 ) -> Result<JetBrowserIntercept, JetBrowserError> {
     if !jet_browser_phase_ok(phase) {
         return Err(JetBrowserError::new("protocol"));
@@ -882,8 +882,8 @@ fn jet_browser_add_intercept(
 
 fn jet_browser_add_intercept_url(
     browser: &JetBrowser,
-    phase: &String,
-    url_pattern: &String,
+    phase: &str,
+    url_pattern: &str,
 ) -> Result<JetBrowserIntercept, JetBrowserError> {
     if !jet_browser_phase_ok(phase) || url_pattern.is_empty() {
         return Err(JetBrowserError::new("protocol"));
@@ -927,7 +927,7 @@ fn jet_browser_intercept_remove(intercept: &JetBrowserIntercept) -> Result<(), J
 
 fn jet_browser_continue_request(
     browser: &JetBrowser,
-    request_id: &String,
+    request_id: &str,
 ) -> Result<(), JetBrowserError> {
     if request_id.is_empty() {
         return Err(JetBrowserError::new("protocol"));
@@ -942,7 +942,7 @@ fn jet_browser_continue_request(
 
 fn jet_browser_fail_request(
     browser: &JetBrowser,
-    request_id: &String,
+    request_id: &str,
 ) -> Result<(), JetBrowserError> {
     if request_id.is_empty() {
         return Err(JetBrowserError::new("protocol"));
@@ -960,9 +960,9 @@ fn jet_browser_fail_request(
 
 fn jet_browser_fulfill_request(
     browser: &JetBrowser,
-    request_id: &String,
+    request_id: &str,
     status: i64,
-    body: &String,
+    body: &str,
 ) -> Result<(), JetBrowserError> {
     if request_id.is_empty() || !(100..=599).contains(&status) {
         return Err(JetBrowserError::new("protocol"));
@@ -986,7 +986,7 @@ fn jet_browser_fulfill_request(
 /// D-BROWSER-AUTO1=A (#1191): allow downloads into an absolute destination folder.
 fn jet_browser_allow_downloads(
     browser: &JetBrowser,
-    folder: &String,
+    folder: &str,
 ) -> Result<(), JetBrowserError> {
     if folder.is_empty() {
         return Err(JetBrowserError::new("protocol"));
@@ -1007,13 +1007,13 @@ fn jet_browser_allow_downloads(
 
 fn jet_browser_protocol(
     browser: &JetBrowser,
-    kind: &String,
+    kind: &str,
 ) -> Result<JetBrowserProtocol, JetBrowserError> {
     let state = browser.state.borrow();
     if state.closed {
         return Err(JetBrowserError::new("closed"));
     }
-    let supported = match kind.as_str() {
+    let supported = match (&kind[..]) {
         "bidi" => true,
         "cdp" => state.cdp,
         _ => false,
@@ -1023,7 +1023,7 @@ fn jet_browser_protocol(
     }
     Ok(JetBrowserProtocol {
         browser: browser.clone(),
-        kind: kind.clone(),
+        kind: kind.to_owned(),
     })
 }
 
@@ -1153,15 +1153,15 @@ impl Drop for JetBrowserContextState {
     }
 }
 
-fn jet_browser_navigation_url(url: &String) -> String {
+fn jet_browser_navigation_url(url: &str) -> String {
     if url.contains("://") || url.starts_with("about:") || url.starts_with("data:") {
-        return url.clone();
+        return url.to_owned();
     }
     let base = std::env::var("JET_TEST_WEB_SERVER_URL")
         .or_else(|_| std::env::var("JET_BROWSER_TEST_SERVER_URL"))
         .unwrap_or_default();
     if base.is_empty() {
-        return url.clone();
+        return url.to_owned();
     }
     format!(
         "{}/{}",
@@ -1172,7 +1172,7 @@ fn jet_browser_navigation_url(url: &String) -> String {
 
 fn jet_browser_page_goto(
     page: &JetBrowserPage,
-    url: &String,
+    url: &str,
 ) -> Result<(), JetBrowserError> {
     if page.state.closed.get() || page.state.context.closed.get() {
         return Err(JetBrowserError::new("closed"));
@@ -1243,9 +1243,9 @@ fn jet_browser_page_pdf(page: &JetBrowserPage) -> Result<String, JetBrowserError
 /// D-BROWSER-AUTO1=A (#1191): set a cookie in the page's storage partition.
 fn jet_browser_page_set_cookie(
     page: &JetBrowserPage,
-    name: &String,
-    value: &String,
-    domain: &String,
+    name: &str,
+    value: &str,
+    domain: &str,
 ) -> Result<(), JetBrowserError> {
     if page.state.closed.get() || page.state.context.closed.get() {
         return Err(JetBrowserError::new("closed"));
@@ -1288,7 +1288,7 @@ fn jet_browser_cookie_string_value(
 /// D-BROWSER-AUTO1=A (#1191): read one cookie value by name (caller-owned; not traced).
 fn jet_browser_page_cookie(
     page: &JetBrowserPage,
-    name: &String,
+    name: &str,
 ) -> Result<Option<String>, JetBrowserError> {
     if page.state.closed.get() || page.state.context.closed.get() {
         return Err(JetBrowserError::new("closed"));
@@ -1421,8 +1421,8 @@ fn jet_browser_page_dom(page: &JetBrowserPage) -> Result<String, JetBrowserError
 /// D-BROWSER-AUTO1=A (#1191): read local/session storage (kind: "local"|"session").
 fn jet_browser_page_storage_get(
     page: &JetBrowserPage,
-    kind: &String,
-    key: &String,
+    kind: &str,
+    key: &str,
 ) -> Result<Option<String>, JetBrowserError> {
     if !jet_browser_storage_kind_ok(kind) || key.is_empty() {
         return Err(JetBrowserError::new("protocol"));
@@ -1447,9 +1447,9 @@ fn jet_browser_page_storage_get(
 /// D-BROWSER-AUTO1=A (#1191): write local/session storage.
 fn jet_browser_page_storage_set(
     page: &JetBrowserPage,
-    kind: &String,
-    key: &String,
-    value: &String,
+    kind: &str,
+    key: &str,
+    value: &str,
 ) -> Result<(), JetBrowserError> {
     if !jet_browser_storage_kind_ok(kind) || key.is_empty() {
         return Err(JetBrowserError::new("protocol"));
@@ -1480,7 +1480,7 @@ fn jet_browser_page_storage_set(
 /// D-BROWSER-AUTO1=A (#1191): clear local/session storage.
 fn jet_browser_page_storage_clear(
     page: &JetBrowserPage,
-    kind: &String,
+    kind: &str,
 ) -> Result<(), JetBrowserError> {
     if !jet_browser_storage_kind_ok(kind) {
         return Err(JetBrowserError::new("protocol"));
@@ -1510,8 +1510,8 @@ fn jet_browser_css_attr_equals(attr: &str, value: &str) -> String {
 
 fn jet_browser_page_get_by_role(
     page: &JetBrowserPage,
-    role: &String,
-    name: &String,
+    role: &str,
+    name: &str,
 ) -> JetBrowserLocator {
     jet_browser_record_action(
         &page.state.browser,
@@ -1524,13 +1524,13 @@ fn jet_browser_page_get_by_role(
     JetBrowserLocator {
         page: page.state.clone(),
         locator_type: "accessibility".to_string(),
-        role: role.clone(),
-        name: name.clone(),
+        role: role.to_owned(),
+        name: name.to_owned(),
         value: String::new(),
     }
 }
 
-fn jet_browser_page_get_by_text(page: &JetBrowserPage, text: &String) -> JetBrowserLocator {
+fn jet_browser_page_get_by_text(page: &JetBrowserPage, text: &str) -> JetBrowserLocator {
     jet_browser_record_action(
         &page.state.browser,
         format!("locator:text:{}", jet_browser_fact_hash(text)),
@@ -1540,11 +1540,11 @@ fn jet_browser_page_get_by_text(page: &JetBrowserPage, text: &String) -> JetBrow
         locator_type: "innerText".to_string(),
         role: String::new(),
         name: String::new(),
-        value: text.clone(),
+        value: text.to_owned(),
     }
 }
 
-fn jet_browser_page_get_by_label(page: &JetBrowserPage, name: &String) -> JetBrowserLocator {
+fn jet_browser_page_get_by_label(page: &JetBrowserPage, name: &str) -> JetBrowserLocator {
     jet_browser_record_action(
         &page.state.browser,
         format!("locator:label:{}", jet_browser_fact_hash(name)),
@@ -1553,14 +1553,14 @@ fn jet_browser_page_get_by_label(page: &JetBrowserPage, name: &String) -> JetBro
         page: page.state.clone(),
         locator_type: "accessibility".to_string(),
         role: String::new(),
-        name: name.clone(),
+        name: name.to_owned(),
         value: String::new(),
     }
 }
 
 fn jet_browser_page_get_by_placeholder(
     page: &JetBrowserPage,
-    text: &String,
+    text: &str,
 ) -> JetBrowserLocator {
     jet_browser_record_action(
         &page.state.browser,
@@ -1575,7 +1575,7 @@ fn jet_browser_page_get_by_placeholder(
     }
 }
 
-fn jet_browser_page_get_by_test_id(page: &JetBrowserPage, id: &String) -> JetBrowserLocator {
+fn jet_browser_page_get_by_test_id(page: &JetBrowserPage, id: &str) -> JetBrowserLocator {
     jet_browser_record_action(
         &page.state.browser,
         format!("locator:test-id:{}", jet_browser_fact_hash(id)),
@@ -1589,7 +1589,7 @@ fn jet_browser_page_get_by_test_id(page: &JetBrowserPage, id: &String) -> JetBro
     }
 }
 
-fn jet_browser_page_get_by_css(page: &JetBrowserPage, selector: &String) -> JetBrowserLocator {
+fn jet_browser_page_get_by_css(page: &JetBrowserPage, selector: &str) -> JetBrowserLocator {
     jet_browser_record_action(
         &page.state.browser,
         format!("locator:css:{}", jet_browser_fact_hash(selector)),
@@ -1599,7 +1599,7 @@ fn jet_browser_page_get_by_css(page: &JetBrowserPage, selector: &String) -> JetB
         locator_type: "css".to_string(),
         role: String::new(),
         name: String::new(),
-        value: selector.clone(),
+        value: selector.to_owned(),
     }
 }
 
@@ -1902,7 +1902,7 @@ fn jet_browser_locator_hover(locator: &JetBrowserLocator) -> Result<(), JetBrows
 
 fn jet_browser_locator_fill(
     locator: &JetBrowserLocator,
-    text: &String,
+    text: &str,
 ) -> Result<(), JetBrowserError> {
     jet_browser_record_locator_action(
         locator,
@@ -1948,7 +1948,7 @@ fn jet_browser_locator_fill(
 
 fn jet_browser_locator_press(
     locator: &JetBrowserLocator,
-    key: &String,
+    key: &str,
 ) -> Result<(), JetBrowserError> {
     jet_browser_record_locator_action(
         locator,
@@ -1985,7 +1985,7 @@ fn jet_browser_locator_press(
 /// D-BROWSER-AUTO1=A (#1191): set file input paths via BiDi input.setFiles.
 fn jet_browser_locator_set_files(
     locator: &JetBrowserLocator,
-    path: &String,
+    path: &str,
 ) -> Result<(), JetBrowserError> {
     if path.is_empty() {
         return Err(JetBrowserError::new("protocol"));
@@ -2077,8 +2077,8 @@ fn jet_browser_cdp_method_ok(method: &str) -> bool {
 /// `goog:cdp.*`, and CDP methods must match audited `Domain.command` shape.
 fn jet_browser_protocol_send(
     protocol: &JetBrowserProtocol,
-    method: &String,
-    params_json: &String,
+    method: &str,
+    params_json: &str,
 ) -> Result<String, JetBrowserError> {
     let params =
         jet_std::parse_json_strict(params_json).map_err(|_| JetBrowserError::new("protocol"))?;

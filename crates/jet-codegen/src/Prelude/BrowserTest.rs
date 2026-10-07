@@ -259,7 +259,7 @@ fn jet_browser_test_split_command(raw: &str) -> Vec<String> {
     command
 }
 
-pub(crate) fn jet_browser_test_selected(config: &JetBrowserTestConfig, name: &String) -> bool {
+pub(crate) fn jet_browser_test_selected(config: &JetBrowserTestConfig, name: &str) -> bool {
     if config.filter.trim().is_empty() {
         return true;
     }
@@ -299,9 +299,9 @@ fn jet_browser_test_glob_match(pattern: &str, value: &str) -> bool {
     p == pattern.len()
 }
 
-fn jet_browser_test_source(path: &String, line: i64, column: i64) -> JetBrowserTestSource {
+fn jet_browser_test_source(path: &str, line: i64, column: i64) -> JetBrowserTestSource {
     JetBrowserTestSource {
-        path: path.clone(),
+        path: path.to_owned(),
         line: u32::try_from(line.max(0)).unwrap_or(u32::MAX),
         column: u32::try_from(column.max(0)).unwrap_or(u32::MAX),
     }
@@ -438,8 +438,8 @@ pub(crate) struct JetBrowserTestSession {
 
 fn jet_browser_test_begin(
     config: &JetBrowserTestConfig,
-    test: &String,
-    engine: &String,
+    test: &str,
+    engine: &str,
     attempt: i64,
     source: JetBrowserTestSource,
 ) -> Result<JetBrowserTestSession, JetBrowserError> {
@@ -476,8 +476,8 @@ fn jet_browser_test_begin(
         page,
         actions,
         config: config.clone(),
-        test: test.clone(),
-        engine: engine.clone(),
+        test: test.to_owned(),
+        engine: engine.to_owned(),
         attempt,
         source,
         started: std::time::Instant::now(),
@@ -485,10 +485,10 @@ fn jet_browser_test_begin(
 }
 pub(crate) fn jet_browser_test_begin_named(
     config: &JetBrowserTestConfig,
-    test: &String,
-    engine: &String,
+    test: &str,
+    engine: &str,
     attempt: i64,
-    source_path: &String,
+    source_path: &str,
     line: i64,
     column: i64,
 ) -> Result<JetBrowserTestFixture, JetBrowserError> {
@@ -756,16 +756,16 @@ fn jet_browser_test_finish(
 }
 
 fn jet_browser_test_setup_failure(
-    test: &String,
-    engine: &String,
+    test: &str,
+    engine: &str,
     attempt: i64,
     expected_failure: bool,
     source: JetBrowserTestSource,
     error: JetBrowserError,
 ) -> JetBrowserTestAttempt {
     JetBrowserTestAttempt {
-        test: test.clone(),
-        engine: engine.clone(),
+        test: test.to_owned(),
+        engine: engine.to_owned(),
         attempt,
         passed: false,
         expected_failure,
@@ -784,14 +784,14 @@ type JetBrowserTestBody = fn(&JetBrowserPage) -> Result<(), JetBrowserError>;
 
 fn jet_browser_test_run_case(
     config: &JetBrowserTestConfig,
-    name: &String,
+    name: &str,
     source: JetBrowserTestSource,
     expected_failure: bool,
     body: JetBrowserTestBody,
 ) -> JetBrowserTestCase {
     if !jet_browser_test_selected(config, name) {
         return JetBrowserTestCase {
-            name: name.clone(),
+            name: name.to_owned(),
             selected: false,
             attempts: Vec::new(),
         };
@@ -822,7 +822,7 @@ fn jet_browser_test_run_case(
         }
     }
     JetBrowserTestCase {
-        name: name.clone(),
+        name: name.to_owned(),
         selected: true,
         attempts,
     }
@@ -1143,7 +1143,7 @@ fn jet_browser_test_render(report: &JetBrowserTestReport) -> String {
 
 pub(crate) fn jet_browser_test_write_report(
     report: &JetBrowserTestReport,
-    path: &String,
+    path: &str,
 ) -> Result<(), JetBrowserError> {
     let rendered = jet_browser_test_render(report);
     let target = std::path::Path::new(path);
@@ -1155,7 +1155,7 @@ pub(crate) fn jet_browser_test_write_report(
     Ok(())
 }
 pub(crate) fn jet_browser_test_watch_changed(
-    path: &String,
+    path: &str,
     last_modified_ms: i64,
 ) -> Result<bool, JetBrowserError> {
     let metadata = match std::fs::metadata(path) {
@@ -1188,9 +1188,9 @@ fn jet_browser_test_escape_source(value: &str) -> String {
 }
 
 pub(crate) fn jet_browser_test_generate_source(
-    name: &String,
-    route: &String,
-    output: &String,
+    name: &str,
+    route: &str,
+    output: &str,
 ) -> Result<String, JetBrowserError> {
     if name.is_empty()
         || !name

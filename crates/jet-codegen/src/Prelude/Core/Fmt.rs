@@ -377,26 +377,26 @@ pub(crate) fn jet_fmt_ordinal(value: i64) -> String {
     format!("{}{}", comma_int(value), suffix)
 }
 
-pub(crate) fn jet_fmt_plural(count: i64, singular: &String, plural: &String) -> String {
+pub(crate) fn jet_fmt_plural(count: i64, singular: &str, plural: &str) -> String {
     let word = if count.abs() == 1 { singular } else { plural };
     format!("{} {}", comma_int(count), word)
 }
 
-pub(crate) fn jet_fmt_pad(text: &String, width: i64, fill: &String) -> String {
+pub(crate) fn jet_fmt_pad(text: &str, width: i64, fill: &str) -> String {
     jet_fmt_pad_right(text, width, fill)
 }
 
-pub(crate) fn jet_fmt_pad_left(text: &String, width: i64, fill: &String) -> String {
+pub(crate) fn jet_fmt_pad_left(text: &str, width: i64, fill: &str) -> String {
     let need = pad_need(text, width);
     format!("{}{}", pad_fill(fill, need), text)
 }
 
-pub(crate) fn jet_fmt_pad_right(text: &String, width: i64, fill: &String) -> String {
+pub(crate) fn jet_fmt_pad_right(text: &str, width: i64, fill: &str) -> String {
     let need = pad_need(text, width);
     format!("{}{}", text, pad_fill(fill, need))
 }
 
-pub(crate) fn jet_fmt_pad_center(text: &String, width: i64, fill: &String) -> String {
+pub(crate) fn jet_fmt_pad_center(text: &str, width: i64, fill: &str) -> String {
     let need = pad_need(text, width);
     let left = need / 2;
     let right = need - left;

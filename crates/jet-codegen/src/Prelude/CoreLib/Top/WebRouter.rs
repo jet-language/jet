@@ -300,7 +300,7 @@ fn jet_web_router_parse_query(query: &str) -> Result<BTreeMap<String, String>, S
 
 fn jet_web_router_parse_value(
     field: &JetWebRouterField,
-    raw: Option<&String>,
+    raw: Option<&str>,
 ) -> Result<Option<String>, String> {
     let Some(raw) = raw.or(field.default.as_ref()) else {
         if field.required {
@@ -309,12 +309,12 @@ fn jet_web_router_parse_value(
         return Ok(None);
     };
     let normalized = match field.value_type {
-        JetWebRouterValueType::String => raw.clone(),
+        JetWebRouterValueType::String => raw.to_owned(),
         JetWebRouterValueType::Int => raw
             .parse::<i64>()
             .map(|value| value.to_string())
             .map_err(|_| format!("parameter `{}` expects Int, got `{raw}`", field.name))?,
-        JetWebRouterValueType::Bool => match raw.as_str() {
+        JetWebRouterValueType::Bool => match (&raw[..]) {
             "true" | "1" => "true".to_string(),
             "false" | "0" => "false".to_string(),
             _ => {
@@ -336,7 +336,7 @@ fn jet_web_router_parse_value(
         JetWebRouterValueType::Json => {
             jet_std::parse_json_strict(raw)
                 .map_err(|error| format!("parameter `{}` expects JSON: {}", field.name, error.reason))?;
-            raw.clone()
+            raw.to_owned()
         }
     };
     Ok(Some(normalized))
