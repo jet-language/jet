@@ -363,6 +363,7 @@ pub struct JetCLIInspectJob {
     pub file: String
     pub subject: String?
     pub json: Bool
+    pub verbose: Bool{false}
     pub color: Bool
     pub threads: Int?
     // The stderr notices entry resolution wrote, which go out first.
@@ -1447,7 +1448,7 @@ fn jet_cli_inspect_checked_build_host(job: JetCLIInspectJob) -> JetDriverVerbOut
     // The checked build scope belongs to this invocation, not a CLI cache or
     // process-global integer. Driver owns evaluation and graph provenance.
     scope := JetDriverBuildQueryScope{next_session_id: 1}
-    jet_cli_build_host(request, &scope, job.file, job.subject, job.json, job.color)
+    jet_cli_build_host(request, &scope, job.file, job.subject, job.json, job.color, job.verbose)
 }
 
 // CmdInspect.rs `run_accel`/`run_decisions` over the shared optimization

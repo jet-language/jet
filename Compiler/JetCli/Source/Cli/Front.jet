@@ -1414,6 +1414,14 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Time.Wait]> JetCLIPlan Never! {
         "test-compare" -> return JetCLIPlan.Comparison{target: if args.len() > 1 -> args[1] else -> "", argv: jet_argv, json: json}
         else -> {}
     }
-    if jet_cli_inspect_word(command) -> return jet_cli_inspect(argv, jet_argv, args, color, quiet, json, threads)
+    if jet_cli_inspect_word(command) {
+        plan :: jet_cli_inspect(argv, jet_argv, args, color, quiet, json, threads)
+        if plan == .Inspect(job) {
+            selected := job
+            selected.verbose = verbose
+            return JetCLIPlan.Inspect{job: selected}
+        }
+        return plan
+    }
     jet_cli_not_ported(command, color)
 }
