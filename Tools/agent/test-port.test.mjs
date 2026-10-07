@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { functionsIn, collectFunctions, censusTsv, classify, checkOriginal, emitFunction, makeReference } from './test-port.mjs';
+import { functionsIn, collectFunctions, censusTsv, classify, checkOriginal, emitFunction, makeReference, machineDiagnostics } from './test-port.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(join(process.env.JET_SCRATCH_ROOT ?? tmpdir(), 'test-port-unit-'));
@@ -106,6 +106,8 @@ test('include_str source, dry-run, exact streams and overwrite refusal', async (
   assert.equal(dry.status, 'CONVERTED'); assert.equal(existsSync(join(root, dry.paths[0])), false);
   const emitted = await emitFunction(row, { root, reference: run });
   assert.equal(readFileSync(join(root, emitted.paths[1]), 'utf8'), 'ok\n');
+  assert.ok(emitted.paths.includes('tests/run/sample/example.stderr.out'));
+  assert.equal(existsSync(join(root, 'tests/run/sample/example.err.out')), false);
   await assert.rejects(emitFunction(row, { root, reference: run }), /already exists/u);
 });
 
@@ -145,28 +147,28 @@ test('plain UI staging keeps the final path and does not insert a directive', as
   const row = fn('let d = jet::compile("fn run() {}").expect_err("bad"); assert!(d.iter().any(|d| d.code == "E0209"));');
   const observe = async (source, mode, metadata) => { seen.push(metadata); return reference(source, mode); };
   const emitted = await emitFunction(row, { root, reference: observe });
-  assert.deepEqual(seen, [{ path: 'tests/ui/sample/example.jet', verbose: false }]);
+  assert.deepEqual(seen, [{ path: 'tests/ui/sample/example.jet', lint: false, agreement: false, interpreterAgreement: false }]);
   assert.equal(readFileSync(join(root, emitted.paths[0]), 'utf8'), 'fn run() {}');
 });
 
-test('verbose lint expectations use a CLI case and exact separate streams', async (t) => {
+test('verbose lint expectations use grouped UI lint and a warning snapshot', async (t) => {
   const root = fixture(t);
   const row = fn('let out = jet::compile("fn run() {}").expect("ok"); assert!(out.lints.iter().any(|d| d.code == "L0202"));');
-  const observe = async (source, mode, metadata) => ({ source, mode, code: 0, verbose: metadata.verbose,
-    diagnostics: [{ ...diagnostic, code: 'L0202' }], stdout: '', stderr: 'Warning [L0202]\\n' });
+  const observe = async (source, mode, metadata) => ({ source, mode, code: 0, lint: metadata.lint,
+    diagnostics: [{ ...diagnostic, code: 'L0202', severity: 'warning' }], rendered: 'Warning [L0202]\n' });
   const emitted = await emitFunction(row, { root, reference: observe });
-  assert.ok(emitted.paths.includes('tests/cases/sample/example.case'));
-  assert.match(readFileSync(join(root, 'tests/cases/sample/example.case'), 'utf8'), /step: jet check --verbose example.jet/u);
-  assert.equal(existsSync(join(root, 'tests/ui')), false);
+  assert.ok(emitted.paths.includes('tests/ui_lint/sample/example.warn'));
+  assert.equal(readFileSync(join(root, 'tests/ui_lint/sample/example.warn'), 'utf8'), 'Warning [L0202]\n');
+  assert.equal(existsSync(join(root, 'tests/cases')), false);
 });
 
 test('multi-file input assembly writes real scratch files and restages the complete project', async (t) => {
   const root = fixture(t), scratch = join(root, 'scratch'); mkdirSync(scratch);
   const binary = join(root, 'reference');
-  writeFileSync(binary, '#!/usr/bin/env node\nconst fs=require("node:fs"), path=require("node:path"); const entry=process.argv.at(-1); if(fs.readFileSync(path.join(path.dirname(entry),"helper.jet"),"utf8")!=="fn helper() {}") process.exit(101); if(process.argv.includes("--json")) console.log(JSON.stringify({schema:"jet.report/v3",code:"E0209",what:"bad",why:"owner",fix:"copy",severity:"error"})); else console.error("Error [E0209]: bad"); process.exitCode=1;\n', { mode: 0o755 });
+  writeFileSync(binary, '#!/usr/bin/env node\nconst fs=require("node:fs"), path=require("node:path"); const entry=process.argv.at(-1); if(path.basename(entry)!=="run.jet" || fs.readFileSync(path.join(path.dirname(entry),"helper.jet"),"utf8")!=="fn helper() {}") process.exit(101); if(process.argv.includes("--json")) console.log(JSON.stringify({schema:"jet.report/v3",moment:"compile",code:"E0209",what:"bad",why:"owner",fix:"copy",severity:"error"})); else console.error("Error [E0209]: bad"); process.exitCode=1;\n', { mode: 0o755 });
   const row = fn('let root = common::unique_tmp("input"); fs::create_dir_all(&root).unwrap(); fs::write(root.join("helper.jet"), "fn helper() {}").unwrap(); let entry = root.join("main.jet"); let src = "fn run() {}"; fs::write(&entry, src).unwrap(); let d = jet::compile_with_path(src, entry.to_str().unwrap()).expect_err("bad"); assert!(d.iter().any(|d| d.code == "E0209"));');
   const result = await emitFunction(row, { root, reference: makeReference(binary, root, scratch) });
-  assert.ok(result.paths.includes('tests/ui/sample/example/main.jet'));
+  assert.ok(result.paths.includes('tests/ui/sample/example/run.jet'));
   assert.ok(result.paths.includes('tests/ui/sample/example/helper.jet'));
   assert.equal(readFileSync(join(root, 'tests/ui/sample/example/helper.jet'), 'utf8'), 'fn helper() {}');
 });
@@ -175,6 +177,129 @@ test('reference JSON/rendered code disagreement refuses conversion', async (t) =
   const root = fixture(t), scratch = join(root, 'scratch'); mkdirSync(scratch);
   // Use the public runner against an actual process, not an injected diagnostic.
   const binary = join(root, 'reference');
-  writeFileSync(binary, '#!/usr/bin/env node\nif(process.argv.includes("--json")) { console.log(JSON.stringify({schema:"jet.report/v3",code:"E0209",what:"bad",why:"owner",fix:"copy",severity:"error"})); } else { console.error("Error [E0003]: different"); } process.exitCode=1;\n', { mode: 0o755 });
+  writeFileSync(binary, '#!/usr/bin/env node\nif(process.argv.includes("--json")) { console.log(JSON.stringify({schema:"jet.report/v3",moment:"compile",code:"E0209",what:"bad",why:"owner",fix:"copy",severity:"error"})); } else { console.error("Error [E0003]: different"); } process.exitCode=1;\n', { mode: 0o755 });
   await assert.rejects(makeReference(binary, root, scratch)('fn run() {}', 'compile'), /JSON\/rendered/u);
+});
+
+test('success without a stderr assertion omits the stderr golden', async (t) => {
+  const root = fixture(t);
+  const row = fn('let (code, out, ignored) = common::build_and_run("a", "b", "fn run() {}"); assert_eq!(code, 0); assert_eq!(out, "ok");');
+  const result = await emitFunction(row, { root, reference: async (source, mode) => ({ source, mode, code: 0, stdout: 'ok', stderr: '' }) });
+  assert.deepEqual(result.paths, ['tests/run/sample/example.jet', 'tests/run/sample/example.out']);
+});
+
+test('failure goldens retain exact exit and both streams in a sidecar', async (t) => {
+  const root = fixture(t);
+  const row = fn('let (code, stdout, stderr) = common::build_and_run("a", "b", "fn run() {}"); assert_eq!(code, 70); assert_eq!(stdout, "before"); assert_eq!(stderr, "failure");');
+  const result = await emitFunction(row, { root, reference: async (source, mode) => ({ source, mode, code: 70, stdout: 'before', stderr: 'failure' }) });
+  assert.deepEqual(result.paths, ['tests/run/sample/example.jet', 'tests/run/sample/example.err.out', 'tests/run/sample/example.stdout', 'tests/run/sample/example.case']);
+  assert.equal(readFileSync(join(root, 'tests/run/sample/example.case'), 'utf8'), 'step: built\nexit: 70\nstdout: = example.stdout\nstderr: = example.err.out\n');
+  assert.equal(readFileSync(join(root, 'tests/run/sample/example.err.out'), 'utf8'), 'failure');
+  assert.equal(readFileSync(join(root, 'tests/run/sample/example.stdout'), 'utf8'), 'before');
+  assert.equal(existsSync(join(root, 'tests/run/sample/example.err')), false);
+  assert.equal(existsSync(join(root, 'tests/run/sample/example.out')), false);
+});
+
+test('ref tier runs the debug-built artifact with input, and refuses I9 disagreement', async (t) => {
+  const root = fixture(t), scratch = join(root, 'scratch'); mkdirSync(scratch);
+  const binary = join(root, 'reference');
+  writeFileSync(binary, `#!/usr/bin/env node
+const fs=require("node:fs");
+const args=process.argv.slice(2);
+if(args[0]==="build") {
+  if(!args.includes("--profile=debug")) process.exit(101);
+  fs.writeFileSync("artifact", '#!/usr/bin/env node\\nprocess.stdout.write("ref:"+require("node:fs").readFileSync(0,"utf8"));\\n', {mode:0o755});
+  console.log("built: artifact");
+} else if(args[0]==="run") {
+  const source=fs.readFileSync(args.at(-1),"utf8");
+  process.stdout.write((source==="DIVERGE" ? "wrong:" : "ref:")+fs.readFileSync(0,"utf8"));
+} else process.exit(101);
+`, { mode: 0o755 });
+  const observe = makeReference(binary, root, scratch);
+  const result = await observe('AGREE', 'run', { stdin: 'input', agreement: true, interpreterAgreement: true });
+  assert.equal(result.stdout, 'ref:input');
+  await assert.rejects(observe('DIVERGE', 'run', { agreement: true }), /I9 ref\/default/u);
+});
+
+test('reference check environment and plain-success snapshot match the UI contract', async (t) => {
+  const root = fixture(t), scratch = join(root, 'scratch'); mkdirSync(scratch);
+  const previous = { extension: process.env.JET_COMPILER_EXTENSION, schema: process.env.JET_SCHEMA_CACHE_DIR };
+  process.env.JET_COMPILER_EXTENSION = 'must-clear'; process.env.JET_SCHEMA_CACHE_DIR = 'must-clear';
+  t.after(() => {
+    for (const [name, value] of [['JET_COMPILER_EXTENSION', previous.extension], ['JET_SCHEMA_CACHE_DIR', previous.schema]]) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  });
+  const binary = join(root, 'reference');
+  writeFileSync(binary, `#!/usr/bin/env node
+const e=process.env,a=process.argv.slice(2);
+if(e.NO_COLOR!=="1" || e.CLICOLOR!=="0" || e.TERM!=="dumb" || e.JET_RECEIPT_BYPASS!=="1" || e.JET_REPL_HISTORY!=="off" || e.JET_COMPILER_EXTENSION || e.JET_SCHEMA_CACHE_DIR || a.includes("--no-color")) process.exit(101);
+if(a.includes("--json")) console.log(JSON.stringify({schema:"jet.status/v1",action:"diagnostics",ok:true,reports:[{schema:"jet.report/v3",moment:"compile",severity:"warning",code:"L0202",what:"lint",why:"lint",fix:"lint"}]}));
+else { console.log("not a snapshot"); console.error("Warning [L0202]: lint"); }
+`, { mode: 0o755 });
+  const observe = makeReference(binary, root, scratch);
+  assert.equal((await observe('fn run() {}', 'compile')).rendered, '(no errors)\n');
+  assert.equal((await observe('fn run() {}', 'compile', { lint: true })).rendered, 'Warning [L0202]: lint\n');
+  writeFileSync(binary, '#!/usr/bin/env node\nif(process.argv.includes("--json")) console.log(JSON.stringify({schema:"jet.status/v1",action:"diagnostics",ok:true,reports:[]}));\n', { mode: 0o755 });
+  await assert.rejects(observe('fn run() {}', 'compile', { lint: true }), /at least one lint/u);
+});
+
+test('project siblings cannot refer to the renamed entry', async (t) => {
+  const root = fixture(t), scratch = join(root, 'scratch'); mkdirSync(scratch);
+  const row = fn('let root = common::unique_tmp("input"); fs::write(root.join("helper.jet"), "import \\\"./main\\\";").unwrap(); let entry = root.join("main.jet"); let src = "fn run() {}"; fs::write(&entry, src).unwrap(); jet::compile_with_path(src, entry.to_str().unwrap()).expect_err("bad");');
+  await assert.rejects(emitFunction(row, { root, reference: makeReference('/not-invoked', root, scratch) }), /references renamed entry/u);
+  assert.equal(existsSync(join(root, 'tests/ui')), false);
+});
+
+test('mixed functions retire Rust aliases and closures, not Jet diagnostic facts', async (t) => {
+  const root = fixture(t);
+  const setup = 'let out = jet::compile("fn run() {}").expect("ok"); let code = out.rust; let includes = |needle: &str| code.contains(needle); assert!(includes("fn")); ';
+  const row = fn(setup + 'assert!(out.lints.iter().any(|d| d.code == "L0202"));');
+  assert.equal(classify(row).disposition, 'UI+retire-rust-asserts');
+  const observe = async (source, mode, metadata) => ({ source, mode, code: 0, lint: metadata.lint, diagnostics: [{ ...diagnostic, code: 'L0202' }], rendered: 'Warning [L0202]\n' });
+  const result = await emitFunction(row, { root, reference: observe, dryRun: true });
+  assert.equal(result.retiredAssertions, 1);
+  await assert.rejects(emitFunction(fn(setup + 'assert!(out.lints.iter().any(|d| d.code == "L9999"));'), { root, reference: observe }), /not satisfied/u);
+  const pure = fn('let out = jet::compile("fn run() {}").unwrap(); assert!(out.rust.contains("fn"));');
+  assert.equal(classify(pure).disposition, 'retire-with-Rust');
+  await assert.rejects(emitFunction(pure, { root, reference: observe }), /must be retired/u);
+});
+
+test('compound Rust retirement keeps Jet predicates and closure shadowing', async () => {
+  const row = fn('let out = jet::compile("fn run() {}").expect("ok"); let rust = out.rust; assert!(rust.contains("fn") && out.lints.iter().any(|rust| rust.code == "L0202"));');
+  const good = async (source, mode) => ({ source, mode, code: 0, diagnostics: [{ ...diagnostic, code: 'L0202' }] });
+  assert.equal((await checkOriginal(row, good)).retiredAssertions.length, 1);
+  await assert.rejects(checkOriginal(row, async (source, mode) => ({ source, mode, code: 0, diagnostics: [] })), /not satisfied/u);
+});
+
+test('quoted Rust punctuation is a literal, never a parser delimiter or operator', async () => {
+  const setup = 'let (code, stdout, stderr) = common::build_and_run("a", "b", "fn run() {}"); ';
+  const observe = async (source, mode) => ({ source, mode, code: 0, stdout: '(', stderr: '' });
+  await checkOriginal(fn(setup + 'assert_eq!(stdout, "("); assert!(stdout.contains("("));'), observe);
+  for (const marker of ['!', ')', '&&']) await assert.rejects(checkOriginal(fn(setup + `assert!(stdout.contains("${marker}"));`), observe), /not satisfied/u);
+});
+
+test('canonical observed machine envelopes accept success and nested errors only', () => {
+  const error = { schema: 'jet.report/v3', moment: 'compile', severity: 'error', code: 'E0104', what: '`show` expects 1 argument, got 2', why: 'Every argument must match a parameter', fix: 'Check the definition of `show`', no_fix_reason: { kind: 'ambiguous', next: 'Check the definition of `show`' } };
+  const run = (row, code = 0) => ({ stdout: JSON.stringify(row), stderr: '', code });
+  assert.deepEqual(machineDiagnostics(run({ schema: 'jet.status/v1', action: 'diagnostics', ok: false, reports: [error] }, 1)), [error]);
+  assert.deepEqual(machineDiagnostics(run(error, 1)), [error]);
+  const success = { status: 'passed', contract: 'jet.check/v1', schema_version: 1, provenance: { diagnostics: 0 }, rows: [{ output: 'not-applicable', name: 'entry resolution', status: 'not applicable', detail: 'explicit-file checks resolve only the named source file', diagnostic: 'E2389' }] };
+  assert.deepEqual(machineDiagnostics(run(success)), []);
+  assert.throws(() => machineDiagnostics(run({ ...success, status: 'failed' }, 1)), /success record/u);
+  assert.throws(() => machineDiagnostics(run({ ...success, rows: [{ ...success.rows[0], status: 'failed' }] })), /proof row/u);
+  assert.throws(() => machineDiagnostics(run({ ...success, contract: 'legacy.check/v1' })), /unknown machine/u);
+  assert.throws(() => machineDiagnostics({ stdout: '', stderr: '', code: 0 }), /no machine record/u);
+});
+
+test('stderr assertions survive renamed stream bindings, aliases and direct tuples', async (t) => {
+  const root = fixture(t);
+  const observe = async (source, mode) => ({ source, mode, code: 0, stdout: 'ok', stderr: '' });
+  for (const body of [
+    'let (c, o, e) = common::build_and_run("a", "b", "fn run() {}"); let alias = e; assert!(alias.is_empty());',
+    'assert_eq!(common::build_and_run("a", "b", "fn run() {}"), (0, "ok", ""));',
+  ]) {
+    const result = await emitFunction(fn(body), { root, reference: observe, dryRun: true });
+    assert.ok(result.paths.includes('tests/run/sample/example.stderr.out'));
+  }
 });

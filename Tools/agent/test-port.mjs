@@ -8,6 +8,8 @@
 // not permission to weaken a test. RETIRED rows name Rust-only subjects.
 // --report FILE records each decision; --exclusions FILE lists raw #[test]
 // occurrences hidden in strings/comments. Source matrices retain every row.
+// Mixed functions retain Jet assertions and report only Rust-derived assertions
+// as retired. Runtime receipts use the ref artifact; all-tier origins must agree.
 // Until M3/W2, plain UI blessing mirrors the kit's public check/render rules;
 // W2 replaces this mirror with testkit ui --bless. No new fixture directives.
 import { readFileSync, readdirSync, existsSync, realpathSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
@@ -113,6 +115,127 @@ function rustFiles(directory) {
   });
 }
 
+function topLevelSplit(tokens, separator) {
+  const parts = []; let start = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i].kind === 'string') continue;
+    if (['(', '[', '{'].includes(tokens[i].value)) { i = closeAt(tokens, i); continue; }
+    if (tokens[i].value === separator) { parts.push(tokens.slice(start, i)); start = i + 1; }
+  }
+  parts.push(tokens.slice(start)); return parts;
+}
+
+// Rust-emitter facts die at cutover, but their neighboring Jet facts do not.
+// Trace only explicit Rust provenance; unknown syntax still reaches the closed
+// parser and is refused. Never supply pretend generated Rust to the evaluator.
+export function retireRustAssertions(fn) {
+  const retired = [], tokens = fn.tokens ?? lexRust(fn.body);
+  let jetAssertions = 0;
+  const origin = (list, names) => {
+    const words = list.filter((token) => token.kind !== 'string').map((token) => token.value);
+    if (words.some((word) => ['Command', 'include_str', 'write'].includes(word)) &&
+      list.some((token) => token.kind === 'string' && (token.value === 'rustc' || /\.rs$/u.test(token.value)))) return true;
+    for (let i = 0; i < list.length; i++) {
+      const token = list[i];
+      if (token.kind === 'string') continue;
+      if (token.value === '|' && list[i + 1]?.kind === 'word') {
+        const end = list.findIndex((candidate, j) => j > i && candidate.value === '|');
+        if (end >= 0) {
+          const inner = new Set(names);
+          for (const param of list.slice(i + 1, end)) if (param.kind === 'word') inner.delete(param.value);
+          return origin(list.slice(end + 1), inner);
+        }
+      }
+      if (['(', '[', '{'].includes(token.value)) {
+        const end = closeAt(list, i);
+        if (origin(list.slice(i + 1, end), names)) return true;
+        i = end; continue;
+      }
+      if ((token.value === '.' && list[i + 1]?.value === 'rust') || (names.has(token.value) && !['.', '::'].includes(list[i - 1]?.value)) || /^(?:strip_vetted\w*|add_generated_rust)$/u.test(token.value)) return true;
+    }
+    return false;
+  };
+  const prune = (list, names) => {
+    if (list[0]?.kind !== 'string' && list[0]?.value === '(' && closeAt(list, 0) === list.length - 1) {
+      const inner = prune(list.slice(1, -1), names);
+      return inner.length ? [list[0], ...inner, list.at(-1)] : [];
+    }
+    for (const operator of ['||', '&&']) {
+      const parts = topLevelSplit(list, operator);
+      if (parts.length > 1) {
+        const kept = parts.map((part) => prune(part, names)).filter((part) => part.length);
+        const delimiter = list.find((token) => token.value === operator);
+        return kept.flatMap((part, i) => i ? [delimiter, ...part] : part);
+      }
+    }
+    return origin(list, names) ? [] : list;
+  };
+  const process = (input, names) => {
+    const kept = [];
+    for (let start = 0; start < input.length;) {
+      let end = start;
+      const control = ['for', 'if'].includes(input[start].value);
+      while (end < input.length) {
+        const token = input[end];
+        if (token.kind !== 'string' && ['(', '[', '{'].includes(token.value)) {
+          if (control && token.value === '{') break;
+          end = closeAt(input, end);
+        } else if (token.kind !== 'string' && token.value === ';') break;
+        end++;
+      }
+      if (end >= input.length) { kept.push(...input.slice(start)); break; }
+      if (control && input[end].value === '{') {
+        const close = closeAt(input, end), header = input.slice(start, end), innerNames = new Set(names);
+        if (header[0].value === 'for') {
+          const inAt = header.findIndex((token) => token.value === 'in');
+          if (origin(header.slice(inAt + 1), names)) for (const token of header.slice(1, inAt)) if (token.kind === 'word') innerNames.add(token.value);
+        }
+        const body = process(input.slice(end + 1, close), innerNames);
+        const rustAvailability = /^if (?:common :: )?have_rustc \( \)$/u.test(header.map((token) => token.raw).join(' '));
+        if (body.length) {
+          if (rustAvailability && !header.some((token) => token.value === '!')) kept.push(...body);
+          else kept.push(...header, input[end], ...body, input[close]);
+        }
+        start = close + 1; continue;
+      }
+      const statement = input.slice(start, end), semicolon = input[end];
+      if (statement[0]?.value === 'let') {
+        const equal = statement.findIndex((token) => token.value === '='), colon = statement.findIndex((token) => token.value === ':');
+        const bindings = statement.slice(1, colon >= 0 && colon < equal ? colon : equal).filter((token) => token.kind === 'word' && token.value !== 'mut').map((token) => token.value);
+        const rust = equal >= 0 && origin(statement.slice(equal + 1), names);
+        for (const name of bindings) { if (rust) names.add(name); else names.delete(name); }
+        if (!rust) {
+          if (statement.some((token) => token.kind === 'word' && /^(?:expect_err|build_and_run|dev_run|run_interpreted|assert_tiers_agree)$/u.test(token.value))) jetAssertions++;
+          kept.push(...statement, semicolon);
+        }
+      } else if (['assert', 'assert_eq', 'assert_ne'].includes(statement[0]?.value) && statement[1]?.value === '!' && statement[2]?.value === '(') {
+        const close = closeAt(statement, 2), args = topLevelSplit(statement.slice(3, close), ',');
+        const count = statement[0].value === 'assert' ? 1 : 2;
+        const rust = args.slice(0, count).some((arg) => origin(arg, names));
+        let predicate = args[0];
+        if (rust) {
+          retired.push({ line: statement[0].line, reason: 'generated-Rust assertion retires with the Rust emitter' });
+          predicate = count === 1 ? prune(predicate, names) : [];
+        }
+        if (predicate.length) {
+          jetAssertions++;
+          const comma = statement.find((token) => token.kind !== 'string' && token.value === ',');
+          kept.push(...statement.slice(0, 3), ...predicate,
+            ...args.slice(1).flatMap((arg) => arg.length ? [comma, ...arg] : []), ...statement.slice(close), semicolon);
+        }
+      } else if (!origin(statement, names)) {
+        const code = statement.filter((token) => token.kind !== 'string').map((token) => token.value).join(' ');
+        if (/\bexpect_err\b|\b(?:build_and_run|dev_run|run_interpreted|assert_tiers_agree)\b/u.test(code)) jetAssertions++;
+        kept.push(...statement, semicolon);
+      }
+      start = end + 1;
+    }
+    return kept;
+  };
+  const remaining = process(tokens, new Set());
+  return { tokens: remaining, retired, jetAssertions };
+}
+
 // Recursion already covers the inventory; module traversal additionally handles
 // #[path] includes outside the conventional tree and fails on unresolved modules.
 export function collectFunctions(root = ROOT, inventory = null) {
@@ -206,16 +329,19 @@ export function classify(fn, helpers = []) {
     || (name === 'scan' && literals.includes('git ls-files'))).map(([name]) => name);
   const suite = fn.file.replace(/^tests\//u, '').replace(/\.rs$/u, '').replace(/\//gu, '_');
   let disposition, target;
+  const retirement = retireRustAssertions(fn);
+  const rustOnly = surfaces.includes('rust') && !retirement.jetAssertions && !surfaces.includes('run') && !surfaces.includes('cli');
   const rustLaw = /selfhost_(?:parser|terminators)|suite_membership|ban_bare_panic|ban_jetpack_unwrap_expect/u.test(fn.file);
   const jetLaw = !rustLaw && /corpus_policy|diagnostic_(?:gate|pages)|(?:ledger|registry)_.*(?:policy|coverage)|case_law/u.test(`${fn.file} ${fn.name}`);
   if (jetLaw) { disposition = 'guard'; target = `tests/guards/${suite}.jet#${fn.name}`; }
   else if (surfaces.includes('compile') && /\.\s*(?:edit|safety|applicability)\b/u.test(code)) { disposition = 'CLI case'; target = `tests/cases/${suite}/${fn.name}.case`; }
   else if (surfaces.includes('run')) { disposition = 'golden'; target = `tests/run/${suite}/${fn.name}.jet`; }
   else if (surfaces.includes('cli')) { disposition = 'CLI case'; target = `tests/cases/${suite}/${fn.name}.case`; }
-  else if (surfaces.includes('rust') || rustLaw || (surfaces.includes('scan') && /\.rs["']/u.test(body) && !/\.jet["']|Docs\//u.test(body))) { disposition = 'retire-with-Rust'; target = 'none: Rust emitter, crate internals, Rust law or cargo partition'; }
-  else if (surfaces.includes('compile')) { disposition = 'UI'; target = `tests/ui/${suite}/${fn.name}${/\bcompile_with_path\b/u.test(code) ? '/' : '.jet'}`; }
+  else if (rustOnly || rustLaw || (surfaces.includes('scan') && /\.rs["']/u.test(body) && !/\.jet["']|Docs\//u.test(body))) { disposition = 'retire-with-Rust'; target = 'none: Rust emitter, crate internals, Rust law or cargo partition'; }
+  else if (surfaces.includes('compile')) { disposition = 'UI'; target = `tests/${/\.\s*lints\b/u.test(code) ? 'ui_lint' : 'ui'}/${suite}/${fn.name}${/\bcompile_with_path\b/u.test(code) ? '/' : '.jet'}`; }
   else if (surfaces.includes('scan') && !surfaces.includes('internal')) { disposition = 'guard'; target = `tests/guards/${suite}.jet#${fn.name}`; }
   else { disposition = 'retire-with-Rust'; target = 'none: Rust crate implementation or harness unit'; }
+  if (retirement.retired.length && disposition !== 'retire-with-Rust') disposition += '+retire-rust-asserts';
   return { ...fn, surfaces: surfaces.join(','), disposition, target };
 }
 
@@ -227,11 +353,11 @@ export function censusTsv(census) {
 }
 
 // A deliberately closed Rust expression subset. Unknown syntax, unknown calls,
-// unmodeled control flow and generated-Rust assertions are hand-port, NEVER
+// unmodeled control flow and remaining Rust API facts are hand-port, NEVER
 // assumed true. Parse the complete function before invoking or writing anything.
 class Parser {
   constructor(tokens) { this.tokens = tokens; this.i = 0; }
-  peek(value) { return this.tokens[this.i]?.value === value; }
+  peek(value) { return this.tokens[this.i]?.kind !== 'string' && this.tokens[this.i]?.value === value; }
   take() { return this.tokens[this.i++] ?? refuse('unexpected end of expression'); }
   need(value) { if (!this.peek(value)) refuse(`expected ${value}, got ${this.tokens[this.i]?.raw ?? 'end'}`); return this.take(); }
   group(open = '(', close = ')') {
@@ -339,27 +465,71 @@ function checkAst(node) {
   }
 }
 
-function invoke(binary, args, cwd, timeout) {
-  const run = spawnSync(binary, args, { cwd, encoding: 'utf8', timeout, maxBuffer: 16 * 1024 * 1024,
-    env: { ...process.env, NO_COLOR: '1', CLICOLOR: '0', JET_NO_UPDATE_CHECK: '1' } });
+function invoke(binary, args, cwd, timeout, stdin = '') {
+  const env = { ...process.env, NO_COLOR: '1', CLICOLOR: '0', TERM: 'dumb', JET_RECEIPT_BYPASS: '1', JET_REPL_HISTORY: 'off' };
+  delete env.JET_COMPILER_EXTENSION;
+  delete env.JET_SCHEMA_CACHE_DIR;
+  const run = spawnSync(binary, args, { cwd, encoding: 'utf8', timeout, input: stdin, maxBuffer: 16 * 1024 * 1024, env });
   if (run.error || run.signal || run.status === null || run.status === 101) refuse(`reference invocation failed: ${run.error?.message ?? run.signal ?? run.status}`);
   return { code: run.status, stdout: run.stdout, stderr: run.stderr };
 }
 
-function machineDiagnostics(run) {
+export function machineDiagnostics(run) {
   const result = [];
+  const object = (value, label) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) refuse(`${label} is not an object`);
+  };
+  const string = (row, key) => { if (typeof row[key] !== 'string') refuse(`machine record is missing string ${key}`); };
+  const report = (row) => {
+    object(row, 'report');
+    if (row.schema !== 'jet.report/v3') refuse(`unknown machine diagnostic schema: ${JSON.stringify(row.schema ?? row.contract ?? null)}`);
+    for (const key of ['moment', 'severity', 'code', 'what', 'why', 'fix']) string(row, key);
+    if (Object.hasOwn(row, 'fix_edits') && Object.hasOwn(row, 'no_fix_reason')) refuse('report contains both fix_edits and no_fix_reason');
+    if (Object.hasOwn(row, 'fix_edits')) {
+      if (!Array.isArray(row.fix_edits)) refuse('fix_edits is not an array');
+      for (const edit of row.fix_edits) {
+        object(edit, 'report edit'); object(edit.span, 'edit span');
+        for (const key of ['file', 'new_text', 'safety']) string(edit, key);
+        for (const key of ['start', 'end']) if (!Object.hasOwn(edit.span, key)) refuse(`edit span missing ${key}`);
+      }
+    }
+    if (Object.hasOwn(row, 'no_fix_reason')) {
+      object(row.no_fix_reason, 'no_fix_reason');
+      string(row.no_fix_reason, 'kind'); string(row.no_fix_reason, 'next');
+      if (!['behavior', 'design', 'ambiguous'].includes(row.no_fix_reason.kind)) refuse('unknown no-fix reason kind');
+      if (!row.no_fix_reason.next.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, '') || /\p{Cc}/u.test(row.no_fix_reason.next)) refuse('no-fix next action is not printable');
+    }
+    result.push(row);
+  };
+  if (!`${run.stdout}\n${run.stderr}`.trim()) refuse('reference emitted no machine record');
   for (const line of `${run.stdout}\n${run.stderr}`.split('\n').filter((line) => line.trim())) {
     let row; try { row = JSON.parse(line); } catch { refuse(`reference did not emit a JSON report: ${line.slice(0, 120)}`); }
-    if (row.schema === 'jet.status/v1' && row.ok === true) continue;
-    if (row.schema !== 'jet.report/v3' || typeof row.code !== 'string' || typeof row.what !== 'string' || typeof row.why !== 'string' || typeof row.fix !== 'string') refuse('unknown machine diagnostic schema');
-    result.push(row);
+    object(row, 'machine record');
+    if (row.schema === 'jet.status/v1') {
+      string(row, 'action');
+      if (!row.action || /\p{Cc}/u.test(row.action) || Object.hasOwn(row, 'status') || typeof row.ok !== 'boolean' || !Array.isArray(row.reports)) refuse('invalid jet.status/v1 record');
+      row.reports.forEach(report);
+    } else if (row.contract === 'jet.check/v1') {
+      if (row.status !== 'passed' || row.schema_version !== 1 || !Array.isArray(row.rows)) refuse('invalid jet.check/v1 success record');
+      object(row.provenance, 'check provenance');
+      if (!Number.isSafeInteger(row.provenance.diagnostics) || row.provenance.diagnostics < 0) refuse('invalid check diagnostics count');
+      for (const proof of row.rows) {
+        object(proof, 'check proof row');
+        for (const key of ['output', 'name', 'status', 'detail', 'diagnostic']) string(proof, key);
+        if (!['passed', 'not applicable'].includes(proof.status)) refuse(`unsuccessful check proof row: ${proof.status}`);
+      }
+      if (run.code !== 0) refuse('success check record with failing exit');
+      // Proof-row diagnostic labels describe unavailable projections, not errors.
+    } else report(row);
   }
   return result;
 }
 
 export function assertionPlan(fn) {
-  const statements = new Parser(fn.tokens ?? lexRust(fn.body)).statements();
+  const retirement = retireRustAssertions(fn);
+  const statements = new Parser(retirement.tokens).statements();
   for (const statement of statements) checkAst(statement);
+  Object.defineProperty(statements, 'retiredAssertions', { value: retirement.retired });
   return statements;
 }
 
@@ -451,8 +621,11 @@ async function evaluate(node, env, context) {
         return [observed.code, observed.stdout, observed.stderr];
       }
       if (node.name === 'tir_support::assert_tiers_agree') {
-        // A single reference run is NOT evidence of the original all-tier assertion.
-        refuse('all-tier helper requires a hand port and per-tier evidence');
+        if (args.length !== 3 || typeof args[1] !== 'string' || typeof args[2] !== 'string') refuse('unsupported all-tier helper arguments');
+        const observed = await context.observe(args[1], 'run');
+        context.observations.push(observed); context.assertions++;
+        if (observed.code !== 0 || observed.stdout !== args[2]) refuse('original all-tier stdout/exit assertion not satisfied');
+        return undefined;
       }
       refuse(`unmodeled call ${node.name}`); break;
     }
@@ -503,7 +676,7 @@ async function evaluate(node, env, context) {
 
 export async function checkOriginal(fn, reference, root = ROOT) {
   const plan = assertionPlan(fn), env = {};
-  const context = { fn, root, reference, observations: [], assertions: 0 };
+  const context = { fn, root, reference, observations: [], assertions: 0, retiredAssertions: plan.retiredAssertions };
   const nodes = [];
   const walk = (node) => {
     if (!node || typeof node !== 'object') return;
@@ -514,16 +687,43 @@ export async function checkOriginal(fn, reference, root = ROOT) {
     }
   };
   plan.forEach(walk);
-  const verbose = nodes.some((node) => node.type === 'field' && node.name === 'lints');
+  const lint = nodes.some((node) => node.type === 'field' && node.name === 'lints');
+  const stderrVariables = new Set(['stderr', '_stderr', 'err', '_err']);
+  const trackStreams = (statements) => {
+    for (const statement of statements) {
+      if (statement.statements) trackStreams(statement.statements);
+      if (!statement.names) continue;
+      if (statement.expr.type === 'call' && statement.expr.name === 'common::build_and_run') stderrVariables.add(statement.names.at(-1));
+      if (statement.expr.type === 'variable' && stderrVariables.has(statement.expr.name)) statement.names.forEach((name) => stderrVariables.add(name));
+    }
+  };
+  trackStreams(plan);
+  const containsRun = (node) => {
+    if (!node || typeof node !== 'object') return false;
+    if (node.type === 'call' && node.name === 'common::build_and_run') return true;
+    return Object.values(node).some((value) => Array.isArray(value) ? value.some(containsRun) : containsRun(value));
+  };
+  const readsStderr = nodes.some((node) => (node.type === 'variable' && stderrVariables.has(node.name)) ||
+    (node.type === 'call' && ['assert!', 'assert_eq!', 'assert_ne!'].includes(node.name) && node.args.slice(0, node.name === 'assert!' ? 1 : 2).some(containsRun)));
+  const agreement = fn.tokens.some((token) => token.kind === 'word' && /^(?:dev_run|run_interpreted|assert_tiers_agree)$/u.test(token.value));
+  const interpreterAgreement = fn.tokens.some((token) => token.kind === 'word' && /^(?:run_interpreted|assert_tiers_agree)$/u.test(token.value));
   const suite = fn.file.replace(/^tests\//u, '').replace(/\.rs$/u, '').replaceAll('/', '_');
   let ordinal = 0;
   context.observe = async (source, mode, project = null) => {
     const name = ++ordinal === 1 ? fn.name : `${fn.name}_${ordinal}`;
-    const category = mode === 'run' ? 'run' : verbose ? 'cases' : 'ui';
+    const category = mode === 'run' ? 'run' : lint ? 'ui_lint' : 'ui';
+    if (project) {
+      const original = project.entry, oldName = basename(original), oldStem = basename(original, '.jet');
+      const siblings = project.files.filter((file) => file.path !== original);
+      if (siblings.some((file) => file.content.includes(oldName) || file.content.includes(`"./${oldStem}"`) || file.content.includes(`'./${oldStem}'`))) refuse(`project sibling references renamed entry ${oldName}`);
+      const files = project.files.map((file) => ({ path: file.path === original ? 'run.jet' : relative(dirname(original), file.path), content: file.content }));
+      if (files.some((file) => file.path.startsWith('../'))) refuse('project input outside the entry directory');
+      project = { entry: 'run.jet', files };
+    }
     const entry = project?.entry ?? `${name}.jet`;
-    const path = category === 'cases' ? `tests/cases/${suite}/${name}.fixture/${entry}` : project ? `tests/${category}/${suite}/${name}/${entry}` : `tests/${category}/${suite}/${name}.jet`;
-    const observation = await reference(source, mode, { path, ...(project ? { project } : {}), verbose: mode === 'compile' && verbose });
-    return { ...observation, project };
+    const path = project ? `tests/${category}/${suite}/${name}/${entry}` : `tests/${category}/${suite}/${name}.jet`;
+    const observation = await reference(source, mode, { path, ...(project ? { project } : {}), lint: mode === 'compile' && lint, agreement: mode === 'run' && agreement, interpreterAgreement: mode === 'run' && interpreterAgreement });
+    return { ...observation, project, readsStderr };
   };
   const execute = async (statements, local) => {
     for (const statement of statements) {
@@ -564,26 +764,40 @@ export function makeReference(binary, root, scratch, timeout = 60000) {
       mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, input.content);
     }
     mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, source);
-    if (mode === 'run') return { source, mode, ...invoke(binary, ['run', shown], dir, timeout) };
-    const verbose = metadata.verbose === true;
-    const cwd = verbose ? dirname(file) : dir, argument = verbose ? basename(file) : shown;
-    const flags = verbose ? ['--verbose'] : [];
+    if (mode === 'run') {
+      const built = invoke(binary, ['build', shown, '--profile=debug'], dir, timeout);
+      if (built.code !== 0 || /Warning \[L0507\]/u.test(built.stderr)) refuse(`reference ref-tier build failed: exit ${built.code}: ${built.stderr}`);
+      const artifact = `${built.stdout}\n${built.stderr}`.match(/^built:\s*(.+)$/mu)?.[1];
+      if (!artifact) refuse('reference build did not report a built: artifact');
+      const run = invoke(resolve(dir, artifact), [], dir, timeout, metadata.stdin ?? '');
+      if (metadata.agreement) {
+        const tiers = [['default', ['run', shown]]];
+        if (metadata.interpreterAgreement) tiers.push(['interpreter', ['run', '--interpret', shown]]);
+        for (const [tier, args] of tiers) {
+          const other = invoke(binary, args, dir, timeout, metadata.stdin ?? '');
+          if (['code', 'stdout', 'stderr'].some((key) => other[key] !== run[key])) refuse(`I9 ref/${tier} exit/stdout/stderr disagreement`);
+        }
+      }
+      return { source, mode, ...run };
+    }
+    const lint = metadata.lint === true;
+    const cwd = dir, argument = shown;
+    const flags = lint ? ['--verbose'] : [];
     const machine = invoke(binary, ['check', '--json', ...flags, argument], cwd, timeout);
     const diagnostics = machineDiagnostics(machine);
     if (machine.code !== 0 && !diagnostics.some((row) => row.severity.toLowerCase() === 'error')) refuse('failed check without an error diagnostic');
-    const human = invoke(binary, ['check', '--no-color', ...flags, argument], cwd, timeout);
+    const human = invoke(binary, ['check', ...flags, argument], cwd, timeout);
     if (human.code !== machine.code) refuse('reference human/JSON exit disagreement');
-    const raw = renderedOnly(`${human.stdout}${human.stderr}`);
+    const raw = renderedOnly(human.stderr);
     const renderedCodes = [...raw.matchAll(/^(?:Error|Warning|Stop) \[([A-Z]\d+)\]/gmu)].map((match) => match[1]).sort();
     const machineCodes = diagnostics.map((row) => row.code).sort();
     if (!isDeepStrictEqual(renderedCodes, machineCodes)) refuse(`JSON/rendered diagnostic code disagreement: ${JSON.stringify({ machineCodes, renderedCodes })}`);
     const normalize = (text) => text.replaceAll(`${dir}/`, '').replaceAll(`${root}/`, '').split(/\r?\n/u)
       .filter((line, i, lines) => !(i === lines.length - 1 && line === '') && !line.includes('Blocking waiting for file lock on package cache'))
       .map((line) => `${line}\n`).join('');
-    const caseStream = (text) => text.replaceAll(cwd, '{work}').replaceAll(root, '{root}').replaceAll(scratch, '{scratch}');
-    return { source, mode, code: machine.code, diagnostics, verbose,
-      stdout: verbose ? caseStream(human.stdout) : human.stdout, stderr: verbose ? caseStream(human.stderr) : human.stderr,
-      rendered: diagnostics.length ? normalize(raw) : '(no errors)\n' };
+    if (lint && (machine.code !== 0 || !diagnostics.some((row) => row.severity.toLowerCase() === 'warning'))) refuse('lint fixture must compile and emit at least one lint');
+    return { source, mode, code: machine.code, diagnostics, lint, stdout: human.stdout, stderr: human.stderr,
+      rendered: lint || machine.code !== 0 ? normalize(raw) : '(no errors)\n' };
   };
   reference.createProject = () => new InputPath({ directory: mkdtempSync(join(scratch, 'input-project-')), files: new Map() });
   return reference;
@@ -593,37 +807,31 @@ export function makeReference(binary, root, scratch, timeout = 60000) {
 // partial cases when a later source/assertion fails. Existing cases are refused.
 export async function emitFunction(fn, options) {
   const root = options.root ?? ROOT;
+  if (classify(fn).disposition === 'retire-with-Rust') refuse('Rust-only function must be retired, not emitted');
   const checked = await checkOriginal(fn, options.reference, root);
   const suite = fn.file.replace(/^tests\//u, '').replace(/\.rs$/u, '').replaceAll('/', '_');
   const files = [];
   checked.observations.forEach((observation, i) => {
     const name = i === 0 ? fn.name : `${fn.name}_${i + 1}`;
-    const prefix = `tests/${observation.mode === 'run' ? 'run' : 'ui'}/${suite}/${name}`;
+    const prefix = `tests/${observation.mode === 'run' ? 'run' : observation.lint ? 'ui_lint' : 'ui'}/${suite}/${name}`;
     const path = `${prefix}.jet`;
-    if (observation.project && !observation.verbose) {
+    if (observation.project) {
       for (const input of observation.project.files) files.push([`${prefix}/${input.path}`, input.content]);
-      files.push([`${prefix}/stderr`, observation.rendered]);
-      return;
-    }
-    // Lint assertions require verbose output: preserve that invocation as a
-    // CLI case instead of adding a second meaning to the plain UI convention.
-    if (observation.mode === 'compile' && observation.verbose) {
-      const casePrefix = `tests/cases/${suite}/${name}`;
-      if (observation.project) for (const input of observation.project.files) files.push([`${casePrefix}.fixture/${input.path}`, input.content]);
-      else files.push([`${casePrefix}.fixture/${name}.jet`, observation.source]);
-      files.push([`${casePrefix}.stdout`, observation.stdout], [`${casePrefix}.stderr`, observation.stderr],
-        [`${casePrefix}.case`, `fixture: ${name}.fixture\nstep: jet check --verbose ${observation.project?.entry ?? `${name}.jet`}\nexit: ${observation.code}\nstdout: = ${name}.stdout\nstderr: = ${name}.stderr\n`]);
+      files.push([`${prefix}/${observation.lint ? 'warn' : 'stderr'}`, observation.rendered]);
       return;
     }
     files.push([path, observation.source]);
-    if (observation.mode === 'compile') files.push([`${prefix}.stderr`, observation.rendered]);
+    if (observation.mode === 'compile') files.push([`${prefix}.${observation.lint ? 'warn' : 'stderr'}`, observation.rendered]);
     else {
       if (observation.code !== 0 && ![1, 70].includes(observation.code)) refuse(`golden cannot preserve exit ${observation.code}`);
-      if (observation.code === 0) { files.push([`${prefix}.out`, observation.stdout], [`${prefix}.err.out`, observation.stderr]); }
+      if (observation.code === 0) {
+        files.push([`${prefix}.out`, observation.stdout]);
+        if (observation.stderr || observation.readsStderr) files.push([`${prefix}.stderr.out`, observation.stderr]);
+      }
       else {
         // Expected-failure goldens don't assert stdout or exact exit; retain a
         // .case sidecar that does, so no assertion is weakened on conversion.
-        files.push([`${prefix}.err`, observation.stderr], [`${prefix}.out`, observation.stdout], [`${prefix}.case`, `step: built\nexit: ${observation.code}\nstdout: = ${name}.out\nstderr: = ${name}.err\n`]);
+        files.push([`${prefix}.err.out`, observation.stderr], [`${prefix}.stdout`, observation.stdout], [`${prefix}.case`, `step: built\nexit: ${observation.code}\nstdout: = ${name}.stdout\nstderr: = ${name}.err.out\n`]);
       }
     }
   });
@@ -631,7 +839,9 @@ export async function emitFunction(fn, options) {
     for (const [path] of files) if (existsSync(join(root, path))) refuse(`case already exists: ${path}`);
     for (const [path, content] of files) { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), content, { flag: 'wx' }); }
   }
-  return { status: 'CONVERTED', function: `${fn.file}::${fn.name}`, assertions: checked.assertions, sources: checked.observations.length, paths: files.map(([path]) => path) };
+  return { status: 'CONVERTED', function: `${fn.file}::${fn.name}`, assertions: checked.assertions,
+    retiredAssertions: checked.retiredAssertions.length, retiredAssertionRows: checked.retiredAssertions,
+    sources: checked.observations.length, paths: files.map(([path]) => path) };
 }
 
 export async function main(argv) {
@@ -668,6 +878,7 @@ export async function main(argv) {
     for (const fn of selected) {
       const classified = classify(fn, census.helpers);
       let result;
+      const retiredAssertions = retireRustAssertions(fn).retired.length;
       if (classified.disposition === 'retire-with-Rust') result = { status: 'RETIRED', function: `${fn.file}::${fn.name}`, reason: classified.target };
       else {
         try { result = await emitFunction(fn, { ...options, reference }); }
@@ -678,11 +889,13 @@ export async function main(argv) {
         }
       }
       result.disposition = classified.disposition; result.target = classified.target;
+      result.retiredAssertions = retiredAssertions;
       results.push(result); console.log(JSON.stringify(result));
     }
   } finally { rmSync(scratch, { recursive: true, force: true }); }
   const summary = { ...counts, selected: selected.length, converted: results.filter((row) => row.status === 'CONVERTED').length,
-    handPort: results.filter((row) => row.status === 'HAND-PORT').length, retired: results.filter((row) => row.status === 'RETIRED').length };
+    handPort: results.filter((row) => row.status === 'HAND-PORT').length, retired: results.filter((row) => row.status === 'RETIRED').length,
+    retiredAssertions: results.reduce((sum, row) => sum + row.retiredAssertions, 0) };
   if (options.report) writeFileSync(options.report, JSON.stringify({ summary, results }, null, 2) + '\n');
   console.log(JSON.stringify(summary));
   return name === '*' ? 0 : results.some((row) => row.status === 'HAND-PORT') ? 2 : 0;
