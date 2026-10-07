@@ -8,7 +8,7 @@
 // Option or Result result comes back as the adapter's tag word plus one out
 // slot. The lowering builds its own List, Option or Result box from them.
 use jet_foundation.[
-    MIRCallArg, MIRInstruction, MIRPreludeCallID, MIRProgram, MIRType, MIRValueID,
+    MIRCallArg, MIRInstruction, MIRPreludeCall, MIRPreludeCallID, MIRProgram, MIRType, MIRValueID,
     mir_symbol_name, mir_type_display_name,
 ]
 
@@ -97,10 +97,32 @@ fn lower_route_drop(carrier: LowerRouteCarrier) -> LIRDrop Never! {
     }
 }
 
+// TLS is a named transport gap until the owner selects its implementation.
+// This predicate runs before route lookup, including missing TLS-client
+// adapters. Pure configuration/PEM rows remain data operations. Shared HTTP/
+// SMTP policy calls jet_rt_http_tls_refuse only in the chosen TLS branch.
+// Cli/Host reports this lowering finding through registered E2104.
+fn lower_tls_transport_route(row: MIRPreludeCall) -> Bool Never! {
+    symbol :: lower_route_symbol(row)
+    (row.module_name == "core.net.tls" && (row.member == "client" || row.member == "handshake"))
+        || symbol.starts_with("jet_net_tls_")
+        || symbol.starts_with("jet_tls_read")
+        || symbol.starts_with("jet_tls_write")
+        || symbol.starts_with("jet_tls_close")
+}
+
+fn lower_tls_transport_message() -> String Never! {
+    "TLS transport is not available in native builds yet (pending decision); use plain TCP/HTTP"
+}
+
 // Explicit MIR Write arguments must match an adapter lending the caller's
 // handle mutably. The pointer stays in the caller's place; no copy or write-back.
 fn lower_route_values(p: MIRProgram, m: &LowerModule, f: &LowerFunction, call: MIRPreludeCallID, args: [MIRCallArg], what: String) -> [MIRValueID]? {
     row :: lower_prelude_row(p, call) ?? return None
+    if lower_tls_transport_route(row) {
+        lower_fail(&m, &f, lower_tls_transport_message())
+        return None
+    }
     route :: lower_runtime_route(lower_route_symbol(row)) ?? {
         lower_fail(&m, &f, "{what} {row.module_name}.{row.member} has no runtime C-ABI route ({mir_symbol_name(row.symbol)})")
         return None
@@ -126,6 +148,7 @@ fn lower_route_values(p: MIRProgram, m: &LowerModule, f: &LowerFunction, call: M
 // for the call and dropped after it.
 fn lower_route_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRValueID], what: String) Never! {
     row :: lower_prelude_row(p, call) ?? return lower_fail(&m, &f, "{what} names missing Prelude call {call.value}")
+    if lower_tls_transport_route(row) -> return lower_fail(&m, &f, lower_tls_transport_message())
     if lower_lazy_route(p, c, &m, &f, instruction, row, args) -> return
     name :: "{row.module_name}.{row.member}"
     route :: lower_runtime_route(lower_route_symbol(row)) ?? return lower_fail(&m, &f, "{what} {name} has no runtime C-ABI route ({mir_symbol_name(row.symbol)})")
