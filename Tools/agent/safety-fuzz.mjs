@@ -40,7 +40,9 @@
 // run-differential, run-sanitized and run-lint-corpus verdicts of the case.
 // The gate (exit 1) fails on model-differs, rust-error, native-diverges, a
 // sanitizer report or sanitized-diverges, lint findings and lint-crash. A
-// failing case reproduces from its seed; the .jet is the repro.
+// failing case reproduces from its seed; the .jet is the repro. Any harness
+// failure (a model error, a tool that did not run) exits 2 and writes no
+// receipt, so it can never read as a gate verdict.
 //
 // usage: [JET=<jet binary>] [JET_RUNTIME_PACK=... | JET_RUNTIME_C_LIB=...] [JET_LOWER_SANITIZE=1]
 //        node Tools/agent/safety-fuzz.mjs <outdir> [--seed N] [--count K]
@@ -59,6 +61,9 @@ const I64_MAX = (1n << 63n) - 1n;
 const I64_MIN = -(1n << 63n);
 const STEP_LIMIT = 20000;
 const OUTPUT_LIMIT = 300;
+// `s += s` in a loop doubles a String; the model discards such programs long
+// before the evaluator's own string limit.
+const STRING_LIMIT = 4096;
 const ATTEMPTS = 200;
 
 class Reject extends Error {}
@@ -533,6 +538,7 @@ class Env {
 
 function checked(v) {
   if (typeof v === "bigint" && (v > I64_MAX || v < I64_MIN)) throw new Reject("overflow");
+  if (typeof v === "string" && v.length > STRING_LIMIT) throw new Reject("string size");
   return v;
 }
 function floorDiv(a, b) {
@@ -589,7 +595,7 @@ class Machine {
     switch (e.k) {
       case "int": case "bool": case "str": return e.v;
       case "copy": return env.get(e.name);
-      case "strfmt": return e.parts.map((part) => (typeof part === "string" ? part : this.show(this.eval(part, env)))).join("");
+      case "strfmt": return checked(e.parts.map((part) => (typeof part === "string" ? part : this.show(this.eval(part, env)))).join(""));
       case "var": return env.get(e.name);
       case "neg": return checked(-this.eval(e.e, env));
       case "not": return !this.eval(e.e, env);
@@ -743,6 +749,10 @@ export function generateCase(seed, index) {
 // ---------------------------------------------------------------- driver
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.on("uncaughtException", (error) => {
+    console.error(error?.stack ?? String(error));
+    process.exit(2);
+  });
   const args = process.argv.slice(2);
   const outDir = args.length ? resolve(args.shift()) : null;
   if (!outDir) {
