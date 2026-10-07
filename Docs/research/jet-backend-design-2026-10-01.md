@@ -364,6 +364,28 @@ must not. Canonical Core identities override a source layout only when the gener
 name rules replace that exact identity; source-owned enums and records retain their
 native constructors and matches. Tuple adapters write zeroed word slots, and lowering
 copies each item into the tuple's naturally aligned native field offset.
+
+Platform process/file cutover keeps one Core source nominal and policy on all
+targets. `Core/CAbiPlatformSeeds.rs` is only a mechanical Windows/macOS Rust
+seed behind the Linux leaf ABI: FD72, Child72, launch216 plus ExecCandidates32
+and borrowed WindowsLaunchFacts136. Existing Windows AppContainer/ACL,
+JobObjects and ConPTY helpers remain under `jet_platform_seeds`; macOS takes
+source-prepared sandbox-exec argv and uses the pinned Apple Libc exec retry
+table over raw execve, with no child allocation or environment mutation.
+Readers have no native buffer: `jet_fd_read_raw` performs one read attempt;
+source owns the reader buffer and EINTR retry. Portable open/rename bits are
+translated at this leaf seam. Error32 distinguishes POSIX/Win32 OS codes from
+HRESULT/custom causes; only domain1/2 with no cause publish an OS code.
+These seeds die at cutover when their target gets a Jet OS backend.
+
+`Compiler/JetRuntime/Tests/PlatformSeeds` type-checks the actual seed bodies and
+existing target helpers using `cargo check --target x86_64-pc-windows-gnu` and
+`--target x86_64-apple-darwin`. Run through `Tools/agent/jet-env`; provide
+`JET_PLATFORM_HOST_CARRIERS` only for a split worktree whose generated
+`Core/CAbiHost.rs` is not yet composed. Its host `cargo test` exercises portable
+flags, the Apple errno table, carrier offsets, and the public OS-code/cause
+projection. Cross-target checking does not exercise Windows/macOS execution.
+
 A MIR-defined Core record (the general `Err`, `IOError`, `IOContext`; schemas in
 `Lower/Records.jet`) keeps its native layout and crosses a route as its runtime
 type's handle: a generated `record.out` helper builds it through
