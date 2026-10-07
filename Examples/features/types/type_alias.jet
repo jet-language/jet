@@ -8,7 +8,27 @@ alias Parsed<T> :: T AppError!
 
 fn parse_count(raw: String) -> Parsed<Int> { if raw == "" -> Err(AppError.Empty) else -> Ok(42) }
 
+struct Point {
+    x: Int
+}
+
+struct Box<T> {
+    value: T
+}
+
+alias P<T> :: Point
+
+alias Wrapped<T> :: Box<T>
+
+alias Chained<T> :: Wrapped<T>
+
 fn run() {
     n :: parse_count("7") ?? 0
     print(n)
+    p :: P<Int>{x: 3}
+    print(p.x)  // aliases of non-generic targets discard the alias's arguments
+    boxed :: Wrapped<Int>{value: 7}
+    print(boxed.value)
+    chained :: Chained<String>{value: "jet"}
+    print(chained.value)
 }

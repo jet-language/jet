@@ -82,7 +82,7 @@ const COMMAND_FLAGS = {
     log: by('text'),
   }},
   decision: { verbs: {
-    list: ['open', 'card'],
+    list: ['open', 'card', 'drafts'],
     show: [],
     scaffold: ['id', 'out'],
     add: payload('id', 'card', 'title', 'situation', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec',
@@ -188,7 +188,7 @@ const FLAG_VALUE = {
   refs: 'a,b', workOrder: 'N', needsAcceptance: 'true|false', log: '"…"', handoff: '"…"',
   expectRev: 'N', name: 'X', dir: 'PATH', port: 'N', days: 'N', window: 'N', goal: '"…"',
   status: 'S', open: null, all: null, untagged: null, force: null, archive: null,
-  unarchive: null, archived: null, draft: null, ready: null, comment: '"…"', quote: '"…"',
+  unarchive: null, archived: null, draft: null, drafts: null, ready: null, comment: '"…"', quote: '"…"',
   outcome: 'K', agent: 'A', noClaim: null, limit: 'N', burndown: null, parallel: null,
   readyAcrossEpochs: null, docs: null, docsRoot: 'DIR', scratch: null, note: '"…"',
   manifest: 'FILE', dryRun: null, commit: 'OID', hardeningDedupKey: 'KEY', hardeningSeam: 'SEAM',
@@ -658,11 +658,11 @@ function cmdDecision(store, { pos, flags }) {
   switch (verb) {
     case 'list': {
       const s = store.load();
-      let ds = s.decisions;
+      let ds = s.decisions.filter(d => flags.drafts || !d.draft);
       if (flags.open) ds = ds.filter(d => d.status !== 'ratified');
       if (flags.card) { const c = db.findCard(s, flags.card); ds = ds.filter(d => c && d.cardId === c.id); }
       if (flags.json) return out(flags, null, ds);
-      for (const d of ds) console.log(`${String(d.id || '(no id)').padEnd(16)} ${(d.status || 'open').padEnd(9)} ${String(d.title || '(untitled)').slice(0, 60)}${d.outcome ? ` → ${d.outcome}` : ''}`);
+      for (const d of ds) console.log(`${String(d.id || '(no id)').padEnd(16)} ${(d.draft ? 'draft' : d.status || 'open').padEnd(9)} ${String(d.title || '(untitled)').slice(0, 60)}${d.outcome ? ` → ${d.outcome}` : ''}`);
       if (!ds.length) console.log('(no decisions match)');
       return;
     }

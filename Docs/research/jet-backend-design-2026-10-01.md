@@ -51,6 +51,30 @@ read-only data; each table's ID equals its index.
   `Branch`, `Return`, `Unreachable`.
 - Calls name a signature by ID, so the generator never re-derives an ABI from
   Jet types.
+- `InlineAsm(dst?, args, regs, result, code)` is effectful, including when
+  it has no result. The strict x86-64 assembler recovers audited asm bodies
+  from their checked UTF-8 source spans. Inputs bind simultaneously to
+  `rdi,rsi,rdx,rcx,r8,r9,r10`; selection snapshots all inputs with push/pop
+  before emitting the template bytes. Allocation treats asm as a call.
+  Supported templates contain word-register push/pop, mov (register,
+  immediate, qword memory), movzx byte loads, syscall, indirect register
+  calls, lock cmpxchg, xchg, and pause. Memory addresses admit a base register
+  or named input with an optional signed-32-bit `+ displacement`.
+  Callee-saved/frame registers, unsupported syntax, unbalanced stacks,
+  misaligned calls, missing/duplicate return anchors, and named input reads
+  after their bound register was written are registered native refusals:
+  `LIRLoweringIssue` with the `inline asm:` prefix and the offending line.
+  No bytes from a refused template enter the LIR. The OS-template witnesses
+  in `Tests/Fixtures/InlineAsm.jet` use the actual `OS/Linux.jet` source.
+  The one read-only frame-register form, `mov r64, rsp`, may expose storage
+  owned by balanced template pushes; it is refused with an empty template stack.
+  Byte stores use explicit low-byte register names (including sil/dil and
+  r8b-r11b), with a REX prefix. Exact `Int` inputs/results must have matching
+  high two bits; non-inline carriers stop through `jet_rt_panic_overflow`
+  before any template memory access. Fixed-width I64/U64 leaves bypass this
+  carrier check. Direct raw-word `#Import(c)` calls name the imported symbol
+  in LIR; non-word carriers, callbacks, handles, and link-unit bridges remain
+  refused rather than acquiring an implicit adapter.
 
 `LIR/Lint.jet` checks a module before any generator reads it: table IDs,
 valid layouts, signature agreement of entry parameters, calls, returns and

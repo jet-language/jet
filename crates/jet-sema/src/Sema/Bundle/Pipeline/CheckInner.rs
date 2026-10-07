@@ -1,4 +1,5 @@
 use super::*;
+use super::super::Validation::attach_module_origin;
 use std::sync::Arc;
 
 pub(super) fn check_bundle_opts_for_output_inner(
@@ -289,6 +290,12 @@ pub(super) fn check_bundle_opts_for_output_inner(
     // tooling projections read. The final population pass remains below for
     // aliases and references discovered during registration.
     populate_name_ledger(bundle, &states, &mut name_ledger);
+    let alias_cycles = super::super::Validation::validate_type_alias_cycles(bundle, &name_ledger);
+    if !alias_cycles.is_empty() {
+        diags.extend(alias_cycles);
+        bundle.name_ledger = name_ledger;
+        return (diags, super::super::Effects::SemIndexEffectFacts::default());
+    }
     bundle.name_ledger = std::mem::take(&mut name_ledger);
     diags.extend(resolve_unit_dimensions(bundle));
     name_ledger = std::mem::take(&mut bundle.name_ledger);
@@ -2354,30 +2361,6 @@ fn drop_core_source_lints(
                 .into_iter()
                 .filter(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Lint),
         );
-    }
-}
-
-/// Reports pushed while one module is processed belong to that module. A
-/// non-entry module's located reports carry it as their origin, so they render
-/// against its own file instead of at a byte offset of the entry file.
-fn attach_module_origin(
-    module: &crate::AST::LoadedModule,
-    is_entry: bool,
-    diags: &mut [Diagnostic],
-) {
-    let unowned = |diagnostic: &Diagnostic| diagnostic.origin().is_none() && diagnostic.span.is_some();
-    if is_entry || !diags.iter().any(|diagnostic| unowned(diagnostic)) {
-        return;
-    }
-    let origin = std::sync::Arc::new(jet_foundation::Diagnostics::DiagnosticOrigin::new(
-        module.display.clone(),
-        module.path.to_string_lossy().into_owned(),
-        module.source.clone(),
-    ));
-    for diagnostic in diags {
-        if unowned(&*diagnostic) {
-            diagnostic.set_origin(origin.clone());
-        }
     }
 }
 

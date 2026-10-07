@@ -1,0 +1,309 @@
+// Native witnesses consume the exact OS/Linux.jet templates supplied by the
+// fixture assembler. No copied template can hide an OS-layer regression.
+// expect-stdout inline-asm-memory: "ok\n682863\n111\n"
+// expect-stdout inline-asm-call: "42\n"
+// expect-stdout inline-asm-call-two: "42\n"
+// expect-stdout inline-asm-fixed: "ok\nok\n682863\n42\n42\n111\n0\n"
+// expect-stdout inline-asm-int-input: ""
+// expect-exit inline-asm-int-input: 70
+// expect-stderr inline-asm-int-input: "error[E3010]: arithmetic overflow\n"
+// expect-stdout inline-asm-import: ""
+// expect-exit inline-asm-import: 70
+// expect-stderr inline-asm-import: "error[E3010]: arithmetic overflow\n"
+// expect-stdout inline-asm-forms: "73\n11\n19\n123\n19\n"
+// expect-stdout inline-asm-int-result: ""
+// expect-exit inline-asm-int-result: 70
+// expect-stderr inline-asm-int-result: "error[E3010]: arithmetic overflow\n"
+use jet_foundation.[MIRForeignID, MIRForeignABI, MIRForeignLanguage]
+
+fn fx_asm_type(name: String) -> MIRType Never! {
+    if name.ends_with("_i64") || name == "os_load_u8" || name == "os_store_u8" -> return mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 64})
+    fx_int()
+}
+
+fn fx_asm_leaf(name: String, names: [String], returns: Bool) -> MIRFunction Never! {
+    b := fx_builder()
+    loop param in names -> fx_param(&b, param, fx_asm_type(name), mir_copy_ownership()).drop("asm parameter")
+    leaf := fx_function(name, b, if returns -> fx_asm_type(name) else -> fx_unit())
+    leaf.kind = MIRFunctionKind.Foreign
+    leaf.foreign_language = Val("asm")
+    leaf.is_unsafe = true
+    leaf.span = fx_asm_os_span(name)
+    leaf
+}
+
+fn fx_asm_program(functions: [MIRFunction]) -> MIRProgram Never! {
+    p := fx_program(functions, [MIRTypeDef]{})
+    p.source_files = [MIRSourceFile]{MIRSourceFile{id: fx_source_file(), path: "OS/Linux.jet", source: fx_asm_os_source()}}
+    loop function in functions {
+        if function.name != "os_load_word" -> next
+        &p.foreign.push(MIRForeign{
+            id: MIRForeignID{value: 77}, module_id: function.module_id,
+            key: function.key, module_name: function.module_name, name: function.name,
+            span: function.span, symbol: function.name, path: "", params: function.params,
+            raw_scalar_abi: true, bridge_eligible: false, return_type: Val(function.return_type),
+            foreign_abi: MIRForeignABI.C, foreign_language: MIRForeignLanguage.Assembly,
+            target_applicability: function.target_applicability, effects: function.effects,
+            callback_transport: None, callback_plan_digest: None, callback_identity: None,
+            link: None, callback: None, handle: None, close_function: None, close_foreign: None, undo_function: None,
+        })
+    }
+    p
+}
+
+fn fx_asm_call(b: &FxBuilder, name: String, args: [MIRValueID], returns: Bool) -> MIRValueID Never! {
+    operands :: loop arg in args -> fx_arg(arg, MIRAccess.Read)
+    callee :: if name == "os_load_word" -> MIRCallee.Foreign{id: MIRForeignID{value: 77}} else -> MIRCallee.User{function: mir_function_id(name)}
+    fx_copy(&b, if returns -> fx_asm_type(name) else -> fx_unit(), MIROperation.Call{callee: callee, args: operands, type_args: [MIRType]{}})
+}
+
+fn fx_inline_asm_memory() -> MIRProgram Never! {
+    b := fx_builder()
+    zero :: fx_int_const(&b, 0)
+    one :: fx_int_const(&b, 1)
+    three :: fx_int_const(&b, 3)
+    page :: fx_int_const(&b, 4096)
+    // mmap anonymous writable memory; actual OS syscall takes seven operands,
+    // including the seventh System V argument arriving on the caller's stack.
+    address :: fx_asm_call(&b, "os_syscall", [MIRValueID]{fx_int_const(&b, 9), zero, page, three, fx_int_const(&b, 34), fx_int_const(&b, -1), zero}, true)
+    fx_asm_call(&b, "os_store_word", [MIRValueID]{address, fx_int_const(&b, 682863)}, false).drop("void")
+    loaded :: fx_asm_call(&b, "os_load_word", [MIRValueID]{address}, true)
+    byte :: fx_asm_call(&b, "os_load_byte", [MIRValueID]{address}, true)
+    fx_asm_call(&b, "os_syscall", [MIRValueID]{one, one, address, three, zero, zero, zero}, true).drop("write result")
+    fx_print(&b, loaded)
+    fx_print(&b, byte)
+    fx_asm_call(&b, "os_syscall", [MIRValueID]{fx_int_const(&b, 11), address, page, zero, zero, zero, zero}, true).drop("munmap result")
+    fx_block(&b, U64{0}, MIRTerminator.Return{value: None})
+    fx_asm_program([MIRFunction]{fx_function("run", b, fx_unit()),
+        fx_asm_leaf("os_syscall", [String]{"number", "a1", "a2", "a3", "a4", "a5", "a6"}, true),
+        fx_asm_leaf("os_store_word", [String]{"address", "value"}, false),
+        fx_asm_leaf("os_load_word", [String]{"address"}, true),
+        fx_asm_leaf("os_load_byte", [String]{"address"}, true)})
+}
+
+// Lower the real call-address leaf as a callable, then attach hand LIR that
+// passes an actual native FunctionAddress. Both arities run native code, not
+// an external mock or an address from a host compiler.
+fn fx_inline_asm_call(two: Bool) -> LIRModule Never! {
+    name :: if two -> "os_call_address_two" else -> "os_call_address"
+    params :: if two -> [String]{"address", "first", "second"} else -> [String]{"address", "argument"}
+    lowered :: lir_lower_callable(fx_asm_program([MIRFunction]{fx_asm_leaf(name, params, true)}), mir_function_id(name))
+    if lowered.issues.len() > 0 -> panic("assembly callable refused: {lowered.issues}")
+    p := lowered.lir
+    callback_id :: LIRFunctionID{value: p.functions.len()}
+    callback_sig :: LIRSignatureID{value: p.signatures.len()}
+    callback_layouts :: if two -> [LIRLayout]{lir_layout_word(), lir_layout_word()} else -> [LIRLayout]{lir_layout_word()}
+    &p.signatures.push(LIRSignature{id: callback_sig, convention: LIRCallConv.SystemV, params: callback_layouts, result: Val(lir_layout_word())})
+    callback := lir_builder(callback_id, "asm-callback", callback_sig)
+    a :: lir_builder_word(&callback)
+    args := [LIRValueID]{a}
+    result := a
+    if two {
+        other :: lir_builder_word(&callback)
+        &args.push(other)
+        result = lir_builder_word(&callback)
+        lir_builder_push(&callback, LIRInst.Binary{dst: result, op: LIRBinaryOp.Add, left: a, right: other})
+    }
+    lir_builder_seal(&callback, LIRBlockID{value: 0}, args, LIRTerminator.Return{value: Val(result)})
+    &p.functions.push(lir_builder_finish(callback))
+    print_sig :: LIRSignatureID{value: p.signatures.len()}
+    &p.signatures.push(LIRSignature{id: print_sig, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_pointer())})
+    line_sig :: LIRSignatureID{value: p.signatures.len()}
+    &p.signatures.push(LIRSignature{id: line_sig, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_pointer(), lir_layout_word()}, result: None})
+    entry_sig :: LIRSignatureID{value: p.signatures.len()}
+    &p.signatures.push(LIRSignature{id: entry_sig, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: None})
+    entry := lir_builder(LIRFunctionID{value: p.functions.len()}, "run", entry_sig)
+    address :: lir_builder_value(&entry, lir_layout_pointer(), LIRDrop.Trivial, None)
+    // os_call_address takes an Int word; its address has the same bits.
+    word :: lir_builder_word(&entry)
+    lir_builder_push(&entry, LIRInst.FunctionAddress{dst: address, function: callback_id})
+    // The load/store round trip converts layouts without an invalid Copy.
+    slot :: lir_builder_value(&entry, lir_layout_pointer(), LIRDrop.Trivial, None)
+    lir_builder_push(&entry, LIRInst.StackSlot{dst: slot, size: 8, align: 8})
+    lir_builder_push(&entry, LIRInst.Store{base: slot, offset: 0, value: address})
+    lir_builder_push(&entry, LIRInst.Load{dst: word, base: slot, offset: 0})
+    first :: lir_builder_word(&entry)
+    lir_builder_push(&entry, LIRInst.Const{dst: first, value: if two -> 19 else -> 42})
+    call_args := [LIRValueID]{word, first}
+    if two {
+        second :: lir_builder_word(&entry)
+        lir_builder_push(&entry, LIRInst.Const{dst: second, value: 23})
+        &call_args.push(second)
+    }
+    output :: lir_builder_word(&entry)
+    lir_builder_push(&entry, LIRInst.Call{dst: Val(output), signature: p.functions[0].signature, callee: LIRCallee.Function{id: p.functions[0].id}, args: call_args})
+    text :: lir_builder_value(&entry, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_string_drop"}, None)
+    flush :: lir_builder_word(&entry)
+    lir_builder_push(&entry, LIRInst.Const{dst: flush, value: 0})
+    lir_builder_push(&entry, LIRInst.Call{dst: Val(text), signature: print_sig, callee: LIRCallee.Runtime{symbol: "jet_rt_int_to_string"}, args: [LIRValueID]{output}})
+    lir_builder_push(&entry, LIRInst.Call{dst: None, signature: line_sig, callee: LIRCallee.Runtime{symbol: "jet_term_write_stdout_line"}, args: [LIRValueID]{text, flush}})
+    lir_builder_push(&entry, LIRInst.Drop{value: text})
+    lir_builder_seal(&entry, LIRBlockID{value: 0}, [LIRValueID]{}, LIRTerminator.Return{value: None})
+    &p.functions.push(lir_builder_finish(entry))
+    p
+}
+
+fn fx_inline_asm_refusals() -> Bool Never! {
+    templates :: [String]{"frobnicate rax ; -> return", "mov rdi, 1\nmov rax, {{value}} ; -> return", "ret", "push rax", "pop rax", "push rax\ncall r11\npop rax", "mov rbx, rax", "mov rax, xmm0 ; -> return", "mov rax, 9223372036854775808 ; -> return", "mov rax, rsp", "mov rax, {{missing}} ; -> return", "mov rax, 1 ; -> return\nmov rax, 2 ; -> return"}
+    loop template in templates {
+        result :: x64_assemble_template(template, [String]{"value"}, template.contains("return"))
+        if result.error == None || result.code.len() != 0 -> return false
+    }
+    valid :: x64_assemble_template("mov rax, 1 ; -> return", [String]{}, true)
+    expected :: [U8]{U8{0x48}, U8{0xc7}, U8{0xc0}, U8{1}, U8{0}, U8{0}, U8{0}}
+    if valid.error != None || valid.code != expected -> return false
+    missing :: x64_assemble_template("mov rax, 1", [String]{}, true)
+    extra :: x64_assemble_template("mov rax, 1 ; -> return", [String]{}, false)
+    many :: x64_assemble_template("pause", [String]{"a", "b", "c", "d", "e", "f", "g", "h"}, false)
+    if missing.error == None || extra.error == None || many.error == None -> return false
+    // The same refusal travels through source extraction + the lower hook.
+    leaf := fx_asm_leaf("os_load_word", [String]{"address"}, true)
+    p := fx_asm_program([MIRFunction]{leaf})
+    source :: "fn bad() {{ \"\"\"frobnicate rax ; -> return\"\"\" }}"
+    leaf.span = Span{start: 0, end: source.bytes().len()}
+    p.functions = [MIRFunction]{leaf}
+    p.source_files = [MIRSourceFile]{MIRSourceFile{id: fx_source_file(), path: "bad.jet", source: source}}
+    refused :: lir_lower_callable(p, leaf.id)
+    refused.issues.len() > 0 && refused.entry == None && refused.issues[0].message.starts_with("inline asm:")
+}
+
+fn fx_asm_i64_const(b: &FxBuilder, value: Int) -> MIRValueID Never! {
+    fx_copy(&b, fx_asm_type("os_syscall_i64"), MIROperation.Constant{value: MIRConstant.Int{value: value, width: None, spelling: None}})
+}
+
+fn fx_inline_asm_fixed() -> MIRProgram Never! {
+    b := fx_builder()
+    zero :: fx_asm_i64_const(&b, 0)
+    one :: fx_asm_i64_const(&b, 1)
+    three :: fx_asm_i64_const(&b, 3)
+    page :: fx_asm_i64_const(&b, 4096)
+    number :: fx_asm_i64_const(&b, 9)
+    flags :: fx_asm_i64_const(&b, 34)
+    fd :: fx_asm_i64_const(&b, -1)
+    address :: fx_asm_call(&b, "os_syscall_i64", [MIRValueID]{number, zero, page, three, flags, fd, zero}, true)
+    word :: fx_asm_i64_const(&b, 682863)
+    fx_asm_call(&b, "os_store_i64", [MIRValueID]{address, word}, false).drop("void")
+    fx_asm_call(&b, "os_syscall_i64", [MIRValueID]{one, one, address, three, zero, zero, zero}, true).drop("write result")
+    fx_asm_call(&b, "os_write_word_i64", [MIRValueID]{one, word, three}, true).drop("write result")
+    desired :: fx_asm_i64_const(&b, 42)
+    old :: fx_asm_call(&b, "os_cas_i64", [MIRValueID]{address, word, desired}, true)
+    fx_print(&b, old)
+    failed :: fx_asm_call(&b, "os_cas_i64", [MIRValueID]{address, word, zero}, true)
+    fx_print(&b, failed)
+    loaded :: fx_asm_call(&b, "os_load_i64", [MIRValueID]{address}, true)
+    fx_print(&b, loaded)
+    byte_value :: fx_asm_i64_const(&b, 111)
+    fx_asm_call(&b, "os_store_u8", [MIRValueID]{address, byte_value}, false).drop("void")
+    byte :: fx_asm_call(&b, "os_load_u8", [MIRValueID]{address}, true)
+    fx_print(&b, byte)
+    fx_asm_call(&b, "os_spin_pause", [MIRValueID]{}, false).drop("void")
+    sigprocmask :: fx_asm_i64_const(&b, 14)
+    mask :: fx_asm_i64_const(&b, 32)
+    size :: fx_asm_i64_const(&b, 8)
+    status :: fx_asm_call(&b, "os_syscall_stack4_i64", [MIRValueID]{sigprocmask, one, mask, zero, zero, zero, size}, true)
+    fx_print(&b, status)
+    unmap :: fx_asm_i64_const(&b, 11)
+    fx_asm_call(&b, "os_syscall_i64", [MIRValueID]{unmap, address, page, zero, zero, zero, zero}, true).drop("unmap result")
+    fx_block(&b, U64{0}, MIRTerminator.Return{value: None})
+    fx_asm_program([MIRFunction]{fx_function("run", b, fx_unit()),
+        fx_asm_leaf("os_syscall_i64", [String]{"number", "a1", "a2", "a3", "a4", "a5", "a6"}, true),
+        fx_asm_leaf("os_store_i64", [String]{"address", "value"}, false),
+        fx_asm_leaf("os_load_i64", [String]{"address"}, true),
+        fx_asm_leaf("os_cas_i64", [String]{"address", "expected", "desired"}, true),
+        fx_asm_leaf("os_load_u8", [String]{"address"}, true),
+        fx_asm_leaf("os_store_u8", [String]{"address", "value"}, false),
+        fx_asm_leaf("os_spin_pause", [String]{}, false),
+        fx_asm_leaf("os_write_word_i64", [String]{"fd", "word", "count"}, true),
+        fx_asm_leaf("os_syscall_stack4_i64", [String]{"number", "a1", "w0", "w1", "w2", "w3", "a4"}, true)})
+}
+
+fn fx_inline_asm_int_input() -> LIRModule Never! {
+    leaf :: fx_asm_leaf("os_load_word", [String]{"address"}, true)
+    lowered :: lir_lower_callable(fx_asm_program([MIRFunction]{leaf}), leaf.id)
+    if lowered.issues.len() > 0 -> panic("checked Int asm leaf refused")
+    p := lowered.lir
+    signature :: LIRSignatureID{value: p.signatures.len()}
+    &p.signatures.push(LIRSignature{id: signature, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: None})
+    entry := lir_builder(LIRFunctionID{value: p.functions.len()}, "run", signature)
+    input :: lir_builder_word(&entry)
+    output :: lir_builder_word(&entry)
+    // Raw carrier bits with disagreeing high bits. The inline check must stop
+    // before the template attempts to dereference this non-address.
+    lir_builder_push(&entry, LIRInst.Const{dst: input, value: 4611686018427387904})
+    lir_builder_push(&entry, LIRInst.Call{dst: Val(output), signature: p.functions[0].signature, callee: LIRCallee.Function{id: p.functions[0].id}, args: [LIRValueID]{input}})
+    lir_builder_seal(&entry, LIRBlockID{value: 0}, [LIRValueID]{}, LIRTerminator.Return{value: None})
+    &p.functions.push(lir_builder_finish(entry))
+    p
+}
+
+fn fx_inline_asm_import() -> MIRProgram Never! {
+    b := fx_builder()
+    fx_do(&b, MIROperation.Call{callee: MIRCallee.Foreign{id: MIRForeignID{value: 77}}, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+    fx_block(&b, U64{0}, MIRTerminator.Return{value: None})
+    p := fx_asm_program([MIRFunction]{fx_function("run", b, fx_unit()), fx_asm_leaf("os_load_word", [String]{"address"}, true)})
+    import := ~p.foreign[0]
+    import.key = "runtime-overflow-import"
+    import.name = "runtime-overflow-import"
+    import.symbol = "jet_rt_panic_overflow"
+    import.foreign_language = MIRForeignLanguage.C
+    import.params = [MIRParam]{}
+    import.return_type = None
+    p.foreign = [MIRForeign]{import}
+    p
+}
+
+fn fx_asm_lir_print(p: &LIRModule, b: &LIRFunctionBuilder, value: LIRValueID) Never! {
+    render :: LIRSignatureID{value: p.signatures.len()}
+    &p.signatures.push(LIRSignature{id: render, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word()}, result: Val(lir_layout_pointer())})
+    line :: LIRSignatureID{value: p.signatures.len()}
+    &p.signatures.push(LIRSignature{id: line, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_pointer(), lir_layout_word()}, result: None})
+    text :: lir_builder_value(&b, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_string_drop"}, None)
+    flush :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.Const{dst: flush, value: 0})
+    lir_builder_push(&b, LIRInst.Call{dst: Val(text), signature: render, callee: LIRCallee.Runtime{symbol: "jet_rt_int_to_string"}, args: [LIRValueID]{value}})
+    lir_builder_push(&b, LIRInst.Call{dst: None, signature: line, callee: LIRCallee.Runtime{symbol: "jet_term_write_stdout_line"}, args: [LIRValueID]{text, flush}})
+    lir_builder_push(&b, LIRInst.Drop{value: text})
+}
+
+fn fx_inline_asm_forms() -> LIRModule Never! {
+    p := LIRModule{signatures: [LIRSignature]{LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: None}}, functions: [LIRFunction]{}, data: [LIRData]{}}
+    b := lir_builder(LIRFunctionID{value: 0}, "run", LIRSignatureID{value: 0})
+    address :: lir_builder_value(&b, lir_layout_pointer(), LIRDrop.Trivial, None)
+    old :: lir_builder_word(&b)
+    value :: lir_builder_word(&b)
+    high :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.StackSlot{dst: address, size: 16, align: 8})
+    lir_builder_push(&b, LIRInst.Const{dst: old, value: 11})
+    lir_builder_push(&b, LIRInst.Const{dst: value, value: 19})
+    lir_builder_push(&b, LIRInst.Const{dst: high, value: 73})
+    lir_builder_push(&b, LIRInst.Store{base: address, offset: 0, value: old})
+    lir_builder_push(&b, LIRInst.Store{base: address, offset: 8, value: high})
+    templates :: [String]{
+        "mov rax, qword ptr [{{address}}+8] ; -> return",
+        "xchg qword ptr [{{address}}], {{value}}\nmov rax, rsi ; -> return",
+        "mov byte ptr [rdi], sil\nmovzx rax, byte ptr [rdi] ; -> return",
+        "mov rax, 123 ; -> return",
+        "mov rax, {{value}} ; -> return",
+    }
+    loop template in templates {
+        assembled :: x64_assemble_template(template, [String]{"address", "value"}, true)
+        if assembled.error != None -> panic("supported form refused: {assembled.error}")
+        result :: lir_builder_word(&b)
+        lir_builder_push(&b, LIRInst.InlineAsm{dst: Val(result), args: [LIRValueID]{address, value}, regs: assembled.regs, result: assembled.result, code: assembled.code})
+        fx_asm_lir_print(&p, &b, result)
+    }
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{}, LIRTerminator.Return{value: None})
+    &p.functions.push(lir_builder_finish(b))
+    p
+}
+
+fn fx_inline_asm_int_result() -> MIRProgram Never! {
+    leaf := fx_function("run", fx_builder(), fx_int())
+    leaf.kind = MIRFunctionKind.Foreign
+    leaf.foreign_language = Val("asm")
+    source :: "\"\"\"mov rax, 4611686018427387904 ; -> return\"\"\""
+    leaf.span = Span{start: 0, end: source.bytes().len()}
+    p := fx_program([MIRFunction]{leaf}, [MIRTypeDef]{})
+    p.source_files = [MIRSourceFile]{MIRSourceFile{id: fx_source_file(), path: "asm-result.jet", source: source}}
+    p
+}
