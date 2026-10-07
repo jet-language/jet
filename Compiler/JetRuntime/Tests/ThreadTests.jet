@@ -2,22 +2,24 @@
 // addresses of these exported Jet callbacks and calls fixture_run. No Rust or
 // libc callee is reachable from the raw-clone child.
 fn thread_test_require(ok: Bool) {
-    if ok -> return
+    if ok {
+        return
+    }
     #Unsafe("a failed isolated runtime witness ends the process without allocation or libc") {
         _ := os_syscall_i64(I64{231}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
-    loop {}
+    loop {
+
+    }
 }
 
-#Export(c)
-fn jet_rt_thread_fixture_destructor(closure: I64, descriptor: I64) -> I64 {
+#Export(c) fn jet_rt_thread_fixture_destructor(closure: I64, descriptor: I64) -> I64 {
     log :: descriptor + I64{32}
     sync_store(log, sync_load(log) * I64{10} + sync_load(closure + I64{24}))
     I64{0}
 }
 
-#Export(c)
-fn jet_rt_thread_fixture_worker(descriptor: I64) -> I64 {
+#Export(c) fn jet_rt_thread_fixture_worker(descriptor: I64) -> I64 {
     pair :: sync_load(descriptor)
     id :: sync_load(descriptor + I64{8})
     first :: sync_load(descriptor + I64{16})
@@ -37,9 +39,7 @@ fn jet_rt_thread_fixture_worker(descriptor: I64) -> I64 {
     loop round < (I64{1000000}) {
         sync_mutex_lock(pair)
         thread_test_require(!sync_mutex_try_lock(pair))
-        loop sync_load(pair + I64{16}) != id {
-            _ := sync_cond_wait(pair + I64{8}, pair, I64{-1})
-        }
+        loop sync_load(pair + I64{16}) != id -> _ := sync_cond_wait(pair + I64{8}, pair, I64{-1})
         sync_store(pair + I64{24}, sync_load(pair + I64{24}) + I64{1})
         sync_store(pair + I64{16}, I64{1} - id)
         sync_cond_notify_one(pair + I64{8})
@@ -50,8 +50,7 @@ fn jet_rt_thread_fixture_worker(descriptor: I64) -> I64 {
     descriptor
 }
 
-#Export(c)
-fn jet_rt_thread_fixture_park_worker(state: I64) -> I64 {
+#Export(c) fn jet_rt_thread_fixture_park_worker(state: I64) -> I64 {
     parker :: sync_load(state)
     notifier :: sync_load(state + I64{8})
     round := I64{0}
@@ -65,8 +64,7 @@ fn jet_rt_thread_fixture_park_worker(state: I64) -> I64 {
     I64{0}
 }
 
-#Export(c)
-fn jet_rt_thread_fixture_clone_worker(state: I64) -> I64 {
+#Export(c) fn jet_rt_thread_fixture_clone_worker(state: I64) -> I64 {
     // clone inherits GS as well as FS. Clear only this child's GS before
     // explicit attach, so it can never borrow/free the parent's TCB.
     thread_set_base(I64{0})
@@ -194,8 +192,7 @@ fn thread_test_clone(entry: I64) {
     jet_rt_free(state, I64{24}, I64{8})
 }
 
-#Export(c)
-fn jet_rt_thread_fixture_run(callbacks: I64) -> I64 {
+#Export(c) fn jet_rt_thread_fixture_run(callbacks: I64) -> I64 {
     // .init_array already initialized alloc/thread; repeated init is harmless.
     parent :: thread_base()
     jet_rt_thread_init()
