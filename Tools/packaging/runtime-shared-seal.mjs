@@ -85,7 +85,7 @@ export function elf64(path) {
       return { offset: u64(at), kind: Number(info & 0xffffffffn), symbol, addend: span(at + 16, 8).readBigInt64LE() };
     });
   }
-  return { type: u16(16), entry: u64(24), programs, sections, symbols, relocations, u64, sectionBytes };
+  return { type: u16(16), entry: u64(24), programs, sections, symbols, relocations, u64, sectionBytes, string };
 }
 
 export function sealObject(path, rows) {
@@ -109,8 +109,8 @@ export function sealObject(path, rows) {
     const expected = rows.filter(row => row[kind] !== null).map(row => ({ name: row.name, priority: row[kind] }));
     const canonical = entries => entries.map(row => `${row.name}:${row.priority}`).sort();
     if (JSON.stringify(canonical(actual)) !== JSON.stringify(canonical(expected))) throw Error(`runtime object LINK_${kind.toUpperCase()} inventory differs from exports.list`);
-    // Equal-priority sections keep the canonical writer's input order.
-    lifecycle[kind] = actual.sort((a, b) => a.priority - b.priority);
+    // Main's canonical writer sorts equal-priority lifecycle entries by symbol.
+    lifecycle[kind] = actual.sort((a, b) => a.priority - b.priority || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   }
   return { lifecycle, imports: symbols.filter(symbol => symbol.bind !== 0 && symbol.section === 0 && symbol.name).map(symbol => symbol.name) };
 }
@@ -127,16 +127,25 @@ export function sealShared(path, rows, lifecycle) {
   if (!table) throw Error('runtime library has no dynamic symbol table');
   const symbols = elf.symbols(table);
   exactExports(symbols, rows.map(row => row.name));
+  const imports = symbols.filter(symbol => symbol.bind !== 0 && symbol.section === 0 && symbol.name).map(symbol => symbol.name).sort();
+  const neededOffsets = [];
+  let dynamicStrings = null;
   for (const section of elf.sections) {
     if ((section.flags & 5) === 5) throw Error(`writable executable section ${section.name}`);
     if (section.type === 6) {
       const dynamic = elf.sectionBytes(section);
+      if (dynamic.length % 16) throw Error('invalid runtime dynamic table');
       for (let at = 0; at < dynamic.length; at += 16) {
         const tag = dynamic.readBigInt64LE(at), value = dynamic.readBigUInt64LE(at + 8);
         if (tag === 22n || (tag === 30n && (value & 4n))) throw Error('runtime library contains text relocations');
+        if (tag === 1n) neededOffsets.push(Number(value));
+        if (tag === 5n) dynamicStrings = Number(value);
       }
     }
   }
+  const stringTable = elf.sections.find(section => section.type === 3 && section.address === dynamicStrings);
+  if (neededOffsets.length && !stringTable) throw Error('runtime DT_NEEDED lacks DT_STRTAB');
+  const needed = neededOffsets.map(offset => elf.string(elf.sectionBytes(stringTable), offset));
   const relocs = elf.sections.filter(section => section.type === 4).flatMap(section => elf.relocations(section));
   for (const [kind, type] of [['init', 14], ['fini', 15]]) {
     const entries = lifecycle[kind];
@@ -150,5 +159,5 @@ export function sealShared(path, rows, lifecycle) {
       if (target !== symbols.find(symbol => symbol.name === entry.name)?.value) throw Error(`shared ${kind} entry ${index} is not ${entry.name}`);
     }
   }
-  return { exports: rows.map(row => row.name).sort(), lifecycle };
+  return { exports: rows.map(row => row.name).sort(), imports, needed, lifecycle };
 }
