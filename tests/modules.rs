@@ -52,7 +52,7 @@ fn run_forced_interpreter(
 
 fn assert_bodyless_module_runs(name: &str, declaration: &str) {
     let main_src = "module lib\nuse lib.[helper]\nfn run() { print(helper.value()) }\n";
-    let lib_src = format!("{} module helper;\n", declaration);
+    let lib_src = format!("{declaration}module helper;\n");
     let files = [
         ("main.jet", main_src),
         ("lib.jet", lib_src.as_str()),
@@ -579,12 +579,12 @@ module installer {
 
 #[test]
 fn bodyless_public_module_is_visible_through_selective_import() {
-    assert_bodyless_module_runs("bodyless_public_module", "pub");
+    assert_bodyless_module_runs("bodyless_public_module", "");
 }
 
 #[test]
 fn bodyless_package_module_is_visible_inside_package() {
-    assert_bodyless_module_runs("bodyless_package_module", "pub(package)");
+    assert_bodyless_module_runs("bodyless_package_module", "priv(package) ");
 }
 
 #[test]
