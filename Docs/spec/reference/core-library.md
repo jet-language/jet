@@ -3284,9 +3284,9 @@ service policy, and `SRVRecord` is explicitly assembled from resolver fields.
 | `udp_packet_data(packet)`, `udp_packet_bytes(packet)`, `udp_packet_addr(packet)` | scalar | Read packet text, bytes, or address. |
 | `udp_packet_original_len(packet) -> Int` / `udp_packet_truncated(packet) -> Bool` | scalar | Inspect datagram length and truncation. |
 | `unix_listen(path: String) -[Net, FS, Time.Wait]> UnixListener !NetError` / `unix_connect(path) -[Net, FS, Time.Wait]> UnixStream !NetError` | endpoint | Use Unix-domain sockets. |
-| `unix_accept(listener) -[Net, Time.Wait]> UnixStream !NetError` / `unix_read(stream) -[Net, Time.Wait]> String !NetError` | stream/text | Accept or read a Unix stream. |
-| `unix_write(stream, text) -[Net, Time.Wait]> Unit !NetError` / `unix_read_bytes(stream, n) -[Net, Time.Wait]> [U8] !NetError` | unit/bytes | Write text or read bytes. |
-| `unix_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `unix_shutdown(stream, how) -[Net, Time.Wait]> Unit !NetError` / `unix_close(stream) -[Net, Time.Wait]> Unit !NetError` | — | Write all bytes or close a Unix stream. |
+| `unix_accept(listener) -[Net, Time.Wait]> UnixStream !NetError` / `unix_read(&stream) -[Net, Time.Wait]> String !NetError` | stream/text | Accept or read a Unix stream. |
+| `unix_write(&stream, text) -[Net, Time.Wait]> Unit !NetError` / `unix_read_bytes(&stream, n) -[Net, Time.Wait]> [U8] !NetError` | unit/bytes | Write text or read bytes through the caller's exclusive stream window. |
+| `unix_write_all_bytes(&stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `unix_shutdown(&stream, how) -[Net, Time.Wait]> Unit !NetError` / `unix_close(&stream) -[Net, Time.Wait]> Unit !NetError` | — | Write all bytes or close the same Unix stream. |
 | `dns_a(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa(name, ms) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve IPv4 or IPv6 records. |
 | `dns_a_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa_at(server, name, ms) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve A or AAAA records through an explicit server. |
 | `dns_txt(name: String, ms: Int) -[Net, Time.Wait]> [String] !NetError` / `dns_ptr(addr, ms) -[Net, Time.Wait]> [String] !NetError` | records | Resolve TXT or PTR records. |
@@ -3303,6 +3303,11 @@ The `*_at` DNS forms take an explicit server, and `error_operation`,
 `NetError`. Ports are checked in `0..=65535`; timeout and deadline values are
 nonnegative milliseconds. A blocking socket call declares `Net` and
 `Time.Wait`, so the suspension boundary remains visible.
+
+`unix_connect` retains the native entry so its ratified `deadline:` overload is
+not narrowed to a path-only source wrapper. Unix and TLS byte/text wrappers use
+the native access contract: reads and writes borrow the named stream with `&`,
+not a copied local handle.
 
 ### `core.net.tls` — TLS stream wrapper
 
@@ -3321,9 +3326,9 @@ protocols are passed through the native TLS provider. See [`Core/net/tls.jet`](.
 | `ClientConfig.default().with_version_bounds(min: version, max: version)` | `ClientConfig !IOError` | Select inclusive `.TLS12` / `.TLS13` bounds; reversed bounds fail before network use. |
 | `tls.client(^tcp, server_name:, config:, deadline:)` | `TLSStream !NetError` | Consume the connected TCP stream, verify the server name, apply configuration, and use the earliest handshake deadline. |
 | `client(host: String, port: Int)` | `TLSStream !IOError` | Convenience form that connects and verifies a host and port. |
-| `read(stream: TLSStream, n: Int)` / `read_text(stream, n)` | `[U8] !IOError` / `String !IOError` | Read bounded TLS bytes or checked UTF-8 text. |
-| `write(stream: TLSStream, bytes: [U8])` / `write_all(stream, bytes)` | `Int !IOError` / `!IOError` | Write application bytes, partially or completely. |
-| `write_text(stream: TLSStream, text)` / `close(stream)` | `!IOError` | Write text or send close-notify; repeated close is harmless. |
+| `read(&stream: TLSStream, n: Int)` / `read_text(&stream, n)` | `[U8] !IOError` / `String !IOError` | Read bounded TLS bytes or checked UTF-8 text. |
+| `write(&stream: TLSStream, bytes: [U8])` / `write_all(&stream, bytes)` | `Int !IOError` / `!IOError` | Write application bytes, partially or completely. |
+| `write_text(&stream: TLSStream, text)` / `close(stream)` | `!IOError` | Write text or send close-notify on the same handle; repeated close is harmless. |
 | `stream.peer_identity()` | `TLSPeerIdentity` | Read the verified server name, certificate chain, cipher suite, and negotiated TLS version. |
 | `stream.read(limit, deadline:)` / `stream.write_all(bytes, deadline:)` | matching results | Apply explicit per-call deadlines on the same TLS handle. |
 | `stream.close_write(deadline:)` | `!IOError` | Flush close-notify and close only writes while reads continue. |
