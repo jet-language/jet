@@ -62,7 +62,7 @@ mod io_line_stream {
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, format!("{error:?}")))
     }
 
-    pub(super) fn input(prompt: Option<&String>) -> Result<String, std::io::Error> {
+    pub(super) fn input(prompt: Option<&str>) -> Result<String, std::io::Error> {
         jet_std_io_input(prompt)
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, format!("{error:?}")))
     }
@@ -778,7 +778,7 @@ pub fn apply_impure_core_call_with_type_args(
             } else {
                 let prompt = match args.as_slice() {
                     [CtValue::Failed(CtReport::Clean(_))] => None,
-                    [CtValue::Str(prompt)] => Some(prompt),
+                    [CtValue::Str(prompt)] => Some(prompt.as_str()),
                     _ => {
                         return Err(unsupported(
                             "core.term.input expects one optional String prompt",

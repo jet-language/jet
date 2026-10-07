@@ -855,7 +855,7 @@ impl JetWebServerFunction {
                 .to_ascii_lowercase()
                 .starts_with("application/json;")
         {
-            if jet_std::parse_json_typed_datatree(&body.to_string()).is_err() {
+            if jet_std::parse_json_typed_datatree(body).is_err() {
                 return Err(JetWebServerFnError::InvalidInput(
                     "server function input is not valid JSON".to_string(),
                 ));

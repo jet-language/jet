@@ -2915,35 +2915,35 @@ fn jet_data_loader_format_for_locator(
 }
 
 fn jet_data_loader_load<T>(
-    locator: &String,
+    locator: &str,
     limits: &jet_std::DataLimits,
 ) -> Result<jet_std::DataLoader<T>, jet_std::DataError> {
     let format = jet_data_loader_format_for_locator(locator)?;
     if locator.starts_with("http://") || locator.starts_with("https://") {
         return jet_data_loader_url(
             locator,
-            &format.as_str().to_string(),
-            &"network".to_string(),
+            format.as_str(),
+            "network",
             limits,
         );
     }
-    jet_data_loader_file(locator, &format.as_str().to_string(), limits)
+    jet_data_loader_file(locator, format.as_str(), limits)
 }
 
 fn jet_data_loader_load_default<T>(
-    locator: &String,
+    locator: &str,
 ) -> Result<jet_std::DataLoader<T>, jet_std::DataError> {
     jet_data_loader_load(locator, &jet_std::DataLimits::safe())
 }
 
 fn jet_data_loader_file<T>(
-    path: &String,
-    format: &String,
+    path: &str,
+    format: &str,
     limits: &jet_std::DataLimits,
 ) -> Result<jet_std::DataLoader<T>, jet_std::DataError> {
     jet_data_loader_new(
         jet_std::DataLoaderKind::File,
-        path.clone(),
+        path.to_owned(),
         String::new(),
         Vec::new(),
         jet_data_loader_format(format)?,
@@ -2953,15 +2953,15 @@ fn jet_data_loader_file<T>(
 }
 
 fn jet_data_loader_file_member<T>(
-    path: &String,
-    member: &String,
-    format: &String,
+    path: &str,
+    member: &str,
+    format: &str,
     limits: &jet_std::DataLimits,
 ) -> Result<jet_std::DataLoader<T>, jet_std::DataError> {
     jet_data_loader_new(
         jet_std::DataLoaderKind::File,
-        path.clone(),
-        member.clone(),
+        path.to_owned(),
+        member.to_owned(),
         Vec::new(),
         jet_data_loader_format(format)?,
         limits.clone(),
@@ -2970,14 +2970,14 @@ fn jet_data_loader_file_member<T>(
 }
 
 fn jet_data_loader_url<T>(
-    url: &String,
-    format: &String,
-    authority: &String,
+    url: &str,
+    format: &str,
+    authority: &str,
     limits: &jet_std::DataLimits,
 ) -> Result<jet_std::DataLoader<T>, jet_std::DataError> {
     jet_data_loader_new(
         jet_std::DataLoaderKind::URL,
-        url.clone(),
+        url.to_owned(),
         String::new(),
         Vec::new(),
         jet_data_loader_format(format)?,
@@ -2987,14 +2987,14 @@ fn jet_data_loader_url<T>(
 }
 
 fn jet_data_loader_database<T>(
-    query: &String,
+    query: &str,
     parameters: &Vec<String>,
-    authority: &String,
+    authority: &str,
     limits: &jet_std::DataLimits,
 ) -> Result<jet_std::DataLoader<T>, jet_std::DataError> {
     jet_data_loader_new(
         jet_std::DataLoaderKind::Database,
-        query.clone(),
+        query.to_owned(),
         String::new(),
         parameters.clone(),
         jet_std::DataFormat::JSON,
@@ -3118,8 +3118,7 @@ fn jet_data_loader_csv_tree(
     text: &str,
     limits: &jet_std::DataLimits,
 ) -> Result<jet_std::DataTree, jet_std::DataError> {
-    let text = text.to_string();
-    let rows = jet_ring_csv_parse(&text, &",".to_string(), false, false).map_err(|reason| {
+    let rows = jet_ring_csv_parse(text, ",", false, false).map_err(|reason| {
         jet_data_loader_error(
             jet_std::DataErrorKind::Decode,
             "data.loader.csv",
@@ -3524,7 +3523,7 @@ fn jet_data_loader_bind<T>(
 
 fn jet_data_loader_bind_text<T>(
     loader: &mut jet_std::DataLoader<T>,
-    payload: &String,
+    payload: &str,
 ) -> Result<(), jet_std::DataError> {
     jet_data_loader_bind(loader, &payload.as_bytes().to_vec())
 }
@@ -3948,7 +3947,7 @@ mod jet_data_web {
     }
     trait WebTypedLoader {
         fn bind(&mut self, payload: &Vec<u8>) -> Result<(), jet_std::DataError>;
-        fn bind_text(&mut self, payload: &String) -> Result<(), jet_std::DataError>;
+        fn bind_text(&mut self, payload: &str) -> Result<(), jet_std::DataError>;
         fn snapshot(&mut self) -> Result<jet_std::DataTree, jet_std::DataError>;
         fn cancel(&mut self);
         fn offline(&mut self, enabled: bool);
@@ -4002,7 +4001,7 @@ mod jet_data_web {
         fn bind(&mut self, payload: &Vec<u8>) -> Result<(), jet_std::DataError> {
             jet_data_loader_bind(&mut self.loader, payload)
         }
-        fn bind_text(&mut self, payload: &String) -> Result<(), jet_std::DataError> {
+        fn bind_text(&mut self, payload: &str) -> Result<(), jet_std::DataError> {
             jet_data_loader_bind_text(&mut self.loader, payload)
         }
         fn snapshot(&mut self) -> Result<jet_std::DataTree, jet_std::DataError> {
@@ -5014,18 +5013,18 @@ where
 /// list door returns.
 fn jet_data_query_sql<T: __jet_Encode + Clone + 'static>(
     rows: &Vec<T>,
-    sql: &String,
+    sql: &str,
 ) -> Result<jet_std::DataQuery<T>, Vec<jet_std::FieldError>> {
     let selected = jet_data_query_rows(rows, sql)?;
     Ok(jet_data_query(&selected).with_step("sql"))
 }
 
 fn jet_enc_csv_query<T: __jet_Decode + __jet_Encode + Clone + 'static>(
-    path: &String,
-    sql: &String,
+    path: &str,
+    sql: &str,
 ) -> Result<jet_std::DataQuery<T>, Vec<jet_std::FieldError>> {
     let text = jet_data_query_read(path)?;
-    let csv_rows = jet_ring_csv_parse(&text, &",".to_string(), false, false)
+    let csv_rows = jet_ring_csv_parse(&text, ",", false, false)
         .map_err(jet_std::FieldError::one)?;
     let header = csv_rows.first().cloned().unwrap_or_default();
     jet_data_query_validate_fields(&header, sql)?;

@@ -205,7 +205,7 @@ fn jet_args_same_input(left: &JetArgKind, right: &JetArgKind) -> bool {
     }
 }
 
-fn jet_args_label(name: &String, short: &Option<String>, meta: Option<&String>) -> String {
+fn jet_args_label(name: &str, short: &Option<String>, meta: Option<&str>) -> String {
     let mut out = String::new();
     if let Some(s) = short {
         out.push('-');
@@ -234,45 +234,45 @@ fn jet_args_spec() -> JetArgsSpec {
     }
 }
 
-fn jet_args_description(mut spec: JetArgsSpec, description: &String) -> JetArgsSpec {
-    spec.description = Some(description.clone());
+fn jet_args_description(mut spec: JetArgsSpec, description: &str) -> JetArgsSpec {
+    spec.description = Some(description.to_owned());
     spec
 }
 
-fn jet_args_flag(mut spec: JetArgsSpec, name: &String, help: &String) -> JetArgsSpec {
+fn jet_args_flag(mut spec: JetArgsSpec, name: &str, help: &str) -> JetArgsSpec {
     spec.entries.push(JetArgKind::Flag {
-        name: name.clone(),
+        name: name.to_owned(),
         short: None,
-        help: help.clone(),
+        help: help.to_owned(),
     });
     spec
 }
 
 fn jet_args_flag_short(
     mut spec: JetArgsSpec,
-    name: &String,
-    short: &String,
-    help: &String,
+    name: &str,
+    short: &str,
+    help: &str,
 ) -> JetArgsSpec {
     spec.entries.push(JetArgKind::Flag {
-        name: name.clone(),
-        short: Some(short.clone()),
-        help: help.clone(),
+        name: name.to_owned(),
+        short: Some(short.to_owned()),
+        help: help.to_owned(),
     });
     spec
 }
 
 fn jet_args_option(
     mut spec: JetArgsSpec,
-    name: &String,
-    help: &String,
-    meta: &String,
+    name: &str,
+    help: &str,
+    meta: &str,
 ) -> JetArgsSpec {
     spec.entries.push(JetArgKind::Option {
-        name: name.clone(),
+        name: name.to_owned(),
         short: None,
-        help: help.clone(),
-        meta: meta.clone(),
+        help: help.to_owned(),
+        meta: meta.to_owned(),
         default: None,
         env: None,
         required: false,
@@ -284,10 +284,10 @@ fn jet_args_option(
 
 fn jet_args_option_base(
     mut spec: JetArgsSpec,
-    name: &String,
+    name: &str,
     short: Option<String>,
-    help: &String,
-    meta: &String,
+    help: &str,
+    meta: &str,
     default: Option<String>,
     env: Option<String>,
     required: bool,
@@ -295,10 +295,10 @@ fn jet_args_option_base(
     value: JetArgValueKind,
 ) -> JetArgsSpec {
     spec.entries.push(JetArgKind::Option {
-        name: name.clone(),
+        name: name.to_owned(),
         short,
-        help: help.clone(),
-        meta: meta.clone(),
+        help: help.to_owned(),
+        meta: meta.to_owned(),
         default,
         env,
         required,
@@ -310,15 +310,15 @@ fn jet_args_option_base(
 
 fn jet_args_option_short(
     spec: JetArgsSpec,
-    name: &String,
-    short: &String,
-    help: &String,
-    meta: &String,
+    name: &str,
+    short: &str,
+    help: &str,
+    meta: &str,
 ) -> JetArgsSpec {
     jet_args_option_base(
         spec,
         name,
-        Some(short.clone()),
+        Some(short.to_owned()),
         help,
         meta,
         None,
@@ -331,10 +331,10 @@ fn jet_args_option_short(
 
 fn jet_args_option_default(
     spec: JetArgsSpec,
-    name: &String,
-    help: &String,
-    meta: &String,
-    default: &String,
+    name: &str,
+    help: &str,
+    meta: &str,
+    default: &str,
 ) -> JetArgsSpec {
     jet_args_option_base(
         spec,
@@ -342,7 +342,7 @@ fn jet_args_option_default(
         None,
         help,
         meta,
-        Some(default.clone()),
+        Some(default.to_owned()),
         None,
         false,
         false,
@@ -352,10 +352,10 @@ fn jet_args_option_default(
 
 fn jet_args_option_env(
     spec: JetArgsSpec,
-    name: &String,
-    help: &String,
-    meta: &String,
-    env: &String,
+    name: &str,
+    help: &str,
+    meta: &str,
+    env: &str,
 ) -> JetArgsSpec {
     jet_args_option_base(
         spec,
@@ -364,7 +364,7 @@ fn jet_args_option_env(
         help,
         meta,
         None,
-        Some(env.clone()),
+        Some(env.to_owned()),
         false,
         false,
         JetArgValueKind::String,
@@ -373,9 +373,9 @@ fn jet_args_option_env(
 
 fn jet_args_option_int(
     spec: JetArgsSpec,
-    name: &String,
-    help: &String,
-    meta: &String,
+    name: &str,
+    help: &str,
+    meta: &str,
 ) -> JetArgsSpec {
     jet_args_option_base(
         spec,
@@ -393,9 +393,9 @@ fn jet_args_option_int(
 
 fn jet_args_option_float(
     spec: JetArgsSpec,
-    name: &String,
-    help: &String,
-    meta: &String,
+    name: &str,
+    help: &str,
+    meta: &str,
 ) -> JetArgsSpec {
     jet_args_option_base(
         spec,
@@ -413,10 +413,10 @@ fn jet_args_option_float(
 
 fn jet_args_option_choice(
     spec: JetArgsSpec,
-    name: &String,
-    help: &String,
-    meta: &String,
-    choices: &String,
+    name: &str,
+    help: &str,
+    meta: &str,
+    choices: &str,
 ) -> JetArgsSpec {
     let values = choices
         .split(',')
@@ -437,7 +437,7 @@ fn jet_args_option_choice(
     )
 }
 
-fn jet_args_repeat(spec: JetArgsSpec, name: &String, help: &String, meta: &String) -> JetArgsSpec {
+fn jet_args_repeat(spec: JetArgsSpec, name: &str, help: &str, meta: &str) -> JetArgsSpec {
     jet_args_option_base(
         spec,
         name,
@@ -454,9 +454,9 @@ fn jet_args_repeat(spec: JetArgsSpec, name: &String, help: &String, meta: &Strin
 
 fn jet_args_required_option(
     spec: JetArgsSpec,
-    name: &String,
-    help: &String,
-    meta: &String,
+    name: &str,
+    help: &str,
+    meta: &str,
 ) -> JetArgsSpec {
     jet_args_option_base(
         spec,
@@ -472,18 +472,18 @@ fn jet_args_required_option(
     )
 }
 
-fn jet_args_positional(mut spec: JetArgsSpec, name: &String, help: &String) -> JetArgsSpec {
+fn jet_args_positional(mut spec: JetArgsSpec, name: &str, help: &str) -> JetArgsSpec {
     spec.entries.push(JetArgKind::Positional {
-        name: name.clone(),
-        help: help.clone(),
+        name: name.to_owned(),
+        help: help.to_owned(),
     });
     spec
 }
 
 fn jet_args_subcommand(
     mut spec: JetArgsSpec,
-    name: &String,
-    help: &String,
+    name: &str,
+    help: &str,
     mut sub: JetArgsSpec,
 ) -> JetArgsSpec {
     let mut inherited = spec.inherited_entries.clone();
@@ -512,19 +512,19 @@ fn jet_args_subcommand(
         sub.version = None;
     }
     spec.entries.push(JetArgKind::Subcommand {
-        name: name.clone(),
-        help: help.clone(),
+        name: name.to_owned(),
+        help: help.to_owned(),
         spec: Box::new(sub),
     });
     spec
 }
 
-fn jet_args_version(mut spec: JetArgsSpec, version: &String) -> JetArgsSpec {
-    spec.version = Some(version.clone());
+fn jet_args_version(mut spec: JetArgsSpec, version: &str) -> JetArgsSpec {
+    spec.version = Some(version.to_owned());
     spec
 }
 
-fn jet_args_completion(spec: &JetArgsSpec, shell: &String) -> String {
+fn jet_args_completion(spec: &JetArgsSpec, shell: &str) -> String {
     let mut words = vec!["--help".to_string()];
     if spec.version.is_some() {
         words.push("--version".to_string());
@@ -837,7 +837,7 @@ fn jet_args_parse_mode(
 
 fn jet_args_parse_or_exit(spec: &JetArgsSpec, argv: &Vec<String>) -> JetParsedArgs {
     match jet_args_parse(spec, argv) {
-        Ok(parsed) if jet_parsed_flag(&parsed, &"help".to_string()) => {
+        Ok(parsed) if jet_parsed_flag(&parsed, "help") => {
             println!("{}", spec.help());
             std::process::exit(0);
         }
@@ -956,24 +956,24 @@ fn jet_args_edit_distance(a: &str, b: &str) -> usize {
     prev[b.len()]
 }
 
-fn jet_parsed_flag(parsed: &JetParsedArgs, name: &String) -> bool {
-    *parsed.flags.get(name.as_str()).unwrap_or(&false)
+fn jet_parsed_flag(parsed: &JetParsedArgs, name: &str) -> bool {
+    *parsed.flags.get(name).unwrap_or(&false)
 }
 
-fn jet_parsed_option(parsed: &JetParsedArgs, name: &String) -> JetOutcome<String, JetAbsent> {
-    jet_outcome_of(parsed.options.get(name.as_str()).and_then(|v| v.last().cloned()))
+fn jet_parsed_option(parsed: &JetParsedArgs, name: &str) -> JetOutcome<String, JetAbsent> {
+    jet_outcome_of(parsed.options.get(name).and_then(|v| v.last().cloned()))
 }
 
-fn jet_parsed_option_int(parsed: &JetParsedArgs, name: &String) -> JetOutcome<i64, JetAbsent> {
+fn jet_parsed_option_int(parsed: &JetParsedArgs, name: &str) -> JetOutcome<i64, JetAbsent> {
     jet_outcome_of(jet_parsed_option(parsed, name).ok().and_then(|v| v.parse::<i64>().ok()))
 }
 
-fn jet_parsed_option_float(parsed: &JetParsedArgs, name: &String) -> JetOutcome<f64, JetAbsent> {
+fn jet_parsed_option_float(parsed: &JetParsedArgs, name: &str) -> JetOutcome<f64, JetAbsent> {
     jet_outcome_of(jet_parsed_option(parsed, name).ok().and_then(|v| v.parse::<f64>().ok()))
 }
 
-fn jet_parsed_options(parsed: &JetParsedArgs, name: &String) -> Vec<String> {
-    parsed.options.get(name.as_str()).cloned().unwrap_or_default()
+fn jet_parsed_options(parsed: &JetParsedArgs, name: &str) -> Vec<String> {
+    parsed.options.get(name).cloned().unwrap_or_default()
 }
 
 fn jet_parsed_positional(parsed: &JetParsedArgs, idx: i64) -> JetOutcome<String, JetAbsent> {
@@ -991,9 +991,9 @@ fn jet_parsed_subcommand(parsed: &JetParsedArgs) -> JetOutcome<String, JetAbsent
 /// `core.log` levels. `--quiet` wins when both switches are present so a
 /// script can silence a verbose default explicitly.
 fn jet_args_standard_log_level(parsed: &JetParsedArgs) -> String {
-    if jet_parsed_flag(parsed, &"quiet".to_string()) {
+    if jet_parsed_flag(parsed, "quiet") {
         "error".to_string()
-    } else if jet_parsed_flag(parsed, &"verbose".to_string()) {
+    } else if jet_parsed_flag(parsed, "verbose") {
         "debug".to_string()
     } else {
         "info".to_string()
@@ -1003,7 +1003,7 @@ fn jet_args_standard_log_level(parsed: &JetParsedArgs) -> String {
 /// D-CLI-GLOBAL1=E: normalize the Standard color choice once. `auto` follows
 /// `NO_COLOR`; explicit `always` and `never` are expert overrides.
 fn jet_args_standard_color_mode(parsed: &JetParsedArgs) -> String {
-    let requested = jet_parsed_option(parsed, &"color".to_string())
+    let requested = jet_parsed_option(parsed, "color")
         .ok()
         .unwrap_or_else(|| "auto".to_string());
     match requested.as_str() {

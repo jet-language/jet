@@ -256,27 +256,27 @@ mod log_kernel {
         super::log_state::jet_ring_log_set_trace_id(id);
     }
 
-    pub(super) fn debug(message: &String) {
+    pub(super) fn debug(message: &str) {
         jet_ring_log_debug(message);
     }
 
-    pub(super) fn info(message: &String) {
+    pub(super) fn info(message: &str) {
         jet_ring_log_info(message);
     }
 
-    pub(super) fn warn(message: &String) {
+    pub(super) fn warn(message: &str) {
         jet_ring_log_warn(message);
     }
 
-    pub(super) fn error(message: &String) {
+    pub(super) fn error(message: &str) {
         jet_ring_log_error(message);
     }
 
-    pub(super) fn critical(message: &String) {
+    pub(super) fn critical(message: &str) {
         jet_ring_log_critical(message);
     }
 
-    pub(super) fn fatal(message: &String) {
+    pub(super) fn fatal(message: &str) {
         jet_ring_log_fatal(message);
     }
 
@@ -288,51 +288,51 @@ mod log_kernel {
         jet_ring_log_flush();
     }
 
-    pub(super) fn enabled(level: &String) -> bool {
+    pub(super) fn enabled(level: &str) -> bool {
         jet_ring_log_enabled(level)
     }
 
-    pub(super) fn field(key: &String, value: &String) -> jet_std::LogField {
+    pub(super) fn field(key: &str, value: &str) -> jet_std::LogField {
         jet_ring_log_field(key, value)
     }
 
-    pub(super) fn int(key: &String, value: i64) -> jet_std::LogField {
+    pub(super) fn int(key: &str, value: i64) -> jet_std::LogField {
         jet_ring_log_int(key, value)
     }
 
-    pub(super) fn float(key: &String, value: f64) -> jet_std::LogField {
+    pub(super) fn float(key: &str, value: f64) -> jet_std::LogField {
         jet_ring_log_float(key, value)
     }
 
-    pub(super) fn bool_field(key: &String, value: bool) -> jet_std::LogField {
+    pub(super) fn bool_field(key: &str, value: bool) -> jet_std::LogField {
         jet_ring_log_bool(key, value)
     }
 
-    pub(super) fn redact(key: &String) -> jet_std::LogField {
+    pub(super) fn redact(key: &str) -> jet_std::LogField {
         jet_ring_log_redact(key)
     }
 
-    pub(super) fn counter(name: &String, value: i64) -> jet_std::LogField {
+    pub(super) fn counter(name: &str, value: i64) -> jet_std::LogField {
         jet_ring_log_counter(name, value)
     }
 
-    pub(super) fn info_fields(message: &String, fields: &Vec<jet_std::LogField>) {
+    pub(super) fn info_fields(message: &str, fields: &Vec<jet_std::LogField>) {
         jet_ring_log_info_fields(message, fields);
     }
 
-    pub(super) fn warn_fields(message: &String, fields: &Vec<jet_std::LogField>) {
+    pub(super) fn warn_fields(message: &str, fields: &Vec<jet_std::LogField>) {
         jet_ring_log_warn_fields(message, fields);
     }
 
-    pub(super) fn error_fields(message: &String, fields: &Vec<jet_std::LogField>) {
+    pub(super) fn error_fields(message: &str, fields: &Vec<jet_std::LogField>) {
         jet_ring_log_error_fields(message, fields);
     }
 
-    pub(super) fn debug_fields(message: &String, fields: &Vec<jet_std::LogField>) {
+    pub(super) fn debug_fields(message: &str, fields: &Vec<jet_std::LogField>) {
         jet_ring_log_debug_fields(message, fields);
     }
 
-    pub(super) fn span(name: &String) -> jet_std::LogSpan {
+    pub(super) fn span(name: &str) -> jet_std::LogSpan {
         jet_ring_log_span(name)
     }
 
@@ -344,7 +344,7 @@ mod log_kernel {
         jet_ring_log_close(span);
     }
 
-    pub(super) fn set_sink(kind: &String, path: &String) {
+    pub(super) fn set_sink(kind: &str, path: &str) {
         jet_ring_log_set_sink(kind, path);
     }
 

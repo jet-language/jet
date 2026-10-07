@@ -33,8 +33,8 @@ pub(crate) fn jet_testing_fake_new(seed: i64) -> jet_std::Fake {
     }
 }
 
-pub(crate) fn jet_fake_locale(fake: &jet_std::Fake, locale: &String) -> jet_std::Fake {
-    let code = match locale.as_str() {
+pub(crate) fn jet_fake_locale(fake: &jet_std::Fake, locale: &str) -> jet_std::Fake {
+    let code = match locale {
         "en" => 0,
         "de" => 1,
         other => panic!("unsupported fake-data locale `{other}`; supported locales: en, de"),

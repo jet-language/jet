@@ -169,6 +169,18 @@ Returned static views remain static. The callable metadata and the ordinary
 function-value type use the same provenance facts; neither guesses a lifetime
 from the order of argument types.
 
+Rust emission reads primitive `Copy` place carriers directly, without invoking
+`Clone`. A display interpolation of text appends its borrowed contents to the
+result buffer; it does not allocate a separate display string. Other formatting
+selectors still use their checked formatting kernels.
+
+Read-only concrete String parameters, captures, and callable inputs use `&str`
+in Rust emission. Text kernels and heterogeneous collection queries borrow that
+view directly; an owned return or stored value materializes one String. An
+abstract generic Read formal still requires `&T`: it borrows an existing String
+owner when available, and materializes a view only at that owned-carrier boundary.
+Native optional-text readers project the optional payload as `Option<&str>`,
+without copying it into an `Option<String>`.
 ## Core keepers
 
 Engines must handle literals (`IntLit`, `FloatLit`, `BoolLit`, `CharLit`, and

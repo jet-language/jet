@@ -192,14 +192,14 @@ impl JetByteBuffer {
     pub(crate) fn string(&self) -> String {
         self.as_text()
     }
-    pub(crate) fn contains(&self, needle: &String) -> bool {
-        self.as_text().contains(needle.as_str())
+    pub(crate) fn contains(&self, needle: &str) -> bool {
+        self.as_text().contains(needle)
     }
-    pub(crate) fn starts_with(&self, prefix: &String) -> bool {
-        self.as_text().starts_with(prefix.as_str())
+    pub(crate) fn starts_with(&self, prefix: &str) -> bool {
+        self.as_text().starts_with(prefix)
     }
-    pub(crate) fn ends_with(&self, suffix: &String) -> bool {
-        self.as_text().ends_with(suffix.as_str())
+    pub(crate) fn ends_with(&self, suffix: &str) -> bool {
+        self.as_text().ends_with(suffix)
     }
     pub(crate) fn trim(&self) -> JetByteBuffer {
         JetByteBuffer::from(&self.as_text().trim().as_bytes().to_vec())
@@ -240,10 +240,10 @@ impl JetByteBuffer {
     pub(crate) fn title(&self) -> JetByteBuffer {
         self.to_title()
     }
-    pub(crate) fn replace(&self, from: &String, to: &String) -> JetByteBuffer {
-        JetByteBuffer::from(&self.as_text().replace(from.as_str(), to.as_str()).into_bytes())
+    pub(crate) fn replace(&self, from: &str, to: &str) -> JetByteBuffer {
+        JetByteBuffer::from(&self.as_text().replace(from, to).into_bytes())
     }
-    pub(crate) fn split(&self, sep: &String) -> Vec<String> {
+    pub(crate) fn split(&self, sep: &str) -> Vec<String> {
         let text = self.as_text();
         if sep.is_empty() {
             let mut out = vec![String::new()];
@@ -253,7 +253,7 @@ impl JetByteBuffer {
             out.push(String::new());
             return out;
         }
-        text.split(sep.as_str()).map(|s| s.to_string()).collect()
+        text.split(sep).map(|s| s.to_string()).collect()
     }
     pub(crate) fn partition(
         &self,
@@ -285,11 +285,11 @@ impl JetByteBuffer {
     pub(crate) fn lines(&self) -> Vec<String> {
         self.as_text().lines().map(|s| s.to_string()).collect()
     }
-    pub(crate) fn index_of(&self, needle: &String) -> JetOutcome<i64, JetAbsent> {
-        jet_outcome_of(self.as_text().find(needle.as_str()).map(|i| i as i64))
+    pub(crate) fn index_of(&self, needle: &str) -> JetOutcome<i64, JetAbsent> {
+        jet_outcome_of(self.as_text().find(needle).map(|i| i as i64))
     }
-    pub(crate) fn last_index_of(&self, needle: &String) -> JetOutcome<i64, JetAbsent> {
-        jet_outcome_of(self.as_text().rfind(needle.as_str()).map(|i| i as i64))
+    pub(crate) fn last_index_of(&self, needle: &str) -> JetOutcome<i64, JetAbsent> {
+        jet_outcome_of(self.as_text().rfind(needle).map(|i| i as i64))
     }
     pub(crate) fn is_ascii(&self) -> bool {
         self.bytes.is_ascii()

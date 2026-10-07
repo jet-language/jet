@@ -1,12 +1,12 @@
 // ── D-UUIDENC1=A: core.encoding.hex / core.encoding.base64 / core.crypto.uuid ───────
 // Pure std implementations; zero external crates (I6); memory-safe (I1).
 
-fn jet_std_b64_decode(text: &String) -> Result<Vec<u8>, String> {
+fn jet_std_b64_decode(text: &str) -> Result<Vec<u8>, String> {
     jet_std_b64_decode_opts(text, false, false)
 }
 
 fn jet_std_b64_decode_opts(
-    text: &String,
+    text: &str,
     allow_whitespace: bool,
     allow_missing_padding: bool,
 ) -> Result<Vec<u8>, String> {
@@ -17,16 +17,16 @@ fn jet_std_b64_decode_opts(
     }
 }
 
-fn jet_std_b64_decodebytes(text: &String) -> Result<Vec<u8>, String> {
+fn jet_std_b64_decodebytes(text: &str) -> Result<Vec<u8>, String> {
     jet_std_b64_decode_opts(text, true, false)
 }
 
-fn jet_std_b64url_decode(text: &String) -> Result<Vec<u8>, String> {
+fn jet_std_b64url_decode(text: &str) -> Result<Vec<u8>, String> {
     jet_std_b64url_decode_opts(text, false, false)
 }
 
 fn jet_std_b64url_decode_opts(
-    text: &String,
+    text: &str,
     allow_whitespace: bool,
     allow_padding: bool,
 ) -> Result<Vec<u8>, String> {
@@ -37,10 +37,10 @@ fn jet_std_b64url_decode_opts(
     }
 }
 
-fn jet_std_base32_decode(text: &String) -> Result<Vec<u8>, String> {
+fn jet_std_base32_decode(text: &str) -> Result<Vec<u8>, String> {
     jet_std_base32_decode_opts(text, false, false, false)
 }
-fn jet_std_base32hex_decode(text: &String) -> Result<Vec<u8>, String> {
+fn jet_std_base32hex_decode(text: &str) -> Result<Vec<u8>, String> {
     const STANDARD: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
     let mut canonical = String::with_capacity(text.len());
     for ch in text.chars() {
@@ -56,7 +56,7 @@ fn jet_std_base32hex_decode(text: &String) -> Result<Vec<u8>, String> {
 }
 
 fn jet_std_base32_decode_opts(
-    text: &String,
+    text: &str,
     allow_whitespace: bool,
     allow_missing_padding: bool,
     allow_lowercase: bool,
@@ -181,14 +181,14 @@ fn jet_xml_options(options: &jet_std::XMLParseOptions) -> crate::jet_xml_pull::P
         },
     }
 }
-fn jet_std_xml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::XMLError> {
+fn jet_std_xml_parse(text: &str) -> Result<jet_std::DataTree, jet_std::XMLError> {
     crate::jet_xml_kernel::parse_document(text)
         .map(jet_xml_to_data_tree)
         .map_err(jet_xml_error)
 }
 
 fn jet_std_xml_parse_with(
-    text: &String,
+    text: &str,
     options: &jet_std::XMLParseOptions,
 ) -> Result<jet_std::DataTree, jet_std::XMLError> {
     crate::jet_xml_kernel::parse_document_with(text, &jet_xml_options(options))
@@ -276,7 +276,7 @@ fn jet_std_xml_expanded_name(
 
 fn jet_std_xml_attribute(
     element: &jet_std::DataTree,
-    name: &String,
+    name: &str,
 ) -> Result<JetOutcome<String, JetAbsent>, jet_std::XMLError> {
     let value = jet_xml_from_data_tree(element).map_err(jet_xml_shape_error)?;
     crate::jet_xml_kernel::lookup_attribute(&value, name)
@@ -343,7 +343,7 @@ fn jet_xml_decode_shape_error(reason: String) -> Vec<jet_std::FieldError> {
 }
 
 fn jet_enc_xml_decode<T: __jet_Decode>(
-    text: &String,
+    text: &str,
     options: jet_std::XMLParseOptions,
 ) -> Result<T, Vec<jet_std::FieldError>> {
     let document = jet_std_xml_parse_with(text, &options).map_err(jet_xml_decode_value_error)?;
@@ -613,7 +613,7 @@ fn jet_uuid_bytes(s: &str) -> Result<[u8; 16], String> {
 
 // #1481 core.crypto.uuid: validate and normalize (lowercase) a UUID string — the
 // String representation stays canonical (D-CORE-TREE1 area; no new UUID type).
-fn jet_std_uuid_parse(s: &String) -> Result<String, String> {
+fn jet_std_uuid_parse(s: &str) -> Result<String, String> {
     jet_uuid_bytes(s).map(|bytes| jet_uuid_format(&bytes))
 }
 
@@ -678,7 +678,7 @@ fn jet_uuid_sha1(data: &[u8]) -> [u8; 20] {
 
 // #1481 core.crypto.uuid: v5 (namespace + name, SHA-1) — deterministic sibling of
 // the already-shipped v4 (random) and v7 (time-ordered).
-fn jet_std_uuid_v5(namespace: &String, name: &String) -> Result<String, String> {
+fn jet_std_uuid_v5(namespace: &str, name: &str) -> Result<String, String> {
     let ns = jet_uuid_bytes(namespace)?;
     let mut input = ns.to_vec();
     input.extend_from_slice(name.as_bytes());

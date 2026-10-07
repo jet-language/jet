@@ -582,7 +582,7 @@ pub(crate) fn jet_sync_map_set(map: JetSyncMap, key: String, value: String) -> J
 /// D-SYNC1: safe denial is part of the carrier. An invalid map shows nothing —
 /// `show`, `metadata`, and `encode` already deny, and a key read must not be the
 /// one path that answers from a denied replica set.
-pub(crate) fn jet_sync_map_get(map: &JetSyncMap, key: &String) -> Option<String> {
+pub(crate) fn jet_sync_map_get(map: &JetSyncMap, key: &str) -> Option<String> {
     if !map.valid {
         return None;
     }
@@ -898,8 +898,8 @@ pub(crate) fn jet_db_policy_from_compiled(
 
 pub(crate) fn jet_db_policy_allows(
     policy: &JetRowPolicy,
-    user: &String,
-    row_owner: &String,
+    user: &str,
+    row_owner: &str,
 ) -> bool {
     if !jet_sync_token_is_valid(user) || !jet_sync_token_is_valid(row_owner) {
         return false;

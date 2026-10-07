@@ -4,9 +4,9 @@
 // Foundation verdict into the Core plain type.
 
 fn jet_testing_relation(
-    relation: &String,
+    relation: &str,
 ) -> crate::jet_testing_comparison_foundation::ObservationRelation {
-    match relation.as_str() {
+    match relation {
         "" | "typed_equality" => {
             crate::jet_testing_comparison_foundation::ObservationRelation::TypedEquality
         }
@@ -69,7 +69,7 @@ fn jet_testing_compare(
     cases: &Vec<jet_std::DataTree>,
     reference: Box<dyn Fn(jet_std::DataTree) -> jet_std::DataTree>,
     candidate: Box<dyn Fn(jet_std::DataTree) -> jet_std::DataTree>,
-    relation: &String,
+    relation: &str,
 ) -> jet_std::JetTestComparison {
     let relation = jet_testing_relation(relation);
     if !relation.supports_plain_callable()
@@ -98,7 +98,7 @@ fn jet_testing_compare(
             Ok(value) => value,
             Err(_) => {
                 let record = crate::jet_testing_comparison_foundation::ComparisonRecord::terminal(
-                    relation.clone(),
+                    relation.to_owned(),
                     crate::jet_testing_comparison_foundation::ComparisonStatus::Unavailable,
                     format!("reference implementation crashed on case-{index}"),
                 );
@@ -112,7 +112,7 @@ fn jet_testing_compare(
             Err(_) => {
                 reference_values.push(reference_value);
                 let record = crate::jet_testing_comparison_foundation::ComparisonRecord::terminal(
-                    relation.clone(),
+                    relation.to_owned(),
                     crate::jet_testing_comparison_foundation::ComparisonStatus::Unavailable,
                     format!("candidate implementation crashed on case-{index}"),
                 );

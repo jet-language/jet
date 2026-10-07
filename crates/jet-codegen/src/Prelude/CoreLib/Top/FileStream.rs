@@ -5,11 +5,11 @@
 // the operation policy and line trimming once, so a default-tier deopt calls
 // the same functions as generated AOT code.
 
-pub(crate) fn jet_std_files_open(path: &String) -> Result<JetFileReader, jet_std::IOError> {
+pub(crate) fn jet_std_files_open(path: &str) -> Result<JetFileReader, jet_std::IOError> {
     if jet_fault_should_fail("FS.Read") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Read,
-            Some(path.clone()),
+            Some(path.to_owned()),
             "fault injected: FS.Read",
         ));
     }
@@ -17,15 +17,15 @@ pub(crate) fn jet_std_files_open(path: &String) -> Result<JetFileReader, jet_std
         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, path, error))?;
     Ok(JetFileReader {
         inner: std::io::BufReader::new(file),
-        path: path.clone(),
+        path: path.to_owned(),
     })
 }
 
-pub(crate) fn jet_std_files_create(path: &String) -> Result<JetFileWriter, jet_std::IOError> {
+pub(crate) fn jet_std_files_create(path: &str) -> Result<JetFileWriter, jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(path.clone()),
+            Some(path.to_owned()),
             "fault injected: FS.Write",
         ));
     }
@@ -36,15 +36,15 @@ pub(crate) fn jet_std_files_create(path: &String) -> Result<JetFileWriter, jet_s
         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))?;
     Ok(JetFileWriter {
         inner: std::io::BufWriter::new(file),
-        path: path.clone(),
+        path: path.to_owned(),
     })
 }
 
-pub(crate) fn jet_std_files_append(path: &String) -> Result<JetFileWriter, jet_std::IOError> {
+pub(crate) fn jet_std_files_append(path: &str) -> Result<JetFileWriter, jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(path.clone()),
+            Some(path.to_owned()),
             "fault injected: FS.Write",
         ));
     }
@@ -58,7 +58,7 @@ pub(crate) fn jet_std_files_append(path: &String) -> Result<JetFileWriter, jet_s
         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))?;
     Ok(JetFileWriter {
         inner: std::io::BufWriter::new(file),
-        path: path.clone(),
+        path: path.to_owned(),
     })
 }
 
@@ -97,7 +97,7 @@ pub(crate) fn jet_std_file_reader_read_line(
 
 pub(crate) fn jet_std_file_writer_write_line(
     writer: &mut JetFileWriter,
-    line: &String,
+    line: &str,
 ) -> Result<(), jet_std::IOError> {
     use std::io::Write;
 

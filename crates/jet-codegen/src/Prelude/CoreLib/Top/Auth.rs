@@ -519,10 +519,10 @@ fn jet_auth_claims(
 }
 
 fn jet_auth_verify_jwt_impl(
-    token: &String,
+    token: &str,
     key: &Vec<u8>,
-    audience: &String,
-    issuer: Option<&String>,
+    audience: &str,
+    issuer: Option<&str>,
     clock_skew_ns: i64,
 ) -> Result<JetAuthClaims, JetAuthError> {
     if key.len() < 32 {
@@ -558,14 +558,14 @@ fn jet_auth_verify_jwt_impl(
         return Err(JetAuthError::InvalidSignature);
     }
     let payload = jet_auth_b64url_decode(parts[1]).map_err(JetAuthError::DecodeError)?;
-    jet_auth_claims(&payload, audience, issuer.map(String::as_str), clock_skew_ns)
+    jet_auth_claims(&payload, audience, issuer, clock_skew_ns)
 }
 
 fn jet_auth_verify_jwt_defaulted(
-    token: &String,
+    token: &str,
     key: &Vec<u8>,
-    audience: &String,
-    issuer: Option<&String>,
+    audience: &str,
+    issuer: Option<&str>,
     clock_skew_ns: Option<i64>,
 ) -> Result<JetAuthClaims, JetAuthError> {
     let clock_skew_ns = jet_auth_clock_skew_ns(clock_skew_ns);
@@ -590,10 +590,10 @@ fn jet_auth_pae(pieces: &[&[u8]]) -> Vec<u8> {
 }
 
 fn jet_auth_verify_paseto_impl<F, E>(
-    token: &String,
+    token: &str,
     key: &Vec<u8>,
-    audience: &String,
-    issuer: Option<&String>,
+    audience: &str,
+    issuer: Option<&str>,
     clock_skew_ns: i64,
     footer: &Vec<u8>,
     implicit: &Vec<u8>,
@@ -620,14 +620,14 @@ where
     if !verify(key, &signed, &signature).unwrap_or(false) {
         return Err(JetAuthError::InvalidSignature);
     }
-    jet_auth_claims(&message, audience, issuer.map(String::as_str), clock_skew_ns)
+    jet_auth_claims(&message, audience, issuer, clock_skew_ns)
 }
 
 fn jet_auth_verify_paseto_defaulted<F, E>(
-    token: &String,
+    token: &str,
     key: &Vec<u8>,
-    audience: &String,
-    issuer: Option<&String>,
+    audience: &str,
+    issuer: Option<&str>,
     clock_skew_ns: Option<i64>,
     footer: Option<&Vec<u8>>,
     implicit: Option<&Vec<u8>>,

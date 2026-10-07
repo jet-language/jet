@@ -21,7 +21,7 @@ mod jet_app_impl {
     type LoaderHandler =
         Arc<dyn Fn(&super::JetWebNavigation) -> Result<String, String> + Send + Sync>;
     type ActionHandler = Option<super::JetWebServerFunction>;
-    type MountHandler = Arc<dyn Fn(&String) + Send + Sync>;
+    type MountHandler = Arc<dyn Fn(&str) + Send + Sync>;
 
     /// The one wire rendering of a checked handler failure.  The default
     /// callable carrier (`Err`) renders its report; every Codable domain is
@@ -67,8 +67,7 @@ mod jet_app_impl {
         let output_type = type_name::<O>().to_string();
         let error_type = type_name::<E>().to_string();
         let dispatch: super::JetWebServerFnHandler = Arc::new(move |_context, body| {
-            let body = body.to_string();
-            let input = super::jet_enc_json_decode::<I>(&body).map_err(|errors| {
+            let input = super::jet_enc_json_decode::<I>(body).map_err(|errors| {
                 super::JetWebServerFnError::InvalidInput(format!("{errors:?}"))
             })?;
             match handler(input) {
@@ -1244,7 +1243,7 @@ mod jet_app_impl {
             security: Vec<String>,
         ) -> JetApp
         where
-            F: Fn(&String) -> R + Send + Sync + 'static,
+            F: Fn(&str) -> R + Send + Sync + 'static,
             R: 'static,
         {
             let handler: MountHandler = Arc::new(move |path| {
@@ -1256,7 +1255,7 @@ mod jet_app_impl {
 
         pub fn mount<F, R>(&self, prefix: String, handler: F) -> JetApp
         where
-            F: Fn(&String) -> R + Send + Sync + 'static,
+            F: Fn(&str) -> R + Send + Sync + 'static,
             R: 'static,
         {
             self.register_mount(prefix, handler, Vec::new(), Vec::new())
@@ -1269,7 +1268,7 @@ mod jet_app_impl {
             effect: String,
         ) -> JetApp
         where
-            F: Fn(&String) -> R + Send + Sync + 'static,
+            F: Fn(&str) -> R + Send + Sync + 'static,
             R: 'static,
         {
             self.register_mount(prefix, handler, vec![effect], Vec::new())
@@ -1283,7 +1282,7 @@ mod jet_app_impl {
             policy: String,
         ) -> JetApp
         where
-            F: Fn(&String) -> R + Send + Sync + 'static,
+            F: Fn(&str) -> R + Send + Sync + 'static,
             R: 'static,
         {
             self.register_mount(prefix, handler, vec![effect], vec![policy])
@@ -1783,7 +1782,7 @@ source.onmessage = () => location.reload();
     static JET_WEB_SESSION_STORAGE: LazyLock<Mutex<HashMap<String, String>>> =
         LazyLock::new(|| Mutex::new(HashMap::new()));
 
-    pub fn jet_web_storage_local_get(key: &String) -> Option<String> {
+    pub fn jet_web_storage_local_get(key: &str) -> Option<String> {
         JET_WEB_LOCAL_STORAGE
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -1791,18 +1790,18 @@ source.onmessage = () => location.reload();
             .cloned()
     }
 
-    pub fn jet_web_storage_local_remove(key: &String) {
+    pub fn jet_web_storage_local_remove(key: &str) {
         JET_WEB_LOCAL_STORAGE
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(key);
     }
 
-    pub fn jet_web_storage_local_set(key: &String, value: &String) {
+    pub fn jet_web_storage_local_set(key: &str, value: &str) {
         JET_WEB_LOCAL_STORAGE
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(key.clone(), value.clone());
+            .insert(key.to_owned(), value.to_owned());
     }
 
     pub fn jet_web_storage_local_clear() {
@@ -1812,7 +1811,7 @@ source.onmessage = () => location.reload();
             .clear();
     }
 
-    pub fn jet_web_storage_session_get(key: &String) -> Option<String> {
+    pub fn jet_web_storage_session_get(key: &str) -> Option<String> {
         JET_WEB_SESSION_STORAGE
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -1820,18 +1819,18 @@ source.onmessage = () => location.reload();
             .cloned()
     }
 
-    pub fn jet_web_storage_session_remove(key: &String) {
+    pub fn jet_web_storage_session_remove(key: &str) {
         JET_WEB_SESSION_STORAGE
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(key);
     }
 
-    pub fn jet_web_storage_session_set(key: &String, value: &String) {
+    pub fn jet_web_storage_session_set(key: &str, value: &str) {
         JET_WEB_SESSION_STORAGE
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(key.clone(), value.clone());
+            .insert(key.to_owned(), value.to_owned());
     }
 
     pub fn jet_web_storage_session_clear() {
@@ -1951,7 +1950,7 @@ source.onmessage = () => location.reload();
 
     pub fn jet_app_mount<F, R>(app: &JetApp, prefix: String, handler: F) -> JetApp
     where
-        F: Fn(&String) -> R + Send + Sync + 'static,
+        F: Fn(&str) -> R + Send + Sync + 'static,
         R: 'static,
     {
         app.mount(prefix, handler)
@@ -1964,7 +1963,7 @@ source.onmessage = () => location.reload();
         effect: String,
     ) -> JetApp
     where
-        F: Fn(&String) -> R + Send + Sync + 'static,
+        F: Fn(&str) -> R + Send + Sync + 'static,
         R: 'static,
     {
         app.mount_with_effect(prefix, handler, effect)
@@ -1978,7 +1977,7 @@ source.onmessage = () => location.reload();
         policy: String,
     ) -> JetApp
     where
-        F: Fn(&String) -> R + Send + Sync + 'static,
+        F: Fn(&str) -> R + Send + Sync + 'static,
         R: 'static,
     {
         app.mount_with_policy(prefix, handler, effect, policy)

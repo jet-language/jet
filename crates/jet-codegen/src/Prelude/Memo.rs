@@ -44,8 +44,8 @@ impl<K: PartialEq + Clone, V: Clone> JetLru<K, V> {
         displaced
     }
 
-    fn get(&mut self, key: &K) -> Option<V> {
-        let index = self.entries.iter().position(|(stored, _)| stored == key)?;
+    fn get_matching(&mut self, mut matches: impl FnMut(&K) -> bool) -> Option<V> {
+        let index = self.entries.iter().position(|(stored, _)| matches(stored))?;
         let (stored, value) = self.entries.remove(index);
         let out = value.clone();
         self.entries.insert(0, (stored, value));
@@ -128,12 +128,12 @@ impl<K, V> JetMemo<K, V> {
 }
 
 impl<K: PartialEq + Clone, V: Clone> JetMemo<K, V> {
-    pub fn get(&self, key: &K) -> Option<V> {
+    pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<V> where K: std::borrow::Borrow<Q>, Q: PartialEq {
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(value) = state.cache.get(&Some(key.clone())) else {
+        let Some(value) = state.cache.get_matching(|stored| stored.as_ref().is_some_and(|stored| stored.borrow() == key)) else {
             state.misses += 1;
             return None;
         };

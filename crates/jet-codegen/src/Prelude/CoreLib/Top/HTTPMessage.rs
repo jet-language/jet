@@ -1136,18 +1136,18 @@ impl JetHTTPHeaders {
     }
 }
 
-fn jet_http_headers_first(headers: &JetHTTPHeaders, name: &String) -> Option<String> {
+fn jet_http_headers_first(headers: &JetHTTPHeaders, name: &str) -> Option<String> {
     headers.get(name).cloned()
 }
 
-fn jet_http_headers_all(headers: &JetHTTPHeaders, name: &String) -> Vec<String> {
+fn jet_http_headers_all(headers: &JetHTTPHeaders, name: &str) -> Vec<String> {
     headers.all(name).into_iter().map(str::to_string).collect()
 }
 
 fn jet_http_headers_append(
     mut headers: JetHTTPHeaders,
-    name: &String,
-    value: &String,
+    name: &str,
+    value: &str,
 ) -> Result<JetHTTPHeaders, JetHTTPError> {
     headers.append(name, value).map_err(|_| JetHTTPError::InvalidHeader)?;
     Ok(headers)
@@ -1155,14 +1155,14 @@ fn jet_http_headers_append(
 
 fn jet_http_headers_set(
     mut headers: JetHTTPHeaders,
-    name: &String,
-    value: &String,
+    name: &str,
+    value: &str,
 ) -> Result<JetHTTPHeaders, JetHTTPError> {
     headers.set(name, value).map_err(|_| JetHTTPError::InvalidHeader)?;
     Ok(headers)
 }
 
-fn jet_http_headers_remove(mut headers: JetHTTPHeaders, name: &String) -> JetHTTPHeaders {
+fn jet_http_headers_remove(mut headers: JetHTTPHeaders, name: &str) -> JetHTTPHeaders {
     headers.remove(name);
     headers
 }
@@ -1275,10 +1275,10 @@ pub fn jet_http_reason_phrase(code: i64) -> String {
     phrase.to_string()
 }
 
-pub fn jet_http_basic_auth(user: &String, password: &String) -> String {
+pub fn jet_http_basic_auth(user: &str, password: &str) -> String {
     format!("Basic {user}:{password}")
 }
 
-pub fn jet_http_bearer_auth(token: &String) -> String {
+pub fn jet_http_bearer_auth(token: &str) -> String {
     format!("Bearer {token}")
 }

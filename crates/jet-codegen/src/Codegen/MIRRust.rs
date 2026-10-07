@@ -1287,6 +1287,7 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
                 let mode = match mode {
                     'O' => "owned",
                     'R' => "read",
+                    'S' => "text",
                     'W' => "write",
                     other => panic!("MIR history callable has unknown mode `{other}`"),
                 };
@@ -6551,6 +6552,7 @@ impl<'a> RustEmitter<'a> {
                 let callable = match mode {
                     'W' => format!("&{lifetime}mut {rendered}"),
                     'R' => format!("&{lifetime}{rendered}"),
+                    'S' => format!("&{lifetime}str"),
                     'O' => rendered.clone(),
                     other => panic!("MIR callable has unknown mode `{other}`"),
                 };
@@ -6630,9 +6632,18 @@ impl<'a> RustEmitter<'a> {
         access == MirAccess::Write || access == MirAccess::Read && !self.is_scalar(ty)
     }
 
+    /// A read-only text parameter borrows the contents, not the allocation.
+    /// Core-layer text already has its static borrowed scalar carrier.
+    fn read_text_parameter(&self, ty: &MirType, access: MirAccess) -> bool {
+        let ty = if ty.identity.is_some() { self.canonical_type(ty) } else { ty };
+        access == MirAccess::Read && matches!(ty.kind(), MirTypeKind::String) && !self.is_core_layer()
+    }
+
     fn callable_parameter_mode(&self, ty: &MirType, access: MirAccess) -> char {
         if access == MirAccess::Write {
             'W'
+        } else if self.read_text_parameter(ty, access) {
+            'S'
         } else if self.callable_parameter_borrowed(ty, access) {
             'R'
         } else {
@@ -6641,6 +6652,9 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn callable_parameter_type(&self, ty: &MirType, access: MirAccess) -> String {
+        if self.read_text_parameter(ty, access) {
+            return "&str".to_string();
+        }
         let rendered = self.rust_type(ty);
         match access {
             MirAccess::Write => format!("&mut {rendered}"),
@@ -6751,13 +6765,6 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
-    fn parameter_borrow_mask(&self, params: &[jet_foundation::MIR::MirParam]) -> Vec<bool> {
-        params
-            .iter()
-            .map(|param| self.parameter_borrowed(param))
-            .collect()
-    }
-
     /// A declared parameter's Rust type inside its own function signature.
     /// A window row (`collect_window_params`) is a `&mut [T]` slice.
     fn function_parameter_type(
@@ -6783,6 +6790,9 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn parameter_type(&self, param: &jet_foundation::MIR::MirParam) -> String {
+        if self.read_text_parameter(&param.ty, param.access) {
+            return "&str".to_string();
+        }
         let ty = self.rust_parameter_type(&param.ty);
         match param.access {
             MirAccess::Write => format!("&mut {ty}"),
@@ -6962,6 +6972,9 @@ impl<'a> RustEmitter<'a> {
         let ty = self.rust_parameter_type(&capture.ty);
         if self.capture_move_required(function, capture.slot) {
             return ty;
+        }
+        if self.read_text_parameter(&capture.ty, capture.access) {
+            return "&str".to_string();
         }
         match capture.access {
             MirAccess::Read => format!("&{ty}"),
@@ -7360,6 +7373,9 @@ impl<'a> RustEmitter<'a> {
         definition: &MirTraitDef,
         param: &MirParam,
     ) -> String {
+        if self.read_text_parameter(&param.ty, param.access) {
+            return "&str".to_string();
+        }
         let ty = self.synthetic_rollback_type(definition, &param.ty);
         match param.access {
             MirAccess::Write => format!("&mut {ty}"),
@@ -17627,11 +17643,7 @@ impl<'a> RustEmitter<'a> {
         Some(literal)
     }
 
-    /// A borrowed read of a String literal lends a process-lifetime String
-    /// built once on first use (`&'static String`, the type a `&String`
-    /// parameter takes), so a literal passed to a user read parameter never
-    /// allocates per call. A no-OS build has no `LazyLock`: it keeps the
-    /// per-use String.
+    /// Read String parameters borrow static literal text without an owner allocation.
     fn static_string_literal_reference(
         &self,
         function: &MirFunction,
@@ -17643,9 +17655,7 @@ impl<'a> RustEmitter<'a> {
             return None;
         }
         let text = self.literal_string_value(function, value)?;
-        Some(format!(
-            "{{ static __JET_LITERAL: ::std::sync::LazyLock<String> = ::std::sync::LazyLock::new(|| String::from({text:?})); &*__JET_LITERAL }}"
-        ))
+        Some(format!("{text:?}"))
     }
 
     fn borrowed_literal_symbol(symbol: &str) -> bool {
@@ -18349,6 +18359,9 @@ impl<'a> RustEmitter<'a> {
                         || self.literal_string_value(function, value).is_some()
                             && self.string_equality_operand(function, *op, *left, *right, value))
             }
+            MirOperation::BuildString { parts } => parts.iter().any(|part| {
+                matches!(part, MirStringPart::Value(operand) if *operand == value)
+            }),
             // Printing only reads its value (`print_borrows_value`): over a
             // stable place it prints the place; a literal prints its text.
             MirOperation::Semantic(MirSemanticOp::Print { value: printed, .. }) => {
@@ -19786,7 +19799,13 @@ impl<'a> RustEmitter<'a> {
                     local_slot(local.id)
                 );
             } else {
-                let ty = self.rust_local_type(&local.ty);
+                let ty = if self.ref_binding_local(function, local.id)
+                    && self.read_text_parameter(&local.ty, MirAccess::Read)
+                {
+                    "str".to_string()
+                } else {
+                    self.rust_local_type(&local.ty)
+                };
                 // A reference binding holds the payload it binds in place.
                 let borrow = if self.ref_binding_local(function, local.id) { "&" } else { "" };
                 let _ = writeln!(
@@ -20819,7 +20838,7 @@ impl<'a> RustEmitter<'a> {
                 .unwrap_or_else(|| self.constant(constant)),
             MirOperation::Unary { op, value } => self.unary(*op, format!("*({})", self.value_slot_reference(*value, false)), self.value_type(function, *value)),
             MirOperation::Binary { op, dispatch, left, right } => self.binary_with_dispatch(function, *op, dispatch, *left, *right, location.as_ref()),
-            MirOperation::BuildString { parts } => self.build_string(parts),
+            MirOperation::BuildString { parts } => self.build_string(function, parts),
             MirOperation::BuildList {
                 values,
                 trait_coercion,
@@ -21099,6 +21118,9 @@ impl<'a> RustEmitter<'a> {
     fn capture_expression(&self, function: &MirFunction, slot: usize) -> String {
         let capture = self.capture_param(function, slot);
         let name = self.capture_param_name(slot);
+        if self.read_text_parameter(&capture.ty, capture.access) {
+            return format!("{name}.to_owned()");
+        }
         match capture.access {
             MirAccess::Read | MirAccess::Write => format!("(*{name}).clone()"),
             MirAccess::Move => name,
@@ -21124,6 +21146,9 @@ impl<'a> RustEmitter<'a> {
         // owned copy.
         if self.window_params.contains(&(function.id, param.index)) {
             return format!("(*{name}).to_vec()");
+        }
+        if self.read_text_parameter(&param.ty, param.access) {
+            return format!("{name}.to_owned()");
         }
         match param.access {
             MirAccess::Write => format!("(*{name}).clone()"),
@@ -22975,7 +23000,7 @@ impl<'a> RustEmitter<'a> {
         )
     }
 
-    fn build_string(&self, parts: &[MirStringPart]) -> String {
+    fn build_string(&self, function: &MirFunction, parts: &[MirStringPart]) -> String {
         if self.is_core_layer() {
             let mut literal = String::new();
             for part in parts {
@@ -22995,6 +23020,11 @@ impl<'a> RustEmitter<'a> {
                     let _ = write!(out, " __jet_string.push_str({value:?});");
                 }
                 MirStringPart::Value(value) => {
+                    let ty = self.value_type(function, *value);
+                    if matches!(ty.kind(), MirTypeKind::String) || is_string_view_type(ty) {
+                        let _ = write!(out, " __jet_string.push_str({});", self.inspected_value_reference(function, *value));
+                        continue;
+                    }
                     // An interpolation hole is shown, never consumed: it
                     // borrows its value (`jet_show(&self)`).
                     let _ = write!(
@@ -23086,8 +23116,7 @@ impl<'a> RustEmitter<'a> {
                 if !row.capture_params.is_empty() {
                     panic!("MIR captured function called without a Closure operation");
                 }
-                let borrow_mask = self.parameter_borrow_mask(&row.params);
-                self.call_symbol_for_function(
+                self.call_declared_symbol(
                     function,
                     self.function_name(*id),
                     args,
@@ -23096,7 +23125,7 @@ impl<'a> RustEmitter<'a> {
                     } else {
                         type_args
                     },
-                    Some(&borrow_mask),
+                    &row.params,
                 )
             }
             MirCallee::Associated {
@@ -23304,8 +23333,7 @@ impl<'a> RustEmitter<'a> {
                 );
             }
         };
-        let borrow_mask = self.parameter_borrow_mask(&row.params);
-        self.call_symbol_for_function(
+        self.call_declared_symbol(
             caller,
             symbol,
             args,
@@ -23314,7 +23342,7 @@ impl<'a> RustEmitter<'a> {
             } else {
                 type_args
             },
-            Some(&borrow_mask),
+            &row.params,
         )
     }
     fn foreign_abi_name(&self, abi: &MirForeignAbi) -> String {
@@ -24547,7 +24575,7 @@ impl<'a> RustEmitter<'a> {
                     || declared
                         .get(index)
                         .is_some_and(|param| self.parameter_borrowed(param));
-                self.call_arg_for_function(caller, arg, borrowed)
+                self.call_arg_for_formal(caller, arg, &declared[index].ty, borrowed)
             })
             .collect::<Vec<_>>()
             .join(", ");
@@ -24639,7 +24667,7 @@ impl<'a> RustEmitter<'a> {
             .iter()
             .zip(&method.params)
             .map(|(arg, param)| {
-                self.call_arg_for_function(caller, arg, self.parameter_borrowed(param))
+                self.call_arg_for_formal(caller, arg, &param.ty, self.parameter_borrowed(param))
             })
             .collect::<Vec<_>>()
             .join(", ");
@@ -24982,7 +25010,9 @@ impl<'a> RustEmitter<'a> {
                         .as_ref()
                         .map(|metadata| metadata.conventions.as_slice());
                     let access = Self::callable_parameter_access(conventions, index);
-                    if self.callable_parameter_borrowed(ty, access) {
+                    if self.read_text_parameter(ty, access) {
+                        format!("__jet_compute_arg_{index}.to_owned()")
+                    } else if self.callable_parameter_borrowed(ty, access) {
                         format!("(*__jet_compute_arg_{index}).clone()")
                     } else {
                         format!("__jet_compute_arg_{index}")
@@ -25679,6 +25709,15 @@ impl<'a> RustEmitter<'a> {
                 };
                 if let Some(value) = native_int {
                     return value;
+                }
+                // Optional text kernels lend the payload; `.ok()` would move
+                // or copy the String and would produce Option<String>.
+                if !row.aot_direct && matches!(declared,
+                    Some(crate::AST::Type::Option(inner)) if matches!(inner.as_ref(), crate::AST::Type::String))
+                    && matches!(self.value_type(function, arg.value).kind(), MirTypeKind::Option(_))
+                {
+                    let reference = self.call_arg_for_function(function, arg, true);
+                    return format!("({reference}).as_ref().ok().map(String::as_str)");
                 }
                 let path_argument = self.core_call_path_argument(function, arg, declared);
                 let value = if path_argument {
@@ -27536,6 +27575,62 @@ impl<'a> RustEmitter<'a> {
             );
         reads_view.then(|| self.string_view_read(function, arg.value))
     }
+    /// An abstract formal borrows its owned carrier (`&T`), not the concrete
+    /// String read ABI (`&str`). Keep an available String owner; materialize
+    /// only when the source is itself a view and that owner does not exist.
+    fn call_arg_for_formal(
+        &self,
+        function: &MirFunction,
+        arg: &MirCallArg,
+        formal: &MirType,
+        borrowed: bool,
+    ) -> String {
+        let view_argument = self.string_view_argument(function, arg);
+        if !borrowed || arg.access != MirAccess::Read
+            || !self.read_text_parameter(self.value_type(function, arg.value), MirAccess::Read) && view_argument.is_none()
+            || self.read_text_parameter(formal, MirAccess::Read)
+        {
+            return self.call_arg_for_function(function, arg, borrowed);
+        }
+        if let Some(text) = self.literal_string_value(function, arg.value).filter(|_| !self.is_no_os()) {
+            return format!("{{ static __JET_LITERAL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {text:?}.to_owned()); &*__JET_LITERAL }}");
+        }
+        let place = arg.place.or_else(|| match self.value_definition(function, arg.value) {
+            Some(MirOperation::ReadPlace(place)) => Some(*place),
+            _ => None,
+        }).and_then(|place| self.place_row(function, place));
+        let view = view_argument.is_some()
+            || place.is_some_and(|place| place.projections.is_empty() && match place.base {
+                MirPlaceBase::Parameter(value) | MirPlaceBase::Capture(value) => {
+                    self.history_binding(value).is_some_and(|(_, access)| access == MirAccess::Read)
+                }
+                MirPlaceBase::Local(local) => self.ref_binding_local(function, local),
+                _ => false,
+            })
+            || matches!(self.value_definition(function, arg.value),
+                Some(MirOperation::Parameter { .. } | MirOperation::Capture { .. }))
+                && self.history_binding(arg.value).is_some_and(|(_, access)| access == MirAccess::Read);
+        let reference = self.call_arg_for_function(function, arg, true);
+        if view { format!("&({reference}).to_owned()") } else { reference }
+    }
+
+    fn call_declared_symbol(
+        &self,
+        function: &MirFunction,
+        symbol: String,
+        args: &[MirCallArg],
+        type_args: &[MirType],
+        params: &[jet_foundation::MIR::MirParam],
+    ) -> String {
+        let generic = if type_args.is_empty() { String::new() } else {
+            format!("::<{}>", type_args.iter().map(|ty| self.rust_type(ty)).collect::<Vec<_>>().join(", "))
+        };
+        let arguments = args.iter().zip(params).map(|(arg, param)| {
+            self.call_arg_for_formal(function, arg, &param.ty, self.parameter_borrowed(param))
+        }).collect::<Vec<_>>().join(", ");
+        split_local_field_borrows(&format!("{symbol}{generic}"), &arguments)
+    }
+
     fn call_arg_for_function(
         &self,
         function: &MirFunction,
@@ -27564,11 +27659,7 @@ impl<'a> RustEmitter<'a> {
         }
         if borrowed && arg.access == MirAccess::Read {
             if let Some(view) = self.string_view_argument(function, arg) {
-                // A string view (`&str`) lent to a `String` read parameter:
-                // the parameter's Rust type is `&String`, so the view is
-                // copied into a String the call borrows. A `&str` host
-                // parameter accepts the `&String` through deref coercion.
-                return format!("&{}({view})", MirViewCopyKind::String.symbol());
+                return view;
             }
         }
         if borrowed
@@ -27863,6 +27954,19 @@ impl<'a> RustEmitter<'a> {
                     .join(", ")
             )
         };
+        let query = symbol.rsplit("::").next().unwrap_or(symbol.as_str());
+        let generic = if !type_args.is_empty() && matches!(
+            query,
+            "jet_list_contains" | "jet_list_index_of" | "jet_list_count" |
+            "jet_list_count_kernel" | "jet_list_binary_search" | "jet_deque_contains" |
+            "jet_map_has_key" | "jet_map_contains_value" | "jet_map_contains_value_kernel" |
+            "jet_map_pop_kernel" | "jet_bag_has" | "jet_bag_count" | "jet_set_has" |
+            "jet_lru_has"
+        ) {
+            format!("{}, _>", generic.trim_end_matches('>'))
+        } else {
+            generic
+        };
         let shutdown_report_field = symbol.rsplit("::").next().unwrap_or(symbol.as_str())
             == "jet_http_shutdown_report_field";
         let fixed_integer_format = matches!(
@@ -28052,12 +28156,7 @@ impl<'a> RustEmitter<'a> {
             .params
             .iter()
             .map(|param| {
-                let ty = self.rust_local_type(&param.ty);
-                let ty = match param.access {
-                    MirAccess::Write => format!("&mut {ty}"),
-                    MirAccess::Read if self.parameter_borrowed(param) => format!("&{ty}"),
-                    MirAccess::Read | MirAccess::Move => ty,
-                };
+                let ty = self.callable_parameter_type(&param.ty, param.access);
                 format!("mut {}: {}", mangle(&param.name), ty)
             })
             .collect::<Vec<_>>()
@@ -28231,6 +28330,7 @@ impl<'a> RustEmitter<'a> {
         params: &[MirType],
         borrow_inputs: bool,
         adapt_unit_result: bool,
+        text_views: bool,
     ) -> String {
         let send_fn = matches!(
             self.value_type(function, callable).kind(),
@@ -28242,11 +28342,12 @@ impl<'a> RustEmitter<'a> {
             .iter()
             .enumerate()
             .map(|(index, ty)| {
-                format!(
-                    "__jet_callback_arg_{index}: {}{}",
-                    if borrow_inputs { "&" } else { "" },
-                    self.rust_type(ty)
-                )
+                let rendered = if borrow_inputs && text_views && self.read_text_parameter(ty, MirAccess::Read) {
+                    "&str".to_string()
+                } else {
+                    format!("{}{}", if borrow_inputs { "&" } else { "" }, self.rust_type(ty))
+                };
+                format!("__jet_callback_arg_{index}: {rendered}")
             })
             .collect::<Vec<_>>()
             .join(", ");
@@ -29888,7 +29989,7 @@ impl<'a> RustEmitter<'a> {
                     self.prelude_symbol(*call),
                     self.borrowed_value_reference(function, *guard, MirAccess::Read),
                     self.value_slot_reference(*condition, false),
-                    self.host_callback(function, *predicate, &params, true, false)
+                    self.host_callback(function, *predicate, &params, true, false, false)
                 )
             }
             MirSemanticOp::ConditionNotify {
@@ -30026,7 +30127,7 @@ impl<'a> RustEmitter<'a> {
                     .unwrap_or(emitted)
             }
             MirSemanticOp::HostBorrowCallback { callable, params } => {
-                self.host_callback(function, *callable, params, true, false)
+                self.host_callback(function, *callable, params, true, false, true)
             }
             MirSemanticOp::NumericMethod { call, receiver } => {
                 self.prelude_values(*call, &[*receiver])
@@ -31341,6 +31442,7 @@ impl<'a> RustEmitter<'a> {
                             params,
                             true,
                             adapt_unit_result,
+                            false,
                         );
                         let callback = if parallel_adapter
                             && matches!(
@@ -31414,6 +31516,7 @@ impl<'a> RustEmitter<'a> {
                 &params,
                 borrow_inputs,
                 adapt_unit_result,
+                false,
             );
             if row.member.starts_with("para_")
                 && matches!(
@@ -31518,13 +31621,20 @@ impl<'a> RustEmitter<'a> {
         let place = self
             .place_row(function, id)
             .unwrap_or_else(|| panic!("MIR place ID {:?} has no row", id));
+        if self.rust_copy_carrier(&place.ty) {
+            return format!("(*{})", self.place_reference(function, id, MirAccess::Read));
+        }
+        if is_string_view_type(&place.ty) {
+            return format!("({})", self.place_base(function, &place.base, false, &place.projections));
+        }
         if place.projections.is_empty() {
             match &place.base {
                 MirPlaceBase::Local(local) => {
                     // A reference binding reads (copies) its referent.
                     if self.ref_binding_local(function, *local) {
+                        let method = if self.read_text_parameter(&place.ty, MirAccess::Read) { "to_owned" } else { "clone" };
                         return format!(
-                            "(**{}.as_ref().expect(\"MIR local\")).clone()",
+                            "(**{}.as_ref().expect(\"MIR local\")).{method}()",
                             local_slot(*local)
                         );
                     }
@@ -31593,6 +31703,8 @@ impl<'a> RustEmitter<'a> {
         };
         let read = if range_window {
             format!("({value}).to_vec()")
+        } else if self.read_text_parameter(&place.ty, MirAccess::Read) {
+            format!("({value}).to_owned()")
         } else {
             format!("({value}).clone()")
         };
@@ -31666,8 +31778,10 @@ impl<'a> RustEmitter<'a> {
             MirPlaceBase::Local(local) => {
                 // Moving a reference binding's value out copies the referent.
                 if self.ref_binding_local(function, *local) {
+                    let ty = &function.locals.iter().find(|row| row.id == *local).expect("checked local").ty;
+                    let method = if self.read_text_parameter(ty, MirAccess::Read) { "to_owned" } else { "clone" };
                     return format!(
-                        "(*{}.take().expect(\"MIR local\")).clone()",
+                        "(*{}.take().expect(\"MIR local\")).{method}()",
                         local_slot(*local)
                     );
                 }
@@ -31919,10 +32033,8 @@ impl<'a> RustEmitter<'a> {
                     context,
                     ..
                 } => {
-                    let index = if *kind == MirIndexKind::Map && !mutable {
+                    let index = if *kind == MirIndexKind::Map {
                         self.value_borrow(*index)
-                    } else if *kind == MirIndexKind::Map {
-                        self.value_owned(*index)
                     } else {
                         self.index_operand(function, *index, *location)
                     };
@@ -32294,6 +32406,10 @@ impl<'a> RustEmitter<'a> {
         });
         if bitwise {
             format!("(*{borrow})")
+        } else if self.history_current_function.get().is_some_and(|id| {
+            self.read_text_parameter(self.value_type(self.function_row(id), value), MirAccess::Read)
+        }) {
+            format!("({borrow}).to_owned()")
         } else if copy_tags_enabled() {
             format!("({borrow}).clone()/*copy:{tag}*/")
         } else {

@@ -541,7 +541,7 @@ impl<V: __jet_Decode> __jet_Decode for JetMap<String, V> {
 // functions only expose that one implementation to generated MIR calls.
 fn jet_datatree_field(
     tree: &jet_std::DataTree,
-    name: &String,
+    name: &str,
 ) -> Result<jet_std::DataTree, Vec<jet_std::FieldError>> {
     <jet_std::DataTree as jet_std::JetDataTreeAccess>::field(tree, name)
 }
@@ -692,7 +692,7 @@ fn jet_enc_json_to_string_shape_pretty<T: __jet_Encode>(
     let projected = jet_std::jet_datatree_project(&value.jet_encode(), projection)?;
     Ok(jet_std::render_datatree_json(&projected, true, 0))
 }
-fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
+fn jet_enc_json_decode<T: __jet_Decode>(text: &str) -> Result<T, Vec<jet_std::FieldError>> {
     let tree = jet_std::parse_json_typed_datatree(text).map_err(|e| {
         let line = e.line.ok().unwrap_or(0);
         jet_std::FieldError::one(format!("invalid JSON (line {}): {}", line, e.reason))
@@ -701,7 +701,7 @@ fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std:
     T::jet_decode(&tree)
 }
 fn jet_data_json_decode<T: __jet_Decode>(
-    text: &String,
+    text: &str,
 ) -> Result<Vec<T>, Vec<jet_std::FieldError>> {
     jet_enc_json_decode::<Vec<T>>(text)
 }
@@ -717,8 +717,8 @@ fn jet_db_decode<T: __jet_Decode>(
 // CSV typed decode: header row maps columns to fields by name; each data row
 // becomes a DataTree::Object of Text cells, then decodes to `T`. A short row or a
 // per-row decode failures are typed `[FieldError]` values naming the 1-based row.
-fn jet_enc_csv_decode<T: __jet_Decode>(text: &String) -> Result<Vec<T>, Vec<jet_std::FieldError>> {
-    let rows = jet_ring_csv_parse(text, &",".to_string(), false, false)
+fn jet_enc_csv_decode<T: __jet_Decode>(text: &str) -> Result<Vec<T>, Vec<jet_std::FieldError>> {
+    let rows = jet_ring_csv_parse(text, ",", false, false)
         .map_err(jet_std::FieldError::one)?;
     jet_std::jet_enc_csv_decode_rows(
         rows,
