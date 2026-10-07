@@ -548,7 +548,8 @@ fn lower_record_load_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ha
     if lower_record_sequence_kind(p, ty) != None {
         sequence :: lower_pointer(&f)
         lower_call_runtime(&m, &f, getter, [LIRValueID]{handle}, Val(sequence))
-        return lower_record_sequence_from_runtime(p, &m, &f, ty, sequence, lower_address(&f, base, offset))
+        target :: lower_address(&f, base, offset)
+        return lower_record_sequence_from_runtime(p, &m, &f, ty, sequence, target)
     }
     if ty.kind == .Option(inner) {
         slot :: lower_pointer(&f)
@@ -673,7 +674,10 @@ fn lower_record_member_arg(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty
         holder = wrapper
         at = 0
     }
-    if lower_record_sequence_kind(p, ty) != None -> return lower_record_sequence_to_runtime(p, &m, &f, ty, lower_address(&f, holder, at))
+    if lower_record_sequence_kind(p, ty) != None {
+        source :: lower_address(&f, holder, at)
+        return lower_record_sequence_to_runtime(p, &m, &f, ty, source)
+    }
     if ty.kind == .Option(inner) {
         box :: lower_pointer(&f)
         lower_emit(&f, LIRInst.Load{dst: box, base: holder, offset: at})
@@ -753,7 +757,8 @@ fn lower_record_data_leaf(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &L
     lower_storage_into(p, &f, dst, result_ty)
     lower_copy_bytes(&f, dst, 0, payload, 0, 24)
     if view {
-        lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: lower_const(&f, 0)})
+        zero :: lower_const(&f, 0)
+        lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: zero})
     } else {
         lower_clear_at(p, &f, payload, 0, info.ty)
         lower_map_drop_value(p, &m, &f, value, tree_ty)
