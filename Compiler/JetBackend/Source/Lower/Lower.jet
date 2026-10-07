@@ -239,6 +239,13 @@ pub fn lir_lower_callable(program: MIRProgram, entry: MIRFunctionID) -> LIRLower
 }
 
 fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -> LIRLowering Never! {
+    // The frontend may erase browser init functions before native MIR is
+    // serialized. Their host requirement survives in the runtime-part facts.
+    loop part in program.facts.runtime_parts {
+        if part == .Browser {
+            return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: [LIRLoweringIssue]{LIRLoweringIssue{function: "entry preparation", message: "browser-hosted initialization and callbacks are not lowered for native O0 yet"}}, entry: None}
+        }
+    }
     prepared :: lower_prepare_entry(program, entry)
     loop function in program.functions {
         if function.web_marker != None {
