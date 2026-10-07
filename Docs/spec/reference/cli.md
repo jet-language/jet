@@ -392,3 +392,20 @@ source strings: security gates sort before knowledge and structure gates,
 duplicate facts merge all provenance, and unsafe rows retain their operation
 proofs and diagnostics. Package policy, invocation choices, and external
 lock/trust/forced-build writers enter through the driver's typed gate inputs.
+
+`jet inspect gates [<entry.jet>] [--kind <kind>] [--scope <scope>]`
+uses the canonical load-only gate query, not semantic body checking or emission.
+Without an explicit file, normal project entry selection still applies. Kind
+aliases follow the gate registry; scope matches the row's scope, domain, or
+source label case-insensitively (`all` selects every row). Filtering does not
+hide loader, obligation, or package-policy diagnostics.
+
+Human output includes provenance and operation proofs. Groups of at least
+16 non-security gates collapse to a count; security groups always retain every
+entry. JSON uses the shared `inspect.gates` status envelope, complete byte spans
+and line/column locations, nullable external locations, and alphabetically
+ordered kind counts. These are direct inspection reports, including under
+`--quiet`. Trust rows project typed records from the actual canonical trust
+store; invocation choices and package/lock facts feed the same ledger before
+its policy checks. No CLI source scan, manifest parser, or invented receipt
+replaces those providers.
