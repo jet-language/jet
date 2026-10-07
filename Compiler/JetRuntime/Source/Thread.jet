@@ -73,6 +73,8 @@ fn thread_register_tcb(tid: I64, tcb: I64) {
 // Bootstrap is exclusively for a newly spawned thread. Its inherited GS can
 // point to a parent's already-freed TCB; never read that base or its memory.
 #Export(c) fn jet_rt_thread_bootstrap() {
+    // Even an allocation failure must not let a trap read inherited GS.
+    thread_set_base(I64{0})
     tid :: thread_tid()
     tcb :: thread_new_tcb(tid)
     sync_mutex_lock(thread_tls_registry)
@@ -81,7 +83,11 @@ fn thread_register_tcb(tid: I64, tcb: I64) {
     thread_set_base(tcb)
 }
 
+// Host callers MUST pair explicit attach with detach before thread exit.
+// Otherwise a recycled Linux tid could match a stale live-registry row.
 #Export(c) fn jet_rt_thread_attach() {
+    // This path may also allocate; clear a foreign/inherited base first.
+    thread_set_base(I64{0})
     // Explicit host attach and repeated attach use only live registry records.
     // Linux gettid is the lookup key; a copied/stale GS base is irrelevant.
     tid :: thread_tid()
