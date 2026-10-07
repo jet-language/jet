@@ -773,6 +773,8 @@ fn push_embedded_devtools(out: &mut String) {
 }
 
 fn push_game_devtools_control_prelude(out: &mut String) {
+    // Native callbacks and relay functions are already emitted from
+    // DevtoolsNative.rs at Prelude root, not inside this control DTO module.
     let source = include_str!("../../../jet-foundation/src/DevtoolsControl.rs")
         .replace("crate::Devtools::", "super::");
     out.push_str("\nmod jet_devtools_control {\n");
@@ -781,15 +783,13 @@ fn push_game_devtools_control_prelude(out: &mut String) {
     out.push_str(
         "pub use jet_devtools_control::{\
 JetDevtoolsCommand, JetDevtoolsCommandReceipt, JetDevtoolsGameControlKind,\
-JetDevtoolsGameControlRequest, JetDevtoolsGameControlCallbackGuard,\
-jet_devtools_install_game_control_callback, jet_devtools_clear_commands,\
+JetDevtoolsGameControlRequest, jet_devtools_clear_commands,\
 jet_devtools_enqueue_command, jet_devtools_requeue_command_front,\
 jet_devtools_command_count, jet_devtools_poll_command,\
 jet_devtools_poll_database_explain, jet_devtools_enqueue_game_control,\
 jet_devtools_poll_game_control, jet_devtools_record_command_receipt,\
 jet_devtools_update_command_receipt, jet_devtools_poll_command_receipt,\
-jet_devtools_command_receipt_count, jet_devtools_clear_command_receipts,\
-jet_devtools_take_game_control_relays, jet_devtools_clear_game_control_relays};\n",
+jet_devtools_command_receipt_count, jet_devtools_clear_command_receipts};\n",
     );
 }
 fn push_game_debug_policy_const(out: &mut String, policy: &ReleaseDevtoolsPolicy) {

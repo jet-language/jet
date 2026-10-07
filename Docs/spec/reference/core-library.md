@@ -1947,6 +1947,8 @@ transcript without requiring a renderer or audio device.
 `Scene`, `Replay`, and `Backend` are opaque compiler-owned handles. Their
 registered constructors preserve runtime identity and state; they do not expose
 source-record construction as an alternate scene, replay, or backend model.
+Game-control callbacks and command relays use the shared native devtools
+boundary; the checked command DTOs and queues remain a separate control layer.
 
 ```jet
 use core.game as game
