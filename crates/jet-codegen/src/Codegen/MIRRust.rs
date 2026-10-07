@@ -3035,9 +3035,6 @@ fn wrap_cfg_not_release(out: &mut String, start: usize, indent: usize) {
 }
 
 
-fn is_source_owned_core_compute_shape(name: &str) -> bool {
-    name.starts_with("<corelib>/Core/compute::")
-}
 fn is_source_owned_core_net_shape(name: &str) -> bool {
     if !name.starts_with("<corelib>/") {
         return false;
@@ -3087,7 +3084,6 @@ fn core_native_probe_name(name: &str) -> &str {
     // Keep canonical Core source types when their shape differs from a
     // same-leaf native carrier.
     if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy"))
-        || is_source_owned_core_compute_shape(name)
         || is_source_owned_core_net_shape(name)
         || is_source_owned_core_web_query_shape(name)
         || crate::Codegen::core_source_record_owns_layout(name)
@@ -3112,8 +3108,7 @@ fn expression_path_generics(path: String) -> String {
 }
 
 fn has_native_type_projection(name: &str) -> bool {
-    if is_source_owned_core_compute_shape(name)
-        || is_source_owned_core_net_shape(name)
+    if is_source_owned_core_net_shape(name)
         || is_source_owned_core_web_query_shape(name)
         || crate::Codegen::core_source_record_owns_layout(name)
     {
@@ -3216,8 +3211,8 @@ mod core_native_projection_tests {
             "<corelib>/Core/compute::Core/compute/compute.jet::ComputeStream",
             "<corelib>/Core/compute::Core/compute/compute.jet::SparseTensor",
         ] {
-            assert_eq!(core_native_probe_name(source_type), source_type);
-            assert!(!is_canonical_core_native_type(source_type));
+            assert_eq!(core_native_probe_name(source_type), crate::Codegen::core_source_type_leaf(source_type));
+            assert!(is_canonical_core_native_type(source_type));
         }
         for source_record in [
             "<corelib>/Core/web::Core/web/query.jet::WebQuery",
@@ -21481,7 +21476,11 @@ impl<'a> RustEmitter<'a> {
                                     self.variant_path(Some(definition.id), &variant.name, false);
                                 match &variant.payload {
                                     MirVariantPayload::Unit => {
-                                        format!("({head}, {head}) => true")
+                                        if core_native_probe_name(&definition.key) == "ComputeError" {
+                                            format!("({head}(_), {head}(_)) => true")
+                                        } else {
+                                            format!("({head}, {head}) => true")
+                                        }
                                     }
                                     MirVariantPayload::Single(payload) => {
                                         let left_value = if definition
@@ -21769,7 +21768,11 @@ impl<'a> RustEmitter<'a> {
                 for (index, variant) in variants.iter().enumerate() {
                     let head = self.variant_path(Some(definition.id), &variant.name, false);
                     match &variant.payload {
-                        MirVariantPayload::Unit => ordinals.push(format!("{head} => {index}usize")),
+                        MirVariantPayload::Unit => ordinals.push(if core_native_probe_name(&definition.key) == "ComputeError" {
+                            format!("{head}(_) => {index}usize")
+                        } else {
+                            format!("{head} => {index}usize")
+                        }),
                         MirVariantPayload::Single(payload) => {
                             ordinals.push(format!("{head}(..) => {index}usize"));
                             let boxed = definition.boxed_edges.iter().any(|edge| edge == &variant.name);
@@ -22103,8 +22106,13 @@ impl<'a> RustEmitter<'a> {
                                 return false;
                             }
                             reads_name = true;
+                            let value = if core_native_probe_name(&definition.key) == "ComputeError" {
+                                format!("{head}(String::from({:?}))", variant.name)
+                            } else {
+                                head
+                            };
                             arms.push(format!(
-                                "if __jet_name.as_deref() == Some({wire:?}) {{ return Ok({head}); }}"
+                                "if __jet_name.as_deref() == Some({wire:?}) {{ return Ok({value}); }}"
                             ));
                         }
                         MirVariantPayload::Single(_) => {
@@ -22240,7 +22248,11 @@ impl<'a> RustEmitter<'a> {
                     }
                     arms.push(match &variant.payload {
                         MirVariantPayload::Unit => {
-                            format!("{head} => {root}jet_std::DataTree::Text({wire:?}.to_string()),")
+                            if core_native_probe_name(&definition.key) == "ComputeError" {
+                                format!("{head}(_) => {root}jet_std::DataTree::Text({wire:?}.to_string()),")
+                            } else {
+                                format!("{head} => {root}jet_std::DataTree::Text({wire:?}.to_string()),")
+                            }
                         }
                         MirVariantPayload::Single(_) => format!(
                             "{head}(__jet_value) => {root}jet_std::DataTree::Object(vec![({wire:?}.to_string(), {})]),",
@@ -26963,7 +26975,11 @@ impl<'a> RustEmitter<'a> {
         let native =
             owner.is_some_and(|owner| has_native_type_projection(&self.type_def(owner).key));
         let variant = if native {
-            variant.to_string()
+            if variant == "Shape" && owner.is_some_and(|owner| core_native_probe_name(&self.type_def(owner).key) == "ComputeError") {
+                "InvalidShape".to_string()
+            } else {
+                variant.to_string()
+            }
         } else {
             mangle_variant(variant)
         };
@@ -27031,7 +27047,11 @@ impl<'a> RustEmitter<'a> {
                 if !args.is_empty() {
                     panic!("MIR unit variant construction has payload arguments");
                 }
-                head
+                if core_native_probe_name(&self.type_def(owner).key) == "ComputeError" {
+                    format!("{head}(String::from({variant:?}))")
+                } else {
+                    head
+                }
             }
             MirVariantPayload::Single(payload) => {
                 if args.len() != 1 {
@@ -27123,6 +27143,7 @@ impl<'a> RustEmitter<'a> {
         }
         let head = self.variant_path(Some(effective_owner), variant, false);
         match self.enum_variant_payload(effective_owner, variant) {
+            MirVariantPayload::Unit if core_native_probe_name(&self.type_def(effective_owner).key) == "ComputeError" => format!("matches!({reference}, {head}(_))"),
             MirVariantPayload::Unit => format!("matches!({reference}, {head})"),
             MirVariantPayload::Single(_) if self.is_datatree_int(effective_owner, variant) => format!(
                 "{}jet_std::jet_datatree_is_int(&{reference})",

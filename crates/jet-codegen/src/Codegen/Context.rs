@@ -3278,6 +3278,13 @@ impl Cx {
 
     pub(crate) fn rust_type(&self, ty: &Type) -> String {
         let ty = self.expand_type_aliases(ty);
+        if let Type::Named(name) = &ty {
+            if name.starts_with("<corelib>/Core/compute::") {
+                if let Some(native) = compute_handle_rust_type(core_source_type_leaf(name)) {
+                    return format!("{}{native}", self.root_prefix);
+                }
+            }
+        }
         if let Some((base, _)) = ty.quantity_parts() {
             return self.rust_type(base);
         }

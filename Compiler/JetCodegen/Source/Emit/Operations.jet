@@ -913,7 +913,10 @@ fn jet_rust_emit_canonical_equality_definition(ctx: &JetRustEmitContext, definit
             loop variant in variants {
                 head :: jet_rust_emit_enum_variant_name(&ctx, definition.id, variant.name)
                 if variant.payload == {
-                    .Unit -> &arms.push("({head}, {head}) => true")
+                    .Unit -> {
+                        if jet_rust_emit_core_native_probe_name(definition.key) == "ComputeError" -> &arms.push("({head}(_), {head}(_)) => true")
+                        else -> &arms.push("({head}, {head}) => true")
+                    }
                     .Single(payload) -> {
                         boxed :: jet_rust_emit_equality_edge_boxed(definition, variant.name)
                         left_value :: if boxed -> "__jet_left.as_ref()" else -> "__jet_left"
@@ -2908,7 +2911,9 @@ fn jet_rust_emit_slice(ctx: &JetRustEmitContext, function: MIRFunction, call: MI
 }
 
 fn jet_rust_emit_enum_variant_name(ctx: &JetRustEmitContext, type_id: MIRTypeID, variant: String) -> String Never! {
-    "{jet_rust_emit_type_name(&ctx, type_id)}::{jet_rust_emit_variant_name(&ctx, type_id, variant)}"
+    row :: jet_rust_emit_type_index(ctx, type_id)
+    name :: if row == .Val(index) && jet_rust_emit_core_native_probe_name(ctx.program.types[index].key) == "ComputeError" && variant == "Shape" -> "InvalidShape" else -> jet_rust_emit_variant_name(&ctx, type_id, variant)
+    "{jet_rust_emit_type_name(&ctx, type_id)}::{name}"
 }
 
 // MIRRust enum_value: payloads follow the owner declaration's boxed recursive
@@ -2947,6 +2952,7 @@ fn jet_rust_emit_enum_value(ctx: &JetRustEmitContext, function: MIRFunction, own
                 if variant != "Empty" -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.UnsupportedOperation, "E0003", "Core HTTP Body variant has no native constructor projection", "Body constructs through empty/from_text/from_bytes", Val(function.span))
                 return "{jet_rust_emit_type_name(&ctx, owner)}::empty()"
             }
+            if jet_rust_emit_core_native_probe_name(ctx.program.types[row_index].key) == "ComputeError" -> return "{head}(String::from({jet_rust_emit_quote(variant)}))"
             return head
         }
         .Single(payload_type) -> {
@@ -3082,7 +3088,11 @@ fn jet_rust_emit_enum_variant_pattern(ctx: &JetRustEmitContext, owner: MIRTypeID
                     loop row in variants {
                         if row.name == variant {
                             if row.payload == {
-                                .Unit -> return jet_rust_emit_enum_variant_name(&ctx, owner, variant)
+                                .Unit -> {
+                                    head :: jet_rust_emit_enum_variant_name(&ctx, owner, variant)
+                                    if jet_rust_emit_core_native_probe_name(ctx.program.types[definition_index].key) == "ComputeError" -> return "{head}(_)"
+                                    return head
+                                }
                                 .Single(_) -> return "{jet_rust_emit_enum_variant_name(&ctx, owner, variant)}(_)"
                                 .Named(_) -> return "{jet_rust_emit_enum_variant_name(&ctx, owner, variant)} {{ .. }}"
                             }

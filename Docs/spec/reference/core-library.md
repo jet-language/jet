@@ -3344,6 +3344,14 @@ typed capability error rather than silently falling back. The source is
 [`Core/compute/compute.jet`](../../../Core/compute/compute.jet), with executable
 examples under [`Examples/features/tooling/`](../../../Examples/features/tooling/).
 This is one ranked Tensor operation family with an explicit placement contract (`D-COMPUTE1=D`; `D-COMPUTE-TYPE1=D`; `D-COMPUTE-PLACE1=D`). Gradient and value-and-gradient calls remain explicit, checked value-based transforms (`D-COMPUTE-GRAD1=E`).
+The registered compute vocabulary is the sole nominal owner of tensors,
+devices, streams, and transform receipts. Core source imports that vocabulary;
+it does not declare a second storage record or synthesize empty-record equality.
+Display, equality, checked serialization, device placement, and SIMD receipts
+use the real compute provider in both compiler halves. `profile_show` reports
+the dispatch and vector width that actually execute, not a hardcoded scalar
+receipt. The source LU solver reads tensors through `shape`, `to_list`, `device`,
+and `placement`, and does not construct replacement tensor storage.
 Tensor bracket write windows retain the checked range's inclusive/exclusive
 end and borrow the owner's first-axis storage. Their native call receives
 those bounds and the enclosing source location, rather than a copied slice.
