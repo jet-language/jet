@@ -160,6 +160,11 @@ joined carrier without recording a new Core error origin; the first user
 propagation site retains its ordinary journey behavior. There is no separate
 native runtime route or backend-local error policy.
 
+The absent-trigger golden also asserts the loaded source inventory: the Rust
+feed checks all artifact source files before reachability pruning, and the Jet
+feed checks the loader's exact generated Core source closure. An unnecessary
+`core.prelude` load is a test failure even if its functions would be pruned.
+
 Native sentry scopes and unsafe function gates save the canonical per-thread
 gate/fence state in caller-owned frame storage. Normal and stopped cleanup
 edges restore that state exactly once, including nested policy scopes; file
