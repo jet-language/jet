@@ -1280,6 +1280,72 @@ fn core_fixed_sig_impl(
     }
 
     match (module, name) {
+        ("core.mem", "__list_capacity") => Some((
+            vec![(read, Type::List(Box::new(Type::Named("__element".to_string()))))],
+            Some(Type::Int),
+        )),
+        ("core.mem", "__list_reserve_exact") => Some((
+            vec![
+                (AccessConvention::Write, Type::List(Box::new(Type::Named("__element".to_string())))),
+                (read, Type::Int),
+            ],
+            Some(Type::Bool),
+        )),
+        ("core.mem", "__type_size") => Some((vec![], Some(Type::Int))),
+        ("core.encoding", "__read_byte") => Some((
+            vec![(AccessConvention::Write, Type::Named("FileReader".to_string()))],
+            Some(result_ty(Type::Option(Box::new(u8_ty())), Type::Named("EncodingCause".to_string()))),
+        )),
+        ("core.encoding", "__write_bytes") => Some((
+            vec![(AccessConvention::Write, Type::Named("FileWriter".to_string())), (read, Type::View(Box::new(u8_ty())))],
+            Some(result_ty(unit.clone(), Type::Named("EncodingCause".to_string()))),
+        )),
+        ("core.encoding", "__flush") => Some((
+            vec![(AccessConvention::Write, Type::Named("FileWriter".to_string()))],
+            Some(result_ty(unit.clone(), Type::Named("EncodingCause".to_string()))),
+        )),
+        ("core.encoding", "__utf8_validate") => Some((
+            vec![(read, list_u8.clone())],
+            Some(result_ty(unit.clone(), Type::String)),
+        )),
+        ("core.encoding", "__bytes_into_text") => Some((
+            vec![(AccessConvention::Move, list_u8.clone())],
+            Some(Type::String),
+        )),
+        ("core.encoding", "__string_byte") => Some((
+            vec![(read, Type::String), (read, Type::Named("U64".to_string()))],
+            Some(u8_ty()),
+        )),
+        ("core.encoding", "__object_from_entries") => Some((
+            vec![(AccessConvention::Move, Type::List(Box::new(Type::Tuple(vec![
+                ("key".to_string(), Box::new(Type::String)),
+                ("value".to_string(), Box::new(Type::Named("DataTree".to_string()))),
+            ]))))],
+            Some(Type::Named("DataTree".to_string())),
+        )),
+        ("core.encoding", "__object_into_entries") => Some((
+            vec![(AccessConvention::Move, Type::Named("DataTree".to_string()))],
+            Some(Type::List(Box::new(Type::Tuple(vec![
+                ("key".to_string(), Box::new(Type::String)),
+                ("value".to_string(), Box::new(Type::Named("DataTree".to_string()))),
+            ])))),
+        )),
+        ("core.encoding", "__write_text") => Some((
+            vec![(AccessConvention::Write, Type::Named("FileWriter".to_string())), (read, Type::String)],
+            Some(result_ty(unit.clone(), Type::Named("EncodingCause".to_string()))),
+        )),
+        ("core.encoding", "__text_into_bytes") => Some((
+            vec![(AccessConvention::Move, Type::String)],
+            Some(list_u8.clone()),
+        )),
+        ("core.encoding", "__typed_text") => Some((
+            vec![(AccessConvention::Move, Type::String)],
+            Some(Type::Named("DataTree".to_string())),
+        )),
+        ("core.encoding", "__tree_tag") => Some((
+            vec![(read, Type::Named("DataTree".to_string()))],
+            Some(u8_ty()),
+        )),
         ("core.files", "scope") => Some((
             vec![(read, Type::Named(Syntax::TYPE_AUTHORITY.to_string()))],
             Some(Type::Named("FileScope".to_string())),
