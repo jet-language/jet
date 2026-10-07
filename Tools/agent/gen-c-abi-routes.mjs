@@ -609,7 +609,6 @@ function paramCarrier(ty, path) {
   const one = (jet, cty, expr) => ({ jet, ctys: [cty], expr: ([a]) => expr(a) });
   if (ty === "&str") return one("Text", "JetCString", (a) => `view(${a})`);
   if (ty === "&String") return one("Text", "JetCString", (a) => `&borrowed(${a})`);
-  if (ty === "Option<&String>") return one("Text", "JetCString", (a) => `(!${a}.is_null()).then(|| borrowed(${a})).as_ref()`);
   if (ty === "String") return one("Text", "JetCString", (a) => `view(${a}).to_owned()`);
   if (ty === "&i64") return one("Word", "i64", (a) => `&${a}`);
   // The prelude Ordering (by value or borrowed): the Jet enum's variant index.
