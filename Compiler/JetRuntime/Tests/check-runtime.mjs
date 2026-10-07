@@ -12,14 +12,16 @@ const args = process.argv.slice(2);
 const output = args.shift();
 const assembleOnly = args.includes("--assemble-only");
 const tests = args.includes("--tests");
-if (!output || args.some((arg) => arg !== "--assemble-only" && arg !== "--tests") || new Set(args).size !== args.length) {
-  throw new Error("usage: check-runtime.mjs OUT [--assemble-only] [--tests]");
+const textTests = args.includes("--text-tests");
+if (!output || args.some((arg) => !["--assemble-only", "--tests", "--text-tests"].includes(arg)) || new Set(args).size !== args.length || (tests && textTests)) {
+  throw new Error("usage: check-runtime.mjs OUT [--assemble-only] [--tests|--text-tests]");
 }
 const out = resolve(output);
 const paths = readFileSync(join(root, "Compiler/JetRuntime/sources.list"), "utf8").split("\n")
   .map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
 if (!paths.length || new Set(paths).size !== paths.length) throw new Error("empty or duplicate runtime source manifest");
 if (tests) paths.push("Compiler/JetRuntime/Tests/AllocTests.jet");
+if (textTests) paths.push("Compiler/JetRuntime/Tests/TextTests.jet");
 const uses = new Set();
 const bodies = paths.map((path) => {
   const lines = readFileSync(join(root, path), "utf8").split("\n");
