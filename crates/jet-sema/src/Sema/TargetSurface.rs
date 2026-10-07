@@ -26,6 +26,22 @@ pub fn check_target_surface(bundle: &ProgramBundle, target: &str) -> Vec<Diagnos
     let socket_target = socket_target_supported(target);
     let web_target =
         target == Syntax::BUILD_TARGET_WEB || bundle.web_partition_enforced;
+    let web_unsupported = if web_target {
+        bundle.used_core.iter().filter_map(|usage| {
+            let (module, member) = usage.split_once("::")?;
+            let unsupported = match module {
+                "core.sys" => matches!(member, "get" | "getenv" | "set" | "unset" | "vars" | "decode"
+                    | "home_dir" | "temp_dir" | "expand" | "env_get"),
+                "core.auth" => matches!(member, "register_user" | "password_login" | "session_validate"
+                    | "magic_link_issue" | "magic_link_consume" | "oauth_begin" | "oauth_finish"),
+                "core.testing" => member.starts_with("__fault_"),
+                _ => false,
+            };
+            unsupported.then(|| format!("{module}.{member}"))
+        }).collect::<BTreeSet<_>>()
+    } else {
+        BTreeSet::new()
+    };
     // D-PLUGIN-AUTHORITY1: the browser web backend cannot host the native
     // Wasmtime Component Model boundary. Reachability comes from sema's
     // canonical Core-use set, not from an unused import.
@@ -49,12 +65,22 @@ pub fn check_target_surface(bundle: &ProgramBundle, target: &str) -> Vec<Diagnos
         && wasip2_unsupported.is_empty()
         && wasip2_unsupported_surfaces.is_empty()
         && !plugin_reachable
+        && web_unsupported.is_empty()
     {
         return Vec::new();
     }
 
     let mut seen = BTreeSet::<(String, usize, usize, String)>::new();
     let mut diagnostics = Vec::new();
+    for operation in &web_unsupported {
+        diagnostics.push(Diagnostic::error(
+            "E-WEB-TIR-UNSUPPORTED",
+            format!("Web output cannot compile `{operation}` yet."),
+            "this Core operation needs a host provider that the browser target does not supply".into(),
+            "move this operation behind a native or server boundary".into(),
+            None,
+        ));
+    }
     if plugin_reachable {
         let mut anchored = false;
         for module in &bundle.modules {
