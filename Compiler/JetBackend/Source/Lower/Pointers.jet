@@ -3,7 +3,7 @@
 // every raw-addressed root a cell) and registers it with the memory sentries;
 // `p.*` checks the read with the same sentry kernel before it loads, as the
 // generated Rust's jet_sentry_address_of / jet_sentry_read do (Mem.rs).
-use jet_foundation.[MIRInstruction, MIRPlaceID, MIRProgram, MIRType, MIRValueID, mir_type_display_name]
+use jet_foundation.[MIRInstruction, MIRPlaceID, MIRProgram, MIRScope, MIRType, MIRUnsafeGate, MIRValueID, mir_type_display_name]
 
 fn lower_ptr_element(ty: MIRType) -> MIRType? {
     if ty.kind == .Apply(name, args) {
@@ -59,4 +59,75 @@ fn lower_ptr_deref(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
         return lower_copy_bytes(&f, dst, 0, pointer, 0, size.size)
     }
     lower_emit(&f, LIRInst.Load{dst: dst, base: pointer, offset: 0})
+}
+
+// Sentry guards save the per-thread gate/fence state in caller-owned frame
+// storage. ScopeExit's MIR cleanup chain includes normal and stopped exits.
+fn lower_sentry_save(f: &LowerFunction) -> LIRValueID Never! {
+    save :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: save, size: 64, align: 8})
+    save
+}
+
+fn lower_sentry_gate_enter(m: &LowerModule, f: &LowerFunction, save: LIRValueID, gate: MIRUnsafeGate) Never! {
+    args := [LIRValueID]{save, lower_const(&f, if gate.enabled -> 1 else -> 0), lower_const(&f, if gate.fenced -> 1 else -> 0)}
+    loop arg in lower_static_text(&m, &f, gate.file) -> &args.push(arg)
+    &args.push(lower_const(&f, gate.line))
+    loop arg in lower_static_text(&m, &f, gate.reason) -> &args.push(arg)
+    lower_call_runtime(&m, &f, "jet_rt_sentry_scope_enter", args, None)
+}
+
+fn lower_sentry_fact(row: MIRScope, key: String) -> String? Never! {
+    loop fact in row.facts {
+        if fact.key == key -> return Val(fact.value)
+    }
+    None
+}
+
+fn lower_sentry_bool(row: MIRScope, key: String, fallback: Bool) -> Bool Never! {
+    value :: lower_sentry_fact(row, key) ?? return fallback
+    if value == "true" -> return true
+    if value == "false" -> return false
+    fallback
+}
+
+fn lower_sentry_frame(c: LowerContext, m: &LowerModule, f: &LowerFunction) Never! {
+    loop scope in c.mir.scopes {
+        if scope.kind != .Unsafe && scope.kind != .Policy -> next
+        save :: lower_sentry_save(&f)
+        &f.sentry_scopes.add(scope.id.value, save.value).drop("scope IDs are unique")
+    }
+    if c.mir.unsafe_gate == .Val(gate) {
+        save :: lower_sentry_save(&f)
+        f.sentry_function = Val(save)
+        lower_sentry_gate_enter(&m, &f, save, gate)
+    }
+}
+
+fn lower_sentry_function_leave(m: &LowerModule, f: &LowerFunction) Never! {
+    if f.sentry_function == .Val(save) -> lower_call_runtime(&m, &f, "jet_rt_sentry_scope_leave", [LIRValueID]{save}, None)
+}
+
+fn lower_sentry_scope(c: LowerContext, m: &LowerModule, f: &LowerFunction, row: MIRScope, enter: Bool) Never! {
+    index :: f.sentry_scopes.get(row.id.value) ?? return lower_fail(&m, &f, "sentry scope has no frame save slot")
+    save :: LIRValueID{value: index}
+    if !enter -> return lower_call_runtime(&m, &f, "jet_rt_sentry_scope_leave", [LIRValueID]{save}, None)
+    if row.kind == .Policy {
+        enabled :: lower_const(&f, if lower_sentry_bool(row, "sentry_enabled", false) -> 1 else -> 0)
+        return lower_call_runtime(&m, &f, "jet_rt_sentry_policy_enter", [LIRValueID]{save, enabled}, None)
+    }
+    gate := c.mir.unsafe_gate ?? MIRUnsafeGate{file: "", line: 0, reason: "", enabled: true, fenced: false}
+    gate.file = lower_sentry_fact(row, "sentry_file") ?? gate.file
+    if lower_sentry_fact(row, "sentry_line") == .Val(text) {
+        line :: Int.parse(text) ?? {
+            lower_fail(&m, &f, "checked sentry line fact cannot be parsed")
+            return
+        }
+        if line < 0 || line > 4294967295 -> return lower_fail(&m, &f, "checked sentry line fact is outside the runtime ABI")
+        gate.line = line
+    }
+    gate.enabled = lower_sentry_bool(row, "sentry_enabled", gate.enabled)
+    gate.fenced = lower_sentry_bool(row, "sentry_fenced", gate.fenced)
+    gate.reason = row.name ?? gate.reason
+    lower_sentry_gate_enter(&m, &f, save, gate)
 }
