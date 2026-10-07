@@ -377,6 +377,25 @@ fn lower_static_fixups(m: &LowerModule, f: &LowerFunction) Never! {
     }
 }
 
+// Releases only the canonical owners lower_static_fixups created, not the
+// frozen storage or the borrowed carriers reachable through its pointer
+// relocations. Each slot is cleared after its load. An exact-Int fixup holds
+// a word whose drop is trivial at O0 (lower_drop), so only Strings release.
+fn lower_static_release(m: &LowerModule, f: &LowerFunction) Never! {
+    fixups :: ~m.static_fixups
+    loop fixup in fixups {
+        if fixup.constructor != "jet_rt_string_from_static" -> next
+        handle :: lower_pointer(&f)
+        object :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.DataAddress{dst: object, data: fixup.object})
+        lower_emit(&f, LIRInst.Load{dst: handle, base: object, offset: fixup.offset})
+        empty :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Const{dst: empty, value: 0})
+        lower_emit(&f, LIRInst.Store{base: object, offset: fixup.offset, value: empty})
+        lower_call_runtime(&m, &f, "jet_rt_string_drop", [LIRValueID]{handle}, None)
+    }
+}
+
 // Lists.jet clone already copies into a fresh header/buffer and never frees its
 // source. Drop must skip the entire frozen tree, not just the data-buffer free.
 fn lower_static_list_drop_guard(f: &LowerFunction, cap: LIRValueID, data: LIRValueID, done: LIRBlockID) Never! {
