@@ -72,8 +72,11 @@ fn lower_route_symbol(row: MIRPreludeCall) -> String Never! {
 
 fn lower_string_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, receiver: MIRValueID, receiver_place: MIRPlaceID?, args: [MIRValueID], aggregate_fields: [MIRFieldID]?) -> Bool Never! {
     receiver_ty :: lower_value_type(c, receiver) ?? return false
-    if !lower_string_type(receiver_ty) || row.family != .BuiltinMethod || row.module_name != "core.builtin" -> return false
+    if !lower_string_type(receiver_ty) || row.family != .BuiltinMethod -> return false
     symbol :: mir_symbol_name(row.symbol)
+    // String.equal has the same borrowed equality as `==`, under core.compare.
+    is_equal :: row.module_name == "core.compare" && row.member == "eq" && symbol == "jet_eq"
+    if !is_equal && row.module_name != "core.builtin" -> return false
     if row.member == "string_cut_last" || row.member == "string_split_once" -> return lower_string_cut(p, c, &m, &f, instruction, row, receiver, args, aggregate_fields)
     is_len :: (row.member == "len" || row.member == "len_string") && symbol == "jet_char_len"
     is_bytes :: row.member == "count_bytes" && symbol == "jet_string_count_bytes"
@@ -81,7 +84,7 @@ fn lower_string_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
     is_contains :: row.member == "contains" && symbol == "jet_string_contains"
     is_prefix :: row.member == "string_starts_with" && symbol == "jet_string_starts_with"
     is_suffix :: row.member == "string_ends_with" && symbol == "jet_string_ends_with"
-    if !is_len && !is_bytes && !is_empty && !is_contains && !is_prefix && !is_suffix -> return false
+    if !is_len && !is_bytes && !is_empty && !is_contains && !is_prefix && !is_suffix && !is_equal -> return false
     arity :: if is_len || is_bytes || is_empty -> 1 else -> 2
     if row.abi != .Value || row.signature.arity != arity || args.len() != arity - 1 || aggregate_fields != None {
         lower_fail(&m, &f, "this String builtin method shape is not lowered at O0 yet")
@@ -124,7 +127,7 @@ fn lower_string_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Lowe
     }
     // Rust MIRRust.rs:26912-26916 adapts jet_char_len's native integer to Int.
     // A scalar count cannot exceed the allocated String's inline-range byte length.
-    lower_call_runtime(&m, &f, symbol, lowered, Val(dst))
+    lower_call_runtime(&m, &f, if is_equal -> "jet_rt_string_eq" else -> symbol, lowered, Val(dst))
     true
 }
 
