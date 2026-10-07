@@ -1528,11 +1528,13 @@ fn jet_test_contract_eligibility<P>(eligible: P) -> Result<bool, String>
 where
     P: FnOnce() -> JetOutcome<bool, JetErr>,
 {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(eligible)) {
-        Ok(Ok(eligible)) => Ok(eligible),
-        Ok(Err(error)) => Err(format!("{:?}", error)),
-        Err(payload) => jet_test_panic_error(payload).map(|()| true),
-    }
+    jet_evidence_with_property_case(|| {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(eligible)) {
+            Ok(Ok(eligible)) => Ok(eligible),
+            Ok(Err(error)) => Err(format!("{:?}", error)),
+            Err(payload) => jet_test_panic_error(payload).map(|()| true),
+        }
+    })
 }
 
 fn jet_test_run_property<F>(
@@ -1542,7 +1544,9 @@ fn jet_test_run_property<F>(
 where
     F: FnOnce() -> Result<(), String>,
 {
-    jet_test_run(expected_failure, run).map(|()| JetPropertyCaseResult::Accepted)
+    jet_evidence_with_property_case(|| {
+        jet_test_run(expected_failure, run).map(|()| JetPropertyCaseResult::Accepted)
+    })
 }
 /// Deterministic splitmix64 step, used by `jet test --shuffle` to reorder tests.
 /// Independent of `JetRng`/`PROP_PRELUDE` (that runtime is only emitted when the

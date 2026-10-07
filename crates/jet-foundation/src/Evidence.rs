@@ -713,6 +713,15 @@ impl EvidenceRecord {
     pub fn set_facet(&mut self, facet: EvidenceFacet) {
         self.facet = facet;
     }
+
+    /// A runtime observation retained by the property harness, rather than an
+    /// uncaught producer stop. The diagnostic and failed outcome stay intact.
+    pub fn is_caught_property_case(&self) -> bool {
+        matches!(self.kind, EvidenceKind::Runtime | EvidenceKind::Contract)
+            && self.attachments.iter().any(|attachment| {
+                attachment.name == "caught_by" && attachment.value == "property_case"
+            })
+    }
     pub fn with_derivation(mut self, derivation: &DerivationRecord) -> Self {
         self.derivation = Some(derivation.reference());
         self
@@ -774,6 +783,10 @@ impl EvidenceRecord {
             self.count,
             &self.detail,
         );
+        if self.is_caught_property_case() {
+            self.identity.evidence_id =
+                stable_token(&[&self.identity.evidence_id, "caught_by", "property_case"]);
+        }
         self
     }
 
@@ -1302,6 +1315,7 @@ impl From<EvidenceExpectationError> for EvidenceMergeError {
 std::thread_local! {
     static TEST_EXPECTATION: std::cell::Cell<EvidenceExpectation> =
         const { std::cell::Cell::new(EvidenceExpectation::Ordinary) };
+    static TEST_PROPERTY_CASE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Keep evidence from one test attached to its declared expectation, including
@@ -1322,6 +1336,20 @@ pub fn jet_evidence_with_expectation<R>(expected_failure: bool, run: impl FnOnce
     run()
 }
 
+/// Attach raw observations to the property case that catches their stop.
+/// Restore the context on unwind as well, so a later ordinary test cannot
+/// inherit the property's capture boundary.
+pub fn jet_evidence_with_property_case<R>(run: impl FnOnce() -> R) -> R {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TEST_PROPERTY_CASE.with(|current| current.set(self.0));
+        }
+    }
+    let _restore = Restore(TEST_PROPERTY_CASE.with(|current| current.replace(true)));
+    run()
+}
+
 
 pub fn write_record_from_codes(
     path: &std::path::Path,
@@ -1337,6 +1365,18 @@ pub fn write_record_from_codes(
         record
             .set_expectation(TEST_EXPECTATION.with(|expectation| expectation.get()))
             .map_err(|error| error.to_string())?;
+    }
+    if matches!(record.kind, EvidenceKind::Runtime | EvidenceKind::Contract)
+        && TEST_PROPERTY_CASE.with(std::cell::Cell::get)
+    {
+        record
+            .attachments
+            .push(EvidenceAttachment::new("caught_by", "property_case"));
+        // The same site can stop in both a sampled case and an ordinary test.
+        // Those observations have different capture provenance, so they must
+        // remain distinct records rather than conflict during report merging.
+        record.identity.evidence_id =
+            stable_token(&[&record.identity.evidence_id, "caught_by", "property_case"]);
     }
     let derivation = record.checked_derivation();
     record.set_derivation(&derivation);

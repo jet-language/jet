@@ -95,6 +95,11 @@ E3005, terminate that child with exit 70, mark declarations trapped in that
 child as skipped with `prior_runtime_panic`, and do not stop independent later
 members or budgets.
 
+Property cases, including generated contract samples, catch their stops as
+failed cases with exit 1. Their typed runtime observations retain the original
+diagnostic and a `caught_by: property_case` attachment; they are not uncaught
+producer stops. This capture context ends before the next ordinary test.
+
 **Reason.** Caught assertions are test outcomes; an uncaught stop is a runtime
 boundary. Treating them differently keeps the exit status and evidence ledger
 honest.
@@ -223,7 +228,10 @@ index keys use `artifact_id`, not `report_id`: repeated runs and presentation
 lenses preserve semantic report identity while retaining different delivery
 links without replacing immutable evidence. Test evidence is likewise stored
 and indexed by the hash of its encoded bytes, independently of its semantic
-producer identity.
+producer identity. The record identity uses the report's source revision,
+toolchain, and producer in both the test child and the proof parent; the
+parent's broader target identity belongs to its proof record, not to a second
+publication of the same evidence bytes.
 
 **Rule.** A-canonical JSON is UTF-8 without a BOM or insignificant whitespace,
 with one trailing LF, recursively Unicode-scalar-sorted object keys, preserved
