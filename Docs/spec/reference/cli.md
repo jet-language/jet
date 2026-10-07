@@ -218,6 +218,23 @@ the full package name, version, and lock fingerprint; a concurrent publisher
 must have the same content hash. Source-store entries are separate from the
 machine-wide artifact store and canonical Hangar.
 
+Fetch resolves the package graph before publishing `.jet/lock`. Package
+fingerprints include sorted dependency fingerprints and the frozen public
+function signatures; release headers do not change the capability component.
+Registry candidates bind the immutable source hash, signed index, OCI evidence,
+dependency-role metadata, source policy and advisory authorization before
+Hangar ingest. A selective update retains unrelated machine and semantic
+records. The machine graph and its resolution rationales are serialized in one
+atomic lock publication, after foreign provider bindings have been verified.
+Locked fetch verifies exact source identities and uses the existing registry
+checkpoint without downloading an index.
+
+Git validates the complete ordered DNS answer set, rejects the whole set if
+any address is non-public, and pins subprocess connections to the validated
+address. Local Git sources and private cache stages are passed as held
+directory descriptors. If the host cannot transfer those descriptors to a
+child, fetch refuses; a pathname is not an equivalent authority.
+
 Checked source transactions hold the project, destination parents, and
 `.jet/codemods` directory. Destinations and staged files must be regular,
 single-link files with the identities observed before publication. The
