@@ -1539,6 +1539,78 @@ fn core_fixed_sig_impl(
         ("core.sys", "__getppid" | "__getuid" | "__geteuid" | "__getgid" | "__getegid" | "__getpgrp") => {
             Some((vec![], Some(Type::Option(Box::new(Type::Int)))))
         }
+        ("core.sys", "__cpu_count" | "__groups_count") => Some((vec![], Some(Type::Option(Box::new(Type::Int))))),
+        ("core.sys", "__executable") => Some((vec![], Some(Type::Option(Box::new(Type::String))))),
+        ("core.sys", "__umask") => Some((vec![(read, Type::Int)], Some(Type::Option(Box::new(Type::Int))))),
+        ("core.sys", "__errno_text") => Some((vec![(read, Type::Int)], Some(Type::String))),
+        ("core.sys", "__groups_fill") => Some((vec![(read, Type::Int)], Some(Type::Tuple(vec![
+            ("count".into(), Box::new(Type::Int)),
+            ("values".into(), Box::new(Type::List(Box::new(Type::Int)))),
+        ])))),
+        ("core.sys", "__loadavg") => Some((vec![], Some(Type::Tuple(vec![
+            ("available".into(), Box::new(Type::Bool)),
+            ("count".into(), Box::new(Type::Int)),
+            ("first".into(), Box::new(Type::Float)),
+            ("second".into(), Box::new(Type::Float)),
+            ("third".into(), Box::new(Type::Float)),
+        ])))),
+        ("core.sys", "__times") => Some((vec![], Some(Type::Tuple(vec![
+            ("available".into(), Box::new(Type::Bool)),
+            ("user".into(), Box::new(Type::Int)),
+            ("system".into(), Box::new(Type::Int)),
+            ("child_user".into(), Box::new(Type::Int)),
+            ("child_system".into(), Box::new(Type::Int)),
+            ("elapsed".into(), Box::new(Type::Int)),
+            ("ticks".into(), Box::new(Type::Int)),
+        ])))),
+        ("core.sys", "__getpgid" | "__getsid" | "__getpriority" | "__setuid" | "__setgid"
+            | "__setpriority" | "__setpgid" | "__kill" | "__fork" | "__setsid" | "__setpgrp"
+            | "__utime" | "__mkfifo" | "__initgroups" | "__wait" | "__waitpid" | "__pipe") => {
+            let params = match name {
+                "__getpgid" | "__getsid" | "__getpriority" | "__setuid" | "__setgid" => vec![(read, Type::Int)],
+                "__setpriority" | "__setpgid" | "__kill" | "__waitpid" => vec![(read, Type::Int), (read, Type::Int)],
+                "__utime" => vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
+                "__mkfifo" | "__initgroups" => vec![(read, Type::String), (read, Type::Int)],
+                _ => vec![],
+            };
+            let mut fields = vec![
+                ("available".into(), Box::new(Type::Bool)),
+                ("value".into(), Box::new(Type::Int)),
+                ("errno".into(), Box::new(Type::Int)),
+            ];
+            if matches!(name, "__wait" | "__waitpid") {
+                fields.push(("status".into(), Box::new(Type::Int)));
+            } else if name == "__pipe" {
+                fields.push(("read_fd".into(), Box::new(Type::Int)));
+                fields.push(("write_fd".into(), Box::new(Type::Int)));
+            }
+            Some((params, Some(Type::Tuple(fields))))
+        }
+        ("core.process", "__spec_fields") => Some((vec![
+            (read, Type::List(Box::new(Type::String))),
+            (read, Type::Option(Box::new(Type::String))),
+            (read, Type::Bool),
+            (read, Type::List(Box::new(Type::String))),
+            (read, Type::List(Box::new(Type::String))),
+            (read, Type::List(Box::new(Type::String))),
+            (read, Type::Option(Box::new(Type::Named("ProcessStreamMode".into())))),
+            (read, Type::Named("ProcessStreamMode".into())),
+            (read, Type::Named("ProcessStreamMode".into())),
+            (read, Type::Option(Box::new(Type::Int))),
+            (read, Type::Option(Box::new(Type::Int))),
+            (read, Type::Option(Box::new(Type::Int))),
+            (read, Type::Option(Box::new(Type::Int))),
+            (read, Type::Option(Box::new(Type::Int))),
+            (read, Type::Bool),
+            (read, Type::Option(Box::new(Type::Named("TerminalPolicy".into())))),
+            (read, Type::Option(Box::new(Type::String))),
+        ], Some(Type::Named("ProcessSpec".into())))),
+        ("core.files", "__link_reader_at") => Some((vec![
+            (read, Type::Named("FileReader".into())), (read, Type::Int), (read, Type::String),
+        ], Some(Type::Tuple(vec![
+            ("available".into(), Box::new(Type::Bool)), ("held".into(), Box::new(Type::Bool)),
+            ("value".into(), Box::new(Type::Int)), ("errno".into(), Box::new(Type::Int)),
+        ])))),
         ("core.sys", "umask" | "exitcode") => Some((vec![(read, Type::Int)], Some(Type::Int))),
         ("core.sys", "success") => Some((vec![(read, Type::Int)], Some(Type::Bool))),
         ("core.sys", "uptime") => Some((vec![], Some(Type::Float))),

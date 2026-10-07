@@ -1154,6 +1154,26 @@ pub(crate) fn apply_files_leaf(
     let unit = |_: ()| CtValue::Unit;
     let run = || -> Result<CtValue, String> {
         Ok(match method {
+            "__link_reader_at" => {
+                let handle = args.first().and_then(file_reader_handle).ok_or_else(|| {
+                    format!("core.files.{method} argument 0 must be a FileReader")
+                })?;
+                let reader = handle.0.lock().unwrap_or_else(|poison| poison.into_inner());
+                let reader = reader.as_ref().ok_or_else(|| {
+                    "compiler-private link requires a live checked FileReader".to_string()
+                })?;
+                let (available, held, value, errno) =
+                    text_kernel::jet_files_link_reader_at_raw(reader, int(1)?, &text(2)?);
+                CtValue::Struct {
+                    type_name: "(available,held,value,errno)".to_string(),
+                    fields: vec![
+                        ("available".to_string(), CtValue::Bool(available)),
+                        ("held".to_string(), CtValue::Bool(held)),
+                        ("value".to_string(), CtValue::Int(value.to_i64().expect("linkat returned i32"))),
+                        ("errno".to_string(), CtValue::Int(errno.to_i64().expect("errno was i32"))),
+                    ],
+                }
+            }
             "__open_reader" => done(text_kernel::jet_std_files_open_reader(int(0)?, &text(1)?, int(2)?), |reader| {
                 opaque_file(FileReaderHandle(std::sync::Arc::new(std::sync::Mutex::new(Some(reader)))))
             }),

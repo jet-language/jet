@@ -858,17 +858,6 @@ fn jet_std_process_exit(code: i64) -> ! {
 fn jet_std_process_workspace() -> JetAuthority {
     JetAuthority::workspace()
 }
-fn jet_std_process_run(cmd: &Vec<String>) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
-    jet_process_spec_run(&jet_std_process_cmd(cmd))
-}
-fn jet_std_process_run_with_authority(
-    cmd: &Vec<String>,
-    authority: &JetAuthority,
-) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
-    let spec =
-        jet_process_spec_under_wire(jet_std_process_cmd(cmd), &jet_authority_to_wire(authority));
-    jet_process_spec_run(&spec)
-}
 fn jet_std_process_spec_under(
     spec: jet_std::ProcessSpec,
     authority: &JetAuthority,

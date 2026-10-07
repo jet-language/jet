@@ -1578,12 +1578,14 @@ fn run() {
 | `home_dir()` / `temp_dir()` | `?String -[Env]>` / `String -[Env]>` | Return platform home or temporary-directory values. |
 | `name()` / `family()` / `arch()` | `String -[Env]>` | Return OS name, OS family, and CPU architecture. |
 | `platform()` / `is_windows()` / `is_unix()` / `is_linux()` / `is_macos()` | platform values `-[Env]>` | Query the environment-derived platform facts. |
-| `executable()` / `hostname()` / `username()` / `release()` / `version()` | `String -[Env]>` | Return process and operating-system facts. |
+| `executable()` / `username()` | `String -[Env]>` | Return process facts. |
+| `hostname()` | `String -[Env, FS]>` | Return the host name. |
+| `release()` / `version()` | `String -[Env, FS, Exec, Time.Wait]>` | Read operating-system facts; macOS queries run `uname` or `sw_vers`. |
 | `pid()` / `getpid()` / `getppid()` / `cpu_count()` | `Int -[Env]>` | Return process IDs or a logical CPU count of at least one. |
 | `getuid()` / `geteuid()` / `getgid()` / `getegid()` / `getpgrp()` | `Int -[Env]>` | Return POSIX identity and process-group values where supported. |
 | `getgroups()` | `[Int] -[Env]>` | Return supplementary group IDs. |
 | `expand(value)` | `String -[Env]>` | Expand `$VAR`, `${VAR}`, and the supported percent form from the environment. |
-| `uptime()` | `Float -[Time, Env]>` | Read system uptime. |
+| `uptime()` | `Float -[Time, Env, FS]>` | Read system uptime from `/proc/uptime` on Linux. |
 | `loadavg()` / `times()` | `[Float] -[Env]>` | Return load averages or process CPU times. |
 | `exitcode(status)` / `success(status)` | `Int` / `Bool` | Interpret a wait status without an effect. |
 | `sync()` | `Unit -[FS, Env]>` | Flush filesystem buffers. |
@@ -1594,6 +1596,13 @@ its future typed error form is a language-edition change, not a second Core
 namespace. Names must be non-empty and contain neither NUL nor `=`; values
 cannot contain NUL. `vars` does not silently skip an unrepresentable entry:
 `EnvError.NonUnicode` reports it.
+
+OS-fact fallback selection, release-file parsing, supplementary-group sizing,
+load-average fallback, process-time conversion, and POSIX syscall error contexts
+are implemented in `Core/sys/sys.jet`. Temporary native leaves provide only host
+availability, syscall return values, errno, or host bytes. `release`/`version`
+keep the first matching release-file field, including an empty field; they do
+not interpret it as shell syntax.
 
 POSIX process/session controls are `#Unsafe` functions: every call needs an OS
 gate and an enclosing audited `#Unsafe("reason")` region (E3103 otherwise),
@@ -1637,6 +1646,12 @@ policy-bearing `ProcessSpec`. `process.cmd` never invokes a shell: each
 argument remains a separate string, including spaces and shell metacharacters.
 Use `process.shell` only when the command line is intentionally delegated to
 the platform shell (D-PROCESS1).
+
+Command defaults are initialized by Jet before transfer into the temporary
+native carrier: stdin is closed, stdout and stderr are captured, the output
+limit is 64 MiB, and working directory, timeout, resource limits, terminal,
+and authority binding are absent. An empty argument vector is accepted by
+`cmd`; launching it reports the existing process error.
 
 ```jet
 use core.process as process
