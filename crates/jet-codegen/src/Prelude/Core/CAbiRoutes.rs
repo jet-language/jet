@@ -21245,12 +21245,6 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_std_rng_new(a0))))
     }
 
-    /// core.time.now
-    #[no_mangle]
-    pub extern "C" fn jet_std_time_now() -> i64 {
-        guard(|| crate::jet_std_time_now())
-    }
-
     /// core.time.sleep
     #[no_mangle]
     pub extern "C" fn jet_std_time_sleep_duration(a0: *mut crate::jet_std::Duration) {
@@ -22741,7 +22735,7 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_time_is_leap_year(a0))
     }
 
-    /// core.time.now_utc
+    /// core.time.now, core.time.now_utc
     #[no_mangle]
     pub extern "C" fn jet_time_now_utc() -> *mut crate::JetDateTime {
         guard(|| Box::into_raw(Box::new(crate::jet_time_now_utc())))
