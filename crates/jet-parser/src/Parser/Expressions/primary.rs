@@ -527,23 +527,23 @@ impl<'a> Parser<'a> {
                     if member == Syntax::TYPE_PTR && matches!(self.peek().kind, TokKind::Lt) {
                         return self.ptr_from_addr(type_name, span);
                     }
-                    // D-GENERIC-CALL1=A: optional call-site type arguments on
-                    // every qualified call, such as `csv.decode<Order>(raw)`.
-                    // D-MEM1 S6 fix: don't blindly overwrite `type_args` — a
-                    // capitalized receiver's OWN turbofish (`Pool<Player>.new()`,
-                    // parsed above at the type-name position) has no call-site
-                    // turbofish of its own (`self.at_turbofish()` is false right
-                    // after `.new`), so this used to silently clobber it with an
-                    // empty `Vec`, losing `Player` entirely. The two positions are
-                    // mutually exclusive in practice (a lowercase alias like `csv`
-                    // never reaches the type-name turbofish parse above), so
-                    // falling back to the outer `type_args` when there's no
-                    // call-site turbofish is a pure bug fix, not a behavior change.
-                    let method_type_args = if self.at_turbofish() {
+                    // Qualified generic literals and calls share the adjacent
+                    // angle-list grammar, but retain different AST owners.
+                    let generic_literal = allow_struct_lit
+                        && member.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+                        && self.at_type_args_before(TokKind::LBrace);
+                    let method_type_args = if generic_literal || self.at_turbofish() {
                         self.parse_turbofish()?
                     } else {
                         Vec::new()
                     };
+                    if generic_literal {
+                        return self.struct_lit_after_path(
+                            format!("{type_name}.{member}"),
+                            method_type_args,
+                            span,
+                        );
+                    }
                     if matches!(self.peek().kind, TokKind::LParen) {
                         // D-JPK-BUILDRECIPE1: the finite build-step values
                         // use lower-case leading-dot names (`.exec(...)`,

@@ -1495,11 +1495,12 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
     loop {
         kind :: parser_current_kind(&state)
         if kind == TOKEN_LT {
-            bare_name :: if expression.expr == {
+            literal_name :: if expression.expr == {
                 .Ident(name, _) -> name
+                .Field(_, member, _) -> if parser_turbofish_ahead(&state, TOKEN_LBRACE) -> member else -> ""
                 else -> ""
             }
-            if allow_struct_lit && owner_type_args.len() == 0 && parser_pascal_name(bare_name) {
+            if allow_struct_lit && owner_type_args.len() == 0 && parser_pascal_name(literal_name) {
                 owner_type_args = parser_parse_call_type_args(&state, depth + 1)
                 next
             }
@@ -1507,7 +1508,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
                 .Ident(_, _) | .Field(_, _, _) -> true
                 else -> false
             }
-            if callee && call_type_args.len() == 0 && parser_turbofish_ahead(&state) {
+            if callee && call_type_args.len() == 0 && parser_turbofish_ahead(&state, TOKEN_LPAREN) {
                 call_type_args = parser_parse_call_type_args(&state, depth + 1)
                 next
             }
@@ -1604,8 +1605,9 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
             span := parser_cover(expression.span, parsed.span)
             first_byte :: Int.from_u8(alias.bytes()[0])
             upper :: first_byte >= 65 && first_byte <= 90
-            literal :: if upper -> Expr.StructLit{type_name: "{alias}.{type_name}", type_args: [Type]{}, import_ns: None, as_trait: None, fields: parsed.fields, inferred: false, span: span} else -> Expr.StructLit{type_name: type_name, type_args: [Type]{}, import_ns: Val(alias), as_trait: None, fields: parsed.fields, inferred: false, span: span}
+            literal :: if upper -> Expr.StructLit{type_name: "{alias}.{type_name}", type_args: owner_type_args, import_ns: None, as_trait: None, fields: parsed.fields, inferred: false, span: span} else -> Expr.StructLit{type_name: type_name, type_args: owner_type_args, import_ns: Val(alias), as_trait: None, fields: parsed.fields, inferred: false, span: span}
             expression = ParsedExpr{expr: literal, span: span}
+            owner_type_args = [Type]{}
             next
         }
         if kind == TOKEN_LBRACKET {
@@ -1734,10 +1736,9 @@ fn parser_parse_postfix(state: &JetParserState, initial: ParsedExpr, depth: Int,
     expression
 }
 
-// Rust `at_turbofish`: `<` touching the call name opens call type
-// arguments only when the matching `>` touches a `(`, so a spaced
+// Adjacent generic heads before calls or qualified literals; spaced
 // `f < T > (x)` stays a comparison.
-fn parser_turbofish_ahead(state: &JetParserState) -> Bool Never! {
+fn parser_turbofish_ahead(state: &JetParserState, following: Int) -> Bool Never! {
     if state.position == 0 || state.tokens[state.position - 1].span.end != parser_current(&state).span.start -> return false
     nested := 0
     loop index in state.position..<state.tokens.len() {
@@ -1746,7 +1747,7 @@ fn parser_turbofish_ahead(state: &JetParserState) -> Bool Never! {
         if token.kind == TOKEN_GT -> nested -= 1
         if token.kind == TOKEN_SHR -> nested -= 2
         if (token.kind == TOKEN_GT || token.kind == TOKEN_SHR) && nested <= 0 {
-            return index + 1 < state.tokens.len() && state.tokens[index + 1].kind == TOKEN_LPAREN && state.tokens[index + 1].span.start == token.span.end
+            return index + 1 < state.tokens.len() && state.tokens[index + 1].kind == following && state.tokens[index + 1].span.start == token.span.end
         }
         if token.kind == TOKEN_SEMI || token.kind == TOKEN_LBRACE || token.kind == TOKEN_RBRACE || token.kind == TOKEN_EOF -> return false
     }
