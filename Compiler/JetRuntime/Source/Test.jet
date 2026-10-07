@@ -3,7 +3,7 @@
 // Outcome layout: [flags, owned name, owned stdout, owned stderr] (32 bytes).
 // Flags: ok=1, expected_failure=2, skipped=4. No property engine is present;
 // property rows are refused by the producer and by this wire consumer.
-// Unit invocation/capture still need L8a's per-thread cell and stop boundary.
+// Capture is in TestCapture; unit invocation still needs L8a's stop boundary.
 #Import(c) fn jet_std_env_get(key: I64, some: I64) -> I64 = "jet_std_env_get"
 
 #Import(c) fn jet_rt_env_present(key: I64) -> Bool = "jet_rt_env_present"
@@ -199,18 +199,18 @@ fn test_utf8(data: I64, length: I64) -> Bool {
         low := I64{128}
         high := I64{191}
         if {
-            first >= I64{194} && first <= I64{223} -> width = I64{2}
-            first >= I64{224} && first <= I64{239} -> {
+            (first >= I64{194} && first <= I64{223}) -> width = I64{2}
+            (first >= I64{224} && first <= I64{239}) -> {
                 width = I64{3}
                 if (first == I64{224}) { low = I64{160} }
                 if (first == I64{237}) { high = I64{159} }
             }
-            first >= I64{240} && first <= I64{244} -> {
+            (first >= I64{240} && first <= I64{244}) -> {
                 width = I64{4}
                 if (first == I64{240}) { low = I64{144} }
                 if (first == I64{244}) { high = I64{143} }
             }
-            first >= I64{128} -> return false
+            (first >= I64{128}) -> return false
         }
         if (width > length - at) { return false }
         if (width > I64{1}) {
@@ -336,10 +336,10 @@ fn test_json_quote(data: I64, length: I64) {
                 test_write(I64{1}, data + plain, at - plain)
                 test_write_word(I64{1}, I64{92}, I64{1})
                 if {
-                    byte == I64{34} || byte == I64{92} -> test_write_word(I64{1}, byte, I64{1})
-                    byte == I64{10} -> test_write_word(I64{1}, I64{110}, I64{1})
-                    byte == I64{13} -> test_write_word(I64{1}, I64{114}, I64{1})
-                    byte == I64{9} -> test_write_word(I64{1}, I64{116}, I64{1})
+                    (byte == I64{34} || byte == I64{92}) -> test_write_word(I64{1}, byte, I64{1})
+                    (byte == I64{10}) -> test_write_word(I64{1}, I64{110}, I64{1})
+                    (byte == I64{13}) -> test_write_word(I64{1}, I64{114}, I64{1})
+                    (byte == I64{9}) -> test_write_word(I64{1}, I64{116}, I64{1})
                     else -> {
                         test_write_word(I64{1}, I64{3158133}, I64{3})
                         test_write_word(I64{1}, test_hex(control /% I64{16}), I64{1})
@@ -391,9 +391,9 @@ fn test_report_text(record: I64, capture: I64) {
     test_write(I64{1}, trap_word(record + I64{8}), trap_word(record + I64{16}))
     test_write_word(I64{1}, I64{8250}, I64{2})
     if {
-        (flags & I64{4}) != I64{0} -> test_msg_skip(I64{1})
-        (flags & I64{2}) != I64{0} -> if {
-            (flags & I64{1}) != I64{0} -> test_msg_expected(I64{1})
+        ((flags & I64{4}) != I64{0}) -> test_msg_skip(I64{1})
+        ((flags & I64{2}) != I64{0}) -> if {
+            ((flags & I64{1}) != I64{0}) -> test_msg_expected(I64{1})
             else -> test_msg_unexpected(I64{1})
         }
         else -> if ((flags & I64{1}) != I64{0}) -> test_msg_pass(I64{1}) else -> test_msg_fail(I64{1})
@@ -418,8 +418,8 @@ fn test_report_text(record: I64, capture: I64) {
         test_parse_record(data, end, at, record)
         flags :: trap_word(record)
         if {
-            (flags & I64{4}) != I64{0} -> skipped += I64{1}
-            (flags & I64{2}) != I64{0} -> if ((flags & I64{1}) != I64{0}) -> expected += I64{1} else -> unexpected += I64{1}
+            ((flags & I64{4}) != I64{0}) -> skipped += I64{1}
+            ((flags & I64{2}) != I64{0}) -> if ((flags & I64{1}) != I64{0}) -> expected += I64{1} else -> unexpected += I64{1}
             else -> if ((flags & I64{1}) != I64{0}) -> passed += I64{1} else -> failed += I64{1}
         }
         if ((flags & I64{5}) == I64{0}) { ok = false }
@@ -509,8 +509,8 @@ fn test_report_shuffle() {
         decided := false
         loop at < (I64{20}) && !decided {
             word :: if {
-                at < I64{8} -> I64{3761692294704805937}
-                at < I64{16} -> I64{3834033537023162160}
+                (at < I64{8}) -> I64{3761692294704805937}
+                (at < I64{16}) -> I64{3834033537023162160}
                 else -> I64{892417585}
             }
             shift :: (at % I64{8}) * I64{8}
@@ -524,7 +524,7 @@ fn test_report_shuffle() {
     if valid {
         test_msg_shuffle(I64{1})
         if {
-            digits == I64{0} -> test_write_word(I64{1}, I64{48}, I64{1})
+            (digits == I64{0}) -> test_write_word(I64{1}, I64{48}, I64{1})
             else -> test_write(I64{1}, data + first, digits)
         }
         test_write_word(I64{1}, I64{10}, I64{1})
