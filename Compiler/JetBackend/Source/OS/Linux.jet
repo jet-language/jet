@@ -431,3 +431,105 @@ fn os_syscall_stack4_i64(number: I64, a1: I64, w0: I64, w1: I64, w2: I64, w3: I6
     ; clobbers rcx, r11, rdi, rsi, rdx, r8, r9, r10
     """
 }
+
+// Translate Linux stat144 to the portable 128-byte scalar StatFacts row.
+// Offsets: dev0 ino8 mode16 nlink24 uid32 gid40 rdev48 size56;
+// atime64/72 mtime80/88 ctime96/104 blocks112 blockSize120.
+// Failed syscalls still copy initialized zeros; callers must inspect errno.
+#[Unsafe("object is a live fd for fstat or a terminated path for stat/lstat; output lends 128 writable bytes; the initialized stack stat frame never escapes"), FFI(asm)]
+fn os_stat_facts_i64(number: I64, object: I64, output: I64) -> I64 {
+    """
+    push {number}
+    push {object}
+    push {output}
+    pop r8
+    pop rdi
+    pop rax
+    push r8
+    sub rsp, 144
+    mov rdx, 0
+    mov qword ptr [rsp], rdx
+    mov qword ptr [rsp + 8], rdx
+    mov qword ptr [rsp + 16], rdx
+    mov qword ptr [rsp + 24], rdx
+    mov qword ptr [rsp + 32], rdx
+    mov qword ptr [rsp + 40], rdx
+    mov qword ptr [rsp + 48], rdx
+    mov qword ptr [rsp + 56], rdx
+    mov qword ptr [rsp + 64], rdx
+    mov qword ptr [rsp + 72], rdx
+    mov qword ptr [rsp + 80], rdx
+    mov qword ptr [rsp + 88], rdx
+    mov qword ptr [rsp + 96], rdx
+    mov qword ptr [rsp + 104], rdx
+    mov qword ptr [rsp + 112], rdx
+    mov qword ptr [rsp + 120], rdx
+    mov qword ptr [rsp + 128], rdx
+    mov qword ptr [rsp + 136], rdx
+    mov rsi, rsp
+    syscall
+    mov r8, qword ptr [rsp + 144]
+    mov rcx, 4294967295
+    mov rdx, qword ptr [rsp]
+    mov qword ptr [r8], rdx
+    mov rdx, qword ptr [rsp + 8]
+    mov qword ptr [r8 + 8], rdx
+    mov rdx, qword ptr [rsp + 24]
+    and rdx, rcx
+    mov qword ptr [r8 + 16], rdx
+    mov rdx, qword ptr [rsp + 16]
+    mov qword ptr [r8 + 24], rdx
+    mov rdx, qword ptr [rsp + 24]
+    shr rdx, 32
+    mov qword ptr [r8 + 32], rdx
+    mov rdx, qword ptr [rsp + 32]
+    and rdx, rcx
+    mov qword ptr [r8 + 40], rdx
+    mov rdx, qword ptr [rsp + 40]
+    mov qword ptr [r8 + 48], rdx
+    mov rdx, qword ptr [rsp + 48]
+    mov qword ptr [r8 + 56], rdx
+    mov rdx, qword ptr [rsp + 72]
+    mov qword ptr [r8 + 64], rdx
+    mov rdx, qword ptr [rsp + 80]
+    mov qword ptr [r8 + 72], rdx
+    mov rdx, qword ptr [rsp + 88]
+    mov qword ptr [r8 + 80], rdx
+    mov rdx, qword ptr [rsp + 96]
+    mov qword ptr [r8 + 88], rdx
+    mov rdx, qword ptr [rsp + 104]
+    mov qword ptr [r8 + 96], rdx
+    mov rdx, qword ptr [rsp + 112]
+    mov qword ptr [r8 + 104], rdx
+    mov rdx, qword ptr [rsp + 64]
+    mov qword ptr [r8 + 112], rdx
+    mov rdx, qword ptr [rsp + 56]
+    mov qword ptr [r8 + 120], rdx
+    add rsp, 152
+    mov rax, rax ; -> return
+    ; clobbers rcx, r11, rdi, rsi, rdx, r8
+    """
+}
+
+// Linux AT_EMPTY_PATH refers to the held source inode (FileHandles.rs), never
+// reopens an old pathname. The borrowed empty path is one stack-local zero.
+#[Unsafe("source and directory are live owned descriptors, name is terminated; linkat borrows a stack-local empty path and retains no pointer"), FFI(asm)]
+fn os_link_fd_i64(source: I64, directory: I64, name: I64) -> I64 {
+    """
+    push {source}
+    push {directory}
+    push {name}
+    pop r10
+    pop rdx
+    pop rdi
+    mov rax, 0
+    push rax
+    mov rsi, rsp
+    mov r8, 4096
+    mov rax, 265
+    syscall
+    pop rdx
+    mov rax, rax ; -> return
+    ; clobbers rcx, r11, rdi, rsi, rdx, r8, r10
+    """
+}
