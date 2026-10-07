@@ -17,6 +17,15 @@ export function runtimeExportSignatures(root) {
   return exports;
 }
 
+export function validateRuntimeOwnership(symbols, definitions) {
+  for (const name of symbols) {
+    if (!definitions.has(name)) throw new Error(`Jet runtime export ${name} has no #Export(c) declaration in sources.list`);
+  }
+  for (const name of definitions.keys()) {
+    if (!symbols.has(name)) throw new Error(`Jet runtime #Export(c) ${name} is missing from exports.list; run gen-runtime-exports.mjs`);
+  }
+}
+
 export function parseRuntimeExports(source, path) {
   const exports = new Map();
   // Read the complete declaration so a generic, write parameter, or failure

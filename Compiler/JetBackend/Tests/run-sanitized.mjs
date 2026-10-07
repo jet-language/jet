@@ -5,19 +5,18 @@
 // precondition checks, and run with the golden's stdin. When run-goldens ran
 // with JET_LOWER_SANITIZE=1, <out>/lower/<case>.asan.o carries ASan checks on
 // every native heap load and store (Compiler/JetBackend/Source/LIR/Sanitize.jet)
-// and is linked instead of <case>.o; either way the ASan runtime checks every
-// call into the runtime and libc (allocation, free, memcpy and string
-// interceptors), turns a native crash into a report with a stack, and finds
-// leaked heap blocks at exit. sanitize.tsv records which object ran
-// (native-checked or runtime-only).
+// and is linked instead of <case>.o. The remaining Rust runtime and libc carry
+// ASan/LSan checks; the Jet runtime object is the same required provider used
+// by the native pack. Its own internals are not instrumented by rustc.
+// Native load/store instrumentation is recorded separately in sanitize.tsv.
 //
 //   1. runtime: <runtime.rs> (the prepared runtime text the corpus's runtime
 //      pack was linked from, prepare-call-runtime.mjs output) is compiled once
-//      with `rustc --crate-type staticlib -Zsanitizer=address -Zub-checks=yes`
+//      with `rustc --cfg jet_native_pack --crate-type staticlib -Zsanitizer=address -Zub-checks=yes`
 //      (RUSTC_BOOTSTRAP=1; the nightly-only flags are confined to this proof
 //      build) into <out>/sanitize/libjet_runtime_asan.a, reused while the
 //      text, rustc and flags are unchanged.
-//   2. link:    clang -fsanitize=address <case>.o libjet_runtime_asan.a
+//   2. link:    clang -fsanitize=address <case>.o jet_runtime_jet.o libjet_runtime_asan.a
 //      -lpthread -ldl -lm (the hosted leg of run-goldens.mjs, plus the ASan
 //      runtime).
 //   3. run:     in the case's staged directory with ASAN_OPTIONS writing every
@@ -32,7 +31,7 @@
 // Gate: exit 1 on any report or sanitized-diverges (leaks included unless
 // --no-leaks, which the summary records).
 //
-// usage: [RUSTC=rustc] [SANITIZE_CC=clang]
+// usage: JET_RUNTIME_JET_OBJECT=<fresh jet_runtime_jet.o> [RUSTC=rustc] [SANITIZE_CC=clang]
 //        [JET_GOLDEN_FEATURES=<checkout>/Examples/features] (the corpus run-goldens.mjs ran)
 //        node Compiler/JetBackend/Tests/run-sanitized.mjs <outdir> --runtime <runtime.rs>
 //        [--case-list FILE] [--no-leaks]
@@ -62,6 +61,8 @@ for (let i = 0; i < args.length; i++) {
   else throw new Error(`unknown option ${args[i]}\n${usage}`);
 }
 if (!runtimeSource) throw new Error(usage);
+const jetObject = process.env.JET_RUNTIME_JET_OBJECT ? resolve(process.env.JET_RUNTIME_JET_OBJECT) : null;
+if (!jetObject || !existsSync(jetObject)) throw new Error("JET_RUNTIME_JET_OBJECT must name the native pack's Jet runtime object");
 
 const { collectGoldenEntries, loadExampleStdin } = await import(pathToFileURL(join(repo, "Tools/agent/compiler-diff.mjs")));
 const { copyFeatureProject, featureProjectRoot } = await import(pathToFileURL(join(repo, "Tools/agent/run-feature-examples.mjs")));
@@ -75,7 +76,7 @@ mkdirSync(reportsDir, { recursive: true });
 const rustc = process.env.RUSTC ?? "rustc";
 const cc = process.env.SANITIZE_CC ?? "clang";
 const RUSTC_FLAGS = [
-  "--edition", "2021", "--crate-name", "jet_runtime", "--crate-type", "staticlib", "-Awarnings",
+  "--edition", "2021", "--crate-name", "jet_runtime", "--crate-type", "staticlib", "--cfg", "jet_native_pack", "-Awarnings",
   "-Zsanitizer=address", "-Zub-checks=yes",
   "-C", "opt-level=1", "-C", "codegen-units=16", "-C", "debuginfo=line-tables-only", "-C", "force-frame-pointers=yes",
 ];
@@ -95,6 +96,8 @@ if (!existsSync(runtimeLib) || !existsSync(stampPath) || readFileSync(stampPath,
   writeFileSync(stampPath, `${stamp}\n`);
   console.log(`sanitized runtime: built in ${Math.round((Date.now() - started) / 1000)} s`);
 }
+const duplicateCheck = spawnSync(process.execPath, [join(repo, "Tools/packaging/check-runtime-exports.mjs"), jetObject, runtimeLib], { encoding: "utf8" });
+if (duplicateCheck.error || duplicateCheck.status !== 0) throw new Error(`sanitized runtime export check failed: ${duplicateCheck.error ?? duplicateCheck.stderr}`);
 
 // The directory run-goldens.mjs ran the golden in (staged again the same way,
 // relative to the checkout that holds the corpus, when that output directory
@@ -138,7 +141,7 @@ for (const line of readFileSync(resultsPath, "utf8").split("\n").filter(Boolean)
   }
   // 2. Link.
   const program = join(dirs.sanitize, slug);
-  const link = spawnSync(cc, ["-fsanitize=address", "-fno-omit-frame-pointer", object, runtimeLib, "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
+  const link = spawnSync(cc, ["-fsanitize=address", "-fno-omit-frame-pointer", object, jetObject, runtimeLib, "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
   if (link.status !== 0) {
     c.verdict = "link-failed";
     const symbols = [...new Set([...link.stderr.matchAll(/undefined reference to `([^']+)'/g)].map((m) => m[1]))];
