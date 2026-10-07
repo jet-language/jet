@@ -1,0 +1,270 @@
+// Rust Sema/Bundle/Outputs.rs: sema owns the callable link and selection.
+use jet_foundation.[ConstDef, Diagnostic, Expr, EnumLitArg, ImportKind, Item, Program, TFunc, OutputKind, OutputParam, OutputCallableAuthority, ResolvedOutput, Span, StrPart, Symbol, SymbolKind, Type, FailureContract, expr_span, failure_contract_of_function, failure_contract_effective_type, type_name, name_mangle, symbol_id]
+
+pub enum SemaOutputIntent { Check Run Test }
+pub struct SemaResolvedOutputRow {
+    pub owner: Int
+    pub item: Int
+    pub fact: ResolvedOutput
+}
+pub fn sema_output_metadata_constant(value: ConstDef) -> Bool Never! {
+    value.ty == Val(Type.Named{name: "Output"}) || value.ty == Val(Type.Named{name: "__OutputDefaults"})
+}
+fn sema_output_error(span: Span?, what: String, why: String, fix: String) -> Diagnostic Never! {
+    sema_error_optional("E1321", span, what, why, fix)
+}
+fn sema_output_kind(name: String) -> OutputKind? Never! {
+    if name == { "Library" -> Val(.Library) "Executable" -> Val(.Executable) "Service" -> Val(.Service) "Check" -> Val(.Check) "Environment" -> Val(.Environment) "Image" -> Val(.Image) "Bundle" -> Val(.Bundle) "System" -> Val(.System) "Fleet" -> Val(.Fleet) else -> None }
+}
+fn sema_output_kind_text(kind: OutputKind) -> String Never! {
+    if kind == { .Library -> "Library" .Executable -> "Executable" .Service -> "Service" .Check -> "Check" .Environment -> "Environment" .Image -> "Image" .Bundle -> "Bundle" .System -> "System" .Fleet -> "Fleet" }
+}
+fn sema_output_runnable(kind: OutputKind) -> Bool Never! { kind == .Executable || kind == .Service || kind == .Check }
+fn sema_output_fields(args: [EnumLitArg], span: Span, diagnostics: &[Diagnostic]) -> [String:Expr]? {
+    fields := [String:Expr]{}
+    loop arg in args {
+        if arg == .Named(label, expression) {
+            if fields.get(label) != None {
+                &diagnostics.push(sema_output_error(Val(expr_span(expression)), "Output field `{label}` is written twice", "one Output field has one checked value", "remove one `{label}:` field"))
+                return None
+            }
+            fields[label] = expression
+        } else {
+            &diagnostics.push(sema_output_error(Val(span), "an Output payload uses named fields", "Output facts need stable field names for checking and inspection", "write `.Executable.{{ name: \"app\", entry: run }}`"))
+            return None
+        }
+    }
+    Val(fields)
+}
+fn sema_output_path(expression: Expr) -> [String]? Never! {
+    if expression == {
+        .Ident(name, _) -> Val([name])
+        .Field(base, member, _) -> {
+            path := sema_output_path(base) ?? return None
+            &path.push(member)
+            Val(path)
+        }
+        else -> None
+    }
+}
+fn sema_output_callable_symbol(graph: SemaRegistrationGraph, owner: Int, path: [String]) -> Symbol? {
+    module :: graph.modules[owner]
+    if path.len() == 1 {
+        found :: sema_registration_lookup_name(graph, module.module_identity, path[0]) ?? return None
+        if found.symbol.kind != SymbolKind.Function -> return None
+        return Val(found.symbol)
+    }
+    // Inline modules use registration's existing generated-member identity.
+    inline_name := path[0]
+    loop index in 1..<path.len() -> inline_name = sema_inline_member_name(inline_name, path[index])
+    if sema_registration_lookup_name(graph, module.module_identity, inline_name) == .Val(found) {
+        if found.symbol.kind == SymbolKind.Function -> return Val(found.symbol)
+    }
+    current := owner
+    loop index in 0..<(path.len() - 1) {
+        target := Int?{None}
+        loop imported in graph.modules[current].imports {
+            if imported.declaration.alias != path[index] || !sema_output_module_import(imported.declaration.kind) -> next
+            if current != owner && !sema_registration_visible(imported.visibility, module.module_identity, module.package_identity, graph.modules[current].module_identity, graph.modules[current].package_identity) -> next
+            target = sema_registration_module_index(graph, imported.target_module_identity)
+            break
+        }
+        current = target ?? return None
+    }
+    found :: sema_registration_resolve_export(graph, current, path[path.len() - 1], module.module_identity, module.package_identity, []) ?? return None
+    if found.symbol.kind != SymbolKind.Function -> return None
+    Val(found.symbol)
+}
+fn sema_output_module_import(kind: ImportKind) -> Bool Never! {
+    if kind == { .File(_, _) -> true .Module(_, _) -> true .Unqualified(_, _, _, _, _) -> false }
+}
+fn sema_output_validate_contract(graph: SemaRegistrationGraph, target: Int, function: SemaRegistrationFunction, kind: OutputKind) -> Bool {
+    parameters :: function.declaration.params
+    parameter_ok := parameters.len() == 0
+    if kind == .Executable && parameters.len() == 1 {
+        parameter_ok = false
+        name :: sema_type_graph_base_name(parameters[0].ty) ?? ""
+        loop nominal in graph.modules[target].nominals {
+            if nominal.symbol.name != name -> next
+            if nominal.source == .SourceAST(.Struct(definition)) {
+                if sema_checked_derive_names(definition.derives).contains("CLI") || sema_type_metadata_has_trait_block(definition.trait_impls, "CLI") || sema_type_metadata_has_explicit_impl(graph.modules[target].declared_trait_impls, name, "CLI") -> parameter_ok = true
+            }
+        }
+    }
+    contract :: failure_contract_of_function(function.declaration.return_type, function.declaration.return_type_span)
+    effective :: failure_contract_effective_type(contract)
+    success :: if effective == { .Result(ok, _) -> ok .Option(ok) -> ok else -> effective }
+    parameter_ok && success == (Type.Named{name: "Unit"})
+}
+fn sema_output_resolve_callable(graph: SemaRegistrationGraph, owner: Int, binding: ConstDef, kind: OutputKind, output_name: String, expression: Expr, diagnostics: &[Diagnostic]) -> ResolvedOutput? {
+    site :: expr_span(expression)
+    path :: sema_output_path(expression) ?? {
+        &diagnostics.push(sema_output_error(Val(site), "Output entry is not a function reference", "text names, calls, and runtime reflection are not Output links", "write a bare or qualified function reference, such as `entry: run`"))
+        return None
+    }
+    source_name :: path[path.len() - 1]
+    symbol :: sema_output_callable_symbol(graph, owner, path) ?? {
+        &diagnostics.push(sema_output_error(Val(site), "Output entry `{path.join(".")}` does not resolve to a function", "an Output entry is an ordinary checked function reference, not a text lookup", "define `fn {source_name}(...)`, import it, or update `entry:`"))
+        return None
+    }
+    target :: sema_registration_module_index(graph, symbol.module_name) ?? return None
+    function := SemaRegistrationFunction?{None}
+    loop row in graph.modules[target].functions { if row.symbol.id.key == symbol.id.key { function = Val(row); break } }
+    declaration :: function ?? return None
+    if declaration.abi.is_extern || declaration.declaration.is_unsafe {
+        &diagnostics.push(sema_output_error(Val(site), "Output entry `{source_name}` is not an ordinary safe Jet function", "package tools invoke checked Jet functions without granting an FFI or unsafe authority boundary", "wrap the boundary in an ordinary safe Jet function and reference that function"))
+        return None
+    }
+    if !sema_output_validate_contract(graph, target, declaration, kind) {
+        why :: if kind == .Executable -> "an Executable takes zero or one typed CLI parameter and returns `()` or `() ?`" else -> "a Service or Check takes no parameters and returns `()` or `() ?`"
+        &diagnostics.push(sema_output_error(Val(site), "Output entry `{source_name}` has the wrong callable contract", why, "change `fn {source_name}` to match the {sema_output_kind_text(kind)} contract"))
+        return None
+    }
+    params :: declaration.declaration.params.map(parameter -> OutputParam{access: parameter.convention, ty: parameter.ty})
+    module :: graph.modules[target]
+    lowered :: if module.module_identity == graph.entry_module_identity -> name_mangle(symbol.name) else -> "{name_mangle(module.module_name)}::{name_mangle(source_name)}"
+    Val(ResolvedOutput{address: binding.name, kind: kind, output_name: output_name, module_id: target, source_path: module.module_path, source_name: source_name, semantic_name: symbol.name, lowered_name: lowered, params: params, return_type: declaration.declaration.return_type, failure_contract: failure_contract_of_function(declaration.declaration.return_type, declaration.declaration.return_type_span), reference: site, definition: symbol.span, authority: .SafeJet, effects: [], selected: false, selection_reason: "not selected"})
+}
+fn sema_output_default(program: Program, diagnostics: &[Diagnostic]) -> String? {
+    loop item in program.items {
+        if item != .Const(_) -> next
+        constant :: if item == .Const(value) -> value else -> panic("output defaults item")
+        if constant.ty != Val(Type.Named{name: "__OutputDefaults"}) -> next
+        if constant.value == .StructLit(_, _, _, _, fields, _, _) {
+            loop field in fields {
+                if field.name != "run" -> next
+                if field.value == .Ident(address, _) -> return Val(address)
+                &diagnostics.push(sema_output_error(Val(expr_span(field.value)), "default `run` is not an Output address", "defaults use checked Output references, not text or calls", "write `run: output_name`"))
+                return None
+            }
+            return None
+        }
+        &diagnostics.push(sema_output_error(Val(expr_span(constant.value)), "`defaults:` needs one checked record", "Output defaults map singular tool intents to Output addresses", "write `defaults: {{ run: app }}`"))
+        return None
+    }
+    None
+}
+pub fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputIntent, explicit: String?) -> [Diagnostic] {
+    diagnostics := [Diagnostic]{}
+    resolved := [SemaResolvedOutputRow]{}
+    loop (owner, module) in graph.modules {
+        loop (index, item) in module.program.items {
+            if item == .Const(binding) {
+                if binding.ty != Val(Type.Named{name: "Output"}) -> next
+                if binding.value != .EnumLit(_, _, _, _, _, _) {
+                    &diagnostics.push(sema_output_error(Val(expr_span(binding.value)), "Output needs one closed kind", "Output is the closed sum of the nine ratified kinds", "write `.Executable.{{ ... }}`, `.Service.{{ ... }}`, or another Output kind"))
+                    next
+                }
+                constructor :: if binding.value == .EnumLit(_, variant, _, args, _, span) -> (variant: variant, args: args, span: span) else -> panic("Output constructor")
+                kind :: sema_output_kind(constructor.variant) ?? {
+                    &diagnostics.push(sema_output_error(Val(constructor.span), "`{constructor.variant}` is not an Output kind", "Output has exactly nine ratified kinds", "use one of: Library, Executable, Service, Check, Environment, Image, Bundle, System, Fleet"))
+                    next
+                }
+                fields :: sema_output_fields(constructor.args, constructor.span, &diagnostics) ?? next
+                name_expr :: fields.get("name") ?? {
+                    &diagnostics.push(sema_output_error(Val(constructor.span), "Output is missing `name:`", "every Output has one stable user-facing name", "add `name: \"...\"`")); next
+                }
+                output_name := String?{None}
+                if name_expr == .Str(parts, _) && parts.len() == 1 && parts[0] == .Lit(text) -> output_name = Val(text)
+                name :: output_name ?? {
+                    &diagnostics.push(sema_output_error(Val(expr_span(name_expr)), "Output `name:` must be fixed text", "graph identity cannot depend on runtime interpolation", "write a plain string literal")); next
+                }
+                if !sema_output_runnable(kind) {
+                    if fields.get("entry") == .Val(entry) -> &diagnostics.push(sema_output_error(Val(expr_span(entry)), "{sema_output_kind_text(kind)} Output is not runnable", "only Executable, Service, and Check link to functions", "remove `entry:` from this Output"))
+                    next
+                }
+                invalid := false
+                loop (field, value) in fields {
+                    if field == "name" || field == "entry" -> next
+                    &diagnostics.push(sema_output_error(Val(expr_span(value)), "`{field}:` is not a runnable Output field", "Executable, Service, and Check Outputs contain only their stable name and checked entry reference", "remove `{field}:` from this Output"))
+                    invalid = true
+                    break
+                }
+                if invalid -> next
+                entry :: fields.get("entry") ?? {
+                    &diagnostics.push(sema_output_error(Val(constructor.span), "{sema_output_kind_text(kind)} Output is missing `entry:`", "every runnable Output links to one checked function", "add `entry: function_name`")); next
+                }
+                fact :: sema_output_resolve_callable(graph, owner, binding, kind, name, entry, &diagnostics) ?? next
+                &resolved.push(SemaResolvedOutputRow{owner: owner, item: index, fact: fact})
+            }
+        }
+    }
+    entry_index :: sema_registration_module_index(graph, graph.entry_module_identity) ?? return diagnostics
+    legacy := false
+    loop function in graph.modules[entry_index].functions { if function.symbol.name == "run" -> legacy = true }
+    default :: sema_output_default(graph.modules[entry_index].program, &diagnostics)
+    default_index := Int?{None}
+    executable := [Int]{}
+    loop (index, row) in resolved {
+        if row.fact.kind == .Executable {
+            &executable.push(index)
+            if default == Val(row.fact.address) -> default_index = Val(index)
+        }
+    }
+    if default != None && default_index == None -> &diagnostics.push(sema_output_error(Val(Span{start: 0, end: 0}), "default `run` names incompatible Output `{default ?? ""}`", "the run default must name an Executable Output in this Package", "point `defaults.run` at one checked Executable address"))
+    if intent == .Run {
+        selected := Int?{None}
+        reason := ""
+        if explicit == .Val(address) {
+            loop (index, row) in resolved { if row.fact.address == address && (row.fact.kind == .Executable || row.fact.kind == .Service) { selected = Val(index); break } }
+            reason = "explicit address"
+            if selected == None {
+                choices := resolved.filter(row -> row.fact.kind == .Executable || row.fact.kind == .Service).map(row -> row.fact.address)
+                &choices.sort()
+                &diagnostics.push(sema_output_error(Val(Span{start: 0, end: 0}), "`{address}` is not an Output compatible with `jet run`", "an explicit run address must name one checked Executable or Service Output", "choose one of: {choices.join(", ")}"))
+            }
+        } else if !legacy {
+            if executable.len() == 1 { selected = Val(executable[0]); reason = "sole compatible Output" }
+            else if executable.len() > 1 {
+                selected = default_index
+                reason = "checked defaults.run"
+                if default == None {
+                    choices := executable.map(index -> resolved[index].fact.address)
+                    &choices.sort()
+                    &diagnostics.push(sema_output_error(None, "this Package has more than one runnable Executable", "without `fn run`, a singular run selects only a sole compatible Output or a checked default", "choose an explicit Output or add `defaults: {{ run: {choices[0]} }}`; candidates: {choices.join(", ")}"))
+                }
+            }
+            else -> &diagnostics.push(sema_error_optional("E0101", None, "this program has no `run` function", "running a program starts at `fn run`, and the entry file doesn't define one", "add `fn run() {{ ... }}` to the entry file"))
+        }
+        if selected == .Val(index) { resolved[index].fact.selected = true; resolved[index].fact.selection_reason = reason }
+    } else if intent == .Test {
+        loop index in 0..<resolved.len() {
+            resolved[index].fact.selected = resolved[index].fact.kind == .Check
+            if resolved[index].fact.selected -> resolved[index].fact.selection_reason = "all Check Outputs"
+        }
+    }
+    loop row in resolved {
+        if graph.modules[row.owner].program.items[row.item] == .Const(value) {
+            updated := value
+            updated.resolved_output = Val(row.fact)
+            graph.modules[row.owner].program.items[row.item] = Item.Const{value: updated}
+            loop index in 0..<graph.modules[row.owner].constants.len() {
+                if graph.modules[row.owner].constants[index].declaration.name == updated.name -> graph.modules[row.owner].constants[index].declaration = updated
+            }
+        }
+    }
+    graph.output_rows = ^resolved
+    diagnostics
+}
+pub fn sema_output_finalize(registration: SemaRegistrationGraph, checked: &SemaGraphResult) Never! {
+    functions := [String:TFunc]{}
+    loop module in checked.modules { loop function in module.functions -> functions[function.key] = function }
+    loop row in registration.output_rows {
+        fact := row.fact
+        module :: registration.modules[fact.module_id]
+        key :: symbol_id(SymbolKind.Function, module.module_identity, "", fact.semantic_name).key
+        function :: functions.get(key) ?? next
+        declaration := Span?{None}
+        loop registered in module.functions { if registered.symbol.id.key == key -> declaration = registered.declaration.return_type_span }
+        fact.return_type = function.ret
+        fact.failure_contract = failure_contract_of_function(function.ret, declaration)
+        fact.effects = function.effects.solved
+        &fact.effects.sort()
+        &checked.outputs.push(fact)
+        if row.owner < checked.programs.len() && row.item < checked.programs[row.owner].items.len() && checked.programs[row.owner].items[row.item] == .Const(binding) {
+            updated := binding
+            updated.resolved_output = Val(fact)
+            checked.programs[row.owner].items[row.item] = Item.Const{value: updated}
+        }
+    }
+}

@@ -1,0 +1,33 @@
+// Inspection projects sema-selected callable facts and target layout facts;
+// it never resolves an entry name or reconstructs layout from source text.
+use jet_foundation.[Item, ResolvedOutput, JetTargetLayout]
+use jet_sema.[SemaOutputIntent, SemaLayoutProjectionRow]
+
+pub struct JetDriverOutputLayoutRow {
+    pub module_identity: String
+    pub source_path: String
+    pub fact: SemaLayoutProjectionRow
+}
+pub struct JetDriverOutputQueryResult {
+    pub compile: JetDriverCompileResult
+    pub outputs: [ResolvedOutput]
+    pub layouts: [JetDriverOutputLayoutRow]
+    pub target_triple: String
+    pub target_layout: JetTargetLayout?
+}
+pub fn jet_driver_output_query(request: JetDriverCompileRequest, address: String?) -> JetDriverOutputQueryResult {
+    selected := request
+    selected.mode = JetDriverCompileMode.Doc
+    selected.output_intent = SemaOutputIntent.Run
+    selected.output_address = address
+    compile :: jet_driver_compile_mir(^selected)
+    result := JetDriverOutputQueryResult{compile: compile, outputs: [], layouts: [], target_triple: "", target_layout: None}
+    if !compile.complete || compile.internal_problem != None -> return result
+    loop module in compile.doc_modules {
+        if result.target_layout == None { result.target_layout = module.target_layout; result.target_triple = module.target_triple }
+        loop item in module.items { if item == .Const(binding) && binding.resolved_output == .Val(output) -> &result.outputs.push(output) }
+        loop fact in module.layout_facts -> &result.layouts.push(JetDriverOutputLayoutRow{module_identity: module.module_identity, source_path: module.physical_path, fact: fact})
+    }
+    &result.outputs.sort_by((a, b) -> (a.address <=> b.address).then(a.source_path <=> b.source_path))
+    result
+}

@@ -606,3 +606,12 @@ diagnostic rows. The same authenticated `jet.mir.decisions.v1` payload carries
 the complete source/configuration/profile/target/implementation/artifact/run
 identity and checked derivation references for live snapshots and replay;
 readers reject altered identities, row IDs, derivations, and noncanonical bytes.
+
+Output inspection consumes sema's checked callable links and selection facts,
+including the original source/semantic/machine names, typed parameters, inferred
+failure contract, solved effects, and reference/declaration spans. The driver
+selects a singular runnable Output (or an explicit address) before lowering;
+inspection does not rename a function or reinterpret a text entry. Layout rows
+come from the compiler's target-aware reflection engine, not the inspecting
+host's pointer width. Inspection stops after canonical MIR production and does
+not emit or execute the selected callable.
