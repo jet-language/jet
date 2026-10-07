@@ -490,13 +490,15 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 value.is_odd()
             }))
         }
-        ("core.math", method @ ("leading_ones" | "trailing_ones")) => {
+        ("core.math", method @ ("leading_ones" | "trailing_ones" | "digits")) => {
             let value = exact_big(one(0)?)
                 .ok_or_else(|| unsupported("this operation needs a whole number", span))?;
             Ok(CtValue::Int(if method == "leading_ones" {
                 value.leading_ones()
-            } else {
+            } else if method == "trailing_ones" {
                 value.trailing_ones()
+            } else {
+                value.digits()
             }))
         }
         ("core.math", "binomial") => {
