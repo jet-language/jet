@@ -499,6 +499,83 @@ pub struct FoundationDirectoryAuthority {
         parent.fsync()
         self.revalidate()
     }
+
+    pub fn path(self) -> String Never! {
+        self.directories[self.directories.len() - 1].path
+    }
+    pub fn fsync(self) IOError! -[FS]> {
+        self.revalidate()
+        self.directories[self.directories.len() - 1].handle.fsync()
+        self.revalidate()
+    }
+    pub fn child(self, name: String, create: Bool{false}) -[FS]> FoundationDirectoryAuthority IOError! {
+        foundation_directory_authority_name(name)
+        self.revalidate()
+        parent :: self.directories[self.directories.len() - 1]
+        handle :: if create -> foundation_open_or_create_directory(parent.handle, name) else -> parent.handle.open_directory(name)
+        directories := self.directories
+        &directories.push(FoundationPublicationDirectory{handle: handle, path: files.join(parent.path, name), publication_parent: true})
+        foundation_ensure_directories_current(directories)
+        Ok(FoundationDirectoryAuthority{directories: directories})
+    }
+    pub fn private_child(self, prefix: String) -[FS, Env, Time]> FoundationDirectoryAuthority IOError! {
+        foundation_directory_authority_name(prefix)
+        self.revalidate()
+        parent :: self.directories[self.directories.len() - 1].handle
+        pid :: sys.pid()
+        stamp :: time.unix_ns()
+        loop attempt in 0..<128 {
+            name :: ".jet-{prefix}-{pid}-{stamp}-{attempt}"
+            parent.create_directory(name, mode: Val(448)) ?? {
+                if err == .AlreadyExists(_) -> next
+                return Err(err)
+            }
+            parent.fsync()
+            return self.child(name)
+        }
+        Err(IOError.AlreadyExists(foundation_io_context(.Write, self.path(), "could not reserve a private source directory")))
+    }
+    // Source/Store.rs: traverse and read only the retained directory handles.
+    // Files are kept open through hashing; a rebound path cannot redirect bytes.
+    pub fn tree_hash(self, reject_hardlinks: Bool{false}) -[FS]> String IOError! {
+        self.revalidate()
+        rows := [FoundationHeldTreeFile]{}
+        root :: self.directories[self.directories.len() - 1].handle
+        foundation_collect_held_tree(root, "", &rows, 0, reject_hardlinks)
+        &rows.sort_by((left: FoundationHeldTreeFile, right: FoundationHeldTreeFile) -> left.relative <=> right.relative)
+        hasher := StreamingSHA256.new()
+        total := 0
+        loop row in rows {
+            if row.identity.size > MAX_TREE_FILE_BYTES || row.identity.size > MAX_TREE_TOTAL_BYTES - total -> return Err(IOError.InvalidData(foundation_io_context(.Read, row.relative, "package tree exceeds the hashing size bound")))
+            &hasher.update(row.relative.bytes())
+            &hasher.update([U8]{0})
+            length :: loop shift in FOUNDATION_U64_SHIFTS -> U8{(row.identity.size >> shift) & 255}
+            &hasher.update(length)
+            actual := 0
+            loop {
+                chunk :: row.reader.read(FOUNDATION_READ_CHUNK)
+                if chunk.len() == 0 -> break
+                actual += chunk.len()
+                if actual > row.identity.size -> return Err(IOError.InvalidData(foundation_io_context(.Read, row.relative, "package source file grew while hashing")))
+                &hasher.update(chunk)
+            }
+            after :: row.reader.stat()
+            if actual != row.identity.size || !foundation_same_authority_identity(row.identity, after) -> return Err(IOError.Other(foundation_io_context(.Read, row.relative, "package source file changed while hashing")))
+            total += actual
+        }
+        self.revalidate()
+        digest :: hasher.finalize_hex()
+        Ok("sha256-{digest}")
+    }
+    pub fn copy_tree_from(self, source: FoundationDirectoryAuthority, reject_hardlinks: Bool{true}) IOError! -[FS]> {
+        source.revalidate()
+        self.revalidate()
+        source_root :: source.directories[source.directories.len() - 1].handle
+        destination :: self.directories[self.directories.len() - 1].handle
+        foundation_copy_held_tree(source_root, destination, "", reject_hardlinks)
+        source.revalidate()
+        self.revalidate()
+    }
 }
 pub fn foundation_open_directory_authority(root: String, create: Bool{false}) -[FS, Env]> FoundationDirectoryAuthority IOError! {
     directories :: foundation_open_root_directories(root, create)
@@ -507,6 +584,82 @@ pub fn foundation_open_directory_authority(root: String, create: Bool{false}) -[
 fn foundation_directory_authority_name(name: String) IOError! {
     components :: foundation_normal_components(.Write, name)
     if components.len() != 1 || components[0] != name -> return Err(foundation_io_error(.Write, name, "directory authority operation needs one normal basename"))
+}
+
+// The source-store excludes these names whether they name files or directories,
+// but inspects/refuses links and special entries before excluding them.
+fn foundation_source_tree_ignored(name: String) -> Bool Never! {
+    name.starts_with(".") || name == "build" || name == "target"
+}
+struct FoundationHeldTreeFile {
+    relative: String
+    reader: FileReader
+    identity: Stat
+}
+fn foundation_held_tree_names(directory: Directory) -[FS]> [String] IOError! {
+    out := [String]{}
+    loop entry in directory.list() {
+        if !entry.name_is_unicode -> return Err(IOError.InvalidData(foundation_io_context(.Read, entry.path, "package tree contains a non-UTF-8 name")))
+        &out.push(entry.name)
+    }
+    Ok(out)
+}
+fn foundation_collect_held_tree(directory: Directory, relative: String, rows: &[FoundationHeldTreeFile], depth: Int, reject_hardlinks: Bool) IOError! -[FS]> {
+    if depth > MAX_TREE_DEPTH -> return Err(IOError.InvalidData(foundation_io_context(.Read, relative, "package tree exceeds the maximum directory depth")))
+    names :: foundation_held_tree_names(directory)
+    loop name in names {
+        path :: if relative == "" -> name else -> files.join(relative, name)
+        info :: directory.entry_stat(name)
+        if info.is_symlink -> return Err(IOError.InvalidInput(foundation_io_context(.Read, path, "package tree contains a symlink")))
+        if info.is_dir {
+            child :: directory.open_directory(name)
+            if foundation_source_tree_ignored(name) -> next
+            foundation_collect_held_tree(child, path, rows, depth + 1, reject_hardlinks)
+        } else if info.is_file {
+            reader :: directory.open(name)
+            opened :: reader.stat()
+            if !opened.is_file -> return Err(IOError.InvalidInput(foundation_io_context(.Read, path, "package tree contains a special entry")))
+            if reject_hardlinks && opened.links > 1 -> return Err(IOError.PermissionDenied(foundation_io_context(.Read, path, "refusing multiply linked source file")))
+            if foundation_source_tree_ignored(name) -> next
+            if rows.len() >= MAX_TREE_FILES -> return Err(IOError.InvalidData(foundation_io_context(.Read, path, "package tree contains too many files")))
+            &rows.push(FoundationHeldTreeFile{relative: path, reader: reader, identity: opened})
+        } else -> return Err(IOError.InvalidInput(foundation_io_context(.Read, path, "package tree contains a special entry")))
+    }
+    if names != foundation_held_tree_names(directory) -> return Err(IOError.Other(foundation_io_context(.Read, relative, "package source changed while inspecting directory")))
+}
+
+fn foundation_copy_held_tree(source: Directory, destination: Directory, relative: String, reject_hardlinks: Bool) IOError! -[FS]> {
+    names :: foundation_held_tree_names(source)
+    loop name in names {
+        path :: if relative == "" -> name else -> files.join(relative, name)
+        info :: source.entry_stat(name)
+        if info.is_symlink -> return Err(IOError.InvalidInput(foundation_io_context(.Read, path, "package tree contains a symlink")))
+        if info.is_dir {
+            child_source :: source.open_directory(name)
+            if foundation_source_tree_ignored(name) -> next
+            destination.create_directory(name, mode: Val(448))
+            destination.fsync()
+            child_destination :: destination.open_directory(name)
+            foundation_copy_held_tree(child_source, child_destination, path, reject_hardlinks)
+        } else if info.is_file {
+            reader :: source.open(name)
+            opened :: reader.stat()
+            if !opened.is_file -> return Err(IOError.InvalidInput(foundation_io_context(.Read, path, "package tree contains a special entry")))
+            if reject_hardlinks && opened.links > 1 -> return Err(IOError.PermissionDenied(foundation_io_context(.Read, path, "refusing multiply linked source file")))
+            if foundation_source_tree_ignored(name) -> next
+            writer :: destination.create(name, if_exists: .Refuse, mode: Val(384))
+            actual := 0
+            loop {
+                chunk :: reader.read(FOUNDATION_READ_CHUNK)
+                if chunk.len() == 0 -> break
+                actual += chunk.len()
+                writer.write_all(chunk)
+            }
+            writer.fsync()
+            if actual != opened.size || !foundation_same_authority_identity(opened, reader.stat()) -> return Err(IOError.Other(foundation_io_context(.Read, path, "package source file changed while copying")))
+        } else -> return Err(IOError.InvalidInput(foundation_io_context(.Read, path, "package tree contains a special entry")))
+    }
+    if names != foundation_held_tree_names(source) -> return Err(IOError.Other(foundation_io_context(.Read, relative, "package source changed while copying directory")))
 }
 
 // Rust std::fs host-path semantics for host-configured locations (registry

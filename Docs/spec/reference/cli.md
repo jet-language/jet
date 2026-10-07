@@ -208,6 +208,16 @@ then the enclosing repository or package, and finally the source's canonical
 directory. Missing workspace declarations are absence; malformed, ambiguous,
 linked, or unreadable authority metadata remains a diagnostic.
 
+Package-source snapshots hold no-follow directory authorities and copy into
+exclusive private stages before computing their content hash. Consumers use
+the staged bytes, not a later read of the mutable original. Source copying
+preserves empty directories, refuses symbolic and multiply linked source
+files even under ignored names, and omits dot-prefixed entries, `build`, and
+`target` from the package tree. A published source-store entry is selected by
+the full package name, version, and lock fingerprint; a concurrent publisher
+must have the same content hash. Source-store entries are separate from the
+machine-wide artifact store and canonical Hangar.
+
 Checked source transactions hold the project, destination parents, and
 `.jet/codemods` directory. Destinations and staged files must be regular,
 single-link files with the identities observed before publication. The

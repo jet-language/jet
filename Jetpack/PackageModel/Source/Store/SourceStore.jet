@@ -1,0 +1,144 @@
+// Source/Store.rs source snapshots and legacy compiler package-source entries.
+// The machine artifact store and canonical Hangar remain distinct stores; this
+// source store holds path/git dependency trees identified by their full lock
+// fingerprint. All filesystem operations reuse Foundation's retained authority.
+
+#Error
+pub struct PackageSourceStoreError { pub diagnostic: Diagnostic }
+
+pub struct PackageSourceSnapshot {
+    pub directory: FoundationDirectoryAuthority
+    pub content_hash: String
+    parent: FoundationDirectoryAuthority
+    name: String
+
+    pub fn path(self) -> String Never! { self.directory.path() }
+}
+impl PackageSourceSnapshot.Close {
+    fn close(^self) -[FS]> {
+        // Never remove a replacement bound at the private snapshot name.
+        self.directory.revalidate() ?? return
+        self.parent.remove_tree(self.name).drop("snapshot cleanup must not replace the caller's outcome")
+    }
+}
+
+pub struct PackageSourceEntry {
+    pub path: String
+    pub content_hash: String
+}
+
+pub fn pkg_source_store_dir() -[Env]> String Never! {
+    explicit :: sys.get("JET_PACKAGE_STORE_DIR")
+    if explicit != None -> return explicit ?? ""
+    home :: sys.get("HOME") ?? sys.get("USERPROFILE") ?? "."
+    files.join(files.join(home, ".jet"), "store")
+}
+
+pub fn pkg_source_store_path(name: String, version: String, fingerprint: String) -[Env]> String Never! {
+    fp :: fingerprint.removeprefix("sha256-")
+    files.join(pkg_source_store_dir(), "{name}-{version}-{fp}")
+}
+
+fn pkg_source_store_component(value: String) PackageSourceStoreError! {
+    invalid := value == "" || value == "." || value == ".." || value.contains("/") || value.contains("\\") || value.contains(":")
+    // Unicode C0/C1 controls, exactly char::is_control in the reference.
+    loop scalar in value.chars() {
+        if scalar < 32 || (scalar >= 127 && scalar <= 159) -> invalid = true
+    }
+    if invalid -> return Err(PackageSourceStoreError{diagnostic: diagnostic_from_registry("E1206", None,
+        "package store path component `{value}` is not allowed",
+        "the value must be one safe path component",
+        "use a package name, version, and fingerprint without path separators")})
+}
+
+fn pkg_source_store_io(action: String, path: String, error: IOError) -> PackageSourceStoreError Never! {
+    PackageSourceStoreError{diagnostic: diagnostic_from_registry("E1206", None,
+        "I/O error while {action} at `{path}`",
+        "a filesystem operation failed during package installation",
+        "check permissions and disk space: {error}")}
+}
+
+pub fn pkg_source_snapshot_tree(path: String) -[FS, Env, Time]> PackageSourceSnapshot PackageSourceStoreError! {
+    source :: foundation_open_directory_authority(path) ?? return Err(pkg_source_store_io("checking package source", path, err))
+    pkg_source_snapshot_authority(source)
+}
+
+pub fn pkg_source_snapshot_authority(source: FoundationDirectoryAuthority) -[FS, Env, Time]> PackageSourceSnapshot PackageSourceStoreError! {
+    root :: pkg_source_store_dir()
+    store :: foundation_open_directory_authority(root, true) ?? return Err(pkg_source_store_io("creating source snapshot store", root, err))
+    snapshots :: store.child(".snapshots", true) ?? return Err(pkg_source_store_io("opening source snapshot root", files.join(root, ".snapshots"), err))
+    pkg_source_snapshot_into(source, snapshots)
+}
+
+fn pkg_source_snapshot_into(source: FoundationDirectoryAuthority, snapshots: FoundationDirectoryAuthority) -[FS, Env, Time]> PackageSourceSnapshot PackageSourceStoreError! {
+    stage :: snapshots.private_child("source") ?? return Err(pkg_source_store_io("creating source snapshot", snapshots.path(), err))
+    name :: files.basename(stage.path())
+    stage.copy_tree_from(source) ?? {
+        snapshots.remove_tree(name).drop("snapshot cleanup must preserve the copy error")
+        return Err(pkg_source_store_io("snapshotting package source", source.path(), err))
+    }
+    hash :: stage.tree_hash() ?? {
+        snapshots.remove_tree(name).drop("snapshot cleanup must preserve the hash error")
+        return Err(pkg_source_store_io("hashing source snapshot", stage.path(), err))
+    }
+    Ok(PackageSourceSnapshot{directory: stage, content_hash: hash, parent: snapshots, name: name})
+}
+
+// Path and git dependencies use this one install path, as ensure_git_dep does
+// in the reference. The caller must retain its source snapshot while installing.
+pub fn pkg_source_store_ensure(name: String, version: String, fingerprint: String, source: FoundationDirectoryAuthority) -[FS, Env, Time]> PackageSourceEntry PackageSourceStoreError! {
+    pkg_source_store_component(name)
+    pkg_source_store_component(version)
+    fp :: fingerprint.removeprefix("sha256-")
+    pkg_source_store_component(fp)
+    root :: pkg_source_store_dir()
+    destination_name :: "{name}-{version}-{fp}"
+    destination :: files.join(root, destination_name)
+    parent :: foundation_open_directory_authority(root, true) ?? return Err(pkg_source_store_io("creating store entry parent", root, err))
+    if parent.child(destination_name) == {
+        .Ok(existing) -> {
+            hash :: existing.tree_hash() ?? return Err(pkg_source_store_io("hashing store entry", destination, err))
+            return Ok(PackageSourceEntry{path: destination, content_hash: hash})
+        }
+        .Err(error) -> if error != .NotFound(_) -> return Err(pkg_source_store_io("checking store entry", destination, error))
+    }
+    stage :: parent.private_child("entry") ?? return Err(pkg_source_store_io("creating store staging entry", root, err))
+    stage_name :: files.basename(stage.path())
+    result :: pkg_source_store_publish_copy(parent, stage, stage_name, destination_name, destination, source)
+    parent.remove_tree(stage_name).drop("install cleanup must preserve the publication outcome")
+    hash :: result
+    Ok(PackageSourceEntry{path: destination, content_hash: hash})
+}
+
+fn pkg_source_store_publish_copy(parent: FoundationDirectoryAuthority, stage: FoundationDirectoryAuthority, stage_name: String, destination_name: String, destination: String, source: FoundationDirectoryAuthority) -[FS]> String PackageSourceStoreError! {
+    stage.copy_tree_from(source) ?? return Err(pkg_source_store_io("copying to store", destination, err))
+    hash :: stage.tree_hash() ?? return Err(pkg_source_store_io("hashing store entry", destination, err))
+    parent.rename(stage_name, destination_name) ?? {
+        if err != .AlreadyExists(_) -> return Err(pkg_source_store_io("publishing store entry", destination, err))
+        winner :: parent.child(destination_name) ?? return Err(pkg_source_store_io("opening concurrent store entry", destination, err))
+        winner_hash :: winner.tree_hash() ?? return Err(pkg_source_store_io("hashing concurrent store entry", destination, err))
+        if winner_hash != hash -> return Err(pkg_source_store_io("publishing store entry", destination, IOError.AlreadyExists(IOContext{operation: .Write, resource: Val(destination), os_code: None, cause: Val("concurrent store entry has different contents")})))
+        return Ok(winner_hash)
+    }
+    parent.fsync() ?? return Err(pkg_source_store_io("publishing store entry", destination, err))
+    Ok(hash)
+}
+
+pub fn pkg_source_store_verify(name: String, entry: String, expected: String) PackageSourceStoreError! -[FS, Env]> {
+    source :: foundation_open_directory_authority(entry) ?? {
+        if err == .NotFound(_) -> return Err(PackageSourceStoreError{diagnostic: diagnostic_from_registry("E1204", None,
+            "the store entry for `{name}` is missing",
+            "a package source tree must be present in the store",
+            "run `jet fetch` to re-download the package")})
+        return Err(pkg_source_store_io("checking store entry", entry, err))
+    }
+    if expected == "" -> return Err(PackageSourceStoreError{diagnostic: diagnostic_from_registry("E1204", None,
+        "the store entry for `{name}` has no content hash",
+        "locked package sources must carry a content hash before they are used",
+        "run `jet fetch` to recreate the lock with verified content hashes")})
+    actual :: source.tree_hash() ?? return Err(pkg_source_store_io("hashing store entry", entry, err))
+    if actual != expected -> return Err(PackageSourceStoreError{diagnostic: diagnostic_from_registry("E1204", None,
+        "the store entry for `{name}` has been modified",
+        "expected content hash `{expected}` but got `{actual}`",
+        "delete the store entry and run `jet fetch` to re-install")})
+}
