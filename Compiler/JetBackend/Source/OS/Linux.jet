@@ -1,12 +1,13 @@
 // Jet's low-level OS layer for Linux x86-64: the one audited place where Jet
 // code talks to the kernel directly (owner ruling 2026-10-01 on #4015). The
-// in-process loader (Image/Loader.jet), tiered hot swap and, later, the
-// Jet-written runtime are ordinary Jet code on top of it.
+// in-process loader (Image/Loader.jet), tiered hot swap and the Jet-written
+// runtime are ordinary Jet code on top of it.
 //
-// Every item is private to the jet_backend package, the layer's only Jet
-// consumer while the runtime is Rust; user packages never see it and get safe
-// Core APIs instead. It becomes the `jet_os` sibling package with
-// `pub(package)` items (D-PUBPKG1) when the Jet runtime package needs it.
+// The backend assembles this source for the loader; the runtime's independent
+// source manifest includes its fixed-width leaves. Runtime heap internals use
+// those I64 leaves, not the loader's exact-Int helpers: entering arbitrary-
+// precision arithmetic while bootstrapping an allocator could recurse.
+// User programs get safe Core APIs, not a direct heap/syscall API.
 //
 // The machine-level entries are `#FFI(asm)` functions under `#Unsafe`
 // (D-FFI-ASM1, D-FFI-ASMOPS1): sema checks their operand contract and every
