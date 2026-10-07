@@ -410,12 +410,12 @@ fn host_support_definition(path: &str) -> Result<Option<Definition>, String> {
         }
         let input = strip_comments(schema);
         let mut cursor = 0;
-        while let Some((keyword, start)) = find_next_definition(&input, cursor) {
+        while let Some((keyword, start)) = find_next_definition(&input, cursor, SchemaSyntax::Rust) {
             let mut position = start + keyword.len();
             skip_space(&input, &mut position);
             cursor = position;
             if read_identifier(&input, &mut position).ok().as_deref() == Some(name) {
-                return parse_definition_body(&input, keyword, name.to_string(), position)
+                return parse_definition_body(&input, keyword, name.to_string(), position, SchemaSyntax::Rust)
                     .map(|(definition, _)| Some(definition));
             }
         }
