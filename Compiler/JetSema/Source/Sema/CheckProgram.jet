@@ -2734,12 +2734,29 @@ pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphMo
         }
         module_index += 1
     }
+    MIRNameFacts{
+        modules: facts.modules,
+        declarations: sema_name_first_declarations(facts.declarations),
+        aliases: sema_name_first_aliases(facts.aliases),
+        references: sema_name_first_references(facts.references),
+        structure_facts: sema_name_structure_facts(graph),
+        display_paths: facts.display_paths,
+    }
+}
+
+// The structure facts the registration graph alone proves: one resolved
+// import edge per graph edge, in edge order. They exist before checking, so a
+// compile that fails later still reports them (Rust records these edges at
+// bundle completion, before Sema, and `jet inspect structure` prints them
+// ahead of the failure diagnostics).
+pub fn sema_name_structure_facts(graph: SemaRegistrationGraph) -> [MIRStructureFact] Never! {
+    facts := [MIRStructureFact]{}
     loop edge in graph.edges {
         source_index :: sema_registration_module_index(graph, edge.source_module_identity) ?? next
         target_index :: sema_registration_module_index(graph, edge.target_module_identity) ?? next
         source :: graph.modules[source_index]
         target :: graph.modules[target_index]
-        &facts.structure_facts.push(MIRStructureFact{
+        &facts.push(MIRStructureFact{
             kind: MIRStructureFactKind.ImportEdge,
             subject: "{source.module_name} -> {target.module_name}",
             source: source.module_path,
@@ -2749,14 +2766,7 @@ pub fn sema_name_build_facts(graph: SemaRegistrationGraph, modules: [SemaGraphMo
             gate: None,
         })
     }
-    MIRNameFacts{
-        modules: facts.modules,
-        declarations: sema_name_first_declarations(facts.declarations),
-        aliases: sema_name_first_aliases(facts.aliases),
-        references: sema_name_first_references(facts.references),
-        structure_facts: facts.structure_facts,
-        display_paths: facts.display_paths,
-    }
+    facts
 }
 
 // The constant values keyed "{module identity}|{key}", first row winning,
