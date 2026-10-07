@@ -156,6 +156,8 @@ struct LowerModule {
     pub line_starts: [U64:[Int]]
     // MIR source file id -> its row in program.source_files.
     pub source_rows: [U64:Int]
+    pub asm_foreign: [U64:MIRFunctionID]
+    pub foreign_rows: [U64:Int]
     // Concrete MIR function ID -> its LIR function row (Mono.jet's inventory
     // order), and per row the program.functions row of its original.
     pub mir_rows: [U64:Int]
@@ -263,6 +265,8 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
         static_fixups: [LowerStaticFixup]{},
         line_starts: [U64:[Int]]{},
         source_rows: [U64:Int]{},
+        asm_foreign: ~prepared.asm_foreign,
+        foreign_rows: ~prepared.foreign_rows,
         mir_rows: [U64:Int]{},
         mir_sources: [Int]{},
         mir_signatures: [LIRSignatureID]{},
@@ -870,6 +874,10 @@ fn lower_new_function(id: LIRFunctionID, name: String, signature: LIRSignatureID
 fn lower_function(p: MIRProgram, m: &LowerModule, function: MIRFunction, id: LIRFunctionID, signature: LIRSignatureID) -> LIRFunction Never! {
     name :: if function.key == "" -> function.name else -> function.key
     f := lower_new_function(id, name, signature, function.entry)
+    if (function.foreign_language ?? "") == "asm" {
+        lower_asm_function(p, &m, &f, function)
+        return lir_builder_finish(f.builder)
+    }
     // Public Unicode casing uses the same pinned full mapping as String's
     // methods, not the bootstrap subset's private map_case implementation.
     lowercase :: name == "<corelib>/Core/text::Core/text/text.jet::lower"
@@ -2795,6 +2803,10 @@ fn lower_prelude_render(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
 
 fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, callee: MIRCallee, args: [MIRCallArg], type_args: [MIRType]) Never! {
     if callee == .TraitMethod(method, bound, receiver) -> return lower_trait_call(p, c, &m, &f, instruction, method, bound, receiver, args, type_args)
+    if callee == .Foreign(foreign) && m.asm_foreign.get(foreign.value) == .None {
+        lower_asm_import_call(p, c, &m, &f, instruction, foreign.value, args, type_args)
+        return
+    }
     if callee == .Prelude(call) {
         if lower_lazy_call(p, c, &m, &f, instruction, call, args) -> return
         if lower_queue_call(p, c, &m, &f, instruction, call, args) -> return
@@ -2823,6 +2835,10 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
     target :: if callee == {
         .User(function) -> lower_instance_id(function, if lower_function_index(m, function) >= 0 -> [MIRType]{} else -> type_args)
         .Associated(function, owner) | .Method(function, owner) -> lower_instance_id(function, lower_call_bindings(Val(owner), type_args))
+        .Foreign(foreign) -> m.asm_foreign.get(foreign.value) ?? {
+            lower_fail(&m, &f, "inline asm: foreign callee has no checked assembly function")
+            return
+        }
         else -> {
             lower_fail(&m, &f, "this callee kind is not lowered at O0 yet")
             return

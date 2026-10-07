@@ -731,6 +731,18 @@ fn run() {
     if !fx_report("control-flow", fx_control_flow()) -> clean = false
     if !fx_report("aggregates", fx_aggregates()) -> clean = false
     // Tests/Fixtures/*.jet
+    if !fx_report("inline-asm-memory", fx_inline_asm_memory()) -> clean = false
+    if !fx_report_lir("inline-asm-call", fx_inline_asm_call(false)) -> clean = false
+    if !fx_report_lir("inline-asm-call-two", fx_inline_asm_call(true)) -> clean = false
+    if !fx_report("inline-asm-fixed", fx_inline_asm_fixed()) -> clean = false
+    if !fx_report_lir("inline-asm-int-input", fx_inline_asm_int_input()) -> clean = false
+    if !fx_report("inline-asm-import", fx_inline_asm_import()) -> clean = false
+    if !fx_report_lir("inline-asm-forms", fx_inline_asm_forms()) -> clean = false
+    if !fx_report("inline-asm-int-result", fx_inline_asm_int_result()) -> clean = false
+    if !fx_inline_asm_refusals() {
+        print("issue inline-asm: refusal/encoding witnesses failed")
+        clean = false
+    }
     if !fx_report("layout", fx_layout()) -> clean = false
     if !fx_report("negate-min", fx_negate_min()) -> clean = false
     if !fx_report("write-params", fx_write_params()) -> clean = false
