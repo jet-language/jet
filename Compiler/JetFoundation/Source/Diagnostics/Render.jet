@@ -13,7 +13,7 @@ DIAGNOSTIC_THEME_BOLD :: "1"
 
 // One `Theme` role: `ESC [ sgr m text ESC [ 0 m` when color is on.
 pub fn diagnostic_theme_paint(color: Bool, sgr: String, text: String) -> String Never! {
-    if !color -> return ~text
+    if !color -> return text.copy()
     escape :: String.from_bytes([U8]{"\x1b"}) ?? ""
     "{escape}[{sgr}m{text}{escape}[0m"
 }
@@ -174,7 +174,7 @@ fn diagnostic_snippet_first_line(bytes: [U8], span: Span) -> String Never! {
 
 fn diagnostic_right_align(text: String, width: Int) -> String Never! {
     padding :: width - text.bytes().len()
-    if padding <= 0 -> return ~text
+    if padding <= 0 -> return text.copy()
     "{" ".repeat(padding)}{text}"
 }
 

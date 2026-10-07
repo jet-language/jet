@@ -313,9 +313,9 @@ fn envmodel_merge_language_fact(facts: &[String: String], pack_name: String, kin
 // Pin a catalog package to the selected version unless it already carries a
 // version or channel marker.
 fn envmodel_versioned_package(package: String, version: String?) -> String Never! {
-    selected :: version ?? return ~package
-    parts :: package.cut_last(REF_PROVIDER_AT) ?? return ~package
-    if parts.before.contains("#version=") || parts.after.contains(REF_CHANNEL_MARKER) -> return ~package
+    selected :: version ?? return package.copy()
+    parts :: package.cut_last(REF_PROVIDER_AT) ?? return package.copy()
+    if parts.before.contains("#version=") || parts.after.contains(REF_CHANNEL_MARKER) -> return package.copy()
     "{parts.before}{REF_PROVIDER_AT}{parts.after}{REF_CHANNEL_MARKER}version={selected}"
 }
 

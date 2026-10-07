@@ -929,7 +929,7 @@ fn run() {
     assert_eq!(stdout, "11\n");
 }
 
-/// c109 Phase 16: a String-payload enum. The construction `Msg.Text(~s)` explicitly
+/// c109 Phase 16: a String-payload enum. The construction `Msg.Text(s.copy())` explicitly
 /// copies the read-only String parameter into the owning payload; the match binds the
 /// payload value and returns it (owning).
 #[test]
@@ -943,7 +943,7 @@ enum Msg {
     Code(Int)
 }
 fn wrap(s: String) -> Msg {
-    return Msg.Text(~s)
+    return Msg.Text(s.copy())
 }
 fn render(m: Msg) -> String {
     if m == {
@@ -962,7 +962,7 @@ fn run() {
     assert_eq!(stdout, "hi\n");
 }
 
-/// c109 Phase 16: a recursive (boxed) enum. Constructing `Tree.Node(~inner)` explicitly
+/// c109 Phase 16: a recursive (boxed) enum. Constructing `Tree.Node(inner.copy())` explicitly
 /// copies the read-only `inner: Tree` parameter before the recursive boxed edge. The
 /// match traverses it (Rust auto-derefs the `Box`).
 #[test]
@@ -976,7 +976,7 @@ enum Tree {
     Node(Tree)
 }
 fn wrap(inner: Tree) -> Tree {
-    return Tree.Node(~inner)
+    return Tree.Node(inner.copy())
 }
 fn leaf_val(t: Tree) -> Int {
     if t == {
@@ -1037,7 +1037,7 @@ enum Shape {
     Line(Int)
 }
 fn mk(p: Point) -> Shape {
-    return Shape.Dot(~p)
+    return Shape.Dot(p.copy())
 }
 fn first(s: Shape) -> Int {
     if s == {
@@ -1075,7 +1075,7 @@ enum Holder {
     One(Int)
 }
 fn mk(xs: [Int]) -> Holder {
-    return Holder.Nums(~xs)
+    return Holder.Nums(xs.copy())
 }
 fn run() {
     b :: Crate{ items: [1, 2, 3], label: \"x\" }
@@ -1108,7 +1108,7 @@ fn pick<T>(a: ^T, b: ^T, first: Bool) -> T {
     return b
 }
 fn firstof<T>(xs: ^[T]) -> T {
-    return ~xs[0]
+    return xs[0].copy()
 }
 fn wrap<T>(x: ^T) -> [T] {
     return [x]

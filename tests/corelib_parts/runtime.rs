@@ -272,7 +272,7 @@ fn run() {
     (started_tx, started_rx) :: channel<Int>()
     (release_tx, release_rx) :: channel<Int>()
     ev.on(scope, (n: Int) -> {
-        started_tx.send(~n)
+        started_tx.send(n.copy())
         released :: release_rx.receive() ?? panic("release")
     })
     first :: ev.emit_async(1)
@@ -331,7 +331,7 @@ fn run() {
     (newest_started_tx, newest_started_rx) :: channel<Int>()
     (newest_release_tx, newest_release_rx) :: channel<Int>()
     newest.on(newest_scope, (n: Int) -> {
-        newest_started_tx.send(~n)
+        newest_started_tx.send(n.copy())
         released_newest :: newest_release_rx.receive() ?? panic("release")
     })
     newest_first :: newest.emit_async(1)
@@ -351,7 +351,7 @@ fn run() {
     (oldest_started_tx, oldest_started_rx) :: channel<Int>()
     (oldest_release_tx, oldest_release_rx) :: channel<Int>()
     oldest.on(oldest_scope, (n: Int) -> {
-        oldest_started_tx.send(~n)
+        oldest_started_tx.send(n.copy())
         released_oldest :: oldest_release_rx.receive() ?? panic("release")
     })
     oldest_first :: oldest.emit_async(1)
@@ -372,7 +372,7 @@ fn run() {
     (once_release_tx, once_release_rx) :: channel<Int>()
     once_event.on_priority(once_scope, 10, (n: Int) -> {
         if n == 1 {
-            once_started_tx.send(~n)
+            once_started_tx.send(n.copy())
             released_once :: once_release_rx.receive() ?? panic("release")
         }
     })
@@ -456,8 +456,8 @@ fn owner_teardown_task() -> Task<DispatchReport<String>> {
     (started_tx, started_rx) :: channel<Int>()
     (release_tx, release_rx) :: channel<Int>()
     ev.on(owner_scope, (n: Int) -> {
-        started_tx.send(~n)
-        held_sender :: ~release_tx
+        started_tx.send(n.copy())
+        held_sender :: release_tx.copy()
         released :: release_rx.receive() ?? panic("release")
     })
     running :: ev.emit_async(98)
@@ -472,7 +472,7 @@ fn run() {
     (cancel_started_tx, cancel_started_rx) :: channel<Int>()
     (cancel_release_tx, cancel_release_rx) :: channel<Int>()
     cancelled.on(cancel_scope, (n: Int) -> {
-        cancel_started_tx.send(~n)
+        cancel_started_tx.send(n.copy())
         released :: cancel_release_rx.receive() ?? panic("release")
     })
     cancel_running :: cancelled.emit_async(1)
@@ -494,7 +494,7 @@ fn run() {
     (queued_started_tx, queued_started_rx) :: channel<Int>()
     (queued_release_tx, queued_release_rx) :: channel<Int>()
     queued_deadline.on(queued_scope, (n: Int) -> {
-        queued_started_tx.send(~n)
+        queued_started_tx.send(n.copy())
         released :: queued_release_rx.receive() ?? panic("release")
     })
     queued_running :: queued_deadline.emit_async(10)
@@ -512,7 +512,7 @@ fn run() {
     (pending_started_tx, pending_started_rx) :: channel<Int>()
     (pending_release_tx, pending_release_rx) :: channel<Int>()
     pending_deadline.on(pending_scope, (n: Int) -> {
-        pending_started_tx.send(~n)
+        pending_started_tx.send(n.copy())
         released :: pending_release_rx.receive() ?? panic("release")
     })
     pending_running :: pending_deadline.emit_async(20)

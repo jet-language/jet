@@ -96,7 +96,7 @@ fn core_files_read_with_fallback() {
     let src = "\
 use core.files as fs
 fn read_or(p: String) -> String {
-    return (fs.read(~p) ?? \"missing\")
+    return (fs.read(p.copy()) ?? \"missing\")
 }
 fn run() {
     print(read_or(\"/no/such/file/at/all/xyzzy\"))
@@ -1067,7 +1067,7 @@ fn handle_methods_file_writer() {
 use core.files as files
 use core.files as fs
 fn write_file(path: String, text: String) -> Int {{
-    w := files.create(~path) ?? return 0
+    w := files.create(path.copy()) ?? return 0
     _r :: w.write_line(text)
     _f :: w.flush()
     return 1
@@ -1387,7 +1387,7 @@ fn run() {
 }
 
 /// Card #2877: explicit-copy policy rejects a plain read in an owning arm
-/// with the same `~` fix used by other owning destinations.
+/// with the same `.copy()` fix used by other owning destinations.
 #[test]
 fn card_2877_if_arm_explicit_copy_requires_tilde() {
     let src = "\

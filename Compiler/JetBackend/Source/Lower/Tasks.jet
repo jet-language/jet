@@ -318,8 +318,8 @@ fn lower_task_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
 
 fn lower_helper_task_body(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, Val(lir_layout_word()))
-    env :: ~f.open_params[0]
-    out :: ~f.open_params[1]
+    env :: f.open_params[0].copy()
+    out :: f.open_params[1].copy()
     result_ty :: lower_task_body_result(glue.ty) ?? panic("task.body is requested for zero-argument closures")
     if lower_call_closure_box(p, &m, &f, env, [LIRValueID]{}, result_ty) == .Val(result) -> lower_write_at(p, &f, out, 0, result, result_ty)
     zero :: lower_const(&f, 0)
@@ -329,7 +329,7 @@ fn lower_helper_task_body(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LI
 
 fn lower_helper_task_release(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
-    env :: ~f.open_params[0]
+    env :: f.open_params[0].copy()
     lower_map_drop_value(p, &m, &f, env, glue.ty)
     lower_seal(&f, LIRTerminator.Return{value: None})
     lir_builder_finish(f.builder)
@@ -338,7 +338,7 @@ fn lower_helper_task_release(p: MIRProgram, m: &LowerModule, glue: LowerGlue) ->
 // (slot) -> owned String: the Debug text of the value stored at slot.
 fn lower_helper_task_debug(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
-    slot :: ~f.open_params[0]
+    slot :: f.open_params[0].copy()
     value :: lower_read_at(p, &f, slot, 0, glue.ty)
     text :: lower_render_value(p, &m, &f, glue.ty, value, LowerRenderMode.Debug) ?? {
         lower_seal(&f, LIRTerminator.Unreachable)

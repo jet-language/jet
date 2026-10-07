@@ -59,7 +59,7 @@ pub struct NoFollowRoot {
     }
 
     fn root(self) -> String Never! {
-        ~self.resolver.root
+        self.resolver.root.copy()
     }
 
     fn checked_file(self, path: String) -[FS, Env]> CheckedFile SandboxAuthorityError! {
@@ -90,7 +90,7 @@ pub struct SandboxAuthority {
             if !authority_covers_any(needs, right) -> return Err(SandboxAuthorityError.UndeclaredRight(right))
         }
         loop root in roots {
-            if !authority.allows(root.right) -> return Err(SandboxAuthorityError.MissingRoot(~root.right))
+            if !authority.allows(root.right) -> return Err(SandboxAuthorityError.MissingRoot(root.right.copy()))
         }
         Ok(SandboxAuthority{authority: authority, needs: needs, roots: roots})
     }

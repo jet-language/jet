@@ -279,7 +279,7 @@ const CASES: &[(&str, &str)] = &[
     ("type-prefix-unit-contract", "fn save(id: Int) !SaveError {}"),
     ("type-prefix-value-contract", "fn load() -> Int !SaveError { return Ok(1) }"),
     ("type-prefix-union-contract", "fn load() -> Int !(SaveError | LoadError) { return Ok(1) }"),
-    ("bracket-range-access-marks", "f(values[0..1], &values[0..1], ~values[0..1])"),
+    ("bracket-range-access-marks", "f(values[0..1], &values[0..1], values[0..1].copy())"),
     // E0393 (#3743): the retired `name: Type :: value` binding.
     ("retired-typed-binding", "fn run() {\n    limit: U8 :: 250\n    print(limit)\n}\n"),
 ];

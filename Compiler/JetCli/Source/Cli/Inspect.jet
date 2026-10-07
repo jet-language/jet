@@ -325,7 +325,7 @@ fn jet_cli_inspect_plain_error(text: String, exit_code: Int) -> JetCLIPlan Never
 
 // Source/main.rs `absolutize`: `path` joined onto the working directory.
 fn jet_cli_inspect_absolute(path: String) -[FS, Env]> String Never! {
-    if path.starts_with("/") -> return ~path
+    if path.starts_with("/") -> return path.copy()
     cwd :: cli_files.cwd() ?? "."
     "{cwd}/{path}"
 }
@@ -1307,7 +1307,7 @@ fn jet_cli_inspect_replay_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     if !clean -> return jet_cli_replay_fail(job, "E3621", identity_what, "entry identity must be a clean project-relative path", identity_fix, JET_DRIVER_EXIT_USER_ERROR)
     compiled :: jet_cli_compile_file(job.file, job.color, false, job.threads, JetDriverCompileMode.Program)
     if compiled == {
-        .Refused(refusal) -> return ~refusal
+        .Refused(refusal) -> return refusal.copy()
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             if jet_cli_errors(diagnostics).len() > 0 || result.internal_problem != None {
@@ -1366,7 +1366,7 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     watch :: cli_time.start()
     compiled :: jet_cli_compile_file(job.file, job.color, false, job.threads, mode)
     if compiled == {
-        .Refused(refusal) -> output = ~refusal
+        .Refused(refusal) -> output = refusal.copy()
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             errors :: jet_cli_errors(diagnostics)
@@ -1578,8 +1578,8 @@ fn jet_cli_impact_walk(calls: [JetCLISemCall], symbol: String, depth_limit: Int,
     depths := [Int]{0}
     cursor := 0
     loop cursor < frontier.len() {
-        current :: ~frontier[cursor]
-        depth :: ~depths[cursor]
+        current :: frontier[cursor].copy()
+        depth :: depths[cursor].copy()
         cursor += 1
         if depth >= depth_limit -> next
         loop call in calls {

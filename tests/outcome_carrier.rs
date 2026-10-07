@@ -175,7 +175,7 @@ fn import_rows(label: String, rows: [String]) -> [String] ImportErr! {
     good :: rows.filter((row) -> row != "")
     broken :: rows.len() - good.len()
     if broken > 0 {
-        return Err(ImportErr.{ broken: broken, partial: good, notes: [~label] })
+        return Err(ImportErr.{ broken: broken, partial: good, notes: [label.copy()] })
     }
     return Ok(good)
 }
@@ -226,7 +226,7 @@ fn import_rows(label: String, rows: [String]) -> [String] ImportErr! {
     good :: rows.filter((row) -> row != "")
     broken :: rows.len() - good.len()
     if broken > 0 {
-        return Err(ImportErr.{ broken: broken, partial: good, notes: [~label] })
+        return Err(ImportErr.{ broken: broken, partial: good, notes: [label.copy()] })
     }
     return Ok(good)
 }

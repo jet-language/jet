@@ -347,7 +347,7 @@ pub fn provider_record_nix_lock_after_store(verification: &StoreVerification, ct
     // Once the lock is published its cache key becomes the stable policy
     // identity, so the warm path uses the same verified key cold replay
     // reconstructs from the portable closure.
-    lock_entry := ~entry
+    lock_entry := entry.copy()
     lock_entry.cache_identity.policy_fingerprint = nix_closure.cache_key
     // Retain the portable identity in the original admission evidence so warm
     // replay compares the whole lock without reading its archive or trusting

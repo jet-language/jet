@@ -42,7 +42,7 @@ pub fn publication_resolve_publish_registry() -[Env]> PublicationRegistryConfig 
 // Rust redact_registry_url (:123-143): the LAST `@` of the authority ends
 // its userinfo; query and fragment text never survives.
 pub fn publication_redact_registry_url(value: String) -> String Never! {
-    safe := ~value
+    safe := value.copy()
     loop delimiter in ([String]{"?", "#"}) {
         if safe.split_once(delimiter) == .Val(pair) -> safe = pair.before
     }
@@ -141,7 +141,7 @@ pub enum PublicationRegistryTransport {
 
     fn remote(self, url: String) -> String Never! {
         if self == {
-            .Local -> ~url
+            .Local -> url.copy()
             .Network(scheme, host, port, explicit_port, address) ->
                 publication_registry_remote(url, scheme, port, explicit_port, publication_registry_ip(address))
         }
@@ -165,8 +165,8 @@ fn publication_registry_ip(address: IPAddr) -> String Never! {
     if net.ip_is_ipv4(address) -> text else -> "[{text}]"
 }
 pub fn publication_registry_remote(url: String, scheme: String, port: Int, explicit_port: Bool, address: String) -> String Never! {
-    if scheme != "git" -> return ~url
-    pair :: url.split_once("://") ?? return ~url
+    if scheme != "git" -> return url.copy()
+    pair :: url.split_once("://") ?? return url.copy()
     rest :: pair.after.bytes()
     authority_end := rest.len()
     loop index in 0..<rest.len() {

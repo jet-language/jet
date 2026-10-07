@@ -4,10 +4,10 @@
 use jet_foundation.[MIRProgram]
 
 fn lower_callable_init(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
-    signature_id :: ~m.mir_signatures[glue.function]
-    signature :: ~m.signatures[signature_id.value]
+    signature_id :: m.mir_signatures[glue.function].copy()
+    signature :: m.signatures[signature_id.value].copy()
     f := lower_helper_start(&m, glue, signature.params, signature.result)
-    params :: ~f.open_params
+    params :: f.open_params.copy()
     // The loader gives module data writable, non-executable pages. This flag
     // avoids re-allocating runtime-owned statics on repeated compiler calls.
     flag_data :: lower_static_object(&m, 8)

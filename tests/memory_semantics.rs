@@ -241,7 +241,7 @@ fn memo_computed_and_view_copy_examples_agree_across_execution_tiers() {
     // line of this golden is a read window entering an owning slot — an
     // interpolation, an owned `String` parameter, and a returned `String` — so
     // AOT, default `jet run`, and the forced interpreter must agree byte for
-    // byte, not only on the explicit `~` spelling above.
+    // byte, not only on the explicit `.copy()` spelling above.
     tir_support::assert_example_cli_tiers_agree(
         "memory/string_view",
         include_str!("../Examples/features/expected/memory/string_view.out"),

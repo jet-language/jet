@@ -570,7 +570,7 @@ fn sema_function_memory_annotate_scope(stmts: &[Stmt], chain: [PolicyDeclaration
                 stmts[index] = Stmt.CountedLoop{init: init, cond: condition, step: step, body: updated_body, span: span, arrow_body: arrow_body, label: label}
             }
             .Switch(subject, arms, else_body, span) -> {
-                updated_arms := ~arms
+                updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
                     promoted_return = sema_function_memory_annotate_scope(&arm_body, chain, &diagnostics, &complete) || promoted_return
@@ -578,7 +578,7 @@ fn sema_function_memory_annotate_scope(stmts: &[Stmt], chain: [PolicyDeclaration
                 }
                 updated_else_body := else_body
                 if else_body == .Val(else_statements) {
-                    body := ~else_statements
+                    body := else_statements.copy()
                     promoted_return = sema_function_memory_annotate_scope(&body, chain, &diagnostics, &complete) || promoted_return
                     updated_else_body = Val(body)
                 }

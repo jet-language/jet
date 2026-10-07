@@ -1641,7 +1641,7 @@ mod s61_tests {
 derive T.TypeName {
     info :: T.reflect()
     param :: info.type_params[0].name
-    fn get_value(self) -> @param { ~self.value }
+    fn get_value(self) -> @param { self.value.copy() }
     fn type_name(self) -> String { T.$name }
 }
 "#,

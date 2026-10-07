@@ -17,7 +17,7 @@ use core.sys as env
 fn count_lines(text: String) -> Int { text.lines().len() }
 
 fn scan_one(path: String) -> String {
-    text :: fs.read(~path) ?? return "{path}: unreadable"
+    text :: fs.read(path.copy()) ?? return "{path}: unreadable"
     lines :: count_lines(text)
     return "{path}: {lines} lines, {text.len()} chars"
 }
@@ -39,7 +39,7 @@ fn paths_from_prompt() -> [String] {
     print("Enter file paths (blank line when done):")
     out := [String]{}
     loop true {
-        raw :: io.input("> ") ?? return ~out
+        raw :: io.input("> ") ?? return out.copy()
         if raw == "" { break }
         &out.push(raw)
     }
@@ -57,8 +57,8 @@ fn scan_parallel(paths: [String]) -> [String] {
     (sender, ch) :: channel<String>()
     workers := [Task<()>]{}
     loop path in paths {
-        tx :: ~sender
-        file :: ~path
+        tx :: sender.copy()
+        file :: path.copy()
         &workers.push(task {
             tx.send(scan_one(file))
         })
@@ -74,7 +74,7 @@ fn scan_parallel(paths: [String]) -> [String] {
     return results
 }
 
-fn copy_paths(paths: [String]) -> [String] { paths.map(path -> ~path) }
+fn copy_paths(paths: [String]) -> [String] { paths.map(path -> path.copy()) }
 
 fn run() {
     paths :: gather_paths()

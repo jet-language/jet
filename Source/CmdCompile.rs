@@ -9410,8 +9410,8 @@ fn format_source_for_fmt(
         && Path::new(origin).is_file()
         && !is_typed_package_source(src, origin)
     {
-        // Sema spans point into the source as read. Insert copy verbs before
-        // any package-target migration can change those offsets.
+        // Sema spans point into the source as read. Insert the copy calls
+        // before any package-target migration can change those offsets.
         let mut source = src.to_string();
         let mut bundle = jet::Loader::load_entry(origin)?;
         let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
@@ -9421,9 +9421,13 @@ fn format_source_for_fmt(
         {
             return Err(diagnostics);
         }
-        for span in implicit_copy_spans(&bundle, origin).into_iter().rev() {
-            if span.start <= source.len() {
-                source.insert_str(span.start, jet::Syntax::SIGIL_COPY);
+        // D-COPY-WORD1=A: an implicit copy site is a place (a name, field or
+        // index chain) whose span ends where the place ends, so the explicit
+        // form appends `.copy()` there. Spans arrive last-first.
+        let copy_call = format!(".{}()", jet::Syntax::METHOD_COPY);
+        for span in implicit_copy_spans(&bundle, origin) {
+            if span.end <= source.len() {
+                source.insert_str(span.end, &copy_call);
                 copy_marks_inserted = true;
             }
         }

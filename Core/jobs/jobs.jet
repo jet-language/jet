@@ -79,7 +79,7 @@ pub fn with_max_attempts(q: JobQueue, max_attempts: Int) -> JobQueue Never! {
         next_id: q.next_id,
         max_attempts: limit,
         policy: q.policy,
-        records: ~q.records,
+        records: q.records.copy(),
     }
 }
 
@@ -131,13 +131,13 @@ pub fn claim(q: JobQueue) -> (queue: JobQueue, taken: JobQueueClaim?) Never! {
                 next_id: q.next_id,
                 max_attempts: limit,
                 policy: q.policy,
-                records: ~recs,
+                records: recs.copy(),
             }
-            return (queue: nq, taken: Val(JobQueueClaim{id: ~recs[i].id, payload: ~recs[i].payload}))
+            return (queue: nq, taken: Val(JobQueueClaim{id: recs[i].id.copy(), payload: recs[i].payload.copy()}))
         }
     }
     if changed {
-        return (queue: JobQueue{name: q.name, next_id: q.next_id, max_attempts: limit, policy: q.policy, records: ~recs}, taken: None)
+        return (queue: JobQueue{name: q.name, next_id: q.next_id, max_attempts: limit, policy: q.policy, records: recs.copy()}, taken: None)
     }
     (queue: q, taken: None)
 }
@@ -156,8 +156,8 @@ pub fn fail(q: JobQueue, id: String) -> JobQueue JobError! {
         if recs[i].state != JobQueueState.Running -> return Err(JobError.Failed)
         next_state :: if recs[i].attempts >= limit -> JobQueueState.DeadLettered else -> JobQueueState.Retrying
         recs[i] = JobQueueRecord{
-            id: ~recs[i].id,
-            payload: ~recs[i].payload,
+            id: recs[i].id.copy(),
+            payload: recs[i].payload.copy(),
             state: next_state,
             attempts: recs[i].attempts,
         }
@@ -166,7 +166,7 @@ pub fn fail(q: JobQueue, id: String) -> JobQueue JobError! {
             next_id: q.next_id,
             max_attempts: limit,
             policy: q.policy,
-            records: ~recs,
+            records: recs.copy(),
         })
     }
     Err(JobError.Missing)
@@ -206,27 +206,27 @@ fn set_state(q: JobQueue, id: String, state: JobQueueState) -> JobQueue JobError
                 return Err(JobError.Failed)
             }
         }
-        recs[i] = JobQueueRecord{id: ~recs[i].id, payload: ~recs[i].payload, state: state, attempts: recs[i].attempts}
-        return Ok(JobQueue{name: q.name, next_id: q.next_id, max_attempts: q.max_attempts, policy: q.policy, records: ~recs})
+        recs[i] = JobQueueRecord{id: recs[i].id.copy(), payload: recs[i].payload.copy(), state: state, attempts: recs[i].attempts}
+        return Ok(JobQueue{name: q.name, next_id: q.next_id, max_attempts: q.max_attempts, policy: q.policy, records: recs.copy()})
     }
     Err(JobError.Missing)
 }
 pub fn state(q: JobQueue, id: String) -> JobQueueState? Never! {
-    loop record in ~q.records {
+    loop record in q.records.copy() {
         if record.id == id -> return Val(record.state)
     }
     None
 }
 
 pub fn attempts(q: JobQueue, id: String) -> Int Never! {
-    loop record in ~q.records {
+    loop record in q.records.copy() {
         if record.id == id -> return record.attempts
     }
     0
 }
 
 pub fn payload(q: JobQueue, id: String) -> String? Never! {
-    loop record in ~q.records {
+    loop record in q.records.copy() {
         if record.id == id -> return Val(record.payload)
     }
     None
@@ -239,7 +239,7 @@ pub fn event(q: JobQueue, id: String) -> JobQueueEvent? Never! {
 
 pub fn events(q: JobQueue) -> [JobQueueEvent] Never! {
     out := [JobQueueEvent]{}
-    loop record in ~q.records {
+    loop record in q.records.copy() {
         &out.push(JobQueueEvent{kind: state_name(record.state), id: record.id})
     }
     out

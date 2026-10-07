@@ -73,7 +73,7 @@ fn evidence_get_string(cursor: &EvidenceCursor) -> String EvidenceCodecError! {
     start :: cursor.at
     cursor.at = end
     // Rust advances the cursor before UTF-8 conversion, including its error rail.
-    text :: String.from_bytes(~cursor.bytes[start..<end]) ?? return Err(evidence_codec_error("non-UTF-8 evidence report field"))
+    text :: String.from_bytes(cursor.bytes[start..<end].copy()) ?? return Err(evidence_codec_error("non-UTF-8 evidence report field"))
     Ok(text)
 }
 

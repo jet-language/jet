@@ -610,7 +610,7 @@ fn link_load_object(c: &LinkContext, b: Int, base: Int, size: Int, name: String)
         weak :: bind == 2
         value :: link_u64(c.bufs, b, at + 8)
         symbol_size :: link_u64(c.bufs, b, at + 16)
-        kind :: ~c.g_kind[g]
+        kind :: c.g_kind[g].copy()
         if section == LINK_UNDEF {
             link_reference(&c, g, weak)
         } else if section == LINK_COMMON {
@@ -627,7 +627,7 @@ fn link_load_object(c: &LinkContext, b: Int, base: Int, size: Int, name: String)
             c.g_obj[g] = obj
             c.g_weak_def[g] = weak
         } else if !weak && !c.g_weak_def[g] && kind == LINK_G_FILE {
-            earlier :: ~c.g_obj[g]
+            earlier :: c.g_obj[g].copy()
             seen_in :: if earlier >= 0 -> c.obj_name[earlier] else -> "the linker"
             message :: "duplicate symbol `{symbol_name}`: defined in {seen_in} and {name}"
             link_error(&c, message)
@@ -665,7 +665,7 @@ fn link_reloc_error(c: &LinkContext, s: Int, off: Int, message: String) Never! {
 // Unwind tables: split each `.eh_frame` into its CIE and FDE records.
 
 fn link_parse_eh(c: &LinkContext, obj: Int, s: Int) Never! {
-    b :: ~c.obj_buffer[obj]
+    b :: c.obj_buffer[obj].copy()
     base :: link_sec_offset(c, obj, s)
     size :: link_sec_size(c, obj, s)
     count :: link_rel_count(c, obj, s)
@@ -726,16 +726,16 @@ fn link_pull(c: &LinkContext, key: Int) Never! {
     index :: key.div_euclid(LINK_MEMBER_SCALE)
     member :: key % LINK_MEMBER_SCALE
     name :: "{c.archives[index].path}({c.archives[index].names[member]})"
-    b :: ~c.archive_buffer[index]
-    start :: ~c.archives[index].starts[member]
-    size :: ~c.archives[index].sizes[member]
+    b :: c.archive_buffer[index].copy()
+    start :: c.archives[index].starts[member].copy()
+    size :: c.archives[index].sizes[member].copy()
     _ := link_load_object(&c, b, start, size, name)
 }
 
 // Pull members until no queued strong reference can be satisfied.
 fn link_resolve(c: &LinkContext) Never! {
     loop c.pending_head < c.pending.len() {
-        g :: ~c.pending[c.pending_head]
+        g :: c.pending[c.pending_head].copy()
         c.pending_head += 1
         f :: link_final(c, g)
         if c.g_kind[f] != LINK_G_NONE -> next
@@ -994,7 +994,7 @@ fn link_shims(c: &LinkContext) -> Bool Never! {
     count :: c.g_name.len()
     loop g in 0..<count {
         if !c.g_strong_ref[g] || c.g_alias[g] >= 0 || c.g_kind[g] != LINK_G_NONE -> next
-        name :: ~c.g_name[g]
+        name :: c.g_name[g].copy()
         if link_lfs64_base(name) == .Val(base) {
             if link_resolvable(c, base) {
                 target :: link_intern(&c, base)
@@ -1079,11 +1079,11 @@ fn link_mark(c: &LinkContext, work: &[Int], s: Int) Never! {
 
 // Mark the targets of the relocations in `piece`, except its pc_begin.
 fn link_mark_piece(c: &LinkContext, work: &[Int], piece: Int, skip_pc: Bool) Never! {
-    s :: ~c.ep_sec[piece]
-    obj :: ~c.ep_obj[piece]
-    b :: ~c.obj_buffer[obj]
+    s :: c.ep_sec[piece].copy()
+    obj :: c.ep_obj[piece].copy()
+    b :: c.obj_buffer[obj].copy()
     table :: link_rel_table(c, obj, s)
-    first :: ~c.ep_first_reloc[piece]
+    first :: c.ep_first_reloc[piece].copy()
     end :: first + c.ep_reloc_count[piece]
     pc :: c.ep_start[piece] + 8
     loop k in first..<end {
@@ -1108,7 +1108,7 @@ fn link_collect(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) Ne
     // Index the FDEs by the section they describe.
     loop piece in 0..<c.ep_sec.len() {
         if c.ep_target[piece] < 0 -> next
-        obj :: ~c.ep_obj[piece]
+        obj :: c.ep_obj[piece].copy()
         t :: link_target_section(c, obj, c.ep_target[piece])
         c.ep_target[piece] = t
         if t < 0 -> next
@@ -1119,7 +1119,7 @@ fn link_collect(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) Ne
     loop entry in entries -> link_mark(&c, &work, entry)
     // Init/fini arrays and SHF_GNU_RETAIN sections of every object are roots.
     loop index in 0..<c.roots.len() {
-        root :: ~c.roots[index]
+        root :: c.roots[index].copy()
         link_mark(&c, &work, root)
     }
     // Personality routines named by the CIEs.
@@ -1129,10 +1129,10 @@ fn link_collect(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) Ne
     reported := [Int:Bool]{}
     head := 0
     loop head < work.len() {
-        s :: ~work[head]
+        s :: work[head].copy()
         head += 1
         obj :: link_obj_of(c, s)
-        b :: ~c.obj_buffer[obj]
+        b :: c.obj_buffer[obj].copy()
         r :: link_rela_of(c, obj, s)
         // Rows are scanned in the order they were marked.
         &c.rel_base.push(c.rel_slot.len())
@@ -1148,7 +1148,7 @@ fn link_collect(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) Ne
                 &c.rel_slot.push(slot)
             }
         }
-        fde := ~c.sec_fde[s]
+        fde := c.sec_fde[s].copy()
         loop fde >= 0 {
             link_mark_piece(&c, &work, fde, true)
             fde = c.ep_next[fde]
@@ -1202,7 +1202,7 @@ fn link_is_got_reloc(kind: Int) -> Bool Never! {
 // after layout), and when it is GOT-relative and not relaxed, return its GOT
 // slot (assigned on first use); otherwise -1.
 fn link_scan_reloc(c: &LinkContext, reported: &[Int:Bool], linker_names: [String:Bool], obj: Int, s: Int, at: Int, symbol: Int) -> Int Never! {
-    b :: ~c.obj_buffer[obj]
+    b :: c.obj_buffer[obj].copy()
     g :: link_global_of(c, obj, symbol)
     if g >= 0 && !link_defined(c, g) && reported.get(g) == None && (link_u8(c.bufs, b, link_sym_at(c, obj, symbol) + 4) >> 4) != 2 && linker_names.get(c.g_name[g]) == None {
         &reported.add(g, true).drop("checked absent above")
@@ -1294,7 +1294,7 @@ fn link_sort_by(items: [Int], keys: [Int]) -> [Int] Never! {
 fn link_place(c: &LinkContext, rows: [Int], start: Int) -> Int Never! {
     addr := start
     loop row in rows {
-        s :: ~c.live_secs[row]
+        s :: c.live_secs[row].copy()
         obj :: link_obj_of(c, s)
         addr = link_align(addr, link_sec_align(c, obj, s))
         c.live_addr[row] = addr
@@ -1489,7 +1489,7 @@ fn link_apply_got(c: &LinkContext, out: &[U8], obj: Int, s: Int, kind: Int, off:
 // TLS call sequence, so the next relocation (the call to `__tls_get_addr`)
 // must be skipped.
 fn link_apply(c: &LinkContext, out: &[U8], obj: Int, s: Int, at: Int, off: Int, slot: Int, pos: Int, place: Int) -> Bool Never! {
-    b :: ~c.obj_buffer[obj]
+    b :: c.obj_buffer[obj].copy()
     kind :: link_u32(c.bufs, b, at + 8)
     addend :: link_s64(c.bufs, b, at + 16)
     if slot >= 0 {
@@ -1599,9 +1599,9 @@ fn link_apply(c: &LinkContext, out: &[U8], obj: Int, s: Int, at: Int, off: Int, 
 // Copy live row `row` to the end of `out` (which must be at its file
 // offset) and apply its relocations there.
 fn link_emit_section(c: &LinkContext, out: &[U8], row: Int) Never! {
-    s :: ~c.live_secs[row]
+    s :: c.live_secs[row].copy()
     obj :: link_obj_of(c, s)
-    b :: ~c.obj_buffer[obj]
+    b :: c.obj_buffer[obj].copy()
     pos :: out.len()
     start :: link_sec_offset(c, obj, s)
     size :: link_sec_size(c, obj, s)
@@ -1610,8 +1610,8 @@ fn link_emit_section(c: &LinkContext, out: &[U8], row: Int) Never! {
     if r < 0 -> return
     count :: link_sec_size(c, obj, r).div_euclid(24)
     table :: link_sec_offset(c, obj, r)
-    address :: ~c.live_addr[row]
-    base :: ~c.rel_base[row]
+    address :: c.live_addr[row].copy()
+    base :: c.rel_base[row].copy()
     skip := false
     loop k in 0..<count {
         if skip {
@@ -1621,7 +1621,7 @@ fn link_emit_section(c: &LinkContext, out: &[U8], row: Int) Never! {
         at :: table + 24 * k
         // Section offsets fit 32 bits.
         off :: link_u32(c.bufs, b, at)
-        slot :: ~c.rel_slot[base + k]
+        slot :: c.rel_slot[base + k].copy()
         skip = link_apply(&c, &out, obj, s, at, off, slot, pos + off, address + off)
     }
 }
@@ -1632,16 +1632,16 @@ fn link_emit_eh(c: &LinkContext, out: &[U8]) Never! {
     base :: out.len()
     loop piece in 0..<c.ep_sec.len() {
         if !c.ep_keep[piece] -> next
-        s :: ~c.ep_sec[piece]
-        obj :: ~c.ep_obj[piece]
-        b :: ~c.obj_buffer[obj]
-        piece_start :: ~c.ep_start[piece]
+        s :: c.ep_sec[piece].copy()
+        obj :: c.ep_obj[piece].copy()
+        b :: c.obj_buffer[obj].copy()
+        piece_start :: c.ep_start[piece].copy()
         start :: link_sec_offset(c, obj, s) + piece_start
         pos :: out.len()
-        length :: ~c.ep_len[piece]
+        length :: c.ep_len[piece].copy()
         &out.extend(c.bufs[b][start..<start + length])
         table :: link_rel_table(c, obj, s)
-        first :: ~c.ep_first_reloc[piece]
+        first :: c.ep_first_reloc[piece].copy()
         end :: first + c.ep_reloc_count[piece]
         loop k in first..<end {
             at :: table + 24 * k
@@ -1650,7 +1650,7 @@ fn link_emit_eh(c: &LinkContext, out: &[U8]) Never! {
             place :: c.eh_start + pos - base + off
             _ := link_apply(&c, &out, obj, s, at, rel_off, -1, pos + off, place)
         }
-        cie :: ~c.ep_cie[piece]
+        cie :: c.ep_cie[piece].copy()
         if cie >= 0 -> link_put32(&out, pos + 4, c.ep_out[piece] + 4 - c.ep_out[cie])
     }
     loop _ in 0..<4 -> &out.push(U8{0})

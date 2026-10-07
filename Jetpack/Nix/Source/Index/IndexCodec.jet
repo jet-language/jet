@@ -123,7 +123,7 @@ pub fn nix_index_zstd_decode_bounded(bytes: [U8], limit: Int) -> [U8] NixIndexEr
 // The decoded bytes of a compressed target, or `bytes` unchanged when they
 // do not start a Zstandard frame.
 fn nix_index_maybe_decode(bytes: [U8]) -> [U8] NixIndexError! {
-    if !nix_has_zstd_magic(bytes) -> return Ok(~bytes)
+    if !nix_has_zstd_magic(bytes) -> return Ok(bytes.copy())
     nix_index_zstd_decode_bounded(bytes, NIX_INDEX_MAX_DECODED_BYTES)
 }
 

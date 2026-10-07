@@ -45,7 +45,7 @@ pub fn set<T>(sig: Signal<T>, value: T) -> Signal<T> Never! {
 }
 
 pub fn set_if_changed(sig: Signal<Int>, value: Int) -> Signal<Int> Never! {
-    if sig.value == value -> return ~sig
+    if sig.value == value -> return sig.copy()
     set(sig, value)
 }
 
@@ -58,7 +58,7 @@ pub fn computed_update(c: Computed<Int>, delta: Int) -> Computed<Int> Never! {
 pub fn computed_version<T>(c: Computed<T>) -> Int Never! { c.version }
 
 pub fn effect_run_if(e: Effect, value: Int) -> Effect Never! {
-    if e.active && e.last == value -> return ~e
+    if e.active && e.last == value -> return e.copy()
     effect_run(e, value)
 }
 
@@ -78,7 +78,7 @@ pub fn computed_set<T>(c: Computed<T>, value: T) -> Computed<T> Never! {
 
 pub fn effect_run(e: Effect, value: Int) -> Effect Never! {
     if !e.active || e.last != value -> return Effect{last: value, active: true}
-    ~e
+    e.copy()
 }
 
 pub fn effect_last(e: Effect) -> Int Never! { e.last }

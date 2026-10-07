@@ -33,8 +33,8 @@ pub fn trust_overlay_invalidations(before: [OverlayFingerprint], after: [Overlay
         overlay :: keys[index].overlay
         package :: keys[index].package
         if index > 0 && overlay == previous_overlay && package == previous_package -> next
-        previous_overlay = ~overlay
-        previous_package = ~package
+        previous_overlay = overlay.copy()
+        previous_package = package.copy()
         fingerprint_before :: trust_overlay_fingerprint(before, overlay, package)
         fingerprint_after :: trust_overlay_fingerprint(after, overlay, package)
         if fingerprint_before == fingerprint_after -> next

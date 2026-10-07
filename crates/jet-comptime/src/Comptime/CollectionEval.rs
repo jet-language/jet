@@ -1135,7 +1135,7 @@ fn set_method(
             }
             Ok(CtValue::List(out))
         }
-        "copy" | "to_set" => Ok(set_struct(type_name, items)),
+        "to_set" => Ok(set_struct(type_name, items)),
         "capacity" => Ok(CtValue::Int(items.len() as i64)),
         "equal" => {
             let other = args
@@ -1439,7 +1439,6 @@ fn bitset_method(
             let bit = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
             Ok(CtValue::Bool(bits.contains(&CtValue::Int(bit))))
         }
-        "copy" => Ok(bitset_struct(bits.clone())),
         "to_list" => Ok(CtValue::List(bits)),
         _ => Err(unsupported(
             &format!("Bits.{} at compile time", method),
@@ -1793,7 +1792,7 @@ fn byte_buffer_method(
             }
             Ok(byte_buffer_struct(out.into_bytes()))
         }
-        "clone" | "copy" => Ok(byte_buffer_struct_at(bytes, pos)),
+        "clone" => Ok(byte_buffer_struct_at(bytes, pos)),
         "lines" => Ok(CtValue::List(
             text.lines().map(|s| CtValue::Str(s.to_string())).collect(),
         )),

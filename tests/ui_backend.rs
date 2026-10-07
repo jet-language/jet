@@ -92,7 +92,7 @@ fn view(title: String) -> UINode {
 fn run() {
     selected := reactive.signal(0)
     backend := ui.tui_backend()
-    render_backend :: ~backend
+    render_backend :: backend.copy()
     ui.reactive_render(() -> {
         marker :: if selected.get() == 0 -> "* " else -> "  "
         ui.mount(render_backend, view("{marker}Meeting"))

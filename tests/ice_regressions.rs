@@ -71,7 +71,7 @@ fn b1_json_text_clones_borrowed_view_param() {
         r#"
 use core.encoding.json as json
 fn wrap(x: String) -[]> String {
-    j :: JSON.Text(~x)
+    j :: JSON.Text(x.copy())
     return json.to_string(j)
 }
 fn run() {
@@ -207,7 +207,7 @@ fn next(value: DataTree) -> Bool Never! { return true }
 fn value_if_bool_never(value: DataTree) -> Bool Never! {
     return if value == {
         .Null -> false
-        else -> next(~value)
+        else -> next(value.copy())
     }
 }
 fn run() {
@@ -222,7 +222,7 @@ fn next(value: DataTree) -> String { return "next" }
 fn value_if_string_err(value: DataTree) -> String {
     return if value == {
         .Null -> "null"
-        else -> next(~value)
+        else -> next(value.copy())
     }
 }
 fn run() {
@@ -237,7 +237,7 @@ fn next(value: DataTree) -> [String] { return [String]{} }
 fn value_if_list_err(value: DataTree) -> [String] {
     empty := [String]{}
     return if value == {
-        .Text(text) -> next(DataTree.Text(~text))
+        .Text(text) -> next(DataTree.Text(text.copy()))
         else -> empty
     }
 }

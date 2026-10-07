@@ -111,7 +111,7 @@ use core.time as time
 
 fn run() {{
     (sender, receiver) :: channel<Int>()
-    second_sender :: ~sender
+    second_sender :: sender.copy()
     task.group limited(limit: {limit}) {{
         first :: task {{
             sender.send(1)

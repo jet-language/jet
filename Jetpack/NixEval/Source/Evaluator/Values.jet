@@ -184,8 +184,8 @@ impl NixEvalValue {
             .Str(value) -> return Ok(NixEvalText{value, contexts: [String]{}})
             .Contextual(value, contexts) -> return Ok(NixEvalText{value, contexts})
             .Integer(value) -> return Ok(NixEvalText{value: "{value}", contexts: [String]{}})
-            .Package(name) -> return Ok(NixEvalText{value: ~name, contexts: [String]{"package:{name}"}})
-            .Path(path) -> return Ok(NixEvalText{value: ~path, contexts: [String]{"path:{path}"}})
+            .Package(name) -> return Ok(NixEvalText{value: name.copy(), contexts: [String]{"package:{name}"}})
+            .Path(path) -> return Ok(NixEvalText{value: path.copy(), contexts: [String]{"path:{path}"}})
             else -> {}
         }
         Err(NixEvalError.Unsupported("value of type {self.type_name()} cannot be coerced to a string"))

@@ -48,7 +48,7 @@ pub fn parse(source: String) -> [Step]? {
 
 fn field(value: DataTree, name: String) -> DataTree? {
     if value == .Object(entries) {
-        if entries.get(~name) == .Val(found) -> return Val(found)
+        if entries.get(name.copy()) == .Val(found) -> return Val(found)
     }
     return None
 }
@@ -59,7 +59,7 @@ fn apply_step(values: [DataTree], step: Step) -> [DataTree] {
         if step == {
             .Identity -> { &output.push(value) }
             .Field(name) -> {
-                if field(~value, ~name) == .Val(found) -> &output.push(found)
+                if field(value.copy(), name.copy()) == .Val(found) -> &output.push(found)
             }
             .Each -> {
                 if value == .Array(items) {
@@ -67,7 +67,7 @@ fn apply_step(values: [DataTree], step: Step) -> [DataTree] {
                 }
             }
             .AtLeast(name, limit) -> {
-                if field(~value, ~name) == .Val(found) {
+                if field(value.copy(), name.copy()) == .Val(found) {
                     score :: found.int() ?? Int.MIN
                     if score >= limit -> &output.push(value)
                 }

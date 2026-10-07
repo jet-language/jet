@@ -131,7 +131,7 @@ fn store_producer_unhex(value: String) -> String StoreError! {
 
 // Build the canonical producer record shared by every store ingestion phase.
 pub fn store_canonical_producer(provider: String, immutable_source: String, source_digest: String, identity: CacheIdentity, facts: [String: String]) -> String StoreError! {
-    recorded := ~facts
+    recorded := facts.copy()
     recorded["action.recipe"] = identity.recipe_fingerprint
     recorded["closure.authority"] = "hangar-cas"
     recorded["cache.reproducibility"] = "attested-v1"
@@ -179,11 +179,11 @@ pub fn store_refresh_lock_digest(verification: &StoreVerification, roots: Hangar
     producer := ProducerRecord.decode(entry.producer_record)
     if producer.provider == {
         "nix" | "jetpackage" -> {}
-        else -> return Ok(~entry)
+        else -> return Ok(entry.copy())
     }
     plan_facts :: producer.plan.facts()
     if producer.facts.get("nix.lock.digest") == Val(lock_digest) && plan_facts.get("nix.lock.digest") == Val(lock_digest) {
-        return Ok(~entry)
+        return Ok(entry.copy())
     }
     producer.facts["nix.lock.digest"] = lock_digest
     replay_facts := [String: String]{}
@@ -197,7 +197,7 @@ pub fn store_refresh_lock_digest(verification: &StoreVerification, roots: Hangar
     &producer.bind_cache_provenance(entry.reference, entry.envelope.output_hash, entry.cache_identity, entry.references)
     provider_refresh_provider_facts(&producer, entry.reference) ?? return Err(StoreError.Other("{err}"))
 
-    refreshed := ~entry
+    refreshed := entry.copy()
     refreshed.producer_record = producer.encode()
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
     store_recover_closure_journal_unlocked(&verification, roots)

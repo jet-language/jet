@@ -16,11 +16,11 @@ fn run() {
     // still works (this is a read, not a move) — proving the view didn't
     // take ownership away from its owner.
     print("padded still readable: {padded}")
-    // `email` is itself a local, type-invisible view (`padded.trim()`). `~`
+    // `email` is itself a local, type-invisible view (`padded.trim()`). `.copy()`
     // materializes an owned String for an owned-String boundary. Named
     // zero-copy return/field boundaries use `View<str>` instead; see
-    // returned_views.jet. A `copies: .Explicit` policy makes `~` visible.
-    print("escaped copy={domain_of(~email)}")
+    // returned_views.jet. A `copies: .Explicit` policy makes `.copy()` visible.
+    print("escaped copy={domain_of(email.copy())}")
     print("implicit copy={implicit_domain(padded)}")
 }
 
@@ -31,7 +31,7 @@ fn implicit_domain(s: String) -> String {
 
 fn domain_of(s: String) -> String {
     d :: s.after("@")
-    return ~d
+    return d.copy()
 }
 
 #Test("string view: after/before/trim, no owning materialization") {

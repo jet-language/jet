@@ -71,7 +71,7 @@ fn run() {
     print("probe:{probe.join() ?? panic("probe join")}")
 
     delivery :: &tree.send_durable(a, "ping", key: "k1") ?? panic("durable")
-    state :: (~delivery).status() ?? panic("delivery status")
+    state :: (delivery.copy()).status() ?? panic("delivery status")
     history :: delivery.events() ?? panic("delivery events")
     if history.len() == 0 -> panic("delivery history")
     print("delivery:{state.show()}")

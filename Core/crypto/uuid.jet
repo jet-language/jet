@@ -88,7 +88,7 @@ fn parse_uuid(text: String) -> [U8]? {
         lo :: hex_value(digits[i * 2 + 1]) ?? return None
         &out.push(to_u8((hi << 4) | lo))
     }
-    Val(~out)
+    Val(out.copy())
 }
 
 fn hex_value(b: U8) -> Int? {
@@ -125,7 +125,7 @@ fn hex_decode(text: String) -> [U8]? {
         lo :: hex_value(raw[i + 1]) ?? return None
         &out.push(to_u8((hi << 4) | lo))
     }
-    Val(~out)
+    Val(out.copy())
 }
 
 /// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the

@@ -854,7 +854,7 @@ fn sema_effect_record_fact(nodes: &[SemaEffectNode], node_by_key: [String:Int], 
 }
 
 fn sema_effect_record_memory_open(nodes: &[SemaEffectNode], node_index: Int, span: Span, reason: String) Never! {
-    source :: ~nodes[node_index].source_display
+    source :: nodes[node_index].source_display.copy()
     &nodes[node_index].memory_opens.push(SemaMemoryOpen{span: span, source: source, reason: reason})
 }
 
@@ -1562,18 +1562,18 @@ fn sema_effect_memory_search(nodes: [SemaEffectNode], node_by_key: [String:Int],
     cursor := 0
     loop cursor < queue.len() {
         index :: queue[cursor]
-        path :: ~paths[cursor]
+        path :: paths[cursor].copy()
         cursor += 1
         if seen[index] -> next
         seen[index] = true
         loop event in sema_effect_memory_sorted_events(nodes[index].memory_events) {
             if event.kind == kind -> return Val(SemaMemoryFinding{event: Val(event), owner: index, open: None, path: path, used: 0})
         }
-        if nodes[index].memory_opens.len() > 0 -> return Val(SemaMemoryFinding{event: None, owner: index, open: Val(~nodes[index].memory_opens[0]), path: path, used: 0})
+        if nodes[index].memory_opens.len() > 0 -> return Val(SemaMemoryFinding{event: None, owner: index, open: Val(nodes[index].memory_opens[0].copy()), path: path, used: 0})
         edges := nodes[index].call_edges
         loop edge in edges {
             target :: sema_effect_node_index(node_by_key, edge) ?? next
-            next_path := ~path
+            next_path := path.copy()
             &next_path.push(nodes[target].display_key)
             &queue.push(target)
             &paths.push(next_path)
@@ -1615,7 +1615,7 @@ fn sema_effect_arena_bound(nodes: [SemaEffectNode], node_by_key: [String:Int], i
 
 fn sema_effect_arena_bound_inner(nodes: [SemaEffectNode], node_by_key: [String:Int], index: Int, visiting: &[Bool], path: [String]) -> SemaMemoryArena {
     node :: nodes[index]
-    if node.memory_opens.len() > 0 -> return sema_effect_arena_failure(SemaMemoryFinding{event: None, owner: index, open: Val(~node.memory_opens[0]), path: path, used: 0})
+    if node.memory_opens.len() > 0 -> return sema_effect_arena_failure(SemaMemoryFinding{event: None, owner: index, open: Val(node.memory_opens[0].copy()), path: path, used: 0})
     total := 0
     witness := SemaMemoryFinding?{None}
     loop event in sema_effect_memory_sorted_events(node.memory_events) {
@@ -1637,7 +1637,7 @@ fn sema_effect_arena_bound_inner(nodes: [SemaEffectNode], node_by_key: [String:I
     }
     loop call in sema_effect_memory_sorted_calls(node.memory_calls) {
         target :: sema_effect_node_index(node_by_key, call.callee) ?? next
-        call_path := ~path
+        call_path := path.copy()
         &call_path.push(nodes[target].display_key)
         proof :: sema_effect_arena_bound(nodes, node_by_key, target, &visiting, call_path)
         if proof.failure != None -> return proof

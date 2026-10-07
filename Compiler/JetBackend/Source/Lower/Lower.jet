@@ -248,7 +248,7 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
     }
     prepared :: lower_prepare_entry(program, entry)
     if prepared.issues.len() > 0 {
-        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ~prepared.issues, entry: None}
+        return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: prepared.issues.copy(), entry: None}
     }
     m := LowerModule{
         signatures: [LIRSignature]{},
@@ -280,7 +280,7 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
     }
     functions := [LIRFunction]{}
     loop (index, descriptor) in prepared.functions {
-        signature :: ~m.mir_signatures[index]
+        signature :: m.mir_signatures[index].copy()
         id :: LIRFunctionID{value: index}
         function :: if descriptor.instance_row >= 0 -> lower_function(program, &m, prepared.instances[descriptor.instance_row], id, signature) else -> lower_function(program, &m, program.functions[descriptor.source_row], id, signature)
         &functions.push(function)
@@ -300,7 +300,7 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
     // Glue and helpers may register more, so the list grows while it is walked.
     cursor := 0
     loop cursor < m.glue.len() {
-        glue :: ~m.glue[cursor]
+        glue :: m.glue[cursor].copy()
         if glue.helper != "" {
             &functions.push(lower_helper_function(program, &m, glue))
         } else if glue.clone {
@@ -310,8 +310,8 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
         }
         cursor += 1
     }
-    lowered :: LIRModule{signatures: ~m.signatures, functions: functions, data: ~m.data}
-    issues := ~m.issues
+    lowered :: LIRModule{signatures: m.signatures.copy(), functions: functions, data: m.data.copy()}
+    issues := m.issues.copy()
     if issues.len() == 0 {
         loop issue in lir_lint_module(lowered) -> &issues.push(LIRLoweringIssue{function: issue.function, message: "LIR lint b{issue.block}: {issue.message}"})
     }
@@ -555,7 +555,7 @@ fn lower_glue_register(m: &LowerModule, role: String, ty: MIRType, clone: Bool, 
     if m.glue_rows.get(row_key) == .Val(row) -> return m.glue[row].id
     row :: m.glue.len()
     id :: LIRFunctionID{value: m.glue_base + row}
-    &m.glue.push(LowerGlue{key: key, ty: ~ty, id: id, clone: clone, helper: helper, function: -1})
+    &m.glue.push(LowerGlue{key: key, ty: ty.copy(), id: id, clone: clone, helper: helper, function: -1})
     &m.glue_rows.add(row_key, row).drop("checked absent above")
     id
 }
@@ -586,7 +586,7 @@ fn lower_signature(m: &LowerModule, params: [LIRLayout], result: LIRLayout?) -> 
     key :: lower_signature_key(params, result)
     if m.signature_rows.get(key) == .Val(row) -> return LIRSignatureID{value: row}
     id :: LIRSignatureID{value: m.signatures.len()}
-    &m.signatures.push(LIRSignature{id: id, convention: LIRCallConv.SystemV, params: ~params, result: ~result})
+    &m.signatures.push(LIRSignature{id: id, convention: LIRCallConv.SystemV, params: params.copy(), result: result.copy()})
     &m.signature_rows.add(key, id.value).drop("checked absent above")
     id
 }
@@ -615,7 +615,7 @@ fn lower_data(m: &LowerModule, text: String) -> LIRDataID Never! {
     loop byte in text.bytes() -> &bytes.push(byte)
     id :: LIRDataID{value: m.data.len()}
     &m.data.push(LIRData{id: id, bytes: bytes, align: 1, relocs: [LIRDataReloc]{}})
-    &m.data_rows.add(~text, id.value).drop("checked absent above")
+    &m.data_rows.add(text.copy(), id.value).drop("checked absent above")
     id
 }
 
@@ -678,18 +678,18 @@ fn lower_new_block(f: &LowerFunction) -> LIRBlockID Never! {
 }
 
 fn lower_seal(f: &LowerFunction, terminator: LIRTerminator) Never! {
-    open :: ~f.open
-    params :: ~f.open_params
+    open :: f.open.copy()
+    params :: f.open_params.copy()
     lir_builder_seal(&f.builder, open, params, terminator)
 }
 
 fn lower_start(f: &LowerFunction, id: LIRBlockID, params: [LIRValueID]) Never! {
     f.open = id
-    f.open_params = ~params
+    f.open_params = params.copy()
 }
 
 fn lower_target(block: LIRBlockID, args: [LIRValueID]) -> LIRJumpTarget Never! {
-    LIRJumpTarget{block: block, args: ~args}
+    LIRJumpTarget{block: block, args: args.copy()}
 }
 
 fn lower_value_type(c: LowerContext, value: MIRValueID) -> MIRType? {
@@ -781,7 +781,7 @@ fn lower_call_runtime(m: &LowerModule, f: &LowerFunction, symbol: String, args: 
     loop arg in args -> &params.push(lower_value_layout(f, arg))
     result :: if dst == .Val(value) -> Val(lower_value_layout(f, value)) else -> None
     signature :: lower_signature(&m, params, result)
-    lower_emit(&f, LIRInst.Call{dst: dst, signature: signature, callee: LIRCallee.Runtime{symbol: symbol}, args: ~args})
+    lower_emit(&f, LIRInst.Call{dst: dst, signature: signature, callee: LIRCallee.Runtime{symbol: symbol}, args: args.copy()})
 }
 
 // A static string's address and byte length, for runtime calls.
@@ -789,7 +789,7 @@ fn lower_static_text(m: &LowerModule, f: &LowerFunction, text: String) -> [LIRVa
     address :: lower_pointer(&f)
     data :: lower_data(&m, text)
     lower_emit(&f, LIRInst.DataAddress{dst: address, data: data})
-    size :: ~m.data[data.value].bytes.len()
+    size :: m.data[data.value].bytes.len().copy()
     length :: lower_const(&f, size)
     [LIRValueID]{address, length}
 }
@@ -828,7 +828,7 @@ fn lower_check(m: &LowerModule, f: &LowerFunction, failed: LIRValueID, symbol: S
 
 fn lower_new_function(id: LIRFunctionID, name: String, signature: LIRSignatureID, entry: MIRBlockID) -> LowerFunction Never! {
     LowerFunction{
-        name: ~name,
+        name: name.copy(),
         builder: lir_builder(id, name, signature),
         values: [U64:Int]{},
         absent: [U64:Bool]{},
@@ -995,7 +995,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
             loop place in addressed {
                 if place_slots.get(place.value) == .Val(slot) {
                     if lower_repr_layout(lower_repr(p, slots[slot].ty)) != None {
-                        row :: ~slots[slot]
+                        row :: slots[slot].copy()
                         slots[slot] = LowerSlot{base: row.base, ty: row.ty, ownership: row.ownership, carried: false, write_param: row.write_param, cell: true}
                     }
                 }
@@ -1066,7 +1066,7 @@ fn lower_context(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MI
         ranks[position] = rank
     }
     Val(LowerContext{
-        mir: ~function,
+        mir: function.copy(),
         result: result,
         fact_index: fact_index,
         block_index: block_index,
@@ -1094,8 +1094,8 @@ fn lower_reverse_postorder(successors: [[Int]], entry: Int) -> [Int] Never! {
     visited[entry] = true
     loop stack.len() > 0 {
         top :: stack.len() - 1
-        node :: ~stack[top]
-        next_edge :: ~cursors[top]
+        node :: stack[top].copy()
+        next_edge :: cursors[top].copy()
         if next_edge < successors[node].len() {
             cursors[top] = next_edge + 1
             child :: successors[node][next_edge]
@@ -1263,7 +1263,7 @@ fn lower_clear_slot(p: MIRProgram, c: LowerContext, f: &LowerFunction, slot: Int
 fn lower_block(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, position: Int, entry_params: [LIRValueID]) Never! {
     block :: c.mir.blocks[position]
     f.mir_block = block.id
-    params := ~entry_params
+    params := entry_params.copy()
     // Slots start empty; a phi defines the temporary slot it stands for.
     current := [LIRValueID?]{}
     loop _ in c.slots -> &current.push(None)
@@ -1319,7 +1319,7 @@ fn lower_carries(p: MIRProgram, c: LowerContext, instruction: MIRInstruction) ->
 // placeholder (unassigned or moved out) stays null.
 fn lower_edge(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, target: MIRBlockID) -> LIRJumpTarget? {
     position :: c.block_index.get(target.value) ?? return None
-    source :: ~f.mir_block
+    source :: f.mir_block.copy()
     back :: lower_is_back_edge(c, source, target)
     args := [LIRValueID]{}
     copy_args := [Int]{}
@@ -1354,12 +1354,12 @@ fn lower_edge(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
     }
     loop slot in c.live[position] {
         row :: c.slots[slot]
-        held :: ~f.current[slot]
+        held :: f.current[slot].copy()
         value :: held ?? {
             lower_fail(&m, &f, "local slot {slot} has no value on the edge b{source.value} -> b{target.value}")
             return None
         }
-        if back && (~f.storage[slot]) == .Val(storage) {
+        if back && (f.storage[slot].copy()) == .Val(storage) {
             &copy_args.push(args.len())
             &copy_targets.push(storage)
             &copy_types.push(row.ty)
@@ -1390,7 +1390,7 @@ fn lower_is_back_edge(c: LowerContext, source: MIRBlockID, target: MIRBlockID) -
 fn lower_copy_carried(p: MIRProgram, f: &LowerFunction, storage: LIRValueID, value: LIRValueID, ty: MIRType, nullable: Bool) -> LIRValueID Never! {
     if !nullable {
         lower_write_at(p, &f, storage, 0, value, ty)
-        return ~storage
+        return storage.copy()
     }
     null :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Const{dst: null, value: 0})
@@ -1523,7 +1523,7 @@ fn lower_instruction(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     if instruction.operation == {
         .Parameter(index, name) -> {
             if index < 0 || index >= f.params.len() -> return lower_fail(&m, &f, "parameter {name} has index {index} outside the signature")
-            param :: ~f.params[index]
+            param :: f.params[index].copy()
             if param == .Val(value) {
                 if c.mir.params[index].access != .Write -> return lower_alias(c, &f, instruction, value)
                 // A Write parameter's value is the caller place's current
@@ -1769,7 +1769,7 @@ fn lower_drop_value(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         if c.slots[slot].cell {
             cell_slot = slot
         } else {
-            held :: ~f.current[slot]
+            held :: f.current[slot].copy()
             if held == .Val(holding) {
                 if holding == lowered -> lower_clear_slot(p, c, &f, slot)
             }
@@ -1810,7 +1810,7 @@ fn lower_read_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         if c.slots[slot].cell {
             walk = lower_cell_walk(p, c, &m, &f, slot, row) ?? return
         } else {
-            held :: ~f.current[slot]
+            held :: f.current[slot].copy()
             root :: held ?? return lower_fail(&m, &f, "place {place.value} has no value")
             if row.projections.len() == 0 {
                 if !moving && lower_read_owns(p, c, instruction, row.ty) {
@@ -1903,12 +1903,12 @@ fn lower_write_place(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
         if replace -> lower_drop_stored(p, &m, &f, walk.base, walk.offset, row.ty)
         return lower_write_at(p, &f, walk.base, walk.offset, lowered, row.ty)
     }
-    held :: ~f.current[slot]
+    held :: f.current[slot].copy()
     if row.projections.len() == 0 {
         if c.slots[slot].write_param >= 0 {
             // The caller's place: the old value is dropped once, here, and
             // the new one lands in the caller's storage.
-            address :: (~f.params[c.slots[slot].write_param]) ?? return lower_fail(&m, &f, "Write parameter of place {place.value} has no pointer")
+            address :: (f.params[c.slots[slot].write_param].copy()) ?? return lower_fail(&m, &f, "Write parameter of place {place.value} has no pointer")
             if replace -> lower_drop_stored(p, &m, &f, address, 0, row.ty)
             lower_write_at(p, &f, address, 0, lowered, row.ty)
             if lower_is_inline(p, row.ty) -> return lower_set_slot(&f, slot, Val(address))
@@ -2771,8 +2771,8 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
     lowered := [LIRValueID]{}
     writebacks := [LowerWriteBack]{}
     if !lower_call_args(p, c, &m, &f, args, &lowered, &writebacks) -> return
-    signature :: ~m.mir_signatures[index]
-    result_bytes :: ~m.mir_results[index]
+    signature :: m.mir_signatures[index].copy()
+    result_bytes :: m.mir_results[index].copy()
     if result_bytes > 0 {
         // An inline aggregate result lands in storage the caller supplies.
         storage :: lower_result(p, c, &m, &f, instruction) ?? lower_pointer(&f)
@@ -2878,12 +2878,12 @@ fn lower_write_arg(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
         walk :: lower_cell_walk(p, c, &m, &f, slot, row) ?? return None
         return Val(LowerWriteBack{place: place, slot: slot, cell: lower_address(&f, walk.base, walk.offset)})
     }
-    root :: (~f.current[slot]) ?? {
+    root :: (f.current[slot].copy()) ?? {
         lower_fail(&m, &f, "place {place.value} has no value")
         return None
     }
     if row.projections.len() == 0 && c.slots[slot].write_param >= 0 {
-        address :: (~f.params[c.slots[slot].write_param]) ?? {
+        address :: (f.params[c.slots[slot].write_param].copy()) ?? {
             lower_fail(&m, &f, "Write parameter of place {place.value} has no pointer")
             return None
         }
@@ -2941,7 +2941,7 @@ fn lower_write_back(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         lower_emit(&f, LIRInst.Load{dst: updated, base: writeback.cell, offset: 0})
         lower_set_slot(&f, writeback.slot, Val(updated))
     } else {
-        root :: (~f.current[writeback.slot]) ?? return lower_fail(&m, &f, "place {writeback.place.value} has no value")
+        root :: (f.current[writeback.slot].copy()) ?? return lower_fail(&m, &f, "place {writeback.place.value} has no value")
         walk :: lower_walk_projections(p, &m, &f, root, c.slots[writeback.slot].ty, row.projections) ?? return
         updated :: lower_new_value(&f, layout, LIRDrop.Trivial, row.ty.identity)
         lower_emit(&f, LIRInst.Load{dst: updated, base: writeback.cell, offset: 0})
@@ -3120,7 +3120,7 @@ fn lower_glue_shapes(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRT
 // generated for, or Unit when it is not per type.
 
 fn lower_helper_id(m: &LowerModule, name: String, ty: MIRType) -> LIRFunctionID Never! {
-    lower_glue_register(&m, "h:{name}", ty, false, ~name)
+    lower_glue_register(&m, "h:{name}", ty, false, name.copy())
 }
 
 // Call helper `name` for `ty` with `args`; its signature is the arguments'
@@ -3131,7 +3131,7 @@ fn lower_call_helper(m: &LowerModule, f: &LowerFunction, name: String, ty: MIRTy
     result :: if dst == .Val(value) -> Val(lower_value_layout(f, value)) else -> None
     signature :: lower_signature(&m, params, result)
     id :: lower_helper_id(&m, name, ty)
-    lower_emit(&f, LIRInst.Call{dst: dst, signature: signature, callee: LIRCallee.Function{id: id}, args: ~args})
+    lower_emit(&f, LIRInst.Call{dst: dst, signature: signature, callee: LIRCallee.Function{id: id}, args: args.copy()})
 }
 
 // A helper function shell: its builder, named `helper.<name>.<type key>`,

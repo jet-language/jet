@@ -27,7 +27,7 @@ pub struct NixDerivationStore {
         }
 
         hashes :: if drv.is_fixed() -> nix_fixed_modulo_hashes(drv) else -> &self.input_modulo_hashes(drv, mask_outputs)
-        self.memo[key] = ~hashes
+        self.memo[key] = hashes.copy()
         Ok(hashes)
     }
 
@@ -48,7 +48,7 @@ pub struct NixDerivationStore {
         }
         digest :: nix_sha256_digest(drv.unparse(mask_outputs, Val(inputs)).bytes())
         hashes := [String: [U8]]{}
-        loop name in drv.output_names() -> hashes[name] = ~digest
+        loop name in drv.output_names() -> hashes[name] = digest.copy()
         Ok(hashes)
     }
 

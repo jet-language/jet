@@ -169,7 +169,7 @@ fn lower_helper_iter_typed(p: MIRProgram, m: &LowerModule, glue: LowerGlue, adva
     if lower_lazy_element(glue.ty) != None -> return lower_lazy_cursor_helper(p, &m, glue, advance)
     if lower_range_members(p, glue.ty) != None -> return lower_range_cursor_helper(&m, glue, advance)
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
-    cursor :: ~f.open_params[0]
+    cursor :: f.open_params[0].copy()
     elem :: lower_sequence_element(glue.ty) ?? {
         lower_fail(&m, &f, "non-List iterator helper is not lowered at O0 yet")
         lower_seal(&f, LIRTerminator.Unreachable)
@@ -224,7 +224,7 @@ fn lower_iter_dispatch(p: MIRProgram, m: &LowerModule, f: &LowerFunction, cursor
     done :: lower_new_block(&f)
     count :: m.glue.len()
     loop index in 0..<count {
-        row :: ~m.glue[index]
+        row :: m.glue[index].copy()
         if row.helper != "iter.release" -> next
         expected :: lower_const(&f, row.id.value)
         matches :: lower_flag(&f)
@@ -244,7 +244,7 @@ fn lower_iter_dispatch(p: MIRProgram, m: &LowerModule, f: &LowerFunction, cursor
 
 fn lower_iter_drop_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
-    cursor :: ~f.open_params[0]
+    cursor :: f.open_params[0].copy()
     null :: lower_pointer(&f)
     lower_emit(&f, LIRInst.Const{dst: null, value: 0})
     absent :: lower_flag(&f)
@@ -265,7 +265,7 @@ fn lower_iter_drop_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRF
 
 fn lower_helper_iter_advance(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
-    cursor :: ~f.open_params[0]
+    cursor :: f.open_params[0].copy()
     lower_iter_dispatch(p, &m, &f, cursor, true)
     lower_seal(&f, LIRTerminator.Return{value: None})
     lir_builder_finish(f.builder)
@@ -371,7 +371,7 @@ fn lower_iter_range_more(f: &LowerFunction, cursor: LIRValueID) -> LIRValueID Ne
 // when fewer remain. A release owns nothing beyond the box.
 fn lower_range_cursor_helper(m: &LowerModule, glue: LowerGlue, advance: Bool) -> LIRFunction Never! {
     f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
-    cursor :: ~f.open_params[0]
+    cursor :: f.open_params[0].copy()
     if advance {
         current :: lower_list_word(&f, cursor, 0)
         marker :: lower_list_word(&f, cursor, 8)

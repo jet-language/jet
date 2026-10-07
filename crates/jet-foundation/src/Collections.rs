@@ -1558,7 +1558,6 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("chunk_while", 1) => Some(Some(iter_ty(Type::List(Box::new(inner.clone()))))),
         // #1477: remaining List ledger surface.
         ("starts_with" | "ends_with" | "equal", 1) => Some(Some(Type::Bool)),
-        ("copy", 0) => Some(Some(Type::List(Box::new(inner.clone())))),
         ("slice", 2) => Some(Some(Type::List(Box::new(inner.clone())))),
         ("binary_search", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
         ("binary_search_by", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
@@ -1873,11 +1872,6 @@ fn map_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Op
         ("update", 1) => Some(None),
         ("each", 1) => Some(None),
         // #1477: remaining Map ledger surface.
-        ("copy", 0) => Some(Some(Type::Map {
-            key: Box::new(key.clone()),
-            key_span: None,
-            value: Box::new(value.clone()),
-        })),
         ("equal", 1) => Some(Some(Type::Bool)),
         ("first", 0) => Some(Some(Type::Option(Box::new(key.clone())))),
         ("to_list" | "items", 0) => Some(Some(Type::List(Box::new(Type::Tuple(vec![
@@ -1961,7 +1955,7 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
             0,
         ) => Some(Some(Type::Bool)),
         (
-            "capitalize" | "swapcase" | "copy" | "reverse" | "normalize",
+            "capitalize" | "swapcase" | "reverse" | "normalize",
             0,
         ) => Some(Some(Type::String)),
         ("removeprefix" | "removesuffix", 1) => Some(Some(Type::String)),
@@ -2564,7 +2558,7 @@ fn set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<T
         ("is_subset" | "issubset" | "is_superset" | "issuperset" | "is_disjoint" | "isdisjoint", 1) => Some(Some(Type::Bool)),
         ("to_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
         // #1478: remaining Set surface (non-closure).
-        ("copy" | "to_set", 0) => Some(Some(set_of_elem())),
+        ("to_set", 0) => Some(Some(set_of_elem())),
         ("discard" | "update" | "difference_update" | "intersection_update" | "symmetric_difference_update", 1) => Some(None),
         ("equal", 1) => Some(Some(Type::Bool)),
         ("capacity", 0) => Some(Some(Type::Int)),
@@ -2658,7 +2652,6 @@ fn bit_set_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         ("remove" | "clear", _) => Some(None),
         ("has", 1) => Some(Some(Type::Bool)),
         ("to_list", 0) => Some(Some(Type::List(Box::new(Type::Int)))),
-        ("copy", 0) => Some(Some(Type::Named(Syntax::TYPE_BITS.to_string()))),
         _ => None,
     }
 }
@@ -2675,7 +2668,7 @@ fn byte_buffer_method_return(method: &str, nargs: usize) -> Option<Option<Type>>
         ("to_string" | "string", 0) => Some(Some(Type::String)),
         (
             "trim" | "trim_start" | "trim_end" | "to_lower" | "to_upper" | "to_title" | "title"
-            | "clone" | "copy",
+            | "clone",
             0,
         ) => Some(Some(buf())),
         ("lines", 0) => Some(Some(Type::List(Box::new(Type::String)))),
@@ -3273,7 +3266,6 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             | "shuffle"
             | "average"
             | "to_set"
-            | "copy"
             | "random"
             | "min_max"
             | "counts" => Some(vec![]),

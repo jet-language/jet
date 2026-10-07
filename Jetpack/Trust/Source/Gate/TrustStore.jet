@@ -86,10 +86,10 @@ pub enum TrustRecord {
     fn parse(line: String) -> TrustRecord Never! {
         if line.starts_with(TRUST_HASH_PREFIX) -> return TrustRecord.Hash{hash: line.removeprefix(TRUST_HASH_PREFIX)}
         if line.starts_with(TRUST_PATTERN_PREFIX) -> return TrustRecord.Pattern{pattern: line.removeprefix(TRUST_PATTERN_PREFIX)}
-        if !line.starts_with(TRUST_GRANT_PREFIX) -> return TrustRecord.Raw{line: ~line}
+        if !line.starts_with(TRUST_GRANT_PREFIX) -> return TrustRecord.Raw{line: line.copy()}
         rest :: line.removeprefix(TRUST_GRANT_PREFIX)
-        scope :: trust_text_split_first(rest, TRUST_COLON) ?? return TrustRecord.Raw{line: ~line}
-        authority :: trust_text_split_first(scope.after, TRUST_COLON) ?? return TrustRecord.Raw{line: ~line}
+        scope :: trust_text_split_first(rest, TRUST_COLON) ?? return TrustRecord.Raw{line: line.copy()}
+        authority :: trust_text_split_first(scope.after, TRUST_COLON) ?? return TrustRecord.Raw{line: line.copy()}
         TrustRecord.Grant(TrustGrant{scope: trust_unescape_component(scope.before), authority: trust_unescape_component(authority.before), subject: trust_unescape_component(authority.after)})
     }
 
@@ -98,25 +98,25 @@ pub enum TrustRecord {
         if self == {
             .Hash(hash) -> trust_json_object_text([TrustJSONField]{
                 TrustJSONField{key: "type", value: DataTree.Text("hash")},
-                TrustJSONField{key: "hash", value: DataTree.Text(~hash)},
+                TrustJSONField{key: "hash", value: DataTree.Text(hash.copy())},
                 TrustJSONField{key: "revocationKey", value: DataTree.Text("{TRUST_HASH_PREFIX}{hash}")}
             })
             .Pattern(pattern) -> trust_json_object_text([TrustJSONField]{
                 TrustJSONField{key: "type", value: DataTree.Text("pattern")},
-                TrustJSONField{key: "pattern", value: DataTree.Text(~pattern)},
+                TrustJSONField{key: "pattern", value: DataTree.Text(pattern.copy())},
                 TrustJSONField{key: "revocationKey", value: DataTree.Text("{TRUST_PATTERN_PREFIX}{pattern}")}
             })
             .Grant(grant) -> trust_json_object_text([TrustJSONField]{
                 TrustJSONField{key: "type", value: DataTree.Text("grant")},
-                TrustJSONField{key: "authority", value: DataTree.Text(~grant.authority)},
-                TrustJSONField{key: "subject", value: DataTree.Text(~grant.subject)},
-                TrustJSONField{key: "scope", value: DataTree.Text(~grant.scope)},
+                TrustJSONField{key: "authority", value: DataTree.Text(grant.authority.copy())},
+                TrustJSONField{key: "subject", value: DataTree.Text(grant.subject.copy())},
+                TrustJSONField{key: "scope", value: DataTree.Text(grant.scope.copy())},
                 TrustJSONField{key: "revocationKey", value: DataTree.Text(grant.key())}
             })
             .Raw(line) -> trust_json_object_text([TrustJSONField]{
                 TrustJSONField{key: "type", value: DataTree.Text("raw")},
-                TrustJSONField{key: "line", value: DataTree.Text(~line)},
-                TrustJSONField{key: "revocationKey", value: DataTree.Text(~line)}
+                TrustJSONField{key: "line", value: DataTree.Text(line.copy())},
+                TrustJSONField{key: "revocationKey", value: DataTree.Text(line.copy())}
             })
         }
     }
@@ -162,7 +162,7 @@ fn trust_escape_component(text: String) -> String Never! {
             else -> &out.push(byte)
         }
     }
-    String.from_bytes(out) ?? ~text
+    String.from_bytes(out) ?? text.copy()
 }
 
 // `%XX` hex escapes decoded; anything else is kept byte for byte.
@@ -322,13 +322,13 @@ fn trust_record_line_text(prefix: String, value: String) -> String Never! {
 // Glob/prefix match: a trailing `*` is a prefix wildcard, otherwise an exact
 // or component-prefix match.
 fn trust_matches_pattern(pattern: String, subject: String) -> Bool Never! {
-    prefix :: if pattern.ends_with("*") -> pattern.removesuffix("*") else -> ~pattern
+    prefix :: if pattern.ends_with("*") -> pattern.removesuffix("*") else -> pattern.copy()
     trust_component_prefix_matches(prefix, subject)
 }
 
 // The same match against the pattern's canonical path.
 fn trust_matches_canonical_pattern(pattern: String, subject: String) -[FS, Env]> Bool {
-    prefix :: if pattern.ends_with("*") -> pattern.removesuffix("*") else -> ~pattern
+    prefix :: if pattern.ends_with("*") -> pattern.removesuffix("*") else -> pattern.copy()
     canonical :: files.canonicalize(prefix) ?? return false
     trust_component_prefix_matches(canonical, subject)
 }
@@ -336,7 +336,7 @@ fn trust_matches_canonical_pattern(pattern: String, subject: String) -[FS, Env]>
 // `prefix` names `subject` or one of its ancestors by whole components.
 fn trust_component_prefix_matches(prefix: String, subject: String) -> Bool Never! {
     if prefix == "" -> return true
-    trimmed := ~prefix
+    trimmed := prefix.copy()
     loop trimmed.ends_with("/") || trimmed.ends_with("\\") -> trimmed = trimmed.removesuffix("/").removesuffix("\\")
     if trimmed == "" -> return subject.starts_with("/") || subject.starts_with("\\")
     if subject == trimmed -> return true

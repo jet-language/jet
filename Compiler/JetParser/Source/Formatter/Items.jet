@@ -129,7 +129,7 @@ fn jfmt_sort_members(members: [JetFmtMember]) -> [JetFmtMember] Never! {
     sorted := members
     index := 1
     loop index < sorted.len() {
-        current :: ~sorted[index]
+        current :: sorted[index].copy()
         position := index
         loop position > 0 && current.start < sorted[position - 1].start {
             sorted[position] = sorted[position - 1]
@@ -144,7 +144,7 @@ fn jfmt_sort_members(members: [JetFmtMember]) -> [JetFmtMember] Never! {
 // Rust `Option<Span>` lookup into `source_list_item_spans`.
 fn jfmt_span_at(spans: [Span], index: Int, fallback: Span) -> Span Never! {
     if index < spans.len() -> return spans[index]
-    ~fallback
+    fallback.copy()
 }
 
 fn jfmt_item_spans_for(f: JetFmt, source: JetFmtSourceList?) -> [Span] {
@@ -189,7 +189,7 @@ fn jfmt_items_rfind(haystack: [U8], needle: [U8], before: Int) -> Int? Never! {
 // The segment after the last `separator` (Rust `rsplit(sep).next()`).
 fn jfmt_last_segment(text: String, separator: String) -> String Never! {
     bytes :: text.bytes()
-    position :: jfmt_items_rfind(bytes, separator.bytes(), bytes.len()) ?? return ~text
+    position :: jfmt_items_rfind(bytes, separator.bytes(), bytes.len()) ?? return text.copy()
     jfmt_bytes_text(bytes, position + separator.bytes().len(), bytes.len())
 }
 
@@ -219,7 +219,7 @@ fn jfmt_substitute_type(ty: Type, params: [TypeParam], args: [Type]) -> Type Nev
             loop index in 0..<params.len() {
                 if index < args.len() && params[index].name == name -> return args[index]
             }
-            ~ty
+            ty.copy()
         }
         .Apply(name, nested) -> {
             out := [Type]{}
@@ -270,7 +270,7 @@ fn jfmt_unit_type_name(member: String) -> String Never! {
         if bytes.len() == 0 -> next
         out = "{out}{jfmt_bytes_text(bytes, 0, 1).to_upper()}{jfmt_bytes_text(bytes, 1, bytes.len())}"
     }
-    if out.len() == 0 -> return ~member
+    if out.len() == 0 -> return member.copy()
     out
 }
 
@@ -299,7 +299,7 @@ fn jfmt_unit_family_decodes(family: UnitFamilyDef, name: String) -> Bool? Never!
 
 // Rust `Names::member_name(module_name, "")`.
 fn jfmt_member_name_prefix(module_name: String) -> String Never! {
-    stripped :: if module_name.starts_with("__jet_") -> jfmt_bytes_text(module_name.bytes(), 6, module_name.bytes().len()) else -> ~module_name
+    stripped :: if module_name.starts_with("__jet_") -> jfmt_bytes_text(module_name.bytes(), 6, module_name.bytes().len()) else -> module_name.copy()
     decoded :: jfmt_decode_generated_suffix(stripped) ?? stripped
     jfmt_generated_path("{decoded}.")
 }
@@ -593,7 +593,7 @@ fn jfmt_canonical_migration_source(f: JetFmt, span: Span) -> String {
     sorted := edits
     position_index := 1
     loop position_index < sorted.len() {
-        current :: ~sorted[position_index]
+        current :: sorted[position_index].copy()
         position := position_index
         loop position > 0 && current.start < sorted[position - 1].start {
             sorted[position] = sorted[position - 1]
@@ -691,7 +691,7 @@ pub fn jfmt_fmt_item(f: &JetFmt, item: Item) {
             // before `fn`, so preserve that source form verbatim. Written
             // `impl Type { … }` blocks still use canonical fmt.
             line_start :: (jfmt_items_rfind(f.src_bytes, "\n".bytes(), i.span.start) ?? -1) + 1
-            text_bytes :: ~f.src_bytes[line_start..<i.span.end]
+            text_bytes :: f.src_bytes[line_start..<i.span.end].copy()
             if jfmt_items_find(text_bytes, "fn {i.type_name}.".bytes(), 0) != None {
                 // The AST does not retain the marker ordering for this sugar,
                 // but the formatter still owns the canonical arrow. Restrict
@@ -1586,7 +1586,7 @@ fn jfmt_empty_body_inline(f: JetFmt, span: Span) -> Bool Never! {
     if open < span.start -> return false
     close :: jfmt_items_rfind(bytes, "}}".bytes(), span.end) ?? return false
     if close <= open -> return false
-    body :: ~bytes[open + 1..<close]
+    body :: bytes[open + 1..<close].copy()
     loop byte in body {
         if Int.from_u8(byte) == 10 -> return false
     }
@@ -1684,7 +1684,7 @@ fn jfmt_fmt_func(f: &JetFmt, func: Func, top_level: Bool) {
         }
     }
     if func.declared_return_view_provenance == .Val(map) -> jfmt_fmt_declared_return_view_from(&f, map, func.params)
-    saved_return_type :: ~f.expected_return_type
+    saved_return_type :: f.expected_return_type.copy()
     f.expected_return_type = func.return_type
     // D-FFI-INLINE1=A (card #501): an inline foreign fn's body is a single
     // foreign-source string. Reconstruct the triple-quoted shape exactly,
@@ -2134,7 +2134,7 @@ fn jfmt_enum_entries_at_prefix(e: EnumDef, prefix: String) -> [JetFmtEnumEntry] 
     sorted := items
     position_index := 1
     loop position_index < sorted.len() {
-        current :: ~sorted[position_index]
+        current :: sorted[position_index].copy()
         position := position_index
         loop position > 0 && current.order < sorted[position - 1].order {
             sorted[position] = sorted[position - 1]

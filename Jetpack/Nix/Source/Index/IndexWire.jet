@@ -192,7 +192,7 @@ pub struct NixIndexRecordWire {
 
     // This record with its outputs in name order.
     fn sorted(self) -> NixIndexRecordWire Never! {
-        outputs := ~self.outputs
+        outputs := self.outputs.copy()
         &outputs.sort_by((left: NixIndexOutputWire, right: NixIndexOutputWire) -> left.name <=> right.name)
         NixIndexRecordWire{attrpath: self.attrpath, version: self.version, drv_path: self.drv_path, outputs}
     }
@@ -298,9 +298,9 @@ pub struct NixIndexDocument {
         records := [NixIndexRecordWire]{}
         loop record in self.records -> &records.push(record.sorted())
         &records.sort_by((left: NixIndexRecordWire, right: NixIndexRecordWire) -> nix_index_attrpath_order(left.attrpath, right.attrpath))
-        indexed := ~self.coverage.indexed
+        indexed := self.coverage.indexed.copy()
         &indexed.sort_by((left: [String], right: [String]) -> nix_index_attrpath_order(left, right))
-        misses := ~self.coverage.not_indexed
+        misses := self.coverage.not_indexed.copy()
         &misses.sort_by((left: NixIndexCoverageMiss, right: NixIndexCoverageMiss) -> nix_index_attrpath_order(left.attrpath, right.attrpath).then(left.reason <=> right.reason))
         record_trees := [DataTree]{}
         loop record in records -> &record_trees.push(record.tree())
@@ -453,7 +453,7 @@ pub struct NixIndexChannelManifest {
 
     fn canonical_bytes(self) -> [U8] NixIndexError! {
         self.validate()
-        targets := ~self.targets
+        targets := self.targets.copy()
         &targets.sort_by((left: NixIndexManifestTarget, right: NixIndexManifestTarget) -> (left.revision <=> right.revision).then(left.system <=> right.system))
         trees := [DataTree]{}
         loop target in targets -> &trees.push(target.tree())
@@ -548,7 +548,7 @@ fn nix_index_validate_native_recipe_url(url: String) NixIndexError! {
 }
 
 fn nix_index_canonical_native_recipes_bytes(recipes: [NixNativeRecipe]) -> [U8] Never! {
-    sorted := ~recipes
+    sorted := recipes.copy()
     &sorted.sort_by((left: NixNativeRecipe, right: NixNativeRecipe) -> (left.name <=> right.name).then(left.version <=> right.version))
     trees := [DataTree]{}
     loop recipe in sorted -> &trees.push(recipe.tree())

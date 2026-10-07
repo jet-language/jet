@@ -1432,7 +1432,7 @@ fn string_bytes_source(init: &TExpr) -> Option<TLocal> {
 /// #4318 §4: the root name of a loop source that is a plain place, `xs` or
 /// `a.b.xs`, possibly under a sema-inserted share copy (`Expr::Copy` whose
 /// span is its operand's: it lowers to `TExprKind::Clone`, which the walk
-/// drops). A user `~` copy (span starts at the sigil, lowers to
+/// drops). A user `.copy()` copy (span starts at the sigil, lowers to
 /// `ExplicitCopy`), a call, or an index is not a stable source.
 fn stable_loop_source_root(collection: &Expr) -> Option<&str> {
     match collection {

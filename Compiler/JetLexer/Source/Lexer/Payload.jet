@@ -339,7 +339,7 @@ fn shifted_diagnostic(diagnostic: &Diagnostic, offset: Int) Never! {
     }
     diagnostic.edit = if diagnostic.edit == {
         .Val(edit) -> {
-            shifted := ~edit
+            shifted := edit.copy()
             shifted.span = shifted_span(edit.span, offset)
             Val(shifted)
         }
@@ -383,7 +383,7 @@ fn lex_expression(source: [U8], start: Int, end: Int, config_surface: Bool, allo
     nested_source := bytes_slice(source, start, end)
     nested := lex_payload_at_depth(nested_source, false, allow_reserved_identifiers, depth + 1)
     loop source_diagnostic in nested.diagnostics {
-        diagnostic := ~source_diagnostic
+        diagnostic := source_diagnostic.copy()
         shifted_diagnostic(&diagnostic, start)
         &diagnostics.push(diagnostic)
     }
@@ -821,7 +821,7 @@ fn numeric_payload(kind: Int, source: [U8], start: Int, end: Int, text: String, 
         return payload
     }
     payload := empty_payload(text)
-    payload.decoded = if kind == K_UNIT_NUMBER -> decimal_number_spelling(number_text) else -> ~number_text
+    payload.decoded = if kind == K_UNIT_NUMBER -> decimal_number_spelling(number_text) else -> number_text.copy()
     payload.integer = Val(parse_integer_literal(number_text) ?? 0)
     payload.suffix = suffix
     payload

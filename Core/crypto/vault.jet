@@ -280,7 +280,7 @@ fn validate_name(name: String) -> Bool? {
     dot :: same_text(name, ".")
     dotdot :: same_text(name, "..")
     if trim_ok == false || dot || dotdot -> return None
-    name_copy :: ~name
+    name_copy :: name.copy()
     nfc :: unicode.nfc(name_copy) ?? return None
     if same_text(name, nfc) == false -> return None
     loop b in name.bytes() {

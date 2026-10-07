@@ -189,30 +189,30 @@ fn mir_lint_index(program: MIRProgram) -> MIRLintIndex Never! {
     _ := &type_vars.add("Self", true)
     loop position in 0..<program.functions.len() {
         _ := &functions.add(mir_lint_key(program.functions[position].id.value), position)
-        &signatures.push(MIRLintSignature{key: ~program.functions[position].key, params: ~program.functions[position].params, return_type: ~program.functions[position].return_type, solved_effects: ~program.functions[position].effects.solved, capture_count: program.functions[position].capture_params.len()})
-        loop param in program.functions[position].generic_params -> _ := &type_vars.add(~param.name, true)
+        &signatures.push(MIRLintSignature{key: program.functions[position].key.copy(), params: program.functions[position].params.copy(), return_type: program.functions[position].return_type.copy(), solved_effects: program.functions[position].effects.solved.copy(), capture_count: program.functions[position].capture_params.len()})
+        loop param in program.functions[position].generic_params -> _ := &type_vars.add(param.name.copy(), true)
     }
     loop position in 0..<program.types.len() {
         _ := &types.add(mir_lint_key(program.types[position].id.value), position)
-        loop param in program.types[position].generic_params -> _ := &type_vars.add(~param.name, true)
-        row := MIRLintTypeRow{name: ~program.types[position].name, fields: None, variants: None}
+        loop param in program.types[position].generic_params -> _ := &type_vars.add(param.name.copy(), true)
+        row := MIRLintTypeRow{name: program.types[position].name.copy(), fields: None, variants: None}
         if program.types[position].kind == {
             .Struct(declared, _) -> {
-                loop field in declared -> _ := &fields.add(mir_lint_key(field.id.value), ~field)
-                row.fields = Val(~declared)
+                loop field in declared -> _ := &fields.add(mir_lint_key(field.id.value), field.copy())
+                row.fields = Val(declared.copy())
             }
-            .Enum(variants, _) -> row.variants = Val(~variants)
+            .Enum(variants, _) -> row.variants = Val(variants.copy())
             else -> {
-                _ := &transparent.add(~program.types[position].name, true)
-                _ := &transparent.add(~program.types[position].key, true)
+                _ := &transparent.add(program.types[position].name.copy(), true)
+                _ := &transparent.add(program.types[position].key.copy(), true)
                 _ := &transparent.add(mir_lint_leaf(program.types[position].name), true)
             }
         }
         &type_rows.push(row)
     }
-    loop row in program.fields -> _ := &fields.add(mir_lint_key(row.id.value), ~row.field)
+    loop row in program.fields -> _ := &fields.add(mir_lint_key(row.id.value), row.field.copy())
     loop row in program.traits {
-        loop declaration in row.associated_types -> _ := &type_vars.add(~declaration.name, true)
+        loop declaration in row.associated_types -> _ := &type_vars.add(declaration.name.copy(), true)
     }
     MIRLintIndex{functions: functions, signatures: signatures, types: types, type_rows: type_rows, fields: fields, type_vars: type_vars, transparent: transparent}
 }
@@ -480,7 +480,7 @@ struct MIRLintContext {
 }
 
 fn mir_lint_context(index: ^MIRLintIndex, function: MIRFunction) -> MIRLintContext Never! {
-    ctx := MIRLintContext{index: index, function: ~function, values: [String:Int]{}, places: [String:Int]{}, blocks: [String:Int]{}, predecessors: [[MIRBlockID]]{}}
+    ctx := MIRLintContext{index: index, function: function.copy(), values: [String:Int]{}, places: [String:Int]{}, blocks: [String:Int]{}, predecessors: [[MIRBlockID]]{}}
     mir_lint_enter(&ctx, function)
     ctx
 }
@@ -503,7 +503,7 @@ fn mir_lint_enter(ctx: &MIRLintContext, function: MIRFunction) Never! {
             &predecessors[position].push(block.id)
         }
     }
-    ctx.function = ~function
+    ctx.function = function.copy()
     ctx.values = values
     ctx.places = places
     ctx.blocks = blocks
@@ -670,7 +670,7 @@ fn mir_lint_operation(ctx: MIRLintContext, position: Int, instruction: MIRInstru
         .Copy(value, fact) -> {
             ty :: result ?? return mir_lint_no_result(op)
             operand :: mir_lint_type_of(ctx, value) ?? return None
-            // A view materialization (`~view`) reads a View and produces the
+            // A view materialization (`view.copy()`) reads a View and produces the
             // owning collection its copy kernel builds (View<str> -> String,
             // View<T> -> [T]); every other copy keeps the operand's type.
             if fact == .ViewMaterialize && mir_lint_view_materializes(operand, ty) -> return None
@@ -1094,7 +1094,7 @@ fn mir_lint_variant(ctx: MIRLintContext, owner: MIRTypeID, variant: String) -> M
     definition :: ctx.index.type_rows[position]
     variants :: definition.variants ?? return MIRLintVariantLookup{variant: None, problem: mir_lint_problem(.EnumVariant, "type {definition.name} is not an enum")}
     loop row in variants {
-        if row.name == variant -> return MIRLintVariantLookup{variant: Val(~row), problem: None}
+        if row.name == variant -> return MIRLintVariantLookup{variant: Val(row.copy()), problem: None}
     }
     MIRLintVariantLookup{variant: None, problem: mir_lint_problem(.EnumVariant, "{definition.name} declares no variant {variant}")}
 }
@@ -1604,7 +1604,7 @@ fn mir_lint_state_set(state: &MIRLintState, bit: Int, present: Bool) Never! {
             &state.bits.push(bit)
         }
     } else if position >= 0 {
-        last :: ~state.bits[state.bits.len() - 1]
+        last :: state.bits[state.bits.len() - 1].copy()
         state.bits[position] = last
         _ := &state.positions.add(last, position)
         _ := &state.bits.pop()
@@ -1625,7 +1625,7 @@ fn mir_lint_state_meet(state: &MIRLintState, incoming: MIRLintState) -> Bool Nev
     changed := false
     position := 0
     loop position < state.bits.len() {
-        bit :: ~state.bits[position]
+        bit :: state.bits[position].copy()
         if mir_lint_state_has(incoming, bit) {
             position += 1
         } else {
@@ -1669,7 +1669,7 @@ fn mir_lint_ownership(ctx: MIRLintContext) -> MIRLintError? Never! {
     }
     head := 0
     loop head < work.len() {
-        position :: ~work[head]
+        position :: work[head].copy()
         head += 1
         queued[position] = false
         current := mir_lint_state_copy(states[position])

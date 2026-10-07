@@ -69,10 +69,10 @@ pub fn merge(a: CountMin, b: CountMin) -> CountMin Never! {
     // A malformed public value cannot contribute a trustworthy counter.
     // Preserve the valid side instead of fabricating an empty success.
     if !shape_ok(a) {
-        if shape_ok(b) -> return ~b
+        if shape_ok(b) -> return b.copy()
         return new()
     }
-    if !shape_ok(b) -> return ~a
+    if !shape_ok(b) -> return a.copy()
 
     // Matching shapes are the normal path and have exact CMS semantics.
     // For legacy values with different dimensions, retain the deterministic

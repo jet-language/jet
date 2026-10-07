@@ -174,7 +174,7 @@ fn lower_member_storage_type(member: LowerMember) -> MIRType Never! {
 
 // base + offset as a new pointer (base itself at offset 0).
 fn lower_address(f: &LowerFunction, base: LIRValueID, offset: Int) -> LIRValueID Never! {
-    if offset == 0 -> return ~base
+    if offset == 0 -> return base.copy()
     bytes :: lower_const(&f, offset)
     address :: lower_pointer(&f)
     lower_emit(&f, LIRInst.PointerAdd{dst: address, base: base, offset: bytes})
