@@ -1090,14 +1090,14 @@ pub fn core_source_owns_type(name: &str) -> bool {
 /// Private semantic routes for exact source declaration identities. These
 /// routes do not grant user-visible Clone, Display, or Debug implementations.
 pub fn core_source_value_hook(name: &str, operation: &str) -> Option<&'static str> {
-    if !core_source_owns_type(name) {
+    if !name.starts_with(crate::Diagnostics::CORE_SOURCE_ROOT)
+        || !name.ends_with("::Core/time/time.jet::Clock")
+    {
         return None;
     }
-    let (owner, leaf) = name.rsplit_once("::")?;
-    let (_, file) = owner.rsplit_once("::")?;
-    match (file, leaf, operation) {
-        ("Core/time/time.jet", "Clock", "clone") => Some("__fork"),
-        ("Core/time/time.jet", "Clock", "show" | "debug") => Some("__show"),
+    match operation {
+        "clone" => Some("__fork"),
+        "show" | "debug" => Some("__show"),
         _ => None,
     }
 }
@@ -1199,5 +1199,17 @@ mod tests {
             .find(|entry| entry.module == "core.web")
             .expect("core.web declaration");
         assert_eq!(web.dependencies, &["core.http", "core.web.forms"]);
+    }
+
+    #[test]
+    fn private_value_hooks_require_the_exact_core_declaration() {
+        let clock = "<corelib>/Core/time::Core/time/time.jet::Clock";
+        assert_eq!(core_source_value_hook(clock, "clone"), Some("__fork"));
+        assert_eq!(core_source_value_hook(clock, "show"), Some("__show"));
+        assert_eq!(core_source_value_hook(clock, "debug"), Some("__show"));
+        assert_eq!(core_source_value_hook(clock, "display"), None);
+        for user in ["Clock", "user::Clock", "<corelib>/Core/other::Core/other/other.jet::Clock"] {
+            assert_eq!(core_source_value_hook(user, "clone"), None);
+        }
     }
 }

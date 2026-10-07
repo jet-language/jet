@@ -8834,6 +8834,15 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn emit_structural_show_impl(&self, def: &MirTypeDef, out: &mut String) {
+        if let Some(hook) = self.source_value_hook_symbol(def, "show") {
+            let name = self.type_name(def.id);
+            let _ = writeln!(out,
+                "impl JetShow for {name} {{ fn jet_show(&self) -> String {{ self.{hook}() }} }}\n\
+                 impl JetDebug for {name} {{ fn jet_debug(&self) -> String {{ self.{hook}() }} }}\n\
+                 impl std::fmt::Debug for {name} {{ fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{ f.write_str(&self.{hook}()) }} }}"
+            );
+            return;
+        }
         let emit_show = def.auto_printable
             && !self.selected_trait_impl_for_type(def, crate::Generics::PRINTABLE);
         let emit_debug = self.derives_trait(def, crate::Generics::DEBUG)
@@ -9167,6 +9176,17 @@ impl<'a> RustEmitter<'a> {
             && self.history_native_type_name(&def.key).is_none()
     }
 
+    fn source_value_hook_symbol(&self, def: &MirTypeDef, operation: &str) -> Option<String> {
+        jet_foundation::CoreModuleExports::core_source_value_hook(&def.key, operation)?;
+        let ty = self.type_instances.get(&def.id).copied()
+            .unwrap_or_else(|| panic!("source value hook has no checked type instance"));
+        let id = jet_foundation::MIR::mir_source_value_hook(self.program, ty, operation)
+            .unwrap_or_else(|| panic!("source value hook for {} is missing or ambiguous", def.key));
+        let function = self.program.functions.iter().find(|function| function.id == id)
+            .unwrap_or_else(|| panic!("source value hook function is unavailable"));
+        Some(self.rust_method_symbol(function))
+    }
+
     fn emit_type_def(&self, def: &'a MirTypeDef, out: &mut String) {
         self.push_generic_scope(&def.generic_params);
         let name = self.type_name(def.id);
@@ -9343,6 +9363,12 @@ impl<'a> RustEmitter<'a> {
                 }
             }
         }
+        if self.source_value_hook_symbol(def, "clone").is_some() {
+            derives.retain(|name| !matches!(*name, "Clone" | "Copy"));
+        }
+        if self.source_value_hook_symbol(def, "debug").is_some() {
+            derives.retain(|name| *name != "Debug");
+        }
         if !derives.is_empty() && !matches!(&def.kind, MirTypeDefKind::Alias { .. }) {
             let _ = writeln!(out, "#[derive({})]", derives.join(", "));
         }
@@ -9453,6 +9479,11 @@ impl<'a> RustEmitter<'a> {
                     panic!("MIR columnar layout requires a struct type definition");
                 }
             }
+        }
+        if let Some(hook) = self.source_value_hook_symbol(def, "clone") {
+            let _ = writeln!(out,
+                "impl Clone for {name} {{ fn clone(&self) -> Self {{ self.{hook}() }} }}"
+            );
         }
         self.pop_generic_scope();
     }
