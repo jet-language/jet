@@ -1471,6 +1471,46 @@ provides a front-end diagnostic census before the probe can be built.
 Preparation and a receipt-only census never establish differential parity;
 only `summary.json` with `differential_verified: true` does.
 
+### Native collection runtime
+
+The runtime-only collection unit implements the current
+`jet_rt_native_iter_*` slot ABI, not the Rust generic `jet_iter_*` names.
+List and Map operations already emitted as typed LIR retain that lowering;
+there is no unused parallel set of generic C exports.
+
+Lists carry an inline `[len, cap, data]` header. Element descriptors have nine
+words: stride, clone, drop, show, equality, comparison, kind, and two child
+descriptors. Iterator owners copy the descriptors because the caller's
+descriptor storage may expire. Pulls use reusable payload slots; Bool copies
+one byte and Unit copies none. Moves, borrowed snapshots, closure release,
+early termination, and buffered cursor stride have the same ownership rules
+at the slot boundary. Collection buffers crossing that boundary belong to
+`jet_rt_alloc`/`jet_rt_free`, including buffers from remaining Rust adapters.
+
+Laziness remains operation-specific. Map/filter/take/skip and cursor pulls are
+lazy; repeat/cycle/shuffle, fallible map/filter, keyed dedup/sorted checks, and
+chunk-while retain the reference kernels' eager consumption. Integer averages
+sum fixed-width values in a signed two-word accumulator before one binary64
+rounding; exact-Int averages borrow the numeric layer.
+
+The remaining progress-state and comptime-fuel leaves are opaque policy seams
+owned by the host/session layers, not Rust iterator owners. Their Rust bodies
+are seed/verification paths scheduled to die at cutover. The collection exit
+harness checks the Jet object's definitions, unresolved pack imports, all
+selected baseline stems, raw slot witnesses, and the count of newly passing
+collection stems; preparation is not behavioral proof.
+
+For the combined Text/collection exit proof, both runners first write their
+`--plan` selections. Run the union once, then pass that fresh `results.tsv` to
+each runner with `--results FILE`. This still requires every selected baseline
+and focused stem to pass and runs each layer's raw ownership, stopped-result,
+and symbol witnesses; the receipts record the shared result file.
+
+Lazy cursor initialization and advancement may invoke user callbacks. Both
+are can-stop MIR operations: their results are usable only on the immediately
+following Propagate poll's resume edge. Prefetched HasNext/Value operations
+remain non-stopping. A cancelled map callback must report task cancellation,
+never return a short successful collection or silently end a for-loop.
 ### Jet-authored runtime object
 
 `Compiler/JetRuntime` is a separate package, assembled from its own
