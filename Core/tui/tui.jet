@@ -14,8 +14,8 @@ use core.ui.[Rect, UINode]
 
 // core.tui — the portable terminal presentation layer.
 //
-// Models and layout are pure.  Terminal dimensions are the sole provider
-// seam; drawing remains owned by the selected UI backend.
+// Models and layout are pure. Environment and stdout-terminal facts cross
+// provider seams; drawing remains owned by the selected UI backend.
 
 pub enum TUIEvent {
     Key(code: String, modifiers: Int)
@@ -81,8 +81,8 @@ pub fn capabilities() -> TUICapabilities Never! {
     capabilities_from_inputs(capability_inputs())
 }
 
-// Ui.rs:499-543 samples immutable startup facts. Runtime leaves do not choose
-// a presentation profile, parse dimensions, or apply the NO_COLOR override.
+// Ui.rs:499-543 samples host facts. Runtime leaves do not choose a
+// presentation profile, parse dimensions, or apply the NO_COLOR override.
 struct TUICapabilityInputs {
     columns: String?
     lines: String?
@@ -96,7 +96,7 @@ struct TUICapabilityInputs {
 }
 
 fn capability_env_bytes(name: String) -> [U8]? Never! {
-    #Unsafe("Core TUI reads owned raw bytes from the immutable startup environment; no UTF-8 assumption") {
+    #Unsafe("Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption") {
         core.tui.__cap_env_bytes(name)
     }
 }
