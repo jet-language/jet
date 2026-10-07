@@ -853,7 +853,7 @@ fn lower_new_function(id: LIRFunctionID, name: String, signature: LIRSignatureID
 fn lower_function(p: MIRProgram, m: &LowerModule, function: MIRFunction, id: LIRFunctionID, signature: LIRSignatureID) -> LIRFunction Never! {
     name :: if function.key == "" -> function.name else -> function.key
     f := lower_new_function(id, name, signature, function.entry)
-    if function.foreign_language == Val("asm") {
+    if (function.foreign_language ?? "") == "asm" {
         lower_asm_function(p, &m, &f, function)
         return lir_builder_finish(f.builder)
     }
