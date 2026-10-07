@@ -29,6 +29,8 @@ use jet_foundation.[
     MIRPreludeCallID,
     MIRProgram,
     MIRScopeID,
+    MIRSharedSite,
+    MIRSharedLifetime,
     MIRSelectKind,
     MIRTaskGroupKind,
     MIRTextPatternPart,
@@ -131,6 +133,28 @@ pub struct JetEvalRegistryData {
 pub struct JetEvalRegistry {
     pub storage: Shared<JetEvalRegistryData>
     pub shared_runtime: JetEvalSharedRuntime
+}
+
+// A host retains this physical registry/table across runtime sessions. Shared
+// indices refer to this segment, never to a replaced session-local registry.
+pub struct JetEvalSharedSiteEntry {
+    pub site: MIRSharedSite
+    pub value: JetEvalRuntimeValue
+}
+pub struct JetEvalSharedSiteTable { pub entries: [JetEvalSharedSiteEntry] }
+pub struct JetEvalSharedSiteContext {
+    pub registry: JetEvalRegistry
+    pub storage: Shared<JetEvalSharedSiteTable>
+    pub thread_storage: Shared<JetEvalSharedSiteTable>
+}
+pub fn jet_eval_shared_site_table_new() -> Shared<JetEvalSharedSiteTable> Never! {
+    shared JetEvalSharedSiteTable{entries: [JetEvalSharedSiteEntry]{}}
+}
+pub fn jet_eval_shared_site_context_new() -> JetEvalSharedSiteContext Never! {
+    JetEvalSharedSiteContext{registry: jet_eval_registry_new(), storage: jet_eval_shared_site_table_new(), thread_storage: jet_eval_shared_site_table_new()}
+}
+pub fn jet_eval_shared_site_context_thread(context: JetEvalSharedSiteContext, thread_storage: Shared<JetEvalSharedSiteTable>) -> JetEvalSharedSiteContext Never! {
+    JetEvalSharedSiteContext{registry: context.registry, storage: context.storage, thread_storage: thread_storage}
 }
 // Transport-only Source task root. Native scheduling owns task control and
 // ambient context; this carrier owns exactly the callback root moved (FnOnce)
@@ -533,6 +557,9 @@ pub struct JetEvalConfig {
     // Compiler-service callbacks live behind one Shared cell: a config copy
     // shares the hooks instead of copying function values.
     pub host_hooks: Shared<SemaRegistrationHostHooks>
+    // The outer persistent host owns this segment across leases/reloads.
+    // A config copy retains the same physical namespace, never its payloads.
+    pub shared_sites: JetEvalSharedSiteContext?{None}
 }
 pub fn jet_eval_default_config() -> JetEvalConfig Never! {
     JetEvalConfig{fuel: 10000000, max_call_depth: 1024, max_collection_len: 1000000, globals: [String:TComptimeValue]{}, runtime_execution: false, host_adapter: None, output_context: None, host_hooks: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}}
@@ -658,6 +685,8 @@ struct JetEvalMachine {
     pub rows: JetEvalProgramRows
     pub config: JetEvalConfig
     pub registry: JetEvalRegistry
+    pub shared_site_session_owner: Bool{false}
+    pub shared_site_context_owner: Bool{false}
     // Session-unique machine identity; child tasks and native callbacks get
     // fresh identities while sharing the registry.
     pub identity: Int
@@ -2007,6 +2036,7 @@ fn jet_eval_replace_field(value: TComptimeValue, name: String, replacement: TCom
 
 fn jet_eval_constant_runtime(constant: MIRConstant, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if constant == {
+        .SharedSite(_) -> panic("publication site nested in MIR constant value")
         .Failed(report) -> {
             if report == .Clean(ty) -> return Val(JetEvalRuntimeValue.Absent{element: ty})
             if report == .Told(value) {
@@ -2022,6 +2052,7 @@ fn jet_eval_constant_runtime(constant: MIRConstant, machine: &JetEvalMachine, sp
 
 fn jet_eval_constant_data(constant: MIRConstant, machine: &JetEvalMachine, span: Span) -> TComptimeValue? {
     if constant == {
+        .SharedSite(_) -> panic("publication site nested in MIR constant value")
         .Int(value, width, _) -> {
             if width == .Val(integer_width) -> return Val(jet_eval_integer_constant_value(value, integer_width.signed, integer_width.bits))
             return Val(jet_eval_decimal_value("{value}"))

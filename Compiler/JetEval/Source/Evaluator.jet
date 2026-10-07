@@ -15,6 +15,7 @@ use jet_foundation.[
     MIRComponentSignatureDescriptor,
     MIRConstant,
     MIRConstantDef,
+    MIRSharedLifetime,
     MIRCopyFact,
     MIRCoreCall,
     MIRCoreClosureKind,
@@ -136,16 +137,19 @@ pub fn jet_eval_runtime_config(config: JetEvalConfig) -> JetEvalConfig {
         host_adapter: host_adapter,
         output_context: config.output_context,
         host_hooks: config.host_hooks,
+        shared_sites: config.shared_sites,
     }
 }
 
 
 fn jet_eval_machine(program: ^MIRProgram, config: ^JetEvalConfig) -> JetEvalMachine {
     active_config := jet_eval_new_session_config(^config)
-    registry := jet_eval_registry_new()
+    owns_sites :: active_config.shared_sites == None
+    if owns_sites -> active_config.shared_sites = Val(jet_eval_shared_site_context_new())
+    registry :: (active_config.shared_sites ?? panic("entry has no site context")).registry
     identity := jet_eval_registry_machine_identity(registry)
     rows := jet_eval_program_rows(program)
-    JetEvalMachine{program: program, rows: rows, config: active_config, registry: registry, identity: identity, frames: [JetEvalFrame]{}, callback_roots: [Int:JetEvalCallbackRoot]{}, entry_access: None, entry_shared_loans: [JetEvalSharedEntryLoan]{}, steps: 0, stdout: "", stderr: "", soft_stop: false, exit_code: None, failure: None, internal_problem: None}
+    JetEvalMachine{program: program, rows: rows, config: active_config, registry: registry, identity: identity, shared_site_session_owner: true, shared_site_context_owner: owns_sites, frames: [JetEvalFrame]{}, callback_roots: [Int:JetEvalCallbackRoot]{}, entry_access: None, entry_shared_loans: [JetEvalSharedEntryLoan]{}, steps: 0, stdout: "", stderr: "", soft_stop: false, exit_code: None, failure: None, internal_problem: None}
 }
 pub fn jet_eval_owned_root(machine: JetEvalMachine) -> JetEvalOwnedRoot Never! {
     config := JetEvalConfig{
@@ -157,6 +161,7 @@ pub fn jet_eval_owned_root(machine: JetEvalMachine) -> JetEvalOwnedRoot Never! {
         host_adapter: None,
         output_context: machine.config.output_context,
         host_hooks: machine.config.host_hooks,
+        shared_sites: machine.config.shared_sites,
     }
     jet_eval_owned_root_from_parts(machine.program, machine.registry, config)
 }
@@ -177,6 +182,7 @@ pub fn jet_eval_owned_root_config(root: JetEvalOwnedRoot) -> JetEvalConfig Never
         host_adapter: None,
         output_context: root.config.output_context,
         host_hooks: root.config.host_hooks,
+        shared_sites: root.config.shared_sites,
     }
 }
 pub fn jet_eval_owned_root_from_parts(program: MIRProgram, registry: JetEvalRegistry, config: JetEvalConfig) -> JetEvalOwnedRoot Never! {
@@ -237,6 +243,24 @@ fn jet_eval_owned_root_drop_value(root: JetEvalOwnedRoot, value: JetEvalRuntimeV
     valid := jet_eval_validate_borrow(value, &machine, span)
     cleaned := jet_eval_drop_value(&machine, value, span)
     jet_eval_owned_root_drop_result(&machine, valid && cleaned, span)
+}
+
+// Quiescent host boundaries retain the original program, physical registry,
+// and adapter even after the last evaluator session has retired.
+pub fn jet_eval_owned_root_reset_shared_sites(root: &JetEvalOwnedRoot, context: JetEvalSharedSiteContext, lifetime: MIRSharedLifetime, adapter: JetEvalHostAdapter, span: Span) -> JetEvalOwnedRootDropResult {
+    machine := jet_eval_owned_root_machine(root, adapter)
+    machine.registry = context.registry
+    machine.config.shared_sites = Val(context)
+    cleaned :: jet_eval_reset_shared_sites(&machine, lifetime)
+    jet_eval_owned_root_drop_result(&machine, cleaned, span)
+}
+
+pub fn jet_eval_owned_root_release_shared_sites(root: &JetEvalOwnedRoot, context: JetEvalSharedSiteContext, adapter: JetEvalHostAdapter, span: Span) -> JetEvalOwnedRootDropResult {
+    machine := jet_eval_owned_root_machine(root, adapter)
+    machine.registry = context.registry
+    machine.config.shared_sites = Val(context)
+    cleaned :: jet_eval_reset_shared_site_rows(&machine, None, true)
+    jet_eval_owned_root_drop_result(&machine, cleaned, span)
 }
 
 pub fn jet_eval_owned_root_drop_values(root: &JetEvalOwnedRoot, values: ^[JetEvalRuntimeValue], adapter: JetEvalHostAdapter, span: Span) -> JetEvalOwnedRootDropResult {
@@ -651,6 +675,11 @@ pub fn jet_eval_retire_in_place(result: &JetEvalResult, span: Span) -> Bool? {
                     if !jet_eval_drop_value(&session.machine, value ?? JetEvalRuntimeValue.Moved, span) -> ok = false
                 }
                 if !jet_eval_retire_machine(&session.machine, span) -> ok = false
+                // Only a standalone entry owns the process root. Retiring a
+                // borrowed evaluator session is not a World/reload boundary.
+                if session.machine.shared_site_session_owner && session.machine.shared_site_context_owner {
+                    if !jet_eval_reset_shared_site_rows(&session.machine, None, true) -> ok = false
+                }
                 result.error = session.machine.failure
                 result.internal_problem = session.machine.internal_problem
                 result.stdout = session.machine.stdout
@@ -865,7 +894,11 @@ pub fn jet_eval_pure_functions(program: ^MIRProgram, function_ids: [MIRFunctionI
 // jet_eval_machine starts empty is reset; program and rows are kept.
 fn jet_eval_reset_session(machine: &JetEvalMachine, config: ^JetEvalConfig) {
     machine.config = jet_eval_new_session_config(^config)
-    machine.registry = jet_eval_registry_new()
+    owns_sites :: machine.config.shared_sites == None
+    if owns_sites -> machine.config.shared_sites = Val(jet_eval_shared_site_context_new())
+    machine.registry = (machine.config.shared_sites ?? panic("entry has no site context")).registry
+    machine.shared_site_session_owner = true
+    machine.shared_site_context_owner = owns_sites
     machine.identity = jet_eval_registry_machine_identity(machine.registry)
     machine.frames = [JetEvalFrame]{}
     machine.callback_roots = [Int:JetEvalCallbackRoot]{}

@@ -1506,6 +1506,29 @@ pub(super) fn lower_expr(
             Some(expr.ty.clone()),
             MirOperation::Global { name: name.clone() },
         ),
+        TExprKind::GlobalShared { initializer, lifetime } => {
+            let initializer = ctx.function_id_for(initializer)?;
+            let key = format!("shared-site:{}", initializer.0);
+            let id = jet_foundation::MIR::MirConstantId(stable_id("mir-constant", &key));
+            let (module, declaration_span) = *ctx.function_registry.declaration_sites
+                .get(&initializer).expect("checked Shared initializer has no declaration metadata");
+            if !ctx.shared_sites.iter().any(|row| row.id == id) {
+                ctx.shared_sites.push(jet_foundation::MIR::MirConstantDef {
+                    id,
+                    module,
+                    key: key.clone(),
+                    name: key.clone(),
+                    span: declaration_span,
+                    visibility: jet_foundation::MIR::MirVisibility::Private,
+                    ty: super::tir_to_mir_types::lower_type(&expr.ty),
+                    is_storage: false,
+                    value: MirConstant::SharedSite(jet_foundation::MIR::MirSharedSite {
+                        initializer, lifetime: *lifetime,
+                    }),
+                });
+            }
+            ctx.emit("global-shared", Some(expr.ty.clone()), MirOperation::Global { name: key })
+        }
         TExprKind::DataEntriesToMap(local) => {
             let local = ctx.local_id_for(local)?;
             let call =

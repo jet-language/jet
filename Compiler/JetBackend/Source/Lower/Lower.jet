@@ -72,10 +72,18 @@ pub struct LIRLoweringIssue {
 // `lir` is complete only when `issues` is empty; the lowering lints the
 // module itself and reports lint findings as issues. `entry` is the LIR
 // function of the entry the program was lowered from (None with issues).
+pub struct LIRSharedSiteExport {
+    pub initializer: MIRFunctionID
+    pub site_key: String
+    pub function: LIRFunctionID
+    pub symbol: String
+}
+
 pub struct LIRLowering {
     pub lir: LIRModule
     pub issues: [LIRLoweringIssue]
     pub entry: LIRFunctionID?
+    pub shared_sites: [LIRSharedSiteExport]{[LIRSharedSiteExport]{}}
 }
 
 // How one checked MIR type is carried in LIR.
@@ -147,6 +155,8 @@ struct LowerModule {
     pub data_rows: [String:Int]
     // MIRConstantDef key -> root LIRData of its frozen static tree (Statics.jet).
     pub static_rows: [String:Int]
+    pub shared_sites_dynamic: Bool
+    pub shared_sites: [LIRSharedSiteExport]
     // String slots of frozen statics the entry fills first (lower_static_entry).
     pub static_fixups: [LowerStaticFixup]
     // MIR source file id -> byte offsets of its line starts (Numeric.jet lower_source_line).
@@ -229,16 +239,20 @@ struct LowerFunction {
 // Lowers the functions `entry` reaches (Mono.jet: generic functions and
 // methods of generic types once per concrete instance) plus their glue.
 pub fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
-    lower_selected(program, entry, true)
+    lower_selected(program, [MIRFunctionID]{entry}, true, true)
 }
 
 // A compiler call retains its return carrier; program entry normalization
 // would consume Option/Result success and turn failure into a process exit.
 pub fn lir_lower_callable(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
-    lower_selected(program, entry, false)
+    lower_selected(program, [MIRFunctionID]{entry}, false, true)
 }
 
-fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -> LIRLowering Never! {
+pub fn lir_lower_core_shared(program: MIRProgram, roots: [MIRFunctionID]) -> LIRLowering Never! {
+    lower_selected(program, roots, false, false)
+}
+
+fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, shared_sites_dynamic: Bool) -> LIRLowering Never! {
     // The frontend may erase browser init functions before native MIR is
     // serialized. Their host requirement survives in the runtime-part facts.
     loop part in program.facts.runtime_parts {
@@ -246,7 +260,7 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
             return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: [LIRLoweringIssue]{LIRLoweringIssue{function: "entry preparation", message: "browser-hosted initialization and callbacks are not lowered for native O0 yet"}}, entry: None}
         }
     }
-    prepared :: lower_prepare_entry(program, entry)
+    prepared :: lower_prepare_roots(program, roots, shared_sites_dynamic)
     if prepared.issues.len() > 0 {
         return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ~prepared.issues, entry: None}
     }
@@ -256,6 +270,8 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
         data: [LIRData]{},
         data_rows: [String:Int]{},
         static_rows: [String:Int]{},
+        shared_sites_dynamic: shared_sites_dynamic,
+        shared_sites: [LIRSharedSiteExport]{},
         static_fixups: [LowerStaticFixup]{},
         line_starts: [U64:[Int]]{},
         source_rows: [U64:Int]{},
@@ -284,6 +300,15 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
         id :: LIRFunctionID{value: index}
         function :: if descriptor.instance_row >= 0 -> lower_function(program, &m, prepared.instances[descriptor.instance_row], id, signature) else -> lower_function(program, &m, program.functions[descriptor.source_row], id, signature)
         &functions.push(function)
+    }
+    if !shared_sites_dynamic {
+        loop definition in program.constants {
+            if definition.value == .SharedSite(site) {
+                if lower_function_index(m, site.initializer) >= 0 {
+                    _ := lower_helper_id(&m, definition.key, definition.ty)
+                }
+            }
+        }
     }
     // Program entries normalize failure carriers. Compiler calls retain the
     // checked signature, including any hidden output pointers.
@@ -316,7 +341,7 @@ fn lower_selected(program: MIRProgram, entry: MIRFunctionID, wrap_entry: Bool) -
         loop issue in lir_lint_module(lowered) -> &issues.push(LIRLoweringIssue{function: issue.function, message: "LIR lint b{issue.block}: {issue.message}"})
     }
     if issues.len() > 0 -> lowered_entry = None
-    LIRLowering{lir: lowered, issues: issues, entry: lowered_entry}
+    LIRLowering{lir: lowered, issues: issues, entry: lowered_entry, shared_sites: m.shared_sites}
 }
 
 // ---------------------------------------------------------------------------
@@ -3148,6 +3173,7 @@ fn lower_helper_start(m: &LowerModule, glue: LowerGlue, params: [LIRLayout], res
 }
 
 fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    if glue.helper.starts_with("shared-site:") -> return lower_shared_site_helper(p, &m, glue)
     if glue.helper.starts_with("lazy.") -> return lower_lazy_helper(p, &m, glue)
     if glue.helper == "closure.thunk" -> return lower_closure_thunk(&m, glue)
     if glue.helper == "entry" -> return lower_entry_function(p, &m, glue)

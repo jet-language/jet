@@ -2384,6 +2384,7 @@ fn jet_rust_emit_constant(ctx: &JetRustEmitContext, constant: MIRConstant, ty: M
             "vec![{rendered.join(", ")}]"
         }
         .Unit -> "()"
+        .SharedSite(_) -> panic("publication site nested in MIR constant value")
         .BigInt(value) -> {
             if ty.kind == {
                 .IntN(signed, bits) -> return "{value}{if signed -> "i" else -> "u"}{bits}"

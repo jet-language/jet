@@ -1844,6 +1844,7 @@ fn jet_codegen_pack_function(builder: JetCodegenBuilder, program: JetCodegenProg
     return JetCodegenLoweredFunction{
         function: mir_function,
         nested_functions: builder.nested_functions,
+        shared_sites: builder.shared_sites,
         callbacks: builder.callbacks,
         fields: fields,
         prelude_calls: builder.prelude_calls,
@@ -1956,6 +1957,7 @@ fn jet_codegen_append_nested_function(builder: &JetCodegenBuilder, program: JetC
 fn jet_codegen_merge_lowered_child(builder: &JetCodegenBuilder, program: JetCodegenProgram, lowered: JetCodegenLoweredFunction) Never! {
     jet_codegen_append_nested_function(&builder, program, lowered.function)
     loop nested in lowered.nested_functions -> jet_codegen_append_nested_function(&builder, program, nested)
+    jet_codegen_merge_shared_sites(&builder.shared_sites, lowered.shared_sites)
     loop callback in lowered.callbacks {
         duplicate := false
         loop existing in builder.callbacks {
@@ -2500,6 +2502,7 @@ fn jet_codegen_growth_add(grown: &JetCodegenFunctions, seen: &JetCodegenGrowthSe
     &grown.functions.push(row.function)
     loop nested in row.nested_functions -> &grown.nested_functions.push(nested)
     loop callback in row.callbacks -> &grown.callbacks.push(callback)
+    jet_codegen_merge_shared_sites(&grown.constants, row.shared_sites)
     loop call in row.prelude_calls {
         if seen.prelude_calls.get(call.id.value) != None -> next
         seen.prelude_calls[call.id.value] = true
@@ -3706,6 +3709,21 @@ fn jet_codegen_declared_type_rows(function_index: JetCodegenFunctionIndex, modul
 // with `declared_types` (jet_codegen_declared_type_rows of `modules`, or a
 // comptime closure's jet_codegen_comptime_types) and `constants`
 // (jet_codegen_lower_constant_rows of `modules`).
+fn jet_codegen_merge_shared_sites(rows: &[MIRConstantDef], incoming: [MIRConstantDef]) Never! {
+    loop site in incoming {
+        found := false
+        loop existing in rows {
+            if existing.id != site.id -> next
+            if existing.ty != site.ty -> panic("one Core initializer has conflicting Shared payload types")
+            if existing.value == .SharedSite(left) && site.value == .SharedSite(right) {
+                if left.initializer != right.initializer || left.lifetime != right.lifetime -> panic("one Core initializer has conflicting publication lifetimes")
+            } else -> panic("Core publication site collides with ordinary constant")
+            found = true
+        }
+        if !found -> &rows.push(site)
+    }
+}
+
 fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], functions: [TFunc], function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], trait_names: JetCodegenTraitNames, declared_types: ^[MIRTypeDef], constants: ^[MIRConstantDef]) -> JetCodegenFunctions {
     lowered_functions := [MIRFunction]{}
     prelude_calls := [MIRPreludeCall]{}
@@ -3725,6 +3743,7 @@ fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], fu
     core_rows := [String:Int]{}
     used_core_seen := [String:Bool]{}
     loop lowered in lowered_rows {
+        jet_codegen_merge_shared_sites(&constants, lowered.shared_sites)
         id_key :: "{lowered.function.id.value}"
         module_key :: "{lowered.function.module_id.value}:{lowered.function.key}"
         if top_ids.get(id_key) != None || top_keys.get(module_key) != None -> panic("duplicate top-level MIR function identity")

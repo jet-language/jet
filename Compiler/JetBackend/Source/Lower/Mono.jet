@@ -76,6 +76,7 @@ pub struct LowerPrepared {
     // Concrete MIR function ID -> its row in `functions`.
     pub mir_rows: [U64:Int]
     pub entry: MIRFunctionID?
+    pub shared_sites_dynamic: Bool{true}
     // Preparation failed when non-empty; `functions` is then empty.
     pub issues: [LIRLoweringIssue]
     // Instance key -> descriptor row while the queue runs.
@@ -948,9 +949,18 @@ fn lower_mono_run(p: MIRProgram, q: &LowerPrepared) Never! {
 
 // The executable inventory reached from `entry`.
 pub fn lower_prepare_entry(program: MIRProgram, entry: MIRFunctionID) -> LowerPrepared Never! {
+    lower_prepare_roots(program, [MIRFunctionID]{entry}, true)
+}
+
+fn lower_prepare_roots(program: MIRProgram, roots: [MIRFunctionID], shared_sites_dynamic: Bool) -> LowerPrepared Never! {
     q := lower_mono_empty()
+    q.shared_sites_dynamic = shared_sites_dynamic
     lower_mono_index(program, &q)
-    if q.issues.len() == 0 -> q.entry = lower_mono_request(program, &q, entry, None, [MIRType]{}, -1, "entry")
+    loop (index, root) in roots {
+        if q.issues.len() != 0 -> break
+        found :: lower_mono_request(program, &q, root, None, [MIRType]{}, -1, if shared_sites_dynamic -> "entry" else -> "pinned Core initializer")
+        if index == 0 && shared_sites_dynamic -> q.entry = found
+    }
     lower_mono_run(program, &q)
     q
 }

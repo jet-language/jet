@@ -1967,6 +1967,56 @@ macro_rules! jet_lane_show {
         }
     }
 
+    // #29 typed Rust-emitter seed, dies at compiler cutover. The site pins
+    // the existing Shared Arc, without allocating another wrapper/cell.
+    pub struct JetSharedSite<T> {
+        owner: std::sync::atomic::AtomicPtr<JetSharedCell<T>>,
+    }
+    unsafe impl<T: Send + Sync> Sync for JetSharedSite<T> {}
+    impl<T: 'static> JetSharedSite<T> {
+        pub const fn new() -> Self {
+            Self { owner: std::sync::atomic::AtomicPtr::new(std::ptr::null_mut()) }
+        }
+        pub fn get(&'static self, initialize: fn() -> JetShared<T>, world: bool) -> JetShared<T> {
+            use std::sync::atomic::Ordering;
+            let mut winner = self.owner.load(Ordering::Acquire);
+            if winner.is_null() {
+                let candidate = std::mem::ManuallyDrop::new(initialize());
+                assert!(candidate.1, "publication initializer returned a non-owning Shared");
+                // SAFETY: transfer exactly the candidate's existing physical
+                // and logical owner into the site, suppressing its old Drop.
+                let raw = unsafe { std::sync::Arc::into_raw(std::ptr::read(&candidate.0)) as *mut JetSharedCell<T> };
+                match self.owner.compare_exchange(std::ptr::null_mut(), raw, Ordering::AcqRel, Ordering::Acquire) {
+                    Ok(_) => {
+                        winner = raw;
+                        if world {
+                            crate::jet_global_shared_register_world(self as *const Self as usize, Self::reset);
+                        }
+                    }
+                    Err(existing) => {
+                        winner = existing;
+                        // SAFETY: failed publication leaves the transferred
+                        // candidate owner with us; use the ordinary Shared drop.
+                        unsafe { drop(JetShared(std::sync::Arc::from_raw(raw), true)); }
+                    }
+                }
+            }
+            // SAFETY: the process-pinned site owns this Arc; world reset is
+            // quiescent. Borrow that owner and fork through canonical Clone.
+            unsafe {
+                let owner = std::mem::ManuallyDrop::new(JetShared(std::sync::Arc::from_raw(winner), true));
+                JetShared::clone(&owner)
+            }
+        }
+        unsafe fn reset(address: usize) {
+            let site = &*(address as *const Self);
+            let owner = site.owner.swap(std::ptr::null_mut(), std::sync::atomic::Ordering::AcqRel);
+            if !owner.is_null() {
+                drop(JetShared(std::sync::Arc::from_raw(owner), true));
+            }
+        }
+    }
+
     impl<T> Clone for JetShared<T> {
         fn clone(&self) -> Self {
             let mut lifetime = self

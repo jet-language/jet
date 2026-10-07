@@ -361,6 +361,7 @@ fn constant_text(value: &MirConstant) -> Result<String, String> {
         MirConstant::String(value) => Ok(value.clone()),
         MirConstant::Bytes(_) => Err("byte defaults are not valid CLI scalars".to_string()),
         MirConstant::Unit => Err("unit defaults are not valid CLI scalars".to_string()),
+        MirConstant::SharedSite(_) => panic!("publication site nested in CLI default"),
         MirConstant::BigInt(value) => Ok(value.clone()),
         MirConstant::List(_) => Err("list defaults are not valid CLI scalars".to_string()),
         MirConstant::Map(_) => Err("map defaults are not valid CLI scalars".to_string()),

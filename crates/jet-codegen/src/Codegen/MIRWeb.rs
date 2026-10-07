@@ -2975,6 +2975,7 @@ fn js_constant_expression(
             values.iter().map(|value| value.to_string()).collect::<Vec<_>>().join(", ")
         )),
         MirConstant::Unit => Ok("undefined".to_string()),
+        MirConstant::SharedSite(_) => panic!("publication site used as a Web literal"),
         MirConstant::BigInt(value) => Ok(format!("BigInt({})", js_string(value))),
         MirConstant::List(values) => Ok(format!(
             "[{}]",
@@ -7972,6 +7973,7 @@ fn constant_descriptor(constant: &MirConstant) -> String {
         MirConstant::String(value) => format!("string:{value}"),
         MirConstant::Bytes(value) => format!("bytes:{}", mir_bytes_descriptor(value)),
         MirConstant::Unit => "unit".to_string(),
+        MirConstant::SharedSite(site) => format!("shared-site:{}:{:?}", site.initializer.0, site.lifetime),
         MirConstant::BigInt(value) => format!("bigint:{value}"),
         MirConstant::List(values) => format!(
             "list:{}",

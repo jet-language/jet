@@ -297,6 +297,81 @@ mod jet_c_abi_task {
     // writes its result into the caller's `out` slot.
     type NativeShared = jet_std::JetShared<NativeValue>;
 
+    // #29 bootstrap seam: dies at L8a-4. Cells and nodes remain pinned while
+    // registered. Reset runs only after all readers/tasks of the old world
+    // have quiesced; it releases the site's owner, never outstanding clones.
+    struct GlobalSharedNode {
+        cell: *const std::sync::atomic::AtomicI64,
+        next: *mut GlobalSharedNode,
+    }
+    static GLOBAL_SHARED_HEAD: std::sync::atomic::AtomicPtr<GlobalSharedNode> =
+        std::sync::atomic::AtomicPtr::new(ptr::null_mut());
+
+    unsafe fn jet_rt_global_register(cell: *const std::sync::atomic::AtomicI64) {
+        guard(|| {
+            use std::sync::atomic::Ordering;
+            // A cell publishes at most once between quiescent resets. Kept
+            // nodes make re-registration O(sites), with no repeated allocation.
+            let mut current = GLOBAL_SHARED_HEAD.load(Ordering::Acquire);
+            while !current.is_null() {
+                if (*current).cell == cell { return; }
+                current = (*current).next;
+            }
+            let node = Box::into_raw(Box::new(GlobalSharedNode { cell, next: ptr::null_mut() }));
+            let mut head = GLOBAL_SHARED_HEAD.load(Ordering::Acquire);
+            loop {
+                (*node).next = head;
+                match GLOBAL_SHARED_HEAD.compare_exchange_weak(
+                    head, node, Ordering::Release, Ordering::Acquire,
+                ) {
+                    Ok(_) => break,
+                    Err(new_head) => head = new_head,
+                }
+            }
+        })
+    }
+
+    // Lifetime tags are the canonical MIR order: Process=0, World=1,
+    // Thread=2, Attempt=3. Only Process/World use this CAS publication path.
+    // The caller transfers its candidate; the returned winner is borrowed
+    // from the site's pinned owner and must be cloned before returning it.
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_shared_site_publish(
+        cell: *const std::sync::atomic::AtomicI64,
+        candidate: i64,
+        lifetime: i64,
+    ) -> i64 {
+        guard(|| {
+            use std::sync::atomic::Ordering;
+            assert!(candidate != 0 && matches!(lifetime, 0 | 1));
+            match (*cell).compare_exchange(0, candidate, Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => {
+                    if lifetime == 1 { jet_rt_global_register(cell); }
+                    candidate
+                }
+                Err(winner) => {
+                    jet_rt_native_shared_drop(candidate as *mut NativeShared);
+                    winner
+                }
+            }
+        })
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_global_reset_registered() {
+        guard(|| {
+            use std::sync::atomic::Ordering;
+            let mut node = GLOBAL_SHARED_HEAD.load(Ordering::Acquire);
+            while !node.is_null() {
+                let handle = (*(*node).cell).swap(0, Ordering::AcqRel);
+                if handle != 0 {
+                    jet_rt_native_shared_drop(handle as *mut NativeShared);
+                }
+                node = (*node).next;
+            }
+        })
+    }
+
     #[no_mangle]
     pub unsafe extern "C" fn jet_rt_native_shared_new(slot: *const u8, meta: *const NativeMeta) -> *mut NativeShared {
         guard(|| Box::into_raw(Box::new(NativeShared::new(NativeValue::moved(slot, Meta::copy(meta))))))

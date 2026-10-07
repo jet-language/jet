@@ -195,8 +195,7 @@ pub fn with_program_args<R>(args: &[String], run: impl FnOnce() -> R) -> R {
 /// prior run cannot become observable.
 #[doc(hidden)]
 pub fn reset_one_shot_core_state() {
-    Crypto::runtime::auth_runtime_reset();
-    jet_codegen::Comptime::AuthLite::auth_runtime_reset();
+    jet_codegen::Codegen::MIREval::reset_world_shared_sites();
 }
 
 /// Release process-local Core owners at the end of a one-shot evaluator run,

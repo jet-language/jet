@@ -6631,6 +6631,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     .iter()
                     .find(|constant| constant.key.as_str() == name)
                 {
+                    if let MirConstant::SharedSite(site) = &constant.value {
+                        let site = site.clone();
+                        return self.global_shared_value(&site, name, span);
+                    }
                     return mir_constant_to_runtime(&constant.value, span);
                 }
                 Err(mir_error_at(
@@ -20023,6 +20027,35 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         self.invoke_callback_args(callback, vec![value], span)
     }
 
+    fn global_shared_value(
+        &mut self,
+        site: &jet_foundation::MIR::MirSharedSite,
+        key: &str,
+        span: Span,
+    ) -> Result<RuntimeValue, Diagnostic> {
+        // Comptime sessions never publish into runtime-lifetime tables.
+        if !self.config.runtime_execution {
+            if let Some(value) = self.static_values.borrow().get(key).cloned() {
+                return Ok(value);
+            }
+            let value = self.invoke_function(site.initializer, Vec::new(), Vec::new(), span)?;
+            if !matches!(value, RuntimeValue::SharedCell(_)) {
+                panic!("checked publication initializer did not return Shared");
+            }
+            self.static_values.borrow_mut().insert(key.to_string(), value.clone());
+            return Ok(value);
+        }
+        if let Some(winner) = shared_site_cached(site) {
+            return runtime_from_ct(mir_runtime_owner_value(winner), span);
+        }
+        let candidate = self.invoke_function(site.initializer, Vec::new(), Vec::new(), span)?;
+        let carrier = self.runtime_to_ct(candidate, span)?;
+        let candidate = mir_runtime_owner::<MirSharedTransfer>(&carrier)
+            .expect("checked publication initializer did not return transferable Shared").clone();
+        let winner = shared_site_publish(site, candidate);
+        runtime_from_ct(mir_runtime_owner_value(winner), span)
+    }
+
     fn invoke_function(
         &mut self,
         function: MirFunctionId,
@@ -26662,6 +26695,58 @@ struct MirSharedTransfer {
     path: Vec<String>,
 }
 
+// Bootstrap evaluator adapter, dies at compiler cutover. The transferred
+// Shared carrier is the existing cross-thread owner, not a second cell kind.
+static PROCESS_SHARED_SITES: std::sync::LazyLock<Mutex<BTreeMap<MirFunctionId, MirSharedTransfer>>> =
+    std::sync::LazyLock::new(|| Mutex::new(BTreeMap::new()));
+static WORLD_SHARED_SITES: std::sync::LazyLock<Mutex<BTreeMap<MirFunctionId, MirSharedTransfer>>> =
+    std::sync::LazyLock::new(|| Mutex::new(BTreeMap::new()));
+thread_local! {
+    static THREAD_SHARED_SITES: RefCell<BTreeMap<MirFunctionId, MirSharedTransfer>> =
+        RefCell::new(BTreeMap::new());
+    static ATTEMPT_SHARED_SITES: RefCell<BTreeMap<MirFunctionId, MirSharedTransfer>> =
+        RefCell::new(BTreeMap::new());
+}
+
+/// Called only after the retiring world's evaluator tasks and readers quiesce.
+/// Process and thread sites deliberately survive a world/reload reset.
+pub fn reset_world_shared_sites() {
+    let retired = std::mem::take(&mut *WORLD_SHARED_SITES.lock().unwrap());
+    drop(retired);
+}
+
+/// Called on the attempt's own worker after its tasks/guards have quiesced.
+pub fn reset_attempt_shared_sites() {
+    ATTEMPT_SHARED_SITES.with(|sites| drop(std::mem::take(&mut *sites.borrow_mut())));
+}
+
+fn shared_site_cached(site: &jet_foundation::MIR::MirSharedSite) -> Option<MirSharedTransfer> {
+    use jet_foundation::MIR::MirSharedLifetime as Lifetime;
+    match site.lifetime {
+        Lifetime::Process => PROCESS_SHARED_SITES.lock().unwrap().get(&site.initializer).cloned(),
+        Lifetime::World => WORLD_SHARED_SITES.lock().unwrap().get(&site.initializer).cloned(),
+        Lifetime::Thread => THREAD_SHARED_SITES.with(|sites| sites.borrow().get(&site.initializer).cloned()),
+        Lifetime::Attempt => ATTEMPT_SHARED_SITES.with(|sites| sites.borrow().get(&site.initializer).cloned()),
+    }
+}
+
+fn shared_site_publish(
+    site: &jet_foundation::MIR::MirSharedSite,
+    candidate: MirSharedTransfer,
+) -> MirSharedTransfer {
+    use jet_foundation::MIR::MirSharedLifetime as Lifetime;
+    match site.lifetime {
+        Lifetime::Process => PROCESS_SHARED_SITES.lock().unwrap()
+            .entry(site.initializer).or_insert(candidate).clone(),
+        Lifetime::World => WORLD_SHARED_SITES.lock().unwrap()
+            .entry(site.initializer).or_insert(candidate).clone(),
+        Lifetime::Thread => THREAD_SHARED_SITES.with(|sites| sites.borrow_mut()
+            .entry(site.initializer).or_insert(candidate).clone()),
+        Lifetime::Attempt => ATTEMPT_SHARED_SITES.with(|sites| sites.borrow_mut()
+            .entry(site.initializer).or_insert(candidate).clone()),
+    }
+}
+
 #[derive(Clone)]
 struct MirSharedStorage {
     protocol: Arc<shared_protocol::JetSharedProtocol>,
@@ -30284,6 +30369,7 @@ fn mir_compare(
 
 fn mir_constant_to_runtime(constant: &MirConstant, span: Span) -> Result<RuntimeValue, Diagnostic> {
     match constant {
+        MirConstant::SharedSite(_) => panic!("publication site nested in MIR constant value"),
         MirConstant::Failed(MirConstReport::Clean(element)) => Ok(RuntimeValue::Absent {
             element: element.clone(),
         }),
@@ -30308,6 +30394,7 @@ fn mir_constant_to_runtime(constant: &MirConstant, span: Span) -> Result<Runtime
 
 fn mir_constant_to_value(constant: &MirConstant, span: Span) -> Result<MirEvalValue, Diagnostic> {
     match constant {
+        MirConstant::SharedSite(_) => panic!("publication site nested in MIR constant value"),
         MirConstant::Int {
             value,
             width,

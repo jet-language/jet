@@ -19,6 +19,8 @@ use jet_foundation.[
     MIRPlaceID,
     MIRProjection,
     MIRStringPart,
+    MIRSharedSite,
+    MIRSharedLifetime,
     MIRType,
     MIRTypeKind,
     MIRUnaryOp,
@@ -170,7 +172,96 @@ fn jet_eval_static(machine: &JetEvalMachine, name: String, span: Span) -> JetEva
         return None
     }
     constant :: ~machine.program.constants[row].value
+    if constant == .SharedSite(site) -> return jet_eval_global_shared(&machine, site, span)
     jet_eval_constant_runtime(constant, &machine, span)
+}
+
+fn jet_eval_global_shared(machine: &JetEvalMachine, site: MIRSharedSite, span: Span) -> JetEvalRuntimeValue? {
+    context :: machine.config.shared_sites ?? panic("publication read has no host-owned site context")
+    storage :: if site.lifetime == {.Thread | .Attempt -> true else -> false} -> context.thread_storage else -> context.storage
+    cached := JetEvalRuntimeValue?{None}
+    {
+        permit :: storage.guard_read()
+        loop entry in permit.value.entries {
+            if entry.site.initializer == site.initializer {
+                if entry.site.lifetime != site.lifetime -> panic("checked initializer has inconsistent publication lifetime")
+                cached = Val(entry.value)
+                break
+            }
+        }
+    }
+    if cached == .Val(winner) -> return jet_eval_copy_value(winner, &machine, span)
+    candidate :: jet_eval_invoke(&machine, site.initializer, [JetEvalRuntimeValue]{}, [JetEvalRuntimeValue]{}, span) ?? return None
+    if candidate != {.Shared(_) -> true else -> false} -> panic("checked publication initializer did not return Shared")
+    selected := candidate
+    won := true
+    {
+        permit :: storage.guard_edit()
+        loop entry in permit.value.entries {
+            if entry.site.initializer == site.initializer {
+                if entry.site.lifetime != site.lifetime -> panic("checked initializer has inconsistent publication lifetime")
+                selected = entry.value
+                won = false
+                break
+            }
+        }
+        if won -> &permit.value.entries.push(JetEvalSharedSiteEntry{site: site, value: candidate})
+    }
+    if !won && !jet_eval_drop_value(&machine, candidate, span) -> return None
+    jet_eval_copy_value(selected, &machine, span)
+}
+
+// Host reset boundaries call this only after their readers/tasks quiesce.
+// A table entry owns one ordinary logical Shared alias; other aliases survive.
+fn jet_eval_reset_shared_site_table(machine: &JetEvalMachine, storage: Shared<JetEvalSharedSiteTable>, lifetime: MIRSharedLifetime?, all: Bool) -> Bool {
+    count :: {
+        permit :: storage.guard_read()
+        permit.value.entries.len()
+    }
+    cursor := count
+    ok := true
+    loop cursor > 0 {
+        cursor -= 1
+        retired := JetEvalRuntimeValue?{None}
+        {
+            permit :: storage.guard_edit()
+            if cursor < permit.value.entries.len() {
+                entry :: permit.value.entries[cursor]
+                if all || lifetime == Val(entry.site.lifetime) {
+                    retired = Val(entry.value)
+                    last :: permit.value.entries.len() - 1
+                    if cursor != last -> permit.value.entries[cursor] = permit.value.entries[last]
+                    _ := &permit.value.entries.pop()
+                }
+            }
+        }
+        if retired == .Val(value) && !jet_eval_drop_value(&machine, value, jet_eval_empty_span()) -> ok = false
+    }
+    ok
+}
+
+fn jet_eval_reset_shared_site_rows(machine: &JetEvalMachine, lifetime: MIRSharedLifetime?, all: Bool) -> Bool {
+    context :: machine.config.shared_sites ?? return true
+    if all {
+        process_ok :: jet_eval_reset_shared_site_table(&machine, context.storage, None, true)
+        thread_ok :: jet_eval_reset_shared_site_table(&machine, context.thread_storage, None, true)
+        return process_ok && thread_ok
+    }
+    storage :: if lifetime == {.Val(.Thread) | .Val(.Attempt) -> true else -> false} -> context.thread_storage else -> context.storage
+    jet_eval_reset_shared_site_table(&machine, storage, lifetime, false)
+}
+
+fn jet_eval_reset_shared_sites(machine: &JetEvalMachine, lifetime: MIRSharedLifetime) -> Bool {
+    if lifetime == MIRSharedLifetime.Process -> panic("Process publication sites cannot be reset")
+    jet_eval_reset_shared_site_rows(&machine, Val(lifetime), false)
+}
+
+pub fn jet_eval_reset_session_shared_sites(session: &JetEvalRuntimeSession, lifetime: MIRSharedLifetime) -> Bool {
+    jet_eval_reset_shared_sites(&session.machine, lifetime)
+}
+
+pub fn jet_eval_release_session_shared_sites(session: &JetEvalRuntimeSession) -> Bool {
+    jet_eval_reset_shared_site_rows(&session.machine, None, true)
 }
 
 fn jet_eval_field(value: JetEvalRuntimeValue, field: MIRFieldID, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {

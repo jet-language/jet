@@ -561,6 +561,9 @@ pub(super) fn complete_bundle_check(
         .filter(|(key, _)| module_aliases.iter().any(|prefix| key.starts_with(prefix)))
         .map(|(key, summary)| (key.clone(), summary.clone()))
         .collect::<HashMap<_, _>>();
+    super::super::super::Effects::check_shared_sites(
+        &validation_summaries, &public_solved, &mut diags,
+    );
     super::super::super::Effects::check_autodiff_purity(
         &validation_summaries,
         &public_solved,
