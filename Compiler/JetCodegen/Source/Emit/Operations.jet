@@ -1937,6 +1937,11 @@ fn jet_rust_emit_c_foreign_call(ctx: &JetRustEmitContext, function: MIRFunction,
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "C foreign call arity does not match its declaration", "C ABI arguments must retain one checked parameter row per call operand", Val(foreign.span))
         return "unreachable!(\"C foreign call arity\")"
     }
+    if jet_rust_emit_safe_c_foreign(foreign) {
+        values := [String]{}
+        loop arg in args -> &values.push(jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, true))
+        return "{jet_rust_emit_safe_c_module(foreign)}::call({values.join(", ")})"
+    }
     body := [String]{"let mut __jet_c_strings: Vec<std::ffi::CString> = Vec::new();"}
     rendered_args := [String]{}
     writebacks := [String]{}

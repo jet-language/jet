@@ -1016,6 +1016,12 @@ fn push_runtime_block(
                 &config.execution.release_devtools_policy,
             );
             out.push_str(super::CACHED_CORE_END);
+            out.push_str("\n// JET_VETTED_UNSAFE_BEGIN: jet_program_allocator\n\
+                // AUDIT: the shared allocator kernel uses System only for its own\n\
+                // allocation-free bookkeeping; the checked cap is installed by the program.\n\
+                pub mod jet_program_allocator {\n");
+            out.push_str(include_str!("../Prelude/ProgramAllocator.rs"));
+            out.push_str("\n}\n// JET_VETTED_UNSAFE_END: jet_program_allocator\n");
             if let Some(link) = config.execution.ffi {
                 let needs_http_bridge = program.prelude_calls.iter().any(|call| {
                     let symbol = match &call.symbol {
@@ -1126,6 +1132,18 @@ pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: 
         super::push_coverage_prelude(EmissionUnits::sink(&mut units, out, None));
     }
     emitter.emit_hardware_facts(EmissionUnits::sink(&mut units, out, None));
+    if !emitter.is_no_os() {
+        if let jet_foundation::TargetMachine::AllocatorPolicy::Counting { cap } =
+            &program.facts.program_allocator
+        {
+            let bytes = cap.map_or(u64::MAX, |size| size.bytes);
+            let _ = writeln!(
+                EmissionUnits::sink(&mut units, out, None),
+                "#[global_allocator]\nstatic __JET_PROGRAM_ALLOCATOR: {}jet_program_allocator::JetProgramAllocator = {}jet_program_allocator::JetProgramAllocator::counting({bytes});",
+                config.root_prefix, config.root_prefix,
+            );
+        }
+    }
     EmissionUnits::sink(&mut units, out, None).push('\n');
 
     if config.execution.emit_metadata {
@@ -10900,6 +10918,60 @@ impl<'a> RustEmitter<'a> {
         }
     }
 
+    /// Value-only C signatures marshal inside a private safe Jet adapter.
+    fn safe_c_value_type(ty: &MirType) -> bool {
+        matches!(ty.kind(), MirTypeKind::Int | MirTypeKind::IntN { .. }
+            | MirTypeKind::Float | MirTypeKind::Float32 | MirTypeKind::Bool
+            | MirTypeKind::Char | MirTypeKind::String | MirTypeKind::Unit)
+    }
+
+    fn safe_c_foreign(&self, foreign: &MirForeign) -> bool {
+        foreign.foreign_language == MirForeignLanguage::C
+            && foreign.callback_transport.is_none()
+            && foreign.params.iter().all(|param| {
+                param.access == MirAccess::Read && Self::safe_c_value_type(&param.ty)
+            })
+            && foreign.return_type.as_ref().is_none_or(Self::safe_c_value_type)
+    }
+
+    fn safe_c_module(&self, foreign: &MirForeign) -> String {
+        format!("__jet___c_{}", foreign.id.0)
+    }
+
+    fn emit_safe_c_adapter(&self, foreign: &MirForeign, out: &mut String) {
+        let mut setup = String::new();
+        let params = foreign.params.iter().enumerate().map(|(index, param)| {
+            let ty = if matches!(param.ty.kind(), MirTypeKind::String) {
+                "str".to_string()
+            } else {
+                self.rust_type(&param.ty)
+            };
+            format!("arg_{index}: &{ty}")
+        }).collect::<Vec<_>>().join(", ");
+        let args = foreign.params.iter().enumerate().map(|(index, param)| {
+            if matches!(param.ty.kind(), MirTypeKind::String) {
+                let _ = writeln!(setup,
+                    "let cstring_{index} = std::ffi::CString::new(arg_{index}).unwrap_or_else(|_| panic!(\"native C String contains NUL\"));");
+                format!("cstring_{index}.as_ptr()")
+            } else {
+                self.c_abi_encode_ref(&param.ty, &format!("arg_{index}"))
+            }
+        }).collect::<Vec<_>>().join(", ");
+        let raw = format!("unsafe {{ super::{}({args}) }}", self.foreign_name(foreign.id));
+        let (ret, body) = foreign.return_type.as_ref().map_or_else(
+            || ("()".to_string(), raw.clone()),
+            |ty| (self.rust_type(ty), self.c_abi_decode_owned(ty, &raw)),
+        );
+        let _ = writeln!(out,
+            "// AUDIT: value-only C ABI; CString owners live through the call.\n\
+             // Scalar narrowing and result validation use shared checked adapters.\n\
+             // Pointer/handle/write signatures retain source-authored Unsafe gates.\n\
+             mod {} {{ use super::*; pub(super) fn call({params}) -> {ret} {{\n\
+             {setup}{body}\n}} }}",
+            self.safe_c_module(foreign),
+        );
+    }
+
     fn emit_foreign(&self, foreign: &MirForeign, out: &mut String) {
         if matches!(
             foreign.callback_transport.as_deref(),
@@ -10962,6 +11034,9 @@ impl<'a> RustEmitter<'a> {
             let _ = writeln!(out, "    #[link_name = {:?}]", foreign.symbol);
         }
         let _ = writeln!(out, "    fn {rust_name}({params}) -> {ret};\n}}\n");
+        if self.safe_c_foreign(foreign) {
+            self.emit_safe_c_adapter(foreign, out);
+        }
     }
     fn emit_link_closure(&self, out: &mut String) {
         let mut seen = BTreeSet::new();
@@ -24258,6 +24333,12 @@ impl<'a> RustEmitter<'a> {
                 );
             }
             _ => {}
+        }
+        if self.safe_c_foreign(foreign) {
+            let values = args.iter().map(|arg| {
+                self.call_arg_for_function(caller, arg, true)
+            }).collect::<Vec<_>>().join(", ");
+            return format!("{}::call({values})", self.safe_c_module(foreign));
         }
         let c_record_string_count = if matches!(foreign.foreign_language, MirForeignLanguage::C) {
             args.iter()

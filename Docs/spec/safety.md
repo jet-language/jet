@@ -59,6 +59,13 @@ inside vetted runtime, standard-library, and memory-internal implementations.
 The generated code is not a new user escape hatch; the gate and sema proof are
 the source-level authority.
 
+Generated value-only C bindings keep their scalar and `String` marshalling
+inside private safe adapters. A string's NUL-terminated owner stays live through
+the foreign call, and returned strings are validated and copied before crossing
+back into Jet. Capability-bearing pointer, handle, and write signatures still
+require the source gate. Generated C record declarations share the binding
+module's nominal owner, including in qualified parameter and return types.
+
 ## Unsafe-region ratchet
 
 The repository records every user-written semantic unsafe region in the

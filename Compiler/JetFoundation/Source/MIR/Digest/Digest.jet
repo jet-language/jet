@@ -4598,6 +4598,13 @@ fn mir_program_write(writer: &MIRCanonicalWriter, program: MIRProgram) {
     mir_digest_string(&writer, program.facts.active_os)
     mir_digest_string(&writer, program.facts.inferred_layer)
     mir_digest_string(&writer, program.facts.allocator)
+    if program.facts.program_allocator == .Counting(cap) {
+        mir_digest_bool(&writer, true)
+        mir_digest_bool(&writer, cap != None)
+        if cap == .Val(size) -> mir_digest_u64(&writer, U64{size.bytes})
+    } else {
+        mir_digest_bool(&writer, false)
+    }
     target_triple :: program.facts.target_dossier.machine.map(row -> row.triple) ?? ""
     dossier_bytes :: mir_digest_target_dossier_bytes(program.facts.target_dossier, target_triple)
     mir_digest_bytes(&writer, dossier_bytes)
