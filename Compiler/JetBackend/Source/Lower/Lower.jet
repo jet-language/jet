@@ -1498,6 +1498,7 @@ fn lower_terminator(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         }
         .Unreachable(_) -> lower_seal(&f, LIRTerminator.Unreachable)
         .Yield(_, _) -> lower_fail(&m, &f, "generators are not lowered at O0 yet")
+        .Poll(_, _, _) | .Stopped -> lower_fail(&m, &f, "MIR stop points are not lowered at O0 yet")
     }
 }
 
