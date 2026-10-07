@@ -7,7 +7,7 @@
 #include <unistd.h>
 
 typedef struct { unsigned char *ptr; int64_t len, cap; } Text;
-typedef struct { int64_t len, cap; uint64_t *data; } Bytes;
+typedef struct { int64_t len, cap; uint8_t *data; } Bytes;
 typedef struct {
     int64_t operation;
     Text *resource;
@@ -28,8 +28,8 @@ extern void jet_rt_host_arguments(int64_t, char **, char **);
 extern int64_t jet_rt_env_count(void);
 extern void jet_rt_env_entry(int64_t, Bytes *, Bytes *);
 extern int64_t jet_sys_startup_env_count_raw(void);
-extern int64_t jet_sys_startup_env_name_raw(int64_t, uint64_t **);
-extern int64_t jet_sys_startup_env_value_raw(int64_t, uint64_t **);
+extern int64_t jet_sys_startup_env_name_raw(int64_t, uint8_t **);
+extern int64_t jet_sys_startup_env_value_raw(int64_t, uint8_t **);
 extern int64_t jet_rt_arg_count(void);
 extern void jet_rt_arg_entry(int64_t, Bytes *);
 extern void jet_rt_free(void *, int64_t, int64_t);
@@ -47,7 +47,7 @@ extern void jet_rt_handle_drop_JetStdout(void *);
 extern void jet_rt_handle_drop_JetStderr(void *);
 extern int64_t jet_std_io_stdout_write(void *, Text *, IOError **);
 extern int64_t jet_std_io_stdout_write_line(void *, Text *, IOError **);
-extern int64_t jet_std_io_stdout_write_bytes(void *, const uint64_t *, int64_t, IOError **);
+extern int64_t jet_std_io_stdout_write_bytes(void *, const uint8_t *, int64_t, IOError **);
 extern int64_t jet_std_io_stdout_flush(void *, IOError **);
 extern int64_t jet_std_io_stderr_write_line(void *, Text *, IOError **);
 extern int64_t jet_std_io_stderr_flush(void *, IOError **);
@@ -57,7 +57,7 @@ static void check_bytes(Bytes value, const char *expected, size_t length) {
     assert(value.len == (int64_t)length && value.cap == value.len);
     assert((value.data == NULL) == (length == 0));
     for (size_t i = 0; i < length; ++i) assert(value.data[i] == (unsigned char)expected[i]);
-    jet_rt_free(value.data, value.cap * 8, 8);
+    jet_rt_free(value.data, value.cap, 8);
 }
 static void check_text(Text *value, const char *expected) {
     assert(value && value->len == (int64_t)strlen(expected));
@@ -87,7 +87,7 @@ int main(void) {
         jet_rt_env_entry(i, &name, &value);
         check_bytes(name, names[i], strlen(names[i]));
         check_bytes(value, values[i], strlen(values[i]));
-        uint64_t *data = NULL;
+        uint8_t *data = NULL;
         int64_t length = jet_sys_startup_env_name_raw(i, &data);
         check_bytes((Bytes){length, length, data}, names[i], strlen(names[i]));
         length = jet_sys_startup_env_value_raw(i, &data);
@@ -124,7 +124,7 @@ int main(void) {
     Text one = borrowed("one"), two = borrowed("two\n"), report = borrowed("err"), pending = borrowed("B");
     assert(jet_std_io_stdout_write_line(out, &one, &error) == 1);
     assert(jet_std_io_stdout_write(out, &two, &error) == 1);
-    const uint64_t binary[] = {255, 0};
+    const uint8_t binary[] = {255, 0};
     assert(jet_std_io_stdout_write_bytes(out, binary, 2, &error) == 1);
     // stderr drains the pending stdout buffer before its immediate frame.
     assert(jet_std_io_stderr_write_line(err, &report, &error) == 1);
