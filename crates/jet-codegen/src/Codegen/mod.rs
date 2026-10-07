@@ -3389,6 +3389,8 @@ fn push_typed_app_preludes(out: &mut String, runtime_parts: &BTreeSet<MirRuntime
     out.push_str(&flat_prelude_body(WEB_VIRTUAL_PRELUDE_RAW));
     out.push_str(&flat_prelude_body(WEB_STORE_PRELUDE_RAW));
     out.push_str(&flat_prelude_body(WEBSERVERFN_PRELUDE_RAW));
+    out.push_str(DEVSERVER_PRELUDE);
+    out.push_str(APP_PRELUDE);
 }
 
 
