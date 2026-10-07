@@ -26,6 +26,17 @@ pub struct LogField {
     pub redacted: Bool
 }
 
+// Readable but not constructible outside this module.
+pub struct LogSpan {
+    priv id: Int
+    priv name: String
+
+    impl {
+        pub fn id(self) -> Int Never! { self.id }
+        pub fn name(self) -> String Never! { self.name }
+    }
+}
+
 pub fn debug(message: String) Never! -[Log]> { emit("debug", message, [LogField]{}) }
 
 pub fn info(message: String) Never! -[Log]> { emit("info", message, [LogField]{}) }
@@ -72,11 +83,14 @@ pub fn redact(key: String) -> LogField Never! {
     LogField{key: key, value: "[redacted]", kind: "redacted", redacted: true}
 }
 
-pub fn span(name: String) -[Log]> LogSpan Never! { core.log.span(name) }
+pub fn span(name: String) -[Log]> LogSpan Never! {
+    allocated :: core.log.__span_allocate(name)
+    LogSpan{id: allocated.id, name: allocated.name}
+}
 
-pub fn enter(span: LogSpan) Never! -[Log]> { core.log.enter(span) }
+pub fn enter(span: LogSpan) Never! -[Log]> { core.log.__span_enter(span) }
 
-pub fn close(span: LogSpan) Never! -[Log]> { core.log.close(span) }
+pub fn close(span: LogSpan) Never! -[Log]> { core.log.__span_close(span) }
 
 /// Select the record sink. `stderr` (JSON lines on stderr) and the `json`,
 /// `jsonl` and `text` file sinks are supported. An unsupported kind, or a
@@ -105,7 +119,10 @@ pub fn sample_every(n: Int) Never! -[Log]> {
     }
 }
 
-pub fn counter(name: String, value: Int) -> LogField Never! { core.log.counter(name, value) }
+pub fn counter(name: String, value: Int) -> LogField Never! {
+    core.log.__metric_publish(name, value)
+    LogField{key: "metric.counter.{name}", value: "{value}", kind: "counter", redacted: false}
+}
 
 pub fn otlp_file(path: String) Never! -[Log, FS]> {
     if trim(path).len() > 0 -> set_sink("jsonl", path)
@@ -164,7 +181,7 @@ fn reject_setting(message: String) -[Log]> {
 
 pub fn disable() Never! -[Log]> { core.log.__disabled_store(true) }
 
-pub fn flush() Never! -[Log]> { core.log.flush() }
+pub fn flush() Never! -[Log]> { core.log.__flush() }
 
 pub fn enabled(level: String) -[Log]> Bool Never! {
     normalized :: canon_level(level)
@@ -188,34 +205,12 @@ fn emit(level: String, message: String, fields: [LogField]) -[Log]> {
     if normalized != "fatal" && !enabled_canonical(normalized) -> return
     normalized_fields := fields
     if normalized_fields.len() > 0 -> normalized_fields = normalize_fields(normalized_fields)
-    if normalized == {
-        "debug" -> {
-            if normalized_fields.len() > 0 -> return core.log.debug_fields(message, normalized_fields)
-            return core.log.debug(message)
-        }
-        "info" -> {
-            if normalized_fields.len() > 0 -> return core.log.info_fields(message, normalized_fields)
-            return core.log.info(message)
-        }
-        "warn" -> {
-            if normalized_fields.len() > 0 -> return core.log.warn_fields(message, normalized_fields)
-            return core.log.warn(message)
-        }
-        "error" -> {
-            if normalized_fields.len() > 0 -> return core.log.error_fields(message, normalized_fields)
-            return core.log.error(message)
-        }
-        "critical" -> {
-            line := message
-            if normalized_fields.len() > 0 -> line = render_json(record(normalized, message, normalized_fields))
-            return core.log.critical(line)
-        }
-        "fatal" -> {
-            line := message
-            if normalized_fields.len() > 0 -> line = render_json(record(normalized, message, normalized_fields))
-            return core.log.fatal(line)
-        }
-        else -> return
+    // This leaf retains sink selection, sampling, timestamps and telemetry
+    // fan-out until Jet runtime L6 replaces it. It is not a public-row call.
+    core.log.__record_emit(normalized, message, normalized_fields)
+    if normalized == "fatal" {
+        flush()
+        core.log.__process_exit(1)
     }
 }
 fn normalize_fields(fields: [LogField]) -> [LogField] {
@@ -541,4 +536,29 @@ pub fn clear(event: LogRecord) -> LogRecord Never! { record(event.level, event.m
     assert(format_code("auto") == 0)
     assert(format_code("json") == 1)
     assert(format_code("text") == 2)
+}
+
+#Test("span allocation preserves names and advances the thread counter") {
+    first :: span(" \nλ ")
+    second :: span("")
+    assert_eq(first.name(), " \nλ ")
+    assert_eq(second.name(), "")
+    assert_eq(second.id(), first.id() + 1)
+}
+
+#Test("typed log fields retain order and normalize only redacted or unknown kinds") {
+    fields :: normalize_fields([LogField]{
+        LogField{key: "same", value: "secret", kind: "int", redacted: true},
+        LogField{key: "same", value: "7", kind: "counter", redacted: false},
+        LogField{key: "\"", value: "\n", kind: "unknown", redacted: false}
+    })
+    assert_eq(fields.len(), 3)
+    assert_eq(fields[0].key, "same")
+    assert_eq(fields[0].value, "[redacted]")
+    assert_eq(fields[0].kind, "redacted")
+    assert_eq(fields[1].value, "7")
+    assert_eq(fields[1].kind, "counter")
+    assert_eq(fields[2].key, "\"")
+    assert_eq(fields[2].value, "\n")
+    assert_eq(fields[2].kind, "string")
 }
