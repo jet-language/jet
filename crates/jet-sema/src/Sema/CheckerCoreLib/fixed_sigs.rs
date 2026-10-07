@@ -1831,6 +1831,10 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("TestComparison".to_string()))],
             Some(Type::String),
         )),
+        ("core.math", "__numeric_stop") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Named("Never".to_string())),
+        )),
         ("core.math", "abs_float" | "log1p") => {
             Some((vec![(read, float.clone())], Some(float)))
         }

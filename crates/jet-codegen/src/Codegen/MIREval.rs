@@ -22203,6 +22203,14 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 ));
             }
         }
+        if row.module == "core.math" && row.member == "__numeric_stop" {
+            let value = args.into_iter().next()
+                .ok_or_else(|| mir_error_at("MIR numeric stop expects one message", span))?;
+            let MirEvalValue::String(message) = runtime_to_data(value, span)? else {
+                return Err(mir_error_at("MIR numeric stop message is not a String", span));
+            };
+            return Err(self.located_runtime_stop("E3010", "", 0, &message, span));
+        }
         if row.module == "core.files" {
             let result_name = match row.member.as_str() {
                 "temp_dir" => Some("TempDir"),

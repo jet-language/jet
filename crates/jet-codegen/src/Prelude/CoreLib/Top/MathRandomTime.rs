@@ -1045,6 +1045,12 @@ fn jet_mime_extension(mime: &String) -> Option<String> {
 }
 
 // D-DECIMAL1 / D-NUMTYPE1: precise numeric constructors and methods.
+// Private source policy bridge. Arithmetic failure is the existing terminal
+// E3010 operation, not a generic panic and not an Outcome with a dummy value.
+fn jet_numeric_stop(message: &String) -> ! {
+    jet_arithmetic_stop("", 0, message)
+}
+
 #[inline(always)]
 fn jet_decimal_from_str(s: &String) -> jet_std::JetDecimal {
     crate::jet_precise_numeric::decimal_from_str(s)
