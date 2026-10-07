@@ -206,6 +206,12 @@ rightmost nonoverlapping matches, then yields the pieces left-to-right.
 The raw `TextTests` library exposes `text_tests`, not an executable entry.
 Its runner adds `run` in a sibling executable directory, outside the runtime
 package manifest, before compiling the ownership and UTF-8 witnesses.
+C foreign String arguments use a separate byte buffer with a trailing NUL;
+the caller frees it with its length including that terminator. Unpacking
+validates UTF-8 while finding the terminator and copies into an owned E4
+header before argument buffers are freed, including interior-pointer returns.
+Interior NUL, null results and invalid UTF-8 use the exact Rust panic messages
+through the shared panic stop path; raw text witnesses cover all three stops.
 
 Sizes: a word, handle or box pointer is 8 bytes (align 8), a Bool 1 byte, Unit
 0. An inline aggregate is 8-aligned and padded to whole words, so copies move
