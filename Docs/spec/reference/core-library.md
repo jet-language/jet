@@ -1827,8 +1827,8 @@ fn run() {
 | `math.inv(x)` / `math.signum(x)` | `Float` | Reciprocal or floating-point signum. |
 | `math.float32(x)` / `math.float64(x)` | `Float` | Convert through the corresponding floating-point representation. |
 | `math.fabs(x)` / `math.real(x)` / `math.imag(x)` / `math.conj(x)` | `Float` | Absolute floating-point value and scalar component helpers. |
-| `math.is_nan(x)`, `is_inf(x)`, `is_finite(x)` | `Bool` | Test NaN, infinity, or finite status. `isnan`, `isinf`, and `isfinite` are aliases. |
-| `math.cmp(a, b)` | `Int` | Return `-1`, `0`, or `1`; NaN sorts after non-NaN values, two NaNs compare equal, and signed zeros compare equal. |
+| `math.is_nan(x)`, `is_inf(x)`, `is_finite(x)` | `Bool` | Test NaN, infinity, or finite status. `is_finite` accepts both `Float` and `F32`. `isnan`, `isinf`, and `isfinite` are aliases. |
+| `math.cmp(a, b)` | `Int` | Accept matching `Float` or `F32` operands and return `-1`, `0`, or `1`; NaN sorts after non-NaN values, two NaNs compare equal, and signed zeros compare equal. |
 | `math.is_normal(x)`, `is_subnormal(x)`, `is_canonical(x)`, `is_signed(x)`, `is_zero(x)`, `is_integer(x)`, `sign_bit(x)` | `Bool` | Inspect floating-point representation properties. |
 | `math.next_up(x)` / `next_down(x)` / `next_after(x, toward)` / `nextafter(x, toward)` | `Float` | Move to an adjacent representable value. |
 | `math.significand(x)` / `math.ulp(x)` | `Float` | Return the significand or unit in the last place. |

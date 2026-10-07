@@ -9,6 +9,7 @@ package {
     }
 }
 use core as core
+use core.math.random as ambient_random
 pub fn abs(n: Int) -> Int Never! {
     if n < 0 -> return -n
     n
@@ -191,6 +192,8 @@ pub fn conj(n: Float) -> Float Never! { n }
 pub fn is_nan(n: Float) -> Bool Never! { n != n }
 pub fn is_inf(n: Float) -> Bool Never! { fabs(n) == infinity() }
 pub fn is_finite(n: Float) -> Bool Never! { fabs(n) < infinity() }
+// #4747: preserve the existing F32 call contract without changing Float policy.
+pub fn __is_finite_f32(n: F32) -> Bool Never! { is_finite(Float{n}) }
 pub fn isnan(n: Float) -> Bool Never! { is_nan(n) }
 pub fn isinf(n: Float) -> Bool Never! { is_inf(n) }
 pub fn isfinite(n: Float) -> Bool Never! { is_finite(n) }
@@ -470,6 +473,7 @@ pub fn cmp(a: Float, b: Float) -> Int Never! {
     if is_nan(a) -> return 1
     return -1
 }
+pub fn __cmp_f32(a: F32, b: F32) -> Int Never! { cmp(Float{a}, Float{b}) }
 
 pub fn abs_diff(a: Int, b: Int) -> Int Never! {
     if a >= b -> return a - b
@@ -569,7 +573,7 @@ pub fn sumprod(left: [Float], right: [Float]) -> Float Never! {
 }
 
 pub fn random() -[Rand]> Float Never! {
-    Float{core.math.random.__word()} / 18446744073709551616.0
+    Float{ambient_random.__word()} / 18446744073709551616.0
 }
 
 pub fn fraction(numerator: Int, denominator: Int) -> Fraction? Never! {

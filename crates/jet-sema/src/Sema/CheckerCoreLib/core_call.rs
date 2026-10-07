@@ -2290,6 +2290,29 @@ fn core_call_argument_convention(
 }
 
 impl<'a> Checker<'a> {
+    // #4747: native width inference stays authoritative, but source reachability
+    // must name the same Jet body that lowering will select.
+    fn record_math_scalar_source_reference(&mut self, name: &str, width: &Type, span: Span) {
+        let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.math") else {
+            return;
+        };
+        if self.name_ledger.module_alias(self.module_idx) == Some(source.alias) {
+            return;
+        }
+        let Some(owner) = self.modules.and_then(|modules| {
+            modules.iter().position(|module| module.module_alias == source.alias)
+        }) else {
+            return;
+        };
+        let member = match (name, width) {
+            ("cmp", Type::Float32) => "__cmp_f32",
+            ("is_finite", Type::Float32) => "__is_finite_f32",
+            _ => name,
+        };
+        self.record_function_reference(owner, member, span);
+        self.record_edge(format!("{}.{member}", source.alias), span);
+    }
+
     /// Infer a callback retained by a reactive/UI host. Retention owns the
     /// lambda's captures, and the host ABI uses the checked SendFn carrier;
     /// ordinary escaping inference would otherwise leave borrowed/Rc facts
@@ -2414,6 +2437,9 @@ impl<'a> Checker<'a> {
                 args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),
             )
                 && self.name_ledger.module_alias(self.module_idx) != Some(source.alias)
+                // #4747: retain width-polymorphic checking; lowering selects
+                // the reserved Jet marshalling wrapper for F32 arguments.
+                && !(module == "core.math" && matches!(name, "cmp" | "is_finite"))
             {
                 let source_idx = self.modules.and_then(|modules| {
                     modules
@@ -4929,6 +4955,9 @@ impl<'a> Checker<'a> {
                     ));
                     return None;
                 }
+                if name == "is_finite" {
+                    self.record_math_scalar_source_reference(name, &ty, span);
+                }
                 return Some(Type::Bool);
             }
             ("core.math", "sign") => {
@@ -5148,6 +5177,9 @@ impl<'a> Checker<'a> {
                                 Some(args[1].expr.span()),
                             ));
                         }
+                    }
+                    if name == "cmp" {
+                        self.record_math_scalar_source_reference(name, &first, span);
                     }
                     return Some(if name == "cmp" { Type::Int } else { first });
                 }

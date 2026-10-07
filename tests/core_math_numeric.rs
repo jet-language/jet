@@ -87,9 +87,13 @@ fn run() {
     print(math.is_finite(-0.0))
     print(math.to_bits(math.fabs(-0.0)))
     print(math.fabs(-2.0))
+    print(math.cmp(F32{-0.0}, F32{0.0}))
+    print(math.cmp(F32{math.nan()}, F32{1.0}))
+    print(math.is_finite(F32{math.infinity()}))
+    print(math.is_finite(F32{1.0}))
 }
 "#,
-        "1\n-1\n0\n0\n-1\n1\nfalse\nfalse\ntrue\ntrue\n0\n2\n",
+        "1\n-1\n0\n0\n-1\n1\nfalse\nfalse\ntrue\ntrue\n0\n2\n0\n1\nfalse\ntrue\n",
     );
 }
 
@@ -103,16 +107,14 @@ use core.math.random as random
 
 fn run() {
     random.seed(1)
-    print(random.__word())
-    random.seed(1)
     print(random.getrandbits(63))
     random.seed(1)
     print(math.random())
     random.seed(0)
-    print(random.__word())
+    print(random.getrandbits(1))
     print(random.getrandbits(0))
 }
 "#,
-        "13399429869638026901\n6699714934819013450\n0.7263845487364354\n0\n0\n",
+        "6699714934819013450\n0.7263845487364354\n0\n0\n",
     );
 }
