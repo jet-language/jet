@@ -10,6 +10,7 @@ mod pool;
 mod repl_process;
 #[path = "Methods/time_deadline.rs"]
 mod time_deadline_kernel;
+pub(super) use time_deadline_kernel::jet_time_wall_override_ms;
 
 pub(crate) use core_calls::as_string;
 pub(crate) use core_calls::data_plot_rt;

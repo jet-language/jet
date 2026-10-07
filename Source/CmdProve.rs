@@ -25,7 +25,7 @@ use jet_foundation::Evidence::{
 use jet_foundation::Facts::{
     DerivationDisposition, DerivationIdentity, DerivationMethod, DerivationRecord,
 };
-use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
+use jet_foundation::Report::{StatusEnvelope, StatusValue};
 use jet_foundation::JSON::parse_json;
 
 use crate::ProveReplay::json_str as json;
@@ -238,16 +238,19 @@ fn persist_evidence_report(target: &Target, report: &EvidenceReport) -> Result<R
         report.build.toolchain.clone(),
         report.producer.as_str(),
     )?;
+    let bytes = report.encode()?;
+    // A producer report id names its invocation, not its observed bytes:
+    // generated-case replay and fresh execution can yield different evidence.
+    let artifact_id = jet::SHA256::sha256_hex(&bytes);
     let path = target
         .authority_root
         .join(".jet/evidence")
-        .join(format!("{report_id}.json"));
-    let bytes = report.encode()?;
+        .join(format!("{artifact_id}.json"));
     let size = write_authoritative_bytes(&path, &bytes, "evidence report")?;
     index_artifact(
         identity,
         RecordKind::Evidence,
-        report_id.to_string(),
+        artifact_id,
         path,
         size,
         RecordCapture::Safe,
@@ -304,11 +307,30 @@ pub(crate) fn index_replay_artifact(
     let record_identity = identity.record_identity()?;
     let size =
         u64::try_from(bytes.len()).map_err(|_| "replay artifact is too large".to_string())?;
+    // An explicit capture path is an export. The record index owns a
+    // canonical in-project copy, never the caller's export destination.
+    let project_root = jet::build_project_root(&identity.entry)
+        .map_err(|diagnostics| format!("could not resolve replay project root: {diagnostics:?}"))?;
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().map_err(|error| error.to_string())?.join(path)
+    };
+    let indexed_path = if absolute.starts_with(project_root.join(".jet/replays"))
+        || absolute.starts_with(project_root.join(".jet/records/saved"))
+    {
+        absolute
+    } else {
+        validate_artifact_id(&artifact_id)?;
+        let canonical = project_root.join(".jet/replays").join(format!("{artifact_id}.jetproof-replay"));
+        write_authoritative_bytes(&canonical, &bytes, "replay artifact")?;
+        canonical
+    };
     index_artifact(
         record_identity,
         RecordKind::Replay,
         artifact_id,
-        path.to_path_buf(),
+        indexed_path,
         size,
         capture,
         Vec::new(),
@@ -439,7 +461,19 @@ fn save_replay_command(
     let project_root = jet::build_project_root(&identity.entry)
         .map_err(|diagnostics| ("E3622", format!("could not resolve replay project root: {diagnostics:?}")))?;
     let mut index = load_record_index(&project_root).map_err(|error| ("E3622", error))?;
-    let Some(entry) = resolve_indexed_replay(&index, raw).map_err(|error| ("E3621", error))? else {
+    let indexed = resolve_indexed_replay(&index, raw).map_err(|error| ("E3622", error))?;
+    let indexed = match indexed {
+        Some(entry) => Some(entry),
+        None => {
+            // Authenticate an exported capture before resolving its canonical
+            // indexed copy. Replay itself still reads the requested export.
+            crate::ProveReplay::prepare_replay(identity, raw)?;
+            let bytes = fs::read(raw).map_err(|error| ("E3622", error.to_string()))?;
+            let id = replay_artifact_id(&bytes).map_err(|error| ("E3622", error))?;
+            index.find(RecordKind::Replay, &id, true)
+        }
+    };
+    let Some(entry) = indexed else {
         return Err((
             "E3621",
             format!("replay `{raw}` is not an indexed replay artifact"),
@@ -1315,8 +1349,8 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             }
             Err(error) => {
                 crate::ProveReplay::emit_prove_diag(
-                    "E3621",
-                    "replay semantic identity could not be resolved",
+                    "E3622",
+                    "replay artifact path is invalid",
                     &error,
                     "use an indexed replay id or a canonical `.jetproof-replay` path",
                     json,
@@ -4366,7 +4400,7 @@ fn render_report(
     let (solver_selected, solver_proved, solver_disproved, solver_unknown, solver_unavailable) =
         crate::ProveSolver::summarize(solver);
     let unit_report = unit_test_report(tests);
-    let unit_summary = unit_report.status_envelope().json();
+    let unit_summary = unit_report.json();
     let unit_unavailable = tests
         .iter()
         .filter(|item| (item.kind == 0 || item.kind == 2) && item.state == 3)
@@ -4662,16 +4696,13 @@ impl UnitTestReport {
         )
     }
 
-    fn status_envelope(&self) -> StatusEnvelope {
-        StatusEnvelope::new("test", self.failed == 0).with_field(
-            "test",
-            StatusValue::object(
-                StatusFields::new()
-                    .with("failed", self.failed)
-                    .with("passed", self.passed)
-                    .with("skipped", self.skipped)
-                    .with("selected", self.passed + self.failed + self.skipped),
-            ),
+    fn json(&self) -> String {
+        format!(
+            "{{\"failed\":{},\"passed\":{},\"selected\":{},\"skipped\":{}}}",
+            self.failed,
+            self.passed,
+            self.passed + self.failed + self.skipped,
+            self.skipped,
         )
     }
 }
@@ -4771,7 +4802,7 @@ fn record_links_json(links: &[RecordLink]) -> String {
     format!("[{}]", values.join(","))
 }
 
-/// D-JPROOF1=A: write `.jet/proofs/<kind>/<name>/<first-16-report_id>.jetproof`.
+/// D-JPROOF1=A: persist semantic report identity separately from delivery links.
 /// Identical existing bytes are left unchanged; differing bytes refuse.
 fn write_jetproof(
     target: &Target,
@@ -4781,6 +4812,11 @@ fn write_jetproof(
 ) -> Result<ProofArtifact, String> {
     let report_bytes = format!("{proof_report}\n");
     let report_id = jet::SHA256::sha256_hex(report_bytes.as_bytes());
+    let consumed_json = record_links_json(consumed);
+    let produced_json = record_links_json(produced);
+    let artifact_id = jet::SHA256::sha256_hex(
+        format!("{{\"consumed\":{consumed_json},\"produced\":{produced_json},\"report_id\":{}}}\n", json(&report_id)).as_bytes(),
+    );
     let kind = target.kind;
     let name = {
         let root = Path::new(&target.root);
@@ -4797,14 +4833,13 @@ fn write_jetproof(
     };
     let rel = format!(
         ".jet/proofs/{kind}/{name}/{}.jetproof",
-        &report_id[..16.min(report_id.len())]
+        &artifact_id[..16]
     );
     let path = target.authority_root.join(&rel);
-    let consumed_json = record_links_json(consumed);
-    let produced_json = record_links_json(produced);
     let envelope = format!(
-        "{{\"artifact\":{{\"path\":{}}},\"consumed\":{},\"links_version\":1,\"privacy\":{{\"absolute_paths\":\"omitted\",\"argv\":\"omitted\",\"environment\":\"omitted\",\"full_source\":\"omitted\",\"producer_transcripts\":\"omitted\",\"safe_locals\":\"redacted_by_D-OBS2\"}},\"produced\":{},\"proofReport\":{proof_report},\"report_id\":{},\"schema\":\"jet.jproof\",\"version\":2}}\n",
+        "{{\"artifact\":{{\"path\":{}}},\"artifact_id\":{},\"consumed\":{},\"links_version\":1,\"privacy\":{{\"absolute_paths\":\"omitted\",\"argv\":\"omitted\",\"environment\":\"omitted\",\"full_source\":\"omitted\",\"producer_transcripts\":\"omitted\",\"safe_locals\":\"redacted_by_D-OBS2\"}},\"produced\":{},\"proofReport\":{proof_report},\"report_id\":{},\"schema\":\"jet.jproof\",\"version\":2}}\n",
         json(&rel),
+        json(&artifact_id),
         consumed_json,
         produced_json,
         json(&report_id)
@@ -4817,7 +4852,7 @@ fn write_jetproof(
         let existing = fs::read(&path).map_err(|e| e.to_string())?;
         if existing == envelope.as_bytes() {
             return Ok(ProofArtifact {
-                artifact_id: report_id,
+                artifact_id,
                 path,
                 size: u64::try_from(envelope.len())
                     .map_err(|_| "proof artifact is too large".to_string())?,
@@ -4879,7 +4914,7 @@ fn write_jetproof(
         return Err(error);
     }
     Ok(ProofArtifact {
-        artifact_id: report_id,
+        artifact_id,
         path,
         size: u64::try_from(envelope.len())
             .map_err(|_| "proof artifact is too large".to_string())?,
