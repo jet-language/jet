@@ -769,7 +769,7 @@ mod tests {
         let main = root.join("main.jet");
         std::fs::write(
             &main,
-            "module boxed<T>(n: Int) { pub fn value() -> Int { return n } }\nmodule a :: boxed<Int>(3)\nmodule b :: boxed<Int>(3)\nfn run() {}\n",
+            "module boxed<T>(n: Int) { fn value() -> Int { return n } }\nmodule a :: boxed<Int>(3)\nmodule b :: boxed<Int>(3)\nfn run() {}\n",
         ).unwrap();
 
         let index = open(&main).expect("generic module should index");
@@ -835,7 +835,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let library = root.join("library.jet");
         let main = root.join("main.jet");
-        std::fs::write(&library, "pub fn report() { print(\"library\") }\n").unwrap();
+        std::fs::write(&library, "fn report() { print(\"library\") }\n").unwrap();
         std::fs::write(
             &main,
             "use \"./library\" as api\nuse api.[report as alias_report]\n\nstruct Worker { value: Int }\nimpl Worker {\n    fn step(self) { print(\"worker\") }\n}\nstruct Other { value: Int }\nimpl Other {\n    fn step(self) { print(\"other\") }\n}\n\nfn run() {\n    api.report()\n    alias_report()\n    worker :: Worker{value: 1}\n    worker.step()\n    other :: Other{value: 2}\n    other.step()\n}\n",

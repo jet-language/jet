@@ -466,7 +466,7 @@ fn parallel_collection_adapters_work_in_imported_modules() {
             ),
             (
                 "worker.jet",
-                "pub fn double_all(values: [Int]) -> [Int] {\n    return values.para_map((n: Int) -> n * 2)\n}\n",
+                "fn double_all(values: [Int]) -> [Int] {\n    return values.para_map((n: Int) -> n * 2)\n}\n",
             ),
         ],
     );

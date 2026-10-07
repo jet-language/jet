@@ -4,10 +4,10 @@
 // remains the detailed diagnostic surface, and this selects the facts that
 // answer the common provenance question in one screen.
 
-pub struct WhyLocation {
-    pub path: String
-    pub line: Int?
-    pub text: String?
+struct WhyLocation {
+    path: String
+    line: Int?
+    text: String?
 
     fn not_found() -> WhyLocation Never! {
         WhyLocation{path: "not found", line: None, text: None}
@@ -25,40 +25,40 @@ pub struct WhyLocation {
     }
 }
 
-pub struct WhyRequesting {
-    pub env_file: WhyLocation
-    pub lock_file: WhyLocation
+struct WhyRequesting {
+    env_file: WhyLocation
+    lock_file: WhyLocation
 }
 
-pub struct WhyOrigin {
-    pub catalog: String
-    pub endpoint: String
-    pub cache_endpoint: String
-    pub signature_chain: String
-    pub source: String
-    pub source_digest: String
+struct WhyOrigin {
+    catalog: String
+    endpoint: String
+    cache_endpoint: String
+    signature_chain: String
+    source: String
+    source_digest: String
 }
 
-pub struct WhyTrust {
-    pub grade: String
-    pub reason: String
+struct WhyTrust {
+    grade: String
+    reason: String
 }
 
-pub struct WhyDisk {
-    pub bytes: Int?
-    pub objects: Int
+struct WhyDisk {
+    bytes: Int?
+    objects: Int
 }
 
-pub struct PackageWhy {
-    pub query: String
-    pub package: String
-    pub available: Bool
-    pub requesting: WhyRequesting
-    pub origin: WhyOrigin
-    pub trust: WhyTrust
-    pub disk: WhyDisk
-    pub dependents: [String]
-    pub receipt: String
+struct PackageWhy {
+    query: String
+    package: String
+    available: Bool
+    requesting: WhyRequesting
+    origin: WhyOrigin
+    trust: WhyTrust
+    disk: WhyDisk
+    dependents: [String]
+    receipt: String
 
     fn from_explain(roots: HangarRoots, explanation: PackageExplain) -> PackageWhy StoreError! {
         package :: if explanation.entry == {
@@ -155,7 +155,7 @@ pub struct PackageWhy {
 
 // The facts on the one-screen `why` surface; read-only like the detailed
 // explanation it projects.
-pub fn store_why_package(roots: HangarRoots, query: String) -> PackageWhy? StoreError! {
+fn store_why_package(roots: HangarRoots, query: String) -> PackageWhy? StoreError! {
     found :: store_explain_package(roots, query, ExplainLens.All)
     explanation :: found ?? return Ok(None)
     Ok(Val(PackageWhy.from_explain(roots, explanation)))

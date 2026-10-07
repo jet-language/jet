@@ -569,7 +569,7 @@ fn render_jet(lib: &str, functions: &[Function]) -> String {
     }
     out.push_str("}\nuse c.");
     out.push_str(&abi);
-    out.push_str(" as abi\n\npub enum DartError { NotInitialized CallbackUnavailable }\n\n");
+    out.push_str(" as abi\n\nenum DartError { NotInitialized CallbackUnavailable }\n\n");
     for f in functions {
         out.push_str("pub fn ");
         out.push_str(&f.jet);

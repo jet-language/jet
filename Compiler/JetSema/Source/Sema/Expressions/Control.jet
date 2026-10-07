@@ -334,7 +334,7 @@ fn sema_pattern_consumes_result_carrier(pattern: Pattern) -> Bool Never! {
 // Call checkers finish through this check. While the dispatcher has opened a
 // success view for this call, a Result result is compared by its success side;
 // `sema_expression_auto_propagate` then inserts the one `Try`.
-pub fn sema_expression_call_expected(value: TExpr, expected: Type?, environment: SemaScopeEnvironment, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expression_call_expected(value: TExpr, expected: Type?, environment: SemaScopeEnvironment, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if context.failure_success_view && expected != None && !sema_expression_failure_carrier_position(expected, value.ty) {
         if sema_expr_unwrap_tag(value.ty) == .Result(success, _) {
             required := sema_expr_expected_type(expected, environment)
@@ -387,9 +387,9 @@ fn sema_failure_declared_conversion(source: Type, target: Type, scopes: SemaScop
 }
 
 struct SemaFailureProvenance {
-    pub callee: String
-    pub definition: String
-    pub contract: String
+    callee: String
+    definition: String
+    contract: String
 }
 
 fn sema_failure_definition_location(environment: SemaScopeEnvironment, symbol: Symbol) -> String? {
@@ -488,7 +488,7 @@ fn sema_failure_union_record_propagation(callee: SemaFailureCallee?, error: Type
 
 // The detail prefix of a failure-domain diagnostic that the bundle failure
 // solve emits or discharges once every body is checked (#3708).
-pub fn sema_failure_obligation_mark() -> String Never! {
+fn sema_failure_obligation_mark() -> String Never! {
     "inferred-failure-obligation:"
 }
 
@@ -1110,7 +1110,7 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
 // chain head binds a non-place subject once to a compiler local and checks
 // the table against that local, so a call subject and its side effects run
 // exactly once.
-pub fn sema_expression_if_dispatch_subject(condition: Expr, else_value: Expr) -> Expr? {
+fn sema_expression_if_dispatch_subject(condition: Expr, else_value: Expr) -> Expr? {
     subject :: sema_expression_if_condition_subject(condition) ?? return None
     if sema_expression_if_subject_is_place(subject) -> return None
     next := else_value
@@ -1206,7 +1206,7 @@ fn sema_expression_if_chain_consumes_carrier(value: Expr, subject_span: Span) ->
 
 // Check a hoisted dispatch subject once and bind it to the compiler local
 // that the rebound chain reads. The value form and the statement form share it.
-pub fn sema_expression_if_bind_subject(subject: Expr, condition: Expr, else_value: Expr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
+fn sema_expression_if_bind_subject(subject: Expr, condition: Expr, else_value: Expr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     subject_span :: expr_span(subject)
     carrier :: sema_expression_if_condition_consumes_carrier(condition) || sema_expression_if_chain_consumes_carrier(else_value, subject_span)
     checked_subject :: if carrier -> sema_check_expression_carrier(subject, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(subject, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -1229,26 +1229,26 @@ pub fn sema_expression_if_bind_subject(subject: Expr, condition: Expr, else_valu
     Val(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: subject_span})
 }
 
-pub fn sema_expression_if_subject_local_name(subject: Expr) -> String {
+fn sema_expression_if_subject_local_name(subject: Expr) -> String {
     "__jet_switch_subject_{expr_span(subject).start}"
 }
 
 // A pattern binding a checked condition introduces into its success branch.
-pub struct SemaConditionBinding {
-    pub symbol: Symbol
+struct SemaConditionBinding {
+    symbol: Symbol
     // D-OPT-WRITE1 (#3974): a write window into the matched payload of a
     // `&place` subject (Rust `if let Some(s) = &mut x`); `source` is the
     // place the window views while it is live.
-    pub window: Bool
-    pub source: Expr?
+    window: Bool
+    source: Expr?
 }
 
 // A checked `if`/arm condition: the TIR condition, its Bool value for
 // coverage, and the pattern bindings its success branch declares.
-pub struct SemaCheckedCondition {
-    pub condition: TIfCond
-    pub value: TExpr
-    pub bindings: [SemaConditionBinding]
+struct SemaCheckedCondition {
+    condition: TIfCond
+    value: TExpr
+    bindings: [SemaConditionBinding]
 }
 
 // Whether a condition tests a pattern at its top level or along a `&&` chain,
@@ -1367,7 +1367,7 @@ fn sema_expression_check_condition_inner(condition: Expr, environment: SemaScope
 }
 
 // D-FLOWTYPE1=A: whether `expr` is a bare `None` / `.None`.
-pub fn sema_expression_absent_none(expr: Expr) -> Bool Never! {
+fn sema_expression_absent_none(expr: Expr) -> Bool Never! {
     if expr == {
         .Absent(_) -> true
         .EnumLit(enum_type, variant, _, args, _, _) -> enum_type == "" && variant == "None" && args.len() == 0
@@ -1385,7 +1385,7 @@ fn sema_expression_ident_name(expr: Expr) -> BindName? {
 
 // D-FLOWTYPE1=A: the name and test span of an atomic `x == None` /
 // `x == .None` test (Rust `atomic_absent_optional_subject`).
-pub fn sema_expression_absent_optional_test(condition: Expr) -> (name: BindName, span: Span)? {
+fn sema_expression_absent_optional_test(condition: Expr) -> (name: BindName, span: Span)? {
     if condition == {
         .Binary(op, left, right, span) -> {
             if op != BinOp.Eq -> return None
@@ -1415,7 +1415,7 @@ pub fn sema_expression_absent_optional_test(condition: Expr) -> (name: BindName,
 // D-FLOWTYPE1=A: the payload type of a stable Optional, an immutable local or
 // parameter of type `T?` that a proven test may refine to `T` (Rust
 // `flow_narrowable_optional_inner`).
-pub fn sema_expression_flow_optional_payload(scopes: SemaScopeTable, name: String) -> Type? {
+fn sema_expression_flow_optional_payload(scopes: SemaScopeTable, name: String) -> Type? {
     index :: sema_scope_resolve_index(scopes, name) ?? return None
     binding :: scopes.bindings[index]
     if binding.mutable || (binding.symbol.kind != SymbolKind.Local && binding.symbol.kind != SymbolKind.Parameter) -> return None
@@ -1428,7 +1428,7 @@ pub fn sema_expression_flow_optional_payload(scopes: SemaScopeTable, name: Strin
 
 // D-FLOWTYPE1=A: the S31 presence test `x == .Val(x)`, whose success branch
 // holds the payload of the Optional `x` under the same name.
-pub fn sema_expression_presence_test(name: BindName, span: Span) -> Expr Never! {
+fn sema_expression_presence_test(name: BindName, span: Span) -> Expr Never! {
     Expr.PatternTest{subject: Expr.Ident{name: name.name, span: name.span}, pattern: Pattern.Present{binding: name.name, binding_span: name.span, inner: None, span: span}, span: span}
 }
 
@@ -1463,7 +1463,7 @@ fn sema_expression_rewrite_optional_ne_none(condition: Expr, scopes: SemaScopeTa
 // `sema_expression_declare_condition_bindings`. The condition's own frame
 // (`pattern@…`) keeps chain bindings out of later arms and fixes their
 // symbol identities for the branch.
-pub fn sema_expression_check_condition(condition: Expr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCheckedCondition? {
+fn sema_expression_check_condition(condition: Expr, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCheckedCondition? {
     rewritten :: sema_expression_rewrite_optional_ne_none(condition, scopes)
     if rewritten == .Val(presence) -> return sema_expression_check_condition(presence, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if !sema_expression_condition_binds(condition) -> return sema_expression_check_condition_inner(condition, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -1478,7 +1478,7 @@ pub fn sema_expression_check_condition(condition: Expr, environment: SemaScopeEn
 // it (and `&binding.field` passes onward) reach the owner's storage, and it
 // holds a write view on its subject place while live. `track` is false for
 // the in-condition declaration a `&&` chain reads, which the branch repeats.
-pub fn sema_expression_declare_condition_bindings(bindings: [SemaConditionBinding], scopes: &SemaScopeTable, state: &SemaOwnershipState, track: Bool, diagnostics: &[Diagnostic]) {
+fn sema_expression_declare_condition_bindings(bindings: [SemaConditionBinding], scopes: &SemaScopeTable, state: &SemaOwnershipState, track: Bool, diagnostics: &[Diagnostic]) {
     loop binding in bindings {
         access :: if binding.window -> AccessConvention.Write else -> AccessConvention.Read
         if !sema_scope_declare_local(&scopes, binding.symbol, binding.window, access, None, false) {
@@ -1516,12 +1516,12 @@ fn sema_expression_refines_optional(scopes: SemaScopeTable, symbol: Symbol) -> B
 }
 
 // The condition with the hoisted subject replaced by its local.
-pub fn sema_expression_if_rebound_condition(subject: Expr, condition: Expr) -> Expr {
+fn sema_expression_if_rebound_condition(subject: Expr, condition: Expr) -> Expr {
     sema_expression_if_replace_subject(condition, expr_span(subject), Expr.Ident{name: sema_expression_if_subject_local_name(subject), span: expr_span(subject)})
 }
 
 // The rest of the chain with every arm that tests the hoisted subject reading its local.
-pub fn sema_expression_if_rebound_chain(subject: Expr, else_value: Expr) -> Expr {
+fn sema_expression_if_rebound_chain(subject: Expr, else_value: Expr) -> Expr {
     sema_expression_if_rebind_chain(else_value, expr_span(subject), Expr.Ident{name: sema_expression_if_subject_local_name(subject), span: expr_span(subject)})
 }
 

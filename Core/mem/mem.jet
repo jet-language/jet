@@ -12,35 +12,35 @@ module scope
 use core as core
 use core.mem as mem
 #Error
-pub struct AllocError {
-    pub requested_bytes: Int
-    pub allocator: String
+struct AllocError {
+    requested_bytes: Int
+    allocator: String
 }
 
 // Allocator and pointer values are compiler-owned nominal surfaces. Their
 // constructors and methods are lowered by the memory CoreLib; source keeps
 // only the canonical type arities, never a fake runtime state carrier.
-pub struct Arena {}
+struct Arena {}
 
-pub struct Bump {}
+struct Bump {}
 
-pub struct Fixed {}
+struct Fixed {}
 
-pub struct Pool<T> {}
+struct Pool<T> {}
 
-pub struct Pin<T> {}
+struct Pin<T> {}
 
 
-pub fn address_of<T>(value: T) -> Int Never! { core.mem.address_of<T>(value) }
+fn address_of<T>(value: T) -> Int Never! { core.mem.address_of<T>(value) }
 
-#Unsafe("`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer") pub fn from_addr<T>(addr: Int) -> *T Never! {
+#Unsafe("`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer") fn from_addr<T>(addr: Int) -> *T Never! {
     mem.Ptr<T>.from_addr(addr)
 }
 
-#Unsafe("`pointer` names a live, aligned, readable `T` for the whole access") pub fn volatile_read<T>(pointer: *T) -> T Never! {
+#Unsafe("`pointer` names a live, aligned, readable `T` for the whole access") fn volatile_read<T>(pointer: *T) -> T Never! {
     core.mem.volatile_read<T>(pointer)
 }
 
-#Unsafe("`pointer` names a live, aligned, writable `T` for the whole access") pub fn volatile_write<T>(pointer: *T, value: T) Never! {
+#Unsafe("`pointer` names a live, aligned, writable `T` for the whole access") fn volatile_write<T>(pointer: *T, value: T) Never! {
     core.mem.volatile_write<T>(pointer, value)
 }

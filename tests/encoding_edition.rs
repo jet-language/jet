@@ -158,7 +158,7 @@ fn user_deprecated_marker_emits_l2001_for_a_consumer() {
     let path = write_project(
         &root,
         "2027",
-        "#Deprecated(since: \"1.2\", use: \"parse\")\npub fn decode() {}\n\nfn run() {\n    decode()\n}\n",
+        "#Deprecated(since: \"1.2\", use: \"parse\")\nfn decode() {}\n\nfn run() {\n    decode()\n}\n",
     );
     let diags = jet::check_with_path(path.to_str().unwrap());
     assert!(
@@ -173,7 +173,7 @@ fn user_deprecated_marker_emits_l2001_for_a_consumer() {
     let removed_path = write_project(
         &removed_root,
         "2028",
-        "#Deprecated(since: \"2027\", use: \"parse\", removed_in: \"2028\")\npub fn decode() {}\n\nfn run() {\n    decode()\n}\n",
+        "#Deprecated(since: \"2027\", use: \"parse\", removed_in: \"2028\")\nfn decode() {}\n\nfn run() {\n    decode()\n}\n",
     );
     let removed_diags = jet::check_with_path(removed_path.to_str().unwrap());
     assert!(
@@ -188,7 +188,7 @@ fn user_deprecated_marker_emits_l2001_for_a_consumer() {
     let before_path = write_project(
         &before_root,
         "2026",
-        "#Deprecated(since: \"2027\", use: \"parse\", removed_in: \"2028\")\npub fn decode() {}\n\nfn run() {\n    decode()\n}\n",
+        "#Deprecated(since: \"2027\", use: \"parse\", removed_in: \"2028\")\nfn decode() {}\n\nfn run() {\n    decode()\n}\n",
     );
     let before_diags = jet::check_with_path(before_path.to_str().unwrap());
     assert!(
@@ -202,7 +202,7 @@ fn user_deprecated_marker_emits_l2001_for_a_consumer() {
 
 #[test]
 fn lifecycle_marker_metadata_erases_before_web_codegen() {
-    let source = "#Deprecated(since: \"2027\", use: \"replacement\", removed_in: \"2028\")\npub fn legacy() { print(\"legacy\") }\npub fn replacement() { print(\"replacement\") }\n\nfn run() {\n    replacement()\n}\n";
+    let source = "#Deprecated(since: \"2027\", use: \"replacement\", removed_in: \"2028\")\nfn legacy() { print(\"legacy\") }\nfn replacement() { print(\"replacement\") }\n\nfn run() {\n    replacement()\n}\n";
     let output = jet::compile_web_with_path(source, "tests/fixtures/lifecycle_marker_web.jet")
         .expect("user lifecycle marker must compile for web");
     let web = output
@@ -218,7 +218,7 @@ fn deprecation_fix_replaces_plain_and_core_member_names() {
     let path = write_project(
         &root,
         "2027",
-        "#Deprecated(since: \"2027\", use: \"parse\")\npub fn decode() {}\npub fn parse() {}\n\nfn run() {\n    decode()\n}\n",
+        "#Deprecated(since: \"2027\", use: \"parse\")\nfn decode() {}\nfn parse() {}\n\nfn run() {\n    decode()\n}\n",
     );
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["fix", path.to_str().unwrap()])

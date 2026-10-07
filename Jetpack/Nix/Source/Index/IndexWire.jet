@@ -18,7 +18,7 @@ NIX_INDEX_SYSTEMS :: prep { [String]{"x86_64-linux", "aarch64-linux", "x86_64-da
 NIX_INDEX_COVERAGE_REASONS :: prep { [String]{"evaluation-failed", "unsupported-value", "unsupported-system", "no-channel-build", "missing-narinfo", "missing-version", "missing-primary-output", "policy-excluded"} }
 
 #Error
-pub enum NixIndexError {
+enum NixIndexError {
     Invalid(String)
     NotIndexed(attrpath: [String], channel: String, revision: String, system: String, reason: String)
     Offline(String)
@@ -42,20 +42,20 @@ pub enum NixIndexError {
     }
 }
 
-pub struct NixIndexKey {
-    pub channel: String
-    pub revision: String
-    pub system: String
-    pub attrpath: [String]
+struct NixIndexKey {
+    channel: String
+    revision: String
+    system: String
+    attrpath: [String]
 }
 
 // One indexed package: its attribute path, version, derivation and named
 // output store paths (key-ordered).
-pub struct NixIndexRecord {
-    pub attrpath: [String]
-    pub version: String
-    pub drv_path: String
-    pub outputs: [String: String]
+struct NixIndexRecord {
+    attrpath: [String]
+    version: String
+    drv_path: String
+    outputs: [String: String]
 
     fn canonical_json(self) -> String Never! {
         pkg_json_render(NixIndexRecordWire.from_record(self).tree())
@@ -64,13 +64,13 @@ pub struct NixIndexRecord {
 
 // A local, unsigned Jetpack-native recipe. It is a document separate from the
 // nixpkgs mapping, so a native artifact never looks Nix-backed.
-pub struct NixNativeRecipe {
-    pub name: String
-    pub version: String
-    pub kind: String
-    pub url: String
-    pub sha256: String
-    pub bin: String
+struct NixNativeRecipe {
+    name: String
+    version: String
+    kind: String
+    url: String
+    sha256: String
+    bin: String
 
     fn tree(self) -> DataTree Never! {
         DataTree.Object([
@@ -89,18 +89,18 @@ pub struct NixNativeRecipe {
 }
 
 // What a resolved record was verified against.
-pub struct NixIndexProof {
-    pub schema: Int
-    pub channel: String
-    pub revision: String
-    pub system: String
-    pub attrpath: [String]
-    pub manifest_generation: Int
-    pub manifest_sha256: String
-    pub index_sha256: String
-    pub record_sha256: String
-    pub jet_key_id: String
-    pub jet_signature: String
+struct NixIndexProof {
+    schema: Int
+    channel: String
+    revision: String
+    system: String
+    attrpath: [String]
+    manifest_generation: Int
+    manifest_sha256: String
+    index_sha256: String
+    record_sha256: String
+    jet_key_id: String
+    jet_signature: String
 
     fn canonical_json(self) -> String Never! {
         pkg_json_render(DataTree.Object([
@@ -119,7 +119,7 @@ pub struct NixIndexProof {
     }
 }
 
-pub enum NixIndexTrustTier {
+enum NixIndexTrustTier {
     OfficialSigned
     LocalUnofficial
 
@@ -145,26 +145,26 @@ pub enum NixIndexTrustTier {
     }
 }
 
-pub struct NixVerifiedIndexRecord {
-    pub record: NixIndexRecord
-    pub proof: NixIndexProof
-    pub trust: NixIndexTrustTier
+struct NixVerifiedIndexRecord {
+    record: NixIndexRecord
+    proof: NixIndexProof
+    trust: NixIndexTrustTier
 }
 
-pub struct NixIndexOutputWire {
-    pub name: String
-    pub store_path: String
+struct NixIndexOutputWire {
+    name: String
+    store_path: String
 
     fn tree(self) -> DataTree Never! {
         DataTree.Object(["name": DataTree.Text(self.name), "storePath": DataTree.Text(self.store_path)])
     }
 }
 
-pub struct NixIndexRecordWire {
-    pub attrpath: [String]
-    pub version: String
-    pub drv_path: String
-    pub outputs: [NixIndexOutputWire]
+struct NixIndexRecordWire {
+    attrpath: [String]
+    version: String
+    drv_path: String
+    outputs: [NixIndexOutputWire]
 
     fn from_record(record: NixIndexRecord) -> NixIndexRecordWire Never! {
         outputs := [NixIndexOutputWire]{}
@@ -198,28 +198,28 @@ pub struct NixIndexRecordWire {
     }
 }
 
-pub struct NixIndexCoverageMiss {
-    pub attrpath: [String]
-    pub reason: String
+struct NixIndexCoverageMiss {
+    attrpath: [String]
+    reason: String
 
     fn tree(self) -> DataTree Never! {
         DataTree.Object(["attrpath": pkg_json_texts(self.attrpath), "reason": DataTree.Text(self.reason)])
     }
 }
 
-pub struct NixIndexCoverage {
-    pub indexed: [[String]]
-    pub not_indexed: [NixIndexCoverageMiss]
+struct NixIndexCoverage {
+    indexed: [[String]]
+    not_indexed: [NixIndexCoverageMiss]
 }
 
-pub struct NixIndexDocument {
-    pub schema: Int
-    pub channel: String
-    pub revision: String
-    pub system: String
-    pub released_unix: Int
-    pub records: [NixIndexRecordWire]
-    pub coverage: NixIndexCoverage
+struct NixIndexDocument {
+    schema: Int
+    channel: String
+    revision: String
+    system: String
+    released_unix: Int
+    records: [NixIndexRecordWire]
+    coverage: NixIndexCoverage
 
     // Strict parse: known fields only, then validation, then byte equality
     // with the canonical re-encoding.
@@ -339,11 +339,11 @@ pub struct NixIndexDocument {
     }
 }
 
-pub struct NixIndexSignature {
-    pub schema: Int
-    pub key_id: String
-    pub algorithm: String
-    pub signature: String
+struct NixIndexSignature {
+    schema: Int
+    key_id: String
+    algorithm: String
+    signature: String
 
     fn parse(bytes: [U8]) -> NixIndexSignature NixIndexError! {
         text :: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("nix index signature is not UTF-8"))
@@ -372,18 +372,18 @@ pub struct NixIndexSignature {
 
 // One signed channel target: where the compressed index and its signature
 // sidecar live and what they must measure.
-pub struct NixIndexManifestTarget {
-    pub revision: String
-    pub system: String
-    pub url: String
-    pub signature_url: String
-    pub sha256: String
-    pub compressed_length: Int
-    pub decoded_length: Int
-    pub record_count: Int
+struct NixIndexManifestTarget {
+    revision: String
+    system: String
+    url: String
+    signature_url: String
+    sha256: String
+    compressed_length: Int
+    decoded_length: Int
+    record_count: Int
     // The manifest's `index_signature_sha256`.
-    pub signature_sha256: String
-    pub discoverable: Bool
+    signature_sha256: String
+    discoverable: Bool
 
     fn tree(self) -> DataTree Never! {
         DataTree.Object([
@@ -401,13 +401,13 @@ pub struct NixIndexManifestTarget {
     }
 }
 
-pub struct NixIndexChannelManifest {
-    pub schema: Int
-    pub channel: String
-    pub generation: Int
-    pub issued_unix: Int
-    pub expires_unix: Int
-    pub targets: [NixIndexManifestTarget]
+struct NixIndexChannelManifest {
+    schema: Int
+    channel: String
+    generation: Int
+    issued_unix: Int
+    expires_unix: Int
+    targets: [NixIndexManifestTarget]
 
     fn parse(bytes: [U8]) -> NixIndexChannelManifest NixIndexError! {
         text :: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("nix index manifest is not UTF-8"))
@@ -476,7 +476,7 @@ pub struct NixIndexChannelManifest {
 }
 
 // The canonical bytes of a local native recipe catalog.
-pub fn nix_index_canonical_local_native_recipes(bytes: [U8]) -> [U8] NixIndexError! {
+fn nix_index_canonical_local_native_recipes(bytes: [U8]) -> [U8] NixIndexError! {
     recipes :: nix_index_parse_local_native_recipes(bytes)
     Ok(nix_index_canonical_native_recipes_bytes(recipes))
 }

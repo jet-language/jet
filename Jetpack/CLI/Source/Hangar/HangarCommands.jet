@@ -15,7 +15,7 @@ fn cli_hangar_nested(parsed: CLIParsed) -> CLIParsed Never! {
 }
 
 // `jetpack hangar [<subcommand>]`. A bare `hangar` is `hangar du`.
-pub fn cli_cmd_hangar(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_hangar(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     if parsed.positional.len() == 0 -> return cli_hangar_du(&verification, theme, parsed)
     sub :: parsed.positional[0]
     if sub == {
@@ -49,7 +49,7 @@ pub fn cli_cmd_hangar(verification: &StoreVerification, theme: Theme, parsed: CL
 }
 
 // `jetpack hangar list` — show realized store entries.
-pub fn cli_cmd_list(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time.Wait]> Int Never! {
+fn cli_cmd_list(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time.Wait]> Int Never! {
     roots :: pkg_resolve_roots()
     entries :: store_list_read_only_checked(roots) ?? {
         return cli_hangar_report_error(theme, parsed, "E1340", "could not read the Hangar", err.message(), "repair the Hangar journal, then retry listing.")
@@ -346,7 +346,7 @@ fn cli_hangar_referrers(verification: &StoreVerification, theme: Theme, parsed: 
 
 // `jetpack hangar clean` — collect stale hangar objects and optimize owned
 // bytes, after one confirmed plan.
-pub fn cli_cmd_clean(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+fn cli_cmd_clean(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
     roots :: pkg_resolve_roots()
     plan :: store_clean_plan(&verification, roots) ?? {
         theme.error("could not plan the hangar clean", err.message(), "check permissions on the hangar root.")
@@ -390,7 +390,7 @@ pub fn cli_cmd_clean(verification: &StoreVerification, theme: Theme, parsed: CLI
 }
 
 // The quiet post-success auto-clean every realizing command runs.
-pub fn cli_auto_clean_after_success(verification: &StoreVerification, theme: Theme, roots: HangarRoots) Never! -[IO, FS, Env, Time, Time.Wait]> {
+fn cli_auto_clean_after_success(verification: &StoreVerification, theme: Theme, roots: HangarRoots) Never! -[IO, FS, Env, Time, Time.Wait]> {
     if store_maybe_auto_clean(&verification, roots) == {
         .Ok(found) -> {
             if found == .Val(report) {
@@ -405,7 +405,7 @@ pub fn cli_auto_clean_after_success(verification: &StoreVerification, theme: The
 
 // One Hangar failure: a `jet.status/v1` envelope carrying the coded report
 // under `--json`, else the coded human diagnostic. Always exit 2.
-pub fn cli_hangar_report_error(theme: Theme, parsed: CLIParsed, code: String, what: String, why: String, fix: String) -[IO, FS, Env, Time.Wait]> Int Never! {
+fn cli_hangar_report_error(theme: Theme, parsed: CLIParsed, code: String, what: String, why: String, fix: String) -[IO, FS, Env, Time.Wait]> Int Never! {
     if parsed.flags.json {
         print(StatusEnvelope.new("hangar", false).with_report(cli_diagnostic_report(code, what, why, fix)).json())
     } else {
@@ -490,7 +490,7 @@ fn cli_positional_path_after(parsed: CLIParsed, sub: String) -> String? Never! {
 
 // Render a byte count as a short human string: `512 B`, `1.5 K`, `3.2 M`,
 // `1.0 G` (one decimal, rounded to nearest).
-pub fn cli_human_bytes(bytes: Int) -> String Never! {
+fn cli_human_bytes(bytes: Int) -> String Never! {
     units :: [String]{"B", "K", "M", "G"}
     unit := 0
     divisor := 1

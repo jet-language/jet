@@ -242,20 +242,20 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
 // edge is `continue` of its header's loop. Any other CFG keeps the dispatch
 // loop.
 struct JetRustEmitCFGPlan {
-    pub structured: Bool
-    pub phis: Bool
+    structured: Bool
+    phis: Bool
     // Block id value -> true when the block's phi reads the predecessor.
-    pub phi_targets: [U64:Bool]
-    pub entry: Int
+    phi_targets: [U64:Bool]
+    entry: Int
     // MIR block id value -> position in `function.blocks`.
-    pub positions: [U64:Int]
+    positions: [U64:Int]
     // Reverse postorder number per position; -1 for an unreachable block.
-    pub order: [Int]
-    pub headers: [Bool]
-    pub merges: [Bool]
+    order: [Int]
+    headers: [Bool]
+    merges: [Bool]
     // The merge blocks each position immediately dominates, latest first.
-    pub follows: [[Int]]
-    pub debug: [Bool]
+    follows: [[Int]]
+    debug: [Bool]
 }
 
 fn jet_rust_emit_cfg_reverse_postorder(successors: [[Int]], entry: Int) -> [Int] Never! {

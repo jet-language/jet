@@ -72,7 +72,7 @@ struct NixImportPackage {
 
 // ── Nix ──
 
-pub fn cli_import_nix_facts(source_path: String, facts_json: String) -> ImportPlan Never! {
+fn cli_import_nix_facts(source_path: String, facts_json: String) -> ImportPlan Never! {
     plan := ImportPlan.empty("nix")
     object :: cli_import_json_object(facts_json) ?? [String: DataTree]{}
     report :: provider_normalize_document(ProviderFamily.Nix, facts_json)
@@ -229,7 +229,7 @@ fn cli_import_nix_package(value: DataTree) -> NixImportPackage? Never! {
 
 // ── Cargo ──
 
-pub fn cli_import_cargo(cargo_toml: String, cargo_lock: String) -> ImportPlan Never! {
+fn cli_import_cargo(cargo_toml: String, cargo_lock: String) -> ImportPlan Never! {
     plan := ImportPlan.empty("cargo")
     source_name :: cli_import_toml_string(cargo_toml, "name") ?? ""
     source_version :: cli_import_toml_string(cargo_toml, "version") ?? ""
@@ -305,7 +305,7 @@ impl ImportPlan {
 
 // ── npm ──
 
-pub fn cli_import_npm(package_json: String) -> ImportPlan Never! {
+fn cli_import_npm(package_json: String) -> ImportPlan Never! {
     plan := ImportPlan.empty("npm")
     object :: cli_import_json_object(package_json) ?? [String: DataTree]{}
     source_name :: pkg_json_text(object.get("name") ?? DataTree.Null) ?? ""
@@ -407,7 +407,7 @@ fn cli_import_copy_provider_projection(target: &ProviderFacts, source: ProviderF
 
 // ── Python and SwiftPM ──
 
-pub fn cli_import_python_metadata(name: String, dynamic_fields: [String]) -> ImportPlan Never! {
+fn cli_import_python_metadata(name: String, dynamic_fields: [String]) -> ImportPlan Never! {
     plan := ImportPlan.empty("pypi")
     &plan.packages.push(ImportedPackage{name: name, version: "0.1.0"})
     loop field in dynamic_fields {
@@ -420,7 +420,7 @@ pub fn cli_import_python_metadata(name: String, dynamic_fields: [String]) -> Imp
     plan
 }
 
-pub fn cli_import_swiftpm(name: String, revision: String) -> ImportPlan Never! {
+fn cli_import_swiftpm(name: String, revision: String) -> ImportPlan Never! {
     plan := ImportPlan.empty("swiftpm")
     &plan.packages.push(ImportedPackage{name: name, version: revision})
     provider_ref :: "{name}@swiftpm{REF_CHANNEL_MARKER}revision={revision}"

@@ -125,7 +125,7 @@ fn sema_database_check_deadline_label(argument: CallArg, diagnostics: &[Diagnost
     &diagnostics.push(sema_error("E0104", argument.span, "`DBPool.acquire` expects the deadline argument to be labeled `deadline`", "an optional pool deadline is explicit at the call site", "write `pool.acquire(deadline: duration)`"))
 }
 
-pub fn sema_call_try_database_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_database_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     receiver_type := sema_call_resolved_type(receiver_value.ty, environment)
     contract :: sema_database_contract(receiver_type, method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if type_args.len() != 0 {
@@ -180,7 +180,7 @@ fn sema_database_sql_receiver_is_core(receiver: Expr, environment: SemaScopeEnvi
     }
 }
 
-pub fn sema_call_try_sql_raw(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_sql_raw(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if method != "raw" || !sema_database_sql_receiver_is_core(receiver, environment, scopes) -> return SemaMethodSpecialCheck{handled: false, value: None}
     if args.len() != 1 {
         &diagnostics.push(sema_error("E0103", span, "`SQL.raw()` takes exactly one argument", "`.raw()` wraps one already-audited String as the escape hatch", "write `SQL.raw(text)`"))

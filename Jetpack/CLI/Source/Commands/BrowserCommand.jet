@@ -2,7 +2,7 @@
 // jetpack::CLI::browser, D-BROWSER-AUTO1=A #1187): lock WebDriver-BiDi
 // browser binaries into `.jet/lock` and read them back verified.
 
-pub enum BrowserVerb {
+enum BrowserVerb {
     Lock
     Provision
     Resolve
@@ -19,7 +19,7 @@ pub enum BrowserVerb {
     }
 }
 
-pub fn cli_cmd_browser(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_browser(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     raw :: parsed.positional.get(0) ?? {
         theme.error("`jetpack browser` needs a verb", "verbs are: {BROWSER_VERBS.join(", ")} — lock or provision a project-pinned browser binary.", "try `jetpack browser list` or `jetpack browser lock chromium --binary ./chromium`.")

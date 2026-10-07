@@ -119,15 +119,15 @@ XML uses the exact tagged `DataTree` schema in the XML section. Every reader
 has the current-signature form
 
 ```jet
-pub fn next(&self) -> Item? encoding.EncodingError!
+fn next(&self) -> Item? encoding.EncodingError!
 ```
 
 Every writer has
 
 ```jet
-pub fn write(&self, item: Item) encoding.EncodingError!
-pub fn flush(&self) encoding.EncodingError!
-pub fn finish(&self) encoding.EncodingError!
+fn write(&self, item: Item) encoding.EncodingError!
+fn flush(&self) encoding.EncodingError!
+fn finish(&self) encoding.EncodingError!
 ```
 
 `&self` is the edit access because each call advances state; callers keep a
@@ -1044,19 +1044,19 @@ required.
 The exact edition-2027 APIs are:
 
 ```jet
-pub fn encode(bytes: [U8]) -> String
-pub fn decode(text: String,
+fn encode(bytes: [U8]) -> String
+fn decode(text: String,
               allow_whitespace: Bool{false},
               allow_missing_padding: Bool{false})
     -> [U8] String!
-pub fn encode_url(bytes: [U8]) -> String
-pub fn decode_url(text: String,
+fn encode_url(bytes: [U8]) -> String
+fn decode_url(text: String,
                   allow_whitespace: Bool{false},
                   allow_padding: Bool{false})
     -> [U8] String!
 
-pub fn encode(bytes: [U8]) -> String
-pub fn decode(text: String,
+fn encode(bytes: [U8]) -> String
+fn decode(text: String,
               allow_whitespace: Bool{false},
               allow_missing_padding: Bool{false},
               allow_lowercase: Bool{false})

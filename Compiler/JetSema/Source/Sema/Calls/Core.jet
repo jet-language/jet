@@ -45,15 +45,15 @@ use jet_foundation.[
 
 // A visible module alias (`use slots`, `use core.mem`) and the registered
 // module it names.
-pub struct SemaCallImportTarget {
-    pub alias: String
-    pub module_identity: String
-    pub module_name: String
-    pub item: String?
-    pub span: Span
+struct SemaCallImportTarget {
+    alias: String
+    module_identity: String
+    module_name: String
+    item: String?
+    span: Span
 }
 
-pub enum SemaCoreCallRoute {
+enum SemaCoreCallRoute {
     Source(target: SemaCallDirectTarget)
     Core(record: CoreCallRecord)
 }
@@ -94,12 +94,12 @@ fn sema_call_source_import_target(environment: SemaScopeEnvironment, alias: Stri
 }
 
 // Resolve through Registration identity, not source spelling alone.
-pub fn sema_call_core_import_module(environment: SemaScopeEnvironment, alias: String) -> String? {
+fn sema_call_core_import_module(environment: SemaScopeEnvironment, alias: String) -> String? {
     target :: sema_call_core_import_target(environment, alias) ?? return None
     Val(target.module_name)
 }
 
-pub fn sema_call_core_import_member(target: SemaCallImportTarget, requested_member: String) -> String? {
+fn sema_call_core_import_member(target: SemaCallImportTarget, requested_member: String) -> String? {
     if target.item == .Val(item) {
         if requested_member != "" && requested_member != item -> return None
         return Val(item)
@@ -110,7 +110,7 @@ pub fn sema_call_core_import_member(target: SemaCallImportTarget, requested_memb
 
 // An import is usable only while its exact registered binding remains the
 // visible lexical binding for the local alias.
-pub fn sema_call_core_import_is_unshadowed(environment: SemaScopeEnvironment, scopes: SemaScopeTable, target: SemaCallImportTarget) -> Bool Never! {
+fn sema_call_core_import_is_unshadowed(environment: SemaScopeEnvironment, scopes: SemaScopeTable, target: SemaCallImportTarget) -> Bool Never! {
     graph_option :: environment.registration_graph
     graph :: graph_option ?? return false
     module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return false
@@ -133,14 +133,14 @@ pub fn sema_call_core_import_is_unshadowed(environment: SemaScopeEnvironment, sc
     false
 }
 
-pub fn sema_call_core_record_import_reference(environment: SemaScopeEnvironment, scopes: SemaScopeTable, target: SemaCallImportTarget, span: Span, context: &SemaCheckContext) -> Bool Never! {
+fn sema_call_core_record_import_reference(environment: SemaScopeEnvironment, scopes: SemaScopeTable, target: SemaCallImportTarget, span: Span, context: &SemaCheckContext) -> Bool Never! {
     if !sema_call_core_import_is_unshadowed(environment, scopes, target) -> return false
     index :: sema_scope_resolve_index(scopes, target.alias) ?? return false
     &context.name_references.push(SemaNameReferenceFact{span: span, symbol: scopes.bindings[index].symbol, kind: "import_alias"})
     true
 }
 
-pub fn sema_call_core_require_imported_unsafe(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, required_module: String, operation: String, span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_call_core_require_imported_unsafe(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, required_module: String, operation: String, span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     target :: sema_call_core_import_target(environment, alias)
     if target == {
         .Val(imported) -> {
@@ -209,7 +209,7 @@ fn sema_call_export_function_target(environment: SemaScopeEnvironment, export: S
 // source module calls the function that module (or, D-MOD-CYCLE1=A, its
 // package) exports, checked like a direct call. A private function is E0605
 // and any other name E0102. Core aliases keep their own route.
-pub fn sema_call_try_source_module_call(alias: String, alias_span: Span, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
+fn sema_call_try_source_module_call(alias: String, alias_span: Span, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     unhandled :: SemaMethodSpecialCheck{handled: false, value: None}
     imported :: sema_call_source_import_target(environment, alias) ?? return unhandled
     if !sema_call_core_record_import_reference(environment, scopes, imported, alias_span, &context) -> return unhandled
@@ -219,7 +219,7 @@ pub fn sema_call_try_source_module_call(alias: String, alias_span: Span, member:
     failed :: SemaMethodSpecialCheck{handled: true, value: None}
     export :: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? {
         if sema_registration_direct_symbol(graph.modules[module_index], member) != None {
-            &diagnostics.push(sema_error("E0605", span, "`{member}` exists but is private to its file", "only names marked `pub` can be used from another file (S18)", "add `pub` before `{member}`, or don't reach across files here"))
+            &diagnostics.push(sema_error("E0605", span, "`{member}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module (D-VIS-MODULE1)", "use `{member}` from inside its module, or remove `priv` from its module or field"))
         } else {
             &diagnostics.push(sema_call_import_member_unknown(member, alias_span))
         }
@@ -268,7 +268,7 @@ fn sema_call_core_projection_error(module_name: String, member: String, error: C
     }
 }
 
-pub fn sema_call_core_record(module_name: String, member: String, actual_arity: Int, span: Span, diagnostics: &[Diagnostic]) -> CoreCallRecord? {
+fn sema_call_core_record(module_name: String, member: String, actual_arity: Int, span: Span, diagnostics: &[Diagnostic]) -> CoreCallRecord? {
     typed_signature :: core_call_typed_signature(module_name, member, actual_arity)
     if typed_signature != None -> return core_call(module_name, member)
     // D-VERDICT-1321-1: variadic `core.term.eprint` joins its arguments into
@@ -285,7 +285,7 @@ pub fn sema_call_core_record(module_name: String, member: String, actual_arity: 
     }
 }
 
-pub fn sema_call_core_typed_signature(record: CoreCallRecord, actual_arity: Int, actual_accesses: [AccessConvention], type_args: [Type]) -> CoreTypedCallSignature? {
+fn sema_call_core_typed_signature(record: CoreCallRecord, actual_arity: Int, actual_accesses: [AccessConvention], type_args: [Type]) -> CoreTypedCallSignature? {
     core_call_typed_signature_for(CoreCallSignatureRequest{
         module_name: record.module_name,
         member: record.member,
@@ -295,7 +295,7 @@ pub fn sema_call_core_typed_signature(record: CoreCallRecord, actual_arity: Int,
     })
 }
 
-pub fn sema_call_core_receiver_record(receiver_type: Type, member: String, actual_arity: Int, span: Span, diagnostics: &[Diagnostic]) -> CoreCallRecord? {
+fn sema_call_core_receiver_record(receiver_type: Type, member: String, actual_arity: Int, span: Span, diagnostics: &[Diagnostic]) -> CoreCallRecord? {
     receiver_name := sema_expr_type_base_name(receiver_type) ?? type_name(receiver_type)
     record :: core_receiver_method(receiver_name, member) ?? return None
     if !core_call_coverage_contains(record.coverage, CORE_CALL_COVERAGE_SEMA) {
@@ -313,7 +313,7 @@ pub fn sema_call_core_receiver_record(receiver_type: Type, member: String, actua
 
 // Source exports resolve as ordinary functions. Only remaining static members
 // can become CoreCall nodes; this prevents registry rows from shadowing source.
-pub fn sema_call_core_resolve_route(environment: SemaScopeEnvironment, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, span: Span, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+fn sema_call_core_resolve_route(environment: SemaScopeEnvironment, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, span: Span, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     diagnostic_count := diagnostics.len()
     source_identity :: sema_call_core_module_identity(environment, module_name)
     source :: if source_identity == {
@@ -330,7 +330,7 @@ pub fn sema_call_core_resolve_route(environment: SemaScopeEnvironment, module_na
     Val(SemaCoreCallRoute.Core{record: record})
 }
 
-pub fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, requested_member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, requested_member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     imported :: sema_call_core_import_target(environment, alias) ?? return None
     if !sema_call_core_import_is_unshadowed(environment, scopes, imported) -> return None
     member :: sema_call_core_import_member(imported, requested_member) ?? return None
@@ -354,7 +354,7 @@ pub fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, sc
 // module alias's known Core submodule (`core.math.fabs(n)` under `use core as
 // core`) routes against that submodule by name, exactly as an alias of the
 // submodule itself would.
-pub fn sema_call_core_resolve_import_path_route(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
+fn sema_call_core_resolve_import_path_route(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, span: Span, alias_span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     imported :: sema_call_core_import_target(environment, alias) ?? return None
     if imported.item != None -> return None
     if !sema_call_core_record_import_reference(environment, scopes, imported, alias_span, &context) -> return None
@@ -366,7 +366,7 @@ pub fn sema_call_core_resolve_import_path_route(environment: SemaScopeEnvironmen
 // ambient variadic `print`, checked and lowered exactly like it (Rust
 // `print_values`). True when this alias call is that print; the alias
 // reference is then recorded.
-pub fn sema_call_core_variadic_print(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, requested_member: String, actual_arity: Int, alias_span: Span, context: &SemaCheckContext) -> Bool Never! {
+fn sema_call_core_variadic_print(environment: SemaScopeEnvironment, scopes: SemaScopeTable, alias: String, requested_member: String, actual_arity: Int, alias_span: Span, context: &SemaCheckContext) -> Bool Never! {
     if actual_arity == 1 -> return false
     imported :: sema_call_core_import_target(environment, alias) ?? return false
     if imported.module_name != "core.term" -> return false
@@ -379,12 +379,12 @@ pub fn sema_call_core_variadic_print(environment: SemaScopeEnvironment, scopes: 
 
 // Registry access metadata is incomplete for optional slots; return None rather
 // than assign an ownership convention the registry does not specify.
-pub fn sema_call_core_access(record: CoreCallRecord, index: Int) -> AccessConvention? {
+fn sema_call_core_access(record: CoreCallRecord, index: Int) -> AccessConvention? {
     if index < 0 || index >= record.signature.borrow_mask.len() -> return None
     if record.signature.borrow_mask[index] -> Val(AccessConvention.Read) else -> Val(AccessConvention.Move)
 }
 
-pub fn sema_call_core_check_type_args(module_name: String, member: String, expected_count: Int, infer_when_omitted: Bool, type_args: [Type], span: Span, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_call_core_check_type_args(module_name: String, member: String, expected_count: Int, infer_when_omitted: Bool, type_args: [Type], span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if infer_when_omitted && type_args.len() == 0 && expected_count > 0 -> return true
     if type_args.len() == expected_count -> return true
     &diagnostics.push(sema_call_generic_count_diagnostic("{module_name}.{member}", expected_count, type_args.len(), span))
@@ -393,7 +393,7 @@ pub fn sema_call_core_check_type_args(module_name: String, member: String, expec
 
 // The caller supplies the exact typed signature. Shared Binder checks its labels,
 // zones, defaults and arity; no Core metadata is inferred from a member name.
-pub fn sema_call_core_bind_arguments(record: CoreCallRecord, signature: Type, args: [CallArg], span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
+fn sema_call_core_bind_arguments(record: CoreCallRecord, signature: Type, args: [CallArg], span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
     process_run_boundary :: record.module_name == "core.process" && record.member == "run" && args.len() == record.signature.arity + 1
     if !core_call_accepts_arity(record, args.len()) && !process_run_boundary {
         maximum := record.signature.max_arity
@@ -410,13 +410,13 @@ pub fn sema_call_core_bind_arguments(record: CoreCallRecord, signature: Type, ar
     sema_call_bind_direct("{record.module_name}.{record.member}", signature, &local_args, span, &diagnostics)
 }
 
-pub fn sema_call_core_check_typed_argument(value: TExpr, expected: Type, environment: SemaScopeEnvironment, span: Span, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_core_check_typed_argument(value: TExpr, expected: Type, environment: SemaScopeEnvironment, span: Span, diagnostics: &[Diagnostic]) -> TExpr? {
     typed := value
     typed.span = span
     sema_expr_expected(typed, Val(expected), environment, &diagnostics)
 }
 
-pub fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], widen_to_vec: [Bool], data_plan: MIRDataPlan?, result_type: Type, fallibility: TFailureCarrier, expected: Type?, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], widen_to_vec: [Bool], data_plan: MIRDataPlan?, result_type: Type, fallibility: TFailureCarrier, expected: Type?, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
     process_run_boundary :: record.module_name == "core.process" && record.member == "run" && args.len() == record.signature.arity + 1
     if !core_call_accepts_arity(record, args.len()) && !process_run_boundary {
         maximum := record.signature.max_arity
@@ -434,7 +434,7 @@ fn sema_call_core_effect_name(effect_kind: Effect) -> String Never! {
 
 // Record known root/leaf effects (including known purity) and enforce authored
 // transaction walls before the CoreCall reaches effect-graph collection.
-pub fn sema_call_core_record_effects(record: CoreCallRecord, span: Span, type_args: [Type], result_type: Type, fallibility: TFailureCarrier, default_refs: [FunctionDefaultRef], scopes: &SemaScopeTable, context: &SemaCheckContext, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool Never! {
+fn sema_call_core_record_effects(record: CoreCallRecord, span: Span, type_args: [Type], result_type: Type, fallibility: TFailureCarrier, default_refs: [FunctionDefaultRef], scopes: &SemaScopeTable, context: &SemaCheckContext, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool Never! {
     effect_bound := [EffectRowEntry]{}
     leaf_name :: record.effect_leaf ?? ""
     if record.effect_kind == {
@@ -696,7 +696,7 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
 
 // Resolve source exports before building a fixed Core call. The callee's
 // canonical typed contract is discovered here; callers never supply its Type.
-pub fn sema_call_core_check_fixed(environment: SemaScopeEnvironment, module_name: String, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_core_check_fixed(environment: SemaScopeEnvironment, module_name: String, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     expected_type_arg_count := 0
     if core_call_typed_signature(module_name, member, args.len()) == {
         .Val(signature) -> expected_type_arg_count = signature.type_parameters.len()
@@ -709,7 +709,7 @@ pub fn sema_call_core_check_fixed(environment: SemaScopeEnvironment, module_name
     }
 }
 
-pub fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified_name: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified_name: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     call := Call{name: qualified_name, name_span: span, type_args: type_args, args: args, resolved_ret: None, range_checked: false, widen_approx: false}
     checked :: sema_call_check_direct_target_owned(&state, target, call, [SemaCallDefaultValue]{}, expected, environment, &scopes, &tail_store, &context, &diagnostics) ?? return None
     if !sema_expr_record_call_fact(environment, &scopes, &context, span, checked, &diagnostics) -> return None
@@ -718,7 +718,7 @@ pub fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified
 
 // `core.prelude.keep` is an erased identity: its checked argument is the call
 // result, with an optional explicit type argument constraining that value.
-pub fn sema_call_core_identity_value(value: TExpr, type_args: [Type], expected: Type?, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_core_identity_value(value: TExpr, type_args: [Type], expected: Type?, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> TExpr? {
     if !sema_call_core_check_type_args("core.prelude", "keep", 1, true, type_args, value.span, &diagnostics) -> return None
     result := value
     if type_args.len() == 1 {

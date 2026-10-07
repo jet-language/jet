@@ -1579,7 +1579,7 @@ fn check_reports_soft_public_lints_without_failing() {
     let dir = isolated_cwd("check_soft_public");
     fs::write(
         dir.join("library.jet"),
-        "pub fn _legacy() -> Int { return 1 }\n",
+        "fn _legacy() -> Int { return 1 }\n",
     )
     .unwrap();
     fs::write(

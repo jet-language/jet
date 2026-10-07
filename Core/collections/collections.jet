@@ -20,26 +20,26 @@ module set
 // double-ended queue is the built-in `Queue<T>` (D-DEQUE-QUEUE1=A).
 
 /// Insertion-ordered string multiset. `get` is `0` for an unseen key.
-pub struct Counter {
-    pub keys: [String]
-    pub counts: [Int]
+struct Counter {
+    keys: [String]
+    counts: [Int]
 }
 
 /// Insertion-ordered string map. Replacing a key keeps its original position.
-pub struct OrderedMap {
-    pub keys: [String]
-    pub values: [String]
+struct OrderedMap {
+    keys: [String]
+    values: [String]
 }
 
 /// One map layer in a `Chain`. Earlier layers win on lookup.
-pub struct Layer {
-    pub keys: [String]
-    pub values: [String]
+struct Layer {
+    keys: [String]
+    values: [String]
 }
 
 /// Stack of maps. `get` walks from the front.
-pub struct Chain {
-    pub layers: [Layer]
+struct Chain {
+    layers: [Layer]
 }
 
 fn copy_ints(xs: [Int]) -> [Int] {
@@ -54,9 +54,9 @@ fn counter_entries(c: Counter) -> Int {
     n
 }
 
-pub fn counter() -> Counter Never! { Counter{keys: [String]{}, counts: [Int]{}} }
+fn counter() -> Counter Never! { Counter{keys: [String]{}, counts: [Int]{}} }
 
-pub fn counter_from(keys: [String]) -> Counter Never! {
+fn counter_from(keys: [String]) -> Counter Never! {
     out_keys := [String]{}
     out_counts := [Int]{}
     loop key in keys {
@@ -76,7 +76,7 @@ pub fn counter_from(keys: [String]) -> Counter Never! {
     Counter{keys: out_keys, counts: out_counts}
 }
 
-pub fn add(c: Counter, key: String, n: Int) -> Counter Never! {
+fn add(c: Counter, key: String, n: Int) -> Counter Never! {
     entries := counter_entries(c)
     target_count := n
     first_target := -1
@@ -110,11 +110,11 @@ pub fn add(c: Counter, key: String, n: Int) -> Counter Never! {
     Counter{keys: keys, counts: counts}
 }
 
-pub fn inc(c: Counter, key: String) -> Counter Never! { add(c, key, 1) }
+fn inc(c: Counter, key: String) -> Counter Never! { add(c, key, 1) }
 
-pub fn dec(c: Counter, key: String) -> Counter Never! { add(c, key, -1) }
+fn dec(c: Counter, key: String) -> Counter Never! { add(c, key, -1) }
 
-pub fn get(c: Counter, key: String) -> Int Never! {
+fn get(c: Counter, key: String) -> Int Never! {
     acc := 0
     found := false
     i := 0
@@ -130,12 +130,12 @@ pub fn get(c: Counter, key: String) -> Int Never! {
     0
 }
 
-pub fn set_count(c: Counter, key: String, n: Int) -> Counter Never! {
+fn set_count(c: Counter, key: String, n: Int) -> Counter Never! {
     cur :: get(c, key)
     add(c, key, n - cur)
 }
 
-pub fn total(c: Counter) -> Int Never! {
+fn total(c: Counter) -> Int Never! {
     acc := 0
     entries := counter_entries(c)
     i := 0
@@ -146,7 +146,7 @@ pub fn total(c: Counter) -> Int Never! {
     acc
 }
 
-pub fn names(c: Counter) -> [String] Never! {
+fn names(c: Counter) -> [String] Never! {
     out := [String]{}
     entries := counter_entries(c)
     i := 0
@@ -157,7 +157,7 @@ pub fn names(c: Counter) -> [String] Never! {
     out
 }
 
-pub fn elements(c: Counter) -> [String] Never! {
+fn elements(c: Counter) -> [String] Never! {
     out := [String]{}
     i := 0
     entries := counter_entries(c)
@@ -173,7 +173,7 @@ pub fn elements(c: Counter) -> [String] Never! {
 }
 
 /// Highest counts first. Ties keep insertion order.
-pub fn most_common(c: Counter, k: Int) -> Counter Never! {
+fn most_common(c: Counter, k: Int) -> Counter Never! {
     entries := counter_entries(c)
     if k == 0 -> return Counter{keys: [String]{}, counts: [Int]{}}
     limit := k
@@ -245,7 +245,7 @@ fn counter_copy(c: Counter) -> Counter {
     Counter{keys: keys, counts: counts}
 }
 
-pub fn subtract(a: Counter, b: Counter) -> Counter Never! {
+fn subtract(a: Counter, b: Counter) -> Counter Never! {
     out := counter_copy(a)
     keys := out.keys
     counts := out.counts
@@ -258,7 +258,7 @@ pub fn subtract(a: Counter, b: Counter) -> Counter Never! {
     Counter{keys: keys, counts: counts}
 }
 
-pub fn merge_add(a: Counter, b: Counter) -> Counter Never! {
+fn merge_add(a: Counter, b: Counter) -> Counter Never! {
     out := counter_copy(a)
     keys := out.keys
     counts := out.counts
@@ -271,7 +271,7 @@ pub fn merge_add(a: Counter, b: Counter) -> Counter Never! {
     Counter{keys: keys, counts: counts}
 }
 
-pub fn clear_counter(_c: Counter) -> Counter Never! { counter() }
+fn clear_counter(_c: Counter) -> Counter Never! { counter() }
 
 fn sift_down(xs: &[Int], start: Int, end: Int) {
     i := start
@@ -304,7 +304,7 @@ fn sift_up(xs: &[Int], start: Int) {
     }
 }
 
-pub fn heapify(xs: [Int]) -> [Int] Never! {
+fn heapify(xs: [Int]) -> [Int] Never! {
     out := copy_ints(xs)
     n := out.len()
     if n > 1 {
@@ -318,7 +318,7 @@ pub fn heapify(xs: [Int]) -> [Int] Never! {
     out
 }
 
-pub fn heappush(xs: [Int], value: Int) -> [Int] Never! {
+fn heappush(xs: [Int], value: Int) -> [Int] Never! {
     out := copy_ints(xs)
     &out.push(value)
     last := out.len() - 1
@@ -326,7 +326,7 @@ pub fn heappush(xs: [Int], value: Int) -> [Int] Never! {
     out
 }
 
-pub fn heappop(xs: [Int]) -> (heap: [Int], value: Int?) Never! {
+fn heappop(xs: [Int]) -> (heap: [Int], value: Int?) Never! {
     if xs.len() == 0 -> return (heap: [Int]{}, value: None)
     if xs.len() == 1 -> return (heap: [Int]{}, value: Val(xs[0]))
     last := xs[xs.len() - 1]
@@ -341,7 +341,7 @@ pub fn heappop(xs: [Int]) -> (heap: [Int], value: Int?) Never! {
     (heap: rest, value: Val(xs[0]))
 }
 
-pub fn heappushpop(xs: [Int], value: Int) -> (heap: [Int], value: Int) Never! {
+fn heappushpop(xs: [Int], value: Int) -> (heap: [Int], value: Int) Never! {
     if xs.len() == 0 || value <= xs[0] -> return (heap: copy_ints(xs), value: value)
     popped := xs[0]
     rest := [Int]{value}
@@ -355,7 +355,7 @@ pub fn heappushpop(xs: [Int], value: Int) -> (heap: [Int], value: Int) Never! {
     (heap: rest, value: popped)
 }
 
-pub fn heapreplace(xs: [Int], value: Int) -> (heap: [Int], value: Int?) Never! {
+fn heapreplace(xs: [Int], value: Int) -> (heap: [Int], value: Int?) Never! {
     if xs.len() == 0 -> return (heap: [Int]{value}, value: None)
     popped := xs[0]
     rest := [Int]{value}
@@ -432,7 +432,7 @@ fn max_heappop(xs: [Int]) -> (heap: [Int], value: Int?) {
     (heap: rest, value: Val(popped))
 }
 
-pub fn nsmallest(n: Int, xs: [Int]) -> [Int] Never! {
+fn nsmallest(n: Int, xs: [Int]) -> [Int] Never! {
     if n <= 0 -> return [Int]{}
     h := [Int]{}
     loop x in xs {
@@ -461,7 +461,7 @@ pub fn nsmallest(n: Int, xs: [Int]) -> [Int] Never! {
     out
 }
 
-pub fn nlargest(n: Int, xs: [Int]) -> [Int] Never! {
+fn nlargest(n: Int, xs: [Int]) -> [Int] Never! {
     if n <= 0 -> return [Int]{}
     h := [Int]{}
     loop x in xs {
@@ -491,7 +491,7 @@ pub fn nlargest(n: Int, xs: [Int]) -> [Int] Never! {
     out
 }
 
-pub fn merge_sorted(left: [Int], right: [Int]) -> [Int] Never! {
+fn merge_sorted(left: [Int], right: [Int]) -> [Int] Never! {
     out := [Int]{}
     i := 0
     j := 0
@@ -515,7 +515,7 @@ pub fn merge_sorted(left: [Int], right: [Int]) -> [Int] Never! {
     out
 }
 
-pub fn bisect_left(xs: [Int], value: Int) -> Int Never! {
+fn bisect_left(xs: [Int], value: Int) -> Int Never! {
     lo := 0
     hi := xs.len()
     loop lo < hi {
@@ -529,7 +529,7 @@ pub fn bisect_left(xs: [Int], value: Int) -> Int Never! {
     lo
 }
 
-pub fn bisect_right(xs: [Int], value: Int) -> Int Never! {
+fn bisect_right(xs: [Int], value: Int) -> Int Never! {
     lo := 0
     hi := xs.len()
     loop lo < hi {
@@ -543,7 +543,7 @@ pub fn bisect_right(xs: [Int], value: Int) -> Int Never! {
     lo
 }
 
-pub fn insort_left(xs: [Int], value: Int) -> [Int] Never! {
+fn insort_left(xs: [Int], value: Int) -> [Int] Never! {
     i :: bisect_left(xs, value)
     out := [Int]{}
     k := 0
@@ -559,7 +559,7 @@ pub fn insort_left(xs: [Int], value: Int) -> [Int] Never! {
     out
 }
 
-pub fn insort_right(xs: [Int], value: Int) -> [Int] Never! {
+fn insort_right(xs: [Int], value: Int) -> [Int] Never! {
     i :: bisect_right(xs, value)
     out := [Int]{}
     k := 0
@@ -606,9 +606,9 @@ fn layer_from(keys: [String], values: [String]) -> Layer {
     Layer{keys: out_keys, values: out_values}
 }
 
-pub fn ordered_map() -> OrderedMap Never! { OrderedMap{keys: [String]{}, values: [String]{}} }
+fn ordered_map() -> OrderedMap Never! { OrderedMap{keys: [String]{}, values: [String]{}} }
 
-pub fn map_get(m: OrderedMap, key: String) -> String? Never! {
+fn map_get(m: OrderedMap, key: String) -> String? Never! {
     i := 0
     entries := map_entries(m)
     loop i < entries {
@@ -618,7 +618,7 @@ pub fn map_get(m: OrderedMap, key: String) -> String? Never! {
     None
 }
 
-pub fn map_set(m: OrderedMap, key: String, value: String) -> OrderedMap Never! {
+fn map_set(m: OrderedMap, key: String, value: String) -> OrderedMap Never! {
     keys := [String]{}
     values := [String]{}
     found := false
@@ -644,7 +644,7 @@ pub fn map_set(m: OrderedMap, key: String, value: String) -> OrderedMap Never! {
     OrderedMap{keys: keys, values: values}
 }
 
-pub fn map_remove(m: OrderedMap, key: String) -> OrderedMap Never! {
+fn map_remove(m: OrderedMap, key: String) -> OrderedMap Never! {
     keys := [String]{}
     values := [String]{}
     i := 0
@@ -659,7 +659,7 @@ pub fn map_remove(m: OrderedMap, key: String) -> OrderedMap Never! {
     OrderedMap{keys: keys, values: values}
 }
 
-pub fn map_keys(m: OrderedMap) -> [String] Never! {
+fn map_keys(m: OrderedMap) -> [String] Never! {
     out := [String]{}
     i := 0
     entries := map_entries(m)
@@ -670,7 +670,7 @@ pub fn map_keys(m: OrderedMap) -> [String] Never! {
     out
 }
 
-pub fn map_values(m: OrderedMap) -> [String] Never! {
+fn map_values(m: OrderedMap) -> [String] Never! {
     out := [String]{}
     i := 0
     entries := map_entries(m)
@@ -681,19 +681,19 @@ pub fn map_values(m: OrderedMap) -> [String] Never! {
     out
 }
 
-pub fn map_contains(m: OrderedMap, key: String) -> Bool Never! { map_get(m, key) != None }
+fn map_contains(m: OrderedMap, key: String) -> Bool Never! { map_get(m, key) != None }
 
-pub fn map_len(m: OrderedMap) -> Int Never! { map_entries(m) }
+fn map_len(m: OrderedMap) -> Int Never! { map_entries(m) }
 
-pub fn chain() -> Chain Never! { Chain{layers: [Layer]{}} }
+fn chain() -> Chain Never! { Chain{layers: [Layer]{}} }
 
-pub fn chain_push(c: Chain, keys: [String], values: [String]) -> Chain Never! {
+fn chain_push(c: Chain, keys: [String], values: [String]) -> Chain Never! {
     layers := [Layer]{layer_from(keys, values)}
     loop layer in c.layers -> &layers.push(layer_from(layer.keys, layer.values))
     Chain{layers: layers}
 }
 
-pub fn chain_get(c: Chain, key: String) -> String? Never! {
+fn chain_get(c: Chain, key: String) -> String? Never! {
     loop layer in c.layers {
         i := 0
         entries := layer.keys.len()
@@ -706,4 +706,4 @@ pub fn chain_get(c: Chain, key: String) -> String? Never! {
     None
 }
 
-pub fn chain_contains(c: Chain, key: String) -> Bool Never! { chain_get(c, key) != None }
+fn chain_contains(c: Chain, key: String) -> Bool Never! { chain_get(c, key) != None }

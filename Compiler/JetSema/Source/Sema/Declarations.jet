@@ -22,7 +22,7 @@ use jet_foundation.[
     type_with_effective_fn_returns,
 ]
 
-pub fn sema_effective_return_type(return_type: Type?) -> Type Never! {
+fn sema_effective_return_type(return_type: Type?) -> Type Never! {
     if return_type == None -> return Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "Err"}}
     raw :: return_type
     if raw == {
@@ -41,14 +41,14 @@ pub fn sema_effective_return_type(return_type: Type?) -> Type Never! {
 // Ordering, DataTree, and same-type arithmetic), never the implicit failure
 // carrier, for user and derived impls alike (the Rust reference's
 // `uses_raw_protocol_return`).
-pub fn sema_raw_protocol_trait(trait_name: String?) -> Bool Never! {
+fn sema_raw_protocol_trait(trait_name: String?) -> Bool Never! {
     name :: trait_name ?? return false
     name == "Display" || name == "Debug" || name == "Encode" || name == "Decode" || name == "Equatable" || name == "Comparable" || name == "Add" || name == "Sub" || name == "Mul" || name == "Div" || name == "Iterable"
 }
 
 // Whether a trait-impl method keeps its declared return raw (the Rust
 // reference's `uses_raw_protocol_function_return`).
-pub fn sema_raw_protocol_function_return(trait_name: String?, implementation_generated: Bool, func: Func) -> Bool Never! {
+fn sema_raw_protocol_function_return(trait_name: String?, implementation_generated: Bool, func: Func) -> Bool Never! {
     if sema_raw_protocol_trait(trait_name) -> return true
     func.compiler_generated && (implementation_generated || func.state_transition != None)
 }
@@ -56,7 +56,7 @@ pub fn sema_raw_protocol_function_return(trait_name: String?, implementation_gen
 // A callable's checked return: a raw protocol return keeps its declared type
 // (Unit when omitted); every other return projects through the failure rail
 // (the Rust reference's `checked_return_types`).
-pub fn sema_checked_return_type(return_type: Type?, raw_protocol_return: Bool) -> Type Never! {
+fn sema_checked_return_type(return_type: Type?, raw_protocol_return: Bool) -> Type Never! {
     if raw_protocol_return -> return return_type ?? Type.Named{name: "Unit"}
     sema_effective_return_type(return_type)
 }
@@ -64,7 +64,7 @@ pub fn sema_checked_return_type(return_type: Type?, raw_protocol_return: Bool) -
 // The stable provenance of a callable's effective failure route, projected
 // from its written return type (the Rust reference's
 // `FailureContract::from_return_type(..).source()`).
-pub fn sema_failure_contract_source(return_type: Type?) -> String Never! {
+fn sema_failure_contract_source(return_type: Type?) -> String Never! {
     declared :: return_type ?? return "implicit default !Err"
     if declared == {
         .Named(name) -> if name == "Never" -> return "declared Never return"
@@ -176,7 +176,7 @@ fn sema_function_call_metadata(func: Func, owner: SymbolID, fallback_source_file
 // calls bind to its raw scalar ABI return, which codegen emits unwrapped (the
 // Rust reference's `checked_return_types(.., sig.is_extern)` with
 // `is_extern: f.inline_foreign.is_some()`).
-pub fn sema_function_symbol_type(func: Func, raw_protocol_return: Bool, owner: SymbolID, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> Type {
+fn sema_function_symbol_type(func: Func, raw_protocol_return: Bool, owner: SymbolID, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> Type {
     effect_bound :: if func.is_pure -> Val([EffectRowEntry]{}) else -> None
     Type.Fn{
         params: sema_function_param_types(func),

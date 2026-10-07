@@ -775,14 +775,14 @@ fn render_jet(lib: &str, s: &Schema) -> String {
         o.push_str(&format!("pub struct {interface} {{ value: Int }}\n"))
     }
     o.push_str(
-        "#Error\npub enum ComError { WrongApartment InvalidHandle InvalidArgument MemberFailed TypeMismatch Limit }\n\n",
+        "#Error\nenum ComError { WrongApartment InvalidHandle InvalidArgument MemberFailed TypeMismatch Limit }\n\n",
     );
     o.push_str(&format!(
-        "pub fn open() -[FFI.Com]> {} !ComError {{\n    value :: abi.open()\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    return Ok({}.{{ value: value }})\n}}\n\n",
+        "fn open() -[FFI.Com]> {} !ComError {{\n    value :: abi.open()\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    return Ok({}.{{ value: value }})\n}}\n\n",
         s.root_interface, s.root_interface
     ));
     o.push_str(&format!(
-        "pub fn close(^object: {}) -[FFI.Com]> {{\n    abi.close(object.value)\n    if abi.take_error() != 0 {{ panic(\"COM resource close failed\") }}\n}}\n\n",
+        "fn close(^object: {}) -[FFI.Com]> {{\n    abi.close(object.value)\n    if abi.take_error() != 0 {{ panic(\"COM resource close failed\") }}\n}}\n\n",
         s.root_interface
     ));
     for interface in interfaces(s) {
@@ -790,7 +790,7 @@ fn render_jet(lib: &str, s: &Schema) -> String {
             "impl {interface}.Close {{\n    fn close(^self) {{\n        abi.close(self.value)\n        code :: abi.take_error()\n        if code != 0 {{ panic(\"COM resource close failed\") }}\n    }}\n}}\n\n"
         ));
         o.push_str(&format!(
-            "#Unsafe(\"dynamic IDispatch has no type-library contract\")\npub fn dynamic_{interface}(object: {interface}, name: String, args: [DataTree], flags: Int) -[FFI.Com]> DataTree ComError! {{\n    raw :: abi.dynamic(object.value, name, json.to_string(args), flags)\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    value := json.parse(raw) ?? return Err(ComError.TypeMismatch)\n    return Ok(value)\n}}\n\n"
+            "#Unsafe(\"dynamic IDispatch has no type-library contract\")\nfn dynamic_{interface}(object: {interface}, name: String, args: [DataTree], flags: Int) -[FFI.Com]> DataTree ComError! {{\n    raw :: abi.dynamic(object.value, name, json.to_string(args), flags)\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    value := json.parse(raw) ?? return Err(ComError.TypeMismatch)\n    return Ok(value)\n}}\n\n"
         ));
     }
     o.push_str("fn error(code: Int) -[]> ComError Never! {\n    if code == 1 { return ComError.WrongApartment }\n    if code == 2 { return ComError.InvalidHandle }\n    if code == 3 { return ComError.InvalidArgument }\n    if code == 5 { return ComError.TypeMismatch }\n    if code == 6 { return ComError.Limit }\n    return ComError.MemberFailed\n}\n\n");

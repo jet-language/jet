@@ -29,34 +29,34 @@ use jet_foundation.[
 ]
 
 struct MIRPassLoopShape {
-    pub header: MIRBlockID
-    pub body: MIRBlockID?
-    pub exit: MIRBlockID?
-    pub form: MIRLoopForm
-    pub cursor: MIRValueID?
-    pub induction: MIRValueID?
-    pub advance_block: MIRBlockID?
-    pub body_blocks: [MIRBlockID]
-    pub trip_count: Int?
-    pub canonical: Bool
-    pub early_exit: Bool
-    pub span: Span
+    header: MIRBlockID
+    body: MIRBlockID?
+    exit: MIRBlockID?
+    form: MIRLoopForm
+    cursor: MIRValueID?
+    induction: MIRValueID?
+    advance_block: MIRBlockID?
+    body_blocks: [MIRBlockID]
+    trip_count: Int?
+    canonical: Bool
+    early_exit: Bool
+    span: Span
 }
 
 struct MIRPassLoopInduction {
-    pub values: [MIRValueID]
-    pub places: [MIRPlaceID]
-    pub supported: Bool
+    values: [MIRValueID]
+    places: [MIRPlaceID]
+    supported: Bool
 }
 
-struct MIRLoopVectorCounts { pub loops: Int, pub vectors: Int }
+struct MIRLoopVectorCounts { loops: Int, vectors: Int }
 
 struct MIRPassLoopReduction {
-    pub accumulator: MIRPlaceID
-    pub addend: MIRValueID
-    pub seed: MIRValueID
-    pub condition: MIRValueID?
-    pub source_operations: [MIROpID]
+    accumulator: MIRPlaceID
+    addend: MIRValueID
+    seed: MIRValueID
+    condition: MIRValueID?
+    source_operations: [MIROpID]
 }
 
 // Function-wide facts that every loop of one function reads: block and place
@@ -64,12 +64,12 @@ struct MIRPassLoopReduction {
 // constants and dominators. Built once per function with a loop test instead
 // of once (or several times) per loop.
 struct MIRPassLoopAnalysis {
-    pub positions: [U64:Int]
-    pub predecessors: [[Int]]
-    pub places: [U64:Int]
-    pub definitions: [U64:MIRInstruction]
-    pub constants: [U64:MIRConstant]
-    pub dominators: MIRPassDominance
+    positions: [U64:Int]
+    predecessors: [[Int]]
+    places: [U64:Int]
+    definitions: [U64:MIRInstruction]
+    constants: [U64:MIRConstant]
+    dominators: MIRPassDominance
 }
 
 fn mir_pass_loop_analysis(function: MIRFunction) -> MIRPassLoopAnalysis Never! {
@@ -292,9 +292,9 @@ fn mir_pass_loop_induction_value(function: MIRFunction, analysis: MIRPassLoopAna
 
 // One write of the induction value into a place inside the loop body.
 struct MIRPassLoopWriteSite {
-    pub place: MIRPlaceID
-    pub block: MIRBlockID
-    pub index: Int
+    place: MIRPlaceID
+    block: MIRBlockID
+    index: Int
 }
 
 fn mir_pass_loop_induction_model(function: MIRFunction, analysis: MIRPassLoopAnalysis, shape: MIRPassLoopShape) -> MIRPassLoopInduction Never! {
@@ -791,7 +791,7 @@ fn mir_pass_checked_vectors(rows: [MIRVectorFact]) -> [MIRVectorFact] Never! {
     output
 }
 
-struct MIRPassLoopReductionSeed { pub value: MIRValueID, pub operation: MIROpID }
+struct MIRPassLoopReductionSeed { value: MIRValueID, operation: MIROpID }
 
 fn mir_pass_fixed_reduction_candidate(function: MIRFunction, analysis: MIRPassLoopAnalysis, shape: MIRPassLoopShape, reduction: MIRPassLoopReduction) -> MIRFixedReductionFact? {
     lanes :: shape.trip_count ?? return None

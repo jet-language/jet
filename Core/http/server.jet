@@ -12,58 +12,58 @@ use core.http.server as provider
 // `deadline:` options take the payload directly and default to absent, a
 // contract a Jet `T?` parameter can't state without `Val(...)` at every call.
 
-pub fn mux() -> HTTPMux Never! {
+fn mux() -> HTTPMux Never! {
     provider.mux()
 }
 
-pub fn serve_once(addr: String, mux: HTTPMux) HTTPError! {
+fn serve_once(addr: String, mux: HTTPMux) HTTPError! {
     provider.serve_once(addr, mux) ?? return
 }
 
-pub fn serve_once_listener(listener: TCPListener, mux: HTTPMux) HTTPError! {
+fn serve_once_listener(listener: TCPListener, mux: HTTPMux) HTTPError! {
     provider.serve_once_listener(listener, mux) ?? return
 }
 
-pub fn response(status: Int, body: String) -> HTTPResponse Never! {
+fn response(status: Int, body: String) -> HTTPResponse Never! {
     provider.response(status, body)
 }
 
-pub fn json<T: Encode>(status: Int, body: T) -> HTTPResponse Never! {
+fn json<T: Encode>(status: Int, body: T) -> HTTPResponse Never! {
     provider.json<T>(status, body)
 }
 
-pub fn static_file(path: String, content_type: String) -[FS, Net, Time.Wait]> HTTPResponse HTTPError! {
+fn static_file(path: String, content_type: String) -[FS, Net, Time.Wait]> HTTPResponse HTTPError! {
     provider.static_file(path, content_type)
 }
 
-pub fn static_file_range(request: HTTPRequest, path: String, content_type: String) -[FS, Net, Time.Wait]> HTTPResponse HTTPError! {
+fn static_file_range(request: HTTPRequest, path: String, content_type: String) -[FS, Net, Time.Wait]> HTTPResponse HTTPError! {
     provider.static_file_range(request, path, content_type)
 }
 
-pub fn static_files(mux: HTTPMux, prefix: String, root: String) Never! {
+fn static_files(mux: HTTPMux, prefix: String, root: String) Never! {
     provider.static_files(mux, prefix, root)
 }
 
-pub fn tls(cert: String, key: String) -> HTTPServerTLS Never! {
+fn tls(cert: String, key: String) -> HTTPServerTLS Never! {
     provider.tls(cert, key)
 }
 
-pub fn sse(body: String) -> HTTPResponse Never! {
+fn sse(body: String) -> HTTPResponse Never! {
     provider.sse(body)
 }
 
-pub fn cors_policy(origins: [String]) -> HTTPCorsPolicy HTTPError! {
+fn cors_policy(origins: [String]) -> HTTPCorsPolicy HTTPError! {
     provider.cors_policy(origins)
 }
 
-pub fn cors(mux: HTTPMux, policy: HTTPCorsPolicy) Never! {
+fn cors(mux: HTTPMux, policy: HTTPCorsPolicy) Never! {
     provider.cors(mux, policy)
 }
 
-pub fn access_log(request: HTTPRequest, status: Int) -> String Never! {
+fn access_log(request: HTTPRequest, status: Int) -> String Never! {
     provider.access_log(request, status)
 }
 
-pub fn request_id(mux: HTTPMux) Never! {
+fn request_id(mux: HTTPMux) Never! {
     provider.request_id(mux)
 }

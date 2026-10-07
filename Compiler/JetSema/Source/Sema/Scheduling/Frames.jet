@@ -44,18 +44,18 @@ use jet_foundation.[
     derivation_record_with_payload,
 ]
 
-pub struct SemaFrameScheduleBuild {
-    pub schedule: FrameSchedule?
-    pub error: String?
+struct SemaFrameScheduleBuild {
+    schedule: FrameSchedule?
+    error: String?
 }
 
-pub struct SemaFrameScheduleFacts {
-    pub schedule: FrameSchedule?
-    pub explanation: String?
-    pub derivation_record: DerivationRecord?
-    pub derivation: DerivationRef?
-    pub mir_derivation: MIRDerivationRef?
-    pub error: String?
+struct SemaFrameScheduleFacts {
+    schedule: FrameSchedule?
+    explanation: String?
+    derivation_record: DerivationRecord?
+    derivation: DerivationRef?
+    mir_derivation: MIRDerivationRef?
+    error: String?
 }
 
 struct FrameEventIndex { token: String, index: Int }
@@ -67,14 +67,14 @@ struct FrameUse {
     temporary: Bool
     layouts: [ResourceLayout?]
 }
-pub struct SemaFrameOperationFact {
-    pub operation: FrameOperation?
-    pub error: String?
+struct SemaFrameOperationFact {
+    operation: FrameOperation?
+    error: String?
 }
 
 // Project the registered Core access contract onto checked argument places.
 // The caller supplies the canonical call name and source byte index.
-pub fn sema_frame_core_call_operation(record: CoreCallRecord, name: String, args: [CallArg], source_index: Int) -> SemaFrameOperationFact Never! {
+fn sema_frame_core_call_operation(record: CoreCallRecord, name: String, args: [CallArg], source_index: Int) -> SemaFrameOperationFact Never! {
     accesses := [ResourceAccess]{}
     loop access in record.frame_accesses {
         if access.argument < 0 || access.argument >= args.len() -> next
@@ -119,7 +119,7 @@ pub fn sema_frame_core_call_operation(record: CoreCallRecord, name: String, args
 
 // Checked ordinary-call parameter conventions take precedence; elaborated
 // argument conventions are the fallback for omitted signature slots.
-pub fn sema_frame_checked_call_operation(name: String, args: [CallArg], signature_accesses: [AccessConvention]?, extern_or_unknown: Bool, external_effect: Bool, source_index: Int) -> SemaFrameOperationFact Never! {
+fn sema_frame_checked_call_operation(name: String, args: [CallArg], signature_accesses: [AccessConvention]?, extern_or_unknown: Bool, external_effect: Bool, source_index: Int) -> SemaFrameOperationFact Never! {
     accesses := [ResourceAccess]{}
     loop (index, argument) in args {
         identity :: sema_frame_resource_identity(argument.expr) ?? next
@@ -144,7 +144,7 @@ pub fn sema_frame_checked_call_operation(name: String, args: [CallArg], signatur
     }
 }
 
-pub fn sema_frame_resource_identity(expression: Expr) -> ResourceIdentity? {
+fn sema_frame_resource_identity(expression: Expr) -> ResourceIdentity? {
     if expression == {
         .Paren(inner, _) | .Place(inner, _, _) | .Copy(inner, _) -> return sema_frame_resource_identity(inner)
         .Ident(name, _) -> return Val(ResourceIdentity.Named{name: name})
@@ -175,21 +175,21 @@ fn sema_frame_access_convention(convention: AccessConvention) -> ResourceAccessM
 }
 
 
-pub struct SemaFrameDMABinding {
-    pub transfer_name: String
-    pub profile_id: String
-    pub channel: String
-    pub buffer_name: String
-    pub token: String
+struct SemaFrameDMABinding {
+    transfer_name: String
+    profile_id: String
+    channel: String
+    buffer_name: String
+    token: String
 }
 
-pub struct SemaFrameHardwareCall {
-    pub operation: FrameOperation?
-    pub dma_start: SemaFrameDMABinding?
+struct SemaFrameHardwareCall {
+    operation: FrameOperation?
+    dma_start: SemaFrameDMABinding?
 }
 
 // Only selected target-machine register facts can create an MMIO resource.
-pub fn sema_frame_hardware_register_operation(receiver: Expr, method: String, source_index: Int, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> FrameOperation? {
+fn sema_frame_hardware_register_operation(receiver: Expr, method: String, source_index: Int, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> FrameOperation? {
     if method != "read" && method != "write" && method != "set" && method != "clear" -> return None
     path :: sema_hardware_board_path(receiver, environment, scopes) ?? return None
     if path.segments.len() < 3 -> return None
@@ -209,13 +209,13 @@ pub fn sema_frame_hardware_register_operation(receiver: Expr, method: String, so
 }
 
 // Bind the exact checked start token to the source local that receives it.
-pub fn sema_frame_hardware_dma_bind_start(start: SemaFrameDMABinding, transfer_name: String) -> SemaFrameDMABinding Never! {
+fn sema_frame_hardware_dma_bind_start(start: SemaFrameDMABinding, transfer_name: String) -> SemaFrameDMABinding Never! {
     result := start
     result.transfer_name = transfer_name
     result
 }
 
-pub fn sema_frame_hardware_dma_start(receiver: Expr, args: [CallArg], source_index: Int, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> SemaFrameHardwareCall Never! {
+fn sema_frame_hardware_dma_start(receiver: Expr, args: [CallArg], source_index: Int, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> SemaFrameHardwareCall Never! {
     is_dma_receiver := if receiver == {
         .Ident(name, _) -> name == "dma"
         else -> false
@@ -241,7 +241,7 @@ pub fn sema_frame_hardware_dma_start(receiver: Expr, args: [CallArg], source_ind
     }
 }
 
-pub fn sema_frame_hardware_dma_wait(receiver: Expr, source_index: Int, bindings: [SemaFrameDMABinding]) -> FrameOperation? {
+fn sema_frame_hardware_dma_wait(receiver: Expr, source_index: Int, bindings: [SemaFrameDMABinding]) -> FrameOperation? {
     transfer_name :: sema_hardware_expr_name(receiver) ?? return None
     binding :: loop item in bindings {
         if item.transfer_name == transfer_name -> break item
@@ -256,7 +256,7 @@ pub fn sema_frame_hardware_dma_wait(receiver: Expr, source_index: Int, bindings:
     })
 }
 
-pub fn sema_frame_schedule_build(operations: [FrameOperation]) -> SemaFrameScheduleBuild {
+fn sema_frame_schedule_build(operations: [FrameOperation]) -> SemaFrameScheduleBuild {
     validation := sema_frame_schedule_validate(operations)
     if validation != None -> return SemaFrameScheduleBuild{schedule: None, error: validation}
     events_result := sema_frame_schedule_events(operations)
@@ -315,7 +315,7 @@ pub fn sema_frame_schedule_build(operations: [FrameOperation]) -> SemaFrameSched
     }
 }
 
-pub fn sema_frame_schedule_produce(operations: [FrameOperation], environment: SemaScopeEnvironment, source_bytes: String, lambda_start: Int) -> SemaFrameScheduleFacts {
+fn sema_frame_schedule_produce(operations: [FrameOperation], environment: SemaScopeEnvironment, source_bytes: String, lambda_start: Int) -> SemaFrameScheduleFacts {
     if operations.len() == 0 -> return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, mir_derivation: None, error: None}
     built := sema_frame_schedule_build(operations)
     if built.schedule == None -> return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, mir_derivation: None, error: built.error}

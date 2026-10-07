@@ -9,7 +9,7 @@
 // built-in method. Parameter and result types may name two placeholders:
 // `Self` is the (untagged) receiver type and `T` is the `Atomic<T>` scalar.
 
-pub enum BuiltinMethodReceiver {
+enum BuiltinMethodReceiver {
     String
     Bytes
     // Int, Float, Bool, Char, the fixed widths, F32 and inline ranges.
@@ -32,7 +32,7 @@ pub enum BuiltinMethodReceiver {
     AtomicInt
 }
 
-pub enum BuiltinMethodLowering {
+enum BuiltinMethodLowering {
     Builtin(operation: TBuiltinOp)
     // `s.slice(a, b)`: TBuiltinOp.Slice carrying the receiver line.
     StringSlice
@@ -56,14 +56,14 @@ pub enum BuiltinMethodLowering {
     Atomic
 }
 
-pub struct BuiltinMethodRow {
-    pub receiver: BuiltinMethodReceiver
-    pub name: String
-    pub parameters: [Type]
-    pub result: Type
+struct BuiltinMethodRow {
+    receiver: BuiltinMethodReceiver
+    name: String
+    parameters: [Type]
+    result: Type
     // Write rows mutate the receiver in place and record `Mem`.
-    pub access: AccessConvention
-    pub lowering: BuiltinMethodLowering
+    access: AccessConvention
+    lowering: BuiltinMethodLowering
 }
 
 fn builtin_method(receiver: BuiltinMethodReceiver, name: String, parameters: [Type], result: Type, lowering: BuiltinMethodLowering) -> BuiltinMethodRow Never! {
@@ -340,7 +340,7 @@ fn builtin_method_strip_tags(ty: Type) -> Type Never! {
 }
 
 // The `Atomic<T>` scalar a receiver carries, if it is a lock-free atomic.
-pub fn builtin_method_atomic_scalar(receiver: Type) -> Type? {
+fn builtin_method_atomic_scalar(receiver: Type) -> Type? {
     if builtin_method_strip_tags(receiver) == {
         .Apply(name, args) -> {
             if name == "Atomic" && args.len() == 1 && jet_target_layout_atomic_scalar_type(args[0]) -> return Val(args[0])
@@ -384,7 +384,7 @@ fn builtin_method_receiver_accepts(family: BuiltinMethodReceiver, receiver: Type
 }
 
 // The one lookup: the row for this receiver, method and argument count.
-pub fn builtin_method_row(receiver: Type, method: String, argument_count: Int) -> BuiltinMethodRow? {
+fn builtin_method_row(receiver: Type, method: String, argument_count: Int) -> BuiltinMethodRow? {
     builtin_method_row_in(BUILTIN_METHOD_ROWS, receiver, method, argument_count)
 }
 
@@ -397,7 +397,7 @@ fn builtin_method_row_in(rows: [BuiltinMethodRow], receiver: Type, method: Strin
 }
 
 // Replace the `Self` and `T` placeholders with the receiver's types.
-pub fn builtin_method_bind(ty: Type, receiver: Type) -> Type Never! {
+fn builtin_method_bind(ty: Type, receiver: Type) -> Type Never! {
     self_type := builtin_method_strip_tags(receiver)
     if ty == {
         .Named(name) -> {

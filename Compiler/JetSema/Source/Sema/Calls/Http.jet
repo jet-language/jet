@@ -38,8 +38,8 @@ use jet_foundation.[
 ]
 
 struct SemaHTTPStaticTarget {
-    pub namespace: String
-    pub type_name: String
+    namespace: String
+    type_name: String
 }
 
 fn sema_call_http_nominal_leaf(ty: Type) -> String Never! {
@@ -248,7 +248,7 @@ fn sema_call_http_static_result(ok: Type) -> Type Never! {
     Type.Result{ok: ok, err: Type.Named{name: "HTTPError"}}
 }
 
-pub fn sema_call_try_http_static(
+fn sema_call_try_http_static(
     receiver: Expr,
     method: String,
     owner_type_args: [Type],
@@ -579,7 +579,7 @@ fn sema_call_http_middleware(receiver: Expr, receiver_value: TExpr, args: [CallA
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, &diagnostics)}
 }
  
-pub fn sema_call_try_http_method(
+fn sema_call_try_http_method(
     receiver: Expr,
     receiver_value: TExpr,
     method: String,
@@ -921,7 +921,7 @@ fn sema_call_http_sync(record: CoreCallRecord, args: [CallArg], type_args: [Type
     SemaDirectSpecialCheck{handled: true, value: Val(value)}
 }
 
-pub fn sema_call_try_http_core_call(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
+fn sema_call_try_http_core_call(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
     if (record.module_name == "app" || record.module_name == "core.web") && record.member == "sync" -> return sema_call_http_sync(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if record.module_name == "core.web" && record.member == "form" -> return sema_call_http_web_form(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     SemaDirectSpecialCheck{handled: false, value: None}

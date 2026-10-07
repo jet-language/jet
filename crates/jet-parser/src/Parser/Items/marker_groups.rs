@@ -1942,10 +1942,10 @@ impl<'a> Parser<'a> {
         while matches!(self.peek().kind, TokKind::Semi) {
             self.bump();
         }
-        let is_pub = matches!(self.peek().kind, TokKind::KwPub);
-        if is_pub {
-            self.bump();
+        if matches!(self.peek().kind, TokKind::KwPub) {
+            self.reject_retired_pub();
         }
+        let is_pub = true;
         match &self.peek().kind {
                 TokKind::KwStruct => self.struct_def_after_pub(is_pub).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def_after_pub(is_pub, false).map(Item::Enum),

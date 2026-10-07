@@ -140,7 +140,7 @@ fn expiring_secret_loan_can_call_cross_file_read_helpers() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("helper.jet"),
-        "use core.crypto as crypto\npub fn inspect_key(key: crypto.SigningKey) -> crypto.VerifyKey { return key.public_key() }\n",
+        "use core.crypto as crypto\nfn inspect_key(key: crypto.SigningKey) -> crypto.VerifyKey { return key.public_key() }\n",
     )
     .unwrap();
     let src = r#"
@@ -168,7 +168,7 @@ fn run() {
 
     std::fs::write(
         dir.join("fake.jet"),
-        "pub struct SigningKey {}\npub fn inspect_key(key: SigningKey) -> Bool { return true }\n",
+        "struct SigningKey {}\nfn inspect_key(key: SigningKey) -> Bool { return true }\n",
     )
     .unwrap();
     let hostile = r#"

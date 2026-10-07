@@ -1365,38 +1365,38 @@ fn jet_codegen_lower_math_swizzle_assign(builder: &JetCodegenBuilder, program: J
 
 // Scalar row chains retain catalog order and duplicate candidates without
 // copying owning nominal, impl, or trait declaration records at each query.
-pub struct JetCodegenHookNominalRow {
-    pub module_index: Int
-    pub nominal_index: Int
-    pub next_owner: Int
-    pub next_trait: Int
+struct JetCodegenHookNominalRow {
+    module_index: Int
+    nominal_index: Int
+    next_owner: Int
+    next_trait: Int
 }
 
-pub struct JetCodegenHookImplMethodRow {
-    pub module_index: Int
-    pub implementation_index: Int
-    pub method_index: Int
-    pub next_exact: Int
-    pub next_fallback: Int
+struct JetCodegenHookImplMethodRow {
+    module_index: Int
+    implementation_index: Int
+    method_index: Int
+    next_exact: Int
+    next_fallback: Int
 }
 
-pub struct JetCodegenHookTraitMethodRow {
-    pub module_index: Int
-    pub definition_index: Int
-    pub method_index: Int
-    pub next: Int
+struct JetCodegenHookTraitMethodRow {
+    module_index: Int
+    definition_index: Int
+    method_index: Int
+    next: Int
 }
 
-pub struct JetCodegenHookIndex {
-    pub module_positions: [String:Int]
-    pub nominal_rows: [JetCodegenHookNominalRow]
-    pub nominal_by_owner: [String:Int]
-    pub traits_by_name: [String:Int]
-    pub implementation_rows: [JetCodegenHookImplMethodRow]
-    pub exact_methods: [String:Int]
-    pub fallback_methods: [String:Int]
-    pub trait_method_rows: [JetCodegenHookTraitMethodRow]
-    pub trait_methods: [String:Int]
+struct JetCodegenHookIndex {
+    module_positions: [String:Int]
+    nominal_rows: [JetCodegenHookNominalRow]
+    nominal_by_owner: [String:Int]
+    traits_by_name: [String:Int]
+    implementation_rows: [JetCodegenHookImplMethodRow]
+    exact_methods: [String:Int]
+    fallback_methods: [String:Int]
+    trait_method_rows: [JetCodegenHookTraitMethodRow]
+    trait_methods: [String:Int]
 }
 
 // Rust: none (Jet-only pass)
@@ -1497,9 +1497,9 @@ fn jet_codegen_hook_index(modules: [SemaGraphModuleResult]) -> JetCodegenHookInd
 }
 
 struct JetCodegenIndexHookTraitMethod {
-    pub symbol: SymbolID
-    pub trait_key: String
-    pub method: TTraitMethod
+    symbol: SymbolID
+    trait_key: String
+    method: TTraitMethod
 }
 
 fn jet_codegen_index_hook_owner_name(ty: Type) -> String? {
@@ -3210,20 +3210,20 @@ fn jet_codegen_lower_split_view(builder: &JetCodegenBuilder, program: JetCodegen
 // scope of its own, so its bindings answer at the end of the enclosing scope.
 // Keyed by jet_codegen_element_let_key.
 struct JetCodegenLetStability {
-    pub disturbed: Int
-    pub last: [String:Int]
-    pub pinned: [String:Bool]
-    pub pending: [JetCodegenLetCandidate]
-    pub stable: [String:Bool]
+    disturbed: Int
+    last: [String:Int]
+    pinned: [String:Bool]
+    pending: [JetCodegenLetCandidate]
+    stable: [String:Bool]
 }
 
 // A binding (`name :: <place rooted at root>`) recorded at change count
 // `start`.
 struct JetCodegenLetCandidate {
-    pub key: String
-    pub name: String
-    pub root: String
-    pub start: Int
+    key: String
+    name: String
+    root: String
+    start: Int
 }
 
 // How an expression position uses a local it names: read in place (an index

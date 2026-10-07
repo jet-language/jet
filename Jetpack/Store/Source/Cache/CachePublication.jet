@@ -14,25 +14,25 @@ STORE_CACHE_RECEIPT_TTL_SECS :: prep { 86400 }
 STORE_CACHE_RECEIPT_MAGIC :: prep { "jet-cache-receipt-v1" }
 
 // One completed cache transfer.
-pub struct CacheTransferReport {
-    pub role: String
-    pub mirror: String
-    pub entry: String
-    pub output_hash: String
+struct CacheTransferReport {
+    role: String
+    mirror: String
+    entry: String
+    output_hash: String
     // Jetpack's digest of the canonical NAR bytes.
-    pub nar_hash: String
+    nar_hash: String
     // Public signature identity, never secret credential material.
-    pub signed_fingerprint: String
+    signed_fingerprint: String
     // Provenance identities carried in the signed cache admission decision.
-    pub builder: String
-    pub provenance: String
+    builder: String
+    provenance: String
     // The signed admission receipt accepted for this transfer, when the
     // endpoint uses Jetpack's native cache receipt protocol.
-    pub witness: String?
-    pub receipt_version: Int?
-    pub receipt_expires_unix: Int?
-    pub credential_provider: String?
-    pub bytes: Int
+    witness: String?
+    receipt_version: Int?
+    receipt_expires_unix: Int?
+    credential_provider: String?
+    bytes: Int
 
     // `jet.status/v1` for a cache transfer operation.
     fn json(self, operation: String) -> String Never! {
@@ -42,11 +42,11 @@ pub struct CacheTransferReport {
 }
 
 // Summary of a local cache publication tree prepared from Hangar.
-pub struct CacheStageReport {
-    pub role: String
-    pub destination: String
-    pub entries: Int
-    pub bytes: Int
+struct CacheStageReport {
+    role: String
+    destination: String
+    entries: Int
+    bytes: Int
 
     fn json(self, operation: String) -> String Never! {
         fields :: StatusFields.new().with("operation", DataTree.Text(operation)).with("role", DataTree.Text(self.role)).with("destination", DataTree.Text(self.destination)).with("entries", DataTree.Int(self.entries)).with("bytes", DataTree.Int(self.bytes))
@@ -57,18 +57,18 @@ pub struct CacheStageReport {
 // Read-only trust state exposed by package explanation: the host's accepted
 // admission pin, not a new cache decision path. Transfer still performs the
 // full signature, provenance, freshness, and output checks.
-pub struct CacheAdmission {
-    pub role: String
-    pub decision: CacheAdmissionDecision
-    pub builder: String
-    pub provenance: String
-    pub receipt_version: Int?
-    pub receipt_expires_unix: Int?
-    pub reason: String
+struct CacheAdmission {
+    role: String
+    decision: CacheAdmissionDecision
+    builder: String
+    provenance: String
+    receipt_version: Int?
+    receipt_expires_unix: Int?
+    reason: String
 }
 
 // The explain view of one role's admission for one output.
-pub enum CacheAdmissionDecision {
+enum CacheAdmissionDecision {
     Accepted
     Expired
     NotAccepted
@@ -110,7 +110,7 @@ struct CacheReceiptPin {
 
 // Publish one reproducible Hangar entry to the first bound mirror that
 // accepts it. Every mirror failure is reported if none does.
-pub fn store_publish_cache_entry(verification: &StoreVerification, roots: HangarRoots, target: String, role: String) -> CacheTransferReport StoreError! {
+fn store_publish_cache_entry(verification: &StoreVerification, roots: HangarRoots, target: String, role: String) -> CacheTransferReport StoreError! {
     binding :: store_read_cache_binding(roots, role)
     if !binding.allow_write -> return Err(StoreError.InvalidData("cache binding is read-only; publishing needs a write grant"))
     entry :: store_cache_select_entry(&verification, roots, target)
@@ -175,7 +175,7 @@ pub fn store_publish_cache_entry(verification: &StoreVerification, roots: Hangar
 // receipt, and HMAC signing as a normal publish, but the endpoint is always
 // a local directory. No network mirror is contacted and the host role secret
 // stays under the Jetpack root.
-pub fn store_stage_cache_from_hangar(verification: &StoreVerification, roots: HangarRoots, destination: String, role: String) -> CacheStageReport StoreError! {
+fn store_stage_cache_from_hangar(verification: &StoreVerification, roots: HangarRoots, destination: String, role: String) -> CacheStageReport StoreError! {
     binding :: store_read_cache_binding(roots, role)
     if !binding.allow_write -> return Err(StoreError.InvalidData("cache binding is read-only; staging needs a write grant"))
     target :: store_cache_absolutize_host_path(destination)
@@ -209,7 +209,7 @@ pub fn store_stage_cache_from_hangar(verification: &StoreVerification, roots: Ha
 
 // Find a verifying hit for `target` on the role's mirrors, in order, without
 // restoring it.
-pub fn store_verify_cache_transfer(verification: &StoreVerification, roots: HangarRoots, target: String, role: String) -> CacheTransferReport StoreError! {
+fn store_verify_cache_transfer(verification: &StoreVerification, roots: HangarRoots, target: String, role: String) -> CacheTransferReport StoreError! {
     binding :: store_read_cache_binding(roots, role)
     expected :: store_cache_select_entry(&verification, roots, target)
     store_cache_ensure_reproducible_for_shared_cache(roots, expected)
@@ -276,7 +276,7 @@ pub fn store_verify_cache_transfer(verification: &StoreVerification, roots: Hang
 
 // Restore `target` from the first verifying mirror into `destination`, which
 // must not exist yet. A failed restore removes its partial output.
-pub fn store_substitute_cache_entry(verification: &StoreVerification, roots: HangarRoots, target: String, role: String, destination: String) -> CacheTransferReport StoreError! {
+fn store_substitute_cache_entry(verification: &StoreVerification, roots: HangarRoots, target: String, role: String, destination: String) -> CacheTransferReport StoreError! {
     binding :: store_read_cache_binding(roots, role)
     if store_archive_lstat_ok(destination) != None -> return Err(StoreError.InvalidData("cache substitution destination already exists"))
     store_cache_validate_path_components(destination)
@@ -592,7 +592,7 @@ fn store_cache_report_for(binding: CacheBinding, mirror: String, info: NarInfo, 
 // Project persisted cache admission pins without contacting a mirror or
 // changing trust state. Explain is observational; the transfer boundary is
 // the only path that admits bytes.
-pub fn store_cache_admissions_for_explain(roots: HangarRoots, entry: StoreEntry) -> [CacheAdmission] StoreError! {
+fn store_cache_admissions_for_explain(roots: HangarRoots, entry: StoreEntry) -> [CacheAdmission] StoreError! {
     bindings :: store_list_cache_bindings(roots)
     provenance_record :: store_cache_provenance_for_entry(entry) ?? {
         reason :: "cache provenance is not admissible: {err.message()}"

@@ -5,7 +5,7 @@
 // Publish a verified, signed NAR and narinfo into a local cache directory.
 // `info.url` is the relative NAR location; the narinfo is stored beside it
 // with a `.narinfo` suffix. Existing bytes must match exactly.
-pub fn store_publish_local(cache: String, info: NarInfo, nar: [U8], key: TrustKey) -> (nar_path: String, info_path: String) StoreError! {
+fn store_publish_local(cache: String, info: NarInfo, nar: [U8], key: TrustKey) -> (nar_path: String, info_path: String) StoreError! {
     signed :: info.signed(key)
     store_verify_nar_info_bytes(signed, nar)
     nar_path :: files.join(cache, signed.url)
@@ -17,7 +17,7 @@ pub fn store_publish_local(cache: String, info: NarInfo, nar: [U8], key: TrustKe
 
 // Substitute a local NAR only after narinfo trust and byte identity checks.
 // A corrupt or conflicting destination is never overwritten.
-pub fn store_substitute_local(nar_path: String, info_path: String, destination: String, key: TrustKey) -> NarStats StoreError! {
+fn store_substitute_local(nar_path: String, info_path: String, destination: String, key: TrustKey) -> NarStats StoreError! {
     info_text :: String.from_bytes(store_nar_read_bounded(info_path, STORE_NAR_MAX_INFO_BYTES)) ?? return Err(store_nar_invalid("narinfo is not UTF-8"))
     info :: NarInfo.parse(info_text)
     info.verify(key)

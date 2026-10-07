@@ -35,24 +35,24 @@ fn safe_limits() -> EncodingLimits Never! {
 // `Unsupported` rather than silently coerced. Canonical encode
 // (`to_bytes_canonical`) uses shortest integer forms and sorted map keys by
 // encoded byte order.
-pub struct CBOROptions {
-    pub max_depth: Int
-    pub max_items: Int
-    pub max_bytes: Int
-    pub require_canonical: Bool
+struct CBOROptions {
+    max_depth: Int
+    max_items: Int
+    max_bytes: Int
+    require_canonical: Bool
 }
 
-pub struct CBORReader {
-    pub bytes: [U8]
-    pub index: Int
+struct CBORReader {
+    bytes: [U8]
+    index: Int
 }
 
-pub struct CBORWriter {
-    pub parts: [U8]
+struct CBORWriter {
+    parts: [U8]
 }
 
 #Error
-pub enum CBORErrorKind {
+enum CBORErrorKind {
     Syntax
     Truncated
     Unsupported
@@ -63,37 +63,37 @@ pub enum CBORErrorKind {
 }
 
 #Error
-pub struct CBORError {
-    pub kind: CBORErrorKind
-    pub byte_offset: Int
-    pub path: String
-    pub reason: String
+struct CBORError {
+    kind: CBORErrorKind
+    byte_offset: Int
+    path: String
+    reason: String
 }
 
-pub fn parse(data: [U8]) -> DataTree EncodingError! { decode(data) }
+fn parse(data: [U8]) -> DataTree EncodingError! { decode(data) }
 
-pub fn decode(data: [U8]) -> DataTree EncodingError! { decode_cbor(data) }
+fn decode(data: [U8]) -> DataTree EncodingError! { decode_cbor(data) }
 
-pub fn to_bytes(value: DataTree) -> [U8] Never! { encode_cbor(value, false) }
+fn to_bytes(value: DataTree) -> [U8] Never! { encode_cbor(value, false) }
 
-pub fn to_bytes_canonical(value: DataTree) -> [U8] Never! { encode_cbor(value, true) }
+fn to_bytes_canonical(value: DataTree) -> [U8] Never! { encode_cbor(value, true) }
 
-pub fn reader(data: [U8]) -> CBORReader Never! { {bytes: data, index: 0} }
+fn reader(data: [U8]) -> CBORReader Never! { {bytes: data, index: 0} }
 
-pub fn writer() -> CBORWriter Never! { {parts: [U8]{}} }
+fn writer() -> CBORWriter Never! { {parts: [U8]{}} }
 
 impl CBORWriter {
-    pub fn write(&self, value: DataTree) Never! {
+    fn write(&self, value: DataTree) Never! {
         chunk :: encode_cbor(value, false)
         loop b in chunk -> &self.parts.push(b)
     }
 
-    pub fn write_canonical(&self, value: DataTree) Never! {
+    fn write_canonical(&self, value: DataTree) Never! {
         chunk :: encode_cbor(value, true)
         loop b in chunk -> &self.parts.push(b)
     }
 
-    pub fn to_bytes(self) -> [U8] Never! { self.parts }
+    fn to_bytes(self) -> [U8] Never! { self.parts }
 }
 
 fn decode_cbor(data: [U8]) -> DataTree EncodingError! {

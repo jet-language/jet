@@ -24,7 +24,7 @@ use jet_foundation.[
     MIRProgram,
 ]
 
-pub enum JetCLIRuntimeText {
+enum JetCLIRuntimeText {
     // The prefix to write before the emitted program.
     Text(text: String)
     // The report that stopped the build.
@@ -39,7 +39,7 @@ fn jet_cli_runtime_unreadable(what: String, color: Bool) -> JetCLIRuntimeText Ne
 // the development devtools policy (Rust `jet test` runs a non-release
 // profile); every other artifact here is the `--release` build, whose
 // profile inspects `local` (main.rs `ProfileConfig::release`).
-pub fn jet_cli_runtime_text(file: String, program: MIRProgram, color: Bool) -[Env, FS]> JetCLIRuntimeText Never! {
+fn jet_cli_runtime_text(file: String, program: MIRProgram, color: Bool) -[Env, FS]> JetCLIRuntimeText Never! {
     artifact :: jet_rust_runtime_artifact(program) ?? return JetCLIRuntimeText.Failed{output: jet_cli_ice("the MIR program of `{file}` has no unique Rust artifact")}
     toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return jet_cli_runtime_unreadable("`{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set, so the runtime sources can't be found", color)
     sources := [JetRustRuntimeSource]{}

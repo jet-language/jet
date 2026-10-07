@@ -15,7 +15,7 @@ use core as core
 // Fixture, golden, world, fake-data, and suite state remain host-owned;
 // callback comparison and bounded history generation stay portable Jet code.
 
-pub fn assert_equal(comparison: TestComparison) -> Bool Never! {
+fn assert_equal(comparison: TestComparison) -> Bool Never! {
     // The typed provider also requires recorded samples; the source twin can
     // validate only the scalar proof fields exposed by the declaration.
     comparison.status == "matched" && !comparison.universal_proof && comparison.first_difference < 0
@@ -23,7 +23,7 @@ pub fn assert_equal(comparison: TestComparison) -> Bool Never! {
 
 /// D-CALLBACK-ERR1=A: both callbacks share one failure type `E`, which the
 /// comparison passes up; two callbacks that cannot fail make it `Never`.
-pub fn compare<E>(cases: [DataTree], reference: fn(DataTree) -> DataTree E!, candidate: fn(DataTree) -> DataTree E!, relation: String) -> TestComparison E! {
+fn compare<E>(cases: [DataTree], reference: fn(DataTree) -> DataTree E!, candidate: fn(DataTree) -> DataTree E!, relation: String) -> TestComparison E! {
     normalized := relation
     if normalized.len() == 0 -> normalized = "typed_equality"
     if normalized == "ordered_effects" || normalized == "typed_failure" {
@@ -87,31 +87,31 @@ fn terminal_comparison(relation: String, reason: String) -> TestComparison {
 }
 
 /// Compare or create a host-managed snapshot for `name`.
-pub fn snap(name: String, value: String) -[FS]> Bool Never! { core.testing.snap(name, value) }
+fn snap(name: String, value: String) -[FS]> Bool Never! { core.testing.snap(name, value) }
 
-pub fn golden(name: String, value: String) -[FS]> Bool Never! {
+fn golden(name: String, value: String) -[FS]> Bool Never! {
     core.testing.golden(name, value)
 }
 
-pub fn fixture(name: String) -[FS]> String Never! { core.testing.fixture(name) }
+fn fixture(name: String) -[FS]> String Never! { core.testing.fixture(name) }
 
-pub fn temp_dir(prefix: String) -[FS]> String Never! { core.testing.temp_dir(prefix) }
+fn temp_dir(prefix: String) -[FS]> String Never! { core.testing.temp_dir(prefix) }
 
-pub fn corpus(glob: String) -[FS]> [String] Never! { core.testing.corpus(glob) }
+fn corpus(glob: String) -[FS]> [String] Never! { core.testing.corpus(glob) }
 
 /// The test-facing spelling of the deterministic Prelude `Clock` built by `Clock.new`.
-pub fn fake_clock(unix_ms: Int) -> Clock Never! { Clock.new(unix_ms) }
+fn fake_clock(unix_ms: Int) -> Clock Never! { Clock.new(unix_ms) }
 
 /// A deterministic Prelude `Rng` seeded by the provider constructor.
-pub fn fake_rng(seed: Int) -> RNG Never! { core.testing.fake_rng(seed) }
+fn fake_rng(seed: Int) -> RNG Never! { core.testing.fake_rng(seed) }
 
 /// The deterministic Prelude `Fake` data capability built by the provider constructor.
-pub fn fake_data(seed: Int) -> Fake Never! { core.testing.fake_data(seed) }
+fn fake_data(seed: Int) -> Fake Never! { core.testing.fake_data(seed) }
 
 /// The Prelude `TestSuite` carrying the current harness iteration and result.
-pub fn test_suite() -> TestSuite Never! { core.testing.test_suite() }
+fn test_suite() -> TestSuite Never! { core.testing.test_suite() }
 
-pub fn world(body: fn(DeterministicWorld)) Never! { core.testing.world(body) }
+fn world(body: fn(DeterministicWorld)) Never! { core.testing.world(body) }
 
-pub fn status(comparison: TestComparison) -> String Never! { comparison.status }
+fn status(comparison: TestComparison) -> String Never! { comparison.status }
 

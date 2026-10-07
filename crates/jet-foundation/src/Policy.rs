@@ -2156,7 +2156,6 @@ mod tests {
         assert!(!super::rule_allows("Codable", super::RuleSite::Function));
         assert!(!super::rule_allows("Doc", super::RuleSite::Block));
         assert!(!super::rule_allows("Region", super::RuleSite::File));
-        assert!(!super::rule_allows("PubFile", super::RuleSite::Field));
     }
 
     #[test]
@@ -2242,7 +2241,7 @@ mod tests {
         for name in ["Pre", "Post", "allow"] {
             assert!(row(name).repeatable, "{name} must be repeatable");
         }
-        for name in ["Inline", "Codable", "Job", "PubFile", "NoPrelude"] {
+        for name in ["Inline", "Codable", "Job", "NoPrelude"] {
             assert!(!row(name).repeatable, "{name} must not be repeatable");
         }
 

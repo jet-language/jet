@@ -122,12 +122,12 @@ fn cross_module_same_name_effects_keep_qualified_rows() {
     fs::create_dir_all(&root).unwrap();
     fs::write(
         root.join("left.jet"),
-        "fn helper() { print(\"left\") }\npub fn same() { helper() }\n",
+        "fn helper() { print(\"left\") }\nfn same() { helper() }\n",
     )
     .unwrap();
     fs::write(
         root.join("right.jet"),
-        "fn helper() {}\npub fn same() { helper() }\n",
+        "fn helper() {}\nfn same() { helper() }\n",
     )
     .unwrap();
     let entry = root.join("main.jet");
@@ -928,7 +928,7 @@ fn dependency_effect_declaration_joins_the_package_view() {
     .unwrap();
     fs::write(
         dependency.join("audit.jet"),
-        "effect Log.Audit\npub fn record() -[Log.Audit]> {}\n",
+        "effect Log.Audit\nfn record() -[Log.Audit]> {}\n",
     )
     .unwrap();
     fs::write(
@@ -1361,7 +1361,7 @@ extern rust "std" {
     #Undo(undo_mutate) fn mutate(value: Int) -> Int = "std::convert::identity"
 }
 fn undo_mutate(value: Int) { print("left") }
-pub fn exercise() {
+fn exercise() {
     #Transact(tx) {
         mutate(1)
         return
@@ -1377,7 +1377,7 @@ extern rust "std" {
     #Undo(undo_mutate) fn mutate(value: Int) -> Int = "std::convert::identity"
 }
 fn undo_mutate(value: Int) { print("right") }
-pub fn exercise() {
+fn exercise() {
     #Transact(tx) {
         mutate(2)
         return

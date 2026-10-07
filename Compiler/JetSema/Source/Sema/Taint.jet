@@ -31,65 +31,65 @@ SEMA_TAINT_ORIGIN_PROCESS :: prep { "$origin.process" }
 SEMA_TAINT_ORIGIN_FFI :: prep { "$origin.ffi" }
 
 
-pub struct SemaTaintTagFact {
-    pub name: String
-    pub module_identity: String
-    pub deny: [String]
-    pub from: [String]
-    pub span: Span
-    pub visibility: Int
+struct SemaTaintTagFact {
+    name: String
+    module_identity: String
+    deny: [String]
+    from: [String]
+    span: Span
+    visibility: Int
 }
 
-pub struct SemaTaintTagList {
-    pub tags: [String]
+struct SemaTaintTagList {
+    tags: [String]
 }
 
-pub struct SemaTaintCallableFact {
-    pub key: String
-    pub module_identity: String
-    pub owner: String
-    pub name: String
-    pub parameter_tags: [SemaTaintTagList]
-    pub return_tags: [String]
-    pub return_type: Type?
-    pub scrub_tag: String?
-    pub ffi_origin: Bool
-    pub span: Span
+struct SemaTaintCallableFact {
+    key: String
+    module_identity: String
+    owner: String
+    name: String
+    parameter_tags: [SemaTaintTagList]
+    return_tags: [String]
+    return_type: Type?
+    scrub_tag: String?
+    ffi_origin: Bool
+    span: Span
 }
 
-pub struct SemaTaintFieldFact {
-    pub module_identity: String
-    pub owner_type: String
-    pub field: String
-    pub tags: [String]
-    pub type_name: String?
-    pub span: Span
+struct SemaTaintFieldFact {
+    module_identity: String
+    owner_type: String
+    field: String
+    tags: [String]
+    type_name: String?
+    span: Span
 }
 
-pub struct SemaTaintBindingFact {
-    pub name: String
-    pub tags: [String]
-    pub type_name: String?
+struct SemaTaintBindingFact {
+    name: String
+    tags: [String]
+    type_name: String?
 }
 
-pub struct SemaTaintFlowValue {
-    pub tags: [String]
-    pub type_name: String?
+struct SemaTaintFlowValue {
+    tags: [String]
+    type_name: String?
 }
 
-pub struct SemaTaintFlowResult {
-    pub value: SemaTaintFlowValue
-    pub bindings: [SemaTaintBindingFact]
-    pub diagnostics: [Diagnostic]
-    pub complete: Bool
+struct SemaTaintFlowResult {
+    value: SemaTaintFlowValue
+    bindings: [SemaTaintBindingFact]
+    diagnostics: [Diagnostic]
+    complete: Bool
 }
 
-pub struct SemaTaintResult {
-    pub tag_facts: [SemaTaintTagFact]
-    pub callable_facts: [SemaTaintCallableFact]
-    pub field_facts: [SemaTaintFieldFact]
-    pub diagnostics: [Diagnostic]
-    pub complete: Bool
+struct SemaTaintResult {
+    tag_facts: [SemaTaintTagFact]
+    callable_facts: [SemaTaintCallableFact]
+    field_facts: [SemaTaintFieldFact]
+    diagnostics: [Diagnostic]
+    complete: Bool
 }
 
 struct SemaTaintCatalog {
@@ -208,7 +208,7 @@ fn sema_taint_builtin_tag(name: String) -> SemaTaintTagFact? {
     None
 }
 
-pub fn sema_taint_builtin_tag_names() -> [String] Never! {
+fn sema_taint_builtin_tag_names() -> [String] Never! {
     [String]{"Input", "PII", "Secret", "Credential"}
 }
 
@@ -266,7 +266,7 @@ fn sema_taint_edit_distance(left: String, right: String) -> Int Never! {
     previous[b.len()]
 }
 
-pub fn sema_taint_closest(name: String, candidates: [String]) -> String? {
+fn sema_taint_closest(name: String, candidates: [String]) -> String? {
     best := ""
     best_distance := 4
     ambiguous := false
@@ -492,7 +492,7 @@ fn sema_taint_validate_tag_graph(tag_value: String, module_identity: String, gra
     sema_taint_collect_tag_declarations(&catalog, graph, &temporary)
     sema_taint_validate_tag_in_catalog(tag_value, module_identity, catalog, graph, span, &diagnostics)
 }
-pub fn sema_taint_validate_tag(tag_value: String, env: SemaScopeEnvironment, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_taint_validate_tag(tag_value: String, env: SemaScopeEnvironment, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if env.registration_graph == {
         .Val(value) -> return sema_taint_validate_tag_graph(tag_value, env.module_identity, value, span, &diagnostics)
         .None -> {}
@@ -1439,7 +1439,7 @@ fn sema_taint_check_body_graph(body: [Stmt], module_identity: String, owner_key:
 
 
 
-pub fn sema_taint_check_graph(graph: SemaRegistrationGraph, existing_diagnostics: [Diagnostic]) -> SemaTaintResult {
+fn sema_taint_check_graph(graph: SemaRegistrationGraph, existing_diagnostics: [Diagnostic]) -> SemaTaintResult {
     catalog := sema_taint_catalog_init()
     diagnostics := existing_diagnostics
     sema_taint_collect_items(&catalog, graph)

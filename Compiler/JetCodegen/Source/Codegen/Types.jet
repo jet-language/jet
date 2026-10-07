@@ -57,10 +57,10 @@ use jet_sema.[
 ]
 
 struct JetCodegenNominalIdentity {
-    pub module_identity: String
-    pub name: String
-    pub key: String
-    pub qualified_name: String
+    module_identity: String
+    name: String
+    key: String
+    qualified_name: String
 }
 
 fn jet_codegen_is_type_parameter(names: [String], name: String) -> Bool Never! {
@@ -85,8 +85,8 @@ fn jet_codegen_nominal_type_key(module_identity: String, nominal: SemaRegistrati
 // A declared trait as a checked name can resolve to it: its module and its
 // canonical key.
 struct JetCodegenTraitCandidate {
-    pub module_identity: String
-    pub canonical: String
+    module_identity: String
+    canonical: String
 }
 
 // Every declared trait under each spelling that names it
@@ -94,7 +94,7 @@ struct JetCodegenTraitCandidate {
 // resolving a checked trait name is one lookup instead of a scan that formats
 // every module's trait spellings. Built once per program lowering.
 struct JetCodegenTraitNames {
-    pub candidates: [String:[JetCodegenTraitCandidate]]
+    candidates: [String:[JetCodegenTraitCandidate]]
 }
 
 // The distinct spellings that name a trait declared as `definition_name` with
@@ -466,7 +466,7 @@ fn jet_codegen_type_instance_id(ty: Type, modules: [SemaGraphModuleResult], modu
     mir_type_id(type_mir_identity_key(ty))
 }
 
-pub fn jet_codegen_lower_type(ty: Type) -> MIRType Never! {
+fn jet_codegen_lower_type(ty: Type) -> MIRType Never! {
     jet_codegen_lower_type_with_modules(ty, [SemaGraphModuleResult]{}, "", [String]{})
 }
 
@@ -652,18 +652,18 @@ fn jet_codegen_lower_view_provenance_map(provenance: ViewProvenanceMap?) -> [MIR
 }
 
 struct JetCodegenResolvedField {
-    pub module_identity: String
-    pub nominal_name: String
-    pub field_name: String
+    module_identity: String
+    nominal_name: String
+    field_name: String
 }
 
 // One registered nominal field, keyed in the program index by its field
 // symbol key so each checked TFieldRef resolves without rescanning every
 // module's nominals.
 struct JetCodegenFieldSymbolRow {
-    pub owner_key: String
-    pub name: String
-    pub resolved: JetCodegenResolvedField
+    owner_key: String
+    name: String
+    resolved: JetCodegenResolvedField
 }
 
 // Built once per lowered program; rows keep module, nominal and field order.
@@ -730,8 +730,8 @@ fn jet_codegen_range_record_field_id(member: String) -> MIRFieldID Never! {
 // One compiler-owned Core record: its bare canonical name and the Core record
 // oracle's field vocabulary, in row order.
 struct JetCodegenCompilerOwnedRecord {
-    pub name: String
-    pub fields: [String]
+    name: String
+    fields: [String]
 }
 
 // Compiler-owned Core records (`ProcessReceipt`, `IOContext`, ...) are checked

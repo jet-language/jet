@@ -305,7 +305,7 @@ fn sema_coverage_three_state_missing(ok: Type, shapes: [TPatternShape], keys: [S
 
 // Port of the Rust checker's `check_pattern_coverage_complete`: reports E0307
 // for an else-less table whose checked pattern conditions leave a case open.
-pub fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
+fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
     table :: sema_coverage_table(conditions) ?? return
     // D-PARSESTR1 / D-BINPAT1 (Rust `report_refutable_pattern_without_else`):
     // a text or byte arm can always fail to match, so the table needs `else`.
@@ -363,7 +363,7 @@ fn sema_coverage_if_let_value(pattern: TPattern, subject: TExpr) -> TExpr Never!
 // The value form arrives as a nested `if` chain sharing one span and ending in
 // `NoElse` (checked as `Never("no else arm")`). Collect its checked arm
 // conditions, or None when the chain has a real `else` value.
-pub fn sema_coverage_noelse_chain_conditions(head_condition: TExpr, else_value: TExpr, span: Span) -> [TExpr]? {
+fn sema_coverage_noelse_chain_conditions(head_condition: TExpr, else_value: TExpr, span: Span) -> [TExpr]? {
     conditions := [TExpr]{head_condition}
     current := else_value
     loop {
@@ -388,7 +388,7 @@ pub fn sema_coverage_noelse_chain_conditions(head_condition: TExpr, else_value: 
 
 // True when this `if` level heads (or continues) an else-less dispatch chain:
 // the nested levels share its span and the last one ends in `NoElse`.
-pub fn sema_coverage_is_noelse_chain(else_body: [Stmt], else_value: Expr, span: Span) -> Bool Never! {
+fn sema_coverage_is_noelse_chain(else_body: [Stmt], else_value: Expr, span: Span) -> Bool Never! {
     if else_body.len() != 0 -> return false
     if else_value == {
         .NoElse(_) -> true
@@ -399,7 +399,7 @@ pub fn sema_coverage_is_noelse_chain(else_body: [Stmt], else_value: Expr, span: 
 
 // The statement form lowers the same chain to nested `TStmt.If` levels.
 // Walk the source chain beside it to collect the checked arm conditions.
-pub fn sema_coverage_noelse_statement_conditions(source: Expr, lowered: TStmt) -> [TExpr]? {
+fn sema_coverage_noelse_statement_conditions(source: Expr, lowered: TStmt) -> [TExpr]? {
     conditions := [TExpr]{}
     current_source := source
     current_lowered := lowered
@@ -441,7 +441,7 @@ fn sema_coverage_else_arm(environment: SemaScopeEnvironment, span: Span) -> Else
 }
 
 // True when this `if` level belongs to a dispatch table with an `else` arm.
-pub fn sema_coverage_is_else_table(environment: SemaScopeEnvironment, span: Span) -> Bool {
+fn sema_coverage_is_else_table(environment: SemaScopeEnvironment, span: Span) -> Bool {
     sema_coverage_else_arm(environment, span) != None
 }
 
@@ -461,7 +461,7 @@ fn sema_coverage_is_closed_set(ty: Type, environment: SemaScopeEnvironment) -> B
 
 // The checked arm conditions of a value table with an `else` arm: every level
 // that shares the table's span, stopping at the `else` value.
-pub fn sema_coverage_else_chain_conditions(head_condition: TExpr, else_value: TExpr, span: Span) -> [TExpr] {
+fn sema_coverage_else_chain_conditions(head_condition: TExpr, else_value: TExpr, span: Span) -> [TExpr] {
     conditions := [TExpr]{head_condition}
     current := else_value
     loop {
@@ -481,7 +481,7 @@ pub fn sema_coverage_else_chain_conditions(head_condition: TExpr, else_value: TE
 }
 
 // The statement form of the same table, walked beside its lowered levels.
-pub fn sema_coverage_else_statement_conditions(source: Expr, lowered: TStmt) -> [TExpr] {
+fn sema_coverage_else_statement_conditions(source: Expr, lowered: TStmt) -> [TExpr] {
     conditions := [TExpr]{}
     current_source := source
     current_lowered := lowered
@@ -513,7 +513,7 @@ pub fn sema_coverage_else_statement_conditions(source: Expr, lowered: TStmt) -> 
 // L0303 (#3716): an `else` after pattern arms that already cover a closed set
 // can never run, and a case added later would fall into it silently instead
 // of raising E0307. Report the arm with the Safe edit that deletes it.
-pub fn sema_coverage_check_redundant_else(conditions: [TExpr], span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
+fn sema_coverage_check_redundant_else(conditions: [TExpr], span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
     arm :: sema_coverage_else_arm(environment, span) ?? return
     table :: sema_coverage_table(conditions) ?? return
     subject_ty :: sema_pattern_unwrap_tags(table.subject.ty)

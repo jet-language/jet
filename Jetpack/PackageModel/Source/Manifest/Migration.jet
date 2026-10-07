@@ -33,14 +33,14 @@ fn pkg_token_kind_at(tokens: [Token], index: Int) -> Int Never! {
 }
 
 // The retired rewrite result: the new text and the number of edits.
-pub struct RetiredRewrite {
-    pub text: String
-    pub count: Int
+struct RetiredRewrite {
+    text: String
+    count: Int
 }
 
 // Rewrite the retired `plugin` package target to `sandbox`: unquoted values
 // in a `packages:` block and `target: plugin` fields.
-pub fn pkg_rewrite_retired_targets(text: String) -> RetiredRewrite Never! {
+fn pkg_rewrite_retired_targets(text: String) -> RetiredRewrite Never! {
     tokens :: pkg_manifest_tokens(text) ?? return RetiredRewrite{text: text, count: 0}
     ranges := [EditSpan]{}
     loop index in 0..<tokens.len() {
@@ -186,7 +186,7 @@ fn pkg_migrated_string_literal(literal: String, value: String, replacement: Stri
 
 // Rewrite the retired `.{ … }` record head (D-LIT-DOT1): `.Kind.{` becomes
 // `.Kind{`.
-pub fn pkg_rewrite_retired_record_heads(text: String) -> RetiredRewrite Never! {
+fn pkg_rewrite_retired_record_heads(text: String) -> RetiredRewrite Never! {
     edits := [SourceEdit]{}
     loop span in pkg_retired_record_head_spans(text) -> &edits.push(SourceEdit{start: span.start, end: span.end, replacement: ""})
     RetiredRewrite{text: pkg_apply_source_edits(text, edits), count: edits.len()}
@@ -194,14 +194,14 @@ pub fn pkg_rewrite_retired_record_heads(text: String) -> RetiredRewrite Never! {
 
 // Why a Package/Config source cannot be formatted (Rust `String` errors).
 #Error
-pub struct PackageFormatError {
-    pub message: String
+struct PackageFormatError {
+    message: String
 }
 
 // Format one canonical Package or Config source file after migrating
 // retired spellings and validating it with the same model that loads it.
 // Files with comments fail closed.
-pub fn pkg_format_source(input: String, origin: String) -> String PackageFormatError! {
+fn pkg_format_source(input: String, origin: String) -> String PackageFormatError! {
     text :: pkg_rewrite_retired_record_heads(pkg_rewrite_retired_dependency_refs(pkg_rewrite_retired_targets(input).text).text).text
     stripped :: pkg_strip_comments(text)
     trimmed :: stripped.trim()

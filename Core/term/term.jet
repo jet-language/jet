@@ -16,28 +16,28 @@ use core as core
 // a TTY unless `style_force` is used. Width and height fall back to 80x24.
 //
 // ANSI SGR parsing is Jet. Byte IO is host (fd 0/1/2).
-pub struct Reader {
-    pub fd: Int
+struct Reader {
+    fd: Int
 }
 
-pub struct Writer {
-    pub fd: Int
+struct Writer {
+    fd: Int
 }
 
-pub struct StdinHandle {
-    pub fd: Int
+struct StdinHandle {
+    fd: Int
 }
 
-pub struct Stdout {
-    pub fd: Int
+struct Stdout {
+    fd: Int
 }
 
-pub struct Stderr {
-    pub fd: Int
+struct Stderr {
+    fd: Int
 }
 
 // D-TERM1: the one `Key` value `read_key()` answers on every tier.
-pub enum Key {
+enum Key {
     Char(Char)
     Enter
     Escape
@@ -52,60 +52,60 @@ pub enum Key {
     Ctrl(Char)
     Unknown
 }
-pub fn print(text: String) Never! -[IO, Time.Wait]> {
+fn print(text: String) Never! -[IO, Time.Wait]> {
     out :: core.term.stdout()
     &out.write_line(text).drop("stdout write")
 }
 
-pub fn eprint(text: String) Never! -[IO]> { core.term.eprint(text) }
+fn eprint(text: String) Never! -[IO]> { core.term.eprint(text) }
 
-pub fn input(prompt: String{""}) -[IO, Time.Wait]> String IOError! {
+fn input(prompt: String{""}) -[IO, Time.Wait]> String IOError! {
     core.term.input(prompt)
 }
 
-pub fn input_secret(prompt: String) -[IO, Time.Wait]> String IOError! {
+fn input_secret(prompt: String) -[IO, Time.Wait]> String IOError! {
     core.term.input_secret(prompt)
 }
 
-pub fn read_all_input() -[IO, Time.Wait]> String IOError! { core.term.read_all_input() }
+fn read_all_input() -[IO, Time.Wait]> String IOError! { core.term.read_all_input() }
 
-pub fn readline() -[IO, Time.Wait]> String IOError! { core.term.readline() }
+fn readline() -[IO, Time.Wait]> String IOError! { core.term.readline() }
 
-pub fn read_until(delimiter: String) -[IO, Time.Wait]> String IOError! {
+fn read_until(delimiter: String) -[IO, Time.Wait]> String IOError! {
     if delimiter.len() == 0 -> return Err(term_input_error("read_until", delimiter, "delimiter must not be empty"))
     core.term.read_until(delimiter)
 }
 
-pub fn binread(path: String) -[IO, Time.Wait]> [U8] IOError! {
+fn binread(path: String) -[IO, Time.Wait]> [U8] IOError! {
     core.term.binread(path)
 }
 
-pub fn binwrite(path: String, bytes: [U8]) IOError! -[IO, Time.Wait]> {
+fn binwrite(path: String, bytes: [U8]) IOError! -[IO, Time.Wait]> {
     core.term.binwrite(path, bytes)
 }
 
-pub fn confirm(prompt: String) -[IO, Time.Wait]> Bool Never! { core.term.confirm(prompt) }
+fn confirm(prompt: String) -[IO, Time.Wait]> Bool Never! { core.term.confirm(prompt) }
 
-pub fn choose(prompt: String, options: [String]) -[IO, Time.Wait]> String IOError! {
+fn choose(prompt: String, options: [String]) -[IO, Time.Wait]> String IOError! {
     if options.len() == 0 -> return Err(term_input_error("choose", prompt, "choose needs at least one item"))
     core.term.choose(prompt, options)
 }
 
-pub fn stdin() -> StdinHandle Never! { core.term.stdin() }
+fn stdin() -> StdinHandle Never! { core.term.stdin() }
 
-pub fn stdout() -> Stdout Never! { core.term.stdout() }
+fn stdout() -> Stdout Never! { core.term.stdout() }
 
-pub fn stderr() -> Stderr Never! { core.term.stderr() }
+fn stderr() -> Stderr Never! { core.term.stderr() }
 
-pub fn buffered() -> StdinHandle Never! { core.term.buffered() }
+fn buffered() -> StdinHandle Never! { core.term.buffered() }
 
-pub fn terminal_width() -[IO]> Int Never! { core.term.terminal_width() }
+fn terminal_width() -[IO]> Int Never! { core.term.terminal_width() }
 
-pub fn terminal_height() -[IO]> Int Never! { core.term.terminal_height() }
+fn terminal_height() -[IO]> Int Never! { core.term.terminal_height() }
 
-pub fn style(style: String, text: String) -[IO]> String Never! { core.term.style(style, text) }
+fn style(style: String, text: String) -[IO]> String Never! { core.term.style(style, text) }
 
-pub fn style_force(style: String, text: String) -> String Never! {
+fn style_force(style: String, text: String) -> String Never! {
     codes :: sgr(style)
     if codes.len() == 0 -> return ~text
     esc :: String.from_bytes([U8]{27}) ?? ""
@@ -113,13 +113,13 @@ pub fn style_force(style: String, text: String) -> String Never! {
 }
 
 
-pub fn read_key() -[IO, Time.Wait]> Key Never! { core.term.read_key() }
+fn read_key() -[IO, Time.Wait]> Key Never! { core.term.read_key() }
 
-pub struct WinSize {
-    pub w: Int
-    pub h: Int
+struct WinSize {
+    w: Int
+    h: Int
 }
-pub fn progress(label: String) IOError! -[IO, Time.Wait]> { core.term.progress(label) }
+fn progress(label: String) IOError! -[IO, Time.Wait]> { core.term.progress(label) }
 
 fn term_input_error(operation: String, resource: String, cause: String) -> IOError Never! {
     IOError.InvalidInput(IOContext{

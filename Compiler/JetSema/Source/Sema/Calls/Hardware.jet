@@ -29,34 +29,34 @@ use jet_foundation.[
     expr_span,
 ]
 
-pub struct SemaHardwareBoardPath {
-    pub profile_id: String
-    pub segments: [String]
+struct SemaHardwareBoardPath {
+    profile_id: String
+    segments: [String]
 }
 
 // A start produces this explicit side fact. The caller that binds the returned
 // transfer records its local symbol identity; wait consumes that exact fact
 // rather than guessing from the opaque TIR handle type.
-pub struct SemaHardwareDMATransferFact {
-    pub transfer_name: String
-    pub transfer_key: String
-    pub profile_id: String
-    pub channel: String
-    pub buffer_name: String
-    pub buffer_key: String
-    pub buffer_type: Type
-    pub start_span: Span
-    pub scope_frame: Int
-    pub buffer_frame: Int
+struct SemaHardwareDMATransferFact {
+    transfer_name: String
+    transfer_key: String
+    profile_id: String
+    channel: String
+    buffer_name: String
+    buffer_key: String
+    buffer_type: Type
+    start_span: Span
+    scope_frame: Int
+    buffer_frame: Int
 }
 
-pub struct SemaHardwareMethodCheck {
-    pub check: SemaMethodSpecialCheck
-    pub hardware_use: MIRTargetHardwareUse
-    pub dma_transfer: SemaHardwareDMATransferFact?
+struct SemaHardwareMethodCheck {
+    check: SemaMethodSpecialCheck
+    hardware_use: MIRTargetHardwareUse
+    dma_transfer: SemaHardwareDMATransferFact?
 }
 
-pub fn sema_hardware_empty_use() -> MIRTargetHardwareUse Never! {
+fn sema_hardware_empty_use() -> MIRTargetHardwareUse Never! {
     MIRTargetHardwareUse{
         register_accesses: [MIRTargetRegisterAccessFact]{},
         interrupt_handlers: [MIRTargetInterruptHandlerFact]{},
@@ -65,7 +65,7 @@ pub fn sema_hardware_empty_use() -> MIRTargetHardwareUse Never! {
     }
 }
 
-pub fn sema_hardware_use_snapshot(source: MIRTargetHardwareUse) -> MIRTargetHardwareUse Never! {
+fn sema_hardware_use_snapshot(source: MIRTargetHardwareUse) -> MIRTargetHardwareUse Never! {
     result := sema_hardware_empty_use()
     loop fact in source.register_accesses -> &result.register_accesses.push(fact)
     loop fact in source.interrupt_handlers -> &result.interrupt_handlers.push(fact)
@@ -74,7 +74,7 @@ pub fn sema_hardware_use_snapshot(source: MIRTargetHardwareUse) -> MIRTargetHard
     result
 }
 
-pub fn sema_hardware_use_merge(destination: &MIRTargetHardwareUse, source: MIRTargetHardwareUse) Never! {
+fn sema_hardware_use_merge(destination: &MIRTargetHardwareUse, source: MIRTargetHardwareUse) Never! {
     loop fact in source.register_accesses -> &destination.register_accesses.push(fact)
     loop fact in source.interrupt_handlers -> &destination.interrupt_handlers.push(fact)
     loop fact in source.dma_operations -> &destination.dma_operations.push(fact)
@@ -99,7 +99,7 @@ fn sema_hardware_place_frame(expression: Expr, scopes: SemaScopeTable) -> Int? {
     Val(scopes.bindings[index].frame)
 }
 
-pub fn sema_hardware_transfer_fact_for_expr(expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> SemaHardwareDMATransferFact? {
+fn sema_hardware_transfer_fact_for_expr(expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> SemaHardwareDMATransferFact? {
     key :: sema_hardware_place_key(expression, scopes, &state) ?? return None
     loop fact in scopes.hardware_definite_transfers {
         if fact.transfer_key == key -> return Val(fact)
@@ -107,7 +107,7 @@ pub fn sema_hardware_transfer_fact_for_expr(expression: Expr, scopes: SemaScopeT
     None
 }
 
-pub fn sema_hardware_note_cpu_use(expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_hardware_note_cpu_use(expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     key :: sema_hardware_place_key(expression, scopes, &state) ?? return true
     loop transfer in scopes.hardware_transfers {
         if transfer.buffer_key != key -> next
@@ -144,7 +144,7 @@ fn sema_hardware_expr_is_dma_start(expression: Expr) -> Bool Never! {
     }
 }
 
-pub fn sema_hardware_bind_pending_dma_transfer(init: Expr, symbol: Symbol, scopes: &SemaScopeTable) -> Bool {
+fn sema_hardware_bind_pending_dma_transfer(init: Expr, symbol: Symbol, scopes: &SemaScopeTable) -> Bool {
     if !sema_hardware_expr_is_dma_start(init) -> return false
     init_span := expr_span(init)
     found := -1
@@ -164,7 +164,7 @@ pub fn sema_hardware_bind_pending_dma_transfer(init: Expr, symbol: Symbol, scope
     true
 }
 
-pub fn sema_hardware_consume_dma_transfer(transfer_key: String, scopes: &SemaScopeTable) Never! {
+fn sema_hardware_consume_dma_transfer(transfer_key: String, scopes: &SemaScopeTable) Never! {
     index := scopes.hardware_transfers.len() - 1
     loop index >= 0 {
         if scopes.hardware_transfers[index].transfer_key == transfer_key {
@@ -231,7 +231,7 @@ fn sema_hardware_import_module(graph: SemaRegistrationGraph, binding: SemaRegist
 
 // Resolve only an active, unshadowed module import whose canonical target is a
 // board profile. An arbitrary same-spelled local name is not a hardware path.
-pub fn sema_hardware_board_path(expression: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> SemaHardwareBoardPath? {
+fn sema_hardware_board_path(expression: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> SemaHardwareBoardPath? {
     path :: sema_hardware_expr_path(expression) ?? return None
     if path.len() < 1 -> return None
     graph_option :: environment.registration_graph
@@ -256,7 +256,7 @@ pub fn sema_hardware_board_path(expression: Expr, environment: SemaScopeEnvironm
 }
 
 
-pub fn sema_hardware_bind_dma_transfer_identity(fact: ^SemaHardwareDMATransferFact, name: String, key: String, scope_frame: Int) -> SemaHardwareDMATransferFact Never! {
+fn sema_hardware_bind_dma_transfer_identity(fact: ^SemaHardwareDMATransferFact, name: String, key: String, scope_frame: Int) -> SemaHardwareDMATransferFact Never! {
     updated := fact
     updated.transfer_name = name
     updated.transfer_key = key
@@ -265,7 +265,7 @@ pub fn sema_hardware_bind_dma_transfer_identity(fact: ^SemaHardwareDMATransferFa
 }
 // A general expression visitor appends this only while the buffer is in-flight;
 // TargetMachine then rejects CPU access until the device returns ownership.
-pub fn sema_hardware_dma_buffer_use_fact(buffer_name: String) -> MIRTargetDMAOperationFact Never! {
+fn sema_hardware_dma_buffer_use_fact(buffer_name: String) -> MIRTargetDMAOperationFact Never! {
     MIRTargetDMAOperationFact{
         channel: "",
         buffer: buffer_name,
@@ -437,7 +437,7 @@ fn sema_hardware_method_receiver_name(ty: Type) -> String Never! {
 
 // Explicit DMA transfer metadata is an input because the opaque language-level
 // `__JetDmaTransfer` type alone cannot prove profile/channel/buffer ownership.
-pub fn sema_call_try_hardware_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], transfer_fact: SemaHardwareDMATransferFact?, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaHardwareMethodCheck? {
+fn sema_call_try_hardware_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], transfer_fact: SemaHardwareDMATransferFact?, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaHardwareMethodCheck? {
     is_dma_receiver := if receiver == {
         .Ident(name, _) -> name == "dma"
         else -> false
@@ -449,7 +449,7 @@ pub fn sema_call_try_hardware_method(receiver: Expr, receiver_value: TExpr, meth
     sema_hardware_register_method(receiver, receiver_value, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
-pub fn sema_call_try_hardware_pre_receiver(receiver: Expr, method: String, args: [CallArg], transfer_fact: SemaHardwareDMATransferFact?, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaHardwareMethodCheck? {
+fn sema_call_try_hardware_pre_receiver(receiver: Expr, method: String, args: [CallArg], transfer_fact: SemaHardwareDMATransferFact?, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaHardwareMethodCheck? {
     is_dma_receiver := if receiver == {
         .Ident(name, _) -> name == "dma"
         else -> false

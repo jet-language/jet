@@ -52,7 +52,7 @@ fn jet_codegen_lower_email_envelope(builder: &JetCodegenBuilder, program: JetCod
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.ReadPlace{place: envelope_place})
 }
 
-pub fn jet_codegen_lower_email_method(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, operation: THandleOp, args: [TExpr]) -> MIRValueID {
+fn jet_codegen_lower_email_method(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, operation: THandleOp, args: [TExpr]) -> MIRValueID {
     method :: if operation == {.EmailMethod(name) -> name else -> panic("checked Email lowering received a non-Email method")}
     owner := jet_codegen_handle_type_without_tags(receiver.ty)
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)

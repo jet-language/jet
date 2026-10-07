@@ -2347,7 +2347,7 @@ fn imported_call_uses_the_same_place_access_rule() {
     fs::create_dir_all(&root).unwrap();
     fs::write(
         root.join("helper.jet"),
-        "pub fn both(a: &Int, b: Int) { a += b }\n",
+        "fn both(a: &Int, b: Int) { a += b }\n",
     )
     .unwrap();
     let entry = root.join("main.jet");
@@ -2411,7 +2411,7 @@ fn run() {
 "#,
         r#"
 module helper {
-    pub fn both(a: &Int, b: Int) { a += b }
+    fn both(a: &Int, b: Int) { a += b }
 }
 fn run() {
     value := 1
@@ -3807,7 +3807,7 @@ fn run() {
 fn inline_module_write_argument_conflicts_with_live_view_once() {
     let src = r#"
 module edit {
-    pub fn touch(values: &[Int]) {
+    fn touch(values: &[Int]) {
         &values.push(9)
     }
 }

@@ -14,8 +14,8 @@ STATUS_SCHEMA :: prep { "jet.status/v1" }
 
 // The report model's one failure carrier; the text is the Rust error string.
 #Error
-pub struct ReportError {
-    pub message: String
+struct ReportError {
+    message: String
 
     fn new(message: String) -> ReportError Never! {
         ReportError{message: message}
@@ -65,7 +65,7 @@ fn report_texts(values: [String]) -> DataTree Never! {
 
 // Why a diagnostic has no machine-applicable edit. The next action is part
 // of the value, never inferred from the kind.
-pub enum NoFixReasonKind {
+enum NoFixReasonKind {
     Behavior
     Design
     Ambiguous
@@ -89,9 +89,9 @@ pub enum NoFixReasonKind {
 }
 
 // A reviewed action for a diagnostic that cannot carry an automatic edit.
-pub struct NoFixReason {
-    pub kind: NoFixReasonKind
-    pub next: String
+struct NoFixReason {
+    kind: NoFixReasonKind
+    next: String
 
     fn new(kind: NoFixReasonKind, next: String) -> NoFixReason Never! {
         NoFixReason.try_new(kind, next) ?? panic("NoFixReason::new requires a reviewed next action")
@@ -110,14 +110,14 @@ pub struct NoFixReason {
 }
 
 // One named status field.
-pub struct StatusField {
-    pub name: String
-    pub value: DataTree
+struct StatusField {
+    name: String
+    value: DataTree
 }
 
 // Ordered, typed action-specific fields for a status object.
-pub struct StatusFields {
-    pub entries: [StatusField]
+struct StatusFields {
+    entries: [StatusField]
 
     fn new() -> StatusFields Never! {
         StatusFields{entries: [StatusField]{}}
@@ -159,7 +159,7 @@ pub struct StatusFields {
 }
 
 // Rust `StatusValue::parse`: a JSON text as a status field value.
-pub fn report_status_value_parse(text: String) -> DataTree ReportError! {
+fn report_status_value_parse(text: String) -> DataTree ReportError! {
     if json.parse(text) == {
         .Ok(tree) -> Ok(tree)
         .Err(error) -> Err(ReportError.new(error.reason))
@@ -167,18 +167,18 @@ pub fn report_status_value_parse(text: String) -> DataTree ReportError! {
 }
 
 // Rust `StatusValue::object`.
-pub fn report_status_object(fields: StatusFields) -> DataTree Never! {
+fn report_status_object(fields: StatusFields) -> DataTree Never! {
     object := [String: DataTree]{}
     loop entry in fields.entries -> object[entry.name] = entry.value
     DataTree.Object(object)
 }
 
 // The one machine status object for every command `--json` result.
-pub struct StatusEnvelope {
-    pub action: String
-    pub ok: Bool
-    pub reports: [ReportEnvelope]
-    pub fields: StatusFields
+struct StatusEnvelope {
+    action: String
+    ok: Bool
+    reports: [ReportEnvelope]
+    fields: StatusFields
 
     fn new(action: String, ok: Bool) -> StatusEnvelope Never! {
         StatusEnvelope{action: action, ok: ok, reports: [ReportEnvelope]{}, fields: StatusFields.new()}
@@ -248,19 +248,19 @@ pub struct StatusEnvelope {
 
 // Render a typed status envelope; reserved keys fail through the one
 // validator every producer shares.
-pub fn report_render_status(action: String, ok: Bool, fields: StatusFields) -> String Never! {
+fn report_render_status(action: String, ok: Bool, fields: StatusFields) -> String Never! {
     envelope :: StatusEnvelope.new(action, ok).try_with_fields(fields) ?? panic("status fields must not duplicate envelope fields")
     envelope.json()
 }
 
 // Render one status object with typed report children.
-pub fn report_render_status_with_reports(action: String, ok: Bool, reports: [ReportEnvelope], fields: StatusFields) -> String Never! {
+fn report_render_status_with_reports(action: String, ok: Bool, reports: [ReportEnvelope], fields: StatusFields) -> String Never! {
     envelope :: StatusEnvelope.new(action, ok).with_reports(reports).try_with_fields(fields) ?? panic("status fields must not duplicate envelope fields")
     envelope.json()
 }
 
 // D-REPORT-FIXGRADE1=D: closed safety classes for machine edits.
-pub enum FixSafety {
+enum FixSafety {
     Formatting
     BehaviorPreserving
     APIChanging
@@ -286,7 +286,7 @@ pub enum FixSafety {
 }
 
 // D-REPORT-FIXGRADE1=D: the promise attached to a machine-applicable edit.
-pub enum FixApplicability {
+enum FixApplicability {
     // Applying every edit with this grade is proved to make report progress.
     Safe
     // Useful to show, but a person must choose whether to apply it.
@@ -303,8 +303,8 @@ pub enum FixApplicability {
 // A source identity a report consumer can open from its process. Relative
 // disk paths become absolute lexically; synthetic labels such as `<cli>`
 // stay labels.
-pub struct ReportPath {
-    value: String
+struct ReportPath {
+    priv value: String
 
     fn from_process(value: String) -[FS, Env]> ReportPath Never! {
         if value == "" || value.starts_with("<") -> return ReportPath{value: value}
@@ -351,9 +351,9 @@ fn report_lexically_normalize(path: String) -> String Never! {
     joined
 }
 
-pub struct ReportSpan {
-    pub start: Int
-    pub end: Int
+struct ReportSpan {
+    start: Int
+    end: Int
 
     fn new(start: Int, end: Int) -> ReportSpan Never! {
         ReportSpan{start: start, end: end}
@@ -386,12 +386,12 @@ fn report_optional_path(path: ReportPath?) -> DataTree Never! {
 
 // One ordered cause in a `jet.report/v3` diagnostic. Every location field is
 // independent; an unknown one stays unknown instead of inheriting the root's.
-pub struct ReportCause {
-    pub code: String
-    pub file: ReportPath?
-    pub line: Int?
-    pub col: Int?
-    pub span: ReportSpan?
+struct ReportCause {
+    code: String
+    file: ReportPath?
+    line: Int?
+    col: Int?
+    span: ReportSpan?
 
     fn new(code: String) -> ReportCause Never! {
         ReportCause{code: code, file: None, line: None, col: None, span: None}
@@ -413,11 +413,11 @@ pub struct ReportCause {
     }
 }
 
-pub struct ReportEdit {
-    pub file: ReportPath
-    pub span: ReportSpan
-    pub new_text: String
-    pub safety: FixSafety
+struct ReportEdit {
+    file: ReportPath
+    span: ReportSpan
+    new_text: String
+    safety: FixSafety
 
     fn new(file: ReportPath, span: ReportSpan, new_text: String, safety: FixSafety) -> ReportEdit Never! {
         ReportEdit{file: file, span: span, new_text: new_text, safety: safety}
@@ -434,44 +434,44 @@ pub struct ReportEdit {
 }
 
 // The crypto finding extension of a report.
-pub struct ReportCryptoExtension {
-    pub reason: String
-    pub operation: String
-    pub expected: String?
-    pub actual: Int?
+struct ReportCryptoExtension {
+    reason: String
+    operation: String
+    expected: String?
+    actual: Int?
 }
 
-pub enum ReportExtension {
+enum ReportExtension {
     Crypto(ReportCryptoExtension)
     // An already rendered build-error JSON document.
     BuildError(String)
 }
 
 // A `jet.report/v3` diagnostic or machine finding.
-pub struct ReportEnvelope {
-    pub schema_name: String
-    pub schema_version: Int
-    pub moment: String
-    pub severity: String
-    pub code: String
-    pub what: String
-    pub why: String
-    pub fix: String
-    pub applicability: FixApplicability?
-    pub detail: String?
-    pub file: ReportPath?
-    pub line: Int?
-    pub col: Int?
-    pub span: ReportSpan?
-    fix_edits: [ReportEdit]
-    pub cause: [ReportCause]
-    pub clears: Int
-    pub extension: ReportExtension?
-    no_fix_reason: NoFixReason?
-    pub denial_kind: String?
-    pub call_chain: [String]
-    pub scope_chain: [String]
-    pub nearest_granting_scope: String?
+struct ReportEnvelope {
+    schema_name: String
+    schema_version: Int
+    moment: String
+    severity: String
+    code: String
+    what: String
+    why: String
+    fix: String
+    applicability: FixApplicability?
+    detail: String?
+    file: ReportPath?
+    line: Int?
+    col: Int?
+    span: ReportSpan?
+    priv fix_edits: [ReportEdit]
+    cause: [ReportCause]
+    clears: Int
+    extension: ReportExtension?
+    priv no_fix_reason: NoFixReason?
+    denial_kind: String?
+    call_chain: [String]
+    scope_chain: [String]
+    nearest_granting_scope: String?
 
     fn new(moment: String, severity: String, code: String, what: String, why: String, fix: String) -> ReportEnvelope Never! {
         ReportEnvelope{

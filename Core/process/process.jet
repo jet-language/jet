@@ -13,11 +13,11 @@ use core as core
 use core.files as files
 
 
-pub fn args() -[Exec.Args]> [String] Never! { core.process.args() }
+fn args() -[Exec.Args]> [String] Never! { core.process.args() }
 
-pub fn argv() -[Exec.Args]> [String] Never! { core.process.argv() }
+fn argv() -[Exec.Args]> [String] Never! { core.process.argv() }
 
-pub fn check(receipt: ProcessReceipt) IOError! {
+fn check(receipt: ProcessReceipt) IOError! {
     if receipt.success -> return Ok()
     limit_hit :: receipt.limit_hit
     if limit_hit == {
@@ -48,7 +48,7 @@ pub fn check(receipt: ProcessReceipt) IOError! {
 }
 
 
-pub fn stdin_text(spec: ProcessSpec, text: String) IOError! -[Exec, Time.Wait]> {
+fn stdin_text(spec: ProcessSpec, text: String) IOError! -[Exec, Time.Wait]> {
     child :: spec.stdin(.Stream).spawn()
     child.stdin.write(text)
     child.stdin.close()
@@ -56,63 +56,63 @@ pub fn stdin_text(spec: ProcessSpec, text: String) IOError! -[Exec, Time.Wait]> 
     check(receipt)
 }
 
-pub fn getoutput(spec: ProcessSpec) -[Exec, Time.Wait]> String IOError! {
+fn getoutput(spec: ProcessSpec) -[Exec, Time.Wait]> String IOError! {
     receipt :: spec.run()
     receipt.output
 }
 
-pub fn getstatusoutput(spec: ProcessSpec) -[Exec, Time.Wait]> (status: Int, output: String) IOError! {
+fn getstatusoutput(spec: ProcessSpec) -[Exec, Time.Wait]> (status: Int, output: String) IOError! {
     receipt :: spec.run()
     (status: receipt.code, output: combined_output(receipt))
 }
 
-pub fn shell(line: String) -[Exec, Env]> ProcessSpec Never! {
+fn shell(line: String) -[Exec, Env]> ProcessSpec Never! {
     if core.sys.family() == "windows" -> return cmd([String]{"cmd", "/C", line})
     cmd([String]{"sh", "-c", line})
 }
 
-pub fn arg(spec: ProcessSpec, extra: String) -> ProcessSpec Never! {
+fn arg(spec: ProcessSpec, extra: String) -> ProcessSpec Never! {
     spec.arg(extra)
 }
 
-pub fn args_extend(spec: ProcessSpec, extra: [String]) -> ProcessSpec Never! {
+fn args_extend(spec: ProcessSpec, extra: [String]) -> ProcessSpec Never! {
     spec.args_extend(extra)
 }
 
 
-pub fn cmd(argv: [String]) -[Exec]> ProcessSpec Never! { core.process.cmd(argv) }
+fn cmd(argv: [String]) -[Exec]> ProcessSpec Never! { core.process.cmd(argv) }
 
-pub fn current_pid() -[Env]> Int Never! { core.sys.getpid() }
+fn current_pid() -[Env]> Int Never! { core.sys.getpid() }
 
-pub fn cwd(spec: ProcessSpec, path: String) -> ProcessSpec Never! { spec.cwd(path) }
+fn cwd(spec: ProcessSpec, path: String) -> ProcessSpec Never! { spec.cwd(path) }
 
-pub fn env(spec: ProcessSpec, key: String, value: String) -> ProcessSpec Never! {
+fn env(spec: ProcessSpec, key: String, value: String) -> ProcessSpec Never! {
     spec.env(key, value)
 }
 
-pub fn env_get(name: String) -[Env]> String? Never! { core.sys.get(name) }
+fn env_get(name: String) -[Env]> String? Never! { core.sys.get(name) }
 
-pub fn exit(code: Int) -[Exec]> Never Never! {
+fn exit(code: Int) -[Exec]> Never Never! {
     core.process.exit(code)
     loop {}
 }
 
-pub fn on_signal(signal: ProcessSignal) Never! -[Exec]> { core.process.on_signal(signal) }
+fn on_signal(signal: ProcessSignal) Never! -[Exec]> { core.process.on_signal(signal) }
 
-pub fn pipeline(steps: [ProcessSpec]) -[Exec, Time.Wait]> ProcessReceipt IOError! {
+fn pipeline(steps: [ProcessSpec]) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     core.process.pipeline(steps)
 }
 
-pub fn run_spec(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
+fn run_spec(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     spec.run()
 }
 
-pub fn status_ok(receipt: ProcessReceipt) -> Bool Never! {
+fn status_ok(receipt: ProcessReceipt) -> Bool Never! {
     receipt.success
 }
 
 
-pub fn which(name: String) -[FS, Env]> String? Never! {
+fn which(name: String) -[FS, Env]> String? Never! {
     if name.len() == 0 -> return None
     if contains_path_separator(name) || path_is_absolute(name) {
         if path_is_file(name) -> return Val(name)
@@ -159,51 +159,51 @@ fn path_separator_for_platform(family: String) -> U8 Never! {
 
 
 
-pub fn call(spec: ProcessSpec) -[Exec, Time.Wait]> Int IOError! {
+fn call(spec: ProcessSpec) -[Exec, Time.Wait]> Int IOError! {
     receipt :: spec.run()
     receipt.code
 }
 
-pub fn capture(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
+fn capture(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     spec.run()
 }
 
-pub fn check_call(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
+fn check_call(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     spec.run_checked()
 }
 
-pub fn check_output(spec: ProcessSpec) -[Exec, Time.Wait]> String IOError! {
+fn check_output(spec: ProcessSpec) -[Exec, Time.Wait]> String IOError! {
     receipt :: check_call(spec)
     receipt.output
 }
 
 
-pub fn combined_output(receipt: ProcessReceipt) -> String Never! {
+fn combined_output(receipt: ProcessReceipt) -> String Never! {
     if receipt.output.len() == 0 -> return receipt.errors
     if receipt.errors.len() == 0 -> return receipt.output
     "{receipt.output}\n{receipt.errors}"
 }
 
-pub fn env_get_or(name: String, fallback: String) -[Env]> String Never! {
+fn env_get_or(name: String, fallback: String) -[Env]> String Never! {
     core.sys.get(name) ?? return fallback
 }
 
-pub fn env_keys() -[Env]> [String] EnvError! { core.sys.vars() }
+fn env_keys() -[Env]> [String] EnvError! { core.sys.vars() }
 
-pub fn env_set(spec: ProcessSpec, key: String, value: String) -> ProcessSpec Never! {
+fn env_set(spec: ProcessSpec, key: String, value: String) -> ProcessSpec Never! {
     spec.env(key, value)
 }
 
-pub fn env_truthy(name: String) -[Env]> Bool Never! {
+fn env_truthy(name: String) -[Env]> Bool Never! {
     value :: core.sys.get(name) ?? return false
     lowered :: core.text.lower(value)
     lowered == "1" || lowered == "true" || lowered == "yes" || lowered == "on"
 }
 
-pub fn failed(receipt: ProcessReceipt) -> Bool Never! { !receipt.success }
+fn failed(receipt: ProcessReceipt) -> Bool Never! { !receipt.success }
 
 
-pub fn list2cmdline(argv: [String]) -> String Never! {
+fn list2cmdline(argv: [String]) -> String Never! {
     out := ""
     first := true
     loop item in argv {
@@ -214,7 +214,7 @@ pub fn list2cmdline(argv: [String]) -> String Never! {
     out
 }
 
-pub fn signal_number(signal: ProcessSignal) -> Int Never! {
+fn signal_number(signal: ProcessSignal) -> Int Never! {
     if signal == {
         .Interrupt -> 2
         .Terminate -> 15
@@ -226,15 +226,15 @@ pub fn signal_number(signal: ProcessSignal) -> Int Never! {
     }
 }
 
-pub fn stderr_lines(receipt: ProcessReceipt) -> [String] Never! {
+fn stderr_lines(receipt: ProcessReceipt) -> [String] Never! {
     split_lines(receipt.errors)
 }
 
-pub fn stdout_lines(receipt: ProcessReceipt) -> [String] Never! {
+fn stdout_lines(receipt: ProcessReceipt) -> [String] Never! {
     split_lines(receipt.output)
 }
 
-pub fn exited(receipt: ProcessReceipt) -> Bool Never! {
+fn exited(receipt: ProcessReceipt) -> Bool Never! {
     receipt.signal == None && !receipt.timed_out
 }
 fn contains_path_separator(value: String) -> Bool Never! {

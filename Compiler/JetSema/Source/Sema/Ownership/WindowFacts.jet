@@ -56,7 +56,7 @@ fn sema_window_plain_name(callee: String) -> String Never! {
 }
 
 // The proven-set key a call site checks for parameter `param` of `callee`.
-pub fn sema_window_callee_key(callee: String, param: String) -> String Never! {
+fn sema_window_callee_key(callee: String, param: String) -> String Never! {
     sema_window_param_key(sema_window_plain_name(callee), param)
 }
 
@@ -74,7 +74,7 @@ fn sema_window_collect_functions(items: [Item], functions: &[Func]) {
 
 // `items` holds every module of the bundle, so the fact covers calls into
 // other modules, inline or file, exactly like the Rust bundle-wide fact.
-pub fn sema_fixed_length_write_params(items: [Item]) -> [String] Never! {
+fn sema_fixed_length_write_params(items: [Item]) -> [String] Never! {
     functions := [Func]{}
     sema_window_collect_functions(items, &functions)
     sema_window_fixed_length_params(functions)
@@ -83,7 +83,7 @@ pub fn sema_fixed_length_write_params(items: [Item]) -> [String] Never! {
 // The same bundle-wide fact over every module of `graph`, in module order:
 // each module's items are read in place rather than first copied into one
 // bundle list.
-pub fn sema_fixed_length_write_params_in_graph(graph: SemaRegistrationGraph) -> [String] Never! {
+fn sema_fixed_length_write_params_in_graph(graph: SemaRegistrationGraph) -> [String] Never! {
     functions := [Func]{}
     loop module_index in 0..<graph.modules.len() -> sema_window_collect_functions(graph.modules[module_index].program.items, &functions)
     sema_window_fixed_length_params(functions)
@@ -150,7 +150,7 @@ fn sema_window_fixed_length_params(functions: [Func]) -> [String] Never! {
     result
 }
 
-pub fn sema_window_contains(keys: [String], key: String) -> Bool Never! {
+fn sema_window_contains(keys: [String], key: String) -> Bool Never! {
     loop candidate in keys {
         if candidate == key -> return true
     }

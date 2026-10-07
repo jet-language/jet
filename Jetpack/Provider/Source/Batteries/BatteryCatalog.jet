@@ -11,16 +11,16 @@ BATTERIES_UPSTREAM :: prep { "embedded:batteries" }
 BATTERIES_FILE_MODE :: prep { 0o644 }
 
 // One bundled battery file: its package-relative path, mode, and bytes.
-pub struct BatteryFile {
-    pub path: String
-    pub mode: Int
-    pub bytes: [U8]
+struct BatteryFile {
+    path: String
+    mode: Int
+    bytes: [U8]
 }
 
 // One bundled battery package.
-pub struct BatteryPackage {
-    pub slug: String
-    pub files: [BatteryFile]
+struct BatteryPackage {
+    slug: String
+    files: [BatteryFile]
 }
 
 fn env_battery_text(path: String, text: String) -> BatteryFile Never! {
@@ -28,7 +28,7 @@ fn env_battery_text(path: String, text: String) -> BatteryFile Never! {
 }
 
 // Every bundled battery package.
-pub fn env_battery_packages() -> [BatteryPackage] Never! {
+fn env_battery_packages() -> [BatteryPackage] Never! {
     [BatteryPackage]{
         BatteryPackage{slug: "backend", files: [BatteryFile]{
             env_battery_text("backend.jet", embed_file("../../../../crates/jetpack/batteries/backend/backend.jet")),

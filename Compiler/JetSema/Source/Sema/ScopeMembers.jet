@@ -13,36 +13,36 @@ use jet_foundation.[
     Type,
 ]
 
-pub struct SemaScopeMembersMarkerRule {
-    pub name: String
-    pub sites: [String]
-    pub first_parameter_is_type: Bool
-    pub repeatable: Bool
-    pub params: [MarkerDeclParam]
+struct SemaScopeMembersMarkerRule {
+    name: String
+    sites: [String]
+    first_parameter_is_type: Bool
+    repeatable: Bool
+    params: [MarkerDeclParam]
 }
 
-pub struct SemaScopeMembersMarkerRegistry {
-    pub applied_rules: [TAppliedRule]
-    pub argument_menus: [TAppliedRuleArgumentMenu]
-    pub marker_rules: [SemaScopeMembersMarkerRule]
-    pub known_marker_names: [String]
-    pub function_allowed_markers: [String]
-    pub block_allowed_markers: [String]
-    pub derive_provider_names: [String]
+struct SemaScopeMembersMarkerRegistry {
+    applied_rules: [TAppliedRule]
+    argument_menus: [TAppliedRuleArgumentMenu]
+    marker_rules: [SemaScopeMembersMarkerRule]
+    known_marker_names: [String]
+    function_allowed_markers: [String]
+    block_allowed_markers: [String]
+    derive_provider_names: [String]
 }
 
-pub struct SemaScopeMembersDeclaredTypeArgument {
-    pub name: String
-    pub ty: Type
-    pub span: Span
+struct SemaScopeMembersDeclaredTypeArgument {
+    name: String
+    ty: Type
+    span: Span
 }
 
-pub struct SemaScopeMembersDSLHeaderResult {
-    pub known: Bool
-    pub block_allowed: Bool
-    pub args_valid: Bool
-    pub declared_type_argument: SemaScopeMembersDeclaredTypeArgument?
-    pub diagnostics: [Diagnostic]
+struct SemaScopeMembersDSLHeaderResult {
+    known: Bool
+    block_allowed: Bool
+    args_valid: Bool
+    declared_type_argument: SemaScopeMembersDeclaredTypeArgument?
+    diagnostics: [Diagnostic]
 }
 
 fn sema_scope_members_append_name(values: &[String], name: String) Never! {
@@ -181,7 +181,7 @@ fn sema_scope_members_registry_add_applied_catalog(registry: &SemaScopeMembersMa
 // `catalog` must be built from the complete embedded Prelude/Markers.jet
 // source. The graph must be complete because source-declared marker and derive
 // names are package-wide. Occurrence facts never authorize marker sites.
-pub fn sema_scope_members_build_marker_registry(graph: SemaRegistrationGraph, module_identity: String, program: Program, catalog: TAppliedRuleCatalog) -> SemaScopeMembersMarkerRegistry? {
+fn sema_scope_members_build_marker_registry(graph: SemaRegistrationGraph, module_identity: String, program: Program, catalog: TAppliedRuleCatalog) -> SemaScopeMembersMarkerRegistry? {
     if !graph.complete -> return None
     registry := SemaScopeMembersMarkerRegistry{
         applied_rules: catalog.rows,
@@ -266,7 +266,7 @@ fn sema_scope_members_dsl_argument_shape_diagnostic(name: String, args_span: Spa
     sema_error("E0617", at, "`#{name}` has an invalid DSL header", "a checked text block keeps its Jet boundary; only its declared header shape is legal", "write {expected}")
 }
 
-pub fn sema_scope_members_check_dsl_header(registry: SemaScopeMembersMarkerRegistry, program: Program, name: String, name_span: Span, args: [Expr], args_span: Span?, span: Span) -> SemaScopeMembersDSLHeaderResult {
+fn sema_scope_members_check_dsl_header(registry: SemaScopeMembersMarkerRegistry, program: Program, name: String, name_span: Span, args: [Expr], args_span: Span?, span: Span) -> SemaScopeMembersDSLHeaderResult {
     result := SemaScopeMembersDSLHeaderResult{
         known: sema_scope_members_has_name(registry.known_marker_names, name),
         block_allowed: sema_scope_members_has_name(registry.block_allowed_markers, name),

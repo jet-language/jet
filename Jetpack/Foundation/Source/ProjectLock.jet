@@ -17,7 +17,7 @@ RUNTIME_LOCK_WAIT_SECONDS :: prep { 30 }
 RUNTIME_LOCK_MARKER_MODE :: prep { 0o600 }
 
 // Kernel state of one persistent lock inode.
-pub enum RuntimeLockState {
+enum RuntimeLockState {
     Absent
     Held
     Idle
@@ -27,11 +27,11 @@ pub enum RuntimeLockState {
 // root; `marker` pins the scope marker inode that `path` must keep naming.
 // Scope exit (or handing `owner` to a child through `keep_open_for`)
 // releases the kernel lock; the marker file always stays on disk.
-pub struct RuntimeLock {
-    pub path: String
-    pub owner_path: String
-    owner: FileLock
-    marker: FileReader
+struct RuntimeLock {
+    path: String
+    owner_path: String
+    priv owner: FileLock
+    priv marker: FileReader
 
     // Rust `acquire_lease_lock` + `set_inheritable`: the launched process tree
     // inherits the lease lock (D-CORE-PROCINHERIT1), so the kernel lock stays
@@ -49,7 +49,7 @@ impl RuntimeLock.Close {
 }
 
 // Rust `lock_path_for_scope`.
-pub fn env_lock_path_for_scope(root: String, scope: String) -> String Never! {
+fn env_lock_path_for_scope(root: String, scope: String) -> String Never! {
     files.join(files.join(root, RUNTIME_LOCK_DIR), "{env_lock_sanitize_scope(scope)}.lock")
 }
 
@@ -79,14 +79,14 @@ fn env_lock_invalid_input(path: String, cause: String) -> IOError Never! {
 }
 
 // Rust `acquire_lock`: wait up to 30 seconds for the root's lock domain.
-pub fn env_acquire_lock(root: String, scope: String) -[FS, Env]> RuntimeLock IOError! {
+fn env_acquire_lock(root: String, scope: String) -[FS, Env]> RuntimeLock IOError! {
     env_acquire_lock_waiting(root, scope, time.duration_seconds(RUNTIME_LOCK_WAIT_SECONDS))
 }
 
 // Rust `try_acquire_lock`: claim for recovery without waiting behind a live
 // owner. Recovery must hold the claim while inspecting and removing state; a
 // probe followed by deletion lets a contender take the same inode in the gap.
-pub fn env_try_acquire_lock(root: String, scope: String) -[FS, Env]> RuntimeLock? IOError! {
+fn env_try_acquire_lock(root: String, scope: String) -[FS, Env]> RuntimeLock? IOError! {
     path :: env_lock_open_scope(root, scope)
     owner_path :: env_lock_canonical_owner(path)
     owner :: files.try_lock(owner_path) ?? return Ok(None)
@@ -94,7 +94,7 @@ pub fn env_try_acquire_lock(root: String, scope: String) -[FS, Env]> RuntimeLock
 }
 
 // Rust `acquire_lock_with_timing`: a bounded wait reports IOError.TimedOut.
-pub fn env_acquire_lock_waiting(root: String, scope: String, wait: Duration) -[FS, Env]> RuntimeLock IOError! {
+fn env_acquire_lock_waiting(root: String, scope: String, wait: Duration) -[FS, Env]> RuntimeLock IOError! {
     path :: env_lock_open_scope(root, scope)
     owner_path :: env_lock_canonical_owner(path)
     owner :: if files.lock(owner_path, timeout: Val(wait)) == {
@@ -111,7 +111,7 @@ pub fn env_acquire_lock_waiting(root: String, scope: String, wait: Duration) -[F
 
 // Rust `acquire_lease_lock`. The caller passes the lock to the launched
 // process tree with `RuntimeLock.keep_open_for`.
-pub fn env_acquire_lease_lock(root: String, scope: String) -[FS, Env]> RuntimeLock IOError! {
+fn env_acquire_lease_lock(root: String, scope: String) -[FS, Env]> RuntimeLock IOError! {
     env_acquire_lock(root, scope)
 }
 
@@ -161,7 +161,7 @@ fn env_lock_validate_marker(marker: FileReader, path: String) IOError! -[FS]> {
 
 // Rust `lock_state`: probe the kernel lock behind one marker. An absent
 // marker (or lock directory) is Absent and the probe creates nothing.
-pub fn env_lock_state(path: String) -[FS, Env]> RuntimeLockState IOError! {
+fn env_lock_state(path: String) -[FS, Env]> RuntimeLockState IOError! {
     info :: if files.stat(path) == {
         .Ok(info) -> info
         .Err(error) -> {
@@ -183,28 +183,28 @@ pub fn env_lock_state(path: String) -[FS, Env]> RuntimeLockState IOError! {
 
 // Rust `with_lock` for a single, non-nested scope: the returned lock is held
 // until the caller's scope exits.
-pub fn env_runtime_lock(root: String, scope: String) -[FS, Env]> RuntimeLock IOError! {
+fn env_runtime_lock(root: String, scope: String) -[FS, Env]> RuntimeLock IOError! {
     env_acquire_lock(root, scope)
 }
 
 // Rust `with_project_lock`: the project's managed `.jet` directory.
-pub fn env_runtime_project_lock(project: String, scope: String) -[FS, Env]> RuntimeLock IOError! {
+fn env_runtime_project_lock(project: String, scope: String) -[FS, Env]> RuntimeLock IOError! {
     env_runtime_lock(files.join(project, SOURCE_ROOT_DIR), scope)
 }
 
 // One nested lock claim. `lock` is None when an outer claim of the same
 // session already holds this root's domain.
-pub struct RuntimeLockGuard {
-    pub root: String
-    lock: RuntimeLock?
+struct RuntimeLockGuard {
+    root: String
+    priv lock: RuntimeLock?
 }
 
 // Rust HELD_LOCK_ROOTS: all scopes for one managed root share one kernel lock
 // domain, so a nested claim on a root this session already holds reuses the
 // outer guard instead of waiting on itself. Jet carries the held set
 // explicitly instead of in thread-local state.
-pub struct RuntimeLockSession {
-    held_roots: [String]
+struct RuntimeLockSession {
+    priv held_roots: [String]
 
     fn new() -> RuntimeLockSession Never! {
         RuntimeLockSession{held_roots: [String]{}}

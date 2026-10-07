@@ -11,7 +11,7 @@ C_MAX_SOURCE_BYTES :: 1048576
 C_MAX_SOURCE_NAME :: 256
 
 #Error
-pub enum BrowserError {
+enum BrowserError {
     Connect
     Headless
     Timeout
@@ -19,156 +19,156 @@ pub enum BrowserError {
     Closed
 }
 
-pub enum BrowserPrivacy {
+enum BrowserPrivacy {
     Default
     Isolated
 }
 
-pub enum BrowserProtocol {
+enum BrowserProtocol {
     CDP
     WebDriver
 }
 
-pub struct BrowserTimeout {
-    pub ms: Int
+struct BrowserTimeout {
+    ms: Int
 }
 
-pub struct BrowserProfile {
-    pub name: String
-    pub privacy: BrowserPrivacy
-    pub headless: Bool
+struct BrowserProfile {
+    name: String
+    privacy: BrowserPrivacy
+    headless: Bool
 }
 
-pub struct BrowserAbilities {
-    pub javascript: Bool
-    pub screenshots: Bool
+struct BrowserAbilities {
+    javascript: Bool
+    screenshots: Bool
 }
 
-pub struct Browser {
-    pub id: Int
-    pub browser_profile: BrowserProfile
-    pub url: String
-    pub closed: Bool
+struct Browser {
+    id: Int
+    browser_profile: BrowserProfile
+    url: String
+    closed: Bool
 }
 
-pub struct BrowserContext {
-    pub id: Int
-    pub browser: Int
+struct BrowserContext {
+    id: Int
+    browser: Int
 }
 
-pub struct BrowserPage {
-    pub id: Int
-    pub url: String
-    pub title: String
+struct BrowserPage {
+    id: Int
+    url: String
+    title: String
 }
 
-pub struct BrowserFrame {
-    pub id: Int
-    pub page_id: Int
-    pub url: String
+struct BrowserFrame {
+    id: Int
+    page_id: Int
+    url: String
 }
 
-pub struct BrowserLocator {
-    pub selector: String
-    pub page_id: Int
+struct BrowserLocator {
+    selector: String
+    page_id: Int
 }
 
-pub struct BrowserLocked {
-    pub reason: String
+struct BrowserLocked {
+    reason: String
 }
 
-pub struct BrowserIntercept {
-    pub url: String
-    pub status: Int
+struct BrowserIntercept {
+    url: String
+    status: Int
 }
 
-pub struct BrowserEvent {
-    pub kind: String
-    pub target: String
+struct BrowserEvent {
+    kind: String
+    target: String
 }
 
-pub struct BrowserReceipt {
-    pub ok: Bool
-    pub detail: String
+struct BrowserReceipt {
+    ok: Bool
+    detail: String
 }
 
-pub struct BrowserTrace {
-    pub events: [String]
+struct BrowserTrace {
+    events: [String]
 }
 
-pub struct BrowserTestConfig {
-    pub headless: Bool
-    pub timeout_ms: Int
-    pub base_url: String
+struct BrowserTestConfig {
+    headless: Bool
+    timeout_ms: Int
+    base_url: String
 }
 
-pub struct BrowserTestCase {
-    pub name: String
-    pub ok: Bool
-    pub detail: String
+struct BrowserTestCase {
+    name: String
+    ok: Bool
+    detail: String
 }
 
-pub struct BrowserReport {
-    pub title: String
-    pub cases: [BrowserTestCase]
+struct BrowserReport {
+    title: String
+    cases: [BrowserTestCase]
 }
 
-pub struct BrowserServer {
-    pub url: String
-    pub running: Bool
-    pub logs: String
-    native: BrowserTestServer?
+struct BrowserServer {
+    url: String
+    running: Bool
+    logs: String
+    priv native: BrowserTestServer?
 }
 
-pub fn config() -> BrowserTestConfig BrowserError! {
+fn config() -> BrowserTestConfig BrowserError! {
     core.web.browser.config()
 }
 
-pub fn config_from_env() -[Env, FS]> BrowserTestConfig BrowserError! {
+fn config_from_env() -[Env, FS]> BrowserTestConfig BrowserError! {
     core.web.browser.config_from_env()
 }
 
 
-pub fn make_profile(name: String) -> BrowserProfile Never! {
+fn make_profile(name: String) -> BrowserProfile Never! {
     BrowserProfile{name: name, privacy: BrowserPrivacy.Isolated, headless: true}
 }
 
-pub fn timeout(ms: Int) -> BrowserTimeout BrowserError! {
+fn timeout(ms: Int) -> BrowserTimeout BrowserError! {
     core.web.browser.timeout(ms)
 }
 
-pub fn locked(engine: String) -[FS, IO]> BrowserLocked BrowserError! {
+fn locked(engine: String) -[FS, IO]> BrowserLocked BrowserError! {
     core.web.browser.locked(engine)
 
 }
-pub fn connect() -[Net]> Browser BrowserError! { core.web.browser.connect("default") }
+fn connect() -[Net]> Browser BrowserError! { core.web.browser.connect("default") }
 
-pub fn connect_browser_profile(p: BrowserProfile, t: BrowserTimeout) -[Net]> Browser BrowserError! {
+fn connect_browser_profile(p: BrowserProfile, t: BrowserTimeout) -[Net]> Browser BrowserError! {
     endpoint := "{p.name}"
     core.web.browser.connect_profile(endpoint, p, t)
 }
 
 
 
-pub fn selected(page: BrowserPage, selector: String) -> BrowserLocator Never! {
+fn selected(page: BrowserPage, selector: String) -> BrowserLocator Never! {
     BrowserLocator{selector: selector, page_id: page.id}
 }
-pub fn begin_named(config: BrowserTestConfig, test: String, engine: String, attempt: Int, source_path: String, line: Int, column: Int) -[Net]> BrowserTestFixture BrowserError! {
+fn begin_named(config: BrowserTestConfig, test: String, engine: String, attempt: Int, source_path: String, line: Int, column: Int) -[Net]> BrowserTestFixture BrowserError! {
     core.web.browser.begin_named(config, test, engine, attempt, source_path, line, column)
 }
 
-pub fn fixture_context(browser: Browser) -> BrowserContext Never! { BrowserContext{id: browser.id, browser: browser.id} }
+fn fixture_context(browser: Browser) -> BrowserContext Never! { BrowserContext{id: browser.id, browser: browser.id} }
 
-pub fn fixture_page(ctx: BrowserContext, url: String) -> BrowserPage Never! {
+fn fixture_page(ctx: BrowserContext, url: String) -> BrowserPage Never! {
     BrowserPage{id: ctx.id, url: url, title: ""}
 }
 
 
-pub fn fixture_source(name: String, body: String) -> String BrowserError! {
+fn fixture_source(name: String, body: String) -> String BrowserError! {
     generate_source(name, body, "")
 }
 
-pub fn generate_source(name: String, body: String, base_url: String) -> String BrowserError! {
+fn generate_source(name: String, body: String, base_url: String) -> String BrowserError! {
     if name.len() == 0 || name.len() > C_MAX_SOURCE_NAME || body.len() > C_MAX_SOURCE_BYTES || base_url.len() > C_MAX_SOURCE_BYTES {
         return Err(BrowserError.Protocol)
     }
@@ -181,16 +181,16 @@ pub fn generate_source(name: String, body: String, base_url: String) -> String B
     Ok(out)
 }
 
-pub fn report_new(title: String) -> BrowserReport Never! { BrowserReport{title: title, cases: [BrowserTestCase]{}} }
+fn report_new(title: String) -> BrowserReport Never! { BrowserReport{title: title, cases: [BrowserTestCase]{}} }
 
-pub fn report_add_case(report: BrowserReport, name: String, ok: Bool) -> BrowserReport Never! {
+fn report_add_case(report: BrowserReport, name: String, ok: Bool) -> BrowserReport Never! {
     cases := [BrowserTestCase]{}
     loop c in report.cases -> &cases.push(c)
     &cases.push(BrowserTestCase{name: name, ok: ok, detail: ""})
     BrowserReport{title: report.title, cases: cases}
 }
 
-pub fn report_html(report: BrowserReport) -> String Never! {
+fn report_html(report: BrowserReport) -> String Never! {
     out := "<!doctype html><html><head><title>{esc(report.title)}</title></head><body><h1>{esc(report.title)}</h1><ol>"
     loop c in report.cases {
         cls := "pass"
@@ -201,7 +201,7 @@ pub fn report_html(report: BrowserReport) -> String Never! {
     out
 }
 
-pub fn report_json(report: BrowserReport) -> String Never! {
+fn report_json(report: BrowserReport) -> String Never! {
     out := "{{\"title\":\"{esc_json(report.title)}\",\"passed\":{passed(report)},\"failed\":{failed(report)},\"cases\":["
     loop i in 0..<report.cases.len() {
         c :: report.cases[i]
@@ -213,7 +213,7 @@ pub fn report_json(report: BrowserReport) -> String Never! {
     "{out}]}}"
 }
 
-pub fn report_text(report: BrowserReport) -> String Never! {
+fn report_text(report: BrowserReport) -> String Never! {
     out := "{report.title}\n"
     loop c in report.cases {
         mark := "ok"
@@ -224,37 +224,37 @@ pub fn report_text(report: BrowserReport) -> String Never! {
     out
 }
 
-pub fn report_exit_code(report: BrowserReport) -> Int Never! {
+fn report_exit_code(report: BrowserReport) -> Int Never! {
     if failed(report) > 0 -> return 1
     0
 }
 
-pub fn write_report(report: BrowserReport, path: String) IOError! {
+fn write_report(report: BrowserReport, path: String) IOError! {
     core.files.write(path, report_text(report))
 }
 
-pub fn server_start(root: String) -[Net]> BrowserServer BrowserError! {
+fn server_start(root: String) -[Net]> BrowserServer BrowserError! {
     if root.len() > C_MAX_SOURCE_BYTES -> return Err(BrowserError.Protocol)
     cfg := BrowserTestConfig{headless: true, timeout_ms: 5000, base_url: root}
     native :: core.web.browser.server_start(cfg)
     Ok(BrowserServer{url: native.url(), running: true, logs: native.logs(), native: Val(native)})
 }
-pub fn watch_changed(path: String) -[FS, Net]> Bool BrowserError! {
+fn watch_changed(path: String) -[FS, Net]> Bool BrowserError! {
     // The public carrier has no prior mtime.  A negative baseline is the
     // provider's explicit "no snapshot" value; zero would fabricate one.
     core.web.browser.watch_changed(path, -1)
 }
 
-pub fn server_stop(server: BrowserServer) -> BrowserServer Never! {
+fn server_stop(server: BrowserServer) -> BrowserServer Never! {
     if server.native == None -> return BrowserServer{url: server.url, running: false, logs: server.logs, native: None}
     native :: server.native ?? return BrowserServer{url: server.url, running: false, logs: server.logs, native: None}
     _ :: core.web.browser.server_stop(native)
     BrowserServer{url: server.url, running: false, logs: server.logs, native: None}
 }
 
-pub fn server_url(server: BrowserServer) -> String Never! { server.url }
+fn server_url(server: BrowserServer) -> String Never! { server.url }
 
-pub fn server_logs(server: BrowserServer) -> String Never! { server.logs }
+fn server_logs(server: BrowserServer) -> String Never! { server.logs }
 
 
 

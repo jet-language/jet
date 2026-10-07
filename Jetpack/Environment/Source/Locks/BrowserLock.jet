@@ -7,7 +7,7 @@
 BROWSER_PROTOCOLS :: prep { [String]{"bidi-2025.5", "bidi-2024.11"} }
 
 #Error
-pub enum BrowserLockError {
+enum BrowserLockError {
     UnknownEngine(String)
     MissingBinary(String)
     MissingLock(String)
@@ -30,13 +30,13 @@ pub enum BrowserLockError {
 }
 
 // The canonical engine spelling (ASCII case-insensitive).
-pub fn env_browser_normalize_engine(raw: String) -> String BrowserLockError! {
+fn env_browser_normalize_engine(raw: String) -> String BrowserLockError! {
     lower :: raw.to_lower()
     if !BROWSER_ENGINES.contains(lower) -> return Err(BrowserLockError.UnknownEngine(raw))
     Ok(lower)
 }
 
-pub fn env_browser_validate_protocol(protocol: String) BrowserLockError! {
+fn env_browser_validate_protocol(protocol: String) BrowserLockError! {
     if !BROWSER_PROTOCOLS.contains(protocol) -> return Err(BrowserLockError.InvalidProtocol(protocol))
 }
 
@@ -47,7 +47,7 @@ fn env_browser_hash_file(path: String) -[FS]> (digest: String, size: Int) Browse
 }
 
 // Lock a local browser binary into the project lock (a deterministic pin).
-pub fn env_browser_lock_binary(project_root: String, engine_input: String, binary: String, version: String, protocol: String, provenance: String) -[IO, FS, Env, Exec, Time, Time.Wait]> LockedBrowser BrowserLockError! {
+fn env_browser_lock_binary(project_root: String, engine_input: String, binary: String, version: String, protocol: String, provenance: String) -[IO, FS, Env, Exec, Time, Time.Wait]> LockedBrowser BrowserLockError! {
     engine :: env_browser_normalize_engine(engine_input)
     env_browser_validate_protocol(protocol)
     if !files.is_file(binary) -> return Err(BrowserLockError.MissingBinary(binary))
@@ -66,7 +66,7 @@ pub fn env_browser_lock_binary(project_root: String, engine_input: String, binar
 }
 
 // Resolve a locked browser and re-verify it: hash and size must still match.
-pub fn env_browser_resolve(project_root: String, engine_input: String) -[FS]> LockedBrowser BrowserLockError! {
+fn env_browser_resolve(project_root: String, engine_input: String) -[FS]> LockedBrowser BrowserLockError! {
     engine :: env_browser_normalize_engine(engine_input)
     lock :: pkg_lock_load(project_root) ?? return Err(BrowserLockError.MissingLock(engine))
     browsers :: lock.browsers
@@ -79,12 +79,12 @@ pub fn env_browser_resolve(project_root: String, engine_input: String) -[FS]> Lo
     Err(BrowserLockError.MissingLock(engine))
 }
 
-pub fn env_browser_list(project_root: String) -[FS]> [LockedBrowser] Never! {
+fn env_browser_list(project_root: String) -[FS]> [LockedBrowser] Never! {
     lock :: pkg_lock_load(project_root) ?? return [LockedBrowser]{}
     lock.browsers
 }
 
-pub fn env_browser_verify(locked: LockedBrowser) BrowserLockError! -[FS]> {
+fn env_browser_verify(locked: LockedBrowser) BrowserLockError! -[FS]> {
     path :: locked.binary
     if !files.is_file(path) -> return Err(BrowserLockError.MissingBinary(path))
     info :: files.stat(path) ?? return Err(BrowserLockError.IO("could not stat {path}: {err}"))
@@ -98,7 +98,7 @@ pub fn env_browser_verify(locked: LockedBrowser) BrowserLockError! -[FS]> {
 }
 
 // Preferred executable names inside a realized package `bin/` directory.
-pub fn env_browser_binary_candidates(engine: String) -> [String] Never! {
+fn env_browser_binary_candidates(engine: String) -> [String] Never! {
     if engine == {
         "chromium" -> [String]{"chromium", "chromium-browser", "chrome", "google-chrome", "google-chrome-stable"}
         "firefox" -> [String]{"firefox"}
@@ -108,7 +108,7 @@ pub fn env_browser_binary_candidates(engine: String) -> [String] Never! {
 }
 
 // The engine binary under a realized package output (usually `…/bin`).
-pub fn env_browser_find_engine_binary(output: String, engine_input: String) -[FS]> String BrowserLockError! {
+fn env_browser_find_engine_binary(output: String, engine_input: String) -[FS]> String BrowserLockError! {
     engine :: env_browser_normalize_engine(engine_input)
     nested :: files.join(output, "bin")
     bin_dir :: if files.is_dir(nested) -> nested else -> output
@@ -121,7 +121,7 @@ pub fn env_browser_find_engine_binary(output: String, engine_input: String) -[FS
 }
 
 // The first line of `<binary> --version` (stdout then stderr), or "unknown".
-pub fn env_browser_read_version_label(binary: String) -[Exec, Time.Wait]> String Never! {
+fn env_browser_read_version_label(binary: String) -[Exec, Time.Wait]> String Never! {
     receipt :: process.cmd([String]{binary, "--version"}).stdout(.Capture).stderr(.Capture).run() ?? return "unknown"
     text :: "{receipt.output}{receipt.errors}"
     if text == "" -> return "unknown"

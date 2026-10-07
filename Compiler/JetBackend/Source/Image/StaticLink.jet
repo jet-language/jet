@@ -106,100 +106,100 @@ LINK_R_REX_GOTPCRELX :: prep { 42 }
 LINK_MEMBER_SCALE :: prep { 16777216 }
 
 struct LinkContext {
-    pub bufs: [[U8]]
-    pub archives: [LinkArchive]
+    bufs: [[U8]]
+    archives: [LinkArchive]
     // archive_buffer[i] is the buffer of archives[i].
-    pub archive_buffer: [Int]
+    archive_buffer: [Int]
     // Every archive symbol to archive * LINK_MEMBER_SCALE + member, the
     // first archive (and the first entry in it) winning.
-    pub lookup: [String:Int]
+    lookup: [String:Int]
     // Keys of the archive members already loaded.
-    pub pulled: [Int:Bool]
+    pulled: [Int:Bool]
     // Objects: the name for reports, the buffer and absolute offsets of the
     // ELF header, section header table, section name table, symbol table,
     // symbol string table and extended section index table (-1: none); the
     // section count, the first global symbol index, and the first global
     // section and symbol ids.
-    pub obj_name: [String]
-    pub obj_buffer: [Int]
-    pub obj_base: [Int]
-    pub obj_shoff: [Int]
-    pub obj_names: [Int]
-    pub obj_symtab: [Int]
-    pub obj_strtab: [Int]
-    pub obj_shndx: [Int]
-    pub obj_count: [Int]
-    pub obj_first_global: [Int]
-    pub obj_first_section: [Int]
-    pub obj_first_symbol: [Int]
-    pub obj_sym_count: [Int]
+    obj_name: [String]
+    obj_buffer: [Int]
+    obj_base: [Int]
+    obj_shoff: [Int]
+    obj_names: [Int]
+    obj_symtab: [Int]
+    obj_strtab: [Int]
+    obj_shndx: [Int]
+    obj_count: [Int]
+    obj_first_global: [Int]
+    obj_first_section: [Int]
+    obj_first_symbol: [Int]
+    obj_sym_count: [Int]
     // Init/fini arrays and SHF_GNU_RETAIN sections: collection roots.
-    pub roots: [Int]
+    roots: [Int]
     // A section's RELA section when it is not the header right after it.
-    pub rela: [Int:Int]
-    pub discarded: [Int:Bool]
+    rela: [Int:Int]
+    discarded: [Int:Bool]
     // Global symbol of each global-binding file symbol.
-    pub sym_global: [Int:Int]
+    sym_global: [Int:Int]
     // Global symbols by name.
-    pub g_index: [String:Int]
-    pub g_name: [String]
-    pub g_kind: [Int]
+    g_index: [String:Int]
+    g_name: [String]
+    g_kind: [Int]
     // The definition (LINK_G_FILE): section (or LINK_ABS), value and size.
-    pub g_section: [Int]
-    pub g_value: [Int]
-    pub g_size: [Int]
-    pub g_obj: [Int]
-    pub g_weak_def: [Bool]
-    pub g_strong_ref: [Bool]
+    g_section: [Int]
+    g_value: [Int]
+    g_size: [Int]
+    g_obj: [Int]
+    g_weak_def: [Bool]
+    g_strong_ref: [Bool]
     // Another global this name stands for (LFS64 names), or -1.
-    pub g_alias: [Int]
+    g_alias: [Int]
     // Address of a LINK_G_COMMON or LINK_G_LINKER symbol.
-    pub g_addr: [Int]
-    pub g_common_size: [Int]
-    pub g_common_align: [Int]
-    pub comdats: [String:Bool]
-    pub pending: [Int]
-    pub pending_head: Int
+    g_addr: [Int]
+    g_common_size: [Int]
+    g_common_align: [Int]
+    comdats: [String:Bool]
+    pending: [Int]
+    pending_head: Int
     // Live sections: the row of each section id (-1: not live; sized by
     // collection, when the inputs are final), then per row the section,
     // class and address.
-    pub live: [Int]
-    pub live_secs: [Int]
-    pub live_class: [Int]
-    pub live_addr: [Int]
+    live: [Int]
+    live_secs: [Int]
+    live_class: [Int]
+    live_addr: [Int]
     // `.eh_frame` records ("pieces"): the section and its object, start and
     // length; the CIE piece of an FDE; the symbol index its pc_begin names
     // until collection, then the section it describes (-1: none); its
     // relocations (row range in the section's RELA table); the next FDE
     // describing the same section; whether it is kept and its output offset.
-    pub ep_sec: [Int]
-    pub ep_obj: [Int]
-    pub ep_start: [Int]
-    pub ep_len: [Int]
-    pub ep_cie: [Int]
-    pub ep_target: [Int]
-    pub ep_first_reloc: [Int]
-    pub ep_reloc_count: [Int]
-    pub ep_next: [Int]
-    pub ep_keep: [Bool]
-    pub ep_out: [Int]
+    ep_sec: [Int]
+    ep_obj: [Int]
+    ep_start: [Int]
+    ep_len: [Int]
+    ep_cie: [Int]
+    ep_target: [Int]
+    ep_first_reloc: [Int]
+    ep_reloc_count: [Int]
+    ep_next: [Int]
+    ep_keep: [Bool]
+    ep_out: [Int]
     // First FDE describing each section id (-1: none), sized like `live`.
-    pub sec_fde: [Int]
+    sec_fde: [Int]
     // GOT slot per relocation target key (global id, or -1 - file symbol).
-    pub got: [Int:Int]
-    pub got_keys: [Int]
+    got: [Int:Int]
+    got_keys: [Int]
     // Per live row, the index in `rel_slot` of its first relocation; per
     // relocation of a live section, its GOT slot or -1 (link_scan_reloc).
-    pub rel_base: [Int]
-    pub rel_slot: [Int]
+    rel_base: [Int]
+    rel_slot: [Int]
     // Layout results.
-    pub got_start: Int
-    pub tls_start: Int
-    pub tls_end: Int
-    pub tls_align: Int
-    pub eh_start: Int
-    pub eh_size: Int
-    pub errors: [String]
+    got_start: Int
+    tls_start: Int
+    tls_end: Int
+    tls_align: Int
+    eh_start: Int
+    eh_size: Int
+    errors: [String]
 }
 
 fn link_context(bufs: ^[[U8]]) -> LinkContext Never! {
@@ -807,18 +807,18 @@ fn link_alloc_shim_target(name: String) -> String? Never! {
 // and loads like any input, so one path resolves and relocates it.
 
 struct LinkSynth {
-    pub text: [U8]
-    pub data: [U8]
-    pub bss: Int
-    pub def_names: [String]
+    text: [U8]
+    data: [U8]
+    bss: Int
+    def_names: [String]
     // 1 .text, 2 .data, 3 .bss
-    pub def_sections: [Int]
-    pub def_values: [Int]
-    pub rel_at: [Int]
-    pub rel_names: [String]
-    pub rel_types: [Int]
-    pub rel_addends: [Int]
-    pub names: [String:Bool]
+    def_sections: [Int]
+    def_values: [Int]
+    rel_at: [Int]
+    rel_names: [String]
+    rel_types: [Int]
+    rel_addends: [Int]
+    names: [String:Bool]
 }
 
 fn link_synth() -> LinkSynth Never! {
@@ -1304,26 +1304,26 @@ fn link_place(c: &LinkContext, rows: [Int], start: Int) -> Int Never! {
 }
 
 struct LinkLayout {
-    pub order: [[Int]]
-    pub phnum: Int
-    pub r_end: Int
-    pub text_start: Int
-    pub text_end: Int
-    pub rw_start: Int
-    pub file_end: Int
-    pub mem_end: Int
-    pub has_rw: Bool
-    pub has_tls: Bool
-    pub tdata_end: Int
-    pub init_start: Int
-    pub init_end: Int
-    pub fini_start: Int
-    pub fini_end: Int
-    pub preinit_start: Int
-    pub preinit_end: Int
-    pub bss_start: Int
+    order: [[Int]]
+    phnum: Int
+    r_end: Int
+    text_start: Int
+    text_end: Int
+    rw_start: Int
+    file_end: Int
+    mem_end: Int
+    has_rw: Bool
+    has_tls: Bool
+    tdata_end: Int
+    init_start: Int
+    init_end: Int
+    fini_start: Int
+    fini_end: Int
+    preinit_start: Int
+    preinit_end: Int
+    bss_start: Int
     // Keeps the layout from deriving comparisons over its nested lists.
-    pub notes: [String:Int]
+    notes: [String:Int]
 }
 
 fn link_layout(c: &LinkContext) -> LinkLayout Never! {
@@ -1798,7 +1798,7 @@ fn link_has_startup(c: LinkContext) -> Bool Never! {
 // as resolution needs them. The image starts at `_start`: the linker's own
 // startup object when the archives provide musl's `__libc_start_main` and
 // no object defines `_start`, else the objects' `_start`.
-pub fn x64_link_executable(names: [String], bufs: ^[[U8]]) -> X64ExecutableResult Never! {
+fn x64_link_executable(names: [String], bufs: ^[[U8]]) -> X64ExecutableResult Never! {
     c := link_context(^bufs)
     link_load_inputs(&c, names)
     if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}

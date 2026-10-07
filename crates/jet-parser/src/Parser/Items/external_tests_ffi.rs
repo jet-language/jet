@@ -30,12 +30,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-VISDEFAULT2=A: is the cursor at `#PubFile`?
-    pub(super) fn at_pub_file(&self) -> bool {
-        matches!(self.peek().kind, TokKind::Hash)
-            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PUB_FILE)
-    }
-
     /// D-PRELUDEX1=A: is the cursor at `#NoPrelude`?
     pub(super) fn at_no_prelude(&self) -> bool {
         matches!(self.peek().kind, TokKind::Hash)

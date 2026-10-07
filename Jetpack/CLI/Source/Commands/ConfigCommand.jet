@@ -16,7 +16,7 @@ enum ConfigGroup {
     }
 }
 
-pub fn cli_cmd_config(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_config(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     group_word :: parsed.positional.get(0) ?? ""
     group :: ConfigGroup.parse(group_word) ?? {
         theme.error("`jet os config {group_word}` isn't a command", "jet os config manages the env/dev trust store and sandbox substitute-or-refuse policy.", "try `jet os config trust list` or `jet os config sandbox status`.")

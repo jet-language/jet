@@ -259,7 +259,7 @@ fn cli_usage_test_scratch(label: String) -[FS]> String {
 
 #Test("cli project declares env is true for the phase one directive surface") {
     dir :: cli_usage_test_scratch("phase1_env")
-    files.write(files.join(dir, ENV_FILE), "use jetpack as pkg\npub fn shell() -> [JSON] {{\n    return [pkg.packages([\"ripgrep\"])]\n}}\n") ?? panic("write env.jet")
+    files.write(files.join(dir, ENV_FILE), "use jetpack as pkg\nfn shell() -> [JSON] {{\n    return [pkg.packages([\"ripgrep\"])]\n}}\n") ?? panic("write env.jet")
     assert(cli_project_declares_env(dir))
     files.remove_all(dir).drop("scratch cleanup")
 }

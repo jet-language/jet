@@ -5,7 +5,7 @@
 
 // The native provider's cache expectation for a toolchain ref: the verified
 // Hangar descriptor's identity, or None when there is none yet.
-pub fn provider_cc_toolchain_cache_expectation(verification: &StoreVerification, spec: RefSpec, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
+fn provider_cc_toolchain_cache_expectation(verification: &StoreVerification, spec: RefSpec, ctx: ProviderCtx) -[FS, Env]> CacheExpectation? Never! {
     target :: provider_cc_toolchain_requested_target(spec) ?? return None
     descriptor :: provider_cc_toolchain_resolve_for_target(&verification, ctx.store_dir, target, ctx.fixtures != None) ?? return None
     Val(CacheExpectation{identity: descriptor.cache_identity(ctx), owned_output: Val(descriptor.root), allow_unsigned_local: true})
@@ -14,7 +14,7 @@ pub fn provider_cc_toolchain_cache_expectation(verification: &StoreVerification,
 // The download plan for toolchain refs: cached when Hangar already holds a
 // verified descriptor, new for a fixture bundle, otherwise the signed Nix
 // closure's download plan.
-pub fn provider_cc_toolchain_plan_downloads(verification: &StoreVerification, specs: [RefSpec], ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
+fn provider_cc_toolchain_plan_downloads(verification: &StoreVerification, specs: [RefSpec], ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
     plan := DownloadPlan.empty()
     loop spec in specs {
         target :: provider_cc_toolchain_requested_target(spec) ?? {
@@ -64,7 +64,7 @@ pub fn provider_cc_toolchain_plan_downloads(verification: &StoreVerification, sp
 
 // Realize a toolchain ref: the verified Hangar descriptor, else a fixture
 // bundle, else the signed Nix acquisition.
-pub fn provider_cc_toolchain_realize(verification: &StoreVerification, spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> Realized ProviderError! {
+fn provider_cc_toolchain_realize(verification: &StoreVerification, spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> Realized ProviderError! {
     target :: provider_cc_toolchain_requested_target(spec) ?? {
         return Err(ProviderError.Unsupported(err.message()))
     }

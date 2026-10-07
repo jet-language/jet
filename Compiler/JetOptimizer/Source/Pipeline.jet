@@ -22,7 +22,7 @@ use jet_foundation.[
     mir_program_digest,
 ]
 
-pub enum MIROptimizationErrorKind {
+enum MIROptimizationErrorKind {
     InvalidSchema
     InvalidCFG
     InvalidDefUse
@@ -31,38 +31,38 @@ pub enum MIROptimizationErrorKind {
     Lint
 }
 
-pub struct MIROptimizationError {
-    pub pass: MIROptimizationPassID
-    pub kind: MIROptimizationErrorKind
-    pub function: MIRFunctionID?
-    pub span: Span
-    pub message: String
+struct MIROptimizationError {
+    pass: MIROptimizationPassID
+    kind: MIROptimizationErrorKind
+    function: MIRFunctionID?
+    span: Span
+    message: String
 }
 
-pub struct MIROptimizationReport {
-    pub production_order: [MIROptimizationPassID]
-    pub completed: [MIROptimizationPassID]
-    pub inline_calls_expanded: Int
-    pub reachable_blocks_removed: Int
-    pub folded_values: Int
-    pub dead_values_removed: Int
-    pub bounds_facts: Int
-    pub loop_facts: Int
-    pub vector_facts: Int
-    pub fixed_reductions_normalized: Int
-    pub acceleration_facts: Int
-    pub decision_rows: Int
+struct MIROptimizationReport {
+    production_order: [MIROptimizationPassID]
+    completed: [MIROptimizationPassID]
+    inline_calls_expanded: Int
+    reachable_blocks_removed: Int
+    folded_values: Int
+    dead_values_removed: Int
+    bounds_facts: Int
+    loop_facts: Int
+    vector_facts: Int
+    fixed_reductions_normalized: Int
+    acceleration_facts: Int
+    decision_rows: Int
 }
 
 // The optimizer rewrites the caller's program in place; a complete result
 // means that program is the optimized, sealed MIR.
-pub struct MIROptimizationResult {
-    pub report: MIROptimizationReport
-    pub error: MIROptimizationError?
-    pub complete: Bool
+struct MIROptimizationResult {
+    report: MIROptimizationReport
+    error: MIROptimizationError?
+    complete: Bool
 }
 
-pub fn mir_optimizer_production_order() -> [MIROptimizationPassID] Never! {
+fn mir_optimizer_production_order() -> [MIROptimizationPassID] Never! {
     [MIROptimizationPassID]{
         .LegalityVerification,
         .UnreachableBlockElimination,
@@ -121,7 +121,7 @@ fn mir_optimizer_succeeded(report: MIROptimizationReport) -> MIROptimizationResu
 // entry check (Rust MIROptimization `validate_after`). The per-function
 // passes run in waves on up to `threads` compiler threads (mir_pass_wave);
 // the result is the same for every thread count.
-pub fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threads: CompilerThreads) -> MIROptimizationResult {
+fn optimize_mir_program(program: &MIRProgram, full_verification: Bool, threads: CompilerThreads) -> MIROptimizationResult {
     report := mir_optimizer_empty_report()
     validation := mir_pass_check(program, .LegalityVerification, full_verification)
     if validation == .Val(error) -> return mir_optimizer_failed(error, report)
@@ -232,27 +232,27 @@ fn mir_pass_step_completes(step: Int) -> MIROptimizationPassID? Never! {
 // `cleanup` says the previous fixed-reduction normalization rewrote some
 // function, which a wave starting at step 7 or 8 acts on.
 struct MIRPassWaveInputs {
-    pub prelude_calls: [MIRPreludeCall]
-    pub purity: [U64:Bool]
-    pub cleanup: Bool
+    prelude_calls: [MIRPreludeCall]
+    purity: [U64:Bool]
+    cleanup: Bool
 }
 
 // What a wave's steps did, summed over functions. `first_bounds`,
 // `first_loops`, and `first_vectors` count the facts the first bounds and
 // loop passes derived; `bounds`, `loops`, and `vectors` the final ones.
 struct MIRPassWaveCounts {
-    pub blocks_removed: Int
-    pub folded: Int
-    pub dead: Int
-    pub first_bounds: Int
-    pub bounds: Int
-    pub first_loops: Int
-    pub first_vectors: Int
-    pub loops: Int
-    pub vectors: Int
-    pub normalized: Int
-    pub acceleration: Int
-    pub rewrote: Bool
+    blocks_removed: Int
+    folded: Int
+    dead: Int
+    first_bounds: Int
+    bounds: Int
+    first_loops: Int
+    first_vectors: Int
+    loops: Int
+    vectors: Int
+    normalized: Int
+    acceleration: Int
+    rewrote: Bool
 }
 
 fn mir_pass_wave_counts() -> MIRPassWaveCounts Never! {
@@ -351,7 +351,7 @@ MIR_PASS_BYTES_PER_INSTRUCTION :: 512
 // the slot and back out by single-element moves, and its thread steps the
 // functions in place behind the slot's guard, so no function is copied.
 struct MIRPassWaveSlot {
-    pub functions: [MIRFunction]
+    functions: [MIRFunction]
 }
 
 // Steps `first` through `last` on every function of `program`. One admitted
@@ -475,7 +475,7 @@ fn mir_pass_lint_error(pass: MIROptimizationPassID, failure: MIRLintError) -> MI
 // one failure per function in program order. The driver traps them all before
 // a single rerun, so reruns grow with the failing checks, not the failing
 // functions. An error naming no function is returned alone.
-pub fn mir_optimizer_function_failures(program: MIRProgram, error: MIROptimizationError) -> [MIROptimizationError] {
+fn mir_optimizer_function_failures(program: MIRProgram, error: MIROptimizationError) -> [MIROptimizationError] {
     pass :: error.pass
     lint :: error.kind == .Lint
     reported :: error.function ?? return [MIROptimizationError]{error}

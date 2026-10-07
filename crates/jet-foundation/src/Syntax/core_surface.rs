@@ -62,14 +62,17 @@ pub const KW_FN: &str = "fn";
 pub const GENERIC_CALL_OPEN: &str = "<";
 pub const GENERIC_CALL_CLOSE: &str = ">";
 
-/// S18 (ratified): marks an item as visible to other files (via `use`).
+/// D-MOD4: `pub use` re-export is the only remaining `pub` form (re-export
+/// ballot pending, card #4723). D-VIS-MODULE1: `pub` on a declaration or field is
+/// rejected (E0411) with a fix that deletes it.
 pub const KW_PUB: &str = "pub";
 
-/// D-VISDEFAULT2=A (ratified): marks an item private inside a `#PubFile` file.
+/// D-VIS-MODULE1 (owner directive 2026-10-07, card #4723): everything is public by
+/// default. `priv` marks a module (`priv module name`, usable only by its
+/// enclosing module) or a struct field (usable only by the type's own module).
 pub const KW_PRIV: &str = "priv";
 
-/// D-VISDEFAULT2=A (ratified): file-scope marker that flips default visibility to
-/// public-by-default for following top-level items (D-VISDEFAULT1=C).
+/// D-VIS-MODULE1: retired file marker, recognized only so E0418 can delete it.
 pub const MARKER_PUB_FILE: &str = "PubFile";
 
 /// D-PRELUDEX1=A (ratified 2026-06-28): file-scope marker that disables the
@@ -77,20 +80,20 @@ pub const MARKER_PUB_FILE: &str = "PubFile";
 /// the no-prefix surface.
 pub const MARKER_NO_PRELUDE: &str = "NoPrelude";
 
-/// D-VISDEFAULT2 option B (rejected): retired spelling for the private exception
-/// keyword — recognized only for E0412 teaching diagnostics.
+/// D-VISDEFAULT2 option B (rejected): foreign spelling of `priv`, recognized
+/// only for E0412 teaching diagnostics.
 pub const FOREIGN_PRIVATE: &str = "private";
 /// D-SHAPE-CLI-COMPLETE1=A: external program schema source for
 /// `jet self completions SHELL --for PROGRAM`.
 pub const CLI_COMPLETIONS_FOR: &str = "--for";
 
-/// D-VISDEFAULT2 option B (rejected): retired spelling for the file marker —
-/// recognized only for E0418 teaching diagnostics.
+/// D-VIS-MODULE1: retired file marker spelling, recognized only so E0418 can
+/// delete it.
 pub const MARKER_PUBLIC_FILE: &str = "PublicFile";
 
-/// D-PUBPKG1=A (ratified): the `pub(package)` visibility qualifier — restricts
-/// access to sibling packages in the same payload/workspace.
-pub const PUB_PACKAGE_QUALIFIER: &str = "package";
+/// D-VIS-MODULE1: `priv(package) module` — the module is usable by every module
+/// of the same package and invisible to other packages.
+pub const PRIV_PACKAGE_QUALIFIER: &str = "package";
 
 /// S2 / D-BIND1 / D-BIND4 / D-BIND-BARE1: immutable binding sigil `name :: expr`.
 /// D-BIND-BARE1 retires typed bindings (`name: Type :: expr`); types ride the

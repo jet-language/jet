@@ -18,17 +18,17 @@
 
 use jet_foundation.[JET_RUST_DEBUG_ESCAPED_RANGES]
 
-struct X64ImageFixup { pub at: Int, pub label: Int }
+struct X64ImageFixup { at: Int, label: Int }
 
 // One hand-assembled function: local labels, rel32 fixups to them, and
 // relocations to other runtime symbols. Message text is placed after the code.
 struct X64ImageAsm {
-    pub code: [U8]
-    pub relocs: [X64Reloc]
-    pub labels: [Int]
-    pub fixups: [X64ImageFixup]
-    pub texts: [String]
-    pub text_labels: [Int]
+    code: [U8]
+    relocs: [X64Reloc]
+    labels: [Int]
+    fixups: [X64ImageFixup]
+    texts: [String]
+    text_labels: [Int]
 }
 
 X64_IMAGE_STOP_STATUS :: prep { 70 }
@@ -1186,7 +1186,7 @@ fn x64_image_cursor_drop() -> X64CompiledFunction Never! {
 
 // Every function of the freestanding runtime; the linker resolves runtime
 // relocations against their names.
-pub fn x64_image_runtime() -> [X64CompiledFunction] Never! {
+fn x64_image_runtime() -> [X64CompiledFunction] Never! {
     [X64CompiledFunction]{
         x64_image_write(),
         x64_image_stop(),

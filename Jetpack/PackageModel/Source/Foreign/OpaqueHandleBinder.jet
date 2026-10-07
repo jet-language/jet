@@ -10,14 +10,14 @@ OPAQUE_HANDLE_CLOSE_VERBS :: prep { [String]{"close", "destroy", "free", "releas
 
 // Thread safety is an explicit overlay fact. `Unspecified` is intentional:
 // the binder never infers a concurrency guarantee from C spelling.
-pub enum ThreadSafety {
+enum ThreadSafety {
     Unspecified
     Safe
     Unsafe
 }
 
 // Why a handle's close symbol was selected.
-pub enum CloseSource {
+enum CloseSource {
     Conventional
     Overlay
 }
@@ -25,9 +25,9 @@ pub enum CloseSource {
 // Native libraries that must stay attached to one generated binding.
 // `primary` is the library the C import names; `transitive` holds only
 // libraries the overlay supplied, never ones guessed from includes or symbols.
-pub struct LinkClosure {
-    pub primary: String
-    pub transitive: [String]
+struct LinkClosure {
+    primary: String
+    transitive: [String]
 
     // The overlay's libraries without the primary or repeats, sorted.
     fn new(primary: String, transitive: [String]) -> LinkClosure Never! {
@@ -49,15 +49,15 @@ pub struct LinkClosure {
 }
 
 // Explicit metadata supplied by a package's C binding overlay.
-pub struct HandleOverlay {
+struct HandleOverlay {
     // A C typedef, its generated Jet name, or an opaque struct tag mapped to a
     // close symbol; required when conventional discovery is absent or
     // ambiguous.
-    pub close_functions: [String: String]
+    close_functions: [String: String]
     // Per-handle concurrency declarations; missing entries stay unspecified.
-    pub thread_safety: [String: ThreadSafety]
+    thread_safety: [String: ThreadSafety]
     // Explicit transitive libraries this binding needs.
-    pub links: [String]
+    links: [String]
 
     fn empty() -> HandleOverlay Never! {
         HandleOverlay{close_functions: [String: String]{}, thread_safety: [String: ThreadSafety]{}, links: [String]{}}
@@ -107,16 +107,16 @@ pub struct HandleOverlay {
 
 // A generated owned handle. Every fact is owned, so its close symbol is
 // mandatory; handles without one stay in `unresolved`.
-pub struct HandleFact {
+struct HandleFact {
     // The C typedef spelling that introduced the opaque pointer.
-    pub typedef_name: String
+    typedef_name: String
     // The generated nominal Jet type name.
-    pub jet_name: String
+    jet_name: String
     // The native close function.
-    pub close: String
-    pub close_source: CloseSource
-    pub thread_safety: ThreadSafety
-    pub link_closure: LinkClosure
+    close: String
+    close_source: CloseSource
+    thread_safety: ThreadSafety
+    link_closure: LinkClosure
 }
 
 // An opaque pointer shape: the incomplete struct (or `void`) it names and
@@ -151,14 +151,14 @@ struct OpaqueCTypeShape {
 }
 
 // Opaque handle discovery over one C header, consumed by the C binder.
-pub struct OpaqueHandleDiscovery {
-    pub handles: [HandleFact]
+struct OpaqueHandleDiscovery {
+    handles: [HandleFact]
     // Opaque typedefs that cannot safely become owned handles, with the
     // reason, so the binder reports them instead of pretending they are
     // scalars.
-    pub unresolved: [(typedef_name: String, reason: String)]
-    opaque: [String: OpaqueHandleShape]
-    handle_indices: [String: Int]
+    unresolved: [(typedef_name: String, reason: String)]
+    priv opaque: [String: OpaqueHandleShape]
+    priv handle_indices: [String: Int]
 
     // Discover opaque struct-pointer typedefs and resolve their ownership
     // facts. `source` is the original header or the binder's cleaned
@@ -265,7 +265,7 @@ pub struct OpaqueHandleDiscovery {
     // One empty nominal struct per handle, then a blank line.
     fn render_type_declarations(self) -> String Never! {
         lines := [String]{}
-        loop handle in self.handles -> &lines.push("pub struct {handle.jet_name} {{}}\n")
+        loop handle in self.handles -> &lines.push("struct {handle.jet_name} {{}}\n")
         if lines.len() == 0 -> return ""
         "{lines.join("")}\n"
     }

@@ -7,7 +7,7 @@
 // impl through the codec trait. A demanded impl's methods are scanned in
 // turn. A backend skips every impl row whose flag is false; a missed demand
 // fails the backend's trait check, it never changes behavior.
-pub fn mir_demanded_codec_impls(program: MIRProgram) -> [Bool] Never! {
+fn mir_demanded_codec_impls(program: MIRProgram) -> [Bool] Never! {
     keep := [Bool]{}
     by_method := [String:Int]{}
     by_name := [String:[Int]]{}
@@ -95,7 +95,7 @@ pub fn mir_demanded_codec_impls(program: MIRProgram) -> [Bool] Never! {
 
 // Every nominal type name inside `ty`, including type arguments and
 // collection elements.
-pub fn mir_type_nominal_names(ty: MIRType, names: &[String]) Never! {
+fn mir_type_nominal_names(ty: MIRType, names: &[String]) Never! {
     if ty.kind == {
         .Apply(name, args) -> {
             &names.push(name.name)

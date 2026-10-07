@@ -1,14 +1,14 @@
-pub struct CalcCell {
-    kind: Int
-    value: Int
-    left: String
-    right: String
-    deps: [String]
+struct CalcCell {
+    priv kind: Int
+    priv value: Int
+    priv left: String
+    priv right: String
+    priv deps: [String]
 }
 
-pub struct RecalcResult {
-    values: [String:Int]
-    touched: [String]
+struct RecalcResult {
+    priv values: [String:Int]
+    priv touched: [String]
 }
 
 fn eval(cell: CalcCell, values: [String:Int]) -> Int {
@@ -16,7 +16,7 @@ fn eval(cell: CalcCell, values: [String:Int]) -> Int {
     return (values.get(~cell.left) ?? 0) + (values.get(~cell.right) ?? 0)
 }
 
-pub fn recalc(cells: [String:CalcCell], previous: [String:Int], changed: String) -> RecalcResult {
+fn recalc(cells: [String:CalcCell], previous: [String:Int], changed: String) -> RecalcResult {
     values := previous.copy()
     touched := [String]{}
     dirty := [String:Bool]{}
@@ -38,7 +38,7 @@ pub fn recalc(cells: [String:CalcCell], previous: [String:Int], changed: String)
     return RecalcResult{ values: values, touched: touched }
 }
 
-pub fn sample() -> [String] {
+fn sample() -> [String] {
     cells := [String:CalcCell]{
         "a": CalcCell{ kind: 0, value: 2, left: "", right: "", deps: [] },
         "one": CalcCell{ kind: 0, value: 1, left: "", right: "", deps: [] },

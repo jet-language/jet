@@ -54,7 +54,7 @@ struct GoFunction {
 }
 
 // Build the Go source at `source_path` into one c-archive and bind its exports.
-pub fn pkg_go_bind(source_path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
+fn pkg_go_bind(source_path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
     pkg_binder_require_lib_name(lib)
     functions :: pkg_go_parse_exports(source)
     pkg_binder_create_dir_all(cache, "could not create binding cache")
@@ -136,7 +136,7 @@ fn pkg_go_render(lib: String, functions: [GoFunction]) -> String Never! {
         }
         &out.push("    fn {function.name}{pkg_go_params(function.params, false)}{result} = \"{function.name}\"\n")
     }
-    &out.push("}}\nuse c.{abi} as abi\n\npub struct Handle {{ value: Int }}\n\n")
+    &out.push("}}\nuse c.{abi} as abi\n\nstruct Handle {{ value: Int }}\n\n")
     loop function in functions {
         args := [String]{}
         loop param in function.params {
@@ -152,9 +152,9 @@ fn pkg_go_render(lib: String, functions: [GoFunction]) -> String Never! {
                     .Handle -> "Handle{{ value: {call} }}"
                     else -> call
                 }
-                &out.push("pub fn {function.name}{pkg_go_params(function.params, true)} -> {scalar.public_jet()} {{\n    return {body}\n}}\n\n")
+                &out.push("fn {function.name}{pkg_go_params(function.params, true)} -> {scalar.public_jet()} {{\n    return {body}\n}}\n\n")
             }
-            .None -> &out.push("pub fn {function.name}{pkg_go_params(function.params, true)} {{\n    {call}\n}}\n\n")
+            .None -> &out.push("fn {function.name}{pkg_go_params(function.params, true)} {{\n    {call}\n}}\n\n")
         }
     }
     out.join("")

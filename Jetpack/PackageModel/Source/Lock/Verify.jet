@@ -5,7 +5,7 @@
 // The lock record kind that is incomplete. The distinction lets hosts
 // report a missing generated fact without treating it as a request to move a
 // declared dependency.
-pub enum LockIncompleteKind {
+enum LockIncompleteKind {
     Dependency
     Toolchain
     SourceChannel
@@ -21,8 +21,8 @@ pub enum LockIncompleteKind {
 
 // Safe regeneration data for a lock diagnostic. `argv` stays separate from a
 // shell command string so CLI hosts can run it without interpolation.
-pub struct LockRegeneration {
-    pub argv: [String]
+struct LockRegeneration {
+    argv: [String]
 
     fn dependency() -> LockRegeneration Never! {
         LockRegeneration{argv: [String]{BINARY_NAME, "fetch"}}
@@ -47,11 +47,11 @@ pub struct LockRegeneration {
 // A generated lock record is missing one concrete fact a later locked or
 // offline realization needs.
 #Error
-pub struct LockCompletenessError {
-    pub kind: LockIncompleteKind
-    pub name: String
-    pub missing_field: String
-    pub regeneration: LockRegeneration
+struct LockCompletenessError {
+    kind: LockIncompleteKind
+    name: String
+    missing_field: String
+    regeneration: LockRegeneration
 
     fn missing(kind: LockIncompleteKind, name: String, missing_field: String, regeneration: LockRegeneration) -> LockCompletenessError Never! {
         LockCompletenessError{kind: kind, name: name, missing_field: missing_field, regeneration: regeneration}
@@ -111,7 +111,7 @@ fn pkg_lock_same_source_kind(spec: DepSpec, source: LockSource) -> Bool Never! {
 // Validate only the lock material the manifest's direct dependencies need.
 // Source identity mismatches are left to `pkg_lock_verify_lock_matches_manifest`,
 // which reports a stale lock and asks the user to update it.
-pub fn pkg_lock_validate_manifest_lock_completeness(manifest: Manifest, lock: LockFile) LockCompletenessError! {
+fn pkg_lock_validate_manifest_lock_completeness(manifest: Manifest, lock: LockFile) LockCompletenessError! {
     loop dep_name in pkg_lock_manifest_dependency_names(manifest) {
         spec :: manifest.dependencies[dep_name]
         package :: lock.find_package(dep_name) ?? return Err(LockCompletenessError.dependency(dep_name, "package"))
@@ -125,7 +125,7 @@ pub fn pkg_lock_validate_manifest_lock_completeness(manifest: Manifest, lock: Lo
 // Check that the lock still describes each manifest dependency's declared
 // source. Stale-only: missing generated facts are reported by
 // `pkg_lock_verify_all_manifest_deps_locked` as a typed completeness error.
-pub fn pkg_lock_verify_lock_matches_manifest(lock: LockFile, manifest: Manifest, lock_path: String) LockError! {
+fn pkg_lock_verify_lock_matches_manifest(lock: LockFile, manifest: Manifest, lock_path: String) LockError! {
     loop dep_name in pkg_lock_manifest_dependency_names(manifest) {
         spec :: manifest.dependencies[dep_name]
         // The stronger typed verifier owns a missing package record.
@@ -149,13 +149,13 @@ pub fn pkg_lock_verify_lock_matches_manifest(lock: LockFile, manifest: Manifest,
 // manifest dependency must carry the exact generated facts a locked/offline
 // realization consumes. Source-kind mismatches stay with the stale verifier
 // so callers can tell "regenerate the lock" from "update the lock".
-pub fn pkg_lock_verify_all_manifest_deps_locked(manifest: Manifest, lock: LockFile) LockCompletenessError! {
+fn pkg_lock_verify_all_manifest_deps_locked(manifest: Manifest, lock: LockFile) LockCompletenessError! {
     pkg_lock_validate_manifest_lock_completeness(manifest, lock)
 }
 
 // D-RINGLAYER1=A M2: the manifest `runtime:` ceiling set on locked packages
 // at fetch time.
-pub fn pkg_lock_layer_from_manifest(manifest: Manifest) -> MIRRuntimeLayer? Never! {
+fn pkg_lock_layer_from_manifest(manifest: Manifest) -> MIRRuntimeLayer? Never! {
     manifest.package.layer
 }
 
@@ -165,7 +165,7 @@ fn pkg_lock_e3512(what: String, why: String, fix: String) -> Diagnostic Never! {
 
 // D-BUILDGEN1: `--locked` requires every generated input to already be in
 // the unified lock with the same hash.
-pub fn pkg_lock_verify_locked_generated_inputs(project_root: String, generated: [ComptimeInput]) LockError! -[FS]> {
+fn pkg_lock_verify_locked_generated_inputs(project_root: String, generated: [ComptimeInput]) LockError! -[FS]> {
     loaded :: pkg_lock_load(project_root)
     if loaded == None {
         if generated.len() == 0 -> return
@@ -180,7 +180,7 @@ pub fn pkg_lock_verify_locked_generated_inputs(project_root: String, generated: 
 // D-BUILDGEN1: record generated-module output hashes in the unified lock,
 // upserting by managed path so a rebuild replaces drift instead of
 // appending.
-pub fn pkg_lock_record_generated_inputs(project_root: String, generated: [ComptimeInput], locked: Bool, stamp: BuildStamp) LockError! -[FS, Env, Time]> {
+fn pkg_lock_record_generated_inputs(project_root: String, generated: [ComptimeInput], locked: Bool, stamp: BuildStamp) LockError! -[FS, Env, Time]> {
     lock_was_present :: files.exists(pkg_lock_file_path(project_root))
     pkg_lock_record_generated_inputs_with_lock_state(project_root, generated, locked, stamp, lock_was_present)
 }
@@ -188,7 +188,7 @@ pub fn pkg_lock_record_generated_inputs(project_root: String, generated: [Compti
 // Record generated provenance while preserving whether the build started
 // with a lock. The driver captures that state before its runtime reload can
 // publish any lock update, so a first build bootstraps dependencies once.
-pub fn pkg_lock_record_generated_inputs_with_lock_state(project_root: String, generated: [ComptimeInput], locked: Bool, stamp: BuildStamp, lock_was_present: Bool) LockError! -[FS, Env, Time]> {
+fn pkg_lock_record_generated_inputs_with_lock_state(project_root: String, generated: [ComptimeInput], locked: Bool, stamp: BuildStamp, lock_was_present: Bool) LockError! -[FS, Env, Time]> {
     lock := pkg_lock_load_or_empty(project_root)
     if locked {
         expected :: pkg_lock_dedup_comptime_inputs(pkg_lock_sorted_comptime_inputs(lock.comptime_inputs))
@@ -266,7 +266,7 @@ fn pkg_lock_locked_build_contribution_set(package: String, contributions: [FactC
 }
 
 // D-CONF-SPLIT1=A: locked builds replay the exact computed writer set.
-pub fn pkg_lock_verify_locked_build_contributions(project_root: String, package: String, contributions: [FactContribution]) LockError! -[FS]> {
+fn pkg_lock_verify_locked_build_contributions(project_root: String, package: String, contributions: [FactContribution]) LockError! -[FS]> {
     actual :: pkg_lock_locked_build_contribution_set(package, contributions)
     loaded :: pkg_lock_load(project_root)
     if loaded == None {
@@ -284,7 +284,7 @@ pub fn pkg_lock_verify_locked_build_contributions(project_root: String, package:
 
 // D-CONF-SPLIT1=A: replace one package's computed writer records in the
 // unified lock after the selected runtime bundle passed the front end.
-pub fn pkg_lock_record_build_contributions(project_root: String, package: String, contributions: [FactContribution], locked: Bool, stamp: BuildStamp) LockError! -[FS, Env, Time]> {
+fn pkg_lock_record_build_contributions(project_root: String, package: String, contributions: [FactContribution], locked: Bool, stamp: BuildStamp) LockError! -[FS, Env, Time]> {
     if locked -> return pkg_lock_verify_locked_build_contributions(project_root, package, contributions)
     lock := pkg_lock_load_or_empty(project_root)
     // Explicit foreign-build selections are project-level activation state,
@@ -312,7 +312,7 @@ fn pkg_lock_write_error(path: String, error: String) -> Diagnostic Never! {
 // the sorted direct-dependency fingerprints, and (S2/D-MEM1) the snapshotted
 // public-fn capability digest when one exists, each NUL-terminated. An
 // empty `cap_digest` (first publish) leaves the tree+deps form unchanged.
-pub fn pkg_lock_compute_fingerprint(tree_hash: String, dep_fingerprints: [String], cap_digest: String) -> String Never! {
+fn pkg_lock_compute_fingerprint(tree_hash: String, dep_fingerprints: [String], cap_digest: String) -> String Never! {
     data := [U8]{}
     loop byte in tree_hash.bytes() -> &data.push(byte)
     &data.push(U8{0})
@@ -330,7 +330,7 @@ pub fn pkg_lock_compute_fingerprint(tree_hash: String, dep_fingerprints: [String
 }
 
 // E1201: two versions of one package with their dependency chains.
-pub fn pkg_lock_e1201(package_name: String, version_a: String, chain_a: [String], version_b: String, chain_b: [String]) -> Diagnostic Never! {
+fn pkg_lock_e1201(package_name: String, version_a: String, chain_a: [String], version_b: String, chain_b: [String]) -> Diagnostic Never! {
     diagnostic_from_registry(
         "E1201",
         None,
@@ -341,38 +341,38 @@ pub fn pkg_lock_e1201(package_name: String, version_a: String, chain_a: [String]
 }
 
 // E1202: the lock is out of date.
-pub fn pkg_lock_e1202(lock_path: String) -> Diagnostic Never! {
+fn pkg_lock_e1202(lock_path: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1202", None, "the lock file is out of date", "`{PACKAGE_FILE}` changed since `{UNIFIED_LOCK_FILE}` was last written", "run `jet fetch` to update `{UNIFIED_LOCK_FILE}`")
 }
 
 // E1205: lock data is corrupt or exceeds the reader safety bound.
-pub fn pkg_lock_e1205_lock_corrupt(lock_path: String) -> Diagnostic Never! {
+fn pkg_lock_e1205_lock_corrupt(lock_path: String) -> Diagnostic Never! {
     pkg_diagnostic_from_row("E1205", [(name: String, value: String)]{(name: "path", value: lock_path)}, None)
 }
 
 // E1214: the lock declares a format version outside this reader's support
 // set.
-pub fn pkg_lock_e1214_lock_unsupported(lock_path: String, version: String, supported: String) -> Diagnostic Never! {
+fn pkg_lock_e1214_lock_unsupported(lock_path: String, version: String, supported: String) -> Diagnostic Never! {
     pkg_diagnostic_from_row("E1214", [(name: String, value: String)]{(name: "path", value: lock_path), (name: "version", value: version), (name: "supported", value: supported)}, None)
 }
 
 // E1202 for a workspace lock whose source/index identity cannot be trusted.
-pub fn pkg_lock_e1202_workspace(lock_path: String) -> Diagnostic Never! {
+fn pkg_lock_e1202_workspace(lock_path: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1202", None, "the workspace lock `{lock_path}` is malformed or stale", "workspace membership and overlay facts must match the current `workspace.jet` and Package sources", "run `jetpack env` from the workspace root after fixing the workspace or Package sources")
 }
 
 // E1202 for a workspace lock write that did not complete.
-pub fn pkg_lock_e1202_workspace_write(lock_path: String, error: String) -> Diagnostic Never! {
+fn pkg_lock_e1202_workspace_write(lock_path: String, error: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1202", None, "the workspace lock `{lock_path}` could not be written", "the workspace index is not usable until the lock write succeeds: {error}", "fix the workspace lock directory permissions or storage error, then run `jetpack env` again")
 }
 
 // E1203: git is not installed.
-pub fn pkg_lock_e1203() -> Diagnostic Never! {
+fn pkg_lock_e1203() -> Diagnostic Never! {
     diagnostic_from_registry("E1203", None, "`git` is not installed", "git dependencies need the `git` command to fetch source trees", "install git and make sure it is on your PATH")
 }
 
 // The lock source selector text for a git dependency.
-pub fn pkg_lock_git_selector_str(selector: GitSelector) -> String Never! {
+fn pkg_lock_git_selector_str(selector: GitSelector) -> String Never! {
     if selector == {
         .Tag(name) -> "tag = \"{pkg_lock_escape(name)}\""
         .Branch(branch) -> "branch = \"{pkg_lock_escape(branch)}\""
@@ -381,7 +381,7 @@ pub fn pkg_lock_git_selector_str(selector: GitSelector) -> String Never! {
 }
 
 // The lock source recorded for a manifest dependency.
-pub fn pkg_lock_dep_source(dep_name: String, spec: DepSpec) -> LockSource Never! {
+fn pkg_lock_dep_source(dep_name: String, spec: DepSpec) -> LockSource Never! {
     if spec == {
         .Path(path) -> LockSource.Path(path)
         .Git(url, selector) -> LockSource.Git{url: url, selector: pkg_lock_git_selector_str(selector)}

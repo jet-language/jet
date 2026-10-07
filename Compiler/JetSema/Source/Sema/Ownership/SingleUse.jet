@@ -32,7 +32,7 @@ fn sema_single_use_type_name(ty: Type) -> String? {
 
 // Rust `type_is_single_use` over the registry: a `#SingleUse` struct or enum,
 // or the Core `Delivery` handle (Rust `core_single_use_type`).
-pub fn sema_single_use_type(ty: Type, environment: SemaScopeEnvironment) -> Bool {
+fn sema_single_use_type(ty: Type, environment: SemaScopeEnvironment) -> Bool {
     name :: sema_single_use_type_name(ty) ?? return false
     if name == "Delivery" -> return true
     definition :: sema_serde_type_definition(environment, name) ?? return false
@@ -41,7 +41,7 @@ pub fn sema_single_use_type(ty: Type, environment: SemaScopeEnvironment) -> Bool
 
 // D-LIN1: a binding that owns a `#SingleUse` value carries the consume duty.
 // The duty transfers on `y :: x`: the move marks `x` consumed and `y` owns it.
-pub fn sema_single_use_note_binding(state: &SemaOwnershipState, symbol: Symbol, environment: SemaScopeEnvironment) {
+fn sema_single_use_note_binding(state: &SemaOwnershipState, symbol: Symbol, environment: SemaScopeEnvironment) {
     ty :: symbol.ty ?? return
     if !sema_single_use_type(ty, environment) -> return
     index := state.declarations.len() - 1
@@ -55,11 +55,11 @@ pub fn sema_single_use_note_binding(state: &SemaOwnershipState, symbol: Symbol, 
 }
 
 // E0140 (D-FACT-WORD1=A): `_ :: value` skips the job of a `#SingleUse` value.
-pub fn sema_single_use_check_discard(ty: Type, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
+fn sema_single_use_check_discard(ty: Type, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
     if sema_single_use_type(ty, environment) -> &diagnostics.push(sema_single_use_diag_discarded(span))
 }
 
-pub fn sema_single_use_key(state: SemaOwnershipState, key: String) -> Bool Never! {
+fn sema_single_use_key(state: SemaOwnershipState, key: String) -> Bool Never! {
     loop fact in state.declarations {
         if fact.key == key -> return fact.single_use
     }
@@ -76,7 +76,7 @@ fn sema_single_use_argument(state: SemaOwnershipState, expr: Expr, scopes: SemaS
 }
 
 // E0142: only an owning (`^`) parameter may receive a `#SingleUse` value.
-pub fn sema_single_use_check_argument(state: SemaOwnershipState, callee: String, param_convention: AccessConvention, expr: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_single_use_check_argument(state: SemaOwnershipState, callee: String, param_convention: AccessConvention, expr: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if param_convention == AccessConvention.Move -> return true
     name :: sema_single_use_argument(state, expr, scopes) ?? return true
     &diagnostics.push(sema_single_use_diag_aliased(name, callee, expr_span(expr)))
@@ -93,7 +93,7 @@ fn sema_single_use_moved(state: SemaOwnershipState, key: String) -> Bool Never! 
 
 // Rust `check_single_use_consumed_in_current_scope`: E0140 for each
 // `#SingleUse` binding of the closing scope that is not consumed.
-pub fn sema_single_use_check_scope_end(state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
+fn sema_single_use_check_scope_end(state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
     loop fact in state.declarations {
         if fact.single_use && fact.active && fact.scope_depth >= state.scope_depth && !sema_single_use_moved(state, fact.key) {
             &diagnostics.push(sema_single_use_diag_unconsumed(fact.name, fact.span))
@@ -102,7 +102,7 @@ pub fn sema_single_use_check_scope_end(state: SemaOwnershipState, diagnostics: &
 }
 
 // Rust `pop_scope`: the scope-end duty check, then the lexical scope exit.
-pub fn sema_single_use_leave_scope(scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
+fn sema_single_use_leave_scope(scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
     sema_single_use_check_scope_end(state, &diagnostics)
     sema_scope_leave(&scopes, &state)
 }
@@ -111,7 +111,7 @@ pub fn sema_single_use_leave_scope(scopes: &SemaScopeTable, state: &SemaOwnershi
 // consumed on only one path would look consumed after the branch. Compare
 // the paths that reach the merge directly, over the bindings of the current
 // scope that were unconsumed before the branch.
-pub fn sema_single_use_check_paths(before: SemaOwnershipState, paths: [SemaOwnershipState], diagnostics: &[Diagnostic]) {
+fn sema_single_use_check_paths(before: SemaOwnershipState, paths: [SemaOwnershipState], diagnostics: &[Diagnostic]) {
     loop fact in before.declarations {
         if !fact.single_use || !fact.active || fact.scope_depth != before.scope_depth -> next
         if sema_single_use_moved(before, fact.key) -> next
@@ -131,7 +131,7 @@ pub fn sema_single_use_check_paths(before: SemaOwnershipState, paths: [SemaOwner
 // Discarding a `#SingleUse` value this way is legal only in an audited
 // `#Unsafe("reason")` region or function (E0143). The value is consumed even
 // on the E0143 path, so no E0140 cascades at scope end.
-pub fn sema_single_use_check_consume(call: Call, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_single_use_check_consume(call: Call, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.args.len() != 1 {
         &diagnostics.push(sema_error("E0103", call.name_span, "`consume` discards exactly one value", "`drop` throws a single value away, running its cleanup", "e.g. consume(x)"))
         loop argument in call.args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)

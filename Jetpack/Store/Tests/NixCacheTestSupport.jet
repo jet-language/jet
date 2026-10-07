@@ -74,11 +74,11 @@ fn store_nix_test_signed_narinfo_with_payload(store_path: String, nar_name: Stri
 
 // A loopback binary cache serving `routes` (URL path -> body); absent routes
 // are 404 (Rust `TestCacheServer`).
-pub struct NixTestCacheServer {
-    pub endpoint: String
-    site: String
-    server: HTTPServer
-    serving: Task
+struct NixTestCacheServer {
+    endpoint: String
+    priv site: String
+    priv server: HTTPServer
+    priv serving: Task
 
     fn start(site: String, routes: [String: [U8]]) -> NixTestCacheServer Never! {
         store_nix_test_write_site(site, routes)

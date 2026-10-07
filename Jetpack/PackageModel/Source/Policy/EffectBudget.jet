@@ -19,63 +19,63 @@ EFFECT_BUILD_ENTRY :: prep { "build" }
 // Sema's per-function effect summary (Rust `Sema::EffectSummary`): the
 // directly performed effects, the static call edges, and whether an open
 // callee makes the function conservatively maximal.
-pub struct PackageEffectSummary {
-    pub direct: [String]
-    pub edges: [String]
-    pub maximal: Bool
+struct PackageEffectSummary {
+    direct: [String]
+    edges: [String]
+    maximal: Bool
 }
 
 // A dependency import of the entry module and the root-side span where it
 // crosses the budget boundary (`ImportKind::Module` name span, or the
 // module-alias span of an unqualified import).
-pub struct EffectBudgetImport {
-    pub name: String
-    pub span: Span
+struct EffectBudgetImport {
+    name: String
+    span: Span
 }
 
 // The selected runnable output of the entry module (`ConstDef.resolved_output`
 // with `selected`): its defining module and semantic name.
-pub struct EffectBudgetOutput {
-    pub module_index: Int
-    pub semantic_name: String
+struct EffectBudgetOutput {
+    module_index: Int
+    semantic_name: String
 }
 
 // One loaded module as the budget reads it (Rust `LoadedModule`).
-pub struct EffectBudgetModule {
-    pub path: String
-    pub alias: String
+struct EffectBudgetModule {
+    path: String
+    alias: String
     // `Sema::effect_key` of every function, method, and trait-impl method the
     // module defines, in item order.
-    pub function_keys: [String]
-    pub imports: [EffectBudgetImport]
+    function_keys: [String]
+    imports: [EffectBudgetImport]
     // Whether the module declares the `build(BuildContext)` entry.
-    pub has_build_entry: Bool
+    has_build_entry: Bool
 }
 
 // The checked program as the budget reads it (Rust `ProgramBundle`).
-pub struct EffectBudgetProgram {
-    pub entry: Int
-    pub modules: [EffectBudgetModule]
+struct EffectBudgetProgram {
+    entry: Int
+    modules: [EffectBudgetModule]
     // Dependency name -> its source root (`deps:` and hangar-realized `use`).
-    pub dep_roots: [String: String]
-    pub selected_output: EffectBudgetOutput?
+    dep_roots: [String: String]
+    selected_output: EffectBudgetOutput?
 }
 
 // One package's (root, or a dependency) aggregated effects.
-pub struct PackageEffects {
+struct PackageEffects {
     // `root` for the building package itself, else the dependency name.
-    pub name: String
-    pub effects: [String]
+    name: String
+    effects: [String]
     // One deterministic function identity reaching each effect (E1220).
-    pub effect_sites: [String: String]
+    effect_sites: [String: String]
     // Function identities where a deniable Panic stop enters the graph.
-    pub panic_sites: [String]
+    panic_sites: [String]
     // Root-side source location where a dependency crosses the boundary.
-    pub boundary_span: Span?
+    boundary_span: Span?
 }
 
 // `Sema::effect_key`: `Type::name` for methods, the bare name otherwise.
-pub fn pkg_effect_key(owner_type: String?, name: String) -> String Never! {
+fn pkg_effect_key(owner_type: String?, name: String) -> String Never! {
     owner :: owner_type ?? return name
     "{owner}::{name}"
 }
@@ -120,7 +120,7 @@ fn pkg_effect_module_owner(program: EffectBudgetProgram, path: String) -> String
 // whose module defines them. Loaded helpers the selected driver never calls
 // must not become application provenance; functions with no solved entry
 // contribute nothing.
-pub fn pkg_compute_package_effects(program: EffectBudgetProgram, solved: [String: [String]], summaries: [String: PackageEffectSummary]) -> [PackageEffects] Never! {
+fn pkg_compute_package_effects(program: EffectBudgetProgram, solved: [String: [String]], summaries: [String: PackageEffectSummary]) -> [PackageEffects] Never! {
     reachable :: pkg_effect_entry_reachable_keys(program, summaries, "run")
     by_package := [String: PackageEffects]{}
     loop loaded in program.modules {
@@ -260,7 +260,7 @@ fn pkg_panic_site(key: String, summaries: [String: PackageEffectSummary], seen: 
 }
 
 // The always-on one-line `jet build` summary.
-pub fn pkg_effect_summary_line(entries: [PackageEffects]) -> String Never! {
+fn pkg_effect_summary_line(entries: [PackageEffects]) -> String Never! {
     all := [String]{}
     loop entry in entries {
         loop effect_name in entry.effects -> &all.push(effect_name)
@@ -277,7 +277,7 @@ pub fn pkg_effect_summary_line(entries: [PackageEffects]) -> String Never! {
 }
 
 // Per-package effect names, sorted, for lockfile provenance.
-pub fn pkg_effect_provenance_for(entries: [PackageEffects], name: String) -> [String] Never! {
+fn pkg_effect_provenance_for(entries: [PackageEffects], name: String) -> [String] Never! {
     loop entry in entries {
         if entry.name == name -> return entry.effects
     }
@@ -298,7 +298,7 @@ fn pkg_effect_budget_rights(names: [String]) -> [String] Never! {
 // inside `deny` fails with E1220, unless `authority.grants` covers it for
 // that dependency. D-EFFTREE1: rows may be ancestor roots; the substrate
 // verdict decides. D-PANICROOT1: Panic is deny-only.
-pub fn pkg_effect_enforce(entries: [PackageEffects], manifest: PackageFacts) -> [Diagnostic] Never! {
+fn pkg_effect_enforce(entries: [PackageEffects], manifest: PackageFacts) -> [Diagnostic] Never! {
     if !manifest.effects_enabled -> return [Diagnostic]{}
     allow :: if manifest.authority.holds.allow == {
         .Val(names) -> Val(pkg_effect_budget_rights(names))
@@ -341,7 +341,7 @@ fn pkg_effect_grant_for(manifest: PackageFacts, dependency: String) -> [String]?
 // Write per-package effect provenance (and configured `authority.grants`)
 // into an existing lockfile's package entries in place. A package the lock
 // does not list yet is left for `jet store fetch` to add.
-pub fn pkg_update_lock_provenance(lock: &LockFile, entries: [PackageEffects], manifest: PackageFacts) {
+fn pkg_update_lock_provenance(lock: &LockFile, entries: [PackageEffects], manifest: PackageFacts) {
     lock.authority = if manifest.authority != PackageAuthority.default() -> Val(manifest.authority) else -> None
     loop index in 0..<lock.packages.len() {
         package := lock.packages[index]
@@ -365,7 +365,7 @@ pub fn pkg_update_lock_provenance(lock: &LockFile, entries: [PackageEffects], ma
 }
 
 // E1220: a package reaches an effect outside this package's budget.
-pub fn pkg_e1220(dependency: String, effect_name: String) -> Diagnostic Never! {
+fn pkg_e1220(dependency: String, effect_name: String) -> Diagnostic Never! {
     pkg_e1220_at(dependency, effect_name, None)
 }
 
@@ -383,7 +383,7 @@ fn pkg_e1220_at(dependency: String, effect_name: String, site: String?) -> Diagn
 
 // E1220 / D-NOPANIC1=D: a package denial keeps the panic provenance visible
 // and offers the same exits as function-scope prohibition.
-pub fn pkg_e1220_panic(dependency: String, panic_site: String, span: Span?) -> Diagnostic Never! {
+fn pkg_e1220_panic(dependency: String, panic_site: String, span: Span?) -> Diagnostic Never! {
     diagnostic_from_registry("E1220", span,
         "`{dependency}` uses the `Panic` effect at `{panic_site}`, which this package's budget doesn't allow",
         "the package denies stops from `{panic_site}`; a dependency that can stop cannot cross this budget boundary",

@@ -16,50 +16,50 @@ use core as core
 // `shape` is the provider seam: the host owns real shaping and returns a
 // canonical run.  `shape_with` is the explicit portable fallback for callers
 // that need deterministic, approximate advances without a shaping provider.
-pub enum FontStyle {
+enum FontStyle {
     Body
     Title
     Monospace
 }
 
-pub enum GlyphShaper {
+enum GlyphShaper {
     HarfBuzz
     HeadlessFallback
 }
 
-pub struct FontFace {
-    pub family: String
-    pub size: Float
-    pub style: FontStyle
+struct FontFace {
+    family: String
+    size: Float
+    style: FontStyle
 }
 
-pub struct Glyph {
-    pub id: Int
-    pub cluster: Int
-    pub x: Float
-    pub y: Float
-    pub advance_x: Float
-    pub advance_y: Float
+struct Glyph {
+    id: Int
+    cluster: Int
+    x: Float
+    y: Float
+    advance_x: Float
+    advance_y: Float
 }
 
-pub struct GlyphRun {
-    pub glyphs: [Glyph]
-    pub advance_x: Float
-    pub advance_y: Float
-    pub shaper: GlyphShaper
-    pub deterministic: Bool
-    pub approximate: Bool
+struct GlyphRun {
+    glyphs: [Glyph]
+    advance_x: Float
+    advance_y: Float
+    shaper: GlyphShaper
+    deterministic: Bool
+    approximate: Bool
 }
 
-pub fn system(style: FontStyle) -> FontFace Never! {
+fn system(style: FontStyle) -> FontFace Never! {
     core.font.system(style)
 }
 
-pub fn shape(text: String, face: FontFace) -> GlyphRun Never! {
+fn shape(text: String, face: FontFace) -> GlyphRun Never! {
     core.font.shape(text, face)
 }
 
-pub fn shape_with(face: FontFace, text: String) -> GlyphRun Never! {
+fn shape_with(face: FontFace, text: String) -> GlyphRun Never! {
     // This is the explicit opt-in for deterministic approximate metrics.
     // `shape` is the only path that requests the FontShaping capability.
     shape_fallback(face, text)

@@ -342,7 +342,7 @@ impl Holder {
 }
 
 module numeric_helpers {
-    pub fn accept(value: Float) -[]> Float {
+    fn accept(value: Float) -[]> Float {
         return value
     }
 }
@@ -391,7 +391,7 @@ fn run() {
         (
             "helper.jet",
             r#"
-pub fn accept(value: Float) -[]> Float {
+fn accept(value: Float) -[]> Float {
     return value
 }
 "#,

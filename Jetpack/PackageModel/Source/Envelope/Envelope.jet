@@ -5,15 +5,15 @@
 // build-from-source output is an envelope-carrying object exactly like a
 // substituted one, so the resolver never cares which path produced it.
 
-pub struct Envelope {
+struct Envelope {
     // Content hash of the realized output tree (`sha256-…`): the cache key.
-    pub output_hash: String
+    output_hash: String
     // Target platform key (`<arch>-<os>`, e.g. `x86_64-linux`).
-    pub platform: String
+    platform: String
     // Detached-signature slot; empty until package signing fills it.
-    pub signature: String
+    signature: String
     // How this output was produced: the resolved source ref + build recipe id.
-    pub provenance: String
+    provenance: String
 
     // The empty envelope of legacy records and providers that predate it.
     fn empty() -> Envelope Never! {
@@ -38,6 +38,6 @@ pub struct Envelope {
 }
 
 // The platform key of the host build target (`<arch>-<os>`).
-pub fn pkg_host_platform() -[Env]> String Never! {
+fn pkg_host_platform() -[Env]> String Never! {
     pkg_host_key()
 }

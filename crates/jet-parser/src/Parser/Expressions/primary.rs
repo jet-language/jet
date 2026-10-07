@@ -1085,7 +1085,6 @@ impl<'a> Parser<'a> {
                         type_generic_depth: 0,
                         type_generic_chain: Vec::new(),
                         type_generic_truncated: false,
-                        pub_file_default: false,
                         in_layout_body: self.in_layout_body,
                         adjacent_if_body_depth: 0,
                         block_depth: 0,

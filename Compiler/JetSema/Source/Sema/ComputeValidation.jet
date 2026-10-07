@@ -8,43 +8,43 @@ use jet_foundation.[
     TFunc,
 ]
 
-pub struct SemaComputeCallFact {
-    pub method: String
-    pub span: Span
+struct SemaComputeCallFact {
+    method: String
+    span: Span
 }
 
-pub struct SemaAutodiffObligation {
-    pub method: String
-    pub target: String
-    pub span: Span
+struct SemaAutodiffObligation {
+    method: String
+    target: String
+    span: Span
 }
 
-pub struct SemaComputeFunctionFacts {
-    pub function_key: String
-    pub compute_calls: [SemaComputeCallFact]
-    pub autodiff_obligations: [SemaAutodiffObligation]
-    pub autodiff_safe_panic: Bool
-    pub autodiff_unsafe_panic: Bool
+struct SemaComputeFunctionFacts {
+    function_key: String
+    compute_calls: [SemaComputeCallFact]
+    autodiff_obligations: [SemaAutodiffObligation]
+    autodiff_safe_panic: Bool
+    autodiff_unsafe_panic: Bool
 }
 
 struct SemaComputePanicMemo {
-    pub function_key: String
-    pub safe: Bool
+    function_key: String
+    safe: Bool
 }
 
-pub fn sema_compute_record_core_call(record: CoreCallRecord, span: Span, context: &SemaCheckContext) -> Bool Never! {
+fn sema_compute_record_core_call(record: CoreCallRecord, span: Span, context: &SemaCheckContext) -> Bool Never! {
     if record.module_name != "core.compute" -> return false
     &context.compute_calls.push(SemaComputeCallFact{method: record.member, span: span})
     true
 }
 
-pub fn sema_compute_record_autodiff_obligation(method: String, target: String, span: Span, context: &SemaCheckContext) Never! {
+fn sema_compute_record_autodiff_obligation(method: String, target: String, span: Span, context: &SemaCheckContext) Never! {
     &context.autodiff_obligations.push(SemaAutodiffObligation{method: method, target: target, span: span})
 }
 
 // A panic is admissible under autodiff only when every reachable Panic edge is
 // the explicit fallback of a checked Tensor-returning Core compute operation.
-pub fn sema_compute_note_panic(context: &SemaCheckContext, safe_compute_fallback: Bool) Never! {
+fn sema_compute_note_panic(context: &SemaCheckContext, safe_compute_fallback: Bool) Never! {
     if safe_compute_fallback -> context.autodiff_safe_panic = true else -> context.autodiff_unsafe_panic = true
 }
 
@@ -146,7 +146,7 @@ fn sema_compute_effect_names(effects: [String]) -> String Never! {
 // `functions` must be the globally effect-solved TFuncs, since a named target
 // may be imported or may reach another module. Callers source-locate the
 // returned diagnostics with the owning module's source segments.
-pub fn sema_compute_validate_autodiff_purity(facts: [SemaComputeFunctionFacts], functions: [TFunc]) -> [Diagnostic] {
+fn sema_compute_validate_autodiff_purity(facts: [SemaComputeFunctionFacts], functions: [TFunc]) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
     panic_memo := [SemaComputePanicMemo]{}
     loop function_facts in facts {

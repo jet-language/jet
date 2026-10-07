@@ -5,11 +5,11 @@
 use core.crypto as crypto
 use core.crypto.random as random
 #Error
-pub struct UUIDError {
-    pub reason: String
+struct UUIDError {
+    reason: String
 }
 
-pub fn v4() -[Rand]> String UUIDError! {
+fn v4() -[Rand]> String UUIDError! {
     raw :: random.bytes(16) ?? return Err(UUIDError{reason: "secure random unavailable"})
     if raw.len() != 16 -> return Err(UUIDError{reason: "secure random returned invalid length"})
     bytes := copy_bytes(raw)
@@ -19,7 +19,7 @@ pub fn v4() -[Rand]> String UUIDError! {
     Ok(value)
 }
 
-pub fn v7(clock: &Clock) -[Rand, Time]> String UUIDError! {
+fn v7(clock: &Clock) -[Rand, Time]> String UUIDError! {
     timestamp :: clock.now()
     if timestamp < 0 || timestamp > 281474976710655 {
         return Err(UUIDError{reason: "UUID v7 timestamp is outside the 48-bit range"})
@@ -40,7 +40,7 @@ pub fn v7(clock: &Clock) -[Rand, Time]> String UUIDError! {
     Ok(value)
 }
 
-pub fn v5(namespace: String, name: String) -> String UUIDError! {
+fn v5(namespace: String, name: String) -> String UUIDError! {
     ns :: parse_uuid(namespace) ?? return Err(UUIDError{reason: "invalid UUID namespace"})
     input := copy_bytes(ns)
     loop b in name.bytes() -> &input.push(b)
@@ -55,11 +55,11 @@ pub fn v5(namespace: String, name: String) -> String UUIDError! {
     Ok(value)
 }
 
-pub fn uuid5(namespace: String, name: String) -> String UUIDError! {
+fn uuid5(namespace: String, name: String) -> String UUIDError! {
     v5(namespace, name)
 }
 
-pub fn parse(text: String) -> String UUIDError! {
+fn parse(text: String) -> String UUIDError! {
     bytes :: parse_uuid(text) ?? return Err(UUIDError{reason: "invalid UUID text"})
     value :: format_uuid(bytes) ?? return Err(UUIDError{reason: "invalid UUID encoding"})
     Ok(value)

@@ -42,7 +42,7 @@ C_MASK32 :: 4294967295
 C_MASK64 :: 18446744073709551615
 
 #Error
-pub enum CryptoError {
+enum CryptoError {
     OpenFailed
     VerifyFailed
     KeyRejected
@@ -51,54 +51,54 @@ pub enum CryptoError {
 }
 
 #Error
-pub enum FileCryptoError {
+enum FileCryptoError {
     OpenFailed
     PublishFailed
     SourceMissing
 }
 
-pub struct Digest256 {
-    pub bytes: [U8]
+struct Digest256 {
+    bytes: [U8]
 
-    pub fn as_bytes(self) -> [U8] Never! { self.bytes }
+    fn as_bytes(self) -> [U8] Never! { self.bytes }
 
-    pub fn hex(self) -> String Never! { hex_encode(self.bytes) }
+    fn hex(self) -> String Never! { hex_encode(self.bytes) }
 }
 
-pub struct Digest512 {
-    pub bytes: [U8]
+struct Digest512 {
+    bytes: [U8]
 
-    pub fn as_bytes(self) -> [U8] Never! { self.bytes }
+    fn as_bytes(self) -> [U8] Never! { self.bytes }
 
-    pub fn hex(self) -> String Never! { hex_encode(self.bytes) }
+    fn hex(self) -> String Never! { hex_encode(self.bytes) }
 }
 
-pub struct Hasher {
-    pub data: [U8]
+struct Hasher {
+    data: [U8]
 
-    pub fn new() -> Hasher Never! { {data: [U8]{}} }
+    fn new() -> Hasher Never! { {data: [U8]{}} }
 
-    pub fn update(&self, bytes: [U8]) Never! {
+    fn update(&self, bytes: [U8]) Never! {
         loop b in bytes -> &self.data.push(b)
     }
 
-    pub fn digest(self) -> String Never! { sha256(self.data).hex() }
+    fn digest(self) -> String Never! { sha256(self.data).hex() }
 }
 
 /// Hashlib-style module constructors for the default SHA-256 hasher.
-pub fn new() -> Hasher Never! { Hasher.new() }
+fn new() -> Hasher Never! { Hasher.new() }
 
-pub fn update(hasher: &Hasher, bytes: [U8]) Never! { &hasher.update(bytes) }
+fn update(hasher: &Hasher, bytes: [U8]) Never! { &hasher.update(bytes) }
 
-pub fn digest(hasher: ^Hasher) -> String Never! { hasher.digest() }
+fn digest(hasher: ^Hasher) -> String Never! { hasher.digest() }
 
-pub struct Secret {
-    pub bytes: [U8]
+struct Secret {
+    bytes: [U8]
 
     /// The UTF-8 bytes of `text` as secret material.
-    pub fn from_text(text: String) -> Secret Never! { Secret{bytes: text.bytes()} }
+    fn from_text(text: String) -> Secret Never! { Secret{bytes: text.bytes()} }
 
-    pub fn from_bytes(bytes: [U8]) -> Secret Never! { Secret{bytes: bytes} }
+    fn from_bytes(bytes: [U8]) -> Secret Never! { Secret{bytes: bytes} }
 }
 
 // Secret-bearing values wipe their bytes when they close (D-SHAPE-RESOURCE1=A).
@@ -112,23 +112,23 @@ impl Secret.Close {
     }
 }
 
-pub struct SigningKey {
-    pub bytes: [U8]
+struct SigningKey {
+    bytes: [U8]
 
     /// A fresh Ed25519 seed from the OS CSPRNG. There is no fallback generator.
-    pub fn new_random() -[Rand]> SigningKey CryptoError! {
+    fn new_random() -[Rand]> SigningKey CryptoError! {
         seed :: core.crypto.random.bytes(32) ?? return Err(CryptoError.Unavailable)
         Ok(SigningKey{bytes: seed})
     }
 
     /// An Ed25519 seed. It must be exactly 32 bytes.
-    pub fn from_bytes(bytes: [U8]) -> SigningKey CryptoError! {
+    fn from_bytes(bytes: [U8]) -> SigningKey CryptoError! {
         if bytes.len() != 32 -> return Err(CryptoError.Length)
         Ok(SigningKey{bytes: bytes})
     }
 
     /// The RFC 8032 public key for this seed.
-    pub fn public_key(self) -> VerifyKey Never! { VerifyKey{bytes: ed25519_public_raw(self.bytes)} }
+    fn public_key(self) -> VerifyKey Never! { VerifyKey{bytes: ed25519_public_raw(self.bytes)} }
 }
 
 impl SigningKey.Close {
@@ -139,34 +139,34 @@ impl SigningKey.Close {
     }
 }
 
-pub struct VerifyKey {
-    pub bytes: [U8]
+struct VerifyKey {
+    bytes: [U8]
 
     /// An encoded Ed25519 public key. It must be exactly 32 bytes.
-    pub fn from_bytes(bytes: [U8]) -> VerifyKey CryptoError! {
+    fn from_bytes(bytes: [U8]) -> VerifyKey CryptoError! {
         if bytes.len() != 32 -> return Err(CryptoError.Length)
         Ok(VerifyKey{bytes: bytes})
     }
 }
 
-pub struct X25519SecretKey {
-    pub bytes: [U8]
+struct X25519SecretKey {
+    bytes: [U8]
 
     /// A fresh X25519 private key from the OS CSPRNG.
-    pub fn new_random() -[Rand]> X25519SecretKey CryptoError! {
+    fn new_random() -[Rand]> X25519SecretKey CryptoError! {
         key :: core.crypto.random.bytes(32) ?? return Err(CryptoError.Unavailable)
         Ok(X25519SecretKey{bytes: key})
     }
 
     /// A raw X25519 private key. It must be exactly 32 bytes.
-    pub fn from_bytes(bytes: [U8]) -> X25519SecretKey CryptoError! {
+    fn from_bytes(bytes: [U8]) -> X25519SecretKey CryptoError! {
         if bytes.len() != 32 -> return Err(CryptoError.Length)
         Ok(X25519SecretKey{bytes: bytes})
     }
 
     /// The RFC 7748 public key. A key that isn't 32 bytes stops with a panic;
     /// `x25519_public` is the checked form.
-    pub fn public_key(self) -> X25519PublicKey Never! { X25519PublicKey{bytes: x25519_scalarmult(self.bytes, x25519_base_point())} }
+    fn public_key(self) -> X25519PublicKey Never! { X25519PublicKey{bytes: x25519_scalarmult(self.bytes, x25519_base_point())} }
 }
 
 impl X25519SecretKey.Close {
@@ -177,28 +177,28 @@ impl X25519SecretKey.Close {
     }
 }
 
-pub struct X25519PublicKey {
-    pub bytes: [U8]
+struct X25519PublicKey {
+    bytes: [U8]
 
     /// A raw X25519 public key. It must be exactly 32 bytes.
-    pub fn from_bytes(bytes: [U8]) -> X25519PublicKey CryptoError! {
+    fn from_bytes(bytes: [U8]) -> X25519PublicKey CryptoError! {
         if bytes.len() != 32 -> return Err(CryptoError.Length)
         Ok(X25519PublicKey{bytes: bytes})
     }
 
     /// Parse the Bech32m recipient text written by `text`. Anything else,
     /// including uppercase, truncation and a bad checksum, is `KeyRejected`.
-    pub fn from_text(text: String) -> X25519PublicKey CryptoError! {
+    fn from_text(text: String) -> X25519PublicKey CryptoError! {
         bytes :: x25519_recipient_decode(text) ?? return Err(CryptoError.KeyRejected)
         Ok(X25519PublicKey{bytes: bytes})
     }
 
     /// Bech32m recipient text: `jetx25519` + `1` + 52 data symbols + checksum.
-    pub fn text(self) -> String Never! { x25519_recipient_encode(self.bytes) }
+    fn text(self) -> String Never! { x25519_recipient_encode(self.bytes) }
 }
 
-pub struct SharedSecret {
-    pub bytes: [U8]
+struct SharedSecret {
+    bytes: [U8]
 }
 
 impl SharedSecret.Close {
@@ -209,76 +209,76 @@ impl SharedSecret.Close {
     }
 }
 
-pub struct Signature {
-    pub bytes: [U8]
+struct Signature {
+    bytes: [U8]
 
     /// An Ed25519 signature. It must be exactly 64 bytes.
-    pub fn from_bytes(bytes: [U8]) -> Signature CryptoError! {
+    fn from_bytes(bytes: [U8]) -> Signature CryptoError! {
         if bytes.len() != 64 -> return Err(CryptoError.Length)
         Ok(Signature{bytes: bytes})
     }
 }
 
-pub struct Sealed {
-    pub bytes: [U8]
+struct Sealed {
+    bytes: [U8]
 }
 
-pub fn sealed_bytes(value: Sealed) -> [U8] Never! { value.bytes }
+fn sealed_bytes(value: Sealed) -> [U8] Never! { value.bytes }
 
-pub struct WrappedKey {
-    pub bytes: [U8]
+struct WrappedKey {
+    bytes: [U8]
 }
 
-pub struct WrappedVaultKey {
-    pub bytes: [U8]
+struct WrappedVaultKey {
+    bytes: [U8]
 }
 
-pub struct KeyUnlock {
-    pub bytes: [U8]
+struct KeyUnlock {
+    bytes: [U8]
 }
 
-pub struct PasswordHash {
-    pub text: String
+struct PasswordHash {
+    text: String
 }
 
 #Error
-pub struct KeyWrapError {
-    pub reason: String
+struct KeyWrapError {
+    reason: String
 }
 
 /// SHA-256. Pure Jet, RFC 6234. Allocates a 32-byte digest.
-pub fn sha256(bytes: [U8]) -> Digest256 Never! { {bytes: sha256_raw(bytes)} }
+fn sha256(bytes: [U8]) -> Digest256 Never! { {bytes: sha256_raw(bytes)} }
 
 /// SHA-224. SHA-256 with the SHA-224 IV, truncated to 28 bytes.
-pub fn sha224(bytes: [U8]) -> String Never! { hex_encode(slice_u8(sha2_256(bytes, C_SHA224_IV), 0, 28)) }
+fn sha224(bytes: [U8]) -> String Never! { hex_encode(slice_u8(sha2_256(bytes, C_SHA224_IV), 0, 28)) }
 
 /// SHA-1. RFC 3174. Prefer SHA-256; this exists for UUID v5 and legacy checks.
-pub fn sha1(bytes: [U8]) -> String Never! { hex_encode(sha1_raw(bytes)) }
+fn sha1(bytes: [U8]) -> String Never! { hex_encode(sha1_raw(bytes)) }
 
 /// SHA-384. SHA-512 with the SHA-384 IV, truncated to 48 bytes.
-pub fn sha384(bytes: [U8]) -> String Never! { hex_encode(slice_u8(sha512_raw(bytes, C_SHA384_IV), 0, 48)) }
+fn sha384(bytes: [U8]) -> String Never! { hex_encode(slice_u8(sha512_raw(bytes, C_SHA384_IV), 0, 48)) }
 
 /// SHA-512 (FIPS 180-4).
-pub fn sha512(bytes: [U8]) -> Digest512 Never! { {bytes: sha512_raw(bytes, C_SHA512_IV)} }
+fn sha512(bytes: [U8]) -> Digest512 Never! { {bytes: sha512_raw(bytes, C_SHA512_IV)} }
 
 /// SHA-3 (FIPS 202). Keccak-f[1600] sponge, rate 1152/1088/832/576.
-pub fn sha3_224(bytes: [U8]) -> String Never! { hex_encode(keccak(bytes, 144, 28, 0x06)) }
+fn sha3_224(bytes: [U8]) -> String Never! { hex_encode(keccak(bytes, 144, 28, 0x06)) }
 
-pub fn sha3_256(bytes: [U8]) -> String Never! { hex_encode(keccak(bytes, 136, 32, 0x06)) }
+fn sha3_256(bytes: [U8]) -> String Never! { hex_encode(keccak(bytes, 136, 32, 0x06)) }
 
-pub fn sha3_384(bytes: [U8]) -> String Never! { hex_encode(keccak(bytes, 104, 48, 0x06)) }
+fn sha3_384(bytes: [U8]) -> String Never! { hex_encode(keccak(bytes, 104, 48, 0x06)) }
 
-pub fn sha3_512(bytes: [U8]) -> String Never! { hex_encode(keccak(bytes, 72, 64, 0x06)) }
+fn sha3_512(bytes: [U8]) -> String Never! { hex_encode(keccak(bytes, 72, 64, 0x06)) }
 
 /// BLAKE3-256. Tree hasher, 32-byte output.
-pub fn blake3(bytes: [U8]) -> Digest256 Never! { {bytes: blake3_raw(bytes)} }
+fn blake3(bytes: [U8]) -> Digest256 Never! { {bytes: blake3_raw(bytes)} }
 
 /// HMAC-SHA256 (RFC 4231).
-pub fn hmac_sha256(key: [U8], data: [U8]) -> [U8] Never! { hmac_sha256_raw(key, data) }
+fn hmac_sha256(key: [U8], data: [U8]) -> [U8] Never! { hmac_sha256_raw(key, data) }
 
 /// HKDF-SHA256 expand. `len` is 0..=8160. The output is a `Secret` so callers
 /// cannot print it by accident.
-pub fn hkdf_sha256(ikm: [U8], salt: [U8], info: [U8], len: Int) -> Secret CryptoError! {
+fn hkdf_sha256(ikm: [U8], salt: [U8], info: [U8], len: Int) -> Secret CryptoError! {
     if len < 0 || len > 8160 -> return Err(CryptoError.Length)
     prk :: hmac_sha256_raw(salt, ikm)
     out := [U8]{}
@@ -300,7 +300,7 @@ pub fn hkdf_sha256(ikm: [U8], salt: [U8], info: [U8], len: Int) -> Secret Crypto
 }
 
 /// PBKDF2-HMAC-SHA256.
-pub fn pbkdf2_hmac(password: [U8], salt: [U8], iterations: Int, key_len: Int) -> [U8] CryptoError! {
+fn pbkdf2_hmac(password: [U8], salt: [U8], iterations: Int, key_len: Int) -> [U8] CryptoError! {
     if iterations < 1 || key_len < 1 || key_len > 67108864 -> return Err(CryptoError.Length)
     blocks :: (key_len + 31) /% 32
     out := [U8]{}
@@ -326,7 +326,7 @@ pub fn pbkdf2_hmac(password: [U8], salt: [U8], iterations: Int, key_len: Int) ->
     Ok(out)
 }
 
-pub fn constant_time_equal_bytes(a: [U8], b: [U8]) -> Bool Never! {
+fn constant_time_equal_bytes(a: [U8], b: [U8]) -> Bool Never! {
     diff := 0
     if a.len() != b.len() -> diff = 1
     n :: a.len()
@@ -343,7 +343,7 @@ pub fn constant_time_equal_bytes(a: [U8], b: [U8]) -> Bool Never! {
     diff == 0
 }
 
-pub fn constant_time_equal(a: Secret, b: Secret) -> Bool Never! {
+fn constant_time_equal(a: Secret, b: Secret) -> Bool Never! {
     constant_time_equal_bytes(a.bytes, b.bytes)
 }
 
@@ -353,7 +353,7 @@ pub fn constant_time_equal(a: Secret, b: Secret) -> Bool Never! {
 // `JETV` || version || suite || flags || recipient_count ||
 // ephemeral_public || salt || payload_nonce ||
 // sorted recipient stanzas || plaintext_length || ciphertext||tag.
-pub fn seal(recipients: [X25519PublicKey], bytes: [U8], aad: [U8]) -[Rand]> Sealed CryptoError! {
+fn seal(recipients: [X25519PublicKey], bytes: [U8], aad: [U8]) -[Rand]> Sealed CryptoError! {
     if recipients.len() == 0 || recipients.len() > 256 -> return Err(CryptoError.KeyRejected)
     if bytes.len() > 16777216 || aad.len() > 16777216 -> return Err(CryptoError.Length)
     loop recipient in recipients {
@@ -517,37 +517,37 @@ fn append_be32(out: &[U8], n: Int) -> Bool CryptoError! {
     true
 }
 
-pub fn open(identity: X25519SecretKey, box: Sealed, aad: [U8]) -> [U8] CryptoError! {
+fn open(identity: X25519SecretKey, box: Sealed, aad: [U8]) -> [U8] CryptoError! {
     open_sealed(identity, box, aad)
 }
 
-pub fn file_seal(recipients: [X25519PublicKey], source: Path, destination: Path) -[FS, Rand]> Bool FileCryptoError! {
+fn file_seal(recipients: [X25519PublicKey], source: Path, destination: Path) -[FS, Rand]> Bool FileCryptoError! {
     data :: host_read_file(source.to_string()) ?? return Err(FileCryptoError.SourceMissing)
     sealed :: seal(recipients, data, [U8]{}) ?? return Err(FileCryptoError.PublishFailed)
     host_write_file(destination.to_string(), sealed.bytes) ?? return Err(FileCryptoError.PublishFailed)
     Ok(true)
 }
 
-pub fn file_open(identity: X25519SecretKey, source: Path, destination: Path) -[FS]> Bool FileCryptoError! {
+fn file_open(identity: X25519SecretKey, source: Path, destination: Path) -[FS]> Bool FileCryptoError! {
     data :: host_read_file(source.to_string()) ?? return Err(FileCryptoError.SourceMissing)
     plain :: open_sealed(identity, Sealed{bytes: data}, [U8]{}) ?? return Err(FileCryptoError.OpenFailed)
     host_write_file(destination.to_string(), plain) ?? return Err(FileCryptoError.PublishFailed)
     Ok(true)
 }
 
-pub fn sign(signing_key: SigningKey, bytes: [U8]) -> Signature CryptoError! {
+fn sign(signing_key: SigningKey, bytes: [U8]) -> Signature CryptoError! {
     if signing_key.bytes.len() != 32 -> return Err(CryptoError.KeyRejected)
     Ok(Signature{bytes: ed25519_sign_raw(signing_key.bytes, bytes)})
 }
 
-pub fn verify(verify_key: VerifyKey, bytes: [U8], signature: Signature) -> Bool CryptoError! {
+fn verify(verify_key: VerifyKey, bytes: [U8], signature: Signature) -> Bool CryptoError! {
     if verify_key.bytes.len() != 32 || signature.bytes.len() != 64 {
         return Err(CryptoError.KeyRejected)
     }
     Ok(ed25519_verify_raw(verify_key.bytes, bytes, signature.bytes))
 }
 
-pub fn x25519(secret_key: X25519SecretKey, public_key: X25519PublicKey) -> SharedSecret CryptoError! {
+fn x25519(secret_key: X25519SecretKey, public_key: X25519PublicKey) -> SharedSecret CryptoError! {
     if secret_key.bytes.len() != 32 || public_key.bytes.len() != 32 {
         return Err(CryptoError.KeyRejected)
     }
@@ -556,7 +556,7 @@ pub fn x25519(secret_key: X25519SecretKey, public_key: X25519PublicKey) -> Share
     Ok(SharedSecret{bytes: shared})
 }
 
-pub fn x25519_public(secret_key: X25519SecretKey) -> X25519PublicKey CryptoError! {
+fn x25519_public(secret_key: X25519SecretKey) -> X25519PublicKey CryptoError! {
     if secret_key.bytes.len() != 32 -> return Err(CryptoError.KeyRejected)
     Ok(X25519PublicKey{bytes: x25519_scalarmult(secret_key.bytes, x25519_base_point())})
 }
@@ -669,34 +669,34 @@ fn all_zero(bytes: [U8]) -> Bool Never! {
     diff == 0
 }
 
-pub fn x25519_shared(secret_key: X25519SecretKey, public_key: X25519PublicKey) -> SharedSecret CryptoError! {
+fn x25519_shared(secret_key: X25519SecretKey, public_key: X25519PublicKey) -> SharedSecret CryptoError! {
     x25519(secret_key, public_key)
 }
 
 /// Generate a fresh X25519 private key for the beginner envelope helpers.
-pub fn generatekey() -[Rand]> X25519SecretKey CryptoError! {
+fn generatekey() -[Rand]> X25519SecretKey CryptoError! {
     bytes :: core.crypto.random.bytes(32) ?? return Err(CryptoError.Unavailable)
     Ok(X25519SecretKey{bytes: bytes})
 }
 
-pub fn privateencrypt(key: X25519SecretKey, bytes: [U8]) -[Rand]> Sealed CryptoError! {
+fn privateencrypt(key: X25519SecretKey, bytes: [U8]) -[Rand]> Sealed CryptoError! {
     public :: x25519_public(key) ?? return Err(CryptoError.KeyRejected)
     seal([X25519PublicKey]{public}, bytes, [U8]{})
 }
 
-pub fn privatedecrypt(key: X25519SecretKey, box: Sealed) -> [U8] CryptoError! {
+fn privatedecrypt(key: X25519SecretKey, box: Sealed) -> [U8] CryptoError! {
     open_sealed(key, box, [U8]{})
 }
 
-pub fn publicencrypt(key: X25519PublicKey, bytes: [U8]) -[Rand]> Sealed CryptoError! {
+fn publicencrypt(key: X25519PublicKey, bytes: [U8]) -[Rand]> Sealed CryptoError! {
     seal([X25519PublicKey]{key}, bytes, [U8]{})
 }
 
-pub fn publicdecrypt(key: X25519SecretKey, box: Sealed) -> [U8] CryptoError! {
+fn publicdecrypt(key: X25519SecretKey, box: Sealed) -> [U8] CryptoError! {
     open_sealed(key, box, [U8]{})
 }
 
-pub fn wrap(key: Secret, recipient: X25519PublicKey) -[Rand]> WrappedKey CryptoError! {
+fn wrap(key: Secret, recipient: X25519PublicKey) -[Rand]> WrappedKey CryptoError! {
     if recipient.bytes.len() != 32 || key.bytes.len() > 1048576 {
         return Err(CryptoError.KeyRejected)
     }
@@ -736,7 +736,7 @@ pub fn wrap(key: Secret, recipient: X25519PublicKey) -[Rand]> WrappedKey CryptoE
     Ok(WrappedKey{bytes: out})
 }
 
-pub fn unwrap(recipient: X25519SecretKey, wrapped: WrappedKey) -> Secret CryptoError! {
+fn unwrap(recipient: X25519SecretKey, wrapped: WrappedKey) -> Secret CryptoError! {
     raw :: wrapped.bytes
     if raw.len() < 108 || raw.len() > 1048684 -> return Err(CryptoError.KeyRejected)
     if slice_u8(raw, 0, 4) != "JETW".bytes() || raw[4] != (U8{1}) || raw[5] != (U8{1}) || raw[6] != (U8{0}) || raw[7] != (U8{0}) {
@@ -771,13 +771,13 @@ pub fn unwrap(recipient: X25519SecretKey, wrapped: WrappedKey) -> Secret CryptoE
     Ok(Secret{bytes: plain})
 }
 
-pub fn password_hash(password: Secret) -[Rand]> PasswordHash CryptoError! {
+fn password_hash(password: Secret) -[Rand]> PasswordHash CryptoError! {
     if password.bytes.len() > 1048576 -> return Err(CryptoError.Length)
     salt :: core.crypto.random.bytes(16) ?? return Err(CryptoError.Unavailable)
     password_hash_with_salt(password, salt)
 }
 
-pub fn password_hash_with_salt(password: Secret, salt: [U8]) -> PasswordHash CryptoError! {
+fn password_hash_with_salt(password: Secret, salt: [U8]) -> PasswordHash CryptoError! {
     if password.bytes.len() > 1048576 || salt.len() < 8 || salt.len() > 64 {
         return Err(CryptoError.Length)
     }
@@ -789,7 +789,7 @@ pub fn password_hash_with_salt(password: Secret, salt: [U8]) -> PasswordHash Cry
     Ok(PasswordHash{text: text})
 }
 
-pub fn password_verify(password: Secret, stored: PasswordHash) -> Bool CryptoError! {
+fn password_verify(password: Secret, stored: PasswordHash) -> Bool CryptoError! {
     if password.bytes.len() > 1048576 -> return Err(CryptoError.Length)
     parts :: split_dollar(stored.text)
     if parts.len() != 6 || parts[1] != "argon2id" || parts[2] != "v=19" {
@@ -1922,9 +1922,9 @@ fn ed25519_verify_raw(pk: [U8], msg: [U8], sig: [U8]) -> Bool Never! {
     sb.x == r_plus_k_a.x && sb.y == r_plus_k_a.y
 }
 
-pub struct EdPoint {
-    pub x: Int
-    pub y: Int
+struct EdPoint {
+    x: Int
+    y: Int
 }
 
 /// Double-and-add in extended twisted Edwards coordinates `[X, Y, Z, T]`

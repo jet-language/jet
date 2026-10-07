@@ -51,7 +51,7 @@ fn safe_xml_limits() -> XMLLimits Never! {
 // Canonicalization, encoding declarations, and namespace rewriting are
 // intentionally outside this small source codec. `parse` remains the
 // portable, bounded door and rejects unsupported constructs explicitly.
-pub enum XMLReason {
+enum XMLReason {
     Syntax
     Truncated
     ForbiddenDTD
@@ -59,85 +59,85 @@ pub enum XMLReason {
 }
 
 #Error
-pub struct XMLError {
-    pub kind: XMLReason
-    pub byte_offset: Int?
-    pub line: Int?
-    pub column: Int?
-    pub path: String
-    pub reason: String
+struct XMLError {
+    kind: XMLReason
+    byte_offset: Int?
+    line: Int?
+    column: Int?
+    path: String
+    reason: String
 }
 
-pub struct XMLLimits {
-    pub max_depth: Int
-    pub max_nodes: Int
-    pub max_attributes_per_element: Int
-    pub max_name_bytes: Int
-    pub max_text_bytes: Int
-    pub max_entity_declarations: Int
-    pub max_entity_depth: Int
-    pub max_entity_replacement_bytes: Int
+struct XMLLimits {
+    max_depth: Int
+    max_nodes: Int
+    max_attributes_per_element: Int
+    max_name_bytes: Int
+    max_text_bytes: Int
+    max_entity_declarations: Int
+    max_entity_depth: Int
+    max_entity_replacement_bytes: Int
 }
 
 // D-ENCXML1=A: W3C Canonical XML 1.1 and Exclusive XML Canonicalization 1.0.
-pub enum XMLCanonicalMode {
+enum XMLCanonicalMode {
     Inclusive11
     Exclusive10
 }
 
-pub enum XMLEncoding {
+enum XMLEncoding {
     UTF8
     UTF16
 }
 
-pub enum XMLEntityPolicy {
+enum XMLEntityPolicy {
     PredefinedOnly
     Reject
 }
 
-pub struct XMLCanonical {
-    pub mode: XMLCanonicalMode
-    pub comments: Bool
-    pub inclusive_prefixes: [String]
+struct XMLCanonical {
+    mode: XMLCanonicalMode
+    comments: Bool
+    inclusive_prefixes: [String]
 }
 
-pub struct XMLLexicalPolicy {
-    pub keep_whitespace: Bool
+struct XMLLexicalPolicy {
+    keep_whitespace: Bool
 }
 
-pub struct XMLParseOptions {
-    pub entities: XMLEntityPolicy
-    pub limits: XMLLimits
+struct XMLParseOptions {
+    entities: XMLEntityPolicy
+    limits: XMLLimits
 }
 
-pub struct XMLRenderOptions {
-    pub encoding: XMLEncoding
-    pub lexical: XMLLexicalPolicy
+struct XMLRenderOptions {
+    encoding: XMLEncoding
+    lexical: XMLLexicalPolicy
 }
 
-pub struct XMLReader {
-    pub root: DataTree
-    pub yielded: Bool
+struct XMLReader {
+    root: DataTree
+    yielded: Bool
 }
 
 impl XMLReader {
-    pub fn next(&self) -> DataTree? Never! {
+    fn next(&self) -> DataTree? Never! {
         if self.yielded -> return None
         self.yielded = true
         Val(self.root)
     }
 }
 
-pub fn parse(text: String) -> DataTree EncodingError! { parse_xml(text) }
+fn parse(text: String) -> DataTree EncodingError! { parse_xml(text) }
 
-pub fn decode(text: String) -> DataTree EncodingError! { parse_xml(text) }
+fn decode(text: String) -> DataTree EncodingError! { parse_xml(text) }
 
-pub fn parse_bytes(bytes: [U8]) -> DataTree EncodingError! {
+fn parse_bytes(bytes: [U8]) -> DataTree EncodingError! {
     text :: String.from_bytes(bytes) ?? return Err(syntax_error(EncodingFormat.XML, 0, 1, 1, "", "XML input is not valid UTF-8"))
     parse_xml(text)
 }
 
-pub fn parse_with(text: String, limits: XMLLimits) -> DataTree EncodingError! {
+fn parse_with(text: String, limits: XMLLimits) -> DataTree EncodingError! {
     if limits.max_depth < 1 -> return Err(unsupported_error(EncodingFormat.XML, 0, "XMLLimits.max_depth must be positive"))
     if limits.max_nodes < 1 -> return Err(unsupported_error(EncodingFormat.XML, 0, "XMLLimits.max_nodes must be positive"))
     if limits.max_attributes_per_element < 0 -> return Err(unsupported_error(EncodingFormat.XML, 0, "XMLLimits.max_attributes_per_element cannot be negative"))
@@ -153,42 +153,42 @@ pub fn parse_with(text: String, limits: XMLLimits) -> DataTree EncodingError! {
 }
 
 
-pub fn to_string(value: DataTree) -> String Never! { render_xml(value) }
+fn to_string(value: DataTree) -> String Never! { render_xml(value) }
 
-pub fn to_bytes(value: DataTree) -> [U8] Never! { to_string(value).bytes() }
+fn to_bytes(value: DataTree) -> [U8] Never! { to_string(value).bytes() }
 
-pub fn canonical(text: String) -> String EncodingError! { to_string(parse_xml(text)) }
+fn canonical(text: String) -> String EncodingError! { to_string(parse_xml(text)) }
 
-pub fn reader(text: String) -> XMLReader EncodingError! {
+fn reader(text: String) -> XMLReader EncodingError! {
     root :: parse_xml(text)
     Ok(XMLReader{root: root, yielded: false})
 }
 
-pub fn attribute(name: String, value: String) -> DataTree Never! {
+fn attribute(name: String, value: String) -> DataTree Never! {
     DataTree.Object(["name": DataTree.Text(~name), "value": DataTree.Text(~value)])
 }
 
-pub fn content(text: String) -> DataTree Never! { DataTree.Text(~text) }
+fn content(text: String) -> DataTree Never! { DataTree.Text(~text) }
 
-pub fn expanded_name(name: String) -> String Never! { ~name }
+fn expanded_name(name: String) -> String Never! { ~name }
 
-pub fn root(value: DataTree) -> DataTree Never! { ~value }
+fn root(value: DataTree) -> DataTree Never! { ~value }
 
 
-pub struct XMLWriter {
-    pub parts: [U8]
+struct XMLWriter {
+    parts: [U8]
 }
 impl XMLWriter {
-    pub fn write(&self, value: DataTree) Never! {
+    fn write(&self, value: DataTree) Never! {
         chunk :: render_xml(value).bytes()
         loop b in chunk -> &self.parts.push(b)
     }
 
-    pub fn to_string(self) -> String Never! { String.from_bytes(self.parts) ?? "" }
+    fn to_string(self) -> String Never! { String.from_bytes(self.parts) ?? "" }
 
-    pub fn flush(&self) Never! {}
+    fn flush(&self) Never! {}
 
-    pub fn finish(&self) Never! {}
+    fn finish(&self) Never! {}
 }
 
 fn parse_xml(text: String) -> DataTree EncodingError! {

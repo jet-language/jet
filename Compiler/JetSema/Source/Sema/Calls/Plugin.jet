@@ -22,11 +22,11 @@ use jet_foundation.[
     type_name,
 ]
 
-pub fn sema_plugin_loaded_type(interface: SemaPluginInterface) -> Type Never! {
+fn sema_plugin_loaded_type(interface: SemaPluginInterface) -> Type Never! {
     Type.Apply{name: "Plugin", args: [Type]{Type.Named{name: interface.identity}}}
 }
 
-pub fn sema_plugin_load_type(facts: SemaPluginInterfaceFacts, artifact: String) -> Type? {
+fn sema_plugin_load_type(facts: SemaPluginInterfaceFacts, artifact: String) -> Type? {
     interface :: sema_plugin_interface_by_artifact(facts, artifact) ?? return None
     Val(sema_plugin_loaded_type(interface))
 }
@@ -147,7 +147,7 @@ fn sema_plugin_unsupported_component_diagnostic(export_name: String, ty: Type, s
     &diagnostics.push(sema_error("E1260", span, "plugin export `{export_name}` uses unsupported Component value `{type_name(ty)}`", "plugin parameters and results must use recursively closed Component Model shapes", "use Int, Float, Bool, String, or a #Codable record/list/Option/Result shape"))
 }
 
-pub fn sema_call_try_plugin_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, facts: SemaPluginInterfaceFacts, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_plugin_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, facts: SemaPluginInterfaceFacts, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     identity :: sema_plugin_handle_identity(receiver_value.ty, environment) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     if method == "call" || method == "call_int" || method == "call_bool" || method == "call_text" {

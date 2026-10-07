@@ -14,10 +14,10 @@ use jet_foundation.[
     mir_type_same_checked_type,
 ]
 
-pub struct JetCodegenAutoDeriveFacts {
-    pub type_id: MIRTypeID
-    pub printable: Bool
-    pub debug: Bool
+struct JetCodegenAutoDeriveFacts {
+    type_id: MIRTypeID
+    printable: Bool
+    debug: Bool
 }
 
 fn jet_codegen_auto_derives_source_name(name: String) -> String Never! {
@@ -267,7 +267,7 @@ fn jet_codegen_auto_derives_append_selected_display(ctx: &JetRustEmitContext, de
 // The selection booleans are checked semantic facts keyed to one canonical MIR
 // type: `printable` is the row's auto-Printable fact and `debug` its declared
 // Debug derive. Mirrors MIRRust emit_structural_show_impl.
-pub fn jet_codegen_auto_derive_lines(ctx: &JetRustEmitContext, definition: MIRTypeDef, facts: JetCodegenAutoDeriveFacts) -> [String] Never! {
+fn jet_codegen_auto_derive_lines(ctx: &JetRustEmitContext, definition: MIRTypeDef, facts: JetCodegenAutoDeriveFacts) -> [String] Never! {
     lines := [String]{}
     if facts.type_id != definition.id {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "auto-derive facts name a different MIR type", "structural auto-derive selections are bound to the exact canonical type ID", Val(definition.span))

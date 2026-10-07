@@ -11,25 +11,25 @@ package {
 use core as core
 
 
-pub fn get(name: String) -[Env]> String? Never! { core.sys.get(name) }
+fn get(name: String) -[Env]> String? Never! { core.sys.get(name) }
 
-pub fn set(name: String, value: String) Never! -[Env]> { core.sys.set(name, value) }
+fn set(name: String, value: String) Never! -[Env]> { core.sys.set(name, value) }
 
-pub fn unset(name: String) -[Env]> Bool EnvError! { core.sys.unset(name) }
+fn unset(name: String) -[Env]> Bool EnvError! { core.sys.unset(name) }
 
-pub fn vars() -[Env]> [String] EnvError! { core.sys.vars() }
+fn vars() -[Env]> [String] EnvError! { core.sys.vars() }
 
-pub fn current_dir() -[FS, Env]> String IOError! { core.sys.current_dir() }
+fn current_dir() -[FS, Env]> String IOError! { core.sys.current_dir() }
 
-pub fn home_dir() -[Env]> String? Never! {
+fn home_dir() -[Env]> String? Never! {
     home :: get("HOME")
     if home != None -> return Val(home)
     get("USERPROFILE")
 }
 
-pub fn name() -[Env]> String Never! { core.sys.name() }
+fn name() -[Env]> String Never! { core.sys.name() }
 
-pub fn family() -[Env]> String Never! {
+fn family() -[Env]> String Never! {
     platform_name :: ascii_lower(name())
     if platform_name == "windows" || platform_name.starts_with("windows") -> return "windows"
     if platform_name == "linux" || platform_name == "darwin" || platform_name == "macos" || platform_name == "osx" || platform_name == "freebsd" || platform_name == "openbsd" || platform_name == "netbsd" || platform_name == "android" {
@@ -38,9 +38,9 @@ pub fn family() -[Env]> String Never! {
     platform_name
 }
 
-pub fn arch() -[Env]> String Never! { core.sys.arch() }
+fn arch() -[Env]> String Never! { core.sys.arch() }
 
-pub fn temp_dir() -[Env]> String Never! {
+fn temp_dir() -[Env]> String Never! {
     tmp :: get("TMPDIR")
     if tmp != None -> return tmp
     temp :: get("TEMP")
@@ -50,11 +50,11 @@ pub fn temp_dir() -[Env]> String Never! {
     "/tmp"
 }
 
-pub fn executable() -[Env]> String Never! { core.sys.executable() }
+fn executable() -[Env]> String Never! { core.sys.executable() }
 
-pub fn hostname() -[Env]> String Never! { core.sys.hostname() }
+fn hostname() -[Env]> String Never! { core.sys.hostname() }
 
-pub fn username() -[Env]> String Never! {
+fn username() -[Env]> String Never! {
     user :: get("USER")
     if user != None -> return user
     username :: get("USERNAME")
@@ -62,11 +62,11 @@ pub fn username() -[Env]> String Never! {
     core.sys.username()
 }
 
-pub fn release() -[Env]> String Never! { core.sys.release() }
+fn release() -[Env]> String Never! { core.sys.release() }
 
-pub fn version() -[Env]> String Never! { core.sys.version() }
+fn version() -[Env]> String Never! { core.sys.version() }
 
-pub fn expand(value: String) -[Env]> String Never! {
+fn expand(value: String) -[Env]> String Never! {
     raw :: value.bytes()
     out := [U8]{}
     i := 0
@@ -133,159 +133,159 @@ pub fn expand(value: String) -[Env]> String Never! {
     }
 }
 
-pub fn pid() -[Env]> Int Never! { core.sys.getpid() }
+fn pid() -[Env]> Int Never! { core.sys.getpid() }
 
-pub fn getpid() -[Env]> Int Never! { core.sys.getpid() }
+fn getpid() -[Env]> Int Never! { core.sys.getpid() }
 
-pub fn cpu_count() -[Env]> Int Never! {
+fn cpu_count() -[Env]> Int Never! {
     count :: core.sys.cpu_count()
     if count < 1 -> return 1
     count
 }
 
-pub fn getppid() -[Env]> Int Never! { core.sys.getppid() }
+fn getppid() -[Env]> Int Never! { core.sys.getppid() }
 
-pub fn getuid() -[Env]> Int Never! { core.sys.getuid() }
+fn getuid() -[Env]> Int Never! { core.sys.getuid() }
 
-pub fn geteuid() -[Env]> Int Never! { core.sys.geteuid() }
+fn geteuid() -[Env]> Int Never! { core.sys.geteuid() }
 
-pub fn getgid() -[Env]> Int Never! { core.sys.getgid() }
+fn getgid() -[Env]> Int Never! { core.sys.getgid() }
 
-pub fn getegid() -[Env]> Int Never! { core.sys.getegid() }
+fn getegid() -[Env]> Int Never! { core.sys.getegid() }
 
-pub fn getpgrp() -[Env]> Int Never! { core.sys.getpgrp() }
+fn getpgrp() -[Env]> Int Never! { core.sys.getpgrp() }
 
-#Unsafe("posix umask: the caller owns the process file-creation mask and restores it when other code relies on it") pub fn umask(mask: Int) -[FS, Env]> Int Never! {
+#Unsafe("posix umask: the caller owns the process file-creation mask and restores it when other code relies on it") fn umask(mask: Int) -[FS, Env]> Int Never! {
     core.sys.umask(mask)
 }
-pub fn exitcode(code: Int) -> Int Never! { code }
+fn exitcode(code: Int) -> Int Never! { code }
 
-pub fn success(code: Int) -> Bool Never! { code == 0 }
+fn success(code: Int) -> Bool Never! { code == 0 }
 
-pub fn uptime() -[Time, Env]> Float Never! { core.sys.uptime() }
+fn uptime() -[Time, Env]> Float Never! { core.sys.uptime() }
 
-pub fn getgroups() -[Env]> [Int] Never! { core.sys.getgroups() }
+fn getgroups() -[Env]> [Int] Never! { core.sys.getgroups() }
 
-pub fn loadavg() -[Env]> [Float] Never! { core.sys.loadavg() }
+fn loadavg() -[Env]> [Float] Never! { core.sys.loadavg() }
 
-pub fn times() -[Env]> [Float] Never! { core.sys.times() }
+fn times() -[Env]> [Float] Never! { core.sys.times() }
 
-pub fn getpgid(pid: Int) -[Env]> Int IOError! {
+fn getpgid(pid: Int) -[Env]> Int IOError! {
     #Unsafe("posix getpgid: inspect a process group") {
         return core.sys.getpgid(pid)
     }
 }
 
-pub fn getsid(pid: Int) -[Env]> Int IOError! {
+fn getsid(pid: Int) -[Env]> Int IOError! {
     #Unsafe("posix getsid: inspect a process session") {
         return core.sys.getsid(pid)
     }
 }
 
-#Unsafe("posix getpriority: the caller vouches that `which` names this process or one it controls") pub fn getpriority(which: Int) -[Env]> Int IOError! {
+#Unsafe("posix getpriority: the caller vouches that `which` names this process or one it controls") fn getpriority(which: Int) -[Env]> Int IOError! {
     core.sys.getpriority(which)
 }
 
-#Unsafe("posix setpriority: the caller owns the scheduling priority of the process it changes") pub fn setpriority(which: Int, priority: Int) IOError! -[Env]> {
+#Unsafe("posix setpriority: the caller owns the scheduling priority of the process it changes") fn setpriority(which: Int, priority: Int) IOError! -[Env]> {
     core.sys.setpriority(which, priority)
 }
 
-#Unsafe("posix utime: the caller owns the file whose timestamps it rewrites") pub fn utime(path: String, atime: Int, mtime: Int) IOError! -[FS, Env]> {
+#Unsafe("posix utime: the caller owns the file whose timestamps it rewrites") fn utime(path: String, atime: Int, mtime: Int) IOError! -[FS, Env]> {
     core.sys.utime(path, atime, mtime)
 }
 
-pub fn sync() Never! -[FS, Env]> { core.sys.sync() }
+fn sync() Never! -[FS, Env]> { core.sys.sync() }
 
-#Unsafe("posix stop: the caller accepts that the process ends here after the shared cleanup boundary") pub fn stop(code: Int) Never! -[Env]> {
+#Unsafe("posix stop: the caller accepts that the process ends here after the shared cleanup boundary") fn stop(code: Int) Never! -[Env]> {
     core.sys.stop(code)
 }
 
-pub fn set_current_dir(path: String) IOError! -[FS, Env]> {
+fn set_current_dir(path: String) IOError! -[FS, Env]> {
     return core.sys.set_current_dir(path)
 }
-#Unsafe("posix pipe: the caller owns both returned descriptors and closes each exactly once") pub fn pipe() -[FS, Env]> [Int] IOError! {
+#Unsafe("posix pipe: the caller owns both returned descriptors and closes each exactly once") fn pipe() -[FS, Env]> [Int] IOError! {
     core.sys.pipe()
 }
 
-#Unsafe("posix close_fd: the caller owns `fd` and nothing uses it after this call") pub fn close_fd(fd: Int) Never! -[FS, Env]> {
+#Unsafe("posix close_fd: the caller owns `fd` and nothing uses it after this call") fn close_fd(fd: Int) Never! -[FS, Env]> {
     core.sys.close_fd(fd)
 }
 
-#Unsafe("posix mkfifo: the caller owns `path` and removes the named pipe it creates") pub fn mkfifo(path: String, mode: Int) IOError! -[FS, Env]> {
+#Unsafe("posix mkfifo: the caller owns `path` and removes the named pipe it creates") fn mkfifo(path: String, mode: Int) IOError! -[FS, Env]> {
     core.sys.mkfifo(path, mode)
 }
 
-#Unsafe("posix fork: the caller handles both the parent and the child return and reaps the child") pub fn fork() -[Env]> Int IOError! {
+#Unsafe("posix fork: the caller handles both the parent and the child return and reaps the child") fn fork() -[Env]> Int IOError! {
     core.sys.fork()
 }
 
-#Unsafe("posix setsid: the caller owns the process session topology it changes") pub fn setsid() -[Env]> Int IOError! {
+#Unsafe("posix setsid: the caller owns the process session topology it changes") fn setsid() -[Env]> Int IOError! {
     core.sys.setsid()
 }
 
-#Unsafe("posix wait: the caller owns the child processes it reaps") pub fn wait() -[Env, Time.Wait]> Int IOError! {
+#Unsafe("posix wait: the caller owns the child processes it reaps") fn wait() -[Env, Time.Wait]> Int IOError! {
     core.sys.wait()
 }
 
-#Unsafe("posix waitpid: the caller owns the child process it reaps") pub fn waitpid(pid: Int, options: Int) -[Env, Time.Wait]> Int IOError! {
+#Unsafe("posix waitpid: the caller owns the child process it reaps") fn waitpid(pid: Int, options: Int) -[Env, Time.Wait]> Int IOError! {
     core.sys.waitpid(pid, options)
 }
 
-#Unsafe("posix setuid: the caller drops or changes process credentials deliberately") pub fn setuid(uid: Int) IOError! -[Env]> {
+#Unsafe("posix setuid: the caller drops or changes process credentials deliberately") fn setuid(uid: Int) IOError! -[Env]> {
     core.sys.setuid(uid)
 }
 
-#Unsafe("posix setgid: the caller drops or changes process credentials deliberately") pub fn setgid(gid: Int) IOError! -[Env]> {
+#Unsafe("posix setgid: the caller drops or changes process credentials deliberately") fn setgid(gid: Int) IOError! -[Env]> {
     core.sys.setgid(gid)
 }
 
-#Unsafe("posix setpgrp: the caller owns the process group topology it changes") pub fn setpgrp() IOError! -[Env]> {
+#Unsafe("posix setpgrp: the caller owns the process group topology it changes") fn setpgrp() IOError! -[Env]> {
     core.sys.setpgrp()
 }
 
-#Unsafe("posix setpgid: the caller owns the process group topology it changes") pub fn setpgid(pid: Int, pgid: Int) IOError! -[Env]> {
+#Unsafe("posix setpgid: the caller owns the process group topology it changes") fn setpgid(pid: Int, pgid: Int) IOError! -[Env]> {
     core.sys.setpgid(pid, pgid)
 }
 
-#Unsafe("posix kill: the caller owns or is entitled to signal the target process") pub fn kill(pid: Int, signal: Int) IOError! -[Env]> {
+#Unsafe("posix kill: the caller owns or is entitled to signal the target process") fn kill(pid: Int, signal: Int) IOError! -[Env]> {
     core.sys.kill(pid, signal)
 }
 
-#Unsafe("posix initgroups: the caller changes supplementary groups deliberately") pub fn initgroups(user: String, group: Int) IOError! -[Env]> {
+#Unsafe("posix initgroups: the caller changes supplementary groups deliberately") fn initgroups(user: String, group: Int) IOError! -[Env]> {
     core.sys.initgroups(user, group)
 }
 
 
-pub fn platform() -[Env]> String Never! { "{name()}-{arch()}" }
+fn platform() -[Env]> String Never! { "{name()}-{arch()}" }
 
-pub fn is_windows() -[Env]> Bool Never! { family() == "windows" }
+fn is_windows() -[Env]> Bool Never! { family() == "windows" }
 
-pub fn is_unix() -[Env]> Bool Never! { family() == "unix" }
+fn is_unix() -[Env]> Bool Never! { family() == "unix" }
 
-pub fn is_linux() -[Env]> Bool Never! {
+fn is_linux() -[Env]> Bool Never! {
     platform_name :: ascii_lower(name())
     platform_name == "linux"
 }
 
-pub fn is_macos() -[Env]> Bool Never! {
+fn is_macos() -[Env]> Bool Never! {
     platform_name :: ascii_lower(name())
     platform_name == "macos" || platform_name == "darwin" || platform_name == "osx"
 }
 
-pub fn uname() -[Env]> String Never! { "{name()} {release()} {version()} {arch()}" }
+fn uname() -[Env]> String Never! { "{name()} {release()} {version()} {arch()}" }
 
-pub fn sysname() -[Env]> String Never! { name() }
+fn sysname() -[Env]> String Never! { name() }
 
-pub fn machine() -[Env]> String Never! { arch() }
+fn machine() -[Env]> String Never! { arch() }
 
-pub fn getenv(name: String) -[Env]> String? Never! { get(name) }
+fn getenv(name: String) -[Env]> String? Never! { get(name) }
 
-pub fn pathsep() -[Env]> String Never! {
+fn pathsep() -[Env]> String Never! {
     if is_windows() -> return ";"
     ":"
 }
 
-pub fn linesep() -[Env]> String Never! {
+fn linesep() -[Env]> String Never! {
     if is_windows() -> return String.from_bytes([U8]{13, 10}) ?? ""
     "\n"
 }

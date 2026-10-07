@@ -223,7 +223,7 @@ fn package_output_selects_non_run_callable_for_run_dev_and_effects() {
     .unwrap();
     fs::write(
         scratch.join("entry.jet"),
-        "fn run() { print(\"wrong callable\") }\npub fn launch() {}\n",
+        "fn run() { print(\"wrong callable\") }\nfn launch() {}\n",
     )
     .unwrap();
 
@@ -281,7 +281,7 @@ fn entry_wrapper_uses_the_full_nested_import_qualification_chain() {
     fs::write(&entry, "use \"runner\" as runner\n").unwrap();
     fs::write(scratch.join("runner.jet"), "use \"bridge\" as bridge\n").unwrap();
     fs::write(scratch.join("bridge.jet"), "use \"leaf\" as app\n").unwrap();
-    fs::write(scratch.join("leaf.jet"), "pub fn leaf() {}\n").unwrap();
+    fs::write(scratch.join("leaf.jet"), "fn leaf() {}\n").unwrap();
 
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).expect("chain should load");
     jet::Driver::swap_entry_point(&mut bundle, "leaf");
@@ -445,7 +445,7 @@ fn manifest_output_resolves_nested_main_file_across_run_and_build() {
     .expect("write package manifest");
     fs::write(
         scratch.join("src/cli/main.jet"),
-        "pub fn cli_run() {\n    print(\"nested-main\")\n}\n",
+        "fn cli_run() {\n    print(\"nested-main\")\n}\n",
     )
     .expect("write nested package entry");
 

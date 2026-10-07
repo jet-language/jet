@@ -7,7 +7,7 @@
 
 // TrustRoot's one error carrier; `message()` is the Rust `Display` text.
 #Error
-pub enum TrustRootError {
+enum TrustRootError {
     BootstrapPinMismatch(expected: String, actual: String)
     BootstrapMissing
     SignatureStripped(role: MetadataRole)
@@ -64,7 +64,7 @@ pub enum TrustRootError {
 impl IOError -> TrustRootError { return TrustRootError.IO{detail: "{self}"} }
 
 // Separate trust-domain identities (D-JPK-TRUSTROOT1).
-pub enum IdentityKind {
+enum IdentityKind {
     Publisher
     Registry
     CacheBuilder
@@ -84,7 +84,7 @@ pub enum IdentityKind {
 // identity bundle against a pinned transparency checkpoint, or an offline
 // Ed25519/KMS/HSM publisher signature. D-PKGSIGN1 author signatures are a
 // different, opt-in surface.
-pub enum PublisherIdentity {
+enum PublisherIdentity {
     Sigstore(identity: String, issuer: String, checkpoint_digest: String, bundle_digest: String)
     OfflineEd25519(public_key_hex: String, key_id: String)
     KMSHSM(key_uri: String, public_key_hex: String, key_id: String)
@@ -121,11 +121,11 @@ pub enum PublisherIdentity {
     }
 }
 
-pub struct BoundIdentity {
-    pub kind: IdentityKind
-    pub name: String
+struct BoundIdentity {
+    kind: IdentityKind
+    name: String
     // The hybrid publisher proof; non-publisher identities must leave it absent.
-    pub proof: PublisherIdentity?
+    proof: PublisherIdentity?
 
     fn registry(name: String) -> BoundIdentity Never! {
         BoundIdentity{kind: IdentityKind.Registry, name, proof: None}

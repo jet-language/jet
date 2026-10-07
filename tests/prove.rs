@@ -41,7 +41,7 @@ module perf.package {
         limit: .AtMost(10),
     }],
 }
-pub fn api() {}
+fn api() {}
 fn run() {}
 "#,
     )

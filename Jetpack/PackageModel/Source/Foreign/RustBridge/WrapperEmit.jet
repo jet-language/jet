@@ -108,7 +108,7 @@ fn ffi_panic() -> ! {
 
 ``` }
 
-pub fn pkg_ffi_emit_cargo_toml(crate_name: String, deps: [String: String], has_native: Bool, foundation_crate_path: String?) -> String Never! {
+fn pkg_ffi_emit_cargo_toml(crate_name: String, deps: [String: String], has_native: Bool, foundation_crate_path: String?) -> String Never! {
     build :: if has_native -> "build = \"build.rs\"\n" else -> ""
     s := "[package]\nname = \"{crate_name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n{build}\n[workspace]\n\n[lib]\ncrate-type = [\"rlib\", \"cdylib\"]\n\n"
     if deps.len() == 0 -> return s
@@ -150,7 +150,7 @@ fn pkg_ffi_runtime_mod(name: String, body: String) -> String Never! {
     "mod {name} {{\n{body}}}\npub use {name}::*;\n"
 }
 
-pub fn pkg_ffi_emit_wrapper_lib_with_handles(entries: [ExternEntry], needs: RustBridgeNeeds, handle_names: [String], record_defs: CRecordDefinitions) -> String Never! {
+fn pkg_ffi_emit_wrapper_lib_with_handles(entries: [ExternEntry], needs: RustBridgeNeeds, handle_names: [String], record_defs: CRecordDefinitions) -> String Never! {
     out := FFI_WRAPPER_PRELUDE
     out = "{out}#[repr(C)]\npub struct JetFfiSlot {{\npub value: u64,\npub ptr: *mut u8,\npub len: usize,\n}}\n\n"
     out = "{out}{record_defs.source}"

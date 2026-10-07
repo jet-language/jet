@@ -128,7 +128,7 @@ pub fn generated_ffi_does_not_move_baseline() {
 
 pub fn corelib_wrapper_needs_unsafe_or_proof() {
     let fixture = Fixture::new("corelib");
-    let laundering = "pub fn fork() -> Int IOError! {\n    #Unsafe(\"posix fork\") {\n        return core.sys.fork()\n    }\n}\n";
+    let laundering = "fn fork() -> Int IOError! {\n    #Unsafe(\"posix fork\") {\n        return core.sys.fork()\n    }\n}\n";
     fixture.write("Core/sys/sys.jet", laundering);
     let output = ratchet(&fixture, true);
     assert!(
@@ -140,7 +140,7 @@ pub fn corelib_wrapper_needs_unsafe_or_proof() {
 
     fixture.write(
         "Core/sys/sys.jet",
-        "pub fn fork() -> Int IOError! {\n    core.sys.fork()\n}\n",
+        "fn fork() -> Int IOError! {\n    core.sys.fork()\n}\n",
     );
     let output = ratchet(&fixture, true);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -155,7 +155,7 @@ pub fn corelib_wrapper_needs_unsafe_or_proof() {
 
     fixture.write(
         "Core/sys/sys.jet",
-        "#Unsafe(\"the caller reaps the child\") pub fn fork() -> Int IOError! {\n    core.sys.fork()\n}\n",
+        "#Unsafe(\"the caller reaps the child\") fn fork() -> Int IOError! {\n    core.sys.fork()\n}\n",
     );
     seed(&fixture);
     let output = ratchet(&fixture, false);
@@ -178,7 +178,7 @@ pub fn corelib_wrapper_needs_unsafe_or_proof() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    fixture.write("Core/sys/sys.jet", "#Unsafe(\"the caller reaps the child\") pub fn fork() -> Int IOError! {\n    core.sys.fork()\n}\n");
+    fixture.write("Core/sys/sys.jet", "#Unsafe(\"the caller reaps the child\") fn fork() -> Int IOError! {\n    core.sys.fork()\n}\n");
     seed_allowing_corelib(&fixture);
     let output = ratchet(&fixture, false);
     let stderr = String::from_utf8_lossy(&output.stderr);

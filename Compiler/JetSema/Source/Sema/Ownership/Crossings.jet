@@ -12,7 +12,7 @@ use jet_foundation.[
     type_name,
 ]
 
-pub enum SemaSendCrossing {
+enum SemaSendCrossing {
     TaskCapture
     TaskResult
     ChannelSend
@@ -23,7 +23,7 @@ pub enum SemaSendCrossing {
     SharedStorage
 }
 
-pub enum SemaSendProblemKind {
+enum SemaSendProblemKind {
     ClosureNeedsTake
     ClosureCaptures
     CallableValue
@@ -34,10 +34,10 @@ pub enum SemaSendProblemKind {
     UnknownType(name: String)
 }
 
-pub struct SemaSendabilityProblem {
-    pub root: String?
-    pub path: [String]
-    pub kind: SemaSendProblemKind
+struct SemaSendabilityProblem {
+    root: String?
+    path: [String]
+    kind: SemaSendProblemKind
 }
 
 fn sema_ownership_crossing_new_problem(kind: SemaSendProblemKind) -> SemaSendabilityProblem Never! {
@@ -300,14 +300,14 @@ fn sema_ownership_crossing_type_inner(ty: Type, crossing: SemaSendCrossing, clos
     }
 }
 
-pub fn sema_ownership_crossing_problem(ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: SemaCheckContext) -> SemaSendabilityProblem? {
+fn sema_ownership_crossing_problem(ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: SemaCheckContext) -> SemaSendabilityProblem? {
     strict_callable :: sema_ownership_crossing_strict_callable(crossing)
     cell_only := crossing == SemaSendCrossing.SharedStorage
     walk := SemaCrossingWalk{active: [String]{}, finished: [String:Bool]{}}
     sema_ownership_crossing_type_inner(ty, crossing, closure_taken, strict_callable, cell_only, environment, context, &walk)
 }
 
-pub fn sema_ownership_crossing_problem_for_name(name: String, ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, environment: SemaScopeEnvironment, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext) -> SemaSendabilityProblem? {
+fn sema_ownership_crossing_problem_for_name(name: String, ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, environment: SemaScopeEnvironment, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext) -> SemaSendabilityProblem? {
     index :: sema_scope_resolve_index(scopes, name)
     if index == .Val(binding_index) {
         binding :: scopes.bindings[binding_index]
@@ -323,7 +323,7 @@ pub fn sema_ownership_crossing_problem_for_name(name: String, ty: Type, crossing
     sema_ownership_crossing_problem(ty, crossing, closure_taken, environment, scopes, context)
 }
  
-pub fn sema_ownership_crossing_problem_for_expr(expr: Expr, ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, environment: SemaScopeEnvironment, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext) -> SemaSendabilityProblem? {
+fn sema_ownership_crossing_problem_for_expr(expr: Expr, ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, environment: SemaScopeEnvironment, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext) -> SemaSendabilityProblem? {
     if expr == {
         .Ident(name, span) -> {
             if sema_scope_resolve_index_at(scopes, name, span) != None -> return sema_ownership_crossing_problem_for_name(name, ty, crossing, closure_taken, environment, scopes, state, context)
@@ -335,16 +335,16 @@ pub fn sema_ownership_crossing_problem_for_expr(expr: Expr, ty: Type, crossing: 
 
  
 
-pub fn sema_ownership_crossing_capture_taken(lambda: TLambda, capture: TCapture, environment: SemaScopeEnvironment, generic_params: [TGenericParam]) -> Bool Never! {
+fn sema_ownership_crossing_capture_taken(lambda: TLambda, capture: TCapture, environment: SemaScopeEnvironment, generic_params: [TGenericParam]) -> Bool Never! {
     loop name in lambda.capture_facts.moved { if name == capture.source -> return true }
     facts :: sema_copy_classify(capture.ty, SemaCopyIntent.Clone, environment, generic_params, false)
     !facts.cloneable
 }
-pub fn sema_ownership_crossing_concurrent_write_diagnostic(value: String, boundary: String, span: Span) -> Diagnostic {
+fn sema_ownership_crossing_concurrent_write_diagnostic(value: String, boundary: String, span: Span) -> Diagnostic {
     sema_error("E1101", span, "`{value}` cannot cross the `{boundary}` boundary: the value writes shared state", "the `{boundary}` boundary can run concurrently with its owner; the write would race with the owner or require a hidden merge rule", "Give it with `^`, freeze it with `freeze`, or share it with `shared`")
 }
 
-pub fn sema_ownership_crossing_describe(problem: SemaSendabilityProblem) -> String Never! {
+fn sema_ownership_crossing_describe(problem: SemaSendabilityProblem) -> String Never! {
     if problem.kind == {
         .ClosureNeedsTake -> {
             if problem.root == .Val(root) && problem.path.len() > 0 -> return "`{root}` contains `{problem.path.join(".")}`, whose captures cannot cross this boundary"
@@ -367,7 +367,7 @@ fn sema_ownership_crossing_local_cell(problem: SemaSendabilityProblem) -> Bool N
     }
 }
 
-pub fn sema_ownership_crossing_diagnostic(value: String, ty: Type, problem: SemaSendabilityProblem, crossing: SemaSendCrossing, span: Span) -> Diagnostic {
+fn sema_ownership_crossing_diagnostic(value: String, ty: Type, problem: SemaSendabilityProblem, crossing: SemaSendCrossing, span: Span) -> Diagnostic {
     type_name_value := type_name(ty)
     value_text := if value == "this value" -> value else -> "`{value}`"
     description := sema_ownership_crossing_describe(problem)

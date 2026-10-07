@@ -3328,7 +3328,7 @@ fn jet_driver_incomplete_graph_problem(summary: String, modules: [SemaGraphModul
 
 // The result for a compile whose own failure escaped every stage: no stage
 // produced a load or partial product, so only the internal problem is kept.
-pub fn jet_driver_compile_escaped_failure(message: String) -> JetDriverCompileResult Never! {
+fn jet_driver_compile_escaped_failure(message: String) -> JetDriverCompileResult Never! {
     JetDriverCompileResult{
         diagnostics: [Diagnostic]{},
         generated_source_files: [MIRSourceFile]{},
@@ -3770,7 +3770,7 @@ fn jet_driver_native_emit_config(threads: CompilerThreads) -> JetRustEmitConfig 
     }
 }
 
-pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
+fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
     kg := jet_driver_keep_going_log(None)
     jet_driver_compile_stages(^request, &kg, true)
 }
@@ -3778,7 +3778,7 @@ pub fn jet_driver_compile(request: ^JetDriverCompileRequest) -> JetDriverCompile
 // Native code generation consumes checked MIR directly. Emitting Rust is not
 // a prerequisite for this feed; the checked front-end/optimizer stages and
 // their diagnostics are identical to the ordinary compile path.
-pub fn jet_driver_compile_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
+fn jet_driver_compile_mir(request: ^JetDriverCompileRequest) -> JetDriverCompileResult {
     kg := jet_driver_keep_going_log(None)
     jet_driver_compile_stages(^request, &kg, false)
 }
@@ -3788,7 +3788,7 @@ pub fn jet_driver_compile_mir(request: ^JetDriverCompileRequest) -> JetDriverCom
 // The result keeps every error report, so a compile with any row never
 // passes; a crash later in the run still leaves the rows already streamed to
 // the trace sink.
-pub fn jet_driver_compile_keep_going(request: ^JetDriverCompileRequest, options: JetDriverKeepGoing) -> JetDriverCompileResult {
+fn jet_driver_compile_keep_going(request: ^JetDriverCompileRequest, options: JetDriverKeepGoing) -> JetDriverCompileResult {
     kg := jet_driver_keep_going_log(Val(options))
     result := jet_driver_compile_stages(^request, &kg, true)
     if result.internal_problem == .Val(problem) -> jet_driver_keep_going_row(&kg, "internal", "-", "ICE", problem, "-")

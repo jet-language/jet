@@ -68,7 +68,7 @@ fn trust_lock_string_list(raw: String) -> [String] Never! {
 }
 
 // Strip the semantic sections so the machine lock keeps its own bytes.
-pub fn trust_strip_semantic_sections(raw: String) -> String Never! {
+fn trust_strip_semantic_sections(raw: String) -> String Never! {
     out := [String]{}
     skipping := false
     loop line in trust_text_lines(raw) {
@@ -254,7 +254,7 @@ struct SemanticLockReader {
 
 // Rust `SemanticLock::parse`: blank and `#` lines are skipped, unknown
 // lines ignored, and incomplete blocks dropped.
-pub fn trust_parse_semantic_lock(raw: String) -> SemanticLockFile Never! {
+fn trust_parse_semantic_lock(raw: String) -> SemanticLockFile Never! {
     reader := SemanticLockReader.new()
     loop raw_line in trust_text_lines(raw) {
         line :: raw_line.trim()
@@ -277,7 +277,7 @@ pub fn trust_parse_semantic_lock(raw: String) -> SemanticLockFile Never! {
 }
 
 // Rust `SemanticLock::write`.
-pub fn trust_write_semantic_lock(lock: SemanticLockFile) -> String Never! {
+fn trust_write_semantic_lock(lock: SemanticLockFile) -> String Never! {
     records := lock.records
     &records.sort_by(record -> record.identity.semantic_key())
     inputs := lock.inputs

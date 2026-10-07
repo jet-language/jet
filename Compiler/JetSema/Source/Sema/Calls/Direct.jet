@@ -34,9 +34,9 @@ use jet_foundation.[
     type_name,
 ]
 
-pub struct SemaDirectSpecialCheck {
-    pub handled: Bool
-    pub value: TExpr?
+struct SemaDirectSpecialCheck {
+    handled: Bool
+    value: TExpr?
 }
 
 fn sema_call_special_diagnostic(name: String, span: Span) -> Diagnostic {
@@ -250,7 +250,7 @@ fn sema_call_check_special_debug(call: Call, expected: Type?, environment: SemaS
     SemaDirectSpecialCheck{handled: true, value: Val(sema_tir_expr(checked.ty, TExprKind.InlineBlock{body: body}, call.name_span))}
 }
 
-pub fn sema_call_try_knowledge_builtin(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_try_knowledge_builtin(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if !sema_call_gate_is_unshadowed(call.name, scopes) -> return SemaDirectSpecialCheck{handled: false, value: None}
     if call.name == {
         "wrapping" | "saturating" | "checked" -> sema_call_check_special_overflow(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -266,7 +266,7 @@ pub fn sema_call_try_knowledge_builtin(call: Call, expected: Type?, environment:
 // (CheckerInfer/calls/direct_calls.rs, CheckerItems.rs check_*_call). A user
 // function or local of the same name shadows every row. `#NoPrelude`
 // print/input refusal (E0429) runs before this dispatcher.
-pub fn sema_call_try_ambient_prelude(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_try_ambient_prelude(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if !sema_call_gate_is_unshadowed(call.name, scopes) -> return SemaDirectSpecialCheck{handled: false, value: None}
     if call.name == {
         "print" -> sema_call_check_ambient_print(call, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -526,7 +526,7 @@ fn sema_call_check_ambient_assert_eq(call: Call, environment: SemaScopeEnvironme
 // Core registry rows are selected by the caller's canonical route.  These
 // source-owned projections run before the generic fixed-row producer; an
 // unhandled projection deliberately leaves the row for that producer.
-pub fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
+fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
     // The compiler query checker has a source-owned lowerer only for the
     // compiler API.  Build graph rows stay on the fixed Core path until their
     // caller-approved lowering exists; no runtime-shaped fallback is invented.
@@ -562,7 +562,7 @@ pub fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg],
 
     SemaDirectSpecialCheck{handled: false, value: None}
 }
-pub fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
+fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
     if !call.name.contains(".") -> return SemaDirectSpecialCheck{handled: false, value: None}
     parts := call.name.split(".").to_list()
     if parts.len() != 2 -> return SemaDirectSpecialCheck{handled: false, value: None}
@@ -623,7 +623,7 @@ fn sema_call_default_err_result(expected: Type?) -> Type? {
 // This predicate is intentionally keyed to the dedicated compiler binding.
 // A source/imported function or type named Err remains the ordinary resolver
 // winner, matching native shadowing behavior.
-pub fn sema_call_default_err_candidate(call: Call, expected: Type?, scopes: SemaScopeTable) -> Bool Never! {
+fn sema_call_default_err_candidate(call: Call, expected: Type?, scopes: SemaScopeTable) -> Bool Never! {
     if call.name != "Err" -> return false
     index :: sema_scope_resolve_index(scopes, call.name) ?? return false
     sema_scope_binding_is_compiler_builtin(scopes.bindings[index], "Err")
@@ -737,7 +737,7 @@ fn sema_call_default_err_constructor(call: Call, expected: Type?, wrap_result: B
     }
 }
 
-pub fn sema_call_check_default_err(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_check_default_err(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     result :: sema_call_default_err_result(expected)
     if result == .Val(result_value) {
         // #3708: an `Err(...)` that builds a carrier is a failure source of
@@ -783,8 +783,8 @@ fn sema_call_local_default_values(target: SemaCallDirectTarget, binding: SemaCal
 }
 
 struct SemaCallInferenceFacts {
-    pub parameter_types: [Type]
-    pub argument_types: [Type]
+    parameter_types: [Type]
+    argument_types: [Type]
 }
 
 fn sema_call_inference_needs_context(expr: Expr) -> Bool Never! {
@@ -945,16 +945,16 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     Val(SemaCallChecked{value: checked, binding: resolved_binding, facts: facts, return_view_facts: return_view_facts})
 }
 
-pub fn sema_call_check_direct_target_owned(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
+fn sema_call_check_direct_target_owned(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
     sema_call_direct_checked_from_target(&state, target, call, defaults, expected, environment, &scopes, &tail_store, &context, &diagnostics)
 }
 
-pub fn sema_call_check_direct_target(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_check_direct_target(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     checked :: sema_call_direct_checked_from_target(&state, target, call, defaults, expected, environment, &scopes, &tail_store, &context, &diagnostics) ?? return None
     Val(checked.value)
 }
 
-pub fn sema_call_check_direct(state: &SemaOwnershipState, call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_check_direct(state: &SemaOwnershipState, call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     special :: sema_call_try_knowledge_builtin(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if special.handled -> return special.value
     if sema_call_default_err_candidate(call, expected, scopes) {

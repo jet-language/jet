@@ -512,7 +512,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         &format!("{}_close", surface.handle.group),
     );
     output.push_str(
-        "}\n\n#Error\npub enum PascalError {\n    InvalidHandle\n    Foreign\n    ResourceLimit\n}\n\n",
+        "}\n\n#Error\nenum PascalError {\n    InvalidHandle\n    Foreign\n    ResourceLimit\n}\n\n",
     );
     output.push_str("pub struct ");
     output.push_str(&ty);

@@ -5,7 +5,7 @@ mod common;
 #[test]
 fn user_policy_declaration_and_custom_chain_parse_together() {
     let source = r#"
-pub policy audit(topic: String) {
+policy audit(topic: String) {
     wrap(call) { return call() }
 }
 
@@ -50,7 +50,7 @@ fn user_policy_apply_keeps_a_callable_binding() {
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
-        r#"pub policy audit(topic: String) {
+        r#"policy audit(topic: String) {
     wrap(call) { return "{topic}:{call()}" }
 }
 

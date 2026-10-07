@@ -10,9 +10,9 @@ ELF64_BASE_ADDRESS :: prep { 0x400000 }
 ELF64_HEADER_SIZE :: prep { 64 }
 ELF64_PROGRAM_HEADER_SIZE :: prep { 56 }
 
-pub struct X64ExecutableResult {
-    pub bytes: [U8]
-    pub errors: [String]
+struct X64ExecutableResult {
+    bytes: [U8]
+    errors: [String]
 }
 
 fn elf64_u16(bytes: &[U8], value: Int) Never! {
@@ -51,7 +51,7 @@ fn elf64_text_offset(origin_align: Int, has_data: Bool) -> Int Never! {
 // starts at `entry_offset` within `text`. ELF64 PT_LOAD congruence still uses
 // the page-aligned mapping base; padding aligns the absolute text origin,
 // including when `origin_align` exceeds the base's divisibility.
-pub fn elf64_static_executable(text: [U8], entry_offset: Int, origin_align: Int, data_offset: Int) -> [U8] Never! {
+fn elf64_static_executable(text: [U8], entry_offset: Int, origin_align: Int, data_offset: Int) -> [U8] Never! {
     has_data :: data_offset < text.len()
     text_offset :: elf64_text_offset(origin_align, has_data)
     bytes := [U8]{}
@@ -100,7 +100,7 @@ fn x64_start_stub(entry: LIRFunctionID, returns_word: Bool) -> X64CompiledFuncti
 // which takes no parameters and returns one word (the exit status) or
 // nothing (status 0). Runtime calls link against the freestanding image
 // runtime (Image/Runtime.jet).
-pub fn x64_static_executable(program: LIRModule, entry: LIRFunctionID) -> X64ExecutableResult Never! {
+fn x64_static_executable(program: LIRModule, entry: LIRFunctionID) -> X64ExecutableResult Never! {
     if entry.value < 0 || entry.value >= program.functions.len() -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {entry.value} is not in the module"}}
     signature :: lir_signature(program, program.functions[entry.value].signature) ?? return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function has no signature"}}
     if signature.params.len() != 0 || (signature.result != None && signature.result != Val(lir_layout_word())) -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {program.functions[entry.value].name} must take no parameters and return one word or nothing"}}

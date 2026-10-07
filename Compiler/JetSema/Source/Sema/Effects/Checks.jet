@@ -38,66 +38,66 @@ use jet_foundation.[
     type_name,
 ]
 
-pub struct SemaEffectFunctionSource {
-    pub key: String
-    pub name: String
-    pub span: Span
+struct SemaEffectFunctionSource {
+    key: String
+    name: String
+    span: Span
     // The function's name, where trait-bound reports (E0742) point.
-    pub name_span: Span?{None}
-    pub declared_effects: [EffectRowEntry]?
-    pub is_pure: Bool
-    pub is_replayable: Bool
-    pub is_unsafe: Bool
-    pub unsafe_reason: String?
-    pub unsafe_span: Span?
-    pub replayable_span: Span?
-    pub effect_via: NamedSpan?
+    name_span: Span?{None}
+    declared_effects: [EffectRowEntry]?
+    is_pure: Bool
+    is_replayable: Bool
+    is_unsafe: Bool
+    unsafe_reason: String?
+    unsafe_span: Span?
+    replayable_span: Span?
+    effect_via: NamedSpan?
     // D-EFF1: the body's `#FX(…)` regions with valid cap lists (E0712).
-    pub fx_regions: [SemaEffectFxRegion]{[SemaEffectFxRegion]{}}
+    fx_regions: [SemaEffectFxRegion]{[SemaEffectFxRegion]{}}
     // D-AUTHORITY-MEM2: loop statement spans; memory work inside one has no
     // static execution count.
-    pub loop_spans: [Span]{[Span]{}}
+    loop_spans: [Span]{[Span]{}}
     // D-DET1: `assume_deterministic` blocks suspend E3403.
-    pub assume_det_spans: [Span]{[Span]{}}
+    assume_det_spans: [Span]{[Span]{}}
 }
 
 // One `#FX(…)` region: its parsed caps, the head span E0712 points at, and
 // the block span its `TStmt.Region` lowering keeps.
-pub struct SemaEffectFxRegion {
-    pub caps: [String]
-    pub caps_span: Span
-    pub span: Span
+struct SemaEffectFxRegion {
+    caps: [String]
+    caps_span: Span
+    span: Span
 }
 
-pub struct SemaEffectModuleInput {
-    pub module_identity: String
-    pub functions: [TFunc]
-    pub sources: [SemaEffectFunctionSource]
-    pub call_facts: [SemaCallSiteFact]
-    pub source_segments: [SemaSourceSegment]
+struct SemaEffectModuleInput {
+    module_identity: String
+    functions: [TFunc]
+    sources: [SemaEffectFunctionSource]
+    call_facts: [SemaCallSiteFact]
+    source_segments: [SemaSourceSegment]
     // D-EFF3 trait-method effect ceilings this module declares (E0742).
-    pub trait_bounds: [SemaEffectTraitBound]{[SemaEffectTraitBound]{}}
+    trait_bounds: [SemaEffectTraitBound]{[SemaEffectTraitBound]{}}
 }
 
 // One bounded trait method: an impl of `trait_name.method` may use only the
 // effects in `bound` (`-[]>` is the empty bound).
-pub struct SemaEffectTraitBound {
-    pub trait_name: String
-    pub method: String
-    pub bound: [String]
+struct SemaEffectTraitBound {
+    trait_name: String
+    method: String
+    bound: [String]
 }
 
-pub struct SemaEffectModuleResult {
-    pub module_identity: String
-    pub functions: [TFunc]
-    pub diagnostics: [Diagnostic]
-    pub complete: Bool
+struct SemaEffectModuleResult {
+    module_identity: String
+    functions: [TFunc]
+    diagnostics: [Diagnostic]
+    complete: Bool
 }
 
-pub struct SemaEffectGraphResult {
-    pub modules: [SemaEffectModuleResult]
-    pub diagnostics: [Diagnostic]
-    pub complete: Bool
+struct SemaEffectGraphResult {
+    modules: [SemaEffectModuleResult]
+    diagnostics: [Diagnostic]
+    complete: Bool
 }
 
 // One memory operation a body performs directly (Rust `MemoryEvent`): `kind`
@@ -193,7 +193,7 @@ struct SemaEffectNode {
     source_display: String{""}
 }
 
-pub fn sema_effect_source_from_function(func: Func, module_identity: String) -> SemaEffectFunctionSource Never! {
+fn sema_effect_source_from_function(func: Func, module_identity: String) -> SemaEffectFunctionSource Never! {
     SemaEffectFunctionSource{
         key: symbol_id(SymbolKind.Function, module_identity, "", func.name).key,
         name: func.name,
@@ -294,7 +294,7 @@ fn sema_effect_push_memory_event(nodes: &[SemaEffectNode], node_index: Int, span
     &nodes[node_index].memory_events.push(SemaMemoryEvent{span: span, operation: operation, kind: kind, bytes: bytes, executions: executions})
 }
 
-pub fn sema_effect_source_from_function_key(func: Func, module_identity: String, key: String) -> SemaEffectFunctionSource Never! {
+fn sema_effect_source_from_function_key(func: Func, module_identity: String, key: String) -> SemaEffectFunctionSource Never! {
     source := sema_effect_source_from_function(func, module_identity)
     source.key = key
     source
@@ -303,7 +303,7 @@ pub fn sema_effect_source_from_function_key(func: Func, module_identity: String,
 // ────────────────────────────────────────────────────────────────────────────
 // Canonical effect vocabulary and set operations
 
-pub fn sema_effect_grantable_roots() -> [String] Never! {
+fn sema_effect_grantable_roots() -> [String] Never! {
     [String]{"Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU", "FFI", "Browser", "Secret"}
 }
 
@@ -315,7 +315,7 @@ fn sema_effect_known_root(root: String) -> Bool Never! {
     false
 }
 
-pub fn sema_effect_root(name: String) -> String Never! {
+fn sema_effect_root(name: String) -> String Never! {
     base := name
     if base.contains("(") {
         parts :: base.split("(").to_list()
@@ -370,7 +370,7 @@ fn sema_effect_set_add(set: &[String], value: String) -> Bool Never! {
     true
 }
 
-pub fn sema_effect_set_union(target: &[String], values: [String]) -> Bool Never! {
+fn sema_effect_set_union(target: &[String], values: [String]) -> Bool Never! {
     changed := false
     loop value in values {
         if sema_effect_set_add(&target, value) -> changed = true
@@ -378,13 +378,13 @@ pub fn sema_effect_set_union(target: &[String], values: [String]) -> Bool Never!
     changed
 }
 
-pub fn sema_effect_covers(bound: String, effect_name: String) -> Bool Never! {
+fn sema_effect_covers(bound: String, effect_name: String) -> Bool Never! {
     if bound == effect_name -> return true
     prefix :: "{bound}."
     effect_name.starts_with(prefix)
 }
 
-pub fn sema_effect_parse_name(name: String) -> String? {
+fn sema_effect_parse_name(name: String) -> String? {
     if name == "" || name.starts_with("..") -> return None
     base := name
     if base.contains("(") {
@@ -440,7 +440,7 @@ fn sema_effect_covered(inferred: [String], prohibited: [String]) -> [String] Nev
     result
 }
 
-pub fn sema_effect_authority_deny_covered(denies: [String], inferred: [String]) -> [String] Never! {
+fn sema_effect_authority_deny_covered(denies: [String], inferred: [String]) -> [String] Never! {
     prohibited := [String]{}
     loop raw in denies {
         effect_name := raw
@@ -495,11 +495,11 @@ fn sema_effect_canonical_irreversible_fact(environment: SemaScopeEnvironment, ef
     sema_effect_declarations_irreversible_fact(graph.modules[module_index].program.items, effect_name)
 }
 
-pub fn sema_effect_root_is_irreversible(environment: SemaScopeEnvironment, effect_name: String) -> Bool? {
+fn sema_effect_root_is_irreversible(environment: SemaScopeEnvironment, effect_name: String) -> Bool? {
     sema_effect_canonical_irreversible_fact(environment, effect_name)
 }
 
-pub fn sema_effect_transaction_wall_diagnostic(api: String, effect_name: String, span: Span) -> Diagnostic {
+fn sema_effect_transaction_wall_diagnostic(api: String, effect_name: String, span: Span) -> Diagnostic {
     effect_root :: sema_effect_root(effect_name)
     diagnostic :: if effect_root == "FFI" -> sema_error("E0746", span, "`{api}` has the `FFI` effect, which can't be rolled back inside a `#Transact` block", "a foreign function can change external state that the compiler cannot undo automatically", "move this call after the block, or declare `#Undo(inverse)` on the foreign binding so rollback can call the inverse") else -> sema_error("E0746", span, "`{api}` has the `{effect_root}` effect, which can't be rolled back inside a `#Transact` block", "a `#Transact` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`{effect_root}`) leaves committed external state a rollback can't take back", "move this call after the block, or register it with `<handle>.on_commit(() -> {{ … }})` so it runs only on a clean commit")
     diagnostic_with_rights(^diagnostic, "transaction", [String]{api}, [String]{}, None)
@@ -508,7 +508,7 @@ pub fn sema_effect_transaction_wall_diagnostic(api: String, effect_name: String,
 // Check a call's declared effect row at the authored-transaction wall. The
 // caller supplies the canonical API spelling because TIR call nodes may no
 // longer retain the registration module/member pair.
-pub fn sema_effect_check_transaction_wall(environment: SemaScopeEnvironment, scopes: SemaScopeTable, effect_row: [EffectRowEntry]?, api: String, span: Span, diagnostics: &[Diagnostic]) -> Bool? {
+fn sema_effect_check_transaction_wall(environment: SemaScopeEnvironment, scopes: SemaScopeTable, effect_row: [EffectRowEntry]?, api: String, span: Span, diagnostics: &[Diagnostic]) -> Bool? {
     if scopes.transaction_wall_depth <= 0 -> return Val(true)
     row :: effect_row ?? return Val(true)
     loop entry in row {
@@ -523,7 +523,7 @@ pub fn sema_effect_check_transaction_wall(environment: SemaScopeEnvironment, sco
     Val(true)
 }
 
-pub fn sema_effect_call_api(value: TExpr) -> String Never! {
+fn sema_effect_call_api(value: TExpr) -> String Never! {
     if value.kind == {
         .CoreCall(record, _, _, _, _, _, _) -> "{record.module_name}.{record.member}"
         .Call(callee, _, _) -> callee.key
@@ -541,7 +541,7 @@ pub fn sema_effect_call_api(value: TExpr) -> String Never! {
 // Diagnostics and explicit audit gates
 // ────────────────────────────────────────────────────────────────────────────
 
-pub fn sema_effect_unknown(name: String, span: Span) -> Diagnostic {
+fn sema_effect_unknown(name: String, span: Span) -> Diagnostic {
     sema_error("E0119", span, "`{name}` isn't a known effect", "an effect list names compiler-known effects such as `Net`, `FS`, `IO`, `DB`, or `Time`", "use a known effect name, or remove it from the list")
 }
 
@@ -549,24 +549,24 @@ fn sema_effect_positive_panic(span: Span) -> Diagnostic {
     sema_error("E0751", span, "`Panic` can't be granted, only denied", "`Panic` is a deny-only effect row; no positive effect bound or authority can grant it", "drop `Panic` from the list, or write `-[!Panic]>`")
 }
 
-pub fn sema_effect_check_unsafe_region(reason: String?, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_effect_check_unsafe_region(reason: String?, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if (reason ?? "").len() > 0 -> return true
     &diagnostics.push(sema_error("E3112", span, "this `#Unsafe` block has no reason", "every audited region must record why it cannot break memory safety", "add the reason: `#Unsafe(\"why this is safe\") {{ … }}`"))
     false
 }
 
-pub fn sema_effect_check_unsafe_function(source: SemaEffectFunctionSource, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_effect_check_unsafe_function(source: SemaEffectFunctionSource, diagnostics: &[Diagnostic]) -> Bool {
     if !source.is_unsafe -> return true
     sema_effect_check_unsafe_region(source.unsafe_reason, source.unsafe_span ?? source.span, &diagnostics)
 }
 
-pub fn sema_effect_require_unsafe_call(callee: String, callee_is_unsafe: Bool, audited: Bool, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_effect_require_unsafe_call(callee: String, callee_is_unsafe: Bool, audited: Bool, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if !callee_is_unsafe || audited -> return true
     &diagnostics.push(sema_error("E3103", span, "`{callee}` is an `#Unsafe` function", "its contract can't be checked by the compiler, so the caller must vouch for it", "call it inside `#Unsafe(\"…\") {{ … }}`"))
     false
 }
 
-pub fn sema_effect_check_tfunc_unsafe(function: TFunc, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_effect_check_tfunc_unsafe(function: TFunc, diagnostics: &[Diagnostic]) -> Bool {
     if !function.is_unsafe -> return true
     sema_effect_check_unsafe_region(function.unsafe_gate.map((gate) -> gate.reason), function.source_span, &diagnostics)
 }
@@ -782,7 +782,7 @@ fn sema_effect_node_from_source(function: TFunc, source: SemaEffectFunctionSourc
 // Intrinsic producers use the same fact carrier as checked calls. The effect
 // row is authoritative producer input: an empty present row means known-pure,
 // while an absent row remains unknown and is conservatively maximal downstream.
-pub fn sema_effect_record_intrinsic_fact(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, facts: SemaCallFacts, diagnostics: &[Diagnostic]) -> Bool Never! {
+fn sema_effect_record_intrinsic_fact(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, facts: SemaCallFacts, diagnostics: &[Diagnostic]) -> Bool Never! {
     wall := sema_effect_check_transaction_wall(environment, scopes, facts.effect_bound, api, span, &diagnostics)
     allowed :: wall ?? return false
     if !allowed -> return false
@@ -801,7 +801,7 @@ pub fn sema_effect_record_intrinsic_fact(environment: SemaScopeEnvironment, scop
 
 // Convenience entry point for intrinsic operations whose only call metadata
 // is their canonical effect row. Use an empty row to record a known-pure site.
-pub fn sema_effect_record_intrinsic_effects(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, effect_row: [EffectRowEntry], diagnostics: &[Diagnostic]) -> Bool Never! {
+fn sema_effect_record_intrinsic_effects(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, effect_row: [EffectRowEntry], diagnostics: &[Diagnostic]) -> Bool Never! {
     sema_effect_record_intrinsic_fact(
         environment,
         &scopes,
@@ -1295,7 +1295,7 @@ fn sema_effect_scope_diagnostic(marker: String, over: [String], bounds: [String]
     sema_error("E0712", span, "this `#{marker}` region uses the effect `{sema_effect_show(over)}`, which it has no authority for", "`#{marker}(…)` allows only {allowed}; an effect reached inside — even through a call — must be in that list", "add `{sema_effect_show(over)}` to the `#{marker}(…)` list, or move that work outside the region")
 }
 
-pub fn sema_effect_check_scope_caps(marker: String, caps: [String], inferred: [String], span: Span, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_effect_check_scope_caps(marker: String, caps: [String], inferred: [String], span: Span, diagnostics: &[Diagnostic]) -> Bool {
     bounds := [String]{}
     valid := true
     loop raw in caps {
@@ -1332,7 +1332,7 @@ fn sema_effect_callback_diagnostic(over: [String], bounds: [String], span: Span)
     sema_error("E0747", span, "this callback uses the effect `{sema_effect_show(over)}`, which the parameter doesn't allow", "{allowed}; `{sema_effect_show(over)}` is outside that bound", "pass a callback within the declared effect bound, or widen the parameter's bound")
 }
 
-pub fn sema_effect_check_callback_bound(callback_effects: [String], bounds: [String], span: Span, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_effect_check_callback_bound(callback_effects: [String], bounds: [String], span: Span, diagnostics: &[Diagnostic]) -> Bool {
     parsed_bounds := [String]{}
     valid := true
     loop raw in bounds {
@@ -1801,7 +1801,7 @@ fn sema_effect_region_inferred(nodes: [SemaEffectNode], solved: [[String]], owne
     inferred
 }
 
-pub fn sema_effects_check_modules(inputs: ^[SemaEffectModuleInput]) -> SemaEffectGraphResult {
+fn sema_effects_check_modules(inputs: ^[SemaEffectModuleInput]) -> SemaEffectGraphResult {
     diagnostics := [Diagnostic]{}
     nodes := [SemaEffectNode]{}
     results := [SemaEffectModuleResult]{}
@@ -1902,11 +1902,11 @@ pub fn sema_effects_check_modules(inputs: ^[SemaEffectModuleInput]) -> SemaEffec
     SemaEffectGraphResult{modules: results, diagnostics: diagnostics, complete: complete}
 }
 
-pub fn sema_effects_check_module(input: SemaEffectModuleInput) -> SemaEffectGraphResult {
+fn sema_effects_check_module(input: SemaEffectModuleInput) -> SemaEffectGraphResult {
     sema_effects_check_modules([SemaEffectModuleInput]{input})
 }
 
-pub fn sema_effect_check_unsafe_statements(statements: [Stmt], diagnostics: &[Diagnostic]) -> Bool {
+fn sema_effect_check_unsafe_statements(statements: [Stmt], diagnostics: &[Diagnostic]) -> Bool {
     valid := true
     loop statement in statements {
         if statement == {

@@ -166,22 +166,8 @@ impl<'a> Checker<'a> {
             let method = mangled.strip_prefix(&member_prefix).unwrap_or(mangled);
             self.record_semantic_reference(span, format!("fn:{identity}::{method}"));
         }
-        // D-MOD2/3: a qualified `M.item` call from outside the module reaches only
-        // its `pub` items — a bare private item escapes its module otherwise.
-        if !self.name_ledger.exported(self.module_idx, mangled) {
-            let item = mangled.strip_prefix(&member_prefix).unwrap_or(mangled);
-            self.diags.push(Diagnostic::error(
-                "E0609",
-                format!("`{}` is private in module `{}`", item, alias),
-                "only `pub` items in an inline module are reachable from outside it".to_string(),
-                format!("add `pub` before `fn {}` in module `{}`", item, alias),
-                Some(alias_span),
-            ));
-            for a in args.iter_mut() {
-                self.infer(&mut a.expr);
-            }
-            return None;
-        }
+        // D-VIS-MODULE1: an inline module of this file is always reachable
+        // from its enclosing file, `priv` or not.
         self.record_import_alias_reference(alias, alias_span);
         let item = mangled.strip_prefix(&member_prefix).unwrap_or(mangled);
         if Syntax::classify_identifier(item) == Syntax::IdentifierClass::SoftPublic {

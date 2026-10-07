@@ -726,8 +726,8 @@ mod tests {
         let main = root.join("main.jet");
         let dependency = root.join("b.jet");
         let main_source = "module b\nfn run() { print(b.value() + 0) }\n";
-        let first_dependency = "pub fn value() -> Int { return 1 }\n";
-        let second_dependency = "pub fn value() -> String { return \"changed\" }\n";
+        let first_dependency = "fn value() -> Int { return 1 }\n";
+        let second_dependency = "fn value() -> String { return \"changed\" }\n";
         std::fs::write(&main, main_source).unwrap();
         std::fs::write(&dependency, first_dependency).unwrap();
 
@@ -756,9 +756,9 @@ mod tests {
         let lock_dir = root.join(".jet");
         let main_source =
             "module b\nmodule c\nfn run() { print(b.value() + c.other()) }\n";
-        let dependency_source = "pub fn value() -> Int { return 1 }\n";
-        let changed_dependency = "pub fn value() -> String { return \"changed\" }\n";
-        let unrelated_source = "pub fn other() -> Int { return 2 }\n";
+        let dependency_source = "fn value() -> Int { return 1 }\n";
+        let changed_dependency = "fn value() -> String { return \"changed\" }\n";
+        let unrelated_source = "fn other() -> Int { return 2 }\n";
         std::fs::write(&main, main_source).unwrap();
         std::fs::write(&dependency, dependency_source).unwrap();
         std::fs::write(&unrelated, unrelated_source).unwrap();
@@ -857,7 +857,7 @@ mod tests {
         for (index, name) in names.iter().enumerate() {
             std::fs::write(
                 root.join(format!("{name}.jet")),
-                format!("pub fn value() -> Int {{ return {} }}\n", index + 1),
+                format!("fn value() -> Int {{ return {} }}\n", index + 1),
             )
             .unwrap();
         }
@@ -880,7 +880,7 @@ mod tests {
 
         std::fs::write(
             root.join("changed.jet"),
-            "pub fn value() -> Int { return 99 }\n",
+            "fn value() -> Int { return 99 }\n",
         )
         .unwrap();
         let (checked, receipt) =
@@ -1090,14 +1090,14 @@ fn run() {{ print(protect() ?? 0) }}
         let main = root.join("main.jet");
         let dependency = root.join("b.jet");
         let source = "module b\nfn run() { print(b.value() + 0) }\n";
-        std::fs::write(&dependency, "pub fn value() -> Int { return 1 }\n").unwrap();
+        std::fs::write(&dependency, "fn value() -> Int { return 1 }\n").unwrap();
         let mut service = CompilerQueries::new();
         let overlay_first = service.check_text(&main.to_string_lossy(), source, true);
         assert!(overlay_first.diagnostics.is_empty(), "{:#?}", overlay_first.diagnostics);
 
         std::fs::write(
             &dependency,
-            "pub fn value() -> String { return \"changed\" }\n",
+            "fn value() -> String { return \"changed\" }\n",
         )
         .unwrap();
         assert!(!service
@@ -1116,13 +1116,13 @@ fn run() {{ print(protect() ?? 0) }}
         let main = root.join("main.jet");
         let dependency = root.join("b.jet");
         let source = "module b\nfn run() { print(b.value() + 0) }\n";
-        let dependency_source = "pub fn value() -> Int { return 1 }\n";
+        let dependency_source = "fn value() -> Int { return 1 }\n";
         std::fs::write(&dependency, dependency_source).unwrap();
         let mut service = CompilerQueries::new();
         let overlay_first = service.check_text(&main.to_string_lossy(), source, true);
         assert!(overlay_first.diagnostics.is_empty(), "{:#?}", overlay_first.diagnostics);
 
-        std::fs::write(&dependency, "pub fn value() -> Int { return 1 }\n::\n").unwrap();
+        std::fs::write(&dependency, "fn value() -> Int { return 1 }\n::\n").unwrap();
         let broken = service.check_text(&main.to_string_lossy(), source, true);
         assert!(broken
             .diagnostics
@@ -1164,8 +1164,8 @@ fn run() {{ print(protect() ?? 0) }}
         let main = root.join("main.jet");
         let dependency = root.join("b.jet");
         let source = "module b\nfn run() { print(b.value() + 0) }\n";
-        let dependency_source = "pub fn value() -> Int { return 1 }\n";
-        std::fs::write(&dependency, "pub fn value() -> Int { return 1 }\n::\n").unwrap();
+        let dependency_source = "fn value() -> Int { return 1 }\n";
+        std::fs::write(&dependency, "fn value() -> Int { return 1 }\n::\n").unwrap();
         let mut service = CompilerQueries::new();
         let broken = service.check_text(&main.to_string_lossy(), source, true);
         assert!(broken
@@ -1213,7 +1213,7 @@ fn run() {{ print(protect() ?? 0) }}
             } else {
                 root.join("b.jet")
             };
-            std::fs::write(&dependency, "pub fn value() -> Int { return 1 }\n").unwrap();
+            std::fs::write(&dependency, "fn value() -> Int { return 1 }\n").unwrap();
             let repaired = service.check_text(&main.to_string_lossy(), source, true);
             let fresh = CompilerQueries::new().check_text(&main.to_string_lossy(), source, true);
             assert_eq!(

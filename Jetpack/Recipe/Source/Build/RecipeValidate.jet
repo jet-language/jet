@@ -12,33 +12,33 @@
 RECIPE_HELPER_VERSION :: prep { "0.1.0" }
 
 // What a recipe run needs, and where its confinement boundaries are.
-pub struct RecipeBuildContext {
+struct RecipeBuildContext {
     // The staged source tree (read-only by contract).
-    pub source_dir: String
+    source_dir: String
     // The single writable install target; every install destination resolves here.
-    pub output_root: String
+    output_root: String
     // Realized `Pkg` build-tool deps: tool name -> absolute executable path.
     // An `exec` step may only name a tool present here (E1238).
-    pub tools: [String: String]
+    tools: [String: String]
     // Where locked fetches cache their bytes (keyed by sha256).
-    pub fetch_cache: String
+    fetch_cache: String
     // `--offline`: no would-be network fetch may touch the wire.
-    pub offline: Bool
+    offline: Bool
 }
 
 // The provenance a recipe run produced: locked fetches plus the effect
 // vocabulary the build exercised. Both flow into `.jet/lock`.
-pub struct RunReport {
-    pub fetches: [FetchRecord]
+struct RunReport {
+    fetches: [FetchRecord]
     // Sorted, de-duplicated effect names (`net.fetch`, `exec:<tool>`, `write`).
-    pub effects: [String]
+    effects: [String]
     // Fingerprint of the canonical finite action graph that admitted the run.
-    pub plan_fingerprint: String
+    plan_fingerprint: String
     // The child backend executable steps used, or `non-executing`.
-    pub sandbox_class: String
+    sandbox_class: String
     // The backend-owned filesystem/process/network/environment/device/resource
     // policy receipt.
-    pub sandbox_policy: String
+    sandbox_policy: String
 
     // Rust `run_report()`: no child launched yet.
     fn new() -> RunReport Never! {
@@ -63,7 +63,7 @@ pub struct RunReport {
 // Validate a recipe against the safety contract without running it: the read
 // path `jet inspect audit` uses (audit never executes). The first violation
 // is the error.
-pub fn recipe_validate(recipe: BuildRecipe, ctx: RecipeBuildContext) RecipeDiagnostic! -[FS, Env]> {
+fn recipe_validate(recipe: BuildRecipe, ctx: RecipeBuildContext) RecipeDiagnostic! -[FS, Env]> {
     recipe_validate_finite(recipe, "pkg")
     loop step in recipe.steps {
         if step == {
@@ -88,7 +88,7 @@ pub fn recipe_validate(recipe: BuildRecipe, ctx: RecipeBuildContext) RecipeDiagn
 // step becomes a typed action under one package target; toolchain,
 // capability and environment allowlists are declared on each action so the
 // action key is the complete cache identity.
-pub fn recipe_lower_to_plan(recipe: BuildRecipe, package: String, tools: [String: String]) -[FS, Env]> ComptimeBuildPlan RecipeDiagnostic! {
+fn recipe_lower_to_plan(recipe: BuildRecipe, package: String, tools: [String: String]) -[FS, Env]> ComptimeBuildPlan RecipeDiagnostic! {
     recipe_validate_finite(recipe, package)
     host :: PlatformKey.host()
     plan_ctx := ComptimeBuildContext.new()
@@ -245,7 +245,7 @@ fn recipe_output_paths_overlap(left: String, right: String) -> Bool Never! {
 
 // Hangar cache-identity hook: the recipe fingerprint is the complete plan
 // key (E4-JP2), written into `CacheIdentity.recipe_fingerprint`.
-pub fn recipe_plan_fingerprint(plan: ComptimeBuildPlan) -> String RecipeDiagnostic! {
+fn recipe_plan_fingerprint(plan: ComptimeBuildPlan) -> String RecipeDiagnostic! {
     if plan.execution_model() == {
         .Ok(_) -> {}
         .Err(error) -> { return Err(RecipeDiagnostic.new("E1238", "could not admit lowered BuildPlan execution graph", "{error}", "remove cyclic or incomplete stage dependencies before caching.")) }

@@ -30,8 +30,8 @@ fn pkg_test_plan_externs(source: String, markers: [String], view_only: Bool) -> 
 // the first line holding only `}`.
 fn pkg_test_plan_wrapper_body(source: String, name: String, generic: Bool) -> String Never! {
     bytes :: source.bytes()
-    start := pkg_cbind_find(bytes, "pub fn {name}(", 0)
-    if start < 0 && generic -> start = pkg_cbind_find(bytes, "pub fn {name}<", 0)
+    start := pkg_cbind_find(bytes, "fn {name}(", 0)
+    if start < 0 && generic -> start = pkg_cbind_find(bytes, "fn {name}<", 0)
     if start < 0 -> panic("every response extern has a generated wrapper")
     tail :: pkg_bytes_text(bytes, start, bytes.len())
     tail_bytes :: tail.bytes()

@@ -23,7 +23,7 @@ fn parser_marker_is_signed_auto_derive(name: String) -> Bool Never! {
     name == "Printable" || name == "Equatable" || name == "Debug" || name == "Comparable" || name == "Encode" || name == "Decode" || name == "Codable"
 }
 
-pub fn parser_split_type_markers(markers: [Marker]) -> (derives: [NamedSpan], serde_markers: [Marker]) Never! {
+fn parser_split_type_markers(markers: [Marker]) -> (derives: [NamedSpan], serde_markers: [Marker]) Never! {
     serde := [Marker]{}
     derives := [NamedSpan]{}
     loop marker in markers {
@@ -42,7 +42,7 @@ pub fn parser_split_type_markers(markers: [Marker]) -> (derives: [NamedSpan], se
     (derives: ^derives, serde_markers: ^serde)
 }
 
-pub fn parser_apply_struct_type_markers(value: &StructDef, markers: [Marker]) Never! {
+fn parser_apply_struct_type_markers(value: &StructDef, markers: [Marker]) Never! {
     value.type_markers = ~markers
     (derives, serde_markers) := parser_split_type_markers(markers)
     value.serde_markers = serde_markers
@@ -51,7 +51,7 @@ pub fn parser_apply_struct_type_markers(value: &StructDef, markers: [Marker]) Ne
     parser_apply_type_markers(&value, markers)
 }
 
-pub fn parser_apply_enum_type_markers(value: &EnumDef, markers: [Marker]) Never! {
+fn parser_apply_enum_type_markers(value: &EnumDef, markers: [Marker]) Never! {
     value.type_markers = ~markers
     (derives, serde_markers) := parser_split_type_markers(markers)
     value.serde_markers = serde_markers
@@ -337,7 +337,7 @@ fn parser_job_parallel(state: &JetParserState, marker: Marker, expression: Expr)
     None
 }
 
-pub fn parser_job_metadata_from_marker(state: &JetParserState, marker: Marker) -> JobMetadata? {
+fn parser_job_metadata_from_marker(state: &JetParserState, marker: Marker) -> JobMetadata? {
     if marker.args.len() == 0 -> return None
     values :: parser_bind_marker_arguments(&state, marker, [String]{"scope", "packages", "cwd", "inputs", "outputs", "skip", "cache", "limits", "after", "parallel"}, 0) ?? return None
     metadata := ast_job_metadata()
@@ -399,7 +399,7 @@ pub fn parser_job_metadata_from_marker(state: &JetParserState, marker: Marker) -
     Val(metadata)
 }
 
-pub fn parser_every_marker_from_marker(state: &JetParserState, marker: Marker) -> EveryMarker? {
+fn parser_every_marker_from_marker(state: &JetParserState, marker: Marker) -> EveryMarker? {
     values :: parser_bind_marker_arguments(&state, marker, [String]{"schedule"}, 1) ?? return None
     schedule :: values[0] ?? return None
     arg := if schedule == {
@@ -419,7 +419,7 @@ pub fn parser_every_marker_from_marker(state: &JetParserState, marker: Marker) -
     Val(EveryMarker{arg: arg, span: marker.span, resolved: None})
 }
 
-pub fn parser_project_function_job_markers(state: &JetParserState, function: &Func, markers: [Marker]) -> Bool {
+fn parser_project_function_job_markers(state: &JetParserState, function: &Func, markers: [Marker]) -> Bool {
     valid := true
     loop marker in markers {
         if marker.name == "Job" {

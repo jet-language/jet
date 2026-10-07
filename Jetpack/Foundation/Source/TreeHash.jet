@@ -21,12 +21,12 @@ FOUNDATION_U64_SHIFTS :: prep { [Int]{56, 48, 40, 32, 24, 16, 8, 0} }
 // identities can hash large artifacts without whole-file reads.
 // REMOVE-AT-FLOORFIX: replace this wrapper with the canonical compiler-owned
 // public streaming hasher when that provider lands; never copy compression.
-pub struct StreamingSHA256 {
+struct StreamingSHA256 {
     state: [U32]
-    words: [U32]
-    k: [U32]
-    block: [U8]
-    total: Int
+    priv words: [U32]
+    priv k: [U32]
+    priv block: [U8]
+    priv total: Int
 
     fn new() -> StreamingSHA256 Never! {
         state :: loop word in MIR_SHA256_H0 -> U32{word}
@@ -80,7 +80,7 @@ pub struct StreamingSHA256 {
 
 // Failure while proving a source tree's contents.
 #Error
-pub enum TreeHashError {
+enum TreeHashError {
     IO(path: String, detail: String)
     Symlink(String)
     Special(String)
@@ -117,7 +117,7 @@ struct TreeHashBudget {
 // visited entry consumes one MAX_TREE_NODES unit, including empty
 // directories and entries excluded from the identity (dot entries, `build`,
 // `target`), which are still inspected before skipping.
-pub fn foundation_try_tree_hash(root: String) -[FS]> String TreeHashError! {
+fn foundation_try_tree_hash(root: String) -[FS]> String TreeHashError! {
     root_stat :: if files.stat(root) == {
         .Ok(stat) -> stat
         .Err(error) -> { return Err(TreeHashError.IO{path: root, detail: "{error}"}) }
@@ -140,7 +140,7 @@ pub fn foundation_try_tree_hash(root: String) -[FS]> String TreeHashError! {
 
 // A tree hash for a tree that must be hashable; failure is a broken
 // invariant.
-pub fn foundation_tree_hash(root: String) -[FS]> String Never! {
+fn foundation_tree_hash(root: String) -[FS]> String Never! {
     if foundation_try_tree_hash(root) == {
         .Ok(hash) -> hash
         .Err(error) -> panic("cannot hash source tree `{root}`: {error.message()}")
@@ -240,7 +240,7 @@ fn foundation_open_regular_nofollow(path: String) -[FS]> FoundationNofollowFile 
 // Lowercase hex SHA-256 of one regular file, read through a no-follow
 // handle and bounded by MAX_TREE_FILE_BYTES. The file must keep its
 // identity and length while it is read.
-pub fn foundation_sha256_file_hex(path: String) -[FS]> String IOError! {
+fn foundation_sha256_file_hex(path: String) -[FS]> String IOError! {
     opened :: foundation_open_regular_nofollow(path)
     if opened.expected.size > MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(.Read, path, "file exceeds the tree hashing bound"))
     hasher := StreamingSHA256.new()
@@ -262,7 +262,7 @@ pub fn foundation_sha256_file_hex(path: String) -[FS]> String IOError! {
 // from the shared no-follow handle. The caller's finite bound is capped by the
 // tree-file bound, checked before and during the read; afterwards the handle
 // and the path must still name the same unchanged file.
-pub fn foundation_read_file_nofollow(path: String, max_bytes: Int) -[FS]> [U8] IOError! {
+fn foundation_read_file_nofollow(path: String, max_bytes: Int) -[FS]> [U8] IOError! {
     if max_bytes > MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(.Read, path, "file read bound exceeds the tree hashing bound"))
     opened :: foundation_open_regular_nofollow(path)
     bound_error :: IOError.InvalidData(foundation_io_context(.Read, path, "file exceeds its read bound"))
@@ -326,13 +326,13 @@ struct FoundationPublicationDirectory {
 // Typed publication policy; defaults preserve every existing caller's 0600,
 // replace-regular-file, refuse-links behavior. Signing uses create-new or force
 // replacement of a symlink BINDING (never its referent) and public mode 0644.
-pub enum FoundationPublicationCreate { Replace CreateNew }
-pub enum FoundationPublicationLinks { Refuse ReplaceBinding }
-pub struct FoundationPublicationPolicy {
-    pub mode: Int{384}
-    pub create: FoundationPublicationCreate{FoundationPublicationCreate.Replace}
-    pub destination_links: FoundationPublicationLinks{FoundationPublicationLinks.Refuse}
-    pub create_root: Bool{false}
+enum FoundationPublicationCreate { Replace CreateNew }
+enum FoundationPublicationLinks { Refuse ReplaceBinding }
+struct FoundationPublicationPolicy {
+    mode: Int{384}
+    create: FoundationPublicationCreate{FoundationPublicationCreate.Replace}
+    destination_links: FoundationPublicationLinks{FoundationPublicationLinks.Refuse}
+    create_root: Bool{false}
 }
 
 // Rust SHA256::rooted_authority::write, with CmdPkg::write_package_source's
@@ -342,7 +342,7 @@ pub struct FoundationPublicationPolicy {
 // after write/fsync, before the final authority checks and descriptor-relative
 // rename; failure removes the stage. None uses the same mechanism without
 // source validation (e.g. a new lock).
-pub fn foundation_write_file_nofollow_at_root(root: String, relative: String, contents: [U8], before_rename: (fn() IOError! -[FS, Env]>)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) IOError! -[FS, Env, Time]> {
+fn foundation_write_file_nofollow_at_root(root: String, relative: String, contents: [U8], before_rename: (fn() IOError! -[FS, Env]>)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) IOError! -[FS, Env, Time]> {
     components :: foundation_normal_components(.Write, relative)
     if components.len() == 0 -> return Err(foundation_io_error(.Write, relative, "file authority publication path is empty"))
     directories := foundation_open_root_directories(root, policy.create_root)
@@ -395,12 +395,12 @@ pub fn foundation_write_file_nofollow_at_root(root: String, relative: String, co
 // through the original handle AND a rename of the source away (to a backup)
 // or a replacement bound at its path. A handle-only revalidation
 // (Authority.rs revalidate_file) cannot see the last two.
-pub struct FoundationFileAuthority {
-    directories: [FoundationPublicationDirectory]
-    handle: FileReader
-    relative: String
-    pub path: String
-    identity: Stat
+struct FoundationFileAuthority {
+    priv directories: [FoundationPublicationDirectory]
+    priv handle: FileReader
+    priv relative: String
+    path: String
+    priv identity: Stat
 
     // Rust Authority::ensure_paths_current: every held directory and the file
     // are still the objects bound at their paths (path metadata never follows
@@ -446,7 +446,7 @@ pub struct FoundationFileAuthority {
 
     // Remove only this checked file's binding through its ORIGINAL parent.
     // Used by TUF rollback; a borrowed file authority cannot delete siblings.
-    pub fn remove(self, basename: String) IOError! -[FS]> {
+    fn remove(self, basename: String) IOError! -[FS]> {
         if basename != files.basename(self.relative) -> return Err(foundation_io_error(.Write, basename, "file authority removal name does not match its held file"))
         self.revalidate()
         parent :: self.directories[self.directories.len() - 1].handle
@@ -458,18 +458,18 @@ pub struct FoundationFileAuthority {
 
 // A directory-operation carrier retaining the ORIGINAL canonical held chain.
 // No public descriptor/vector escapes, and no second walker or lock authority.
-pub struct FoundationDirectoryAuthority {
-    directories: [FoundationPublicationDirectory]
+struct FoundationDirectoryAuthority {
+    priv directories: [FoundationPublicationDirectory]
 
-    pub fn revalidate(self) IOError! -[FS]> {
+    fn revalidate(self) IOError! -[FS]> {
         foundation_ensure_directories_current(self.directories)
     }
-    pub fn create_exclusive(self, name: String, mode: Int) -[FS]> FileWriter IOError! {
+    fn create_exclusive(self, name: String, mode: Int) -[FS]> FileWriter IOError! {
         foundation_directory_authority_name(name)
         self.revalidate()
         self.directories[self.directories.len() - 1].handle.create(name, if_exists: .Refuse, mode: Val(mode))
     }
-    pub fn remove(self, name: String) IOError! -[FS]> {
+    fn remove(self, name: String) IOError! -[FS]> {
         foundation_directory_authority_name(name)
         self.revalidate()
         parent :: self.directories[self.directories.len() - 1].handle
@@ -479,14 +479,14 @@ pub struct FoundationDirectoryAuthority {
     }
     // Registry clone installation: mutate only this retained parent, never
     // reopen a path for staging/rollback. Core Directory leaves remain #3593.
-    pub fn entry_stat(self, name: String) -[FS]> Stat IOError! {
+    fn entry_stat(self, name: String) -[FS]> Stat IOError! {
         foundation_directory_authority_name(name)
         self.revalidate()
         info :: self.directories[self.directories.len() - 1].handle.entry_stat(name)
         self.revalidate()
         Ok(info)
     }
-    pub fn rename(self, from: String, to: String, replace: Bool{false}) IOError! -[FS]> {
+    fn rename(self, from: String, to: String, replace: Bool{false}) IOError! -[FS]> {
         foundation_directory_authority_name(from)
         foundation_directory_authority_name(to)
         self.revalidate()
@@ -494,7 +494,7 @@ pub struct FoundationDirectoryAuthority {
         if replace -> parent.rename(from, to) else -> parent.rename(from, to, if_exists: .Refuse)
         self.revalidate()
     }
-    pub fn remove_tree(self, name: String) IOError! -[FS]> {
+    fn remove_tree(self, name: String) IOError! -[FS]> {
         foundation_directory_authority_name(name)
         self.revalidate()
         parent :: self.directories[self.directories.len() - 1].handle
@@ -503,7 +503,7 @@ pub struct FoundationDirectoryAuthority {
         self.revalidate()
     }
 }
-pub fn foundation_open_directory_authority(root: String, create: Bool{false}) -[FS, Env]> FoundationDirectoryAuthority IOError! {
+fn foundation_open_directory_authority(root: String, create: Bool{false}) -[FS, Env]> FoundationDirectoryAuthority IOError! {
     directories :: foundation_open_root_directories(root, create)
     Ok(FoundationDirectoryAuthority{directories: directories})
 }
@@ -522,7 +522,7 @@ fn foundation_directory_authority_name(name: String) IOError! {
 // foundation_open_file_authority; strict callers keep their no-follow root walk.
 // `create` makes missing ancestors (0700, held no-follow) as create_dir_all
 // would, never the final component.
-pub fn foundation_resolve_path_ancestors(path: String, create: Bool{false}) -[FS, Env]> String IOError! {
+fn foundation_resolve_path_ancestors(path: String, create: Bool{false}) -[FS, Env]> String IOError! {
     trimmed := ~path
     loop trimmed.len() > 1 && (trimmed.ends_with("/") || trimmed.ends_with("/.")) {
         trimmed = if trimmed.ends_with("/") -> trimmed.removesuffix("/") else -> trimmed.removesuffix("/.")
@@ -550,7 +550,7 @@ pub fn foundation_resolve_path_ancestors(path: String, create: Bool{false}) -[FS
 // Rust rooted_authority::open: every parent component is a directory opened
 // relative to the held chain without following links; the final component
 // must be a single-link regular file.
-pub fn foundation_open_file_authority(root: String, relative: String) -[FS, Env]> FoundationFileAuthority IOError! {
+fn foundation_open_file_authority(root: String, relative: String) -[FS, Env]> FoundationFileAuthority IOError! {
     components :: foundation_normal_components(.Read, relative)
     directories := foundation_open_root_directories(root)
     if components.len() == 0 -> return Err(foundation_io_error(.Read, relative, "file authority path is empty"))
@@ -573,7 +573,7 @@ pub fn foundation_open_file_authority(root: String, relative: String) -[FS, Env]
 
 // Rust `read_file_nofollow_at_root`: one regular file below `root`, read from
 // the held no-follow handle and bounded by `max_bytes`.
-pub fn foundation_read_file_nofollow_at_root(root: String, relative: String, max_bytes: Int) -[FS, Env]> [U8] IOError! {
+fn foundation_read_file_nofollow_at_root(root: String, relative: String, max_bytes: Int) -[FS, Env]> [U8] IOError! {
     if max_bytes > MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(.Read, relative, "file read bound exceeds the tree hashing bound"))
     source :: foundation_open_file_authority(root, relative)
     source.read_bounded(max_bytes)
@@ -695,7 +695,7 @@ fn foundation_io_error(operation: IOOperation, resource: String, cause: String) 
 
 // Attach availability detail to an IOError: the kind and the operation,
 // resource and OS code stay; only the cause is replaced.
-pub fn foundation_io_error_with_cause(error: IOError, cause: String) -> IOError Never! {
+fn foundation_io_error_with_cause(error: IOError, cause: String) -> IOError Never! {
     if error == {
         .NotFound(context) -> IOError.NotFound(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(cause)})
         .PermissionDenied(context) -> IOError.PermissionDenied(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(cause)})
@@ -715,7 +715,7 @@ pub fn foundation_io_error_with_cause(error: IOError, cause: String) -> IOError 
 
 // Moved from Provider/RemoteCheckout: one descriptor-relative tree remover.
 // Core Directory open/list/unlink leaves remain #3593; no pathname fallback.
-pub fn foundation_remove_held_tree(parent: Directory, child: String) IOError! -[FS]> {
+fn foundation_remove_held_tree(parent: Directory, child: String) IOError! -[FS]> {
     directory :: parent.open_directory(child) ?? {
         if err == .NotFound(_) -> return
         parent.remove(child) ?? {

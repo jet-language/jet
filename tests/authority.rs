@@ -1359,7 +1359,7 @@ fn panel_lines(state: State) -> [UINode] {
 }
 
 #DevPanel
-pub fn panel(state: State) -> UINode {
+fn panel(state: State) -> UINode {
     return ui.box(panel_lines(state))
 }
 

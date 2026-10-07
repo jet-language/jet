@@ -338,7 +338,6 @@ impl<'a> Fmt<'a> {
             Item::Tag(t) => {
                 // `TagDef::span` starts at `tag`; visibility is parsed before
                 // that span and must be reconstructed from the AST fact.
-                self.fmt_pub_qualifier(t.is_pub, t.is_package_pub);
                 let text = self.src[t.span.start..t.span.end].to_string();
                 self.write(&text);
                 self.newline();
@@ -386,7 +385,6 @@ impl<'a> Fmt<'a> {
             Item::UnitFamily(uf) => {
                 // The marker span begins at `#UnitFamily`, after any `pub`
                 // qualifier consumed by the visibility parser.
-                self.fmt_pub_qualifier(uf.is_pub, uf.is_package_pub);
                 let text = self.src[uf.span.start..uf.span.end].to_string();
                 self.write(&text);
                 self.skip_verbatim_comments(uf.span.end);
@@ -428,7 +426,7 @@ impl<'a> Fmt<'a> {
             // D-CONF-GENSPELL1=A: module alias declarations emitted verbatim (non-destructive)
             // apart from the `pub`/`pub(package)` qualifier — see Item::GenericModule.
             Item::ModuleAlias(ma) => {
-                self.fmt_pub_qualifier(ma.is_pub, ma.is_package_pub);
+                self.fmt_module_privacy(ma.is_pub, ma.is_package_pub);
                 let text = self.src[ma.span.start..ma.span.end].to_string();
                 self.write(&text);
                 self.newline();
@@ -493,7 +491,6 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_protocol_decl(&mut self, protocol: &crate::AST::ProtocolDecl) {
-        self.fmt_pub_qualifier(protocol.is_pub, protocol.is_package_pub);
         self.write("protocol ");
         self.write(&protocol.name);
         self.write(" {");
@@ -543,9 +540,6 @@ impl<'a> Fmt<'a> {
     /// visibility prefix comes from `is_pub` — echoing the slice alone drops
     /// `pub` and the formatter's own output then fails E0003.
     pub(super) fn fmt_user_policy_decl(&mut self, declaration: &crate::AST::UserPolicyDecl) {
-        if declaration.is_pub {
-            self.write("pub ");
-        }
         let text = &self.src[declaration.span.start..declaration.span.end];
         self.write(text);
         self.newline();
@@ -663,7 +657,7 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_code_module(&mut self, module: &CodeModule) {
-        self.fmt_pub_qualifier(module.is_pub, module.is_package_pub);
+        self.fmt_module_privacy(module.is_pub, module.is_package_pub);
         self.write("module ");
         self.write(&module.name);
         if let Some(target) = module.web_target {
@@ -679,7 +673,7 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_generic_module(&mut self, module: &GenericModuleDef) {
-        self.fmt_pub_qualifier(module.is_pub, module.is_package_pub);
+        self.fmt_module_privacy(module.is_pub, module.is_package_pub);
         self.write("module ");
         self.write(&module.name);
 
@@ -874,7 +868,6 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_trait(&mut self, t: &crate::AST::TraitDef) {
-        self.fmt_pub_qualifier(t.is_pub, t.is_package_pub);
         self.write("trait ");
         self.write(&t.name);
         // D-TRAIT-OVERLOAD1=A: one supertrait stays bare, several use the list.
@@ -1085,23 +1078,18 @@ impl<'a> Fmt<'a> {
         self.end_block();
     }
 
-    fn fmt_pub_qualifier(&mut self, is_pub: bool, is_package_pub: bool) {
+    /// D-VIS-MODULE1: `priv module` / `priv(package) module`. Declarations
+    /// other than modules carry no visibility marker.
+    fn fmt_module_privacy(&mut self, is_pub: bool, is_package_pub: bool) {
         if is_package_pub {
-            self.write("pub(package) ");
-            return;
-        }
-        if self.pub_file {
-            if !is_pub {
-                self.write("priv ");
-            }
-        } else if is_pub {
-            self.write("pub ");
+            self.write("priv(package) ");
+        } else if !is_pub {
+            self.write("priv ");
         }
     }
 
     fn fmt_distinct(&mut self, d: &crate::AST::DistinctDef) {
         self.fmt_type_markers(&d.type_markers, true);
-        self.fmt_pub_qualifier(d.is_pub, d.is_package_pub);
         self.write(&d.name);
         self.write(" :: distinct ");
         self.fmt_type_at(&d.base, Some(d.base_span));
@@ -1115,7 +1103,6 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_type_alias(&mut self, a: &crate::AST::TypeAliasDef) {
-        self.fmt_pub_qualifier(a.is_pub, a.is_package_pub);
         self.write("alias ");
         self.write(&a.name);
         self.fmt_type_params(
@@ -1330,9 +1317,7 @@ impl<'a> Fmt<'a> {
             }
         }
         if top_level {
-            self.fmt_pub_qualifier(f.is_pub, f.is_package_pub);
         } else if f.is_pub {
-            self.fmt_pub_qualifier(f.is_pub, f.is_package_pub);
         }
         if f.is_comptime {
             // D-FOUND-LITERAL1=A (card #2789), respelled by D-PREP-FN1=A:
@@ -1802,7 +1787,6 @@ impl<'a> Fmt<'a> {
             s.layout.is_none() && !s.is_published_schema && !s.is_single_use && !s.is_must_use;
         self.fmt_type_markers(&s.type_markers, lone_hash_ok);
         if top_level {
-            self.fmt_pub_qualifier(s.is_pub, s.is_package_pub);
         }
         self.write("struct ");
         self.write(&s.name);
@@ -1852,7 +1836,6 @@ impl<'a> Fmt<'a> {
         let lone_hash_ok = !e.is_single_use && !e.is_must_use;
         self.fmt_type_markers(&e.type_markers, lone_hash_ok);
         if top_level {
-            self.fmt_pub_qualifier(e.is_pub, e.is_package_pub);
         }
         self.write("enum ");
         self.write(&e.name);
@@ -2098,15 +2081,8 @@ impl<'a> Fmt<'a> {
     }
 
     pub(super) fn fmt_import(&mut self, imp: &ImportDecl) {
-        // Imports don't take `priv` — the parser only accepts `use …` (not
-        // re-exported, the ambient default whether or not the file is
-        // `#PubFile`) or `pub use …` (re-exported). Unlike struct/fn/etc.,
-        // there's no `#PubFile`-relative "priv" spelling to fall back to, so
-        // this can't route through `fmt_pub_qualifier` (that produced
-        // unparseable `priv use …` output — a real fmt idempotence bug).
-        if imp.is_package_pub {
-            self.write("pub(package) ");
-        } else if imp.is_pub {
+        // D-MOD4: `pub use` is the only re-export spelling (ballot pending).
+        if imp.is_pub {
             self.write("pub ");
         }
         self.write(Syntax::KW_USE);
@@ -2233,7 +2209,9 @@ impl<'a> Fmt<'a> {
             }
             self.write(" ");
         }
-        self.fmt_pub_qualifier(field.is_pub, field.is_package_pub);
+        if !field.is_pub {
+            self.write("priv ");
+        }
         self.write(&field.name);
         self.write(": ");
         self.fmt_decode_type(&field.ty, field.ty_span, derives_decode);

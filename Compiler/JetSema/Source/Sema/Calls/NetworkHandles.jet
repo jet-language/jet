@@ -19,12 +19,12 @@ use jet_foundation.[
 ]
 
 struct SemaNetworkHandleSpec {
-    pub operation: THandleOp
-    pub result_type: Type
-    pub params: [SemaCallParam]
-    pub receiver_convention: AccessConvention
-    pub callback_non_escaping: Bool
-    pub effect_name: String?
+    operation: THandleOp
+    result_type: Type
+    params: [SemaCallParam]
+    receiver_convention: AccessConvention
+    callback_non_escaping: Bool
+    effect_name: String?
 }
 
 fn sema_network_handle_parameter(name: String, label: String, ty: Type, zone: ParamZone) -> SemaCallParam Never! {
@@ -186,7 +186,7 @@ fn sema_network_handle_spec_for(owner: String, method: String, argc: Int) -> Sem
     None
 }
 
-pub fn sema_network_handle_known_method(owner: String, method: String) -> Bool Never! {
+fn sema_network_handle_known_method(owner: String, method: String) -> Bool Never! {
     if owner == "TCPListener" -> return method == "accept" || method == "local_addr"
     if owner == "TCPStream" -> return method == "read" || method == "read_text" || method == "write" || method == "write_all" || method == "write_text" || method == "shutdown" || method == "ready" || method == "peer_addr" || method == "local_addr" || method == "close"
     if owner == "UDPSocket" -> return method == "ready" || method == "close" || method == "receive" || method == "send_to"
@@ -335,7 +335,7 @@ fn sema_network_handle_finish(receiver: TExpr, operation: THandleOp, args: [TExp
 
 // Called before ordinary method candidate lookup with the already checked
 // receiver. A route is claimed only for the exact registered Core owner.
-pub fn sema_call_try_network_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_network_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     owner :: sema_network_handle_nominal_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_network_handle_is_canonical(receiver_value.ty, owner, environment) || !sema_network_handle_known_method(owner, method) -> return SemaMethodSpecialCheck{handled: false, value: None}
     spec := sema_network_handle_spec_for(owner, method, args.len())
@@ -367,7 +367,7 @@ fn sema_network_tls_static_target(receiver: Expr, method: String, environment: S
     None
 }
 
-pub fn sema_call_try_network_tls_static(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_network_tls_static(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     target :: sema_network_tls_static_target(receiver, method, environment) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     result_type := Type.Named{name: "TLSClientConfig"}
     operation := THandleOp.TLSClientConfigDefault

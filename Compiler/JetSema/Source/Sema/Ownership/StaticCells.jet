@@ -13,7 +13,7 @@ use jet_foundation.[
 
 // Rust `is_static_move_root`: registration asks once per module constant and
 // keeps the keys on the module row (`static_roots`).
-pub fn sema_ownership_is_static_root(declaration: ConstDef) -> Bool Never! {
+fn sema_ownership_is_static_root(declaration: ConstDef) -> Bool Never! {
     if declaration.is_persist || declaration.mutable -> return true
     loop attr in declaration.attrs {
         if attr == ConstAttr.ForceStatic -> return true
@@ -23,7 +23,7 @@ pub fn sema_ownership_is_static_root(declaration: ConstDef) -> Bool Never! {
 
 // The module's static roots, read from its registration row: walking the
 // module's constants here copied every constant AST once per checked function.
-pub fn sema_ownership_static_roots(graph: SemaRegistrationGraph, module_identity: String) -> [String] {
+fn sema_ownership_static_roots(graph: SemaRegistrationGraph, module_identity: String) -> [String] {
     module_index :: sema_registration_module_index(graph, module_identity) ?? return [String]{}
     graph.modules[module_index].static_roots
 }

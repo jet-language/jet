@@ -10,7 +10,7 @@
 
 TRANSITION_ROLE_FILES :: prep { [String]{"pkg.jet", "env.jet", "workspace.jet", "config.jet"} }
 
-pub enum SplitTarget {
+enum SplitTarget {
     Environment
     Package(String)
 
@@ -22,7 +22,7 @@ pub enum SplitTarget {
     }
 }
 
-pub enum ChangeAction {
+enum ChangeAction {
     Create
     Remove
     Update
@@ -36,21 +36,21 @@ pub enum ChangeAction {
     }
 }
 
-pub struct ChangeSummary {
-    pub path: String
-    pub action: ChangeAction
+struct ChangeSummary {
+    path: String
+    action: ChangeAction
 }
 
-pub struct TransitionSummary {
-    pub operation: String
-    pub changes: [ChangeSummary]
-    pub before_fingerprint: String
-    pub after_fingerprint: String
-    pub journal: String
+struct TransitionSummary {
+    operation: String
+    changes: [ChangeSummary]
+    before_fingerprint: String
+    after_fingerprint: String
+    journal: String
 }
 
-pub struct TransitionResult {
-    pub summary: TransitionSummary
+struct TransitionResult {
+    summary: TransitionSummary
 }
 
 struct TransitionPlan {
@@ -172,7 +172,7 @@ struct TransitionSnapshot {
 }
 
 // Plan and apply one of the ratified `jet split` transitions.
-pub fn env_transition_split(root: String, target: SplitTarget, check_only: Bool) -[FS, Env]> TransitionResult EnvironmentError! {
+fn env_transition_split(root: String, target: SplitTarget, check_only: Bool) -[FS, Env]> TransitionResult EnvironmentError! {
     plan :: env_transition_split_plan(root, target)
     plan.finish(check_only)
 }
@@ -180,7 +180,7 @@ pub fn env_transition_split(root: String, target: SplitTarget, check_only: Bool)
 // Plan and apply the reverse of a recorded transition. `path` is the
 // generated file named by `jet fold`, relative to the Package root or an
 // absolute path inside it.
-pub fn env_transition_fold(root: String, path: String, check_only: Bool) -[FS, Env]> TransitionResult EnvironmentError! {
+fn env_transition_fold(root: String, path: String, check_only: Bool) -[FS, Env]> TransitionResult EnvironmentError! {
     plan :: env_transition_fold_plan(root, path)
     plan.finish(check_only)
 }
@@ -189,14 +189,14 @@ pub fn env_transition_fold(root: String, path: String, check_only: Bool) -[FS, E
 // closed, typed role files convert; a file with an open or unknown field is
 // rejected before any file changes, because copying it into `package.jet`
 // would create a second interpretation of the graph.
-pub fn env_transition_init(root: String, check_only: Bool) -[FS, Env]> TransitionResult EnvironmentError! {
+fn env_transition_init(root: String, check_only: Bool) -[FS, Env]> TransitionResult EnvironmentError! {
     plan :: env_transition_legacy_plan(root)
     plan.finish(check_only)
 }
 
 // Restore the last successful role-file migration: the explicit
 // migration-epoch escape hatch of `jet init --restore-role-files`.
-pub fn env_transition_restore_role_files(root: String, check_only: Bool) -[FS, Env]> TransitionResult EnvironmentError! {
+fn env_transition_restore_role_files(root: String, check_only: Bool) -[FS, Env]> TransitionResult EnvironmentError! {
     canonical :: env_transition_canonical_root(root)
     journal_path :: env_transition_latest_legacy_journal(canonical)
     journal :: env_transition_read_journal(journal_path)

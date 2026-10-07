@@ -403,7 +403,7 @@ fn render_jet(lib: &str, routines: &[Routine]) -> String {
     }
     o.push_str("}\nuse c.");
     o.push_str(&abi);
-    o.push_str(" as abi\n\npub enum AdaError { Constraint }\n\n");
+    o.push_str(" as abi\n\nenum AdaError { Constraint }\n\n");
     for r in routines {
         o.push_str("pub fn ");
         o.push_str(&r.name);

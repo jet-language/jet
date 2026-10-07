@@ -1367,7 +1367,7 @@ fn sema_expression_lambda(lambda: Lambda, expected: Type?, environment: SemaScop
 // is open (`ret: None`) adopts the callback's own result, whether a lambda or
 // a named function value; the collection method then checks that result
 // against its own callback contract (`open_ret` skips E0108).
-pub fn sema_expression_lambda_collection_callback(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expression_lambda_collection_callback(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     previous_lambda_escapes := context.lambda_escapes
     context.lambda_escapes = Val(false)
     open_result := false
@@ -1385,14 +1385,14 @@ pub fn sema_expression_lambda_collection_callback(expr: Expr, expected: Type?, e
     checked
 }
 
-pub fn sema_expression_lambda_host_callback(expr: Expr, expected: Type?, write: Bool, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expression_lambda_host_callback(expr: Expr, expected: Type?, write: Bool, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if expr == {
         .Lambda(lambda) -> return sema_expression_lambda_with_host(lambda, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics, true, write, false, false)
         else -> sema_check_expression(expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     }
 }
 
-pub fn sema_expression_lambda_host_callback_stored(expr: Expr, expected: Type?, write: Bool, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expression_lambda_host_callback_stored(expr: Expr, expected: Type?, write: Bool, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if expr == {
         .Lambda(lambda) -> return sema_expression_lambda_with_host(lambda, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics, true, write, true, false)
         else -> sema_check_expression(expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)

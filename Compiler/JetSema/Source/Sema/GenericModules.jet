@@ -71,7 +71,7 @@ struct SemaGenericModuleNode {
 
 // `inputs` carries each module's program as written: by now every valid
 // alias in `graph` is an expanded instance (`sema_generic_modules_expand`).
-pub fn sema_generic_modules_check(graph: &SemaRegistrationGraph, inputs: [SemaRegistrationModuleInput]) {
+fn sema_generic_modules_check(graph: &SemaRegistrationGraph, inputs: [SemaRegistrationModuleInput]) {
     per_module :: sema_generic_modules_collect(graph, inputs)
     loop (module_index, diagnostics) in per_module {
         loop diagnostic in diagnostics {
@@ -775,15 +775,15 @@ fn sema_genmod_visit(node: String, nodes: [SemaGenericModuleNode], state: &[Stri
 // A template an alias can name: a local `module cache<K>` or one imported
 // with `use defs.box`. The key names the defining module, so equal
 // applications of one template share one instance.
-pub struct SemaGenericModuleSource {
-    pub local: String
-    pub key: String
-    pub definition: GenericModuleDef
+struct SemaGenericModuleSource {
+    local: String
+    key: String
+    definition: GenericModuleDef
     // An imported template's defining-module declarations: each instance
     // carries them under its own member names.
-    pub source_items: [Item]
+    source_items: [Item]
     // Closed constants of the defining module.
-    pub source_values: [String:Expr]
+    source_values: [String:Expr]
 }
 
 struct SemaGenericModuleBinding {
@@ -801,7 +801,7 @@ struct SemaGenericModuleExpansion {
 
 // Templates `module_identity` imports by name, from each loaded import edge.
 // A private template binds nothing; import registration reports it (E0609).
-pub fn sema_generic_modules_imported(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], module_identity: String) -> [SemaGenericModuleSource] {
+fn sema_generic_modules_imported(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], module_identity: String) -> [SemaGenericModuleSource] {
     sources := [SemaGenericModuleSource]{}
     loop edge in edges {
         if edge.source_module_identity != module_identity -> next
@@ -845,7 +845,7 @@ fn sema_genmod_definition_items(items: [Item]) -> [Item] {
 
 // Expands `program`'s module aliases in place; a program without one is left
 // untouched (not copied).
-pub fn sema_generic_modules_expand(program: &Program, module_identity: String, imported: [SemaGenericModuleSource]) {
+fn sema_generic_modules_expand(program: &Program, module_identity: String, imported: [SemaGenericModuleSource]) {
     rewritten :: sema_generic_modules_rewritten_items(program, module_identity, imported) ?? return
     program.items = rewritten
 }

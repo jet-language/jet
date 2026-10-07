@@ -4,34 +4,34 @@
 // commands print the same diff through `CliLockDiffGuard`.
 
 // Measured or planned byte deltas for one lock change.
-pub struct DiffSizes {
-    pub download: Int?
-    pub disk: Int?
+struct DiffSizes {
+    download: Int?
+    disk: Int?
 
     fn empty() -> DiffSizes Never! {
         DiffSizes{download: None, disk: None}
     }
 }
 
-pub fn cli_sizes_from_plan(plan: DownloadPlan) -> DiffSizes Never! {
+fn cli_sizes_from_plan(plan: DownloadPlan) -> DiffSizes Never! {
     cli_sizes_from_bytes(plan.download_bytes, plan.disk_bytes)
 }
 
-pub fn cli_sizes_from_bytes(download: Int?, disk: Int?) -> DiffSizes Never! {
+fn cli_sizes_from_bytes(download: Int?, disk: Int?) -> DiffSizes Never! {
     DiffSizes{download, disk}
 }
 
 // Print one diff when a command mutates the unified lock. Closing the guard
 // renders the diff on every exit path, so a partial lock update is still
 // visible (Rust `LockDiffGuard` Drop).
-pub struct CLILockDiffGuard {
-    pub theme: Theme
-    pub root: String
-    pub before: LockFile?
-    pub sizes: DiffSizes
+struct CLILockDiffGuard {
+    theme: Theme
+    root: String
+    before: LockFile?
+    sizes: DiffSizes
     // An inactive guard stands in where no lock can change (Rust's absent
     // `Option<LockDiffGuard>`); it renders nothing.
-    pub active: Bool
+    active: Bool
 
     fn new(theme: Theme, root: String) -[FS]> CLILockDiffGuard Never! {
         CLILockDiffGuard{theme, root, before: pkg_lock_load(root), sizes: DiffSizes.empty(), active: true}
@@ -56,7 +56,7 @@ impl CLILockDiffGuard.Close {
 }
 
 // `jetpack lock diff [--against rev]`; the default revision is `HEAD`.
-pub fn cli_cmd_lock(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_lock(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     if parsed.positional.len() != 1 || parsed.positional[0] != LOCK_DIFF_VERB || parsed.command != None {
         theme.error("`jetpack lock` needs the `diff` subcommand", "the unified `.jet/lock` is inspected through one read-only diff surface", "run `jetpack lock diff [--against <rev>]`")
@@ -83,7 +83,7 @@ pub fn cli_cmd_lock(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, T
     EXIT_OK
 }
 
-pub fn cli_render_lock_diff(theme: Theme, diff: LockDiff, sizes: DiffSizes) Never! -[IO, FS, Time.Wait]> {
+fn cli_render_lock_diff(theme: Theme, diff: LockDiff, sizes: DiffSizes) Never! -[IO, FS, Time.Wait]> {
     theme.status("Lock changes")
     loop line in cli_render_lock_diff_lines(diff, sizes) -> theme.detail(line)
 }

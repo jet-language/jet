@@ -6,14 +6,14 @@
 C_DEFAULT_K :: 32
 C_INT_MAX :: 9223372036854775807
 
-pub struct Reservoir {
-    pub k: Int
-    pub seen: Int
-    pub items: [String]
+struct Reservoir {
+    k: Int
+    seen: Int
+    items: [String]
     state: U64
 }
 
-pub fn new(k: Int{C_DEFAULT_K}) -> Reservoir Never! {
+fn new(k: Int{C_DEFAULT_K}) -> Reservoir Never! {
     capacity := k
     if capacity < 1 -> capacity = 1
     Reservoir{k: capacity, seen: 0, items: [String]{}, state: U64{0}}
@@ -21,7 +21,7 @@ pub fn new(k: Int{C_DEFAULT_K}) -> Reservoir Never! {
 
 impl Reservoir {
     /// Offer one item; every item seen so far is kept with equal probability.
-    pub fn add(&self, item: String) Never! {
+    fn add(&self, item: String) Never! {
         if self.k < 1 -> self.k = 1
         if self.seen < self.items.len() -> self.seen = self.items.len()
         if self.seen < C_INT_MAX -> self.seen = self.seen + 1
@@ -38,7 +38,7 @@ impl Reservoir {
     }
 
     /// The current sample, in slot order.
-    pub fn sample(self) -> [String] Never! {
+    fn sample(self) -> [String] Never! {
         out := [String]{}
         loop item in self.items -> &out.push(item)
         out

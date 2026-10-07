@@ -1,4 +1,4 @@
-pub enum Step {
+enum Step {
     Identity
     Field(String)
     Each
@@ -34,7 +34,7 @@ fn parse_stage(source: String) -> [Step]? {
     return None
 }
 
-pub fn parse(source: String) -> [Step]? {
+fn parse(source: String) -> [Step]? {
     steps := [Step]{}
     stages :: source.split("|").to_list()
     if stages.len() == 0 -> return None
@@ -77,7 +77,7 @@ fn apply_step(values: [DataTree], step: Step) -> [DataTree] {
     return output
 }
 
-pub fn run(data: DataTree, query: String) -> [DataTree]? {
+fn run(data: DataTree, query: String) -> [DataTree]? {
     steps :: parse(query) ?? return None
     values := [DataTree]{data}
     loop step in steps -> values = apply_step(values, step)

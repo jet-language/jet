@@ -87,15 +87,15 @@ struct BrokerField {
 
 // The eight provenance facts one write is bound to. The broker re-derives
 // them from the admitted archive and refuses any disagreement.
-pub struct ProvenanceBinding {
-    pub reference: String
-    pub source: String
-    pub builder: String
-    pub action: String
-    pub output: String
-    pub platform: String
-    pub sandbox: String
-    pub policy: String
+struct ProvenanceBinding {
+    reference: String
+    source: String
+    builder: String
+    action: String
+    output: String
+    platform: String
+    sandbox: String
+    policy: String
 
     // Wire order of the binding fields.
     fn fields(self) -> [BrokerField] Never! {
@@ -117,35 +117,35 @@ pub struct ProvenanceBinding {
 }
 
 // A write request's header: the archive bytes follow it on the stream.
-pub struct BrokerWriteHeader {
-    pub length: Int
-    pub binding: ProvenanceBinding
-    pub credential: String
+struct BrokerWriteHeader {
+    length: Int
+    binding: ProvenanceBinding
+    credential: String
 }
 
-pub enum BrokerHeader {
+enum BrokerHeader {
     Write(BrokerWriteHeader)
     Read(String)
 }
 
 // A complete write request (header plus archive bytes).
-pub struct BrokerWriteRequest {
-    pub archive: [U8]
-    pub binding: ProvenanceBinding
-    pub credential: String
+struct BrokerWriteRequest {
+    archive: [U8]
+    binding: ProvenanceBinding
+    credential: String
 }
 
-pub enum BrokerRequest {
+enum BrokerRequest {
     Write(BrokerWriteRequest)
     Read(String)
 }
 
 // The byte source of one broker exchange: an accepted or connected Unix
 // stream, or in-memory bytes for protocol checks.
-pub struct BrokerWireReader {
-    stream: UnixStream?
-    bytes: [U8]
-    position: Int
+struct BrokerWireReader {
+    priv stream: UnixStream?
+    priv bytes: [U8]
+    priv position: Int
 
     fn memory(bytes: [U8]) -> BrokerWireReader Never! {
         BrokerWireReader{stream: None, bytes: bytes, position: 0}
@@ -209,7 +209,7 @@ fn store_broker_append(out: &[U8], bytes: [U8]) Never! {
 }
 
 // Rust `write_request`: a provenance-bound write of one unsigned archive.
-pub fn store_broker_encode_write_request(binding: ProvenanceBinding, credential: String, archive: [U8]) -> [U8] StoreError! {
+fn store_broker_encode_write_request(binding: ProvenanceBinding, credential: String, archive: [U8]) -> [U8] StoreError! {
     if archive.len() > STORE_BROKER_MAX_REQUEST_BYTES -> return Err(store_broker_invalid("shared-store archive exceeds the request limit"))
     binding.validate()
     store_broker_validate_text_field(credential, "shared-store writer credential")
@@ -222,7 +222,7 @@ pub fn store_broker_encode_write_request(binding: ProvenanceBinding, credential:
 }
 
 // Rust `write_read_request`.
-pub fn store_broker_encode_read_request(reference: String) -> [U8] StoreError! {
+fn store_broker_encode_read_request(reference: String) -> [U8] StoreError! {
     if !store_broker_valid_reference(reference) -> return Err(store_broker_invalid("shared-store reference is invalid"))
     Ok("{STORE_BROKER_REQUEST_MAGIC}\nop=read\nreference={store_hex_bytes(reference.bytes())}\n\n".bytes())
 }
@@ -247,7 +247,7 @@ fn store_broker_header_fields(header: [U8], label: String, magic: String, allowe
 }
 
 // Rust `read_request_header`.
-pub fn store_broker_read_request_header(reader: &BrokerWireReader) -> BrokerHeader StoreError! {
+fn store_broker_read_request_header(reader: &BrokerWireReader) -> BrokerHeader StoreError! {
     header :: &reader.read_header("shared-store request")
     fields :: store_broker_header_fields(header, "shared-store request", STORE_BROKER_REQUEST_MAGIC, [String]{"op", "bytes", "reference", "source", "builder", "action", "output", "platform", "sandbox", "policy", "credential"})
     op :: fields.get("op") ?? return Err(store_broker_invalid("shared-store request has no operation"))
@@ -289,7 +289,7 @@ fn store_broker_write_field(fields: [String: String], key: String) -> String Sto
 }
 
 // Rust `read_request` (the test-facing whole request).
-pub fn store_broker_read_request(reader: &BrokerWireReader) -> BrokerRequest StoreError! {
+fn store_broker_read_request(reader: &BrokerWireReader) -> BrokerRequest StoreError! {
     if store_broker_read_request_header(&reader) == {
         .Write(header) -> {
             archive :: &reader.read_exact(header.length)
@@ -300,12 +300,12 @@ pub fn store_broker_read_request(reader: &BrokerWireReader) -> BrokerRequest Sto
 }
 
 // Rust `write_response`.
-pub fn store_broker_encode_response(status: String) -> [U8] Never! {
+fn store_broker_encode_response(status: String) -> [U8] Never! {
     "{STORE_BROKER_RESPONSE_MAGIC}\nstatus={status}\n\n".bytes()
 }
 
 // Rust `write_archive_response`.
-pub fn store_broker_encode_archive_response(archive: [U8]) -> [U8] StoreError! {
+fn store_broker_encode_archive_response(archive: [U8]) -> [U8] StoreError! {
     if archive.len() > STORE_BROKER_MAX_REQUEST_BYTES -> return Err(store_broker_invalid("shared-store archive exceeds the response limit"))
     out := "{STORE_BROKER_RESPONSE_MAGIC}\nstatus=ok\nbytes={archive.len()}\n\n".bytes()
     store_broker_append(&out, archive)
@@ -314,7 +314,7 @@ pub fn store_broker_encode_archive_response(archive: [U8]) -> [U8] StoreError! {
 
 // Rust `read_response`: a status-only response to a write. `ok` is true,
 // `missing` false.
-pub fn store_broker_read_response(reader: &BrokerWireReader) -> Bool StoreError! {
+fn store_broker_read_response(reader: &BrokerWireReader) -> Bool StoreError! {
     bytes :: &reader.read_bounded(STORE_BROKER_MAX_HEADER_BYTES + 1)
     if bytes.len() > STORE_BROKER_MAX_HEADER_BYTES -> return Err(store_broker_invalid("shared-store response is too large"))
     text :: String.from_bytes(bytes) ?? return Err(store_broker_invalid("shared-store response is not UTF-8"))
@@ -337,7 +337,7 @@ pub fn store_broker_read_response(reader: &BrokerWireReader) -> Bool StoreError!
 }
 
 // Rust `read_archive_response`: the archive of a read, or None for missing.
-pub fn store_broker_read_archive_response(reader: &BrokerWireReader) -> [U8]? StoreError! {
+fn store_broker_read_archive_response(reader: &BrokerWireReader) -> [U8]? StoreError! {
     header :: &reader.read_header("shared-store response")
     fields :: store_broker_header_fields(header, "shared-store response", STORE_BROKER_RESPONSE_MAGIC, [String]{"status", "bytes"})
     status :: fields.get("status") ?? return Err(store_broker_invalid("shared-store response has no status"))
@@ -358,18 +358,18 @@ pub fn store_broker_read_archive_response(reader: &BrokerWireReader) -> [U8]? St
 
 // One enrolled user's authority. Allowlists are ordered sets of the exact
 // provenance facts a writer may publish.
-pub struct WriterGrant {
-    pub read: Bool
-    pub write: Bool
-    pub expires: Int?
-    pub credential: String?
-    pub sources: [String]
-    pub builders: [String]
-    pub actions: [String]
-    pub outputs: [String]
-    pub platforms: [String]
-    pub sandboxes: [String]
-    pub policies: [String]
+struct WriterGrant {
+    read: Bool
+    write: Bool
+    expires: Int?
+    credential: String?
+    sources: [String]
+    builders: [String]
+    actions: [String]
+    outputs: [String]
+    platforms: [String]
+    sandboxes: [String]
+    policies: [String]
 
     fn empty() -> WriterGrant Never! {
         WriterGrant{read: false, write: false, expires: None, credential: None, sources: [String]{}, builders: [String]{}, actions: [String]{}, outputs: [String]{}, platforms: [String]{}, sandboxes: [String]{}, policies: [String]{}}
@@ -443,7 +443,7 @@ struct BrokerAllowlist {
 }
 
 // Rust `parse_writer_grant`.
-pub fn store_broker_parse_writer_grant(text: String) -> WriterGrant StoreError! {
+fn store_broker_parse_writer_grant(text: String) -> WriterGrant StoreError! {
     lines :: store_text_lines(text)
     if lines.len() == 0 || lines[0] != STORE_BROKER_GRANT_MAGIC -> return Err(store_broker_invalid("shared-store peer enrollment has an unknown format"))
     seen := [String]{}
@@ -488,7 +488,7 @@ pub fn store_broker_parse_writer_grant(text: String) -> WriterGrant StoreError! 
 }
 
 // Rust `authorize_grant` at time `now` (Unix seconds).
-pub fn store_broker_authorize_grant(grant: WriterGrant, write: Bool, binding: ProvenanceBinding, credential: String, now: Int) StoreError! {
+fn store_broker_authorize_grant(grant: WriterGrant, write: Bool, binding: ProvenanceBinding, credential: String, now: Int) StoreError! {
     if !grant.read -> return Err(store_broker_invalid("shared-store peer has no read authority"))
     if !write -> return
     if !grant.write -> return Err(store_broker_invalid("shared-store peer has no write authority"))

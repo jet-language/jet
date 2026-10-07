@@ -33,29 +33,29 @@
 struct LinkPack {
     // Kept sections in input order: live row per ordinal, ordinal per live
     // row, and the output section header index per ordinal.
-    pub ord_row: [Int]
-    pub row_ord: [Int]
-    pub sec_out: [Int]
+    ord_row: [Int]
+    row_ord: [Int]
+    sec_out: [Int]
     // Named local symbols, by file symbol id (locals) or -1 - global id
     // (localized definitions): name, info, output section index (or
     // LINK_ABS), value and size. Negative sentinels cannot alias a real
     // output section index in the ELF reserved-index range.
-    pub local_index: [Int:Int]
-    pub l_name: [String]
-    pub l_info: [Int]
-    pub l_shndx: [Int]
-    pub l_value: [Int]
-    pub l_size: [Int]
+    local_index: [Int:Int]
+    l_name: [String]
+    l_info: [Int]
+    l_shndx: [Int]
+    l_value: [Int]
+    l_size: [Int]
     // Global symbols by final global id.
-    pub global_index: [Int:Int]
-    pub gl_id: [Int]
-    pub exports: [Int:Bool]
+    global_index: [Int:Int]
+    gl_id: [Int]
+    exports: [Int:Bool]
     // Relocation rows: offset, type, symbol reference (>= 0: local symbol
     // index; < 0: -1 - global ordinal) and addend.
-    pub r_off: [Int]
-    pub r_type: [Int]
-    pub r_sym: [Int]
-    pub r_add: [Int]
+    r_off: [Int]
+    r_type: [Int]
+    r_sym: [Int]
+    r_add: [Int]
 }
 
 // Whether `name` is a plain C identifier and not a Rust-mangled name (v0
@@ -210,15 +210,15 @@ fn link_pack_rela(bytes: &[U8], p: LinkPack, first: Int, end: Int, first_global:
 }
 
 struct LinkPackHeaders {
-    pub name: [Int]
-    pub kind: [Int]
-    pub flags: [Int]
-    pub offset: [Int]
-    pub size: [Int]
-    pub link: [Int]
-    pub info: [Int]
-    pub align: [Int]
-    pub entry_size: [Int]
+    name: [Int]
+    kind: [Int]
+    flags: [Int]
+    offset: [Int]
+    size: [Int]
+    link: [Int]
+    info: [Int]
+    align: [Int]
+    entry_size: [Int]
 }
 
 fn link_pack_header(h: &LinkPackHeaders, name: Int, kind: Int, flags: Int, offset: Int, size: Int, link: Int, info: Int, align: Int, entry_size: Int) Never! {
@@ -442,7 +442,7 @@ fn link_pack_write(c: &LinkContext, exports: [Int]) -> [U8] Never! {
 // the first archive is the runtime itself) into a runtime pack. The roots
 // are the C ABI the first archive defines plus `extra_roots` (names a
 // program object may reference directly, such as `memcpy`).
-pub fn x64_link_runtime_pack(names: [String], bufs: ^[[U8]], extra_roots: [String]) -> X64ExecutableResult Never! {
+fn x64_link_runtime_pack(names: [String], bufs: ^[[U8]], extra_roots: [String]) -> X64ExecutableResult Never! {
     c := link_context(^bufs)
     link_load_inputs(&c, names)
     if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}

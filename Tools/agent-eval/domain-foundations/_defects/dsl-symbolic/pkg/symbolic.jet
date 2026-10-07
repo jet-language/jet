@@ -1,6 +1,6 @@
 use core.math as math
 
-pub enum Node {
+enum Node {
     Const(Float)
     Var(String)
     Add
@@ -8,17 +8,17 @@ pub enum Node {
     Neg
 }
 
-pub struct Expr {
-    code: [Node]
+struct Expr {
+    priv code: [Node]
 }
 
 fn one(node: Node) -> Expr { Expr{ code: [Node]{node} } }
 
-pub fn constant(value: Float) -> Expr { one(Node.Const(value)) }
+fn constant(value: Float) -> Expr { one(Node.Const(value)) }
 
-pub fn variable(name: String) -> Expr { one(Node.Var(~name)) }
+fn variable(name: String) -> Expr { one(Node.Var(~name)) }
 
-pub fn add(left: Expr, right: Expr) -> Expr {
+fn add(left: Expr, right: Expr) -> Expr {
     code := [Node]{}
     &code.extend(~left.code)
     &code.extend(~right.code)
@@ -26,7 +26,7 @@ pub fn add(left: Expr, right: Expr) -> Expr {
     return Expr{ code: code }
 }
 
-pub fn mul(left: Expr, right: Expr) -> Expr {
+fn mul(left: Expr, right: Expr) -> Expr {
     code := [Node]{}
     &code.extend(~left.code)
     &code.extend(~right.code)
@@ -34,14 +34,14 @@ pub fn mul(left: Expr, right: Expr) -> Expr {
     return Expr{ code: code }
 }
 
-pub fn neg(value: Expr) -> Expr {
+fn neg(value: Expr) -> Expr {
     code := [Node]{}
     &code.extend(~value.code)
     &code.push(Node.Neg)
     return Expr{ code: code }
 }
 
-pub fn show(expr: Expr) -> String {
+fn show(expr: Expr) -> String {
     stack := [String]{}
     loop token in expr.code {
         if token == {
@@ -76,7 +76,7 @@ fn is_zero(expr: Expr) -> Bool {
     return false
 }
 
-pub fn simplify(expr: Expr) -> Expr {
+fn simplify(expr: Expr) -> Expr {
     stack := [Expr]{}
     loop token in expr.code {
         if token == {
@@ -107,12 +107,12 @@ pub fn simplify(expr: Expr) -> Expr {
     return &stack.pop() ?? zero_expr()
 }
 
-pub struct Dual {
-    expr: Expr
-    deriv: Expr
+struct Dual {
+    priv expr: Expr
+    priv deriv: Expr
 }
 
-pub fn derivative(expr: Expr, wrt: String) -> Expr {
+fn derivative(expr: Expr, wrt: String) -> Expr {
     stack := [Dual]{}
     loop token in expr.code {
         if token == {
@@ -150,7 +150,7 @@ pub fn derivative(expr: Expr, wrt: String) -> Expr {
     return item.deriv
 }
 
-pub fn sample() -> Expr {
+fn sample() -> Expr {
     x :: variable("x")
     two :: constant(2.0)
     return add(mul(~two, ~x), constant(0.0))

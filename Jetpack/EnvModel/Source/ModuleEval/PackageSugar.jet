@@ -4,9 +4,9 @@
 // comptime values.
 
 // The packages and adapter packages one `packages:` field declares.
-pub struct ExtractedPackages {
-    pub packages: [Pkg]
-    pub adapters: [AdapterPlan]
+struct ExtractedPackages {
+    packages: [Pkg]
+    adapters: [AdapterPlan]
 }
 
 // One `name: value` argument of a sugar call, both halves trimmed.
@@ -17,7 +17,7 @@ struct SugarField {
 
 // Pull the package list out of a `packages: [ … ]` field by slicing its
 // source text and reusing the tested sugar parser.
-pub fn envmodel_extract_packages(value: Expr, src: String) -> ExtractedPackages EnvModelEvalError! {
+fn envmodel_extract_packages(value: Expr, src: String) -> ExtractedPackages EnvModelEvalError! {
     span :: if value == {
         .ListLit(_, span) -> span
         else -> { return Err(envmodel_packages_not_a_list(expr_span(value))) }

@@ -9,30 +9,30 @@ CPP_BIND_SCHEMA :: prep { "jet-cpp-bind-v3" }
 CPP_TOOL_CAPTURE_LIMIT :: prep { 67108864 }
 
 // One explicit template instantiation the caller asks for.
-pub struct CppTemplateInstantiation {
-    pub qualified_name: String
-    pub cpp_args: [String]
-    pub jet_name: String
+struct CppTemplateInstantiation {
+    qualified_name: String
+    cpp_args: [String]
+    jet_name: String
 }
 
-pub struct CppBindOptions {
-    pub lib: String
-    pub target: String
-    pub clang: String
-    pub archiver: String
-    pub include_dirs: [String]
-    pub library_dirs: [String]
-    pub libraries: [String]
-    pub namespaces: [String]
-    pub templates: [CppTemplateInstantiation]
+struct CppBindOptions {
+    lib: String
+    target: String
+    clang: String
+    archiver: String
+    include_dirs: [String]
+    library_dirs: [String]
+    libraries: [String]
+    namespaces: [String]
+    templates: [CppTemplateInstantiation]
 }
 
 // Checked descriptor overlay for a C++ library. The binder infers no
 // semantics from generated names; the caller supplies the stable overlay
 // identity and its source, and both invalidate the cache when they change.
-pub struct CppOverlay {
-    pub identity: String
-    pub source: String
+struct CppOverlay {
+    identity: String
+    source: String
 
     fn default() -> CppOverlay Never! {
         CppOverlay{identity: "none", source: "none"}
@@ -47,26 +47,26 @@ pub struct CppOverlay {
     }
 }
 
-pub struct CppBindResult {
-    pub source: String
-    pub bound: [String]
+struct CppBindResult {
+    source: String
+    bound: [String]
     // Content-addressed archive; a stable projection is also materialized for
     // ordinary `use cpp.<lib>` discovery.
-    pub archive: String
-    pub provenance: String
+    archive: String
+    provenance: String
     // Adaptation plans carried with this surface; each points back to the
     // same boundary digest.
-    pub plans: [BindingPlan]
+    plans: [BindingPlan]
     // The one boundary row consumed by inspect, comparison, and debugging.
-    pub boundary: ForeignBoundaryContract
+    boundary: ForeignBoundaryContract
 }
 
-pub fn pkg_cpp_bind(header: String, cache: String, options: CppBindOptions) -[FS, Env, Exec, Time.Wait]> CppBindResult ForeignBindError! {
+fn pkg_cpp_bind(header: String, cache: String, options: CppBindOptions) -[FS, Env, Exec, Time.Wait]> CppBindResult ForeignBindError! {
     pkg_cpp_bind_with_overlay(header, cache, options, CppOverlay.default())
 }
 
 // Bind C++ with an explicit checked overlay identity.
-pub fn pkg_cpp_bind_with_overlay(header: String, cache: String, options: CppBindOptions, overlay: CppOverlay) -[FS, Env, Exec, Time.Wait]> CppBindResult ForeignBindError! {
+fn pkg_cpp_bind_with_overlay(header: String, cache: String, options: CppBindOptions, overlay: CppOverlay) -[FS, Env, Exec, Time.Wait]> CppBindResult ForeignBindError! {
     pkg_cpp_validate_options(options)
     if pkg_cpp_has_line_break(overlay.identity) || pkg_cpp_has_line_break(overlay.source) -> return Err(ForeignBindError.Source("C++ overlay identities cannot contain line breaks"))
     resolved := options
@@ -174,7 +174,7 @@ fn pkg_cpp_describe_boundary(boundary: &ForeignBoundaryContract, c_abi_carrier: 
 // Bind C++ and append only caller-selected, already-resolved adaptation
 // facades. A plan stale against the generated boundary is rejected instead
 // of silently regenerating against a different artifact.
-pub fn pkg_cpp_bind_with_overlay_and_plans(header: String, cache: String, options: CppBindOptions, overlay: CppOverlay, plans: [String: BindingPlan]) -[FS, Env, Exec, Time.Wait]> CppBindResult ForeignBindError! {
+fn pkg_cpp_bind_with_overlay_and_plans(header: String, cache: String, options: CppBindOptions, overlay: CppOverlay, plans: [String: BindingPlan]) -[FS, Env, Exec, Time.Wait]> CppBindResult ForeignBindError! {
     result := pkg_cpp_bind_with_overlay(header, cache, options, overlay)
     boundary_digest :: result.boundary.digest()
     names := plans.keys().to_list()
@@ -196,7 +196,7 @@ pub fn pkg_cpp_bind_with_overlay_and_plans(header: String, cache: String, option
 
 // The cache identity a header and options would produce with no AST, shim,
 // or generated source, for cache-key tests.
-pub fn pkg_cpp_cache_identity_for_test(header: String, options: CppBindOptions, target: String) -[FS, Env, Exec, Time.Wait]> String Never! {
+fn pkg_cpp_cache_identity_for_test(header: String, options: CppBindOptions, target: String) -[FS, Env, Exec, Time.Wait]> String Never! {
     canonical :: files.canonicalize(header) ?? header
     bytes :: files.read_bytes(canonical) ?? [U8]{}
     resolved := options

@@ -52,17 +52,17 @@ module binary
 module ini
 /// Error returned by the root hexadecimal decoder.
 #Error
-pub struct HexError {
-    pub reason: String
+struct HexError {
+    reason: String
 }
 /// Convert one nibble to lowercase ASCII. Callers must pass `0..15`.
-pub fn hex_nibble(n: Int) -> U8 Never! {
+fn hex_nibble(n: Int) -> U8 Never! {
     if n < 10 -> return (U8{48 + n})
     (U8{87 + n})
 }
 
 /// Hex alphabet lookup. Accepts `0-9A-Fa-f`. Other bytes are absent.
-pub fn hex_value(b: U8) -> Int? Never! {
+fn hex_value(b: U8) -> Int? Never! {
     n :: Int.from_u8(b)
     if n >= 48 && n <= 57 -> return Val(n - 48)
     if n >= 97 && n <= 102 -> return Val(n - 87)
@@ -71,7 +71,7 @@ pub fn hex_value(b: U8) -> Int? Never! {
 }
 
 /// Lowercase hex of `bytes`. Allocates `2 * bytes.len()` ASCII bytes.
-pub fn bytes_to_hex(bytes: [U8]) -> String Never! {
+fn bytes_to_hex(bytes: [U8]) -> String Never! {
     out := [U8]{}
     loop b in bytes {
         n :: Int.from_u8(b)
@@ -82,7 +82,7 @@ pub fn bytes_to_hex(bytes: [U8]) -> String Never! {
 }
 
 /// Decode a hex string into bytes. Whitespace is rejected; length must be even.
-pub fn hex_to_bytes(text: String) -> [U8] HexError! {
+fn hex_to_bytes(text: String) -> [U8] HexError! {
     raw :: text.bytes()
     if raw.len() %% 2 != 0 {
         return Err(HexError{reason: "odd-length hex string; hex text encodes whole bytes, so the length must be even"})
@@ -100,6 +100,6 @@ pub fn hex_to_bytes(text: String) -> [U8] HexError! {
 
 /// 32-bit wrap used by hashes and CBOR integer codecs. Jet `Int` is exact; mask
 /// after arithmetic to get machine-word wrapping without a second integer type.
-pub fn wrap32(n: Int) -> Int Never! { n & 4294967295 }
+fn wrap32(n: Int) -> Int Never! { n & 4294967295 }
 
 

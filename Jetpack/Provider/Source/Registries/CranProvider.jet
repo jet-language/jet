@@ -9,27 +9,27 @@ CRAN_DEFAULT_REPOSITORY :: prep { "https://cloud.r-project.org" }
 
 // One `Depends`/`Imports`/`LinkingTo` entry: a package and an optional
 // `(operator version)` requirement.
-pub struct CranDependency {
-    pub name: String
-    pub requirement: (operator: String, wanted: String)?
+struct CranDependency {
+    name: String
+    requirement: (operator: String, wanted: String)?
 }
 
 // One `PACKAGES` paragraph.
-pub struct CranRecord {
-    pub name: String
-    pub version: String
+struct CranRecord {
+    name: String
+    version: String
     // Non-base dependencies, sorted by name, without repeats.
-    pub dependencies: [CranDependency]
+    dependencies: [CranDependency]
 }
 
 // A fetched source tarball of the closure.
-pub struct CranSourceArtifact {
-    pub record: CranRecord
-    pub path: String
-    pub hash: String
+struct CranSourceArtifact {
+    record: CranRecord
+    path: String
+    hash: String
 }
 
-pub struct CranProvider {
+struct CranProvider {
     // A locked CRAN realization must still match `authority.providers`.
     fn validate_cache_authority(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env]> {
         project :: ctx.project_dir ?? return
@@ -69,7 +69,7 @@ fn provider_cran_authority(ctx: ProviderCtx) -[FS, Env]> RegistryAuthority Regis
     RegistryAuthority.load(ctx, "cran", CRAN_DEFAULT_REPOSITORY, [String]{"cran.r-project.org", "cloud.r-project.org"})
 }
 
-pub fn provider_cran_cache_authority(ctx: ProviderCtx) -[FS, Env]> RegistryAuthority ProviderError! {
+fn provider_cran_cache_authority(ctx: ProviderCtx) -[FS, Env]> RegistryAuthority ProviderError! {
     authority :: provider_cran_authority(ctx) ?? return Err(err.into_provider(RegistryErrorKind.Cran))
     Ok(authority)
 }

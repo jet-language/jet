@@ -14,7 +14,7 @@ fn cli_optional_text(value: String?) -> DataTree Never! {
     }
 }
 
-pub fn cli_cmd_explain(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_explain(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     query :: parsed.positional.get(0) ?? return cli_explain_error(theme, parsed, "E1274", "explain needs a package ref", "`jet explain <CODE>` is handled by the main compiler; `jetpack explain` explains package refs.", "write `jet explain weirdctl` after a failed build.")
     if query.starts_with("package-overlay:") -> return cli_cmd_explain_overlay(&cache, theme, parsed, query)

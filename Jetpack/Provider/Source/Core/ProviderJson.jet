@@ -5,9 +5,9 @@
 
 PROVIDER_JSON_MAX_BYTES :: prep { 1048576 }
 
-pub struct ProviderFilteredJSON {
-    pub value: DataTree
-    pub noise: [String]
+struct ProviderFilteredJSON {
+    value: DataTree
+    noise: [String]
 
     // A schema error with the filtered provider noise appended.
     fn diagnostic(self, error: String) -> String Never! {
@@ -22,7 +22,7 @@ pub struct ProviderFilteredJSON {
 
 // Parse provider output after dropping known noise lines; a parse failure is
 // `BadOutput` carrying the filtered noise.
-pub fn provider_json_parse_lenient(input: String) -> ProviderFilteredJSON ProviderError! {
+fn provider_json_parse_lenient(input: String) -> ProviderFilteredJSON ProviderError! {
     raw :: input.bytes()
     if raw.len() > PROVIDER_JSON_MAX_BYTES -> return Err(ProviderError.BadOutput("JSON input exceeds the 1 MiB limit"))
     kept := [U8]{}

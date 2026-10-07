@@ -19,97 +19,97 @@ BUILD_MAX_NODES :: 524288
 // evaluator for already-materialized graph values.  Neither operation reads
 // the filesystem or consults a cache, so equal graph values always compare
 // equal and output order is canonical.
-pub struct BuildGraphTarget {
-    pub id: Int
-    pub name: String
-    pub kind: String
-    pub deps: [Int]
-    pub actions: [Int]
-    pub files: [String]
-    pub plugin: Int?
+struct BuildGraphTarget {
+    id: Int
+    name: String
+    kind: String
+    deps: [Int]
+    actions: [Int]
+    files: [String]
+    plugin: Int?
 }
 
-pub struct BuildGraphAction {
-    pub id: Int
-    pub name: String
-    pub kind: String
-    pub inputs: [String]
-    pub outputs: [String]
-    pub target: Int?
-    pub caps: [String]
-    pub pools: [String]
-    pub legacy_wrapper: String?
-    pub plugin: Int?
-    pub compiler_owned: Bool
-    pub key: String
-    pub cache_hit: Bool?
+struct BuildGraphAction {
+    id: Int
+    name: String
+    kind: String
+    inputs: [String]
+    outputs: [String]
+    target: Int?
+    caps: [String]
+    pools: [String]
+    legacy_wrapper: String?
+    plugin: Int?
+    compiler_owned: Bool
+    key: String
+    cache_hit: Bool?
 }
 
-pub struct BuildGraphActionKey {
-    pub action: String
-    pub key: String
+struct BuildGraphActionKey {
+    action: String
+    key: String
 }
 
-pub struct BuildGraphFile {
-    pub path: String
-    pub owner: Int?
-    pub consumers: [Int]
-    pub targets: [Int]
+struct BuildGraphFile {
+    path: String
+    owner: Int?
+    consumers: [Int]
+    targets: [Int]
 }
 
-pub struct BuildGraphNode {
-    pub kind: String
-    pub key: String
-    pub subject: String
-    pub inputs: [String]
-    pub input_digests: [BuildGraphInputDigest]
+struct BuildGraphNode {
+    kind: String
+    key: String
+    subject: String
+    inputs: [String]
+    input_digests: [BuildGraphInputDigest]
 }
 
-pub struct BuildGraphInputDigest {
-    pub name: String
-    pub digest: String
+struct BuildGraphInputDigest {
+    name: String
+    digest: String
 }
 
-pub struct BuildGraphFileDelta {
-    pub path: String
-    pub before: BuildGraphFile?
-    pub after: BuildGraphFile?
+struct BuildGraphFileDelta {
+    path: String
+    before: BuildGraphFile?
+    after: BuildGraphFile?
 }
 
-pub struct BuildGraphKeyDelta {
-    pub action: String
-    pub before: String?
-    pub after: String?
+struct BuildGraphKeyDelta {
+    action: String
+    before: String?
+    after: String?
 }
 
-pub struct BuildGraphCacheDelta {
-    pub action: String
-    pub before: Bool?
-    pub after: Bool?
+struct BuildGraphCacheDelta {
+    action: String
+    before: Bool?
+    after: Bool?
 }
 
-pub struct BuildGraphDiff {
-    pub file_deltas: [BuildGraphFileDelta]
-    pub affected_files: [String]
-    pub key_deltas: [BuildGraphKeyDelta]
-    pub cache_deltas: [BuildGraphCacheDelta]
+struct BuildGraphDiff {
+    file_deltas: [BuildGraphFileDelta]
+    affected_files: [String]
+    key_deltas: [BuildGraphKeyDelta]
+    cache_deltas: [BuildGraphCacheDelta]
 }
 
-pub struct BuildGraph {
-    pub targets: [BuildGraphTarget]
-    pub actions: [BuildGraphAction]
-    pub action_keys: [BuildGraphActionKey]
-    pub cache_hits: [BuildGraphAction]
-    pub files: [BuildGraphFile]
-    pub affected_files: [BuildGraphFile]
-    pub nodes: [BuildGraphNode]
+struct BuildGraph {
+    targets: [BuildGraphTarget]
+    actions: [BuildGraphAction]
+    action_keys: [BuildGraphActionKey]
+    cache_hits: [BuildGraphAction]
+    files: [BuildGraphFile]
+    affected_files: [BuildGraphFile]
+    nodes: [BuildGraphNode]
 }
 
 /// `graph` is a compiler-owned query.  Runtime code cannot manufacture a
 /// BuildPlan, so failing closed here is preferable to returning an empty
 /// graph that looks like a successful build.  The comptime dispatcher replaces
 /// this body with the checked projection.
-pub fn graph(_plan: BuildPlan) -> BuildGraph Never! {
+fn graph(_plan: BuildPlan) -> BuildGraph Never! {
     panic("core.build.graph requires a checked BuildPlan in build/comptime code")
 }
 
@@ -117,7 +117,7 @@ pub fn graph(_plan: BuildPlan) -> BuildGraph Never! {
 /// making cache policy decisions.  All deltas are ordered lexicographically;
 /// action keys compare recipe identity, while affected files follow changed
 /// actions through declared outputs, consumers, and target dependencies.
-pub fn receipt_diff(before: BuildGraph, after: BuildGraph) -> BuildGraphDiff Never! {
+fn receipt_diff(before: BuildGraph, after: BuildGraph) -> BuildGraphDiff Never! {
     if !valid_graph(before) || !valid_graph(after) {
         panic("core.build.receipt_diff requires canonical BuildGraph values")
     }

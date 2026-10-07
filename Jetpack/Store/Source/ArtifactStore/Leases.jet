@@ -6,9 +6,9 @@
 
 // Ownership identity recorded in lock and lease files. PID alone is not
 // sufficient because a later process may reuse it.
-pub struct ArtifactProcessIdentity {
-    pid_value: Int
-    start_value: String
+struct ArtifactProcessIdentity {
+    priv pid_value: Int
+    priv start_value: String
 
     fn new(pid: Int, start: String) -> ArtifactProcessIdentity Never! {
         ArtifactProcessIdentity{pid_value: pid, start_value: start}
@@ -90,9 +90,9 @@ fn store_artifact_rfind(haystack: [U8], needle: [U8]) -> Int Never! {
 // A live lease. Closing it releases the file only if its ownership record is
 // unchanged; a later process can therefore never remove a live lease by PID
 // coincidence.
-pub struct ArtifactLease {
-    path_value: String
-    owner_value: ArtifactProcessIdentity
+struct ArtifactLease {
+    priv path_value: String
+    priv owner_value: ArtifactProcessIdentity
 
     fn path(self) -> String Never! { self.path_value }
 

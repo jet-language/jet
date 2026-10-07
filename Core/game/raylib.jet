@@ -5,103 +5,103 @@ use core as core
 // This module owns no host fallback.  Window, input, drawing, texture, and
 // audio state are provider-owned; availability is exposed through the
 // provider's typed handles and status queries rather than fabricated locally.
-pub struct RaylibWindow {
-    pub width: Int
-    pub height: Int
-    pub title: String
-    pub open: Bool
-    pub drawing: Bool
-    pub should_close: Bool
-    pub fps: Int
-    pub commands: [String]
+struct RaylibWindow {
+    width: Int
+    height: Int
+    title: String
+    open: Bool
+    drawing: Bool
+    should_close: Bool
+    fps: Int
+    commands: [String]
 }
 
-pub struct RaylibColor {
-    pub r: Int
-    pub g: Int
-    pub b: Int
-    pub a: Int
+struct RaylibColor {
+    r: Int
+    g: Int
+    b: Int
+    a: Int
 }
 
-pub struct RaylibTextureAtlas {
-    pub path: String
+struct RaylibTextureAtlas {
+    path: String
 }
 
-pub struct RaylibSound {
-    pub path: String
+struct RaylibSound {
+    path: String
 }
 
-pub fn color(r: Int, g: Int, b: Int, a: Int) -> RaylibColor Never! {
+fn color(r: Int, g: Int, b: Int, a: Int) -> RaylibColor Never! {
     RaylibColor{r: clamp8(r), g: clamp8(g), b: clamp8(b), a: clamp8(a)}
 }
 
-pub fn window_open(width: Int, height: Int, title: String) -[GPU]> RaylibWindow Never! {
+fn window_open(width: Int, height: Int, title: String) -[GPU]> RaylibWindow Never! {
     w := clamp_dimension(width)
     h := clamp_dimension(height)
     core.game.raylib.window_open(w, h, title)
 }
 
-pub fn window_should_close(window: RaylibWindow) -[GPU]> Bool Never! {
+fn window_should_close(window: RaylibWindow) -[GPU]> Bool Never! {
     core.game.raylib.window_should_close(window)
 }
 
-pub fn window_ready(window: RaylibWindow) -[GPU]> Bool Never! {
+fn window_ready(window: RaylibWindow) -[GPU]> Bool Never! {
     core.game.raylib.window_ready(window)
 }
 
-pub fn close_window(window: RaylibWindow) Never! -[GPU]> {
+fn close_window(window: RaylibWindow) Never! -[GPU]> {
     core.game.raylib.close_window(window)
 }
 
-pub fn begin_drawing(window: RaylibWindow) Never! -[GPU]> {
+fn begin_drawing(window: RaylibWindow) Never! -[GPU]> {
     core.game.raylib.begin_drawing(window)
 }
 
-pub fn end_drawing() Never! -[GPU]> {
+fn end_drawing() Never! -[GPU]> {
     core.game.raylib.end_drawing()
 }
 
-pub fn clear_background(color: RaylibColor) Never! -[GPU]> {
+fn clear_background(color: RaylibColor) Never! -[GPU]> {
     core.game.raylib.clear_background(color)
 }
 
-pub fn draw_rectangle(x: Int, y: Int, width: Int, height: Int, color: RaylibColor) Never! -[GPU]> {
+fn draw_rectangle(x: Int, y: Int, width: Int, height: Int, color: RaylibColor) Never! -[GPU]> {
     core.game.raylib.draw_rectangle(x, y, width, height, color)
 }
 
-pub fn draw_text(text: String, x: Int, y: Int, size: Int, color: RaylibColor) Never! -[GPU]> {
+fn draw_text(text: String, x: Int, y: Int, size: Int, color: RaylibColor) Never! -[GPU]> {
     core.game.raylib.draw_text(text, x, y, size, color)
 }
 
-pub fn draw_sprite(atlas: RaylibTextureAtlas, source: String, x: Int, y: Int) Never! -[GPU]> {
+fn draw_sprite(atlas: RaylibTextureAtlas, source: String, x: Int, y: Int) Never! -[GPU]> {
     core.game.raylib.draw_sprite(atlas, source, x, y)
 }
 
-pub fn set_target_fps(fps: Int) Never! -[GPU]> {
+fn set_target_fps(fps: Int) Never! -[GPU]> {
     core.game.raylib.set_target_fps(clamp_fps(fps))
 }
 
-pub fn key_down(key: String) -[GPU]> Bool Never! {
+fn key_down(key: String) -[GPU]> Bool Never! {
     core.game.raylib.key_down(key)
 }
 
-pub fn gamepad_down(gamepad: Int, button: String) -[GPU]> Bool Never! {
+fn gamepad_down(gamepad: Int, button: String) -[GPU]> Bool Never! {
     core.game.raylib.gamepad_down(gamepad, button)
 }
 
-pub fn gamepad_axis(gamepad: Int, axis: String) -[GPU]> Float Never! {
+fn gamepad_axis(gamepad: Int, axis: String) -[GPU]> Float Never! {
     core.game.raylib.gamepad_axis(gamepad, axis)
 }
 
-pub fn load_texture_atlas(path: String) -[FS, GPU]> RaylibTextureAtlas Never! {
+fn load_texture_atlas(path: String) -[FS, GPU]> RaylibTextureAtlas Never! {
     core.game.raylib.load_texture_atlas(path)
 }
 
-pub fn load_sound(path: String) -[FS, GPU]> RaylibSound Never! {
+fn load_sound(path: String) -[FS, GPU]> RaylibSound Never! {
     core.game.raylib.load_sound(path)
 }
 
-pub fn play_sound(sound: RaylibSound) -[GPU]> Bool Never! {
+fn play_sound(sound: RaylibSound) -[GPU]> Bool Never! {
     core.game.raylib.play_sound(sound)
 }
 

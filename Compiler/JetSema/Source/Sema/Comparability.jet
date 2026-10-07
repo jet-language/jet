@@ -35,9 +35,9 @@ struct SemaComparabilityQuery {
 // A comparison operator the comparability rule decided. `handled` is false when
 // the scalar operator path owns the operands; otherwise `value` is the typed
 // comparison, or None after this rule reported the rejection.
-pub struct SemaComparabilityBinary {
-    pub handled: Bool
-    pub value: TExpr?
+struct SemaComparabilityBinary {
+    handled: Bool
+    value: TExpr?
 }
 
 fn sema_comparability_query() -> SemaComparabilityQuery Never! {
@@ -225,14 +225,14 @@ fn sema_comparability_incomparable_field(environment: SemaScopeEnvironment, modu
 }
 
 // Rust `types_comparable`: structural ordering only.
-pub fn sema_types_comparable(environment: SemaScopeEnvironment, ty: Type) -> Bool Never! {
+fn sema_types_comparable(environment: SemaScopeEnvironment, ty: Type) -> Bool Never! {
     query := sema_comparability_query()
     sema_comparability_structural(environment, environment.module_identity, ty, &query)
 }
 
 // Rust `incomparable_field`: the first field (or `payload`) that blocks
 // comparing values of `ty`.
-pub fn sema_incomparable_field(environment: SemaScopeEnvironment, ty: Type) -> String? {
+fn sema_incomparable_field(environment: SemaScopeEnvironment, ty: Type) -> String? {
     query := sema_comparability_query()
     sema_comparability_incomparable_field(environment, environment.module_identity, ty, &query)
 }
@@ -240,14 +240,14 @@ pub fn sema_incomparable_field(environment: SemaScopeEnvironment, ty: Type) -> S
 // Rust `types_comparable_type` plus `type_param_has_bound(_, Comparable)`: a
 // registered `Comparable` implementation, bound, or derive, else the
 // structural rule.
-pub fn sema_type_comparable(environment: SemaScopeEnvironment, ty: Type) -> Bool Never! {
+fn sema_type_comparable(environment: SemaScopeEnvironment, ty: Type) -> Bool Never! {
     if sema_comparability_implements(environment, ty, "Comparable") -> return true
     sema_types_comparable(environment, ty)
 }
 
 // Rust `is_equatable_type`/`is_equatable`: value equality is structural over
 // the built-in shapes and registered (`Equatable`) for nominals.
-pub fn sema_type_equatable(environment: SemaScopeEnvironment, ty: Type) -> Bool Never! {
+fn sema_type_equatable(environment: SemaScopeEnvironment, ty: Type) -> Bool Never! {
     if sema_call_reflection_secret_bearing(ty) -> return false
     if ty == {
         .Int | .Bool | .Float | .String | .Char | .IntN(_, _) | .Float32 -> true
@@ -297,7 +297,7 @@ fn sema_comparability_scalar_operand(ty: Type) -> Bool Never! {
 // (Rust `check_relational`) over one operand type without a registered
 // operator hook. Mismatched operand types stay with the scalar path's
 // mismatch diagnostics.
-pub fn sema_comparability_check_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, line: Int, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> SemaComparabilityBinary {
+fn sema_comparability_check_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, line: Int, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> SemaComparabilityBinary {
     skipped := SemaComparabilityBinary{handled: false, value: None}
     rejected := SemaComparabilityBinary{handled: true, value: None}
     equality := op == BinOp.Eq || op == BinOp.Ne
@@ -333,7 +333,7 @@ pub fn sema_comparability_check_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: 
 
 // Rust `check_assert_eq_call`: both sides share one type (E0108) and that type
 // supports `==` (E0312). Reported at the `assert_eq` name; false rejects.
-pub fn sema_comparability_check_assert_eq(arguments: [TCallArg], span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_comparability_check_assert_eq(arguments: [TCallArg], span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
     if arguments.len() != 2 -> return true
     left :: arguments[0].value.ty
     right :: arguments[1].value.ty
@@ -354,7 +354,7 @@ pub fn sema_comparability_check_assert_eq(arguments: [TCallArg], span: Span, env
 // Rust `core.math` `min`/`max`/`clamp` (E0905, reported at the first
 // argument). Other Comparable-constrained Core members keep the canonical
 // constraint wording.
-pub fn sema_comparability_core_error(member: String, span: Span) -> Diagnostic? {
+fn sema_comparability_core_error(member: String, span: Span) -> Diagnostic? {
     why := if {
         member == "min" || member == "max" -> "min/max compare their two arguments"
         member == "clamp" -> "clamp compares the value with its lower and upper bounds"
@@ -369,14 +369,14 @@ pub fn sema_comparability_core_error(member: String, span: Span) -> Diagnostic? 
 // is a struct whose fields all qualify or an enum without payloads. A nominal
 // reached again while it is still being decided lies on a cycle and answers
 // false, as the Rust walk's active set does.
-pub fn sema_type_map_key_eligible(environment: SemaScopeEnvironment, ty: Type) -> Bool Never! {
+fn sema_type_map_key_eligible(environment: SemaScopeEnvironment, ty: Type) -> Bool Never! {
     query := sema_comparability_query()
     sema_comparability_map_key(environment, environment.module_identity, ty, &query)
 }
 
 // Rust `check_declared_type_rules` (D-MAP-KEY1, E0502): every map written in
 // a declared type needs a key-eligible key. False when one was reported.
-pub fn sema_type_check_declared_map_keys(environment: SemaScopeEnvironment, ty: Type, span: Span, diagnostics: &[Diagnostic]) -> Bool Never! {
+fn sema_type_check_declared_map_keys(environment: SemaScopeEnvironment, ty: Type, span: Span, diagnostics: &[Diagnostic]) -> Bool Never! {
     if ty == {
         .Map(key, key_span, value) -> {
             valid := sema_type_check_declared_map_keys(environment, key, span, &diagnostics)
@@ -468,7 +468,7 @@ fn sema_comparability_definition_map_key(environment: SemaScopeEnvironment, defi
 // capability a `Set` or `Tally` element needs. Structural carriers follow
 // their parts; a nominal needs value equality and hashable fields. A nominal
 // still being decided answers false, and a finished one reuses its answer.
-pub fn sema_type_hashable(environment: SemaScopeEnvironment, ty: Type) -> Bool Never! {
+fn sema_type_hashable(environment: SemaScopeEnvironment, ty: Type) -> Bool Never! {
     query := sema_comparability_query()
     sema_comparability_hashable(environment, environment.module_identity, ty, &query)
 }

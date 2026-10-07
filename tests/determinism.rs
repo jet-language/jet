@@ -329,7 +329,7 @@ fn pure_code_rejects_clock_observation_through_an_imported_nominal_type() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("clock_box.jet"),
-        "pub enum BoxedClock {\n    Held(Clock)\n}\n",
+        "enum BoxedClock {\n    Held(Clock)\n}\n",
     )
     .unwrap();
     let main = dir.join("main.jet");

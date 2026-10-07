@@ -11,7 +11,7 @@ STORE_PROJECT_NIX_CAS_DIR :: prep { "nix-cas" }
 
 // Export the selected Hangar closure as a portable, unsigned CAS bundle and
 // its `sha256-<hex>` digest.
-pub fn store_export_nix_cas_bundle(verification: &StoreVerification, roots: HangarRoots, target: String) -> (bytes: [U8], digest: String) StoreError! {
+fn store_export_nix_cas_bundle(verification: &StoreVerification, roots: HangarRoots, target: String) -> (bytes: [U8], digest: String) StoreError! {
     _lock :: env_runtime_lock(roots.root, "hangar")
     archive :: store_nix_cas_build_unlocked(&verification, roots, target)
     bytes :: archive.encode()
@@ -22,7 +22,7 @@ pub fn store_export_nix_cas_bundle(verification: &StoreVerification, roots: Hang
 // Persist a portable Nix CAS bundle below the project's managed directory.
 // An identical existing bundle is reused; different bytes under the same
 // digest fail closed.
-pub fn store_publish_nix_cas_bundle(verification: &StoreVerification, project: String, roots: HangarRoots, target: String) -> String StoreError! {
+fn store_publish_nix_cas_bundle(verification: &StoreVerification, project: String, roots: HangarRoots, target: String) -> String StoreError! {
     exported :: store_export_nix_cas_bundle(&verification, roots, target)
     bytes :: exported.bytes
     digest :: exported.digest
@@ -59,7 +59,7 @@ pub fn store_publish_nix_cas_bundle(verification: &StoreVerification, project: S
 
 // Import a project Nix CAS bundle only after checking its declared digest.
 // Returns the import report and the manifest's member keys.
-pub fn store_import_nix_cas_bundle(project: String, roots: HangarRoots, digest: String) -> (report: HangarArchiveReport, digests: [String]) StoreError! {
+fn store_import_nix_cas_bundle(project: String, roots: HangarRoots, digest: String) -> (report: HangarArchiveReport, digests: [String]) StoreError! {
     store_nix_cas_import_with_expectation(project, roots, digest, None)
 }
 
@@ -67,7 +67,7 @@ pub fn store_import_nix_cas_bundle(project: String, roots: HangarRoots, digest: 
 // manifest is decoded and checked before any Hangar staging or publication,
 // so the lock identity is an admission precondition, not a post-import
 // observation.
-pub fn store_import_nix_cas_bundle_checked(project: String, roots: HangarRoots, digest: String, closure: NixClosureRecord, envelope: LockEnvelope) -> (report: HangarArchiveReport, digests: [String]) StoreError! {
+fn store_import_nix_cas_bundle_checked(project: String, roots: HangarRoots, digest: String, closure: NixClosureRecord, envelope: LockEnvelope) -> (report: HangarArchiveReport, digests: [String]) StoreError! {
     closure.validate() ?? return Err(StoreError.Other(err.message()))
     if envelope.output_hash != closure.output || envelope.platform != closure.system {
         return Err(StoreError.InvalidData("locked Nix envelope identity disagrees with its closure record"))

@@ -31,7 +31,7 @@ fn soft_public_imports_warn_once_per_outside_use() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("note.jet"),
-        "pub struct Note {\n    pub _title: String\n}\nimpl Note {\n    pub fn _length(self) -> Int { return 1 }\n}\npub fn _legacy() -> Int { return 2 }\n",
+        "struct Note {\n    _title: String\n}\nimpl Note {\n    fn _length(self) -> Int { return 1 }\n}\nfn _legacy() -> Int { return 2 }\n",
     )
     .unwrap();
     let source = "use \"note\"\nuse note._legacy\nfn run() {\n    n :: note.Note{ _title: \"hi\" }\n    print(n._title)\n    print(n._length())\n    print(note._legacy())\n    print(_legacy())\n}\n";
@@ -68,7 +68,7 @@ fn soft_public_reexports_warn_on_the_exported_spelling_once() {
     .unwrap();
     fs::write(
         dir.join("api/implementation.jet"),
-        "pub fn _raw() -> Int { return 1 }\npub fn supported() -> Int { return 2 }\n",
+        "fn _raw() -> Int { return 1 }\nfn supported() -> Int { return 2 }\n",
     )
     .unwrap();
     let main = dir.join("main.jet");
@@ -95,7 +95,7 @@ fn imported_soft_public_declared_types_warn_once_per_occurrence() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("models.jet"),
-        "pub struct _Cell<T> { pub value: T }\npub trait _Readable { fn read(self) -> Int }\n",
+        "struct _Cell<T> { value: T }\ntrait _Readable { fn read(self) -> Int }\n",
     )
     .unwrap();
     let main = dir.join("main.jet");
@@ -133,7 +133,7 @@ fn local_soft_public_types_win_over_imported_name_collisions() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("library.jet"),
-        "pub struct _Thing { pub value: Int }\npub trait _Shape { fn size(self) -> Int }\n",
+        "struct _Thing { value: Int }\ntrait _Shape { fn size(self) -> Int }\n",
     )
     .unwrap();
     let main = dir.join("main.jet");
@@ -176,10 +176,10 @@ fn run() {
 }
 ";
     let adapter_src = "\
-pub fn concrete(table: ^Table<DataTree>) -> Table<DataTree> {
+fn concrete(table: ^Table<DataTree>) -> Table<DataTree> {
     return table
 }
-pub fn generic<T>(table: ^Table<T>) -> Table<T> {
+fn generic<T>(table: ^Table<T>) -> Table<T> {
     return table
 }
 ";
@@ -207,7 +207,7 @@ fn explicit_internal_project_module_alias_runs() {
             ),
             (
                 "arbitrary.jet",
-                "module _bench { }\npub fn fixture() -> Int { return 42 }\n",
+                "module _bench { }\nfn fixture() -> Int { return 42 }\n",
             ),
         ],
     );
@@ -225,10 +225,10 @@ fn inline_code_module_qualified_call() {
     }
     let src = "\
 module math {
-    pub fn double(n: Int) -> Int {
+    fn double(n: Int) -> Int {
         return (n * 2)
     }
-    pub fn add(a: Int, b: Int) -> Int {
+    fn add(a: Int, b: Int) -> Int {
         return (a + b)
     }
 }
@@ -253,7 +253,7 @@ fn unqualified_inline_module_call() {
     let src = "\
 use math.double
 module math {
-    pub fn double(n: Int) -> Int {
+    fn double(n: Int) -> Int {
         return (n * 2)
     }
 }
@@ -273,14 +273,14 @@ fn run() {
 fn inline_module_use_list_and_pub_reexport_match_all_tiers() {
     let src = "\
 module math {
-    pub fn double(n: Int) -> Int {
+    fn double(n: Int) -> Int {
         return (n * 2)
     }
 }
 module api {
     use math.[double as twice]
     pub use math.[double as exported]
-    pub fn local(n: Int) -> Int {
+    fn local(n: Int) -> Int {
         return twice(n)
     }
 }
@@ -329,7 +329,7 @@ use core.math.[abs, min, max, clamp]
 module api {
     use core.[math.abs]
     pub use core.[math.abs as exported]
-    pub fn local(n: Int) -> Int {
+    fn local(n: Int) -> Int {
         return abs(n)
     }
 }
@@ -385,7 +385,7 @@ module math
 module api {
     use math.[label as decorate]
     pub use math.[label as exported]
-    pub fn local(n: Int) -> String {
+    fn local(n: Int) -> String {
         return decorate("x", n)
     }
 }
@@ -395,7 +395,7 @@ fn run() {
 }
 "#;
     let math_src = r#"
-pub fn label(prefix: String, n: Int) -> String {
+fn label(prefix: String, n: Int) -> String {
     return "{prefix}:{n}"
 }
 "#;
@@ -447,7 +447,7 @@ fn run() {
 }
 ";
     let math_src = "\
-pub fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+fn clamp(x: Int, lo: Int, hi: Int) -> Int {
     if (x < lo) {
         return lo
     }
@@ -456,10 +456,10 @@ pub fn clamp(x: Int, lo: Int, hi: Int) -> Int {
     }
     return x
 }
-pub fn label(prefix: String, n: Int) -> String {
+fn label(prefix: String, n: Int) -> String {
     return \"{prefix}:{n}\"
 }
-pub fn checked(value: Int) -> Int Err! {
+fn checked(value: Int) -> Int Err! {
     if value < 0 {
         return Err(message(value))
     }
@@ -468,7 +468,7 @@ pub fn checked(value: Int) -> Int Err! {
 fn message(value: Int) -> String {
     return \"bad {value}\"
 }
-pub fn ready() -> Bool { true }
+fn ready() -> Bool { true }
 ";
     let files = [("main.jet", main_src), ("math.jet", math_src)];
     let expected = "10\nx:5\n7\n-2\ntrue\n";
@@ -504,10 +504,10 @@ fn run() {
 ";
     let worker_src = "\
 #Error
-pub struct WorkerError {
-    pub message: String
+struct WorkerError {
+    message: String
 }
-pub fn checked(value: Int) -> Int WorkerError! {
+fn checked(value: Int) -> Int WorkerError! {
     if value < 0 {
         return Err(WorkerError{message: \"negative\"})
     }
@@ -551,11 +551,11 @@ fn run() {
 ";
     let worker_src = "\
 #Error
-pub struct WorkerError {
-    pub message: String
+struct WorkerError {
+    message: String
 }
-pub struct Value {
-    pub id: String
+struct Value {
+    id: String
 }
 fn inner() -> Bool WorkerError! {
     return Err(WorkerError{message: \"inner\"})
@@ -563,7 +563,7 @@ fn inner() -> Bool WorkerError! {
 fn fail_after(error: WorkerError) -> Value WorkerError! {
     return Err(error)
 }
-pub fn checked() -> Value WorkerError! {
+fn checked() -> Value WorkerError! {
     inner() ?? {
         return fail_after(err)
     }
@@ -621,19 +621,19 @@ fn run() {
 }
 ";
     let helper_src = "\
-pub fn sum(left: Int, right: Int) -> Int { left + right }
+fn sum(left: Int, right: Int) -> Int { left + right }
 #Error
-pub enum HelperError {
+enum HelperError {
     Negative
 }
-pub fn trimmed(value: String) -> String {
+fn trimmed(value: String) -> String {
     return value.trim()
 }
-pub fn checked(value: Int) -> Int HelperError! {
+fn checked(value: Int) -> Int HelperError! {
     assert(value >= 0)
     return Ok(value)
 }
-pub fn failed(value: Int) -> Int HelperError! {
+fn failed(value: Int) -> Int HelperError! {
     if value < 0 {
         return Err(HelperError.Negative)
     }
@@ -642,14 +642,14 @@ pub fn failed(value: Int) -> Int HelperError! {
 fn fallback_message() -> String {
     return \"recovered\"
 }
-pub fn recover() -> String {
+fn recover() -> String {
     values := \"\".split(\",\").to_list()
     return values.get(1) ?? fallback_message()
 }
-pub fn empty_strings() -> [String] {
+fn empty_strings() -> [String] {
     return [String]{}
 }
-pub fn reset_strings() -> [String] {
+fn reset_strings() -> [String] {
     values := [String]{}
     values = [String]{}
     return values
@@ -678,7 +678,7 @@ fn run() {
 }
 ";
     let helper_src = "\
-pub fn panic_fallback() -> String {
+fn panic_fallback() -> String {
     values := \"\".split(\",\").to_list()
     return values.get(1) ?? panic(\"imported fallback\")
 }
@@ -739,7 +739,7 @@ fn run() {
 }
 ";
     let mathlib_src = "\
-pub fn clamp(n: Int, lo: Int, hi: Int) -> Int {
+fn clamp(n: Int, lo: Int, hi: Int) -> Int {
     if (n < lo) {
         return lo
     }
@@ -748,10 +748,10 @@ pub fn clamp(n: Int, lo: Int, hi: Int) -> Int {
     }
     return n
 }
-pub fn lo() -> Int {
+fn lo() -> Int {
     return 0
 }
-pub fn hi() -> Int {
+fn hi() -> Int {
     return 100
 }
 ";
@@ -784,7 +784,7 @@ pub use wrap.wrap
 module wrap
 ";
     let wrap_src = "\
-pub fn wrap(s: String) -> String {
+fn wrap(s: String) -> String {
     return \"[{decorate(s)}]\"
 }
 fn decorate(s: String) -> String {
@@ -1179,7 +1179,7 @@ fn package_namespace_uses_owner_indices_without_sibling_imports() {
     let files = [
         ("package.jet", "name: \"namespace_owner_indices\"\nversion: \"0.1.0\"\noutputs: { app: .Executable{ entry: run } }\n"),
         ("main.jet", "#NoPrelude\nFOLDED :: prep { fold_record().value }\nfn run() {\n    callback :: plus\n    result :: callback(2)\n    record :: make()\n    amount :: record.amount()\n    boxed :: wrap(result + amount)\n    state :: State.Ready(boxed.value)\n}\n"),
-        ("types.jet", "#NoPrelude\nstruct Record { pub value: Int }\nstruct Box<T> { pub value: T }\nenum State { Ready(Int) }\nalias RecordView<T> :: Box<T>\nalias Again<T> :: RecordView<T>\n"),
+        ("types.jet", "#NoPrelude\nstruct Record { value: Int }\nstruct Box<T> { value: T }\nenum State { Ready(Int) }\nalias RecordView<T> :: Box<T>\nalias Again<T> :: RecordView<T>\n"),
         ("methods.jet", "#NoPrelude\ntrait Measure { fn amount(self) -> Int }\nimpl Record.Measure {\n    fn amount(self) -> Int { self.value }\n}\n"),
         ("values.jet", "#NoPrelude\nTOKEN :: 7\nfn plus(value: Int) -> Int { value + TOKEN }\nfn make() -> Record { Record{value: TOKEN} }\nfn fold_record() -> Record { Record{value: 11} }\nfn wrap(value: Int) -> Again<Int> { Box<Int>{value: value} }\n"),
     ];
@@ -1221,7 +1221,7 @@ fn comptime_qualified_module_function_call_reaches_its_body() {
     for (name, source) in [
         ("package.jet", "name: \"comptime_qualified_function_call\"\nversion: \"0.1.0\"\noutputs: { app: .Executable{ entry: run } }\n"),
         ("main.jet", "#NoPrelude\nmodule helper\nFOLDED :: prep { helper.double(20) + helper.double(1) }\nfn run() {}\n"),
-        ("helper.jet", "#NoPrelude\npub fn double(value: Int) -> Int { value * 2 }\n"),
+        ("helper.jet", "#NoPrelude\nfn double(value: Int) -> Int { value * 2 }\n"),
     ] {
         fs::write(scratch.join(name), source).unwrap();
     }

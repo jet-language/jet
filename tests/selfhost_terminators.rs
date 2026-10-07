@@ -235,7 +235,7 @@ fn scoped_candidate_reaches_overlay_loader_parser_and_checked_mir() {
     let entry = scratch.path.join("run.jet");
     let helper = scratch.path.join("helper.jet");
     let entry_source = "use helper as h\nfn observed() -> Int { return h.answer() }\nfn run() { print(observed()) }\n";
-    let helper_source = "pub fn answer() -> Int {\n    return 42\n}\n";
+    let helper_source = "fn answer() -> Int {\n    return 42\n}\n";
     fs::write(&entry, "fn run() {}\n").unwrap();
     fs::write(&helper, helper_source).unwrap();
     let seen = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));

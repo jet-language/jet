@@ -67,7 +67,7 @@ fn sema_text_handle_regex_spec(owner: String, method: String, argc: Int) -> Sema
     None
 }
 
-pub fn sema_text_handle_known_method(owner: String, method: String) -> Bool Never! {
+fn sema_text_handle_known_method(owner: String, method: String) -> Bool Never! {
     if owner == "MIME" -> return method == "media_type" || method == "subtype" || method == "essence" || method == "to_string" || method == "param" || method == "params"
     if owner == "Regex" -> return method == "pattern" || method == "source" || method == "flags" || method == "options" || method == "names" || method == "count" || method == "is_match" || method == "full_match" || method == "match" || method == "find" || method == "find_all" || method == "matches" || method == "split" || method == "replace" || method == "replace_first" || method == "split_limit" || method == "replace_all_with"
     if owner == "Match" -> return method == "group" || method == "name" || method == "start" || method == "end" || method == "named_captures" || method == "group_start" || method == "group_end"
@@ -113,7 +113,7 @@ fn sema_text_handle_is_canonical(receiver_type: Type, owner: String, environment
 
 // Nominal MIME and Regex/Match methods. The matching TIR kinds already
 // have Source codegen routes and do not repeat typed-literal validation.
-pub fn sema_call_try_text_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_text_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     owner :: sema_text_handle_nominal_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if (owner != "MIME" && owner != "Regex" && owner != "Match") || !sema_text_handle_is_canonical(receiver_value.ty, owner, environment) || !sema_text_handle_known_method(owner, method) -> return SemaMethodSpecialCheck{handled: false, value: None}
     spec := sema_text_handle_regex_spec(owner, method, args.len())
@@ -138,7 +138,7 @@ fn sema_email_handle_spec(owner: String, method: String, argc: Int) -> SemaNetwo
 // The native EmailMethod lowering remains a primitive structural operation;
 // this producer preserves the exact checker contract without inventing a
 // Prelude symbol or an Email effect row that the native method contract lacks.
-pub fn sema_call_try_email_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_email_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     owner :: sema_text_handle_nominal_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if (owner != "Message" && owner != "Mailer") || !sema_text_handle_is_canonical(receiver_value.ty, owner, environment) -> return SemaMethodSpecialCheck{handled: false, value: None}
     if (owner == "Message" && method != "envelope" && method != "with_envelope") || (owner == "Mailer" && method != "send") -> return SemaMethodSpecialCheck{handled: false, value: None}

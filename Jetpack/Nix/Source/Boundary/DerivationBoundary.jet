@@ -5,15 +5,15 @@
 
 // A derivation materialized to Nix-compatible store paths. `outputs` holds
 // each output's store path with its fixed-output method and hash.
-pub struct NixNativeDerivation {
-    pub name: String
-    pub drv_path: String
-    pub outputs: [String: NixDerivationOutput]
-    pub builder: String
-    pub args: [String]
-    pub env: [String: String]
+struct NixNativeDerivation {
+    name: String
+    drv_path: String
+    outputs: [String: NixDerivationOutput]
+    builder: String
+    args: [String]
+    env: [String: String]
     // Sorted and unique.
-    pub input_sources: [String]
+    input_sources: [String]
 
     fn output_path(self, name: String) -> String? Never! {
         output :: self.outputs.get(name) ?? return None
@@ -28,8 +28,8 @@ pub struct NixNativeDerivation {
     }
 }
 
-pub struct NixNativeBoundary {
-    manifest: NixEvalOracleManifest
+struct NixNativeBoundary {
+    priv manifest: NixEvalOracleManifest
 
     // The committed oracle manifest; evaluation is refused unless it is
     // product-ready.

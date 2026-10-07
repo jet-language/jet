@@ -7,12 +7,12 @@
 ADA_BIND_SCHEMA :: prep { "jet-ada-bind-v1" }
 ADA_TOOL_ACTION :: prep { "rejected the Ada binding source" }
 
-pub struct AdaBindResult {
-    pub source: String
-    pub bound: [String]
-    pub archive: String
-    pub runtime_dir: String
-    pub provenance: String
+struct AdaBindResult {
+    source: String
+    bound: [String]
+    archive: String
+    runtime_dir: String
+    provenance: String
 }
 
 enum AdaScalar {
@@ -69,7 +69,7 @@ struct AdaRoutine {
 
 // Parse the spec, compile it with its body through gnatmake/gnatbind, build
 // the C bridge archive, and render the Jet binding with provenance.
-pub fn pkg_ada_bind(spec_path: String, spec: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> AdaBindResult ForeignBindError! {
+fn pkg_ada_bind(spec_path: String, spec: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> AdaBindResult ForeignBindError! {
     if !pkg_binder_is_ident(lib) -> return Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
     if files.suffix(spec_path) != ".ads" -> return Err(ForeignBindError.Source("the Ada binder requires a `.ads` package spec"))
     body_path :: files.with_suffix(spec_path, ".adb")
@@ -228,9 +228,9 @@ fn pkg_ada_render_jet(lib: String, routines: [AdaRoutine]) -> String Never! {
     loop routine in routines {
         out = "{out}    fn {routine.name}{pkg_ada_params_jet(routine.params)} -> {routine.result.jet()} = \"{abi}_{routine.name}\"\n"
     }
-    out = "{out}}}\nuse c.{abi} as abi\n\npub enum AdaError {{ Constraint }}\n\n"
+    out = "{out}}}\nuse c.{abi} as abi\n\nenum AdaError {{ Constraint }}\n\n"
     loop routine in routines {
-        out = "{out}pub fn {routine.name}{pkg_ada_params_jet(routine.params)} -[FFI.Ada]> {routine.result.jet()} AdaError! {{\n"
+        out = "{out}fn {routine.name}{pkg_ada_params_jet(routine.params)} -[FFI.Ada]> {routine.result.jet()} AdaError! {{\n"
         loop param in routine.params {
             if param.constraint == {
                 .Val(range) -> {

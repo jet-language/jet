@@ -6,7 +6,7 @@
 // exact, case-sensitive catalog name) is checked first and copies real
 // `.jet` source into `./components/` instead; source names are always
 // lowercase, so an exact-case `Button`-style name can only be a component.
-pub fn cli_cmd_add(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_add(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     if parsed.flags.offline -> return cli_offline_refusal(theme, "add")
     raw :: parsed.positional.get(0) ?? {
@@ -171,7 +171,7 @@ fn cli_add_component(theme: Theme, component: StarterComponent) -[IO, FS, Env, T
 }
 
 // `jetpack remove <ref>`: a confirmed env-file edit.
-pub fn cli_cmd_remove(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_remove(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     raw :: parsed.positional.get(0) ?? {
         theme.error("remove what?", "`jetpack remove` needs a ref to remove.", "try `jetpack remove ripgrep@nixpkgs`.")
         return EXIT_USAGE

@@ -275,7 +275,7 @@ fn store_reuse_binding_for(bindings: [NixProjectionBinding], source: String) -> 
 // Return opened handles for every regular file of the snapshot below `path`.
 // Links stay links (the archive law already bounds them); a path outside
 // `root` is refused before it is inspected.
-pub fn store_open_snapshot_files(root: String, path: String) -> [SnapshotFile] StoreError! {
+fn store_open_snapshot_files(root: String, path: String) -> [SnapshotFile] StoreError! {
     opened := [SnapshotFile]{}
     store_collect_snapshot_files(root, path, &opened)
     Ok(opened)
@@ -388,7 +388,7 @@ fn store_reuse_wrapper_keeper_error(child: ^ProcessChild, action: String) -> Sto
 
 // Copy an output into the private snapshot, preserving modes, symlinks and
 // hardlink groups (keyed by file identity). Special files are refused.
-pub fn store_copy_snapshot_node(source: String, destination: String, hardlinks: &[String: String]) StoreError! {
+fn store_copy_snapshot_node(source: String, destination: String, hardlinks: &[String: String]) StoreError! {
     info :: files.stat(source)
     if info.is_dir {
         files.create_dir_all(destination)

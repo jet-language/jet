@@ -1,7 +1,7 @@
 // D-FOUND-CAP1: process lifecycle is an explicitly authorized OS boundary.
 use core.process as process
 
-pub fn lifecycle() {
+fn lifecycle() {
     policy :: Authority.from_rights(["Exec:sleep"])
     spec :: process.cmd(["sleep", "5"]).stdout(.Capture).stderr(.Capture).under(policy)
     child :: spec.spawn() ?? {

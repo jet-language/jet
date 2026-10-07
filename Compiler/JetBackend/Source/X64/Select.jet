@@ -18,7 +18,7 @@
 // and shifts need cl: rdx and rcx are saved around them with push/pop, so the
 // allocator may keep values there.
 
-pub enum X64RelocTarget {
+enum X64RelocTarget {
     Function(id: LIRFunctionID)
     Runtime(symbol: String)
     Data(id: LIRDataID)
@@ -26,41 +26,41 @@ pub enum X64RelocTarget {
 
 // A rel32 field at `at` (offset in the function's code) that must hold the
 // distance from the end of the field to the target.
-pub struct X64Reloc { pub at: Int, pub target: X64RelocTarget }
+struct X64Reloc { at: Int, target: X64RelocTarget }
 
-pub struct X64CompiledFunction {
-    pub id: LIRFunctionID
-    pub name: String
-    pub code: [U8]
-    pub relocs: [X64Reloc]
+struct X64CompiledFunction {
+    id: LIRFunctionID
+    name: String
+    code: [U8]
+    relocs: [X64Reloc]
 }
 
-pub struct X64CompileResult {
-    pub function: X64CompiledFunction?
-    pub errors: [String]
+struct X64CompileResult {
+    function: X64CompiledFunction?
+    errors: [String]
 }
 
-pub struct X64ModuleResult {
-    pub functions: [X64CompiledFunction]
-    pub errors: [String]
+struct X64ModuleResult {
+    functions: [X64CompiledFunction]
+    errors: [String]
 }
 
 X64_ARGUMENT_REGISTERS :: prep { [Int]{7, 6, 2, 1, 8, 9} }
 
-struct X64BlockFixup { pub at: Int, pub block: Int }
+struct X64BlockFixup { at: Int, block: Int }
 
-struct X64Move { pub src: X64Loc, pub dst: X64Loc }
+struct X64Move { src: X64Loc, dst: X64Loc }
 
 struct X64Emitter {
-    pub code: [U8]
-    pub relocs: [X64Reloc]
-    pub fixups: [X64BlockFixup]
-    pub saved: [Int]
+    code: [U8]
+    relocs: [X64Reloc]
+    fixups: [X64BlockFixup]
+    saved: [Int]
     // LIR value -> rbp displacement of its StackSlot storage (0 for none).
-    pub stack: [Int]
+    stack: [Int]
 }
 
-struct X64Frame { pub stack: [Int], pub bytes: Int }
+struct X64Frame { stack: [Int], bytes: Int }
 
 // The displacement of every StackSlot's storage, and the bytes `sub rsp`
 // reserves below the callee-saved registers for spills and storage.
@@ -204,9 +204,9 @@ fn x64_emit_jump(emitter: &X64Emitter, block: Int) Never! {
 // `floats[i]`), or -1 when it is on the stack; `stack` lists the stack
 // arguments in order.
 struct X64ArgPlan {
-    pub regs: [Int]
-    pub floats: [Bool]
-    pub stack: [Int]
+    regs: [Int]
+    floats: [Bool]
+    stack: [Int]
 }
 
 fn x64_arg_plan(layouts: [LIRLayout]) -> X64ArgPlan Never! {
@@ -342,7 +342,7 @@ fn x64_use_counts(function: LIRFunction) -> [Int] Never! {
 }
 
 // Compile one linted function. `program` supplies signatures.
-pub fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64CompileResult Never! {
+fn x64_compile_function(program: LIRModule, function: LIRFunction) -> X64CompileResult Never! {
     gaps :: x64_selection_gaps(program, function)
     if gaps.len() > 0 -> return X64CompileResult{function: None, errors: gaps}
     allocation :: x64_allocate(function)
@@ -676,7 +676,7 @@ fn x64_select_terminator(emitter: &X64Emitter, function: LIRFunction, allocation
 }
 
 // Lint, then compile every function. Lint issues stop compilation.
-pub fn x64_compile_module(program: LIRModule) -> X64ModuleResult Never! {
+fn x64_compile_module(program: LIRModule) -> X64ModuleResult Never! {
     errors := [String]{}
     loop issue in lir_lint_module(program) -> &errors.push("LIR lint: {issue.function} b{issue.block}: {issue.message}")
     if errors.len() > 0 -> return X64ModuleResult{functions: [X64CompiledFunction]{}, errors: errors}

@@ -8,8 +8,8 @@
 
 // Every Services failure is final diagnostic text (Rust `Result<_, String>`).
 #Error
-pub struct ServicesError {
-    pub message: String
+struct ServicesError {
+    message: String
 
     fn new(message: String) -> ServicesError Never! {
         ServicesError{message}
@@ -21,10 +21,10 @@ impl IOError -> ServicesError { return ServicesError{message: "{self}"} }
 // Typed metadata exposed by the shared preset registry. A source-only
 // owner-gated row stays discovery metadata until its runtime projection is
 // ratified; it is never treated as a runnable service.
-pub struct ServicePreset {
-    pub name: String
-    pub package: String
-    pub default_port: Int
+struct ServicePreset {
+    name: String
+    package: String
+    default_port: Int
 }
 
 // One documented dev service. Declaration order is the catalog order.
@@ -400,19 +400,19 @@ fn services_canonical_service_name(name: String) -> String Never! {
 
 // The catalog package ref for `name`, folded into the project's realized
 // packages so a bare `redis: { enable: true }` has `redis-server` on PATH.
-pub fn services_catalog_pkg_ref(name: String) -> String? Never! {
+fn services_catalog_pkg_ref(name: String) -> String? Never! {
     kind :: services_catalog(name) ?? return None
     Val(kind.pkg_ref())
 }
 
 // The executable a catalog package contributes to an environment image.
-pub fn services_catalog_executable(name: String) -> String? Never! {
+fn services_catalog_executable(name: String) -> String? Never! {
     kind :: services_catalog(name) ?? return None
     kind.executable_name()
 }
 
 // Built-in presets for the typed contribution path, from the same catalog.
-pub fn services_catalog_presets() -> [ServicePreset] Never! {
+fn services_catalog_presets() -> [ServicePreset] Never! {
     presets := [ServicePreset]{}
     kinds :: services_catalog_kinds()
     loop kind in kinds -> &presets.push(ServicePreset{name: kind.canonical_name(), package: kind.pkg_ref(), default_port: kind.port()})
@@ -422,7 +422,7 @@ pub fn services_catalog_presets() -> [ServicePreset] Never! {
 // The executable vector for a service projected into an environment image.
 // Image state lives below /var/lib/jet/services, so a generated image
 // supervisor never keeps a build-machine path.
-pub fn services_image_run_command(plan: DevServicePlan) -> [String] ServicesError! {
+fn services_image_run_command(plan: DevServicePlan) -> [String] ServicesError! {
     if !plan.enable -> return Err(ServicesError.new("service {plan.name} is disabled"))
     if plan.run == .Val(run) {
         if run.len() == 0 || services_any_contains_nul(run) {
