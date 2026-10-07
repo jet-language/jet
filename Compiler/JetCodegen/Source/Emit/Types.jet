@@ -1176,6 +1176,9 @@ fn jet_rust_emit_derive_capability_gate(ctx: &JetRustEmitContext, ty: MIRType, t
     if jet_rust_emit_selected_user_capability_impl(&ctx, ty, trait_name) -> return JET_RUST_EMIT_DERIVE_CAPABLE
     row_index :: jet_rust_emit_structural_type_row(ctx, ty)
     if row_index == None {
+        if ty.kind == .Apply(name, _) {
+            if name.name == "BrowserTestServer" -> return JET_RUST_EMIT_DERIVE_INCAPABLE
+        }
         // MIRRust auto_derive_type_ready: a runtime handle implements
         // neither Printable nor Debug, so a record holding one does
         // not print structurally.

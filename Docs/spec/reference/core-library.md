@@ -1048,7 +1048,7 @@ only redacted audit facts.
 | API | Result | Description |
 | --- | --- | --- |
 | `config()` / `config_from_env()` | `BrowserTestConfig !BrowserError` | Load checked browser-test configuration. |
-| `make_profile(name)` / `timeout(ms)` | `BrowserProfile` / `BrowserTimeout !BrowserError` | Construct an isolated profile or a checked timeout. |
+| `make_profile(name)` / `profile(name)` / `timeout(ms)` | `BrowserProfile` / `BrowserProfile !BrowserError` / `BrowserTimeout !BrowserError` | Construct an isolated profile, check a pinned BiDi profile (`bidi-2024.11` or `bidi-2025.5`), or check a timeout in `1..=600000` milliseconds. |
 | `locked(engine)` | `BrowserLocked !BrowserError` | Read and verify the provider's locked browser record. |
 | `connect()` / `connect_browser_profile(profile, timeout)` | `Browser !BrowserError` | Connect through the default or named profile. |
 | `browser.context()` | `BrowserContext !BrowserError` | Open an isolated browsing context. |
