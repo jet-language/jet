@@ -1,0 +1,41 @@
+// Every fixed-width overflow mode the MIR bridge carries, run in range so the
+// program prints instead of stopping: default trapping operators (expression
+// and compound forms), the per-operation wrapping/saturating/checked gates, and
+// the lexical `#Arithmetic` policy. Exact `Int` arithmetic never overflows.
+fn run() {
+    a :: I32{2000000000}
+    b :: I32{100000000}
+    print(a + b / I32{10})
+    print(a - b)
+    print(b * I32{20})
+    print(a / b)
+    print(I32{3} ^ I32{19})
+    print(I32{1} << 30)
+    print(a >> 4)
+    total := U8{200}
+    total += U8{55}
+    total -= U8{5}
+    total *= U8{1}
+    total /= U8{2}
+    print(total)
+    power := U16{2}
+    power ^= U16{15}
+    print(power)
+    shifted := U32{1}
+    shifted <<= 31
+    shifted >>= 3
+    print(shifted)
+    hi :: U8{200}
+    lo :: U8{100}
+    print(wrapping(hi + lo))
+    print(saturating(hi + lo))
+    print(checked(hi + lo) ?? U8{0})
+    print(checked(hi * lo) ?? U8{0})
+    #Arithmetic(.Wrapping) {
+        print(hi * lo)
+    }
+    #Arithmetic(.Saturating) {
+        print(hi * lo)
+    }
+    print(9000000000 * 9000000000)
+}

@@ -44,14 +44,14 @@ use jet_foundation.[
 fn sema_expression_lambda_binding_frame(name: String, use_span: Span, scopes: &SemaScopeTable) -> Int Never! {
     selected_frame := -1
     selected_start := -1
-    index := 0
-    loop index < scopes.bindings.len() {
-        binding :: scopes.bindings[index]
-        if (binding.symbol.kind == SymbolKind.Local || binding.symbol.kind == SymbolKind.Parameter) && binding.symbol.name == name && binding.symbol.span.start <= use_span.start && binding.symbol.span.start >= selected_start {
+    // Only bindings named `name` can match; visit them in table order.
+    slot :: scopes.name_slots.get(name) ?? return selected_frame
+    loop position in 0..<scopes.name_positions[slot].len() {
+        binding :: scopes.bindings[scopes.name_positions[slot][position]]
+        if (binding.symbol.kind == SymbolKind.Local || binding.symbol.kind == SymbolKind.Parameter) && binding.symbol.span.start <= use_span.start && binding.symbol.span.start >= selected_start {
             selected_frame = binding.frame
             selected_start = binding.symbol.span.start
         }
-        index += 1
     }
     selected_frame
 }
@@ -1212,7 +1212,7 @@ fn sema_expression_lambda_collect_tir_statements(statements: [TStmt], frame: Int
             .If(condition, then_body, else_body, _, _) -> {
                 sema_expression_lambda_collect_tir_condition(condition, frame, &scopes, &keys)
                 sema_expression_lambda_collect_tir_statements(then_body, frame, &scopes, &keys)
-                if else_body != None -> sema_expression_lambda_collect_tir_statements(else_body, frame, &scopes, &keys)
+                if else_body == .Val(else_statements) -> sema_expression_lambda_collect_tir_statements(else_statements, frame, &scopes, &keys)
             }
             .Loop(_, body, _) -> sema_expression_lambda_collect_tir_statements(body, frame, &scopes, &keys)
             .While(_, condition, body, _) -> {
@@ -1234,7 +1234,7 @@ fn sema_expression_lambda_collect_tir_statements(statements: [TStmt], frame: Int
             .EnumMatch(scrutinee, _, arms, else_body, _, _) -> {
                 sema_expression_lambda_collect_tir_expr(scrutinee, frame, &scopes, &keys)
                 loop arm in arms -> sema_expression_lambda_collect_tir_statements(arm.body, frame, &scopes, &keys)
-                if else_body != None -> sema_expression_lambda_collect_tir_statements(else_body, frame, &scopes, &keys)
+                if else_body == .Val(else_statements) -> sema_expression_lambda_collect_tir_statements(else_statements, frame, &scopes, &keys)
             }
             .RangeSwitch(subject, arms, else_body, _) -> {
                 sema_expression_lambda_collect_tir_expr(subject, frame, &scopes, &keys)

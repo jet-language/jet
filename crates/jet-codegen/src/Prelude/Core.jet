@@ -85,7 +85,7 @@ source_module core.encoding.binary path Core/encoding/binary.jet alias core_core
 module core.encoding.cbor exports { CBORError, CBORErrorKind, CBOROptions, CBORReader, CBORWriter, decode, parse, reader, to_bytes, to_bytes_canonical, writer } types { CBORReader:plain, CBORWriter:plain, CBOROptions:plain, CBORError:plain, CBORErrorKind:plain(Syntax|Truncated|Unsupported|Limit|TypeMismatch|TrailingData|NonCanonical) } depends_on [core.encoding, core.math]
 source_module core.encoding.cbor path Core/encoding/cbor.jet alias core_core_encoding_cbor owns { reader, writer }
 module core.encoding.csv exports { CSVReader, CSVRow, CSVWriter, decode, parse, query, reader, rows, to_string, writer, dict_rows, dict_get, dict_get_or, write_dict, fieldnames, DictRow } types { CSVReader:plain, CSVWriter:plain, CSVRow:plain, DictRow:plain } depends_on [core.encoding]
-source_module core.encoding.csv path Core/encoding/csv.jet alias core_core_encoding_csv owns { dict_get, dict_get_or, dict_rows, fieldnames, parse, reader, rows, write_dict, writer }
+source_module core.encoding.csv path Core/encoding/csv.jet alias core_core_encoding_csv owns { dict_get, dict_get_or, dict_rows, fieldnames, parse, rows, write_dict }
 module core.encoding.hex exports { HexError, decode, encode, encode_prefixed, encode_upper, is_hex, hexlify, unhexlify, b2a_hex, a2b_hex, crc_hqx, crc32, b2a_base64, a2b_base64, b2a_qp, a2b_qp, b2a_uu, a2b_uu, encode_sep, dump } types { HexError:plain } depends_on [core.encoding]
 source_module core.encoding.hex path Core/encoding/hex.jet alias core_core_encoding_hex owns { a2b_base64, a2b_hex, a2b_qp, a2b_uu, b2a_base64, b2a_hex, b2a_qp, b2a_uu, crc32, crc_hqx, decode, dump, encode, encode_prefixed, encode_sep, encode_upper, hexlify, is_hex, unhexlify }
 module core.encoding.ini exports { Pair, Section, Ini, empty, parse, to_string, sections, has_section, has_option, get, get_or, get_int, get_bool, get_float, items, options, set, remove_option, remove_section, defaults, INIError } types { Pair:plain, Section:plain, Ini:plain, INIError:plain } depends_on [core.encoding]
@@ -1041,8 +1041,8 @@ dispatcher_row plain core.net.url data | CoreCallRecord::new("core.net.url", "da
 dispatcher_row plain core.net.url query | CoreCallRecord::new("core.net.url", "query", "jet_url_query", true, &[true])
 dispatcher_row plain core.net.url percent_encode | CoreCallRecord::new( "core.net.url", "percent_encode", "jet_url_percent_encode_component", true, &[true], )
 dispatcher_row plain core.net.url percent_decode | CoreCallRecord::new( "core.net.url", "percent_decode", "jet_url_percent_decode_component", true, &[true], )
-dispatcher_row plain core.net.url geturl | CoreCallRecord::new("core.net.url", "geturl", "jet_url_to_string", true, &[true],) .with_jit_symbol("jet_jit_url_to_string")
-dispatcher_row plain core.net.url unparse | CoreCallRecord::new("core.net.url", "unparse", "jet_url_to_string", true, &[true],) .with_jit_symbol("jet_jit_url_to_string")
+dispatcher_row plain core.net.url geturl | CoreCallRecord::new("core.net.url", "geturl", "jet_url_to_string", true, &[true],)
+dispatcher_row plain core.net.url unparse | CoreCallRecord::new("core.net.url", "unparse", "jet_url_to_string", true, &[true],)
 dispatcher_row plain core.net.url urljoin | CoreCallRecord::new("core.net.url", "urljoin", "jet_url_join", true, &[true, true],) .with_jit_symbol("jet_jit_url_join_text")
 dispatcher_row plain core.net.url parse_qsl | CoreCallRecord::new("core.net.url", "parse_qsl", "jet_url_parse_qsl", true, &[true],) .with_jit_symbol("jet_jit_url_parse_qsl")
 dispatcher_row plain core.net.url parse_qs | CoreCallRecord::new("core.net.url", "parse_qs", "jet_url_parse_qsl", true, &[true],) .with_jit_symbol("jet_jit_url_parse_qsl")
@@ -1054,10 +1054,10 @@ dispatcher_row plain core.net.url quote_plus | CoreCallRecord::new("core.net.url
 dispatcher_row plain core.net.url unquote | CoreCallRecord::new("core.net.url", "unquote", "jet_url_unquote", true, &[true],) .with_jit_symbol("jet_jit_url_unquote")
 dispatcher_row plain core.net.url unquote_to_bytes | CoreCallRecord::new("core.net.url", "unquote_to_bytes", "jet_url_unquote_to_bytes", true, &[true],) .with_jit_symbol("jet_jit_url_unquote_to_bytes")
 dispatcher_row plain core.net.url unquote_plus | CoreCallRecord::new("core.net.url", "unquote_plus", "jet_url_unquote_plus", true, &[true],) .with_jit_symbol("jet_jit_url_unquote_plus")
-dispatcher_row plain core.net.url urlparse | CoreCallRecord::new("core.net.url", "urlparse", "jet_url_parse", true, &[true],) .with_jit_symbol("jet_jit_url_parse")
-dispatcher_row plain core.net.url urlsplit | CoreCallRecord::new("core.net.url", "urlsplit", "jet_url_parse", true, &[true],) .with_jit_symbol("jet_jit_url_parse")
-dispatcher_row plain core.net.url urlunparse | CoreCallRecord::new("core.net.url", "urlunparse", "jet_url_to_string", true, &[true],) .with_jit_symbol("jet_jit_url_to_string")
-dispatcher_row plain core.net.url urlunsplit | CoreCallRecord::new("core.net.url", "urlunsplit", "jet_url_to_string", true, &[true],) .with_jit_symbol("jet_jit_url_to_string")
+dispatcher_row plain core.net.url urlparse | CoreCallRecord::new("core.net.url", "urlparse", "jet_url_parse", true, &[true],)
+dispatcher_row plain core.net.url urlsplit | CoreCallRecord::new("core.net.url", "urlsplit", "jet_url_parse", true, &[true],)
+dispatcher_row plain core.net.url urlunparse | CoreCallRecord::new("core.net.url", "urlunparse", "jet_url_to_string", true, &[true],)
+dispatcher_row plain core.net.url urlunsplit | CoreCallRecord::new("core.net.url", "urlunsplit", "jet_url_to_string", true, &[true],)
 dispatcher_row plain core.net.url urldefrag | CoreCallRecord::new("core.net.url", "urldefrag", "jet_url_urldefrag", true, &[true],) .with_jit_symbol("jet_jit_url_urldefrag")
 dispatcher_row plain core.net.mime parse | CoreCallRecord::new("core.net.mime", "parse", "jet_mime_parse", true, &[true]) .with_pure_route(CoreCallPureRoute::Mime)
 dispatcher_row plain core.net.mime from_extension | CoreCallRecord::new( "core.net.mime", "from_extension", "jet_mime_from_extension", true, &[true], ) .with_pure_route(CoreCallPureRoute::Mime)

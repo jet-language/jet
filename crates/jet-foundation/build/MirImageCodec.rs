@@ -121,7 +121,7 @@ pub fn generate(manifest_dir: &Path, out_dir: &Path) {
     assign_public_paths(&mut schema);
     let reachable = reachable_schema(&schema, "crate::MIR::MirProgram")
         .unwrap_or_else(|error| panic!("native MIR image schema is incomplete: {error}"));
-    let output = emit_codec(&schema, &reachable)
+    let output = emit_codec(&schema, &reachable, INTERNED_DEFINITIONS)
         .unwrap_or_else(|error| panic!("cannot generate native MIR image codec: {error}"));
     fs::write(out_dir.join("mir_program_image_codec.rs"), output)
         .expect("write generated native MIR image codec");
@@ -1036,15 +1036,36 @@ fn assign_public_paths(schema: &mut Schema) {
     }
 }
 
-fn emit_codec(schema: &Schema, reachable: &BTreeSet<String>) -> Result<String, String> {
+/// Definitions the image stores once in its value table: every occurrence in the
+/// payload is a varint index into that table. A definition belongs here when
+/// its values are large or repeat across the program. In the stage-zero
+/// compiler image, 7,431 distinct checked types stand behind 307 MB of type
+/// trees; spans, ownership facts and name references repeat per instruction;
+/// value, block and place ids are 64-bit stable hashes used several times each.
+const INTERNED_DEFINITIONS: &[&str] = &[
+    "crate::MIR::MirType",
+    "crate::Diagnostics::Span",
+    "crate::MIR::MirOwnership",
+    "crate::Names::NameReference",
+    "crate::MIR::MirValueId",
+    "crate::MIR::MirBlockId",
+    "crate::MIR::MirPlaceId",
+];
+
+fn emit_codec(schema: &Schema, reachable: &BTreeSet<String>, interned: &[&str]) -> Result<String, String> {
     let mut out = String::new();
-    emit_runtime_codec_primitives(&mut out);
+    for key in interned {
+        if !reachable.contains(*key) {
+            return Err(format!("interned native MIR definition `{key}` is outside the codec closure"));
+        }
+    }
+    emit_runtime_codec_primitives(&mut out, schema, interned)?;
     let definitions = reachable
         .iter()
         .map(|key| schema.definitions.get(key).expect("reachable definition").clone())
         .collect::<Vec<_>>();
     for definition in &definitions {
-        emit_definition_codec(&mut out, schema, reachable, definition)?;
+        emit_definition_codec(&mut out, schema, reachable, definition, interned)?;
     }
     let root = schema
         .definitions
@@ -1054,33 +1075,133 @@ fn emit_codec(schema: &Schema, reachable: &BTreeSet<String>) -> Result<String, S
     let decode_root = function_name("decode", &root.key);
     writeln!(
         out,
-        "pub fn mir_program_image_bytes(value: &MirProgram) -> Result<Vec<u8>, String> {{\n    value.validate().map_err(|error| format!(\"invalid MIR image source: {{error}}\"))?;\n    let mut writer = MirProgramImageWriter::new();\n    {encode_root}(value, &mut writer)?;\n    Ok(writer.finish())\n}}\npub fn mir_program_from_image_bytes(bytes: &[u8]) -> Result<MirProgram, String> {{\n    let mut reader = MirProgramImageReader::new(bytes);\n    let value = {decode_root}(&mut reader)?;\n    reader.finish()?;\n    value.validate().map_err(|error| format!(\"invalid restored MIR image: {{error}}\"))?;\n    Ok(value)\n}}\n"
+        "pub fn mir_program_image_bytes(value: &MirProgram) -> Result<Vec<u8>, String> {{\n    value.validate().map_err(|error| format!(\"invalid MIR image source: {{error}}\"))?;\n    let mut interner = MirProgramImageInterner::default();\n    let mut writer = MirProgramImageWriter {{ bytes: Vec::new(), interner: &mut interner }};\n    {encode_root}(value, &mut writer)?;\n    let body = writer.finish();\n    mir_image_assemble(interner, body)\n}}\npub fn mir_program_from_image_bytes(bytes: &[u8]) -> Result<MirProgram, String> {{\n    let (tables, cursor) = mir_image_read_tables(bytes)?;\n    let mut reader = MirProgramImageReader {{ bytes, cursor, tables: &tables }};\n    let value = {decode_root}(&mut reader)?;\n    reader.finish()?;\n    value.validate().map_err(|error| format!(\"invalid restored MIR image: {{error}}\"))?;\n    Ok(value)\n}}\n"
     )
     .map_err(|error| error.to_string())?;
     Ok(out)
 }
 
-fn emit_runtime_codec_primitives(out: &mut String) {
+/// The image wire format: unsigned integers, enum tags, counts and lengths are
+/// canonical LEB128 varints; signed integers are zigzag varints; floats keep
+/// their fixed little-endian bits. The payload opens with the string table and
+/// the value table of `INTERNED_DEFINITIONS`, in first-encounter order; strings
+/// and interned values in the body are varint indices into those tables. Every
+/// collection is encoded in a deterministic order (hash containers by sorted
+/// key), so a restored program re-encodes to the identical bytes.
+fn emit_runtime_codec_primitives(out: &mut String, schema: &Schema, interned: &[&str]) -> Result<(), String> {
+    let mut table_fields = String::new();
+    for key in interned {
+        let definition = schema
+            .definitions
+            .get(*key)
+            .ok_or_else(|| format!("missing interned native MIR definition `{key}`"))?;
+        writeln!(table_fields, "    {}: Vec<{}>,", function_name("interned", key), definition.path)
+            .map_err(|error| error.to_string())?;
+    }
+    let mut decode_entries = String::new();
+    for (kind, key) in interned.iter().enumerate() {
+        writeln!(
+            decode_entries,
+            "            {kind} => {{ let value = {}(&mut reader)?; cursor = reader.cursor; tables.{}.push(value); }}",
+            function_name("decode_entry", key),
+            function_name("interned", key),
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    writeln!(
+        out,
+        "#[derive(Default)]\nstruct MirProgramImageTables {{\n    strings: Vec<String>,\n{table_fields}}}\n#[derive(Default)]\nstruct MirProgramImageInterner {{\n    strings: std::collections::HashMap<String, u64>,\n    string_table: Vec<u8>,\n    entries: std::collections::HashMap<(u32, Vec<u8>), u64>,\n    kind_counts: [u64; {}],\n    entry_table: Vec<u8>,\n    entry_count: u64,\n}}",
+        interned.len()
+    )
+    .map_err(|error| error.to_string())?;
+    // Table entries reference only earlier entries (nested values are interned
+    // before the value holding them), so one forward pass restores the tables.
+    writeln!(
+        out,
+        "fn mir_image_read_tables(bytes: &[u8]) -> Result<(MirProgramImageTables, usize), String> {{\n    let mut tables = MirProgramImageTables::default();\n    let mut cursor = {{\n        let mut reader = MirProgramImageReader::new(bytes, &tables);\n        let string_count = reader.read_count()?;\n        let mut strings = Vec::new();\n        strings.try_reserve_exact(string_count).map_err(|_| \"native MIR string table is too large\".to_string())?;\n        for _ in 0..string_count {{\n            let length = reader.read_len()?;\n            let text = std::str::from_utf8(reader.read_raw(length)?).map_err(|_| \"native MIR image string is not UTF-8\".to_string())?;\n            strings.push(text.to_string());\n        }}\n        let cursor = reader.cursor;\n        tables.strings = strings;\n        cursor\n    }};\n    let entry_count = {{\n        let mut reader = MirProgramImageReader {{ bytes, cursor, tables: &tables }};\n        let count = reader.read_count()?;\n        cursor = reader.cursor;\n        count\n    }};\n    for _ in 0..entry_count {{\n        let mut reader = MirProgramImageReader {{ bytes, cursor, tables: &tables }};\n        match reader.read_varint()? {{\n{decode_entries}            _ => return Err(\"unknown native MIR image table entry kind\".to_string()),\n        }}\n    }}\n    Ok((tables, cursor))\n}}"
+    )
+    .map_err(|error| error.to_string())?;
     out.push_str(
         r#"
-struct MirProgramImageWriter { bytes: Vec<u8> }
-impl MirProgramImageWriter {
-    fn new() -> Self { Self { bytes: Vec::new() } }
+fn mir_image_push_varint(bytes: &mut Vec<u8>, mut value: u64) {
+    while value >= 0x80 {
+        bytes.push((value as u8) | 0x80);
+        value >>= 7;
+    }
+    bytes.push(value as u8);
+}
+fn mir_image_assemble(interner: MirProgramImageInterner, body: Vec<u8>) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(interner.string_table.len() + interner.entry_table.len() + body.len() + 20).map_err(|_| "native MIR image is too large to allocate".to_string())?;
+    mir_image_push_varint(&mut bytes, u64::try_from(interner.strings.len()).map_err(|_| "native MIR string table exceeds u64".to_string())?);
+    bytes.extend_from_slice(&interner.string_table);
+    mir_image_push_varint(&mut bytes, interner.entry_count);
+    bytes.extend_from_slice(&interner.entry_table);
+    bytes.extend_from_slice(&body);
+    Ok(bytes)
+}
+#[allow(dead_code)]
+impl MirProgramImageInterner {
+    fn intern_string(&mut self, value: &str) -> Result<u64, String> {
+        if let Some(index) = self.strings.get(value) { return Ok(*index); }
+        let index = u64::try_from(self.strings.len()).map_err(|_| "native MIR string table exceeds u64".to_string())?;
+        mir_image_push_varint(&mut self.string_table, u64::try_from(value.len()).map_err(|_| "MIR image string exceeds u64".to_string())?);
+        self.string_table.extend_from_slice(value.as_bytes());
+        self.strings.insert(value.to_string(), index);
+        Ok(index)
+    }
+    fn intern_entry(&mut self, kind: u32, entry: Vec<u8>) -> u64 {
+        let next = self.kind_counts[kind as usize];
+        match self.entries.entry((kind, entry)) {
+            std::collections::hash_map::Entry::Occupied(found) => *found.get(),
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                mir_image_push_varint(&mut self.entry_table, u64::from(kind));
+                self.entry_table.extend_from_slice(&slot.key().1);
+                self.entry_count += 1;
+                self.kind_counts[kind as usize] += 1;
+                slot.insert(next);
+                next
+            }
+        }
+    }
+}
+struct MirProgramImageWriter<'t> { bytes: Vec<u8>, interner: &'t mut MirProgramImageInterner }
+#[allow(dead_code)]
+impl<'t> MirProgramImageWriter<'t> {
+    fn child(&mut self) -> MirProgramImageWriter<'_> { MirProgramImageWriter { bytes: Vec::new(), interner: &mut *self.interner } }
     fn write_u8(&mut self, value: u8) { self.bytes.push(value); }
-    fn write_u16(&mut self, value: u16) { self.bytes.extend_from_slice(&value.to_le_bytes()); }
-    fn write_u32(&mut self, value: u32) { self.bytes.extend_from_slice(&value.to_le_bytes()); }
-    fn write_u64(&mut self, value: u64) { self.bytes.extend_from_slice(&value.to_le_bytes()); }
+    fn write_varint(&mut self, value: u64) { mir_image_push_varint(&mut self.bytes, value); }
+    fn write_u16(&mut self, value: u16) { self.write_varint(u64::from(value)); }
+    fn write_u32(&mut self, value: u32) { self.write_varint(u64::from(value)); }
+    fn write_u64(&mut self, value: u64) { self.write_varint(value); }
+    fn write_signed(&mut self, value: i64) { self.write_varint(((value << 1) ^ (value >> 63)) as u64); }
+    fn write_fixed_u32(&mut self, value: u32) { self.bytes.extend_from_slice(&value.to_le_bytes()); }
+    fn write_fixed_u64(&mut self, value: u64) { self.bytes.extend_from_slice(&value.to_le_bytes()); }
+    fn write_count(&mut self, value: usize) -> Result<(), String> {
+        self.write_varint(u64::try_from(value).map_err(|_| "native MIR collection exceeds u64".to_string())?);
+        Ok(())
+    }
     fn write_bytes(&mut self, value: &[u8]) -> Result<(), String> {
-        self.write_u64(u64::try_from(value.len()).map_err(|_| "MIR image value exceeds u64".to_string())?);
+        self.write_count(value.len())?;
         self.bytes.extend_from_slice(value);
         Ok(())
     }
-    fn write_string(&mut self, value: &str) -> Result<(), String> { self.write_bytes(value.as_bytes()) }
+    fn write_string(&mut self, value: &str) -> Result<(), String> {
+        let index = self.interner.intern_string(value)?;
+        self.write_varint(index);
+        Ok(())
+    }
+    fn write_entry(&mut self, kind: u32, entry: Vec<u8>) {
+        let index = self.interner.intern_entry(kind, entry);
+        self.write_varint(index);
+    }
     fn finish(self) -> Vec<u8> { self.bytes }
 }
-struct MirProgramImageReader<'a> { bytes: &'a [u8], cursor: usize }
+struct MirProgramImageReader<'a> { bytes: &'a [u8], cursor: usize, tables: &'a MirProgramImageTables }
+#[allow(dead_code)]
 impl<'a> MirProgramImageReader<'a> {
-    fn new(bytes: &'a [u8]) -> Self { Self { bytes, cursor: 0 } }
+    fn new(bytes: &'a [u8], tables: &'a MirProgramImageTables) -> Self { Self { bytes, cursor: 0, tables } }
+    fn child(&self, bytes: &'a [u8]) -> Self { Self { bytes, cursor: 0, tables: self.tables } }
     fn read_raw(&mut self, length: usize) -> Result<&'a [u8], String> {
         let end = self.cursor.checked_add(length).ok_or_else(|| "MIR image cursor overflow".to_string())?;
         let value = self.bytes.get(self.cursor..end).ok_or_else(|| "truncated native MIR image".to_string())?;
@@ -1088,17 +1209,40 @@ impl<'a> MirProgramImageReader<'a> {
         Ok(value)
     }
     fn read_u8(&mut self) -> Result<u8, String> { Ok(self.read_raw(1)?[0]) }
-    fn read_u16(&mut self) -> Result<u16, String> { Ok(u16::from_le_bytes(self.read_raw(2)?.try_into().map_err(|_| "invalid MIR image u16".to_string())?)) }
-    fn read_u32(&mut self) -> Result<u32, String> { Ok(u32::from_le_bytes(self.read_raw(4)?.try_into().map_err(|_| "invalid MIR image u32".to_string())?)) }
-    fn read_u64(&mut self) -> Result<u64, String> { Ok(u64::from_le_bytes(self.read_raw(8)?.try_into().map_err(|_| "invalid MIR image u64".to_string())?)) }
+    fn read_varint(&mut self) -> Result<u64, String> {
+        let mut value = 0u64;
+        let mut shift = 0u32;
+        loop {
+            let byte = self.read_u8()?;
+            let bits = u64::from(byte & 0x7f);
+            if shift == 63 && bits > 1 { return Err("native MIR image varint exceeds u64".to_string()); }
+            value |= bits << shift;
+            if byte & 0x80 == 0 {
+                if byte == 0 && shift != 0 { return Err("native MIR image varint is not canonical".to_string()); }
+                return Ok(value);
+            }
+            shift += 7;
+            if shift > 63 { return Err("native MIR image varint exceeds u64".to_string()); }
+        }
+    }
+    fn read_u16(&mut self) -> Result<u16, String> { u16::try_from(self.read_varint()?).map_err(|_| "native MIR image u16 out of range".to_string()) }
+    fn read_u32(&mut self) -> Result<u32, String> { u32::try_from(self.read_varint()?).map_err(|_| "native MIR image u32 out of range".to_string()) }
+    fn read_u64(&mut self) -> Result<u64, String> { self.read_varint() }
+    fn read_signed(&mut self) -> Result<i64, String> { let value = self.read_varint()?; Ok(((value >> 1) as i64) ^ -((value & 1) as i64)) }
+    fn read_fixed_u32(&mut self) -> Result<u32, String> { Ok(u32::from_le_bytes(self.read_raw(4)?.try_into().map_err(|_| "invalid MIR image u32".to_string())?)) }
+    fn read_fixed_u64(&mut self) -> Result<u64, String> { Ok(u64::from_le_bytes(self.read_raw(8)?.try_into().map_err(|_| "invalid MIR image u64".to_string())?)) }
     fn read_count(&mut self) -> Result<usize, String> {
-        let count = usize::try_from(self.read_u64()?).map_err(|_| "native MIR image count exceeds host range".to_string())?;
+        let count = usize::try_from(self.read_varint()?).map_err(|_| "native MIR image count exceeds host range".to_string())?;
         if count > self.bytes.len().saturating_sub(self.cursor) { return Err("native MIR image collection count exceeds remaining bytes".to_string()); }
         Ok(count)
     }
     fn read_len(&mut self) -> Result<usize, String> { self.read_count() }
     fn read_bytes(&mut self) -> Result<&'a [u8], String> { let length = self.read_len()?; self.read_raw(length) }
-    fn read_string(&mut self) -> Result<String, String> { String::from_utf8(self.read_bytes()?.to_vec()).map_err(|_| "native MIR image string is not UTF-8".to_string()) }
+    fn read_index(&mut self) -> Result<usize, String> { usize::try_from(self.read_varint()?).map_err(|_| "native MIR image table index exceeds host range".to_string()) }
+    fn read_string(&mut self) -> Result<String, String> {
+        let index = self.read_index()?;
+        self.tables.strings.get(index).cloned().ok_or_else(|| "native MIR image references an unknown string".to_string())
+    }
     fn finish(self) -> Result<(), String> { if self.cursor == self.bytes.len() { Ok(()) } else { Err("native MIR image has trailing bytes".to_string()) } }
 }
 fn mir_image_static_str(value: String) -> Result<&'static str, String> {
@@ -1120,6 +1264,7 @@ fn mir_image_static_str(value: String) -> Result<&'static str, String> {
 }
 "#,
     );
+    Ok(())
 }
 
 fn emit_definition_codec(
@@ -1127,10 +1272,26 @@ fn emit_definition_codec(
     schema: &Schema,
     reachable: &BTreeSet<String>,
     definition: &Definition,
+    interned: &[&str],
 ) -> Result<(), String> {
-    let encoder = function_name("encode", &definition.key);
-    let decoder = function_name("decode", &definition.key);
+    // An interned definition's own codec writes its table entry; the public
+    // encode/decode pair writes and resolves the table index.
+    let interned = interned.iter().position(|key| *key == definition.key);
+    let (encoder, decoder) = match interned {
+        Some(_) => (function_name("encode_entry", &definition.key), function_name("decode_entry", &definition.key)),
+        None => (function_name("encode", &definition.key), function_name("decode", &definition.key)),
+    };
     let path = &definition.path;
+    if let Some(kind) = interned {
+        writeln!(
+            out,
+            "fn {}(value: &{path}, writer: &mut MirProgramImageWriter<'_>) -> Result<(), String> {{\n    let mut entry = writer.child();\n    {encoder}(value, &mut entry)?;\n    let entry = entry.finish();\n    writer.write_entry({kind}, entry);\n    Ok(())\n}}\nfn {}(reader: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{\n    let index = reader.read_index()?;\n    reader.tables.{}.get(index).cloned().ok_or_else(|| \"native MIR image references an unknown interned value\".to_string())\n}}\n",
+            function_name("encode", &definition.key),
+            function_name("decode", &definition.key),
+            function_name("interned", &definition.key),
+        )
+        .map_err(|error| error.to_string())?;
+    }
     match &definition.body {
         Body::Struct(fields) => {
             let mut encode = String::new();
@@ -1140,7 +1301,7 @@ fn emit_definition_codec(
                 encode.push_str(&expression);
                 decode.push(format!("{}: {},", field.name, decode_expression(&field.ty, "reader", schema, reachable, definition)?));
             }
-            writeln!(out, "fn {encoder}(value: &{path}, writer: &mut MirProgramImageWriter) -> Result<(), String> {{\n{encode}    Ok(())\n}}\nfn {decoder}(reader: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{\n    Ok({path} {{\n        {}\n    }})\n}}\n", decode.join("\n"))
+            writeln!(out, "fn {encoder}(value: &{path}, writer: &mut MirProgramImageWriter<'_>) -> Result<(), String> {{\n{encode}    Ok(())\n}}\nfn {decoder}(reader: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{\n    Ok({path} {{\n        {}\n    }})\n}}\n", decode.join("\n"))
                 .map_err(|error| error.to_string())?;
         }
         Body::Tuple(fields) => {
@@ -1166,12 +1327,12 @@ fn emit_definition_codec(
             let value = format!("{path}({})", decode.join(", "));
             writeln!(
                 out,
-                "fn {encoder}(value: &{path}, writer: &mut MirProgramImageWriter) -> Result<(), String> {{\n{encode}    Ok(())\n}}\nfn {decoder}(reader: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{\n    Ok({value})\n}}\n"
+                "fn {encoder}(value: &{path}, writer: &mut MirProgramImageWriter<'_>) -> Result<(), String> {{\n{encode}    Ok(())\n}}\nfn {decoder}(reader: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{\n    Ok({value})\n}}\n"
             )
             .map_err(|error| error.to_string())?;
         }
         Body::Unit => {
-            writeln!(out, "fn {encoder}(_: &{path}, _: &mut MirProgramImageWriter) -> Result<(), String> {{ Ok(()) }}\nfn {decoder}(_: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{ Ok({path}) }}\n")
+            writeln!(out, "fn {encoder}(_: &{path}, _: &mut MirProgramImageWriter<'_>) -> Result<(), String> {{ Ok(()) }}\nfn {decoder}(_: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{ Ok({path}) }}\n")
                 .map_err(|error| error.to_string())?;
         }
         Body::Alias(ty) => {
@@ -1179,7 +1340,7 @@ fn emit_definition_codec(
             let decode = decode_expression(ty, "reader", schema, reachable, definition)?;
             writeln!(
                 out,
-                "fn {encoder}(value: &{path}, writer: &mut MirProgramImageWriter) -> Result<(), String> {{\n{encode}    Ok(())\n}}\nfn {decoder}(reader: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{\n    Ok({decode})\n}}\n"
+                "fn {encoder}(value: &{path}, writer: &mut MirProgramImageWriter<'_>) -> Result<(), String> {{\n{encode}    Ok(())\n}}\nfn {decoder}(reader: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{\n    Ok({decode})\n}}\n"
             )
             .map_err(|error| error.to_string())?;
         }
@@ -1224,7 +1385,7 @@ fn emit_definition_codec(
                 };
                 decode_arms.push(format!("        {tag} => Ok({constructor}),"));
             }
-            writeln!(out, "fn {encoder}(value: &{path}, writer: &mut MirProgramImageWriter) -> Result<(), String> {{\n    match value {{\n{}\n    }}\n}}\nfn {decoder}(reader: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{\n    match reader.read_u32()? {{\n{}\n        _ => Err(\"unknown native MIR enum tag\".to_string()),\n    }}\n}}\n", encode_arms.join("\n"), decode_arms.join("\n"))
+            writeln!(out, "fn {encoder}(value: &{path}, writer: &mut MirProgramImageWriter<'_>) -> Result<(), String> {{\n    match value {{\n{}\n    }}\n}}\nfn {decoder}(reader: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{\n    match reader.read_u32()? {{\n{}\n        _ => Err(\"unknown native MIR enum tag\".to_string()),\n    }}\n}}\n", encode_arms.join("\n"), decode_arms.join("\n"))
                 .map_err(|error| error.to_string())?;
         }
     }
@@ -1249,14 +1410,26 @@ fn encode_expression(
             let body = encode_expression(inner, "__item", writer, schema, reachable, context)?;
             writeln!(out, "    {writer}.write_u64(u64::try_from(({expression}).len()).map_err(|_| \"native MIR collection exceeds u64\".to_string())?);\n    for __item in ({expression}).iter() {{\n{body}    }}\n").unwrap();
         }
-        TypeExpr::Set(inner, _) => {
+        TypeExpr::Set(inner, hash) => {
             let body = encode_expression(inner, "__item", "(&mut __item_writer)", schema, reachable, context)?;
-            writeln!(out, "    {{ let mut __items = Vec::with_capacity(({expression}).len()); for __item in ({expression}).iter() {{ let mut __item_writer = MirProgramImageWriter::new();\n{body}        __items.push(__item_writer.finish()); }} __items.sort(); if __items.windows(2).any(|pair| pair[0] == pair[1]) {{ return Err(\"duplicate native MIR set element encoding\".to_string()); }} {writer}.write_u64(u64::try_from(__items.len()).map_err(|_| \"native MIR set exceeds u64\".to_string())?); for __item in __items {{ {writer}.write_bytes(&__item)?; }} }}\n").unwrap();
+            // Hash containers are walked in sorted order: interning assigns table
+            // indices on first encounter, so the walk order must be canonical.
+            let items = if *hash {
+                format!("{{ let mut __sorted = ({expression}).iter().collect::<Vec<_>>(); __sorted.sort(); __sorted }}")
+            } else {
+                format!("({expression}).iter()")
+            };
+            writeln!(out, "    {{ let mut __items = Vec::with_capacity(({expression}).len()); for __item in {items} {{ let mut __item_writer = {writer}.child();\n{body}        __items.push(__item_writer.finish()); }} __items.sort(); if __items.windows(2).any(|pair| pair[0] == pair[1]) {{ return Err(\"duplicate native MIR set element encoding\".to_string()); }} {writer}.write_count(__items.len())?; for __item in __items {{ {writer}.write_bytes(&__item)?; }} }}\n").unwrap();
         }
-        TypeExpr::Map(key, value, _) => {
+        TypeExpr::Map(key, value, hash) => {
             let key_body = encode_expression(key, "__key", "(&mut __key_writer)", schema, reachable, context)?;
             let value_body = encode_expression(value, "__value", "(&mut __value_writer)", schema, reachable, context)?;
-            writeln!(out, "    {{ let mut __entries = Vec::with_capacity(({expression}).len()); for (__key, __value) in ({expression}).iter() {{ let mut __key_writer = MirProgramImageWriter::new();\n{key_body}        let mut __value_writer = MirProgramImageWriter::new();\n{value_body}        __entries.push((__key_writer.finish(), __value_writer.finish())); }} __entries.sort_by(|left, right| left.0.cmp(&right.0)); if __entries.windows(2).any(|pair| pair[0].0 == pair[1].0) {{ return Err(\"duplicate native MIR map key encoding\".to_string()); }} {writer}.write_u64(u64::try_from(__entries.len()).map_err(|_| \"native MIR map exceeds u64\".to_string())?); for (__key, __value) in __entries {{ {writer}.write_bytes(&__key)?; {writer}.write_bytes(&__value)?; }} }}\n").unwrap();
+            let entries = if *hash {
+                format!("{{ let mut __sorted = ({expression}).iter().collect::<Vec<_>>(); __sorted.sort_by(|left, right| left.0.cmp(right.0)); __sorted }}")
+            } else {
+                format!("({expression}).iter()")
+            };
+            writeln!(out, "    {{ let mut __entries = Vec::with_capacity(({expression}).len()); for (__key, __value) in {entries} {{ let __key_bytes = {{ let mut __key_writer = {writer}.child();\n{key_body}        __key_writer.finish() }}; let __value_bytes = {{ let mut __value_writer = {writer}.child();\n{value_body}        __value_writer.finish() }}; __entries.push((__key_bytes, __value_bytes)); }} __entries.sort_by(|left, right| left.0.cmp(&right.0)); if __entries.windows(2).any(|pair| pair[0].0 == pair[1].0) {{ return Err(\"duplicate native MIR map key encoding\".to_string()); }} {writer}.write_count(__entries.len())?; for (__key, __value) in __entries {{ {writer}.write_bytes(&__key)?; {writer}.write_bytes(&__value)?; }} }}\n").unwrap();
         }
         TypeExpr::Array(inner, _) => {
             let body = encode_expression(inner, "__item", writer, schema, reachable, context)?;
@@ -1295,12 +1468,10 @@ fn emit_named_encode(
         "u64" => writeln!(out, "    {writer}.write_u64(*({expression}));\n").unwrap(),
         "usize" => writeln!(out, "    {writer}.write_u64(u64::try_from(*({expression})).map_err(|_| \"native MIR usize exceeds u64\".to_string())?);\n").unwrap(),
         "i8" => writeln!(out, "    {writer}.write_u8(*({expression}) as u8);\n").unwrap(),
-        "i16" => writeln!(out, "    {writer}.write_u16(*({expression}) as u16);\n").unwrap(),
-        "i32" => writeln!(out, "    {writer}.write_u32(*({expression}) as u32);\n").unwrap(),
-        "i64" => writeln!(out, "    {writer}.write_u64(*({expression}) as u64);\n").unwrap(),
-        "isize" => writeln!(out, "    {writer}.write_u64((*({expression}) as i64) as u64);\n").unwrap(),
-        "f32" => writeln!(out, "    {writer}.write_u32(({expression}).to_bits());\n").unwrap(),
-        "f64" => writeln!(out, "    {writer}.write_u64(({expression}).to_bits());\n").unwrap(),
+        "i16" | "i32" | "i64" => writeln!(out, "    {writer}.write_signed(i64::from(*({expression})));\n").unwrap(),
+        "isize" => writeln!(out, "    {writer}.write_signed(*({expression}) as i64);\n").unwrap(),
+        "f32" => writeln!(out, "    {writer}.write_fixed_u32(({expression}).to_bits());\n").unwrap(),
+        "f64" => writeln!(out, "    {writer}.write_fixed_u64(({expression}).to_bits());\n").unwrap(),
         "char" => writeln!(out, "    {writer}.write_u32(*({expression}) as u32);\n").unwrap(),
         _ => {
             let key = resolve_type_name(schema, context, name)?;
@@ -1333,13 +1504,13 @@ fn decode_expression(
         TypeExpr::Set(inner, hash) => {
             let value = decode_expression(inner, "(&mut __item_reader)", schema, reachable, context)?;
             let container = if *hash { "std::collections::HashSet" } else { "std::collections::BTreeSet" };
-            format!("{{ let __count = {reader}.read_count()?; let mut __items = Vec::new(); __items.try_reserve_exact(__count).map_err(|_| \"native MIR set is too large\".to_string())?; let mut __seen = BTreeSet::new(); for _ in 0..__count {{ let __bytes = {reader}.read_bytes()?; if !__seen.insert(__bytes.to_vec()) {{ return Err(\"duplicate native MIR set element\".to_string()); }} let mut __item_reader = MirProgramImageReader::new(__bytes); let __item = {value}; __item_reader.finish()?; __items.push(__item); }} let __output = __items.into_iter().collect::<{container}<_>>(); if __output.len() != __count {{ return Err(\"duplicate native MIR set element\".to_string()); }} __output }}")
+            format!("{{ let __count = {reader}.read_count()?; let mut __items = Vec::new(); __items.try_reserve_exact(__count).map_err(|_| \"native MIR set is too large\".to_string())?; let mut __seen = BTreeSet::new(); for _ in 0..__count {{ let __bytes = {reader}.read_bytes()?; if !__seen.insert(__bytes.to_vec()) {{ return Err(\"duplicate native MIR set element\".to_string()); }} let mut __item_reader = {reader}.child(__bytes); let __item = {value}; __item_reader.finish()?; __items.push(__item); }} let __output = __items.into_iter().collect::<{container}<_>>(); if __output.len() != __count {{ return Err(\"duplicate native MIR set element\".to_string()); }} __output }}")
         }
         TypeExpr::Map(key, value, hash) => {
             let key_value = decode_expression(key, "(&mut __key_reader)", schema, reachable, context)?;
             let value_value = decode_expression(value, "(&mut __value_reader)", schema, reachable, context)?;
             let container = if *hash { "std::collections::HashMap" } else { "std::collections::BTreeMap" };
-            format!("{{ let __count = {reader}.read_count()?; let mut __items = Vec::new(); __items.try_reserve_exact(__count).map_err(|_| \"native MIR map is too large\".to_string())?; let mut __seen = BTreeSet::new(); for _ in 0..__count {{ let __key_bytes = {reader}.read_bytes()?; let mut __key_reader = MirProgramImageReader::new(__key_bytes); let __key = {key_value}; __key_reader.finish()?; if !__seen.insert(__key_bytes.to_vec()) {{ return Err(\"duplicate native MIR map key\".to_string()); }} let __value_bytes = {reader}.read_bytes()?; let mut __value_reader = MirProgramImageReader::new(__value_bytes); let __value = {value_value}; __value_reader.finish()?; __items.push((__key, __value)); }} let __output = __items.into_iter().collect::<{container}<_, _>>(); if __output.len() != __count {{ return Err(\"duplicate native MIR map key\".to_string()); }} __output }}")
+            format!("{{ let __count = {reader}.read_count()?; let mut __items = Vec::new(); __items.try_reserve_exact(__count).map_err(|_| \"native MIR map is too large\".to_string())?; let mut __seen = BTreeSet::new(); for _ in 0..__count {{ let __key_bytes = {reader}.read_bytes()?; let mut __key_reader = {reader}.child(__key_bytes); let __key = {key_value}; __key_reader.finish()?; if !__seen.insert(__key_bytes.to_vec()) {{ return Err(\"duplicate native MIR map key\".to_string()); }} let __value_bytes = {reader}.read_bytes()?; let mut __value_reader = {reader}.child(__value_bytes); let __value = {value_value}; __value_reader.finish()?; __items.push((__key, __value)); }} let __output = __items.into_iter().collect::<{container}<_, _>>(); if __output.len() != __count {{ return Err(\"duplicate native MIR map key\".to_string()); }} __output }}")
         }
         TypeExpr::Boxed(inner) => format!("Box::new({})", decode_expression(inner, reader, schema, reachable, context)?),
         TypeExpr::Arc(inner) => format!("std::sync::Arc::new({})", decode_expression(inner, reader, schema, reachable, context)?),
@@ -1375,12 +1546,12 @@ fn decode_named(
         "u64" => format!("{reader}.read_u64()?"),
         "usize" => format!("usize::try_from({reader}.read_u64()?).map_err(|_| \"native MIR usize exceeds host range\".to_string())?"),
         "i8" => format!("{reader}.read_u8()? as i8"),
-        "i16" => format!("{reader}.read_u16()? as i16"),
-        "i32" => format!("{reader}.read_u32()? as i32"),
-        "i64" => format!("{reader}.read_u64()? as i64"),
-        "isize" => format!("isize::try_from({reader}.read_u64()? as i64).map_err(|_| \"native MIR isize exceeds host range\".to_string())?"),
-        "f32" => format!("f32::from_bits({reader}.read_u32()?)"),
-        "f64" => format!("f64::from_bits({reader}.read_u64()?)"),
+        "i16" => format!("i16::try_from({reader}.read_signed()?).map_err(|_| \"native MIR i16 out of range\".to_string())?"),
+        "i32" => format!("i32::try_from({reader}.read_signed()?).map_err(|_| \"native MIR i32 out of range\".to_string())?"),
+        "i64" => format!("{reader}.read_signed()?"),
+        "isize" => format!("isize::try_from({reader}.read_signed()?).map_err(|_| \"native MIR isize exceeds host range\".to_string())?"),
+        "f32" => format!("f32::from_bits({reader}.read_fixed_u32()?)"),
+        "f64" => format!("f64::from_bits({reader}.read_fixed_u64()?)"),
         "char" => format!("char::from_u32({reader}.read_u32()?).ok_or_else(|| \"invalid native MIR character\".to_string())?"),
         _ => {
             let key = resolve_type_name(schema, context, name)?;
@@ -1615,7 +1786,7 @@ mod tests {
         assert!(reachable.contains("crate::MIR::KindSet"));
         assert!(reachable.contains("crate::Kinds::Kind"));
         assert!(reachable.contains("crate::Kinds::Code"));
-        let generated = emit_codec(&schema, &reachable).unwrap();
+        let generated = emit_codec(&schema, &reachable, &[]).unwrap();
         assert!(generated.contains(&format!(
             "fn {}(",
             function_name("encode", "crate::MIR::KindSet")
@@ -1694,52 +1865,77 @@ mod tests {
 
     #[test]
     fn generated_nested_containers_and_paths_round_trip() {
-        let spelling = "BTreeMap<std::path::PathBuf, BTreeSet<BTreeMap<Leaf, Leaf>>>";
+        let spelling = "(BTreeMap<std::path::PathBuf, BTreeSet<BTreeMap<Leaf, Leaf>>>, HashMap<String, Leaf>, Vec<(i32, f64, String)>)";
         let ty = parse_type(spelling).unwrap();
         let context = parse_definitions("pub struct Leaf(pub u64);", "crate", &BTreeMap::new()).unwrap().remove(0);
         let mut schema = Schema::default();
         schema.definitions.insert(context.key.clone(), context.clone());
         let reachable = BTreeSet::from([context.key.clone()]);
+        let interned = [context.key.as_str()];
         let mut leaf_codec = String::new();
-        emit_definition_codec(&mut leaf_codec, &schema, &reachable, &context).unwrap();
+        emit_definition_codec(&mut leaf_codec, &schema, &reachable, &context, &interned).unwrap();
         let encode = encode_expression(&ty, "value", "writer", &schema, &reachable, &context).unwrap();
         let decode = decode_expression(&ty, "reader", &schema, &reachable, &context).unwrap();
         let mut primitives = String::new();
-        emit_runtime_codec_primitives(&mut primitives);
+        emit_runtime_codec_primitives(&mut primitives, &schema, &interned).unwrap();
         let primitives = primitives.split("fn mir_image_static_str").next().unwrap();
         let source = format!(r#"
-use std::collections::{{BTreeMap, BTreeSet}};
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+use std::collections::{{BTreeMap, BTreeSet, HashMap}};
+type Value = {spelling};
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Leaf(pub u64);
 {leaf_codec}
 {primitives}
-fn encode(value: &{spelling}, writer: &mut MirProgramImageWriter) -> Result<(), String> {{
+fn encode(value: &Value, writer: &mut MirProgramImageWriter<'_>) -> Result<(), String> {{
 {encode}
     Ok(())
 }}
-fn decode(reader: &mut MirProgramImageReader<'_>) -> Result<{spelling}, String> {{
+fn decode(reader: &mut MirProgramImageReader<'_>) -> Result<Value, String> {{
     Ok({decode})
 }}
+fn image(value: &Value) -> Result<Vec<u8>, String> {{
+    let mut interner = MirProgramImageInterner::default();
+    let mut writer = MirProgramImageWriter {{ bytes: Vec::new(), interner: &mut interner }};
+    encode(value, &mut writer)?;
+    let body = writer.finish();
+    mir_image_assemble(interner, body)
+}}
+fn restore(bytes: &[u8]) -> Result<Value, String> {{
+    let (tables, cursor) = mir_image_read_tables(bytes)?;
+    let mut reader = MirProgramImageReader {{ bytes, cursor, tables: &tables }};
+    let value = decode(&mut reader)?;
+    reader.finish()?;
+    Ok(value)
+}}
 fn main() {{
-    let value = BTreeMap::from([(std::path::PathBuf::from("outer/λ"), BTreeSet::from([
+    let leaves = BTreeMap::from([(std::path::PathBuf::from("outer/λ"), BTreeSet::from([
         BTreeMap::from([(Leaf(1), Leaf(7)), (Leaf(2), Leaf(11))]),
-        BTreeMap::from([(Leaf(3), Leaf(13))]),
+        BTreeMap::from([(Leaf(3), Leaf(7))]),
     ]))]);
-    let mut writer = MirProgramImageWriter::new();
-    encode(&value, &mut writer).unwrap();
-    let bytes = writer.finish();
-    let mut reader = MirProgramImageReader::new(&bytes);
-    assert_eq!(decode(&mut reader).unwrap(), value);
-    reader.finish().unwrap();
-    let mut truncated = MirProgramImageReader::new(&bytes[..bytes.len() - 1]);
-    assert!(decode(&mut truncated).is_err());
+    let named = (0..64).map(|index| (format!("key{{index}}"), Leaf(index % 3))).collect::<HashMap<_, _>>();
+    let rows = vec![(-1, 0.5, "outer/λ".to_string()), (i32::MIN, f64::NAN, "key1".to_string()), (i32::MAX, -0.0, String::new())];
+    let value = (leaves, named, rows);
+    let bytes = image(&value).unwrap();
+    let restored = restore(&bytes).unwrap();
+    assert_eq!(restored.0, value.0);
+    assert_eq!(restored.1, value.1);
+    for (left, right) in restored.2.iter().zip(&value.2) {{
+        assert_eq!((left.0, left.1.to_bits(), &left.2), (right.0, right.1.to_bits(), &right.2));
+    }}
+    // Interning stores each distinct string and Leaf once, and the hash map
+    // is walked in key order, so the restored value re-encodes identically.
+    assert_eq!(image(&restored).unwrap(), bytes);
+    assert_eq!(bytes.windows("outer/λ".len()).filter(|window| *window == "outer/λ".as_bytes()).count(), 1);
+    assert!(restore(&bytes[..bytes.len() - 1]).is_err());
+    let mut overlong = bytes.clone();
+    overlong.splice(0..1, [overlong[0] | 0x80, 0]);
+    assert!(restore(&overlong).unwrap_err().contains("not canonical"));
     #[cfg(unix)]
     {{
         use std::os::unix::ffi::OsStringExt;
         let path = std::path::PathBuf::from(std::ffi::OsString::from_vec(vec![0xff]));
-        let invalid = BTreeMap::from([(path, BTreeSet::new())]);
-        let mut writer = MirProgramImageWriter::new();
-        assert!(encode(&invalid, &mut writer).unwrap_err().contains("not valid UTF-8"));
+        let invalid = (BTreeMap::from([(path, BTreeSet::new())]), HashMap::new(), Vec::new());
+        assert!(image(&invalid).unwrap_err().contains("not valid UTF-8"));
     }}
 }}
 "#);

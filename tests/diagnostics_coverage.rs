@@ -2066,7 +2066,7 @@ fn registered_unimplemented_codes_are_expected() {
         ("E0990", "retired"),
         ("E2301", "retired"),
         ("E2302", "retired"),
-        ("E2303", "staged #1164"),
+        ("E2303", "retired"),
         ("E2304", "retired"),
         ("E2306", "retired"),
         ("E2403", "staged #1542"),

@@ -2011,6 +2011,8 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     s = strip_vetted_module(&s, "ffi_reporter");
     s = strip_vetted_module(&s, "jet_program_allocator");
     s = strip_vetted_module(&s, "jet_mod_native");
+    // D-EXEC1: the Jet-native backend's runtime C ABI (Prelude/Core/CAbi.rs).
+    s = strip_vetted_module(&s, "jet_c_abi");
     loop {
         let next = strip_vetted_module(&s, "jet_mod_native");
         if next == s {

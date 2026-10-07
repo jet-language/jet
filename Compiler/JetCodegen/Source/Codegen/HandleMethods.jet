@@ -537,25 +537,11 @@ fn jet_codegen_handle_regex_route(kind: String, method: String) -> JetCodegenHan
     Val(jet_codegen_handle_h("{kind}.{method}", symbol, mask, None))
 }
 
+// Checked MIME projections. `URL` is the `core.net.url` record, so its
+// documented methods lower through the declaration, never a handle row.
 fn jet_codegen_handle_url_mime_route(kind: String, method: String) -> JetCodegenHandleRoute? {
     symbol := ""
     if {
-        kind == "URL" -> {
-            if method == {
-                "scheme" | "host" | "port" | "path" | "path_segments" | "query" | "query_pairs" | "fragment" | "normalize" | "username" | "password" | "userinfo" | "authority" | "default_port" -> {
-                    symbol = "jet_std::JetURL::{method}"
-                }
-                "to_string" -> {
-                    symbol = "jet_std::JetURL::to_string_value"
-                }
-                "join" | "set_query" | "add_query" -> {
-                    symbol = "jet_std::JetURL::{method}"
-                }
-                else -> {
-                    return None
-                }
-            }
-        }
         kind == "MIME" -> {
             if method == {
                 "media_type" | "subtype" | "essence" | "params" -> {
@@ -577,17 +563,7 @@ fn jet_codegen_handle_url_mime_route(kind: String, method: String) -> JetCodegen
         }
     }
     mask := [Bool]{true}
-    if {
-        kind == "MIME" -> {
-            if method == "param" -> mask = [Bool]{true, true}
-        }
-        method == "join" -> {
-            mask = [Bool]{true, true}
-        }
-        method == "set_query" || method == "add_query" -> {
-            mask = [Bool]{true, true, true}
-        }
-    }
+    if method == "param" -> mask = [Bool]{true, true}
     Val(jet_codegen_handle_h("{kind}.{method}", symbol, mask, None))
 }
 

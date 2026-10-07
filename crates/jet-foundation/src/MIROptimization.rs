@@ -4721,7 +4721,7 @@ pub fn optimize_mir_program(
         );
         return Ok(optimized);
     }
-    let mut optimized = program.clone();
+    let mut optimized = program;
     let previous_loop_facts = optimized
         .functions
         .iter()
@@ -7944,8 +7944,164 @@ fn simplify_cfg(program: &mut MirProgram) {
                 other => other,
             };
         }
+        forward_phi_joins(function);
     }
     eliminate_unreachable_blocks(program);
+}
+
+/// Forwards phi-only joins. A block that holds only a phi, is entered only by
+/// plain jumps, and jumps to a block whose phi is the single use of its value
+/// (the join of an inner arm of an if-expression or match chain) is bypassed:
+/// its predecessors jump to the outer join and feed that phi directly. An
+/// N-arm chain then merges once instead of through N nested joins, so the
+/// emitted code is one flat dispatch, not N nested blocks and N phis. Nothing
+/// executes in a bypassed block (a function with `Normal` drop actions runs
+/// them on every jump, so it is left alone), and `eliminate_unreachable_blocks`
+/// removes the bypassed blocks and their phi values. Linear in the function.
+fn forward_phi_joins(function: &mut MirFunction) {
+    if function.drops.iter().any(|action| matches!(action.edge, MirDropEdge::Normal)) {
+        return;
+    }
+    let uses = value_use_counts(function);
+    let positions: HashMap<MirBlockId, usize> =
+        function.blocks.iter().enumerate().map(|(position, block)| (block.id, position)).collect();
+    let mut sources: HashMap<MirBlockId, Vec<usize>> = HashMap::new();
+    for (position, block) in function.blocks.iter().enumerate() {
+        for target in block.terminator.targets() {
+            sources.entry(target).or_default().push(position);
+        }
+    }
+    let drop_targets: HashSet<MirBlockId> = function
+        .drops
+        .iter()
+        .filter_map(|action| match action.edge {
+            MirDropEdge::Failure(target) | MirDropEdge::Unwind(target) => Some(target),
+            MirDropEdge::Normal | MirDropEdge::Return => None,
+        })
+        .collect();
+    // Bypassed block -> (its phi value, the block it jumps to).
+    let mut forwarded: HashMap<MirBlockId, (MirValueId, MirBlockId)> = HashMap::new();
+    for block in &function.blocks {
+        if block.id == function.entry || drop_targets.contains(&block.id) {
+            continue;
+        }
+        let [instruction] = block.instructions.as_slice() else {
+            continue;
+        };
+        let (Some(value), MirOperation::Phi { incoming }) = (instruction.result, &instruction.operation) else {
+            continue;
+        };
+        let MirTerminator::Jump { target } = block.terminator else {
+            continue;
+        };
+        if target == block.id || uses.get(&value) != Some(&1) {
+            continue;
+        }
+        let Some(&target_position) = positions.get(&target) else {
+            continue;
+        };
+        let mut mentions = 0;
+        let mut feeds = 0;
+        for outer in &function.blocks[target_position].instructions {
+            if let MirOperation::Phi { incoming: outer_incoming } = &outer.operation {
+                if outer_incoming.iter().any(|(predecessor, _)| *predecessor == block.id) {
+                    mentions += 1;
+                }
+                if outer.ty == instruction.ty
+                    && outer_incoming.iter().any(|(predecessor, incoming)| *predecessor == block.id && *incoming == value)
+                {
+                    feeds += 1;
+                }
+            }
+        }
+        if mentions != 1 || feeds != 1 {
+            continue;
+        }
+        let entered = sources.get(&block.id).map(Vec::as_slice).unwrap_or_default();
+        let plain = entered.iter().all(|source| {
+            matches!(function.blocks[*source].terminator, MirTerminator::Jump { target } if target == block.id)
+        });
+        let entering: HashSet<MirBlockId> = entered.iter().map(|source| function.blocks[*source].id).collect();
+        if entered.is_empty()
+            || !plain
+            || entering.len() != entered.len()
+            || incoming.len() != entered.len()
+            || !incoming.iter().all(|(predecessor, _)| entering.contains(predecessor))
+        {
+            continue;
+        }
+        forwarded.insert(block.id, (value, target));
+    }
+    if forwarded.is_empty() {
+        return;
+    }
+    // The outermost join each bypassed block reaches, each chain walked once.
+    // A jump cycle of phi-only blocks leaves the function alone.
+    let mut finals: HashMap<MirBlockId, MirBlockId> = HashMap::new();
+    for start in forwarded.keys() {
+        let mut path = Vec::new();
+        let mut on_path = HashSet::new();
+        let mut at = *start;
+        let end = loop {
+            if let Some(known) = finals.get(&at) {
+                break *known;
+            }
+            let Some((_, target)) = forwarded.get(&at) else {
+                break at;
+            };
+            if !on_path.insert(at) {
+                return;
+            }
+            path.push(at);
+            at = *target;
+        };
+        for block in path {
+            finals.insert(block, end);
+        }
+    }
+    let mut inner: HashMap<MirBlockId, Vec<(MirBlockId, MirValueId)>> = HashMap::new();
+    for block in &mut function.blocks {
+        if forwarded.contains_key(&block.id) {
+            if let MirOperation::Phi { incoming } = &mut block.instructions[0].operation {
+                inner.insert(block.id, std::mem::take(incoming));
+            }
+            continue;
+        }
+        if let MirTerminator::Jump { target } = &mut block.terminator {
+            if let Some(end) = finals.get(target) {
+                *target = *end;
+            }
+        }
+    }
+    for block in &mut function.blocks {
+        if forwarded.contains_key(&block.id) {
+            continue;
+        }
+        for instruction in &mut block.instructions {
+            let MirOperation::Phi { incoming } = &mut instruction.operation else {
+                continue;
+            };
+            let bypassed = |(predecessor, value): &(MirBlockId, MirValueId)| {
+                forwarded.get(predecessor).is_some_and(|(phi, _)| phi == value)
+            };
+            if !incoming.iter().any(bypassed) {
+                continue;
+            }
+            let mut expanded = Vec::with_capacity(incoming.len());
+            let mut stack = vec![std::mem::take(incoming).into_iter()];
+            while let Some(rows) = stack.last_mut() {
+                let Some(row) = rows.next() else {
+                    stack.pop();
+                    continue;
+                };
+                match bypassed(&row).then(|| inner.remove(&row.0)).flatten() {
+                    Some(rows) => stack.push(rows.into_iter()),
+                    None => expanded.push(row),
+                }
+            }
+            *incoming = expanded;
+        }
+    }
 }
 
 fn fold_exact_constants(program: &mut MirProgram) {
@@ -8890,6 +9046,12 @@ fn derive_loop_and_vector_facts(
         function.optimization.fusion_facts.clear();
         function.optimization.acceleration_facts.clear();
         let mut shapes = Vec::new();
+        // Built once per function: a block id -> position map and the blocks
+        // that lie on a cycle. Only a cycle block can head a loop, so the
+        // region walk below never runs for the branches of a straight-line
+        // `if`/match chain, which kept this pass quadratic in chain length.
+        let positions = block_positions(function);
+        let cyclic = cyclic_block_positions(function, &positions);
         for block in &function.blocks {
             if let crate::MIR::MirTerminator::Branch {
                 then_target,
@@ -8897,9 +9059,14 @@ fn derive_loop_and_vector_facts(
                 ..
             } = &block.terminator
             {
-                if let Some(shape) =
-                    counted_shape(function, block.id, *then_target, *else_target)
-                {
+                if let Some(shape) = counted_shape(
+                    function,
+                    &positions,
+                    &cyclic,
+                    block.id,
+                    *then_target,
+                    *else_target,
+                ) {
                     let trip_count = shape
                         .range
                         .and_then(|range| loop_trip_count(function, range))
@@ -8929,12 +9096,11 @@ fn derive_loop_and_vector_facts(
                     shapes.push((row, shape));
                 }
             } else if let crate::MIR::MirTerminator::Jump { target: body } = &block.terminator {
-                if function.blocks.iter().any(|candidate| {
-                    candidate.id == *body
-                        && matches!(
-                            &candidate.terminator,
-                            crate::MIR::MirTerminator::Jump { target } if *target == block.id
-                        )
+                if positions.get(body).is_some_and(|position| {
+                    matches!(
+                        &function.blocks[*position].terminator,
+                        crate::MIR::MirTerminator::Jump { target } if *target == block.id
+                    )
                 }) {
                     let shape = CanonicalLoopShape {
                         form: MirLoopForm::Unconditional,
@@ -9332,7 +9498,8 @@ fn normalized_fixed_reduction_shape(
         return None;
     }
     let advance = advances[0];
-    let mut body_blocks = collect_loop_region(function, header, body, Some(post_entry));
+    let mut body_blocks =
+        collect_loop_region(function, &block_positions(function), header, body, Some(post_entry));
     body_blocks.retain(|block_id| *block_id != advance);
     if body_blocks.is_empty()
         || !body_blocks.iter().any(|block_id| {
@@ -9502,6 +9669,8 @@ fn normalized_fixed_reduction_fact(
 
 fn counted_shape(
     function: &MirFunction,
+    positions: &HashMap<MirBlockId, usize>,
+    cyclic: &[bool],
     header: MirBlockId,
     then_target: MirBlockId,
     else_target: MirBlockId,
@@ -9511,7 +9680,13 @@ fn counted_shape(
     {
         return Some(shape);
     }
-    let header_block = function.blocks.iter().find(|block| block.id == header)?;
+    // Both shapes below need a region block that branches back to `header`,
+    // which only exists when `header` lies on a cycle.
+    let header_position = *positions.get(&header)?;
+    if !cyclic[header_position] {
+        return None;
+    }
+    let header_block = &function.blocks[header_position];
     let cursor_form = header_block
         .instructions
         .iter()
@@ -9524,13 +9699,12 @@ fn counted_shape(
             }
             _ => None,
         });
-    let blocks = collect_loop_region(function, header, then_target, Some(else_target));
+    let blocks = collect_loop_region(function, positions, header, then_target, Some(else_target));
     if let Some((form, cursor)) = cursor_form {
         let has_value = blocks.iter().any(|block_id| {
-            function
-                .blocks
-                .iter()
-                .find(|block| block.id == *block_id)
+            positions
+                .get(block_id)
+                .map(|position| &function.blocks[*position])
                 .is_some_and(|block| {
                     block.instructions.iter().any(|instruction| {
                         matches!(
@@ -9543,7 +9717,7 @@ fn counted_shape(
                 })
         });
         let advance = blocks.iter().find_map(|block_id| {
-            let block = function.blocks.iter().find(|block| block.id == *block_id)?;
+            let block = &function.blocks[*positions.get(block_id)?];
             let advances = block.instructions.iter().any(|instruction| {
                 matches!(
                     &instruction.operation,
@@ -9570,7 +9744,7 @@ fn counted_shape(
             blocks,
         });
     }
-    scalar_counted_shape(function, header, then_target, else_target, blocks)
+    scalar_counted_shape(function, positions, header, then_target, else_target, blocks)
 }
 fn loop_cursor_place(
     function: &MirFunction,
@@ -9638,6 +9812,7 @@ fn canonical_range_for_cursor(
 
 fn scalar_counted_shape(
     function: &MirFunction,
+    positions: &HashMap<MirBlockId, usize>,
     header: MirBlockId,
     then_target: MirBlockId,
     else_target: MirBlockId,
@@ -9646,7 +9821,12 @@ fn scalar_counted_shape(
     if blocks.is_empty() {
         return None;
     }
-    let header_block = function.blocks.iter().find(|block| block.id == header)?;
+    let block_at = move |block_id: &MirBlockId| {
+        positions
+            .get(block_id)
+            .map(|position| &function.blocks[*position])
+    };
+    let header_block = block_at(&header)?;
     let MirTerminator::Branch { condition, .. } = &header_block.terminator else {
         return None;
     };
@@ -9664,17 +9844,13 @@ fn scalar_counted_shape(
         return None;
     }
     let backedges = blocks.iter().filter(|block_id| {
-        function
-            .blocks
-            .iter()
-            .find(|block| block.id == **block_id)
-            .is_some_and(|block| block.terminator.targets().contains(&header))
+        block_at(*block_id).is_some_and(|block| block.terminator.targets().contains(&header))
     });
     if backedges.count() != 1 {
         return None;
     }
     let (advance, advance_write, step_value) = blocks.iter().find_map(|block_id| {
-        scalar_loop_advance(function, *block_id, header, cursor_place)
+        scalar_loop_advance(function, block_at(block_id)?, header, cursor_place)
             .map(|(write, step)| (*block_id, write, step))
     })?;
     let mut cursor_writes = Vec::new();
@@ -9704,11 +9880,7 @@ fn scalar_counted_shape(
                 && *block_id != header
                 && !blocks.contains(block_id)
                 && matches!(
-                    function
-                        .blocks
-                        .iter()
-                        .find(|block| block.id == *block_id)
-                        .map(|block| &block.terminator),
+                    block_at(block_id).map(|block| &block.terminator),
                     Some(MirTerminator::Jump { target }) if *target == header
                 )
                 && instruction.id != advance_write
@@ -9789,11 +9961,10 @@ fn scalar_loop_condition(
 
 fn scalar_loop_advance(
     function: &MirFunction,
-    block_id: MirBlockId,
+    block: &MirBasicBlock,
     header: MirBlockId,
     cursor_place: MirPlaceId,
 ) -> Option<(MirOpId, MirValueId)> {
-    let block = function.blocks.iter().find(|block| block.id == block_id)?;
     if !matches!(&block.terminator, MirTerminator::Jump { target } if *target == header) {
         return None;
     }
@@ -10081,8 +10252,95 @@ fn loop_value_is_indexed(
     })
 }
 
+/// Position of each block in `function.blocks`, keyed by block id (the first
+/// row wins, as a linear `find` would).
+fn block_positions(function: &MirFunction) -> HashMap<MirBlockId, usize> {
+    let mut positions = HashMap::with_capacity(function.blocks.len());
+    for (position, block) in function.blocks.iter().enumerate() {
+        positions.entry(block.id).or_insert(position);
+    }
+    positions
+}
+
+/// Whether each block (by position) lies on a control-flow cycle: it shares a
+/// strongly connected component with another block, or targets itself.
+/// Iterative Tarjan, linear in blocks plus edges.
+fn cyclic_block_positions(
+    function: &MirFunction,
+    positions: &HashMap<MirBlockId, usize>,
+) -> Vec<bool> {
+    const UNVISITED: usize = usize::MAX;
+    let count = function.blocks.len();
+    let successors = function
+        .blocks
+        .iter()
+        .map(|block| {
+            block
+                .terminator
+                .targets()
+                .iter()
+                .filter_map(|target| positions.get(target).copied())
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let mut order = vec![UNVISITED; count];
+    let mut low = vec![0; count];
+    let mut on_stack = vec![false; count];
+    let mut stack = Vec::new();
+    let mut cyclic = vec![false; count];
+    let mut next_order = 0;
+    // (block, next successor to visit)
+    let mut frames: Vec<(usize, usize)> = Vec::new();
+    for root in 0..count {
+        if order[root] != UNVISITED {
+            continue;
+        }
+        order[root] = next_order;
+        low[root] = next_order;
+        next_order += 1;
+        stack.push(root);
+        on_stack[root] = true;
+        frames.push((root, 0));
+        while let Some(frame) = frames.last_mut() {
+            let node = frame.0;
+            if let Some(&target) = successors[node].get(frame.1) {
+                frame.1 += 1;
+                if order[target] == UNVISITED {
+                    order[target] = next_order;
+                    low[target] = next_order;
+                    next_order += 1;
+                    stack.push(target);
+                    on_stack[target] = true;
+                    frames.push((target, 0));
+                } else if on_stack[target] {
+                    low[node] = low[node].min(order[target]);
+                }
+                continue;
+            }
+            frames.pop();
+            if let Some(&(parent, _)) = frames.last() {
+                low[parent] = low[parent].min(low[node]);
+            }
+            if low[node] == order[node] {
+                let start = stack
+                    .iter()
+                    .rposition(|member| *member == node)
+                    .expect("a component root is on the Tarjan stack");
+                let component = stack.split_off(start);
+                let on_cycle = component.len() > 1 || successors[node].contains(&node);
+                for member in component {
+                    on_stack[member] = false;
+                    cyclic[member] = on_cycle;
+                }
+            }
+        }
+    }
+    cyclic
+}
+
 fn collect_loop_region(
     function: &MirFunction,
+    positions: &HashMap<MirBlockId, usize>,
     header: MirBlockId,
     body: MirBlockId,
     exit: Option<MirBlockId>,
@@ -10094,9 +10352,10 @@ fn collect_loop_region(
         if block_id == header || exit == Some(block_id) || !seen.insert(block_id) {
             continue;
         }
-        let Some(block) = function.blocks.iter().find(|block| block.id == block_id) else {
+        let Some(position) = positions.get(&block_id) else {
             continue;
         };
+        let block = &function.blocks[*position];
         region.push(block_id);
         for target in block.terminator.targets() {
             if target != header && exit != Some(target) {

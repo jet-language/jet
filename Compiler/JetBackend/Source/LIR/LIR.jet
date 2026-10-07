@@ -1,0 +1,270 @@
+// Jet low-level IR (LIR): the typed, target-independent form every Jet code
+// generator level reads (D-EXEC1). It sits below Jet MIR. Every value carries
+// its machine layout (size, alignment, ABI class), its drop action, and a link
+// back to the checked Jet type; moves and drops are explicit instructions; calls
+// name a signature ID and either a function in the same module or a symbol in
+// the compiled runtime. Blocks take parameters instead of phi nodes, and the
+// entry block's parameters are the function's parameters.
+use jet_foundation.[MIRTypeID]
+
+pub struct LIRValueID { pub value: Int }
+
+pub struct LIRBlockID { pub value: Int }
+
+pub struct LIRSignatureID { pub value: Int }
+
+pub struct LIRFunctionID { pub value: Int }
+
+pub struct LIRDataID { pub value: Int }
+
+// System V classification of one value. `Memory` values travel by hidden
+// pointer; a function without a result has no result layout.
+pub enum LIRABIClass { Integer Pointer Float Memory }
+
+pub struct LIRLayout { pub size: Int, pub align: Int, pub class: LIRABIClass }
+
+// What ends a value's life. `Runtime` names the compiled-runtime drop glue that
+// receives the value; `Function` names drop glue generated into the module
+// (heap boxes); trivially destructible values need no drop.
+pub enum LIRDrop {
+    Trivial
+    Runtime(symbol: String)
+    Function(id: LIRFunctionID)
+}
+
+pub struct LIRValue {
+    pub id: LIRValueID
+    pub layout: LIRLayout
+    pub drop: LIRDrop
+    pub jet_type: MIRTypeID?
+}
+
+// Word arithmetic is signed: `Div` and `Rem` truncate (the lowering checks the
+// divisor, zero and -1 against the minimum, before them) and `Shr` is
+// arithmetic. On Float values `Add Sub Mul Div` are IEEE double arithmetic and
+// `Xor` acts on the bits (negation flips the sign bit).
+pub enum LIRBinaryOp { Add Sub Mul Div Rem And Or Xor Shl Shr }
+
+// Signed integer comparisons; on Float operands, ordered IEEE comparisons
+// (every comparison with NaN is false, except `Ne`).
+pub enum LIRCondition { Eq Ne Lt Le Gt Ge }
+
+pub enum LIRCallee {
+    Function(id: LIRFunctionID)
+    Runtime(symbol: String)
+}
+
+pub enum LIRInst {
+    Const(dst: LIRValueID, value: Int)
+    Binary(dst: LIRValueID, op: LIRBinaryOp, left: LIRValueID, right: LIRValueID)
+    Compare(dst: LIRValueID, condition: LIRCondition, left: LIRValueID, right: LIRValueID)
+    // Ownership transfer: `src` is dead after the move.
+    Move(dst: LIRValueID, src: LIRValueID)
+    // Duplicate of a trivially destructible value.
+    Copy(dst: LIRValueID, src: LIRValueID)
+    Call(dst: LIRValueID?, signature: LIRSignatureID, callee: LIRCallee, args: [LIRValueID])
+    // Runs the value's drop glue; the value is dead afterwards.
+    Drop(value: LIRValueID)
+    // Bool: whether signed `left op right` (Add, Sub or Mul) overflows a word.
+    Overflows(dst: LIRValueID, op: LIRBinaryOp, left: LIRValueID, right: LIRValueID)
+    // Reads `dst`'s layout from `base + offset`; `base` is a Pointer.
+    Load(dst: LIRValueID, base: LIRValueID, offset: Int)
+    // Writes `value` to `base + offset`; `base` is a Pointer.
+    Store(base: LIRValueID, offset: Int, value: LIRValueID)
+    // The address of a module data object.
+    DataAddress(dst: LIRValueID, data: LIRDataID)
+    // Numeric conversion between the layouts of `src` and `dst`: a signed
+    // Integer word to Float, or a Float to an Integer word (truncating).
+    Convert(dst: LIRValueID, src: LIRValueID)
+}
+
+pub struct LIRJumpTarget { pub block: LIRBlockID, pub args: [LIRValueID] }
+
+pub enum LIRTerminator {
+    Jump(target: LIRJumpTarget)
+    Branch(condition: LIRValueID, then_target: LIRJumpTarget, else_target: LIRJumpTarget)
+    Return(value: LIRValueID?)
+    // Control never reaches the end of the block (after a call that does not return).
+    Unreachable
+}
+
+pub struct LIRBlock {
+    pub id: LIRBlockID
+    pub params: [LIRValueID]
+    pub insts: [LIRInst]
+    pub terminator: LIRTerminator
+}
+
+pub enum LIRCallConv { SystemV }
+
+pub struct LIRSignature {
+    pub id: LIRSignatureID
+    pub convention: LIRCallConv
+    pub params: [LIRLayout]
+    pub result: LIRLayout?
+}
+
+// `values[i].id.value == i`; `blocks[0]` is the entry block.
+pub struct LIRFunction {
+    pub id: LIRFunctionID
+    pub name: String
+    pub signature: LIRSignatureID
+    pub values: [LIRValue]
+    pub blocks: [LIRBlock]
+}
+
+// Read-only bytes the module's code addresses (string literals, file names).
+pub struct LIRData {
+    pub id: LIRDataID
+    pub bytes: [U8]
+    pub align: Int
+}
+
+// `signatures[i].id.value == i`, `functions[i].id.value == i` and
+// `data[i].id.value == i`.
+pub struct LIRModule {
+    pub signatures: [LIRSignature]
+    pub functions: [LIRFunction]
+    pub data: [LIRData]
+}
+
+pub fn lir_layout_word() -> LIRLayout Never! {
+    LIRLayout{size: 8, align: 8, class: LIRABIClass.Integer}
+}
+
+pub fn lir_layout_bool() -> LIRLayout Never! {
+    LIRLayout{size: 1, align: 1, class: LIRABIClass.Integer}
+}
+
+pub fn lir_layout_pointer() -> LIRLayout Never! {
+    LIRLayout{size: 8, align: 8, class: LIRABIClass.Pointer}
+}
+
+pub fn lir_layout_float() -> LIRLayout Never! {
+    LIRLayout{size: 8, align: 8, class: LIRABIClass.Float}
+}
+
+pub fn lir_inst_def(inst: LIRInst) -> LIRValueID? {
+    if inst == {
+        .Const(dst, _) -> Val(dst)
+        .Binary(dst, _, _, _) -> Val(dst)
+        .Compare(dst, _, _, _) -> Val(dst)
+        .Move(dst, _) -> Val(dst)
+        .Copy(dst, _) -> Val(dst)
+        .Call(dst, _, _, _) -> dst
+        .Drop(_) -> None
+        .Overflows(dst, _, _, _) -> Val(dst)
+        .Load(dst, _, _) -> Val(dst)
+        .Store(_, _, _) -> None
+        .DataAddress(dst, _) -> Val(dst)
+        .Convert(dst, _) -> Val(dst)
+    }
+}
+
+pub fn lir_inst_uses(inst: LIRInst) -> [LIRValueID] Never! {
+    if inst == {
+        .Const(_, _) -> [LIRValueID]{}
+        .Binary(_, _, left, right) -> [LIRValueID]{left, right}
+        .Compare(_, _, left, right) -> [LIRValueID]{left, right}
+        .Move(_, src) -> [LIRValueID]{src}
+        .Copy(_, src) -> [LIRValueID]{src}
+        .Call(_, _, _, args) -> args
+        .Drop(value) -> [LIRValueID]{value}
+        .Overflows(_, _, left, right) -> [LIRValueID]{left, right}
+        .Load(_, base, _) -> [LIRValueID]{base}
+        .Store(base, _, value) -> [LIRValueID]{base, value}
+        .DataAddress(_, _) -> [LIRValueID]{}
+        .Convert(_, src) -> [LIRValueID]{src}
+    }
+}
+
+// Values whose life the instruction ends.
+pub fn lir_inst_consumes(inst: LIRInst) -> [LIRValueID] Never! {
+    if inst == {
+        .Move(_, src) -> [LIRValueID]{src}
+        .Drop(value) -> [LIRValueID]{value}
+        else -> [LIRValueID]{}
+    }
+}
+
+pub fn lir_terminator_targets(terminator: LIRTerminator) -> [LIRJumpTarget] Never! {
+    if terminator == {
+        .Jump(target) -> [LIRJumpTarget]{target}
+        .Branch(_, then_target, else_target) -> [LIRJumpTarget]{then_target, else_target}
+        .Return(_) -> [LIRJumpTarget]{}
+        .Unreachable -> [LIRJumpTarget]{}
+    }
+}
+
+pub fn lir_terminator_uses(terminator: LIRTerminator) -> [LIRValueID] Never! {
+    uses := [LIRValueID]{}
+    if terminator == {
+        .Branch(condition, _, _) -> &uses.push(condition)
+        .Return(value) -> { if value == .Val(returned) -> &uses.push(returned) }
+        else -> {}
+    }
+    loop target in lir_terminator_targets(terminator) {
+        loop arg in target.args -> &uses.push(arg)
+    }
+    uses
+}
+
+pub fn lir_block_index(function: LIRFunction, id: LIRBlockID) -> Int Never! {
+    loop (index, block) in function.blocks { if block.id == id -> return index }
+    -1
+}
+
+pub fn lir_signature(program: LIRModule, id: LIRSignatureID) -> LIRSignature? {
+    if id.value < 0 || id.value >= program.signatures.len() -> return None
+    Val(program.signatures[id.value])
+}
+
+// Builder used by MIR->LIR lowering and by hand-written LIR: values are
+// allocated first, instructions go into the open block, and `lir_builder_seal`
+// closes it with its parameters and terminator.
+pub struct LIRFunctionBuilder {
+    pub id: LIRFunctionID
+    pub name: String
+    pub signature: LIRSignatureID
+    pub values: [LIRValue]
+    pub blocks: [LIRBlock]
+    pub open: [LIRInst]
+    pub next_block: Int
+}
+
+pub fn lir_builder(id: LIRFunctionID, name: String, signature: LIRSignatureID) -> LIRFunctionBuilder Never! {
+    LIRFunctionBuilder{id: id, name: name, signature: signature, values: [LIRValue]{}, blocks: [LIRBlock]{}, open: [LIRInst]{}, next_block: 0}
+}
+
+pub fn lir_builder_value(builder: &LIRFunctionBuilder, layout: LIRLayout, drop: LIRDrop, jet_type: MIRTypeID?) -> LIRValueID Never! {
+    id :: LIRValueID{value: builder.values.len()}
+    &builder.values.push(LIRValue{id: id, layout: layout, drop: drop, jet_type: jet_type})
+    id
+}
+
+pub fn lir_builder_word(builder: &LIRFunctionBuilder) -> LIRValueID Never! {
+    lir_builder_value(&builder, lir_layout_word(), LIRDrop.Trivial, None)
+}
+
+pub fn lir_builder_bool(builder: &LIRFunctionBuilder) -> LIRValueID Never! {
+    lir_builder_value(&builder, lir_layout_bool(), LIRDrop.Trivial, None)
+}
+
+pub fn lir_builder_block_id(builder: &LIRFunctionBuilder) -> LIRBlockID Never! {
+    id :: LIRBlockID{value: builder.next_block}
+    builder.next_block = builder.next_block + 1
+    id
+}
+
+pub fn lir_builder_push(builder: &LIRFunctionBuilder, inst: LIRInst) Never! {
+    &builder.open.push(inst)
+}
+
+pub fn lir_builder_seal(builder: &LIRFunctionBuilder, id: LIRBlockID, params: [LIRValueID], terminator: LIRTerminator) Never! {
+    &builder.blocks.push(LIRBlock{id: id, params: params, insts: builder.open, terminator: terminator})
+    builder.open = [LIRInst]{}
+}
+
+pub fn lir_builder_finish(builder: LIRFunctionBuilder) -> LIRFunction Never! {
+    LIRFunction{id: builder.id, name: builder.name, signature: builder.signature, values: builder.values, blocks: builder.blocks}
+}

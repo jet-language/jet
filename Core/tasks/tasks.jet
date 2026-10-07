@@ -1,6 +1,6 @@
 package {
     name: "core.tasks"
-    version: "0.1.0"
+    version: "0.0.1"
     edition: "2026"
     description: "Tasks, timers, and the current trace id."
     license: "MIT"
@@ -86,17 +86,17 @@ pub fn notify(state: TaskState) -> TaskState Never! {
 
 pub fn start(rx: Receiver<Int>) -> Receiver<Int> Never! { ~rx }
 
-pub fn run() Never! -[Time]> {
+pub fn run() Never! -[Time.Wait]> {
     yield_now()
 }
 
-pub fn waitall(receivers: [Receiver<Int>]) -[Time]> [Int] Never! {
+pub fn waitall(receivers: [Receiver<Int>]) -[Time.Wait]> [Int] Never! {
     out := [Int]{}
     loop rx in receivers -> &out.push(wait(rx))
     out
 }
 
-pub fn waitany(receivers: [Receiver<Int>]) -[Time]> Int Never! {
+pub fn waitany(receivers: [Receiver<Int>]) -[Time.Wait]> Int Never! {
     if receivers.len() == 0 -> return -1
     // Receiver readiness is owned by the scheduler's opaque handle. This
     // convenience rail keeps the deterministic first-arm selection; callers
@@ -112,23 +112,23 @@ pub fn interval(period: time.Duration) -[Time]> Receiver<Int> Never! {
     core.tasks.interval(period)
 }
 
-pub fn yield_now() Never! -[Time]> { host_yield() }
+pub fn yield_now() Never! -[Time.Wait]> { host_yield() }
 
 pub fn current_task() -> String Never! { host_task_id() }
 
 /// Receive from the host scheduler channel. A closed channel maps to the
 /// existing integer sentinel because this convenience rail is non-fallible.
-pub fn recv(rx: Receiver<Int>) -[Time]> Int Never! {
+pub fn recv(rx: Receiver<Int>) -[Time.Wait]> Int Never! {
     value :: rx.receive() ?? return -1
     value
 }
 
 /// Blocking receive spellings used by queue/future adapters.
-pub fn get(rx: Receiver<Int>) -[Time]> Int Never! { recv(rx) }
+pub fn get(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
 
-pub fn result(rx: Receiver<Int>) -[Time]> Int Never! { recv(rx) }
+pub fn result(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
 
-pub fn wait(rx: Receiver<Int>) -[Time]> Int Never! { recv(rx) }
+pub fn wait(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
 
 
 fn host_sleep_ms(ms: Int) -[Time]> {
@@ -136,7 +136,7 @@ fn host_sleep_ms(ms: Int) -[Time]> {
 }
 
 
-fn host_yield() -[Time]> { core.tasks.yield_now() }
+fn host_yield() -[Time.Wait]> { core.tasks.yield_now() }
 
 fn host_task_id() -> String { core.tasks.current_task() }
 

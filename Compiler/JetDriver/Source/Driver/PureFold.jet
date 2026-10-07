@@ -47,17 +47,14 @@ use jet_foundation.[
     MIRValueFact,
     MIRValueID,
     MIRWebParamReconstruction,
-    Span,
     TComptimeValue,
     mir_empty_optimization_facts,
     mir_operation_value_uses,
     mir_semantic_op_prelude_calls,
 ]
 use jet_eval.[
-    jet_eval_comptime_value,
     jet_eval_default_config,
-    jet_eval_function,
-    jet_eval_retire_result,
+    jet_eval_pure_function,
 ]
 
 JET_DRIVER_PURE_FOLD_ROUNDS :: 8
@@ -79,29 +76,51 @@ struct JetDriverPureFoldCandidates {
 }
 
 // Fold effect-free work that initializes immutable locals from constants.
-pub fn jet_driver_fold_pure_calls(program: &MIRProgram) {
+// Each round appends its synthetic functions to the program, moves the
+// program through one evaluation per candidate (never a copy per
+// evaluation), drops the synthetics again, and only then writes the folded
+// constants, so every evaluation of a round sees the same program. Rounds
+// and evaluations recurse so each step moves the program exactly once.
+pub fn jet_driver_fold_pure_calls(program: ^MIRProgram) -> MIRProgram {
     declined := [String:Bool]{}
-    loop _ in 0..<JET_DRIVER_PURE_FOLD_ROUNDS {
-        candidates :: jet_driver_pure_fold_candidates(program, declined)
-        if candidates.sites.len() == 0 -> break
-        augmented := ~program
-        loop synthetic in candidates.functions -> &augmented.functions.push(synthetic)
-        changed := false
-        loop site in candidates.sites {
-            folded :: jet_driver_pure_fold_evaluate(augmented, site.synthetic, site.ty)
-            if folded == {
-                .Val(constant) -> {
-                    program.functions[site.function].blocks[site.block].instructions[site.instruction].operation = MIROperation.Constant{value: constant}
-                    changed = true
-                }
-                .None -> {
-                    _ := &declined.add(jet_driver_pure_fold_site_key(site.function, site.block, site.instruction), true)
-                }
+    folded := jet_driver_pure_fold_rounds(^program, &declined, 0)
+    jet_driver_pure_fold_resolve_joins(&folded)
+    folded
+}
+
+fn jet_driver_pure_fold_rounds(program: ^MIRProgram, declined: &[String:Bool], round: Int) -> MIRProgram {
+    folding := program
+    if round >= JET_DRIVER_PURE_FOLD_ROUNDS -> return folding
+    candidates :: jet_driver_pure_fold_candidates(folding, declined)
+    if candidates.sites.len() == 0 -> return folding
+    base_len :: folding.functions.len()
+    loop synthetic in candidates.functions -> &folding.functions.push(synthetic)
+    folded := [MIRConstant?]{}
+    result := jet_driver_pure_fold_evaluate_sites(^folding, candidates.sites, 0, &folded)
+    loop result.functions.len() > base_len -> _ := &result.functions.pop()
+    changed := false
+    loop (index, site) in candidates.sites {
+        if folded[index] == {
+            .Val(constant) -> {
+                result.functions[site.function].blocks[site.block].instructions[site.instruction].operation = MIROperation.Constant{value: constant}
+                changed = true
+            }
+            .None -> {
+                _ := &declined.add(jet_driver_pure_fold_site_key(site.function, site.block, site.instruction), true)
             }
         }
-        if !changed -> break
     }
-    jet_driver_pure_fold_resolve_joins(&program)
+    if !changed -> return result
+    jet_driver_pure_fold_rounds(^result, &declined, round + 1)
+}
+
+// One pure evaluation per site, threading the program through each.
+fn jet_driver_pure_fold_evaluate_sites(program: ^MIRProgram, sites: [JetDriverPureFoldSite], index: Int, folded: &[MIRConstant?]) -> MIRProgram {
+    if index >= sites.len() -> return program
+    site :: sites[index]
+    evaluated := jet_eval_pure_function(^program, site.synthetic, jet_eval_default_config())
+    &folded.push(jet_driver_pure_fold_folded(evaluated.value, site.ty))
+    jet_driver_pure_fold_evaluate_sites(^evaluated.program, sites, index + 1, &folded)
 }
 
 // Replace a scalar join whose live edges all carry one constant with that
@@ -159,6 +178,17 @@ fn jet_driver_pure_fold_candidates(program: MIRProgram, declined: [String:Bool])
     }
     sites := [JetDriverPureFoldSite]{}
     synthetics := [MIRFunction]{}
+    // The program-wide callee and Prelude sets are built once; each function
+    // replaces only its own rows, so the sets are never copied per function.
+    inputs := JetDriverPureFoldInputs{
+        constants: [Int:MIRConstant]{},
+        types: [Int:MIRType]{},
+        definitions: [Int:MIROperation]{},
+        initializers: [Int:Int]{},
+        roots: [Int:Int]{},
+        callees: callees,
+        preludes: preludes,
+    }
     loop function_index in 0..<program.functions.len() {
         function := program.functions[function_index]
         initializers :: jet_driver_pure_fold_initializers(function)
@@ -176,15 +206,11 @@ fn jet_driver_pure_fold_candidates(program: MIRProgram, declined: [String:Bool])
         }
         feeding :: jet_driver_pure_fold_feeding(function, initializers, definitions)
         roots :: jet_driver_pure_fold_root_locals(function)
-        inputs := JetDriverPureFoldInputs{
-            constants: jet_driver_pure_fold_constants(function, initializers, roots),
-            types: types,
-            definitions: definitions,
-            initializers: initializers,
-            roots: roots,
-            callees: callees,
-            preludes: preludes,
-        }
+        inputs.constants = jet_driver_pure_fold_constants(function, initializers, roots)
+        inputs.types = types
+        inputs.definitions = definitions
+        inputs.initializers = initializers
+        inputs.roots = roots
         loop block_index in 0..<function.blocks.len() {
             block := function.blocks[block_index]
             loop instruction_index in 0..<block.instructions.len() {
@@ -195,7 +221,7 @@ fn jet_driver_pure_fold_candidates(program: MIRProgram, declined: [String:Bool])
                 if feeding.get(result.value) == None -> next
                 if inputs.constants.get(result.value) != None -> next
                 if !jet_driver_pure_fold_result_type(ty) -> next
-                if !jet_driver_pure_fold_operation(instruction.operation, callees, preludes) -> next
+                if !jet_driver_pure_fold_operation(instruction.operation, inputs.callees, inputs.preludes) -> next
                 slice := JetDriverPureFoldSlice{instructions: [MIRInstruction]{}, defined: [Int:Bool]{}, visiting: [Int:Bool]{}}
                 complete := true
                 loop value in mir_operation_value_uses(instruction.operation) {
@@ -685,15 +711,11 @@ fn jet_driver_pure_fold_synthetic(host: MIRFunction, identity: MIRFunctionID, in
     }
 }
 
-fn jet_driver_pure_fold_evaluate(program: MIRProgram, function: MIRFunctionID, ty: MIRType) -> MIRConstant? {
-    span := Span{start: 0, end: 0}
-    evaluated := jet_eval_function(~program, function, [TComptimeValue]{}, jet_eval_default_config())
-    if !evaluated.complete || evaluated.error != None || evaluated.soft_stop || evaluated.stdout != "" || evaluated.stderr != "" {
-        jet_eval_retire_result(&evaluated, span)
-        return None
-    }
-    value :: jet_eval_comptime_value(&evaluated, span) ?? return None
-    constant :: jet_driver_pure_fold_constant(value, ty) ?? return None
+// The constant one evaluation folds to: its data value lowered to the
+// site's literal type, within the output budget.
+fn jet_driver_pure_fold_folded(value: TComptimeValue?, ty: MIRType) -> MIRConstant? {
+    data :: value ?? return None
+    constant :: jet_driver_pure_fold_constant(data, ty) ?? return None
     if jet_driver_pure_fold_cost(constant) > JET_DRIVER_PURE_FOLD_OUTPUT_BUDGET -> return None
     Val(constant)
 }

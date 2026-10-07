@@ -1,0 +1,236 @@
+// Linear-scan register allocation (Poletto and Sarkar) for x86-64 System V.
+//
+// Blocks are laid out in function order and every block start, instruction and
+// terminator gets one position. Block-level liveness extends each value's
+// interval over the blocks it is live through, so one conservative interval
+// per value covers loops. Intervals are scanned by start; an interval expires
+// strictly before the next one starts, so an instruction's result never shares
+// a register with its operands. A value live across a call may only take a
+// callee-saved register. When no register is free, the interval that ends last
+// is spilled to its own frame slot for its whole life.
+//
+// rax, r10 and r11 are never allocated: instruction selection uses them as the
+// result, operand and parallel-move scratch registers. rsp and rbp hold the frame.
+
+pub enum X64Loc {
+    Reg(reg: Int)
+    Stack(slot: Int)
+}
+
+pub struct X64Allocation {
+    pub locations: [X64Loc]
+    pub spill_slots: Int
+    // Callee-saved registers the function writes, in push order.
+    pub callee_saved: [Int]
+}
+
+X64_CALLER_SAVED_POOL :: prep { [Int]{1, 2, 6, 7, 8, 9} }
+X64_CALLEE_SAVED_POOL :: prep { [Int]{3, 12, 13, 14, 15} }
+
+pub fn x64_inst_is_call(inst: LIRInst) -> Bool Never! {
+    if inst == {
+        .Call(_, _, _, _) -> true
+        .Drop(_) -> true
+        else -> false
+    }
+}
+
+// Block-by-value bit matrices: `live_in[block * value_count + value]`.
+struct X64Liveness {
+    pub live_in: [Bool]
+    pub live_out: [Bool]
+}
+
+fn x64_falses(count: Int) -> [Bool] Never! {
+    row := [Bool]{}
+    loop _ in 0..<count -> &row.push(false)
+    row
+}
+
+fn x64_liveness(function: LIRFunction) -> X64Liveness Never! {
+    count :: function.values.len()
+    gens := [[Bool]]{}
+    kills := [[Bool]]{}
+    successors := [[Int]]{}
+    loop block in function.blocks {
+        defined := x64_falses(count)
+        gen := x64_falses(count)
+        loop param in block.params -> defined[param.value] = true
+        loop inst in block.insts {
+            loop used in lir_inst_uses(inst) { if !defined[used.value] -> gen[used.value] = true }
+            if lir_inst_def(inst) == .Val(dst) -> defined[dst.value] = true
+        }
+        loop used in lir_terminator_uses(block.terminator) { if !defined[used.value] -> gen[used.value] = true }
+        &gens.push(gen)
+        &kills.push(defined)
+        targets := [Int]{}
+        loop target in lir_terminator_targets(block.terminator) -> &targets.push(lir_block_index(function, target.block))
+        &successors.push(targets)
+    }
+    live_in := [[Bool]]{}
+    live_out := [[Bool]]{}
+    loop _ in function.blocks {
+        &live_in.push(x64_falses(count))
+        &live_out.push(x64_falses(count))
+    }
+    changed := true
+    loop changed {
+        changed = false
+        index := function.blocks.len() - 1
+        loop index >= 0 {
+            out := x64_falses(count)
+            loop successor in successors[index] {
+                loop value in 0..<count { if live_in[successor][value] -> out[value] = true }
+            }
+            incoming := x64_falses(count)
+            loop value in 0..<count -> incoming[value] = gens[index][value] || (out[value] && !kills[index][value])
+            if out != live_out[index] || incoming != live_in[index] {
+                live_out[index] = out
+                live_in[index] = incoming
+                changed = true
+            }
+            index -= 1
+        }
+    }
+    flat_in := [Bool]{}
+    flat_out := [Bool]{}
+    loop index in 0..<function.blocks.len() {
+        loop value in 0..<count {
+            &flat_in.push(live_in[index][value])
+            &flat_out.push(live_out[index][value])
+        }
+    }
+    X64Liveness{live_in: flat_in, live_out: flat_out}
+}
+
+fn x64_pool_has(pool: [Int], reg: Int) -> Bool Never! {
+    loop candidate in pool { if candidate == reg -> return true }
+    false
+}
+
+pub fn x64_allocate(function: LIRFunction) -> X64Allocation Never! {
+    count :: function.values.len()
+    liveness :: x64_liveness(function)
+    starts := [Int]{}
+    ends := [Int]{}
+    loop _ in 0..<count {
+        &starts.push(-1)
+        &ends.push(-1)
+    }
+    calls := [Int]{}
+    position := 0
+    loop (block_index, block) in function.blocks {
+        touched := [Int]{}
+        loop value in 0..<count { if liveness.live_in[block_index * count + value] -> &touched.push(value) }
+        loop param in block.params -> &touched.push(param.value)
+        loop value in touched {
+            if starts[value] < 0 || position < starts[value] -> starts[value] = position
+            if position > ends[value] -> ends[value] = position
+        }
+        position += 1
+        loop inst in block.insts {
+            touched = [Int]{}
+            loop used in lir_inst_uses(inst) -> &touched.push(used.value)
+            if lir_inst_def(inst) == .Val(dst) -> &touched.push(dst.value)
+            loop value in touched {
+                if starts[value] < 0 || position < starts[value] -> starts[value] = position
+                if position > ends[value] -> ends[value] = position
+            }
+            if x64_inst_is_call(inst) -> &calls.push(position)
+            position += 1
+        }
+        touched = [Int]{}
+        loop used in lir_terminator_uses(block.terminator) -> &touched.push(used.value)
+        loop value in 0..<count { if liveness.live_out[block_index * count + value] -> &touched.push(value) }
+        loop value in touched {
+            if starts[value] < 0 || position < starts[value] -> starts[value] = position
+            if position > ends[value] -> ends[value] = position
+        }
+        position += 1
+    }
+
+    crosses := [Bool]{}
+    loop value in 0..<count {
+        crossing := false
+        loop call in calls { if starts[value] < call && call < ends[value] -> crossing = true }
+        &crosses.push(crossing)
+    }
+
+    // Values in start order; ties keep value order.
+    order := [Int]{}
+    placed := x64_falses(count)
+    loop _ in 0..<count {
+        next_value := -1
+        loop value in 0..<count {
+            if !placed[value] && (next_value < 0 || starts[value] < starts[next_value]) -> next_value = value
+        }
+        placed[next_value] = true
+        &order.push(next_value)
+    }
+
+    registers := [Int]{}
+    slots := [Int]{}
+    loop _ in 0..<count {
+        &registers.push(-1)
+        &slots.push(-1)
+    }
+    owners := [Int]{}
+    loop _ in 0..<16 -> &owners.push(-1)
+    spill_slots := 0
+    active := [Int]{}
+    loop value in order {
+        kept := [Int]{}
+        loop other in active {
+            if ends[other] < starts[value] {
+                owners[registers[other]] = -1
+            } else {
+                &kept.push(other)
+            }
+        }
+        active = kept
+        pool := [Int]{}
+        if !crosses[value] {
+            loop reg in X64_CALLER_SAVED_POOL -> &pool.push(reg)
+        }
+        loop reg in X64_CALLEE_SAVED_POOL -> &pool.push(reg)
+        chosen := -1
+        loop reg in pool { if chosen < 0 && owners[reg] < 0 -> chosen = reg }
+        if chosen >= 0 {
+            registers[value] = chosen
+            owners[chosen] = value
+            &active.push(value)
+        } else {
+            victim := -1
+            loop other in active {
+                if x64_pool_has(pool, registers[other]) && (victim < 0 || ends[other] > ends[victim]) -> victim = other
+            }
+            if victim >= 0 && ends[victim] > ends[value] {
+                reg :: ~registers[victim]
+                registers[victim] = -1
+                slots[victim] = spill_slots
+                spill_slots += 1
+                kept = [Int]{}
+                loop other in active { if other != victim -> &kept.push(other) }
+                active = kept
+                registers[value] = reg
+                owners[reg] = value
+                &active.push(value)
+            } else {
+                slots[value] = spill_slots
+                spill_slots += 1
+            }
+        }
+    }
+
+    locations := [X64Loc]{}
+    loop value in 0..<count {
+        &locations.push(if registers[value] >= 0 -> X64Loc.Reg{reg: registers[value]} else -> X64Loc.Stack{slot: slots[value]})
+    }
+    callee_saved := [Int]{}
+    loop reg in X64_CALLEE_SAVED_POOL {
+        used := false
+        loop value in 0..<count { if registers[value] == reg -> used = true }
+        if used -> &callee_saved.push(reg)
+    }
+    X64Allocation{locations: locations, spill_slots: spill_slots, callee_saved: callee_saved}
+}

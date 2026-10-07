@@ -37,6 +37,7 @@ use jet_foundation.[
     MIRPlace,
     MIRPlaceBase,
     MIRPlaceID,
+    MIRProjection,
     MIRPreludeCallID,
     MIRPreludeTypeArg,
     MIRResourceAccess,
@@ -209,8 +210,187 @@ fn jet_web_js_symbol_alias(name: String) -> String? {
         name == "jet_time_sleep_until" -> Val("jet_time_sleep_until")
         name == "jet_runtime_stop" -> Val("jet_runtime_stop")
         name == "jet_runtime_stop_report" -> Val("jet_runtime_stop_report")
+        // MIRWeb WEB_PRELUDE_LINKS / WEB_RUNTIME_LINKS: the renamed bindings
+        // (namespaced Rust Prelude paths and DOM runtime adapters).
+        name == "jet_data_left_join_checked_default" -> Val("jet_data_left_join")
+        name == "jet_data_inner_join_checked_default" -> Val("jet_data_inner_join")
+        name == "jet_std::jet_int_checked_fixed" -> Val("jet_int_checked_fixed")
+        name == "jet_std::JetReceiver::is_timer" -> Val("jet_channel_is_timer")
+        name == "jet_std::JetReceiver::is_interval" -> Val("jet_channel_is_interval")
+        name == "jet_std::JetReceiver::is_cancelled" -> Val("jet_channel_is_cancelled")
+        name == "jet_std::JetReceiver::is_ready" -> Val("jet_channel_is_ready")
+        name == "jet_std::JetReceiver::delay_ms" -> Val("jet_channel_delay_ms")
+        name == "jet_std::jet_select_wait_tagged" -> Val("jet_scheduler_select")
+        name == "jet_std::jet_select_try_wait_tagged" -> Val("jet_scheduler_try_select")
+        name == "jet_std::JetMeasurement::add" -> Val("jet_measurement_add")
+        name == "jet_std::JetMeasurement::sub" -> Val("jet_measurement_sub")
+        name == "jet_std::JetMeasurement::mul" -> Val("jet_measurement_mul")
+        name == "jet_std::JetMeasurement::div" -> Val("jet_measurement_div")
+        name == "jet_std::JetMeasurement::sqrt" -> Val("jet_measurement_sqrt")
+        name == "::jet_std::JetShared::new" -> Val("jet_shared_new")
+        name == "JetUiShortcut::cmd" -> Val("jet_ui_shortcut_cmd")
+        name == "::JetUiShortcut::cmd" -> Val("jet_ui_shortcut_cmd")
+        name == "jet_std::JetUiShortcut::cmd" -> Val("jet_ui_shortcut_cmd")
+        name == "jet_app" -> Val("jetDom.jetApp")
+        name == "jet_app_route" -> Val("jetDom.jetAppRoute")
+        name == "jet_app_page" -> Val("jetDom.jetAppPage")
+        name == "jet_app_layout" -> Val("jetDom.jetAppLayout")
+        name == "jet_app_loader" -> Val("jetDom.jetAppLoader")
+        name == "jet_app_loader_preload" -> Val("jetDom.jetAppLoaderPreload")
+        name == "jet_app_pending" -> Val("jetDom.jetAppPending")
+        name == "jet_app_not_found" -> Val("jetDom.jetAppNotFound")
+        name == "jet_app_error" -> Val("jetDom.jetAppError")
+        name == "jet_app_action" -> Val("jetDom.jetAppAction")
+        name == "jet_app_form" -> Val("jetDom.jetAppForm")
+        name == "jet_app_data" -> Val("jetDom.jetAppData")
+        name == "jet_app_mount" -> Val("jetDom.jetAppMount")
+        name == "jet_app_mount_with_effect" -> Val("jetDom.jetAppMountWithEffect")
+        name == "jet_app_mount_with_policy" -> Val("jetDom.jetAppMountWithPolicy")
+        name == "jet_app_routes" -> Val("jetDom.jetAppRoutes")
+        name == "jet_app_security" -> Val("jetDom.jetAppSecurity")
+        name == "jet_app_assets" -> Val("jetDom.jetAppAssets")
+        name == "jet_app_split" -> Val("jetDom.jetAppSplit")
+        name == "jet_app_code_split" -> Val("jetDom.jetAppCodeSplit")
+        name == "jet_app_cache" -> Val("jetDom.jetAppCache")
+        name == "jet_app_a11y" -> Val("jetDom.jetAppA11y")
+        name == "jet_app_adapter" -> Val("jetDom.jetAppAdapter")
+        name == "jet_app_csr" -> Val("jetDom.jetAppCsr")
+        name == "jet_app_ssr" -> Val("jetDom.jetAppSsr")
+        name == "jet_app_ssg" -> Val("jetDom.jetAppSsg")
+        name == "jet_app_stream" -> Val("jetDom.jetAppStream")
+        name == "jet_app_streaming" -> Val("jetDom.jetAppStreaming")
+        name == "jet_app_island" -> Val("jetDom.jetAppIsland")
+        name == "jet_app_hydration_dev" -> Val("jetDom.jetAppHydrationDev")
+        name == "jet_app_hydration_release" -> Val("jetDom.jetAppHydrationRelease")
+        name == "jet_app_facts_json" -> Val("jetDom.jetAppFactsJson")
+        name == "jet_app_serve" -> Val("jetDom.jetAppServe")
+        name == "jet_app_serve_with_port" -> Val("jetDom.jetAppServeWithPort")
+        name == "jet_app_serve_on" -> Val("jetDom.jetAppServeOn")
+        name == "jet_web_stream_register" -> Val("jetDom.webStreamRegister")
+        name == "jet_web_stream_chunk" -> Val("jetDom.webStreamChunk")
+        name == "jet_web_stream_hydration_start" -> Val("jetDom.webStreamHydrationStart")
+        name == "jet_web_stream_hydration_complete" -> Val("jetDom.webStreamHydrationComplete")
+        name == "jet_web_stream_receipt" -> Val("jetDom.webStreamReceipt")
+        name == "jet_web_stream_projection" -> Val("jetDom.webStreamProjection")
+        name == "jet_std::JetTask::join" -> Val("jet_task_join")
+        name == "jet_std::jet_task_join_result" -> Val("jet_task_join_result")
+        name == "jet_std::JetEventScope::new" -> Val("jet_event_scope_new")
+        name == "jet_std::JetHook::new" -> Val("jet_event_hook_new")
+        name == "jet_std::JetDecisionHook::new" -> Val("jet_event_decision_hook_new")
+        name == "jet_std::JetEventPolicy::sync" -> Val("jet_event_policy_sync")
+        name == "jet_std::JetEvent::new" -> Val("jet_event_new")
+        name == "jet_std::JetEvent::with_policy" -> Val("jet_event_with_policy")
+        name == "jet_std::JetAsyncEvent::new" -> Val("jet_async_event_new")
+        name == "jet_std::JetEvent::on" -> Val("jet_event_on")
+        name == "jet_std::JetEvent::once" -> Val("jet_event_once")
+        name == "jet_std::JetEvent::on_priority" -> Val("jet_event_on_priority")
+        name == "jet_std::JetEvent::emit" -> Val("jet_event_emit")
+        name == "jet_std::JetEvent::listener_count" -> Val("jet_event_listener_count")
+        name == "jet_std::JetEvent::trace" -> Val("jet_event_trace")
+        name == "jet_std::JetAsyncEvent::on" -> Val("jet_async_event_on")
+        name == "jet_std::JetAsyncEvent::once" -> Val("jet_async_event_once")
+        name == "jet_std::JetAsyncEvent::on_priority" -> Val("jet_async_event_on_priority")
+        name == "jet_std::JetAsyncEvent::emit_async" -> Val("jet_async_event_emit")
+        name == "jet_std::JetAsyncEvent::emit_async_result" -> Val("jet_async_event_emit")
+        name == "jet_std::JetAsyncEvent::close" -> Val("jet_async_event_close")
+        name == "jet_std::JetAsyncEvent::listener_count" -> Val("jet_async_event_listener_count")
+        name == "jet_std::JetAsyncEvent::queued_count" -> Val("jet_async_event_queued_count")
+        name == "jet_std::JetAsyncEvent::running_count" -> Val("jet_async_event_running_count")
+        name == "jet_std::JetAsyncEvent::blocked_count" -> Val("jet_async_event_blocked_count")
+        name == "jet_std::JetHook::on" -> Val("jet_hook_on")
+        name == "jet_std::JetHook::once" -> Val("jet_hook_once")
+        name == "jet_std::JetHook::on_priority" -> Val("jet_hook_on_priority")
+        name == "jet_std::JetHook::run" -> Val("jet_hook_run")
+        name == "jet_std::JetHook::listener_count" -> Val("jet_hook_listener_count")
+        name == "jet_std::JetHook::trace" -> Val("jet_hook_trace")
+        name == "jet_std::JetDecisionHook::on" -> Val("jet_decision_hook_on")
+        name == "jet_std::JetDecisionHook::once" -> Val("jet_decision_hook_once")
+        name == "jet_std::JetDecisionHook::on_priority" -> Val("jet_decision_hook_on_priority")
+        name == "jet_std::JetDecisionHook::run" -> Val("jet_decision_hook_run")
+        name == "jet_std::JetDecisionHook::listener_count" -> Val("jet_decision_hook_listener_count")
+        name == "jet_std::JetSubscription::unsubscribe" -> Val("jet_subscription_unsubscribe")
+        name == "jet_std::JetSubscription::active" -> Val("jet_subscription_active")
+        name == "jet_std::JetEventScope::cancel" -> Val("jet_event_scope_cancel")
+        name == "jet_std::JetEventScope::active_count" -> Val("jet_event_scope_active_count")
+        name == "jet_std::JetEventTrace::summary" -> Val("jet_event_trace_summary")
+        name == "jet_std::JetEventTrace::delivered" -> Val("jet_event_trace_delivered")
+        name == "jet_std::JetEventTrace::queued" -> Val("jet_event_trace_queued")
+        name == "jet_std::JetEventTrace::dropped" -> Val("jet_event_trace_dropped")
+        name == "jet_std::JetDispatchReport::state" -> Val("jet_dispatch_report_state")
+        name == "jet_std::JetDispatchReport::accepted" -> Val("jet_dispatch_report_accepted")
+        name == "jet_std::JetDispatchReport::delivered_handlers" -> Val("jet_dispatch_report_delivered_handlers")
+        name == "jet_std::JetDispatchReport::failures" -> Val("jet_dispatch_report_failures")
+        name == "jet_std::JetDispatchReport::trace" -> Val("jet_dispatch_report_trace")
+        name == "jet_std::JetPool::new" -> Val("jet_pool_new")
+        name == "jet_std::JetPool::add" -> Val("jet_pool_add")
+        name == "jet_std::JetPool::remove" -> Val("jet_pool_remove")
+        name == "jet_std::JetPool::ids" -> Val("jet_pool_ids")
         else -> None
     }
+}
+
+// MIRWeb WEB_RUNTIME_LINKS identity rows: runtime symbols the Web JS runtime
+// module binds under their own name. Runtime symbols bind only when listed.
+fn jet_web_js_runtime_identity(name: String) -> Bool Never! {
+    linked :: [String]{
+        "jet_journey_reset", "jet_journey_origin", "jet_journey_frame_text", "jet_err_from_message", "jet_err_with_context_frame",
+        "jet_entry_error_exit_jet", "jet_web_result_value", "jet_web_default_error", "jet_web_error_from_conversion", "jet_web_try",
+        "jet_list_bounds_message", "jet_missing_map_key_message", "jet_web_runtime_context", "jet_web_runtime_context_frame", "jet_web_wasm_host_error",
+        "jet_stack_overflow_message", "jet_stack_enter", "jet_stack_leave", "jet_todo_stop", "jet_contract_check", "jet_contract_fail", "jet_keep",
+        "jet_task_spawn", "jet_task_join", "jet_task_detach", "jet_task_group_body_failed", "jet_task_all", "jet_task_all_named", "jet_channel_send",
+        "jet_channel_receive", "jet_channel_try_receive", "jet_channel_is_timer", "jet_channel_is_interval", "jet_channel_is_cancelled",
+        "jet_channel_is_ready", "jet_channel_delay_ms", "jet_channel_close", "jet_scheduler_select", "jet_scheduler_try_select", "jet_list_map",
+        "jet_list_filter", "jet_iter_map", "jet_iter_filter", "jet_list_try_map", "jet_list_try_filter", "jet_list_pop_kernel", "jet_list_remove_value",
+        "jet_list_remove_slot", "jet_map_pop_kernel", "jet_map_pop_first", "jet_list_take", "jet_list_skip", "jet_iter_lazy", "jet_iter_from_vec",
+        "jet_iter_to_list", "jet_iter_collect", "jet_iter_take", "jet_iter_skip", "jet_iter_empty", "jet_iter_some", "jet_iter_indexes", "jet_iter_zip",
+        "jet_iter_zip_strict", "jet_iter_zip_pad", "jet_iter_step_by", "jet_iter_dedup", "jet_iter_chunks", "jet_iter_windows", "jet_iter_flatten",
+        "jet_list_flatten", "jet_iter_intersperse", "jet_iter_repeat", "jet_iter_cycle", "jet_iter_drop_last", "jet_iter_shuffle", "jet_iter_is_sorted",
+        "jet_iter_last_index_of", "jet_iter_average_int", "jet_iter_average_float", "jet_iter_compare", "jet_iter_split", "jet_iter_zip_family",
+        "jet_list_try_collect", "jet_iter_first", "jet_iter_next", "jet_float_display", "jet_fmt_decimal", "jet_fmt_quantity", "jet_fmt_fixed_even",
+        "jet_fmt_grouped", "jet_fmt_decimal_int", "jet_fmt_grouped_int", "jet_group_decimal", "jet_fmt_pretty", "jet_gc_root", "jet_gc_apply", "jet_gc_read",
+        "jet_gc_edit_clear", "jet_gc_edit_pop", "jet_gc_edit_remove_index", "jet_gc_edit_insert_index", "jet_gc_edit_prepend", "jet_gc_edit_additive",
+        "jet_gc_edit_plain", "jet_gc_edit_edge_slot", "jet_typed_sql_raw", "jet_typed_sql_interpolate", "jet_typed_sql_template", "jet_typed_sql_params",
+        "jet_typed_html_raw", "jet_typed_html_text", "jet_typed_html_escape", "jet_typed_html_interpolate", "jet_typed_sh_raw", "jet_typed_sh_interpolate",
+        "jet_typed_path_component", "jet_typed_path_interpolate", "jet_typed_path_literal", "jet_typed_datetime_interpolate", "jet_typed_datetime_literal",
+        "jet_typed_url_literal", "jet_expiring_now", "jet_expiring_new", "jet_expiring_secret_new", "jet_expiring_get", "jet_expiring_secret_with",
+        "jet_fraction_value", "jet_fraction_from_parts", "jet_fraction_add", "jet_fraction_sub", "jet_fraction_mul", "jet_fraction_div",
+        "jet_fraction_equal", "jet_fraction_numerator", "jet_fraction_denominator", "jet_fraction_to_float", "jet_fraction_is_zero",
+        "jet_fraction_to_string", "jet_complex_value", "jet_complex_from_parts", "jet_complex_add", "jet_complex_sub", "jet_complex_mul", "jet_complex_div",
+        "jet_complex_abs", "jet_measurement_kernel_new", "jet_measurement_kernel_from_relative", "jet_measurement_kernel_add", "jet_measurement_kernel_sub",
+        "jet_measurement_kernel_mul", "jet_measurement_kernel_div", "jet_measurement_kernel_sqrt", "jet_measurement_kernel_show", "jet_measurement_new",
+        "jet_measurement_value", "jet_measurement_uncertainty", "jet_measurement_add", "jet_measurement_sub", "jet_measurement_mul", "jet_measurement_div",
+        "jet_measurement_sqrt", "jet_measurement_show", "jet_cell_replace", "jet_cell_read", "jet_cell_edit", "jet_cell_get_or_set", "jet_cell_guard_read",
+        "jet_cell_guard_edit", "jet_cell_guard_map", "jet_cell_guard_split", "jet_cell_read_guard_get", "jet_cell_read_guard_read",
+        "jet_cell_edit_guard_get", "jet_cell_edit_guard_set", "jet_cell_edit_guard_read", "jet_cell_edit_guard_edit", "jet_pool_get", "jet_pool_get_mut",
+        "jet_pool_set", "jet_authority_covers", "jet_authority_workspace", "jet_authority_from_rights", "jet_authority_with", "jet_authority_without",
+        "jet_compute_web_fail", "jet_compute_web_num", "jet_compute_web_float", "jet_compute_web_shape", "jet_compute_web_numel",
+        "jet_compute_web_placement", "jet_compute_web_tensor", "jet_compute_web_device_show", "jet_compute_web_device", "jet_compute_web_same_device",
+        "jet_compute_webgpu_device", "jet_compute_webgpu_buffer", "jet_compute_webgpu_params", "jet_compute_webgpu_pipeline", "jet_compute_webgpu_dispatch",
+        "jet_compute_webgpu_read", "jet_compute_web_values", "jet_compute_web_buffer", "jet_compute_web_unary_shader", "jet_compute_web_binary_shader",
+        "jet_compute_web_f32_values", "jet_compute_web_gpu_unary", "jet_compute_web_gpu_binary", "jet_compute_web_gpu_matmul",
+        "jet_compute_web_broadcast_shape", "jet_compute_web_broadcast_values", "jet_compute_web_binary", "jet_compute_web_unary", "jet_compute_web_matmul",
+        "jet_compute_web_upload", "jet_compute_web_transfer", "jet_std_time_sleep_duration_ns", "jet_rt_callback", "jet_rt_next_deadline", "jet_rt_receipt",
+        "jet_rt_cancel", "jet_rt_is_cancelled", "jet_compute_web_sum", "jet_compute_web_mse", "jet_compute_web_sgd", "jet_compute_web_set",
+        "jet_compute_web_shape_result", "jet_time_floor_div", "jet_time_mod", "jet_time_clamp_i64", "jet_time_checked_i64", "jet_time_saturating_add_i64",
+        "jet_time_saturating_mul_i64", "jet_time_saturating_negated_i64", "jet_time_saturating_abs_i64", "jet_time_pad", "jet_time_year_string",
+        "jet_time_is_leap", "jet_time_days_in_month", "jet_time_date", "jet_time_day_number", "jet_time_date_from_day_number", "jet_time_add_days",
+        "jet_time_add_months", "jet_time_date_parse", "jet_time_weekday", "jet_time_iso_weekday", "jet_time_iso_week_year", "jet_time_iso_week",
+        "jet_time_from_iso_week", "jet_time_parse_iso_week_date", "jet_time_time", "jet_time_parse_time", "jet_time_time_seconds",
+        "jet_time_time_nanoseconds", "jet_time_time_from_nanoseconds", "jet_time_date_time_from_ns", "jet_time_date_time_from_ms",
+        "jet_time_date_time_from_seconds", "jet_time_date_time_from_microseconds", "jet_time_date_time_from_nanoseconds", "jet_time_date_time_total_ns",
+        "jet_time_date_time_date", "jet_time_date_time_time", "jet_time_date_time_add_duration", "jet_time_local_epoch_seconds", "jet_time_parse_offset",
+        "jet_time_offset_string", "jet_time_parse_rfc3339", "jet_time_date_string", "jet_time_time_string", "jet_time_date_time_format_rfc3339",
+        "jet_time_period", "jet_time_period_add", "jet_time_period_negated", "jet_time_period_abs", "jet_time_period_month_delta",
+        "jet_time_period_add_to_date", "jet_time_period_add_to_datetime", "jet_time_period_total_in", "jet_time_unit_ns", "jet_time_round_quotient",
+        "jet_time_round_ns", "jet_time_duration_abs", "jet_time_duration_negated", "jet_time_duration_sign", "jet_time_duration_total_in",
+        "jet_time_duration_round", "jet_time_ok", "jet_time_err", "jet_time_result", "jet_time_text_result", "jet_time_range_result", "jet_time_some",
+        "jet_time_none", "jet_time_tzif_u32", "jet_time_tzif_i64", "jet_time_tzif_counts", "jet_time_tzif_block_size", "jet_time_parse_tzif",
+        "jet_time_zone", "jet_time_zone_info_at_utc", "jet_time_zone_local_parts", "jet_time_zone_local_to_utc", "jet_time_zone_local_to_utc_offset",
+        "jet_time_zone_start_of_day", "jet_time_zone_hours_in_day", "jet_time_zone_transition", "jet_time_zoned_from_local", "jet_time_zoned_date",
+        "jet_time_zoned_time", "jet_time_replace", "jet_time_format", "jet_time_format_checked", "jet_time_method", "jet_time_core", "jet_time_add",
+        "jet_time_sub"
+    }
+    linked.contains(name)
 }
 
 fn jet_web_js_symbol(ctx: &JetWebEmitContext, symbol: MIRSymbol) -> String Never! {
@@ -223,6 +403,7 @@ fn jet_web_js_symbol(ctx: &JetWebEmitContext, symbol: MIRSymbol) -> String Never
         }
         .Runtime(name) -> {
             if jet_web_js_symbol_alias(name) == .Val(alias) -> return alias
+            if jet_web_js_runtime_identity(name) -> return name
             jet_web_fail(&ctx, JetWebEmitFailureKind.MissingPreludeCall, "E0003", "MIR Web runtime symbol has no explicit binding", name, None)
             return "__jet_missing_runtime"
         }
@@ -645,7 +826,7 @@ fn jet_web_js_place_expression(ctx: &JetWebEmitContext, function: MIRFunction, p
     loop projection in place_row.projections {
         if projection == {
             .Field(field, _) -> expression = "({expression})[{jet_web_js_quote(jet_web_js_field_name(&ctx, field))}]"
-            .Index(_, index, _, _, _, _, _) -> expression = "({expression})[{jet_web_js_value(index)}]"
+            .Index(_, index, call, _, location, context, span) -> expression = jet_web_js_projection_index_read(&ctx, call, expression, jet_web_js_value(index), location, context, span)
             .Deref(_) -> expression = "({expression}).value"
             .Payload(kind, _) -> {
                 slot :: if kind == .Enum(_, _, index) -> index else -> 0
@@ -683,8 +864,12 @@ fn jet_web_js_place_cell(ctx: &JetWebEmitContext, function: MIRFunction, place: 
             .Static(name) -> return "{{ get value() {{ return globalThis[{jet_web_js_quote(name)}]; }}, set value(v) {{ globalThis[{jet_web_js_quote(name)}] = v; }} }}"
         }
     }
-    expression :: jet_web_js_place_expression(&ctx, function, place)
-    "{{ get value() {{ return {expression}; }}, set value(v) {{ {expression} = v; }} }}"
+    // MIRWeb js_place_cell_expression: a projected place is a cell whose read
+    // and write run the checked index routes.
+    read :: jet_web_js_place_expression(&ctx, function, place)
+    root :: jet_web_js_base_expression(&ctx, function, place_row.base)
+    write :: jet_web_js_write_projected(&ctx, root, place_row.projections, 0, "value")
+    "(() => {{ const cell = {{}}; Object.defineProperty(cell, \"value\", {{ get: () => {read}, set: value => {{ void {write}; }} }}); return cell; }})()"
 }
 
 fn jet_web_js_move_place(ctx: &JetWebEmitContext, function: MIRFunction, place: MIRPlaceID) -> String Never! {
@@ -716,8 +901,86 @@ fn jet_web_js_read_place(ctx: &JetWebEmitContext, function: MIRFunction, place: 
 }
 
 fn jet_web_js_write_place(ctx: &JetWebEmitContext, function: MIRFunction, place: MIRPlaceID, value: String) -> String Never! {
+    loop row in function.places {
+        if row.id == place && row.projections.len() > 0 {
+            root :: jet_web_js_base_expression(&ctx, function, row.base)
+            return jet_web_js_write_projected(&ctx, root, row.projections, 0, value)
+        }
+    }
     cell :: jet_web_js_place_cell(&ctx, function, place)
-    "(({cell}.value = {value}), {value})"
+    "(({cell}.value = {value}), undefined)"
+}
+
+// MIRWeb js_index_expression for an index place projection: the checked read
+// route; a route with context arguments needs the checked panic context.
+fn jet_web_js_projection_index_read(ctx: &JetWebEmitContext, call: MIRPreludeCallID, base: String, index: String, location: MIRPanicLoc, context: MIRPanicContext?, span: Span) -> String Never! {
+    if context == .Val(context_row) -> return jet_web_js_index_call(&ctx, call, base, index, location, context_row)
+    route :: jet_web_find_prelude(ctx.program, call) ?? return jet_web_js_route_call(&ctx, call, [base, index])
+    if route.signature.arity != 4 || route.signature.max_arity != 4 {
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR index Prelude call requires checked context", "index routes with context arguments need the checked panic context", Val(span))
+        return "undefined"
+    }
+    source :: jet_web_js_quote(jet_web_find_source_path(ctx.program, location.file) ?? "")
+    jet_web_js_route_call(&ctx, call, [base, index, source, "{location.line}"])
+}
+
+// MIRWeb js_index_write_expression: the exact setter route with its checked
+// source and context arguments.
+fn jet_web_js_index_write(ctx: &JetWebEmitContext, call: MIRPreludeCallID, base: String, index: String, written: String, location: MIRPanicLoc, context: MIRPanicContext?, span: Span) -> String Never! {
+    route :: jet_web_find_prelude(ctx.program, call) ?? return jet_web_js_route_call(&ctx, call, [base, index, written])
+    args := [String]{base, index, written}
+    arity :: route.signature.arity
+    if route.signature.max_arity != arity || (arity != 3 && arity != 5 && arity != 7) {
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR indexed setter Prelude call has an unsupported ABI arity", "checked setter routes use exact arity three, five, or seven", Val(span))
+        return "undefined"
+    }
+    if arity >= 5 {
+        &args.push(jet_web_js_quote(jet_web_find_source_path(ctx.program, location.file) ?? ""))
+        &args.push("{location.line}")
+    }
+    if arity == 7 {
+        context_row :: context ?? {
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR indexed setter Prelude call requires checked context", "setter routes with context arguments need the checked panic context", Val(span))
+            return "undefined"
+        }
+        &args.push(jet_web_js_quote(context_row.function))
+        &args.push(jet_web_js_quote(context_row.source_line))
+    }
+    jet_web_js_route_call(&ctx, call, args)
+}
+
+// MIRWeb js_write_projected_place_expression: walks the projections from
+// `start`; a nested index write reads the element, writes inside it, and
+// stores it back through the setter route.
+fn jet_web_js_write_projected(ctx: &JetWebEmitContext, target: String, projections: [MIRProjection], start: Int, expression: String) -> String Never! {
+    if start >= projections.len() -> return "({target} = {expression}, undefined)"
+    if projections[start] == {
+        .Field(field, _) -> {
+            name :: jet_web_js_quote(jet_web_js_field_name(&ctx, field))
+            return jet_web_js_write_projected(&ctx, "{target}[{name}]", projections, start + 1, expression)
+        }
+        .Deref(_) -> return jet_web_js_write_projected(&ctx, "({target}).value", projections, start + 1, expression)
+        .Payload(kind, _) -> {
+            slot :: if kind == .Enum(_, _, index) -> index else -> 0
+            return jet_web_js_write_projected(&ctx, "({target}).values[{slot}]", projections, start + 1, expression)
+        }
+        .Index(_, index, call, write_call, location, context, span) -> {
+            setter :: write_call ?? {
+                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "Web write index projection has no exact setter Prelude row", "checked writable index places carry their setter route", Val(span))
+                return "undefined"
+            }
+            index_text :: jet_web_js_value(index)
+            if start + 1 == projections.len() -> return jet_web_js_index_write(&ctx, setter, target, index_text, expression, location, context, span)
+            read :: jet_web_js_projection_index_read(&ctx, call, "__jet_index_base", index_text, location, context, span)
+            nested :: jet_web_js_write_projected(&ctx, "__jet_index_value", projections, start + 1, expression)
+            store :: jet_web_js_index_write(&ctx, setter, "__jet_index_base", index_text, "__jet_index_value", location, context, span)
+            return "(() => {{ const __jet_index_base = {target}; const __jet_index_value = {read}; void ({nested}); return {store}; }})()"
+        }
+        .Range(_, _, span) -> {
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "Web MIR has no range write window lowering", "a range write window edits its owner list in place, which the Web target does not lower yet", Val(span))
+            return "undefined"
+        }
+    }
 }
 
 fn jet_web_js_phi(incoming: [MIRPhiIncoming]) -> String Never! {

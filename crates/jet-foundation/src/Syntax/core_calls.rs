@@ -1465,7 +1465,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: e628f7d846899239ad0518f37449b1d00773b5aa16a3861b954bf4f381e08df0
+// Source SHA-256: bf1ce2d4e62af90c68111a66b61a92e4dc7cf7873f3419ee3ebfe31c34a49a66
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2596,8 +2596,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.net.url", "query", "jet_url_query", true, &[true]),
     CoreCallRecord::new( "core.net.url", "percent_encode", "jet_url_percent_encode_component", true, &[true], ),
     CoreCallRecord::new( "core.net.url", "percent_decode", "jet_url_percent_decode_component", true, &[true], ),
-    CoreCallRecord::new("core.net.url", "geturl", "jet_url_to_string", true, &[true],) .with_jit_symbol("jet_jit_url_to_string"),
-    CoreCallRecord::new("core.net.url", "unparse", "jet_url_to_string", true, &[true],) .with_jit_symbol("jet_jit_url_to_string"),
+    CoreCallRecord::new("core.net.url", "geturl", "jet_url_to_string", true, &[true],),
+    CoreCallRecord::new("core.net.url", "unparse", "jet_url_to_string", true, &[true],),
     CoreCallRecord::new("core.net.url", "urljoin", "jet_url_join", true, &[true, true],) .with_jit_symbol("jet_jit_url_join_text"),
     CoreCallRecord::new("core.net.url", "parse_qsl", "jet_url_parse_qsl", true, &[true],) .with_jit_symbol("jet_jit_url_parse_qsl"),
     CoreCallRecord::new("core.net.url", "parse_qs", "jet_url_parse_qsl", true, &[true],) .with_jit_symbol("jet_jit_url_parse_qsl"),
@@ -2609,10 +2609,10 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.net.url", "unquote", "jet_url_unquote", true, &[true],) .with_jit_symbol("jet_jit_url_unquote"),
     CoreCallRecord::new("core.net.url", "unquote_to_bytes", "jet_url_unquote_to_bytes", true, &[true],) .with_jit_symbol("jet_jit_url_unquote_to_bytes"),
     CoreCallRecord::new("core.net.url", "unquote_plus", "jet_url_unquote_plus", true, &[true],) .with_jit_symbol("jet_jit_url_unquote_plus"),
-    CoreCallRecord::new("core.net.url", "urlparse", "jet_url_parse", true, &[true],) .with_jit_symbol("jet_jit_url_parse"),
-    CoreCallRecord::new("core.net.url", "urlsplit", "jet_url_parse", true, &[true],) .with_jit_symbol("jet_jit_url_parse"),
-    CoreCallRecord::new("core.net.url", "urlunparse", "jet_url_to_string", true, &[true],) .with_jit_symbol("jet_jit_url_to_string"),
-    CoreCallRecord::new("core.net.url", "urlunsplit", "jet_url_to_string", true, &[true],) .with_jit_symbol("jet_jit_url_to_string"),
+    CoreCallRecord::new("core.net.url", "urlparse", "jet_url_parse", true, &[true],),
+    CoreCallRecord::new("core.net.url", "urlsplit", "jet_url_parse", true, &[true],),
+    CoreCallRecord::new("core.net.url", "urlunparse", "jet_url_to_string", true, &[true],),
+    CoreCallRecord::new("core.net.url", "urlunsplit", "jet_url_to_string", true, &[true],),
     CoreCallRecord::new("core.net.url", "urldefrag", "jet_url_urldefrag", true, &[true],) .with_jit_symbol("jet_jit_url_urldefrag"),
     CoreCallRecord::new("core.net.mime", "parse", "jet_mime_parse", true, &[true]) .with_pure_route(CoreCallPureRoute::Mime),
     CoreCallRecord::new( "core.net.mime", "from_extension", "jet_mime_from_extension", true, &[true], ) .with_pure_route(CoreCallPureRoute::Mime),

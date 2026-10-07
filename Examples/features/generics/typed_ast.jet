@@ -1,0 +1,197 @@
+// Typed expression AST: the evaluator's result type follows the node type.
+// Three encodings evaluate the same two programs,
+//   if 1 + 2 == 3 then 10 + 5 else 0        (an Int program)
+//   if 2 == 2 then 4 == 5 else true         (a Bool program)
+// using only generic types, enums and traits. Jet has no GADTs; see
+// tests/ui/typed_ast_ill_typed.jet for the ill-typed nodes each encoding
+// rejects before the program runs.
+
+// (a) One enum per result type. A constructor's result type is the enum it
+// belongs to, so an ill-typed node cannot be built and both evaluators are
+// total: no arm handles an impossible shape.
+enum IntExpr {
+    Lit(Int)
+    Add(a: IntExpr, b: IntExpr)
+    If(c: BoolExpr, t: IntExpr, e: IntExpr)
+}
+
+enum BoolExpr {
+    Lit(Bool)
+    Eq(a: IntExpr, b: IntExpr)
+    If(c: BoolExpr, t: BoolExpr, e: BoolExpr)
+}
+
+fn eval_int(e: IntExpr) -> Int {
+    if e == {
+        .Lit(v) -> v
+        .Add(a, b) -> eval_int(a) + eval_int(b)
+        .If(c, t, f) -> if eval_bool(c) -> eval_int(t) else -> eval_int(f)
+    }
+}
+
+fn eval_bool(e: BoolExpr) -> Bool {
+    if e == {
+        .Lit(v) -> v
+        .Eq(a, b) -> eval_int(a) == eval_int(b)
+        .If(c, t, f) -> if eval_bool(c) -> eval_bool(t) else -> eval_bool(f)
+    }
+}
+
+// (b) A phantom-typed wrapper `Expr<T>` over one untyped node enum. The smart
+// constructors fix `T`, and `cond<T>` forces both branches to agree. The
+// untyped evaluator still carries a `Stuck` arm for shapes the constructors
+// never build, and the typed runners need a fallback for it.
+enum Node {
+    ILit(Int)
+    BLit(Bool)
+    Add(a: Node, b: Node)
+    Eq(a: Node, b: Node)
+    If(c: Node, t: Node, e: Node)
+}
+
+enum Value {
+    I(Int)
+    B(Bool)
+    Stuck(String)
+}
+
+struct Expr<T> {
+    node: Node
+    #Skip marker: T?
+}
+
+fn int_lit(v: Int) -> Expr<Int> { {node: Node.ILit(v), marker: None} }
+
+fn bool_lit(v: Bool) -> Expr<Bool> { {node: Node.BLit(v), marker: None} }
+
+fn add(a: Expr<Int>, b: Expr<Int>) -> Expr<Int> { {node: Node.Add{a: a.node, b: b.node}, marker: None} }
+
+fn eq(a: Expr<Int>, b: Expr<Int>) -> Expr<Bool> { {node: Node.Eq{a: a.node, b: b.node}, marker: None} }
+
+fn cond<T>(c: Expr<Bool>, t: Expr<T>, e: Expr<T>) -> Expr<T> {
+    {node: Node.If{c: c.node, t: t.node, e: e.node}, marker: None}
+}
+
+fn eval_node(n: Node) -> Value {
+    if n == {
+        .ILit(v) -> Value.I(v)
+        .BLit(v) -> Value.B(v)
+        .Add(a, b) -> if eval_node(a) == {
+            .I(x) -> if eval_node(b) == {
+                .I(y) -> Value.I(x + y)
+                else -> Value.Stuck("add rhs")
+            }
+            else -> Value.Stuck("add lhs")
+        }
+        .Eq(a, b) -> if eval_node(a) == {
+            .I(x) -> if eval_node(b) == {
+                .I(y) -> Value.B(x == y)
+                else -> Value.Stuck("eq rhs")
+            }
+            else -> Value.Stuck("eq lhs")
+        }
+        .If(c, t, e) -> if eval_node(c) == {
+            .B(k) -> if k -> eval_node(t) else -> eval_node(e)
+            else -> Value.Stuck("if cond")
+        }
+    }
+}
+
+fn run_int(e: Expr<Int>) -> Int {
+    if eval_node(e.node) == {
+        .I(v) -> v
+        else -> 0 - 1
+    }
+}
+
+fn run_bool(e: Expr<Bool>) -> Bool {
+    if eval_node(e.node) == {
+        .B(v) -> v
+        else -> false
+    }
+}
+
+// (c) Trait-bounded, open encoding: each node is its own struct, and the trait
+// it implements fixes its evaluator's result type.
+trait IntTerm {
+    fn value(self) -[]> Int
+}
+
+trait BoolTerm {
+    fn holds(self) -[]> Bool
+}
+
+struct Num {
+    v: Int
+
+    impl IntTerm {
+        fn value(self) -[]> Int { self.v }
+    }
+}
+
+struct Truth {
+    v: Bool
+
+    impl BoolTerm {
+        fn holds(self) -[]> Bool { self.v }
+    }
+}
+
+struct Plus {
+    a: IntTerm
+    b: IntTerm
+
+    impl IntTerm {
+        fn value(self) -[]> Int { self.a.value() + self.b.value() }
+    }
+}
+
+struct Same {
+    a: IntTerm
+    b: IntTerm
+
+    impl BoolTerm {
+        fn holds(self) -[]> Bool { self.a.value() == self.b.value() }
+    }
+}
+
+struct IntIf {
+    c: BoolTerm
+    t: IntTerm
+    e: IntTerm
+
+    impl IntTerm {
+        fn value(self) -[]> Int { if self.c.holds() -> self.t.value() else -> self.e.value() }
+    }
+}
+
+struct BoolIf {
+    c: BoolTerm
+    t: BoolTerm
+    e: BoolTerm
+
+    impl BoolTerm {
+        fn holds(self) -[]> Bool { if self.c.holds() -> self.t.holds() else -> self.e.holds() }
+    }
+}
+
+fn run() {
+    // (a)
+    sum_a :: IntExpr.Add{a: IntExpr.Lit(1), b: IntExpr.Lit(2)}
+    test_a :: BoolExpr.Eq{a: sum_a, b: IntExpr.Lit(3)}
+    prog_a :: IntExpr.If{c: test_a, t: IntExpr.Add{a: IntExpr.Lit(10), b: IntExpr.Lit(5)}, e: IntExpr.Lit(0)}
+    same_a :: BoolExpr.Eq{a: IntExpr.Lit(2), b: IntExpr.Lit(2)}
+    flag_a :: BoolExpr.If{c: same_a, t: BoolExpr.Eq{a: IntExpr.Lit(4), b: IntExpr.Lit(5)}, e: BoolExpr.Lit(true)}
+    print("a: {eval_int(prog_a)} {eval_bool(flag_a)}")
+
+    // (b)
+    prog_b :: cond(eq(add(int_lit(1), int_lit(2)), int_lit(3)), add(int_lit(10), int_lit(5)), int_lit(0))
+    flag_b :: cond(eq(int_lit(2), int_lit(2)), eq(int_lit(4), int_lit(5)), bool_lit(true))
+    print("b: {run_int(prog_b)} {run_bool(flag_b)}")
+
+    // (c)
+    test_c :: Same{a: Plus{a: Num{v: 1}, b: Num{v: 2}}, b: Num{v: 3}}
+    prog_c :: IntIf{c: test_c, t: Plus{a: Num{v: 10}, b: Num{v: 5}}, e: Num{v: 0}}
+    flag_c :: BoolIf{c: Same{a: Num{v: 2}, b: Num{v: 2}}, t: Same{a: Num{v: 4}, b: Num{v: 5}}, e: Truth{v: true}}
+    print("c: {prog_c.value()} {flag_c.holds()}")
+}

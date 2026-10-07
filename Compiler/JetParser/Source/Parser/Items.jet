@@ -405,6 +405,9 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
             marker :: parser_parse_marker(&state)
             &markers.push(marker)
             if marker.name == "Comptime" -> is_comptime = true
+            // Rust `parse_attached_marker_sequence`: a marker on its own line
+            // still attaches to the declaration below.
+            parser_skip_semicolons(&state)
             next
         }
         break
@@ -687,7 +690,7 @@ fn parser_parse_type_params(state: &JetParserState) -> [TypeParam] {
 fn parser_parse_prep_param(state: &JetParserState, prep_span: Span, retired: Bool) -> TypeParam {
     name :: parser_expect_name(&state, "for a number parameter name")
     written :: name.payload.decoded
-    param_name :: if retired -> written.slice(1, written.len() - 1) else -> written
+    param_name :: if retired -> written.slice(1, written.len()) else -> written
     name_span :: if retired -> Span{start: name.span.start + 1, end: name.span.end} else -> name.span
     if retired {
         parser_add_error_code(&state, "E0389", name.span, "`{written}` marks a number parameter with the retired `@` mark", "only the declaration carries `prep`; every use writes the plain name `{param_name}`", "write `prep {param_name}` in the parameter list")
@@ -1499,6 +1502,7 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF && !parser_aborting(&state) {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        member_start :: state.position
         member_modifiers := parser_parse_item_modifiers(&state, false)
         if parser_state_section_ahead(&state) {
             section := parser_parse_state_section(&state, name.payload.decoded, name.span)
@@ -1555,7 +1559,9 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
                 if separator_kind == TOKEN_COMMA || separator_kind == TOKEN_SEMI -> parser_bump(&state)
             }
         }
-        if parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_COMMA && parser_current_kind(&state) != TOKEN_SEMI {
+        // A member's own separator is optional (a field may end at `}`), so
+        // only a member that consumed nothing is reported and skipped.
+        if state.position == member_start && !parser_aborting(&state) {
             parser_add_error_here(&state, "expected a separator between struct members", "struct fields and methods are separated by commas or statement terminators", "add a separator or close the struct")
             parser_recover_statement(&state)
         }
@@ -1635,7 +1641,10 @@ fn parser_parse_type_method(state: &JetParserState) -> Func {
 fn parser_parse_variant_markers(state: &JetParserState) -> [Marker] {
     if parser_kind_at(&state, 1) == TOKEN_LBRACKET -> return parser_parse_marker_group(&state)
     markers := [Marker]{}
-    loop parser_current_kind(&state) == TOKEN_HASH -> &markers.push(parser_parse_marker(&state))
+    loop parser_current_kind(&state) == TOKEN_HASH {
+        &markers.push(parser_parse_marker(&state))
+        parser_skip_semicolons(&state)
+    }
     markers
 }
 

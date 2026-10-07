@@ -7,6 +7,7 @@ use jet_foundation.[
     MIRForeignLanguage,
     MIRFunction,
     MIRImplDef,
+    MIRModuleID,
     MIRParam,
     MIRProgram,
     MIRTargetApplicability,
@@ -55,7 +56,7 @@ fn jet_rust_emit_impl_target_enabled(ctx: &JetRustEmitContext, implementation: M
     if !jet_rust_emit_target_enabled(ctx.config, implementation.target_applicability) -> return false
     if ctx.config.target != "web" || ctx.config.web_bucket == None -> return true
     loop method_id in implementation.methods {
-        loop function in ctx.program.functions {
+        loop function in jet_rust_emit_function_rows(ctx, method_id) {
             if function.id == method_id && jet_rust_emit_function_target_enabled(ctx.config, function) -> return true
         }
     }
@@ -136,7 +137,8 @@ fn jet_rust_emit_foreign_param_type(ctx: &JetRustEmitContext, foreign: MIRForeig
         if parameter.access == MIRAccess.Write -> return "*mut {abi_type}"
         return abi_type
     }
-    if foreign.raw_scalar_abi && parameter.ty.kind == MIRTypeKind.Int -> return jet_rust_emit_type(&ctx, parameter.ty)
+    // MIRRust foreign_param_type: a raw-scalar Int parameter is a host machine word.
+    if foreign.raw_scalar_abi && parameter.ty.kind == MIRTypeKind.Int -> return "i64"
     jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)
 }
 
@@ -173,12 +175,80 @@ fn jet_rust_emit_foreign(ctx: &JetRustEmitContext, foreign: MIRForeign) -> [Stri
     lines
 }
 
+// MIRRust emit_constant_def: a storage constant is one persistent cell (an
+// exact Int defers its heap-backed initializer to the first read); a folded
+// constant is an inline function because heap-backed carriers are not Rust
+// const expressions. A folded list over 16 KB of rows is cached instead.
 fn jet_rust_emit_constant_definition(ctx: &JetRustEmitContext, definition: MIRConstantDef) -> String Never! {
     visibility :: jet_rust_emit_visibility(definition.visibility)
     name :: jet_rust_emit_symbol("__jet_const_", definition.name, definition.id.value)
     ty :: jet_rust_emit_type(&ctx, definition.ty)
+    listed :: if definition.ty.kind == {
+        .List(_) -> !definition.is_storage && !jet_rust_emit_is_no_os(&ctx)
+        else -> false
+    }
+    if listed {
+        if definition.value == {
+            .List(values) -> {
+                element :: jet_rust_emit_constant_inner_type(definition.ty, 0)
+                rows := [String]{}
+                bytes := 0
+                loop value in values {
+                    row :: jet_rust_emit_constant(&ctx, value, element)
+                    bytes += row.bytes().len()
+                    &rows.push(row)
+                }
+                if bytes > 16 * 1024 -> return jet_rust_emit_cached_list_constant(visibility, name, ty, rows)
+                return "#[inline]\n{visibility}fn {name}() -> {ty} {{ vec![{rows.join(", ")}] }}"
+            }
+            else -> {}
+        }
+    }
     value :: jet_rust_emit_constant(&ctx, definition.value, definition.ty)
-    "{visibility}const {name}: {ty} = {value};"
+    if definition.is_storage {
+        cell :: "{ctx.config.root_prefix}JetPersistCell"
+        if definition.ty.kind == MIRTypeKind.Int -> return "{visibility}static {name}: std::sync::LazyLock<{cell}<{ty}>> = std::sync::LazyLock::new(|| {cell}::new({value}));"
+        return "{visibility}static {name}: {cell}<{ty}> = {cell}::new({value});"
+    }
+    "#[inline]\n{visibility}fn {name}() -> {ty} {{ {value} }}"
+}
+
+// MIRRust emit_cached_list_constant: a per-thread cache that row-chunk helpers
+// of at most 64 KB each fill once; the accessor clones the cached rows. No
+// emitted function then holds the whole table, and a read no longer rebuilds
+// every row from code.
+fn jet_rust_emit_cached_list_constant(visibility: String, name: String, ty: String, rows: [String]) -> String Never! {
+    lines := [String]{}
+    chunks := 0
+    start := 0
+    bytes := 0
+    loop (index, row) in rows {
+        width :: row.bytes().len()
+        if index > start && bytes + width > 64 * 1024 {
+            &lines.push("}}")
+            &lines.push("")
+            chunks += 1
+            start = index
+            bytes = 0
+        }
+        if index == start -> &lines.push("fn {name}_rows_{chunks}(rows: &mut {ty}) {{")
+        bytes += width
+        &lines.push("    rows.push({row});")
+    }
+    &lines.push("}}")
+    &lines.push("")
+    chunks += 1
+    &lines.push("thread_local! {{")
+    &lines.push("    static {name}_ROWS: {ty} = {{")
+    &lines.push("        let mut rows: {ty} = Vec::with_capacity({rows.len()});")
+    loop index in 0..<chunks -> &lines.push("        {name}_rows_{index}(&mut rows);")
+    &lines.push("        rows")
+    &lines.push("    }};")
+    &lines.push("}}")
+    &lines.push("")
+    &lines.push("#[inline]")
+    &lines.push("{visibility}fn {name}() -> {ty} {{ {name}_ROWS.with(|rows| rows.clone()) }}")
+    lines.join("\n")
 }
 
 // The emitted text is the user-item suffix of the artifact: the host prepends
@@ -200,6 +270,10 @@ pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig) -> 
     if ctx.failure != None -> return jet_rust_emit_result(ctx, "")
     jet_rust_emit_validate_program(&ctx)
     if ctx.failure != None -> return jet_rust_emit_result(ctx, "")
+    // Program items go to their build unit's section (jet_rust_emit_units);
+    // `pieces` records the line range of each package-unit item.
+    units :: jet_rust_emit_units(ctx.program)
+    pieces := [JetRustEmitUnitPiece]{}
     lines := [String]{}
     jet_rust_emit_program_header(&ctx, &lines)
     jet_rust_emit_hardware_facts(&ctx, &lines)
@@ -212,8 +286,10 @@ pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig) -> 
             if handle_lines.len() > 0 -> &lines.push("")
         }
         loop definition in ctx.program.types {
+            start :: lines.len()
             jet_rust_emit_type_definition(&ctx, definition, &lines)
             &lines.push("")
+            if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_module_unit(units, definition.module_id, definition.span.start), start, lines.len())
         }
         jet_rust_emit_period_anchor_impls(&ctx, &lines)
     }
@@ -221,41 +297,186 @@ pub fn jet_rust_emit_program(program: MIRProgram, config: JetRustEmitConfig) -> 
         // MIRRust: the cached runtime declares compiler-owned traits; only
         // Rollback keeps a per-program declaration.
         if definition.name != "Rollback" && (jet_rust_emit_compiler_owned_trait(definition.name) || jet_rust_emit_compiler_owned_trait(definition.key)) -> next
+        start :: lines.len()
         trait_lines := [String]{}
         jet_rust_emit_trait_definition(&ctx, definition, &trait_lines)
         loop line in trait_lines -> &lines.push(line)
         &lines.push("")
+        if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_module_unit(units, definition.module_id, definition.span.start), start, lines.len())
     }
-    loop implementation in ctx.program.impls {
+    codec_keep :: mir_demanded_codec_impls(ctx.program)
+    loop (index, implementation) in ctx.program.impls {
+        if !codec_keep[index] {
+            loop method_id in implementation.methods -> ctx.skipped_methods[jet_rust_emit_id_key(method_id.value)] = true
+            next
+        }
         if jet_rust_emit_impl_target_enabled(&ctx, implementation) {
+            start :: lines.len()
             impl_lines := [String]{}
             jet_rust_emit_impl_definition(&ctx, implementation, &impl_lines)
             loop line in impl_lines -> &lines.push(line)
             &lines.push("")
+            if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_impl_unit(&ctx, units, implementation), start, lines.len())
         }
     }
     loop constant in ctx.program.constants {
+        start :: lines.len()
         &lines.push(jet_rust_emit_constant_definition(&ctx, constant))
+        if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_module_unit(units, constant.module_id, constant.span.start), start, lines.len())
     }
     jet_rust_emit_link_closure(&ctx, &lines)
     if ctx.config.emit_foreign {
         loop foreign in ctx.program.foreign {
             if jet_rust_emit_foreign_target_enabled(&ctx, foreign) {
+                start :: lines.len()
                 foreign_lines :: jet_rust_emit_foreign(&ctx, foreign)
                 loop line in foreign_lines -> &lines.push(line)
                 &lines.push("")
+                if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_module_unit(units, foreign.module_id, foreign.span.start), start, lines.len())
             }
         }
     }
     jet_rust_emit_callback_trampolines(&ctx, &lines)
     loop function in ctx.program.functions {
-        if jet_rust_emit_function_target_enabled(ctx.config, function) {
+        if jet_rust_emit_function_target_enabled(ctx.config, function) && ctx.skipped_methods.get(jet_rust_emit_id_key(function.id.value)) == None {
+            start :: lines.len()
             function_lines :: jet_rust_emit_function(&ctx, function)
             loop line in function_lines -> &lines.push(line)
             &lines.push("")
+            if units.split -> jet_rust_emit_units_record(&pieces, jet_rust_emit_units_file_unit(units, jet_rust_emit_id_key(function.source_file.value), function.span.start), start, lines.len())
         }
     }
+    items_end :: lines.len()
     jet_rust_emit_artifact_assembly(&ctx, &lines)
     if ctx.failure != None -> return jet_rust_emit_result(ctx, "")
+    if units.split -> return jet_rust_emit_result(ctx, jet_rust_emit_units_layout(pieces, lines, items_end).join("\n"))
     jet_rust_emit_result(ctx, lines.join("\n"))
+}
+
+// MIRRust EmissionUnits: build units of one emitted program. An item's unit
+// is the package of the original `Compiler/<Package>/…` file whose bootstrap
+// assembler provenance marker (Compiler/Bootstrap/assemble.mjs) is in effect
+// at the item's span, so the assembled compiler splits into one crate per
+// package. Items outside a marked range (Core, compiler-synthesized rows) go
+// to the `base` unit beneath every package. Programs with fewer than two
+// units are not split; single-crate consumers only see marker comments.
+JET_RUST_EMIT_UNIT_PROVENANCE_MARKER :: "// [jet-bootstrap source: "
+JET_RUST_EMIT_UNIT_BEGIN_MARKER :: "// jet:unit-begin "
+JET_RUST_EMIT_UNIT_END_MARKER :: "// jet:unit-end "
+JET_RUST_EMIT_BASE_UNIT :: "base"
+
+struct JetRustEmitUnitStart {
+    pub offset: Int
+    pub unit: String
+}
+
+struct JetRustEmitUnits {
+    pub split: Bool
+    // Source file id key -> (byte offset where a marked file's text starts,
+    // unit), in source order.
+    pub starts: [String:[JetRustEmitUnitStart]]
+    // Module id key -> source file id key.
+    pub module_files: [String:String]
+}
+
+// The emitted lines `start..<end` of one package-unit item.
+struct JetRustEmitUnitPiece {
+    pub unit: String
+    pub start: Int
+    pub end: Int
+}
+
+fn jet_rust_emit_units(program: MIRProgram) -> JetRustEmitUnits Never! {
+    starts := [String:[JetRustEmitUnitStart]]{}
+    names := [String:Bool]{}
+    marker_length :: JET_RUST_EMIT_UNIT_PROVENANCE_MARKER.bytes().len()
+    loop file in program.source_files {
+        rows := [JetRustEmitUnitStart]{}
+        offset := 0
+        loop line in file.source.split("\n").to_list() {
+            bytes :: line.bytes()
+            offset += bytes.len() + 1
+            if !line.starts_with(JET_RUST_EMIT_UNIT_PROVENANCE_MARKER) || !line.ends_with("]") -> next
+            path :: String.from_bytes(~(bytes[marker_length..<bytes.len() - 1])) ?? ""
+            parts :: path.split("/").to_list()
+            unit :: if parts.len() > 1 -> parts[1] else -> JET_RUST_EMIT_BASE_UNIT
+            names[unit] = true
+            &rows.push(JetRustEmitUnitStart{offset: offset, unit: unit})
+        }
+        if rows.len() > 0 -> starts[jet_rust_emit_id_key(file.id.value)] = rows
+    }
+    module_files := [String:String]{}
+    loop row in program.modules -> module_files[jet_rust_emit_id_key(row.id.value)] = jet_rust_emit_id_key(row.source_file.value)
+    JetRustEmitUnits{split: names.len() > 1, starts: starts, module_files: module_files}
+}
+
+fn jet_rust_emit_units_file_unit(units: JetRustEmitUnits, file_key: String, offset: Int) -> String Never! {
+    rows :: units.starts.get(file_key) ?? return JET_RUST_EMIT_BASE_UNIT
+    low := 0
+    high := rows.len()
+    loop low < high {
+        middle :: (low + high) /% 2
+        if rows[middle].offset <= offset -> low = middle + 1 else -> high = middle
+    }
+    if low == 0 -> return JET_RUST_EMIT_BASE_UNIT
+    rows[low - 1].unit
+}
+
+fn jet_rust_emit_units_module_unit(units: JetRustEmitUnits, module_id: MIRModuleID, offset: Int) -> String Never! {
+    file_key :: units.module_files.get(jet_rust_emit_id_key(module_id.value)) ?? return JET_RUST_EMIT_BASE_UNIT
+    jet_rust_emit_units_file_unit(units, file_key, offset)
+}
+
+// Rust's orphan rule: an impl of a runtime trait must live in the crate
+// declaring its self type, so it follows the type's unit (the first type row
+// matching the nominal id, key or name, as MIRRust first_type_def_matching).
+fn jet_rust_emit_units_impl_unit(ctx: &JetRustEmitContext, units: JetRustEmitUnits, implementation: MIRImplDef) -> String Never! {
+    if implementation.self_type.kind == .Apply(name, _) {
+        index := -1
+        by_id :: ctx.type_index_by_id.get(jet_rust_emit_id_key(name.id.value)) ?? -1
+        by_key :: ctx.type_index_by_key.get(name.name) ?? -1
+        by_name :: ctx.type_index_by_name.get(name.name) ?? -1
+        candidates :: [Int]{by_id, by_key, by_name}
+        loop row in candidates {
+            if row >= 0 && (index < 0 || row < index) -> index = row
+        }
+        if index >= 0 {
+            definition :: ctx.program.types[index]
+            return jet_rust_emit_units_module_unit(units, definition.module_id, definition.span.start)
+        }
+    }
+    jet_rust_emit_units_module_unit(units, implementation.module_id, implementation.span.start)
+}
+
+fn jet_rust_emit_units_record(pieces: &[JetRustEmitUnitPiece], unit: String, start: Int, end: Int) Never! {
+    if unit == JET_RUST_EMIT_BASE_UNIT || end <= start -> return
+    &pieces.push(JetRustEmitUnitPiece{unit: unit, start: start, end: end})
+}
+
+// MIRRust EmissionUnits.write_sections: the base section (every line before
+// `items_end` outside a package piece) first, then each package's pieces in
+// unit-name order, each between its begin/end markers. Lines from
+// `items_end` on (artifact assembly) stay after the sections.
+fn jet_rust_emit_units_layout(pieces: [JetRustEmitUnitPiece], lines: [String], items_end: Int) -> [String] Never! {
+    out := [String]{}
+    &out.push("{JET_RUST_EMIT_UNIT_BEGIN_MARKER}{JET_RUST_EMIT_BASE_UNIT}")
+    cursor := 0
+    names := [String]{}
+    loop piece in pieces {
+        loop index in cursor..<piece.start -> &out.push(lines[index])
+        cursor = piece.end
+        &names.push(piece.unit)
+    }
+    loop index in cursor..<items_end -> &out.push(lines[index])
+    &out.push("{JET_RUST_EMIT_UNIT_END_MARKER}{JET_RUST_EMIT_BASE_UNIT}")
+    loop unit in jet_codegen_sort_strings(names) {
+        &out.push("{JET_RUST_EMIT_UNIT_BEGIN_MARKER}{unit}")
+        loop piece in pieces {
+            if piece.unit != unit -> next
+            loop index in piece.start..<piece.end -> &out.push(lines[index])
+        }
+        &out.push("{JET_RUST_EMIT_UNIT_END_MARKER}{unit}")
+    }
+    loop index in items_end..<lines.len() -> &out.push(lines[index])
+    out
 }

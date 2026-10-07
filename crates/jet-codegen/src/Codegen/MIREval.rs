@@ -13774,22 +13774,18 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     span,
                 ));
             }
-            let target = type_args
-                .first()
-                .map(crate::Comptime::MirBridge::mir_to_ast_type)
-                .ok_or_else(|| {
-                    mir_error_at("MIR typed codec decode has no checked type argument", span)
-                })?;
-            let decoded = crate::Comptime::decode_typed_builtin_value_for_mir(&target, &values[0])
-                .ok_or_else(|| {
-                    mir_error_at(
-                        &format!(
-                            "MIR typed codec decode has no builtin decoder for {}",
-                            target.name()
-                        ),
-                        span,
-                    )
-                })?;
+            let target = type_args.first().ok_or_else(|| {
+                mir_error_at("MIR typed codec decode has no checked type argument", span)
+            })?;
+            let decoded = self.decode_typed_tree(target, &values[0], span)?.ok_or_else(|| {
+                mir_error_at(
+                    &format!(
+                        "MIR typed codec decode has no builtin decoder for {}",
+                        target.display_name()
+                    ),
+                    span,
+                )
+            })?;
             let result = match decoded {
                 Ok(value) => CtValue::Present(Box::new(value)),
                 Err(error) => CtValue::failed(Box::new(error)),
@@ -13980,7 +13976,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             return Ok(value);
         }
         let value = self.runtime_to_ct(value, span)?;
-        let text = crate::Comptime::display_core_pure_value(&value).unwrap_or_else(|| value.jet_show());
+        let text = ct_source_display(&value)
+            .or_else(|| crate::Comptime::display_core_pure_value(&value))
+            .unwrap_or_else(|| value.jet_show());
         Ok(RuntimeValue::Data(MirEvalValue::String(text)))
     }
 
@@ -20700,7 +20698,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         let decoded = {
             let mut decode_nominal = |nominal: &Type, tree: &CtValue| {
                 let nominal = crate::Comptime::MirBridge::ast_to_mir_type(nominal);
-                let outcome = (|| {
+                let outcome: Result<Option<CtValue>, Diagnostic> = (|| {
                     if self.typed_decode_function(&nominal, span)?.is_none() {
                         return Ok(None);
                     }
@@ -31806,6 +31804,37 @@ fn mir_show(value: &MirEvalValue) -> String {
 fn mir_source_name(name: &str) -> &str {
     name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
         .unwrap_or(name)
+}
+/// Source-name displays `jet_show` (generated Rust identifiers) gets wrong:
+/// a `Set` prints its items sorted by text and a `Rank` in rank order, as
+/// AOT's `JetDisplay` for `HashSet`/`BTreeSet`; a payload-free variant
+/// prints its source variant name.
+fn ct_source_display(value: &CtValue) -> Option<String> {
+    match value {
+        CtValue::Struct { type_name, fields }
+            if type_name == crate::Syntax::TYPE_SET || type_name == crate::Syntax::TYPE_RANK =>
+        {
+            let Some((_, CtValue::List(items))) = fields.iter().find(|(name, _)| name == "items")
+            else {
+                return None;
+            };
+            let mut parts = items
+                .iter()
+                .map(|item| {
+                    crate::Comptime::display_core_pure_value(item)
+                        .unwrap_or_else(|| item.jet_show())
+                })
+                .collect::<Vec<_>>();
+            if type_name == crate::Syntax::TYPE_SET {
+                parts.sort();
+            }
+            Some(format!("[{}]", parts.join(", ")))
+        }
+        CtValue::Enum { variant, args, .. } if args.is_empty() => {
+            Some(mir_source_name(variant).to_string())
+        }
+        _ => None,
+    }
 }
 
 fn print_names_match(left: &str, right: &str) -> bool {

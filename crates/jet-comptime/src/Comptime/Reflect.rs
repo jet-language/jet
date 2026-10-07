@@ -7,7 +7,7 @@
 //! contains only derives lowered from them.
 
 use crate::AST::{
-    Dimension, DistinctDef, EnumDef, Exactness, Expr, Field, Func, FunctionCallMetadata,
+    Dimension, DistinctDef, EnumDef, Exactness, Expr, Func, FunctionCallMetadata,
     FunctionObligations, Item, KnowledgeFact, Marker, MaturityTag, Measure, StructDef,
     StructLayout, Type, TypeParam, UnitFamilyDef, UnitScaleProvenance, VariantPayload,
     ViewProvenance,
@@ -3185,7 +3185,7 @@ mod tests {
     use super::*;
     use crate::{
         Diagnostics::Span,
-        AST::{AccessConvention, Dimension, QuantityKind, Type},
+        AST::{AccessConvention, Dimension, Field, QuantityKind, Type},
     };
 
     fn span() -> Span {

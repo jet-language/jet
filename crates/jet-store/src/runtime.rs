@@ -468,6 +468,44 @@ fn split_generated(generated: &str) -> Result<Option<SplitGenerated>, String> {
     Ok(Some(SplitGenerated { runtime, program }))
 }
 
+/// A generated program whose runtime/Core closure builds as the separate
+/// `jet_runtime` crate: that crate's exported source, and the program, which
+/// links it through `extern crate jet_runtime; use jet_runtime::*;`.
+pub struct RuntimeCrateSplit {
+    pub runtime_lib: String,
+    pub program: String,
+}
+
+/// The `prepare` split for builders that compile the runtime crate
+/// themselves (the bootstrap cargo workspace). The text before the runtime
+/// block is the program's runtime hook (the FFI reporter that
+/// `jet_std_env_init` installs), so it builds inside the runtime crate.
+/// `None` when the text has no runtime block.
+pub fn split_runtime_crate(generated: &str) -> Result<Option<RuntimeCrateSplit>, String> {
+    let Some(split) = split_generated(generated)? else {
+        return Ok(None);
+    };
+    let head = &generated[..generated.find(BEGIN).unwrap_or(0)];
+    let program = split
+        .program
+        .strip_prefix(head)
+        .ok_or_else(|| "split program does not start with the pre-runtime text".to_string())?
+        .to_string();
+    Ok(Some(RuntimeCrateSplit {
+        runtime_lib: format!(
+            "{RUNTIME_CRATE_PREFIX}{}",
+            export_runtime_source(&format!("{head}{}", split.runtime))
+        ),
+        program,
+    }))
+}
+
+/// Make every item of a generated crate visible to the crates that depend on
+/// it, exactly as the runtime crate is exported.
+pub fn export_crate_source(source: &str) -> String {
+    export_runtime_source(source)
+}
+
 fn cache_key(
     source: &str,
     exported_source: &str,
@@ -624,10 +662,17 @@ fn export_runtime_source(source: &str) -> String {
     let mut depth = 0usize;
     let mut pending = String::new();
     let mut macro_exported = false;
+    // Level of the outermost open `macro_rules!` scope, kept incrementally:
+    // emitted program bodies nest thousands of blocks deep, so rescanning
+    // `scopes` per line would make the export quadratic.
+    let mut macro_level: Option<usize> = None;
 
     for (line, masked) in source_lines.into_iter().zip(mask_lines) {
         while scopes.last().is_some_and(|(_, level)| *level > depth) {
             scopes.pop();
+        }
+        if macro_level.is_some_and(|level| level > depth) {
+            macro_level = None;
         }
         let scope = scopes
             .last()
@@ -639,10 +684,6 @@ fn export_runtime_source(source: &str) -> String {
         // continuations, not items: `pub fn jet_fixed_list_concat<\n T: Clone,\n
         // const LEFT: usize,` would otherwise become `pub const LEFT: usize,`
         // inside the angle brackets and the runtime crate would not even parse.
-        let macro_level = scopes
-            .iter()
-            .find(|(kind, _)| *kind == Scope::Macro)
-            .map(|(_, level)| *level);
         let code = masked.trim();
         let rewritten = if let Some(level) = macro_level {
             export_macro_line(line, masked, depth == level + 1)
@@ -686,6 +727,9 @@ fn export_runtime_source(source: &str) -> String {
                         Scope::Other
                     };
                     depth += 1;
+                    if kind == Scope::Macro && macro_level.is_none() {
+                        macro_level = Some(depth);
+                    }
                     scopes.push((kind, depth));
                     pending.clear();
                 }
@@ -892,7 +936,10 @@ fn scope_for_header(header: &str) -> Scope {
     }
 }
 
-fn rust_code_mask(source: &str) -> String {
+/// `source` with every comment, string and char literal blanked to spaces
+/// (newlines kept), byte for byte the same length: brackets and keywords in
+/// the mask are code. The bootstrap backend split scans emitted items with it.
+pub fn rust_code_mask(source: &str) -> String {
     #[derive(Clone, Copy)]
     enum State {
         Code,
@@ -1024,7 +1071,16 @@ fn char_literal_end(bytes: &[u8]) -> Option<usize> {
         return None;
     }
     if bytes.get(1) != Some(&b'\\') {
-        let text = std::str::from_utf8(bytes.get(1..)?).ok()?;
+        // Decode only the one character: validating the whole remaining
+        // source per quote made the mask quadratic on large programs.
+        let width = match *bytes.get(1)? {
+            0x00..=0x7f => 1,
+            0xc0..=0xdf => 2,
+            0xe0..=0xef => 3,
+            0xf0..=0xf7 => 4,
+            _ => return None,
+        };
+        let text = std::str::from_utf8(bytes.get(1..1 + width)?).ok()?;
         let character = text.chars().next()?;
         let end = 1 + character.len_utf8();
         return (bytes.get(end) == Some(&b'\'')).then_some(end);

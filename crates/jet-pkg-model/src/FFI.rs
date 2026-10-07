@@ -3780,6 +3780,14 @@ fn bridge_paths(
     }
 }
 
+/// The generated source package of a prepared bridge (`Cargo.toml`, `src/`,
+/// `build.rs`): a Cargo workspace that builds an emitted program depends on
+/// this directory by path, its equivalent of `jet build`'s `--extern` of the
+/// bridge rlib.
+pub fn bridge_crate_dir(link: &FfiLink) -> PathBuf {
+    cache_dir().join(&link.cache_identity)
+}
+
 /// The Cargo target dir shared by every bridge key with this build identity.
 ///
 /// The hash covers exactly what would make Cargo recompile the dependency graph

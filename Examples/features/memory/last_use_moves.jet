@@ -1,0 +1,59 @@
+// A read of an owned binding that nothing reads afterwards hands the value
+// over instead of copying it, and a match arm that binds every payload of a
+// value nobody reads again takes the payloads out instead of copying them.
+// Value semantics stay exact: a binding still read later is copied, so
+// editing it never shows through the copy.
+
+enum Link {
+    Node(c: Int, t: [Int], e: [Link]?)
+    End
+}
+
+fn build(n: Int) -> [Link] {
+    holder := [[Link]]{[Link]{}}
+    i := n
+    loop i > 0 {
+        i -= 1
+        body := [Int]{i, i + 1}
+        tail := &holder.pop() ?? [Link]{}
+        &holder.push([Link]{Link.Node{c: i, t: ^body, e: Val(^tail)}})
+    }
+    &holder.pop() ?? [Link]{}
+}
+
+fn walk(chain: ^[Link]) -> Int {
+    total := 0
+    rest := ^chain
+    loop rest.len() == 1 {
+        link := &rest.pop() ?? break
+        if link == {
+            .Node(c, t, e) -> {
+                total += c + t.len()
+                rest = ^e ?? [Link]{}
+            }
+            .End -> break
+        }
+    }
+    total
+}
+
+fn run() {
+    chain := build(5)
+    print("walk {walk(^chain)}")
+
+    kept := [Int]{1, 2, 3}
+    duplicate := kept
+    &kept.push(4)
+    print("duplicate {duplicate.len()} kept {kept.len()}")
+
+    source := [Int]{7}
+    moved := source
+    &moved.push(8)
+    print("moved {moved.len()}")
+
+    shared := [Int]{1}
+    first := shared
+    &first.push(2)
+    second := shared
+    print("first {first.len()} second {second.len()} shared {shared.len()}")
+}

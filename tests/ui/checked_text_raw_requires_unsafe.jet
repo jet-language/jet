@@ -1,0 +1,25 @@
+// E0387: `Type.raw(text)` skips the CheckedText checker, so it needs `#Unsafe`.
+#Error
+enum TextError { Empty }
+
+Token :: distinct String
+
+impl Token.CheckedText {
+    type Error = TextError
+
+    fn check(text: String) TextError! -[]> {
+        if text == "" { return Err(TextError.Empty) }
+        return Ok(())
+    }
+
+    fn encode_hole<T: Printable>(value: T) -[]> String {
+        return "[{value}]"
+    }
+}
+
+fn run() {
+    token :: Token.raw("unchecked")
+    #Unsafe("audited literal") {
+        print(token.raw())
+    }
+}

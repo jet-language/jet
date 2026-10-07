@@ -214,6 +214,7 @@ pub(crate) fn fresh_runtime_with_allocator_cap(
         lazy_iters: Vec::new(),
         type_descriptors: HashMap::new(),
         type_descriptor_names: HashMap::new(),
+        owned_drop_cache: std::sync::Mutex::new(HashMap::new()),
         default_error_type: None,
         trait_object_types: HashMap::new(),
         native_interface_carriers: HashMap::new(),

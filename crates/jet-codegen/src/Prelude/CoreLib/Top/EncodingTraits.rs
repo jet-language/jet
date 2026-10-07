@@ -589,6 +589,67 @@ fn jet_codec_decode_typed<T: __jet_Decode>(
     T::jet_decode(tree)
 }
 
+// Shared steps of natively printed derived codecs (MIRRust and the Jet
+// emitter's `emit_native_derived_decode`). One keyed struct field:
+// `FieldError.under(key, (tree.field(key) ?? Null).decode<T>())`, with its
+// failures appended to `errors` in field order; `None` when it failed.
+fn jet_decode_object_field<T: __jet_Decode>(
+    tree: &jet_std::DataTree,
+    key: &str,
+    errors: &mut Vec<jet_std::FieldError>,
+) -> Option<T> {
+    let field = <jet_std::DataTree as jet_std::JetDataTreeAccess>::field(tree, key)
+        .unwrap_or(jet_std::DataTree::Null);
+    match T::jet_decode(&field) {
+        Ok(value) => Some(value),
+        Err(failures) => {
+            errors.extend(jet_std::FieldError::under_errors(key, failures));
+            None
+        }
+    }
+}
+
+// One required struct field (no default, not optional): as
+// `jet_decode_object_field`, except an absent key whose `Null` does not
+// decode appends only `E2410: missing required field `key`` at `key`.
+fn jet_decode_required_field<T: __jet_Decode>(
+    tree: &jet_std::DataTree,
+    key: &str,
+    errors: &mut Vec<jet_std::FieldError>,
+) -> Option<T> {
+    let Ok(field) = <jet_std::DataTree as jet_std::JetDataTreeAccess>::field(tree, key) else {
+        return match T::jet_decode(&jet_std::DataTree::Null) {
+            Ok(value) => Some(value),
+            Err(_) => {
+                errors.push(jet_std::FieldError {
+                    path: key.to_string(),
+                    reason: format!("E2410: missing required field `{key}`"),
+                });
+                None
+            }
+        };
+    };
+    match T::jet_decode(&field) {
+        Ok(value) => Some(value),
+        Err(failures) => {
+            errors.extend(jet_std::FieldError::under_errors(key, failures));
+            None
+        }
+    }
+}
+
+// The payload tree of an externally tagged enum variant:
+// `tree.field(wire) ?? Null`.
+fn jet_decode_enum_candidate(tree: &jet_std::DataTree, wire: &str) -> jet_std::DataTree {
+    <jet_std::DataTree as jet_std::JetDataTreeAccess>::field(tree, wire)
+        .unwrap_or(jet_std::DataTree::Null)
+}
+
+// One single-payload variant: it matches when the payload tree decodes.
+fn jet_decode_enum_payload<T: __jet_Decode>(tree: &jet_std::DataTree, wire: &str) -> Option<T> {
+    T::jet_decode(&jet_decode_enum_candidate(tree, wire)).ok()
+}
+
 // ── core.encoding: typed format verbs over Encode/Decode (D-ENC1, D-SERDE6) ────
 // `to_string`/`to_string_pretty` (D-JSONVERB1) and the typed `decode<T>` route
 // every format through the one DataTree model.

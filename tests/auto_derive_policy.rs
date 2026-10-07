@@ -14,7 +14,7 @@ fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
     mir.validate()
         .expect("canonical MIR validates in auto-derive test");
     let mir = jet_foundation::MIR::optimize_mir_program(
-        &mir,
+        mir,
         &jet_foundation::MIR::MirOptimizationPolicy::conservative(),
     )
     .expect("canonical MIR optimizes in auto-derive test");
@@ -27,6 +27,20 @@ fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
             execution: jet::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
         },
     )
+}
+
+/// Number of `impl <rust_trait> for <type>` headers in generated Rust for the
+/// program type `name`. Program types are emitted under their mangled
+/// module-qualified key, whose last path segment `::<name>` mangles to
+/// `_c_c<name>`.
+fn impl_count(rust: &str, rust_trait: &str, name: &str) -> usize {
+    let prefix = format!("impl {rust_trait} for __jet_");
+    let bare = format!("{name} {{");
+    let qualified = format!("_c_c{name} {{");
+    rust.lines()
+        .filter_map(|line| line.strip_prefix(&prefix))
+        .filter(|rest| *rest == bare || rest.ends_with(&qualified))
+        .count()
 }
 
 fn project_dir(name: &str) -> std::path::PathBuf {
@@ -156,9 +170,9 @@ fn run() {
 "#,
     );
     let rust = emit_native_aot(&bundle);
-    assert!(rust.contains("impl JetShow for __jet_Mixed"));
-    assert!(!rust.contains("impl JetDebug for __jet_Mixed"));
-    assert!(!rust.contains("impl __jet_Equatable for __jet_Mixed"));
+    assert_eq!(impl_count(&rust, "JetShow", "Mixed"), 1);
+    assert_eq!(impl_count(&rust, "JetDebug", "Mixed"), 0);
+    assert_eq!(impl_count(&rust, "__jet_Equatable", "Mixed"), 0);
 
     let policy = common::development_policy();
     let mut backend = jet_jit::CraneliftBackend::new();
@@ -382,10 +396,9 @@ fn run() {}
         assert!(facts.auto_encode.contains(name), "{name}");
         assert!(facts.auto_decode.contains(name), "{name}");
     }
-    for name in ["OptionalNode", "ListNode"] {
+    for name in ["OptionalNode", "ListNode", "MapNode"] {
         assert!(facts.auto_equatable.contains(name), "{name}");
     }
-    assert!(!facts.auto_equatable.contains("MapNode"));
     assert!(!facts.auto_printable.contains("Blocked"));
     let _ = checked_bundle(bundle);
 }
@@ -421,10 +434,10 @@ fn run() {}
     assert!(facts.auto_decode.contains("Explicit"));
     let bundle = checked_bundle(bundle);
     let rust = emit_native_aot(&bundle);
-    assert!(!rust.contains("impl __jet_Encode for __jet_Defaulted"));
-    assert!(!rust.contains("impl __jet_Decode for __jet_Defaulted"));
-    assert!(rust.contains("impl __jet_Encode for __jet_Explicit"));
-    assert!(rust.contains("impl __jet_Decode for __jet_Explicit"));
+    assert_eq!(impl_count(&rust, "__jet_Encode", "Defaulted"), 0);
+    assert_eq!(impl_count(&rust, "__jet_Decode", "Defaulted"), 0);
+    assert_eq!(impl_count(&rust, "__jet_Encode", "Explicit"), 1);
+    assert_eq!(impl_count(&rust, "__jet_Decode", "Explicit"), 1);
 }
 
 #[test]
@@ -455,25 +468,15 @@ fn run() {
 "#,
     );
     let rust = emit_native_aot(&bundle);
-    for implementation in [
-        "impl JetShow for __jet_Enabled",
-        "impl JetDebug for __jet_Enabled",
-        "impl __jet_Equatable for __jet_Enabled",
-    ] {
-        assert!(rust.contains(implementation), "{implementation}");
-    }
-    for implementation in [
-        "impl JetShow for __jet_Missing",
-        "impl JetDebug for __jet_Missing",
-        "impl __jet_Equatable for __jet_Missing",
-    ] {
-        assert!(!rust.contains(implementation), "{implementation}");
+    for rust_trait in ["JetShow", "JetDebug", "__jet_Equatable"] {
+        assert_eq!(impl_count(&rust, rust_trait, "Enabled"), 1, "{rust_trait} Enabled");
+        assert_eq!(impl_count(&rust, rust_trait, "Missing"), 0, "{rust_trait} Missing");
     }
     let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
     let facts = &facts[bundle.entry];
     assert!(!facts.auto_encode.contains("Missing"));
     assert!(!facts.auto_decode.contains("Missing"));
-    assert_eq!(rust.matches("impl JetDebug for __jet_Manual").count(), 1);
+    assert_eq!(impl_count(&rust, "JetDebug", "Manual"), 1);
 
     let policy = common::development_policy();
     let mut backend = jet_jit::CraneliftBackend::new();
@@ -869,7 +872,7 @@ fn run() {
     assert!(app_facts.auto_decode.contains("ImportedEnvelope"));
     assert!(app_facts.auto_printable.contains("MapEnvelope"));
     assert!(app_facts.auto_debug.contains("MapEnvelope"));
-    assert!(!app_facts.auto_equatable.contains("MapEnvelope"));
+    assert!(app_facts.auto_equatable.contains("MapEnvelope"));
     assert!(!app_facts.auto_comparable.contains("MapEnvelope"));
     for selected in [
         &dep_facts.auto_printable,

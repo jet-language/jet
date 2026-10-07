@@ -1,0 +1,1766 @@
+// MIR Lint: the independent typed checker over canonical MIR. The rule list
+// is the compiler contract in Docs/spec/mir-lint.md. The lint shares no code
+// with the semantic checker or the legality verifier: it re-derives every
+// operand and result type from the operation, every call from the callee row
+// named by ID, every enum and struct shape from its declaration, ownership
+// from one forward dataflow over flat bit rows, and effect rows from the
+// callee's solved row. The optimizer pipeline runs it once after the last
+// pass, and after every pass when full verification is on; a failure is an
+// internal compiler error that names the pass and the rule.
+use jet_foundation.[
+    MIRBasicBlock,
+    MIRBinaryDispatch,
+    MIRBinaryOp,
+    MIRBlockID,
+    MIRCallArg,
+    MIRCallee,
+    MIRConstant,
+    MIRConversion,
+    MIREnumArg,
+    MIRField,
+    MIRFieldID,
+    MIRFieldValue,
+    MIRFunction,
+    MIRFunctionID,
+    MIRInstruction,
+    MIROperation,
+    MIRParam,
+    MIRPlace,
+    MIRPlaceID,
+    MIRProgram,
+    MIRSemanticOp,
+    MIRType,
+    MIRTypeDef,
+    MIRTypeID,
+    MIRValueID,
+    MIRVariant,
+    Span,
+    mir_call_metadata_is_variadic,
+    mir_operation_value_uses,
+    mir_terminator_targets,
+    mir_terminator_value_uses,
+    mir_type_display_name,
+    mir_type_has_valid_layout,
+    mir_type_is_integer,
+    mir_type_is_numeric,
+    mir_type_is_unit,
+]
+
+// One rule family of Docs/spec/mir-lint.md; its name is part of the ICE text.
+pub enum MIRLintRule {
+    ValueTyped
+    TypeWellFormed
+    OperationTyping
+    SemanticTyping
+    CallSignature
+    EnumVariant
+    StructField
+    TerminatorTyping
+    OwnershipMove
+    EffectRow
+}
+
+pub struct MIRLintError {
+    pub rule: MIRLintRule
+    pub function: MIRFunctionID
+    pub function_key: String
+    pub span: Span
+    pub detail: String
+}
+
+pub fn mir_lint_rule_name(rule: MIRLintRule) -> String Never! {
+    if rule == {
+        .ValueTyped -> "value.typed"
+        .TypeWellFormed -> "type.well-formed"
+        .OperationTyping -> "operation.typing"
+        .SemanticTyping -> "semantic.typing"
+        .CallSignature -> "call.signature"
+        .EnumVariant -> "enum.variant"
+        .StructField -> "struct.field"
+        .TerminatorTyping -> "terminator.typing"
+        .OwnershipMove -> "ownership.move"
+        .EffectRow -> "effect.row"
+    }
+}
+
+pub fn mir_lint_error_text(error: MIRLintError) -> String Never! {
+    "rule {mir_lint_rule_name(error.rule)} in function `{error.function_key}`: {error.detail}"
+}
+
+// Check every function of `program` against the MIR Lint rules.
+pub fn mir_lint_program(program: MIRProgram) -> MIRLintError? Never! {
+    if program.functions.len() == 0 -> return None
+    ctx := mir_lint_context(mir_lint_index(program), program.functions[0])
+    loop (position, function) in program.functions {
+        if position > 0 -> mir_lint_enter(&ctx, function)
+        failure :: mir_lint_function(ctx)
+        if failure == .Val(error) -> return Val(error)
+    }
+    None
+}
+
+// A broken rule before the function and span are attached.
+struct MIRLintProblem {
+    pub rule: MIRLintRule
+    pub detail: String
+}
+
+fn mir_lint_problem(rule: MIRLintRule, detail: String) -> MIRLintProblem? Never! {
+    Val(MIRLintProblem{rule: rule, detail: detail})
+}
+
+// The representation class used by the compatibility relation.
+enum MIRLintClass { Wild Unit Integer Float Bool String Char List Map Option Result Callable Nominal Tuple }
+
+fn mir_lint_class_name(class: MIRLintClass) -> String Never! {
+    if class == {
+        .Wild -> "any"
+        .Unit -> "Unit"
+        .Integer -> "an integer"
+        .Float -> "a float"
+        .Bool -> "Bool"
+        .String -> "String"
+        .Char -> "Char"
+        .List -> "a list"
+        .Map -> "a map"
+        .Option -> "an Optional"
+        .Result -> "a Result"
+        .Callable -> "a callable"
+        .Nominal -> "a nominal type"
+        .Tuple -> "a tuple"
+    }
+}
+
+// The callee row a call is checked against, copied out of the program once.
+struct MIRLintSignature {
+    pub key: String
+    pub params: [MIRParam]
+    pub return_type: MIRType
+    pub solved_effects: [String]
+    pub capture_count: Int
+}
+
+// The declaration shape a literal, variant, or payload read is checked
+// against: a struct's fields or an enum's variants.
+struct MIRLintTypeRow {
+    pub name: String
+    pub fields: [MIRField]?
+    pub variants: [MIRVariant]?
+}
+
+struct MIRLintIndex {
+    // Function ID -> row in `signatures`.
+    pub functions: [String:Int]
+    pub signatures: [MIRLintSignature]
+    // Type ID -> row in `type_rows`.
+    pub types: [String:Int]
+    pub type_rows: [MIRLintTypeRow]
+    pub fields: [String:MIRField]
+    // Generic parameter and associated-type names declared anywhere.
+    pub type_vars: [String:Bool]
+    // Names of `Alias`, `Distinct`, and unit-family declarations.
+    pub transparent: [String:Bool]
+}
+
+fn mir_lint_index(program: MIRProgram) -> MIRLintIndex Never! {
+    functions := [String:Int]{}
+    signatures := [MIRLintSignature]{}
+    types := [String:Int]{}
+    type_rows := [MIRLintTypeRow]{}
+    fields := [String:MIRField]{}
+    type_vars := [String:Bool]{}
+    transparent := [String:Bool]{}
+    _ := &type_vars.add("Self", true)
+    loop (position, function) in program.functions {
+        _ := &functions.add(mir_lint_key(function.id.value), position)
+        &signatures.push(MIRLintSignature{key: ~function.key, params: ~function.params, return_type: ~function.return_type, solved_effects: ~function.effects.solved, capture_count: function.capture_params.len()})
+        loop param in function.generic_params -> _ := &type_vars.add(~param.name, true)
+    }
+    loop (position, definition) in program.types {
+        _ := &types.add(mir_lint_key(definition.id.value), position)
+        loop param in definition.generic_params -> _ := &type_vars.add(~param.name, true)
+        row := MIRLintTypeRow{name: ~definition.name, fields: None, variants: None}
+        if definition.kind == {
+            .Struct(declared, _) -> {
+                loop field in declared -> _ := &fields.add(mir_lint_key(field.id.value), ~field)
+                row.fields = Val(~declared)
+            }
+            .Enum(variants, _) -> row.variants = Val(~variants)
+            else -> {
+                _ := &transparent.add(~definition.name, true)
+                _ := &transparent.add(~definition.key, true)
+                _ := &transparent.add(mir_lint_leaf(definition.name), true)
+            }
+        }
+        &type_rows.push(row)
+    }
+    loop row in program.fields -> _ := &fields.add(mir_lint_key(row.id.value), ~row.field)
+    loop row in program.traits {
+        loop declaration in row.associated_types -> _ := &type_vars.add(~declaration.name, true)
+    }
+    MIRLintIndex{functions: functions, signatures: signatures, types: types, type_rows: type_rows, fields: fields, type_vars: type_vars, transparent: transparent}
+}
+
+// Table key of a stable MIR ID. IDs are unsigned 64-bit hashes, so they are
+// keyed by their decimal text: an Int map does not find a key at or above
+// 2^63 that was computed separately from the stored one.
+fn mir_lint_key(id: Int) -> String Never! {
+    "{id}"
+}
+
+fn mir_lint_leaf(name: String) -> String Never! {
+    dotted := name.split(".").to_list()
+    tail := if dotted.len() == 0 -> name else -> dotted[dotted.len() - 1]
+    coloned := tail.split(":").to_list()
+    if coloned.len() == 0 -> return tail
+    coloned[coloned.len() - 1]
+}
+
+// Peel the carriers that share their inner representation.
+fn mir_lint_reduce(ty: MIRType) -> MIRType Never! {
+    if ty.kind == {
+        .Tagged(_, inner) -> mir_lint_reduce(inner)
+        .InlineRange(base, _, _) -> mir_lint_reduce(base)
+        .Quantity(base, _) -> mir_lint_reduce(base)
+        .Shared(inner) -> mir_lint_reduce(inner)
+        else -> ty
+    }
+}
+
+fn mir_lint_is_wild(index: MIRLintIndex, ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Measure(_) | .TraitObject(_) | .Union(_) -> true
+        .Apply(name, args) -> {
+            if args.len() == 0 {
+                if name.name == "Never" || index.type_vars.get(name.name) != None -> return true
+                dotted :: name.name.split(".").to_list()
+                if dotted.len() > 1 && index.type_vars.get(dotted[0]) != None -> return true
+            }
+            if index.transparent.get(name.name) != None -> return true
+            index.transparent.len() > 0 && index.transparent.get(mir_lint_leaf(name.name)) != None
+        }
+        else -> false
+    }
+}
+
+fn mir_lint_class(index: MIRLintIndex, ty: MIRType) -> MIRLintClass Never! {
+    reduced :: mir_lint_reduce(ty)
+    if mir_lint_is_wild(index, reduced) -> return MIRLintClass.Wild
+    if mir_type_is_unit(reduced) -> return MIRLintClass.Unit
+    if reduced.kind == {
+        .Int | .IntN(_, _) -> MIRLintClass.Integer
+        .Float | .Float32 -> MIRLintClass.Float
+        .Bool -> MIRLintClass.Bool
+        .String -> MIRLintClass.String
+        .Char -> MIRLintClass.Char
+        .List(_) | .FixedList(_, _) -> MIRLintClass.List
+        .Map(_, _) -> MIRLintClass.Map
+        .Option(_) -> MIRLintClass.Option
+        .Result(_, _) -> MIRLintClass.Result
+        .Fn(_) | .SendFn(_, _, _) -> MIRLintClass.Callable
+        .Tuple(fields) -> if fields.len() == 0 -> MIRLintClass.Unit else -> MIRLintClass.Tuple
+        .Apply(_, _) -> MIRLintClass.Nominal
+        else -> MIRLintClass.Wild
+    }
+}
+
+fn mir_lint_element(ty: MIRType) -> MIRType? Never! {
+    reduced :: mir_lint_reduce(ty)
+    if reduced.kind == {
+        .List(inner) -> Val(inner)
+        .FixedList(elem, _) -> Val(elem)
+        else -> None
+    }
+}
+
+fn mir_lint_option_inner(ty: MIRType) -> MIRType? Never! {
+    reduced :: mir_lint_reduce(ty)
+    if reduced.kind == {
+        .Option(inner) -> Val(inner)
+        else -> None
+    }
+}
+
+fn mir_lint_result_part(ty: MIRType, ok: Bool) -> MIRType? Never! {
+    reduced :: mir_lint_reduce(ty)
+    if reduced.kind == {
+        .Result(success, failure) -> if ok -> Val(success) else -> Val(failure)
+        else -> None
+    }
+}
+
+// The one compatibility relation of the spec: representation classes agree,
+// and structural children are compatible.
+fn mir_lint_compatible(index: MIRLintIndex, expected: MIRType, actual: MIRType) -> Bool Never! {
+    left :: mir_lint_reduce(expected)
+    right :: mir_lint_reduce(actual)
+    left_class :: mir_lint_class(index, left)
+    right_class :: mir_lint_class(index, right)
+    if left_class == .Wild || right_class == .Wild -> return true
+    if left_class != right_class -> return false
+    if left_class == .List {
+        left_element :: mir_lint_element(left) ?? return true
+        right_element :: mir_lint_element(right) ?? return true
+        return mir_lint_compatible(index, left_element, right_element)
+    }
+    if left.kind == {
+        .Option(left_inner) -> {
+            right_inner :: mir_lint_option_inner(right) ?? return true
+            mir_lint_compatible(index, left_inner, right_inner)
+        }
+        .Map(left_key, left_value) -> {
+            if right.kind == .Map(right_key, right_value) -> return mir_lint_compatible(index, left_key, right_key) && mir_lint_compatible(index, left_value, right_value)
+            true
+        }
+        .Result(left_ok, left_err) -> {
+            if right.kind == .Result(right_ok, right_err) -> return mir_lint_compatible(index, left_ok, right_ok) && mir_lint_compatible(index, left_err, right_err)
+            true
+        }
+        .Apply(left_name, left_args) -> {
+            if right.kind == .Apply(right_name, right_args) {
+                same :: left_name.id == right_name.id || left_name.name == right_name.name || mir_lint_leaf(left_name.name) == mir_lint_leaf(right_name.name)
+                if !same -> return false
+                if left_args.len() != right_args.len() -> return true
+                loop (position, arg) in left_args {
+                    if !mir_lint_compatible(index, arg, right_args[position]) -> return false
+                }
+            }
+            true
+        }
+        .Tuple(left_fields) -> {
+            if right.kind == .Tuple(right_fields) {
+                if left_fields.len() != right_fields.len() -> return false
+                loop (position, field) in left_fields {
+                    if !mir_lint_compatible(index, field.ty, right_fields[position].ty) -> return false
+                }
+            }
+            true
+        }
+        else -> true
+    }
+}
+
+fn mir_lint_kind_callable(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Fn(_) | .SendFn(_, _, _) -> true
+        else -> false
+    }
+}
+
+// The 23 type-kind rules; the reason the type is malformed, if it is.
+fn mir_lint_type_problem(ty: MIRType) -> String? Never! {
+    if !mir_type_has_valid_layout(ty) -> return Val("stored layout does not match the type kind")
+    mir_lint_kind_problem(ty)
+}
+
+fn mir_lint_kinds_problem(types: [MIRType]) -> String? Never! {
+    loop ty in types {
+        problem :: mir_lint_kind_problem(ty)
+        if problem != None -> return problem
+    }
+    None
+}
+
+fn mir_lint_kind_problem(ty: MIRType) -> String? Never! {
+    if ty.kind == {
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .Measure(_) -> None
+        .List(inner) | .Shared(inner) | .Option(inner) -> mir_lint_kind_problem(inner)
+        .FixedList(elem, _) -> mir_lint_kind_problem(elem)
+        .Map(key, value) -> {
+            if mir_lint_kind_callable(key) -> return Val("map key is callable")
+            mir_lint_kinds_problem([MIRType]{key, value})
+        }
+        .Result(ok, err) -> mir_lint_kinds_problem([MIRType]{ok, err})
+        .Fn(signature) -> {
+            arity :: signature.params.len()
+            if signature.call_metadata == .Val(metadata) {
+                if (metadata.names.len() != 0 && metadata.names.len() != arity) || (metadata.defaults.len() != 0 && metadata.defaults.len() != arity) || (metadata.variadic.len() != 0 && metadata.variadic.len() != arity) {
+                    return Val("callable metadata does not have one row per parameter")
+                }
+            }
+            if signature.param_contract == .Val(rows) {
+                if rows.len() != arity -> return Val("callable parameter contract does not have one row per parameter")
+            }
+            problem :: mir_lint_kinds_problem(signature.params)
+            if problem != None -> return problem
+            ret :: signature.ret ?? return None
+            mir_lint_kind_problem(ret)
+        }
+        .SendFn(params, ret, conventions) -> {
+            if conventions.len() != 0 && conventions.len() != params.len() -> return Val("send callable does not have one convention per parameter")
+            problem :: mir_lint_kinds_problem(params)
+            if problem != None -> return problem
+            result :: ret ?? return None
+            mir_lint_kind_problem(result)
+        }
+        .Apply(name, args) -> {
+            if name.name == "" -> return Val("nominal type has no name")
+            mir_lint_kinds_problem(args)
+        }
+        .TraitObject(bounds) -> if bounds.len() == 0 -> Val("trait object has no bound") else -> None
+        .Tuple(fields) -> {
+            loop (position, field) in fields {
+                if field.name != "" {
+                    loop earlier in 0..<position {
+                        if fields[earlier].name == field.name -> return Val("tuple repeats field name `{field.name}`")
+                    }
+                }
+                problem :: mir_lint_kind_problem(field.ty)
+                if problem != None -> return problem
+            }
+            None
+        }
+        .IntN(_, bits) -> if bits < 1 || bits > 64 -> Val("fixed-width integer is not 1 to 64 bits") else -> None
+        .InlineRange(base, lo, hi) -> {
+            if lo > hi -> return Val("inline range bounds are inverted")
+            if !mir_type_is_integer(base) && !mir_lint_is_char(base) -> return Val("inline range base is not an integer")
+            mir_lint_kind_problem(base)
+        }
+        .Tagged(marker, inner) -> {
+            if marker == .User(name) {
+                if name == "" -> return Val("user tag has no name")
+            }
+            mir_lint_kind_problem(inner)
+        }
+        .Union(members) -> {
+            if members.len() < 2 -> return Val("union has fewer than two members")
+            mir_lint_kinds_problem(members)
+        }
+        .Quantity(base, _) -> {
+            if !mir_type_is_numeric(base) -> return Val("quantity base is not numeric")
+            mir_lint_kind_problem(base)
+        }
+    }
+}
+
+fn mir_lint_is_char(ty: MIRType) -> Bool Never! {
+    if mir_lint_reduce(ty).kind == {
+        .Char -> true
+        else -> false
+    }
+}
+
+fn mir_lint_is_bool(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Bool -> true
+        else -> false
+    }
+}
+
+// The program index and the lookup rows of the function being checked.
+// Every table is keyed by the raw ID value.
+struct MIRLintContext {
+    pub index: MIRLintIndex
+    pub function: MIRFunction
+    // Value ID -> row in `function.values`.
+    pub values: [String:Int]
+    // Place ID -> row in `function.places`.
+    pub places: [String:Int]
+    // Block ID -> position in `function.blocks`.
+    pub blocks: [String:Int]
+    // Block position -> predecessor block IDs.
+    pub predecessors: [[MIRBlockID]]
+}
+
+fn mir_lint_context(index: ^MIRLintIndex, function: MIRFunction) -> MIRLintContext Never! {
+    ctx := MIRLintContext{index: index, function: ~function, values: [String:Int]{}, places: [String:Int]{}, blocks: [String:Int]{}, predecessors: [[MIRBlockID]]{}}
+    mir_lint_enter(&ctx, function)
+    ctx
+}
+
+// Point the context at `function`.
+fn mir_lint_enter(ctx: &MIRLintContext, function: MIRFunction) Never! {
+    values := [String:Int]{}
+    loop (row, fact) in function.values -> _ := &values.add(mir_lint_key(fact.id.value), row)
+    places := [String:Int]{}
+    loop (row, place) in function.places -> _ := &places.add(mir_lint_key(place.id.value), row)
+    blocks := [String:Int]{}
+    predecessors := [[MIRBlockID]]{}
+    loop (position, block) in function.blocks {
+        _ := &blocks.add(mir_lint_key(block.id.value), position)
+        &predecessors.push([MIRBlockID]{})
+    }
+    loop block in function.blocks {
+        loop target in mir_terminator_targets(block.terminator) {
+            position :: blocks.get(mir_lint_key(target.value)) ?? next
+            &predecessors[position].push(block.id)
+        }
+    }
+    ctx.function = ~function
+    ctx.values = values
+    ctx.places = places
+    ctx.blocks = blocks
+    ctx.predecessors = predecessors
+}
+
+fn mir_lint_fail(ctx: MIRLintContext, rule: MIRLintRule, span: Span, detail: String) -> MIRLintError? Never! {
+    Val(MIRLintError{rule: rule, function: ctx.function.id, function_key: ctx.function.key, span: span, detail: detail})
+}
+
+fn mir_lint_type_of(ctx: MIRLintContext, value: MIRValueID) -> MIRType? Never! {
+    row :: ctx.values.get(mir_lint_key(value.value)) ?? return None
+    Val(ctx.function.values[row].ty)
+}
+
+fn mir_lint_place(ctx: MIRLintContext, place: MIRPlaceID) -> MIRPlace? Never! {
+    row :: ctx.places.get(mir_lint_key(place.value)) ?? return None
+    Val(ctx.function.places[row])
+}
+
+fn mir_lint_well_formed(ctx: MIRLintContext, ty: MIRType, span: Span, what: String) -> MIRLintError? Never! {
+    reason :: mir_lint_type_problem(ty) ?? return None
+    mir_lint_fail(ctx, .TypeWellFormed, span, "{what} type {mir_type_display_name(ty)}: {reason}")
+}
+
+fn mir_lint_function(ctx: MIRLintContext) -> MIRLintError? Never! {
+    function :: ctx.function
+    loop param in function.params {
+        failure :: mir_lint_well_formed(ctx, param.ty, param.span, "parameter `{param.name}`")
+        if failure != None -> return failure
+    }
+    loop local in function.locals {
+        failure :: mir_lint_well_formed(ctx, local.ty, local.span, "local `{local.name}`")
+        if failure != None -> return failure
+    }
+    loop place in function.places {
+        failure :: mir_lint_well_formed(ctx, place.ty, place.span, "place {place.id.value}")
+        if failure != None -> return failure
+    }
+    loop fact in function.values {
+        failure :: mir_lint_well_formed(ctx, fact.ty, fact.span, "value {fact.id.value}")
+        if failure != None -> return failure
+    }
+    loop (position, block) in function.blocks {
+        loop instruction in block.instructions {
+            row_problem :: mir_lint_result_row(ctx, instruction)
+            if row_problem == .Val(problem) -> return mir_lint_fail(ctx, problem.rule, instruction.span, problem.detail)
+            loop value in mir_operation_value_uses(instruction.operation) {
+                if ctx.values.get(mir_lint_key(value.value)) == None -> return mir_lint_fail(ctx, .ValueTyped, instruction.span, "operand {value.value} has no typed definition")
+            }
+            operation_problem :: mir_lint_operation(ctx, position, instruction)
+            if operation_problem == .Val(problem) -> return mir_lint_fail(ctx, problem.rule, instruction.span, problem.detail)
+        }
+        loop value in mir_terminator_value_uses(block.terminator) {
+            if ctx.values.get(mir_lint_key(value.value)) == None -> return mir_lint_fail(ctx, .ValueTyped, block.span, "terminator operand {value.value} has no typed definition")
+        }
+        terminator_problem :: mir_lint_terminator(ctx, block)
+        if terminator_problem == .Val(problem) -> return mir_lint_fail(ctx, problem.rule, block.span, problem.detail)
+    }
+    mir_lint_ownership(ctx)
+}
+
+// `value.typed`: a result and its type travel together, and the result's
+// value row agrees with the instruction type.
+fn mir_lint_result_row(ctx: MIRLintContext, instruction: MIRInstruction) -> MIRLintProblem? Never! {
+    if instruction.result == .Val(result) {
+        ty :: instruction.ty ?? return mir_lint_problem(.ValueTyped, "result {result.value} has no type")
+        row :: mir_lint_type_of(ctx, result) ?? return mir_lint_problem(.ValueTyped, "result {result.value} has no value row")
+        return mir_lint_expect(ctx, .ValueTyped, "result value row", ty, row)
+    }
+    if instruction.ty != None -> return mir_lint_problem(.ValueTyped, "an instruction without a result carries a type")
+    None
+}
+
+// `actual` (an operand or result) must be compatible with `expected`.
+fn mir_lint_expect(ctx: MIRLintContext, rule: MIRLintRule, what: String, expected: MIRType, actual: MIRType) -> MIRLintProblem? Never! {
+    if mir_lint_compatible(ctx.index, expected, actual) -> return None
+    mir_lint_problem(rule, "{what} has type {mir_type_display_name(actual)} where {mir_type_display_name(expected)} is required")
+}
+
+fn mir_lint_expect_class(ctx: MIRLintContext, rule: MIRLintRule, what: String, ty: MIRType, classes: [MIRLintClass]) -> MIRLintProblem? Never! {
+    class :: mir_lint_class(ctx.index, ty)
+    if class == .Wild || classes.contains(class) -> return None
+    names := [String]{}
+    loop expected in classes -> &names.push(mir_lint_class_name(expected))
+    joined :: names.join(" or ")
+    mir_lint_problem(rule, "{what} has type {mir_type_display_name(ty)}, expected {joined}")
+}
+
+fn mir_lint_expect_value(ctx: MIRLintContext, rule: MIRLintRule, what: String, expected: MIRType, value: MIRValueID) -> MIRLintProblem? Never! {
+    actual :: mir_lint_type_of(ctx, value) ?? return None
+    mir_lint_expect(ctx, rule, what, expected, actual)
+}
+
+fn mir_lint_expect_value_class(ctx: MIRLintContext, rule: MIRLintRule, what: String, value: MIRValueID, classes: [MIRLintClass]) -> MIRLintProblem? Never! {
+    actual :: mir_lint_type_of(ctx, value) ?? return None
+    mir_lint_expect_class(ctx, rule, what, actual, classes)
+}
+
+fn mir_lint_bool() -> [MIRLintClass] Never! { [MIRLintClass]{MIRLintClass.Bool} }
+
+fn mir_lint_integer() -> [MIRLintClass] Never! { [MIRLintClass]{MIRLintClass.Integer} }
+
+fn mir_lint_numeric() -> [MIRLintClass] Never! { [MIRLintClass]{MIRLintClass.Integer, MIRLintClass.Float} }
+
+fn mir_lint_callable() -> [MIRLintClass] Never! { [MIRLintClass]{MIRLintClass.Callable, MIRLintClass.Nominal} }
+
+fn mir_lint_no_result(rule: MIRLintRule) -> MIRLintProblem? Never! {
+    mir_lint_problem(rule, "the operation must produce a result")
+}
+
+fn mir_lint_without_result(instruction: MIRInstruction, what: String) -> MIRLintProblem? Never! {
+    if instruction.ty != None -> return mir_lint_problem(.OperationTyping, "{what} produces a result")
+    None
+}
+
+// `operation.typing`, with `struct.field`, `enum.variant`, `call.signature`,
+// and `effect.row` for the operations that name declarations. The match is
+// split across `mir_lint_operation_*` helpers (each takes the operations the
+// previous one does not) so no single lowered body grows with every arm.
+fn mir_lint_operation(ctx: MIRLintContext, position: Int, instruction: MIRInstruction) -> MIRLintProblem? Never! {
+    op :: MIRLintRule.OperationTyping
+    result :: instruction.ty
+    if instruction.operation == {
+        .Parameter(slot, _) -> {
+            if slot < 0 || slot >= ctx.function.params.len() -> return mir_lint_problem(op, "parameter {slot} does not exist")
+            ty :: result ?? return mir_lint_no_result(op)
+            mir_lint_expect(ctx, op, "parameter", ctx.function.params[slot].ty, ty)
+        }
+        .Capture(slot) -> {
+            if slot < 0 || slot >= ctx.function.capture_params.len() -> return mir_lint_problem(op, "capture slot {slot} does not exist")
+            ty :: result ?? return mir_lint_no_result(op)
+            mir_lint_expect(ctx, op, "capture", ctx.function.capture_params[slot].ty, ty)
+        }
+        .Global(name) -> {
+            if name == "" -> return mir_lint_problem(op, "global has no name")
+            if result == None -> return mir_lint_no_result(op)
+            None
+        }
+        .Phi(incoming) -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            if incoming.len() == 0 -> return mir_lint_problem(op, "phi has no incoming edge")
+            loop edge in incoming {
+                if !ctx.predecessors[position].contains(edge.block) -> return mir_lint_problem(op, "phi edge from block {edge.block.value} is not a predecessor")
+                problem :: mir_lint_expect_value(ctx, op, "phi input", ty, edge.value)
+                if problem != None -> return problem
+            }
+            None
+        }
+        .ReadPlace(place) | .MovePlace(place) -> {
+            row :: mir_lint_place(ctx, place) ?? return mir_lint_problem(op, "place {place.value} does not exist")
+            ty :: result ?? return mir_lint_no_result(op)
+            mir_lint_expect(ctx, op, "place read", row.ty, ty)
+        }
+        .WritePlace(place, value) | .ReplacePlace(place, value) -> {
+            row :: mir_lint_place(ctx, place) ?? return mir_lint_problem(op, "place {place.value} does not exist")
+            if result != None -> return mir_lint_problem(op, "place write produces a result")
+            mir_lint_expect_value(ctx, op, "written value", row.ty, value)
+        }
+        .InitializeUninit(place) -> {
+            if mir_lint_place(ctx, place) == None -> return mir_lint_problem(op, "place {place.value} does not exist")
+            mir_lint_without_result(instruction, "initialization")
+        }
+        .Copy(value, _) | .Move(value) | .AttachTag(value, _) -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            operand :: mir_lint_type_of(ctx, value) ?? return None
+            mir_lint_expect(ctx, op, "result", operand, ty)
+        }
+        .TraitBox(_, _) | .PatternCapture(_, _) -> if result == None -> mir_lint_no_result(op) else -> None
+        else -> mir_lint_operation_values(ctx, instruction)
+    }
+}
+
+// `mir_lint_operation` for constants, unary and binary operators and strings.
+fn mir_lint_operation_values(ctx: MIRLintContext, instruction: MIRInstruction) -> MIRLintProblem? Never! {
+    op :: MIRLintRule.OperationTyping
+    result :: instruction.ty
+    if instruction.operation == {
+        .Constant(constant) -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            class :: mir_lint_class(ctx.index, ty)
+            if class == .Wild || class == .Nominal -> return None
+            expected :: if constant == {
+                .Int(_, _, _) | .BigInt(_) -> Val(MIRLintClass.Integer)
+                .Float(_, _, _) -> Val(MIRLintClass.Float)
+                .Bool(_) -> Val(MIRLintClass.Bool)
+                .Char(_) -> Val(MIRLintClass.Char)
+                .String(_) -> Val(MIRLintClass.String)
+                .Unit -> Val(MIRLintClass.Unit)
+                else -> None
+            }
+            if expected == .Val(wanted) {
+                if wanted != class -> return mir_lint_problem(op, "constant has type {mir_type_display_name(ty)}, expected {mir_lint_class_name(wanted)}")
+            }
+            None
+        }
+        .Unary(unary, value) -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            operand :: mir_lint_type_of(ctx, value) ?? return None
+            classes :: if unary == {
+                .Neg -> mir_lint_numeric()
+                .Not -> [MIRLintClass]{MIRLintClass.Bool, MIRLintClass.Integer}
+            }
+            problem :: mir_lint_expect_class(ctx, op, "unary operand", operand, classes)
+            if problem != None -> return problem
+            mir_lint_expect(ctx, op, "result", operand, ty)
+        }
+        .Binary(binary, dispatch, _, left, right) -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            mir_lint_binary(ctx, binary, mir_lint_is_primitive(dispatch), left, right, ty)
+        }
+        .BuildString(_) -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            mir_lint_expect_class(ctx, op, "string result", ty, [MIRLintClass]{MIRLintClass.String, MIRLintClass.Nominal})
+        }
+        else -> mir_lint_operation_collections(ctx, instruction)
+    }
+}
+
+// `mir_lint_operation` for list and map literals and enum and carrier tests.
+fn mir_lint_operation_collections(ctx: MIRLintContext, instruction: MIRInstruction) -> MIRLintProblem? Never! {
+    op :: MIRLintRule.OperationTyping
+    result :: instruction.ty
+    if instruction.operation == {
+        .BuildList(values, trait_coercion) -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            problem :: mir_lint_expect_class(ctx, op, "list result", ty, [MIRLintClass]{MIRLintClass.List, MIRLintClass.Nominal})
+            if problem != None -> return problem
+            if trait_coercion != None -> return None
+            element :: mir_lint_element(ty) ?? return None
+            loop value in values {
+                element_problem :: mir_lint_expect_value(ctx, op, "list element", element, value)
+                if element_problem != None -> return element_problem
+            }
+            None
+        }
+        .BuildMap(entries) -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            problem :: mir_lint_expect_class(ctx, op, "map result", ty, [MIRLintClass]{MIRLintClass.Map, MIRLintClass.Nominal})
+            if problem != None -> return problem
+            if mir_lint_reduce(ty).kind == .Map(key, value) {
+                loop entry in entries {
+                    key_problem :: mir_lint_expect_value(ctx, op, "map key", key, entry.key)
+                    if key_problem != None -> return key_problem
+                    value_problem :: mir_lint_expect_value(ctx, op, "map value", value, entry.value)
+                    if value_problem != None -> return value_problem
+                }
+            }
+            None
+        }
+        .EnumIs(_, owner, variant) -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            problem :: mir_lint_expect_class(ctx, op, "variant test", ty, mir_lint_bool())
+            if problem != None -> return problem
+            lookup :: mir_lint_variant(ctx, owner, variant)
+            lookup.problem
+        }
+        .EnumPayload(_, owner, variant, slot) -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            lookup :: mir_lint_variant(ctx, owner, variant)
+            if lookup.problem != None -> return lookup.problem
+            row :: lookup.variant ?? return None
+            payload :: if row.payload == {
+                .Single(value) -> if slot == 0 -> Val(value) else -> None
+                .Named(fields) -> if slot >= 0 && slot < fields.len() -> Val(fields[slot].ty) else -> None
+                .Unit -> None
+            }
+            declared :: payload ?? return mir_lint_problem(.EnumVariant, "variant {variant} has no payload slot {slot}")
+            mir_lint_expect(ctx, .EnumVariant, "payload", declared, ty)
+        }
+        .OptionIsSome(subject) -> mir_lint_carrier_test(ctx, instruction, subject, MIRLintClass.Option)
+        .ResultIsOk(subject) -> mir_lint_carrier_test(ctx, instruction, subject, MIRLintClass.Result)
+        else -> mir_lint_operation_payloads(ctx, instruction)
+    }
+}
+
+// `mir_lint_operation` for carrier payloads, pattern tests and projections.
+fn mir_lint_operation_payloads(ctx: MIRLintContext, instruction: MIRInstruction) -> MIRLintProblem? Never! {
+    op :: MIRLintRule.OperationTyping
+    result :: instruction.ty
+    if instruction.operation == {
+        .OptionValue(subject) -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            carrier :: mir_lint_type_of(ctx, subject) ?? return None
+            problem :: mir_lint_expect_class(ctx, op, "subject", carrier, [MIRLintClass]{MIRLintClass.Option})
+            if problem != None -> return problem
+            inner :: mir_lint_option_inner(carrier) ?? return None
+            mir_lint_expect(ctx, op, "Optional payload", inner, ty)
+        }
+        .ResultValue(subject, ok) -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            carrier :: mir_lint_type_of(ctx, subject) ?? return None
+            problem :: mir_lint_expect_class(ctx, op, "subject", carrier, [MIRLintClass]{MIRLintClass.Result})
+            if problem != None -> return problem
+            part :: mir_lint_result_part(carrier, ok) ?? return None
+            mir_lint_expect(ctx, op, "Result payload", part, ty)
+        }
+        .PatternMatched(_) -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            mir_lint_expect_class(ctx, op, "pattern test", ty, mir_lint_bool())
+        }
+        .ProjectMembers(_, members) -> {
+            if members.len() == 0 -> return mir_lint_problem(op, "member projection is empty")
+            loop (member_position, member) in members {
+                if ctx.index.fields.get(mir_lint_key(member.value)) == None -> return mir_lint_problem(.StructField, "field {member.value} is not declared")
+                loop earlier in 0..<member_position {
+                    if members[earlier] == member -> return mir_lint_problem(.StructField, "member projection repeats field {member.value}")
+                }
+            }
+            None
+        }
+        else -> mir_lint_operation_access(ctx, instruction)
+    }
+}
+
+// `mir_lint_operation` for indexing, slices, ranges and field reads.
+fn mir_lint_operation_access(ctx: MIRLintContext, instruction: MIRInstruction) -> MIRLintProblem? Never! {
+    op :: MIRLintRule.OperationTyping
+    result :: instruction.ty
+    if instruction.operation == {
+        .Index(_, base, key, kind, access, _, _) -> {
+            base_type :: mir_lint_type_of(ctx, base) ?? return None
+            key_type :: mir_lint_type_of(ctx, key) ?? return None
+            if kind == {
+                .List | .FixedListProof | .Lane -> {
+                    problem :: mir_lint_expect_class(ctx, op, "index", key_type, mir_lint_integer())
+                    if problem != None -> return problem
+                    if access != .Read -> return None
+                    ty :: result ?? return None
+                    element :: mir_lint_element(base_type) ?? return None
+                    mir_lint_expect(ctx, op, "element", element, ty)
+                }
+                .Map -> {
+                    if mir_lint_reduce(base_type).kind == .Map(map_key, map_value) {
+                        problem :: mir_lint_expect(ctx, op, "map key", map_key, key_type)
+                        if problem != None -> return problem
+                        if access != .Read -> return None
+                        ty :: result ?? return None
+                        if mir_lint_compatible(ctx.index, map_value, ty) -> return None
+                        inner :: mir_lint_option_inner(ty) ?? return mir_lint_problem(op, "map read has type {mir_type_display_name(ty)} for values of {mir_type_display_name(map_value)}")
+                        if !mir_lint_compatible(ctx.index, map_value, inner) -> return mir_lint_problem(op, "map read has type {mir_type_display_name(ty)} for values of {mir_type_display_name(map_value)}")
+                    }
+                    None
+                }
+                .Pool -> None
+            }
+        }
+        .Slice(_, _, start, end, _, _) -> {
+            problem :: mir_lint_expect_value_class(ctx, op, "slice start", start, mir_lint_integer())
+            if problem != None -> return problem
+            mir_lint_expect_value_class(ctx, op, "slice end", end, mir_lint_integer())
+        }
+        .Range(start, end, _) | .LoopRangeInit(_, start, end, _, _) -> {
+            start_type :: mir_lint_type_of(ctx, start) ?? return None
+            mir_lint_expect_value(ctx, op, "range end", start_type, end)
+        }
+        .Field(_, field) -> {
+            declared :: ctx.index.fields.get(mir_lint_key(field.value)) ?? return mir_lint_problem(.StructField, "field {field.value} is not declared")
+            ty :: result ?? return mir_lint_no_result(op)
+            mir_lint_expect(ctx, .StructField, "field `{declared.name}`", declared.ty, ty)
+        }
+        else -> mir_lint_operation_construction(ctx, instruction)
+    }
+}
+
+// `mir_lint_operation` for struct, enum, tuple and carrier construction and
+// conversions.
+fn mir_lint_operation_construction(ctx: MIRLintContext, instruction: MIRInstruction) -> MIRLintProblem? Never! {
+    op :: MIRLintRule.OperationTyping
+    result :: instruction.ty
+    if instruction.operation == {
+        .Struct(type_id, fields) -> {
+            if result == None -> return mir_lint_no_result(op)
+            mir_lint_struct_fields(ctx, type_id, fields, [MIRFieldID]{}, true)
+        }
+        .Enum(type_id, variant, args) -> {
+            if result == None -> return mir_lint_no_result(op)
+            mir_lint_enum_construction(ctx, type_id, variant, args)
+        }
+        .Tuple(_, fields) -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            if mir_lint_reduce(ty).kind == .Tuple(slots) {
+                if slots.len() != fields.len() -> return mir_lint_problem(op, "tuple of {fields.len()} fields has type {mir_type_display_name(ty)}")
+                return None
+            }
+            mir_lint_expect_class(ctx, op, "tuple result", ty, [MIRLintClass]{MIRLintClass.Tuple, MIRLintClass.Unit, MIRLintClass.Nominal})
+        }
+        .Present(value) -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            problem :: mir_lint_expect_class(ctx, op, "present result", ty, [MIRLintClass]{MIRLintClass.Option})
+            if problem != None -> return problem
+            inner :: mir_lint_option_inner(ty) ?? return None
+            mir_lint_expect_value(ctx, op, "present value", inner, value)
+        }
+        .Absent -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            mir_lint_expect_class(ctx, op, "absent result", ty, [MIRLintClass]{MIRLintClass.Option})
+        }
+        .ResultOk(value) -> mir_lint_result_carrier(ctx, instruction, value, true)
+        .ResultErr(value) -> mir_lint_result_carrier(ctx, instruction, value, false)
+        .Convert(value, _, _, conversion) -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            if mir_lint_is_numeric_cast(conversion) {
+                problem :: mir_lint_expect_value_class(ctx, op, "cast source", value, mir_lint_numeric())
+                if problem != None -> return problem
+                return mir_lint_expect_class(ctx, op, "cast target", ty, mir_lint_numeric())
+            }
+            None
+        }
+        else -> mir_lint_operation_calls(ctx, instruction)
+    }
+}
+
+// `mir_lint_operation` for calls, closures, addresses, loop tests, scopes and
+// semantic operations.
+fn mir_lint_operation_calls(ctx: MIRLintContext, instruction: MIRInstruction) -> MIRLintProblem? Never! {
+    op :: MIRLintRule.OperationTyping
+    result :: instruction.ty
+    if instruction.operation == {
+        .Call(callee, args, _) -> mir_lint_call(ctx, instruction, callee, args)
+        .IndirectCall(callee, args, _) -> {
+            callee_type :: mir_lint_type_of(ctx, callee) ?? return None
+            problem :: mir_lint_expect_class(ctx, .CallSignature, "indirect callee", callee_type, mir_lint_callable())
+            if problem != None -> return problem
+            arity :: if mir_lint_reduce(callee_type).kind == {
+                .Fn(signature) -> {
+                    variadic :: if signature.call_metadata == .Val(metadata) -> mir_call_metadata_is_variadic(metadata) else -> false
+                    if variadic -> -1 else -> signature.params.len()
+                }
+                .SendFn(params, _, _) -> params.len()
+                else -> -1
+            }
+            if arity < 0 || mir_lint_has_spread(args) -> return None
+            if args.len() > arity -> return mir_lint_problem(.CallSignature, "indirect call passes {args.len()} arguments to {arity} parameters")
+            None
+        }
+        .Closure(target, captures, _) -> {
+            target_position :: ctx.index.functions.get(mir_lint_key(target.value)) ?? return mir_lint_problem(op, "closure function {target.value} does not exist")
+            signature :: ctx.index.signatures[target_position]
+            if signature.capture_count != captures.len() -> return mir_lint_problem(op, "closure passes {captures.len()} captures to {signature.capture_count} capture slots")
+            ty :: result ?? return mir_lint_no_result(op)
+            mir_lint_expect_class(ctx, op, "closure", ty, mir_lint_callable())
+        }
+        .PtrFromAddr(address, _) -> mir_lint_expect_value_class(ctx, op, "address", address, mir_lint_integer())
+        .RawAddressOf(place) | .AddressOf(place, _) -> {
+            if mir_lint_place(ctx, place) == None -> return mir_lint_problem(op, "place {place.value} does not exist")
+            None
+        }
+        .LoopRangeHasNext(_, _) | .LoopIterHasNext(_, _) -> {
+            ty :: result ?? return mir_lint_no_result(op)
+            mir_lint_expect_class(ctx, op, "loop test", ty, mir_lint_bool())
+        }
+        .ScopeEnter(scope, _) | .ScopeExit(scope) -> {
+            loop row in ctx.function.scopes {
+                if row.id == scope -> return None
+            }
+            mir_lint_problem(op, "scope {scope.value} does not exist")
+        }
+        .Semantic(semantic) -> mir_lint_semantic(ctx, instruction, semantic)
+        else -> None
+    }
+}
+
+fn mir_lint_is_primitive(dispatch: MIRBinaryDispatch) -> Bool Never! {
+    if dispatch == {
+        .Primitive -> true
+        else -> false
+    }
+}
+
+fn mir_lint_is_numeric_cast(conversion: MIRConversion) -> Bool Never! {
+    if conversion == {
+        .NumericCast -> true
+        else -> false
+    }
+}
+
+fn mir_lint_binary(ctx: MIRLintContext, binary: MIRBinaryOp, primitive: Bool, left: MIRValueID, right: MIRValueID, ty: MIRType) -> MIRLintProblem? Never! {
+    op :: MIRLintRule.OperationTyping
+    if binary == .Eq || binary == .Ne || binary == .Lt || binary == .Gt || binary == .Le || binary == .Ge -> return mir_lint_expect_class(ctx, op, "comparison result", ty, mir_lint_bool())
+    if !primitive || binary == .Compare -> return None
+    left_type :: mir_lint_type_of(ctx, left) ?? return None
+    right_type :: mir_lint_type_of(ctx, right) ?? return None
+    if binary == .And || binary == .Or {
+        problem := mir_lint_expect_class(ctx, op, "logical operand", left_type, mir_lint_bool())
+        if problem != None -> return problem
+        problem = mir_lint_expect_class(ctx, op, "logical operand", right_type, mir_lint_bool())
+        if problem != None -> return problem
+        return mir_lint_expect_class(ctx, op, "logical result", ty, mir_lint_bool())
+    }
+    if binary == .Shl || binary == .Shr {
+        problem := mir_lint_expect_class(ctx, op, "shifted operand", left_type, mir_lint_integer())
+        if problem != None -> return problem
+        problem = mir_lint_expect_class(ctx, op, "shift amount", right_type, mir_lint_integer())
+        if problem != None -> return problem
+        return mir_lint_expect(ctx, op, "shift result", left_type, ty)
+    }
+    if binary == .Pow -> return mir_lint_expect(ctx, op, "power result", left_type, ty)
+    problem :: mir_lint_expect(ctx, op, "right operand", left_type, right_type)
+    if problem != None || binary == .Div -> return problem
+    mir_lint_expect(ctx, op, "arithmetic result", left_type, ty)
+}
+
+fn mir_lint_carrier_test(ctx: MIRLintContext, instruction: MIRInstruction, subject: MIRValueID, class: MIRLintClass) -> MIRLintProblem? Never! {
+    op :: MIRLintRule.OperationTyping
+    ty :: instruction.ty ?? return mir_lint_no_result(op)
+    problem :: mir_lint_expect_value_class(ctx, op, "subject", subject, [MIRLintClass]{class})
+    if problem != None -> return problem
+    mir_lint_expect_class(ctx, op, "carrier test", ty, mir_lint_bool())
+}
+
+fn mir_lint_result_carrier(ctx: MIRLintContext, instruction: MIRInstruction, value: MIRValueID, ok: Bool) -> MIRLintProblem? Never! {
+    op :: MIRLintRule.OperationTyping
+    ty :: instruction.ty ?? return mir_lint_no_result(op)
+    problem :: mir_lint_expect_class(ctx, op, "Result carrier", ty, [MIRLintClass]{MIRLintClass.Result})
+    if problem != None -> return problem
+    part :: mir_lint_result_part(ty, ok) ?? return None
+    mir_lint_expect_value(ctx, op, "carried value", part, value)
+}
+
+fn mir_lint_has_spread(args: [MIRCallArg]) -> Bool Never! {
+    loop arg in args {
+        if arg.spread -> return true
+    }
+    false
+}
+
+// `struct.field`: every supplied field is declared once on the struct, with a
+// compatible value, and every field without a default is present.
+fn mir_lint_struct_fields(ctx: MIRLintContext, type_id: MIRTypeID, fields: [MIRFieldValue], boxed: [MIRFieldID], complete: Bool) -> MIRLintProblem? Never! {
+    rule :: MIRLintRule.StructField
+    position :: ctx.index.types.get(mir_lint_key(type_id.value)) ?? return None
+    definition :: ctx.index.type_rows[position]
+    declared :: definition.fields ?? return mir_lint_problem(rule, "type {definition.name} is not a struct")
+    loop (field_position, supplied) in fields {
+        row_position := -1
+        loop (declared_position, declaration) in declared {
+            if declaration.id == supplied.field -> row_position = declared_position
+        }
+        if row_position < 0 -> return mir_lint_problem(rule, "field {supplied.field.value} is not declared on {definition.name}")
+        row :: declared[row_position]
+        loop earlier in 0..<field_position {
+            if fields[earlier].field == supplied.field -> return mir_lint_problem(rule, "field `{row.name}` is supplied twice")
+        }
+        if !boxed.contains(supplied.field) {
+            problem :: mir_lint_expect_value(ctx, rule, "field `{row.name}`", row.ty, supplied.value)
+            if problem != None -> return problem
+        }
+    }
+    if !complete -> return None
+    loop row in declared {
+        if row.has_default || row.computed -> next
+        present := false
+        loop supplied in fields {
+            if supplied.field == row.id -> present = true
+        }
+        if !present -> return mir_lint_problem(rule, "field `{row.name}` of {definition.name} is missing")
+    }
+    None
+}
+
+struct MIRLintVariantLookup {
+    pub variant: MIRVariant?
+    pub problem: MIRLintProblem?
+}
+
+// `enum.variant`: the variant is declared on the owner enum. An owner the
+// program does not declare (a Core or builtin enum) is not checked here.
+fn mir_lint_variant(ctx: MIRLintContext, owner: MIRTypeID, variant: String) -> MIRLintVariantLookup Never! {
+    position :: ctx.index.types.get(mir_lint_key(owner.value)) ?? return MIRLintVariantLookup{variant: None, problem: None}
+    definition :: ctx.index.type_rows[position]
+    variants :: definition.variants ?? return MIRLintVariantLookup{variant: None, problem: mir_lint_problem(.EnumVariant, "type {definition.name} is not an enum")}
+    loop row in variants {
+        if row.name == variant -> return MIRLintVariantLookup{variant: Val(~row), problem: None}
+    }
+    MIRLintVariantLookup{variant: None, problem: mir_lint_problem(.EnumVariant, "{definition.name} declares no variant {variant}")}
+}
+
+fn mir_lint_enum_construction(ctx: MIRLintContext, owner: MIRTypeID, variant: String, args: [MIREnumArg]) -> MIRLintProblem? Never! {
+    rule :: MIRLintRule.EnumVariant
+    lookup :: mir_lint_variant(ctx, owner, variant)
+    if lookup.problem != None -> return lookup.problem
+    row :: lookup.variant ?? return None
+    arity :: if row.payload == {
+        .Unit -> 0
+        .Single(_) -> 1
+        .Named(fields) -> fields.len()
+    }
+    if args.len() != arity -> return mir_lint_problem(rule, "variant {variant} takes {arity} payload values, got {args.len()}")
+    loop (position, arg) in args {
+        declared := MIRType?{None}
+        if row.payload == {
+            .Single(value) -> {
+                if arg.field != None -> return mir_lint_problem(rule, "variant {variant} payload slot {position} names a field")
+                declared = Val(value)
+            }
+            .Named(fields) -> {
+                if arg.field == {
+                    .Val(field) -> {
+                        loop declaration in fields {
+                            if declaration.id == field -> declared = Val(declaration.ty)
+                        }
+                        if declared == None -> return mir_lint_problem(rule, "variant {variant} declares no field {field.value}")
+                    }
+                    else -> declared = Val(fields[position].ty)
+                }
+            }
+            .Unit -> {}
+        }
+        if !arg.boxed {
+            if declared == .Val(expected) {
+                problem :: mir_lint_expect_value(ctx, rule, "payload value", expected, arg.value)
+                if problem != None -> return problem
+            }
+        }
+    }
+    None
+}
+
+fn mir_lint_arg_is_plain(arg: MIRCallArg) -> Bool Never! {
+    arg.fn_coercion == None && !arg.widen_fixed_to_list && arg.widen_to_union == None && arg.box_as_trait == None && !arg.spread
+}
+
+// An effect is inside a row that names it or one of its parent effects.
+fn mir_lint_effect_covered(row: [String], performed: String) -> Bool Never! {
+    loop granted in row {
+        if granted == performed || performed.starts_with("{granted}.") -> return true
+    }
+    false
+}
+
+// `call.signature` against the callee row named by ID, then `effect.row`.
+fn mir_lint_call(ctx: MIRLintContext, instruction: MIRInstruction, callee: MIRCallee, args: [MIRCallArg]) -> MIRLintProblem? Never! {
+    rule :: MIRLintRule.CallSignature
+    target_option :: if callee == {
+        .User(function) | .Associated(function, _) | .Method(function, _) -> Val(function)
+        else -> None
+    }
+    target_id :: target_option ?? return None
+    target_position :: ctx.index.functions.get(mir_lint_key(target_id.value)) ?? return mir_lint_problem(rule, "callee {target_id.value} is not a function of the program")
+    target :: ctx.index.signatures[target_position]
+    variadic := false
+    required := 0
+    loop param in target.params {
+        if param.variadic -> variadic = true
+        if !param.default_present -> required += 1
+    }
+    if !variadic && !mir_lint_has_spread(args) {
+        if args.len() < required || args.len() > target.params.len() -> return mir_lint_problem(rule, "call passes {args.len()} arguments to `{target.key}`, which takes {target.params.len()}")
+        loop (position, arg) in args {
+            if mir_lint_arg_is_plain(arg) {
+                param :: target.params[position]
+                problem :: mir_lint_expect_value(ctx, rule, "argument `{param.name}` of `{target.key}`", param.ty, arg.value)
+                if problem != None -> return problem
+            }
+        }
+    }
+    if instruction.ty == .Val(ty) {
+        problem :: mir_lint_expect(ctx, rule, "result of `{target.key}`", target.return_type, ty)
+        if problem != None -> return problem
+    }
+    caller :: ctx.function.effects
+    if caller.maximal -> return None
+    loop performed in target.solved_effects {
+        if !mir_lint_effect_covered(caller.solved, performed) -> return mir_lint_problem(.EffectRow, "call to `{target.key}` performs {performed}, outside the caller's effect row")
+    }
+    None
+}
+
+fn mir_lint_declared_fields(ctx: MIRLintContext, fields: [MIRFieldID]) -> MIRLintProblem? Never! {
+    loop field in fields {
+        if ctx.index.fields.get(mir_lint_key(field.value)) == None -> return mir_lint_problem(.StructField, "field {field.value} is not declared")
+    }
+    None
+}
+
+// `semantic.typing`.
+fn mir_lint_semantic(ctx: MIRLintContext, instruction: MIRInstruction, semantic: MIRSemanticOp) -> MIRLintProblem? Never! {
+    rule :: MIRLintRule.SemanticTyping
+    if semantic == {
+        .LayoutCompare(_, _, _, _) -> {
+            ty :: instruction.ty ?? return mir_lint_no_result(rule)
+            mir_lint_expect_class(ctx, rule, "layout comparison", ty, mir_lint_bool())
+        }
+        .RequireStop(_, _, condition, _, _, _, _) -> {
+            value :: condition ?? return None
+            mir_lint_expect_value_class(ctx, rule, "condition", value, mir_lint_bool())
+        }
+        .StructLiteral(type_id, fields, extra, _, boxed_fields) -> mir_lint_struct_fields(ctx, type_id, fields, boxed_fields, extra == None)
+        .ColumnarRead(_, index, column, _, _) -> {
+            problem :: mir_lint_expect_value_class(ctx, rule, "row index", index, mir_lint_integer())
+            if problem != None -> return problem
+            mir_lint_declared_fields(ctx, [MIRFieldID]{column})
+        }
+        .CellGuardProject(_, _, _, paths, _, _) -> {
+            loop path in paths {
+                problem :: mir_lint_declared_fields(ctx, path)
+                if problem != None -> return problem
+            }
+            None
+        }
+        .SharedGuardMap(_, _, path, _) -> mir_lint_declared_fields(ctx, path)
+        .SharedGuardSplit(_, _, _, first, second, _) -> {
+            problem :: mir_lint_declared_fields(ctx, first)
+            if problem != None -> return problem
+            mir_lint_declared_fields(ctx, second)
+        }
+        .CarrierFact(_, _, field, _) -> mir_lint_declared_fields(ctx, [MIRFieldID]{field})
+        .BuiltinMethod(_, _, _, _, aggregate_fields) -> {
+            fields :: aggregate_fields ?? return None
+            mir_lint_declared_fields(ctx, fields)
+        }
+        .OptionLift2(_, function, _, _) -> mir_lint_expect_value_class(ctx, rule, "lifted function", function, mir_lint_callable())
+        .OverflowOption(_, _, _, _) -> {
+            ty :: instruction.ty ?? return mir_lint_no_result(rule)
+            mir_lint_expect_class(ctx, rule, "checked arithmetic", ty, [MIRLintClass]{MIRLintClass.Option})
+        }
+        .NumericMethod(_, receiver) | .NumericBinaryMethod(_, receiver, _) -> mir_lint_expect_value_class(ctx, rule, "numeric receiver", receiver, mir_lint_numeric())
+        .ClosureMethod(value, _, _) | .HostBorrowCallback(value, _) | .CCallback(_, _, value) | .HTTPRouterRegister(_, _, _, value, _, _, _, _) -> mir_lint_expect_value_class(ctx, rule, "callable operand", value, mir_lint_callable())
+        .CoreClosureCall(_, _, _, closure, _, _) -> {
+            value :: closure ?? return None
+            mir_lint_expect_value_class(ctx, rule, "callable operand", value, mir_lint_callable())
+        }
+        .GCEdit(_, _, _, _, index, _, _) -> {
+            value :: index ?? return None
+            mir_lint_expect_value_class(ctx, rule, "edit index", value, mir_lint_integer())
+        }
+        .TypedTextInterp(_, _, literals, holes, trusted_html) -> {
+            if literals.len() != holes.len() + 1 -> return mir_lint_problem(rule, "typed text has {literals.len()} literals for {holes.len()} holes")
+            if trusted_html.len() != holes.len() -> return mir_lint_problem(rule, "typed text has {trusted_html.len()} HTML proofs for {holes.len()} holes")
+            None
+        }
+        .PluginInvoke(_, _, _, signature, args) -> {
+            if signature.params.len() != args.len() -> return mir_lint_problem(rule, "plugin call passes {args.len()} arguments to {signature.params.len()} parameters")
+            None
+        }
+        .AmbientInput(_, prompt) -> {
+            value :: prompt ?? return None
+            mir_lint_expect_value_class(ctx, rule, "prompt", value, [MIRLintClass]{MIRLintClass.String})
+        }
+        .DataEntriesToMap(_, local) -> {
+            loop row in ctx.function.locals {
+                if row.id == local -> return None
+            }
+            mir_lint_problem(rule, "local {local.value} does not exist")
+        }
+        .CursorTakePattern(_, receiver_place, _) | .ReaderTakePattern(_, receiver_place, _) -> {
+            if mir_lint_place(ctx, receiver_place) == None -> return mir_lint_problem(rule, "receiver place {receiver_place.value} does not exist")
+            None
+        }
+        else -> None
+    }
+}
+
+fn mir_lint_target(ctx: MIRLintContext, target: MIRBlockID) -> MIRLintProblem? Never! {
+    if ctx.blocks.get(mir_lint_key(target.value)) == None -> return mir_lint_problem(.TerminatorTyping, "target block {target.value} does not exist")
+    None
+}
+
+// `terminator.typing`.
+fn mir_lint_terminator(ctx: MIRLintContext, block: MIRBasicBlock) -> MIRLintProblem? Never! {
+    rule :: MIRLintRule.TerminatorTyping
+    function :: ctx.function
+    if block.terminator == {
+        .Jump(target) | .Continue(target) | .Break(target, _) -> mir_lint_target(ctx, target)
+        .Branch(condition, then_target, else_target) -> {
+            problem := mir_lint_expect_value_class(ctx, rule, "branch condition", condition, mir_lint_bool())
+            if problem != None -> return problem
+            problem = mir_lint_target(ctx, then_target)
+            if problem != None -> return problem
+            mir_lint_target(ctx, else_target)
+        }
+        .Switch(_, arms, otherwise) -> {
+            loop arm in arms {
+                problem := mir_lint_expect_value_class(ctx, rule, "switch arm condition", arm.condition, mir_lint_bool())
+                if problem != None -> return problem
+                problem = mir_lint_target(ctx, arm.target)
+                if problem != None -> return problem
+            }
+            mir_lint_target(ctx, otherwise)
+        }
+        .Return(value) -> {
+            if value == .Val(returned) -> return mir_lint_expect_value(ctx, rule, "returned value", function.return_type, returned)
+            if function.generator != None -> return None
+            mir_lint_expect_class(ctx, rule, "bare return of a function returning", function.return_type, [MIRLintClass]{MIRLintClass.Unit})
+        }
+        .Yield(value, resume) -> {
+            generator :: function.generator ?? return mir_lint_problem(rule, "yield outside a generator")
+            problem :: mir_lint_expect_value(ctx, rule, "yielded value", generator.item, value)
+            if problem != None -> return problem
+            mir_lint_target(ctx, resume)
+        }
+        .Unreachable(_) -> None
+    }
+}
+
+// Values an operation takes ownership of.
+fn mir_lint_arg_consumes(arg: MIRCallArg) -> Bool Never! {
+    !(arg.implicit_clone || arg.shared_auto_clone || arg.widen_fixed_to_list) && (arg.access == .Move || arg.owned_last_use)
+}
+
+fn mir_lint_call_args(operation: MIROperation) -> [MIRCallArg] Never! {
+    if operation == {
+        .Call(_, args, _) | .IndirectCall(_, args, _) | .CoreCall(_, _, args, _, _, _) -> args
+        .Semantic(semantic) -> if semantic == {
+            .StaticPreludeCall(_, args, _, _) | .HardwareCall(_, _, _, args) | .ClosureMethod(_, args, _) | .HostCall(_, args) -> args
+            else -> [MIRCallArg]{}
+        }
+        else -> [MIRCallArg]{}
+    }
+}
+
+fn mir_lint_consumed(operation: MIROperation) -> [MIRValueID] Never! {
+    consumed := [MIRValueID]{}
+    if operation == {
+        .Move(value) | .TraitBox(value, _) -> &consumed.push(value)
+        .Drop(value, kind) -> {
+            if kind != .NoDrop -> &consumed.push(value)
+        }
+        .Closure(_, captures, _) -> {
+            loop capture in captures {
+                if capture == .Value(value) -> &consumed.push(value)
+            }
+        }
+        else -> {
+            loop arg in mir_lint_call_args(operation) {
+                if mir_lint_arg_consumes(arg) -> &consumed.push(arg.value)
+            }
+        }
+    }
+    consumed
+}
+
+enum MIRLintPlaceUse { Read Borrow Move Reinitialize }
+
+struct MIRLintPlaceUseRow {
+    pub place: MIRPlaceID
+    pub usage: MIRLintPlaceUse
+}
+
+// Places an operation reads, borrows, moves, or reinitializes.
+fn mir_lint_place_uses(operation: MIROperation) -> [MIRLintPlaceUseRow] Never! {
+    rows := [MIRLintPlaceUseRow]{}
+    if operation == {
+        .ReadPlace(place) -> &rows.push(MIRLintPlaceUseRow{place: place, usage: MIRLintPlaceUse.Read})
+        .MovePlace(place) -> &rows.push(MIRLintPlaceUseRow{place: place, usage: MIRLintPlaceUse.Move})
+        .InitializeUninit(place) | .WritePlace(place, _) | .ReplacePlace(place, _) -> &rows.push(MIRLintPlaceUseRow{place: place, usage: MIRLintPlaceUse.Reinitialize})
+        .RawAddressOf(place) | .AddressOf(place, _) -> &rows.push(MIRLintPlaceUseRow{place: place, usage: MIRLintPlaceUse.Borrow})
+        .Closure(_, captures, _) -> {
+            loop capture in captures {
+                if capture == .Place(place) -> &rows.push(MIRLintPlaceUseRow{place: place, usage: MIRLintPlaceUse.Borrow})
+            }
+        }
+        .Semantic(semantic) -> {
+            if semantic == .BuiltinMethod(_, _, receiver_place, _, _) {
+                if receiver_place == .Val(place) -> &rows.push(MIRLintPlaceUseRow{place: place, usage: MIRLintPlaceUse.Borrow})
+            }
+        }
+        else -> {}
+    }
+    loop arg in mir_lint_call_args(operation) {
+        if arg.place == .Val(place) {
+            usage :: if {
+                mir_lint_arg_consumes(arg) -> MIRLintPlaceUse.Move
+                arg.access == .Write -> MIRLintPlaceUse.Borrow
+                else -> MIRLintPlaceUse.Read
+            }
+            &rows.push(MIRLintPlaceUseRow{place: place, usage: usage})
+        }
+    }
+    rows
+}
+
+// The storage path of a place: its root and projections. A path that is a
+// prefix of another overlaps it.
+fn mir_lint_path_key(place: MIRPlace) -> String Never! {
+    key := if place.base == {
+        .Local(local) -> "l{local.value}"
+        .Parameter(value) -> "p{value.value}"
+        .Capture(value) -> "c{value.value}"
+        .Temporary(value) -> "t{value.value}"
+        .Static(name) -> "s{name}"
+    }
+    loop projection in place.projections {
+        step :: if projection == {
+            .Field(field, _) -> "f{field.value}"
+            .Index(_, index, _, _, _, _, _) -> "i{index.value}"
+            .Deref(_) -> "d"
+            .Payload(kind, _) -> if kind == {
+                .Option -> "o"
+                .Result(ok) -> if ok -> "r1" else -> "r0"
+                .Enum(owner, variant, slot) -> "e{owner.value}.{variant}.{slot}"
+            }
+            .Range(range, _, _) -> "g{range.value}"
+        }
+        key = "{key}/{step}"
+    }
+    key
+}
+
+fn mir_lint_path_prefix(prefix: String, path: String) -> Bool Never! {
+    path == prefix || path.starts_with("{prefix}/")
+}
+
+// Dense layout of one ownership state: consumed values, moved paths, then the
+// known-true and known-false bits of guard slots and edge-crossing values.
+struct MIRLintOwnership {
+    pub value_bits: [String:Int]
+    pub value_count: Int
+    pub path_count: Int
+    // Per place row: moved-path bits overlapping the place (a read, borrow,
+    // or move is invalid while one is set), strict-prefix bits (a write is
+    // invalid while one is set), bits the place's write reinitializes, and
+    // the bit its move sets (-1 when the place is never moved).
+    pub overlapping: [[Int]]
+    pub ancestors: [[Int]]
+    pub reinitialized: [[Int]]
+    pub moved: [Int]
+    // Per place row: the Bool guard slot of an unborrowed whole local, or -1.
+    pub slots: [Int]
+    pub slot_count: Int
+    pub crossing: [String:Int]
+    pub crossing_count: Int
+    pub width: Int
+}
+
+fn mir_lint_slot_bit(layout: MIRLintOwnership, slot: Int, truth: Bool) -> Int Never! {
+    offset :: if truth -> 0 else -> layout.slot_count
+    layout.value_count + layout.path_count + slot + offset
+}
+
+fn mir_lint_crossing_bit(layout: MIRLintOwnership, crossing: Int, truth: Bool) -> Int Never! {
+    offset :: if truth -> 0 else -> layout.crossing_count
+    layout.value_count + layout.path_count + 2 * layout.slot_count + crossing + offset
+}
+
+// The bit layout, or None when nothing is ever consumed or moved.
+fn mir_lint_ownership_layout(ctx: MIRLintContext) -> MIRLintOwnership? Never! {
+    function :: ctx.function
+    value_bits := [String:Int]{}
+    value_count := 0
+    path_bits := [String:Int]{}
+    path_keys := [String]{}
+    borrowed := [String:Bool]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            loop value in mir_lint_consumed(instruction.operation) {
+                if value_bits.get(mir_lint_key(value.value)) == None {
+                    _ := &value_bits.add(mir_lint_key(value.value), value_count)
+                    value_count += 1
+                }
+            }
+            loop row in mir_lint_place_uses(instruction.operation) {
+                place :: mir_lint_place(ctx, row.place) ?? next
+                if row.usage == .Move {
+                    key :: mir_lint_path_key(place)
+                    if path_bits.get(key) == None {
+                        _ := &path_bits.add(key, path_keys.len())
+                        &path_keys.push(key)
+                    }
+                }
+                if row.usage == .Borrow {
+                    if place.base == .Local(local) -> _ := &borrowed.add(mir_lint_key(local.value), true)
+                }
+            }
+        }
+    }
+    if value_count == 0 && path_keys.len() == 0 -> return None
+    overlapping := [[Int]]{}
+    ancestors := [[Int]]{}
+    reinitialized := [[Int]]{}
+    moved := [Int]{}
+    slots := [Int]{}
+    slot_of_local := [String:Int]{}
+    slot_count := 0
+    loop place in function.places {
+        key :: mir_lint_path_key(place)
+        overlap := [Int]{}
+        ancestor := [Int]{}
+        reinit := [Int]{}
+        loop (bit, moved_key) in path_keys {
+            moved_is_prefix :: mir_lint_path_prefix(moved_key, key)
+            place_is_prefix :: mir_lint_path_prefix(key, moved_key)
+            if moved_is_prefix || place_is_prefix -> &overlap.push(bit)
+            if moved_is_prefix && moved_key != key -> &ancestor.push(bit)
+            if place_is_prefix -> &reinit.push(bit)
+        }
+        &overlapping.push(overlap)
+        &ancestors.push(ancestor)
+        &reinitialized.push(reinit)
+        &moved.push(path_bits.get(key) ?? -1)
+        slot := -1
+        if place.base == .Local(local) {
+            if mir_lint_is_bool(place.ty) && place.projections.len() == 0 && borrowed.get(mir_lint_key(local.value)) == None {
+                if slot_of_local.get(mir_lint_key(local.value)) == {
+                    .Val(existing) -> slot = existing
+                    else -> {
+                        slot = slot_count
+                        _ := &slot_of_local.add(mir_lint_key(local.value), slot_count)
+                        slot_count += 1
+                    }
+                }
+            }
+        }
+        &slots.push(slot)
+    }
+    // Guard facts cross edges only for Bool values read outside their block.
+    crossing := [String:Int]{}
+    crossing_count := 0
+    if slot_count > 0 {
+        defined_in := [String:Int]{}
+        loop (position, block) in function.blocks {
+            loop instruction in block.instructions {
+                if instruction.result == .Val(result) -> _ := &defined_in.add(mir_lint_key(result.value), position)
+            }
+        }
+        loop (position, block) in function.blocks {
+            used := mir_terminator_value_uses(block.terminator)
+            loop instruction in block.instructions {
+                loop value in mir_operation_value_uses(instruction.operation) -> &used.push(value)
+            }
+            loop value in used {
+                home :: defined_in.get(mir_lint_key(value.value)) ?? next
+                if home == position || crossing.get(mir_lint_key(value.value)) != None -> next
+                ty :: mir_lint_type_of(ctx, value) ?? next
+                if mir_lint_is_bool(ty) {
+                    _ := &crossing.add(mir_lint_key(value.value), crossing_count)
+                    crossing_count += 1
+                }
+            }
+        }
+    }
+    width :: value_count + path_keys.len() + 2 * slot_count + 2 * crossing_count
+    Val(MIRLintOwnership{
+        value_bits: value_bits,
+        value_count: value_count,
+        path_count: path_keys.len(),
+        overlapping: overlapping,
+        ancestors: ancestors,
+        reinitialized: reinitialized,
+        moved: moved,
+        slots: slots,
+        slot_count: slot_count,
+        crossing: crossing,
+        crossing_count: crossing_count,
+        width: width,
+    })
+}
+
+// One block's effect on the state, and the successors its known guards allow.
+struct MIRLintStep {
+    pub successors: [MIRBlockID]
+    pub failure: MIRLintError?
+}
+
+// `ownership.move`: a forward must-dataflow over bit rows. A bit is set only
+// when the value or place is moved on every path to the point; the meet is
+// the bitwise AND of the incoming rows.
+fn mir_lint_ownership(ctx: MIRLintContext) -> MIRLintError? Never! {
+    layout :: mir_lint_ownership_layout(ctx) ?? return None
+    function :: ctx.function
+    width :: layout.width
+    count :: function.blocks.len()
+    states := [Bool]{}
+    loop _ in 0..<(count * width) -> &states.push(false)
+    reached := [Bool]{}
+    queued := [Bool]{}
+    loop _ in 0..<count {
+        &reached.push(false)
+        &queued.push(false)
+    }
+    work := [Int]{}
+    roots := [MIRBlockID]{function.entry}
+    loop drop in function.drops {
+        if drop.edge == {
+            .Failure(target) | .Unwind(target) -> &roots.push(target)
+            else -> {}
+        }
+    }
+    loop root in roots {
+        position :: ctx.blocks.get(mir_lint_key(root.value)) ?? next
+        if !reached[position] {
+            reached[position] = true
+            queued[position] = true
+            &work.push(position)
+        }
+    }
+    current := [Bool]{}
+    loop _ in 0..<width -> &current.push(false)
+    head := 0
+    loop head < work.len() {
+        position :: ~work[head]
+        head += 1
+        queued[position] = false
+        loop bit in 0..<width -> current[bit] = states[position * width + bit]
+        step :: mir_lint_transfer(ctx, layout, function.blocks[position], &current, false)
+        loop target in step.successors {
+            target_position :: ctx.blocks.get(mir_lint_key(target.value)) ?? next
+            base :: target_position * width
+            changed := false
+            if {
+                reached[target_position] -> {
+                    loop bit in 0..<width {
+                        if states[base + bit] && !current[bit] {
+                            states[base + bit] = false
+                            changed = true
+                        }
+                    }
+                }
+                else -> {
+                    reached[target_position] = true
+                    loop bit in 0..<width -> states[base + bit] = current[bit]
+                    changed = true
+                }
+            }
+            if changed && !queued[target_position] {
+                queued[target_position] = true
+                &work.push(target_position)
+            }
+        }
+    }
+    loop (position, block) in function.blocks {
+        if !reached[position] -> next
+        loop bit in 0..<width -> current[bit] = states[position * width + bit]
+        step :: mir_lint_transfer(ctx, layout, block, &current, true)
+        if step.failure != None -> return step.failure
+    }
+    None
+}
+
+// The known truth of a Bool value: a fact from this block, else a crossing
+// bit. 1 is true, 2 is false, 0 is unknown.
+fn mir_lint_known(layout: MIRLintOwnership, state: [Bool], facts: [String:Int], value: MIRValueID) -> Int Never! {
+    local :: facts.get(mir_lint_key(value.value)) ?? -1
+    if local >= 0 -> return local
+    crossing :: layout.crossing.get(mir_lint_key(value.value)) ?? return 0
+    if state[mir_lint_crossing_bit(layout, crossing, true)] -> return 1
+    if state[mir_lint_crossing_bit(layout, crossing, false)] -> return 2
+    0
+}
+
+fn mir_lint_moved_failure(ctx: MIRLintContext, layout: MIRLintOwnership, state: [Bool], values: [MIRValueID], span: Span) -> MIRLintError? Never! {
+    loop value in values {
+        bit :: layout.value_bits.get(mir_lint_key(value.value)) ?? next
+        if state[bit] -> return mir_lint_fail(ctx, .OwnershipMove, span, "value {value.value} is used after it was moved")
+    }
+    None
+}
+
+fn mir_lint_is_phi(operation: MIROperation) -> Bool Never! {
+    if operation == {
+        .Phi(_) -> true
+        else -> false
+    }
+}
+
+// The known truth of a constant: 1 is true, 2 is false, 0 is not a Bool.
+fn mir_lint_bool_constant(constant: MIRConstant) -> Int Never! {
+    if constant == {
+        .Bool(truth) -> if truth -> 1 else -> 2
+        else -> 0
+    }
+}
+
+// Apply one block to `state`; with `check`, report the first violation.
+fn mir_lint_transfer(ctx: MIRLintContext, layout: MIRLintOwnership, block: MIRBasicBlock, state: &[Bool], check: Bool) -> MIRLintStep Never! {
+    rule :: MIRLintRule.OwnershipMove
+    facts := [String:Int]{}
+    guards :: layout.slot_count > 0
+    loop instruction in block.instructions {
+        span :: instruction.span
+        operation :: instruction.operation
+        if check && !mir_lint_is_phi(operation) {
+            uses := mir_operation_value_uses(operation)
+            if operation == .ScopeEnter(scope, _) {
+                loop row in ctx.function.scopes {
+                    if row.id == scope {
+                        if row.deadline == .Val(deadline) -> &uses.push(deadline)
+                    }
+                }
+            }
+            failure :: mir_lint_moved_failure(ctx, layout, state, uses, span)
+            if failure != None -> return MIRLintStep{successors: [MIRBlockID]{}, failure: failure}
+        }
+        place_rows :: mir_lint_place_uses(operation)
+        if check {
+            loop row in place_rows {
+                position :: ctx.places.get(mir_lint_key(row.place.value)) ?? next
+                blocked :: if row.usage == .Reinitialize -> layout.ancestors[position] else -> layout.overlapping[position]
+                loop bit in blocked {
+                    if state[layout.value_count + bit] -> return MIRLintStep{successors: [MIRBlockID]{}, failure: mir_lint_fail(ctx, rule, span, "place {row.place.value} is used after it was moved")}
+                }
+            }
+        }
+        // A definition starts the value's life, even on a loop's next turn.
+        if instruction.result == .Val(defined) {
+            if layout.value_bits.get(mir_lint_key(defined.value)) == .Val(bit) -> state[bit] = false
+        }
+        loop value in mir_lint_consumed(operation) {
+            bit :: layout.value_bits.get(mir_lint_key(value.value)) ?? next
+            if check {
+                row :: ctx.values.get(mir_lint_key(value.value)) ?? next
+                mode :: ctx.function.values[row].ownership.mode
+                if mode == .Copy || mode == .ReadBorrow || mode == .WriteBorrow -> return MIRLintStep{successors: [MIRBlockID]{}, failure: mir_lint_fail(ctx, rule, span, "value {value.value} is consumed but not owned")}
+                if state[bit] -> return MIRLintStep{successors: [MIRBlockID]{}, failure: mir_lint_fail(ctx, rule, span, "value {value.value} is consumed twice")}
+            }
+            state[bit] = true
+        }
+        loop row in place_rows {
+            position :: ctx.places.get(mir_lint_key(row.place.value)) ?? next
+            if row.usage == .Move {
+                bit :: layout.moved[position]
+                if bit >= 0 -> state[layout.value_count + bit] = true
+            }
+            if row.usage == .Reinitialize {
+                loop bit in layout.reinitialized[position] -> state[layout.value_count + bit] = false
+            }
+        }
+        if !guards -> next
+        known :: if operation == {
+            .Constant(constant) -> mir_lint_bool_constant(constant)
+            .ReadPlace(place) -> {
+                truth := 0
+                position :: ctx.places.get(mir_lint_key(place.value)) ?? -1
+                if position >= 0 && layout.slots[position] >= 0 {
+                    slot :: layout.slots[position]
+                    if state[mir_lint_slot_bit(layout, slot, true)] -> truth = 1
+                    if state[mir_lint_slot_bit(layout, slot, false)] -> truth = 2
+                }
+                truth
+            }
+            .Copy(value, _) | .Move(value) -> mir_lint_known(layout, state, facts, value)
+            .Unary(unary, value) -> {
+                inner :: if unary == .Not -> mir_lint_known(layout, state, facts, value) else -> 0
+                if inner == 0 -> 0 else -> 3 - inner
+            }
+            else -> 0
+        }
+        if instruction.result == .Val(result) {
+            _ := &facts.add(mir_lint_key(result.value), known)
+            if layout.crossing.get(mir_lint_key(result.value)) == .Val(crossing) {
+                state[mir_lint_crossing_bit(layout, crossing, true)] = known == 1
+                state[mir_lint_crossing_bit(layout, crossing, false)] = known == 2
+            }
+        }
+        written_place := MIRPlaceID?{None}
+        written := 0
+        if operation == {
+            .WritePlace(place, value) | .ReplacePlace(place, value) -> {
+                written_place = Val(place)
+                written = mir_lint_known(layout, state, facts, value)
+            }
+            .MovePlace(place) | .InitializeUninit(place) -> written_place = Val(place)
+            else -> {}
+        }
+        if written_place == .Val(place) {
+            position :: ctx.places.get(mir_lint_key(place.value)) ?? next
+            slot :: layout.slots[position]
+            if slot >= 0 {
+                state[mir_lint_slot_bit(layout, slot, true)] = written == 1
+                state[mir_lint_slot_bit(layout, slot, false)] = written == 2
+            }
+        }
+    }
+    if check {
+        failure :: mir_lint_moved_failure(ctx, layout, state, mir_terminator_value_uses(block.terminator), block.span)
+        if failure != None -> return MIRLintStep{successors: [MIRBlockID]{}, failure: failure}
+    }
+    if guards {
+        if block.terminator == .Branch(condition, then_target, else_target) {
+            truth :: mir_lint_known(layout, state, facts, condition)
+            if truth == 1 -> return MIRLintStep{successors: [MIRBlockID]{then_target}, failure: None}
+            if truth == 2 -> return MIRLintStep{successors: [MIRBlockID]{else_target}, failure: None}
+        }
+    }
+    MIRLintStep{successors: mir_terminator_targets(block.terminator), failure: None}
+}

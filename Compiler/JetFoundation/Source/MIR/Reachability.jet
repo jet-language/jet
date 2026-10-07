@@ -1,0 +1,128 @@
+// Backend-agnostic codec reachability over checked MIR (MIRRust
+// demanded_codec_impls). The candidates are derived serde impls
+// (compiler_generated with a codec) on a nominal type; every other function
+// is a root. A scanned body demands a candidate by calling one of its
+// methods, or by naming its nominal type anywhere inside a call's type
+// arguments: generic Prelude codecs such as `decode_typed<[T]>` reach the
+// impl through the codec trait. A demanded impl's methods are scanned in
+// turn. A backend skips every impl row whose flag is false; a missed demand
+// fails the backend's trait check, it never changes behavior.
+pub fn mir_demanded_codec_impls(program: MIRProgram) -> [Bool] Never! {
+    keep := [Bool]{}
+    by_method := [String:Int]{}
+    by_name := [String:[Int]]{}
+    loop (index, implementation) in program.impls {
+        nominal :: if implementation.self_type.kind == {
+            .Apply(name, _) -> Val(name.name)
+            else -> String?{None}
+        }
+        candidate :: implementation.compiler_generated && implementation.serde != None && nominal != None
+        &keep.push(!candidate)
+        if !candidate -> next
+        loop method in implementation.methods -> by_method["{method.value}"] = index
+        name :: nominal ?? next
+        rows := by_name.get(name) ?? [Int]{}
+        &rows.push(index)
+        by_name[name] = rows
+    }
+    function_index := [String:Int]{}
+    pending := [Int]{}
+    loop (index, function) in program.functions {
+        key :: "{function.id.value}"
+        function_index[key] = index
+        if by_method.get(key) == None -> &pending.push(index)
+    }
+    seen_names := [String:Bool]{}
+    cursor := 0
+    loop {
+        if cursor >= pending.len() -> break
+        current :: pending[cursor]
+        cursor += 1
+        names := [String]{}
+        demanded := [Int]{}
+        loop block in program.functions[current].blocks {
+            loop instruction in block.instructions {
+                if instruction.operation == {
+                    .Call(callee, _, type_args) -> {
+                        if callee == {
+                            .User(id) | .Associated(id, _) | .Method(id, _) -> {
+                                if by_method.get("{id.value}") == .Val(row) -> &demanded.push(row)
+                            }
+                            else -> {}
+                        }
+                        loop ty in type_args -> mir_type_nominal_names(ty, &names)
+                    }
+                    .IndirectCall(_, _, type_args) -> {
+                        loop ty in type_args -> mir_type_nominal_names(ty, &names)
+                    }
+                    .CoreCall(_, _, _, type_args, _, _) -> {
+                        loop ty in type_args -> mir_type_nominal_names(ty, &names)
+                    }
+                    .Semantic(operation) -> {
+                        if operation == {
+                            .StaticPreludeCall(_, _, owner_type_args, type_args) -> {
+                                loop type_arg in owner_type_args {
+                                    if type_arg == {
+                                        .Type(ty) -> mir_type_nominal_names(ty, &names)
+                                        else -> {}
+                                    }
+                                }
+                                loop ty in type_args -> mir_type_nominal_names(ty, &names)
+                            }
+                            else -> {}
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }
+        loop name in names {
+            if seen_names.get(name) != None -> next
+            seen_names[name] = true
+            rows :: by_name.get(name) ?? [Int]{}
+            loop row in rows -> &demanded.push(row)
+        }
+        loop row in demanded {
+            if keep[row] -> next
+            keep[row] = true
+            loop method in program.impls[row].methods {
+                if function_index.get("{method.value}") == .Val(found) -> &pending.push(found)
+            }
+        }
+    }
+    keep
+}
+
+// Every nominal type name inside `ty`, including type arguments and
+// collection elements.
+fn mir_type_nominal_names(ty: MIRType, names: &[String]) Never! {
+    if ty.kind == {
+        .Apply(name, args) -> {
+            &names.push(name.name)
+            loop arg in args -> mir_type_nominal_names(arg, &names)
+        }
+        .TraitObject(bounds) -> {
+            loop bound in bounds -> &names.push(bound.name)
+        }
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) -> mir_type_nominal_names(inner, &names)
+        .Map(key, value) | .Result(key, value) -> {
+            mir_type_nominal_names(key, &names)
+            mir_type_nominal_names(value, &names)
+        }
+        .Tuple(fields) -> {
+            loop field in fields -> mir_type_nominal_names(field.ty, &names)
+        }
+        .Union(members) -> {
+            loop member in members -> mir_type_nominal_names(member, &names)
+        }
+        .Fn(signature) -> {
+            loop param in signature.params -> mir_type_nominal_names(param, &names)
+            if signature.ret == .Val(ret) -> mir_type_nominal_names(ret, &names)
+        }
+        .SendFn(params, ret, _) -> {
+            loop param in params -> mir_type_nominal_names(param, &names)
+            if ret == .Val(result) -> mir_type_nominal_names(result, &names)
+        }
+        else -> {}
+    }
+}

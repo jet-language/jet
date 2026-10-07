@@ -15674,7 +15674,7 @@ mod missing_c_lib_tests {
         child_exit_code, missing_c_lib, missing_linker, native_cache_key,
         native_cache_key_for_prepared_build, native_cache_key_for_program,
         native_cache_key_with_toolchain, native_cache_salt, native_cache_salt_with_schema,
-        render_internal_fault,
+        render_internal_fault, NativeKeyBackend,
     };
 
     struct ScratchProject(std::path::PathBuf);

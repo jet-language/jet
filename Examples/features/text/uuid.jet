@@ -18,10 +18,10 @@ fn run() {
     id7 :: uuid.v7(&clk)
     print(id7.len() == 36)
     print(id7.contains("-"))
-    // version nibble is '7' (inclusive slice — same start and end)
-    print(id7.slice(14, 14) == "7")
+    // version nibble is '7' (`.slice` excludes the end: one character)
+    print(id7.slice(14, 15) == "7")
     // the first 48 bits are the big-endian Unix milliseconds (RFC 9562 5.7)
-    print(id7.slice(0, 12) == "018bcfe5-6800")
+    print(id7.slice(0, 13) == "018bcfe5-6800")
     // parse validates and lowercases; a malformed string is an error.
     normalized :: uuid.parse("6BA7B810-9DAD-11D1-80B4-00C04FD430C8") ?? panic("parse failed")
     print(normalized)

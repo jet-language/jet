@@ -26,6 +26,7 @@ use jet_foundation.[
     THostCall,
     TMapEntry,
     TMethodRef,
+    TNumericOp,
     TPreludeArg,
     TStaticOwner,
     TStmt,
@@ -511,7 +512,10 @@ fn sema_call_builtin_static_lowered(row: BuiltinStaticRow, values: [TExpr], args
         .IntFromRadix -> Val(TExprKind.BuiltinMethod{receiver: values[0], operation: TBuiltinOp.IntFromRadix{line: line}, args: rest})
         .UnitBuiltin(operation) -> Val(TExprKind.BuiltinMethod{receiver: sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Unit, span), operation: operation, args: values})
         .PreludeStatic(rooted, path, generics) -> {
-            owner_args :: loop name in generics -> TPreludeArg.Jet{ty: sema_inference_substitute_type_bindings(Type.Named{name: name}, bindings)}
+            owner_args :: loop generic in generics -> if generic == {
+                .Jet(ty) -> TPreludeArg.Jet{ty: sema_inference_substitute_type_bindings(ty, bindings)}
+                .HostUsize -> TPreludeArg.HostUsize
+            }
             call_args := [TCallArg]{}
             loop index in 0..<values.len() -> &call_args.push(sema_call_builtin_static_call_arg(values[index], args[index]))
             reference := TMethodRef{symbol: symbol_id(SymbolKind.Function, row.module_name, path, row.method), name: row.method, mangled: false, trait_owner: None, operator_identity: None}
@@ -567,10 +571,10 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
         if !sema_call_builtin_static_bound(bindings, name) -> &bindings.push(SemaInferenceBinding{name: name, ty: Type.Int, source: "builtin static default"})
     }
     result := sema_inference_substitute_type_bindings(row.return_type, bindings)
-    // D-SET-HASH1 (E0506): `Set.new()` / `Set.from(list)` need a hashable element.
-    if row.owner == "Set" && result == .Apply(_, result_args) && result_args.len() == 1 && !sema_type_hashable(environment, result_args[0]) {
+    // D-SET-HASH1 (E0506): `Set.new()` / `Set.from(list)` / `Tally.new()` need a hashable element.
+    if (row.owner == "Set" || row.owner == "Tally") && result == .Apply(_, result_args) && result_args.len() == 1 && !sema_type_hashable(environment, result_args[0]) {
         element_name :: type_name(result_args[0])
-        &diagnostics.push(sema_error("E0506", span, "`Set<{element_name}>` is not valid — `{element_name}` is not hashable", "Set elements must implement Hash and Eq; use Int, Bool, String, Char, or a named type", "change the element type to a hashable type, or use a `[{element_name}]` list instead"))
+        &diagnostics.push(sema_error("E0506", span, "`{row.owner}<{element_name}>` is not valid — `{element_name}` is not hashable", "{row.owner} elements must implement Hash and Eq; use Int, Bool, String, Char, or a named type", "change the element type to a hashable type, or use a `[{element_name}]` list instead"))
     }
 
     if row.lowering == .CoreCall(core_module, member) {
@@ -606,6 +610,7 @@ fn sema_call_try_builtin_static_field(base: Expr, owner: String, method: String,
 }
 
 pub fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if receiver == .Call(descriptor) -> return sema_call_try_inline_range_conversion(descriptor, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if receiver == .Field(base, owner_leaf, _) -> return sema_call_try_builtin_static_field(base, owner_leaf, method, owner_type_args, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     type_name :: if receiver == {
         .Ident(name, _) -> name
@@ -632,6 +637,8 @@ pub fn sema_call_try_static_method(receiver: Expr, method: String, method_span: 
     }
     if targets.len() == 0 {
         if diagnostics.len() > diagnostics_before -> return SemaMethodSpecialCheck{handled: true, value: None}
+        distinct := sema_call_try_distinct_conversion(owner_symbol, type_name, method, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        if distinct.handled -> return distinct
         // Declared statics win; a canonical Core or compiler owner then falls back to its built-in rows.
         if !generic_owner_method && sema_expr_canonical_type_binding(type_name, scopes) {
             builtin := sema_call_try_builtin_static(type_name, owner_symbol.module_name, method, owner_type_args, type_args, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -676,4 +683,153 @@ pub fn sema_call_try_static_method(receiver: Expr, method: String, method_span: 
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     SemaMethodSpecialCheck{handled: true, value: Val(value)}
+}
+
+// D-SHAPE-CONVERT1=A: the numeric destination conversion a distinct type
+// inherits from its numeric base (`UserID.from_int`, `Meters.from_float`):
+// the base's own built-in conversion row.
+fn sema_call_distinct_numeric_row(base: Type, method: String) -> BuiltinStaticRow? {
+    if !sema_expr_is_numeric(base) -> return None
+    loop row in builtin_static_rows(type_name(base), method) {
+        if row.lowering == .Numeric(_) -> return Val(row)
+    }
+    None
+}
+
+fn sema_call_distinct_numeric_operation(row: BuiltinStaticRow) -> TNumericOp? {
+    if row.lowering == .Numeric(operation) -> return Val(operation)
+    None
+}
+
+// A distinct over a non-numeric base is built by its base-named conversion
+// (`Name.from_string(text)` over `String`).
+fn sema_call_distinct_base_method(base: Type) -> String {
+    "from_{sema_casing_canonical(type_name(base), SemaNameCase.Snake)}"
+}
+
+fn sema_call_distinct_conversion_unhandled() -> SemaMethodSpecialCheck Never! {
+    SemaMethodSpecialCheck{handled: false, value: None}
+}
+
+fn sema_call_distinct_conversion_failed() -> SemaMethodSpecialCheck Never! {
+    SemaMethodSpecialCheck{handled: true, value: None}
+}
+
+// D-SHAPE-CONVERT1=A / D-RANGETYPE1: a distinct type owns the conversion
+// from its base (`UserID.from_int(42)`). A literal is proved against a range
+// type's bounds here (E0135); a runtime value makes the range type's
+// conversion fallible, which a binding then reports (E0136).
+fn sema_call_try_distinct_conversion(owner: Symbol, display_name: String, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    facts :: sema_expr_distinct_facts(Type.Named{name: display_name}, environment, &scopes) ?? return sema_call_distinct_conversion_unhandled()
+    numeric_row :: sema_call_distinct_numeric_row(facts.base, method)
+    if numeric_row == None && (sema_expr_is_numeric(facts.base) || method != sema_call_distinct_base_method(facts.base)) -> return sema_call_distinct_conversion_unhandled()
+    callee :: "{display_name}.{method}"
+    if args.len() != 1 {
+        &diagnostics.push(sema_error("E0104", span, "`{callee}` takes one value, got {args.len()}", "a distinct conversion wraps exactly one value of its base type", "write `{callee}(value)`"))
+        sema_call_builtin_static_discard(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return sema_call_distinct_conversion_failed()
+    }
+    source :: if numeric_row == .Val(row) -> row.parameters[0] else -> facts.base
+    diagnostics_before :: diagnostics.len()
+    argument :: sema_check_expression(args[0].expr, Val(source), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return sema_call_distinct_conversion_failed()
+    if diagnostics.len() > diagnostics_before -> return sema_call_distinct_conversion_failed()
+    if !type_identity_equal(argument.ty, source) {
+        &diagnostics.push(sema_error("E0108", expr_span(args[0].expr), "argument to `{callee}` should be {type_name(source)}, not {type_name(argument.ty)}", "the source name fixes the conversion input type", "pass a {type_name(source)} value"))
+        return sema_call_distinct_conversion_failed()
+    }
+    params :: [SemaCallParam]{SemaCallParam{label: "arg0", name: "arg0", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(argument.ty), variadic: false}}
+    ownership_args := args
+    ownership := sema_ownership_check_call_arguments(&state, callee, params, &ownership_args, scopes, &diagnostics)
+    if !ownership.accepted || !ownership.complete -> return sema_call_distinct_conversion_failed()
+    value := argument
+    if ownership_args[0].flags.implicit_clone || ownership_args[0].flags.shared_auto_clone -> value = sema_tir_expr(value.ty, TExprKind.Clone{value: value}, value.span)
+    success :: Type.Named{name: display_name}
+    row :: numeric_row ?? {
+        constructed :: sema_tir_expr(success, TExprKind.DistinctCtor{owner: owner.id, argument: value, base: facts.base}, span)
+        return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(constructed, expected, environment, context, &diagnostics)}
+    }
+    operation :: sema_call_distinct_numeric_operation(row) ?? return sema_call_distinct_conversion_failed()
+    // Rust `converted_literal`: an integer literal that fits the base is
+    // known at compile time, so a range type checks it here.
+    literal_in_range := false
+    if facts.range == .Val(bounds) {
+        if argument.kind == .IntLit(literal, _) {
+            base_bounds :: sema_expr_integer_range_for_type(facts.base)
+            fits_base :: if base_bounds == .Val(base_range) -> literal >= base_range.lo && literal <= base_range.hi else -> true
+            if sema_expr_is_integer(source) && sema_expr_is_integer(facts.base) && fits_base {
+                literal_in_range = true
+                if literal < bounds.lo || literal > bounds.hi {
+                    &diagnostics.push(sema_error("E0135", argument.span, "`{literal}` is outside `{display_name}`'s range {bounds.lo}..{bounds.hi}", "a range type only holds values inside its bounds; `{literal}` can never be a `{display_name}`", "use a value in `{bounds.lo}..{bounds.hi}`, or widen the type's range"))
+                }
+            }
+        }
+    }
+    base_fallible :: if row.return_type == {
+        .Result(_, _) -> true
+        else -> false
+    }
+    fallible :: base_fallible || (facts.range != None && !literal_in_range)
+    result :: if fallible -> Type.Result{ok: success, err: Type.String} else -> success
+    converted :: sema_tir_expr(result, TExprKind.DistinctConvert{owner: owner.id, argument: value, operation: operation, range: facts.range, fallible: fallible}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(converted, expected, environment, context, &diagnostics)}
+}
+
+// D-TYPE2-SPELL1 (#1549): `Int(lo..hi)` written as a call is the type head of
+// an inline range conversion, not a runtime constructor.
+fn sema_call_inline_range_descriptor(descriptor: Call) -> SemaIntegerRange? {
+    if descriptor.name != "Int" || descriptor.args.len() != 1 -> return None
+    if descriptor.args[0].expr == .Range(start, end, exclusive, _) {
+        if exclusive -> return None
+        if start == .Int(lo, _, _, _) {
+            if end == .Int(hi, _, _, _) -> return Val(SemaIntegerRange{lo: lo, hi: hi})
+        }
+    }
+    None
+}
+
+// D-RANGETYPE1 (E0135): an integer literal outside an inline range.
+fn sema_inline_range_out_of_bounds(value: Int, lo: Int, hi: Int, span: Span) -> Diagnostic {
+    sema_error("E0135", span, "`{value}` is outside `Int({lo}..{hi})`'s range {lo}..{hi}", "a range type only holds values inside its bounds; `{value}` can never be an `Int({lo}..{hi})`", "use a value in `{lo}..{hi}`, or widen the type's range")
+}
+
+// D-TYPE2-SPELL1: `Int(lo..hi).from_int(value)`. A literal is proved against
+// the interval here (E0135); a runtime value converts fallibly.
+fn sema_call_try_inline_range_conversion(descriptor: Call, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if method != "from_int" -> return sema_call_distinct_conversion_unhandled()
+    if sema_scope_resolve_index(scopes, "Int") == .Val(int_binding) {
+        if scopes.bindings[int_binding].symbol.kind != SymbolKind.Type -> return sema_call_distinct_conversion_unhandled()
+    }
+    bounds :: sema_call_inline_range_descriptor(descriptor) ?? return sema_call_distinct_conversion_unhandled()
+    head :: "Int({bounds.lo}..{bounds.hi})"
+    if bounds.lo > bounds.hi {
+        &diagnostics.push(sema_error("E0137", span, "this range is empty — {bounds.lo} is after {bounds.hi}", "a range's low bound must not be greater than its high bound", "write `{bounds.hi}..{bounds.lo}` (swap the bounds), or fix the values"))
+        sema_call_builtin_static_discard(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return sema_call_distinct_conversion_failed()
+    }
+    if args.len() != 1 {
+        &diagnostics.push(sema_error("E0104", span, "`{head}.{method}` takes one value, got {args.len()}", "a range conversion wraps exactly one integer value", "write `{head}.{method}(value)`"))
+        sema_call_builtin_static_discard(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return sema_call_distinct_conversion_failed()
+    }
+    // A propagating runtime conversion inside a binding is reported at its
+    // value (E0136); a carrier consumer (`??`, `?`) handles the failure.
+    reports_runtime :: context.failure_success_view && context.binding_initializer
+    checked :: sema_check_expression(args[0].expr, Val(Type.Int), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return sema_call_distinct_conversion_failed()
+    argument :: sema_expr_expected(checked, Val(Type.Int), environment, &diagnostics) ?? return sema_call_distinct_conversion_failed()
+    target :: Type.InlineRange{base: Type.Int, lo: bounds.lo, hi: bounds.hi}
+    literal := false
+    if args[0].expr == .Int(value, literal_span, _, _) {
+        literal = true
+        if value < bounds.lo || value > bounds.hi -> &diagnostics.push(sema_inline_range_out_of_bounds(value, bounds.lo, bounds.hi, literal_span))
+    }
+    if !literal && reports_runtime -> &diagnostics.push(sema_range_runtime_conversion(head, method, expr_span(args[0].expr)))
+    result :: if literal -> target else -> Type.Result{ok: target, err: Type.String}
+    converted :: sema_tir_expr(result, TExprKind.NumericMethod{receiver: argument, operation: TNumericOp.InlineRange{lo: bounds.lo, hi: bounds.hi, fallible: !literal}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(converted, expected, environment, context, &diagnostics)}
+}
+
+// D-RANGETYPE1 (E0136): a runtime value entering a range type needs the
+// fallible conversion's failure handled.
+fn sema_range_runtime_conversion(head: String, method: String, span: Span) -> Diagnostic {
+    sema_error("E0136", span, "making a `{head}` from a runtime value can fail", "only a literal is checked at compile time; a runtime number needs the fallible form so a bad value is handled", "write `{head}.{method}(raw)?` and handle the failure")
 }

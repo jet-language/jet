@@ -66,7 +66,7 @@ fn run() {}
 "#;
     let mir = lower_checked(source);
     let policy = MirOptimizationPolicy::conservative();
-    let optimized = jet_foundation::MIR::optimize_mir_program(&mir, &policy).unwrap();
+    let optimized = jet_foundation::MIR::optimize_mir_program(mir, &policy).unwrap();
     let reduction = function(&optimized, "scalar_sum");
     assert!(!reduction.optimization.auto_vectorizable);
     assert!(reduction
@@ -275,7 +275,7 @@ fn run() {}
         .expect("the checked loop has a literal upper bound");
     *upper_bound = 5;
     overrun_function.optimization.pass_ids.clear();
-    let overrun = jet_foundation::MIR::optimize_mir_program(&overrun, &policy).unwrap();
+    let overrun = jet_foundation::MIR::optimize_mir_program(overrun, &policy).unwrap();
     let overrun_function = function(&overrun, "auto");
     assert!(overrun_function
         .optimization
@@ -298,7 +298,7 @@ fn run() {}
         .pass_ids
         .clear();
 
-    let rejected = jet_foundation::MIR::optimize_mir_program(&changed, &policy).unwrap();
+    let rejected = jet_foundation::MIR::optimize_mir_program(changed, &policy).unwrap();
     let auto = function(&rejected, "auto");
     assert!(!auto.optimization.auto_vectorizable);
     assert!(
@@ -309,7 +309,7 @@ fn run() {}
     );
     jet_foundation::MIR::require_canonical_mir_optimization(&rejected).unwrap();
 
-    let no_op = jet_foundation::MIR::optimize_mir_program(&rejected, &policy).unwrap();
+    let no_op = jet_foundation::MIR::optimize_mir_program(rejected.clone(), &policy).unwrap();
     assert_eq!(
         rejected.deterministic_digest(),
         no_op.deterministic_digest(),
@@ -342,7 +342,7 @@ fn run() {}
 "#;
     let mir = lower_checked(source);
     let optimized =
-        jet_foundation::MIR::optimize_mir_program(&mir, &MirOptimizationPolicy::conservative())
+        jet_foundation::MIR::optimize_mir_program(mir, &MirOptimizationPolicy::conservative())
             .unwrap();
     let erased = function(&optimized, "erased");
     let active = function(&optimized, "active");
@@ -381,7 +381,7 @@ fn run() {}
 "#;
     let mir = lower_checked(source);
     let policy = MirOptimizationPolicy::conservative();
-    let optimized = jet_foundation::MIR::optimize_mir_program(&mir, &policy).unwrap();
+    let optimized = jet_foundation::MIR::optimize_mir_program(mir, &policy).unwrap();
 
     let bare = function(&optimized, "bare");
     let bare_loop = bare
@@ -439,7 +439,7 @@ fn run() {}
     let mir = lower_checked(source);
     let policy = MirOptimizationPolicy::conservative();
 
-    let mut missing = jet_foundation::MIR::optimize_mir_program(&mir, &policy).unwrap();
+    let mut missing = jet_foundation::MIR::optimize_mir_program(mir.clone(), &policy).unwrap();
     function_mut(&mut missing, "auto")
         .optimization
         .checked_vector_facts
@@ -448,7 +448,7 @@ fn run() {}
         .optimization
         .pass_ids
         .clear();
-    let missing = jet_foundation::MIR::optimize_mir_program(&missing, &policy).unwrap();
+    let missing = jet_foundation::MIR::optimize_mir_program(missing, &policy).unwrap();
     assert!(
         function(&missing, "auto")
             .optimization
@@ -457,7 +457,7 @@ fn run() {}
             .all(|fact| !fact.decision.is_eligible()),
         "missing checked proof must keep the loop scalar"
     );
-    let mut duplicate = jet_foundation::MIR::optimize_mir_program(&mir, &policy).unwrap();
+    let mut duplicate = jet_foundation::MIR::optimize_mir_program(mir.clone(), &policy).unwrap();
     let duplicate_proof = function(&duplicate, "auto")
         .optimization
         .checked_vector_facts
@@ -472,7 +472,7 @@ fn run() {}
         .optimization
         .pass_ids
         .clear();
-    let duplicate = jet_foundation::MIR::optimize_mir_program(&duplicate, &policy).unwrap();
+    let duplicate = jet_foundation::MIR::optimize_mir_program(duplicate, &policy).unwrap();
     assert!(
         function(&duplicate, "auto")
             .optimization
@@ -483,7 +483,7 @@ fn run() {}
     );
 
 
-    let mut conflict = jet_foundation::MIR::optimize_mir_program(&mir, &policy).unwrap();
+    let mut conflict = jet_foundation::MIR::optimize_mir_program(mir.clone(), &policy).unwrap();
     let proof = function_mut(&mut conflict, "auto")
         .optimization
         .checked_vector_facts
@@ -494,7 +494,7 @@ fn run() {}
         .optimization
         .pass_ids
         .clear();
-    let conflict = jet_foundation::MIR::optimize_mir_program(&conflict, &policy).unwrap();
+    let conflict = jet_foundation::MIR::optimize_mir_program(conflict, &policy).unwrap();
     let auto = function(&conflict, "auto");
     assert!(
         auto.optimization
@@ -511,7 +511,8 @@ fn run() {}
         "the rejected cross-iteration fact must remain visible"
     );
 
-    let mut stale_access = jet_foundation::MIR::optimize_mir_program(&mir, &policy).unwrap();
+    let mut stale_access =
+        jet_foundation::MIR::optimize_mir_program(mir.clone(), &policy).unwrap();
     let proof = function_mut(&mut stale_access, "auto")
         .optimization
         .checked_vector_facts
@@ -524,7 +525,7 @@ fn run() {}
         .pass_ids
         .clear();
     let stale_access =
-        jet_foundation::MIR::optimize_mir_program(&stale_access, &policy).unwrap();
+        jet_foundation::MIR::optimize_mir_program(stale_access, &policy).unwrap();
     assert!(
         function(&stale_access, "auto")
             .optimization
@@ -534,7 +535,7 @@ fn run() {}
         "a proof with stale access identity must not re-promote the loop"
     );
 
-    let mut changed_cfg = jet_foundation::MIR::optimize_mir_program(&mir, &policy).unwrap();
+    let mut changed_cfg = jet_foundation::MIR::optimize_mir_program(mir.clone(), &policy).unwrap();
     let checked = function(&changed_cfg, "auto")
         .optimization
         .checked_vector_facts
@@ -560,7 +561,7 @@ fn run() {}
         .pass_ids
         .clear();
     let changed_cfg =
-        jet_foundation::MIR::optimize_mir_program(&changed_cfg, &policy).unwrap();
+        jet_foundation::MIR::optimize_mir_program(changed_cfg, &policy).unwrap();
     assert!(
         function(&changed_cfg, "auto")
             .optimization
@@ -570,14 +571,14 @@ fn run() {}
         "CFG mutation must invalidate the checked loop scope"
     );
 
-    let mut explicit_scalar = jet_foundation::MIR::optimize_mir_program(&mir, &policy).unwrap();
+    let mut explicit_scalar = jet_foundation::MIR::optimize_mir_program(mir, &policy).unwrap();
     function_mut(&mut explicit_scalar, "auto").is_scalar = true;
     function_mut(&mut explicit_scalar, "auto")
         .optimization
         .pass_ids
         .clear();
     let explicit_scalar =
-        jet_foundation::MIR::optimize_mir_program(&explicit_scalar, &policy).unwrap();
+        jet_foundation::MIR::optimize_mir_program(explicit_scalar, &policy).unwrap();
     assert!(
         function(&explicit_scalar, "auto")
             .optimization
@@ -610,7 +611,7 @@ fn run() {}
 "#;
     let mir = lower_checked(source);
     let policy = MirOptimizationPolicy::conservative();
-    let optimized = jet_foundation::MIR::optimize_mir_program(&mir, &policy).unwrap();
+    let optimized = jet_foundation::MIR::optimize_mir_program(mir, &policy).unwrap();
     let energy = function(&optimized, "energy");
     let fact = energy
         .optimization
