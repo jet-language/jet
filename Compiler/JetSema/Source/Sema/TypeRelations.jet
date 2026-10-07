@@ -323,6 +323,26 @@ fn sema_type_carrier_compatible(required: Type, offered: Type) -> Bool Never! {
     if required == {
         .List(required_inner) -> if offered == .List(offered_inner) -> return sema_type_carrier_compatible(required_inner, offered_inner)
         .Option(required_inner) -> if offered == .Option(offered_inner) -> return sema_type_carrier_compatible(required_inner, offered_inner)
+        .Shared(required_inner) -> if offered == .Shared(offered_inner) -> return sema_type_carrier_compatible(required_inner, offered_inner)
+        .Map(required_key, _, required_value) -> if offered == .Map(offered_key, _, offered_value) -> return sema_type_carrier_compatible(required_key, offered_key) && sema_type_carrier_compatible(required_value, offered_value)
+        .FixedList(required_element, required_length) -> if offered == .FixedList(offered_element, offered_length) -> return required_length == offered_length && sema_type_carrier_compatible(required_element, offered_element)
+        .Tuple(required_fields) -> if offered == .Tuple(offered_fields) {
+            if required_fields.len() != offered_fields.len() -> return false
+            loop (index, required_field) in required_fields {
+                offered_field :: offered_fields[index]
+                if required_field.name != offered_field.name || !sema_type_carrier_compatible(required_field.ty, offered_field.ty) -> return false
+            }
+            return true
+        }
+        .Union(required_members) -> if offered == .Union(offered_members) {
+            if required_members.len() != offered_members.len() -> return false
+            loop (index, required_member) in required_members {
+                if !sema_type_carrier_compatible(required_member, offered_members[index]) -> return false
+            }
+            return true
+        }
+        .Tagged(required_marker, required_inner) -> if offered == .Tagged(offered_marker, offered_inner) -> return required_marker == offered_marker && sema_type_carrier_compatible(required_inner, offered_inner)
+        .Quantity(required_base, required_dimension) -> if offered == .Quantity(offered_base, offered_dimension) -> return required_dimension == offered_dimension && sema_type_carrier_compatible(required_base, offered_base)
         .Result(required_ok, required_err) -> if offered == .Result(offered_ok, offered_err) -> return sema_type_carrier_compatible(required_ok, offered_ok) && sema_type_carrier_compatible(required_err, offered_err)
         .Apply(required_name, required_args) -> if offered == .Apply(offered_name, offered_args) {
             if required_name != offered_name || required_args.len() != offered_args.len() -> return false
@@ -382,9 +402,10 @@ fn sema_never_failing_return_fits(required: Type, offered: Type) -> Bool Never! 
 // State-free assignment cases. Nominal aliases, trait implementation, and
 // knowledge-loss gates require the module registries owned by the full checker.
 pub fn sema_type_assignable(required: Type, offered: Type) -> Bool Never! {
-    if type_identity_equal(required, offered) -> return sema_type_obligations_satisfy(required, offered)
+    // Value-slot comparison is recursive: callable metadata may differ at any
+    // container depth, but required labels, effects and view origins still hold.
+    if sema_type_carrier_compatible(required, offered) -> return sema_type_obligations_satisfy(required, offered)
     if required == {
-        .Fn(_, _, _, _, _, _) -> if offered == .Fn(_, _, _, _, _, _) -> return sema_function_types_compatible(required, offered) && sema_type_obligations_satisfy(required, offered)
         .List(required_element) -> if offered == .FixedList(offered_element, _) -> return type_identity_equal(required_element, offered_element)
         .Union(members) -> loop member in members {
             if type_identity_equal(member, offered) -> return true

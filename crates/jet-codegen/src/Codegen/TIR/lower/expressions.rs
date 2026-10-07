@@ -619,7 +619,77 @@ pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> 
             }
         }
         Expr::Paren(inner, _) => lower_expr_as_mut_place(inner, cx, env),
+        // D-SHAPE-PLACE1=A: a mutating method on `xs[a..b]` edits the
+        // range write window in place, never a copied slice.
+        Expr::Slice {
+            base,
+            start,
+            end,
+            range,
+            span,
+        } => lower_slice_window(base, start, end, range.as_deref(), true, *span, cx, env),
         _ => lower_expr(e, cx, env),
+    }
+}
+
+/// D-DYNARRAY1 / D-SHAPE-PLACE1: `xs[a..b]` lent as a place is a zero-copy
+/// window over its owner; a write window keeps the owner a mutable place.
+#[allow(clippy::too_many_arguments)]
+fn lower_slice_window(
+    base: &Expr,
+    start: &Expr,
+    end: &Expr,
+    range: Option<&Expr>,
+    mutable: bool,
+    span: Span,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TExpr {
+    let recv = if mutable {
+        lower_expr_as_mut_place(base, cx, env)
+    } else {
+        lower_expr(base, cx, env)
+    };
+    // Tensor, Vec<N>, and Matrix<M, N> all use the ranked compute
+    // Prelude. The foundation predicate is exact, so ordinary
+    // generics cannot accidentally enter the tensor-view path.
+    let is_tensor = recv.ty.is_compute_tensor_family();
+    let elem = if is_tensor {
+        Type::Float
+    } else {
+        match &recv.ty {
+            Type::List(elem) | Type::FixedList { elem, .. } => (**elem).clone(),
+            _ => Type::Int,
+        }
+    };
+    let line = cx.src_line_col(span.start).0;
+    let args = if let Some(range) = range {
+        vec![lower_expr(range, cx, env)]
+    } else {
+        vec![lower_expr(start, cx, env), lower_expr(end, cx, env)]
+    };
+    TExpr {
+        ty: Type::Apply {
+            name: if mutable && is_tensor {
+                "ComputeViewMut"
+            } else if mutable {
+                "ViewMut"
+            } else {
+                "View"
+            }
+            .to_string(),
+            args: vec![elem],
+        },
+        kind: TExprKind::BuiltinMethod {
+            recv: Box::new(recv),
+            op: match (mutable, is_tensor) {
+                (true, true) => TBuiltinOp::ComputeViewMutNew { line },
+                (true, false) => TBuiltinOp::ViewMutNew { line },
+                (false, true) => TBuiltinOp::ComputeViewNew { line },
+                (false, false) => TBuiltinOp::ViewNew { line },
+            },
+            args,
+        },
     }
 }
 /// Canonicalize an operator's sema identity against the lowered receiver.
@@ -4888,60 +4958,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     ..
                 } = inner.as_ref()
                 {
-                    let recv = if *access == crate::AST::PlaceAccess::Write {
-                        lower_expr_as_mut_place(base, cx, env)
-                    } else {
-                        lower_expr(base, cx, env)
-                    };
-                    // Tensor, Vec<N>, and Matrix<M, N> all use the ranked compute
-                    // Prelude. The foundation predicate is exact, so ordinary
-                    // generics cannot accidentally enter the tensor-view path.
-                    let is_tensor = recv.ty.is_compute_tensor_family();
-                    let elem = if is_tensor {
-                        Type::Float
-                    } else {
-                        match &recv.ty {
-                            Type::List(elem) | Type::FixedList { elem, .. } => (**elem).clone(),
-                            _ => Type::Int,
-                        }
-                    };
-                    let mutable = *access == crate::AST::PlaceAccess::Write;
-                    let line = cx.src_line_col(span.start).0;
-                    let args = if let Some(range) = range {
-                        vec![lower_expr(range, cx, env)]
-                    } else {
-                        vec![lower_expr(start, cx, env), lower_expr(end, cx, env)]
-                    };
-                    TExpr {
-                        ty: Type::Apply {
-                            name: if mutable && is_tensor {
-                                "ComputeViewMut"
-                            } else if mutable {
-                                "ViewMut"
-                            } else {
-                                "View"
-                            }
-                            .to_string(),
-                            args: vec![elem],
-                        },
-                        kind: TExprKind::BuiltinMethod {
-                            recv: Box::new(recv),
-                            op: if mutable {
-                                if is_tensor {
-                                    TBuiltinOp::ComputeViewMutNew { line }
-                                } else {
-                                    TBuiltinOp::ViewMutNew { line }
-                                }
-                            } else {
-                                if is_tensor {
-                                    TBuiltinOp::ComputeViewNew { line }
-                                } else {
-                                    TBuiltinOp::ViewNew { line }
-                                }
-                            },
-                            args,
-                        },
-                    }
+                    lower_slice_window(
+                        base,
+                        start,
+                        end,
+                        range.as_deref(),
+                        *access == crate::AST::PlaceAccess::Write,
+                        *span,
+                        cx,
+                        env,
+                    )
                 } else {
                     let place = if *access == crate::AST::PlaceAccess::Write {
                         lower_expr_as_mut_place(inner, cx, env)
@@ -5438,7 +5464,18 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         let lm = crate::Sema::is_math_type(ln) && !cx.fact_type_name(ln);
                         let rm = crate::Sema::is_math_type(rn) && !cx.fact_type_name(rn);
                         if lm || rm {
+                            // A Named scalar operand (`Decimal`, `F64`) against a math
+                            // value is a scalar splat, typed like the checker's
+                            // math_scalar_binop_result fallback (`2.0 * v` is `Vec3`).
                             crate::Sema::math_binop_result(*op, ln, rn)
+                                .or_else(|| {
+                                    lm.then(|| crate::Sema::math_scalar_binop_result(*op, ln, &rhs.ty))
+                                        .flatten()
+                                })
+                                .or_else(|| {
+                                    rm.then(|| crate::Sema::math_scalar_binop_result(*op, rn, &lhs.ty))
+                                        .flatten()
+                                })
                                 .unwrap_or_else(|| lhs.ty.clone())
                         } else if ln == rn
                             && crate::Sema::precise_binop_result(*op, ln, rn).is_some()
@@ -8064,6 +8101,12 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .iter()
                     .map(|(n, fty)| {
                         let v = match value_of.get(n.as_str()) {
+                            // A bare `[]` carries no element type of its own;
+                            // the checked field type (found by name, not by
+                            // the literal's written order) restores it.
+                            Some(e @ Expr::ListLit(..)) => {
+                                preserve_typed_list_shape(lower_expr(e, cx, env), fty, cx)
+                            }
                             Some(e) => lower_expr(e, cx, env),
                             // A missing field never occurs in a sema-checked tuple literal;
                             // mirror the AST's `0i64` default defensively (an Int literal).

@@ -715,20 +715,31 @@ macro_rules! jet_lane_show {
         /// in the one TaskFailure rail; the scheduler owns only the wait-point
         /// adapter for cancellation of the joining parent.
         pub fn join(self) -> Result<T, JetTaskFailure> {
+            // The joining parent owns cancellation and completion until join
+            // succeeds. An interrupted wait must not orphan a parked child.
+            struct JoinCleanup<T> {
+                handle: Option<super::JetSchedulerJoin<T>>,
+                control: std::sync::Arc<super::JetTaskControl>,
+            }
+            impl<T> Drop for JoinCleanup<T> {
+                fn drop(&mut self) {
+                    if let Some(handle) = self.handle.take() {
+                        self.control.cancel();
+                        handle.drain();
+                    }
+                }
+            }
             let state = self.state;
             let skip_join_deadline = state.skip_join_deadline;
+            let mut cleanup = JoinCleanup {
+                handle: state.handle.lock().unwrap().take(),
+                control: state.control.clone(),
+            };
             if !skip_join_deadline {
                 super::jet_task_join_deadline_check();
             }
-            let result = {
-                let mut handle = state.handle.lock().unwrap();
-                let result = handle
-                    .as_mut()
-                    .expect("task already joined")
-                    .join();
-                let _ = handle.take();
-                result
-            };
+            let result = cleanup.handle.as_mut().expect("task already joined").join();
+            let _ = cleanup.handle.take();
             if !skip_join_deadline {
                 super::jet_task_join_deadline_check();
             }
@@ -2973,16 +2984,27 @@ macro_rules! jet_lane_show {
             )
         }
 
-        pub fn wait<F>(&mut self, condition: &JetCondition, ready: F) -> Result<(), String>
+        /// The canonical `SharedGuard.wait` (MIREval `eval_shared_guard_wait`
+        /// and the JIT `jet_jit_shared_guard_wait_once` mirror it): an invalid
+        /// or released guard traps, a read guard reports edit-required before
+        /// the predicate runs, and an interrupted park reports cancellation.
+        pub fn wait<F>(&self, condition: &JetCondition, mut ready: F) -> Result<(), String>
         where
-            F: Fn(&T) -> bool,
+            F: FnMut(&T) -> bool,
         {
             let state = self.state.clone();
-            if !state.held() {
-                return Err(crate::JET_SHARED_GUARD_INVALID.to_string());
+            let capability = if state.held() {
+                crate::jet_shared_guard_require_edit_capability(self.editable, state.permit())
+            } else {
+                Err(crate::JET_SHARED_GUARD_INVALID)
+            };
+            match capability {
+                Ok(()) => {}
+                Err(message) if message == crate::JET_SHARED_GUARD_INVALID => {
+                    super::jet_runtime_stop_with_context("E3001", "", 0, "", "", message)
+                }
+                Err(message) => return Err(message.to_string()),
             }
-            crate::jet_shared_guard_require_edit_capability(self.editable, state.permit())
-                .map_err(|message| message.to_string())?;
             loop {
                 if ready(self) {
                     return Ok(());
@@ -2991,12 +3013,21 @@ macro_rules! jet_lane_show {
                     std::sync::Arc::new(JetSchedulerConditionWaiter {
                         slot: super::ParkSlot::new(),
                     });
-                match crate::jet_shared_guard_wait_once(
+                match crate::jet_shared_guard_wait_once_with_handoff(
                     Some(state.as_ref()),
                     Some(&condition.inner),
                     waiter,
+                    None,
                 ) {
                     Ok(()) => {}
+                    Err(error) if error.traps() => super::jet_runtime_stop_with_context(
+                        "E3001",
+                        "",
+                        0,
+                        "",
+                        "",
+                        error.message(),
+                    ),
                     Err(error) => return Err(error.message().to_string()),
                 }
             }

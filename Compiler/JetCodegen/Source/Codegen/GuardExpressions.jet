@@ -27,7 +27,7 @@ fn jet_codegen_shared_guard_field_path(builder: JetCodegenBuilder, program: JetC
 
 fn jet_codegen_lower_shared_guard_map(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, guard: TExpr, path: [TFieldRef], editable: Bool) -> MIRValueID {
     lowered_path := jet_codegen_shared_guard_field_path(builder, program, guard.ty, path)
-    guard_value := jet_codegen_lower_expr(&builder, program, guard)
+    guard_value := jet_codegen_lower_consuming_value(&builder, program, guard)
     member := if editable -> "map_edit" else -> "map_read"
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
     call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.shared_guard", member, "jet_shared_guard_map", 3, [Bool]{true, false, false}, None, carrier, MIRPreludeABI.Control)
@@ -37,7 +37,7 @@ fn jet_codegen_lower_shared_guard_map(builder: &JetCodegenBuilder, program: JetC
 fn jet_codegen_lower_shared_guard_split(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, guard: TExpr, first: [TFieldRef], second: [TFieldRef], editable: Bool) -> MIRValueID {
     first_path := jet_codegen_shared_guard_field_path(builder, program, guard.ty, first)
     second_path := jet_codegen_shared_guard_field_path(builder, program, guard.ty, second)
-    guard_value := jet_codegen_lower_expr(&builder, program, guard)
+    guard_value := jet_codegen_lower_consuming_value(&builder, program, guard)
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
     map_member := if editable -> "map_edit" else -> "map_read"
     split_member := if editable -> "split_edit" else -> "split_read"

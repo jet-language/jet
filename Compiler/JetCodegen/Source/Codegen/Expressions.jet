@@ -749,6 +749,7 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
             owned_last_use: owned_last_use,
             authority_boundary: false,
             fn_coercion: fn_coercion,
+            // Preserve the checked boundary conversion before its borrow is emitted.
             widen_fixed_to_list: argument.widen_to_vec,
             widen_to_union: widen_to_union,
             box_as_trait: box_as_trait,
@@ -1267,6 +1268,21 @@ fn jet_codegen_project_deref_place(builder: &JetCodegenBuilder, program: JetCode
     id
 }
 
+// D-PIN3=A: the place a pin names. A pin local bound by `mem.pin(&place)`
+// aliases the owner place itself (as does a borrowed receiver); a stored or
+// returned pin is a window whose target is one deref away.
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs::project_pin_target
+fn jet_codegen_project_pin_target(builder: &JetCodegenBuilder, program: JetCodegenProgram, base: MIRPlaceID, inner: Type, span: Span) -> MIRPlaceID Never! {
+    root :: jet_codegen_find_place(builder, program, base) ?? panic("checked pin place has no MIR base")
+    if root.ty.kind == {
+        .Apply(name, args) -> {
+            if name.name == "Pin" && args.len() == 1 -> return jet_codegen_project_deref_place(&builder, program, base, inner, span)
+        }
+        else -> {}
+    }
+    MIRPlaceID{value: base.value}
+}
+
 // Project the fixed-length range window `range` of a list place. The window
 // keeps the list type, so a length-preserving callee edits it in place.
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::LowerCtx::project_range_place
@@ -1292,13 +1308,7 @@ fn jet_codegen_lower_expression_place(builder: &JetCodegenBuilder, program: JetC
             base := jet_codegen_lower_expression_place(&builder, program, receiver, access) ?? return None
             if receiver.ty == {
                 .Apply(name, args) -> {
-                    // A borrowed Pin receiver is already its pinned place
-                    // (Rust skips the deref projection for a Borrow receiver).
-                    borrowed :: if receiver.kind == {
-                        .Borrow(_, _) -> true
-                        else -> false
-                    }
-                    if name == "Pin" && args.len() == 1 && !borrowed -> base = jet_codegen_project_deref_place(&builder, program, base, args[0], expression.span)
+                    if name == "Pin" && args.len() == 1 -> base = jet_codegen_project_pin_target(&builder, program, base, args[0], expression.span)
                 }
                 else -> {}
             }
@@ -1527,6 +1537,19 @@ fn jet_codegen_lower_field_expr(builder: &JetCodegenBuilder, program: JetCodegen
     folded :: jet_codegen_fold_prepared_field(&builder, program, expression, reference)
     if folded == .Val(value) -> return value
     field_id := jet_codegen_field_ref_id(builder, program, receiver.ty, reference)
+    // D-PIN3=A: a field read through a pin reads the pinned place; the pin is
+    // an exclusive reference, never a value to copy out of.
+    if receiver.ty == {
+        .Apply(name, args) -> if name == "Pin" && args.len() == 1 {
+            pinned := jet_codegen_lower_expression_place(&builder, program, receiver, MIRAccess.Read)
+            if pinned == .Val(pin_base) {
+                target := jet_codegen_project_pin_target(&builder, program, pin_base, args[0], expression.span)
+                place := jet_codegen_project_field_place(&builder, program, target, expression.span, expression.ty, field_id)
+                return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.ReadPlace{place: place})
+            }
+        }
+        else -> {}
+    }
     // Reading one stored field only needs that field: project the field place
     // and read it, instead of copying the whole receiver first (#3735).
     if jet_codegen_is_field_read_chain(builder, program, receiver) && jet_codegen_is_stored_struct_field(builder, program, receiver.ty, reference) {
@@ -3261,9 +3284,19 @@ fn jet_codegen_lower_core_closure_call(builder: &JetCodegenBuilder, program: Jet
             borrow_mask = [Bool]{false}
         }
         .ReactiveEffect -> {
+            // D-REACTCORE1: the `#Reactive { … }` statement form has no handle
+            // to own its effect, so it roots the observer; `reactive.effect(..)`
+            // returns its lifecycle handle.
             module_name = "core.reactive"
-            member = "effect"
-            symbol = "jet_std::jet_reactive_effect"
+            if {
+                jet_codegen_is_unit_type(expression.ty) -> {
+                    member = "scope"
+                    symbol = "jet_std::jet_reactive_scope"
+                } else -> {
+                    member = "effect"
+                    symbol = "jet_std::jet_reactive_effect"
+                }
+            }
             arity = 1
             borrow_mask = [Bool]{false}
         }
@@ -3303,6 +3336,8 @@ fn jet_codegen_lower_core_closure_call(builder: &JetCodegenBuilder, program: Jet
 }
 
 fn jet_codegen_lower_shared_guard_wait(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, guard: TExpr, condition: TExpr, predicate: TLambda) -> MIRValueID {
+    // `wait` borrows its guard: the kernel reacquires the same lock and the
+    // guard stays live after the call (Rust `SharedGuardWait` lowering).
     guard_value := jet_codegen_lower_expr(&builder, program, guard)
     condition_value := jet_codegen_lower_expr(&builder, program, condition)
     predicate_value := jet_codegen_lower_lambda(&builder, program, predicate, false, "direct").value
@@ -4689,7 +4724,8 @@ fn jet_codegen_numeric_bound_constant(ty: Type, member: String) -> MIRConstant? 
 }
 
 fn jet_codegen_lower_memo_stats(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, name: String) -> MIRValueID Never! {
-    name_value := jet_codegen_emit_value(&builder, program, expression.span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: name}})
+    function :: jet_codegen_function_id_for_name(builder, program, name)
+    name_value := jet_codegen_emit_value(&builder, program, expression.span, Type.String, MIROperation.Constant{value: MIRConstant.String{value: "{function.value}"}})
     bound_value := jet_codegen_emit_value(&builder, program, expression.span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: -1, width: None, spelling: None}})
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
     call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.memo", "stats", "jet_memo_stats", 2, [Bool]{false, false}, None, carrier, MIRPreludeABI.Value)
@@ -5013,10 +5049,11 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, program: JetCodegenProgra
                 widen := false
                 if index < widen_to_vec.len() -> widen = widen_to_vec[index]
                 lowered := jet_codegen_lower_core_call_arg(&builder, program, args[index], index, canonical_record, widen)
-                // An owned exact Int crosses a Core runtime ABI as a checked
-                // I64 (`jet_std_math_ldexp(x: f64, exp: i64)`): passing the
-                // JetInt carrier is a rustc E0308.
-                if index < canonical_record.signature.borrow_mask.len() && !canonical_record.signature.borrow_mask[index] {
+                // Bounded Core slots take I64, but a volatile store writes
+                // the checked T through Ptr<T> and `keep<T>` returns its
+                // argument at the checked type: neither narrows exact Int.
+                typed_carrier_value :: (canonical_record.module_name == "core.mem" && canonical_record.member == "volatile_write" && index == 1) || (canonical_record.module_name == "core.prelude" && canonical_record.member == "keep")
+                if !typed_carrier_value && index < canonical_record.signature.borrow_mask.len() && !canonical_record.signature.borrow_mask[index] {
                     lowered.value = jet_codegen_builtin_native_int(&builder, program, lowered.value, args[index].ty, args[index].span)
                 }
                 &lowered_args.push(lowered)
@@ -6340,10 +6377,9 @@ fn jet_codegen_task_group_result_tasks(ty: Type) -> Bool Never! {
     }
 }
 
-// Rust `lower_consuming_task_value`: a task handle in a local moves out of
-// the local's own place row (retained at Move, as `.Move(Local)` does), so its
-// drop flag clears and scope exit does not move it a second time.
-fn jet_codegen_lower_consuming_task_value(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: TExpr) -> MIRValueID {
+// Rust `lower_consuming_value`: an owned handle moves from its own place row,
+// so its drop flag clears and scope exit does not move it a second time.
+fn jet_codegen_lower_consuming_value(builder: &JetCodegenBuilder, program: JetCodegenProgram, value: TExpr) -> MIRValueID {
     if value.kind == .Local(local) {
         place := jet_codegen_lower_local_place(&builder, program, local)
         if !jet_codegen_unmovable_place(builder, program, place) -> jet_codegen_retain_place_access(&builder, program, place, MIRAccess.Move)
@@ -6363,7 +6399,7 @@ fn jet_codegen_lower_task_group_value(builder: &JetCodegenBuilder, program: JetC
     }
     if jet_codegen_task_group_result_tasks(tasks.ty) -> member = "{member}_result"
     call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.tasks", member, "jet_std::jet_task_{member}", 1, [Bool]{false}, None, jet_codegen_failure_carrier_for_type(expression.ty), MIRPreludeABI.Value)
-    value := jet_codegen_lower_consuming_task_value(&builder, program, tasks)
+    value := jet_codegen_lower_consuming_value(&builder, program, tasks)
     jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.TaskGroup{call: call, kind: kind, tasks: [MIRValueID]{value}}})
 }
 
@@ -6422,6 +6458,16 @@ fn jet_codegen_lower_math_swizzle_read(builder: &JetCodegenBuilder, program: Jet
     result_name := if jet_codegen_unwrap_pattern_tags(expression.ty) == {
         .Named(name) -> name
         else -> panic("checked multi-lane swizzle has no vector result type")
+    }
+    // D-SWIZZLE1: a partial swizzle of an `F32x4` reads `F32` lanes into a
+    // `VecN`, whose lanes are `Float`. Widen each lane to the result's scalar
+    // so the constructor sees its own component type.
+    result_scalar :: jet_codegen_math_scalar_type(result_name)
+    if type_identity_key(result_scalar) != type_identity_key(scalar) {
+        target :: jet_codegen_lower_type_for_function(result_scalar, builder, program)
+        widened := [MIRValueID]{}
+        loop value in values -> &widened.push(jet_codegen_emit_value(&builder, program, expression.span, result_scalar, MIROperation.Convert{value: value, parameters: [MIRValueID]{}, target: target, conversion: MIRConversion.NumericCast}))
+        values = widened
     }
     jet_codegen_emit_math_builtin(&builder, program, expression, result_name, "new", values)
 }

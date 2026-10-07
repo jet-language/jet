@@ -343,7 +343,7 @@ fn jet_rust_emit_cli_record_literal(ctx: &JetRustEmitContext, function: MIRFunct
     loop (index, field) in fields {
         if index < values.len() -> &rendered.push("{jet_rust_emit_field_name(&ctx, field.id)}: {values[index]}")
     }
-    record :: "{jet_rust_emit_type(&ctx, function.params[0].ty)} {{ {rendered.join(", ")} }}"
+    record :: "{jet_rust_emit_type(&ctx, function.params[0].ty)} {{ {jet_rust_emit_record_type_phantom_initializer(&ctx, function.params[0].ty)}{rendered.join(", ")} }}"
     jet_rust_emit_cli_owned_argument(function.params[0], record)
 }
 
@@ -1064,7 +1064,7 @@ fn jet_rust_emit_web_exports(ctx: &JetRustEmitContext, lines: &[String]) Never! 
                     &params.push("{flat}: {jet_rust_emit_web_abi_scalar(&ctx, field.ty)}")
                     &fields.push("{jet_rust_emit_mangle(field.field)}: {jet_rust_emit_web_abi_decode(&ctx, field.ty, flat)}")
                 }
-                decode = "{decode}    let mut {name} = {jet_rust_emit_type(&ctx, row.ty)} {{ {fields.join(", ")} }};\n"
+                decode = "{decode}    let mut {name} = {jet_rust_emit_type(&ctx, row.ty)} {{ {jet_rust_emit_record_type_phantom_initializer(&ctx, row.ty)}{fields.join(", ")} }};\n"
             } else {
                 &params.push("{name}: {jet_rust_emit_web_abi_scalar(&ctx, parameter.ty)}")
                 decode = "{decode}    let mut {name} = {jet_rust_emit_web_abi_decode(&ctx, parameter.ty, name)};\n"

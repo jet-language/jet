@@ -4142,7 +4142,8 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
         graph_module :: resolved_graph.modules[core_module_index]
         checked_module :: modules[core_module_index]
         generated_roots := sema_core_generated_roots(resolved_graph, graph_module)
-        &core_modules.push(sema_core_module_usage_from_registration(graph_module, checked_module.exact_int_reachable, generated_roots))
+        unshared := sema_core_source_unshared_functions(graph_module, checked_module.call_facts)
+        &core_modules.push(sema_core_module_usage_from_registration(graph_module, unshared, checked_module.exact_int_reachable, generated_roots))
         core_module_index += 1
     }
     core_usage := sema_core_combine_module_usage(core_modules)

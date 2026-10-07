@@ -2012,7 +2012,7 @@ resulting parts (D-TEXTUNICODE1=A).
 | `text.nfc(value)` / `nfd(value)` / `nfkc(value)` / `nfkd(value)` | `String` | Apply the named normalization form. |
 | `text.graphemes(value)` / `words(value)` / `sentences(value)` | `[String]` | Return grapheme, word, or sentence segments. |
 | `text.char_indices(value)` | `[String]` | Return scalar strings with their UTF-8 byte indexes. |
-| `text.display_width(value)` | `Int` | Compute terminal display width under the portable text-width policy (D-TEXTWIDTH1=B). |
+| `text.display_width(value)` | `Int` | Compute terminal display width under the portable text-width policy (D-TEXTWIDTH1=B); ambiguous scalars are narrow. |
 | `text.grapheme_views(value)` / `word_views(value)` / `line_views(value)` / `byte_views(value)` | `[String]` | Produce views or segments for the requested boundaries. |
 | `text.is_alphabetic(value)` / `is_numeric(value)` / `is_whitespace(value)` | `Bool` | Test the corresponding scalar property. |
 | `text.has_control(value)` | `Bool Never!` | True iff any scalar is Unicode 17 Cc (`U+0000..U+001F` or `U+007F..U+009F`); empty text is false. One UTF-8 byte scan stops at the first match without creating per-character strings or a decoded-scalar list. |
@@ -2724,6 +2724,9 @@ The budget is an execution bound, not a promise of linear-time matching. The
 engine does not expose named capture groups: `Match.groups` is a positional
 list. Use the compiled `Pattern`/`Regex` values when the same expression is
 used repeatedly, and call `escape` for literal user input.
+`Match.start` and `Match.end` are UTF-8 byte offsets, and `Match.text` contains
+the entire match. `Match.groups` contains the captured groups in positional
+order, excluding the whole match; use `expand` for numbered substitution.
 
 | Signature | Result | Description |
 |---|---|---|
@@ -2823,6 +2826,9 @@ Reactive updates are explicit: use `set` or `update`, read through `get`, and
 release effects with `unsubscribe`. A derived computation does not become a
 hidden global dataflow graph.
 Reactivity is an opt-in library rather than ambient language semantics (`D-REACT1`); `computed` is the canonical alias for the derived-value constructor (`D-SIGNAL1`).
+Setting a synchronized signal updates the provider state, not the Jet carrier
+binding, so its receiver call uses `count.set(value)` without an `&` mark. UI
+button handlers use the trailing block form, `ui.button("Click") { … }`.
 
 ### `core.reactive.loadable` — asynchronous value state
 
@@ -3373,7 +3379,7 @@ Each codec has one public home. Compose a container and a stream codec explicitl
 | `decompress(bytes: [U8]) -> [U8] ArchiveError!` | bytes | Validate and decode a zlib stream. |
 | `zip_decompress(data: [U8]) -> [U8] ArchiveError!` | bytes | Return the first ZIP file's data. |
 | `zip_names_json(archive: [U8]) -> String ArchiveError!` / `list(archive) -> [String] ArchiveError!` | names | List ZIP entry names as JSON or values. |
-| `zip_open(archive: [U8]) -> [U8] ArchiveError!` | reader | Validate and retain an immutable ZIP buffer. |
+| `zip_open(archive: [U8]) -> [U8] ArchiveError!` | reader | Validate and retain an immutable ZIP buffer; an empty buffer opens a writer holding the valid empty ZIP. |
 | `zip_next(reader: [U8], index: Int) -> String ArchiveError!` | name | Read the name at an entry index. |
 | `zip_read(reader: [U8], name: String) -> [U8] ArchiveError!` | bytes | Read one named ZIP entry. |
 | `zip_write(writer: [U8], name: String, data: [U8]) -> [U8] ArchiveError!` | bytes | Return a ZIP buffer with an entry written. |

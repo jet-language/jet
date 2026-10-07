@@ -654,6 +654,86 @@ fn run() {
 }
 
 #[test]
+fn native_allocator_borrows_end_before_reset_and_close() {
+    if !common::have_rustc() {
+        return;
+    }
+    for (name, source, expected) in [
+        (
+            "arena_last_use",
+            include_str!("../Examples/features/memory/arena.jet"),
+            include_str!("../Examples/features/expected/memory/arena.out"),
+        ),
+        (
+            "arena_regions_last_use",
+            include_str!("../Examples/features/memory/arena_regions.jet"),
+            include_str!("../Examples/features/expected/memory/arena_regions.out"),
+        ),
+        (
+            "fixed_last_use",
+            r#"
+use core.mem
+struct Point {
+    x: Int
+    y: Int
+}
+fn run() {
+    bytes := [U8#128]{ uninit }
+    fixed :: mem.Fixed.over(&bytes)
+    value :: fixed.alloc(9)
+    point :: fixed.alloc(Point{x: 3, y: 4})
+    print(value)
+    print(point.x)
+    print(point.y)
+    &fixed.reset()
+    again :: fixed.alloc(10)
+    print(again)
+    &fixed.reset()
+    close(^fixed)
+}
+"#,
+            "9\n3\n4\n10\n",
+        ),
+    ] {
+        let (code, stdout, stderr) = run_jet(name, source);
+        assert_eq!(code, 0, "{name}: {stderr}");
+        assert_eq!(stdout, expected, "{name}");
+    }
+}
+
+#[test]
+fn native_owner_backed_windows_end_before_the_next_borrow() {
+    if !common::have_rustc() {
+        return;
+    }
+    let (code, stdout, stderr) = run_jet(
+        "owner_backed_last_use",
+        include_str!("../Examples/features/memory/owner_backed_views.jet"),
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(
+        stdout,
+        include_str!("../Examples/features/expected/memory/owner_backed_views.out")
+    );
+}
+
+#[test]
+fn native_allocator_context_reads_do_not_require_owned_copies() {
+    if !common::have_rustc() {
+        return;
+    }
+    let (code, stdout, stderr) = run_jet(
+        "allocator_context_read",
+        include_str!("../Examples/features/effects/smart_context.jet"),
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(
+        stdout,
+        include_str!("../Examples/features/expected/effects/smart_context.out")
+    );
+}
+
+#[test]
 fn try_allocation_example_reports_exhaustion_as_a_value() {
     let src = include_str!("../Examples/features/memory/try_allocation.jet");
     let expected = include_str!("../Examples/features/expected/memory/try_allocation.out");

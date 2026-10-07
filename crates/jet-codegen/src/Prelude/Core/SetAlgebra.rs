@@ -96,9 +96,12 @@ pub(crate) fn jet_set_remove<T: Eq + std::hash::Hash>(
     set.remove(&value);
 }
 
-/// D-COLLBREADTH1=A: `Rank<T>.add(v)` / `.remove(v)` on the ordered carrier.
-pub(crate) fn jet_sorted_set_insert<T: Ord>(set: &mut std::collections::BTreeSet<T>, value: T) {
-    set.insert(value);
+/// D-COLLBREADTH1=A: `Rank<T>.add(v)` reports whether a new member was stored.
+pub(crate) fn jet_sorted_set_insert<T: Ord>(
+    set: &mut std::collections::BTreeSet<T>,
+    value: T,
+) -> bool {
+    set.insert(value)
 }
 
 pub(crate) fn jet_sorted_set_remove<T: Ord>(set: &mut std::collections::BTreeSet<T>, value: T) {

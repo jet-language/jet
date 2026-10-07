@@ -1013,6 +1013,23 @@ fn push_cached_runtime_traits(out: &mut String) {
     out.push_str(
         "pub trait __jet_Iterable: Sized {\n    type __jet_Iter;\n    fn iter(self) -> Self::__jet_Iter;\n}\n",
     );
+    // D-ITER-HOOK: the native loop bridge for a user `Iterable`. MIR emits one
+    // `JetLoopSource` impl per Iterable owner that forwards here; `iter` runs
+    // once and each `Iterator.next` absence ends the loop.
+    out.push_str(concat!(
+        "pub struct JetIterableLoop<I>(I);\n",
+        "impl<I: __jet_Iterator> Iterator for JetIterableLoop<I>\nwhere\n    I::__jet_Item: 'static,\n{\n",
+        "    type Item = JetLoopAny;\n",
+        "    fn next(&mut self) -> Option<JetLoopAny> {\n",
+        "        __jet_Iterator::next(&mut self.0).ok().map(|value| Box::new(value) as JetLoopAny)\n",
+        "    }\n}\n",
+        "pub fn jet_iterable_loop_source<C>(collection: C, source_kind: JetLoopSourceKind, by_value: bool) -> Box<dyn Iterator<Item = JetLoopAny>>\n",
+        "where\n    C: __jet_Iterable,\n    C::__jet_Iter: __jet_Iterator + 'static,\n    <C::__jet_Iter as __jet_Iterator>::__jet_Item: 'static,\n{\n",
+        "    match source_kind {\n",
+        "        JetLoopSourceKind::Iterable { .. } if by_value => Box::new(JetIterableLoop(__jet_Iterable::iter(collection))),\n",
+        "        _ => jet_loop_source_error(source_kind),\n",
+        "    }\n}\n",
+    ));
     // D-SHAPE-RESOURCE2=A: `Close.close(^self)` is the consuming, infallible
     // cleanup capability that `defer close(^resource)` invokes.
     out.push_str("pub trait __jet_Close: Sized {\n    fn close(self);\n}\n");

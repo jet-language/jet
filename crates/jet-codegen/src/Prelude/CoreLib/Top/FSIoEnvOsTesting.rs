@@ -674,7 +674,18 @@ fn jet_env_insert_tree(tree: &mut jet_std::DataTree, segments: &[String], value:
     }
 }
 
-fn jet_std_env_set(name: &String, value: &String) -> Result<(), jet_std::EnvError> {
+/// The source-compatible `core.sys.set` form (D-CORE spec, core.sys): an
+/// invalid name or value is the E3001 stop the interpreter reports, not a
+/// value. The typed form is `jet_std_env_try_set`, reserved for the edition
+/// that makes `set` fallible.
+fn jet_std_env_set(name: &String, value: &String) {
+    if let Err(error) = jet_std_env_try_set(name, value) {
+        let message = format!("core.sys.set: {}", crate::JetShow::jet_show(&error));
+        jet_runtime_stop("E3001", "", 0, &message)
+    }
+}
+
+fn jet_std_env_try_set(name: &String, value: &String) -> Result<(), jet_std::EnvError> {
     jet_env_validate_name(name)?;
     jet_env_validate_value(value)?;
     let os_name = std::ffi::OsString::from(name);

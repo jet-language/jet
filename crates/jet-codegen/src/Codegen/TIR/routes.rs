@@ -4940,7 +4940,7 @@ fn builtin_collection_route(
             row("map_has_key", "jet_map_has_key", 2, &[true, true])
         }
         (TBuiltinOp::ContainsKey, Type::Apply { name, .. }) if name == crate::Syntax::TYPE_LRU => {
-            row("lru_has", "jet_lru_has", 2, &[true, false])
+            row("lru_has", "jet_lru_has", 2, &[true, true])
         }
         (TBuiltinOp::LenList, Type::Apply { name, .. }) if name == "Set" => {
             row("len", "jet_set_len", 1, &[true])
@@ -6103,7 +6103,7 @@ impl TBuiltinOp {
                 "jet_lru_get",
                 2,
                 2,
-                &[true, false],
+                &[true, true],
                 Some(Effect::Mem),
                 carrier,
             ),
@@ -6462,7 +6462,7 @@ impl TBuiltinOp {
             ),
             MapSliceKeys { .. } => b(
                 "map_slice",
-                "jet_map_slice",
+                "jet_map_slice_keys_kernel",
                 2,
                 2,
                 &[true, false],
@@ -6879,15 +6879,25 @@ fn byte_buffer_method_route(
     };
     let member = format!("byte_buffer_{method}");
     let symbol = format!("JetByteBuffer::{method}");
+    let mut borrow_mask = vec![true; arity];
+    if byte_buffer_native_int_operand(method) {
+        borrow_mask[1] = false;
+    }
     Ok(b(
         &member,
         &symbol,
         arity,
         arity,
-        &vec![true; arity],
+        &borrow_mask,
         Some(Effect::Mem),
         carrier,
     ))
+}
+
+/// ByteBuffer methods whose operand is an index or count the kernel takes as
+/// the native `i64` word (by value, narrowed from the exact Int).
+pub(super) fn byte_buffer_native_int_operand(method: &str) -> bool {
+    matches!(method, "get" | "seek" | "read_bytes" | "read_string")
 }
 
 fn byte_buffer_write_route(
@@ -6901,7 +6911,9 @@ fn byte_buffer_write_route(
         &symbol,
         2,
         2,
-        &[true, false],
+        // `write`/`write_bytes` borrow their `&Vec<u8>`; the scalar
+        // `write_<kind>` forms take their value.
+        &[true, matches!(method, "write" | "write_bytes")],
         Some(Effect::Mem),
         carrier,
     ))
@@ -8020,7 +8032,13 @@ pub(super) fn core_closure_route(
     result: &Type,
     carrier: &TFailureCarrier,
 ) -> Result<TPreludeRoute, LowerError> {
-    let _ = result;
+    // D-REACTCORE1: the `#Reactive { … }` statement form has no handle to own
+    // its effect, so it roots the observer (`jet_reactive_scope`); the
+    // `reactive.effect(..)` expression returns its lifecycle handle.
+    let rooted_effect = matches!(
+        result,
+        Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE
+    );
     let (module, member, symbol, arity, borrow_mask) = match &kind {
         MirCoreClosureKind::Spawn if grouped_spawn => (
             "core.tasks",
@@ -8070,6 +8088,13 @@ pub(super) fn core_closure_route(
             "core.reactive",
             "derived",
             "jet_std::JetDerived::new",
+            1,
+            vec![false],
+        ),
+        MirCoreClosureKind::ReactiveEffect if rooted_effect => (
+            "core.reactive",
+            "scope",
+            "jet_std::jet_reactive_scope",
             1,
             vec![false],
         ),

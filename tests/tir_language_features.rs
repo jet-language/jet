@@ -225,9 +225,33 @@ fn run() {
     print(double(21))
 }
 ";
+    let compiled = jet::compile(src).expect("typed Todo lowers its contextual arguments");
+    assert!(
+        compiled.rust.contains("5u32, \"Int\")"),
+        "Todo must carry its source line and checked Jet type: {}",
+        compiled.rust
+    );
     let (code, stdout) = build_and_run("tir_todo", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "42\n");
+}
+
+#[test]
+fn static_split_builder_preserves_owned_halves_across_tiers() {
+    let source = r#"
+fn run() {
+    values :: [1, 2, 3, 4]
+    halves :: values.split(2)
+    print(halves.left)
+    print(halves.right)
+    print(values)
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "static_split_builder",
+        source,
+        "[1, 2]\n[3, 4]\n[1, 2, 3, 4]\n",
+    );
 }
 
 /// c109 Phase 23: default parameter values (S61/D-NARG-D2). Sema fills omitted trailing
@@ -377,6 +401,36 @@ fn run() { _ :: invoke(factory, (value: Bool) -> 1) }
     assert!(
         diagnostics.iter().any(|diagnostic| diagnostic.code == "E0112"),
         "expected E0112 for a missing strict callable contract: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn nested_callable_containers_ignore_declaration_call_metadata() {
+    let src = r#"
+fn lower(value: String) -> String { ~value }
+fn run() {
+    handlers :: [String:fn(String) -> String]{"lower": lower}
+    nested :: [[String:fn(String) -> String]]{^handlers}
+    handler :: nested[0].get("lower").or_err("missing handler")
+    _ :: handler("HI")
+}
+"#;
+    jet::compile(src).expect("named function metadata must not distinguish nested value slots");
+}
+
+#[test]
+fn nested_callable_containers_keep_required_public_labels() {
+    let src = r#"
+fn plain(value: Bool) -> Int { 1 }
+fn run() {
+    handlers :: [String:fn(*, force: Bool) -> Int]{"plain": plain}
+}
+"#;
+    let diagnostics = jet::compile(src)
+        .expect_err("container storage must not erase required callable labels");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0108"),
+        "expected E0108 for the nested callable-contract mismatch: {diagnostics:#?}"
     );
 }
 

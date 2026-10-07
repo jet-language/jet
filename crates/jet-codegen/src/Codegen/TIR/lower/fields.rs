@@ -121,16 +121,31 @@ fn canonical_nominal_name(
         }
     }
     if let Some((namespace, leaf)) = name.rsplit_once('.') {
-        let target = bundle.modules[module_idx]
+        let import = bundle.modules[module_idx]
             .imports
             .iter()
-            .find(|import| import.import_alias() == namespace)
+            .find(|import| import.import_alias() == namespace);
+        let target = import
             .and_then(|import| nominal_import_target(bundle, module_idx, import))
             .or_else(|| {
                 bundle.name_ledger.effective_alias(module_idx, namespace)
                     .and_then(|alias| alias.target_module)
-            })?;
-        return canonical_nominal_name(bundle, target, leaf, &HashSet::new(), qualify_aliases, seen);
+            });
+        if let Some(identity) = target.and_then(|target| {
+            canonical_nominal_name(bundle, target, leaf, &HashSet::new(), qualify_aliases, seen)
+        }) {
+            return Some(identity);
+        }
+        // A compiler-owned Core leaf (`time.Duration` under `use core.time as
+        // time`) has no source declaration; it is the one Prelude nominal in
+        // every module, the projection sema's `canonical_core` applies too.
+        return import
+            .and_then(|import| import.core_module_path())
+            .filter(|module| {
+                module != "core.crypto"
+                    && jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf).is_some()
+            })
+            .map(|_| leaf.to_string());
     }
     let alias = bundle.name_ledger.effective_alias(module_idx, name)?;
     let target = alias.target_module?;

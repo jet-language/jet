@@ -286,7 +286,8 @@ fn sema_failure_union_flatten(ty: Type, flat: &[Type]) Never! {
 }
 
 // D-UNIONTYPE1=A: flatten nested unions, drop exact duplicates, sort by the
-// canonical spelling; one surviving member is that member.
+// canonical spelling read without module qualifiers (Rust
+// `union_member_order_key`); one surviving member is that member.
 fn sema_failure_union_canonical(members: [Type]) -> Type Never! {
     flat := [Type]{}
     loop member in members -> sema_failure_union_flatten(member, &flat)
@@ -294,7 +295,7 @@ fn sema_failure_union_canonical(members: [Type]) -> Type Never! {
     loop index < flat.len() {
         current := flat[index]
         insertion := index - 1
-        loop insertion >= 0 && type_name(flat[insertion]) > type_name(current) {
+        loop insertion >= 0 && sema_failure_union_member_after(flat[insertion], current) {
             flat[insertion + 1] = flat[insertion]
             insertion -= 1
         }
@@ -304,6 +305,35 @@ fn sema_failure_union_canonical(members: [Type]) -> Type Never! {
     if flat.len() == 0 -> return Type.Named{name: "Unit"}
     if flat.len() == 1 -> return flat[0]
     Type.Union{members: flat}
+}
+
+// Resolving a member to its declaration key (`<corelib>/Core/http::…::HTTPError`)
+// never reorders the union: the order reads each nominal head unqualified and
+// the full spelling only breaks ties.
+fn sema_failure_union_member_after(left: Type, right: Type) -> Bool Never! {
+    left_key :: sema_failure_union_order_key(left)
+    right_key :: sema_failure_union_order_key(right)
+    if left_key != right_key -> return left_key > right_key
+    type_name(left) > type_name(right)
+}
+
+fn sema_failure_union_order_key(ty: Type) -> String Never! {
+    if ty == {
+        .Named(name) -> return sema_failure_union_unqualified(name)
+        .Apply(name, _) -> {
+            full :: type_name(ty)
+            if full.starts_with(name) -> return "{sema_failure_union_unqualified(name)}{full.slice(name.len(), full.len())}"
+            return full
+        }
+        else -> {}
+    }
+    type_name(ty)
+}
+
+fn sema_failure_union_unqualified(name: String) -> String Never! {
+    leaf := name
+    loop part in name.split("::") -> leaf = part
+    leaf
 }
 
 // The success side of an unwritten contract.

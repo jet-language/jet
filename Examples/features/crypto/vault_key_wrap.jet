@@ -3,7 +3,7 @@
 use core.crypto as crypto
 use core.crypto.vault as vault
 
-fn recipient_surface() -[Secret]> {
+fn recipient_surface() -[Secret, Rand]> {
     create :: vault.prepare_generate<crypto.SigningKey>("release") ?? return
     create_write :: vault.authorize_write(&create, "create release signer") ?? return
     key_ref :: vault.commit_generate(^create_write, ^create) ?? return
