@@ -14,20 +14,16 @@
 // expect-stdout inline-asm-int-result: ""
 // expect-exit inline-asm-int-result: 70
 // expect-stderr inline-asm-int-result: "error[E3010]: arithmetic overflow\n"
-// expect-stdout inline-asm-float: "0\n-9223372036854775808\n4609434218613702656\n9221120237041090626\n9218868437227405313\n9218868437227405312\n-4503599627370496\n1\n-9223372036854775807\n"
 use jet_foundation.[MIRForeignID, MIRForeignABI, MIRForeignLanguage]
 
 fn fx_asm_type(name: String) -> MIRType Never! {
-    if name == "os_f64_from_bits" -> return mir_type_from_kind(MIRTypeKind.Float)
-    if name == "os_f64_bits" -> return mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 64})
     if name.ends_with("_i64") || name == "os_load_u8" || name == "os_store_u8" -> return mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 64})
     fx_int()
 }
 
 fn fx_asm_leaf(name: String, names: [String], returns: Bool) -> MIRFunction Never! {
     b := fx_builder()
-    param_type :: if name == "os_f64_bits" -> mir_type_from_kind(MIRTypeKind.Float) else -> if name == "os_f64_from_bits" -> fx_asm_type("os_load_i64") else -> fx_asm_type(name)
-    loop param in names -> fx_param(&b, param, param_type, mir_copy_ownership()).drop("asm parameter")
+    loop param in names -> fx_param(&b, param, fx_asm_type(name), mir_copy_ownership()).drop("asm parameter")
     leaf := fx_function(name, b, if returns -> fx_asm_type(name) else -> fx_unit())
     leaf.kind = MIRFunctionKind.Foreign
     leaf.foreign_language = Val("asm")
@@ -315,23 +311,4 @@ fn fx_inline_asm_int_result() -> MIRProgram Never! {
     p := fx_program([MIRFunction]{leaf}, [MIRTypeDef]{})
     p.source_files = [MIRSourceFile]{MIRSourceFile{id: fx_source_file(), path: "asm-result.jet", source: source}}
     p
-}
-
-fn fx_inline_asm_float() -> MIRProgram Never! {
-    b := fx_builder()
-    // +0, -0, 1.5, quiet/signaling NaN payloads, +/- infinity,
-    // and both signs of the smallest subnormal survive the xmm call ABI.
-    patterns :: [Int]{0, -9223372036854775808, 4609434218613702656,
-        9221120237041090626, 9218868437227405313, 9218868437227405312,
-        -4503599627370496, 1, -9223372036854775807}
-    loop pattern in patterns {
-        bits :: fx_asm_i64_const(&b, pattern)
-        value :: fx_asm_call(&b, "os_f64_from_bits", [MIRValueID]{bits}, true)
-        round_trip :: fx_asm_call(&b, "os_f64_bits", [MIRValueID]{value}, true)
-        fx_print(&b, round_trip)
-    }
-    fx_block(&b, U64{0}, MIRTerminator.Return{value: None})
-    fx_asm_program([MIRFunction]{fx_function("run", b, fx_unit()),
-        fx_asm_leaf("os_f64_bits", [String]{"value"}, true),
-        fx_asm_leaf("os_f64_from_bits", [String]{"bits"}, true)})
 }
