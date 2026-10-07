@@ -164,6 +164,11 @@ The absent-trigger golden also asserts the loaded source inventory: the Rust
 feed checks all artifact source files before reachability pruning, and the Jet
 feed checks the loader's exact generated Core source closure. An unnecessary
 `core.prelude` load is a test failure even if its functions would be pruned.
+The front-feed differential includes failing goldens using the same suffix
+rules as the native golden harness: `.err.out` pins stderr and requires exit
+70 or 1; successful `.out` cases require exit 0 and may additionally pin
+`.stderr.out`. Both feeds must still match each other's exit status, stdout,
+and stderr byte for byte, including on failure.
 
 Native sentry scopes and unsafe function gates save the canonical per-thread
 gate/fence state in caller-owned frame storage. Normal and stopped cleanup

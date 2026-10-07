@@ -52,7 +52,16 @@ const cases = passing.map(stem => {
   // fixtures. Do not accidentally include every sibling golden in that root.
   if (!existsSync(join(root, 'package.jet'))) writeFileSync(join(root, 'package.jet'), 'name: "front_feed_case"\nversion: "0.0.1"\nedition: "2028"\n');
   const prefix = join(out, 'feeds', slug); mkdirSync(dirname(prefix), { recursive: true });
-  return { stem, slug, entry, work, file, root, prefix, expected: readFileSync(join(repo, 'Examples/features/expected', `${stem}.out`)), stdin: stdinTable.get(stem) ?? '' };
+  // Keep the canonical golden suffix rules shared with run-goldens.mjs:
+  // .err.out is an expected 70/1 exit; .stderr.out accompanies a zero exit.
+  const expectedOut = join(repo, 'Examples/features/expected', `${stem}.out`);
+  const expectedErr = join(repo, 'Examples/features/expected', `${stem}.err.out`);
+  const expectedStderr = join(repo, 'Examples/features/expected', `${stem}.stderr.out`);
+  if (!existsSync(expectedOut) && !existsSync(expectedErr)) throw new Error(`baseline case has no golden: ${stem}`);
+  const expect = existsSync(expectedErr)
+    ? { failure: true, stderr: readFileSync(expectedErr) }
+    : { failure: false, stdout: readFileSync(expectedOut), stderr: existsSync(expectedStderr) ? readFileSync(expectedStderr) : null };
+  return { stem, slug, entry, work, file, root, prefix, expect, stdin: stdinTable.get(stem) ?? '' };
 });
 writeFileSync(join(out, 'manifest.json'), JSON.stringify({ baseline: resolve(options.baseline), baseline_sha256: createHash('sha256').update(baselineText).digest('hex'), cases: cases.map(c => ({ stem: c.stem, file: c.file, prefix: c.prefix })) }, null, 2) + '\n');
 const results = [];
@@ -106,6 +115,14 @@ if (options.bootstrap) {
     rmSync(`${c.prefix}.rust.convert-error`, { force: true });
     try {
       const converter = new Converter(schema); const node = parseRustDebug(readFileSync(dump, 'utf8'));
+      if (c.stem === 'errors/prelude_load_absent') {
+        const sourceFiles = node.fields.find(([name]) => name === 'source_files')?.[1]?.items;
+        if (!sourceFiles?.length) throw new Error('absent-prelude test has no loaded-source inventory');
+        for (const source of sourceFiles) {
+          const path = source.fields.find(([name]) => name === 'path')?.[1]?.v;
+          if (path === 'Core/prelude/prelude.jet' || path?.endsWith('/Core/prelude/prelude.jet')) throw new Error('unmentioned optional-to-failure body loaded core.prelude');
+        }
+      }
       const value = converter.convert(node, { k: 'named', name: 'MIRProgram' });
       const observed = node.fields.find(([name]) => name === 'artifacts')?.[1]?.items ?? [];
       const entry = observed.map(artifact => artifact.fields.find(([name]) => name === 'entry')?.[1]).filter(Boolean).map(row => row.items?.[0]?.fields.find(([name]) => name === 'function')?.[1]?.items?.[0]?.items?.[0]?.v).find(Boolean);
@@ -168,7 +185,14 @@ if (options.bootstrap) {
         const run = spawnSync(binary, [], { cwd: runDir, input: c.stdin, timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 120000), maxBuffer: 1 << 27 });
         writeFileSync(`${c.prefix}.${feed}.stdout`, run.stdout ?? Buffer.alloc(0)); writeFileSync(`${c.prefix}.${feed}.stderr`, run.stderr ?? Buffer.alloc(0));
         runs.push({ feed, run });
-        if (run.status !== 0 || !Buffer.from(run.stdout ?? '').equals(c.expected)) { verdict = 'wrong'; gap(`${feed}-output`, run.status !== 0 ? `exit ${run.status}, signal ${run.signal}` : 'stdout differs from golden', c.stem, String(run.stderr)); }
+        const exitOk = c.expect.failure ? run.status === 70 || run.status === 1 : run.status === 0;
+        const stdoutOk = c.expect.failure || Buffer.from(run.stdout ?? '').equals(c.expect.stdout);
+        const stderrOk = c.expect.stderr === null || Buffer.from(run.stderr ?? '').equals(c.expect.stderr);
+        if (!exitOk || !stdoutOk || !stderrOk) {
+          verdict = 'wrong';
+          const mismatch = !exitOk ? `exit ${run.status}, signal ${run.signal}${c.expect.failure ? ' (expected 70 or 1)' : ''}` : !stdoutOk ? 'stdout differs from golden' : 'stderr differs from golden';
+          gap(`${feed}-output`, mismatch, c.stem, String(run.stderr));
+        }
       }
       if (runs.length === 2 && (runs[0].run.status !== runs[1].run.status || !Buffer.from(runs[0].run.stdout ?? '').equals(Buffer.from(runs[1].run.stdout ?? '')) || !Buffer.from(runs[0].run.stderr ?? '').equals(Buffer.from(runs[1].run.stderr ?? '')))) { verdict = 'different'; gap('feed-output', 'Rust and Jet feed outputs/status differ', c.stem, 'see retained stdout/stderr'); }
       if (existsSync(`${c.prefix}.jet.mird`) && existsSync(`${c.prefix}.rust.mird`)) {
