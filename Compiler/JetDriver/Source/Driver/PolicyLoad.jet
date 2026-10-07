@@ -3,12 +3,12 @@
 // The bootstrap unit already includes Jetpack's PackageModel source closure.
 use jet_foundation.[Diagnostic, PolicyDeclaration, PolicyError, PolicyKey, PolicyScope, Program, Span, POLICY_RULES, diagnostic_with_source_path, policy_key_name, policy_resolve]
 
-fn jet_driver_read_package_policy(value: String) -> [PolicyDeclaration] PackageParseError! {
+fn jet_driver_read_package_policy(value: String) -> PackagePolicy PackageParseError! {
     // PackageFacts.parse rejects this shape before reading any fields. Retain
     // that same refusal when the driver asks for just the policy field.
     if pkg_retired_record_head_spans(value).len() > 0 -> return Err(PackageParseError.RetiredRecordHead)
     policy :: pkg_parse_package_policy(pkg_record_body(value, "policy"))
-    Ok(policy.declarations)
+    Ok(policy)
 }
 
 fn jet_driver_policy_ladder_diagnostic(key: PolicyKey, error: PolicyError, path: String) -> Diagnostic Never! {

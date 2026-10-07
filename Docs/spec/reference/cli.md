@@ -423,3 +423,12 @@ source strings: security gates sort before knowledge and structure gates,
 duplicate facts merge all provenance, and unsafe rows retain their operation
 proofs and diagnostics. Package policy, invocation choices, and external
 lock/trust/forced-build writers enter through the driver's typed gate inputs.
+
+Load-only gate queries use the same authorized source loader as schema and
+source queries. The loader retains canonical module, declaration, alias, and
+import-edge name facts without checking function bodies. Gate projection reuses
+sema's unsafe-obligation and policy writers, including the owning Package's
+unsafe-path and expert ceilings; external writers are supplied as typed gate
+entries. Diagnostics retain the loaded physical source path. A source that
+loads successfully can therefore be inspected even when a callable body would
+fail a semantic compile.
