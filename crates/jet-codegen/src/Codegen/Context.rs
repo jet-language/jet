@@ -4277,6 +4277,37 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.import_mods = import_mod_map(bundle, module_idx);
     cx.module_alias = bundle.modules[module_idx].alias.clone();
     cx.module_identity = module_identity(bundle, module_idx);
+    // Sema's mounting callbacks name their source method by canonical nominal
+    // identity. Retain those checked bodies across imports for the existing
+    // endpoint-contract extractor; this does not register or discover routes.
+    fn register_http_method_bodies(cx: &mut Cx, bundle: &ProgramBundle, owner: usize, items: &[Item]) {
+        for item in items {
+            match item {
+                Item::Struct(definition) => {
+                    for method in &definition.methods {
+                        let route_source = method.markers.iter().any(|marker| {
+                            let crate::Sema::MarkerModules::MarkerResolution::Found(resolved) =
+                                crate::Sema::MarkerModules::resolve_marker_application(bundle, owner, marker)
+                                else { return false; };
+                            jet_foundation::CoreModuleExports::core_source_module("core.http.server")
+                                .is_some_and(|source| bundle.modules[resolved.module].alias == source.alias)
+                        });
+                        if !route_source { continue; }
+                        if let Some(identity) = bundle.name_ledger.nominal_identity(owner, &definition.name) {
+                            cx.fn_bodies.insert(format!("{identity}::{}", method.name), method.body.clone());
+                        }
+                    }
+                }
+                Item::CodeModule(module) => {
+                    if let Some(body) = &module.body { register_http_method_bodies(cx, bundle, owner, body); }
+                }
+                _ => {}
+            }
+        }
+    }
+    for (owner, module) in bundle.modules.iter().enumerate() {
+        register_http_method_bodies(cx, bundle, owner, &module.items);
+    }
     // Match `qualified_key` used when constructing `TirConstantDef.key`.
     let module = cx.module_identity.clone();
     cx.const_ref_keys = cx

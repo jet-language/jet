@@ -460,6 +460,7 @@ fn field_info_carries_visibility() {
 fn marker_arguments_are_typed_in_the_written_view() {
     let marker = Marker {
         name: "Inline".to_string(),
+        declaration: None,
         negated: false,
         name_span: span(),
         args: vec![jet_foundation::AST::MarkerCallArg::Expr(Expr::Ident(
@@ -529,6 +530,7 @@ fn marker_arguments_are_typed_in_the_written_view() {
 fn distinct_capability_marker_is_visible_in_reflection() {
     let marker = Marker {
         name: "Comparable".to_string(),
+        declaration: None,
         negated: false,
         name_span: span(),
         args: Vec::new(),

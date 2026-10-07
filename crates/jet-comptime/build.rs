@@ -44,8 +44,9 @@ fn write_web_kernel_std(manifest: &Path) {
     let reactive_src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs");
     let encoding_types_src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs");
     let json_codec_src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
+    let json_tree_src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/JSONDataTree.rs");
     let math_task_src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs");
-    for source in [&reactive_src, &encoding_types_src, &json_codec_src, &math_task_src] {
+    for source in [&reactive_src, &encoding_types_src, &json_codec_src, &json_tree_src, &math_task_src] {
         println!("cargo:rerun-if-changed={}", source.display());
     }
 
@@ -56,13 +57,18 @@ fn write_web_kernel_std(manifest: &Path) {
     let json_codec = unindent(
         &std::fs::read_to_string(&json_codec_src).expect("read JSONCodec.rs"),
     );
+    let json_tree = std::fs::read_to_string(&json_tree_src).expect("read JSONDataTree.rs");
+    let renderer_start = json_tree.find("    pub fn render_datatree_json(").expect("JSON renderer");
+    let renderer_end = json_tree[renderer_start..].find("    /// Parse typed wire data")
+        .map(|offset| renderer_start + offset).expect("JSON renderer end");
+    let json_renderer = unindent(&json_tree[renderer_start..renderer_end]);
     let native_task =
         extract_native_task(&std::fs::read_to_string(&math_task_src).expect("read MathTaskMem.rs"));
     let shared =
         extract_shared(&std::fs::read_to_string(&math_task_src).expect("read MathTaskMem.rs"));
 
     let mut body = String::with_capacity(
-        native_task.len() + shared.len() + reactive.len() + encoding_types.len() + json_codec.len() + 4,
+        native_task.len() + shared.len() + reactive.len() + encoding_types.len() + json_codec.len() + json_renderer.len() + 4,
     );
     body.push_str("use jet_foundation::Outcome::{JetAbsent, JetOutcome};\n");
     body.push_str(&native_task);
@@ -74,6 +80,8 @@ fn write_web_kernel_std(manifest: &Path) {
     body.push_str(&encoding_types);
     body.push('\n');
     body.push_str(&json_codec);
+    body.push('\n');
+    body.push_str(&json_renderer);
 
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("web_kernel_std.rs");
     std::fs::write(&out, body).expect("write web_kernel_std.rs");

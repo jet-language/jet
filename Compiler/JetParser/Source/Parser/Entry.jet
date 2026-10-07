@@ -1,5 +1,6 @@
 // Public parser entry points preserve lexer diagnostics and original byte spans.
 use jet_foundation.[
+    AppliedRuleApplication,
     DebugTraceSite,
     Diagnostic,
     DiagnosticFixApplicability,
@@ -10,6 +11,7 @@ use jet_foundation.[
     Marker,
     ParseResult,
     Program,
+    RuleSite,
     Span,
     TextEdit,
     WebBucket,
@@ -68,8 +70,25 @@ pub fn parse_generated_source(source: [U8]) -> ParseResult {
     parser_parse_lexed_lines(lex_generated(source), source, parser_line_starts(source))
 }
 
+pub fn parse_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
+    lexed := lex(source)
+    lexed.tokens = expand_named_marker_groups(lexed.tokens, groups)
+    parser_parse_lexed_lines(lexed, source, parser_line_starts(source))
+}
+
+pub fn parse_generated_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
+    lexed := lex_generated(source)
+    lexed.tokens = expand_named_marker_groups(lexed.tokens, groups)
+    parser_parse_lexed_lines(lexed, source, parser_line_starts(source))
+}
+
 pub fn parse_lexed(lexed: Lexed) -> ParseResult {
     parser_parse_lexed_lines(lexed, [U8]{}, [Int]{})
+}
+
+// Loader replay keeps original source coordinates and line metadata.
+pub fn parse_lexed_with_source(lexed: Lexed, source: [U8]) -> ParseResult {
+    parser_parse_lexed_lines(lexed, source, parser_line_starts(source))
 }
 
 fn parser_parse_lexed_lines(lexed: Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
@@ -283,6 +302,10 @@ fn parser_parse_program(state: &JetParserState) -> Program {
             parser_foreign_top_word_ahead(&state) -> parser_report_foreign_top_word(&state)
             parser_file_directive_ahead(&state) -> parser_parse_file_directive(&state, &program)
             parser_policy_file_decl_ahead(&state) -> parser_parse_policy_file_decl(&state, &program)
+            parser_unattached_marker_at_end(&state) -> {
+                marker :: parser_parse_marker(&state)
+                &program.rule_facts.push(AppliedRuleApplication{marker: marker, target: None, site: Val(RuleSite.File)})
+            }
             parser_item_ahead(&state) -> {
                 declaration :: parser_parse_item_or_import(&state)
                 if declaration.import == {
@@ -360,6 +383,30 @@ fn parser_report_foreign_top_word(state: &JetParserState) {
     if parser_current_kind(&state) != TOKEN_KW_EXTERN -> parser_sync_top(&state)
 }
 
+// Imported group heads cannot reveal their file members until the loader has
+// the defining module. Retain an unattached head for that ordinary replay.
+fn parser_unattached_marker_at_end(state: &JetParserState) -> Bool Never! {
+    if parser_current_kind(&state) != TOKEN_HASH -> return false
+    offset := 1
+    if parser_kind_at(&state, offset) == TOKEN_BANG -> offset += 1
+    if parser_kind_at(&state, offset) != TOKEN_IDENT -> return false
+    offset += 1
+    loop parser_kind_at(&state, offset) == TOKEN_DOT && parser_kind_at(&state, offset + 1) == TOKEN_IDENT -> offset += 2
+    if parser_kind_at(&state, offset) == TOKEN_LPAREN {
+        depth := 1
+        offset += 1
+        loop depth > 0 {
+            kind :: parser_kind_at(&state, offset)
+            if kind == TOKEN_EOF -> return false
+            if kind == TOKEN_LPAREN -> depth += 1
+            if kind == TOKEN_RPAREN -> depth -= 1
+            offset += 1
+        }
+    }
+    loop parser_kind_at(&state, offset) == TOKEN_SEMI -> offset += 1
+    parser_kind_at(&state, offset) == TOKEN_EOF
+}
+
 // File rules (D-VISDEFAULT2, D-PRELUDEX1, D-WEBDEFAULT1, D-HTMLPAIR1): bare
 // `#PubFile`/`#NoPrelude`/`#HTML(…)`, a file-level `#Target(…)`, or a `#[…]`
 // list of them. The retired `#PublicFile`/`#Html` spellings are read to teach.
@@ -367,7 +414,7 @@ fn parser_file_directive_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_HASH -> return false
     if parser_kind_at(&state, 1) == TOKEN_LBRACKET -> return parser_file_marker_group_ahead(&state)
     name :: parser_lookahead(&state, 1)
-    if name.kind != TOKEN_IDENT -> return false
+    if name.kind != TOKEN_IDENT || parser_kind_at(&state, 2) == TOKEN_DOT -> return false
     if name.payload.decoded == "PubFile" || name.payload.decoded == "PublicFile" || name.payload.decoded == "NoPrelude" || name.payload.decoded == "HTML" || name.payload.decoded == "Html" -> return true
     name.payload.decoded == "Target" && (parser_target_selects_file_web_at(&state, 1) || !parser_hash_leads_to_item(&state))
 }
@@ -411,6 +458,7 @@ fn parser_file_marker_group_ahead(state: &JetParserState) -> Bool Never! {
     }
     loop parser_kind_at(&state, offset) == TOKEN_SEMI -> offset += 1
     after :: parser_kind_at(&state, offset)
+    if !every_entry_fits_function -> return true
     if after == TOKEN_KW_STRUCT || after == TOKEN_KW_ENUM -> return false
     function_follows :: after == TOKEN_KW_FN || (after == TOKEN_KW_PUB && parser_kind_at(&state, offset + 1) == TOKEN_KW_FN) || parser_prep_verb_ahead(&state, offset, TOKEN_KW_FN) || after == TOKEN_HASH
     !(every_entry_fits_function && function_follows)
@@ -466,6 +514,7 @@ fn parser_parse_file_directive(state: &JetParserState, program: &Program) {
 }
 
 fn parser_apply_file_marker(state: &JetParserState, program: &Program, marker: Marker, single: Bool) {
+    &program.rule_facts.push(AppliedRuleApplication{marker: marker, target: None, site: Val(RuleSite.File)})
     hash :: Span{start: marker.span.start, end: marker.span.start + 1}
     repeat_span :: if single -> hash else -> marker.span
     if marker.name == {
@@ -717,6 +766,7 @@ fn parser_hash_leads_to_item(state: &JetParserState) -> Bool Never! {
         if parser_kind_at(&state, offset) == TOKEN_BANG -> offset += 1
         if parser_kind_at(&state, offset) != TOKEN_IDENT -> return false
         offset += 1
+        loop parser_kind_at(&state, offset) == TOKEN_DOT && parser_kind_at(&state, offset + 1) == TOKEN_IDENT -> offset += 2
         if parser_kind_at(&state, offset) == TOKEN_LPAREN {
             nesting := 1
             offset += 1

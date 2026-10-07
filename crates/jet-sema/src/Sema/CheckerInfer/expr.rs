@@ -2690,6 +2690,13 @@ impl<'a> Checker<'a> {
         if super::optional_chain::is_optional_method_call(e) {
             return self.infer_optional_method_call(e);
         }
+        if self.expand_http_mount(e) {
+            return if matches!(e, Expr::CallValue { .. }) {
+                self.infer_call_like(e)
+            } else {
+                None
+            };
+        }
         self.rewrite_contextual_literal(e);
         if matches!(
             e,

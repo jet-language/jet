@@ -16,6 +16,7 @@ use jet_foundation.[
     TFnValueKind,
     THandleOp,
     Type,
+    type_name,
 ]
 
 struct SemaHTTPRouteParameter {
@@ -75,6 +76,23 @@ fn sema_http_route_shape(expression: Expr, environment: SemaScopeEnvironment, sc
     if expression == {
         .Paren(inner, _) -> return sema_http_route_shape(inner, environment, scopes)
         .Lambda(lambda) -> {
+            if lambda.meta.http_route_source == .Val(source) {
+                graph :: environment.registration_graph ?? return None
+                loop module_row in graph.modules {
+                    loop nominal in module_row.nominals {
+                        loop method in nominal.methods {
+                            if method.symbol.id.key != source -> next
+                            params := [SemaHTTPRouteParameter]{}
+                            loop index in 1..<method.declaration.params.len() {
+                                parameter :: method.declaration.params[index]
+                                &params.push(SemaHTTPRouteParameter{name: parameter.name, ty: sema_type_resolve_declared(graph, parameter.ty, module_row.module_identity)})
+                            }
+                            return Val(SemaHTTPRouteShape{params: params, body: LambdaBody.Block{body: method.declaration.body}, module_identity: module_row.module_identity})
+                        }
+                    }
+                }
+                return None
+            }
             params := [SemaHTTPRouteParameter]{}
             loop parameter in lambda.params {
                 declared :: parameter.ty ?? return None
@@ -828,13 +846,13 @@ fn sema_http_route_contract(method: String, pattern: String, path_fields: [SemaH
     path_names := [String]{}
     loop field in path_fields {
         parameter :: loop candidate in shape.params { if candidate.name == field.name && sema_call_http_nominal_leaf(candidate.ty) != "HTTPRequest" -> break candidate } ?? return None
-        schema_result := if is_mux -> Val("{{\"type\":\"string\"}}") else -> sema_http_route_schema_type(parameter.ty, handler_environment, [String]{})
+        schema_result := sema_http_route_schema_type(parameter.ty, handler_environment, [String]{})
         schema :: schema_result ?? return None
         &path_params.push("{{\"name\":{sema_http_route_json_quote(field.name)},\"in\":\"path\",\"required\":true,\"catch_all\":{field.catch_all},\"schema\":{schema}}}")
         &path_names.push(field.name)
     }
     query_params := [String]{}
-    if method == "get" || method == "head" {
+    if method == "get" || method == "head" || pattern == "" {
         loop parameter in shape.params {
             if sema_call_http_nominal_leaf(parameter.ty) == "HTTPRequest" -> next
             found_path := false
@@ -861,7 +879,6 @@ fn sema_http_route_contract(method: String, pattern: String, path_fields: [SemaH
         content_type := if response.content_type == .Val(text) -> sema_http_route_json_quote(text) else -> "null"
         &response_json.push("{{\"status\":{response.status},\"description\":\"HTTP response\",\"schema\":{schema},\"content_type\":{content_type}}}")
     }
-    if is_mux { response_json = [String]{} }
     if response_json.len() == 0 && !is_mux -> return None
     source := if environment.source_file == "" -> "<source>" else -> environment.source_file
     Val("{{\"method\":{sema_http_route_json_quote(sema_http_route_method_name(method))},\"pattern\":{sema_http_route_json_quote(pattern)},\"path\":{sema_http_route_json_quote(canonical)},\"operation_id\":{sema_http_route_json_quote(sema_http_route_operation_id(method, canonical))},\"summary\":null,\"parameters\":[{params.join(",")}],\"request_body\":{request_body},\"responses\":[{response_json.join(",")}],\"security\":[],\"provenance\":{sema_http_route_json_quote("{source}:{line}")}}}")
@@ -875,6 +892,7 @@ pub fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: 
     updated_args := args
     receiver_name := sema_call_http_nominal_leaf(receiver_value.ty)
     if receiver_name != "HTTPRouter" && receiver_name != "HTTPMux" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if receiver_name == "HTTPMux" && method == "mount" -> return sema_call_http_mount(receiver, receiver_value, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     supported := if receiver_name == "HTTPRouter" -> method == "get" || method == "post" || method == "put" || method == "delete" else -> method == "get" || method == "post" || method == "put" || method == "delete" || method == "patch" || method == "head" || method == "options"
     if !supported -> return SemaMethodSpecialCheck{handled: false, value: None}
     if updated_args.len() != 2 {
@@ -883,11 +901,23 @@ pub fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: 
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     path_value :: sema_call_http_check_value(updated_args[0], Type.String, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    pattern :: sema_http_route_constant_string(updated_args[0].expr, environment, scopes) ?? {
-        &diagnostics.push(sema_error("E2805", updated_args[0].span, "HTTP route path must be a static String", "route patterns are checked at registration and become part of the endpoint contract", "use a literal or compile-time String constant"))
+    static_pattern :: sema_http_route_constant_string(updated_args[0].expr, environment, scopes)
+    dynamic :: static_pattern == None
+    if dynamic && receiver_name != "HTTPMux" {
+        &diagnostics.push(sema_error("E2805", updated_args[0].span, "HTTPRouter route path must be a static String", "router endpoint contracts are fully checked while building; mux value routes may be computed at runtime", "use a literal or compile-time String constant, or register the dynamic route on a mux"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    path_error :: sema_http_route_pattern_error(pattern) ?? {
+    pattern :: static_pattern ?? ""
+    if !dynamic && sema_expr_place_root_ident(receiver) == .Val(root) {
+        if sema_scope_resolve_index(scopes, root) == .Val(binding_index) {
+            key :: "{scopes.bindings[binding_index].symbol.id.key}|{method}|{pattern}"
+            if context.http_routes.contains(key) {
+                &diagnostics.push(sema_error("E2804", span, "Two routes both match `{sema_http_route_method_name(method)} {pattern}`.", "a duplicate route makes dispatch ambiguous; mounted and value routes share one ordered list", "remove one registration or use a distinct method and path"))
+            } else -> &context.http_routes.push(key)
+        }
+    }
+    pattern_error :: if dynamic -> None else -> sema_http_route_pattern_error(pattern)
+    path_error :: pattern_error ?? {
         path_fields :: sema_http_route_path_fields(pattern) ?? [SemaHTTPRoutePathField]{}
         handler_shape :: sema_http_route_shape(updated_args[1].expr, environment, scopes) ?? {
             &diagnostics.push(sema_error("E2805", updated_args[1].span, "HTTP route handler must be a lambda or named function with explicit typed parameters", "route binding needs source parameter names and types before it can define transport inputs", "write `(id: Int, req: HTTPRequest) -> ...` or pass a named function"))
@@ -906,6 +936,11 @@ pub fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: 
             }
         }
         handler_issue := ""
+        if dynamic {
+            loop parameter in typed {
+                if !sema_serde_type_is_admissible(environment, parameter.ty, SemaSerdeDirection.Decode) -> handler_issue = "dynamic HTTP route input `{parameter.name}` cannot decode text into handler type `{type_name(parameter.ty)}`"
+            }
+        }
         if request_names.len() > 1 -> handler_issue = "HTTP route `{pattern}` has more than one HTTPRequest input"
         seen := [String]{}
         loop parameter in handler_shape.params {
@@ -921,6 +956,11 @@ pub fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: 
             matches := 0
             loop parameter in typed { if parameter.name == field.name -> matches = matches + 1 }
             if matches != 1 -> handler_issue = "HTTP route `{pattern}` path field `{field.name}` does not have exactly one typed handler input"
+            loop parameter in typed {
+                if parameter.name == field.name && !sema_serde_type_is_admissible(environment, parameter.ty, SemaSerdeDirection.Decode) {
+                    handler_issue = "HTTP route `{pattern}` path field `{field.name}` cannot decode text into handler type `{type_name(parameter.ty)}`"
+                }
+            }
         }
         path_names := [String]{}
         loop field in path_fields -> &path_names.push(field.name)
@@ -929,7 +969,7 @@ pub fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: 
             found_path := false
             loop path_name in path_names { if path_name == parameter.name -> found_path = true }
             if !found_path {
-                if method == "get" || method == "head" -> &query_names.push(parameter.name)
+                if method == "get" || method == "head" || dynamic -> &query_names.push(parameter.name)
                 else -> handler_issue = "HTTP route `{pattern}` has unbound non-GET handler input `{parameter.name}`"
             }
         }

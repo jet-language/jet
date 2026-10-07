@@ -1007,6 +1007,30 @@ and `serve_once_listener` provide testable one-request entry points.
 | `access_log(request, status)` | `String` | Render a stable access-log line. |
 | `request_id(mux)` | unit | Install request-id middleware. |
 
+Routes are methods of an ordinary struct (D-HTTP-ROUTE-EXPOSE1=A). Import
+`core.http.server as server` and write `#server.Get("/jokes/:id")` immediately
+before `fn joke(self, id: Int) -> HTTPResponse HTTPError! { ... }`.
+The other body-less markers are `Post`, `Put`, `Delete`, `Patch`, `Head`, and
+`Options`, each taking one path. Markers record facts; they do not start a
+server or expose a struct merely because its module was imported.
+
+`mux.mount(Jokes{...})` adds only that value's marked methods, in declaration
+order at the mount call. The struct's fields are shared state, read through
+read-only `self`; use `Shared<T>` for synchronized mutable state. `Cell<T>` is
+thread-confined and cannot cross the HTTP handler boundary. A tagged struct that
+is never mounted receives E2818, with `mux.mount` as the repair.
+
+Mounted and explicit `mux.get`/`post`/other verb registrations use the same
+ordered route rows, input binding, response checks, and duplicate check.
+Path placeholders bind parameters by name; a missing parameter or a type
+without text-decode capability is E2805. Invalid text in an incoming request
+keeps the runtime decoding failure rather than becoming a compile-time error.
+Two statically known registrations of the same method and path are E2804,
+including a marker and a value route. Value routes remain available when the
+path is computed while the program runs. `web.openapi(mux)` describes the same
+route value passed to `serve`; no separate documentation router is needed.
+
+
 ### `core.net.ws` — WebSocket transport
 
 `core.net.ws` is the WebSocket home and accepts an HTTP request for server-side
@@ -2858,7 +2882,7 @@ The module source is [`Core/web/web.jet`](../../../Core/web/web.jet).
 | `page(title: String, body: String) -> WebPage` | page | Build a server-rendered page. |
 | `form(input: WebFormInput, action: String) -> WebFormTyped !WebFormError` | form | Convert form input through the typed form boundary. |
 | `on(path: String, title: String, handler: fn(WebEvent)) -[Browser]>` | — | Register a browser-facing handler. |
-| `openapi(router: HTTPRouter) -> String` | text | Render the router's OpenAPI description. |
+| `openapi(routes: HTTPMux or HTTPRouter) -> String` | text | Render OpenAPI from the checked facts of the same route value that is served. |
 | `value(key: String) -[Browser]> String` | text | Read a browser value. |
 | `storage() -> String` | text | Select the local storage namespace. |
 | `auth(kind: String) -> Auth` | auth | Build an authentication carrier. |

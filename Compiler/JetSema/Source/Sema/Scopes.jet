@@ -378,6 +378,7 @@ pub struct SemaCheckContext {
     pub lambda_escapes: Bool?
     pub lambda_statement_tails: [SemaStatementTailFrame]
     pub call_facts: [SemaCallSiteFact]
+    pub http_routes: [String]{[String]{}}
     pub hardware_use: MIRTargetHardwareUse
     pub call_return_views: [SemaCallReturnView]
     pub local_view_provenance: [SemaLocalViewProvenance]
@@ -726,6 +727,7 @@ pub fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext
         lambda_escapes: source.lambda_escapes,
         lambda_statement_tails: ~source.lambda_statement_tails,
         call_facts: ~source.call_facts,
+        http_routes: ~source.http_routes,
         hardware_use: sema_hardware_use_snapshot(source.hardware_use),
         call_return_views: ~source.call_return_views,
         local_view_provenance: ~source.local_view_provenance,
@@ -840,6 +842,7 @@ pub fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMar
             lambda_escapes: context.lambda_escapes,
             lambda_statement_tails: ~context.lambda_statement_tails,
             call_facts: [SemaCallSiteFact]{},
+            http_routes: ~context.http_routes,
             hardware_use: sema_hardware_use_snapshot(context.hardware_use),
             call_return_views: [SemaCallReturnView]{},
             local_view_provenance: [SemaLocalViewProvenance]{},
@@ -929,6 +932,7 @@ pub fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckCo
     context.lambda_escapes = saved.lambda_escapes
     context.lambda_statement_tails = ~saved.lambda_statement_tails
     context.hardware_use = sema_hardware_use_snapshot(saved.hardware_use)
+    context.http_routes = ~saved.http_routes
     context.return_view_receiver_key = saved.return_view_receiver_key
     context.return_view_parameter_keys = ~saved.return_view_parameter_keys
     context.return_view_provenance = saved.return_view_provenance
