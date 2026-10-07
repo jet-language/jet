@@ -81,6 +81,12 @@ fn sema_comparability_implements(environment: SemaScopeEnvironment, ty: Type, tr
     graph :: graph_option ?? return false
     bound := sema_type_bound_satisfied_with_generics(graph, ty, trait_name, environment.module_identity, environment.generic_params) ?? false
     if bound -> return true
+    // Rust `register_synthetic_display_debug` registers the Prelude carriers'
+    // value equality and order (D-TIME-ORDER1=A: LocalDate, DateTime, ...) in
+    // the trait registry, so `implements_trait` answers by name.
+    if ty == .Named(carrier) {
+        if sema_derive_builtin_supports(sema_serde_named_leaf(carrier), trait_name) -> return true
+    }
     name :: sema_type_graph_base_name(ty) ?? return false
     resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return false
     if resolved.symbol.kind != SymbolKind.Type -> return false
