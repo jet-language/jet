@@ -5,10 +5,9 @@ use core.files as files
 
 fn runtime_lower(program: MIRProgram) {
     symbols := [String]{}
-    if files.read("runtime.exports") == .Val(text) {
-        loop line in text.split("\n").to_list() {
-            if line.trim() != "" -> &symbols.push(line.trim())
-        }
+    text :: files.read("runtime.exports") ?? panic("cannot read runtime.exports")
+    loop line in text.split("\n").to_list() {
+        if line.trim() != "" -> &symbols.push(line.trim())
     }
     library :: x64_runtime_library(program, symbols)
     if library.object.errors.len() > 0 {
