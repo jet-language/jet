@@ -74,7 +74,8 @@ fn deadline_wall_now_ms() -> I64 {
 // CoreReview2 #49 / D-ENV-MUTATE1=A: Rust's std::env reads the immutable host
 // startup capture, never the Jet env overlay. RtL7 owns the one rt_env_get view.
 fn jet_std_time_now() -> I64 {
-    if scheduler_world_refused() -> return I64{0}
+    world :: world_current()
+    if (world != I64{0}) -> return jet_world_now(world)
     key :: scheduler_msg_replay()
     replay :: rt_env_get(key)
     jet_rt_string_drop(key)
