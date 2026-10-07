@@ -173,11 +173,7 @@ fn run() {{
         params = params,
     );
     let api = plugin_api_snapshot("large_args", "scale", "a0: Int", "Int");
-    let mut tiers = vec!["jit", "interpreter"];
-    if common::have_rustc() {
-        tiers.push("release");
-    }
-    for tier in tiers {
+    for tier in ["default", "interpreter", "release"] {
         let (code, stdout, stderr) = tir_support::run_plugin_tier(
             "plugin_large_argument_list",
             &source,
@@ -509,13 +505,7 @@ fn assert_plugin_failure_on_all_hosted_tiers(
     artifact: &Path,
     api_snapshot: &str,
 ) {
-    let mut tiers = vec!["jit", "interpreter"];
-    if common::have_rustc() {
-        tiers.push("release");
-    } else {
-        eprintln!("note: skipping AOT plugin resource witness (need rustc)");
-    }
-    for tier in tiers {
+    for tier in ["default", "interpreter", "release"] {
         let (success, stdout, stderr) =
             run_plugin_resource_child(test_name, tier, source, artifact, api_snapshot);
         assert!(
@@ -634,9 +624,7 @@ fn plugin_failure_propagation_records_the_host_call_line_on_all_tiers() {
         .replace("Examples/features/packages/plugin_failure/failure_guest.wat", &path.to_string_lossy())
         .replace("FS.Read:Examples/features/packages/plugin_failure", &format!("FS.Read:{}", scratch.path.display()));
     let api = include_str!("../Examples/features/packages/plugin_failure/fixture-state/cache/api/plugin__failure_guest.api");
-    let mut tiers = vec!["jit", "interpreter"];
-    if common::have_rustc() { tiers.push("release"); }
-    for tier in tiers {
+    for tier in ["default", "interpreter", "release"] {
         let (code, stdout, stderr) = tir_support::run_plugin_tier_in_package("plugin_journey", &source, tier, &path, api, PLUGIN_FAILURE_PACKAGE);
         assert_ne!(code, 0, "{tier} lost the guest failure");
         assert_eq!(stdout, "", "{tier} entered the success path");
@@ -665,9 +653,7 @@ fn plugin_guest_failure_reports_operation_boundary_and_kind_on_all_hosted_tiers(
         .replace("FS.Read:Examples/features/packages/plugin_failure", &format!("FS.Read:{}", scratch.path.display()));
     let api = include_str!("../Examples/features/packages/plugin_failure/fixture-state/cache/api/plugin__failure_guest.api");
     let expected = include_str!("../Examples/features/expected/packages/plugin_failure.out");
-    let mut tiers = vec!["jit", "interpreter"];
-    if common::have_rustc() { tiers.push("release"); }
-    for tier in tiers {
+    for tier in ["default", "interpreter", "release"] {
         let (code, stdout, stderr) = tir_support::run_plugin_tier_in_package("plugin_causes", &source, tier, &path, api, PLUGIN_FAILURE_PACKAGE);
         assert_eq!(code, 0, "{tier} failed the typed plugin witness: {stderr}");
         assert_eq!(stderr, "", "{tier} unexpectedly propagated a handled failure");
@@ -1252,11 +1238,7 @@ fn run() {{
         params = params,
     );
     let api = plugin_api_snapshot("zero_param", "zero", "", "Int");
-    let mut tiers = vec!["jit", "interpreter"];
-    if common::have_rustc() {
-        tiers.push("release");
-    }
-    for tier in tiers {
+    for tier in ["default", "interpreter", "release"] {
         let (code, stdout, stderr) = tir_support::run_plugin_tier(
             "plugin_zero_param_overlarge_frame",
             &source,
@@ -1316,11 +1298,7 @@ fn run() {{
         root = root,
     );
     let api = plugin_api_snapshot("link", "zero", "", "Int");
-    let mut tiers = vec!["jit", "interpreter"];
-    if common::have_rustc() {
-        tiers.push("release");
-    }
-    for tier in tiers {
+    for tier in ["default", "interpreter", "release"] {
         let (code, stdout, stderr) = tir_support::run_plugin_tier(
             "plugin_symlink_outside_read_root",
             &source,
