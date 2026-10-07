@@ -1,0 +1,85 @@
+// Raw ABI ownership witnesses alongside the high-level collection goldens.
+fn coll_test_require(ok: Bool) {
+    if ok -> return
+    trap_exit(I64{1})
+    loop {}
+}
+fn coll_test_meta() -> I64 {
+    meta :: jet_rt_alloc(I64{72}, I64{8})
+    coll_zero(meta, I64{72})
+    trap_store(meta, I64{8})
+    trap_store(meta + I64{48}, I64{274877906946})
+    meta
+}
+fn coll_test_source() -> I64 {
+    meta :: coll_test_meta()
+    header :: coll_list_new()
+    slot :: jet_rt_alloc(I64{8}, I64{8})
+    at := I64{1}
+    loop at <= (I64{5}) {
+        trap_store(slot, at)
+        coll_list_push(header, slot, meta)
+        at += I64{1}
+    }
+    source :: jet_rt_native_iter_from_list(header, meta, I64{1})
+    coll_test_require(trap_word(header) == I64{0} && trap_word(header + I64{8}) == I64{0} && trap_word(header + I64{16}) == I64{0})
+    jet_rt_free(header, I64{24}, I64{8})
+    jet_rt_free(slot, I64{8}, I64{8})
+    // The node must own the descriptor, not borrow this expired one.
+    coll_meta_drop(meta)
+    source
+}
+fn run() {
+    jet_rt_alloc_init()
+    source :: coll_test_source()
+    first :: jet_rt_native_iter_next(source)
+    coll_test_require(trap_word(first) == I64{1})
+    jet_rt_free(first, I64{8}, I64{8})
+    tail :: jet_rt_native_iter_step_by(source, I64{2})
+    output :: coll_list_new()
+    jet_rt_native_iter_to_list(tail, output)
+    coll_test_require(trap_word(output) == I64{2})
+    data :: trap_word(output + I64{16})
+    coll_test_require(trap_word(data) == I64{2} && trap_word(data + I64{8}) == I64{4})
+    meta :: coll_test_meta()
+    coll_list_drop(output, meta, I64{0})
+    jet_rt_free(output, I64{24}, I64{8})
+    cursor :: jet_rt_native_iter_cursor_init(coll_test_source(), I64{2}, I64{1})
+    slot :: coll_slot_new(meta)
+    coll_test_require(jet_rt_native_iter_cursor_test(cursor) == I64{1})
+    jet_rt_native_iter_cursor_value(cursor, slot, I64{0})
+    coll_test_require(trap_word(slot) == I64{1})
+    jet_rt_native_iter_cursor_advance(cursor)
+    jet_rt_native_iter_cursor_value(cursor, slot, I64{1})
+    coll_test_require(trap_word(slot) == I64{3})
+    jet_rt_native_iter_cursor_advance(cursor)
+    jet_rt_native_iter_cursor_value(cursor, slot, I64{1})
+    coll_test_require(trap_word(slot) == I64{5})
+    jet_rt_native_iter_cursor_advance(cursor)
+    coll_test_require(jet_rt_native_iter_cursor_test(cursor) == I64{0})
+    jet_rt_native_iter_cursor_advance(cursor)
+    jet_rt_native_iter_cursor_drop(cursor)
+    coll_test_require(jet_rt_native_iter_len(coll_test_source()) == I64{5})
+    coll_test_require(jet_rt_native_iter_len(jet_rt_native_iter_take(coll_test_source(), I64{0})) == I64{0})
+    coll_test_require(jet_rt_native_iter_len(jet_rt_native_iter_skip(coll_test_source(), I64{99})) == I64{0})
+    coll_test_require(jet_rt_native_iter_len(jet_rt_native_iter_drop_last(coll_test_source(), I64{99})) == I64{0})
+    coll_test_require(jet_rt_native_iter_average_int(coll_test_source()) == 3.0)
+    // Rounding boundaries exercise carry into exponent and ties-to-even.
+    coll_test_require(iter_wide_float(I64{0}, U64{9007199254740993}) == 9007199254740992.0)
+    coll_test_require(iter_wide_float(I64{0}, U64{9007199254740995}) == 9007199254740996.0)
+    coll_test_require(iter_wide_float(I64{1}, U64{0}) == 18446744073709551616.0)
+    coll_test_require(iter_wide_float(I64{-1}, U64{0}) == -18446744073709551616.0)
+    // Bool/Unit copies never read uninitialized padding bytes.
+    trap_store(meta + I64{48}, I64{9})
+    trap_store(slot, I64{0})
+    tiny :: jet_rt_alloc(I64{1}, I64{1})
+    trap_put(tiny, I64{1})
+    coll_copy(tiny, slot, coll_payload(meta))
+    coll_test_require(trap_word(slot) == I64{1})
+    trap_store(meta + I64{48}, I64{11})
+    coll_test_require(coll_payload(meta) == I64{0})
+    coll_copy(I64{0}, slot, coll_payload(meta))
+    jet_rt_free(tiny, I64{1}, I64{1})
+    jet_rt_free(slot, I64{8}, I64{8})
+    coll_meta_drop(meta)
+}

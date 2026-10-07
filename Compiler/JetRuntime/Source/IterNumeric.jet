@@ -1,0 +1,110 @@
+// Numeric terminals retain the reference's collect-before-reduce ordering.
+// Fixed-width integers sum into two machine words, then round only once.
+fn iter_unsigned(word: I64) -> U64 {
+    U64{word & I64{9223372036854775807}} | (if (word < I64{0}) -> U64{9223372036854775808} else -> U64{0})
+}
+
+fn iter_signed(word: U64) -> I64 {
+    I64{word & U64{9223372036854775807}} | (if (word >= U64{9223372036854775808}) -> I64{-9223372036854775808} else -> I64{0})
+}
+
+
+// Signed i128-as-f64 rounding, ties to even. Per-element Float conversion
+// would lose cancellation and round the total more than once.
+fn iter_wide_float(high: I64, low: U64) -> Float {
+    negative :: high < I64{0}
+    hi := iter_unsigned(high)
+    lo := low
+    if negative {
+        lo = wrapping(!lo + U64{1})
+        hi = wrapping(!hi + (if (lo == U64{0}) -> U64{1} else -> U64{0}))
+    }
+    if (hi == U64{0} && lo == U64{0}) -> return 0.0
+    exponent := I64{52}
+    guard := false
+    sticky := false
+    loop hi != (U64{0}) || lo >= (U64{9007199254740992}) {
+        sticky = sticky || guard
+        guard = (lo & U64{1}) != U64{0}
+        lo = (lo >> U64{1}) | wrapping(hi << U64{63})
+        hi >>= U64{1}
+        exponent += I64{1}
+    }
+    if (guard && (sticky || (lo & U64{1}) != U64{0})) -> lo += U64{1}
+    if (lo == U64{9007199254740992}) {
+        lo >>= U64{1}
+        exponent += I64{1}
+    }
+    // The mantissa has already been rounded to 53 bits. Building it from
+    // binary digits and multiplying by powers of two are exact binary64
+    // operations; no general Float/word reinterpretation seam is required.
+    value := 0.0
+    place := 1.0
+    loop lo != (U64{0}) {
+        if ((lo & U64{1}) != U64{0}) -> value += place
+        lo >>= U64{1}
+        place *= 2.0
+    }
+    scale := exponent - I64{52}
+    loop scale > (I64{0}) {
+        value *= 2.0
+        scale -= I64{1}
+    }
+    if negative -> -value else -> value
+}
+
+#Export(c) fn jet_rt_native_iter_average_float(source: I64) -> Float {
+    node :: iter_collect_node(source)
+    header :: trap_word(node + I64{112})
+    data :: trap_word(header + I64{16})
+    length :: trap_word(header)
+    at := I64{0}
+    sum := 0.0
+    loop at < length {
+        sum += iter_float_bits(trap_word(data + at * I64{8}))
+        at += I64{1}
+    }
+    jet_rt_native_iter_drop(node)
+    if (length == I64{0}) -> 0.0 else -> sum / iter_wide_float(I64{0}, U64{length})
+}
+
+#Export(c) fn jet_rt_native_iter_average_int(source: I64) -> Float {
+    node :: iter_collect_node(source)
+    meta :: iter_meta(node)
+    kind :: trap_word(meta + I64{48}) & I64{4294967295}
+    width :: trap_word(meta + I64{48}) >> I64{32}
+    header :: trap_word(node + I64{112})
+    data :: trap_word(header + I64{16})
+    length :: trap_word(header)
+    at := I64{0}
+    sum := 0.0
+    if (kind == I64{1}) {
+        accumulator :: coll_slot_new(meta)
+        trap_store(accumulator, jet_int_owned_from_i64(I64{0}))
+        loop at < length {
+            next_sum :: jet_int_add(trap_word(accumulator), trap_word(data + at * trap_word(meta)))
+            int_discard(trap_word(accumulator))
+            trap_store(accumulator, next_sum)
+            at += I64{1}
+        }
+        sum = jet_int_owned_to_f64(trap_word(accumulator))
+        int_discard(trap_word(accumulator))
+        jet_rt_free(accumulator, coll_size(meta), I64{8})
+    } else {
+        hi := I64{0}
+        lo := U64{0}
+        loop at < length {
+            word := trap_word(data + at * trap_word(meta))
+            if (width < I64{64} && kind == I64{2}) -> word = wrapping(word << (I64{64} - width)) >> (I64{64} - width)
+            bits := iter_unsigned(word)
+            if (width < I64{64} && kind == I64{3}) -> bits &= (U64{1} << U64{width}) - U64{1}
+            added :: wrapping(lo + bits)
+            hi = wrapping(hi + (if (kind == I64{2} && word < I64{0}) -> I64{-1} else -> I64{0}) + (if added < lo -> I64{1} else -> I64{0}))
+            lo = added
+            at += I64{1}
+        }
+        sum = iter_wide_float(hi, lo)
+    }
+    jet_rt_native_iter_drop(node)
+    if (length == I64{0}) -> 0.0 else -> sum / iter_wide_float(I64{0}, U64{length})
+}
