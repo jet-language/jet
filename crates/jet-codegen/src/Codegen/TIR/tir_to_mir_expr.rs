@@ -8897,7 +8897,7 @@ fn http_text_method_receiver(recv: &Type, op: &THandleOp) -> Option<&'static str
     match recv.without_user_tags() {
         Type::Named(name) if name == "HTTPRequest" => Some("HTTPRequest"),
         Type::Named(name) if name == "HTTPResponse" => Some("HTTPResponse"),
-        Type::Named(name) if name == "Body" => Some("Body"),
+        Type::Named(name) if matches!(name.as_str(), "Body" | "core.http.Body") => Some("Body"),
         _ => None,
     }
 }
@@ -9027,7 +9027,7 @@ fn http_json_method_receiver(recv: &Type, op: &THandleOp) -> Option<&'static str
     match recv.without_user_tags() {
         Type::Named(name) if name == "HTTPRequest" => Some("HTTPRequest"),
         Type::Named(name) if name == "HTTPResponse" => Some("HTTPResponse"),
-        Type::Named(name) if name == "Body" => Some("Body"),
+        Type::Named(name) if matches!(name.as_str(), "Body" | "core.http.Body") => Some("Body"),
         _ => None,
     }
 }

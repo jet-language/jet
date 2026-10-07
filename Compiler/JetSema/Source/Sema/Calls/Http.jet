@@ -341,7 +341,7 @@ fn sema_call_http_method_result(name: String, method: String, count: Int) -> Typ
     if name == "HTTPRequest" {
         if (method == "method" || method == "path") && count == 0 -> return Val(Type.String)
         if method == "text" && (count == 0 || count == 1) -> return Val(Type.Result{ok: Type.String, err: error})
-        if method == "body" && count == 0 -> return Val(Type.Named{name: "Body"})
+        if method == "body" && count == 0 -> return Val(Type.Named{name: "core.http.Body"})
         if method == "trailers" && count == 0 -> return Val(Type.Result{ok: Type.Named{name: "Headers"}, err: error})
         if (method == "param" || method == "header") && count == 1 -> return Val(Type.Option{inner: Type.String})
         if method == "header" && count == 2 -> return Val(Type.Named{name: "HTTPRequest"})
@@ -354,7 +354,7 @@ fn sema_call_http_method_result(name: String, method: String, count: Int) -> Typ
     if name == "HTTPResponse" {
         if method == "status" && count == 0 -> return Val(Type.Int)
         if method == "text" && (count == 0 || count == 1) -> return Val(Type.Result{ok: Type.String, err: error})
-        if method == "body" && count == 0 -> return Val(Type.Named{name: "Body"})
+        if method == "body" && count == 0 -> return Val(Type.Named{name: "core.http.Body"})
         if method == "header" && count == 1 -> return Val(Type.Option{inner: Type.String})
         if method == "header" && count == 2 -> return Val(Type.Named{name: "HTTPResponse"})
         if method == "trailers" && count == 1 -> return Val(Type.Result{ok: Type.Named{name: "HTTPResponse"}, err: error})
