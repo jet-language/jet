@@ -49,7 +49,8 @@ fn deadline_parse_i64(text: I64, out: I64) -> Bool {
         byte :: trap_byte(data + at)
         if byte < I64{48} || byte > I64{57} -> return false
         digit :: byte - I64{48}
-        if value < limit /% I64{10} -> return false
+        // /% floors negative values; the multiply guard needs truncation.
+        if value < I64{-922337203685477580} -> return false
         multiplied :: value * I64{10}
         if multiplied < limit + digit -> return false
         value = multiplied - digit
