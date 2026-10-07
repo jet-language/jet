@@ -43,6 +43,28 @@ views remain available. `jet jobs deploy` is an error teaching `jet deploy`,
 not an alias. `jet run <entry> -- deploy` and `<built-program> deploy` use
 the same checked job dispatch.
 
+The compiler request selects a job or generator by its declared callable in
+the authorized entry module. It does not rename that function or manufacture
+`fn run`. Evaluation uses the same selection and checks transitive purity
+through sema's checked call graph before execution.
+
+## Published schemas
+
+`#PublishedSchema` records have a lockfile-style snapshot in
+`.jet/cache/schema/<Type>.snapshot`. The canonical sema codec records the
+format version, type, published version, optional `squashed_before` cutoff,
+and declaration-order field names and types. Field reordering is not breaking.
+Removing a field, changing its type, or adding a required field needs declared
+migration intent; invalid migration operations also report E0910 before
+codegen. A type change requires an inline converter or an `impl Old -> New`.
+
+`inspect schema status` uses the same sema diff over authorized load-only
+declarations, intentionally without a full build's populated trait registry.
+The full-build check remains authoritative. Snapshot reads honor
+`JET_SCHEMA_CACHE_DIR`; publication and squash writes always use the project's
+canonical cache directory. Source-only queries retain the loader's original
+program, physical path and source bytes and do not substitute a semantic check.
+
 ## Root command index
 
 The root index below mirrors `target/debug/jet help` in this checkout. It lists

@@ -2730,9 +2730,18 @@ fn jet_driver_core_module_order(modules: [JetDriverLoadedModule], source_units: 
 pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
     diagnostics := [Diagnostic]{}
     failed_stage := JetDriverStage?{None}
-    catalog :: jet_driver_build_source_catalog(request)
+    catalog := jet_driver_build_source_catalog(request)
     loop diagnostic in catalog.diagnostics -> &diagnostics.push(diagnostic)
     if !catalog.complete -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
+    // Fix the selected callable before module loading, semantic registration,
+    // Job metadata and authority checking; never rename or synthesize `run`.
+    if request.selected_entry == .Val(name) {
+        loop package_index in 0..<catalog.packages.len() {
+            if catalog.packages[package_index].identity == catalog.entry_package_identity {
+                catalog.packages[package_index].entry = Val(JetDriverPackageEntry{module_alias: None, function_name: name, source_path: request.authorized_sources.entry_path, span: None})
+            }
+        }
+    }
     source_index_result :: jet_driver_build_source_index(catalog.source_units)
     loop diagnostic in source_index_result.diagnostics -> &diagnostics.push(diagnostic)
     if !source_index_result.complete -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)
