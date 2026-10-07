@@ -1,0 +1,59 @@
+// Production stored-view bookkeeping and return checking; no host view carrier.
+fn view_field_require(ok: Bool, message: String) Never! {
+    if !ok -> panic("ViewFieldProvenance: {message}")
+}
+
+fn view_field_binding(name: String, value: Expr, ty: Type, span: Span) -> Binding Never! {
+    Binding{mutable: false, markers: [Marker]{}, reactive_upgrade: false, meta: None, name: name, name_span: span, sigil_span: None, pattern: None, ty: Val(ty), ty_span: None, init: value, is_comptime: false, ct: None, uninit: false, arena_view: false, string_view: false, gc_promotion: None, gc_transferred: false}
+}
+
+fn view_field_symbol(name: String, kind: SymbolKind, ty: Type, span: Span) -> Symbol Never! {
+    Symbol{id: symbol_id(kind, "fixture", "window", name), kind: kind, name: name, module_name: "fixture", owner: Val("window"), span: span, ty: Val(ty), visibility: 0}
+}
+
+fn view_field_window(value: Expr, span: Span) -> Expr Never! {
+    Expr.StructLit{type_name: "Window", type_args: [Type]{}, import_ns: None, as_trait: None, fields: [ExprField]{ExprField{name: "values", name_span: span, value: value}}, inferred: false, span: span}
+}
+
+fn view_field_case(parameter: Bool, access: AccessConvention, expected: String) {
+    span :: Span{start: 10, end: 20}
+    use_span :: Span{start: 30, end: 40}
+    view_type :: Type.Apply{name: "View", args: [Type]{Type.Named{name: "Int"}}}
+    list_type :: Type.List{element: Type.Named{name: "Int"}}
+    owner :: view_field_symbol("values", if parameter -> SymbolKind.Parameter else -> SymbolKind.Local, list_type, span)
+    selected :: view_field_symbol("selected", SymbolKind.Local, view_type, use_span)
+    scopes := sema_scope_init("fixture")
+    state := sema_ownership_state_init()
+    context := sema_check_context_init()
+    diagnostics := [Diagnostic]{}
+    view_field_require(sema_scope_declare_local(&scopes, owner, false, access, None, false), "owner is declared")
+    sema_ownership_declare_binding(&state, owner, parameter)
+    if parameter -> &context.return_view_parameter_keys.push(owner.id.key)
+    view_field_require(sema_scope_declare_local(&scopes, selected, false, AccessConvention.Read, None, false), "range binding is declared")
+    slice :: Expr.Slice{base: Expr.Ident{name: "values", span: use_span}, start: Expr.Int{value: 0, span: use_span, width: None, raw: None}, end: Expr.Int{value: 1, span: use_span, width: None, raw: None}, range: None, span: use_span}
+    sema_ownership_declare_binding(&state, selected, false)
+    view_field_require(sema_ownership_record_binding_view(&state, view_field_binding("selected", slice, view_type, use_span), scopes), "production range binding records its owner")
+    window :: view_field_window(Expr.Ident{name: "selected", span: use_span}, use_span)
+    valid :: sema_stmt_record_return_views(window, Type.Named{name: "Window"}, scopes, &state, &context, &diagnostics)
+    if expected != "" {
+        view_field_require(!valid && diagnostics.len() == 1, "unsafe aggregate return is rejected once")
+        view_field_require(diagnostics[0].code == "E2305" && diagnostics[0].what == expected, "aggregate diagnostic matches the Rust checker")
+        return
+    }
+    view_field_require(valid && diagnostics.len() == 0, "caller-owned range may be returned in a stored view field")
+    provenance :: context.return_view_provenance ?? panic("missing view provenance")
+    view_field_require(provenance.entries.len() == 1, "one output view field")
+    entry :: provenance.entries[0]
+    view_field_require(entry.slot == [String]{"values"} && !entry.value.mutable, "canonical output field path and read access")
+    view_field_require(entry.value.sources.len() == 1 && entry.value.sources[0].source == ViewSource.Parameter{index: 0}, "caller parameter owns the stored view")
+    view_field_require(entry.value.sources[0].projections == [ViewSourceProjection]{ViewSourceProjection.Range}, "range projection survives the aggregate")
+    nested :: view_field_window(window, use_span)
+    nested_facts :: sema_stmt_local_view_facts_for_expr(nested, scopes, &state, context)
+    view_field_require(nested_facts.len() == 1 && nested_facts[0].slot == [String]{"values", "values"}, "nested aggregate fields preserve every output slot")
+}
+
+fn run() {
+    view_field_case(true, AccessConvention.Read, "")
+    view_field_case(false, AccessConvention.Read, "this view points into `values`, which this function owns")
+    view_field_case(true, AccessConvention.Move, "this view points into `values`, which this function consumes")
+}

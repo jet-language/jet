@@ -1186,8 +1186,8 @@ fn sema_ownership_string_list_snapshot(source: [String]) -> [String] Never! {
     result
 }
 
-fn sema_ownership_diag_view_return_owner(place: SemaOwnershipPlace, span: Span) -> Diagnostic {
-    owner := sema_ownership_place_name(place)
+fn sema_ownership_diag_view_return_owner(place: SemaOwnershipPlace, span: Span, aggregate: Bool) -> Diagnostic {
+    owner := if aggregate -> place.root else -> sema_ownership_place_name(place)
     sema_error("E2305", span, "this view points into `{owner}`, which this function owns", "`{owner}` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at", "return an owned copy with `~place` (for example `~value[a..b]`), or accept the source as a parameter so the caller keeps owning it")
 }
 
@@ -1212,8 +1212,8 @@ fn sema_ownership_consumed_view_owner(place: SemaOwnershipPlace, scopes: SemaSco
     false
 }
 
-fn sema_ownership_diag_view_return_consumed(place: SemaOwnershipPlace, span: Span) -> Diagnostic {
-    owner := sema_ownership_place_name(place)
+fn sema_ownership_diag_view_return_consumed(place: SemaOwnershipPlace, span: Span, aggregate: Bool) -> Diagnostic {
+    owner := if aggregate -> place.root else -> sema_ownership_place_name(place)
     sema_error("E2305", span, "this view points into `{owner}`, which this function consumes", "`^{owner}` moves the value into this function, which frees it when it returns, so a returned window into it would outlive its owner", "take `{owner}` as a read or `&` parameter so the caller keeps owning it, or return an owned copy with `~`")
 }
 
@@ -1237,11 +1237,11 @@ pub fn sema_ownership_record_view_return(state: &SemaOwnershipState, place: Sema
         return false
     }
     source_path :: sema_ownership_view_source_for_place(place, receiver_key, parameter_keys, scopes) ?? {
-        &diagnostics.push(sema_ownership_diag_view_return_owner(place, span))
+        &diagnostics.push(sema_ownership_diag_view_return_owner(place, span, output_path.len() > 0))
         return false
     }
     if sema_ownership_consumed_view_owner(place, scopes) {
-        &diagnostics.push(sema_ownership_diag_view_return_consumed(place, span))
+        &diagnostics.push(sema_ownership_diag_view_return_consumed(place, span, output_path.len() > 0))
         return false
     }
     mutable := access == AccessConvention.Write
@@ -1277,7 +1277,7 @@ pub fn sema_ownership_record_view_returns(state: &SemaOwnershipState, places: [S
         if sema_ownership_view_source_for_place(place, receiver_key, parameter_keys, scopes) == None {
             if {
                 sema_ownership_place_has_fresh_projection(place) -> &diagnostics.push(sema_ownership_diag_view_return_boundary(span))
-                else -> &diagnostics.push(sema_ownership_diag_view_return_owner(place, span))
+                else -> &diagnostics.push(sema_ownership_diag_view_return_owner(place, span, output_path.len() > 0))
             }
             return false
         }
