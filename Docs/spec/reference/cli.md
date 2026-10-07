@@ -235,6 +235,15 @@ address. Local Git sources and private cache stages are passed as held
 directory descriptors. If the host cannot transfer those descriptors to a
 child, fetch refuses; a pathname is not an equivalent authority.
 
+Native desktop bundles materialize checked plan files in exclusive staging
+directories. AppImage and MSIX transports bind the resolved tool's executable
+digest and version probe to the checked native sandbox result; unavailable
+isolation is an error, never a logical-artifact substitute. macOS app directories
+use the built-in materializer's executable identity and path-sorted framed file
+digest. Signing hooks must name verified plan inputs, and a requested signature
+requires a successful verify-phase hook before publication. The package receipt
+is recorded only after the native output has been published.
+
 Checked source transactions hold the project, destination parents, and
 `.jet/codemods` directory. Destinations and staged files must be regular,
 single-link files with the identities observed before publication. The

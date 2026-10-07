@@ -1,0 +1,29 @@
+// The restored internal kernel is the one grammar and scalar policy owner.
+use core.db.runtime.kernel_sql_query as sql_kernel
+#Test("SQL canonical tokenizer retains Unicode strings and comments") {
+    tokens :: sql_kernel.sql_tokens("SELECT 'x'';é', value /* outer */ FROM source -- tail\nWHERE value >= 2;") ?? panic("tokens")
+    assert_eq(tokens, [String]{"SELECT", "'x'';é'", ",", "value", "FROM", "source", "WHERE", "value", ">=", "2", ";"})
+    assert_eq(sql_kernel.unquote("'x'';é'"), "x';é")
+    assert(sql_kernel.sql_tokens("SELECT 'open") == .Err(_))
+    assert(sql_kernel.sql_tokens("SELECT value /* open") == .Err(_))
+}
+#Test("SQL numeric comparison does not coerce a text literal to numeric") {
+    assert(sql_kernel.compare_sql_cell("10", ">", "2"))
+    assert(!sql_kernel.compare_sql_cell("10", ">", "'2'"))
+    assert(sql_kernel.compare_sql_cell("true", "=", "true"))
+    assert(!sql_kernel.compare_sql_cell("TRUE", "=", "true"))
+    assert(sql_kernel.identifier(Val("'9id'"), "column") == .Ok("9id"))
+    assert(sql_kernel.identifier(Val("9id"), "column") == .Err(_))
+}
+#Test("SQL sum uses wide integer accumulation before narrowing") {
+    indices :: [U64]{U64{0}, U64{1}, U64{2}}
+    cell :: (index: U64, field: String) -> sql_kernel.JetSQLValue? {
+        if index == (U64{0}) -> Val(sql_kernel.JetSQLValue.Int(I64{9223372036854775807}))
+        else -> if index == (U64{1}) -> Val(sql_kernel.JetSQLValue.Int(I64{1}))
+        else -> Val(sql_kernel.JetSQLValue.Int(I64{-1}))
+    }
+    sum :: sql_kernel.sql_aggregate_value(indices, sql_kernel.JetSQLAggregate.Sum, Val("value"), cell)
+    assert_eq(sum, sql_kernel.JetSQLValue.Int(I64{9223372036854775807}))
+    count :: sql_kernel.sql_aggregate_value(indices, sql_kernel.JetSQLAggregate.Count, None, cell)
+    assert_eq(count, sql_kernel.JetSQLValue.Int(I64{3}))
+}

@@ -1,0 +1,813 @@
+// Behavioral ports of CmdFlash.rs. tests/target_machines.rs validates target
+// construction/audits but has no FlashPlan/FlashReceipt oracle or CLI launch.
+// These controlled in-memory fixtures prove policy only, never device flashing.
+fn flash_test_facts(adapter: MIRTargetProgrammerAdapter) -> MIRTargetProgrammerFacts Never! {
+    MIRTargetProgrammerFacts{adapter: adapter, executable: "tool", chip: Val("chip"), interface: Val("iface"), config: [String]{"board.cfg"}, speed_khz: Val(1000), reset: true, machine: Val("machine"), cpu: Val("cpu")}
+}
+fn flash_test_plan() -> JetCLIFlashPlan Never! {
+    JetCLIFlashPlan{schema: "jet.flash.plan", target: "board.test", target_triple: "thumbv7em-none-eabi", target_identity: "target-id", hardware_identity: "hardware-id", adapter: JetCLIFlashAdapter.ProbeRs, programmer: flash_test_facts(MIRTargetProgrammerAdapter.ProbeRs), tool: "tool", tool_identity: "tool-id", executable: flash_paths.of("/bin/tool"), image: flash_paths.of("/out/firmware.elf"), audit: flash_paths.of("/out/firmware.target.json"), audit_sha256: "audit-id", image_bytes: 17, image_sha256: "image-id", argv: [String]{"tool", "download", "firmware.elf"}, authority: "Build.native_sandboxed"}
+}
+fn flash_test_profile(tools: [JetCLIFlashToolDeclaration]) -> JetCLIFlashProfile Never! {
+    JetCLIFlashProfile{target: "board", target_triple: "triple", target_identity: "target-id", hardware_identity: "hardware-id", tools: tools}
+}
+#Test("flash adapters and exact argv preserve optional facts and reset") {
+    assert(jet_cli_flash_adapter_parse("Probe-Rs") == None)
+    adapters :: [JetCLIFlashAdapter]{JetCLIFlashAdapter.Emulator, JetCLIFlashAdapter.ProbeRs, JetCLIFlashAdapter.OpenOcd}
+    loop adapter in adapters -> assert(jet_cli_flash_adapter_parse(jet_cli_flash_adapter_name(adapter)) == Val(adapter))
+    emulator :: jet_cli_flash_tool_from_facts(flash_test_facts(MIRTargetProgrammerAdapter.Emulator))
+    assert_eq(jet_cli_flash_tool_argv(emulator, "evil; file.elf") ?? panic("argv"), [String]{"-machine", "machine", "-cpu", "cpu", "-nographic", "-kernel", "evil; file.elf"})
+    probe :: jet_cli_flash_tool_from_facts(flash_test_facts(MIRTargetProgrammerAdapter.ProbeRs))
+    assert_eq(jet_cli_flash_tool_argv(probe, "firmware.elf") ?? panic("argv"), [String]{"download", "--chip", "chip", "--probe", "iface", "--speed", "1000", "--connect-under-reset", "firmware.elf"})
+    open :: jet_cli_flash_tool_from_facts(flash_test_facts(MIRTargetProgrammerAdapter.OpenOcd))
+    assert_eq(jet_cli_flash_tool_argv(open, "firmware.elf") ?? panic("argv"), [String]{"-f", "iface", "-f", "board.cfg", "-c", "adapter speed 1000", "-c", "program firmware.elf verify reset exit"})
+    facts := flash_test_facts(MIRTargetProgrammerAdapter.ProbeRs)
+    facts.interface = None
+    facts.speed_khz = None
+    facts.reset = false
+    assert_eq(jet_cli_flash_tool_argv(jet_cli_flash_tool_from_facts(facts), "a") ?? panic("argv"), [String]{"download", "--chip", "chip", "a"})
+    facts.adapter = MIRTargetProgrammerAdapter.OpenOcd
+    facts.config = [String]{"board.cfg"}
+    assert_eq(jet_cli_flash_tool_argv(jet_cli_flash_tool_from_facts(facts), "a") ?? panic("argv"), [String]{"-f", "board.cfg", "-c", "program a verify exit"})
+    facts.interface = Val("iface")
+    facts.config = [String]{}
+    assert_eq(jet_cli_flash_tool_argv(jet_cli_flash_tool_from_facts(facts), "a") ?? panic("argv"), [String]{"-f", "iface", "-c", "program a verify exit"})
+    _ :: jet_cli_flash_tool_argv(open, "evil;file") ?? {
+        assert_eq(err.message, "image filename `evil;file` cannot be passed to OpenOCD safely")
+        return
+    }
+    panic("unsafe OpenOCD image accepted")
+}
+#Test("Foundation programmer missing fact order and Unicode trim") {
+    facts := flash_test_facts(MIRTargetProgrammerAdapter.Emulator)
+    facts.executable = " "
+    facts.config = [String]{" "}
+    facts.machine = None
+    facts.cpu = None
+    assert_eq(jet_target_programmer_missing_fact(facts), Val("executable"))
+    facts.executable = "tool"
+    assert_eq(jet_target_programmer_missing_fact(facts), Val("config"))
+    facts.config = [String]{}
+    assert_eq(jet_target_programmer_missing_fact(facts), Val("machine"))
+    facts.machine = Val("machine")
+    assert_eq(jet_target_programmer_missing_fact(facts), Val("cpu"))
+    facts.cpu = Val("cpu")
+    assert(jet_target_programmer_missing_fact(facts) == None)
+    facts.adapter = MIRTargetProgrammerAdapter.ProbeRs
+    facts.chip = Val("\t")
+    assert_eq(jet_target_programmer_missing_fact(facts), Val("chip"))
+    facts.adapter = MIRTargetProgrammerAdapter.OpenOcd
+    facts.interface = None
+    assert_eq(jet_target_programmer_missing_fact(facts), Val("interface or config"))
+    facts.config = [String]{"config"}
+    assert(jet_target_programmer_missing_fact(facts) == None)
+}
+#Test("profile selects first usable matching declaration before reporting a missing fact") {
+    facts := flash_test_facts(MIRTargetProgrammerAdapter.ProbeRs)
+    facts.chip = None
+    invalid :: jet_cli_flash_tool_from_facts(facts)
+    valid :: jet_cli_flash_tool_from_facts(flash_test_facts(MIRTargetProgrammerAdapter.ProbeRs))
+    profile :: flash_test_profile([JetCLIFlashToolDeclaration]{invalid, valid})
+    assert_eq(jet_cli_flash_profile_select(profile, None) ?? panic("select"), 1)
+    assert_eq(jet_cli_flash_profile_select(profile, Val(JetCLIFlashAdapter.ProbeRs)) ?? panic("select"), 1)
+    _ :: jet_cli_flash_profile_select(flash_test_profile([JetCLIFlashToolDeclaration]{invalid}), None) ?? {
+        assert_eq(err.message, "target `board` `probe-rs` programmer is missing explicit `chip` fact")
+        return
+    }
+    panic("invalid programmer selected")
+}
+#Test("profile unavailable adapter and empty declarations are exact errors") {
+    profile :: flash_test_profile([JetCLIFlashToolDeclaration]{jet_cli_flash_tool_from_facts(flash_test_facts(MIRTargetProgrammerAdapter.ProbeRs))})
+    error := ""
+    _ :: jet_cli_flash_profile_select(profile, Val(JetCLIFlashAdapter.OpenOcd)) ?? {
+        error = ~err.message
+        0
+    }
+    assert_eq(error, "target `board` does not declare the `openocd` adapter (declared: probe-rs)")
+    _ :: jet_cli_flash_profile_select(flash_test_profile([JetCLIFlashToolDeclaration]{}), None) ?? {
+        error = ~err.message
+        0
+    }
+    assert_eq(error, "target `board` declares no usable programmer ()")
+    facts := flash_test_facts(MIRTargetProgrammerAdapter.OpenOcd)
+    facts.executable = " "
+    _ :: jet_cli_flash_tool_argv(jet_cli_flash_tool_from_facts(facts), "evil;") ?? {
+        error = ~err.message
+        [String]{}
+    }
+    assert_eq(error, "target programmer `openocd` is missing explicit `executable` fact")
+    machine := jet_target_machine_hosted("x86_64-unknown-linux-gnu", "test")
+    _ :: jet_cli_flash_profile_from_machine(machine) ?? {
+        error = ~err.message
+        profile
+    }
+    assert_eq(error, "target `hosted` has no owner-approved programmer facts; declare an adapter plus chip for probe-rs, interface/config for OpenOCD, or machine/cpu for an emulator")
+    machine.programmers = [MIRTargetProgrammerFacts]{flash_test_facts(MIRTargetProgrammerAdapter.ProbeRs)}
+    projected :: jet_cli_flash_profile_from_machine(machine) ?? panic("profile")
+    assert_eq(projected.target_identity, jet_target_provider_identity(machine))
+    assert_eq(projected.hardware_identity, mir_sha256_hex(jet_target_hardware_json(machine.hardware)))
+}
+#Test("OpenOCD filename allowlist is ASCII and excludes dot paths") {
+    good :: [String]{"a", "a.elf", "a-1_b.elf", ".hidden"}
+    bad :: [String]{"", ".", "..", "a b", "é.elf", "a/elf", "a\\elf", "a;exit", "{{a}}", "a\n"}
+    loop name in good -> assert(jet_cli_flash_safe_openocd_image_name(name))
+    loop name in bad -> assert(!jet_cli_flash_safe_openocd_image_name(name))
+}
+struct FlashTestParseError { args: [String], message: String }
+// #4381 PATH BEGIN: original args test retained; optional Core Path must have one nominal identity.
+#Test("flash bespoke args every branch and help short circuit") {
+    failures :: [FlashTestParseError]{
+        FlashTestParseError{args: [String]{"--target"}, message: "`--target` needs a value"},
+        FlashTestParseError{args: [String]{"--image="}, message: "`--image` needs a value"},
+        FlashTestParseError{args: [String]{"--audit", "--quiet"}, message: "`--audit` needs a value"},
+        FlashTestParseError{args: [String]{"--adapter="}, message: "`--adapter` needs a value"},
+        FlashTestParseError{args: [String]{"--adapter", "bad"}, message: "unknown flash adapter `bad` (use probe-rs, openocd, or emulator)"},
+        FlashTestParseError{args: [String]{"--json=true"}, message: "unexpected flash argument `--json=true`"},
+        FlashTestParseError{args: [String]{"--quiet=true"}, message: "unexpected flash argument `--quiet=true`"},
+        FlashTestParseError{args: [String]{"--help=true"}, message: "unexpected flash argument `--help=true`"},
+        FlashTestParseError{args: [String]{"image.elf"}, message: "unexpected flash argument `image.elf`"},
+    }
+    loop row in failures {
+        error := ""
+        _ :: jet_cli_flash_parse_args(row.args) ?? {
+            error = ~err.message
+            JetCLIFlashParse.Help
+        }
+        assert_eq(error, row.message)
+    }
+    help :: jet_cli_flash_parse_args([String]{"flash", "--json", "--quiet", "--help", "bad"}) ?? panic("parse")
+    assert(help == .Help)
+    bare_help :: jet_cli_flash_parse_args([String]{"help"}) ?? panic("parse")
+    assert(bare_help == .Help)
+    parsed :: jet_cli_flash_parse_args([String]{"flash", "--target", "first", "--target=é", "--image=-a=b", "--audit", "audit.json", "--adapter=emulator"}) ?? panic("parse")
+    if parsed == .Options(options) {
+        assert_eq(options.target, Val("é"))
+        // #4376: exact Core Path projection avoids external nominal owner-field lowering.
+        assert_eq(flash_paths.show(options.image ?? panic("image")), "-a=b")
+        assert_eq(flash_paths.show(options.audit ?? panic("audit")), "audit.json")
+        assert(options.adapter == .Val(.Emulator))
+    } else {
+        panic("expected options")
+    }
+    empty :: jet_cli_flash_parse_args([String]{}) ?? panic("parse")
+    if empty == .Options(options) {
+        assert(options.target == None)
+        assert(options.image == None)
+        assert(options.audit == None)
+        assert(options.adapter == None)
+    } else {
+        panic("expected options")
+    }
+    assert_eq(jet_cli_flash_canonical_args([String]{}), [String]{"flash"})
+    assert_eq(jet_cli_flash_canonical_args([String]{"flash", "help"}), [String]{"flash", "help"})
+    assert_eq(jet_cli_flash_canonical_args([String]{"--json"}), [String]{"flash", "--json"})
+    assert_eq(jet_cli_flash_help(), "jet flash --target <board.name> [--image <firmware.elf>] [--audit <target.json>] [--adapter <probe-rs|openocd|emulator>]")
+}
+// #4381 PATH END
+struct FlashTestAuditError { text: String, message: String }
+#Test("private raw audit scanner preserves tokens and rejects malformed top-level fields") {
+    rows :: [FlashTestAuditError]{
+        FlashTestAuditError{text: "[]", message: "top-level value is not an object"},
+        FlashTestAuditError{text: "{{1:2}}", message: "expected a JSON string"},
+        FlashTestAuditError{text: "{{\"\\u006eame\":\"a\"}}", message: "escaped object keys are not supported"},
+        FlashTestAuditError{text: "{{\"name\" \"a\"}}", message: "object key is not followed by `:`"},
+        FlashTestAuditError{text: "{{\"a\":1,\"a\":2}}", message: "duplicate top-level field `a`"},
+        FlashTestAuditError{text: "{{\"a\":1,}}", message: "object has a trailing comma"},
+        FlashTestAuditError{text: "{{\"a\":1 \"b\":2}}", message: "object field is not followed by `,` or `}}`"},
+        FlashTestAuditError{text: "{{}}x", message: "trailing bytes after target audit object"},
+        FlashTestAuditError{text: "{{\"a\":\"\\uX000\"}}", message: "malformed JSON unicode escape"},
+        FlashTestAuditError{text: "{{\"a\":\"\n\"}}", message: "JSON string contains a control character"},
+        FlashTestAuditError{text: "{{\"a\":\"x", message: "unterminated JSON string"},
+        FlashTestAuditError{text: "{{\"a\":", message: "missing JSON value"},
+        FlashTestAuditError{text: "{{\"a\":}}", message: "empty JSON value"},
+        FlashTestAuditError{text: "{{\"a\":[}}", message: "mismatched JSON delimiters"},
+        FlashTestAuditError{text: "{{\"a\":[1", message: "unterminated JSON value"},
+    }
+    loop row in rows {
+        error := ""
+        _ :: jet_cli_flash_parse_top_level_string_fields(row.text) ?? {
+            error = ~err.message
+            [String:String]{}
+        }
+        assert_eq(error, row.message)
+    }
+    suffix :: String.from_bytes([U8]{U8{13}, U8{10}}) ?? panic("whitespace")
+    tokens :: jet_cli_flash_parse_top_level_string_fields(" \t{{\"a\":\"é\\u000a\\q\",\"b\":[{{\"a\":\"[\\\"\"}}],\"c\":garbage}}{suffix}") ?? panic("scan")
+    assert_eq(tokens.get("a"), Val("é\\u000a\\q"))
+    assert_eq(tokens.get("b"), Val(""))
+    assert_eq(tokens.get("c"), Val(""))
+    control :: String.from_bytes([U8]{U8{1}}) ?? panic("control")
+    assert_eq(jet_cli_flash_json_string_token("é\n\"\\{control}"), "é\\n\\\"\\\\\\u0001")
+    invalid := JetCLIFlashTokenCursor{bytes: [U8]{U8{34}, U8{255}, U8{34}}, at: 0}
+    _ :: jet_cli_flash_parse_json_string_token(&invalid) ?? {
+        assert_eq(err.message, "JSON string is not UTF-8")
+        return
+    }
+    panic("invalid UTF-8 accepted")
+}
+fn flash_test_audit_fields(machine: MIRTargetMachine) -> [String:String] Never! {
+    [String:String]{"name": jet_cli_flash_json_string_token(machine.name), "triple": jet_cli_flash_json_string_token(machine.triple), "environment": jet_cli_flash_json_string_token(jet_target_environment_identity(machine)), "provider_identity": jet_cli_flash_json_string_token(jet_target_provider_identity(machine))}
+}
+#Test("audit identity exact escaped tokens and first present image digest precedence") {
+    machine :: jet_target_machine_hosted("x86_64-unknown-linux-gnu", "test")
+    keys :: [String]{"name", "triple", "environment", "provider_identity"}
+    loop key in keys {
+        fields := flash_test_audit_fields(machine)
+        fields[key] = "bad"
+        error := ""
+        if jet_cli_flash_verify_audit(fields, machine, "hash") == .Err(failure) -> error = ~failure.message
+        assert_eq(error, "target audit `{key}` does not match selected target `hosted`")
+        partial := [String:String]{}
+        loop prior in keys {
+            if prior == key -> break
+            partial[prior] = fields.get(prior) ?? panic("field")
+        }
+        if jet_cli_flash_verify_audit(partial, machine, "hash") == .Err(failure) -> error = ~failure.message
+        assert_eq(error, "target audit has no `{key}` identity field")
+    }
+    digest_keys :: [String]{"image_sha256", "artifact_sha256", "image_digest"}
+    loop key in digest_keys {
+        fields := flash_test_audit_fields(machine)
+        fields[key] = "hash"
+        jet_cli_flash_verify_audit(fields, machine, "hash") ?? panic("digest")
+        fields[key] = "sha256:hash"
+        jet_cli_flash_verify_audit(fields, machine, "hash") ?? panic("digest")
+        fields[key] = "bad"
+        error := ""
+        if jet_cli_flash_verify_audit(fields, machine, "hash") == .Err(failure) -> error = ~failure.message
+        assert_eq(error, "target audit `{key}` does not match the image digest")
+    }
+    fields := flash_test_audit_fields(machine)
+    jet_cli_flash_verify_audit(fields, machine, "hash") ?? panic("optional digest")
+    fields["image_sha256"] = "hash"
+    fields["artifact_sha256"] = "bad"
+    jet_cli_flash_verify_audit(fields, machine, "hash") ?? panic("first present digest wins")
+    fields["name"] = "\\u0068osted"
+    error := ""
+    if jet_cli_flash_verify_audit(fields, machine, "hash") == .Err(failure) -> error = ~failure.message
+    assert_eq(error, "target audit `name` does not match selected target `hosted`")
+}
+// #4376: original host fixture retained; trait/impl Core Path owner identities must agree after compiler fix.
+struct FlashTestFile {
+    metadata: JetCLIFlashMetadata
+    canonical: Path
+    text: String
+    inspect_error: JetCLIFlashError?
+    canonical_error: String?
+    metadata_error: String?
+    read_error: String?
+    hash_error: String?
+    non_utf8_name: Bool
+}
+struct FlashTestHost {
+    files: [String:FlashTestFile]
+    path: [Path]?
+    impl JetCLIFlashHost {
+    fn symlink_metadata(&self, path: Path) -> JetCLIFlashMetadata JetCLIFlashError! {
+        file :: self.files.get(path.raw) ?? return Err(jet_cli_flash_error("missing"))
+        if file.inspect_error == .Val(failure) -> return Err(~failure)
+        Ok(~file.metadata)
+    }
+    fn canonicalize(&self, path: Path) -> Path JetCLIFlashError! {
+        file :: self.files.get(path.raw) ?? return Err(jet_cli_flash_error("missing"))
+        if file.canonical_error == .Val(message) -> return Err(jet_cli_flash_error(~message))
+        Ok(~file.canonical)
+    }
+    fn metadata(&self, path: Path) -> JetCLIFlashMetadata JetCLIFlashError! {
+        file :: self.files.get(path.raw) ?? return Err(jet_cli_flash_error("missing"))
+        if file.metadata_error == .Val(message) -> return Err(jet_cli_flash_error(~message))
+        Ok(~file.metadata)
+    }
+    fn read_audit_text(&self, path: Path) -> String JetCLIFlashError! {
+        file :: self.files.get(path.raw) ?? return Err(jet_cli_flash_error("missing"))
+        if file.read_error == .Val(message) -> return Err(jet_cli_flash_error(~message))
+        Ok(~file.text)
+    }
+    fn sha256_file(&self, path: Path) -> String JetCLIFlashError! {
+        file :: self.files.get(path.raw) ?? return Err(jet_cli_flash_error("missing"))
+        if file.hash_error == .Val(message) -> return Err(jet_cli_flash_error(~message))
+        Ok(mir_sha256_hex(path.raw))
+    }
+    fn path_snapshot(&self) -> [Path]? JetCLIFlashError! { Ok(~self.path) }
+    fn utf8_filename(&self, path: Path) -> String? JetCLIFlashError! {
+        file :: self.files.get(path.raw) ?? return Ok(flash_test_no_text())
+        if file.non_utf8_name -> return Err(jet_cli_flash_non_utf8_error(2))
+        Ok(Val(flash_paths.name(path)))
+    }
+}
+}
+fn flash_test_file(path: String) -> FlashTestFile Never! {
+    FlashTestFile{metadata: JetCLIFlashMetadata{symlink: false, regular: true, bytes: 2}, canonical: flash_paths.of(path), text: "{{}}", inspect_error: None, canonical_error: None, metadata_error: None, read_error: None, hash_error: None, non_utf8_name: false}
+}
+// #4316: route the same generic host behavior through an ordinary typed test caller.
+// The original direct-call failing unit is retained in the CLI-36 scratch evidence.
+fn flash_test_regular_file(host: &FlashTestHost, path: Path, label: String) -> Path JetCLIFlashError! {
+    jet_cli_flash_regular_file(&host, path, label)
+}
+fn flash_test_resolve_audit(host: &FlashTestHost, image: Path, target: String, explicit: Path?) -> Path JetCLIFlashError! {
+    jet_cli_flash_resolve_audit(&host, image, target, explicit)
+}
+fn flash_test_read_audit(host: &FlashTestHost, path: Path) -> String JetCLIFlashError! {
+    jet_cli_flash_read_audit(&host, path)
+}
+fn flash_test_resolve_tool(host: &FlashTestHost, name: String) -> Path JetCLIFlashError! {
+    jet_cli_flash_resolve_tool(&host, name)
+}
+fn flash_test_from_machine(host: &FlashTestHost, machine: MIRTargetMachine, adapter: JetCLIFlashAdapter?) -> JetCLIFlashPlan JetCLIFlashError! {
+    jet_cli_flash_plan_from_machine<FlashTestHost>(&host, machine, flash_paths.of("/out/firmware.elf"), flash_test_no_path(), adapter)
+}
+fn flash_test_from_target(host: &FlashTestHost, target: String, image: Path) -> JetCLIFlashPlan JetCLIFlashError! {
+    jet_cli_flash_plan_from_target_and_image(&host, target, image, flash_test_no_path(), flash_test_adapter_none(), "test")
+}
+// #4376 HOST BEGIN: original host tests retained; Core Path MIR owner prevents lowering.
+#Test("host regular file preserves no-follow and canonicalize error order through typed caller") {
+    host := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
+    error := ""
+    _ :: flash_test_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
+        error = ~err.message
+        flash_paths.of("")
+    }
+    assert_eq(error, "cannot inspect flash image `image`: missing")
+    file := flash_test_file("/image")
+    file.metadata.symlink = true
+    file.canonical_error = Val("bad canonical")
+    host.files["image"] = ~file
+    _ :: flash_test_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
+        error = ~err.message
+        flash_paths.of("")
+    }
+    assert_eq(error, "flash image `image` is not a regular file")
+    file.metadata.symlink = false
+    file.metadata.regular = false
+    host.files["image"] = ~file
+    _ :: flash_test_regular_file(&host, flash_paths.of("image"), "target audit") ?? {
+        error = ~err.message
+        flash_paths.of("")
+    }
+    assert_eq(error, "target audit `image` is not a regular file")
+    file.metadata.regular = true
+    host.files["image"] = ~file
+    _ :: flash_test_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
+        error = ~err.message
+        flash_paths.of("")
+    }
+    assert_eq(error, "cannot canonicalize flash image `image`: bad canonical")
+    file.canonical_error = None
+    host.files["image"] = ~file
+    assert_eq(flash_paths.show(flash_test_regular_file(&host, flash_paths.of("image"), "flash image") ?? panic("regular")), "/image")
+}
+fn flash_test_no_text() -> String? Never! { None }
+fn flash_test_no_path() -> Path? Never! { None }
+#Test("audit sidecar candidates explicit selection Unicode sanitization and duplicate names through typed caller") {
+    host := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
+    error := ""
+    _ :: flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
+        error = ~err.message
+        flash_paths.of("")
+    }
+    assert_eq(error, "no target audit sidecar found beside `/out/image.elf`; pass `--audit <target.json>`")
+    host.files["/out/image.target.json"] = flash_test_file("/out/image.target.json")
+    assert_eq(flash_paths.show(flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? panic("audit")), "/out/image.target.json")
+    assert_eq(flash_paths.show(flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "image", flash_test_no_path()) ?? panic("same candidate")), "/out/image.target.json")
+    host.files["/out/board.target.json"] = flash_test_file("/out/board.target.json")
+    _ :: flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
+        error = ~err.message
+        flash_paths.of("")
+    }
+    assert_eq(error, "multiple target audit sidecars found beside `/out/image.elf`; pass one with `--audit`")
+    assert_eq(flash_paths.show(flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", Val(flash_paths.of("/out/board.target.json"))) ?? panic("explicit")), "/out/board.target.json")
+    file := flash_test_file("/out/board.target.json")
+    file.metadata.symlink = true
+    host.files["/out/board.target.json"] = file
+    _ :: flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
+        error = ~err.message
+        flash_paths.of("")
+    }
+    assert_eq(error, "target audit `/out/board.target.json` is not a regular file")
+    host.files = [String:FlashTestFile]{"/out/a__.target.json": flash_test_file("/out/a__.target.json")}
+    assert_eq(flash_paths.show(flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "a.é", flash_test_no_path()) ?? panic("sanitize")), "/out/a__.target.json")
+}
+// #4376: retain original audit-read assertions while Core Path projection works around owner lowering.
+#Test("audit metadata cap precedes read and accepts the exact one MiB bound") {
+    host := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
+    file := flash_test_file("audit")
+    file.metadata.bytes = 1048577
+    file.read_error = Val("read failed")
+    host.files["audit"] = ~file
+    error := ""
+    _ :: flash_test_read_audit(&host, flash_paths.of("audit")) ?? {
+        error = ~err.message
+        ""
+    }
+    assert_eq(error, "target audit `audit` exceeds the 1048576-byte limit")
+    file.metadata.bytes = 1048576
+    host.files["audit"] = ~file
+    _ :: flash_test_read_audit(&host, flash_paths.of("audit")) ?? {
+        error = ~err.message
+        ""
+    }
+    assert_eq(error, "cannot read target audit `audit`: read failed")
+    file.read_error = None
+    host.files["audit"] = ~file
+    assert_eq(flash_test_read_audit(&host, flash_paths.of("audit")) ?? panic("read"), "{{}}")
+    file.metadata_error = Val("stat failed")
+    host.files["audit"] = file
+    _ :: flash_test_read_audit(&host, flash_paths.of("audit")) ?? {
+        error = ~err.message
+        ""
+    }
+    assert_eq(error, "cannot inspect target audit `audit`: stat failed")
+}
+#Test("declared tool captured PATH skips errors symlinks directories and stops at first canonicalization") {
+    host := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
+    names :: [String]{"", "a/b", "a\\b"}
+    loop name in names {
+        error := ""
+        _ :: flash_test_resolve_tool(&host, name) ?? {
+            error = ~err.message
+            flash_paths.of("")
+        }
+        assert_eq(error, "declared flash tool `{name}` is not a bare executable")
+    }
+    error := ""
+    _ :: flash_test_resolve_tool(&host, "tool") ?? {
+        error = ~err.message
+        flash_paths.of("")
+    }
+    assert_eq(error, "cannot resolve declared flash tool without a PATH snapshot")
+    host.path = Val([Path]{flash_paths.of("/missing"), flash_paths.of("/sym"), flash_paths.of("/dir"), flash_paths.of("/first"), flash_paths.of("/second")})
+    file := flash_test_file("/sym/tool")
+    file.metadata.symlink = true
+    host.files["/sym/tool"] = ~file
+    file.metadata.symlink = false
+    file.metadata.regular = false
+    host.files["/dir/tool"] = ~file
+    file.metadata.regular = true
+    file.canonical_error = Val("denied")
+    host.files["/first/tool"] = ~file
+    host.files["/second/tool"] = flash_test_file("/real/tool")
+    _ :: flash_test_resolve_tool(&host, "tool") ?? {
+        error = ~err.message
+        flash_paths.of("")
+    }
+    assert_eq(error, "cannot canonicalize declared flash tool `tool`: denied")
+    file.canonical_error = None
+    file.canonical = flash_paths.of("/real/first")
+    host.files["/first/tool"] = ~file
+    assert_eq(flash_paths.show(flash_test_resolve_tool(&host, "tool") ?? panic("tool")), "/real/first")
+    host.path = Val([Path]{})
+    _ :: flash_test_resolve_tool(&host, "tool") ?? {
+        error = ~err.message
+        flash_paths.of("")
+    }
+    assert_eq(error, "declared flash tool `tool` was not found in the captured PATH")
+}
+// #4376 HOST END
+#Test("capture exact boundary truncation marker and Rust UTF-8 lossy sequences") {
+    bytes := [U8]{}
+    loop _ in 0..<65536 -> &bytes.push(U8{97})
+    capture :: jet_cli_flash_bound_capture(bytes)
+    assert(!capture.truncated)
+    assert_eq(capture.bytes, bytes)
+    &bytes.push(U8{98})
+    bounded :: jet_cli_flash_bound_capture(bytes)
+    assert(bounded.truncated)
+    assert_eq(bounded.bytes.len(), 65536)
+    assert_eq(String.from_bytes(~bounded.bytes[65516..<65536]) ?? panic("marker"), "\n<output truncated>\n")
+    assert_eq(jet_cli_flash_utf8_lossy([U8]{U8{226}, U8{130}}), "�")
+    assert_eq(jet_cli_flash_utf8_lossy([U8]{U8{226}, U8{130}, U8{97}}), "�a")
+    assert_eq(jet_cli_flash_utf8_lossy([U8]{U8{237}, U8{160}, U8{128}}), "���")
+    assert_eq(jet_cli_flash_utf8_lossy("é🙂".bytes()), "é🙂")
+}
+// #4381 PATH BEGIN: original receipt/plan tests retained; Core Path nominal identity must unify.
+#Test("receipt status does not override explicit execution failure and sections use shared codec") {
+    plan :: flash_test_plan()
+    failed :: jet_cli_flash_execution_failed("launch", "denied", "sandbox", "strict")
+    receipt :: jet_cli_flash_receipt_from_execution(plan, ^failed)
+    assert(!receipt.success)
+    assert(receipt.status == None)
+    section :: jet_cli_flash_receipt_section(receipt) ?? panic("section")
+    assert_eq(section.name, "flash")
+    assert_eq(section.type_name, "FlashReceipt")
+    assert_eq(section.bytes, canonical_json_bytes(jet_cli_flash_receipt_to_json(receipt)))
+    execution :: JetCLIFlashExecution{status: Val(9), stdout: "ok\n".bytes(), stderr: [U8]{}, mechanism: "sandbox", policy: "strict", failure: None}
+    success :: jet_cli_flash_receipt_from_execution(plan, ^execution)
+    assert(success.success)
+    assert_eq(success.status, Val(9))
+    assert(!success.stdout_truncated)
+    status :: jet_cli_flash_plan_value(plan)
+    if status == .Object(fields) {
+        cell :: fields.get("image_bytes") ?? panic("image bytes")
+        if cell == .Int(value) -> assert_eq(value, 17) else -> panic("integer status")
+    } else {
+        panic("plan status")
+    }
+}
+
+// Rust-computed oracles: CLI-36/oracle.py extracts CmdFlash.rs:378-436,
+// 478-619,1233-1242,1338-1377 verbatim plus PerformanceBudget.rs:1-271
+// and the real SHA256.rs, compiled with rustc (no Cargo). Fixture above is
+// synthetic: tests/target_machines.rs contains no Flash receipt/plan cases.
+#Test("flash plan identity and success failure receipt digests match Rust") {
+    plan :: flash_test_plan()
+    assert_eq(mir_sha256_hex(jet_cli_flash_plan_identity(plan)), "1459f83d21b5bc686b503b5aceafeb165fdbd0acd4a5859ae399d59647ae5128")
+    success :: jet_cli_flash_receipt_from_execution(plan, JetCLIFlashExecution{status: Val(9), stdout: "ok\n".bytes(), stderr: [U8]{}, mechanism: "sandbox", policy: "strict", failure: None})
+    assert_eq(success.result_identity, "flash-result-v1:8b4aeaea61404f9724ab07728e887e892be5c4d89ebfa8f2d00014e77ae9bdd1")
+    assert_eq(canonical_json_sha256(jet_cli_flash_receipt_to_json(success)), "977767e9d16000a35172ec5319b1b5458c2f294c869e0b22c08c122fdd56d719")
+    failed :: jet_cli_flash_receipt_from_execution(plan, jet_cli_flash_execution_failed("launch", "denied", "sandbox", "strict"))
+    assert_eq(failed.result_identity, "flash-result-v1:add820c2a6679fbe6e902c6dce12e17176c74ce99b888ea6bb64bd284aa094c3")
+    assert_eq(canonical_json_sha256(jet_cli_flash_receipt_to_json(failed)), "e1748d0de32851824b7ee9bf7f271bedc48adb871edf31e4eb82a7463f93e1d1")
+}
+// #4381 PATH END
+fn flash_test_adapter_none() -> JetCLIFlashAdapter? Never! { None }
+fn flash_test_build(host: &FlashTestHost, machine: MIRTargetMachine) -> JetCLIFlashPlan JetCLIFlashError! {
+    jet_cli_flash_plan_from_machine<FlashTestHost>(&host, machine, flash_paths.of("/out/firmware.elf"), flash_test_no_path(), flash_test_adapter_none())
+}
+fn flash_test_build_error(host: &FlashTestHost, machine: MIRTargetMachine) -> String Never! {
+    if flash_test_build(&host, machine) == {
+        .Ok(_) -> panic("expected plan refusal")
+        .Err(failure) -> ~failure.message
+    }
+}
+fn flash_test_machine() -> MIRTargetMachine Never! {
+    machine := jet_target_machine_board_sensor_v1("test")
+    machine.programmers = [MIRTargetProgrammerFacts]{flash_test_facts(MIRTargetProgrammerAdapter.ProbeRs)}
+    machine
+}
+fn flash_test_host_for_machine(machine: MIRTargetMachine) -> FlashTestHost Never! {
+    audit := flash_test_file("/out/firmware.target.json")
+    digest :: mir_sha256_hex("/out/firmware.elf")
+    audit.text = "{{\"name\":{jet_target_json_quote(machine.name)},\"triple\":{jet_target_json_quote(machine.triple)},\"environment\":{jet_target_json_quote(jet_target_environment_identity(machine))},\"provider_identity\":{jet_target_json_quote(jet_target_provider_identity(machine))},\"image_sha256\":\"{digest}\"}}"
+    FlashTestHost{files: [String:FlashTestFile]{"/out/firmware.elf": flash_test_file("/out/firmware.elf"), "/out/firmware.target.json": audit, "/bin/tool": flash_test_file("/bin/tool")}, path: Val([Path]{flash_paths.of("/bin")})}
+}
+// #4316 PLAN BEGIN: original plan tests; full proof owed after generic target lowering is fixed.
+#Test("flash builder hosted and canonical validation precede filesystem effects") {
+    empty := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
+    hosted :: jet_target_machine_hosted("x86_64-unknown-linux-gnu", "test")
+    assert_eq(flash_test_build_error(&empty, hosted), "target `hosted` is hosted; flashing requires a no-OS board or emulator profile")
+    machine := flash_test_machine()
+    machine.triple = ""
+    validation :: jet_target_machine_validate(machine, jet_target_machine_use_default())
+    assert(!validation.is_empty())
+    assert_eq(flash_test_build_error(&empty, machine), "target `board.sensor_v1` failed canonical profile validation: {jet_target_machine_errors_debug(validation)}")
+    machine = flash_test_machine()
+    machine.memory[0].kind = MIRMemoryKind.Reserved
+    validation_no_flash :: jet_target_machine_validate(machine, jet_target_machine_use_default())
+    // No-flash branch in FlashPlan is defensive: canonical validation reports
+    // MissingMemoryKind(Flash) first, so it cannot be reached with real facts.
+    assert_eq(flash_test_build_error(&empty, machine), "target `board.sensor_v1` failed canonical profile validation: {jet_target_machine_errors_debug(validation_no_flash)}")
+}
+#Test("flash builder immutable image metadata size hash and UTF-8 filename order") {
+    machine :: flash_test_machine()
+    host := flash_test_host_for_machine(machine)
+    image := flash_test_file("/out/firmware.elf")
+    image.metadata_error = Val("stat failed")
+    image.metadata.bytes = 4194305
+    image.hash_error = Val("hash failed")
+    image.non_utf8_name = true
+    host.files["/out/firmware.elf"] = ~image
+    assert_eq(flash_test_build_error(&host, machine), "cannot inspect flash image `/out/firmware.elf`: stat failed")
+    image.metadata_error = None
+    host.files["/out/firmware.elf"] = ~image
+    assert_eq(flash_test_build_error(&host, machine), "flash image `/out/firmware.elf` is 4194305 bytes but target `board.sensor_v1` declares only 4194304 flash bytes")
+    image.metadata.bytes = 4194304
+    host.files["/out/firmware.elf"] = ~image
+    assert_eq(flash_test_build_error(&host, machine), "cannot hash flash image `/out/firmware.elf`: hash failed")
+    image.hash_error = None
+    host.files["/out/firmware.elf"] = ~image
+    assert_eq(flash_test_build_error(&host, machine), "flash path is not UTF-8 at byte 2")
+    image.non_utf8_name = false
+    host.files["/out/firmware.elf"] = ~image
+    plan :: flash_test_build(&host, machine) ?? panic("plan")
+    assert_eq(plan.image_bytes, 4194304)
+    assert_eq(plan.image_sha256, mir_sha256_hex("/out/firmware.elf"))
+    assert_eq(plan.tool_identity, mir_sha256_hex("/bin/tool"))
+    assert_eq(plan.argv, [String]{"tool", "download", "--chip", "chip", "--probe", "iface", "--speed", "1000", "--connect-under-reset", "firmware.elf"})
+    assert_eq(plan.audit_sha256, mir_sha256_hex((host.files.get("/out/firmware.target.json") ?? panic("audit")).text))
+}
+#Test("flash builder audit profile argv and tool identity error ordering") {
+    machine := flash_test_machine()
+    host := flash_test_host_for_machine(machine)
+    audit := host.files.get("/out/firmware.target.json") ?? panic("audit")
+    audit.text = "[]"
+    host.files["/out/firmware.target.json"] = ~audit
+    assert_eq(flash_test_build_error(&host, machine), "target audit `/out/firmware.target.json` is malformed: top-level value is not an object")
+    audit.text = "{{}}"
+    host.files["/out/firmware.target.json"] = ~audit
+    assert_eq(flash_test_build_error(&host, machine), "target audit has no `name` identity field")
+    machine.programmers = [MIRTargetProgrammerFacts]{}
+    host = flash_test_host_for_machine(machine)
+    assert_eq(flash_test_build_error(&host, machine), "target `board.sensor_v1` has no owner-approved programmer facts; declare an adapter plus chip for probe-rs, interface/config for OpenOCD, or machine/cpu for an emulator")
+    facts := flash_test_facts(MIRTargetProgrammerAdapter.ProbeRs)
+    facts.chip = None
+    machine.programmers = [MIRTargetProgrammerFacts]{facts}
+    host = flash_test_host_for_machine(machine)
+    assert_eq(flash_test_build_error(&host, machine), "target `board.sensor_v1` `probe-rs` programmer is missing explicit `chip` fact")
+    machine = flash_test_machine()
+    host = flash_test_host_for_machine(machine)
+    tool := flash_test_file("/bin/tool")
+    tool.hash_error = Val("hash failed")
+    host.files["/bin/tool"] = tool
+    assert_eq(flash_test_build_error(&host, machine), "cannot hash declared flash tool `/bin/tool`: hash failed")
+    error := ""
+    _ :: flash_test_from_machine(&host, machine, Val(JetCLIFlashAdapter.OpenOcd)) ?? {
+        error = ~err.message
+        flash_test_plan()
+    }
+    assert_eq(error, "target `board.sensor_v1` does not declare the `openocd` adapter (declared: probe-rs)")
+}
+#Test("flash target aliases canonical default image and unknown lookup") {
+    assert_eq(flash_paths.show(jet_cli_flash_default_image("sensor", "test")), ".jet/target/board.sensor_v1/firmware.elf")
+    assert_eq(flash_paths.show(jet_cli_flash_default_image("unknown", "test")), ".jet/target/unknown/firmware.elf")
+    host := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
+    error := ""
+    _ :: flash_test_from_target(&host, "unknown", flash_paths.of("image")) ?? {
+        error = ~err.message
+        flash_test_plan()
+    }
+    assert_eq(error, "unknown target machine `unknown`")
+    machine :: flash_test_machine()
+    host = flash_test_host_for_machine(machine)
+    // Real selected sensor profile has no programmer facts, unlike fixture above.
+    selected :: jet_driver_target_machine_by_name("sensor", "test") ?? panic("target")
+    host = flash_test_host_for_machine(selected)
+    _ :: flash_test_from_target(&host, "sensor", flash_paths.of("/out/firmware.elf")) ?? {
+        error = ~err.message
+        flash_test_plan()
+    }
+    assert_eq(error, "target `board.sensor_v1` has no owner-approved programmer facts; declare an adapter plus chip for probe-rs, interface/config for OpenOCD, or machine/cpu for an emulator")
+}
+// #4316 PLAN END
+#Test("raw audit scanner Rust ASCII whitespace excludes vertical tab") {
+    form_feed :: String.from_bytes([U8]{U8{12}}) ?? panic("form feed")
+    fields :: jet_cli_flash_parse_top_level_string_fields("{form_feed}{{}}{form_feed}") ?? panic("ASCII whitespace")
+    assert(fields.is_empty())
+    vertical_tab :: String.from_bytes([U8]{U8{11}}) ?? panic("vertical tab")
+    error := ""
+    _ :: jet_cli_flash_parse_top_level_string_fields("{vertical_tab}{{}}") ?? {
+        error = ~err.message
+        [String:String]{}
+    }
+    assert_eq(error, "top-level value is not an object")
+}
+// #4316 PLAN BEGIN: original plan tests; full proof owed after generic target lowering is fixed.
+#Test("flash builder uses largest flash region not sum and refuses unsafe OpenOCD before PATH") {
+    machine := flash_test_machine()
+    &machine.memory.push(jet_target_memory_region_new("flash2", 0x10000000, MIRByteSize{bytes: 8388608}, .Flash, .Rx))
+    host := flash_test_host_for_machine(machine)
+    image := flash_test_file("/out/firmware.elf")
+    image.metadata.bytes = 8388608
+    host.files["/out/firmware.elf"] = ~image
+    plan :: flash_test_build(&host, machine) ?? panic("largest capacity")
+    assert_eq(plan.image_bytes, 8388608)
+    image.metadata.bytes = 8388609
+    host.files["/out/firmware.elf"] = ~image
+    assert_eq(flash_test_build_error(&host, machine), "flash image `/out/firmware.elf` is 8388609 bytes but target `board.sensor_v1` declares only 8388608 flash bytes")
+    machine.programmers = [MIRTargetProgrammerFacts]{flash_test_facts(MIRTargetProgrammerAdapter.OpenOcd)}
+    host = flash_test_host_for_machine(machine)
+    unsafe_image :: "/out/evil;file.elf"
+    image = flash_test_file(unsafe_image)
+    host.files["/out/firmware.elf"] = ~image
+    host.files[unsafe_image] = ~image
+    audit := flash_test_file("/out/evil;file.target.json")
+    audit.text = "{{\"name\":{jet_target_json_quote(machine.name)},\"triple\":{jet_target_json_quote(machine.triple)},\"environment\":{jet_target_json_quote(jet_target_environment_identity(machine))},\"provider_identity\":{jet_target_json_quote(jet_target_provider_identity(machine))}}}"
+    host.files["/out/evil;file.target.json"] = audit
+    host.path = None
+    assert_eq(flash_test_build_error(&host, machine), "image filename `evil;file.elf` cannot be passed to OpenOCD safely")
+    facts := flash_test_facts(MIRTargetProgrammerAdapter.ProbeRs)
+    facts.executable = "a/b"
+    machine.programmers = [MIRTargetProgrammerFacts]{facts}
+    host = flash_test_host_for_machine(machine)
+    host.path = None
+    assert_eq(flash_test_build_error(&host, machine), "declared flash tool `a/b` is not a bare executable")
+}
+// #4316 PLAN END
+// #4381 PATH BEGIN: original receipt bounds test retained; full proof owed after Path identity fix.
+#Test("receipt bounds both streams and hashes lossy text including the truncation marker") {
+    output := [U8]{}
+    loop _ in 0..<65537 -> &output.push(U8{255})
+    execution :: JetCLIFlashExecution{status: Val(0), stdout: ~output, stderr: ~output, mechanism: "sandbox", policy: "strict", failure: None}
+    receipt :: jet_cli_flash_receipt_from_execution(flash_test_plan(), ^execution)
+    assert(receipt.stdout_truncated)
+    assert(receipt.stderr_truncated)
+    assert_eq(receipt.stdout.len(), 65536)
+    assert_eq(receipt.stderr.len(), 65536)
+    assert_eq(receipt.result_identity, "flash-result-v1:{canonical_json_sha256(jet_cli_flash_receipt_result_json(receipt))}")
+    if jet_cli_flash_receipt_result_json(receipt) == .Object(fields) {
+        loop field in fields {
+            if field.key == "stdout" {
+                if field.value == .String(text) {
+                    assert(text.ends_with("\n<output truncated>\n"))
+                    assert(text.starts_with("�"))
+                } else {
+                    panic("stdout is text")
+                }
+            }
+        }
+    } else {
+        panic("result is object")
+    }
+}
+// #4381 PATH END
+// #4376 HOST BEGIN: original host refusal test retained; full proof owed after owner lowering fix.
+// #4378: Core raw OS-byte addresses remain gated. The scripted native seam
+// refuses them with exact byte provenance; policy never converts/join lossy text.
+#Test("UTF-8-only flash seam preserves nonUTF byte-position refusal without skipping it") {
+    raw :: [U8]{U8{97}, U8{47}, U8{255}, U8{98}}
+    assert(String.from_bytes(raw) == .Err(_))
+    host := FlashTestHost{files: [String:FlashTestFile]{}, path: Val([Path]{flash_paths.of("/bin")})}
+    file := flash_test_file("/bin/tool")
+    file.inspect_error = Val(jet_cli_flash_non_utf8_error(2))
+    host.files["/bin/tool"] = ~file
+    if flash_test_resolve_tool(&host, "tool") == {
+        .Ok(_) -> panic("raw native address was skipped or accepted")
+        .Err(failure) -> {
+            assert_eq(failure.byte_offset, Val(2))
+            assert_eq(failure.message, "flash path is not UTF-8 at byte 2")
+        }
+    }
+    host.files["image"] = ~file
+    if flash_test_regular_file(&host, flash_paths.of("image"), "flash image") == {
+        .Ok(_) -> panic("raw native address was accepted")
+        .Err(failure) -> {
+            assert_eq(failure.byte_offset, Val(2))
+            assert_eq(failure.message, "flash path is not UTF-8 at byte 2")
+        }
+    }
+    host.files["/out/image.target.json"] = file
+    if flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) == {
+        .Ok(_) -> panic("raw native sidecar was skipped or accepted")
+        .Err(failure) -> {
+            assert_eq(failure.byte_offset, Val(2))
+            assert_eq(failure.message, "flash path is not UTF-8 at byte 2")
+        }
+    }
+}
+// #4376 HOST END
+// #4376: original direct host tests below also require the Core Path owner fix.
+// #4316 BEGIN: original direct generic-call regressions, retained until lowering is repaired.
+#Test("host regular file preserves no-follow and canonicalize error order") {
+    host := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
+    error := ""
+    _ :: jet_cli_flash_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
+        error = ~err.message
+        flash_paths.of("")
+    }
+    assert_eq(error, "cannot inspect flash image `image`: missing")
+    file := flash_test_file("/image")
+    file.metadata.symlink = true
+    file.canonical_error = Val("bad canonical")
+    host.files["image"] = ~file
+    _ :: jet_cli_flash_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
+        error = ~err.message
+        flash_paths.of("")
+    }
+    assert_eq(error, "flash image `image` is not a regular file")
+    file.metadata.symlink = false
+    file.metadata.regular = false
+    host.files["image"] = ~file
+    _ :: jet_cli_flash_regular_file(&host, flash_paths.of("image"), "target audit") ?? {
+        error = ~err.message
+        flash_paths.of("")
+    }
+    assert_eq(error, "target audit `image` is not a regular file")
+    file.metadata.regular = true
+    host.files["image"] = ~file
+    _ :: jet_cli_flash_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
+        error = ~err.message
+        flash_paths.of("")
+    }
+    assert_eq(error, "cannot canonicalize flash image `image`: bad canonical")
+    file.canonical_error = None
+    host.files["image"] = ~file
+    assert_eq(flash_paths.show(jet_cli_flash_regular_file(&host, flash_paths.of("image"), "flash image") ?? panic("regular")), "/image")
+}
+#Test("audit sidecar candidates explicit selection Unicode sanitization and duplicate names") {
+    host := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
+    error := ""
+    _ :: jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
+        error = ~err.message
+        flash_paths.of("")
+    }
+    assert_eq(error, "no target audit sidecar found beside `/out/image.elf`; pass `--audit <target.json>`")
+    host.files["/out/image.target.json"] = flash_test_file("/out/image.target.json")
+    assert_eq(flash_paths.show(jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? panic("audit")), "/out/image.target.json")
+    assert_eq(flash_paths.show(jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "image", flash_test_no_path()) ?? panic("same candidate")), "/out/image.target.json")
+    host.files["/out/board.target.json"] = flash_test_file("/out/board.target.json")
+    _ :: jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
+        error = ~err.message
+        flash_paths.of("")
+    }
+    assert_eq(error, "multiple target audit sidecars found beside `/out/image.elf`; pass one with `--audit`")
+    assert_eq(flash_paths.show(jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", Val(flash_paths.of("/out/board.target.json"))) ?? panic("explicit")), "/out/board.target.json")
+    file := flash_test_file("/out/board.target.json")
+    file.metadata.symlink = true
+    host.files["/out/board.target.json"] = file
+    _ :: jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
+        error = ~err.message
+        flash_paths.of("")
+    }
+    assert_eq(error, "target audit `/out/board.target.json` is not a regular file")
+    host.files = [String:FlashTestFile]{"/out/a__.target.json": flash_test_file("/out/a__.target.json")}
+    assert_eq(flash_paths.show(jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "a.é", flash_test_no_path()) ?? panic("sanitize")), "/out/a__.target.json")
+}
+// #4316 END

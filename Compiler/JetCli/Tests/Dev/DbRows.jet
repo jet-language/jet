@@ -1,0 +1,280 @@
+// Behavioral row/codecs contracts from Source/CmdDb.rs (no inline Rust tests).
+fn db_rows_test_parse(text: String) -> DataTree Never! {
+    db_rows_json.parse_allow_duplicates_with_limits(text, jet_cli_db_rows_limits(text.bytes().len())) ?? panic("fixture JSON: {err.reason}")
+}
+fn db_rows_test_load(text: String, max_rows: Int{100}) -> JetCLIDBLoadedSource Never! {
+    jet_cli_db_normalize_json_source("items", "fixture.json", db_rows_test_parse(text), text.bytes().len(), max_rows) ?? panic("normalize: {err.message}")
+}
+fn db_rows_test_error(error: JetCLIDBError, code: String, operation: String, path: String, message: String, hint: String) {
+    assert_eq(error.code, code)
+    assert_eq(error.operation, operation)
+    assert_eq(error.source, path)
+    assert_eq(error.message, message)
+    assert_eq(error.hint, hint)
+}
+fn db_rows_test_column(name: String, kind: JetCLIDBColumnKind, nullable: Bool{false}) -> JetCLIDBColumn Never! {
+    JetCLIDBColumn{name: name, kind: kind, nullable: nullable}
+}
+fn db_rows_test_csv_error(text: String, max_rows: Int{100}) -> JetCLIDBError Never! {
+    if jet_cli_db_load_csv_source("items", "fixture.csv", text, max_rows) == { .Err(e) -> e; .Ok(_) -> panic("bad CSV accepted") }
+}
+fn db_rows_test_jsonl_error(text: String, max_rows: Int{100}) -> JetCLIDBError Never! {
+    if jet_cli_db_load_jsonl_source("items", "fixture.jsonl", text, max_rows) == { .Err(e) -> e; .Ok(_) -> panic("bad JSONL accepted") }
+}
+fn db_rows_test_normalize_error(value: DataTree, max_rows: Int{100}) -> JetCLIDBError Never! {
+    if jet_cli_db_normalize_json_source("items", "fixture.json", value, 0, max_rows) == { .Err(e) -> e; .Ok(_) -> panic("bad rows accepted") }
+}
+fn db_rows_test_cr() -> String Never! { String.from_bytes([U8]{U8{13}}) ?? panic("CR is UTF-8") }
+
+#Test("DB CSV preserves text cells sorts columns and counts input bytes") {
+    text :: "z,a\n10,é\ntrue,\"\"\n"
+    loaded :: jet_cli_db_load_csv_source("items", "fixture.csv", text, 2) ?? panic("CSV")
+    assert_eq(loaded.name, "items")
+    assert_eq(loaded.path, "fixture.csv")
+    assert_eq(loaded.rows, 2)
+    assert_eq(loaded.input_bytes, text.bytes().len())
+    assert_eq(loaded.columns[0].name, "a")
+    assert(loaded.columns[0].kind == JetCLIDBColumnKind.String)
+    assert(!loaded.columns[0].nullable)
+    assert_eq(loaded.json, "[{{\"a\":\"é\",\"z\":\"10\"}},{{\"a\":\"\",\"z\":\"true\"}}]")
+    assert_eq((jet_cli_db_load_csv_source("items", "fixture.csv", "z,a\n", 0) ?? panic("header")).json, "[]")
+    assert_eq((jet_cli_db_load_csv_source("items", "fixture.csv", "a\nx", 1) ?? panic("EOF")).rows, 1)
+}
+
+#Test("DB CSV header failures retain every source diagnostic field") {
+    db_rows_test_error(db_rows_test_csv_error("\n,\n"), "E2701", "source", "fixture.csv", "CSV source has no header row", "put one non-empty column name on the first CSV record")
+    db_rows_test_error(db_rows_test_csv_error("a,a\nx,y"), "E2701", "source", "fixture.csv", "CSV header has an invalid or duplicate column `a`", "use unique ASCII identifier column names")
+    db_rows_test_error(db_rows_test_csv_error("a,9bad\nx,y"), "E2701", "source", "fixture.csv", "CSV header has an invalid or duplicate column `9bad`", "use unique ASCII identifier column names")
+    db_rows_test_error(db_rows_test_csv_error("\"\"\n"), "E2701", "source", "fixture.csv", "CSV header has an invalid or duplicate column ``", "use unique ASCII identifier column names")
+    db_rows_test_error(db_rows_test_csv_error("é\nx"), "E2701", "source", "fixture.csv", "CSV header has an invalid or duplicate column `é`", "use unique ASCII identifier column names")
+}
+
+#Test("DB CSV ragged rows use logical data index plus two not physical line") {
+    db_rows_test_error(db_rows_test_csv_error("a,b\n\n\"x\ny\",z\nonly"), "E2701", "source", "fixture.csv", "CSV row 3 has 1 fields, expected 2", "make every row match the header width")
+    db_rows_test_error(db_rows_test_csv_error("a\nx,y"), "E2701", "source", "fixture.csv", "CSV row 2 has 2 fields, expected 1", "make every row match the header width")
+}
+
+#Test("DB CSV parser errors and bound precedence match push finish") {
+    db_rows_test_error(db_rows_test_csv_error("a\n\"open"), "E2701", "source", "fixture.csv", "E2701: CSV row 2, line 2, column 6 — quoted field ended before its closing quote", "correct the malformed or truncated CSV record")
+    db_rows_test_error(db_rows_test_csv_error("a\nx{db_rows_test_cr()}z"), "E2701", "source", "fixture.csv", "E2701: CSV row 2, line 2, column 2 — bare CR is not a record ending", "correct the malformed or truncated CSV record")
+    db_rows_test_error(db_rows_test_csv_error("a\né\"x"), "E2701", "source", "fixture.csv", "E2701: CSV row 2, line 2, column 2 — quote inside an unquoted field", "correct the malformed or truncated CSV record")
+    db_rows_test_error(db_rows_test_csv_error("a\n\"x\"!"), "E2701", "source", "fixture.csv", "E2701: CSV row 2, line 2, column 4 — only quote, comma, CRLF, LF, or EOF may follow a closing quote", "correct the malformed or truncated CSV record")
+    db_rows_test_error(db_rows_test_csv_error("a\nx\ny\n\"open", 1), "E2603", "source", "fixture.csv", "CSV source has more than the 1-row limit", "raise `--max-rows` explicitly or split the source")
+    db_rows_test_error(db_rows_test_csv_error("a\nx\ny", 1), "E2603", "source", "fixture.csv", "CSV source has more than the 1-row limit", "raise `--max-rows` explicitly or split the source")
+    assert_eq(db_rows_test_csv_error("a\nx\ny\"", 1).code, "E2701")
+    assert_eq(db_rows_test_csv_error("a,a\nx,y\nz,w", 1).code, "E2603")
+    assert_eq(db_rows_test_csv_error("a\nx", 0).message, "CSV source has more than the 0-row limit")
+}
+
+#Test("DB JSONL skips Unicode whitespace retains physical indices and CRLF semantics") {
+    text :: "\n　\n{{\"id\":1}}{db_rows_test_cr()}\n{{\"id\":2}}\n"
+    loaded :: jet_cli_db_load_jsonl_source("items", "fixture.jsonl", text, 2) ?? panic("JSONL")
+    assert_eq(loaded.json, "[{{\"id\":1}},{{\"id\":2}}]")
+    assert_eq(loaded.rows, 2)
+    assert_eq(loaded.input_bytes, text.bytes().len())
+    db_rows_test_error(db_rows_test_jsonl_error("\n{{\"id\":1}}\n{{\"id\":}}"), "E2701", "source", "fixture.jsonl", "invalid JSONL value on line 3: expected a JSON value", "repair the line or use a valid JSONL object")
+    db_rows_test_error(db_rows_test_jsonl_error("{{}}\nnot-json", 1), "E2603", "source", "fixture.jsonl", "JSONL source has more than the 1-row limit", "raise `--max-rows` explicitly or split the source")
+    db_rows_test_error(db_rows_test_jsonl_error("{{}}", 0), "E2603", "source", "fixture.jsonl", "JSONL source has more than the 0-row limit", "raise `--max-rows` explicitly or split the source")
+    assert_eq((jet_cli_db_load_jsonl_source("items", "fixture.jsonl", "\n ", 0) ?? panic("empty")).json, "[]")
+    db_rows_test_error(db_rows_test_jsonl_error("{{}}\n3"), "E2701", "source", "fixture.jsonl", "row 2 is not an object", "make every row an object with named columns")
+}
+
+#Test("DB JSONL duplicate keys keep last value at first position and depth is 64") {
+    loaded :: jet_cli_db_load_jsonl_source("items", "fixture.jsonl", "{{\"id\":1,\"id\":2}}", 1) ?? panic("duplicates")
+    assert_eq(loaded.json, "[{{\"id\":2}}]")
+    open := ""
+    close := ""
+    loop _ in 0..<63 {
+        open = "{open}["
+        close = "{close}]"
+    }
+    legal :: "{{\"nested\":{open}0{close}}}"
+    assert_eq((jet_cli_db_load_jsonl_source("items", "fixture.jsonl", legal, 1) ?? panic("depth64")).rows, 1)
+    too_deep :: "{{\"nested\":[{open}0{close}]}}"
+    assert_eq(db_rows_test_jsonl_error(too_deep).message, "invalid JSONL value on line 1: JSON value is nested too deeply")
+}
+
+#Test("DB normalization rejects roots row limits nonobjects and invalid names in order") {
+    db_rows_test_error(db_rows_test_normalize_error(DataTree.Null), "E2701", "source", "fixture.json", "source root must be an array of objects", "use `[ {{ \"column\": value }} ]` or convert the source to CSV/JSONL")
+    db_rows_test_error(db_rows_test_normalize_error(db_rows_test_parse("[1,2]"), 1), "E2603", "source", "fixture.json", "source has 2 rows, over the 1-row limit", "raise `--max-rows` explicitly or split the source")
+    db_rows_test_error(db_rows_test_normalize_error(db_rows_test_parse("[{{}},false]")), "E2701", "source", "fixture.json", "row 2 is not an object", "make every row an object with named columns")
+    db_rows_test_error(db_rows_test_normalize_error(db_rows_test_parse("[{{\"9bad\":1}}]")), "E2701", "source", "fixture.json", "row 1 has invalid column `9bad`", "use unique ASCII identifier column names")
+    if jet_cli_db_normalized_row_json(DataTree.Null, [JetCLIDBColumn]{}) == {
+        .Err(e) -> db_rows_test_error(e, "E2701", "source", "", "row is not an object", "use an object row")
+        .Ok(_) -> panic("non-object accepted")
+    }
+}
+
+#Test("DB normalization null missing and all mixed kind inference") {
+    loaded :: db_rows_test_load("[{{\"z\":1,\"a\":null,\"b\":true,\"m\":1}},{{\"z\":2.5,\"a\":null,\"b\":\"yes\",\"m\":false}},{{\"z\":3,\"b\":false}}]")
+    assert_eq(jet_cli_db_columns_json(loaded.columns), "[{{\"name\":\"a\",\"type\":\"String\",\"nullable\":true}},{{\"name\":\"b\",\"type\":\"String\",\"nullable\":false}},{{\"name\":\"m\",\"type\":\"String\",\"nullable\":true}},{{\"name\":\"z\",\"type\":\"Float\",\"nullable\":false}}]")
+    assert_eq(loaded.json, "[{{\"a\":null,\"b\":\"true\",\"m\":\"1\",\"z\":1.0}},{{\"a\":null,\"b\":\"yes\",\"m\":\"false\",\"z\":2.5}},{{\"a\":null,\"b\":\"false\",\"m\":null,\"z\":3.0}}]")
+    empty :: db_rows_test_load("[{{}},{{}}]")
+    assert_eq(empty.columns.len(), 0)
+    assert_eq(empty.json, "[{{}},{{}}]")
+    assert_eq(db_rows_test_load("[]", 0).json, "[]")
+}
+
+#Test("DB value kind merge matrix is symmetric and keeps only numeric mixtures numeric") {
+    kinds :: [JetCLIDBColumnKind]{JetCLIDBColumnKind.Int, JetCLIDBColumnKind.Float, JetCLIDBColumnKind.Bool, JetCLIDBColumnKind.String}
+    loop left in kinds {
+        loop right in kinds {
+            merged :: jet_cli_db_merge_kind(left, right)
+            assert(merged == jet_cli_db_merge_kind(right, left))
+            if left == right -> assert(merged == left) else {
+                numeric :: (left == JetCLIDBColumnKind.Int || left == JetCLIDBColumnKind.Float) && (right == JetCLIDBColumnKind.Int || right == JetCLIDBColumnKind.Float)
+                assert(merged == if numeric -> JetCLIDBColumnKind.Float else -> JetCLIDBColumnKind.String)
+            }
+        }
+    }
+    assert(jet_cli_db_value_kind(DataTree.Null) == None)
+    assert((jet_cli_db_value_kind(db_rows_test_parse("9223372036854775807")) ?? panic("kind")) == JetCLIDBColumnKind.Int)
+    assert((jet_cli_db_value_kind(db_rows_test_parse("9223372036854775808")) ?? panic("kind")) == JetCLIDBColumnKind.Float)
+    assert((jet_cli_db_value_kind(db_rows_test_parse("-9223372036854775809")) ?? panic("kind")) == JetCLIDBColumnKind.Float)
+    assert_eq(db_rows_test_load("[{{\"n\":9223372036854775808}},{{\"n\":2}}]").json, "[{{\"n\":9223372036854775808}},{{\"n\":2.0}}]")
+}
+
+#Test("DB cell defaults nullability coercion and nested stringification") {
+    kinds :: [JetCLIDBColumnKind]{JetCLIDBColumnKind.Int, JetCLIDBColumnKind.Float, JetCLIDBColumnKind.Bool, JetCLIDBColumnKind.String}
+    defaults :: [String]{"0", "0.0", "false", "\"\""}
+    loop index in 0..<kinds.len() {
+        column :: db_rows_test_column("x", kinds[index])
+        assert_eq(jet_cli_db_default_cell(kinds[index]), defaults[index])
+        assert_eq(jet_cli_db_normalized_cell(None, column), defaults[index])
+        assert_eq(jet_cli_db_normalized_cell(Val(DataTree.Null), column), defaults[index])
+        nullable :: db_rows_test_column("x", kinds[index], true)
+        assert_eq(jet_cli_db_normalized_cell(None, nullable), "null")
+        assert_eq(jet_cli_db_normalized_cell(Val(DataTree.Null), nullable), "null")
+    }
+    assert_eq(jet_cli_db_normalized_cell(Val(DataTree.Text("3")), db_rows_test_column("x", JetCLIDBColumnKind.Int)), "0")
+    assert_eq(jet_cli_db_normalized_cell(Val(DataTree.Bool(true)), db_rows_test_column("x", JetCLIDBColumnKind.Float)), "0.0")
+    assert_eq(jet_cli_db_normalized_cell(Val(DataTree.Int(1)), db_rows_test_column("x", JetCLIDBColumnKind.Bool)), "false")
+    nested :: db_rows_test_load("[{{\"x\":[null,1,2.0,\"é\"],\"y\":{{\"k\":true}}}}]")
+    assert_eq(nested.json, "[{{\"x\":\"[null,1,2.0,\\\"é\\\"]\",\"y\":\"{{\\\"k\\\":true}}\"}}]")
+    assert_eq(jet_cli_db_value_text(DataTree.Null), "")
+    assert_eq(jet_cli_db_render_json_value(DataTree.Null), "null")
+    assert_eq(jet_cli_db_value_text(DataTree.Text("raw\ntext")), "raw\ntext")
+    assert_eq(jet_cli_db_render_json_value(DataTree.Text("raw\ntext")), "\"raw\\ntext\"")
+}
+
+#Test("DB f64 Display rendering has no scientific notation and preserves negative zero") {
+    inputs :: [String]{"0", "-0", "1", "-1", "1.25", "0.0000001", "1e20", "1e21", "-1.2345e-10", "1.7976931348623157e308", "5e-324", "inf", "-inf", "NaN"}
+    expected := [String]{"0.0", "-0.0", "1.0", "-1.0", "1.25", "0.0000001", "100000000000000000000.0", "1000000000000000000000.0", "-0.00000000012345"}
+    largest := "17976931348623157"
+    loop _ in 0..<292 -> largest = "{largest}0"
+    &expected.push("{largest}.0")
+    smallest := "0."
+    loop _ in 0..<323 -> smallest = "{smallest}0"
+    &expected.push("{smallest}5")
+    &expected.push("inf.0")
+    &expected.push("-inf.0")
+    &expected.push("NaN.0")
+    loop index in 0..<inputs.len() {
+        number :: Float.parse(inputs[index]) ?? panic("float fixture")
+        assert_eq(jet_cli_db_render_float(number), expected[index])
+    }
+}
+
+#Test("DB and comparison float display share digits but keep distinct decimal contracts") {
+    inputs :: [String]{"1", "-0", "1e20", "1e-7", "inf", "-inf", "NaN"}
+    comparison :: [String]{"1", "-0", "100000000000000000000", "0.0000001", "inf", "-inf", "NaN"}
+    database :: [String]{"1.0", "-0.0", "100000000000000000000.0", "0.0000001", "inf.0", "-inf.0", "NaN.0"}
+    loop (index, input) in inputs {
+        number :: Float.parse(input) ?? panic("shared float fixture")
+        assert_eq(jet_cli_db_float_display(number, false), comparison[index])
+        assert_eq(jet_cli_db_render_float(number), database[index])
+    }
+}
+
+#Test("DB generated Codable row and columns metadata retain names kinds order and nullable") {
+    columns :: [JetCLIDBColumn]{db_rows_test_column("id", JetCLIDBColumnKind.Int), db_rows_test_column("note", JetCLIDBColumnKind.String, true), db_rows_test_column("ok", JetCLIDBColumnKind.Bool), db_rows_test_column("score", JetCLIDBColumnKind.Float, true)}
+    assert_eq(jet_cli_db_generated_row_item(columns), "#Codable\nstruct DbConsoleRow {{\n    id: Int\n    note: String?\n    ok: Bool\n    score: Float?\n}}\n")
+    assert_eq(jet_cli_db_generated_row_item([JetCLIDBColumn]{}), "#Codable\nstruct DbConsoleRow {{\n}}\n")
+    assert_eq(jet_cli_db_columns_json([JetCLIDBColumn]{}), "[]")
+}
+
+// #4306 Dyn ordered objects integration gate: keep original insertion-order oracle.
+#Test("DB CSV result inference escapes quotes line endings commas nulls and nested values") {
+    columns :: [JetCLIDBColumn]{db_rows_test_column("wrong", JetCLIDBColumnKind.Int)}
+    result :: jet_cli_db_result_csv("[{{\"body\":\"a,b\\\"c\\nnext\",\"none\":null,\"n\":2.0,\"nested\":[1,null]}},{{\"body\":\"plain\",\"n\":3}}]", columns, "query") ?? panic("CSV output")
+    assert_eq(result, "body,none,n,nested\n\"a,b\"\"c\nnext\",,2.0,\"[1,null]\"\nplain,,3,\n")
+    assert_eq(jet_cli_db_result_csv("[]", columns, "query") ?? panic("empty"), "wrong\n")
+    assert_eq(jet_cli_db_result_csv("[{{}}]", columns, "query") ?? panic("empty object"), "\n\n")
+    reordered :: jet_cli_db_result_csv("[{{\"b\":1,\"a\":2}}]", [JetCLIDBColumn]{db_rows_test_column("a", JetCLIDBColumnKind.Int), db_rows_test_column("b", JetCLIDBColumnKind.Int)}, "query") ?? panic("order")
+    assert_eq(reordered, "b,a\n1,2\n")
+    carriage :: jet_cli_db_result_csv("[{{\"a\":\"x\\ry\"}}]", columns, "query") ?? panic("CR")
+    assert_eq(carriage, "a\n\"x{db_rows_test_cr()}y\"\n")
+}
+
+#Test("DB CSV result failures preserve E2600 operations paths messages and hints") {
+    columns :: [JetCLIDBColumn]{}
+    if jet_cli_db_result_csv("not-json", columns, "query") == {
+        .Err(e) -> db_rows_test_error(e, "E2600", "csv", "query", "result is not valid JSON: expected a JSON word", "use `--json` for the canonical result envelope")
+        .Ok(_) -> panic("invalid JSON accepted")
+    }
+    if jet_cli_db_result_csv("{{}}", columns, "query") == {
+        .Err(e) -> db_rows_test_error(e, "E2600", "csv", "query", "result is not an array", "use `--json` for the canonical result envelope")
+        .Ok(_) -> panic("non-array accepted")
+    }
+    if jet_cli_db_result_csv("[{{}},1]", columns, "query") == {
+        .Err(e) -> db_rows_test_error(e, "E2600", "csv", "query", "a result row is not an object", "use `--json` for nested result values")
+        .Ok(_) -> panic("non-object accepted")
+    }
+}
+
+// tests/db_policy.rs::typed_sql_hostile_operations_keep_policy_and_provenance_across_tiers
+// row-level carrier requirement (129-135): hostile text stays data, not SQL.
+#Test("DB row normalization preserves hostile SQL payload as exact text") {
+    loaded :: db_rows_test_load("[{{\"id\":1,\"body\":\"x'); DROP TABLE tasks; --\"}}]")
+    assert_eq(loaded.json, "[{{\"body\":\"x'); DROP TABLE tasks; --\",\"id\":1}}]")
+    assert_eq(jet_cli_db_result_csv(loaded.json, loaded.columns, "query") ?? panic("CSV"), "body,id\nx'); DROP TABLE tasks; --,1\n")
+}
+// tests/db_policy.rs::invalid_row_policy_is_denied_the_same_way_aot/default
+// rejects leading-digit/padded names; the row codec has the corresponding column boundary.
+#Test("DB column names reject padding punctuation and leading digits without rewriting") {
+    invalid :: [String]{" id", "id ", "9id", "id.name", "id$name", "id-name", "é"}
+    loop name in invalid {
+        fields := [String: DataTree]{}
+        _ :: &fields.add(name, DataTree.Int(1))
+        error :: db_rows_test_normalize_error(DataTree.Array([DataTree]{DataTree.Object(fields)}))
+        assert_eq(error.message, "row 1 has invalid column `{name}`")
+    }
+    loaded :: db_rows_test_load("[{{\"_id\":1,\"A9\":true}}]")
+    assert_eq(loaded.columns[0].name, "A9")
+    assert_eq(loaded.columns[1].name, "_id")
+}
+
+// tests/db_policy.rs::sqlite_blob_round_trip_preserves_bytes_across_tiers
+// row-level byte rendering (306-321); Core DataTree represents bytes as Int arrays.
+#Test("DB byte row text preserves all byte values in compact JSON order") {
+    bytes :: DataTree.Array([DataTree]{DataTree.Int(0), DataTree.Int(1), DataTree.Int(2), DataTree.Int(127), DataTree.Int(128), DataTree.Int(255)})
+    assert_eq(jet_cli_db_value_text(bytes), "[0,1,2,127,128,255]")
+    kind :: jet_cli_db_value_kind(bytes)
+    assert((kind ?? panic("kind")) == JetCLIDBColumnKind.String)
+    assert_eq(jet_cli_db_normalized_cell(Val(bytes), db_rows_test_column("payload", JetCLIDBColumnKind.String)), "\"[0,1,2,127,128,255]\"")
+}
+
+// #4306 Dyn ordered objects integration gate; never repin this to Map's sorting.
+#Test("DB nested object text retains source insertion order") {
+    loaded :: db_rows_test_load("[{{\"cell\":{{\"z\":1,\"a\":2}}}}]")
+    assert_eq(loaded.json, "[{{\"cell\":\"{{\\\"z\\\":1,\\\"a\\\":2}}\"}}]")
+    assert_eq(jet_cli_db_value_text(db_rows_test_parse("{{\"z\":1,\"a\":2}}")), "{{\"z\":1,\"a\":2}}")
+}
+
+#Test("DB CSV single-column escaping is independent of object ordering") {
+    columns :: [JetCLIDBColumn]{db_rows_test_column("a", JetCLIDBColumnKind.String)}
+    output :: jet_cli_db_result_csv("[{{\"a\":\"comma, quote\\\" LF\\nCR\\r\"}},{{\"a\":null}},{{}},{{\"a\":[1,null]}},{{\"a\":2.0}}]", columns, "query") ?? panic("CSV")
+    assert_eq(output, "a\n\"comma, quote\"\" LF\nCR{db_rows_test_cr()}\"\n\n\n\"[1,null]\"\n2.0\n")
+}
+
+#Test("DB exact Int representation preserves Rust minus-zero and Number classifications") {
+    assert_eq(db_rows_test_load("[{{\"n\":-0}},{{\"n\":0}}]").json, "[{{\"n\":0}},{{\"n\":0}}]")
+    assert_eq(db_rows_test_load("[{{\"n\":-0}},{{\"n\":1.5}}]").json, "[{{\"n\":0.0}},{{\"n\":1.5}}]")
+    // Rust Number's integer lexeme survives Float inference without a .0 suffix.
+    assert_eq(db_rows_test_load("[{{\"n\":-9223372036854775809}}]").json, "[{{\"n\":-9223372036854775809}}]")
+    huge := "1"
+    loop _ in 0..<400 -> huge = "{huge}0"
+    loaded :: db_rows_test_load("[{{\"n\":{huge}}}]")
+    assert(loaded.columns[0].kind == JetCLIDBColumnKind.Float)
+    assert_eq(loaded.json, "[{{\"n\":{huge}}}]")
+}

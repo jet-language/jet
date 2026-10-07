@@ -1,0 +1,100 @@
+// Pure boundaries from Source/CmdDb.rs session helpers; no inline Rust tests.
+fn db_session_test_split(text: String) -> [String] {
+    jet_cli_db_split_sql_statements(text) ?? panic(err.message)
+}
+fn db_session_test_error(text: String, message: String) {
+    if jet_cli_db_split_sql_statements(text) == {
+        .Ok(_) -> panic("invalid SQL statement accepted")
+        .Err(error) -> assert_eq(error.message, message)
+    }
+}
+#Test("DB CSV quotes only separators quote CR and LF and doubles each quote") {
+    assert_eq(jet_cli_db_csv_escape(""), "")
+    assert_eq(jet_cli_db_csv_escape("é α"), "é α")
+    assert_eq(jet_cli_db_csv_escape(" a "), " a ")
+    assert_eq(jet_cli_db_csv_escape("a,b"), "\"a,b\"")
+    assert_eq(jet_cli_db_csv_escape("a\"b"), "\"a\"\"b\"")
+    assert_eq(jet_cli_db_csv_escape("a\nb"), "\"a\nb\"")
+    cr :: String.from_bytes([U8]{U8{13}}) ?? panic("CR is UTF-8")
+    assert_eq(jet_cli_db_csv_escape("a{cr}b"), "\"a{cr}b\"")
+    assert_eq(jet_cli_db_csv_escape("\"\",é{cr}\n"), "\"\"\"\"\",é{cr}\n\"")
+}
+#Test("DB SQL splits outer semicolons retaining nested semicolons and unicode") {
+    assert(db_session_test_split(" ; ; SELECT é; SELECT (a;b); trailing") == [String]{"SELECT é", "SELECT (a;b)", "trailing"})
+    assert(db_session_test_split(" SELECT 1 ;\n") == [String]{"SELECT 1"})
+    assert(db_session_test_split(" \n ;\t;") == [String]{})
+    assert(db_session_test_split("SELECT ((x));") == [String]{"SELECT ((x))"})
+    assert(jet_cli_db_has_complete_sql_statement("SELECT ((x));"))
+    assert(!jet_cli_db_has_complete_sql_statement("SELECT (x;y)"))
+    assert(!jet_cli_db_has_complete_sql_statement("SELECT x"))
+    // Completion intentionally notices depth-zero ';' before parsing later bad SQL.
+    assert(jet_cli_db_has_complete_sql_statement("SELECT 1; 'unfinished"))
+    assert(!jet_cli_db_has_complete_sql_statement(");"))
+    assert(jet_cli_db_has_complete_sql_statement(") (;"))
+}
+#Test("DB SQL quoted doubled and backslash-escaped delimiters preserve bytes") {
+    assert(db_session_test_split("SELECT 'a;é', \"b;c\"; SELECT 'it''s;ok'; SELECT \"a\"\"b;c\";") == [String]{"SELECT 'a;é', \"b;c\"", "SELECT 'it''s;ok'", "SELECT \"a\"\"b;c\""})
+    assert(db_session_test_split("SELECT 'a\\';b'; SELECT \"a\\\";b\";") == [String]{"SELECT 'a\\';b'", "SELECT \"a\\\";b\""})
+    assert(!jet_cli_db_has_complete_sql_statement("SELECT 'a;b'"))
+    assert(!jet_cli_db_has_complete_sql_statement("SELECT 'a'';b'"))
+    assert(!jet_cli_db_has_complete_sql_statement("SELECT 'a\\';b'"))
+    assert(jet_cli_db_has_complete_sql_statement("SELECT 'a\\';b';"))
+    assert(db_session_test_split("SELECT ''; SELECT 'a\\\\';") == [String]{"SELECT ''", "SELECT 'a\\\\'"})
+    assert(db_session_test_split("SELECT \\\\;") == [String]{"SELECT \\\\"})
+}
+#Test("DB SQL all errors and quote-before-depth precedence") {
+    db_session_test_error("SELECT )", "SQL statement closes a parenthesis that it did not open")
+    db_session_test_error("SELECT (", "SQL statement has unbalanced parentheses")
+    db_session_test_error("SELECT 'x", "SQL string literal is missing its closing quote")
+    db_session_test_error("SELECT \"x", "SQL string literal is missing its closing quote")
+    db_session_test_error("SELECT ('x", "SQL string literal is missing its closing quote")
+    db_session_test_error("SELECT 'x\\", "SQL string literal is missing its closing quote")
+    db_session_test_error("SELECT 1; SELECT )", "SQL statement closes a parenthesis that it did not open")
+    // SQL comments are kernel-owned, not silently stripped by these helpers.
+    assert(db_session_test_split("-- comment; SELECT 1;") == [String]{"-- comment", "SELECT 1"})
+}
+#Test("DB console dot lines pending SQL CRLF and final unterminated-line handling") {
+    cr :: String.from_bytes([U8]{U8{13}}) ?? panic("CR is UTF-8")
+    text :: "\n .tables {cr}\nSELECT{cr}\n 'é;ok';\n .stats \nSELECT (\n1); SELECT 2\n"
+    assert((jet_cli_db_split_console_inputs(text) ?? panic(err.message)) == [String]{".tables", "SELECT\n 'é;ok'", ".stats", "SELECT (\n1)", "SELECT 2"})
+    assert((jet_cli_db_split_console_inputs("SELECT\n .schema\n1;\n.quit") ?? panic(err.message)) == [String]{"SELECT\n .schema\n1", ".quit"})
+    assert((jet_cli_db_split_console_inputs("SELECT 1{cr}") ?? panic(err.message)) == [String]{"SELECT 1"})
+    assert((jet_cli_db_split_console_inputs("") ?? panic(err.message)) == [String]{})
+    assert((jet_cli_db_split_console_inputs(" \n\n") ?? panic(err.message)) == [String]{})
+    if jet_cli_db_split_console_inputs(".tables\nSELECT '") == {
+        .Ok(_) -> panic("unterminated console SQL accepted")
+        .Err(error) -> assert_eq(error.message, "SQL string literal is missing its closing quote")
+    }
+    if jet_cli_db_split_console_inputs("SELECT 1; SELECT )\n") == {
+        .Ok(_) -> panic("invalid console SQL accepted")
+        .Err(error) -> assert_eq(error.message, "SQL statement closes a parenthesis that it did not open")
+    }
+}
+#Test("DB remote detection is exact case-sensitive spelling") {
+    remotes :: [String]{"https://host", "postgres:db", "mysql:db", "a://b", "://"}
+    loop value in remotes -> assert(jet_cli_db_is_remote(value))
+    locals :: [String]{"a.csv", "POSTGRES:db", "MYSQL:db", "postgres", "https:host", "xpostgres:db"}
+    loop value in locals -> assert(!jet_cli_db_is_remote(value))
+}
+#Test("DB source identity uses POSIX file stem and replaces one unicode scalar once") {
+    paths :: [String]{"orders.json", "dir/9 rows.csv", "é😀.json", ".hidden", "a.tar.gz", "a.", "", "/", ".", "..", "dir/..", "dir/./orders.json/", "dir/orders.json/.", "foo//bar.csv", ".a.b", "a\\b.json"}
+    names :: [String]{"orders", "table_9_rows", "__", "_hidden", "a_tar", "a", "source", "source", "source", "source", "source", "orders", "orders", "bar", "_a", "a_b"}
+    loop (index, path) in paths -> assert_eq(jet_cli_db_source_name_from_path(path), names[index])
+}
+#Test("DB table and column identifiers preserve their distinct allowed punctuation") {
+    tables :: [String]{"tasks", "_", "_9", "A0", "a.b", "a$b", "a..$"}
+    loop value in tables -> assert(jet_cli_db_valid_table_name(value))
+    columns :: [String]{"tasks", "_", "_9", "A0"}
+    loop value in columns -> assert(jet_cli_db_valid_column_name(value))
+    invalid :: [String]{"", "9tasks", "two words", "$a", ".a", "é", "a-é", "a/b", " tasks ", "a\n"}
+    loop value in invalid {
+        assert(!jet_cli_db_valid_table_name(value))
+        assert(!jet_cli_db_valid_column_name(value))
+    }
+    assert(!jet_cli_db_valid_column_name("a.b"))
+    assert(!jet_cli_db_valid_column_name("a$b"))
+    // tests/db_policy.rs::invalid_row_policy_is_denied_the_same_way_{aot,default}
+    // provides the option-level applicable digit-table and spaced-table expectations.
+    assert(!jet_cli_db_valid_table_name("9tasks"))
+    assert(!jet_cli_db_valid_table_name("two words"))
+}
