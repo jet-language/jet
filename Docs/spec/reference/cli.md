@@ -208,12 +208,33 @@ then the enclosing repository or package, and finally the source's canonical
 directory. Missing workspace declarations are absence; malformed, ambiguous,
 linked, or unreadable authority metadata remains a diagnostic.
 
+Checked source transactions hold the project, destination parents, and
+`.jet/codemods` directory. Destinations and staged files must be regular,
+single-link files with the identities observed before publication. The
+schema-2 journal stores exact before/after bytes and staged identities before
+the first source rename. Recovery completes the replay log when every file
+reached its after-state, otherwise restores the recorded before-states;
+unrecorded bytes or substituted identities preserve the journal and refuse.
+Fix logs retain checked rename intent when the structural compiler facts
+establish it uniquely, otherwise the exact changed UTF-8 region is a rewrite.
+Undo verifies each log byte hash and every current after-checkpoint before
+publishing any reversal.
+
 Receipt objects and their append-only section records are immutable,
 content-authenticated files under `.jet/receipts`. The record-index JSONL
 snapshot under `.jet/records` is reloaded while holding its directory lock
 before each mutation and replaced atomically with mode `0600`. FIFO eviction
 removes only unreferenced disposable groups; removed artifacts are cleaned up
 after the new index is published, without following links.
+
+Build-node evidence stays immutable in the machine-wide artifact store. The
+latest record key for each program is workspace state:
+`.jet/last-run/<sha256(program)>`. This pointer uses the authenticated
+`jet.last-run/v1` record codec and binds the program name before resolving
+the content-addressed build record. Missing or malformed pointers are cache
+misses, not execution evidence. Publication holds the workspace directories,
+locks the last-run directory, flushes a staged file, renames it, and flushes
+the directory; separate workspaces do not share latest-run selection.
 
 `jet test-compare <corpus.json>` compares recorded reference and candidate
 observations using the shared finite-sample verdict. It records the canonical

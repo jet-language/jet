@@ -1,0 +1,25 @@
+// Held-root closure: no intermediate symlink, no escaped name, no path reopen.
+fn run() {
+    loop name in [String]{"", ".", "..", "a/b", "a\\b", "a\0b"} {
+        rejected :: jet_cli_rooted_validate_name(name) == .Err(_)
+        assert(rejected)
+    }
+    root :: "{cli_sys.temp_dir()}/jet-rooted-{cli_process.current_pid()}"
+    cli_files.create_dir_all(root) ?? panic("test root")
+    defer cli_files.remove_all(root).drop("test root cleanup")
+    held :: JetCLIRootedDirectory.open(root, [String]{"original"}, true) ?? panic("hold original")
+    _ :: held.publish_immutable("record", "original".bytes(), Val(0o600), 1024) ?? panic("publish original")
+    cli_files.rename("{root}/original", "{root}/moved", if_exists: .Refuse) ?? panic("move ancestor")
+    replacement :: JetCLIRootedDirectory.open(root, [String]{"original"}, true) ?? panic("replacement ancestor")
+    _ :: replacement.publish_immutable("record", "replacement".bytes(), Val(0o600), 1024) ?? panic("publish replacement")
+    bytes :: held.read("record", 1024) ?? panic("read held original")
+    assert(bytes == Val("original".bytes()))
+    present :: JetCLIRootedDirectory.present(root, [String]{"absent", "child"}) ?? panic("absent store")
+    assert(!present)
+    escaped :: held.replace("../escaped", "wrong".bytes(), None) == .Err(_)
+    assert(escaped)
+    _ :: held.replace("record", "updated".bytes(), None) ?? panic("replace held original")
+    updated :: cli_files.read("{root}/moved/record") ?? panic("read moved bytes")
+    unchanged :: cli_files.read("{root}/original/record") ?? panic("read replacement bytes")
+    assert(updated == "updated" && unchanged == "replacement")
+}
