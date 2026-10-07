@@ -438,7 +438,13 @@ registry name and decision only in text mode. Unknown syntax-like queries
 produce E2106 with a nearest registered spelling; package references are not
 classified as syntax typos. Standalone policy essays use the Foundation policy
 registry after syntax lookup. Effective source-site policy and build-fact
-writer-chain queries remain distinct loader-backed operations.
+writer-chain queries remain distinct loader-backed operations. Loaded policy
+queries do not require semantic compilation of callable bodies. The compiler
+prepends the selected entry package's policy declarations to each loaded user
+module and resolves the shared package/module/function/block ladder before
+publishing those facts. Package provenance names the physical `package.jet`
+or inline Package carrier; source-authored provenance names the same relative
+display path as the loaded module (an external module keeps its absolute path).
 
 Unsafe-gate inspection reads the parser's audited regions and scoped policy
 declarations. It retains each low-level operation, its typed obligations

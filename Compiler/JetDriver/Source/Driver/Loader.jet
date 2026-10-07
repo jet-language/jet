@@ -17,6 +17,7 @@ use jet_foundation.[
     MIRSourceFile,
     NamedSpan,
     ParseResult,
+    PolicyDeclaration,
     Program,
     Span,
     ast_program,
@@ -983,6 +984,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     authority_allow := [String]?{None}
     authority_deny := [String]?{None}
     authority_needs := [String]{}
+    policy_declarations := [PolicyDeclaration]{}
     entry := JetDriverPackageEntry?{None}
     dependencies := [JetDriverPackageDependency]{}
     outputs := jet_driver_no_package_outputs()
@@ -994,6 +996,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     authority_seen := false
     deps_seen := false
     outputs_seen := false
+    policy_seen := false
     brace_depth := 0
     index := 0
     loop index < tokens.len() {
@@ -1067,6 +1070,21 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                             }
                         }
                     }
+                }
+                "policy" -> {
+                    if policy_seen -> &diagnostics.push(pkg_manifest_parse_diagnostic(manifest_path, PackageParseError.Composition("`policy` is declared more than once")))
+                    policy_seen = true
+                    policy_value :: jet_driver_manifest_field_value(source, tokens, value_index)
+                    if jet_driver_read_package_policy(policy_value.text) == {
+                        .Ok(declarations) -> {
+                            policy_declarations = ^declarations
+                            loop declaration_index in 0..<policy_declarations.len() {
+                                policy_declarations[declaration_index].source = root.files[manifest].path
+                            }
+                        }
+                        .Err(error) -> &diagnostics.push(pkg_manifest_parse_diagnostic(manifest_path, error))
+                    }
+                    index = policy_value.next_index - 1
                 }
                 "allocator" -> {
                     if allocator_seen -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package allocator is declared more than once", "one package selects exactly one program allocator policy", "keep one `allocator:` field"))
@@ -1155,7 +1173,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
         diagnostic_index += 1
     }
     identity :: jet_driver_package_identity(name, version)
-    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, entry: entry, manifest_path: Val(manifest_path), inline_package: inline_carrier != None, dependencies: dependencies, outputs: outputs}
+    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, entry: entry, manifest_path: Val(manifest_path), policy_declarations: ^policy_declarations, inline_package: inline_carrier != None, dependencies: dependencies, outputs: outputs}
 }
 
 fn jet_driver_default_module_alias(relative_path: String) -> String Never! {
@@ -2752,6 +2770,15 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
     source_units := catalog.source_units
     units_by_source :: source_index_result.index
     selected_entry :: source_units[entry_index ?? 0]
+    // Rust read_load threads the entry package's policy through the entire
+    // user-source closure, including imports, not each dependency's own floor.
+    package_policy := [PolicyDeclaration]{}
+    loop package in catalog.packages {
+        if package.identity == catalog.entry_package_identity {
+            package_policy = ~package.policy_declarations
+            break
+        }
+    }
     entry_source_identity :: jet_driver_source_identity(selected_entry.package_identity, selected_entry.path)
     entry_module_identity :: jet_driver_module_identity(selected_entry.package_identity, selected_entry.path)
     pending := [Int]{entry_index ?? 0}
@@ -2805,6 +2832,8 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
         }
         if jet_driver_has_errors(parse_result.diagnostics) -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)
         program := ^parse_result.program
+        policy_ok :: if is_core || jet_driver_has_errors(parse_result.diagnostics) -> true else -> jet_driver_load_policy(&program, package_policy, unit.path, &diagnostics)
+        if !policy_ok -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)
         jet_driver_bind_dependency_imports(&program, unit, catalog.packages)
         module_identity :: jet_driver_unit_module_identity(unit)
         module_position :: modules.len()
@@ -2817,7 +2846,7 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
             program: ^program,
         })
         loaded_program :: modules[module_position].program
-        if jet_driver_has_errors(parse_result.diagnostics) -> next
+        if jet_driver_has_errors(parse_result.diagnostics) || !policy_ok -> next
         // A bare `URL` (a type or a typed `URL{"…"}` head) is the `core.net.url`
         // record, so a module that names it loads that Core source without a
         // `use` (Rust `source_names_identifier` in the loader).
