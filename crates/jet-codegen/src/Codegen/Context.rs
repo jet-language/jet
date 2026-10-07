@@ -483,6 +483,8 @@ pub(crate) struct Cx {
     pub(crate) fn_bodies: HashMap<String, Vec<crate::AST::Stmt>>,
     /// Function name -> source parameter names for labeled compute transforms.
     pub(crate) fn_param_names: HashMap<String, Vec<String>>,
+    /// Checked declaration-default policy calls, in their authored order.
+    pub(crate) fn_policy_calls: HashMap<String, Vec<crate::AST::Call>>,
     /// `(TypeName, method)` -> parameter conventions+types (including `self`).
     pub(crate) method_sigs: HashMap<(String, String), Vec<(AccessConvention, Type)>>,
     /// Method-owned type parameters in declaration order. Owner parameters are
@@ -5902,6 +5904,7 @@ pub(crate) fn build_cx_items(
         fn_source_types: HashMap::new(),
         fn_bodies: HashMap::new(),
         fn_param_names: HashMap::new(),
+        fn_policy_calls: HashMap::new(),
         method_sigs: HashMap::new(),
         method_type_params: HashMap::new(),
         method_self_convs: HashMap::new(),
@@ -6428,6 +6431,16 @@ pub(crate) fn build_cx_items(
                         ty.with_effective_fn_returns()
                     }).collect(), f.callable_value_return_type()));
                 cx.fn_bodies.insert(f.name.clone(), f.body.clone());
+                let policy_calls = f.markers.iter()
+                    .filter(|marker| marker.name == crate::Syntax::MARKER_POLICY)
+                    .flat_map(|marker| marker.expr_args_owned())
+                    .filter_map(|argument| match argument {
+                        crate::AST::Expr::Call(policy) if !crate::AST::CallablePolicyChain::is_builtin(&policy.name) => Some(policy),
+                        _ => None,
+                    }).collect::<Vec<_>>();
+                if !policy_calls.is_empty() {
+                    cx.fn_policy_calls.insert(f.name.clone(), policy_calls);
+                }
                 let source_fn_type = cx.fn_types.get(&f.name).cloned().map(|mut ty| {
                     if let Type::Fn { ret, .. } = &mut ty {
                         *ret = f.return_type.clone().map(Box::new);

@@ -1219,8 +1219,17 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     }
 }
 
-pub fn check_program(program: Program, module_name: String, source_file: String, source_segments: [SemaSourceSegment]) -> SemaResult {
+pub fn check_program(input: Program, module_name: String, source_file: String, source_segments: [SemaSourceSegment]) -> SemaResult {
     diagnostics := [Diagnostic]{}
+    policy_program := Program?{None}
+    if input.user_policy_declarations.len() > 0 {
+        prepared := input
+        declarations :: sema_policy_declarations_checked(input.user_policy_declarations, &diagnostics)
+        sema_policy_materialize(&prepared, declarations, module_name, source_file, SemaSourceOrigin.Snapshot, source_segments, &diagnostics)
+        policy_program = Val(^prepared)
+    }
+    program :: policy_program ?? input
+    sema_marker_rules_validate_allow(program, &diagnostics)
     functions := [TFunc]{}
     call_facts := [SemaCallSiteFact]{}
     hardware_use := sema_hardware_empty_use()
@@ -1233,7 +1242,7 @@ pub fn check_program(program: Program, module_name: String, source_file: String,
     exact_int_reachable := false
     copy_events := [SemaCopyEvent]{}
     memory_plan := sema_function_memory_plan_for_program(program, module_name, "")
-    complete := program.script_body.len() == 0 && program.imports.len() == 0 && program.block_spans.len() == 0 && program.web_target_ceiling == None && !program.no_prelude && program.default_target == None && program.html_path == None && !sema_function_memory_has_unsupported_policies(program.policy_declarations) && program.user_policy_declarations.len() == 0 && program.applied_rules.len() == 0 && program.rule_facts.len() == 0
+    complete := program.script_body.len() == 0 && program.imports.len() == 0 && program.web_target_ceiling == None && !program.no_prelude && program.default_target == None && program.html_path == None && !sema_function_memory_has_unsupported_policies(program.policy_declarations) && !sema_policy_has_unsupported_applications(program)
     item_index := 0
     loop item_index < program.items.len() {
         item :: program.items[item_index]
@@ -1696,9 +1705,7 @@ fn sema_check_unsupported_program_forms(program: Program) -> [String] Never! {
     if program.default_target != None -> &forms.push("default target")
     if program.html_path != None -> &forms.push("html path")
     if sema_function_memory_has_unsupported_policies(program.policy_declarations) -> &forms.push("memory policy")
-    if program.user_policy_declarations.len() > 0 -> &forms.push("user policy declarations")
-    if program.applied_rules.len() > 0 -> &forms.push("applied rules")
-    if program.rule_facts.len() > 0 -> &forms.push("rule facts")
+    if sema_policy_has_unsupported_applications(program) -> &forms.push("applied rules")
     forms
 }
 

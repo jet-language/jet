@@ -635,7 +635,7 @@ fn sema_plugin_export_from_function(function: Func, dimensions: [SemaPluginUnitD
         name: function.name,
         signature: sema_plugin_canonical_fn_signature(function, dimensions),
         params: params,
-        return_type: function.return_type,
+        return_type: sema_guest_export_value_type(function.return_type),
     }
 }
 
@@ -727,7 +727,7 @@ fn sema_plugin_parse_frozen_export(frozen: SemaPluginFrozenExportInput) -> SemaP
     declaration :: function ?? return None
     if declaration.type_params.len() != 0 -> return None
     params := (loop param in declaration.params -> SemaPluginExportParam{convention: param.convention, ty: param.ty})
-    Val(SemaPluginInterfaceExport{name: declaration.name, signature: signature, params: params, return_type: declaration.return_type})
+    Val(SemaPluginInterfaceExport{name: declaration.name, signature: signature, params: params, return_type: sema_guest_export_value_type(declaration.return_type)})
 }
 
 fn sema_plugin_snapshot_capability_digest(snapshot: SemaPluginFrozenSnapshotInput) -> String Never! {

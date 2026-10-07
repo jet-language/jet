@@ -1339,8 +1339,8 @@ fn sema_marker_rules_validate_vocabulary(registry: SemaScopeMembersMarkerRegistr
     }
 }
 
-fn sema_marker_rules_validate_sites(registry: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: &[Diagnostic]) {
-    applications := sema_marker_rules_applications(program)
+pub fn sema_marker_rules_validate_allow(program: Program, diagnostics: &[Diagnostic]) {
+    applications :: sema_marker_rules_applications(program)
     loop application in applications {
         if application.marker.name == "allow" {
             if application.marker.args.len() < 2 {
@@ -1354,6 +1354,13 @@ fn sema_marker_rules_validate_sites(registry: SemaScopeMembersMarkerRegistry, pr
                 }
             }
         }
+    }
+}
+
+fn sema_marker_rules_validate_sites(registry: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: &[Diagnostic]) {
+    sema_marker_rules_validate_allow(program, &diagnostics)
+    applications :: sema_marker_rules_applications(program)
+    loop application in applications {
         site :: application.site ?? next
         builtin_index := sema_marker_rules_catalog_rule_index(registry.applied_rules, application.marker.name)
         if builtin_index != None {

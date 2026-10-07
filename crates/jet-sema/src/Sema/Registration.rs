@@ -763,12 +763,26 @@ impl<'a> Checker<'a> {
         // D-STRUCT-POLICY1=A: callable marker values use the same package
         // vocabulary as `apply`; declaration bodies are checked separately
         // against each wrapped function signature below the bundle seam.
-        for marker in &f.markers {
+        for marker in &mut f.markers {
             if marker.name == Syntax::MARKER_POLICY
                 && crate::AST::CallablePolicyChain::parse(&marker.expr_args_owned()).is_ok()
             {
-                let policy_args = marker.expr_args_owned();
-                let _ = self.validate_callable_policy_values(&policy_args, marker.span);
+                let mut policy_args = marker.expr_args_owned().into_iter().map(|expr| {
+                    crate::AST::CallArg { convention: AccessConvention::Read, span: expr.span(), expr, flags: Default::default(), label: None, spread: false }
+                }).collect::<Vec<_>>();
+                self.bind_user_policy_arguments(&mut policy_args, marker.span);
+                let expressions = policy_args.iter().map(|arg| arg.expr.clone()).collect::<Vec<_>>();
+                if self.validate_callable_policy_values(&expressions, marker.span) {
+                    for argument in &mut policy_args {
+                        if let crate::AST::Expr::Call(policy) = &mut argument.expr {
+                            for value in &mut policy.args {
+                                self.infer(&mut value.expr);
+                            }
+                        }
+                    }
+                    self.normalize_user_policy_arguments(&mut policy_args);
+                    marker.args = policy_args.into_iter().map(|arg| crate::AST::MarkerCallArg::Expr(arg.expr)).collect();
+                }
             }
         }
         for mut marker in self.take_targeted_rule_facts(f.span) {

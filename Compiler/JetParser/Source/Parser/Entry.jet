@@ -124,6 +124,10 @@ fn parser_parse_prepared(prepared: ParserFenceExpansion, lexer_diagnostics: [Dia
     program.block_spans = state.block_spans
     program.else_arms = state.else_arms
     loop declaration in state.block_policy_declarations -> &program.policy_declarations.push(declaration)
+    loop application in state.statement_rules {
+        &program.applied_rules.push(application)
+        &program.rule_facts.push(application)
+    }
     program.fenced_statements = prepared.fenced_statements
     program.used_import_names = parser_used_import_names(state.tokens, program.imports, program.items)
     program.debug_sites = parser_debug_trace_sites(state.tokens, source)

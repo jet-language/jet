@@ -329,7 +329,7 @@ impl<'a> Checker<'a> {
     /// D-STRUCT-POLICY1=A: user policy calls use the same declaration-order
     /// binder as ordinary functions, including default expressions and
     /// their private earlier-parameter references.
-    fn bind_user_policy_arguments(&mut self, arguments: &mut [crate::AST::CallArg], span: Span) {
+    pub(crate) fn bind_user_policy_arguments(&mut self, arguments: &mut [crate::AST::CallArg], span: Span) {
         for argument in arguments {
             let Expr::Call(policy) = &mut argument.expr else {
                 continue;
@@ -372,7 +372,7 @@ impl<'a> Checker<'a> {
     /// D-VARIADIC1: the policy call has the same fixed list-slot ABI as an
     /// ordinary function call. Bind first so defaults occupy their slots,
     /// then pack the user declaration's homogeneous rest tail once.
-    fn normalize_user_policy_arguments(&mut self, arguments: &mut [crate::AST::CallArg]) {
+    pub(crate) fn normalize_user_policy_arguments(&mut self, arguments: &mut [crate::AST::CallArg]) {
         for argument in arguments {
             let Expr::Call(policy) = &mut argument.expr else {
                 continue;

@@ -7637,6 +7637,9 @@ an unknown name reports the declaring package. The wrapper body has one checked
 callable value and cannot edit its signature, effects, errors, defaults,
 variadics, or view provenance. Its semantics lower through the shared Prelude
 path on AOT, Cranelift, interpreter/deopt, and applicable web output.
+Direct calls to a `#Policy`-marked function execute its checked chain, including
+ordinary typed/defaulted policy arguments. `apply(policy(...), fn)` replaces
+that declaration chain; `apply(fn)` explicitly selects the unwrapped callable.
 
 **2026-08-19 — D-STRUCT-ONCE1=A** *(card #2052; ratified 2026-08-19)*:
 The existing `@loop` may expand marker bodies, top-level impl items, and
