@@ -163,7 +163,7 @@ fn sema_call_core_source_target(environment: SemaScopeEnvironment, module_identi
     module_index :: sema_registration_module_index(graph, module_identity) ?? return None
     // Module rows are read in place; binding one would copy its whole program.
     source_name :: graph.modules[module_index].module_name
-    if (source_name == "core.http.client" && member == "request") || (source_name == "core.http.server" && member == "response") -> return None
+    if source_name == "core.http.client" && member == "request" -> return None
     caller_index :: sema_registration_module_index(graph, environment.module_identity) ?? return None
     // Only the source module itself keeps the host row for its own members
     // (Rust core_call.rs: by registered identity, never by file name, so a
@@ -673,6 +673,9 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
     // #1465: POSIX process/session control requires `#Unsafe` (I1); checking continues.
     if canonical_record.module_name == "core.sys" && context.unsafe_depth == 0 && sema_call_core_posix_control(canonical_record.member) {
         &diagnostics.push(sema_error("E3101", span, "`core.sys.{canonical_record.member}` requires an audited `#Unsafe` region", "POSIX process and session control can change credentials, signals, and process topology (I1)", "wrap the call in `#Unsafe(\"posix {canonical_record.member}: …\") {{ … }}` and gate the host OS with `prep if $build.os` / `#Target(OS.*)`"))
+    }
+    if canonical_record.module_name == "core.http.server" && canonical_record.member == "__response_parts" && context.unsafe_depth == 0 {
+        &diagnostics.push(sema_error("E3101", span, "`core.http.server.__response_parts` requires an audited `#Unsafe` region", "the transport transfer trusts the source response policy and consumes body ownership", "wrap the transfer in `#Unsafe(\"normalized response ownership transfer\") { … }`"))
     }
     actual_accesses :: loop argument in args -> argument.convention
     signature :: sema_call_core_typed_signature(canonical_record, args.len(), actual_accesses, [Type]{}) ?? {

@@ -35,3 +35,27 @@ fn _() {
     assert(!jobs.is_terminal(JobQueueState.Queued))
     assert(jobs.is_cancelled(JobQueueState.Cancelled))
 }
+
+#Test("response policy transfers defaults and retains the one-shot body")
+fn _() {
+    response :: server.response(99, "must not publish")
+    assert(response.status() == 500)
+    assert(response.protocol() == "HTTP/1.1")
+    assert(response.remote_address() == "")
+    assert(response.redirect_history().len() == 0)
+    assert(response.timings().len() == 0)
+    assert(!response.reused_connection())
+    assert(response.raw_content_encoding() == None)
+    assert((response.body().text(64) ?? panic("error body")) == "500 Internal Server Error")
+    if response.body().text(64) == {
+        .Err(.BodyConsumed) -> {}
+        else -> panic("response body must be consumed once")
+    }
+    events :: server.sse("ready")
+    assert((events.header("content-type") ?? panic("SSE content type")) == "text/event-stream")
+    assert((events.header("cache-control") ?? panic("SSE cache")) == "no-cache")
+    assert((events.body().text(64) ?? panic("SSE body")) == "data: ready\n\n")
+    json :: server.json(200, "witness")
+    assert((json.header("content-type") ?? panic("JSON content type")) == "application/json; charset=utf-8")
+    assert((json.body().text(64) ?? panic("JSON body")) == "\"witness\"")
+}

@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 3d270eb503c5a93f8977daf6cb132084ba5c1874ce617d3560b4cd65cb6714ad
+// Source SHA-256: 382b730b28dc024fc6a81e00b89edbb34a0bfd03a4acce19bbe1c69279cbca83
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -392,7 +392,7 @@ const CORE_MODULE_52_MEMBERS: &[&str] = &["Client", "Proxy", "RedirectPolicy", "
 const CORE_MODULE_52_TYPES: &[(&str, CoreLeafKind)] = &[("Session", CoreLeafKind::Plain), ("Client", CoreLeafKind::Plain), ("Proxy", CoreLeafKind::Plain), ("RedirectPolicy", CoreLeafKind::Enum(&["Disabled", "Limited", "All"]))];
 const CORE_MODULE_52_DEPENDENCIES: &[&str] = &["core.http"];
 
-const CORE_MODULE_53_MEMBERS: &[&str] = &["access_log", "bind", "cors", "cors_policy", "json", "mux", "request_id", "response", "serve", "serve_once", "serve_once_listener", "sse", "static_file", "static_file_range", "static_files", "tls"];
+const CORE_MODULE_53_MEMBERS: &[&str] = &["__response_parts", "__route_template", "access_log", "bind", "cors", "cors_policy", "json", "mux", "request_id", "response", "serve", "serve_once", "serve_once_listener", "sse", "static_file", "static_file_range", "static_files", "tls"];
 const CORE_MODULE_53_TYPES: &[(&str, CoreLeafKind)] = &[];
 const CORE_MODULE_53_DEPENDENCIES: &[&str] = &["core.http"];
 

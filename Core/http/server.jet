@@ -1,5 +1,5 @@
 use core as core
-use core.http.[HTTPError, HTTPRequest, HTTPResponse]
+use core.http.[Body, Headers, HTTPError, HTTPRequest, HTTPResponse]
 use core.http.server as provider
 
 // core.http.server — source policy over native HTTP transport carriers.
@@ -43,11 +43,30 @@ pub fn serve_once_listener(listener: TCPListener, mux: HTTPMux) HTTPError! {
 }
 
 pub fn response(status: Int, body: String) -> HTTPResponse Never! {
-    provider.response(status, body)
+    response_body(status, Body.Text(body), core.http.headers())
+}
+
+// Head policy stays in Jet. The resource transfer consumes the selected body
+// once without reading it; streaming bodies are never flattened into text.
+fn response_body(status: Int, body: ^Body, headers: ^Headers) -> HTTPResponse Never! {
+    selected := status
+    payload := body
+    if selected < 100 || selected > 599 {
+        selected = 500
+        payload = Body.Text("500 Internal Server Error")
+    }
+    #Unsafe("move the normalized response head and one-shot body into the transport carrier") {
+        core.http.server.__response_parts(
+            I64{selected}, "HTTP/1.1", headers, payload, core.http.headers(),
+            None, false, "HTTP/1.1", "", [String]{}, [I64]{}, false, None
+        )
+    }
 }
 
 pub fn json<T: Encode>(status: Int, body: T) -> HTTPResponse Never! {
-    provider.json<T>(status, body)
+    text :: core.encoding.json.to_string(body.encode())
+    fields :: core.http.headers_set(core.http.headers(), "content-type", "application/json; charset=utf-8")
+    response_body(status, Body.Text(text), fields)
 }
 
 pub fn static_file(path: String, content_type: String) -[FS, Net, Time.Wait]> HTTPResponse HTTPError! {
@@ -67,7 +86,9 @@ pub fn tls(cert: String, key: String) -> HTTPServerTLS Never! {
 }
 
 pub fn sse(body: String) -> HTTPResponse Never! {
-    provider.sse(body)
+    fields :: core.http.headers_set(core.http.headers(), "content-type", "text/event-stream")
+    headers :: core.http.headers_set(fields, "cache-control", "no-cache")
+    response_body(200, Body.Text("data: {body}\n\n"), headers)
 }
 
 pub fn cors_policy(origins: [String] | HTTPCorsOrigins, methods: [String]{[String]{}}, headers: [String]{[String]{}}, credentials: Bool{false}, max_age: Int{86400}) -> HTTPCorsPolicy HTTPError! {
@@ -161,4 +182,19 @@ fn _() {
     assert(access_log_parts("GET", "/雪/☃?secret=x", None, 200) == "GET /雪/☃ 200")
     assert(access_log_parts("GET", "?secret=x", None, 200) == "GET  200")
     assert(access_log_parts("GET", "", None, 200) == "GET  200")
+}
+
+#Test("response policy normalizes only statuses outside 100 through 599") {
+    assert(response(99, "discarded").status == 500)
+    assert(response(100, "").status == 100)
+    assert(response(599, "retained").status == 599)
+    assert(response(600, "discarded").status == 500)
+    assert(response(-9223372036854775808, "discarded").status == 500)
+    assert(response(9223372036854775807, "discarded").status == 500)
+}
+
+#Test("response transport accepts every source body kind by move") {
+    assert(response_body(204, Body.Empty, core.http.headers()).status == 204)
+    assert(response_body(200, Body.Text("text"), core.http.headers()).status == 200)
+    assert(response_body(201, Body.Bytes([U8]{0, 255}), core.http.headers()).status == 201)
 }

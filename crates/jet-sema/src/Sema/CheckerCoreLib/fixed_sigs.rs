@@ -5281,6 +5281,24 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("HTTPRequest".to_string()))],
             Some(Type::Option(Box::new(Type::String))),
         )),
+        ("core.http.server", "__response_parts") => Some((
+            vec![
+                (read, Type::IntN { signed: true, bits: 64 }),
+                (moved, Type::String),
+                (moved, Type::Named("Headers".to_string())),
+                (moved, Type::Named("Body".to_string())),
+                (moved, Type::Named("Headers".to_string())),
+                (read, Type::Option(Box::new(Type::IntN { signed: false, bits: 64 }))),
+                (read, Type::Bool),
+                (moved, Type::String),
+                (moved, Type::String),
+                (moved, Type::List(Box::new(Type::String))),
+                (moved, Type::List(Box::new(Type::IntN { signed: true, bits: 64 }))),
+                (read, Type::Bool),
+                (moved, Type::Option(Box::new(Type::String))),
+            ],
+            Some(Type::Named("HTTPResponse".to_string())),
+        )),
         ("core.net", "tls_connect") => Some((
             vec![
                 (AccessConvention::Move, Type::Named("TCPStream".to_string())),

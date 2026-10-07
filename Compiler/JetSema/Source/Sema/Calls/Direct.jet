@@ -879,6 +879,22 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     if candidate.generic_params.len() > 0 && candidate.generic_substitutions.len() != candidate.generic_params.len() {
         inferred_facts := sema_call_collect_inference_facts(params, binding, source_args, environment, &scopes, &state, &tail_store, &context)
         sema_call_lambda_failure_facts(&inferred_facts, candidate.generic_params, params, binding, source_args, environment, &scopes, &state, &tail_store, &context)
+        if sema_call_http_source_json_target(candidate, environment) {
+            loop parameter in candidate.generic_params {
+                loop bound in parameter.bounds {
+                    if bound != "Encode" -> next
+                    loop index in 0..<inferred_facts.parameter_types.len() {
+                        if inferred_facts.parameter_types[index] == Type.Named{name: parameter.name} {
+                            body_type :: inferred_facts.argument_types[index]
+                            if !sema_serde_type_is_admissible(environment, body_type, SemaSerdeDirection.Encode) {
+                                sema_call_http_check_serde(SemaSerdeDirection.Encode, body_type, source_args[index].expr.span(), environment, &diagnostics)
+                                return None
+                            }
+                        }
+                    }
+                }
+            }
+        }
         inferred :: sema_call_infer_direct_target_from_types(candidate, inferred_facts.parameter_types, inferred_facts.argument_types, expected, environment, &scopes, call.name_span, &diagnostics) ?? return None
         candidate = inferred
         params = sema_call_params_from_type(candidate.signature) ?? {

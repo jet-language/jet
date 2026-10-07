@@ -1432,7 +1432,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 3d270eb503c5a93f8977daf6cb132084ba5c1874ce617d3560b4cd65cb6714ad
+// Source SHA-256: 382b730b28dc024fc6a81e00b89edbb34a0bfd03a4acce19bbe1c69279cbca83
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -1686,9 +1686,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.http.server", "static_file"),
     ("core.http.server", "static_file_range"),
     ("core.http.server", "mux"),
-    ("core.http.server", "response"),
-    ("core.http.server", "sse"),
-    ("core.http.server", "json"),
+    ("core.http.server", "__response_parts"),
     ("core.http.server", "cors"),
     ("core.http.server", "request_id"),
     ("core.files", "write_at"),
@@ -3071,9 +3069,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.http.server", "static_file_range", "jet_http_srv_static_file_range", false, &[true, true, true], ) .without_direct_aot().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.http.server", "static_files", "jet_http_srv_static_files_mount_defaulted", false, &[true, true, true], ) .with_max_arity(6) .without_direct_aot(),
     CoreCallRecord::new("core.http.server", "mux", "jet_http_mux_new", false, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.http.server", "response", "jet_http_srv_response", false, &[false, true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.http.server", "sse", "jet_http_srv_sse", false, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.http.server", "json", "jet_http_srv_json", false, &[false, true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.http.server", "__response_parts", "jet_http_srv_raw_response_parts", true, &[false, false, false, false, false, false, false, false, false, false, false, false, false]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.http.server", "cors", "jet_http_srv_install_cors", false, &[true, true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.http.server", "__route_template", "jet_http_srv_raw_route_template", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.http.server", "request_id", "jet_http_srv_install_request_id", false, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
