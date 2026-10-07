@@ -33,6 +33,14 @@ Both commands retain their direct confirmation output under `--json` and
 Missing-path diagnostics use deterministic directory order; Rust's OS directory
 order is unspecified. Path occurrences, including duplicates, remain counted.
 
+`jet inspect schema status` reads published snapshots and runs the canonical
+load-only E0910 advisory diff; an unavailable source bundle does not prevent
+listing its snapshots. `schema squash --before <version>` snapshots the current
+published declarations and records the cutoff without editing source. Only
+successful snapshot writes are counted. These commands keep their direct
+human report under `--json` and `--quiet`; neither mode creates a schema-status
+JSON protocol.
+
 ## Project jobs
 
 Write a named chore as `#Job fn deploy(region: String) { … }`, then run

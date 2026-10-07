@@ -1,0 +1,16 @@
+use jet_sema.[SchemaSnapshot, SnapshotField]
+
+fn schema_commands_require(ok: Bool, label: String) Never! {
+    if !ok -> panic("schema command contract: {label}")
+}
+
+fn run() {
+    empty :: jet_cli_schema_status_text([SchemaSnapshot]{}, [String]{})
+    schema_commands_require(empty == "no published schemas yet.\nnote: a `#PublishedSchema` struct is snapshotted into .jet/cache/schema/ on `jet registry publish`.\n", "no valid snapshots")
+    snapshot :: SchemaSnapshot{schema_version: U32{4294967295}, type_name: "Account", published_version: "1.0.0", squashed_before: Val("0.9.0"), fields: [SnapshotField]{SnapshotField{name: "name", ty: "String"}, SnapshotField{name: "active", ty: "Bool"}}}
+    shown :: jet_cli_schema_status_text([SchemaSnapshot]{snapshot}, [String]{"Account"})
+    schema_commands_require(shown == "published schemas in this project:\n\n  Account — published 1.0.0 (squashed before 0.9.0)\n    2 field(s):\n      name: String\n      active: Bool\n    pending: a breaking change vs this snapshot — `jet build` would report E0910\n\n", "published shape and advisory pending attribution")
+    schema_commands_require(!jet_cli_schema_status_text([SchemaSnapshot]{snapshot}, [String]{"Other"}).contains("pending:"), "unrelated pending type")
+    schema_commands_require(jet_cli_schema_squash_summary(0, "anything") == "no `#PublishedSchema` structs found — nothing to squash.\n", "zero successful writes")
+    schema_commands_require(jet_cli_schema_squash_summary(2, "") == "\nok: 2 snapshot(s) re-baselined. Migration blocks for versions before  are no longer required.\nnote: this rewrote .jet/cache/schema/ only — your source is unchanged. Commit the updated snapshots.\n", "empty cutoff accepted")
+}
