@@ -14003,12 +14003,8 @@ impl<'a> RustEmitter<'a> {
                 let source = format!(
                     "fn {wrapper}() -> JetTestOutcome {{\n\
                          let __jet_result = jet_test_run({expected_failure}, || {{ {body} }});\n\
-                         let __jet_stdout = jet_test_take_output();\n\
-                         let (__jet_failed, __jet_stderr) = match __jet_result {{ Ok(()) => (false, String::new()), Err(__jet_error) => (true, __jet_error) }};\n\
-                         let __jet_skipped = jet_test_take_whole_skip();\n\
-                         JetTestOutcome {{ name: {name_literal}.to_string(), ok: __jet_skipped || (__jet_failed == {}), expected_failure: {expected_failure}, skipped: __jet_skipped, stdout: __jet_stdout, stderr: __jet_stderr, property_cases: None }}\n\
+                         jet_test_unit_outcome({name_literal}.to_string(), {expected_failure}, __jet_result)\n\
                      }}\n",
-                    test.expected_failure,
                 );
                 out.push_str(&source);
             }
