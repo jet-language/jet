@@ -668,42 +668,6 @@ fn ambient_fs_grant_value(grant: ui_rt::JetUiFsGrant) -> CtValue {
     )
 }
 
-fn ambient_file_request_value(request: ui_rt::JetUiFileDialogRequest) -> CtValue {
-    let kind = ambient_enum_value(
-        "UIFileDialogKind",
-        match request.kind {
-            ui_rt::JetUiFileDialogKind::Open => "Open",
-            ui_rt::JetUiFileDialogKind::Save => "Save",
-        },
-        Vec::new(),
-    );
-    let initial_directory = request
-        .initial_directory
-        .map(ambient_granted_path_value);
-    ambient_struct(
-        "UIFileDialogRequest",
-        vec![
-            ("kind".to_string(), kind),
-            ("title".to_string(), CtValue::Str(request.title)),
-            ("grant".to_string(), ambient_fs_grant_value(request.grant)),
-            (
-                "initial_directory".to_string(),
-                ambient_option_value("UIGrantedPath", initial_directory),
-            ),
-            (
-                "filters".to_string(),
-                CtValue::List(
-                    request
-                        .filters
-                        .into_iter()
-                        .map(ambient_file_filter_value)
-                        .collect(),
-                ),
-            ),
-            ("allow_multiple".to_string(), CtValue::Bool(request.allow_multiple)),
-        ],
-    )
-}
 
 fn ambient_file_selection_value(selection: ui_rt::JetUiFileDialogSelection) -> CtValue {
     ambient_struct(
@@ -915,6 +879,34 @@ fn ambient_node(
     )?
     .map(|value| ambient_shortcut(value, span))
     .transpose()?;
+    let style = ambient_optional(ambient_field(value, "UINode", "style", span)?, "UI style wire", span)?
+        .map(|wire| {
+            let CtValue::Tuple(words) = wire else {
+                return Err(unsupported("UI style wire must be a five-word tuple", span));
+            };
+            if words.len() != 5 {
+                return Err(unsupported("UI style wire must contain five words", span));
+            }
+            let color = |kind: &CtValue, word: &CtValue| -> Result<Option<ui_rt::JetTuiColor>, Diagnostic> {
+                let word = ambient_int(word, "UI style word", span)?;
+                Ok(match ambient_int(kind, "UI style tag", span)? {
+                    0 => None,
+                    1 => Some(ui_rt::JetTuiColor::ANSI16(word as u8)),
+                    2 => Some(ui_rt::JetTuiColor::ANSI256(word as u8)),
+                    3 => Some(ui_rt::JetTuiColor::RGB((word >> 16) as u8, (word >> 8) as u8, word as u8)),
+                    _ => return Err(unsupported("invalid audited UI color carrier", span)),
+                })
+            };
+            let flags = ambient_int(&words[4], "UI style flags", span)?;
+            Ok(ui_rt::JetTuiStyle {
+                foreground: color(&words[0], &words[1])?,
+                background: color(&words[2], &words[3])?,
+                bold: flags & 1 != 0,
+                dim: flags & 2 != 0,
+                underline: flags & 4 != 0,
+            })
+        })
+        .transpose()?;
     Ok(ui_rt::JetUiNode {
         label,
         width,
@@ -923,7 +915,7 @@ fn ambient_node(
         accessibility,
         ime,
         color,
-        style: None,
+        style,
         kind,
         children,
         key: None,
@@ -1043,6 +1035,22 @@ fn ambient_node_value(node: ui_rt::JetUiNode) -> CtValue {
         },
         Vec::new(),
     );
+    let style = node.style.map(|style| {
+        let color = |color: Option<ui_rt::JetTuiColor>| -> (i64, i64) {
+            match color {
+                None => (0, 0),
+                Some(ui_rt::JetTuiColor::ANSI16(index)) => (1, i64::from(index)),
+                Some(ui_rt::JetTuiColor::ANSI256(index)) => (2, i64::from(index)),
+                Some(ui_rt::JetTuiColor::RGB(red, green, blue)) =>
+                    (3, (i64::from(red) << 16) | (i64::from(green) << 8) | i64::from(blue)),
+            }
+        };
+        let (fg_kind, fg_word) = color(style.foreground);
+        let (bg_kind, bg_word) = color(style.background);
+        let flags = i64::from(style.bold) | (i64::from(style.dim) << 1) | (i64::from(style.underline) << 2);
+        CtValue::Tuple(vec![CtValue::Int(fg_kind), CtValue::Int(fg_word),
+            CtValue::Int(bg_kind), CtValue::Int(bg_word), CtValue::Int(flags)])
+    });
     ambient_struct(
         "UINode",
         vec![
@@ -1070,6 +1078,7 @@ fn ambient_node_value(node: ui_rt::JetUiNode) -> CtValue {
             ),
             ("kind".to_string(), kind),
             ("children".to_string(), CtValue::List(children)),
+            ("style".to_string(), ambient_option_value("UI style wire", style)),
             (
                 "shortcut".to_string(),
                 ambient_option_value("UIShortcut", node.shortcut.map(ambient_shortcut_value)),
@@ -1806,32 +1815,41 @@ fn jet_ui_host_ambient_core_call(
         })());
     }
     match (module, method) {
-        ("core.ui", "node") => Some((|| {
-            ambient_expect_arity(&args, 3, "core.ui.node", span)?;
-            let label = ambient_string(&args[0], "core.ui.node", span)?;
-            let width = ambient_float(&args[1], "core.ui.node", span)?;
-            let height = ambient_float(&args[2], "core.ui.node", span)?;
-            Ok(ambient_node_value(ui_rt::jet_ui_node(&label, width, height)))
+        ("core.tui", "capabilities") => Some((|| {
+            ambient_expect_arity(&args, 0, "core.tui.capabilities", span)?;
+            let caps = ui_rt::jet_tui_capabilities();
+            let profile = match caps.profile {
+                ui_rt::JetTuiColorProfile::ANSI16 => "ANSI16",
+                ui_rt::JetTuiColorProfile::ANSI256 => "ANSI256",
+                ui_rt::JetTuiColorProfile::TrueColor => "TrueColor",
+                ui_rt::JetTuiColorProfile::ASCII => "ASCII",
+            };
+            Ok(ambient_struct("TUICapabilities", vec![
+                ("profile".to_string(), ambient_enum_value("TUIColorProfile", profile, Vec::new())),
+                ("color".to_string(), CtValue::Bool(caps.color)),
+                ("unicode".to_string(), CtValue::Bool(caps.unicode)),
+                ("mouse".to_string(), CtValue::Bool(caps.mouse)),
+                ("resize".to_string(), CtValue::Bool(caps.resize)),
+                ("clipboard".to_string(), CtValue::Bool(caps.clipboard)),
+                ("width".to_string(), CtValue::Int(caps.width as i64)),
+                ("height".to_string(), CtValue::Int(caps.height as i64)),
+            ]))
         })()),
-        ("core.ui", "text") => Some((|| {
-            ambient_expect_arity(&args, 1, "core.ui.text", span)?;
-            let text = ambient_string(&args[0], "core.ui.text", span)?;
-            Ok(ambient_node_value(ui_rt::jet_ui_text(&text)))
-        })()),
-        ("core.ui", "node_accessibility") => Some((|| {
-            ambient_expect_arity(&args, 2, "core.ui.node_accessibility", span)?;
-            let node = ambient_node(&args[0], span)?;
-            let accessibility = ambient_accessibility(&args[1], span)?;
-            Ok(ambient_node_value(ui_rt::jet_ui_node_accessibility(
-                node,
-                accessibility,
+        ("core.ui", "__node_transfer") => Some((|| {
+            let call = "core.ui.__node_transfer";
+            ambient_expect_arity(&args, 15, call, span)?;
+            let label = ambient_string(&args[0], call, span)?;
+            let color = ambient_string(&args[7], call, span)?;
+            let children = ambient_list(&args[5], call, span)?.iter()
+                .map(|child| ambient_node(child, span)).collect::<Result<Vec<_>, _>>()?;
+            Ok(ambient_node_value(ui_rt::jet_ui_raw_node_transfer(
+                &label, ambient_float(&args[1], call, span)?, ambient_float(&args[2], call, span)?,
+                ambient_int(&args[3], call, span)?.into(), ambient_int(&args[4], call, span)?.into(), children,
+                ambient_bool(&args[6], call, span)?, &color, ambient_int(&args[8], call, span)?.into(),
+                ambient_bool(&args[9], call, span)?, ambient_int(&args[10], call, span)?.into(),
+                ambient_int(&args[11], call, span)?.into(), ambient_int(&args[12], call, span)?.into(),
+                ambient_int(&args[13], call, span)?.into(), ambient_int(&args[14], call, span)?.into(),
             )))
-        })()),
-        ("core.ui", "node_shortcut") => Some((|| {
-            ambient_expect_arity(&args, 2, "core.ui.node_shortcut", span)?;
-            let node = ambient_node(&args[0], span)?;
-            let shortcut = ambient_shortcut(&args[1], span)?;
-            Ok(ambient_node_value(ui_rt::jet_ui_node_shortcut(node, shortcut)))
         })()),
         ("core.ui", "text_input") => Some((|| {
             ambient_expect_arity(&args, 2, "core.ui.text_input", span)?;
@@ -1853,10 +1871,6 @@ fn jet_ui_host_ambient_core_call(
                 ui_rt::jet_ui_host_file_filter(&label, &extensions, &mime_types),
                 ambient_file_filter_value,
             ))
-        })()),
-        ("core.ui.host", "file_filter_text") => Some((|| {
-            ambient_expect_arity(&args, 0, "core.ui.host.file_filter_text", span)?;
-            Ok(ambient_file_filter_value(ui_rt::jet_ui_host_file_filter_text()))
         })()),
         ("core.ui.host", "fs_rights_read") => Some((|| {
             ambient_expect_arity(&args, 0, "core.ui.host.fs_rights_read", span)?;
@@ -1880,20 +1894,6 @@ fn jet_ui_host_ambient_core_call(
                 ui_rt::jet_ui_host_fs_grant(&root, rights),
                 ambient_fs_grant_value,
             ))
-        })()),
-        ("core.ui.host", "open_request") => Some((|| {
-            ambient_expect_arity(&args, 1, "core.ui.host.open_request", span)?;
-            let grant = ambient_fs_grant(&args[0], span)?;
-            Ok(ambient_file_request_value(ui_rt::jet_ui_host_open_request(
-                grant,
-            )))
-        })()),
-        ("core.ui.host", "save_request") => Some((|| {
-            ambient_expect_arity(&args, 1, "core.ui.host.save_request", span)?;
-            let grant = ambient_fs_grant(&args[0], span)?;
-            Ok(ambient_file_request_value(ui_rt::jet_ui_host_save_request(
-                grant,
-            )))
         })()),
         ("core.ui.host", "open_file") => Some((|| {
             ambient_expect_arity(&args, 1, "core.ui.host.open_file", span)?;

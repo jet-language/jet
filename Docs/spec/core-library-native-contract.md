@@ -301,9 +301,33 @@ ranges, fill weights round and saturate to a 16-bit unsigned weight, and event
 modifier words retain their low byte. Layout scales oversubscribed fixed sizes
 uniformly, then distributes unused space in fill-weight order. Styling keeps
 the ANSI code order bold, dim, underline, foreground, background and projects
-text to ASCII only when Unicode presentation is unavailable. Terminal capability
-sampling and UI-node rendering are separate host boundaries, not alternative
-implementations of these portable operations.
+text to ASCII only when Unicode presentation is unavailable. List and table
+formatting also lives in Jet: clipping counts terminal-cell widths, table
+padding excludes the final cell, and an empty list retains one empty text node.
+
+`core.ui` owns geometry, input-event construction, node defaults, container
+measurement, and text widths in Jet. Its retained renderer handle crosses the
+audited `core.ui.__node_transfer` leaf rather than importing source TUI nominal
+types into a different native layout. Both compiler halves require `#Unsafe`
+at this boundary. The source packer supplies role/kind tags, color presence,
+children, a six-bit absent-metadata carrier, and optional style presence plus
+five normalized words: foreground kind/word, background kind/word, and style
+flags. Color kinds are absent/ANSI16/ANSI256/RGB; RGB uses packed byte channels,
+and flags use bits 0/1/2 for bold/dim/underline. These are storage projections,
+not native defaults or alternate presentation policy. The node-construction
+wire accepts absent accessibility/IME/key/callback/shortcut slots only.
+Independent accessibility/shortcut slot transfers preserve every other node
+slot and take an explicit presence tag. Viewport transfer receives a device
+tag and source-selected width/height/scale; dialog-request transfer receives
+kind/title, an existing grant, explicit directory absence, filters and
+multiple-selection. Host metadata validation remains a separate boundary.
+
+Terminal capability sampling and UI-node rendering remain host boundaries.
+The interpreter samples actual host capabilities instead of synthesizing
+ASCII/80×24 facts at compile time. Preview sessions, native/browser renderers,
+host services and their authority/error carriers require their own real Jet
+host primitives before their remaining policy can be cut over; portable
+constructor ownership does not claim these boundaries are Jet-only.
 
 ## Dependency order
 

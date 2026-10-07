@@ -145,11 +145,17 @@ pub fn save_file(request: UIFileDialogRequest) -[FS]> UIFileDialogSelection UIHo
 }
 
 pub fn open_request(grant: UIFSGrant) -> UIFileDialogRequest Never! {
-    core.ui.host.open_request(grant)
+    transfer_request(0, "Open File", grant, true, [UIFileFilter]{}, false)
 }
 
 pub fn save_request(grant: UIFSGrant) -> UIFileDialogRequest Never! {
-    core.ui.host.save_request(grant)
+    transfer_request(1, "Save File", grant, true, [UIFileFilter]{}, false)
+}
+
+fn transfer_request(kind: Int, title: String, grant: UIFSGrant, directory_absent: Bool, filters: [UIFileFilter], multiple: Bool) -> UIFileDialogRequest Never! {
+    #Unsafe("Core UI dialog request transfer: validated grant and explicit absent directory, filter list, and multiple-selection slot") {
+        core.ui.host.__request_transfer(kind, title, grant, directory_absent, filters, multiple)
+    }
 }
 
 pub fn file_filter(label: String, extensions: [String], mime_types: [String]) -> UIFileFilter UIHostError! {
@@ -164,7 +170,7 @@ pub fn file_filter(label: String, extensions: [String], mime_types: [String]) ->
 }
 
 pub fn file_filter_text() -> UIFileFilter Never! {
-    core.ui.host.file_filter_text()
+    UIFileFilter{label: "Text", extensions: [String]{"txt"}, mime_types: [String]{"text/plain"}}
 }
 
 pub fn fs_grant(path: String, rights: UIFSRights) -> UIFSGrant UIHostError! {

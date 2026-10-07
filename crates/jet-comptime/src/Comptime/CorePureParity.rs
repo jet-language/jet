@@ -14,7 +14,7 @@ use crate::Comptime::Diagnostics::unsupported;
 use crate::Comptime::EmailAdapter;
 use crate::Comptime::Methods::as_float;
 use crate::Comptime::{ServicesLite, SyncLite};
-use jet_foundation::Prelude::{jet_as_bytes as as_bytes, tui as tui_kernel};
+use jet_foundation::Prelude::jet_as_bytes as as_bytes;
 use jet_foundation::StructuralDebug::jet_debug_map;
 use jet_foundation::Syntax::CoreCallPureRoute;
 
@@ -133,27 +133,16 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::Date, "new") => date_new_call(args, span),
         (CoreCallPureRoute::Date, "parse") => date_parse_call(args, span),
         (CoreCallPureRoute::DateTime, "from_timestamp") => datetime_from_timestamp(args, span),
-        (CoreCallPureRoute::Ui, "point") => ui_point(args, span),
-        (CoreCallPureRoute::Ui, "size") => ui_size(args, span),
-        (CoreCallPureRoute::Ui, "rect") => ui_rect(args, span),
-        (CoreCallPureRoute::Ui, "constraint") => ui_constraint(args, span),
-        (CoreCallPureRoute::Ui, "node") => ui_node(args, span, None, None, "Custom"),
-        (CoreCallPureRoute::Ui, "node_role") => ui_node_role(args, span),
-        (CoreCallPureRoute::Ui, "node_color") => ui_node_color(args, span),
-        (CoreCallPureRoute::Ui, "text") => ui_text(args, span),
+        (CoreCallPureRoute::Ui, "__node_transfer") => ui_raw_node_transfer(args, span),
+        (CoreCallPureRoute::Ui, "__viewport_transfer") => ui_raw_viewport_transfer(args, span),
+        (CoreCallPureRoute::Ui, "__request_transfer") => ui_raw_request_transfer(args, span),
+        (CoreCallPureRoute::Ui, "__accessibility_transfer") => ui_raw_optional_slot_transfer(args, span, "accessibility", "UIAccessibility"),
+        (CoreCallPureRoute::Ui, "__shortcut_transfer") => ui_raw_optional_slot_transfer(args, span, "shortcut", "UIShortcut"),
         (CoreCallPureRoute::Ui, "button") => ui_button(args, span),
-        (CoreCallPureRoute::Ui, "box") => ui_box(args, span),
         (CoreCallPureRoute::Ui, "aria_role_button") => Ok(ui_role("Button")),
         (CoreCallPureRoute::Ui, "aria_role_text_input") => Ok(ui_role("TextInput")),
         (CoreCallPureRoute::Ui, "aria_role_label") => Ok(ui_role("Label")),
         (CoreCallPureRoute::Ui, "aria_role_container") => Ok(ui_role("Container")),
-        (CoreCallPureRoute::Ui, "key_event") => ui_key_event(args, span),
-        (CoreCallPureRoute::Ui, "resize_event") => ui_resize_event(args, span),
-        (CoreCallPureRoute::Ui, "ascii") => tui_ascii(args, span),
-        (CoreCallPureRoute::Ui, "capabilities") => Ok(tui_capabilities()),
-        (CoreCallPureRoute::Ui, "display_width") => tui_display_width(args, span),
-        (CoreCallPureRoute::Ui, "list") => tui_list(args, span),
-        (CoreCallPureRoute::Ui, "table") => tui_table(args, span),
         (CoreCallPureRoute::Io, "style_force") => io_style_force(args, span),
         (CoreCallPureRoute::Net, "ip_addr") => net_ip_addr(args, span),
         (CoreCallPureRoute::Net, "ip_to_string") => net_string_field(args, "IPAddr", "text", span),
@@ -1956,73 +1945,9 @@ fn ui_kind(variant: &str) -> CtValue {
     }
 }
 
-fn ui_point(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(structure(
-        "Point",
-        vec![
-            ("x", CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?))),
-            ("y", CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?))),
-        ],
-    ))
-}
 
-fn ui_size(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(structure(
-        "Size",
-        vec![
-            (
-                "width",
-                CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?)),
-            ),
-            (
-                "height",
-                CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?)),
-            ),
-        ],
-    ))
-}
 
-fn ui_rect(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(structure(
-        "Rect",
-        vec![
-            ("x", CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?))),
-            ("y", CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?))),
-            (
-                "width",
-                CtValue::Float(CtFloat::f64(float_arg(args, 2, span)?)),
-            ),
-            (
-                "height",
-                CtValue::Float(CtFloat::f64(float_arg(args, 3, span)?)),
-            ),
-        ],
-    ))
-}
 
-fn ui_constraint(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(structure(
-        "SizeConstraint",
-        vec![
-            (
-                "min_width",
-                CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?)),
-            ),
-            (
-                "min_height",
-                CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?)),
-            ),
-            (
-                "max_width",
-                CtValue::Float(CtFloat::f64(float_arg(args, 2, span)?)),
-            ),
-            (
-                "max_height",
-                CtValue::Float(CtFloat::f64(float_arg(args, 3, span)?)),
-            ),
-        ],
-    ))
-}
 
 fn ui_node_value_with_metadata(
     label: String,
@@ -2067,6 +1992,7 @@ fn ui_node_value_with_metadata(
             ),
             ("kind", ui_kind(kind)),
             ("children", CtValue::List(children)),
+            ("style", CtValue::absent(Type::Tuple(vec![Type::Int; 5]))),
             (
                 "shortcut",
                 shortcut.map_or(
@@ -2100,54 +2026,99 @@ fn ui_node_value(
     )
 }
 
-fn ui_node(
-    args: &[CtValue],
-    span: Span,
-    role: Option<CtValue>,
-    color: Option<String>,
-    kind: &str,
-) -> EvalResult {
-    Ok(ui_node_value(
-        string_arg(args, 0, span)?.to_string(),
-        float_arg(args, 1, span)?,
-        float_arg(args, 2, span)?,
-        role,
-        color,
-        kind,
-        Vec::new(),
-    ))
-}
-
-fn ui_node_role(args: &[CtValue], span: Span) -> EvalResult {
-    let role = args
-        .get(3)
-        .cloned()
-        .ok_or_else(|| unsupported("core.ui.node_role(): missing role", span))?;
-    let kind = match &role {
-        CtValue::Enum { variant, .. } if variant == "Button" => "Button",
-        CtValue::Enum { variant, .. } if variant == "TextInput" => "TextInput",
-        _ => "Custom",
+// A retained UI node is opaque to Source. Its private style slot retains the
+// source packer's five normalized words without substituting a native policy.
+fn ui_raw_node_transfer(args: &[CtValue], span: Span) -> EvalResult {
+    if int_arg(args, 8, span)? != 63 {
+        return Err(unsupported("invalid audited UI absent-slot carrier", span));
+    }
+    let role = match int_arg(args, 3, span)? {
+        -1 => None,
+        0 => Some(ui_role("Button")),
+        1 => Some(ui_role("TextInput")),
+        2 => Some(ui_role("Label")),
+        3 => Some(ui_role("Container")),
+        _ => return Err(unsupported("invalid audited UI role carrier", span)),
     };
-    ui_node(args, span, Some(role), None, kind)
+    let kind = match int_arg(args, 4, span)? {
+        0 => "Custom",
+        1 => "Text",
+        2 => "Box",
+        3 => "Button",
+        4 => "TextInput",
+        _ => return Err(unsupported("invalid audited UI kind carrier", span)),
+    };
+    let children = match args.get(5) {
+        Some(CtValue::List(children)) => children.clone(),
+        _ => return Err(unsupported("UI transfer needs retained child slots", span)),
+    };
+    let color = if as_bool(one(args, 6, "core.ui", "__node_transfer", span)?, span)? {
+        Some(string_arg(args, 7, span)?.to_owned())
+    } else {
+        None
+    };
+    let mut node = ui_node_value(string_arg(args, 0, span)?.to_owned(),
+        float_arg(args, 1, span)?, float_arg(args, 2, span)?, role, color, kind, children);
+    if as_bool(one(args, 9, "core.ui", "__node_transfer", span)?, span)? {
+        let CtValue::Struct { fields, .. } = &mut node else { unreachable!() };
+        let slot = fields.iter_mut().find(|(name, _)| name == "style").unwrap();
+        slot.1 = CtValue::Present(Box::new(CtValue::Tuple(
+            (10..15).map(|index| int_arg(args, index, span).map(CtValue::Int))
+                .collect::<Result<Vec<_>, _>>()?,
+        )));
+    }
+    Ok(node)
 }
 
-fn ui_node_color(args: &[CtValue], span: Span) -> EvalResult {
-    let color = string_arg(args, 3, span)?.to_string();
-    ui_node(args, span, Some(ui_role("Label")), Some(color), "Custom")
+fn ui_raw_viewport_transfer(args: &[CtValue], span: Span) -> EvalResult {
+    let device = match int_arg(args, 0, span)? {
+        0 => "Phone", 1 => "Tablet", 2 => "Desktop",
+        _ => return Err(unsupported("invalid audited viewport device", span)),
+    };
+    Ok(structure("UIPreviewViewport", vec![
+        ("device", CtValue::Enum { type_name: "UIPreviewDevice".to_string(), variant: device.to_string(), args: Vec::new() }),
+        ("width", CtValue::Int(int_arg(args, 1, span)?)),
+        ("height", CtValue::Int(int_arg(args, 2, span)?)),
+        ("scale", CtValue::Int(int_arg(args, 3, span)?)),
+    ]))
 }
 
-fn ui_text(args: &[CtValue], span: Span) -> EvalResult {
-    let text = string_arg(args, 0, span)?.to_string();
-    Ok(ui_node_value(
-        text.clone(),
-        text.chars().count() as f64,
-        1.0,
-        Some(ui_role("Label")),
-        None,
-        "Text",
-        Vec::new(),
-    ))
+fn ui_raw_request_transfer(args: &[CtValue], span: Span) -> EvalResult {
+    if !as_bool(one(args, 3, "core.ui.host", "__request_transfer", span)?, span)? {
+        return Err(unsupported("audited request carrier has no directory payload", span));
+    }
+    let kind = match int_arg(args, 0, span)? {
+        0 => "Open", 1 => "Save",
+        _ => return Err(unsupported("invalid audited request kind", span)),
+    };
+    Ok(structure("UIFileDialogRequest", vec![
+        ("kind", CtValue::Enum { type_name: "UIFileDialogKind".to_string(), variant: kind.to_string(), args: Vec::new() }),
+        ("title", CtValue::Str(string_arg(args, 1, span)?.to_owned())),
+        ("grant", one(args, 2, "core.ui.host", "__request_transfer", span)?.clone()),
+        ("initial_directory", CtValue::absent(Type::Named("UIGrantedPath".to_string()))),
+        ("filters", one(args, 4, "core.ui.host", "__request_transfer", span)?.clone()),
+        ("allow_multiple", CtValue::Bool(as_bool(one(args, 5, "core.ui.host", "__request_transfer", span)?, span)?)),
+    ]))
 }
+
+fn ui_raw_optional_slot_transfer(args: &[CtValue], span: Span, name: &str, type_name: &str) -> EvalResult {
+    let mut node = one(args, 0, "core.ui", "slot transfer", span)?.clone();
+    let CtValue::Struct { fields, .. } = &mut node else {
+        return Err(unsupported("UI slot transfer needs a retained node", span));
+    };
+    let slot = fields.iter_mut().find(|(field, _)| field == name)
+        .ok_or_else(|| unsupported("UI slot transfer has no named slot", span))?;
+    slot.1 = if as_bool(one(args, 2, "core.ui", "slot transfer", span)?, span)? {
+        CtValue::Present(Box::new(one(args, 1, "core.ui", "slot transfer", span)?.clone()))
+    } else {
+        CtValue::absent(Type::Named(type_name.to_string()))
+    };
+    Ok(node)
+}
+
+
+
+
 
 fn ui_button(args: &[CtValue], span: Span) -> EvalResult {
     let label = string_arg(args, 0, span)?.to_string();
@@ -2191,54 +2162,6 @@ fn ui_button(args: &[CtValue], span: Span) -> EvalResult {
     ))
 }
 
-fn ui_box(args: &[CtValue], span: Span) -> EvalResult {
-    let children = match args.first() {
-        Some(CtValue::List(children)) => children.clone(),
-        _ => return Err(unsupported("core.ui.box() needs [UINode]", span)),
-    };
-    let mut width = 0.0_f64;
-    let mut height = 0.0_f64;
-    for child in &children {
-        width = width.max(as_float(
-            field(child, "UINode", "width")
-                .ok_or_else(|| unsupported("core.ui.box() needs UINode children", span))?,
-            span,
-        )?);
-        height += as_float(
-            field(child, "UINode", "height")
-                .ok_or_else(|| unsupported("core.ui.box() needs UINode children", span))?,
-            span,
-        )?;
-    }
-    Ok(ui_node_value(
-        String::new(),
-        width,
-        height,
-        Some(ui_role("Container")),
-        None,
-        "Box",
-        children,
-    ))
-}
-
-fn ui_key_event(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(CtValue::Enum {
-        type_name: "InputEvent".to_string(),
-        variant: "Key".to_string(),
-        args: vec![(
-            Some("code".to_string()),
-            CtValue::Str(string_arg(args, 0, span)?.to_string()),
-        )],
-    })
-}
-
-fn ui_resize_event(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(CtValue::Enum {
-        type_name: "InputEvent".to_string(),
-        variant: "Resize".to_string(),
-        args: vec![(Some("size".to_string()), ui_size(args, span)?)],
-    })
-}
 
 
 
@@ -2253,47 +2176,6 @@ fn ui_resize_event(args: &[CtValue], span: Span) -> EvalResult {
 
 
 
-fn tui_kernel_capabilities_value(capabilities: tui_kernel::Capabilities) -> CtValue {
-    let profile = match capabilities.profile {
-        tui_kernel::ColorProfile::Ansi16 => tui_profile("ANSI16"),
-        tui_kernel::ColorProfile::Ansi256 => tui_profile("ANSI256"),
-        tui_kernel::ColorProfile::TrueColor => tui_profile("TrueColor"),
-        tui_kernel::ColorProfile::Ascii => tui_profile("ASCII"),
-    };
-    structure(
-        "TUICapabilities",
-        vec![
-            ("profile", profile),
-            ("color", CtValue::Bool(capabilities.color)),
-            ("unicode", CtValue::Bool(capabilities.unicode)),
-            ("mouse", CtValue::Bool(capabilities.mouse)),
-            ("resize", CtValue::Bool(capabilities.resize)),
-            ("clipboard", CtValue::Bool(capabilities.clipboard)),
-            ("width", CtValue::Int(capabilities.width as i64)),
-            ("height", CtValue::Int(capabilities.height as i64)),
-        ],
-    )
-}
-
-
-
-
-
-fn tui_profile(variant: &str) -> CtValue {
-    CtValue::Enum {
-        type_name: "TUIColorProfile".to_string(),
-        variant: variant.to_string(),
-        args: Vec::new(),
-    }
-}
-
-fn tui_capabilities() -> CtValue {
-    tui_kernel_capabilities_value(tui_kernel::capabilities(
-        tui_kernel::ColorProfile::Ascii,
-        80,
-        24,
-    ))
-}
 
 
 
@@ -2301,68 +2183,22 @@ fn tui_capabilities() -> CtValue {
 
 
 
-fn tui_ascii(args: &[CtValue], span: Span) -> EvalResult {
-    let text = string_arg(args, 0, span)?;
-    Ok(CtValue::Str(tui_kernel::ascii(text)))
-}
-
-fn tui_display_width(args: &[CtValue], span: Span) -> EvalResult {
-    let text = string_arg(args, 0, span)?;
-    Ok(CtValue::Int(tui_kernel::display_width(text) as i64))
-}
 
 
 
 
 
 
-fn tui_list(args: &[CtValue], span: Span) -> EvalResult {
-    let items = match one(args, 0, "core.tui", "list", span)? {
-        CtValue::List(values) => values,
-        _ => return Err(unsupported("core.tui.list() needs [String]", span)),
-    };
-    let children = items
-        .iter()
-        .map(|item| {
-            let text = match item {
-                CtValue::Str(value) => value.clone(),
-                _ => return Err(unsupported("core.tui.list() needs [String]", span)),
-            };
-            ui_text(&[CtValue::Str(text)], span)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    ui_box(&[CtValue::List(children)], span)
-}
 
-fn tui_table(args: &[CtValue], span: Span) -> EvalResult {
-    let headers = match one(args, 0, "core.tui", "table", span)? {
-        CtValue::List(values) => values,
-        _ => return Err(unsupported("core.tui.table() needs [String] headers", span)),
-    };
-    let rows = match one(args, 1, "core.tui", "table", span)? {
-        CtValue::List(values) => values,
-        _ => return Err(unsupported("core.tui.table() needs [[String]] rows", span)),
-    };
-    let mut lines = Vec::with_capacity(rows.len() + 1);
-    let join = |row: &[CtValue]| -> Result<CtValue, Diagnostic> {
-        let mut line = String::new();
-        for (index, value) in row.iter().enumerate() {
-            if index != 0 {
-                line.push_str(" | ");
-            }
-            line.push_str(string_arg(std::slice::from_ref(value), 0, span)?);
-        }
-        Ok(CtValue::Str(line))
-    };
-    lines.push(join(headers)?);
-    for row in rows {
-        let CtValue::List(values) = row else {
-            return Err(unsupported("core.tui.table() needs [[String]] rows", span));
-        };
-        lines.push(join(values)?);
-    }
-    tui_list(&[CtValue::List(lines)], span)
-}
+
+
+
+
+
+
+
+
+
 
 fn io_style_force(args: &[CtValue], span: Span) -> EvalResult {
     let style = string_arg(args, 0, span)?;

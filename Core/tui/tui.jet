@@ -17,7 +17,7 @@ use core.ui.[Rect, UINode]
 // Models and layout are pure.  Terminal dimensions are the sole provider
 // seam; drawing remains owned by the selected UI backend.
 
-enum TUIEvent {
+pub enum TUIEvent {
     Key(code: String, modifiers: Int)
     Resize(size: ui.Size)
     Timer(id: String, elapsed_ms: Int)
@@ -27,25 +27,25 @@ enum TUIEvent {
     Close
 }
 
-enum TUIColorProfile {
+pub enum TUIColorProfile {
     ANSI16
     ANSI256
     TrueColor
     ASCII
 }
 
-enum TUIColor {
+pub enum TUIColor {
     ANSI16(Int)
     ANSI256(Int)
     RGB(red: Int, green: Int, blue: Int)
 }
 
-enum TUIDirection {
+pub enum TUIDirection {
     Horizontal
     Vertical
 }
 
-enum TUIConstraint {
+pub enum TUIConstraint {
     Length(Float)
     Min(Float)
     Max(Float)
@@ -53,35 +53,35 @@ enum TUIConstraint {
     Fill(Float)
 }
 
-struct TUICapabilities {
-    profile: TUIColorProfile
-    color: Bool
-    unicode: Bool
-    mouse: Bool
-    resize: Bool
-    clipboard: Bool
-    width: Int
-    height: Int
+pub struct TUICapabilities {
+    pub profile: TUIColorProfile
+    pub color: Bool
+    pub unicode: Bool
+    pub mouse: Bool
+    pub resize: Bool
+    pub clipboard: Bool
+    pub width: Int
+    pub height: Int
 }
 
-struct TUIStyle {
-    foreground: TUIColor?
-    background: TUIColor?
-    bold: Bool
-    dim: Bool
-    underline: Bool
+pub struct TUIStyle {
+    pub foreground: TUIColor?
+    pub background: TUIColor?
+    pub bold: Bool
+    pub dim: Bool
+    pub underline: Bool
 }
 
-struct TUIListState {
-    selected: Int
-    offset: Int
+pub struct TUIListState {
+    pub selected: Int
+    pub offset: Int
 }
 
-fn capabilities() -> TUICapabilities Never! {
+pub fn capabilities() -> TUICapabilities Never! {
     core.tui.capabilities()
 }
 
-fn ascii(value: String) -> String Never! {
+pub fn ascii(value: String) -> String Never! {
     raw :: value.bytes()
     out := [U8]{}
     i := 0
@@ -93,41 +93,41 @@ fn ascii(value: String) -> String Never! {
     }
     String.from_bytes(out) ?? ""
 }
-fn color_ansi16(index: Int) -> TUIColor Never! { TUIColor.ANSI16(clamp_int(index, 15)) }
-fn color_ansi256(index: Int) -> TUIColor Never! { TUIColor.ANSI256(clamp_int(index, 255)) }
-fn color_rgb(red: Int, green: Int, blue: Int) -> TUIColor Never! {
-    TUIColor.RGB(clamp_int(red, 255), clamp_int(green, 255), clamp_int(blue, 255))
+pub fn color_ansi16(index: Int) -> TUIColor Never! { TUIColor.ANSI16(clamp_int(index, 15)) }
+pub fn color_ansi256(index: Int) -> TUIColor Never! { TUIColor.ANSI256(clamp_int(index, 255)) }
+pub fn color_rgb(red: Int, green: Int, blue: Int) -> TUIColor Never! {
+    TUIColor.RGB{red: clamp_int(red, 255), green: clamp_int(green, 255), blue: clamp_int(blue, 255)}
 }
 
-fn style() -> TUIStyle Never! {
+pub fn style() -> TUIStyle Never! {
     TUIStyle{foreground: None, background: None, bold: false, dim: false, underline: false}
 }
-fn style_bold(s: TUIStyle, enabled: Bool) -> TUIStyle Never! {
+pub fn style_bold(s: TUIStyle, enabled: Bool) -> TUIStyle Never! {
     result := s
     result.bold = enabled
     result
 }
-fn style_dim(s: TUIStyle, enabled: Bool) -> TUIStyle Never! {
+pub fn style_dim(s: TUIStyle, enabled: Bool) -> TUIStyle Never! {
     result := s
     result.dim = enabled
     result
 }
-fn style_underline(s: TUIStyle, enabled: Bool) -> TUIStyle Never! {
+pub fn style_underline(s: TUIStyle, enabled: Bool) -> TUIStyle Never! {
     result := s
     result.underline = enabled
     result
 }
-fn style_foreground(s: TUIStyle, color: TUIColor) -> TUIStyle Never! {
+pub fn style_foreground(s: TUIStyle, color: TUIColor) -> TUIStyle Never! {
     result := s
     result.foreground = Val(color)
     result
 }
-fn style_background(s: TUIStyle, color: TUIColor) -> TUIStyle Never! {
+pub fn style_background(s: TUIStyle, color: TUIColor) -> TUIStyle Never! {
     result := s
     result.background = Val(color)
     result
 }
-fn style_text(value: String, s: TUIStyle, caps: TUICapabilities) -> String Never! {
+pub fn style_text(value: String, s: TUIStyle, caps: TUICapabilities) -> String Never! {
     text := value
     if !caps.unicode -> text = ascii(text)
     if !caps.color -> return text
@@ -142,7 +142,7 @@ fn style_text(value: String, s: TUIStyle, caps: TUICapabilities) -> String Never
     escape :: String.from_bytes([U8]{27}) ?? ""
     "{escape}[{codes.join(";")}m{text}{escape}[0m"
 }
-fn display_width(value: String) -> Int Never! {
+pub fn display_width(value: String) -> Int Never! {
     raw :: value.bytes()
     result := 0
     i := 0
@@ -159,17 +159,17 @@ fn display_width(value: String) -> Int Never! {
     result
 }
 
-fn length(value: Float) -> TUIConstraint Never! { TUIConstraint.Length(nonnegative(value)) }
-fn min(value: Float) -> TUIConstraint Never! { TUIConstraint.Min(nonnegative(value)) }
-fn max(value: Float) -> TUIConstraint Never! { TUIConstraint.Max(nonnegative(value)) }
-fn percent(value: Float) -> TUIConstraint Never! {
+pub fn length(value: Float) -> TUIConstraint Never! { TUIConstraint.Length(nonnegative(value)) }
+pub fn min(value: Float) -> TUIConstraint Never! { TUIConstraint.Min(nonnegative(value)) }
+pub fn max(value: Float) -> TUIConstraint Never! { TUIConstraint.Max(nonnegative(value)) }
+pub fn percent(value: Float) -> TUIConstraint Never! {
     TUIConstraint.Percent(bounded_float(value, 100.0))
 }
-fn fill(weight: Float) -> TUIConstraint Never! { TUIConstraint.Fill(normalized_weight(weight)) }
-fn horizontal() -> TUIDirection Never! { TUIDirection.Horizontal }
-fn vertical() -> TUIDirection Never! { TUIDirection.Vertical }
+pub fn fill(weight: Float) -> TUIConstraint Never! { TUIConstraint.Fill(normalized_weight(weight)) }
+pub fn horizontal() -> TUIDirection Never! { TUIDirection.Horizontal }
+pub fn vertical() -> TUIDirection Never! { TUIDirection.Vertical }
 
-fn layout(area: Rect, direction: TUIDirection, constraints: [TUIConstraint]) -> [Rect] Never! {
+pub fn layout(area: Rect, direction: TUIDirection, constraints: [TUIConstraint]) -> [Rect] Never! {
     total := nonnegative(area.height)
     if direction == .Horizontal -> total = nonnegative(area.width)
     sizes := [Float]{}
@@ -216,43 +216,139 @@ fn layout(area: Rect, direction: TUIDirection, constraints: [TUIConstraint]) -> 
     result
 }
 
-fn list(items: [String]) -> UINode Never! {
-    core.tui.list(^items)
+pub fn list(items: [String]) -> UINode Never! {
+    caps :: capabilities()
+    children := [UINode]{}
+    rows := caps.height
+    if rows < 1 -> rows = 1
+    count := items.len()
+    if count > rows -> count = rows
+    loop index in 0..<count {
+        prefix := "  "
+        if index == 0 -> prefix = "> "
+        &children.push(ui.text(truncate_text("{prefix}{items[index]}", caps.width)))
+    }
+    if children.len() == 0 -> &children.push(ui.text(""))
+    ui.box(children)
 }
 
-fn table(headers: [String], rows: [[String]]) -> ui.UINode Never! {
-    core.tui.table(^headers, ^rows)
+pub fn table(headers: [String], rows: [[String]]) -> ui.UINode Never! {
+    columns := headers.len()
+    loop row in rows {
+        if row.len() > columns -> columns = row.len()
+    }
+    if columns == 0 -> return ui.text("")
+    caps :: capabilities()
+    children := [UINode]{}
+    if headers.len() > 0 -> &children.push(ui.text(table_line(headers, columns, caps.width)))
+    loop row in rows -> &children.push(ui.text(table_line(row, columns, caps.width)))
+    ui.box(children)
 }
 
-fn list_state() -> TUIListState Never! { TUIListState{selected: 0, offset: 0} }
-fn list_state_select(state: TUIListState, index: Int) -> TUIListState Never! {
+pub fn list_state() -> TUIListState Never! { TUIListState{selected: 0, offset: 0} }
+pub fn list_state_select(state: TUIListState, index: Int) -> TUIListState Never! {
     result := state
     result.selected = nonnegative_int(index)
     result
 }
-fn list_state_selected(state: TUIListState) -> Int Never! { state.selected }
-fn list_state_offset(state: TUIListState, offset: Int) -> TUIListState Never! {
+pub fn list_state_selected(state: TUIListState) -> Int Never! { state.selected }
+pub fn list_state_offset(state: TUIListState, offset: Int) -> TUIListState Never! {
     result := state
     result.offset = nonnegative_int(offset)
     result
 }
 
-fn key_event(code: String) -> TUIEvent Never! { TUIEvent.Key(code, 0) }
-fn key_event_modifiers(code: String, modifiers: Int) -> TUIEvent Never! {
-    TUIEvent.Key(code, modifiers & 255)
+pub fn key_event(code: String) -> TUIEvent Never! { TUIEvent.Key{code: code, modifiers: 0} }
+pub fn key_event_modifiers(code: String, modifiers: Int) -> TUIEvent Never! {
+    TUIEvent.Key{code: code, modifiers: modifiers & 255}
 }
-fn resize_event(width: Float, height: Float) -> TUIEvent Never! {
+pub fn resize_event(width: Float, height: Float) -> TUIEvent Never! {
     TUIEvent.Resize(ui.Size{width: width, height: height})
 }
-fn timer_event(id: String, elapsed_ms: Int) -> TUIEvent Never! {
-    TUIEvent.Timer(id, elapsed_ms)
+pub fn timer_event(id: String, elapsed_ms: Int) -> TUIEvent Never! {
+    TUIEvent.Timer{id: id, elapsed_ms: elapsed_ms}
 }
-fn io_event(channel: String, payload: [U8]) -> TUIEvent Never! {
-    TUIEvent.IO(channel, payload)
+pub fn io_event(channel: String, payload: [U8]) -> TUIEvent Never! {
+    TUIEvent.IO{channel: channel, payload: payload}
 }
-fn focus_event(focused: Bool) -> TUIEvent Never! { TUIEvent.Focus(focused) }
-fn interrupt_event() -> TUIEvent Never! { TUIEvent.Interrupt }
-fn close_event() -> TUIEvent Never! { TUIEvent.Close }
+pub fn focus_event(focused: Bool) -> TUIEvent Never! { TUIEvent.Focus(focused) }
+pub fn interrupt_event() -> TUIEvent Never! { TUIEvent.Interrupt }
+pub fn close_event() -> TUIEvent Never! { TUIEvent.Close }
+
+struct ColorWords {
+    kind: Int
+    word: Int
+}
+
+struct StyleWords {
+    foreground: ColorWords
+    background: ColorWords
+    flags: Int
+}
+
+fn color_words(color: TUIColor?) -> ColorWords Never! {
+    if color == .Val(value) {
+        if value == {
+            .ANSI16(index) -> return ColorWords{kind: 1, word: clamp_int(index, 15)}
+            .ANSI256(index) -> return ColorWords{kind: 2, word: clamp_int(index, 255)}
+            .RGB(red, green, blue) -> return ColorWords{
+                kind: 3,
+                word: (clamp_int(red, 255) << 16) | (clamp_int(green, 255) << 8) | clamp_int(blue, 255),
+            }
+        }
+    }
+    ColorWords{kind: 0, word: 0}
+}
+
+fn style_words(value: TUIStyle) -> StyleWords Never! {
+    flags := 0
+    if value.bold -> flags = flags | 1
+    if value.dim -> flags = flags | 2
+    if value.underline -> flags = flags | 4
+    StyleWords{foreground: color_words(value.foreground), background: color_words(value.background), flags: flags}
+}
+
+fn truncate_text(value: String, limit: Int) -> String Never! {
+    if limit <= 0 -> return ""
+    raw :: value.bytes()
+    out := [U8]{}
+    used := 0
+    index := 0
+    escape := false
+    loop index < raw.len() {
+        size :: utf8_width(raw[index])
+        scalar :: scalar_at(raw, index, size)
+        start :: index
+        index += size
+        if escape {
+            if scalar == 64 || (scalar >= 65 && scalar <= 90) || (scalar >= 97 && scalar <= 122) -> escape = false
+        } else if scalar == 27 -> escape = true
+        else {
+            width :: scalar_display_width(scalar)
+            if used + width > limit -> break
+            loop offset in 0..<size -> &out.push(raw[start + offset])
+            used += width
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn table_line(values: [String], columns: Int, width: Int) -> String Never! {
+    column_width :: nonnegative_int(width - (columns - 1) * 3) /% columns
+    out := ""
+    loop index in 0..<columns {
+        if index > 0 -> out += " | "
+        value := ""
+        if index < values.len() -> value = values[index]
+        value = truncate_text(value, column_width)
+        out += value
+        if index + 1 < columns {
+            padding :: nonnegative_int(column_width - display_width(value))
+            loop unused in 0..<padding -> out += " "
+        }
+    }
+    truncate_text(out, width)
+}
 
 fn normalized_weight(weight: Float) -> Float Never! {
     // This conversion is bounded and truncating: positive half ties round up.
@@ -437,4 +533,26 @@ fn scalar_display_width(n: Int) -> Int Never! {
     caps :: capabilities()
     if !caps.color -> assert(style_text("jet", s, caps) == "jet")
     assert(escape.len() == 1)
+}
+
+#Test("TUI normalized style words cross the actual retained renderer boundary") {
+    styled :: style_background(style_foreground(style_bold(style(), true), color_rgb(12, 34, 56)), color_ansi16(2))
+    words :: style_words(styled)
+    assert(words.foreground.kind == 3 && words.foreground.word == 795192)
+    assert(words.background.kind == 1 && words.background.word == 2 && words.flags == 1)
+    node :: #Unsafe("Core TUI test: normalized style words and explicit absent UI slots") {
+        ui.__node_transfer("jet", 3.0, 1.0, 2, 1, [UINode]{}, false, "", 63, true,
+            words.foreground.kind, words.foreground.word, words.background.kind, words.background.word, words.flags)
+    }
+    backend :: ui.tui_backend()
+    ui.mount(backend, node)
+    lines :: backend.frame_lines()
+    assert(lines.len() > 0 && lines[0] == style_text("jet", styled, capabilities()))
+}
+
+#Test("TUI list/table formatting keeps scalar widths and empty cells") {
+    assert(truncate_text("a界b", 3) == "a界")
+    assert(truncate_text("a界b", 2) == "a")
+    assert(truncate_text("áb", 1) == "á")
+    assert(table_line([String]{"x"}, 2, 9) == "x   | ")
 }

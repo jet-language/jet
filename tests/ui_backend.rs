@@ -7,6 +7,17 @@ use std::process::Command;
 mod common;
 mod tir_support;
 
+#[test]
+fn raw_ui_transfer_requires_an_audited_gate() {
+    let source = "use core.ui as ui\nfn run() { ui.__node_transfer(\"\", 0.0, 0.0, -1, 0, [], false, \"\", 63, false, 0, 0, 0, 0, 0) }\n";
+    let Err(diags) = jet::compile_with_path(source, "ui_raw_transfer.jet") else {
+        panic!("raw UI transfer was accepted without an audited gate");
+    };
+    let rendered = jet::render_diagnostics("ui_raw_transfer.jet", source, &diags);
+    assert!(rendered.contains("[E3101]"), "{rendered}");
+    assert!(rendered.contains("requires an audited `#Unsafe` region"), "{rendered}");
+}
+
 fn build_and_run(dir: &PathBuf, name: &str, src: &str) -> (i32, String, String) {
     tir_support::write_test_package(dir, tir_support::TIR_TEST_PACKAGE);
     let path = dir.join(name);
