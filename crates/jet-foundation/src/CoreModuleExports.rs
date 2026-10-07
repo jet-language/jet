@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 5a4aff2e2eb284903b97b012cf928234b95737464050baa9322a8331bdb16e72
+// Source SHA-256: db85c0333f881bc43006d63287094d43acfde7a270ccd6a5d8bda2a0126efe21
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -392,7 +392,7 @@ const CORE_MODULE_54_MEMBERS: &[&str] = &["JobQueue", "JobPayload", "JobResult",
 const CORE_MODULE_54_TYPES: &[(&str, CoreLeafKind)] = &[("JobQueue", CoreLeafKind::Plain), ("JobPayload", CoreLeafKind::Plain), ("JobResult", CoreLeafKind::Plain), ("JobError", CoreLeafKind::Enum(&["Empty", "Duplicate", "Failed", "Missing"])), ("JobQueueReceipt", CoreLeafKind::Plain), ("JobQueueClaim", CoreLeafKind::Plain), ("JobQueueDeliveryPolicy", CoreLeafKind::Enum(&["AtLeastOnce"])), ("JobQueueEvent", CoreLeafKind::Plain), ("JobQueueRecord", CoreLeafKind::Plain), ("JobQueueState", CoreLeafKind::Enum(&["Queued", "Running", "Retrying", "Completed", "Failed", "DeadLettered", "Cancelled"])), ("JobQueueStatus", CoreLeafKind::Plain)];
 const CORE_MODULE_54_DEPENDENCIES: &[&str] = &[];
 
-const CORE_MODULE_55_MEMBERS: &[&str] = &["bool", "close", "counter", "critical", "debug", "debug_fields", "disable", "enabled", "enter", "error", "error_fields", "fatal", "field", "float", "flush", "info", "info_fields", "int", "otlp_file", "redact", "sample_every", "set_level", "set_sink", "set_trace_id", "setup", "span", "warn", "warn_fields", "LogField", "Pair", "LogRecord", "Formatter", "Handler", "record", "formatter", "handler", "handler_format", "format", "handle", "add", "group", "time", "clear", "log", "warning"];
+const CORE_MODULE_55_MEMBERS: &[&str] = &["bool", "close", "counter", "critical", "debug", "debug_fields", "disable", "enabled", "enter", "error", "error_fields", "fatal", "field", "float", "flush", "info", "info_fields", "int", "otlp_file", "redact", "sample_every", "set_level", "set_sink", "set_trace_id", "setup", "span", "warn", "warn_fields", "LogField", "Pair", "LogRecord", "Formatter", "Handler", "record", "formatter", "handler", "handler_format", "format", "handle", "add", "group", "time", "clear", "log", "warning", "__trace_store", "__level_load", "__level_store", "__disabled_load", "__disabled_store", "__format_store", "__sink_store", "__sample_store", "__sample_count_store"];
 const CORE_MODULE_55_TYPES: &[(&str, CoreLeafKind)] = &[("LogRecord", CoreLeafKind::Plain), ("Formatter", CoreLeafKind::Plain), ("Handler", CoreLeafKind::Plain), ("LogField", CoreLeafKind::Plain), ("Pair", CoreLeafKind::Plain)];
 const CORE_MODULE_55_DEPENDENCIES: &[&str] = &[];
 
