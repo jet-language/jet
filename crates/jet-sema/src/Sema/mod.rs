@@ -1981,6 +1981,11 @@ pub(crate) struct ModuleState {
     /// D-NAME-WALK1=A: inline-module `pub use` of a Core item. The first
     /// value is the Core module and the second is the original member name.
     inline_reexport_core: HashMap<(String, String), (String, String)>,
+    /// Comptime fragment memos, open only while body checking holds every
+    /// state final: this module's projection as a module a fragment loads,
+    /// and as the evaluating module of its own bodies.
+    fragment_rows: CheckerCore::FragmentMemo<CheckerCore::FragmentModuleRows>,
+    fragment_facts: CheckerCore::FragmentMemo<crate::Comptime::MirBridge::MirFragmentNominalFacts>,
 }
 
 /// D-INTBIG1: whether a checked type carries Jet's default exact `Int`.
@@ -3592,6 +3597,34 @@ pub use WebPartition::checked_web_bucket;
 // D-OSTARGET1=A: native OS platform gating (mixed-axis + unmatched-call).
 pub(crate) use MemberSpread::desugar_member_spreads;
 pub(crate) use OSTarget::{check_os_target, desugar_os_switches};
+
+/// The canonical eligibility boundary for generated precondition sampling.
+pub fn is_contract_sampling_candidate(function: &crate::AST::Func) -> bool {
+    !function.pre.is_empty() && !function.params.is_empty()
+}
+
+pub fn has_contract_sampling_candidates(items: &[crate::AST::Item]) -> bool {
+    items.iter().any(|item| match item {
+        crate::AST::Item::Func(function) => is_contract_sampling_candidate(function),
+        crate::AST::Item::CodeModule(module) => module
+            .body
+            .as_ref()
+            .is_some_and(|body| has_contract_sampling_candidates(body)),
+        _ => false,
+    })
+}
+
+/// File-target test discovery excludes sibling and imported source files.
+pub fn has_test_blocks_in_items(items: &[crate::AST::Item]) -> bool {
+    items.iter().any(|item| match item {
+        crate::AST::Item::Test(_) => true,
+        crate::AST::Item::CodeModule(module) => module
+            .body
+            .as_ref()
+            .is_some_and(|body| has_test_blocks_in_items(body)),
+        _ => false,
+    })
+}
 
 // Public entry points (preserve `jet::Sema::<item>` paths).
 pub use Bundle::{

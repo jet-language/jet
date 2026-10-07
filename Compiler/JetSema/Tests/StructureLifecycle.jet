@@ -1,0 +1,27 @@
+// Assemble with the sema/foundation test unit: these exercise the production
+// lifecycle collector, including the dormant and expired edition boundaries.
+fn structure_lifecycle_require(ok: Bool, message: String) Never! {
+    if !ok -> panic("StructureLifecycle: {message}")
+}
+
+fn run() Never! {
+    result := SemaLifecycleResult{diagnostics: [Diagnostic]{}, facts: [MIRStructureFact]{}}
+    seen := [String:Bool]{}
+    payload :: CoreMarkerApplication{member: "old", since: "2027", replacement: "cbor.to_bytes", removed_in: Val("2028")}
+    span :: Span{start: 10, end: 13}
+    sema_lifecycle_record(payload, "active.jet", span, "2026", &result, &seen)
+    structure_lifecycle_require(result.facts.len() == 1 && result.facts[0].status == "active" && result.diagnostics.len() == 0, "future marker retains an active fact without a warning")
+    sema_lifecycle_record(payload, "deprecated.jet", span, "2027", &result, &seen)
+    structure_lifecycle_require(result.facts[1].status == "deprecated" && result.diagnostics.len() == 1, "since edition begins the migration warning")
+    structure_lifecycle_require(result.facts[1].detail == "since 2027; use `cbor.to_bytes`; removed in 2028", "detail retains the complete marker payload")
+    expected_edit :: TextEdit{span: span, new_text: "to_bytes"}
+    structure_lifecycle_require(result.diagnostics[0].edit == Val(expected_edit), "fix replaces only the member leaf")
+    sema_lifecycle_record(payload, "removed.jet", span, "2028", &result, &seen)
+    structure_lifecycle_require(result.facts[2].status == "removed" && result.diagnostics[1].severity == DIAGNOSTIC_ERROR, "removed edition records its fact and error")
+    sema_lifecycle_record(payload, "removed.jet", span, "2028", &result, &seen)
+    structure_lifecycle_require(result.facts.len() == 3 && result.diagnostics.len() == 2, "one checked site has one fact and diagnostic")
+    semantic :: CoreMarkerApplication{member: "old", since: "1.2", replacement: "replacement", removed_in: None}
+    sema_lifecycle_record(semantic, "semver.jet", span, "2026", &result, &seen)
+    structure_lifecycle_require(result.facts[3].status == "deprecated" && result.facts[3].detail == "since 1.2; use `replacement`", "semantic versions are retiring independent of edition")
+    structure_lifecycle_require(!sema_lifecycle_edition_label("20x7") && sema_lifecycle_edition_label(" 2027 "), "edition labels use the Rust trimmed four-ASCII-digit grammar")
+}

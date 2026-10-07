@@ -108,15 +108,13 @@ pub fn sema_call_facts(signature: Type, type_args: [Type], binding: SemaCallBind
     if signature == {
         .Fn(_, ret, effects, _, _, _) -> {
             return_type :: sema_call_signature_return(signature) ?? Type.Named{name: "Unit"}
-            Val(
-            SemaCallFacts{
+            Val(SemaCallFacts{
                 return_type: return_type,
                 failure_carrier: sema_call_failure_carrier(ret),
                 effect_bound: effects,
                 type_args: type_args,
                 default_refs: binding.default_refs,
-            }
-            )
+            })
         }
         else -> None
     }

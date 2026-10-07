@@ -1,0 +1,27 @@
+// Pure ReceiptStore/RecordIndex contracts; assemble with Compiler and run.
+fn record_receipt_memory_require(ok: Bool, name: String) Never! {
+    if !ok -> panic("record/receipt memory contract: {name}")
+}
+
+fn run() {
+    digest :: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    claim :: JetCLIReceiptClaim{verb: "run", key: digest, inputs: [JetCLIReceiptInput]{}}
+    receipt :: jet_cli_receipt_prepare(claim, 0, [U8]{255, 115, 101, 99, 114, 101, 116}, [U8]{}, [JetCLIReceiptSection]{}, [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, [String]{"secret"}) ?? panic("prepare")
+    record_receipt_memory_require(receipt.stdout == [U8]{255, 60, 114, 101, 100, 97, 99, 116, 101, 100, 62}, "redaction preserves non UTF8")
+    bytes :: jet_cli_receipt_encode(receipt) ?? panic("encode")
+    found :: jet_cli_receipt_lookup_bytes(Val(bytes), claim, [JetCLIReceiptInput]{}, [JetCLIReceiptSectionRecord]{}) ?? panic("lookup")
+    record_receipt_memory_require(found != None, "authenticated cache hit")
+    stale :: jet_cli_receipt_lookup_bytes(Val(bytes), claim, [JetCLIReceiptInput]{JetCLIReceiptInput{path: "changed", digest: digest}}, [JetCLIReceiptSectionRecord]{}) ?? panic("stale lookup")
+    record_receipt_memory_require(stale == .None, "changed input misses")
+    index := jet_cli_record_index_new() ?? panic("index")
+    identity :: JetCLIRecordIdentity{target_inputs_sha256: digest, tool_version: "jet", engine: "interpreter"}
+    entry :: JetCLIRecordIndexEntry{identity: identity, kind: "replay", artifact_id: digest, path: ".jet/replays/{digest}.jetreplay", recorded_sequence: U64{1}, size: U64{1}, capture: "safe", saved: false, consumed: [JetCLIRecordLink]{}, produced: [JetCLIRecordLink]{}}
+    jet_cli_record_index_update(&index, entry) ?? panic("insert")
+    jet_cli_record_index_update(&index, entry) ?? panic("idempotent insert")
+    record_receipt_memory_require(jet_cli_record_index_query(index, false).len() == 1, "idempotent rows")
+    snapshot :: jet_cli_record_index_to_bytes(index) ?? panic("snapshot")
+    restored :: jet_cli_record_index_from_bytes(snapshot) ?? panic("restore")
+    record_receipt_memory_require(jet_cli_record_index_find(restored, "replay", digest, false) == .Val(entry), "canonical JSONL snapshot round trip")
+    sequence :: jet_cli_record_index_next_sequence(restored) ?? panic("sequence")
+    record_receipt_memory_require(sequence == U64{2}, "sequence increment")
+}

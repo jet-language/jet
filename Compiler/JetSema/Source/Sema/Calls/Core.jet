@@ -462,7 +462,12 @@ pub fn sema_call_core_record_effects(record: CoreCallRecord, span: Span, type_ar
         type_args: type_args,
         default_refs: default_refs,
     }
-    sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, api, span, facts, &diagnostics)
+    start :: context.call_facts.len()
+    accepted :: sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, api, span, facts, &diagnostics)
+    if accepted && record.marker != None && context.call_facts.len() > start {
+        context.call_facts[context.call_facts.len() - 1].lifecycle = record.marker
+    }
+    accepted
 }
 
 fn sema_call_core_default_expr(default: CoreCallDefault, span: Span) -> Expr Never! {

@@ -1,0 +1,135 @@
+// crates/jet-semindex/src/SemanticOps.rs: persisted, checkpoint-bound
+// semantic intent. Hand edits never manufacture a rename receipt.
+use core.files as cli_files
+use core.encoding.json as cli_sem_json
+
+pub struct JetCLISemOpTarget {
+    pub stable_id: String
+    pub before: String
+    pub after: String
+    pub kind: String
+    pub module_path: String
+}
+
+pub struct JetCLISemOpFile {
+    pub path: String
+    pub before_hash: String
+    pub after_hash: String
+}
+
+pub struct JetCLISemOp {
+    pub kind: String
+    pub rule_id: String?
+    pub from: String?
+    pub to: String?
+    pub node: String?
+    pub match_template: String?
+    pub replace_template: String?
+    pub targets: [JetCLISemOpTarget]
+    pub files: [JetCLISemOpFile]
+}
+
+pub fn jet_cli_sem_json_field(value: DataTree, name: String) -> DataTree? Never! {
+    if value == .Object(fields) -> return fields.get(name)
+    None
+}
+
+pub fn jet_cli_sem_json_text(value: DataTree, name: String) -> String? Never! {
+    field :: jet_cli_sem_json_field(value, name) ?? return None
+    if field == .Text(text) -> return Val(text)
+    None
+}
+
+pub fn jet_cli_sem_json_array(value: DataTree, name: String) -> [DataTree]? Never! {
+    field :: jet_cli_sem_json_field(value, name) ?? return None
+    if field == .Array(items) -> return Val(items)
+    None
+}
+
+pub fn jet_cli_sem_same_hash(recorded: String, current: String) -> Bool Never! {
+    prefixed_current :: "sha256-{current}"
+    prefixed_recorded :: "sha256-{recorded}"
+    recorded == current || recorded == prefixed_current || current == prefixed_recorded
+}
+
+pub fn jet_cli_sem_normalize(path: String) -> String {
+    cli_files.realpath(path) ?? if path.starts_with("/") -> path else -> "{cli_files.cwd() ?? "."}/{path}"
+}
+
+fn jet_cli_sem_parse_op(value: DataTree, files: [JetCLISemOpFile]) -> JetCLISemOp? Never! {
+    kind :: jet_cli_sem_json_text(value, "kind") ?? return None
+    targets := [JetCLISemOpTarget]{}
+    loop row in (jet_cli_sem_json_array(value, "targets") ?? [DataTree]{}) {
+        stable :: jet_cli_sem_json_text(row, "stable_id") ?? next
+        before :: jet_cli_sem_json_text(row, "before") ?? next
+        after :: jet_cli_sem_json_text(row, "after") ?? next
+        target_kind :: jet_cli_sem_json_text(row, "kind") ?? next
+        path :: jet_cli_sem_json_text(row, "module_path") ?? next
+        &targets.push(JetCLISemOpTarget{stable_id: stable, before: before, after: after, kind: target_kind, module_path: path})
+    }
+    Val(JetCLISemOp{kind: kind, rule_id: jet_cli_sem_json_text(value, "rule_id"), from: jet_cli_sem_json_text(value, "from"), to: jet_cli_sem_json_text(value, "to"), node: jet_cli_sem_json_text(value, "node"), match_template: jet_cli_sem_json_text(value, "match"), replace_template: jet_cli_sem_json_text(value, "replace"), targets: targets, files: files})
+}
+
+pub fn jet_cli_sem_ops_for_file(raw: String, source_hash: String) -> [JetCLISemOp] {
+    path :: jet_cli_sem_normalize(raw)
+    directory := jet_cli_parent(path)
+    output := [JetCLISemOp]{}
+    loop {
+        root :: directory ?? break
+        receipts :: "{root}/.jet/codemods"
+        names := [String]{}
+        loop entry in (cli_files.list_dir(receipts) ?? [cli_files.DirEntry]{}) -> &names.push(entry.name)
+        &names.sort()
+        loop name in names {
+            receipt :: "{receipts}/{name}"
+            if !name.ends_with(".log.json") || !cli_files.is_file(receipt) -> next
+            text :: cli_files.read(receipt) ?? next
+            value :: cli_sem_json.parse(text) ?? next
+            rows :: jet_cli_sem_json_array(value, "files") ?? next
+            files := [JetCLISemOpFile]{}
+            matches := false
+            loop row in rows {
+                file_path :: jet_cli_sem_json_text(row, "path") ?? next
+                before :: jet_cli_sem_json_text(row, "before_hash") ?? next
+                after :: jet_cli_sem_json_text(row, "after_hash") ?? next
+                normalized :: jet_cli_sem_normalize(if file_path.starts_with("/") -> file_path else -> "{root}/{file_path}")
+                &files.push(JetCLISemOpFile{path: normalized, before_hash: before, after_hash: after})
+                if normalized == path && (jet_cli_sem_same_hash(before, source_hash) || jet_cli_sem_same_hash(after, source_hash)) {
+                    matches = true
+                }
+            }
+            if !matches -> next
+            loop row in (jet_cli_sem_json_array(value, "semantic_ops") ?? [DataTree]{}) {
+                if jet_cli_sem_parse_op(row, files) == .Val(operation) -> &output.push(operation)
+            }
+        }
+        directory = jet_cli_parent(root)
+    }
+    output
+}
+
+pub fn jet_cli_sem_op_transition(operation: JetCLISemOp, paths: [String], before: String, after: String) -> Bool {
+    loop file in operation.files {
+        if !jet_cli_sem_same_hash(file.before_hash, before) || !jet_cli_sem_same_hash(file.after_hash, after) {
+            next
+        }
+        loop path in paths {
+            if jet_cli_sem_normalize(file.path) == jet_cli_sem_normalize(path) -> return true
+        }
+    }
+    false
+}
+
+pub fn jet_cli_sem_op_value(operation: JetCLISemOp) -> JetCLIStatusValue Never! {
+    jet_cli_status_object(
+    [JetCLIStatusField]{
+        jet_cli_status_field("kind", jet_cli_status_text(operation.kind)),
+        jet_cli_status_field("rule_id", jet_cli_status_optional_text(operation.rule_id)),
+        jet_cli_status_field("from", jet_cli_status_optional_text(operation.from)),
+        jet_cli_status_field("to", jet_cli_status_optional_text(operation.to)),
+        jet_cli_status_field("node", jet_cli_status_optional_text(operation.node)),
+        jet_cli_status_field("match", jet_cli_status_optional_text(operation.match_template)),
+        jet_cli_status_field("replace", jet_cli_status_optional_text(operation.replace_template)),
+    },
+    )
+}

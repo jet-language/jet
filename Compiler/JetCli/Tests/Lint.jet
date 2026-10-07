@@ -1,0 +1,40 @@
+// CmdDevTools lint presentation and CognitiveComplexity scoring contracts.
+fn run() Never! {
+    plain :: jet_driver_parse_user_source("fn run() {{}}\n")
+    if plain.diagnostics.len() != 0 -> panic("plain fixture must parse")
+    reports :: jet_cli_complexity_reports(plain.program)
+    if reports.len() != 1 || reports[0].name != "run" || reports[0].score != 0 -> panic("plain function score")
+
+    branches :: jet_driver_parse_user_source("fn classify(value: Int) -> Int {{\n    if value > 10 -> return 2\n    if value > 0 -> return 1\n    0\n}}\nfn run() {{}}\n")
+    if branches.diagnostics.len() != 0 -> panic("branch fixture must parse")
+    ranked :: jet_cli_complexity_reports(branches.program)
+    if ranked.len() != 2 || ranked[0].name != "classify" || ranked[0].score != 2 || ranked[1].score != 0 -> panic("branch score and descending order")
+
+    recursion :: jet_driver_parse_user_source("fn recur(value: Int) -> Int {{ if value > 0 -> recur(value - 1) else -> 0 }}\n")
+    if recursion.diagnostics.len() != 0 -> panic("recursion fixture must parse")
+    recursive :: jet_cli_complexity_reports(recursion.program)
+    if recursive.len() != 1 || recursive[0].score != 2 -> panic("direct recursion adds one per function")
+
+    mixed :: jet_driver_parse_user_source("fn mixed(a: Bool, b: Bool, c: Bool) -> Bool {{ a && b || c }}\n")
+    if mixed.diagnostics.len() != 0 -> panic("boolean fixture must parse")
+    boolean :: jet_cli_complexity_reports(mixed.program)
+    if boolean.len() != 1 || boolean[0].score != 1 -> panic("mixed boolean sequence score")
+
+    budget :: jet_cli_lint_max([String]{"--max=4294967295"}, false)
+    if budget != .Value(Val(4294967295)) -> panic("maximum u32 budget")
+    if jet_cli_lint_max([String]{"--max=4294967296"}, false) == .Value(_) -> panic("overflow must refuse")
+    if jet_cli_lint_max([String]{"--max=-1"}, false) == .Value(_) -> panic("negative must refuse")
+    if jet_cli_lint_max([String]{"--max=-0"}, false) == .Value(_) -> panic("unsigned parsing rejects negative zero")
+    if jet_cli_lint_max([String]{"--max=0", "--max=20"}, false) != .Value(Val(0)) -> panic("first max wins")
+    if jet_cli_lint_max([String]{"--max=+0"}, false) != .Value(Val(0)) -> panic("unsigned parsing accepts one leading plus")
+    if jet_cli_lint_max([String]{"--max=00000000000000000000001"}, false) != .Value(Val(1)) -> panic("leading zeroes do not overflow")
+    if jet_cli_lint_max([String]{"--max=1_0"}, false) == .Value(_) -> panic("underscores are not integer option digits")
+    if jet_cli_lint_max([String]{"--max="}, false) == .Value(_) -> panic("empty max must refuse")
+    if jet_cli_lint_max([String]{"--max=++1"}, false) == .Value(_) -> panic("only one plus is allowed")
+
+    inspection :: JetCLIArchitectureInspection{rows: [], reason: None, check: None}
+    expected :: "architecture advice (D-ARCH-ADVICE1; advisory, operator may reject):\n  no checked agreement candidate; local complexity is not proof of a cross-boundary invariant\n  measurement: benchmark/change-task not measured; no advantage claim\n"
+    if jet_cli_architecture_text(inspection) != expected -> panic("empty architecture inspection text")
+    json :: jet_cli_status_json(jet_cli_architecture_value(inspection))
+    if json != "{{\"status\":\"advisory\",\"rows\":[],\"operator_action\":\"review_or_reject\"}}" -> panic("empty architecture inspection machine fields")
+}

@@ -1,9 +1,17 @@
 // Source, module, and package identities remain separate at the driver boundary.
 use jet_foundation.[
+    AppAuthorizedDirectory,
     CompilerThreads,
     CompilerTraceSink,
     Diagnostic,
+    GateLedger,
+    GateEntry,
+    GateSet,
+    PolicyDeclaration,
+    ImportDecl,
+    Item,
     JetReleaseDevtoolsPolicy,
+    JetTargetLayout,
     MIRAllocatorPolicy,
     MIRArtifactBuildMode,
     MIRArtifactID,
@@ -11,6 +19,8 @@ use jet_foundation.[
     MIRProgram,
     MIRRuntimeLayer,
     MIRSourceFile,
+    NameLedger,
+    MIRStructureFact,
     PackageKeyDependency,
     PackageKeySourceFile,
     PackageKeyTargetFact,
@@ -18,6 +28,7 @@ use jet_foundation.[
     Record,
     RecordSection,
     Span,
+    TFunc,
     diagnostic_from_registry,
     diagnostic_registry_row,
     diagnostic_with_source_path,
@@ -30,18 +41,22 @@ use jet_foundation.[
     record_encode,
 ]
 use jet_sema.[
+    SemaCallSiteFact,
+    SemaNameReferenceFact,
+    SemaCheckedMemoryFacts,
+    SemaLayoutProjectionRow,
+    SemaComptimeItemValue,
     SemaRegistrationImportEdge,
     SemaSourceOrigin,
     SemaSourceSegment,
 ]
 use jet_codegen.[
-    JetRustEmitManifest,
-    JetWebArtifacts,
-    JetWebAssets,
+JetRustEmitManifest,
+JetWebArtifacts,
+JetWebAssets,
 ]
-use jet_eval.[
-    JetEvalConfig,
-]
+use jet_eval.JetEvalConfig
+use jet_repl.ReplSession
 
 pub struct JetDriverAuthorizedSourceFile {
     pub path: String
@@ -56,6 +71,7 @@ pub struct JetDriverAuthorizedSourceRoot {
     pub allow_hardlinks: Bool
     pub files: [JetDriverAuthorizedSourceFile]
     pub foreign_cache_files: [JetDriverAuthorizedSourceFile]
+    pub directories: [AppAuthorizedDirectory]{[AppAuthorizedDirectory]{}}
 }
 
 pub struct JetDriverAuthorizedSourceSnapshot {
@@ -73,9 +89,9 @@ pub struct JetDriverHostFacts {
 pub enum JetDriverCompileTarget {
     Native
     Web(
-        assets: JetWebAssets,
-        release_devtools_policy: JetReleaseDevtoolsPolicy,
-        profile: MIRArtifactBuildMode,
+    assets: JetWebAssets,
+    release_devtools_policy: JetReleaseDevtoolsPolicy,
+    profile: MIRArtifactBuildMode,
     )
 }
 
@@ -83,9 +99,56 @@ pub enum JetDriverCompileTarget {
 // (its artifact starts at the package entry); `Test` compiles the `jet test`
 // harness: named `#Test` bodies are checked and lowered, E0601 reports a file
 // with none, and the artifact is a TestExecutable whose harness runs them.
+// `Doc` compiles as `Program` does and also keeps each user module's checked
+// declarations (`JetDriverDocModule`) for `jet doc`.
+// `Comptime` checks the program and runs its build-time values through the
+// canonical comptime stage (checked, lowered to MIR, evaluated by JetEval),
+// then stops: nothing is lowered or emitted for run time. Config surfaces
+// (Jetpack EnvModel) evaluate their typed values this way.
+// `Eval` and `Interpreter` produce the same checked MIR for canonical JetEval,
+// without AOT emission. Eval checks the selected root's transitive pure row;
+// Interpreter leaves effects to its runtime authorizer (REPL turns).
 pub enum JetDriverCompileMode {
     Program
     Test
+    Doc
+    Comptime
+    Eval
+    Interpreter
+    Repl
+}
+
+// One user module of the checked bundle as `jet doc` and the semantic index
+// read it (Rust `ProgramModule`: `alias`, `source`, `pub_file`, the post-sema
+// `items`, and `block_spans`, so derived impls and inferred failure contracts
+// are the ones the checker settled). `path` is the module's display path:
+// relative to the entry root when beneath it, which is the stable path
+// `jet doc` prints; `physical_path` is the snapshot file's canonical path,
+// which machine reports name. `module_name`, `functions`, `name_references`,
+// and `call_facts` are the module's checked rows (Rust `SemIndexEffectFacts`
+// summaries and the name ledger's references).
+pub struct JetDriverDocModule {
+    pub path: String
+    pub physical_path: String
+    pub alias: String
+    pub source: String
+    pub pub_file: Bool
+    pub items: [Item]
+    pub block_spans: [Span]{[Span]{}}
+    pub imports: [ImportDecl]{[ImportDecl]{}}
+    pub module_name: String{""}
+    pub functions: [TFunc]{[TFunc]{}}
+    pub name_references: [SemaNameReferenceFact]{[SemaNameReferenceFact]{}}
+    pub call_facts: [SemaCallSiteFact]{[SemaCallSiteFact]{}}
+    // Shared once per checked bundle; module positions retain Sema's ordering.
+    pub name_ledger: Shared<NameLedger>?{None}
+    pub gate_ledger: Shared<GateLedger>?{None}
+    pub memory_facts: Shared<SemaCheckedMemoryFacts>?{None}
+    pub module_identity: String{""}
+    pub target_triple: String{""}
+    pub target_layout: JetTargetLayout?{None}
+    pub layout_facts: [SemaLayoutProjectionRow]{[SemaLayoutProjectionRow]{}}
+    pub name_module_index: Int{-1}
 }
 
 // One Core library source module the host embeds, mirroring a Rust
@@ -123,6 +186,18 @@ pub struct JetDriverCompileRequest {
     // the same diagnostics and output bytes.
     pub compiler_threads: CompilerThreads
     pub mode: JetDriverCompileMode{JetDriverCompileMode.Program}
+    pub gate_set: GateSet{GateSet{}}
+    pub gate_policies: [JetDriverGatePolicy]{[JetDriverGatePolicy]{}}
+    // External lock/trust/forced-build writers use the canonical gate row.
+    pub external_gate_entries: [GateEntry]{[GateEntry]{}}
+    pub evaluation_entry: String?{None}
+}
+
+pub struct JetDriverGatePolicy {
+    pub package_identity: String
+    pub declarations: [PolicyDeclaration]{[PolicyDeclaration]{}}
+    pub unsafe_paths: [String]?{None}
+    pub expert: Bool?{None}
 }
 
 // The compiler's record store, reached only through the host, which owns
@@ -229,7 +304,17 @@ struct JetDriverSourceCatalogResult {
     complete: Bool
 }
 
-enum JetDriverStage { Collect Parse Load Check Comptime Lower Assemble Pass Emit }
+enum JetDriverStage {
+    Collect
+    Parse
+    Load
+    Check
+    Comptime
+    Lower
+    Assemble
+    Pass
+    Emit
+}
 
 struct JetDriverLoadedModule {
     source_unit_index: Int
@@ -267,6 +352,8 @@ struct JetDriverLoadResult {
     diagnostics: [Diagnostic]
     failed_stage: JetDriverStage?
     complete: Bool
+    // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
+    doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}}
 }
 
 // The entry package's written authority policy, for the host's application
@@ -302,6 +389,19 @@ pub struct JetDriverCompileResult {
     // compile recorded, one TSV row each: phase, item, code, message, span.
     pub keep_going_rows: [String]{[String]{}}
     pub authority_policy: JetDriverAuthorityPolicy?{None}
+    // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
+    pub doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}}
+    // `JetDriverCompileMode.Doc` that fails after registration: the structure
+    // facts the registration graph already proved (Sema
+    // `sema_name_structure_facts`), so `jet inspect structure` prints them
+    // ahead of the failure diagnostics. A complete Doc compile carries the
+    // same rows in its modules' NameLedger instead; other modes leave this empty.
+    pub structure_facts: [MIRStructureFact]{[MIRStructureFact]{}}
+    // `JetDriverCompileMode.Comptime`: every build-time value the comptime
+    // stage produced, constants included. Empty in the other modes.
+    pub comptime_values: [SemaComptimeItemValue]{[SemaComptimeItemValue]{}}
+    // A Repl compile retains its checked scope and canonical MIR machine.
+    pub repl_session: ReplSession?{None}
 }
 
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read
@@ -427,7 +527,9 @@ fn jet_driver_build_source_index(source_units: [JetDriverSourceUnit]) -> JetDriv
             _ := &by_identity.add(identity, index)
             _ := &by_path.add(unit.path, index)
             if {
-                by_module_name.get(module_key) != None -> _ := &ambiguous_module_names.add(module_key, true)
+                by_module_name.get(module_key) != None -> {
+                    _ := &ambiguous_module_names.add(module_key, true)
+                }
                 else -> _ := &by_module_name.add(module_key, index)
             }
         }
@@ -493,7 +595,6 @@ pub fn jet_driver_receipt_answers(receipt: JetDriverReceipt, verb: String, reque
 
 // #2517 package keys for the self-hosted driver, framed by
 // `package_key_*` in JetFoundation.
-
 // The facts self-hosted sema reads from the request for one package: the
 // active OS, the target triple, the package edition, and whether the build
 // targets the web. The build clock and root policy never enter.
@@ -512,7 +613,7 @@ pub fn jet_driver_package_target_facts(request: JetDriverCompileRequest, package
 
 // The package.jet source of a package that has a manifest.
 fn jet_driver_package_manifest_source(package: JetDriverPackageInfo, snapshot: JetDriverAuthorizedSourceSnapshot) -> String? Never! {
-    if package.manifest_path == None -> return None
+    if package.manifest_path == .None -> return None
     loop file in snapshot.roots[package.root_index].files {
         if file.relative_path == "package.jet" -> return Val(file.source)
     }

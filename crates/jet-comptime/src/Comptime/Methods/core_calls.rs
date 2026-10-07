@@ -522,6 +522,7 @@ mod sketch_kernel {
 }
 
 mod time_kernel {
+    use super::time_deadline_kernel::jet_time_wall_override_ms;
     fn jet_scheduler_world_now_ms() -> Option<i64> {
         None
     }

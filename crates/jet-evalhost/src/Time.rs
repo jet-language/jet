@@ -7,6 +7,7 @@
 use super::Concurrency;
 
 pub(crate) mod time_rt {
+    use jet_codegen::scheduler::jet_time_wall_override_ms;
     // `TimeInstant.rs` names the shared sleep seam unqualified; the resident
     // adapter below routes it to the ambient scheduler.
     use super::jet_std_time_sleep_duration_ns;

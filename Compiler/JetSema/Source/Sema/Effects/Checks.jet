@@ -94,6 +94,8 @@ pub struct SemaEffectTraitBound {
 pub struct SemaEffectGraphResult {
     pub diagnostics: [Diagnostic]
     pub complete: Bool
+    pub memory_declarations: [SemaMemoryFactDeclaration]{[SemaMemoryFactDeclaration]{}}
+    pub memory_projections: [SemaMemoryProjectionRow]{[SemaMemoryProjectionRow]{}}
 }
 
 // One memory operation a body performs directly (Rust `MemoryEvent`): `kind`
@@ -1719,27 +1721,33 @@ fn sema_effect_memory_violation(nodes: [SemaEffectNode], root: Int, denial: Effe
 // D-AUTHORITY-MEM1/2 (Rust `check_memory_facts`): a `-[!Mem.Alloc]>`,
 // `-[!Mem.Rc]>` or `-[!Mem.Alloc(above: N)]>` denial holds for every
 // function the root can reach (E0921).
-fn sema_effect_check_memory_denials(nodes: [SemaEffectNode], node_by_key: [String:Int], root: Int, diagnostics: &[Diagnostic]) {
-    loop denial in nodes[root].memory_denials {
-        fact :: sema_effect_memory_fact(denial.name) ?? next
-        limit :: sema_effect_memory_bound(denial.name)
-        if limit == .Val(bytes_limit) {
-            visiting := (loop _ in nodes -> false)
-            proof :: sema_effect_arena_bound(nodes, node_by_key, root, &visiting, [String]{nodes[root].display_key})
-            if proof.failure == .Val(failure) {
-                &diagnostics.push(sema_effect_memory_violation(nodes, root, denial, fact, true, failure))
-                next
-            }
-            if proof.bytes <= bytes_limit -> next
-            finding :: proof.witness ?? sema_effect_memory_open_finding(Span{start: 0, end: 0}, nodes[root].display_key, "the verified upper bound is {proof.bytes} bytes, above the declared {bytes_limit} bytes", root, [String]{nodes[root].display_key}, 0)
-            finding_total := finding
-            finding_total.used = proof.bytes
-            &diagnostics.push(sema_effect_memory_violation(nodes, root, denial, fact, true, finding_total))
-            next
+fn sema_effect_memory_project(nodes: [SemaEffectNode], node_by_key: [String:Int], root: Int, denial: EffectRowEntry, diagnostics: &[Diagnostic]) -> SemaMemoryProjection {
+    fact :: sema_effect_memory_fact(denial.name) ?? panic("invalid checked memory denial")
+    limit :: sema_effect_memory_bound(denial.name)
+    if limit == .Val(bytes_limit) {
+        visiting := (loop _ in nodes -> false)
+        proof :: sema_effect_arena_bound(nodes, node_by_key, root, &visiting, [String]{nodes[root].display_key})
+        if proof.failure == .Val(failure) {
+            &diagnostics.push(sema_effect_memory_violation(nodes, root, denial, fact, true, failure))
+            return sema_effect_memory_projection(failure)
         }
-        kind :: if denial.name == "Mem.Rc" -> "rc" else -> "alloc"
-        found :: sema_effect_memory_search(nodes, node_by_key, root, kind) ?? next
-        &diagnostics.push(sema_effect_memory_violation(nodes, root, denial, fact, false, found))
+        if proof.bytes <= bytes_limit -> return SemaMemoryProjection.Proven
+        finding :: proof.witness ?? sema_effect_memory_open_finding(Span{start: 0, end: 0}, nodes[root].display_key, "the verified upper bound is {proof.bytes} bytes, above the declared {bytes_limit} bytes", root, [String]{nodes[root].display_key}, 0)
+        finding_total := finding
+        finding_total.used = proof.bytes
+        &diagnostics.push(sema_effect_memory_violation(nodes, root, denial, fact, true, finding_total))
+        return sema_effect_memory_projection(finding_total)
+    }
+    kind :: if denial.name == "Mem.Rc" -> "rc" else -> "alloc"
+    finding :: sema_effect_memory_search(nodes, node_by_key, root, kind) ?? return SemaMemoryProjection.Proven
+    &diagnostics.push(sema_effect_memory_violation(nodes, root, denial, fact, false, finding))
+    sema_effect_memory_projection(finding)
+}
+fn sema_effect_check_memory_denials(nodes: [SemaEffectNode], node_by_key: [String:Int], root: Int, diagnostics: &[Diagnostic], facts: &SemaMemoryProjectionFacts) {
+    loop denial in nodes[root].memory_denials {
+        if sema_effect_memory_fact(denial.name) == None -> next
+        projection :: sema_effect_memory_project(nodes, node_by_key, root, denial, &diagnostics)
+        sema_effect_memory_publish(nodes, root, denial, projection, &facts)
     }
 }
 
@@ -1858,9 +1866,10 @@ fn sema_effect_region_inferred(nodes: [SemaEffectNode], solved: [[String]], owne
 // `modules` are the checked modules; each input names its module, whose
 // functions and call facts are read in place. The solved effect row of every
 // input module's function is stamped onto `modules` at the end.
-pub fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput]) -> SemaEffectGraphResult {
+pub fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], package_memory_denials: [String]) -> SemaEffectGraphResult {
     diagnostics := [Diagnostic]{}
     nodes := [SemaEffectNode]{}
+    memory_facts := SemaMemoryProjectionFacts{declarations: [], projections: []}
     source_indices :: loop module_index in 0..<inputs.len() -> sema_effect_source_index(inputs[module_index].sources)
     node_by_key := [String:Int]{}
     loop module_index in 0..<inputs.len() {
@@ -1922,8 +1931,21 @@ pub fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [Se
     }
     loop node_index in 0..<nodes.len() {
         memory_diagnostics := [Diagnostic]{}
-        sema_effect_check_memory_denials(nodes, node_by_key, node_index, &memory_diagnostics)
+        sema_effect_check_memory_denials(nodes, node_by_key, node_index, &memory_diagnostics, &memory_facts)
         sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[node_index].module_index].source_segments, memory_diagnostics)
+    }
+    // Rust bundle_memory_inputs: a manifest guarantee covers every qualified
+    // function, including otherwise unreferenced bodies, not just entry.
+    loop name in package_memory_denials {
+        fact :: sema_effect_memory_fact(name) ?? next
+        declaration :: SemaMemoryFactDeclaration{fact: fact, roots: loop node in nodes -> node.display_key, span: Span{start: 0, end: 0}, source: "package.jet", provenance: "manifest denial `authority: {{ holds: {{ deny: [{name}] }} }}`"}
+        &memory_facts.declarations.push(declaration)
+        loop root in 0..<nodes.len() {
+            memory_diagnostics := [Diagnostic]{}
+            projection :: sema_effect_memory_project(nodes, node_by_key, root, EffectRowEntry{name: name, span: Span{start: 0, end: 0}}, &memory_diagnostics)
+            &memory_facts.projections.push(SemaMemoryProjectionRow{root: nodes[root].display_key, fact: fact, projection: projection})
+            sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[root].module_index].source_segments, memory_diagnostics)
+        }
     }
     loop module_index in 0..<inputs.len() {
         module_row :: inputs[module_index]
@@ -1960,7 +1982,7 @@ pub fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [Se
             modules[target].functions[function_index].effects = sema_effect_tfacts(nodes[node_index], solved[node_index])
         }
     }
-    SemaEffectGraphResult{diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0)}
+    SemaEffectGraphResult{diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0), memory_declarations: ^memory_facts.declarations, memory_projections: ^memory_facts.projections}
 }
 
 pub fn sema_effect_check_unsafe_statements(statements: [Stmt], diagnostics: &[Diagnostic]) -> Bool {

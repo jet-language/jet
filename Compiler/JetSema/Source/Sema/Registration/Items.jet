@@ -423,6 +423,9 @@ pub struct SemaRegistrationModuleInput {
     pub namespace: String{""}
     pub namespace_names: [String]{[String]{}}
     pub namespace_refs: [String]{[String]{}}
+    // The module's source text (Rust `Module::source`). A declared text block
+    // (D-META-DSL1=A) hands the text inside its braces to its rule.
+    pub source: String{""}
 }
 
 pub struct SemaForeignImportBinding {
@@ -447,6 +450,7 @@ pub struct SemaRegistrationModule {
     pub source_segments: [SemaSourceSegment]
     pub source_origin: SemaSourceOrigin
     pub program: Program
+    pub source: String{""}
     pub declarations: [Item]
     pub symbols: [Symbol]
     pub symbol_positions: [String:Int]
@@ -598,6 +602,10 @@ pub struct SemaRegistrationGraph {
     pub namespace_entries: [[Int]]{[[Int]]{}}
     pub namespace_entry_modules: [Int]{[Int]{}}
     pub namespace_entry_names: [String]{[String]{}}
+    // `jet doc` (driver `JetDriverCompileMode.Doc`): finalization keeps each
+    // module's settled program (derived impls, inferred failure contracts) in
+    // `SemaGraphResult.programs`.
+    pub retain_programs: Bool{false}
 }
 
 pub struct SemaRegistrationRowRef {
@@ -1910,6 +1918,7 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
         source_segments: owned.source_segments,
         source_origin: owned.source_origin,
         program: ^owned.program,
+        source: owned.source,
         symbols: [Symbol]{},
         declarations: [Item]{},
         symbol_positions: [String:Int]{},

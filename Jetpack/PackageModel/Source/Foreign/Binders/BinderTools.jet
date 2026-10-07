@@ -1,3 +1,6 @@
+use core.files as binder_core_files
+use core.process as binder_core_process
+
 // Shared failure carrier, supervised tool runs, and small text helpers for
 // the foreign-language binders (jet_pkg_model::{Ada,Cobol,Com,Cpp,Dart,
 // DotNet,Fortran,Go,...}Bind). Every binder spawned its tools the same way:
@@ -69,7 +72,7 @@ pub struct BinderToolOutput {
 // not exist is `ToolMissing(tool)`; any other launch failure is `IO`. The
 // caller decides what a timeout or a failing status means.
 pub fn pkg_binder_supervise(argv: [String], cwd: String?, env: [(name: String, value: String)], limit: Int, timeout: Duration, tool: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
-    spec := process.cmd(argv).stdout(.Capture).stderr(.Capture).timeout(timeout).output_limit(limit)
+    spec := binder_core_process.cmd(argv).stdout(.Capture).stderr(.Capture).timeout(timeout).output_limit(limit)
     if cwd == {
         .Val(directory) -> spec = spec.cwd(directory)
         .None -> {}
@@ -134,35 +137,35 @@ pub fn pkg_binder_is_ascii_digit(code: Int) -> Bool Never! {
 // ── Filesystem steps with the binder's failure context ──
 
 pub fn pkg_binder_canonicalize(path: String, context: String) -[FS, Env]> String ForeignBindError! {
-    if files.canonicalize(path) == {
+    if binder_core_files.canonicalize(path) == {
         .Ok(resolved) -> Ok(resolved)
         .Err(error) -> return Err(ForeignBindError.IO("{context}: {error}"))
     }
 }
 
 pub fn pkg_binder_create_dir_all(path: String, context: String) ForeignBindError! -[FS]> {
-    if files.create_dir_all(path) == {
+    if binder_core_files.create_dir_all(path) == {
         .Ok(_) -> {}
         .Err(error) -> return Err(ForeignBindError.IO("{context}: {error}"))
     }
 }
 
 pub fn pkg_binder_write(path: String, text: String, context: String) ForeignBindError! -[FS]> {
-    if files.write(path, text) == {
+    if binder_core_files.write(path, text) == {
         .Ok(_) -> {}
         .Err(error) -> return Err(ForeignBindError.IO("{context}: {error}"))
     }
 }
 
 pub fn pkg_binder_read_bytes(path: String, context: String) -[FS]> [U8] ForeignBindError! {
-    if files.read_bytes(path) == {
+    if binder_core_files.read_bytes(path) == {
         .Ok(bytes) -> Ok(bytes)
         .Err(error) -> return Err(ForeignBindError.IO("{context}: {error}"))
     }
 }
 
 pub fn pkg_binder_copy(from: String, to: String, context: String) ForeignBindError! -[FS]> {
-    if files.copy2(from, to) == {
+    if binder_core_files.copy2(from, to) == {
         .Ok(_) -> {}
         .Err(error) -> return Err(ForeignBindError.IO("{context}: {error}"))
     }
@@ -170,11 +173,11 @@ pub fn pkg_binder_copy(from: String, to: String, context: String) ForeignBindErr
 
 // Best-effort cleanup (`let _ = remove_dir_all`): a missing tree is fine.
 pub fn pkg_binder_remove_tree_quiet(path: String) -[FS]> {
-    files.remove_all(path) ?? return
+    binder_core_files.remove_all(path) ?? return
 }
 
 pub fn pkg_binder_remove_file_quiet(path: String) -[FS]> {
-    files.remove(path) ?? return
+    binder_core_files.remove(path) ?? return
 }
 
 // ── Text helpers over Rust `str` semantics ──
