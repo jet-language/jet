@@ -1890,6 +1890,11 @@ impl Param {
                 Some(list.clone())
             };
         }
+        // Sema canonicalizes a resolved bare trait name before codegen builds
+        // its context; the variadic template classification must survive that.
+        if let Type::TraitObject(bounds) = &self.ty {
+            return (!bounds.is_empty()).then(|| bounds.clone());
+        }
         if let Type::Named(n) = &self.ty {
             if !n.is_empty() && is_trait_name(n) {
                 return Some(vec![n.clone()]);
