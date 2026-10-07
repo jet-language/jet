@@ -8261,7 +8261,20 @@ impl<'a> RustEmitter<'a> {
             .same_checked_type(
                 &self.normalize_trait_type_with_aliases(&method.return_type, &implementation.self_type, &implementation.associated_types),
             );
-        let failure_differs = function.failure != method.failure;
+        let same_failure_type = |actual: &MirType, expected: &MirType| {
+            self.normalize_trait_type_with_aliases(actual, &implementation.self_type, &implementation.associated_types)
+                .same_checked_type(&self.normalize_trait_type_with_aliases(expected, &implementation.self_type, &implementation.associated_types))
+        };
+        let failure_differs = !match (&function.failure, &method.failure) {
+            (MirFailureCarrier::Infallible, MirFailureCarrier::Infallible) => true,
+            (MirFailureCarrier::Result { success: actual, error: actual_error },
+             MirFailureCarrier::Result { success: expected, error: expected_error }) =>
+                same_failure_type(actual, expected) && same_failure_type(actual_error, expected_error),
+            (MirFailureCarrier::Optional { value: actual }, MirFailureCarrier::Optional { value: expected })
+            | (MirFailureCarrier::Diverges { value: actual }, MirFailureCarrier::Diverges { value: expected }) =>
+                same_failure_type(actual, expected),
+            _ => false,
+        };
         if receiver_differs
             || has_captures
             || arity_differs
@@ -26429,6 +26442,11 @@ impl<'a> RustEmitter<'a> {
                 location,
                 fallibility,
             } => {
+                if self.prelude_row(*call).module == "core.units"
+                    && self.prelude_row(*call).member.starts_with("conversion_")
+                {
+                    return self.unit_conversion(function, value, parameters, target, *call);
+                }
                 if matches!(
                     self.prelude_row(*call).member.as_str(),
                     "checked_widen"
@@ -26463,6 +26481,68 @@ impl<'a> RustEmitter<'a> {
                     self.append_prelude_context(*call, &mut args, &extras);
                     self.prelude_call_args(*call, &args)
                 }
+            }
+        }
+    }
+
+    fn unit_conversion(
+        &self,
+        function: &MirFunction,
+        value: MirValueId,
+        parameters: &[MirValueId],
+        target: &MirType,
+        call: MirPreludeCallId,
+    ) -> String {
+        let row = self.prelude_row(call);
+        let rounded = matches!(row.member.as_str(), "conversion_rounded" | "conversion_rounded_measurement");
+        self.validate_prelude_count(row, parameters.len() + 1);
+        let source = self.value_type(function, value);
+        let input = self.value_owned(value);
+        let input = if self.is_distinct_type(source) { format!("({input}).0") } else { input };
+        let mut args = vec![input];
+        for (index, parameter) in parameters.iter().enumerate() {
+            let value = self.value_owned(*parameter);
+            args.push(match index {
+                0..=3 => format!("&({value})"),
+                4 if rounded => format!(
+                    "match {value} {{ 0 => {}UnitRoundingMode::TowardZero, 1 => {}UnitRoundingMode::Floor, 2 => {}UnitRoundingMode::Ceiling, 3 => {}UnitRoundingMode::NearestEven, _ => unreachable!(\"checked unit rounding mode\") }}",
+                    self.config.root_prefix, self.config.root_prefix, self.config.root_prefix, self.config.root_prefix
+                ),
+                5 if rounded && matches!(self.value_type(function, *parameter).kind(), MirTypeKind::Int) => "__jet_unit_digits".to_string(),
+                _ => value,
+            });
+        }
+        let result = self.prelude_call_args(call, &args);
+        let wrap = |ty: &MirType, value: &str| {
+            if self.is_distinct_type(ty) { format!("{}({value})", self.rust_type(ty)) } else { value.to_string() }
+        };
+        let digits = if rounded && matches!(self.value_type(function, parameters[5]).kind(), MirTypeKind::Int) {
+            format!(
+                "let __jet_unit_digits = {}jet_std::jet_int_owned_to_i64({}).map_err(|error| error.to_string())?;",
+                self.config.root_prefix, self.value_slot_reference(parameters[5], false)
+            )
+        } else { String::new() };
+        match target.kind() {
+            MirTypeKind::Result { ok, err } => {
+                assert!(matches!(err.kind(), MirTypeKind::String), "unit conversion error must be String");
+                if rounded {
+                    format!("(|| -> {} {{ {digits} ({result}).map(|value| {}).map_err(|error| error.to_string()) }})()", self.rust_type(target), wrap(ok, "value"))
+                } else {
+                    format!("({result}).map(|value| {}).ok_or_else(|| \"unit conversion is not exactly representable\".to_string())", wrap(ok, "value"))
+                }
+            }
+            MirTypeKind::Option(inner) => {
+                let result = if rounded { format!("({result}).ok()") } else { result };
+                format!("({result}).map(|value| {})", wrap(inner, "value"))
+            }
+            _ => {
+                assert!(digits.is_empty(), "rounded exact-Int digits require the checked Result carrier");
+                let raw = if rounded {
+                    format!("({result}).unwrap_or_else(|error| panic!(\"unit conversion failed: {{}}\", error))")
+                } else {
+                    format!("({result}).expect(\"unit conversion is not exactly representable\")")
+                };
+                wrap(target, &raw)
             }
         }
     }

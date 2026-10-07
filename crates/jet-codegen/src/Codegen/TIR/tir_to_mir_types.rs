@@ -2002,7 +2002,7 @@ fn lower_trait(
                 }
                 TirTraitMethod {
                     key: qualified_key(module, &method.name),
-                    name: method.name.clone(),
+                    name: method.name.rsplit("::").next().expect("checked trait method name").to_string(),
                     span: method.span,
                     self_access,
                     params,

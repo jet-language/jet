@@ -1219,6 +1219,11 @@ and resident execution use the same conversion mechanism. For an unknown
 unrestricted `Float`-backed value, only an identity scale and offset proves
 exact finite conversion over the complete source domain; integral coefficients
 alone are not proof.
+At the native boundary, the emitters unwrap a source unit's Float storage,
+borrow the exact rational metadata, map the checked mode to the shared kernel's
+rounding enum, and narrow `digits` through the checked exact-Int adapter. Kernel
+success values regain the destination unit identity; reason text stays in the
+checked String failure carrier.
 
 Per D-PACKAGE-POLICY-SCOPE1, `policy: .{ explicit_units: true }` in
 `package.jet` restores explicit-only conversion at package scope, and
@@ -1982,8 +1987,10 @@ rule applies. v1: signatures plus D-LIB2's associated types and default
 bodies.
 Checked implementation ABIs substitute the impl's `Self` and associated
 aliases before comparing parameter and result types with the trait declaration.
-The substitution applies inside containers and callable signatures as well as
-to bare aliases; parameter names, access modes, and failure contracts stay exact.
+The substitution applies inside containers, callable signatures, and the
+success/error payloads of failure carriers; parameter names, access modes, and
+carrier kinds stay exact. A trait method's key retains its declaring module,
+while its method name is the source leaf used by implementations.
 
 **S48 — Dynamic dispatch**: a trait name in type position (`[Shape]`,
 `fn f(s: Shape)`) means automatic boxing + dynamic dispatch; `<T: Shape>`
