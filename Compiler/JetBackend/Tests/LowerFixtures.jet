@@ -710,6 +710,10 @@ fn fx_report_executable(name: String, image: X64ExecutableResult) -> Bool {
 fn run() {
     abi_fixtures()
     clean := true
+    if !fx_runtime_o1_check() {
+        print("issue runtime-o1: library feed did not preserve canonical O1/export object bytes")
+        clean = false
+    }
     if !fx_reach_graph_checks() {
         print("issue reach: graph closure checks failed")
         clean = false
