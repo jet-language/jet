@@ -19,9 +19,11 @@ impl<'a> Checker<'a> {
             "Float" => vec![Type::Float],
             "Text" => vec![Type::String],
             "Array" => vec![Type::List(Box::new(json.clone()))],
-            // A compiler-generated struct encoder hands over its ordered pair
-            // list directly; source code always builds an Object from a map.
-            "Object" if self.is_generated_object_pairs(args) => vec![data_tree_object_pairs_ty()],
+            // D-DATATREE-ORDER1=A: an object keeps its fields in arrival
+            // order. A key-value literal keeps the written order, a
+            // `[String: DataTree]` Map hands over its sorted order, and a
+            // `[(key: String, value: DataTree)]` pair list keeps list order.
+            "Object" if self.is_object_pairs_arg(args) => vec![data_tree_object_pairs_ty()],
             "Object" => vec![Type::Map {
                 key: Box::new(Type::String),
                 key_span: None,
@@ -64,7 +66,7 @@ impl<'a> Checker<'a> {
                         if expected.len() == 1 { "" } else { "s" },
                         args.len()
                     ),
-                    "each `DataTree` variant has a fixed payload (Bool/Int/Float→scalar, Text→String, Array→[DataTree], Object→Map)".to_string(),
+                    "each `DataTree` variant has a fixed payload (Bool/Int/Float→scalar, Text→String, Array→[DataTree], Object→[(key: String, value: DataTree)] or [String: DataTree])".to_string(),
                     "check the variant payload".to_string(),
                     Some(span),
                 ));
@@ -79,20 +81,20 @@ impl<'a> Checker<'a> {
         Some(json)
     }
 
-    /// Only compiler-generated bodies may pass the ordered
-    /// `[(key: String, value: DataTree)]` accumulator to `DataTree.Object`.
-    fn is_generated_object_pairs(&self, args: &[crate::AST::CallArg]) -> bool {
-        if !self.compiler_generated {
-            return false;
-        }
+    /// D-DATATREE-ORDER1=A: `DataTree.Object` takes the ordered
+    /// `[(key: String, value: DataTree)]` pair list when its argument is a
+    /// local of that type or a list literal; anything else is read as a Map.
+    fn is_object_pairs_arg(&self, args: &[crate::AST::CallArg]) -> bool {
         let [arg] = args else {
             return false;
         };
-        let crate::AST::Expr::Ident(name, _) = &arg.expr else {
-            return false;
-        };
-        self.lookup(name)
-            .is_some_and(|local| local.ty == data_tree_object_pairs_ty())
+        match &arg.expr {
+            crate::AST::Expr::ListLit(..) => true,
+            crate::AST::Expr::Ident(name, _) => self
+                .lookup(name)
+                .is_some_and(|local| local.ty == data_tree_object_pairs_ty()),
+            _ => false,
+        }
     }
 
     /// D-DBDRIVER1: `DBValue.Null` / `.Int(n)` / `.Float(f)` / `.Text(s)` /

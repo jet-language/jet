@@ -957,7 +957,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     if manifest_file_index == None && inline_carrier == None {
         root_display :: jet_driver_display_path(entry_root, root.canonical_path)
         identity :: "source-root:{root_display.len()}:{root_display}"
-        return JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: "", version: "", edition: JET_DRIVER_LATEST_EDITION, runtime_ceiling: None, allocator_policy: MIRAllocatorPolicy.HostedDefault, authority_allow: None, authority_deny: None, authority_needs: [String]{}, entry: None, manifest_path: None, inline_package: false, dependencies: [JetDriverPackageDependency]{}, outputs: jet_driver_no_package_outputs()}
+        return JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: "", version: "", edition: JET_DRIVER_LATEST_EDITION, runtime_ceiling: None, allocator_policy: MIRAllocatorPolicy.HostedDefault, authority_allow: None, authority_deny: None, authority_needs: [String]{}, entry: None, manifest_path: None, inline_package: false, configs: [String]{}, dependencies: [JetDriverPackageDependency]{}, outputs: jet_driver_no_package_outputs()}
     }
     if manifest_file_index != None && retired_manifest {
         &diagnostics.push(jet_driver_diagnostic_at_source("E0003", None, retired_manifest_path, 0, "the authority root contains both canonical and retired package manifests", "choosing either file would make package identity ambiguous", "remove jet.toml and keep package.jet"))
@@ -985,6 +985,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     authority_needs := [String]{}
     entry := JetDriverPackageEntry?{None}
     dependencies := [JetDriverPackageDependency]{}
+    configs := [String]{}
     outputs := jet_driver_no_package_outputs()
     name_seen := false
     version_seen := false
@@ -993,6 +994,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     allocator_seen := false
     authority_seen := false
     deps_seen := false
+    configs_seen := false
     outputs_seen := false
     brace_depth := 0
     index := 0
@@ -1095,6 +1097,25 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                         else -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package dependencies must be a block", "direct package dependencies use the typed `deps: .{{ ... }}` shape", "write `deps: .{{ name: source }}`"))
                     }
                 }
+                "configs" -> {
+                    if configs_seen -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package configurations are declared more than once", "one list selects the package fact contributors", "keep one `configs:` list"))
+                    configs_seen = true
+                    list_open := value_index
+                    if list_open < tokens.len() && tokens[list_open].kind == TOKEN_DOT -> list_open += 1
+                    list_close :: jet_driver_manifest_matching_bracket(tokens, list_open, tokens.len()) ?? {
+                        &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package configurations must be a closed list", "configuration declarations select manifest inputs rather than source modules", "write `configs: [\"config/build.jet\"]`"))
+                        index = list_open
+                        next
+                    }
+                    loop config_index in (list_open + 1)..<list_close {
+                        config_token :: tokens[config_index]
+                        if jet_driver_is_manifest_string(config_token.kind) {
+                            path :: jet_driver_file_import_path("package.jet", config_token.payload.decoded)
+                            if path.valid -> &configs.push(path.path)
+                        }
+                    }
+                    index = list_close
+                }
                 "outputs" -> {
                     if outputs_seen -> &diagnostics.push(jet_driver_diagnostic("E0003", token.span, "package outputs are declared more than once", "the private compile request carries no output selector", "keep one `outputs:` block"))
                     outputs_seen = true
@@ -1155,7 +1176,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
         diagnostic_index += 1
     }
     identity :: jet_driver_package_identity(name, version)
-    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, entry: entry, manifest_path: Val(manifest_path), inline_package: inline_carrier != None, dependencies: dependencies, outputs: outputs}
+    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, entry: entry, manifest_path: Val(manifest_path), inline_package: inline_carrier != None, configs: configs, dependencies: dependencies, outputs: outputs}
 }
 
 fn jet_driver_default_module_alias(relative_path: String) -> String Never! {
@@ -1220,6 +1241,12 @@ fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDrive
         package :: packages[root_index]
         loop (file_index, file) in root.files {
             if file.relative_path == "package.jet" || file.relative_path == "jet.toml" || !file.relative_path.ends_with(".jet") -> next
+            // Config files are checked manifest inputs, not source namespace members.
+            configuration := false
+            loop path in package.configs {
+                if file.relative_path == path || file.relative_path == "{path}.jet" -> configuration = true
+            }
+            if configuration -> next
             unit_path :: jet_driver_display_path(entry_root, file.path)
             &source_units.push(JetDriverSourceUnit{
                 root_index: root_index,

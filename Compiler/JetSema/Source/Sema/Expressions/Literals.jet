@@ -828,10 +828,10 @@ fn sema_expression_displayable(ty: Type, environment: SemaScopeEnvironment) -> B
             return true
         }
         .Apply(name, args) -> {
-            // The owner's own rule is the reflection gate's, applied to the
-            // bare owner; every argument is then shown in turn.
+            // Explicit Display implementations are checked against the owner's
+            // actual generic bounds; unused parameters need not be displayable.
+            if sema_call_reflection_bound(ty, "Display", environment) -> return true
             if !sema_call_reflection_is_displayable(Type.Apply{name: name, args: [Type]{}}, environment) && !sema_expression_interpolation_derived(ty, environment) -> return false
-            if sema_call_reflection_leaf_name(name) == "KeyRef" -> return true
             loop argument in args {
                 if !sema_expression_displayable(argument, environment) -> return false
             }

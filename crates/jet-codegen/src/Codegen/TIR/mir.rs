@@ -4091,6 +4091,7 @@ fn lower_package_facts(program: &TirProgram) -> MirPackageFacts {
         active_os: program.facts.active_os.clone(),
         inferred_layer: program.facts.inferred_layer.clone(),
         allocator: program.facts.allocator.clone(),
+        program_allocator: program.facts.program_allocator.clone(),
         package_version: program.artifact_facts.package_version.clone(),
         artifact_target: Some(program.artifact_facts.target),
         target_dossier: program.artifact_facts.build.target_dossier.clone(),
@@ -8913,25 +8914,6 @@ impl<'a> LowerCtx<'a> {
         Ok(())
     }
 
-    pub(super) fn bind_data_entries_temp(
-        &mut self,
-        local: &TLocal,
-        owner: MirTypeId,
-        variant: &str,
-    ) -> Result<MirLocalId, LowerError> {
-        if let Some(local_id) = self
-            .locals
-            .iter()
-            .rfind(|candidate| candidate.name == local.name)
-            .map(|candidate| candidate.id)
-        {
-            return Ok(local_id);
-        }
-        let payload_ty = self.variant_payload_type(owner, variant, 0)?;
-        self.bind_local(local, payload_ty, true, false, true)?;
-        self.local_id_for(local)
-    }
-
     pub(super) fn bind_named_local(
         &mut self,
         name: &str,
@@ -8950,27 +8932,6 @@ impl<'a> LowerCtx<'a> {
         pattern: &MirPattern,
     ) -> Result<MirValueId, LowerError> {
         let subject_ty = self.value_source_type(subject)?;
-        // Object patterns bind their ordered payload to `temp`; the public
-        // map binding is a later then-body declaration.  Suppress the generic
-        // variant binder here so both writes do not alias one local place with
-        // incompatible list/map types.
-        let shape = match &pattern.position {
-            MirPatternPosition::DataEntries { .. } => match &pattern.shape {
-                MirPatternShape::Variant {
-                    variant,
-                    leading_dot,
-                    span,
-                    ..
-                } => MirPatternShape::Variant {
-                    variant: variant.clone(),
-                    bindings: vec![MirPatternBinding::Wildcard],
-                    leading_dot: *leading_dot,
-                    span: *span,
-                },
-                _ => pattern.shape.clone(),
-            },
-            _ => pattern.shape.clone(),
-        };
         // A mutable binding owns its copy; only an immutable one may alias a
         // read window.
         let window = self
@@ -8978,41 +8939,15 @@ impl<'a> LowerCtx<'a> {
             .get(&subject)
             .copied()
             .filter(|window| !(pattern.mutable && self.read_windows.contains(window)));
-        let condition = self.lower_pattern_shape_condition(
+        self.lower_pattern_shape_condition(
             subject,
             &subject_ty,
             pattern.owner,
-            &shape,
+            &pattern.shape,
             pattern.mutable,
             false,
             window,
-        )?;
-        if let MirPatternPosition::DataEntries { temp } = &pattern.position {
-            if let MirPatternShape::Variant { variant, .. } = &pattern.shape {
-                let owner = pattern.owner.ok_or_else(|| {
-                    self.error(
-                        self.span(),
-                        "checked data-entry pattern is missing its owner",
-                    )
-                })?;
-                return self.lower_guarded_pattern(condition, |ctx| {
-                    let payload_ty = ctx.variant_payload_type(owner, variant, 0)?;
-                    let payload = ctx.emit_checked(
-                        "pattern",
-                        Some(&payload_ty),
-                        MirOperation::EnumPayload {
-                            subject,
-                            owner,
-                            variant: variant.clone(),
-                            index: 0,
-                        },
-                    )?;
-                    ctx.write_local_id(*temp, payload)?;
-                    Ok(condition)
-                });
-            }
-        }
-        Ok(condition)
+        )
     }
 
     fn lower_pattern_shape_condition(
@@ -10143,24 +10078,20 @@ impl<'a> LowerCtx<'a> {
                     format!("invalid or duplicate checked lambda capture `{source}`"),
                 ));
             }
-            // A clone/materialization owns the closure environment once; it
-            // does not consume that environment on every callback invocation.
-            // Only a sema-proven consuming/resource capture is a per-call move.
+            // `moved` transfers ownership at closure creation, just like a
+            // clone/materialization fills an owning environment once. Each
+            // invocation lends the slot unless the body actually consumes it.
             let moved = facts.moved.contains(source);
             let cloned =
                 !moved && (facts.cloned.contains(source) || facts.materialized.contains(source));
-            let access = if moved {
-                MirAccess::Move
-            } else if facts.mutable.contains(source) {
+            let access = if facts.mutable.contains(source) {
                 MirAccess::Write
             } else {
                 MirAccess::Read
             };
             // A taken read capture owns its slot like a clone does; only the
             // construction differs (a move instead of a copy).
-            let ownership = if moved {
-                MirOwnership::from_access(MirAccess::Move)
-            } else if cloned || self.taken_read_capture(taken, source, ty, access, cloned) {
+            let ownership = if moved || cloned || self.taken_read_capture(taken, source, ty, access, cloned) {
                 MirOwnership::Owned
             } else {
                 MirOwnership::from_access(access)
@@ -10211,11 +10142,6 @@ impl<'a> LowerCtx<'a> {
                     string_view: false,
                     gc_root: false,
                 });
-            }
-            if moved {
-                let source_local = TLocal::user(source.clone());
-                let source_place = self.place_for_local(&source_local, access)?;
-                self.register_owned_drop(source_place, ty, ownership, true)?;
             }
         }
         Ok(())
@@ -10475,11 +10401,7 @@ impl<'a> LowerCtx<'a> {
             source_span: lambda.source_span,
             failure_carrier: lambda.failure_carrier.clone(),
             effects: lambda.effects.clone(),
-            target_applicability: TTargetApplicability {
-                rust_aot: true,
-                interpreter: true,
-                web: true,
-            },
+            target_applicability: self.function.target_applicability,
             web_bucket: self.function.web_bucket,
             web_marker: None,
             visibility: TVisibility::Private,
@@ -10552,15 +10474,12 @@ impl<'a> LowerCtx<'a> {
         let facts = self.capture_facts_for(lambda);
         let mut captures = Vec::with_capacity(lambda.captures.len());
         for (slot, (source, runtime, ty)) in lambda.captures.iter().enumerate() {
-            // Cloned/materialized captures are owned by the closure environment,
-            // but reusable callbacks borrow that environment on each call.
-            // Keep Move exclusively for sema-proven consuming captures.
+            // Construction owns moved/cloned/materialized captures once;
+            // reusable callbacks lend that environment on each invocation.
             let moved = facts.moved.contains(source);
             let cloned =
                 !moved && (facts.cloned.contains(source) || facts.materialized.contains(source));
-            let access = if moved {
-                MirAccess::Move
-            } else if facts.mutable.contains(source) {
+            let access = if facts.mutable.contains(source) {
                 MirAccess::Write
             } else {
                 MirAccess::Read
@@ -10574,7 +10493,7 @@ impl<'a> LowerCtx<'a> {
                 access,
                 cloned,
             );
-            let borrowed = matches!(access, MirAccess::Read | MirAccess::Write) && !cloned && !taken;
+            let borrowed = matches!(access, MirAccess::Read | MirAccess::Write) && !moved && !cloned && !taken;
             // `runtime` is the canonical TIR slot used by the lambda body and,
             // for borrowed and moved captures, the exact enclosing slot (which
             // may carry a generated spelling). A cloned/materialized capture's
@@ -10588,7 +10507,7 @@ impl<'a> LowerCtx<'a> {
                 .unwrap_or_else(|| runtime.clone());
             let outer_access = if cloned {
                 MirAccess::Read
-            } else if taken {
+            } else if moved || taken {
                 MirAccess::Move
             } else {
                 access
@@ -10624,7 +10543,7 @@ impl<'a> LowerCtx<'a> {
                         },
                     )?
                 }
-            } else if matches!(access, MirAccess::Move) || taken {
+            } else if moved || taken {
                 self.emit_owned(
                     &format!("closure.capture.{slot}.move"),
                     Some(ty.clone()),

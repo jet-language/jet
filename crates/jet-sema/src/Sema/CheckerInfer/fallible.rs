@@ -1350,7 +1350,12 @@ impl<'a> Checker<'a> {
         let saved_fallback_has_err = self.fallback_has_err;
         let saved_fallback_is_shape_miss = self.fallback_is_shape_miss;
         self.fallback_is_shape_miss = false;
-        self.fallback_has_err = Some(!*is_option);
+        // A mixed carrier also reaches this fallback on Ok(None). That
+        // route owns no report, so an ambient err is not valid for the
+        // shared fallback; handle Result and Option separately when needed.
+        let mixed_absence = matches!(&val_ty, Type::Result { ok, .. }
+            if matches!(ok.as_ref(), Type::Option(_)));
+        self.fallback_has_err = Some(!*is_option && !mixed_absence);
         let ambient_scope = !*is_option;
         if ambient_scope {
             let err_ty = match &val_ty {

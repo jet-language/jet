@@ -97,7 +97,12 @@ fn store_build_record_string_field(node: [String: DataTree], name: String) -> St
 
 fn store_build_record_object(value: DataTree) -> [String: DataTree]? Never! {
     if value == {
-        .Object(entries) -> Val(entries)
+        // D-DATATREE-ORDER1=A: the object's ordered pairs, indexed by name.
+        .Object(entries) -> {
+            members := [String: DataTree]{}
+            loop pair in entries -> members[pair.key] = pair.value
+            Val(members)
+        }
         else -> None
     }
 }

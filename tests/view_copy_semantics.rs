@@ -209,6 +209,30 @@ fn checked_source_windows_lower_to_marked_mir() {
 }
 
 #[test]
+fn user_write_calls_keep_range_arguments_as_owner_places() {
+    let source = std::fs::read_to_string("Examples/features/memory/range_write_windows.jet").unwrap();
+    let mir = lower_checked(&source);
+    let mut range_calls = 0;
+    for function in &mir.functions {
+        for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+            let MirOperation::Call { callee: jet_foundation::MIR::MirCallee::User(_), args, .. } =
+                &instruction.operation else { continue };
+            for arg in args {
+                if arg.access != jet_foundation::MIR::MirAccess::Write { continue; }
+                if arg.place.is_some_and(|id| function.places.iter().any(|place| {
+                    place.id == id && matches!(place.projections.last(),
+                        Some(jet_foundation::MIR::MirProjection::Range { .. }))
+                })) {
+                    range_calls += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(range_calls, 2,
+        "both direct user calls must lend a range of their owner's list, not an owned slice");
+}
+
+#[test]
 fn evaluator_view_materialization_helpers_use_checked_jet_route() {
     let source = include_str!("../Compiler/JetEval/Source/Evaluator.jet");
     for helper in [

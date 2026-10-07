@@ -487,16 +487,6 @@ fn jet_codegen_move_place_root(expression: TExpr) -> Bool Never! {
     }
 }
 
-// Whether a place expression is a dereferenced pointer or a field path below
-// one; Rust `lower_receiver_place` has no place for it.
-fn jet_codegen_place_root_is_deref(expression: TExpr) -> Bool Never! {
-    if expression.kind == {
-        .Deref(_) -> true
-        .Field(receiver, _) -> jet_codegen_place_root_is_deref(receiver)
-        else -> false
-    }
-}
-
 fn jet_codegen_trait_bound_is_declared(modules: [SemaGraphModuleResult], name: String, preferred_module_identity: String) -> Bool Never! {
     jet_codegen_resolve_trait_ref(modules, name, preferred_module_identity) != None
 }
@@ -674,10 +664,9 @@ fn jet_codegen_lower_call_args_for_signature(builder: &JetCodegenBuilder, progra
                     // owner's place itself: a read borrow reads the owner's
                     // storage in place, and a write lands in it (Rust
                     // `lower_receiver_place` for both conventions).
-                    // A dereferenced pointer has no receiver place (Rust
-                    // returns None), so its argument takes the value path.
-                    projected := MIRPlaceID?{None}
-                    if !jet_codegen_place_root_is_deref(place_expr) -> projected = jet_codegen_lower_expression_place(&builder, program, place_expr, access)
+                    // An allocation view or raw-pointer dereference also
+                    // projects the owner's storage, never a copied pointee.
+                    projected := jet_codegen_lower_expression_place(&builder, program, place_expr, access)
                     if projected != None {
                         place = projected
                     } else if argument.mut_borrow {
@@ -3769,6 +3758,9 @@ fn jet_codegen_lower_try(builder: &JetCodegenBuilder, program: JetCodegenProgram
     builder.plain_try_operand = previous_operand
     if taken -> return input
     input_type := jet_codegen_expression_call_return_type(builder, program, inner) ?? inner.ty
+    // The solved callable may have erased an inferred failure carrier after
+    // the automatic Try was installed. No failure route remains to consume.
+    if inner.ty != .Result(_, _) && inner.ty != .Option(_) && input_type != .Result(_, _) && input_type != .Option(_) -> return input
     jet_codegen_lower_try_value(&builder, program, expression, input, input_type, inner.span, note, conversion, file, line, function, jet_codegen_try_operand_starts_failure(inner))
 }
 
@@ -4069,13 +4061,6 @@ fn jet_codegen_lower_list_spread(builder: &JetCodegenBuilder, program: JetCodege
         accumulator = jet_codegen_emit_static_prelude_call(&builder, program, expression.span, expression.ty, route, [MIRValueID]{accumulator, chunk})
     }
     accumulator
-}
-
-fn jet_codegen_lower_data_entries_to_map(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, local: TLocal) -> MIRValueID Never! {
-    binding :: jet_codegen_find_binding_for_local(builder, program, local) ?? panic("checked data entries have no MIR local")
-    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
-    call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.collections", "entries_to_map", "jet_data_entries_to_map", 1, [Bool]{false}, None, carrier, MIRPreludeABI.Value)
-    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.DataEntriesToMap{call: call, local: binding.local}})
 }
 
 fn jet_codegen_lower_decode_under(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, segment: TExpr, inner: TExpr) -> MIRValueID {
@@ -4998,7 +4983,6 @@ fn jet_codegen_lower_expr(builder: &JetCodegenBuilder, program: JetCodegenProgra
         .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> jet_codegen_lower_result_handler(&builder, program, expression, subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal)
         .OptionLift2(function, left, right) -> jet_codegen_lower_option_lift2(&builder, program, expression, function, left, right)
         .DecodeUnder(segment, inner) -> jet_codegen_lower_decode_under(&builder, program, expression, segment, inner)
-        .DataEntriesToMap(local) -> jet_codegen_lower_data_entries_to_map(&builder, program, expression, local)
         .InlineBlock(body) -> jet_codegen_lower_inline_block(&builder, program, expression, body)
         .Unit -> jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: MIRConstant.Unit})
         .CtLit(value) -> {

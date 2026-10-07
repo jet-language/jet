@@ -9,19 +9,13 @@ package {
     }
 }
 use core as core
-use core.process as process
 
 
 // core.args — argv decoding against a declarative spec.
 //
-// `spec` is the empty builder. `decode` reads process argv. `merge` overlays
-// two configuration trees (later wins). Flags are `--key=value`, `--key value`
-// `--flag` (true), and `--no-flag` (false). A bare `--` ends options.
-// Positionals land in the `_` array.
-
-pub struct ArgsSpec {
-    pub flags: [String]
-}
+// `ArgsSpec` and typed `decode`/`merge` use the one checked native contract.
+// Source helpers below inspect untyped argv trees; they do not redeclare the
+// builder or replace #CLI projection with a generic DataTree parser.
 fn slice_str(text: String, start: Int, end: Int) -> String {
     raw :: text.bytes()
     s := start
@@ -43,16 +37,10 @@ fn drop_prefix(text: String, count: Int) -> String {
 }
 
 
-pub fn spec() -> ArgsSpec Never! { ArgsSpec{flags: [String]{}} }
-
-/// Decode process argv into a `DataTree` object. `--help` / `-h` set `help`.
-pub fn decode() -[Env, Exec.Args]> DataTree Never! {
-    argv :: process.argv()
-    decode_argv(argv)
-}
 
 pub fn decode_argv(argv: [String]) -> DataTree Never! {
-    entries := [String: DataTree]{}
+    // D-DATATREE-ORDER1=A: options keep their argv order.
+    entries := [(key: String, value: DataTree)]{}
     positionals := [DataTree]{}
     i := 0
     // Skip argv[0] (program name) when present.
@@ -115,36 +103,11 @@ pub fn decode_argv(argv: [String]) -> DataTree Never! {
         i = i + 1
     }
     if argv.len() > 0 -> put_entry(&entries, "0", DataTree.Text(~argv[0]))
-    _ :: &entries.add("_", DataTree.Array(positionals))
+    &entries.push((key: "_", value: DataTree.Array(positionals)))
     DataTree.Object(entries)
 }
 
-/// Overlay `overlay` onto `base`. Object keys in overlay replace; arrays
-/// replace (they are not concatenated). Scalars replace.
-pub fn merge(base: DataTree, overlay: DataTree) -> DataTree Never! {
-    if overlay == {
-        .Object(over) -> {
-            if base == {
-                .Object(under) -> {
-                    out := ~under
-                    loop key in over.keys() {
-                        ov :: over.get(key) ?? DataTree.Null
-                        un :: under.get(key)
-                        if un == .None {
-                            _ :: &out.add(key, ov)
-                        } else {
-                            under_value :: un
-                            _ :: &out.add(key, merge(under_value, ov))
-                        }
-                    }
-                    return DataTree.Object(out)
-                }
-                else -> return ~overlay
-            }
-        }
-        else -> return ~overlay
-    }
-}
+
 
 fn parse_atom(text: String) -> DataTree {
     if text == {
@@ -181,30 +144,49 @@ fn negative_number(text: String) -> Bool {
     true
 }
 
-fn add_flag_entry(entries: &[String: DataTree], key: String, old: DataTree, value: DataTree) {
+// The first value named `key`, scanning the object's ordered pairs.
+fn object_get(entries: [(key: String, value: DataTree)], key: String) -> DataTree? {
+    loop pair in entries {
+        if pair.key == key -> return Val(pair.value)
+    }
+    None
+}
+
+// Bind `key` to `value`: an existing key keeps its place, a new key goes last.
+fn object_set(entries: &[(key: String, value: DataTree)], key: String, value: DataTree) {
+    loop i in 0..<entries.len() {
+        if entries[i].key == key {
+            entries[i] = (key: key, value: value)
+            return
+        }
+    }
+    &entries.push((key: key, value: value))
+}
+
+fn add_flag_entry(entries: &[(key: String, value: DataTree)], key: String, old: DataTree, value: DataTree) {
     if old == {
         .Bool(previous) -> {
             if previous {
-                _ :: &entries.add(key, DataTree.Int(2))
+                object_set(&entries, key, DataTree.Int(2))
             } else {
-                _ :: &entries.add(key, value)
+                object_set(&entries, key, value)
             }
         }
         .Int(count) -> {
             if count > 0 {
-                _ :: &entries.add(key, DataTree.Int(count + 1))
+                object_set(&entries, key, DataTree.Int(count + 1))
             } else {
-                _ :: &entries.add(key, value)
+                object_set(&entries, key, value)
             }
         }
-        else -> { _ :: &entries.add(key, value) }
+        else -> { object_set(&entries, key, value) }
     }
 }
 
-fn put_entry(entries: &[String: DataTree], key: String, value: DataTree) {
-    old :: entries.get(key)
+fn put_entry(entries: &[(key: String, value: DataTree)], key: String, value: DataTree) {
+    old :: object_get(entries, key)
     if old == .None {
-        _ :: &entries.add(key, value)
+        &entries.push((key: key, value: value))
         return
     }
     previous :: old
@@ -213,7 +195,7 @@ fn put_entry(entries: &[String: DataTree], key: String, value: DataTree) {
             if flag_value {
                 add_flag_entry(&entries, key, previous, value)
             } else {
-                _ :: &entries.add(key, value)
+                object_set(&entries, key, value)
             }
         }
         else -> {
@@ -252,7 +234,7 @@ fn index_of(text: String, needle: String) -> Int {
 pub fn get_text(tree: DataTree, key: String) -> String Never! {
     if tree == {
         .Object(entries) -> {
-            v :: entries.get(key)
+            v :: object_get(entries, key)
             value :: v ?? return ""
             if value == {
                 .Text(s) -> return ~s
@@ -273,7 +255,7 @@ pub fn get_text(tree: DataTree, key: String) -> String Never! {
 pub fn get_bool(tree: DataTree, key: String) -> Bool Never! {
     if tree == {
         .Object(entries) -> {
-            v :: entries.get(key)
+            v :: object_get(entries, key)
             value :: v ?? return false
             if value == {
                 .Bool(b) -> return b
@@ -293,7 +275,7 @@ pub fn get_bool(tree: DataTree, key: String) -> Bool Never! {
 pub fn get_int(tree: DataTree, key: String) -> Int Never! {
     if tree == {
         .Object(entries) -> {
-            v :: entries.get(key)
+            v :: object_get(entries, key)
             value :: v ?? return 0
             if value == {
                 .Int(n) -> return n
@@ -309,7 +291,7 @@ pub fn positionals(tree: DataTree) -> [String] Never! {
     out := [String]{}
     if tree == {
         .Object(entries) -> {
-            v :: entries.get("_")
+            v :: object_get(entries, "_")
             value :: v ?? return out
             if value == {
                 .Array(items) -> {
@@ -331,17 +313,11 @@ pub fn positionals(tree: DataTree) -> [String] Never! {
 pub fn program(tree: DataTree) -> String Never! { get_text(tree, "0") }
 
 pub fn help_text(name: String, summary: String) -> String Never! { "{name} — {summary}\n\nOptions:\n  -h, --help    Show this help\n  --flag        Boolean flag\n  --key value   Key/value option\n" }
-pub fn flag(spec: ArgsSpec, name: String) -> ArgsSpec Never! {
-    flags := [String]{}
-    loop item in spec.flags -> &flags.push(~item)
-    &flags.push(~name)
-    ArgsSpec{flags: flags}
-}
 
 pub fn has(tree: DataTree, key: String) -> Bool Never! {
     if tree == {
         .Object(entries) -> {
-            v :: entries.get(key)
+            v :: object_get(entries, key)
             if v == .None -> return false
             return true
         }
@@ -359,7 +335,6 @@ pub struct ArgDef {
     pub default_text: String
 }
 
-pub fn argument(spec: ArgsSpec, name: String) -> ArgsSpec Never! { flag(spec, name) }
 
 pub fn define(name: String, help: String, flag: Bool) -> ArgDef Never! {
     ArgDef{
@@ -432,9 +407,9 @@ pub fn apply_defaults(tree: DataTree, defs: [ArgDef]) -> DataTree Never! {
         if d.default_text.bytes().len() == 0 -> next
         if ~out == {
             .Object(entries) -> {
-                if entries.get(d.dest) == .None && entries.get(d.name) == .None {
+                if object_get(entries, d.dest) == .None && object_get(entries, d.name) == .None {
                     next_entries := ~entries
-                    _ :: &next_entries.add(d.dest, parse_atom(d.default_text))
+                    &next_entries.push((key: d.dest, value: parse_atom(d.default_text)))
                     out = DataTree.Object(next_entries)
                 }
             }
