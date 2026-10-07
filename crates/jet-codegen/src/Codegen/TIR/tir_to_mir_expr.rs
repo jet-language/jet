@@ -4518,6 +4518,7 @@ pub(super) fn lower_expr(
                 matches!(
                     op,
                     THandleOp::FileReaderReadLine
+                        | THandleOp::StdinReadLine
                         | THandleOp::FileReaderRead
                         | THandleOp::AllocReset
                         | THandleOp::FileWriterWriteLine

@@ -1441,6 +1441,10 @@ fn run() {
 and `Unknown`. `confirm` treats a bare Enter as no; `choose` returns an input
 error after its finite retry budget or when stdin closes.
 
+Read a buffered handle with `&reader.read_line()`: each call mutably lends
+the reader and returns `String? !IOError`. Ordinary failure propagation
+preserves the optional line, so EOF remains `None` rather than an I/O error.
+
 ### `core.args` — declarative command-line parsing (D-ARGS1)
 
 `core.args` provides both a direct `DataTree` decoder and an `ArgsSpec` builder.

@@ -4811,7 +4811,11 @@ fn jet_rust_emit_handle_method_values(ctx: &JetRustEmitContext, function: MIRFun
             else -> &rendered.push(jet_rust_emit_value_consume(ctx, function, value))
         }
     }
-    jet_rust_emit_route_call(&ctx, call, rendered)
+    emitted :: jet_rust_emit_route_call(&ctx, call, rendered)
+    if row.member == "file_reader.read_line" || row.member == "stdin.read_line" {
+        return "({emitted}).map(|line| line.ok_or({ctx.config.root_prefix}JetAbsent))"
+    }
+    emitted
 }
 
 // MIRRust prelude_handle_method: a by-value argument after the receiver whose
