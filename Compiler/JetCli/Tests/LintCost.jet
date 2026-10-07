@@ -29,12 +29,23 @@ fn run() {
     materialized := sites[0]
     materialized.kind = TCostKind.ViewMaterialization
     assert(jet_cli_cost_diagnostics(TCostReport{sites: [TCostSite]{materialized}}, []).len() == 0)
+    retained :: cli_cost_expr(TExprKind.Present{value: two}, Type.Option{inner: Type.Int}, 5)
+    consumed := [TCostSite]{}
+    jet_codegen_cost_expr(retained, "run", 1, &consumed, true)
+    assert(consumed.len() == 0)
+    fallback :: cli_cost_expr(TExprKind.OrFallback{value: retained, fallback: TOrFallback.Value{value: two}, ambient_err: None}, Type.Int, 6)
+    jet_codegen_cost_expr(fallback, "run", 1, &consumed)
+    assert(consumed.len() == 1 && consumed[0].state == TCostState.OptimizerRemoved)
     clean :: jet_driver_cost_query(cli_cost_request("fn run() {{ x :: 2; y :: x + 3; }}"))
     assert(clean.compile.complete && clean.gaps.len() == 0 && clean.report != None)
     bounded :: clean.report ?? panic("checked report")
     assert(bounded.sites.len() > 0 && bounded.sites[0].state == TCostState.OptimizerRemoved)
     missing_root :: jet_driver_cost_query(cli_cost_request("fn unused() {{ loop {{ x :: 1 + 2; break }} }}"))
     assert(missing_root.report == Val(TCostReport{}))
+    unreachable :: jet_driver_cost_query(cli_cost_request("fn identity<T>(value: T) -> T {{ return value }}\nfn run() {{}}\n"))
+    assert(unreachable.compile.complete && unreachable.gaps.len() == 0 && unreachable.report != None)
+    reached :: jet_driver_cost_query(cli_cost_request("fn identity<T>(value: T) -> T {{ return value }}\nfn run() {{ value :: identity(1); }}\n"))
+    assert(reached.report == None && reached.gaps.len() > 0)
     broken :: jet_driver_cost_query(cli_cost_request("fn run() -> Int {{ true }}"))
     assert(broken.report == None && !broken.compile.complete && broken.compile.diagnostics.len() > 0)
     nodes :: jet_cli_inspect_build_query("explain-build", [String]{"explain-build", "main.jet"}, false, true, None)
