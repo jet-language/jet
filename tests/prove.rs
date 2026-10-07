@@ -1185,7 +1185,13 @@ fn prove_caught_property_stop_does_not_capture_later_unit_panic() {
     let root = workspace("property_capture_boundary");
     fs::write(
         root.join("mixed.jet"),
-        "#[Pre(value > 0, \"positive\"), Post(result > value, \"fee grows\")] fn add_fee(value: Int) -[]> Int { return value }\n#Test(\"ordinary same site\") { assert_eq(add_fee(1), 1) }\n#Test(\"ordinary later panic\") { panic(\"ordinary later panic\"); assert(true) }\n",
+        r#"#[Pre(value > 0, "positive"), Post(result > value, "fee grows")] fn add_fee(value: Int) -[]> Int { return value }
+#Test("ordinary same site") { assert_eq(add_fee(1), 1) }
+#Test("ordinary later panic") {
+    panic("ordinary later panic")
+    assert(true)
+}
+"#,
     )
     .unwrap();
     let out = Command::new(jet())
