@@ -63,7 +63,8 @@ if [ -z "$runtime_object" ]; then
   runtime_object=$work/runtime/jet_runtime_jet.o
 fi
 [ -f "$runtime_object" ] || { echo "prebuild-runtime: no Jet runtime object at $runtime_object" >&2; exit 1; }
-cp "$runtime_object" "$out/$key/jet_runtime_jet.o"
+[ "$runtime_object" -ef "$out/$key/jet_runtime_jet.o" ] || cp "$runtime_object" "$out/$key/jet_runtime_jet.o"
+node "$repo/Tools/packaging/check-runtime-exports.mjs" "$out/$key/jet_runtime_jet.o" "$out/$key/libjet_runtime.rlib"
 sysroot_lib=$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/lib
 archives=("$out/$key/jet_runtime_jet.o" "$out/$key/libjet_runtime.rlib")
 for name in std panic_unwind object memchr addr2line gimli rustc_demangle std_detect hashbrown rustc_std_workspace_alloc miniz_oxide adler2 unwind cfg_if libc alloc rustc_std_workspace_core core compiler_builtins; do
