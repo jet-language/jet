@@ -4,26 +4,10 @@
 // three 8-byte words. No String/Vec Rust layout is read here. These exports
 // replace the corresponding Rust exports when E2 cuts the pack over.
 
-// The live stdout buffer remains in the Rust stdio layer until L7a. These
-// stable C exports flush that real buffer, not a substitute Jet buffer.
-#Import(c) fn trap_rust_stdout() -> I64 = "jet_std_io_stdout"
-#Import(c) fn trap_rust_stdout_flush(handle: I64, error_slot: I64) -> I64 = "jet_std_io_stdout_flush"
-
+// Host.jet owns the real Jet stdout buffer. Flush once before the first
+// stderr byte, so a partial stdout line survives a process-edge stop.
 fn trap_flush_stdout() {
-    root :: alloc_root
-    if (root == I64{0}) -> return
-    flush_lock :: root + I64{4080}
-    error_slot :: root + I64{4088}
-    // The foreign error-pointer store is non-atomic: serialize failed flushes
-    // separately from the heap lock, which Rust error construction may need.
-    // This lock is not reentrant: the current Rust flush only returns an
-    // error. A future hook must not raise a trap while this lock is held.
-    alloc_lock(flush_lock)
-    #Unsafe("the zero-sized stdout box and aligned error slot remain live; the dedicated flush lock excludes concurrent foreign pointer stores") {
-        stdout :: trap_rust_stdout()
-        _ := trap_rust_stdout_flush(stdout, error_slot)
-    }
-    alloc_unlock(flush_lock)
+    jet_rt_stdout_flush()
 }
 
 fn trap_word(address: I64) -> I64 {
