@@ -28,17 +28,9 @@ module store
 module table
 module virtual
 
-pub struct App {
-    pub name: String
-    pub pages: [WebPage]
-    pub live: [LiveQuery]
-    pub sessions: [Session]
-}
-
-pub struct WebPage {
-    pub title: String
-    pub body: String
-}
+// D-WEBAPP1=D: App and WebPage are compiler-owned opaque graph carriers.
+// Their registered constructors (`web.app`, `web.page`) and builder methods
+// retain typed handlers; a plain record cannot stand in for that graph.
 
 pub struct WebEvent {
     pub path: String
@@ -73,10 +65,6 @@ pub struct LiveQuery {
     pub generation: Int
     pub subscribers: Int
 }
-
-pub fn app() -> App Never! { App{name: "app", pages: [WebPage]{}, live: [LiveQuery]{}, sessions: [Session]{}} }
-
-pub fn page(title: String, body: String) -> WebPage Never! { WebPage{title: title, body: body} }
 
 pub fn form(input: WebFormInput, action: String) -> WebFormTyped WebFormError! {
     core.web.forms.typed(input, action)
