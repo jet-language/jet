@@ -216,11 +216,17 @@ pub struct JetCLIRootedDirectory {
         self.handle.fsync() ?? return Err(jet_cli_read_error("could not flush `{self.path}`: {jet_cli_io_error_text(err)}"))
     }
 
-    // Remove the regular file `name`; absence is not an error. A directory
-    // is refused, and a link is removed itself, never followed.
+    // Remove the regular file `name` (RecordIndex.rs
+    // `remove_disposable_artifact`); absence is not an error. A link or a
+    // directory is refused, never followed or removed.
     fn remove(self, name: String) -[FS]> Bool JetCLIReadError! {
         jet_cli_rooted_validate_name(name)
         shown :: jet_cli_rooted_join(self.path, name)
+        info :: self.handle.entry_stat(name) ?? {
+            if jet_cli_rooted_missing(err) -> return Ok(false)
+            return Err(jet_cli_read_error("could not inspect `{shown}`: {jet_cli_io_error_text(err)}"))
+        }
+        if info.is_symlink || !info.is_file -> return Err(jet_cli_read_error("`{shown}` is not a regular file"))
         if self.handle.remove(name) == .Err(error) {
             if error == .NotFound(_) -> return Ok(false)
             return Err(jet_cli_read_error("could not remove `{shown}`: {jet_cli_io_error_text(error)}"))
