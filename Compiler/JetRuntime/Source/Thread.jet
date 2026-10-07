@@ -135,7 +135,9 @@ fn rt_tls_shared_destructor_address() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
-#Export(c) fn jet_rt_tls_shared_key(site: I64) -> I64 {
+// A declaration's site always supplies its stable lifetime scope:
+// 0 = thread exit only, 1 = attempt reset as well as thread exit.
+#Export(c) fn jet_rt_tls_shared_key(site: I64, scope: I64) -> I64 {
     existing :: sync_load(site)
     if (existing != I64{0}) { return existing }
     sync_mutex_lock(thread_tls_registry)
@@ -145,7 +147,7 @@ fn rt_tls_shared_destructor_address() -> I64 {
         sync_store(closure, I64{1})
         sync_store(closure + I64{8}, rt_tls_shared_destructor_address())
         sync_store(closure + I64{16}, I64{0})
-        key = thread_tls_key_new_locked(closure, I64{1})
+        key = thread_tls_key_new_locked(closure, scope)
         sync_store(site, key)
     }
     sync_mutex_unlock(thread_tls_registry)
