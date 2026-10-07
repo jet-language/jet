@@ -1908,7 +1908,7 @@ pub(crate) fn lower_return_value(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt
                 other => other,
             };
             value = preserve_typed_list_shape(value, payload, cx);
-            value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want);
+            value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want, cx);
             let carrier_slot = match want {
                 Type::Result { ok, .. } => ok.as_ref(),
                 other => other,
@@ -3327,7 +3327,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         }
                         // D-UNIONTYPE1=A: member → union inject at the binding boundary.
                         if let Some(want) = b.ty.as_ref().map(Type::without_user_tags) {
-                            init = crate::Codegen::TIR::maybe_widen_expr_to_union(init, want);
+                            init = crate::Codegen::TIR::maybe_widen_expr_to_union(init, want, cx);
                         }
                         // D-SOA1: an EMPTY list literal `[]` for a declared columnar `[S]` lowers
                         // with an Int placeholder element type (no element to infer from), so it

@@ -2591,6 +2591,63 @@ fn mir_map_slice_routes_to_the_prelude_kernel() {
 }
 
 #[test]
+fn mir_math_arithmetic_results_use_typed_kernels() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = include_str!("../../../../../Examples/features/lowlevel/vector_result_values.jet");
+        let bundle = checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+            .unwrap_or_else(|err| panic!("math arithmetic failed to lower: {err:?}"));
+        for symbol in [
+            "jet_math_Vec3_add",
+            "jet_math_Vec3_sub",
+            "jet_math_Vec3_hadamard_mul",
+            "jet_math_Mat3_transform",
+            "jet_math_Vec3_dot",
+            "jet_math_Vec3_cross",
+            "jet_math_Vec3_length",
+        ] {
+            assert!(mir.prelude_calls.iter().any(|row| row.symbol.name() == symbol),
+                "math result operations must use the typed kernel {symbol}");
+        }
+    });
+}
+
+#[test]
+fn mir_read_union_injection_does_not_move_member_places() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = include_str!("../../../../../Examples/features/types/union_parameter_values.jet");
+        let bundle = checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+            .unwrap_or_else(|err| panic!("union read injection failed to lower: {err:?}"));
+        let mut injections = 0;
+        for function in &mir.functions {
+            for block in &function.blocks {
+                for instruction in &block.instructions {
+                    if let jet_foundation::MIR::MirOperation::Call { args, .. } = &instruction.operation {
+                        for arg in args.iter().filter(|arg| arg.widen_to_union.is_some()) {
+                            injections += 1;
+                            assert_eq!(arg.access, jet_foundation::MIR::MirAccess::Read);
+                            assert!(arg.place.is_none(), "the carrier is not the member's place");
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(injections, 7);
+    });
+}
+
+#[test]
 fn mir_partial_f32_swizzle_widens_lanes_and_writes_have_setters() {
     // D-SWIZZLE1: `F32x4.xy` is a `Vec2`, whose lanes are `Float`; each `F32`
     // lane read is widened before the `Vec2` constructor. A write swizzle
