@@ -4264,51 +4264,76 @@ fn lower_method_call_impl(
             return consume_plain_helper_route(resolved_ret, method_span, lowered, cx, env);
         });
     }
-    // D-FAIL-CARRIER1=A: `.or_err("why")` lifts a clean absence into a failure.
-    // One carrier, so the payload rides through untouched and only the report
-    // changes. The prelude's `JetOptionalView::or_err` holds that one meaning;
-    // this is a plain marshalling call onto it.
-    if method == Syntax::METHOD_OUTCOME_OR_ERR
-        && args.len() == 1
-        && matches!(tir_recv_jet_ty(receiver, env), Some(Type::Option(_)))
-    {
-        return in_own_frame(|| {
-            let Some(ty) = resolved_ret.cloned() else {
-                return invariant_method_expr(
-                    method_span,
-                    "or_err call without a resolved return type",
-                );
-            };
-            // Map.get (and similar) keep source `fn(...) T` in sema; stored
-            // named functions already return the Result carrier. Carry that
-            // ABI through `.or_err` so the binding is callable without a
-            // second Ok wrap.
-            let ty = ty.with_effective_fn_returns();
-            let recv = lower_expr(receiver, cx, env);
-            let why = lower_one_call_arg(&args[0], None, env, cx);
-            let receiver = TCallArg {
-                value: recv,
-                template_items: None,
-                borrow: false,
-                mut_borrow: false,
-                clone: false,
-                arc_clone: false,
-                fn_coerce: None,
-                widen_to_vec: false,
-                widen_to_union: None,
-                box_as_trait: None,
-            };
-            TExpr {
-                ty,
-                kind: TExprKind::StaticCall {
-                    owner: rooted_owner("JetOptionalView"),
-                    owner_type: None,
-                    method: TMethodRef::bare(method),
-                    type_args: Vec::new(),
-                    args: vec![receiver, why],
-                },
-            }
-        });
+    // D-FAIL-CARRIER1=A: preserve the old TIR's receiver/why evaluation
+    // (formerly lines 4287-4288) and owned argument flags. The user-facing
+    // receiver contract stays Read; these evaluated copies go to the ordinary
+    // canonical Jet source body's move parameters, with no new Clone bound.
+    if method == Syntax::METHOD_OUTCOME_OR_ERR && args.len() == 1 {
+        if let Some(Type::Option(inner)) = tir_recv_jet_ty(receiver, env) {
+            return in_own_frame(|| {
+                let Some(ty) = resolved_ret.cloned() else {
+                    return invariant_method_expr(
+                        method_span,
+                        "or_err call without a resolved return type",
+                    );
+                };
+                let Some(source_signature) = cx
+                    .core_source_sigs
+                    .get(&("core.prelude".to_string(), "option_or_err".to_string()))
+                else {
+                    return invariant_method_expr(
+                        method_span,
+                        "or_err canonical Jet source signature is not loaded",
+                    );
+                };
+                // Stored functions retain their effective Result-return ABI.
+                let ty = ty.with_effective_fn_returns();
+                let recv = lower_expr(receiver, cx, env);
+                let receiver_arg = TCallArg {
+                    borrow: false,
+                    value: recv,
+                    template_items: None,
+                    mut_borrow: false,
+                    clone: false,
+                    arc_clone: false,
+                    fn_coerce: None,
+                    widen_to_vec: false,
+                    widen_to_union: None,
+                    box_as_trait: None,
+                };
+                let lowered_args = vec![
+                    receiver_arg,
+                    lower_one_call_arg(&args[0], None, env, cx),
+                ];
+                let type_args = vec![inner.with_effective_fn_returns()];
+                let instance = match demand_core_source_generic_function(
+                    cx,
+                    "option_or_err",
+                    source_signature,
+                    &lowered_args,
+                    &type_args,
+                ) {
+                    Ok(instance) => instance,
+                    Err(error) => return invariant_method_expr(method_span, error),
+                };
+                let target_return = match module_call_target_return(cx, Some(&ty)) {
+                    Ok(target_return) => Some(target_return),
+                    Err(error) => return invariant_method_expr(method_span, error),
+                };
+                TExpr {
+                    ty,
+                    kind: TExprKind::ModuleCall {
+                        form: TModuleCallForm::Qualified {
+                            rust_mod: source_signature.module_identity.clone(),
+                            rust_fn: instance,
+                        },
+                        target_return,
+                        type_args,
+                        args: lowered_args,
+                    },
+                }
+            });
+        }
     }
     // D-FAIL-CARRIER1=A: the carrier's middle states. `.partial` reads the
     // payload a failure kept and `.notes` reads what it had to say. Both live

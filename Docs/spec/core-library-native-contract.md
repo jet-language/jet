@@ -151,8 +151,13 @@ exponents rather than passing a rounded Float to the hook.
 
 `Option.or_err` calls the ordinary canonical Jet optional-to-failure body.
 The receiver and reason expression are evaluated once, in that order, even
-when the payload is present. Presence returns the payload as `Ok`; absence
-constructs the default error from the evaluated reason. There is no separate
+when the payload is present. The method retains its Read ownership contract:
+the existing CopySEM materializes the receiver before the reason, and the
+source body owns those evaluated values without moving the user's place or
+adding a Clone bound. Presence moves that materialized payload into `Ok`;
+absence constructs the default error from the reason. The body returns the
+joined carrier without recording a new Core error origin; the first user
+propagation site retains its ordinary journey behavior. There is no separate
 native runtime route or backend-local error policy.
 
 Native sentry scopes and unsafe function gates save the canonical per-thread

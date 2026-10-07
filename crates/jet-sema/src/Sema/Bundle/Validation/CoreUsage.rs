@@ -1284,6 +1284,9 @@ pub(crate) fn collect_core_expr(
             recv_type,
             ..
         } => {
+            if method == Syntax::METHOD_OUTCOME_OR_ERR {
+                note_core_usage(used, spans, "core.prelude::option_or_err", Some(*method_span));
+            }
             // D-CONC-SPAWN1=D: bare `task expr`/`task.all|race|any { … }` parse
             // into a method call on the parser-private `INTERNAL_TASK_RECEIVER`
             // ident (set before sema ever runs), so this is available even

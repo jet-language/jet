@@ -2823,6 +2823,22 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
                 }
             }
         }
+        // The optional-to-failure view calls the ordinary Core source body,
+        // even when the caller has no explicit core.prelude import.
+        source_text :: if {
+            is_core && unit.file_index >= 0 -> request.core_sources[unit.file_index].source
+            is_core -> ""
+            else -> request.authorized_sources.roots[unit.root_index].files[unit.file_index].source
+        }
+        if jet_driver_source_names_identifier(source_text, "or_err") {
+            prelude_index :: jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, "core.prelude", Span{start: 0, end: 0}, &diagnostics)
+            if prelude_index == .Val(index) {
+                if !queued[index] {
+                    queued[index] = true
+                    &pending.push(index)
+                }
+            }
+        }
         import_diagnostic_start :: diagnostics.len()
 
         aliases := [String:Int]{}

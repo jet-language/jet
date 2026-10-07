@@ -48,11 +48,12 @@ pub fn max_int(a: Int, b: Int) -> Int Never! {
     b
 }
 
-// D-FAIL-CARRIER1=A: the caller evaluates the receiver and then `why`, even
-// when the payload is present. Construct an Err only for clean absence.
-pub fn option_or_err<T>(value: T?, why: String) -> T Err! {
-    if value == {
-        .Val(payload) -> return Ok(payload)
-        .None -> return Err(why)
+// D-FAIL-CARRIER1=A: the caller materializes the receiver and then `why`,
+// even when the payload is present. Own those evaluated values, not a later
+// read of the caller's optional. Construct an Err only for clean absence.
+pub fn option_or_err<T>(value: ^T?, why: ^String) -> T Err! {
+    return if value == {
+        .Val(payload) -> Ok(payload)
+        .None -> Err(why)
     }
 }
