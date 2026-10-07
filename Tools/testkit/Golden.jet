@@ -410,7 +410,7 @@ fn run_entry(entry: Entry, tier: Tier, env: Exec.Env, scratch: String, bless: Ex
         if index == plan.steps.len() - 1 && actual_step.stdin == "" && exists("{expected}.stdin") -> actual_step.stdin = "{expected}.stdin"
         overlay :: Steps.environment(plan, env, work, scratch, built)
         cwd :: if command == "built" && tier.direct -> source else -> work
-        last = Steps.invoke(actual_step, env, cwd, scratch, snapshots, built, overlay)
+        last = Steps.invoke_step(actual_step, env, cwd, scratch, snapshots, built, overlay)
         if last.stderr.contains("Warning [L0507]") -> return Steps.Outcome{verdict: Expect.verdict("FAIL", "feature example emitted L0507"), run: last}
         final_step :: index == plan.steps.len() - 1
         if final_step && !last_explicit {

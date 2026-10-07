@@ -242,7 +242,7 @@ fn environment(plan: Plan, env: Exec.Env, work: String, scratch: String, built: 
     overlay
 }
 
-fn invoke(step: Step, env: Exec.Env, work: String, scratch: String, snapshots: String, built: String, overlay: [Exec.EnvVar]) -> Exec.Run {
+fn invoke_step(step: Step, env: Exec.Env, work: String, scratch: String, snapshots: String, built: String, overlay: [Exec.EnvVar]) -> Exec.Run {
     argv := [String]{}
     loop argument in step.argv -> &argv.push(expand(argument, env, work, scratch, built))
     if argv[0] == "jet" -> argv[0] = env.jet
@@ -330,7 +330,7 @@ fn execute(plan: Plan, id: String, env: Exec.Env, work: String, scratch: String,
     overlay :: environment(plan, env, work, scratch, "")
     loop step in plan.steps {
         if step.argv[0] == "build" || step.argv[0] == "built" -> return Outcome{verdict: Expect.verdict("REFUSED", "build/built steps require golden entry"), run: last}
-        last = invoke(step, env, work, scratch, snapshots, "", overlay)
+        last = invoke_step(step, env, work, scratch, snapshots, "", overlay)
         verdict :: check(step, id, last, env, work, scratch, snapshots, bless, plan.normalize, "", "")
         if verdict.status != "PASS" -> return Outcome{verdict: verdict, run: last}
     }

@@ -9,7 +9,7 @@ use core.files as files
 use core.sys as sys
 
 
-fn parse(args: [String]) -> Options {
+fn parse_options(args: [String]) -> Options {
     options := Exec.defaults()
     if args.len() == 0 -> return options
     options.suite = args[0]
@@ -109,7 +109,7 @@ fn suites() -> [Suite] {
     [Suite{name: "golden", discover: Golden.discover_suite, run: Golden.run_suite}]
 }
 
-fn execute(options: Options, root: String) -> Int {
+fn execute_suites(options: Options, root: String) -> Int {
     selected_suites := [Suite]{}
     loop suite in suites() {
         if options.suite == "all" || options.suite == suite.name -> &selected_suites.push(suite)
@@ -210,12 +210,12 @@ fn run() {
         print("testkit <golden|ui|cases|all> --jet BIN [--jetpack BIN] [--tier T[,T…]] [--filter SUBSTR] [--cases FILE] [--shard I/N] [--timeout SEC] [--scratch DIR] [--results FILE] [--list] [--bless ID] [--bless-all --reason TEXT] [--allow-shrink ID]")
         return
     }
-    options :: parse(args)
+    options :: parse_options(args)
     if options.error != "" {
         print("REFUSED\tselection\t\t{options.error}")
         process.exit(2)
     }
     root :: files.canonicalize(sys.current_dir()) ?? panic("checkout root: {err}")
-    code :: execute(options, root)
+    code :: execute_suites(options, root)
     if code != 0 -> process.exit(code)
 }
