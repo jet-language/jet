@@ -166,6 +166,40 @@ fn scheduler_test_spawn(callbacks: I64, meta: I64, log: I64, mode: I64, value: I
     sync_store(sync_load(minimum) + I64{8}, I64{3978706198986109744})
     sync_store(sync_load(minimum) + I64{16}, I64{942684213})
     scheduler_test_require(deadline_parse_i64(minimum, out) && sync_load(out) == I64{-9223372036854775808})
+    maximum :: scheduler_text_new(I64{19})
+    coll_copy(sync_load(minimum) + I64{1}, sync_load(maximum), I64{19})
+    #Unsafe("fixture byte writes stay within owned 19/20-byte text buffers") {
+        os_store_u8(sync_load(maximum) + I64{18}, I64{55})
+    }
+    scheduler_test_require(deadline_parse_i64(maximum, out) && sync_load(out) == I64{9223372036854775807})
+    #Unsafe("fixture byte writes stay within owned 19/20-byte text buffers") {
+        os_store_u8(sync_load(maximum) + I64{18}, I64{56})
+    }
+    scheduler_test_require(!deadline_parse_i64(maximum, out))
+    #Unsafe("fixture byte writes stay within owned 19/20-byte text buffers") {
+        os_store_u8(sync_load(minimum) + I64{19}, I64{57})
+    }
+    scheduler_test_require(!deadline_parse_i64(minimum, out))
+    #Unsafe("fixture byte writes stay within owned 19/20-byte text buffers") {
+        os_store_u8(sync_load(maximum) + I64{17}, I64{49})
+        os_store_u8(sync_load(maximum) + I64{18}, I64{48})
+        os_store_u8(sync_load(minimum) + I64{18}, I64{49})
+        os_store_u8(sync_load(minimum) + I64{19}, I64{48})
+    }
+    scheduler_test_require(!deadline_parse_i64(maximum, out) && !deadline_parse_i64(minimum, out))
+    jet_rt_string_drop(maximum)
+    sign_only :: scheduler_text_new(I64{1})
+    #Unsafe("fixture byte writes stay within an owned one-byte text buffer") {
+        os_store_u8(sync_load(sign_only), I64{43})
+    }
+    scheduler_test_require(!deadline_parse_i64(sign_only, out))
+    #Unsafe("fixture byte writes stay within an owned one-byte text buffer") {
+        os_store_u8(sync_load(sign_only), I64{45})
+    }
+    scheduler_test_require(!deadline_parse_i64(sign_only, out))
+    sync_store(sign_only + I64{8}, I64{0})
+    scheduler_test_require(!deadline_parse_i64(sign_only, out))
+    jet_rt_string_drop(sign_only)
     jet_rt_string_drop(minimum)
     // Real wheel timer wakes, cancellation synchronizes with freeing the slot.
     start :: sync_now_ns()

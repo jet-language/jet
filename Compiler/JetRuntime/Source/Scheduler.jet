@@ -931,16 +931,6 @@ fn scheduler_thread_detach() {
         jet_rt_free(queue, I64{24}, I64{8})
         sync_store(base + I64{96}, I64{0})
     }
-    exit_queue :: jet_rt_tls_get(task_exit_key)
-    if exit_queue != I64{0} {
-        at := sync_load(exit_queue)
-        loop at > I64{0} {
-            at -= I64{1}
-            scheduler_closure_drop(sync_load(sync_load(exit_queue + I64{16}) + at * I64{8}))
-        }
-        scheduler_words_drop(exit_queue)
-        jet_rt_tls_set(task_exit_key, I64{0})
-    }
 }
 
 // Host/session and interim comptime entry points. Controls and records are
