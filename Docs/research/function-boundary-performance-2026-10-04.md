@@ -519,12 +519,74 @@ where the C peer does not use a capability Jet lacks.
   - A call, method call, value call, tuple or struct literal, `^take`, `~copy`,
     or a `?` / `??` over one of these now moves every field. A name, field,
     index or view still copies, which keeps the place intact.
+  - Moving fields also transfers cleanup away from the temporary as a whole.
+    The MIR lowering retires its whole-owner drop flag after extraction and
+    registers field cleanup for omitted fields. Otherwise the temporary's
+    scope-exit `MovePlace` reads a partially moved aggregate and MIR legality
+    correctly rejects it. This belongs in both `tir_to_mir_stmt.rs`/`mir.rs`
+    and JetCodegen `Bindings.jet`, not in a legality-check exception.
 - Repro: `Tools/perf/function-boundary/destructure-move/main.jet`. Before the
   patch, its emitted Rust contains `(_v5…).0.clone()` and `(_v5…).1.clone()`.
 - Pending: release rebuild of `jet` from the worktree (after stage 2 frees
   memory). Then `jet emit --rust destructure-move/main.jet` must show
   `MovePlace` moves and no field `.clone()`, and the `destructure-move` row is
   re-run. Stage-2 bootstrap of the Jet half follows the normal landing path.
+
+### 6.0.1 Boundary ownership and layout follow-through
+
+An owned call-result destructure must transfer both fields and cleanup. The
+temporary's whole-owner cleanup is invalid after any field moves; disabling
+the legality check would hide an actual ownership error. Omitted stored fields
+retain independent scope cleanup, and computed properties own no field storage.
+The source-place spelling still copies and preserves its owner.
+The remainder occupies the original aggregate's automatic-cleanup position,
+not the positions of the newly introduced bindings. Its stored fields release
+in the original aggregate's field order. Rust registers that remainder in
+reverse field order and rotates it into the retired owner's action slot; Jet
+inserts each field action at that slot, then removes the whole-owner action.
+The observable-guard fixture `memory/destructure_drop_order.jet` exercises
+normal and early-return cleanup against other aggregate owners and the retained
+field. Its expected trace is a proof obligation, not a claimed receipt.
+S63/D-SHAPE-RESOURCE1/2 (`syntax-decisions.md:2525`) ratifies scope cleanup;
+`spec.md:843` and `reference/core-library.md:1671` ratify the ordered explicit
+boundary. This candidate is order-neutral: omitted fields retain exactly the
+whole-value drop fold, rather than deriving order from the pattern bindings.
+The ratified D-FIELD-DROP-ORDER1=A reverse-order cutover is separate card #4617,
+covering all emitters, the native backend and partial destructures together;
+its implementation will flip this fixture's complete expected trace.
+Fresh-result field moves are restricted to plain aggregate owners and stored
+selected fields. A nominal `Close` implementation keeps whole-owner cleanup:
+fields are copied, and a fresh owner is retained in its generated local until
+the original scope exit, where `Close` runs once with its fields intact.
+Computed selected fields never become `MovePlace` projections. Both frontends
+apply the eligibility gate, and both MIR lowerers retain fresh `Close` owners.
+The fixture also covers call/literal `Close` owners on normal and early exits;
+`close_owner_destructure_keeps_close_once_on_every_tier` is the focused proof.
+
+
+Native Int locals borrowed by a call need no exact shadow carried between
+iterations. An uncoerced `Read` argument can materialize its exact Int temporary
+at the call; writes, moves, trait boxing and representation coercions retain
+their existing ownership paths. Lambdas can use the same range-checked native
+versions as loops. Read captures receive guard indices after ordinary
+parameters, and the cold exact fallback receives every original capture and
+argument unchanged.
+
+The recursion-aggregate profile identifies actual 32-byte result traffic,
+not a by-pointer Stats parameter: `stats` takes two Int references and returns
+Stats by value. Its recursive calls return into stack temporaries, followed by
+`vmovups` into `Option<Stats>` locals (sample addresses `49dab`/`49dbe` and
+`49e7e`/`49eb0`). Leaf and merge return paths copy a full YMM word into the
+ABI return destination (`4a0c1`/`4a0c5`, `4a74a`/`4a753`). The caller-destination
+mechanism therefore also admits closed scalar records above the two-word
+register-return boundary; records with non-scalar storage remain excluded.
+The leaf builder and the lowering's exit local must share that storage too:
+passing a destination only at calls still leaves the leaf's move into the exit
+local. A full scalar-record constructor on another immediate-return branch
+can write the same caller slot as an already-identified unique moved builder.
+This fold rejects later builder accesses, other exit-local uses, cleanup,
+capture and persistence; it does not alias arbitrary local lifetimes.
+
 
 ### 6.1 Allocation slices 4, 7b and 8 (worktree `.agent-worktrees/perfalloc`)
 

@@ -10,6 +10,69 @@ use tir_support::{
     have_rustc, default_run_with_env,
 };
 
+#[test]
+fn native_loop_int_read_arguments_materialize_exact_at_call() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+fn echo(x: Int) -> Int { x }
+fn run() {
+    i := 0
+    total := 0
+    loop i < 4 {
+        total = total + echo(i)
+        i = i + 1
+    }
+    print(total)
+    high := 9223372036854775807
+    j := 0
+    loop j < 1 {
+        print(echo(high))
+        high = high + 0
+        j = j + 1
+    }
+}
+"#;
+    let rust = compile("tir_native_loop_int_read_arguments", src);
+    assert!(
+        rust.lines().any(|line| line.contains("echo(") && line.contains("JetInt::from_i64(__jet_li_")),
+        "the loop counter's exact Int is materialized only at the borrowed call"
+    );
+    let (code, stdout) = build_and_run("tir_native_loop_int_read_arguments", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "6\n9223372036854775807\n");
+}
+
+#[test]
+fn int_lambda_versions_check_inputs_and_read_captures() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+fn transform(xs: [Int], offset: Int) -> [Int] {
+    xs.map(x -> x * 3 + offset).filter(x -> x % 2 == 0).map(x -> x + 1)
+}
+fn captured(xs: [Int], offset: Int) -> [Int] {
+    xs.map(x -> x * 3 + offset)
+}
+fn run() {
+    a :: transform([1, 2], 5)
+    print(a[0])
+    b :: captured([1], 9223372036854775808)
+    print(b[0])
+    c :: captured([9223372036854775808], 5)
+    print(c[0])
+}
+"#;
+    let rust = compile("tir_int_lambda_versions", src);
+    assert!(rust.contains("__jet_pi_1"), "the read capture needs its own native guard");
+    assert!(rust.contains("__jet_exact"), "out-of-range inputs keep exact Int arithmetic");
+    let (code, stdout) = build_and_run("tir_int_lambda_versions", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "9\n9223372036854775811\n27670116110564327429\n");
+}
+
 /// D-OPDEF1=A: user arithmetic/equality/order reuse ordinary trait methods.
 #[test]
 fn user_operator_traits_route_through_tir() {
