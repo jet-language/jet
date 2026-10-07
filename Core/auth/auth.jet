@@ -77,7 +77,7 @@ pub fn verify_jwt(token: String, /, *, key: [U8], audience: String, issuer: Stri
     if parts.len() != 3 || parts[0].len() == 0 || parts[1].len() == 0 || parts[2].len() == 0 {
         return Err(AuthError.MalformedToken("JWT must have exactly three non-empty parts"))
     }
-    header_bytes :: b64url_decode(parts[0]) ?? return Err(AuthError.DecodeError(err.reason))
+    header_bytes :: b64url_decode(parts[0])
     header_text :: String.from_bytes(header_bytes) ?? return Err(AuthError.MalformedToken("JWT header is not valid UTF-8"))
     header :: claims_object(header_text)
     alg :: header_text_member(header, "alg") ?? return Err(AuthError.MalformedToken("JWT header requires text `alg`"))
@@ -85,7 +85,7 @@ pub fn verify_jwt(token: String, /, *, key: [U8], audience: String, issuer: Stri
     signature :: b64url_decode(parts[2]) ?? return Err(AuthError.InvalidSignature)
     expected :: crypto.hmac_sha256(key, "{parts[0]}.{parts[1]}".bytes())
     if !crypto.constant_time_equal_bytes(expected, signature) -> return Err(AuthError.InvalidSignature)
-    payload :: b64url_decode(parts[1]) ?? return Err(AuthError.DecodeError(err.reason))
+    payload :: b64url_decode(parts[1])
     token_claims(payload, audience, issuer, clock_skew.ns, time.unix_ns())
 }
 
@@ -97,11 +97,11 @@ pub fn verify_paseto(token: String, /, *, key: [U8], audience: String, issuer: S
     if parts.len() < 3 || parts.len() > 4 || parts[0] != "v4" || parts[1] != "public" {
         return Err(AuthError.UnsupportedToken("only PASETO v4.public is supported"))
     }
-    body :: b64url_decode(parts[2]) ?? return Err(AuthError.DecodeError(err.reason))
+    body :: b64url_decode(parts[2])
     if body.len() < 64 -> return Err(AuthError.MalformedToken("PASETO body is shorter than its signature"))
     token_footer := [U8]{}
     if parts.len() == 4 {
-        token_footer = b64url_decode(parts[3]) ?? return Err(AuthError.DecodeError(err.reason))
+        token_footer = b64url_decode(parts[3])
     }
     if !crypto.constant_time_equal_bytes(token_footer, footer) -> return Err(AuthError.InvalidSignature)
     split :: body.len() - 64
@@ -277,14 +277,14 @@ fn pae_len(out: &[U8], value: Int) Never! {
     }
 }
 
-/// Unpadded RFC 4648 base64url with canonical trailing bits; the error text is
-/// the `DecodeError` payload.
-fn b64url_decode(text: String) -> [U8] AuthFailure! {
+/// Unpadded RFC 4648 base64url with canonical trailing bits; a failure is the
+/// `DecodeError` naming the reason.
+fn b64url_decode(text: String) -> [U8] AuthError! {
     raw :: text.bytes()
     loop b in raw {
-        if b64url_value(b) < 0 -> return Err(AuthFailure{reason: "invalid base64url character"})
+        if b64url_value(b) < 0 -> return Err(AuthError.DecodeError("invalid base64url character"))
     }
-    if raw.len() %% 4 == 1 -> return Err(AuthFailure{reason: "invalid base64url length"})
+    if raw.len() %% 4 == 1 -> return Err(AuthError.DecodeError("invalid base64url length"))
     out := [U8]{}
     acc := 0
     bits := 0
@@ -296,14 +296,8 @@ fn b64url_decode(text: String) -> [U8] AuthFailure! {
             &out.push(to_u8(acc >> bits))
         }
     }
-    if bits != 0 && (acc & ((1 << bits) - 1)) != 0 -> return Err(AuthFailure{reason: "non-canonical base64 trailing bits"})
+    if bits != 0 && (acc & ((1 << bits) - 1)) != 0 -> return Err(AuthError.DecodeError("non-canonical base64 trailing bits"))
     Ok(out)
-}
-
-/// The base64url failure reason that becomes an `AuthError.DecodeError` payload.
-#Error
-struct AuthFailure {
-    reason: String
 }
 
 fn b64url_value(b: U8) -> Int Never! {
@@ -1108,7 +1102,7 @@ fn claims_outcome(text: String, skew_ns: Int, now_ns: Int) -> String Never! {
 fn b64url_outcome(text: String) -> String Never! {
     if b64url_decode(text) == {
         .Ok(bytes) -> "ok:{bytes.len()}"
-        .Err(error) -> error.reason
+        .Err(error) -> auth_error_text(error)
     }
 }
 
@@ -1240,9 +1234,9 @@ fn expiry_outcome(now_ms: Int, ttl_ms: Int) -> String Never! {
 
 #Test("base64url decoding is canonical") {
     assert(b64url_outcome("AQ") == "ok:1")
-    assert(b64url_outcome("AR") == "non-canonical base64 trailing bits")
-    assert(b64url_outcome("A") == "invalid base64url length")
-    assert(b64url_outcome("A=") == "invalid base64url character")
+    assert(b64url_outcome("AR") == "DecodeError(non-canonical base64 trailing bits)")
+    assert(b64url_outcome("A") == "DecodeError(invalid base64url length)")
+    assert(b64url_outcome("A=") == "DecodeError(invalid base64url character)")
 }
 
 #Test("magic link delivery identity policy") {
