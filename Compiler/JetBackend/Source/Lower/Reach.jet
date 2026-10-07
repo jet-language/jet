@@ -248,6 +248,12 @@ fn lower_reach_body(p: MIRProgram, q: &LowerPrepared, function: MIRFunction, bin
         .TopLevel -> {}
     }
     loop param in function.params -> lower_mono_intern_type(&q, param.ty, parent)
+    // The runtime driver supplies complete scalar operations for checked IDs.
+    // Never visit their reference bodies or their Core provider dependencies.
+    if q.runtime_intrinsics.get(function.id.value) == .Val(intrinsic) {
+        if intrinsic == .FunctionAddress(target) -> lower_mono_request(p, &q, target, None, [MIRType]{}, parent, "runtime function address").drop("validated address dependency")
+        return
+    }
     loop capture in function.capture_params -> lower_mono_intern_type(&q, capture.ty, parent)
     loop local in function.locals -> lower_mono_intern_type(&q, local.ty, parent)
     loop place in function.places -> lower_mono_intern_type(&q, place.ty, parent)

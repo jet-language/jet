@@ -142,9 +142,19 @@ struct LowerSlot {
     pub cell: Bool
 }
 
+// These operations are enabled only for checked IDs selected by RuntimeLibrary.
+// They are not MIR operators, language intrinsics, or assembly bindings.
+enum LowerRuntimeIntrinsic {
+    FloatBits
+    FloatFromBits
+    FunctionAddress(function: MIRFunctionID)
+}
+
 struct LowerModule {
     pub signatures: [LIRSignature]
     pub test_harness: Bool
+    // Empty for ordinary program and callback lowering.
+    pub runtime_intrinsics: [U64:LowerRuntimeIntrinsic]{[U64:LowerRuntimeIntrinsic]{}}
     // Signature shape key -> its id (lower_signature_key).
     pub signature_rows: [String:Int]
     pub data: [LIRData]
@@ -244,16 +254,24 @@ struct LowerFunction {
 // Lowers the functions `entry` reaches (Mono.jet: generic functions and
 // methods of generic types once per concrete instance) plus their glue.
 pub fn lir_lower_entry(program: MIRProgram, entry: MIRFunctionID) -> LIRLowering Never! {
-    lower_selected(program, [MIRFunctionID]{entry}, true)
+    intrinsics := [U64:LowerRuntimeIntrinsic]{}
+    lower_selected(program, [MIRFunctionID]{entry}, true, ^intrinsics)
 }
 
 // Compiler and test callbacks retain return carriers; only program entries
 // consume Option/Result success and turn failure into a process exit.
 pub fn lir_lower_callables(program: MIRProgram, roots: [MIRFunctionID]) -> LIRLowering Never! {
-    lower_selected(program, roots, false)
+    intrinsics := [U64:LowerRuntimeIntrinsic]{}
+    lower_selected(program, roots, false, ^intrinsics)
 }
 
-fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool) -> LIRLowering Never! {
+// RuntimeLibrary validates each exact function ID and its signature.
+// No ordinary program/callback lowering enables runtime-only substitution.
+fn lir_lower_runtime_callables(program: MIRProgram, roots: [MIRFunctionID], intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LIRLowering Never! {
+    lower_selected(program, roots, false, ^intrinsics)
+}
+
+fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool, runtime_intrinsics: ^[U64:LowerRuntimeIntrinsic]) -> LIRLowering Never! {
     // The frontend may erase browser init functions before native MIR is
     // serialized. Their host requirement survives in the runtime-part facts.
     loop part in program.facts.runtime_parts {
@@ -261,7 +279,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool)
             return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: [LIRLoweringIssue]{LIRLoweringIssue{function: "entry preparation", message: "browser-hosted initialization and callbacks are not lowered for native O0 yet"}}, entry: None, callables: [U64:LIRFunctionID]{}}
         }
     }
-    prepared :: lower_prepare_callables(program, roots)
+    prepared := lower_prepare_callables(program, roots, ^runtime_intrinsics)
     if prepared.issues.len() > 0 {
         return LIRLowering{lir: LIRModule{signatures: [LIRSignature]{}, functions: [LIRFunction]{}, data: [LIRData]{}}, issues: ~prepared.issues, entry: None, callables: [U64:LIRFunctionID]{}}
     }
@@ -272,6 +290,7 @@ fn lower_selected(program: MIRProgram, roots: [MIRFunctionID], wrap_entry: Bool)
     m := LowerModule{
         signatures: [LIRSignature]{},
         test_harness: test_harness,
+        runtime_intrinsics: ^prepared.runtime_intrinsics,
         signature_rows: [String:Int]{},
         data: [LIRData]{},
         data_rows: [String:Int]{},
@@ -882,6 +901,31 @@ fn lower_new_function(id: LIRFunctionID, name: String, signature: LIRSignatureID
 fn lower_function(p: MIRProgram, m: &LowerModule, function: MIRFunction, id: LIRFunctionID, signature: LIRSignatureID) -> LIRFunction Never! {
     name :: if function.key == "" -> function.name else -> function.key
     f := lower_new_function(id, name, signature, function.entry)
+    if m.runtime_intrinsics.get(function.id.value) == .Val(intrinsic) {
+        output_layout :: lower_repr_layout(lower_repr(p, function.return_type)) ?? panic("validated runtime intrinsic result layout")
+        output :: lower_new_value(&f, output_layout, LIRDrop.Trivial, function.return_type.identity)
+        block :: lower_new_block(&f)
+        if intrinsic == {
+            .FloatBits | .FloatFromBits -> {
+                // SSA Float values preserve all bits; the System V boundary
+                // transfers them to/from xmm registers without arithmetic.
+                param :: function.params[0]
+                input_layout :: lower_repr_layout(lower_repr(p, param.ty)) ?? panic("validated runtime bitcast input layout")
+                input :: lower_new_value(&f, input_layout, LIRDrop.Trivial, param.ty.identity)
+                lower_start(&f, block, [LIRValueID]{input})
+                lower_emit(&f, LIRInst.Bitcast{dst: output, src: input})
+            }
+            .FunctionAddress(target) -> {
+                lower_start(&f, block, [LIRValueID]{})
+                row :: m.mir_rows.get(target.value) ?? panic("validated runtime address target is reachable")
+                pointer :: lower_pointer(&f)
+                lower_emit(&f, LIRInst.FunctionAddress{dst: pointer, function: LIRFunctionID{value: row}})
+                lower_emit(&f, LIRInst.Bitcast{dst: output, src: pointer})
+            }
+        }
+        lower_seal(&f, LIRTerminator.Return{value: Val(output)})
+        return lir_builder_finish(f.builder)
+    }
     if (function.foreign_language ?? "") == "asm" {
         lower_asm_function(p, &m, &f, function)
         return lir_builder_finish(f.builder)
