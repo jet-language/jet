@@ -444,7 +444,7 @@ fn run() {
     print(jsonl.to_string(rows).contains("\"a\":1"))
     source := "<r xmlns=\"urn:r\" xmlns:h=\"urn:h\" h:a=\"x&amp;y\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><h:c/></r>"
     doc := xml.parse(source) ?? panic("xml")
-    print(xml.to_string(doc))
+    print(xml.to_string(doc) ?? panic("xml render"))
     print((&doc.field("$xml") ?? panic("document tag")).text() ?? "bad")
     root := (&doc.field("children") ?? panic("document children")).at(0) ?? panic("root")
     name := &root.field("name") ?? panic("root name")
@@ -813,7 +813,7 @@ fn summarize(source: String) -> String {
     reference := ((attributes.at(1) ?? panic("reference attribute")).field("normalized_value") ?? panic("reference normalized value")).text() ?? "bad"
     namespace_ok := (namespace.text() ?? "bad") == "urn: foo bar"
     literal_ok := literal == "A B C D E"
-    lexical_ok := xml.to_string(doc) == source
+    lexical_ok := (xml.to_string(doc) ?? panic("xml render")) == source
     return "{namespace_ok}|{literal_ok}|{reference.len()}|{lexical_ok}"
 }
 

@@ -950,9 +950,12 @@ pub fn apply_core_call_without_ambient_with_type_args_and_history_schema(
                 ))),
             }
         }
-        ("core.encoding.xml", "to_string") => Ok(CtValue::Str(
-            crate::Comptime::EncodingLite::xml_render(one(0)?),
-        )),
+        ("core.encoding.xml", "to_string") => {
+            match crate::Comptime::EncodingLite::xml_render(one(0)?) {
+                Ok(text) => Ok(CtValue::Present(Box::new(CtValue::Str(text)))),
+                Err(error) => Ok(CtValue::failed(Box::new(error))),
+            }
+        }
         ("core.encoding.xml", "to_bytes") => {
             match crate::Comptime::EncodingLite::xml_to_bytes(one(0)?, args.get(1)) {
                 Ok(bytes) => Ok(CtValue::Present(Box::new(CtValue::Bytes(bytes)))),
