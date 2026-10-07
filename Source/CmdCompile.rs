@@ -14112,6 +14112,10 @@ fn build_inner(
     // such as `embed_file` or explicit C links. `build` also rejects cross-target
     cache_key: Option<String>,
     target_machine: Option<&jet::TargetMachine::TargetMachine>,
+    // `jet debug`: where to publish the exact Rust text rustc compiled (the
+    // program after the runtime split, or the inline monolith), so the native
+    // debugger's line map agrees with the binary's DWARF lines.
+    compiled_source: Option<&Path>,
 ) {
     // D-BUILD2: `jet build -v` makes the hidden Jet→Rust→native bridge honest.
     // Step labels are deterministic so they can be golden-tested.
@@ -14649,16 +14653,18 @@ fn build_inner(
     // rustc invocation that performs backend code generation and linking.
     let rustc_started = Instant::now();
     let mut out = run_rustc(&prepared_runtime);
+    let mut compiled_split = prepared_runtime.is_split();
     // I5 fail-open: linking the cached runtime rlib is an optimization, so it may
     // cost a compile but must never cost a working build. If the thin crate is
     // rejected — a runtime item the exporter left private, an impl the split
     // moved away from its type — rebuild the exact inline monolith and report on
     // that instead. `jet build` of correct Jet cannot regress into an I2 banner.
-    if !out.status.success() && prepared_runtime.is_split() {
+    if !out.status.success() && compiled_split {
         if verbose {
             step("runtime cache bypassed (split crate rejected — inline retry)".to_string());
         }
         out = run_rustc(&jet_store::runtime::PreparedRuntime::inline(rust_code));
+        compiled_split = false;
     }
 
     if !out.status.success() {
@@ -14728,6 +14734,14 @@ fn build_inner(
         exit(ExitCodes::ICE);
     }
 
+    if let Some(path) = compiled_source {
+        let compiled = if compiled_split { prepared_runtime.rust() } else { rust_code };
+        if let Err(error) = fs::write(path, compiled) {
+            let _ = fs::remove_dir_all(&work);
+            crate::cli_error!("E2105", "couldn't write {}: {}", path.display(), error);
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
     step(format!("link       -> {}", bin.display()));
 
     // Store into the content cache from the private path first, so the cache
@@ -14801,6 +14815,7 @@ pub(crate) fn build(
         restored_cache,
         cache_key,
         None,
+        None,
     );
 }
 
@@ -14837,6 +14852,7 @@ pub(crate) fn build_target_machine(
         restored_cache,
         cache_key,
         target_machine,
+        None,
     );
 }
 
@@ -14956,7 +14972,10 @@ fn build_debug_native(file: &str, mode: OutputMode) -> Result<NativeDebugBuild, 
         }
     };
     let bin = build_output_root(&project_root).join(format!("{}_dbg", stem(file)));
-    build(
+    // The runtime split compiles a thinner program than the generated text;
+    // the line map must be built from the exact text rustc saw.
+    let compiled_source = bin.with_extension("rs");
+    build_inner(
         file,
         &out.rust,
         None,
@@ -14972,14 +14991,22 @@ fn build_debug_native(file: &str, mode: OutputMode) -> Result<NativeDebugBuild, 
         false,
         // `jet debug` builds carry a line-map and launch interactively; not cached.
         None,
+        None,
+        Some(&compiled_source),
     );
-    // `build()` always writes the generated Rust to `.jet/build/<stem>.rs` (the
-    // debug binary path is the only caller-chosen path) — lldb's `-f` flag
-    // matches by basename, so this is what `Inferior::set_breakpoint` needs.
+    let rust = match fs::read_to_string(&compiled_source) {
+        Ok(rust) => rust,
+        Err(error) => {
+            crate::cli_error!("E2105", "couldn't read {}: {}", compiled_source.display(), error);
+            return Err(ExitCodes::USER_ERROR);
+        }
+    };
+    // rustc compiles `<stem>.rs` in its private work dir; lldb's `-f` flag
+    // matches that basename (`Inferior::set_breakpoint`).
     Ok(NativeDebugBuild {
         bin,
         rust_file: format!("{}.rs", stem(file)),
-        rust: out.rust,
+        rust,
         src,
     })
 }

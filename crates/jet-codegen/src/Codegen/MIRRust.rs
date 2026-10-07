@@ -2667,7 +2667,14 @@ mod unwrap_value_slot_tests {
 /// capped at eight. String, raw-string and comment text is never touched,
 /// and a line that starts inside a string keeps its indentation. The names
 /// are local to the function, so the renaming is consistent by construction.
-fn compact_function_text(out: &mut String, start: usize) {
+/// A debug-linemap build passes `debug_locals` (MIR local id digits -> Rust
+/// name): those local slots keep the Jet-visible `__jet_<name>` spelling the
+/// native debugger projects instead of a sequential `_lK`.
+fn compact_function_text(
+    out: &mut String,
+    start: usize,
+    debug_locals: &HashMap<String, String>,
+) {
     #[derive(Clone, Copy, PartialEq)]
     enum Lex {
         Code,
@@ -2782,6 +2789,11 @@ fn compact_function_text(out: &mut String, start: usize) {
                             .then_some((kind, *short, index + prefix.len(), end))
                     });
                     if let Some((kind, short, id_start, end)) = slot {
+                        if let Some(name) = debug_locals.get(&text[id_start..end]).filter(|_| kind == 1) {
+                            out.push_str(name);
+                            index = end;
+                            continue;
+                        }
                         let next = names[kind].len();
                         let number = *names[kind].entry(&text[id_start..end]).or_insert(next);
                         let _ = write!(out, "{short}{number}");
@@ -14295,7 +14307,8 @@ impl<'a> RustEmitter<'a> {
             fold_value_slots(out, slots_start, declarations_end);
             unwrap_value_slots(out, slots_start);
         }
-        compact_function_text(out, slots_start);
+        let debug_locals = self.debug_local_names(function, &out[slots_start..]);
+        compact_function_text(out, slots_start, &debug_locals);
         if generator {
             let _ = writeln!(out, "    }})");
         }
@@ -19461,6 +19474,41 @@ impl<'a> RustEmitter<'a> {
 
     fn emits_debug_linemap(&self, _function: &MirFunction) -> bool {
         self.config.execution.emit_debug_linemap
+    }
+
+    /// D-DX-DEBUGBACK1: in a debug-linemap build each source local whose name
+    /// is unique in its function keeps the `__jet_<name>` spelling (the
+    /// inverse the native debugger applies). A spelling already present in
+    /// the emitted body (a parameter, a global, a generated temporary) keeps
+    /// the sequential slot name, so the rename can never capture another
+    /// binding.
+    fn debug_local_names(&self, function: &MirFunction, body: &str) -> HashMap<String, String> {
+        let mut names = HashMap::new();
+        if !self.emits_debug_linemap(function) {
+            return names;
+        }
+        let mut seen: HashMap<&str, usize> = HashMap::new();
+        for local in &function.locals {
+            *seen.entry(local.name.as_str()).or_default() += 1;
+        }
+        for local in &function.locals {
+            let visible = !local.name.is_empty()
+                && !local.name.starts_with("__")
+                && local.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+            if !visible || seen[local.name.as_str()] != 1 {
+                continue;
+            }
+            let rust = mangle(&local.name);
+            let taken = body.match_indices(&rust).any(|(at, _)| {
+                let before = at.checked_sub(1).map(|at| body.as_bytes()[at]);
+                let after = body.as_bytes().get(at + rust.len()).copied();
+                !before.is_some_and(is_identifier_byte) && !after.is_some_and(is_identifier_byte)
+            });
+            if !taken {
+                names.insert(local.id.0.to_string(), rust);
+            }
+        }
+        names
     }
     fn partial_drop_node(&self, function: &MirFunction, value: MirValueId) -> Option<&PartialMoveNode> {
         self.partial_moves.get(&function.id)?;

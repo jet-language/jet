@@ -1342,7 +1342,9 @@ impl Session {
                     .into_iter()
 
                     .filter_map(|(raw_type, raw_name, raw_value)| {
-                        if !Inferior::rust_local_is_jet_visible(&raw_name) {
+                        if !Inferior::rust_local_is_jet_visible(&raw_name)
+                            || Inferior::is_unset_slot(&raw_type, &raw_value)
+                        {
                             return None;
                         }
                         let name = Inferior::rust_local_to_jet(&raw_name)?;
@@ -1628,7 +1630,7 @@ impl Session {
                         if self.raw_frames {
                             return Some(format!("{} : {} = {}", n, ty, v));
                         }
-                        if !Inferior::rust_local_is_jet_visible(n) {
+                        if !Inferior::rust_local_is_jet_visible(n) || Inferior::is_unset_slot(ty, v) {
                             return None;
                         }
                         let jn = Inferior::rust_local_to_jet(n)?;

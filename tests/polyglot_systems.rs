@@ -642,10 +642,27 @@ fn mixed_run_workflow(root: &Path, expected: &str, java_home: Option<&Path>) {
         include_str!("fixtures/mixed_repo/debug.jet"),
     )
     .unwrap();
-    let debug = jet::Debug::run_session_result(debug_file.to_str().unwrap(), &["s", "c"]);
-    assert_eq!(debug.status, jet::Debug::SessionStatus::Finished);
-    assert!(debug.transcript.contains("program finished"));
-    assert!(debug.transcript.contains("42"));
+    // D-EXEC1: live `jet debug` steps the native build under LLDB.
+    let lldb = std::process::Command::new("lldb").arg("--version").output();
+    if lldb.is_ok_and(|output| output.status.success()) {
+        let mut debug = mixed_jet(root);
+        if let Some(java_home) = java_home {
+            debug.env("JAVA_HOME", java_home);
+        }
+        let mut debug = debug
+            .args(["debug", "debug.jet"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        std::io::Write::write_all(&mut debug.stdin.take().unwrap(), b"s\nc\n").unwrap();
+        let debug = debug.wait_with_output().unwrap();
+        mixed_assert_ok("mixed-repo native debug session", &debug);
+        let transcript = mixed_output_text(&debug);
+        assert!(transcript.contains("program finished"), "{transcript}");
+        assert!(transcript.contains("42"), "{transcript}");
+    }
 
     let trace = root.join("profile.jettrace");
     let mut perf = mixed_jet(root);

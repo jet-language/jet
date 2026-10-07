@@ -116,7 +116,7 @@ impl LineMap {
     }
 
     /// The first marked rust line AT OR AFTER `rust_line` — used to place the
-    /// initial breakpoint at the generated `__jet_run` body's first real
+    /// initial breakpoint at the lowered Jet entry body's first real
     /// statement by `-f -l` (line-based) rather than `-n main` (name-based,
     /// which can resolve to more than one symbol and land with no source line
     /// at all).
@@ -346,10 +346,13 @@ mod tests {
 
     #[test]
     fn generated_entry_wrapper_is_not_projected_as_jet() {
-        let rust = "pub fn __jet_run() {\n    // jet:line 2\n    let x = 1;\n}\nfn main() {\n    __jet_run();\n}\n";
+        let rust = "fn __jet__d_c_cx_djet_c_crun() -> () {\n    // jet:line 2\n    let x = 1;\n}\n\
+                    fn main() {\n    jet_std_env_init();\n    jet_runtime_boundary(|| {\n        \
+                    let _ = __jet__d_c_cx_djet_c_crun();\n    });\n}\n";
         let map = LineMap::build(rust);
         assert_eq!(map.jet_line_for(3), Some(2));
         assert_eq!(map.jet_line_for(5), None);
+        assert_eq!(map.main_entry_line(rust), Some(3));
     }
 
     #[test]
