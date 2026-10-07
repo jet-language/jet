@@ -43,8 +43,6 @@ use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::tir_address_lifetime;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::unit_type;
-#[cfg(test)]
-use crate::Codegen::build_cx;
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
 use crate::jet_generated_format as jet_format;
@@ -54,8 +52,6 @@ use crate::AST::{
     BindPattern, Expr, ForKind, IndexKind, LValue, OrFallback, Pattern, PlaceAccess, Stmt, Type,
     UnOp,
 };
-#[cfg(test)]
-use crate::Diagnostics::Span;
 use crate::Syntax;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
@@ -4943,6 +4939,8 @@ fn hardware_dma_channel(expr: &crate::AST::Expr, cx: &Cx) -> Option<String> {
 #[cfg(all(test, debug_assertions))]
 mod handoff_assert_tests {
     use super::*;
+    use crate::Codegen::build_cx;
+    use crate::Diagnostics::Span;
 
     fn empty_cx() -> Cx {
         let src = "fn run() {}\n";
