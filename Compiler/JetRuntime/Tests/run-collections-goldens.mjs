@@ -68,7 +68,7 @@ if (mode !== "--plan") {
             const executableRoot = join(out, "raw-native");
             mkdirSync(executableRoot, { recursive: true });
             const program = join(executableRoot, "unit.jet");
-            writeFileSync(program, readFileSync(join(raw, "unit.jet"), "utf8"));
+            writeFileSync(program, readFileSync(join(raw, "unit.jet"), "utf8") + "\nfn run() { collections_tests() }\n");
             const prefix = join(executableRoot, "collections-test");
             const problem = runJetFront({ candidate: candidateJetc0(), file: program, root: executableRoot, cwd: root, prefix, receipt: join(raw, "front.receipt"), pack, store: join(raw, "store") });
             if (problem) failures.push(`raw front: ${problem.detail}`);
