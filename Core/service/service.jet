@@ -88,6 +88,43 @@ fn delivery_receipt_show(receipt: DeliveryReceipt) -> String Never! {
     "DeliveryReceipt(id={receipt.id}, state={state}, attempts={receipt.attempts}, retention_until={receipt.retention_until}, deadline={receipt.deadline}, key={receipt.idempotency_key}, duplicate={receipt.duplicate}, authority={receipt.authority}, generation={receipt.generation}, signature={receipt.signature})"
 }
 
+enum TaskOutcome {
+    Finished
+    Panicked(String)
+    Cancelled
+    DeadlineBlown
+
+    impl Display {
+        fn display(self) -> String Never! { task_outcome_show(self) }
+    }
+    impl Debug {
+        fn debug(self) -> String Never! {
+            if self == {
+                .Panicked(reason) -> "Panicked({reason:Debug})"
+                else -> task_outcome_show(self)
+            }
+        }
+    }
+}
+
+fn task_outcome_show(outcome: TaskOutcome) -> String Never! {
+    if outcome == {
+        .Finished -> "Finished"
+        .Panicked(reason) -> "Panicked({reason})"
+        .Cancelled -> "Cancelled"
+        .DeadlineBlown -> "DeadlineBlown"
+    }
+}
+
+#Test("task outcome display and debug distinguish raw and quoted panic reasons") {
+    assert(task_outcome_show(TaskOutcome.Finished) == "Finished")
+    assert(task_outcome_show(TaskOutcome.Cancelled) == "Cancelled")
+    assert(task_outcome_show(TaskOutcome.DeadlineBlown) == "DeadlineBlown")
+    assert(task_outcome_show(TaskOutcome.Panicked("a\"b")) == "Panicked(a\"b)")
+    outcome :: TaskOutcome.Panicked("a\"b")
+    assert("{outcome:Debug}" == "Panicked(\"a\\\"b\")")
+}
+
 #Test("service errors keep every message and delivery receipts keep every field") {
     assert(service_error_show(ServiceError.Full("full")) == "full")
     assert(service_error_show(ServiceError.Ambiguous("ambiguous")) == "ambiguous")
