@@ -457,6 +457,12 @@ and row-path framing remain in the canonical kernel, not native lowering.
 This generated Rust adapter is a tracked temporary directive-19 leaf, removed
 when the checked Jet-owned CSV intrinsic and native DataTree/FieldError path
 replace the canonical Rust row kernel. It is not a permanent provider exemption.
+The callback marshals the borrowed tree through `record.in` without allocating
+a Rust tree clone. Native-freed row and handle-array buffers use `jet_rt_alloc`
+and `jet_rt_free` with the same byte count and eight-byte alignment as lowering.
+Opaque runtime FieldError boxes retain their matching runtime handle-drop
+provider; they are converted to native records, never freed as native records.
+
 
 
 
