@@ -1506,6 +1506,12 @@ each runner with `--results FILE`. This still requires every selected baseline
 and focused stem to pass and runs each layer's raw ownership, stopped-result,
 and symbol witnesses; the receipts record the shared result file.
 
+Stopped splits discard both partial lists; owned search needles, zip inputs,
+chunks, progress outputs, and unboxed failure payloads are also released before
+returning their neutral stopped result. Zip checks the stop rail before padding
+or reporting unequal lengths. A partially consumed step-by hint counts only
+remaining complete steps, and Float averaging preserves the reference sum's
+negative-zero identity.
 Lazy cursor initialization and advancement may invoke user callbacks. Both
 are can-stop MIR operations: their results are usable only on the immediately
 following Propagate poll's resume edge. Prefetched HasNext/Value operations
