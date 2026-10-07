@@ -12,34 +12,17 @@
 // @200 test scope List*; @208 dynamic TLS native List<I64>*;
 // @216/224 absolute futex timespec; @232/240 clock_gettime scratch;
 // @248 reserved. Attach before the first GS read, never lazily from TLS.
-#Import(c) fn thread_pthread_create(out: I64, attr: I64, start: I64, arg: I64) -> I64 {
-
-}
-
-#Import(c) fn thread_pthread_join(thread: I64, out: I64) -> I64 {
-
-}
-
-#Import(c) fn thread_pthread_detach(thread: I64) -> I64 {
-
-}
-
-#Import(c) fn thread_pthread_attr_init(attr: I64) -> I64 {
-
-}
-
-#Import(c) fn thread_pthread_attr_setstacksize(attr: I64, size: I64) -> I64 {
-
-}
-
-#Import(c) fn thread_pthread_attr_destroy(attr: I64) -> I64 {
-
-}
+#Import(c) fn thread_pthread_create(out: I64, attr: I64, start: I64, arg: I64) -> I64 = "pthread_create"
+#Import(c) fn thread_pthread_join(thread: I64, out: I64) -> I64 = "pthread_join"
+#Import(c) fn thread_pthread_detach(thread: I64) -> I64 = "pthread_detach"
+#Import(c) fn thread_pthread_attr_init(attr: I64) -> I64 = "pthread_attr_init"
+#Import(c) fn thread_pthread_attr_setstacksize(attr: I64, size: I64) -> I64 = "pthread_attr_setstacksize"
+#Import(c) fn thread_pthread_attr_destroy(attr: I64) -> I64 = "pthread_attr_destroy"
 
 // Process lifetime root: mutex@0, atomic next-key counter@8, native List
 // header@16 (data/len/cap). Destructor closures are transferred to the registry
 // and retained for key lifetime (keys have no deletion API).
-thread_tls_registry :: I64{0}
+thread_tls_registry := I64{0}
 
 fn thread_zero(address: I64, bytes: I64) {
     at := I64{0}

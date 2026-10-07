@@ -177,11 +177,29 @@ fn fx_inline_asm_call(two: Bool) -> LIRModule Never! {
 
 fn fx_inline_asm_refusals() -> Bool Never! {
     templates :: [String]{"frobnicate rax ; -> return", "mov rdi, 1\nmov rax, {{value}} ; -> return", "ret", "push rax", "pop rax", "push rax\ncall r11\npop rax", "mov rbx, rax", "mov rax, xmm0 ; -> return", "mov rax, 9223372036854775808 ; -> return", "mov rax, rsp", "mov rax, {{missing}} ; -> return", "mov rax, 1 ; -> return\nmov rax, 2 ; -> return"}
-    forbidden :: [String]{"mov rax, qword ptr fs:[0] ; -> return", "mov rax, qword ptr gs:[8] ; -> return", "mov rcx, qword ptr gs:[0] ; -> return", "xadd qword ptr [rdi], rax", "lock xchg qword ptr [rdi], rax", "test rcx, rcx", "jnz 1f", "1:", "and rsp, -16", "xor edi, edi", "mov eax, 60"}
-    loop template in forbidden {
-        result :: x64_assemble_template(template, [String]{}, template.contains("return"))
-        if result.error == None || result.code.len() != 0 -> return false
+    forbidden :: [String]{
+        "mov rax, qword ptr fs:[0] ; -> return",
+        "mov rax, qword ptr gs:[8] ; -> return",
+        "mov rcx, qword ptr gs:[0] ; -> return",
+        "xadd qword ptr [rdi], rax", "lock xadd",
+        "lock xadd qword ptr [rdi]", "lock xchg qword ptr [rdi], rax",
+        "test rcx, rcx", "jnz 1f", "1:", "and rsp, -16", "xor edi, edi", "mov eax, 60",
     }
+    reasons :: [String]{
+        "unsupported source or operand read after its bound register was written",
+        "unsupported source or operand read after its bound register was written",
+        "unsupported source or operand read after its bound register was written",
+        "atomic instruction requires lock", "unsupported lock instruction",
+        "expected memory and register operands", "unsupported lock instruction",
+        "unsupported mnemonic `test`", "unsupported mnemonic `jnz`", "unsupported mnemonic `1:`",
+        "unsupported mnemonic `and`", "unsupported mnemonic `xor`", "unsupported mov operands or stale placeholder",
+    }
+    loop (index, template) in forbidden {
+        result :: x64_assemble_template(template, [String]{}, template.contains("return"))
+        if result.error != Val("inline asm: {reasons[index]} (line 1: {template})") || result.code.len() != 0 -> return false
+    }
+    misplaced :: x64_assemble_template("test rax, rax", [String]{}, false)
+    if misplaced.error != Val("inline asm: clone child rail requires the audited clone prologue") || misplaced.code.len() != 0 -> return false
     gs :: x64_assemble_template("mov rax, qword ptr gs:[0] ; -> return", [String]{}, true)
     if gs.error != None || gs.code != [U8]{0x65, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0} -> return false
     xadd :: x64_assemble_template("lock xadd qword ptr [rcx], rax\nmov rax, rax ; -> return", [String]{}, true)

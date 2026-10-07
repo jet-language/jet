@@ -80,7 +80,7 @@ const sorted = (dir) => existsSync(`${repo}/${dir}`) ? readdirSync(`${repo}/${di
 // Feed the exact audited OS templates into the hand-MIR witnesses; do not
 // maintain a second copy that could diverge from the OS layer.
 const osSource = read("Compiler/JetBackend/Source/OS/Linux.jet");
-const asmLeaves = ["os_syscall", "os_store_word", "os_load_word", "os_load_byte", "os_call_address", "os_call_address_two", "os_syscall_i64", "os_load_i64", "os_store_i64", "os_cas_i64", "os_spin_pause", "os_load_u8", "os_store_u8", "os_write_word_i64", "os_syscall_stack4_i64"];
+const asmLeaves = ["os_syscall", "os_store_word", "os_load_word", "os_load_byte", "os_call_address", "os_call_address_two", "os_syscall_i64", "os_load_i64", "os_store_i64", "os_cas_i64", "os_spin_pause", "os_load_u8", "os_store_u8", "os_write_word_i64", "os_syscall_stack4_i64", "os_tls_base_i64", "os_fetch_add_i64", "os_swap_i64", "os_call_address_i64", "os_call_address_two_i64", "os_clone_i64"];
 const asmSpans = asmLeaves.map((name) => {
   const start = osSource.indexOf(`fn ${name}(`);
   const open = osSource.indexOf('"""', start);
