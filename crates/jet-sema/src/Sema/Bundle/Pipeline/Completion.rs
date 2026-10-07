@@ -200,8 +200,10 @@ pub(super) fn complete_bundle_check(
             diags.push(no_run_error());
         }
     }
+    let entry_items = &bundle.modules[bundle.entry].items;
     match mode {
-        CompileMode::Test if !states.iter().any(|state| !state.tests.is_empty())
+        CompileMode::Test if !crate::Sema::has_test_blocks_in_items(entry_items)
+            && !crate::Sema::has_contract_sampling_candidates(entry_items)
             && !bundle.modules[bundle.entry].items.iter().any(|item| {
                 matches!(item, Item::Const(value) if value.resolved_output.as_ref().is_some_and(|output| output.selected && output.kind == crate::AST::OutputKind::Check))
             }) => {

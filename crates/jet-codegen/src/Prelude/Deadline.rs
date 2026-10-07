@@ -17,20 +17,20 @@ pub fn jet_std_time_now() -> i64 {
     if let Some(now) = jet_scheduler_world_now_ms() {
         return now;
     }
-    if let Ok(s) = std::env::var("JET_PROVE_REPLAY_TIME_MS") {
-        if let Ok(n) = s.parse::<i64>() {
-            return n;
-        }
-    }
-    if let Ok(s) = std::env::var("LEX_TEST_EPOCH") {
-        if let Ok(n) = s.parse::<i64>() {
-            return n;
-        }
+    if let Some(now) = jet_time_wall_override_ms() {
+        return now;
     }
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+}
+
+/// One replay/test override provider for integer deadlines and civil time.
+pub fn jet_time_wall_override_ms() -> Option<i64> {
+    ["JET_PROVE_REPLAY_TIME_MS", "LEX_TEST_EPOCH"]
+        .into_iter()
+        .find_map(|name| std::env::var(name).ok()?.parse().ok())
 }
 
 thread_local! {

@@ -2830,43 +2830,20 @@ pub fn has_entry_fn(file: &str, name: &str) -> bool {
 pub fn has_test_blocks(file: &str) -> bool {
     with_compiler_stack(
         || match Loader::load_entry_with_overlay(file, None, false) {
-            Ok(bundle) => bundle
-                .modules
-                .iter()
-                .flat_map(|module| module.items.iter())
-                .any(|i| matches!(i, AST::Item::Test(_))),
+            Ok(bundle) => Sema::has_test_blocks_in_items(&bundle.modules[bundle.entry].items),
             Err(_) => true,
         },
     )
 }
-fn item_has_contracts(item: &AST::Item) -> bool {
-    match item {
-        AST::Item::Func(function) => !function.pre.is_empty() || !function.post.is_empty(),
-        AST::Item::Impl(implementation) => implementation
-            .methods
-            .iter()
-            .any(|method| !method.pre.is_empty() || !method.post.is_empty()),
-        AST::Item::CodeModule(module) => module
-            .body
-            .as_ref()
-            .is_some_and(|items| items.iter().any(item_has_contracts)),
-        _ => false,
-    }
-}
 
-/// Does the entry file define any contract-bearing callable? `jet test` uses
-/// this discovery alongside `#Test` discovery so a file with only `#Pre` /
-/// `#Post` contracts still reaches the ordinary checked producer path. A load
-/// failure returns `true`, matching `has_test_blocks`, so the caller surfaces
-/// the real compile error instead of silently skipping the target.
+/// Does the entry file contain a generated contract-sampling candidate?
+/// Uncalled declarations still contribute static contract evidence to prove;
+/// only parameterized preconditions can produce a sampled runtime test.
+/// A load failure returns true so normal compilation owns the diagnostic.
 pub fn has_test_contracts(file: &str) -> bool {
     with_compiler_stack(
         || match Loader::load_entry_with_overlay(file, None, false) {
-            Ok(bundle) => bundle
-                .modules
-                .iter()
-                .flat_map(|module| module.items.iter())
-                .any(item_has_contracts),
+            Ok(bundle) => Sema::has_contract_sampling_candidates(&bundle.modules[bundle.entry].items),
             Err(_) => true,
         },
     )
