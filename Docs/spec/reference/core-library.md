@@ -3342,6 +3342,11 @@ structured values, not an untyped supervisor log. The source is
 runtime model is also exercised by the service examples and tests.
 The tree is the single public topology boundary; workers, delivery, and restart policies remain typed rather than string-keyed (`D-SERVICE1=D`).
 
+A worker handler is a checked, zero-argument top-level function, not a
+captured callback. Ownership transfers of that function value preserve its
+identity; the native dispatcher invokes a non-capturing adapter that reports
+handler failure through the service boundary.
+
 | Signature | Result | Description |
 |---|---|---|
 | `tree(name: String) -> ServiceTree` | tree | Create a named service topology. |
