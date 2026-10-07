@@ -82,11 +82,8 @@ fn sema_expression_is_place(expr: Expr) -> Bool Never! {
 // mark before this point, so a take mark here stands on a bare place. The
 // place gives its value away even when it is read later (any later use is
 // E0121 naming the mark); borrowed storage cannot be moved (E0201), and an
-// element stays owned by its collection (E0225). A whole name in an owning
-// position already moves, so its checked value is the bare place. A field
-// keeps the mark as `Move`: lowering would otherwise read (copy) the field,
-// so the mark is what moves it out of its owner (Rust keeps the AST mark and
-// lowers it to the same `TExprKind::Move`).
+// element stays owned by its collection (E0225). The checked value is the
+// bare place, which every owning position already moves.
 fn sema_expression_move_mark_text(expr: Expr) -> String Never! {
     if expr == {
         .Ident(name, _) -> name
@@ -135,7 +132,6 @@ fn sema_expression_exact_move(value: Expr, span: Span, expected: Type?, environm
     }
     if !sema_pin_check_move(&state, value, scopes, &diagnostics) -> return None
     if !sema_ownership_consume_expression(&state, Expr.Place{value: value, access: PlaceAccess.Take, span: span}, scopes, "the move `^{sema_expression_move_mark_text(value)}`", &diagnostics) -> return None
-    if checked.kind == .Field(_, _) -> return Val(sema_tir_expr(checked.ty, TExprKind.Move{value: checked}, span))
     Val(checked)
 }
 
