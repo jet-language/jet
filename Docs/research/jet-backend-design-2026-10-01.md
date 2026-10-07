@@ -1638,6 +1638,10 @@ not at a gate boundary, and the newest expired registration determines whether
 a dangling address refers to a Jet frame or quarantined heap storage. Native
 packing excludes the five former Rust pointer/scope exports. Ledger failures
 never alter the delivered fault.
+Raw-addressed native functions hold a distinct sentry allocation-frame token
+through normal and stopped cleanup; the gate save is not its lifetime owner.
+An instrumented raw read skips its native load after a delivered fault and
+leaves its payload unwritten for the MIR Propagate cleanup edge.
 
 `JetRuntime/Tests/check-object.mjs` checks exact exports and the audited
 `imports.list`, including the allocator constructor relocation.

@@ -22,7 +22,7 @@ fn lower_raw_address_of(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &Low
     address :: lower_address(&f, walk.base, walk.offset)
     bytes :: lower_const(&f, lower_size(p, row.ty).size)
     raw :: lower_word(&f)
-    lower_call_runtime(&m, &f, "jet_rt_sentry_address_of", [LIRValueID]{address, bytes}, Val(raw))
+    lower_call_runtime(&m, &f, "jet_rt_sentry_stack_address_of", [LIRValueID]{address, bytes}, Val(raw))
     result_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "raw address has no checked type")
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
     if lower_is_exact_int(result_ty) -> return lower_convert_exact(&m, &f, dst, raw, "jet_int_owned_from_i64", false)
@@ -54,11 +54,41 @@ fn lower_ptr_deref(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFun
     lower_call_runtime(&m, &f, "jet_rt_sentry_read", [LIRValueID]{address, bytes, align}, Val(pointer))
     if lower_repr(p, elem) == .Absent -> return lower_alias_absent(&f, instruction)
     dst :: lower_result(p, c, &m, &f, instruction) ?? return
-    if lower_is_inline(p, elem) {
-        lower_storage_into(p, &f, dst, elem)
-        return lower_copy_bytes(&f, dst, 0, pointer, 0, size.size)
+    if !m.stop_points {
+        if lower_is_inline(p, elem) {
+            lower_storage_into(p, &f, dst, elem)
+            return lower_copy_bytes(&f, dst, 0, pointer, 0, size.size)
+        }
+        return lower_emit(&f, LIRInst.Load{dst: dst, base: pointer, offset: 0})
     }
-    lower_emit(&f, LIRInst.Load{dst: dst, base: pointer, offset: 0})
+    // A fault has already delivered a stop. Never load its zero pointer or
+    // initialize aggregate payload storage; MIR Propagate owns the cleanup.
+    if lower_is_inline(p, elem) -> lower_storage_into(p, &f, dst, elem)
+    valid :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: valid, condition: LIRCondition.Ne, left: pointer, right: lower_const(&f, 0)})
+    load :: lower_new_block(&f)
+    stopped :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: valid, then_target: lower_target(load, [LIRValueID]{}), else_target: lower_target(stopped, [LIRValueID]{})})
+    if lower_is_inline(p, elem) {
+        lower_start(&f, load, [LIRValueID]{})
+        lower_copy_bytes(&f, dst, 0, pointer, 0, size.size)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, stopped, [LIRValueID]{})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, done, [LIRValueID]{})
+        return
+    }
+    layout :: lower_repr_layout(lower_repr(p, elem)) ?? return lower_fail(&m, &f, "raw read has no scalar representation")
+    loaded :: lower_new_value(&f, layout, LIRDrop.Trivial, elem.identity)
+    unwritten :: lower_new_value(&f, layout, LIRDrop.Trivial, elem.identity)
+    lower_start(&f, load, [LIRValueID]{})
+    lower_emit(&f, LIRInst.Load{dst: loaded, base: pointer, offset: 0})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{loaded})})
+    lower_start(&f, stopped, [LIRValueID]{})
+    lower_emit(&f, LIRInst.Const{dst: unwritten, value: 0})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{unwritten})})
+    lower_start(&f, done, [LIRValueID]{dst})
 }
 
 // Sentry guards save the per-thread gate/fence state in caller-owned frame
@@ -102,9 +132,21 @@ fn lower_sentry_frame(c: LowerContext, m: &LowerModule, f: &LowerFunction) Never
         f.sentry_function = Val(save)
         lower_sentry_gate_enter(&m, &f, save, gate)
     }
+    needs_frame := false
+    loop block in c.mir.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .RawAddressOf(_) -> needs_frame = true
+        }
+    }
+    if needs_frame {
+        frame :: lower_word(&f)
+        f.sentry_stack_frame = Val(frame)
+        lower_call_runtime(&m, &f, "jet_rt_sentry_frame_enter", [LIRValueID]{}, Val(frame))
+    }
 }
 
 fn lower_sentry_function_leave(m: &LowerModule, f: &LowerFunction) Never! {
+    if f.sentry_stack_frame == .Val(frame) -> lower_call_runtime(&m, &f, "jet_rt_sentry_frame_leave", [LIRValueID]{frame}, None)
     if f.sentry_function == .Val(save) -> lower_call_runtime(&m, &f, "jet_rt_sentry_scope_leave", [LIRValueID]{save}, None)
 }
 
