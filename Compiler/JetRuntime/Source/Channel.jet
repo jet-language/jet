@@ -547,6 +547,9 @@ fn channel_select_probe(receivers: I64, count: I64, timer_data: I64, timer_count
         jet_rt_string_drop(reason)
         at = I64{0}
         loop at < count {
+            // Scheduler.rs:3977-3983 only removes the selector; it does not
+            // hand off a stolen wake when an earlier arm won. The paired
+            // private-kernel fixture records this existing cross-tier gap.
             channel :: sync_load(receivers + at * I64{8})
             sync_mutex_lock(channel)
             channel_wait_remove(channel, registrations + at * I64{24}, false)
@@ -569,13 +572,14 @@ fn channel_select_probe(receivers: I64, count: I64, timer_data: I64, timer_count
     }
     if (capacity != I64{0}) { jet_rt_free(receivers, capacity * I64{8}, I64{8}) }
     if (timer_count != I64{0}) { jet_rt_free(converted, timer_count * I64{16}, I64{8}) }
+    // The selected payload and arm have already transferred to the caller.
+    // Do not turn a completed selection into a stopped, uninitialized output.
+    if (result == I64{1}) { return }
     if (jet_rt_session_propagate() != I64{0}) { return }
     if (result == I64{3}) { channel_fatal(I64{5}); return }
     if ((probing & I64{255}) == I64{0} && result == I64{2}) { channel_fatal(I64{4}); return }
-    if (result != I64{1}) {
-        sync_store(arm, jet_int_owned_from_i64(I64{-1}))
-        sync_store(value, I64{0})
-    }
+    sync_store(arm, jet_int_owned_from_i64(I64{-1}))
+    sync_store(value, I64{0})
 }
 
 // The six exact E4 messages below are emitted without Core String values.

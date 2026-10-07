@@ -519,6 +519,18 @@ destructors run outside the permit lock. Process/World site publication returns
 the borrowed winning cell, drops losing candidates through the uniform Shared
 drop door, and registers only World sites for quiescent reset. Reset preserves
 outstanding clones and retains registry nodes for later republishing.
+Revision exhaustion is checked before invoking an edit callback and becomes a
+task panic inside a task body, not an initialized callback result. The runtime
+fixtures exercise prepared-send rollback, stopped iterator/output ownership,
+failed-send payload disposal, simultaneous read permits, writer priority and
+revision exhaustion. Their Closed crossing uses the actual Rust Prelude enum,
+and their paired one-million-message ping-pong records Jet and Rust timings.
+Once selection has transferred a payload/arm to the caller, a later stop does
+not discard that completed selection. Select deregistration preserves the
+canonical selector's known wake-steal gap: an earlier arm may win after a
+later channel woke the selector, leaving that later channel's plain receiver
+parked. Paired private-kernel witnesses record the gap rather than introducing
+a tier-specific wake-handoff policy.
 Opaque runtime-owned enums do not expose a native discriminant or payload
 layout. Their construction, variant tests and payload projections report a
 native unsupported issue unless an explicit record adapter supplies that layout.

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { candidateJetc0, frontReceipt } from '../../JetBackend/Tests/jet-front.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode, source] = process.argv.slice(2);
-const modes = ['assemble', 'lower', 'prepare-native', 'prepare-seed', 'link', 'link-seed', 'run', 'run-seed', 'cross', 'perf'];
+const modes = ['assemble', 'lower', 'prepare-native', 'prepare-seed', 'link', 'link-seed', 'run', 'run-seed', 'cross', 'fatal', 'perf'];
 if (!output || !modes.includes(mode)) throw Error(`usage: run-channel-fixtures.mjs OUT ${modes.join('|')} [FRESH_RUNTIME_RS]`);
 const out = resolve(output), fixture = join(out, 'fixture');
 const read = p => readFileSync(join(repo, p), 'utf8');
@@ -35,6 +35,24 @@ const bridge = `
 }
 #[no_mangle] pub unsafe extern "C" fn jet_fixture_rust_closed_eq(a: usize, b: usize) -> bool {
     &*(a as *mut jet_std::Closed) == &*(b as *mut jet_std::Closed)
+}
+#[no_mangle] pub extern "C" fn jet_fixture_rust_select_wake_gap() -> bool {
+    let early = JetSchedulerChannel::<u64>::new();
+    let late = JetSchedulerChannel::<u64>::new();
+    let early_sender = early.sender();
+    let late_sender = late.sender();
+    let plain = ParkSlot::new();
+    let master = ParkSlot::new();
+    late.inner.register_select_waiter(plain.clone());
+    let inners = vec![early.inner.clone(), late.inner.clone()];
+    let registration = SelectRegistration::new(&inners, master, None);
+    assert!(early_sender.send(10));
+    assert!(late_sender.send(20));
+    assert!(matches!(jet_scheduler_try_select(inners, vec![]),
+                    Some(JetSelectOutcome::Recv { arm: 0, value: 10 })));
+    drop(registration);
+    let queued = late.inner.state.lock().unwrap().queue.len();
+    queued == 1 && !plain.notified.load(std::sync::atomic::Ordering::Acquire)
 }
 `;
 if (mode === 'assemble') {
@@ -70,6 +88,21 @@ if (mode === 'assemble') {
   const flags=seed?['-DJET_SEED','-Djet_rt_handle_clone_Closed=jet_fixture_rust_closed_clone','-Djet_rt_handle_drop_Closed=jet_fixture_rust_closed_drop','-Djet_rt_handle_eq_Closed=jet_fixture_rust_closed_eq','-Djet_rt_handle_show_Closed=jet_fixture_rust_closed_show']:['-DJET_CHANNEL_INTERNAL','-DJET_CLOSED_CROSS'];
   const objects=seed?[]:[join(fixture,'fixture.o')];
   command(process.env.CC??'cc',['-O2',...flags,join(repo,'Compiler/JetRuntime/Tests/channel-fixture.c'),...objects,lib,'-lpthread','-ldl','-lm','-o',join(out,seed?'channel-seed':'channel-native')]);
+} else if (mode === 'fatal') {
+  const failures = [];
+  for (const name of ['select-closed', 'select-empty']) {
+    const results = {};
+    for (const tier of ['native', 'seed']) {
+      const result = spawnSync(join(out, `channel-${tier}`), [name], {encoding:'utf8',timeout:120000,maxBuffer:1<<27});
+      results[tier] = result;
+      writeFileSync(join(out, `${name}-${tier}.txt`), result.stdout ?? '');
+      writeFileSync(join(out, `${name}-${tier}.stderr.txt`), result.stderr ?? '');
+      writeFileSync(join(out, `${name}-${tier}.status.json`), JSON.stringify({status:result.status,signal:result.signal,error:result.error?.message})+'\n');
+      if (result.error || result.status !== 1 || result.stdout !== '') failures.push(`${name}/${tier}: invalid fatal exit`);
+    }
+    if (results.native.stderr !== results.seed.stderr) failures.push(`${name}: native/seed stderr mismatch`);
+  }
+  if (failures.length) throw Error(failures.join('\n'));
 } else if (mode === 'perf') {
   const rows=[];
   // Alternate order to avoid comparing a cold program with a warm competitor.
@@ -83,14 +116,17 @@ if (mode === 'assemble') {
   const median=t=>rows.filter(r=>r.tier===t).map(r=>r.ns).sort((a,b)=>a-b)[2];
   const jet=median('native'),rust=median('seed');
   writeFileSync(join(out,'perf.tsv'),'round\ttier\tns\n'+rows.map(r=>`${r.round}\t${r.tier}\t${r.ns}`).join('\n')+'\n');
-  writeFileSync(join(out,'perf-summary.json'),JSON.stringify({messages:1000000,jet_median_ns:jet,rust_median_ns:rust,ratio:jet/rust,strict_win:jet/rust<1/1.05},null,2)+'\n');
+  const speedup=rust/jet,strictWin=speedup>1.05;
+  writeFileSync(join(out,'perf-summary.json'),JSON.stringify({messages:1000000,jet_median_ns:jet,rust_median_ns:rust,ratio:jet/rust,speedup,strict_win:strictWin},null,2)+'\n');
   console.log(`1M-message ping-pong Jet/Rust=${jet/rust}`);
+  if(!strictWin)throw Error('ping-pong cell has not strictly beaten the matched Rust peer');
 } else {
   const seed=mode==='run-seed',binary=join(out,seed?'channel-seed':'channel-native');
   const result=command(binary,[],{timeout:120000});
   writeFileSync(join(out,`${mode}.txt`),result.stdout+result.stderr);
   if(result.stderr!=='')throw Error('fixture wrote stderr');
-  for(const text of ['queue/close/owners ok','select source-order/probe/timers ok','shared concurrent edits/drop ok'])if(!result.stdout.includes(text+'\n'))throw Error(`missing ${text}`);
+  for(const text of ['queue/close/owners ok','select source-order/probe/timers ok','shared concurrent edits/drop ok','canonical select wake-steal gap parity ok'])if(!result.stdout.includes(text+'\n'))throw Error(`missing ${text}`);
+  if(!seed)for(const text of ['reservations/stopped output/permit cleanup ok','shared concurrent readers/writer priority ok'])if(!result.stdout.includes(text+'\n'))throw Error(`missing ${text}`);
   if(mode==='cross'&&!result.stdout.includes('Closed Rust/Jet ownership cross ok\n'))throw Error('cross ownership fixture did not execute');
 }
 console.log(`channel fixtures ${mode}: ok`);
