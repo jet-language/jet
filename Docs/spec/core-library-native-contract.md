@@ -322,6 +322,17 @@ tag and source-selected width/height/scale; dialog-request transfer receives
 kind/title, an existing grant, explicit directory absence, filters and
 multiple-selection. Host metadata validation remains a separate boundary.
 
+The file-filter constructor reuses the older Jet host-value kernel's policy:
+an empty label is valid when an extension or media type is supplied, but empty
+extension/media-type entries are rejected. Its source error declaration carries
+the canonical `InvalidRequest(String)` payload, including the native messages.
+The source constructs the filter's public label/extensions/media-types slots;
+it does not consult a host. Grant, shortcut and accessibility wrappers defer
+validation to the retained bootstrap boundary until their Jet carriers land:
+empty grant rights are valid, shortcut keys are trimmed and Unicode-lowercased,
+and accessibility uses a required name plus an optional description (the empty
+description is absent; spaces are valid), not a role/label pair.
+
 Terminal capability sampling and UI-node rendering remain host boundaries.
 The interpreter samples actual host capabilities instead of synthesizing
 ASCII/80×24 facts at compile time. Preview sessions, native/browser renderers,

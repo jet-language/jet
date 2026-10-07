@@ -39,7 +39,7 @@ pub enum UIHostError {
     Headless
     Denied
     Missing
-    InvalidRequest
+    InvalidRequest(String)
     CapabilityUnavailable
     CapabilityDenied
     HostFailure
@@ -159,14 +159,14 @@ fn transfer_request(kind: Int, title: String, grant: UIFSGrant, directory_absent
 }
 
 pub fn file_filter(label: String, extensions: [String], mime_types: [String]) -> UIFileFilter UIHostError! {
-    if label.len() == 0 && extensions.len() == 0 && mime_types.len() == 0 -> return Err(UIHostError.InvalidRequest)
+    if label.len() == 0 && extensions.len() == 0 && mime_types.len() == 0 -> return Err(UIHostError.InvalidRequest("file filter must name an extension, media type, or label"))
     loop extension in extensions {
-        if extension.len() == 0 -> return Err(UIHostError.InvalidRequest)
+        if extension.len() == 0 -> return Err(UIHostError.InvalidRequest("file filter extensions must not be empty"))
     }
     loop mime in mime_types {
-        if mime.len() == 0 -> return Err(UIHostError.InvalidRequest)
+        if mime.len() == 0 -> return Err(UIHostError.InvalidRequest("file filter media types must not be empty"))
     }
-    core.ui.host.file_filter(label, extensions, mime_types)
+    Ok(UIFileFilter{label: label, extensions: extensions, mime_types: mime_types})
 }
 
 pub fn file_filter_text() -> UIFileFilter Never! {
@@ -174,7 +174,6 @@ pub fn file_filter_text() -> UIFileFilter Never! {
 }
 
 pub fn fs_grant(path: String, rights: UIFSRights) -> UIFSGrant UIHostError! {
-    if path.trim() == "" || (!rights.read && !rights.write) -> return Err(UIHostError.InvalidRequest)
     core.ui.host.fs_grant(path, rights)
 }
 
@@ -183,12 +182,41 @@ pub fn fs_rights_write() -> UIFSRights Never! { core.ui.host.fs_rights_write() }
 pub fn fs_rights_read_write() -> UIFSRights Never! { core.ui.host.fs_rights_read_write() }
 
 pub fn shortcut(key: String, modifiers: UIShortcutModifiers) -[IO]> UIShortcut UIHostError! {
-    if key.trim() == "" -> return Err(UIHostError.InvalidRequest)
     core.ui.host.shortcut(key, modifiers)
 }
 
-pub fn accessibility(role: String, label: String) -[IO]> UIAccessibility UIHostError! {
-    if role.trim() == "" || label.trim() == "" -> return Err(UIHostError.InvalidRequest)
-    core.ui.host.accessibility(role, label)
+pub fn accessibility(name: String, description: String) -[IO]> UIAccessibility UIHostError! {
+    core.ui.host.accessibility(name, description)
+}
+
+#Test("UI file-filter policy preserves labels and typed error payloads") {
+    text :: file_filter_text()
+    assert(text.label == "Text" && text.extensions == [String]{"txt"} && text.mime_types == [String]{"text/plain"})
+    filter :: file_filter(" ", [String]{"jet"}, [String]{"text/x-jet"}) ?? panic("valid filter rejected")
+    assert(filter.label == " " && filter.extensions == [String]{"jet"})
+    if file_filter("", [String]{}, [String]{}) == .Err(error) {
+        if error == .InvalidRequest(message) -> assert(message == "file filter must name an extension, media type, or label")
+        else -> panic("wrong file-filter error")
+    } else -> panic("empty filter accepted")
+    if file_filter("Jet", [String]{""}, [String]{}) == .Err(error) {
+        if error == .InvalidRequest(message) -> assert(message == "file filter extensions must not be empty")
+        else -> panic("wrong extension error")
+    } else -> panic("empty extension accepted")
+    if file_filter("Jet", [String]{}, [String]{""}) == .Err(error) {
+        if error == .InvalidRequest(message) -> assert(message == "file filter media types must not be empty")
+        else -> panic("wrong media-type error")
+    } else -> panic("empty media type accepted")
+}
+
+#Test("UI dialog request defaults occupy explicit carrier slots") {
+    grant :: fs_grant(".", fs_rights_read_write()) ?? panic("valid grant rejected")
+    open :: open_request(grant)
+    save :: save_request(grant)
+    assert(open.kind == .Open && open.title == "Open File")
+    assert(save.kind == .Save && save.title == "Save File")
+    assert(open.initial_directory == None && save.initial_directory == None)
+    assert(open.filters.len() == 0 && save.filters.len() == 0)
+    assert(!open.allow_multiple && !save.allow_multiple)
+    assert(open.grant.root == grant.root && save.grant.root == grant.root)
 }
 
