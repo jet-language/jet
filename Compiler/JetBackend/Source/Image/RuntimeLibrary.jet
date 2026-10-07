@@ -91,6 +91,30 @@ fn runtime_export_signature(function: MIRFunction, int_index_seam: Bool) -> Bool
     runtime_export_word(function.return_type)
 }
 
+enum RuntimeIntrinsicShape {
+    FloatBits
+    FloatFromBits
+    FunctionAddress(symbol: String, arity: Int)
+}
+struct RuntimeIntrinsicSpec {
+    pub name: String
+    pub shape: RuntimeIntrinsicShape
+}
+
+// One reviewed recognizer table; every address row uses the same I64-only
+// target validation and existing FunctionAddress lowering.
+fn runtime_intrinsic_specs() -> [RuntimeIntrinsicSpec] Never! {
+    [RuntimeIntrinsicSpec]{
+        RuntimeIntrinsicSpec{name: "rt_f64_bits", shape: .FloatBits},
+        RuntimeIntrinsicSpec{name: "rt_f64_from_bits", shape: .FloatFromBits},
+        RuntimeIntrinsicSpec{name: "rt_thread_entry_address", shape: .FunctionAddress("jet_rt_thread_entry", 1)},
+        RuntimeIntrinsicSpec{name: "rt_tls_shared_destructor_address", shape: .FunctionAddress("jet_rt_tls_shared_destructor", 2)},
+        RuntimeIntrinsicSpec{name: "rt_scheduler_worker_address", shape: .FunctionAddress("jet_rt_scheduler_worker", 1)},
+        RuntimeIntrinsicSpec{name: "rt_scheduler_timer_address", shape: .FunctionAddress("jet_rt_scheduler_timer", 1)},
+        RuntimeIntrinsicSpec{name: "rt_test_capture_abort_address", shape: .FunctionAddress("jet_rt_test_capture_abort", 2)},
+    }
+}
+
 // Runtime-only, ordinary Jet reference functions. A mismatched declaration
 // never becomes an unchecked bitcast; normal lowering has no such override.
 fn runtime_bitcast_signature(function: MIRFunction, to_bits: Bool) -> Bool Never! {
@@ -101,8 +125,8 @@ fn runtime_bitcast_signature(function: MIRFunction, to_bits: Bool) -> Bool Never
     output_word := false
     if param.ty.kind == .IntN(signed, bits) -> input_word = signed && bits == 64
     if function.return_type.kind == .IntN(signed, bits) -> output_word = signed && bits == 64
-    if to_bits -> param.ty.kind == .Float && output_word
-    else -> input_word && function.return_type.kind == .Float
+    if to_bits -> return param.ty.kind == .Float && output_word
+    input_word && function.return_type.kind == .Float
 }
 
 fn runtime_address_signature(function: MIRFunction) -> Bool Never! {
@@ -213,56 +237,36 @@ fn x64_runtime_library(program: MIRProgram, explicit: [String]) -> X64RuntimeLib
     intrinsics := [U64:LowerRuntimeIntrinsic]{}
     bits := MIRFunctionID?{None}
     from_bits := MIRFunctionID?{None}
-    thread_address := MIRFunctionID?{None}
-    tls_shared_address := MIRFunctionID?{None}
-    loop function in program.functions {
-        if function.name == "rt_thread_entry_address" {
-            if thread_address != None -> return runtime_export_error("ambiguous checked runtime intrinsic rt_thread_entry_address")
-            if !runtime_address_signature(function) -> return runtime_export_error("runtime intrinsic rt_thread_entry_address has an invalid checked scalar signature")
-            thread_address = Val(function.id)
-            next
+    loop spec in runtime_intrinsic_specs() {
+        selected := MIRFunctionID?{None}
+        loop function in program.functions {
+            if function.name != spec.name -> next
+            if selected != None -> return runtime_export_error("ambiguous checked runtime intrinsic {spec.name}")
+            selected = Val(function.id)
+            if spec.shape == {
+                .FloatBits | .FloatFromBits -> {
+                    to_bits :: spec.shape == .FloatBits
+                    if !runtime_bitcast_signature(function, to_bits) -> return runtime_export_error("runtime bitcast {spec.name} has an invalid checked scalar signature")
+                    if to_bits -> bits = Val(function.id)
+                    else -> from_bits = Val(function.id)
+                    &intrinsics.add(function.id.value, if to_bits -> LowerRuntimeIntrinsic.FloatBits else -> LowerRuntimeIntrinsic.FloatFromBits).drop("unique checked bitcast ID")
+                }
+                .FunctionAddress(symbol, arity) -> {
+                    if !runtime_address_signature(function) -> return runtime_export_error("runtime intrinsic {spec.name} has an invalid checked scalar signature")
+                    target := MIRFunctionID?{None}
+                    loop entry_row in exports {
+                        if entry_row.symbol != symbol -> next
+                        index :: rows.get(entry_row.function.value) ?? return runtime_export_error("runtime address target {symbol} is missing")
+                        if entry_row.abi != .C || !runtime_address_target_signature(program.functions[index], arity) -> return runtime_export_error("runtime address target {symbol} must export an infallible C function with {arity} I64 parameters and an I64 result")
+                        target = Val(entry_row.function)
+                    }
+                    target_id :: target ?? return runtime_export_error("runtime intrinsic {spec.name} requires #Export(c) {symbol}")
+                    &intrinsics.add(function.id.value, LowerRuntimeIntrinsic.FunctionAddress{function: target_id}).drop("unique checked address intrinsic ID")
+                }
+            }
         }
-        if function.name == "rt_tls_shared_destructor_address" {
-            if tls_shared_address != None -> return runtime_export_error("ambiguous checked runtime intrinsic rt_tls_shared_destructor_address")
-            if !runtime_address_signature(function) -> return runtime_export_error("runtime intrinsic rt_tls_shared_destructor_address has an invalid checked scalar signature")
-            tls_shared_address = Val(function.id)
-            next
-        }
-        if function.name != "rt_f64_bits" && function.name != "rt_f64_from_bits" -> next
-        to_bits :: function.name == "rt_f64_bits"
-        if !runtime_bitcast_signature(function, to_bits) -> return runtime_export_error("runtime bitcast {function.name} has an invalid checked scalar signature")
-        if to_bits {
-            if bits != None -> return runtime_export_error("ambiguous checked runtime bitcast rt_f64_bits")
-            bits = Val(function.id)
-        } else {
-            if from_bits != None -> return runtime_export_error("ambiguous checked runtime bitcast rt_f64_from_bits")
-            from_bits = Val(function.id)
-        }
-        &intrinsics.add(function.id.value, if to_bits -> LowerRuntimeIntrinsic.FloatBits else -> LowerRuntimeIntrinsic.FloatFromBits).drop("unique checked bitcast ID")
     }
     if (bits == None) != (from_bits == None) -> return runtime_export_error("runtime bitcast definitions must be present as one validated pair")
-    if thread_address == .Val(address_id) {
-        target := MIRFunctionID?{None}
-        loop entry_row in exports {
-            if entry_row.symbol != "jet_rt_thread_entry" -> next
-            index :: rows.get(entry_row.function.value) ?? return runtime_export_error("runtime address target jet_rt_thread_entry is missing")
-            if entry_row.abi != .C || !runtime_address_target_signature(program.functions[index], 1) -> return runtime_export_error("runtime address target jet_rt_thread_entry must export an infallible C I64 -> I64 function")
-            target = Val(entry_row.function)
-        }
-        target_id :: target ?? return runtime_export_error("runtime intrinsic rt_thread_entry_address requires #Export(c) jet_rt_thread_entry")
-        &intrinsics.add(address_id.value, LowerRuntimeIntrinsic.FunctionAddress{function: target_id}).drop("unique checked address intrinsic ID")
-    }
-    if tls_shared_address == .Val(address_id) {
-        target := MIRFunctionID?{None}
-        loop entry_row in exports {
-            if entry_row.symbol != "jet_rt_tls_shared_destructor" -> next
-            index :: rows.get(entry_row.function.value) ?? return runtime_export_error("runtime address target jet_rt_tls_shared_destructor is missing")
-            if entry_row.abi != .C || !runtime_address_target_signature(program.functions[index], 2) -> return runtime_export_error("runtime address target jet_rt_tls_shared_destructor must export an infallible C (I64, I64) -> I64 function")
-            target = Val(entry_row.function)
-        }
-        target_id :: target ?? return runtime_export_error("runtime intrinsic rt_tls_shared_destructor_address requires #Export(c) jet_rt_tls_shared_destructor")
-        &intrinsics.add(address_id.value, LowerRuntimeIntrinsic.FunctionAddress{function: target_id}).drop("unique checked address intrinsic ID")
-    }
     lowered :: lir_lower_runtime_callables(program, roots, ^intrinsics)
     if lowered.issues.len() > 0 {
         errors :: loop issue in lowered.issues -> "{issue.function}\t{issue.message}"
