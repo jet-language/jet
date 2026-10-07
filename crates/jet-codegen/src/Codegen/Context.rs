@@ -572,8 +572,9 @@ pub(crate) struct Cx {
     pub(crate) boxed_edges: HashSet<(String, String)>,
     pub(crate) cloneable: HashSet<String>,
     /// D-MIGRATE4: `migration TypeName { … }` blocks per type, in source order
-    /// (the chain, oldest step first). Read by `emit_struct_migration` to lower
-    /// the runtime step functions + silent decode migration chain-walker.
+    /// (the chain, oldest step first). Read by `Items::migration_blocks` for the
+    /// TIR codec migration plans; the runtime chain-walker is the derived
+    /// `Decode`'s Jet items (jet-sema `Registration/Serde.rs::struct_migration_decode`).
     pub(crate) migrations: HashMap<String, Vec<crate::AST::MigrationDecl>>,
     /// D-SOA1 / D-SOA-TIER1=A: struct names declared `#layout(columnar)`. A `[S]`
     /// of such a struct lowers to the Prelude-owned `JetColumnList<S>` over THE
@@ -980,6 +981,9 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "NullBackend" => Some("JetNullBackend"),
         "TUIBackend" => Some("JetTuiBackend"),
         "GtkBackend" => Some("JetGtkBackend"),
+        // D-WEBAPP1=D: these graph carriers have no source record layout.
+        "App" => Some("JetApp"),
+        "WebPage" => Some("JetWebPage"),
         // D-AUTH1=A: authentication carriers are Prelude-root values.
         "Session" => Some("JetAuthSession"),
         "Auth" => Some("JetAuthApp"),
@@ -6702,9 +6706,8 @@ pub(crate) fn build_cx_items(
             // D-QUAL2: a tag erases — it contributes no codegen names.
             Item::Tag(_) => {}
             // D-MIGRATE4: collect migration blocks per type (source order = the
-            // chain, oldest step first) so `emit_struct_migration` can emit the
-            // runtime step functions + chain-walker for decodable
-            // `#PublishedSchema` types. Types without blocks get nothing.
+            // chain, oldest step first) for the TIR codec migration plans of
+            // decodable `#PublishedSchema` types. Types without blocks get nothing.
             Item::Migration(m) => {
                 cx.migrations
                     .entry(m.type_name.clone())

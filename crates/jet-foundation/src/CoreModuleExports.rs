@@ -25,7 +25,7 @@ pub enum CoreLeafKind {
 
 // BEGIN GENERATED CORE DECLARATIONS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: bd5efa25c7cd4bd76a8faefbbc9d13170034ded020577d4dff92acf18553de77
+// Source SHA-256: 7a4de14f86cf7e85b48eaca802ca0d4b77b93bb2f0a7756052f1ec77143b6151
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreModuleDeclaration {
     pub module: &'static str,
@@ -845,7 +845,7 @@ pub const CORE_SOURCE_MODULES: &[CoreSourceModule] = &[
     CoreSourceModule { module: "core.ui.host.accessibility", alias: "core_core_ui_host_accessibility", path: "Core/ui/host/accessibility.jet", owned_members: &["attach", "project"] },
     CoreSourceModule { module: "core.units", alias: "core_units", path: "Core/units/units.jet", owned_members: &["from", "abs", "add", "bytes_of", "convert", "div", "equals", "grams", "is_zero", "kibibytes", "kilograms", "kilometers", "meters", "milliseconds", "mul", "ratio", "scale", "seconds", "show", "si", "sub", "to_si", "metres", "kilometres"] },
     CoreSourceModule { module: "core.watcher", alias: "core_core_watcher", path: "Core/watcher/watcher.jet", owned_members: &["add", "contains", "files", "kind", "len", "port", "process_pid", "remove", "set", "target", "recursive", "debounce", "poll", "events", "cancel", "is_active", "summary", "drain"] },
-    CoreSourceModule { module: "core.web", alias: "core_core_web", path: "Core/web/web.jet", owned_members: &["app", "auth", "auth_oauth", "auth_routes", "auth_show", "form", "invalidate", "live", "live_get", "live_show", "live_stats", "on", "openapi", "page", "signal_push", "storage", "subscribe", "sync", "transact_invalidate", "value"] },
+    CoreSourceModule { module: "core.web", alias: "core_core_web", path: "Core/web/web.jet", owned_members: &["auth", "auth_oauth", "auth_routes", "auth_show", "invalidate", "live", "live_get", "live_show", "live_stats", "on", "openapi", "signal_push", "storage", "subscribe", "sync", "transact_invalidate", "value"] },
     CoreSourceModule { module: "core.web.browser", alias: "core_core_web_browser", path: "Core/web/browser.jet", owned_members: &["begin_named", "config", "config_from_env", "connect", "connect_browser_profile", "fixture_context", "fixture_page", "fixture_source", "generate_source", "locked", "make_profile", "profile", "report_add_case", "report_exit_code", "report_html", "report_json", "report_new", "report_text", "selected", "server_logs", "server_start", "server_stop", "server_url", "timeout", "watch_changed", "write_report"] },
     CoreSourceModule { module: "core.web.devserver", alias: "core_core_web_devserver", path: "Core/web/devserver.jet", owned_members: &["app", "for_app", "is_local", "url"] },
     CoreSourceModule { module: "core.web.forms", alias: "core_core_web_forms", path: "Core/web/forms.jet", owned_members: &["action_error", "action_field_error", "action_form_error", "blur", "field", "html", "input", "input_exclude", "input_group", "input_rename", "input_replace", "new", "no_script", "set", "show", "submit", "typed", "typed_blur", "typed_cancel", "typed_decode_post", "typed_errors", "typed_focus", "typed_html", "typed_lifecycle", "typed_no_script", "typed_post", "typed_select_field", "typed_set", "typed_set_action", "typed_set_async_validator", "typed_show", "typed_state", "typed_submission_cancel", "typed_submission_wait", "typed_submit", "typed_submit_async", "typed_validate", "typed_validate_async", "typed_validate_field", "typed_validation_cancel", "typed_validation_render", "typed_validation_wait", "validate", "validate_async"] },

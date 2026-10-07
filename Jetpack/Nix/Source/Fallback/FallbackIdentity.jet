@@ -54,7 +54,9 @@ pub struct NixFallbackIdentity {
         tree :: json.parse(value) ?? return Err(NixError.Fallback("invalid Nix fallback provenance: {err}"))
         fields := [String: DataTree]{}
         if tree == {
-            .Object(entries) -> fields = entries
+            .Object(entries) -> {
+                loop pair in entries -> fields[pair.key] = pair.value
+            }
             else -> return Err(NixError.Fallback("Nix fallback provenance must be a JSON object"))
         }
         if fields.len() != NIX_FALLBACK_PROVENANCE_FIELDS.len() || !nix_fallback_has_every_field(fields) {

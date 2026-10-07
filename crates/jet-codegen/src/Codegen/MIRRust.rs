@@ -1793,9 +1793,6 @@ impl FunctionIndex {
                                 }
                             }
                         }
-                        MirOperation::Semantic(MirSemanticOp::DataEntriesToMap { local, .. }) => {
-                            escaped_locals.insert(*local);
-                        }
                         _ => {}
                     }
                     let args: &[MirCallArg] = match &instruction.operation {
@@ -18881,9 +18878,6 @@ impl<'a> RustEmitter<'a> {
                     }) => {
                         rejected.extend(place_local(*place).map(|(local, _)| local));
                     }
-                    MirOperation::Semantic(MirSemanticOp::DataEntriesToMap { local, .. }) => {
-                        rejected.insert(*local);
-                    }
                     _ => {}
                 }
             }
@@ -25886,6 +25880,15 @@ impl<'a> RustEmitter<'a> {
                         location.line
                     );
                 }
+                MirTypeKind::IntN { .. } => {
+                    let value = self.value_owned(index);
+                    let file = self.source_file_path(location.file);
+                    let root = &self.config.root_prefix;
+                    return format!(
+                        "i64::try_from({value}).unwrap_or_else(|_| {root}jet_arithmetic_stop({file:?}, {}u32, \"index exceeds host range\"))",
+                        location.line
+                    );
+                }
                 _ => return self.value_owned(index),
             }
         }
@@ -27260,19 +27263,7 @@ impl<'a> RustEmitter<'a> {
                 if index != 0 {
                     panic!("MIR single variant payload index out of range")
                 }
-                let payload = if variant == "Object"
-                    && crate::Codegen::core_rust_type_name(&self.type_def(effective_owner).key)
-                        == Some("DataTree")
-                    && matches!(
-                        self.value_type(function, result.expect("MIR enum payload result"))
-                            .kind(),
-                        MirTypeKind::Map { .. }
-                    ) {
-                    format!(
-                        "{}jet_data_entries_to_map(payload.clone())",
-                        self.config.root_prefix
-                    )
-                } else if let Some(widened) = native
+                let payload = if let Some(widened) = native
                     .then(|| self.native_int_result("payload.clone()", payload_type))
                     .flatten()
                 {
@@ -29621,9 +29612,6 @@ impl<'a> RustEmitter<'a> {
         location: Option<MirPanicLoc>,
     ) -> String {
         match operation {
-            MirSemanticOp::DataEntriesToMap { call, local } => {
-                self.prelude_call_args(*call, &[self.local_read(function, *local)])
-            }
             MirSemanticOp::MathBuiltin { call, args, .. }
             | MirSemanticOp::PreciseBuiltin { call, args, .. } => self.prelude_values(*call, args),
             MirSemanticOp::Print { call, value } => {

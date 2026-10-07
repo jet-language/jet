@@ -31,7 +31,7 @@ pub fn load(text: String) -> DataTree EncodingError! { parse(text) }
 pub fn to_string(value: DataTree) -> String Never! { render_toml(value) }
 
 fn parse_toml(text: String) -> DataTree EncodingError! {
-    p := TOMLParser{bytes: text.bytes(), index: 0, line: 1, column: 1, root: [String:DataTree]{}}
+    p := TOMLParser{bytes: text.bytes(), index: 0, line: 1, column: 1, root: [(key: String, value: DataTree)]{}}
     _ :: &p.document() ?? return Err(p.fail("TOML document could not be parsed"))
     Ok(DataTree.Object(p.root))
 }
@@ -41,7 +41,7 @@ struct TOMLParser {
     index: Int
     line: Int
     column: Int
-    root: [String:DataTree]
+    root: [(key: String, value: DataTree)]
 }
 
 impl TOMLParser {
@@ -316,7 +316,10 @@ impl TOMLParser {
 
     fn parse_inline_table(&self) -> DataTree EncodingError! {
         _ :: &self.bump()
-        entries := [String:DataTree]{}
+        // D-DATATREE-ORDER1=A: keys keep arrival order; the temporary key set
+        // rejects a repeated name and is freed with the table.
+        entries := [(key: String, value: DataTree)]{}
+        seen := [String: Bool]{}
         loop {
             &self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
             b0 :: self.peek() ?? (U8{0})
@@ -325,11 +328,12 @@ impl TOMLParser {
                 return Ok(DataTree.Object(entries))
             }
             key :: &self.parse_key()
-            if entries.has_key(key) -> return Err(self.fail("duplicate key in TOML inline table"))
+            if seen.has_key(key) -> return Err(self.fail("duplicate key in TOML inline table"))
+            _ :: &seen.add(key, true)
             eq :: &self.bump() ?? return Err(self.fail("expected '='"))
             if eq != (U8{61}) -> return Err(self.fail("expected '='"))
             value :: &self.parse_value()
-            _ :: &entries.add(key, value)
+            &entries.push((key: key, value: value))
             &self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
             b :: self.peek() ?? return Err(self.fail("unterminated TOML inline table"))
             if b == (U8{125}) {
@@ -510,18 +514,37 @@ fn radix_digit(b: U8, base: Int) -> Int Never! {
     d
 }
 
-fn ensure_table_path(entries: [String:DataTree], path: [String], i: Int) -> [String:DataTree] Never! {
+// D-DATATREE-ORDER1=A: a TOML table is its keys in arrival order.
+fn table_get(entries: [(key: String, value: DataTree)], key: String) -> DataTree? {
+    loop pair in entries {
+        if pair.key == key -> return Val(pair.value)
+    }
+    None
+}
+
+// Bind `key` to `value`: an existing key keeps its place, a new key goes last.
+fn table_set(entries: &[(key: String, value: DataTree)], key: String, value: DataTree) Never! {
+    loop i in 0..<entries.len() {
+        if entries[i].key == key {
+            entries[i] = (key: key, value: value)
+            return
+        }
+    }
+    &entries.push((key: key, value: value))
+}
+
+fn ensure_table_path(entries: [(key: String, value: DataTree)], path: [String], i: Int) -> [(key: String, value: DataTree)] Never! {
     if i >= path.len() -> return ~entries
     out := ~entries
     key :: path[i]
     if i == path.len() - 1 {
-        if out.get(key) == .None -> _ :: &out.add(key, DataTree.Object([String:DataTree]{}))
+        if table_get(out, key) == .None -> table_set(&out, key, DataTree.Object([(key: String, value: DataTree)]{}))
         return out
     }
-    child := [String:DataTree]{}
+    child := [(key: String, value: DataTree)]{}
     existing_array := false
     array_items := [DataTree]{}
-    if out.get(key) == {
+    if table_get(out, key) == {
         .Val(existing) -> {
             if existing == {
                 .Object(obj) -> child = obj
@@ -548,41 +571,41 @@ fn ensure_table_path(entries: [String:DataTree], path: [String], i: Int) -> [Str
         } else {
             array_items[array_items.len() - 1] = DataTree.Object(nested)
         }
-        _ :: &out.add(key, DataTree.Array(array_items))
+        table_set(&out, key, DataTree.Array(array_items))
     } else {
-        _ :: &out.add(key, DataTree.Object(nested))
+        table_set(&out, key, DataTree.Object(nested))
     }
     out
 }
 
-fn ensure_array_path(entries: [String:DataTree], path: [String], i: Int) -> [String:DataTree] Never! {
+fn ensure_array_path(entries: [(key: String, value: DataTree)], path: [String], i: Int) -> [(key: String, value: DataTree)] Never! {
     if i >= path.len() -> return ~entries
     out := ~entries
     key :: path[i]
     if i == path.len() - 1 {
-        item := DataTree.Object([String:DataTree]{})
-        if out.get(key) == {
+        item := DataTree.Object([(key: String, value: DataTree)]{})
+        if table_get(out, key) == {
             .Val(existing) -> {
                 if existing == {
                     .Array(items) -> {
                         mutable := ~items
                         &mutable.push(item)
-                        _ :: &out.add(key, DataTree.Array(mutable))
+                        table_set(&out, key, DataTree.Array(mutable))
                     }
                     .Object(obj) -> {
-                        _ :: &out.add(key, DataTree.Array([DataTree]{DataTree.Object(obj), item}))
+                        table_set(&out, key, DataTree.Array([DataTree]{DataTree.Object(obj), item}))
                     }
-                    else -> _ :: &out.add(key, DataTree.Array([DataTree]{item}))
+                    else -> table_set(&out, key, DataTree.Array([DataTree]{item}))
                 }
             }
-            else -> _ :: &out.add(key, DataTree.Array([DataTree]{item}))
+            else -> table_set(&out, key, DataTree.Array([DataTree]{item}))
         }
         return out
     }
-    child := [String:DataTree]{}
+    child := [(key: String, value: DataTree)]{}
     existing_array := false
     array_items := [DataTree]{}
-    if out.get(key) == {
+    if table_get(out, key) == {
         .Val(existing) -> {
             if existing == {
                 .Object(obj) -> child = obj
@@ -609,18 +632,18 @@ fn ensure_array_path(entries: [String:DataTree], path: [String], i: Int) -> [Str
         } else {
             array_items[array_items.len() - 1] = DataTree.Object(nested)
         }
-        _ :: &out.add(key, DataTree.Array(array_items))
+        table_set(&out, key, DataTree.Array(array_items))
     } else {
-        _ :: &out.add(key, DataTree.Object(nested))
+        table_set(&out, key, DataTree.Object(nested))
     }
     out
 }
 
-fn has_path(entries: [String:DataTree], path: [String], i: Int) -> Bool Never! {
+fn has_path(entries: [(key: String, value: DataTree)], path: [String], i: Int) -> Bool Never! {
     if i >= path.len() -> return false
     key :: path[i]
-    if i == path.len() - 1 -> return entries.has_key(key)
-    child :: entries.get(key) ?? return false
+    if i == path.len() - 1 -> return table_get(entries, key) != None
+    child :: table_get(entries, key) ?? return false
     if child == {
         .Object(obj) -> return has_path(obj, path, i + 1)
         .Array(items) -> {
@@ -635,15 +658,15 @@ fn has_path(entries: [String:DataTree], path: [String], i: Int) -> Bool Never! {
     }
 }
 
-fn put_path(entries: [String:DataTree], path: [String], i: Int, value: DataTree) -> [String:DataTree] Never! {
+fn put_path(entries: [(key: String, value: DataTree)], path: [String], i: Int, value: DataTree) -> [(key: String, value: DataTree)] Never! {
     out := ~entries
     key :: path[i]
     if i == path.len() - 1 {
-        _ :: &out.add(key, value)
+        table_set(&out, key, value)
         return out
     }
-    child := [String:DataTree]{}
-    if out.get(key) == {
+    child := [(key: String, value: DataTree)]{}
+    if table_get(out, key) == {
         .Val(existing) -> {
             if existing == {
                 .Object(obj) -> child = obj
@@ -655,7 +678,7 @@ fn put_path(entries: [String:DataTree], path: [String], i: Int, value: DataTree)
                             .Object(obj) -> {
                                 nested :: put_path(obj, path, i + 1, value)
                                 mutable[last_index] = DataTree.Object(nested)
-                                _ :: &out.add(key, DataTree.Array(mutable))
+                                table_set(&out, key, DataTree.Array(mutable))
                                 return out
                             }
                             else -> { _ := 0 }
@@ -668,7 +691,7 @@ fn put_path(entries: [String:DataTree], path: [String], i: Int, value: DataTree)
         else -> { _ := 0 }
     }
     nested :: put_path(child, path, i + 1, value)
-    _ :: &out.add(key, DataTree.Object(nested))
+    table_set(&out, key, DataTree.Object(nested))
     out
 }
 
@@ -679,7 +702,7 @@ fn render_toml(value: DataTree) -> String {
     }
 }
 
-fn render_toml_table(entries: [String:DataTree], prefix: String) -> String {
+fn render_toml_table(entries: [(key: String, value: DataTree)], prefix: String) -> String {
     out := ""
     loop pair in entries {
         if pair.value == {

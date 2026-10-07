@@ -1695,6 +1695,12 @@ fn lower_demanded_generic_methods(
             } else if !method.type_params.is_empty() {
                 continue;
             }
+            // Imported generic callers revisit the demand worklist. A concrete
+            // method is owned by its instance key, not by the pass that found it.
+            let instance_key = function_semantic_key(&cx.module_identity, &key);
+            if funcs.iter().any(|function| function.key == instance_key) {
+                continue;
+            }
             let mut specialized = crate::Sema::specialize_function_types(method.clone(), &subst);
             let residual_type_params: std::collections::HashSet<String> = specialized
                 .type_params
@@ -1755,7 +1761,10 @@ fn lower_demanded_generic_methods(
                 )
             };
             cx.current_type_params.replace(previous_type_params);
-            lowered.key = function_semantic_key(&lowered.module, &key);
+            if let TFuncKind::TraitMethod { owner_type, .. } = &mut lowered.kind {
+                *owner_type = local_module_type(&cx.module_identity, &owner_ty);
+            }
+            lowered.key = instance_key;
             set_lowered_method_name(&mut lowered, || key.clone());
             // Nested SerdeEncode/DataTreeDecode inside this body may demand more.
             collect_serde_codec_demands(std::slice::from_ref(&lowered), &mut pending);
@@ -8133,7 +8142,6 @@ pub enum TPatternPosition {
     OptionBinding,
     Arm,
     VariantPath,
-    DataEntries { temp: String },
 }
 
 impl TPattern {
@@ -11884,9 +11892,6 @@ pub enum TExprKind {
     /// resolves the Rust static name; other engines look the value up by the
     /// same Jet name in their own const table.
     ConstRef(String),
-    /// D-ENC-DYN1: collect the ordered `Data` object entries a
-    /// `TPatternPosition::DataEntries` test captured into the user-visible map.
-    DataEntriesToMap(TLocal),
     /// Call to a plain top-level function. Each arg carries its emit decisions.
     Call {
         name: String,

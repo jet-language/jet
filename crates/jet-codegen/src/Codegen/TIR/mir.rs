@@ -8914,25 +8914,6 @@ impl<'a> LowerCtx<'a> {
         Ok(())
     }
 
-    pub(super) fn bind_data_entries_temp(
-        &mut self,
-        local: &TLocal,
-        owner: MirTypeId,
-        variant: &str,
-    ) -> Result<MirLocalId, LowerError> {
-        if let Some(local_id) = self
-            .locals
-            .iter()
-            .rfind(|candidate| candidate.name == local.name)
-            .map(|candidate| candidate.id)
-        {
-            return Ok(local_id);
-        }
-        let payload_ty = self.variant_payload_type(owner, variant, 0)?;
-        self.bind_local(local, payload_ty, true, false, true)?;
-        self.local_id_for(local)
-    }
-
     pub(super) fn bind_named_local(
         &mut self,
         name: &str,
@@ -8951,27 +8932,6 @@ impl<'a> LowerCtx<'a> {
         pattern: &MirPattern,
     ) -> Result<MirValueId, LowerError> {
         let subject_ty = self.value_source_type(subject)?;
-        // Object patterns bind their ordered payload to `temp`; the public
-        // map binding is a later then-body declaration.  Suppress the generic
-        // variant binder here so both writes do not alias one local place with
-        // incompatible list/map types.
-        let shape = match &pattern.position {
-            MirPatternPosition::DataEntries { .. } => match &pattern.shape {
-                MirPatternShape::Variant {
-                    variant,
-                    leading_dot,
-                    span,
-                    ..
-                } => MirPatternShape::Variant {
-                    variant: variant.clone(),
-                    bindings: vec![MirPatternBinding::Wildcard],
-                    leading_dot: *leading_dot,
-                    span: *span,
-                },
-                _ => pattern.shape.clone(),
-            },
-            _ => pattern.shape.clone(),
-        };
         // A mutable binding owns its copy; only an immutable one may alias a
         // read window.
         let window = self
@@ -8979,41 +8939,15 @@ impl<'a> LowerCtx<'a> {
             .get(&subject)
             .copied()
             .filter(|window| !(pattern.mutable && self.read_windows.contains(window)));
-        let condition = self.lower_pattern_shape_condition(
+        self.lower_pattern_shape_condition(
             subject,
             &subject_ty,
             pattern.owner,
-            &shape,
+            &pattern.shape,
             pattern.mutable,
             false,
             window,
-        )?;
-        if let MirPatternPosition::DataEntries { temp } = &pattern.position {
-            if let MirPatternShape::Variant { variant, .. } = &pattern.shape {
-                let owner = pattern.owner.ok_or_else(|| {
-                    self.error(
-                        self.span(),
-                        "checked data-entry pattern is missing its owner",
-                    )
-                })?;
-                return self.lower_guarded_pattern(condition, |ctx| {
-                    let payload_ty = ctx.variant_payload_type(owner, variant, 0)?;
-                    let payload = ctx.emit_checked(
-                        "pattern",
-                        Some(&payload_ty),
-                        MirOperation::EnumPayload {
-                            subject,
-                            owner,
-                            variant: variant.clone(),
-                            index: 0,
-                        },
-                    )?;
-                    ctx.write_local_id(*temp, payload)?;
-                    Ok(condition)
-                });
-            }
-        }
-        Ok(condition)
+        )
     }
 
     fn lower_pattern_shape_condition(

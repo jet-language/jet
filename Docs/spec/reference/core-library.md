@@ -1944,6 +1944,11 @@ configured element limit rather than silently moving them to another device.
 backend values. A scene owns its name, frame limit, and tick callback; a replay
 records a path; and the headless backend produces a deterministic frame
 transcript without requiring a renderer or audio device.
+`Scene`, `Replay`, and `Backend` are opaque compiler-owned handles. Their
+registered constructors preserve runtime identity and state; they do not expose
+source-record construction as an alternate scene, replay, or backend model.
+Game-control callbacks and command relays use the shared native devtools
+boundary; the checked command DTOs and queues remain a separate control layer.
 
 ```jet
 use core.game as game
@@ -2165,10 +2170,14 @@ are `MONDAY :: 0` through `SUNDAY :: 6`.
 ### `core.encoding` — bounded value codecs
 
 `core.encoding` converts complete values to and from `DataTree`. Objects retain
-insertion order, integers and floating-point numbers remain distinct, and
+arrival order: the `Object` payload is the ordered pair list
+`[(key: String, value: DataTree)]` (D-DATATREE-ORDER1), and a repeated name is a
+`Syntax` error except under `json.parse_allow_duplicates`. Integers and
+floating-point numbers remain distinct, and
 malformed input returns a typed `EncodingError`. The whole-value codecs are
 pure; readers and writers expose the same boundaries incrementally. The
-shared codec shape and value tree follow D-ENC1, D-JSONVERB1, and D-SERDE13.
+shared codec shape and value tree follow D-ENC1, D-JSONVERB1, D-SERDE13, and
+D-DATATREE-ORDER1.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
@@ -2748,6 +2757,10 @@ The budget is an execution bound, not a promise of linear-time matching. The
 engine does not expose named capture groups: `Match.groups` is a positional
 list. Use the compiled `Pattern`/`Regex` values when the same expression is
 used repeatedly, and call `escape` for literal user input.
+Checked `Regex{"…"}` literals and inferred-head `.{"…"}` arguments produce the
+same source-owned `Regex` as `compile`; they do not use a separate native regex
+carrier or engine. The compiler validates the complete literal before lowering
+it through the source `compile` function and retaining its checked success value.
 `Match.start` and `Match.end` are UTF-8 byte offsets, and `Match.text` contains
 the entire match. `Match.groups` contains the captured groups in positional
 order, excluding the whole match; use `expand` for numbered substitution.
@@ -2909,12 +2922,15 @@ The event family is a typed Core value with no additional event syntax (`D-EVENT
 `App` owns routes, live state, sessions, and storage adapters; the browser
 surface is represented by typed effects rather than an assumed browser DOM.
 The module source is [`Core/web/web.jet`](../../../Core/web/web.jet).
+`App` and `WebPage` are opaque compiler-owned carriers, not constructible source
+records. The registered constructors and App builder methods retain the checked
+route graph and its typed handlers across both compiler implementations.
 
 | Signature | Result | Description |
 |---|---|---|
 | `app() -> App` | app | Create the default application carrier. |
 | `page(title: String, body: String) -> WebPage` | page | Build a server-rendered page. |
-| `form(input: WebFormInput, action: String) -> WebFormTyped !WebFormError` | form | Convert form input through the typed form boundary. |
+| `form(Model, action: handler) -> WebFormTyped` | form | Derive typed inputs and the named action contract at compile time (D-WEBFORM1=A). |
 | `on(path: String, title: String, handler: fn(WebEvent)) -[Browser]>` | — | Register a browser-facing handler. |
 | `openapi(router: HTTPRouter) -> String` | text | Render the router's OpenAPI description. |
 | `value(key: String) -[Browser]> String` | text | Read a browser value. |
@@ -2934,6 +2950,9 @@ The module source is [`Core/web/web.jet`](../../../Core/web/web.jet).
 `core.web` delegates HTTP transport to `core.http`; route handlers should use
 that typed request/response contract rather than opening sockets directly.
 Storage adapters are named below because they are separate built modules.
+The high-level `web.form` value keeps its compiler-owned typed-model identity
+and `.set`/`.render` interface. The source `core.web.forms.typed` API remains
+separate for callers that explicitly supply `WebFormInput` and an action name.
 
 ### `core.web.storage` — browser storage adapters
 
