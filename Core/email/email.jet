@@ -77,7 +77,10 @@ fn decode_dkim(text: Secret) -> Secret EmailError! {
     #Unsafe("DKIM decoding: borrow encoded bytes and keep partial output in a zeroizing Secret") {
         length :: text.bytes.len()
         if length == 0 || length %% 4 != 0 -> return Err(configuration_error(invalid))
-        output := Secret.from_bytes([U8]{})
+        // Allocate only non-secret zeros; decoded bytes never enter a buffer
+        // whose ordinary List growth could free them without zeroizing.
+        output := Secret.from_bytes(loop index in 0..<32 -> U8{0})
+        written := 0
         blocks :: length /% 4
         loop index in 0..<blocks {
             offset :: index * 4
@@ -90,11 +93,18 @@ fn decode_dkim(text: Secret) -> Secret EmailError! {
             c :: if pad2 -> 0 else -> base64_value(text.bytes[offset + 2]) ?? return Err(configuration_error(invalid))
             d :: if pad3 -> 0 else -> base64_value(text.bytes[offset + 3]) ?? return Err(configuration_error(invalid))
             if (pads == 2 && (b & 15) != 0) || (pads == 1 && (c & 3) != 0) -> return Err(configuration_error(invalid))
-            &output.bytes.push(U8{((a << 2) | (b >> 4)) & 255})
-            if pads < 2 -> &output.bytes.push(U8{((b << 4) | (c >> 2)) & 255})
-            if pads == 0 -> &output.bytes.push(U8{((c << 6) | d) & 255})
+            if written < 32 -> output.bytes[written] = U8{((a << 2) | (b >> 4)) & 255}
+            written += 1
+            if pads < 2 {
+                if written < 32 -> output.bytes[written] = U8{((b << 4) | (c >> 2)) & 255}
+                written += 1
+            }
+            if pads == 0 {
+                if written < 32 -> output.bytes[written] = U8{((c << 6) | d) & 255}
+                written += 1
+            }
         }
-        if output.bytes.len() != 32 -> return Err(configuration_error("SMTP_DKIM_PRIVATE_KEY_BASE64 must decode to exactly 32 bytes"))
+        if written != 32 -> return Err(configuration_error("SMTP_DKIM_PRIVATE_KEY_BASE64 must decode to exactly 32 bytes"))
         return Ok(^output)
     }
 }
@@ -178,6 +188,13 @@ pub fn smtp_from_env() -[Env, Net]> Mailer EmailError! {
             assert_eq(decoded.bytes[index], U8{index})
         }
     }
+}
+
+#Test("DKIM invalid quartet after an oversized decoded prefix wins over length") {
+    // Eleven complete quartets decode to 33 bytes before the invalid tail.
+    encoded :: Secret.from_text("AAAA".repeat(11) + "AAA?")
+    decoded :: decode_dkim(encoded)
+    assert(decoded == .Err(EmailError.Configuration{operation: "smtp_from_env", server: None, code: None, reason: "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"}))
 }
 
 #Test("SMTP port grammar retains signed-i64 parsing boundaries") {

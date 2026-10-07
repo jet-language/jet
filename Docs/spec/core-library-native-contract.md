@@ -94,6 +94,13 @@ values and fail-closed policy in Jet; the OS CSPRNG is a host cell. The raw
 algorithm controls in `core.crypto.expert` remain an explicit audited door, not
 a hidden provider policy.
 
+`core.email` decodes DKIM key material into a fixed, zero-filled Secret buffer.
+It validates every encoded quartet before applying the final 32-byte length
+rule; a late alphabet or padding error still takes precedence over length.
+Borrowed Secret bytes may be read or written by index inside audited Core
+code, but their storage must never grow, shrink, or be freed through ordinary
+List operations without the Secret owner's zeroization.
+
 The `core.http.client` transport entries `get`, `post`, and `request` remain
 native rows. String-only source forwarders narrow the existing typed-URL
 contract and change the transport result's checked failure carrier; they are
@@ -115,10 +122,6 @@ generator. Its Jet value kernels retain explicit wrapping U64 transitions and
 the complete U128 product for Lemire bounded rejection; modulo-only selection
 is not equivalent. A zero word-width bound denotes the full signed-64 domain.
 Equal endpoints and rejected backwards intervals do not advance the state.
-Source module tests compare the kernels with the retained native capability,
-including rejection-heavy ranges and the full signed domain. These kernels
-alone do not establish admission of the source RNG carrier or its generic
-storage operations.
 
 `core.net.url.URL` is a source-owned record. Typed `URL{"…"}` heads validate
 their literal skeleton in sema, then call `core.net.url.literal` as an ordinary
