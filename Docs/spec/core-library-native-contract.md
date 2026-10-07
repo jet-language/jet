@@ -68,6 +68,12 @@ requires a host word; compile-time folding must not bypass that adaptation.
 Timer adapters marshal a checked `Duration` into scheduler milliseconds;
 interval payloads remain exact Jet `Int` values rather than host integers.
 
+A Jet read parameter does not imply a borrowed host argument. The checked
+native route's borrow mask decides whether the emitter lends the place or
+materializes an owned copy for the kernel. A read may be omitted only when
+every consumer actually reads its backing place; owned native arguments must
+not refer to an uninitialized SSA placeholder.
+
 An owned whole-value read through a `SharedGuard<T>` copies the payload using
 the checked clone contract; the guard keeps the original payload alive. Native
 pointer reads that duplicate field ownership cannot implement that operation.
