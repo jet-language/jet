@@ -60,11 +60,12 @@ fn jet_codegen_collection_closure_route(operation: TClosureOp, receiver: Type) -
     kind :: jet_codegen_closure_receiver_kind(receiver) ?? panic("checked closure operation has an unsupported receiver type")
     if operation == {
         .Map -> {
-            if kind == "list" -> return jet_codegen_closure_route_row("core.list", "map", "jet_list_map", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
+            // #4566 slice 5: the eager list map kernels borrow their source.
+            if kind == "list" -> return jet_codegen_closure_route_row("core.list", "map", "jet_list_map", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
             if kind == "iter" -> return jet_codegen_closure_route_row("core.iter", "map", "jet_iter_map", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
         }
         .MapMut -> {
-            if kind == "list" -> return jet_codegen_closure_route_row("core.list", "map_mut", "jet_list_map_mut", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
+            if kind == "list" -> return jet_codegen_closure_route_row("core.list", "map_mut", "jet_list_map_mut", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
             if kind == "iter" -> return jet_codegen_closure_route_row("core.iter", "map_mut", "jet_iter_map_mut", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
         }
         .TryMap -> {

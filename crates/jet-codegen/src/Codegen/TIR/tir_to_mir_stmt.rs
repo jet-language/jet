@@ -1939,10 +1939,18 @@ fn read_list_walk(
     if method_kind.is_some() || step.is_some() || by_value || columnar {
         return Ok(None);
     }
-    let Type::List(element) = collection.ty.without_user_tags() else {
-        return Ok(None);
+    // A fixed list walks the same way over its static length; one whose
+    // length is not a literal keeps the iterator.
+    let (element, fixed_len) = match collection.ty.without_user_tags() {
+        Type::List(element) => ((**element).clone(), None),
+        Type::FixedList { elem, len } => {
+            match len.literal_value().and_then(|len| i64::try_from(len).ok()) {
+                Some(len) => ((**elem).clone(), Some(len)),
+                None => return Ok(None),
+            }
+        }
+        _ => return Ok(None),
     };
-    let element = (**element).clone();
     if ctx.read_window_place(collection)?.is_none()
         && !(source_stable && ctx.stable_source_place(collection)?.is_some())
     {
@@ -1996,10 +2004,13 @@ fn read_list_walk(
         },
         end: TExpr {
             ty: Type::Int,
-            kind: TExprKind::BuiltinMethod {
-                recv: Box::new(list),
-                op: TBuiltinOp::LenList,
-                args: Vec::new(),
+            kind: match fixed_len {
+                Some(len) => TExprKind::IntLit(len, None),
+                None => TExprKind::BuiltinMethod {
+                    recv: Box::new(list),
+                    op: TBuiltinOp::LenList,
+                    args: Vec::new(),
+                },
             },
         },
         step: None,

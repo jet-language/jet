@@ -4149,12 +4149,22 @@ pub fn jet_int_from_radix(text: &str, radix: i64) -> Result<i64, String> {
     JetBigInt::from_radix(text, radix).map(jet_int_pack)
 }
 
+// Every index, range bound and host-width conversion goes through here, so the
+// inline payload answers without a call; only a spilled word leaves the
+// caller (#4566).
+#[inline(always)]
 pub fn jet_int_to_i64(value: i64) -> Option<i64> {
     if !jet_int_is_tagged(value) {
         Some(value)
     } else {
-        jet_int_big_value(value)?.try_i64()
+        jet_int_to_i64_slow(value)
     }
+}
+
+#[cold]
+#[inline(never)]
+fn jet_int_to_i64_slow(value: i64) -> Option<i64> {
+    jet_int_big_value(value)?.try_i64()
 }
 
 pub fn jet_int_to_i128(value: i64) -> Option<i128> {
@@ -4893,6 +4903,80 @@ pub(crate) fn jet_int_owned_from_raw_result(value: i64) -> jet_foundation::Numer
     unsafe { jet_foundation::Numeric::JetInt::from_raw_owned(value) }
 }
 
+/// #4566: exact-Int storage (`[Int#N]`, `[Int]`) copied and released in
+/// bulk. One vectorised scan (`JetInt::all_inline`) finds whether any
+/// element owns a node; when none does, the copy is a `memcpy` and the
+/// release frees only the buffer. Otherwise each element clones or drops as
+/// usual, so the meaning never changes.
+pub(crate) trait JetIntBulk: Sized {
+    fn jet_int_bulk_clone(&self) -> Self;
+    fn jet_int_bulk_drop(self);
+}
+
+impl<const N: usize> JetIntBulk for [jet_foundation::Numeric::JetInt; N] {
+    #[inline(always)]
+    fn jet_int_bulk_clone(&self) -> Self {
+        if jet_foundation::Numeric::JetInt::all_inline(self) {
+            // SAFETY: no element owns a node, so the bitwise copy is a
+            // second owner of nothing.
+            unsafe { std::ptr::read(self) }
+        } else {
+            self.clone()
+        }
+    }
+
+    #[inline(always)]
+    fn jet_int_bulk_drop(self) {
+        if jet_foundation::Numeric::JetInt::all_inline(&self) {
+            std::mem::forget(self);
+        } else {
+            drop(self);
+        }
+    }
+}
+
+impl JetIntBulk for Vec<jet_foundation::Numeric::JetInt> {
+    #[inline]
+    fn jet_int_bulk_clone(&self) -> Self {
+        if !jet_foundation::Numeric::JetInt::all_inline(self) {
+            return self.clone();
+        }
+        let mut copy = Vec::with_capacity(self.len());
+        // SAFETY: the copy has room for every element, and no element owns a
+        // node, so the bitwise copies own nothing.
+        unsafe {
+            std::ptr::copy_nonoverlapping(self.as_ptr(), copy.as_mut_ptr(), self.len());
+            copy.set_len(self.len());
+        }
+        copy
+    }
+
+    #[inline]
+    fn jet_int_bulk_drop(mut self) {
+        if jet_foundation::Numeric::JetInt::all_inline(&self) {
+            // SAFETY: no element owns a node, so forgetting them leaks
+            // nothing; dropping the empty vector frees the buffer.
+            unsafe { self.set_len(0) };
+        }
+        drop(self);
+    }
+}
+
+/// #4566: `xs.clear()` on `[Int]` storage. One vectorised scan
+/// (`JetInt::all_inline`) finds whether any element owns a node; when none
+/// does, the elements are forgotten (they own nothing) and the buffer stays.
+/// Otherwise each element drops as usual, so the meaning never changes.
+#[inline]
+pub(crate) fn jet_int_list_clear(list: &mut Vec<jet_foundation::Numeric::JetInt>) {
+    if jet_foundation::Numeric::JetInt::all_inline(list) {
+        // SAFETY: length 0 is within capacity, and no element owns a node,
+        // so forgetting them leaks nothing.
+        unsafe { list.set_len(0) };
+    } else {
+        list.clear();
+    }
+}
+
 #[inline(always)]
 fn jet_int_owned_raw(value: &jet_foundation::Numeric::JetInt) -> i64 {
     value.to_raw()
@@ -4959,6 +5043,7 @@ pub fn jet_int_owned_from_radix(
         .map(jet_int_owned_from_raw_result)
 }
 
+#[inline(always)]
 pub fn jet_int_owned_to_i64(
     value: &jet_foundation::Numeric::JetInt,
 ) -> Result<i64, String> {

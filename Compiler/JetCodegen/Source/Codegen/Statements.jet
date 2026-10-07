@@ -105,6 +105,7 @@ use jet_foundation.[
     Type,
     TypeTupleField,
     core_call,
+    measure_literal_value,
     mir_field_id,
     mir_source_file_id,
     mir_type_identity_key,
@@ -973,24 +974,35 @@ fn jet_codegen_for_in_tuple_field_id(builder: JetCodegenBuilder, ty: Type, membe
 // as `index`. The parameter cannot change while the loop runs, so every alias
 // reads exactly what the copied item would hold. #4318 §4: a stable source
 // (sema proved the body never mentions its root) walks the same way when it is
-// rooted at a local or any parameter. False (nothing emitted) when
-// `collection` is not such a list. A columnar list (D-SOA1) stores one column
-// per field, so its slots are not places an alias can name; the caller keeps
-// the gathered-record iteration for it.
+// rooted at a local or any parameter. A fixed list walks over its literal
+// length; one whose length is not a literal keeps the iterator. False
+// (nothing emitted) when `collection` is not such a sequence. A columnar list
+// (D-SOA1) stores one column per field, so its slots are not places an alias
+// can name; the caller keeps the gathered-record iteration for it.
 // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs::read_list_walk
 fn jet_codegen_lower_read_list_walk(builder: &JetCodegenBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: TExpr, source_stable: Bool, body: [TStmt], span: Span) -> Bool {
     listed := Type?{None}
-    if jet_codegen_builtin_untag(collection.ty) == .List(inner) -> listed = Val(inner)
+    fixed_length := Int?{None}
+    if jet_codegen_builtin_untag(collection.ty) == {
+        .List(inner) -> listed = Val(inner)
+        .FixedList(inner, measure) -> {
+            fixed_length = measure_literal_value(measure)
+            if fixed_length != None -> listed = Val(inner)
+        }
+        else -> {}
+    }
     element :: listed ?? return false
     if jet_codegen_read_window_place(&builder, collection) == None && !(source_stable && jet_codegen_stable_source_place(&builder, collection) != None) -> return false
     // The walk reads the list's own slots, so a compiler copy of the source
     // (a share of a later-used local) is never made.
     list := collection
     if collection.kind == .Clone(inner, _) -> list = inner
-    length_expr := TExpr{ty: Type.Int, kind: TExprKind.BuiltinMethod{receiver: list, operation: TBuiltinOp.LenList, args: [TExpr]{}}, span: span, integer_bounds: None, cost: None}
     loop_scope_depth := builder.scope_depth
     jet_codegen_enter_lexical(&builder)
-    length := jet_codegen_lower_expr(&builder, length_expr)
+    length := if fixed_length == {
+        .Val(count) -> jet_codegen_emit_value(&builder, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: count, width: None, spelling: None}})
+        .None -> jet_codegen_lower_expr(&builder, TExpr{ty: Type.Int, kind: TExprKind.BuiltinMethod{receiver: list, operation: TBuiltinOp.LenList, args: [TExpr]{}}, span: span, integer_bounds: None, cost: None})
+    }
     index_local := if variable_two == None -> tir_user_local("read_walk_index_{span.start}", span) else -> variable
     item_local := variable_two ?? variable
     index_place := jet_codegen_bind_local(&builder, index_local, Type.Int, true, None, None, false)

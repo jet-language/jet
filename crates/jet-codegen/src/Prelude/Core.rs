@@ -2374,6 +2374,21 @@ fn jet_index_vec_set<T>(xs: &mut [T], i: i64, value: T, file: &str, line: u32) {
         .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()));
     xs[index] = value;
 }
+/// #4566: `jet_index_vec_set` into Int storage whose every element is an
+/// inline word (MIRRust `inline_int_storage`): the displaced element owns
+/// no node, so it is overwritten without a release.
+#[inline(always)]
+fn jet_index_int_set_inline(
+    xs: &mut [jet_foundation::Numeric::JetInt],
+    i: i64,
+    value: jet_foundation::Numeric::JetInt,
+    file: &str,
+    line: u32,
+) {
+    let index = jet_fixed_list_index(xs.len(), i, |index| index)
+        .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()));
+    std::mem::forget(std::mem::replace(&mut xs[index], value));
+}
 
 fn jet_unpack_vec<T: Clone>(xs: &[T], want: usize, i: usize, file: &str, line: u32) -> T {
     if xs.len() != want {
@@ -3314,10 +3329,14 @@ fn jet_list_concat<T: Clone>(left: &[T], right: &[T]) -> Vec<T> {
     out
 }
 fn jet_list_join<T: JetShow>(xs: &[T], separator: &String) -> String {
-    xs.iter()
-        .map(JetShow::jet_show)
-        .collect::<Vec<_>>()
-        .join(separator)
+    let mut out = String::new();
+    for (index, item) in xs.iter().enumerate() {
+        if index > 0 {
+            out.push_str(separator);
+        }
+        item.jet_show_into(&mut out);
+    }
+    out
 }
 fn jet_fixed_list_concat<
     T: Clone,
@@ -3338,8 +3357,23 @@ fn jet_fixed_list_concat<
     })
 }
 
+/// The scalar count of `s`: its bytes that start a scalar (every byte but a
+/// `0b10xx_xxxx` continuation byte). Each 64-byte block sums into one byte
+/// lane, a branch-free pass the host CPU's vector unit runs.
 fn jet_char_len(s: &String) -> i64 {
-    s.chars().count() as i64
+    let mut chunks = s.as_bytes().chunks_exact(64);
+    let mut count = 0_usize;
+    for chunk in &mut chunks {
+        let mut starts = 0_u8;
+        for &byte in chunk {
+            starts += u8::from((byte as i8) >= -0x40);
+        }
+        count += usize::from(starts);
+    }
+    for &byte in chunks.remainder() {
+        count += usize::from((byte as i8) >= -0x40);
+    }
+    count as i64
 }
 // Eager materialize of the same pieces as `jet_iter_string_split` (AOT `String.split`
 // emits the lazy helper; this Vec form remains for hosts that need a list handle).

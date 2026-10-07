@@ -133,6 +133,12 @@ pub(crate) mod collection_semantics {
     include!("../../../jet-codegen/src/Prelude/Core/SimdLanes.rs");
     include!("../../../jet-codegen/src/Prelude/Core/CollectionFailure.rs");
     include!("../../../jet-codegen/src/Prelude/Core/SortKernel.rs");
+    // #4566 slice 8: the vetted inline-list storage `Collections.rs` names
+    // as `jet_mem::JetInlineList` (AOT embeds it in its `jet_mem`).
+    #[allow(dead_code)]
+    mod jet_mem {
+        include!("../../../jet-codegen/src/Prelude/InlineList.rs");
+    }
     include!("../../../jet-codegen/src/Prelude/Core/Collections.rs");
 
     pub struct LoopListCursor<T> {
