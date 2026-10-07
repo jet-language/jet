@@ -144,6 +144,25 @@ the source. Keep one meaning across AOT, `jet run`, the interpreter, LSP,
 machine output, and web. Documentation and rendering changes must not mint a
 new diagnostic or change compiler semantics.
 
+### Cargo-free snapshot checks
+
+`node Tools/agent/test-corpora.mjs --jet <admitted-jet> --suite ui
+--filter tests/ui/<fixture> --results <external-results.json>` compares
+rendered errors with the checked snapshots without invoking Cargo. Use
+`--suite lint` for `tests/ui_lint/*.warn`. Discovery excludes `.fixed.jet`
+sources and follows directory `run.jet`, `main.jet`, and workspace entries.
+Fixtures and their canonical state are staged outside the checkout.
+
+Internal-API snapshots compare only the shared diagnostic renderer, without
+the CLI's summary/hint envelope. Fixtures marked `@check_cli` or another
+supported CLI directive compare the actual command output instead. Snapshots
+remain read-only. A missing snapshot is a failure; a directive requiring a
+typed internal fact or an unexposed compile mode is reported as `REFUSED` and
+fails the run. It is never replaced with a plain `check` invocation.
+
+These command-driven checks do not substitute for structured diagnostic
+span/edit tests, registry coverage, or source-region safety audits.
+
 ## Latency and runtime-query boundaries
 
 D-DEV3 is a wall-clock promise: a save gives diagnostic feedback in well under

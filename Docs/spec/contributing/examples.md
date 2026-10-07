@@ -41,3 +41,26 @@ output even when the program's values are unchanged.
 Use [`agent-engineering.md`](agent-engineering.md) for fixture and generated-
 artifact traps. Preserve the example's meaning; do not rewrite a snapshot only
 to hide a compiler or runtime regression.
+
+## Cargo-free stream checks
+
+Use `node Tools/agent/test-corpora.mjs --jet <admitted-jet> --suite golden
+--filter <source-path> --results <external-results.json>` for focused output
+checks without invoking Cargo. The runner discovers the same standalone files
+and project entries as the golden corpus, stages fixture state outside the
+checkout, builds through the selected CLI, and compares exact stdout, pinned
+stderr, and exit status. An `.err.out` requires exit 1 or 70; warning output
+never converts a failed process into a pass.
+
+`--cases <file>` selects exact canonical source paths or stems, one per line.
+`--list` reports discovery without running a compiler. Expected streams are
+read-only; intentional updates still require review against the example's
+meaning. A `REFUSED` result names missing fixture machinery and fails the run,
+rather than counting a skipped service, browser, foreign binder, or named-job
+case as passing.
+
+During reference-runner parity measurement, `--rust-audit` also checks the
+existing generated-Rust I1 contract using the canonical vetted-module
+registry. This transitional check is not a native safety proof. The native
+memory-safety gate and typed source-region audits remain independent
+requirements; output agreement cannot replace either one.
