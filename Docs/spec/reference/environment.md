@@ -72,6 +72,13 @@ non-negative `elapsed_ms` observations. Their expected files retain stdout
 from successful real executions; they do not substitute invented timings or
 normalize arbitrary numbers.
 
+The capabilities foundation golden builds its guest Component from canonical
+Jet source with the test's compiler before running the host. Its repository-
+relative authority root and guest paths are mirrored under disk-backed scratch;
+no checkout build artifact or precompiled canned guest can satisfy this probe.
+Missing or failed sandbox tools are reported as fixture-build failures, never
+as a successful skipped capability boundary.
+
 Canvas verification can receive explicit paths for its browser and driver
 processes:
 
