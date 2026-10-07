@@ -974,6 +974,15 @@ pub fn core_source_owns(module: &str, member: &str) -> bool {
     {
         return false;
     }
+    // These handles and operations share the runtime's ambient registry.
+    // Loading source vocabulary must not create a second record-only registry.
+    if matches!(module, "app" | "core.web")
+        && matches!(member,
+            "LiveQuery" | "live" | "live_get" | "live_show" | "live_stats"
+                | "subscribe" | "invalidate" | "transact_invalidate" | "signal_push" | "sync")
+    {
+        return false;
+    }
     core_source_module(module)
         .is_some_and(|source| source.owned_members.contains(&member))
 }
@@ -1067,6 +1076,17 @@ mod tests {
         ] {
             assert!(!core_source_owns_call("core.compiler", member, argc));
         }
+    }
+
+    #[test]
+    fn application_live_queries_keep_the_shared_registry_route() {
+        for module in ["app", "core.web"] {
+            for member in ["LiveQuery", "live", "live_get", "live_show", "live_stats",
+                "subscribe", "invalidate", "transact_invalidate", "signal_push", "sync"] {
+                assert!(!core_source_owns(module, member));
+            }
+        }
+        assert!(core_source_owns("app", "auth"));
     }
 
     /// Criterion #2: a brand-new Core module needs one data row, not a new

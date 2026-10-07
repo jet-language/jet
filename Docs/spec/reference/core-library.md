@@ -2948,6 +2948,11 @@ route graph and its typed handlers across both compiler implementations.
 | `signal_push(q: LiveQuery, payload: String) -> LiveQuery` | query | Push data and advance query generation. |
 | `sync(key: String, data: String) -> String` | text | Format a synchronized key/value update. |
 
+`app` and `core.web` live-query operations retain the same runtime-owned
+registry as database and data-loader consumers. `LiveQuery` is an opaque
+identity, not a source record snapshot; invalidation, generations, statistics,
+and sync-session publication always inspect or mutate that one registry.
+
 `core.web` delegates HTTP transport to `core.http`; route handlers should use
 that typed request/response contract rather than opening sockets directly.
 Storage adapters are named below because they are separate built modules.

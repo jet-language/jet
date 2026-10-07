@@ -241,11 +241,18 @@ pub fn sema_call_core_receiver_record(receiver_type: Type, member: String, actua
     Val(record)
 }
 
+// Process-wide handles are published by source, but their operations retain
+// the runtime registry identity shared by database and data-loader consumers.
+fn sema_call_core_keeps_provider(module_name: String, member: String) -> Bool Never! {
+    module_name == "core.compiler" || ((module_name == "app" || module_name == "core.web")
+        && [String]{"live", "live_get", "live_show", "live_stats", "subscribe", "invalidate", "transact_invalidate", "signal_push", "sync"}.contains(member))
+}
+
 // Source exports resolve as ordinary functions except compiler-owned CT
 // services: their source declarations publish types, not executable bodies.
 pub fn sema_call_core_resolve_route(environment: SemaScopeEnvironment, module_name: String, member: String, type_args: [Type], expected_type_arg_count: Int, infer_when_omitted: Bool, actual_arity: Int, span: Span, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     diagnostic_count := diagnostics.len()
-    source_identity :: if module_name == "core.compiler" -> None else -> sema_call_core_module_identity(environment, module_name)
+    source_identity :: if sema_call_core_keeps_provider(module_name, member) -> None else -> sema_call_core_module_identity(environment, module_name)
     source :: if source_identity == {
         .Val(identity) -> sema_call_core_source_target(environment, identity, member, type_args, span, &diagnostics)
         .None -> None
@@ -269,7 +276,7 @@ pub fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, sc
     // D-VERDICT-1321-1: `core.term` owns only the one-argument print, eprint
     // and progress wrappers; other arities keep the fixed Core route.
     variadic_term :: imported.module_name == "core.term" && (member == "print" || member == "eprint" || member == "progress") && actual_arity != 1
-    source :: if variadic_term || imported.module_name == "core.compiler" -> None else -> sema_call_core_source_target(environment, imported.module_identity, member, type_args, span, &diagnostics)
+    source :: if variadic_term || sema_call_core_keeps_provider(imported.module_name, member) -> None else -> sema_call_core_source_target(environment, imported.module_identity, member, type_args, span, &diagnostics)
     if source == {
         .Val(target) -> return Val(SemaCoreCallRoute.Source{target: target})
         .None -> {}

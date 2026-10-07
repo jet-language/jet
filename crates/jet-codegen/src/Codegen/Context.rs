@@ -1363,6 +1363,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-DBPOLICY-BIND1: the policy carrier is emitted by the shared
         // Sync/Core prelude and is re-exported from the generated crate root.
         "RowPolicy" => Some("JetRowPolicy"),
+        "LiveQuery" => Some("JetLiveQuery"),
         // D-DBDRIVER1: the tagged SQL parameter/column value + its error type.
         "DBValue" => Some("DBValue"),
         "DBError" => Some("DBError"),
