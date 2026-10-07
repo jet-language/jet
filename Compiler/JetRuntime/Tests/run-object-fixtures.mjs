@@ -26,7 +26,7 @@ if (mode === '--assemble') {
     if (entry < 0) throw Error('Global source witness lost its program entry');
     writeFileSync(join(out, 'global/Source/Fixture.jet'), global.slice(0, entry) + '\n' + read('Compiler/JetRuntime/Tests/FloatAbi.jet'));
     writeFileSync(join(out, 'global/exports.list'), 'native_global_store\nnative_global_load\nruntime_float_identity\n');
-    execFileSync(process.execPath, [join(repo, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), join(out, 'init'), '--assemble-only', '--tests'], { stdio: 'inherit' });
+    execFileSync(process.execPath, [join(repo, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), join(out, 'init'), '--assemble-only', '--test', 'Alloc'], { stdio: 'inherit' });
     let unit = readFileSync(join(out, 'init/unit.jet'), 'utf8');
     const runHead = 'fn run() {\n';
     if (unit.split(runHead).length !== 2) throw Error('allocator witness must have one entry');
