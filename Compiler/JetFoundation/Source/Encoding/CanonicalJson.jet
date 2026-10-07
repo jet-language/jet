@@ -44,7 +44,9 @@ pub fn canonical_json_bytes(value: CanonicalJSON) -> [U8] Never! {
 
 // Rust `CanonicalJson::sha256`.
 pub fn canonical_json_sha256(value: CanonicalJSON) -> String Never! {
-    mir_sha256_hex_bytes(mir_sha256_bytes(canonical_json_bytes(value)))
+    bytes :: canonical_json_bytes(value)
+    view :: bytes[0..<bytes.len()]
+    mir_sha256_hex_bytes(mir_sha256_bytes(view))
 }
 
 fn canonical_json_append(out: &[U8], text: String) Never! {

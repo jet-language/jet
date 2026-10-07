@@ -50,8 +50,7 @@ fn jetlib_test_digest(stamp: JetLibStamp, payload: [U8]) Err! {
     payload_view :: payload[0..<payload.len()]
     artifact :: JetLibArtifact{stamp: JetLibStamp.for_this_compiler([String]{}, pkg_test_jetlib_identity()), payload: payload_view}
     bytes :: artifact.encode_bytes()
-    input_view :: bytes[0..<bytes.len()]
-    decoded :: JetLibArtifact.decode_bytes(input_view, pkg_test_jetlib_identity().host_max, false) ?? panic("decode")
+    decoded :: JetLibArtifact.decode_bytes(bytes, pkg_test_jetlib_identity().host_max, false) ?? panic("decode")
     assert_eq(decoded.stamp, artifact.stamp)
     assert_eq(decoded.payload.len(), artifact.payload.len())
     loop i in 0..<payload.len() -> assert_eq(decoded.payload[i], artifact.payload[i])
@@ -62,8 +61,7 @@ fn jetlib_test_digest(stamp: JetLibStamp, payload: [U8]) Err! {
     artifact :: JetLibArtifact{stamp: JetLibStamp.for_this_compiler([String]{}, pkg_test_jetlib_identity()), payload: payload_view}
     bytes := artifact.encode_bytes()
     _ :: &bytes.pop() ?? panic("nonempty artifact")
-    input_view :: bytes[0..<bytes.len()]
-    if JetLibArtifact.decode_bytes(input_view, pkg_test_jetlib_identity().host_max, false) == {
+    if JetLibArtifact.decode_bytes(bytes, pkg_test_jetlib_identity().host_max, false) == {
         .Ok(_) -> panic("a truncated payload must be refused")
         .Err(error) -> assert(error.message.contains("payload declares"))
     }
@@ -172,8 +170,7 @@ fn jetlib_test_digest(stamp: JetLibStamp, payload: [U8]) Err! {
 }
 
 fn jetlib_test_error(bytes: [U8], loader: Bool, host_max: Int) -> String Never! {
-    view :: bytes[0..<bytes.len()]
-    if JetLibArtifact.decode_bytes(view, host_max, loader) == {
+    if JetLibArtifact.decode_bytes(bytes, host_max, loader) == {
         .Ok(_) -> panic("malformed artifact was accepted")
         .Err(error) -> error.message
     }
@@ -243,9 +240,8 @@ fn jetlib_test_wire_effects(stamp: JetLibStamp, effects: [String]) -> [U8] Never
 #Test("jetlib loader retains wire effect order while package dedups and sorts") {
     stamp :: JetLibStamp.for_this_compiler([String]{}, pkg_test_jetlib_identity())
     bytes :: jetlib_test_wire_effects(stamp, [String]{"Net.Z", "Env.A", "Net.Z"})
-    input_view :: bytes[0..<bytes.len()]
-    loader :: JetLibArtifact.decode_bytes(input_view, 4294967295, true) ?? panic("loader decode")
-    package :: JetLibArtifact.decode_bytes(input_view, 4294967295, false) ?? panic("package decode")
+    loader :: JetLibArtifact.decode_bytes(bytes, 4294967295, true) ?? panic("loader decode")
+    package :: JetLibArtifact.decode_bytes(bytes, 4294967295, false) ?? panic("package decode")
     assert_eq(loader.stamp.declared_effects, [String]{"Net.Z", "Env.A", "Net.Z"})
     assert_eq(package.stamp.declared_effects, [String]{"Env.A", "Net.Z"})
 }
@@ -254,8 +250,7 @@ fn jetlib_test_wire_effects(stamp: JetLibStamp, effects: [String]) -> [U8] Never
     effects := [String]{}
     loop _ in 0..<4096 -> &effects.push("FS")
     bytes :: jetlib_test_wire_effects(stamp, effects)
-    input_view :: bytes[0..<bytes.len()]
-    parsed :: JetLibArtifact.decode_bytes(input_view, 4294967295, false) ?? panic("4096 effects")
+    parsed :: JetLibArtifact.decode_bytes(bytes, 4294967295, false) ?? panic("4096 effects")
     assert_eq(parsed.stamp.declared_effects, [String]{"FS"})
     &effects.push("FS")
     bytes2 :: jetlib_test_wire_effects(stamp, effects)

@@ -260,8 +260,9 @@ pub struct JetLibStamp {
     }
 }
 
-// Rust Artifact encode/decode:175–202. Retain original input owner and extent;
-// no payload to_list/to_vec conversion. host_max is actual target usize::MAX.
+// Rust Artifact encode/decode:175–202. The payload is a View of the original
+// input owner and extent; no payload to_list/to_vec conversion. host_max is
+// actual target usize::MAX.
 pub struct JetLibArtifact {
     pub stamp: JetLibStamp
     pub payload: View<U8>
@@ -272,8 +273,9 @@ pub struct JetLibArtifact {
         &out.push_raw(self.payload)
         out.bytes
     }
-    fn decode_bytes(bytes: View<U8>, host_max: Int, loader: Bool) -> JetLibArtifact Err! from bytes {
-        reader := JetLibReader{bytes: bytes, at: 0, loader: loader}
+    fn decode_bytes(bytes: [U8], host_max: Int, loader: Bool) -> JetLibArtifact Err! from bytes {
+        input :: bytes[0..<bytes.len()]
+        reader := JetLibReader{bytes: input, at: 0, loader: loader}
         stamp := JetLibStamp.decode_prefix(&reader) ?? return Err(err)
         if bytes.len() - reader.at < 8 -> return Err("truncated .jetlib artifact (payload length)")
         declared := 0
@@ -333,15 +335,17 @@ struct JetLibReader {
         self.at += 4
         Ok(value)
     }
-    // Every successful field extent retains the original input owner.
-    fn take_field(&self, what: String) -> View<U8> Err! from self.bytes {
+    // A header field's bytes. Fields become owned Strings, so the extent is
+    // copied out of the input; only the payload keeps the input owner.
+    fn take_field(&self, what: String) -> [U8] Err! {
         if self.bytes.len() - self.at < 4 -> return Err(jetlib_parse_message(JetLibParseFailure{kind: JetLibParseKind.Length, field: what}, self.loader))
         length :: &self.take_u32(what) ?? return Err(err)
         if length > JETLIB_MAX_HEADER_FIELD_BYTES -> return Err(jetlib_parse_message(JetLibParseFailure{kind: JetLibParseKind.TooLarge, field: what}, self.loader))
         if self.bytes.len() - self.at < length -> return Err(jetlib_parse_message(JetLibParseFailure{kind: JetLibParseKind.Field, field: what}, self.loader))
-        start :: self.at
+        field := [U8]{}
+        loop index in self.at..<self.at + length -> &field.push(self.bytes[index])
         self.at += length
-        Ok(self.bytes[start..<self.at])
+        Ok(field)
     }
     fn take_string(&self, what: String) -> String Err! {
         raw := &self.take_field(what) ?? return Err(err)
