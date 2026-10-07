@@ -82,12 +82,21 @@ ${kinds.map((kind, index) => `    pub(crate) const HOST_IO_KIND_${kind.replace(/
         pub(crate) os_code: i64,
         pub(crate) cause: JetCString,
     }
+    #[repr(C)]
+    pub(crate) struct JetCResolveError {
+        pub(crate) kind: i64,
+        pub(crate) has_os_code: i64,
+        pub(crate) os_code: i64,
+        pub(crate) message: JetCString,
+    }
     unsafe extern "C" {
         fn jet_rt_alloc(size: usize, align: usize) -> *mut u8;
         #[cfg(jet_native_pack)]
         fn jet_rt_handle_drop_IOError(value: *mut JetCIOError);
         #[cfg(jet_native_pack)]
         fn jet_rt_handle_drop_IOContext(value: *mut JetCIOContext);
+        #[cfg(jet_native_pack)]
+        fn jet_rt_handle_drop_Jet__ResolveError(value: *mut JetCResolveError);
         #[cfg(not(jet_native_pack))]
         fn jet_rt_free(pointer: *mut u8, size: usize, align: usize);
     }
@@ -201,6 +210,68 @@ ${operations.map((name, index) => `            ${index} => IOOperation::${name},
         let value = context_view(pointer);
         context_drop(pointer);
         value
+    }
+
+    pub(crate) fn resolve_error_handle(value: crate::Jet__ResolveError) -> *mut JetCResolveError {
+        let carrier = JetCResolveError {
+            kind: value.kind.into_raw(),
+            has_os_code: i64::from(value.has_os_code),
+            os_code: value.os_code.into_raw(),
+            message: handle(value.message),
+        };
+        // SAFETY: transfer each independently owned child into a fresh 32B C header.
+        let pointer = unsafe { jet_rt_alloc(32, 8) }.cast::<JetCResolveError>();
+        unsafe { pointer.write(carrier) };
+        pointer
+    }
+
+    pub(crate) fn resolve_error_view(pointer: *mut JetCResolveError) -> crate::Jet__ResolveError {
+        // SAFETY: caller lends a complete C header; exact words are retained,
+        // not numerically decoded or cast to a Rust struct.
+        let value = unsafe { &*pointer };
+        crate::Jet__ResolveError {
+            kind: unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(value.kind) },
+            has_os_code: value.has_os_code != 0,
+            os_code: unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(value.os_code) },
+            message: view(value.message).to_owned(),
+        }
+    }
+
+    pub(crate) fn resolve_error_drop(pointer: *mut JetCResolveError) {
+        #[cfg(jet_native_pack)]
+        // SAFETY: one owned canonical C carrier goes to its Jet owner.
+        unsafe { jet_rt_handle_drop_Jet__ResolveError(pointer) };
+        #[cfg(not(jet_native_pack))]
+        {
+            if pointer.is_null() { return; }
+            // SAFETY: consume the independently owned exact words and E4 text;
+            // this is the Rust-tier allocator path, never a native fallback.
+            unsafe {
+                let value = &*pointer;
+                drop(crate::jet_foundation::Numeric::JetInt::from_raw_owned(value.kind));
+                drop(crate::jet_foundation::Numeric::JetInt::from_raw_owned(value.os_code));
+                release(value.message);
+                jet_rt_free(pointer.cast(), 32, 8);
+            }
+        }
+    }
+
+    pub(crate) fn resolve_error_take(pointer: *mut JetCResolveError) -> crate::Jet__ResolveError {
+        // SAFETY: this adapter consumes the three children rather than cloning
+        // a message only to immediately release the original allocation.
+        if pointer.is_null() { panic!("null ResolveError C carrier"); }
+        let value = unsafe { &*pointer };
+        let result = crate::Jet__ResolveError {
+            kind: unsafe { crate::jet_foundation::Numeric::JetInt::from_raw_owned(value.kind) },
+            has_os_code: value.has_os_code != 0,
+            os_code: unsafe { crate::jet_foundation::Numeric::JetInt::from_raw_owned(value.os_code) },
+            message: view(value.message).to_owned(),
+        };
+        // Leave the moved exact words at inline zero; drop still releases the
+        // E4 message and header through the correct tier's ownership path.
+        unsafe { (*pointer).kind = 0; (*pointer).os_code = 0; }
+        resolve_error_drop(pointer);
+        result
     }
 }
 `;
