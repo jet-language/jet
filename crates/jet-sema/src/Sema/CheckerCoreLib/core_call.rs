@@ -3862,7 +3862,7 @@ impl<'a> Checker<'a> {
             // D-FMT-INTERP3=B: decimal accepts both machine Float and exact
             // Int. The return stays String; the carrier-specific formatter is
             // selected by each engine only after this sema fact is resolved.
-            ("core.text.fmt", method @ ("decimal" | "grouped")) => {
+            ("core.text.fmt", method @ "decimal") => {
                 if args.len() != 2 {
                     self.diags.push(wrong_core_arity(name, 2, args.len(), span));
                 }

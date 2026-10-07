@@ -53,3 +53,33 @@ fn run() {
         "àb\nSTRASSE\nstrasse\n2\ntrue\n",
     );
 }
+
+#[test]
+fn grouped_format_is_source_owned_without_a_dispatcher_row() {
+    assert!(jet_foundation::CoreModuleExports::core_source_owns_call(
+        "core.text.fmt", "grouped", 2,
+    ));
+    assert!(jet_foundation::Syntax::core_call("core.text.fmt", "grouped").is_none());
+    tir_support::assert_tiers_agree(
+        "core_text_grouped_source",
+        r#"
+use core.text.fmt as fmt
+
+fn run() {
+    price :: Float{1234.5678}
+    print(fmt.grouped(price, 2))
+    print("{price:Grouped(2)}")
+    exact :: 123456789012345678901234567890
+    print("{exact:Grouped(2)}")
+    count :: 255
+    ratio :: Float{1.25}
+    word :: "go"
+    print("{count:Hex(4)} {count:Bin} {count:Oct}")
+    print("{ratio:Sci(2)} {ratio:Percent(1)}")
+    print("{word:Pad(4, ".")} {word:PadLeft(4, "0")}")
+    print("{count:PadLeft(4, "0")}")
+}
+"#,
+        "1,234.57\n1,234.57\n123,456,789,012,345,678,901,234,567,890.00\n00ff 11111111 377\n1.25e+00 125.0%\ngo.. 00go\n0255\n",
+    );
+}

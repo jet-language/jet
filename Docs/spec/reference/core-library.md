@@ -2574,7 +2574,7 @@ values, not bytes; binary-size formatting uses binary units.
 | `grouped(value: Float, frac: Int) -> String` | text | Add grouping separators and keep `frac` fractional digits. |
 | `decimal(value: Float, frac: Int) -> String` | text | Format fixed-point decimal output, rounding half away from zero with no negative zero (`decimal(0.125, 2)` is `0.13`, `decimal(-0.0001, 2)` is `0.00`). |
 | `percent(value: Float, frac: Int) -> String` | text | Format a grouped percentage with `frac` fractional digits (`percent(12345.6, 0)` is `1,234,560%`). |
-| `sci(value: Float, frac: Int) -> String` | text | Format normalized scientific notation with a plain exponent (`1.23e3`, `1.23e-3`, `1.00e1` for `9.999`). |
+| `sci(value: Float, frac: Int) -> String` | text | Format scientific notation with a signed, two-digit-minimum exponent (`1.23e+03`, `1.23e-03`). Rounding keeps the selected exponent (`9.999` at precision 2 is `10.00e+00`); NaN and infinities use ordinary Float display regardless of precision. |
 | `pretty(value: String) -> String` | text | Lay out Debug text one item per line with commas between items; empty collections stay on one line, and `[:]` and `[redacted]` are unchanged. |
 | `bytes(value: Int) -> String` | text | Format bytes in SI units `B`, `KB`, `MB`, `GB`, `TB`, `PB`, or `EB`, with one decimal below 10 (`1536` is `1.5 KB`). |
 | `duration(milliseconds: Int) -> String` | text | Format a duration using at most three nonzero units. |

@@ -42,9 +42,11 @@ pub fn grouped(n: Float, frac: Int) -> String Never! { group_decimal(float_fixed
 pub fn decimal(n: Float, frac: Int) -> String Never! { float_fixed(n, frac) }
 pub fn percent(n: Float, frac: Int) -> String Never! { "{grouped(n * 100.0, frac)}%" }
 
-/// Normalized scientific notation with a plain exponent: `1.23e3`, `1.23e-3`.
+/// Scientific notation keeps the shipped signed, two-digit-minimum exponent.
+/// Nonfinite values use ordinary Float display, independent of precision.
 pub fn sci(n: Float, frac: Int) -> String Never! {
-    if n == 0.0 -> return "{float_fixed(0.0, frac)}e0"
+    if math.is_nan(n) || math.is_inf(n) -> return "{n}"
+    if n == 0.0 -> return "{float_fixed(0.0, frac)}e+00"
     sign :: if n < 0.0 -> "-" else -> ""
     value := if n < 0.0 -> -n else -> n
     exponent := 0
@@ -56,13 +58,9 @@ pub fn sci(n: Float, frac: Int) -> String Never! {
         value *= 10.0
         exponent -= 1
     }
-    mantissa := float_fixed(value, frac)
-    // Rounding can carry the mantissa to 10; renormalize instead of printing "10.00".
-    if mantissa.starts_with("10") {
-        exponent += 1
-        mantissa = float_fixed(value / 10.0, frac)
-    }
-    "{sign}{mantissa}e{exponent}"
+    mantissa :: float_fixed(value, frac)
+    exponent_sign :: if exponent < 0 -> "-" else -> "+"
+    "{sign}{mantissa}e{exponent_sign}{pad_left(radix(abs_int(exponent), 10), 2, "0")}"
 }
 
 /// Lays out canonical Debug text: one item per line, commas between items,

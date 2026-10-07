@@ -510,7 +510,7 @@ fn core_sig_text_and_testing(request: CoreCallSignatureRequest) -> CoreTypedCall
         t :: core_sig_named("T")
         return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read)}, Val(Type.String), core_sig_type_parameter("T", CoreCallTypeConstraint.Debuggable)))
     }
-    if module_name == "core.text.fmt" && core_sig_one_of(member, [String]{"decimal", "grouped"}) {
+    if module_name == "core.text.fmt" && member == "decimal" {
         numeric :: Type.Union{members: [Type]{Type.Int, Type.Float}}
         return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(numeric, read), core_sig_positional(Type.Int, read)}, Val(Type.String)))
     }

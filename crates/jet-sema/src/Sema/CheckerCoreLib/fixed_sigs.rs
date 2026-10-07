@@ -19,7 +19,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.math", "abs")
             | ("core.math", "min")
             | ("core.math", "max")
-            | ("core.text.fmt", "pretty" | "decimal" | "grouped")
+            | ("core.text.fmt", "pretty" | "decimal")
             | ("core.math", "clamp")
             // D-FLOATW1: sqrt/floor/ceil/pow are width-generic (Float→Float, F32→F32);
             // their return type is arg-type-dependent, so they use resolved_ret.
@@ -3599,7 +3599,7 @@ fn core_fixed_sig_impl(
         ("core.text.fmt", "number" | "bytes" | "duration" | "ordinal") => {
             Some((vec![(read, Type::Int)], Some(Type::String)))
         }
-        ("core.text.fmt", "decimal" | "grouped" | "percent" | "sci") => Some((
+        ("core.text.fmt", "decimal" | "percent" | "sci") => Some((
             vec![(read, Type::Float), (read, Type::Int)],
             Some(Type::String),
         )),

@@ -2922,6 +2922,57 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
     Val(value)
 }
 
+// Selectors whose dispatcher rows are retired name the same checked Core
+// function as a direct call. Exact Int Float-selectors keep their typed ABI.
+fn sema_expr_source_format(value: TExpr, format: StrFormat, environment: SemaScopeEnvironment) -> TStrPart? {
+    member := ""
+    digits := Int?{None}
+    width := Int?{None}
+    fill := ""
+    if format == {
+        .Grouped(count) -> {
+            if value.ty != Type.Float -> return Val(TStrPart.Interpolation{value: value, format: sema_expr_string_format(format)})
+            member = "grouped"
+            digits = Val(count)
+        }
+        .Sci(count) | .Percent(count) -> {
+            if value.ty != Type.Float -> return Val(TStrPart.Interpolation{value: value, format: sema_expr_string_format(format)})
+            member = if format == .Sci(_) -> "sci" else -> "percent"
+            digits = Val(count)
+        }
+        .Hex(count) -> { member = "hex"; digits = Val(count) }
+        .Bin -> member = "bin"
+        .Oct -> member = "oct"
+        .Pad(count, pattern) | .PadLeft(count, pattern) -> {
+            member = if format == .Pad(_, _) -> "pad" else -> "pad_left"
+            width = Val(count)
+            fill = pattern
+        }
+        else -> return Val(TStrPart.Interpolation{value: value, format: sema_expr_string_format(format)})
+    }
+    graph :: environment.registration_graph ?? return None
+    module_index := Int?{None}
+    loop index in 0..<graph.modules.len() {
+        if graph.modules[index].module_name == "core.text.fmt" { module_index = Val(index); break }
+    }
+    owner :: module_index ?? return None
+    export :: sema_registration_resolve_export(graph, owner, member, environment.module_identity, environment.package_identity, [String]{}) ?? return None
+    first := value
+    if width != None && value.ty != Type.String -> first = sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Interpolation{value: value, format: TStrFormat.Display}}}, value.span)
+    args := [TCallArg]{sema_expr_format_arg(first)}
+    if digits == .Val(count) -> &args.push(sema_expr_format_arg(sema_tir_expr(Type.Int, TExprKind.IntLit{value: count, width: None}, value.span)))
+    if width == .Val(count) {
+        &args.push(sema_expr_format_arg(sema_tir_expr(Type.Int, TExprKind.IntLit{value: count, width: None}, value.span)))
+        &args.push(sema_expr_format_arg(sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: fill}}}, value.span)))
+    }
+    formatted :: sema_tir_expr(Type.String, TExprKind.Call{callee: export.symbol.id, type_args: [Type]{}, args: args}, value.span)
+    Val(TStrPart.Interpolation{value: formatted, format: TStrFormat.Display})
+}
+
+fn sema_expr_format_arg(value: TExpr) -> TCallArg Never! {
+    TCallArg{value: value, template_items: [SymbolID]{}, borrow: !sema_call_is_scalar(value.ty), mut_borrow: false, clone: false, arc_clone: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+}
+
 fn sema_expr_check_string(parts: [StrPart], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     tir_parts := [TStrPart]{}
     index := 0
@@ -2948,7 +2999,8 @@ fn sema_expr_check_string(parts: [StrPart], span: Span, expected: Type?, environ
                     return None
                 }
                 if !debug_family && format != StrFormat.Display && !sema_expr_format_supported(checked.ty, format) -> return None
-                &tir_parts.push(TStrPart.Interpolation{value: checked, format: sema_expr_string_format(format)})
+                formatted :: sema_expr_source_format(checked, format, environment) ?? return None
+                &tir_parts.push(formatted)
             }
         }
         index += 1
