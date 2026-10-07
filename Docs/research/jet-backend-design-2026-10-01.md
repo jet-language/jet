@@ -212,6 +212,11 @@ validates UTF-8 while finding the terminator and copies into an owned E4
 header before argument buffers are freed, including interior-pointer returns.
 Interior NUL, null results and invalid UTF-8 use the exact Rust panic messages
 through the shared panic stop path; raw text witnesses cover all three stops.
+The private `jet_string_validate_utf8` adapter uses that same scalar validator
+over native U8 list slots (eight-byte stride), returning the checked
+`Unit String!` tag and owned error text. Success allocates nothing. Invalid
+subparts and incomplete tails preserve the strict decoder's exact error text
+and byte index; the native corpus compares them against the Rust seed oracle.
 
 Sizes: a word, handle or box pointer is 8 bytes (align 8), a Bool 1 byte, Unit
 0. An inline aggregate is 8-aligned and padded to whole words, so copies move
