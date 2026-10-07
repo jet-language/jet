@@ -4,6 +4,7 @@ use jet_foundation.[
     MIRCallee,
     MIRCaptureParam,
     MIRCopyFact,
+    MIRDropKind,
     MIRFieldID,
     MIRFunction,
     MIRFunctionID,
@@ -78,13 +79,42 @@ fn jet_rust_emit_value_declaration(ctx: &JetRustEmitContext, function: MIRFuncti
     "let mut {jet_rust_emit_value_slot(value.id)}: Option<{jet_rust_emit_type(&ctx, value.ty)}> = None;"
 }
 
-// MIRRust localizable_value_slots: a value whose type has no observable drop
-// may be declared at its definition instead of the function top.
-fn jet_rust_emit_value_slot_localizable(ty: MIRType) -> Bool Never! {
-    if ty.kind == {
-        .Bool | .Int | .IntN(_, _) | .Float | .Float32 | .Char | .String -> true
-        else -> false
+// MIRRust localizable_value_slots: a value whose drop does nothing but free
+// memory may be declared at its definition instead of the function top (its
+// value is freed when that scope ends, not when the function returns):
+// every plain-drop type (jet_rust_emit_type_drop_is_plain over
+// ctx.plain_drop_types) unless the value's ownership drops a handle, a shared
+// count or a view, or its Rust slot type borrows. Value ids to Rust types.
+fn jet_rust_emit_localizable_value_slots(ctx: &JetRustEmitContext, function: MIRFunction) -> [String:String] Never! {
+    types := [String:String]{}
+    loop value in function.values {
+        if value.ownership.drop != MIRDropKind.NoDrop && value.ownership.drop != MIRDropKind.Value -> next
+        if !jet_rust_emit_type_drop_is_plain(value.ty, ctx.plain_drop_types) -> next
+        rendered :: jet_rust_emit_type(&ctx, value.ty)
+        if rendered.contains("&") || rendered.contains("'") -> next
+        &types.add("{value.id.value}", rendered).drop("value ids are unique")
     }
+    types
+}
+
+// MIRRust localizable_local_slots: local slots declared `Option<T>`
+// (jet_rust_emit_local_declaration) whose drop does nothing but free memory,
+// under the value rule: never an uninit fixed list, a shared-capture cell, a
+// reference binding, a partially moved root, an arena or string view, or a
+// GC root. Local ids to Rust types.
+fn jet_rust_emit_localizable_local_slots(ctx: &JetRustEmitContext, function: MIRFunction) -> [String:String] Never! {
+    types := [String:String]{}
+    loop local in function.locals {
+        if local.uninit || local.arena_view || local.string_view || local.gc_root -> next
+        if local.ownership.drop != MIRDropKind.NoDrop && local.ownership.drop != MIRDropKind.Value -> next
+        if !jet_rust_emit_type_drop_is_plain(local.ty, ctx.plain_drop_types) -> next
+        if jet_rust_emit_local_is_shared(&ctx, local.id) || ctx.ref_bindings.locals.get(local.id.value) != None -> next
+        if jet_rust_emit_partial_root_has(ctx, function, MIRPlaceBase.Local{local: local.id}) -> next
+        rendered :: jet_rust_emit_type(&ctx, local.ty)
+        if rendered.contains("&") || rendered.contains("'") -> next
+        &types.add("{local.id.value}", rendered).drop("local ids are unique")
+    }
+    types
 }
 
 fn jet_rust_emit_blank_line(bytes: [U8]) -> Bool Never! {
@@ -100,15 +130,22 @@ fn jet_rust_emit_identifier_byte(byte: U8) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
 }
 
-// One `__jet_v_<id>` mention: the id digits and the byte column it starts at.
+// One `<prefix><id>` slot mention: the id digits and the byte column it starts at.
 struct JetRustEmitSlotMention {
     pub id: String
     pub column: Int
 }
 
 fn jet_rust_emit_value_mentions(line: String) -> [JetRustEmitSlotMention] Never! {
+    jet_rust_emit_slot_mentions(line, "__jet_v_")
+}
+
+// Every `<prefix><id>` numbered slot mention in `line`.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::for_each_slot_mention
+fn jet_rust_emit_slot_mentions(line: String, prefix: String) -> [JetRustEmitSlotMention] Never! {
     mentions := [JetRustEmitSlotMention]{}
-    parts :: line.split("__jet_v_").to_list()
+    parts :: line.split(prefix).to_list()
+    width :: prefix.bytes().len()
     column := 0
     loop (index, part) in parts {
         bytes :: part.bytes()
@@ -121,9 +158,9 @@ fn jet_rust_emit_value_mentions(line: String) -> [JetRustEmitSlotMention] Never!
                 if code < 48 || code > 57 -> break
                 &digits.push(byte)
             }
-            if digits.len() > 0 && !joined -> &mentions.push(JetRustEmitSlotMention{id: String.from_bytes(digits) ?? "", column: column - 8})
+            if digits.len() > 0 && !joined -> &mentions.push(JetRustEmitSlotMention{id: String.from_bytes(digits) ?? "", column: column - width})
         }
-        column += bytes.len() + 8
+        column += bytes.len() + width
     }
     mentions
 }
@@ -135,32 +172,72 @@ struct JetRustEmitLocalizedSlots {
     pub body_start: Int
 }
 
-// MIRRust localize_value_slots: `lines[values_start..values_end]` are the
-// value declarations and every later line is the body. The declarations need
-// not follow `function.values` one to one (a reference-binding payload has
-// none), so each is matched by the slot id it declares. A localizable slot
-// declared once there, whose first body mention starts its `slot = Some(..);`
-// statement, and whose later mentions all stay in that statement's lexical
-// scope (no line between them is indented less), becomes
-// `let mut slot: Option<T> = Some(..);` there; a localizable declared slot the
-// body never mentions loses its declaration.
-fn jet_rust_emit_localize_value_slots(ctx: &JetRustEmitContext, function: MIRFunction, lines: [String], values_start: Int, values_end: Int) -> JetRustEmitLocalizedSlots Never! {
-    types := [String:String]{}
-    loop value in function.values {
-        if jet_rust_emit_value_slot_localizable(value.ty) -> &types.add("{value.id.value}", jet_rust_emit_type(&ctx, value.ty)).drop("value ids are unique")
+// MIRRust lent_slots: the candidate `<prefix><id>` slots (ids in `types`) some
+// `body` statement lends to a reference slot: a statement assigning
+// `slot = ..` to a slot whose `let .. = None;` declaration in `lines[1..]`
+// (the whole function after its signature) names a borrowing type (`&` or a
+// lifetime) and that mentions the candidate. Such a candidate must outlive
+// the reference slot, so it keeps its function-wide declaration.
+fn jet_rust_emit_lent_slots(lines: [String], body: [String], prefix: String, types: [String:String]) -> [String:Bool] Never! {
+    references := [String:Bool]{}
+    loop (index, entry) in lines {
+        if index < 1 -> next
+        loop line in entry.split("\n").to_list() {
+            bytes :: line.bytes()
+            start := 0
+            loop start < bytes.len() && Int.from_u8(bytes[start]) == 32 -> start += 1
+            content :: String.from_bytes(~(bytes[start..<bytes.len()])) ?? ""
+            if !content.starts_with("let ") || !content.ends_with(" = None;") -> next
+            start += 4
+            if content.starts_with("let mut ") -> start += 4
+            end := start
+            loop end < bytes.len() && jet_rust_emit_identifier_byte(bytes[end]) -> end += 1
+            tail :: String.from_bytes(~(bytes[end..<bytes.len()])) ?? ""
+            if !tail.starts_with(": ") -> next
+            if tail.contains("&") || tail.contains("'") -> references[String.from_bytes(~(bytes[start..<end])) ?? ""] = true
+        }
     }
-    if types.len() == 0 -> return JetRustEmitLocalizedSlots{lines: ~lines, body_start: values_end}
+    lent := [String:Bool]{}
+    if references.len() == 0 -> return lent
+    loop line in body {
+        bytes :: line.bytes()
+        indent := 0
+        loop indent < bytes.len() && Int.from_u8(bytes[indent]) == 32 -> indent += 1
+        target := indent
+        loop target < bytes.len() && jet_rust_emit_identifier_byte(bytes[target]) -> target += 1
+        name :: String.from_bytes(~(bytes[indent..<target])) ?? ""
+        tail :: String.from_bytes(~(bytes[target..<bytes.len()])) ?? ""
+        if !tail.starts_with(" = ") || references.get(name) == None -> next
+        loop mention in jet_rust_emit_slot_mentions(line, prefix) {
+            if types.get(mention.id) != None -> lent[mention.id] = true
+        }
+    }
+    lent
+}
+
+// MIRRust localize_slots: `lines[decl_start..decl_end]` are the slot
+// declarations of `<prefix><id>` slots (`__jet_v_` values or `__jet_l_`
+// locals) and every later line is the body. The declarations need not follow
+// the candidates one to one (a reference-binding payload has none), so each
+// is matched by the slot id it declares. A candidate (`ids`, in MIR order;
+// `types` maps each to its Rust type) declared once there, whose first body
+// mention starts its `slot = Some(..);` statement, and whose later mentions
+// all stay in that statement's lexical scope (no line between them is
+// indented less), becomes `let mut slot: Option<T> = Some(..);` there; a
+// candidate the body never mentions loses its declaration.
+fn jet_rust_emit_localize_slots(lines: [String], decl_start: Int, decl_end: Int, prefix: String, ids: [String], types: [String:String]) -> JetRustEmitLocalizedSlots Never! {
+    if types.len() == 0 -> return JetRustEmitLocalizedSlots{lines: ~lines, body_start: decl_end}
     declared := [String:Int]{}
     loop (index, entry) in lines {
-        if index < values_start -> next
-        if index >= values_end -> break
-        loop mention in jet_rust_emit_value_mentions(entry) {
+        if index < decl_start -> next
+        if index >= decl_end -> break
+        loop mention in jet_rust_emit_slot_mentions(entry, prefix) {
             if types.get(mention.id) != None -> &declared.add(mention.id, (declared.get(mention.id) ?? 0) + 1).drop("the count replaces the prior count")
         }
     }
     body := [String]{}
     loop (index, entry) in lines {
-        if index >= values_end {
+        if index >= decl_end {
             loop line in entry.split("\n").to_list() -> &body.push(line)
         }
     }
@@ -175,7 +252,7 @@ fn jet_rust_emit_localize_value_slots(ctx: &JetRustEmitContext, function: MIRFun
         indent := 0
         loop indent < bytes.len() && bytes[indent] == (U8{32}) -> indent += 1
         &indents.push(if jet_rust_emit_blank_line(bytes) -> blank else -> indent)
-        loop mention in jet_rust_emit_value_mentions(line) {
+        loop mention in jet_rust_emit_slot_mentions(line, prefix) {
             if types.get(mention.id) == None -> next
             if first_line.get(mention.id) == None {
                 &first_line.add(mention.id, line_index).drop("first mention")
@@ -199,30 +276,30 @@ fn jet_rust_emit_localize_value_slots(ctx: &JetRustEmitContext, function: MIRFun
         }
         &open.push(index)
     }
+    pinned :: jet_rust_emit_lent_slots(lines, body, prefix, types)
     localized := [Int:String]{}
     dropped := [String:Bool]{}
-    loop value in function.values {
-        id :: "{value.id.value}"
+    loop id in ids {
         if types.get(id) == None || (declared.get(id) ?? 0) != 1 -> next
         line :: first_line.get(id) ?? {
-            &dropped.add(id, true).drop("value ids are unique")
+            &dropped.add(id, true).drop("slot ids are unique")
             next
         }
         bytes :: body[line].bytes()
         indent :: indents[line]
         rest :: if indent < bytes.len() -> String.from_bytes(~(bytes[indent..<bytes.len()])) ?? "" else -> ""
-        defines :: (on_first_line.get(id) ?? 0) == 1 && (first_column.get(id) ?? -1) == indent && rest.starts_with("__jet_v_{id} = Some(")
-        if defines && (last_line.get(id) ?? body.len()) < scope_end[line] {
+        defines :: (on_first_line.get(id) ?? 0) == 1 && (first_column.get(id) ?? -1) == indent && rest.starts_with("{prefix}{id} = Some(")
+        if defines && (last_line.get(id) ?? body.len()) < scope_end[line] && pinned.get(id) == None {
             &localized.add(line, id).drop("one definition per line")
-            &dropped.add(id, true).drop("value ids are unique")
+            &dropped.add(id, true).drop("slot ids are unique")
         }
     }
-    if dropped.len() == 0 -> return JetRustEmitLocalizedSlots{lines: ~lines, body_start: values_end}
+    if dropped.len() == 0 -> return JetRustEmitLocalizedSlots{lines: ~lines, body_start: decl_end}
     rebuilt := [String]{}
     loop (index, entry) in lines {
-        if index >= values_end -> break
-        if index >= values_start {
-            if jet_rust_emit_declared_value_id(entry) == .Val(declared_id) {
+        if index >= decl_end -> break
+        if index >= decl_start {
+            if jet_rust_emit_declared_slot_id(entry, prefix) == .Val(declared_id) {
                 if dropped.get(declared_id) != None -> next
             }
         }
@@ -236,25 +313,119 @@ fn jet_rust_emit_localize_value_slots(ctx: &JetRustEmitContext, function: MIRFun
         }
         bytes :: body[index].bytes()
         indent :: indents[index]
-        prefix :: "__jet_v_{id} = ".bytes().len()
+        width :: "{prefix}{id} = ".bytes().len()
         pad :: String.from_bytes(~(bytes[0..<indent])) ?? ""
-        tail :: String.from_bytes(~(bytes[indent + prefix..<bytes.len()])) ?? ""
-        &rebuilt.push("{pad}let mut __jet_v_{id}: Option<{types.get(id) ?? ""}> = {tail}")
+        tail :: String.from_bytes(~(bytes[indent + width..<bytes.len()])) ?? ""
+        &rebuilt.push("{pad}let mut {prefix}{id}: Option<{types.get(id) ?? ""}> = {tail}")
     }
     JetRustEmitLocalizedSlots{lines: rebuilt, body_start: body_start}
 }
 
-// The slot id a `    let mut __jet_v_<id>: ..` value declaration declares.
-// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::localize_value_slots
-fn jet_rust_emit_declared_value_id(line: String) -> String? Never! {
-    prefix :: "    let mut __jet_v_"
-    if !line.starts_with(prefix) -> return None
+// The slot id a `    let mut <prefix><id>: ..` slot declaration declares.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::localize_slots
+fn jet_rust_emit_declared_slot_id(line: String, prefix: String) -> String? Never! {
+    head :: "    let mut {prefix}"
+    if !line.starts_with(head) -> return None
     bytes :: line.bytes()
-    start :: prefix.bytes().len()
+    start :: head.bytes().len()
     end := start
     loop end < bytes.len() && Int.from_u8(bytes[end]) >= 48 && Int.from_u8(bytes[end]) <= 57 -> end += 1
     if end == start || end >= bytes.len() || Int.from_u8(bytes[end]) != 58 -> return None
     Val(String.from_bytes(~(bytes[start..<end])) ?? "")
+}
+
+// The numbered slot name prefixes, as bytes: `__jet_v_`, `__jet_l_`, `__jet_pm_`.
+fn jet_rust_emit_numbered_slot_prefixes() -> [[U8]] Never! {
+    [[U8]]{"__jet_v_".bytes(), "__jet_l_".bytes(), "__jet_pm_".bytes()}
+}
+
+// The byte length of the numbered slot name (`__jet_v_N`, `__jet_l_N`,
+// `__jet_pm_N`; `prefixes` from `jet_rust_emit_numbered_slot_prefixes`)
+// starting at `at` when its digits end the identifier, else 0.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::numbered_slot_len
+fn jet_rust_emit_numbered_slot_len(prefixes: [[U8]], text: [U8], at: Int) -> Int Never! {
+    loop prefix in prefixes {
+        digits :: jet_rust_emit_compact_numbered(text, at, prefix)
+        if digits > 0 -> return prefix.len() + digits
+    }
+    0
+}
+
+// Whether `line` is `let mut slot: Option<T> = None;` (any indent) for a
+// numbered slot that `mentions` counts exactly once: its own declaration.
+fn jet_rust_emit_unmentioned_slot_declaration(prefixes: [[U8]], line: String, mentions: [String:Int]) -> Bool Never! {
+    bytes :: line.bytes()
+    indent := 0
+    loop indent < bytes.len() && Int.from_u8(bytes[indent]) == 32 -> indent += 1
+    content :: String.from_bytes(~(bytes[indent..<bytes.len()])) ?? ""
+    if !content.starts_with("let mut ") || !content.ends_with("> = None;") -> return false
+    content_bytes :: content.bytes()
+    len :: jet_rust_emit_numbered_slot_len(prefixes, content_bytes, 8)
+    if len == 0 -> return false
+    name :: String.from_bytes(~(content_bytes[8..<8 + len])) ?? ""
+    rest :: String.from_bytes(~(content_bytes[8 + len..<content_bytes.len()])) ?? ""
+    rest.starts_with(": Option<") && (mentions.get(name) ?? 0) == 1
+}
+
+// MIRRust drop_unmentioned_slots: `lines[start..]` are the slot declarations
+// and the body. A line `let mut slot: Option<T> = None;` (any indent, not
+// under an attribute) whose numbered slot name is mentioned nowhere else in
+// that text declares storage no statement uses: it only holds `None`, so its
+// drop is a no-op and removing it changes nothing but the frame size.
+// Mentions are counted over the raw text, string and comment text included,
+// so a doubtful slot is kept.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::drop_unmentioned_slots
+fn jet_rust_emit_drop_unmentioned_slots(lines: [String], start: Int) -> [String] Never! {
+    body := [String]{}
+    loop (index, entry) in lines {
+        if index >= start {
+            loop line in entry.split("\n").to_list() -> &body.push(line)
+        }
+    }
+    prefixes :: jet_rust_emit_numbered_slot_prefixes()
+    mentions := [String:Int]{}
+    loop line in body {
+        bytes :: line.bytes()
+        index := 0
+        loop index < bytes.len() {
+            joined :: index > 0 && jet_rust_emit_identifier_byte(bytes[index - 1])
+            len :: if Int.from_u8(bytes[index]) == 95 && !joined -> jet_rust_emit_numbered_slot_len(prefixes, bytes, index) else -> 0
+            if len == 0 {
+                index += 1
+                next
+            }
+            name :: String.from_bytes(~(bytes[index..<index + len])) ?? ""
+            &mentions.add(name, (mentions.get(name) ?? 0) + 1).drop("the count replaces the prior count")
+            index += len
+        }
+    }
+    kept := [String]{}
+    removed := false
+    attributed := false
+    loop line in body {
+        if !attributed && jet_rust_emit_unmentioned_slot_declaration(prefixes, line, mentions) {
+            removed = true
+        } else {
+            &kept.push(line)
+        }
+        attributed = jet_rust_emit_attribute_line(line)
+    }
+    if !removed -> return ~lines
+    rebuilt := [String]{}
+    loop (index, entry) in lines {
+        if index >= start -> break
+        &rebuilt.push(entry)
+    }
+    loop line in kept -> &rebuilt.push(line)
+    rebuilt
+}
+
+// Whether `line` (after its leading spaces) starts an attribute `#[`.
+fn jet_rust_emit_attribute_line(line: String) -> Bool Never! {
+    bytes :: line.bytes()
+    indent := 0
+    loop indent < bytes.len() && Int.from_u8(bytes[indent]) == 32 -> indent += 1
+    indent + 1 < bytes.len() && Int.from_u8(bytes[indent]) == 35 && Int.from_u8(bytes[indent + 1]) == 91
 }
 
 // MIRRust strip_enclosing_parens: `text` without parentheses enclosing all of it.
@@ -818,7 +989,7 @@ fn jet_rust_emit_bytes_at(bytes: [U8], pattern: [U8], at: Int) -> Bool Never! {
 
 // MIRRust unwrap_value_slots: `lines[start..]` are the slot declarations and
 // the body. A slot declared at its single definition (`let mut slot:
-// Option<T> = Some(E);`, see `jet_rust_emit_localize_value_slots`) whose every
+// Option<T> = Some(E);`, see `jet_rust_emit_localize_slots`) whose every
 // other mention is a shared read (`slot.as_ref().expect("MIR value")`) is never
 // taken, written through or re-initialized, so it becomes `let slot: T = E;`:
 // an owned read names a Copy scalar directly and clones any other type, and a
@@ -2460,6 +2631,7 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
     lines := [String]{jet_rust_emit_function_signature(&ctx, function)}
     partial_lines :: jet_rust_emit_partial_declarations(&ctx, function)
     loop line in partial_lines -> &lines.push("    {line}")
+    locals_start :: lines.len()
     loop local in function.locals -> &lines.push("    {jet_rust_emit_local_declaration(&ctx, local)}")
     values_start :: lines.len()
     loop value in function.values {
@@ -2518,9 +2690,17 @@ fn jet_rust_emit_function(ctx: &JetRustEmitContext, function: MIRFunction) -> [S
         &lines.push("{indent}        }}")
         &lines.push("{indent}    }}")
     }
-    localized :: jet_rust_emit_localize_value_slots(&ctx, function, lines, values_start, values_end)
+    value_ids := [String]{}
+    loop value in function.values -> &value_ids.push("{value.id.value}")
+    localized :: jet_rust_emit_localize_slots(lines, values_start, values_end, "__jet_v_", value_ids, jet_rust_emit_localizable_value_slots(&ctx, function))
     lines = jet_rust_emit_fold_value_slots(localized.lines, values_start, localized.body_start)
     lines = jet_rust_emit_unwrap_value_slots(lines, values_start)
+    // MIRRust localize_slots over `__jet_l_` after the value passes: the
+    // local declarations still sit at lines[locals_start..values_start].
+    local_ids := [String]{}
+    loop local in function.locals -> &local_ids.push("{local.id.value}")
+    lines = jet_rust_emit_localize_slots(lines, locals_start, values_start, "__jet_l_", local_ids, jet_rust_emit_localizable_local_slots(&ctx, function)).lines
+    lines = jet_rust_emit_drop_unmentioned_slots(lines, 1)
     lines = jet_rust_emit_compact_function_text(lines, 1)
     if generator -> &lines.push("    }})")
     &lines.push("}}")

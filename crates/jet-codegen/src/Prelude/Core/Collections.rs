@@ -1448,6 +1448,7 @@ pub(crate) struct JetLoopRangeCursor {
     done: bool,
 }
 
+#[inline]
 pub(crate) fn jet_loop_range_init(
     start: i64,
     end: i64,
@@ -1479,6 +1480,7 @@ pub(crate) fn jet_loop_range_init_checked(
     })
 }
 
+#[inline(always)]
 pub(crate) fn jet_loop_range_has_next(cursor: &JetLoopRangeCursor) -> bool {
     !cursor.done && if cursor.step > 0 {
         if cursor.exclusive { cursor.current < cursor.end } else { cursor.current <= cursor.end }
@@ -1487,6 +1489,7 @@ pub(crate) fn jet_loop_range_has_next(cursor: &JetLoopRangeCursor) -> bool {
     }
 }
 
+#[inline(always)]
 pub(crate) fn jet_loop_range_value(cursor: &JetLoopRangeCursor) -> i64 {
     if !jet_loop_range_has_next(cursor) {
         jet_panic("<core.prelude>", 0, "range loop value requested after exhaustion");
@@ -1494,6 +1497,7 @@ pub(crate) fn jet_loop_range_value(cursor: &JetLoopRangeCursor) -> i64 {
     cursor.current
 }
 
+#[inline(always)]
 pub(crate) fn jet_loop_range_advance(cursor: &mut JetLoopRangeCursor) {
     if cursor.done {
         return;

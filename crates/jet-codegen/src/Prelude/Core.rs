@@ -865,11 +865,13 @@ pub fn jet_test_skip_abort() {
 struct JetStackFrame;
 
 impl Drop for JetStackFrame {
+    #[inline(always)]
     fn drop(&mut self) {
         jet_runtime_stack_leave();
     }
 }
 
+#[inline(always)]
 fn jet_stack_enter(
     file: &str,
     line: u32,
