@@ -2308,6 +2308,15 @@ fn lower_binary(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFuncti
             no :: lower_const_flag(&f, 0)
             return lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Eq, left: same, right: no})
         }
+        // A List of ordered elements compares lexicographically (Rust Vec Ord).
+        if lower_list_element(left_ty) == .Val(elem) {
+            if lower_map_key_kind(p, elem) != "" && lower_view_element(left_ty) == None {
+                order :: lower_word(&f)
+                lower_call_helper(&m, &f, "list.compare", left_ty, [LIRValueID]{left_value, right_value}, Val(order))
+                zero :: lower_const(&f, 0)
+                return lower_emit(&f, LIRInst.Compare{dst: dst, condition: condition, left: order, right: zero})
+            }
+        }
         if left_layout.class != .Integer && left_layout != lir_layout_float() -> return lower_fail(&m, &f, "comparison of {mir_type_display_name(left_ty)} is not lowered at O0 yet")
         return lower_emit(&f, LIRInst.Compare{dst: dst, condition: if unsigned -> lower_unsigned_condition(condition) else -> condition, left: left_value, right: right_value})
     }
@@ -3087,6 +3096,7 @@ fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIR
     if glue.helper == "list.join" -> return lower_helper_list_join(p, &m, glue)
     if glue.helper == "list.pop" -> return lower_helper_list_pop(p, &m, glue)
     if glue.helper == "list.get" -> return lower_helper_list_get(p, &m, glue)
+    if glue.helper == "list.compare" -> return lower_helper_list_compare(p, &m, glue)
     if glue.helper == "list.starts_with" || glue.helper == "list.ends_with" -> return lower_helper_list_starts_with(p, &m, glue)
     if glue.helper == "list.remove_value" || glue.helper == "list.remove_slot" -> return lower_helper_list_remove(p, &m, glue)
     if glue.helper == "list.index_of" -> return lower_helper_list_index_of(p, &m, glue)

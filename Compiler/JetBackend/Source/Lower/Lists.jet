@@ -254,6 +254,7 @@ fn lower_list_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     }
     if lower_list_method_more(p, c, &m, &f, instruction, row, symbol, receiver, receiver_place, args, ty) -> return true
     if lower_list_method_shape(p, c, &m, &f, instruction, row, symbol, receiver, receiver_place, args, ty) -> return true
+    if lower_list_method_window(p, c, &m, &f, instruction, row, symbol, receiver, args, ty) -> return true
     length_route :: row.member == "len" && symbol == "jet_list_len"
     empty_route :: row.member == "is_empty" && symbol == "jet_list_is_empty"
     push_route :: row.member == "list_push" && symbol == "jet_list_push"
@@ -813,6 +814,65 @@ fn lower_list_reduce_int(p: MIRProgram, m: &LowerModule, f: &LowerFunction, list
     Val(each.exit[0])
 }
 
+// The lexicographic order of two Lists of `glue.ty` (Rust Vec Ord) as a
+// negative, zero or positive word: the first differing element pair decides
+// (-1 / 1), else the length difference.
+fn lower_helper_list_compare(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    elem :: lower_list_element(glue.ty) ?? panic("{glue.helper} helper has no List type")
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, Val(lir_layout_word()))
+    left :: ~f.open_params[0]
+    right :: ~f.open_params[1]
+    left_len :: lower_list_word(&f, left, 0)
+    right_len :: lower_list_word(&f, right, 0)
+    stride :: lower_list_stride(p, elem)
+    left_data :: lower_list_data(&f, left)
+    right_data :: lower_list_data(&f, right)
+    zero :: lower_const(&f, 0)
+    head :: lower_new_block(&f)
+    body :: lower_new_block(&f)
+    differ :: lower_new_block(&f)
+    before :: lower_new_block(&f)
+    after :: lower_new_block(&f)
+    step :: lower_new_block(&f)
+    ended :: lower_new_block(&f)
+    at :: lower_word(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{zero})})
+    lower_start(&f, head, [LIRValueID]{at})
+    in_left :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: in_left, condition: LIRCondition.Lt, left: at, right: left_len})
+    in_right :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: in_right, condition: LIRCondition.Lt, left: at, right: right_len})
+    both :: lower_flag(&f)
+    lower_logic(&f, both, true, in_left, in_right)
+    lower_seal(&f, LIRTerminator.Branch{condition: both, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(ended, [LIRValueID]{})})
+    lower_start(&f, body, [LIRValueID]{})
+    a_address :: lower_list_address(&f, left_data, at, stride)
+    a :: lower_read_at(p, &f, a_address, 0, elem) ?? panic("list.compare element has no layout")
+    b_address :: lower_list_address(&f, right_data, at, stride)
+    b :: lower_read_at(p, &f, b_address, 0, elem) ?? panic("list.compare element has no layout")
+    order :: lower_map_key_order(p, &m, &f, elem, a, b)
+    lower_seal(&f, LIRTerminator.Branch{condition: order.same, then_target: lower_target(step, [LIRValueID]{}), else_target: lower_target(differ, [LIRValueID]{})})
+    lower_start(&f, differ, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Branch{condition: order.less, then_target: lower_target(before, [LIRValueID]{}), else_target: lower_target(after, [LIRValueID]{})})
+    lower_start(&f, before, [LIRValueID]{})
+    minus_one :: lower_const(&f, -1)
+    lower_seal(&f, LIRTerminator.Return{value: Val(minus_one)})
+    lower_start(&f, after, [LIRValueID]{})
+    plus_one :: lower_const(&f, 1)
+    lower_seal(&f, LIRTerminator.Return{value: Val(plus_one)})
+    lower_start(&f, step, [LIRValueID]{})
+    one :: lower_const(&f, 1)
+    next_at :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: one})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{next_at})})
+    lower_start(&f, ended, [LIRValueID]{})
+    // Equal prefixes: the length difference's sign decides.
+    difference :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: difference, op: LIRBinaryOp.Sub, left: left_len, right: right_len})
+    lower_seal(&f, LIRTerminator.Return{value: Val(difference)})
+    lir_builder_finish(f.builder)
+}
+
 // `xs.starts_with(prefix)` / `xs.ends_with(suffix)`: no longer than the List,
 // every position of the List's first / last `count` elements equal.
 fn lower_helper_list_starts_with(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
@@ -1032,6 +1092,127 @@ fn lower_new_like(f: &LowerFunction, value: LIRValueID) -> LIRValueID Never! {
 fn lower_list_clone_element(p: MIRProgram, m: &LowerModule, f: &LowerFunction, from: LIRValueID, to: LIRValueID, elem: MIRType) Never! {
     lower_list_move(p, &f, to, from, elem)
     if lower_needs_drop(p, elem) -> lower_glue_clone_fields(p, &m, &f, from, to, [LowerGlueField]{LowerGlueField{offset: 0, ty: elem}})
+}
+
+// `xs.slice(start, end)` (Collections.rs jet_list_slice: both bounds clamp
+// into 0..len, an empty window when end <= start, the window's elements
+// cloned) and `xs.min()` / `xs.max()` (jet_list_min / jet_list_max:
+// Iterator::min keeps the first least item, max the last greatest; a `T?`
+// box of a copy, None when empty). False when `row` is not one.
+fn lower_list_method_window(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, symbol: String, receiver: MIRValueID, args: [MIRValueID], ty: MIRType) -> Bool Never! {
+    elem :: lower_list_element(ty) ?? return false
+    slice_route :: row.member == "list_slice" && symbol == "jet_list_slice"
+    min_route :: row.member == "min" && symbol == "jet_list_min"
+    max_route :: row.member == "max" && symbol == "jet_list_max"
+    if !slice_route && !min_route && !max_route -> return false
+    if args.len() != (if slice_route -> 2 else -> 0) {
+        lower_fail(&m, &f, "List {row.member} with {args.len()} arguments is not lowered at O0 yet")
+        return true
+    }
+    if lower_repr(p, elem) == .Absent {
+        lower_fail(&m, &f, "List {row.member} over {mir_type_display_name(elem)} is not lowered at O0 yet")
+        return true
+    }
+    stride :: lower_list_stride(p, elem)
+    zero :: lower_const(&f, 0)
+    if slice_route {
+        result_ty :: lower_checked_type(c, instruction) ?? {
+            lower_fail(&m, &f, "List slice without a checked result type is not lowered at O0 yet")
+            return true
+        }
+        start :: lower_list_native_index(c, &m, &f, args[0]) ?? return true
+        end :: lower_list_native_index(c, &m, &f, args[1]) ?? return true
+        list :: lower_use(&m, &f, receiver) ?? return true
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+        length :: lower_list_word(&f, list, 0)
+        first :: lower_list_clamp(&f, start, zero, length)
+        last :: lower_list_clamp(&f, end, first, length)
+        count :: lower_word(&f)
+        lower_emit(&f, LIRInst.Binary{dst: count, op: LIRBinaryOp.Sub, left: last, right: first})
+        window :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.StackSlot{dst: window, size: 24, align: 8})
+        lower_emit(&f, LIRInst.Store{base: window, offset: 0, value: count})
+        lower_emit(&f, LIRInst.Store{base: window, offset: 8, value: zero})
+        list_data :: lower_list_data(&f, list)
+        window_data :: lower_list_address(&f, list_data, first, stride)
+        lower_emit(&f, LIRInst.Store{base: window, offset: 16, value: window_data})
+        lower_storage_into(p, &f, dst, result_ty)
+        lower_inline_clone(p, &m, &f, window, dst, result_ty)
+        return true
+    }
+    if lower_map_key_kind(p, elem) == "" || lower_is_inline(p, elem) {
+        lower_fail(&m, &f, "List {row.member} of {mir_type_display_name(elem)} is not lowered at O0 yet")
+        return true
+    }
+    list :: lower_use(&m, &f, receiver) ?? return true
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    data :: lower_list_data(&f, list)
+    none_at :: lower_const(&f, -1)
+    each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{none_at})
+    best_at :: each.state[0]
+    item :: lower_read_at(p, &f, each.address, 0, elem) ?? return true
+    chosen_block :: lower_new_block(&f)
+    weigh :: lower_new_block(&f)
+    join :: lower_new_block(&f)
+    first :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: first, condition: LIRCondition.Lt, left: best_at, right: zero})
+    lower_seal(&f, LIRTerminator.Branch{condition: first, then_target: lower_target(chosen_block, [LIRValueID]{}), else_target: lower_target(weigh, [LIRValueID]{})})
+    lower_start(&f, weigh, [LIRValueID]{})
+    best_address :: lower_list_address(&f, data, best_at, stride)
+    best :: lower_read_at(p, &f, best_address, 0, elem) ?? return true
+    // min replaces the best only when item < best; max keeps it only then.
+    order :: lower_map_key_order(p, &m, &f, elem, item, best)
+    if min_route {
+        lower_seal(&f, LIRTerminator.Branch{condition: order.less, then_target: lower_target(chosen_block, [LIRValueID]{}), else_target: lower_target(join, [LIRValueID]{best_at})})
+    } else {
+        lower_seal(&f, LIRTerminator.Branch{condition: order.less, then_target: lower_target(join, [LIRValueID]{best_at}), else_target: lower_target(chosen_block, [LIRValueID]{})})
+    }
+    lower_start(&f, chosen_block, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{each.at})})
+    next_at :: lower_word(&f)
+    lower_start(&f, join, [LIRValueID]{next_at})
+    lower_each_end(&f, each, [LIRValueID]{next_at})
+    chosen :: each.exit[0]
+    found :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: found, condition: LIRCondition.Ge, left: chosen, right: zero})
+    some :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    lower_seal(&f, LIRTerminator.Branch{condition: found, then_target: lower_target(some, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{null})})
+    lower_start(&f, some, [LIRValueID]{})
+    chosen_address :: lower_list_address(&f, data, chosen, stride)
+    value := lower_read_at(p, &f, chosen_address, 0, elem) ?? return true
+    if lower_needs_drop(p, elem) {
+        copied :: lower_new_like(&f, value)
+        lower_clone_into(p, &m, &f, value, copied, elem)
+        value = copied
+    }
+    boxed :: lower_pointer(&f)
+    lower_alloc(&m, &f, boxed, lower_option_box_size(p, elem))
+    lower_write_at(p, &f, boxed, 0, value, elem)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{boxed})})
+    lower_start(&f, done, [LIRValueID]{dst})
+    true
+}
+
+// `value` clamped into `low..=high` (low <= high).
+fn lower_list_clamp(f: &LowerFunction, value: LIRValueID, low: LIRValueID, high: LIRValueID) -> LIRValueID Never! {
+    below :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: below, condition: LIRCondition.Lt, left: value, right: low})
+    above :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: above, condition: LIRCondition.Gt, left: value, right: high})
+    check :: lower_new_block(&f)
+    within :: lower_new_block(&f)
+    join :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: below, then_target: lower_target(join, [LIRValueID]{low}), else_target: lower_target(check, [LIRValueID]{})})
+    lower_start(&f, check, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Branch{condition: above, then_target: lower_target(join, [LIRValueID]{high}), else_target: lower_target(within, [LIRValueID]{})})
+    lower_start(&f, within, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{value})})
+    clamped :: lower_word(&f)
+    lower_start(&f, join, [LIRValueID]{clamped})
+    clamped
 }
 
 // Flatten, removal by value or slot, count and Map.from_keys over a List
