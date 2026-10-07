@@ -26,6 +26,11 @@ fn run() Never! {
     if jet_cli_lint_max([String]{"--max=-1"}, false) == .Value(_) -> panic("negative must refuse")
     if jet_cli_lint_max([String]{"--max=-0"}, false) == .Value(_) -> panic("unsigned parsing rejects negative zero")
     if jet_cli_lint_max([String]{"--max=0", "--max=20"}, false) != .Value(Val(0)) -> panic("first max wins")
+    if jet_cli_lint_max([String]{"--max=+0"}, false) != .Value(Val(0)) -> panic("unsigned parsing accepts one leading plus")
+    if jet_cli_lint_max([String]{"--max=00000000000000000000001"}, false) != .Value(Val(1)) -> panic("leading zeroes do not overflow")
+    if jet_cli_lint_max([String]{"--max=1_0"}, false) == .Value(_) -> panic("underscores are not integer option digits")
+    if jet_cli_lint_max([String]{"--max="}, false) == .Value(_) -> panic("empty max must refuse")
+    if jet_cli_lint_max([String]{"--max=++1"}, false) == .Value(_) -> panic("only one plus is allowed")
 
     inspection :: JetCLIArchitectureInspection{rows: [], reason: None, check: None}
     expected :: "architecture advice (D-ARCH-ADVICE1; advisory, operator may reject):\n  no checked agreement candidate; local complexity is not proof of a cross-boundary invariant\n  measurement: benchmark/change-task not measured; no advantage claim\n"

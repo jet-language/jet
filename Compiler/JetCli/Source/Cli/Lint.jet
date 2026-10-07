@@ -32,11 +32,17 @@ pub fn jet_cli_lint_a11y(file: String, source: String, color: Bool, json: Bool) 
 fn jet_cli_lint_max(raw: [String], color: Bool) -> JetCLIIntOption Never! {
     loop argument in raw {
         if !argument.starts_with("--max=") -> next
-        bytes :: argument.bytes()
-        text :: if bytes.len() > 6 -> String.from_bytes(bytes[6..bytes.len() - 1]) ?? "" else -> ""
-        if text.starts_with("-") -> return JetCLIIntOption.Refused{output: jet_cli_lint_max_error(text, color)}
-        value :: Int.parse(text) ?? return JetCLIIntOption.Refused{output: jet_cli_lint_max_error(text, color)}
-        if value < 0 || value > 4294967295 -> return JetCLIIntOption.Refused{output: jet_cli_lint_max_error(text, color)}
+        text :: argument.removeprefix("--max=")
+        digits :: text.bytes()
+        index := if digits.len() > 0 && digits[0] == (U8{43}) -> 1 else -> 0
+        if index >= digits.len() -> return JetCLIIntOption.Refused{output: jet_cli_lint_max_error(text, color)}
+        value := 0
+        loop index < digits.len() {
+            digit :: Int.from_u8(digits[index]) - 48
+            if digit < 0 || digit > 9 || value > 429496729 || (value == 429496729 && digit > 5) -> return JetCLIIntOption.Refused{output: jet_cli_lint_max_error(text, color)}
+            value = value * 10 + digit
+            index += 1
+        }
         return JetCLIIntOption.Value{value: Val(value)}
     }
     JetCLIIntOption.Value{value: None}

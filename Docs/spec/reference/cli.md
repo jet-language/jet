@@ -352,6 +352,18 @@ architecture advice and check provenance. Shared-callee and consumer-agreement
 candidates retain definition/call-site spans, effects, behavioral-check
 statuses, and uncertainty; they neither execute user code nor apply a refactor.
 
+`inspect structure` presents the compiler's published name facts and the
+structure slice of its gate ledger; it does not infer missing facts by scanning
+source text. Frontend failures can publish a structure report before the
+diagnostic report, so the machine stream can contain a successful envelope
+followed by a failed one. `--core` presents the canonical bootstrap order,
+root types, and module/type export declarations without compiling the entry.
+Its ordinary inspect target/project resolution still applies.
+The hosted Core/Structure catalog is regenerated from `Prelude/Core.jet`
+and `Prelude/Facts.jet` with
+`node Compiler/Bootstrap/generate-structure-registry.mjs`; `--check` detects
+a stale generated projection.
+
 Unsafe-gate inspection reads the parser's audited regions and scoped policy
 declarations. It retains each low-level operation, its typed obligations
 (`valid_ptr`, `aligned`, `no_alias`), the immediately following assertion, and
