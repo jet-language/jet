@@ -1,0 +1,149 @@
+// Native Shared<NativeValue>. SharedProtocol.rs:280-330 is the policy:
+// concurrent readers, exclusive writer, waiting writers precede new readers.
+// Recursive acquisition has no special exception (it blocks as in Rust).
+// Cell80: atomic refs0, mutex8, condition sequence16, readers24, writer32,
+// writers-waiting40, revision48, owned descriptor56, payload64, borrows72.
+// Handles are opaque owned references to the cell; callbacks borrow the payload.
+fn shared_retain(shared: I64) {
+    _ := sync_add(shared, I64{1})
+}
+
+fn shared_acquire(shared: I64, editable: Bool) {
+    mutex :: shared + I64{8}
+    sync_mutex_lock(mutex)
+    if editable { _ := sync_add(shared + I64{40}, I64{1}) }
+    loop {
+        available :: sync_load(shared + I64{32}) == I64{0} && (if editable -> sync_load(shared + I64{24}) == I64{0} else -> sync_load(shared + I64{40}) == I64{0})
+        if available {
+            if editable {
+                _ := sync_add(shared + I64{40}, I64{-1})
+                sync_store(shared + I64{32}, I64{1})
+            } else { _ := sync_add(shared + I64{24}, I64{1}) }
+            _ := sync_add(shared + I64{72}, I64{1})
+            sync_mutex_unlock(mutex)
+            return
+        }
+        // These callback doors pass cancelled=||false in the Rust kernel.
+        // Compensation is required, but cancellation must not change meaning.
+        scheduler_blocking_wait_enter()
+        _ := sync_cond_wait(shared + I64{16}, mutex, sync_deadline(I64{10000000}))
+        scheduler_blocking_wait_leave()
+    }
+}
+
+fn shared_release(shared: I64, editable: Bool) {
+    sync_mutex_lock(shared + I64{8})
+    if editable { sync_store(shared + I64{32}, I64{0}) }
+    else { _ := sync_add(shared + I64{24}, I64{-1}) }
+    _ := sync_add(shared + I64{72}, I64{-1})
+    sync_cond_notify_all(shared + I64{16})
+    sync_mutex_unlock(shared + I64{8})
+}
+
+#Export(c) fn jet_rt_native_shared_new(slot: I64, meta: I64) -> I64 {
+    shared :: jet_rt_alloc(I64{80}, I64{8})
+    thread_zero(shared, I64{80})
+    owned_meta :: coll_meta_copy(meta)
+    payload :: coll_slot_new(owned_meta)
+    coll_copy(slot, payload, coll_payload(owned_meta))
+    sync_store(shared, I64{1})
+    sync_store(shared + I64{56}, owned_meta)
+    sync_store(shared + I64{64}, payload)
+    shared
+}
+
+#Export(c) fn jet_rt_native_shared_read(shared: I64, env: I64, invoke: I64, out: I64) {
+    shared_retain(shared)
+    shared_acquire(shared, false)
+    _ := coll_call3(invoke, env, sync_load(shared + I64{64}), out)
+    // No output is inspected here: a stopped callback leaves it uninitialized.
+    shared_release(shared, false)
+    jet_rt_native_shared_drop(shared)
+}
+
+#Export(c) fn jet_rt_native_shared_edit(shared: I64, env: I64, invoke: I64, out: I64) {
+    shared_retain(shared)
+    shared_acquire(shared, true)
+    revision :: sync_load(shared + I64{48})
+    if (revision == I64{-1}) {
+        shared_release(shared, true)
+        jet_rt_native_shared_drop(shared)
+        channel_fatal(I64{3})
+        return
+    }
+    _ := coll_call3(invoke, env, sync_load(shared + I64{64}), out)
+    if (jet_rt_session_propagate() == I64{0}) {
+        sync_store(shared + I64{48}, wrapping(revision + I64{1}))
+    }
+    shared_release(shared, true)
+    jet_rt_native_shared_drop(shared)
+}
+
+#Export(c) fn jet_rt_native_shared_clone(shared: I64) -> I64 {
+    shared_retain(shared)
+    shared
+}
+
+#Export(c) fn jet_rt_native_shared_drop(shared: I64) {
+    if (shared == I64{0}) { return }
+    if (sync_add(shared, I64{-1}) != I64{1}) { return }
+    meta :: sync_load(shared + I64{56})
+    // Finalization runs outside every payload/protocol lock and is shielded.
+    jet_rt_session_shield_enter()
+    coll_slot_free(sync_load(shared + I64{64}), meta)
+    coll_meta_drop(meta)
+    jet_rt_free(shared, I64{80}, I64{8})
+    jet_rt_session_shield_leave()
+}
+
+// Process-pinned publication registry, shared with World-lifetime site reset.
+// Reset is quiescent (all World children joined); retained nodes dedupe the
+// cell before allocation. Outstanding clones independently retain their cell.
+shared_registered := I64{0}
+
+// runtime-init: 3
+#Export(c) fn jet_rt_shared_init() {
+    if (shared_registered == I64{0}) {
+        shared_registered = jet_rt_alloc(I64{8}, I64{8})
+        sync_store(shared_registered, I64{0})
+    }
+}
+
+#Export(c) fn jet_rt_global_register(cell: I64) {
+    loop {
+        first :: sync_load(shared_registered)
+        node := first
+        loop node != (I64{0}) {
+            if (sync_load(node) == cell) { return }
+            node = sync_load(node + I64{8})
+        }
+        candidate :: jet_rt_alloc(I64{16}, I64{8})
+        sync_store(candidate, cell)
+        sync_store(candidate + I64{8}, first)
+        // Global publication uses the one MIR .Global address mechanism.
+        if shared_registry_publish(first, candidate) { return }
+        jet_rt_free(candidate, I64{16}, I64{8})
+    }
+}
+
+fn shared_registry_publish(expected: I64, candidate: I64) -> Bool {
+    sync_cas(shared_registered, expected, candidate) == expected
+}
+
+#Export(c) fn jet_rt_shared_site_publish(cell: I64, candidate: I64, lifetime: I64) -> I64 {
+    previous :: sync_cas(cell, I64{0}, candidate)
+    if (previous == I64{0}) {
+        if (lifetime == I64{1}) { jet_rt_global_register(cell) }
+        return candidate
+    }
+    jet_rt_native_shared_drop(candidate)
+    previous
+}
+
+#Export(c) fn jet_rt_global_reset_registered() {
+    node := sync_load(shared_registered)
+    loop node != (I64{0}) {
+        jet_rt_native_shared_drop(sync_swap(sync_load(node), I64{0}))
+        node = sync_load(node + I64{8})
+    }
+}
