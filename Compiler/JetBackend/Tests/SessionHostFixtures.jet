@@ -186,6 +186,14 @@ fn session_test_logical_close(host: X64ExecutionHost) -> Int {
 
 // These are loader/registry witnesses, not replacement Shared semantics:
 // the export is an actual emitted callable and the dynamic image imports it.
+fn session_test_core_zero_image() -> X64MemoryImage {
+    lir := LIRModule{signatures: [LIRSignature]{LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: None}}, functions: [LIRFunction]{}, data: [LIRData]{}}
+    startup := lir_builder(LIRFunctionID{value: 0}, "host.fixture.core.zero.init", LIRSignatureID{value: 0})
+    lir_builder_term(&startup, LIRTerminator.Return{value: None})
+    &lir.functions.push(lir_builder_finish(startup))
+    x64_memory_image(lir, LIRFunctionID{value: 0})
+}
+
 fn session_test_core_image() -> X64MemoryImage {
     lir := LIRModule{signatures: [LIRSignature]{
         LIRSignature{id: LIRSignatureID{value: 0}, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: Val(lir_layout_word())},
@@ -324,6 +332,15 @@ fn run() {
     assert(refused.errors.len() > 0 && refused.invalidated && !refused.stopped && refused.body == "")
     recovered :: x64_execution_request(host, session_test_request("constant"))
     assert(recovered.errors.len() == 0 && recovered.body == folded.body && recovered.generation == fresh.generation + 1)
+    // A real Unit startup is still required when there are no Shared sites.
+    zero_site := session_test_request("constant")
+    zero_site.core = Val(session_test_core_zero_image())
+    zero_image :: zero_site.core ?? panic("fixture lost its empty Core image")
+    assert(zero_image.exports.len() == 0 && x64_core_export_errors(zero_image).len() == 0)
+    zero_admitted :: x64_execution_request(host, zero_site)
+    assert(zero_admitted.errors.len() == 0 && zero_admitted.body == folded.body && zero_admitted.generation == recovered.generation)
+    zero_reused :: x64_execution_request(host, zero_site)
+    assert(zero_reused.errors.len() == 0 && zero_reused.body == zero_admitted.body && zero_reused.generation == zero_admitted.generation)
     x64_execution_close(host)
     print("one child: binary image transport, shared turns/comptime, recoverable fuel, typed refusal, fatal reset: pass")
 }
