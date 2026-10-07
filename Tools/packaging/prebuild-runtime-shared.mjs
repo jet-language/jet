@@ -77,6 +77,8 @@ const manifestPath = `${runtime}/exports.list`;
 const manifest = source(config.source.root, manifestPath);
 const rows = exportRows(manifest);
 const expectedNames = rows.map(row => row.name).sort();
+const e2Exports = exportRows(source(config.e2.root, manifestPath)).map(row => row.name).sort();
+for (const name of e2Exports) if (!expectedNames.includes(name)) throw Error(`composed export union dropped frozen E2 export ${name}`);
 // Schema identity belongs to the pinned Core image/getter inventory, never to
 // new runtime .so exports. The runtime manifest is the complete landed union.
 const initializers = rows.filter(row => row.init !== null);
@@ -143,7 +145,7 @@ const receipt = {
   e2SHA: config.e2.sha, layers: config.layers, optimization: 'O0',
   library: 'jet_runtime.so', librarySHA256: fileHash(candidate), objectSHA256: fileHash(object),
   compilerSHA256: config.compiler.sha256, e2CompilerSHA256: config.e2.compilerSHA256, e2ObjectSHA256: config.e2.objectSHA256,
-  exportManifestSHA256: hash(manifest), runtimeLoweringSHA256: fileHash(join(config.source.root, loweringPath)), sourceFiles, ...seal,
+  exportManifestSHA256: hash(manifest), runtimeLoweringSHA256: fileHash(join(config.source.root, loweringPath)), e2Exports, sourceFiles, ...seal,
 };
 renameSync(candidate, join(out, receipt.library));
 const receiptBytes = JSON.stringify(receipt, null, 2) + '\n';
