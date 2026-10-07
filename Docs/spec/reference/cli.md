@@ -41,6 +41,15 @@ successful snapshot writes are counted. These commands keep their direct
 human report under `--json` and `--quiet`; neither mode creates a schema-status
 JSON protocol.
 
+`jet self completions <shell> --for <program>` reads embedded command metadata
+without executing the program. Shell registration uses its basename, with
+shell-specific quoting; only schema-known inputs and commands are candidates.
+The reader opens once without blocking, checks that opened file is regular,
+and bounds the read to 512 MiB before verifying the record format and digest.
+Offset overflow follows the CLI's compile-target pointer layout, not the
+inspected executable's word size. Metadata failures always use direct E2103
+stderr; completion arguments retain their exact command-specific grammar.
+
 ## Project jobs
 
 Write a named chore as `#Job fn deploy(region: String) { … }`, then run
