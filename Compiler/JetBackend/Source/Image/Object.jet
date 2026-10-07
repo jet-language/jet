@@ -216,8 +216,26 @@ fn x64_object_functions(program: LIRModule, functions: [X64CompiledFunction], ex
         elf64_u64(&data_rela, (entry_row.symbol << 32) | entry_row.kind)
         elf64_u64(&data_rela, entry_row.addend)
     }
+    // Allocator initialization belongs to the runtime object, not main.
+    // Priority zero precedes Rust/library constructors that may allocate.
+    initializer := -1
+    loop (index, entry_row) in exports {
+        if entry_row.symbol == "jet_rt_alloc_init" -> initializer = first_global + index
+    }
+    init := [U8]{}
+    init_rela := [U8]{}
+    if initializer >= 0 {
+        elf64_u64(&init, 0)
+        elf64_u64(&init_rela, 0)
+        elf64_u64(&init_rela, (initializer << 32) | ELF64_R_X86_64_64)
+        elf64_u64(&init_rela, 0)
+    }
     shstrtab := [U8]{U8{0}}
-    names :: [String]{".text", ".data", ".rela.text", ".symtab", ".strtab", ".shstrtab", ".note.GNU-stack", ".rela.data"}
+    names := [String]{".text", ".data", ".rela.text", ".symtab", ".strtab", ".shstrtab", ".note.GNU-stack", ".rela.data"}
+    if initializer >= 0 {
+        &names.push(".init_array.00000")
+        &names.push(".rela.init_array.00000")
+    }
     name_offsets := [Int]{0}
     loop name in names -> &name_offsets.push(elf64_string(&shstrtab, name))
 
@@ -237,10 +255,17 @@ fn x64_object_functions(program: LIRModule, functions: [X64CompiledFunction], ex
     elf64_u16(&bytes, 0)
     elf64_u16(&bytes, 0)
     elf64_u16(&bytes, ELF64_SECTION_HEADER_SIZE)
-    elf64_u16(&bytes, ELF64_OBJECT_SECTIONS)
+    section_count :: if initializer >= 0 -> ELF64_OBJECT_SECTIONS + 2 else -> ELF64_OBJECT_SECTIONS
+    elf64_u16(&bytes, section_count)
     elf64_u16(&bytes, ELF64_OBJECT_SHSTRTAB)
-    contents :: [[U8]]{text, rodata, rela, symtab, strtab, shstrtab, data_rela}
-    aligns :: [Int]{X64_FUNCTION_ALIGN, rodata_align, 8, 8, 1, 1, 8}
+    contents := [[U8]]{text, rodata, rela, symtab, strtab, shstrtab, data_rela}
+    aligns := [Int]{X64_FUNCTION_ALIGN, rodata_align, 8, 8, 1, 1, 8}
+    if initializer >= 0 {
+        &contents.push(init)
+        &contents.push(init_rela)
+        &aligns.push(8)
+        &aligns.push(8)
+    }
     section_offsets := [Int]{}
     loop (index, content) in contents {
         elf64_pad(&bytes, aligns[index])
@@ -265,5 +290,10 @@ fn x64_object_functions(program: LIRModule, functions: [X64CompiledFunction], ex
     elf64_section_header(&bytes, name_offsets[7], 1, 0, shoff, 0, 0, 0, 1, 0)
     // .rela.data: absolute pointer words against the .data section symbol.
     elf64_section_header(&bytes, name_offsets[8], 4, 0x40, section_offsets[6], data_rela.len(), ELF64_OBJECT_SYMTAB, ELF64_OBJECT_RODATA, 8, ELF64_RELA_SIZE)
+    if initializer >= 0 {
+        // SHT_INIT_ARRAY; absolute pointer relocated to the global init FUNC.
+        elf64_section_header(&bytes, name_offsets[9], 14, 3, section_offsets[7], init.len(), 0, 0, 8, 8)
+        elf64_section_header(&bytes, name_offsets[10], 4, 0x40, section_offsets[8], init_rela.len(), ELF64_OBJECT_SYMTAB, 9, 8, ELF64_RELA_SIZE)
+    }
     X64ExecutableResult{bytes: bytes, errors: [String]{}}
 }

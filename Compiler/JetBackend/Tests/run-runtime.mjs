@@ -1,20 +1,22 @@
 #!/usr/bin/env node
-// Assemble the audited OS layer and Jet runtime library, dump its checked MIR,
-// and lower precisely MIRArtifactPlan.exports into jet_runtime_jet.o.
-// usage: JET=<compiler> node run-runtime.mjs <outdir> [--stage assemble|mir|convert|lower] [--until assemble|mir|convert|lower]
-// --until assemble prepares both units for cheap checks without invoking a build.
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+// Assemble the audited runtime-only unit. NativeFeed's Jet compiler hands its
+// checked MIR directly to the library-object lowering hook; no Rust MIR feed.
+// usage: JET_FRONT_JETC0=<candidate> node run-runtime.mjs <outdir>
+//        [--stage assemble|lower] [--until assemble|lower]
+// --until assemble prepares the runtime and narrow RuntimeLower check units.
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Converter, SUPPORT_ITEMS, encode, jetDecoder, loadMirSchema, parseRustDebug } from "./mir-debug.mjs";
+import { SUPPORT_ITEMS, jetDecoder, loadMirSchema } from "./mir-debug.mjs";
+import { candidateJetc0, frontReceipt } from "./jet-front.mjs";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const args = process.argv.slice(2);
 const output = args.shift();
-if (!output) throw new Error("usage: run-runtime.mjs <outdir> [--stage assemble|mir|convert|lower] [--until assemble|mir|convert|lower]");
+if (!output) throw new Error("usage: run-runtime.mjs <outdir> [--stage assemble|lower] [--until assemble|lower]");
 const out = resolve(output);
-const stages = ["assemble", "mir", "convert", "lower"];
+const stages = ["assemble", "lower"];
 let first = "assemble", last = "lower";
 for (let index = 0; index < args.length; index++) {
   if (args[index] === "--stage") first = args[++index];
@@ -51,13 +53,9 @@ function item(path, head) {
 }
 const schema = loadMirSchema(repo);
 if (from <= 0 && until >= 0) {
-  const runtimeFiles = sorted("Compiler/JetRuntime/Source");
-  if (!runtimeFiles.length) throw new Error("Jet runtime library has no source files");
-  const runtime = [body("Compiler/JetBackend/Source/OS/Linux.jet"), ...runtimeFiles.map(body)];
+  execFileSync(process.execPath, [join(repo, "Compiler/JetRuntime/Tests/check-runtime.mjs"), library, "--assemble-only"], { stdio: "inherit" });
   mkdirSync(join(library, "Source"), { recursive: true });
-  writeFileSync(join(library, "Source/Runtime.jet"), [...coreUses, "", ...runtime].join("\n"));
-  writeFileSync(join(library, "package.jet"), read("Compiler/JetRuntime/package.jet"));
-  coreUses.clear();
+  renameSync(join(library, "unit.jet"), join(library, "Source/Runtime.jet"));
   const support = [];
   for (const [path, names] of SUPPORT_ITEMS) for (const name of names) support.push(item(path, new RegExp(`^(pub )?(struct|enum) ${name}\\b`)));
   support.push(item("Compiler/JetFoundation/Source/Types/Types.jet", /^(pub )?fn param_zone_name\(/));
@@ -71,6 +69,7 @@ if (from <= 0 && until >= 0) {
     "Compiler/JetBackend/Source/Image/Link.jet", "Compiler/JetBackend/Source/Image/Runtime.jet",
     "Compiler/JetBackend/Source/Image/RuntimeStrings.jet", "Compiler/JetBackend/Source/Image/ELF.jet",
     "Compiler/JetBackend/Source/Image/Object.jet", "Compiler/JetBackend/Source/Image/RuntimeObject.jet",
+    "Compiler/JetBackend/Source/Image/RuntimeLibrary.jet",
   ];
   // Reuse the golden stream reader verbatim rather than a second wire decoder.
   const golden = "Compiler/JetBackend/Tests/GoldenLower.jet";
@@ -79,32 +78,28 @@ if (from <= 0 && until >= 0) {
   writeFileSync(join(out, "unit.jet"), ["use core.math as math", ...coreUses, "", ...parts].join("\n"));
   writeFileSync(join(out, "package.jet"), 'name: "jet_runtime_lower"\nversion: "0.1.0"\nauthority: { holds: { allow: [FS.Read, FS.Write, IO, Mem.Alloc] } }\n');
 }
-function invoke(command, cwd, extra = {}) {
-  const jet = process.env.JET;
-  if (!jet) throw new Error("set JET to the compiler for this tree");
-  const run = spawnSync(join(repo, "Tools/agent/jet-env"), [jet, ...command], {
-    cwd, env: { ...process.env, ...extra }, encoding: "utf8", maxBuffer: 1 << 28,
+if (until === 1) {
+  const candidate = candidateJetc0();
+  const prefix = join(out, "jet_runtime_jet");
+  const receipt = join(out, "front.receipt");
+  for (const suffix of [".o", ".exports", ".issues"]) rmSync(prefix + suffix, { force: true });
+  rmSync(receipt, { force: true });
+  const run = spawnSync(candidate, [], {
+    cwd: repo,
+    env: {
+      ...process.env,
+      JET_BOOTSTRAP_MODE: "factory", JET_BOOTSTRAP_FACTORY_TIER: "aot",
+      JET_BOOTSTRAP_SOURCE_ROOT: library, JET_BOOTSTRAP_ENTRY: relative(library, join(library, "Source/Runtime.jet")),
+      JET_BOOTSTRAP_OUTPUT: join(out, "unused.output"), JET_BOOTSTRAP_RECEIPT: receipt,
+      JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix, JET_FRONT_LIBRARY_EXPORTS: join(repo, "Compiler/JetRuntime/exports.list"),
+      JET_STORE_DIR: resolve(process.env.JET_STORE_DIR ?? join(out, "store")), RUST_MIN_STACK: "8388608",
+    },
+    encoding: "utf8", timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 120000), maxBuffer: 1 << 27,
   });
-  writeFileSync(join(out, `${command[0]}.stderr`), run.stderr ?? "");
-  if (run.error || run.status !== 0) throw new Error(`${command.join(" ")} failed (${run.status}): ${run.error ?? run.stderr}`);
-  return run.stdout;
+  writeFileSync(join(out, "front.log"), `${run.stdout ?? ""}${run.stderr ?? ""}`);
+  const problem = frontReceipt(existsSync(receipt) ? readFileSync(receipt, "utf8") : "", run);
+  if (problem) throw new Error(problem.detail);
+  if (existsSync(prefix + ".issues")) throw new Error(readFileSync(prefix + ".issues", "utf8"));
+  if (!existsSync(prefix + ".o")) throw new Error("candidate lacks the Jet library-object hook; rebuild it from this tree");
 }
-if (from <= 1 && until >= 1) {
-  const dump = join(out, "runtime.mir");
-  rmSync(dump, { force: true });
-  invoke(["emit", "--rust"], library, { JET_DUMP_MIR: dump });
-  if (!existsSync(dump)) throw new Error("library front end produced no MIR dump; use the Jet front feed (no Rust fix)");
-}
-if (from <= 2 && until >= 2) {
-  const ast = parseRustDebug(readFileSync(join(out, "runtime.mir"), "utf8"));
-  const converted = new Converter(schema).convert(ast, { k: "named", name: "MIRProgram" }, "program");
-  const lines = [];
-  encode(converted, { k: "named", name: "MIRProgram" }, schema, lines);
-  writeFileSync(join(out, "runtime.mird"), `${lines.join("\n")}\n`);
-}
-if (from <= 3 && until >= 3) {
-  rmSync(join(out, "jet_runtime_jet.o"), { force: true });
-  invoke(["run", "unit.jet"], out);
-  if (!existsSync(join(out, "jet_runtime_jet.o"))) throw new Error("runtime lowering produced no object");
-}
-console.log(join(out, until === 3 ? "jet_runtime_jet.o" : "unit.jet"));
+console.log(join(out, until === 1 ? "jet_runtime_jet.o" : "unit.jet"));

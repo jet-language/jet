@@ -138,6 +138,7 @@ const parts = [
   body("Compiler/JetBackend/Source/Image/ELF.jet"),
   body("Compiler/JetBackend/Source/Image/Object.jet"),
   body("Compiler/JetBackend/Source/Image/RuntimeObject.jet"),
+  ...(!small ? [body("Compiler/JetBackend/Source/Image/RuntimeLibrary.jet")] : []),
   ...(!small ? [body("Compiler/JetBackend/Source/Image/Memory.jet")] : []),
   ...(sanitizeOnly ? [body("Compiler/JetBackend/Tests/SanitizeFixtures.jet"), "fn run() { sanitize_fixtures() }"] : [body("Compiler/JetBackend/Tests/AbiFixtures.jet")]),
   ...(abiOnly ? ["fn run() { abi_fixtures() }"] : sanitizeOnly ? [] : [body("Compiler/JetBackend/Tests/LowerFixtures.jet"), ...sorted("Compiler/JetBackend/Tests/Fixtures").map(body)]),

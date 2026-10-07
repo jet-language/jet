@@ -6,6 +6,13 @@ struct X64RuntimeExport {
 }
 
 fn x64_runtime_object(program: LIRModule, exports: [X64RuntimeExport]) -> X64ExecutableResult Never! {
+    loop entry_row in exports {
+        if entry_row.symbol != "jet_rt_alloc_init" -> next
+        id :: entry_row.function.value
+        if id < 0 || id >= program.functions.len() -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"allocator initializer is not in the module"}}
+        signature :: lir_signature(program, program.functions[id].signature) ?? return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"allocator initializer has no signature"}}
+        if signature.params.len() != 0 || signature.result != None -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"jet_rt_alloc_init must take no parameters and return nothing"}}
+    }
     compiled :: x64_compile_module(program)
     if compiled.errors.len() > 0 {
         return X64ExecutableResult{bytes: [U8]{}, errors: compiled.errors}

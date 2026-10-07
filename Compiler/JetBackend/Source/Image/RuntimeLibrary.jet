@@ -1,0 +1,159 @@
+// The library feed consumes checked MIR in-process. An explicit audited list
+// may supply exports while the Jet artifact producer lacks export rows; it is
+// never a naming heuristic, and every listed definition must be #Export(c).
+use jet_foundation.[MIRProgram, MIRExport, MIRFunction, MIRFunctionID, MIRType]
+
+struct X64RuntimeLibraryResult {
+    object: X64ExecutableResult
+    exports: [MIRExport]
+}
+
+fn runtime_export_error(message: String) -> X64RuntimeLibraryResult Never! {
+    X64RuntimeLibraryResult{object: X64ExecutableResult{bytes: [U8]{}, errors: [String]{message}}, exports: [MIRExport]{}}
+}
+
+fn runtime_export_word(ty: MIRType) -> Bool Never! {
+    if ty.kind == .IntN(signed, bits) -> return bits == 64 || (!signed && bits == 8)
+    ty.kind == .Bool
+}
+
+// Read complete attribute lines adjacent to the checked declaration. Matching
+// a substring in a comment, string, or unrelated preceding function is not an
+// export marker. The checked source span may include or follow the attributes.
+fn runtime_export_annotated(program: MIRProgram, function: MIRFunction) -> Bool Never! {
+    loop file in program.source_files {
+        if file.id == function.source_file -> return runtime_export_source(file.source, function)
+    }
+    false
+}
+
+fn runtime_export_source(text: String, function: MIRFunction) -> Bool Never! {
+    bytes :: text.bytes()
+    start :: function.span.start
+    end :: function.span.end
+    if start < 0 || end < start || end > bytes.len() -> return false
+    marked := false
+    found := false
+    at := start
+    loop at < end {
+        line_end := at
+        loop line_end < end && bytes[line_end] != (U8{10}) -> line_end += 1
+        line :: String.from_bytes(bytes.slice(at, line_end)) ?? return false
+        at = line_end + 1
+        value :: line.trim()
+        if value == "#Export(c)" -> marked = true
+        if value.starts_with("#Export(c) fn {function.name}(") || value.starts_with("#Export(c) pub fn {function.name}(") -> return true
+        if value.starts_with("fn {function.name}(") || value.starts_with("pub fn {function.name}(") {
+            found = true
+            break
+        }
+        if value != "" && !value.starts_with("#") && !value.starts_with("//") -> return false
+    }
+    if !found -> return false
+    if marked -> return true
+    at = start
+    // Also accept a same-line annotation just before the checked fn span.
+    loop at > 0 && bytes[at - 1] != (U8{10}) -> at -= 1
+    partial :: (String.from_bytes(bytes.slice(at, start)) ?? return false).trim()
+    if partial == "#Export(c)" -> return true
+    loop at > 0 {
+        line_end :: at - 1
+        line_start := line_end
+        loop line_start > 0 && bytes[line_start - 1] != (U8{10}) -> line_start -= 1
+        line :: (String.from_bytes(bytes.slice(line_start, line_end)) ?? return false).trim()
+        if line == "#Export(c)" -> return true
+        if line != "" && !line.starts_with("#") && !line.starts_with("//") -> return false
+        at = line_start
+    }
+    false
+}
+
+fn runtime_export_signature(function: MIRFunction, int_index_seam: Bool) -> Bool Never! {
+    if function.generic_params.len() != 0 || function.capture_params.len() != 0 || function.failure != .Infallible -> return false
+    if int_index_seam {
+        if function.params.len() != 2 -> return false
+        first := false
+        if function.params[0].ty.kind == .IntN(signed, bits) -> first = signed && bits == 64
+        if !first || function.params[1].ty.kind != .Int || function.params[0].access == .Write || function.params[1].access == .Write -> return false
+        if function.return_type.kind == .Tuple(fields) -> return fields.len() == 0
+        return false
+    }
+    loop param in function.params {
+        if param.access == .Write || !runtime_export_word(param.ty) -> return false
+    }
+    if function.return_type.kind == .Tuple(fields) -> return fields.len() == 0
+    runtime_export_word(function.return_type)
+}
+
+fn x64_runtime_library(program: MIRProgram, explicit: [String]) -> X64RuntimeLibraryResult Never! {
+    exports := [MIRExport]{}
+    library := false
+    loop artifact in program.artifacts {
+        if artifact.kind != .NativeLibrary -> next
+        library = true
+        loop entry_row in artifact.exports -> &exports.push(entry_row)
+    }
+    if !library -> return runtime_export_error("runtime feed requires a checked NativeLibrary artifact")
+    specs := [String:Bool]{}
+    pending := [String:Bool]{}
+    seam_count := 0
+    loop line in explicit {
+        text :: line.trim()
+        if text == "" || text.starts_with("#") -> next
+        fields := [String]{}
+        loop field in text.split(" ").to_list() {
+            if field != "" -> &fields.push(field)
+        }
+        if fields.len() == 0 || fields.len() > 2 -> return runtime_export_error("invalid runtime export row `{text}`")
+        seam :: fields.len() == 2
+        if seam && fields[1] != "int-index-seam" -> return runtime_export_error("unknown runtime export qualifier `{fields[1]}`")
+        if specs.get(fields[0]) != None -> return runtime_export_error("duplicate runtime export `{fields[0]}`")
+        if seam -> seam_count += 1
+        if seam_count > 1 -> return runtime_export_error("exports.list allows only one explicit Int index seam")
+        &specs.add(fields[0], seam).drop("checked absent above")
+        &pending.add(fields[0], true).drop("checked absent above")
+    }
+    if specs.len() == 0 -> return runtime_export_error("runtime feed requires the explicit audited exports.list")
+    use_plan :: exports.len() != 0
+    planned := [U64:String]{}
+    loop entry_row in exports {
+        if planned.get(entry_row.function.value) != None -> return runtime_export_error("duplicate checked export function {entry_row.symbol}")
+        &planned.add(entry_row.function.value, entry_row.symbol).drop("checked absent above")
+    }
+    loop function in program.functions {
+        annotated :: runtime_export_annotated(program, function)
+        listed :: specs.get(function.name) != None
+        if annotated && !listed -> return runtime_export_error("#Export(c) function {function.name} is missing from exports.list")
+        if !listed -> next
+        if pending.get(function.name) == None -> return runtime_export_error("ambiguous checked runtime function {function.name}")
+        if !annotated -> return runtime_export_error("listed runtime export {function.name} is not preceded by #Export(c)")
+        if use_plan {
+            if planned.get(function.id.value) != .Val(function.name) -> return runtime_export_error("exports.list disagrees with the checked artifact export {function.name}")
+        } else {
+            &exports.push(MIRExport{symbol: function.name, function: function.id, abi: .C})
+        }
+        _ := &pending.remove(function.name)
+    }
+    if pending.len() != 0 || exports.len() != specs.len() -> return runtime_export_error("exports.list names missing or extra checked runtime functions")
+    rows := [U64:Int]{}
+    loop (index, function) in program.functions -> &rows.add(function.id.value, index).drop("checked function IDs are unique")
+    roots := [MIRFunctionID]{}
+    loop entry_row in exports {
+        index :: rows.get(entry_row.function.value) ?? return runtime_export_error("export {entry_row.symbol} names a missing checked function")
+        function :: program.functions[index]
+        seam :: specs.get(entry_row.symbol) ?? return runtime_export_error("checked export {entry_row.symbol} is not in exports.list")
+        if entry_row.abi != .C || !runtime_export_signature(function, seam) -> return runtime_export_error("export {entry_row.symbol} has an invalid infallible C carrier signature")
+        &roots.push(entry_row.function)
+    }
+    lowered :: lir_lower_callables(program, roots)
+    if lowered.issues.len() > 0 {
+        errors :: loop issue in lowered.issues -> "{issue.function}\t{issue.message}"
+        return X64RuntimeLibraryResult{object: X64ExecutableResult{bytes: [U8]{}, errors: errors}, exports: exports}
+    }
+    globals := [X64RuntimeExport]{}
+    loop entry_row in exports {
+        function :: lowered.callables.get(entry_row.function.value) ?? return runtime_export_error("export {entry_row.symbol} has no lowered callable")
+        &globals.push(X64RuntimeExport{function: function, symbol: entry_row.symbol})
+    }
+    X64RuntimeLibraryResult{object: x64_runtime_object(lowered.lir, globals), exports: exports}
+}
