@@ -3709,6 +3709,9 @@ fn lower_boundary_typed_lit(
     }
     let kind = Syntax::typed_head_kind(type_name).filter(|kind| kind.is_boundary())?;
     let ty = Type::Named(kind.internal_type_name().to_string());
+    if kind == Syntax::TypedHeadKind::URL {
+        return Some(lower_url_recipe(literals, holes, cx));
+    }
     Some(TExpr {
         ty,
         kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::TypedTextInterp {
@@ -3718,6 +3721,49 @@ fn lower_boundary_typed_lit(
             trusted_html,
         })),
     })
+}
+
+fn lower_url_recipe(literals: Vec<String>, holes: Vec<TExpr>, cx: &Cx) -> TExpr {
+    let signature = cx.core_source_sigs
+        .get(&("core.net.url".to_string(), "literal".to_string()))
+        .expect("URL literal source signature is loaded");
+    let ty = signature.return_type.as_ref().expect("URL literal return type").clone();
+    let literals = literals.into_iter().map(|text| TExpr {
+        ty: Type::String,
+        kind: TExprKind::StrLit(vec![TStrPart::Lit(text)]),
+    }).collect();
+    let holes = holes.into_iter().map(|hole| TExpr {
+        ty: Type::String,
+        kind: TExprKind::StrLit(vec![TStrPart::Interp(hole, crate::AST::StrFormat::Display)]),
+    }).collect();
+    let args = [literals, holes].into_iter().map(|elements| TCallArg {
+        value: TExpr {
+            ty: Type::List(Box::new(Type::String)),
+            kind: TExprKind::ListLit(elements),
+        },
+        template_items: None,
+        borrow: true,
+        mut_borrow: false,
+        clone: false,
+        arc_clone: false,
+        fn_coerce: None,
+        widen_to_vec: false,
+        widen_to_union: None,
+        box_as_trait: None,
+    }).collect();
+    TExpr {
+        ty: ty.clone(),
+        kind: TExprKind::ModuleCall {
+            form: crate::Codegen::TIR::TModuleCallForm::Qualified {
+                rust_mod: signature.module_identity.clone(),
+                rust_fn: "literal".to_string(),
+            },
+            target_return: Some(crate::Codegen::TIR::module_call_target_return(cx, Some(&ty))
+                .expect("URL literal checked return")),
+            type_args: Vec::new(),
+            args,
+        },
+    }
 }
 
 /// D-BYTELIT1=B: mirror sema's byte-text rewrite for raw comptime fragments
@@ -6079,6 +6125,9 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 trusted_html.push(trusted);
                                 holes.push(hole);
                             }
+                        }
+                        if kind == Syntax::TypedHeadKind::URL {
+                            return lower_url_recipe(literals, holes, cx);
                         }
                         let ty = Type::Named(kind.internal_type_name().to_string());
                         if kind == Syntax::TypedHeadKind::HTML && holes.is_empty() {

@@ -2,14 +2,14 @@ package {
     name: "core.math"
     version: "0.0.1"
     edition: "2026"
-    description: "Integer math implemented in Jet."
+    description: "Exact integer arithmetic and IEEE floating-point composition in Jet."
     license: "MIT"
     outputs: {
         math: .Library{ entry: math }
     }
 }
 use core as core
-fn round_provider(n: Float) -> Int { core.math.round(n) }
+use core.math.random as ambient_random
 pub fn abs(n: Int) -> Int Never! {
     if n < 0 -> return -n
     n
@@ -103,21 +103,59 @@ pub fn exp(n: Float) -> Float Never! { core.math.exp(n) }
 pub fn exp2(n: Float) -> Float Never! { core.math.exp2(n) }
 pub fn exp_m1(n: Float) -> Float Never! { core.math.exp_m1(n) }
 pub fn expm1(n: Float) -> Float Never! { exp_m1(n) }
-pub fn erf(n: Float) -> Float Never! { core.math.erf(n) }
-pub fn erfc(n: Float) -> Float Never! { core.math.erfc(n) }
+/// Abramowitz & Stegun 7.1.26, retaining the runtime polynomial and operation order.
+pub fn erf(n: Float) -> Float Never! {
+    if is_nan(n) -> return nan()
+    if is_inf(n) -> return signum(n)
+    sign := Float{1.0}
+    if n < 0.0 -> sign = -1.0
+    magnitude :: fabs(n)
+    t :: Float{1.0} / (Float{1.0} + Float{0.3275911} * magnitude)
+    polynomial :: t * (Float{0.254829592} + t * (-Float{0.284496736} + t * (Float{1.421413741} + t * (-Float{1.453152027} + t * Float{1.061405429}))))
+    sign * (Float{1.0} - polynomial * exp(-magnitude * magnitude))
+}
+pub fn erfc(n: Float) -> Float Never! { 1.0 - erf(n) }
 pub fn floor(n: Float) -> Float Never! { core.math.floor(n) }
 pub fn ceil(n: Float) -> Float Never! { core.math.ceil(n) }
-pub fn fract(n: Float) -> Float Never! { core.math.fract(n) }
-pub fn gamma(n: Float) -> Float Never! { core.math.gamma(n) }
-pub fn lgamma(n: Float) -> Float Never! { core.math.lgamma(n) }
+pub fn fract(n: Float) -> Float Never! { n - trunc(n) }
+/// Lanczos g=7, n=9, reflected below one half.
+pub fn gamma(n: Float) -> Float Never! {
+    if is_nan(n) -> return nan()
+    if n <= 0.0 && n == floor(n) -> return nan()
+    if n < 0.5 -> return pi() / (sin(pi() * n) * gamma(1.0 - n))
+    z :: n - 1.0
+    accumulator := Float{0.99999999999980993}
+    accumulator = accumulator + Float{676.5203681218851} / (z + 1.0)
+    accumulator = accumulator + -Float{1259.1392167224028} / (z + 2.0)
+    accumulator = accumulator + Float{771.32342877765313} / (z + 3.0)
+    accumulator = accumulator + -Float{176.61502916214059} / (z + 4.0)
+    accumulator = accumulator + Float{12.507343278686905} / (z + 5.0)
+    accumulator = accumulator + -Float{0.13857109526572012} / (z + 6.0)
+    accumulator = accumulator + Float{9.984369654078991e-6} / (z + 7.0)
+    accumulator = accumulator + Float{1.5056327351493116e-7} / (z + 8.0)
+    t :: z + 7.0 + 0.5
+    sqrt(2.0 * pi()) * pow(t, z + 0.5) * exp(-t) * accumulator
+}
+pub fn lgamma(n: Float) -> Float Never! {
+    value :: gamma(n)
+    if is_nan(value) || value <= 0.0 -> return nan()
+    ln(value)
+}
 pub fn hypot(a: Float, b: Float) -> Float Never! { core.math.hypot(a, b) }
 pub fn ln(n: Float) -> Float Never! { core.math.ln(n) }
 pub fn ln_1p(n: Float) -> Float Never! { core.math.ln_1p(n) }
 pub fn log1p(n: Float) -> Float Never! { ln_1p(n) }
-pub fn log(n: Float, base: Float) -> Float Never! { core.math.log(n, base) }
+pub fn log(n: Float, base: Float) -> Float Never! { ln(n) / ln(base) }
 pub fn log10(n: Float) -> Float Never! { core.math.log10(n) }
 pub fn log2(n: Float) -> Float Never! { core.math.log2(n) }
-pub fn logb(n: Float) -> Float Never! { core.math.logb(n) }
+pub fn logb(n: Float) -> Float Never! {
+    if ilogb(n) == {
+        .Val(exponent) -> return Float{exponent}
+        .None -> {}
+    }
+    if n == 0.0 -> return -infinity()
+    infinity()
+}
 pub fn pow(a: Float, b: Float) -> Float Never! { core.math.pow(a, b) }
 pub fn sin(n: Float) -> Float Never! { core.math.sin(n) }
 pub fn sinh(n: Float) -> Float Never! { core.math.sinh(n) }
@@ -127,50 +165,100 @@ pub fn tanh(n: Float) -> Float Never! { core.math.tanh(n) }
 pub fn trunc(n: Float) -> Float Never! { core.math.trunc(n) }
 pub fn truncate(n: Float) -> Float Never! { trunc(n) }
 
-pub fn cot(n: Float) -> Float Never! { core.math.cot(n) }
+pub fn cot(n: Float) -> Float Never! { 1.0 / tan(n) }
 pub fn copysign(value: Float, sign_value: Float) -> Float Never! {
-    core.math.copysign(value, sign_value)
+    magnitude :: to_bits(value) & 9223372036854775807
+    sign :: to_bits(sign_value) & (-9223372036854775807 - 1)
+    from_bits(magnitude | sign)
 }
 pub fn fma(a: Float, b: Float, c: Float) -> Float Never! { core.math.fma(a, b, c) }
 pub fn muladd(a: Float, b: Float, c: Float) -> Float Never! { fma(a, b, c) }
-pub fn inv(n: Float) -> Float Never! { core.math.inv(n) }
-pub fn signum(n: Float) -> Float Never! { core.math.signum(n) }
-pub fn degrees(n: Float) -> Float Never! { core.math.degrees(n) }
-pub fn radians(n: Float) -> Float Never! { core.math.radians(n) }
-pub fn lerp(a: Float, b: Float, t: Float) -> Float Never! { core.math.lerp(a, b, t) }
-pub fn float32(n: Float) -> Float Never! { core.math.float32(n) }
-pub fn float64(n: Float) -> Float Never! { core.math.float64(n) }
-pub fn fabs(n: Float) -> Float Never! { core.math.fabs(n) }
+pub fn inv(n: Float) -> Float Never! { 1.0 / n }
+pub fn signum(n: Float) -> Float Never! {
+    if is_nan(n) -> return nan()
+    if sign_bit(n) -> return -1.0
+    1.0
+}
+pub fn degrees(n: Float) -> Float Never! { n * 57.29577951308232 }
+pub fn radians(n: Float) -> Float Never! { n * 0.017453292519943295 }
+pub fn lerp(a: Float, b: Float, t: Float) -> Float Never! { a + (b - a) * t }
+pub fn float32(n: Float) -> Float Never! { n }
+pub fn float64(n: Float) -> Float Never! { n }
+pub fn fabs(n: Float) -> Float Never! { from_bits(to_bits(n) & 9223372036854775807) }
 pub fn real(n: Float) -> Float Never! { n }
 pub fn imag(n: Float) -> Float Never! { Float{0.0} }
 pub fn conj(n: Float) -> Float Never! { n }
 
-pub fn is_nan(n: Float) -> Bool Never! { core.math.is_nan(n) }
-pub fn is_inf(n: Float) -> Bool Never! { core.math.is_inf(n) }
-pub fn is_finite(n: Float) -> Bool Never! { core.math.is_finite(n) }
+pub fn is_nan(n: Float) -> Bool Never! { n != n }
+pub fn is_inf(n: Float) -> Bool Never! { fabs(n) == infinity() }
+pub fn is_finite(n: Float) -> Bool Never! { fabs(n) < infinity() }
+// #4747: preserve the existing F32 call contract without changing Float policy.
+pub fn __is_finite_f32(n: F32) -> Bool Never! { is_finite(Float{n}) }
 pub fn isnan(n: Float) -> Bool Never! { is_nan(n) }
 pub fn isinf(n: Float) -> Bool Never! { is_inf(n) }
 pub fn isfinite(n: Float) -> Bool Never! { is_finite(n) }
-pub fn is_normal(n: Float) -> Bool Never! { core.math.is_normal(n) }
-pub fn is_subnormal(n: Float) -> Bool Never! { core.math.is_subnormal(n) }
-pub fn is_canonical(n: Float) -> Bool Never! { core.math.is_canonical(n) }
-pub fn is_signed(n: Float) -> Bool Never! { core.math.is_signed(n) }
-pub fn is_zero(n: Float) -> Bool Never! { core.math.is_zero(n) }
-pub fn is_integer(n: Float) -> Bool Never! { core.math.is_integer(n) }
-pub fn sign_bit(n: Float) -> Bool Never! { core.math.sign_bit(n) }
+pub fn is_normal(n: Float) -> Bool Never! {
+    magnitude :: fabs(n)
+    magnitude >= 2.2250738585072014e-308 && magnitude < infinity()
+}
+pub fn is_subnormal(n: Float) -> Bool Never! {
+    magnitude :: fabs(n)
+    magnitude > 0.0 && magnitude < 2.2250738585072014e-308
+}
+pub fn is_canonical(n: Float) -> Bool Never! { is_finite(n) || is_nan(n) }
+pub fn is_signed(n: Float) -> Bool Never! { sign_bit(n) }
+pub fn is_zero(n: Float) -> Bool Never! { n == 0.0 }
+pub fn is_integer(n: Float) -> Bool Never! { is_finite(n) && fract(n) == 0.0 }
+pub fn sign_bit(n: Float) -> Bool Never! { to_bits(n) < 0 }
 
-pub fn next_up(n: Float) -> Float Never! { core.math.next_up(n) }
-pub fn next_down(n: Float) -> Float Never! { core.math.next_down(n) }
+pub fn next_up(n: Float) -> Float Never! {
+    if is_nan(n) || n == infinity() -> return n
+    next_after(n, infinity())
+}
+pub fn next_down(n: Float) -> Float Never! {
+    if is_nan(n) || n == -infinity() -> return n
+    next_after(n, -infinity())
+}
 pub fn next_after(n: Float, toward: Float) -> Float Never! {
-    core.math.next_after(n, toward)
+    if is_nan(n) || is_nan(toward) -> return nan()
+    if n == toward -> return toward
+    if n == 0.0 {
+        if toward > 0.0 -> return from_bits(1)
+        return -from_bits(1)
+    }
+    bits := to_bits(n)
+    if (toward > n) == !sign_bit(n) -> bits = bits + 1 else -> bits = bits - 1
+    from_bits(bits)
 }
 pub fn nextafter(n: Float, toward: Float) -> Float Never! { next_after(n, toward) }
-pub fn significand(n: Float) -> Float Never! { core.math.significand(n) }
-pub fn ulp(n: Float) -> Float Never! { core.math.ulp(n) }
-pub fn ilogb(n: Float) -> Int? Never! { core.math.ilogb(n) }
-pub fn ldexp(n: Float, exponent: Int) -> Float Never! { core.math.ldexp(n, exponent) }
+pub fn significand(n: Float) -> Float Never! {
+    if n == 0.0 || !is_finite(n) -> return n
+    bits :: to_bits(n)
+    exponent :: (bits >> 52) & 2047
+    if exponent == 0 {
+        value := fabs(n)
+        loop value < 1.0 -> value = value * 2.0
+        return copysign(value, n)
+    }
+    copysign(from_bits((1023 << 52) | (bits & 4503599627370495)), n)
+}
+pub fn ulp(n: Float) -> Float Never! {
+    if is_nan(n) -> return nan()
+    if is_inf(n) -> return infinity()
+    magnitude :: fabs(n)
+    if magnitude == 0.0 -> return from_bits(1)
+    from_bits(to_bits(magnitude) + 1) - magnitude
+}
+pub fn ilogb(n: Float) -> Int? Never! {
+    if n == 0.0 || !is_finite(n) -> return None
+    Val(Int.from_float(floor(log2(fabs(n)))) ?? panic("finite logarithm exponent fits Int"))
+}
+pub fn ldexp(n: Float, exponent: Int) -> Float Never! {
+    if !is_finite(n) || n == 0.0 || exponent == 0 -> return n
+    n * pow(2.0, Float{clamp(exponent, -2099, 2099)})
+}
 pub fn scaleb(n: Float, exponent: Int) -> Float Never! { ldexp(n, exponent) }
-pub fn radix(n: Float) -> Int Never! { core.math.radix(n) }
+pub fn radix(n: Float) -> Int Never! { 2 }
 
 pub fn pi() -> Float Never! { Float{3.14159265358979323846264338327950288} }
 pub fn e() -> Float Never! { Float{2.7182818284590452354} }
@@ -180,7 +268,16 @@ pub fn infinity() -> Float Never! { (Float{1.0}) / (Float{0.0}) }
 pub fn nan() -> Float Never! { (Float{0.0}) / (Float{0.0}) }
 pub fn zero() -> Float Never! { Float{0.0} }
 
-pub fn round(n: Float) -> Int Never! { round_provider(n) }
+pub fn round(n: Float) -> Int Never! {
+    if is_nan(n) -> return 0
+    if n >= 9223372036854775808.0 -> return 9223372036854775807
+    if n <= -9223372036854775808.0 -> return -9223372036854775808
+    whole := trunc(n)
+    fraction :: n - whole
+    if fraction >= 0.5 -> whole = whole + 1.0
+    if fraction <= -0.5 -> whole = whole - 1.0
+    Int.from_float(whole) ?? panic("bounded rounded Float fits Int")
+}
 pub fn to_bits(n: Float) -> Int Never! { core.math.to_bits(n) }
 pub fn from_bits(bits: Int) -> Float Never! { core.math.from_bits(bits) }
 pub fn sin_cos(n: Float) -> (cos: Float, sin: Float) Never! {
@@ -188,11 +285,12 @@ pub fn sin_cos(n: Float) -> (cos: Float, sin: Float) Never! {
     (cos: pair.cos, sin: pair.sin)
 }
 pub fn modf(n: Float) -> (fract: Float, whole: Float) Never! {
-    core.math.modf(n)
+    (fract: fract(n), whole: trunc(n))
 }
 pub fn frexp(n: Float) -> (exp: Int, frac: Float) Never! {
-    pair :: core.math.frexp(n)
-    (exp: pair.exp, frac: pair.frac)
+    exponent :: ilogb(n) ?? 0
+    if n == 0.0 || !is_finite(n) -> return (exp: exponent, frac: n)
+    (exp: exponent, frac: ldexp(n, -exponent))
 }
 
 pub fn checked_abs(n: Int) -> Int? Never! {
@@ -343,10 +441,39 @@ pub fn div_rem(a: Int, b: Int) -> (quot: Int, rem: Int) Never! {
     (quot: (a - rem) /% b, rem: rem)
 }
 
-pub fn digits(n: Int) -> Int Never! { core.math.digits(n) }
-pub fn leading_ones(n: Int) -> Int Never! { core.math.leading_ones(n) }
-pub fn trailing_ones(n: Int) -> Int Never! { core.math.trailing_ones(n) }
-pub fn cmp(a: Float, b: Float) -> Int Never! { core.math.cmp(a, b) }
+pub fn digits(n: Int) -> Int Never! {
+    value := n
+    count := 1
+    loop value <= -10 || value >= 10 {
+        value = value /% 10
+        count = count + 1
+    }
+    count
+}
+pub fn leading_ones(n: Int) -> Int Never! {
+    count := 0
+    loop count < 64 {
+        if ((n >> (63 - count)) & 1) == 0 -> return count
+        count = count + 1
+    }
+    count
+}
+pub fn trailing_ones(n: Int) -> Int Never! {
+    count := 0
+    loop count < 64 {
+        if ((n >> count) & 1) == 0 -> return count
+        count = count + 1
+    }
+    count
+}
+pub fn cmp(a: Float, b: Float) -> Int Never! {
+    if a < b -> return -1
+    if a > b -> return 1
+    if a == b || (is_nan(a) && is_nan(b)) -> return 0
+    if is_nan(a) -> return 1
+    return -1
+}
+pub fn __cmp_f32(a: F32, b: F32) -> Int Never! { cmp(Float{a}, Float{b}) }
 
 pub fn abs_diff(a: Int, b: Int) -> Int Never! {
     if a >= b -> return a - b
@@ -355,7 +482,7 @@ pub fn abs_diff(a: Int, b: Int) -> Int Never! {
 
 pub fn even(n: Int) -> Bool Never! { is_even(n) }
 pub fn odd(n: Int) -> Bool Never! { is_odd(n) }
-pub fn xor(a: Int, b: Int) -> Int Never! { core.math.xor(a, b) }
+pub fn xor(a: Int, b: Int) -> Int Never! { a ~| b }
 pub fn in_range(value: Int, low: Int, high: Int) -> Bool Never! {
     value >= low && value < high
 }
@@ -374,26 +501,56 @@ pub fn prod_int(values: [Int]) -> Int Never! {
 
 pub fn prod(values: [Int]) -> Int Never! { prod_int(values) }
 pub fn fmod(a: Float, b: Float) -> Float Never! { core.math.fmod(a, b) }
-pub fn remainder(a: Float, b: Float) -> Float Never! { core.math.remainder(a, b) }
+pub fn remainder(a: Float, b: Float) -> Float Never! {
+    if !is_finite(a) || !is_finite(b) || b == 0.0 -> return nan()
+    quotient :: a / b
+    lower :: floor(quotient)
+    fraction :: quotient - lower
+    nearest := lower
+    if fraction > 0.5 || (fraction == 0.5 && fmod(lower, 2.0) != 0.0) {
+        nearest = lower + 1.0
+    }
+    a - nearest * b
+}
 pub fn isclose(a: Float, b: Float, rel_tol: Float, abs_tol: Float) -> Bool Never! {
-    core.math.isclose(a, b, rel_tol, abs_tol)
+    if rel_tol < 0.0 || abs_tol < 0.0 -> return false
+    if a == b -> return true
+    if !is_finite(a) || !is_finite(b) -> return false
+    fabs(a - b) <= max_float(rel_tol * max_float(fabs(a), fabs(b)), abs_tol)
 }
 
 pub fn dist(left: [Float], right: [Float]) -> Float Never! {
-    core.math.dist(left, right)
+    if left.len() != right.len() -> return nan()
+    total := Float{0.0}
+    loop i in 0..<left.len() {
+        delta :: left[i] - right[i]
+        total = total + delta * delta
+    }
+    sqrt(total)
 }
 
-pub fn hypot3(a: Float, b: Float, c: Float) -> Float Never! {
-    core.math.hypot3(a, b, c)
-}
+pub fn hypot3(a: Float, b: Float, c: Float) -> Float Never! { hypot(hypot(a, b), c) }
 
 pub fn clamp_float(value: Float, low: Float, high: Float) -> Float Never! {
-    core.math.clamp_float(value, low, high)
+    if !(low <= high) -> panic("min > max, or either was NaN")
+    if value < low -> return low
+    if value > high -> return high
+    value
 }
 
-pub fn min_float(a: Float, b: Float) -> Float Never! { core.math.min_float(a, b) }
-pub fn max_float(a: Float, b: Float) -> Float Never! { core.math.max_float(a, b) }
-pub fn midpoint(a: Float, b: Float) -> Float Never! { core.math.midpoint(a, b) }
+pub fn min_float(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) -> return b
+    if is_nan(b) -> return a
+    if a < b -> return a
+    b
+}
+pub fn max_float(a: Float, b: Float) -> Float Never! {
+    if is_nan(a) -> return b
+    if is_nan(b) -> return a
+    if a > b -> return a
+    b
+}
+pub fn midpoint(a: Float, b: Float) -> Float Never! { a + (b - a) * 0.5 }
 
 pub fn fsum(values: [Float]) -> Float Never! {
     total := Float{0.0}
@@ -415,7 +572,9 @@ pub fn sumprod(left: [Float], right: [Float]) -> Float Never! {
     total
 }
 
-pub fn random() -> Float Never! { core.math.random() }
+pub fn random() -[Rand]> Float Never! {
+    Float{ambient_random.__word()} / 18446744073709551616.0
+}
 
 pub fn fraction(numerator: Int, denominator: Int) -> Fraction? Never! {
     core.math.fraction(numerator, denominator)
@@ -423,4 +582,71 @@ pub fn fraction(numerator: Int, denominator: Int) -> Fraction? Never! {
 
 pub fn decimal(text: String) -> Decimal Never! {
     core.math.decimal(text)
+}
+
+pub fn copy(n: Float) -> Float Never! { n }
+
+#Test("math scalar composition preserves IEEE boundaries") {
+    assert(is_nan(nan()))
+    assert(is_inf(infinity()))
+    assert(!is_finite(nan()))
+    assert(is_normal(1.0))
+    assert(is_subnormal(from_bits(1)))
+    assert(sign_bit(-0.0))
+    assert_eq(to_bits(fabs(-0.0)), 0)
+    assert_eq(signum(-0.0), -1.0)
+    assert_eq(cmp(nan(), 1.0), 1)
+    assert_eq(cmp(1.0, nan()), -1)
+    assert_eq(cmp(nan(), nan()), 0)
+    assert_eq(__cmp_f32(F32{-0.0}, F32{0.0}), 0)
+    assert_eq(__cmp_f32(F32{nan()}, F32{1.0}), 1)
+    assert(__is_finite_f32(F32{1.0}))
+    assert(!__is_finite_f32(F32{infinity()}))
+    assert_eq(radix(0.0), 2)
+}
+
+#Test("math rounding uses ties away from zero and saturating native conversion") {
+    assert_eq(round(1.5), 2)
+    assert_eq(round(-1.5), -2)
+    assert_eq(round(0.49999999999999994), 0)
+    assert_eq(round(nan()), 0)
+    assert_eq(round(infinity()), 9223372036854775807)
+    assert_eq(round(-infinity()), -9223372036854775808)
+}
+
+#Test("math adjacent values and exponent decomposition") {
+    assert_eq(to_bits(next_up(0.0)), 1)
+    assert_eq(to_bits(next_down(0.0)), -9223372036854775807)
+    assert_eq(to_bits(next_after(1.0, 2.0)), to_bits(1.0) + 1)
+    assert_eq(next_up(infinity()), infinity())
+    assert_eq(ulp(0.0), from_bits(1))
+    assert_eq(significand(6.0), 1.5)
+    assert_eq(ilogb(8.0) ?? -1, 3)
+    assert(ilogb(0.0) == None)
+    assert_eq(ldexp(1.5, 2), 6.0)
+    pair :: frexp(6.0)
+    assert_eq(pair.exp, 2)
+    assert_eq(pair.frac, 1.5)
+}
+
+#Test("math remainder and distance retain their validation") {
+    assert_eq(remainder(7.0, 2.0), -1.0)
+    assert_eq(remainder(5.0, 2.0), 1.0)
+    assert(is_nan(remainder(1.0, 0.0)))
+    assert(isclose(infinity(), infinity(), 0.0, 0.0))
+    assert(!isclose(1.0, 1.0, -1.0, 0.0))
+    assert_eq(dist([Float]{0.0, 0.0}, [Float]{3.0, 4.0}), 5.0)
+    assert(is_nan(dist([Float]{1.0}, [Float]{})))
+    assert_eq(digits(-9223372036854775808), 19)
+    assert_eq(leading_ones(-1), 64)
+    assert_eq(trailing_ones(-1), 64)
+    assert_eq(xor(3, 5), 6)
+}
+
+#Test("math special functions retain their approximation") {
+    assert_eq(erf(infinity()), 1.0)
+    assert_eq(erf(-infinity()), -1.0)
+    assert(is_nan(gamma(0.0)))
+    assert(isclose(gamma(5.0), 24.0, 0.000000000001, 0.0))
+    assert(isclose(erfc(1.0), 1.0 - erf(1.0), 0.0, 0.0))
 }

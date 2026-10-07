@@ -207,11 +207,12 @@ use self::random::ambient_random_kernel;
 /// synchronous adapter call. Outside the scope, MathRandomFns keeps its
 /// ordinary thread-local stream.
 pub fn with_world_rng_provider<T>(
-    next: fn() -> Option<u64>,
     seed: fn(i64) -> bool,
+    state: fn() -> Option<u64>,
+    try_update: fn(u64, u64) -> Option<bool>,
     callback: impl FnOnce() -> T,
 ) -> T {
-    ambient_random_kernel::with_world_rng_provider(next, seed, callback)
+    ambient_random_kernel::with_world_rng_provider(seed, state, try_update, callback)
 }
 
 
@@ -280,17 +281,11 @@ mod log_kernel {
         jet_ring_log_fatal(message);
     }
 
-    pub(super) fn disable() {
-        jet_ring_log_disable();
-    }
 
     pub(super) fn flush() {
         jet_ring_log_flush();
     }
 
-    pub(super) fn enabled(level: &String) -> bool {
-        jet_ring_log_enabled(level)
-    }
 
     pub(super) fn field(key: &String, value: &String) -> jet_std::LogField {
         jet_ring_log_field(key, value)
@@ -344,25 +339,6 @@ mod log_kernel {
         jet_ring_log_close(span);
     }
 
-    pub(super) fn set_sink(kind: &String, path: &String) {
-        jet_ring_log_set_sink(kind, path);
-    }
-
-    pub(super) fn sample_every(value: i64) {
-        jet_ring_log_sample_every(value);
-    }
-
-    pub(super) fn otlp_file(path: &String) {
-        jet_ring_log_otlp_file(path);
-    }
-
-    pub(super) fn set_level(level: &String) {
-        jet_ring_log_set_level(level);
-    }
-
-    pub(super) fn setup(format: &String) {
-        jet_ring_log_setup(format);
-    }
 }
 /// Set the shared Prelude log trace context for the MIR evaluator.
 ///
@@ -382,9 +358,6 @@ mod math_lib_pure {
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs");
 }
 
-mod encoding_base_kernel {
-    include!("../../../../jet-codegen/src/Prelude/Core/EncodingBase.rs");
-}
 
 mod encoding_error_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/EncodingError.rs");
@@ -517,9 +490,6 @@ mod solver_kernel {
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/Solver.rs");
 }
 
-mod sketch_kernel {
-    include!("../../../../jet-codegen/src/Prelude/Core/Sketch.rs");
-}
 
 mod time_kernel {
     use super::time_deadline_kernel::jet_time_wall_override_ms;
@@ -529,6 +499,7 @@ mod time_kernel {
     pub(crate) use jet_foundation::Monotonic::jet_time_monotonic_now_ns;
     include!("../../../../jet-codegen/src/Prelude/Core/Duration.rs");
     include!("../../../../jet-codegen/src/Prelude/Core/Time.rs");
+    include!("../../../../jet-codegen/src/Prelude/Core/TimeFacts.rs");
 }
 mod raylib_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/Raylib.rs");
@@ -761,13 +732,6 @@ pub fn apply_core_pure_method(
     core_pure_parity::evaluate_method(recv, method, args, span)
 }
 
-pub fn sketch_add(
-    recv: &CtValue,
-    args: &[CtValue],
-    span: Span,
-) -> Option<Result<(CtValue, CtValue), Diagnostic>> {
-    core_pure_parity::sketch_add(recv, args, span)
-}
 
 pub(in super::super) fn solver_require(
     recv: &CtValue,
@@ -788,7 +752,6 @@ pub fn display_core_pure_value(value: &CtValue) -> Option<String> {
 pub(in super::super) use regex::apply_regex_method;
 pub use regex::eval_regex_replace_all_with;
 
-const PERF_DEFAULT_FIDELITY_BITS: u32 = 1.0f32.to_bits();
 // D-FIDELITY-API1=A: this signal must behave like the AOT binary's
 // process-global static (fresh default per program run, persists across
 // reads/writes within one run). This compiler process hosts many concurrent
@@ -799,7 +762,7 @@ const PERF_DEFAULT_FIDELITY_BITS: u32 = 1.0f32.to_bits();
 // process-wide static had) while preserving the existing single-thread
 // persistence a REPL session or dev run relies on.
 thread_local! {
-    static PERF_FIDELITY: Cell<u32> = const { Cell::new(PERF_DEFAULT_FIDELITY_BITS) };
+    static PERF_FIDELITY: Cell<i64> = const { Cell::new(0) };
 }
 
 // ---------------------------------------------------------------------------
@@ -890,21 +853,7 @@ fn core_math_float_clamp(
     }
 }
 
-fn hex_encode(bytes: Vec<u8>) -> String {
-    encoding_base_kernel::jet_std_hex_encode(&bytes)
-}
 
-fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
-    encoding_base_kernel::jet_std_hex_decode(&s.to_string())
-}
-
-fn base64_encode(bytes: Vec<u8>) -> String {
-    encoding_base_kernel::jet_std_b64_encode(&bytes)
-}
-
-fn base32_encode(bytes: &[u8]) -> String {
-    encoding_base_kernel::jet_std_base32_encode(&bytes.to_vec())
-}
 
 /// Core modules the REPL interpreter cannot run (native FFI / threads / HTTP stack).
 fn repl_native_only_module(module: &str) -> Option<&'static str> {
@@ -1144,15 +1093,6 @@ fn apply_raylib_core_call(
             let _ = as_int(one(0)?, span)?;
             Ok(CtValue::Unit)
         }
-        "color" => Ok(CtValue::Struct {
-            type_name: "RaylibColor".to_string(),
-            fields: vec![
-                ("r".to_string(), CtValue::Int(as_int(one(0)?, span)?)),
-                ("g".to_string(), CtValue::Int(as_int(one(1)?, span)?)),
-                ("b".to_string(), CtValue::Int(as_int(one(2)?, span)?)),
-                ("a".to_string(), CtValue::Int(as_int(one(3)?, span)?)),
-            ],
-        }),
         "gamepad_down" => {
             let gamepad = as_int(one(0)?, span)?;
             let button = as_string(one(1)?, span)?;
@@ -1170,26 +1110,6 @@ fn apply_raylib_core_call(
                 .filter(|value| *value >= 0)
                 .and_then(|_| raylib_kernel::jet_raylib_axis_code(axis));
             Ok(CtValue::Float(CtFloat::f64(0.0)))
-        }
-        "load_sound" => Ok(CtValue::Struct {
-            type_name: "RaylibSound".to_string(),
-            fields: vec![(
-                "path".to_string(),
-                CtValue::Str(as_string(one(0)?, span)?.to_string()),
-            )],
-        }),
-        "play_sound" => {
-            let CtValue::Struct { type_name, fields } = one(0)? else {
-                return Err(unsupported("expected a RaylibSound", span));
-            };
-            if type_name != "RaylibSound" {
-                return Err(unsupported("expected a RaylibSound", span));
-            }
-            let path = match raylib_field(fields, "path") {
-                Some(CtValue::Str(path)) => path,
-                _ => return Err(unsupported("malformed RaylibSound", span)),
-            };
-            Ok(CtValue::Bool(!path.is_empty()))
         }
         "load_texture_atlas" => Ok(raylib_atlas_value(
             raylib_kernel::jet_raylib_load_texture_atlas_spec(as_string(one(0)?, span)?),

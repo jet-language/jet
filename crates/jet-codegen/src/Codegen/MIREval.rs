@@ -16070,8 +16070,11 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 "file_reader.path"
                     | "file_writer.path"
                     | "file_reader.read_line"
+                    | "file_reader.read"
                     | "file_writer.write_line"
                     | "file_writer.flush"
+                    | "file_writer.write_all"
+                    | "file_writer.fsync"
             )
         {
             let mut call_args = args.into_iter();
@@ -21798,7 +21801,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             "after" => "jet_std::after_value",
             "interval" => "jet_std::interval",
             "yield_now" => "jet_std::jet_task_yield",
-            "current_task" => "jet_std::jet_task_current_trace",
+            "__task_paused" => "jet_scheduler_task_paused",
+            "__task_cancelled" => "jet_scheduler_task_cancelled_state",
             _ => {
                 return Err(mir_error_at(
                     "MIR core.tasks runtime call has an unknown member",
@@ -21856,9 +21860,21 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 crate::scheduler::jet_scheduler_yield_now();
                 Ok(RuntimeValue::Data(MirEvalValue::Unit))
             }
-            ("current_task", []) => Ok(RuntimeValue::Data(MirEvalValue::String(
-                crate::scheduler::jet_scheduler_current_task_trace(),
-            ))),
+            ("__task_paused" | "__task_cancelled", []) => {
+                let flag = if member == "__task_paused" {
+                    crate::scheduler::jet_scheduler_task_paused()
+                } else {
+                    crate::scheduler::jet_scheduler_task_cancelled_state()
+                };
+                Ok(match flag {
+                    Some(flag) => RuntimeValue::Data(MirEvalValue::Present(Box::new(
+                        MirEvalValue::Bool(flag),
+                    ))),
+                    None => RuntimeValue::Absent {
+                        element: MirType::from_kind(MirTypeKind::Bool),
+                    },
+                })
+            }
             _ => Err(mir_error_at(
                 "MIR core.tasks runtime call received the wrong arguments",
                 span,
@@ -22411,7 +22427,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         if row.module == "core.tasks"
             && matches!(
                 row.member.as_str(),
-                "after" | "interval" | "yield_now" | "current_task"
+                "after" | "interval" | "yield_now" | "__task_paused" | "__task_cancelled"
             )
         {
             return self.eval_task_runtime_call(&row.member, row.symbol.name(), args, span);
@@ -22467,8 +22483,9 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             };
             let (function, captures, capture_cells) = self.closure_parts(callback.clone(), span)?;
             return crate::Comptime::with_world_rng_provider(
-                crate::scheduler::jet_scheduler_world_rng_next,
                 crate::scheduler::jet_scheduler_world_rng_seed,
+                crate::scheduler::jet_scheduler_world_rng_state,
+                crate::scheduler::jet_scheduler_world_rng_try_update,
                 || {
                     crate::scheduler::jet_testing_world(|world| {
                         let raw = register_deterministic_world(world);

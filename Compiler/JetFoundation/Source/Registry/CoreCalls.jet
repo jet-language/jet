@@ -112,20 +112,29 @@ fn core_call_one_of(value: String, choices: [String]) -> Bool Never! {
 
 fn core_call_effect_for(module_name: String, member: String) -> Effect? {
     if {
+        module_name == "core.files" && member == "__temp_path_sample" -> Val(Effect.Time)
+        module_name == "core.files" && member == "__temp_directory" -> Val(Effect.Env)
+        module_name == "core.files" && core_call_one_of(member, [String]{"__host_path_is_absolute", "__host_path_join"}) -> None
+        module_name == "core.process" && member == "__with_directory_raw" -> Val(Effect.FS)
+        module_name == "core.time" && member == "__zone_env" -> Val(Effect.Env)
+        module_name == "core.time" && core_call_one_of(member, [String]{"zone", "parse_zoned", "__zone_file_bytes"}) -> Val(Effect.FS)
         (module_name == "core.time" && core_call_one_of(member, [String]{
             "clock", "time", "local_time", "parse_time", "new", "parse", "from_timestamp",
             "period", "period_days", "period_months", "period_years", "parse_rfc3339",
             "from_unix_ms", "from_unix_seconds", "from_unix_microseconds", "from_unix_nanoseconds",
-            "parse_iso_week_date", "from_iso_week", "parse_zoned", "datetime", "zone", "utc",
-            "zoned", "zoned_local", "days_in_month", "is_leap_year"
+            "parse_iso_week_date", "from_iso_week", "datetime", "utc",
+            "zoned", "zoned_local", "days_in_month", "is_leap_year",
+            "__embedded_zone_bytes"
         })) || (module_name == "core.math.random" && member == "rng") -> None
         module_name == "core.time" && core_call_one_of(member, [String]{"now", "now_utc", "today", "instant", "sleep", "sleep_until", "start"}) -> Val(Effect.Time)
         module_name == "core.rt" && member == "callback" -> Val(Effect.Time)
+        module_name == "core.math" && member == "random" -> Val(Effect.Rand)
         (module_name == "core.math.random" && core_call_one_of(member, [String]{
             "int", "float", "float_range", "bool", "normal", "exponential", "pick", "weighted_pick",
             "sample", "shuffle", "seed", "split", "bytes"
         })) || (module_name == "core.crypto.random" && member == "bytes") -> Val(Effect.Rand)
         member == "style_force" && module_name == "core.term" -> None
+        module_name == "core.net" && member == "gethostname" -> Val(Effect.Env)
         module_name == "core.net" && core_call_one_of(member, [String]{
             "ip_addr", "ip_to_string", "ip_is_ipv4", "ip", "ipv4", "ipv6", "parse_ip", "is_ipv4",
             "is_ipv6", "socket_addr_parse", "socket_host", "socket_port", "socket_to_string",
@@ -158,6 +167,7 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
         module_name == "core.math.random" || module_name == "core.crypto.random" -> Val(Effect.Rand)
         // Key generation draws from the OS generator, like crypto.random.bytes.
         module_name == "core.crypto" && core_call_one_of(member, [String]{"__x25519_generate", "__signing_generate"}) -> Val(Effect.Rand)
+        module_name == "core.perf" && core_call_one_of(member, [String]{"__read_bits", "__write_bits", "fidelity", "override_fidelity", "reset_fidelity"}) -> Val(Effect.Env)
         module_name == "core.sys" && member == "success" -> None
         module_name == "core.sys" -> Val(Effect.Env)
         module_name == "core.process" && member == "status_ok" -> None
@@ -166,7 +176,7 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
         module_name == "core.db" || module_name == "core.jobs" -> Val(Effect.DB)
         module_name == "core.auth" && core_call_one_of(member, [String]{
             "register_user", "password_login", "session_validate", "magic_link_issue", "magic_link_consume",
-            "oauth_begin", "oauth_finish"
+            "oauth_begin", "oauth_finish", "__store_load", "__store_replace"
         }) -> Val(Effect.DB)
         module_name == "core.plugin" || module_name == "core.mod" -> Val(Effect.Exec)
         module_name == "core.log" -> Val(Effect.Log)
@@ -183,7 +193,10 @@ fn core_call_effect_for(module_name: String, member: String) -> Effect? {
 }
 
 fn core_call_effect_leaf_for(module_name: String, member: String) -> String? {
+    if (module_name == "core.net" && member == "gethostname") || (module_name == "core.sys" && member == "hostname") -> return Val("FS.Read")
     if {
+        module_name == "core.process" && member == "__with_directory_raw" -> Val("FS.Read")
+        module_name == "core.time" && core_call_one_of(member, [String]{"zone", "parse_zoned", "__zone_file_bytes"}) -> Val("FS.Read")
         module_name == "core.time" && core_call_one_of(member, [String]{"sleep", "sleep_until"}) -> Val("Time.Wait")
         module_name == "core.tasks" && member == "yield_now" -> Val("Time.Wait")
         module_name == "core.files" && member == "scope" -> Val("FS.Read")
@@ -192,12 +205,16 @@ fn core_call_effect_leaf_for(module_name: String, member: String) -> String? {
         // write, so they keep the bare `FS` root.
         module_name == "core.files" && core_call_one_of(member, [String]{
             "read", "read_bytes", "read_at", "read_link", "map", "open", "exists", "is_dir", "is_fifo", "is_socket",
-            "stat", "lstat", "list_dir", "walk", "walk_parallel", "walk_files", "glob", "canonicalize", "absolute"
+            "stat", "lstat", "list_dir", "walk", "walk_parallel", "walk_files", "glob", "canonicalize", "absolute",
+            // #3593 provider leaves behind Core/files/files.jet.
+            "__open_reader", "__open_directory", "__close_directory", "__list_directory", "__stat_at", "__read_link_at",
+            "__xattr_names", "__xattr_get", "__reader_stat", "__writer_stat", "__metadata_directory", "__directory_fd"
         }) -> Val("FS.Read")
         module_name == "core.files" && core_call_one_of(member, [String]{
             "write", "write_bytes", "write_at", "write_atomic", "append_all", "create", "append", "fsync", "remove",
             "remove_dir", "remove_all", "create_dir", "create_dir_all", "rename", "symlink", "hard_link", "chown",
-            "set_mode", "mkdtemp", "mktemp", "temp_dir", "temp_file", "lock"
+            "set_mode", "mkdtemp", "mktemp", "temp_dir", "temp_file", "lock", "__open_writer", "__create_directory",
+            "__fsync_directory", "__rename_at", "__remove_at", "__xattr_set", "__writer_set_mode", "__flock"
         }) -> Val("FS.Write")
         // D-AUTH-AMBIENT1=A: reading the program's own arguments is a leaf of
         // `Exec`; spawning a process keeps the ungranted `Exec` root.

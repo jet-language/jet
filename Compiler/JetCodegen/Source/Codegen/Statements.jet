@@ -2904,7 +2904,9 @@ fn jet_codegen_lower_binary_match_scan(builder: &JetCodegenBuilder, program: Jet
     jet_codegen_lower_pattern_probe(&builder, program, expression, matched, probe)
 }
 
-fn jet_codegen_lower_env_set(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, name: TExpr, value: TExpr, location: TPanicLoc) -> MIRValueID {
+// 3ea7c9cc2: `core.sys.set` is the source-compatible Unit form; the kernel
+// itself stops with E3001 on an invalid name or value.
+fn jet_codegen_lower_env_set(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, name: TExpr, value: TExpr) -> MIRValueID {
     record :: core_call("core.sys", "set") ?? panic("missing checked Core registry row core.sys.set")
     arguments := [MIRCallArg]{}
     call_values := [TExpr]{name, value}
@@ -2914,33 +2916,11 @@ fn jet_codegen_lower_env_set(builder: &JetCodegenBuilder, program: JetCodegenPro
         lowered.access = if borrowed -> MIRAccess.Read else -> MIRAccess.Move
         &arguments.push(lowered)
     }
-    error_type := Type.Named{name: "EnvError"}
-    result_type := Type.Result{ok: Type.Named{name: "Unit"}, err: error_type}
-    carrier := jet_codegen_failure_carrier_for_type(result_type)
+    carrier := jet_codegen_failure_carrier_for_type(expression.ty)
     call := jet_codegen_intern_core_call(&builder, program, record)
     route := jet_codegen_intern_core_route(&builder, program, record, carrier)
     fallibility := jet_codegen_core_call_fallibility(carrier, builder, program)
-    result := jet_codegen_emit_value(&builder, program, expression.span, result_type, MIROperation.CoreCall{call: call, route: route, args: arguments, type_args: [MIRType]{}, fallibility: fallibility, data_plan: None})
-    condition := jet_codegen_emit_value(&builder, program, expression.span, Type.Bool, MIROperation.ResultIsOk{subject: result})
-    failure := jet_codegen_new_block(&builder, program, expression.span, "core-sys-set-failure")
-    join := jet_codegen_new_block(&builder, program, expression.span, "core-sys-set-join")
-    jet_codegen_terminate(&builder, program, MIRTerminator.Branch{condition: condition, then_target: join, else_target: failure})
-    jet_codegen_switch_block(&builder, program, failure)
-    error := jet_codegen_emit_value(&builder, program, expression.span, error_type, MIROperation.ResultValue{subject: result, ok: false})
-    shown := jet_codegen_lower_direct_display(&builder, program, error, error_type, expression.span)
-    stop_call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.require", "require", "jet_require", 9, [Bool]{false, true, true, false, true, true, false, false, true}, Val(Effect.Panic), jet_codegen_failure_carrier_for_type(expression.ty), MIRPreludeABI.Control)
-    locals := [MIRPanicLocal]{}
-    loop local in location.locals {
-        binding :: jet_codegen_find_binding_for_local(builder, program, local.local) ?? next
-        &locals.push(MIRPanicLocal{name: local.display_name, local: binding.local})
-    }
-    panic_location := MIRPanicLoc{file: mir_source_file_id(location.file), line: location.line, column: location.column}
-    context := MIRPanicContext{function: builder.function.name, source_line: location.source_line, caret: location.caret, locals: locals}
-    jet_codegen_emit_explicit_stop_cleanups(&builder, program)
-    _ := jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.RequireStop{call: stop_call, kind: MIRRequireKind.Require, condition: Val(condition), location: panic_location, context: context, values: [MIRValueID]{shown}, always_stops: true}})
-    jet_codegen_terminate(&builder, program, MIRTerminator.Unreachable{reason: "environment update failure"})
-    jet_codegen_switch_block(&builder, program, join)
-    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: MIRConstant.Unit})
+    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.CoreCall{call: call, route: route, args: arguments, type_args: [MIRType]{}, fallibility: fallibility, data_plan: None})
 }
 
 fn jet_codegen_gc_local_type(builder: JetCodegenBuilder, program: JetCodegenProgram, local: TLocal) -> Type Never! {

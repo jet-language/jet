@@ -1015,6 +1015,11 @@ pub(super) fn lower_receiver_place(
             Some(ctx.lower_index_place(base, index, kind, access)?)
         }
         TExprKind::Field { recv, field, .. } => {
+            // D-TYPE2-TIME1: `d.ns` is a scalar projection with no field
+            // place; the caller's value path reads it.
+            if is_duration_ns_projection(ctx, recv, field) {
+                return Ok(None);
+            }
             let Some(base) = lower_receiver_place(ctx, recv, access)? else {
                 return Ok(None);
             };
@@ -2109,13 +2114,7 @@ pub(super) fn lower_expr(
             boxed: _,
         } => {
             let field = crate::Syntax::compiler_fact_member(field).unwrap_or(field);
-            // D-TYPE2-TIME1: Duration is a compiler-owned unit quantity over an
-            // i64 nanosecond carrier, not a record. `d.ns` reads that carrier
-            // through the canonical scalar projection on every tier.
-            if field == "ns"
-                && matches!(recv.ty.without_user_tags(), Type::Named(name) if name == crate::Syntax::DURATION_TYPE)
-                && !ctx.has_field_owner(&recv.ty)
-            {
+            if is_duration_ns_projection(ctx, recv, field) {
                 let carrier = TExpr {
                     ty: Type::Int,
                     kind: TExprKind::HandleMethod {
@@ -3575,10 +3574,22 @@ pub(super) fn lower_expr(
                     format_route.member = "decimal".to_string();
                 }
                 ctx.intern_prelude_route(format_route)?
+            } else if record.module == "core.net.tls" && record.member == "client" && args.len() > 2 {
+                let symbol = match args.len() {
+                    3 => "jet_net_tls_client_deadline",
+                    4 => "jet_net_tls_client_config_deadline",
+                    _ => return Err(ctx.error(ctx.span(), "TLS client requires two, three or four checked operands")),
+                };
+                let mut tls_route = direct_prelude_route(
+                    record.module, record.member, symbol, args.len(),
+                    &[false, true, true, true][..args.len()], fallibility,
+                );
+                tls_route.symbol = MirSymbol::Runtime(symbol.to_string());
+                tls_route.effect = record.effect;
+                ctx.intern_prelude_route(tls_route)?
             } else {
                 ctx.intern_core_route(record, fallibility)?
             };
-            let lowered_fallibility = ctx.lower_call_fallibility(fallibility)?;
             let lowered = args
                 .iter()
                 .enumerate()
@@ -3716,6 +3727,22 @@ pub(super) fn lower_expr(
                     }),
                 );
             }
+            // Consumed-stream TLS overloads have distinct native signatures;
+            // like typed format overloads, they are checked Prelude routes,
+            // not the host/port CoreCall ABI.
+            if record.module == "core.net.tls" && record.member == "client" && args.len() > 2 {
+                return ctx.emit(
+                    "core-call-tls-stream",
+                    Some(expr.ty.clone()),
+                    MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
+                        call: route,
+                        args: lowered,
+                        owner_type_args: Vec::new(),
+                        type_args,
+                    }),
+                );
+            }
+            let lowered_fallibility = ctx.lower_call_fallibility(fallibility)?;
             ctx.emit(
                 "core-call",
                 Some(expr.ty.clone()),
@@ -4500,9 +4527,13 @@ pub(super) fn lower_expr(
                 matches!(
                     op,
                     THandleOp::FileReaderReadLine
+                        | THandleOp::StdinReadLine
+                        | THandleOp::FileReaderRead
                         | THandleOp::AllocReset
                         | THandleOp::FileWriterWriteLine
                         | THandleOp::FileWriterFlush
+                        | THandleOp::FileWriterWriteAll
+                        | THandleOp::FileWriterFsync
                         | THandleOp::CSVWriterWrite
                         | THandleOp::CSVWriterFlush
                         | THandleOp::CSVWriterFinish
@@ -8077,7 +8108,9 @@ fn lower_host_call(
             let args = vec![mir_value_arg(ctx, shown), mir_value_arg(ctx, path)];
             emit_host_route_call(ctx, expr, route, args)
         }
-        THostCall::EnvSet { name, value, loc } => {
+        // 3ea7c9cc2: `core.sys.set` is the source-compatible Unit form; the
+        // kernel itself stops with E3001 on an invalid name or value.
+        THostCall::EnvSet { name, value, .. } => {
             let record = crate::Syntax::core_call("core.sys", "set").ok_or_else(|| {
                 ctx.error(
                     ctx.span(),
@@ -8098,17 +8131,13 @@ fn lower_host_call(
                     MirAccess::Move
                 };
             }
-            let core_result_ty = Type::Result {
-                ok: Box::new(Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
-                err: Box::new(Type::Named("EnvError".to_string())),
-            };
-            let core_carrier = super::TFailureCarrier::from_checked_type(&core_result_ty);
+            let core_carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
             let core_call = MirCoreCall::from_record(record).id;
             let core_route = ctx.intern_core_route(record, &core_carrier)?;
             let core_fallibility = ctx.lower_call_fallibility(&core_carrier)?;
-            let result = ctx.emit(
+            ctx.emit(
                 "core-sys-set",
-                Some(core_result_ty.clone()),
+                Some(expr.ty.clone()),
                 MirOperation::CoreCall {
                     call: core_call,
                     route: core_route,
@@ -8117,74 +8146,6 @@ fn lower_host_call(
                     fallibility: core_fallibility,
                     data_plan: None,
                 },
-            )?;
-            let condition = ctx.emit(
-                "core-sys-set-ok",
-                Some(Type::Bool),
-                MirOperation::ResultIsOk { subject: result },
-            )?;
-            let failure = ctx.new_block(ctx.span(), "core-sys-set.failure")?;
-            let join = ctx.new_block(ctx.span(), "core-sys-set.join")?;
-            ctx.terminate(MirTerminator::Branch {
-                condition,
-                then_target: join,
-                else_target: failure,
-            });
-            ctx.switch_to(failure);
-            let error = ctx.emit(
-                "core-sys-set-error",
-                Some(Type::Named("EnvError".to_string())),
-                MirOperation::ResultValue {
-                    subject: result,
-                    ok: false,
-                },
-            )?;
-            let error = lower_direct_string_format(
-                ctx,
-                error,
-                &Type::Named("EnvError".to_string()),
-                &crate::AST::StrFormat::Display,
-                &Type::String,
-            )?;
-            let carrier = super::TFailureCarrier::from_checked_type(&expr.ty);
-            let route = super::require_stop_route("require", 1, &expr.ty, &carrier)?;
-            let call = ctx.intern_prelude_route(route)?;
-            let location = MirPanicLoc {
-                file: ctx.source_file_id_for(&loc.file),
-                line: loc.line,
-                column: loc.col,
-            };
-            let context = MirPanicContext {
-                function: loc.fn_name.clone(),
-                source_line: loc.src_line.clone(),
-                caret: loc.caret,
-                locals: loc
-                    .locals
-                    .iter()
-                    .filter_map(|(name, local)| {
-                        ctx.local_id_for(local).ok().map(|id| (name.clone(), id))
-                    })
-                    .collect(),
-            };
-            ctx.emit(
-                "core-sys-set-stop",
-                Some(expr.ty.clone()),
-                MirOperation::Semantic(MirSemanticOp::RequireStop {
-                    call,
-                    kind: MirRequireKind::Require,
-                    condition: Some(condition),
-                    location,
-                    context,
-                    values: vec![error],
-                    always_stops: false,
-                }),
-            )?;
-            ctx.terminate(MirTerminator::Jump { target: join });
-            ctx.switch_to(join);
-            ctx.emit(
-                "core-sys-set-unit",
-                Some(expr.ty.clone()),
-                MirOperation::Constant(MirConstant::Unit),
             )
         }
         THostCall::NumericBounds { ty, member } => {
@@ -8647,6 +8608,16 @@ fn http_shutdown_report_field_route(field: &str) -> Option<(i64, TPreludeRoute)>
             db_metadata: None,
         },
     ))
+}
+
+/// D-TYPE2-TIME1: Duration is a compiler-owned unit quantity over an i64
+/// nanosecond carrier, not a record. `d.ns` reads that carrier through the
+/// canonical scalar projection on every tier, never through a field place.
+fn is_duration_ns_projection(ctx: &LowerCtx, recv: &TExpr, field: &str) -> bool {
+    let field = crate::Syntax::compiler_fact_member(field).unwrap_or(field);
+    field == "ns"
+        && matches!(recv.ty.without_user_tags(), Type::Named(name) if name == crate::Syntax::DURATION_TYPE)
+        && !ctx.has_field_owner(&recv.ty)
 }
 
 fn lower_http_shutdown_report_field(

@@ -302,7 +302,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Mod" | "ModGrant"
         | "FileReader" | "FileWriter" | "FileLines" | "FileScope" | "MappedFile"
         // D-LSDIR1/D-FSOPS1/D-WATCH-SCOPE1: filesystem and watcher values.
-        | "DirEntry" | "Stat" | "WalkEntry" | "TempDir" | "TempFile" | "FileLock"
+        | "DirEntry" | "WalkEntry" | "TempDir" | "TempFile" | "FileLock"
         // stdlib-api-laws D4: `WatchEvent.domain`/`.kind` are closed enums.
         | "WatchEvent" | "WatchDomain" | "WatchKind" | "WatchHandle" | "WatchSet"
         // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: data summary/status values.
@@ -458,8 +458,6 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "WebVirtualWindow" | "WebVirtualPlan" | "WebVirtualPlanViewport"
         | "WebStoreTransaction" | "WebStoreEvent" | "WebStoreInspection"
         | "WebStorePatch" | "WebStore" | "WebStoreSubscription"
-        // D-APPROX1=A: approximate sketch data structures.
-        | "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"
         // D-TIMEDEPTH1=A: civil-time types.
         | "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant" | "Period" | "Zone"
         | "ZonedDateTime"
@@ -766,23 +764,6 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "dns_names" => Some(Type::List(Box::new(Type::String))),
             "valid_from_unix_ms" | "valid_until_unix_ms" => Some(Type::Int),
             "subject" | "issuer" => Some(Type::String),
-            _ => None,
-        };
-    }
-    if type_name == "Claims" {
-        return match field {
-            "subject" | "issuer" => Some(Type::Option(Box::new(Type::String))),
-            "audience" => Some(Type::String),
-            "expires_at" => Some(Type::Int),
-            "not_before" => Some(Type::Option(Box::new(Type::Int))),
-            "issued_at" => Some(Type::Option(Box::new(Type::Int))),
-            _ => None,
-        };
-    }
-    if type_name == "Session" {
-        return match field {
-            "id" | "user_id" | "cookie" => Some(Type::String),
-            "expires_at" => Some(Type::Int),
             _ => None,
         };
     }
@@ -1901,10 +1882,6 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         // D-LSDIR1=A: DirEntry has name (bare filename), path (full path), is_dir.
         ("DirEntry", "name" | "path") => Some(Type::String),
         ("DirEntry", "is_dir") => Some(Type::Bool),
-        // D-FSOPS1=A: typed filesystem metadata and recursive walk entries.
-        ("Stat", "size" | "modified_ms" | "created_ms" | "mode") => Some(Type::Int),
-        ("Stat", "readonly" | "is_file" | "is_dir" | "is_symlink") => Some(Type::Bool),
-        ("Stat", "kind") => Some(Type::String),
         ("WalkEntry", "path" | "relative") => Some(Type::String),
         ("WalkEntry", "is_dir") => Some(Type::Bool),
         ("WalkEntry", "depth") => Some(Type::Int),
@@ -3556,8 +3533,10 @@ pub fn file_handle_method_return(
             "read_line" if n_args == 0 => {
                 Some(Some(result_ty(Type::Option(Box::new(Type::String)), io)))
             }
+            // #3593: `.read(max)` — up to `max` bytes; an empty list at EOF.
+            "read" if n_args == 1 => Some(Some(result_ty(Type::List(Box::new(u8_ty())), io))),
             // Wrong direction: writing to a reader.
-            "write_line" | "flush" => {
+            "write_line" | "flush" | "write_all" | "fsync" | "set_mode" => {
                 diags.push(Diagnostic::error(
                     "E2501",
                     format!("`{}` is not available on a read-only file handle", method),
@@ -3574,9 +3553,12 @@ pub fn file_handle_method_return(
             // `.write_line(text)` — writes a line followed by a newline.
             "write_line" if n_args == 1 => Some(Some(result_ty(unit.clone(), io.clone()))),
             // `.flush()` — ensure buffered bytes reach disk.
-            "flush" if n_args == 0 => Some(Some(result_ty(unit, io))),
+            "flush" if n_args == 0 => Some(Some(result_ty(unit.clone(), io.clone()))),
+            // #3593: `.write_all(bytes)` — buffered; `.fsync()` flushes then syncs.
+            "write_all" if n_args == 1 => Some(Some(result_ty(unit.clone(), io.clone()))),
+            "fsync" if n_args == 0 => Some(Some(result_ty(unit, io))),
             // Wrong direction: reading from a writer.
-            "lines" | "read_line" => {
+            "lines" | "read_line" | "read" => {
                 diags.push(Diagnostic::error(
                     "E2501",
                     format!("`{}` is not available on a write-only file handle", method),
@@ -4153,10 +4135,6 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("response".to_string(), Type::String),
             ("accepted_at".to_string(), Type::String),
         ]),
-"MIME" => Some(vec![
-    ("top".to_string(), Type::String),
-    ("sub".to_string(), Type::String),
-]),
         "NetErrorDetail" => Some(vec![
             ("operation".to_string(), Type::String),
             ("address".to_string(), Type::Option(Box::new(Type::String))),
@@ -4509,61 +4487,5 @@ pub(crate) fn core_encoding_variants(
             variants.insert(name.to_string(), (zero, VariantPayload::Single(ty, zero)));
         }
     }
-    Some(variants)
-}
-
-/// D-AUTH-TOKENPOLICY1=A: inspectable verifier failures.
-pub(crate) fn core_auth_variants(
-    enum_name: &str,
-) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
-{
-    use crate::Diagnostics::Span;
-    use crate::AST::{VariantField, VariantPayload};
-    if enum_name != "AuthError" {
-        return None;
-    }
-    let zero = Span::new(0, 0);
-    let field = |name: &str, ty: Type| VariantField {
-        name: name.to_string(),
-        name_span: zero,
-        ty,
-        ty_span: zero,
-    };
-    let mut variants = std::collections::HashMap::new();
-    for name in ["InvalidSignature", "WeakKey", "TokenExpired"] {
-        variants.insert(name.to_string(), (zero, VariantPayload::Unit));
-    }
-    for name in [
-        "MalformedToken",
-        "UnsupportedToken",
-        "MissingClaim",
-        "DecodeError",
-    ] {
-        variants.insert(
-            name.to_string(),
-            (zero, VariantPayload::Single(Type::String, zero)),
-        );
-    }
-    variants.insert(
-        "WrongAudience".to_string(),
-        (
-            zero,
-            VariantPayload::Named(vec![
-                field("expected", Type::String),
-                field("actual", Type::String),
-            ]),
-        ),
-    );
-    variants.insert(
-        "WrongIssuer".to_string(),
-        (
-            zero,
-            VariantPayload::Named(vec![
-                field("expected", Type::String),
-                field("actual", Type::Option(Box::new(Type::String))),
-            ]),
-        ),
-    );
-    variants.insert("TokenNotYetValid".to_string(), (zero, VariantPayload::Unit));
     Some(variants)
 }

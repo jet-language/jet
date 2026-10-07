@@ -1,9 +1,6 @@
 use super::super::repl_process::{run_repl_process, REPL_PROCESS_OUTPUT_LIMIT_BYTES};
 use super::*;
 
-mod process_args_kernel {
-    include!("../../../../../jet-codegen/src/Prelude/Core/ProcessArgs.rs");
-}
 // #1480: use the same line/byte stdin Prelude as AOT and JIT. This adapter
 // supplies only the host-side IOError shape required by that shared source;
 // line ownership and newline policy stay in `Prelude/CoreLib/Top/IoLineStream.rs`.
@@ -399,41 +396,37 @@ pub fn apply_impure_core_call_with_type_args(
             }
             Ok(CtValue::Unit)
         }
-        ("core.log", "enabled") => {
-            let level = log_string_arg(one(0)?, span)?;
-            Ok(CtValue::Bool(super::log_kernel::enabled(level)))
+        ("core.log", "__level_load") => Ok(CtValue::Int(super::log_kernel::jet_log_level_load())),
+        ("core.log", "__disabled_load") => Ok(CtValue::Bool(super::log_kernel::jet_log_disabled_load())),
+        ("core.log", "__level_store") => {
+            super::log_kernel::jet_log_level_store(as_int(one(0)?, span)?);
+            Ok(CtValue::Unit)
         }
-        ("core.log", "disable") => {
-            super::log_kernel::disable();
+        ("core.log", "__disabled_store") => {
+            super::log_kernel::jet_log_disabled_store(log_bool_arg(one(0)?, span)?);
             Ok(CtValue::Unit)
         }
         ("core.log", "flush") => {
             super::log_kernel::flush();
             Ok(CtValue::Unit)
         }
-        ("core.log", "set_sink") => {
-            let kind = log_string_arg(one(0)?, span)?;
-            let path = log_string_arg(one(1)?, span)?;
-            super::log_kernel::set_sink(kind, path);
+        ("core.log", "__format_store") => {
+            super::log_kernel::jet_log_format_store(as_int(one(0)?, span)?);
             Ok(CtValue::Unit)
         }
-        ("core.log", "sample_every") => {
-            super::log_kernel::sample_every(as_int(one(0)?, span)?);
+        ("core.log", "__sink_store") => {
+            super::log_kernel::jet_log_sink_store(log_string_arg(one(0)?, span)?);
             Ok(CtValue::Unit)
         }
-        ("core.log", "otlp_file") => {
-            super::log_kernel::otlp_file(log_string_arg(one(0)?, span)?);
+        ("core.log", "__sample_store") => {
+            super::log_kernel::jet_log_sample_store(as_int(one(0)?, span)?);
             Ok(CtValue::Unit)
         }
-        ("core.log", "set_level") => {
-            super::log_kernel::set_level(log_string_arg(one(0)?, span)?);
+        ("core.log", "__sample_count_store") => {
+            super::log_kernel::jet_log_sample_count_store(as_int(one(0)?, span)?);
             Ok(CtValue::Unit)
         }
-        ("core.log", "setup") => {
-            super::log_kernel::setup(log_string_arg(one(0)?, span)?);
-            Ok(CtValue::Unit)
-        }
-        ("core.log", "set_trace_id") => {
+        ("core.log", "__trace_store") => {
             super::log_kernel::set_trace_id(as_string(one(0)?, span)?);
             Ok(CtValue::Unit)
         }
@@ -462,36 +455,21 @@ pub fn apply_impure_core_call_with_type_args(
         // it replaces are why `create_dir_all` and `remove_all` had no arm at
         // all: a shipped example (`io/watcher`) passed sema and then died at
         // run time on E0956 while AOT ran the same source.
-        ("core.files", "absolute") => {
-            let path = as_string(one(0)?, span)?;
-            use crate::Comptime::TextLite as files_kernel;
-            Ok(match files_kernel::fs_absolute(path) {
-                Ok(path) => CtValue::Present(Box::new(CtValue::Str(path))),
-                Err(error) => CtValue::failed(Box::new(error)),
-            })
-        }
-        ("core.files", "open" | "create" | "append") => {
-            let path = as_string(one(0)?, span)?;
-            use crate::Comptime::TextLite as files_kernel;
-            let result = match method {
-                "open" => files_kernel::fs_open(path),
-                "create" => files_kernel::fs_create(path),
-                "append" => files_kernel::fs_append_stream(path),
-                _ => unreachable!("streaming file route is closed"),
-            };
-            Ok(match result {
-                Ok(value) => CtValue::Present(Box::new(value)),
-                Err(error) => CtValue::failed(Box::new(error)),
-            })
+        // #3593: the policy-free provider leaves behind Core/files/files.jet.
+        ("core.files", leaf) if leaf.starts_with("__") => {
+            match crate::Comptime::TextLite::apply_files_leaf(leaf, &args) {
+                Some(result) => result.map_err(|message| unsupported(&message, span)),
+                None => Err(unsupported(&format!("core.files.{leaf}"), span)),
+            }
         }
 
         (
             "core.files",
             "read" | "read_bytes" | "write" | "write_bytes" | "append_all" | "exists" | "is_dir"
             | "create_dir" | "create_dir_all" | "remove" | "remove_dir" | "remove_all"
-            | "list_dir" | "copy" | "copy_dir" | "rename" | "symlink" | "hard_link"
+            | "list_dir" | "copy" | "copy_dir" | "symlink" | "hard_link"
             | "read_link" | "canonicalize" | "glob" | "walk" | "walk_parallel"
-            | "walk_files" | "stat" | "fsync" | "set_mode",
+            | "walk_files" | "fsync" | "set_mode",
         ) => {
             let path_arg = |value: &CtValue| -> Result<String, Diagnostic> {
                 Ok(as_string(value, span)?.to_string())
@@ -541,9 +519,6 @@ pub fn apply_impure_core_call_with_type_args(
                 "append_all" => unit(files_kernel::fs_append(&path, as_string(one(1)?, span)?)),
                 "fsync" => unit(files_kernel::fs_fsync(&path)),
                 "set_mode" => unit(files_kernel::fs_set_mode(&path, as_int(one(1)?, span)?)),
-                "exists" => CtValue::Bool(files_kernel::fs_exists(&path)),
-                "is_dir" => CtValue::Bool(files_kernel::fs_is_dir(&path)),
-                "stat" => present(files_kernel::fs_stat(&path)),
                 "create_dir" => unit(files_kernel::fs_create_dir(&path)),
                 "create_dir_all" => unit(files_kernel::fs_create_dir_all(&path)),
                 "remove" => unit(files_kernel::fs_remove(&path)),
@@ -551,7 +526,6 @@ pub fn apply_impure_core_call_with_type_args(
                 "remove_all" => unit(files_kernel::fs_remove_all(&path)),
                 "copy" => unit(files_kernel::fs_copy(&path, &path_arg(one(1)?)?)),
                 "copy_dir" => unit(files_kernel::fs_copy_dir(&path, &path_arg(one(1)?)?)),
-                "rename" => unit(files_kernel::fs_rename(&path, &path_arg(one(1)?)?)),
                 "symlink" => unit(files_kernel::fs_symlink(&path, &path_arg(one(1)?)?)),
                 "hard_link" => unit(files_kernel::fs_hard_link(&path, &path_arg(one(1)?)?)),
                 "read_link" => present(files_kernel::fs_read_link(&path).map(CtValue::Str)),
@@ -650,32 +624,12 @@ pub fn apply_impure_core_call_with_type_args(
                 e,
             )))),
         },
-        ("core.sys", "home_dir") => Ok(
-            match jet_foundation::CheckReads::env_var("HOME")
-                .or_else(|| jet_foundation::CheckReads::env_var("USERPROFILE"))
-            {
-                Some(v) => CtValue::Present(Box::new(CtValue::Str(v))),
-                None => CtValue::absent(crate::AST::Type::String),
-            },
-        ),
         ("core.process", "argv") => {
             // Prefer argv installed for this jet run/deopt. Never fall back to
             // the host process argv — `cargo test` flags would leak into output.
             let argv = super::super::super::Interpreter::runtime_argv()
                 .unwrap_or_else(|| vec!["jet".to_string()]);
             Ok(CtValue::List(argv.into_iter().map(CtValue::Str).collect()))
-        }
-        ("core.process", "args") => {
-            // Keep the projection in the shared Prelude. The returned list is
-            // newly allocated on every call, just like the native adapters.
-            let argv = super::super::super::Interpreter::runtime_argv()
-                .unwrap_or_else(|| vec!["jet".to_string()]);
-            Ok(CtValue::List(
-                process_args_kernel::jet_process_args_view(argv)
-                    .into_iter()
-                    .map(CtValue::Str)
-                    .collect(),
-            ))
         }
         ("core.term", "progress") => {
             let Some(source) = args.first() else {
@@ -737,22 +691,6 @@ pub fn apply_impure_core_call_with_type_args(
                     let _ = super::term_semantics::jet_term_write_stdout(&frame, flush);
                 } else {
                     s.stdout.push_str(&frame);
-                }
-            }
-            Ok(CtValue::Unit)
-        }
-        ("core.term", "eprint") => {
-            let text = args
-                .iter()
-                .map(|v| display_core_pure_value(v).unwrap_or_else(|| v.jet_show()))
-                .collect::<Vec<_>>()
-                .join("\n");
-            if let Some(s) = sink {
-                let frame = super::term_semantics::jet_term_print_frame(&text);
-                if !repl_mode && super::term_semantics::jet_term_stderr_is_program_stream() {
-                    let _ = super::term_semantics::jet_term_write_stderr(&frame, true);
-                } else {
-                    s.stderr.push_str(&frame);
                 }
             }
             Ok(CtValue::Unit)
@@ -1021,7 +959,7 @@ pub fn apply_impure_core_call_with_type_args(
         ("core.math.random", _) | ("core.testing", "fake_rng") => {
             apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
         }
-        ("core.crypto.random", "bytes") => {
+        ("core.crypto.random", "__os_entropy") => {
             apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
         }
         // `core.text.fmt` is pure text rendering; at runtime it carries the

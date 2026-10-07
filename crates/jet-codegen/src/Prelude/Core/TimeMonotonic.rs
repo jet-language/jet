@@ -18,7 +18,7 @@ pub fn jet_time_monotonic_provider_set(
     JET_MONOTONIC_PROVIDER.with(|current| current.replace(provider))
 }
 
-fn jet_time_monotonic_controlled_now_ns() -> Option<i64> {
+pub fn jet_time_monotonic_controlled_now_ns() -> Option<i64> {
     JET_MONOTONIC_PROVIDER.with(|provider| provider.get().and_then(|provider| provider()))
 }
 
@@ -29,10 +29,10 @@ pub fn jet_time_monotonic_now_ns() -> i64 {
     if let Some(now) = jet_scheduler_world_monotonic_now_ns() {
         return now;
     }
+    jet_time_monotonic_host_sample().min(i64::MAX as u128) as i64
+}
+
+pub fn jet_time_monotonic_host_sample() -> u128 {
     static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-    EPOCH
-        .get_or_init(std::time::Instant::now)
-        .elapsed()
-        .as_nanos()
-        .min(i64::MAX as u128) as i64
+    EPOCH.get_or_init(std::time::Instant::now).elapsed().as_nanos()
 }

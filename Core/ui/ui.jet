@@ -65,6 +65,13 @@ pub struct Rect {
     pub height: Float
 }
 
+pub struct SizeConstraint {
+    pub min_width: Float
+    pub min_height: Float
+    pub max_width: Float
+    pub max_height: Float
+}
+
 
 pub enum InputEvent {
     Key(code: String)
@@ -74,36 +81,44 @@ pub enum InputEvent {
 
 
 
-pub fn point(x: Float, y: Float) -> Point Never! { core.ui.point(x, y) }
+pub fn point(x: Float, y: Float) -> Point Never! { Point{x: x, y: y} }
 pub fn size(width: Float, height: Float) -> Size Never! {
-    core.ui.size(width, height)
+    Size{width: width, height: height}
 }
 pub fn rect(x: Float, y: Float, width: Float, height: Float) -> Rect Never! {
-    core.ui.rect(x, y, width, height)
+    Rect{x: x, y: y, width: width, height: height}
 }
 pub fn constraint(min_width: Float, min_height: Float, max_width: Float, max_height: Float) -> SizeConstraint Never! {
-    core.ui.constraint(min_width, min_height, max_width, max_height)
+    SizeConstraint{min_width: min_width, min_height: min_height, max_width: max_width, max_height: max_height}
 }
 
 pub fn node(label: String, width: Float, height: Float) -> UINode Never! {
-    core.ui.node(label, width, height)
+    transfer_node(label, width, height, None, UINodeKind.Custom, [UINode]{}, None)
 }
 
 pub fn box(children: [UINode]) -> UINode Never! {
-    core.ui.box(children)
+    width := Float{0.0}
+    height := Float{0.0}
+    loop child in children {
+        // f64::max ignores a NaN operand; do not let it poison the width.
+        if child.width > width -> width = child.width
+        height += child.height
+    }
+    transfer_node("", width, height, Val(UIAriaRole.Container), UINodeKind.Box, children, None)
 }
 
 pub fn text(value: String) -> UINode Never! {
-    core.ui.text(value)
+    width :: Float{core.tui.display_width(value)}
+    transfer_node(value, width, 1.0, Val(UIAriaRole.Label), UINodeKind.Text, [UINode]{}, None)
 }
 
-pub fn desktop() -> UIPreviewViewport Never! { core.ui.desktop() }
-pub fn phone() -> UIPreviewViewport Never! { core.ui.phone() }
-pub fn tablet() -> UIPreviewViewport Never! { core.ui.tablet() }
+pub fn desktop() -> UIPreviewViewport Never! { transfer_viewport(2, 1280, 800, 1) }
+pub fn phone() -> UIPreviewViewport Never! { transfer_viewport(0, 390, 844, 2) }
+pub fn tablet() -> UIPreviewViewport Never! { transfer_viewport(1, 834, 1119, 2) }
 
-pub fn key_event(code: String) -> InputEvent Never! { core.ui.key_event(code) }
+pub fn key_event(code: String) -> InputEvent Never! { InputEvent.Key(code) }
 pub fn resize_event(width: Float, height: Float) -> InputEvent Never! {
-    core.ui.resize_event(width, height)
+    InputEvent.Resize(size(width, height))
 }
 
 
@@ -111,24 +126,70 @@ pub fn gtk_backend() -> GtkBackend Never! { core.ui.gtk_backend() }
 pub fn tui_backend() -> TUIBackend Never! { core.ui.tui_backend() }
 pub fn null_backend() -> NullBackend Never! { core.ui.null_backend() }
 
-pub fn aria_role_button() -> UIAriaRole Never! { core.ui.aria_role_button() }
-pub fn aria_role_container() -> UIAriaRole Never! { core.ui.aria_role_container() }
-pub fn aria_role_label() -> UIAriaRole Never! { core.ui.aria_role_label() }
-pub fn aria_role_text_input() -> UIAriaRole Never! { core.ui.aria_role_text_input() }
+pub fn aria_role_button() -> UIAriaRole Never! { UIAriaRole.Button }
+pub fn aria_role_container() -> UIAriaRole Never! { UIAriaRole.Container }
+pub fn aria_role_label() -> UIAriaRole Never! { UIAriaRole.Label }
+pub fn aria_role_text_input() -> UIAriaRole Never! { UIAriaRole.TextInput }
 
 pub fn node_accessibility(n: UINode, metadata: UIAccessibility) -> UINode Never! {
-    core.ui.node_accessibility(n, metadata)
+    #Unsafe("Core UI accessibility slot transfer: explicitly present validated metadata") {
+        core.ui.__accessibility_transfer(n, metadata, true)
+    }
 }
 
 pub fn node_color(label: String, width: Float, height: Float, color: String) -> UINode Never! {
-    core.ui.node_color(label, width, height, color)
+    transfer_node(label, width, height, Val(UIAriaRole.Label), UINodeKind.Custom, [UINode]{}, Val(color))
 }
 
 pub fn node_role(label: String, width: Float, height: Float, role: UIAriaRole) -> UINode Never! {
-    core.ui.node_role(label, width, height, role)
+    kind := UINodeKind.Custom
+    if role == .Button -> kind = UINodeKind.Button
+    if role == .TextInput -> kind = UINodeKind.TextInput
+    transfer_node(label, width, height, Val(role), kind, [UINode]{}, None)
 }
 
 pub fn node_shortcut(n: UINode, shortcut: UIShortcut) -> UINode Never! {
-    core.ui.node_shortcut(n, shortcut)
+    #Unsafe("Core UI shortcut slot transfer: explicitly present validated shortcut") {
+        core.ui.__shortcut_transfer(n, shortcut, true)
+    }
 }
 
+
+fn transfer_node(label: String, width: Float, height: Float, role: UIAriaRole?, kind: UINodeKind, children: [UINode], color: String?) -> UINode Never! {
+    // Policy chooses the absent metadata slots here. The wire explicitly
+    // carries their six absence bits, rather than asking the host for defaults.
+    role_tag := -1
+    if role == .Val(value) {
+        if value == .Button -> role_tag = 0
+        if value == .TextInput -> role_tag = 1
+        if value == .Label -> role_tag = 2
+        if value == .Container -> role_tag = 3
+    }
+    kind_tag := 0
+    if kind == .Text -> kind_tag = 1
+    if kind == .Box -> kind_tag = 2
+    if kind == .Button -> kind_tag = 3
+    if kind == .TextInput -> kind_tag = 4
+    color_present := false
+    color_word := ""
+    if color == .Val(value) {
+        color_present = true
+        color_word = value
+    }
+    #Unsafe("Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words") {
+        core.ui.__node_transfer(label, width, height, role_tag, kind_tag, children, color_present, color_word, 63, false, 0, 0, 0, 0, 0)
+    }
+}
+
+fn transfer_viewport(device: Int, width: Int, height: Int, scale: Int) -> UIPreviewViewport Never! {
+    #Unsafe("Core UI viewport transfer: source supplies a valid device and bounded positive dimensions") {
+        core.ui.__viewport_transfer(device, width, height, scale)
+    }
+}
+
+#Test("UI aria role constructors") {
+    assert(aria_role_button() == UIAriaRole.Button)
+    assert(aria_role_container() == UIAriaRole.Container)
+    assert(aria_role_label() == UIAriaRole.Label)
+    assert(aria_role_text_input() == UIAriaRole.TextInput)
+}

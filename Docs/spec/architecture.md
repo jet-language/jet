@@ -1062,6 +1062,14 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   2026-07-24; I9 owner-directed 2026-07-29; dumb-adapter rule owner-directed
   2026-07-29; D-EXEC2=A retired the Cranelift JIT.)
 
+  Source-owned Core policy must preserve the public provider carrier, including
+  methods, nominal traits, ownership conventions, and labeled optional controls.
+  A descriptor record or fieldless source struct is not a substitute for an
+  opaque native handle. Native optional payloads are converted once at the Core
+  call boundary to Jet's owned absence carrier; callers must not reinterpret that
+  carrier as a Rust `Option`. Scheduler-gated host steps remain in the local
+  runtime rather than being dispatched into a crypto-only FFI bridge.
+
   The comptime Core registry uses the following namespace classification. The
   table covers the `core_calls.rs` namespaces.
   `Kernel` means that comptime marshals `CtValue` into the exact Prelude part.
@@ -1098,6 +1106,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.encoding.toml` | Kernel | Typed TOML uses the shared codec kernel. |
   | `core.encoding.xml` | Kernel | `jet-foundation/XmlKernel.rs`; AOT embeds it and comptime marshals `DataTree` values. |
   | `core.encoding.yaml` | Kernel | Typed YAML uses the shared codec kernel. |
+  | `core.builtin` | Intrinsic | String length and map projections marshal through the shared builtin value operations. |
   | `core.sys` | Host | Explicit comptime environment authority and policy boundary. |
   | `core.event` | Host | Callback registration crosses the runtime closure boundary; the host only marshals shared event values. |
   | `core.files` | Host | Explicit comptime filesystem authority and policy boundary. |
@@ -1117,10 +1126,10 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.regex` | Kernel | The generated regex engine exposes one shared matching and validation kernel. |
   | `core.units` | Kernel | `Prelude/Core/Measurement.rs`; all tiers marshal `(value, uncertainty)`. |
   | `core.service` | Kernel | Typed tree declarations and the shipped mailbox, lifecycle, authenticated directory/routing, handoff, rollback, partition, reconciliation, and typed observability paths use `ServiceAuthority.rs` and `Services.rs`; structured export uses the existing `core.log` sink, and `ServicesLite` marshals the service calls. |
-  | `core.data.sketch.cms` | Kernel | `Prelude/Core/Sketch.rs`; comptime marshals state. |
-  | `core.data.sketch.hll` | Kernel | `Prelude/Core/Sketch.rs`; comptime marshals state. |
-  | `core.data.sketch.reservoir` | Kernel | `Prelude/Core/Sketch.rs`; comptime marshals state. |
-  | `core.data.sketch.tdigest` | Kernel | `Prelude/Core/Sketch.rs`; comptime marshals state. |
+  | `core.data.sketch.cms` | Jet | `Core/data/sketch/cms.jet` owns seeded hash selection, unit saturation and additive source merge over Shared storage. |
+  | `core.data.sketch.hll` | Jet | `Core/data/sketch/hll.jet` owns the 256-register estimator over Shared storage; seeded FNV lives in `Core/data/sketch.jet`. |
+  | `core.data.sketch.reservoir` | Jet | `Core/data/sketch/reservoir.jet` owns the shipped xorshift seed, Algorithm R and slot order over Shared storage. |
+  | `core.data.sketch.tdigest` | Jet | `Core/data/sketch/tdigest.jet` owns unit-weight insertion, compression and step quantiles over the canonical Shared storage primitive. |
   | `core.compute.solve` | Kernel | `Prelude/CoreLib/Top/Solver.rs`; comptime marshals state. |
   | `core.sync` | Kernel | `Prelude/CoreLib/Top/Sync.rs`; `SyncLite` marshals values. |
   | `core.testing` | Mixed | Shared deterministic helpers call Prelude; harness and host work stay adapters. |

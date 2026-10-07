@@ -394,37 +394,6 @@ fn jet_time_days_in_month(year: i64, month: i64) -> i64 {
 fn jet_time_is_leap_year(year: i64) -> bool {
     JetDate::is_leap(jet_time_unix_input(year))
 }
-fn jet_calendar_isleap(year: i64) -> bool {
-    jet_time_is_leap_year(year)
-}
-fn jet_calendar_leapdays(
-    first: i64,
-    second: i64,
-) -> jet_foundation::Numeric::JetInt {
-    let (start, end) = if first <= second {
-        (first, second)
-    } else {
-        (second, first)
-    };
-    jet_std::jet_int_owned_from_i64(
-        (start..end)
-            .filter(|year| JetDate::is_leap(*year))
-            .count() as i64,
-    )
-}
-fn jet_calendar_weekday_i64(year: i64, month: i64, day: i64) -> i64 {
-    let adjusted_year = if month < 3 { year - 1 } else { year };
-    let offsets = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
-    let month_index = month.saturating_sub(1).clamp(0, 11) as usize;
-    let sunday_zero = (adjusted_year
-        + adjusted_year.div_euclid(4)
-        - adjusted_year.div_euclid(100)
-        + adjusted_year.div_euclid(400)
-        + offsets[month_index]
-        + day)
-        .rem_euclid(7);
-    (sunday_zero + 6).rem_euclid(7)
-}
 fn jet_coll_owned_values(
     values: Vec<i64>,
 ) -> Vec<jet_foundation::Numeric::JetInt> {
@@ -616,180 +585,6 @@ impl JetDebug for (String, String) {
     }
 }
 
-fn jet_calendar_weekday(
-    year: i64,
-    month: i64,
-    day: i64,
-) -> jet_foundation::Numeric::JetInt {
-    jet_std::jet_int_owned_from_i64(jet_calendar_weekday_i64(year, month, day))
-}
-fn jet_calendar_monthrange(
-    year: i64,
-    month: i64,
-) -> (
-    jet_foundation::Numeric::JetInt,
-    jet_foundation::Numeric::JetInt,
-) {
-    (
-        jet_std::jet_int_owned_from_i64(jet_time_days_in_month(year, month)),
-        jet_std::jet_int_owned_from_i64(jet_calendar_weekday_i64(year, month, 1)),
-    )
-}
-fn jet_calendar_monthcalendar(
-    year: i64,
-    month: i64,
-) -> Vec<Vec<jet_foundation::Numeric::JetInt>> {
-    jet_calendar_monthcalendar_start(year, month, 0)
-}
-fn jet_calendar_monthcalendar_start(
-    year: i64,
-    month: i64,
-    firstweekday: i64,
-) -> Vec<Vec<jet_foundation::Numeric::JetInt>> {
-    let days = jet_time_days_in_month(year, month);
-    let start = (jet_calendar_weekday_i64(year, month, 1) - firstweekday).rem_euclid(7);
-    let mut weeks = Vec::new();
-    let mut week = Vec::new();
-    for _ in 0..start {
-        week.push(jet_std::jet_int_owned_from_i64(0));
-    }
-    for day in 1..=days {
-        week.push(jet_std::jet_int_owned_from_i64(day));
-        if week.len() == 7 {
-            weeks.push(week);
-            week = Vec::new();
-        }
-    }
-    if !week.is_empty() {
-        while week.len() < 7 {
-            week.push(jet_std::jet_int_owned_from_i64(0));
-        }
-        weeks.push(week);
-    }
-    weeks
-}
-fn jet_calendar_yearcalendar(
-    year: i64,
-) -> Vec<Vec<Vec<jet_foundation::Numeric::JetInt>>> {
-    (1..=12)
-        .map(|month| jet_calendar_monthcalendar(year, month))
-        .collect()
-}
-fn jet_calendar_weekheader(width: i64, firstweekday: i64) -> Vec<String> {
-    let width = width.max(1) as usize;
-    (0..7)
-        .map(|index| {
-            let text = jet_calendar_day_abbr((index + firstweekday).rem_euclid(7));
-            let bytes = text.as_bytes();
-            if bytes.len() >= width {
-                String::from_utf8_lossy(&bytes[..width]).into_owned()
-            } else {
-                format!("{text}{}", " ".repeat(width - bytes.len()))
-            }
-        })
-        .collect()
-}
-fn jet_calendar_formatmonth(year: i64, month: i64, width: i64) -> String {
-    let width = width.max(2) as usize;
-    let title = format!("{} {year}", jet_calendar_month_name(month));
-    let title_width = width.saturating_mul(7).saturating_add(6);
-    let title_bytes = title.as_bytes();
-    let title = if title_bytes.len() >= title_width {
-        String::from_utf8_lossy(&title_bytes[..title_width]).into_owned()
-    } else {
-        let left = (title_width - title_bytes.len()) / 2;
-        let right = title_width - title_bytes.len() - left;
-        format!("{}{}{}", " ".repeat(left), title, " ".repeat(right))
-    };
-    let cells = jet_calendar_weekheader(width as i64, 0);
-    let mut out = format!("{title}\n{}\n", cells.join(" "));
-    for week in jet_calendar_monthcalendar(year, month) {
-        let row = week
-            .into_iter()
-            .map(|day| {
-                let day = day.to_raw().to_string();
-                let cell = if day == "0" { String::new() } else { day };
-                if cell.len() >= width {
-                    cell[..width].to_string()
-                } else {
-                    format!("{}{}", " ".repeat(width - cell.len()), cell)
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
-        out.push_str(&row);
-        out.push('\n');
-    }
-    out
-}
-fn jet_calendar_formatyear(year: i64) -> String {
-    let mut out = String::new();
-    for month in 1..=12 {
-        out.push_str(&jet_calendar_formatmonth(year, month, 3));
-        out.push('\n');
-    }
-    out
-}
-fn jet_calendar_day_name(weekday: i64) -> String {
-    [
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-        "Sunday",
-    ]
-    .get(weekday.clamp(0, 6) as usize)
-    .unwrap_or(&"Sunday")
-    .to_string()
-}
-fn jet_calendar_day_abbr(weekday: i64) -> String {
-    ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-        .get(weekday.clamp(0, 6) as usize)
-        .unwrap_or(&"Sun")
-        .to_string()
-}
-fn jet_calendar_month_name(month: i64) -> String {
-    [
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-    ]
-    .get(month.saturating_sub(1).clamp(0, 11) as usize)
-    .unwrap_or(&"December")
-    .to_string()
-}
-fn jet_calendar_month_abbr(month: i64) -> String {
-    [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
-        "Dec",
-    ]
-    .get(month.saturating_sub(1).clamp(0, 11) as usize)
-    .unwrap_or(&"Dec")
-    .to_string()
-}
-fn jet_calendar_timegm(
-    year: i64,
-    month: i64,
-    day: i64,
-    hour: i64,
-    minute: i64,
-    second: i64,
-) -> jet_foundation::Numeric::JetInt {
-    jet_std::jet_int_owned_from_i64(
-        JetDateTime::from_parts(year, month, day, hour, minute, second, 0).to_unix_seconds(),
-    )
-}
 fn jet_time_period(years: i64, months: i64, days: i64) -> JetPeriod {
     JetPeriod::new(
         jet_time_unix_input(years),
@@ -1230,9 +1025,6 @@ impl JetZonedDateTime {
 }
 
 
-fn jet_url_parse(s: &String) -> Result<crate::jet_std::JetURL, String> {
-    crate::jet_std::JetURLParts::parse(s).map(crate::jet_std::JetURL::from_url_parts)
-}
 
 /// D-BOUND-HEAD1=A: DateTime heads are complete RFC3339 values. Sema has
 /// already rejected holes that could make the literal invalid.
@@ -1244,91 +1036,7 @@ fn jet_typed_datetime_literal(literals: &[&str], holes: Vec<String>) -> JetDateT
     }
 }
 
-fn jet_url_from_parts(
-    scheme: &String,
-    host: &String,
-    path: &String,
-    query: &Vec<Vec<String>>,
-    fragment: &String,
-) -> Result<crate::jet_std::JetURL, String> {
-    crate::jet_std::JetURLParts::from_parts(scheme, host, path, query, fragment)
-        .map(crate::jet_std::JetURL::from_url_parts)
-}
-fn jet_url_file(path: &String) -> crate::jet_std::JetURL {
-    crate::jet_std::JetURL::from_url_parts(crate::jet_std::JetURLParts::file(path))
-}
-fn jet_url_data(mime: &crate::jet_std::JetMIME, text: &String) -> crate::jet_std::JetURL {
-    crate::jet_std::JetURL::from_url_parts(crate::jet_std::JetURLParts::data(mime, text))
-}
-fn jet_url_query(pairs: &Vec<Vec<String>>) -> String {
-    let rows: Vec<(String, String)> = pairs
-        .iter()
-        .filter(|r| !r.is_empty())
-        .map(|r| {
-            (
-                r.get(0).cloned().unwrap_or_default(),
-                r.get(1).cloned().unwrap_or_default(),
-            )
-        })
-        .collect();
-    rows.iter()
-        .map(|(k, v)| {
-            format!(
-                "{}={}",
-                crate::jet_std::jet_url_percent_encode(k, false),
-                crate::jet_std::jet_url_percent_encode(v, false)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("&")
-}
-fn jet_url_percent_encode_component(s: &String) -> String {
-    crate::jet_std::jet_url_percent_encode(s, false)
-}
-fn jet_url_percent_decode_component(s: &String) -> Result<String, String> {
-    crate::jet_std::jet_url_percent_decode_str(s)
-}
-fn jet_url_join(base: &String, rel: &String) -> String {
-    crate::jet_std::jet_url_join_text(base, rel)
-}
-fn jet_url_parse_qsl(query: &String) -> Vec<Vec<String>> {
-    crate::jet_std::jet_url_parse_qsl_rows(query)
-}
-fn jet_url_urlencode(pairs: &Vec<Vec<String>>) -> String {
-    crate::jet_std::jet_url_query_rows(pairs)
-}
-fn jet_url_split_fragment(text: &String) -> (String, String) {
-    let (url, fragment) = crate::jet_std::jet_url_split_fragment(text);
-    (fragment, url)
-}
-fn jet_url_quote(text: &String) -> String {
-    crate::jet_std::jet_url_quote(text)
-}
-fn jet_url_quote_from_bytes(data: &Vec<u8>) -> String {
-    crate::jet_std::jet_url_quote_from_bytes(data)
-}
-fn jet_url_quote_plus(text: &String) -> String {
-    crate::jet_std::jet_url_quote_plus(text)
-}
-fn jet_url_unquote(text: &String) -> Result<String, String> {
-    crate::jet_std::jet_url_unquote(text)
-}
-fn jet_url_unquote_to_bytes(text: &String) -> Result<Vec<u8>, String> {
-    crate::jet_std::jet_url_unquote_to_bytes(text)
-}
-fn jet_url_unquote_plus(text: &String) -> Result<String, String> {
-    crate::jet_std::jet_url_unquote_plus(text)
-}
-fn jet_url_to_string(url: &crate::jet_std::JetURL) -> String {
-    url.to_string_value()
-}
-fn jet_url_urldefrag(text: &String) -> (String, String) {
-    crate::jet_std::jet_url_split_fragment(text)
-}
 
-fn jet_mime_parse(s: &String) -> Result<crate::jet_std::JetMIME, String> {
-    crate::jet_std::JetMIME::parse(s)
-}
 fn jet_mime_from_extension(ext: &String) -> Option<String> {
     crate::jet_std::jet_mime_from_extension(ext).map(|s| s.to_string())
 }
@@ -1840,4 +1548,46 @@ fn jet_int_to_u8(n: i64) -> Result<u8, String> {
     } else {
         Err("a U8 holds 0..255".to_string())
     }
+}
+
+// Raw samples for the Jet-owned civil carriers. No calendar, selection,
+// validation, or defaulting policy belongs in these temporary host leaves.
+fn jet_time_raw_wall_sample() -> (
+    jet_foundation::Numeric::JetInt,
+    jet_foundation::Numeric::JetInt,
+    bool,
+) {
+    let (seconds, nanoseconds, before_epoch) = jet_time_wall_parts();
+    (
+        jet_std::jet_int_owned_from_i128(seconds as i128),
+        jet_std::jet_int_owned_from_i64(nanoseconds as i64),
+        before_epoch,
+    )
+}
+fn jet_time_raw_world_wall_ms() -> Option<jet_foundation::Numeric::JetInt> {
+    jet_scheduler_world_now_ms().map(jet_std::jet_int_owned_from_i64)
+}
+fn jet_time_raw_wall_override_ms() -> Option<jet_foundation::Numeric::JetInt> {
+    jet_time_wall_override_ms().map(jet_std::jet_int_owned_from_i64)
+}
+fn jet_time_raw_controlled_monotonic_ns() -> Option<jet_foundation::Numeric::JetInt> {
+    jet_time_monotonic_controlled_now_ns().map(jet_std::jet_int_owned_from_i64)
+}
+fn jet_time_raw_world_monotonic_ns() -> Option<jet_foundation::Numeric::JetInt> {
+    jet_scheduler_world_monotonic_now_ns().map(jet_std::jet_int_owned_from_i64)
+}
+fn jet_time_raw_host_monotonic_ns() -> jet_foundation::Numeric::JetInt {
+    jet_std::jet_int_owned_from_i128(jet_time_monotonic_host_sample() as i128)
+}
+fn jet_time_raw_zone_env(name: &String) -> Option<String> {
+    jet_time_zone_environment(name)
+}
+fn jet_time_raw_zone_file_bytes(path: &String) -> Option<Vec<u8>> {
+    jet_time_zone_file(path)
+}
+fn jet_time_raw_embedded_zone_bytes(name: &String) -> Option<Vec<u8>> {
+    #[cfg(target_arch = "wasm32")]
+    { jet_time_embedded_zone_bytes(name).map(|bytes| bytes.to_vec()) }
+    #[cfg(not(target_arch = "wasm32"))]
+    { let _ = name; None }
 }

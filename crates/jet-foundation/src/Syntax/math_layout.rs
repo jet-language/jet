@@ -301,6 +301,8 @@ pub const IO_ERROR_VARIANTS: &[&str] = &[
     "Protocol",
     "Other",
     "ResourceLimit",
+    "AlreadyExists",
+    "Unsupported",
 ];
 pub const PROCESS_RESOURCE_LIMIT_VARIANTS: &[&str] =
     &["WallTime", "CpuTime", "Memory", "OpenFiles", "Output"];

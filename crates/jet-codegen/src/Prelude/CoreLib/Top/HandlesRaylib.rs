@@ -408,11 +408,6 @@ struct RaylibColor {
     a: i64,
 }
 
-/// D-GAME-LOOP1=A: typed sound handle (headless-safe; native play is best-effort).
-#[derive(Clone, Debug)]
-struct RaylibSound {
-    path: String,
-}
 
 type RaylibAtlasRegion = JetRaylibAtlasRegion;
 
@@ -914,9 +909,6 @@ fn jet_raylib_close_window(window: &RaylibWindow) {
     }
 }
 
-fn jet_raylib_color(r: i64, g: i64, b: i64, a: i64) -> RaylibColor {
-    RaylibColor { r, g, b, a }
-}
 
 fn jet_raylib_key_code(name: &String) -> i32 {
     match name.as_str() {
@@ -1020,12 +1012,4 @@ fn jet_raylib_set_target_fps(fps: i64) {
     }
 }
 
-fn jet_raylib_load_sound(path: &String) -> RaylibSound {
-    RaylibSound { path: path.clone() }
-}
-
-/// Returns whether a play was accepted (always true for a non-empty path in headless).
-fn jet_raylib_play_sound(sound: &RaylibSound) -> bool {
-    !sound.path.is_empty()
-}
 // jet:raylib-end

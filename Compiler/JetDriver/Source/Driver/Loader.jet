@@ -2642,10 +2642,10 @@ fn jet_driver_place_core_module(modules: [JetDriverLoadedModule], source_units: 
 // bare `URL`), in Core table order, each followed by the private parts it
 // owns; then, breadth first, the Core modules those import, in import order.
 // Host-only Core modules, which Rust never loads, come last in load order.
-fn jet_driver_order_core_modules(modules: ^[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], core_sources: [JetDriverCoreSource], names_url_carrier: Bool) -> [JetDriverLoadedModule] Never! {
+fn jet_driver_order_core_modules(modules: ^[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], core_sources: [JetDriverCoreSource], names_url_carrier: Bool, names_perf: Bool) -> [JetDriverLoadedModule] Never! {
     // Discover the complete index order before taking any module. Pop and
     // keyed removal transfer ownership without shifting a vector per module.
-    final_order :: jet_driver_core_module_order(modules, source_units, core_sources, names_url_carrier)
+    final_order :: jet_driver_core_module_order(modules, source_units, core_sources, names_url_carrier, names_perf)
     slots := [Int:JetDriverLoadedModule]{}
     remaining := ^modules
     loop remaining.len() > 0 {
@@ -2664,7 +2664,7 @@ fn jet_driver_order_core_modules(modules: ^[JetDriverLoadedModule], source_units
 // The load order of `modules` as positions. `modules` is a read parameter, so
 // planning reads every module row through a borrow instead of copying the
 // consumed list (or a module) per Core source row.
-fn jet_driver_core_module_order(modules: [JetDriverLoadedModule], source_units: [JetDriverSourceUnit], core_sources: [JetDriverCoreSource], names_url_carrier: Bool) -> [Int] Never! {
+fn jet_driver_core_module_order(modules: [JetDriverLoadedModule], source_units: [JetDriverSourceUnit], core_sources: [JetDriverCoreSource], names_url_carrier: Bool, names_perf: Bool) -> [Int] Never! {
     placed := [Bool]{}
     direct := [Bool]{}
     loop position in 0..<modules.len() {
@@ -2682,6 +2682,9 @@ fn jet_driver_core_module_order(modules: [JetDriverLoadedModule], source_units: 
     if names_url_carrier {
         url_carrier :: mir_boundary_head_carrier_module("URL") ?? ""
         if jet_driver_core_module_position(modules, source_units, url_carrier) == .Val(position) -> direct[position] = true
+    }
+    if names_perf {
+        if jet_driver_core_module_position(modules, source_units, "core.perf") == .Val(position) -> direct[position] = true
     }
     order := [Int]{}
     loop row_index in 0..<core_sources.len() {
@@ -2756,6 +2759,7 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
     // Exact text records of the embedded Core modules the closure loads.
     core_generated := [MIRSourceFile]{}
     names_url_carrier := false
+    names_perf := false
     pending_index := 0
     // The current parse wave's results, last-first: every unit queued when
     // the wave starts is parsed at once, on the admitted compiler threads.
@@ -2809,14 +2813,24 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
         })
         loaded_program :: modules[module_position].program
         if jet_driver_has_errors(parse_result.diagnostics) -> next
-        // A bare `URL` (a type or a typed `URL{"…"}` head) is the `core.net.url`
-        // record, so a module that names it loads that Core source without a
-        // `use` (Rust `source_names_identifier` in the loader).
-        if !is_core && jet_driver_source_names_identifier(request.authorized_sources.roots[unit.root_index].files[unit.file_index].source, "URL") {
+        // URL values and lowercase typed heads load their source owner even
+        // without an explicit import.
+        if !is_core && (jet_driver_source_names_identifier(request.authorized_sources.roots[unit.root_index].files[unit.file_index].source, "URL") || jet_driver_source_names_identifier(request.authorized_sources.roots[unit.root_index].files[unit.file_index].source, "url")) {
             names_url_carrier = true
             url_carrier :: mir_boundary_head_carrier_module("URL") ?? ""
             url_index :: jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, url_carrier, Span{start: 0, end: 0}, &diagnostics)
             if url_index == .Val(index) {
+                if !queued[index] {
+                    queued[index] = true
+                    &pending.push(index)
+                }
+            }
+        }
+        // Prelude `Perf.*` calls use the same source owner as `use core.perf`.
+        if !is_core && jet_driver_source_names_identifier(request.authorized_sources.roots[unit.root_index].files[unit.file_index].source, "Perf") {
+            names_perf = true
+            perf_index :: jet_driver_core_unit(&source_units, &queued, &pending, &core_generated, request.core_sources, "core.perf", Span{start: 0, end: 0}, &diagnostics)
+            if perf_index == .Val(index) {
                 if !queued[index] {
                     queued[index] = true
                     &pending.push(index)
@@ -2992,7 +3006,7 @@ pub fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult 
     if !jet_driver_has_errors(diagnostics) && !jet_driver_bind_package_namespaces(&modules, &resolved_imports, source_units, catalog.packages, request.authorized_sources.roots, &diagnostics) {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
     }
-    modules = jet_driver_order_core_modules(^modules, source_units, request.core_sources, names_url_carrier)
+    modules = jet_driver_order_core_modules(^modules, source_units, request.core_sources, names_url_carrier, names_perf)
     provenance :: jet_driver_collect_source_files(request.authorized_sources, source_units, modules, core_generated)
     loop diagnostic in provenance.diagnostics -> &diagnostics.push(diagnostic)
     if !provenance.complete -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Collect)

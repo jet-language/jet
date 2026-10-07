@@ -744,6 +744,15 @@ fn sema_type_bound_satisfied_resolved(graph: SemaRegistrationGraph, actual_resol
     nominal_row :: sema_type_resolve_nominal_row(graph, actual_resolved, caller_module_identity) ?? return None
     nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     trait_symbol :: sema_type_graph_trait_symbol(graph, caller_module_identity, bound_name) ?? return None
+    // These provider-backed Core owners already implement the consuming runtime
+    // Close protocol. Check the declaring identity, never the display path or
+    // an application's same-named struct.
+    if bound_name == "Close" && nominal.symbol.module_name.starts_with("<corelib>/Core/files::") {
+        if nominal.symbol.name == {
+            "FileReader" | "FileWriter" | "FileLock" | "TempDir" | "TempFile" -> return Val(true)
+            else -> {}
+        }
+    }
     unresolved_impl := false
     if graph.impl_traits_indexed {
         // Only the impls of this trait, from the registration index.
@@ -886,7 +895,7 @@ fn sema_type_core_leaf_name(graph: SemaRegistrationGraph, name: String, caller_m
     loop index in 0..<last -> &owner_parts.push(parts[index])
     module_name :: sema_registration_module_name(graph, owner_parts.join("::")) ?? return None
     if module_name == "core.crypto" -> return None
-    if (leaf == "SQL" || leaf == "HTML" || leaf == "Sh" || leaf == "URL" || leaf == "Path" || leaf == "DateTime") && !(leaf == "URL" && module_name == "core.net.url") -> return None
+    if (leaf == "SQL" || leaf == "HTML" || leaf == "Sh" || leaf == "URL" || leaf == "Path" || leaf == "DateTime") && !(leaf == "URL" && module_name == "core.net.url") && !(leaf == "DateTime" && module_name == "core.time") -> return None
     exports :: core_module_export(module_name) ?? return None
     if !exports.type_exports.contains(leaf) -> return None
     if sema_type_graph_lookup_symbol(graph, caller_module_identity, leaf) != None -> return None

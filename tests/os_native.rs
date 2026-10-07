@@ -717,6 +717,49 @@ fn process_pty_reuses_the_canonical_termios_abi() {
 }
 
 #[test]
+fn hostname_uses_the_same_jet_environment_and_file_policy() {
+    let dir = temp_dir("hostname_policy");
+    let binary = compile(
+        &dir,
+        "hostname_policy",
+        r#"
+package {
+    name: "hostname_policy"
+    authority: { holds: { allow: [Env, FS, IO, Mem.Alloc] } }
+}
+use core.sys as os
+use core.net as net
+
+fn run() {
+    print("name:{net.gethostname()}")
+    print(net.gethostname() == os.hostname())
+}
+"#,
+    );
+    let file_name = std::fs::read_to_string("/etc/hostname")
+        .map(|value| value.trim().to_owned())
+        .unwrap_or_else(|_| "localhost".to_owned());
+    for environment in [None, Some(""), Some("  deliberate-host  ")] {
+        let mut command = Command::new(&binary);
+        command.env_remove("HOSTNAME");
+        if let Some(value) = environment {
+            command.env("HOSTNAME", value);
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "hostname child failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let expected = environment.filter(|value| !value.is_empty()).unwrap_or(&file_name);
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap().replace("\r\n", "\n"),
+            format!("name:{expected}\ntrue\n")
+        );
+    }
+}
+
+#[test]
 fn native_os_facts_match_host_and_are_nonempty() {
     let dir = temp_dir("facts");
     let binary = compile(

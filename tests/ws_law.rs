@@ -120,6 +120,8 @@ mod jet_std {
         Closed(IOContext),
         Protocol(IOContext),
         Other(IOContext),
+        AlreadyExists(IOContext),
+        Unsupported(IOContext),
     }
 
     // The canonical DataTree extension calls these exact-Int helpers. This
@@ -152,13 +154,6 @@ mod jet_std {
         pub fragment: Option<String>,
         pub typed_host: Option<Vec<(String, bool)>>,
         pub typed_path: Option<Vec<(String, bool)>>,
-    }
-
-    #[derive(Clone, Debug, PartialEq)]
-    pub struct JetMIME {
-        pub top: String,
-        pub sub: String,
-        pub parameters: Vec<Vec<String>>,
     }
 
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");

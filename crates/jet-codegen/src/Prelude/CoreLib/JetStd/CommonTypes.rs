@@ -508,6 +508,7 @@ pub struct CBORWriter {
 pub struct ProcessSpec {
     pub cmd: Vec<String>,
     pub cwd: Option<String>,
+    pub(crate) inherited_directories: Vec<JetProcessDirectory>,
     pub env_clear: bool,
     pub env_set: Vec<(String, String)>,
     pub env_remove: Vec<String>,
@@ -6564,6 +6565,8 @@ impl super::JetShow for IOError {
             IOError::Closed(context) => (5, context),
             IOError::Protocol(context) => (6, context),
             IOError::Other(context) => (7, context),
+            IOError::AlreadyExists(context) => (9, context),
+            IOError::Unsupported(context) => (10, context),
             IOError::ResourceLimit(limit) => {
                 return format!("process resource limit exceeded: {}", limit.jet_show());
             }
@@ -6592,6 +6595,8 @@ impl super::JetDebug for IOError {
             IOError::Closed(context) => ("Closed", context),
             IOError::Protocol(context) => ("Protocol", context),
             IOError::Other(context) => ("Other", context),
+            IOError::AlreadyExists(context) => ("AlreadyExists", context),
+            IOError::Unsupported(context) => ("Unsupported", context),
             IOError::ResourceLimit(limit) => {
                 return crate::jet_debug_variant("ResourceLimit", Some(limit.jet_debug()));
             }

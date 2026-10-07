@@ -70,11 +70,11 @@ JET_RUST_PREFIX_FONTS :: [String]{
 JET_RUST_PREFIX_PRELUDE_FILES :: [String]{
     "Devtools.rs", "DevelopmentReceipt.rs", "Core/Receipt.rs", "FaultInjection.rs", "Core/Keep.rs",
     "JobQueueTypes.rs", "Job.rs", "Core/Option.rs", "Core/FixedList.rs", "Core/Columns.rs",
-    "Core/ColumnList.rs", "Core/UnicodeString.rs", "Core/Ascii.rs", "Core/ProcessArgs.rs",
+    "Core/ColumnList.rs", "Core/UnicodeString.rs", "Core/Ascii.rs",
     "Core/StringConcat.rs", "Core/ViewCopy.rs", "Core/Loadable.rs", "Core/Values.rs",
     "Core/TextValues.rs", "Core/RangeBounds.rs", "Core/InlineRange.rs", "Core/Disjoint.rs",
     "Core/ExpiringSecret.rs", "Core/SetAlgebra.rs", "Core/Duration.rs", "Core/Measurement.rs",
-    "Core/TimeMonotonic.rs", "Core/Time.rs", "Core/Sketch.rs", "Core/Contracts.rs", "Core/MapKey.rs",
+    "Core/TimeMonotonic.rs", "Core/Time.rs", "Core/Contracts.rs", "Core/MapKey.rs",
     "Core/RuntimeStack.rs", "Core/Authority.rs", "Core/FixedArithmetic.rs", "Core/FloatOrdering.rs",
     "Core/ParallelKernel.rs", "Core/TestEvidence.rs", "Core.rs", "Core/ViewAccess.rs", "Core/Power.rs",
     "Core/Division.rs", "TypedText.rs", "Core/Progress.rs", "Core/Bytes.rs", "Core/FSIgnore.rs",
@@ -124,7 +124,7 @@ JET_RUST_PREFIX_PRELUDE_FILES :: [String]{
     "Core/HttpRequestTarget.rs", "CoreLib/Top/HTTPMessage.rs", "CoreLib/Top/HTTPRoute.rs",
     "CoreLib/Top/HTTPClient.rs", "CoreLib/Top/HTTPServer.rs", "CoreLib/Top/WsClient.rs", "CoreLib/Top/Ws.rs",
     "CoreLib/Top/Browser.rs", "BrowserTest.rs", "CoreLib/Top/Args.rs", "Core/ArgsProjectionCore.rs",
-    "Core/ArgsProjection.rs", "CoreLib/Top/Reflect.rs", "CoreLib/Top/Auth.rs", "CoreLib/Top/AuthSession.rs",
+    "Core/ArgsProjection.rs", "CoreLib/Top/Reflect.rs", "CoreLib/Top/AuthSession.rs",
     "CoreLib/Top/Sync.rs", "CoreLib/SyncPublish.rs", "CoreLib/Top/ServiceAuthority.rs",
     "CoreLib/Top/JobQueueNative.rs", "CoreLib/Top/Services.rs", "CoreLib/Top/Mod.rs",
     "CoreLib/Top/LiveQuery.rs", "Core/WebPending.rs", "CoreLib/Top/WebRouter.rs", "CoreLib/Top/OpenAPI.rs",
@@ -698,7 +698,7 @@ fn jet_rust_prefix_prelude_parts(state: &JetRustPrefixState, out: &[String], dev
     &out.push(jet_rust_prefix_cut(&state, devtools, "// JET_HOST_DEVTOOLS_NATIVE_BEGIN", "// JET_HOST_DEVTOOLS_NATIVE_END"))
     &out.push(jet_rust_prefix_foundation(&state, "DevtoolsNative.rs"))
     &out.push(jet_rust_prefix_raw_const(&state, "DEVTOOLS_NATIVE_WRAPPERS_PRELUDE"))
-    jet_rust_prefix_push_files(&state, &out, [String]{"FaultInjection.rs", "Core/Keep.rs", "JobQueueTypes.rs", "Job.rs", "Core/Option.rs", "Core/FixedList.rs", "Core/Columns.rs", "Core/ColumnList.rs", "Core/UnicodeString.rs", "Core/Ascii.rs", "Core/ProcessArgs.rs", "Core/StringConcat.rs", "Core/ViewCopy.rs", "Core/Loadable.rs", "Core/Values.rs", "Core/TextValues.rs", "Core/RangeBounds.rs", "Core/InlineRange.rs", "Core/Disjoint.rs", "Core/ExpiringSecret.rs", "Core/SetAlgebra.rs", "Core/Duration.rs", "Core/Measurement.rs", "Core/TimeMonotonic.rs", "Core/Time.rs", "Core/Sketch.rs", "Core/Contracts.rs", "Core/MapKey.rs", "Core/RuntimeStack.rs", "Core/Authority.rs", "Core/FixedArithmetic.rs", "Core/FloatOrdering.rs", "Core/ParallelKernel.rs"})
+    jet_rust_prefix_push_files(&state, &out, [String]{"FaultInjection.rs", "Core/Keep.rs", "JobQueueTypes.rs", "Job.rs", "Core/Option.rs", "Core/FixedList.rs", "Core/Columns.rs", "Core/ColumnList.rs", "Core/UnicodeString.rs", "Core/Ascii.rs", "Core/StringConcat.rs", "Core/ViewCopy.rs", "Core/Loadable.rs", "Core/Values.rs", "Core/TextValues.rs", "Core/RangeBounds.rs", "Core/InlineRange.rs", "Core/Disjoint.rs", "Core/ExpiringSecret.rs", "Core/SetAlgebra.rs", "Core/Duration.rs", "Core/Measurement.rs", "Core/TimeMonotonic.rs", "Core/Time.rs", "Core/Contracts.rs", "Core/MapKey.rs", "Core/RuntimeStack.rs", "Core/Authority.rs", "Core/FixedArithmetic.rs", "Core/FloatOrdering.rs", "Core/ParallelKernel.rs"})
     // RESOURCE_FACTS_PRELUDE
     &out.push("\n#[allow(non_snake_case, unused_imports)]\nmod ResourceSchedule {{\n")
     &out.push(jet_rust_prefix_foundation(&state, "ResourceSchedule.rs"))
@@ -1129,7 +1129,6 @@ fn jet_rust_prefix_optional_parts(state: &JetRustPrefixState, out: &[String], pa
     if browser -> jet_rust_prefix_push_files(&state, &out, [String]{"CoreLib/Top/Browser.rs", "BrowserTest.rs"})
     if jet_rust_prefix_has(parts, MIRRuntimePartID.Args) -> jet_rust_prefix_push_files(&state, &out, [String]{"CoreLib/Top/Args.rs", "Core/ArgsProjectionCore.rs", "Core/ArgsProjection.rs"})
     if jet_rust_prefix_has(parts, MIRRuntimePartID.Reflect) -> &out.push(jet_rust_prefix_prelude(&state, "CoreLib/Top/Reflect.rs"))
-    if jet_rust_prefix_has(parts, MIRRuntimePartID.AuthTokens) -> &out.push(jet_rust_prefix_prelude(&state, "CoreLib/Top/Auth.rs"))
     if jet_rust_prefix_has(parts, MIRRuntimePartID.AuthSession) -> &out.push(jet_rust_prefix_prelude(&state, "CoreLib/Top/AuthSession.rs"))
     if sync {
         &out.push("\nmod jet_sync {{\n")
@@ -1190,6 +1189,8 @@ fn jet_rust_prefix_full_corelib(state: &JetRustPrefixState, out: &[String], linu
     if jet_rust_prefix_has(parts, MIRRuntimePartID.UI) {
         &out.push(jet_rust_prefix_font_prelude(&state))
         &out.push(jet_rust_prefix_prelude(&state, "Core/HostServices.rs"))
+        // mod.rs `FONT_STYLE_COMPARABLE`: Core source compares the native FontStyle with `==`.
+        &out.push("impl __jet_Comparable for JetFontStyle {{ fn compare(&self, rhs: &Self) -> __jet_Ordering {{ match (*self as u8).cmp(&(*rhs as u8)) {{ std::cmp::Ordering::Less => __jet_Ordering::__jet_Less, std::cmp::Ordering::Equal => __jet_Ordering::__jet_Equal, std::cmp::Ordering::Greater => __jet_Ordering::__jet_Greater }} }} }}\n")
         &out.push("\nmod jet_tui_kernel {{\n{jet_rust_prefix_foundation(&state, "Prelude/TuiKernel.rs")}\n}}\n")
         &out.push(jet_rust_prefix_prelude(&state, "Ui.rs"))
         &out.push(jet_rust_prefix_prelude(&state, "Core/Preview.rs"))
@@ -1603,7 +1604,7 @@ fn jet_rust_prefix_ffi_bridges(out: &[String], program: MIRProgram, crate_name: 
     loop call in program.prelude_calls {
         symbol :: jet_rust_prefix_symbol(call.symbol)
         if symbol == "jet_http_client_get" || symbol == "jet_http_client_post" || symbol == "jet_http_client_request_send" -> http = true
-        if symbol == "jet_net_tls_client" -> tls = true
+        if symbol == "jet_net_tls_client" || symbol == "jet_net_tls_client_deadline" || symbol == "jet_net_tls_client_config_deadline" || symbol == "jet_tls_root_certificates_from_pem" || symbol == "jet_tls_client_identity_from_pem" -> tls = true
         if jet_rust_prefix_symbol_is_prelude(call.symbol) && symbol == "jet_plugin_load" -> plugin = true
         if symbol.starts_with("jet_db_") -> db = true
         segments :: symbol.split("::").to_list()

@@ -94,7 +94,7 @@ fn run() {
 "#,
     );
     assert!(
-        out.rust.contains(".to_string_value()"),
+        out.rust.contains(".__jet_to_string()"),
         "typed URL should render to String at HTTP boundary:\n{}",
         out.rust
     );

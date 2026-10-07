@@ -8661,8 +8661,8 @@ fn jet_eval_typed_text_interp(machine: &JetEvalMachine, frame_index: Int, call: 
             expected_symbol = "jet_typed_sh_interpolate"
         }
         kind == MIRTypedHeadKind.URL -> {
-            expected_member = "url_literal"
-            expected_symbol = "jet_std::jet_typed_url_literal"
+            jet_eval_compiler_fail(&machine, span, "URL recipes must call core.net.url.literal")
+            return None
         }
         kind == MIRTypedHeadKind.Path -> {
             expected_member = "path_literal"

@@ -17,7 +17,6 @@ use crate::Codegen::TIR::handle_method_op;
 use crate::Codegen::TIR::handle_method_return_ty;
 use crate::Codegen::TIR::imported_module_call_target_return;
 use crate::Codegen::TIR::is_app_method_name;
-use crate::Codegen::TIR::is_civil_time_method_name;
 use crate::Codegen::TIR::is_concurrency_method_name;
 use crate::Codegen::TIR::is_devserver_method_name;
 use crate::Codegen::TIR::is_event_handle_type;
@@ -28,8 +27,6 @@ use crate::Codegen::TIR::is_loadable_method_name;
 use crate::Codegen::TIR::is_measurement_method_name;
 use crate::Codegen::TIR::is_reactive_effect_method_name;
 use crate::Codegen::TIR::is_reactive_method_name;
-use crate::Codegen::TIR::is_sketch_method_name;
-use crate::Codegen::TIR::is_sketch_type;
 use crate::Codegen::TIR::is_ui_backend_method_name;
 use crate::Codegen::TIR::lower_debug_text;
 use crate::Codegen::TIR::lower_extern_call_arg;
@@ -50,14 +47,6 @@ use crate::jet_generated_format as jet_format;
 
 const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.reflect", "of", "jet_reflect_of", true, &[true]),
-    CoreCallRecord::new(
-        "core.auth",
-        "verify_paseto",
-        "jet_auth_verify_paseto_defaulted",
-        true,
-        &[true, true, true, true, true, true, true],
-    )
-    .with_max_arity(7),
     CoreCallRecord::new(
         "core.http.server",
         "cors_policy",
@@ -156,54 +145,6 @@ const TIR_CORE_CALL_RECORDS: &[CoreCallRecord] = &[
         "jet_sync_text_new",
         true,
         &[false, false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "register_user",
-        "jet_auth_register_user",
-        true,
-        &[false, false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "password_login",
-        "jet_auth_password_login",
-        true,
-        &[false, false, false, false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "magic_link_issue",
-        "jet_auth_magic_link_issue",
-        true,
-        &[false, false, false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "magic_link_consume",
-        "jet_auth_magic_link_consume",
-        true,
-        &[false, false, false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "oauth_begin",
-        "jet_auth_oauth_begin",
-        true,
-        &[false],
-    )
-    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new(
-        "core.auth",
-        "oauth_finish",
-        "jet_auth_oauth_finish",
-        true,
-        &[false, false, false, false],
     )
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
@@ -1697,14 +1638,34 @@ fn lower_core_source_call(
     env: &mut LowerEnv,
 ) -> Option<TExpr> {
     let alias = cx.core_source_modules.get(module)?;
-    if alias == &cx.module_alias
-        || !jet_foundation::CoreModuleExports::core_source_owns_call(module, method, args.len())
+    if (alias == &cx.module_alias && !(module == "core.net.url" && method == "literal"))
+        || !jet_foundation::CoreModuleExports::core_source_owns_call(
+            module, method, args.len(),
+            args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),
+        )
     {
         return None;
     }
+    // #4747: sema keeps the historical width-polymorphic contract. Marshal
+    // F32 through reserved Jet wrappers rather than the Float-only export.
+    let scalar_args = (module == "core.math" && matches!(method, "cmp" | "is_finite"))
+        .then(|| args.iter().map(|arg| {
+            lower_one_call_arg(arg, Some((AccessConvention::Read, Type::Float)), env, cx)
+        }).collect::<Vec<_>>());
+    let source_method = if scalar_args.as_ref().is_some_and(|args| {
+        args.first().is_some_and(|arg| arg.value.ty == Type::Float32)
+    }) {
+        match method {
+            "cmp" => "__cmp_f32",
+            "is_finite" => "__is_finite_f32",
+            _ => unreachable!(),
+        }
+    } else {
+        method
+    };
     let Some(source_signature) = cx
         .core_source_sigs
-        .get(&(module.to_string(), method.to_string()))
+        .get(&(module.to_string(), source_method.to_string()))
     else {
         return Some(invariant_method_expr(
             method_span,
@@ -1712,7 +1673,7 @@ fn lower_core_source_call(
         ));
     };
     let sig = checked_core_source_call_signature(cx, source_signature, type_args);
-    let targs = lower_module_args(args, Some(&sig), env, cx);
+    let targs = scalar_args.unwrap_or_else(|| lower_module_args(args, Some(&sig), env, cx));
     let Some(ty) = resolved_ret.cloned() else {
         let declared_return = source_signature
             .return_type
@@ -1744,7 +1705,7 @@ fn lower_core_source_call(
             rust_fn: instance,
         }
     } else {
-        core_source_module_target(source_signature, method)
+        core_source_module_target(source_signature, source_method)
     };
     Some(TExpr {
         ty,
@@ -3636,6 +3597,19 @@ fn app_route_binding(method: &str, handler: Option<&Expr>, cx: &Cx) -> String {
         })
         .collect::<Vec<_>>()
         .join(";")
+}
+
+/// `core.term.input(prompt?)`: the optional prompt is the ambient input's
+/// `None | Some(&prompt)` argument, so every spelling (bare `input(...)`, an
+/// alias call, and Core source's own `core.term.input(prompt)`) lowers to the
+/// one `AmbientInput` node.
+fn core_term_input_expr(ty: Type, args: Vec<TExpr>) -> TExpr {
+    TExpr {
+        ty,
+        kind: TExprKind::AmbientInput {
+            prompt: args.into_iter().next().map(Box::new),
+        },
+    }
 }
 
 fn lower_game_handle_receiver(receiver: &Expr, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr> {
@@ -5697,22 +5671,8 @@ fn lower_method_call_impl(
                         "Clock.now without a resolved return type",
                     );
                 };
-                let record = match checked_core_record("core.time", "instant", 0, method_span) {
-                    Ok(record) => record,
-                    Err(expr) => return expr,
-                };
-                TExpr {
-                    ty: ty.clone(),
-                    kind: TExprKind::CoreCall {
-                        record,
-                        args: Vec::new(),
-                        source_span: method_span,
-                        type_args: Vec::new(),
-                        widen_to_vec: Vec::new(),
-                        data_plan: None,
-                        fallibility: TFailureCarrier::from_checked_type(&ty),
-                    },
-                }
+                lower_core_source_call(method_span, "core.time", "instant", &[], Some(&ty), &[], cx, env)
+                    .unwrap_or_else(|| invariant_method_expr(method_span, "Clock.now has no loaded source Instant constructor"))
             });
         }
     }
@@ -6378,6 +6338,9 @@ fn lower_method_call_impl(
                     } else {
                         ty
                     };
+                    if module == "core.term" && method == "input" {
+                        return core_term_input_expr(ty, targs);
+                    }
                     let record =
                         match checked_core_record(&module, method, targs.len(), method_span) {
                             Ok(record) => record,
@@ -6510,6 +6473,9 @@ fn lower_method_call_impl(
                     } else {
                         ty
                     };
+                    if submodule == "core.term" && method == "input" {
+                        return core_term_input_expr(ty, targs);
+                    }
                     let record =
                         match checked_core_record(&submodule, method, targs.len(), method_span) {
                             Ok(record) => record,
@@ -8083,25 +8049,6 @@ fn lower_method_call_impl(
     // checked Core rows, never a second receiver dispatch table.  The source
     // receiver is the first Core argument; sema has already supplied the
     // generic element type and result carrier.
-    if recv_type.as_deref() == Some("WebVirtualWindow") && method == "facts_json" && args.is_empty()
-    {
-        return in_own_frame(|| {
-            let Some(result_ty) = resolved_ret.cloned() else {
-                return invariant_method_expr(
-                    method_span,
-                    "virtual window facts has no resolved return type".to_string(),
-                );
-            };
-            TExpr {
-                ty: result_ty,
-                kind: TExprKind::HandleMethod {
-                    recv: Box::new(lower_expr(receiver, cx, env)),
-                    op: THandleOp::WebVirtualWindowFacts,
-                    args: Vec::new(),
-                },
-            }
-        });
-    }
     let web_projection = web_receiver_projection(recv_type.as_deref(), method, args.len());
     if let Some((module, core_method)) = web_projection {
         return in_own_frame(|| {
@@ -8610,163 +8557,6 @@ fn lower_method_call_impl(
             };
         });
     }
-    // D-TIMEDEPTH1=A: a civil-time method (gate shape d9).
-    if matches!(
-        recv_type.as_deref(),
-        Some(
-            "Date"
-                | "LocalDate"
-                | "LocalTime"
-                | "DateTime"
-                | "Instant"
-                | "Period"
-                | "Zone"
-                | "ZonedDateTime"
-        )
-    ) && is_civil_time_method_name(recv_type.as_deref(), method)
-    {
-        return in_own_frame(|| {
-            let kind = recv_type.as_deref().unwrap_or("Date").to_string();
-            let recv_t = lower_expr(receiver, cx, env);
-            let result_ty = in_own_frame(|| match (kind.as_str(), method) {
-                ("Date" | "LocalDate", "year")
-                | ("Date" | "LocalDate", "month")
-                | ("Date" | "LocalDate", "day")
-                | ("Date" | "LocalDate", "diff_days")
-                | ("Date" | "LocalDate", "weekday")
-                | ("Date" | "LocalDate", "iso_weekday")
-                | ("Date" | "LocalDate", "day_of_year")
-                | ("Date" | "LocalDate", "iso_week")
-                | ("Date" | "LocalDate", "iso_week_year")
-                | ("Date" | "LocalDate", "quarter_of_year")
-                | ("Date" | "LocalDate", "days_in_month") => Type::Int,
-                ("Date" | "LocalDate", "is_leap_year") => Type::Bool,
-                (
-                    "Date" | "LocalDate",
-                    "add_days" | "add_months" | "add_period" | "subtract_period" | "truncate"
-                    | "replace",
-                ) => Type::Named("LocalDate".to_string()),
-                ("Date" | "LocalDate", "with") => Type::Result {
-                    ok: Box::new(Type::Named("LocalDate".to_string())),
-                    err: Box::new(Type::String),
-                },
-                ("Date" | "LocalDate", "to_string" | "format") => Type::String,
-                ("Date" | "LocalDate", "format_checked") => Type::Result {
-                    ok: Box::new(Type::String),
-                    err: Box::new(Type::Named("TextError".to_string())),
-                },
-                ("Date" | "LocalDate", "until" | "since") => Type::Named("Duration".to_string()),
-                (
-                    "LocalTime",
-                    "hour" | "minute" | "second" | "millisecond" | "microsecond" | "nanosecond",
-                ) => Type::Int,
-                (
-                    "LocalTime",
-                    "add_duration" | "subtract_duration" | "round" | "truncate" | "floor" | "ceil",
-                ) => Type::Named("LocalTime".to_string()),
-                ("LocalTime", "until" | "since") => Type::Named("Duration".to_string()),
-                ("LocalTime", "to_string" | "format") => Type::String,
-                ("LocalTime", "format_checked") => Type::Result {
-                    ok: Box::new(Type::String),
-                    err: Box::new(Type::Named("TextError".to_string())),
-                },
-                (
-                    "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant" | "ZonedDateTime",
-                    "equal",
-                ) => Type::Bool,
-                (
-                    "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant" | "ZonedDateTime",
-                    "compare",
-                ) => Type::Named(crate::Syntax::TYPE_ORDERING.to_string()),
-                ("DateTime", "hour")
-                | ("DateTime", "minute")
-                | ("DateTime", "second")
-                | ("DateTime", "millisecond")
-                | ("DateTime", "microsecond")
-                | ("DateTime", "nanosecond")
-                | ("DateTime", "to_timestamp")
-                | ("DateTime", "to_unix_ms")
-                | ("DateTime", "to_unix_s") => Type::Int,
-                ("DateTime", "to_unix_us" | "to_unix_ns") => Type::Result {
-                    ok: Box::new(Type::Int),
-                    err: Box::new(Type::Named("RangeError".to_string())),
-                },
-                ("DateTime", "date") => Type::Named("LocalDate".to_string()),
-                ("DateTime", "time") => Type::Named("LocalTime".to_string()),
-                (
-                    "DateTime",
-                    "plus_duration" | "subtract_duration" | "add_nanoseconds" | "add_period"
-                    | "subtract_period" | "truncate" | "round" | "floor" | "ceil" | "replace",
-                ) => Type::Named("DateTime".to_string()),
-                ("DateTime", "with") => Type::Result {
-                    ok: Box::new(Type::Named("DateTime".to_string())),
-                    err: Box::new(Type::String),
-                },
-                ("DateTime", "difference" | "until" | "since") => {
-                    Type::Named("Duration".to_string())
-                }
-                ("DateTime", "in_zone") => Type::Named("ZonedDateTime".to_string()),
-                ("DateTime", "to_string" | "format_rfc3339" | "format") => Type::String,
-                ("DateTime", "format_checked") => Type::Result {
-                    ok: Box::new(Type::String),
-                    err: Box::new(Type::Named("TextError".to_string())),
-                },
-                ("Instant", "elapsed_millis") => Type::Int,
-                ("Instant", "elapsed") => Type::Named("Duration".to_string()),
-                ("Period", "years" | "months" | "days" | "sign") => Type::Int,
-                ("Period", "is_zero") => Type::Bool,
-                ("Period", "abs" | "negated" | "add" | "sub") => Type::Named("Period".to_string()),
-                ("Period", "total_in") => Type::Float,
-                ("Period", "to_string") => Type::String,
-                ("Zone", "name") => Type::String,
-                ("Zone", "next_transition" | "previous_transition") => {
-                    Type::Option(Box::new(Type::Int))
-                }
-                ("Zone", "start_of_day") => Type::Named("ZonedDateTime".to_string()),
-                ("Zone", "hours_in_day") => Type::Int,
-                ("ZonedDateTime", "date") => Type::Named("LocalDate".to_string()),
-                ("ZonedDateTime", "time") => Type::Named("LocalTime".to_string()),
-                ("ZonedDateTime", "offset_seconds") => Type::Int,
-                ("ZonedDateTime", "is_dst") => Type::Bool,
-                ("ZonedDateTime", "to_datetime") => Type::Named("DateTime".to_string()),
-                ("ZonedDateTime", "zone") => Type::Named("Zone".to_string()),
-                (
-                    "ZonedDateTime",
-                    "add_duration" | "subtract_duration" | "add_period" | "subtract_period",
-                ) => Type::Named("ZonedDateTime".to_string()),
-                ("ZonedDateTime", "with_zone" | "start_of_day") => {
-                    Type::Named("ZonedDateTime".to_string())
-                }
-                ("ZonedDateTime", "with_time") => Type::Result {
-                    ok: Box::new(Type::Named("ZonedDateTime".to_string())),
-                    err: Box::new(Type::String),
-                },
-                ("ZonedDateTime", "until" | "since") => Type::Named("Duration".to_string()),
-                ("ZonedDateTime", "next_transition" | "previous_transition") => {
-                    Type::Option(Box::new(Type::Int))
-                }
-                ("ZonedDateTime", "hours_in_day") => Type::Int,
-                ("ZonedDateTime", "to_string" | "format" | "format_rfc9557") => Type::String,
-                ("ZonedDateTime", "format_checked") => Type::Result {
-                    ok: Box::new(Type::String),
-                    err: Box::new(Type::Named("TextError".to_string())),
-                },
-                _ => unit_type(),
-            });
-            let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
-            return TExpr {
-                ty: result_ty,
-                kind: TExprKind::HandleMethod {
-                    recv: Box::new(recv_t),
-                    op: THandleOp::CivilTimeMethod {
-                        kind,
-                        method: method.to_string(),
-                    },
-                    args: targs,
-                },
-            };
-        });
-    }
     // D-TIMEDEPTH1=A: Duration is represented as raw nanoseconds in TIR/JIT,
     // so its comparison hook reuses the typed binary node. The node's Compare
     // form emits the same Prelude Comparable symbol as the release hook, while
@@ -8787,79 +8577,6 @@ fn lower_method_call_impl(
             method_span,
         );
         return lower_expr(&operator, cx, env);
-    }
-    // D-APPROX1=A: a sketch method (gate shape d8). Sema normally persists the
-    // nominal receiver in `recv_type`; comptime fragments can retain the same
-    // concrete receiver only in the environment. Derive that name from the
-    // checked receiver type as the fallback so all engines select one sketch
-    // operation rather than the generic method/math fallback.
-    let sketch = recv_type.clone().or_else(|| {
-        let Type::Named(name) = tir_recv_jet_ty(receiver, env)? else {
-            return None;
-        };
-        is_sketch_type(Some(name.as_str())).then_some(name)
-    });
-    if is_sketch_type(sketch.as_deref()) && is_sketch_method_name(sketch.as_deref(), method) {
-        return in_own_frame(|| {
-            let sketch = sketch.as_deref().unwrap_or("").to_string();
-            let recv_t = lower_expr(receiver, cx, env);
-            let result_ty = match (sketch.as_str(), method) {
-                ("HyperLogLog", "add")
-                | ("TDigest", "add")
-                | ("CountMinSketch", "add")
-                | ("ReservoirSampler", "add") => unit_type(),
-                ("HyperLogLog", "count") | ("CountMinSketch", "count") => Type::Int,
-                ("TDigest", "quantile") => Type::Float,
-                ("ReservoirSampler", "sample") => Type::List(Box::new(Type::String)),
-                _ => unit_type(),
-            };
-            let targs: Vec<TExpr> = args
-                .iter()
-                .map(|a| {
-                    let value = lower_expr(&a.expr, cx, env);
-                    if sketch == "TDigest" && matches!(method, "add" | "quantile") {
-                        let source_name = value.ty.without_user_tags().name();
-                        if let Some((type_name, func)) =
-                            crate::Numeric::precise_conversion_route("Float", &source_name)
-                        {
-                            return TExpr {
-                                ty: Type::Float,
-                                kind: TExprKind::PreciseBuiltin {
-                                    type_name: type_name.to_string(),
-                                    func: func.to_string(),
-                                    args: vec![value],
-                                },
-                            };
-                        }
-                        if source_name != "Float"
-                            && crate::AST::numeric_type_from_name(&source_name).is_some()
-                        {
-                            if let Some(op) = resolve_numeric_conversion_op("Float", &source_name) {
-                                return TExpr {
-                                    ty: Type::Float,
-                                    kind: TExprKind::NumericMethod {
-                                        recv: Box::new(value),
-                                        op,
-                                    },
-                                };
-                            }
-                        }
-                    }
-                    value
-                })
-                .collect();
-            return TExpr {
-                ty: result_ty,
-                kind: TExprKind::HandleMethod {
-                    recv: Box::new(recv_t),
-                    op: THandleOp::SketchMethod {
-                        sketch,
-                        method: method.to_string(),
-                    },
-                    args: targs,
-                },
-            };
-        });
     }
     // c109 Phase 21 / D-TUPLE-DESTRUCT1: a Task/Receiver/Sender concurrency method
     // (gate shape d3). The gate proved `recv_type == None` + a disjoint concurrency
@@ -10655,8 +10372,11 @@ fn lower_method_call_impl(
                 } else if matches!(
                     op,
                     THandleOp::FileReaderReadLine
+                        | THandleOp::FileReaderRead
                         | THandleOp::FileWriterWriteLine
                         | THandleOp::FileWriterFlush
+                        | THandleOp::FileWriterWriteAll
+                        | THandleOp::FileWriterFsync
                         | THandleOp::CSVWriterWrite
                         | THandleOp::CSVWriterFlush
                         | THandleOp::CSVWriterFinish
@@ -11416,33 +11136,6 @@ fn lower_method_call_impl(
                         },
                     };
                 }
-                if type_name == "Date" && method == "today" && args.is_empty() {
-                    return in_own_frame(|| {
-                        let Some(ty) = resolved_ret.cloned() else {
-                            return invariant_method_expr(
-                                method_span,
-                                "Date.today without a resolved return type",
-                            );
-                        };
-                        let record = match checked_core_record("core.time", "today", 0, method_span)
-                        {
-                            Ok(record) => record,
-                            Err(expr) => return expr,
-                        };
-                        TExpr {
-                            ty: ty.clone(),
-                            kind: TExprKind::CoreCall {
-                                record,
-                                args: Vec::new(),
-                                source_span: method_span,
-                                type_args: Vec::new(),
-                                widen_to_vec: Vec::new(),
-                                data_plan: None,
-                                fallibility: TFailureCarrier::from_checked_type(&ty),
-                            },
-                        }
-                    });
-                }
                 if type_name == "Path"
                     && method == "home"
                     && args.is_empty()
@@ -11515,7 +11208,28 @@ fn lower_method_call_impl(
                                 type_args: Vec::new(),
                                 args: args
                                     .iter()
-                                    .map(|argument| lower_one_call_arg(argument, None, env, cx))
+                                    .enumerate()
+                                    .map(|(index, argument)| {
+                                        let mut lowered = lower_one_call_arg(argument, None, env, cx);
+                                        // `Body.text(text, mime)`: the source-owned
+                                        // `core.net.mime.MIME` crosses into the native
+                                        // body as its rendered `to_string()` text.
+                                        if type_name == "Body" && method == "text" && index == 1 {
+                                            let recv = lowered.value;
+                                            lowered.value = TExpr {
+                                                ty: Type::String,
+                                                kind: TExprKind::MethodCall {
+                                                    recv: Box::new(recv),
+                                                    method: TMethodRef::inherent("to_string"),
+                                                    type_args: Vec::new(),
+                                                    args: Vec::new(),
+                                                    source_first_string_literal: None,
+                                                    operator_line: None,
+                                                },
+                                            };
+                                        }
+                                        lowered
+                                    })
                                     .collect(),
                             },
                         };
@@ -11859,38 +11573,12 @@ fn lower_method_call_impl(
                 // D-FIDELITY-API1=A: `Perf.fidelity()` / `Perf.override_fidelity(v)?`
                 // lower to the same core call shape as `use core.perf as perf`.
                 if type_name == "Perf" && !cx.fact_type_name("Perf") {
-                    return in_own_frame(|| {
-                        let targs: Vec<TExpr> =
-                            args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
-                        let widen_to_vec = core_widen_to_vec("core.perf", method, &targs);
-                        let Some(ty) = resolved_ret.cloned() else {
-                            return invariant_method_expr(
-                                method_span,
-                                format!("Perf.{method} without a resolved return type",),
-                            );
-                        };
-                        let record = match checked_core_record(
-                            "core.perf",
-                            method,
-                            targs.len(),
-                            method_span,
-                        ) {
-                            Ok(record) => record,
-                            Err(expr) => return expr,
-                        };
-                        TExpr {
-                            ty: ty.clone(),
-                            kind: TExprKind::CoreCall {
-                                record,
-                                args: targs,
-                                source_span: method_span,
-                                type_args: Vec::new(),
-                                widen_to_vec,
-                                data_plan: None,
-                                fallibility: TFailureCarrier::from_checked_type(&ty),
-                            },
-                        }
-                    });
+                    if let Some(call) = lower_core_source_call(
+                        method_span, "core.perf", method, type_args, resolved_ret, args, cx, env,
+                    ) {
+                        return call;
+                    }
+                    return invariant_method_expr(method_span, "Perf source call was not loaded");
                 }
                 // D-COLLBREADTH1=A: `Set.from([...])` → collect list into HashSet.
                 // Lower the list arg as the recv of a SetFrom BuiltinMethod.

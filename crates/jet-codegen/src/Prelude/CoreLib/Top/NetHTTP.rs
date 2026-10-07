@@ -394,7 +394,7 @@ fn jet_tls_config_error(operation: &str, message: String) -> jet_std::IOError {
     ))
 }
 
-fn jet_tls_root_certificates_from_pem(
+fn jet_tls_root_certificates_from_pem_with_validator(
     pem: &Vec<u8>,
     validate: fn(&Vec<u8>) -> Result<(), String>,
 ) -> Result<JetTLSRootCertificates, jet_std::IOError> {
@@ -402,7 +402,7 @@ fn jet_tls_root_certificates_from_pem(
     Ok(JetTLSRootCertificates { pem: pem.clone() })
 }
 
-fn jet_tls_client_identity_from_pem(
+fn jet_tls_client_identity_from_pem_with_validator(
     cert_chain: &Vec<u8>,
     private_key: &Vec<u8>,
     validate: fn(&Vec<u8>, &Vec<u8>) -> Result<(), String>,
@@ -1419,6 +1419,60 @@ macro_rules! jet_net_tls_client_bridge {
             )
             .map_err(jet_net_to_io_error)
         }
+        fn jet_net_tls_client_deadline(
+            stream: JetTCPStream,
+            server_name: &String,
+            deadline: &jet_std::Duration,
+        ) -> Result<JetTLSStream, JetNetError> {
+            jet_net_tls_client_scheduler_deadline(
+                stream, server_name, deadline,
+                $bridge::jet_net_tls_begin_impl,
+                $bridge::jet_net_tls_handshake_step_impl,
+                $bridge::jet_net_tls_abort_impl,
+                $bridge::jet_net_tls_wants_impl,
+                $bridge::jet_net_tls_read_ready_impl,
+                $bridge::jet_net_tls_read_step_impl,
+                $bridge::jet_net_tls_write_step_impl,
+                $bridge::jet_net_tls_close_step_impl,
+                $bridge::jet_net_tls_close_write_step_impl,
+                $bridge::jet_net_tls_peer_identity_impl,
+            )
+        }
+        fn jet_net_tls_client_config_deadline(
+            stream: JetTCPStream,
+            server_name: &String,
+            config: &JetTLSClientConfig,
+            deadline: &jet_std::Duration,
+        ) -> Result<JetTLSStream, JetNetError> {
+            jet_net_tls_client_scheduler_config_deadline(
+                stream, server_name, config, deadline,
+                $bridge::jet_net_tls_begin_config_impl,
+                $bridge::jet_net_tls_handshake_step_impl,
+                $bridge::jet_net_tls_abort_impl,
+                $bridge::jet_net_tls_wants_impl,
+                $bridge::jet_net_tls_read_ready_impl,
+                $bridge::jet_net_tls_read_step_impl,
+                $bridge::jet_net_tls_write_step_impl,
+                $bridge::jet_net_tls_close_step_impl,
+                $bridge::jet_net_tls_close_write_step_impl,
+                $bridge::jet_net_tls_peer_identity_impl,
+            )
+        }
+        fn jet_tls_root_certificates_from_pem(
+            pem: &Vec<u8>,
+        ) -> Result<JetTLSRootCertificates, jet_std::IOError> {
+            jet_tls_root_certificates_from_pem_with_validator(
+                pem, $bridge::jet_net_tls_validate_roots_impl,
+            )
+        }
+        fn jet_tls_client_identity_from_pem(
+            cert_chain: &Vec<u8>,
+            private_key: &Vec<u8>,
+        ) -> Result<JetTLSClientIdentity, jet_std::IOError> {
+            jet_tls_client_identity_from_pem_with_validator(
+                cert_chain, private_key, $bridge::jet_net_tls_validate_identity_impl,
+            )
+        }
     };
 }
 
@@ -1571,12 +1625,12 @@ fn jet_net_tls_client_scheduler_config_deadline(
     peer_snapshot: fn(i64) -> Result<JetTLSPeerSnapshot, String>,
 ) -> Result<JetTLSStream, JetNetError> {
     let _deadline = jet_net_explicit_deadline(deadline, "tls handshake")?;
-    let (trust_mode, roots) = match &config.trust {
-        JetTLSTrust::System => (0, Vec::new()),
-        JetTLSTrust::SystemPlus(roots) => (1, roots.pem.clone()),
-        JetTLSTrust::CustomOnly(roots) => (2, roots.pem.clone()),
-    };
     let empty = Vec::new();
+    let (trust_mode, roots) = match &config.trust {
+        JetTLSTrust::System => (0, &empty),
+        JetTLSTrust::SystemPlus(roots) => (1, &roots.pem),
+        JetTLSTrust::CustomOnly(roots) => (2, &roots.pem),
+    };
     let (cert_chain, private_key) = config
         .identity
         .as_ref()
@@ -1593,7 +1647,7 @@ fn jet_net_tls_client_scheduler_config_deadline(
                 inner,
                 server_name,
                 trust_mode,
-                &roots,
+                roots,
                 cert_chain,
                 private_key,
                 version(config.min_version),
@@ -1715,12 +1769,6 @@ fn jet_net_tls_write_all_bytes_deadline(
     jet_net_tls_write_all_bytes(stream, data)
 }
 
-fn jet_net_tls_write_text(
-    stream: &mut JetTLSStream,
-    text: &String,
-) -> Result<(), jet_std::IOError> {
-    jet_net_tls_write_all_bytes(stream, &text.as_bytes().to_vec())
-}
 
 fn jet_net_tls_close(stream: &mut JetTLSStream) -> Result<(), jet_std::IOError> {
     let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
@@ -2627,55 +2675,6 @@ fn jet_net_sendfile(stream: &mut JetTCPStream, path: &String) -> Result<i64, Jet
     Ok(written.min(i64::MAX as u64) as i64)
 }
 
-const JET_NET_SERVICES: &[(&str, i64)] = &[
-    ("ftp", 21),
-    ("ssh", 22),
-    ("telnet", 23),
-    ("smtp", 25),
-    ("dns", 53),
-    ("domain", 53),
-    ("http", 80),
-    ("pop3", 110),
-    ("imap", 143),
-    ("https", 443),
-    ("smtps", 465),
-    ("submission", 587),
-    ("imaps", 993),
-    ("pop3s", 995),
-];
-
-pub(crate) fn jet_net_getservbyname(name: &String) -> Result<i64, JetNetError> {
-    let key = name.to_ascii_lowercase();
-    JET_NET_SERVICES
-        .iter()
-        .find(|(n, _)| *n == key)
-        .map(|(_, port)| *port)
-        .ok_or_else(|| {
-            JetNetError::InvalidInput(jet_net_detail(
-                "getservbyname",
-                None,
-                None,
-                format!("unknown service `{name}`"),
-                None,
-            ))
-        })
-}
-
-pub(crate) fn jet_net_getservbyport(port: i64) -> Result<String, JetNetError> {
-    JET_NET_SERVICES
-        .iter()
-        .find(|(_, p)| *p == port)
-        .map(|(n, _)| (*n).to_string())
-        .ok_or_else(|| {
-            JetNetError::InvalidInput(jet_net_detail(
-                "getservbyport",
-                None,
-                None,
-                format!("unknown port `{port}`"),
-                None,
-            ))
-        })
-}
 
 fn jet_net_udp_bind(addr: &String) -> Result<JetUDPSocket, JetNetError> {
     jet_scheduler_world_reject_uncontrolled("network");

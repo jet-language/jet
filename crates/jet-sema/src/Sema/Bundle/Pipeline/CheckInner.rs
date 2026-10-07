@@ -23,6 +23,7 @@ pub(super) fn check_bundle_opts_for_output_inner(
     diags.extend(validate_script_entries(bundle));
     default_entry_return(bundle);
     diags.extend(inject_units_prelude(bundle));
+    resolve_default_time_literals(bundle);
     super::super::Prelude::inject(bundle);
     diags.extend(super::super::Casing::validate_bundle(bundle));
     // D-OSTARGET2=B (ratified 2026-07-03): fold every `prep if $build.os == {

@@ -158,6 +158,16 @@ fn sema_call_http_static_value(
     )
 }
 
+// Source-owned HTTP text carriers cross into native leaves through their
+// registered `to_string()` method; the leaf itself takes String.
+fn sema_call_http_source_text(value: ^TExpr, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> TExpr? {
+    graph :: environment.registration_graph ?? return None
+    candidates := sema_expr_registration_method_candidates(graph, value.ty, "to_string", [Type]{}, [Type]{}, span, environment, &scopes, &diagnostics)
+    if candidates.len() != 1 -> return None
+    candidate := &candidates.pop() ?? return None
+    Val(sema_tir_expr(Type.String, TExprKind.MethodCall{receiver: ^value, method: ^candidate.method, type_args: [Type]{}, args: [TCallArg]{}}, span))
+}
+
 fn sema_call_http_static_known(type_name: String, method: String) -> Bool Never! {
     if type_name == "HTTPClientType" && method == "new" -> return true
     if type_name == "HTTPMethod" && (method == "custom" || method == "get" || method == "head" || method == "post" || method == "put" || method == "delete" || method == "connect" || method == "options" || method == "trace" || method == "patch") -> return true
@@ -327,6 +337,9 @@ pub fn sema_call_try_http_static(
         target.type_name == "Body" && method == "reader" && args.len() == 1 -> "from_reader"
         target.type_name == "Body" && method == "reader" -> "from_reader_with_length"
         else -> method
+    }
+    if target.type_name == "Body" && method == "text" && values.len() == 2 {
+        values[1] = sema_call_http_source_text(^values[1], span, environment, &scopes, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     }
     tir := sema_call_http_static_value(target.type_name, method, rust_method, args, values, result_type, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, &diagnostics)}
@@ -900,7 +913,38 @@ fn sema_call_http_sync(record: CoreCallRecord, args: [CallArg], type_args: [Type
     SemaDirectSpecialCheck{handled: true, value: Val(value)}
 }
 
+fn sema_call_http_transport(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if args.len() != record.signature.arity -> return SemaDirectSpecialCheck{handled: false, value: None}
+    if !sema_call_core_check_type_args(record.module_name, record.member, 0, false, type_args, span, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    signature :: core_call_typed_signature(record.module_name, record.member, args.len()) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    _ := sema_call_core_bind_arguments(record, sema_call_http_core_signature_type(signature), args, span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    url_index :: if record.member == "request" -> 1 else -> 0
+    values := [TExpr]{}
+    params := sema_call_core_parameter_records(signature, [Type]{}, span, false)
+    updated_args := args
+    loop (index, argument) in args {
+        value := sema_check_expression(argument.expr, if index == url_index -> None else -> Val(Type.String), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        if index == url_index && value.ty != Type.String {
+            if !(sema_call_type_assignable(Type.Named{name: "URL"}, value.ty, environment) ?? false) {
+                &diagnostics.push(sema_type_mismatch(Type.String, value.ty, argument.span))
+                return SemaDirectSpecialCheck{handled: true, value: None}
+            }
+            params[index].ty = Val(value.ty)
+            value = sema_call_http_source_text(^value, argument.span, environment, &scopes, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        }
+        &values.push(^value)
+    }
+    ownership :: sema_ownership_check_call_arguments(&state, "{record.module_name}.{record.member}", params, &updated_args, scopes, &diagnostics)
+    if !ownership.accepted || !ownership.complete -> return SemaDirectSpecialCheck{handled: true, value: None}
+    result_type :: signature.return_type ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    fallibility :: sema_expression_failure_carrier(result_type)
+    if !sema_call_core_record_effects(record, span, [Type]{}, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    value :: sema_call_core_tir(record, values, span, [Type]{}, loop _ in values -> false, None, result_type, fallibility, None, environment, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, context, &diagnostics)}
+}
+
 pub fn sema_call_try_http_core_call(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
+    if record.module_name == "core.http.client" && (record.member == "get" || record.member == "post" || record.member == "request") -> return sema_call_http_transport(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if (record.module_name == "app" || record.module_name == "core.web") && record.member == "sync" -> return sema_call_http_sync(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     if record.module_name == "core.web" && record.member == "form" -> return sema_call_http_web_form(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
     SemaDirectSpecialCheck{handled: false, value: None}

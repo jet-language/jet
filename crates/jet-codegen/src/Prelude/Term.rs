@@ -366,27 +366,6 @@ impl Drop for JetTermModeGuard {
     }
 }
 
-pub(crate) fn jet_term_confirm_prompt(prompt: &str) -> String {
-    format!("{prompt} [y/N] ")
-}
-
-pub(crate) fn jet_term_confirm_with_io<E>(
-    prompt: &str,
-    mut write: impl FnMut(&str) -> Result<(), E>,
-    mut read: impl FnMut() -> Result<JetTermRead, E>,
-) -> bool {
-    let prompt = jet_term_confirm_prompt(prompt);
-    // The safe default answers for a stream that says nothing, so a piped or
-    // closed input ends the prompt instead of holding the program.
-    let answer = match write(&prompt).and_then(|_| read()) {
-        Ok(JetTermRead::Line(line)) => line,
-        Ok(JetTermRead::EndOfInput) | Err(_) => return false,
-    };
-    matches!(
-        answer.trim().to_ascii_lowercase().as_str(),
-        "y" | "yes"
-    )
-}
 
 pub(crate) fn jet_term_choose_menu(prompt: &str, items: &[String]) -> String {
     let mut menu = format!("{prompt}\n");

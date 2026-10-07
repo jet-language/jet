@@ -162,6 +162,15 @@ pub fn core_effect_leaf(module: &str, method: &str) -> Option<&'static str> {
 }
 
 fn core_effect_leaf_legacy(module: &str, method: &str) -> Option<&'static str> {
+    if module == "core.time" && matches!(method, "zone" | "parse_zoned" | "__zone_file_bytes") {
+        return Some("FS.Read");
+    }
+    if matches!(
+        (module, method),
+        ("core.net", "gethostname") | ("core.sys", "hostname")
+    ) {
+        return Some("FS.Read");
+    }
     if (module == "core.tasks" && method == "timeout")
         || (module == "core.http" && method == "serve")
         || (module == "core.http.client" && matches!(method, "get" | "post" | "request"))
@@ -221,6 +230,9 @@ pub const fn receiver_effect_leaf(type_name: &str, method: &str) -> Option<&'sta
 /// Fallback for special calls that do not yet have a plain Core-call row.
 /// Plain rows never reach this resolver; their effect is stored on the row.
 fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
+    if module == "core.net" && method == "gethostname" {
+        return Some(Effect::Env);
+    }
     if matches!(
         (module, method),
         ("core.sys", "success") | ("core.process", "status_ok")
@@ -238,6 +250,12 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
     // / `random.int(…)` stay rejected (E3403).
     // Civil constructors mint deterministic values, so (like `time.clock`) they
     // carry no effect.
+    if module == "core.time" && method == "__zone_env" {
+        return Some(Effect::Env);
+    }
+    if module == "core.time" && matches!(method, "zone" | "parse_zoned" | "__zone_file_bytes") {
+        return Some(Effect::FS);
+    }
     if matches!(
         (module, method),
         (
@@ -249,10 +267,10 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
                 | "period_days"
                 | "period_months"
                 | "period_years"
-                | "zone"
                 | "utc"
                 | "zoned"
                 | "zoned_local"
+                | "__embedded_zone_bytes"
         ) | ("core.math.random", "rng")
     ) {
         return None;
@@ -360,14 +378,16 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
         // D-RAYLIB1=A: windowing/drawing/input/audio bridge.
         "core.game.raylib" => Effect::GPU,
         "core.time" => Effect::Time,
+        "core.math" if method == "random" => Effect::Rand,
         "core.math.random" | "core.crypto.random" => Effect::Rand,
         "core.sys" => Effect::Env,
         "core.process" => Effect::Exec,
         "core.term" => Effect::IO,
         "core.db" => Effect::DB,
-        // D-AUTH1: the storeful session APIs read and write a live user store.
-        // Declared here so the comptime tier reads the same fact the run tier
-        // does, instead of naming these seven methods in a list of its own.
+        // D-AUTH1: the storeful session APIs read and write a live user store,
+        // and the store cell they go through is that store. Declared here so
+        // the comptime tier reads the same fact the run tier does, instead of
+        // naming these methods in a list of its own.
         "core.auth"
             if matches!(
                 method,
@@ -378,6 +398,8 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
                     | "magic_link_consume"
                     | "oauth_begin"
                     | "oauth_finish"
+                    | "__store_load"
+                    | "__store_replace"
             ) =>
         {
             Effect::DB

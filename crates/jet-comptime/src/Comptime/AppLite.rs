@@ -211,8 +211,6 @@ mod web_kernel {
                 pub redacted: bool,
             }
 
-            pub(crate) use crate::Comptime::UrlLite::JetMIME;
-
             /// Strict JSON validity through the one Foundation parser; the
             /// server-fn kernel only asks whether a body parses.
             pub fn parse_json_typed_datatree(
@@ -2098,55 +2096,6 @@ fn web_query_mode(
 }
 
 
-fn web_virtual_window(value: web_kernel::JetWebVirtualWindow) -> CtValue {
-    CtValue::Struct {
-        type_name: "WebVirtualWindow".to_string(),
-        fields: vec![
-            ("total_count".to_string(), CtValue::Int(value.total_count)),
-            ("scroll_offset".to_string(), CtValue::Int(value.scroll_offset)),
-            ("viewport_size".to_string(), CtValue::Int(value.viewport_size)),
-            (
-                "estimated_item_size".to_string(),
-                CtValue::Int(value.estimated_item_size),
-            ),
-            ("overscan".to_string(), CtValue::Int(value.overscan)),
-            ("start".to_string(), CtValue::Int(value.start)),
-            ("end".to_string(), CtValue::Int(value.end)),
-            ("total_size".to_string(), CtValue::Int(value.total_size)),
-            ("measured_count".to_string(), CtValue::Int(value.measured_count)),
-        ],
-    }
-}
-
-fn web_virtual_window_value(
-    value: &CtValue,
-    span: Span,
-) -> Result<web_kernel::JetWebVirtualWindow, Diagnostic> {
-    let CtValue::Struct { type_name, fields } = value else {
-        return Err(unsupported("WebVirtualWindow", span));
-    };
-    if type_name != "WebVirtualWindow" {
-        return Err(unsupported("WebVirtualWindow", span));
-    }
-    let field = |name: &str| {
-        fields
-            .iter()
-            .find(|(field, _)| field == name)
-            .map(|(_, value)| value)
-            .ok_or_else(|| unsupported("WebVirtualWindow field", span))
-    };
-    Ok(web_kernel::JetWebVirtualWindow {
-        total_count: web_int(field("total_count")?, "total_count", span)?,
-        scroll_offset: web_int(field("scroll_offset")?, "scroll_offset", span)?,
-        viewport_size: web_int(field("viewport_size")?, "viewport_size", span)?,
-        estimated_item_size: web_int(field("estimated_item_size")?, "estimated_item_size", span)?,
-        overscan: web_int(field("overscan")?, "overscan", span)?,
-        start: web_int(field("start")?, "start", span)?,
-        end: web_int(field("end")?, "end", span)?,
-        total_size: web_int(field("total_size")?, "total_size", span)?,
-        measured_count: web_int(field("measured_count")?, "measured_count", span)?,
-    })
-}
 
 fn web_virtual_plan(value: web_kernel::JetWebVirtualPlan) -> CtValue {
     CtValue::Struct {
@@ -3414,42 +3363,6 @@ pub fn apply_suite(
                     .is_some_and(|(_, keep)| *keep)
             });
             Ok(CtValue::List(filtered))
-        }
-        ("core.web.virtual", "window") => Ok(web_virtual_window(
-            web_kernel::jet_web_virtual_window(
-                web_int(one(0)?, "virtual total count", span)?,
-                web_int(one(1)?, "virtual scroll offset", span)?,
-                web_int(one(2)?, "virtual viewport size", span)?,
-                web_int(one(3)?, "virtual item size", span)?,
-                web_int(one(4)?, "virtual overscan", span)?,
-            ),
-        )),
-        ("core.web.virtual", "window_measured") => {
-            let measurements = web_ints(one(5)?, "virtual measurements", span)?;
-            Ok(web_virtual_window(web_kernel::jet_web_virtual_window_measured(
-                web_int(one(0)?, "virtual total count", span)?,
-                web_int(one(1)?, "virtual scroll offset", span)?,
-                web_int(one(2)?, "virtual viewport size", span)?,
-                web_int(one(3)?, "virtual item size", span)?,
-                web_int(one(4)?, "virtual overscan", span)?,
-                &measurements,
-            )))
-        }
-        ("core.web.virtual", "slice") => {
-            let CtValue::List(rows) = one(0)? else {
-                return Err(unsupported("virtual rows", span));
-            };
-            let window = web_virtual_window_value(one(1)?, span)?;
-            Ok(CtValue::List(web_kernel::jet_web_virtual_slice(rows, &window)))
-        }
-        ("core.web.virtual", "indices") => {
-            let window = web_virtual_window_value(one(0)?, span)?;
-            Ok(CtValue::List(
-                web_kernel::jet_web_virtual_indices(&window)
-                    .into_iter()
-                    .map(CtValue::Int)
-                    .collect(),
-            ))
         }
         ("core.web.virtual", "plan") => Ok(web_virtual_plan(
             web_kernel::jet_web_virtual_plan(

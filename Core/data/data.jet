@@ -533,12 +533,72 @@ pub fn value<T: Encode>(value: T, limits: DataLimits) -> DataLoader<T> DataError
     core.data.value<T>(value, limits)
 }
 
-pub fn load_default<T>(locator: String) -> DataLoader<T> DataError! {
-    core.data.load_default<T>(locator)
+/// Infer a core format from the final path extension, without reading the
+/// source. Query/fragment suffixes do not participate in format detection.
+pub fn load_default<T>(locator: String) -[FS, Net, DB]> DataLoader<T> DataError! {
+    load<T>(locator, DataLimits.safe())
 }
 
 pub fn load<T>(locator: String, limits: DataLimits) -[FS, Net, DB]> DataLoader<T> DataError! {
-    core.data.load<T>(locator, limits)
+    format :: locator_format(locator)
+    if locator.starts_with("http://") || locator.starts_with("https://") {
+        if url<T>(locator, format, "network", limits) == {
+            .Ok(loader) -> return Ok(loader)
+            .Err(error) -> return Err(load_format_error(error, format))
+        }
+    }
+    if file<T>(locator, format, limits) == {
+        .Ok(loader) -> Ok(loader)
+        .Err(error) -> Err(load_format_error(error, format))
+    }
+}
+
+fn load_format_error(error: DataError, format: String) -> DataError Never! {
+    if error.kind == .InvalidArgument && error.reason == "unknown data format" {
+        return data_error(DataErrorKind.Bridge, "format `{format}` is provider-owned; import its package", "data.loader")
+    }
+    ~error
+}
+
+fn locator_format(locator: String) -> String DataError! {
+    path :: locator.split("?").to_list()[0].split("#").to_list()[0]
+    segments :: path.split("/").to_list()
+    name :: segments[segments.len() - 1]
+    parts :: name.split(".").to_list()
+    if parts.len() < 2 {
+        return Err(data_error(DataErrorKind.Bridge, "source has no core format; import a provider package", "data.load"))
+    }
+    parts[parts.len() - 1]
+}
+
+#Test("load discovers the final path extension before query and fragment") {
+    local :: load_default<Int>("dir.with.dot/items.CSV?version=.json#part") ?? panic("local loader")
+    assert_eq(local.source.locator, "dir.with.dot/items.CSV?version=.json#part")
+    assert(local.format == .CSV)
+    remote :: load_default<Int>("https://example.test/items.ndjson#part.json") ?? panic("remote loader")
+    assert(remote.source.kind == .URL)
+    assert(remote.format == .JSONL)
+    assert_eq(remote.authority.scope, "network")
+    assert_eq(remote.limits.max_output_rows, 1000000)
+}
+
+#Test("load does not infer a format from a directory or query") {
+    if load_default<Int>("dir.csv/items?format=.json") == {
+        .Ok(_) -> panic("extensionless source accepted")
+        .Err(error) -> {
+            assert(error.kind == .Bridge)
+            assert_eq(error.operation, "data.load")
+            assert_eq(error.reason, "source has no core format; import a provider package")
+        }
+    }
+    if load_default<Int>("items.txt") == {
+        .Ok(_) -> panic("provider format accepted")
+        .Err(error) -> {
+            assert(error.kind == .Bridge)
+            assert_eq(error.operation, "data.loader")
+            assert_eq(error.reason, "format `txt` is provider-owned; import its package")
+        }
+    }
 }
 
 pub fn csv<T: Decode>(text: String) -> [T] DataError! {
@@ -726,10 +786,6 @@ pub fn rolling_mean(values: [Float], window: Int) -> [Float] DataError! {
         &out.push(normalize_zero(mean_value))
     }
     Ok(out)
-}
-
-pub fn query<T>(rows: [T]) -> Query<T> Never! {
-    Query<T>{rows: rows, sql: "", operations: [String]{"scan"}}
 }
 
 pub fn inner_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U>] DataError! {
@@ -1103,13 +1159,16 @@ fn valid_authority(text: String) -> Bool Never! {
 }
 
 fn parse_format(name: String) -> DataFormat? Never! {
-    normalized := upper(trim(name))
+    normalized := upper(name)
     if normalized == {
         "CSV" -> Val(DataFormat.CSV)
         "JSON" -> Val(DataFormat.JSON)
         "JSONL" -> Val(DataFormat.JSONL)
+        "NDJSON" -> Val(DataFormat.JSONL)
         "PARQUET" -> Val(DataFormat.Parquet)
         "ARROW" -> Val(DataFormat.Arrow)
+        "ARROW-IPC" -> Val(DataFormat.Arrow)
+        "FEATHER" -> Val(DataFormat.Arrow)
         else -> None
     }
 }

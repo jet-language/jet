@@ -292,6 +292,8 @@ mod jet_c_abi {
             Protocol(_) => 6,
             Other(_) => 7,
             ResourceLimit(_) => 8,
+            AlreadyExists(_) => 9,
+            Unsupported(_) => 10,
         })
     }
 
@@ -324,6 +326,8 @@ mod jet_c_abi {
         Closed: jet_rt_record_get_IOError_Closed, jet_rt_record_new_IOError_Closed;
         Protocol: jet_rt_record_get_IOError_Protocol, jet_rt_record_new_IOError_Protocol;
         Other: jet_rt_record_get_IOError_Other, jet_rt_record_new_IOError_Other;
+        AlreadyExists: jet_rt_record_get_IOError_AlreadyExists, jet_rt_record_new_IOError_AlreadyExists;
+        Unsupported: jet_rt_record_get_IOError_Unsupported, jet_rt_record_new_IOError_Unsupported;
     }
 
     #[no_mangle]

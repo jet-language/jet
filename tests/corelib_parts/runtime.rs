@@ -1,5 +1,25 @@
 #[test]
-fn perf_static_api_lowers_to_core_helpers() {
+fn web_virtual_window_uses_jet_source_carrier() {
+    let out = compile_temp(
+        "virtual_window_source.jet",
+        r#"
+use core.web.virtual as api
+fn run() {
+    window :: api.window_measured(100, 60, 40, 20, 1, [Int]{10, 30})
+    print(window.facts_json())
+    print(api.indices(window))
+    print(api.slice<Int>([Int]{0, 1, 2, 3, 4, 5, 6}, window))
+}
+"#,
+    );
+    assert!(!out.rust.contains("pub struct JetWebVirtualWindow"));
+    assert!(!out.rust.contains("pub struct JetWebVirtualViewport"));
+    assert!(!out.rust.contains("fn jet_web_virtual_window("));
+    assert!(!out.rust.contains("jet_web_virtual_window_facts"));
+}
+
+#[test]
+fn perf_static_api_lowers_to_jet_source() {
     let out = compile_temp(
         "perf_static.jet",
         r#"
@@ -11,10 +31,54 @@ fn run() {
 }
 "#,
     );
-    assert!(out.rust.contains("jet_perf_default_fidelity()"));
-    assert!(out.rust.contains("jet_perf_override_fidelity(0.25"));
-    assert!(out.rust.contains("jet_perf_fidelity()"));
-    assert!(out.rust.contains("jet_perf_reset_fidelity()"));
+    assert!(out.rust.contains("::default_fidelity()"));
+    assert!(out.rust.contains("::override_fidelity(0.25"));
+    assert!(out.rust.contains("::fidelity()"));
+    assert!(out.rust.contains("::reset_fidelity()"));
+    assert!(out.rust.contains("jet_perf_read_bits"));
+    assert!(out.rust.contains("jet_perf_write_bits"));
+    assert!(!out.rust.contains("fn jet_perf_override_fidelity"));
+    assert!(!out.rust.contains("fn jet_perf_reset_fidelity"));
+}
+
+/// #4745: a default argument belongs to its declaring module. `verify_jwt`'s
+/// `clock_skew: Duration{0ms}` must bind for a caller with no unit in scope.
+#[test]
+fn core_default_time_literal_binds_without_caller_units() {
+    compile_temp(
+        "default_units_absent.jet",
+        r#"
+use core.auth as auth
+
+fn run() -[Time]> {
+    key :: "0123456789abcdef0123456789abcdef".bytes()
+    verified :: auth.verify_jwt("a.b.c", key: key, audience: "api")
+    print(verified == .Err(_))
+}
+"#,
+    );
+}
+
+/// #4745: the caller's own `ms` unit must not rebind the callee's default.
+#[test]
+fn core_default_time_literal_ignores_caller_unit_of_same_name() {
+    let out = compile_temp(
+        "default_units_shadowed.jet",
+        r#"
+use core.auth as auth
+
+#UnitFamily(Lag) { ms }
+
+fn run() -[Time]> {
+    local :: 5ms
+    print(local.to_float())
+    key :: "0123456789abcdef0123456789abcdef".bytes()
+    verified :: auth.verify_jwt("a.b.c", key: key, audience: "api")
+    print(verified == .Err(_))
+}
+"#,
+    );
+    assert!(out.rust.contains("verify_jwt"), "the defaulted call must lower");
 }
 
 #[test]

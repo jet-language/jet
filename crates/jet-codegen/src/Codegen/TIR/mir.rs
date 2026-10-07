@@ -193,7 +193,7 @@ pub(super) struct FunctionRegistry {
 impl FunctionRegistry {
     fn build(
         functions: &[TFunc],
-        entry_sibling_calls: Option<&(String, String)>,
+        entry_call_alias: Option<&(String, String)>,
     ) -> Result<Self, LowerError> {
         let mut registry = Self {
             by_key: HashMap::new(),
@@ -311,9 +311,9 @@ impl FunctionRegistry {
                 .entry(function.name.clone())
                 .or_default()
                 .push(id);
-            // D-MOD-CYCLE1=A: a package sibling calls an entry function by the
-            // imported spelling `<entry alias>::<name>`; it names this row.
-            if let Some((entry_module, prefix)) = entry_sibling_calls {
+            // A canonical entry-qualified call names the entry row, even
+            // when its package has no sibling modules.
+            if let Some((entry_module, prefix)) = entry_call_alias {
                 if matches!(&function.kind, TFuncKind::TopLevel)
                     && function.module == *entry_module
                     && !function.name.contains("::")
@@ -1139,7 +1139,7 @@ fn report_lower_sweep_failure(
 /// whole TIR and whole MIR at once.
 pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerError> {
     let mut function_registry =
-        FunctionRegistry::build(&program.funcs, program.entry_sibling_calls.as_ref())?;
+        FunctionRegistry::build(&program.funcs, program.entry_call_alias.as_ref())?;
     let mut types = lower_type_defs(&program.declarations.type_defs, &function_registry)?;
     lower_anonymous_union_type_defs(&program, &mut types)?;
     // Trait names are checked nominal identities too.  Unlike user types,
@@ -4302,7 +4302,6 @@ fn parse_runtime_part(key: &str) -> Option<MirRuntimePartId> {
         Browser,
         Args,
         Reflect,
-        AuthTokens,
         AuthSession,
         Sync,
         Services,
@@ -10901,6 +10900,7 @@ impl<'a> LowerCtx<'a> {
             _ => None,
         };
         let value = adapted.unwrap_or(value);
+        // A widened union is a fresh boundary value, not the member's place.
         let call_place = if consumes_trait_box || arg.widen_to_union.is_some() || adapted.is_some() {
             None
         } else {
@@ -11651,6 +11651,24 @@ impl<'a> LowerCtx<'a> {
         record: &'static jet_foundation::Syntax::CoreCallRecord,
         widen_to_vec: bool,
     ) -> Result<MirCallArg, LowerError> {
+        // A registry read argument borrows the checked place even when sema
+        // inserted an implicit Clone for ordinary value consumption. Explicit
+        // copies/moves and mutation borrows keep their own access convention.
+        let borrowed_place = if record.signature.borrow_mask.get(index).copied() == Some(true)
+            || (record.module == "core.net.tls" && record.member == "client" && index >= 2)
+        {
+            let source = match &arg.kind {
+                TExprKind::Clone(inner, _) => &**inner,
+                _ => arg,
+            };
+            if matches!(&arg.kind, TExprKind::Borrow { .. }) {
+                None
+            } else {
+                super::tir_to_mir_expr::lower_receiver_place(self, source, MirAccess::Read)?
+            }
+        } else {
+            None
+        };
         let (access, place) = match &arg.kind {
             TExprKind::Borrow { place, mutable } => {
                 let access = if *mutable {
@@ -11661,6 +11679,7 @@ impl<'a> LowerCtx<'a> {
                 let place = self.lower_place(&TPlace::Expr(Box::new((**place).clone())), access)?;
                 (access, Some(place))
             }
+            _ if borrowed_place.is_some() => (MirAccess::Read, borrowed_place),
             TExprKind::Clone(..)
             | TExprKind::ExplicitCopy(_)
             | TExprKind::MaterializeView(_)

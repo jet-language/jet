@@ -182,13 +182,6 @@ pub mod jet_std {
         pub typed_path: Option<Vec<(String, bool)>>
     }
 
-    #[derive(Clone, Debug, PartialEq)]
-    pub struct JetMIME {
-        pub top: String,
-        pub sub: String,
-        pub parameters: Vec<Vec<String>>
-    }
-
     pub(crate) use crate::Encoding::json_rt::{
         datatree_kind_for, decode_bool, decode_f32, decode_float, decode_int, decode_int_with, decode_string,
         jet_datatree_encode_i64, jet_datatree_encode_u64, jet_datatree_decode_fixed_integer,

@@ -94,3 +94,12 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> String? {
 }
  
 fn c_int_max() -> Int Never! { 9223372036854775807 }
+
+/// Internal seeded FNV-1a kernel shared by the shipped HLL and CMS algorithms.
+pub fn __fnv1a64(key: String, seed: U64) -> U64 Never! {
+    hash := seed
+    loop byte in key.bytes() {
+        hash = (hash ~| U64.from_u8(byte)).wrapping_mul(U64{1099511628211})
+    }
+    hash
+}

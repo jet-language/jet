@@ -16,8 +16,8 @@
 // Duplicate object names (D-CORE-JSON-DUP1=A): `parse`, `decode`, and
 // `reader` reject them with the key's path, line, and column. The named
 // `parse_allow_duplicates` keeps the later value in the first key's position;
-// `reader_allow_duplicates` reports every occurrence as events. The duplicate
-// check uses the object's own key map, so the input bound
+// bounded native streaming readers remain strict. The duplicate check uses
+// the object's own key map, so the input bound
 // (`EncodingLimits.safe().max_item_bytes`) also bounds it.
 //
 // `pointer` is RFC 6901 selection (D-CORE-JSON-POINTER1=A) and `patch` is RFC
@@ -115,13 +115,19 @@ pub fn canonical(value: DataTree) -> String EncodingError! {
     Ok(String.from_bytes(out) ?? "")
 }
 
-/// Streaming pull parser over `text`.  The first call validates and
-/// materializes the value, then subsequent calls walk its event sequence.
+/// A pull reader over text already held by the caller. File readers use the
+/// bounded native stream contract and consume a `^FileReader`.
 pub fn reader(text: String) -> JSONReader Never! { JSONReader{parser: Parser.new(text.bytes(), false, false)} }
 
-/// Pull reader that reports every occurrence of a repeated object name as its
-/// own `Key` event instead of rejecting the document.
+/// Report each occurrence of a duplicate key as an event.
 pub fn reader_allow_duplicates(text: String) -> JSONReader Never! { JSONReader{parser: Parser.new(text.bytes(), true, true)} }
+
+pub struct JSONReader {
+    parser: Parser
+
+    pub fn next(&self) -> DataEvent EncodingError! { &self.parser.next_event() }
+}
+
 
 /// RFC 6901 JSON Pointer selection (D-CORE-JSON-POINTER1=A). `""` is the whole
 /// value and `/` the empty-named member; `~0` and `~1` escape `~` and `/`;
@@ -190,29 +196,6 @@ pub fn patch_with_limits(doc: DataTree, ops: DataTree, limits: EncodingLimits) -
 /// Convert a parsed tree to the canonical streaming event sequence.
 pub fn events(value: DataTree) -> [DataEvent] Never! { append_events(value) }
 
-pub fn writer() -> JSONWriter Never! { JSONWriter{pretty: false, parts: [U8]{}} }
-
-pub struct JSONReader {
-    pub parser: Parser
-}
-
-impl JSONReader {
-    pub fn next(&self) -> DataEvent EncodingError! { &self.parser.next_event() }
-}
-
-pub struct JSONWriter {
-    pub pretty: Bool
-    pub parts: [U8]
-}
-
-impl JSONWriter {
-    pub fn write(&self, value: DataTree) Never! {
-        chunk :: render_json(value, self.pretty).bytes()
-        loop b in chunk -> &self.parts.push(b)
-    }
-
-    pub fn to_string(self) -> String Never! { String.from_bytes(self.parts) ?? "" }
-}
 
 struct Parser {
     bytes: [U8]
@@ -224,10 +207,8 @@ struct Parser {
     pending: [DataEvent]
     pending_index: Int
     parsed: Bool
-    allow_duplicates: Bool
-    // Reader mode: append each value's events to `pending` as it is parsed,
-    // so a repeated object name appears once per occurrence.
     recording: Bool
+    allow_duplicates: Bool
 }
 
 impl Parser {
@@ -242,8 +223,8 @@ impl Parser {
             pending: [DataEvent]{},
             pending_index: 0,
             parsed: false,
-            allow_duplicates: allow_duplicates,
             recording: recording,
+            allow_duplicates: allow_duplicates,
         }
     }
 
@@ -585,33 +566,24 @@ impl Parser {
         self.depth += 1
         self.depth <= safe_limits().max_depth
     }
+
     fn next_event(&self) -> DataEvent EncodingError! {
         if !self.parsed {
             if self.bytes.len() > safe_limits().max_item_bytes {
                 return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds EncodingLimits.safe().max_item_bytes"))
             }
             &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
-            if self.eof() {
-                return Err(truncated_error(
-                    EncodingFormat.JSON,
-                    self.index,
-                    self.line,
-                    self.column,
-                    "",
-                ))
-            }
+            if self.eof() -> return Err(truncated_error(EncodingFormat.JSON, self.index, self.line, self.column, ""))
             value :: &self.parse_value()
             &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
             if !self.eof() -> return Err(self.err("unexpected trailing data after the JSON value"))
             if !self.recording -> self.pending = append_events(value)
             self.parsed = true
         }
-        if self.pending_index >= self.pending.len() {
-            return Err(self.err("JSON reader is exhausted"))
-        }
-        ev :: self.pending[self.pending_index]
+        if self.pending_index >= self.pending.len() -> return Err(self.err("JSON reader is exhausted"))
+        event :: self.pending[self.pending_index]
         self.pending_index += 1
-        Ok(ev)
+        Ok(event)
     }
 }
 

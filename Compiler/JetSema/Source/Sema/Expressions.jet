@@ -56,6 +56,7 @@ use jet_foundation.[
     ast_empty_call_arg_flags,
     core_call_typed_signature,
     core_module_export,
+    core_source_owns_type,
     dimension_display_name,
     dimension_identity,
     expr_span,
@@ -2554,7 +2555,7 @@ fn sema_expr_try_core_module_method(receiver: Expr, method: String, method_span:
         .None -> {}
     }
     diagnostics_before := diagnostics.len()
-    route := if nested -> sema_call_core_resolve_import_path_route(environment, scopes, alias, module_name, method, type_args, expected_type_arg_count, true, args.len(), method_span, alias_span, &context, &diagnostics) else -> sema_call_core_resolve_import_route(environment, scopes, alias, method, type_args, expected_type_arg_count, true, args.len(), method_span, alias_span, &context, &diagnostics)
+    route := if nested -> sema_call_core_resolve_import_path_route(environment, scopes, alias, module_name, method, type_args, expected_type_arg_count, true, args.len(), sema_call_core_first_is_move(args), method_span, alias_span, &context, &diagnostics) else -> sema_call_core_resolve_import_route(environment, scopes, alias, method, type_args, expected_type_arg_count, true, args.len(), sema_call_core_first_is_move(args), method_span, alias_span, &context, &diagnostics)
     route_value :: route ?? {
         if diagnostics.len() != diagnostics_before -> return SemaMethodSpecialCheck{handled: true, value: None}
         return SemaMethodSpecialCheck{handled: false, value: None}
@@ -3184,6 +3185,30 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     if op == BinOp.Div && lhs.ty == Type.Int && rhs.ty == Type.Int {
         value := sema_tir_expr(Type.Named{name: "Fraction"}, TExprKind.PreciseBuiltin{type_name: "Fraction", function: "from_parts", args: [TExpr]{lhs, rhs}}, span)
         return sema_expr_expected(value, expected, environment, &diagnostics)
+    }
+    left_point :: if lhs.ty == {.Named(name) -> name.ends_with("::Instant") && core_source_owns_type(name) else -> false}
+    right_point :: if rhs.ty == {.Named(name) -> name.ends_with("::Instant") && core_source_owns_type(name) else -> false}
+    left_delta :: lhs.ty == Type.Named{name: "Duration"}
+    right_delta :: rhs.ty == Type.Named{name: "Duration"}
+    point_method := ""
+    if {
+        op == BinOp.Add && left_point && right_delta -> point_method = "__add"
+        op == BinOp.Add && left_delta && right_point -> point_method = "__delta_add"
+        op == BinOp.Sub && left_point && right_delta -> point_method = "__subtract"
+        op == BinOp.Sub && left_point && right_point -> point_method = "__difference"
+        else -> {}
+    }
+    if point_method != "" {
+        arguments :: [CallArg]{
+            CallArg{convention: AccessConvention.Read, expr: left, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false},
+            CallArg{convention: AccessConvention.Read, expr: right, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+        }
+        constructor :: Expr.MethodCall{receiver: Expr.Ident{name: "Instant", span: span}, method: point_method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: arguments, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
+        return sema_check_expression(constructor, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
+    if (op == BinOp.Add && left_point && right_point) || (op == BinOp.Sub && left_delta && right_point) {
+        &diagnostics.push(sema_error("E0127", span, "{sema_expr_binary_name(op)} is not available between `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "Time points are positions; only point + delta, point - delta, point - point, and delta + delta are defined", "subtract two Instants for a Duration, or add a Duration to an Instant"))
+        return None
     }
     duration := sema_expr_check_duration_binary(op, lhs, rhs, span)
     if duration != None -> return sema_expr_expected(duration ?? lhs, expected, environment, &diagnostics)

@@ -5634,9 +5634,6 @@ fn web_data_symbol_name(name: &str) -> bool {
             | "jet_data_track_insert"
             | "jet_data_track_replace"
             | "jet_data_track_remove"
-            | "jet_data_load"
-            | "jet_data_loader_load"
-            | "jet_data_loader_load_default"
             | "jet_data_loader_file"
             | "jet_data_loader_file_member"
             | "jet_data_loader_url"
@@ -6054,9 +6051,6 @@ const WEB_PRELUDE_LINKS: &[(&str, &str)] = &[
     ("jet_data_track_remove", "jet_data_track_remove"),
     ("jet_data_count", "jet_data_count"),
     ("jet_data_query", "jet_data_query"),
-    ("jet_data_load", "jet_data_loader_load"),
-    ("jet_data_loader_load", "jet_data_loader_load"),
-    ("jet_data_loader_load_default", "jet_data_loader_load_default"),
     ("jet_data_loader_file", "jet_data_loader_file"),
     ("jet_data_loader_file_member", "jet_data_loader_file_member"),
     ("jet_data_loader_url", "jet_data_loader_url"),
@@ -6110,7 +6104,6 @@ const WEB_PRELUDE_LINKS: &[(&str, &str)] = &[
     ("jet_cursor_skip_ws", "jet_cursor_skip_ws"),
     ("jet_cursor_take_pattern", "jet_cursor_take_pattern"),
     ("jet_term_write_stdout_line", "jetDom.print"),
-    ("jet_std::jet_typed_url_literal", "jet_typed_url_literal"),
     ("jet_std::jet_int_abs", "jet_int_abs"),
     ("jet_std::jet_int_add", "jet_int_add"),
     ("jet_std::jet_int_sub", "jet_int_sub"),
@@ -6403,7 +6396,6 @@ const WEB_RUNTIME_LINKS: &[(&str, &str)] = &[
     ("jet_typed_path_literal", "jet_typed_path_literal"),
     ("jet_typed_datetime_interpolate", "jet_typed_datetime_interpolate"),
     ("jet_typed_datetime_literal", "jet_typed_datetime_literal"),
-    ("jet_typed_url_literal", "jet_typed_url_literal"),
     ("jet_expiring_now", "jet_expiring_now"),
     ("jet_expiring_new", "jet_expiring_new"),
     ("jet_expiring_secret_new", "jet_expiring_secret_new"),
@@ -6635,6 +6627,15 @@ const WEB_RUNTIME_LINKS: &[(&str, &str)] = &[
     ("jet_time_format_checked", "jet_time_format_checked"),
     ("jet_time_method", "jet_time_method"),
     ("jet_time_core", "jet_time_core"),
+    ("jet_time_raw_wall_sample", "jet_time_raw_wall_sample"),
+    ("jet_time_raw_world_wall_ms", "jet_time_raw_world_wall_ms"),
+    ("jet_time_raw_wall_override_ms", "jet_time_raw_wall_override_ms"),
+    ("jet_time_raw_controlled_monotonic_ns", "jet_time_raw_controlled_monotonic_ns"),
+    ("jet_time_raw_world_monotonic_ns", "jet_time_raw_world_monotonic_ns"),
+    ("jet_time_raw_host_monotonic_ns", "jet_time_raw_host_monotonic_ns"),
+    ("jet_time_raw_zone_env", "jet_time_raw_zone_env"),
+    ("jet_time_raw_zone_file_bytes", "jet_time_raw_zone_file_bytes"),
+    ("jet_time_raw_embedded_zone_bytes", "jet_time_raw_embedded_zone_bytes"),
     ("jet_time_add", "jet_time_add"),
     ("jet_time_sub", "jet_time_sub"),
 ];
@@ -8368,7 +8369,6 @@ fn runtime_part_descriptor(value: jet_foundation::MIR::MirRuntimePartId) -> &'st
         jet_foundation::MIR::MirRuntimePartId::Browser => "browser",
         jet_foundation::MIR::MirRuntimePartId::Args => "args",
         jet_foundation::MIR::MirRuntimePartId::Reflect => "reflect",
-        jet_foundation::MIR::MirRuntimePartId::AuthTokens => "auth-tokens",
         jet_foundation::MIR::MirRuntimePartId::AuthSession => "auth-session",
         jet_foundation::MIR::MirRuntimePartId::Sync => "sync",
         jet_foundation::MIR::MirRuntimePartId::Services => "services",

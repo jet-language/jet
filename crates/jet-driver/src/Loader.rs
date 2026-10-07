@@ -2656,18 +2656,25 @@ fn load_entry_with_overlays_mode_on_stack(
         build_facts,
         edition: package_edition,
     };
-    // A bare `URL` (a type or a typed `URL{"…"}` head) is the `core.net.url`
-    // record, so a module that names it loads that Core source without a `use`.
+    // URL values and lowercase typed heads load their source owner even
+    // without an explicit import.
     let url_carrier = jet_foundation::Syntax::TypedHeadKind::URL.carrier_record_module();
     let names_url_carrier = bundle
         .modules
         .iter()
-        .any(|module| source_names_identifier(&module.source, "URL"));
+        .any(|module| source_names_identifier(&module.source, "URL")
+            || source_names_identifier(&module.source, "url"));
+    // Prelude static APIs load their source owner just like explicit imports.
+    let names_perf = bundle
+        .modules
+        .iter()
+        .any(|module| source_names_identifier(&module.source, "Perf"));
     let mut core_source_modules = jet_foundation::CoreModuleExports::core_source_modules()
         .iter()
         .copied()
         .filter(|source_module| {
             (names_url_carrier && Some(source_module.module) == url_carrier)
+                || (names_perf && source_module.module == "core.perf")
                 || bundle.modules.iter().any(|module| {
                     module.imports.iter().any(|import| {
                         core_source_import_module(import).as_deref() == Some(source_module.module)

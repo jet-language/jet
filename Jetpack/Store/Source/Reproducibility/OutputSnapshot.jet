@@ -192,8 +192,8 @@ fn store_repro_read_file_digest(path: String) -[FS]> String StoreError! {
 }
 
 fn store_repro_metadata_fingerprint(info: files.Stat) -> String Never! {
-    modified :: info.modified.unix_ns
-    changed :: info.changed.unix_ns
+    modified :: info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")
+    changed :: info.changed.to_unix_ns() ?? panic("file times fit Unix nanoseconds")
     "{info.id.device}:{info.id.inode}:{info.size}:{modified /% 1000000000}:{modified % 1000000000}:{changed /% 1000000000}:{changed % 1000000000}:{info.mode}"
 }
 

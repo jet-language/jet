@@ -66,3 +66,55 @@ fn run() {
         "9223372036854775808\n9223372036854775808\n9223372036854775808\n-9223372036854775809\n18446744073709551616\n9223372036854775808\n0\n1267650600228229401496703205376\n9223372036854775808\n18446744073709551616\n1267650600228229401496703205376\n9223372036854775808\n18446744073709551616\n18446744073709551616\ntrue\ntrue\n-2\n-1\n-3\n2\n3\n2\n-2\n-1\n6148914691236517205\n",
     );
 }
+
+#[test]
+fn core_math_scalar_predicates_and_comparison_match_across_tiers() {
+    tir_support::assert_tiers_agree(
+        "core_math_scalar_predicates",
+        r#"
+use core.math as math
+
+fn run() {
+    print(math.cmp(math.nan(), 1.0))
+    print(math.cmp(1.0, math.nan()))
+    print(math.cmp(math.nan(), math.nan()))
+    print(math.cmp(-0.0, 0.0))
+    print(math.cmp(-2.0, -1.0))
+    print(math.cmp(math.infinity(), 1.0))
+    print(math.is_finite(math.nan()))
+    print(math.is_finite(math.infinity()))
+    print(math.is_finite(math.from_bits(1)))
+    print(math.is_finite(-0.0))
+    print(math.to_bits(math.fabs(-0.0)))
+    print(math.fabs(-2.0))
+    print(math.cmp(F32{-0.0}, F32{0.0}))
+    print(math.cmp(F32{math.nan()}, F32{1.0}))
+    print(math.is_finite(F32{math.infinity()}))
+    print(math.is_finite(F32{1.0}))
+}
+"#,
+        "1\n-1\n0\n0\n-1\n1\nfalse\nfalse\ntrue\ntrue\n0\n2\n0\n1\nfalse\ntrue\n",
+    );
+}
+
+#[test]
+fn core_math_ambient_transition_and_bit_projection_match_across_tiers() {
+    tir_support::assert_tiers_agree(
+        "core_math_ambient_transition",
+        r#"
+use core.math as math
+use core.math.random as random
+
+fn run() {
+    random.seed(1)
+    print(random.getrandbits(63))
+    random.seed(1)
+    print(math.random())
+    random.seed(0)
+    print(random.getrandbits(1))
+    print(random.getrandbits(0))
+}
+"#,
+        "6699714934819013450\n0.7263845487364354\n0\n0\n",
+    );
+}
