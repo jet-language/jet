@@ -1444,6 +1444,12 @@ harness checks the Jet object's definitions, unresolved pack imports, all
 selected baseline stems, raw slot witnesses, and the count of newly passing
 collection stems; preparation is not behavioral proof.
 
+Lazy cursor initialization and advancement may invoke user callbacks. Both
+are can-stop MIR operations: their results are usable only on the immediately
+following Propagate poll's resume edge. Prefetched HasNext/Value operations
+remain non-stopping. A cancelled map callback must report task cancellation,
+never return a short successful collection or silently end a for-loop.
+
 ### Jet-authored runtime object
 
 `Compiler/JetRuntime` is a separate package, assembled from its own

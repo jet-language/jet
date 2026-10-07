@@ -12,7 +12,7 @@ const out = resolve(output);
 const rows = readFileSync(baseline, "utf8").trim().split("\n").map(line => line.split("\t"));
 const prior = new Map(rows.map(([stem, verdict]) => [stem, verdict]));
 if (prior.size !== rows.length || !rows.some(([, verdict]) => verdict === "pass")) throw Error("empty or duplicate baseline");
-const focused = ["filter_map", "fold_association", "iter_adapters", "iter_join", "iter_numeric_bounds", "lazy_iter", "list_surface", "lists", "map_surface", "operation_contract", "zip_family", "runtime_iter_core"].map(stem => `collections/${stem}`);
+const focused = ["filter_map", "fold_association", "iter_adapters", "iter_join", "iter_numeric_bounds", "lazy_iter", "list_surface", "lists", "map_surface", "operation_contract", "zip_family", "runtime_iter_core", "runtime_iter_cancelled"].map(stem => `collections/${stem}`);
 const stems = [...new Set([...rows.filter(([, verdict]) => verdict === "pass").map(([stem]) => stem), ...focused])].sort();
 for (const stem of stems) for (const path of [join(root, "Examples/features", `${stem}.jet`), join(root, "Examples/features/expected", `${stem}.out`)]) if (!existsSync(path)) throw Error(`missing golden ${path}`);
 mkdirSync(out, { recursive: true });
