@@ -510,7 +510,8 @@ fn ui_snapshots() {
                 .map(|p| p.trim().to_string())
         });
         let (cex_lock, cex_restore) = compiler_extension_env(compiler_extension.as_deref());
-        let actual = if let Some(manifest_source) = lint_policy_config.as_deref() {
+        let actual = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if let Some(manifest_source) = lint_policy_config.as_deref() {
             let diagnostic = jet::Manifest::parse(Path::new("package.jet"), manifest_source)
                 .expect_err("the lint-policy code fixture must be refused");
             jet::render_diagnostics(&shown_path, &src, &[diagnostic])
@@ -747,9 +748,23 @@ fn ui_snapshots() {
                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
                 Ok(_) => "(no errors)\n".to_string(),
             }
-        };
+            }
+        }));
         drop(cex_restore);
         drop(cex_lock);
+        let actual = match actual {
+            Ok(actual) => actual,
+            Err(panic) => {
+                let message = panic
+                    .downcast_ref::<String>()
+                    .map(String::as_str)
+                    .or_else(|| panic.downcast_ref::<&str>().copied())
+                    .unwrap_or("non-string panic");
+                failures.push(format!("ui fixture panicked for {shown_path}: {message}"));
+                checked += 1;
+                continue;
+            }
+        };
         let actual = normalize_volatile_ui_snapshot(&shown_path, actual);
 
         let is_directory_entry = path
