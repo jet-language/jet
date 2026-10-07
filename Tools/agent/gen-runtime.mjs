@@ -18,6 +18,8 @@ const check = args.includes("--check") ? ["--check"] : [];
 // that the route generator omits from the remaining Rust adapters.
 const steps = [
   ["gen-runtime-trap-messages.mjs", check],
+  ["gen-runtime-host-errors.mjs", check],
+  ["gen-runtime-host-carriers.mjs", check],
   ["gen-runtime-exports.mjs", check],
   ["gen-c-abi-routes.mjs", [runtime, ...check]],
 ];

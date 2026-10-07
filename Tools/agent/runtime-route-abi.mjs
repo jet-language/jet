@@ -75,3 +75,23 @@ export function validateRuntimeRoute(adapter, definition) {
     throw new Error(`Jet runtime route ${adapter.symbol}: ${definition.path} export ${adapter.name}${found} does not match C ABI ${wanted}`);
   }
 }
+
+// Lower/CForeign.jet: lower_c_import_call calls these raw helpers directly,
+// not through a Core route or a fabricated Rust kernel. This table checks the
+// actual C ABI of the existing calls (pack/len 126/128, unpack 156, free 173).
+export const loweringRuntimeAbi = [
+  { name: "jet_rt_c_string_pack", params: ["i64"], ret: "i64", site: "Compiler/JetBackend/Source/Lower/CForeign.jet:126" },
+  { name: "jet_rt_string_byte_len", params: ["i64"], ret: "i64", site: "Compiler/JetBackend/Source/Lower/CForeign.jet:128" },
+  { name: "jet_rt_c_string_unpack", params: ["i64"], ret: "i64", site: "Compiler/JetBackend/Source/Lower/CForeign.jet:156" },
+  { name: "jet_rt_c_string_free", params: ["i64", "i64"], ret: null, site: "Compiler/JetBackend/Source/Lower/CForeign.jet:173" },
+];
+
+export function validateLoweringRuntimeAbi(definitions) {
+  // Earlier runtime compositions without CString do not acquire new symbols.
+  if (!definitions.has("jet_rt_c_string_pack") && !definitions.has("jet_rt_c_string_unpack") && !definitions.has("jet_rt_c_string_free")) return;
+  for (const { name, params, ret, site } of loweringRuntimeAbi) {
+    const definition = definitions.get(name);
+    if (!definition) throw new Error(`${site}: missing Jet lowering helper ${name}`);
+    validateRuntimeRoute({ symbol: `${name} (${site})`, name, params: params.map((cty) => ({ ctys: [cty] })), result: { ret, outs: [] } }, definition);
+  }
+}

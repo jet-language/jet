@@ -26,6 +26,7 @@ let prepared = [...lines.slice(0, start), canonical.slice(canonicalStart), ...li
 if (mode === '--allparts') {
   for (const [module, file] of [
     ['jet_c_abi_routes', 'CAbiRoutes.rs'],
+    ['jet_c_abi_host', 'CAbiHost.rs'],
     ['jet_c_abi_iter', 'CAbiIter.rs'],
     ['jet_c_abi_task', 'CAbiTask.rs'],
     ['jet_c_abi_parallel', 'CAbiParallel.rs'],

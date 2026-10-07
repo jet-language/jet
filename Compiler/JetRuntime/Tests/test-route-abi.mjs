@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseRuntimeExports, runtimeExportSignatures, validateRuntimeOwnership, validateRuntimeRoute } from "../../../Tools/agent/runtime-route-abi.mjs";
+import { loweringRuntimeAbi, parseRuntimeExports, runtimeExportSignatures, validateLoweringRuntimeAbi, validateRuntimeOwnership, validateRuntimeRoute } from "../../../Tools/agent/runtime-route-abi.mjs";
 
 function definition(params, suffix = "") {
   return { params, suffix, path: "Source/Test.jet" };
@@ -66,14 +66,45 @@ assert.equal(lifecycle.get("init").lifecycle, "init 42");
 assert.equal(lifecycle.get("fini").lifecycle, "fini 65535");
 assert.throws(() => parseRuntimeExports("// runtime-init: 65536\n#Export(c) fn init() {}", "Source/Test.jet"), /lifecycle priority exceeds/);
 
+// Lowering-only CString helpers have no predecessor Rust C route. Validate
+// their real raw-word ABI without adding a second Core meaning.
+const cStringDefinitions = new Map(loweringRuntimeAbi.map(({ name, params, ret }) => [
+  name, definition(params.map((_, index) => `a${index}: I64`), ret ? "-> I64" : ""),
+]));
+validateLoweringRuntimeAbi(cStringDefinitions);
+const missingCString = new Map(cStringDefinitions);
+missingCString.delete("jet_rt_c_string_free");
+assert.throws(() => validateLoweringRuntimeAbi(missingCString), /missing Jet lowering helper/);
+for (const { name } of loweringRuntimeAbi) {
+  const wrong = new Map(cStringDefinitions);
+  wrong.set(name, definition(["pointer: F64"], "-> I64"));
+  assert.throws(() => validateLoweringRuntimeAbi(wrong), /does not match C ABI/);
+}
+validateLoweringRuntimeAbi(new Map());
+
 // Exercise the composed runtime's real ownership partition, not just synthetic
 // signatures. Ported routes keep lowering metadata and have no Rust adapter.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const names = new Set(readFileSync(join(root, "Compiler/JetRuntime/exports.list"), "utf8").split("\n")
   .map((line) => line.trim()).filter((line) => line && !line.startsWith("#")).map((line) => line.split(/\s+/u)[0]));
 validateRuntimeOwnership(names, runtimeExportSignatures(root));
-const routeNames = new Set([...readFileSync(join(root, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8")
-  .matchAll(/LowerRoute\{symbol: "[^"]+", export: "([^"]+)"/g)].map((match) => match[1]));
+validateLoweringRuntimeAbi(runtimeExportSignatures(root));
+const routeText = readFileSync(join(root, "Compiler/JetBackend/Source/Lower/RuntimeRoutes.jet"), "utf8");
+const routeNames = new Set([...routeText.matchAll(/LowerRoute\{symbol: "[^"]+", export: "([^"]+)"/g)].map((match) => match[1]));
+for (const [, name, inline] of routeText.matchAll(/LowerRoute\{symbol: "[^"]+", export: "([^"]+)", native_lists: (true|false),/g)) {
+  assert.equal(inline === "true", names.has(name), `${name} List representation must follow Jet ownership`);
+}
+assert.match(routeText, /pub native_lists: Bool/);
+if (routeNames.has("jet_net_raw_resolve_ordered")) {
+  assert.match(routeText, /LowerRecordSchema\{jet_name: "Jet__ResolveError", variants: "", fields: "kind=Int,has_os_code=Flag,os_code=Int,message=Text"\}/);
+  assert.match(routeText, /jet_name: "<corelib>\/Core\/net::Core\/net\/net.jet::__ResolveError", runtime: "Jet__ResolveError"/);
+  if (names.has("jet_net_raw_resolve_ordered")) {
+    for (const name of ["jet_rt_record_new_Jet__ResolveError", "jet_rt_handle_clone_Jet__ResolveError", "jet_rt_handle_drop_Jet__ResolveError",
+      ...["kind", "has_os_code", "os_code", "message"].map((field) => `jet_rt_record_get_Jet__ResolveError_${field}`)]) {
+      assert.ok(names.has(name), `native resolver requires canonical record helper ${name}`);
+    }
+  }
+}
 assert.equal(routeNames.has("jet_rt_int_drop"), names.has("jet_rt_int_drop"), "Int destructor route must follow Jet ownership");
 const rustText = readFileSync(join(root, "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs"), "utf8");
 const rustNames = new Set([...rustText.matchAll(/pub extern "C" fn ([A-Za-z_]\w*)\(/g)].map((match) => match[1]));
@@ -91,5 +122,14 @@ for (const [name, stem] of [["IOError", "error"], ["IOContext", "context"], ["Je
     assert.ok(rustText.includes(`super::jet_c_abi_host::${stem}_handle(`));
     assert.ok(rustText.includes(`super::jet_c_abi_host::${stem}_view(`));
   }
+}
+const handText = readFileSync(join(root, "crates/jet-codegen/src/Prelude/Core/CAbi.rs"), "utf8");
+assert.match(handText, /#\[cfg\(not\(jet_native_pack\)\)\]\s+mod host_records/);
+const handRecords = handText.slice(handText.indexOf("mod host_records"), handText.indexOf("// TaskFailure remains"));
+assert.ok(!/\bBox\b|crate::jet_std::(?:IOError|IOContext)|super::JetTaskFailure/.test(handRecords), "hand records must use C headers on the seed tier too");
+assert.ok(!/to_owned|String::/.test(handRecords), "raw record projections must not create intermediate Rust Strings");
+const hostText = readFileSync(join(root, "crates/jet-codegen/src/Prelude/Core/CAbiHost.rs"), "utf8");
+for (const stem of ["error", "context", ...(names.has("jet_rt_handle_drop_JetTaskFailure") ? ["failure"] : [])]) {
+  for (const operation of ["handle", "view", "take", "drop"]) assert.ok(hostText.includes(`fn ${stem}_${operation}(`), `missing ${stem}_${operation}`);
 }
 console.log("runtime route ABI: CHECK OK");
