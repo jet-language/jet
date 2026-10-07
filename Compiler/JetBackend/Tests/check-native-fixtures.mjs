@@ -53,12 +53,21 @@ if (existsSync(fixtureDir)) {
       // Native-only fixtures require real task-control/runtime imports.
       const nativeOnly = /^\/\/ expect-native-only ([\w-]+)\s*$/.exec(line);
       if (nativeOnly) expected.find((fixture) => fixture.name === nativeOnly[1]).nativeOnly = true;
+      const nativeTask = /^\/\/ expect-native-task ([\w-]+)\s*$/.exec(line);
+      if (nativeTask) expected.find((fixture) => fixture.name === nativeTask[1]).nativeTask = true;
       // `// expect-stderr <name>: <JSON string>` (after its expect-stdout
       // line): the exact stderr, e.g. a stop report; unchecked when absent.
       const stderr = /^\/\/ expect-stderr ([\w-]+): (".*")\s*$/.exec(line);
       if (stderr) expected.find((fixture) => fixture.name === stderr[1]).stderr = JSON.parse(stderr[2]);
     }
   }
+}
+
+// Plain and root callback panic reports must remain byte-identical to the
+// existing panic-message witness, not merely begin with a diagnostic code.
+for (const name of ["panic-task-plain", "panic-root-checked"]) {
+  const fixture = expected.find((row) => row.name === name);
+  if (fixture) fixture.stderr = expected.find((row) => row.name === "panic-message").stderr;
 }
 
 let failures = 0;
@@ -156,12 +165,15 @@ for (const fixture of process.argv.includes("--abi") ? [] : expected.filter(({ n
     check(`${fixture.name} (static image)`, path, fixture);
     if (!runtimeLib || fixture.staticOnly) continue;
   }
-  checkMemoryImage(fixture);
-  if (sharedRuntime) {
-    check(`${fixture.name} (in-process Jet loader)`, jetRun, fixture, ["run", "load/load.jet", fixture.name, sharedRuntime], { cwd: outDir, timeout: 600000 }, false);
+  if (!fixture.nativeTask) {
+    checkMemoryImage(fixture);
+    if (sharedRuntime) {
+      check(`${fixture.name} (in-process Jet loader)`, jetRun, fixture, ["run", "load/load.jet", fixture.name, sharedRuntime], { cwd: outDir, timeout: 600000 }, false);
+    }
   }
   const program = `${outDir}/${fixture.name}.hosted`;
-  const link = spawnSync(process.env.CC ?? "cc", [`${outDir}/${fixture.name}.o`, runtimeLib, "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
+  const taskHost = fixture.nativeTask ? [`${dirname(fileURLToPath(import.meta.url))}/check-trap-task.c`, "-Wl,--wrap=jet_rt_main"] : [];
+  const link = spawnSync(process.env.CC ?? "cc", [`${outDir}/${fixture.name}.o`, ...taskHost, runtimeLib, "-lpthread", "-ldl", "-lm", "-o", program], { encoding: "utf8" });
   if (link.status !== 0) {
     console.log(`${fixture.name} (compiled runtime): LINK FAILED\n${link.stderr}`);
     failures += 1;
