@@ -3,6 +3,7 @@
 use jet_foundation.[Program, Item, TComptimeValue]
 
 pub fn sema_checked_shape_defaults(program: ^Program, registered: SemaRegistrationModule, values: [SemaComptimeItemValue]) -> Program Never! {
+    updated_program := ^program
     defaults := [String:TComptimeValue]{}
     loop value in values {
         if value.module_identity != registered.module_identity || value.kind != SemaComptimeItemKind.FieldDefault {
@@ -12,9 +13,9 @@ pub fn sema_checked_shape_defaults(program: ^Program, registered: SemaRegistrati
             defaults[value.destination_key] = value.value
         }
     }
-    if defaults.len() == 0 -> return program
-    loop index in 0..<program.items.len() {
-        if program.items[index] == .Struct(definition) {
+    if defaults.len() == 0 -> return updated_program
+    loop index in 0..<updated_program.items.len() {
+        if updated_program.items[index] == .Struct(definition) {
             nominal := SemaRegistrationNominal?{None}
             loop candidate in registered.nominals {
                 if candidate.symbol.name == definition.name -> nominal = Val(candidate)
@@ -34,8 +35,8 @@ pub fn sema_checked_shape_defaults(program: ^Program, registered: SemaRegistrati
                 updated.fields[field_index].default_ct = Val(retained)
                 changed = true
             }
-            if changed -> program.items[index] = Item.Struct{value: updated}
+            if changed -> updated_program.items[index] = Item.Struct{value: updated}
         }
     }
-    program
+    updated_program
 }

@@ -9,7 +9,7 @@ pub fn ast_expr_for_each_expr<V: ASTExprVisitor>(expression: Expr, visitor: &V) 
         .MemberSpread(value, _, _) | .Spread(value, _) | .Deref(value, _) | .RawOf(value, _) | .Copy(value, _) | .Place(value, _, _) | .Field(value, _, _) | .OptField(value, _, _, _, _) | .Present(value, _) | .Ok(value, _) | .Err(value, _) | .Paren(value, _) | .Unary(_, value, _) | .Tainted(value, _, _) -> ast_expr_for_each_expr<V>(value, &visitor)
         .Try(value, _, _, note) -> {
             ast_expr_for_each_expr<V>(value, &visitor)
-            if note == .Val(value) -> ast_expr_for_each_expr<V>(value, &visitor)
+            if note == .Val(note_value) -> ast_expr_for_each_expr<V>(note_value, &visitor)
         }
         .MapLit(entries, _) -> loop entry in entries {
             ast_expr_for_each_expr<V>(entry.key, &visitor)
@@ -105,7 +105,7 @@ fn ast_visit_statement<V: ASTExprVisitor>(statement: Stmt, visitor: &V, nested_e
         .Expr(expression) | .DeferClose(expression, _) -> ast_expr_for_each_expr<V>(expression, &visitor)
         .Val(binding) -> {
             ast_expr_for_each_expr<V>(binding.init, &visitor)
-            if nested_expression && binding.pattern == .Val(.Refutable(pattern, fallback, _, _, _)) {
+            if nested_expression && binding.pattern == .Val(.Refutable(pattern, fallback, _, _)) {
                 ast_visit_pattern<V>(pattern, &visitor)
                 ast_visit_fallback<V>(fallback, &visitor)
             }

@@ -47,7 +47,9 @@ pub fn jet_cli_sem_json_array(value: DataTree, name: String) -> [DataTree]? Neve
 }
 
 pub fn jet_cli_sem_same_hash(recorded: String, current: String) -> Bool Never! {
-    recorded == current || recorded == "sha256-{current}" || current == "sha256-{recorded}"
+    prefixed_current :: "sha256-{current}"
+    prefixed_recorded :: "sha256-{recorded}"
+    recorded == current || recorded == prefixed_current || current == prefixed_recorded
 }
 
 pub fn jet_cli_sem_normalize(path: String) -> String {
@@ -72,9 +74,11 @@ pub fn jet_cli_sem_ops_for_file(raw: String, source_hash: String) -> [JetCLISemO
     path :: jet_cli_sem_normalize(raw)
     directory := jet_cli_parent(path)
     output := [JetCLISemOp]{}
-    loop directory == .Val(root) {
+    loop {
+        root :: directory ?? break
         receipts :: "{root}/.jet/codemods"
-        names := cli_files.list_dir(receipts) ?? [String]{}
+        names := [String]{}
+        loop entry in (cli_files.list_dir(receipts) ?? [cli_files.DirEntry]{}) -> &names.push(entry.name)
         &names.sort()
         loop name in names {
             receipt :: "{receipts}/{name}"

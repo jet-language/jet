@@ -1038,7 +1038,7 @@ fn jet_cli_wants_json(owned: [String]) -> Bool Never! {
 // Plan one `jet` invocation; `raw` is argv without the program name. Under
 // `--json` a refusal is the `cli` status envelope on stdout (main.rs
 // `emit_cli_report`).
-pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
+pub fn jet_cli_front(raw: [String]) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
     plan :: jet_cli_plan(raw)
     if plan == {
         .Refused(report, _, exit_code, notice) -> {
@@ -1049,7 +1049,7 @@ pub fn jet_cli_front(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
     plan
 }
 
-fn jet_cli_plan(raw: [String]) -[FS, Env]> JetCLIPlan Never! {
+fn jet_cli_plan(raw: [String]) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
     // D-ADOPT-CCSPELL1=A: the engine compiler aliases own every raw argument
     // (Source/main.rs `dispatch_alias`), before Jet's output/flag parsing.
     if raw.len() > 0 && (raw[0] == "cc" || raw[0] == "c++") -> return jet_cli_foreign_compile(raw)

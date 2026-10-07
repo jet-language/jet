@@ -64,7 +64,7 @@ fn jet_cli_compiler_checked_value(value: TComptimeValue) -> JetCLIStatusValue Ne
     }
 }
 
-fn jet_cli_inspect_compiler_check(file: String, source: String) -> JetDriverVerbOutput {
+fn jet_cli_inspect_compiler_check(file: String, source: String) -> JetDriverVerbOutput Never! {
     core_sources :: if jet_cli_core_sources() == {
         .Loaded(sources) -> sources
         .Missing(what, fix) -> {
@@ -84,7 +84,7 @@ fn jet_cli_inspect_compiler_check(file: String, source: String) -> JetDriverVerb
         entry_root_identity: identity,
         entry_path: path,
     }
-    result :: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: jet_cli_driver_request(snapshot, core_sources, None, JetDriverCompileMode.Doc)})
+    result :: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: jet_cli_driver_request(snapshot, core_sources, None, JetDriverCompileMode.Doc)}) ?? return jet_cli_ice("the compiler check query failed before returning its diagnostics")
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     value := JetCLIStatusValue.Null
     if result.checked == .Val(checked) -> value = jet_cli_compiler_checked_value(checked.value) else {
@@ -99,11 +99,11 @@ fn jet_cli_inspect_compiler_check(file: String, source: String) -> JetDriverVerb
                     jet_cli_status_field("name", jet_cli_status_text(function.name)),
                     jet_cli_status_field("module", jet_cli_status_text("core.compiler")),
                     jet_cli_status_field("identity", jet_cli_status_text("core.compiler::{function.name}")),
-                    jet_cli_status_field("params", jet_cli_status_array([])),
+                    jet_cli_status_field("params", jet_cli_status_array([JetCLIStatusValue]{})),
                     jet_cli_status_field("span", jet_cli_compiler_span(function.name_span.start, function.name_span.end)),
-                    jet_cli_status_field("effects", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("values", jet_cli_status_array([]))})),
+                    jet_cli_status_field("effects", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("values", jet_cli_status_array([JetCLIStatusValue]{}))})),
                     jet_cli_status_field("reaches_panic", jet_cli_status_bool(false)),
-                    jet_cli_status_field("arithmetic", jet_cli_status_array([])),
+                    jet_cli_status_field("arithmetic", jet_cli_status_array([JetCLIStatusValue]{})),
                 },
                 ),
                 )

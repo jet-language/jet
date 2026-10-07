@@ -3,7 +3,7 @@ use core.files as cli_files
 use core.process as cli_process
 use core.text as cli_struct_text
 use jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
-use jet_foundation.mir_sha256_hex
+use jet_foundation.[Diagnostic, mir_sha256_hex]
 use jet_parser.jet_format_source
 
 struct JetCLIStructUnit {
@@ -66,7 +66,7 @@ fn jet_cli_struct_fail(what: String, fix: String) -> JetDriverVerbOutput Never! 
     JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", what, jet_cli_why("E2104"), fix, false), exit_code: JET_DRIVER_EXIT_USAGE}
 }
 
-fn jet_cli_struct_index_error(context: String, diagnostics: [jet_foundation.Diagnostic]) -> JetDriverVerbOutput Never! {
+fn jet_cli_struct_index_error(context: String, diagnostics: [Diagnostic]) -> JetDriverVerbOutput Never! {
     text := jet_cli_report("E2105", context, jet_cli_why("E2105"), "correct source errors; structural tools never merge unchecked code", false)
     loop diagnostic in diagnostics -> text = "{text}  {diagnostic.code}: {diagnostic.what}\n"
     JetDriverVerbOutput{stdout: "", stderr: text, exit_code: JET_DRIVER_EXIT_USER_ERROR}
@@ -229,7 +229,7 @@ fn jet_cli_struct_merge_text(kind: String, stable: String, identity: String, bas
     if ours == base -> return ~theirs
     if theirs == base -> return ~ours
     &conflicts.push(JetCLIStructConflict{kind: kind, stable_id: stable, identity: identity, ours: "sha256:{mir_sha256_hex(ours)}", theirs: "sha256:{mir_sha256_hex(theirs)}"})
-    base
+    ~base
 }
 
 fn jet_cli_struct_ambiguous(base: JetCLIStructUnit, side: String, rows: [Int], units: [JetCLIStructUnit]) -> JetCLIStructConflict Never! {
@@ -471,7 +471,7 @@ pub fn jet_cli_structural(argv: [String], command: String, json: Bool) -> JetDri
         } else {
             if changes.len() == 0 -> stdout = "no structural changes\n"
             loop change in changes {
-                stdout = "{stdout}{change.kind}: {change.after ?? change.before ?? "definition"} [{change.stable_id}]\n"
+                stdout = "{stdout}{change.kind}: {change.after ?? (change.before ?? "definition")} [{change.stable_id}]\n"
             }
         }
         return JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}

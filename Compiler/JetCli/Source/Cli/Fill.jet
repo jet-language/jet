@@ -76,13 +76,14 @@ fn jet_cli_fill_effects(function: TFunc, alias: String, facts: [JetCLISemEffect]
     "none"
 }
 
-fn jet_cli_fill_candidate_checks(file: String, source: String, goal: JetCLIFillGoal, candidate: String) -> Bool {
+fn jet_cli_fill_candidate_checks(file: String, source: String, goal: JetCLIFillGoal, candidate: String) -> Bool JetCLIReadError! {
     if goal.span.start < 0 || goal.span.start > goal.span.end || goal.span.end > source.bytes().len() {
         return false
     }
     bytes :: source.bytes()
     replacement :: "{jet_cli_doc_text(bytes, 0, goal.span.start)}{candidate}{jet_cli_doc_text(bytes, goal.span.end, bytes.len())}"
-    if jet_cli_compile_entry(file, false, None, JetDriverCompileMode.Doc, Val(replacement)) == {
+    compiled :: jet_cli_compile_entry(file, false, None, JetDriverCompileMode.Doc, Val(replacement)) ?? return Err(jet_cli_read_error("the fill candidate compiler failed before returning diagnostics"))
+    if compiled == {
         .Compiled(result, _) -> {
             return result.diagnostics.len() == 0 && result.internal_problem == .None
         }
@@ -90,7 +91,7 @@ fn jet_cli_fill_candidate_checks(file: String, source: String, goal: JetCLIFillG
     }
 }
 
-fn jet_cli_fill_candidates(unit: JetDriverDocModule, function: TFunc, infos: [JetCLIFillFunction], goal: JetCLIFillGoal) -> [String] {
+fn jet_cli_fill_candidates(unit: JetDriverDocModule, function: TFunc, infos: [JetCLIFillFunction], goal: JetCLIFillGoal) -> [String] JetCLIReadError! {
     candidates := [String]{}
     loop parameter in function.params {
         if type_name(parameter.ty) == goal.expected -> &candidates.push(parameter.name)
@@ -120,8 +121,8 @@ fn jet_cli_fill_candidates(unit: JetDriverDocModule, function: TFunc, infos: [Je
 }
 
 // Also usable by `jet check`: include_candidates=false prints only the card.
-pub fn jet_cli_fill_report(result: JetDriverCompileResult, file: String?, line: Int?, include_candidates: Bool, json: Bool) -> String? {
-    index :: jet_cli_checked_semindex(result)
+pub fn jet_cli_fill_report(result: JetDriverCompileResult, file: String?, line: Int?, include_candidates: Bool, json: Bool) -> String? JetCLIReadError! {
+    index :: jet_cli_checked_semindex(result) ?? return Err(jet_cli_read_error("the checked semantic index could not be read for fill"))
     text := ""
     cards := [JetCLIStatusValue]{}
     loop unit in result.doc_modules {
@@ -183,7 +184,8 @@ pub fn jet_cli_compile_fill(target: String, json: Bool, color: Bool) -> JetDrive
     colon :: jet_cli_find_byte(target, 58, true)
     if colon >= 0 {
         suffix :: jet_cli_find_text(target, colon + 1, target.bytes().len())
-        if Int.parse(suffix) == .Val(number) && number >= 0 {
+        number :: Int.parse(suffix) ?? -1
+        if number >= 0 {
             file = jet_cli_find_text(target, 0, colon)
             line = Val(number)
         }
@@ -200,7 +202,11 @@ pub fn jet_cli_compile_fill(target: String, json: Bool, color: Bool) -> JetDrive
                 return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, diagnostics, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
             }
             if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
-            report :: jet_cli_fill_report(result, Val(file), line, true, json) ?? if json -> jet_cli_status_render("fill", true, [JetCLIStatusField]{jet_cli_status_field("fill", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("goals", jet_cli_status_array([JetCLIStatusValue]{}))}))}) else -> "no goals found in '{file}'"
+            checked_report :: if jet_cli_fill_report(result, Val(file), line, true, json) == {
+                .Ok(value) -> value
+                .Err(error) -> { return jet_cli_ice(error.message) }
+            }
+            report :: checked_report ?? if json -> jet_cli_status_render("fill", true, [JetCLIStatusField]{jet_cli_status_field("fill", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("goals", jet_cli_status_array([JetCLIStatusValue]{}))}))}) else -> "no goals found in '{file}'"
             return JetDriverVerbOutput{stdout: "{report}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
         }
     }

@@ -1,7 +1,7 @@
 // D-FACT-GATE1: one compile-time read model for source and policy gates.
 // Adapted from origin/port/compiler GateLedger.jet and current Rust writers.
 use jet_foundation.[GateLedger, GateEntry, GateDiagnostic, GateOperation, GateKind, GateSet, NameLedger, Program, Item, Func, Expr, Stmt, Span, CallArg, DeriveBodyItem, Marker, RuleSite, PolicyKey, PolicyValue, policy_key_name, policy_scope_rank, gate_kind_policy_key, gate_source_entry, gate_ledger_push, gate_ledger_sort, ASTExprVisitor, ast_expr_for_each_expr, ast_stmt_for_each_expr, expr_span]
-use jet_foundation.[Type, PolicyDeclaration, ast_program]
+use jet_foundation.[Type, PolicyDeclaration, Token, StrPart, ast_program]
 use jet_sema.[SemaGateModule, UnsafeGateInspection, sema_unsafe_inspect, sema_unsafe_nested_bodies, sema_error_optional]
 use jet_parser.jfmt_format_program_with_tokens
 
@@ -327,7 +327,7 @@ fn sema_gate_checked_raw(source: String, span: Span, context: SemaGateContext) -
         }
         enclosing = Val(gate)
     }
-    reason :: enclosing.and_then((gate) -> gate.reason)
+    reason :: if enclosing == .Val(enclosing_gate) -> enclosing_gate.reason else -> String?{None}
     entry := gate_source_entry(GateKind.Unsafe, "security", "expression", source, span, "Type.raw", reason, "checked text raw construction requires an audited unsafe region", if reason != None -> "recorded" else -> "missing")
     if enclosing == .Val(gate) {
         &entry.provenance.push("unsafe gate {gate.source}:{gate.span.start}..{gate.span.end}")
@@ -357,11 +357,11 @@ fn sema_gate_marker_expr(marker: Marker, position: Int) -> Expr? Never! {
 
 fn sema_gate_literal_text(expression: Expr?) -> String? Never! {
     value :: expression ?? return None
-    if value != .Str(parts, _) -> return None
+    parts :: (if value == .Str(str_parts, _) -> Val(str_parts) else -> [StrPart]?{None}) ?? return None
     text := ""
     loop part in parts {
         if part == {
-            .Lit(value) -> &text.push_str(value)
+            .Lit(literal) -> text = "{text}{literal}"
             else -> return None
         }
     }
@@ -371,7 +371,7 @@ fn sema_gate_literal_text(expression: Expr?) -> String? Never! {
 fn sema_gate_expression_text(expression: Expr) -> String Never! {
     program := ast_program()
     program.script_body = [Stmt.Expr{expr: expression}]
-    jfmt_format_program_with_tokens(program, "", [], false).trim()
+    jfmt_format_program_with_tokens(program, "", [Token]{}, false).trim()
 }
 
 fn sema_gate_rule_site_name(site: RuleSite) -> String Never! {

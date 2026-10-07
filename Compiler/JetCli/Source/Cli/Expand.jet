@@ -321,9 +321,7 @@ pub fn jet_cli_expand_callable(index: JetCLISemIndex, modules: [JetDriverDocModu
     output := [JetCLIExpandFact]{}
     loop definition in index.definitions {
         row :: definition.def
-        callable :: if row.kind == .Function(value) -> value else -> {
-            next
-        }
+        callable :: (if row.kind == .Function(value) -> Val(value) else -> JetCLISemCallable?{None}) ?? next
         if !callable.signature_facts_available -> next
         parameters :: loop parameter in callable.params -> jet_cli_expand_parameter_text(parameter)
         effects := "unavailable"

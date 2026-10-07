@@ -1,6 +1,6 @@
 // D-UNSAFE-OBLIG1: read-only unsafe inspection, adapted from origin/port/compiler.
 // The current integration passes module rows rather than a Rust ProgramBundle.
-use jet_foundation.[Diagnostic, Span, Expr, Func, Item, LValue, Program, Stmt, GateSet, PolicyDeclaration, PolicyKey, PolicyScope, PolicyValue, policy_resolve_with_gates, policy_default_gate_value, policy_gate_allows, policy_scope_name, policy_value_display]
+use jet_foundation.[Diagnostic, Span, Expr, Call, Func, Item, LValue, Program, Stmt, GateSet, PolicyDeclaration, EffectivePolicy, PolicyKey, PolicyScope, PolicyValue, policy_resolve_with_gates, policy_default_gate_value, policy_gate_allows, policy_scope_name, policy_value_display]
 
 pub struct SemaGateModule {
     pub source: String
@@ -249,7 +249,10 @@ fn sema_unsafe_visit_gate(target: Span, span: Span, is_function: Bool, reason: S
         }
         if declaration.target == (Val(target)) -> &site.push(declaration)
     }
-    outer_policy :: policy_resolve_with_gates(PolicyKey.Unsafe, outer, gates) ?? None
+    outer_policy :: if policy_resolve_with_gates(PolicyKey.Unsafe, outer, gates) == {
+        .Ok(policy) -> policy
+        .Err(_) -> EffectivePolicy?{None}
+    }
     chain := outer
     loop declaration in site -> &chain.push(declaration)
     effective := if policy_resolve_with_gates(PolicyKey.Unsafe, chain, gates) == {
@@ -302,8 +305,8 @@ fn sema_unsafe_mode(value: PolicyValue) -> String Never! {
 }
 
 fn sema_unsafe_assertion(statement: Stmt) -> (names: [String], span: Span)? Never! {
-    if statement != .Expr(expression) -> return None
-    if expression != .Call(call) -> return None
+    expression :: (if statement == .Expr(value) -> Val(value) else -> Expr?{None}) ?? return None
+    call :: (if expression == .Call(value) -> Val(value) else -> Call?{None}) ?? return None
     if call.name != "__jet_unsafe_assert" -> return None
     names := [String]{}
     loop argument in call.args {
@@ -333,7 +336,7 @@ fn sema_unsafe_scan_sequence(body: [Stmt], track: Bool, gate: &UnsafeGateInspect
             pending = []
             next
         }
-        sema_unsafe_discharge(pending, [], track, &gate, source, &diagnostics)
+        sema_unsafe_discharge(pending, [String]{}, track, &gate, source, &diagnostics)
         pending = []
         if statement == .Unsafe(_, _, _, _) -> next
         sema_unsafe_shallow_operations(statement, &pending)
@@ -341,7 +344,7 @@ fn sema_unsafe_scan_sequence(body: [Stmt], track: Bool, gate: &UnsafeGateInspect
             sema_unsafe_scan_sequence(nested, track, &gate, source, &diagnostics)
         }
     }
-    sema_unsafe_discharge(pending, [], track, &gate, source, &diagnostics)
+    sema_unsafe_discharge(pending, [String]{}, track, &gate, source, &diagnostics)
 }
 
 fn sema_unsafe_discharge(operations: [SemaUnsafeOperation], asserted: [String], track: Bool, gate: &UnsafeGateInspection, source: String, diagnostics: &[UnsafeDiagnostic]) Never! {
@@ -516,12 +519,12 @@ fn sema_unsafe_expr_operations(expression: Expr, out: &[SemaUnsafeOperation]) Ne
         .OrFallback(value, fallback, _, _) -> {
             sema_unsafe_expr_operations(value, &out)
             if fallback == {
-                .Value(value) | .Return(.Val(value), _) -> {
-                    sema_unsafe_expr_operations(value, &out)
+                .Value(fallback_value) | .Return(.Val(fallback_value), _) -> {
+                    sema_unsafe_expr_operations(fallback_value, &out)
                 }
-                .Block(body, value, _) -> {
+                .Block(body, block_value, _) -> {
                     loop statement in body -> sema_unsafe_shallow_operations(statement, &out)
-                    if value == .Val(value) -> sema_unsafe_expr_operations(value, &out)
+                    if block_value == .Val(nested_value) -> sema_unsafe_expr_operations(nested_value, &out)
                 }
                 .Panic(_, args) -> {
                     loop argument in args -> sema_unsafe_expr_operations(argument.expr, &out)
@@ -562,10 +565,9 @@ fn sema_unsafe_reject_outside(body: [Stmt], source: String, result: &UnsafeInspe
         if sema_unsafe_assertion(statement) == .Val(assertion) {
             sema_unsafe_diagnostic(&result, source, "E3108", Val(assertion.span), "unsafe obligations can only be asserted inside `#Unsafe`", "the assertion discharges one tracked low-level operation and has no ambient meaning", "move it immediately after an operation inside the audited gate")
         }
-        if statement != .Unsafe(_, _, _, _) {
-            loop nested in sema_unsafe_nested_bodies(statement) {
-                sema_unsafe_reject_outside(nested, source, &result)
-            }
+        if statement == .Unsafe(_, _, _, _) -> next
+        loop nested in sema_unsafe_nested_bodies(statement) {
+            sema_unsafe_reject_outside(nested, source, &result)
         }
     }
 }

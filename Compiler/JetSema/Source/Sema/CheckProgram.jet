@@ -3511,7 +3511,7 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, stage: Sem
     }
     if trace_sink == .Val(sink) -> sink.begin("sema.effects", "", -1, -1)
     root_policy :: sema_comptime_policy_for_package(stage.package_policies, resolved_graph.package_identity)
-    package_memory_denials :: root_policy.and_then((policy) -> policy.authority_deny) ?? [String]{}
+    package_memory_denials :: if root_policy == .Val(policy) -> policy.authority_deny ?? [String]{} else -> [String]{}
     effects := sema_effects_check_modules(^effect_inputs, package_memory_denials)
     if trace_sink == .Val(sink) -> sink.end("sema.effects", effects.modules.len())
     loop diagnostic in effects.diagnostics -> &diagnostics.push(diagnostic)

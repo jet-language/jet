@@ -17,8 +17,8 @@ pub fn jet_driver_apply_edits(src: String, edits: [TextEdit]) -> String JetDrive
         merged := [Int]{}
         start := 0
         loop start < order.len() {
-            middle :: min(start + width, order.len())
-            end :: min(start + width * 2, order.len())
+            middle :: if start + width < order.len() -> start + width else -> order.len()
+            end :: if start + width * 2 < order.len() -> start + width * 2 else -> order.len()
             left := start
             right := middle
             loop left < middle || right < end {

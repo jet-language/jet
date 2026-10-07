@@ -59,7 +59,7 @@ pub fn jet_cli_expand_memory(modules: [JetDriverDocModule], index: JetCLISemInde
     facts := [JetCLIExpandFact]{}
     loop declaration in permit.value.declarations {
         loop root in declaration.roots {
-            projection :: projections.get((root: root, fact: declaration.fact)).map((position) -> permit.value.projections[position].projection)
+            projection :: if projections.get((root: root, fact: declaration.fact)) == .Val(position) -> Val(permit.value.projections[position].projection) else -> SemaMemoryProjection?{None}
             status :: jet_cli_expand_memory_status(projection)
             fields := [JetCLIStatusField]{
                 jet_cli_status_field("fact", jet_cli_status_text(declaration.fact)),
@@ -94,7 +94,7 @@ fn jet_cli_expand_layout_unavailable(layout: TComptimeValue) -> Bool Never! {
 }
 fn jet_cli_expand_layout_diagnostic() -> Diagnostic Never! {
     row :: diagnostic_registry_row("E0959") ?? panic("layout byte facts diagnostic is not registered")
-    what :: row.what.replace("{type}", "LayoutInfo").replace("{member}", "size")
+    what :: row.what.replace("{{type}}", "LayoutInfo").replace("{{member}}", "size")
     diagnostic_from_registry("E0959", None, what, row.why, row.fix)
 }
 fn jet_cli_expand_layout_bytes(layout: TComptimeValue) -> JetCLIStatusValue Never! {
@@ -111,7 +111,10 @@ fn jet_cli_expand_layout_bytes(layout: TComptimeValue) -> JetCLIStatusValue Neve
     })
 }
 fn jet_cli_expand_layout_text(layout: TComptimeValue) -> String Never! {
-    header :: loop name in ([String]{"kind", "size", "alignment", "stride", "requested_alignment", "effective_alignment", "target", "guarantee", "source"}) -> "{name}={jet_cli_expand_checked_display(jet_cli_expand_checked_field(layout, name))}"
+    header_parts := [String]{}
+    loop name in ([String]{"kind", "size", "alignment", "stride", "requested_alignment", "effective_alignment", "target", "guarantee", "source"}) {
+        &header_parts.push("{name}={jet_cli_expand_checked_display(jet_cli_expand_checked_field(layout, name))}")
+    }
     fields := [String]{}
     if jet_cli_expand_checked_field(layout, "fields") == .Val(.List(values)) {
         loop field in values {
@@ -127,7 +130,7 @@ fn jet_cli_expand_layout_text(layout: TComptimeValue) -> String Never! {
         diagnostic :: jet_cli_expand_layout_diagnostic()
         status = " byte_facts=unavailable[{diagnostic.code}] {diagnostic.what}; Why: {diagnostic.why}; Fix: {diagnostic.fix}; More: jet-lang.dev/e/{diagnostic.code}"
     }
-    "{header.join(" ")}{status} fields=[{fields.join(",")}]"
+    "{header_parts.join(" ")}{status} fields=[{fields.join(",")}]"
 }
 pub fn jet_cli_expand_layout(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] Never! {
     facts := [JetCLIExpandFact]{}
@@ -156,7 +159,7 @@ fn jet_cli_expand_origin_receiver(source: String, span: Span) -> String Never! {
         if receiver != "" -> return receiver
     }
     if text == "@origin" {
-        words :: source.slice(0, span.start).split_whitespace().to_list()
+        words :: jet_cli_find_words(source.slice(0, span.start))
         if words.len() > 0 {
             word :: words[words.len() - 1]
             receiver :: if word.ends_with(".") -> word.slice(0, word.len() - 1) else -> word
