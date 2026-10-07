@@ -9,7 +9,19 @@ RT_TIME_ELEMENT_STRIDE :: prep { I64{8} }
     if (time_host_root != I64{0}) -> return
     root :: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(root, I64{32})
+    // Registry creation is a startup fact; do not sample the host epoch until
+    // the first host-monotonic call (provider setup must not move that origin).
+    sync_store(wrapping(root + I64{24}), jet_rt_tls_key_new(I64{0}))
     time_host_root = root
+}
+fn rt_time_monotonic_provider_get() -> I64 {
+    jet_rt_tls_get(sync_load(wrapping(time_host_root + I64{24})))
+}
+fn rt_time_monotonic_provider_set(provider: I64) -> I64 {
+    key :: sync_load(wrapping(time_host_root + I64{24}))
+    previous :: jet_rt_tls_get(key)
+    jet_rt_tls_set(key, provider)
+    previous
 }
 fn time_clock_read(clock: I64) -> I64 {
     scratch :: wrapping(thread_base() + I64{232})
@@ -67,6 +79,18 @@ fn time_seconds_magnitude(seconds: I64) -> I64 {
     result :: jet_int_add(whole, nanos)
     jet_rt_int_drop(whole)
     result
+}
+// This reserved Core Clock seam deliberately bypasses controlled/world/replay
+// selection; it preserves the old hidden Clock implementation's host sample.
+#Export(c) fn jet_time_raw_clock_mono_ns() -> I64 { jet_time_raw_host_monotonic_ns() }
+#Export(c) fn jet_time_raw_world_wall_ms(output: I64) -> I64 {
+    if world_wall_ms(output) -> I64{1} else -> I64{0}
+}
+#Export(c) fn jet_time_raw_world_monotonic_ns(output: I64) -> I64 {
+    if world_monotonic_ns(output) -> I64{1} else -> I64{0}
+}
+#Export(c) fn jet_time_raw_controlled_monotonic_ns(output: I64) -> I64 {
+    if controlled_monotonic_ns(output) -> I64{1} else -> I64{0}
 }
 #Export(c) fn jet_time_raw_wall_override_ms(output: I64) -> I64 {
     replay_name :: scheduler_msg_replay()
