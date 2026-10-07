@@ -161,9 +161,7 @@ fn thread_tls_destroy(table: I64, key: I64, attempt_only: Bool) -> Bool {
     closure :: sync_load(sync_load(thread_tls_registry + I64{32}) + (key - I64{1}) * I64{8})
     scope :: sync_load(sync_load(thread_tls_registry + I64{56}) + (key - I64{1}) * I64{8})
     sync_mutex_unlock(thread_tls_registry)
-    if (attempt_only && scope != I64{1}) {
-        return false
-    }
+    if (attempt_only && scope != I64{1}) { return false }
     // Clear first: a destructor can reenter reset_attempt without double-drop.
     // Reload data on every key because a destructor may grow its TLS table.
     sync_store(sync_load(table + I64{16}) + (key - I64{1}) * I64{8}, I64{0})
