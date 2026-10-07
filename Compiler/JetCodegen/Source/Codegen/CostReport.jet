@@ -1,5 +1,5 @@
 // Read-only projection of frozen typed evidence. No adapter text is inspected.
-use jet_foundation.[Span, TExpr, TExprKind, TStmt, TFunc, TLambda, TIfCond, TCostKind, TCostState, TCostFact, THostArg, TCoreClosureKind, tir_cost_fact, tir_expr_children, tir_stmt_children, tir_stmt_cost_fact, tir_pattern_children]
+use jet_foundation.[Span, TExpr, TExprKind, TStmt, TFunc, TLambda, TIfCond, TPattern, TPatternShape, TCostKind, TCostState, TCoreClosureKind, tir_cost_fact, tir_stmt_cost_fact]
 
 pub struct TCostSite {
     pub function: String
@@ -24,8 +24,8 @@ fn jet_codegen_cost_expr(value: TExpr, function: String, depth: Int, sites: &[TC
         span :: if value.kind == .CoreCall(_, _, source_span, _, _, _, _) -> source_span else -> value.span
         if !consumed || fact.kind != TCostKind.OutcomeConstruction || state == TCostState.OptimizerRemoved -> &sites.push(TCostSite{function: function, span: span, loop_depth: depth, kind: fact.kind, state: state})
     }
-    // Containers must retain statement boundaries: flattening their children
-    // would erase nested loop depth. Ordinary nodes use the canonical children.
+    // Reuse the archived in-place traversal, adapted to the canonical TIR.
+    // Containers retain statement boundaries and no child arrays are built.
     if value.kind == {
         .Drop(inner) | .Try(inner, _, _) | .OptField(inner, _, _) -> {
             jet_codegen_cost_expr(inner, function, depth, &sites, true)
@@ -52,7 +52,7 @@ fn jet_codegen_cost_expr(value: TExpr, function: String, depth: Int, sites: &[TC
         }
         .PatternMatches(subject, pattern) -> {
             jet_codegen_cost_expr(subject, function, depth, &sites, true)
-            loop child in tir_pattern_children(pattern) -> jet_codegen_cost_expr(child, function, depth, &sites)
+            jet_codegen_cost_pattern(pattern, function, depth, &sites)
             return
         }
         .OptionLift2(callable, left, right) -> {
@@ -61,8 +61,15 @@ fn jet_codegen_cost_expr(value: TExpr, function: String, depth: Int, sites: &[TC
             jet_codegen_cost_expr(right, function, depth, &sites, true)
             return
         }
-        .FnValue(kind) -> if kind == .NamedFn(_, lambda) {
-            if lambda == .Val(executable) -> jet_codegen_cost_lambda(executable, function, depth, &sites)
+        .FnValue(kind) -> {
+            if kind == {
+                .NamedFn(_, lambda) -> if lambda == .Val(executable) -> jet_codegen_cost_lambda(executable, function, depth, &sites)
+                .Policy(_, args, _, _, _, callee) | .Call(callee, args) -> {
+                    jet_codegen_cost_expr(callee, function, depth, &sites)
+                    loop argument in args -> jet_codegen_cost_expr(argument.value, function, depth, &sites)
+                }
+                .Send(child) -> jet_codegen_cost_expr(child, function, depth, &sites)
+            }
             return
         }
         .InlineBlock(body) -> { jet_codegen_cost_stmts(body, function, depth, &sites); return }
@@ -77,10 +84,10 @@ fn jet_codegen_cost_expr(value: TExpr, function: String, depth: Int, sites: &[TC
         }
         .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> {
             jet_codegen_cost_expr(subject, function, depth, &sites, true)
-            loop child in tir_pattern_children(ok_pattern) -> jet_codegen_cost_expr(child, function, depth, &sites)
+            jet_codegen_cost_pattern(ok_pattern, function, depth, &sites)
             jet_codegen_cost_stmts(ok_body, function, depth, &sites)
             jet_codegen_cost_expr(ok_value, function, depth, &sites)
-            loop child in tir_pattern_children(err_pattern) -> jet_codegen_cost_expr(child, function, depth, &sites)
+            jet_codegen_cost_pattern(err_pattern, function, depth, &sites)
             jet_codegen_cost_stmts(err_body, function, depth, &sites)
             jet_codegen_cost_expr(err_value, function, depth, &sites)
             jet_codegen_cost_expr(terminal, function, depth, &sites)
@@ -107,11 +114,123 @@ fn jet_codegen_cost_expr(value: TExpr, function: String, depth: Int, sites: &[TC
                 jet_codegen_cost_expr(inner, function, depth, &sites, true)
                 return
             }
+            .CCallback(_, lambda, _, _, _, _) -> jet_codegen_cost_lambda(lambda, function, depth, &sites)
+            .Method(receiver, _, args) -> {
+                jet_codegen_cost_expr(receiver, function, depth, &sites)
+                loop child in args -> jet_codegen_cost_expr(child, function, depth, &sites)
+            }
+            .CellGuardProject(child, _, _, _, _) | .TypedText(_, child) | .TupleIndex(child, _)
+            | .StrMatchScan(child, _, _) | .BinMatchScan(child, _, _) | .YieldSend(child)
+            | .ExpectSnapshot(child, _) -> jet_codegen_cost_expr(child, function, depth, &sites)
+            .FixedListIndex(base, index, _) -> {
+                jet_codegen_cost_expr(base, function, depth, &sites)
+                jet_codegen_cost_expr(index, function, depth, &sites)
+            }
+            .GCEdit(_, _, _, edit, index, _) -> {
+                jet_codegen_cost_expr(edit, function, depth, &sites)
+                if index == .Val(child) -> jet_codegen_cost_expr(child, function, depth, &sites)
+            }
+            .TypedTextInterp(_, _, holes, _) -> loop child in holes -> jet_codegen_cost_expr(child, function, depth, &sites)
+            .EnvSet(name, child, _) -> {
+                jet_codegen_cost_expr(name, function, depth, &sites)
+                jet_codegen_cost_expr(child, function, depth, &sites)
+            }
+            .ExpiringSecretNew(child, duration, clock, _) | .ExpiringValueNew(child, duration, clock) -> {
+                jet_codegen_cost_expr(child, function, depth, &sites)
+                jet_codegen_cost_expr(duration, function, depth, &sites)
+                jet_codegen_cost_expr(clock, function, depth, &sites)
+            }
             else -> {}
         }
         else -> {}
     }
-    loop child in tir_expr_children(value) -> jet_codegen_cost_expr(child, function, depth, &sites)
+    if value.kind == {
+        .StrLit(parts) -> loop part in parts {
+            if part == .Interpolation(child, _) -> jet_codegen_cost_expr(child, function, depth, &sites)
+        }
+        .Call(_, _, args) | .AllocNew(_, args) | .StaticCall(_, _, _, _, args)
+        | .ModuleCall(_, _, _, _, args) -> loop argument in args -> jet_codegen_cost_expr(argument.value, function, depth, &sites)
+        .ExternCall(_, _, args) -> loop argument in args -> jet_codegen_cost_expr(argument.value, function, depth, &sites)
+        .IndirectCall(callee, _, args, _) | .MethodCall(callee, _, _, args) -> {
+            jet_codegen_cost_expr(callee, function, depth, &sites)
+            loop argument in args -> jet_codegen_cost_expr(argument.value, function, depth, &sites)
+        }
+        .DistinctCtor(_, child, _) | .RangeCheckedCtor(_, child, _) | .DistinctConvert(_, child, _, _, _)
+        | .TraitBox(child, _) | .Print(child) | .Close(child) | .Move(child) | .ResourceNew(child)
+        | .Unary(_, child) | .Field(child, _) | .Present(child) | .Ok(child) | .Err(child)
+        | .DistinctRaw(child) | .Borrow(child, _) | .RawOf(child) | .Deref(child) | .PtrFromAddr(child, _)
+        | .LayoutLiteral(child) | .LayoutLit(child) | .SharedGuardValue(child, _) | .SharedGuardMap(child, _, _)
+        | .SharedGuardSplit(child, _, _, _) | .ConditionNotify(child, _) | .MathSwizzleRead(_, child, _)
+        | .Clone(child, _) | .ExplicitCopy(child) | .MaterializeView(child) | .HostBorrowCallback(child, _)
+        | .NumericMethod(child, _) | .TaskGroupAll(child) | .TaskGroupRace(child) | .TaskGroupAny(child)
+        | .SelectWait(child, _) -> jet_codegen_cost_expr(child, function, depth, &sites)
+        .UnitConvert(_, child, _, _, rounding, _, _, _, _) -> {
+            jet_codegen_cost_expr(child, function, depth, &sites)
+            if rounding == .Val(rounding_value) -> jet_codegen_cost_expr(rounding_value.digits, function, depth, &sites)
+        }
+        .AmbientInput(child) | .JSONLit(_, child, _) | .DBValueLit(_, child, _) -> {
+            if child == .Val(expression) -> jet_codegen_cost_expr(expression, function, depth, &sites)
+        }
+        .RequireStop(kind, _, _) -> if kind == {
+            .Require(condition, message) -> {
+                jet_codegen_cost_expr(condition, function, depth, &sites)
+                if message == .Val(child) -> jet_codegen_cost_expr(child, function, depth, &sites)
+            }
+            .RequireEq(left, right) -> {
+                jet_codegen_cost_expr(left, function, depth, &sites)
+                jet_codegen_cost_expr(right, function, depth, &sites)
+            }
+            .Panic(child) -> jet_codegen_cost_expr(child, function, depth, &sites)
+        }
+        .MathBuiltin(_, _, children) | .PreciseBuiltin(_, _, children) | .CompareChain(children, _, _)
+        | .Tuple(children) | .List(children, _) | .ListLit(children) | .ColumnarListLit(_, children)
+        | .CoreCall(_, children, _, _, _, _, _) -> loop child in children -> jet_codegen_cost_expr(child, function, depth, &sites)
+        .StructLit(fields, _, _) -> loop field in fields -> jet_codegen_cost_expr(field.value, function, depth, &sites)
+        .TupleLit(_, fields) -> loop field in fields -> jet_codegen_cost_expr(field.value, function, depth, &sites)
+        .Map(entries) | .MapLit(entries) -> loop entry in entries {
+            jet_codegen_cost_expr(entry.key, function, depth, &sites)
+            jet_codegen_cost_expr(entry.value, function, depth, &sites)
+        }
+        .EnumCtor(_, _, payload) | .EnumLit(_, _, payload) -> if payload == {
+            .Positional(args) -> loop argument in args -> jet_codegen_cost_expr(argument.value, function, depth, &sites)
+            .Named(fields) -> loop field in fields -> jet_codegen_cost_expr(field.value.value, function, depth, &sites)
+            .Unit -> {}
+        }
+        .AddressOf(place, _, _) | .RawAddressOf(place) -> {
+            if place == .Expr(child) -> jet_codegen_cost_expr(child, function, depth, &sites)
+        }
+        .Binary(_, _, _, left, right) | .LayoutCompare(_, left, right) | .NumericBinaryMethod(left, _, right)
+        | .OverflowOpt(_, _, _, _, left, right) | .Index(left, right, _, _, _, _) | .IndexRead(left, right, _, _, _)
+        | .ColumnarGather(left, right, _) | .ColumnarColumnRead(left, right, _, _, _, _)
+        | .PoolSlot(left, right, _, _, _, _) | .IndexHook(_, left, right, _) | .MathLaneIndex(_, left, right, _)
+        | .Range(left, right, _) | .SelectRecv(left, right) -> {
+            jet_codegen_cost_expr(left, function, depth, &sites)
+            jet_codegen_cost_expr(right, function, depth, &sites)
+        }
+        .Slice(base, start, end, range, _) | .SliceOwned(base, start, end, range, _) -> {
+            jet_codegen_cost_expr(base, function, depth, &sites)
+            jet_codegen_cost_expr(start, function, depth, &sites)
+            jet_codegen_cost_expr(end, function, depth, &sites)
+            if range == .Val(child) -> jet_codegen_cost_expr(child, function, depth, &sites)
+        }
+        .ListSpread(parts) -> loop part in parts {
+            if part == {.Element(child) | .Spread(child) -> jet_codegen_cost_expr(child, function, depth, &sites)}
+        }
+        .BuiltinMethod(receiver, _, args) | .ClosureMethod(receiver, _, args) | .HandleMethod(receiver, _, args) -> {
+            jet_codegen_cost_expr(receiver, function, depth, &sites)
+            loop child in args -> jet_codegen_cost_expr(child, function, depth, &sites)
+        }
+        .OptMethodCall(base, _, call, _) -> {
+            jet_codegen_cost_expr(base, function, depth, &sites, true)
+            jet_codegen_cost_expr(call, function, depth, &sites)
+        }
+        .SelectAfter(builder, duration, child) -> {
+            jet_codegen_cost_expr(builder, function, depth, &sites)
+            jet_codegen_cost_expr(duration, function, depth, &sites)
+            if child == .Val(expression) -> jet_codegen_cost_expr(expression, function, depth, &sites)
+        }
+        else -> {}
+    }
 }
 fn jet_codegen_cost_core_closure(kind: TCoreClosureKind, function: String, depth: Int, sites: &[TCostSite]) {
     if kind == {
@@ -157,7 +276,7 @@ fn jet_codegen_cost_condition(condition: TIfCond, function: String, depth: Int, 
         }
         .IfLet(pattern, subject) | .Matches(pattern, subject) -> {
             jet_codegen_cost_expr(subject, function, depth, &sites, true)
-            loop child in tir_pattern_children(pattern) -> jet_codegen_cost_expr(child, function, depth, &sites)
+            jet_codegen_cost_pattern(pattern, function, depth, &sites)
         }
         .IsNone(subject) -> jet_codegen_cost_expr(subject, function, depth, &sites, true)
         .WithPrelude(body, nested) -> {
@@ -235,21 +354,21 @@ fn jet_codegen_cost_stmt(statement: TStmt, function: String, depth: Int, sites: 
             jet_codegen_cost_stmts(body, function, depth, &sites)
         }
         .RefutableBind(pattern, init, fallback, _) -> {
-            loop child in tir_pattern_children(pattern) -> jet_codegen_cost_expr(child, function, depth, &sites)
+            jet_codegen_cost_pattern(pattern, function, depth, &sites)
             jet_codegen_cost_expr(init, function, depth, &sites, true)
             jet_codegen_cost_stmts(fallback, function, depth, &sites)
         }
         .Match(subject, arms, _, _) -> {
             jet_codegen_cost_expr(subject, function, depth, &sites, true)
             loop arm in arms {
-                loop child in tir_pattern_children(arm.pattern) -> jet_codegen_cost_expr(child, function, depth, &sites)
+                jet_codegen_cost_pattern(arm.pattern, function, depth, &sites)
                 jet_codegen_cost_stmts(arm.body, function, depth, &sites)
             }
         }
         .EnumMatch(subject, _, arms, otherwise, _, _) -> {
             jet_codegen_cost_expr(subject, function, depth, &sites, true)
             loop arm in arms {
-                loop child in tir_pattern_children(arm.pattern) -> jet_codegen_cost_expr(child, function, depth, &sites)
+                jet_codegen_cost_pattern(arm.pattern, function, depth, &sites)
                 jet_codegen_cost_stmts(arm.body, function, depth, &sites)
             }
             if otherwise == .Val(body) -> jet_codegen_cost_stmts(body, function, depth, &sites)
@@ -281,7 +400,41 @@ fn jet_codegen_cost_stmt(statement: TStmt, function: String, depth: Int, sites: 
             if index == .Val(value) -> jet_codegen_cost_expr(value, function, depth, &sites)
             jet_codegen_cost_stmt(edited, function, depth, &sites)
         }
-        else -> loop child in tir_stmt_children(statement) -> jet_codegen_cost_expr(child, function, depth, &sites)
+        .Contract(contract) -> {
+            jet_codegen_cost_expr(contract.condition, function, depth, &sites)
+            jet_codegen_cost_expr(contract.message, function, depth, &sites)
+        }
+        .Let(_, _, init, _, _, _) | .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _)
+        | .ListDestructure(_, init, _, _, _, _, _) | .DeferClose(init, _, _, _) | .BreakValue(_, init, _) -> jet_codegen_cost_expr(init, function, depth, &sites)
+        .Assign(place, _, child, _, _, _) -> {
+            if place == .Expr(expression) -> jet_codegen_cost_expr(expression, function, depth, &sites)
+            jet_codegen_cost_expr(child, function, depth, &sites)
+        }
+        .Return(child, _) | .SplitViews(child, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) -> {
+            if child == .Val(expression) -> jet_codegen_cost_expr(expression, function, depth, &sites)
+        }
+        .IndexHookAssign(_, base, index, child, _) -> {
+            jet_codegen_cost_expr(base, function, depth, &sites)
+            jet_codegen_cost_expr(index, function, depth, &sites)
+            jet_codegen_cost_expr(child, function, depth, &sites)
+        }
+        .MathSwizzleAssign(base, _, _, child, _, _) -> {
+            jet_codegen_cost_expr(base, function, depth, &sites)
+            jet_codegen_cost_expr(child, function, depth, &sites)
+        }
+        else -> {}
+    }
+}
+fn jet_codegen_cost_pattern(pattern: TPattern, function: String, depth: Int, sites: &[TCostSite]) {
+    jet_codegen_cost_pattern_shape(pattern.shape, function, depth, &sites)
+}
+fn jet_codegen_cost_pattern_shape(shape: TPatternShape, function: String, depth: Int, sites: &[TCostSite]) {
+    if shape == {
+        .Or(alternatives, _) -> loop alternative in alternatives -> jet_codegen_cost_pattern_shape(alternative, function, depth, &sites)
+        .Struct(fields, _, _) -> loop field in fields {
+            if field == .Value(_, child, _) -> jet_codegen_cost_expr(child, function, depth, &sites)
+        }
+        else -> {}
     }
 }
 pub fn jet_codegen_cost_report(functions: [TFunc]) -> TCostReport {
