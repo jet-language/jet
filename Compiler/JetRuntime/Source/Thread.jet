@@ -295,6 +295,7 @@ fn thread_tls_destroy(table: I64, key: I64, attempt_only: Bool) -> Bool {
         jet_rt_free(sync_load(table + I64{16}), sync_load(table + I64{8}) * I64{8}, I64{8})
         jet_rt_free(table, I64{24}, I64{8})
     }
+    sentry_thread_detach()
     thread_unregister_tcb(tcb)
     thread_set_base(I64{0})
     jet_rt_free(tcb, I64{256}, I64{64})
