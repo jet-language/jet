@@ -18,9 +18,9 @@ fn run() {{
     first :: &reader.read_line()
     second :: &reader.read_line()
     end :: &reader.read_line()
-    if first == {{ .Ok(line) -> print(line ?? "missing") .Err(_) -> panic("read first") }}
-    if second == {{ .Ok(line) -> print(line ?? "missing") .Err(_) -> panic("read second") }}
-    print(end == .Ok(None))
+    print(first ?? "missing")
+    print(second ?? "missing")
+    print(end == None)
 }}
 "#);
     let (code, stdout, stderr) = build_and_run(
