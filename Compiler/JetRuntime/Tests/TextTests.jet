@@ -1,16 +1,22 @@
 // Runtime-only ownership/UTF-8 witnesses; no String-valued test scaffolding.
 fn text_test_require(ok: Bool) {
-    if ok -> return
+    if ok {
+        return
+    }
     #Unsafe("a failed text runtime witness terminates only its isolated process") {
         _ := os_syscall_i64(I64{231}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
-    loop {}
+    loop {
+
+    }
 }
+
 fn text_test_word(word: I64, len: I64) -> I64 {
     value :: jet_rt_string_builder_new()
     rt_text_push_word(value, word, len)
     value
 }
+
 fn text_test_piece(state: I64, expected: I64) {
     slot :: text_iter_pull(state)
     text_test_require(slot != I64{0})
@@ -19,15 +25,17 @@ fn text_test_piece(state: I64, expected: I64) {
     jet_rt_string_drop(value)
     jet_rt_free(slot, I64{8}, I64{8})
 }
+
 fn text_test_find_reference(data: I64, len: I64, pattern: I64, n: I64, start: I64, last: Bool) -> I64 {
     if n > len - start -> return I64{-1}
     at := if last -> len - n else -> start
     loop at >= start && at <= len - n {
         if rt_text_equal_bytes(data + at, pattern, n) -> return at
-        if last -> at -= I64{1} else -> at += I64{1}
+        if last -> at -= I64{1} else { at += I64{1} }
     }
     I64{-1}
 }
+
 fn text_test_search() {
     // Exhaust short binary-alphabet haystacks and needles, both directions
     // and every start offset: exercise periodic/nonperiodic factorization.
@@ -68,17 +76,18 @@ fn text_test_search() {
     jet_rt_free(pattern, I64{3}, I64{1})
     jet_rt_free(data, I64{6}, I64{1})
 }
+
 fn run() {
     jet_rt_alloc_init()
     text_test_search()
     empty :: jet_rt_string_builder_new()
     text_test_require(rt_text_data(empty) == I64{1} && rt_text_word(empty + I64{16}) == I64{0})
     text_test_require(jet_string_is_empty(empty) && jet_char_len(empty) == I64{0})
-    word :: text_test_word(I64{6513249}, I64{3}) // abc
+    word :: text_test_word(I64{6513249}, I64{3})  // abc
     clone :: jet_rt_string_clone(word)
     text_test_require(word != clone && rt_text_data(word) != rt_text_data(clone))
     text_test_require(jet_rt_string_eq(word, clone) && jet_rt_string_compare(word, clone) == I64{0})
-    suffix :: text_test_word(I64{25442}, I64{2}) // bc
+    suffix :: text_test_word(I64{25442}, I64{2})  // bc
     text_test_require(jet_string_contains(word, suffix) && jet_string_ends_with(word, suffix))
     text_test_require(!jet_string_starts_with(word, suffix) && jet_string_starts_with(word, empty) && jet_string_ends_with(word, empty))
     text_test_require(jet_rt_string_compare(word, suffix) == I64{-1} && jet_rt_string_compare(suffix, word) == I64{1})
