@@ -2298,7 +2298,7 @@ pub struct JetCodegenComptimeSession {
     row_keys: [String:Bool]
 }
 
-pub fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_files: [MIRSourceFile]) -> JetCodegenComptimeSession {
+pub fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_files: [MIRSourceFile], stop_points: Bool) -> JetCodegenComptimeSession {
     field_symbols := jet_codegen_field_symbol_index(modules)
     source_index := jet_codegen_source_index(source_files)
     function_index := jet_codegen_function_index([TFunc]{})
@@ -2348,6 +2348,10 @@ pub fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_fi
     // Every lowering replaces this first function (jet_codegen_begin_function).
     first := jet_codegen_comptime_item_tfunc("", "", "", "", Span{start: 0, end: 0}, Type.Named{name: "Unit"})
     program := jet_codegen_new_program(^function_index, ^modules, ^field_symbols, source_files, ^source_index)
+    // A native-host comptime session lowers compiler callables: stop points
+    // plus the budget can-stop operations.
+    program.stop_points = stop_points
+    program.comptime_budget = stop_points
     builder := jet_codegen_new_builder(first, program)
     program.owners.closure_only = true
     JetCodegenComptimeSession{program: ^program, builder: ^builder, constants: ^constants, constants_sorted: true, module_rows: ^module_rows, type_slots: ^type_slots, method_slots: ^method_slots, trait_names: ^trait_names, row_keys: ^row_keys}
