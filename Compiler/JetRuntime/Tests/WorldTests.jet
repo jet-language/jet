@@ -1,0 +1,23 @@
+// Controlled zero must be Some(0), not the absent-clock path.
+#Export(c) fn jet_rt_world_getter_fixture() -> I64 {
+    world :: jet_rt_world_new()
+    out :: jet_rt_alloc(I64{8}, I64{8})
+    base :: thread_base()
+    previous :: sync_load(base + I64{104})
+    sync_store(base + I64{104}, I64{0})
+    sync_store(out, I64{73})
+    if world_wall_ms(out) || world_monotonic_ns(out) || sync_load(out) != I64{73} -> jet_rt_unreachable(I64{0}, I64{0})
+    sync_store(base + I64{104}, world)
+    if !world_wall_ms(out) || sync_load(out) != I64{0} -> jet_rt_unreachable(I64{0}, I64{0})
+    if !world_monotonic_ns(out) || sync_load(out) != I64{0} -> jet_rt_unreachable(I64{0}, I64{0})
+    sync_store(world + I64{24}, I64{123456789})
+    sync_store(world + I64{32}, I64{-500})
+    if !world_wall_ms(out) || sync_load(out) != I64{-377} -> jet_rt_unreachable(I64{0}, I64{0})
+    if !world_monotonic_ns(out) || sync_load(out) != I64{123456789} -> jet_rt_unreachable(I64{0}, I64{0})
+    sync_store(world + I64{32}, I64{9223372036854775800})
+    if jet_world_now(world) != I64{9223372036854775807} -> jet_rt_unreachable(I64{0}, I64{0})
+    sync_store(base + I64{104}, previous)
+    jet_rt_free(out, I64{8}, I64{8})
+    jet_rt_free(world, I64{128}, I64{8})
+    I64{0}
+}

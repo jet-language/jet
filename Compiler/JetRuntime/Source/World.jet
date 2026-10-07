@@ -1,0 +1,66 @@
+// D-TEST-WORLD1=A. One World-lifetime state, shared by controlled descendants.
+// World128: refs0 mutex8 condSeq16 monotonicNs24 wallOriginMs32 rng40
+// nextSequence48 live56 runnable64 budget72 timers List<I64>@80 (triples
+// deadlineNs, sequence, OWNED ParkSlot), history List<owned E4>@104.
+// TCB104 borrows active World;112 flags (active1/waiting2);120 owns parked slot.
+// Task edges never reset clocks, RNG, timers, history or the execution budget.
+
+fn world_require(world: I64) {
+    if (world == I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+}
+
+#Export(c) fn jet_rt_world_current() -> I64 { sync_load(thread_base() + I64{104}) }
+fn world_current() -> I64 { jet_rt_world_current() }
+
+#Export(c) fn jet_rt_world_new() -> I64 {
+    world :: jet_rt_alloc(I64{128}, I64{8})
+    thread_zero(world, I64{128})
+    sync_store(world, I64{1})
+    sync_store(world + I64{40}, I64{5573589319906701683})
+    sync_store(world + I64{72}, I64{100000})
+    world
+}
+
+#Export(c) fn jet_rt_world_clone(world: I64) -> I64 {
+    world_require(world)
+    _ := sync_add(world, I64{1})
+    world
+}
+
+fn world_wall_locked(world: I64) -> I64 {
+    elapsed :: sync_load(world + I64{24}) /% I64{1000000}
+    origin :: sync_load(world + I64{32})
+    if (origin > I64{9223372036854775807} - elapsed) -> return I64{9223372036854775807}
+    origin + elapsed
+}
+
+#Export(c) fn jet_world_now(world: I64) -> I64 {
+    world_require(world)
+    sync_mutex_lock(world + I64{8})
+    value :: world_wall_locked(world)
+    sync_mutex_unlock(world + I64{8})
+    value
+}
+
+#Export(c) fn jet_rt_world_monotonic_ns(world: I64) -> I64 {
+    world_require(world)
+    sync_mutex_lock(world + I64{8})
+    value :: sync_load(world + I64{24})
+    sync_mutex_unlock(world + I64{8})
+    value
+}
+
+// Presence is independent of the sample: epoch zero is a controlled value.
+// output borrows one writable raw I64 word; false leaves it untouched.
+fn world_wall_ms(output: I64) -> Bool {
+    world :: world_current()
+    if (world == I64{0}) -> return false
+    sync_store(output, jet_world_now(world))
+    true
+}
+fn world_monotonic_ns(output: I64) -> Bool {
+    world :: world_current()
+    if (world == I64{0}) -> return false
+    sync_store(output, jet_rt_world_monotonic_ns(world))
+    true
+}

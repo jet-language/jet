@@ -1506,3 +1506,11 @@ ambiguous pairing is reported, never treated as equality. `--bootstrap JETC0`
 provides a front-end diagnostic census before the probe can be built.
 Preparation and a receipt-only census never establish differential parity;
 only `summary.json` with `differential_verified: true` does.
+
+Controlled clocks use the native World128 state in `Source/World.jet`.
+The active capability is borrowed at TCB offset 104; zero means no World.
+`world_wall_ms(out)` and `world_monotonic_ns(out)` return presence separately
+from the raw I64 sample, so a controlled epoch of zero never falls through to
+the host. World state survives task boundaries and ends only with its owning
+World lease. Wall time is the saturating sum of the fixed origin and virtual
+monotonic milliseconds, matching the Rust seed.
