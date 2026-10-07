@@ -836,6 +836,24 @@ fn lower_call_runtime(m: &LowerModule, f: &LowerFunction, symbol: String, args: 
     lower_emit(&f, LIRInst.Call{dst: dst, signature: signature, callee: LIRCallee.Runtime{symbol: symbol}, args: ~args})
 }
 
+// A C U32 result defines eax only; LIR narrow integers live in full words.
+// Use the checked MIR type, never a symbol-name guess or a new 4B layout.
+// lower_narrow_wrap emits a logical zero extension into a distinct SSA value.
+fn lower_call_runtime_typed(c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, symbol: String, args: [LIRValueID], dst: LIRValueID?) Never! {
+    if dst == .Val(result) {
+        if instruction.result == .Val(value) {
+            if lower_value_type(c, value) == .Val(ty) {
+                if lower_narrow_bits(ty) == 32 && !lower_narrow_signed(ty) {
+                    raw :: lower_word(&f)
+                    lower_call_runtime(&m, &f, symbol, args, Val(raw))
+                    return lower_narrow_wrap(&f, result, raw, false, 32)
+                }
+            }
+        }
+    }
+    lower_call_runtime(&m, &f, symbol, args, dst)
+}
+
 // A static string's address and byte length, for runtime calls.
 fn lower_static_text(m: &LowerModule, f: &LowerFunction, text: String) -> [LIRValueID] Never! {
     address :: lower_pointer(&f)
@@ -2944,7 +2962,7 @@ fn lower_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction
             &lowered.push(value)
         }
         dst :: lower_result(p, c, &m, &f, instruction)
-        return lower_call_runtime(&m, &f, lower_runtime_symbol(row), lowered, dst)
+        return lower_call_runtime_typed(c, &m, &f, instruction, lower_runtime_symbol(row), lowered, dst)
     }
     // The concrete callee: the instance Mono.jet registered for this call's
     // owner and type arguments (the original when nothing binds). A callee
