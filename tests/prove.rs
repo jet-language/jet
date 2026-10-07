@@ -1132,13 +1132,97 @@ fn prove_solver_counterexample_is_checked_producer_evidence() {
     assert_eq!(
         out.status.code(),
         Some(1),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
+        "stderr={} stdout={}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
     );
     let report = String::from_utf8(out.stdout).unwrap();
     assert!(report.contains("\"code\":\"E2950\""), "{report}");
     assert!(report.contains("\"outcome\":\"disproved\""), "{report}");
     assert!(report.contains("\"counterexample\":["), "{report}");
+    assert!(report.contains("\"code\":\"E3001\""), "{report}");
+
+    // The child and parent publish one immutable evidence artifact with the
+    // same source identity, including the caught runtime observation.
+    let index = jet::RecordIndex::RecordIndex::load_for_project(&root).unwrap();
+    let evidence = index
+        .entries()
+        .into_iter()
+        .filter(|entry| entry.kind == jet::RecordIndex::RecordKind::Evidence)
+        .collect::<Vec<_>>();
+    assert_eq!(evidence.len(), 1, "{evidence:?}");
+    let bytes = fs::read(root.join(&evidence[0].path)).unwrap();
+    assert_eq!(evidence[0].artifact_id, jet::SHA256::sha256_hex(&bytes));
+    let (records, _) = jet_foundation::Evidence::decode_report_bytes(&bytes).unwrap();
+    assert!(
+        records.iter().any(|record| record.is_caught_property_case()),
+        "{records:?}"
+    );
+    for record in &records {
+        assert_eq!(
+            evidence[0].identity.target_inputs_sha256,
+            record.revision.source
+        );
+    }
+
+    let repeated = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "bad.jet", "--lens", "solver", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        repeated.status.code(),
+        Some(1),
+        "stderr={} stdout={}",
+        String::from_utf8_lossy(&repeated.stderr),
+        String::from_utf8_lossy(&repeated.stdout)
+    );
+    assert!(String::from_utf8_lossy(&repeated.stdout).contains("\"code\":\"E2950\""));
+}
+
+#[test]
+fn prove_caught_property_stop_does_not_capture_later_unit_stop() {
+    let root = workspace("property_capture_boundary");
+    fs::write(
+        root.join("mixed.jet"),
+        "#[Pre(value > 0, \"positive\"), Post(result > value, \"fee grows\")] fn add_fee(value: Int) -[]> Int { return value }\n#Test(\"ordinary later stop\") { add_fee(1) }\n",
+    )
+    .unwrap();
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "mixed.jet", "--lens", "solver", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(70),
+        "stderr={} stdout={}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let report = String::from_utf8(out.stdout).unwrap();
+    assert!(report.contains("\"code\":\"E3001\""), "{report}");
+    assert!(report.contains("\"code\":\"E2950\""), "{report}");
+    let index = jet::RecordIndex::RecordIndex::load_for_project(&root).unwrap();
+    let evidence = index
+        .entries()
+        .into_iter()
+        .find(|entry| entry.kind == jet::RecordIndex::RecordKind::Evidence)
+        .unwrap();
+    let bytes = fs::read(root.join(evidence.path)).unwrap();
+    let (records, _) = jet_foundation::Evidence::decode_report_bytes(&bytes).unwrap();
+    assert!(
+        records.iter().any(|record| record.is_caught_property_case()),
+        "{records:?}"
+    );
+    assert!(
+        records.iter().any(|record| {
+            record.kind == jet_foundation::Evidence::EvidenceKind::Runtime
+                && !record.is_caught_property_case()
+                && record.detail.contains("fee grows")
+        }),
+        "{records:?}"
+    );
 }
 
 #[test]

@@ -233,8 +233,11 @@ fn persist_evidence_report(target: &Target, report: &EvidenceReport) -> Result<R
             "evidence report has an unsafe report id `{report_id}`"
         ));
     }
+    // The child already publishes these bytes under the report's source
+    // revision. Reusing that intrinsic identity makes publication idempotent;
+    // the enclosing proof target has a separate record identity.
     let identity = RecordIdentity::new(
-        target.input_sha256.clone(),
+        report.revision.source.clone(),
         report.build.toolchain.clone(),
         report.producer.as_str(),
     )?;
@@ -3099,9 +3102,10 @@ fn run_test_producers(target: &Target) -> Result<(Vec<TestItem>, i32, Vec<Record
                             highest_exit = ExitCodes::ICE;
                         } else {
                             if report.records.iter().any(|record| {
-                                matches!(record.kind, EvidenceKind::Runtime)
-                                    || (matches!(record.kind, EvidenceKind::Contract)
-                                        && record.outcome == EvidenceOutcome::Failed)
+                                !record.is_caught_property_case()
+                                    && (matches!(record.kind, EvidenceKind::Runtime)
+                                        || (matches!(record.kind, EvidenceKind::Contract)
+                                            && record.outcome == EvidenceOutcome::Failed))
                             }) && highest_exit != ExitCodes::ICE
                             {
                                 highest_exit = ExitCodes::RUNTIME_PANIC;
