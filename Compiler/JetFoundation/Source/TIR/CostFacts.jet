@@ -199,3 +199,12 @@ pub fn tir_cost_fix(kind: TCostKind) -> String Never! {
         .RepresentationFallback -> "provide the collection shape proof that selects the direct representation"
     }
 }
+
+pub fn tir_stmt_cost_fact(statement: TStmt) -> TCostFact? Never! {
+    map_edit :: if statement == {
+        .IndexAssign(_, _, _, is_map, _, _) -> is_map
+        .IndexFieldAssign(value, _) -> value.is_map
+        else -> false
+    }
+    if map_edit -> Val(TCostFact{kind: TCostKind.CollectionCopyOnWrite, state: TCostState.SemanticRemainder}) else -> None
+}
