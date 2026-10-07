@@ -194,3 +194,169 @@ fn coll_result_size(ok: I64, error: I64) -> I64 {
     if (size < I64{8}) { size = I64{8} }
     I64{8} + ((size + I64{7}) & I64{-8})
 }
+
+// Bits owns a sorted, unique sequence of nonnegative native I64 indices.
+// The header uses the same [len, cap, data] layout as the collection boundary;
+// indices are not exact-Int carriers until they cross a public Word route.
+fn coll_bits_bound(bits: I64, value: I64) -> I64 {
+    low := I64{0}
+    high := trap_word(bits)
+    data :: trap_word(bits + I64{16})
+    loop low < high {
+        middle :: low + (high - low) / I64{2}
+        if trap_word(data + middle * I64{8}) < value {
+            low = middle + I64{1}
+        } else {
+            high = middle
+        }
+    }
+    low
+}
+
+#Export(c) fn jet_rt_native_bits_new() -> I64 { coll_list_new() }
+
+#Export(c) fn jet_rt_native_bits_clear(bits: I64) {
+    capacity :: trap_word(bits + I64{8})
+    if (capacity != I64{0}) {
+        jet_rt_free(trap_word(bits + I64{16}), capacity * I64{8}, I64{8})
+    }
+    coll_zero(bits, I64{24})
+}
+
+#Export(c) fn jet_rt_handle_drop_JetBitSet(bits: I64) {
+    if (bits == I64{0}) { return }
+    jet_rt_native_bits_clear(bits)
+    jet_rt_free(bits, I64{24}, I64{8})
+}
+
+#Export(c) fn jet_bit_set_count(bits: I64) -> I64 {
+    jet_int_owned_from_i64(trap_word(bits))
+}
+
+#Export(c) fn jet_bit_set_is_empty(bits: I64) -> Bool {
+    trap_word(bits) == I64{0}
+}
+
+#Export(c) fn jet_bit_set_len(bits: I64) -> I64 {
+    count :: trap_word(bits)
+    if (count == I64{0}) { return I64{0} }
+    last :: trap_word(trap_word(bits + I64{16}) + (count - I64{1}) * I64{8})
+    if (last == I64{9223372036854775807}) { jet_rt_panic_overflow() }
+    jet_int_owned_from_i64(last + I64{1})
+}
+
+#Export(c) fn jet_bit_set_has(bits: I64, carrier: I64) -> Bool {
+    value :: jet_int_owned_to_i64(carrier)
+    at :: coll_bits_bound(bits, value)
+    if at == trap_word(bits) { return false }
+    trap_word(trap_word(bits + I64{16}) + at * I64{8}) == value
+}
+
+#Export(c) fn jet_bitset_add(bits: I64, carrier: I64) -> Bool {
+    value :: jet_int_owned_to_i64(carrier)
+    if (value < I64{0}) { return false }
+    at :: coll_bits_bound(bits, value)
+    length :: trap_word(bits)
+    data := trap_word(bits + I64{16})
+    if at < length && trap_word(data + at * I64{8}) == value { return false }
+    capacity :: trap_word(bits + I64{8})
+    if length == capacity {
+        grown :: if (capacity == I64{0}) -> I64{4} else -> capacity * I64{2}
+        buffer :: jet_rt_alloc(grown * I64{8}, I64{8})
+        coll_copy(data, buffer, length * I64{8})
+        if (capacity != I64{0}) { jet_rt_free(data, capacity * I64{8}, I64{8}) }
+        trap_store(bits + I64{8}, grown)
+        trap_store(bits + I64{16}, buffer)
+        data = buffer
+    }
+    move := length
+    loop move > at {
+        trap_store(data + move * I64{8}, trap_word(data + (move - I64{1}) * I64{8}))
+        move -= I64{1}
+    }
+    trap_store(data + at * I64{8}, value)
+    trap_store(bits, length + I64{1})
+    true
+}
+
+#Export(c) fn jet_bitset_remove(bits: I64, carrier: I64) {
+    value :: jet_int_owned_to_i64(carrier)
+    at := coll_bits_bound(bits, value)
+    length :: trap_word(bits)
+    data :: trap_word(bits + I64{16})
+    if at == length || trap_word(data + at * I64{8}) != value { return }
+    loop at + I64{1} < length {
+        trap_store(data + at * I64{8}, trap_word(data + (at + I64{1}) * I64{8}))
+        at += I64{1}
+    }
+    trap_store(bits, length - I64{1})
+}
+
+#Export(c) fn jet_bits_copy(bits: I64) -> I64 {
+    copy :: coll_list_new()
+    length :: trap_word(bits)
+    if (length != I64{0}) {
+        data :: jet_rt_alloc(length * I64{8}, I64{8})
+        coll_copy(trap_word(bits + I64{16}), data, length * I64{8})
+        trap_store(copy, length)
+        trap_store(copy + I64{8}, length)
+        trap_store(copy + I64{16}, data)
+    }
+    copy
+}
+
+#Export(c) fn jet_rt_handle_clone_JetBitSet(bits: I64) -> I64 { jet_bits_copy(bits) }
+
+// Route List results return a native length and transfer the fresh slot
+// buffer through out_data. Each initialized slot owns its exact Int carrier.
+#Export(c) fn jet_bit_set_to_list(bits: I64, out_data: I64) -> I64 {
+    length :: trap_word(bits)
+    if (length == I64{0}) {
+        trap_store(out_data, I64{0})
+        return I64{0}
+    }
+    output :: jet_rt_alloc(length * I64{8}, I64{8})
+    source :: trap_word(bits + I64{16})
+    at := I64{0}
+    loop at < length {
+        trap_store(output + at * I64{8}, jet_int_owned_from_i64(trap_word(source + at * I64{8})))
+        at += I64{1}
+    }
+    trap_store(out_data, output)
+    length
+}
+
+fn coll_bits_render(bits: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    scratch :: jet_rt_alloc(I64{20}, I64{1})
+    trap_put(scratch, I64{91})
+    rt_text_append(text, scratch, I64{1})
+    length :: trap_word(bits)
+    data :: trap_word(bits + I64{16})
+    at := I64{0}
+    loop at < length {
+        if (at != I64{0}) {
+            trap_put(scratch, I64{44})
+            trap_put(scratch + I64{1}, I64{32})
+            rt_text_append(text, scratch, I64{2})
+        }
+        value := trap_word(data + at * I64{8})
+        begin := I64{20}
+        loop {
+            begin -= I64{1}
+            trap_put(scratch + begin, I64{48} + value % I64{10})
+            value /= I64{10}
+            if (value == I64{0}) { break }
+        }
+        rt_text_append(text, scratch + begin, I64{20} - begin)
+        at += I64{1}
+    }
+    trap_put(scratch, I64{93})
+    rt_text_append(text, scratch, I64{1})
+    jet_rt_free(scratch, I64{20}, I64{1})
+    jet_rt_string_builder_finish(text)
+}
+
+#Export(c) fn jet_rt_handle_display_JetBitSet(bits: I64) -> I64 { coll_bits_render(bits) }
+#Export(c) fn jet_rt_handle_show_JetBitSet(bits: I64) -> I64 { coll_bits_render(bits) }
+#Export(c) fn jet_rt_handle_debug_JetBitSet(bits: I64) -> I64 { coll_bits_render(bits) }
