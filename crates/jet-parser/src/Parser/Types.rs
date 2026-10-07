@@ -690,6 +690,11 @@ impl<'a> Parser<'a> {
     /// arguments `<T, …>(`. Both angle-bracket edges must be adjacent to the call
     /// name, so spaced comparisons such as `f < T > (x)` keep their meaning.
     pub(super) fn at_turbofish(&self) -> bool {
+        self.at_type_args_before(TokKind::LParen)
+    }
+
+    /// The same adjacent generic head may precede a qualified literal's brace.
+    pub(super) fn at_type_args_before(&self, following: TokKind) -> bool {
         if !matches!(self.peek().kind, TokKind::Lt) {
             return false;
         }
@@ -705,7 +710,7 @@ impl<'a> Parser<'a> {
                     depth -= 1;
                     if depth == 0 {
                         return self.toks.get(i + 1).is_some_and(|next| {
-                            matches!(next.kind, TokKind::LParen)
+                            next.kind == following
                                 && self.toks[i].span.end == next.span.start
                         });
                     }
@@ -714,7 +719,7 @@ impl<'a> Parser<'a> {
                     depth -= 2;
                     if depth <= 0 {
                         return self.toks.get(i + 1).is_some_and(|next| {
-                            matches!(next.kind, TokKind::LParen)
+                            next.kind == following
                                 && self.toks[i].span.end == next.span.start
                         });
                     }
