@@ -44,8 +44,8 @@ fn jet_process_spec_under_wire(
     spec
 }
 
-fn jet_process_spec_arg(mut spec: jet_std::ProcessSpec, extra: &String) -> jet_std::ProcessSpec {
-    spec.cmd.push(extra.clone());
+fn jet_process_spec_arg(mut spec: jet_std::ProcessSpec, extra: &str) -> jet_std::ProcessSpec {
+    spec.cmd.push(extra.to_owned());
     spec
 }
 
@@ -57,23 +57,23 @@ fn jet_process_spec_args_extend(
     spec
 }
 
-fn jet_process_spec_cwd(mut spec: jet_std::ProcessSpec, cwd: &String) -> jet_std::ProcessSpec {
-    spec.cwd = Some(cwd.clone());
+fn jet_process_spec_cwd(mut spec: jet_std::ProcessSpec, cwd: &str) -> jet_std::ProcessSpec {
+    spec.cwd = Some(cwd.to_owned());
     spec
 }
 fn jet_process_spec_env(
     mut spec: jet_std::ProcessSpec,
-    name: &String,
-    value: &String,
+    name: &str,
+    value: &str,
 ) -> jet_std::ProcessSpec {
-    spec.env_set.push((name.clone(), value.clone()));
+    spec.env_set.push((name.to_owned(), value.to_owned()));
     spec
 }
 fn jet_process_spec_env_remove(
     mut spec: jet_std::ProcessSpec,
-    name: &String,
+    name: &str,
 ) -> jet_std::ProcessSpec {
-    spec.env_remove.push(name.clone());
+    spec.env_remove.push(name.to_owned());
     spec
 }
 fn jet_process_spec_env_clear(mut spec: jet_std::ProcessSpec) -> jet_std::ProcessSpec {

@@ -228,8 +228,8 @@ pub mod jet_email {
 
     #[derive(Clone, Copy)]
     pub struct RuntimeFns {
-        pub tls_begin: fn(std::net::TcpStream, &String) -> Result<i64, String>,
-        pub tls_begin_ca: fn(std::net::TcpStream, &String, &Vec<u8>) -> Result<i64, String>,
+        pub tls_begin: fn(std::net::TcpStream, &str) -> Result<i64, String>,
+        pub tls_begin_ca: fn(std::net::TcpStream, &str, &Vec<u8>) -> Result<i64, String>,
         pub tls_handshake_step: fn(i64) -> Result<bool, String>,
         pub tls_set_poll_timeout: fn(i64, i64) -> Result<(), String>,
         pub tls_read: fn(i64, i64) -> Result<Vec<u8>, String>,
@@ -1512,7 +1512,7 @@ pub mod jet_email {
         Ok(())
     }
 
-    pub fn address(input: &String) -> Result<Address, Error> {
+    pub fn address(input: &str) -> Result<Address, Error> {
         reject_controls(input, "email address")?;
         let value = input.trim();
         if value.is_empty() || value.len() > 512 {
@@ -1647,7 +1647,7 @@ pub mod jet_email {
         byte.is_ascii_alphanumeric() || matches!(byte, b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'-' | b'/' | b'=' | b'?' | b'^' | b'_' | b'`' | b'{' | b'|' | b'}' | b'~' | b'.')
     }
 
-    pub fn attachment(filename: &String, mime: &String, bytes: &Vec<u8>) -> Result<Attachment, Error> {
+    pub fn attachment(filename: &str, mime: &str, bytes: &Vec<u8>) -> Result<Attachment, Error> {
         reject_controls(filename, "attachment filename")?;
         reject_controls(mime, "attachment content type")?;
         if filename.trim().is_empty() || filename.contains('/') || filename.contains('\\') {
@@ -1664,16 +1664,16 @@ pub mod jet_email {
         if bytes.len() > MAX_ATTACHMENT_BYTES {
             return Err(error("LimitExceeded", format!("attachment exceeds {MAX_ATTACHMENT_BYTES} bytes")));
         }
-        Ok(Attachment { filename: filename.clone(), mime: mime.to_ascii_lowercase(), bytes: bytes.clone() })
+        Ok(Attachment { filename: filename.to_owned(), mime: mime.to_ascii_lowercase(), bytes: bytes.clone() })
     }
 
     pub fn message(
         from: &Address,
         to: &Vec<Address>,
         bcc: &Vec<Address>,
-        subject: &String,
-        text: &String,
-        html: &String,
+        subject: &str,
+        text: &str,
+        html: &str,
         attachments: &Vec<Attachment>,
     ) -> Result<Message, Error> {
         reject_controls(subject, "subject")?;
@@ -1706,8 +1706,8 @@ pub mod jet_email {
         ensure_encoded_header_lines("Subject", subject)?;
         let envelope = default_envelope(from, to, bcc)?;
         Ok(Message {
-            from: from.clone(), to: to.clone(), bcc: bcc.clone(), subject: subject.clone(),
-            text: text.clone(), html: html.clone(), attachments: attachments.clone(), envelope, wire_upper,
+            from: from.clone(), to: to.clone(), bcc: bcc.clone(), subject: subject.to_owned(),
+            text: text.to_owned(), html: html.to_owned(), attachments: attachments.clone(), envelope, wire_upper,
         })
     }
 

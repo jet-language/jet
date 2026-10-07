@@ -253,7 +253,7 @@ impl JetShow for GameFrame {
     }
 }
 
-fn jet_game_scene_new(name: &String) -> GameScene {
+fn jet_game_scene_new(name: &str) -> GameScene {
     let state = std::rc::Rc::new(std::cell::RefCell::new(GameState::new(name)));
     let assets = GameAssets {
         state: state.clone(),
@@ -262,7 +262,7 @@ fn jet_game_scene_new(name: &String) -> GameScene {
         state: state.clone(),
     };
     GameScene {
-        name: name.clone(),
+        name: name.to_owned(),
         assets: assets.clone(),
         user_assets: assets,
         input: input.clone(),
@@ -271,11 +271,11 @@ fn jet_game_scene_new(name: &String) -> GameScene {
     }
 }
 
-fn jet_game_replay_record(path: &String) -> GameReplay {
+fn jet_game_replay_record(path: &str) -> GameReplay {
     let tape = JetGameReplay::from_path(path)
         .unwrap_or_else(|error| panic!("invalid game replay `{path}`: {error}"));
     GameReplay {
-        path: path.clone(),
+        path: path.to_owned(),
         tape,
     }
 }
@@ -368,16 +368,16 @@ pub(crate) fn jet_game_frame_schedule_explain(
     schedule.explain()
 }
 
-fn jet_game_scene_component(scene: &mut GameScene, name: &String) {
+fn jet_game_scene_component(scene: &mut GameScene, name: &str) {
     let mut state = scene.assets.state.borrow_mut();
     if !state.components.iter().any(|existing| existing == name) {
-        state.components.push(name.clone());
+        state.components.push(name.to_owned());
     }
 }
 
 /// D-GAME-LOOP1=A: return one synthetic entity row of component *data*
 /// (default-initialized Int fields), not bare type-name markers.
-fn jet_game_scene_query(scene: &GameScene, names: &String) -> Vec<String> {
+fn jet_game_scene_query(scene: &GameScene, names: &str) -> Vec<String> {
     let state = scene.assets.state.borrow();
     let wanted: Vec<&str> = names.split(',').filter(|s| !s.is_empty()).collect();
     if wanted
@@ -399,12 +399,12 @@ fn jet_game_scene_query(scene: &GameScene, names: &String) -> Vec<String> {
     }
 }
 
-fn jet_game_assets_image(assets: &GameAssets, path: &String) -> Result<GameImage, String> {
+fn jet_game_assets_image(assets: &GameAssets, path: &str) -> Result<GameImage, String> {
     let resolved = assets
         .state
         .borrow()
         .asset_roots
-        .resolve(path.clone())
+        .resolve(path.to_owned())
         .map_err(|error| error.to_string())?;
     let asset_key = resolved.node().key();
     let logical_path = resolved.logical_path;
@@ -419,12 +419,12 @@ fn jet_game_assets_image(assets: &GameAssets, path: &String) -> Result<GameImage
     })
 }
 
-fn jet_game_assets_sound(assets: &GameAssets, path: &String) -> Result<GameSound, String> {
+fn jet_game_assets_sound(assets: &GameAssets, path: &str) -> Result<GameSound, String> {
     let resolved = assets
         .state
         .borrow()
         .asset_roots
-        .resolve(path.clone())
+        .resolve(path.to_owned())
         .map_err(|error| error.to_string())?;
     let asset_key = resolved.node().key();
     let logical_path = resolved.logical_path;
@@ -494,14 +494,14 @@ fn jet_game_assets_reload(
 }
 
 
-fn jet_game_input_bind(input: &GameInputMap, action: &String, key: &String) {
+fn jet_game_input_bind(input: &GameInputMap, action: &str, key: &str) {
     let mut state = input.state.borrow_mut();
     if !state.bindings.iter().any(|(a, k)| a == action && k == key) {
-        state.bindings.push((action.clone(), key.clone()));
+        state.bindings.push((action.to_owned(), key.to_owned()));
     }
 }
 
-fn jet_game_input_pressed(input: &GameInputSnapshot, action: &String) -> bool {
+fn jet_game_input_pressed(input: &GameInputSnapshot, action: &str) -> bool {
     input.pressed.iter().any(|a| a == action)
 }
 

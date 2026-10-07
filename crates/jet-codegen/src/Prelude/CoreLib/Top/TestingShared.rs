@@ -134,29 +134,29 @@ fn jet_testing_unified_diff(path: &str, expected: &str, actual: &str) -> String 
 }
 
 pub(crate) fn jet_testing_golden_result(
-    path: &String,
-    actual: &String,
+    path: &str,
+    actual: &str,
 ) -> Result<bool, TestEvidenceError> {
     match std::fs::read_to_string(path) {
         Ok(expected) if expected == *actual => Ok(true),
         Ok(expected) => Err(TestEvidenceError::GoldenMismatch {
-            path: path.clone(),
+            path: path.to_owned(),
             diff: jet_testing_unified_diff(path, &expected, actual),
         }),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Err(TestEvidenceError::GoldenMissing { path: path.clone() })
+            Err(TestEvidenceError::GoldenMissing { path: path.to_owned() })
         }
-        Err(_) => Err(TestEvidenceError::GoldenUnreadable { path: path.clone() }),
+        Err(_) => Err(TestEvidenceError::GoldenUnreadable { path: path.to_owned() }),
     }
 }
 
-pub(crate) fn jet_testing_fixture_result(path: &String) -> Result<String, TestEvidenceError> {
+pub(crate) fn jet_testing_fixture_result(path: &str) -> Result<String, TestEvidenceError> {
     match std::fs::read_to_string(path) {
         Ok(contents) => Ok(contents),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Err(TestEvidenceError::FixtureMissing { path: path.clone() })
+            Err(TestEvidenceError::FixtureMissing { path: path.to_owned() })
         }
-        Err(_) => Err(TestEvidenceError::FixtureUnreadable { path: path.clone() }),
+        Err(_) => Err(TestEvidenceError::FixtureUnreadable { path: path.to_owned() }),
     }
 }
 
