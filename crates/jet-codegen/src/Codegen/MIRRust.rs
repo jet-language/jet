@@ -25022,6 +25022,21 @@ impl<'a> RustEmitter<'a> {
             .iter()
             .find(|row| row.id == call)
             .unwrap_or_else(|| panic!("MIR Core call {:?} has no canonical row", call));
+        if row.module == "core.game" && row.member == "run" {
+            let [scene, replay, backend, frames] = args else {
+                panic!("MIR core.game.run requires its four checked arguments");
+            };
+            let scene = self.borrowed_value_reference(function, scene.value, MirAccess::Write);
+            let replay = self.call_arg_for_function(function, replay, true);
+            let backend = self.call_arg_for_function(function, backend, true);
+            let frames = self.call_arg_for_function(function, frames, true);
+            let frame_word = self.native_int_argument("__jet_frames".to_string(), location);
+            return format!(
+                "{}({scene}, ({replay}).as_ref().ok(), ({backend}).as_ref().ok(), \
+                 ({frames}).as_ref().ok().map(|__jet_frames| {frame_word}).as_ref())",
+                self.prelude_symbol(route)
+            );
+        }
         if row.module == "core.testing" && row.member == "histories" {
             return self.history_call_expression(
                 function,
@@ -26685,6 +26700,15 @@ impl<'a> RustEmitter<'a> {
             .into_iter()
             .enumerate()
             .map(|(index, (value_id, value))| {
+                if route.member == "game.scene_on_frame" && index == 1 {
+                    let callback = self.host_callback_with_inputs(
+                        function, value_id.expect("game frame callback"), &[false],
+                    );
+                    return format!(
+                        "{{ let mut __jet_frame_callback = {callback}; \
+                         Box::new(move |frame| __jet_frame_callback(frame).unwrap_or_else(|error| match error {{}})) }}"
+                    );
+                }
                 if let Some(value_id) = value_id {
                     if let Some(callback) =
                         self.host_borrow_callback_value(function, value_id, false, false)
@@ -26755,6 +26779,7 @@ impl<'a> RustEmitter<'a> {
                             && (index == 0 || (route.member == "rng.shuffle" && index == 1));
                         let access = if reader_consumes
                             || rng_mutates
+                            || (index == 0 && route.member == "game.scene_on_frame")
                             || (route.module == "core.transaction" && route.member == "commit")
                         {
                             MirAccess::Write

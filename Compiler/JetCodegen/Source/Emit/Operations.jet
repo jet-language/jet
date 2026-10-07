@@ -1,6 +1,10 @@
 // MIR operation printer. Every branch consumes an already checked operation and
 // either preserves its ownership/failure facts or marks the artifact incomplete.
 use jet_foundation.[
+    DerivationPayload,
+    derivation_payload_json,
+    MIRFrameSchedule,
+    MIRDerivationRef,
     MIRAccess,
     MIRBinaryDispatch,
     MIRBinaryOp,
@@ -2577,6 +2581,15 @@ fn jet_rust_emit_exact_int_argument(ctx: &JetRustEmitContext, ty: MIRType, value
 // constructs `JetSignal<JetInt>` and keeps the exact carrier.
 fn jet_rust_emit_core_call_argument(ctx: &JetRustEmitContext, function: MIRFunction, module_name: String, member: String, symbol: String, index: Int, arg: MIRCallArg, borrowed: Bool, declared: Type?, location: MIRPanicLoc?) -> String Never! {
     value_type :: jet_rust_emit_value_type(ctx, function, arg.value)
+    if module_name == "core.game" && member == "run" {
+        if index == 0 -> return jet_rust_emit_borrowed_value_reference(&ctx, function, arg.value, MIRAccess.Write)
+        value :: jet_rust_emit_call_arg_with_borrow(&ctx, function, arg, true)
+        if index == 3 {
+            word :: jet_rust_emit_native_int_argument(&ctx, "__jet_frames", location)
+            return "({value}).as_ref().ok().map(|__jet_frames| {word}).as_ref()"
+        }
+        return "({value}).as_ref().ok()"
+    }
     value_is_int :: value_type.kind == MIRTypeKind.Int
     exact_int_carrier :: module_name == "core.reactive" && member == "signal"
     if !exact_int_carrier && module_name == "core.tasks" && symbol == "jet_std::channel_bounded" && index == 0 && !borrowed && value_is_int {
@@ -4750,13 +4763,23 @@ fn jet_rust_emit_semantic_values(ctx: &JetRustEmitContext, function: MIRFunction
 // is never copied into a value slot first. Reader and text cursor operations
 // and transaction commits lend their receiver mutably; RNG draws and shuffle
 // lend the state they advance mutably; addresses lend with their own access.
-fn jet_rust_emit_handle_method_values(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, receiver: MIRValueID, args: [MIRValueID]) -> String Never! {
+fn jet_rust_emit_handle_method_values(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, receiver: MIRValueID, args: [MIRValueID], frame_schedule: MIRFrameSchedule?, frame_schedule_derivation: MIRDerivationRef?) -> String Never! {
     values := [MIRValueID]{receiver}
     loop arg in args -> &values.push(arg)
     row :: jet_rust_emit_prelude_route(ctx, call, false) ?? return jet_rust_emit_semantic_values(&ctx, function, call, values)
     // MIRRust prelude_handle_method: `Path.home()` is receiver-free; its Unit
     // placeholder receiver never reaches the nullary Prelude row.
     if row.member == "path.home" && args.len() == 0 -> return jet_rust_emit_route_call(&ctx, call, [String]{})
+    if row.member == "game.scene_on_frame" {
+        scene :: jet_rust_emit_borrowed_value_reference(&ctx, function, receiver, MIRAccess.Write)
+        callback :: jet_rust_emit_host_callback_with_inputs(&ctx, function, args[0], [Bool]{false})
+        schedule := "None"
+        if frame_schedule == .Val(facts) -> schedule = "Some({jet_rust_emit_quote(derivation_payload_json(DerivationPayload.FrameSchedule(facts)))})"
+        derivation := "None"
+        if frame_schedule_derivation == .Val(reference) -> derivation = "Some({jet_rust_emit_quote(reference.id)})"
+        wrapped :: "{{ let mut __jet_frame_callback = {callback}; Box::new(move |frame| __jet_frame_callback(frame).unwrap_or_else(|error| match error {{}})) }}"
+        return jet_rust_emit_route_call(&ctx, call, [String]{scene, wrapped, schedule, derivation})
+    }
     if values.len() < row.signature.arity || values.len() > row.signature.max_arity || row.signature.borrow_mask.len() != values.len() -> return jet_rust_emit_semantic_values(&ctx, function, call, values)
     reader_route :: row.module_name == "core.handle" && (row.member.starts_with("reader.read_") || row.member == "reader.seek" || row.member == "reader.skip" || row.member == "reader.take" || row.member == "cursor.skip_ws" || row.member == "cursor.take_until")
     commit_route :: row.module_name == "core.transaction" && row.member == "commit"
@@ -5368,7 +5391,7 @@ fn jet_rust_emit_operation(ctx: &JetRustEmitContext, function: MIRFunction, oper
                     return "{call_text}, {jet_rust_emit_source_path(&ctx, euclid_location.file)}, {euclid_location.line}u32)"
                 }
                 .OverflowOption(call, left, right, overflow_location) -> return jet_rust_emit_overflow_option(&ctx, function, call, left, right, overflow_location)
-                .HandleMethod(call, receiver, args, _, _) -> return jet_rust_emit_handle_method_values(&ctx, function, call, receiver, args)
+                .HandleMethod(call, receiver, args, schedule, derivation) -> return jet_rust_emit_handle_method_values(&ctx, function, call, receiver, args, schedule, derivation)
                 .CoreClosureCall(call, kind, values, closure, _, _) -> return jet_rust_emit_core_closure_call(&ctx, function, call, kind, values, closure)
                 .TaskGroup(call, kind, tasks) -> return jet_rust_emit_task_group(&ctx, function, call, kind, tasks)
                 .Select(call, kind, values) -> return jet_rust_emit_select(&ctx, function, call, kind, values)

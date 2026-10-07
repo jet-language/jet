@@ -1077,6 +1077,7 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         | "JetDataPlotColumn"
         | "JetDataPlot" => Some(name),
         n if job_queue_rust_type(n).is_some() => job_queue_rust_type(n),
+        n if game_handle_rust_type(n).is_some() => game_handle_rust_type(n),
         _ => net_handle_rust_type(name),
     }
 }
