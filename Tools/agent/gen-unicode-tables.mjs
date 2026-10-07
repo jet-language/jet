@@ -565,7 +565,9 @@ pub fn jet_unicode_count(s: &String, needle: &String) -> i64 {
     }
     count
 }
+`;
 
+const stringOutcomeBody = `
 pub fn jet_unicode_split_once(
     s: &String,
     sep: &String,
@@ -651,8 +653,28 @@ pub static UNICODE_SENTENCE_BREAK: &[(u32,u32,u8)] = &[${fmtU32Triples(sentenceR
 pub static UNICODE_INCB: &[(u32,u32,u8)] = &[${fmtU32Triples(incbRanges)}];
 `;
 
-const stringModuleOut = MODULE_HEADER + stringBody;
-const stringFlatOut = FLAT_HEADER + stringBody;
+// The seed Foundation helper keeps its Option ABI; the AOT prelude uses
+// borrowed str inputs and the language's Outcome ABI. Neither projection
+// changes the pinned mappings or the shared search/count implementation.
+const stringOptionBody = `
+pub fn jet_unicode_split_once(s: &String, sep: &String) -> Option<(String, String)> {
+    s.find(sep).map(|at| (
+        s[..at].to_string(),
+        s[at + sep.len()..].to_string(),
+    ))
+}
+
+pub fn jet_unicode_cut_last(s: &String, sep: &String) -> Option<(String, String)> {
+    s.rfind(sep).map(|at| (
+        s[..at].to_string(),
+        s[at + sep.len()..].to_string(),
+    ))
+}
+`;
+const stringModuleOut = MODULE_HEADER + stringBody + stringOptionBody;
+const stringFlatOut = FLAT_HEADER + (stringBody + stringOutcomeBody)
+  .replaceAll("&String", "&str")
+  .replace("let mut rest = s.as_str();", "let mut rest = s;");
 const tablesFlatOut = FLAT_HEADER + tablesBody;
 
 // ---- emit Jet runtime lookups -----------------------------------------------

@@ -2013,6 +2013,11 @@ mapping and property assets, including the native runtime's fixed-word
 lookup functions. Regenerate them from `tests/data/unicode/ucd`; never copy
 host Unicode tables or hand-maintain a native whitespace/casing list.
 
+The generator preserves each seed/reference boundary: Foundation's split/cut
+helpers return Rust `Option`, while the AOT prelude borrows `str` inputs and
+returns Jet's `Outcome`. Run `--check` to check all generated assets for exact
+byte identity; regenerating Unicode tables must not migrate either ABI.
+
 `String.equal` borrows both operands and uses the same native UTF-8 byte
 comparison as `==`; it does not normalize or clone either string.
 
