@@ -12,12 +12,16 @@ export const workflowRank = (card) => {
   return 5;
 };
 
+// Apply at rendering boundaries too, including an already-open card refreshed
+// after a ballot changes from ready to draft.
+export const ownerDecisions = (decisions = []) => decisions.filter(d => !d.draft);
+
 // Owner Now/beacon review queue: ONLY needsAcceptance cards the owner can act
 // on. Bare phase=verify is a legacy agent state, not an owner duty, and so is
 // a visual card still waiting on agent criteria or on its screen capture:
 // every card in the owner's lane offers both Accept and Bounce.
 export const openAcceptanceBallot = (card) =>
-  (card.decisions || []).find(d => d.id === `D-ACCEPT-${card.num}` && d.status !== 'ratified') || null;
+  ownerDecisions(card.decisions).find(d => d.id === `D-ACCEPT-${card.num}` && d.status !== 'ratified') || null;
 
 export const evidenceMedia = (card, ballot) => ballot ? (ballot.visualMedia || []) : (card.visualMedia || []);
 

@@ -1407,7 +1407,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 3ddc4c768e3acaef570eed1170c0d78d9a06e96e948eeb9dae759b6d94c92e87
+// Source SHA-256: fd34a426a7661846ac8deb2d8b386bf740f4b1c3a3c63e64d17a5b4e7cbbd944
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.data", "left_join"),
@@ -2179,7 +2179,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.crypto.random", "bytes", "jet_std_crypto_random_bytes_controlled", true, &[false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.math.random", "rng", "jet_std_rng_new", true, &[false]),
     CoreCallRecord::new( "core.math.random", "split", "jet_std_random_split", true, &[false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.time", "now", "jet_std_time_now", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.time", "now", "jet_time_now_utc", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.time", "sleep", "jet_std_time_sleep_duration", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.time", "sleep_until", "jet_time_sleep_until", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.rt", "callback", "jet_rt_callback", true, &[false, false, false], ),

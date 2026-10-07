@@ -4,7 +4,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(non_snake_case, clippy::all)]
 mod jet_c_abi_routes {
-    use super::jet_c_abi::{guard, handle, native, view, JetCString};
+    use super::jet_c_abi::{borrowed, guard, handle, native, view, JetCString};
 
     #[cold]
     fn range_stop() -> ! {
@@ -11263,1496 +11263,1496 @@ mod jet_c_abi_routes {
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_Attachment_filename(value: *mut crate::jet_email::Attachment) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).filename) }
+    pub extern "C" fn jet_rt_handle_field_Attachment_filename(value: *mut crate::jet_email::Attachment, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).filename; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_Attachment_mime(value: *mut crate::jet_email::Attachment) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).mime) }
+    pub extern "C" fn jet_rt_handle_field_Attachment_mime(value: *mut crate::jet_email::Attachment, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).mime; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_CBORWriter_output(value: *mut crate::jet_std::CBORWriter) -> *const crate::JetFileWriter {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).output) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_CBORWriter_limits(value: *mut crate::jet_std::CBORWriter) -> *const crate::jet_std::EncodingLimits {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).limits) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_CBORWriter_root_written(value: *mut crate::jet_std::CBORWriter) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).root_written) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_CBORWriter_finished(value: *mut crate::jet_std::CBORWriter) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).finished) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_CSVReader_input(value: *mut crate::jet_std::CSVReader) -> *const crate::JetFileReader {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).input) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_CSVReader_limits(value: *mut crate::jet_std::CSVReader) -> *const crate::jet_std::EncodingLimits {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).limits) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_CSVReader_header(value: *mut crate::jet_std::CSVReader) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).header) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_CSVReader_skip_blank(value: *mut crate::jet_std::CSVReader) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).skip_blank) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_CSVReader_eof(value: *mut crate::jet_std::CSVReader) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).eof) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_CSVWriter_output(value: *mut crate::jet_std::CSVWriter) -> *const crate::JetFileWriter {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).output) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_CSVWriter_limits(value: *mut crate::jet_std::CSVWriter) -> *const crate::jet_std::EncodingLimits {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).limits) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_CSVWriter_finished(value: *mut crate::jet_std::CSVWriter) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).finished) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_CSVWriter_pending_crlf(value: *mut crate::jet_std::CSVWriter) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).pending_crlf) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_DataLineOptions_title(value: *mut crate::jet_std::DataLineOptions) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).title) }
+    pub extern "C" fn jet_rt_handle_field_DataLineOptions_title(value: *mut crate::jet_std::DataLineOptions, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).title; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_DataLineOptions_x_label(value: *mut crate::jet_std::DataLineOptions) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).x_label) }
+    pub extern "C" fn jet_rt_handle_field_DataLineOptions_x_label(value: *mut crate::jet_std::DataLineOptions, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).x_label; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_DataLineOptions_y_label(value: *mut crate::jet_std::DataLineOptions) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).y_label) }
+    pub extern "C" fn jet_rt_handle_field_DataLineOptions_y_label(value: *mut crate::jet_std::DataLineOptions, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).y_label; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_DataLineOptions_markers(value: *mut crate::jet_std::DataLineOptions) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).markers) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_DataLineOptions_style(value: *mut crate::jet_std::DataLineOptions) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).style) }
+    pub extern "C" fn jet_rt_handle_field_DataLineOptions_style(value: *mut crate::jet_std::DataLineOptions, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).style; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_DataLineOptions_color(value: *mut crate::jet_std::DataLineOptions) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).color) }
+    pub extern "C" fn jet_rt_handle_field_DataLineOptions_color(value: *mut crate::jet_std::DataLineOptions, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).color; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_DataLineOptions_legend(value: *mut crate::jet_std::DataLineOptions) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).legend) }
+    pub extern "C" fn jet_rt_handle_field_DataLineOptions_legend(value: *mut crate::jet_std::DataLineOptions, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).legend; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_DataProvenance_source(value: *mut crate::jet_std::DataProvenance) -> *const crate::jet_std::DataSourceIdentity {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).source) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_DataProvenance_authority(value: *mut crate::jet_std::DataProvenance) -> *const crate::jet_std::DataAuthority {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).authority) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_DataSourceIdentity_locator(value: *mut crate::jet_std::DataSourceIdentity) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).locator) }
+    pub extern "C" fn jet_rt_handle_field_DataSourceIdentity_locator(value: *mut crate::jet_std::DataSourceIdentity, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).locator; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_DataSourceIdentity_member(value: *mut crate::jet_std::DataSourceIdentity) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).member) }
+    pub extern "C" fn jet_rt_handle_field_DataSourceIdentity_member(value: *mut crate::jet_std::DataSourceIdentity, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).member; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_DataStream_limits(value: *mut crate::jet_std::DataStream) -> *const crate::jet_std::DataLimits {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).limits) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_DataStream_eof(value: *mut crate::jet_std::DataStream) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).eof) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_DataStream_cancelled(value: *mut crate::jet_std::DataStream) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).cancelled) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_Envelope_from(value: *mut crate::jet_email::Envelope) -> *const crate::jet_email::Address {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).from) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetAuthApp_users_table(value: *mut crate::JetAuthApp) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).users_table) }
+    pub extern "C" fn jet_rt_handle_field_JetAuthApp_users_table(value: *mut crate::JetAuthApp, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).users_table; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetCursor_buf(value: *mut crate::JetCursor) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).buf) }
+    pub extern "C" fn jet_rt_handle_field_JetCursor_buf(value: *mut crate::JetCursor, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).buf; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetDataPlotInspection_plan(value: *mut crate::JetDataPlotInspection) -> *const crate::JetDataPlotPlan {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).plan) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetDataPlotLayer_name(value: *mut crate::JetDataPlotLayer) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).name) }
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotLayer_name(value: *mut crate::JetDataPlotLayer, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).name; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetDataPlotLayer_opacity(value: *mut crate::JetDataPlotLayer) -> *const f64 {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).opacity) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetDataPlotPlan_source(value: *mut crate::JetDataPlotPlan) -> *const crate::JetDataPlotSourceFacts {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).source) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetDataPlotPlan_schema(value: *mut crate::JetDataPlotPlan) -> *const crate::JetDataPlotSchema {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).schema) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetDataPlotPlan_limits(value: *mut crate::JetDataPlotPlan) -> *const crate::jet_std::DataLimits {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).limits) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetDataPlotPlan_accessibility(value: *mut crate::JetDataPlotPlan) -> *const crate::JetDataPlotAccessibility {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).accessibility) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetDataPlotPlan_layout(value: *mut crate::JetDataPlotPlan) -> *const crate::JetDataPlotLayout {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).layout) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetDataPlotProjection_plan(value: *mut crate::JetDataPlotProjection) -> *const crate::JetDataPlotPlan {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).plan) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetDataPlotProjection_source(value: *mut crate::JetDataPlotProjection) -> *const crate::JetDataPlotSourceFacts {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).source) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetDataPlotRender_body(value: *mut crate::JetDataPlotRender) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).body) }
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotRender_body(value: *mut crate::JetDataPlotRender, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).body; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetDataPlotRender_source(value: *mut crate::JetDataPlotRender) -> *const crate::JetDataPlotSourceFacts {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).source) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetDataPlotScale_domain(value: *mut crate::JetDataPlotScale) -> *const crate::JetDataPlotDomain {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).domain) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetDataPlotScale_clamp(value: *mut crate::JetDataPlotScale) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).clamp) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetDataPlotScale_reverse(value: *mut crate::JetDataPlotScale) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).reverse) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetDataPlotSchema_identity(value: *mut crate::JetDataPlotSchema) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).identity) }
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotSchema_identity(value: *mut crate::JetDataPlotSchema, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).identity; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetDataPlotSchema_row_type(value: *mut crate::JetDataPlotSchema) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).row_type) }
+    pub extern "C" fn jet_rt_handle_field_JetDataPlotSchema_row_type(value: *mut crate::JetDataPlotSchema, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).row_type; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetDateTime_leap_second(value: *mut crate::JetDateTime) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).leap_second) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetDbScope_policy(value: *mut crate::jet_sync::JetDbScope) -> *const crate::jet_sync::JetRowPolicy {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).policy) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetDbScope_user(value: *mut crate::jet_sync::JetDbScope) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).user) }
+    pub extern "C" fn jet_rt_handle_field_JetDbScope_user(value: *mut crate::jet_sync::JetDbScope, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).user; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetErr_message(value: *mut crate::JetErr) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).message) }
+    pub extern "C" fn jet_rt_handle_field_JetErr_message(value: *mut crate::JetErr, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).message; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetFileLockOwner_path(value: *mut crate::JetFileLockOwner) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).path) }
+    pub extern "C" fn jet_rt_handle_field_JetFileLockOwner_path(value: *mut crate::JetFileLockOwner, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).path; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetFileReader_path(value: *mut crate::JetFileReader) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).path) }
+    pub extern "C" fn jet_rt_handle_field_JetFileReader_path(value: *mut crate::JetFileReader, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).path; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetFileWriter_path(value: *mut crate::JetFileWriter) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).path) }
+    pub extern "C" fn jet_rt_handle_field_JetFileWriter_path(value: *mut crate::JetFileWriter, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).path; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetGlyphRun_advance_x(value: *mut crate::JetGlyphRun) -> *const f64 {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).advance_x) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetGlyphRun_advance_y(value: *mut crate::JetGlyphRun) -> *const f64 {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).advance_y) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetGlyphRun_deterministic(value: *mut crate::JetGlyphRun) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).deterministic) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetGlyphRun_approximate(value: *mut crate::JetGlyphRun) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).approximate) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetHTTPBodyChunks_done(value: *mut crate::JetHTTPBodyChunks) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).done) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetHTTPCorsPolicy_origins(value: *mut crate::JetHTTPCorsPolicy) -> *const crate::JetHTTPCorsOrigins {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).origins) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetHTTPCorsPolicy_allow_methods(value: *mut crate::JetHTTPCorsPolicy) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).allow_methods) }
+    pub extern "C" fn jet_rt_handle_field_JetHTTPCorsPolicy_allow_methods(value: *mut crate::JetHTTPCorsPolicy, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).allow_methods; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetHTTPCorsPolicy_allow_headers(value: *mut crate::JetHTTPCorsPolicy) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).allow_headers) }
+    pub extern "C" fn jet_rt_handle_field_JetHTTPCorsPolicy_allow_headers(value: *mut crate::JetHTTPCorsPolicy, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).allow_headers; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetHTTPCorsPolicy_credentials(value: *mut crate::JetHTTPCorsPolicy) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).credentials) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetHTTPRequest_method(value: *mut crate::JetHTTPRequest) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).method) }
+    pub extern "C" fn jet_rt_handle_field_JetHTTPRequest_method(value: *mut crate::JetHTTPRequest, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).method; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetHTTPRequest_url(value: *mut crate::JetHTTPRequest) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).url) }
+    pub extern "C" fn jet_rt_handle_field_JetHTTPRequest_url(value: *mut crate::JetHTTPRequest, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).url; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetHTTPRequest_path(value: *mut crate::JetHTTPRequest) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).path) }
+    pub extern "C" fn jet_rt_handle_field_JetHTTPRequest_path(value: *mut crate::JetHTTPRequest, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).path; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetHTTPRequest_version(value: *mut crate::JetHTTPRequest) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).version) }
+    pub extern "C" fn jet_rt_handle_field_JetHTTPRequest_version(value: *mut crate::JetHTTPRequest, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).version; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetHTTPRequest_headers(value: *mut crate::JetHTTPRequest) -> *const crate::JetHTTPHeaders {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).headers) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetHTTPRequest_body(value: *mut crate::JetHTTPRequest) -> *const crate::JetHTTPBody {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).body) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetHTTPRequest_body_set(value: *mut crate::JetHTTPRequest) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).body_set) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetHTTPResponse_version(value: *mut crate::JetHTTPResponse) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).version) }
+    pub extern "C" fn jet_rt_handle_field_JetHTTPResponse_version(value: *mut crate::JetHTTPResponse, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).version; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetHTTPResponse_headers(value: *mut crate::JetHTTPResponse) -> *const crate::JetHTTPHeaders {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).headers) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetHTTPResponse_body(value: *mut crate::JetHTTPResponse) -> *const crate::JetHTTPBody {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).body) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetHTTPResponse_trailers(value: *mut crate::JetHTTPResponse) -> *const crate::JetHTTPHeaders {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).trailers) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetHTTPResponse_suppress_body(value: *mut crate::JetHTTPResponse) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).suppress_body) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetHTTPResponse_protocol(value: *mut crate::JetHTTPResponse) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).protocol) }
+    pub extern "C" fn jet_rt_handle_field_JetHTTPResponse_protocol(value: *mut crate::JetHTTPResponse, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).protocol; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetHTTPResponse_remote_address(value: *mut crate::JetHTTPResponse) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).remote_address) }
+    pub extern "C" fn jet_rt_handle_field_JetHTTPResponse_remote_address(value: *mut crate::JetHTTPResponse, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).remote_address; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetHTTPResponse_reused_connection(value: *mut crate::JetHTTPResponse) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).reused_connection) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetJobPayload_type_id(value: *mut crate::JetJobPayload) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).type_id) }
+    pub extern "C" fn jet_rt_handle_field_JetJobPayload_type_id(value: *mut crate::JetJobPayload, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).type_id; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetJobPayload_publish(value: *mut crate::JetJobPayload) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).publish) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetJobQueueClaim_receipt(value: *mut crate::JetJobQueueClaim) -> *const crate::JetJobQueueReceipt {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).receipt) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetJobQueueClaim_payload(value: *mut crate::JetJobQueueClaim) -> *const crate::JetJobPayload {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).payload) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetJobQueueClaim_worker(value: *mut crate::JetJobQueueClaim) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).worker) }
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueClaim_worker(value: *mut crate::JetJobQueueClaim, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).worker; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetJobQueueClaim_lease_token(value: *mut crate::JetJobQueueClaim) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).lease_token) }
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueClaim_lease_token(value: *mut crate::JetJobQueueClaim, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).lease_token; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetJobQueueReceipt_id(value: *mut crate::JetJobQueueReceipt) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).id) }
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueReceipt_id(value: *mut crate::JetJobQueueReceipt, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).id; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetJobQueueReceipt_authority(value: *mut crate::JetJobQueueReceipt) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).authority) }
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueReceipt_authority(value: *mut crate::JetJobQueueReceipt, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).authority; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetJobQueueReceipt_queue(value: *mut crate::JetJobQueueReceipt) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).queue) }
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueReceipt_queue(value: *mut crate::JetJobQueueReceipt, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).queue; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetJobQueueReceipt_job_type(value: *mut crate::JetJobQueueReceipt) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).job_type) }
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueReceipt_job_type(value: *mut crate::JetJobQueueReceipt, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).job_type; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetJobQueueReceipt_duplicate(value: *mut crate::JetJobQueueReceipt) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).duplicate) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetJobQueueReceipt_signature(value: *mut crate::JetJobQueueReceipt) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).signature) }
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueReceipt_signature(value: *mut crate::JetJobQueueReceipt, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).signature; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetJobQueueRecord_receipt(value: *mut crate::JetJobQueueRecord) -> *const crate::JetJobQueueReceipt {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).receipt) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetJobQueueStatus_queue(value: *mut crate::JetJobQueueStatus) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).queue) }
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueStatus_queue(value: *mut crate::JetJobQueueStatus, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).queue; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetJobQueueStatus_authority(value: *mut crate::JetJobQueueStatus) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).authority) }
+    pub extern "C" fn jet_rt_handle_field_JetJobQueueStatus_authority(value: *mut crate::JetJobQueueStatus, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).authority; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetJobQueueStatus_paused(value: *mut crate::JetJobQueueStatus) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).paused) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetJobResult_type_id(value: *mut crate::JetJobResult) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).type_id) }
+    pub extern "C" fn jet_rt_handle_field_JetJobResult_type_id(value: *mut crate::JetJobResult, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).type_id; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetJobResult_publish(value: *mut crate::JetJobResult) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).publish) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetLiveQuery_key(value: *mut crate::JetLiveQuery) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).key) }
+    pub extern "C" fn jet_rt_handle_field_JetLiveQuery_key(value: *mut crate::JetLiveQuery, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).key; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetLiveQuery_value(value: *mut crate::JetLiveQuery) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).value) }
+    pub extern "C" fn jet_rt_handle_field_JetLiveQuery_value(value: *mut crate::JetLiveQuery, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).value; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetMIME_top(value: *mut crate::jet_std::JetMIME) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).top) }
+    pub extern "C" fn jet_rt_handle_field_JetMIME_top(value: *mut crate::jet_std::JetMIME, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).top; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetMIME_sub(value: *mut crate::jet_std::JetMIME) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).sub) }
+    pub extern "C" fn jet_rt_handle_field_JetMIME_sub(value: *mut crate::jet_std::JetMIME, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).sub; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetReflectField_name(value: *mut crate::JetReflectField) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).name) }
+    pub extern "C" fn jet_rt_handle_field_JetReflectField_name(value: *mut crate::JetReflectField, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).name; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetReflectField_value(value: *mut crate::JetReflectField) -> *const crate::JetReflectValue {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).value) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetReflectValue_type_name(value: *mut crate::JetReflectValue) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).type_name) }
+    pub extern "C" fn jet_rt_handle_field_JetReflectValue_type_name(value: *mut crate::JetReflectValue, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).type_name; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetReflectValue_path(value: *mut crate::JetReflectValue) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).path) }
+    pub extern "C" fn jet_rt_handle_field_JetReflectValue_path(value: *mut crate::JetReflectValue, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).path; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetReflectValue_display(value: *mut crate::JetReflectValue) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).display) }
+    pub extern "C" fn jet_rt_handle_field_JetReflectValue_display(value: *mut crate::JetReflectValue, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).display; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetRowPolicy_table(value: *mut crate::jet_sync::JetRowPolicy) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).table) }
+    pub extern "C" fn jet_rt_handle_field_JetRowPolicy_table(value: *mut crate::jet_sync::JetRowPolicy, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).table; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetRowPolicy_expression(value: *mut crate::jet_sync::JetRowPolicy) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).expression) }
+    pub extern "C" fn jet_rt_handle_field_JetRowPolicy_expression(value: *mut crate::jet_sync::JetRowPolicy, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).expression; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetServiceEndpoint_tree(value: *mut crate::JetServiceEndpoint) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).tree) }
+    pub extern "C" fn jet_rt_handle_field_JetServiceEndpoint_tree(value: *mut crate::JetServiceEndpoint, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).tree; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetServiceEndpoint_worker(value: *mut crate::JetServiceEndpoint) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).worker) }
+    pub extern "C" fn jet_rt_handle_field_JetServiceEndpoint_worker(value: *mut crate::JetServiceEndpoint, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).worker; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetServiceEndpoint_authority(value: *mut crate::JetServiceEndpoint) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).authority) }
+    pub extern "C" fn jet_rt_handle_field_JetServiceEndpoint_authority(value: *mut crate::JetServiceEndpoint, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).authority; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetServiceTree_name(value: *mut crate::JetServiceTree) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).name) }
+    pub extern "C" fn jet_rt_handle_field_JetServiceTree_name(value: *mut crate::JetServiceTree, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).name; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetServiceTree_authority(value: *mut crate::JetServiceTree) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).authority) }
+    pub extern "C" fn jet_rt_handle_field_JetServiceTree_authority(value: *mut crate::JetServiceTree, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).authority; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetServiceTree_delivery(value: *mut crate::JetServiceTree) -> *const crate::JetServiceDelivery {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).delivery) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetServiceTree_restart(value: *mut crate::JetServiceTree) -> *const crate::JetServiceRestart {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).restart) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetServiceTree_started(value: *mut crate::JetServiceTree) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).started) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetServiceUpgradeReceipt_migration(value: *mut crate::JetServiceUpgradeReceipt) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).migration) }
+    pub extern "C" fn jet_rt_handle_field_JetServiceUpgradeReceipt_migration(value: *mut crate::JetServiceUpgradeReceipt, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).migration; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetServiceUpgradeReceipt_rollback_store(value: *mut crate::JetServiceUpgradeReceipt) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).rollback_store) }
+    pub extern "C" fn jet_rt_handle_field_JetServiceUpgradeReceipt_rollback_store(value: *mut crate::JetServiceUpgradeReceipt, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).rollback_store; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetServiceUpgradeReceipt_rollback_available(value: *mut crate::JetServiceUpgradeReceipt) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).rollback_available) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetTCPStream_closed(value: *mut crate::JetTCPStream) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).closed) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetTCPStream_read_shutdown(value: *mut crate::JetTCPStream) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).read_shutdown) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetTCPStream_write_shutdown(value: *mut crate::JetTCPStream) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).write_shutdown) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetTempDirOwner_path(value: *mut crate::JetTempDirOwner) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).path) }
+    pub extern "C" fn jet_rt_handle_field_JetTempDirOwner_path(value: *mut crate::JetTempDirOwner, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).path; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetTempFileOwner_path(value: *mut crate::JetTempFileOwner) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).path) }
+    pub extern "C" fn jet_rt_handle_field_JetTempFileOwner_path(value: *mut crate::JetTempFileOwner, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).path; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetTestComparison_status(value: *mut crate::jet_std::JetTestComparison) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).status) }
+    pub extern "C" fn jet_rt_handle_field_JetTestComparison_status(value: *mut crate::jet_std::JetTestComparison, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).status; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetTestComparison_relation(value: *mut crate::jet_std::JetTestComparison) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).relation) }
+    pub extern "C" fn jet_rt_handle_field_JetTestComparison_relation(value: *mut crate::jet_std::JetTestComparison, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).relation; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetTestComparison_source(value: *mut crate::jet_std::JetTestComparison) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).source) }
+    pub extern "C" fn jet_rt_handle_field_JetTestComparison_source(value: *mut crate::jet_std::JetTestComparison, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).source; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetTestComparison_tool(value: *mut crate::jet_std::JetTestComparison) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).tool) }
+    pub extern "C" fn jet_rt_handle_field_JetTestComparison_tool(value: *mut crate::jet_std::JetTestComparison, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).tool; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetTestComparison_target(value: *mut crate::jet_std::JetTestComparison) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).target) }
+    pub extern "C" fn jet_rt_handle_field_JetTestComparison_target(value: *mut crate::jet_std::JetTestComparison, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).target; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetTestComparison_reason(value: *mut crate::jet_std::JetTestComparison) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).reason) }
+    pub extern "C" fn jet_rt_handle_field_JetTestComparison_reason(value: *mut crate::jet_std::JetTestComparison, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).reason; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetTestComparison_universal_proof(value: *mut crate::jet_std::JetTestComparison) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).universal_proof) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetTLSCertificate_subject(value: *mut crate::JetTLSCertificate) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).subject) }
+    pub extern "C" fn jet_rt_handle_field_JetTLSCertificate_subject(value: *mut crate::JetTLSCertificate, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).subject; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetTLSCertificate_issuer(value: *mut crate::JetTLSCertificate) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).issuer) }
+    pub extern "C" fn jet_rt_handle_field_JetTLSCertificate_issuer(value: *mut crate::JetTLSCertificate, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).issuer; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetTLSClientConfig_trust(value: *mut crate::JetTLSClientConfig) -> *const crate::JetTLSTrust {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).trust) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetTLSPeerIdentity_verified_server_name(value: *mut crate::JetTLSPeerIdentity) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).verified_server_name) }
+    pub extern "C" fn jet_rt_handle_field_JetTLSPeerIdentity_verified_server_name(value: *mut crate::JetTLSPeerIdentity, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).verified_server_name; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetTLSPeerIdentity_leaf(value: *mut crate::JetTLSPeerIdentity) -> *const crate::JetTLSCertificate {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).leaf) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetTLSPeerIdentity_cipher_suite(value: *mut crate::JetTLSPeerIdentity) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).cipher_suite) }
+    pub extern "C" fn jet_rt_handle_field_JetTLSPeerIdentity_cipher_suite(value: *mut crate::JetTLSPeerIdentity, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).cipher_suite; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetTransaction_committed(value: *mut crate::JetTransaction) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).committed) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetTuiCapabilities_color(value: *mut crate::JetTuiCapabilities) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).color) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetTuiCapabilities_unicode(value: *mut crate::JetTuiCapabilities) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).unicode) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetTuiCapabilities_mouse(value: *mut crate::JetTuiCapabilities) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).mouse) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetTuiCapabilities_resize(value: *mut crate::JetTuiCapabilities) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).resize) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetTuiCapabilities_clipboard(value: *mut crate::JetTuiCapabilities) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).clipboard) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetTuiStyle_bold(value: *mut crate::JetTuiStyle) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).bold) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetTuiStyle_dim(value: *mut crate::JetTuiStyle) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).dim) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetTuiStyle_underline(value: *mut crate::JetTuiStyle) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).underline) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetUDPPacket_addr(value: *mut crate::JetUDPPacket) -> *const crate::JetSocketAddr {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).addr) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetUDPPacket_truncated(value: *mut crate::JetUDPPacket) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).truncated) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetUiFileDialogRequest_title(value: *mut crate::JetUiFileDialogRequest) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).title) }
+    pub extern "C" fn jet_rt_handle_field_JetUiFileDialogRequest_title(value: *mut crate::JetUiFileDialogRequest, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).title; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetUiFileDialogRequest_grant(value: *mut crate::JetUiFileDialogRequest) -> *const crate::JetUiFsGrant {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).grant) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetUiFileDialogRequest_allow_multiple(value: *mut crate::JetUiFileDialogRequest) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).allow_multiple) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetUiFileFilter_label(value: *mut crate::JetUiFileFilter) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).label) }
+    pub extern "C" fn jet_rt_handle_field_JetUiFileFilter_label(value: *mut crate::JetUiFileFilter, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).label; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetUiFsGrant_root(value: *mut crate::JetUiFsGrant) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).root) }
+    pub extern "C" fn jet_rt_handle_field_JetUiFsGrant_root(value: *mut crate::JetUiFsGrant, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).root; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetUiFsGrant_rights(value: *mut crate::JetUiFsGrant) -> *const crate::JetUiFsRights {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).rights) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetUiNode_label(value: *mut crate::JetUiNode) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).label) }
+    pub extern "C" fn jet_rt_handle_field_JetUiNode_label(value: *mut crate::JetUiNode, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).label; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetUiNode_width(value: *mut crate::JetUiNode) -> *const f64 {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).width) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetUiNode_height(value: *mut crate::JetUiNode) -> *const f64 {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).height) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetUiShortcut_key(value: *mut crate::JetUiShortcut) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).key) }
+    pub extern "C" fn jet_rt_handle_field_JetUiShortcut_key(value: *mut crate::JetUiShortcut, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).key; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebFormDecodedInput_type_name(value: *mut crate::JetWebFormDecodedInput) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).type_name) }
+    pub extern "C" fn jet_rt_handle_field_JetWebFormDecodedInput_type_name(value: *mut crate::JetWebFormDecodedInput, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).type_name; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebFormFieldSpec_name(value: *mut crate::JetWebFormFieldSpec) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).name) }
+    pub extern "C" fn jet_rt_handle_field_JetWebFormFieldSpec_name(value: *mut crate::JetWebFormFieldSpec, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).name; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetWebFormFieldSpec_required(value: *mut crate::JetWebFormFieldSpec) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).required) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebFormFieldSpec_label(value: *mut crate::JetWebFormFieldSpec) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).label) }
+    pub extern "C" fn jet_rt_handle_field_JetWebFormFieldSpec_label(value: *mut crate::JetWebFormFieldSpec, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).label; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebFormFieldSpec_wire_name(value: *mut crate::JetWebFormFieldSpec) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).wire_name) }
+    pub extern "C" fn jet_rt_handle_field_JetWebFormFieldSpec_wire_name(value: *mut crate::JetWebFormFieldSpec, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).wire_name; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebFormFieldState_name(value: *mut crate::JetWebFormFieldState) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).name) }
+    pub extern "C" fn jet_rt_handle_field_JetWebFormFieldState_name(value: *mut crate::JetWebFormFieldState, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).name; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetWebFormFieldState_required(value: *mut crate::JetWebFormFieldState) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).required) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebFormFieldState_value(value: *mut crate::JetWebFormFieldState) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).value) }
+    pub extern "C" fn jet_rt_handle_field_JetWebFormFieldState_value(value: *mut crate::JetWebFormFieldState, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).value; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetWebFormFieldState_touched(value: *mut crate::JetWebFormFieldState) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).touched) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetWebFormFieldState_validating(value: *mut crate::JetWebFormFieldState) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).validating) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebFormInput_type_name(value: *mut crate::JetWebFormInput) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).type_name) }
+    pub extern "C" fn jet_rt_handle_field_JetWebFormInput_type_name(value: *mut crate::JetWebFormInput, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).type_name; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebFormLifecycle_result(value: *mut crate::JetWebFormLifecycle) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).result) }
+    pub extern "C" fn jet_rt_handle_field_JetWebFormLifecycle_result(value: *mut crate::JetWebFormLifecycle, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).result; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebFormLifecycle_error(value: *mut crate::JetWebFormLifecycle) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).error) }
+    pub extern "C" fn jet_rt_handle_field_JetWebFormLifecycle_error(value: *mut crate::JetWebFormLifecycle, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).error; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebFormState_action(value: *mut crate::JetWebFormState) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).action) }
+    pub extern "C" fn jet_rt_handle_field_JetWebFormState_action(value: *mut crate::JetWebFormState, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).action; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebFormState_method(value: *mut crate::JetWebFormState) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).method) }
+    pub extern "C" fn jet_rt_handle_field_JetWebFormState_method(value: *mut crate::JetWebFormState, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).method; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebFormState_result(value: *mut crate::JetWebFormState) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).result) }
+    pub extern "C" fn jet_rt_handle_field_JetWebFormState_result(value: *mut crate::JetWebFormState, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).result; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebFormState_error(value: *mut crate::JetWebFormState) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).error) }
+    pub extern "C" fn jet_rt_handle_field_JetWebFormState_error(value: *mut crate::JetWebFormState, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).error; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetWebFormTyped_form(value: *mut crate::JetWebFormTyped) -> *const crate::JetWebForm {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).form) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetWebFormTypedSubmission_form(value: *mut crate::JetWebFormTypedSubmission) -> *const crate::JetWebFormTyped {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).form) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetWebFormTypedValidation_form(value: *mut crate::JetWebFormTypedValidation) -> *const crate::JetWebFormTyped {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).form) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetWebMutationState_optimistic(value: *mut crate::JetWebMutationState) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).optimistic) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebMutationState_value(value: *mut crate::JetWebMutationState) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).value) }
+    pub extern "C" fn jet_rt_handle_field_JetWebMutationState_value(value: *mut crate::JetWebMutationState, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).value; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebMutationState_result(value: *mut crate::JetWebMutationState) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).result) }
+    pub extern "C" fn jet_rt_handle_field_JetWebMutationState_result(value: *mut crate::JetWebMutationState, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).result; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebMutationState_error(value: *mut crate::JetWebMutationState) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).error) }
+    pub extern "C" fn jet_rt_handle_field_JetWebMutationState_error(value: *mut crate::JetWebMutationState, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).error; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebMutationState_context(value: *mut crate::JetWebMutationState) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).context) }
+    pub extern "C" fn jet_rt_handle_field_JetWebMutationState_context(value: *mut crate::JetWebMutationState, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).context; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetWebMutationState_rollback(value: *mut crate::JetWebMutationState) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).rollback) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetWebMutationState_paused(value: *mut crate::JetWebMutationState) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).paused) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebQuery_key(value: *mut crate::JetWebQuery) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).key) }
+    pub extern "C" fn jet_rt_handle_field_JetWebQuery_key(value: *mut crate::JetWebQuery, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).key; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebQuery_footprint(value: *mut crate::JetWebQuery) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).footprint) }
+    pub extern "C" fn jet_rt_handle_field_JetWebQuery_footprint(value: *mut crate::JetWebQuery, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).footprint; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebQueryState_value(value: *mut crate::JetWebQueryState) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).value) }
+    pub extern "C" fn jet_rt_handle_field_JetWebQueryState_value(value: *mut crate::JetWebQueryState, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).value; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebQueryState_error(value: *mut crate::JetWebQueryState) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).error) }
+    pub extern "C" fn jet_rt_handle_field_JetWebQueryState_error(value: *mut crate::JetWebQueryState, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).error; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetWebQueryState_offline(value: *mut crate::JetWebQueryState) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).offline) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetWebStoreEvent_action(value: *mut crate::JetWebStoreEvent) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).action) }
+    pub extern "C" fn jet_rt_handle_field_JetWebStoreEvent_action(value: *mut crate::JetWebStoreEvent, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).action; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_JetZone_name(value: *mut crate::JetZone) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).name) }
+    pub extern "C" fn jet_rt_handle_field_JetZone_name(value: *mut crate::JetZone, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).name; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetZonedDateTime_instant(value: *mut crate::JetZonedDateTime) -> *const crate::JetDateTime {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).instant) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JetZonedDateTime_zone(value: *mut crate::JetZonedDateTime) -> *const crate::JetZone {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).zone) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JSONLReader_json(value: *mut crate::jet_std::JSONLReader) -> *const crate::jet_std::JSONReader {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).json) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JSONLWriter_json(value: *mut crate::jet_std::JSONLWriter) -> *const crate::jet_std::JSONWriter {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).json) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JSONLWriter_finished(value: *mut crate::jet_std::JSONLWriter) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).finished) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JSONLWriter_pending_lf(value: *mut crate::jet_std::JSONLWriter) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).pending_lf) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JSONReader_input(value: *mut crate::jet_std::JSONReader) -> *const crate::JetFileReader {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).input) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JSONReader_limits(value: *mut crate::jet_std::JSONReader) -> *const crate::jet_std::EncodingLimits {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).limits) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JSONReader_root_started(value: *mut crate::jet_std::JSONReader) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).root_started) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JSONReader_root_done(value: *mut crate::jet_std::JSONReader) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).root_done) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JSONReader_eof(value: *mut crate::jet_std::JSONReader) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).eof) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JSONReader_record_mode(value: *mut crate::jet_std::JSONReader) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).record_mode) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JSONReader_typed_numbers(value: *mut crate::jet_std::JSONReader) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).typed_numbers) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JSONWriter_output(value: *mut crate::jet_std::JSONWriter) -> *const crate::JetFileWriter {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).output) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JSONWriter_limits(value: *mut crate::jet_std::JSONWriter) -> *const crate::jet_std::EncodingLimits {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).limits) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JSONWriter_root_written(value: *mut crate::jet_std::JSONWriter) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).root_written) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JSONWriter_finished(value: *mut crate::jet_std::JSONWriter) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).finished) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_JSONWriter_canonical(value: *mut crate::jet_std::JSONWriter) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).canonical) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_Message_from(value: *mut crate::jet_email::Message) -> *const crate::jet_email::Address {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).from) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_Message_subject(value: *mut crate::jet_email::Message) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).subject) }
+    pub extern "C" fn jet_rt_handle_field_Message_subject(value: *mut crate::jet_email::Message, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).subject; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_Message_text(value: *mut crate::jet_email::Message) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).text) }
+    pub extern "C" fn jet_rt_handle_field_Message_text(value: *mut crate::jet_email::Message, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).text; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_Message_html(value: *mut crate::jet_email::Message) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).html) }
+    pub extern "C" fn jet_rt_handle_field_Message_html(value: *mut crate::jet_email::Message, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).html; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_Message_envelope(value: *mut crate::jet_email::Message) -> *const crate::jet_email::Envelope {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).envelope) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_ProcessChild_process_group(value: *mut crate::jet_std::ProcessChild) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).process_group) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_ProcessChild_detached(value: *mut crate::jet_std::ProcessChild) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).detached) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_ProcessPlan_executable_identity(value: *mut crate::jet_std::ProcessPlan) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).executable_identity) }
+    pub extern "C" fn jet_rt_handle_field_ProcessPlan_executable_identity(value: *mut crate::jet_std::ProcessPlan, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).executable_identity; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_ProcessPlan_input_digest(value: *mut crate::jet_std::ProcessPlan) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).input_digest) }
+    pub extern "C" fn jet_rt_handle_field_ProcessPlan_input_digest(value: *mut crate::jet_std::ProcessPlan, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).input_digest; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_ProcessPlan_policy_digest(value: *mut crate::jet_std::ProcessPlan) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).policy_digest) }
+    pub extern "C" fn jet_rt_handle_field_ProcessPlan_policy_digest(value: *mut crate::jet_std::ProcessPlan, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).policy_digest; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_ProcessPlan_backend(value: *mut crate::jet_std::ProcessPlan) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).backend) }
+    pub extern "C" fn jet_rt_handle_field_ProcessPlan_backend(value: *mut crate::jet_std::ProcessPlan, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).backend; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_ProcessPlan_descendants(value: *mut crate::jet_std::ProcessPlan) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).descendants) }
+    pub extern "C" fn jet_rt_handle_field_ProcessPlan_descendants(value: *mut crate::jet_std::ProcessPlan, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).descendants; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_output(value: *mut crate::jet_std::ProcessReceipt) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).output) }
+    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_output(value: *mut crate::jet_std::ProcessReceipt, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).output; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_errors(value: *mut crate::jet_std::ProcessReceipt) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).errors) }
+    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_errors(value: *mut crate::jet_std::ProcessReceipt, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).errors; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_ProcessReceipt_success(value: *mut crate::jet_std::ProcessReceipt) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).success) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_ProcessReceipt_timed_out(value: *mut crate::jet_std::ProcessReceipt) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).timed_out) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_executable_identity(value: *mut crate::jet_std::ProcessReceipt) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).executable_identity) }
+    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_executable_identity(value: *mut crate::jet_std::ProcessReceipt, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).executable_identity; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_input_digest(value: *mut crate::jet_std::ProcessReceipt) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).input_digest) }
+    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_input_digest(value: *mut crate::jet_std::ProcessReceipt, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).input_digest; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_policy_digest(value: *mut crate::jet_std::ProcessReceipt) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).policy_digest) }
+    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_policy_digest(value: *mut crate::jet_std::ProcessReceipt, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).policy_digest; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_backend(value: *mut crate::jet_std::ProcessReceipt) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).backend) }
+    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_backend(value: *mut crate::jet_std::ProcessReceipt, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).backend; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_descendants(value: *mut crate::jet_std::ProcessReceipt) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).descendants) }
+    pub extern "C" fn jet_rt_handle_field_ProcessReceipt_descendants(value: *mut crate::jet_std::ProcessReceipt, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).descendants; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_ProcessReceipt_redacted(value: *mut crate::jet_std::ProcessReceipt) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).redacted) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_ProcessSpec_env_clear(value: *mut crate::jet_std::ProcessSpec) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).env_clear) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_ProcessSpec_detached(value: *mut crate::jet_std::ProcessSpec) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).detached) }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_RaylibTextureAtlas_path(value: *mut crate::RaylibTextureAtlas) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).path) }
+    pub extern "C" fn jet_rt_handle_field_RaylibTextureAtlas_path(value: *mut crate::RaylibTextureAtlas, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).path; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_RaylibTextureAtlas_name(value: *mut crate::RaylibTextureAtlas) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).name) }
+    pub extern "C" fn jet_rt_handle_field_RaylibTextureAtlas_name(value: *mut crate::RaylibTextureAtlas, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).name; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_SendReport_server(value: *mut crate::jet_email::SendReport) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).server) }
+    pub extern "C" fn jet_rt_handle_field_SendReport_server(value: *mut crate::jet_email::SendReport, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).server; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_SendReport_response(value: *mut crate::jet_email::SendReport) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).response) }
+    pub extern "C" fn jet_rt_handle_field_SendReport_response(value: *mut crate::jet_email::SendReport, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).response; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
-    pub extern "C" fn jet_rt_handle_field_SendReport_accepted_at(value: *mut crate::jet_email::SendReport) -> *const String {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
-        unsafe { std::ptr::addr_of!((*value).accepted_at) }
+    pub extern "C" fn jet_rt_handle_field_SendReport_accepted_at(value: *mut crate::jet_email::SendReport, out: *mut super::jet_c_abi::JetCText) {
+        // SAFETY: value lends an immutable field; out is a read/clone-only stack header, never freed/grown/taken.
+        unsafe { let text = &(*value).accepted_at; out.write(super::jet_c_abi::JetCText { ptr: text.as_ptr() as *mut u8, len: text.len(), cap: text.capacity() }); }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_XMLCanonical_comments(value: *mut crate::jet_std::XMLCanonical) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).comments) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_XMLParseOptions_entities(value: *mut crate::jet_std::XMLParseOptions) -> *const crate::jet_std::XMLEntityPolicy {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).entities) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_XMLParseOptions_limits(value: *mut crate::jet_std::XMLParseOptions) -> *const crate::jet_std::XMLLimits {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).limits) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_XMLReader_input(value: *mut crate::jet_std::XMLReader) -> *const crate::JetFileReader {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).input) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_XMLReader_limits(value: *mut crate::jet_std::XMLReader) -> *const crate::jet_std::EncodingLimits {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).limits) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_XMLReader_eof(value: *mut crate::jet_std::XMLReader) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).eof) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_XMLWriter_output(value: *mut crate::jet_std::XMLWriter) -> *const crate::JetFileWriter {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).output) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_XMLWriter_limits(value: *mut crate::jet_std::XMLWriter) -> *const crate::jet_std::EncodingLimits {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).limits) }
     }
 
     #[no_mangle]
     pub extern "C" fn jet_rt_handle_field_XMLWriter_finished(value: *mut crate::jet_std::XMLWriter) -> *const bool {
-        // SAFETY: `value` is a live handle the caller lends; the field outlives this read.
+        // SAFETY: value is a live handle the caller lends; the field outlives this read.
         unsafe { std::ptr::addr_of!((*value).finished) }
     }
 
@@ -12909,7 +12909,7 @@ mod jet_c_abi_routes {
     /// core.auth.session_validate
     #[no_mangle]
     pub extern "C" fn jet_auth_session_validate(a0: JetCString, a1: i64, ok: *mut *mut crate::JetAuthSession, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_auth_session_validate(unsafe { &*a0 }, a1) {
+        guard(|| match crate::jet_auth_session_validate(&borrowed(a0), a1) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -12984,7 +12984,7 @@ mod jet_c_abi_routes {
     /// core.web.browser.connect
     #[no_mangle]
     pub extern "C" fn jet_browser_connect(a0: JetCString, ok: *mut *mut crate::JetBrowser, err: *mut *mut crate::JetBrowserError) -> i64 {
-        guard(|| match crate::jet_browser_connect(unsafe { &*a0 }) {
+        guard(|| match crate::jet_browser_connect(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -12993,7 +12993,7 @@ mod jet_c_abi_routes {
     /// core.web.browser.connect_profile
     #[no_mangle]
     pub extern "C" fn jet_browser_connect_profile(a0: JetCString, a1: *mut crate::JetBrowserProfile, a2: *mut crate::JetBrowserTimeout, ok: *mut *mut crate::JetBrowser, err: *mut *mut crate::JetBrowserError) -> i64 {
-        guard(|| match crate::jet_browser_connect_profile(unsafe { &*a0 }, unsafe { &*a1 }, unsafe { &*a2 }.clone()) {
+        guard(|| match crate::jet_browser_connect_profile(&borrowed(a0), unsafe { &*a1 }, unsafe { &*a2 }.clone()) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -13002,7 +13002,7 @@ mod jet_c_abi_routes {
     /// core.web.browser.locked
     #[no_mangle]
     pub extern "C" fn jet_browser_locked(a0: JetCString, ok: *mut *mut crate::JetBrowserLocked, err: *mut *mut crate::JetBrowserError) -> i64 {
-        guard(|| match crate::jet_browser_locked(unsafe { &*a0 }) {
+        guard(|| match crate::jet_browser_locked(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -13011,7 +13011,7 @@ mod jet_c_abi_routes {
     /// core.web.browser.profile
     #[no_mangle]
     pub extern "C" fn jet_browser_profile(a0: JetCString, ok: *mut *mut crate::JetBrowserProfile, err: *mut *mut crate::JetBrowserError) -> i64 {
-        guard(|| match crate::jet_browser_profile(unsafe { &*a0 }) {
+        guard(|| match crate::jet_browser_profile(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -13147,13 +13147,13 @@ mod jet_c_abi_routes {
     /// core.collections.chain_contains
     #[no_mangle]
     pub extern "C" fn jet_coll_chain_contains(a0: *mut crate::JetChain, a1: JetCString) -> bool {
-        guard(|| crate::jet_coll_chain_contains(unsafe { &*a0 }, unsafe { &*a1 }))
+        guard(|| crate::jet_coll_chain_contains(unsafe { &*a0 }, &borrowed(a1)))
     }
 
     /// core.collections.chain_get
     #[no_mangle]
     pub extern "C" fn jet_coll_chain_get(a0: *mut crate::JetChain, a1: JetCString, some: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_coll_chain_get(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_coll_chain_get(unsafe { &*a0 }, &borrowed(a1)) {
             Some(value) => { unsafe { some.write(handle(value)) }; 1 }
             None => 0,
         })
@@ -13174,7 +13174,7 @@ mod jet_c_abi_routes {
     /// core.collections.add
     #[no_mangle]
     pub extern "C" fn jet_coll_counter_add(a0: *mut crate::JetCounter, a1: JetCString, a2: i64) -> *mut crate::JetCounter {
-        guard(|| Box::into_raw(Box::new(crate::jet_coll_counter_add(unsafe { &*a0 }, unsafe { &*a1 }, a2))))
+        guard(|| Box::into_raw(Box::new(crate::jet_coll_counter_add(unsafe { &*a0 }, &borrowed(a1), a2))))
     }
 
     /// core.collections.clear_counter
@@ -13186,7 +13186,7 @@ mod jet_c_abi_routes {
     /// core.collections.dec
     #[no_mangle]
     pub extern "C" fn jet_coll_counter_dec(a0: *mut crate::JetCounter, a1: JetCString) -> *mut crate::JetCounter {
-        guard(|| Box::into_raw(Box::new(crate::jet_coll_counter_dec(unsafe { &*a0 }, unsafe { &*a1 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_coll_counter_dec(unsafe { &*a0 }, &borrowed(a1)))))
     }
 
     /// core.collections.elements
@@ -13204,13 +13204,13 @@ mod jet_c_abi_routes {
     /// core.collections.get
     #[no_mangle]
     pub extern "C" fn jet_coll_counter_get(a0: *mut crate::JetCounter, a1: JetCString) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_coll_counter_get(unsafe { &*a0 }, unsafe { &*a1 })))
+        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_coll_counter_get(unsafe { &*a0 }, &borrowed(a1))))
     }
 
     /// core.collections.inc
     #[no_mangle]
     pub extern "C" fn jet_coll_counter_inc(a0: *mut crate::JetCounter, a1: JetCString) -> *mut crate::JetCounter {
-        guard(|| Box::into_raw(Box::new(crate::jet_coll_counter_inc(unsafe { &*a0 }, unsafe { &*a1 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_coll_counter_inc(unsafe { &*a0 }, &borrowed(a1)))))
     }
 
     /// core.collections.merge_add
@@ -13234,7 +13234,7 @@ mod jet_c_abi_routes {
     /// core.collections.set_count
     #[no_mangle]
     pub extern "C" fn jet_coll_counter_set_count(a0: *mut crate::JetCounter, a1: JetCString, a2: i64) -> *mut crate::JetCounter {
-        guard(|| Box::into_raw(Box::new(crate::jet_coll_counter_set_count(unsafe { &*a0 }, unsafe { &*a1 }, a2))))
+        guard(|| Box::into_raw(Box::new(crate::jet_coll_counter_set_count(unsafe { &*a0 }, &borrowed(a1), a2))))
     }
 
     /// core.collections.subtract
@@ -13276,13 +13276,13 @@ mod jet_c_abi_routes {
     /// core.collections.map_contains
     #[no_mangle]
     pub extern "C" fn jet_coll_map_contains(a0: *mut crate::JetOrderedMap, a1: JetCString) -> bool {
-        guard(|| crate::jet_coll_map_contains(unsafe { &*a0 }, unsafe { &*a1 }))
+        guard(|| crate::jet_coll_map_contains(unsafe { &*a0 }, &borrowed(a1)))
     }
 
     /// core.collections.map_get
     #[no_mangle]
     pub extern "C" fn jet_coll_map_get(a0: *mut crate::JetOrderedMap, a1: JetCString, some: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_coll_map_get(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_coll_map_get(unsafe { &*a0 }, &borrowed(a1)) {
             Some(value) => { unsafe { some.write(handle(value)) }; 1 }
             None => 0,
         })
@@ -13303,13 +13303,13 @@ mod jet_c_abi_routes {
     /// core.collections.map_remove
     #[no_mangle]
     pub extern "C" fn jet_coll_map_remove(a0: *mut crate::JetOrderedMap, a1: JetCString) -> *mut crate::JetOrderedMap {
-        guard(|| Box::into_raw(Box::new(crate::jet_coll_map_remove(unsafe { &*a0 }, unsafe { &*a1 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_coll_map_remove(unsafe { &*a0 }, &borrowed(a1)))))
     }
 
     /// core.collections.map_set
     #[no_mangle]
     pub extern "C" fn jet_coll_map_set(a0: *mut crate::JetOrderedMap, a1: JetCString, a2: JetCString) -> *mut crate::JetOrderedMap {
-        guard(|| Box::into_raw(Box::new(crate::jet_coll_map_set(unsafe { &*a0 }, unsafe { &*a1 }, unsafe { &*a2 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_coll_map_set(unsafe { &*a0 }, &borrowed(a1), &borrowed(a2)))))
     }
 
     /// core.collections.map_values
@@ -13435,7 +13435,7 @@ mod jet_c_abi_routes {
     /// core.handle.cursor.over
     #[no_mangle]
     pub extern "C" fn jet_cursor_over(a0: JetCString) -> *mut crate::JetCursor {
-        guard(|| Box::into_raw(Box::new(crate::jet_cursor_over(unsafe { &*a0 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_cursor_over(&borrowed(a0)))))
     }
 
     /// core.handle.cursor.skip_ws
@@ -13447,7 +13447,7 @@ mod jet_c_abi_routes {
     /// core.handle.cursor.take_until
     #[no_mangle]
     pub extern "C" fn jet_cursor_take_until(a0: *mut crate::JetCursor, a1: JetCString, ok: *mut JetCString, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_cursor_take_until(unsafe { &mut *a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_cursor_take_until(unsafe { &mut *a0 }, &borrowed(a1)) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -13492,7 +13492,7 @@ mod jet_c_abi_routes {
     /// core.data.require_bridge
     #[no_mangle]
     pub extern "C" fn jet_data_require_bridge(a0: JetCString, err: *mut *mut crate::jet_std::DataError) -> i64 {
-        guard(|| match crate::jet_data_require_bridge(unsafe { &*a0 }) {
+        guard(|| match crate::jet_data_require_bridge(&borrowed(a0)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -13615,7 +13615,7 @@ mod jet_c_abi_routes {
     /// core.math.decimal, core.precise.decimal_from_str
     #[no_mangle]
     pub extern "C" fn jet_decimal_from_str(a0: JetCString) -> *mut crate::jet_std::JetDecimal {
-        guard(|| Box::into_raw(Box::new(crate::jet_decimal_from_str(unsafe { &*a0 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_decimal_from_str(&borrowed(a0)))))
     }
 
     /// core.precise.decimal_mul
@@ -13726,7 +13726,7 @@ mod jet_c_abi_routes {
     /// core.handle.duration.round
     #[no_mangle]
     pub extern "C" fn jet_duration_round(a0: *mut crate::jet_std::Duration, a1: JetCString, a2: i64, a3: JetCString) -> *mut crate::jet_std::Duration {
-        guard(|| Box::into_raw(Box::new(crate::jet_duration_round(unsafe { &*a0 }, unsafe { &*a1 }, &a2, unsafe { &*a3 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_duration_round(unsafe { &*a0 }, &borrowed(a1), &a2, &borrowed(a3)))))
     }
 
     /// core.handle.duration.scale
@@ -13750,7 +13750,7 @@ mod jet_c_abi_routes {
     /// core.handle.duration.total_in
     #[no_mangle]
     pub extern "C" fn jet_duration_total_in(a0: *mut crate::jet_std::Duration, a1: JetCString) -> f64 {
-        guard(|| crate::jet_duration_total_in(unsafe { &*a0 }, unsafe { &*a1 }))
+        guard(|| crate::jet_duration_total_in(unsafe { &*a0 }, &borrowed(a1)))
     }
 
     /// core.handle.duration.total_seconds
@@ -13762,7 +13762,7 @@ mod jet_c_abi_routes {
     /// core.email.address
     #[no_mangle]
     pub extern "C" fn address(a0: JetCString, ok: *mut *mut crate::jet_email::Address, err: *mut *mut crate::jet_email::Error) -> i64 {
-        guard(|| match crate::jet_email::address(unsafe { &*a0 }) {
+        guard(|| match crate::jet_email::address(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -13771,7 +13771,7 @@ mod jet_c_abi_routes {
     /// core.email.attachment
     #[no_mangle]
     pub extern "C" fn attachment(a0: JetCString, a1: JetCString, a2_0: *const u64, a2_1: i64, ok: *mut *mut crate::jet_email::Attachment, err: *mut *mut crate::jet_email::Error) -> i64 {
-        guard(|| match crate::jet_email::attachment(unsafe { &*a0 }, unsafe { &*a1 }, &list_in(a2_0, a2_1, |w| w as u8)) {
+        guard(|| match crate::jet_email::attachment(&borrowed(a0), &borrowed(a1), &list_in(a2_0, a2_1, |w| w as u8)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -13795,7 +13795,7 @@ mod jet_c_abi_routes {
     /// core.email.message
     #[no_mangle]
     pub extern "C" fn message(a0: *mut crate::jet_email::Address, a1_0: *const u64, a1_1: i64, a2_0: *const u64, a2_1: i64, a3: JetCString, a4: JetCString, a5: JetCString, a6_0: *const u64, a6_1: i64, ok: *mut *mut crate::jet_email::Message, err: *mut *mut crate::jet_email::Error) -> i64 {
-        guard(|| match crate::jet_email::message(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_email::Address) }.clone()), &list_in(a2_0, a2_1, |w| unsafe { &*(w as *const crate::jet_email::Address) }.clone()), unsafe { &*a3 }, unsafe { &*a4 }, unsafe { &*a5 }, &list_in(a6_0, a6_1, |w| unsafe { &*(w as *const crate::jet_email::Attachment) }.clone())) {
+        guard(|| match crate::jet_email::message(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_email::Address) }.clone()), &list_in(a2_0, a2_1, |w| unsafe { &*(w as *const crate::jet_email::Address) }.clone()), &borrowed(a3), &borrowed(a4), &borrowed(a5), &list_in(a6_0, a6_1, |w| unsafe { &*(w as *const crate::jet_email::Attachment) }.clone())) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -14008,7 +14008,7 @@ mod jet_c_abi_routes {
     /// core.handle.fake.locale
     #[no_mangle]
     pub extern "C" fn jet_fake_locale(a0: *mut crate::jet_std::Fake, a1: JetCString) -> *mut crate::jet_std::Fake {
-        guard(|| Box::into_raw(Box::new(crate::jet_fake_locale(unsafe { &*a0 }, unsafe { &*a1 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_fake_locale(unsafe { &*a0 }, &borrowed(a1)))))
     }
 
     /// core.handle.fake.name
@@ -14104,25 +14104,25 @@ mod jet_c_abi_routes {
     /// core.text.fmt.pad
     #[no_mangle]
     pub extern "C" fn jet_fmt_pad(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_fmt_pad(unsafe { &*a0 }, a1, unsafe { &*a2 })))
+        guard(|| handle(crate::jet_fmt_pad(&borrowed(a0), a1, &borrowed(a2))))
     }
 
     /// core.text.fmt.pad_center
     #[no_mangle]
     pub extern "C" fn jet_fmt_pad_center(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_fmt_pad_center(unsafe { &*a0 }, a1, unsafe { &*a2 })))
+        guard(|| handle(crate::jet_fmt_pad_center(&borrowed(a0), a1, &borrowed(a2))))
     }
 
     /// core.text.fmt.pad_left
     #[no_mangle]
     pub extern "C" fn jet_fmt_pad_left(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_fmt_pad_left(unsafe { &*a0 }, a1, unsafe { &*a2 })))
+        guard(|| handle(crate::jet_fmt_pad_left(&borrowed(a0), a1, &borrowed(a2))))
     }
 
     /// core.text.fmt.pad_right
     #[no_mangle]
     pub extern "C" fn jet_fmt_pad_right(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_fmt_pad_right(unsafe { &*a0 }, a1, unsafe { &*a2 })))
+        guard(|| handle(crate::jet_fmt_pad_right(&borrowed(a0), a1, &borrowed(a2))))
     }
 
     /// core.text.fmt.percent
@@ -14134,7 +14134,7 @@ mod jet_c_abi_routes {
     /// core.text.fmt.plural
     #[no_mangle]
     pub extern "C" fn jet_fmt_plural(a0: i64, a1: JetCString, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_fmt_plural(a0, unsafe { &*a1 }, unsafe { &*a2 })))
+        guard(|| handle(crate::jet_fmt_plural(a0, &borrowed(a1), &borrowed(a2))))
     }
 
     /// core.text.fmt.pretty
@@ -14287,13 +14287,13 @@ mod jet_c_abi_routes {
     /// core.http.basic_auth
     #[no_mangle]
     pub extern "C" fn jet_http_basic_auth(a0: JetCString, a1: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_http_basic_auth(unsafe { &*a0 }, unsafe { &*a1 })))
+        guard(|| handle(crate::jet_http_basic_auth(&borrowed(a0), &borrowed(a1))))
     }
 
     /// core.http.bearer_auth
     #[no_mangle]
     pub extern "C" fn jet_http_bearer_auth(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_http_bearer_auth(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_http_bearer_auth(&borrowed(a0))))
     }
 
     /// TIR/routes.rs
@@ -14323,7 +14323,7 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_http_client_request_body(a0: *mut crate::JetHTTPRequest, a1: JetCString) -> *mut crate::JetHTTPRequest {
-        guard(|| Box::into_raw(Box::new(crate::jet_http_client_request_body(unsafe { &*a0 }.clone(), unsafe { &*a1 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_http_client_request_body(unsafe { &*a0 }.clone(), &borrowed(a1)))))
     }
 
     /// TIR/routes.rs
@@ -14335,7 +14335,7 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_http_client_request_cookie(a0: *mut crate::JetHTTPRequest, a1: JetCString, a2: JetCString) -> *mut crate::JetHTTPRequest {
-        guard(|| Box::into_raw(Box::new(crate::jet_http_client_request_cookie(unsafe { &*a0 }.clone(), unsafe { &*a1 }, unsafe { &*a2 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_http_client_request_cookie(unsafe { &*a0 }.clone(), &borrowed(a1), &borrowed(a2)))))
     }
 
     /// TIR/routes.rs
@@ -14353,31 +14353,31 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_http_client_request_form(a0: *mut crate::JetHTTPRequest, a1: JetCString, a2: JetCString) -> *mut crate::JetHTTPRequest {
-        guard(|| Box::into_raw(Box::new(crate::jet_http_client_request_form(unsafe { &*a0 }.clone(), unsafe { &*a1 }, unsafe { &*a2 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_http_client_request_form(unsafe { &*a0 }.clone(), &borrowed(a1), &borrowed(a2)))))
     }
 
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_http_client_request_header(a0: *mut crate::JetHTTPRequest, a1: JetCString, a2: JetCString) -> *mut crate::JetHTTPRequest {
-        guard(|| Box::into_raw(Box::new(crate::jet_http_client_request_header(unsafe { &*a0 }.clone(), unsafe { &*a1 }, unsafe { &*a2 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_http_client_request_header(unsafe { &*a0 }.clone(), &borrowed(a1), &borrowed(a2)))))
     }
 
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_http_client_request_multipart_text(a0: *mut crate::JetHTTPRequest, a1: JetCString, a2: JetCString) -> *mut crate::JetHTTPRequest {
-        guard(|| Box::into_raw(Box::new(crate::jet_http_client_request_multipart_text(unsafe { &*a0 }.clone(), unsafe { &*a1 }, unsafe { &*a2 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_http_client_request_multipart_text(unsafe { &*a0 }.clone(), &borrowed(a1), &borrowed(a2)))))
     }
 
     /// core.http.client.request
     #[no_mangle]
     pub extern "C" fn jet_http_client_request_new(a0: JetCString, a1: JetCString) -> *mut crate::JetHTTPRequest {
-        guard(|| Box::into_raw(Box::new(crate::jet_http_client_request_new(unsafe { &*a0 }, unsafe { &*a1 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_http_client_request_new(&borrowed(a0), &borrowed(a1)))))
     }
 
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_http_client_request_proxy(a0: *mut crate::JetHTTPRequest, a1: JetCString) -> *mut crate::JetHTTPRequest {
-        guard(|| Box::into_raw(Box::new(crate::jet_http_client_request_proxy(unsafe { &*a0 }.clone(), unsafe { &*a1 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_http_client_request_proxy(unsafe { &*a0 }.clone(), &borrowed(a1)))))
     }
 
     /// TIR/routes.rs
@@ -14425,7 +14425,7 @@ mod jet_c_abi_routes {
     /// TIR/tir_to_mir_expr.rs
     #[no_mangle]
     pub extern "C" fn jet_http_client_response_header(a0: *mut crate::JetHTTPResponse, a1: JetCString, some: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_http_client_response_header(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_http_client_response_header(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(value) => { unsafe { some.write(handle(value)) }; 1 }
             Err(_) => 0,
         })
@@ -14455,7 +14455,7 @@ mod jet_c_abi_routes {
     /// core.http.server.serve_once
     #[no_mangle]
     pub extern "C" fn jet_http_mux_serve_once(a0: JetCString, a1: *mut crate::JetHTTPMux, err: *mut *mut crate::JetHTTPError) -> i64 {
-        guard(|| match crate::jet_http_mux_serve_once(unsafe { &*a0 }, unsafe { &*a1 }.clone()) {
+        guard(|| match crate::jet_http_mux_serve_once(&borrowed(a0), unsafe { &*a1 }.clone()) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -14620,7 +14620,7 @@ mod jet_c_abi_routes {
     /// core.handle.http.request_header
     #[no_mangle]
     pub extern "C" fn jet_http_srv_req_header(a0: *mut crate::JetHTTPRequest, a1: JetCString, some: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_http_srv_req_header(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_http_srv_req_header(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(value) => { unsafe { some.write(handle(value)) }; 1 }
             Err(_) => 0,
         })
@@ -14635,7 +14635,7 @@ mod jet_c_abi_routes {
     /// core.handle.http.request_param
     #[no_mangle]
     pub extern "C" fn jet_http_srv_req_param(a0: *mut crate::JetHTTPRequest, a1: JetCString, some: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_http_srv_req_param(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_http_srv_req_param(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(value) => { unsafe { some.write(handle(value)) }; 1 }
             Err(_) => 0,
         })
@@ -14665,7 +14665,7 @@ mod jet_c_abi_routes {
     /// TIR/tir_to_mir_expr.rs
     #[no_mangle]
     pub extern "C" fn jet_http_srv_response_header(a0: *mut crate::JetHTTPResponse, a1: JetCString, a2: JetCString) -> *mut crate::JetHTTPResponse {
-        guard(|| Box::into_raw(Box::new(crate::jet_http_srv_response_header(unsafe { &*a0 }.clone(), unsafe { &*a1 }, unsafe { &*a2 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_http_srv_response_header(unsafe { &*a0 }.clone(), &borrowed(a1), &borrowed(a2)))))
     }
 
     /// core.handle.http.response_trailers
@@ -14680,13 +14680,13 @@ mod jet_c_abi_routes {
     /// core.http.server.sse
     #[no_mangle]
     pub extern "C" fn jet_http_srv_sse(a0: JetCString) -> *mut crate::JetHTTPResponse {
-        guard(|| Box::into_raw(Box::new(crate::jet_http_srv_sse(unsafe { &*a0 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_http_srv_sse(&borrowed(a0)))))
     }
 
     /// core.http.server.static_file
     #[no_mangle]
     pub extern "C" fn jet_http_srv_static_file(a0: JetCString, a1: JetCString, ok: *mut *mut crate::JetHTTPResponse, err: *mut *mut crate::JetHTTPError) -> i64 {
-        guard(|| match crate::jet_http_srv_static_file(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_http_srv_static_file(&borrowed(a0), &borrowed(a1)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -14695,7 +14695,7 @@ mod jet_c_abi_routes {
     /// core.http.server.static_file_range
     #[no_mangle]
     pub extern "C" fn jet_http_srv_static_file_range(a0: *mut crate::JetHTTPRequest, a1: JetCString, a2: JetCString, ok: *mut *mut crate::JetHTTPResponse, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_http_srv_static_file_range(unsafe { &*a0 }, unsafe { &*a1 }, unsafe { &*a2 }) {
+        guard(|| match crate::jet_http_srv_static_file_range(unsafe { &*a0 }, &borrowed(a1), &borrowed(a2)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -14704,7 +14704,7 @@ mod jet_c_abi_routes {
     /// core.http.server.tls
     #[no_mangle]
     pub extern "C" fn jet_http_srv_tls(a0: JetCString, a1: JetCString) -> *mut crate::JetHTTPServerTls {
-        guard(|| Box::into_raw(Box::new(crate::jet_http_srv_tls(unsafe { &*a0 }, unsafe { &*a1 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_http_srv_tls(&borrowed(a0), &borrowed(a1)))))
     }
 
     /// core.numeric.inline_range, core.numeric.inline_range
@@ -15469,7 +15469,7 @@ mod jet_c_abi_routes {
     /// core.net.mime.extension
     #[no_mangle]
     pub extern "C" fn jet_mime_extension(a0: JetCString, some: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_mime_extension(unsafe { &*a0 }) {
+        guard(|| match crate::jet_mime_extension(&borrowed(a0)) {
             Some(value) => { unsafe { some.write(handle(value)) }; 1 }
             None => 0,
         })
@@ -15478,7 +15478,7 @@ mod jet_c_abi_routes {
     /// core.net.mime.from_extension
     #[no_mangle]
     pub extern "C" fn jet_mime_from_extension(a0: JetCString, some: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_mime_from_extension(unsafe { &*a0 }) {
+        guard(|| match crate::jet_mime_from_extension(&borrowed(a0)) {
             Some(value) => { unsafe { some.write(handle(value)) }; 1 }
             None => 0,
         })
@@ -15487,7 +15487,7 @@ mod jet_c_abi_routes {
     /// core.net.mime.parse
     #[no_mangle]
     pub extern "C" fn jet_mime_parse(a0: JetCString, ok: *mut *mut crate::jet_std::JetMIME, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_mime_parse(unsafe { &*a0 }) {
+        guard(|| match crate::jet_mime_parse(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -15496,7 +15496,7 @@ mod jet_c_abi_routes {
     /// core.net.dns_a
     #[no_mangle]
     pub extern "C" fn jet_net_dns_a(a0: JetCString, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_dns_a(unsafe { &*a0 }, a1) {
+        guard(|| match crate::jet_net_dns_a(&borrowed(a0), a1) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -15505,7 +15505,7 @@ mod jet_c_abi_routes {
     /// core.net.dns_a_at
     #[no_mangle]
     pub extern "C" fn jet_net_dns_a_at(a0: JetCString, a1: JetCString, a2: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_dns_a_at(unsafe { &*a0 }, unsafe { &*a1 }, a2) {
+        guard(|| match crate::jet_net_dns_a_at(&borrowed(a0), &borrowed(a1), a2) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -15514,7 +15514,7 @@ mod jet_c_abi_routes {
     /// core.net.dns_aaaa
     #[no_mangle]
     pub extern "C" fn jet_net_dns_aaaa(a0: JetCString, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_dns_aaaa(unsafe { &*a0 }, a1) {
+        guard(|| match crate::jet_net_dns_aaaa(&borrowed(a0), a1) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -15523,7 +15523,7 @@ mod jet_c_abi_routes {
     /// core.net.dns_aaaa_at
     #[no_mangle]
     pub extern "C" fn jet_net_dns_aaaa_at(a0: JetCString, a1: JetCString, a2: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_dns_aaaa_at(unsafe { &*a0 }, unsafe { &*a1 }, a2) {
+        guard(|| match crate::jet_net_dns_aaaa_at(&borrowed(a0), &borrowed(a1), a2) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -15532,7 +15532,7 @@ mod jet_c_abi_routes {
     /// core.net.dns_ptr
     #[no_mangle]
     pub extern "C" fn jet_net_dns_ptr(a0: JetCString, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_dns_ptr(unsafe { &*a0 }, a1) {
+        guard(|| match crate::jet_net_dns_ptr(&borrowed(a0), a1) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| handle(e) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -15541,7 +15541,7 @@ mod jet_c_abi_routes {
     /// core.net.dns_srv
     #[no_mangle]
     pub extern "C" fn jet_net_dns_srv(a0: JetCString, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_dns_srv(unsafe { &*a0 }, a1) {
+        guard(|| match crate::jet_net_dns_srv(&borrowed(a0), a1) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -15550,7 +15550,7 @@ mod jet_c_abi_routes {
     /// core.net.dns_srv_at
     #[no_mangle]
     pub extern "C" fn jet_net_dns_srv_at(a0: JetCString, a1: JetCString, a2: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_dns_srv_at(unsafe { &*a0 }, unsafe { &*a1 }, a2) {
+        guard(|| match crate::jet_net_dns_srv_at(&borrowed(a0), &borrowed(a1), a2) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -15583,7 +15583,7 @@ mod jet_c_abi_routes {
     /// core.net.dns_txt
     #[no_mangle]
     pub extern "C" fn jet_net_dns_txt(a0: JetCString, a1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_dns_txt(unsafe { &*a0 }, a1) {
+        guard(|| match crate::jet_net_dns_txt(&borrowed(a0), a1) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| handle(e) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -15592,7 +15592,7 @@ mod jet_c_abi_routes {
     /// core.net.dns_txt_at
     #[no_mangle]
     pub extern "C" fn jet_net_dns_txt_at(a0: JetCString, a1: JetCString, a2: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_dns_txt_at(unsafe { &*a0 }, unsafe { &*a1 }, a2) {
+        guard(|| match crate::jet_net_dns_txt_at(&borrowed(a0), &borrowed(a1), a2) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| handle(e) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -15640,7 +15640,7 @@ mod jet_c_abi_routes {
     /// core.net.getservbyname
     #[no_mangle]
     pub extern "C" fn jet_net_getservbyname(a0: JetCString, ok: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_getservbyname(unsafe { &*a0 }) {
+        guard(|| match crate::jet_net_getservbyname(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -15658,7 +15658,7 @@ mod jet_c_abi_routes {
     /// core.net.ip_addr
     #[no_mangle]
     pub extern "C" fn jet_net_ip_addr(a0: JetCString, ok: *mut *mut crate::JetIpAddr, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_ip_addr(unsafe { &*a0 }) {
+        guard(|| match crate::jet_net_ip_addr(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -15718,7 +15718,7 @@ mod jet_c_abi_routes {
     /// TIR/lower/method_calls.rs
     #[no_mangle]
     pub extern "C" fn jet_net_sendfile(a0: *mut crate::JetTCPStream, a1: JetCString, ok: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_sendfile(unsafe { &mut *a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_net_sendfile(unsafe { &mut *a0 }, &borrowed(a1)) {
             Ok(value) => { unsafe { ok.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -15772,7 +15772,7 @@ mod jet_c_abi_routes {
     /// core.net.socket_addr
     #[no_mangle]
     pub extern "C" fn jet_net_socket_addr(a0: JetCString, a1: i64, ok: *mut *mut crate::JetSocketAddr, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_socket_addr(unsafe { &*a0 }, a1) {
+        guard(|| match crate::jet_net_socket_addr(&borrowed(a0), a1) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -15781,7 +15781,7 @@ mod jet_c_abi_routes {
     /// core.net.socket_addr_parse
     #[no_mangle]
     pub extern "C" fn jet_net_socket_addr_parse(a0: JetCString, ok: *mut *mut crate::JetSocketAddr, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_socket_addr_parse(unsafe { &*a0 }) {
+        guard(|| match crate::jet_net_socket_addr_parse(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -15841,7 +15841,7 @@ mod jet_c_abi_routes {
     /// core.net.tcp_connect
     #[no_mangle]
     pub extern "C" fn jet_net_tcp_connect(a0: JetCString, ok: *mut *mut crate::JetTCPStream, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_tcp_connect(unsafe { &*a0 }) {
+        guard(|| match crate::jet_net_tcp_connect(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -15859,7 +15859,7 @@ mod jet_c_abi_routes {
     /// core.net.tcp_connect_happy
     #[no_mangle]
     pub extern "C" fn jet_net_tcp_connect_happy(a0: JetCString, a1: i64, a2: i64, ok: *mut *mut crate::JetTCPStream, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_tcp_connect_happy(unsafe { &*a0 }, a1, a2) {
+        guard(|| match crate::jet_net_tcp_connect_happy(&borrowed(a0), a1, a2) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -15877,7 +15877,7 @@ mod jet_c_abi_routes {
     /// core.net.tcp_listen
     #[no_mangle]
     pub extern "C" fn jet_net_tcp_listen(a0: JetCString, ok: *mut *mut crate::JetTCPListener, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_tcp_listen(unsafe { &*a0 }) {
+        guard(|| match crate::jet_net_tcp_listen(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -15994,7 +15994,7 @@ mod jet_c_abi_routes {
     /// core.handle.tcp_stream.write
     #[no_mangle]
     pub extern "C" fn jet_net_tcp_write(a0: *mut crate::JetTCPStream, a1: JetCString, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_tcp_write(unsafe { &mut *a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_net_tcp_write(unsafe { &mut *a0 }, &borrowed(a1)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -16039,7 +16039,7 @@ mod jet_c_abi_routes {
     /// core.handle.tcp_stream.write_text
     #[no_mangle]
     pub extern "C" fn jet_net_tcp_write_text(a0: *mut crate::JetTCPStream, a1: JetCString, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_tcp_write_text(unsafe { &mut *a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_net_tcp_write_text(unsafe { &mut *a0 }, &borrowed(a1)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -16048,7 +16048,7 @@ mod jet_c_abi_routes {
     /// core.handle.tcp_stream.write_text_deadline
     #[no_mangle]
     pub extern "C" fn jet_net_tcp_write_text_deadline(a0: *mut crate::JetTCPStream, a1: JetCString, a2: *mut crate::jet_std::Duration, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_tcp_write_text_deadline(unsafe { &mut *a0 }, unsafe { &*a1 }, unsafe { &*a2 }) {
+        guard(|| match crate::jet_net_tcp_write_text_deadline(unsafe { &mut *a0 }, &borrowed(a1), unsafe { &*a2 }) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -16135,7 +16135,7 @@ mod jet_c_abi_routes {
     /// core.net.tls.write_text
     #[no_mangle]
     pub extern "C" fn jet_net_tls_write_text(a0: *mut crate::JetTLSStream, a1: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_net_tls_write_text(unsafe { &mut *a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_net_tls_write_text(unsafe { &mut *a0 }, &borrowed(a1)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -16153,7 +16153,7 @@ mod jet_c_abi_routes {
     /// core.net.udp_bind
     #[no_mangle]
     pub extern "C" fn jet_net_udp_bind(a0: JetCString, ok: *mut *mut crate::JetUDPSocket, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_udp_bind(unsafe { &*a0 }) {
+        guard(|| match crate::jet_net_udp_bind(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -16273,7 +16273,7 @@ mod jet_c_abi_routes {
     /// core.net.udp_send_to
     #[no_mangle]
     pub extern "C" fn jet_net_udp_send_to(a0: *mut crate::JetUDPSocket, a1: JetCString, a2: *mut crate::JetSocketAddr, ok: *mut i64, err: *mut *mut crate::JetNetError) -> i64 {
-        guard(|| match crate::jet_net_udp_send_to(unsafe { &*a0 }, unsafe { &*a1 }, unsafe { &*a2 }) {
+        guard(|| match crate::jet_net_udp_send_to(unsafe { &*a0 }, &borrowed(a1), unsafe { &*a2 }) {
             Ok(value) => { unsafe { ok.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -16330,7 +16330,7 @@ mod jet_c_abi_routes {
     /// core.handle.path.from
     #[no_mangle]
     pub extern "C" fn jet_path_from(a0: JetCString) -> *mut crate::JetPath {
-        guard(|| Box::into_raw(Box::new(crate::jet_path_from(unsafe { &*a0 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_path_from(&borrowed(a0)))))
     }
 
     /// core.handle.path.home
@@ -16348,7 +16348,7 @@ mod jet_c_abi_routes {
     /// core.handle.path.join
     #[no_mangle]
     pub extern "C" fn jet_path_join(a0: *mut crate::JetPath, a1: JetCString) -> *mut crate::JetPath {
-        guard(|| Box::into_raw(Box::new(crate::jet_path_join(unsafe { &*a0 }, unsafe { &*a1 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_path_join(unsafe { &*a0 }, &borrowed(a1)))))
     }
 
     /// core.handle.path.normalize
@@ -16483,7 +16483,7 @@ mod jet_c_abi_routes {
     /// core.handle.process.spec.arg
     #[no_mangle]
     pub extern "C" fn jet_process_spec_arg(a0: *mut crate::jet_std::ProcessSpec, a1: JetCString) -> *mut crate::jet_std::ProcessSpec {
-        guard(|| Box::into_raw(Box::new(crate::jet_process_spec_arg(unsafe { &*a0 }.clone(), unsafe { &*a1 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_process_spec_arg(unsafe { &*a0 }.clone(), &borrowed(a1)))))
     }
 
     /// core.handle.process.spec.args_extend
@@ -16501,7 +16501,7 @@ mod jet_c_abi_routes {
     /// core.handle.process.spec.cwd
     #[no_mangle]
     pub extern "C" fn jet_process_spec_cwd(a0: *mut crate::jet_std::ProcessSpec, a1: JetCString) -> *mut crate::jet_std::ProcessSpec {
-        guard(|| Box::into_raw(Box::new(crate::jet_process_spec_cwd(unsafe { &*a0 }.clone(), unsafe { &*a1 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_process_spec_cwd(unsafe { &*a0 }.clone(), &borrowed(a1)))))
     }
 
     /// core.handle.process.spec.detached
@@ -16513,7 +16513,7 @@ mod jet_c_abi_routes {
     /// core.handle.process.spec.env
     #[no_mangle]
     pub extern "C" fn jet_process_spec_env(a0: *mut crate::jet_std::ProcessSpec, a1: JetCString, a2: JetCString) -> *mut crate::jet_std::ProcessSpec {
-        guard(|| Box::into_raw(Box::new(crate::jet_process_spec_env(unsafe { &*a0 }.clone(), unsafe { &*a1 }, unsafe { &*a2 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_process_spec_env(unsafe { &*a0 }.clone(), &borrowed(a1), &borrowed(a2)))))
     }
 
     /// core.handle.process.spec.env_clear
@@ -16525,7 +16525,7 @@ mod jet_c_abi_routes {
     /// core.handle.process.spec.env_remove
     #[no_mangle]
     pub extern "C" fn jet_process_spec_env_remove(a0: *mut crate::jet_std::ProcessSpec, a1: JetCString) -> *mut crate::jet_std::ProcessSpec {
-        guard(|| Box::into_raw(Box::new(crate::jet_process_spec_env_remove(unsafe { &*a0 }.clone(), unsafe { &*a1 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_process_spec_env_remove(unsafe { &*a0 }.clone(), &borrowed(a1)))))
     }
 
     /// core.handle.process.spec.memory_limit
@@ -16663,13 +16663,13 @@ mod jet_c_abi_routes {
     /// core.game.raylib.draw_sprite
     #[no_mangle]
     pub extern "C" fn jet_raylib_draw_sprite(a0: *mut crate::RaylibTextureAtlas, a1: JetCString, a2: i64, a3: i64) {
-        guard(|| crate::jet_raylib_draw_sprite(unsafe { &*a0 }, unsafe { &*a1 }, a2, a3))
+        guard(|| crate::jet_raylib_draw_sprite(unsafe { &*a0 }, &borrowed(a1), a2, a3))
     }
 
     /// core.game.raylib.draw_text
     #[no_mangle]
     pub extern "C" fn jet_raylib_draw_text(a0: JetCString, a1: i64, a2: i64, a3: i64, a4: *mut crate::RaylibColor) {
-        guard(|| crate::jet_raylib_draw_text(unsafe { &*a0 }, a1, a2, a3, unsafe { &*a4 }))
+        guard(|| crate::jet_raylib_draw_text(&borrowed(a0), a1, a2, a3, unsafe { &*a4 }))
     }
 
     /// core.game.raylib.end_drawing
@@ -16681,31 +16681,31 @@ mod jet_c_abi_routes {
     /// core.game.raylib.gamepad_axis
     #[no_mangle]
     pub extern "C" fn jet_raylib_gamepad_axis(a0: i64, a1: JetCString) -> f64 {
-        guard(|| crate::jet_raylib_gamepad_axis(a0, unsafe { &*a1 }))
+        guard(|| crate::jet_raylib_gamepad_axis(a0, &borrowed(a1)))
     }
 
     /// core.game.raylib.gamepad_down
     #[no_mangle]
     pub extern "C" fn jet_raylib_gamepad_down(a0: i64, a1: JetCString) -> bool {
-        guard(|| crate::jet_raylib_gamepad_down(a0, unsafe { &*a1 }))
+        guard(|| crate::jet_raylib_gamepad_down(a0, &borrowed(a1)))
     }
 
     /// core.game.raylib.key_down
     #[no_mangle]
     pub extern "C" fn jet_raylib_key_down(a0: JetCString) -> bool {
-        guard(|| crate::jet_raylib_key_down(unsafe { &*a0 }))
+        guard(|| crate::jet_raylib_key_down(&borrowed(a0)))
     }
 
     /// core.game.raylib.load_sound
     #[no_mangle]
     pub extern "C" fn jet_raylib_load_sound(a0: JetCString) -> *mut crate::RaylibSound {
-        guard(|| Box::into_raw(Box::new(crate::jet_raylib_load_sound(unsafe { &*a0 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_raylib_load_sound(&borrowed(a0)))))
     }
 
     /// core.game.raylib.load_texture_atlas
     #[no_mangle]
     pub extern "C" fn jet_raylib_load_texture_atlas(a0: JetCString) -> *mut crate::RaylibTextureAtlas {
-        guard(|| Box::into_raw(Box::new(crate::jet_raylib_load_texture_atlas(unsafe { &*a0 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_raylib_load_texture_atlas(&borrowed(a0)))))
     }
 
     /// core.game.raylib.play_sound
@@ -16723,7 +16723,7 @@ mod jet_c_abi_routes {
     /// core.game.raylib.window_open
     #[no_mangle]
     pub extern "C" fn jet_raylib_window_open(a0: i64, a1: i64, a2: JetCString) -> *mut crate::RaylibWindow {
-        guard(|| Box::into_raw(Box::new(crate::jet_raylib_window_open(a0, a1, unsafe { &*a2 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_raylib_window_open(a0, a1, &borrowed(a2)))))
     }
 
     /// core.game.raylib.window_ready
@@ -16957,7 +16957,7 @@ mod jet_c_abi_routes {
     /// core.encoding.csv.rows
     #[no_mangle]
     pub extern "C" fn jet_ring_csv_rows(a0: JetCString, a1: JetCString, a2: u8, a3: u8, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_ring_csv_rows(unsafe { &*a0 }, unsafe { &*a1 }, a2 != 0, a3 != 0) {
+        guard(|| match crate::jet_ring_csv_rows(&borrowed(a0), &borrowed(a1), a2 != 0, a3 != 0) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -16966,7 +16966,7 @@ mod jet_c_abi_routes {
     /// core.log.bool
     #[no_mangle]
     pub extern "C" fn jet_ring_log_bool(a0: JetCString, a1: u8) -> *mut crate::jet_std::LogField {
-        guard(|| Box::into_raw(Box::new(crate::jet_ring_log_bool(unsafe { &*a0 }, a1 != 0))))
+        guard(|| Box::into_raw(Box::new(crate::jet_ring_log_bool(&borrowed(a0), a1 != 0))))
     }
 
     /// core.log.close
@@ -16978,25 +16978,25 @@ mod jet_c_abi_routes {
     /// core.log.counter
     #[no_mangle]
     pub extern "C" fn jet_ring_log_counter(a0: JetCString, a1: i64) -> *mut crate::jet_std::LogField {
-        guard(|| Box::into_raw(Box::new(crate::jet_ring_log_counter(unsafe { &*a0 }, a1))))
+        guard(|| Box::into_raw(Box::new(crate::jet_ring_log_counter(&borrowed(a0), a1))))
     }
 
     /// core.log.critical
     #[no_mangle]
     pub extern "C" fn jet_ring_log_critical(a0: JetCString) {
-        guard(|| crate::jet_ring_log_critical(unsafe { &*a0 }))
+        guard(|| crate::jet_ring_log_critical(&borrowed(a0)))
     }
 
     /// core.log.debug
     #[no_mangle]
     pub extern "C" fn jet_ring_log_debug(a0: JetCString) {
-        guard(|| crate::jet_ring_log_debug(unsafe { &*a0 }))
+        guard(|| crate::jet_ring_log_debug(&borrowed(a0)))
     }
 
     /// core.log.debug_fields
     #[no_mangle]
     pub extern "C" fn jet_ring_log_debug_fields(a0: JetCString, a1_0: *const u64, a1_1: i64) {
-        guard(|| crate::jet_ring_log_debug_fields(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_std::LogField) }.clone())))
+        guard(|| crate::jet_ring_log_debug_fields(&borrowed(a0), &list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_std::LogField) }.clone())))
     }
 
     /// core.log.disable
@@ -17008,7 +17008,7 @@ mod jet_c_abi_routes {
     /// core.log.enabled
     #[no_mangle]
     pub extern "C" fn jet_ring_log_enabled(a0: JetCString) -> bool {
-        guard(|| crate::jet_ring_log_enabled(unsafe { &*a0 }))
+        guard(|| crate::jet_ring_log_enabled(&borrowed(a0)))
     }
 
     /// core.log.enter
@@ -17020,31 +17020,31 @@ mod jet_c_abi_routes {
     /// core.log.error
     #[no_mangle]
     pub extern "C" fn jet_ring_log_error(a0: JetCString) {
-        guard(|| crate::jet_ring_log_error(unsafe { &*a0 }))
+        guard(|| crate::jet_ring_log_error(&borrowed(a0)))
     }
 
     /// core.log.error_fields
     #[no_mangle]
     pub extern "C" fn jet_ring_log_error_fields(a0: JetCString, a1_0: *const u64, a1_1: i64) {
-        guard(|| crate::jet_ring_log_error_fields(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_std::LogField) }.clone())))
+        guard(|| crate::jet_ring_log_error_fields(&borrowed(a0), &list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_std::LogField) }.clone())))
     }
 
     /// core.log.fatal
     #[no_mangle]
     pub extern "C" fn jet_ring_log_fatal(a0: JetCString) {
-        guard(|| crate::jet_ring_log_fatal(unsafe { &*a0 }))
+        guard(|| crate::jet_ring_log_fatal(&borrowed(a0)))
     }
 
     /// core.log.field
     #[no_mangle]
     pub extern "C" fn jet_ring_log_field(a0: JetCString, a1: JetCString) -> *mut crate::jet_std::LogField {
-        guard(|| Box::into_raw(Box::new(crate::jet_ring_log_field(unsafe { &*a0 }, unsafe { &*a1 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_ring_log_field(&borrowed(a0), &borrowed(a1)))))
     }
 
     /// core.log.float
     #[no_mangle]
     pub extern "C" fn jet_ring_log_float(a0: JetCString, a1: f64) -> *mut crate::jet_std::LogField {
-        guard(|| Box::into_raw(Box::new(crate::jet_ring_log_float(unsafe { &*a0 }, a1))))
+        guard(|| Box::into_raw(Box::new(crate::jet_ring_log_float(&borrowed(a0), a1))))
     }
 
     /// core.log.flush
@@ -17056,31 +17056,31 @@ mod jet_c_abi_routes {
     /// core.log.info
     #[no_mangle]
     pub extern "C" fn jet_ring_log_info(a0: JetCString) {
-        guard(|| crate::jet_ring_log_info(unsafe { &*a0 }))
+        guard(|| crate::jet_ring_log_info(&borrowed(a0)))
     }
 
     /// core.log.info_fields
     #[no_mangle]
     pub extern "C" fn jet_ring_log_info_fields(a0: JetCString, a1_0: *const u64, a1_1: i64) {
-        guard(|| crate::jet_ring_log_info_fields(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_std::LogField) }.clone())))
+        guard(|| crate::jet_ring_log_info_fields(&borrowed(a0), &list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_std::LogField) }.clone())))
     }
 
     /// core.log.int
     #[no_mangle]
     pub extern "C" fn jet_ring_log_int(a0: JetCString, a1: i64) -> *mut crate::jet_std::LogField {
-        guard(|| Box::into_raw(Box::new(crate::jet_ring_log_int(unsafe { &*a0 }, a1))))
+        guard(|| Box::into_raw(Box::new(crate::jet_ring_log_int(&borrowed(a0), a1))))
     }
 
     /// core.log.otlp_file
     #[no_mangle]
     pub extern "C" fn jet_ring_log_otlp_file(a0: JetCString) {
-        guard(|| crate::jet_ring_log_otlp_file(unsafe { &*a0 }))
+        guard(|| crate::jet_ring_log_otlp_file(&borrowed(a0)))
     }
 
     /// core.log.redact
     #[no_mangle]
     pub extern "C" fn jet_ring_log_redact(a0: JetCString) -> *mut crate::jet_std::LogField {
-        guard(|| Box::into_raw(Box::new(crate::jet_ring_log_redact(unsafe { &*a0 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_ring_log_redact(&borrowed(a0)))))
     }
 
     /// core.log.sample_every
@@ -17092,13 +17092,13 @@ mod jet_c_abi_routes {
     /// core.log.set_level
     #[no_mangle]
     pub extern "C" fn jet_ring_log_set_level(a0: JetCString) {
-        guard(|| crate::jet_ring_log_set_level(unsafe { &*a0 }))
+        guard(|| crate::jet_ring_log_set_level(&borrowed(a0)))
     }
 
     /// core.log.set_sink
     #[no_mangle]
     pub extern "C" fn jet_ring_log_set_sink(a0: JetCString, a1: JetCString) {
-        guard(|| crate::jet_ring_log_set_sink(unsafe { &*a0 }, unsafe { &*a1 }))
+        guard(|| crate::jet_ring_log_set_sink(&borrowed(a0), &borrowed(a1)))
     }
 
     /// core.log.set_trace_id
@@ -17110,25 +17110,25 @@ mod jet_c_abi_routes {
     /// core.log.setup
     #[no_mangle]
     pub extern "C" fn jet_ring_log_setup(a0: JetCString) {
-        guard(|| crate::jet_ring_log_setup(unsafe { &*a0 }))
+        guard(|| crate::jet_ring_log_setup(&borrowed(a0)))
     }
 
     /// core.log.span
     #[no_mangle]
     pub extern "C" fn jet_ring_log_span(a0: JetCString) -> *mut crate::jet_std::LogSpan {
-        guard(|| Box::into_raw(Box::new(crate::jet_ring_log_span(unsafe { &*a0 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_ring_log_span(&borrowed(a0)))))
     }
 
     /// core.log.warn
     #[no_mangle]
     pub extern "C" fn jet_ring_log_warn(a0: JetCString) {
-        guard(|| crate::jet_ring_log_warn(unsafe { &*a0 }))
+        guard(|| crate::jet_ring_log_warn(&borrowed(a0)))
     }
 
     /// core.log.warn_fields
     #[no_mangle]
     pub extern "C" fn jet_ring_log_warn_fields(a0: JetCString, a1_0: *const u64, a1_1: i64) {
-        guard(|| crate::jet_ring_log_warn_fields(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_std::LogField) }.clone())))
+        guard(|| crate::jet_ring_log_warn_fields(&borrowed(a0), &list_in(a1_0, a1_1, |w| unsafe { &*(w as *const crate::jet_std::LogField) }.clone())))
     }
 
     /// core.handle.rng.bool
@@ -17332,7 +17332,7 @@ mod jet_c_abi_routes {
     /// core.service.directory_resolve
     #[no_mangle]
     pub extern "C" fn jet_services_directory_resolve(a0: *mut crate::JetServiceTree, a1: JetCString, ok: *mut *mut crate::JetServiceEndpoint, err: *mut *mut crate::JetServiceError) -> i64 {
-        guard(|| match crate::jet_services_directory_resolve(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_services_directory_resolve(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18046,7 +18046,7 @@ mod jet_c_abi_routes {
     /// core.encoding.base64.decode
     #[no_mangle]
     pub extern "C" fn jet_std_b64_decode(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_std_b64_decode(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_b64_decode(&borrowed(a0)) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -18055,7 +18055,7 @@ mod jet_c_abi_routes {
     /// core.encoding.hex.a2b_base64, core.encoding.base64.decodebytes
     #[no_mangle]
     pub extern "C" fn jet_std_b64_decodebytes(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_std_b64_decodebytes(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_b64_decodebytes(&borrowed(a0)) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -18076,19 +18076,19 @@ mod jet_c_abi_routes {
     /// core.encoding.base64.pad
     #[no_mangle]
     pub extern "C" fn jet_std_b64_pad(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_std_b64_pad(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_std_b64_pad(&borrowed(a0))))
     }
 
     /// core.encoding.base64.unpad
     #[no_mangle]
     pub extern "C" fn jet_std_b64_unpad(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_std_b64_unpad(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_std_b64_unpad(&borrowed(a0))))
     }
 
     /// core.encoding.base64.decode_url
     #[no_mangle]
     pub extern "C" fn jet_std_b64url_decode(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_std_b64url_decode(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_b64url_decode(&borrowed(a0)) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -18109,7 +18109,7 @@ mod jet_c_abi_routes {
     /// core.encoding.base32.b32decode
     #[no_mangle]
     pub extern "C" fn jet_std_base32_decode(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_std_base32_decode(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_base32_decode(&borrowed(a0)) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -18124,7 +18124,7 @@ mod jet_c_abi_routes {
     /// core.encoding.base32.b32hexdecode
     #[no_mangle]
     pub extern "C" fn jet_std_base32hex_decode(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_std_base32hex_decode(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_base32hex_decode(&borrowed(a0)) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -18139,7 +18139,7 @@ mod jet_c_abi_routes {
     /// core.encoding.binary.calcsize
     #[no_mangle]
     pub extern "C" fn jet_std_binary_calcsize(a0: JetCString, ok: *mut i64, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_std_binary_calcsize(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_binary_calcsize(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -18148,7 +18148,7 @@ mod jet_c_abi_routes {
     /// core.encoding.binary.pack
     #[no_mangle]
     pub extern "C" fn jet_std_binary_pack(a0: JetCString, a1_0: *const u64, a1_1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_std_binary_pack(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| w as i64)) {
+        guard(|| match crate::jet_std_binary_pack(&borrowed(a0), &list_in(a1_0, a1_1, |w| w as i64)) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -18223,7 +18223,7 @@ mod jet_c_abi_routes {
     /// core.encoding.binary.unpack
     #[no_mangle]
     pub extern "C" fn jet_std_binary_unpack(a0: JetCString, a1_0: *const u64, a1_1: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_std_binary_unpack(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| w as u8)) {
+        guard(|| match crate::jet_std_binary_unpack(&borrowed(a0), &list_in(a1_0, a1_1, |w| w as u8)) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -18355,7 +18355,7 @@ mod jet_c_abi_routes {
     /// core.sys.get
     #[no_mangle]
     pub extern "C" fn jet_std_env_get(a0: JetCString, some: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_std_env_get(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_env_get(&borrowed(a0)) {
             Some(value) => { unsafe { some.write(handle(value)) }; 1 }
             None => 0,
         })
@@ -18373,13 +18373,13 @@ mod jet_c_abi_routes {
     /// core.sys.set
     #[no_mangle]
     pub extern "C" fn jet_std_env_set(a0: JetCString, a1: JetCString) {
-        guard(|| crate::jet_std_env_set(unsafe { &*a0 }, unsafe { &*a1 }))
+        guard(|| crate::jet_std_env_set(&borrowed(a0), &borrowed(a1)))
     }
 
     /// core.sys.unset
     #[no_mangle]
     pub extern "C" fn jet_std_env_unset(a0: JetCString, ok: *mut bool, err: *mut *mut crate::jet_std::EnvError) -> i64 {
-        guard(|| match crate::jet_std_env_unset(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_env_unset(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(value) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18418,7 +18418,7 @@ mod jet_c_abi_routes {
     /// core.handle.file_writer.write_line
     #[no_mangle]
     pub extern "C" fn jet_std_file_writer_write_line(a0: *mut crate::JetFileWriter, a1: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_file_writer_write_line(unsafe { &mut *a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_std_file_writer_write_line(unsafe { &mut *a0 }, &borrowed(a1)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18427,7 +18427,7 @@ mod jet_c_abi_routes {
     /// core.files.append
     #[no_mangle]
     pub extern "C" fn jet_std_files_append(a0: JetCString, ok: *mut *mut crate::JetFileWriter, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_files_append(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_files_append(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18436,7 +18436,7 @@ mod jet_c_abi_routes {
     /// core.files.create
     #[no_mangle]
     pub extern "C" fn jet_std_files_create(a0: JetCString, ok: *mut *mut crate::JetFileWriter, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_files_create(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_files_create(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18445,7 +18445,7 @@ mod jet_c_abi_routes {
     /// core.files.open
     #[no_mangle]
     pub extern "C" fn jet_std_files_open(a0: JetCString, ok: *mut *mut crate::JetFileReader, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_files_open(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_files_open(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18454,7 +18454,7 @@ mod jet_c_abi_routes {
     /// core.files.absolute
     #[no_mangle]
     pub extern "C" fn jet_std_fs_absolute(a0: JetCString, ok: *mut JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_absolute(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_fs_absolute(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18463,7 +18463,7 @@ mod jet_c_abi_routes {
     /// core.files.append_all
     #[no_mangle]
     pub extern "C" fn jet_std_fs_append(a0: JetCString, a1: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_append(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_std_fs_append(&borrowed(a0), &borrowed(a1)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18472,7 +18472,7 @@ mod jet_c_abi_routes {
     /// core.files.canonicalize
     #[no_mangle]
     pub extern "C" fn jet_std_fs_canonicalize(a0: JetCString, ok: *mut JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_canonicalize(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_fs_canonicalize(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18481,7 +18481,7 @@ mod jet_c_abi_routes {
     /// core.files.chown
     #[no_mangle]
     pub extern "C" fn jet_std_fs_chown(a0: JetCString, a1: i64, a2: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_chown(unsafe { &*a0 }, a1, a2) {
+        guard(|| match crate::jet_std_fs_chown(&borrowed(a0), a1, a2) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18490,7 +18490,7 @@ mod jet_c_abi_routes {
     /// core.files.copy
     #[no_mangle]
     pub extern "C" fn jet_std_fs_copy(a0: JetCString, a1: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_copy(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_std_fs_copy(&borrowed(a0), &borrowed(a1)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18499,7 +18499,7 @@ mod jet_c_abi_routes {
     /// core.files.copy_dir
     #[no_mangle]
     pub extern "C" fn jet_std_fs_copy_dir(a0: JetCString, a1: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_copy_dir(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_std_fs_copy_dir(&borrowed(a0), &borrowed(a1)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18508,7 +18508,7 @@ mod jet_c_abi_routes {
     /// core.files.create_dir
     #[no_mangle]
     pub extern "C" fn jet_std_fs_create_dir(a0: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_create_dir(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_fs_create_dir(&borrowed(a0)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18517,7 +18517,7 @@ mod jet_c_abi_routes {
     /// core.files.create_dir_all
     #[no_mangle]
     pub extern "C" fn jet_std_fs_create_dir_all(a0: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_create_dir_all(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_fs_create_dir_all(&borrowed(a0)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18526,13 +18526,13 @@ mod jet_c_abi_routes {
     /// core.files.exists
     #[no_mangle]
     pub extern "C" fn jet_std_fs_exists(a0: JetCString) -> bool {
-        guard(|| crate::jet_std_fs_exists(unsafe { &*a0 }))
+        guard(|| crate::jet_std_fs_exists(&borrowed(a0)))
     }
 
     /// core.files.fsync
     #[no_mangle]
     pub extern "C" fn jet_std_fs_fsync(a0: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_fsync(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_fs_fsync(&borrowed(a0)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18541,7 +18541,7 @@ mod jet_c_abi_routes {
     /// core.files.glob
     #[no_mangle]
     pub extern "C" fn jet_std_fs_glob(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_glob(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_fs_glob(&borrowed(a0)) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| handle(e) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18550,7 +18550,7 @@ mod jet_c_abi_routes {
     /// core.files.hard_link
     #[no_mangle]
     pub extern "C" fn jet_std_fs_hard_link(a0: JetCString, a1: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_hard_link(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_std_fs_hard_link(&borrowed(a0), &borrowed(a1)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18559,13 +18559,13 @@ mod jet_c_abi_routes {
     /// core.files.is_dir
     #[no_mangle]
     pub extern "C" fn jet_std_fs_is_dir(a0: JetCString) -> bool {
-        guard(|| crate::jet_std_fs_is_dir(unsafe { &*a0 }))
+        guard(|| crate::jet_std_fs_is_dir(&borrowed(a0)))
     }
 
     /// core.files.is_fifo
     #[no_mangle]
     pub extern "C" fn jet_std_fs_is_fifo(a0: JetCString, ok: *mut bool, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_is_fifo(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_fs_is_fifo(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(value) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18574,7 +18574,7 @@ mod jet_c_abi_routes {
     /// core.files.is_socket
     #[no_mangle]
     pub extern "C" fn jet_std_fs_is_socket(a0: JetCString, ok: *mut bool, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_is_socket(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_fs_is_socket(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(value) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18583,7 +18583,7 @@ mod jet_c_abi_routes {
     /// core.files.list_dir
     #[no_mangle]
     pub extern "C" fn jet_std_fs_list_dir(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_list_dir(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_fs_list_dir(&borrowed(a0)) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18592,7 +18592,7 @@ mod jet_c_abi_routes {
     /// core.files.lock
     #[no_mangle]
     pub extern "C" fn jet_std_fs_lock(a0: JetCString, ok: *mut *mut crate::JetFileLockOwner, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_lock(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_fs_lock(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18601,7 +18601,7 @@ mod jet_c_abi_routes {
     /// core.files.map
     #[no_mangle]
     pub extern "C" fn jet_std_fs_map(a0: JetCString, ok: *mut *mut crate::jet_std::JetMappedFile, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_map(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_fs_map(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18622,13 +18622,13 @@ mod jet_c_abi_routes {
     /// core.files.mktemp
     #[no_mangle]
     pub extern "C" fn jet_std_fs_mktemp_path(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_std_fs_mktemp_path(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_std_fs_mktemp_path(&borrowed(a0))))
     }
 
     /// core.files.read
     #[no_mangle]
     pub extern "C" fn jet_std_fs_read(a0: JetCString, ok: *mut JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_read(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_fs_read(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18637,7 +18637,7 @@ mod jet_c_abi_routes {
     /// core.files.read_at
     #[no_mangle]
     pub extern "C" fn jet_std_fs_read_at(a0: JetCString, a1: i64, a2: i64, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_read_at(unsafe { &*a0 }, a1, a2) {
+        guard(|| match crate::jet_std_fs_read_at(&borrowed(a0), a1, a2) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18655,7 +18655,7 @@ mod jet_c_abi_routes {
     /// core.files.read_link
     #[no_mangle]
     pub extern "C" fn jet_std_fs_read_link(a0: JetCString, ok: *mut JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_read_link(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_fs_read_link(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18664,7 +18664,7 @@ mod jet_c_abi_routes {
     /// core.files.remove
     #[no_mangle]
     pub extern "C" fn jet_std_fs_remove(a0: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_remove(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_fs_remove(&borrowed(a0)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18673,7 +18673,7 @@ mod jet_c_abi_routes {
     /// core.files.remove_all
     #[no_mangle]
     pub extern "C" fn jet_std_fs_remove_all(a0: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_remove_all(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_fs_remove_all(&borrowed(a0)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18682,7 +18682,7 @@ mod jet_c_abi_routes {
     /// core.files.remove_dir
     #[no_mangle]
     pub extern "C" fn jet_std_fs_remove_dir(a0: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_remove_dir(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_fs_remove_dir(&borrowed(a0)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18691,7 +18691,7 @@ mod jet_c_abi_routes {
     /// core.files.rename
     #[no_mangle]
     pub extern "C" fn jet_std_fs_rename(a0: JetCString, a1: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_rename(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_std_fs_rename(&borrowed(a0), &borrowed(a1)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18706,7 +18706,7 @@ mod jet_c_abi_routes {
     /// core.files.set_mode
     #[no_mangle]
     pub extern "C" fn jet_std_fs_set_mode(a0: JetCString, a1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_set_mode(unsafe { &*a0 }, a1) {
+        guard(|| match crate::jet_std_fs_set_mode(&borrowed(a0), a1) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18715,7 +18715,7 @@ mod jet_c_abi_routes {
     /// core.files.stat, core.files.lstat
     #[no_mangle]
     pub extern "C" fn jet_std_fs_stat(a0: JetCString, ok: *mut *mut crate::jet_std::Stat, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_stat(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_fs_stat(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18724,7 +18724,7 @@ mod jet_c_abi_routes {
     /// core.files.symlink
     #[no_mangle]
     pub extern "C" fn jet_std_fs_symlink(a0: JetCString, a1: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_symlink(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_std_fs_symlink(&borrowed(a0), &borrowed(a1)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18733,7 +18733,7 @@ mod jet_c_abi_routes {
     /// core.files.temp_dir
     #[no_mangle]
     pub extern "C" fn jet_std_fs_temp_dir(a0: JetCString, ok: *mut *mut crate::JetTempDirOwner, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_temp_dir(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_fs_temp_dir(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18742,7 +18742,7 @@ mod jet_c_abi_routes {
     /// core.files.mkdtemp
     #[no_mangle]
     pub extern "C" fn jet_std_fs_temp_dir_path(a0: JetCString, ok: *mut JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_temp_dir_path(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_fs_temp_dir_path(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18751,7 +18751,7 @@ mod jet_c_abi_routes {
     /// core.files.temp_file
     #[no_mangle]
     pub extern "C" fn jet_std_fs_temp_file(a0: JetCString, ok: *mut *mut crate::JetTempFileOwner, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_temp_file(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_fs_temp_file(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18760,7 +18760,7 @@ mod jet_c_abi_routes {
     /// core.files.write
     #[no_mangle]
     pub extern "C" fn jet_std_fs_write(a0: JetCString, a1: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_write(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_std_fs_write(&borrowed(a0), &borrowed(a1)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18769,7 +18769,7 @@ mod jet_c_abi_routes {
     /// core.files.write_at
     #[no_mangle]
     pub extern "C" fn jet_std_fs_write_at(a0: JetCString, a1: i64, a2_0: *const u64, a2_1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_write_at(unsafe { &*a0 }, a1, &list_in(a2_0, a2_1, |w| w as u8)) {
+        guard(|| match crate::jet_std_fs_write_at(&borrowed(a0), a1, &list_in(a2_0, a2_1, |w| w as u8)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18778,7 +18778,7 @@ mod jet_c_abi_routes {
     /// core.files.write_atomic
     #[no_mangle]
     pub extern "C" fn jet_std_fs_write_atomic(a0: JetCString, a1_0: *const u64, a1_1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_write_atomic(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| w as u8)) {
+        guard(|| match crate::jet_std_fs_write_atomic(&borrowed(a0), &list_in(a1_0, a1_1, |w| w as u8)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18787,7 +18787,7 @@ mod jet_c_abi_routes {
     /// core.files.write_bytes
     #[no_mangle]
     pub extern "C" fn jet_std_fs_write_bytes(a0: JetCString, a1_0: *const u64, a1_1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_fs_write_bytes(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| w as u8)) {
+        guard(|| match crate::jet_std_fs_write_bytes(&borrowed(a0), &list_in(a1_0, a1_1, |w| w as u8)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18796,7 +18796,7 @@ mod jet_c_abi_routes {
     /// core.encoding.hex.decode
     #[no_mangle]
     pub extern "C" fn jet_std_hex_decode(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_std_hex_decode(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_hex_decode(&borrowed(a0)) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -18817,7 +18817,7 @@ mod jet_c_abi_routes {
     /// core.encoding.hex.encode_sep
     #[no_mangle]
     pub extern "C" fn jet_std_hex_encode_sep(a0_0: *const u64, a0_1: i64, a1: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_std_hex_encode_sep(&list_in(a0_0, a0_1, |w| w as u8), unsafe { &*a1 })))
+        guard(|| handle(crate::jet_std_hex_encode_sep(&list_in(a0_0, a0_1, |w| w as u8), &borrowed(a1))))
     }
 
     /// core.encoding.hex.encode_upper
@@ -18829,7 +18829,7 @@ mod jet_c_abi_routes {
     /// core.encoding.hex.is_hex
     #[no_mangle]
     pub extern "C" fn jet_std_hex_is_hex(a0: JetCString) -> bool {
-        guard(|| crate::jet_std_hex_is_hex(unsafe { &*a0 }))
+        guard(|| crate::jet_std_hex_is_hex(&borrowed(a0)))
     }
 
     /// core.process.argv
@@ -18850,7 +18850,7 @@ mod jet_c_abi_routes {
     /// core.term.binwrite
     #[no_mangle]
     pub extern "C" fn jet_std_io_binwrite(a0: JetCString, a1_0: *const u64, a1_1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_io_binwrite(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| w as u8)) {
+        guard(|| match crate::jet_std_io_binwrite(&borrowed(a0), &list_in(a1_0, a1_1, |w| w as u8)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18865,7 +18865,7 @@ mod jet_c_abi_routes {
     /// core.term.choose
     #[no_mangle]
     pub extern "C" fn jet_std_io_choose(a0: JetCString, a1_0: *const u64, a1_1: i64, ok: *mut JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_io_choose(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| view(w as JetCString).to_owned())) {
+        guard(|| match crate::jet_std_io_choose(&borrowed(a0), &list_in(a1_0, a1_1, |w| view(w as JetCString).to_owned())) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18874,19 +18874,19 @@ mod jet_c_abi_routes {
     /// core.term.confirm
     #[no_mangle]
     pub extern "C" fn jet_std_io_confirm(a0: JetCString) -> bool {
-        guard(|| crate::jet_std_io_confirm(unsafe { &*a0 }))
+        guard(|| crate::jet_std_io_confirm(&borrowed(a0)))
     }
 
     /// core.term.eprint
     #[no_mangle]
     pub extern "C" fn jet_std_io_eprint(a0: JetCString) {
-        guard(|| crate::jet_std_io_eprint(unsafe { &*a0 }))
+        guard(|| crate::jet_std_io_eprint(&borrowed(a0)))
     }
 
     /// core.term.input_secret
     #[no_mangle]
     pub extern "C" fn jet_std_io_input_secret(a0: JetCString, ok: *mut JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_io_input_secret(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_io_input_secret(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18901,7 +18901,7 @@ mod jet_c_abi_routes {
     /// core.term.progress
     #[no_mangle]
     pub extern "C" fn jet_std_io_progress(a0: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_io_progress(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_io_progress(&borrowed(a0)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18919,7 +18919,7 @@ mod jet_c_abi_routes {
     /// core.term.read_until
     #[no_mangle]
     pub extern "C" fn jet_std_io_read_until(a0: JetCString, ok: *mut JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_io_read_until(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_io_read_until(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18958,7 +18958,7 @@ mod jet_c_abi_routes {
     /// core.handle.stderr.write
     #[no_mangle]
     pub extern "C" fn jet_std_io_stderr_write(a0: *mut crate::JetStderr, a1: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_io_stderr_write(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_std_io_stderr_write(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -18976,7 +18976,7 @@ mod jet_c_abi_routes {
     /// core.handle.stderr.write_line
     #[no_mangle]
     pub extern "C" fn jet_std_io_stderr_write_line(a0: *mut crate::JetStderr, a1: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_io_stderr_write_line(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_std_io_stderr_write_line(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -19012,7 +19012,7 @@ mod jet_c_abi_routes {
     /// core.handle.stdout.write
     #[no_mangle]
     pub extern "C" fn jet_std_io_stdout_write(a0: *mut crate::JetStdout, a1: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_io_stdout_write(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_std_io_stdout_write(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -19030,7 +19030,7 @@ mod jet_c_abi_routes {
     /// core.handle.stdout.write_line
     #[no_mangle]
     pub extern "C" fn jet_std_io_stdout_write_line(a0: *mut crate::JetStdout, a1: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_io_stdout_write_line(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_std_io_stdout_write_line(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -19039,13 +19039,13 @@ mod jet_c_abi_routes {
     /// core.term.style
     #[no_mangle]
     pub extern "C" fn jet_std_io_style(a0: JetCString, a1: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_std_io_style(unsafe { &*a0 }, unsafe { &*a1 })))
+        guard(|| handle(crate::jet_std_io_style(&borrowed(a0), &borrowed(a1))))
     }
 
     /// core.term.style_force
     #[no_mangle]
     pub extern "C" fn jet_std_io_style_force(a0: JetCString, a1: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_std_io_style_force(unsafe { &*a0 }, unsafe { &*a1 })))
+        guard(|| handle(crate::jet_std_io_style_force(&borrowed(a0), &borrowed(a1))))
     }
 
     /// core.term.take
@@ -19072,7 +19072,7 @@ mod jet_c_abi_routes {
     /// core.encoding.json.decode
     #[no_mangle]
     pub extern "C" fn jet_std_json_decode_lenient(a0: JetCString, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
-        guard(|| match crate::jet_std_json_decode_lenient(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_json_decode_lenient(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -19087,7 +19087,7 @@ mod jet_c_abi_routes {
     /// core.encoding.json.parse, core.encoding.json.loads
     #[no_mangle]
     pub extern "C" fn jet_std_json_parse(a0: JetCString, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
-        guard(|| match crate::jet_std_json_parse(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_json_parse(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -19108,19 +19108,19 @@ mod jet_c_abi_routes {
     /// core.encoding.jsonl.append_line
     #[no_mangle]
     pub extern "C" fn jet_std_jsonl_append_line(a0: JetCString, a1: *mut crate::jet_std::DataTree) -> JetCString {
-        guard(|| handle(crate::jet_std_jsonl_append_line(unsafe { &*a0 }, unsafe { &*a1 })))
+        guard(|| handle(crate::jet_std_jsonl_append_line(&borrowed(a0), unsafe { &*a1 })))
     }
 
     /// core.encoding.jsonl.count_rows
     #[no_mangle]
     pub extern "C" fn jet_std_jsonl_count_rows(a0: JetCString) -> i64 {
-        guard(|| (crate::jet_std_jsonl_count_rows(unsafe { &*a0 })).into_raw())
+        guard(|| (crate::jet_std_jsonl_count_rows(&borrowed(a0))).into_raw())
     }
 
     /// core.encoding.jsonl.parse, core.encoding.jsonl.loads
     #[no_mangle]
     pub extern "C" fn jet_std_jsonl_parse(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
-        guard(|| match crate::jet_std_jsonl_parse(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_jsonl_parse(&borrowed(a0)) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| Box::into_raw(Box::new(e)) as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -19938,7 +19938,7 @@ mod jet_c_abi_routes {
     /// core.sys.expand
     #[no_mangle]
     pub extern "C" fn jet_std_os_expand(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_std_os_expand(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_std_os_expand(&borrowed(a0))))
     }
 
     /// core.sys.family
@@ -20034,7 +20034,7 @@ mod jet_c_abi_routes {
     /// core.sys.initgroups
     #[no_mangle]
     pub extern "C" fn jet_std_os_initgroups(a0: JetCString, a1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_os_initgroups(unsafe { &*a0 }, a1) {
+        guard(|| match crate::jet_std_os_initgroups(&borrowed(a0), a1) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -20058,7 +20058,7 @@ mod jet_c_abi_routes {
     /// core.sys.mkfifo
     #[no_mangle]
     pub extern "C" fn jet_std_os_mkfifo(a0: JetCString, a1: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_os_mkfifo(unsafe { &*a0 }, a1) {
+        guard(|| match crate::jet_std_os_mkfifo(&borrowed(a0), a1) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -20094,7 +20094,7 @@ mod jet_c_abi_routes {
     /// core.sys.set_current_dir
     #[no_mangle]
     pub extern "C" fn jet_std_os_set_current_dir(a0: JetCString, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_os_set_current_dir(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_os_set_current_dir(&borrowed(a0)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -20199,7 +20199,7 @@ mod jet_c_abi_routes {
     /// core.sys.utime
     #[no_mangle]
     pub extern "C" fn jet_std_os_utime(a0: JetCString, a1: i64, a2: i64, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_std_os_utime(unsafe { &*a0 }, a1, a2) {
+        guard(|| match crate::jet_std_os_utime(&borrowed(a0), a1, a2) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -20286,12 +20286,6 @@ mod jet_c_abi_routes {
         guard(|| Box::into_raw(Box::new(crate::jet_std_rng_new(a0))))
     }
 
-    /// core.time.now
-    #[no_mangle]
-    pub extern "C" fn jet_std_time_now() -> i64 {
-        guard(|| crate::jet_std_time_now())
-    }
-
     /// core.time.sleep
     #[no_mangle]
     pub extern "C" fn jet_std_time_sleep_duration(a0: *mut crate::jet_std::Duration) {
@@ -20307,7 +20301,7 @@ mod jet_c_abi_routes {
     /// core.encoding.toml.parse, core.encoding.toml.load, core.encoding.toml.loads
     #[no_mangle]
     pub extern "C" fn jet_std_toml_parse(a0: JetCString, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
-        guard(|| match crate::jet_std_toml_parse(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_toml_parse(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -20334,7 +20328,7 @@ mod jet_c_abi_routes {
     /// core.encoding.xml.parse
     #[no_mangle]
     pub extern "C" fn jet_std_xml_parse(a0: JetCString, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut crate::jet_std::XMLError) -> i64 {
-        guard(|| match crate::jet_std_xml_parse(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_xml_parse(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -20343,7 +20337,7 @@ mod jet_c_abi_routes {
     /// core.encoding.xml.parse_with
     #[no_mangle]
     pub extern "C" fn jet_std_xml_parse_with(a0: JetCString, a1: *mut crate::jet_std::XMLParseOptions, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut crate::jet_std::XMLError) -> i64 {
-        guard(|| match crate::jet_std_xml_parse_with(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_std_xml_parse_with(&borrowed(a0), unsafe { &*a1 }) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -20379,7 +20373,7 @@ mod jet_c_abi_routes {
     /// core.encoding.yaml.parse
     #[no_mangle]
     pub extern "C" fn jet_std_yaml_parse(a0: JetCString, ok: *mut *mut crate::jet_std::DataTree, err: *mut *mut crate::jet_std::EncodingError) -> i64 {
-        guard(|| match crate::jet_std_yaml_parse(unsafe { &*a0 }) {
+        guard(|| match crate::jet_std_yaml_parse(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -20451,7 +20445,7 @@ mod jet_c_abi_routes {
     /// core.db.row_bool
     #[no_mangle]
     pub extern "C" fn jet_db_row_bool(a0: *mut crate::jet_std::JetDBRow, a1: JetCString, ok: *mut bool, err: *mut *mut crate::jet_std::DBError) -> i64 {
-        guard(|| match crate::jet_std::jet_db_row_bool(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_std::jet_db_row_bool(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(value) => { unsafe { ok.write(value) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -20460,7 +20454,7 @@ mod jet_c_abi_routes {
     /// core.db.row_float
     #[no_mangle]
     pub extern "C" fn jet_db_row_float(a0: *mut crate::jet_std::JetDBRow, a1: JetCString, ok: *mut f64, err: *mut *mut crate::jet_std::DBError) -> i64 {
-        guard(|| match crate::jet_std::jet_db_row_float(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_std::jet_db_row_float(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(value) => { unsafe { ok.write(value) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -20469,7 +20463,7 @@ mod jet_c_abi_routes {
     /// core.db.row_int
     #[no_mangle]
     pub extern "C" fn jet_db_row_int(a0: *mut crate::jet_std::JetDBRow, a1: JetCString, ok: *mut i64, err: *mut *mut crate::jet_std::DBError) -> i64 {
-        guard(|| match crate::jet_std::jet_db_row_int(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_std::jet_db_row_int(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(value) => { unsafe { ok.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -20478,7 +20472,7 @@ mod jet_c_abi_routes {
     /// core.db.row_text
     #[no_mangle]
     pub extern "C" fn jet_db_row_text(a0: *mut crate::jet_std::JetDBRow, a1: JetCString, ok: *mut JetCString, err: *mut *mut crate::jet_std::DBError) -> i64 {
-        guard(|| match crate::jet_std::jet_db_row_text(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_std::jet_db_row_text(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -20487,7 +20481,7 @@ mod jet_c_abi_routes {
     /// core.db.row_value
     #[no_mangle]
     pub extern "C" fn jet_db_row_value(a0: *mut crate::jet_std::JetDBRow, a1: JetCString, ok: *mut *mut crate::jet_std::DBValue, err: *mut *mut crate::jet_std::DBError) -> i64 {
-        guard(|| match crate::jet_std::jet_db_row_value(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_std::jet_db_row_value(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -20739,7 +20733,7 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn JetMIME_param(a0: *mut crate::jet_std::JetMIME, a1: JetCString, some: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_std::JetMIME::param(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_std::JetMIME::param(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(value) => { unsafe { some.write(handle(value)) }; 1 }
             Err(_) => 0,
         })
@@ -20934,25 +20928,25 @@ mod jet_c_abi_routes {
     /// core.builtin.bytes, core.builtin.bytes
     #[no_mangle]
     pub extern "C" fn jet_string_bytes(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_string_bytes(unsafe { &*a0 }).into_iter().map(|e| e as u64).collect(), data))
+        guard(|| list_out(crate::jet_string_bytes(&borrowed(a0)).into_iter().map(|e| e as u64).collect(), data))
     }
 
     /// core.builtin.string_chars
     #[no_mangle]
     pub extern "C" fn jet_string_chars(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_string_chars(unsafe { &*a0 }).into_iter().map(|e| e as u64).collect(), data))
+        guard(|| list_out(crate::jet_string_chars(&borrowed(a0)).into_iter().map(|e| e as u64).collect(), data))
     }
 
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_string_copy(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_string_copy(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_string_copy(&borrowed(a0))))
     }
 
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_string_count_bytes(a0: JetCString) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_string_count_bytes(unsafe { &*a0 })))
+        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_string_count_bytes(&borrowed(a0))))
     }
 
     /// core.builtin.string_from_bytes
@@ -20973,31 +20967,31 @@ mod jet_c_abi_routes {
     /// core.builtin.string_lines
     #[no_mangle]
     pub extern "C" fn jet_string_lines(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_string_lines(unsafe { &*a0 }).into_iter().map(|e| handle(e) as u64).collect(), data))
+        guard(|| list_out(crate::jet_string_lines(&borrowed(a0)).into_iter().map(|e| handle(e) as u64).collect(), data))
     }
 
     /// core.builtin.string_repeat
     #[no_mangle]
     pub extern "C" fn jet_string_repeat(a0: JetCString, a1: i64) -> JetCString {
-        guard(|| handle(crate::jet_string_repeat(unsafe { &*a0 }, a1)))
+        guard(|| handle(crate::jet_string_repeat(&borrowed(a0), a1)))
     }
 
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_string_replace(a0: JetCString, a1: JetCString, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_string_replace(unsafe { &*a0 }, unsafe { &*a1 }, unsafe { &*a2 })))
+        guard(|| handle(crate::jet_string_replace(&borrowed(a0), &borrowed(a1), &borrowed(a2))))
     }
 
     /// core.collections.slice_string
     #[no_mangle]
     pub extern "C" fn jet_string_slice(a0: JetCString, a1: i64, a2: i64, a3: JetCString, a4: i64) -> JetCString {
-        guard(|| handle(crate::jet_string_slice(unsafe { &*a0 }, a1, a2, view(a3), fixed::<u32>(a4))))
+        guard(|| handle(crate::jet_string_slice(&borrowed(a0), a1, a2, view(a3), fixed::<u32>(a4))))
     }
 
     /// core.builtin.string_slice
     #[no_mangle]
     pub extern "C" fn jet_string_slice_builtin(a0: JetCString, a1: i64, a2: i64) -> JetCString {
-        guard(|| handle(crate::jet_string_slice_builtin(unsafe { &*a0 }, a1, a2)))
+        guard(|| handle(crate::jet_string_slice_builtin(&borrowed(a0), a1, a2)))
     }
 
     /// core.term.read_key
@@ -21036,7 +21030,7 @@ mod jet_c_abi_routes {
     /// core.testing.corpus
     #[no_mangle]
     pub extern "C" fn jet_testing_corpus(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_testing_corpus(unsafe { &*a0 }).into_iter().map(|e| handle(e) as u64).collect(), data))
+        guard(|| list_out(crate::jet_testing_corpus(&borrowed(a0)).into_iter().map(|e| handle(e) as u64).collect(), data))
     }
 
     /// core.testing.fake_data
@@ -21048,13 +21042,13 @@ mod jet_c_abi_routes {
     /// core.testing.fixture
     #[no_mangle]
     pub extern "C" fn jet_testing_fixture(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_testing_fixture(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_testing_fixture(&borrowed(a0))))
     }
 
     /// core.testing.golden
     #[no_mangle]
     pub extern "C" fn jet_testing_golden(a0: JetCString, a1: JetCString) -> bool {
-        guard(|| crate::jet_testing_golden(unsafe { &*a0 }, unsafe { &*a1 }))
+        guard(|| crate::jet_testing_golden(&borrowed(a0), &borrowed(a1)))
     }
 
     /// core.handle.history_rng.below
@@ -21072,7 +21066,7 @@ mod jet_c_abi_routes {
     /// core.testing.snap
     #[no_mangle]
     pub extern "C" fn jet_testing_snap(a0: JetCString, a1: JetCString) -> bool {
-        guard(|| crate::jet_testing_snap(unsafe { &*a0 }, unsafe { &*a1 }))
+        guard(|| crate::jet_testing_snap(&borrowed(a0), &borrowed(a1)))
     }
 
     /// core.testing.status
@@ -21084,55 +21078,55 @@ mod jet_c_abi_routes {
     /// core.testing.temp_dir
     #[no_mangle]
     pub extern "C" fn jet_testing_temp_dir(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_testing_temp_dir(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_testing_temp_dir(&borrowed(a0))))
     }
 
     /// core.builtin.string_ascii_lower
     #[no_mangle]
     pub extern "C" fn jet_text_ascii_lower(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_ascii_lower(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_ascii_lower(&borrowed(a0))))
     }
 
     /// core.builtin.string_ascii_upper
     #[no_mangle]
     pub extern "C" fn jet_text_ascii_upper(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_ascii_upper(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_ascii_upper(&borrowed(a0))))
     }
 
     /// core.text.parse.capitalize
     #[no_mangle]
     pub extern "C" fn jet_text_capitalize(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_capitalize(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_capitalize(&borrowed(a0))))
     }
 
     /// core.text.casefold
     #[no_mangle]
     pub extern "C" fn jet_text_casefold(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_casefold(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_casefold(&borrowed(a0))))
     }
 
     /// core.text.caseless_eq
     #[no_mangle]
     pub extern "C" fn jet_text_caseless_eq(a0: JetCString, a1: JetCString) -> bool {
-        guard(|| crate::jet_text_caseless_eq(unsafe { &*a0 }, unsafe { &*a1 }))
+        guard(|| crate::jet_text_caseless_eq(&borrowed(a0), &borrowed(a1)))
     }
 
     /// core.text.center, core.text.parse.center
     #[no_mangle]
     pub extern "C" fn jet_text_center_i64(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_center_i64(unsafe { &*a0 }, a1, unsafe { &*a2 })))
+        guard(|| handle(crate::jet_text_center_i64(&borrowed(a0), a1, &borrowed(a2))))
     }
 
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_center_ref(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_center_ref(unsafe { &*a0 }, &unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) }, unsafe { &*a2 })))
+        guard(|| handle(crate::jet_text_center_ref(&borrowed(a0), &unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) }, &borrowed(a2))))
     }
 
     /// core.text.char_indices
     #[no_mangle]
     pub extern "C" fn jet_text_char_indices(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_char_indices(unsafe { &*a0 }).into_iter().map(|e| handle(e) as u64).collect(), data))
+        guard(|| list_out(crate::jet_text_char_indices(&borrowed(a0)).into_iter().map(|e| handle(e) as u64).collect(), data))
     }
 
     /// TIR/routes.rs
@@ -21144,253 +21138,253 @@ mod jet_c_abi_routes {
     /// core.text.wrap.dedent
     #[no_mangle]
     pub extern "C" fn jet_text_dedent(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_dedent(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_dedent(&borrowed(a0))))
     }
 
     /// core.text.parse.encode
     #[no_mangle]
     pub extern "C" fn jet_text_encode(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_encode(unsafe { &*a0 }).into_iter().map(|e| e as u64).collect(), data))
+        guard(|| list_out(crate::jet_text_encode(&borrowed(a0)).into_iter().map(|e| e as u64).collect(), data))
     }
 
     /// core.text.ends_any
     #[no_mangle]
     pub extern "C" fn jet_text_ends_any(a0: JetCString, a1_0: *const u64, a1_1: i64) -> bool {
-        guard(|| crate::jet_text_ends_any(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| view(w as JetCString).to_owned())))
+        guard(|| crate::jet_text_ends_any(&borrowed(a0), &list_in(a1_0, a1_1, |w| view(w as JetCString).to_owned())))
     }
 
     /// core.text.wrap.expand_tabs
     #[no_mangle]
     pub extern "C" fn jet_text_expand_tabs(a0: JetCString, a1: i64) -> JetCString {
-        guard(|| handle(crate::jet_text_expand_tabs(unsafe { &*a0 }, a1)))
+        guard(|| handle(crate::jet_text_expand_tabs(&borrowed(a0), a1)))
     }
 
     /// core.text.parse.expandtabs, core.builtin.expandtabs
     #[no_mangle]
     pub extern "C" fn jet_text_expandtabs(a0: JetCString, a1: i64) -> JetCString {
-        guard(|| handle(crate::jet_text_expandtabs(unsafe { &*a0 }, unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) })))
+        guard(|| handle(crate::jet_text_expandtabs(&borrowed(a0), unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) })))
     }
 
     /// core.text.wrap.fill
     #[no_mangle]
     pub extern "C" fn jet_text_fill(a0: JetCString, a1: i64) -> JetCString {
-        guard(|| handle(crate::jet_text_fill(unsafe { &*a0 }, a1)))
+        guard(|| handle(crate::jet_text_fill(&borrowed(a0), a1)))
     }
 
     /// core.text.graphemes
     #[no_mangle]
     pub extern "C" fn jet_text_graphemes(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_graphemes(unsafe { &*a0 }).into_iter().map(|e| handle(e) as u64).collect(), data))
+        guard(|| list_out(crate::jet_text_graphemes(&borrowed(a0)).into_iter().map(|e| handle(e) as u64).collect(), data))
     }
 
     /// core.text.wrap.hanging_indent
     #[no_mangle]
     pub extern "C" fn jet_text_hanging_indent(a0: JetCString, a1: JetCString, a2: JetCString, a3: i64) -> JetCString {
-        guard(|| handle(crate::jet_text_hanging_indent(unsafe { &*a0 }, unsafe { &*a1 }, unsafe { &*a2 }, a3)))
+        guard(|| handle(crate::jet_text_hanging_indent(&borrowed(a0), &borrowed(a1), &borrowed(a2), a3)))
     }
 
     /// core.text.wrap.html_escape, core.text.html.escape_quote
     #[no_mangle]
     pub extern "C" fn jet_text_html_escape(a0: JetCString, a1: u8) -> JetCString {
-        guard(|| handle(crate::jet_text_html_escape(unsafe { &*a0 }, a1 != 0)))
+        guard(|| handle(crate::jet_text_html_escape(&borrowed(a0), a1 != 0)))
     }
 
     /// core.text.html.escape, core.text.html.attr_escape
     #[no_mangle]
     pub extern "C" fn jet_text_html_escape_quoted(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_html_escape_quoted(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_html_escape_quoted(&borrowed(a0))))
     }
 
     /// core.text.html.text_escape
     #[no_mangle]
     pub extern "C" fn jet_text_html_escape_text(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_html_escape_text(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_html_escape_text(&borrowed(a0))))
     }
 
     /// core.text.html.strip_tags
     #[no_mangle]
     pub extern "C" fn jet_text_html_strip_tags(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_html_strip_tags(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_html_strip_tags(&borrowed(a0))))
     }
 
     /// core.text.wrap.html_unescape, core.text.html.unescape
     #[no_mangle]
     pub extern "C" fn jet_text_html_unescape(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_html_unescape(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_html_unescape(&borrowed(a0))))
     }
 
     /// core.text.html.unescape_and_strip
     #[no_mangle]
     pub extern "C" fn jet_text_html_unescape_and_strip(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_html_unescape_and_strip(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_html_unescape_and_strip(&borrowed(a0))))
     }
 
     /// core.text.wrap.indent
     #[no_mangle]
     pub extern "C" fn jet_text_indent(a0: JetCString, a1: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_indent(unsafe { &*a0 }, unsafe { &*a1 })))
+        guard(|| handle(crate::jet_text_indent(&borrowed(a0), &borrowed(a1))))
     }
 
     /// core.text.wrap.indent_with
     #[no_mangle]
     pub extern "C" fn jet_text_indent_with(a0: JetCString, a1: JetCString, a2: u8) -> JetCString {
-        guard(|| handle(crate::jet_text_indent_with(unsafe { &*a0 }, unsafe { &*a1 }, a2 != 0)))
+        guard(|| handle(crate::jet_text_indent_with(&borrowed(a0), &borrowed(a1), a2 != 0)))
     }
 
     /// core.text.inspect
     #[no_mangle]
     pub extern "C" fn jet_text_inspect(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_inspect(unsafe { &*a0 }).into_iter().map(|e| handle(e) as u64).collect(), data))
+        guard(|| list_out(crate::jet_text_inspect(&borrowed(a0)).into_iter().map(|e| handle(e) as u64).collect(), data))
     }
 
     /// core.text.is_alphabetic, core.text.parse.isalpha, core.builtin.string_is_alphabetic
     #[no_mangle]
     pub extern "C" fn jet_text_is_alphabetic(a0: JetCString) -> bool {
-        guard(|| crate::jet_text_is_alphabetic(unsafe { &*a0 }))
+        guard(|| crate::jet_text_is_alphabetic(&borrowed(a0)))
     }
 
     /// core.text.parse.islower, core.text.parse.is_lower
     #[no_mangle]
     pub extern "C" fn jet_text_is_lower(a0: JetCString) -> bool {
-        guard(|| crate::jet_text_is_lower(unsafe { &*a0 }))
+        guard(|| crate::jet_text_is_lower(&borrowed(a0)))
     }
 
     /// core.text.is_numeric, core.builtin.string_is_numeric
     #[no_mangle]
     pub extern "C" fn jet_text_is_numeric(a0: JetCString) -> bool {
-        guard(|| crate::jet_text_is_numeric(unsafe { &*a0 }))
+        guard(|| crate::jet_text_is_numeric(&borrowed(a0)))
     }
 
     /// core.text.parse.isupper, core.text.parse.is_upper
     #[no_mangle]
     pub extern "C" fn jet_text_is_upper(a0: JetCString) -> bool {
-        guard(|| crate::jet_text_is_upper(unsafe { &*a0 }))
+        guard(|| crate::jet_text_is_upper(&borrowed(a0)))
     }
 
     /// core.text.is_whitespace, core.text.parse.isspace, core.text.parse.is_space, core.builtin.string_is_whitespace
     #[no_mangle]
     pub extern "C" fn jet_text_is_whitespace(a0: JetCString) -> bool {
-        guard(|| crate::jet_text_is_whitespace(unsafe { &*a0 }))
+        guard(|| crate::jet_text_is_whitespace(&borrowed(a0)))
     }
 
     /// core.text.parse.isalnum, core.text.parse.is_alnum
     #[no_mangle]
     pub extern "C" fn jet_text_isalnum(a0: JetCString) -> bool {
-        guard(|| crate::jet_text_isalnum(unsafe { &*a0 }))
+        guard(|| crate::jet_text_isalnum(&borrowed(a0)))
     }
 
     /// core.text.parse.isdecimal
     #[no_mangle]
     pub extern "C" fn jet_text_isdecimal(a0: JetCString) -> bool {
-        guard(|| crate::jet_text_isdecimal(unsafe { &*a0 }))
+        guard(|| crate::jet_text_isdecimal(&borrowed(a0)))
     }
 
     /// core.text.parse.isdigit, core.text.parse.is_digit
     #[no_mangle]
     pub extern "C" fn jet_text_isdigit(a0: JetCString) -> bool {
-        guard(|| crate::jet_text_isdigit(unsafe { &*a0 }))
+        guard(|| crate::jet_text_isdigit(&borrowed(a0)))
     }
 
     /// core.text.parse.isidentifier, core.text.parse.is_identifier
     #[no_mangle]
     pub extern "C" fn jet_text_isidentifier(a0: JetCString) -> bool {
-        guard(|| crate::jet_text_isidentifier(unsafe { &*a0 }))
+        guard(|| crate::jet_text_isidentifier(&borrowed(a0)))
     }
 
     /// core.text.parse.isnumeric
     #[no_mangle]
     pub extern "C" fn jet_text_isnumeric(a0: JetCString) -> bool {
-        guard(|| crate::jet_text_isnumeric(unsafe { &*a0 }))
+        guard(|| crate::jet_text_isnumeric(&borrowed(a0)))
     }
 
     /// core.text.parse.isprintable
     #[no_mangle]
     pub extern "C" fn jet_text_isprintable(a0: JetCString) -> bool {
-        guard(|| crate::jet_text_isprintable(unsafe { &*a0 }))
+        guard(|| crate::jet_text_isprintable(&borrowed(a0)))
     }
 
     /// core.text.parse.istitle, core.text.parse.is_title
     #[no_mangle]
     pub extern "C" fn jet_text_istitle(a0: JetCString) -> bool {
-        guard(|| crate::jet_text_istitle(unsafe { &*a0 }))
+        guard(|| crate::jet_text_istitle(&borrowed(a0)))
     }
 
     /// core.text.lower, core.text.parse.lower
     #[no_mangle]
     pub extern "C" fn jet_text_lower(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_lower(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_lower(&borrowed(a0))))
     }
 
     /// core.text.nfc
     #[no_mangle]
     pub extern "C" fn jet_text_nfc(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_nfc(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_nfc(&borrowed(a0))))
     }
 
     /// core.text.nfd
     #[no_mangle]
     pub extern "C" fn jet_text_nfd(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_nfd(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_nfd(&borrowed(a0))))
     }
 
     /// core.text.nfkc
     #[no_mangle]
     pub extern "C" fn jet_text_nfkc(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_nfkc(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_nfkc(&borrowed(a0))))
     }
 
     /// core.text.nfkd
     #[no_mangle]
     pub extern "C" fn jet_text_nfkd(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_nfkd(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_nfkd(&borrowed(a0))))
     }
 
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_normalize_nfc(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_normalize_nfc(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_normalize_nfc(&borrowed(a0))))
     }
 
     /// core.builtin.string_pad_end
     #[no_mangle]
     pub extern "C" fn jet_text_pad_end(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_pad_end(unsafe { &*a0 }, unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) }, unsafe { &*a2 })))
+        guard(|| handle(crate::jet_text_pad_end(&borrowed(a0), unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) }, &borrowed(a2))))
     }
 
     /// core.text.pad_end, core.text.parse.ljust
     #[no_mangle]
     pub extern "C" fn jet_text_pad_end_i64(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_pad_end_i64(unsafe { &*a0 }, a1, unsafe { &*a2 })))
+        guard(|| handle(crate::jet_text_pad_end_i64(&borrowed(a0), a1, &borrowed(a2))))
     }
 
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_pad_end_ref(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_pad_end_ref(unsafe { &*a0 }, &unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) }, unsafe { &*a2 })))
+        guard(|| handle(crate::jet_text_pad_end_ref(&borrowed(a0), &unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) }, &borrowed(a2))))
     }
 
     /// core.builtin.string_pad_start
     #[no_mangle]
     pub extern "C" fn jet_text_pad_start(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_pad_start(unsafe { &*a0 }, unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) }, unsafe { &*a2 })))
+        guard(|| handle(crate::jet_text_pad_start(&borrowed(a0), unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) }, &borrowed(a2))))
     }
 
     /// core.text.pad_start, core.text.parse.rjust
     #[no_mangle]
     pub extern "C" fn jet_text_pad_start_i64(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_pad_start_i64(unsafe { &*a0 }, a1, unsafe { &*a2 })))
+        guard(|| handle(crate::jet_text_pad_start_i64(&borrowed(a0), a1, &borrowed(a2))))
     }
 
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_pad_start_ref(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_pad_start_ref(unsafe { &*a0 }, &unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) }, unsafe { &*a2 })))
+        guard(|| handle(crate::jet_text_pad_start_ref(&borrowed(a0), &unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) }, &borrowed(a2))))
     }
 
     /// core.text.parse.parse_bool
     #[no_mangle]
     pub extern "C" fn jet_text_parse_bool(a0: JetCString, some: *mut bool) -> i64 {
-        guard(|| match crate::jet_text_parse_bool(unsafe { &*a0 }) {
+        guard(|| match crate::jet_text_parse_bool(&borrowed(a0)) {
             Some(value) => { unsafe { some.write(value) }; 1 }
             None => 0,
         })
@@ -21399,43 +21393,43 @@ mod jet_c_abi_routes {
     /// core.text.parse.capwords
     #[no_mangle]
     pub extern "C" fn jet_text_parse_capwords(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_parse_capwords(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_parse_capwords(&borrowed(a0))))
     }
 
     /// core.text.parse.contains
     #[no_mangle]
     pub extern "C" fn jet_text_parse_contains(a0: JetCString, a1: JetCString) -> bool {
-        guard(|| crate::jet_text_parse_contains(unsafe { &*a0 }, unsafe { &*a1 }))
+        guard(|| crate::jet_text_parse_contains(&borrowed(a0), &borrowed(a1)))
     }
 
     /// core.text.parse.count
     #[no_mangle]
     pub extern "C" fn jet_text_parse_count(a0: JetCString, a1: JetCString) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_parse_count(unsafe { &*a0 }, unsafe { &*a1 })))
+        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_parse_count(&borrowed(a0), &borrowed(a1))))
     }
 
     /// core.text.parse.escape_c
     #[no_mangle]
     pub extern "C" fn jet_text_parse_escape_c(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_parse_escape_c(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_parse_escape_c(&borrowed(a0))))
     }
 
     /// core.text.parse.find
     #[no_mangle]
     pub extern "C" fn jet_text_parse_find(a0: JetCString, a1: JetCString) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_parse_find(unsafe { &*a0 }, unsafe { &*a1 })))
+        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_parse_find(&borrowed(a0), &borrowed(a1))))
     }
 
     /// core.text.parse.find_from
     #[no_mangle]
     pub extern "C" fn jet_text_parse_find_from(a0: JetCString, a1: JetCString, a2: i64) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_parse_find_from(unsafe { &*a0 }, unsafe { &*a1 }, a2)))
+        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_parse_find_from(&borrowed(a0), &borrowed(a1), a2)))
     }
 
     /// core.text.parse.parse_float
     #[no_mangle]
     pub extern "C" fn jet_text_parse_float(a0: JetCString, some: *mut f64) -> i64 {
-        guard(|| match crate::jet_text_parse_float(unsafe { &*a0 }) {
+        guard(|| match crate::jet_text_parse_float(&borrowed(a0)) {
             Some(value) => { unsafe { some.write(value) }; 1 }
             None => 0,
         })
@@ -21444,13 +21438,13 @@ mod jet_c_abi_routes {
     /// core.text.parse.index
     #[no_mangle]
     pub extern "C" fn jet_text_parse_index(a0: JetCString, a1: JetCString) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_parse_index(unsafe { &*a0 }, unsafe { &*a1 })))
+        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_parse_index(&borrowed(a0), &borrowed(a1))))
     }
 
     /// core.text.parse.parse_int, core.text.parse.parse
     #[no_mangle]
     pub extern "C" fn jet_text_parse_int(a0: JetCString, some: *mut i64) -> i64 {
-        guard(|| match crate::jet_text_parse_int(unsafe { &*a0 }) {
+        guard(|| match crate::jet_text_parse_int(&borrowed(a0)) {
             Some(value) => { unsafe { some.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
             None => 0,
         })
@@ -21459,7 +21453,7 @@ mod jet_c_abi_routes {
     /// core.text.parse.parse_int_base
     #[no_mangle]
     pub extern "C" fn jet_text_parse_int_base(a0: JetCString, a1: i64, some: *mut i64) -> i64 {
-        guard(|| match crate::jet_text_parse_int_base(unsafe { &*a0 }, a1) {
+        guard(|| match crate::jet_text_parse_int_base(&borrowed(a0), a1) {
             Some(value) => { unsafe { some.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
             None => 0,
         })
@@ -21468,14 +21462,14 @@ mod jet_c_abi_routes {
     /// core.text.parse.join
     #[no_mangle]
     pub extern "C" fn jet_text_parse_join(a0_0: *const u64, a0_1: i64, a1: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_parse_join(&list_in(a0_0, a0_1, |w| view(w as JetCString).to_owned()), unsafe { &*a1 })))
+        guard(|| handle(crate::jet_text_parse_join(&list_in(a0_0, a0_1, |w| view(w as JetCString).to_owned()), &borrowed(a1))))
     }
 
     /// core.text.parse.parse_kv
     #[no_mangle]
     pub extern "C" fn jet_text_parse_kv(a0: JetCString, a1: JetCString, item0: *mut JetCString, item1: *mut bool, item2: *mut JetCString) {
         guard(|| {
-            let (e0, e1, e2) = crate::jet_text_parse_kv(unsafe { &*a0 }, unsafe { &*a1 });
+            let (e0, e1, e2) = crate::jet_text_parse_kv(&borrowed(a0), &borrowed(a1));
             unsafe { item0.write(handle(e0)) };
             unsafe { item1.write(e1) };
             unsafe { item2.write(handle(e2)) };
@@ -21485,14 +21479,14 @@ mod jet_c_abi_routes {
     /// core.text.parse.lstrip
     #[no_mangle]
     pub extern "C" fn jet_text_parse_lstrip(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_parse_lstrip(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_parse_lstrip(&borrowed(a0))))
     }
 
     /// core.text.parse.partition
     #[no_mangle]
     pub extern "C" fn jet_text_parse_partition(a0: JetCString, a1: JetCString, item0: *mut JetCString, item1: *mut JetCString, item2: *mut JetCString) {
         guard(|| {
-            let (e0, e1, e2) = crate::jet_text_parse_partition(unsafe { &*a0 }, unsafe { &*a1 });
+            let (e0, e1, e2) = crate::jet_text_parse_partition(&borrowed(a0), &borrowed(a1));
             unsafe { item0.write(handle(e0)) };
             unsafe { item1.write(handle(e1)) };
             unsafe { item2.write(handle(e2)) };
@@ -21502,26 +21496,26 @@ mod jet_c_abi_routes {
     /// core.text.parse.replace
     #[no_mangle]
     pub extern "C" fn jet_text_parse_replace_n(a0: JetCString, a1: JetCString, a2: JetCString, a3: i64) -> JetCString {
-        guard(|| handle(crate::jet_text_parse_replace_n(unsafe { &*a0 }, unsafe { &*a1 }, unsafe { &*a2 }, a3)))
+        guard(|| handle(crate::jet_text_parse_replace_n(&borrowed(a0), &borrowed(a1), &borrowed(a2), a3)))
     }
 
     /// core.text.parse.rfind
     #[no_mangle]
     pub extern "C" fn jet_text_parse_rfind(a0: JetCString, a1: JetCString) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_parse_rfind(unsafe { &*a0 }, unsafe { &*a1 })))
+        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_parse_rfind(&borrowed(a0), &borrowed(a1))))
     }
 
     /// core.text.parse.rfind_from
     #[no_mangle]
     pub extern "C" fn jet_text_parse_rfind_from(a0: JetCString, a1: JetCString, a2: i64) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_parse_rfind_from(unsafe { &*a0 }, unsafe { &*a1 }, a2)))
+        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_parse_rfind_from(&borrowed(a0), &borrowed(a1), a2)))
     }
 
     /// core.text.parse.rpartition
     #[no_mangle]
     pub extern "C" fn jet_text_parse_rpartition(a0: JetCString, a1: JetCString, item0: *mut JetCString, item1: *mut JetCString, item2: *mut JetCString) {
         guard(|| {
-            let (e0, e1, e2) = crate::jet_text_parse_rpartition(unsafe { &*a0 }, unsafe { &*a1 });
+            let (e0, e1, e2) = crate::jet_text_parse_rpartition(&borrowed(a0), &borrowed(a1));
             unsafe { item0.write(handle(e0)) };
             unsafe { item1.write(handle(e1)) };
             unsafe { item2.write(handle(e2)) };
@@ -21531,26 +21525,26 @@ mod jet_c_abi_routes {
     /// core.text.parse.rsplit
     #[no_mangle]
     pub extern "C" fn jet_text_parse_rsplit(a0: JetCString, a1: JetCString, a2: i64, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_parse_rsplit(unsafe { &*a0 }, unsafe { &*a1 }, a2).into_iter().map(|e| handle(e) as u64).collect(), data))
+        guard(|| list_out(crate::jet_text_parse_rsplit(&borrowed(a0), &borrowed(a1), a2).into_iter().map(|e| handle(e) as u64).collect(), data))
     }
 
     /// core.text.parse.rstrip
     #[no_mangle]
     pub extern "C" fn jet_text_parse_rstrip(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_parse_rstrip(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_parse_rstrip(&borrowed(a0))))
     }
 
     /// core.text.parse.split
     #[no_mangle]
     pub extern "C" fn jet_text_parse_split(a0: JetCString, a1: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_parse_split(unsafe { &*a0 }, unsafe { &*a1 }).into_iter().map(|e| handle(e) as u64).collect(), data))
+        guard(|| list_out(crate::jet_text_parse_split(&borrowed(a0), &borrowed(a1)).into_iter().map(|e| handle(e) as u64).collect(), data))
     }
 
     /// core.text.parse.split_once
     #[no_mangle]
     pub extern "C" fn jet_text_parse_split_once(a0: JetCString, a1: JetCString, item0: *mut bool, item1: *mut JetCString, item2: *mut JetCString) {
         guard(|| {
-            let (e0, e1, e2) = crate::jet_text_parse_split_once(unsafe { &*a0 }, unsafe { &*a1 });
+            let (e0, e1, e2) = crate::jet_text_parse_split_once(&borrowed(a0), &borrowed(a1));
             unsafe { item0.write(e0) };
             unsafe { item1.write(handle(e1)) };
             unsafe { item2.write(handle(e2)) };
@@ -21560,169 +21554,169 @@ mod jet_c_abi_routes {
     /// core.text.parse.split_ws
     #[no_mangle]
     pub extern "C" fn jet_text_parse_split_ws(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_parse_split_ws(unsafe { &*a0 }).into_iter().map(|e| handle(e) as u64).collect(), data))
+        guard(|| list_out(crate::jet_text_parse_split_ws(&borrowed(a0)).into_iter().map(|e| handle(e) as u64).collect(), data))
     }
 
     /// core.text.parse.splitlines
     #[no_mangle]
     pub extern "C" fn jet_text_parse_splitlines(a0: JetCString, a1: u8, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_parse_splitlines(unsafe { &*a0 }, a1 != 0).into_iter().map(|e| handle(e) as u64).collect(), data))
+        guard(|| list_out(crate::jet_text_parse_splitlines(&borrowed(a0), a1 != 0).into_iter().map(|e| handle(e) as u64).collect(), data))
     }
 
     /// core.text.parse.strip
     #[no_mangle]
     pub extern "C" fn jet_text_parse_strip(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_parse_strip(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_parse_strip(&borrowed(a0))))
     }
 
     /// core.text.parse.unescape_c
     #[no_mangle]
     pub extern "C" fn jet_text_parse_unescape_c(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_parse_unescape_c(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_parse_unescape_c(&borrowed(a0))))
     }
 
     /// core.text.parse.removeprefix, core.text.parse.strip_prefix
     #[no_mangle]
     pub extern "C" fn jet_text_remove_prefix(a0: JetCString, a1: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_remove_prefix(unsafe { &*a0 }, unsafe { &*a1 })))
+        guard(|| handle(crate::jet_text_remove_prefix(&borrowed(a0), &borrowed(a1))))
     }
 
     /// core.text.parse.removesuffix, core.text.parse.strip_suffix
     #[no_mangle]
     pub extern "C" fn jet_text_remove_suffix(a0: JetCString, a1: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_remove_suffix(unsafe { &*a0 }, unsafe { &*a1 })))
+        guard(|| handle(crate::jet_text_remove_suffix(&borrowed(a0), &borrowed(a1))))
     }
 
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_reverse(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_reverse(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_reverse(&borrowed(a0))))
     }
 
     /// core.text.parse.rindex
     #[no_mangle]
     pub extern "C" fn jet_text_rindex(a0: JetCString, a1: JetCString) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_rindex(unsafe { &*a0 }, unsafe { &*a1 })))
+        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_rindex(&borrowed(a0), &borrowed(a1))))
     }
 
     /// core.text.rsplitn
     #[no_mangle]
     pub extern "C" fn jet_text_rsplitn(a0: JetCString, a1: JetCString, a2: i64, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_rsplitn(unsafe { &*a0 }, unsafe { &*a1 }, a2).into_iter().map(|e| handle(e) as u64).collect(), data))
+        guard(|| list_out(crate::jet_text_rsplitn(&borrowed(a0), &borrowed(a1), a2).into_iter().map(|e| handle(e) as u64).collect(), data))
     }
 
     /// core.text.sentences
     #[no_mangle]
     pub extern "C" fn jet_text_sentences(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_sentences(unsafe { &*a0 }).into_iter().map(|e| handle(e) as u64).collect(), data))
+        guard(|| list_out(crate::jet_text_sentences(&borrowed(a0)).into_iter().map(|e| handle(e) as u64).collect(), data))
     }
 
     /// core.text.wrap.shorten
     #[no_mangle]
     pub extern "C" fn jet_text_shorten(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_shorten(unsafe { &*a0 }, a1, unsafe { &*a2 })))
+        guard(|| handle(crate::jet_text_shorten(&borrowed(a0), a1, &borrowed(a2))))
     }
 
     /// core.text.splitn
     #[no_mangle]
     pub extern "C" fn jet_text_splitn(a0: JetCString, a1: JetCString, a2: i64, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_splitn(unsafe { &*a0 }, unsafe { &*a1 }, a2).into_iter().map(|e| handle(e) as u64).collect(), data))
+        guard(|| list_out(crate::jet_text_splitn(&borrowed(a0), &borrowed(a1), a2).into_iter().map(|e| handle(e) as u64).collect(), data))
     }
 
     /// core.text.starts_any
     #[no_mangle]
     pub extern "C" fn jet_text_starts_any(a0: JetCString, a1_0: *const u64, a1_1: i64) -> bool {
-        guard(|| crate::jet_text_starts_any(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| view(w as JetCString).to_owned())))
+        guard(|| crate::jet_text_starts_any(&borrowed(a0), &list_in(a1_0, a1_1, |w| view(w as JetCString).to_owned())))
     }
 
     /// core.text.parse.swapcase
     #[no_mangle]
     pub extern "C" fn jet_text_swapcase(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_swapcase(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_swapcase(&borrowed(a0))))
     }
 
     /// core.text.parse.title, core.builtin.string_to_title
     #[no_mangle]
     pub extern "C" fn jet_text_title(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_title(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_title(&borrowed(a0))))
     }
 
     /// core.text.trim
     #[no_mangle]
     pub extern "C" fn jet_text_trim(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_trim(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_trim(&borrowed(a0))))
     }
 
     /// core.text.trim_end, core.builtin.string_trim_end
     #[no_mangle]
     pub extern "C" fn jet_text_trim_end(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_trim_end(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_trim_end(&borrowed(a0))))
     }
 
     /// core.text.trim_start, core.builtin.string_trim_start
     #[no_mangle]
     pub extern "C" fn jet_text_trim_start(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_trim_start(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_trim_start(&borrowed(a0))))
     }
 
     /// core.text.byte_count
     #[no_mangle]
     pub extern "C" fn jet_text_unicode_byte_count(a0: JetCString) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_unicode_byte_count(unsafe { &*a0 })))
+        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_unicode_byte_count(&borrowed(a0))))
     }
 
     /// core.text.is_ascii, core.text.parse.isascii, core.text.parse.is_ascii, core.builtin.string_is_ascii
     #[no_mangle]
     pub extern "C" fn jet_text_unicode_is_ascii(a0: JetCString) -> bool {
-        guard(|| crate::jet_text_unicode_is_ascii(unsafe { &*a0 }))
+        guard(|| crate::jet_text_unicode_is_ascii(&borrowed(a0)))
     }
 
     /// core.text.scalar_count
     #[no_mangle]
     pub extern "C" fn jet_text_unicode_scalar_count(a0: JetCString) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_unicode_scalar_count(unsafe { &*a0 })))
+        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_unicode_scalar_count(&borrowed(a0))))
     }
 
     /// core.text.scalars
     #[no_mangle]
     pub extern "C" fn jet_text_unicode_scalars(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_unicode_scalars(unsafe { &*a0 }).into_iter().map(|e| handle(e) as u64).collect(), data))
+        guard(|| list_out(crate::jet_text_unicode_scalars(&borrowed(a0)).into_iter().map(|e| handle(e) as u64).collect(), data))
     }
 
     /// core.text.upper, core.text.parse.upper
     #[no_mangle]
     pub extern "C" fn jet_text_upper(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_upper(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_text_upper(&borrowed(a0))))
     }
 
     /// core.text.words
     #[no_mangle]
     pub extern "C" fn jet_text_words(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_words(unsafe { &*a0 }).into_iter().map(|e| handle(e) as u64).collect(), data))
+        guard(|| list_out(crate::jet_text_words(&borrowed(a0)).into_iter().map(|e| handle(e) as u64).collect(), data))
     }
 
     /// core.text.wrap.wrap
     #[no_mangle]
     pub extern "C" fn jet_text_wrap(a0: JetCString, a1: i64, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_wrap(unsafe { &*a0 }, a1).into_iter().map(|e| handle(e) as u64).collect(), data))
+        guard(|| list_out(crate::jet_text_wrap(&borrowed(a0), a1).into_iter().map(|e| handle(e) as u64).collect(), data))
     }
 
     /// core.text.wrap.wrap_paragraphs
     #[no_mangle]
     pub extern "C" fn jet_text_wrap_paragraphs(a0: JetCString, a1: i64) -> JetCString {
-        guard(|| handle(crate::jet_text_wrap_paragraphs(unsafe { &*a0 }, a1)))
+        guard(|| handle(crate::jet_text_wrap_paragraphs(&borrowed(a0), a1)))
     }
 
     /// core.text.parse.zfill
     #[no_mangle]
     pub extern "C" fn jet_text_zfill(a0: JetCString, a1: i64) -> JetCString {
-        guard(|| handle(crate::jet_text_zfill(unsafe { &*a0 }, a1)))
+        guard(|| handle(crate::jet_text_zfill(&borrowed(a0), a1)))
     }
 
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_zfill_ref(a0: JetCString, a1: i64) -> JetCString {
-        guard(|| handle(crate::jet_text_zfill_ref(unsafe { &*a0 }, &unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) })))
+        guard(|| handle(crate::jet_text_zfill_ref(&borrowed(a0), &unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) })))
     }
 
     /// core.time.datetime
@@ -21782,7 +21776,7 @@ mod jet_c_abi_routes {
         guard(|| crate::jet_time_is_leap_year(a0))
     }
 
-    /// core.time.now_utc
+    /// core.time.now, core.time.now_utc
     #[no_mangle]
     pub extern "C" fn jet_time_now_utc() -> *mut crate::JetDateTime {
         guard(|| Box::into_raw(Box::new(crate::jet_time_now_utc())))
@@ -21791,7 +21785,7 @@ mod jet_c_abi_routes {
     /// core.time.parse_rfc3339
     #[no_mangle]
     pub extern "C" fn jet_time_parse_rfc3339(a0: JetCString, ok: *mut *mut crate::JetDateTime, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_time_parse_rfc3339(unsafe { &*a0 }) {
+        guard(|| match crate::jet_time_parse_rfc3339(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -21800,7 +21794,7 @@ mod jet_c_abi_routes {
     /// core.time.parse_zoned
     #[no_mangle]
     pub extern "C" fn jet_time_parse_zoned(a0: JetCString, ok: *mut *mut crate::JetZonedDateTime, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_time_parse_zoned(unsafe { &*a0 }) {
+        guard(|| match crate::jet_time_parse_zoned(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -21845,7 +21839,7 @@ mod jet_c_abi_routes {
     /// core.time.zone
     #[no_mangle]
     pub extern "C" fn jet_time_zone_named(a0: JetCString, ok: *mut *mut crate::JetZone, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_time_zone_named(unsafe { &*a0 }) {
+        guard(|| match crate::jet_time_zone_named(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -21866,7 +21860,7 @@ mod jet_c_abi_routes {
     /// core.time.zoned_local
     #[no_mangle]
     pub extern "C" fn jet_time_zoned_local(a0: *mut crate::JetDate, a1: *mut crate::JetLocalTime, a2: *mut crate::JetZone, a3: JetCString, ok: *mut *mut crate::JetZonedDateTime, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_time_zoned_local(unsafe { &*a0 }, unsafe { &*a1 }, unsafe { &*a2 }, unsafe { &*a3 }) {
+        guard(|| match crate::jet_time_zoned_local(unsafe { &*a0 }, unsafe { &*a1 }, unsafe { &*a2 }, &borrowed(a3)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -22388,25 +22382,25 @@ mod jet_c_abi_routes {
     /// core.net.url.data
     #[no_mangle]
     pub extern "C" fn jet_url_data(a0: *mut crate::jet_std::JetMIME, a1: JetCString) -> *mut crate::jet_std::JetURL {
-        guard(|| Box::into_raw(Box::new(crate::jet_url_data(unsafe { &*a0 }, unsafe { &*a1 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_url_data(unsafe { &*a0 }, &borrowed(a1)))))
     }
 
     /// core.net.url.file
     #[no_mangle]
     pub extern "C" fn jet_url_file(a0: JetCString) -> *mut crate::jet_std::JetURL {
-        guard(|| Box::into_raw(Box::new(crate::jet_url_file(unsafe { &*a0 }))))
+        guard(|| Box::into_raw(Box::new(crate::jet_url_file(&borrowed(a0)))))
     }
 
     /// core.net.url.urljoin
     #[no_mangle]
     pub extern "C" fn jet_url_join(a0: JetCString, a1: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_url_join(unsafe { &*a0 }, unsafe { &*a1 })))
+        guard(|| handle(crate::jet_url_join(&borrowed(a0), &borrowed(a1))))
     }
 
     /// core.net.url.parse, core.net.url.urlparse, core.net.url.urlsplit
     #[no_mangle]
     pub extern "C" fn jet_url_parse(a0: JetCString, ok: *mut *mut crate::jet_std::JetURL, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_url_parse(unsafe { &*a0 }) {
+        guard(|| match crate::jet_url_parse(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -22415,7 +22409,7 @@ mod jet_c_abi_routes {
     /// core.net.url.percent_decode
     #[no_mangle]
     pub extern "C" fn jet_url_percent_decode_component(a0: JetCString, ok: *mut JetCString, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_url_percent_decode_component(unsafe { &*a0 }) {
+        guard(|| match crate::jet_url_percent_decode_component(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -22424,13 +22418,13 @@ mod jet_c_abi_routes {
     /// core.net.url.percent_encode
     #[no_mangle]
     pub extern "C" fn jet_url_percent_encode_component(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_url_percent_encode_component(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_url_percent_encode_component(&borrowed(a0))))
     }
 
     /// core.net.url.quote
     #[no_mangle]
     pub extern "C" fn jet_url_quote(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_url_quote(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_url_quote(&borrowed(a0))))
     }
 
     /// core.net.url.quote_from_bytes
@@ -22442,14 +22436,14 @@ mod jet_c_abi_routes {
     /// core.net.url.quote_plus
     #[no_mangle]
     pub extern "C" fn jet_url_quote_plus(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_url_quote_plus(unsafe { &*a0 })))
+        guard(|| handle(crate::jet_url_quote_plus(&borrowed(a0))))
     }
 
     /// core.net.url.split_fragment
     #[no_mangle]
     pub extern "C" fn jet_url_split_fragment(a0: JetCString, item0: *mut JetCString, item1: *mut JetCString) {
         guard(|| {
-            let (e0, e1) = crate::jet_url_split_fragment(unsafe { &*a0 });
+            let (e0, e1) = crate::jet_url_split_fragment(&borrowed(a0));
             unsafe { item0.write(handle(e0)) };
             unsafe { item1.write(handle(e1)) };
         })
@@ -22464,7 +22458,7 @@ mod jet_c_abi_routes {
     /// core.net.url.unquote
     #[no_mangle]
     pub extern "C" fn jet_url_unquote(a0: JetCString, ok: *mut JetCString, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_url_unquote(unsafe { &*a0 }) {
+        guard(|| match crate::jet_url_unquote(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -22473,7 +22467,7 @@ mod jet_c_abi_routes {
     /// core.net.url.unquote_plus
     #[no_mangle]
     pub extern "C" fn jet_url_unquote_plus(a0: JetCString, ok: *mut JetCString, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_url_unquote_plus(unsafe { &*a0 }) {
+        guard(|| match crate::jet_url_unquote_plus(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -22482,7 +22476,7 @@ mod jet_c_abi_routes {
     /// core.net.url.unquote_to_bytes
     #[no_mangle]
     pub extern "C" fn jet_url_unquote_to_bytes(a0: JetCString, ok: *mut *mut u64, ok_len: *mut i64, err: *mut JetCString) -> i64 {
-        guard(|| match crate::jet_url_unquote_to_bytes(unsafe { &*a0 }) {
+        guard(|| match crate::jet_url_unquote_to_bytes(&borrowed(a0)) {
             Ok(value) => { let len = list_out(value.into_iter().map(|e| e as u64).collect(), ok); unsafe { ok_len.write(len) }; 1 }
             Err(error) => { unsafe { err.write(handle(error)) }; 0 }
         })
@@ -22492,7 +22486,7 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_url_urldefrag(a0: JetCString, item0: *mut JetCString, item1: *mut JetCString) {
         guard(|| {
-            let (e0, e1) = crate::jet_url_urldefrag(unsafe { &*a0 });
+            let (e0, e1) = crate::jet_url_urldefrag(&borrowed(a0));
             unsafe { item0.write(handle(e0)) };
             unsafe { item1.write(handle(e1)) };
         })
@@ -22501,7 +22495,7 @@ mod jet_c_abi_routes {
     /// core.watcher.files
     #[no_mangle]
     pub extern "C" fn jet_watcher_files(a0: JetCString, ok: *mut *mut crate::jet_std::WatchHandle, err: *mut *mut crate::jet_std::IOError) -> i64 {
-        guard(|| match crate::jet_watcher_files(unsafe { &*a0 }) {
+        guard(|| match crate::jet_watcher_files(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -22510,7 +22504,7 @@ mod jet_c_abi_routes {
     /// core.watcher.port
     #[no_mangle]
     pub extern "C" fn jet_watcher_port(a0: JetCString, a1: i64) -> *mut crate::jet_std::WatchHandle {
-        guard(|| Box::into_raw(Box::new(crate::jet_watcher_port(unsafe { &*a0 }, a1))))
+        guard(|| Box::into_raw(Box::new(crate::jet_watcher_port(&borrowed(a0), a1))))
     }
 
     /// core.watcher.process_pid
@@ -22552,7 +22546,7 @@ mod jet_c_abi_routes {
     /// core.handle.ws.close
     #[no_mangle]
     pub extern "C" fn jet_ws_close(a0: *mut crate::JetWsConn, a1: i64, a2: JetCString, err: *mut *mut crate::JetWsError) -> i64 {
-        guard(|| match crate::jet_ws_close(unsafe { &*a0 }, a1, unsafe { &*a2 }) {
+        guard(|| match crate::jet_ws_close(unsafe { &*a0 }, a1, &borrowed(a2)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -22561,7 +22555,7 @@ mod jet_c_abi_routes {
     /// core.net.ws.connect
     #[no_mangle]
     pub extern "C" fn jet_ws_connect(a0: JetCString, ok: *mut *mut crate::JetWsConn, err: *mut *mut crate::JetWsError) -> i64 {
-        guard(|| match crate::jet_ws_connect(unsafe { &*a0 }) {
+        guard(|| match crate::jet_ws_connect(&borrowed(a0)) {
             Ok(value) => { unsafe { ok.write(Box::into_raw(Box::new(value))) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -22594,7 +22588,7 @@ mod jet_c_abi_routes {
     /// core.handle.ws.send_text
     #[no_mangle]
     pub extern "C" fn jet_ws_send_text(a0: *mut crate::JetWsConn, a1: JetCString, err: *mut *mut crate::JetWsError) -> i64 {
-        guard(|| match crate::jet_ws_send_text(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::jet_ws_send_text(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(()) => 1,
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -22696,7 +22690,7 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn JetDate_format_checked_text(a0: *mut crate::JetDate, a1: JetCString, ok: *mut JetCString, err: *mut *mut crate::jet_std::TextError) -> i64 {
-        guard(|| match crate::JetDate::format_checked_text(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::JetDate::format_checked_text(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -22705,7 +22699,7 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn JetDate_format_pattern(a0: *mut crate::JetDate, a1: JetCString) -> JetCString {
-        guard(|| handle(crate::JetDate::format_pattern(unsafe { &*a0 }, unsafe { &*a1 })))
+        guard(|| handle(crate::JetDate::format_pattern(unsafe { &*a0 }, &borrowed(a1))))
     }
 
     /// TIR/routes.rs
@@ -22777,7 +22771,7 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn JetDate_since_duration(a0: *mut crate::JetDate, a1: *mut crate::JetDate, a2: JetCString, a3: JetCString, a4: JetCString, a5: i64) -> *mut crate::jet_std::Duration {
-        guard(|| Box::into_raw(Box::new(crate::JetDate::since_duration(unsafe { &*a0 }, unsafe { &*a1 }.clone(), unsafe { &*a2 }, unsafe { &*a3 }, unsafe { &*a4 }, a5))))
+        guard(|| Box::into_raw(Box::new(crate::JetDate::since_duration(unsafe { &*a0 }, unsafe { &*a1 }.clone(), &borrowed(a2), &borrowed(a3), &borrowed(a4), a5))))
     }
 
     /// TIR/routes.rs
@@ -22795,13 +22789,13 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn JetDate_truncate(a0: *mut crate::JetDate, a1: JetCString) -> *mut crate::JetDate {
-        guard(|| Box::into_raw(Box::new(crate::JetDate::truncate(unsafe { &*a0 }, unsafe { &*a1 }))))
+        guard(|| Box::into_raw(Box::new(crate::JetDate::truncate(unsafe { &*a0 }, &borrowed(a1)))))
     }
 
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn JetDate_until_duration(a0: *mut crate::JetDate, a1: *mut crate::JetDate, a2: JetCString, a3: JetCString, a4: JetCString, a5: i64) -> *mut crate::jet_std::Duration {
-        guard(|| Box::into_raw(Box::new(crate::JetDate::until_duration(unsafe { &*a0 }, unsafe { &*a1 }.clone(), unsafe { &*a2 }, unsafe { &*a3 }, unsafe { &*a4 }, a5))))
+        guard(|| Box::into_raw(Box::new(crate::JetDate::until_duration(unsafe { &*a0 }, unsafe { &*a1 }.clone(), &borrowed(a2), &borrowed(a3), &borrowed(a4), a5))))
     }
 
     /// TIR/routes.rs
@@ -22876,7 +22870,7 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn JetDateTime_format_checked_text(a0: *mut crate::JetDateTime, a1: JetCString, ok: *mut JetCString, err: *mut *mut crate::jet_std::TextError) -> i64 {
-        guard(|| match crate::JetDateTime::format_checked_text(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::JetDateTime::format_checked_text(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -22885,7 +22879,7 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn JetDateTime_format_pattern(a0: *mut crate::JetDateTime, a1: JetCString) -> JetCString {
-        guard(|| handle(crate::JetDateTime::format_pattern(unsafe { &*a0 }, unsafe { &*a1 })))
+        guard(|| handle(crate::JetDateTime::format_pattern(unsafe { &*a0 }, &borrowed(a1))))
     }
 
     /// TIR/routes.rs
@@ -22963,7 +22957,7 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn JetDateTime_since_duration(a0: *mut crate::JetDateTime, a1: *mut crate::JetDateTime, a2: JetCString, a3: JetCString, a4: JetCString, a5: i64) -> *mut crate::jet_std::Duration {
-        guard(|| Box::into_raw(Box::new(crate::JetDateTime::since_duration(unsafe { &*a0 }, unsafe { &*a1 }.clone(), unsafe { &*a2 }, unsafe { &*a3 }, unsafe { &*a4 }, a5))))
+        guard(|| Box::into_raw(Box::new(crate::JetDateTime::since_duration(unsafe { &*a0 }, unsafe { &*a1 }.clone(), &borrowed(a2), &borrowed(a3), &borrowed(a4), a5))))
     }
 
     /// TIR/routes.rs
@@ -23035,7 +23029,7 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn JetDateTime_until_duration(a0: *mut crate::JetDateTime, a1: *mut crate::JetDateTime, a2: JetCString, a3: JetCString, a4: JetCString, a5: i64) -> *mut crate::jet_std::Duration {
-        guard(|| Box::into_raw(Box::new(crate::JetDateTime::until_duration(unsafe { &*a0 }, unsafe { &*a1 }.clone(), unsafe { &*a2 }, unsafe { &*a3 }, unsafe { &*a4 }, a5))))
+        guard(|| Box::into_raw(Box::new(crate::JetDateTime::until_duration(unsafe { &*a0 }, unsafe { &*a1 }.clone(), &borrowed(a2), &borrowed(a3), &borrowed(a4), a5))))
     }
 
     /// TIR/routes.rs
@@ -23110,7 +23104,7 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn JetLocalTime_format_checked_text(a0: *mut crate::JetLocalTime, a1: JetCString, ok: *mut JetCString, err: *mut *mut crate::jet_std::TextError) -> i64 {
-        guard(|| match crate::JetLocalTime::format_checked_text(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::JetLocalTime::format_checked_text(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -23119,7 +23113,7 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn JetLocalTime_format_pattern(a0: *mut crate::JetLocalTime, a1: JetCString) -> JetCString {
-        guard(|| handle(crate::JetLocalTime::format_pattern(unsafe { &*a0 }, unsafe { &*a1 })))
+        guard(|| handle(crate::JetLocalTime::format_pattern(unsafe { &*a0 }, &borrowed(a1))))
     }
 
     /// TIR/routes.rs
@@ -23182,7 +23176,7 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn JetLocalTime_since_duration(a0: *mut crate::JetLocalTime, a1: *mut crate::JetLocalTime, a2: JetCString, a3: JetCString, a4: JetCString, a5: i64) -> *mut crate::jet_std::Duration {
-        guard(|| Box::into_raw(Box::new(crate::JetLocalTime::since_duration(unsafe { &*a0 }, unsafe { &*a1 }.clone(), unsafe { &*a2 }, unsafe { &*a3 }, unsafe { &*a4 }, a5))))
+        guard(|| Box::into_raw(Box::new(crate::JetLocalTime::since_duration(unsafe { &*a0 }, unsafe { &*a1 }.clone(), &borrowed(a2), &borrowed(a3), &borrowed(a4), a5))))
     }
 
     /// TIR/routes.rs
@@ -23206,7 +23200,7 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn JetLocalTime_until_duration(a0: *mut crate::JetLocalTime, a1: *mut crate::JetLocalTime, a2: JetCString, a3: JetCString, a4: JetCString, a5: i64) -> *mut crate::jet_std::Duration {
-        guard(|| Box::into_raw(Box::new(crate::JetLocalTime::until_duration(unsafe { &*a0 }, unsafe { &*a1 }.clone(), unsafe { &*a2 }, unsafe { &*a3 }, unsafe { &*a4 }, a5))))
+        guard(|| Box::into_raw(Box::new(crate::JetLocalTime::until_duration(unsafe { &*a0 }, unsafe { &*a1 }.clone(), &borrowed(a2), &borrowed(a3), &borrowed(a4), a5))))
     }
 
     /// TIR/routes.rs
@@ -23350,7 +23344,7 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn JetZonedDateTime_format_checked_text(a0: *mut crate::JetZonedDateTime, a1: JetCString, ok: *mut JetCString, err: *mut *mut crate::jet_std::TextError) -> i64 {
-        guard(|| match crate::JetZonedDateTime::format_checked_text(unsafe { &*a0 }, unsafe { &*a1 }) {
+        guard(|| match crate::JetZonedDateTime::format_checked_text(unsafe { &*a0 }, &borrowed(a1)) {
             Ok(value) => { unsafe { ok.write(handle(value)) }; 1 }
             Err(error) => { unsafe { err.write(Box::into_raw(Box::new(error))) }; 0 }
         })
@@ -23359,7 +23353,7 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn JetZonedDateTime_format_pattern(a0: *mut crate::JetZonedDateTime, a1: JetCString) -> JetCString {
-        guard(|| handle(crate::JetZonedDateTime::format_pattern(unsafe { &*a0 }, unsafe { &*a1 })))
+        guard(|| handle(crate::JetZonedDateTime::format_pattern(unsafe { &*a0 }, &borrowed(a1))))
     }
 
     /// TIR/routes.rs
@@ -23407,7 +23401,7 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn JetZonedDateTime_since_duration(a0: *mut crate::JetZonedDateTime, a1: *mut crate::JetZonedDateTime, a2: JetCString, a3: JetCString, a4: JetCString, a5: i64) -> *mut crate::jet_std::Duration {
-        guard(|| Box::into_raw(Box::new(crate::JetZonedDateTime::since_duration(unsafe { &*a0 }, unsafe { &*a1 }.clone(), unsafe { &*a2 }, unsafe { &*a3 }, unsafe { &*a4 }, a5))))
+        guard(|| Box::into_raw(Box::new(crate::JetZonedDateTime::since_duration(unsafe { &*a0 }, unsafe { &*a1 }.clone(), &borrowed(a2), &borrowed(a3), &borrowed(a4), a5))))
     }
 
     /// TIR/routes.rs
@@ -23449,7 +23443,7 @@ mod jet_c_abi_routes {
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn JetZonedDateTime_until_duration(a0: *mut crate::JetZonedDateTime, a1: *mut crate::JetZonedDateTime, a2: JetCString, a3: JetCString, a4: JetCString, a5: i64) -> *mut crate::jet_std::Duration {
-        guard(|| Box::into_raw(Box::new(crate::JetZonedDateTime::until_duration(unsafe { &*a0 }, unsafe { &*a1 }.clone(), unsafe { &*a2 }, unsafe { &*a3 }, unsafe { &*a4 }, a5))))
+        guard(|| Box::into_raw(Box::new(crate::JetZonedDateTime::until_duration(unsafe { &*a0 }, unsafe { &*a1 }.clone(), &borrowed(a2), &borrowed(a3), &borrowed(a4), a5))))
     }
 
     /// TIR/routes.rs

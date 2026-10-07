@@ -799,9 +799,9 @@ impl JetDateTime {
         )
     }
     pub(crate) fn now() -> Self {
-        // Keep host nanosecond precision outside a world. A controlled world
-        // intentionally exposes its millisecond wall-clock origin.
-        if let Some(millis) = jet_scheduler_world_now_ms() {
+        // Replay and controlled worlds share the wall-clock provider with
+        // deadlines. Uncontrolled host reads retain nanosecond precision.
+        if let Some(millis) = jet_scheduler_world_now_ms().or_else(jet_time_wall_override_ms) {
             return JetDateTime {
                 secs: millis.div_euclid(1_000),
                 nanos: millis.rem_euclid(1_000) as u32 * 1_000_000,

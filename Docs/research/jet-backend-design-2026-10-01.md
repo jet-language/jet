@@ -154,7 +154,7 @@ IR with these choices, which the Jet lowering keeps or replaces as noted:
 | `Char`, `IntN(_, 64)` | word | `i64` | none |
 | `Bool` | flag | `i8` (Integer 1, 0 or 1) | none |
 | `Unit`, `Never` | no LIR value | — | — |
-| `String` | runtime handle | `ptr` | `jet_rt_string_drop` |
+| `String` | runtime handle to a C-layout `{ptr, len, cap}` UTF-8 header (byte counts, words at offsets 0/8/16 on x64) | `ptr` | `jet_rt_string_drop` |
 | `RangeCursor`, `IterCursor` | runtime handle | `ptr` | `jet_loop_cursor_drop` |
 | struct, tuple | inline aggregate: pointer to storage holding the stored fields at natural offsets (`Lower/Values.jet`) | `ptr` | generated glue on the storage (frees nothing) |
 | enum, every variant without payload | discriminant word | `i64` | none |
@@ -376,6 +376,20 @@ printed); `jet_loop_cursor_drop` frees a range cursor. A runtime stop renders
 its report and exits the process; nothing unwinds into generated frames.
 Prelude and Core routes go through adapters that `Tools/agent/gen-c-abi-routes.mjs`
 generates (`CAbiRoutes.rs`, with the carrier table `Lower/RuntimeRoutes.jet`).
+Text has one C-ABI carrier, `JetCText`, not Rust's unspecified `String` layout.
+Owning headers and buffers are allocated/freed by `jet_rt_alloc`/`jet_rt_free`;
+empty buffers have capacity zero and a non-null dangling pointer. The Rust
+boundary copies a returned Rust String into this domain, and copies text out
+before consuming a carrier as a Rust-owned String. Read-only `&str` kernels
+borrow its UTF-8 bytes; remaining `&String` signatures receive a Rust-owned
+temporary copy. Builders grow with the runtime allocator and finish by
+transferring the unchanged header. Runtime-handle String field projections
+write a borrowed header into caller stack storage; that header and its bytes
+are never freed or grown, and owning reads clone it. Native compiler text
+marshaling continues to use `jet_rt_string_data`/`jet_rt_string_byte_len`,
+never Rust layout. This contract applies to the linked runtime pack; the
+standalone freestanding image runtime is separate and retires with L3.
+
 A Jet type that generated Rust holds as a native runtime type crosses as an owned
 `Box<T>` handle. The generator reads Context.rs and predicates.rs name tables and the
 explicit names in MIRRust `rust_apply_type`, using the same canonical-Core probe as
