@@ -210,7 +210,7 @@ pub(crate) mod collection_semantics {
     // supply the AOT failure/receipt siblings that the flat Prelude expects.
     #[allow(dead_code)]
     mod jet_std {
-        pub(crate) use crate::Encoding::json_rt::{render_datatree_json, DataTree};
+        pub(crate) use crate::Encoding::json_rt::{render_dyn_json, Dyn};
     }
     #[allow(dead_code)]
     struct JetParaFailure {

@@ -504,16 +504,16 @@ pub(crate) struct IndexHook {
 }
 
 // D-ENC-DYN1=A+: the dynamic encoding value `Data` (+ aliases `JSON`/`TOML`/
-// `YAML`/`CSV`) is the user-facing face of `jet_std::DataTree`.
+// `YAML`/`CSV`) is the user-facing face of `jet_std::Dyn`.
 pub(crate) fn is_json_type_name(name: &str) -> bool {
     Syntax::is_data_type_name(name)
 }
 
-/// Whether a checked pattern subject is the dynamic `DataTree` value. User
+/// Whether a checked pattern subject is the dynamic `Dyn` value. User
 /// enums may declare the same variant names (`Int`, `Text`, `Null`, …), so a
-/// variant pattern takes the DataTree owner only from its subject type, never
+/// variant pattern takes the Dyn owner only from its subject type, never
 /// from the variant name alone.
-pub(crate) fn is_data_tree_subject(cx: &Cx, subject_ty: &Type) -> bool {
+pub(crate) fn is_dyn_subject(cx: &Cx, subject_ty: &Type) -> bool {
     match subject_ty.without_user_tags() {
         Type::Named(name) | Type::Apply { name, .. } => {
             is_json_type_name(name)
@@ -783,7 +783,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         None => name,
     };
     match name {
-        n if is_json_type_name(n) => Some("DataTree"),
+        n if is_json_type_name(n) => Some("Dyn"),
         n if n == Syntax::TYPE_IO_ERROR || n == "IOError" => Some("IOError"),
         n if n == Syntax::TYPE_IO_CONTEXT => Some("IOContext"),
         n if n == Syntax::TYPE_IO_OPERATION => Some("IOOperation"),
@@ -920,7 +920,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "LogSpan" => Some("LogSpan"),
         // D-SERDE2 / D-VALIDATE-DECODE1: the value tree and accumulated typed
         // decode errors live in jet_std.
-        "DataTree" => Some("DataTree"),
+        "Dyn" => Some("Dyn"),
         "EncodingLimits" => Some("EncodingLimits"),
         "EncodingError" => Some("EncodingError"),
         "EncodingCause" => Some("EncodingCause"),
@@ -1727,7 +1727,7 @@ impl Cx {
             (Some("core.sys"), "EnvError") => Some("EnvError"),
             (Some("core.mem"), "AllocError") => Some("AllocError"),
             (Some("core.encoding"), "DataEvent") => Some("DataEvent"),
-            (Some("core.encoding"), "DataTree") => Some("DataTree"),
+            (Some("core.encoding"), "Dyn") => Some("Dyn"),
             (Some("core.encoding"), "EncodingLimits") => Some("EncodingLimits"),
             (Some("core.encoding"), "EncodingError") => Some("EncodingError"),
             (Some("core.encoding"), "EncodingCause") => Some("EncodingCause"),
@@ -7020,7 +7020,7 @@ pub(crate) fn field_type_cloneable(
         }
         // c148: recognize both single-char heuristic and declared multi-char params.
         Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
-        // D-SERDE: the dynamic data surface is the Clone-backed DataTree in
+        // D-SERDE: the dynamic data surface is the Clone-backed Dyn in
         // every canonical spelling, so records containing it can satisfy the
         // generated decoder's existing result-retention path.
         Type::Named(n) if is_json_type_name(n) || n == "Tensor" => true,
@@ -7070,8 +7070,8 @@ pub(crate) fn field_type_cloneable(
 }
 
 pub(crate) fn type_is_hashable_struct(s: &StructDef, types: &HashSet<String>) -> bool {
-    // D-BOUND-EVOLVE1=A: published records carry an ordered DataTree holder.
-    // DataTree intentionally has no Eq/Hash contract (it can contain Float),
+    // D-BOUND-EVOLVE1=A: published records carry an ordered Dyn holder.
+    // Dyn intentionally has no Eq/Hash contract (it can contain Float),
     // so the hidden holder must not make the source record claim those Rust
     // storage traits.
     if s.is_published_schema {

@@ -44,7 +44,7 @@ pub fn nix_index_parse_oracle_for_producer(bytes: [U8], system: String, revision
     Ok(candidates)
 }
 
-fn nix_index_parse_oracle_record(value: DataTree, system: String) -> NixIndexOracleCandidate NixIndexError! {
+fn nix_index_parse_oracle_record(value: Dyn, system: String) -> NixIndexOracleCandidate NixIndexError! {
     map :: nix_index_object(value, "oracle record")
     nix_index_reject_unknown(map, [String]{"system", "attrpath", "version", "drvPath", "outputs", "cache"})
     if map.get("system") == {
@@ -80,7 +80,7 @@ fn nix_index_parse_oracle_record(value: DataTree, system: String) -> NixIndexOra
 }
 
 // Oracle outputs: the index wire array, or Nix's `{name: {path}}` map.
-fn nix_index_parse_oracle_outputs(value: DataTree) -> [NixIndexOutputWire] NixIndexError! {
+fn nix_index_parse_oracle_outputs(value: Dyn) -> [NixIndexOutputWire] NixIndexError! {
     outputs := [NixIndexOutputWire]{}
     if value == {
         .Array(items) -> {
@@ -168,36 +168,36 @@ fn nix_index_coverage_reason(candidate: NixIndexOracleCandidate, store_paths: [S
 fn nix_index_generation_report(decoded: [U8], compressed: [U8], document: NixIndexDocument) -> String Never! {
     output_count := 0
     loop record in document.records -> output_count += record.outputs.len()
-    pkg_json_render(DataTree.Object([
-        "schema": DataTree.Int(1),
-        "channel": DataTree.Text(document.channel),
-        "revision": DataTree.Text(document.revision),
-        "system": DataTree.Text(document.system),
-        "released_unix": DataTree.Int(document.released_unix),
-        "compressed_bytes": DataTree.Int(compressed.len()),
-        "decoded_bytes": DataTree.Int(decoded.len()),
-        "record_count": DataTree.Int(document.records.len()),
-        "output_count": DataTree.Int(output_count),
-        "indexed_count": DataTree.Int(document.coverage.indexed.len()),
-        "not_indexed_count": DataTree.Int(document.coverage.not_indexed.len()),
+    pkg_json_render(Dyn.Object([
+        "schema": Dyn.Int(1),
+        "channel": Dyn.Text(document.channel),
+        "revision": Dyn.Text(document.revision),
+        "system": Dyn.Text(document.system),
+        "released_unix": Dyn.Int(document.released_unix),
+        "compressed_bytes": Dyn.Int(compressed.len()),
+        "decoded_bytes": Dyn.Int(decoded.len()),
+        "record_count": Dyn.Int(document.records.len()),
+        "output_count": Dyn.Int(output_count),
+        "indexed_count": Dyn.Int(document.coverage.indexed.len()),
+        "not_indexed_count": Dyn.Int(document.coverage.not_indexed.len()),
     ]))
 }
 
 // The indexed and not-indexed attribute paths of one decoded index.
 pub fn nix_index_producer_coverage_report(decoded: [U8]) -> String NixIndexError! {
     document :: NixIndexDocument.parse(decoded)
-    indexed := [DataTree]{}
+    indexed := [Dyn]{}
     loop attrpath in document.coverage.indexed -> &indexed.push(pkg_json_texts(attrpath))
-    misses := [DataTree]{}
+    misses := [Dyn]{}
     loop miss in document.coverage.not_indexed -> &misses.push(miss.tree())
-    Ok(pkg_json_render(DataTree.Object([
-        "schema": DataTree.Int(1),
-        "channel": DataTree.Text(document.channel),
-        "revision": DataTree.Text(document.revision),
-        "system": DataTree.Text(document.system),
-        "indexed": DataTree.Array(indexed),
-        "notIndexed": DataTree.Array(misses),
-        "scope": DataTree.Text(@NIX_INDEX_COVERAGE_SCOPE),
+    Ok(pkg_json_render(Dyn.Object([
+        "schema": Dyn.Int(1),
+        "channel": Dyn.Text(document.channel),
+        "revision": Dyn.Text(document.revision),
+        "system": Dyn.Text(document.system),
+        "indexed": Dyn.Array(indexed),
+        "notIndexed": Dyn.Array(misses),
+        "scope": Dyn.Text(@NIX_INDEX_COVERAGE_SCOPE),
     ])))
 }
 

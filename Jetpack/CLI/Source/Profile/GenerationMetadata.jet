@@ -83,7 +83,7 @@ pub struct ToolGenerationTool {
         &out.push(if last -> "    }}\n" else -> "    }},\n")
     }
 
-    fn from_json_tree(value: DataTree) -> ToolGenerationTool CliError! {
+    fn from_json_tree(value: Dyn) -> ToolGenerationTool CliError! {
         tool :: pkg_json_object(value) ?? return Err(CliError.InvalidData("profile tool entry is not an object"))
         cli_json_expect_exact_keys(tool, [String]{"bins", "members", "name", "output_hash", "projection_hashes", "reference", "source", "store_root", "version"}, "profile tool")
         Ok(ToolGenerationTool{
@@ -133,7 +133,7 @@ pub struct ToolGenerationMetadata {
         generation :: cli_json_integer_field(root, "generation")
         if generation != expected_generation || generation == 0 -> return Err(CliError.InvalidData("tool generation metadata disagrees with path"))
         created_at :: cli_json_integer_field(root, "created_at")
-        entries :: pkg_json_array(root.get("tools") ?? DataTree.Null) ?? return Err(CliError.InvalidData("profile tools field is not an array"))
+        entries :: pkg_json_array(root.get("tools") ?? Dyn.Null) ?? return Err(CliError.InvalidData("profile tools field is not an array"))
         if entries.len() > @TOOL_PROFILE_MAX_TOOLS -> return Err(CliError.InvalidData("profile tool count exceeds bound"))
         tools := [ToolGenerationTool]{}
         loop entry in entries -> &tools.push(ToolGenerationTool.from_json_tree(entry))
@@ -287,7 +287,7 @@ fn cli_profile_validate_string(value: String) CliError! {
     }
 }
 
-fn cli_profile_bounded_string(object: [String: DataTree], key: String) -> String CliError! {
+fn cli_profile_bounded_string(object: [String: Dyn], key: String) -> String CliError! {
     value :: cli_json_string_field(object, key)
     cli_profile_validate_string(value)
     Ok(value)
@@ -303,7 +303,7 @@ fn cli_profile_string_array_line(out: &[String], key: String, values: [String], 
 
 // One JSON string literal.
 pub fn cli_json_quote(value: String) -> String Never! {
-    pkg_json_render(DataTree.Text(value))
+    pkg_json_render(Dyn.Text(value))
 }
 
 // `[a,b]` of JSON string literals, no spaces.
@@ -313,14 +313,14 @@ pub fn cli_json_quote_list(values: [String]) -> String Never! {
     quoted.join(",")
 }
 
-pub fn cli_json_parse(text: String) -> DataTree CliError! {
+pub fn cli_json_parse(text: String) -> Dyn CliError! {
     if json.parse(text) == {
         .Ok(tree) -> Ok(tree)
         .Err(error) -> Err(CliError.InvalidData(error.reason))
     }
 }
 
-pub fn cli_json_expect_exact_keys(object: [String: DataTree], expected: [String], label: String) CliError! {
+pub fn cli_json_expect_exact_keys(object: [String: Dyn], expected: [String], label: String) CliError! {
     actual := object.keys().to_list()
     &actual.sort()
     wanted := expected
@@ -328,15 +328,15 @@ pub fn cli_json_expect_exact_keys(object: [String: DataTree], expected: [String]
     if actual != wanted -> return Err(CliError.InvalidData("{label} has unknown or missing fields"))
 }
 
-pub fn cli_json_string_field(object: [String: DataTree], key: String) -> String CliError! {
+pub fn cli_json_string_field(object: [String: Dyn], key: String) -> String CliError! {
     value :: object.get(key) ?? return Err(CliError.InvalidData("missing key `{key}`"))
-    text :: pkg_json_text(value) ?? return Err(CliError.InvalidData("expected a DataTree string"))
+    text :: pkg_json_text(value) ?? return Err(CliError.InvalidData("expected a Dyn string"))
     Ok(text)
 }
 
 // A non-negative exact integer; a float counts only when it is integral and
 // no larger than 2^53 - 1.
-pub fn cli_json_integer_field(object: [String: DataTree], key: String) -> Int CliError! {
+pub fn cli_json_integer_field(object: [String: Dyn], key: String) -> Int CliError! {
     value :: object.get(key) ?? return Err(CliError.InvalidData("profile field `{key}` is not a number"))
     exact :: if value == {
         .Int(number) -> if number >= 0 -> Val(number) else -> None
@@ -349,11 +349,11 @@ pub fn cli_json_integer_field(object: [String: DataTree], key: String) -> Int Cl
 
 // A string array whose members are at most `max_len` bytes; `forbid_nul`
 // additionally refuses a NUL byte (the manifest readers).
-pub fn cli_json_string_array(object: [String: DataTree], key: String, max_len: Int, forbid_nul: Bool) -> [String] CliError! {
-    values :: pkg_json_array(object.get(key) ?? DataTree.Null) ?? return Err(CliError.InvalidData("profile field `{key}` is not an array"))
+pub fn cli_json_string_array(object: [String: Dyn], key: String, max_len: Int, forbid_nul: Bool) -> [String] CliError! {
+    values :: pkg_json_array(object.get(key) ?? Dyn.Null) ?? return Err(CliError.InvalidData("profile field `{key}` is not an array"))
     out := [String]{}
     loop value in values {
-        text :: pkg_json_text(value) ?? return Err(CliError.InvalidData("expected a DataTree string"))
+        text :: pkg_json_text(value) ?? return Err(CliError.InvalidData("expected a Dyn string"))
         if text.bytes().len() > max_len || (forbid_nul && text.bytes().contains(U8{0})) -> return Err(CliError.InvalidData("profile field `{key}` exceeds bounds"))
         &out.push(text)
     }

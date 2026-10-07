@@ -2324,14 +2324,14 @@ pub(super) fn lower_expr(
                 let Some((value, clone)) = arg.as_deref() else {
                     return Err(ctx.error(
                         ctx.span(),
-                        "DataTree.Object is missing its checked map payload",
+                        "Dyn.Object is missing its checked map payload",
                     ));
                 };
                 if let TExprKind::MapLit(entries) = &value.kind {
                     return lower_ordered_object_encode(ctx, expr, entries);
                 }
                 // Compiler-generated struct encoders accumulate their
-                // `[(key: String, value: DataTree)]` pairs in field order. That
+                // `[(key: String, value: Dyn)]` pairs in field order. That
                 // list is already the Object payload every engine consumes, so
                 // it becomes the payload unchanged instead of being re-read as a
                 // key-ordered map.
@@ -2360,7 +2360,7 @@ pub(super) fn lower_expr(
                     true,
                 );
             }
-            let type_id = ctx.type_id_for("DataTree")?;
+            let type_id = ctx.type_id_for("Dyn")?;
             let args = arg
                 .as_deref()
                 .map(|(value, clone)| lower_cloned_value(ctx, value, *clone))
@@ -4308,15 +4308,15 @@ pub(super) fn lower_expr(
                     }),
                 );
             }
-            if datatree_access_route(op, &carrier).is_some() {
-                return lower_datatree_access(ctx, expr, recv, args, op, &carrier);
+            if dyn_access_route(op, &carrier).is_some() {
+                return lower_dyn_access(ctx, expr, recv, args, op, &carrier);
             }
 
             if matches!(op, super::THandleOp::SerdeEncode) {
                 return lower_serde_encode(ctx, expr, recv);
             }
-            if let super::THandleOp::DataTreeDecode(target) = op {
-                return lower_datatree_decode(ctx, expr, recv, target);
+            if let super::THandleOp::DynDecode(target) = op {
+                return lower_dyn_decode(ctx, expr, recv, target);
             }
             if matches!(op, super::THandleOp::HTTPRespHeader) {
                 return lower_http_response_header(ctx, expr, recv, args);
@@ -9955,30 +9955,30 @@ fn lower_fn_value(
     }
 }
 
-fn datatree_access_route(op: &THandleOp, carrier: &TFailureCarrier) -> Option<TPreludeRoute> {
+fn dyn_access_route(op: &THandleOp, carrier: &TFailureCarrier) -> Option<TPreludeRoute> {
     let (member, symbol, arity, borrow_mask) = match op {
-        THandleOp::DataTreeField | THandleOp::JSONField => {
-            ("field", "jet_datatree_field", 2, vec![true, true])
+        THandleOp::DynField | THandleOp::JSONField => {
+            ("field", "jet_dyn_field", 2, vec![true, true])
         }
-        THandleOp::DataTreeAt | THandleOp::JSONAt => {
-            ("at", "jet_datatree_at", 2, vec![true, false])
+        THandleOp::DynAt | THandleOp::JSONAt => {
+            ("at", "jet_dyn_at", 2, vec![true, false])
         }
-        THandleOp::DataTreeInt | THandleOp::JSONInt => ("int", "jet_datatree_int", 1, vec![true]),
-        THandleOp::DataTreeText | THandleOp::JSONText => {
-            ("text", "jet_datatree_text", 1, vec![true])
+        THandleOp::DynInt | THandleOp::JSONInt => ("int", "jet_dyn_int", 1, vec![true]),
+        THandleOp::DynText | THandleOp::JSONText => {
+            ("text", "jet_dyn_text", 1, vec![true])
         }
-        THandleOp::DataTreeBool | THandleOp::JSONBool => {
-            ("bool", "jet_datatree_bool", 1, vec![true])
+        THandleOp::DynBool | THandleOp::JSONBool => {
+            ("bool", "jet_dyn_bool", 1, vec![true])
         }
-        THandleOp::DataTreeFloat | THandleOp::JSONFloat => {
-            ("float", "jet_datatree_float", 1, vec![true])
+        THandleOp::DynFloat | THandleOp::JSONFloat => {
+            ("float", "jet_dyn_float", 1, vec![true])
         }
-        THandleOp::DataTreeToText | THandleOp::JSONToText => {
-            ("to_text", "jet_datatree_to_text", 1, vec![true])
+        THandleOp::DynToText | THandleOp::JSONToText => {
+            ("to_text", "jet_dyn_to_text", 1, vec![true])
         }
-        THandleOp::DataTreeEqualUnordered | THandleOp::JSONEqualUnordered => (
+        THandleOp::DynEqualUnordered | THandleOp::JSONEqualUnordered => (
             "equal_unordered",
-            "jet_datatree_equal_unordered",
+            "jet_dyn_equal_unordered",
             2,
             vec![true, true],
         ),
@@ -9992,7 +9992,7 @@ fn datatree_access_route(op: &THandleOp, carrier: &TFailureCarrier) -> Option<TP
     };
     Some(TPreludeRoute {
         family: MirPreludeFamily::HandleMethod,
-        module: "core.encoding.datatree".to_string(),
+        module: "core.encoding.dyn".to_string(),
         member: member.to_string(),
         symbol: MirSymbol::Prelude(symbol.to_string()),
         signature: MirCallSignature {
@@ -10008,7 +10008,7 @@ fn datatree_access_route(op: &THandleOp, carrier: &TFailureCarrier) -> Option<TP
     })
 }
 
-fn lower_datatree_access(
+fn lower_dyn_access(
     ctx: &mut LowerCtx,
     expr: &TExpr,
     recv: &TExpr,
@@ -10016,8 +10016,8 @@ fn lower_datatree_access(
     op: &THandleOp,
     carrier: &TFailureCarrier,
 ) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
-    let route = datatree_access_route(op, carrier)
-        .expect("DataTree access route checked before structural lowering");
+    let route = dyn_access_route(op, carrier)
+        .expect("Dyn access route checked before structural lowering");
     let receiver = ctx.lower_child(recv)?;
     let args = source_args
         .iter()
@@ -10025,7 +10025,7 @@ fn lower_datatree_access(
         .collect::<Result<Vec<_>, _>>()?;
     let call = ctx.intern_prelude_route(route)?;
     ctx.emit(
-        "datatree-access",
+        "dyn-access",
         Some(expr.ty.clone()),
         MirOperation::Semantic(MirSemanticOp::HandleMethod {
             call,
@@ -10055,7 +10055,7 @@ fn typed_codec_target(ty: &Type) -> bool {
             matches!(
                 name.as_str(),
                 "Data"
-                    | "DataTree"
+                    | "Dyn"
                     | "U8"
                     | "I8"
                     | "I16"
@@ -10588,7 +10588,7 @@ fn lower_serde_encode(
     if typed_codec_target(ty) {
         return lower_typed_encode(ctx, expr, recv, ty);
     }
-    let variant = data_tree_encode_variant(ty).ok_or_else(|| {
+    let variant = dyn_encode_variant(ty).ok_or_else(|| {
         ctx.error(
             ctx.span(),
             format!(
@@ -10614,7 +10614,7 @@ fn lower_serde_encode(
     )
 }
 
-fn lower_datatree_decode(
+fn lower_dyn_decode(
     ctx: &mut LowerCtx,
     expr: &TExpr,
     recv: &TExpr,
@@ -10641,7 +10641,7 @@ fn lower_datatree_decode(
                 .map_err(|message| ctx.error(ctx.span(), message))?
                 .unwrap_or_else(|| expr.ty.clone());
             return ctx.emit(
-                "datatree-decode-call",
+                "dyn-decode-call",
                 Some(call_return_type),
                 MirOperation::Call {
                     callee: MirCallee::Associated { function, owner },
@@ -10668,7 +10668,7 @@ fn lower_datatree_decode(
     ))
 }
 
-fn data_tree_encode_variant(ty: &Type) -> Option<&'static str> {
+fn dyn_encode_variant(ty: &Type) -> Option<&'static str> {
     match ty.without_user_tags() {
         Type::Int | Type::IntN { .. } => Some("Int"),
         Type::Float | Type::Float32 => Some("Float"),

@@ -79,7 +79,7 @@ fn return_value_fix(want: &Type, got: &Type) -> String {
 fn encoding_reader_item_type(name: &str) -> Option<Type> {
     match name {
         "JSONReader" | "CBORReader" => Some(Type::Named("DataEvent".to_string())),
-        "JSONLReader" | "XMLReader" => Some(Type::Named("DataTree".to_string())),
+        "JSONLReader" | "XMLReader" => Some(Type::Named("Dyn".to_string())),
         "CSVReader" => Some(Type::Named("CSVRow".to_string())),
         _ => None,
     }

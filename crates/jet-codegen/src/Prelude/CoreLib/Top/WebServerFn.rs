@@ -855,7 +855,7 @@ impl JetWebServerFunction {
                 .to_ascii_lowercase()
                 .starts_with("application/json;")
         {
-            if jet_std::parse_json_typed_datatree(&body.to_string()).is_err() {
+            if jet_std::parse_json_typed_dyn(&body.to_string()).is_err() {
                 return Err(JetWebServerFnError::InvalidInput(
                     "server function input is not valid JSON".to_string(),
                 ));
@@ -946,7 +946,7 @@ impl JetWebServerFunction {
         request.context.check_live()?;
         let output = (self.handler)(&request.context, &body)?;
         if output.len() > JET_WEB_SERVER_FN_MAX_BODY
-            || jet_std::parse_json_typed_datatree(&output).is_err()
+            || jet_std::parse_json_typed_dyn(&output).is_err()
         {
             return Err(JetWebServerFnError::InvalidOutput);
         }
@@ -1181,7 +1181,7 @@ impl JetWebServerFunction {
                         .is_some_and(|timeout| elapsed > Duration::from_millis(timeout))
                     {
                         Err(JetWebServerFnError::UncertainCompletion { request_id })
-                    } else if jet_std::parse_json_typed_datatree(&response.body).is_err() {
+                    } else if jet_std::parse_json_typed_dyn(&response.body).is_err() {
                         Err(JetWebServerFnError::InvalidOutput)
                     } else {
                         Ok(response.body)

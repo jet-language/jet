@@ -7,10 +7,10 @@ fn cli_explain_error(theme: Theme, parsed: CliParsed, code: String, what: String
     cli_status_error(theme, parsed.flags.json, "explain", code, what, why, fix)
 }
 
-fn cli_optional_text(value: String?) -> DataTree Never! {
+fn cli_optional_text(value: String?) -> Dyn Never! {
     if value == {
-        .Val(text) -> DataTree.Text(text)
-        .None -> DataTree.Null
+        .Val(text) -> Dyn.Text(text)
+        .None -> Dyn.Null
     }
 }
 
@@ -21,9 +21,9 @@ pub fn cli_cmd_explain(theme: Theme, parsed: CliParsed) -[IO, FS, Env, Exec, Net
         explanation :: explain_lookup(query) ?? panic("the syntax and explain dictionaries must be one table")
         if parsed.flags.json {
             fields := StatusFields.new()
-            fields = fields.with("code", DataTree.Text(explanation.code))
-            fields = fields.with("stage", DataTree.Text(explanation.stage))
-            fields = fields.with("what", DataTree.Text(explanation.what ?? explanation.meaning))
+            fields = fields.with("code", Dyn.Text(explanation.code))
+            fields = fields.with("stage", Dyn.Text(explanation.stage))
+            fields = fields.with("what", Dyn.Text(explanation.what ?? explanation.meaning))
             fields = fields.with("why", cli_optional_text(explanation.why))
             fields = fields.with("fix", cli_optional_text(explanation.fix))
             fields = fields.with("example", cli_optional_text(explanation.example))
@@ -80,37 +80,37 @@ fn cli_cmd_explain_overlay(theme: Theme, parsed: CliParsed, query: String) -[IO,
     lock :: SemanticLockFile.with_records(records)
     fact :: trust_explain_semantic_lock(lock, query) ?? return cli_explain_error(theme, parsed, "E1274", "no overlay record for `{query}`", "`workspace.jet` has overlay policy, but not that overlay/package key.", "query `package-overlay:<overlay>:<package>`.")
     if parsed.flags.json {
-        owners := [DataTree]{}
-        loop owner in fact.owners -> &owners.push(DataTree.Text(owner))
-        contenders := [DataTree]{}
+        owners := [Dyn]{}
+        loop owner in fact.owners -> &owners.push(Dyn.Text(owner))
+        contenders := [Dyn]{}
         loop contender in fact.contenders {
             contender_fields := StatusFields.new()
-            contender_fields = contender_fields.with("owner", DataTree.Text(contender.owner_package))
-            contender_fields = contender_fields.with("provider", DataTree.Text(contender.provider))
-            contender_fields = contender_fields.with("exact", DataTree.Text(contender.exact_output))
-            contender_fields = contender_fields.with("reason", DataTree.Text(contender.reason))
-            contender_fields = contender_fields.with("source", DataTree.Text(contender.source_ref))
-            contender_fields = contender_fields.with("channel", DataTree.Text(contender.channel_input))
-            contender_fields = contender_fields.with("policy", DataTree.Text(contender.policy_fingerprint))
-            contender_fields = contender_fields.with("recipe", DataTree.Text(contender.recipe_id))
-            contender_fields = contender_fields.with("adapter", DataTree.Text(contender.adapter_id))
-            contender_fields = contender_fields.with("signature", DataTree.Text(contender.signature))
-            contender_fields = contender_fields.with("cache_provenance", DataTree.Text(contender.cache_provenance))
-            contender_fields = contender_fields.with("update", DataTree.Text(contender.update_command))
+            contender_fields = contender_fields.with("owner", Dyn.Text(contender.owner_package))
+            contender_fields = contender_fields.with("provider", Dyn.Text(contender.provider))
+            contender_fields = contender_fields.with("exact", Dyn.Text(contender.exact_output))
+            contender_fields = contender_fields.with("reason", Dyn.Text(contender.reason))
+            contender_fields = contender_fields.with("source", Dyn.Text(contender.source_ref))
+            contender_fields = contender_fields.with("channel", Dyn.Text(contender.channel_input))
+            contender_fields = contender_fields.with("policy", Dyn.Text(contender.policy_fingerprint))
+            contender_fields = contender_fields.with("recipe", Dyn.Text(contender.recipe_id))
+            contender_fields = contender_fields.with("adapter", Dyn.Text(contender.adapter_id))
+            contender_fields = contender_fields.with("signature", Dyn.Text(contender.signature))
+            contender_fields = contender_fields.with("cache_provenance", Dyn.Text(contender.cache_provenance))
+            contender_fields = contender_fields.with("update", Dyn.Text(contender.update_command))
             &contenders.push(report_status_object(contender_fields))
         }
         fields := StatusFields.new()
-        fields = fields.with("query", DataTree.Text(query))
-        fields = fields.with("lens", DataTree.Text("overlay"))
-        fields = fields.with("semantic_key", DataTree.Text(fact.semantic_key))
-        fields = fields.with("owners", DataTree.Array(owners))
-        fields = fields.with("contenders", DataTree.Array(contenders))
-        fields = fields.with("provider", DataTree.Text(fact.provider))
-        fields = fields.with("platform", DataTree.Text(fact.platform))
-        fields = fields.with("exact", DataTree.Text(fact.exact_artifact))
-        fields = fields.with("policy", DataTree.Text(fact.policy_fingerprint))
-        fields = fields.with("update", DataTree.Text(fact.update_command))
-        fields = fields.with("offline", DataTree.Bool(fact.offline_satisfied))
+        fields = fields.with("query", Dyn.Text(query))
+        fields = fields.with("lens", Dyn.Text("overlay"))
+        fields = fields.with("semantic_key", Dyn.Text(fact.semantic_key))
+        fields = fields.with("owners", Dyn.Array(owners))
+        fields = fields.with("contenders", Dyn.Array(contenders))
+        fields = fields.with("provider", Dyn.Text(fact.provider))
+        fields = fields.with("platform", Dyn.Text(fact.platform))
+        fields = fields.with("exact", Dyn.Text(fact.exact_artifact))
+        fields = fields.with("policy", Dyn.Text(fact.policy_fingerprint))
+        fields = fields.with("update", Dyn.Text(fact.update_command))
+        fields = fields.with("offline", Dyn.Bool(fact.offline_satisfied))
         print(StatusEnvelope.new("explain", true).with_fields(fields).json())
         return @EXIT_OK
     }

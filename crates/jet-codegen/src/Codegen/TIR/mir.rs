@@ -8503,7 +8503,7 @@ impl<'a> LowerCtx<'a> {
     /// D-MEM-COPYSEM1: read `subject` as a read window when it names a read
     /// parameter's place; `None` leaves the subject to the ordinary value path.
     /// A compiler-owned subject keeps the value path: its native Rust carrier
-    /// can hold a payload in a host representation (`DataTree.Int` is `i64`)
+    /// can hold a payload in a host representation (`Dyn.Int` is `i64`)
     /// that only the checked payload readers widen to the Jet type, so a
     /// payload place aliased through it would read the wrong type.
     pub(super) fn lower_read_window(

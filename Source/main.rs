@@ -2330,7 +2330,7 @@ fn console_output_kind(kind: jet::REPL::ConsoleOutputKind) -> &'static str {
 fn console_output(mode: OutputMode, output: &jet::REPL::ConsoleOutput) {
     if mode.json {
         let payload = jet_foundation::JSON::parse(&output.payload)
-            .and_then(|value| StatusValue::from_data_tree(&value))
+            .and_then(|value| StatusValue::from_dyn(&value))
             .unwrap_or_else(|_| StatusValue::String(output.payload.clone()));
         let console = StatusValue::object(
             StatusFields::new()

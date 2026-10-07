@@ -2400,7 +2400,7 @@ fn lower_serde_encode_node(mut recv: TExpr, cx: &Cx) -> TExpr {
     }
 }
 
-fn lower_datatree_decode_node(
+fn lower_dyn_decode_node(
     recv: TExpr,
     target: Type,
     resolved_ret: Option<&Type>,
@@ -2428,7 +2428,7 @@ fn lower_datatree_decode_node(
         ty,
         kind: TExprKind::HandleMethod {
             recv: Box::new(recv),
-            op: THandleOp::DataTreeDecode(target),
+            op: THandleOp::DynDecode(target),
             args: Vec::new(),
         },
     }
@@ -5606,7 +5606,7 @@ fn lower_method_call_impl(
                     if method == "Object" && matches!(&value.kind, TExprKind::MapLit(_)) {
                         value.ty = crate::Sema::core_json_pattern_types(method)
                             .and_then(|types| types.into_iter().next())
-                            .expect("checked DataTree.Object payload type");
+                            .expect("checked Dyn.Object payload type");
                     }
                     let value = if method == "Array" {
                         let payload =
@@ -10380,7 +10380,7 @@ fn lower_method_call_impl(
             return lower_debug_text(lower_expr(receiver, cx, env));
         }
         if handle == Syntax::TYPE_DATA
-            && method == Syntax::METHOD_DATATREE_DECODE
+            && method == Syntax::METHOD_DYN_DECODE
             && args.is_empty()
         {
             // Compiler-generated Codable bodies are lowered before a sema pass
@@ -10395,7 +10395,7 @@ fn lower_method_call_impl(
                 .or_else(|| type_args.first().cloned());
             if let Some(target) = target {
                 return in_own_frame(|| {
-                    lower_datatree_decode_node(
+                    lower_dyn_decode_node(
                         lower_expr(receiver, cx, env),
                         target,
                         resolved_ret,

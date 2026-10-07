@@ -3385,7 +3385,7 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(name, 1, &Type::Named("CBOROptions".to_string()), arg);
                 }
                 return Some(result_ty(
-                    Type::Named("DataTree".to_string()),
+                    Type::Named("Dyn".to_string()),
                     Type::Named("CBORError".to_string()),
                 ));
             }
@@ -3400,7 +3400,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
                 if let Some(arg) = args.get_mut(0) {
-                    self.expect_core_arg(name, 0, &Type::Named("DataTree".to_string()), arg);
+                    self.expect_core_arg(name, 0, &Type::Named("Dyn".to_string()), arg);
                 }
                 return Some(Type::List(Box::new(u8_ty())));
             }
@@ -3416,11 +3416,11 @@ impl<'a> Checker<'a> {
                 }
                 if super::super::Edition::edition_at_least("2027") {
                     return Some(result_ty(
-                        Type::Named("DataTree".to_string()),
+                        Type::Named("Dyn".to_string()),
                         Type::Named("CBORError".to_string()),
                     ));
                 }
-                return Some(result_ty(Type::Named("DataTree".to_string()), Type::String));
+                return Some(result_ty(Type::Named("Dyn".to_string()), Type::String));
             }
             ("core.encoding.xml", "parse_bytes") => {
                 if !(1..=2).contains(&args.len()) {
@@ -3433,7 +3433,7 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(name, 1, &Type::Named("XMLParseOptions".to_string()), arg);
                 }
                 return Some(result_ty(
-                    Type::Named("DataTree".to_string()),
+                    Type::Named("Dyn".to_string()),
                     Type::Named("XMLError".to_string()),
                 ));
             }
@@ -3442,7 +3442,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
                 if let Some(arg) = args.get_mut(0) {
-                    self.expect_core_arg(name, 0, &Type::Named("DataTree".to_string()), arg);
+                    self.expect_core_arg(name, 0, &Type::Named("Dyn".to_string()), arg);
                 }
                 if let Some(arg) = args.get_mut(1) {
                     self.expect_core_arg(
@@ -3494,7 +3494,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
                 if let Some(arg) = args.get_mut(0) {
-                    self.expect_core_arg(name, 0, &Type::Named("DataTree".to_string()), arg);
+                    self.expect_core_arg(name, 0, &Type::Named("Dyn".to_string()), arg);
                 }
                 return Some(result_ty(
                     Type::Tuple(vec![
@@ -3517,10 +3517,10 @@ impl<'a> Checker<'a> {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
                 if let Some(arg) = args.get_mut(0) {
-                    self.expect_core_arg(name, 0, &Type::Named("DataTree".to_string()), arg);
+                    self.expect_core_arg(name, 0, &Type::Named("Dyn".to_string()), arg);
                 }
                 return Some(result_ty(
-                    Type::Named("DataTree".to_string()),
+                    Type::Named("Dyn".to_string()),
                     Type::Named("XMLError".to_string()),
                 ));
             }
@@ -3529,7 +3529,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(wrong_core_arity(name, 2, args.len(), span));
                 }
                 if let Some(arg) = args.get_mut(0) {
-                    self.expect_core_arg(name, 0, &Type::Named("DataTree".to_string()), arg);
+                    self.expect_core_arg(name, 0, &Type::Named("Dyn".to_string()), arg);
                 }
                 if let Some(arg) = args.get_mut(1) {
                     self.expect_core_arg(name, 1, &Type::String, arg);
@@ -3544,10 +3544,10 @@ impl<'a> Checker<'a> {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
                 if let Some(arg) = args.get_mut(0) {
-                    self.expect_core_arg(name, 0, &Type::Named("DataTree".to_string()), arg);
+                    self.expect_core_arg(name, 0, &Type::Named("Dyn".to_string()), arg);
                 }
                 return Some(result_ty(
-                    Type::List(Box::new(Type::Named("DataTree".to_string()))),
+                    Type::List(Box::new(Type::Named("Dyn".to_string()))),
                     Type::Named("XMLError".to_string()),
                 ));
             }
@@ -3882,7 +3882,7 @@ impl<'a> Checker<'a> {
                 return Some(result_ty(t, decode_error_ty()));
             }
             // D-JSON3: the UNTYPED `json.decode(text)` form is the lenient
-            // dynamic decode — same `DataTree !EncodingError` shape as `parse`, with
+            // dynamic decode — same `Dyn !EncodingError` shape as `parse`, with
             // string→number/bool coercions surfaced as log lines
             // (Docs/spec/reference/core-library.md, `jet_std_json_decode_lenient`
             // in the Prelude, `enc_ok_is_json` in emit). `decode` is registered
@@ -3927,7 +3927,7 @@ impl<'a> Checker<'a> {
                 return Some(result_ty(t, decode_error_ty()));
             }
             // D-SHAPE-ONE1=A: decode one existing DB row through the same
-            // typed DataTree decoder used by the wire formats. The explicit
+            // typed Dyn decoder used by the wire formats. The explicit
             // row remains the authoritative table/transaction carrier.
             ("core.db", "decode") if !type_args.is_empty() => {
                 if args.len() != 1 {
@@ -5832,13 +5832,13 @@ impl<'a> Checker<'a> {
                 let command = type_args
                     .first()
                     .cloned()
-                    .unwrap_or_else(|| Type::Named("DataTree".to_string()));
-                let data_tree = Type::Named("DataTree".to_string());
+                    .unwrap_or_else(|| Type::Named("Dyn".to_string()));
+                let dyn_value = Type::Named("Dyn".to_string());
                 let command_callback = data_callback_type(
                     Type::List(Box::new(command.clone())),
-                    data_tree.clone(),
+                    dyn_value.clone(),
                 );
-                let observe_callback = data_callback_type(data_tree.clone(), data_tree);
+                let observe_callback = data_callback_type(dyn_value.clone(), dyn_value);
                 let strategy_callback = Type::Option(Box::new(history_strategy_type(command)));
                 let expected = vec![
                     Type::Int,

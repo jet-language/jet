@@ -34,13 +34,13 @@ where
 // + one record per element. Flat object records and explicit row arrays share the
 // same renderer: rows already carry their header as the first row.
 fn jet_enc_csv_to_string<T: __jet_Encode>(values: &Vec<T>) -> String {
-    let trees: Vec<jet_std::DataTree> = values.iter().map(|v| v.jet_encode()).collect();
+    let trees: Vec<jet_std::Dyn> = values.iter().map(|v| v.jet_encode()).collect();
     let mut rows: Vec<Vec<String>> = Vec::new();
-    if let Some(jet_std::DataTree::Object(entries)) = trees.first() {
+    if let Some(jet_std::Dyn::Object(entries)) = trees.first() {
         let header: Vec<String> = entries.iter().map(|(k, _)| k.clone()).collect();
         rows.push(header.clone());
         for tree in &trees {
-            if !matches!(tree, jet_std::DataTree::Object(_)) {
+            if !matches!(tree, jet_std::Dyn::Object(_)) {
                 jet_panic(
                     "<core.encoding.csv>",
                     0,
@@ -49,13 +49,13 @@ fn jet_enc_csv_to_string<T: __jet_Encode>(values: &Vec<T>) -> String {
             }
             let mut record = Vec::with_capacity(header.len());
             for key in &header {
-                let cell = match jet_std::datatree_get(tree, key) {
-                    Some(jet_std::DataTree::Text(s)) => s.clone(),
-                    Some(jet_std::DataTree::Int(n)) => jet_std::jet_int_to_string(*n),
-                    Some(jet_std::DataTree::Float(f)) => format!("{:?}", f),
-                    Some(jet_std::DataTree::Bool(b)) => b.to_string(),
-                    Some(jet_std::DataTree::Null) | None => String::new(),
-                    Some(other) => jet_std::render_datatree_json(other, false, 0),
+                let cell = match jet_std::dyn_get(tree, key) {
+                    Some(jet_std::Dyn::Text(s)) => s.clone(),
+                    Some(jet_std::Dyn::Int(n)) => jet_std::jet_int_to_string(*n),
+                    Some(jet_std::Dyn::Float(f)) => format!("{:?}", f),
+                    Some(jet_std::Dyn::Bool(b)) => b.to_string(),
+                    Some(jet_std::Dyn::Null) | None => String::new(),
+                    Some(other) => jet_std::render_dyn_json(other, false, 0),
                 };
                 record.push(cell);
             }
@@ -63,7 +63,7 @@ fn jet_enc_csv_to_string<T: __jet_Encode>(values: &Vec<T>) -> String {
         }
     } else {
         for tree in trees {
-            let jet_std::DataTree::Array(cells) = tree else {
+            let jet_std::Dyn::Array(cells) = tree else {
                 jet_panic(
                     "<core.encoding.csv>",
                     0,
@@ -74,12 +74,12 @@ fn jet_enc_csv_to_string<T: __jet_Encode>(values: &Vec<T>) -> String {
                 cells
                     .iter()
                     .map(|cell| match cell {
-                        jet_std::DataTree::Text(s) => s.clone(),
-                        jet_std::DataTree::Int(n) => jet_std::jet_int_to_string(*n),
-                        jet_std::DataTree::Float(f) => format!("{:?}", f),
-                        jet_std::DataTree::Bool(b) => b.to_string(),
-                        jet_std::DataTree::Null => String::new(),
-                        other => jet_std::render_datatree_json(other, false, 0),
+                        jet_std::Dyn::Text(s) => s.clone(),
+                        jet_std::Dyn::Int(n) => jet_std::jet_int_to_string(*n),
+                        jet_std::Dyn::Float(f) => format!("{:?}", f),
+                        jet_std::Dyn::Bool(b) => b.to_string(),
+                        jet_std::Dyn::Null => String::new(),
+                        other => jet_std::render_dyn_json(other, false, 0),
                     })
                     .collect(),
             );
@@ -89,10 +89,10 @@ fn jet_enc_csv_to_string<T: __jet_Encode>(values: &Vec<T>) -> String {
 }
 
 // D-ENC-DYN1=A+ (c152): TOML is a full serde-equivalent adapter over the one rich
-// `DataTree` — nested `[table]`s, arrays-of-tables, dotted keys, and typed scalars.
+// `Dyn` — nested `[table]`s, arrays-of-tables, dotted keys, and typed scalars.
 // The dynamic `parse` returns the `Data` value; `decode<T>` walks the rich tree;
-// `to_string` renders a `DataTree` back to a nested document.
-fn jet_std_toml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+// `to_string` renders a `Dyn` back to a nested document.
+fn jet_std_toml_parse(text: &String) -> Result<jet_std::Dyn, jet_std::EncodingError> {
     jet_std::toml::parse_to_tree(text).map_err(|e| {
         jet_std::EncodingError::new(
             jet_std::EncodingFormat::TOML,
@@ -105,7 +105,7 @@ fn jet_std_toml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::Encod
         )
     })
 }
-fn jet_std_toml_render(d: &jet_std::DataTree) -> String {
+fn jet_std_toml_render(d: &jet_std::Dyn) -> String {
     jet_std::toml::render(d)
 }
 
@@ -117,11 +117,11 @@ fn jet_enc_toml_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std:
     T::jet_decode(&tree)
 }
 
-// YAML typed decode: parse flat scalars into a DataTree::Object of Text, then decode.
+// YAML typed decode: parse flat scalars into a Dyn::Object of Text, then decode.
 // D-ENC-DYN1=A+ / D-ENC-YAML1 (c152): YAML is a full serde adapter over the one
-// rich `DataTree` — block + flow maps/sequences, typed core scalars, block scalars,
+// rich `Dyn` — block + flow maps/sequences, typed core scalars, block scalars,
 // comments, documents, anchors/aliases. parse → `Data`; decode<T> → typed tree.
-fn jet_std_yaml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+fn jet_std_yaml_parse(text: &String) -> Result<jet_std::Dyn, jet_std::EncodingError> {
     jet_std::yaml::parse_to_tree(text).map_err(|e| {
         jet_std::EncodingError::new(
             jet_std::EncodingFormat::YAML,
@@ -134,7 +134,7 @@ fn jet_std_yaml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::Encod
         )
     })
 }
-fn jet_std_yaml_render(d: &jet_std::DataTree) -> String {
+fn jet_std_yaml_render(d: &jet_std::Dyn) -> String {
     jet_std::yaml::render(d)
 }
 

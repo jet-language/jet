@@ -1,9 +1,9 @@
 
-// core.encoding.json — RFC 8259 JSON as DataTree.
+// core.encoding.json — RFC 8259 JSON as Dyn.
 //
 // `parse` is the strict codec: objects keep insertion order, whole numbers
-// become `DataTree.Int` (exact `Int`, not binary64), fractions become
-// `DataTree.Float`, and `NaN` / `Infinity` are syntax errors. `decode` is the
+// become `Dyn.Int` (exact `Int`, not binary64), fractions become
+// `Dyn.Float`, and `NaN` / `Infinity` are syntax errors. `decode` is the
 // same tree with the historical lenient name; typed `decode<T>` stays a
 // compiler lowering over this tree and is not reimplemented here.
 //
@@ -28,7 +28,7 @@
 // process out of stack.
 
 
-use core.encoding.[DataEvent, DataTree, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
+use core.encoding.[DataEvent, Dyn, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
 use core.math as math
 
 fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
@@ -79,36 +79,36 @@ fn safe_limits() -> EncodingLimits Never! {
         max_expansion_bytes: 8388608,
     }
 }
-/// Strict JSON → `DataTree`.
-pub fn parse(text: String) -> DataTree EncodingError! { parse_json(text, false) }
+/// Strict JSON → `Dyn`.
+pub fn parse(text: String) -> Dyn EncodingError! { parse_json(text, false) }
 
-/// Strict JSON → `DataTree`, except that a repeated object name keeps the later
+/// Strict JSON → `Dyn`, except that a repeated object name keeps the later
 /// value at the first name's position.
-pub fn parse_allow_duplicates(text: String) -> DataTree EncodingError! { parse_json(text, true) }
+pub fn parse_allow_duplicates(text: String) -> Dyn EncodingError! { parse_json(text, true) }
 
 /// Same as `parse`. Kept as the documented sibling verb for typed lowering.
-pub fn decode(text: String) -> DataTree EncodingError! { parse_json(text, false) }
+pub fn decode(text: String) -> Dyn EncodingError! { parse_json(text, false) }
 /// Python-compatible spelling for JSON parsing.
-pub fn loads(text: String) -> DataTree EncodingError! { parse(text) }
+pub fn loads(text: String) -> Dyn EncodingError! { parse(text) }
 
 /// Python-compatible file-shaped spelling for JSON parsing.
-pub fn load(text: String) -> DataTree EncodingError! { parse(text) }
+pub fn load(text: String) -> Dyn EncodingError! { parse(text) }
 /// Compact JSON text. Object keys keep insertion order.
-pub fn to_string(value: DataTree) -> String Never! { render_json(value, false) }
+pub fn to_string(value: Dyn) -> String Never! { render_json(value, false) }
 /// Python-compatible spelling for compact JSON serialization.
-pub fn dumps(value: DataTree) -> String Never! { render_json(value, false) }
+pub fn dumps(value: Dyn) -> String Never! { render_json(value, false) }
 /// Python-compatible file-shaped spelling for JSON serialization.
-pub fn dump(value: DataTree) -> String Never! { render_json(value, false) }
+pub fn dump(value: Dyn) -> String Never! { render_json(value, false) }
 
 /// Two-space indented JSON text.
-pub fn to_string_pretty(value: DataTree) -> String Never! { render_json(value, true) }
+pub fn to_string_pretty(value: Dyn) -> String Never! { render_json(value, true) }
 
 /// RFC 8785 JSON Canonicalization Scheme bytes (D-JSONCANON1=A): compact,
 /// object keys sorted by unsigned UTF-16 code units, ECMAScript `Number`
 /// spelling, `-0.0` as `0`. Rejects NaN and infinities, an `Int` that binary64
 /// cannot hold exactly, and repeated keys, naming the failing value's JSON
 /// Pointer. Nesting is bounded by `EncodingLimits.safe().max_depth`.
-pub fn canonical(value: DataTree) -> String EncodingError! {
+pub fn canonical(value: Dyn) -> String EncodingError! {
     out := [U8]{}
     path := [String]{}
     write_canonical(&out, value, &path, 1) ?? return Err(err)
@@ -130,7 +130,7 @@ pub fn reader_allow_duplicates(text: String) -> JSONReader Never! { JSONReader{p
 /// fails with the pointer prefix through the failing step. The walk borrows
 /// each ancestor; only the selected subtree is returned as an owned value.
 /// A pointer may have at most `EncodingLimits.safe().max_depth` steps.
-pub fn pointer(tree: DataTree, path: String) -> DataTree EncodingError! {
+pub fn pointer(tree: Dyn, path: String) -> Dyn EncodingError! {
     segments :: pointer_segments(path)
     if segments.len() > safe_limits().max_depth {
         return Err(value_error(EncodingErrorKind.Limit, "", "JSON Pointer has more than max_depth {safe_limits().max_depth} steps"))
@@ -140,7 +140,7 @@ pub fn pointer(tree: DataTree, path: String) -> DataTree EncodingError! {
 
 /// RFC 6902 JSON Patch (D-CORE-JSON-PATCH1=A) under `EncodingLimits.safe()`.
 /// See `patch_with_limits`.
-pub fn patch(doc: DataTree, ops: DataTree) -> DataTree EncodingError! { patch_with_limits(doc, ops, safe_limits()) }
+pub fn patch(doc: Dyn, ops: Dyn) -> Dyn EncodingError! { patch_with_limits(doc, ops, safe_limits()) }
 
 /// Apply an RFC 6902 operation array (`add`, `remove`, `replace`, `move`,
 /// `copy`, `test`) and return the patched value. The whole array is validated
@@ -152,7 +152,7 @@ pub fn patch(doc: DataTree, ops: DataTree) -> DataTree EncodingError! { patch_wi
 /// path and the result's nesting, `max_expansion_bytes` bounds the bytes that
 /// `copy` duplicates across the patch, and `max_total_bytes` (when set) bounds
 /// the compact size of the result.
-pub fn patch_with_limits(doc: DataTree, ops: DataTree, limits: EncodingLimits) -> DataTree EncodingError! {
+pub fn patch_with_limits(doc: Dyn, ops: Dyn, limits: EncodingLimits) -> Dyn EncodingError! {
     if limits.max_depth < 1 || limits.max_item_bytes < 1 || limits.max_expansion_bytes < 0 {
         return Err(value_error(EncodingErrorKind.Limit, "", "EncodingLimits.max_depth and max_item_bytes must be positive and max_expansion_bytes nonnegative"))
     }
@@ -188,7 +188,7 @@ pub fn patch_with_limits(doc: DataTree, ops: DataTree, limits: EncodingLimits) -
 }
 
 /// Convert a parsed tree to the canonical streaming event sequence.
-pub fn events(value: DataTree) -> [DataEvent] Never! { append_events(value) }
+pub fn events(value: Dyn) -> [DataEvent] Never! { append_events(value) }
 
 pub fn writer() -> JSONWriter Never! { JSONWriter{pretty: false, parts: [U8]{}} }
 
@@ -206,7 +206,7 @@ pub struct JSONWriter {
 }
 
 impl JSONWriter {
-    pub fn write(&self, value: DataTree) Never! {
+    pub fn write(&self, value: Dyn) Never! {
         chunk :: render_json(value, self.pretty).bytes()
         loop b in chunk -> &self.parts.push(b)
     }
@@ -308,7 +308,7 @@ impl Parser {
     }
 
 
-    fn parse_value(&self) -> DataTree EncodingError! {
+    fn parse_value(&self) -> Dyn EncodingError! {
         &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
         b :: self.peek() ?? return Err(truncated_error(
             EncodingFormat.JSON,
@@ -323,19 +323,19 @@ impl Parser {
             123 -> return &self.parse_object()
             else -> { _ := 0 }
         }
-        value := DataTree.Null
+        value := Dyn.Null
         if n == 110 {
-            value = &self.parse_literal("null", DataTree.Null)
+            value = &self.parse_literal("null", Dyn.Null)
         } else {
             if n == 116 {
-                value = &self.parse_literal("true", DataTree.Bool(true))
+                value = &self.parse_literal("true", Dyn.Bool(true))
             } else {
                 if n == 102 {
-                    value = &self.parse_literal("false", DataTree.Bool(false))
+                    value = &self.parse_literal("false", Dyn.Bool(false))
                 } else {
                     if n == 34 {
                         s :: &self.parse_string()
-                        value = DataTree.Text(s)
+                        value = Dyn.Text(s)
                     } else {
                         if n != 45 && (n < 48 || n > 57) -> return Err(self.err("expected a JSON value (object, array, string, number, true, false, or null)"))
                         value = &self.parse_number()
@@ -349,7 +349,7 @@ impl Parser {
         Ok(value)
     }
 
-    fn parse_literal(&self, spelling: String, value: DataTree) -> DataTree EncodingError! {
+    fn parse_literal(&self, spelling: String, value: Dyn) -> Dyn EncodingError! {
         loop b in spelling.bytes() {
             got :: &self.bump() ?? return Err(self.err("input ended inside `{spelling}`"))
             if got != b -> return Err(self.err("expected `{spelling}`"))
@@ -428,7 +428,7 @@ impl Parser {
         Ok(n)
     }
 
-    fn parse_number(&self) -> DataTree EncodingError! {
+    fn parse_number(&self) -> Dyn EncodingError! {
         start :: self.index
         if (self.peek() ?? (U8{0})) == (U8{45}) -> _ :: &self.bump()
         first :: self.peek() ?? return Err(self.err("input ended inside a number"))
@@ -493,23 +493,23 @@ impl Parser {
         if fractional || exp {
             f :: Float.parse(token) ?? return Err(self.err("number does not fit in Float"))
             if !math.is_finite(f) -> return Err(self.err("non-finite JSON numbers are not allowed"))
-            return Ok(DataTree.Float(f))
+            return Ok(Dyn.Float(f))
         }
         n :: Int.parse(token) ?? return Err(self.err("number does not fit in Int"))
-        Ok(DataTree.Int(n))
+        Ok(Dyn.Int(n))
     }
 
-    fn parse_array(&self) -> DataTree EncodingError! {
+    fn parse_array(&self) -> Dyn EncodingError! {
         if !&self.expect(U8{91}) -> return Err(self.err("expected '['"))
         if !&self.enter() -> return Err(self.err("nesting exceeds EncodingLimits.safe().max_depth (256)"))
         if self.recording -> &self.pending.push(DataEvent.ArrayStart)
-        items := [DataTree]{}
+        items := [Dyn]{}
         &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
         if (self.peek() ?? (U8{0})) == (U8{93}) {
             _ :: &self.bump()
             self.depth -= 1
             if self.recording -> &self.pending.push(DataEvent.ArrayEnd)
-            return Ok(DataTree.Array(items))
+            return Ok(Dyn.Array(items))
         }
         index := 0
         loop {
@@ -523,7 +523,7 @@ impl Parser {
                 _ :: &self.bump()
                 self.depth -= 1
                 if self.recording -> &self.pending.push(DataEvent.ArrayEnd)
-                return Ok(DataTree.Array(items))
+                return Ok(Dyn.Array(items))
             }
             if b != (U8{44}) -> return Err(self.err("expected ',' or ']' after an array element"))
             _ :: &self.bump()
@@ -533,17 +533,17 @@ impl Parser {
         }
     }
 
-    fn parse_object(&self) -> DataTree EncodingError! {
+    fn parse_object(&self) -> Dyn EncodingError! {
         if !&self.expect(U8{123}) -> return Err(self.err("expected '{{'"))
         if !&self.enter() -> return Err(self.err("nesting exceeds EncodingLimits.safe().max_depth (256)"))
         if self.recording -> &self.pending.push(DataEvent.ObjectStart)
-        entries := [String: DataTree]{}
+        entries := [String: Dyn]{}
         &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
         if (self.peek() ?? (U8{0})) == (U8{125}) {
             _ :: &self.bump()
             self.depth -= 1
             if self.recording -> &self.pending.push(DataEvent.ObjectEnd)
-            return Ok(DataTree.Object(entries))
+            return Ok(Dyn.Object(entries))
         }
         loop {
             &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
@@ -572,7 +572,7 @@ impl Parser {
                 _ :: &self.bump()
                 self.depth -= 1
                 if self.recording -> &self.pending.push(DataEvent.ObjectEnd)
-                return Ok(DataTree.Object(entries))
+                return Ok(Dyn.Object(entries))
             }
             if b != (U8{44}) -> return Err(self.err("expected ',' or '}}' after an object member"))
             _ :: &self.bump()
@@ -615,7 +615,7 @@ impl Parser {
     }
 }
 
-fn parse_json(text: String, allow_duplicates: Bool) -> DataTree EncodingError! {
+fn parse_json(text: String, allow_duplicates: Bool) -> Dyn EncodingError! {
     raw :: text.bytes()
     if raw.len() > safe_limits().max_item_bytes {
         return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds EncodingLimits.safe().max_item_bytes"))
@@ -629,8 +629,8 @@ fn parse_json(text: String, allow_duplicates: Bool) -> DataTree EncodingError! {
 
 // Rebuild an object with `key` bound to `value`, keeping member order: an
 // existing key keeps its position, a new key goes last.
-fn object_with(entries: [String: DataTree], key: String, value: DataTree) -> [String: DataTree] Never! {
-    out := [String: DataTree]{}
+fn object_with(entries: [String: Dyn], key: String, value: Dyn) -> [String: Dyn] Never! {
+    out := [String: Dyn]{}
     found := false
     loop pair in entries {
         if pair.key == key {
@@ -644,7 +644,7 @@ fn object_with(entries: [String: DataTree], key: String, value: DataTree) -> [St
     out
 }
 
-fn append_events(value: DataTree) -> [DataEvent] Never! {
+fn append_events(value: Dyn) -> [DataEvent] Never! {
     out := [DataEvent]{}
     if value == {
         .Null -> &out.push(DataEvent.Null)
@@ -705,7 +705,7 @@ fn utf8_bytes(cp: Int) -> [U8] Never! {
     out
 }
 
-fn render_json(value: DataTree, pretty: Bool) -> String Never! {
+fn render_json(value: Dyn, pretty: Bool) -> String Never! {
     out := [U8]{}
     write_json(&out, value, pretty, 0)
     String.from_bytes(out) ?? ""
@@ -724,7 +724,7 @@ fn value_error(kind: EncodingErrorKind, path: String, reason: String) -> Encodin
     }
 }
 
-fn write_canonical(out: &[U8], value: DataTree, path: &[String], depth: Int) -> Bool EncodingError! {
+fn write_canonical(out: &[U8], value: Dyn, path: &[String], depth: Int) -> Bool EncodingError! {
     if depth > safe_limits().max_depth {
         return Err(value_error(EncodingErrorKind.Limit, pointer_text(path, path.len()), "max_depth {safe_limits().max_depth} exceeded"))
     }
@@ -759,7 +759,7 @@ fn write_canonical(out: &[U8], value: DataTree, path: &[String], depth: Int) -> 
         }
         .Object(entries) -> {
             keys := [String]{}
-            values := [DataTree]{}
+            values := [Dyn]{}
             units := [[Int]]{}
             loop pair in entries {
                 &keys.push(pair.key)
@@ -950,7 +950,7 @@ fn sort_by_units(units: [[Int]]) -> [Int] Never! {
     order
 }
 
-fn write_json(out: &[U8], value: DataTree, pretty: Bool, indent: Int) Never! {
+fn write_json(out: &[U8], value: Dyn, pretty: Bool, indent: Int) Never! {
     if value == {
         .Null -> write_ascii(&out, "null")
         .Bool(v) -> {
@@ -1154,7 +1154,7 @@ fn pointer_index(segment: String) -> Int? {
 }
 
 // Walk by borrowing each ancestor; only the final node is returned.
-fn pointer_select(node: DataTree, segments: [String], depth: Int) -> DataTree EncodingError! {
+fn pointer_select(node: Dyn, segments: [String], depth: Int) -> Dyn EncodingError! {
     if depth == segments.len() -> return Ok(node)
     segment :: segments[depth]
     at :: pointer_text(segments, depth + 1)
@@ -1203,15 +1203,15 @@ struct PatchOp {
     name: String
     path: [String]
     from: [String]
-    value: DataTree
+    value: Dyn
 }
 
-fn patch_field(members: [String: DataTree], index: Int, name: String) -> DataTree EncodingError! {
+fn patch_field(members: [String: Dyn], index: Int, name: String) -> Dyn EncodingError! {
     value :: members.get(name) ?? return Err(value_error(EncodingErrorKind.Syntax, "/{index}", "operation {index} needs a `{name}` member"))
     Ok(value)
 }
 
-fn patch_pointer_field(members: [String: DataTree], index: Int, name: String, limits: EncodingLimits) -> [String] EncodingError! {
+fn patch_pointer_field(members: [String: Dyn], index: Int, name: String, limits: EncodingLimits) -> [String] EncodingError! {
     raw :: patch_field(members, index, name)
     text := ""
     valid := false
@@ -1229,8 +1229,8 @@ fn patch_pointer_field(members: [String: DataTree], index: Int, name: String, li
 }
 
 // Validate the whole operation array before any operation runs.
-fn patch_operations(ops: DataTree, limits: EncodingLimits) -> [PatchOp] EncodingError! {
-    items := [DataTree]{}
+fn patch_operations(ops: Dyn, limits: EncodingLimits) -> [PatchOp] EncodingError! {
+    items := [Dyn]{}
     is_array := false
     if ops == {
         .Array(values) -> {
@@ -1242,7 +1242,7 @@ fn patch_operations(ops: DataTree, limits: EncodingLimits) -> [PatchOp] Encoding
     if !is_array -> return Err(value_error(EncodingErrorKind.Syntax, "", "a JSON Patch document is an array of operation objects"))
     list := [PatchOp]{}
     loop index in 0..<items.len() {
-        members := [String: DataTree]{}
+        members := [String: Dyn]{}
         is_object := false
         if items[index] == {
             .Object(fields) -> {
@@ -1269,7 +1269,7 @@ fn patch_operations(ops: DataTree, limits: EncodingLimits) -> [PatchOp] Encoding
         path :: patch_pointer_field(members, index, "path", limits)
         from := [String]{}
         if kind == PATCH_MOVE || kind == PATCH_COPY -> from = patch_pointer_field(members, index, "from", limits)
-        value := DataTree.Null
+        value := Dyn.Null
         if kind == PATCH_ADD || kind == PATCH_REPLACE || kind == PATCH_TEST -> value = patch_field(members, index, "value")
         if kind == PATCH_MOVE && pointer_is_proper_prefix(from, path) {
             return Err(value_error(EncodingErrorKind.Syntax, "/{index}/from", "operation {index} cannot move `{pointer_text(from, from.len())}` into its own descendant `{pointer_text(path, path.len())}`"))
@@ -1281,7 +1281,7 @@ fn patch_operations(ops: DataTree, limits: EncodingLimits) -> [PatchOp] Encoding
 
 // Return `node` rebuilt along `segments` with one add/remove/replace applied.
 // Siblings off the path are shared, not rewritten.
-fn patch_edit(node: DataTree, segments: [String], depth: Int, kind: Int, value: DataTree) -> DataTree EncodingError! {
+fn patch_edit(node: Dyn, segments: [String], depth: Int, kind: Int, value: Dyn) -> Dyn EncodingError! {
     if segments.len() == 0 {
         if kind == PATCH_REMOVE -> return Err(value_error(EncodingErrorKind.Syntax, "", "cannot remove the document root"))
         return Ok(value)
@@ -1291,7 +1291,7 @@ fn patch_edit(node: DataTree, segments: [String], depth: Int, kind: Int, value: 
     last :: depth + 1 == segments.len()
     if node == {
         .Object(entries) -> {
-            out := [String: DataTree]{}
+            out := [String: Dyn]{}
             found := false
             loop pair in entries {
                 if pair.key != segment {
@@ -1310,7 +1310,7 @@ fn patch_edit(node: DataTree, segments: [String], depth: Int, kind: Int, value: 
                 if !last || kind != PATCH_ADD -> return Err(value_error(EncodingErrorKind.Syntax, at, "no object member named `{segment}`"))
                 _ :: &out.add(segment, value)
             }
-            return Ok(DataTree.Object(out))
+            return Ok(Dyn.Object(out))
         }
         .Array(items) -> {
             appending :: last && kind == PATCH_ADD && segment == "-"
@@ -1319,7 +1319,7 @@ fn patch_edit(node: DataTree, segments: [String], depth: Int, kind: Int, value: 
             bound := items.len()
             if last && kind == PATCH_ADD -> bound = items.len() + 1
             if index >= bound -> return Err(value_error(EncodingErrorKind.Syntax, at, "array index {index} is out of range for length {items.len()}"))
-            out := [DataTree]{}
+            out := [Dyn]{}
             loop i in 0..<items.len() {
                 if i != index {
                     &out.push(items[i])
@@ -1338,7 +1338,7 @@ fn patch_edit(node: DataTree, segments: [String], depth: Int, kind: Int, value: 
                 if kind == PATCH_REPLACE -> &out.push(value)
             }
             if last && kind == PATCH_ADD && index == items.len() -> &out.push(value)
-            return Ok(DataTree.Array(out))
+            return Ok(Dyn.Array(out))
         }
         else -> { _ := 0 }
     }
@@ -1347,7 +1347,7 @@ fn patch_edit(node: DataTree, segments: [String], depth: Int, kind: Int, value: 
 
 // RFC 6902 `test` equality: numbers by value, arrays in order, objects by
 // member set regardless of order.
-fn json_equal(left: DataTree, right: DataTree) -> Bool Never! {
+fn json_equal(left: Dyn, right: Dyn) -> Bool Never! {
     if left == {
         .Null -> {
             if right == {
@@ -1410,7 +1410,7 @@ fn json_equal(left: DataTree, right: DataTree) -> Bool Never! {
     false
 }
 
-fn tree_depth(value: DataTree) -> Int Never! {
+fn tree_depth(value: Dyn) -> Int Never! {
     deepest := 0
     if value == {
         .Array(items) -> {
@@ -1432,7 +1432,7 @@ fn tree_depth(value: DataTree) -> Int Never! {
     0
 }
 
-fn patch_step(doc: DataTree, op: PatchOp) -> DataTree EncodingError! {
+fn patch_step(doc: Dyn, op: PatchOp) -> Dyn EncodingError! {
     if op.kind == PATCH_TEST {
         actual :: pointer_select(doc, op.path, 0)
         if !json_equal(actual, op.value) -> return Err(value_error(EncodingErrorKind.Syntax, pointer_text(op.path, op.path.len()), "test failed: the value differs"))
@@ -1441,7 +1441,7 @@ fn patch_step(doc: DataTree, op: PatchOp) -> DataTree EncodingError! {
     if op.kind == PATCH_MOVE {
         if pointer_equal(op.from, op.path) -> return Ok(doc)
         moved :: pointer_select(doc, op.from, 0)
-        removed :: patch_edit(doc, op.from, 0, PATCH_REMOVE, DataTree.Null)
+        removed :: patch_edit(doc, op.from, 0, PATCH_REMOVE, Dyn.Null)
         return patch_edit(removed, op.path, 0, PATCH_ADD, moved)
     }
     if op.kind == PATCH_COPY {

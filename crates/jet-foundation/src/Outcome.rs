@@ -674,7 +674,7 @@ impl JetErrorReport {
 }
 
 fn jet_error_report_from_json(
-    value: &crate::DataTree::DataTree,
+    value: &crate::Dyn::Dyn,
 ) -> Result<JetErrorReport, String> {
     let fields = jet_error_json_object(value, "report")?;
     if jet_error_json_text(jet_error_json_field(fields, "schema")?, "schema")?
@@ -684,15 +684,15 @@ fn jet_error_report_from_json(
     }
     let message = jet_error_json_text(jet_error_json_field(fields, "message")?, "message")?;
     let code = match jet_error_json_field(fields, "code")? {
-        crate::DataTree::DataTree::Null => None,
+        crate::Dyn::Dyn::Null => None,
         value => Some(jet_error_json_text(value, "code")?),
     };
     let causes = match jet_error_json_field(fields, "cause")? {
-        crate::DataTree::DataTree::Null => Vec::new(),
-        crate::DataTree::DataTree::Object(_) => {
+        crate::Dyn::Dyn::Null => Vec::new(),
+        crate::Dyn::Dyn::Object(_) => {
             vec![jet_error_report_from_json(jet_error_json_field(fields, "cause")?)?]
         }
-        crate::DataTree::DataTree::Array(values) => values
+        crate::Dyn::Dyn::Array(values) => values
             .iter()
             .map(jet_error_report_from_json)
             .collect::<Result<Vec<_>, _>>()?,
@@ -746,43 +746,43 @@ fn jet_error_report_from_json(
 }
 
 fn jet_error_json_object<'a>(
-    value: &'a crate::DataTree::DataTree,
+    value: &'a crate::Dyn::Dyn,
     name: &str,
-) -> Result<&'a [(String, crate::DataTree::DataTree)], String> {
+) -> Result<&'a [(String, crate::Dyn::Dyn)], String> {
     match value {
-        crate::DataTree::DataTree::Object(fields) => Ok(fields),
+        crate::Dyn::Dyn::Object(fields) => Ok(fields),
         _ => Err(format!("error report {name} is not an object")),
     }
 }
 
 fn jet_error_json_field<'a>(
-    fields: &'a [(String, crate::DataTree::DataTree)],
+    fields: &'a [(String, crate::Dyn::Dyn)],
     name: &str,
-) -> Result<&'a crate::DataTree::DataTree, String> {
+) -> Result<&'a crate::Dyn::Dyn, String> {
     jet_error_json_field_optional(fields, name).ok_or_else(|| format!("error report lacks {name}"))
 }
 
 fn jet_error_json_field_optional<'a>(
-    fields: &'a [(String, crate::DataTree::DataTree)],
+    fields: &'a [(String, crate::Dyn::Dyn)],
     name: &str,
-) -> Option<&'a crate::DataTree::DataTree> {
+) -> Option<&'a crate::Dyn::Dyn> {
     fields
         .iter()
         .find_map(|(field, value)| (field == name).then_some(value))
 }
 
 fn jet_error_json_text(
-    value: &crate::DataTree::DataTree,
+    value: &crate::Dyn::Dyn,
     name: &str,
 ) -> Result<String, String> {
     match value {
-        crate::DataTree::DataTree::Text(value) => Ok(value.clone()),
+        crate::Dyn::Dyn::Text(value) => Ok(value.clone()),
         _ => Err(format!("error report {name} is not text")),
     }
 }
 
 fn jet_error_json_optional_text(
-    fields: &[(String, crate::DataTree::DataTree)],
+    fields: &[(String, crate::Dyn::Dyn)],
     name: &str,
 ) -> Result<Option<String>, String> {
     jet_error_json_field_optional(fields, name)
@@ -791,31 +791,31 @@ fn jet_error_json_optional_text(
 }
 
 fn jet_error_json_optional_array<'a>(
-    fields: &'a [(String, crate::DataTree::DataTree)],
+    fields: &'a [(String, crate::Dyn::Dyn)],
     name: &str,
-) -> Result<Option<&'a [crate::DataTree::DataTree]>, String> {
+) -> Result<Option<&'a [crate::Dyn::Dyn]>, String> {
     let Some(value) = jet_error_json_field_optional(fields, name) else {
         return Ok(None);
     };
     match value {
-        crate::DataTree::DataTree::Array(values) => Ok(Some(values)),
+        crate::Dyn::Dyn::Array(values) => Ok(Some(values)),
         _ => Err(format!("error report {name} is not an array")),
     }
 }
 
 fn jet_error_json_u32(
-    value: &crate::DataTree::DataTree,
+    value: &crate::Dyn::Dyn,
     name: &str,
 ) -> Result<u32, String> {
     match value {
-        crate::DataTree::DataTree::Int(value) => u32::try_from(*value)
+        crate::Dyn::Dyn::Int(value) => u32::try_from(*value)
             .map_err(|_| format!("error report {name} is not a u32")),
         _ => Err(format!("error report {name} is not an integer")),
     }
 }
 
 fn jet_error_context_from_json(
-    value: &crate::DataTree::DataTree,
+    value: &crate::Dyn::Dyn,
 ) -> Result<JetErrorContextFrame, String> {
     let fields = jet_error_json_object(value, "context frame")?;
     Ok(JetErrorContextFrame {
@@ -826,7 +826,7 @@ fn jet_error_context_from_json(
 }
 
 fn jet_error_journey_from_json(
-    value: &crate::DataTree::DataTree,
+    value: &crate::Dyn::Dyn,
 ) -> Result<JetErrorJourneyFrame, String> {
     let fields = jet_error_json_object(value, "journey frame")?;
     Ok(JetErrorJourneyFrame {
@@ -840,7 +840,7 @@ fn jet_error_journey_from_json(
 }
 
 fn jet_error_conversion_from_json(
-    value: &crate::DataTree::DataTree,
+    value: &crate::Dyn::Dyn,
 ) -> Result<JetErrorConversion, String> {
     let fields = jet_error_json_object(value, "conversion")?;
     Ok(JetErrorConversion {
@@ -850,7 +850,7 @@ fn jet_error_conversion_from_json(
 }
 
 fn jet_error_details_from_json(
-    value: &crate::DataTree::DataTree,
+    value: &crate::Dyn::Dyn,
 ) -> Result<JetErrorDetails, String> {
     let fields = jet_error_json_object(value, "details")?;
     let field_values = jet_error_json_object(jet_error_json_field(fields, "fields")?, "detail fields")?
@@ -863,7 +863,7 @@ fn jet_error_details_from_json(
         })
         .collect::<Result<Vec<_>, String>>()?;
     let source_span = match jet_error_json_field(fields, "source_span")? {
-        crate::DataTree::DataTree::Null => None,
+        crate::Dyn::Dyn::Null => None,
         value => {
             let span = jet_error_json_object(value, "source span")?;
             Some(JetErrorSpan {
@@ -881,17 +881,17 @@ fn jet_error_details_from_json(
     })
 }
 
-fn jet_error_json_encode_value(value: &crate::DataTree::DataTree) -> String {
+fn jet_error_json_encode_value(value: &crate::Dyn::Dyn) -> String {
     match value {
-        crate::DataTree::DataTree::Null => "null".to_string(),
-        crate::DataTree::DataTree::Bool(value) => value.to_string(),
-        crate::DataTree::DataTree::Int(value) => value.to_string(),
-        crate::DataTree::DataTree::Float(value) => value.to_string(),
-        crate::DataTree::DataTree::Number(value) => value.clone(),
-        crate::DataTree::DataTree::Text(value) | crate::DataTree::DataTree::TypedText(value) => {
+        crate::Dyn::Dyn::Null => "null".to_string(),
+        crate::Dyn::Dyn::Bool(value) => value.to_string(),
+        crate::Dyn::Dyn::Int(value) => value.to_string(),
+        crate::Dyn::Dyn::Float(value) => value.to_string(),
+        crate::Dyn::Dyn::Number(value) => value.clone(),
+        crate::Dyn::Dyn::Text(value) | crate::Dyn::Dyn::TypedText(value) => {
             format!("\"{}\"", jet_error_json_escape(value))
         }
-        crate::DataTree::DataTree::Bytes(bytes) => format!(
+        crate::Dyn::Dyn::Bytes(bytes) => format!(
             "[{}]",
             bytes
                 .iter()
@@ -899,7 +899,7 @@ fn jet_error_json_encode_value(value: &crate::DataTree::DataTree) -> String {
                 .collect::<Vec<_>>()
                 .join(",")
         ),
-        crate::DataTree::DataTree::Array(values) => format!(
+        crate::Dyn::Dyn::Array(values) => format!(
             "[{}]",
             values
                 .iter()
@@ -907,7 +907,7 @@ fn jet_error_json_encode_value(value: &crate::DataTree::DataTree) -> String {
                 .collect::<Vec<_>>()
                 .join(",")
         ),
-        crate::DataTree::DataTree::Object(fields) => format!(
+        crate::Dyn::Dyn::Object(fields) => format!(
             "{{{}}}",
             fields
                 .iter()

@@ -297,17 +297,17 @@ pub fn services_lifecycle_json(project_dir: String, name: String) -[FS]> String?
     found :: services_read_lifecycle(services_service_dir(project_dir, name)) ?? return None
     facts :: found ?? return None
     authority :: services_authority_from_lifecycle(facts) ?? return None
-    after := [DataTree]{}
-    loop dependency in facts.dependencies -> &after.push(DataTree.Text(dependency))
-    document := [String: DataTree]{}
-    document["backend"] = DataTree.Text(authority.backend())
-    document["generation"] = DataTree.Int(facts.generation)
-    document["phase"] = DataTree.Text(facts.phase.as_str())
-    document["containment"] = DataTree.Text(authority.containment())
-    document["recovery"] = DataTree.Text(facts.recovery)
-    document["pid"] = if facts.pid == .Val(pid) -> DataTree.Int(pid) else -> DataTree.Null
-    document["unit"] = if authority.unit() == .Val(unit) -> DataTree.Text(unit) else -> DataTree.Null
-    document["guardian"] = if authority.guardian() == .Val(guardian) -> DataTree.Text(guardian) else -> DataTree.Null
-    document["after"] = DataTree.Array(after)
-    Val(json.to_string(DataTree.Object(document)))
+    after := [Dyn]{}
+    loop dependency in facts.dependencies -> &after.push(Dyn.Text(dependency))
+    document := [String: Dyn]{}
+    document["backend"] = Dyn.Text(authority.backend())
+    document["generation"] = Dyn.Int(facts.generation)
+    document["phase"] = Dyn.Text(facts.phase.as_str())
+    document["containment"] = Dyn.Text(authority.containment())
+    document["recovery"] = Dyn.Text(facts.recovery)
+    document["pid"] = if facts.pid == .Val(pid) -> Dyn.Int(pid) else -> Dyn.Null
+    document["unit"] = if authority.unit() == .Val(unit) -> Dyn.Text(unit) else -> Dyn.Null
+    document["guardian"] = if authority.guardian() == .Val(guardian) -> Dyn.Text(guardian) else -> Dyn.Null
+    document["after"] = Dyn.Array(after)
+    Val(json.to_string(Dyn.Object(document)))
 }

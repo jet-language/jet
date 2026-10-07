@@ -84,13 +84,13 @@ pub struct BundleFile {
         pkg_sha256_hex(self.bytes)
     }
 
-    fn to_json_tree(self) -> DataTree Never! {
+    fn to_json_tree(self) -> Dyn Never! {
         pkg_bundle_object([
-            "bytes": DataTree.Int(self.bytes.len()),
-            "kind": DataTree.Text(self.kind.as_str()),
-            "mode": DataTree.Int(self.mode),
-            "path": DataTree.Text(self.path),
-            "sha256": DataTree.Text(self.digest())
+            "bytes": Dyn.Int(self.bytes.len()),
+            "kind": Dyn.Text(self.kind.as_str()),
+            "mode": Dyn.Int(self.mode),
+            "path": Dyn.Text(self.path),
+            "sha256": Dyn.Text(self.digest())
         ])
     }
 }
@@ -105,11 +105,11 @@ pub struct LaunchDescriptor {
         LaunchDescriptor{launcher: launcher, executable: executable, arguments_passthrough: true}
     }
 
-    fn to_json_tree(self) -> DataTree Never! {
+    fn to_json_tree(self) -> Dyn Never! {
         pkg_bundle_object([
-            "arguments_passthrough": DataTree.Bool(self.arguments_passthrough),
-            "executable": DataTree.Text(self.executable),
-            "launcher": DataTree.Text(self.launcher)
+            "arguments_passthrough": Dyn.Bool(self.arguments_passthrough),
+            "executable": Dyn.Text(self.executable),
+            "launcher": Dyn.Text(self.launcher)
         ])
     }
 }
@@ -144,37 +144,37 @@ pub struct UpdaterManifest {
         }
     }
 
-    fn to_json_tree(self) -> DataTree Never! {
+    fn to_json_tree(self) -> Dyn Never! {
         pkg_bundle_object([
-            "artifact": DataTree.Text(self.artifact),
-            "channel": DataTree.Text(self.channel),
-            "package": DataTree.Text(self.package),
-            "payload_bytes": DataTree.Int(self.payload_bytes),
-            "payload_sha256": DataTree.Text(self.payload_sha256),
+            "artifact": Dyn.Text(self.artifact),
+            "channel": Dyn.Text(self.channel),
+            "package": Dyn.Text(self.package),
+            "payload_bytes": Dyn.Int(self.payload_bytes),
+            "payload_sha256": Dyn.Text(self.payload_sha256),
             "release_notes_url": pkg_bundle_optional_text(self.release_notes_url),
-            "schema": DataTree.Text(self.schema),
+            "schema": Dyn.Text(self.schema),
             "signature_url": pkg_bundle_optional_text(self.signature_url),
-            "target": DataTree.Text(self.target.as_str()),
-            "url": DataTree.Text(self.url),
-            "version": DataTree.Text(self.version)
+            "target": Dyn.Text(self.target.as_str()),
+            "url": Dyn.Text(self.url),
+            "version": Dyn.Text(self.version)
         ])
     }
 
     // The receipt projection: URLs with credentials, queries, or fragments
     // are redacted.
-    fn receipt_json_tree(self) -> DataTree Never! {
+    fn receipt_json_tree(self) -> Dyn Never! {
         pkg_bundle_object([
-            "artifact": DataTree.Text(self.artifact),
-            "channel": DataTree.Text(self.channel),
-            "package": DataTree.Text(self.package),
-            "payload_bytes": DataTree.Int(self.payload_bytes),
-            "payload_sha256": DataTree.Text(self.payload_sha256),
+            "artifact": Dyn.Text(self.artifact),
+            "channel": Dyn.Text(self.channel),
+            "package": Dyn.Text(self.package),
+            "payload_bytes": Dyn.Int(self.payload_bytes),
+            "payload_sha256": Dyn.Text(self.payload_sha256),
             "release_notes_url": pkg_bundle_optional_receipt_url(self.release_notes_url),
-            "schema": DataTree.Text(self.schema),
+            "schema": Dyn.Text(self.schema),
             "signature_url": pkg_bundle_optional_receipt_url(self.signature_url),
-            "target": DataTree.Text(self.target.as_str()),
-            "url": DataTree.Text(pkg_bundle_receipt_source(self.url)),
-            "version": DataTree.Text(self.version)
+            "target": Dyn.Text(self.target.as_str()),
+            "url": Dyn.Text(pkg_bundle_receipt_source(self.url)),
+            "version": Dyn.Text(self.version)
         ])
     }
 
@@ -194,21 +194,21 @@ pub struct BundleInputFact {
     pub digest: String
     pub bytes: Int
 
-    fn to_json_tree(self) -> DataTree Never! {
+    fn to_json_tree(self) -> Dyn Never! {
         pkg_bundle_object([
-            "bytes": DataTree.Int(self.bytes),
-            "digest": DataTree.Text(self.digest),
-            "path": DataTree.Text(self.path),
-            "role": DataTree.Text(self.role)
+            "bytes": Dyn.Int(self.bytes),
+            "digest": Dyn.Text(self.digest),
+            "path": Dyn.Text(self.path),
+            "role": Dyn.Text(self.role)
         ])
     }
 
-    fn receipt_json_tree(self) -> DataTree Never! {
+    fn receipt_json_tree(self) -> Dyn Never! {
         pkg_bundle_object([
-            "bytes": DataTree.Int(self.bytes),
-            "digest": DataTree.Text(self.digest),
-            "path": DataTree.Text(pkg_bundle_receipt_source(self.path)),
-            "role": DataTree.Text(self.role)
+            "bytes": Dyn.Int(self.bytes),
+            "digest": Dyn.Text(self.digest),
+            "path": Dyn.Text(pkg_bundle_receipt_source(self.path)),
+            "role": Dyn.Text(self.role)
         ])
     }
 }
@@ -442,38 +442,38 @@ pub struct BundlePlan {
         pkg_bundle_canonical_text(self.to_json_tree())
     }
 
-    fn to_json_tree(self) -> DataTree Never! {
-        files := [DataTree]{}
+    fn to_json_tree(self) -> Dyn Never! {
+        files := [Dyn]{}
         loop file in self.files -> &files.push(file.to_json_tree())
-        inputs := [DataTree]{}
+        inputs := [Dyn]{}
         loop input in self.inputs -> &inputs.push(input.to_json_tree())
-        hooks := [DataTree]{}
+        hooks := [Dyn]{}
         loop hook in self.signing_hooks -> &hooks.push(pkg_bundle_signing_hook_json(hook))
         game :: if self.game == {
             .Val(declared) -> pkg_bundle_game_spec_json(declared)
-            .None -> DataTree.Null
+            .None -> Dyn.Null
         }
         updater :: if self.updater == {
             .Val(manifest) -> manifest.to_json_tree()
-            .None -> DataTree.Null
+            .None -> Dyn.Null
         }
         pkg_bundle_object([
-            "artifact_name": DataTree.Text(self.artifact_name),
-            "files": DataTree.Array(files),
+            "artifact_name": Dyn.Text(self.artifact_name),
+            "files": Dyn.Array(files),
             "game": game,
-            "format": DataTree.Text(@PACKAGE_BUNDLE_FORMAT),
-            "identity": DataTree.Text(self.identity),
-            "kind": DataTree.Text(self.kind.as_str()),
+            "format": Dyn.Text(@PACKAGE_BUNDLE_FORMAT),
+            "identity": Dyn.Text(self.identity),
+            "kind": Dyn.Text(self.kind.as_str()),
             "launch": self.launch.to_json_tree(),
             "metadata": pkg_bundle_plan_metadata_json(self.metadata),
-            "package": DataTree.Text(self.package),
-            "executable_source": DataTree.Text(self.executable_source),
-            "inputs": DataTree.Array(inputs),
-            "signing_hooks": DataTree.Array(hooks),
-            "target": DataTree.Text(self.target.as_str()),
+            "package": Dyn.Text(self.package),
+            "executable_source": Dyn.Text(self.executable_source),
+            "inputs": Dyn.Array(inputs),
+            "signing_hooks": Dyn.Array(hooks),
+            "target": Dyn.Text(self.target.as_str()),
             "updater": updater,
-            "version": DataTree.Text(self.version),
-            "schema_version": DataTree.Int(self.schema_version)
+            "version": Dyn.Text(self.version),
+            "schema_version": Dyn.Int(self.schema_version)
         ])
     }
 }
@@ -512,17 +512,17 @@ pub struct BundleArtifact {
         pkg_bundle_canonical_text(self.to_json_tree())
     }
 
-    fn to_json_tree(self) -> DataTree Never! {
+    fn to_json_tree(self) -> Dyn Never! {
         pkg_bundle_object([
-            "artifact_name": DataTree.Text(self.artifact_name),
-            "artifact_sha256": DataTree.Text(self.digest()),
-            "format": DataTree.Text(@PACKAGE_BUNDLE_FORMAT),
-            "kind": DataTree.Text(self.kind.as_str()),
-            "package": DataTree.Text(self.package),
+            "artifact_name": Dyn.Text(self.artifact_name),
+            "artifact_sha256": Dyn.Text(self.digest()),
+            "format": Dyn.Text(@PACKAGE_BUNDLE_FORMAT),
+            "kind": Dyn.Text(self.kind.as_str()),
+            "package": Dyn.Text(self.package),
             "receipt": self.receipt.to_json_tree(),
-            "schema_version": DataTree.Int(self.schema_version),
-            "target": DataTree.Text(self.target.as_str()),
-            "version": DataTree.Text(self.version)
+            "schema_version": Dyn.Int(self.schema_version),
+            "target": Dyn.Text(self.target.as_str()),
+            "version": Dyn.Text(self.version)
         ])
     }
 }
@@ -583,10 +583,10 @@ pub struct BundleSigningFact {
         out
     }
 
-    fn to_json_tree(self) -> DataTree Never! {
+    fn to_json_tree(self) -> Dyn Never! {
         pkg_bundle_object([
             "diagnostic": pkg_bundle_optional_receipt_text(self.diagnostic),
-            "status": DataTree.Text(self.status.as_str()),
+            "status": Dyn.Text(self.status.as_str()),
             "tool": pkg_bundle_optional_receipt_text(self.tool),
             "tool_identity": pkg_bundle_optional_receipt_text(self.tool_identity),
             "tool_version": pkg_bundle_optional_receipt_text(self.tool_version)
@@ -622,15 +622,15 @@ pub struct BundleMaterializerFact {
     pub mechanism: String
     pub policy: String
 
-    fn to_json_tree(self) -> DataTree Never! {
+    fn to_json_tree(self) -> Dyn Never! {
         pkg_bundle_object([
-            "authority": DataTree.Text(pkg_bundle_receipt_safe_text(self.authority)),
-            "executable": DataTree.Text(pkg_bundle_receipt_safe_text(self.executable)),
-            "mechanism": DataTree.Text(pkg_bundle_receipt_safe_text(self.mechanism)),
-            "policy": DataTree.Text(pkg_bundle_receipt_safe_text(self.policy)),
-            "tool": DataTree.Text(pkg_bundle_receipt_safe_text(self.tool)),
-            "tool_identity": DataTree.Text(pkg_bundle_receipt_safe_text(self.tool_identity)),
-            "tool_version": DataTree.Text(pkg_bundle_receipt_safe_text(self.tool_version))
+            "authority": Dyn.Text(pkg_bundle_receipt_safe_text(self.authority)),
+            "executable": Dyn.Text(pkg_bundle_receipt_safe_text(self.executable)),
+            "mechanism": Dyn.Text(pkg_bundle_receipt_safe_text(self.mechanism)),
+            "policy": Dyn.Text(pkg_bundle_receipt_safe_text(self.policy)),
+            "tool": Dyn.Text(pkg_bundle_receipt_safe_text(self.tool)),
+            "tool_identity": Dyn.Text(pkg_bundle_receipt_safe_text(self.tool_identity)),
+            "tool_version": Dyn.Text(pkg_bundle_receipt_safe_text(self.tool_version))
         ])
     }
 }
@@ -642,13 +642,13 @@ pub struct BundleFileFact {
     pub bytes: Int
     pub sha256: String
 
-    fn receipt_json_tree(self) -> DataTree Never! {
+    fn receipt_json_tree(self) -> Dyn Never! {
         pkg_bundle_object([
-            "bytes": DataTree.Int(self.bytes),
-            "kind": DataTree.Text(self.kind.as_str()),
-            "mode": DataTree.Int(self.mode),
-            "path": DataTree.Text(pkg_bundle_receipt_source(self.path)),
-            "sha256": DataTree.Text(self.sha256)
+            "bytes": Dyn.Int(self.bytes),
+            "kind": Dyn.Text(self.kind.as_str()),
+            "mode": Dyn.Int(self.mode),
+            "path": Dyn.Text(pkg_bundle_receipt_source(self.path)),
+            "sha256": Dyn.Text(self.sha256)
         ])
     }
 }
@@ -748,51 +748,51 @@ pub struct BundleReceipt {
         }
     }
 
-    fn to_json_tree(self) -> DataTree Never! {
-        files := [DataTree]{}
+    fn to_json_tree(self) -> Dyn Never! {
+        files := [Dyn]{}
         loop file in self.files -> &files.push(file.receipt_json_tree())
-        inputs := [DataTree]{}
+        inputs := [Dyn]{}
         loop input in self.inputs -> &inputs.push(input.receipt_json_tree())
-        hooks := [DataTree]{}
+        hooks := [Dyn]{}
         loop hook in self.signing_hooks -> &hooks.push(pkg_bundle_signing_hook_receipt_json(hook))
         game :: if self.game == {
             .Val(declared) -> pkg_bundle_game_spec_receipt_json(declared)
-            .None -> DataTree.Null
+            .None -> Dyn.Null
         }
         materializer :: if self.materializer == {
             .Val(fact) -> fact.to_json_tree()
-            .None -> DataTree.Null
+            .None -> Dyn.Null
         }
         signing :: if self.signing == {
             .Val(fact) -> fact.to_json_tree()
-            .None -> DataTree.Null
+            .None -> Dyn.Null
         }
         updater :: if self.updater == {
             .Val(manifest) -> manifest.receipt_json_tree()
-            .None -> DataTree.Null
+            .None -> Dyn.Null
         }
         pkg_bundle_object([
-            "artifact_bytes": DataTree.Int(self.artifact_bytes),
-            "artifact_name": DataTree.Text(self.artifact_name),
-            "artifact_sha256": DataTree.Text(self.artifact_sha256),
-            "artifact_status": DataTree.Text(self.artifact_status().as_str()),
-            "executable_source": DataTree.Text(pkg_bundle_receipt_source(self.executable_source)),
-            "files": DataTree.Array(files),
+            "artifact_bytes": Dyn.Int(self.artifact_bytes),
+            "artifact_name": Dyn.Text(self.artifact_name),
+            "artifact_sha256": Dyn.Text(self.artifact_sha256),
+            "artifact_status": Dyn.Text(self.artifact_status().as_str()),
+            "executable_source": Dyn.Text(pkg_bundle_receipt_source(self.executable_source)),
+            "files": Dyn.Array(files),
             "game": game,
-            "inputs": DataTree.Array(inputs),
-            "installability": DataTree.Text(self.installability().as_str()),
-            "kind": DataTree.Text(self.kind.as_str()),
+            "inputs": Dyn.Array(inputs),
+            "installability": Dyn.Text(self.installability().as_str()),
+            "kind": Dyn.Text(self.kind.as_str()),
             "launch": self.launch.to_json_tree(),
             "materializer": materializer,
-            "package": DataTree.Text(self.package),
-            "plan_identity": DataTree.Text(self.plan_identity),
-            "schema": DataTree.Text(self.schema),
+            "package": Dyn.Text(self.package),
+            "plan_identity": Dyn.Text(self.plan_identity),
+            "schema": Dyn.Text(self.schema),
             "signing": signing,
-            "signing_hooks": DataTree.Array(hooks),
-            "signing_status": DataTree.Text(self.signing_status().as_str()),
-            "target": DataTree.Text(self.target.as_str()),
+            "signing_hooks": Dyn.Array(hooks),
+            "signing_status": Dyn.Text(self.signing_status().as_str()),
+            "target": Dyn.Text(self.target.as_str()),
             "updater": updater,
-            "version": DataTree.Text(self.version)
+            "version": Dyn.Text(self.version)
         ])
     }
 
@@ -838,69 +838,69 @@ fn pkg_bundle_hook_inputs_key(inputs: [SigningHookInput]) -> String Never! {
 }
 
 // Canonical JSON text: RFC 8785 JCS bytes plus one trailing LF.
-fn pkg_bundle_canonical_text(value: DataTree) -> String Never! {
+fn pkg_bundle_canonical_text(value: Dyn) -> String Never! {
     "{json.canonical(value) ?? panic("value is not canonical JSON")}\n"
 }
 
-fn pkg_bundle_canonical_bytes(value: DataTree) -> [U8] Never! {
+fn pkg_bundle_canonical_bytes(value: Dyn) -> [U8] Never! {
     pkg_bundle_canonical_text(value).bytes()
 }
 
-fn pkg_bundle_object(fields: [String: DataTree]) -> DataTree Never! {
-    DataTree.Object(fields)
+fn pkg_bundle_object(fields: [String: Dyn]) -> Dyn Never! {
+    Dyn.Object(fields)
 }
 
-fn pkg_bundle_optional_text(value: String?) -> DataTree Never! {
+fn pkg_bundle_optional_text(value: String?) -> Dyn Never! {
     if value == {
-        .Val(text) -> DataTree.Text(text)
-        .None -> DataTree.Null
+        .Val(text) -> Dyn.Text(text)
+        .None -> Dyn.Null
     }
 }
 
-fn pkg_bundle_texts(values: [String]) -> DataTree Never! {
-    items := [DataTree]{}
-    loop value in values -> &items.push(DataTree.Text(value))
-    DataTree.Array(items)
+fn pkg_bundle_texts(values: [String]) -> Dyn Never! {
+    items := [Dyn]{}
+    loop value in values -> &items.push(Dyn.Text(value))
+    Dyn.Array(items)
 }
 
-fn pkg_bundle_metadata_json(spec: BundleSpec, metadata: BundleMetadata, executable_digest: String, icons: [BundleIcon], hooks: [SigningHook]) -> DataTree Never! {
-    icon_values := [DataTree]{}
+fn pkg_bundle_metadata_json(spec: BundleSpec, metadata: BundleMetadata, executable_digest: String, icons: [BundleIcon], hooks: [SigningHook]) -> Dyn Never! {
+    icon_values := [Dyn]{}
     loop icon in icons {
         &icon_values.push(pkg_bundle_object([
-            "bytes": DataTree.Int(icon.bytes.len()),
-            "format": DataTree.Text(icon.format.as_str()),
-            "name": DataTree.Text(icon.name),
-            "sha256": DataTree.Text(icon.digest()),
-            "size": DataTree.Int(icon.size)
+            "bytes": Dyn.Int(icon.bytes.len()),
+            "format": Dyn.Text(icon.format.as_str()),
+            "name": Dyn.Text(icon.name),
+            "sha256": Dyn.Text(icon.digest()),
+            "size": Dyn.Int(icon.size)
         ]))
     }
-    hook_values := [DataTree]{}
+    hook_values := [Dyn]{}
     loop hook in hooks -> &hook_values.push(pkg_bundle_signing_hook_json(hook))
     pkg_bundle_object([
         "categories": pkg_bundle_texts(metadata.categories),
-        "description": DataTree.Text(metadata.description),
-        "executable": DataTree.Text(spec.executable.name),
-        "executable_sha256": DataTree.Text(executable_digest),
-        "format": DataTree.Text(@PACKAGE_BUNDLE_FORMAT),
-        "icons": DataTree.Array(icon_values),
-        "kind": DataTree.Text(spec.kind.as_str()),
-        "identifier": DataTree.Text(metadata.identifier),
-        "name": DataTree.Text(metadata.display_name),
-        "package": DataTree.Text(spec.package),
-        "publisher": DataTree.Text(metadata.publisher),
-        "signing_hooks": DataTree.Array(hook_values),
-        "target": DataTree.Text(spec.target.as_str()),
-        "version": DataTree.Text(spec.version)
+        "description": Dyn.Text(metadata.description),
+        "executable": Dyn.Text(spec.executable.name),
+        "executable_sha256": Dyn.Text(executable_digest),
+        "format": Dyn.Text(@PACKAGE_BUNDLE_FORMAT),
+        "icons": Dyn.Array(icon_values),
+        "kind": Dyn.Text(spec.kind.as_str()),
+        "identifier": Dyn.Text(metadata.identifier),
+        "name": Dyn.Text(metadata.display_name),
+        "package": Dyn.Text(spec.package),
+        "publisher": Dyn.Text(metadata.publisher),
+        "signing_hooks": Dyn.Array(hook_values),
+        "target": Dyn.Text(spec.target.as_str()),
+        "version": Dyn.Text(spec.version)
     ])
 }
 
-fn pkg_bundle_plan_metadata_json(metadata: BundleMetadata) -> DataTree Never! {
+fn pkg_bundle_plan_metadata_json(metadata: BundleMetadata) -> Dyn Never! {
     pkg_bundle_object([
         "categories": pkg_bundle_texts(metadata.categories),
-        "description": DataTree.Text(metadata.description),
-        "display_name": DataTree.Text(metadata.display_name),
-        "identifier": DataTree.Text(metadata.identifier),
-        "publisher": DataTree.Text(metadata.publisher)
+        "description": Dyn.Text(metadata.description),
+        "display_name": Dyn.Text(metadata.display_name),
+        "identifier": Dyn.Text(metadata.identifier),
+        "publisher": Dyn.Text(metadata.publisher)
     ])
 }
 
@@ -920,125 +920,125 @@ fn pkg_bundle_game_asset_path(spec: BundleSpec, path: String) -> String Never! {
     }
 }
 
-fn pkg_bundle_game_spec_json(game: GameBundleSpec) -> DataTree Never! {
-    assets := [DataTree]{}
+fn pkg_bundle_game_spec_json(game: GameBundleSpec) -> Dyn Never! {
+    assets := [Dyn]{}
     loop asset in game.assets {
         &assets.push(pkg_bundle_object([
-            "bytes": DataTree.Int(asset.bytes.len()),
-            "mode": DataTree.Int(asset.mode),
-            "path": DataTree.Text(asset.path),
-            "sha256": DataTree.Text(asset.digest())
+            "bytes": Dyn.Int(asset.bytes.len()),
+            "mode": Dyn.Int(asset.mode),
+            "path": Dyn.Text(asset.path),
+            "sha256": Dyn.Text(asset.digest())
         ]))
     }
     pkg_bundle_object([
-        "assets": DataTree.Array(assets),
-        "backend": DataTree.Text(game.backend),
-        "build_identity": DataTree.Text(game.build_identity),
-        "cook_mode": DataTree.Text(game.cook_mode),
-        "crash_consent": DataTree.Text(game.crash_consent),
-        "crash_reporter": DataTree.Text(game.crash_reporter),
+        "assets": Dyn.Array(assets),
+        "backend": Dyn.Text(game.backend),
+        "build_identity": Dyn.Text(game.build_identity),
+        "cook_mode": Dyn.Text(game.cook_mode),
+        "crash_consent": Dyn.Text(game.crash_consent),
+        "crash_reporter": Dyn.Text(game.crash_reporter),
         "crash_runtime": pkg_bundle_crash_runtime_json(game.crash_runtime, false),
-        "development_stripping": DataTree.Bool(game.development_stripping),
-        "export_preset": DataTree.Text(game.export_preset),
-        "format": DataTree.Text("jet.game.bundle"),
-        "profile": DataTree.Text(game.profile_name),
-        "renderer": DataTree.Text(game.renderer),
-        "source_revision": DataTree.Text(game.source_revision)
+        "development_stripping": Dyn.Bool(game.development_stripping),
+        "export_preset": Dyn.Text(game.export_preset),
+        "format": Dyn.Text("jet.game.bundle"),
+        "profile": Dyn.Text(game.profile_name),
+        "renderer": Dyn.Text(game.renderer),
+        "source_revision": Dyn.Text(game.source_revision)
     ])
 }
 
-fn pkg_bundle_game_spec_receipt_json(game: GameBundleSpec) -> DataTree Never! {
-    assets := [DataTree]{}
+fn pkg_bundle_game_spec_receipt_json(game: GameBundleSpec) -> Dyn Never! {
+    assets := [Dyn]{}
     loop asset in game.assets {
         &assets.push(pkg_bundle_object([
-            "bytes": DataTree.Int(asset.bytes.len()),
-            "mode": DataTree.Int(asset.mode),
-            "path": DataTree.Text(pkg_bundle_receipt_source(asset.path)),
-            "sha256": DataTree.Text(asset.digest())
+            "bytes": Dyn.Int(asset.bytes.len()),
+            "mode": Dyn.Int(asset.mode),
+            "path": Dyn.Text(pkg_bundle_receipt_source(asset.path)),
+            "sha256": Dyn.Text(asset.digest())
         ]))
     }
     pkg_bundle_object([
-        "assets": DataTree.Array(assets),
-        "backend": DataTree.Text(pkg_bundle_receipt_safe_text(game.backend)),
-        "build_identity": DataTree.Text(pkg_bundle_receipt_safe_text(game.build_identity)),
-        "cook_mode": DataTree.Text(pkg_bundle_receipt_safe_text(game.cook_mode)),
-        "crash_consent": DataTree.Text(pkg_bundle_receipt_safe_text(game.crash_consent)),
-        "crash_reporter": DataTree.Text(pkg_bundle_receipt_safe_text(game.crash_reporter)),
+        "assets": Dyn.Array(assets),
+        "backend": Dyn.Text(pkg_bundle_receipt_safe_text(game.backend)),
+        "build_identity": Dyn.Text(pkg_bundle_receipt_safe_text(game.build_identity)),
+        "cook_mode": Dyn.Text(pkg_bundle_receipt_safe_text(game.cook_mode)),
+        "crash_consent": Dyn.Text(pkg_bundle_receipt_safe_text(game.crash_consent)),
+        "crash_reporter": Dyn.Text(pkg_bundle_receipt_safe_text(game.crash_reporter)),
         "crash_runtime": pkg_bundle_crash_runtime_json(game.crash_runtime, true),
-        "development_stripping": DataTree.Bool(game.development_stripping),
-        "export_preset": DataTree.Text(pkg_bundle_receipt_safe_text(game.export_preset)),
-        "format": DataTree.Text("jet.game.bundle"),
-        "profile": DataTree.Text(pkg_bundle_receipt_safe_text(game.profile_name)),
-        "renderer": DataTree.Text(pkg_bundle_receipt_safe_text(game.renderer)),
-        "source_revision": DataTree.Text(pkg_bundle_receipt_source(game.source_revision))
+        "development_stripping": Dyn.Bool(game.development_stripping),
+        "export_preset": Dyn.Text(pkg_bundle_receipt_safe_text(game.export_preset)),
+        "format": Dyn.Text("jet.game.bundle"),
+        "profile": Dyn.Text(pkg_bundle_receipt_safe_text(game.profile_name)),
+        "renderer": Dyn.Text(pkg_bundle_receipt_safe_text(game.renderer)),
+        "source_revision": Dyn.Text(pkg_bundle_receipt_source(game.source_revision))
     ])
 }
 
 // The crash runtime facts; the receipt form redacts sensitive text and
 // source-like paths.
-fn pkg_bundle_crash_runtime_json(runtime: GameCrashReporterSpec, receipt: Bool) -> DataTree Never! {
+fn pkg_bundle_crash_runtime_json(runtime: GameCrashReporterSpec, receipt: Bool) -> Dyn Never! {
     safe :: (value: String) -> if receipt -> pkg_bundle_receipt_safe_text(value) else -> value
     retention_path :: if receipt -> pkg_bundle_receipt_source(runtime.retention_path) else -> runtime.retention_path
     pkg_bundle_object([
-        "abi": DataTree.Text(safe(@GAME_CRASH_REPORTER_ABI)),
-        "installation": DataTree.Text(safe(runtime.installation)),
-        "memory": pkg_bundle_object(["max_logs": DataTree.Int(runtime.memory_logs), "max_stacks": DataTree.Int(runtime.memory_stacks)]),
-        "retention": pkg_bundle_object(["max_reports": DataTree.Int(runtime.retention_limit), "mode": DataTree.Text(safe(runtime.retention_mode)), "path": DataTree.Text(retention_path)]),
-        "routing": DataTree.Text(safe(runtime.routing)),
-        "upload_policy": DataTree.Text(safe(runtime.upload_policy))
+        "abi": Dyn.Text(safe(@GAME_CRASH_REPORTER_ABI)),
+        "installation": Dyn.Text(safe(runtime.installation)),
+        "memory": pkg_bundle_object(["max_logs": Dyn.Int(runtime.memory_logs), "max_stacks": Dyn.Int(runtime.memory_stacks)]),
+        "retention": pkg_bundle_object(["max_reports": Dyn.Int(runtime.retention_limit), "mode": Dyn.Text(safe(runtime.retention_mode)), "path": Dyn.Text(retention_path)]),
+        "routing": Dyn.Text(safe(runtime.routing)),
+        "upload_policy": Dyn.Text(safe(runtime.upload_policy))
     ])
 }
 
-fn pkg_bundle_game_manifest_json(spec: BundleSpec, game: GameBundleSpec) -> DataTree Never! {
+fn pkg_bundle_game_manifest_json(spec: BundleSpec, game: GameBundleSpec) -> Dyn Never! {
     pkg_bundle_object([
         "game": pkg_bundle_game_spec_json(game),
-        "package": DataTree.Text(spec.package),
-        "target": DataTree.Text(spec.target.as_str()),
-        "version": DataTree.Text(spec.version)
+        "package": Dyn.Text(spec.package),
+        "target": Dyn.Text(spec.target.as_str()),
+        "version": Dyn.Text(spec.version)
     ])
 }
 
-fn pkg_bundle_signing_hook_json(hook: SigningHook) -> DataTree Never! {
-    inputs := [DataTree]{}
-    loop input in hook.inputs -> &inputs.push(pkg_bundle_object(["digest": DataTree.Text(input.digest), "path": DataTree.Text(input.path)]))
+fn pkg_bundle_signing_hook_json(hook: SigningHook) -> Dyn Never! {
+    inputs := [Dyn]{}
+    loop input in hook.inputs -> &inputs.push(pkg_bundle_object(["digest": Dyn.Text(input.digest), "path": Dyn.Text(input.path)]))
     pkg_bundle_object([
         "args": pkg_bundle_texts(hook.args),
-        "inputs": DataTree.Array(inputs),
-        "name": DataTree.Text(hook.name),
-        "phase": DataTree.Text(hook.phase.as_str()),
-        "program": DataTree.Text(hook.program)
+        "inputs": Dyn.Array(inputs),
+        "name": Dyn.Text(hook.name),
+        "phase": Dyn.Text(hook.phase.as_str()),
+        "program": Dyn.Text(hook.program)
     ])
 }
 
 // Hook arguments may carry a password, token, or key: the plan keeps the
 // exact declaration for the adapter, the receipt only the argument count and
 // redaction markers.
-fn pkg_bundle_signing_hook_receipt_json(hook: SigningHook) -> DataTree Never! {
-    args := [DataTree]{}
-    loop _ in hook.args -> &args.push(DataTree.Text("<redacted>"))
-    inputs := [DataTree]{}
-    loop input in hook.inputs -> &inputs.push(pkg_bundle_object(["digest": DataTree.Text(input.digest), "path": DataTree.Text(pkg_bundle_receipt_source(input.path))]))
+fn pkg_bundle_signing_hook_receipt_json(hook: SigningHook) -> Dyn Never! {
+    args := [Dyn]{}
+    loop _ in hook.args -> &args.push(Dyn.Text("<redacted>"))
+    inputs := [Dyn]{}
+    loop input in hook.inputs -> &inputs.push(pkg_bundle_object(["digest": Dyn.Text(input.digest), "path": Dyn.Text(pkg_bundle_receipt_source(input.path))]))
     pkg_bundle_object([
-        "args": DataTree.Array(args),
-        "args_redacted": DataTree.Bool(true),
-        "inputs": DataTree.Array(inputs),
-        "name": DataTree.Text(hook.name),
-        "phase": DataTree.Text(hook.phase.as_str()),
-        "program": DataTree.Text(pkg_bundle_receipt_source(hook.program))
+        "args": Dyn.Array(args),
+        "args_redacted": Dyn.Bool(true),
+        "inputs": Dyn.Array(inputs),
+        "name": Dyn.Text(hook.name),
+        "phase": Dyn.Text(hook.phase.as_str()),
+        "program": Dyn.Text(pkg_bundle_receipt_source(hook.program))
     ])
 }
 
-fn pkg_bundle_optional_receipt_url(value: String?) -> DataTree Never! {
+fn pkg_bundle_optional_receipt_url(value: String?) -> Dyn Never! {
     if value == {
-        .Val(text) -> DataTree.Text(pkg_bundle_receipt_source(text))
-        .None -> DataTree.Null
+        .Val(text) -> Dyn.Text(pkg_bundle_receipt_source(text))
+        .None -> Dyn.Null
     }
 }
 
-fn pkg_bundle_optional_receipt_text(value: String?) -> DataTree Never! {
+fn pkg_bundle_optional_receipt_text(value: String?) -> Dyn Never! {
     if value == {
-        .Val(text) -> DataTree.Text(pkg_bundle_receipt_safe_text(text))
-        .None -> DataTree.Null
+        .Val(text) -> Dyn.Text(pkg_bundle_receipt_safe_text(text))
+        .None -> Dyn.Null
     }
 }
 

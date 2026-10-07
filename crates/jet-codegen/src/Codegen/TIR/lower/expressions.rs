@@ -7651,7 +7651,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             });
                         }
                     }
-                    // D-ENC-DYN1=A+: `Data.Null` → `{root}jet_std::DataTree::Null` (a unit
+                    // D-ENC-DYN1=A+: `Data.Null` → `{root}jet_std::Dyn::Null` (a unit
                     // construction reaching codegen as a `Field`, the gate proved it).
                     if env.ty_of(enum_name).is_none()
                         && is_json_type_name(enum_name)

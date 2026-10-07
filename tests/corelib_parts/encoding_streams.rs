@@ -318,7 +318,7 @@ fn run() {{
     record_limits.max_total_bytes = Val(5)
     record_output :: files.create("{jsonl}") ?? panic("create record")
     record_writer :: jsonl.writer(^record_output, record_limits) ?? panic("record writer")
-    record_result :: record_writer.write(DataTree.Array([DataTree.Int(1), DataTree.Text("abcd")]))
+    record_result :: record_writer.write(Dyn.Array([Dyn.Int(1), Dyn.Text("abcd")]))
     if record_result == {{
         .Ok(_) -> {{ print("record-limit-missed") }}
         .Err(first) -> {{
@@ -329,7 +329,7 @@ fn run() {{
 
     nonfinite_output :: files.create("{nonfinite}") ?? panic("create nonfinite")
     nonfinite_writer :: jsonl.writer(^nonfinite_output) ?? panic("nonfinite writer")
-    nonfinite_result :: nonfinite_writer.write(DataTree.Array([DataTree.Int(1), DataTree.Float(0.0 / 0.0)]))
+    nonfinite_result :: nonfinite_writer.write(Dyn.Array([Dyn.Int(1), Dyn.Float(0.0 / 0.0)]))
     if nonfinite_result == {{ .Ok(_) -> {{ print("nonfinite-missed") }} .Err(_) -> {{ print(true) }} }}
 }}
 "#
@@ -395,9 +395,9 @@ fn run() {{
     writer.finish() ?? panic("finish")
     writer.finish() ?? panic("finish twice")
 
-    data := DataTree.Object([
-        "z": DataTree.Array([DataTree.Int(1), DataTree.Object(["b": DataTree.Int(2), "a": DataTree.Text("x")])]),
-        "a": DataTree.Bool(true),
+    data := Dyn.Object([
+        "z": Dyn.Array([Dyn.Int(1), Dyn.Object(["b": Dyn.Int(2), "a": Dyn.Text("x")])]),
+        "a": Dyn.Bool(true),
     ])
     print(json.canonical(data) ?? panic("value is not canonical JSON"))
 
@@ -659,12 +659,12 @@ use core.files as files
 fn run() {{
     output :: files.create("{output}") ?? panic("create")
     writer :: jsonl.writer(^output) ?? panic("writer")
-    writer.write(DataTree.Text("alpha")) ?? panic("write")
-    writer.write(DataTree.Array([DataTree.Int(1), DataTree.Text("beta")])) ?? panic("write")
+    writer.write(Dyn.Text("alpha")) ?? panic("write")
+    writer.write(Dyn.Array([Dyn.Int(1), Dyn.Text("beta")])) ?? panic("write")
     &writer.flush() ?? panic("flush")
     writer.finish() ?? panic("finish")
     writer.finish() ?? panic("finish twice")
-    after_finish :: writer.write(DataTree.Null)
+    after_finish :: writer.write(Dyn.Null)
     if after_finish == {{
         .Ok(_) -> {{ print("write-after-finish-missed") }}
         .Err(first) -> {{
@@ -686,8 +686,8 @@ fn run() {{
     second_result :: reader.next() ?? panic("second")
     if second_result == {{
         Val(value) -> {{
-            first :: value.at(0) ?? DataTree.Int(-1)
-            second :: value.at(1) ?? DataTree.Text("bad")
+            first :: value.at(0) ?? Dyn.Int(-1)
+            second :: value.at(1) ?? Dyn.Text("bad")
             print(first.int() ?? -1)
             print(second.text() ?? "bad")
         }}
@@ -721,7 +721,7 @@ fn run() {{
     limits.max_item_bytes = 2
     limited_output :: files.create("{limited}") ?? panic("limited create")
     limited_writer :: jsonl.writer(^limited_output, limits) ?? panic("limited writer")
-    limited_result :: limited_writer.write(DataTree.Text("three"))
+    limited_result :: limited_writer.write(Dyn.Text("three"))
     if limited_result == {{
         .Ok(_) -> {{ print("limit-missed") }}
         .Err(first) -> {{
@@ -813,7 +813,7 @@ fn run() {{
     valid_record :: valid_reader.next() ?? panic("valid next")
     if valid_record == {{
         Val(value) -> {{
-            last :: value.at(31) ?? DataTree.Int(-1)
+            last :: value.at(31) ?? Dyn.Int(-1)
             print(last.int() ?? -1)
         }}
         None -> {{ print("valid-missing") }}
@@ -1138,7 +1138,7 @@ use core.files as files
 fn write_unfinished(path: String) {{
     output :: files.create(path) ?? panic("create partial")
     writer :: jsonl.writer(^output) ?? panic("writer")
-    writer.write(DataTree.Text("alpha")) ?? panic("record")
+    writer.write(Dyn.Text("alpha")) ?? panic("record")
     &writer.flush() ?? panic("flush")
     // no finish — Drop must leave the record LF unwritten (incomplete wire)
 }}
@@ -1151,7 +1151,7 @@ fn run() {{
     // Same-path recreate: Drop must have released the unfinished writer handle.
     reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
     reopen_writer :: jsonl.writer(^reopen_out) ?? panic("reopen writer")
-    reopen_writer.write(DataTree.Null) ?? panic("reopen write")
+    reopen_writer.write(Dyn.Null) ?? panic("reopen write")
     reopen_writer.finish() ?? panic("reopen finish")
     finished :: files.read("{partial}") ?? panic("same-path read after finish")
     print(finished == "null\n")
@@ -1309,7 +1309,7 @@ fn xml_stream_drop_and_codec_heap_ceiling_are_enforced() {
     fs::create_dir_all(&dir).unwrap();
     let partial_path = dir.join("partial.xml");
     let heap_path = dir.join("heap.xml");
-    // Attribute text under max_item_bytes; raw_bytes→Array<Int> DataTree slots
+    // Attribute text under max_item_bytes; raw_bytes→Array<Int> Dyn slots
     // charge past the shared codec heap ceiling (same counting allocator).
     // Keep modest: ByteLexer retains per-scalar units, so 128KiB hung the suite.
     let attr = "x".repeat(8_192);
@@ -1322,42 +1322,42 @@ use core.encoding as encoding
 use core.encoding.xml as xml
 use core.files as files
 
-fn xml_name(local: String) -> DataTree {{
-    return DataTree.Object([
-        "raw": DataTree.Text(~local),
-        "prefix": DataTree.Null,
-        "local": DataTree.Text(~local),
-        "namespace_uri": DataTree.Null,
+fn xml_name(local: String) -> Dyn {{
+    return Dyn.Object([
+        "raw": Dyn.Text(~local),
+        "prefix": Dyn.Null,
+        "local": Dyn.Text(~local),
+        "namespace_uri": Dyn.Null,
     ])
 }}
 
-fn document_start() -> DataTree {{
-    return DataTree.Object([
-        "$xml_event": DataTree.Text("document_start"),
-        "encoding": DataTree.Null,
-        "bom": DataTree.Array([]),
+fn document_start() -> Dyn {{
+    return Dyn.Object([
+        "$xml_event": Dyn.Text("document_start"),
+        "encoding": Dyn.Null,
+        "bom": Dyn.Array([]),
     ])
 }}
 
-fn document_end() -> DataTree {{
-    return DataTree.Object(["$xml_event": DataTree.Text("document_end")])
+fn document_end() -> Dyn {{
+    return Dyn.Object(["$xml_event": Dyn.Text("document_end")])
 }}
 
-fn element_start(empty_style: String) -> DataTree {{
-    return DataTree.Object([
-        "$xml_event": DataTree.Text("element_start"),
+fn element_start(empty_style: String) -> Dyn {{
+    return Dyn.Object([
+        "$xml_event": Dyn.Text("element_start"),
         "name": xml_name("r"),
-        "namespaces": DataTree.Array([]),
-        "attributes": DataTree.Array([]),
-        "empty_style": DataTree.Text(~empty_style),
-        "open_lexical": DataTree.Object([
-            "raw_text": DataTree.Null,
-            "raw_bytes": DataTree.Null,
-            "semantic": DataTree.Object([
+        "namespaces": Dyn.Array([]),
+        "attributes": Dyn.Array([]),
+        "empty_style": Dyn.Text(~empty_style),
+        "open_lexical": Dyn.Object([
+            "raw_text": Dyn.Null,
+            "raw_bytes": Dyn.Null,
+            "semantic": Dyn.Object([
                 "name": xml_name("r"),
-                "namespaces": DataTree.Array([]),
-                "attributes": DataTree.Array([]),
-                "empty_style": DataTree.Text(~empty_style),
+                "namespaces": Dyn.Array([]),
+                "attributes": Dyn.Array([]),
+                "empty_style": Dyn.Text(~empty_style),
             ]),
         ]),
     ])
@@ -1833,7 +1833,7 @@ fn run() {{
     float_writer.write(encoding.DataEvent.Float(-0.0)) ?? panic("negative zero write")
     float_writer.write(encoding.DataEvent.ArrayEnd) ?? panic("float array end")
     float_writer.finish() ?? panic("float finish")
-    whole_tree :: DataTree.Object(["b": DataTree.Text("xy"), "a": DataTree.Int(1)])
+    whole_tree :: Dyn.Object(["b": Dyn.Text("xy"), "a": Dyn.Int(1)])
     expected_whole :: [U8]{{ 162, 97, 97, 1, 97, 98, 98, 120, 121 }}
     print((cbor.to_bytes_canonical(whole_tree) ?? panic("whole encode")) == expected_whole)
     after :: writer.write(encoding.DataEvent.Null)
@@ -2355,7 +2355,7 @@ fn run() {
         require_canonical: true,
     }
     // 0x18 0x01 is valid CBOR for 1, but not shortest/Core deterministic.
-    rejected := cbor.parse([24, 1], strict) ?? DataTree.Int(-1)
+    rejected := cbor.parse([24, 1], strict) ?? Dyn.Int(-1)
     print(rejected.int() ?? -2)
     strict_decode := cbor.CBOROptions{
         max_depth: 256,
@@ -2625,7 +2625,7 @@ fn run() {
     print(accepted([191, 97, 107, 1, 255]))
 
     // Truncation at each structural layer, reserved heads, invalid text,
-    // closed DataTree byte identity, duplicate/non-text keys, tags/simple
+    // closed Dyn byte identity, duplicate/non-text keys, tags/simple
     // values, stray breaks, trailing roots, and signed-range overflow.
     print(rejected(empty, 0, "$", "CBOR value is missing"))
     print(rejected([28], 0, "$", "indefinite/reserved CBOR length is unsupported by whole-value decoding"))
@@ -2761,7 +2761,7 @@ mod jet_cbor_alloc_probe {
 }
 #[global_allocator]
 static JET_CBOR_ALLOC: jet_cbor_alloc_probe::CountingAlloc = jet_cbor_alloc_probe::CountingAlloc;
-fn jet_enc_cbor_parse(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<jet_std::DataTree, jet_std::CBORError> {
+fn jet_enc_cbor_parse(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<jet_std::Dyn, jet_std::CBORError> {
     let ceiling = options.max_bytes as usize;
     jet_cbor_alloc_probe::begin();
     let result = jet_enc_cbor_parse_inner(bytes, options);

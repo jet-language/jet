@@ -6,7 +6,7 @@ use crate::Sema::{json_ty, result_ty};
 use crate::Sema::CheckerCoreLib::{
     alloc_method_return, app_method_return, args_spec_method_return, binary_reader_method_return,
     civil_time_method_contract, civil_time_method_return, core_generic_struct_field,
-    data_renamed_to_datatree, datatree_method_return, db_value_method_return, decode_error_ty,
+    data_renamed_to_dyn, dyn_method_return, db_value_method_return, decode_error_ty,
     devserver_method_return, email_method_return, encoding_handle_method_return,
     expiring_method_return, file_handle_method_return, http_nominal_leaf, http_type_method_return,
     is_allocator_type, is_db_value_type_name, is_geometry_type, is_json_type_name, is_layout_axis_type,
@@ -2005,7 +2005,7 @@ impl<'a> Checker<'a> {
         }
         // Direct grouped imports bind a type name to its owning Core module.
         // Resolve constructors on that alias before the module-call fallback;
-        // otherwise `use core.encoding.[DataTree]` is misread as
+        // otherwise `use core.encoding.[Dyn]` is misread as
         // `core.encoding.Bool`.
         if let Expr::Ident(alias, alias_span) = &**receiver {
             if let (Some(module), Some(item)) = (
@@ -2351,9 +2351,9 @@ impl<'a> Checker<'a> {
                 return Some(builder_ty);
             }
             // D-SERDE13=B: `Data.Text(x)` etc. — the retired spelling of the value
-            // tree. Point at `DataTree` (no alias, I8) before generic resolution.
+            // tree. Point at `Dyn` (no alias, I8) before generic resolution.
             if type_name == "Data" {
-                self.diags.push(data_renamed_to_datatree(*type_span));
+                self.diags.push(data_renamed_to_dyn(*type_span));
                 for a in args.iter_mut() {
                     self.infer(&mut a.expr);
                 }
@@ -2441,7 +2441,7 @@ impl<'a> Checker<'a> {
                     Type::Named("CryptoError".to_string()),
                 ));
             }
-            // D-ENC-DYN1=A+: `DataTree`/`JSON`/`TOML`/`YAML`/`CSV` name the one dynamic
+            // D-ENC-DYN1=A+: `Dyn`/`JSON`/`TOML`/`YAML`/`CSV` name the one dynamic
             // value; they are reserved core type names (a user type may not redefine them).
             // TIR lowers both constructors from `resolved_ret`; the checked
             // dynamic-value type is carried on the call node here, never
@@ -3768,14 +3768,14 @@ impl<'a> Checker<'a> {
             }
         }
         // D-SERDE16=A: public, target-directed Decode dispatch from an ordinary
-        // DataTree subtree. This is the spelling generated derives emit too.
+        // Dyn subtree. This is the spelling generated derives emit too.
         if matches!(&recv_ty, Type::Named(n) if Syntax::is_data_type_name(n))
-            && method == Syntax::METHOD_DATATREE_DECODE
+            && method == Syntax::METHOD_DYN_DECODE
         {
             *recv_type_out = Some(Syntax::TYPE_DATA.to_string());
             if !args.is_empty() || type_args.len() != 1 {
                 self.diags
-                    .push(wrong_core_arity("DataTree.decode<T>", 0, args.len(), span));
+                    .push(wrong_core_arity("Dyn.decode<T>", 0, args.len(), span));
                 for arg in args.iter_mut() {
                     self.infer(&mut arg.expr);
                 }
@@ -3789,7 +3789,7 @@ impl<'a> Checker<'a> {
                     "E0905",
                     format!("`{shown}` does not implement `Decode`"),
                     format!(
-                        "`DataTree.decode<{shown}>()` can only call the type's Decode contract"
+                        "`Dyn.decode<{shown}>()` can only call the type's Decode contract"
                     ),
                     format!("derive `Decode` on `{shown}`, or write `impl {shown}.Decode`"),
                     Some(span),
@@ -4390,7 +4390,7 @@ impl<'a> Checker<'a> {
                     }
                 } else if handle_ty == "JSONLWriter" && method == "write" {
                     if let Some(arg) = args.first_mut() {
-                        self.expect_core_arg("write", 0, &Type::Named("DataTree".to_string()), arg);
+                        self.expect_core_arg("write", 0, &Type::Named("Dyn".to_string()), arg);
                     }
                 } else if handle_ty == "CSVWriter" && method == "write" {
                     if let Some(arg) = args.first_mut() {
@@ -6898,13 +6898,13 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        // D-SERDE-ACCESS=B: accessor methods on Data/JSON/DataTree.
+        // D-SERDE-ACCESS=B: accessor methods on Data/JSON/Dyn.
         if let Type::Named(ref tn) = recv_ty {
             if is_json_type_name(tn) {
-                if let Some(ret) = datatree_method_return(method, args.len()) {
+                if let Some(ret) = dyn_method_return(method, args.len()) {
                     let json_ret = match ret {
                         Type::Result { ok, err } => Type::Result {
-                            ok: if matches!(*ok, Type::Named(ref n) if n == "DataTree") {
+                            ok: if matches!(*ok, Type::Named(ref n) if n == "Dyn") {
                                 Box::new(json_ty())
                             } else {
                                 ok
@@ -6920,12 +6920,12 @@ impl<'a> Checker<'a> {
                     return Some(json_ret);
                 }
             }
-            if tn == "DataTree" {
-                if let Some(ret) = datatree_method_return(method, args.len()) {
+            if tn == "Dyn" {
+                if let Some(ret) = dyn_method_return(method, args.len()) {
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
-                    *recv_type_out = Some("DataTree".to_string());
+                    *recv_type_out = Some("Dyn".to_string());
                     return Some(ret);
                 }
             }

@@ -16,7 +16,7 @@ use jet::AST::{CtKey, CtReport, CtValue};
 use jet::Diagnostics::{json_str, ColorChoice};
 use jet::ExitCodes;
 use jet::REPL::Sql::{SqlEval, SqlSession};
-use jet_foundation::DataTree::DataTree as Value;
+use jet_foundation::Dyn::Dyn as Value;
 use jet_foundation::EncodingJson::parse_json;
 use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 use jet_semindex::html_escape;
@@ -2143,7 +2143,7 @@ fn run_query(
                 "keep the query as a SELECT expression",
             )
         })?;
-        let rendered = jet::Comptime::render_datatree_for_tir(value);
+        let rendered = jet::Comptime::render_dyn_for_tir(value);
         let rows = result_row_count(value).ok_or_else(|| {
             DbError::new(
                 "E2600",
@@ -2535,7 +2535,7 @@ fn status_ct_value(value: &CtValue) -> StatusValue {
     {
         if matches!(
             type_name.as_str(),
-            "DataTree" | "JSON" | "TOML" | "YAML" | "CSV"
+            "Dyn" | "JSON" | "TOML" | "YAML" | "CSV"
         ) {
             return match variant.as_str() {
                 "Null" => StatusValue::Null,

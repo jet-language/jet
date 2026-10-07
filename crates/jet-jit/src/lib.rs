@@ -25,7 +25,7 @@
 /// generated job Prelude. Keep the names at the JIT root so that an included
 /// Prelude sees the same types as the compiler/comptime host.
 pub use jet_foundation::Devtools::{JetDevtoolsEvent, JET_DEVTOOLS_MAX_HISTORY};
-pub use jet_foundation::DataTree;
+pub use jet_foundation::Dyn;
 
 /// D-JOB-SUBCMD1=C: the JIT and interpreter import the same Prelude selector
 /// as generated AOT mains. Their only extra work is mapping the selected name

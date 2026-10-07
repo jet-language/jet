@@ -131,7 +131,7 @@ fn sema_pattern_union_tag(ty: Type) -> String Never! {
 
 fn sema_pattern_core_payload(owner: String, variant: String) -> [Type]? {
     if owner == {
-        "Data" | "DataTree" | "JSON" -> if variant == {
+        "Data" | "Dyn" | "JSON" -> if variant == {
             "Null" -> Val([Type]{})
             "Bool" -> Val([Type.Bool])
             "Int" -> Val([Type.Int])
@@ -219,7 +219,7 @@ fn sema_pattern_payload(subject_ty: Type, variant: String, env: SemaScopeEnviron
         &diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't match `{type_name(normalized)}`", "variant patterns only work on enum values", "match a value with a pattern for its type"))
         return result
     }
-    if owner_name == "Data" || owner_name == "DataTree" || owner_name == "JSON" || owner_name == "DataEvent" || owner_name == "Key" {
+    if owner_name == "Data" || owner_name == "Dyn" || owner_name == "JSON" || owner_name == "DataEvent" || owner_name == "Key" {
         result.range_forbidden = true
         core_payload :: sema_pattern_core_payload(owner_name, variant)
         result.types = core_payload ?? [Type]{}

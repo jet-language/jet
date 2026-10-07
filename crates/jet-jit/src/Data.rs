@@ -877,7 +877,7 @@ pub(crate) struct DataLoaderSlot {
     pub(crate) type_key: String,
 }
 
-type LoaderTree = crate::Encoding::json_rt::DataTree;
+type LoaderTree = crate::Encoding::json_rt::Dyn;
 type LoaderFormat = crate::Encoding::data_query_rt::jet_std::DataFormat;
 
 fn loader_error(error: jet_foundation::PreludeDataFlow::KernelError) -> DataError {
@@ -1264,7 +1264,7 @@ fn loader_tree(
             .map_err(|error| err(DataErrorKind::Decode, "data.loader", error.to_string()))
     };
     let tree = match format {
-        LoaderFormat::JSON => crate::Encoding::json_rt::parse_datatree_typed_ordered(text()?)
+        LoaderFormat::JSON => crate::Encoding::json_rt::parse_dyn_typed_ordered(text()?)
             .map_err(|error| err(DataErrorKind::Decode, "data.loader.json", error.to_string()))?,
         LoaderFormat::JSONL => {
             let mut rows = Vec::new();
@@ -1272,7 +1272,7 @@ fn loader_tree(
                 if value.trim().is_empty() {
                     continue;
                 }
-                let row = crate::Encoding::json_rt::parse_datatree_typed_ordered(value)
+                let row = crate::Encoding::json_rt::parse_dyn_typed_ordered(value)
                     .map_err(|error| {
                         err(
                             DataErrorKind::Decode,
@@ -1437,7 +1437,7 @@ fn loader_decode_rows(
         .into_iter()
         .enumerate()
         .map(|(index, row)| {
-            crate::Encoding::decode_datatree_for_type(&row, type_key)
+            crate::Encoding::decode_dyn_for_type(&row, type_key)
                 .map_err(|errors| loader_decode_error(operation, errors, Some(index as i64)))
         })
         .collect()
@@ -1716,7 +1716,7 @@ fn jet_data_loader_value(value: i64, limits: i64, type_key: i64) -> i64 {
                 authority,
             )
             .map_err(loader_error)?;
-            let bytes = crate::Encoding::json_rt::render_datatree_json(&tree, false, 0).into_bytes();
+            let bytes = crate::Encoding::json_rt::render_dyn_json(&tree, false, 0).into_bytes();
             jet_foundation::PreludeDataFlow::check_payload(&state.limits, bytes.len(), "data.value")
                 .map_err(loader_error)?;
             state.payload = Some(bytes);
@@ -1768,7 +1768,7 @@ fn jet_data_loader_snapshot(place: i64, type_key: i64) -> i64 {
         Ok(value) => value,
         Err(error) => return result_data_err(error),
     };
-    let value = match crate::Encoding::decode_datatree_for_type(&tree, &slot.type_key) {
+    let value = match crate::Encoding::decode_dyn_for_type(&tree, &slot.type_key) {
         Ok(value) => value,
         Err(errors) => return result_data_err(loader_decode_error("data.snapshot", errors, None)),
     };
@@ -1779,7 +1779,7 @@ fn jet_data_loader_snapshot(place: i64, type_key: i64) -> i64 {
                 .ok_or_else(|| data_error("data.snapshot", "unknown checked snapshot type"))?;
             let encoded = crate::Receipt::encode_jit_value(rt, value, &descriptor)
                 .map_err(|reason| data_decode_error("data.snapshot", reason))?;
-            let canonical = crate::Encoding::json_rt::render_datatree_json(&encoded, false, 0);
+            let canonical = crate::Encoding::json_rt::render_dyn_json(&encoded, false, 0);
             let mut schema = crate::Encoding::data_query_rt::jet_std::DataSchema::infer(&tree, format);
             schema.identity = jet_foundation::PreludeDataFlow::digest(schema.identity.as_bytes());
             let facts = jet_foundation::PreludeDataFlow::commit_snapshot(
@@ -4704,7 +4704,7 @@ fn jet_jit_data_query_sql(rows: i64, sql: i64, type_key: i64) -> i64 {
     } else {
         let Some(trees) = source_rows
             .iter()
-            .map(|row| crate::Encoding::read_datatree(row.word))
+            .map(|row| crate::Encoding::read_dyn(row.word))
             .collect::<Option<Vec<_>>>()
         else {
             return crate::Encoding::result_err_fields(

@@ -2664,10 +2664,10 @@ fn jet_jit_net_error_show(bits: i64) -> i64 {
     )
 }
 
-/// D-HTTP-JSON1=A: `server.json(status, body)` — body is a canonical DataTree.
+/// D-HTTP-JSON1=A: `server.json(status, body)` — body is a canonical Dyn.
 fn jet_jit_http_json_response(status: i64, body: i64) -> i64 {
-    let body = crate::Encoding::read_datatree(body)
-        .map(|tree| crate::Encoding::json_rt::render_datatree_json(&tree, false, 0))
+    let body = crate::Encoding::read_dyn(body)
+        .map(|tree| crate::Encoding::json_rt::render_dyn_json(&tree, false, 0))
         .unwrap_or_else(|| "null".to_string());
     push_handle(NetHttpHandle::HTTPResponse(jet_http_srv_json_text_owned(
         status, body,
@@ -3435,8 +3435,8 @@ fn jet_jit_http_client_request_body(req: i64, body: i64) -> i64 {
 }
 
 fn jet_jit_http_client_request_json(req: i64, body: i64) -> i64 {
-    let body = crate::Encoding::read_datatree(body)
-        .map(|tree| crate::Encoding::json_rt::render_datatree_json(&tree, false, 0))
+    let body = crate::Encoding::read_dyn(body)
+        .map(|tree| crate::Encoding::json_rt::render_dyn_json(&tree, false, 0))
         .unwrap_or_else(|| "null".to_string());
     let Some(req) = take_http_request(req) else {
         return 0;

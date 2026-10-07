@@ -598,7 +598,7 @@ function jet_notes(outcome) {
   if (!Array.isArray(report.notes)) throw new Error("carrier report has no notes value");
   return report.notes.slice();
 }
-// Canonical typed DataTree decoding and accessors for the Web adapter. MIR
+// Canonical typed Dyn decoding and accessors for the Web adapter. MIR
 // supplies a checked shape descriptor; conversion and FieldError policy stay
 // with the other value carriers in this Prelude module.
 function jet_codec_decode_ok(value) {
@@ -631,7 +631,7 @@ function jet_codec_tree_payload(tree) {
   return tree && Array.isArray(tree.values) ? tree.values[0] : undefined;
 }
 
-function jet_datatree_kind(tree) {
+function jet_dyn_kind(tree) {
   switch (tree?.tag) {
     case "Null": return "null";
     case "Bool": return "Bool";
@@ -647,12 +647,12 @@ function jet_datatree_kind(tree) {
   }
 }
 
-function jet_datatree_array_items(tree) {
+function jet_dyn_array_items(tree) {
   const payload = jet_codec_tree_payload(tree);
   return Array.isArray(payload) ? payload : null;
 }
 
-function jet_datatree_object_entries(tree) {
+function jet_dyn_object_entries(tree) {
   const payload = jet_codec_tree_payload(tree);
   if (payload instanceof Map) return Array.from(payload.entries());
   if (Array.isArray(payload)) {
@@ -666,7 +666,7 @@ function jet_datatree_object_entries(tree) {
   return null;
 }
 
-function jet_datatree_render(tree) {
+function jet_dyn_render(tree) {
   switch (tree?.tag) {
     case "Null": return "null";
     case "Bool": return jet_codec_tree_payload(tree) ? "true" : "false";
@@ -682,22 +682,22 @@ function jet_datatree_render(tree) {
       return Array.isArray(bytes) ? `[${bytes.join(",")}]` : "[]";
     }
     case "Array": {
-      const items = jet_datatree_array_items(tree);
-      return items == null ? "[]" : `[${items.map((item) => jet_datatree_render(item)).join(",")}]`;
+      const items = jet_dyn_array_items(tree);
+      return items == null ? "[]" : `[${items.map((item) => jet_dyn_render(item)).join(",")}]`;
     }
     case "Object": {
-      const entries = jet_datatree_object_entries(tree);
+      const entries = jet_dyn_object_entries(tree);
       return entries == null
         ? "{}"
-        : `{${entries.map(([key, value]) => `${JSON.stringify(key)}:${jet_datatree_render(value)}`).join(",")}}`;
+        : `{${entries.map(([key, value]) => `${JSON.stringify(key)}:${jet_dyn_render(value)}`).join(",")}}`;
     }
     default: return String(tree?.tag ?? "value");
   }
 }
 
-function jet_datatree_field(tree, name) {
+function jet_dyn_field(tree, name) {
   const key = String(name);
-  const entries = jet_datatree_object_entries(tree);
+  const entries = jet_dyn_object_entries(tree);
   if (tree?.tag === "Object" && entries != null) {
     const found = entries.find((entry) => entry[0] === key);
     if (found) return { tag: "Ok", values: [found[1]] };
@@ -708,12 +708,12 @@ function jet_datatree_field(tree, name) {
   }
   return {
     tag: "Err",
-    values: [[{ path: key, reason: `expected object, got ${jet_datatree_render(tree)}` }]],
+    values: [[{ path: key, reason: `expected object, got ${jet_dyn_render(tree)}` }]],
   };
 }
 
-function jet_datatree_at(tree, index) {
-  const items = jet_datatree_array_items(tree);
+function jet_dyn_at(tree, index) {
+  const items = jet_dyn_array_items(tree);
   const raw = String(index);
   if (tree?.tag === "Array" && items != null) {
     let position;
@@ -733,7 +733,7 @@ function jet_datatree_at(tree, index) {
   }
   return {
     tag: "Err",
-    values: [[{ path: `[${raw}]`, reason: `expected array, got ${jet_datatree_render(tree)}` }]],
+    values: [[{ path: `[${raw}]`, reason: `expected array, got ${jet_dyn_render(tree)}` }]],
   };
 }
 
@@ -767,36 +767,36 @@ function jet_codec_i64(value) {
   }
 }
 
-function jet_datatree_int(tree) {
+function jet_dyn_int(tree) {
   let value = null;
   if (tree?.tag === "Int") value = jet_codec_i64(jet_codec_tree_payload(tree));
   else if (tree?.tag === "Number") value = jet_codec_i64(jet_codec_json_exact_integer(jet_codec_tree_payload(tree)));
   if (value != null) return { tag: "Ok", values: [value] };
   return {
     tag: "Err",
-    values: [[{ path: "", reason: `expected int, got ${jet_datatree_render(tree)}` }]],
+    values: [[{ path: "", reason: `expected int, got ${jet_dyn_render(tree)}` }]],
   };
 }
 
-function jet_datatree_text(tree) {
+function jet_dyn_text(tree) {
   if (tree?.tag === "Text" || tree?.tag === "TypedText") {
     return { tag: "Ok", values: [String(jet_codec_tree_payload(tree))] };
   }
   return {
     tag: "Err",
-    values: [[{ path: "", reason: `expected text, got ${jet_datatree_render(tree)}` }]],
+    values: [[{ path: "", reason: `expected text, got ${jet_dyn_render(tree)}` }]],
   };
 }
 
-function jet_datatree_bool(tree) {
+function jet_dyn_bool(tree) {
   if (tree?.tag === "Bool") return { tag: "Ok", values: [Boolean(jet_codec_tree_payload(tree))] };
   return {
     tag: "Err",
-    values: [[{ path: "", reason: `expected bool, got ${jet_datatree_render(tree)}` }]],
+    values: [[{ path: "", reason: `expected bool, got ${jet_dyn_render(tree)}` }]],
   };
 }
 
-function jet_datatree_float(tree) {
+function jet_dyn_float(tree) {
   let value = null;
   if (tree?.tag === "Float") {
     const number = Number(jet_codec_tree_payload(tree));
@@ -811,11 +811,11 @@ function jet_datatree_float(tree) {
   if (value != null) return { tag: "Ok", values: [value] };
   const reason = tree?.tag === "Int" && !Number.isFinite(Number(jet_codec_tree_payload(tree)))
     ? "expected float, got out-of-range Int"
-    : `expected float, got ${jet_datatree_render(tree)}`;
+    : `expected float, got ${jet_dyn_render(tree)}`;
   return { tag: "Err", values: [[{ path: "", reason }]] };
 }
 
-function jet_datatree_to_text(tree) {
+function jet_dyn_to_text(tree) {
   switch (tree?.tag) {
     case "Text":
     case "TypedText":
@@ -832,7 +832,7 @@ function jet_datatree_to_text(tree) {
   }
 }
 
-function jet_datatree_equal_unordered(left, right) {
+function jet_dyn_equal_unordered(left, right) {
   if (left?.tag !== right?.tag) return false;
   switch (left?.tag) {
     case "Null": return true;
@@ -855,19 +855,19 @@ function jet_datatree_equal_unordered(left, right) {
       return Array.isArray(l) && Array.isArray(r) && l.length === r.length && l.every((v, i) => v === r[i]);
     }
     case "Array": {
-      const l = jet_datatree_array_items(left);
-      const r = jet_datatree_array_items(right);
+      const l = jet_dyn_array_items(left);
+      const r = jet_dyn_array_items(right);
       return l != null && r != null && l.length === r.length
-        && l.every((v, i) => jet_datatree_equal_unordered(v, r[i]));
+        && l.every((v, i) => jet_dyn_equal_unordered(v, r[i]));
     }
     case "Object": {
-      const l = jet_datatree_object_entries(left);
-      const r = jet_datatree_object_entries(right);
+      const l = jet_dyn_object_entries(left);
+      const r = jet_dyn_object_entries(right);
       if (l == null || r == null || l.length !== r.length) return false;
       const used = new Array(r.length).fill(false);
       return l.every(([key, value]) => {
         const index = r.findIndex((entry, i) => !used[i] && entry[0] === key
-          && jet_datatree_equal_unordered(value, entry[1]));
+          && jet_dyn_equal_unordered(value, entry[1]));
         if (index < 0) return false;
         used[index] = true;
         return true;
@@ -890,7 +890,7 @@ function jet_codec_typed_string(tree) {
   }
   if (tree?.tag === "Float") return jet_codec_decode_ok(jet_float_display(jet_codec_tree_payload(tree)));
   if (tree?.tag === "Bool") return jet_codec_decode_ok(jet_codec_tree_payload(tree) ? "true" : "false");
-  return jet_codec_decode_error("", `expected Text, found ${jet_datatree_kind(tree)}`);
+  return jet_codec_decode_error("", `expected Text, found ${jet_dyn_kind(tree)}`);
 }
 
 function jet_codec_typed_int(tree) {
@@ -927,7 +927,7 @@ function jet_codec_typed_int(tree) {
       ? jet_codec_decode_error("", `expected Int, found text ${JSON.stringify(raw)}`)
       : jet_codec_decode_ok(value);
   }
-  return jet_codec_decode_error("", `expected Int, found ${jet_datatree_kind(tree)}`);
+  return jet_codec_decode_error("", `expected Int, found ${jet_dyn_kind(tree)}`);
 }
 
 function jet_codec_typed_float(tree) {
@@ -953,7 +953,7 @@ function jet_codec_typed_float(tree) {
   if (tree?.tag === "TypedText") {
     return jet_codec_decode_error("", `expected Float, found text ${JSON.stringify(jet_codec_tree_payload(tree))}`);
   }
-  return jet_codec_decode_error("", `expected Float, found ${jet_datatree_kind(tree)}`);
+  return jet_codec_decode_error("", `expected Float, found ${jet_dyn_kind(tree)}`);
 }
 
 function jet_codec_typed_bool(tree) {
@@ -967,7 +967,7 @@ function jet_codec_typed_bool(tree) {
   if (tree?.tag === "TypedText") {
     return jet_codec_decode_error("", `expected Bool, found text ${JSON.stringify(jet_codec_tree_payload(tree))}`);
   }
-  return jet_codec_decode_error("", `expected Bool, found ${jet_datatree_kind(tree)}`);
+  return jet_codec_decode_error("", `expected Bool, found ${jet_dyn_kind(tree)}`);
 }
 
 function jet_codec_typed_char(tree) {
@@ -1020,7 +1020,7 @@ function jet_codec_typed_decimal(tree) {
     const raw = BigInt(jet_codec_tree_payload(tree)).toString();
     return jet_codec_decode_ok(jet_decimal_from_str(raw));
   }
-  return jet_codec_decode_error("", `expected Decimal, found ${jet_datatree_kind(tree)}`);
+  return jet_codec_decode_error("", `expected Decimal, found ${jet_dyn_kind(tree)}`);
 }
 
 function jet_codec_typed_temporal(tree, descriptor) {
@@ -1063,7 +1063,7 @@ function jet_codec_encode_typed(value, descriptor) {
       return { tag: "Text", values: [String(value)] };
     case "range":
       return jet_codec_encode_typed(value, descriptor.base);
-    case "datatree":
+    case "dyn":
       return value;
     case "date":
     case "local_date":
@@ -1136,7 +1136,7 @@ function jet_codec_typed_value(tree, descriptor) {
         ? result
         : jet_codec_decode_error("", `value is outside Int(${descriptor.lo}..${descriptor.hi})`);
     }
-    case "datatree": return jet_codec_decode_ok(tree);
+    case "dyn": return jet_codec_decode_ok(tree);
     case "date":
     case "local_date":
     case "local_time":
@@ -1162,9 +1162,9 @@ function jet_codec_typed_value(tree, descriptor) {
     case "fixed_list": {
       let items;
       if (descriptor.element?.byte && tree?.tag === "Bytes") items = jet_codec_tree_payload(tree);
-      else if (tree?.tag === "Array") items = jet_datatree_array_items(tree);
+      else if (tree?.tag === "Array") items = jet_dyn_array_items(tree);
       if (!Array.isArray(items)) {
-        return jet_codec_decode_error("", `expected a list, found ${jet_datatree_kind(tree)}`);
+        return jet_codec_decode_error("", `expected a list, found ${jet_dyn_kind(tree)}`);
       }
       if (descriptor.kind === "fixed_list" && BigInt(items.length) !== BigInt(descriptor.length)) {
         return jet_codec_decode_error("", `expected a fixed list of length ${descriptor.length}, found ${items.length}`);
@@ -1184,9 +1184,9 @@ function jet_codec_typed_value(tree, descriptor) {
       if (descriptor.key?.kind !== "string") {
         return jet_codec_decode_error("", "comptime maps require String keys");
       }
-      const entries = jet_datatree_object_entries(tree);
+      const entries = jet_dyn_object_entries(tree);
       if (tree?.tag !== "Object" || entries == null) {
-        return jet_codec_decode_error("", `expected an object, found ${jet_datatree_kind(tree)}`);
+        return jet_codec_decode_error("", `expected an object, found ${jet_dyn_kind(tree)}`);
       }
       const values = new Map();
       const errors = [];

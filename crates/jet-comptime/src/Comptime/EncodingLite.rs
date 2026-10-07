@@ -2,7 +2,7 @@
 //! + `core.encoding.json.{canonical,events}`, ported verbatim into the
 //! comptime/REPL tier-0 interpreter so they match AOT byte-for-byte (R12
 //! parity). Sources (std-only, I6, no changes to logic — only the target
-//! value type changes from `jet_std::DataTree` to the canonical `DataTree`
+//! value type changes from `jet_std::Dyn` to the canonical `Dyn`
 //! `CtValue` shape `JSONInterp.rs` established for `core.encoding.json`):
 //!
 //! - csv: `jet_ring_csv_parse`/`jet_ring_csv_render`,
@@ -19,8 +19,8 @@
 //!   same file.
 //!
 //! sema (`fixed_sigs.rs`) types `core.encoding.{toml,yaml,xml,cbor}`'s
-//! parsed value as the same `DataTree` type as `core.encoding.json` — AOT
-//! backs every one of these with the single `jet_std::DataTree`. Comptime
+//! parsed value as the same `Dyn` type as `core.encoding.json` — AOT
+//! backs every one of these with the single `jet_std::Dyn`. Comptime
 //! mirrors that with the same canonical `CtValue::Enum` (`JSONInterp::json_variant`/
 //! `json_payload`) every accessor method (`.field`/`.at`/...) already reads,
 //! so no new value machinery is needed — just new parse/render walkers that
@@ -65,7 +65,7 @@ fn encoding_error_struct(format: &str, line: i64, message: String) -> CtValue {
 
 // ── core.encoding.toml ──────────────────────────────────────────────────────
 // Ported from `TOML.rs`'s `pub mod toml`, target type swapped from
-// `DataTree` to the `JSON`-tagged `CtValue`.
+// `Dyn` to the `JSON`-tagged `CtValue`.
 
 #[derive(Clone, Debug, PartialEq)]
 enum TOMLValue {
@@ -111,7 +111,7 @@ pub(super) fn toml_parse(raw: &str) -> Result<CtValue, CtValue> {
 }
 
 // A tagged `JSON` `Object` whose payload keeps insertion order — AOT's
-// `DataTree::Object(Vec<…>)` does the same; a sorted `BTreeMap` reordered
+// `Dyn::Object(Vec<…>)` does the same; a sorted `BTreeMap` reordered
 // TOML keys (e.g. `port` before `title`) and broke #777 corpus differential.
 fn json_object(entries: Vec<(String, CtValue)>) -> CtValue {
     json_variant(
@@ -175,7 +175,7 @@ fn toml_assemble(items: Vec<TOMLItem>) -> CtValue {
 // Ensure a table exists at `path` (creating empty tables along the way, but
 // never clobbering a table that already has keys) — used for a bare
 // `[table]` header with no keys under it yet. A value-typed
-// re-implementation of the AOT version's `&mut DataTree` walk (which
+// re-implementation of the AOT version's `&mut Dyn` walk (which
 // mutates in place via live aliasing that doesn't fit an immutable-by-value
 // `CtValue` tree directly); behaviorally identical output (`descend into
 // the last element of an existing array-of-tables` included).
@@ -216,7 +216,7 @@ fn toml_set_key(root: &mut CtValue, current: &[String], key_path: &[String], val
 
 // Rebuild `root` with `value` set at `path.field`, creating tables along the
 // way. Recursive-by-value (immutable `CtValue`) rewrite of the AOT
-// `&mut DataTree` walk, which needs live mutable aliasing that doesn't fit a
+// `&mut Dyn` walk, which needs live mutable aliasing that doesn't fit a
 // value-typed `CtValue` tree as directly — behaviorally identical output.
 fn toml_set_at_path(root: &CtValue, path: &[String], field: &str, value: CtValue) -> CtValue {
     if path.is_empty() {
@@ -995,7 +995,7 @@ fn quote_json_local(s: &str) -> String {
 
 // ── core.encoding.yaml ──────────────────────────────────────────────────────
 // Ported from `YAML.rs`'s `pub mod yaml`, target type swapped from
-// `DataTree` to the `JSON`-tagged `CtValue` (same convention as toml above).
+// `Dyn` to the `JSON`-tagged `CtValue` (same convention as toml above).
 
 pub(super) fn yaml_parse(raw: &str) -> Result<CtValue, CtValue> {
     let line_count = raw
@@ -1133,7 +1133,7 @@ fn yaml_clone(value: &CtValue, budget: &mut YamlBudget) -> Result<CtValue, ()> {
             type_name,
             variant,
             args,
-        } if type_name == "DataTree" && variant == "Null" && args.is_empty()
+        } if type_name == "Dyn" && variant == "Null" && args.is_empty()
     ) {
         budget.node(0)?;
     } else if let Some(CtValue::List(items)) = json_payload(value, "Array") {
@@ -1841,7 +1841,7 @@ fn yaml_needs_quote(s: &str) -> bool {
 
 // ── core.encoding.xml ────────────────────────────────────────────────────────
 // Runtime and comptime share one parser/folder. These adapters only translate
-// the ordinary DataTree algebra to and from comptime's tagged representation.
+// the ordinary Dyn algebra to and from comptime's tagged representation.
 fn xml_to_ct(value: jet_foundation::XmlPull::Value) -> CtValue {
     xml_value_to_ct(value)
 }
@@ -1898,7 +1898,7 @@ fn xml_value_from_ct(value: &CtValue) -> Result<jet_foundation::XmlPull::Value, 
             type_name,
             variant,
             args,
-        } if type_name == "DataTree" && variant == "Null" && args.is_empty()
+        } if type_name == "Dyn" && variant == "Null" && args.is_empty()
     ) {
         return Ok(Value::Null);
     }
@@ -1926,7 +1926,7 @@ fn xml_value_from_ct(value: &CtValue) -> Result<jet_foundation::XmlPull::Value, 
             .collect();
         return Ok(Value::Object(converted?));
     }
-    Err("XML tree contains a non-DataTree value".to_string())
+    Err("XML tree contains a non-Dyn value".to_string())
 }
 
 pub(super) fn xml_from_ct(value: &CtValue) -> Result<jet_foundation::XmlPull::Value, String> {
@@ -2474,7 +2474,7 @@ mod xml_tests {
 
 // ── core.encoding.cbor ──────────────────────────────────────────────────────
 // Ported from `EncodingCodecs.rs`'s `jet_cbor_*`/`jet_std_cbor_*`, target
-// type swapped from `DataTree` to the `JSON`-tagged `CtValue`.
+// type swapped from `Dyn` to the `JSON`-tagged `CtValue`.
 
 fn cbor_is_u8_list(ty: Option<&Type>) -> bool {
     matches!(
@@ -2565,7 +2565,7 @@ fn cbor_codable_value(
         CtValue::Failed(CtReport::Told(_)) => {
             Err("CBOR cannot encode a Result without an explicit Codable schema".to_string())
         }
-        CtValue::Enum { type_name, .. } if type_name != "DataTree" => Err(format!(
+        CtValue::Enum { type_name, .. } if type_name != "Dyn" => Err(format!(
             "CBOR comptime encoder does not own the Codable schema for enum `{type_name}`"
         )),
         _ => Ok(value.clone()),
@@ -2748,29 +2748,29 @@ fn cbor_kernel_value(value: &CtValue) -> Result<jet_foundation::CborKernel::Valu
             type_name,
             variant,
             args,
-        } if type_name == "DataTree" => match variant.as_str() {
+        } if type_name == "Dyn" => match variant.as_str() {
             "Null" => Ok(jet_foundation::CborKernel::Value::Null),
             "Bool" => match args.first().map(|(_, value)| value) {
                 Some(CtValue::Bool(value)) => Ok(jet_foundation::CborKernel::Value::Bool(*value)),
-                _ => Err("DataTree.Bool has an invalid payload".to_string()),
+                _ => Err("Dyn.Bool has an invalid payload".to_string()),
             },
             "Int" => match args.first().map(|(_, value)| value) {
                 Some(CtValue::Int(value)) => Ok(jet_foundation::CborKernel::Value::Int(*value)),
-                _ => Err("DataTree.Int has an invalid payload".to_string()),
+                _ => Err("Dyn.Int has an invalid payload".to_string()),
             },
             "Float" => match args.first().map(|(_, value)| value) {
                 Some(CtValue::Float(value)) => {
                     Ok(jet_foundation::CborKernel::Value::Float(value.as_f64()))
                 }
-                _ => Err("DataTree.Float has an invalid payload".to_string()),
+                _ => Err("Dyn.Float has an invalid payload".to_string()),
             },
             "Text" | "TypedText" => match args.first().map(|(_, value)| value) {
                 Some(CtValue::Str(value)) => {
                     Ok(jet_foundation::CborKernel::Value::Text(value.clone()))
                 }
-                _ => Err("DataTree.Text has an invalid payload".to_string()),
+                _ => Err("Dyn.Text has an invalid payload".to_string()),
             },
-            _ => Err(format!("unsupported DataTree variant `{variant}`")),
+            _ => Err(format!("unsupported Dyn variant `{variant}`")),
         },
         CtValue::Enum { type_name, .. } => {
             Err(format!("CBOR encoder does not own enum `{type_name}`"))
@@ -3361,7 +3361,7 @@ fn jcs_tree(value: &CtValue, limits: &EncodingLimitsLite, depth: i64) -> Result<
         args,
     } = value
     {
-        if type_name == "DataTree" {
+        if type_name == "Dyn" {
             match variant.as_str() {
                 "Null" => return Ok(b"null".to_vec()),
                 "Bool" => {

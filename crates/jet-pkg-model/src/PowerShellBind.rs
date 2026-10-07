@@ -290,7 +290,7 @@ pub fn cancel(session: Session) { abi.cancel(session.value) }
     for function in functions {
         let call = format!("abi.{}", function.jet);
         out.push_str(&format!(
-            r#"pub fn {}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree PowerShellError! {{
+            r#"pub fn {}(session: Session, input: Dyn, deadline_ms: Int) -> Dyn PowerShellError! {{
     raw :: {}(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)

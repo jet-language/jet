@@ -146,7 +146,7 @@ pub struct NixImportedState {
 
 // Import a rich fallback record. None means the record is the old pinned
 // `nix build --json` shape with no fallback projections to retain.
-pub fn nix_fallback_import_record(record: DataTree) -> NixImportedState? NixError! {
+pub fn nix_fallback_import_record(record: Dyn) -> NixImportedState? NixError! {
     root :: nix_fallback_object(record)
     import :: nix_fallback_import_object(root)
     if !nix_fallback_detect(root.keys().to_list(), import.keys().to_list()) -> return Ok(None)
@@ -174,7 +174,7 @@ pub fn nix_fallback_import_record(record: DataTree) -> NixImportedState? NixErro
     Ok(Val(canonical.imported()))
 }
 
-fn nix_fallback_object(value: DataTree) -> [String: DataTree] NixError! {
+fn nix_fallback_object(value: Dyn) -> [String: Dyn] NixError! {
     if value == {
         .Object(entries) -> return Ok(entries)
         else -> return Err(NixError.FallbackNotObject)
@@ -183,7 +183,7 @@ fn nix_fallback_object(value: DataTree) -> [String: DataTree] NixError! {
 
 // The import object: the `jetpackImport` or `jetpack` field of the root, or
 // the root itself.
-fn nix_fallback_import_object(root: [String: DataTree]) -> [String: DataTree] NixError! {
+fn nix_fallback_import_object(root: [String: Dyn]) -> [String: Dyn] NixError! {
     if nix_fallback_import_field(root.keys().to_list()) == {
         .Val(field) -> return nix_fallback_object(root[field])
         else -> {}
@@ -192,19 +192,19 @@ fn nix_fallback_import_object(root: [String: DataTree]) -> [String: DataTree] Ni
 }
 
 // The compact JSON of `projection`'s one field of `object`.
-fn nix_fallback_render(object: [String: DataTree], projection: NixFallbackProjection) -> String NixError! {
+fn nix_fallback_render(object: [String: Dyn], projection: NixFallbackProjection) -> String NixError! {
     field :: projection.select(object.keys().to_list())
     Ok(pkg_json_render(object[field]))
 }
 
-fn nix_fallback_optional(object: [String: DataTree], field: String) -> String? Never! {
+fn nix_fallback_optional(object: [String: Dyn], field: String) -> String? Never! {
     value :: object.get(field) ?? return None
     Val(pkg_json_render(value))
 }
 
 // Whether every number in `value` is finite (JSON has no NaN or infinity).
-fn nix_fallback_is_finite(value: DataTree) -> Bool Never! {
-    children := [DataTree]{}
+fn nix_fallback_is_finite(value: Dyn) -> Bool Never! {
+    children := [Dyn]{}
     if value == {
         .Float(number) -> return number - number == 0.0
         .Array(items) -> {

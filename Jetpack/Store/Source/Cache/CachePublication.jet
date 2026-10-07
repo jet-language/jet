@@ -36,7 +36,7 @@ pub struct CacheTransferReport {
 
     // `jet.status/v1` for a cache transfer operation.
     fn json(self, operation: String) -> String Never! {
-        fields :: StatusFields.new().with("operation", DataTree.Text(operation)).with("role", DataTree.Text(self.role)).with("mirror", DataTree.Text(self.mirror)).with("entry", DataTree.Text(self.entry)).with("output_hash", DataTree.Text(self.output_hash)).with("nar_hash", DataTree.Text(self.nar_hash)).with("signed_fingerprint", DataTree.Text(self.signed_fingerprint)).with("builder", DataTree.Text(self.builder)).with("provenance", DataTree.Text(self.provenance)).with("witness", report_optional_text(self.witness)).with("receipt_version", report_optional_int(self.receipt_version)).with("receipt_expires_unix", report_optional_int(self.receipt_expires_unix)).with("credential_provider", report_optional_text(self.credential_provider)).with("bytes", DataTree.Int(self.bytes))
+        fields :: StatusFields.new().with("operation", Dyn.Text(operation)).with("role", Dyn.Text(self.role)).with("mirror", Dyn.Text(self.mirror)).with("entry", Dyn.Text(self.entry)).with("output_hash", Dyn.Text(self.output_hash)).with("nar_hash", Dyn.Text(self.nar_hash)).with("signed_fingerprint", Dyn.Text(self.signed_fingerprint)).with("builder", Dyn.Text(self.builder)).with("provenance", Dyn.Text(self.provenance)).with("witness", report_optional_text(self.witness)).with("receipt_version", report_optional_int(self.receipt_version)).with("receipt_expires_unix", report_optional_int(self.receipt_expires_unix)).with("credential_provider", report_optional_text(self.credential_provider)).with("bytes", Dyn.Int(self.bytes))
         StatusEnvelope.new(operation, true).with_fields(fields).json()
     }
 }
@@ -49,7 +49,7 @@ pub struct CacheStageReport {
     pub bytes: Int
 
     fn json(self, operation: String) -> String Never! {
-        fields :: StatusFields.new().with("operation", DataTree.Text(operation)).with("role", DataTree.Text(self.role)).with("destination", DataTree.Text(self.destination)).with("entries", DataTree.Int(self.entries)).with("bytes", DataTree.Int(self.bytes))
+        fields :: StatusFields.new().with("operation", Dyn.Text(operation)).with("role", Dyn.Text(self.role)).with("destination", Dyn.Text(self.destination)).with("entries", Dyn.Int(self.entries)).with("bytes", Dyn.Int(self.bytes))
         StatusEnvelope.new(operation, true).with_fields(fields).json()
     }
 }

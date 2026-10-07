@@ -136,39 +136,39 @@ pub(crate) mod web_rt {
 #[cfg(test)]
 mod tests {
     use super::web_rt::__jet_Decode;
-    use jet_foundation::{DataTree::DataTree, Numeric::JetInt};
+    use jet_foundation::{Dyn::Dyn, Numeric::JetInt};
 
     #[test]
     fn web_decode_preserves_exact_integers_and_fixed_bounds() {
         for expected in [i64::MIN, i64::MAX] {
-            let tree = DataTree::Number(expected.to_string());
+            let tree = Dyn::Number(expected.to_string());
             assert_eq!(<i64 as __jet_Decode>::jet_decode(&tree).unwrap(), expected);
         }
         for text in ["-9223372036854775809", "9223372036854775808"] {
-            let tree = DataTree::Number(text.to_string());
+            let tree = Dyn::Number(text.to_string());
             assert!(<i64 as __jet_Decode>::jet_decode(&tree).is_err());
             assert_eq!(
                 <JetInt as __jet_Decode>::jet_decode(&tree).unwrap().to_string(),
                 text,
             );
         }
-        let tree = DataTree::Number(u64::MAX.to_string());
+        let tree = Dyn::Number(u64::MAX.to_string());
         assert_eq!(<u64 as __jet_Decode>::jet_decode(&tree).unwrap(), u64::MAX);
         for text in ["-1", "18446744073709551616"] {
             assert!(
-                <u64 as __jet_Decode>::jet_decode(&DataTree::Number(text.to_string()))
+                <u64 as __jet_Decode>::jet_decode(&Dyn::Number(text.to_string()))
                     .is_err()
             );
         }
         let text = "12345678901234567890123456789012345678901234567890";
         assert_eq!(
-            <JetInt as __jet_Decode>::jet_decode(&DataTree::Number(text.to_string()))
+            <JetInt as __jet_Decode>::jet_decode(&Dyn::Number(text.to_string()))
                 .unwrap()
                 .to_string(),
             text,
         );
-        assert!(<JetInt as __jet_Decode>::jet_decode(&DataTree::Number("1.5".to_string())).is_err());
-        assert!(<JetInt as __jet_Decode>::jet_decode(&DataTree::TypedText("12".to_string())).is_err());
+        assert!(<JetInt as __jet_Decode>::jet_decode(&Dyn::Number("1.5".to_string())).is_err());
+        assert!(<JetInt as __jet_Decode>::jet_decode(&Dyn::TypedText("12".to_string())).is_err());
     }
 }
 
@@ -283,13 +283,13 @@ fn web_route_result(result: i64) -> Result<i64, String> {
 }
 
 fn jet_jit_web_route_decode_tree(tree: i64, type_key: i64) -> i64 {
-    let tree = crate::Encoding::read_datatree(tree);
+    let tree = crate::Encoding::read_dyn(tree);
     let type_key = with_rt(|rt| rt.heap.clone_string(type_key));
     let Some(tree) = tree else {
         return with_rt(|rt| {
             let message = rt
                 .heap
-                .alloc_string("typed route input has an invalid DataTree");
+                .alloc_string("typed route input has an invalid Dyn");
             crate::runtime_host::alloc_jit_result(rt, false, message as u64)
         });
     };
@@ -301,7 +301,7 @@ fn jet_jit_web_route_decode_tree(tree: i64, type_key: i64) -> i64 {
             crate::runtime_host::alloc_jit_result(rt, false, message as u64)
         });
     };
-    match crate::Encoding::decode_datatree_for_type(&tree, &type_key) {
+    match crate::Encoding::decode_dyn_for_type(&tree, &type_key) {
         Ok(value) => with_rt(|rt| crate::runtime_host::alloc_jit_result(rt, true, value as u64)),
         Err(errors) => with_rt(|rt| {
             let list = rt.heap.alloc_empty_list();
@@ -331,7 +331,7 @@ fn web_route_type_descriptor(
 
 enum WebEncodedValue {
     Text(String),
-    Tree(crate::Encoding::json_rt::DataTree),
+    Tree(crate::Encoding::json_rt::Dyn),
 }
 
 fn web_route_encoded_value(
@@ -362,7 +362,7 @@ fn web_route_encoded_value(
 fn web_encoded_text(value: WebEncodedValue) -> Result<String, String> {
     match value {
         WebEncodedValue::Text(value) => Ok(value),
-        WebEncodedValue::Tree(tree) => Ok(crate::Encoding::json_rt::render_datatree_json(
+        WebEncodedValue::Tree(tree) => Ok(crate::Encoding::json_rt::render_dyn_json(
             &tree, false, 0,
         )),
     }
@@ -415,10 +415,10 @@ fn jet_jit_web_route_stringify_error(result: i64, err_type: i64) -> i64 {
 }
 
 
-fn web_pack_route_trees(trees: &[web_rt::jet_std::DataTree]) -> i64 {
+fn web_pack_route_trees(trees: &[web_rt::jet_std::Dyn]) -> i64 {
     let handles = trees
         .iter()
-        .map(crate::Encoding::alloc_datatree)
+        .map(crate::Encoding::alloc_dyn)
         .collect::<Vec<_>>();
     with_rt(|rt| {
         let list = rt.heap.alloc_empty_list();
@@ -439,7 +439,7 @@ fn web_pack_route_trees(trees: &[web_rt::jet_std::DataTree]) -> i64 {
 /// after it returns runs with no runtime and aborts the request.
 fn web_invoke_route_callback<R>(
     callback: Option<(usize, crate::runtime_host::JitCallableSlot)>,
-    trees: &[web_rt::jet_std::DataTree],
+    trees: &[web_rt::jet_std::Dyn],
     resolve: impl FnOnce(&mut crate::runtime_host::JitRuntime, i64) -> Result<R, String>,
 ) -> Result<R, String> {
     let Some((epoch, callback)) = callback else {
@@ -457,7 +457,7 @@ fn web_invoke_route_callback<R>(
 
 fn web_page_callback(
     callback: Option<(usize, crate::runtime_host::JitCallableSlot)>,
-    trees: &[web_rt::jet_std::DataTree],
+    trees: &[web_rt::jet_std::Dyn],
 ) -> Result<web_rt::JetWebPage, String> {
     web_invoke_route_callback(callback, trees, |rt, page| {
         rt.web
@@ -470,7 +470,7 @@ fn web_page_callback(
 
 fn web_encoded_callback(
     callback: Option<(usize, crate::runtime_host::JitCallableSlot)>,
-    trees: &[web_rt::jet_std::DataTree],
+    trees: &[web_rt::jet_std::Dyn],
 ) -> Result<String, String> {
     web_invoke_route_callback(callback, trees, |rt, encoded| {
         rt.heap
@@ -483,7 +483,7 @@ fn web_form_encoded_callback(
     callback: Option<(usize, crate::runtime_host::JitCallableSlot)>,
     body: &str,
 ) -> Result<String, String> {
-    let tree = web_rt::jet_std::parse_json_typed_datatree(body)
+    let tree = web_rt::jet_std::parse_json_typed_dyn(body)
         .map_err(|_| "typed form action input is not valid JSON".to_string())?;
     web_encoded_callback(callback, &[tree])
 }
@@ -605,7 +605,7 @@ fn jet_jit_web_app_method(
                     } else {
                         web_encoded_callback(
                             callback,
-                            &[web_rt::jet_std::DataTree::Text(body.clone())],
+                            &[web_rt::jet_std::Dyn::Text(body.clone())],
                         )
                     }
                 });

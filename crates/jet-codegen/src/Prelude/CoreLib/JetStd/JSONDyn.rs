@@ -1,4 +1,4 @@
-    // JSON/DataTree bridges layered on the canonical JSON parser.
+    // JSON/Dyn bridges layered on the canonical JSON parser.
     pub fn io_error_at(operation: IOOperation, path: &str, e: std::io::Error) -> IOError {
         let context = IOContext::new(
             operation,
@@ -21,33 +21,33 @@
         }
     }
 
-    // Render a DataTree as JSON, preserving Object field order. Int uses the
+    // Render a Dyn as JSON, preserving Object field order. Int uses the
     // exact carrier renderer; Float keeps its decimal (`5.0`); Bytes render as
     // a number array.
-    pub fn render_datatree_json(t: &DataTree, pretty: bool, depth: usize) -> String {
+    pub fn render_dyn_json(t: &Dyn, pretty: bool, depth: usize) -> String {
         match t {
-            DataTree::Null => "null".to_string(),
-            DataTree::Bool(b) => b.to_string(),
-            DataTree::Int(n) => jet_int_to_string(*n),
-            DataTree::Float(f) => {
+            Dyn::Null => "null".to_string(),
+            Dyn::Bool(b) => b.to_string(),
+            Dyn::Int(n) => jet_int_to_string(*n),
+            Dyn::Float(f) => {
                 assert!(f.is_finite(), "JSON cannot encode a non-finite Float");
                 format!("{:?}", f)
             }
-            DataTree::Number(text) => text.clone(),
-            DataTree::TypedText(text) => quote_json(text),
-            DataTree::Text(s) => quote_json(s),
-            DataTree::Bytes(bs) => {
+            Dyn::Number(text) => text.clone(),
+            Dyn::TypedText(text) => quote_json(text),
+            Dyn::Text(s) => quote_json(s),
+            Dyn::Bytes(bs) => {
                 let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
                 format!("[{}]", parts.join(","))
             }
-            DataTree::Array(items) => {
+            Dyn::Array(items) => {
                 if items.is_empty() {
                     return "[]".to_string();
                 }
                 if !pretty {
                     let parts: Vec<String> = items
                         .iter()
-                        .map(|x| render_datatree_json(x, false, depth))
+                        .map(|x| render_dyn_json(x, false, depth))
                         .collect();
                     return format!("[{}]", parts.join(","));
                 }
@@ -55,11 +55,11 @@
                 let end = "  ".repeat(depth);
                 let parts: Vec<String> = items
                     .iter()
-                    .map(|x| format!("{}{}", pad, render_datatree_json(x, true, depth + 1)))
+                    .map(|x| format!("{}{}", pad, render_dyn_json(x, true, depth + 1)))
                     .collect();
                 format!("[\n{}\n{}]", parts.join(",\n"), end)
             }
-            DataTree::Object(entries) => {
+            Dyn::Object(entries) => {
                 if entries.is_empty() {
                     return "{}".to_string();
                 }
@@ -72,7 +72,7 @@
                             format!(
                                 "{}:{}",
                                 quote_json(k),
-                                render_datatree_json(v, false, depth)
+                                render_dyn_json(v, false, depth)
                             )
                         })
                         .collect();
@@ -85,7 +85,7 @@
                             "{}{}: {}",
                             pad,
                             quote_json(k),
-                            render_datatree_json(v, true, depth + 1)
+                            render_dyn_json(v, true, depth + 1)
                         )
                     })
                     .collect();
@@ -97,19 +97,19 @@
 
     /// Parse typed wire data directly into the ordered tree. The parser and
     /// malformed-input vocabulary are shared with dynamic JSON and comptime.
-    pub fn parse_json_datatree(text: &str) -> Result<DataTree, EncodingError> {
-        crate::jet_encoding_json::parse_json(text, true).map_err(json_error_from_datatree)
+    pub fn parse_json_dyn(text: &str) -> Result<Dyn, EncodingError> {
+        crate::jet_encoding_json::parse_json(text, true).map_err(json_error_from_dyn)
     }
 
     /// Parse typed JSON through the same tokenizer while preserving each
     /// number token until a destination decoder chooses Int, a sized integer,
     /// Decimal, or Float.
-    pub fn parse_json_typed_datatree(text: &str) -> Result<DataTree, EncodingError> {
+    pub fn parse_json_typed_dyn(text: &str) -> Result<Dyn, EncodingError> {
         crate::jet_encoding_json::parse_json_typed(text, true)
-            .map_err(json_error_from_datatree)
+            .map_err(json_error_from_dyn)
     }
 
-    fn json_error_from_datatree(error: crate::jet_encoding_json::Error) -> EncodingError {
+    fn json_error_from_dyn(error: crate::jet_encoding_json::Error) -> EncodingError {
         EncodingError::new(
             EncodingFormat::JSON,
             EncodingErrorKind::Syntax,
@@ -122,9 +122,9 @@
     }
 
     // Look up a key in an ordered Object.
-    pub fn datatree_get<'a>(t: &'a DataTree, key: &str) -> Option<&'a DataTree> {
+    pub fn dyn_get<'a>(t: &'a Dyn, key: &str) -> Option<&'a Dyn> {
         match t {
-            DataTree::Object(entries) => entries.iter().find(|(k, _)| k == key).map(|(_, v)| v),
+            Dyn::Object(entries) => entries.iter().find(|(k, _)| k == key).map(|(_, v)| v),
             _ => None,
         }
     }
@@ -153,29 +153,29 @@
     // Any JSON string that looks like a boolean or a number becomes that type,
     // and one audit line is emitted per coercion naming the field and from→to.
     pub fn jet_std_json_coerce_walk(
-        value: &DataTree,
+        value: &Dyn,
         path: &str,
         emit: &mut dyn FnMut(String),
-    ) -> DataTree {
+    ) -> Dyn {
         match value {
-            DataTree::Text(s) | DataTree::TypedText(s) => {
+            Dyn::Text(s) | Dyn::TypedText(s) => {
                 if s == "true" {
                     emit(jet_std_json_coerce_line(path, "string", "boolean"));
-                    return DataTree::Bool(true);
+                    return Dyn::Bool(true);
                 }
                 if s == "false" {
                     emit(jet_std_json_coerce_line(path, "string", "boolean"));
-                    return DataTree::Bool(false);
+                    return Dyn::Bool(false);
                 }
                 if let Ok(n) = s.parse::<f64>() {
                     if n.is_finite() {
                         emit(jet_std_json_coerce_line(path, "string", "number"));
-                        return DataTree::Float(n);
+                        return Dyn::Float(n);
                     }
                 }
                 value.clone()
             }
-            DataTree::Object(entries) => DataTree::Object(
+            Dyn::Object(entries) => Dyn::Object(
                 entries
                     .iter()
                     .map(|(key, value)| {
@@ -191,7 +191,7 @@
                     })
                     .collect(),
             ),
-            DataTree::Array(items) => DataTree::Array(
+            Dyn::Array(items) => Dyn::Array(
                 items
                     .iter()
                     .enumerate()
@@ -209,11 +209,11 @@
         }
     }
 
-    // The lenient decode value stays on the canonical ordered DataTree.
+    // The lenient decode value stays on the canonical ordered Dyn.
     pub fn jet_std_json_decode_lenient(
         text: &str,
         emit: &mut dyn FnMut(String),
-    ) -> Result<DataTree, EncodingError> {
-        let parsed = parse_json_datatree(text)?;
+    ) -> Result<Dyn, EncodingError> {
+        let parsed = parse_json_dyn(text)?;
         Ok(jet_std_json_coerce_walk(&parsed, "", emit))
     }

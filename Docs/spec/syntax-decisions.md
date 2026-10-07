@@ -1362,7 +1362,7 @@ Every form stays lazy and has the same AOT, dev/JIT, and interpreter meaning.
 `Rank<T>`, ring-buffer `Queue<T>`, `PriorityQueue<T>`, `Cache<K,V>`,
 `Tally<T>`, `Bits`, and `Bytes` in Core (E0506). `[K:V]` is the default
 ordered map spelling; specialized map names stay reserved. **D-ENC-DYN1**:
-`DataTree` is the single dynamic value
+`Dyn` is the single dynamic value
 (`.Object/.Array/.Int/.Float/.Text/.Bool/.Null`); `JSON`/`TOML`/`YAML`/`CSV`
 are aliases over it. **Declined**: `[..]T` spelling — zero-copy comes as
 `View<T>` library type (D-DYNARRAY1).
@@ -3578,7 +3578,7 @@ the D-FFI-PY1 precedent):**
   IDispatch fallback behind `#Unsafe`; the Office/VBA estate becomes
   automatable and migratable; its effect clause is `-[FFI.Com]>`.
   **D-FFI-PWSH1=A** — `pwsh.*` sidecar
-  PowerShell 7+ worker; cmdlet objects cross as `DataTree`; pipelines
+  PowerShell 7+ worker; cmdlet objects cross as `Dyn`; pipelines
   callable; its effect clause is `-[FFI.PowerShell]>`. **D-FFI-DART1=A** — dual surface: `dart.*` library binder
   (dart_api_dl) plus the Flutter embedding path (Jet compute compiled to
   C-ABI, callable from Flutter apps); interop floor for the mobile
@@ -3869,8 +3869,8 @@ D-ENC-YAML1)*: one format-agnostic data model. `#Codable` (≡
 field-walk, not S56 reflection. Formats are adapters in **`core.encoding`**
 (`core.encoding.{json,csv,toml,yaml}`); encode verbs `to_string` /
 `to_string_pretty`; typed decode `decode<T>` (target inferable from the
-binding type; bare `decode(s)` yields dynamic `DataTree`). Hand-impl surface:
-`encode`/`decode` verbs over `DataTree`
+binding type; bare `decode(s)` yields dynamic `Dyn`). Hand-impl surface:
+`encode`/`decode` verbs over `Dyn`
 (`.Null/.Bool/.Int/.Float/.Text/.Array/.Object`); accumulated `[FieldError]`
 values with `{ path, reason }`; encode infallible. Field markers (`#` plane):
 `#Rename("x")`, `#Skip`, declaration defaults `field: T{expr}`, `#Flatten`,
@@ -3886,7 +3886,7 @@ YAML parser is std-only, YAML 1.2 core incl. anchors.
 **D-SERDE2 = A** *(ratified 2026-07-11, card #131; error contract amended by
 D-VALIDATE-DECODE1)*: the hand-writable codec
 surface is a first-class `Encode`/`Decode` protocol — a type implements
-  `encode(self) DataTree` and `decode(tree: DataTree) T ![FieldError]` to own
+  `encode(self) Dyn` and `decode(tree: Dyn) T ![FieldError]` to own
   its wire form (e.g. a validated newtype serializing as a
 bare string). The built-in `#Codable`/`#Encode`/`#Decode` derives become
 ordinary derives that contribute the same checked Jet items and enter sema
@@ -3895,13 +3895,13 @@ Ratifying this also fixes cross-module `decode<T>` (derive output
 previously referenced entry-file-local paths).
 
 **D-SERDE13 = B / D-SERDE14 = A / D-SERDE15 = A** *(ratified 2026-07-11, card
-#131)*: the value tree's one user-facing name is **`DataTree`** — the retired `Data`
-spelling becomes a teaching error pointing at `DataTree` (no alias,
+#131)*: the value tree's one user-facing name is **`Dyn`** — the retired `Data`
+spelling becomes a teaching error pointing at `Dyn` (no alias,
 I8); tree accessors (`.field`/`.at`/`.int`/`.text`/…) return `T ![FieldError]`
 everywhere. `.field` and `.at` fill `path` from the segment they read; scalar
 accessors leave it empty and a containing decoder uses `FieldError.under`, so
 `?` chains inside a hand `decode` remain direct; hand-built object
-nodes take the map literal — `DataTree.Object({ "name": v, … })` —
+nodes take the map literal — `Dyn.Object({ "name": v, … })` —
 insertion-ordered, and the pair-list form is not accepted.
 
 **D-SERDE16 = A** *(ratified 2026-07-11, card #131)*: decode an arbitrary
@@ -3911,12 +3911,12 @@ spelling works uniformly for primitives, user types, `List`, `Option`, and
 `Decode` implementation is E0905 before codegen. No compiler-only helper,
 hidden alias, alternate codec, or fallback exists.
 
-**D-DATATREE-ERGO1 = A** *(ratified 2026-08-30, card #2380)*: `DataTree`
+**D-DATATREE-ERGO1 = A** *(ratified 2026-08-30, card #2380)*: `Dyn`
 provides `to_text()` for scalar text, integer, float, and boolean leaves,
 returning `None` for `Null` and containers; the strict `.text()` accessor is
 unchanged. `equal_unordered(other)` ignores object insertion order, preserves
 array order, keeps `Int` and `Float` distinct, and never equates `NaN`. No
-`DataTree.truthy()` operation is added; domain-specific truthiness remains
+`Dyn.truthy()` operation is added; domain-specific truthiness remains
 explicit at its call site.
 
 **CLI & IO**: builder-spec arg parsing `args.spec().flag(…).option(…)
@@ -4075,7 +4075,7 @@ index, not a substitute for that law.
   `<selector>._domainkey.<domain>`. SPF and DMARC remain DNS policy. Multiple
   identities use separate named Mailers; there is no per-message override.
 - **D-ENCSTREAM1=A**: each `core.encoding` codec has one adapter identity with
-  whole-value and reader/writer modes over the shared `DataTree`
+  whole-value and reader/writer modes over the shared `Dyn`
   and `Codable` machinery. Reader/writer access is a mode of that adapter, never a second
   codec library.
 
@@ -4085,18 +4085,18 @@ index, not a substitute for that law.
   `^files.FileWriter`, take shared `EncodingLimits.safe()`, and return
   `EncodingError`; readers provide `next(&self)`, writers `write(&self)`,
   `flush(&self)`, and required idempotent `finish(&self)`. Items are `DataEvent`
-  for JSON/CBOR, `DataTree` for JSONL, `CSVRow` for CSV readers and `[String]`
+  for JSON/CBOR, `Dyn` for JSONL, `CSVRow` for CSV readers and `[String]`
   for CSV writers, and D-ENCXML1's exact
-  tagged `DataTree` event algebra for XML. Blocking calls provide backpressure; no
+  tagged `Dyn` event algebra for XML. Blocking calls provide backpressure; no
   hidden task, queue, partial-success state, or `WouldBlock` exists. Clean EOF
   follows complete structural/trailing-input validation; the first terminal
   error is cloned forever. `EncodingLimits` owns buffer/depth/item/total/entity
   expansion bounds and all constructors validate fields before IO. Shared
   `EncodingError` records format, kind, zero-based byte offset, optional
-  one-based line/column, DataTree path, reason, and handle-free IO cause. Whole and
+  one-based line/column, Dyn path, reason, and handle-free IO cause. Whole and
   stream paths share parser, value tree, errors, limits, canonical bytes, and
   bounded-memory law, summarized across primitives in the [Bounded buffering law](spec.md#bounded-buffering-law).
-  Shipped `json.events(DataTree) -> String` is unchanged;
+  Shipped `json.events(Dyn) -> String` is unchanged;
   pull events exist only through `json.reader` until an edition migration.
 
   **D-ROWS1=A** fixes the existing CSV engine as the one whole-value and
@@ -4110,7 +4110,7 @@ index, not a substitute for that law.
   multiline records and records after CRLF. `csv.parse` and `csv.reader`
   expose the same options and engine; `csv.reader.next()` returns `CSVRow`.
 
-  **D-ENCXML1=A** selects one lossless namespace-aware ordinary-`DataTree` XML
+  **D-ENCXML1=A** selects one lossless namespace-aware ordinary-`Dyn` XML
   algebra, not an `XmlDocument` or `XMLEvent` type. XML 1.0 Fifth Edition plus
   Namespaces 1.0 is the floor. `parse` accepts Unicode/UTF-8 declarations;
   `parse_bytes` additionally detects UTF-8 BOM and UTF-16 LE/BE BOM. The closed
@@ -4143,10 +4143,10 @@ index, not a substitute for that law.
   and audits hashing/signing fixtures. No 2027 legacy branch exists.
 
   **D-ENCBIN1=A / D-ENC-CBOR-SURFACE1=A** select RFC 8949 CBOR. The only whole
-  surface is `parse([U8], options) -> DataTree`, `decode<T: Codable>`, `to_bytes`,
+  surface is `parse([U8], options) -> Dyn`, `decode<T: Codable>`, `to_bytes`,
   and `to_bytes_canonical`; `parse` and byte verbs return closed `CBORError`,
   while typed `decode<T>` returns the ratified `[FieldError]` list. `[U8]` uses native
-  byte strings through typed Codable; untyped `DataTree` rejects byte strings,
+  byte strings through typed Codable; untyped `Dyn` rejects byte strings,
   tags, bignums, non-text/duplicate map keys, and unsupported values rather than
   coercing. `CBOROptions` bounds depth/items/input and live allocation and may
   require canonical input. Canonical output is RFC 8949 section 4.2.1 Core:
@@ -4154,7 +4154,7 @@ index, not a substitute for that law.
   zero, and pure bytewise lexicographic complete encoded-key order. Canonical
   validation checks original bytes. Ordinary output is preferred interoperable
   CBOR, not a cross-version hash promise. Edition 2026 keeps shipped
-  `encode(DataTree)`/`DataTree`-returning `decode`; edition 2027 migrates to the ratified
+  `encode(Dyn)`/`Dyn`-returning `decode`; edition 2027 migrates to the ratified
   names, edition 2028 removes forwarding entries, and `jet fix` owns rewrites.
 
   **D-ENCBASE-STRICT1=A** makes edition-2027 base64/base64url/base32 decoding

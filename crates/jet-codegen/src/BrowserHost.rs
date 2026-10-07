@@ -28,7 +28,7 @@ fn jet_deadline_remaining_ms() -> Option<i64> {
 }
 
 mod jet_std {
-    pub use jet_foundation::DataTree::DataTree;
+    pub use jet_foundation::Dyn::Dyn;
     pub use jet_foundation::Outcome::{JetAbsent, JetOutcome};
 
     #[derive(Clone, Debug, PartialEq)]

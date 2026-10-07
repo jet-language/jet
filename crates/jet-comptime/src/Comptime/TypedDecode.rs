@@ -8,10 +8,10 @@
 //! and the canonical `[FieldError]` value defined by `jet_std`.
 //! parity: guard tests/corelib.rs::typed_codec_decode_matches_between_full_build_and_quick_run
 //!
-//! Operates directly on the canonical `DataTree`-tagged `CtValue` tree that
+//! Operates directly on the canonical `Dyn`-tagged `CtValue` tree that
 //! `JSONInterp`/`EncodingLite` build for every codec (json/csv/toml/yaml) — its
 //! variant tags (`Null`/`Bool`/`Int`/`Float`/`Text`/`Array`/`Object`) are
-//! exactly AOT's `DataTree` shape, so no separate value type is needed at this
+//! exactly AOT's `Dyn` shape, so no separate value type is needed at this
 //! tier.
 
 use std::collections::{BTreeSet, HashMap};
@@ -28,8 +28,8 @@ mod sql_query {
     include!("../../../jet-codegen/src/Prelude/Core/SqlQuery.rs");
 }
 
-mod datatree_kind_rt {
-    include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
+mod dyn_kind_rt {
+    include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DynKind.rs");
 }
 
 mod inline_range_semantics {
@@ -157,7 +157,7 @@ fn migration_wire_key(style: Option<&str>, s: &StructDef, name: &str) -> String 
     }
 }
 
-// ── DataTree-tagged CtValue tree helpers (the canonical `DataTree` shape) ──
+// ── Dyn-tagged CtValue tree helpers (the canonical `Dyn` shape) ──
 
 fn variant_of(tree: &CtValue) -> Option<(&str, Option<&CtValue>)> {
     match tree {
@@ -165,14 +165,14 @@ fn variant_of(tree: &CtValue) -> Option<(&str, Option<&CtValue>)> {
             type_name,
             variant,
             args,
-        } if type_name == "DataTree" => Some((variant.as_str(), args.first().map(|(_, v)| v))),
+        } if type_name == "Dyn" => Some((variant.as_str(), args.first().map(|(_, v)| v))),
         CtValue::Bytes(_) => Some(("Bytes", Some(tree))),
         _ => None,
     }
 }
-fn datatree_kind_for(tree: &CtValue) -> &'static str {
+fn dyn_kind_for(tree: &CtValue) -> &'static str {
     let tag = variant_of(tree).map(|(tag, _)| tag).unwrap_or("value");
-    datatree_kind_rt::datatree_kind(tag)
+    dyn_kind_rt::dyn_kind(tag)
 }
 fn object_pairs(tree: &CtValue) -> Option<Vec<(String, CtValue)>> {
     match json_payload(tree, "Object") {
@@ -431,7 +431,7 @@ fn decode_float(tree: &CtValue) -> Result<CtValue, CtValue> {
         ))),
         _ => Err(decode_error(format!(
             "expected Float, found {}",
-            datatree_kind_for(tree)
+            dyn_kind_for(tree)
         ))),
     }
 }
@@ -452,7 +452,7 @@ fn decode_bool(tree: &CtValue) -> Result<CtValue, CtValue> {
         },
         _ => Err(decode_error(format!(
             "expected Bool, found {}",
-            datatree_kind_for(tree)
+            dyn_kind_for(tree)
         ))),
     }
 }
@@ -469,7 +469,7 @@ fn decode_string(tree: &CtValue) -> Result<CtValue, CtValue> {
         Some(("Bool", Some(CtValue::Bool(b)))) => Ok(CtValue::Str(b.to_string())),
         _ => Err(decode_error(format!(
             "expected Text, found {}",
-            datatree_kind_for(tree)
+            dyn_kind_for(tree)
         ))),
     }
 }
@@ -506,7 +506,7 @@ fn decode_f32(tree: &CtValue) -> Result<CtValue, CtValue> {
         _ => {
             return Err(decode_error(format!(
                 "expected F32, found {}",
-                datatree_kind_for(tree)
+                dyn_kind_for(tree)
             )))
         }
     };
@@ -535,7 +535,7 @@ fn decode_decimal(tree: &CtValue) -> Result<CtValue, CtValue> {
         _ => {
             return Err(decode_error(format!(
                 "expected Decimal, found {}",
-                datatree_kind_for(tree)
+                dyn_kind_for(tree)
             )))
         }
     };
@@ -590,7 +590,7 @@ fn codec_int_field(
 }
 
 /// Encode one of the closed Prelude builtin codec types to the canonical
-/// DataTree-tagged comptime value. The same Codec.rs kernels are used by AOT
+/// Dyn-tagged comptime value. The same Codec.rs kernels are used by AOT
 /// and resident JIT adapters.
 pub fn encode_builtin_codec(kind: i64, value: &CtValue) -> Result<CtValue, String> {
     let text = match kind {
@@ -720,7 +720,7 @@ pub fn decode_builtin_codec(ty: &Type, tree: &CtValue) -> Result<CtValue, CtValu
 /// Decode the closed primitive/container subset without an interpreter-owned
 /// struct registry. TIR core calls retain their resolved return type but not
 /// source turbofish syntax, so CBOR uses this same scalar/list walker instead
-/// of falling through to an untyped `DataTree`.
+/// of falling through to an untyped `Dyn`.
 pub(super) fn typed_decode_builtin_value(
     ty: &Type,
     tree: &CtValue,
@@ -762,7 +762,7 @@ pub(super) fn typed_decode_value_with(
         Type::Bool => Some(decode_bool(tree)),
         Type::String => Some(decode_string(tree)),
         Type::Char => Some(decode_char(tree)),
-        Type::Named(name) if name == "DataTree" || name == "Data" => {
+        Type::Named(name) if name == "Dyn" || name == "Data" => {
             Some(Ok(tree.clone()))
         }
         Type::Named(name) if matches!(
@@ -827,7 +827,7 @@ pub(super) fn typed_decode_value_with(
             let Some(("Array", Some(CtValue::List(items)))) = variant_of(tree) else {
                 return Some(Err(decode_error(format!(
                     "expected a list, found {}",
-                    datatree_kind_for(tree)
+                    dyn_kind_for(tree)
                 ))));
             };
             if let Type::FixedList { len, .. } = ty {
@@ -859,7 +859,7 @@ pub(super) fn typed_decode_value_with(
             let Some(pairs) = object_pairs(tree) else {
                 return Some(Err(decode_error(format!(
                     "expected an object, found {}",
-                    datatree_kind_for(tree)
+                    dyn_kind_for(tree)
                 ))));
             };
             let mut out = std::collections::BTreeMap::new();
@@ -937,7 +937,7 @@ pub(super) fn encode_typed_value_with(
         | Type::Shared(base)
         | Type::Tagged { inner: base, .. }
         | Type::Quantity { base, .. } => encode_typed_value_with(base, value, encode_nominal),
-        Type::Named(name) if name == crate::Syntax::TYPE_DATA || name == "DataTree" => {
+        Type::Named(name) if name == crate::Syntax::TYPE_DATA || name == "Dyn" => {
             Some(Ok(value.clone()))
         }
         Type::Named(name)
@@ -1211,7 +1211,7 @@ impl<'a> Interp<'a> {
                 if let Some(decoded) = self.decode_user_value(&name, tree) {
                     return decoded;
                 }
-                let shape = datatree_kind_for(tree);
+                let shape = dyn_kind_for(tree);
                 let Some(member) = members
                     .iter()
                     .find(|member| {
@@ -1237,7 +1237,7 @@ impl<'a> Interp<'a> {
                 let Some(("Array", Some(CtValue::List(items)))) = variant_of(tree) else {
                     return Err(decode_error(format!(
                         "expected a list, found {}",
-                        datatree_kind_for(tree)
+                        dyn_kind_for(tree)
                     )));
                 };
                 if let Type::FixedList { len, .. } = ty {
@@ -1269,7 +1269,7 @@ impl<'a> Interp<'a> {
                 let Some(pairs) = object_pairs(tree) else {
                     return Err(decode_error(format!(
                         "expected an object, found {}",
-                        datatree_kind_for(tree)
+                        dyn_kind_for(tree)
                     )));
                 };
                 let mut out = std::collections::BTreeMap::new();

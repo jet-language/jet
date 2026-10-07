@@ -576,15 +576,15 @@ fn empty_method_traits() -> &'static HashMap<(String, String), String> {
     EMPTY_METHOD_TRAITS.get_or_init(HashMap::new)
 }
 
-pub fn render_datatree_for_tir(value: &CtValue) -> String {
-    JSONInterp::render_ordered_datatree(value, false, 0)
+pub fn render_dyn_for_tir(value: &CtValue) -> String {
+    JSONInterp::render_ordered_dyn(value, false, 0)
 }
 
-pub fn render_datatree_pretty_for_tir(value: &CtValue) -> String {
-    JSONInterp::render_ordered_datatree(value, true, 0)
+pub fn render_dyn_pretty_for_tir(value: &CtValue) -> String {
+    JSONInterp::render_ordered_dyn(value, true, 0)
 }
 
-/// TIR typed JSON decode uses the ordered DataTree shape. Dynamic JSON keeps
+/// TIR typed JSON decode uses the ordered Dyn shape. Dynamic JSON keeps
 /// its BTreeMap shape, so this adapter is separate from `core.encoding.json.parse`.
 pub fn parse_ordered_json_for_tir(text: &str) -> CtValue {
     match JSONInterp::parse_json_typed_ordered(text) {

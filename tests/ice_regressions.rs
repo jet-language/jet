@@ -203,46 +203,46 @@ fn b8_value_if_fallible_arms_keep_one_value_type() {
     assert_compiles(
         "b8_value_if_bool_never",
         r#"
-fn next(value: DataTree) -> Bool Never! { return true }
-fn value_if_bool_never(value: DataTree) -> Bool Never! {
+fn next(value: Dyn) -> Bool Never! { return true }
+fn value_if_bool_never(value: Dyn) -> Bool Never! {
     return if value == {
         .Null -> false
         else -> next(~value)
     }
 }
 fn run() {
-    print(value_if_bool_never(DataTree.Null))
+    print(value_if_bool_never(Dyn.Null))
 }
 "#,
     );
     assert_compiles(
         "b8_value_if_string_err",
         r#"
-fn next(value: DataTree) -> String { return "next" }
-fn value_if_string_err(value: DataTree) -> String {
+fn next(value: Dyn) -> String { return "next" }
+fn value_if_string_err(value: Dyn) -> String {
     return if value == {
         .Null -> "null"
         else -> next(~value)
     }
 }
 fn run() {
-    print(value_if_string_err(DataTree.Null))
+    print(value_if_string_err(Dyn.Null))
 }
 "#,
     );
     assert_compiles(
         "b8_value_if_list_err",
         r#"
-fn next(value: DataTree) -> [String] { return [String]{} }
-fn value_if_list_err(value: DataTree) -> [String] {
+fn next(value: Dyn) -> [String] { return [String]{} }
+fn value_if_list_err(value: Dyn) -> [String] {
     empty := [String]{}
     return if value == {
-        .Text(text) -> next(DataTree.Text(~text))
+        .Text(text) -> next(Dyn.Text(~text))
         else -> empty
     }
 }
 fn run() {
-    print(value_if_list_err(DataTree.Null))
+    print(value_if_list_err(Dyn.Null))
 }
 "#,
     );
@@ -312,7 +312,7 @@ fn run(args: Args) {
     for (trait_name, method_name, return_type) in [
         ("__jet_Equatable", "equal", "bool"),
         ("__jet_Comparable", "compare", "__jet_Ordering"),
-        ("__jet_Encode", "jet_encode", "jet_std::DataTree"),
+        ("__jet_Encode", "jet_encode", "jet_std::Dyn"),
     ] {
         let marker = format!("{trait_name} for __jet_");
         let mut found = false;

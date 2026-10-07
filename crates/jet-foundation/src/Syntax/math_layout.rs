@@ -314,7 +314,7 @@ pub const TYPE_ENCODING_ERROR: &str = "EncodingError";
 
 /// D-ENC-DYN1=A+ (ratified 2026-06-25) + D-SERDE13=B (ratified 2026-07-11): the
 /// one dynamic encoding value every format's `parse` returns and every hand codec
-/// constructs and returns. `DataTree` is the single canonical user-facing
+/// constructs and returns. `Dyn` is the single canonical user-facing
 /// spelling — renamed from the old `Data` face by D-SERDE13=B (it is a tree of
 /// data, distinct from any user type named `Data`; the retired `Data` spelling is
 /// a teaching error, E0351, not an alias, per I8). `JSON`/`TOML`/`YAML`/`CSV` are
@@ -322,24 +322,24 @@ pub const TYPE_ENCODING_ERROR: &str = "EncodingError";
 /// `JSON`, `toml.parse` is typed `TOML`, etc., but one walker and one accessor
 /// set back them. Variants: `Null`, `Bool`, `Int`, `Float`, `Text`, `Array`,
 /// `Object`.
-pub const TYPE_DATA: &str = "DataTree";
+pub const TYPE_DATA: &str = "Dyn";
 /// D-SERDE16=A (ratified 2026-07-11): public target-directed subtree dispatch.
 /// `tree.decode<T>()` calls only `T`'s ordinary `Decode` protocol impl.
-pub const METHOD_DATATREE_DECODE: &str = "decode";
+pub const METHOD_DYN_DECODE: &str = "decode";
 pub const TYPE_DATA_JSON: &str = "JSON";
 pub const TYPE_DATA_TOML: &str = "TOML";
 pub const TYPE_DATA_YAML: &str = "YAML";
 pub const TYPE_DATA_CSV: &str = "CSV";
 
 /// The accepted spellings of the dynamic encoding value (D-ENC-DYN1=A+ /
-/// D-SERDE13=B): canonical `DataTree` plus the four format-tagged aliases. The
+/// D-SERDE13=B): canonical `Dyn` plus the four format-tagged aliases. The
 /// old bare `Data` spelling is intentionally absent — it is caught as E0351.
 pub fn is_data_type_name(name: &str) -> bool {
-    matches!(name, "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
+    matches!(name, "Dyn" | "JSON" | "TOML" | "YAML" | "CSV")
 }
 
 /// The variants of the dynamic `Data` value (D-ENC-DYN1=A+), the user-facing face
-/// of `DataTree`. `Bytes` stays internal (no dynamic constructor).
+/// of `Dyn`. `Bytes` stays internal (no dynamic constructor).
 pub fn is_data_variant(variant: &str) -> bool {
     matches!(
         variant,

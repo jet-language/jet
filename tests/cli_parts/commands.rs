@@ -409,7 +409,7 @@ fn perl_bind_launders_parse_failure_as_e3208() {
 }
 
 #[test]
-fn ruby_bind_round_trips_datatree_state_timeout_and_cancellation() {
+fn ruby_bind_round_trips_dyn_state_timeout_and_cancellation() {
     if Command::new("ruby").arg("--version").output().is_err() {
         return;
     }
@@ -625,7 +625,7 @@ fn php_bind_launders_parse_failure_as_e3208() {
 }
 
 #[test]
-fn r_bind_round_trips_datatree_state_and_worker_lifecycle() {
+fn r_bind_round_trips_dyn_state_and_worker_lifecycle() {
     if Command::new("Rscript").arg("--version").output().is_err() {
         return;
     }

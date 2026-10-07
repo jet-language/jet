@@ -3,7 +3,7 @@
 // 1.0 reader keeps only what inference needs: expanded element and attribute
 // names and the kinds of content each element holds. Attributes become `@`
 // wire keys, simple content `$text`, mixed content an ordered `$content`
-// DataTree, nested elements records, and repeated children lists.
+// Dyn, nested elements records, and repeated children lists.
 
 @XML_NAMESPACE_URI :: "http://www.w3.org/XML/1998/namespace"
 @XMLNS_NAMESPACE_URI :: "http://www.w3.org/2000/xmlns/"
@@ -480,7 +480,7 @@ fn pkg_data_add_xml_record(builder: &SchemaBuilder, preferred: String, nodes: [X
     }
     mixed_count :: nodes.len() - simple_count
     if simple_count > 0 -> &fields.push(FieldSeed{wire_name: "$text", ty: BoundType.Scalar("String"), optional: mixed_count > 0, note: None})
-    if mixed_count > 0 -> &fields.push(FieldSeed{wire_name: "$content", ty: BoundType.Scalar("DataTree"), optional: simple_count > 0, note: None})
+    if mixed_count > 0 -> &fields.push(FieldSeed{wire_name: "$content", ty: BoundType.Scalar("Dyn"), optional: simple_count > 0, note: None})
     loop child_name in child_names {
         children := [XmlNode]{}
         present_count := 0

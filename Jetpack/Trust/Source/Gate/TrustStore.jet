@@ -97,26 +97,26 @@ pub enum TrustRecord {
     fn json(self) -> String Never! {
         if self == {
             .Hash(hash) -> trust_json_object_text([TrustJsonField]{
-                TrustJsonField{key: "type", value: DataTree.Text("hash")},
-                TrustJsonField{key: "hash", value: DataTree.Text(~hash)},
-                TrustJsonField{key: "revocationKey", value: DataTree.Text("{@TRUST_HASH_PREFIX}{hash}")}
+                TrustJsonField{key: "type", value: Dyn.Text("hash")},
+                TrustJsonField{key: "hash", value: Dyn.Text(~hash)},
+                TrustJsonField{key: "revocationKey", value: Dyn.Text("{@TRUST_HASH_PREFIX}{hash}")}
             })
             .Pattern(pattern) -> trust_json_object_text([TrustJsonField]{
-                TrustJsonField{key: "type", value: DataTree.Text("pattern")},
-                TrustJsonField{key: "pattern", value: DataTree.Text(~pattern)},
-                TrustJsonField{key: "revocationKey", value: DataTree.Text("{@TRUST_PATTERN_PREFIX}{pattern}")}
+                TrustJsonField{key: "type", value: Dyn.Text("pattern")},
+                TrustJsonField{key: "pattern", value: Dyn.Text(~pattern)},
+                TrustJsonField{key: "revocationKey", value: Dyn.Text("{@TRUST_PATTERN_PREFIX}{pattern}")}
             })
             .Grant(grant) -> trust_json_object_text([TrustJsonField]{
-                TrustJsonField{key: "type", value: DataTree.Text("grant")},
-                TrustJsonField{key: "authority", value: DataTree.Text(~grant.authority)},
-                TrustJsonField{key: "subject", value: DataTree.Text(~grant.subject)},
-                TrustJsonField{key: "scope", value: DataTree.Text(~grant.scope)},
-                TrustJsonField{key: "revocationKey", value: DataTree.Text(grant.key())}
+                TrustJsonField{key: "type", value: Dyn.Text("grant")},
+                TrustJsonField{key: "authority", value: Dyn.Text(~grant.authority)},
+                TrustJsonField{key: "subject", value: Dyn.Text(~grant.subject)},
+                TrustJsonField{key: "scope", value: Dyn.Text(~grant.scope)},
+                TrustJsonField{key: "revocationKey", value: Dyn.Text(grant.key())}
             })
             .Raw(line) -> trust_json_object_text([TrustJsonField]{
-                TrustJsonField{key: "type", value: DataTree.Text("raw")},
-                TrustJsonField{key: "line", value: DataTree.Text(~line)},
-                TrustJsonField{key: "revocationKey", value: DataTree.Text(~line)}
+                TrustJsonField{key: "type", value: Dyn.Text("raw")},
+                TrustJsonField{key: "line", value: Dyn.Text(~line)},
+                TrustJsonField{key: "revocationKey", value: Dyn.Text(~line)}
             })
         }
     }

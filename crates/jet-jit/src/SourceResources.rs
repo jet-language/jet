@@ -5053,7 +5053,7 @@ impl SourceResourceArena {
                     .map_err(|error| encoding_error(&error))
             }
             EncodingWriter::Jsonl(writer) => {
-                let tree = data_tree_from_value(value)?;
+                let tree = dyn_from_value(value)?;
                 crate::enc_stream::runtime::enc_jsonl_writer_write(writer, tree)
                     .map_err(|error| encoding_error(&error))
             }
@@ -5063,7 +5063,7 @@ impl SourceResourceArena {
                     .map_err(|error| encoding_error(&error))
             }
             EncodingWriter::Xml(writer) => {
-                let tree = data_tree_from_value(value)?;
+                let tree = dyn_from_value(value)?;
                 crate::enc_stream::runtime::enc_xml_writer_write(writer, tree)
                     .map_err(|error| encoding_error(&error))
             }
@@ -5671,13 +5671,13 @@ fn encoding_next(
             .map(|value| value.map(data_event_value))
             .map_err(|error| encoding_error(&error)),
         EncodingReader::Jsonl(reader) => crate::enc_stream::runtime::enc_jsonl_reader_next(reader)
-            .map(|value| value.map(data_tree_value))
+            .map(|value| value.map(dyn_value))
             .map_err(|error| encoding_error(&error)),
         EncodingReader::Csv(reader) => crate::enc_stream::runtime::enc_csv_reader_next(reader)
             .map(|value| value.map(csv_row_value))
             .map_err(|error| encoding_error(&error)),
         EncodingReader::Xml(reader) => crate::enc_stream::runtime::enc_xml_reader_next(reader)
-            .map(|value| value.map(data_tree_value))
+            .map(|value| value.map(dyn_value))
             .map_err(|error| encoding_error(&error)),
         EncodingReader::Cbor(reader) => crate::enc_stream::runtime::enc_cbor_reader_next(reader)
             .map(|value| value.map(data_event_value))
@@ -5711,27 +5711,27 @@ fn data_event_value(event: crate::enc_stream::runtime::jet_std::DataEvent) -> Mi
     }
 }
 
-fn data_tree_value(tree: crate::enc_stream::runtime::jet_std::DataTree) -> MirRuntimeValue {
-    use crate::enc_stream::runtime::jet_std::DataTree;
+fn dyn_value(tree: crate::enc_stream::runtime::jet_std::Dyn) -> MirRuntimeValue {
+    use crate::enc_stream::runtime::jet_std::Dyn;
     let (variant, args) = match tree {
-        DataTree::Null => ("Null", Vec::new()),
-        DataTree::Bool(value) => ("Bool", vec![MirRuntimeValue::Bool(value)]),
-        DataTree::Int(value) => ("Int", vec![MirRuntimeValue::Int(value)]),
-        DataTree::Float(value) => (
+        Dyn::Null => ("Null", Vec::new()),
+        Dyn::Bool(value) => ("Bool", vec![MirRuntimeValue::Bool(value)]),
+        Dyn::Int(value) => ("Int", vec![MirRuntimeValue::Int(value)]),
+        Dyn::Float(value) => (
             "Float",
             vec![MirRuntimeValue::Float { value, f32: false }],
         ),
-        DataTree::Number(value) => ("Number", vec![MirRuntimeValue::String(value)]),
-        DataTree::TypedText(value) => ("TypedText", vec![MirRuntimeValue::String(value)]),
-        DataTree::Text(value) => ("Text", vec![MirRuntimeValue::String(value)]),
-        DataTree::Bytes(value) => ("Bytes", vec![MirRuntimeValue::Bytes(value)]),
-        DataTree::Array(values) => (
+        Dyn::Number(value) => ("Number", vec![MirRuntimeValue::String(value)]),
+        Dyn::TypedText(value) => ("TypedText", vec![MirRuntimeValue::String(value)]),
+        Dyn::Text(value) => ("Text", vec![MirRuntimeValue::String(value)]),
+        Dyn::Bytes(value) => ("Bytes", vec![MirRuntimeValue::Bytes(value)]),
+        Dyn::Array(values) => (
             "Array",
             vec![MirRuntimeValue::List(
-                values.into_iter().map(data_tree_value).collect(),
+                values.into_iter().map(dyn_value).collect(),
             )],
         ),
-        DataTree::Object(values) => (
+        Dyn::Object(values) => (
             "Object",
             vec![MirRuntimeValue::List(
                 values
@@ -5740,7 +5740,7 @@ fn data_tree_value(tree: crate::enc_stream::runtime::jet_std::DataTree) -> MirRu
                         type_name: "Tuple".to_string(),
                         fields: vec![
                             ("key".to_string(), MirRuntimeValue::String(key)),
-                            ("value".to_string(), data_tree_value(value)),
+                            ("value".to_string(), dyn_value(value)),
                         ],
                     })
                     .collect(),
@@ -5748,7 +5748,7 @@ fn data_tree_value(tree: crate::enc_stream::runtime::jet_std::DataTree) -> MirRu
         ),
     };
     MirRuntimeValue::Enum {
-        type_name: "DataTree".to_string(),
+        type_name: "Dyn".to_string(),
         variant: variant.to_string(),
         args: args.into_iter().map(|value| (None, value)).collect(),
     }
@@ -5884,10 +5884,10 @@ fn data_event_from_value(
     }
 }
 
-fn data_tree_from_value(
+fn dyn_from_value(
     value: &MirRuntimeValue,
-) -> Result<crate::enc_stream::runtime::jet_std::DataTree, MirNativeCursorError> {
-    use crate::enc_stream::runtime::jet_std::DataTree;
+) -> Result<crate::enc_stream::runtime::jet_std::Dyn, MirNativeCursorError> {
+    use crate::enc_stream::runtime::jet_std::Dyn;
     let MirRuntimeValue::Enum {
         type_name,
         variant,
@@ -5895,138 +5895,138 @@ fn data_tree_from_value(
     } = value
     else {
         return Err(MirNativeCursorError::internal(
-            "encoding writer expects a DataTree carrier",
+            "encoding writer expects a Dyn carrier",
         ));
     };
-    if type_name != "DataTree" {
+    if type_name != "Dyn" {
         return Err(MirNativeCursorError::internal(format!(
-            "encoding writer expects DataTree, got `{type_name}`"
+            "encoding writer expects Dyn, got `{type_name}`"
         )));
     }
     let arg = |index: usize| {
         args.get(index)
             .map(|(_, value)| value)
-            .ok_or_else(|| MirNativeCursorError::internal("DataTree carrier is missing an argument"))
+            .ok_or_else(|| MirNativeCursorError::internal("Dyn carrier is missing an argument"))
     };
     let unit = || {
         if args.is_empty() {
             Ok(())
         } else {
             Err(MirNativeCursorError::internal(
-                "unit DataTree variant has unexpected arguments",
+                "unit Dyn variant has unexpected arguments",
             ))
         }
     };
     match variant.as_str() {
         "Null" => {
             unit()?;
-            Ok(DataTree::Null)
+            Ok(Dyn::Null)
         }
         "Bool" => match arg(0)? {
-            MirRuntimeValue::Bool(value) if args.len() == 1 => Ok(DataTree::Bool(*value)),
+            MirRuntimeValue::Bool(value) if args.len() == 1 => Ok(Dyn::Bool(*value)),
             _ => Err(MirNativeCursorError::internal(
-                "DataTree.Bool carrier has the wrong payload",
+                "Dyn.Bool carrier has the wrong payload",
             )),
         },
         "Int" => match arg(0)? {
-            MirRuntimeValue::Int(value) if args.len() == 1 => Ok(DataTree::Int(*value)),
+            MirRuntimeValue::Int(value) if args.len() == 1 => Ok(Dyn::Int(*value)),
             _ => Err(MirNativeCursorError::internal(
-                "DataTree.Int carrier has the wrong payload",
+                "Dyn.Int carrier has the wrong payload",
             )),
         },
         "Float" => match arg(0)? {
             MirRuntimeValue::Float { value, .. } if args.len() == 1 => {
-                Ok(DataTree::Float(*value))
+                Ok(Dyn::Float(*value))
             }
             _ => Err(MirNativeCursorError::internal(
-                "DataTree.Float carrier has the wrong payload",
+                "Dyn.Float carrier has the wrong payload",
             )),
         },
         "Number" => match arg(0)? {
             MirRuntimeValue::String(value) if args.len() == 1 => {
-                Ok(DataTree::Number(value.clone()))
+                Ok(Dyn::Number(value.clone()))
             }
             _ => Err(MirNativeCursorError::internal(
-                "DataTree.Number carrier has the wrong payload",
+                "Dyn.Number carrier has the wrong payload",
             )),
         },
         "TypedText" => match arg(0)? {
             MirRuntimeValue::String(value) if args.len() == 1 => {
-                Ok(DataTree::TypedText(value.clone()))
+                Ok(Dyn::TypedText(value.clone()))
             }
             _ => Err(MirNativeCursorError::internal(
-                "DataTree.TypedText carrier has the wrong payload",
+                "Dyn.TypedText carrier has the wrong payload",
             )),
         },
         "Text" => match arg(0)? {
             MirRuntimeValue::String(value) if args.len() == 1 => {
-                Ok(DataTree::Text(value.clone()))
+                Ok(Dyn::Text(value.clone()))
             }
             _ => Err(MirNativeCursorError::internal(
-                "DataTree.Text carrier has the wrong payload",
+                "Dyn.Text carrier has the wrong payload",
             )),
         },
         "Bytes" => match arg(0)? {
             MirRuntimeValue::Bytes(value) if args.len() == 1 => {
-                Ok(DataTree::Bytes(value.clone()))
+                Ok(Dyn::Bytes(value.clone()))
             }
             _ => Err(MirNativeCursorError::internal(
-                "DataTree.Bytes carrier has the wrong payload",
+                "Dyn.Bytes carrier has the wrong payload",
             )),
         },
         "Array" => {
             let MirRuntimeValue::List(values) = arg(0)? else {
                 return Err(MirNativeCursorError::internal(
-                    "DataTree.Array carrier has the wrong payload",
+                    "Dyn.Array carrier has the wrong payload",
                 ));
             };
             if args.len() != 1 {
                 return Err(MirNativeCursorError::internal(
-                    "DataTree.Array carrier has unexpected arguments",
+                    "Dyn.Array carrier has unexpected arguments",
                 ));
             }
             values
                 .iter()
-                .map(data_tree_from_value)
+                .map(dyn_from_value)
                 .collect::<Result<Vec<_>, _>>()
-                .map(DataTree::Array)
+                .map(Dyn::Array)
         }
         "Object" => {
             let MirRuntimeValue::List(values) = arg(0)? else {
                 return Err(MirNativeCursorError::internal(
-                    "DataTree.Object carrier has the wrong payload",
+                    "Dyn.Object carrier has the wrong payload",
                 ));
             };
             if args.len() != 1 {
                 return Err(MirNativeCursorError::internal(
-                    "DataTree.Object carrier has unexpected arguments",
+                    "Dyn.Object carrier has unexpected arguments",
                 ));
             }
             let mut entries = Vec::with_capacity(values.len());
             for value in values {
                 let MirRuntimeValue::Struct { type_name, fields } = value else {
                     return Err(MirNativeCursorError::internal(
-                        "DataTree.Object carrier contains a non-tuple entry",
+                        "Dyn.Object carrier contains a non-tuple entry",
                     ));
                 };
                 if type_name != "Tuple" {
                     return Err(MirNativeCursorError::internal(
-                        "DataTree.Object carrier entry is not a Tuple",
+                        "Dyn.Object carrier entry is not a Tuple",
                     ));
                 }
                 let key = named_field(fields, "key")?;
                 let value = named_field(fields, "value")?;
                 let MirRuntimeValue::String(key) = key else {
                     return Err(MirNativeCursorError::internal(
-                        "DataTree.Object carrier key is not a String",
+                        "Dyn.Object carrier key is not a String",
                     ));
                 };
-                entries.push((key.clone(), data_tree_from_value(value)?));
+                entries.push((key.clone(), dyn_from_value(value)?));
             }
-            Ok(DataTree::Object(entries))
+            Ok(Dyn::Object(entries))
         }
         _ => Err(MirNativeCursorError::internal(format!(
-            "unknown DataTree variant `{variant}`"
+            "unknown Dyn variant `{variant}`"
         ))),
     }
 }
@@ -8200,7 +8200,7 @@ mod tests {
             }
         );
         let value = MirRuntimeValue::Enum {
-            type_name: "DataTree".to_string(),
+            type_name: "Dyn".to_string(),
             variant: "Int".to_string(),
             args: vec![(None, MirRuntimeValue::Int(7))],
         };
@@ -8245,7 +8245,7 @@ mod tests {
         assert_eq!(
             iterator.next(),
             Some(Ok(MirRuntimeValue::Enum {
-                type_name: "DataTree".to_string(),
+                type_name: "Dyn".to_string(),
                 variant: "Int".to_string(),
                 args: vec![(None, MirRuntimeValue::Int(7))],
             }))

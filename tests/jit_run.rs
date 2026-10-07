@@ -1741,21 +1741,21 @@ fn run() {
 }
 
 #[test]
-fn data_tree_list_extend_runs_resident_and_snapshots_self_extension() {
+fn dyn_list_extend_runs_resident_and_snapshots_self_extension() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
-    let dir = common::unique_tmp("jit_data_tree_extend");
+    let dir = common::unique_tmp("jit_dyn_extend");
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"jit_data_tree_extend\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+        "name: \"jit_dyn_extend\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
     )
     .unwrap();
-    let file = dir.join("data_tree_extend.jet");
+    let file = dir.join("dyn_extend.jet");
     fs::write(
         &file,
-        r#"fn text_value(value: DataTree) String -> {
+        r#"fn text_value(value: Dyn) String -> {
     return if value == {
         .Text(text) -> ~text
         else -> ""
@@ -1763,13 +1763,13 @@ fn data_tree_list_extend_runs_resident_and_snapshots_self_extension() {
 }
 
 fn run() {
-    values := [DataTree]{
-        DataTree.Text("a"),
-        DataTree.Text("b")
+    values := [Dyn]{
+        Dyn.Text("a"),
+        Dyn.Text("b")
     }
-    other := [DataTree]{
-        DataTree.Text("c"),
-        DataTree.Text("d")
+    other := [Dyn]{
+        Dyn.Text("c"),
+        Dyn.Text("d")
     }
     &values.extend(other)
     loop value in values {
@@ -1785,25 +1785,25 @@ fn run() {
     .unwrap();
     let shown = file.to_string_lossy().into_owned();
 
-    let mut bundle = jet::Loader::load_entry(&shown).expect("DataTree extend fixture should load");
+    let mut bundle = jet::Loader::load_entry(&shown).expect("Dyn extend fixture should load");
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(
         diagnostics.is_empty(),
-        "DataTree extend fixture must type-check: {diagnostics:#?}"
+        "Dyn extend fixture must type-check: {diagnostics:#?}"
     );
     assert!(
         common::cranelift_resident_safe(&bundle),
-        "DataTree extend fixture must stay resident-JIT safe: {}",
+        "Dyn extend fixture must stay resident-JIT safe: {}",
         common::cranelift_resident_safe_detail(&bundle)
     );
     common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .unwrap_or_else(|error| {
-            panic!("DataTree extend fixture must compile in resident JIT: {error}")
+            panic!("Dyn extend fixture must compile in resident JIT: {error}")
         });
 
     let expected = "a\nb\nc\nd\na\nb\nc\nd\na\nb\nc\nd\n";
     let aot = run_jet(&file, true);
-    assert_eq!(aot.status.code(), Some(0), "AOT DataTree extend fixture failed");
+    assert_eq!(aot.status.code(), Some(0), "AOT Dyn extend fixture failed");
     assert_eq!(String::from_utf8_lossy(&aot.stdout), expected);
 
     jet_jit::reset_jit_trace_for_test();
@@ -1830,21 +1830,21 @@ fn run() {
 }
 
 #[test]
-fn data_tree_for_in_nested_conditions_run_resident() {
+fn dyn_for_in_nested_conditions_run_resident() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
-    let dir = common::unique_tmp("jit_data_tree_for_in");
+    let dir = common::unique_tmp("jit_dyn_for_in");
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"jit_data_tree_for_in\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+        "name: \"jit_dyn_for_in\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
     )
     .unwrap();
-    let file = dir.join("data_tree_for_in.jet");
+    let file = dir.join("dyn_for_in.jet");
     fs::write(
         &file,
-        r#"fn text_value(value: DataTree) String -> {
+        r#"fn text_value(value: Dyn) String -> {
     return if value == {
         .Text(text) -> ~text
         else -> ""
@@ -1852,9 +1852,9 @@ fn data_tree_for_in_nested_conditions_run_resident() {
 }
 
 fn run() {
-    rows := [DataTree]{
-        DataTree.Text("target"),
-        DataTree.Text("other")
+    rows := [Dyn]{
+        Dyn.Text("target"),
+        Dyn.Text("other")
     }
     found := false
     loop row in rows {
@@ -1867,22 +1867,22 @@ fn run() {
     .unwrap();
     let shown = file.to_string_lossy().into_owned();
 
-    let mut bundle = jet::Loader::load_entry(&shown).expect("DataTree fixture should load");
+    let mut bundle = jet::Loader::load_entry(&shown).expect("Dyn fixture should load");
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(
         diagnostics.is_empty(),
-        "DataTree fixture must type-check: {diagnostics:#?}"
+        "Dyn fixture must type-check: {diagnostics:#?}"
     );
     assert!(
         common::cranelift_resident_safe(&bundle),
-        "DataTree fixture must stay resident-JIT safe: {}",
+        "Dyn fixture must stay resident-JIT safe: {}",
         common::cranelift_resident_safe_detail(&bundle)
     );
     common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .unwrap_or_else(|error| panic!("DataTree fixture must compile in resident JIT: {error}"));
+        .unwrap_or_else(|error| panic!("Dyn fixture must compile in resident JIT: {error}"));
 
     let aot = run_jet(&file, true);
-    assert_eq!(aot.status.code(), Some(0), "AOT DataTree fixture failed");
+    assert_eq!(aot.status.code(), Some(0), "AOT Dyn fixture failed");
     let expected = String::from_utf8_lossy(&aot.stdout).into_owned();
     assert_eq!(expected, "true\n");
 
@@ -1907,8 +1907,8 @@ fn run() {
         RunOutcome::Problems(diags) => panic!("forced interpreter rejected fixture: {diags:?}"),
     };
     let reference = (expected, String::new(), 0);
-    assert_eq!(resident, reference, "resident JIT DataTree loop drifted");
-    assert_eq!(interpreted, reference, "interpreter DataTree loop drifted");
+    assert_eq!(resident, reference, "resident JIT Dyn loop drifted");
+    assert_eq!(interpreted, reference, "interpreter Dyn loop drifted");
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -2051,16 +2051,16 @@ fn result_err_try_sort_by_runs_resident_and_matches_interpreter() {
 }
 
 #[test]
-fn data_tree_try_sort_by_desc_closure_runs_resident() {
+fn dyn_try_sort_by_desc_closure_runs_resident() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
-    let dir = common::unique_tmp("jit_data_tree_try_sort_by_desc");
+    let dir = common::unique_tmp("jit_dyn_try_sort_by_desc");
     fs::create_dir_all(&dir).unwrap();
-    let file = dir.join("data_tree_try_sort_by_desc.jet");
+    let file = dir.join("dyn_try_sort_by_desc.jet");
     fs::write(
         &file,
-        r#"fn text_value(value: DataTree) String Never! -> {
+        r#"fn text_value(value: Dyn) String Never! -> {
     return if value == {
         .Text(text) -> ~text
         else -> ""
@@ -2068,12 +2068,12 @@ fn data_tree_try_sort_by_desc_closure_runs_resident() {
 }
 
 fn run() {
-    rows := [DataTree]{
-        DataTree.Text("a"),
-        DataTree.Text("c"),
-        DataTree.Text("b")
+    rows := [Dyn]{
+        Dyn.Text("a"),
+        Dyn.Text("c"),
+        Dyn.Text("b")
     }
-    &rows.sort_by_desc((row: DataTree) -> text_value(~row))
+    &rows.sort_by_desc((row: Dyn) -> text_value(~row))
     loop row in rows {
         print(text_value(~row))
     }
@@ -2083,19 +2083,19 @@ fn run() {
     .unwrap();
     let shown = file.to_string_lossy().into_owned();
 
-    let mut bundle = jet::Loader::load_entry(&shown).expect("DataTree sort fixture should load");
+    let mut bundle = jet::Loader::load_entry(&shown).expect("Dyn sort fixture should load");
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(
         diagnostics.is_empty(),
-        "DataTree sort fixture must type-check: {diagnostics:#?}"
+        "Dyn sort fixture must type-check: {diagnostics:#?}"
     );
     assert!(
         common::cranelift_resident_safe(&bundle),
-        "DataTree sort fixture must stay resident-JIT safe: {}",
+        "Dyn sort fixture must stay resident-JIT safe: {}",
         common::cranelift_resident_safe_detail(&bundle)
     );
     common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .unwrap_or_else(|error| panic!("DataTree sort fixture must compile in resident JIT: {error}"));
+        .unwrap_or_else(|error| panic!("Dyn sort fixture must compile in resident JIT: {error}"));
 
     jet_jit::reset_jit_trace_for_test();
     let resident = match dev_iteration(&shown, false, false) {
@@ -2127,7 +2127,7 @@ fn try_payload_return_survives_exit_block() {
         &file,
         r#"use core.encoding.json as json
 
-fn text_at(tree: DataTree, field: String) -> String {
+fn text_at(tree: Dyn, field: String) -> String {
     value :: &tree.field(~field) ?? panic("missing")
     return value.text() ?? panic("not text")
 }
@@ -2286,7 +2286,7 @@ fn run() {
 }
 
 #[test]
-fn tower_data_tree_helpers_select_resident_tier() {
+fn tower_dyn_helpers_select_resident_tier() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
@@ -2294,7 +2294,7 @@ fn tower_data_tree_helpers_select_resident_tier() {
     // belong to dogfood measurements, not this compiler regression, and a
     // developer's Hangar contents must not decide whether JIT safety is tested.
     let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("dogfood/tower");
-    let dir = common::unique_tmp("jit_tower_data_tree_helpers");
+    let dir = common::unique_tmp("jit_tower_dyn_helpers");
     fs::create_dir_all(&dir).unwrap();
     fs::copy(source_root.join("run.jet"), dir.join("run.jet")).unwrap();
     fs::copy(source_root.join("package.jet"), dir.join("package.jet")).unwrap();
@@ -2342,14 +2342,14 @@ fn tower_data_tree_helpers_select_resident_tier() {
             plan.native
                 .iter()
                 .any(|candidate| candidate.ends_with(&format!("::{name}"))),
-            "Tower DataTree helper `{name}` must select resident JIT: deopt={:?}, whole_interp={:?}",
+            "Tower Dyn helper `{name}` must select resident JIT: deopt={:?}, whole_interp={:?}",
             plan.deopt,
             plan.whole_interp
         );
     }
     assert!(
         !plan.whole_interp,
-        "Tower DataTree helpers must not force whole-program interpretation: deopt={:?}",
+        "Tower Dyn helpers must not force whole-program interpretation: deopt={:?}",
         plan.deopt
     );
     assert!(

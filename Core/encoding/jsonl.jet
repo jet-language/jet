@@ -18,12 +18,12 @@
 // `to_string` writes one compact JSON value per record and a trailing newline so
 // concatenation of documents stays a valid JSONL stream. There is no pretty
 // form; pretty JSON contains newlines and would break the line protocol.
-use core.encoding.[DataTree, EncodingError, EncodingFormat]
+use core.encoding.[Dyn, EncodingError, EncodingFormat]
 use core.encoding.json as json
 
-/// Parse every non-empty record as JSON. Allocates one `DataTree` per record.
-pub fn parse(text: String) -> [DataTree] EncodingError! {
-    rows := [DataTree]{}
+/// Parse every non-empty record as JSON. Allocates one `Dyn` per record.
+pub fn parse(text: String) -> [Dyn] EncodingError! {
+    rows := [Dyn]{}
     index := 0
     loop record in records_of(text) {
         if is_blank(record.text) -> next
@@ -34,7 +34,7 @@ pub fn parse(text: String) -> [DataTree] EncodingError! {
 }
 
 /// Compact JSONL text. Always ends with a newline when `rows` is non-empty.
-pub fn to_string(rows: [DataTree]) -> String Never! {
+pub fn to_string(rows: [Dyn]) -> String Never! {
     out := ""
     loop row in rows -> out = "{out}{json.to_string(row)}\n"
     out
@@ -48,7 +48,7 @@ pub struct JSONLReader {
     pub records_read: Int
 
     /// The next non-blank record, or `None` after the last one.
-    pub fn next(&self) -> DataTree? EncodingError! {
+    pub fn next(&self) -> Dyn? EncodingError! {
         loop self.index < self.rows.len() {
             record :: JSONLRecord{text: self.rows[self.index], line: self.lines[self.index], offset: self.offsets[self.index]}
             self.index += 1
@@ -64,7 +64,7 @@ pub struct JSONLReader {
 pub struct JSONLWriter {
     pub parts: [String]
 
-    pub fn write(&self, value: DataTree) Never! { &self.parts.push(json.to_string(value)) }
+    pub fn write(&self, value: Dyn) Never! { &self.parts.push(json.to_string(value)) }
 
     pub fn to_string(self) -> String Never! {
         out := ""
@@ -87,9 +87,9 @@ pub fn reader(text: String) -> JSONLReader Never! {
 
 pub fn writer() -> JSONLWriter Never! { {parts: [String]{}} }
 
-pub fn loads(text: String) -> [DataTree] EncodingError! { parse(text) }
+pub fn loads(text: String) -> [Dyn] EncodingError! { parse(text) }
 
-pub fn dumps(rows: [DataTree]) -> String Never! { to_string(rows) }
+pub fn dumps(rows: [Dyn]) -> String Never! { to_string(rows) }
 
 pub fn count_rows(text: String) -> Int Never! {
     n := 0
@@ -99,14 +99,14 @@ pub fn count_rows(text: String) -> Int Never! {
     n
 }
 
-pub fn append_line(text: String, value: DataTree) -> String Never! {
+pub fn append_line(text: String, value: Dyn) -> String Never! {
     if text.bytes().len() == 0 -> return "{json.to_string(value)}\n"
     last :: text.bytes()[text.bytes().len() - 1]
     if last == (U8{10}) -> return "{text}{json.to_string(value)}\n"
     "{text}\n{json.to_string(value)}\n"
 }
 
-pub fn first(text: String) -> DataTree? EncodingError! {
+pub fn first(text: String) -> Dyn? EncodingError! {
     loop record in records_of(text) {
         if is_blank(record.text) -> next
         return Val(parse_record(record, 0))
@@ -122,7 +122,7 @@ struct JSONLRecord {
     offset: Int
 }
 
-fn parse_record(record: JSONLRecord, index: Int) -> DataTree EncodingError! {
+fn parse_record(record: JSONLRecord, index: Int) -> Dyn EncodingError! {
     value :: json.parse(record.text) ?? return Err(record_error(err, record, index))
     Ok(value)
 }

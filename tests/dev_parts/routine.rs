@@ -5318,7 +5318,7 @@ fn run() {
 /// and hand that `f64` to `int_to_string`, declared `i64`.
 ///
 /// Separately, the compiler-written `Frame::decode` decodes a `[Float#4]`
-/// field: `result_payload` yields `f64` while `lower_datatree_decode_list_items`
+/// field: `result_payload` yields `f64` while `lower_dyn_decode_list_items`
 /// hardcoded `list_push`, declared `i64`. The codec is generated for every
 /// structurally eligible struct (D-META-AUTO1=A), so declaring `Frame` emits
 /// that site — `require_funcs` proves it rather than assuming it.
@@ -6643,15 +6643,15 @@ use core.encoding.json as json
 struct Email { addr: String }
 
 impl Email.Encode {
-    fn encode(self) -> DataTree {
-        m :: [String:DataTree]{ "email": DataTree.Text(~self.addr) }
-        return DataTree.Object(m)
+    fn encode(self) -> Dyn {
+        m :: [String:Dyn]{ "email": Dyn.Text(~self.addr) }
+        return Dyn.Object(m)
     }
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) -> Email [FieldError]! {
-        f := &tree.field("email") ?? DataTree.Text("")
+    fn decode(tree: Dyn) -> Email [FieldError]! {
+        f := &tree.field("email") ?? Dyn.Text("")
         s := f.text() ?? ""
         return Ok(Email{addr: s})
     }

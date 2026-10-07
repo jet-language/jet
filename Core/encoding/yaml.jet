@@ -1,4 +1,4 @@
-use core.encoding.[DataTree, EncodingError, EncodingErrorKind, EncodingFormat]
+use core.encoding.[Dyn, EncodingError, EncodingErrorKind, EncodingFormat]
 
 fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
     {
@@ -19,13 +19,13 @@ use core.encoding.json as json
 // This source codec covers JSON, `key: value` maps, `- item` lists,
 // `|` / `>` folded scalars, and `#` comments. Unknown syntax fails closed
 // instead of guessing; unsupported YAML features are not silently delegated.
-pub fn parse(text: String) -> DataTree EncodingError! { parse_yaml(text) }
+pub fn parse(text: String) -> Dyn EncodingError! { parse_yaml(text) }
 
-pub fn decode(text: String) -> DataTree EncodingError! { parse_yaml(text) }
+pub fn decode(text: String) -> Dyn EncodingError! { parse_yaml(text) }
 
-fn parse_yaml(text: String) -> DataTree EncodingError! {
+fn parse_yaml(text: String) -> Dyn EncodingError! {
     trimmed :: trim_yaml(text)
-    if trimmed.len() == 0 -> return Ok(DataTree.Null)
+    if trimmed.len() == 0 -> return Ok(Dyn.Null)
     if looks_json(trimmed) -> return json.parse(trimmed)
     parse_block(trimmed)
 }
@@ -39,7 +39,7 @@ fn looks_json(text: String) -> Bool Never! {
     false
 }
 
-fn parse_block(text: String) -> DataTree EncodingError! {
+fn parse_block(text: String) -> Dyn EncodingError! {
     rows := [String]{}
     buf := [U8]{}
     loop b in text.bytes() {
@@ -52,7 +52,7 @@ fn parse_block(text: String) -> DataTree EncodingError! {
         &buf.push(b)
     }
     if buf.len() > 0 -> &rows.push(String.from_bytes(buf) ?? return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "invalid UTF-8 in YAML input")))
-    if rows.len() == 0 -> return Ok(DataTree.Null)
+    if rows.len() == 0 -> return Ok(Dyn.Null)
     first := ""
     first_index := 0
     loop row_index in 0..<rows.len() {
@@ -63,11 +63,11 @@ fn parse_block(text: String) -> DataTree EncodingError! {
             break
         }
     }
-    if first.len() == 0 -> return Ok(DataTree.Null)
+    if first.len() == 0 -> return Ok(Dyn.Null)
     first_body :: trim_yaml(strip_inline_comment(first))
     if first_body == "|" || first_body == ">" {
         block :: parse_block_scalar(rows, first_index, leading_spaces(first), first_body == ">")
-        return Ok(DataTree.Text(block.value))
+        return Ok(Dyn.Text(block.value))
     }
     if starts_list(first) -> return parse_list(rows, leading_spaces(first))
     if split_once(lstrip(first), 58).before == lstrip(first) -> return Ok(parse_scalar(trim_yaml(first)))
@@ -137,8 +137,8 @@ fn strip_indent(text: String, columns: Int) -> String Never! {
 }
 
 
-fn parse_map(rows: [String], indent: Int) -> DataTree EncodingError! {
-    entries := [String:DataTree]{}
+fn parse_map(rows: [String], indent: Int) -> Dyn EncodingError! {
+    entries := [String:Dyn]{}
     i := 0
     loop i < rows.len() {
         line :: rows[i]
@@ -159,7 +159,7 @@ fn parse_map(rows: [String], indent: Int) -> DataTree EncodingError! {
         i += 1
         if rest == "|" || rest == ">" {
             block :: parse_block_scalar(rows, i - 1, pad, rest == ">")
-            _ :: &entries.add(key, DataTree.Text(block.value))
+            _ :: &entries.add(key, Dyn.Text(block.value))
             i = block.next
         } else if rest.len() == 0 {
             child_rows := [String]{}
@@ -178,11 +178,11 @@ fn parse_map(rows: [String], indent: Int) -> DataTree EncodingError! {
             _ :: &entries.add(key, parse_scalar(rest))
         }
     }
-    Ok(DataTree.Object(entries))
+    Ok(Dyn.Object(entries))
 }
 
-fn parse_list(rows: [String], indent: Int) -> DataTree EncodingError! {
-    items := [DataTree]{}
+fn parse_list(rows: [String], indent: Int) -> Dyn EncodingError! {
+    items := [Dyn]{}
     i := 0
     loop i < rows.len() {
         line :: rows[i]
@@ -201,7 +201,7 @@ fn parse_list(rows: [String], indent: Int) -> DataTree EncodingError! {
         i += 1
         if rest == "|" || rest == ">" {
             block :: parse_block_scalar(rows, i - 1, pad, rest == ">")
-            &items.push(DataTree.Text(block.value))
+            &items.push(Dyn.Text(block.value))
             i = block.next
         } else if rest.len() == 0 {
             child_rows := [String]{}
@@ -234,29 +234,29 @@ fn parse_list(rows: [String], indent: Int) -> DataTree EncodingError! {
             &items.push(parse_scalar(strip_inline_comment(rest)))
         }
     }
-    Ok(DataTree.Array(items))
+    Ok(Dyn.Array(items))
 }
 
-fn parse_scalar(text: String) -> DataTree Never! {
+fn parse_scalar(text: String) -> Dyn Never! {
     clean :: trim_yaml(strip_inline_comment(text))
     if clean == {
-        "null" | "~" -> return DataTree.Null
-        "true" -> return DataTree.Bool(true)
-        "false" -> return DataTree.Bool(false)
+        "null" | "~" -> return Dyn.Null
+        "true" -> return Dyn.Bool(true)
+        "false" -> return Dyn.Bool(false)
         else -> { _ := 0 }
     }
     if Int.parse(clean) == {
-        .Ok(n) -> return DataTree.Int(n)
+        .Ok(n) -> return Dyn.Int(n)
         else -> { _ := 0 }
     }
     if Float.parse(clean) == {
-        .Ok(n) -> return DataTree.Float(n)
+        .Ok(n) -> return Dyn.Float(n)
         else -> { _ := 0 }
     }
-    DataTree.Text(unquote(clean))
+    Dyn.Text(unquote(clean))
 }
 
-fn render_yaml(value: DataTree, indent: Int) -> String {
+fn render_yaml(value: Dyn, indent: Int) -> String {
     if value == {
         .Null -> return "null"
         .Bool(v) -> {
@@ -271,13 +271,13 @@ fn render_yaml(value: DataTree, indent: Int) -> String {
     }
 }
 
-fn render_yaml_array(items: [DataTree], indent: Int) -> String {
+fn render_yaml_array(items: [Dyn], indent: Int) -> String {
     out := ""
     loop item in items -> out = "{out}{spaces(indent)}- {render_yaml(item, indent + 2)}\n"
     out
 }
 
-fn render_yaml_object(entries: [String:DataTree], indent: Int) -> String {
+fn render_yaml_object(entries: [String:Dyn], indent: Int) -> String {
     out := ""
     loop pair in entries -> out = "{out}{spaces(indent)}{pair.key}: {render_yaml(pair.value, indent + 2)}\n"
     out

@@ -869,7 +869,7 @@ fn typed_cli_tree(
     inputs: &[MirCliInput],
     parsed: &Parsed,
     descriptor: &crate::runtime_host::RuntimeTypeDescriptor,
-) -> Result<crate::Encoding::json_rt::DataTree, Vec<crate::Encoding::json_rt::FieldError>> {
+) -> Result<crate::Encoding::json_rt::Dyn, Vec<crate::Encoding::json_rt::FieldError>> {
     let mut fields = Vec::new();
     for input in inputs {
         let Some(field) = descriptor.fields.iter().find(|field| {
@@ -895,7 +895,7 @@ fn typed_cli_tree(
         }
         let value = match &input.shape {
             MirCliInputShape::Flag => {
-                crate::Encoding::json_rt::DataTree::Bool(flag_set(parsed, &input.name))
+                crate::Encoding::json_rt::Dyn::Bool(flag_set(parsed, &input.name))
             }
             MirCliInputShape::Value { .. } => {
                 let values = option_values(parsed, &input.name);
@@ -906,7 +906,7 @@ fn typed_cli_tree(
                 for value in values {
                     let value = match cli_value_kind(input) {
                         MirCliValueKind::Bool => match parse_bool(&value, &input.name) {
-                            Ok(value) => crate::Encoding::json_rt::DataTree::Bool(value),
+                            Ok(value) => crate::Encoding::json_rt::Dyn::Bool(value),
                             Err(error) => {
                                 return Err(crate::Encoding::json_rt::FieldError::at(
                                     input.name.clone(),
@@ -915,7 +915,7 @@ fn typed_cli_tree(
                             }
                         },
                         MirCliValueKind::String | MirCliValueKind::Path => {
-                            crate::Encoding::json_rt::DataTree::Text(value)
+                            crate::Encoding::json_rt::Dyn::Text(value)
                         }
                         MirCliValueKind::Int => {
                             if let Some((lo, hi)) = inline_range_bounds(&input.ty) {
@@ -938,7 +938,7 @@ fn typed_cli_tree(
                                 }
                             }
                             match crate::Encoding::json_rt::jet_int_from_str(&value) {
-                                Ok(value) => crate::Encoding::json_rt::DataTree::Int(value),
+                                Ok(value) => crate::Encoding::json_rt::Dyn::Int(value),
                                 Err(_) => {
                                     return Err(crate::Encoding::json_rt::FieldError::at(
                                         input.name.clone(),
@@ -948,7 +948,7 @@ fn typed_cli_tree(
                             }
                         }
                         MirCliValueKind::Float => match value.parse::<f64>() {
-                            Ok(value) => crate::Encoding::json_rt::DataTree::Float(value),
+                            Ok(value) => crate::Encoding::json_rt::Dyn::Float(value),
                             Err(_) => {
                                 return Err(crate::Encoding::json_rt::FieldError::at(
                                     input.name.clone(),
@@ -960,7 +960,7 @@ fn typed_cli_tree(
                     decoded.push(value);
                 }
                 if input.variadic {
-                    crate::Encoding::json_rt::DataTree::Array(decoded)
+                    crate::Encoding::json_rt::Dyn::Array(decoded)
                 } else {
                     decoded
                         .pop()
@@ -970,7 +970,7 @@ fn typed_cli_tree(
         };
         fields.push((output_name, value));
     }
-    Ok(crate::Encoding::json_rt::DataTree::Object(fields))
+    Ok(crate::Encoding::json_rt::Dyn::Object(fields))
 }
 
 fn typed_cli_descriptor(type_key: &str) -> Option<crate::runtime_host::RuntimeTypeDescriptor> {
@@ -1019,7 +1019,7 @@ pub(crate) fn jet_jit_args_decode(type_key: i64) -> i64 {
         Ok(tree) => tree,
         Err(errors) => return crate::Encoding::result_err_fields(errors),
     };
-    match crate::Encoding::decode_datatree_for_type(&tree, &type_key) {
+    match crate::Encoding::decode_dyn_for_type(&tree, &type_key) {
         Ok(value) => result_ok(value as u64),
         Err(errors) => crate::Encoding::result_err_fields(errors),
     }

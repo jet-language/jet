@@ -3072,21 +3072,21 @@ fn core_closure_calls_covered() {
 
 #[test]
 fn covers_json_construction_and_collection() {
-    // D-ENC-DYN1=A+: dynamic `DataTree` construction (`DataTree.Text`/
-    // `DataTree.Bool`/`DataTree.Array`/`DataTree.Null`) + a `[DataTree]` list value
-    // type. A fn that builds and returns `DataTree` values routes (the dynamic value
+    // D-ENC-DYN1=A+: dynamic `Dyn` construction (`Dyn.Text`/
+    // `Dyn.Bool`/`Dyn.Array`/`Dyn.Null`) + a `[Dyn]` list value
+    // type. A fn that builds and returns `Dyn` values routes (the dynamic value
     // type is a covered foreign value type;
     // construction is the `JSONLit` shape). The if-let MATCHING + index-assign need
-    // full sema (the `DataTree` pattern / `IndexKind`), proven by the TIR feature
+    // full sema (the `Dyn` pattern / `IndexKind`), proven by the TIR feature
     // integration targets + the whole-suite byte-parity diff; here we gate the
     // sema-independent construction.
     let src = "\
-fn build() -> DataTree {
+fn build() -> Dyn {
     items := []
-    items.push(DataTree.Text(\"jet\"))
-    items.push(DataTree.Bool(true))
-    items.push(DataTree.Null)
-    return DataTree.Array(items)
+    items.push(Dyn.Text(\"jet\"))
+    items.push(Dyn.Bool(true))
+    items.push(Dyn.Null)
+    return Dyn.Array(items)
 }
 ";
     assert!(covers(src, "build"));
@@ -3094,12 +3094,12 @@ fn build() -> DataTree {
 
 #[test]
 fn covers_json_value_param_and_array() {
-    // A `DataTree` param + list value type + `DataTree.Array` construction.
+    // A `Dyn` param + list value type + `Dyn.Array` construction.
     let src = "\
-fn wrap(x: DataTree) -> DataTree {
+fn wrap(x: Dyn) -> Dyn {
     items := []
     items.push(x)
-    return DataTree.Array(items)
+    return Dyn.Array(items)
 }
 ";
     assert!(covers(src, "wrap"));

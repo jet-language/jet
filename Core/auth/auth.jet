@@ -304,32 +304,32 @@ fn decode_url_local(text: String) -> [U8]? {
     Val(out)
 }
 
-fn json_object(tree: encoding.DataTree) -> Bool Never! {
+fn json_object(tree: encoding.Dyn) -> Bool Never! {
     if tree == {
         .Object(_) -> return true
         else -> return false
     }
 }
 
-fn json_text(tree: encoding.DataTree, key: String) -> String? {
+fn json_text(tree: encoding.Dyn, key: String) -> String? {
     value :: &tree.field(key) ?? return None
     text :: value.text() ?? return None
     Val(text)
 }
 
-fn json_optional_text(tree: encoding.DataTree, key: String) -> String? {
+fn json_optional_text(tree: encoding.Dyn, key: String) -> String? {
     value :: &tree.field(key) ?? return Val("")
     text :: value.text() ?? return None
     Val(text)
 }
-fn json_has(tree: encoding.DataTree, key: String) -> Bool Never! {
+fn json_has(tree: encoding.Dyn, key: String) -> Bool Never! {
     if &tree.field(key) == {
         .Ok(_) -> return true
         .Err(_) -> return false
     }
 }
 
-fn json_audience_text(tree: encoding.DataTree, key: String) -> String? {
+fn json_audience_text(tree: encoding.Dyn, key: String) -> String? {
     value :: &tree.field(key) ?? return None
     if value == {
         .Text(text) -> return Val(text)
@@ -345,7 +345,7 @@ fn json_audience_text(tree: encoding.DataTree, key: String) -> String? {
     }
 }
 
-fn json_audience_matches(tree: encoding.DataTree, key: String, expected: String) -> Bool Never! {
+fn json_audience_matches(tree: encoding.Dyn, key: String, expected: String) -> Bool Never! {
     value :: &tree.field(key) ?? return false
     if value == {
         .Text(text) -> return text == expected
@@ -361,7 +361,7 @@ fn json_audience_matches(tree: encoding.DataTree, key: String, expected: String)
     }
 }
 
-fn json_required_int(tree: encoding.DataTree, key: String) -> Int? {
+fn json_required_int(tree: encoding.Dyn, key: String) -> Int? {
     value :: &tree.field(key) ?? return None
     number :: value.int() ?? return None
     Val(number)

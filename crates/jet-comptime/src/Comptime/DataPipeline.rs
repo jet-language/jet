@@ -64,7 +64,7 @@ pub(super) fn query_row_field<'a>(row: &'a CtValue, field: &str) -> Option<&'a C
             .map(|(_, value)| value),
         CtValue::Enum { type_name, .. } if matches!(
             type_name.as_str(),
-            "DataTree" | "TOML" | "YAML" | "CSV"
+            "Dyn" | "TOML" | "YAML" | "CSV"
         ) => {
             match super::JSONInterp::json_payload(row, "Object") {
                 Some(CtValue::Map(entries)) => entries.iter().find_map(|(key, value)| match key {
@@ -88,7 +88,7 @@ pub(super) fn query_cell_text(value: &CtValue) -> String {
             type_name,
             variant,
             args,
-        } if matches!(type_name.as_str(), "DataTree" | "TOML" | "YAML" | "CSV") => {
+        } if matches!(type_name.as_str(), "Dyn" | "TOML" | "YAML" | "CSV") => {
             match variant.as_str() {
                 "Null" => String::new(),
                 _ => args
@@ -122,7 +122,7 @@ fn query_cell_sql_value(value: &CtValue) -> Option<sql_query::JetSqlValue> {
             type_name,
             variant,
             args,
-        } if matches!(type_name.as_str(), "DataTree" | "TOML" | "YAML" | "CSV") => {
+        } if matches!(type_name.as_str(), "Dyn" | "TOML" | "YAML" | "CSV") => {
             match variant.as_str() {
                 "Null" => Some(sql_query::JetSqlValue::Null),
                 "Bool" | "Int" | "Number" | "Float" | "TypedText" | "Text" => args
@@ -1528,7 +1528,7 @@ fn data_typed_tree(value: &CtValue) -> CtValue {
             type_name,
             variant,
             args,
-        } if type_name == "DataTree" && variant == "TypedText" => {
+        } if type_name == "Dyn" && variant == "TypedText" => {
             super::JSONInterp::json_variant(
                 "Text",
                 args.first().map(|(_, value)| data_typed_tree(value)),
@@ -1538,7 +1538,7 @@ fn data_typed_tree(value: &CtValue) -> CtValue {
             type_name,
             variant,
             args,
-        } if type_name == "DataTree" => CtValue::Enum {
+        } if type_name == "Dyn" => CtValue::Enum {
             type_name: type_name.clone(),
             variant: variant.clone(),
             args: args
@@ -1613,36 +1613,36 @@ fn data_arrow_limits(
     })
 }
 
-fn data_arrow_tree_value(value: jet_foundation::DataTree::DataTree) -> CtValue {
+fn data_arrow_tree_value(value: jet_foundation::Dyn::Dyn) -> CtValue {
     match value {
-        jet_foundation::DataTree::DataTree::Null => super::JSONInterp::json_variant("Null", None),
-        jet_foundation::DataTree::DataTree::Bool(value) => {
+        jet_foundation::Dyn::Dyn::Null => super::JSONInterp::json_variant("Null", None),
+        jet_foundation::Dyn::Dyn::Bool(value) => {
             super::JSONInterp::json_variant("Bool", Some(CtValue::Bool(value)))
         }
-        jet_foundation::DataTree::DataTree::Int(value) => {
+        jet_foundation::Dyn::Dyn::Int(value) => {
             super::JSONInterp::json_variant("Int", Some(CtValue::Int(value)))
         }
-        jet_foundation::DataTree::DataTree::Float(value) => super::JSONInterp::json_variant(
+        jet_foundation::Dyn::Dyn::Float(value) => super::JSONInterp::json_variant(
             "Float",
             Some(CtValue::Float(CtFloat::f64(value))),
         ),
-        jet_foundation::DataTree::DataTree::Number(value) => {
+        jet_foundation::Dyn::Dyn::Number(value) => {
             super::JSONInterp::json_variant("Number", Some(CtValue::Str(value)))
         }
-        jet_foundation::DataTree::DataTree::TypedText(value)
-        | jet_foundation::DataTree::DataTree::Text(value) => {
+        jet_foundation::Dyn::Dyn::TypedText(value)
+        | jet_foundation::Dyn::Dyn::Text(value) => {
             super::JSONInterp::json_variant("Text", Some(CtValue::Str(value)))
         }
-        jet_foundation::DataTree::DataTree::Bytes(value) => {
+        jet_foundation::Dyn::Dyn::Bytes(value) => {
             super::JSONInterp::json_variant("Bytes", Some(CtValue::Bytes(value)))
         }
-        jet_foundation::DataTree::DataTree::Array(values) => data_dynamic_array(
+        jet_foundation::Dyn::Dyn::Array(values) => data_dynamic_array(
             values
                 .into_iter()
                 .map(data_arrow_tree_value)
                 .collect(),
         ),
-        jet_foundation::DataTree::DataTree::Object(fields) => data_dynamic_object(
+        jet_foundation::Dyn::Dyn::Object(fields) => data_dynamic_object(
             fields
                 .into_iter()
                 .map(|(key, value)| (key, data_arrow_tree_value(value)))
@@ -1861,7 +1861,7 @@ fn data_dynamic_scalar_type(value: &CtValue) -> (&'static str, bool) {
             type_name,
             variant,
             ..
-        } if type_name == "DataTree" => match variant.as_str() {
+        } if type_name == "Dyn" => match variant.as_str() {
             "Null" => ("null", true),
             "Bool" => ("bool", false),
             "Number" => ("float", false),
@@ -2075,7 +2075,7 @@ fn data_dynamic_canonical(value: &CtValue) -> CtValue {
             type_name,
             variant,
             args,
-        } if type_name == "DataTree" && variant == "Object" => {
+        } if type_name == "Dyn" && variant == "Object" => {
             let Some(CtValue::Struct {
                 type_name: object_type,
                 fields,
@@ -2097,7 +2097,7 @@ fn data_dynamic_canonical(value: &CtValue) -> CtValue {
             type_name,
             variant,
             args,
-        } if type_name == "DataTree" && variant == "Array" => {
+        } if type_name == "Dyn" && variant == "Array" => {
             let Some(CtValue::List(values)) = args.first().map(|(_, value)| value) else {
                 return value.clone();
             };
@@ -2186,7 +2186,7 @@ fn data_snapshot_dynamic(
         data_dynamic_canonical(&value)
     };
     let canonical =
-        super::JSONInterp::render_ordered_datatree(&canonical_value, false, 0).into_bytes();
+        super::JSONInterp::render_ordered_dyn(&canonical_value, false, 0).into_bytes();
     let schema = data_schema_value(&tree, &loader.state.format);
     let schema_id = match struct_field(&schema, "DataSchema", "identity") {
         Some(CtValue::Str(value)) => value.clone(),
@@ -2304,7 +2304,7 @@ fn data_state_plain_tree(value: &CtValue) -> CtValue {
             type_name,
             variant,
             args,
-        } if type_name == "DataTree" => match variant.as_str() {
+        } if type_name == "Dyn" => match variant.as_str() {
             "Null" => CtValue::Unit,
             "Bool" | "Int" | "Float" | "Text" | "TypedText" | "Bytes" => args
                 .first()
@@ -2588,7 +2588,7 @@ fn data_state_encode_tree(value: &CtValue) -> Result<CtValue, CtValue> {
         CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit => {
             Ok(super::JSONInterp::json_variant("Null", None))
         }
-        CtValue::Enum { type_name, .. } if type_name == "DataTree" => Ok(value.clone()),
+        CtValue::Enum { type_name, .. } if type_name == "Dyn" => Ok(value.clone()),
         CtValue::Enum { .. } | CtValue::Failed(CtReport::Told(_)) => Err(data_loader_failure(
             "Decode",
             "data.loader",
@@ -2664,7 +2664,7 @@ fn data_snapshot_dynamic_in_state(
         data_dynamic_canonical(&value)
     };
     let canonical =
-        super::JSONInterp::render_ordered_datatree(&canonical_value, false, 0).into_bytes();
+        super::JSONInterp::render_ordered_dyn(&canonical_value, false, 0).into_bytes();
     let schema = data_schema_value(&tree, &loader.state.format);
     let schema_id = match struct_field(&schema, "DataSchema", "identity") {
         Some(CtValue::Str(value)) => value.clone(),
@@ -3187,7 +3187,7 @@ fn data_loader_constructor_in_state(
                     .cloned()
                     .ok_or_else(|| unsupported("`data.value()` is missing value", span))?;
                 let limits = data_limits_from_value(args.get(1));
-                let text = super::JSONInterp::render_ordered_datatree(&value, false, 0);
+                let text = super::JSONInterp::render_ordered_dyn(&value, false, 0);
                 let authority = match data_loader_authority("local", "") {
                     Ok(authority) => authority,
                     Err(error) => return Ok(error),
@@ -3616,7 +3616,7 @@ pub(super) fn eval_data_loader_call(
                                 .cloned()
                                 .ok_or_else(|| unsupported("`data.value()` is missing value", span))?;
                             let limits = data_limits_from_value(args.get(1));
-                            let text = super::JSONInterp::render_ordered_datatree(&value, false, 0);
+                            let text = super::JSONInterp::render_ordered_dyn(&value, false, 0);
                             let authority = match data_loader_authority("local", "") {
                                 Ok(authority) => authority,
                                 Err(error) => return Ok(error),

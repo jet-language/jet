@@ -1,12 +1,12 @@
 //! Minimal hand-rolled JSON (parse only what LSP needs) — invariant I6.
 
-use crate::DataTree::DataTree;
+use crate::Dyn::Dyn;
 use std::io::{self, BufRead};
 
-// JSON parsing returns the canonical ordered DataTree directly.  Duplicate object
+// JSON parsing returns the canonical ordered Dyn directly.  Duplicate object
 // keys remain rejected at this protocol boundary.
 
-pub fn parse_json(text: &str) -> Result<DataTree, ()> {
+pub fn parse_json(text: &str) -> Result<Dyn, ()> {
     parse_json_with_limit(text, MAX_PROTOCOL_MESSAGE_BYTES)
 }
 
@@ -15,25 +15,25 @@ pub fn parse_json(text: &str) -> Result<DataTree, ()> {
 /// LSP keeps its historical one-megabyte ceiling. DAP has a separate
 /// ratified sixteen-megabyte frame ceiling, so the adapter must not widen the
 /// shared default for every protocol consumer.
-pub fn parse_json_with_limit(text: &str, limit: usize) -> Result<DataTree, ()> {
+pub fn parse_json_with_limit(text: &str, limit: usize) -> Result<Dyn, ()> {
     if text.len() > limit {
         return Err(());
     }
     parse_json_detailed(text).map_err(|_| ())
 }
 
-fn parse_json_detailed(text: &str) -> Result<DataTree, String> {
+fn parse_json_detailed(text: &str) -> Result<Dyn, String> {
     let mut p = JSONParser { s: text, i: 0 };
     let v = p.value(0)?;
     p.skip_ws();
     if p.i < p.s.len() {
-        return Err("trailing characters after DataTree value".into());
+        return Err("trailing characters after Dyn value".into());
     }
     Ok(v)
 }
 
 /// Parse JSON with the provider-facing error text and bounded tree.
-pub fn parse(text: &str) -> Result<DataTree, String> {
+pub fn parse(text: &str) -> Result<Dyn, String> {
     if text.len() > MAX_PROTOCOL_MESSAGE_BYTES {
         return Err("JSON input exceeds the 1 MiB limit".into());
     }
@@ -120,22 +120,22 @@ impl<'a> JSONParser<'a> {
         }
     }
 
-    fn value(&mut self, depth: usize) -> Result<DataTree, String> {
+    fn value(&mut self, depth: usize) -> Result<Dyn, String> {
         self.skip_ws();
         match self.peek() {
             Some('n') => {
                 self.expect_literal("null")?;
-                Ok(DataTree::Null)
+                Ok(Dyn::Null)
             }
             Some('t') => {
                 self.expect_literal("true")?;
-                Ok(DataTree::Bool(true))
+                Ok(Dyn::Bool(true))
             }
             Some('f') => {
                 self.expect_literal("false")?;
-                Ok(DataTree::Bool(false))
+                Ok(Dyn::Bool(false))
             }
-            Some('"') => Ok(DataTree::Text(self.string()?)),
+            Some('"') => Ok(Dyn::Text(self.string()?)),
             Some('[') => {
                 if depth >= MAX_JSON_DEPTH {
                     return Err("JSON exceeds maximum nesting depth".into());
@@ -145,7 +145,7 @@ impl<'a> JSONParser<'a> {
                 self.skip_ws();
                 if self.peek() == Some(']') {
                     self.bump();
-                    return Ok(DataTree::Array(arr));
+                    return Ok(Dyn::Array(arr));
                 }
                 loop {
                     arr.push(self.value(depth + 1)?);
@@ -156,7 +156,7 @@ impl<'a> JSONParser<'a> {
                         _ => return Err("expected `,` or `]` in array".into()),
                     }
                 }
-                Ok(DataTree::Array(arr))
+                Ok(Dyn::Array(arr))
             }
             Some('{') => {
                 if depth >= MAX_JSON_DEPTH {
@@ -167,7 +167,7 @@ impl<'a> JSONParser<'a> {
                 self.skip_ws();
                 if self.peek() == Some('}') {
                     self.bump();
-                    return Ok(DataTree::Object(obj));
+                    return Ok(Dyn::Object(obj));
                 }
                 loop {
                     self.skip_ws();
@@ -188,7 +188,7 @@ impl<'a> JSONParser<'a> {
                         _ => return Err("expected `,` or `}` in object".into()),
                     }
                 }
-                Ok(DataTree::Object(obj))
+                Ok(Dyn::Object(obj))
             }
             Some(c) if c == '-' || c.is_ascii_digit() => self.number(),
             Some(c) => Err(format!("unexpected character `{c}`")),
@@ -196,7 +196,7 @@ impl<'a> JSONParser<'a> {
         }
     }
 
-    fn number(&mut self) -> Result<DataTree, String> {
+    fn number(&mut self) -> Result<Dyn, String> {
         let start = self.i;
         if self.peek() == Some('-') {
             self.bump();
@@ -249,9 +249,9 @@ impl<'a> JSONParser<'a> {
             if !value.is_finite() {
                 return Err(format!("number `{raw}` is out of range"));
             }
-            Ok(DataTree::Float(value))
+            Ok(Dyn::Float(value))
         } else {
-            Ok(DataTree::Int(
+            Ok(Dyn::Int(
                 raw.parse().map_err(|_| format!("invalid number `{raw}`"))?,
             ))
         }
@@ -334,28 +334,28 @@ impl<'a> JSONParser<'a> {
     }
 }
 
-pub fn json_get<'a>(v: &'a DataTree, key: &str) -> Option<&'a DataTree> {
+pub fn json_get<'a>(v: &'a Dyn, key: &str) -> Option<&'a Dyn> {
     v.get_opt(key)
 }
 
-pub fn json_str(v: &DataTree) -> Option<&str> {
+pub fn json_str(v: &Dyn) -> Option<&str> {
     match v {
-        DataTree::Text(s) | DataTree::TypedText(s) => Some(s),
+        Dyn::Text(s) | Dyn::TypedText(s) => Some(s),
         _ => None,
     }
 }
 
-pub fn json_int(v: &DataTree) -> Option<i64> {
+pub fn json_int(v: &Dyn) -> Option<i64> {
     match v {
-        DataTree::Int(n) => Some(*n),
-        DataTree::Float(f) => Some(*f as i64),
+        Dyn::Int(n) => Some(*n),
+        Dyn::Float(f) => Some(*f as i64),
         _ => None,
     }
 }
 
-pub fn json_u32(v: &DataTree) -> Option<u32> {
+pub fn json_u32(v: &Dyn) -> Option<u32> {
     match v {
-        DataTree::Int(n) => u32::try_from(*n).ok(),
+        Dyn::Int(n) => u32::try_from(*n).ok(),
         _ => None,
     }
 }
@@ -392,7 +392,7 @@ pub fn object_of(pairs: &[(&str, &str)]) -> String {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FilteredJson {
-    pub value: DataTree,
+    pub value: Dyn,
     pub noise: Vec<String>,
 }
 
@@ -509,10 +509,10 @@ mod tests {
 
     #[test]
     fn protocol_positions_require_nonnegative_integer_u32_values() {
-        assert_eq!(json_u32(&DataTree::Int(42)), Some(42));
-        assert_eq!(json_u32(&DataTree::Int(-1)), None);
-        assert_eq!(json_u32(&DataTree::Float(1.5)), None);
-        assert_eq!(json_u32(&DataTree::Int(i64::MAX)), None);
+        assert_eq!(json_u32(&Dyn::Int(42)), Some(42));
+        assert_eq!(json_u32(&Dyn::Int(-1)), None);
+        assert_eq!(json_u32(&Dyn::Float(1.5)), None);
+        assert_eq!(json_u32(&Dyn::Int(i64::MAX)), None);
     }
 
     #[test]

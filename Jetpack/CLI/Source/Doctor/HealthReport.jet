@@ -98,20 +98,20 @@ pub struct DoctorReport {
     }
 
     fn to_json(self) -> String Never! {
-        checks := [DataTree]{}
+        checks := [Dyn]{}
         loop check in self.checks {
-            fields := [String: DataTree]{}
-            fields["name"] = DataTree.Text(check.name)
-            fields["status"] = DataTree.Text(check.health.word())
-            fields["detail"] = DataTree.Text(check.detail)
-            fields["fix"] = DataTree.Text(check.fix)
-            &checks.push(DataTree.Object(fields))
+            fields := [String: Dyn]{}
+            fields["name"] = Dyn.Text(check.name)
+            fields["status"] = Dyn.Text(check.health.word())
+            fields["detail"] = Dyn.Text(check.detail)
+            fields["fix"] = Dyn.Text(check.fix)
+            &checks.push(Dyn.Object(fields))
         }
-        document := [String: DataTree]{}
-        document["kind"] = DataTree.Text("jetpack.doctor")
-        document["status"] = DataTree.Text(self.health().word())
-        document["checks"] = DataTree.Array(checks)
-        json.to_string(DataTree.Object(document))
+        document := [String: Dyn]{}
+        document["kind"] = Dyn.Text("jetpack.doctor")
+        document["status"] = Dyn.Text(self.health().word())
+        document["checks"] = Dyn.Array(checks)
+        json.to_string(Dyn.Object(document))
     }
 }
 

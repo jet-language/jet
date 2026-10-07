@@ -138,8 +138,8 @@ pub(super) fn history_schema_field(
     }
 }
 
-pub(super) fn comptime_history_data_tree_command(
-    value: &jet_foundation::DataTree::DataTree,
+pub(super) fn comptime_history_dyn_command(
+    value: &jet_foundation::Dyn::Dyn,
 ) -> Result<CtValue, String> {
     let json = jet_foundation::EncodingJson::render_json(value, false, 0);
     crate::Comptime::JSONInterp::parse_json(&json)
@@ -1480,7 +1480,7 @@ pub(crate) fn apply_testing_histories_explicit(
             let observe_value = |value: CtValue| {
                 invoke(&observe, value, "observe").map(|value| {
                     jet_foundation::TestingComparison::ComparisonObservation::value(
-                        crate::Comptime::JSONInterp::render_ordered_datatree(&value, false, 0),
+                        crate::Comptime::JSONInterp::render_ordered_dyn(&value, false, 0),
                     )
                 })
             };
@@ -1635,7 +1635,7 @@ pub(crate) fn apply_testing_histories(
         ))));
     }
     let command_key = command_type.identity_key();
-    let data_tree_command = command_key == "DataTree" || command_key.starts_with("DataTree|");
+    let dyn_command = command_key == "Dyn" || command_key.starts_with("Dyn|");
     let Some(cases) = exact_big(&args[1]).and_then(|number| number.try_i64()) else {
         return Ok(CtValue::failed(Box::new(CtValue::Str(
             jet_foundation::TestingHistory::HISTORY_CASE_BOUND_INVALID_REASON.to_string(),
@@ -1680,7 +1680,7 @@ pub(crate) fn apply_testing_histories(
     let model = args[3].clone();
     let actual = args[4].clone();
     let observe = args[5].clone();
-    let unsupported_reason = if data_tree_command {
+    let unsupported_reason = if dyn_command {
         None
     } else {
         schema
@@ -1747,7 +1747,7 @@ pub(crate) fn apply_testing_histories(
         };
         variants
     } else {
-        jet_foundation::TestingHistory::HistorySchemaStrategy::new("DataTree")
+        jet_foundation::TestingHistory::HistorySchemaStrategy::new("Dyn")
     };
     let strategy_identity = match history_derived_strategy_fingerprint(schema, &strategy, bounds) {
         Ok(identity) => identity,
@@ -1800,7 +1800,7 @@ pub(crate) fn apply_testing_histories(
     let mut candidate_values = Vec::new();
     let mut samples = Vec::new();
     let run = match runner
-        .run_strategy::<jet_foundation::DataTree::DataTree, _, _>(
+        .run_strategy::<jet_foundation::Dyn::Dyn, _, _>(
             &strategy,
             |typed| {
                 let unavailable = |reason: String| {
@@ -1820,7 +1820,7 @@ pub(crate) fn apply_testing_histories(
                     None => typed
                         .commands
                         .iter()
-                        .map(comptime_history_data_tree_command)
+                        .map(comptime_history_dyn_command)
                         .collect::<Result<Vec<_>, _>>(),
                 };
                 let command_values = match command_values {
@@ -1831,7 +1831,7 @@ pub(crate) fn apply_testing_histories(
                 let observe_value = |value: CtValue| {
                     invoke(&observe, value, "observe").map(|value| {
                         jet_foundation::TestingComparison::ComparisonObservation::value(
-                            crate::Comptime::JSONInterp::render_ordered_datatree(
+                            crate::Comptime::JSONInterp::render_ordered_dyn(
                                 &value, false, 0,
                             ),
                         )

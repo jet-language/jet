@@ -36,7 +36,7 @@ use super::{
 };
 #[cfg(test)]
 use jet_foundation::JSON::parse_json;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{
     json_escape, json_get, json_str, json_u32, parse_json_with_limit,
     MAX_PROTOCOL_HEADER_BYTES, MAX_PROTOCOL_HEADER_COUNT,
@@ -198,7 +198,7 @@ fn run_io(
     server.finish(crate::ExitCodes::OK)
 }
 
-fn is_running_control_request(msg: &DataTree) -> bool {
+fn is_running_control_request(msg: &Dyn) -> bool {
     matches!(
         json_get(msg, "command").and_then(json_str),
         Some(
@@ -214,9 +214,9 @@ fn is_running_control_request(msg: &DataTree) -> bool {
 }
 
 fn take_next_request(
-    requests: &mut VecDeque<DataTree>,
+    requests: &mut VecDeque<Dyn>,
     resume_pending: bool,
-) -> Option<DataTree> {
+) -> Option<Dyn> {
     if resume_pending {
         requests
             .iter()
@@ -1092,7 +1092,7 @@ impl DapServer {
         out: &mut impl Write,
         request_seq: i64,
         command: &str,
-        args: Option<&DataTree>,
+        args: Option<&Dyn>,
     ) {
         if matches!(self.state, State::Terminated) {
             self.respond_jet_error(
@@ -1136,7 +1136,7 @@ impl DapServer {
         out: &mut impl Write,
         request_seq: i64,
         command: &str,
-        args: Option<&DataTree>,
+        args: Option<&Dyn>,
     ) {
         if !matches!(
             self.state,
@@ -1296,7 +1296,7 @@ impl DapServer {
         out: &mut impl Write,
         request_seq: i64,
         command: &str,
-        _args: Option<&DataTree>,
+        _args: Option<&Dyn>,
     ) {
         if !self.state.is_stopped() {
             self.respond_jet_error(
@@ -1611,7 +1611,7 @@ impl DapServer {
         self.event(out, "thread", "{\"reason\":\"started\",\"threadId\":1}");
     }
 
-    fn raw_frames_for_request(&self, args: Option<&DataTree>) -> Result<bool, &'static str> {
+    fn raw_frames_for_request(&self, args: Option<&Dyn>) -> Result<bool, &'static str> {
         match args.and_then(|args| json_get(args, "showRawFrames")) {
             None => Ok(self.show_raw_frames),
             Some(value) => json_bool(value)
@@ -1668,7 +1668,7 @@ impl DapServer {
 
     fn attach_target(
         &self,
-        args: Option<&DataTree>,
+        args: Option<&Dyn>,
     ) -> Result<(Inferior, LineMap, bool), AttachFailure> {
         let attach = parse_attach_arguments(args).map_err(|_| AttachFailure::InvalidArguments)?;
         let map = LineMap::load_verified(
@@ -1775,7 +1775,7 @@ impl DapServer {
 
     fn select_resume_thread(
         &mut self,
-        args: Option<&DataTree>,
+        args: Option<&Dyn>,
     ) -> Result<(), (i64, &'static str)> {
         let thread_id = args
             .and_then(|args| json_get(args, "threadId"))
@@ -1951,7 +1951,7 @@ impl DapServer {
 
     /// Dispatch one DAP request. `Some(())` to keep the loop going; `None` to
     /// stop (a `disconnect`/`terminate` request, or an unrecoverable error).
-    fn handle(&mut self, msg: &DataTree, out: &mut impl Write) -> Option<()> {
+    fn handle(&mut self, msg: &Dyn, out: &mut impl Write) -> Option<()> {
         let command = json_get(msg, "command").and_then(json_str)?;
         let client_seq = json_get(msg, "seq").and_then(json_u32)?;
         let request_seq = i64::from(client_seq);
@@ -3126,7 +3126,7 @@ impl DapServer {
                     self.respond(out, request_seq, command, true, "{}");
                     return Some(());
                 };
-                let DataTree::Array(values) = filters else {
+                let Dyn::Array(values) = filters else {
                     self.respond_jet_error(
                         out,
                         request_seq,
@@ -4077,10 +4077,10 @@ fn diagnostic_details(id: i64, format: &str) -> (&'static str, &'static str, &'s
     }
 }
 
-fn parse_dap_request(body: &str) -> Result<DataTree, &'static str> {
+fn parse_dap_request(body: &str) -> Result<Dyn, &'static str> {
     let message =
         parse_json_with_limit(body, MAX_DAP_MESSAGE_BYTES).map_err(|()| "invalid JSON")?;
-    let DataTree::Object(_) = &message else {
+    let Dyn::Object(_) = &message else {
         return Err("request must be an object");
     };
     if json_get(&message, "type").and_then(json_str) != Some("request") {
@@ -4100,7 +4100,7 @@ fn parse_dap_request(body: &str) -> Result<DataTree, &'static str> {
     }
     if !matches!(
         json_get(&message, "arguments"),
-        None | Some(DataTree::Object(_))
+        None | Some(Dyn::Object(_))
     ) {
         return Err("arguments must be an object");
     }
@@ -4141,7 +4141,7 @@ struct InitializeArguments {
 }
 
 fn parse_initialize_arguments(
-    args: Option<&DataTree>,
+    args: Option<&Dyn>,
 ) -> Result<InitializeArguments, &'static str> {
     let args = args.ok_or("initialize arguments are required")?;
     if json_get(args, "adapterID").and_then(json_str) != Some("jet") {
@@ -4181,7 +4181,7 @@ struct LaunchArguments {
 }
 
 fn parse_launch_arguments(
-    args: Option<&DataTree>,
+    args: Option<&Dyn>,
     jet_file: &str,
 ) -> Result<LaunchArguments, &'static str> {
     if let Some(program) = args
@@ -4194,7 +4194,7 @@ fn parse_launch_arguments(
     }
     let values = match args.and_then(|args| json_get(args, "args")) {
         None => Vec::new(),
-        Some(DataTree::Array(values)) => values
+        Some(Dyn::Array(values)) => values
             .iter()
             .map(|value| json_str(value).ok_or("launch args must be strings"))
             .collect::<Result<Vec<_>, _>>()?
@@ -4225,7 +4225,7 @@ fn parse_launch_arguments(
     };
     let env = match args.and_then(|args| json_get(args, "env")) {
         None => Vec::new(),
-        Some(DataTree::Object(values)) => values
+        Some(Dyn::Object(values)) => values
             .iter()
             .map(|(key, value)| {
                 if !valid_launch_env_key(key) {
@@ -4272,11 +4272,11 @@ fn same_path(left: &str, right: &str) -> bool {
     }
 }
 
-fn data_breakpoint_places(args: Option<&DataTree>) -> Result<Vec<String>, &'static str> {
+fn data_breakpoint_places(args: Option<&Dyn>) -> Result<Vec<String>, &'static str> {
     let value = args
         .and_then(|args| json_get(args, "breakpoints"))
         .ok_or("setDataBreakpoints requires a breakpoints array")?;
-    let DataTree::Array(items) = value else {
+    let Dyn::Array(items) = value else {
         return Err("setDataBreakpoints breakpoints must be an array");
     };
     if items.len() > 32 {
@@ -4308,19 +4308,19 @@ fn data_breakpoint_places(args: Option<&DataTree>) -> Result<Vec<String>, &'stat
 }
 
 #[cfg(test)]
-fn breakpoint_lines(args: Option<&DataTree>) -> Result<Vec<usize>, &'static str> {
+fn breakpoint_lines(args: Option<&Dyn>) -> Result<Vec<usize>, &'static str> {
     breakpoint_lines_for_origin(args, true)
 }
 
 #[cfg(test)]
 fn breakpoint_lines_for_origin(
-    args: Option<&DataTree>,
+    args: Option<&Dyn>,
     lines_start_at_1: bool,
 ) -> Result<Vec<usize>, &'static str> {
     let Some(value) = args.and_then(|args| json_get(args, "breakpoints")) else {
         return Ok(Vec::new());
     };
-    let DataTree::Array(items) = value else {
+    let Dyn::Array(items) = value else {
         return Err("breakpoints must be an array");
     };
     items
@@ -4342,7 +4342,7 @@ fn breakpoint_lines_for_origin(
         .collect()
 }
 
-fn breakpoint_source(args: Option<&DataTree>, jet_file: &str) -> Result<(), &'static str> {
+fn breakpoint_source(args: Option<&Dyn>, jet_file: &str) -> Result<(), &'static str> {
     let source = args
         .and_then(|args| json_get(args, "source"))
         .ok_or("setBreakpoints requires a source object")?;
@@ -4357,13 +4357,13 @@ fn breakpoint_source(args: Option<&DataTree>, jet_file: &str) -> Result<(), &'st
 }
 
 fn breakpoint_specs_for_origin(
-    args: Option<&DataTree>,
+    args: Option<&Dyn>,
     lines_start_at_1: bool,
 ) -> Result<Vec<BreakpointSpec>, &'static str> {
     let Some(value) = args.and_then(|args| json_get(args, "breakpoints")) else {
         return Ok(Vec::new());
     };
-    let DataTree::Array(items) = value else {
+    let Dyn::Array(items) = value else {
         return Err("breakpoints must be an array");
     };
     items
@@ -4400,7 +4400,7 @@ fn breakpoint_specs_for_origin(
         })
 }
 
-fn breakpoint_text(item: &DataTree, key: &str) -> Result<Option<String>, &'static str> {
+fn breakpoint_text(item: &Dyn, key: &str) -> Result<Option<String>, &'static str> {
     let Some(value) = json_get(item, key) else {
         return Ok(None);
     };
@@ -4470,7 +4470,7 @@ fn validate_breakpoint_specs(specs: &[BreakpointSpec]) -> Result<(), &'static st
     Ok(())
 }
 
-fn parse_attach_arguments(args: Option<&DataTree>) -> Result<AttachArguments, &'static str> {
+fn parse_attach_arguments(args: Option<&Dyn>) -> Result<AttachArguments, &'static str> {
     let args = args.ok_or("attach arguments are required")?;
     let pid = json_get(args, "processId")
         .and_then(json_u32)
@@ -4490,7 +4490,7 @@ fn parse_attach_arguments(args: Option<&DataTree>) -> Result<AttachArguments, &'
     })
 }
 
-fn attach_path(args: &DataTree, key: &str) -> Result<PathBuf, &'static str> {
+fn attach_path(args: &Dyn, key: &str) -> Result<PathBuf, &'static str> {
     let raw = json_get(args, key)
         .and_then(json_str)
         .filter(|value| !value.is_empty() && !value.chars().any(char::is_control))
@@ -4506,9 +4506,9 @@ fn attach_path(args: &DataTree, key: &str) -> Result<PathBuf, &'static str> {
     Ok(path)
 }
 
-fn json_bool(value: &DataTree) -> Option<bool> {
+fn json_bool(value: &Dyn) -> Option<bool> {
     match value {
-        DataTree::Bool(value) => Some(*value),
+        Dyn::Bool(value) => Some(*value),
         _ => None,
     }
 }
@@ -5318,7 +5318,7 @@ mod tests {
         String::from_utf8(output).expect("DAP output is UTF-8")
     }
 
-    fn dap_message(output: &str) -> DataTree {
+    fn dap_message(output: &str) -> Dyn {
         let mut reader = std::io::Cursor::new(output.as_bytes());
         let body = read_message(&mut reader)
             .expect("DAP response frame")
@@ -5330,7 +5330,7 @@ mod tests {
         let message = dap_message(output);
         let body = json_get(&message, "body").expect("DAP response body object");
         let values = match json_get(body, collection).expect("DAP response collection") {
-            DataTree::Array(values) => values,
+            Dyn::Array(values) => values,
             _ => panic!("DAP response collection is not an array"),
         };
         json_get(values.first().expect("DAP response collection item"), field)

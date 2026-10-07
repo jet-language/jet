@@ -11,7 +11,7 @@
 
 mod common;
 
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_get, json_str, parse_json};
 use std::fs;
 use std::io::{Read, Write};
@@ -90,7 +90,7 @@ fn request_lsp(
     loop {
         let body = read_msg(stdout);
         let parsed = parse_json(&body).expect("valid LSP response");
-        if matches!(json_get(&parsed, "id"), Some(DataTree::Int(response_id)) if *response_id == id) {
+        if matches!(json_get(&parsed, "id"), Some(Dyn::Int(response_id)) if *response_id == id) {
             return body;
         }
     }
@@ -104,7 +104,7 @@ fn request_lsp_collect(
     id: i64,
     method: &str,
     params: &str,
-) -> (DataTree, Vec<DataTree>) {
+) -> (Dyn, Vec<Dyn>) {
     send_msg(
         stdin,
         &format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"{method}","params":{params}}}"#),
@@ -112,7 +112,7 @@ fn request_lsp_collect(
     let mut before = Vec::new();
     loop {
         let parsed = parse_json(&read_msg(stdout)).expect("valid LSP message");
-        if matches!(json_get(&parsed, "id"), Some(DataTree::Int(response_id)) if *response_id == id) {
+        if matches!(json_get(&parsed, "id"), Some(Dyn::Int(response_id)) if *response_id == id) {
             return (parsed, before);
         }
         before.push(parsed);
@@ -120,7 +120,7 @@ fn request_lsp_collect(
 }
 
 /// The `publishDiagnostics` params addressed to `uri`, in arrival order.
-fn published_diagnostics_for<'a>(messages: &'a [DataTree], uri: &str) -> Vec<&'a DataTree> {
+fn published_diagnostics_for<'a>(messages: &'a [Dyn], uri: &str) -> Vec<&'a Dyn> {
     messages
         .iter()
         .filter(|message| {
@@ -131,10 +131,10 @@ fn published_diagnostics_for<'a>(messages: &'a [DataTree], uri: &str) -> Vec<&'a
         .collect()
 }
 
-fn error_count(published: &DataTree) -> usize {
+fn error_count(published: &Dyn) -> usize {
     json_array_field(published, "diagnostics")
         .iter()
-        .filter(|diagnostic| matches!(json_get(diagnostic, "severity"), Some(DataTree::Int(1))))
+        .filter(|diagnostic| matches!(json_get(diagnostic, "severity"), Some(Dyn::Int(1))))
         .count()
 }
 
@@ -154,43 +154,43 @@ fn json_string(s: &str) -> String {
     out
 }
 
-fn json_object_field<'a>(value: &'a DataTree, key: &str) -> &'a DataTree {
+fn json_object_field<'a>(value: &'a Dyn, key: &str) -> &'a Dyn {
     json_get(value, key).unwrap_or_else(|| panic!("missing JSON field `{key}`"))
 }
 
-fn json_array<'a>(value: &'a DataTree, context: &str) -> &'a [DataTree] {
+fn json_array<'a>(value: &'a Dyn, context: &str) -> &'a [Dyn] {
     match value {
-        DataTree::Array(values) => values,
+        Dyn::Array(values) => values,
         other => panic!("{context} is not an array: {other:?}"),
     }
 }
 
-fn json_array_field<'a>(value: &'a DataTree, key: &str) -> &'a [DataTree] {
+fn json_array_field<'a>(value: &'a Dyn, key: &str) -> &'a [Dyn] {
     json_array(
         json_object_field(value, key),
         &format!("JSON field `{key}`"),
     )
 }
 
-fn json_values_equal(left: &DataTree, right: &DataTree) -> bool {
+fn json_values_equal(left: &Dyn, right: &Dyn) -> bool {
     match (left, right) {
-        (DataTree::Null, DataTree::Null) => true,
-        (DataTree::Bool(left), DataTree::Bool(right)) => left == right,
-        (DataTree::Int(left), DataTree::Int(right)) => left == right,
-        (DataTree::Float(left), DataTree::Float(right)) => left == right,
-        (DataTree::Number(left), DataTree::Number(right)) => left == right,
-        (DataTree::Text(left) | DataTree::TypedText(left), DataTree::Text(right) | DataTree::TypedText(right)) => {
+        (Dyn::Null, Dyn::Null) => true,
+        (Dyn::Bool(left), Dyn::Bool(right)) => left == right,
+        (Dyn::Int(left), Dyn::Int(right)) => left == right,
+        (Dyn::Float(left), Dyn::Float(right)) => left == right,
+        (Dyn::Number(left), Dyn::Number(right)) => left == right,
+        (Dyn::Text(left) | Dyn::TypedText(left), Dyn::Text(right) | Dyn::TypedText(right)) => {
             left == right
         }
-        (DataTree::Bytes(left), DataTree::Bytes(right)) => left == right,
-        (DataTree::Array(left), DataTree::Array(right)) => {
+        (Dyn::Bytes(left), Dyn::Bytes(right)) => left == right,
+        (Dyn::Array(left), Dyn::Array(right)) => {
             left.len() == right.len()
                 && left
                     .iter()
                     .zip(right)
                     .all(|(left, right)| json_values_equal(left, right))
         }
-        (DataTree::Object(left), DataTree::Object(right)) => {
+        (Dyn::Object(left), Dyn::Object(right)) => {
             left.len() == right.len()
                 && left.iter().all(|(key, left)| {
                     right
@@ -203,7 +203,7 @@ fn json_values_equal(left: &DataTree, right: &DataTree) -> bool {
     }
 }
 
-fn assert_json_values_equal(label: &str, actual: &DataTree, expected: &DataTree) {
+fn assert_json_values_equal(label: &str, actual: &Dyn, expected: &Dyn) {
     assert!(
         json_values_equal(actual, expected),
         "{label}: actual={actual:?}, expected={expected:?}"
@@ -3456,7 +3456,7 @@ fn lsp_sibling_import_edit_never_publishes_stale_verdict() {
     assert!(
         helper_published
             .iter()
-            .all(|params| matches!(json_get(params, "version"), Some(DataTree::Int(4)))),
+            .all(|params| matches!(json_get(params, "version"), Some(Dyn::Int(4)))),
         "sibling reports carry only its newest revision: {repaired:?}"
     );
     assert!(published_diagnostics_for(&repaired, &other_uri).is_empty(), "{repaired:?}");
@@ -3523,16 +3523,16 @@ fn lsp_cancelled_costly_request_returns_32800_and_never_publishes() {
     let mut before = Vec::new();
     let cancelled = loop {
         let message = parse_json(&read_msg(&mut stdout)).expect("valid LSP message");
-        if matches!(json_get(&message, "id"), Some(DataTree::Int(50))) {
+        if matches!(json_get(&message, "id"), Some(Dyn::Int(50))) {
             break message;
         }
         before.push(message);
     };
     let error = json_object_field(&cancelled, "error");
-    assert_json_values_equal("cancel code", json_object_field(error, "code"), &DataTree::Int(-32800));
+    assert_json_values_equal("cancel code", json_object_field(error, "code"), &Dyn::Int(-32800));
     assert!(json_get(&cancelled, "result").is_none(), "{cancelled:?}");
     for published in published_diagnostics_for(&before, uri) {
-        assert_json_values_equal("flushed revision", json_object_field(published, "version"), &DataTree::Int(2));
+        assert_json_values_equal("flushed revision", json_object_field(published, "version"), &Dyn::Int(2));
     }
 
     let (current, after) =
@@ -3540,7 +3540,7 @@ fn lsp_cancelled_costly_request_returns_32800_and_never_publishes() {
     assert!(
         after
             .iter()
-            .all(|message| !matches!(json_get(message, "id"), Some(DataTree::Int(50)))),
+            .all(|message| !matches!(json_get(message, "id"), Some(Dyn::Int(50)))),
         "cancelled request 50 must never answer again: {after:?}"
     );
     let current_text = format!("{current:?}");
@@ -3634,17 +3634,17 @@ fn lsp_repeated_edit_stream_latency() {
                 && json_get(&message, "method").and_then(json_str) == Some("textDocument/publishDiagnostics")
                 && matches!(
                     params.and_then(|params| json_get(params, "version")),
-                    Some(DataTree::Int(checked)) if *checked == version
+                    Some(Dyn::Int(checked)) if *checked == version
                 )
             {
                 verdict = Some(started.elapsed());
             }
             match json_get(&message, "id") {
-                Some(DataTree::Int(id)) if *id == request_id => {
+                Some(Dyn::Int(id)) if *id == request_id => {
                     assert!(format!("{message:?}").contains(&marker), "stale symbols: {message:?}");
                     waiting -= 1;
                 }
-                Some(DataTree::Int(id)) if *id == cancel_id => {
+                Some(Dyn::Int(id)) if *id == cancel_id => {
                     releases.push(cancel_sent.expect("cancel was sent").elapsed());
                     if json_get(&message, "error").is_none() {
                         late_cancels += 1;
@@ -3834,7 +3834,7 @@ fn lsp_checked_identity_and_versioned_rename() {
         ));
         loop {
             let response = parse_json(&read_msg(stdout)).unwrap();
-            if matches!(json_get(&response, "id"), Some(DataTree::Int(7))) {
+            if matches!(json_get(&response, "id"), Some(Dyn::Int(7))) {
                 break response;
             }
         }
@@ -3893,7 +3893,7 @@ fn lsp_checked_identity_and_versioned_rename() {
             assert_eq!(uri, scoring_uri);
             (2, &expected_definition_range)
         };
-        assert_json_values_equal("checked document version", json_object_field(document, "version"), &DataTree::Int(version));
+        assert_json_values_equal("checked document version", json_object_field(document, "version"), &Dyn::Int(version));
         let edits = json_array_field(change, "edits");
         assert_eq!(edits.len(), 1);
         assert_json_values_equal("rename range", json_object_field(&edits[0], "range"), expected);
@@ -3919,7 +3919,7 @@ fn lsp_checked_identity_and_versioned_rename() {
             == Some(main_uri.as_str())
     }).unwrap();
     assert_json_values_equal("new snapshot version",
-        json_object_field(json_object_field(moved_main, "textDocument"), "version"), &DataTree::Int(3));
+        json_object_field(json_object_field(moved_main, "textDocument"), "version"), &Dyn::Int(3));
     let moved_range = parse_json(
         r#"{"start":{"line":4,"character":30},"end":{"line":4,"character":36}}"#
     ).unwrap();
@@ -3958,7 +3958,7 @@ fn lsp_checked_imported_diagnostics_and_repairs() {
         let mut notifications = Vec::new();
         loop {
             let response = parse_json(&read_msg(stdout)).unwrap();
-            if matches!(json_get(&response, "id"), Some(DataTree::Int(7))) {
+            if matches!(json_get(&response, "id"), Some(Dyn::Int(7))) {
                 break (response, notifications);
             }
             notifications.push(response);
@@ -3987,13 +3987,13 @@ fn lsp_checked_imported_diagnostics_and_repairs() {
         (json_get(params, "uri").and_then(json_str) == Some(uri)).then_some(params)
     }).unwrap();
     let imported = reports(&scoring_uri);
-    assert_json_values_equal("imported checked version", json_object_field(imported, "version"), &DataTree::Int(2));
+    assert_json_values_equal("imported checked version", json_object_field(imported, "version"), &Dyn::Int(2));
     let imported_errors: Vec<_> = json_array_field(imported, "diagnostics").iter()
         .filter(|diagnostic| json_get(diagnostic, "code").and_then(json_str) == Some("E0107"))
         .collect();
     assert_eq!(imported_errors.len(), 3, "{imported:?}");
     let first = json_object_field(json_object_field(imported_errors[0], "range"), "start");
-    assert_json_values_equal("imported body line", json_object_field(first, "line"), &DataTree::Int(3));
+    assert_json_values_equal("imported body line", json_object_field(first, "line"), &Dyn::Int(3));
     let caller = reports(&main_uri);
     let caller_errors = json_array_field(caller, "diagnostics");
     assert!(caller_errors.iter().all(|diagnostic| {
@@ -4003,7 +4003,7 @@ fn lsp_checked_imported_diagnostics_and_repairs() {
         json_get(diagnostic, "code").and_then(json_str) == Some("E0104")
     }).expect("missing argument remains a caller diagnostic");
     let caller_start = json_object_field(json_object_field(missing_arg, "range"), "start");
-    assert_json_values_equal("caller line", json_object_field(caller_start, "line"), &DataTree::Int(1));
+    assert_json_values_equal("caller line", json_object_field(caller_start, "line"), &Dyn::Int(1));
     assert!(json_array(json_object_field(&main_actions, "result"), "caller actions").iter()
         .flat_map(|action| json_array_field(json_object_field(action, "edit"), "documentChanges"))
         .flat_map(|change| json_array_field(change, "edits"))
@@ -4026,7 +4026,7 @@ fn lsp_checked_imported_diagnostics_and_repairs() {
         for change in json_array_field(json_object_field(action, "edit"), "documentChanges") {
             let document = json_object_field(change, "textDocument");
             assert_eq!(json_get(document, "uri").and_then(json_str), Some(scoring_uri.as_str()));
-            assert_json_values_equal("repair snapshot", json_object_field(document, "version"), &DataTree::Int(2));
+            assert_json_values_equal("repair snapshot", json_object_field(document, "version"), &Dyn::Int(2));
         }
     }
     request(&mut stdin, &mut stdout, "shutdown", "{}".into());
@@ -5088,7 +5088,7 @@ fn run() {}
     };
 
     let mut next_id = 2;
-    let mut request = |method: &str, params: String| -> DataTree {
+    let mut request = |method: &str, params: String| -> Dyn {
         let id = next_id;
         next_id += 1;
         let body = request_lsp(&mut stdin, &mut stdout, id, method, &params);
@@ -5101,13 +5101,13 @@ fn run() {}
         )
     };
 
-    let assert_completion = |response: &DataTree, expected: &[&str]| {
+    let assert_completion = |response: &Dyn, expected: &[&str]| {
         assert!(json_get(response, "error").is_none(), "completion error: {response:?}");
         let result = json_object_field(response, "result");
         assert_json_values_equal(
             "completion isIncomplete",
             json_object_field(result, "isIncomplete"),
-            &DataTree::Bool(false),
+            &Dyn::Bool(false),
         );
         let items = json_array_field(result, "items");
         let labels: Vec<&str> = items
@@ -5140,7 +5140,7 @@ fn run() {}
             assert_json_values_equal(
                 "enum completion kind",
                 json_object_field(item, "kind"),
-                &DataTree::Int(20),
+                &Dyn::Int(20),
             );
             assert_eq!(
                 json_str(json_object_field(item, "detail")),
@@ -5155,7 +5155,7 @@ fn run() {}
             assert_json_values_equal(
                 "enum completion insert format",
                 json_object_field(item, "insertTextFormat"),
-                &DataTree::Int(2),
+                &Dyn::Int(2),
             );
             assert!(
                 json_get(item, "additionalTextEdits").is_none(),
@@ -5163,7 +5163,7 @@ fn run() {}
             );
         }
     };
-    let assert_definition = |response: &DataTree, expected_range: &DataTree| {
+    let assert_definition = |response: &Dyn, expected_range: &Dyn| {
         assert!(json_get(response, "error").is_none(), "definition error: {response:?}");
         let result = json_object_field(response, "result");
         assert_eq!(json_str(json_object_field(result, "uri")), Some(uri));
@@ -5174,10 +5174,10 @@ fn run() {}
         );
     };
     let assert_references =
-        |response: &DataTree, text: &str, offsets: &[usize], variant: &str| {
+        |response: &Dyn, text: &str, offsets: &[usize], variant: &str| {
         assert!(json_get(response, "error").is_none(), "references error: {response:?}");
         let references = json_array(json_object_field(response, "result"), "enum references");
-        let expected_ranges: Vec<DataTree> = offsets
+        let expected_ranges: Vec<Dyn> = offsets
             .iter()
             .map(|offset| range(text, *offset, *offset + variant.len()))
             .collect();
@@ -5211,7 +5211,7 @@ fn run() {}
             );
         }
     };
-    let assert_rename = |response: &DataTree,
+    let assert_rename = |response: &Dyn,
                          text: &str,
                          offsets: &[usize],
                          old_name: &str,
@@ -5227,10 +5227,10 @@ fn run() {}
         assert_json_values_equal(
             "rename checked document version",
             json_object_field(document, "version"),
-            &DataTree::Int(version),
+            &Dyn::Int(version),
         );
         let edits = json_array_field(change, "edits");
-        let expected_ranges: Vec<DataTree> = offsets
+        let expected_ranges: Vec<Dyn> = offsets
             .iter()
             .map(|offset| range(text, *offset, *offset + old_name.len()))
             .collect();
@@ -5366,7 +5366,7 @@ fn run() {}
         json_string(&updated),
     );
     send_msg(&mut stdin, &change);
-    let mut request = |method: &str, params: String| -> DataTree {
+    let mut request = |method: &str, params: String| -> Dyn {
         let id = next_id;
         next_id += 1;
         let body = request_lsp(&mut stdin, &mut stdout, id, method, &params);
@@ -5444,7 +5444,7 @@ fn run() {}
     assert_json_values_equal(
         "shutdown result",
         json_object_field(&shutdown, "result"),
-        &DataTree::Null,
+        &Dyn::Null,
     );
     drop(request);
     drop(stdin);

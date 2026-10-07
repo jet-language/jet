@@ -931,7 +931,7 @@ impl jet_std::JSONReader {
         drop(bytes);
         match value {
             Ok(value) if value.is_finite() => Ok(jet_std::DataEvent::Float(value)),
-            _ => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, start, self.line, self.column, "JSON number is outside the DataTree numeric range")),
+            _ => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, start, self.line, self.column, "JSON number is outside the Dyn numeric range")),
         }
     }
 
@@ -1518,12 +1518,12 @@ fn jet_enc_json_writer_flush(writer: &mut jet_std::JSONWriter) -> Result<(), jet
 fn jet_enc_json_writer_finish(writer: &mut jet_std::JSONWriter) -> Result<(), jet_std::EncodingError> { writer.finish_output() }
 
 // D-ENCSTREAM-SURFACE1=A: JSONL shares the byte-at-a-time JSON tokenizer and
-// event writer above. Only record framing and DataEvent<->DataTree folding are
+// event writer above. Only record framing and DataEvent<->Dyn folding are
 // format-specific; no line buffer or second JSON parser exists here.
 enum JetJsonlFoldFrame {
-    Array(Vec<jet_std::DataTree>),
+    Array(Vec<jet_std::Dyn>),
     Object {
-        entries: Vec<(String, jet_std::DataTree)>,
+        entries: Vec<(String, jet_std::Dyn)>,
         key: Option<String>,
     },
 }
@@ -1683,9 +1683,9 @@ fn jet_json_fold_budget(
 fn jet_json_fold_push_value(
     reader: &jet_std::JSONReader,
     heap: &mut JetJsonlHeapBudget,
-    root: &mut Option<jet_std::DataTree>,
+    root: &mut Option<jet_std::Dyn>,
     frames: &mut Vec<JetJsonlFoldFrame>,
-    value: jet_std::DataTree,
+    value: jet_std::Dyn,
 ) -> Result<(), jet_std::EncodingError> {
     match frames.last_mut() {
         Some(JetJsonlFoldFrame::Array(items)) => {
@@ -1742,7 +1742,7 @@ fn jet_json_fold_from_event(
     reader: &mut jet_std::JSONReader,
     first: jet_std::DataEvent,
     heap: &mut JetJsonlHeapBudget,
-) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+) -> Result<jet_std::Dyn, jet_std::EncodingError> {
     let mut root = None;
     let mut frames = Vec::new();
     let mut pending = Some(first);
@@ -1772,7 +1772,7 @@ fn jet_json_fold_from_event(
                         heap,
                         &mut root,
                         &mut frames,
-                        jet_std::DataTree::Null,
+                        jet_std::Dyn::Null,
                     )
                 }
             }
@@ -1785,7 +1785,7 @@ fn jet_json_fold_from_event(
                         heap,
                         &mut root,
                         &mut frames,
-                        jet_std::DataTree::Bool(value),
+                        jet_std::Dyn::Bool(value),
                     )
                 }
             }
@@ -1798,7 +1798,7 @@ fn jet_json_fold_from_event(
                         heap,
                         &mut root,
                         &mut frames,
-                        jet_std::DataTree::Int(value),
+                        jet_std::Dyn::Int(value),
                     )
                 }
             }
@@ -1811,7 +1811,7 @@ fn jet_json_fold_from_event(
                         heap,
                         &mut root,
                         &mut frames,
-                        jet_std::DataTree::Float(value),
+                        jet_std::Dyn::Float(value),
                     )
                 }
             }
@@ -1824,7 +1824,7 @@ fn jet_json_fold_from_event(
                         heap,
                         &mut root,
                         &mut frames,
-                        jet_std::DataTree::Number(value),
+                        jet_std::Dyn::Number(value),
                     )
                 }
             }
@@ -1837,7 +1837,7 @@ fn jet_json_fold_from_event(
                         heap,
                         &mut root,
                         &mut frames,
-                        jet_std::DataTree::TypedText(value),
+                        jet_std::Dyn::TypedText(value),
                     )
                 }
             }
@@ -1850,7 +1850,7 @@ fn jet_json_fold_from_event(
                         heap,
                         &mut root,
                         &mut frames,
-                        jet_std::DataTree::Bytes(value),
+                        jet_std::Dyn::Bytes(value),
                     )
                 }
             }
@@ -1900,7 +1900,7 @@ fn jet_json_fold_from_event(
                     heap,
                     &mut root,
                     &mut frames,
-                    jet_std::DataTree::Array(items),
+                    jet_std::Dyn::Array(items),
                 ),
                 _ => Err(jet_encoding_error(
                     jet_std::EncodingErrorKind::State,
@@ -1919,7 +1919,7 @@ fn jet_json_fold_from_event(
                     heap,
                     &mut root,
                     &mut frames,
-                    jet_std::DataTree::Object(entries),
+                    jet_std::Dyn::Object(entries),
                 ),
                 _ => Err(jet_encoding_error(
                     jet_std::EncodingErrorKind::State,
@@ -1985,7 +1985,7 @@ impl jet_std::JSONLReader {
         }
     }
 
-    fn next_record(&mut self) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
+    fn next_record(&mut self) -> Result<Option<jet_std::Dyn>, jet_std::EncodingError> {
         if let Some(error) = &self.terminal {
             return Err(error.clone());
         }
@@ -2049,7 +2049,7 @@ impl jet_std::JSONLReader {
 
 fn jet_enc_jsonl_reader_next(
     reader: &mut jet_std::JSONLReader,
-) -> Result<JetOutcome<jet_std::DataTree, JetAbsent>, jet_std::EncodingError> {
+) -> Result<JetOutcome<jet_std::Dyn, JetAbsent>, jet_std::EncodingError> {
     reader.next_record().map(jet_outcome_of)
 }
 
@@ -2069,14 +2069,14 @@ fn jet_enc_jsonl_writer(
 }
 
 fn jet_jsonl_tree_size(
-    value: &jet_std::DataTree,
+    value: &jet_std::Dyn,
     depth: i64,
     path: &str,
     limits: &jet_std::EncodingLimits,
 ) -> Result<usize, jet_std::EncodingError> {
     let is_container = matches!(
         value,
-        jet_std::DataTree::Array(_) | jet_std::DataTree::Object(_)
+        jet_std::Dyn::Array(_) | jet_std::Dyn::Object(_)
     );
     if is_container && depth >= limits.max_depth {
         let mut error = jet_encoding_error(
@@ -2090,10 +2090,10 @@ fn jet_jsonl_tree_size(
         return Err(error);
     }
     let size = match value {
-        jet_std::DataTree::Null | jet_std::DataTree::Bool(_) => 1,
-        jet_std::DataTree::Int(_) => 8,
-        jet_std::DataTree::Float(value) if value.is_finite() => 8,
-        jet_std::DataTree::Float(_) => {
+        jet_std::Dyn::Null | jet_std::Dyn::Bool(_) => 1,
+        jet_std::Dyn::Int(_) => 8,
+        jet_std::Dyn::Float(value) if value.is_finite() => 8,
+        jet_std::Dyn::Float(_) => {
             let mut error = jet_encoding_error(
                 jet_std::EncodingErrorKind::Unsupported,
                 0,
@@ -2104,7 +2104,7 @@ fn jet_jsonl_tree_size(
             error.path = path.to_string();
             return Err(error);
         }
-        jet_std::DataTree::Number(_) | jet_std::DataTree::TypedText(_) => {
+        jet_std::Dyn::Number(_) | jet_std::Dyn::TypedText(_) => {
             let mut error = jet_encoding_error(
                 jet_std::EncodingErrorKind::State,
                 0,
@@ -2115,8 +2115,8 @@ fn jet_jsonl_tree_size(
             error.path = path.to_string();
             return Err(error);
         }
-        jet_std::DataTree::Text(text) => text.len(),
-        jet_std::DataTree::Bytes(_) => {
+        jet_std::Dyn::Text(text) => text.len(),
+        jet_std::Dyn::Bytes(_) => {
             let mut error = jet_encoding_error(
                 jet_std::EncodingErrorKind::Unsupported,
                 0,
@@ -2127,7 +2127,7 @@ fn jet_jsonl_tree_size(
             error.path = path.to_string();
             return Err(error);
         }
-        jet_std::DataTree::Array(items) => {
+        jet_std::Dyn::Array(items) => {
             let mut size = 1usize;
             for (index, item) in items.iter().enumerate() {
                 size = size.checked_add(jet_jsonl_tree_size(
@@ -2139,7 +2139,7 @@ fn jet_jsonl_tree_size(
             }
             size
         }
-        jet_std::DataTree::Object(entries) => {
+        jet_std::Dyn::Object(entries) => {
             let mut size = 1usize;
             for (key, item) in entries {
                 let child = jet_jsonl_tree_size(
@@ -2172,20 +2172,20 @@ fn jet_jsonl_tree_size(
 
 fn jet_jsonl_wire_size(
     writer: &jet_std::JSONWriter,
-    value: &jet_std::DataTree,
+    value: &jet_std::Dyn,
 ) -> Result<usize, jet_std::EncodingError> {
     let checked_sum = |parts: &[usize]| {
         parts.iter().try_fold(0usize, |sum, part| sum.checked_add(*part))
             .ok_or_else(|| jet_encoding_error(jet_std::EncodingErrorKind::Limit, writer.total, 1, writer.total + 1, "JSONL record wire size overflow"))
     };
     match value {
-        jet_std::DataTree::Null => Ok(4),
-        jet_std::DataTree::Bool(true) => Ok(4),
-        jet_std::DataTree::Bool(false) => Ok(5),
-        jet_std::DataTree::Int(value) => Ok(value.to_string().len()),
-        jet_std::DataTree::Float(value) => Ok(value.to_string().len()),
-        jet_std::DataTree::Text(value) => checked_sum(&[writer.quoted_len(value)?, 2]),
-        jet_std::DataTree::Number(_) | jet_std::DataTree::TypedText(_) => Err(
+        jet_std::Dyn::Null => Ok(4),
+        jet_std::Dyn::Bool(true) => Ok(4),
+        jet_std::Dyn::Bool(false) => Ok(5),
+        jet_std::Dyn::Int(value) => Ok(value.to_string().len()),
+        jet_std::Dyn::Float(value) => Ok(value.to_string().len()),
+        jet_std::Dyn::Text(value) => checked_sum(&[writer.quoted_len(value)?, 2]),
+        jet_std::Dyn::Number(_) | jet_std::Dyn::TypedText(_) => Err(
             jet_encoding_error(
                 jet_std::EncodingErrorKind::State,
                 writer.total,
@@ -2194,21 +2194,21 @@ fn jet_jsonl_wire_size(
                 "internal JSON carrier escaped typed decode",
             ),
         ),
-        jet_std::DataTree::Bytes(_) => Err(jet_encoding_error(
+        jet_std::Dyn::Bytes(_) => Err(jet_encoding_error(
             jet_std::EncodingErrorKind::Unsupported,
             writer.total,
             1,
             writer.total + 1,
             "JSON cannot encode Bytes; encode bytes as Text explicitly",
         )),
-        jet_std::DataTree::Array(items) => {
+        jet_std::Dyn::Array(items) => {
             let mut size = 2usize;
             for (index, item) in items.iter().enumerate() {
                 size = checked_sum(&[size, usize::from(index > 0), jet_jsonl_wire_size(writer, item)?])?;
             }
             Ok(size)
         }
-        jet_std::DataTree::Object(entries) => {
+        jet_std::Dyn::Object(entries) => {
             let mut size = 2usize;
             for (index, (key, item)) in entries.iter().enumerate() {
                 size = checked_sum(&[
@@ -2226,14 +2226,14 @@ fn jet_jsonl_wire_size(
 
 fn jet_jsonl_write_tree(
     writer: &mut jet_std::JSONWriter,
-    value: &jet_std::DataTree,
+    value: &jet_std::Dyn,
 ) -> Result<(), jet_std::EncodingError> {
     match value {
-        jet_std::DataTree::Null => writer.write_event(jet_std::DataEvent::Null),
-        jet_std::DataTree::Bool(value) => writer.write_event(jet_std::DataEvent::Bool(*value)),
-        jet_std::DataTree::Int(value) => writer.write_event(jet_std::DataEvent::Int(*value)),
-        jet_std::DataTree::Float(value) => writer.write_event(jet_std::DataEvent::Float(*value)),
-        jet_std::DataTree::Number(_) | jet_std::DataTree::TypedText(_) => Err(
+        jet_std::Dyn::Null => writer.write_event(jet_std::DataEvent::Null),
+        jet_std::Dyn::Bool(value) => writer.write_event(jet_std::DataEvent::Bool(*value)),
+        jet_std::Dyn::Int(value) => writer.write_event(jet_std::DataEvent::Int(*value)),
+        jet_std::Dyn::Float(value) => writer.write_event(jet_std::DataEvent::Float(*value)),
+        jet_std::Dyn::Number(_) | jet_std::Dyn::TypedText(_) => Err(
             jet_encoding_error(
                 jet_std::EncodingErrorKind::State,
                 writer.total,
@@ -2242,16 +2242,16 @@ fn jet_jsonl_write_tree(
                 "internal JSON carrier escaped typed decode",
             ),
         ),
-        jet_std::DataTree::Text(value) => writer.write_event(jet_std::DataEvent::Text(value.clone())),
-        jet_std::DataTree::Bytes(value) => writer.write_event(jet_std::DataEvent::Bytes(value.clone())),
-        jet_std::DataTree::Array(items) => {
+        jet_std::Dyn::Text(value) => writer.write_event(jet_std::DataEvent::Text(value.clone())),
+        jet_std::Dyn::Bytes(value) => writer.write_event(jet_std::DataEvent::Bytes(value.clone())),
+        jet_std::Dyn::Array(items) => {
             writer.write_event(jet_std::DataEvent::ArrayStart)?;
             for item in items {
                 jet_jsonl_write_tree(writer, item)?;
             }
             writer.write_event(jet_std::DataEvent::ArrayEnd)
         }
-        jet_std::DataTree::Object(entries) => {
+        jet_std::Dyn::Object(entries) => {
             writer.write_event(jet_std::DataEvent::ObjectStart)?;
             for (key, value) in entries {
                 writer.write_event(jet_std::DataEvent::Key(key.clone()))?;
@@ -2271,7 +2271,7 @@ impl jet_std::JSONLWriter {
         jet_encoding_fail(&mut self.terminal, error)
     }
 
-    fn write_record(&mut self, value: jet_std::DataTree) -> Result<(), jet_std::EncodingError> {
+    fn write_record(&mut self, value: jet_std::Dyn) -> Result<(), jet_std::EncodingError> {
         if let Some(error) = &self.terminal {
             return Err(error.clone());
         }
@@ -2361,7 +2361,7 @@ impl jet_std::JSONLWriter {
 
 fn jet_enc_jsonl_writer_write(
     writer: &mut jet_std::JSONLWriter,
-    value: jet_std::DataTree,
+    value: jet_std::Dyn,
 ) -> Result<(), jet_std::EncodingError> {
     writer.write_record(value)
 }
@@ -3073,11 +3073,11 @@ fn jet_xml_value_heap_cost(value: &crate::jet_xml_pull::Value) -> usize {
         crate::jet_xml_pull::Value::Text(text) => text.len(),
         crate::jet_xml_pull::Value::Array(items) => items
             .len()
-            .saturating_mul(std::mem::size_of::<jet_std::DataTree>())
+            .saturating_mul(std::mem::size_of::<jet_std::Dyn>())
             .saturating_add(items.iter().map(jet_xml_value_heap_cost).fold(0usize, usize::saturating_add)),
         crate::jet_xml_pull::Value::Object(entries) => entries
             .len()
-            .saturating_mul(std::mem::size_of::<(String, jet_std::DataTree)>())
+            .saturating_mul(std::mem::size_of::<(String, jet_std::Dyn)>())
             .saturating_add(
                 entries
                     .iter()
@@ -3102,23 +3102,23 @@ fn jet_xml_heap_error(offset: i64) -> jet_std::EncodingError {
 
 fn jet_enc_xml_reader_next(
     reader: &mut jet_std::XMLReader,
-) -> Result<JetOutcome<jet_std::DataTree, JetAbsent>, jet_std::EncodingError> {
+) -> Result<JetOutcome<jet_std::Dyn, JetAbsent>, jet_std::EncodingError> {
     jet_enc_xml_reader_scan(reader).map(jet_outcome_of)
 }
 
 fn jet_enc_xml_reader_scan(
     reader: &mut jet_std::XMLReader,
-) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
+) -> Result<Option<jet_std::Dyn>, jet_std::EncodingError> {
     if let Some(error) = &reader.terminal {
         return Err(error.clone());
     }
     loop {
         match reader.scanner.next() {
             Ok(Some(event)) => {
-                // Lexical raw_bytes / BOM project to Array<Int> DataTree slots.
+                // Lexical raw_bytes / BOM project to Array<Int> Dyn slots.
                 // Charge that projection before building so a hostile token fails
                 // closed without retaining the projected tree.
-                let slot = std::mem::size_of::<jet_std::DataTree>();
+                let slot = std::mem::size_of::<jet_std::Dyn>();
                 let prospective = event
                     .raw_bytes
                     .len()
@@ -3136,8 +3136,8 @@ fn jet_enc_xml_reader_scan(
                     let error = jet_xml_heap_error(reader.total);
                     return jet_encoding_fail(&mut reader.terminal, error);
                 }
-                let tree = jet_xml_to_data_tree(value);
-                // Returned DataTree leaves codec ownership (D-ENCSTREAM-SURFACE1).
+                let tree = jet_xml_to_dyn(value);
+                // Returned Dyn leaves codec ownership (D-ENCSTREAM-SURFACE1).
                 reader.allocation.release(prospective.saturating_add(extra));
                 return Ok(Some(tree));
             }
@@ -3282,12 +3282,12 @@ impl jet_std::XMLWriter {
         Ok(())
     }
 
-    fn write_event(&mut self, event: jet_std::DataTree) -> Result<(), jet_std::EncodingError> {
+    fn write_event(&mut self, event: jet_std::Dyn) -> Result<(), jet_std::EncodingError> {
         if let Some(error) = &self.terminal { return Err(error.clone()); }
         if self.finished {
             return self.fail(jet_std::EncodingError { format: jet_std::EncodingFormat::XML, kind: jet_std::EncodingErrorKind::State, byte_offset: self.total, line: Err(JetAbsent), column: Err(JetAbsent), path: String::new(), reason: "write called after finish".to_string(), cause: Err(JetAbsent) });
         }
-        let value = match jet_xml_from_data_tree(&event) {
+        let value = match jet_xml_from_dyn(&event) {
             Ok(value) => value,
             Err(reason) => {
                 let error = jet_std::EncodingError { format: jet_std::EncodingFormat::XML, kind: jet_std::EncodingErrorKind::Syntax, byte_offset: self.total, line: Err(JetAbsent), column: Err(JetAbsent), path: String::new(), reason, cause: Err(JetAbsent) };
@@ -3372,7 +3372,7 @@ impl jet_std::XMLWriter {
     }
 }
 
-fn jet_enc_xml_writer_write(writer: &mut jet_std::XMLWriter, event: jet_std::DataTree) -> Result<(), jet_std::EncodingError> { writer.write_event(event) }
+fn jet_enc_xml_writer_write(writer: &mut jet_std::XMLWriter, event: jet_std::Dyn) -> Result<(), jet_std::EncodingError> { writer.write_event(event) }
 fn jet_enc_xml_writer_flush(writer: &mut jet_std::XMLWriter) -> Result<(), jet_std::EncodingError> { writer.flush_output() }
 fn jet_enc_xml_writer_finish(writer: &mut jet_std::XMLWriter) -> Result<(), jet_std::EncodingError> { writer.finish_output() }
 
@@ -4119,7 +4119,7 @@ fn jet_json_canonical_quote_text(text: &str) -> Vec<u8> {
 }
 
 fn jet_enc_json_canonical_tree(
-    value: &jet_std::DataTree,
+    value: &jet_std::Dyn,
     limits: &jet_std::EncodingLimits,
     depth: i64,
 ) -> Result<Vec<u8>, jet_std::EncodingError> {
@@ -4133,10 +4133,10 @@ fn jet_enc_json_canonical_tree(
         ));
     }
     match value {
-        jet_std::DataTree::Null => Ok(b"null".to_vec()),
-        jet_std::DataTree::Bool(true) => Ok(b"true".to_vec()),
-        jet_std::DataTree::Bool(false) => Ok(b"false".to_vec()),
-        jet_std::DataTree::Int(n) => {
+        jet_std::Dyn::Null => Ok(b"null".to_vec()),
+        jet_std::Dyn::Bool(true) => Ok(b"true".to_vec()),
+        jet_std::Dyn::Bool(false) => Ok(b"false".to_vec()),
+        jet_std::Dyn::Int(n) => {
             if (*n as f64) as i128 != *n as i128 {
                 return Err(jet_encoding_error(
                     jet_std::EncodingErrorKind::Unsupported,
@@ -4148,7 +4148,7 @@ fn jet_enc_json_canonical_tree(
             }
             Ok(jet_json_jcs_number(*n as f64).into_bytes())
         }
-        jet_std::DataTree::Float(f) => {
+        jet_std::Dyn::Float(f) => {
             if !f.is_finite() {
                 return Err(jet_encoding_error(
                     jet_std::EncodingErrorKind::Unsupported,
@@ -4160,7 +4160,7 @@ fn jet_enc_json_canonical_tree(
             }
             Ok(jet_json_jcs_number(*f).into_bytes())
         }
-        jet_std::DataTree::Number(_) | jet_std::DataTree::TypedText(_) => Err(
+        jet_std::Dyn::Number(_) | jet_std::Dyn::TypedText(_) => Err(
             jet_encoding_error(
                 jet_std::EncodingErrorKind::State,
                 0,
@@ -4169,15 +4169,15 @@ fn jet_enc_json_canonical_tree(
                 "internal JSON carrier escaped typed decode",
             ),
         ),
-        jet_std::DataTree::Text(s) => Ok(jet_json_canonical_quote_text(s)),
-        jet_std::DataTree::Bytes(_) => Err(jet_encoding_error(
+        jet_std::Dyn::Text(s) => Ok(jet_json_canonical_quote_text(s)),
+        jet_std::Dyn::Bytes(_) => Err(jet_encoding_error(
             jet_std::EncodingErrorKind::Unsupported,
             0,
             1,
             1,
             "JSON cannot encode Bytes; encode bytes as Text explicitly",
         )),
-        jet_std::DataTree::Array(items) => {
+        jet_std::Dyn::Array(items) => {
             let mut out = Vec::from(b"[");
             for (index, item) in items.iter().enumerate() {
                 if index > 0 {
@@ -4188,7 +4188,7 @@ fn jet_enc_json_canonical_tree(
             out.push(b']');
             Ok(out)
         }
-        jet_std::DataTree::Object(entries) => {
+        jet_std::Dyn::Object(entries) => {
             let mut sorted = entries.clone();
             sorted.sort_by(|left, right| jet_json_jcs_key_cmp(&left.0, &right.0));
             if sorted.windows(2).any(|pair| pair[0].0 == pair[1].0) {
@@ -4216,7 +4216,7 @@ fn jet_enc_json_canonical_tree(
 }
 
 fn jet_enc_json_canonical(
-    value: &jet_std::DataTree,
+    value: &jet_std::Dyn,
     limits: &jet_std::EncodingLimits,
 ) -> Result<String, jet_std::EncodingError> {
     jet_encoding_validate_limits(limits)?;
