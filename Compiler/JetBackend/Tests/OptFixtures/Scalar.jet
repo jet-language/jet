@@ -97,12 +97,13 @@ fn oscalar_undefined() -> Bool Never! {
 
 fn oscalar_overlap(layout_mismatch: Bool) -> Bool Never! {
     b := ofx_builder(if layout_mismatch -> "scalar-layout-mismatch" else -> "scalar-overlap")
-    slot :: oscalar_slot(&b, 8)
+    slot :: oscalar_slot(&b, 16)
     x :: ofx_const(&b, 17)
     oscalar_store(&b, slot, 0, x)
-    small :: lir_builder_bool(&b)
-    lir_builder_push(&b, LIRInst.Load{dst: small, base: slot, offset: if layout_mismatch -> 0 else -> 1})
-    oscalar_refuse(ofx_finish(&b, [LIRValueID]{}, small))
+    layout :: if layout_mismatch -> lir_layout_float() else -> LIRLayout{size: 8, align: 4, class: LIRABIClass.Integer}
+    loaded :: lir_builder_value(&b, layout, LIRDrop.Trivial, None)
+    lir_builder_push(&b, LIRInst.Load{dst: loaded, base: slot, offset: if layout_mismatch -> 0 else -> 4})
+    oscalar_refuse(ofx_finish(&b, [LIRValueID]{}, loaded))
 }
 
 fn oscalar_escape(pointer_add: Bool) -> Bool Never! {
@@ -216,6 +217,28 @@ fn oscalar_undefined_edge() -> Bool Never! {
     refused
 }
 
+fn oscalar_subword(size: Int) -> Bool Never! {
+    b := ofx_builder("scalar-i{8 * size}-roundtrip-refused")
+    layout :: LIRLayout{size: size, align: size, class: LIRABIClass.Integer}
+    slot :: oscalar_slot(&b, 8)
+    one :: lir_builder_value(&b, layout, LIRDrop.Trivial, None)
+    lir_builder_push(&b, LIRInst.Const{dst: one, value: 1})
+    source := one
+    // i8 Binary is lint-valid yet need not have normalized upper bits. A
+    // memory roundtrip reads 512 as 0; an alias would incorrectly retain 512.
+    if size == 1 {
+        loop _ in 0..<9 {
+            shifted :: lir_builder_value(&b, layout, LIRDrop.Trivial, None)
+            lir_builder_push(&b, LIRInst.Binary{dst: shifted, op: LIRBinaryOp.Shl, left: source, right: one})
+            source = shifted
+        }
+    }
+    oscalar_store(&b, slot, 0, source)
+    loaded :: lir_builder_value(&b, layout, LIRDrop.Trivial, None)
+    lir_builder_push(&b, LIRInst.Load{dst: loaded, base: slot, offset: 0})
+    oscalar_refuse(ofx_finish(&b, [LIRValueID]{}, loaded))
+}
+
 pub fn opt_fixtures_scalar() -> Bool Never! {
     passed := true
     if !oscalar_straight(false) -> passed = false
@@ -237,5 +260,8 @@ pub fn opt_fixtures_scalar() -> Bool Never! {
     if !oscalar_multi_phi() -> passed = false
     if !oscalar_dead_predecessor() -> passed = false
     if !oscalar_undefined_edge() -> passed = false
+    if !oscalar_subword(1) -> passed = false
+    if !oscalar_subword(2) -> passed = false
+    if !oscalar_subword(4) -> passed = false
     passed
 }

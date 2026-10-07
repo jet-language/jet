@@ -27,6 +27,9 @@ fn opt_scalar_fields(function: LIRFunction, slot: LIRValueID, size: Int, dom: Op
             if value.value >= 0 {
                 if dom.parent[row] < 0 -> return None
                 sample :: function.values[value.value]
+                // A subword Store/Load is not an SSA copy: the memory roundtrip
+                // truncates/extends bits. Preserve it, even for Bool fields.
+                if sample.layout.size != 8 -> return None
                 // Subtraction avoids overflow even for large byte offsets.
                 if sample.drop != .Trivial || offset < 0 || sample.layout.size > size || offset > size - sample.layout.size -> return None
                 index :: opt_scalar_field(fields, offset)
