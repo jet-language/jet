@@ -128,6 +128,7 @@ int main(int argc,char **argv) {
     char *column[]={inaccessible,executable};Candidates candidates={2,column,0,1};
     // Owner #33 deliberately replaces glibc's stale-errno empty-PATH pathology.
     Candidates empty={0,NULL,0,1};assert(!jet_process_spawn_raw(spec,&empty,waiting,env,NULL,&e));posix(&e,7,ENOENT);
+    spec[1]=1;spec[2]=(W)(intptr_t)&missing;assert(!jet_process_spawn_raw(spec,&empty,waiting,env,NULL,&e));posix(&e,3,ENOENT);spec[1]=0;spec[2]=0;
     c=jet_process_spawn_raw(spec,&candidates,waiting,env,NULL,&e);good(&e);assert(c);read_exact(c,1,bytes,5);assert(jet_process_write_raw(c,0,"x",1,&e)==1);good(&e);wait_code(c,9);jet_process_drop_raw(c);
     column[1]=absent;assert(!jet_process_spawn_raw(spec,&candidates,waiting,env,NULL,&e));posix(&e,7,EACCES);
     snprintf(looping,sizeof looping,"%s/loop",root);assert(!symlink("loop",looping));column[0]=looping;column[1]=executable;assert(!jet_process_spawn_raw(spec,&candidates,waiting,env,NULL,&e));posix(&e,7,ELOOP);
