@@ -60,8 +60,8 @@ fn oscalar_diamond(missing: Bool, reorder: Bool, dead: Bool) -> Bool Never! {
     function := lir_builder_finish(b)
     if reorder -> function.blocks = [LIRBlock]{function.blocks[0], function.blocks[3], function.blocks[2], function.blocks[1]}
     if missing && !dead -> return oscalar_refuse(function)
-    if dead -> return oscalar_check(function, "  b0(v0: i8):\n    branch v0, b10(), b20()\n  b10():\n    v1: i64 = const 17\n    jump b30()\n  b20():\n    v2: i64 = const 25\n    jump b30()\n  b30():\n    v3: i64 = const 0\n    ret v3")
-    oscalar_check(function, if reorder -> "  b0(v0: i8):\n    branch v0, b10(), b20()\n  b30(v3: i64):\n    ret v3\n  b20():\n    v2: i64 = const 25\n    jump b30(v2)\n  b10():\n    v1: i64 = const 17\n    jump b30(v1)" else -> "  b0(v0: i8):\n    branch v0, b10(), b20()\n  b10():\n    v1: i64 = const 17\n    jump b30(v1)\n  b20():\n    v2: i64 = const 25\n    jump b30(v2)\n  b30(v3: i64):\n    ret v3")
+    if dead -> return oscalar_check(function, "  b0(v0: i8):\n    br v0, b10(), b20()\n  b10():\n    v1: i64 = const 17\n    jmp b30()\n  b20():\n    v2: i64 = const 25\n    jmp b30()\n  b30():\n    v3: i64 = const 0\n    ret v3")
+    oscalar_check(function, if reorder -> "  b0(v0: i8):\n    br v0, b10(), b20()\n  b30(v3: i64):\n    ret v3\n  b20():\n    v2: i64 = const 25\n    jmp b30(v2)\n  b10():\n    v1: i64 = const 17\n    jmp b30(v1)" else -> "  b0(v0: i8):\n    br v0, b10(), b20()\n  b10():\n    v1: i64 = const 17\n    jmp b30(v1)\n  b20():\n    v2: i64 = const 25\n    jmp b30(v2)\n  b30(v3: i64):\n    ret v3")
 }
 
 fn oscalar_loop(initial: Bool) -> Bool Never! {
@@ -80,7 +80,7 @@ fn oscalar_loop(initial: Bool) -> Bool Never! {
     lir_builder_seal(&b, LIRBlockID{value: 20}, [LIRValueID]{}, LIRTerminator.Return{value: Val(result)})
     function :: lir_builder_finish(b)
     if !initial -> return oscalar_refuse(function)
-    oscalar_check(function, "  b0(v0: i8):\n    v1: i64 = const 0\n    jump b10(v1)\n  b10(v4: i64):\n    v2: i64 = const 1\n    v3: i64 = add v4, v2\n    branch v0, b10(v3), b20()\n  b20():\n    ret v3")
+    oscalar_check(function, "  b0(v0: i8):\n    v1: i64 = const 0\n    jmp b10(v1)\n  b10(v4: i64):\n    v2: i64 = const 1\n    v3: i64 = add v4, v2\n    br v0, b10(v3), b20()\n  b20():\n    ret v3")
 }
 
 fn oscalar_undefined() -> Bool Never! {
@@ -176,7 +176,7 @@ fn oscalar_multi_phi() -> Bool Never! {
     sum :: ofx_binary(&b, LIRBinaryOp.Add, a, c)
     result :: ofx_binary(&b, LIRBinaryOp.Add, sum, param)
     lir_builder_seal(&b, LIRBlockID{value: 30}, [LIRValueID]{param}, LIRTerminator.Return{value: Val(result)})
-    oscalar_check(lir_builder_finish(b), "  b0(v0: i8):\n    v1: i64 = const 17\n    v2: i64 = const 25\n    branch v0, b10(), b20()\n  b10():\n    jump b30(v1, v1, v2)\n  b20():\n    jump b30(v2, v2, v1)\n  b30(v3: i64, v6: i64, v7: i64):\n    v4: i64 = add v6, v7\n    v5: i64 = add v4, v3\n    ret v5")
+    oscalar_check(lir_builder_finish(b), "  b0(v0: i8):\n    v1: i64 = const 17\n    v2: i64 = const 25\n    br v0, b10(), b20()\n  b10():\n    jmp b30(v1, v1, v2)\n  b20():\n    jmp b30(v2, v2, v1)\n  b30(v3: i64, v6: i64, v7: i64):\n    v4: i64 = add v6, v7\n    v5: i64 = add v4, v3\n    ret v5")
 }
 
 // Simplify may not yet have dropped unreachable rows after inlining. The
