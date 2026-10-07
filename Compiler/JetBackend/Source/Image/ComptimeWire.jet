@@ -129,3 +129,73 @@ pub fn x64_value_native_wire(runtime: X64Runtime, boundary: X64ValueBoundary, ro
     }
     None
 }
+
+fn x64_value_member_json(member: X64ValueMember) -> String Never! {
+    "[{foundation_json_quote(member.name)},{member.offset},{member.descriptor},{member.boxed}]"
+}
+pub fn x64_value_boundary_json(boundary: X64ValueBoundary) -> String Never! {
+    rows := [String]{}
+    loop descriptor in boundary.descriptors {
+        children :: loop child in descriptor.children -> "{child}"
+        members :: loop member in descriptor.members -> x64_value_member_json(member)
+        variants := [String]{}
+        loop variant in descriptor.variants {
+            fields :: loop member in variant.members -> x64_value_member_json(member)
+            &variants.push("[{foundation_json_quote(variant.name)},{variant.selector},[{fields.join(",")}]]")
+        }
+        &rows.push("[{foundation_json_quote(descriptor.kind)},{foundation_json_quote(descriptor.name)},{descriptor.size},{descriptor.align},{descriptor.stride},[{children.join(",")}],[{members.join(",")}],[{variants.join(",")}]]")
+    }
+    "[{boundary.root},[{rows.join(",")}]]"
+}
+fn x64_value_member_decode(tree: DataTree, count: Int) -> X64ValueMember? Never! {
+    rows :: if tree == .Array(values) -> values else -> return None
+    if rows.len() != 4 -> return None
+    name :: x64_execution_string(rows[0]) ?? return None
+    offset :: x64_execution_int(rows[1]) ?? return None
+    descriptor :: x64_execution_int(rows[2]) ?? return None
+    boxed :: if rows[3] == .Bool(value) -> value else -> return None
+    if offset < 0 || descriptor < 0 || descriptor >= count -> return None
+    Val(X64ValueMember{name: name, offset: offset, descriptor: descriptor, boxed: boxed})
+}
+pub fn x64_value_boundary_decode(tree: DataTree) -> X64ValueBoundary? Never! {
+    fields :: if tree == .Array(values) -> values else -> return None
+    if fields.len() != 2 -> return None
+    root :: x64_execution_int(fields[0]) ?? return None
+    rows :: if fields[1] == .Array(values) -> values else -> return None
+    if root < 0 || root >= rows.len() -> return None
+    descriptors := [X64ValueDescriptor]{}
+    loop row in rows {
+        values :: if row == .Array(fields) -> fields else -> return None
+        if values.len() != 8 -> return None
+        kind :: x64_execution_string(values[0]) ?? return None
+        name :: x64_execution_string(values[1]) ?? return None
+        size :: x64_execution_int(values[2]) ?? return None
+        align :: x64_execution_int(values[3]) ?? return None
+        stride :: x64_execution_int(values[4]) ?? return None
+        if size < 0 || align < 1 || stride < 0 -> return None
+        child_rows :: if values[5] == .Array(fields) -> fields else -> return None
+        children := [Int]{}
+        loop child in child_rows {
+            index :: x64_execution_int(child) ?? return None
+            if index < 0 || index >= rows.len() -> return None
+            &children.push(index)
+        }
+        member_rows :: if values[6] == .Array(fields) -> fields else -> return None
+        members := [X64ValueMember]{}
+        loop member in member_rows -> &members.push(x64_value_member_decode(member, rows.len()) ?? return None)
+        variant_rows :: if values[7] == .Array(fields) -> fields else -> return None
+        variants := [X64ValueVariant]{}
+        loop variant in variant_rows {
+            parts :: if variant == .Array(fields) -> fields else -> return None
+            if parts.len() != 3 -> return None
+            variant_name :: x64_execution_string(parts[0]) ?? return None
+            selector :: x64_execution_int(parts[1]) ?? return None
+            payload :: if parts[2] == .Array(fields) -> fields else -> return None
+            fields := [X64ValueMember]{}
+            loop member in payload -> &fields.push(x64_value_member_decode(member, rows.len()) ?? return None)
+            &variants.push(X64ValueVariant{name: variant_name, selector: selector, members: fields})
+        }
+        &descriptors.push(X64ValueDescriptor{kind: kind, name: name, size: size, align: align, stride: stride, children: children, members: members, variants: variants})
+    }
+    Val(X64ValueBoundary{root: root, descriptors: descriptors, errors: [String]{}})
+}

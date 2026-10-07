@@ -3,7 +3,8 @@
 use core.encoding.json as native_comptime_json
 use core.math as native_comptime_math
 use jet_backend.[X64ExecutionMode, X64ExecutionRequest, X64ExecutionResponse, X64ExecutionScalar, lir_lower_callables, x64_call_image]
-use jet_foundation.[MIRFunctionID, MIRProgram, MIRType, Span, TComptimeValue, mir_module_id]
+use jet_codegen.JetCodegenClosureSource
+use jet_foundation.[MIRFunctionID, MIRProgram, MIRType, Span, TComptimeValue, mir_module_id, mir_program_digest]
 use jet_sema.[SemaRegistrationGraph, SemaSourceLocation]
 use jet_eval.[JetEvalConfig, JetEvalError, JetEvalErrorKind, JetEvalResult, JetEvalRuntimeValue]
 
@@ -77,13 +78,15 @@ fn jet_driver_native_comptime_stop(program: MIRProgram, graph: SemaRegistrationG
     }
     jet_driver_native_comptime_failure(span, "E0953", JetEvalErrorKind.ComptimePanic, "your comptime code stopped the build", "native comptime stopped with {kind}: {message}", location)
 }
-pub fn jet_driver_native_comptime_eval(program: MIRProgram, graph: SemaRegistrationGraph, function_id: MIRFunctionID, config: JetEvalConfig, host: JetDriverExecutionHost?) -> JetEvalResult {
+pub fn jet_driver_native_comptime_eval(program: MIRProgram, graph: SemaRegistrationGraph, function_id: MIRFunctionID, config: JetEvalConfig, host: JetDriverExecutionHost?, sources: [JetCodegenClosureSource]) -> JetEvalResult {
     row := -1
     loop (index, function) in program.functions { if function.id == function_id -> row = index }
     if row < 0 -> return jet_driver_native_comptime_failure(Span{start: 0, end: 0}, "E0956", JetEvalErrorKind.Compiler, "native comptime selected a missing function", "the checked MIR function identity must remain in its program")
     function :: program.functions[row]
     executor :: host ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Unsupported, "native comptime has no execution host", "the compiler host must own the one shared native child and admitted runtime")
     kind :: jet_driver_native_scalar_kind(function.return_type) ?? return jet_driver_native_comptime_failure(function.span, "E0956", JetEvalErrorKind.Unsupported, "native comptime result needs a composite layout descriptor", "the selected callable has no supported scalar native value boundary")
+    snapshot :: mir_program_digest(program)
+    executor.register_closure_sources(snapshot, sources)
     lowered :: lir_lower_callables(program, [MIRFunctionID]{function_id})
     if lowered.issues.len() > 0 {
         issue :: lowered.issues[0]
