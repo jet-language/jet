@@ -603,6 +603,10 @@ Packaging ships those sources beside the runtime. User foreign
 dependencies are program link inputs; a runtime pack includes only the foreign
 closure reached by its own declared sources, keeping the shared pack independent
 of user projects.
+User C closures also link the existing toolchain's musl `libc.a` (including
+math and pthread) and C compiler builtins as program-only platform inputs.
+Packaging places them in `jet-runtime/foreign/platform`; a program with no C
+closure receives no additional link inputs. They are never runtime-pack inputs.
 
 The private `Core.mem` carrier kernels borrow native String/List headers
 directly, rather than using the public C List ABI. C String parameters are

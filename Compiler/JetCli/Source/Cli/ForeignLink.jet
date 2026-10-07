@@ -3,13 +3,13 @@
 use core.files as cli_files
 use core.process as cli_process
 use core.sys as cli_sys
-use jet_driver.[JetDriverAuthorizedSourceSnapshot, jet_driver_c_dependencies]
-use jet_foundation.[MIRProgram, MIRLinkArtifactKind, mir_sha256_bytes, mir_sha256_hex_bytes]
+use jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCDependency, jet_driver_c_dependencies]
+use jet_foundation.[MIRProgram, MIRForeignLanguage, MIRLinkArtifactKind, mir_sha256_bytes, mir_sha256_hex_bytes]
 
-struct JetCLIForeignInputs {
-    names: [String]
-    bytes: [[U8]]
-    paths: [String]
+pub struct JetCLIForeignInputs {
+    pub names: [String]
+    pub bytes: [[U8]]
+    pub paths: [String]
 }
 
 fn jet_cli_foreign_add(inputs: &JetCLIForeignInputs, path: String) -[FS]> String! {
@@ -144,15 +144,28 @@ fn jet_cli_foreign_static_archive(lib: String, directories: [String], cache: Str
     Ok(path)
 }
 
-fn jet_cli_native_c_inputs(program: MIRProgram, snapshot: JetDriverAuthorizedSourceSnapshot, runtime_dir: String) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs String! {
-    inputs := JetCLIForeignInputs{names: [String]{}, bytes: [[U8]]{}, paths: [String]{}}
+pub struct JetCLIForeignSources {
+    pub root: String
+    pub declarations: [JetDriverCDependency]
+}
+
+// Capture only C declarations before a factory transfers its request into
+// the compiler. Keeping the complete source snapshot would copy source text.
+pub fn jet_cli_native_c_sources(snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLIForeignSources String! {
     root := ""
     loop candidate in snapshot.roots {
         if candidate.identity == snapshot.entry_root_identity -> root = candidate.canonical_path
     }
     if root == "" -> return Err("C link resolution has no authorized entry source root")
+    Ok(JetCLIForeignSources{root: root, declarations: jet_driver_c_dependencies(snapshot)})
+}
+
+// Runtime factories consume this closure without program platform inputs.
+pub fn jet_cli_native_c_closure(program: MIRProgram, sources: JetCLIForeignSources, runtime_dir: String) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs String! {
+    inputs := JetCLIForeignInputs{names: [String]{}, bytes: [[U8]]{}, paths: [String]{}}
+    root :: sources.root
     cache :: "{root}/.jet/clinks/objects"
-    declarations :: jet_driver_c_dependencies(snapshot)
+    declarations :: sources.declarations
     libraries := program.cffi.direct_links
     if libraries.len() == 0 {
         loop row in program.cffi.libs -> &libraries.push(row.lib)
@@ -160,7 +173,7 @@ fn jet_cli_native_c_inputs(program: MIRProgram, snapshot: JetDriverAuthorizedSou
     loop lib in program.cffi.transitive_links -> &libraries.push(lib)
     libraries = jet_cli_sorted_set(libraries)
     loop lib in libraries {
-        // The runtime pack supplies these platform archives once.
+        // These names select the program's one implicit musl platform below.
         if [String]{"c", "m", "pthread", "dl", "rt", "util"}.contains(lib) -> next
         directories := [String]{}
         declared_system := false
@@ -226,6 +239,34 @@ fn jet_cli_native_c_inputs(program: MIRProgram, snapshot: JetDriverAuthorizedSou
             }
         }
     }
+    Ok(inputs)
+}
+
+// C's implicit platform is a program dependency, not a Jet runtime dependency.
+// Programs without a C closure preserve the original link line exactly.
+pub fn jet_cli_native_c_inputs(program: MIRProgram, snapshot: JetDriverAuthorizedSourceSnapshot, runtime_dir: String) -[FS, Env, Exec, Time.Wait]> JetCLIForeignInputs String! {
+    sources :: jet_cli_native_c_sources(snapshot) ?? return Err(err)
+    inputs := jet_cli_native_c_closure(program, sources, runtime_dir) ?? return Err(err)
+    has_c := inputs.names.len() > 0 || program.cffi.libs.len() > 0 || program.cffi.direct_links.len() > 0 || program.cffi.transitive_links.len() > 0
+    loop row in program.foreign {
+        if row.foreign_language == .C -> has_c = true
+    }
+    if !has_c -> return Ok(inputs)
+    libc := "{runtime_dir}/foreign/platform/libc.a"
+    if !cli_files.is_file(libc) {
+        musl :: cli_sys.get("JET_PACK_MUSL_LIB") ?? return Err("the toolchain's musl libc.a was not packaged for C programs")
+        libc = "{musl}/libc.a"
+    }
+    jet_cli_foreign_add(&inputs, libc) ?? return Err(err)
+    builtins := "{runtime_dir}/foreign/platform/libgcc.a"
+    if !cli_files.is_file(builtins) {
+        compiler :: cli_sys.get("CC") ?? "cc"
+        receipt :: cli_process.cmd([String]{compiler, "-print-libgcc-file-name"}).run() ?? return Err("couldn't locate the C compiler's builtins archive: {err}")
+        if !receipt.success -> return Err("couldn't locate the C compiler's builtins archive: {receipt.errors}")
+        builtins = receipt.output.trim()
+        if builtins == "libgcc.a" || !cli_files.is_file(builtins) -> return Err("the C compiler did not provide a builtins archive")
+    }
+    jet_cli_foreign_add(&inputs, builtins) ?? return Err(err)
     Ok(inputs)
 }
 

@@ -69,10 +69,14 @@ for name in std panic_unwind object memchr addr2line gimli rustc_demangle std_de
 done
 musl=${JET_PACK_MUSL_LIB:?set JET_PACK_MUSL_LIB to the directory holding the static musl libc.a}
 [ -f "$musl/libc.a" ] || { echo "prebuild-runtime: no libc.a in $musl" >&2; exit 1; }
+# User C programs keep their implicit platform outside the Jet-only pack.
+mkdir -p "$out/foreign/platform"
+cp "$musl/libc.a" "$out/foreign/platform/libc.a"
 archives+=("$musl/libc.a")
 for lib in libgcc_eh.a libgcc.a; do
   path=$("${CC:-cc}" -print-file-name="$lib")
   [ -f "$path" ] || { echo "prebuild-runtime: ${CC:-cc} has no $lib" >&2; exit 1; }
+  [ "$lib" != libgcc.a ] || cp "$path" "$out/foreign/platform/libgcc.a"
   archives+=("$path")
 done
 node "$repo/Compiler/JetBackend/Tests/run-link.mjs" "$work/link" > /dev/null
