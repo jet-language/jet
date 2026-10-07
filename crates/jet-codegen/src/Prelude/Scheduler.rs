@@ -18,12 +18,13 @@ pub struct JetNativeThreadAttachment;
 impl JetNativeThreadAttachment {
     pub fn enter() -> Self {
         extern "C" {
-            #[link_name = "jet_rt_thread_attach"]
-            fn attach();
+            #[link_name = "jet_rt_thread_bootstrap"]
+            fn bootstrap();
         }
         // SAFETY: this is the first operation on a new runtime-owned thread;
-        // Jet reserves GS and explicit attach is idempotent.
-        unsafe { attach() };
+        // inherited GS may point to a freed parent's TCB, so bootstrap never
+        // reads it and always installs a fresh TCB before any Jet work.
+        unsafe { bootstrap() };
         Self
     }
 }
