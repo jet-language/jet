@@ -447,6 +447,11 @@ are the sole raw startup snapshot, not foreign data imports or a second
 environment map. Entryless hosts must call that entry explicitly before
 argument/environment access. Core owns the once-published logical Shared
 environment and all subsequent writes; raw startup bytes remain immutable.
+Entryless hosts lend environment arrays only during capture: valid entries
+are copied once into a single runtime-owned NUL-terminated byte block and the
+index points into it. Later host `setenv`/`putenv` cannot invalidate the
+snapshot. argv remains borrowed for the runtime lifetime. Zero-sized process
+stream tokens are the constant non-null word 1 and have no allocation/drop.
 Startup indexing follows Rust 1.90 `sys/env/unix.rs`: skip empty/malformed
 entries and search `=` after byte zero, preserving names beginning with `=`,
 non-UTF-8 bytes, duplicate rows and host order. Core transfers use owned
