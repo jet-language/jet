@@ -195,6 +195,12 @@ and alignment one. Empty packed bytes use the non-null dangling pointer `1`
 and require no deallocation. `jet_rt_bytes_unpack` copies C bytes into a fresh
 owned native list header and word-stride buffer; the empty header has all three
 words zero. Neither conversion transfers or frees its borrowed input.
+
+Native sentry scopes and unsafe function gates save the canonical per-thread
+gate/fence state in caller-owned frame storage. Normal and stopped cleanup
+edges restore that state exactly once, including nested policy scopes; file
+and reason strings remain borrowed module literals at the ABI boundary. The
+temporary Rust sentry marshal seam retires with the Jet sentry/TLS layer.
 ## One meaning across execution tiers
 
 AOT, interpreter/comptime evaluation, and web execution are
