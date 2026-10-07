@@ -555,25 +555,35 @@ unsigned values above `i64::MAX` detach as decimal `BigInt` compiler values.
 Runtime effects, stop recovery, execution limits and composite ownership are compiler-call
 prerequisites, not properties inferred from a successful memory mapping.
 
-The canonical runtime exposes a worker-only budget scope:
+The canonical runtime exposes a comptime request scope:
 `jet_rt_comptime_begin(fuel, max_depth)`, `step(owner, start, end)`,
-`work(units)`, `enter(owner, start, end)`, `leave()` and `end()`.
-`owner` is a dense row in the retained original MIR program, so the compiler
-maps a callee's span through its canonical function/module association rather
-than interpreting it against the prep caller. Fuel is shared across native
-callback threads; depth and the current source site belong to each native
-stack. Pure runtime kernels charge `work`, not only generated MIR steps.
-Ordinary runtime execution never activates the scope.
+`work(units)`, `enter(owner, start, end)`, `leave()`, `end()` and
+`stop_write()`. `owner` is a dense row in the retained original MIR program, so
+the compiler maps a callee's span through its canonical function/module
+association rather than interpreting it against the prep caller. Fuel is
+shared across native callback threads; depth and the current source site
+belong to each native stack. Pure runtime kernels charge `work`, not only
+generated MIR steps. Ordinary runtime execution never activates the scope;
+`begin` enters the request's own task control on the calling thread.
 
-A stop or exhausted budget does not unwind through native frames: the isolated
-worker flushes output, writes `JCT1 status owner start end byte_len` plus its
-raw UTF-8 message to private descriptor 3, then exits. Status 1 is a source
-stop, 2 fuel, 3 depth and 4 an unexpected runtime panic. A parent worker
-controller must concurrently drain stdout/stderr and enforce a wall envelope
-for kernels not yet instrumented. The runtime ABI alone is not a native-prep
-selection policy or proof of end-to-end compiler diagnostic parity.
-`Tests/comptime-runtime.c` exercises the actual exports in exec'd children,
-including successful scope reuse and fuel charged from a callback thread.
+An exhausted budget is a recoverable stop (unified host/stop contract, #4720;
+"Stop points" below): the runtime records the request's first budget stop,
+publishes it as BudgetFuel/BudgetDepth on the current task control, spends the
+remaining fuel so every thread's next charge stops too, and returns; the MIR
+Propagate after the budget operation takes the stop edge and canonical cleanup
+runs. A runtime kernel iterating for the request leaves through the canonical
+cancellation transfer, which its export's guard turns back into the rail. A
+panic is fatal: the child flushes output, writes its stop record and exits
+(81 runtime panic, 101 foreign/host panic). `stop_write()` writes a budget
+stop's record. Records travel on private descriptor 3 as the body's decimal
+byte length, a newline, then the body: one JSON object with `kind`
+(Cancelled, Deadline, BudgetFuel, BudgetDepth, Panic, HostFault, Trap),
+`jct_status` (1 runtime panic, 2 fuel, 3 depth, 4 foreign/host panic),
+`owner`, `start`, `end` (null when absent) and the exact UTF-8 `message`. A
+parent controller must concurrently drain stdout/stderr and enforce a wall
+envelope for kernels not yet instrumented. `Tests/comptime-runtime.c`
+exercises the actual exports in exec'd children, including successful scope
+reuse and fuel charged from a callback thread.
 
 ## In-process linking
 
