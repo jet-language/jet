@@ -207,8 +207,9 @@ fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], e
         loop row in rows -> &groups.push(row.tokens)
         unit :: units[modules[module_index].source_unit_index]
         original :: jet_driver_marker_group_source(source_files, unit.path) ?? return false
-        source :: if jet_driver_unit_is_core(unit) -> jet_driver_mask_core_package(original) else -> original
-        lexed := if jet_driver_unit_is_core(unit) -> lex_generated(source.bytes()) else -> lex(source.bytes())
+        source :: if jet_driver_unit_is_core(unit) -> jet_driver_mask_inline_package(original, jet_driver_inline_package(original)) else -> original
+        source_bytes :: source.bytes()
+        lexed := if jet_driver_unit_is_core(unit) -> lex_generated(source_bytes) else -> lex(source_bytes)
         expanded :: expand_named_marker_groups_with_uses(lexed.tokens, groups)
         if expanded.uses.len() == 0 -> next
         bindings := [SemaMarkerModuleBinding]{}
@@ -231,8 +232,22 @@ fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], e
             }
         }
         lexed.tokens = expanded.tokens
-        parsed :: parse_lexed_with_source(lexed, source.bytes(), parser_line_starts(source.bytes()))
-        loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic_with_source_path(~diagnostic, unit.path, 0))
+        parsed :: parse_lexed_with_source(lexed, source_bytes, parser_line_starts(source_bytes))
+        // Replay replaces initial local-group reports one-for-one; distinct
+        // repeats at the same authored span must remain distinct diagnostics.
+        prior_count := diagnostics.len()
+        loop diagnostic in parsed.diagnostics {
+            replayed :: diagnostic_with_source_path(~diagnostic, unit.path, 0)
+            loop index in 0..<prior_count {
+                previous :: diagnostics[index]
+                if previous.source_path == replayed.source_path && previous.severity == replayed.severity && previous.code == replayed.code && previous.span == replayed.span && previous.what == replayed.what && previous.why == replayed.why && previous.fix == replayed.fix && previous.edit == replayed.edit {
+                    _ := &diagnostics.remove(index)
+                    prior_count -= 1
+                    break
+                }
+            }
+            &diagnostics.push(replayed)
+        }
         if jet_driver_has_errors(parsed.diagnostics) {
             complete = false
             next

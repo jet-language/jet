@@ -619,39 +619,6 @@ fn is_http_route_registration(type_name: &str, method: &str) -> bool {
     }
 }
 
-impl<'a> Checker<'a> {
-    fn http_handler_param_count(&self, expr: &Expr) -> Option<usize> {
-        match expr {
-            Expr::Paren(inner, _) => self.http_handler_param_count(inner),
-            Expr::Lambda(lambda) => Some(lambda.params.len()),
-            Expr::Ident(name, _) => {
-                self.funcs
-                    .get(name)
-                    .map(|sig| sig.params.len())
-                    .or_else(|| {
-                        self.lookup(name).and_then(|info| match &info.ty {
-                            Type::Fn { params, .. } => Some(params.len()),
-                            _ => None,
-                        })
-                    })
-            }
-            _ => None,
-        }
-    }
-
-    fn http_route_is_fixed_path(&self, expr: &Expr) -> Option<bool> {
-        let crate::Comptime::CtValue::Str(pattern) = self.evaluate_constant(expr)? else {
-            return None;
-        };
-        Some(
-            Syntax::validate_http_route_pattern(&pattern).is_ok()
-                && pattern.split('/').skip(1).all(|segment| {
-                    !segment.starts_with(Syntax::HTTP_ROUTE_PARAM_PREFIX)
-                        && !segment.starts_with(Syntax::HTTP_ROUTE_CATCH_ALL_PREFIX)
-                }),
-        )
-    }
-}
 
 fn http_route_json_type(body: &LambdaBody, request_params: &HashSet<String>) -> Option<Type> {
     let mut found = None;
@@ -919,6 +886,27 @@ impl<'a> Checker<'a> {
         self.expect_core_arg(method, index, handler_ty, arg);
         self.http_handler_depth = saved_http_depth;
         self.lambda_escapes = saved_escapes;
+    }
+
+    fn check_http_route_registration(
+        &mut self,
+        receiver: &Expr,
+        method: &str,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) {
+        if let (Some(root), Some(CtValue::Str(pattern))) =
+            (expr_root_ident(receiver), args.first().and_then(|arg| self.evaluate_constant(&arg.expr)))
+        {
+            let root = self.http_mux_aliases.get(root).map_or(root, String::as_str);
+            if !self.http_routes.insert((root.to_string(), method.to_string(), pattern.clone())) {
+                self.diags.push(Diagnostic::error("E2804",
+                    format!("Two routes both match `{} {pattern}`.", method.to_uppercase()),
+                    "a duplicate route makes dispatch ambiguous; mounted and value routes share one ordered list".to_string(),
+                    "remove one registration or use a distinct method and path".to_string(), Some(span)));
+            }
+        }
+        self.check_http_router_contract(method, args, span);
     }
 
     fn check_http_router_contract(
@@ -5228,17 +5216,7 @@ impl<'a> Checker<'a> {
             {
                 self.check_http_route_constant(handle_ty, method, args);
                 if is_http_route_registration(handle_ty, method) {
-                    if let (Some(root), Some(CtValue::Str(pattern))) =
-                        (expr_root_ident(receiver), args.first().and_then(|arg| self.evaluate_constant(&arg.expr))) {
-                        let root = self.http_mux_aliases.get(root).map_or(root, String::as_str);
-                        if !self.http_routes.insert((root.to_string(), method.to_string(), pattern.clone())) {
-                            self.diags.push(Diagnostic::error("E2804",
-                                format!("Two routes both match `{} {pattern}`.", method.to_uppercase()),
-                                "a duplicate route makes dispatch ambiguous; mounted and value routes share one ordered list".to_string(),
-                                "remove one registration or use a distinct method and path".to_string(), Some(span)));
-                        }
-                    }
-                    self.check_http_router_contract(method, args, span);
+                    self.check_http_route_registration(receiver, method, args, span);
                 } else if handle_ty == "HTTPMux" && method == "middleware" {
                     if args.len() != 1 {
                         self.diags
@@ -5635,28 +5613,7 @@ impl<'a> Checker<'a> {
                     "get" | "post" | "put" | "delete" | "patch" | "head" | "options"
                 )
             {
-                if args.len() != 2 {
-                    self.diags
-                        .push(wrong_core_arity(method, 2, args.len(), span));
-                    for arg in args.iter_mut() {
-                        self.infer(&mut arg.expr);
-                    }
-                } else {
-                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-                    let handler_params = if self.http_handler_param_count(&args[1].expr) == Some(0)
-                        && self.http_route_is_fixed_path(&args[0].expr) == Some(true)
-                    {
-                        Vec::new()
-                    } else {
-                        vec![Type::Named("HTTPRequest".to_string())]
-                    };
-                    self.expect_http_handler_arg(
-                        method,
-                        1,
-                        &http_handler_type(handler_params),
-                        &mut args[1],
-                    );
-                }
+                self.check_http_route_registration(receiver, method, args, span);
             } else if matches!(
                 &recv_ty,
                 Type::Named(name) if name == "HTTPRequest" || name == "HTTPResponse"

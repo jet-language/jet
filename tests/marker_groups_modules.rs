@@ -88,6 +88,10 @@ fn bare_imported_unknown_private_and_ambiguous_names_have_distinct_errors() {
         rejects(&[("main.jet", &main), ("library.jet", library)], code);
     }
     rejects(&[
+        ("main.jet", include_str!("ui/marker_module_bare/main.jet")),
+        ("library.jet", include_str!("ui/marker_module_bare/library.jet")),
+    ], "E0085");
+    rejects(&[
         ("main.jet", "use first as lib\nuse second as lib\n#lib.LibraryNote pub fn helper() {}\nfn run() {}\n"),
         ("first.jet", library),
         ("second.jet", library),
@@ -109,7 +113,7 @@ fn exported_nested_marker_and_group_keep_their_declaration_identity() {
     let marker = custom_marker(&helper.markers, "LibraryNote");
     let MarkerResolution::Found(resolved) = resolve_marker_application(&bundle, bundle.entry, marker) else { panic!("nested member must resolve") };
     assert_ne!(resolved.module, bundle.entry);
-    assert_eq!(resolved.declaration.name, "Tag");
+    assert_eq!(resolved.declaration.name, "LibraryNote");
     assert!(resolved.exported);
     assert_eq!(marker.declaration, Some((resolved.module, resolved.declaration.name_span)));
     assert!(declaration_by_span(&bundle.modules[resolved.module].items, resolved.declaration.name_span).is_some());
