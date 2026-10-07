@@ -67,6 +67,12 @@ if (config.compiler?.sourceSHA !== config.source.sha) throw Error('composed runt
 pinnedFile(config.compiler.path, config.compiler.sha256, 'composed compiler');
 pinnedFile(config.e2.compiler, config.e2.compilerSHA256, 'FINAL E2 compiler');
 pinnedFile(config.e2.object, config.e2.objectSHA256, 'FINAL E2 object');
+// Runtime optimization is source-selected, not an environment switch. The O1
+// static bundle has a different owner/epoch and must not silently enter here.
+const loweringPath = 'Compiler/JetBackend/Source/Image/RuntimeLibrary.jet';
+for (const tree of [config.source.root, config.e2.root]) {
+  if (source(tree, loweringPath).split('\n').some(line => !line.trim().startsWith('//') && /\blir_optimize_module\s*\(/.test(line))) throw Error('O1 runtime-library hook is not an O0 parent runtime input');
+}
 const manifestPath = `${runtime}/exports.list`;
 const manifest = source(config.source.root, manifestPath);
 const rows = exportRows(manifest);
@@ -137,7 +143,7 @@ const receipt = {
   e2SHA: config.e2.sha, layers: config.layers, optimization: 'O0',
   library: 'jet_runtime.so', librarySHA256: fileHash(candidate), objectSHA256: fileHash(object),
   compilerSHA256: config.compiler.sha256, e2CompilerSHA256: config.e2.compilerSHA256, e2ObjectSHA256: config.e2.objectSHA256,
-  exportManifestSHA256: hash(manifest), sourceFiles, ...seal,
+  exportManifestSHA256: hash(manifest), runtimeLoweringSHA256: fileHash(join(config.source.root, loweringPath)), sourceFiles, ...seal,
 };
 renameSync(candidate, join(out, receipt.library));
 const receiptBytes = JSON.stringify(receipt, null, 2) + '\n';
