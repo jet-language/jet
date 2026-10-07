@@ -508,6 +508,12 @@ pub struct FoundationDirectoryAuthority {
         self.directories[self.directories.len() - 1].handle.fsync()
         self.revalidate()
     }
+    // The process owns a duplicate of this held directory through exec. Git
+    // consumes only the child fd/cwd, never a re-opened authority pathname.
+    fn process_directory(self, spec: ProcessSpec, child_fd: Int, as_cwd: Bool) -[FS, Exec, Env]> ProcessSpec IOError! {
+        self.revalidate()
+        files.__with_process_directory(spec, self.directories[self.directories.len() - 1].handle, child_fd, as_cwd)
+    }
     pub fn child(self, name: String, create: Bool{false}) -[FS]> FoundationDirectoryAuthority IOError! {
         foundation_directory_authority_name(name)
         self.revalidate()
