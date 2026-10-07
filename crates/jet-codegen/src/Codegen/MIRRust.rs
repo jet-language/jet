@@ -5952,6 +5952,25 @@ impl<'a> RustEmitter<'a> {
             }
             return format!("&{lifetime}[{}]", self.rust_type(&args[0]));
         }
+        // ViewIter retains borrowed windows and their source lifetime.
+        if name.name == jet_foundation::Syntax::TYPE_VIEW_ITER && args.len() == 1 {
+            return format!(
+                "{}JetViewIter<'_, {}>",
+                self.config.root_prefix,
+                self.rust_type(&args[0])
+            );
+        }
+        // Coordinate spaces and units are checked phantom facts, not native
+        // generic parameters. Erase them before attempting nominal lookup.
+        let geometry = match (native_name, args.len()) {
+            ("Point2" | "Delta2", 2) => Some("JetCoord2"),
+            ("Transform" | "Transform2", 2 | 3) => Some("JetTransform2"),
+            ("Ray2", 3) => Some("JetRay2"),
+            _ => None,
+        };
+        if let Some(carrier) = geometry {
+            return format!("{}{carrier}", self.config.root_prefix);
+        }
         if name.name == "ViewMut" && args.len() == 1 {
             return format!(
                 "&{}mut [{}]",

@@ -2598,6 +2598,7 @@ fn jet_rust_emit_root_prelude_type_name(name: String) -> String? {
         "Loadable" -> Val("JetLoadable")
         "Range" -> Val("JetRange")
         "Iter" -> Val("JetIter")
+        "Complex" -> Val("JetComplex")
         "Point" -> Val("JetPoint")
         "Size" -> Val("JetSize")
         "Rect" -> Val("JetRect")
@@ -2931,6 +2932,11 @@ fn jet_rust_emit_native_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef
     root :: ~ctx.config.root_prefix
     native_name :: jet_rust_emit_core_native_probe_name(name.name)
     user_declared :: ctx.type_by_name.get(name.name) != None
+    if name.name == "ViewIter" && args.len() == 1 -> return Val("{root}JetViewIter<'_, {jet_rust_emit_type(&ctx, args[0])}>")
+    // Coordinate spaces and units are sema-only phantom facts.
+    if (native_name == "Point2" || native_name == "Delta2") && args.len() == 2 -> return Val("{root}JetCoord2")
+    if (native_name == "Transform" || native_name == "Transform2") && (args.len() == 2 || args.len() == 3) -> return Val("{root}JetTransform2")
+    if native_name == "Ray2" && args.len() == 3 -> return Val("{root}JetRay2")
     if name.name == "Tally" && args.len() == 1 -> return Val("std::collections::HashMap<{jet_rust_emit_type(&ctx, args[0])}, usize>")
     if name.name == "Queue" && args.len() == 1 -> return Val("std::collections::VecDeque<{jet_rust_emit_type(&ctx, args[0])}>")
     if args.len() == 0 && name.name == "Group" -> return Val("{root}jet_std::JetTaskGroup")

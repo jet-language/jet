@@ -57,6 +57,12 @@ The generator must verify that:
 - effect, authority, capability, fallback, signature, and tier metadata remain
   consistent.
 
+Native type projection preserves the checked representation: borrowed iterators
+retain the owner's lifetime, and coordinate-space or unit phantom arguments are
+erased only at the native ABI. Compiler-owned records and reflection enums still
+need declaration rows when programs read fields or construct typed values; an
+opaque native carrier does not make those checked identities optional.
+
 The generated Rust tables are projections, not a second API catalog. Never
 hand-edit them. The main generated views are
 [`CoreModuleExports.rs`](../../crates/jet-foundation/src/CoreModuleExports.rs),
