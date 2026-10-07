@@ -14017,7 +14017,7 @@ mod jet_c_abi_routes {
         guard(|| handle(crate::jet_fake_name(unsafe { &mut *a0 })))
     }
 
-    /// core.text.fmt.bin
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_fmt_bin(a0: i64) -> JetCString {
         guard(|| handle(crate::jet_std::jet_fmt_bin_owned(&unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a0) })))
@@ -14027,12 +14027,6 @@ mod jet_c_abi_routes {
     #[no_mangle]
     pub extern "C" fn jet_fmt_bin_decimal(a0: JetCString) -> JetCString {
         guard(|| handle(crate::jet_fmt_bin_decimal(view(a0))))
-    }
-
-    /// core.text.fmt.bytes
-    #[no_mangle]
-    pub extern "C" fn jet_fmt_bytes(a0: i64) -> JetCString {
-        guard(|| handle(crate::jet_fmt_bytes(a0)))
     }
 
     /// core.text.fmt.decimal
@@ -14047,13 +14041,7 @@ mod jet_c_abi_routes {
         guard(|| handle(crate::jet_std::jet_fmt_decimal_int_owned(&unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a0) }, &unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) })))
     }
 
-    /// core.text.fmt.duration
-    #[no_mangle]
-    pub extern "C" fn jet_fmt_duration(a0: i64) -> JetCString {
-        guard(|| handle(crate::jet_fmt_duration(a0)))
-    }
-
-    /// core.text.fmt.grouped
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_fmt_grouped(a0: f64, a1: i64) -> JetCString {
         guard(|| handle(crate::jet_fmt_grouped(a0, a1)))
@@ -14065,7 +14053,7 @@ mod jet_c_abi_routes {
         guard(|| handle(crate::jet_std::jet_fmt_grouped_int_owned(&unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a0) }, &unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) })))
     }
 
-    /// core.text.fmt.hex
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_fmt_hex(a0: i64, a1: i64) -> JetCString {
         guard(|| handle(crate::jet_std::jet_fmt_hex_owned(&unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a0) }, &unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) })))
@@ -14077,13 +14065,7 @@ mod jet_c_abi_routes {
         guard(|| handle(crate::jet_fmt_hex_decimal(view(a0), a1)))
     }
 
-    /// core.text.fmt.number
-    #[no_mangle]
-    pub extern "C" fn jet_fmt_number(a0: i64) -> JetCString {
-        guard(|| handle(crate::jet_fmt_number(a0)))
-    }
-
-    /// core.text.fmt.oct
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_fmt_oct(a0: i64) -> JetCString {
         guard(|| handle(crate::jet_std::jet_fmt_oct_owned(&unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a0) })))
@@ -14095,46 +14077,22 @@ mod jet_c_abi_routes {
         guard(|| handle(crate::jet_fmt_oct_decimal(view(a0))))
     }
 
-    /// core.text.fmt.ordinal
-    #[no_mangle]
-    pub extern "C" fn jet_fmt_ordinal(a0: i64) -> JetCString {
-        guard(|| handle(crate::jet_fmt_ordinal(a0)))
-    }
-
-    /// core.text.fmt.pad
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_fmt_pad(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
         guard(|| handle(crate::jet_fmt_pad(unsafe { &*a0 }, a1, unsafe { &*a2 })))
     }
 
-    /// core.text.fmt.pad_center
-    #[no_mangle]
-    pub extern "C" fn jet_fmt_pad_center(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_fmt_pad_center(unsafe { &*a0 }, a1, unsafe { &*a2 })))
-    }
-
-    /// core.text.fmt.pad_left
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_fmt_pad_left(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
         guard(|| handle(crate::jet_fmt_pad_left(unsafe { &*a0 }, a1, unsafe { &*a2 })))
     }
 
-    /// core.text.fmt.pad_right
-    #[no_mangle]
-    pub extern "C" fn jet_fmt_pad_right(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_fmt_pad_right(unsafe { &*a0 }, a1, unsafe { &*a2 })))
-    }
-
-    /// core.text.fmt.percent
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_fmt_percent(a0: f64, a1: i64) -> JetCString {
         guard(|| handle(crate::jet_fmt_percent(a0, a1)))
-    }
-
-    /// core.text.fmt.plural
-    #[no_mangle]
-    pub extern "C" fn jet_fmt_plural(a0: i64, a1: JetCString, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_fmt_plural(a0, unsafe { &*a1 }, unsafe { &*a2 })))
     }
 
     /// core.text.fmt.pretty
@@ -14149,7 +14107,7 @@ mod jet_c_abi_routes {
         guard(|| handle(crate::jet_fmt_quantity(a0)))
     }
 
-    /// core.text.fmt.sci
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_fmt_sci(a0: f64, a1: i64) -> JetCString {
         guard(|| handle(crate::jet_fmt_sci(a0, a1)))
@@ -21099,28 +21057,16 @@ mod jet_c_abi_routes {
         guard(|| handle(crate::jet_text_ascii_upper(unsafe { &*a0 })))
     }
 
-    /// core.text.parse.capitalize
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_capitalize(a0: JetCString) -> JetCString {
         guard(|| handle(crate::jet_text_capitalize(unsafe { &*a0 })))
     }
 
-    /// core.text.casefold
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_casefold(a0: JetCString) -> JetCString {
         guard(|| handle(crate::jet_text_casefold(unsafe { &*a0 })))
-    }
-
-    /// core.text.caseless_eq
-    #[no_mangle]
-    pub extern "C" fn jet_text_caseless_eq(a0: JetCString, a1: JetCString) -> bool {
-        guard(|| crate::jet_text_caseless_eq(unsafe { &*a0 }, unsafe { &*a1 }))
-    }
-
-    /// core.text.center, core.text.parse.center
-    #[no_mangle]
-    pub extern "C" fn jet_text_center_i64(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_center_i64(unsafe { &*a0 }, a1, unsafe { &*a2 })))
     }
 
     /// TIR/routes.rs
@@ -21129,220 +21075,88 @@ mod jet_c_abi_routes {
         guard(|| handle(crate::jet_text_center_ref(unsafe { &*a0 }, &unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) }, unsafe { &*a2 })))
     }
 
-    /// core.text.char_indices
-    #[no_mangle]
-    pub extern "C" fn jet_text_char_indices(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_char_indices(unsafe { &*a0 }).into_iter().map(|e| handle(e) as u64).collect(), data))
-    }
-
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_compare(a0: JetCString, a1: JetCString) -> i64 {
         guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_compare(view(a0), view(a1))))
     }
 
-    /// core.text.wrap.dedent
-    #[no_mangle]
-    pub extern "C" fn jet_text_dedent(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_dedent(unsafe { &*a0 })))
-    }
-
-    /// core.text.parse.encode
-    #[no_mangle]
-    pub extern "C" fn jet_text_encode(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_encode(unsafe { &*a0 }).into_iter().map(|e| e as u64).collect(), data))
-    }
-
-    /// core.text.ends_any
-    #[no_mangle]
-    pub extern "C" fn jet_text_ends_any(a0: JetCString, a1_0: *const u64, a1_1: i64) -> bool {
-        guard(|| crate::jet_text_ends_any(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| view(w as JetCString).to_owned())))
-    }
-
-    /// core.text.wrap.expand_tabs
-    #[no_mangle]
-    pub extern "C" fn jet_text_expand_tabs(a0: JetCString, a1: i64) -> JetCString {
-        guard(|| handle(crate::jet_text_expand_tabs(unsafe { &*a0 }, a1)))
-    }
-
-    /// core.text.parse.expandtabs, core.builtin.expandtabs
+    /// core.builtin.expandtabs
     #[no_mangle]
     pub extern "C" fn jet_text_expandtabs(a0: JetCString, a1: i64) -> JetCString {
         guard(|| handle(crate::jet_text_expandtabs(unsafe { &*a0 }, unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) })))
     }
 
-    /// core.text.wrap.fill
-    #[no_mangle]
-    pub extern "C" fn jet_text_fill(a0: JetCString, a1: i64) -> JetCString {
-        guard(|| handle(crate::jet_text_fill(unsafe { &*a0 }, a1)))
-    }
-
-    /// core.text.graphemes
-    #[no_mangle]
-    pub extern "C" fn jet_text_graphemes(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_graphemes(unsafe { &*a0 }).into_iter().map(|e| handle(e) as u64).collect(), data))
-    }
-
-    /// core.text.wrap.hanging_indent
-    #[no_mangle]
-    pub extern "C" fn jet_text_hanging_indent(a0: JetCString, a1: JetCString, a2: JetCString, a3: i64) -> JetCString {
-        guard(|| handle(crate::jet_text_hanging_indent(unsafe { &*a0 }, unsafe { &*a1 }, unsafe { &*a2 }, a3)))
-    }
-
-    /// core.text.wrap.html_escape, core.text.html.escape_quote
-    #[no_mangle]
-    pub extern "C" fn jet_text_html_escape(a0: JetCString, a1: u8) -> JetCString {
-        guard(|| handle(crate::jet_text_html_escape(unsafe { &*a0 }, a1 != 0)))
-    }
-
-    /// core.text.html.escape, core.text.html.attr_escape
-    #[no_mangle]
-    pub extern "C" fn jet_text_html_escape_quoted(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_html_escape_quoted(unsafe { &*a0 })))
-    }
-
-    /// core.text.html.text_escape
-    #[no_mangle]
-    pub extern "C" fn jet_text_html_escape_text(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_html_escape_text(unsafe { &*a0 })))
-    }
-
-    /// core.text.html.strip_tags
-    #[no_mangle]
-    pub extern "C" fn jet_text_html_strip_tags(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_html_strip_tags(unsafe { &*a0 })))
-    }
-
-    /// core.text.wrap.html_unescape, core.text.html.unescape
-    #[no_mangle]
-    pub extern "C" fn jet_text_html_unescape(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_html_unescape(unsafe { &*a0 })))
-    }
-
-    /// core.text.html.unescape_and_strip
-    #[no_mangle]
-    pub extern "C" fn jet_text_html_unescape_and_strip(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_html_unescape_and_strip(unsafe { &*a0 })))
-    }
-
-    /// core.text.wrap.indent
-    #[no_mangle]
-    pub extern "C" fn jet_text_indent(a0: JetCString, a1: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_indent(unsafe { &*a0 }, unsafe { &*a1 })))
-    }
-
-    /// core.text.wrap.indent_with
-    #[no_mangle]
-    pub extern "C" fn jet_text_indent_with(a0: JetCString, a1: JetCString, a2: u8) -> JetCString {
-        guard(|| handle(crate::jet_text_indent_with(unsafe { &*a0 }, unsafe { &*a1 }, a2 != 0)))
-    }
-
-    /// core.text.inspect
-    #[no_mangle]
-    pub extern "C" fn jet_text_inspect(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_inspect(unsafe { &*a0 }).into_iter().map(|e| handle(e) as u64).collect(), data))
-    }
-
-    /// core.text.is_alphabetic, core.text.parse.isalpha, core.builtin.string_is_alphabetic
+    /// core.builtin.string_is_alphabetic
     #[no_mangle]
     pub extern "C" fn jet_text_is_alphabetic(a0: JetCString) -> bool {
         guard(|| crate::jet_text_is_alphabetic(unsafe { &*a0 }))
     }
 
-    /// core.text.parse.islower, core.text.parse.is_lower
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_is_lower(a0: JetCString) -> bool {
         guard(|| crate::jet_text_is_lower(unsafe { &*a0 }))
     }
 
-    /// core.text.is_numeric, core.builtin.string_is_numeric
+    /// core.builtin.string_is_numeric
     #[no_mangle]
     pub extern "C" fn jet_text_is_numeric(a0: JetCString) -> bool {
         guard(|| crate::jet_text_is_numeric(unsafe { &*a0 }))
     }
 
-    /// core.text.parse.isupper, core.text.parse.is_upper
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_is_upper(a0: JetCString) -> bool {
         guard(|| crate::jet_text_is_upper(unsafe { &*a0 }))
     }
 
-    /// core.text.is_whitespace, core.text.parse.isspace, core.text.parse.is_space, core.builtin.string_is_whitespace
+    /// core.builtin.string_is_whitespace
     #[no_mangle]
     pub extern "C" fn jet_text_is_whitespace(a0: JetCString) -> bool {
         guard(|| crate::jet_text_is_whitespace(unsafe { &*a0 }))
     }
 
-    /// core.text.parse.isalnum, core.text.parse.is_alnum
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_isalnum(a0: JetCString) -> bool {
         guard(|| crate::jet_text_isalnum(unsafe { &*a0 }))
     }
 
-    /// core.text.parse.isdecimal
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_isdecimal(a0: JetCString) -> bool {
         guard(|| crate::jet_text_isdecimal(unsafe { &*a0 }))
     }
 
-    /// core.text.parse.isdigit, core.text.parse.is_digit
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_isdigit(a0: JetCString) -> bool {
         guard(|| crate::jet_text_isdigit(unsafe { &*a0 }))
     }
 
-    /// core.text.parse.isidentifier, core.text.parse.is_identifier
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_isidentifier(a0: JetCString) -> bool {
         guard(|| crate::jet_text_isidentifier(unsafe { &*a0 }))
     }
 
-    /// core.text.parse.isnumeric
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_isnumeric(a0: JetCString) -> bool {
         guard(|| crate::jet_text_isnumeric(unsafe { &*a0 }))
     }
 
-    /// core.text.parse.isprintable
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_isprintable(a0: JetCString) -> bool {
         guard(|| crate::jet_text_isprintable(unsafe { &*a0 }))
     }
 
-    /// core.text.parse.istitle, core.text.parse.is_title
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_istitle(a0: JetCString) -> bool {
         guard(|| crate::jet_text_istitle(unsafe { &*a0 }))
-    }
-
-    /// core.text.lower, core.text.parse.lower
-    #[no_mangle]
-    pub extern "C" fn jet_text_lower(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_lower(unsafe { &*a0 })))
-    }
-
-    /// core.text.nfc
-    #[no_mangle]
-    pub extern "C" fn jet_text_nfc(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_nfc(unsafe { &*a0 })))
-    }
-
-    /// core.text.nfd
-    #[no_mangle]
-    pub extern "C" fn jet_text_nfd(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_nfd(unsafe { &*a0 })))
-    }
-
-    /// core.text.nfkc
-    #[no_mangle]
-    pub extern "C" fn jet_text_nfkc(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_nfkc(unsafe { &*a0 })))
-    }
-
-    /// core.text.nfkd
-    #[no_mangle]
-    pub extern "C" fn jet_text_nfkd(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_nfkd(unsafe { &*a0 })))
     }
 
     /// TIR/routes.rs
@@ -21357,12 +21171,6 @@ mod jet_c_abi_routes {
         guard(|| handle(crate::jet_text_pad_end(unsafe { &*a0 }, unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) }, unsafe { &*a2 })))
     }
 
-    /// core.text.pad_end, core.text.parse.ljust
-    #[no_mangle]
-    pub extern "C" fn jet_text_pad_end_i64(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_pad_end_i64(unsafe { &*a0 }, a1, unsafe { &*a2 })))
-    }
-
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_pad_end_ref(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
@@ -21375,120 +21183,25 @@ mod jet_c_abi_routes {
         guard(|| handle(crate::jet_text_pad_start(unsafe { &*a0 }, unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) }, unsafe { &*a2 })))
     }
 
-    /// core.text.pad_start, core.text.parse.rjust
-    #[no_mangle]
-    pub extern "C" fn jet_text_pad_start_i64(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_pad_start_i64(unsafe { &*a0 }, a1, unsafe { &*a2 })))
-    }
-
     /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_pad_start_ref(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
         guard(|| handle(crate::jet_text_pad_start_ref(unsafe { &*a0 }, &unsafe { crate::jet_foundation::Numeric::JetInt::clone_from_raw(a1) }, unsafe { &*a2 })))
     }
 
-    /// core.text.parse.parse_bool
-    #[no_mangle]
-    pub extern "C" fn jet_text_parse_bool(a0: JetCString, some: *mut bool) -> i64 {
-        guard(|| match crate::jet_text_parse_bool(unsafe { &*a0 }) {
-            Some(value) => { unsafe { some.write(value) }; 1 }
-            None => 0,
-        })
-    }
-
-    /// core.text.parse.capwords
-    #[no_mangle]
-    pub extern "C" fn jet_text_parse_capwords(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_parse_capwords(unsafe { &*a0 })))
-    }
-
-    /// core.text.parse.contains
-    #[no_mangle]
-    pub extern "C" fn jet_text_parse_contains(a0: JetCString, a1: JetCString) -> bool {
-        guard(|| crate::jet_text_parse_contains(unsafe { &*a0 }, unsafe { &*a1 }))
-    }
-
-    /// core.text.parse.count
-    #[no_mangle]
-    pub extern "C" fn jet_text_parse_count(a0: JetCString, a1: JetCString) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_parse_count(unsafe { &*a0 }, unsafe { &*a1 })))
-    }
-
-    /// core.text.parse.escape_c
-    #[no_mangle]
-    pub extern "C" fn jet_text_parse_escape_c(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_parse_escape_c(unsafe { &*a0 })))
-    }
-
-    /// core.text.parse.find
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_parse_find(a0: JetCString, a1: JetCString) -> i64 {
         guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_parse_find(unsafe { &*a0 }, unsafe { &*a1 })))
     }
 
-    /// core.text.parse.find_from
-    #[no_mangle]
-    pub extern "C" fn jet_text_parse_find_from(a0: JetCString, a1: JetCString, a2: i64) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_parse_find_from(unsafe { &*a0 }, unsafe { &*a1 }, a2)))
-    }
-
-    /// core.text.parse.parse_float
-    #[no_mangle]
-    pub extern "C" fn jet_text_parse_float(a0: JetCString, some: *mut f64) -> i64 {
-        guard(|| match crate::jet_text_parse_float(unsafe { &*a0 }) {
-            Some(value) => { unsafe { some.write(value) }; 1 }
-            None => 0,
-        })
-    }
-
-    /// core.text.parse.index
-    #[no_mangle]
-    pub extern "C" fn jet_text_parse_index(a0: JetCString, a1: JetCString) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_parse_index(unsafe { &*a0 }, unsafe { &*a1 })))
-    }
-
-    /// core.text.parse.parse_int, core.text.parse.parse
-    #[no_mangle]
-    pub extern "C" fn jet_text_parse_int(a0: JetCString, some: *mut i64) -> i64 {
-        guard(|| match crate::jet_text_parse_int(unsafe { &*a0 }) {
-            Some(value) => { unsafe { some.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
-            None => 0,
-        })
-    }
-
-    /// core.text.parse.parse_int_base
-    #[no_mangle]
-    pub extern "C" fn jet_text_parse_int_base(a0: JetCString, a1: i64, some: *mut i64) -> i64 {
-        guard(|| match crate::jet_text_parse_int_base(unsafe { &*a0 }, a1) {
-            Some(value) => { unsafe { some.write(crate::jet_std::jet_int_from_i64(value)) }; 1 }
-            None => 0,
-        })
-    }
-
-    /// core.text.parse.join
-    #[no_mangle]
-    pub extern "C" fn jet_text_parse_join(a0_0: *const u64, a0_1: i64, a1: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_parse_join(&list_in(a0_0, a0_1, |w| view(w as JetCString).to_owned()), unsafe { &*a1 })))
-    }
-
-    /// core.text.parse.parse_kv
-    #[no_mangle]
-    pub extern "C" fn jet_text_parse_kv(a0: JetCString, a1: JetCString, item0: *mut JetCString, item1: *mut bool, item2: *mut JetCString) {
-        guard(|| {
-            let (e0, e1, e2) = crate::jet_text_parse_kv(unsafe { &*a0 }, unsafe { &*a1 });
-            unsafe { item0.write(handle(e0)) };
-            unsafe { item1.write(e1) };
-            unsafe { item2.write(handle(e2)) };
-        })
-    }
-
-    /// core.text.parse.lstrip
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_parse_lstrip(a0: JetCString) -> JetCString {
         guard(|| handle(crate::jet_text_parse_lstrip(unsafe { &*a0 })))
     }
 
-    /// core.text.parse.partition
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_parse_partition(a0: JetCString, a1: JetCString, item0: *mut JetCString, item1: *mut JetCString, item2: *mut JetCString) {
         guard(|| {
@@ -21499,25 +21212,13 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.text.parse.replace
-    #[no_mangle]
-    pub extern "C" fn jet_text_parse_replace_n(a0: JetCString, a1: JetCString, a2: JetCString, a3: i64) -> JetCString {
-        guard(|| handle(crate::jet_text_parse_replace_n(unsafe { &*a0 }, unsafe { &*a1 }, unsafe { &*a2 }, a3)))
-    }
-
-    /// core.text.parse.rfind
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_parse_rfind(a0: JetCString, a1: JetCString) -> i64 {
         guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_parse_rfind(unsafe { &*a0 }, unsafe { &*a1 })))
     }
 
-    /// core.text.parse.rfind_from
-    #[no_mangle]
-    pub extern "C" fn jet_text_parse_rfind_from(a0: JetCString, a1: JetCString, a2: i64) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_parse_rfind_from(unsafe { &*a0 }, unsafe { &*a1 }, a2)))
-    }
-
-    /// core.text.parse.rpartition
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_parse_rpartition(a0: JetCString, a1: JetCString, item0: *mut JetCString, item1: *mut JetCString, item2: *mut JetCString) {
         guard(|| {
@@ -21528,66 +21229,25 @@ mod jet_c_abi_routes {
         })
     }
 
-    /// core.text.parse.rsplit
-    #[no_mangle]
-    pub extern "C" fn jet_text_parse_rsplit(a0: JetCString, a1: JetCString, a2: i64, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_parse_rsplit(unsafe { &*a0 }, unsafe { &*a1 }, a2).into_iter().map(|e| handle(e) as u64).collect(), data))
-    }
-
-    /// core.text.parse.rstrip
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_parse_rstrip(a0: JetCString) -> JetCString {
         guard(|| handle(crate::jet_text_parse_rstrip(unsafe { &*a0 })))
     }
 
-    /// core.text.parse.split
-    #[no_mangle]
-    pub extern "C" fn jet_text_parse_split(a0: JetCString, a1: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_parse_split(unsafe { &*a0 }, unsafe { &*a1 }).into_iter().map(|e| handle(e) as u64).collect(), data))
-    }
-
-    /// core.text.parse.split_once
-    #[no_mangle]
-    pub extern "C" fn jet_text_parse_split_once(a0: JetCString, a1: JetCString, item0: *mut bool, item1: *mut JetCString, item2: *mut JetCString) {
-        guard(|| {
-            let (e0, e1, e2) = crate::jet_text_parse_split_once(unsafe { &*a0 }, unsafe { &*a1 });
-            unsafe { item0.write(e0) };
-            unsafe { item1.write(handle(e1)) };
-            unsafe { item2.write(handle(e2)) };
-        })
-    }
-
-    /// core.text.parse.split_ws
-    #[no_mangle]
-    pub extern "C" fn jet_text_parse_split_ws(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_parse_split_ws(unsafe { &*a0 }).into_iter().map(|e| handle(e) as u64).collect(), data))
-    }
-
-    /// core.text.parse.splitlines
-    #[no_mangle]
-    pub extern "C" fn jet_text_parse_splitlines(a0: JetCString, a1: u8, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_parse_splitlines(unsafe { &*a0 }, a1 != 0).into_iter().map(|e| handle(e) as u64).collect(), data))
-    }
-
-    /// core.text.parse.strip
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_parse_strip(a0: JetCString) -> JetCString {
         guard(|| handle(crate::jet_text_parse_strip(unsafe { &*a0 })))
     }
 
-    /// core.text.parse.unescape_c
-    #[no_mangle]
-    pub extern "C" fn jet_text_parse_unescape_c(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_parse_unescape_c(unsafe { &*a0 })))
-    }
-
-    /// core.text.parse.removeprefix, core.text.parse.strip_prefix
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_remove_prefix(a0: JetCString, a1: JetCString) -> JetCString {
         guard(|| handle(crate::jet_text_remove_prefix(unsafe { &*a0 }, unsafe { &*a1 })))
     }
 
-    /// core.text.parse.removesuffix, core.text.parse.strip_suffix
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_remove_suffix(a0: JetCString, a1: JetCString) -> JetCString {
         guard(|| handle(crate::jet_text_remove_suffix(unsafe { &*a0 }, unsafe { &*a1 })))
@@ -21599,124 +21259,34 @@ mod jet_c_abi_routes {
         guard(|| handle(crate::jet_text_reverse(unsafe { &*a0 })))
     }
 
-    /// core.text.parse.rindex
-    #[no_mangle]
-    pub extern "C" fn jet_text_rindex(a0: JetCString, a1: JetCString) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_rindex(unsafe { &*a0 }, unsafe { &*a1 })))
-    }
-
-    /// core.text.rsplitn
-    #[no_mangle]
-    pub extern "C" fn jet_text_rsplitn(a0: JetCString, a1: JetCString, a2: i64, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_rsplitn(unsafe { &*a0 }, unsafe { &*a1 }, a2).into_iter().map(|e| handle(e) as u64).collect(), data))
-    }
-
-    /// core.text.sentences
-    #[no_mangle]
-    pub extern "C" fn jet_text_sentences(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_sentences(unsafe { &*a0 }).into_iter().map(|e| handle(e) as u64).collect(), data))
-    }
-
-    /// core.text.wrap.shorten
-    #[no_mangle]
-    pub extern "C" fn jet_text_shorten(a0: JetCString, a1: i64, a2: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_shorten(unsafe { &*a0 }, a1, unsafe { &*a2 })))
-    }
-
-    /// core.text.splitn
-    #[no_mangle]
-    pub extern "C" fn jet_text_splitn(a0: JetCString, a1: JetCString, a2: i64, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_splitn(unsafe { &*a0 }, unsafe { &*a1 }, a2).into_iter().map(|e| handle(e) as u64).collect(), data))
-    }
-
-    /// core.text.starts_any
-    #[no_mangle]
-    pub extern "C" fn jet_text_starts_any(a0: JetCString, a1_0: *const u64, a1_1: i64) -> bool {
-        guard(|| crate::jet_text_starts_any(unsafe { &*a0 }, &list_in(a1_0, a1_1, |w| view(w as JetCString).to_owned())))
-    }
-
-    /// core.text.parse.swapcase
+    /// TIR/routes.rs
     #[no_mangle]
     pub extern "C" fn jet_text_swapcase(a0: JetCString) -> JetCString {
         guard(|| handle(crate::jet_text_swapcase(unsafe { &*a0 })))
     }
 
-    /// core.text.parse.title, core.builtin.string_to_title
+    /// core.builtin.string_to_title
     #[no_mangle]
     pub extern "C" fn jet_text_title(a0: JetCString) -> JetCString {
         guard(|| handle(crate::jet_text_title(unsafe { &*a0 })))
     }
 
-    /// core.text.trim
-    #[no_mangle]
-    pub extern "C" fn jet_text_trim(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_trim(unsafe { &*a0 })))
-    }
-
-    /// core.text.trim_end, core.builtin.string_trim_end
+    /// core.builtin.string_trim_end
     #[no_mangle]
     pub extern "C" fn jet_text_trim_end(a0: JetCString) -> JetCString {
         guard(|| handle(crate::jet_text_trim_end(unsafe { &*a0 })))
     }
 
-    /// core.text.trim_start, core.builtin.string_trim_start
+    /// core.builtin.string_trim_start
     #[no_mangle]
     pub extern "C" fn jet_text_trim_start(a0: JetCString) -> JetCString {
         guard(|| handle(crate::jet_text_trim_start(unsafe { &*a0 })))
     }
 
-    /// core.text.byte_count
-    #[no_mangle]
-    pub extern "C" fn jet_text_unicode_byte_count(a0: JetCString) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_unicode_byte_count(unsafe { &*a0 })))
-    }
-
-    /// core.text.is_ascii, core.text.parse.isascii, core.text.parse.is_ascii, core.builtin.string_is_ascii
+    /// core.builtin.string_is_ascii
     #[no_mangle]
     pub extern "C" fn jet_text_unicode_is_ascii(a0: JetCString) -> bool {
         guard(|| crate::jet_text_unicode_is_ascii(unsafe { &*a0 }))
-    }
-
-    /// core.text.scalar_count
-    #[no_mangle]
-    pub extern "C" fn jet_text_unicode_scalar_count(a0: JetCString) -> i64 {
-        guard(|| crate::jet_std::jet_int_from_i64(crate::jet_text_unicode_scalar_count(unsafe { &*a0 })))
-    }
-
-    /// core.text.scalars
-    #[no_mangle]
-    pub extern "C" fn jet_text_unicode_scalars(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_unicode_scalars(unsafe { &*a0 }).into_iter().map(|e| handle(e) as u64).collect(), data))
-    }
-
-    /// core.text.upper, core.text.parse.upper
-    #[no_mangle]
-    pub extern "C" fn jet_text_upper(a0: JetCString) -> JetCString {
-        guard(|| handle(crate::jet_text_upper(unsafe { &*a0 })))
-    }
-
-    /// core.text.words
-    #[no_mangle]
-    pub extern "C" fn jet_text_words(a0: JetCString, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_words(unsafe { &*a0 }).into_iter().map(|e| handle(e) as u64).collect(), data))
-    }
-
-    /// core.text.wrap.wrap
-    #[no_mangle]
-    pub extern "C" fn jet_text_wrap(a0: JetCString, a1: i64, data: *mut *mut u64) -> i64 {
-        guard(|| list_out(crate::jet_text_wrap(unsafe { &*a0 }, a1).into_iter().map(|e| handle(e) as u64).collect(), data))
-    }
-
-    /// core.text.wrap.wrap_paragraphs
-    #[no_mangle]
-    pub extern "C" fn jet_text_wrap_paragraphs(a0: JetCString, a1: i64) -> JetCString {
-        guard(|| handle(crate::jet_text_wrap_paragraphs(unsafe { &*a0 }, a1)))
-    }
-
-    /// core.text.parse.zfill
-    #[no_mangle]
-    pub extern "C" fn jet_text_zfill(a0: JetCString, a1: i64) -> JetCString {
-        guard(|| handle(crate::jet_text_zfill(unsafe { &*a0 }, a1)))
     }
 
     /// TIR/routes.rs
@@ -24171,11 +23741,7 @@ mod jet_c_abi_routes {
 //   jet_testing_compare (core.testing.compare): parameter types  cases: &Vec<jet_std::DataTree>, reference: Box<dyn Fn(jet_std::DataTree) -> jet_std::DataTree>, candidate: Box<dyn Fn(jet_std::DataTree) -> jet_std::DataTree>, relation: &String, 
 //   jet_testing_histories (core.testing.histories): generic
 //   jet_testing_world (core.testing.world): generic
-//   jet_text_byte_views (core.text.byte_views): generic
-//   jet_text_grapheme_views (core.text.grapheme_views): generic
-//   jet_text_line_views (core.text.line_views): generic
 //   jet_text_pattern_match (TIR/routes.rs): parameter types  subject: &str, parts: &[JetTextMatchPart<'_>], 
-//   jet_text_word_views (core.text.word_views): generic
 //   jet_tls_client_identity_from_pem (core.handle.tls.client_identity_from_pem): parameter types  cert_chain: &Vec<u8>, private_key: &Vec<u8>, validate: fn(&Vec<u8>, &Vec<u8>) -> Result<(), String>, 
 //   jet_tls_root_certificates_from_pem (core.handle.tls.root_certificates_from_pem): parameter types  pem: &Vec<u8>, validate: fn(&Vec<u8>) -> Result<(), String>, 
 //   jet_transaction_on_commit (TIR/routes.rs): parameter types transaction: &mut JetTransaction, callback: Box<dyn FnOnce()>
