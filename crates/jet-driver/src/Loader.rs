@@ -2663,11 +2663,17 @@ fn load_entry_with_overlays_mode_on_stack(
         .modules
         .iter()
         .any(|module| source_names_identifier(&module.source, "URL"));
+    // Prelude static APIs load their source owner just like explicit imports.
+    let names_perf = bundle
+        .modules
+        .iter()
+        .any(|module| source_names_identifier(&module.source, "Perf"));
     let mut core_source_modules = jet_foundation::CoreModuleExports::core_source_modules()
         .iter()
         .copied()
         .filter(|source_module| {
             (names_url_carrier && Some(source_module.module) == url_carrier)
+                || (names_perf && source_module.module == "core.perf")
                 || bundle.modules.iter().any(|module| {
                     module.imports.iter().any(|import| {
                         core_source_import_module(import).as_deref() == Some(source_module.module)
