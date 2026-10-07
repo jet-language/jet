@@ -1357,7 +1357,8 @@ same complete case list, retaining both `results.tsv` files and every
 failure, before admitting parity.
 
 The consolidated proof consumers are `Tests/check-front-feed-results.mjs`
-(exact full398 selection, no lost native passes, zero wrong outcomes),
+(exact full398 selection, no lost native passes, zero wrong outcomes; reports
+both pass counts, every differing verdict/detail and ranked diagnostic roots),
 `Tests/test-native-test-host.mjs` (three Examples and canonical capture,
 filter, serial and shuffle policies), and `Tests/test-native-test-contract.mjs`
 (output checks observe joined batch state; a fatal child preserves completed
