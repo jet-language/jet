@@ -10,12 +10,22 @@ mod tir_support;
 #[test]
 fn raw_ui_transfer_requires_an_audited_gate() {
     let source = "use core.ui as ui\nfn run() { ui.__node_transfer(\"\", 0.0, 0.0, -1, 0, [], false, \"\", 63, false, 0, 0, 0, 0, 0) }\n";
+    assert_raw_transfer_requires_audited_gate(source, "use core.ui as ui\nfn run() { ui.text(\"jet\") }\n");
+}
+
+#[test]
+fn raw_ui_rights_transfer_requires_an_audited_gate() {
+    let source = "use core.ui.host as host\nfn run() { host.__rights_transfer(3) }\n";
+    assert_raw_transfer_requires_audited_gate(source, "use core.ui.host as host\nfn run() { host.fs_rights_read() }\n");
+}
+
+fn assert_raw_transfer_requires_audited_gate(source: &str, fixture: &str) {
     let (_, user_diags) = jet::Lexer::lex(source);
     assert!(user_diags.iter().any(|diag| diag.code == "E0067"),
         "user source must not enter the compiler-reserved identifier lane");
     let dir = common::Scratch::new("ui_raw_transfer");
     let path = dir.join("main.jet");
-    fs::write(&path, "use core.ui as ui\nfn run() { ui.text(\"jet\") }\n").unwrap();
+    fs::write(&path, fixture).unwrap();
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
     // Embedded Core uses the generated lexer lane. Exercise its semantic gate
     // without relaxing the ordinary user-source reserved-name check.

@@ -507,13 +507,9 @@ const fn effect_leaf_for(module: &str, method: &str) -> Option<&'static str> {
                 "__close_directory",
                 "__list_directory",
                 "__stat_at",
-<<<<<<< HEAD
                 "__metadata_directory",
                 "__directory_fd",
-||||||| fb192101a
-=======
                 "__path_kind",
->>>>>>> eeda4057d183fb271daa6f8c75e54c3c0a92e39f
                 "__read_link_at",
                 "__xattr_names",
                 "__xattr_get",
@@ -2798,9 +2794,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.tui", "capabilities", "jet_tui_capabilities", true, &[]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.ui.host", "capabilities", "jet_ui_host_capabilities", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.ui.host", "file_filter", "jet_ui_host_file_filter", true, &[true, true, true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.ui.host", "fs_rights_read", "jet_ui_host_fs_rights_read", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.ui.host", "fs_rights_write", "jet_ui_host_fs_rights_write", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new( "core.ui.host", "fs_rights_read_write", "jet_ui_host_fs_rights_read_write", true, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui.host", "fs_grant", "jet_ui_host_fs_grant", true, &[true, false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui.host", "open_file", "jet_ui_host_open_file", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.FileDialog"]),
     CoreCallRecord::new("core.ui.host", "save_file", "jet_ui_host_save_file", true, &[false]) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_ui_capabilities(&["UI.FileDialog"]),
@@ -3320,6 +3313,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.service", "__tree_generation", "jet_services_raw_tree_generation", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "__tree_event_count", "jet_services_raw_tree_event_count", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.service", "__tree_dead_letter_count", "jet_services_raw_tree_dead_letter_count", true, &[true]).with_native_int_result().with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.ui.host", "__rights_transfer", "jet_ui_host_raw_rights_transfer", true, &[false]).with_pure_route(CoreCallPureRoute::Ui).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
 ];
 // END GENERATED CORE CALLS
 

@@ -1877,19 +1877,14 @@ fn jet_ui_host_ambient_core_call(
                 ambient_file_filter_value,
             ))
         })()),
-        ("core.ui.host", "fs_rights_read") => Some((|| {
-            ambient_expect_arity(&args, 0, "core.ui.host.fs_rights_read", span)?;
-            Ok(ambient_fs_rights_value(ui_rt::jet_ui_host_fs_rights_read()))
-        })()),
-        ("core.ui.host", "fs_rights_write") => Some((|| {
-            ambient_expect_arity(&args, 0, "core.ui.host.fs_rights_write", span)?;
-            Ok(ambient_fs_rights_value(ui_rt::jet_ui_host_fs_rights_write()))
-        })()),
-        ("core.ui.host", "fs_rights_read_write") => Some((|| {
-            ambient_expect_arity(&args, 0, "core.ui.host.fs_rights_read_write", span)?;
-            Ok(ambient_fs_rights_value(
-                ui_rt::jet_ui_host_fs_rights_read_write(),
-            ))
+        ("core.ui.host", "__rights_transfer") => Some((|| {
+            let call = "core.ui.host.__rights_transfer";
+            ambient_expect_arity(&args, 1, call, span)?;
+            let bits = ambient_int(&args[0], call, span)?;
+            if !(0..=3).contains(&bits) {
+                return Err(unsupported("invalid audited UI rights carrier", span));
+            }
+            Ok(ambient_fs_rights_value(ui_rt::jet_ui_host_raw_rights_transfer(bits.into())))
         })()),
         ("core.ui.host", "fs_grant") => Some((|| {
             ambient_expect_arity(&args, 2, "core.ui.host.fs_grant", span)?;

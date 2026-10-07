@@ -140,6 +140,7 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::Ui, "__node_transfer") => ui_raw_node_transfer(args, span),
         (CoreCallPureRoute::Ui, "__viewport_transfer") => ui_raw_viewport_transfer(args, span),
         (CoreCallPureRoute::Ui, "__request_transfer") => ui_raw_request_transfer(args, span),
+        (CoreCallPureRoute::Ui, "__rights_transfer") => ui_raw_rights_transfer(args, span),
         (CoreCallPureRoute::Ui, "__accessibility_transfer") => ui_raw_optional_slot_transfer(args, span, "accessibility", "UIAccessibility"),
         (CoreCallPureRoute::Ui, "__shortcut_transfer") => ui_raw_optional_slot_transfer(args, span, "shortcut", "UIShortcut"),
         (CoreCallPureRoute::Ui, "button") => ui_button(args, span),
@@ -2065,6 +2066,14 @@ fn ui_raw_request_transfer(args: &[CtValue], span: Span) -> EvalResult {
         ("filters", one(args, 4, "core.ui.host", "__request_transfer", span)?.clone()),
         ("allow_multiple", CtValue::Bool(as_bool(one(args, 5, "core.ui.host", "__request_transfer", span)?, span)?)),
     ]))
+}
+
+fn ui_raw_rights_transfer(args: &[CtValue], span: Span) -> EvalResult {
+    let bits = int_arg(args, 0, span)?;
+    if !(0..=3).contains(&bits) {
+        return Err(unsupported("invalid audited UI rights carrier", span));
+    }
+    Ok(structure("UIFSRights", vec![("bits", CtValue::Int(bits))]))
 }
 
 fn ui_raw_optional_slot_transfer(args: &[CtValue], span: Span, name: &str, type_name: &str) -> EvalResult {

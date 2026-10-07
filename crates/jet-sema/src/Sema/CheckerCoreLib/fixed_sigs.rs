@@ -6132,6 +6132,10 @@ fn core_fixed_sig_impl(
                 (read, bool_)],
             Some(Type::Named("UIFileDialogRequest".to_string())),
         )),
+        ("core.ui.host", "__rights_transfer") => Some((
+            vec![(read, int.clone())],
+            Some(Type::Named("UIFSRights".to_string())),
+        )),
         ("core.ui", "__accessibility_transfer") => Some((
             vec![(read, Type::Named("UINode".to_string())),
                 (read, Type::Named("UIAccessibility".to_string())), (read, bool_)],
@@ -6382,9 +6386,6 @@ fn core_fixed_sig_impl(
             vec![],
             Some(Type::Named("UIFileFilter".to_string())),
         )),
-        ("core.ui.host", "fs_rights_read" | "fs_rights_write" | "fs_rights_read_write") => {
-            Some((vec![], Some(Type::Named("UIFSRights".to_string()))))
-        }
         ("core.ui.host", "fs_grant") => Some((
             vec![
                 (read, string.clone()),
