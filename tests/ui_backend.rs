@@ -7,6 +7,16 @@ use std::process::Command;
 mod common;
 mod tir_support;
 
+// Generic hosted-tier driver; all rights assertions live in Jet. Dies at cutover.
+#[test]
+fn ui_host_rights_source_preserves_storage_across_hosted_tiers() {
+    tir_support::assert_example_cli_tiers_agree_with_package(
+        "ui/host_rights",
+        Some(tir_support::TIR_TEST_PACKAGE),
+        |actual| assert_eq!(actual, include_str!("../Examples/features/expected/ui/host_rights.out")),
+    );
+}
+
 #[test]
 fn raw_ui_transfer_requires_an_audited_gate() {
     let source = "use core.ui as ui\nfn run() { ui.__node_transfer(\"\", 0.0, 0.0, -1, 0, [], false, \"\", 63, false, 0, 0, 0, 0, 0) }\n";

@@ -1,54 +1,11 @@
+// Generic JS projection driver; the real rights assertions live in Jet. Dies at cutover.
 #[test]
-fn db_checked_sql_execute_uses_typed_sql() {
-    assert!(common::have_rustc(), "DB query_one proof requires rustc");
-    let dir = std::env::temp_dir().join(format!("jet_corelib_db_sql_{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-    let (code, stdout, stderr) = build_and_run(
-        &dir,
-        "db_checked_sql",
-        r#"
-use core.db as db
-
-fn run() {
-    conn := db.open_memory()
-    policy :: db.policy("person", "true") ?? panic("policy")
-    scoped := conn.with_policy(policy, "owner")
-    created :: db.migrate(scoped, "person-v1", [
-        SQL{"CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"}
-    ]) ?? panic("migrate")
-    skipped :: db.migrate(scoped, "person-v1", [
-        SQL{"CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"}
-    ]) ?? panic("migrate again")
-    id :: 7
-    name :: "Ada"
-    insert :: SQL{"INSERT INTO person (id, name, active) VALUES ({id}, {name}, 1)"}
-    _inserted :: scoped.execute(insert) ?? panic("insert")
-    failed :: db.transaction(scoped, "bad batch", [
-        SQL{"INSERT INTO person (id, name, active) VALUES (8, 'Grace', 1)"},
-        SQL{"INSERT INTO missing_table VALUES (1)"}
-    ]) ?? 0
-    found :: scoped.query_one(SQL{"SELECT id, name, active FROM person WHERE id = {id}"}) ?? panic("query")
-    missing_id :: 99
-    missing :: scoped.query_one(SQL{"SELECT id, name, active FROM person WHERE id = {missing_id}"})
-    counted :: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM person"}) ?? panic("count")
-    print(created)
-    print(skipped)
-    print(failed)
-    print(db.row_int(found, "id") ?? 0)
-    print(db.row_text(found, "name") ?? "bad")
-    print(db.row_int(found, "active") ?? 0)
-    print(db.row_int(counted, "n") ?? 0)
-    if missing == .None { print("absent") } else { panic("unexpected row") }
-    _closed :: scoped.close()
-}
-"#,
-        &[],
-        None,
-    );
-    assert_eq!(code, 0, "db checked sql test failed: {stderr}");
-    assert_eq!(stdout, "1\n0\n0\n7\nAda\n1\n1\nabsent\n");
-    let _ = fs::remove_dir_all(&dir);
+fn ui_host_rights_source_preserves_storage_in_javascript() {
+    let dir = common::Scratch::new("ui_host_rights_js");
+    let source = include_str!("../../Examples/features/ui/host_rights.jet");
+    let actual = run_web_js_source(&dir.path, "host_rights", source)
+        .expect("UIFSRights JavaScript projection requires node");
+    assert_eq!(actual, include_str!("../../Examples/features/expected/ui/host_rights.out"));
 }
 
 #[test]

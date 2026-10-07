@@ -352,6 +352,10 @@ and 3) in Jet. `UIFSRights` has one private `U8` field, `bits`, matching the
 native record instead of exposing nonexistent Boolean fields. Default empty
 rights retain bit pair 0; grants permit empty rights. These pure constructors
 require neither a host transfer leaf nor an unsafe region.
+The canonical `Examples/features/ui/host_rights.jet` probe checks distinct
+caller-visible rights, default empty construction, and preservation by grants.
+Its Rust-hosted tier/JavaScript drivers are generic bootstrap test plumbing
+that dies at cutover; assertions and expected output are owned by Jet.
 
 Terminal capability sampling and UI-node rendering remain host boundaries.
 The interpreter samples actual host capabilities instead of synthesizing
