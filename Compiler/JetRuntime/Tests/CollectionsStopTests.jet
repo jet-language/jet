@@ -40,8 +40,12 @@ fn coll_stop_live() -> I64 {
             coll_test_require(trap_word(output) == I64{0} && trap_word(output + I64{8}) == I64{0} && trap_word(output + I64{16}) == I64{0})
             jet_rt_free(output, I64{24}, I64{8})
         }
-        (family == I64{6}) -> result = jet_rt_native_iter_dedup_by(mapped, I64{0}, unary, release, meta)
-        (family == I64{7}) -> result = jet_rt_native_iter_chunk_while(mapped, I64{0}, binary, release, meta, list_meta)
+        (family == I64{6}) -> {
+            result = jet_rt_native_iter_dedup_by(mapped, I64{0}, unary, release, meta)
+        }
+        (family == I64{7}) -> {
+            result = jet_rt_native_iter_chunk_while(mapped, I64{0}, binary, release, meta, list_meta)
+        }
         (family == I64{8}) -> {
             trap_store(meta + I64{24}, show)
             separator :: jet_rt_string_builder_finish(jet_rt_string_builder_new())

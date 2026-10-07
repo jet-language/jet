@@ -4,8 +4,8 @@
 // Only initialized payload bytes are read (Bool is one byte; Unit is empty).
 fn coll_payload(meta: I64) -> I64 {
     kind :: trap_word(meta + I64{48}) & I64{4294967295}
-    if (kind == I64{11}) -> return I64{0}
-    if (kind == I64{9}) -> return I64{1}
+    if (kind == I64{11}) { return I64{0} }
+    if (kind == I64{9}) { return I64{1} }
     trap_word(meta)
 }
 
@@ -35,7 +35,7 @@ fn coll_copy(source: I64, target: I64, size: I64) {
 }
 
 fn coll_meta_copy(source: I64) -> I64 {
-    if (source == I64{0}) -> return I64{0}
+    if (source == I64{0}) { return I64{0} }
     target :: jet_rt_alloc(I64{72}, I64{8})
     coll_copy(source, target, I64{56})
     trap_store(target + I64{56}, coll_meta_copy(trap_word(source + I64{56})))
@@ -44,7 +44,9 @@ fn coll_meta_copy(source: I64) -> I64 {
 }
 
 fn coll_meta_drop(meta: I64) {
-    if (meta == I64{0}) -> return
+    if (meta == I64{0}) {
+        return
+    }
     coll_meta_drop(trap_word(meta + I64{56}))
     coll_meta_drop(trap_word(meta + I64{64}))
     jet_rt_free(meta, I64{72}, I64{8})
@@ -86,11 +88,13 @@ fn coll_slot_clone(source: I64, target: I64, meta: I64) {
 
 fn coll_slot_drop(slot: I64, meta: I64) {
     code :: trap_word(meta + I64{16})
-    if (code != I64{0}) -> _ := coll_call1(code, slot)
+    if (code != I64{0}) { _ := coll_call1(code, slot) }
 }
 
 fn coll_slot_free(slot: I64, meta: I64) {
-    if (slot == I64{0}) -> return
+    if (slot == I64{0}) {
+        return
+    }
     coll_slot_drop(slot, meta)
     jet_rt_free(slot, coll_size(meta), I64{8})
 }
@@ -109,8 +113,8 @@ fn coll_list_push(header: I64, slot: I64, meta: I64) {
     if length == capacity {
         grown :: if (capacity == I64{0}) -> I64{4} else -> capacity * I64{2}
         buffer :: jet_rt_alloc(grown * stride, I64{8})
-        if (length != I64{0}) -> coll_copy(data, buffer, length * stride)
-        if (capacity != I64{0}) -> jet_rt_free(data, capacity * stride, I64{8})
+        if (length != I64{0}) { coll_copy(data, buffer, length * stride) }
+        if (capacity != I64{0}) { jet_rt_free(data, capacity * stride, I64{8}) }
         trap_store(header + I64{8}, grown)
         trap_store(header + I64{16}, buffer)
         data = buffer
@@ -129,7 +133,7 @@ fn coll_list_drop(header: I64, meta: I64, start: I64) {
         at += I64{1}
     }
     capacity :: trap_word(header + I64{8})
-    if (capacity != I64{0}) -> jet_rt_free(data, capacity * stride, I64{8})
+    if (capacity != I64{0}) { jet_rt_free(data, capacity * stride, I64{8}) }
     coll_zero(header, I64{24})
 }
 
@@ -137,6 +141,6 @@ fn coll_result_size(ok: I64, error: I64) -> I64 {
     a :: coll_payload(ok)
     b :: coll_payload(error)
     size := if a > b -> a else -> b
-    if (size < I64{8}) -> size = I64{8}
+    if (size < I64{8}) { size = I64{8} }
     I64{8} + ((size + I64{7}) & I64{-8})
 }

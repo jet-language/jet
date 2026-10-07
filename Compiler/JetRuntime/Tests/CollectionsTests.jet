@@ -1,9 +1,14 @@
 // Raw ABI ownership witnesses alongside the high-level collection goldens.
 fn coll_test_require(ok: Bool) {
-    if ok -> return
+    if ok {
+        return
+    }
     trap_exit(I64{1})
-    loop {}
+    loop {
+
+    }
 }
+
 fn coll_test_meta() -> I64 {
     meta :: jet_rt_alloc(I64{72}, I64{8})
     coll_zero(meta, I64{72})
@@ -11,6 +16,7 @@ fn coll_test_meta() -> I64 {
     trap_store(meta + I64{48}, I64{274877906946})
     meta
 }
+
 fn coll_test_source() -> I64 {
     meta :: coll_test_meta()
     header :: coll_list_new()
@@ -29,6 +35,7 @@ fn coll_test_source() -> I64 {
     coll_meta_drop(meta)
     source
 }
+
 fn run() {
     jet_rt_alloc_init()
     source :: coll_test_source()
