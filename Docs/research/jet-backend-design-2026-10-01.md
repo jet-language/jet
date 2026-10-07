@@ -445,6 +445,20 @@ instantiation before native Decode dispatch, preserving its error envelope.
 leaves successful payloads intact. Unsupported container/callback carrier
 edges remain explicit refusals rather than a second codec policy.
 
+Typed CSV supplies a checked native Decode callback to the existing canonical
+`jet_enc_csv_decode_rows` kernel. The private generated `jet_rt_codec_csv`
+boundary lends each runtime DataTree, uses the existing NativeMeta/NativeValue
+container slots, and transfers owned decoded rows or owned FieldError handles.
+The borrowed callback's OCB1 consumed mask is zero. A native delivered-stop gate
+leaves all outs unwritten; `jet_native_callback_body` resumes the canonical stop
+only after the native callback has returned, before inspecting its tag or
+initializing a NativeValue. Header projection, row order, error accumulation
+and row-path framing remain in the canonical kernel, not native lowering.
+This generated Rust adapter is a tracked temporary directive-19 leaf, removed
+when the checked Jet-owned CSV intrinsic and native DataTree/FieldError path
+replace the canonical Rust row kernel. It is not a permanent provider exemption.
+
+
 
 
 Lazy collection routes use the existing `Collections.rs` and `LoopCursor.rs`

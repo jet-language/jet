@@ -945,6 +945,17 @@ adapters.push({
   rows: ["source numeric bit count"], params: Array.from({ length: 3 }, () => ({ jet: "Word" })),
   result: { jet: "Plain{carrier: LowerRouteCarrier.Word}" },
 });
+// Duration uses the existing saturating i64 kernel on raw nanoseconds, not
+// exact-Int owner words. Its scalar ABI must not insert tag conversion.
+{
+  const symbol = "jet_i64_saturating_add";
+  const row = { symbol, target: symbol, name: symbol, label: "raw duration nanoseconds", rows: ["source duration addition"],
+    params: Array.from({ length: 2 }, () => ({ jet: "Word", ctys: ["i64"], expr: ([value]) => value })),
+    result: { jet: "Plain{carrier: LowerRouteCarrier.Word}", ret: "i64", outs: [], handles: [], body: (call) => call },
+  };
+  const index = adapters.findIndex((adapter) => adapter.symbol === symbol);
+  if (index < 0) adapters.push(row); else adapters[index] = row;
+}
 
 // Core types the runtime holds natively: the Jet name -> native Rust type
 // tables generated Rust spells its types with (Codegen/Context.rs and
@@ -1390,6 +1401,78 @@ for (const [name, full] of handleRows) {
     rs.push("    }");
   }
 }
+// Temporary representation seam (#19): removed when the checked Jet-owned CSV
+// intrinsic/native DataTree+FieldError path replaces this canonical row kernel.
+// No CSV, user-shape or row-error policy is reproduced here.
+rs.push(`
+    extern "C" {
+        #[link_name = "jet_rt_alloc"]
+        fn codec_alloc(size: usize, align: usize) -> *mut u8;
+        #[link_name = "jet_rt_free"]
+        fn codec_free(value: *mut u8, size: usize, align: usize);
+    }
+    /// Canonical CSV rows with a checked native Decode callback.
+    /// invoke(borrowed_tree, value_out, tag_out, errors_out, length_out) -> OCB1
+    /// consumed mask zero. Outs remain unwritten on delivered native Stop.
+    #[no_mangle]
+    pub unsafe extern "C" fn jet_rt_codec_csv(
+        text: JetCString, invoke: usize,
+        meta: *const crate::jet_c_abi_iter::NativeMeta,
+        values: *mut crate::jet_c_abi_iter::Header,
+        errors: *mut *mut u64, errors_len: *mut i64,
+    ) -> i64 {
+        guard(|| {
+            use crate::jet_c_abi_iter::{Meta, NativeValue, Header};
+            let meta = Meta::copy(meta);
+            let invoke: unsafe extern "C" fn(*mut crate::jet_std::DataTree, *mut u8, *mut u64, *mut *mut u64, *mut i64) -> u64 = std::mem::transmute(invoke);
+            let rows = crate::jet_ring_csv_parse(${paramCarrier("&String", "").expr(["text"])}, &",".to_string(), false, false)
+                .map_err(crate::jet_std::FieldError::one);
+            let decoded = rows.and_then(|rows| crate::jet_std::jet_enc_csv_decode_rows(
+                rows,
+                |mut tree| {
+                    let mut value = NativeValue::uninitialized(meta.clone());
+                    let mut tag = std::mem::MaybeUninit::<u64>::uninit();
+                    let mut errors = std::ptr::null_mut();
+                    let mut count = 0i64;
+                    let consumed = crate::jet_native_callback_body(|| invoke(&mut tree, value.slot_mut(), tag.as_mut_ptr(), &mut errors, &mut count));
+                    assert_eq!(consumed, 0, "typed CSV lends its DataTree input");
+                    if tag.assume_init() != 0 {
+                        Ok(value.initialized())
+                    } else {
+                        let failures = if count == 0 { Vec::new() } else {
+                            let failures = std::slice::from_raw_parts(errors.cast::<*mut crate::jet_std::FieldError>(), count as usize)
+                                .iter().map(|error| *Box::from_raw(*error)).collect();
+                            codec_free(errors.cast(), count as usize * std::mem::size_of::<u64>(), 8);
+                            failures
+                        };
+                        Err(failures)
+                    }
+                },
+                crate::jet_std::FieldError::under_errors,
+                crate::jet_std::DataTree::Text,
+                crate::jet_std::DataTree::Object,
+            ));
+            match decoded {
+                Ok(rows) => {
+                    let length = rows.len();
+                    let stride = meta.stride();
+                    let data = if length == 0 { std::ptr::null_mut() } else { codec_alloc(length * stride, 8) };
+                    for (index, row) in rows.into_iter().enumerate() { row.put(data.add(index * stride)); }
+                    values.write(Header { len: length, cap: length, data });
+                    1
+                }
+                Err(failures) => {
+                    let length = failures.len();
+                    let data = if length == 0 { std::ptr::null_mut() } else { codec_alloc(length * std::mem::size_of::<u64>(), 8).cast::<u64>() };
+                    for (index, failure) in failures.into_iter().enumerate() { data.add(index).write(Box::into_raw(Box::new(failure)) as u64); }
+                    errors.write(data);
+                    errors_len.write(length as i64);
+                    0
+                }
+            }
+        })
+    }
+`);
 for (const adapter of adapters) {
   if (adapter.external) continue;
   const params = [];

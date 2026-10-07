@@ -3386,6 +3386,7 @@ fn lower_helper_start(m: &LowerModule, glue: LowerGlue, params: [LIRLayout], res
 
 fn lower_helper_function(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
     if glue.helper.starts_with("lazy.") -> return lower_lazy_helper(p, &m, glue)
+    if glue.helper == "codec.csv.decode" -> return lower_helper_codec_csv_decode(p, &m, glue)
     if glue.helper == "closure.thunk" -> return lower_closure_thunk(&m, glue)
     if glue.helper == "para.map.invoke" -> return lower_helper_parallel_map(p, &m, glue)
     if glue.helper == "para.fold.chunk" || glue.helper == "para.fold.merge" -> return lower_helper_parallel_fold(p, &m, glue)

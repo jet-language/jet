@@ -62,7 +62,9 @@ fn lower_codec_scalar(ty: MIRType) -> String? Never! {
 fn lower_codec_tree(p: MIRProgram) -> MIRType? Never! {
     loop definition in p.types {
         ty :: mir_type_from_kind(MIRTypeKind.Apply{name: MIRNominalRef{id: definition.id, name: definition.name}, args: [MIRType]{}})
-        if lower_record_handle(p, ty) == .Val("DataTree") -> return Val(ty)
+        if lower_record_handle(p, ty) == .Val(runtime) {
+            if runtime == "DataTree" -> return Val(ty)
+        }
     }
     None
 }
@@ -96,7 +98,8 @@ fn lower_codec_decode_into(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ta
         failure :: lower_new_block(&f)
         merge :: lower_new_block(&f)
         yes :: lower_flag(&f)
-        lower_emit(&f, LIRInst.Compare{dst: yes, condition: LIRCondition.Ne, left: out.word, right: lower_const(&f, 0)})
+        zero :: lower_const(&f, 0)
+        lower_emit(&f, LIRInst.Compare{dst: yes, condition: LIRCondition.Ne, left: out.word, right: zero})
         lower_seal(&f, LIRTerminator.Branch{condition: yes, then_target: lower_target(success, [LIRValueID]{}), else_target: lower_target(failure, [LIRValueID]{})})
         lower_start(&f, success, [LIRValueID]{})
         lower_route_store_payload(p, &m, &f, dst, 8, target, ok, out.slot)
@@ -111,6 +114,7 @@ fn lower_codec_decode_into(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ta
 
 fn lower_codec_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg], types: [MIRType]) -> Bool Never! {
     row :: lower_prelude_row(p, call) ?? return false
+    if types.len() == 1 && row.module_name == "core.encoding.csv" && row.member == "decode" -> return lower_codec_csv(p, c, &m, &f, instruction, args, types[0])
     codec :: row.module_name == "core.encoding.codec" && (row.member == "encode" || row.member == "decode" || row.member == "decode_typed")
     parsed :: (row.module_name == "core.encoding.json" || row.module_name == "core.encoding.toml" || row.module_name == "core.encoding.yaml") && row.member == "decode"
     if types.len() != 1 || (!codec && !parsed) -> return false
@@ -166,7 +170,8 @@ fn lower_codec_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFu
         }
         out :: lower_route_result_call(&m, &f, route.export, [LIRValueID]{source}, ok, err)
         yes :: lower_flag(&f)
-        lower_emit(&f, LIRInst.Compare{dst: yes, condition: LIRCondition.Ne, left: out.word, right: lower_const(&f, 0)})
+        zero :: lower_const(&f, 0)
+        lower_emit(&f, LIRInst.Compare{dst: yes, condition: LIRCondition.Ne, left: out.word, right: zero})
         success :: lower_new_block(&f)
         failure :: lower_new_block(&f)
         merge :: lower_new_block(&f)
@@ -208,7 +213,8 @@ fn lower_codec_under(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     selector :: lower_word(&f)
     lower_emit(&f, LIRInst.Load{dst: selector, base: value, offset: 0})
     yes :: lower_flag(&f)
-    lower_emit(&f, LIRInst.Compare{dst: yes, condition: LIRCondition.Ne, left: selector, right: lower_const(&f, 0)})
+    zero :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Compare{dst: yes, condition: LIRCondition.Ne, left: selector, right: zero})
     failure :: lower_new_block(&f)
     merge :: lower_new_block(&f)
     lower_seal(&f, LIRTerminator.Branch{condition: yes, then_target: lower_target(merge, [LIRValueID]{}), else_target: lower_target(failure, [LIRValueID]{})})
@@ -226,4 +232,129 @@ fn lower_codec_under(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerF
     lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
     lower_start(&f, merge, [LIRValueID]{})
     lower_alias(c, &f, instruction, value)
+}
+
+// The canonical CSV row kernel owns header projection/error accumulation.
+// This boundary supplies only its checked native Decode callback and storage.
+fn lower_codec_csv(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, args: [MIRCallArg], target: MIRType) -> Bool Never! {
+    if args.len() != 1 {
+        lower_fail(&m, &f, "typed CSV intrinsic needs its checked text argument")
+        return true
+    }
+    result :: lower_checked_type(c, instruction) ?? return true
+    errors :: if result.kind == .Result(values, failure) {
+        element :: lower_list_element(values) ?? {
+            lower_fail(&m, &f, "typed CSV success is not a List")
+            return true
+        }
+        if !mir_type_same_checked_type(element, target) {
+            lower_fail(&m, &f, "typed CSV row type does not match its checked result")
+            return true
+        }
+        failure
+    } else {
+        lower_fail(&m, &f, "typed CSV does not return a checked Result")
+        return true
+    }
+    carrier :: LowerRouteCarrier.List{elem: LowerRouteCarrier.Handle{name: "FieldError"}}
+    if !lower_route_result_matches(p, errors, carrier) {
+        lower_fail(&m, &f, "typed CSV failures do not match canonical FieldError storage")
+        return true
+    }
+    if lower_codec_tree(p) == None {
+        lower_fail(&m, &f, "typed CSV has no checked DataTree declaration")
+        return true
+    }
+    source :: lower_use(&m, &f, args[0].value) ?? return true
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    callback_type :: mir_type_from_kind(MIRTypeKind.Result{ok: target, err: errors})
+    invoke :: lower_lazy_helper_address(&m, &f, "codec.csv.decode", callback_type)
+    meta :: lower_lazy_meta(p, &m, &f, target)
+    lower_alloc(&m, &f, dst, lower_box_size(p, result))
+    failure_out :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: failure_out, size: 16, align: 8})
+    zero :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Store{base: failure_out, offset: 0, value: zero})
+    lower_emit(&f, LIRInst.Store{base: failure_out, offset: 8, value: zero})
+    selector :: lower_word(&f)
+    payload :: lower_address(&f, dst, 8)
+    length_out :: lower_address(&f, failure_out, 8)
+    lower_call_runtime(&m, &f, "jet_rt_codec_csv", [LIRValueID]{source, invoke, meta, payload, failure_out, length_out}, Val(selector))
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: selector})
+    succeeded :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: succeeded, condition: LIRCondition.Ne, left: selector, right: zero})
+    failure :: lower_new_block(&f)
+    merge :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: succeeded, then_target: lower_target(merge, [LIRValueID]{}), else_target: lower_target(failure, [LIRValueID]{})})
+    lower_start(&f, failure, [LIRValueID]{})
+    buffer :: lower_pointer(&f)
+    length :: lower_word(&f)
+    lower_emit(&f, LIRInst.Load{dst: buffer, base: failure_out, offset: 0})
+    lower_emit(&f, LIRInst.Load{dst: length, base: failure_out, offset: 8})
+    lower_record_list_from_runtime(p, &m, &f, errors, buffer, length, payload)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
+    lower_start(&f, merge, [LIRValueID]{})
+    true
+}
+
+// OCB1 borrowed input: always returns consumed mask zero. The status/value
+// outs are written only after the masked delivered-stop gate succeeds.
+fn lower_helper_codec_csv_decode(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    target :: if glue.ty.kind == .Result(ok, _) -> ok else -> panic("CSV callback needs its checked Decode Result")
+    errors :: if glue.ty.kind == .Result(_, err) -> err else -> panic("CSV callback needs its checked failures")
+    tree :: lower_codec_tree(p) ?? panic("CSV callback needs its checked DataTree")
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer(), lir_layout_pointer(), lir_layout_pointer(), lir_layout_pointer()}, Val(lir_layout_word()))
+    borrowed :: ~f.open_params[0]
+    output :: ~f.open_params[1]
+    status_out :: ~f.open_params[2]
+    errors_out :: ~f.open_params[3]
+    length_out :: ~f.open_params[4]
+    native_slot :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: native_slot, size: 8, align: 8})
+    lower_call_helper(&m, &f, "record.in", tree, [LIRValueID]{borrowed, native_slot}, None)
+    native :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: native, base: native_slot, offset: 0})
+    decoded :: lower_pointer(&f)
+    lower_codec_decode_into(p, &m, &f, target, glue.ty, tree, native, decoded)
+    stopped :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_session_propagate", [LIRValueID]{}, Val(stopped))
+    delivered :: lower_flag(&f)
+    zero :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Compare{dst: delivered, condition: LIRCondition.Ne, left: stopped, right: zero})
+    stop :: lower_new_block(&f)
+    ready :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: delivered, then_target: lower_target(stop, [LIRValueID]{}), else_target: lower_target(ready, [LIRValueID]{})})
+    lower_start(&f, stop, [LIRValueID]{})
+    lower_map_drop_value(p, &m, &f, native, tree)
+    lower_seal(&f, LIRTerminator.Return{value: Val(zero)})
+    lower_start(&f, ready, [LIRValueID]{})
+    lower_map_drop_value(p, &m, &f, native, tree)
+    selector :: lower_word(&f)
+    lower_emit(&f, LIRInst.Load{dst: selector, base: decoded, offset: 0})
+    lower_emit(&f, LIRInst.Store{base: status_out, offset: 0, value: selector})
+    succeeded :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: succeeded, condition: LIRCondition.Ne, left: selector, right: zero})
+    success :: lower_new_block(&f)
+    failure :: lower_new_block(&f)
+    merge :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: succeeded, then_target: lower_target(success, [LIRValueID]{}), else_target: lower_target(failure, [LIRValueID]{})})
+    lower_start(&f, success, [LIRValueID]{})
+    if target.kind != .Unit {
+        value :: lower_read_at(p, &f, decoded, 8, target) ?? panic("checked CSV row has native storage")
+        lower_write_at(p, &f, output, 0, value, target)
+    }
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
+    lower_start(&f, failure, [LIRValueID]{})
+    source :: lower_address(&f, decoded, 8)
+    length :: lower_list_word(&f, source, 0)
+    buffer :: lower_pointer(&f)
+    lower_call_helper(&m, &f, "list.record_handles", errors, [LIRValueID]{source}, Val(buffer))
+    lower_emit(&f, LIRInst.Store{base: errors_out, offset: 0, value: buffer})
+    lower_emit(&f, LIRInst.Store{base: length_out, offset: 0, value: length})
+    lower_map_drop_value(p, &m, &f, source, errors)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
+    lower_start(&f, merge, [LIRValueID]{})
+    lower_free_shell(&m, &f, decoded, lower_box_size(p, glue.ty))
+    lower_seal(&f, LIRTerminator.Return{value: Val(zero)})
+    lir_builder_finish(f.builder)
 }

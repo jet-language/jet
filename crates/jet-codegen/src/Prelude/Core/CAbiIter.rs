@@ -47,6 +47,7 @@ pub(crate) mod jet_c_abi_iter {
             })
         }
         pub(crate) fn tag(&self) -> u32 { self.kind as u32 }
+        pub(crate) fn stride(&self) -> usize { self.stride }
         pub(crate) fn payload_size(&self) -> usize { match self.tag() { 11 => 0, 9 => 1, _ => self.stride } }
         pub(crate) fn first(&self) -> Arc<Meta> { self.child0.as_ref().expect("native child descriptor").clone() }
         pub(crate) fn second(&self) -> Arc<Meta> { self.child1.as_ref().expect("native error descriptor").clone() }
