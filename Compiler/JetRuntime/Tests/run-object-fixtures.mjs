@@ -28,11 +28,11 @@ if (mode === '--assemble') {
     writeFileSync(join(out, 'global/exports.list'), 'native_global_store\nnative_global_load\nruntime_float_identity\n');
     execFileSync(process.execPath, [join(repo, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), join(out, 'init'), '--assemble-only', '--tests'], { stdio: 'inherit' });
     let unit = readFileSync(join(out, 'init/unit.jet'), 'utf8');
-    const runHead = 'fn run() {\n';
-    if (unit.split(runHead).length !== 2) throw Error('allocator witness must have one entry');
+    const testHead = 'fn alloc_tests() {\n';
+    if (unit.split(testHead).length !== 2) throw Error('allocator witness must have one test entry');
     // Full tests may call init twice, but startup must already have initialized.
-    unit = unit.replace(runHead, `${runHead}    alloc_test_require(alloc_root != I64{0})\n`);
-    unit += '\n#Export(c)\nfn runtime_fixture_root() -> I64 Never! { alloc_root }\n\n#Export(c)\nfn runtime_fixture_tests() { run() }\n';
+    unit = unit.replace(testHead, `${testHead}    alloc_test_require(alloc_root != I64{0})\n`);
+    unit += '\n#Export(c)\nfn runtime_fixture_root() -> I64 { alloc_root }\n\n#Export(c)\nfn runtime_fixture_tests() { alloc_tests() }\n';
     writeFileSync(join(out, 'init/Source/Fixture.jet'), unit);
     rmSync(join(out, 'init/unit.jet'));
     writeFileSync(join(out, 'init/exports.list'), read('Compiler/JetRuntime/exports.list') + 'runtime_fixture_root\nruntime_fixture_tests\n');
