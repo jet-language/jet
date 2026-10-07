@@ -77,11 +77,11 @@ fn sema_lifecycle_edition_year(label: String) -> Int Never! {
 
 fn sema_lifecycle_version_phrase(label: String) -> String Never! {
     if sema_lifecycle_edition_label(label) -> return "edition {label}"
-    label
+    ~label
 }
 
 fn sema_lifecycle_edit(payload: CoreMarkerApplication, span: Span) -> TextEdit? Never! {
-    parts :: payload.replacement.split(".")
+    parts :: payload.replacement.split(".").to_list()
     leaf :: parts[parts.len() - 1].trim()
     if leaf.len() == 0 -> return None
     underscore :: U8{95}
