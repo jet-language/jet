@@ -22,6 +22,7 @@ use jet_foundation.[
     Diagnostic,
     diagnostic_from_registry,
     diagnostic_render_all,
+    policy_key_parse,
 ]
 
 pub enum JetCLIPlan {
@@ -817,15 +818,22 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
     JetCLIPlan.Test{file: file, source: source, color: color, verbose: verbose, threads: threads, options: options}
 }
 
-// `jet explain [<CODE>]` (CmdDevTools.rs `run_explain`): registered
-// diagnostic essays render through Explain.jet; an unregistered
-// code-shaped subject keeps the driver's unknown-code report. The other
-// explain subjects (syntax, policy markers, build facts) and views are not
-// ported yet.
+// `jet explain [<CODE>|<syntax>|<policy>]` (CmdDevTools.rs `run_explain`,
+// Explain.rs `lookup`): registered diagnostic essays render through
+// Explain.jet; an unregistered code-shaped subject keeps the driver's
+// unknown-code report; offline syntax (and its E2106 typo report) and
+// standalone policies render through SyntaxExplain.jet. Build facts, `marker`
+// sites, and a policy with a source file are load-only source queries and
+// stay refused until the loader leaf lands, as do the views.
 fn jet_cli_explain(jet_argv: [String], args: [String], color: Bool, json: Bool) -> JetCLIPlan Never! {
     if jet_cli_has(jet_argv, "--reload") || jet_cli_has(jet_argv, "--web-graph") || jet_cli_has(jet_argv, "--cost") -> return jet_cli_not_ported("explain", color)
     if jet_cli_explain_diagnostic(args, color, json) == .Val(plan) -> return plan
     if args.len() == 2 && jet_cli_is_diagnostic_code(args[1]) -> return JetCLIPlan.Done{output: jet_driver_explain_code(Val(args[1]), color)}
+    query :: args[1]
+    if query == "marker" || jet_cli_explain_build_fact_name(query) != None -> return jet_cli_not_ported("explain", color)
+    if args.len() > 2 && policy_key_parse(query.trim().removeprefix("@")) != None -> return jet_cli_not_ported("explain", color)
+    if jet_cli_explain_syntax(query, jet_cli_has(jet_argv, "--verbose"), color, json) == .Val(plan) -> return plan
+    if args.len() == 2 && jet_cli_explain_policy(query, color, json) == .Val(plan) -> return plan
     jet_cli_not_ported("explain", color)
 }
 
