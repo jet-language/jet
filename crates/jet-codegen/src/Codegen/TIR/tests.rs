@@ -2006,6 +2006,93 @@ fn run() {{
     });
 }
 
+/// #4744: a `^owner.field` argument moves the field into the `^T` parameter,
+/// and the owner's scope-end cleanup releases only the fields left in place
+/// (a whole-owner `MovePlace` feeding a `Drop`, which MIR legality accepts
+/// after the field move). Owned parameter and local owners alike.
+#[test]
+fn exact_field_move_arguments_leave_a_dropped_remainder() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let program = |mark: &str| {
+            format!(
+                "\
+struct Run {{
+    graph: [String]
+    values: [String]
+}}
+fn make_run() -> Run {{ Run{{graph: [\"g\"], values: [\"v\"]}} }}
+fn consume(xs: ^[String]) -> Int {{ xs.len() }}
+fn hop_arg(run: ^Run) -> Int {{
+    n := consume({mark}run.graph)
+    print(run.values.len())
+    return n
+}}
+fn hop_arg_local() -> Int {{
+    run := make_run()
+    return consume({mark}run.graph) + run.values.len()
+}}
+fn run() {{
+    print(hop_arg(make_run()))
+    print(hop_arg_local())
+}}
+"
+            )
+        };
+        let (moved_mir, moved_rust) = emitted_rust(&program("^"));
+        let (_, read_rust) = emitted_rust(&program(""));
+        for name in ["hop_arg", "hop_arg_local"] {
+            let function = moved_mir
+                .functions
+                .iter()
+                .find(|function| function.name == name)
+                .unwrap_or_else(|| panic!("no `{name}` function"));
+            let instructions = function
+                .blocks
+                .iter()
+                .flat_map(|block| &block.instructions)
+                .collect::<Vec<_>>();
+            let moved_place = |projected: bool| {
+                instructions
+                    .iter()
+                    .filter_map(|instruction| match instruction.operation {
+                        jet_foundation::MIR::MirOperation::MovePlace { place } => function
+                            .places
+                            .iter()
+                            .any(|row| row.id == place && row.projections.is_empty() != projected)
+                            .then_some(instruction.result)
+                            .flatten(),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                moved_place(true).len(),
+                1,
+                "`{name}`: the marked field is one projected MovePlace:\n{:#?}\n{moved_rust}",
+                instructions.iter().map(|instruction| &instruction.operation).collect::<Vec<_>>()
+            );
+            assert!(
+                moved_place(false).iter().any(|owner| instructions.iter().any(|instruction| matches!(
+                    instruction.operation,
+                    jet_foundation::MIR::MirOperation::Drop { value, .. } if value == *owner
+                ))),
+                "`{name}`: the partly moved owner's remainder is dropped"
+            );
+        }
+        assert!(
+            !moved_rust.contains("__jet_graph).clone()"),
+            "a moved `graph` argument must not be cloned:\n{moved_rust}"
+        );
+        let moved_clones = non_scalar_clone_count(&moved_rust);
+        let read_clones = non_scalar_clone_count(&read_rust);
+        eprintln!("exact field move arguments: non-scalar .clone() {read_clones} (unmarked) -> {moved_clones} (marked)");
+        assert!(
+            moved_clones < read_clones,
+            "marked field arguments emitted {moved_clones} clones, unmarked reads {read_clones}"
+        );
+    });
+}
+
 #[test]
 fn mir_keeps_full_call_carriers_and_drops_partial_move_remainders() {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {

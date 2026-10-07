@@ -16232,6 +16232,50 @@ mod ownership_guard_tests {
         rejects_second_move(&function);
     }
 
+    /// #4744: `x := ^owner.field` moves one field (instruction 14 moves a
+    /// projected place); the owner's flag-guarded scope-end cleanup then
+    /// moves the whole owner only to release it. That remainder drop
+    /// releases the fields still in place, so it is not a second move.
+    fn partial_move_function(cleanup_drops: bool) -> MirFunction {
+        const FIELD: MirPlaceId = MirPlaceId(2);
+        let mut function = cleanup_function(true);
+        let owner = function.places[0].clone();
+        function.places.push(MirPlace {
+            id: FIELD,
+            projections: vec![MirProjection::Field { field: MirFieldId(7), span: Span::new(0, 1) }],
+            ..owner
+        });
+        function.blocks[0].instructions[4].operation = MirOperation::MovePlace { place: FIELD };
+        if cleanup_drops {
+            function.blocks[2].instructions.push(instruction(
+                31,
+                MirOperation::Drop { value: MirValueId(30), kind: MirDropKind::Value },
+                None,
+            ));
+        }
+        function
+    }
+
+    #[test]
+    fn remainder_drop_after_field_move_is_not_a_second_move() {
+        assert!(matches!(verify(&partial_move_function(true)), Ok(())));
+    }
+
+    /// A whole-owner move that is not released by a drop (here: unused) still
+    /// reuses the moved field, and a remainder drop after a move of the whole
+    /// owner is still a second move.
+    #[test]
+    fn only_a_remainder_drop_follows_a_field_move() {
+        rejects_second_move(&partial_move_function(false));
+        let mut function = cleanup_function(true);
+        function.blocks[2].instructions.push(instruction(
+            31,
+            MirOperation::Drop { value: MirValueId(30), kind: MirDropKind::Value },
+            None,
+        ));
+        rejects_second_move(&function);
+    }
+
     fn verify_copies(function: &MirFunction) -> Result<(), MirLegalityError> {
         let defs = function.blocks.iter().flat_map(|block| {
             block.instructions.iter().enumerate().filter_map(move |(index, instruction)| {
