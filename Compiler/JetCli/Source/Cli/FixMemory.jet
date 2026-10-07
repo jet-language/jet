@@ -29,18 +29,25 @@ fn jet_cli_memory_repair_path(root: String, source: String) -[FS]> String? Never
     None
 }
 
-fn jet_cli_memory_write_atomic(path: String, source: String) String! {
-    parent :: jet_cli_parent(path) ?? "."
+fn jet_cli_memory_write_atomic(path: String, source: String) String! -[FS, Env, Time.Wait]> {
+    parent :: jet_cli_parent(path) ?? return Err("source has no parent directory")
     name :: jet_cli_file_name(path)
-    temporary :: jet_cli_entry_join(parent, ".{name}.memory-fix-{cli_process.current_pid()}")
-    metadata :: cli_files.stat(path) ?? return Err("cannot inspect source permissions: {jet_cli_io_error_text(err)}")
-    cli_files.write(temporary, source) ?? return Err("cannot write temporary repair: {jet_cli_io_error_text(err)}")
-    cli_files.set_mode(temporary, metadata.mode) ?? return Err("cannot preserve source permissions: {jet_cli_io_error_text(err)}")
-    cli_files.rename(temporary, path) ?? return Err("cannot publish repaired source: {jet_cli_io_error_text(err)}")
-    Ok(())
+    canonical :: cli_files.realpath(parent) ?? return Err("cannot inspect source directory: {jet_cli_io_error_text(err)}")
+    held :: JetCLIRootedDirectory.open(canonical, [String]{}, false) ?? return Err(err.message)
+    mode :: held.file_mode(name) ?? return Err(err.message)
+    held.replace(name, source.bytes(), Val(mode)) ?? return Err(err.message)
 }
 
-pub fn jet_cli_fix_memory_at(root: String, args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
+fn jet_cli_memory_read_source(path: String) -[FS, Time.Wait]> String String! {
+    parent :: jet_cli_parent(path) ?? return Err("source has no parent directory")
+    name :: jet_cli_file_name(path)
+    held :: JetCLIRootedDirectory.open(parent, [String]{}, false) ?? return Err(err.message)
+    bytes :: held.read(name, Int.MAX) ?? return Err(err.message)
+    raw :: bytes ?? return Err("source disappeared")
+    Ok(String.from_bytes(raw) ?? return Err("source is not UTF-8"))
+}
+
+pub fn jet_cli_fix_memory_at(root: String, args: [String], color: Bool, json: Bool) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
     loop argument in args {
         if !argument.starts_with("-") {
             return jet_cli_memory_fail("unexpected fix memory argument `{argument}`", color, json)
@@ -48,7 +55,7 @@ pub fn jet_cli_fix_memory_at(root: String, args: [String], color: Bool, json: Bo
     }
     dry_run :: args.contains("--dry-run")
     path :: cli_sys.get("JET_MEMORY_LEDGER") ?? "{root}/.jet/memory/ledger-v1.jsonl"
-    rows :: jet_cli_memory_read(path) ?? return jet_cli_memory_fail(err, color, json)
+    rows :: jet_cli_memory_read(path) ?? return jet_cli_memory_fail(err.message, color, json)
     candidates := [String:[JetCLIMemoryRow]]{}
     options := [JetCLIMemoryRow]{}
     loop row in rows {
@@ -67,7 +74,7 @@ pub fn jet_cli_fix_memory_at(root: String, args: [String], color: Bool, json: Bo
     applied := [JetCLIMemoryApplied]{}
     loop path in paths {
         edits :: candidates.get(path) ?? panic("candidate path is present")
-        source := cli_files.read(path) ?? {
+        source := jet_cli_memory_read_source(path) ?? {
             loop row in edits -> &options.push(row)
             next
         }
