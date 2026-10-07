@@ -220,12 +220,12 @@ fn lir_lint_inst(program: LIRModule, function: LIRFunction, inst: LIRInst) -> [S
             }
             loop arg in args {
                 layout :: function.values[arg.value].layout
-                if layout != lir_layout_word() && layout != lir_layout_pointer() && layout != lir_layout_float() -> &messages.push("inline asm input v{arg.value} is not a machine-word scalar")
+                if layout != lir_layout_word() && layout != lir_layout_pointer() -> &messages.push("inline asm input v{arg.value} is not a machine word")
                 if function.values[arg.value].drop != .Trivial -> &messages.push("inline asm input v{arg.value} has drop glue")
             }
             if dst == .Val(output) {
                 layout :: function.values[output.value].layout
-                if layout != lir_layout_word() && layout != lir_layout_pointer() && layout != lir_layout_float() -> &messages.push("inline asm result is not a machine-word scalar")
+                if layout != lir_layout_word() && layout != lir_layout_pointer() -> &messages.push("inline asm result is not a machine word")
                 if function.values[output.value].drop != .Trivial -> &messages.push("inline asm result has drop glue")
             }
         }

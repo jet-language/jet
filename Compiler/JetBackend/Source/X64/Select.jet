@@ -457,9 +457,6 @@ fn x64_select_inst(emitter: &X64Emitter, function: LIRFunction, allocation: X64A
     if inst == {
         .InlineAsm(dst, args, regs, result, code) -> {
             // Read all operands before overwriting any bound register.
-            // Float values already reside here as IEEE bits in GPRs/spills.
-            // x64_select_param/read and the System V call/return path perform
-            // the movq xmm transfers, not this template binding.
             loop arg in args {
                 reg :: x64_operand(&emitter, locations[arg.value], X64_RAX)
                 x64_push(&emitter.code, reg)
