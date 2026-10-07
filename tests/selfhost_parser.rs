@@ -282,6 +282,17 @@ const CASES: &[(&str, &str)] = &[
     ("bracket-range-access-marks", "f(values[0..1], &values[0..1], ~values[0..1])"),
     // E0393 (#3743): the retired `name: Type :: value` binding.
     ("retired-typed-binding", "fn run() {\n    limit: U8 :: 250\n    print(limit)\n}\n"),
+    // D-VIS-MODULE1 (#4723): retired visibility spellings and their deleting edits; `pub use` stays the re-export.
+    ("vis-pub-use-reexport", "pub use helper.[touch]\nfn run() {}\n"),
+    ("vis-reexport-qualifier-retired", "pub(package) use helper.[touch]\nfn run() {}\n"),
+    ("vis-retired-pub-fn", "pub fn run() {}\n"),
+    ("vis-retired-pub-package-fn", "pub(package) fn run() {}\n"),
+    ("vis-foreign-private-fn", "private fn run() {}\n"),
+    ("vis-priv-on-fn", "priv fn run() {}\n"),
+    ("vis-priv-unknown-qualifier", "priv(crate) module helper {\n    fn touch() {}\n}\nfn run() {}\n"),
+    ("vis-field-priv-package", "struct S {\n    priv(package) x: Int\n}\nfn run() {}\n"),
+    ("vis-section-label", "pub:\nfn run() {}\n"),
+    ("vis-retired-file-marker", "#PubFile\nfn run() {}\n"),
 ];
 
 fn jet_byte_array_literal(source: &str) -> String {

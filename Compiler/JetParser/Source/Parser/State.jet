@@ -256,6 +256,20 @@ fn parser_add_error_code(state: &JetParserState, code: String, span: Span, what:
     &state.diagnostics.push(diagnostic_from_registry(code, Val(span), what, why, fix))
 }
 
+// A coded error with its fix edit (Rust `Diagnostic::error(…).with_edit(edit)`).
+fn parser_add_error_code_edit(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String, edit: TextEdit) {
+    if parser_aborting(&state) -> return
+    &state.diagnostics.push(diagnostic_with_edit(diagnostic_from_registry(code, Val(span), what, why, fix), edit))
+}
+
+// Rust `deletion_edit`: an edit deleting `span` and the horizontal whitespace
+// after it.
+fn parser_deletion_edit(state: JetParserState, span: Span) -> TextEdit Never! {
+    end := span.end
+    loop end < state.source.len() && (Int.from_u8(state.source[end]) == 32 || Int.from_u8(state.source[end]) == 9) -> end += 1
+    TextEdit{span: Span{start: span.start, end: end}, new_text: ""}
+}
+
 // A fatal error: Rust returns it as the statement's or item's `Err`, so
 // nothing more is reported until the enclosing loop resynchronizes.
 fn parser_add_fatal_code(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String) {

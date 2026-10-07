@@ -163,7 +163,7 @@ fn parser_user_policy_ahead(state: &JetParserState) -> Bool Never! {
 fn parser_parse_user_policy(state: &JetParserState) -> ParsedUserPolicy {
     if parser_current_kind(&state) == TOKEN_KW_PUB {
         word :: parser_bump(&state)
-        parser_add_error_code(&state, "E0411", word.span, "`pub` was removed: everything is public by default", "privacy belongs to a `priv module` (or `priv(package) module`) and to `priv` fields", "delete `pub`")
+        parser_add_error_code_edit(&state, "E0411", word.span, "`pub` was removed: everything is public by default", "privacy belongs to a `priv module` (or `priv(package) module`) and to `priv` fields", "delete `pub`", parser_deletion_edit(state, word.span))
     }
     start :: parser_expect_name(&state, "to start a policy declaration")
     name :: parser_expect_name(&state, "as the policy setting name")
@@ -356,7 +356,7 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
                 open :: parser_current(&state).span
                 loop parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_EOF -> parser_bump(&state)
                 qualifier :: parser_cover(open, parser_bump(&state).span)
-                parser_add_error_code(&state, "E0411", qualifier, "a re-export is written `pub use`; `pub(…)` qualifiers were removed", "declarations are public by default and package privacy belongs to `priv(package) module`", "delete the qualifier")
+                parser_add_error_code_edit(&state, "E0411", qualifier, "a re-export is written `pub use`; `pub(…)` qualifiers were removed", "declarations are public by default and package privacy belongs to `priv(package) module`", "delete the qualifier", TextEdit{span: qualifier, new_text: ""})
             }
             reexport = true
             next
@@ -368,13 +368,15 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
                 loop parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_EOF -> parser_bump(&state)
                 if parser_current_kind(&state) == TOKEN_RPAREN -> removed = parser_cover(word.span, parser_bump(&state).span)
             }
-            parser_add_error_code(&state, "E0411", removed, "`pub` was removed: everything is public by default", "privacy belongs to a `priv module` (or `priv(package) module`) and to `priv` fields", "delete `pub`")
+            written :: parser_source_slice(state, removed.start, removed.end)
+            shown :: if written == "" -> "pub" else -> written
+            parser_add_error_code_edit(&state, "E0411", removed, "`pub` was removed: everything is public by default", "privacy belongs to a `priv module` (or `priv(package) module`) and to `priv` fields", "delete `{shown}`", parser_deletion_edit(state, removed))
             next
         }
         foreign_private :: item_visibility && kind == TOKEN_IDENT && parser_current(&state).payload.decoded == "private" && parser_foreign_private_ahead(&state)
         if foreign_private {
             word :: parser_bump(&state)
-            parser_add_error_code(&state, "E0412", word.span, "Jet has no `private`", "declarations are public by default; privacy belongs to a `priv module` or a `priv` field", "delete `private`; move the declaration into a `priv module` if it must stay internal")
+            parser_add_error_code_edit(&state, "E0412", word.span, "Jet has no `private`", "declarations are public by default; privacy belongs to a `priv module` or a `priv` field", "delete `private`; move the declaration into a `priv module` if it must stay internal", parser_deletion_edit(state, word.span))
             next
         }
         if kind == TOKEN_KW_PRIV {
@@ -382,19 +384,20 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
             marker_span := word.span
             package := false
             if parser_current_kind(&state) == TOKEN_LPAREN {
-                parser_bump(&state)
+                open :: parser_bump(&state).span
                 qualifier :: parser_current(&state)
                 package = qualifier.kind == TOKEN_IDENT && qualifier.payload.decoded == "package" && parser_kind_at(&state, 1) == TOKEN_RPAREN
                 loop parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_EOF -> parser_bump(&state)
                 if parser_current_kind(&state) == TOKEN_RPAREN -> marker_span = parser_cover(word.span, parser_bump(&state).span)
-                if !package -> parser_add_error_code(&state, "E0414", marker_span, "unknown `priv(…)` qualifier: only `priv(package)` exists", "`priv(package) module` is the only qualified module privacy", "delete the qualifier, or write `priv(package)`")
+                written :: Span{start: open.start, end: marker_span.end}
+                if !package -> parser_add_error_code_edit(&state, "E0414", written, "unknown `priv(…)` qualifier: only `priv(package)` exists", "`priv(package) module` is the only qualified module privacy", "delete the qualifier, or write `priv(package)`", TextEdit{span: written, new_text: ""})
             }
             if item_visibility && parser_current_kind(&state) != TOKEN_KW_MODULE {
-                parser_add_error_code(&state, "E0413", marker_span, "`priv` marks only modules and fields", "declarations are public by default; privacy belongs to a `priv module` or a `priv` field", "delete `priv`; move the declaration into a `priv module` if it must stay internal")
+                parser_add_error_code_edit(&state, "E0413", marker_span, "`priv` marks only modules and fields", "declarations are public by default; privacy belongs to a `priv module` or a `priv` field", "delete `priv`; move the declaration into a `priv module` if it must stay internal", parser_deletion_edit(state, marker_span))
                 next
             }
             if !item_visibility && package {
-                parser_add_error_code(&state, "E0417", marker_span, "a field takes plain `priv`, not `priv(package)`", "a `priv` field is usable only by its type's module; package privacy belongs to modules", "write `priv`")
+                parser_add_error_code_edit(&state, "E0417", marker_span, "a field takes plain `priv`, not `priv(package)`", "a `priv` field is usable only by its type's module; package privacy belongs to modules", "write `priv`", TextEdit{span: Span{start: marker_span.start + 4, end: marker_span.end}, new_text: ""})
                 package = false
             }
             is_pub = false

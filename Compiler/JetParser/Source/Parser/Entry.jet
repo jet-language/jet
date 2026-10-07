@@ -484,7 +484,7 @@ fn parser_apply_file_marker(state: &JetParserState, program: &Program, marker: M
     repeat_span :: if single -> hash else -> marker.span
     if marker.name == {
         // D-VIS-MODULE1: the retired file marker; E0418 deletes it.
-        "PubFile" | "PublicFile" -> parser_add_error_code(&state, "E0418", marker.span, "`#PubFile` was removed: every file is public by default", "declarations are public by default, so the file marker has nothing left to flip", "delete the marker")
+        "PubFile" | "PublicFile" -> parser_add_error_code_edit(&state, "E0418", marker.span, "`#PubFile` was removed: every file is public by default", "declarations are public by default, so the file marker has nothing left to flip", "delete the marker", parser_deletion_edit(state, marker.span))
         "NoPrelude" -> {
             if program.no_prelude {
                 parser_report_repeated_file_marker(&state, "NoPrelude", repeat_span)
@@ -607,7 +607,8 @@ fn parser_section_label_ahead(state: &JetParserState) -> Bool Never! {
 fn parser_report_section_label(state: &JetParserState) {
     first :: parser_bump(&state)
     colon :: parser_bump(&state)
-    parser_add_error_code(&state, "E0415", parser_cover(first.span, colon.span), "section visibility labels like `pub:` / `priv:` are not supported", "moving an item above or below a label would silently change its visibility", "delete the label; group internal declarations in a `priv module`")
+    label :: parser_cover(first.span, colon.span)
+    parser_add_error_code_edit(&state, "E0415", label, "section visibility labels like `pub:` / `priv:` are not supported", "moving an item above or below a label would silently change its visibility", "delete the label; group internal declarations in a `priv module`", parser_deletion_edit(state, label))
 }
 
 fn parser_item_ahead(state: &JetParserState) -> Bool Never! {
