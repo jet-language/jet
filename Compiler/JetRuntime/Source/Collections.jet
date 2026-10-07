@@ -1,0 +1,142 @@
+// Native collection representation shared by iterator boundaries. Lists are
+// inline [len, cap, data]; descriptors are [stride, clone, drop, show, equal,
+// compare, kind, child0, child1]. Callbacks operate on borrowed payload slots.
+// Only initialized payload bytes are read (Bool is one byte; Unit is empty).
+fn coll_payload(meta: I64) -> I64 {
+    kind :: trap_word(meta + I64{48}) & I64{4294967295}
+    if (kind == I64{11}) -> return I64{0}
+    if (kind == I64{9}) -> return I64{1}
+    trap_word(meta)
+}
+
+fn coll_size(meta: I64) -> I64 {
+    width :: trap_word(meta)
+    if (width < I64{8}) -> I64{8} else -> width
+}
+
+fn coll_zero(address: I64, size: I64) {
+    at := I64{0}
+    loop at < size {
+        trap_put(address + at, I64{0})
+        at += I64{1}
+    }
+}
+
+fn coll_copy(source: I64, target: I64, size: I64) {
+    at := I64{0}
+    loop at + (I64{8}) <= size {
+        trap_store(target + at, trap_word(source + at))
+        at += I64{8}
+    }
+    loop at < size {
+        trap_put(target + at, trap_byte(source + at))
+        at += I64{1}
+    }
+}
+
+fn coll_meta_copy(source: I64) -> I64 {
+    if (source == I64{0}) -> return I64{0}
+    target :: jet_rt_alloc(I64{72}, I64{8})
+    coll_copy(source, target, I64{56})
+    trap_store(target + I64{56}, coll_meta_copy(trap_word(source + I64{56})))
+    trap_store(target + I64{64}, coll_meta_copy(trap_word(source + I64{64})))
+    target
+}
+
+fn coll_meta_drop(meta: I64) {
+    if (meta == I64{0}) -> return
+    coll_meta_drop(trap_word(meta + I64{56}))
+    coll_meta_drop(trap_word(meta + I64{64}))
+    jet_rt_free(meta, I64{72}, I64{8})
+}
+
+fn coll_call1(code: I64, a: I64) -> I64 {
+    #Unsafe("checked native descriptor callback; slot storage remains live for the synchronous call") {
+        return os_call1_i64(code, a)
+    }
+}
+
+fn coll_call2(code: I64, a: I64, b: I64) -> I64 {
+    #Unsafe("checked clone/equality/comparison callback; both payload slots remain live") {
+        return os_call2_i64(code, a, b)
+    }
+}
+
+fn coll_call3(code: I64, a: I64, b: I64, c: I64) -> I64 {
+    #Unsafe("checked unary closure adapter with borrowed environment, input and output slots") {
+        return os_call3_i64(code, a, b, c)
+    }
+}
+
+fn coll_call4(code: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
+    #Unsafe("checked binary closure adapter with live environment, inputs and output slots") {
+        return os_call4_i64(code, a, b, c, d)
+    }
+}
+
+fn coll_slot_new(meta: I64) -> I64 {
+    slot :: jet_rt_alloc(coll_size(meta), I64{8})
+    coll_zero(slot, coll_size(meta))
+    slot
+}
+
+fn coll_slot_clone(source: I64, target: I64, meta: I64) {
+    _ := coll_call2(trap_word(meta + I64{8}), source, target)
+}
+
+fn coll_slot_drop(slot: I64, meta: I64) {
+    code :: trap_word(meta + I64{16})
+    if (code != I64{0}) -> _ := coll_call1(code, slot)
+}
+
+fn coll_slot_free(slot: I64, meta: I64) {
+    if (slot == I64{0}) -> return
+    coll_slot_drop(slot, meta)
+    jet_rt_free(slot, coll_size(meta), I64{8})
+}
+
+fn coll_list_new() -> I64 {
+    header :: jet_rt_alloc(I64{24}, I64{8})
+    coll_zero(header, I64{24})
+    header
+}
+
+fn coll_list_push(header: I64, slot: I64, meta: I64) {
+    length :: trap_word(header)
+    capacity :: trap_word(header + I64{8})
+    stride :: trap_word(meta)
+    data := trap_word(header + I64{16})
+    if length == capacity {
+        grown :: if (capacity == I64{0}) -> I64{4} else -> capacity * I64{2}
+        buffer :: jet_rt_alloc(grown * stride, I64{8})
+        if (length != I64{0}) -> coll_copy(data, buffer, length * stride)
+        if (capacity != I64{0}) -> jet_rt_free(data, capacity * stride, I64{8})
+        trap_store(header + I64{8}, grown)
+        trap_store(header + I64{16}, buffer)
+        data = buffer
+    }
+    coll_copy(slot, data + length * stride, coll_payload(meta))
+    trap_store(header, length + I64{1})
+}
+
+fn coll_list_drop(header: I64, meta: I64, start: I64) {
+    length :: trap_word(header)
+    data :: trap_word(header + I64{16})
+    stride :: trap_word(meta)
+    at := start
+    loop at < length {
+        coll_slot_drop(data + at * stride, meta)
+        at += I64{1}
+    }
+    capacity :: trap_word(header + I64{8})
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * stride, I64{8})
+    coll_zero(header, I64{24})
+}
+
+fn coll_result_size(ok: I64, error: I64) -> I64 {
+    a :: coll_payload(ok)
+    b :: coll_payload(error)
+    size := if a > b -> a else -> b
+    if (size < I64{8}) -> size = I64{8}
+    I64{8} + ((size + I64{7}) & I64{-8})
+}
