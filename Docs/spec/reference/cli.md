@@ -442,6 +442,14 @@ the complete source/configuration/profile/target/implementation/artifact/run
 identity and checked derivation references for live snapshots and replay;
 readers reject altered identities, row IDs, derivations, and noncanonical bytes.
 
+The CLI's `inspect.accel` status projects typed authenticated runtime receipt
+rows separately from static vector and gate facts. Missing measurements stay
+null; a source proof alone never marks an acceleration selected. The shared
+D-ACCEL1 evaluator retains the release, parity, proof, measurement, and gain
+checks in their canonical order. `inspect.decisions` projects numeric row IDs,
+flat derivation references, per-kind counts, and the actual compiler journal's
+canonical routes; transport-ledger JSON is not a CLI status envelope.
+
 Output inspection consumes sema's checked callable links and selection facts,
 including the original source/semantic/machine names, typed parameters, inferred
 failure contract, solved effects, and reference/declaration spans. The driver
@@ -450,3 +458,8 @@ inspection does not rename a function or reinterpret a text entry. Layout rows
 come from the compiler's target-aware reflection engine, not the inspecting
 host's pointer width. Inspection stops after canonical MIR production and does
 not emit or execute the selected callable.
+
+`inspect.output` reports the selected binding, callable identity, effective
+failure contract and its source, solved required effects, and the canonical
+application authority's granted/denied effects. An explicit address selects
+the checked Output, not an arbitrary function with a matching name.
