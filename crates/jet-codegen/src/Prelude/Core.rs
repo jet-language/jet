@@ -1149,7 +1149,13 @@ where
 }
 
 fn jet_std_os_run_atexit() {
+    #[cfg(not(jet_native_pack))]
     jet_runtime_atexit::run();
+    #[cfg(jet_native_pack)]
+    {
+        unsafe extern "C" { fn jet_rt_task_exit_handlers(); }
+        unsafe { jet_rt_task_exit_handlers() };
+    }
 }
 
 fn jet_runtime_report_parked_tasks() -> Option<i32> {
