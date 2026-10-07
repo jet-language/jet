@@ -1888,10 +1888,11 @@ pub fn sema_effects_check_modules(inputs: ^[SemaEffectModuleInput]) -> SemaEffec
         }
         sema_effect_publish_diagnostics(&diagnostics, &results, module_index, module_row.source_segments, discarded)
     }
-    // All source reads are finished. Transfer each owned list into its result
-    // before stamping solved effects; neither side needs a second list.
+    // All source reads are finished. Copy each list into its result before
+    // stamping solved effects: a field below a list element stays owned by
+    // its element (E0225), so the copy is spelled.
     loop module_index in 0..<results.len() {
-        results[module_index].functions = ^inputs[module_index].functions
+        results[module_index].functions = ~inputs[module_index].functions
         loop function_index in 0..<results[module_index].functions.len() {
             node_index :: sema_effect_node_index(node_by_key, results[module_index].functions[function_index].key) ?? next
             results[module_index].functions[function_index].effects = sema_effect_tfacts(nodes[node_index], solved[node_index])

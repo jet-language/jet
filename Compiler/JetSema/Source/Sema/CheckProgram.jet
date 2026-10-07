@@ -4047,7 +4047,7 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
         source :: resolved_graph.modules[source_index]
         &effect_inputs.push(SemaEffectModuleInput{
             module_identity: modules[module_index].module_identity,
-            functions: ^modules[module_index].functions,
+            functions: ~modules[module_index].functions,
             sources: sema_comptime_effect_sources(source),
             call_facts: modules[module_index].call_facts,
             source_segments: source.source_segments,
@@ -4061,7 +4061,7 @@ pub fn sema_finalize_registration_graph(graph: SemaRegistrationGraph, resolved: 
     if !effects.complete -> complete = false
     loop effect_module_index in 0..<effects.modules.len() {
         effect_index :: sema_registration_module_index(resolved_graph, effects.modules[effect_module_index].module_identity) ?? next
-        modules[effect_index].functions = ^effects.modules[effect_module_index].functions
+        modules[effect_index].functions = ~effects.modules[effect_module_index].functions
     }
     resolved_compute_facts := [SemaComputeFunctionFacts]{}
     effect_solved_functions := [TFunc]{}
